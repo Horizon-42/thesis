@@ -57,6 +57,7 @@ from ts_transformer.data.approach_difficulty import (  # noqa: E402
 )
 from ts_transformer.data.channels import states_from_channels  # noqa: E402
 from ts_transformer.outputs import strategy_for
+from ts_transformer.outputs.envelope import control_contract  # noqa: E402
 from ts_transformer.data.dataset import FlightSeries, flight_key  # noqa: E402
 from ts_transformer.inference.forecast import Forecast  # noqa: E402
 from ts_transformer.geometry.metrics import (  # noqa: E402
@@ -236,14 +237,16 @@ def build_prediction_record(
                 zip(starts, control_boundaries, forecast.segment_durations_s, controls)
             )
         ]
-        # Under specific-force the command is n_x and `thrust` above is its thrust at the
-        # segment's start; the command itself rides beside it. Absent under thrust-fraction,
-        # whose thrust IS the command, so every such record reproduces to the bit.
-        if forecast.specific_force_commands is not None:
+        # Under specific-force or speed-command, `thrust` above is the command's thrust at the
+        # segment's start, and the command itself rides beside it under its contract's name
+        # (`specific_force`, `speed_command_delta`). Absent under thrust-fraction, whose
+        # thrust IS the command, so every such record reproduces to the bit.
+        if forecast.longitudinal_commands is not None:
+            name = control_contract(forecast.longitudinal_parameterization).names[0]
             for segment, command in zip(
-                control_segments, forecast.specific_force_commands, strict=True
+                control_segments, forecast.longitudinal_commands, strict=True
             ):
-                segment["specific_force"] = float(command)
+                segment[name] = float(command)
     eval_record["reference_file"] = f"{REFERENCES_DIR}/{record_stem(scenario.source, index)}{_REFERENCE_EVAL_SUFFIX}"
 
     reference_record = reference_evaluation_record(

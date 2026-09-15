@@ -297,7 +297,7 @@ def control_distribution_statistics(
     ranges = upper - lower
     changes = np.abs(np.diff(controls, axis=1))
     # The columns are in the run's control contract — never newtons (the head never
-    # emits them): the thrust fraction is unit 1, the specific force g.
+    # emits them): the thrust fraction is unit 1, the specific force g, the speed command m/s.
     channel_statistics: dict[str, dict[str, float | str]] = {}
     for channel, (name, unit) in enumerate(zip(contract.names, contract.units, strict=True)):
         values = controls[..., channel].reshape(-1)

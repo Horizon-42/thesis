@@ -262,7 +262,7 @@ flight model.
   rule: the caller's alignment is a central difference over POSITIONS, so the flying just after a
   row is in its direction; and `MEMBERSHIP_FLOOR_M` (500 m) is what decides whether a record is
   cut at all.
-- **The longitudinal column has TWO contracts — `control_thrust_parameterization`**
+- **The longitudinal column has THREE contracts — `control_thrust_parameterization`**
   (2026-09-14, `docs/2026-09-14_specific_force_control_design.md`):
   - **`thrust-fraction`** (the default, every stored run, pinned by every named recipe) is the
     box below.
@@ -270,6 +270,14 @@ flight model.
     `[−0.20, 0.23]` g and its neutral −0.05. It runs on `first-order-lag` only, and the lag RHS
     re-solves `T = clamp(W·a_x + D, −0.2·T_max, T_max)` at EVERY RK4 stage, so drag cancels and
     `V̇ = g(a_x − sin γ)`.
+  - **`speed-command`** (§12) makes it a target airspeed RELATIVE to the anchor's, Δv ∈
+    `[−90, +20]` m/s, neutral 0 (hold the speed you have). The lag RHS flies it through an 8 s
+    speed loop (`envelope.SPEED_LOOP_TIME_CONSTANT_S`, a CONTRACT constant, not a field): the
+    specific force `sin γ + (V₀ + a_Δ − V)/(g·τ_V)` through the same clamp, so
+    `V̇ = (V₀ + a_Δ − V)/τ_V`, the invariance plus the restoring force n_x lacks. `actual_controls`
+    returns the loop's ABSOLUTE target there, and `inverse.anchor_relative` makes it the contract's
+    Δv. Only the teacher (`reference_controls`, `states[0]`) and `anchor_controls` (the window's
+    last row) know the anchor, so only they call it. The speed floor is refused under it (not built).
   - **Rules:** `dynamics_arrays` / `anchor_controls` / `actual_controls` / `commanded_controls`
     take the parameterisation as a REQUIRED argument; the box, neutral and half width come from
     `envelope.control_contract()`; the plan path pins thrust-fraction. `dynamics_arrays` and
@@ -440,6 +448,7 @@ flight model.
 | `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `cli.common._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
 | `control_thrust_parameterization` | `thrust-fraction` | `specific-force` = the head predicts `n_x = (T − D)/W` (the contract above). **Built, not yet measured**: the N3 arms (design §7) read the per-class n_x bias and the heavy − 737 speed gap against `B1_point_matched`. First-order-lag only; refused with the fitted teacher. The speed floor inverts it drag-free and saturates at the engine's `(T_max − D)/W` — NOT at the head's 0.23 g box, which sits below the engine on this fleet (a box-capped floor had less authority than the thrust-fraction one). Names a run `first-order-lag+specific-force …` / slug `lag-sf-…`, only off the default. `control_recipe()` carries it only off the default, because `pipeline` compares that dict for checkpoint reuse |
+| `control_thrust_parameterization` = `speed-command` | — | N6 (design §12, branch `sf-n6`): **built, not measured**. `sf_n6_arms.json` is launched only if N3's straight-in FDE veto holds against the same-code twin (§12.6). Named `first-order-lag+speed-command` / slug `lag-sc-…`; the record carries `speed_command_delta` per segment |
 | `control_condition_features` | `raw` | HOW the airframe is written into the control head's 8-channel condition vector (`outputs/conditioning.py`, design §11). `ratios` keeps the mass and the polar and replaces the installed thrust and the wing area by `T_max/(m g)` and the 1-g stall speed (`aircraft.aero_params.stall_speed_ms`) — the same information and the SAME WIDTH, so a ratios arm starts from its raw twin's weights. On KRDU's 26 types the raw thrust channel spans 46×, T_max/W 1.3×; Cd0, k and the stall parameters are constant on the whole fleet (4 of the 8 channels carry nothing). **Built, not yet measured**: N4 (`sf_n4_arms.json`) is the alternative-hypothesis control for N3, and it re-trains the δ twins because the stored `B1_point_matched` pair does not reproduce at the current code (design §11.6). Every named recipe pins `raw`; names a run `airframe=ratios`; `control_recipe()` carries it only off the default; `predict` takes the checkpoint's own value and has no override (a head trained on one set reads the other without a shape error) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected. In `run_ts.py pipeline` the model is an axis of the cell: a lag cell's `train_dir` / `pred_dir` / category carry `_lag`, and the ONE override dict (`TrainingPlan._plan_overrides`) feeds the label, `--skip-train` and CV reuse — before 2026-09-09 two hand-written copies both lacked the field, so a lag cell was rebuilt as point-mass everywhere but the training command and shared its directory with the point-mass cell (review A-1) |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `outputs.closure.model.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |

@@ -409,6 +409,15 @@
     "N4_ratios": "B1_point_matched 只改 control_condition_features=ratios（seed 1337，推力分数定律）；门与 N3 相同：分类比力偏差范围向真值自身 0.0045 g 收敛、重型−737 速度偏差差距缩小；否决：总体 ADE 劣于其孪生 N4_twin 超过约 125 m 种子线。",
     "N4_ratios_s2024": "同上，seed 2024（同分割），孪生 N4_twin_s2024：门需两个种子同向。"
    }
+  },
+  "sf_n6": {
+   "title": "N6 · 速度指令：比力的机型不变性 + 恢复力",
+   "intent": "N3 显示：让控制头预测比力 n_x 后，各机型类之间的比力偏差收敛到真值自身的水平（两个种子），但重型−737 的速度偏差差距反而扩大，直线进近的 FDE 变差（p50 887 / 885 m，最后 5 km 速度慢 4.4 m/s）。原因是比力定律下阻力抵消，速度对速度没有反馈（∂V̇/∂V = 0），指令的偏差被积分。本实验把控制头的纵向指令换成相对锚点空速的目标速度 Δv，由 8 s 的一阶速度环经同一推力钳位飞出：V̇ = (V₀ + Δv − V)/τ_V。它在每种机型上含义相同（机型只在推力钳位、失速钳位和导出推力里出现），又恢复了同样的恢复力 −1/τ_V。对照 sf_n4 在同一代码上重训的 δ 孪生 N4_twin / N4_twin_s2024。",
+   "design": "4dTrajectory/ts_transformer/docs/2026-09-14_specific_force_control_design.md §12",
+   "runs": {
+    "N6_speed_command": "B1_point_matched 只改 control_thrust_parameterization=speed-command（seed 1337）；门：分类比力偏差范围向真值自身 0.0045 g 收敛（N3 已通过）、重型−737 速度偏差差距缩小（N3 未通过）、直线进近 FDE p50 回到孪生的种子散布内（N3 未通过）；否决：总体 ADE 劣于孪生 N4_twin 超过约 125 m 种子线。",
+    "N6_speed_command_s2024": "同上，seed 2024（同分割），孪生 N4_twin_s2024：门需两个种子同向。"
+   }
   }
  }
 }

@@ -16,10 +16,10 @@ the literature (36 sources) and the measurements behind the choice are in
 | D | this design, plus the teacher-distribution measurement (§2.4) | **done** 2026-09-14 | branch `specific-force-control`, worktree `.claude/worktrees/specific-force` |
 | M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | **done** 2026-09-14, reviewed (opus; 1 blocker + 3 should-fix, all fixed and re-verified, §9) | `8ce4568` |
 | M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | **done** 2026-09-14, review §10 | the commit after `8ce4568` |
-| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **ran** 2026-09-15 00:18–02:33 UTC at `47b4b40`, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`. **Provisional reading** (stored twins, which drifted): gate 1 passes on both seeds, gate 2 fails, the straight-in FDE veto trips (§7.2). Binding reading waits for `N4_twin` | §7.2 |
+| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **ran** 2026-09-15 00:18–02:33 UTC at `47b4b40`, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`, **published** (KRDU picker, group `sf_n3`). Provisional reading on both seeds (§7.2). **Binding reading, seed 1337 (§7.3):** gate 1 passes (0.0042 vs 0.0125 g), gate 2 fails, the straight-in FDE veto trips (887 vs 647 m). Seed 2024 waits for `N4_twin_s2024` | §7.2, §7.3 |
 | N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | built 2026-09-15 on branch `sf-n4` (`608f14a`, review §11.5). **Running** since 2026-09-15 ~02:40 UTC from the `specific-force` worktree fast-forwarded to `f1b19c5`: campaign `4dTrajectory/outputs/KRDU/experiments/sf_n4`, log `…/experiments/sf_n4.log`, 4 arms (twins first) | results → §11.7 |
 | N5 | pooled five-airport arm | not started; only if the mechanism holds on all gates (§11.4) — N3's provisional reading does not | — |
-| N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | **planned**, conditional on the binding N3 reading (§12.6); teacher distribution measured (§12.3) | §12 |
+| N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | **built and reviewed** 2026-09-15 on branch `sf-n6` (worktree `.claude/worktrees/sf-n6`, from `e959bc0`; review §12.8). Arm file `docs/experiments/sf_n6_arms.json`, intents key `sf_n6`. **§12.6's condition is MET (§7.3): queued after `sf_n4`**, launched from the runner worktree fast-forwarded to `sf-n6` | §12 |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
 the user merges. Every code milestone gets a subagent review before its commit
@@ -380,6 +380,32 @@ p50 by remaining distance):
 - **Nothing here is final until `N4_twin` reads the same-code baseline.** `c544db0`'s terminal emphasis
   may have moved the twins' endpoint error too.
 
+### 7.3 N3 against the SAME-CODE twin — BINDING for seed 1337 (2026-09-15)
+
+`sf_n4/N4_twin` is `B1_point_matched` re-trained at the N3/N4 code (seed 1337, 180 epochs). N3 seed 1337
+against it, same instrument:
+
+| KRDU val, 1404 flights | N3_specific_force | N4_twin | stored B1_point_matched |
+|---|---|---|---|
+| **gate 1** per-class n_x bias range (truth 0.0045 g) | **0.0042** | 0.0125 | 0.0104 |
+| **gate 2** heavy − B737 speed bias (m/s) | **+6.17** | +5.16 | +4.70 |
+| ADE pooled / straight-in / vectored (m) | 1268 / 437 / 2737 | 1325 / 444 / 2880 | 1248 / 413 / 2721 |
+| **FDE p50** pooled / straight-in (m) | 1103 / **887** | 873 / 647 | 877 / 582 |
+| duration MAE pooled / straight-in (s) | 26.2 / 13.9 | 25.5 / 13.3 | 25.1 / 13.1 |
+| paired ADE vs N4_twin, arm better | 54.4 % (median −22 m) | — | — |
+| flyability Δ vs observed: fully / samples | −0.634 / −0.050 | −0.980 / −0.067 | −0.981 / −0.070 |
+
+- **Gate 1 passes, gate 2 fails, the straight-in FDE veto trips: +240 m against the same-code twin.** That
+  is three times the twins' straight-in seed spread (77 m).
+- **The provisional reading stands, and the FDE penalty is the law's, not the drift's.**
+- **The drift, measured:** `N4_twin` against the stored twin is +77 m pooled ADE and +65 m straight-in
+  FDE p50, inside the seed line. `c544db0` moved epoch 1 by −11 % but not the converged model.
+- **N3's pooled ADE is 57 m BETTER than its same-code twin** (not worse by 20, as against the stored
+  one). It stays inside the seed line either way.
+- Seed 2024's binding reading waits for `N4_twin_s2024`.
+- **§12.6's condition is met:** `N4_twin`'s straight-in FDE (647 m) sits 240 m below N3's. N6 is queued
+  after `sf_n4`.
+
 ## 7.1 Smoke run (M2) — the chain works; its numbers are NOT results
 
 **Run:** KRDU, `B1_point_matched`'s config with only the law moved, 2 epochs, one seed, train → predict val →
@@ -670,7 +696,7 @@ therefore re-trains the twins at this code, and N3 and N4 are both read against 
   nothing in its config, name or `history.json` to show it — which is exactly how the twins stopped being
   twins.
 
-## 12. N6 — a speed command (PLANNED; built only if the binding N3 reading confirms §7.2)
+## 12. N6 — a speed command (BUILT on `sf-n6`; launched only if the binding N3 reading confirms §7.2)
 
 ### 12.1 Why
 
@@ -705,15 +731,24 @@ inside EVERY RK4 stage:
 
 - **`∂V̇/∂V = −1/τ_V` on every airframe.** Where the clamp binds, it is the δ law at its bound, as under n_x.
   At idle, the deceleration is the airframe's own drag, which is what a real idle descent is.
-- **τ_V is a new field**, `control_speed_time_constant_s`, default 8 s. Autothrottle speed loops are
-  5–10 s, and the teacher barely moves with it (§12.3). RK4 at h = 0.5 s is far inside its limit.
+- **τ_V = 8 s is a constant of the CONTRACT** (`envelope.SPEED_LOOP_TIME_CONSTANT_S`), like the
+  specific-force box. It is not a config field. The plan was a field; the build showed why not:
+  - the inverse needs τ_V at every call site (the anchor actuator, the teacher, basis_fit) — a third
+    required argument through `dynamics_arrays`;
+  - the teacher barely moves with it (§12.3);
+  - autothrottle speed loops are 5–10 s;
+  - a run that wants another value is another contract.
+  RK4 at h = 0.5 s is far inside its limit.
 - **The command is RELATIVE to the anchor speed**, so the neutral `Δv = 0` is "hold the speed you have".
   An untrained head then flies no transient on any airframe. An absolute neutral (one speed for all)
   would drive every flight toward it from step 0.
 - Implemented as a third value of `control_thrust_parameterization`: `speed-command`.
-  - It is a third `LagControlLaw`, whose context also carries V₀ and τ_V.
-  - The specific-force law's thrust helper is reused.
-  - The δ and n_x laws stay bit-identical; tested against their pinned goldens.
+  - It is a third `LagControlLaw` (`SpeedCommandLaw(min_thrust_fraction, speed_time_constant_s)`).
+    Its step context also carries V₀ (each flight's initial-state airspeed) and τ_V.
+  - The thrust goes through the specific-force law's own helper. The loop's specific force is one
+    expression, `torch_dynamics.speed_loop_specific_force`, read by the chart RHS and by the exported
+    record thrust alike.
+  - The δ and n_x laws stay bit-identical: goldens, and the identity check in §12.7.
 
 ### 12.3 Measured: where the teacher lives (KRDU val, 1404 × 32, the same tracks as §2.4)
 
@@ -734,21 +769,34 @@ Inverse on the observed track: `a_Δ = V − V₀ + τ_V·V̇`, `command = a_Δ 
 
 ### 12.4 What else changes (the M1/M2 checklist, applied to the third law)
 
-- **Inverse and teacher:** `actual_controls` / `commanded_controls` under `speed-command` need V₀, which is
-  the anchor row of the window. `reference_controls` reads the configured law.
-- **Context:** the initial actuator is the inverted `a_Δ` at the anchor, clipped to the box.
+- **Inverse and teacher:**
+  - `actual_controls` under `speed-command` returns the loop's ABSOLUTE target `V + τ_V·tangential`, from
+    the kinematics alone. It does not know the anchor.
+  - `inverse.anchor_relative(controls, anchor_speed, parameterization=)` subtracts the anchor's speed.
+    Only the callers that know the anchor call it:
+    - `reference_controls` (the teacher; its `states[0]` is the anchor);
+    - `context.anchor_controls` (the actuator's initial condition; the window's last row is the anchor).
+  - The lag inverse commutes with that constant shift.
+- **Context:** the initial actuator is the inverted `a_Δ` at the anchor, clipped to the box. It equals
+  `g·τ_V·(n_x − sin γ)` of the specific-force inversion on the same track (tested).
 - **Speed floor:**
   - The demand becomes a speed. Holding `V(hold) ≥ V_floor` under the loop is
     `V₀ + Δv ≥ (V_floor − V·e^{−dt/τ_V})/(1 − e^{−dt/τ_V})`, with the actuator's lag credited as before.
   - Saturation means the engine's `(T_max − D)/W`.
   - Refused in the first milestone, like M1 did.
 - **Barrier and trombone:** pass column 0 through (unchanged, already tested under n_x).
-- **Export:** each segment's record thrust is the law's thrust at its start state, and each segment
-  carries `speed_command` (absolute, m/s). `source.controlThrustParameterization` = `speed-command`.
+- **Export:**
+  - Each segment's record thrust is the law's thrust at its start state.
+  - Each segment carries its command under the contract's name, `speed_command_delta` (relative, m/s;
+    the anchor speed is the record's `initial_state.V`).
+  - `source.controlThrustParameterization` is `speed-command`.
+  - `Forecast.specific_force_commands` became `longitudinal_commands` + `longitudinal_parameterization`.
+    The specific-force records keep their `specific_force` key, bit for bit.
 - **Naming, CLI, recipes:**
   - Named `first-order-lag+speed-command` / slug `-sc`.
   - Every recipe pins thrust-fraction; `control_recipe()` names the law off the default.
-  - `τ_V` is refused off its default unless the law is `speed-command`.
+  - The config refuses `speed-command` off `first-order-lag`, with the fitted teacher, and with any hook
+    that contains the speed floor (not built yet).
 - **Tests:**
   - Under the loop, `V̇ = (V₀ + a_Δ − V)/τ_V` exactly where the clamp does not bind.
   - At the clamp, the law equals δ's at its bound.
@@ -769,5 +817,75 @@ Inverse on the observed track: `a_Δ = V − V₀ + τ_V·V̇`, `command = a_Δ 
 
 1. Wait for `N4_twin` (the first `sf_n4` arm).
 2. If its straight-in FDE p50 stays below N3's 885–887 m by more than the seed spread (the stored twins
-   582 / 659), the veto is confirmed and N6 is built on `sf-n4`, reviewed, and queued after `sf_n4`.
-3. If not, N3's FDE penalty was the stored twins' drift, and N6 is dropped.
+   582 / 659), the veto is confirmed and N6 is queued after `sf_n4`.
+   - The runner worktree is fast-forwarded to `sf-n6`, which descends from `sf-n4`, and the campaign is
+     launched from it.
+3. If not, N3's FDE penalty was the stored twins' drift. N6 is dropped and `sf-n6` is not merged.
+
+**Outcome (2026-09-15, §7.3):** met. `N4_twin`'s straight-in FDE p50 is 647 m against N3's 887 m, and the
+seed spread is 77 m. N6 is queued after `sf_n4`.
+
+### 12.7 Verified before review (2026-09-15)
+
+- **The law:** `aerodynamic_model/tests/test_torch_lag_speed_command.py`, 22 tests:
+  - `V' = (V₀ + a_Δ − V)/τ_V` to 1e-9 on three airframes and four commands;
+  - at the clamp, the law equals δ's at its bound;
+  - a constant step follows the two-pole response `V₀ + Δv(1 − (τ_V e^{−t/τ_V} − τ_T e^{−t/τ_T})/(τ_V −
+    τ_T))` to 1e-3 m/s and settles on the command;
+  - each flight's reference speed is its own anchor speed;
+  - the CUDA compile path and its backward pass.
+- **The ts side:** `tests/test_speed_command.py`, 11 tests:
+  - the round trip through the inverse (Δv to 0.1 m/s);
+  - the anchor actuator's tie to the specific-force column;
+  - the neutral head, the probe, the export's thrust at every segment start, one training step;
+  - the barrier's pass-through, the config refusals, the recipes, the name, the CLI.
+- **The two stored laws are bit-identical to `e959bc0`:** thrust-fraction and specific-force, a lagged
+  simple-v3 step (loss, all 32 gradients, the batch, 4 records).
+- **Stored runs:** over 247 stored runs, names, slugs, parameter rows and loading are identical to
+  `e959bc0`'s. Resume is identical over 107 arms (81 resumable).
+- **The arm file:** the dry run constructs both arms. Their base is N3's with only the law moved.
+- **Suites:** ts 1193 passed; aerodynamic_model 124 passed.
+
+### 12.8 N6 review (2026-09-15, opus subagent, code only)
+
+No blocker. The reviewer made 38 mutations in a /tmp copy: 31 were killed, 7 survived. Of the survivors,
+one was equivalent and the rest were fixed below. What it checked:
+- the law's algebra and context layout;
+- the CUDA caches: 6 code objects, 0 recompiles when the three laws interleave;
+- every branch on the law;
+- `anchor_relative` applied exactly once per path, with the teacher's `states[0].V` equal to the
+  rollout's V₀ bit for bit on all 1404 KRDU val flights;
+- the export, the config refusals, the arm file;
+- the δ and n_x identity, regenerated independently.
+
+**Measured by the reviewer: the teacher flown open-loop.** Each law's own inverse-dynamics teacher, flown
+through its own rollout, on 300 KRDU val flights:
+
+| teacher | ADE mean | ADE p50 |
+|---|---|---|
+| speed-command | **375 m** | **36 m** |
+| specific-force | 2606 m | 158 m |
+| thrust-fraction | 2700 m | 321 m |
+
+The speed loop's teacher reproduces the truth ~7× better. Its restoring force keeps an imperfect command
+from integrating away, which is §12.1's argument, measured on the teacher. On the same set the thrust clamp
+binds at 0.2 % / 1.3 % of segment ends (above the maximum / below the floor). The box clips 0.037 % /
+0.069 % of the teacher, and 0.07 % of the anchor actuators.
+
+**Fixed:**
+- **S1:** the hooked rollout's physics was untested. Dropping the law from the hooked path flew Δv as a
+  thrust fraction and passed every test. Now the hooked states must equal a plain rollout of the flown
+  schedule, and the per-flight reference speed is tested in all three rollouts.
+- **S2:** τ_V and the box are module constants that no checkpoint recorded.
+  `envelope.speed_command_identity()` is now spelled into the target contract under this law, so a moved
+  constant is refused at load. The specific-force box has the same gap (followups §37).
+- **S3:** the "holds the speed" test checked only the neutral's value. It now flies the untrained head
+  through the forecast: the excursion is bounded by the anchor actuator, and the speed ends on V₀.
+- **N1:** under the loop, the record's per-segment thrust is the hold's extreme, not its mean (the error
+  decays across the segment). Documented in `record_newton_controls`. A readout of the record's thrust
+  fraction must read it so; the n_x and speed read off the states are exact.
+- **N2:** stale docstrings corrected.
+- **N3:** one chart read (`_chart_speed_altitude_mass`) shared by the two thrust helpers.
+- **N4:** tests for the anchor-actuator clip and the saturation labels.
+
+After the fixes: δ and n_x are still bit-identical to `e959bc0`. ts + aerodynamic_model: 1323 passed.

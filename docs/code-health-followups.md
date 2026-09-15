@@ -802,3 +802,15 @@ the change must be shown to select the same anchors before it lands.
 **Judgement**: make `_dynamics_batch` public and call it from the report. The report is validation-only and
 never runs a CTA arm.
 
+## 37. The specific-force contract's constants are not in any checkpoint's identity (2026-09-15)
+
+**Verified** (N6 review S2):
+- The specific-force box `[−0.20, 0.23]` g and its neutral −0.05 are constants of `outputs/envelope.py`.
+  They are not config fields, and the control target contract does not spell them.
+- So a stored specific-force checkpoint would load and fly under moved constants with the same name. Today
+  that is the two `sf_n3` checkpoints.
+- The speed-command law spells its constants into the target contract (`envelope.speed_command_identity()`).
+
+**Judgement**: do the same for specific-force. Adding it would refuse the two stored `sf_n3` checkpoints,
+so it needs a reading of the absent spelling as today's values (like `absent_field_defaults`), or a re-save.
+It is the owner's call.

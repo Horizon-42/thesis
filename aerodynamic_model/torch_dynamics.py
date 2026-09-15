@@ -105,6 +105,19 @@ def specific_force_thrust_n(
     return torch.minimum(torch.maximum(thrust, min_thrust_n), max_thrust_n)
 
 
+def speed_loop_specific_force(
+    speed_command_mps: torch.Tensor,
+    speed_mps: torch.Tensor,
+    sin_gamma: torch.Tensor,
+    speed_time_constant_s: torch.Tensor | float,
+) -> torch.Tensor:
+    """The specific force a first-order speed loop asks for, ``sin γ + (v_c − V)/(g·τ_V)``:
+    flown through :func:`specific_force_thrust_n`, it makes ``V' = (v_c − V)/τ_V`` wherever
+    the engine's clamp does not bind. The one expression the lag RHS and the exported record
+    thrust both read."""
+    return sin_gamma + (speed_command_mps - speed_mps) / (GRAVITY_MPS2 * speed_time_constant_s)
+
+
 def enu_rhs(
     state_enu: torch.Tensor,
     controls: torch.Tensor,

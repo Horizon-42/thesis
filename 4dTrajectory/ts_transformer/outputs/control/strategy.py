@@ -19,9 +19,9 @@ from ts_transformer.data.batch_contract import LossComponents, anchor_state
 from ts_transformer.data.channels import IDX
 from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
-    CONTROL_SPECIFIC_FORCE,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_HOOK_OFF,
+    CONTROL_SPEED_COMMAND,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -69,6 +69,7 @@ from ts_transformer.outputs.control.loss.objective import (
     control_prediction_loss_components,
 )
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
+from ts_transformer.outputs.envelope import speed_command_identity
 from ts_transformer.outputs.control.supervision import (
     probe_dynamics,
     reference_control_supervision,
@@ -301,6 +302,15 @@ class ControlStrategy(OutputStrategy):
         return ControlOutputModel(config, build_state_forecaster(config))
 
     def target_contract(self, config: TSConfig) -> str:
+        contract = self._objective_target_contract(config)
+        # Under speed-command the loop constant and the box are module constants; spelling
+        # them here makes a checkpoint trained under other constants fail to load
+        # (`envelope.speed_command_identity`). The other laws' strings are unchanged.
+        if config.control_thrust_parameterization == CONTROL_SPEED_COMMAND:
+            contract = f"{contract}+{speed_command_identity()}"
+        return contract
+
+    def _objective_target_contract(self, config: TSConfig) -> str:
         base = CONTROL_TARGET_CONTRACTS[
             (
                 config.control_duration_parameterization,
@@ -552,11 +562,11 @@ class ControlStrategy(OutputStrategy):
 
     def record_fields(self, forecast: Forecast) -> dict[str, Any]:
         return {
-            # The longitudinal contract the schedule was predicted in — written only under
-            # specific-force (`control_segments[*].specific_force` carries the commands);
+            # The longitudinal contract the schedule was predicted in — written only off
+            # thrust-fraction (`control_segments[*].<contract column>` carries the commands);
             # absent means thrust-fraction, so every such record reproduces to the bit.
-            **({"controlThrustParameterization": CONTROL_SPECIFIC_FORCE}
-               if forecast.specific_force_commands is not None else {}),
+            **({"controlThrustParameterization": forecast.longitudinal_parameterization}
+               if forecast.longitudinal_commands is not None else {}),
             # Latent control output: which prior sample this is (None = the top-1 the
             # contract carries) and its probability; whether it was decoded from another
             # flight's latent (the collapse diagnostic). z itself is never written.

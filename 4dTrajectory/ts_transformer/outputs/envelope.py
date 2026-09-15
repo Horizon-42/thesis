@@ -3,11 +3,14 @@
 Three numbers with three different natural magnitudes — thrust in hundreds of kilonewtons,
 bank in radians, load factor around one — cannot share a sigmoid, a regularizer or a
 teacher-imitation MSE without one of them dominating. So the CONTRACT this package
-predicts in is dimensionless, and since 2026-09-14 there are two of them — one per
-``control_thrust_parameterization`` (:func:`control_contract`):
+predicts in is one box per ``control_thrust_parameterization`` (:func:`control_contract`),
+the same on every airframe — three since 2026-09-15:
 
     thrust-fraction   delta_T = T / T_max     normalised by the ACTUATOR (T_max installed)
     specific-force    n_x = (T - D) / W       normalised by the EFFECT (speed-rate in g)
+    speed-command     Δv = v_c − V₀ (m/s)     a target speed relative to the anchor's, flown by
+                                              a speed loop (design §12); the one column in
+                                              physical units, since a speed IS airframe-free
     bank_rad          unchanged; a quarter turn is already order one
     load_factor       unchanged; it is a ratio by definition
 
@@ -15,9 +18,10 @@ predicts in is dimensionless, and since 2026-09-14 there are two of them — one
 2026-08-18 one sigmoid output meant 100 kN on a small jet and 400 kN on a heavy).
 ``specific-force`` makes it mean the same MOTION: the lag RHS re-solves the thrust at every
 stage and the drag cancels, so the same n_x moves a C550 and a B77W identically
-(``docs/2026-09-14_specific_force_control_design.md``). Under thrust-fraction the newton
+(``docs/2026-09-14_specific_force_control_design.md``). ``speed-command`` keeps that
+invariance and adds the restoring force n_x lacks. Under thrust-fraction the newton
 conversion is :func:`physical_controls`, once, on the way into the dynamics and out to the
-record; under specific-force it needs the state's drag and lives in the lag RHS
+record; under the other two it needs the state's drag and lives in the lag RHS
 (``aerodynamic_model.torch_lag_dynamics``) and in the record export. The evaluation record
 contract is newtons either way, shared with the CasADi optimizer.
 
@@ -44,7 +48,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ts_transformer.config import CONTROL_SPECIFIC_FORCE, CONTROL_THRUST_FRACTION
+from ts_transformer.config import (
+    CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPEED_COMMAND,
+    CONTROL_THRUST_FRACTION,
+)
 
 
 CONTROL_NAMES = ("thrust_fraction", "bank_rad", "load_factor")
@@ -92,6 +100,17 @@ MAX_SPECIFIC_FORCE = 0.23
 # trim there flew the same untrained heads to 311-328 m/s, stopped only by the T_max clamp
 # (M1 review, 2026-09-14). At -0.05 they stay within 103-144 m/s from 118-136 m/s.
 NEUTRAL_SPECIFIC_FORCE = -0.05
+# The speed-command contract (design §12): the head's first column is the target airspeed
+# RELATIVE to the anchor's, Δv in m/s, flown by a first-order speed loop of time constant
+# SPEED_LOOP_TIME_CONSTANT_S. The box holds the truth's own commands (KRDU val, 1404 x 32:
+# p0.1 -85 m/s, p99.9 +15 m/s, at every loop constant from 5 to 12 s — §12.3) and the neutral
+# 0 is "hold the speed you have", so an untrained head flies no transient on any airframe.
+# The loop constant is part of the CONTRACT, like the specific-force box, not a config field:
+# the inverse reads it at every call site and the teacher barely moves with it, so a run
+# that wants another value is another contract.
+MIN_SPEED_COMMAND_DELTA_MPS = -90.0
+MAX_SPEED_COMMAND_DELTA_MPS = 20.0
+SPEED_LOOP_TIME_CONSTANT_S = 8.0
 
 
 @dataclass(frozen=True)
@@ -107,7 +126,8 @@ class ControlContract:
     #: The neutral command, wings level at 1 g: under thrust-fraction 20 % of installed
     #: thrust — the level-flight trim of the median airframe (0.2 x 0.358 ≈ its D/W 0.076);
     #: under specific-force :data:`NEUTRAL_SPECIFIC_FORCE`, a descent's speed hold on EVERY
-    #: airframe (why not level trim: that constant's comment).
+    #: airframe (why not level trim: that constant's comment); under speed-command Δv = 0,
+    #: the anchor's own speed held.
     neutral: tuple[float, float, float]
 
     def __post_init__(self) -> None:
@@ -146,10 +166,33 @@ SPECIFIC_FORCE_CONTRACT = ControlContract(
     upper=(MAX_SPECIFIC_FORCE, MAX_BANK_RAD, MAX_LOAD_FACTOR),
     neutral=(NEUTRAL_SPECIFIC_FORCE, 0.0, 1.0),
 )
+SPEED_COMMAND_CONTRACT = ControlContract(
+    parameterization=CONTROL_SPEED_COMMAND,
+    names=("speed_command_delta", "bank_rad", "load_factor"),
+    units=("m/s", "rad", "1"),
+    lower=(MIN_SPEED_COMMAND_DELTA_MPS, -MAX_BANK_RAD, MIN_LOAD_FACTOR),
+    upper=(MAX_SPEED_COMMAND_DELTA_MPS, MAX_BANK_RAD, MAX_LOAD_FACTOR),
+    neutral=(0.0, 0.0, 1.0),
+)
 _CONTRACTS = {
     contract.parameterization: contract
-    for contract in (THRUST_FRACTION_CONTRACT, SPECIFIC_FORCE_CONTRACT)
+    for contract in (THRUST_FRACTION_CONTRACT, SPECIFIC_FORCE_CONTRACT, SPEED_COMMAND_CONTRACT)
 }
+
+
+def speed_command_identity() -> str:
+    """The speed-command contract's constants, spelled for a checkpoint's target contract.
+
+    The loop constant and the box are constants of this module, not config fields, so
+    nothing else a checkpoint stores would change if one moved: a speed-command checkpoint
+    trained under other constants would load and fly under these. Spelled into the target
+    contract (``outputs.control.strategy``), a moved constant is refused at load instead."""
+    contract = SPEED_COMMAND_CONTRACT
+    return (
+        f"speed-command(tau-v={SPEED_LOOP_TIME_CONSTANT_S:g}s,"
+        f"box={contract.lower[0]:g}..{contract.upper[0]:g}m/s,"
+        f"neutral={contract.neutral[0]:g})-v1"
+    )
 
 
 def control_contract(parameterization: str) -> ControlContract:

@@ -31,11 +31,15 @@ law (``control_law=`` on every rollout below):
   the thrust recomputed at EVERY RHS evaluation as ``clamp(W·a_x + D, T_lo, T_max)``. The
   RHS subtracts the same drag, so wherever the clamp does not bind ``V' = g·(a_x - sin γ)``
   and the airframe leaves the speed equation (``ts_transformer/docs/
-  2026-09-14_specific_force_control_design.md``).
+  2026-09-14_specific_force_control_design.md``);
+* :class:`SpeedCommandLaw` — a speed command relative to the anchor airspeed, ``a_Δ`` m/s,
+  flown by a first-order speed loop through the specific-force law's thrust: wherever the
+  clamp does not bind ``V' = (V₀ + a_Δ − V)/τ_V`` (the same design, §12).
 
-Either way all three actuator states are order one, so the long rollout does not need a
-separate scaling for them. ``state_scale`` nondimensionalises the seven point-mass
-coordinates and is all-ones for the physical variant.
+The actuator states are order one under the first two laws and metres per second under the
+third; a fixed-step RK4 is invariant to a linear rescaling of a state, so none of them needs
+a scale of its own. ``state_scale`` nondimensionalises the seven point-mass coordinates and is
+all-ones for the physical variant.
 
 Controls are the COMMANDS, in the same units as the actuator states.
 """
@@ -62,15 +66,18 @@ from aerodynamic_model.torch_transport_chart_dynamics import (
     geodetic_to_transport_chart_state,
     transport_chart_rhs,
     transport_chart_specific_force_thrust_n,
+    transport_chart_speed_command_thrust_n,
 )
 
 
 # The first actuator is the control law's longitudinal command (thrust fraction under
-# THRUST_FRACTION_LAW, specific force under SpecificForceLaw); the name is the default law's.
+# THRUST_FRACTION_LAW, specific force under SpecificForceLaw, the speed command relative to
+# the anchor under SpeedCommandLaw); the name is the default law's.
 LAG_ACTUATOR_NAMES = ("thrust_fraction", "bank_rad", "load_factor")
 LAG_STATE_NAMES = (*TRANSPORT_CHART_STATE_NAMES, *LAG_ACTUATOR_NAMES)
 CHART_WIDTH = len(TRANSPORT_CHART_STATE_NAMES)
-# Actuator states are dimensionless or radians already; only the chart half is rescaled.
+# Actuator states are dimensionless, radians or (speed-command) m/s; a fixed-step RK4 is
+# invariant to a linear rescaling of a state, so only the chart half is rescaled.
 UNIT_ACTUATOR_SCALE = (1.0, 1.0, 1.0)
 
 
@@ -101,8 +108,34 @@ class SpecificForceLaw:
             )
 
 
+@dataclass(frozen=True)
+class SpeedCommandLaw:
+    """The first actuator is a speed command RELATIVE to the anchor's airspeed, ``a_Δ`` m/s,
+    flown by a first-order speed loop (``ts_transformer/docs/
+    2026-09-14_specific_force_control_design.md`` §12).
+
+    At every RHS evaluation the loop asks for the specific force
+    ``sin γ + (V₀ + a_Δ − V)/(g·τ_V)`` and the thrust that flies it is re-solved exactly as
+    under :class:`SpecificForceLaw` — the same clamp, the same drag — so wherever the clamp
+    does not bind ``V' = (V₀ + a_Δ − V)/τ_V`` on every airframe: the specific force's
+    invariance, plus the restoring force ``∂V'/∂V = −1/τ_V`` that law lacks. ``V₀`` is each
+    flight's anchor airspeed, read off the rollout's initial state.
+    """
+
+    min_thrust_fraction: float
+    speed_time_constant_s: float
+
+    def __post_init__(self) -> None:
+        SpecificForceLaw(self.min_thrust_fraction)   # the same engine-floor contract
+        if not math.isfinite(self.speed_time_constant_s) or self.speed_time_constant_s <= 0.0:
+            raise ValueError(
+                "speed_time_constant_s must be finite and positive, "
+                f"got {self.speed_time_constant_s!r}"
+            )
+
+
 THRUST_FRACTION_LAW = ThrustFractionLaw()
-LagControlLaw = ThrustFractionLaw | SpecificForceLaw
+LagControlLaw = ThrustFractionLaw | SpecificForceLaw | SpeedCommandLaw
 
 
 def _require_last_dim(tensor: torch.Tensor, expected: int, name: str) -> None:
@@ -153,7 +186,8 @@ def lag_actuator_states(
     state_lag: torch.Tensor, state_scale: torch.Tensor
 ) -> torch.Tensor:
     """Return the realised ``(a_x, bank, load)`` along the rollout — ``a_x`` in the
-    control law's own unit (thrust fraction or specific force)."""
+    control law's own unit (thrust fraction, specific force, or the speed command relative
+    to the anchor's airspeed)."""
     _require_last_dim(state_lag, len(LAG_STATE_NAMES), "state_lag")
     return (state_lag * state_scale)[..., CHART_WIDTH:]
 
@@ -239,6 +273,33 @@ def lag_rhs_specific_force(
     )
 
 
+def lag_rhs_speed_command(
+    state_lag: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    frame_params: torch.Tensor,
+    time_constants_s: torch.Tensor,
+    reference_speed_mps: torch.Tensor,
+    speed_time_constant_s: torch.Tensor,
+    min_thrust_n: torch.Tensor,
+    max_thrust_n: torch.Tensor,
+    state_scale: torch.Tensor,
+) -> torch.Tensor:
+    """The same RHS under :class:`SpeedCommandLaw`: the thrust the speed loop asks for at
+    THIS state toward ``reference_speed_mps + a_Δ``, clamped to ``[min_thrust_n,
+    max_thrust_n]``."""
+    _require_lag_inputs(state_lag, commands, time_constants_s)
+    chart, actual = _physical_split(state_lag, state_scale)
+    thrust_n = transport_chart_speed_command_thrust_n(
+        chart, reference_speed_mps + actual[..., 0], speed_time_constant_s, actual[..., 2],
+        aero_params, frame_params, min_thrust_n, max_thrust_n,
+    )
+    return _lag_rate(
+        chart, actual, thrust_n, commands, aero_params, frame_params,
+        time_constants_s, state_scale,
+    )
+
+
 def _rk4(rhs, state: torch.Tensor, dt_s: torch.Tensor | float) -> torch.Tensor:
     """One explicit RK4 step of ``rhs`` from ``state``."""
     dt = torch.as_tensor(dt_s, dtype=state.dtype, device=state.device)
@@ -295,12 +356,40 @@ def rk4_lag_step_specific_force(
     )
 
 
+def rk4_lag_step_speed_command(
+    state_lag: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor | float,
+    frame_params: torch.Tensor,
+    time_constants_s: torch.Tensor,
+    reference_speed_mps: torch.Tensor,
+    speed_time_constant_s: torch.Tensor,
+    min_thrust_n: torch.Tensor,
+    max_thrust_n: torch.Tensor,
+    state_scale: torch.Tensor,
+) -> torch.Tensor:
+    """:func:`rk4_lag_step` under :class:`SpeedCommandLaw` — the loop's thrust is re-solved
+    at each of the four stages, as under the specific-force law."""
+    return _rk4(
+        lambda state: lag_rhs_speed_command(
+            state, commands, aero_params, frame_params, time_constants_s,
+            reference_speed_mps, speed_time_constant_s, min_thrust_n, max_thrust_n,
+            state_scale,
+        ),
+        state_lag,
+        dt_s,
+    )
+
+
 # The rollout engine hands one ``step_context`` tensor to the step function, so every
 # per-run constant travels in it, in this fixed layout per control law:
 #
 #     thrust-fraction: [ frame (4) | time_constants_s (3) | max_thrust_n (1) | state_scale (10) ]
 #     specific-force:  [ frame (4) | time_constants_s (3) | max_thrust_n (1) | min_thrust_n (1)
 #                        | state_scale (10) ]
+#     speed-command:   [ frame (4) | time_constants_s (3) | max_thrust_n (1) | min_thrust_n (1)
+#                        | reference_speed_mps (1) | speed_time_constant_s (1) | state_scale (10) ]
 #
 # state_scale rides along rather than being captured in a closure specifically so the step
 # stays ONE module-level function per law. A closure would be a new code object per rollout,
@@ -313,21 +402,28 @@ _THRUST_AT = _FRAME_WIDTH + _TAU_WIDTH
 _SCALE_AT = _THRUST_AT + 1
 _MIN_THRUST_AT = _THRUST_AT + 1
 _SPECIFIC_FORCE_SCALE_AT = _MIN_THRUST_AT + 1
+_REFERENCE_SPEED_AT = _MIN_THRUST_AT + 1
+_SPEED_TAU_AT = _REFERENCE_SPEED_AT + 1
+_SPEED_COMMAND_SCALE_AT = _SPEED_TAU_AT + 1
 
 
 def _pack_context(
     frame_params: torch.Tensor,
     time_constants_s: torch.Tensor,
-    thrust_limits_n: tuple[torch.Tensor, ...],
+    row_values: tuple[torch.Tensor, ...],
     state_scale: torch.Tensor,
 ) -> torch.Tensor:
-    """The layout above; ``thrust_limits_n`` is ``(max,)`` or ``(max, min)`` by law."""
+    """The layout above; ``row_values`` is ``(max,)``, ``(max, min)`` or ``(max, min,
+    reference speed, τ_V)`` by law — one column each, per flight (a scalar broadcasts)."""
     rows = len(frame_params)
     return torch.cat(
         (
             frame_params,
             time_constants_s.reshape(1, -1).expand(rows, -1).to(frame_params.dtype),
-            *(limit.reshape(-1, 1).to(frame_params.dtype) for limit in thrust_limits_n),
+            *(
+                torch.as_tensor(value).to(frame_params).reshape(-1, 1).expand(rows, 1)
+                for value in row_values
+            ),
             state_scale.reshape(1, -1).expand(rows, -1).to(frame_params.dtype),
         ),
         dim=-1,
@@ -373,6 +469,28 @@ def _unpacked_step_specific_force(
     )
 
 
+def _unpacked_step_speed_command(
+    state: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    return rk4_lag_step_speed_command(
+        state,
+        commands,
+        aero_params,
+        dt_s,
+        step_context[..., :_FRAME_WIDTH],
+        step_context[..., _FRAME_WIDTH:_THRUST_AT],
+        step_context[..., _REFERENCE_SPEED_AT],
+        step_context[..., _SPEED_TAU_AT],
+        step_context[..., _MIN_THRUST_AT],
+        step_context[..., _THRUST_AT],
+        step_context[0, _SPEED_COMMAND_SCALE_AT:],
+    )
+
+
 def _cuda_inference_step(
     state: torch.Tensor,
     commands: torch.Tensor,
@@ -415,6 +533,28 @@ def _cuda_autograd_step_specific_force(
 ) -> torch.Tensor:
     """The specific-force law's grad-enabled code object (its own compile cache)."""
     return _unpacked_step_specific_force(state, commands, aero_params, dt_s, step_context)
+
+
+def _cuda_inference_step_speed_command(
+    state: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    """The speed-command law's no-grad code object (its own compile cache)."""
+    return _unpacked_step_speed_command(state, commands, aero_params, dt_s, step_context)
+
+
+def _cuda_autograd_step_speed_command(
+    state: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    """The speed-command law's grad-enabled code object (its own compile cache)."""
+    return _unpacked_step_speed_command(state, commands, aero_params, dt_s, step_context)
 
 
 #: One compiled kernel per (step function) — i.e. per law and per grad mode — built on
@@ -479,14 +619,43 @@ def _rollout_step_specific_force(
     )
 
 
+def _rollout_step_speed_command(
+    state: torch.Tensor,
+    commands: torch.Tensor,
+    aero_params: torch.Tensor,
+    dt_s: torch.Tensor,
+    step_context: torch.Tensor,
+) -> torch.Tensor:
+    """The speed-command law's step, as the engines call it."""
+    return _dispatch_step(
+        _unpacked_step_speed_command,
+        _cuda_inference_step_speed_command,
+        _cuda_autograd_step_speed_command,
+        state, commands, aero_params, dt_s, step_context,
+    )
+
+
 def _law_step(
     control_law: LagControlLaw,
     frame_params: torch.Tensor,
     time_constants_s: torch.Tensor,
     max_thrust_n: torch.Tensor,
     state_scale: torch.Tensor,
+    initial_geodetic_states: torch.Tensor,
 ):
-    """``(step function, step context)`` for a control law — the one dispatch on it."""
+    """``(step function, step context)`` for a control law — the one dispatch on it. The
+    speed-command law's reference speed is each flight's anchor airspeed, the initial
+    geodetic state's ``V``."""
+    if isinstance(control_law, SpeedCommandLaw):
+        values = (
+            max_thrust_n,
+            control_law.min_thrust_fraction * max_thrust_n,
+            initial_geodetic_states[..., STATE_NAMES.index("V")],
+            control_law.speed_time_constant_s,
+        )
+        return _rollout_step_speed_command, _pack_context(
+            frame_params, time_constants_s, values, state_scale
+        )
     if isinstance(control_law, SpecificForceLaw):
         limits = (max_thrust_n, control_law.min_thrust_fraction * max_thrust_n)
         return _rollout_step_specific_force, _pack_context(
@@ -517,7 +686,8 @@ def rollout_piecewise_constant(
     """Return augmented segment-end states ``[B,N,10]``."""
     state_scale = lag_state_scale(chart_scale, frame_params)
     step, context = _law_step(
-        control_law, frame_params, time_constants_s, max_thrust_n, state_scale
+        control_law, frame_params, time_constants_s, max_thrust_n, state_scale,
+        initial_geodetic_states,
     )
     return rollout_piecewise_constant_with_step(
         lag_state_from_geodetic(
@@ -554,7 +724,8 @@ def rollout_piecewise_constant_hooked(
     when a hook rewrites each segment's command from the (scaled, augmented) state."""
     state_scale = lag_state_scale(chart_scale, frame_params)
     step, context = _law_step(
-        control_law, frame_params, time_constants_s, max_thrust_n, state_scale
+        control_law, frame_params, time_constants_s, max_thrust_n, state_scale,
+        initial_geodetic_states,
     )
     return rollout_piecewise_constant_hooked_with_step(
         lag_state_from_geodetic(
@@ -593,7 +764,8 @@ def rollout_piecewise_constant_at_times(
     """Return event-aligned augmented states at queries and control boundaries."""
     state_scale = lag_state_scale(chart_scale, frame_params)
     step, context = _law_step(
-        control_law, frame_params, time_constants_s, max_thrust_n, state_scale
+        control_law, frame_params, time_constants_s, max_thrust_n, state_scale,
+        initial_geodetic_states,
     )
     return rollout_piecewise_constant_at_times_with_step(
         lag_state_from_geodetic(

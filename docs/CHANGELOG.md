@@ -4,6 +4,39 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-15 — ts_transformer: a third longitudinal contract, the speed command (N6, branch `sf-n6`)
+
+**Why.** N3 (provisional, design §7.2) passed its first gate on both seeds: the per-class n_x bias collapsed to
+the truth's own spread. It failed the second (the heavy − 737 speed gap grew) and tripped the straight-in FDE veto
+(887 / 885 m p50; the last 5 km flown 4.4 m/s slow). The specific force cancels the drag and with it the speed's
+only feedback, `∂V̇/∂V = 0`.
+
+**What** (design §12):
+- `control_thrust_parameterization=speed-command`: the head predicts Δv, a target airspeed relative to the
+  anchor's. The lag RHS flies it through a first-order speed loop (τ_V = 8 s, a contract constant) and the
+  specific-force law's own clamp: `V̇ = (V₀ + Δv − V)/τ_V`, the same on every airframe.
+- New aerodynamic_model pieces: `SpeedCommandLaw`, `lag_rhs_speed_command`,
+  `transport_chart_speed_command_thrust_n`, and one `speed_loop_specific_force` read by the RHS and the record.
+- `actual_controls` returns the absolute target; `inverse.anchor_relative` makes it relative at the two callers
+  that know the anchor.
+- `Forecast.specific_force_commands` became `longitudinal_commands` + `longitudinal_parameterization`.
+  Specific-force records keep their `specific_force` key.
+- Refused off the lag model, with the fitted teacher, and with the speed floor.
+
+**Nothing moved.** The thrust-fraction and specific-force laws are bit-identical to `e959bc0`: loss, gradients,
+batch and records. Stored-run names and resume are identical. ts + aerodynamic_model: 1323 passed.
+
+**Review (opus):** no blocker, and the fixes are in design §12.8:
+- the hooked rollout's physics is now tested;
+- the speed-command constants are spelled into the checkpoint's target contract;
+- the neutral is now tested as flown.
+
+The reviewer also measured each law's teacher flown open-loop on 300 KRDU val flights: speed-command ADE 375 m,
+specific-force 2606 m, thrust-fraction 2700 m.
+
+**The go/no-go:** the same-code twin `N4_twin` confirms N3's straight-in FDE veto for seed 1337 (887 vs 647 m p50,
+design §7.3). N6 is queued after `sf_n4`.
+
 ### 2026-09-15 — ts_transformer: the control head's condition vector as ratios (N4, branch `sf-n4`)
 
 **Why.** N3 (running) tests whether predicting the specific force removes the thrust-fraction head's class

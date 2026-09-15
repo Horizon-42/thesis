@@ -12,7 +12,8 @@ import torch.nn as nn
 
 from ts_transformer.data.approach_difficulty import approach_difficulty
 from ts_transformer.inference.calibration import conformal_intervals, interval_stratum
-from aerodynamic_model.torch_dynamics import specific_force_thrust_n
+from aerodynamic_model.torch_dynamics import specific_force_thrust_n, speed_loop_specific_force
+from aerodynamic_model.torch_lag_dynamics import SpeedCommandLaw
 from ts_transformer.config import (
     CONTROL_THRUST_FRACTION,
     CTA_CONDITIONING_OFF,
@@ -43,15 +44,22 @@ def record_newton_controls(
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
 ) -> torch.Tensor:
-    """A SPECIFIC-FORCE schedule flown, in the record's newton contract, ``[B, N, 3]``.
+    """A SPECIFIC-FORCE or SPEED-COMMAND schedule flown, in the record's newton contract,
+    ``[B, N, 3]``.
 
     The thrust column is the thrust the command asks for where its segment BEGINS —
     ``clamp(W·n_x + D, T_lo, T_max)`` at the segment's start state and COMMANDED load factor,
     through the lag RHS's own ``specific_force_thrust_n`` and the floor of the law the
     rollout flew (``backends.lag_control_law``), so the record can never clamp where the
-    dynamics did not. Inside the hold the RHS re-solves it at every stage, so one number per
-    segment is a stand-in, chosen so the record's per-state controls stay a zero-order hold
-    of this schedule as the contract says. (Under thrust-fraction the newton thrust IS the
+    dynamics did not. Under speed-command ``n_x`` is the loop's own at that state,
+    ``speed_loop_specific_force(V₀ + Δv, V, sin γ, τ_V)``, V₀ the anchor's airspeed. Inside
+    the hold the RHS re-solves it at every stage, so one number per segment is a stand-in,
+    chosen so the record's per-state controls stay a zero-order hold of this schedule as the
+    contract says. **Under speed-command it is the hold's EXTREME, not its mean**: the loop's
+    speed error decays across the whole segment (τ_V ≫ τ_T), so the thrust flown relaxes away
+    from this start-of-segment demand (review N1: −0.047 T_max on average on a stepped
+    descent). A readout of the record's thrust fraction reads it so; the specific force and the
+    speed read off the STATES are exact. (Under thrust-fraction the newton thrust IS the
     command: ``physical_controls``.)
     """
     initial = dynamics["initial_state"].to(flown)
@@ -59,11 +67,18 @@ def record_newton_controls(
         (initial.unsqueeze(1), segment_end_geodetic_states.to(flown)[:, :-1]), dim=1
     )
     max_thrust = dynamics["max_thrust_n"].to(flown).unsqueeze(-1)
+    law = lag_control_law(config)
+    specific_force = flown[..., 0]
+    if isinstance(law, SpeedCommandLaw):
+        specific_force = speed_loop_specific_force(
+            initial[:, 3:4] + flown[..., 0], starts[..., 3], torch.sin(starts[..., 5]),
+            law.speed_time_constant_s,
+        )
     thrust = specific_force_thrust_n(
-        flown[..., 0], flown[..., 2],
+        specific_force, flown[..., 2],
         starts[..., 3], starts[..., 2], starts[..., 6],
         dynamics["aero_params"].to(flown).unsqueeze(1),
-        lag_control_law(config).min_thrust_fraction * max_thrust, max_thrust,
+        law.min_thrust_fraction * max_thrust, max_thrust,
     )
     return torch.cat((thrust.unsqueeze(-1), flown[..., 1:]), dim=-1)
 
@@ -201,18 +216,18 @@ def forecast_control_batch(
     # Both contracts export the commands at the head's own precision (a hook's float64
     # rewrite is rounded to it), so bank and load read the same bits under either law.
     flown = rollout.controls.to(prediction.controls.dtype)
-    specific_force = config.control_thrust_parameterization != CONTROL_THRUST_FRACTION
+    longitudinal = config.control_thrust_parameterization != CONTROL_THRUST_FRACTION
     newtons = (
         record_newton_controls(
             flown.to(rollout.controls.dtype), rollout.segment_end_geodetic_states,
             dynamics, config,
         )
-        if specific_force
+        if longitudinal
         else physical_controls(flown, dynamics["max_thrust_n"])
     )
     controls = newtons.detach().cpu().numpy().astype(np.float64)
-    specific_force_commands = (
-        flown[..., 0].detach().cpu().numpy().astype(np.float64) if specific_force else None
+    longitudinal_commands = (
+        flown[..., 0].detach().cpu().numpy().astype(np.float64) if longitudinal else None
     )
     predicted_final_time = (
         prediction.final_time_s.detach().cpu().numpy().astype(np.float64)
@@ -240,8 +255,11 @@ def forecast_control_batch(
             truncated_at_threshold=False,
             horizon_capped=False,
             controls=controls[row],
-            specific_force_commands=(
-                None if specific_force_commands is None else specific_force_commands[row]
+            longitudinal_commands=(
+                None if longitudinal_commands is None else longitudinal_commands[row]
+            ),
+            longitudinal_parameterization=(
+                config.control_thrust_parameterization if longitudinal else None
             ),
             sample_durations_s=np.diff(np.concatenate(([0.0], row_offsets))),
             segment_durations_s=durations[row],

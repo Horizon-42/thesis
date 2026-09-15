@@ -16,7 +16,7 @@ from ts_transformer.data.channels import states_from_channels
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays
 from ts_transformer.outputs.conditioning import condition_vector
-from ts_transformer.outputs.dynamics.inverse import actual_controls
+from ts_transformer.outputs.dynamics.inverse import actual_controls, anchor_relative
 from ts_transformer.outputs.envelope import control_contract
 
 # How much observed lookback the anchor-state control inversion differentiates. It needs
@@ -34,7 +34,8 @@ def anchor_controls(
     before the anchor, so it is as deployable as the history window itself, and it is the
     ACTUAL control (never a command) for every flight model — the commands that produced
     it are a separate inversion in ``control_inverse_dynamics``. In the contract
-    ``parameterization`` names, because that is the unit the lag RHS reads its actuators in.
+    ``parameterization`` names, because that is the unit the lag RHS reads its actuators in
+    — under ``speed-command`` relative to the anchor's own airspeed, the window's last row.
     """
     start = max(0, anchor + 1 - ANCHOR_CONTROL_SAMPLES)
     window = slice(start, anchor + 1)
@@ -50,7 +51,7 @@ def anchor_controls(
         dtype=np.float64,
     )
     aero = series.scenario.aero
-    return actual_controls(
+    actual = actual_controls(
         states,
         times,
         aero_params=np.array(
@@ -60,6 +61,7 @@ def anchor_controls(
         max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
         parameterization=parameterization,
     )[-1]
+    return anchor_relative(actual, float(states[-1, 3]), parameterization=parameterization)
 
 
 def dynamics_arrays(

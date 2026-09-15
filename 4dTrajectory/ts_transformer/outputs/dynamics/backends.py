@@ -50,6 +50,7 @@ from aerodynamic_model.torch_lag_dynamics import (
     THRUST_FRACTION_LAW,
     LagControlLaw,
     SpecificForceLaw,
+    SpeedCommandLaw,
     lag_actuator_states,
     lag_state_scale,
     lag_state_to_transport_chart,
@@ -73,10 +74,15 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPEED_COMMAND,
     CONTROL_THRUST_FRACTION,
     TSConfig,
 )
-from ts_transformer.outputs.envelope import MIN_THRUST_FRACTION, physical_controls
+from ts_transformer.outputs.envelope import (
+    MIN_THRUST_FRACTION,
+    SPEED_LOOP_TIME_CONSTANT_S,
+    physical_controls,
+)
 
 
 #: The lag RHS's control law per ``control_thrust_parameterization`` — the one place the
@@ -85,6 +91,10 @@ from ts_transformer.outputs.envelope import MIN_THRUST_FRACTION, physical_contro
 _LAG_CONTROL_LAWS: dict[str, LagControlLaw] = {
     CONTROL_THRUST_FRACTION: THRUST_FRACTION_LAW,
     CONTROL_SPECIFIC_FORCE: SpecificForceLaw(min_thrust_fraction=MIN_THRUST_FRACTION),
+    CONTROL_SPEED_COMMAND: SpeedCommandLaw(
+        min_thrust_fraction=MIN_THRUST_FRACTION,
+        speed_time_constant_s=SPEED_LOOP_TIME_CONSTANT_S,
+    ),
 }
 
 

@@ -28,7 +28,7 @@ def saturation_labels(parameterization: str) -> tuple[str, ...]:
 
     Under thrust-fraction the historical labels every stored ``history.json`` carries (its
     first key reads ``thrust_N`` although the column is the thrust FRACTION — kept so new
-    runs stay comparable key for key); under specific-force the contract's own names.
+    runs stay comparable key for key); under any other law the contract's own names.
     """
     if parameterization == CONTROL_THRUST_FRACTION:
         return CONTROL_NAMES

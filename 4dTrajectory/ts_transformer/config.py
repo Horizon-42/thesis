@@ -292,11 +292,17 @@ CONTROL_DYNAMICS_BACKENDS = (
 # [-0.2, 1] x T_max range at every state), the stall clamp and the exported thrust. The SAME
 # thrust range is not the same dynamical system: with the drag cancelled the speed has no
 # drag feedback, so a biased command drifts where the thrust-fraction law settles (design
-# §2.1). First-order-lag only: the point-mass rows hold newton controls across a segment and
-# have no per-stage thrust.
+# §2.1). ``speed-command`` (design §12) commands a target airspeed relative to the anchor's,
+# Δv, flown by a first-order speed loop through the specific-force law's thrust: the same
+# invariance, plus the restoring force the specific force lacks (``V' = (V₀ + Δv − V)/τ_V``
+# wherever the clamp does not bind). Both non-default laws are first-order-lag only: the
+# point-mass rows hold newton controls across a segment and have no per-stage thrust.
 CONTROL_THRUST_FRACTION = "thrust-fraction"
 CONTROL_SPECIFIC_FORCE = "specific-force"
-CONTROL_THRUST_PARAMETERIZATIONS = (CONTROL_THRUST_FRACTION, CONTROL_SPECIFIC_FORCE)
+CONTROL_SPEED_COMMAND = "speed-command"
+CONTROL_THRUST_PARAMETERIZATIONS = (
+    CONTROL_THRUST_FRACTION, CONTROL_SPECIFIC_FORCE, CONTROL_SPEED_COMMAND,
+)
 # HOW the airframe is presented to the control head (`outputs/conditioning.py`; design N4).
 # ``raw`` scales each quantity on its own (mass, installed thrust, wing area, the polar) —
 # every run before 2026-09-15, pinned by every named recipe. ``ratios`` hands the head the
@@ -1416,15 +1422,15 @@ class DynamicsSpec:
             "control_thrust_parameterization", self.control_thrust_parameterization,
             CONTROL_THRUST_PARAMETERIZATIONS,
         )
-        if (self.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE
+        if (self.control_thrust_parameterization != CONTROL_THRUST_FRACTION
                 and self.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG):
-            # A scope statement, not physics: the specific force needs the thrust re-solved
-            # at every RK4 stage, which only the lag RHS does. The point-mass rows convert to
-            # newtons once per segment and would hold T, not n_x.
+            # A scope statement, not physics: the specific force and the speed loop both need
+            # the thrust re-solved at every RK4 stage, which only the lag RHS does. The
+            # point-mass rows convert to newtons once per segment and would hold T.
             raise ValueError(
-                f"control_thrust_parameterization={CONTROL_SPECIFIC_FORCE!r} is implemented "
-                "on the first-order-lag flight model only; control_dynamics_model="
-                f"{self.control_dynamics_model!r}"
+                f"control_thrust_parameterization={self.control_thrust_parameterization!r} "
+                "is implemented on the first-order-lag flight model only; "
+                f"control_dynamics_model={self.control_dynamics_model!r}"
             )
         for name in sorted(TIME_CONSTANT_FIELDS):
             value = getattr(self, name)
@@ -1791,16 +1797,25 @@ class ControlOutput(OutputSpec):
                 "Weigh the pinball with duration_quantile_loss_weight, or take the point "
                 f"term back with duration_head={DURATION_HEAD_TWO_HEAD!r}"
             )
-        if self.dynamics.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE:
+        law = self.dynamics.control_thrust_parameterization
+        if law != CONTROL_THRUST_FRACTION:
             if self.objective.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
-                # The table's schema names no parameterisation, so a specific-force run
-                # could read a thrust-fraction table and imitate δ as if it were n_x.
+                # The table's schema names no parameterisation, so an n_x or a speed-command
+                # run could read a thrust-fraction table and imitate δ as if it were its own.
                 raise ValueError(
                     f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r} is not "
-                    "built for control_thrust_parameterization="
-                    f"{CONTROL_SPECIFIC_FORCE!r}: a fitted-teacher table does not say which "
-                    "coordinate its schedules are in"
+                    f"built for control_thrust_parameterization={law!r}: a fitted-teacher "
+                    "table does not say which coordinate its schedules are in"
                 )
+        if (law == CONTROL_SPEED_COMMAND
+                and CONTROL_HOOK_SPEED_FLOOR
+                in CONTROL_HOOK_MEMBERS.get(self.hook.control_command_hook, ())):
+            # Not built yet (design §12.4): the floor writes the thrust channel by inverting a
+            # thrust or specific-force law, and under the speed loop its demand is a speed.
+            raise ValueError(
+                f"a command hook containing {CONTROL_HOOK_SPEED_FLOOR!r} is not built for "
+                f"control_thrust_parameterization={CONTROL_SPEED_COMMAND!r} yet"
+            )
         if self.hook.active:
             if self.dynamics.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
                 raise ValueError(
