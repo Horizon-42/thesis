@@ -16,8 +16,8 @@ the literature (36 sources) and the measurements behind the choice are in
 | D | this design, plus the teacher-distribution measurement (§2.4) | **done** 2026-09-14 | branch `specific-force-control`, worktree `.claude/worktrees/specific-force` |
 | M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | **done** 2026-09-14, reviewed (opus; 1 blocker + 3 should-fix, all fixed and re-verified, §9) | `8ce4568` |
 | M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | **done** 2026-09-14, review §10 | the commit after `8ce4568` |
-| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **running** since 2026-09-15 00:18 UTC, from the `specific-force` worktree at `47b4b40` (clean tree, formal run); campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`, log `…/experiments/sf_n3.log` | results → §7.2 |
-| N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | **built** 2026-09-15 on branch `sf-n4` (worktree `.claude/worktrees/sf-n4`), review §11.5; arm file `docs/experiments/sf_n4_arms.json` (4 arms), intents key `sf_n4` | launch after N3's runner exits (§11.4) |
+| N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **ran** 2026-09-15 00:18–02:33 UTC at `47b4b40`, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`. **Provisional reading** (stored twins, which drifted): gate 1 passes on both seeds, gate 2 fails, the straight-in FDE veto trips (§7.2). Binding reading waits for `N4_twin` | §7.2 |
+| N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | built 2026-09-15 on branch `sf-n4` (`608f14a`, review §11.5). **Running** since 2026-09-15 ~02:40 UTC from the `specific-force` worktree fast-forwarded to `f1b19c5`: campaign `4dTrajectory/outputs/KRDU/experiments/sf_n4`, log `…/experiments/sf_n4.log`, 4 arms (twins first) | results → §11.7 |
 | N5 | pooled five-airport arm | not started; decided after N3 (§11.4) | — |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
@@ -323,6 +323,61 @@ The torch modules have no importer outside `ts_transformer` and the package's ow
   - flyability delta against observed not worse.
 - **Expected (reading):** in-distribution ties are the norm in the literature (Villar Exp. 1,
   QuadBenchmark Table V). A pooled-ADE win is not the claim; the class structure is.
+
+## 7.2 N3 results — PROVISIONAL (against the stored twins, which drifted; §11.6)
+
+**Ran:** 2026-09-15 00:18–02:33 UTC, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`, commit `47b4b40`, both
+arms `completed`. Both ran all 180 epochs (selection ADE 1268.2 / 1221.7 m). The stored twins: 1247.9 (180
+epochs) / 1373.1 m (143 epochs, early stop).
+
+**This reading is NOT binding.** The twins were trained before `c544db0`, so every delta below mixes the law's
+effect with that fix's. The binding reading is against `N4_twin` / `N4_twin_s2024` (§11.4), same instrument.
+Instrument: `per_class_readout.flight_row` on each arm's `pred_val` (the established stratum for the class
+rows) plus the package strata on `summary.json`. Script in the session scratchpad (`sf_readout.py`), which
+reproduces the twins' published numbers exactly (1248 / 1373 m ADE, 0.0104 / 0.0117 g, 4.70 / 4.90 m/s).
+
+| KRDU val, 1404 flights | seed 1337: arm / stored twin | seed 2024: arm / stored twin |
+|---|---|---|
+| **gate 1** per-class n_x bias range (truth's own class spread 0.0046 g) | **0.0042** / 0.0104 g | **0.0044** / 0.0117 g |
+| **gate 2** heavy − B737 speed bias | **+6.17** / +4.70 m/s | **+6.31** / +4.90 m/s |
+| ADE pooled / straight-in / vectored (m) | 1268 / 437 / 2737 vs 1248 / 413 / 2721 | 1222 / 412 / 2649 vs 1373 / 451 / 3004 |
+| **FDE p50** pooled / straight-in (m) | 1103 / **887** vs 877 / 582 | 1110 / **885** vs 937 / 659 |
+| duration MAE pooled / straight-in (s) | 26.2 / 13.9 vs 25.1 / 13.1 | 25.7 / 13.6 vs 26.2 / 13.9 |
+| paired ADE, arm better | 47.5 % (median +13 m) | 61.9 % (median −65 m) |
+| flyability Δ vs observed: fully / samples | −0.634 / −0.050 vs −0.981 / −0.070 | −0.724 / −0.051 vs −0.984 / −0.072 |
+
+Per class, established stratum (n_x bias = time-mean predicted − observed n_x; δ = the time-mean thrust fraction
+the exported thrust implies; the truth's inverted δ is 0.036 / 0.042 / 0.031 / 0.028 for B737 / A320 / regional /
+heavy):
+
+| class (n) | n_x bias 1337 / 2024 (g) | stored twins (g) | speed bias 1337 / 2024 (m/s) | stored twins (m/s) | δ flown 1337 / 2024 | stored twins' δ |
+|---|---|---|---|---|---|---|
+| B737 fam (314) | −0.0028 / −0.0024 | −0.0056 / −0.0083 | −3.93 / −4.04 | −1.41 / −1.86 | 0.063 / 0.068 | 0.051 / 0.045 |
+| A320 fam (233) | +0.0015 / +0.0017 | −0.0043 / −0.0072 | −0.63 / −0.98 | +0.90 / +0.58 | 0.065 / 0.068 | 0.050 / 0.043 |
+| regional (250) | +0.0005 / +0.0012 | +0.0010 / −0.0006 | −1.62 / −2.21 | +1.15 / +1.17 | 0.052 / 0.060 | 0.053 / 0.048 |
+| heavy (44) | +0.0013 / +0.0020 | +0.0048 / +0.0033 | +2.28 / +2.28 | +3.30 / +3.04 | 0.033 / 0.038 | 0.052 / 0.047 |
+
+**Where the straight-in FDE goes** (seed 1337, `run_ts.py straight_in_residual_readout`, straight-in stratum,
+p50 by remaining distance):
+- The arm tracks the truth's speed to 5 km, then flies **4.4 m/s SLOWER** in the last 5 km, where the twin flew
+  1.8 m/s fast. The along-track error there is −207 m against the twin's −119 m.
+- The deceleration POINT is unchanged (offset p50 0.0 km in both).
+- The vertical error falls: RMS p50 79 → 53 m.
+
+**Reading (provisional; the twins drifted):**
+- **Gate 1 passes on both seeds.** The head's specific-force bias is class-invariant, at the truth's own class
+  spread. The class-dependent δ it flies (heavies 0.033–0.038 against 0.063–0.068 for the 737s) is what the
+  thrust-fraction head never learned.
+- **Gate 2 fails on both seeds.** The heavy − 737 speed gap grows by about 1.4 m/s.
+  - Since n_x = V̇/g + sin γ, a class-invariant n_x bias with a class-dependent speed bias puts the class
+    structure into the path angle.
+  - That is a reading. The vertical channel's per-class bias has not been measured.
+- **The straight-in FDE veto trips on both seeds**, identically: 887 / 885 m against 582 / 659.
+  - The late-final speed deficit is the missing drag feedback (§2.1): a slightly low n_x over the last
+    segments accumulates into lost speed instead of settling.
+- **Pooled ADE is inside the seed line. Flyability improves by a third.**
+- **Nothing here is final until `N4_twin` reads the same-code baseline.** `c544db0`'s terminal emphasis
+  may have moved the twins' endpoint error too.
 
 ## 7.1 Smoke run (M2) — the chain works; its numbers are NOT results
 
