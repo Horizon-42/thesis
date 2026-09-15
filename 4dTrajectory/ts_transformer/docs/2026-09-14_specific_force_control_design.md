@@ -17,7 +17,7 @@ the literature (36 sources) and the measurements behind the choice are in
 | M1 | core: the lag model's specific-force law, config axis, contract box, context, inverse, heads, objective, export, naming, tests | **done** 2026-09-14, reviewed (opus; 1 blocker + 3 should-fix, all fixed and re-verified, §9) | `8ce4568` |
 | M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | **done** 2026-09-14, review §10 | the commit after `8ce4568` |
 | N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **ran** 2026-09-15 00:18–02:33 UTC at `47b4b40`, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`, **published** (KRDU picker, group `sf_n3`). **Final, both seeds against same-code twins (§7.3):** gate 1 passes (0.0042 / 0.0044 vs 0.0125 / 0.0118 g), gate 2 fails, the straight-in FDE veto trips (+240 / +222 m). Pooled ADE −57 / −73 m. Not adopted; the evidence for N6 | §7.2, §7.3 |
-| N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | built 2026-09-15 on branch `sf-n4` (`608f14a`, review §11.5). **Running** since 2026-09-15 ~02:40 UTC from the `specific-force` worktree fast-forwarded to `f1b19c5`: campaign `4dTrajectory/outputs/KRDU/experiments/sf_n4`, log `…/experiments/sf_n4.log`, 4 arms (twins first) | results → §11.7 |
+| N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | built 2026-09-15 on branch `sf-n4` (`608f14a`, review §11.5). **Running** since 2026-09-15 ~02:40 UTC from the `specific-force` worktree fast-forwarded to `f1b19c5`: campaign `4dTrajectory/outputs/KRDU/experiments/sf_n4`, log `…/experiments/sf_n4.log`, 4 arms (twins first). Twins and `N4_ratios` done; **seed 1337: the ratios do not move the δ head's class bias** (0.0119 vs 0.0125 g, §11.7) | results → §11.7 |
 | N5 | pooled five-airport arm | not started; only if the mechanism holds on all gates (§11.4) — N3's provisional reading does not | — |
 | N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | **built and reviewed** 2026-09-15 on branch `sf-n6` (worktree `.claude/worktrees/sf-n6`, from `e959bc0`; review §12.8). Arm file `docs/experiments/sf_n6_arms.json`, intents key `sf_n6`. **§12.6's condition is MET (§7.3): queued after `sf_n4`**, launched from the runner worktree fast-forwarded to `sf-n6` | §12 |
 
@@ -643,6 +643,27 @@ If N4 leaves the bias while N3 closes it, the parameterisation is the mechanism.
    commits moved.
 4. **N5 (pooled five airports) only if N3's mechanism holds on both seeds.** There is no
   stored pooled thrust-fraction twin, so N5 is four arms (δ and n_x, two seeds), not two.
+
+### 11.7 N4 results (2026-09-15; seed 1337 in, seed 2024 running)
+
+`sf_n4/N4_ratios` (180 epochs, selection ADE 1346.0 m) against its same-code twin `N4_twin`, with N3's
+instrument:
+
+| KRDU val, 1404 flights | N4_ratios | N4_twin |
+|---|---|---|
+| per-class n_x bias range (truth 0.0045 g) | 0.0119 | 0.0125 |
+| heavy − B737 speed bias (m/s) | +5.19 | +5.16 |
+| δ flown B737 / A320 / regional / heavy (the truth's: 0.036 / 0.042 / 0.031 / 0.028) | 0.044 / 0.042 / 0.047 / 0.047 | 0.044 / 0.043 / 0.047 / 0.047 |
+| ADE pooled / straight-in / vectored (m) | 1346 / 451 / 2927 | 1325 / 444 / 2880 |
+| FDE p50 pooled / straight-in (m) | 909 / 639 | 873 / 647 |
+| paired ADE, arm better | 47.6 % (median +5 m) | — |
+
+- **The alternative hypothesis fails on seed 1337.** Handed T_max/W and the stall speed directly, the δ
+  head still commands the SAME δ on every class, to the third decimal. Its class bias does not move.
+- **So the class structure N3 removed is the parameterisation's, not the conditioning's presentation.**
+  N3's gate 1 on the same seed: 0.0042.
+- Nothing else moves beyond the twins' spread.
+- Seed 2024 (`N4_ratios_s2024`) is training; the verdict needs both.
 
 ### 11.5 N4 review (2026-09-15, opus subagent, code only)
 
