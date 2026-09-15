@@ -71,10 +71,13 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
     77 / 90 m).
   - A straight-in FDE is 60–77 % along-track and 1–2 % vertical (of Σ FDE²), so the N3 veto rewards δ's
     compensating error. Read it with its along/vertical split.
-- **N7 — proposed, not built (the user's call; design §7.5.6):** an inference-time glidepath hook on the
-  specific-force contract. Under SF, `Ė = V·n_x` does not depend on γ, so a vertical law is energy-neutral by
-  construction: the third law the 2026-09-06 nominal-law hook lacked under δ. Predict-only arms on N3's two
-  checkpoints with the δ twins as the control; no retrain.
+- **N7 (an inference-time glidepath hook) — WITHDRAWN as a model fix** (the user, 2026-09-16, design
+  §7.5.6). It computes the final's vertical profile from the published procedure, so the result would be the
+  rule's, not the model's. Kept only as a labelled diagnostic or baseline component.
+- **N7′ — proposed, not built (the user's call):** a learned vertical target. The head predicts the path angle
+  (or height) per segment, and a fixed tracking law with no procedure in it flies the head's own target. The
+  height error then grows linearly or not at all, instead of quadratically. Under SF, `Ė = V·n_x`, so the law
+  cannot hide an energy cost the way N6's speed loop did.
 - **N6 — the speed command: RAN, FAILED — unstable in training** (design §12.9).
   - The first arm diverged from epoch 26: pre-clip control-head gradients 1e7–1e10, from zoom climbs the speed
     loop hides until the T_max clamp binds.

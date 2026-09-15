@@ -4,6 +4,21 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-16 — ts_transformer: the glidepath hook (N7) withdrawn as a model fix; a learned vertical target (N7′) proposed
+
+- **Withdrawn (the user's objection):** the model's purpose is to LEARN to fly a procedure-conforming track.
+  A hook that computes the final's vertical profile from the published glidepath answers that by
+  construction, so any gain would be the rule's. It is not leakage, but it changes what is evaluated.
+- **The collected literature agrees** (`docs/literature/procedure_hard_constraints/`):
+  - none of the twelve aviation TP papers imposes the glidepath;
+  - physics-as-generator work learns the intent and lets the physics integrate it;
+  - residual policies and safety filters are claims about the composite system;
+  - test-time-only filtering has a horizon-quadratic error (Geiger & Straehle 2022).
+- **Kept only** as a labelled diagnostic or a procedure-only baseline component.
+- **Proposed instead (not built, the user's call): N7′.** The head predicts a per-segment path-angle (or
+  height) target, and a fixed tracking law with no procedure in it flies it. The profile stays the model's;
+  the open-loop double integration diagnosed in design §7.5 goes.
+
 ### 2026-09-15 — ts_transformer: the final-descent split diagnosed — the vertical channel is open loop; δ's straight-in FDE edge is a stall-bound dive
 
 Read-only diagnosis on the four same-code runs (N3 and `N4_twin`, both seeds; specific-force design §7.5).

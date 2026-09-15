@@ -21,7 +21,8 @@ the literature (36 sources) and the measurements behind the choice are in
 | N5 | pooled five-airport arm | not started; only if the mechanism holds on all gates (§11.4) — N3's provisional reading does not | — |
 | N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | built and reviewed 2026-09-15 on branch `sf-n6` (`94f822e`; review §12.8). Ran 06:01 UTC at `eaf409a`. **FAILED: unstable in training** (§12.9). Arm 1 diverged from epoch 26 (pre-clip control-head gradient norm 1e7–1e10) and early-stopped at 38 (best 18): pooled ADE 2335 vs 1325 m. Seed 2024 stopped at dataset build (only `config.json`). Not adopted; the next design is the user's call (§12.9) | §12.9 |
 | F | the final-descent split, diagnosed (the user: "开始排查") | **done** 2026-09-15, read-only on the four same-code runs. The truth flies at ~0.6 Cl_max; the rollouts reach the stall boundary by losing speed. SF's split is its vertical-load command integrated open loop: the twice-integrated command bias predicts the height error at 5 km with Spearman +0.76 / +0.82, and the energy is right. δ has the same open channel, worse; its straight-in FDE edge is a stall-bound dive that ends ~100 m low and on time. A straight-in FDE is 60–77 % along-track, 1–2 % vertical | §7.5 |
-| N7 | an inference-time glidepath hook on the specific-force contract (the vertical law SF makes energy-neutral) | **proposed, not built**: the user's call (§7.5.6) | §7.5.6 |
+| N7 | an inference-time glidepath hook on the specific-force contract | **withdrawn as a model fix** (the user, 2026-09-16): it computes the final's vertical profile from the published procedure, so the result would be the rule's, not the model's. Kept only as a labelled diagnostic or baseline component (§7.5.6) | §7.5.6 |
+| N7′ | a learned vertical target: the head predicts the path angle (or height) per segment, and a fixed tracking law with no procedure in it flies it. The diagnosed integrator goes, and the profile stays the model's | **proposed, not built**: the user's call (§7.5.6) | §7.5.6 |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
 the user merges. Every code milestone gets a subagent review before its commit
@@ -596,22 +597,53 @@ over flights, as Δ = prediction − truth. Command Δ is the model's segment co
     measured on v1 and v2.
   - The code is archived in `archive/nominal_law_hook_2026_09/`, and `nominal-residual` is refused for new
     runs.
-- **Proposed N7: an inference-time glidepath hook on the specific-force contract.**
-  - On the barrier's on-final gate, replace the vertical-load command with a path-angle law toward the
-    published glidepath (the record's LTP, TCH and angle).
-  - Re-coordinate the load for bank, and leave n_x alone.
-  - No retrain: predict-only arms on N3's two checkpoints, with the δ twins under the same hook as the
-    control, where the energy is expected to show again.
-  - Gates:
-    - the stall-bound group's along-track lag;
-    - straight-in FDE p50 against the twins, read with its split;
-    - |vertical| at the end.
-  - Not N6's failure mode: nothing trains through the hook, and it acts only on the gate.
-- **Upper bound, an estimate:** if SF's stall-bound flights did as well as SF's own other flights (FDE p50
-  667 / 683 m), SF's straight-in FDE p50 would be near 680 m, against δ's 647 / 663.
-- **The alternative on the training side** is the existing vertical procedure penalty
-  (`procedure_loss_vertical_weight`). The 2026-09-05 penalty results found that a penalty moves the
-  objective and pushed the vectored mid-path worse (+581 m). It is second choice.
+- **N7 as first proposed — WITHDRAWN as a fix for the model (the user, 2026-09-16).**
+  - The proposal was an inference-time glidepath hook. On the barrier's on-final gate it would replace the
+    vertical-load command with a path-angle law toward the published glidepath (the record's LTP, TCH and
+    angle), leave n_x alone, and run predict-only on N3's checkpoints.
+  - The objection: the model exists to LEARN to fly a procedure-conforming track. A hook that computes the
+    final's vertical profile from the procedure answers that question by construction, so the final would
+    be the rule's and not the model's.
+    - It is not leakage: the glidepath is published before the flight.
+    - But it changes what is evaluated, and any gain belongs to the rule.
+  - The literature agrees (`docs/literature/procedure_hard_constraints/`):
+    - None of the twelve aviation trajectory-prediction papers collected imposes the glidepath, hard or soft.
+    - The physics-as-generator ones learn the INTENT and let BADA or an ODE integrate it: Pepper & Thomas
+      the thrust profile, Hodgkin et al. thrust or drag plus CAS, Alligier et al. the mass. Procedures enter
+      at most as coarse conditioning.
+    - Residual policies and safety filters (Silver 2018, Johannink 2019, Wabersich & Zeilinger 2021) are
+      claims about the composite controller.
+    - Geiger & Straehle 2022 show that, in imitation, filtering only at test time has an error quadratic in
+      the horizon.
+  - What remains legitimate for such a hook:
+    - a labelled DIAGNOSTIC (does closing the vertical loop turn SF's correct energy into correct speed?);
+    - or a component of a procedure-only BASELINE.
+    - Never a model result.
+- **Proposed instead, N7′: a learned vertical TARGET (the user's call, not built).**
+  - The head predicts, per segment, the path angle γ* (or the height) instead of the load factor. A fixed
+    tracking law with no procedure in it flies the head's own target:
+    `n = [cos γ + V·(γ* − γ)/(g·τ_γ)] / cos φ`, lag-compensated over the segment hold.
+  - Where the glidepath is stays for the network to learn. The procedure geometry may enter as an INPUT,
+    as maps do in driving prediction (TNT, PBP).
+  - It removes the diagnosed integrator:
+    - a bias in γ* grows a height error linearly (`V·δγ*·t`), not quadratically;
+    - a height target does not accumulate at all.
+  - Precedent in the physics-as-generator family:
+    - the network emits the profile and the physics flies it (Pepper & Thomas, Hodgkin et al.);
+    - BADA 3 defines the vertical profile by controlling two of thrust, speed and ROCD;
+    - NODE-FDM (Jarry et al. 2025) takes autopilot targets (selected altitude, speed, vertical speed) as its
+      controls.
+  - Under SF the tracking law cannot create or destroy energy (`Ė = V·n_x`, the head's). That is unlike
+    N6's speed loop, which hid a pull-up's cost behind the thrust.
+  - It trains, so N6's stability lesson applies: clamp the loop's load into the envelope and the stall
+    margin, and zero-init the γ* head at level-trim of the anchor path.
+- **Alternatives, second choice:**
+  - Closed-loop re-prediction: re-run the network on the rollout's own state every few segments. It is the
+    closest to "learn to correct", at the highest cost and risk (compounding error; DAgger, Ross et al.
+    2011, not in the collected literature).
+  - The vertical procedure penalty (`procedure_loss_vertical_weight`). It teaches the procedure
+    legitimately but leaves the open-loop integrator in place. The 2026-09-05 penalty results found a
+    penalty pushed the vectored mid-path worse (+581 m).
 
 ## 7.1 Smoke run (M2) — the chain works; its numbers are NOT results
 
