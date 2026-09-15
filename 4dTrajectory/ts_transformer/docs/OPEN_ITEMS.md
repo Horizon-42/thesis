@@ -52,7 +52,12 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
 
   Not adopted. The same-code δ twins differ by only 30 m of pooled ADE, against the stored pair's 125 m, so the
   control path's seed line needs re-measuring on converged pairs.
-- **N6 — the speed command, BUILT and reviewed on `sf-n6`** (design §12). The head predicts a target airspeed
+- **N6 — the speed command: RAN, FAILED — unstable in training** (design §12.9).
+  - The first arm diverged from epoch 26: pre-clip control-head gradients 1e7–1e10, from zoom climbs the speed
+    loop hides until the T_max clamp binds.
+  - Pooled ADE 2335 vs 1325 m against the same-code twin. The second seed was stopped before training.
+  - Not adopted. The next design (bounded loop authority / a vertical loop / damped n_x) is the user's call.
+  - The original entry: BUILT and reviewed on `sf-n6` (design §12). The head predicts a target airspeed
   relative to the anchor's, flown by an 8 s speed loop through the specific-force clamp: the invariance N3 showed,
   plus the restoring force whose absence is the FDE veto's mechanism. The reviewer measured each law's teacher flown
   open-loop (300 KRDU val flights): ADE 375 m against 2606 (n_x) and 2700 (δ). §12.6's condition is met: N6 is

@@ -4,6 +4,24 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-15 — ts_transformer: N6 ran and FAILED (the speed loop is unstable in training); N3/N4 final
+
+- **N3 final** (both seeds against same-code twins):
+  - the specific force collapses the per-class n_x bias to the truth's own spread (0.0042 / 0.0044 vs
+    0.0125 / 0.0118 g);
+  - but the heavy − 737 speed gap grows, and straight-in FDE p50 is +240 / +222 m — the veto trips;
+  - not adopted.
+- **N4 final:** handing the δ head T_max/W and the stall speed moves its class bias only 0.0125 → 0.0119 /
+  0.0118 → 0.0105 g. The class structure is the parameterisation's.
+- **N6 ran and failed:**
+  - the speed-command arm diverged from epoch 26 (pre-clip gradient norm 1e7–1e10) and early-stopped with its
+    epoch-18 weights: pooled ADE 2335 vs 1325 m;
+  - its records show zoom climbs, which the loop hides until the thrust clamp binds (design §12.9);
+  - the second seed was stopped before training;
+  - not adopted, and the next design goes back to the user.
+- **The stored B1 twins drifted** because of `c544db0` (review A-3, no config field).
+- **A converged same-code δ pair differs by only 30 m of pooled ADE.**
+
 ### 2026-09-15 — ts_transformer: a third longitudinal contract, the speed command (N6, branch `sf-n6`)
 
 **Why.** N3 (provisional, design §7.2) passed its first gate on both seeds: the per-class n_x bias collapsed to

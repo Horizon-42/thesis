@@ -19,7 +19,7 @@ the literature (36 sources) and the measurements behind the choice are in
 | N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **ran** 2026-09-15 00:18–02:33 UTC at `47b4b40`, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`, **published** (KRDU picker, group `sf_n3`). **Final, both seeds against same-code twins (§7.3):** gate 1 passes (0.0042 / 0.0044 vs 0.0125 / 0.0118 g), gate 2 fails, the straight-in FDE veto trips (+240 / +222 m). Pooled ADE −57 / −73 m. Not adopted; the evidence for N6 | §7.2, §7.3 |
 | N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | built 2026-09-15 on branch `sf-n4` (`608f14a`, review §11.5). **Running** since 2026-09-15 ~02:40 UTC from the `specific-force` worktree fast-forwarded to `f1b19c5`: campaign `4dTrajectory/outputs/KRDU/experiments/sf_n4`, log `…/experiments/sf_n4.log`, 4 arms (twins first). **Ran** 02:40–06:01 UTC, all four arms `completed` at `f1b19c5`. **Final (§11.7): the alternative hypothesis is rejected.** Ratios move the δ head's class bias only 0.0125 → 0.0119 and 0.0118 → 0.0105 g (N3: 0.0042 / 0.0044); `ratios` not adopted. **Published** (KRDU picker, group `sf_n4`, 4 categories; validator: picker loads) | §11.7 |
 | N5 | pooled five-airport arm | not started; only if the mechanism holds on all gates (§11.4) — N3's provisional reading does not | — |
-| N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | built and reviewed 2026-09-15 on branch `sf-n6` (`94f822e`; review §12.8). §12.6's condition met (§7.3). **Running** since 06:01 UTC: the queue script fast-forwarded the runner worktree to `eaf409a` and launched campaign `4dTrajectory/outputs/KRDU/experiments/sf_n6` (log `…/experiments/sf_n6.log`) | §12 |
+| N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | built and reviewed 2026-09-15 on branch `sf-n6` (`94f822e`; review §12.8). Ran 06:01 UTC at `eaf409a`. **FAILED: unstable in training** (§12.9). Arm 1 diverged from epoch 26 (pre-clip control-head gradient norm 1e7–1e10) and early-stopped at 38 (best 18): pooled ADE 2335 vs 1325 m. Seed 2024 stopped at dataset build (only `config.json`). Not adopted; the next design is the user's call (§12.9) | §12.9 |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
 the user merges. Every code milestone gets a subagent review before its commit
@@ -951,3 +951,59 @@ binds at 0.2 % / 1.3 % of segment ends (above the maximum / below the floor). Th
 - **N4:** tests for the anchor-actuator clip and the saturation labels.
 
 After the fixes: δ and n_x are still bit-identical to `e959bc0`. ts + aerodynamic_model: 1323 passed.
+
+### 12.9 N6 result — the speed loop as built is unstable in training (2026-09-15)
+
+**Ran:** campaign `4dTrajectory/outputs/KRDU/experiments/sf_n6`, launched 06:01 UTC by the queue script from the
+runner worktree at `eaf409a`.
+- `N6_speed_command` (seed 1337) trained normally to epoch ~18: selection ADE 6309 → 2430 m, a curve close to
+  the δ twin's.
+- From epoch **26** the control head's PRE-CLIP gradient norm jumped from ~1e3 to **1e7–1e10**.
+  - The global clip (20) kept the numbers finite, but the updates were dominated by those batches.
+  - Selection ADE degraded to >4000 m, and the plateau scheduler halved the LR twice.
+  - Early stop at epoch 38; the checkpoint is epoch 18's.
+- `N6_speed_command_s2024` was stopped during its dataset build, so no GPU hour went to a second seed of the same
+  instability. Its directory holds only `config.json`; no manifest was written.
+
+**The arm against its same-code twin** (`N4_twin`, N3's instrument):
+
+| KRDU val, 1404 flights | N6_speed_command | N4_twin |
+|---|---|---|
+| ADE pooled / straight-in / vectored (m) | **2335** / 667 / **5328** | 1325 / 444 / 2880 |
+| FDE p50 pooled / straight-in (m) | 1697 / 948 | 873 / 647 |
+| duration MAE pooled (s) | 35.3 | 25.5 |
+| paired ADE, arm better | 32.4 % (median +196 m) | — |
+| per-class n_x bias range (g) | 0.0117 | 0.0125 |
+| heavy − B737 speed bias (m/s) | +3.10 | +5.16 |
+| flyability Δ vs observed: fully | −0.40 | −0.98 |
+
+**What failed — the zoom climb** (read off the arm's own records):
+- On the flights that fail, the head commands a load factor a little over 1 (1.08–1.17) at high speed
+  (~120 m/s), around segment 12, while lowering its speed command.
+- The aircraft pitches up to 30–45°. The speed loop drives the thrust to T_max to hold the target, cannot, and
+  the speed bleeds from ~117 to 26–31 m/s. The aircraft stalls and falls (γ −24°), recovers, and on some flights
+  repeats the cycle.
+- Across the three laws' predictions:
+  - flights whose path angle exceeds +10° somewhere: δ 28.7 %, n_x 28.3 %, speed-command **45.1 %**;
+  - only the speed-command run's gradients exploded.
+- Dipping below the 1-g sea-level stall speed is NOT specific to N6. δ does it on 99.6 % of flights, n_x on
+  53.6 %, speed-command on 39.3 %: the clean polar's known stall term.
+
+**Reading (not measured further):** the loop hides the energy cost of a pitch-up.
+- Under δ or n_x, a load factor above cos γ costs speed at once, and the velocity term prices it.
+- Under the loop, the thrust holds the speed, so the loss sees nothing until the T_max clamp binds. Then the
+  speed collapses inside one segment: a cliff in the loss surface.
+- Deep in the zoom, the RHS's 1/V and 1/cos γ terms (the γ and ψ rows) multiply the gradients, which is where
+  1e10 comes from.
+
+**Not adopted.** The next design needs a decision, so it goes back to the user. Candidates, none built:
+1. **Bound the loop's authority:** clip the loop's n_x to the specific-force box, so the thrust demand is the n_x
+   law's where the loop would ask for more. It keeps the restoring force for small errors. It does NOT remove the
+   masking below the clip.
+2. **Close the vertical channel too:** command a flight-path angle (or a height) instead of the load factor, so a
+   zoom cannot be commanded. That is an autopilot-mode parameterisation, and it overlaps the plan path's guidance.
+3. **Damp n_x instead of replacing it:** keep the n_x head and add a fixed feedback `−(V − V_ref)/(g·τ)` about a
+   reference speed. This is option 1's physics seen from the other side, and it needs a V_ref that is not the
+   future.
+
+**N5 (pooled) is not warranted.** No law cleared all of N3's gates.
