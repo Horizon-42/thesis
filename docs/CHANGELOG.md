@@ -4,6 +4,28 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-15 — ts_transformer: the final-descent split diagnosed — the vertical channel is open loop; δ's straight-in FDE edge is a stall-bound dive
+
+Read-only diagnosis on the four same-code runs (N3 and `N4_twin`, both seeds; specific-force design §7.5).
+- **The truth never nears the model's stall boundary** (~0.6 Cl_max on the final descent). Rollout samples
+  past it are 16–21 m/s slower than the truth.
+- **Specific force:**
+  - the error is a tail (32 / 45 % of straight-ins), with the n_x command at the teacher and the energy
+    right;
+  - the vertical-load command sits +0.004 above the truth. Integrated twice open loop, it predicts the
+    height error at 5 km with Spearman +0.76 / +0.82;
+  - under SF, `Ė = V·n_x`, so the height comes out of speed: the tail ends ~95 m high, ~8 m/s slow and
+    1.0–1.1 km behind.
+- **Thrust fraction:**
+  - its load bias is 2–6 × larger, and 63 / 68 % of its flights reach the stall boundary;
+  - the lift cap dives them. They end ~100 m low and on time, which is where δ's straight-in FDE edge
+    comes from;
+  - its other flights are worse than SF's, and it ends with the larger |vertical|.
+- **A straight-in FDE is 60–77 % along-track and 1–2 % vertical** of Σ FDE², so the N3 veto rewards a
+  compensating error.
+- **Proposed, not built:** N7, an inference-time glidepath hook on the specific-force contract. There the
+  vertical law is energy-neutral by construction, the third law the 2026-09-06 nominal-law hook lacked.
+
 ### 2026-09-15 — ts_transformer: N6 ran and FAILED (the speed loop is unstable in training); N3/N4 final
 
 - **N3 final** (both seeds against same-code twins):

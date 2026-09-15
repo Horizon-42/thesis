@@ -20,6 +20,8 @@ the literature (36 sources) and the measurements behind the choice are in
 | N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | built 2026-09-15 on branch `sf-n4` (`608f14a`, review §11.5). **Running** since 2026-09-15 ~02:40 UTC from the `specific-force` worktree fast-forwarded to `f1b19c5`: campaign `4dTrajectory/outputs/KRDU/experiments/sf_n4`, log `…/experiments/sf_n4.log`, 4 arms (twins first). **Ran** 02:40–06:01 UTC, all four arms `completed` at `f1b19c5`. **Final (§11.7): the alternative hypothesis is rejected.** Ratios move the δ head's class bias only 0.0125 → 0.0119 and 0.0118 → 0.0105 g (N3: 0.0042 / 0.0044); `ratios` not adopted. **Published** (KRDU picker, group `sf_n4`, 4 categories; validator: picker loads) | §11.7 |
 | N5 | pooled five-airport arm | not started; only if the mechanism holds on all gates (§11.4) — N3's provisional reading does not | — |
 | N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | built and reviewed 2026-09-15 on branch `sf-n6` (`94f822e`; review §12.8). Ran 06:01 UTC at `eaf409a`. **FAILED: unstable in training** (§12.9). Arm 1 diverged from epoch 26 (pre-clip control-head gradient norm 1e7–1e10) and early-stopped at 38 (best 18): pooled ADE 2335 vs 1325 m. Seed 2024 stopped at dataset build (only `config.json`). Not adopted; the next design is the user's call (§12.9) | §12.9 |
+| F | the final-descent split, diagnosed (the user: "开始排查") | **done** 2026-09-15, read-only on the four same-code runs. The truth flies at ~0.6 Cl_max; the rollouts reach the stall boundary by losing speed. SF's split is its vertical-load command integrated open loop: the twice-integrated command bias predicts the height error at 5 km with Spearman +0.76 / +0.82, and the energy is right. δ has the same open channel, worse; its straight-in FDE edge is a stall-bound dive that ends ~100 m low and on time. A straight-in FDE is 60–77 % along-track, 1–2 % vertical | §7.5 |
+| N7 | an inference-time glidepath hook on the specific-force contract (the vertical law SF makes energy-neutral) | **proposed, not built**: the user's call (§7.5.6) | §7.5.6 |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
 the user merges. Every code milestone gets a subagent review before its commit
@@ -475,6 +477,141 @@ Two measurements taken after N6, both against the same-code twins (both seeds).
     the terminal terms;
   - whether the rollout's final seconds are weighted differently under the two laws.
 - A longitudinal restoring force (N6) addresses none of this.
+- **Measured in §7.5:** the split is the open-loop vertical channel. δ's straight-in FDE edge is a stall-bound
+  dive, a compensating error.
+
+### 7.5 The final-descent split, diagnosed — the vertical channel is open loop (2026-09-15)
+
+**Instruments.** Session-scratchpad scripts, not kept; the method is stated here so they can be rebuilt.
+- Data: KRDU val straight-in flights (`route_tortuosity < 1.05`; 904, or 898–900 where a band or a >6 km
+  anchor is required) of the four same-code runs, N3 and `N4_twin` × seeds 1337 / 2024.
+- Bands are the truth's remaining horizontal path.
+- Commands are the records' `control_segments`. The truth's realised load and the teacher come from
+  `actual_controls` / `commanded_controls`.
+- **Stall-bound flight:** the rollout spends >10 % of its last 5–1 km at `Cl_req/Cl_max > 0.9` (0.9 is
+  the RHS's stall-drag threshold). Evaluated at the commanded load for §7.5.1 and .3–.5, and at the
+  realised load of the inverted prediction for the band table in .2. The shares agree within 1 point:
+  SF 32 / 45 %, δ 63 / 68 %.
+
+**1. The truth never comes near the model's stall boundary; the rollouts reach it by losing speed.**
+- The truth's `Cl_req/Cl_max`, median over flights:
+  - 0.55 / 0.60 / 0.59 / 0.58 on the 10–5 / 5–3 / 3–1 / 1–0 km bands, about 1.3 V_s. `Cl_max` is the
+    landing-configuration value (`aircraft.aero_params`: 2.7 for the 737 class, 3.0 for the A320
+    family).
+  - 2.2 / 1.1 / 0.8 / 0.4 % of flights ever exceed 0.9 on a band.
+- Rollout samples past the boundary (ratio > 1; seed 1337):
+  - δ has 8 / 15 / 12 / 8 % of its samples there, SF 3 / 6 / 4 / 3 %.
+  - They are **16–21 m/s slower than the truth** at a commanded load of only 1.00–1.015.
+- **A stall in these rollouts is the end of a speed collapse, not the head asking for too much lift.**
+
+**2. Under SF the error is a tail with the energy right.** The table gives per-flight band means, median
+over flights, as Δ = prediction − truth. Command Δ is the model's segment command minus the teacher's.
+
+| SF (N3), seed 1337 / 2024 | stall-bound (32 / 45 %) | the rest |
+|---|---|---|
+| 10–5 km: Δγ, Δh, ΔV | +0.80 / +0.74°, +24 / +8 m, −3.1 / −0.6 m/s | +0.04 / −0.08°, −5 / −10 m, +0.1 / +0.7 m/s |
+| 5–3 km: Δγ, Δh, ΔV | +0.74 / +1.37°, **+87 / +75 m, −10.9 / −9.9 m/s** | +0.29 / +0.59°, +3 / −3 m, −0.7 / −0.2 m/s |
+| 3–1 km: Δγ, Δh, ΔV | −0.83 / −0.97°, +106 / +100 m, −10.9 / −11.9 m/s | +0.03 / +0.43°, +10 / +23 m, −1.2 / −2.7 m/s |
+| 1–0 km: Δh, ΔV | **+97 / +95 m, −8.8 / −8.1 m/s** | +5 / +35 m, −0.9 / −3.3 m/s |
+| ΔE = Δh + V·ΔV/g, 10–5 / 5–3 / 3–1 / 1–0 km | +2 / +4 / +21 / +32 m (1337) | −0 / −7 / −4 / −3 m |
+| command Δ n_x, 5–3 km | −0.0022 / −0.0008 | −0.0000 / −0.0004 |
+| command Δ load, 10–5 / 5–3 km | **+0.0036 / +0.0029** (1337), +0.0043 / +0.0036 (2024) | +0.0017 / +0.0010, +0.0020 / +0.0026 |
+
+- 55–68 % of SF's straight-in flights fly the final descent close to the truth.
+- In the tail the n_x command matches the teacher and the total energy is right. The path goes 0.7–1.4°
+  shallow from 10 km in and takes the height out of the speed.
+- At ~10 m/s slow the rollout reaches the stall boundary. The lift cap then steepens the path (−0.8 /
+  −1.0° on 3–1 km), but too late: the flight ends ~95 m high and ~8 m/s slow.
+
+**3. The path error is the vertical-load command, integrated open loop.**
+- Below the stall boundary the model has `γ̇ = (g/V)(n·cos φ − cos γ)`. Lift is whatever the commanded
+  load asks for, at any speed.
+  - So no V² in the lift couples speed back into the path.
+  - And no glidepath term couples the path back into the command: the head is open loop.
+- A load bias δn therefore grows a height error of about `½·g·δn·t²`. At 0.004 g for 100 s that is
+  ~200 m.
+- Measured on SF (flights whose forecast starts >6 km out): the vertical-load command minus the truth's
+  realised vertical load, integrated twice along the rollout (`Δh_int`), **predicts the rollout's own
+  height error at 5 km with Spearman +0.76 / +0.82**. The group medians:
+  - seed 1337: `Δh_int` 78 m vs a measured 72 m (stall-bound), 8 vs −2 m (the rest);
+  - seed 2024: 61 vs 52 m, and −6 vs −13 m.
+- The stall-bound group's bias over 10–5 km is +0.004, against +0.002 for the rest. That is the resolution
+  of gate 1's class bias (0.004 g). **No open-loop head can be expected to beat it.**
+- The per-sample Δγ correlates only +0.18 / +0.26. The truth's per-row γ is noisy (ADS-B vertical rate);
+  height is the robust integral.
+- **Not a missed glidepath capture:** both groups are already on the glidepath at the anchor (γ −2.95 /
+  −3.06°, seed 1337). 13 % of flights are within 1.5° of level at the anchor, with a stall-bound share of
+  44 / 48 % against 31 / 45 %.
+- **Under SF, `Ė = V·n_x` does not depend on γ.** A shallow path therefore trades speed for height one to
+  one. That is exactly the split §7.4 found.
+
+**4. δ has the same open channel, worse, and a stall-bound dive hides it.**
+- δ's load command sits **+0.006 to +0.021 above the teacher on 10–1 km**, 2–6 × SF's.
+- On 63 / 68 % of flights the rollout reaches the stall boundary on 5–1 km. The back side of the drag
+  curve (§7.4) speeds the collapse.
+- There the lift cap dives it: Δγ −3.7 / −3.9° on the last 3 km. It ends **−98 / −113 m LOW and
+  +8.4 / +9.2 m/s FAST**, with ΔE −35 / −37 m.
+- δ's other flights show the same dive earlier. On 10–5 km they are 0.6–0.8° steeper while commanding
+  +0.012 more load than the teacher, which only a capped lift explains (a reading, not measured per
+  flight). They sit 77–105 m low on 5–1 km.
+
+**5. A straight-in FDE is a timing number.**
+- Method: the final displacement at the true final time, split in the truth's course frame. The truth's
+  endpoint is the record's threshold target; the observed rows stop ~6 s short of it. The prediction is
+  held at its last node, as `geometry/metrics.py` does. The 3D norm reproduces `fde_m` at 0.985–1.008 (p5–p95).
+
+| straight-in, p50, seed 1337 / 2024 | δ (`N4_twin`) | SF (N3) |
+|---|---|---|
+| FDE | 647 / 663 m | 887 / 885 m |
+| along-track (signed) | −294 / −305 m | **−614 / −693 m** |
+| \|vertical\| | **127 / 139 m** | 77 / 90 m |
+| Σ FDE² along / cross / vertical | 0.61 / 0.37 / 0.01, 0.60 / 0.39 / 0.02 | 0.74 / 0.26 / 0.01, 0.77 / 0.22 / 0.01 |
+| stall-bound: FDE, along, vertical | 603 / 629, −320 / −263, −142 / −161 m | **1244 / 1133, −1099 / −1008**, +107 / +101 m |
+| the rest: FDE, along, vertical | 714 / 799, −242 / −413, +4 / −1 m | 667 / 683, −288 / −292, +24 / +60 m |
+| final-time error Δt p50 | +3.1 / +3.0 s | +3.9 / +3.7 s |
+
+- **The vertical component is 1–2 % of Σ FDE² on every run.** Along-track is 60–77 %.
+- The duration head is not the difference: Δt is +3 to +4 s under both laws.
+- **δ's straight-in advantage comes entirely from its stall-bound flights.** The dive puts them back on
+  time.
+  - δ's other flights are WORSE than SF's: 714 / 799 against 667 / 683 m.
+  - SF's gap is its tail's along-track lag of 1.0–1.1 km.
+- **δ ends with the larger height error** (|vertical| 127 / 139 against 77 / 90 m).
+- **So N3's straight-in FDE veto measures δ's compensating error as much as SF's defect.**
+  - SF's energy is right within ±32 m equivalent in every band, both groups, both seeds. δ's is −30 to
+    −47 m on the last 3 km in both groups, and −45 / −51 m on 5–3 km for its other flights.
+  - What both lack is a closed vertical loop.
+  - A veto on a straight-in FDE should be read with this split, or a compensating error passes it.
+
+**6. The next step (a proposal — the user's call, not built).**
+- **The vertical channel is the bottleneck for both laws** (§7.5.3). The longitudinal normalisation did what
+  it was for (gate 1; the energy is right).
+- **Under SF a vertical law is energy-neutral by construction.** It moves height into speed and never
+  creates or destroys energy.
+- That is the third law the 2026-09-06 nominal-law hook lacked under δ
+  (`docs/2026-09-06_control_hooks_results.zh.md`):
+  - v1 passed the thrust through. The speed fell 88 → 58 m/s and the rollout landed 584 m short.
+  - v2 had to integrate a parallel no-hook rollout to hold its speed.
+  - That campaign also found that a hook belongs at inference: training through one made the network lazy,
+    measured on v1 and v2.
+  - The code is archived in `archive/nominal_law_hook_2026_09/`, and `nominal-residual` is refused for new
+    runs.
+- **Proposed N7: an inference-time glidepath hook on the specific-force contract.**
+  - On the barrier's on-final gate, replace the vertical-load command with a path-angle law toward the
+    published glidepath (the record's LTP, TCH and angle).
+  - Re-coordinate the load for bank, and leave n_x alone.
+  - No retrain: predict-only arms on N3's two checkpoints, with the δ twins under the same hook as the
+    control, where the energy is expected to show again.
+  - Gates:
+    - the stall-bound group's along-track lag;
+    - straight-in FDE p50 against the twins, read with its split;
+    - |vertical| at the end.
+  - Not N6's failure mode: nothing trains through the hook, and it acts only on the gate.
+- **Upper bound, an estimate:** if SF's stall-bound flights did as well as SF's own other flights (FDE p50
+  667 / 683 m), SF's straight-in FDE p50 would be near 680 m, against δ's 647 / 663.
+- **The alternative on the training side** is the existing vertical procedure penalty
+  (`procedure_loss_vertical_weight`). The 2026-09-05 penalty results found that a penalty moves the
+  objective and pushed the vectored mid-path worse (+581 m). It is second choice.
 
 ## 7.1 Smoke run (M2) — the chain works; its numbers are NOT results
 
@@ -1059,4 +1196,4 @@ runner worktree at `eaf409a`.
 
 **And the premise was wrong (§7.4).** N3's FDE veto is a final-descent height/speed split, not a missing
 restoring force. None of the three candidates above is the next step; the final descent's vertical profile
-under the n_x law is.
+under the n_x law is. Diagnosed in §7.5: the vertical channel is open loop, and the proposal is N7 (§7.5.6).

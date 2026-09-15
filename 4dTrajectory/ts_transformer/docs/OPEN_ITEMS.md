@@ -6,7 +6,7 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
-## Specific-force control parameterisation — BUILT, NOT MEASURED (2026-09-14, branch `specific-force-control`)
+## Specific-force control parameterisation — MEASURED, NOT ADOPTED; the final descent diagnosed (2026-09-15, branch `specific-force-control`)
 
 Design `docs/2026-09-14_specific_force_control_design.md`; literature
 `docs/literature/control_normalization/` (repo root).
@@ -24,7 +24,7 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
 - **M1** (`8ce4568`) and **M2** (the speed floor, CLI, docs, smoke) are built and reviewed. Defaults are
   bit-identical, and no stored run is renamed or refused.
 - **N3 — the measurement:** KRDU `B1_point_matched` as `custom` + specific-force, seeds 1337/2024
-  (`docs/experiments/sf_n3_arms.json`). **RUNNING** since 2026-09-15 00:18 UTC from the `specific-force` worktree
+  (`docs/experiments/sf_n3_arms.json`). **Ran** 2026-09-15 00:18–02:33 UTC from the `specific-force` worktree
   at `47b4b40`; campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`.
   - Gates: the per-class n_x bias range falls toward 0.0045 g; the heavy − 737 speed gap closes.
   - Veto: pooled ADE within ~125 m of the base; the straight-in FDE veto.
@@ -57,8 +57,24 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
   - The two laws match the truth equally to 5 km out.
   - On the last 5 km the n_x run ends 36–54 m HIGH and 4.4–6.4 m/s SLOW with the total energy right. δ ends
     ~30 m low at the right speed.
-  - **Next: why the n_x head flies the final descent shallower** (the load-factor channel). A longitudinal law
-    change (N6) does not address it.
+  - Why the n_x head flies the final descent shallower (the load-factor channel): diagnosed below. A
+    longitudinal law change (N6) does not address it.
+- **The final-descent split, diagnosed (design §7.5, read-only, the four same-code runs):**
+  - The truth flies the final descent at ~0.6 Cl_max (about 1.3 V_s). Rollouts reach the stall boundary only
+    by losing 16–21 m/s.
+  - SF's error is a tail (32 / 45 % of straight-ins) with the energy right. Its vertical-load command sits
+    +0.004 above the truth. Integrated twice open loop, that bias predicts the height error at 5 km (Spearman
+    +0.76 / +0.82). Height comes out of speed; the tail ends ~95 m high, ~8 m/s slow, 1.0–1.1 km behind.
+  - δ's load bias is 2–6 × larger. Its rollouts reach the stall boundary on 63 / 68 % of flights, and the lift
+    cap dives them: they end ~100 m low and ON TIME. That is its straight-in FDE edge. δ's other flights have a
+    worse FDE than SF's (714 / 799 vs 667 / 683 m), and δ ends with the larger |vertical| (127 / 139 vs
+    77 / 90 m).
+  - A straight-in FDE is 60–77 % along-track and 1–2 % vertical (of Σ FDE²), so the N3 veto rewards δ's
+    compensating error. Read it with its along/vertical split.
+- **N7 — proposed, not built (the user's call; design §7.5.6):** an inference-time glidepath hook on the
+  specific-force contract. Under SF, `Ė = V·n_x` does not depend on γ, so a vertical law is energy-neutral by
+  construction: the third law the 2026-09-06 nominal-law hook lacked under δ. Predict-only arms on N3's two
+  checkpoints with the δ twins as the control; no retrain.
 - **N6 — the speed command: RAN, FAILED — unstable in training** (design §12.9).
   - The first arm diverged from epoch 26: pre-clip control-head gradients 1e7–1e10, from zoom climbs the speed
     loop hides until the T_max clamp binds.
