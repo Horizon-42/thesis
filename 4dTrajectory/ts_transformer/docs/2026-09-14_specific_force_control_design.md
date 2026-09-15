@@ -18,7 +18,8 @@ the literature (36 sources) and the measurements behind the choice are in
 | M2 | speed-floor hook under the new law, CLI flag, name/load census, docs (CLAUDE.md, CHANGELOG, OPEN_ITEMS), smoke train → predict → evaluate on real data | **done** 2026-09-14, review §10 | the commit after `8ce4568` |
 | N3 | KRDU arms (§7): `B1_point_matched` recipe, thrust-fraction vs specific-force, 2 seeds each | **ran** 2026-09-15 00:18–02:33 UTC at `47b4b40`, campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`. **Provisional reading** (stored twins, which drifted): gate 1 passes on both seeds, gate 2 fails, the straight-in FDE veto trips (§7.2). Binding reading waits for `N4_twin` | §7.2 |
 | N4 | the condition vector as ratios (own axis, §11): the alternative-hypothesis control for N3; plus the same-code δ twins N3 and N4 are both read against (§11.6: the stored twins drifted) | built 2026-09-15 on branch `sf-n4` (`608f14a`, review §11.5). **Running** since 2026-09-15 ~02:40 UTC from the `specific-force` worktree fast-forwarded to `f1b19c5`: campaign `4dTrajectory/outputs/KRDU/experiments/sf_n4`, log `…/experiments/sf_n4.log`, 4 arms (twins first) | results → §11.7 |
-| N5 | pooled five-airport arm | not started; decided after N3 (§11.4) | — |
+| N5 | pooled five-airport arm | not started; only if the mechanism holds on all gates (§11.4) — N3's provisional reading does not | — |
+| N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | **planned**, conditional on the binding N3 reading (§12.6); teacher distribution measured (§12.3) | §12 |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
 the user merges. Every code milestone gets a subagent review before its commit
@@ -668,3 +669,105 @@ therefore re-trains the twins at this code, and N3 and N4 are both read against 
 - **It is a data-side contract, not a config field.** A retrain of any pre-09-09 config picks it up with
   nothing in its config, name or `history.json` to show it — which is exactly how the twins stopped being
   twins.
+
+## 12. N6 — a speed command (PLANNED; built only if the binding N3 reading confirms §7.2)
+
+### 12.1 Why
+
+N3 (provisional, §7.2) splits the question in two.
+- **The specific force is the right invariant.** Its per-class bias collapses to the truth's own class
+  spread on both seeds.
+- **The law has lost the restoring force.** Under δ, drag gives `∂V̇/∂V = −(∂D/∂V)/m`. Under n_x it gives
+  `0`, so a command bias integrates. That is the late-final speed deficit (−4.4 m/s in the last 5 km) and
+  the straight-in FDE veto.
+- The fix is not to take the drag back; its strength differs per airframe, which is the problem N3
+  removed. The fix is a restoring force that is the SAME on every airframe.
+
+The aviation answer is the autothrottle's SPEED mode:
+- The command is a target airspeed.
+- A speed loop turns it into thrust through the airframe's own weight and drag.
+
+That is pattern P1 of the literature assessment (a platform-free command plus a per-platform inverse model):
+the speed means the same on every airframe, and the airframe enters only through the thrust clamp, the stall
+clamp and the exported thrust, exactly as under n_x. It is also what the plan path's guidance already does
+(a speed schedule flown through the speed floor's thrust inversion).
+
+### 12.2 The law (first-order-lag only)
+
+```
+controls (Δv, φ, n)   Δv = target airspeed − the anchor's airspeed V₀   [m/s]
+actuator a_Δ lags Δv with τ_T (unchanged)
+inside EVERY RK4 stage:
+    n_x = sin γ + (V₀ + a_Δ − V) / (g · τ_V)
+    T   = clamp(W · n_x + D, T_lo, T_max)            (the specific-force clamp, unchanged)
+⇒   V̇ = (V₀ + a_Δ − V) / τ_V                         wherever T is not clamped
+```
+
+- **`∂V̇/∂V = −1/τ_V` on every airframe.** Where the clamp binds, it is the δ law at its bound, as under n_x.
+  At idle, the deceleration is the airframe's own drag, which is what a real idle descent is.
+- **τ_V is a new field**, `control_speed_time_constant_s`, default 8 s. Autothrottle speed loops are
+  5–10 s, and the teacher barely moves with it (§12.3). RK4 at h = 0.5 s is far inside its limit.
+- **The command is RELATIVE to the anchor speed**, so the neutral `Δv = 0` is "hold the speed you have".
+  An untrained head then flies no transient on any airframe. An absolute neutral (one speed for all)
+  would drive every flight toward it from step 0.
+- Implemented as a third value of `control_thrust_parameterization`: `speed-command`.
+  - It is a third `LagControlLaw`, whose context also carries V₀ and τ_V.
+  - The specific-force law's thrust helper is reused.
+  - The δ and n_x laws stay bit-identical; tested against their pinned goldens.
+
+### 12.3 Measured: where the teacher lives (KRDU val, 1404 × 32, the same tracks as §2.4)
+
+Inverse on the observed track: `a_Δ = V − V₀ + τ_V·V̇`, `command = a_Δ + τ_T·ȧ_Δ`. Averaged over each of the
+32 uniform segments. Script: session scratchpad `speed_command_teacher.py`.
+
+| τ_V | command − V₀: p0.1 / p1 / p5 / p50 / p95 / p99 / p99.9 (m/s) | segment-to-segment step p50 / p99 |
+|---|---|---|
+| 5 s | −84.8 / −73.9 / −60.1 / −16.2 / −0.3 / +3.2 / +15.2 | 1.2 / 9.2 |
+| 8 s | −85.1 / −74.1 / −60.4 / −16.5 / −0.3 / +3.6 / +15.2 | 1.5 / 10.0 |
+| 12 s | −86.0 / −74.6 / −60.7 / −17.0 / −0.3 / +4.1 / +15.3 | 1.9 / 11.6 |
+
+- **Box: Δv ∈ [−90, +20] m/s**, half width 55, neutral 0. It cuts none of the 0.1–99.9 % range.
+  - The absolute target lives in 52–150 m/s. The box is a search space, as the others are; the stall
+    floor is the speed floor's job.
+- **The imitation weight does not transfer from δ.** A speed command is a target, not a rate. N6 keeps
+  64 and says so, like the per-airport rule for that weight.
+
+### 12.4 What else changes (the M1/M2 checklist, applied to the third law)
+
+- **Inverse and teacher:** `actual_controls` / `commanded_controls` under `speed-command` need V₀, which is
+  the anchor row of the window. `reference_controls` reads the configured law.
+- **Context:** the initial actuator is the inverted `a_Δ` at the anchor, clipped to the box.
+- **Speed floor:**
+  - The demand becomes a speed. Holding `V(hold) ≥ V_floor` under the loop is
+    `V₀ + Δv ≥ (V_floor − V·e^{−dt/τ_V})/(1 − e^{−dt/τ_V})`, with the actuator's lag credited as before.
+  - Saturation means the engine's `(T_max − D)/W`.
+  - Refused in the first milestone, like M1 did.
+- **Barrier and trombone:** pass column 0 through (unchanged, already tested under n_x).
+- **Export:** each segment's record thrust is the law's thrust at its start state, and each segment
+  carries `speed_command` (absolute, m/s). `source.controlThrustParameterization` = `speed-command`.
+- **Naming, CLI, recipes:**
+  - Named `first-order-lag+speed-command` / slug `-sc`.
+  - Every recipe pins thrust-fraction; `control_recipe()` names the law off the default.
+  - `τ_V` is refused off its default unless the law is `speed-command`.
+- **Tests:**
+  - Under the loop, `V̇ = (V₀ + a_Δ − V)/τ_V` exactly where the clamp does not bind.
+  - At the clamp, the law equals δ's at its bound.
+  - Round trip through the inverse.
+  - The neutral holds the anchor speed on three airframes.
+  - Export, naming, config, and the two old laws' goldens.
+
+### 12.5 The arms (after the build and its review)
+
+`N6_speed_command` / `_s2024` are `B1_point_matched` with only the law moved. They are read against
+`N4_twin` / `_s2024` with N3's instrument.
+- **Gates:** the per-class n_x bias range (N3's, kept); the heavy − 737 speed gap closing (N3 failed it);
+  the straight-in FDE back inside the twins' seed spread (N3 failed it).
+- **Veto:** pooled ADE worse than the twin by more than ~125 m.
+- **Reading:** if N6 passes all three where N3 passed one, the invariant needed the restoring force.
+
+### 12.6 Order and condition
+
+1. Wait for `N4_twin` (the first `sf_n4` arm).
+2. If its straight-in FDE p50 stays below N3's 885–887 m by more than the seed spread (the stored twins
+   582 / 659), the veto is confirmed and N6 is built on `sf-n4`, reviewed, and queued after `sf_n4`.
+3. If not, N3's FDE penalty was the stored twins' drift, and N6 is dropped.
