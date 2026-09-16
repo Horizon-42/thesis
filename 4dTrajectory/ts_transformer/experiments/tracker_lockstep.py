@@ -36,21 +36,32 @@ Per flight from the fixed anchor ``a0`` (`default_anchor`), one ask at a time fo
   (`extractors.ground_speeds`) — the definitions the label reads. Under a head, both come from the
   head's order at the pose (its arrival time clamped at `labels.T_MIN_S`, as the guidance flies it);
 * the forecast is flown for Δ, unless it crosses the threshold ON THE FINAL inside Δ
-  (`cut_at_threshold_crossing`: the flight ends there) or ends within Δ plus the checkpoint's
-  `random_train_anchor_min_future_s` — the next ask would hand it an arrival time below every
-  anchor it trained at, so this forecast is kept whole (cut at its crossing) instead; a flight
-  still flying at ``--cap-factor`` × its FIRST ask's arrival time (the truth duration under the
-  truth, the head's own under a head — so a head's run reads no future) is ended and counted capped.
-  An ask whose arrival time is below that floor anyway is counted per flight (``asks_below_floor``).
+  (`cut_at_threshold_crossing`: the flight ends there, ``crossed``). A flight ends ONLY by crossing or
+  at its HORIZON, ``T₀ + max(30 s, 0.1·T₀)`` from ``a0`` (`plan_oracle.closing_horizon_s`, T₀ its
+  FIRST ask's arrival time — the truth duration under the truth, the head's own under a head, so a
+  head's run reads no future), cut there (``horizon``) — the budget the rule guidance's own rollout
+  is flown to, so an on-time or slightly late arrival is scored as the guidance's is (review
+  2026-09-16: ending at the arrival time left "established" to the sign of a rounding error on an
+  on-time flight). Every ask hands a CTA of at least ``max(random_train_anchor_min_future_s, Δ)`` —
+  an anchor the checkpoint trained at, and one whole step, so every leg is a whole step and the
+  cohort stays in lockstep; an ask whose arrival time had to be raised to it is counted per flight
+  (``asks_below_floor``). A checkpoint without a given CTA whose forecast is shorter than one step
+  flies it whole and ends (``forecast-end``).
 
 Variants (``--variants``), each scored per stratum (`strata_fixed_at_anchor` at ``a0``) and, with
 ``--write-records``, its own predict-shaped record directory under ``records/<label>/<variant>/``:
 ``receding`` (the plan as the checkpoint is conditioned), ``receding-no-plan`` (the ABSENT token on
 the same weights — what the plan buys; refused for a checkpoint without a plan token) and
-``one-shot`` (one ask at ``a0``, kept whole to its crossing on the final — what re-asking buys,
-over the same span the receding records are cut to). `python -m evaluation`
-(flyability, established) and `run_ts.py lead_time_error` read the records unchanged; their
-summaries carry a ``lockstep`` block, and the publisher refuses them without a category variant.
+``one-shot`` (one ask at ``a0``, flown to its last whole step or its crossing, and closed from there
+by the same asks as ``receding`` — what re-asking buys over the plan's own duration).
+
+Each flight row carries the plan oracle's REFERENCE reading of the whole record
+(`plan_oracle.reference_verdicts`: fully flyable, established = crossed the threshold on the final,
+the corridor / glidepath / floor verdicts) and its difficulty covariates, so a gate that compares
+the tracker with the rule guidance flying the same plan (`run_ts.py two_tier_gates`, design §10.7)
+reads both with ONE definition, flight by flight. `run_ts.py lead_time_error` reads the records
+unchanged; their summaries carry a ``lockstep`` block, and the publisher refuses them without a
+category variant.
 """
 
 from __future__ import annotations
@@ -79,14 +90,15 @@ from ts_transformer.config import (
     PREDICTION_PLAN,
     default_anchor,
 )
-from ts_transformer.data.anchor_grid import strata_fixed_at_anchor
-from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED
+from ts_transformer.data.anchor_grid import difficulty_at_anchor
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks
 from ts_transformer.data.channels import IDX
 from ts_transformer.data.dataset import FlightSeries, truth_duration_s
 from ts_transformer.experiments.anytime_curve import FORBIDDEN_SPLIT, Arm, Grid, cohort_series, load_arm, parse_arms
+from ts_transformer.experiments.plan_oracle import closing_horizon_s, reference_verdicts
 from ts_transformer.experiments.support import REPO_ROOT, forecast_geometry
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
-from ts_transformer.inference.forecast import Forecast, concatenate, cut_at_threshold_crossing, history_batch
+from ts_transformer.inference.forecast import Forecast, concatenate, cut_at_threshold_crossing, cut_rows, history_batch
 from ts_transformer.inference.receding import ROW_TOLERANCE_S, cut_at_lead, displacement_at, rolled_series
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.outputs.control.forecast import forecast_control_batch
@@ -99,7 +111,9 @@ from ts_transformer.outputs.plan.labels import (
 from ts_transformer.outputs.plan.model import prediction_rows
 from ts_transformer.outputs.plan.skeleton import RunwaySkeleton, SkeletonCache
 
-RESULT_SCHEMA = "ts-tracker-lockstep-v1"
+# v2 (2026-09-16): every flight row carries `difficulty` and the plan oracle's `reference`
+# verdicts; every stratum block their shares.
+RESULT_SCHEMA = "ts-tracker-lockstep-v2"
 #: The block each record directory's summary carries — the publisher's
 #: `VARIANT_RECORD_BLOCKS` mirrors this name.
 RECORDS_BLOCK = "lockstep"
@@ -107,24 +121,22 @@ RECORDS_SCHEMA = "ts-lockstep-records-v1"
 RECORDS_DIR = "records"
 INSTRUMENT = "the plan-given lockstep"
 DEFAULT_STEP_S = 30.0
-DEFAULT_CAP_FACTOR = 1.5
 VARIANT_RECEDING = "receding"
 VARIANT_NO_PLAN = "receding-no-plan"
 VARIANT_ONE_SHOT = "one-shot"
 VARIANTS = (VARIANT_RECEDING, VARIANT_NO_PLAN, VARIANT_ONE_SHOT)
 #: How a flight's lockstep ended.
-ENDED_CROSSED = "crossed"          # crossed the threshold on the final inside a step
-ENDED_FORECAST = "forecast-end"    # kept whole: the next ask would fall below the training floor
-ENDED_CAPPED = "capped"            # still flying at the cap
-ENDED_ONE_SHOT = "one-shot"
+ENDED_CROSSED = "crossed"          # crossed the threshold on the final
+ENDED_HORIZON = "horizon"          # still flying at its horizon, cut there
+ENDED_FORECAST = "forecast-end"    # no given CTA and a forecast shorter than one step: flown whole
 LEADS_S = (30.0, 60.0, 120.0, 180.0, 300.0)
+HORIZON_RULE = "T0 + max(30 s, 0.1·T0), T0 = the first ask's arrival time (plan_oracle.closing_horizon_s)"
 
 
 @dataclass(frozen=True)
 class LockstepPlan:
     split: str
     step_s: float
-    cap_factor: float
     variants: tuple[str, ...]
     limit: int
     batch_size: int | None
@@ -137,10 +149,12 @@ class FlightRun:
 
     series: FlightSeries
     skeleton: RunwaySkeleton
-    cap_s: float = math.inf        # set at the first ask, from its arrival time
+    horizon_s: float = math.inf    # set at the first ask, from its arrival time
+    next_ask: int = 0              # the ask index this flight is next asked at
     legs: list[Forecast] = field(default_factory=list)
     asks: int = 0
     asks_below_floor: int = 0
+    cta_raised_max_s: float = 0.0  # the largest amount an ask's arrival time was raised by
     ended: str | None = None
     truncated: bool = False
 
@@ -249,16 +263,23 @@ class HeadPlans:
 
 # ── one ask ────────────────────────────────────────────────────────────────────
 
-def ask_row(run: FlightRun, history: FlightSeries, anchor: int, config, plan_at: AskPlan, *, with_plan: bool) -> dict[str, np.ndarray]:
+def ask_floor_s(config, step_s: float) -> float:
+    """The smallest CTA an ask hands over: an anchor the checkpoint trained at, and one whole step."""
+    return max(float(config.random_train_anchor_min_future_s), float(step_s))
+
+
+def ask_row(run: FlightRun, history: FlightSeries, anchor: int, config, plan_at: AskPlan, *, with_plan: bool,
+            floor_s: float) -> dict[str, np.ndarray]:
     """The dynamics row of one ask: the anchor state of ``history`` and, as the checkpoint reads
-    them, the arrival time and the plan token at that pose."""
+    them, the arrival time (raised to ``floor_s``, `ask_floor_s`) and the plan token at that pose."""
     row = dynamics_arrays(
         history, anchor, parameterization=config.control_thrust_parameterization,
         condition_features=config.control_condition_features,
     )
     if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
-        run.asks_below_floor += int(plan_at.arrival_s < config.random_train_anchor_min_future_s)
-        row["cta_s"] = np.array(plan_at.arrival_s, dtype=np.float64)
+        run.asks_below_floor += int(plan_at.arrival_s < floor_s)
+        run.cta_raised_max_s = max(run.cta_raised_max_s, floor_s - plan_at.arrival_s)
+        row["cta_s"] = np.array(max(plan_at.arrival_s, floor_s), dtype=np.float64)
     if config.plan_conditioning != PLAN_CONDITIONING_OFF:
         e, n, _heading, _speed = pose(history, anchor)
         targets = targets_at(plan_at.operating, plan_at.instruction, e, n, run.skeleton) if with_plan else None
@@ -274,11 +295,13 @@ def fly_variant(arm: Arm, series: list[FlightSeries], variant: str, plan: Lockst
     skeletons = SkeletonCache()
     runs = [FlightRun(series=item, skeleton=skeletons.for_series(item)) for item in series]
     plans = TruthPlans(runs, a0) if head is None else HeadPlans(head, batch_size, device)
+    floor_s = ask_floor_s(config, plan.step_s)
     ask = 0
-    while True:
-        active = [run for run in runs if run.ended is None]
-        if not active:
-            break
+    while any(run.ended is None for run in runs):
+        active = [run for run in runs if run.ended is None and run.next_ask == ask]
+        if not active:          # every flight still flying is inside a one-shot leg
+            ask += 1
+            continue
         anchor = a0 + ask * step_rows
         histories = [
             run.series if ask == 0 else rolled_series(run.series, a0, concatenate(run.legs, a0, 0.0), anchor, config.dt_s)
@@ -287,9 +310,9 @@ def fly_variant(arm: Arm, series: list[FlightSeries], variant: str, plan: Lockst
         asked = plans.at_ask(active, histories, anchor, first=ask == 0)
         if ask == 0:
             for run, plan_at in zip(active, asked, strict=True):
-                run.cap_s = plan.cap_factor * plan_at.arrival_s
+                run.horizon_s = closing_horizon_s(plan_at.arrival_s)
         rows = [
-            ask_row(run, history, anchor, config, plan_at, with_plan=variant != VARIANT_NO_PLAN)
+            ask_row(run, history, anchor, config, plan_at, with_plan=variant != VARIANT_NO_PLAN, floor_s=floor_s)
             for run, history, plan_at in zip(active, histories, asked, strict=True)
         ]
         forecasts: list[Forecast] = []
@@ -300,31 +323,39 @@ def fly_variant(arm: Arm, series: list[FlightSeries], variant: str, plan: Lockst
                 arm.model, histories[start : start + batch_size], config, arm.normalizer, anchor, device,
                 dynamics=dynamics,
             ))
-        # an ask whose forecast leaves less than this after the step is the last: under the truth
-        # the next would hand the checkpoint an arrival time below the training future floor
-        # (under a head the next arrival is a fresh prediction; the same rule ends the flight)
-        last_ask_s = plan.step_s + config.random_train_anchor_min_future_s + ROW_TOLERANCE_S
         for run, history, forecast in zip(active, histories, forecasts, strict=True):
-            run.asks += 1
-            crossed = cut_at_threshold_crossing(forecast, history)
-            if variant == VARIANT_ONE_SHOT:
-                run.legs.append(crossed)
-                run.ended, run.truncated = ENDED_ONE_SHOT, crossed.truncated_at_threshold
-                continue
-            if crossed.truncated_at_threshold and crossed.final_time_s <= plan.step_s + ROW_TOLERANCE_S:
-                run.legs.append(crossed)
-                run.ended, run.truncated = ENDED_CROSSED, True
-            elif forecast.final_time_s <= last_ask_s:
-                run.legs.append(crossed)
-                run.ended, run.truncated = ENDED_FORECAST, crossed.truncated_at_threshold
-            else:
-                run.legs.append(cut_at_lead(forecast, plan.step_s))
-                if run.flown_s >= run.cap_s - ROW_TOLERANCE_S:
-                    run.ended = ENDED_CAPPED
+            steps = (int((forecast.final_time_s + ROW_TOLERANCE_S) // plan.step_s)
+                     if variant == VARIANT_ONE_SHOT and ask == 0 else 1)
+            fly_leg(run, history, forecast, steps=steps, step_s=plan.step_s, ask=ask)
         print(f"    {variant} ask {ask}: {len(active)} flights at anchor {anchor}, "
               f"{sum(1 for run in runs if run.ended is None)} continue", flush=True)
         ask += 1
     return runs
+
+
+def fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, steps: int, step_s: float, ask: int) -> None:
+    """Fly ``steps`` whole steps of this ask's ``forecast`` (a forecast shorter than one step — only
+    without a given CTA — is flown whole and ends the flight), and end the flight where it crosses
+    the threshold on the final or reaches its horizon, whichever comes first. The next ask is
+    ``ask + steps``. ``run.asks`` counts the asks that flew a leg: an ask whose flight's horizon falls
+    before the forecast's first row ends the flight there and flies nothing."""
+    crossed = cut_at_threshold_crossing(forecast, history)
+    remaining_s = run.horizon_s - run.flown_s
+    short = forecast.final_time_s < step_s - ROW_TOLERANCE_S
+    span_s = forecast.final_time_s if short else steps * step_s
+    if crossed.truncated_at_threshold and crossed.final_time_s <= min(span_s, remaining_s) + ROW_TOLERANCE_S:
+        leg, run.ended, run.truncated = crossed, ENDED_CROSSED, True
+    elif remaining_s <= span_s + ROW_TOLERANCE_S:
+        offsets = np.cumsum(forecast.sample_durations_s)
+        rows = int(np.searchsorted(offsets, remaining_s + ROW_TOLERANCE_S, side="right"))
+        leg, run.ended = (cut_rows(forecast, rows) if rows else None), ENDED_HORIZON
+    elif short:
+        leg, run.ended = crossed, ENDED_FORECAST
+    else:
+        leg, run.next_ask = cut_at_lead(forecast, span_s), ask + steps
+    if leg is not None:
+        run.legs.append(leg)
+        run.asks += 1
 
 
 def whole_forecast(run: FlightRun, a0: int) -> Forecast:
@@ -332,17 +363,24 @@ def whole_forecast(run: FlightRun, a0: int) -> Forecast:
     last = run.legs[-1]
     before = float(sum(np.sum(leg.sample_durations_s) for leg in run.legs[:-1]))
     whole = concatenate(run.legs, a0, before + float(last.predicted_final_time_s))
-    return replace(whole, truncated_at_threshold=run.truncated, horizon_capped=run.ended == ENDED_CAPPED)
+    return replace(whole, truncated_at_threshold=run.truncated, horizon_capped=run.ended == ENDED_HORIZON)
 
 
 # ── the readout ────────────────────────────────────────────────────────────────
 
-def flight_row(run: FlightRun, forecast: Forecast, a0: int, points: int) -> tuple[dict, dict]:
+#: The plan oracle's reference verdicts a stratum block reports as shares (`plan_oracle.summarize`'s).
+REFERENCE_SHARES = ("fully_flyable", "established", "lateral_violation", "glidepath_violation", "floor_violation")
+
+
+def flight_row(run: FlightRun, forecast: Forecast, a0: int, points: int, difficulty: dict) -> tuple[dict, dict]:
     metrics = observed_series_metrics(run.series, forecast, points=points)
     geometry = forecast_geometry(run.series, forecast)
     origin = float(run.series.times[a0])
     row = {
-        "asks": run.asks, "asks_below_floor": run.asks_below_floor, "ended": run.ended,
+        "difficulty": difficulty,
+        "reference": reference_verdicts(run.series, forecast, run.skeleton),
+        "asks": run.asks, "asks_below_floor": run.asks_below_floor, "cta_raised_max_s": run.cta_raised_max_s,
+        "ended": run.ended,
         "truncated_at_threshold": run.truncated,
         "ade_m": float(metrics["ade_m"]), "fde_m": float(metrics["fde_m"]),
         "final_time_error_s": float(metrics["final_time_error_s"]),
@@ -368,12 +406,18 @@ def stratum_block(rows: dict[str, dict], keys: list[str]) -> dict:
         "abs_dt_p50_s": _p50([abs(c["final_time_error_s"]) for c in cells]),
         "asks_mean": float(np.mean([c["asks"] for c in cells])) if cells else None,
         "flights_with_an_ask_below_floor": sum(1 for c in cells if c["asks_below_floor"]),
+        # how far the raise reached: a flight told 30 s at 29 s to go is not one told 30 s at 2 s
+        "cta_raised_max_p50_s": _p50([c["cta_raised_max_s"] for c in cells if c["asks_below_floor"]]),
         "truncated_at_threshold": sum(1 for c in cells if c["truncated_at_threshold"]),
         "ended": {name: sum(1 for c in cells if c["ended"] == name) for name in sorted({c["ended"] for c in cells})},
         "at_lead_p50_m": {
             lead: {"n": len(v), "p50": _p50(v)}
             for lead in (f"{h:g}" for h in LEADS_S)
             for v in [[c["at"][lead] for c in cells if c["at"][lead] is not None]]
+        },
+        **{
+            f"{name}_share": float(np.mean([c["reference"][name] for c in cells])) if cells else None
+            for name in REFERENCE_SHARES
         },
     }
 
@@ -386,12 +430,12 @@ def render(payload: dict) -> str:
     plan = payload["plan"]
     lines = [
         f"Plan-given lockstep, plan source {payload['plan_source']} — reads {payload['reads_the_future']}; "
-        f"re-asked every {plan['step_s']:g} s, "
-        f"cap {plan['cap_factor']:g}× the first ask's arrival time, split {plan['split']}"
+        f"re-asked every {plan['step_s']:g} s, ended at a crossing on the final or at {plan['horizon']}, "
+        f"split {plan['split']}"
         + (f", limit {plan['limit']}" if plan["limit"] else ""),
         "ADE/FDE on the whole record (export's accounting), every variant cut at its crossing on the final; "
-        "chamfer / Fréchet time-free; disp p50 at leads from a0; below-floor = flights asked with an arrival "
-        "time under the checkpoint's training future floor.",
+        "chamfer / Fréchet time-free; disp p50 at leads from a0; below-floor = flights with an ask whose arrival "
+        "time was raised to the ask floor max(the training future floor, one step).",
     ]
     for label, arm in payload["checkpoints"].items():
         lines.append("")
@@ -403,7 +447,8 @@ def render(payload: dict) -> str:
                     f"   {variant:<17s} {stratum[:34]:<34s} n={cell['n']:>4d} ADE {_fmt(cell['ade_mean_m']):>5}/"
                     f"{_fmt(cell['ade_p50_m']):>5} FDE50 {_fmt(cell['fde_p50_m']):>5} cham50 {_fmt(cell['chamfer_p50_m']):>5} "
                     f"Fr50 {_fmt(cell['frechet_p50_m']):>5} |dt|50 {_fmt(cell['abs_dt_p50_s'], 1):>5} asks {_fmt(cell['asks_mean'], 1)} "
-                    f"ended {cell['ended']} cut {cell['truncated_at_threshold']} below-floor {cell['flights_with_an_ask_below_floor']} | {leads}"
+                    f"ended {cell['ended']} cut {cell['truncated_at_threshold']} below-floor {cell['flights_with_an_ask_below_floor']} "
+                    f"flyable {_fmt(cell['fully_flyable_share'], 3)} established {_fmt(cell['established_share'], 3)} | {leads}"
                 )
     return "\n".join(lines) + "\n"
 
@@ -437,7 +482,9 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: LockstepPlan, device
     a0 = default_anchor(config)
     batch_size = plan.batch_size or config.batch_size
     keys = [item.dataset_id for item in series]
-    masks = strata_fixed_at_anchor(series, keys, anchor=a0)
+    # the strata fixed at a0, their covariates kept per flight
+    difficulty = difficulty_at_anchor(series, keys, anchor=a0)
+    masks = strata_masks(difficulty, keys)
     print(f"{arm.label}: {len(series)} flights, a0 {a0}, every {plan.step_s:g} s, variants {', '.join(plan.variants)}", flush=True)
     variants = {}
     record_dirs = {}
@@ -447,7 +494,9 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: LockstepPlan, device
         records, metrics = [], []
         for index, run in enumerate(runs):
             forecast = whole_forecast(run, a0)
-            row, flight_metrics = flight_row(run, forecast, a0, config.validation_common_grid_points)
+            row, flight_metrics = flight_row(
+                run, forecast, a0, config.validation_common_grid_points, difficulty[run.series.dataset_id]
+            )
             rows[run.series.dataset_id] = row
             if records_root is not None:
                 records.append(build_prediction_record(
@@ -467,7 +516,8 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: LockstepPlan, device
                 checkpoint=str(arm.path), split=plan.split,
                 extra_summary={RECORDS_BLOCK: {
                     "schema": RECORDS_SCHEMA, "campaign": campaign, "label": arm.label, "variant": variant,
-                    "step_s": plan.step_s, "cap_factor": plan.cap_factor, "anchor": a0,
+                    "step_s": plan.step_s, "horizon": HORIZON_RULE, "ask_floor_s": ask_floor_s(config, plan.step_s),
+                    "anchor": a0,
                     "plan_conditioning": config.plan_conditioning, "cta_conditioning": config.cta_conditioning,
                     "plan_source": plan_source(head),
                     "plan_head_sha256": None if head is None else file_sha256(head.path),
@@ -533,8 +583,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--split", choices=("val", "train", FORBIDDEN_SPLIT), default="val")
     parser.add_argument("--step-s", type=float, default=DEFAULT_STEP_S,
                         help=f"the re-ask period (default {DEFAULT_STEP_S:g}, the plan lockstep's)")
-    parser.add_argument("--cap-factor", type=float, default=DEFAULT_CAP_FACTOR,
-                        help=f"end a flight still flying at this × its first ask's arrival time (default {DEFAULT_CAP_FACTOR:g})")
     parser.add_argument("--variants", default=",".join(VARIANTS),
                         help=f"comma-separated subset of {VARIANTS} (default: all)")
     parser.add_argument("--limit", type=int, default=0, help="first N flights of the split (a smoke test)")
@@ -552,8 +600,6 @@ def parse_plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Loc
         parser.error(f"the {FORBIDDEN_SPLIT} split is sealed")
     if not math.isfinite(args.step_s) or args.step_s <= 0.0:
         parser.error("--step-s must be positive")
-    if not math.isfinite(args.cap_factor) or args.cap_factor < 1.0:
-        parser.error("--cap-factor must be at least 1 (the first ask's own arrival time)")
     variants = tuple(token.strip() for token in args.variants.split(",") if token.strip())
     unknown = [name for name in variants if name not in VARIANTS]
     if not variants or unknown or len(set(variants)) != len(variants):
@@ -562,7 +608,7 @@ def parse_plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Loc
         parser.error("--limit must be non-negative")
     if args.batch_size is not None and args.batch_size < 1:
         parser.error("--batch-size must be positive")
-    return LockstepPlan(split=args.split, step_s=float(args.step_s), cap_factor=float(args.cap_factor),
+    return LockstepPlan(split=args.split, step_s=float(args.step_s),
                         variants=variants, limit=int(args.limit), batch_size=args.batch_size,
                         write_records=bool(args.write_records))
 
@@ -592,7 +638,7 @@ def main(argv: list[str] | None = None) -> int:
         records_root = staged / RECORDS_DIR if plan.write_records else None
         payload = {
             "schema": RESULT_SCHEMA,
-            "plan": {"split": plan.split, "step_s": plan.step_s, "cap_factor": plan.cap_factor,
+            "plan": {"split": plan.split, "step_s": plan.step_s, "horizon": HORIZON_RULE,
                      "variants": list(plan.variants), "limit": plan.limit, "write_records": plan.write_records},
             "plan_source": plan_source(head),
             "plan_head_sha256": None if head is None else file_sha256(head.path),

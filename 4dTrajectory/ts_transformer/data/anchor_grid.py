@@ -145,6 +145,13 @@ def anchors_for_bin(series: Sequence[FlightSeries], profiles: Sequence[np.ndarra
     return anchors
 
 
+def difficulty_at_anchor(series: Sequence[FlightSeries], keys: Sequence[str], *,
+                         anchor: int) -> dict[str, dict]:
+    """Every flight's stratum covariates at the evaluation ``anchor`` (`approach_difficulty`), by key —
+    what `strata_fixed_at_anchor` stratifies, for a readout that keeps them per flight."""
+    return {key: approach_difficulty(item, anchor).to_dict() for key, item in zip(keys, series, strict=True)}
+
+
 def strata_fixed_at_anchor(series: Sequence[FlightSeries], keys: Sequence[str], *,
                            anchor: int) -> dict[str, np.ndarray]:
     """The stratum masks, computed ONCE at the evaluation ``anchor`` and valid at every bin
@@ -155,8 +162,4 @@ def strata_fixed_at_anchor(series: Sequence[FlightSeries], keys: Sequence[str], 
     a checkpoint trained at a common floor is judged there, and stratified there (it was
     ``seq_len - 1`` until 2026-09-16, when the floor made the two differ).
     """
-    difficulty = {
-        key: approach_difficulty(item, anchor).to_dict()
-        for key, item in zip(keys, series, strict=True)
-    }
-    return strata_masks(difficulty, list(keys))
+    return strata_masks(difficulty_at_anchor(series, keys, anchor=anchor), list(keys))

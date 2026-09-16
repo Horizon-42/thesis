@@ -16,6 +16,8 @@ import torch
 
 import ts_transformer.experiments.anytime_curve as anytime
 import ts_transformer.experiments.tracker_lockstep as runner
+import ts_transformer.experiments.two_tier_gates as gates
+from ts_transformer.experiments.plan_oracle import closing_horizon_s
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
 from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
@@ -28,6 +30,8 @@ from ts_transformer.config import (
     TSConfig,
     default_anchor,
 )
+from ts_transformer.data.approach_difficulty import STRATUM_ALL
+from ts_transformer.inference.forecast import Forecast
 from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, build_series, dataset_flight_key, truth_duration_s
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.inference.forecast import forecast_approaches
@@ -76,7 +80,7 @@ def trained(tmp_path_factory):
 
 
 def _plan(**overrides) -> runner.LockstepPlan:
-    settings = dict(split="train", step_s=STEP_S, cap_factor=1.5, variants=runner.VARIANTS, limit=0,
+    settings = dict(split="train", step_s=STEP_S, variants=runner.VARIANTS, limit=0,
                     batch_size=4, write_records=False)
     settings.update(overrides)
     return runner.LockstepPlan(**settings)
@@ -93,12 +97,16 @@ def test_the_first_ask_is_the_checkpoints_own_predict_path(trained) -> None:
     for i, (run, expected) in enumerate(zip(runs, one_shot, strict=True)):
         fresh = runner.FlightRun(series=run.series, skeleton=run.skeleton)
         plan_at = runner.TruthPlans([fresh], a0).at_ask([fresh], [run.series], a0, first=True)[0]
-        row = runner.ask_row(fresh, run.series, a0, arm.config, plan_at, with_plan=True)
+        row = runner.ask_row(fresh, run.series, a0, arm.config, plan_at, with_plan=True,
+                              floor_s=runner.ask_floor_s(arm.config, STEP_S))
         training = windows.context.row(i)
         assert row[PLAN_TOKEN_KEY] == pytest.approx(training[PLAN_TOKEN_KEY])
         assert float(row["cta_s"]) == pytest.approx(float(training["cta_s"]))
-        assert run.ended == runner.ENDED_ONE_SHOT and run.asks == 1
-        assert run.legs[0].values == pytest.approx(expected.values, abs=1e-6)
+        # the one ask is flown to its last whole step (or its crossing), then closed by re-asks
+        first = run.legs[0]
+        assert first.values == pytest.approx(expected.values[: len(first.values)], abs=1e-6)
+        assert first.truncated_at_threshold or first.final_time_s == pytest.approx(
+            STEP_S * int((expected.final_time_s + 1e-6) // STEP_S))
 
 
 def test_receding_flights_fly_one_step_per_ask_and_end_by_a_stated_rule(trained) -> None:
@@ -106,16 +114,21 @@ def test_receding_flights_fly_one_step_per_ask_and_end_by_a_stated_rule(trained)
     runs = runner.fly_variant(arm, series, runner.VARIANT_RECEDING, _plan(), torch.device("cpu"), 4)
     assert any(run.asks > 1 for run in runs)
     for run in runs:
-        assert run.ended in (runner.ENDED_CROSSED, runner.ENDED_FORECAST, runner.ENDED_CAPPED)
+        # a given CTA is never below one step, so no flight ends as a short forecast
+        assert run.ended in (runner.ENDED_CROSSED, runner.ENDED_HORIZON)
         for leg in run.legs[:-1]:
             assert leg.final_time_s == pytest.approx(STEP_S)
         whole = runner.whole_forecast(run, default_anchor(arm.config))
         assert np.all(np.diff(whole.times) > 0.0)
         assert whole.passes == run.asks
-        # the cap is the first ask's arrival time × the factor (the truth duration under the truth)
-        assert run.cap_s == pytest.approx(1.5 * truth_duration_s(run.series, default_anchor(arm.config)))
-        if run.ended == runner.ENDED_CAPPED:
-            assert run.flown_s >= run.cap_s - 1e-6
+        # the horizon is the guidance's: the first ask's arrival time (the truth duration) plus its slack
+        assert run.horizon_s == pytest.approx(closing_horizon_s(truth_duration_s(run.series, default_anchor(arm.config))))
+        if run.ended == runner.ENDED_HORIZON:
+            assert run.horizon_s - 1.0 <= run.flown_s <= run.horizon_s + 1e-6
+        # the record's own crossing is the one the flight ended on: re-cutting the whole record agrees
+        recut = runner.cut_at_threshold_crossing(whole, run.series)
+        assert recut.truncated_at_threshold == run.truncated
+        assert recut.n_steps == whole.n_steps
 
 
 def test_the_no_plan_variant_hands_the_absent_token(trained) -> None:
@@ -124,7 +137,8 @@ def test_the_no_plan_variant_hands_the_absent_token(trained) -> None:
     a0 = default_anchor(arm.config)
     fresh = runner.FlightRun(series=run.series, skeleton=run.skeleton)
     plan_at = runner.TruthPlans([fresh], a0).at_ask([fresh], [run.series], a0, first=True)[0]
-    row = runner.ask_row(fresh, run.series, a0, arm.config, plan_at, with_plan=False)
+    row = runner.ask_row(fresh, run.series, a0, arm.config, plan_at, with_plan=False,
+                         floor_s=runner.ask_floor_s(arm.config, STEP_S))
     assert np.all(row[PLAN_TOKEN_KEY] == 0.0)
     assert "cta_s" in row                              # the arrival time is still handed over
 
@@ -224,6 +238,85 @@ def test_the_readout_runs_end_to_end_with_records(monkeypatch, tmp_path, trained
         summary = json.loads((out / "records" / "t1" / variant / "summary.json").read_text())
         assert summary[runner.RECORDS_BLOCK]["variant"] == variant
         assert summary[runner.RECORDS_BLOCK]["records"] == block["flights"]
+        # every row carries the plan oracle's reference reading and its strata covariates, and the
+        # blocks their shares — established IS the crossing on the final, as the plan oracle defines it
+        rows = block["variants"][variant]["flights"]
+        assert all(set(row["reference"]) >= set(runner.REFERENCE_SHARES) and "difficulty" in row for row in rows.values())
+        everyone = block["variants"][variant]["strata"][STRATUM_ALL]
+        assert everyone["fully_flyable_share"] == pytest.approx(
+            np.mean([row["reference"]["fully_flyable"] for row in rows.values()]))
+    # …and the gate readout reads the artifact (a guidance baseline made of the tracker's own rows)
+    # a gate refuses a train-split artifact (the readout on this fixture is a train-split smoke)
+    with pytest.raises(SystemExit, match="never a smoke run"):
+        gates.load_lockstep(out)
+
+
+# ── the leg rule ────────────────────────────────────────────────────────────────
+
+def _truth_leg(series, anchor: int, config) -> Forecast:
+    """The observed rows after ``anchor`` dressed as a forecast (one segment per row)."""
+    origin = float(series.times[anchor])
+    offsets = np.asarray(series.times[anchor + 1 :], dtype=np.float64) - origin
+    durations = np.diff(np.concatenate(([0.0], offsets)))
+    return Forecast(
+        times=origin + offsets, values=np.asarray(series.values[anchor + 1 :], dtype=np.float64),
+        normalized_progress=offsets / offsets[-1], anchor=anchor, final_time_s=float(offsets[-1]),
+        predicted_final_time_s=float(offsets[-1]), horizon_mode=config.horizon_mode, passes=1,
+        truncated_at_threshold=False, horizon_capped=False, sample_durations_s=durations,
+        segment_durations_s=durations, controls=np.zeros((len(offsets), 3)), commands=np.zeros((len(offsets), 3)),
+        control_parameterization=config.control_thrust_parameterization,
+        geodetic_values=np.zeros((len(offsets), 7)), prediction_output=PREDICTION_CONTROL,
+    )
+
+
+def test_a_leg_is_whole_steps_and_a_flight_ends_only_by_crossing_or_at_its_horizon(trained) -> None:
+    _flights, series, arm = trained
+    item = next(s for s in series if float(s.times[-1] - s.times[default_anchor(arm.config)]) > 3 * STEP_S)
+    a0 = default_anchor(arm.config)
+    leg = _truth_leg(item, a0, arm.config)
+    skeleton = runner.SkeletonCache().for_series(item)
+    # far from its horizon: one step flown, asked again next
+    run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=1e6)
+    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=3)
+    assert run.ended is None and run.next_ask == 4 and run.legs[-1].final_time_s == pytest.approx(STEP_S)
+    # a one-shot leg of two whole steps: the next ask waits two steps
+    run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=1e6)
+    runner.fly_leg(run, item, leg, steps=2, step_s=STEP_S, ask=0)
+    assert run.ended is None and run.next_ask == 2 and run.legs[-1].final_time_s == pytest.approx(2 * STEP_S)
+    # its horizon inside the step: cut there, ended at the horizon, not established
+    run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=0.5 * STEP_S)
+    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=0)
+    assert run.ended == runner.ENDED_HORIZON and not run.truncated
+    assert run.flown_s <= 0.5 * STEP_S + 1e-6 and run.flown_s > 0.5 * STEP_S - float(np.max(leg.sample_durations_s)) - 1e-6
+    # a horizon before the forecast's first row: the flight ends there and flies (and counts) nothing
+    first_row_s = float(leg.sample_durations_s[0])
+    run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=0.5 * first_row_s)
+    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=0)
+    assert run.ended == runner.ENDED_HORIZON and run.legs == [] and run.asks == 0
+    # a forecast shorter than one step (only without a given CTA) is flown whole and ends the flight…
+    short = runner.cut_at_lead(leg, float(np.cumsum(leg.sample_durations_s)[2]))
+    run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=1e6)
+    runner.fly_leg(run, item, short, steps=1, step_s=STEP_S, ask=0)
+    assert run.ended in (runner.ENDED_FORECAST, runner.ENDED_CROSSED) and run.asks == 1
+    # …unless its horizon comes first
+    run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=float(np.cumsum(leg.sample_durations_s)[1]))
+    runner.fly_leg(run, item, short, steps=1, step_s=STEP_S, ask=0)
+    assert run.ended == runner.ENDED_HORIZON and run.flown_s <= run.horizon_s + 1e-6
+
+
+def test_an_ask_hands_at_least_one_step_and_counts_a_raised_arrival(trained) -> None:
+    _flights, series, arm = trained
+    a0 = default_anchor(arm.config)
+    floor = runner.ask_floor_s(arm.config, STEP_S)
+    assert floor == max(arm.config.random_train_anchor_min_future_s, STEP_S)
+    run = runner.FlightRun(series=series[0], skeleton=runner.SkeletonCache().for_series(series[0]))
+    plan_at = runner.TruthPlans([run], a0).at_ask([run], [series[0]], a0, first=True)[0]
+    low = runner.AskPlan(arrival_s=0.25 * floor, operating=plan_at.operating, instruction=plan_at.instruction)
+    row = runner.ask_row(run, series[0], a0, arm.config, low, with_plan=True, floor_s=floor)
+    assert float(row["cta_s"]) == floor and run.asks_below_floor == 1
+    assert run.cta_raised_max_s == pytest.approx(0.75 * floor)
+    row = runner.ask_row(run, series[0], a0, arm.config, plan_at, with_plan=True, floor_s=floor)
+    assert float(row["cta_s"]) == pytest.approx(max(plan_at.arrival_s, floor)) and run.asks_below_floor == 1
 
 
 # ── T2: the plan head's own plan ──────────────────────────────────────────────
@@ -271,20 +364,21 @@ def test_a_head_ask_hands_over_the_heads_own_order_as_token_and_arrival(trained,
             e, n, heading, _v = runner.pose(run.series, anchor)
             order = order_from_prediction(values[i], float(probability[i]), e, n, run.skeleton)
             assert plan_at.arrival_s == pytest.approx(order.T_s) and plan_at.arrival_s >= T_MIN_S
-            row = runner.ask_row(run, run.series, anchor, arm.config, plan_at, with_plan=True)
+            row = runner.ask_row(run, run.series, anchor, arm.config, plan_at, with_plan=True,
+                                 floor_s=runner.ask_floor_s(arm.config, STEP_S))
             on_final = on_final_pose(run.skeleton, e, n, heading)
             branches.add(on_final)
             operating = Operating(T_s=order.T_s, V_mid_mps=order.V_mid_mps, d_decel_m=order.d_decel_m,
                                   V_final_mps=order.V_final_mps, h_capture_m=None if on_final else order.h_capture_m,
                                   d_join_m=order.d_join_m, remaining_m=order.remaining_m)
             assert row[PLAN_TOKEN_KEY] == pytest.approx(plan_token(targets_at(operating, order.instruction, e, n, run.skeleton)))
-            assert float(row["cta_s"]) == pytest.approx(order.T_s)
+            assert float(row["cta_s"]) == pytest.approx(max(order.T_s, runner.ask_floor_s(arm.config, STEP_S)))
     assert branches == {True, False}
 
 
-def test_a_head_run_reads_no_truth_and_is_capped_by_its_own_time(monkeypatch, trained, head) -> None:
+def test_a_head_run_reads_no_truth_and_ends_at_its_own_horizon(monkeypatch, trained, head) -> None:
     """On series with the truth stripped (no supervision rows) and no `TruthExpert` to build, a head
-    run flies, and each flight's cap is the factor × the head's own first arrival time."""
+    run flies, and each flight's horizon is the head's own first arrival time plus the slack."""
     from dataclasses import replace
 
     import ts_transformer.outputs.plan.labels as labels_module
@@ -300,7 +394,7 @@ def test_a_head_run_reads_no_truth_and_is_capped_by_its_own_time(monkeypatch, tr
     runs = runner.fly_variant(arm, blind, runner.VARIANT_RECEDING, _plan(), torch.device("cpu"), 4, head)
     for run, plan_at in zip(runs, first, strict=True):
         assert run.ended is not None
-        assert run.cap_s == pytest.approx(1.5 * plan_at.arrival_s)
+        assert run.horizon_s == pytest.approx(closing_horizon_s(plan_at.arrival_s))
 
 
 def test_a_rolled_head_window_is_the_plan_paths_own(trained, head) -> None:

@@ -1,0 +1,216 @@
+"""`run_ts.py two_tier_gates` (two-tier feasibility §6, §10.7): G1 / G3 off tracker_lockstep artifacts.
+
+The gates are pre-registered numbers, so what must hold is the READING: which variant, which stratum,
+strict or inclusive, the guidance's established share taken over the SAME flights, both seeds required,
+and refusals wherever the two sides would not be the same cohort or the same definition.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+import ts_transformer.experiments.two_tier_gates as gates
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED
+from ts_transformer.experiments.plan_oracle import POLICY_TRUTH, ROLLING_LOCKSTEP, ROUTE_NEXT, SCHEMA as PLAN_ORACLE_SCHEMA
+from ts_transformer.experiments.tracker_lockstep import (
+    RESULT_SCHEMA,
+    VARIANT_NO_PLAN,
+    VARIANT_ONE_SHOT,
+    VARIANT_RECEDING,
+)
+
+LEADS = ("30", "60")
+
+
+def _difficulty(kind: str) -> dict:
+    return {"route_tortuosity": 1.0 if kind == "straight" else 1.4, "established_at_anchor": False,
+            "remaining_path_m": 20_000.0}
+
+
+def _row(kind: str, ade: float, *, flyable: bool = True, established: bool = True) -> dict:
+    return {"difficulty": _difficulty(kind), "ade_m": ade, "fde_m": ade, "at": {lead: ade / 2 for lead in LEADS},
+            "reference": {"fully_flyable": flyable, "established": established}}
+
+
+def _flights(straight_ade: float, vectored_ade: float, **flags) -> dict[str, dict]:
+    rows = {f"s{i}": _row("straight", straight_ade, **flags) for i in range(4)}
+    rows.update({f"v{i}": _row("vectored", vectored_ade, **flags) for i in range(4)})
+    return rows
+
+
+def _lockstep(tmp_path, name: str, checkpoints: dict[str, dict[str, dict]], *, source: str = "truth",
+              anchor: int = 59, schema: str = RESULT_SCHEMA, split: str = "val", limit: int = 0):
+    directory = tmp_path / name
+    directory.mkdir()
+    payload = {
+        "schema": schema,
+        "plan": {"split": split, "limit": limit},
+        "plan_source": source if source == "truth" else f"{source}:/some/plan/checkpoint.pt",
+        "checkpoints": {
+            label: {"anchor": anchor, "variants": {v: {"flights": rows} for v, rows in variants.items()}}
+            for label, variants in checkpoints.items()
+        },
+    }
+    (directory / "tracker_lockstep.json").write_text(json.dumps(payload))
+    return directory
+
+
+def _oracle(tmp_path, name: str, rows: dict[str, dict], *, anchor: int = 59, flyable_share: float = 1.0, **protocol):
+    directory = tmp_path / name
+    directory.mkdir()
+    artifact = {
+        "schema_version": PLAN_ORACLE_SCHEMA, "anchor": anchor, "flights": len(rows),
+        "policy": POLICY_TRUTH, "route": ROUTE_NEXT, "rolling": ROLLING_LOCKSTEP, "split": "val", "limit": 0,
+        **protocol,
+        "summary": {STRATUM_ALL: {"fully_flyable_share": flyable_share}},
+        "rows": [
+            {"dataset_id": key, "anchor": anchor, "difficulty": row["difficulty"], "prediction": {"ade_m": row["ade_m"]},
+             "reference": row["reference"]}
+            for key, row in rows.items()
+        ],
+    }
+    (directory / "plan_oracle.json").write_text(json.dumps(artifact))
+    return directory
+
+
+def _guidance(tmp_path, *, vectored_established: bool = True):
+    rows = _flights(283.0, 1847.0)
+    for key in rows:
+        if key.startswith("v") and key in ("v0", "v1") and not vectored_established:
+            rows[key]["reference"]["established"] = False
+    return _oracle(tmp_path, "guidance", rows)
+
+
+def _run(tmp_path, *lockstep, gate_arms="s1337,s2024", baseline=None, plan_path=None):
+    argv = [arg for path in lockstep for arg in ("--lockstep", str(path))]
+    argv += ["--gate-arms", gate_arms, "--out", str(tmp_path / "gates")]
+    if baseline is not None:
+        argv += ["--baseline", str(baseline)]
+    if plan_path is not None:
+        argv += ["--plan-path-baseline", str(plan_path)]
+    assert gates.main(argv) == 0
+    return json.loads((tmp_path / "gates" / "two_tier_gates.json").read_text())
+
+
+def _variants(straight: float, vectored: float, **flags) -> dict[str, dict]:
+    return {VARIANT_RECEDING: _flights(straight, vectored, **flags),
+            VARIANT_NO_PLAN: _flights(straight + 50.0, vectored + 400.0),
+            VARIANT_ONE_SHOT: _flights(straight + 10.0, vectored + 100.0)}
+
+
+# ── G1 ─────────────────────────────────────────────────────────────────────────
+
+def test_g1_passes_only_when_both_seeds_pass_every_criterion(tmp_path):
+    lockstep = _lockstep(tmp_path, "t1a", {"s1337": _variants(150.0, 900.0), "s2024": _variants(190.0, 999.0),
+                                            "p0": _variants(500.0, 3000.0)})
+    result = _run(tmp_path, lockstep, baseline=_guidance(tmp_path))
+    g1 = result["gates"]["G1"]
+    assert g1["pass"] and set(g1["verdicts"]) == {"s1337", "s2024"}      # p0 is read, never judged
+    assert "p0" in g1["arms"]
+    # the readings beside it: receding against the absent token, the one-shot and the guidance
+    minus = g1["arms"]["s1337"]["receding_minus"]
+    assert minus[VARIANT_NO_PLAN][STRATUM_VECTORED]["delta_mean_m"] == pytest.approx(-400.0)
+    assert minus[VARIANT_ONE_SHOT][STRATUM_STRAIGHT_IN]["delta_mean_m"] == pytest.approx(-10.0)
+    assert minus["guidance"][STRATUM_VECTORED]["delta_mean_m"] == pytest.approx(900.0 - 1847.0)
+    assert minus["guidance"][STRATUM_VECTORED]["arm_better_share"] == 1.0
+
+
+@pytest.mark.parametrize("seed_2024, failing", [
+    (dict(straight=150.0, vectored=1000.0), "ADE mean vectored"),      # strict: 1000 is not below 1000
+    (dict(straight=200.0, vectored=900.0), "ADE mean straight-in"),
+    (dict(straight=150.0, vectored=900.0, flyable=False), "fully flyable share, all"),
+])
+def test_g1_fails_on_one_seed_and_names_the_criterion(tmp_path, seed_2024, failing):
+    straight, vectored = seed_2024.pop("straight"), seed_2024.pop("vectored")
+    lockstep = _lockstep(tmp_path, "t1a", {"s1337": _variants(150.0, 900.0),
+                                            "s2024": _variants(straight, vectored, **seed_2024)})
+    g1 = _run(tmp_path, lockstep, baseline=_guidance(tmp_path))["gates"]["G1"]
+    assert not g1["pass"] and g1["verdicts"]["s1337"]["pass"] and not g1["verdicts"]["s2024"]["pass"]
+    failed = [c["criterion"] for c in g1["verdicts"]["s2024"]["criteria"] if not c["pass"]]
+    assert len(failed) == 1 and failed[0].startswith(failing)
+
+
+def test_g1_established_is_a_fraction_of_the_guidance_on_the_same_flights(tmp_path):
+    """The guidance establishes 2 of the 4 vectored flights here, so 0.88 × 0.5 = 0.44 is the bar."""
+    receding = _flights(150.0, 900.0)
+    for key in ("v0", "v1", "v2"):
+        receding[key]["reference"]["established"] = False           # 1 of 4 = 0.25 < 0.44
+    lockstep = _lockstep(tmp_path, "t1a", {"s1337": {VARIANT_RECEDING: _flights(150.0, 900.0)},
+                                            "s2024": {VARIANT_RECEDING: receding}})
+    g1 = _run(tmp_path, lockstep, baseline=_guidance(tmp_path, vectored_established=False))["gates"]["G1"]
+    [bar] = [c for c in g1["verdicts"]["s2024"]["criteria"] if c["criterion"].startswith("established share vectored")]
+    assert bar["threshold"] == pytest.approx(0.88 * 0.5) and bar["value"] == 0.25 and not bar["pass"]
+    assert g1["verdicts"]["s1337"]["pass"]
+
+
+# ── G3 ─────────────────────────────────────────────────────────────────────────
+
+def test_g3_reads_a_head_artifact_with_inclusive_ade_and_the_plan_paths_flyable_share_beside(tmp_path):
+    head = _lockstep(tmp_path, "t2", {"s1337": _variants(415.0, 2745.0), "s2024": _variants(400.0, 2000.0)},
+                     source="head")
+    plan_path = _oracle(tmp_path, "plan_path", _flights(773.0, 3143.0), anchor=29, flyable_share=1.0)
+    result = _run(tmp_path, head, plan_path=plan_path)
+    g3 = result["gates"]["G3"]
+    assert set(result["gates"]) == {"G3"} and g3["pass"]            # ≤ 2745 and ≤ 415 are inclusive
+    assert "guidance" not in g3["arms"]["s1337"]["receding_minus"]
+    [flyable] = [c for c in g3["verdicts"]["s1337"]["criteria"] if c["criterion"].startswith("fully flyable")]
+    # the bar is G1's 0.95, not the plan path's 1.000 (§10.7), which is read beside it
+    assert flyable["threshold"] == gates.G3_FULLY_FLYABLE_AT_LEAST == 0.95 and "1.000" in flyable["criterion"]
+
+
+def test_g1_and_g3_artifacts_are_judged_side_by_side(tmp_path):
+    truth = _lockstep(tmp_path, "t1a", {"s1337": _variants(150.0, 900.0), "s2024": _variants(150.0, 900.0)})
+    head = _lockstep(tmp_path, "t2", {"s1337": _variants(400.0, 2800.0), "s2024": _variants(400.0, 2000.0)},
+                     source="head")
+    plan_path = _oracle(tmp_path, "plan_path", _flights(773.0, 3143.0), anchor=29)
+    result = _run(tmp_path, truth, head, baseline=_guidance(tmp_path), plan_path=plan_path)
+    assert result["gates"]["G1"]["pass"] and not result["gates"]["G3"]["pass"]
+
+
+# ── refusals ───────────────────────────────────────────────────────────────────
+
+def test_the_readout_refuses_another_cohort_anchor_schema_or_a_missing_gate_arm(tmp_path):
+    guidance = _guidance(tmp_path)
+    fewer = _flights(150.0, 900.0)
+    fewer.pop("v3")
+    both = {"s1337": _variants(150.0, 900.0), "s2024": _variants(150.0, 900.0)}
+    restratified = _flights(150.0, 900.0)
+    restratified["s0"]["difficulty"] = _difficulty("vectored")
+    only_straight = {f"s{i}": _row("straight", 150.0) for i in range(4)}
+    cases = [
+        (_lockstep(tmp_path, "cohort", {"s1337": {VARIANT_RECEDING: fewer}, "s2024": _variants(1, 1)}), guidance, "same cohort"),
+        (_lockstep(tmp_path, "anchor", both, anchor=29), guidance, "same anchor"),
+        (_lockstep(tmp_path, "schema", {"s1337": _variants(1, 1)}, schema="ts-tracker-lockstep-v1"), guidance, "re-run"),
+        (_lockstep(tmp_path, "missing", {"s1337": _variants(1, 1)}), guidance, "gate arm"),
+        (_lockstep(tmp_path, "smoke", both, limit=100), guidance, "never a smoke run"),
+        (_lockstep(tmp_path, "train", both, split="train"), guidance, "never a smoke run"),
+        (_lockstep(tmp_path, "strata", {"s1337": {VARIANT_RECEDING: restratified}, "s2024": _variants(1, 1)}),
+         guidance, "stratified differently"),
+        (_lockstep(tmp_path, "empty", {"s1337": {VARIANT_RECEDING: only_straight}, "s2024": _variants(1, 1)}),
+         _oracle(tmp_path, "straight_guidance", only_straight), "judged empty"),
+        (_lockstep(tmp_path, "policy", both), _oracle(tmp_path, "model_guidance", _flights(283.0, 1847.0), policy="model"),
+         "flying the truth's plan"),
+        (_lockstep(tmp_path, "row_anchor", both), _oracle(tmp_path, "a60s_guidance", _flights(283.0, 1847.0), anchor=30),
+         "row anchors"),
+    ]
+    for index, (lockstep, baseline, message) in enumerate(cases):
+        with pytest.raises(SystemExit, match=message):
+            gates.main(["--lockstep", str(lockstep), "--gate-arms", "s1337,s2024", "--baseline", str(baseline),
+                        "--out", str(tmp_path / f"out{index}")])
+    with pytest.raises(SystemExit, match="at least 2 seeds"):
+        gates.main(["--lockstep", str(_lockstep(tmp_path, "one", both)), "--gate-arms", "s1337",
+                    "--baseline", str(guidance), "--out", str(tmp_path / "out_one")])
+    stale = tmp_path / "stale_guidance"
+    stale.mkdir()
+    (stale / "plan_oracle.json").write_text(json.dumps({"schema_version": "ts-plan-oracle-v1", "rows": []}))
+    with pytest.raises(SystemExit, match="this readout reads"):
+        gates.load_plan_oracle(stale)
+    truth = _lockstep(tmp_path, "nobase", {"s1337": _variants(1, 1), "s2024": _variants(1, 1)})
+    with pytest.raises(SystemExit, match="needs --baseline"):
+        gates.main(["--lockstep", str(truth), "--gate-arms", "s1337,s2024", "--out", str(tmp_path / "out_nobase")])
+    (tmp_path / "exists").mkdir()
+    with pytest.raises(FileExistsError):
+        gates.main(["--lockstep", str(truth), "--gate-arms", "s1337", "--baseline", str(guidance),
+                    "--out", str(tmp_path / "exists")])

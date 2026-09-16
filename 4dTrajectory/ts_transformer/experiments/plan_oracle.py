@@ -103,6 +103,13 @@ STRATA = (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, STRATUM_ESTABLISHE
 #: The rollout horizon past the plan's T: a flight that arrives late is measured as late.
 HORIZON_SLACK_S = 30.0
 HORIZON_SLACK_FRACTION = 0.1
+
+
+def closing_horizon_s(T_s: float) -> float:
+    """How long a flight planned to arrive in ``T_s`` is flown before it is scored: the plan's T plus
+    ``max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION·T)``. One definition for the guidance's rollout here
+    and the learned tracker's lockstep (`tracker_lockstep`), so "established" is read over one budget."""
+    return T_s + max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION * T_s)
 #: The design's §7 "today's best" column, re-read off the artifacts on 2026-09-10 (its
 #: provenance note): what the ceiling is compared against, per stratum where it exists.
 TODAYS_BEST = {
@@ -459,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
         ]
         # the rollout runs PAST the plan's T so a late arrival is measured as late rather
         # than cut off unestablished; the metrics' clock is the truth's regardless
-        horizons = [lab.T_s + max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION * lab.T_s) for lab in labels]
+        horizons = [closing_horizon_s(lab.T_s) for lab in labels]
         if args.route == ROUTE_NEXT and args.policy == POLICY_MODEL and args.rolling == ROLLING_LOCKSTEP:
             # the assignment: the truth's arrival time on the series clock (+ the offset) and
             # its join where the track has one (a flight established at the anchor has none)

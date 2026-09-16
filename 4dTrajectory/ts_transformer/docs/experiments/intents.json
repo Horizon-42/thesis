@@ -421,22 +421,22 @@
     "T1a_plan_p0_s1337": "真值计划 token 从不遮掉，种子 1337：读风险 2（过度依赖计划）。"
    },
    "variants": {
-    "T1a_plan_p50_s1337@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来）：G1 的读数。",
+    "T1a_plan_p50_s1337@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来），飞到过线或与规则制导相同的时限 T+max(30 s, 10 %)：G1 的读数。",
     "T1a_plan_p50_s1337@lockstep-no-plan": "同一权重、计划 token 置为缺席、仍给真值到达时间：计划 token 值多少。",
-    "T1a_plan_p50_s1337@lockstep-one-shot": "只在 L−1 问一次、整段飞完：再问值多少。",
-    "T1a_plan_p50_s2024@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来）：G1 的读数。",
+    "T1a_plan_p50_s1337@lockstep-one-shot": "只在 L−1 问一次、飞到计划时长内最后一个整步，之后与 receding 同样收尾（到过线或时限 T+max(30 s, 10 %)）：计划时长内再问值多少。",
+    "T1a_plan_p50_s2024@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来），飞到过线或与规则制导相同的时限 T+max(30 s, 10 %)：G1 的读数。",
     "T1a_plan_p50_s2024@lockstep-no-plan": "同一权重、计划 token 置为缺席、仍给真值到达时间：计划 token 值多少。",
-    "T1a_plan_p50_s2024@lockstep-one-shot": "只在 L−1 问一次、整段飞完：再问值多少。",
-    "T1a_plan_p0_s1337@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来）：G1 的读数。",
-    "T1a_plan_p0_s1337@lockstep-one-shot": "只在 L−1 问一次、整段飞完：再问值多少。",
+    "T1a_plan_p50_s2024@lockstep-one-shot": "只在 L−1 问一次、飞到计划时长内最后一个整步，之后与 receding 同样收尾（到过线或时限 T+max(30 s, 10 %)）：计划时长内再问值多少。",
+    "T1a_plan_p0_s1337@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来），飞到过线或与规则制导相同的时限 T+max(30 s, 10 %)：G1 的读数。",
+    "T1a_plan_p0_s1337@lockstep-one-shot": "只在 L−1 问一次、飞到计划时长内最后一个整步，之后与 receding 同样收尾（到过线或时限 T+max(30 s, 10 %)）：计划时长内再问值多少。",
     "T1a_plan_p50_s1337@lockstep-head-receding": "两重 Transformer T2（协议 A，不读未来）：同一跟踪器，计划与到达时间改由 KRDU 计划头（step3g_fan4_head top-1）在每次询问的滚动历史上预测；门 G3：雷达引导 ≤ 2745 m、直线 ≤ 415 m（对 native32 2870 / 445）。",
     "T1a_plan_p50_s1337@lockstep-head-no-plan": "T2 对照：同一权重，只给计划头的到达时间、计划 token 缺席——计划头的指令值多少。",
-    "T1a_plan_p50_s1337@lockstep-head-one-shot": "T2 对照：计划头只在 L−1 给一次计划与时间、整段飞完——再问值多少。",
+    "T1a_plan_p50_s1337@lockstep-head-one-shot": "T2 对照：计划头只在 L−1 给一次计划与时间、飞到其时长内最后一个整步后同样收尾——再问值多少。",
     "T1a_plan_p50_s2024@lockstep-head-receding": "两重 Transformer T2（协议 A，不读未来）：同一跟踪器，计划与到达时间改由 KRDU 计划头（step3g_fan4_head top-1）在每次询问的滚动历史上预测；门 G3：雷达引导 ≤ 2745 m、直线 ≤ 415 m（对 native32 2870 / 445）。",
     "T1a_plan_p50_s2024@lockstep-head-no-plan": "T2 对照：同一权重，只给计划头的到达时间、计划 token 缺席——计划头的指令值多少。",
-    "T1a_plan_p50_s2024@lockstep-head-one-shot": "T2 对照：计划头只在 L−1 给一次计划与时间、整段飞完——再问值多少。",
+    "T1a_plan_p50_s2024@lockstep-head-one-shot": "T2 对照：计划头只在 L−1 给一次计划与时间、飞到其时长内最后一个整步后同样收尾——再问值多少。",
     "T1a_plan_p0_s1337@lockstep-head-receding": "两重 Transformer T2（协议 A，不读未来）：同一跟踪器，计划与到达时间改由 KRDU 计划头（step3g_fan4_head top-1）在每次询问的滚动历史上预测；门 G3：雷达引导 ≤ 2745 m、直线 ≤ 415 m（对 native32 2870 / 445）。",
-    "T1a_plan_p0_s1337@lockstep-head-one-shot": "T2 对照：计划头只在 L−1 给一次计划与时间、整段飞完——再问值多少。"
+    "T1a_plan_p0_s1337@lockstep-head-one-shot": "T2 对照：计划头只在 L−1 给一次计划与时间、飞到其时长内最后一个整步后同样收尾——再问值多少。"
    }
   },
   "sf_n3": {
