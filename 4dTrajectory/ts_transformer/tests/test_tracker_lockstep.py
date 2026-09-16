@@ -28,7 +28,7 @@ from ts_transformer.config import (
     TSConfig,
     default_anchor,
 )
-from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, build_series, dataset_flight_key
+from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, build_series, dataset_flight_key, truth_duration_s
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.inference.forecast import forecast_approaches
 from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY
@@ -91,9 +91,9 @@ def test_the_first_ask_is_the_checkpoints_own_predict_path(trained) -> None:
     runs = runner.fly_variant(arm, series, runner.VARIANT_ONE_SHOT, _plan(), torch.device("cpu"), 4)
     one_shot = forecast_approaches(arm.model, series, arm.config, arm.normalizer, device=torch.device("cpu"))
     for i, (run, expected) in enumerate(zip(runs, one_shot, strict=True)):
-        fresh = runner.FlightRun(series=run.series, labels=run.labels, skeleton=run.skeleton,
-                                 expert=type(run.expert)(run.labels, run.series, a0, run.skeleton), cap_s=run.cap_s)
-        row = runner.ask_row(fresh, run.series, a0, arm.config, first=True, with_plan=True)
+        fresh = runner.FlightRun(series=run.series, skeleton=run.skeleton)
+        plan_at = runner.TruthPlans([fresh], a0).at_ask([fresh], [run.series], a0, first=True)[0]
+        row = runner.ask_row(fresh, run.series, a0, arm.config, plan_at, with_plan=True)
         training = windows.context.row(i)
         assert row[PLAN_TOKEN_KEY] == pytest.approx(training[PLAN_TOKEN_KEY])
         assert float(row["cta_s"]) == pytest.approx(float(training["cta_s"]))
@@ -112,6 +112,8 @@ def test_receding_flights_fly_one_step_per_ask_and_end_by_a_stated_rule(trained)
         whole = runner.whole_forecast(run, default_anchor(arm.config))
         assert np.all(np.diff(whole.times) > 0.0)
         assert whole.passes == run.asks
+        # the cap is the first ask's arrival time × the factor (the truth duration under the truth)
+        assert run.cap_s == pytest.approx(1.5 * truth_duration_s(run.series, default_anchor(arm.config)))
         if run.ended == runner.ENDED_CAPPED:
             assert run.flown_s >= run.cap_s - 1e-6
 
@@ -120,9 +122,9 @@ def test_the_no_plan_variant_hands_the_absent_token(trained) -> None:
     _flights, series, arm = trained
     run = runner.fly_variant(arm, series[:1], runner.VARIANT_ONE_SHOT, _plan(), torch.device("cpu"), 4)[0]
     a0 = default_anchor(arm.config)
-    fresh = runner.FlightRun(series=run.series, labels=run.labels, skeleton=run.skeleton,
-                             expert=type(run.expert)(run.labels, run.series, a0, run.skeleton), cap_s=run.cap_s)
-    row = runner.ask_row(fresh, run.series, a0, arm.config, first=True, with_plan=False)
+    fresh = runner.FlightRun(series=run.series, skeleton=run.skeleton)
+    plan_at = runner.TruthPlans([fresh], a0).at_ask([fresh], [run.series], a0, first=True)[0]
+    row = runner.ask_row(fresh, run.series, a0, arm.config, plan_at, with_plan=False)
     assert np.all(row[PLAN_TOKEN_KEY] == 0.0)
     assert "cta_s" in row                              # the arrival time is still handed over
 
@@ -159,12 +161,13 @@ def test_a_later_ask_reads_the_truth_expert_at_the_flown_pose(monkeypatch, train
     """Ask 1: the arrival time is the expert's time-to-go and the token `targets_at` at the pose
     the first leg ended in — read by an expert built at a0 and asked in order, independently."""
     import math
+    from dataclasses import replace
 
     from ts_transformer.data.channels import IDX
     from ts_transformer.inference.receding import rolled_series
     from ts_transformer.outputs.control.plan_token import plan_token
-    from ts_transformer.outputs.plan.extractors import ground_speeds
-    from ts_transformer.outputs.plan.labels import TruthExpert, targets_at
+    from ts_transformer.outputs.plan.extractors import extract_plan, ground_speeds
+    from ts_transformer.outputs.plan.labels import TruthExpert, on_final_pose, targets_at
 
     _flights, series, arm = trained
     a0 = default_anchor(arm.config)
@@ -175,13 +178,16 @@ def test_a_later_ask_reads_the_truth_expert_at_the_flown_pose(monkeypatch, train
     for run in runs:
         if run.asks < 2:
             continue
-        expert = TruthExpert(run.labels, run.series, a0, run.skeleton)
+        expert = TruthExpert(extract_plan(run.series, a0, run.skeleton), run.series, a0, run.skeleton)
         for history, anchor in ((run.series, a0), (rolled_series(run.series, a0, run.legs[0], a0 + step_rows, arm.config.dt_s), a0 + step_rows)):
             row = np.asarray(history.values[anchor], dtype=np.float64)
             e, n = float(row[IDX["e"]]), float(row[IDX["n"]])
+            heading = math.atan2(row[IDX["ndot"]], row[IDX["edot"]])
             instruction, operating = expert.order_at(
-                e, n, math.atan2(row[IDX["ndot"]], row[IDX["edot"]]), float(ground_speeds(history, slice(anchor, anchor + 1))[0]),
+                e, n, heading, float(ground_speeds(history, slice(anchor, anchor + 1))[0]),
             )
+        if on_final_pose(run.skeleton, e, n, heading):          # the shared rule after the first ask
+            operating = replace(operating, h_capture_m=None)
         asked = seen[(a0 + step_rows, run.series.dataset_id)]
         assert float(asked["cta_s"]) == pytest.approx(float(operating.T_s))
         assert asked[PLAN_TOKEN_KEY] == pytest.approx(plan_token(targets_at(operating, instruction, e, n, run.skeleton)))
@@ -218,6 +224,120 @@ def test_the_readout_runs_end_to_end_with_records(monkeypatch, tmp_path, trained
         summary = json.loads((out / "records" / "t1" / variant / "summary.json").read_text())
         assert summary[runner.RECORDS_BLOCK]["variant"] == variant
         assert summary[runner.RECORDS_BLOCK]["records"] == block["flights"]
+
+
+# ── T2: the plan head's own plan ──────────────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def head(trained, tmp_path_factory):
+    """A tiny plan head on the same synthetic flights and split rule as the tracker, with a
+    SHORTER lookback than the tracker's (the real pair is 30 against 60)."""
+    from ts_transformer.config import CHECKPOINT_SELECTION_OBJECTIVE, PREDICTION_PLAN
+
+    flights, _series, arm = trained
+    config = TSConfig(prediction_output=PREDICTION_PLAN, seq_len=6, n_segments=4, d_model=16, n_heads=4, d_ff=32,
+                      e_layers=1, final_time_scale_s=2.0, device="cpu", horizon_mode="normalized",
+                      checkpoint_selection_metric=CHECKPOINT_SELECTION_OBJECTIVE, epochs=1, patience=1, batch_size=8,
+                      val_fraction=0.25, test_fraction=0.25)
+    series, _report = build_series(flights, config, airport=AIRPORT)
+    out = tmp_path_factory.mktemp("plan_head")
+    torch.manual_seed(0)
+    train(series, config, output_dir=out, data_provenance=fake_data_provenance(), verbose=False)
+    model, loaded, normalizer, payload = load_checkpoint(out / "checkpoint.pt")
+    return anytime.Arm(label="plan-head", path=out / "checkpoint.pt", model=model, config=loaded,
+                       normalizer=normalizer, payload=payload, airports=(AIRPORT,), manifests=[out / "manifest.json"])
+
+
+def test_a_head_ask_hands_over_the_heads_own_order_as_token_and_arrival(trained, head) -> None:
+    """Independently of `HeadPlans`: the head's prediction on the ask's history, through
+    `order_from_prediction`, the on-final capture rule and `targets_at` — at a0 (off the final)
+    and late in each flight (on it), so both branches of the rule are exercised."""
+    from ts_transformer.inference.forecast import history_batch
+    from ts_transformer.outputs.control.plan_token import plan_token
+    from ts_transformer.outputs.plan.labels import T_MIN_S, Operating, on_final_pose, order_from_prediction, targets_at
+    from ts_transformer.outputs.plan.model import prediction_rows
+
+    _flights, series, arm = trained
+    branches = set()
+    for anchor_of in (lambda item: default_anchor(arm.config), lambda item: item.n_samples - 6):
+        items = [item for item in series if anchor_of(item) == anchor_of(series[0])][:4]
+        anchor = anchor_of(items[0])
+        runs = [runner.FlightRun(series=item, skeleton=runner.SkeletonCache().for_series(item)) for item in items]
+        asked = runner.HeadPlans(head, 2, torch.device("cpu")).at_ask(runs, items, anchor, first=True)
+        with torch.no_grad():
+            values, probability = prediction_rows(head.model(torch.from_numpy(
+                history_batch(items, head.config, head.normalizer, anchor))))
+        for i, (run, plan_at) in enumerate(zip(runs, asked, strict=True)):
+            e, n, heading, _v = runner.pose(run.series, anchor)
+            order = order_from_prediction(values[i], float(probability[i]), e, n, run.skeleton)
+            assert plan_at.arrival_s == pytest.approx(order.T_s) and plan_at.arrival_s >= T_MIN_S
+            row = runner.ask_row(run, run.series, anchor, arm.config, plan_at, with_plan=True)
+            on_final = on_final_pose(run.skeleton, e, n, heading)
+            branches.add(on_final)
+            operating = Operating(T_s=order.T_s, V_mid_mps=order.V_mid_mps, d_decel_m=order.d_decel_m,
+                                  V_final_mps=order.V_final_mps, h_capture_m=None if on_final else order.h_capture_m,
+                                  d_join_m=order.d_join_m, remaining_m=order.remaining_m)
+            assert row[PLAN_TOKEN_KEY] == pytest.approx(plan_token(targets_at(operating, order.instruction, e, n, run.skeleton)))
+            assert float(row["cta_s"]) == pytest.approx(order.T_s)
+    assert branches == {True, False}
+
+
+def test_a_head_run_reads_no_truth_and_is_capped_by_its_own_time(monkeypatch, trained, head) -> None:
+    """On series with the truth stripped (no supervision rows) and no `TruthExpert` to build, a head
+    run flies, and each flight's cap is the factor × the head's own first arrival time."""
+    from dataclasses import replace
+
+    import ts_transformer.outputs.plan.labels as labels_module
+
+    _flights, series, arm = trained
+    blind = [replace(item, supervision_times=None, supervision_values=None, supervision_weights=None) for item in series[:3]]
+    a0 = default_anchor(arm.config)
+    probe = [runner.FlightRun(series=item, skeleton=runner.SkeletonCache().for_series(item)) for item in blind]
+    first = runner.HeadPlans(head, 4, torch.device("cpu")).at_ask(probe, blind, a0, first=True)
+    monkeypatch.setattr(runner, "TruthExpert", None)
+    monkeypatch.setattr(labels_module, "TruthExpert", None)
+    monkeypatch.setattr(runner, "truth_duration_s", None)
+    runs = runner.fly_variant(arm, blind, runner.VARIANT_RECEDING, _plan(), torch.device("cpu"), 4, head)
+    for run, plan_at in zip(runs, first, strict=True):
+        assert run.ended is not None
+        assert run.cap_s == pytest.approx(1.5 * plan_at.arrival_s)
+
+
+def test_a_rolled_head_window_is_the_plan_paths_own(trained, head) -> None:
+    """At a later ask the head reads `history_batch` on the rolled series — the window the plan
+    path's own lockstep builds with `rolled_history` from the same flown leg."""
+    from ts_transformer.data.target_conditioning import conditioned_history
+    from ts_transformer.inference.forecast import history_batch
+    from ts_transformer.inference.receding import cut_at_lead, rolled_series
+    from ts_transformer.outputs.plan.forecast import rolled_history
+
+    _flights, series, arm = trained
+    a0 = default_anchor(arm.config)
+    step_rows = int(round(STEP_S / arm.config.dt_s))
+    item = series[0]
+    leg = cut_at_lead(forecast_approaches(arm.model, [item], arm.config, arm.normalizer, device=torch.device("cpu"))[0], STEP_S)
+    rolled = rolled_series(item, a0, leg, a0 + step_rows, arm.config.dt_s)
+    ours = history_batch([rolled], head.config, head.normalizer, a0 + step_rows)[0]
+    theirs = conditioned_history(head.normalizer.encode(rolled_history(item, a0, [leg], head.config)), None)
+    assert ours == pytest.approx(theirs, abs=1e-5)
+
+
+def test_a_head_is_refused_on_a_flight_it_trained_on_or_another_series_contract(trained, head) -> None:
+    from dataclasses import replace
+
+    _flights, _series, arm = trained
+    grid = anytime.Grid(split="train", bins_m=(), min_future_s=0.0, batch_size=None, limit=0)
+    assert set(arm.payload["split"]["train"]) & set(head.payload["split"]["train"])
+    with pytest.raises(SystemExit, match="TRAIN split"):
+        runner.check_head(head, [arm], grid)
+    held_out = replace(grid, split="val")
+    assert not set(arm.payload["split"]["val"]) & set(head.payload["split"]["train"])
+    runner.check_head(head, [arm], held_out)
+    for overrides, message in (({"dt_s": 1.0}, "dt_s"), ({"seq_len": 9}, "lookback")):
+        with pytest.raises(SystemExit, match=message):
+            runner.check_head(replace(head, config=replace(head.config, **overrides)), [arm], held_out)
+    with pytest.raises(SystemExit, match="asked about"):
+        runner.check_head(replace(head, airports=("KSJC",)), [arm], held_out)
 
 
 @pytest.mark.parametrize("config_overrides, variants, message", [

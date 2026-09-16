@@ -31,7 +31,7 @@ def rolled_series(series: FlightSeries, anchor: int, flown: Forecast, until: int
     ``until`` is shown. The flown rows start one query step after the anchor, so the anchor's
     own observed row stands in before them. The supervision arrays are dropped (a rolled
     series has no truth): a caller whose checkpoint reads a CTA or a plan supplies them itself
-    (`tracker_lockstep` reads both off the ORIGINAL series' truth expert), and nothing else on
+    (`tracker_lockstep`: off the original series' truth expert, or a plan head's prediction), and nothing else on
     the hook-free control forecast path reads the truth."""
     if until <= anchor:
         raise ValueError(f"a rolled series continues past its anchor {anchor}, not to {until}")

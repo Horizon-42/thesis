@@ -273,10 +273,10 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 | 步 | 状态 | 产物 / commit | 关键数字 |
 |---|---|---|---|
 | T0(a) | 完成（§3） | 8a03408 | — |
-| T0(b) 链式敏感度 L | **完成**（§10.4）：开环链式在两臂上都不赢；native32 的累积主要是锚点分布外 | ec9323e；`outputs/KRDU/experiments/two_tier_t0b_20260916/{chain_60s,chain_30s,identity_check.json,lead_time_error.*}` | 雷达引导整段 ADE：native32 一次成形 2870 → 链 60 s 9893 / 30 s 11930；A0b 3839 → 5585；L：native32 1.2–1.7，A0b 0.5–0.95 |
+| T0(b) 链式敏感度 L | **完成并发布**（§10.4；KRDU picker 4 个类别 `…@chain-60s` / `…@chain-30s`，native32 与 A0b，165 类 0 错误）：开环链式在两臂上都不赢；native32 的累积主要是锚点分布外 | ec9323e；`outputs/KRDU/experiments/two_tier_t0b_20260916/{chain_60s,chain_30s,identity_check.json,lead_time_error.*}` | 雷达引导整段 ADE：native32 一次成形 2870 → 链 60 s 9893 / 30 s 11930；A0b 3839 → 5585；L：native32 1.2–1.7，A0b 0.5–0.95 |
 | T0(c) 长历史信息 | 9d12b11 首次启动在第一臂建数据时崩（锚点 119 处 38 架 KRDU 航班观测余量 < 3 点，模仿项反演拒绝）→ f5b2531 修正（该锚点不监督任何段，文档既有的全零情形）；**6 臂训练中**（队列 agent，runs worktree @ f5b2531，约 7–8 h） | campaign `outputs/KRDU/experiments/two_tier_t0c_20260916`（首次失败臂移作 `T0c_L60_s1337.aborted-*`） | 三臂共同 cohort 1371（KRDU val） |
 | T1 学习型第一层 | T1.1（`plan_conditioning` 轴 + 融合 token）、T1.2（`inference/receding.py` + `run_ts.py tracker_lockstep`）已提交（opus review：1 个读数 bug——one-shot 与 receding 截断口径不一——等 10 项修正并复核）；T1.3 臂声明 `docs/experiments/t1a_plan_tracker_arms.json`（p50 ×2 种子 + p0）+ intents；**排在 T0(c) 之后训练**，然后 `tracker_lockstep --write-records` + `python -m evaluation` 读 G1 | 见 §10.3；lockstep 细则：最后一次询问 = 预测时长 ≤ Δ + 训练未来下限（T1a 为 20 s），每个变体都在 on-final 过线处截断 | — |
-| T2 端到端 | 未开始 | — | — |
+| T2 端到端 | **代码已写（§10.5）**：`tracker_lockstep --plan-head <plan ckpt>`，plan 头在每次询问的滚动历史上给出计划与到达时间（协议 A，不读未来）；native32 冒烟 30 架通过；**待 opus review**，实验在 T1a 之后 | — | — |
 | T3 | **按现有 harvest 不可建**（§10.2：10 分钟历史不存在） | — | — |
 | T4 | 未开始（前置 oracle） | — | — |
 
@@ -356,3 +356,14 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 2. **随机锚点训练把 L 压到 1 以下**（A0b 0.5–0.95：模型对偏离的历史有收缩，雷达引导链/一次成形在 300 s 处 0.89–1.22，而 native32 3.0–4.2）——所以累积主要是**锚点分布外**，不是"自己的历史"本身；但 A0b 自己的短时误差大（60 s 处雷达引导 p50 1995 m 对 native32 632），链式整体仍输。
 3. **协议 B 的 ε 很小**：native32 在真实历史上逐 30 s 再锚，30 s 提前量的位移 p50 雷达引导 148–313 m——"再问能降误差"只在有**新观测**时成立。
 4. **对 T1 的决定（预注册读法 §10.1）**：native32 触发"L_med > 1.05 且 120 s 处链式更差"。T1a 的设计已经用随机锚点训练（A0b 显示这一项把 L 压到 1 以下）且每次询问都重新给真值计划 token（外部信息，抵消漂移），所以**T1a 按原设计先建**；若 T1a 在 lockstep 里漂移（每步 e(30 s) 相对滚动真值上升），T1c（离轨状态上的时间平移真值目标）升为必做。
+
+### 10.5 T2 设计（2026-09-16）：计划头替换真值计划（协议 A）
+
+`run_ts.py tracker_lockstep --plan-head <plan checkpoint>`：同一个 lockstep、同一个 T1 跟踪器，只把计划来源从 `TruthPlans`（每架一个 `TruthExpert`，按时间顺序读）换成 `HeadPlans`——计划头在**同一段滚动历史**上的预测，经 `order_from_prediction`（各参数夹到范围内，到达时间下限 `T_MIN_S`）得到 `(Operating, Instruction)`，再走真值走的同一条 `targets_at` → `plan_token`；CTA = 头的 T。于是 T1 与 T2 是同一个仪器、换一个输入，差值就是 `e_plan`（§4.3）。
+
+- 计划头：KRDU 交付头 `plan_guidance_20260910/step3g_fan4_head`（K=4 混合，seq_len 30，滚动窗口训练 share 0.75，§12.8：60 s 锚点雷达引导 top-1 3087 m）；取 top-1 权重分量（`prediction_rows`），不做 fan。
+- **捕获高度的有效位用同一条可观测规则**（review 2026-09-16）：训练标签在"锚点起一直在五边上"（`join_at_anchor`，读未来）时把 `h_capture` 置未定义，而在 a₀ 建好的 `TruthExpert` 会把 a₀ 的值一直带到后面的询问——T1 自己的 lockstep token 在后续询问上就和训练分布不一致。现在两种来源在**首次询问之后**共用 `on_final_capture`（此刻 `on_final_pose` 在五边上 → 未定义）；真值的首次询问就是标签本身。实测 KRDU val 100 架 a₀：修正前头来源 `h_capture` 有效率 1.00 对真值 0.40（60/100 掩码不同）；修正后 0.39 对 0.40（1/100 不同）。其余运行参数位两边都是 1，指令组有效率 0.39 / 0.38，T p50 187 / 181 s（|ΔT| 中位 11 s）。所以 T2 − T1 ≈ e_plan。
+- 头的契约在读任何轨迹前核对：dt、坐标系、输入通道与跟踪器一致，回看不长于跟踪器锚点，机场覆盖；产物记头的 sha256。
+- 读未来的地方都去掉：时间上限改为 `cap_factor × 第一次询问的到达时间`（真值来源下 = 真值时长，头来源下 = 头自己的 T）；头在任何它训练过的航班上被拒（逐航班对照头的 train 名册）。**跑道仍是已知的**（包内通例：阈值锚定坐标系）。
+- 门 G3（§6）：雷达引导整段 ADE ≤ 2745 m 且直线 ≤ 415 m（对 native32 一次成形 2870 / 445，两种子）；读 top-1，fan 不作交付。同时报 `receding-no-plan`（只给头的 T）与 `one-shot`（头的计划只在 L−1 给一次）。
+- 冒烟（native32 + 头，30 架，CPU 33 s）：机制跑通；native32 本身不读 token / CTA，所以数字只是链式本身（雷达引导 12 km），不代表 T2。
