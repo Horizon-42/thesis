@@ -24,9 +24,9 @@ representation change never reaches the model, the loss or the data pipeline. Co
 arrive in the dimensionless contract ``config.control_thrust_parameterization`` names
 (``outputs/envelope.py``). The point-mass rows convert to newtons once, here, at the
 boundary (``RolloutInputs.newton_controls``), and are thrust-fraction only (`TSConfig`
-refuses the other pairing). The lag rows never convert here: they hand the RHS the control
-LAW (:func:`lag_control_law`) and it converts inside, per stage — ``a_x·T_max`` under
-thrust-fraction, the drag-dependent thrust under specific-force.
+refuses the other pairing: `ControlParameterizationScope.point_mass`). The lag rows never
+convert here: they hand the RHS the contract's control LAW (``ControlContract.law``) and it
+resolves the thrust and the load inside, per stage.
 """
 
 from __future__ import annotations
@@ -47,11 +47,6 @@ from aerodynamic_model.torch_dynamics import (
     rollout_piecewise_constant as reanchored_endpoint_rollout,
 )
 from aerodynamic_model.torch_lag_dynamics import (
-    THRUST_FRACTION_LAW,
-    LagControlLaw,
-    PathAngleLaw,
-    SpecificForceLaw,
-    SpeedCommandLaw,
     lag_actuator_states,
     lag_state_scale,
     lag_state_to_transport_chart,
@@ -74,47 +69,9 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
-    CONTROL_SPECIFIC_FORCE,
-    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
-    CONTROL_SPEED_COMMAND,
-    CONTROL_THRUST_FRACTION,
     TSConfig,
 )
-from ts_transformer.outputs.envelope import (
-    MAX_LOAD_FACTOR,
-    MIN_LOAD_FACTOR,
-    MIN_THRUST_FRACTION,
-    PATH_ANGLE_TIME_CONSTANT_S,
-    SPEED_LOOP_TIME_CONSTANT_S,
-    physical_controls,
-)
-
-
-#: The lag RHS's control law per ``control_thrust_parameterization`` — the one place the
-#: config field meets the physics. The specific-force law's engine floor is the
-#: thrust-fraction box's, so the two admit the same thrusts (design §2.1).
-_LAG_CONTROL_LAWS: dict[str, LagControlLaw] = {
-    CONTROL_THRUST_FRACTION: THRUST_FRACTION_LAW,
-    CONTROL_SPECIFIC_FORCE: SpecificForceLaw(min_thrust_fraction=MIN_THRUST_FRACTION),
-    CONTROL_SPEED_COMMAND: SpeedCommandLaw(
-        min_thrust_fraction=MIN_THRUST_FRACTION,
-        speed_time_constant_s=SPEED_LOOP_TIME_CONSTANT_S,
-    ),
-    # The path loop resolves a LOAD FACTOR, so it reads the load box the head's own column
-    # used to be bounded by: the search space the commands lived in is the range the loop may
-    # ask for (design §14.2).
-    CONTROL_SPECIFIC_FORCE_PATH_ANGLE: PathAngleLaw(
-        min_thrust_fraction=MIN_THRUST_FRACTION,
-        path_angle_time_constant_s=PATH_ANGLE_TIME_CONSTANT_S,
-        min_load_factor=MIN_LOAD_FACTOR,
-        max_load_factor=MAX_LOAD_FACTOR,
-    ),
-}
-
-
-def lag_control_law(config: TSConfig) -> LagControlLaw:
-    """The control law the lagged rollout integrates this config's commands under."""
-    return _LAG_CONTROL_LAWS[config.control_thrust_parameterization]
+from ts_transformer.outputs.envelope import control_contract, physical_controls
 
 
 @dataclass(frozen=True)
@@ -150,8 +107,8 @@ class EndpointControlRollout:
     # states chasing their command and this is where they got to. A term that prices what
     # the rollout flew (the heading-rate loss) must read this, never the command — in EACH
     # law's own unit: column 2 is a load factor under every law except the path-angle one,
-    # where it is the target angle and the flown load has to be re-solved from the state
-    # (config refuses that pairing rather than let the term read radians as a load).
+    # where it is the target angle, so such a term asks the law for the load it resolves
+    # (`_ControlLaw.geodetic_load`) rather than reading the column.
     actual_controls: torch.Tensor
 
 
@@ -342,7 +299,7 @@ def _lag_hooked_schedule(
         inputs.frame_params.new_tensor(config.control_time_constants_s),
         inputs.max_thrust_n,
         raw_hook,
-        control_law=lag_control_law(config),
+        control_law=control_contract(config.control_thrust_parameterization).law,
         track_reference=command_hook.needs_reference,
         chart_scale=chart_scale,
         integrator_dt_s=config.control_rollout_integrator_dt_s,
@@ -376,7 +333,7 @@ def _lag_endpoint(
             inputs.frame_params,
             inputs.frame_params.new_tensor(config.control_time_constants_s),
             inputs.max_thrust_n,
-            control_law=lag_control_law(config),
+            control_law=control_contract(config.control_thrust_parameterization).law,
             chart_scale=chart_scale,
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
@@ -416,7 +373,7 @@ def _lag_dense(
         inputs.max_thrust_n,
         query_offsets_s,
         query_valid,
-        control_law=lag_control_law(config),
+        control_law=control_contract(config.control_thrust_parameterization).law,
         chart_scale=chart_scale,
         integrator_dt_s=config.control_rollout_integrator_dt_s,
     )

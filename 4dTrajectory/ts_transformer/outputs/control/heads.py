@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 
 from ts_transformer.config import TSConfig
-from ts_transformer.outputs.envelope import ControlContract, control_contract
+from ts_transformer.outputs.envelope import CONTROL_NAMES, ControlContract, control_contract
 from ts_transformer.outputs.conditioning import condition_names
 from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, PLAN_TOKEN_WIDTH
 from ts_transformer.config import (
@@ -28,9 +28,6 @@ from ts_transformer.config import (
 from ts_transformer.outputs.duration_heads import FinalTimeHead, QuantileFinalTimeHead
 
 
-# Three columns in the order every contract shares; the labels are the thrust-fraction
-# saturation diagnostics' historical keys (`training.diagnostics.saturation_labels`).
-CONTROL_NAMES = ("thrust_N", "bank_rad", "load_factor")
 
 
 @dataclass(frozen=True)

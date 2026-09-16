@@ -18,10 +18,11 @@ import torch
 from aerodynamic_model.torch_lag_dynamics import (
     SpecificForceLaw,
     SpeedCommandLaw,
+    THRUST_FRACTION_LAW,
     lag_rhs,
-    lag_rhs_speed_command,
     lag_state_from_geodetic,
     lag_state_scale,
+    lag_step_context,
     rollout_piecewise_constant,
     rollout_piecewise_constant_hooked,
     rollout_piecewise_constant_at_times,
@@ -46,6 +47,13 @@ def _lag_state(airframe, *, speed=85.0, gamma=-0.05, actuators):
     return state, torch.tensor([aero], dtype=torch.float64), scale
 
 
+def _rhs(law, state, aero, thrust, scale, *, reference_speed=85.0):
+    """The one lag RHS; the speed loop's reference is the initial state's airspeed."""
+    initial = state.new_zeros((1, 7))
+    initial[0, 3] = reference_speed
+    return lag_rhs(state, state[..., 7:], aero, lag_step_context(law, FRAME, TAU, thrust, scale, initial), law)
+
+
 def _speed_rate(state: torch.Tensor, rate: torch.Tensor) -> torch.Tensor:
     velocity, velocity_rate = state[..., 3:6], rate[..., 3:6]
     return (velocity * velocity_rate).sum(-1) / velocity.norm(dim=-1)
@@ -56,10 +64,7 @@ def _speed_rate(state: torch.Tensor, rate: torch.Tensor) -> torch.Tensor:
 def test_the_speed_loop_moves_every_airframe_toward_its_command_alike(airframe, reference, command):
     state, aero, scale = _lag_state(airframe, actuators=(command, 0.2, 1.05))
     thrust = torch.tensor([airframe[2]], dtype=torch.float64)
-    rate = lag_rhs_speed_command(
-        state, state[..., 7:], aero, FRAME, TAU, torch.tensor([reference], dtype=torch.float64),
-        torch.tensor([TAU_V], dtype=torch.float64), MIN_FRACTION * thrust, thrust, scale,
-    )
+    rate = _rhs(SpeedCommandLaw(MIN_FRACTION, TAU_V), state, aero, thrust, scale, reference_speed=reference)
     speed = state[..., 3:6].norm(dim=-1)
     expected = (reference + command - speed) / TAU_V
     assert _speed_rate(state, rate).item() == pytest.approx(expected.item(), rel=1e-9, abs=1e-12)
@@ -74,11 +79,8 @@ def test_where_the_clamp_binds_the_loop_flies_the_thrust_fractions_bound(airfram
     thrust = torch.tensor([airframe[2]], dtype=torch.float64)
     sc_state, aero, scale = _lag_state(airframe, actuators=(command, 0.2, 1.05))
     tf_state, _aero, _scale = _lag_state(airframe, actuators=(fraction, 0.2, 1.05))
-    sc_rate = lag_rhs_speed_command(
-        sc_state, sc_state[..., 7:], aero, FRAME, TAU, torch.tensor([85.0], dtype=torch.float64),
-        torch.tensor([TAU_V], dtype=torch.float64), MIN_FRACTION * thrust, thrust, scale,
-    )
-    tf_rate = lag_rhs(tf_state, tf_state[..., 7:], aero, FRAME, TAU, thrust, scale)
+    sc_rate = _rhs(SpeedCommandLaw(MIN_FRACTION, TAU_V), sc_state, aero, thrust, scale)
+    tf_rate = _rhs(THRUST_FRACTION_LAW, tf_state, aero, thrust, scale)
     assert torch.allclose(sc_rate[..., :7], tf_rate[..., :7], rtol=0.0, atol=1e-12)
 
 

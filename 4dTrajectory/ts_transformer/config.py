@@ -326,12 +326,9 @@ CONTROL_SPEED_COMMAND = "speed-command"
 # Every non-default law is first-order-lag only: the point-mass rows hold newton controls
 # across a segment and have no per-stage re-solve.
 CONTROL_SPECIFIC_FORCE_PATH_ANGLE = "specific-force+path-angle"
-CONTROL_THRUST_PARAMETERIZATIONS = (
-    CONTROL_THRUST_FRACTION,
-    CONTROL_SPECIFIC_FORCE,
-    CONTROL_SPEED_COMMAND,
-    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
-)
+# Where each value may be used is ONE row of `CONTROL_PARAMETERIZATION_SCOPES` (below the hook
+# vocabulary it names), and what it IS — box, law, teacher, identity — one row of
+# `outputs/envelope.py`'s contract registry, which asserts its keys equal these.
 # HOW the airframe is presented to the control head (`outputs/conditioning.py`; design N4).
 # ``raw`` scales each quantity on its own (mass, installed thrust, wing area, the polar) —
 # every run before 2026-09-15, pinned by every named recipe. ``ratios`` hands the head the
@@ -674,6 +671,64 @@ assert set(CONTROL_HOOK_MEMBERS) == set(CONTROL_HOOKS_AVAILABLE) - {CONTROL_HOOK
 #: trombone divides by the same ``V_floor`` to size the detour the delay needs, so the value
 #: changes an answer under either — and a knob that cannot change an answer is refused.
 CONTROL_SPEED_FLOOR_MARGIN_READERS = (CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE)
+
+
+
+@dataclass(frozen=True)
+class ControlParameterizationScope:
+    """Where one ``control_thrust_parameterization`` value may be used — the config layer's
+    half of the contract (config cannot import ``outputs``; the box, the law, the teacher and
+    the checkpoint identity are the value's row in ``outputs/envelope.py``, whose registry
+    asserts its keys equal this table's). `TSConfig` reads the row; it never compares the value.
+    """
+
+    #: The value's word in run names and slugs; empty for the default, which is never spelled.
+    slug: str
+    #: Whether the point-mass rows may fly it. They convert the schedule to newtons once per
+    #: segment and hold the thrust, so a law that re-solves its thrust (or its load) at every
+    #: RK4 stage exists on the first-order-lag model only.
+    point_mass: bool
+    #: Whether ``control_imitation_target=fitted`` may teach it: the fitted-teacher table's
+    #: schema names no parameterisation, so another contract would imitate δ as its own.
+    fitted_teacher: bool
+    #: The command-hook modules built for this contract's columns.
+    hook_modules: tuple[str, ...]
+    #: Why the other modules are not, quoted in the refusal.
+    hook_note: str = ""
+
+
+#: Every hook module a stored config may name, including the retired ``nominal-residual``
+#: (its own single module), which only thrust-fraction configs ever carried.
+_THRUST_FRACTION_HOOK_MODULES = (
+    CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE,
+    CONTROL_HOOK_NOMINAL_RESIDUAL,
+)
+CONTROL_PARAMETERIZATION_SCOPES: dict[str, ControlParameterizationScope] = {
+    CONTROL_THRUST_FRACTION: ControlParameterizationScope(
+        slug="", point_mass=True, fitted_teacher=True,
+        hook_modules=_THRUST_FRACTION_HOOK_MODULES,
+    ),
+    CONTROL_SPECIFIC_FORCE: ControlParameterizationScope(
+        slug="sf", point_mass=False, fitted_teacher=False,
+        hook_modules=(CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE),
+        hook_note="the retired nominal-residual hook was only ever built for thrust-fraction",
+    ),
+    CONTROL_SPEED_COMMAND: ControlParameterizationScope(
+        slug="sc", point_mass=False, fitted_teacher=False,
+        hook_modules=(CONTROL_HOOK_BARRIER, CONTROL_HOOK_TROMBONE),
+        # design §12.4
+        hook_note="the speed floor writes the thrust channel by inverting a thrust or "
+        "specific-force law, and under the speed loop its demand is a speed",
+    ),
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE: ControlParameterizationScope(
+        slug="sfpa", point_mass=False, fitted_teacher=False,
+        hook_modules=(),
+        # design §14.4: composing them is a separate design
+        hook_note="every hook writes or reads the load-factor column, which this contract "
+        "replaces with a path-angle target",
+    ),
+}
+CONTROL_THRUST_PARAMETERIZATIONS = tuple(CONTROL_PARAMETERIZATION_SCOPES)
 # WHAT the trombone measures its surplus against (L3.f, 2026-09-09). ``beeline`` is L3.e's
 # estimator — the straight-line distance from here to the threshold — and it reads a
 # VECTORED flight's long intended path (downwind, base) as surplus time: measured at the
@@ -1461,11 +1516,9 @@ class DynamicsSpec:
             "control_thrust_parameterization", self.control_thrust_parameterization,
             CONTROL_THRUST_PARAMETERIZATIONS,
         )
-        if (self.control_thrust_parameterization != CONTROL_THRUST_FRACTION
+        if (not CONTROL_PARAMETERIZATION_SCOPES[self.control_thrust_parameterization].point_mass
                 and self.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG):
-            # A scope statement, not physics: the specific force and the speed loop both need
-            # the thrust re-solved at every RK4 stage, which only the lag RHS does. The
-            # point-mass rows convert to newtons once per segment and would hold T.
+            # A scope statement, not physics (`ControlParameterizationScope.point_mass`).
             raise ValueError(
                 f"control_thrust_parameterization={self.control_thrust_parameterization!r} "
                 "is implemented on the first-order-lag flight model only; "
@@ -1855,50 +1908,25 @@ class ControlOutput(OutputSpec):
                 f"term back with duration_head={DURATION_HEAD_TWO_HEAD!r}"
             )
         law = self.dynamics.control_thrust_parameterization
-        if law != CONTROL_THRUST_FRACTION:
-            if self.objective.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
-                # The table's schema names no parameterisation, so an n_x or a speed-command
-                # run could read a thrust-fraction table and imitate δ as if it were its own.
-                raise ValueError(
-                    f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r} is not "
-                    f"built for control_thrust_parameterization={law!r}: a fitted-teacher "
-                    "table does not say which coordinate its schedules are in"
-                )
-        if (law == CONTROL_SPEED_COMMAND
-                and CONTROL_HOOK_SPEED_FLOOR
-                in CONTROL_HOOK_MEMBERS.get(self.hook.control_command_hook, ())):
-            # Not built yet (design §12.4): the floor writes the thrust channel by inverting a
-            # thrust or specific-force law, and under the speed loop its demand is a speed.
+        scope = CONTROL_PARAMETERIZATION_SCOPES[law]
+        if (not scope.fitted_teacher
+                and self.objective.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED):
             raise ValueError(
-                f"a command hook containing {CONTROL_HOOK_SPEED_FLOOR!r} is not built for "
-                f"control_thrust_parameterization={CONTROL_SPEED_COMMAND!r} yet"
-            )
-        if (law == CONTROL_SPECIFIC_FORCE_PATH_ANGLE
-                and self.objective.control_heading_rate_loss_weight != 0.0):
-            # The heading-rate term prices what the rollout FLEW, so it reads the third
-            # ACTUATOR (`backends.EndpointControlRollout.actual_controls`) as a load factor and
-            # feeds it to the psi row `g·n·sin φ/(V cos γ)`. Under this contract that actuator is
-            # a path angle in radians: the term would read −0.05 where the flight flew 1.06, a
-            # full-scale wrong target on every segment, silently (review §14.9, finding 1).
-            # Resolving the load inside the term is the other fix; nothing needs it yet.
-            raise ValueError(
-                "control_heading_rate_loss_weight is not built for "
-                f"control_thrust_parameterization={CONTROL_SPECIFIC_FORCE_PATH_ANGLE!r}: the "
-                "term reads the third actuator as a load factor and this contract holds a "
-                "path angle there"
-            )
-        if law == CONTROL_SPECIFIC_FORCE_PATH_ANGLE and self.hook.active:
-            # Design §14.4: the barrier and the trombone rewrite the LOAD FACTOR and the speed
-            # floor reads a commanded load, and under this contract the third column is a path
-            # angle — none of them speaks it. Composing them is a separate design; the arms run
-            # with the hook off.
-            raise ValueError(
-                f"control_command_hook={self.hook.control_command_hook!r} is not built for "
-                f"control_thrust_parameterization={CONTROL_SPECIFIC_FORCE_PATH_ANGLE!r}: every "
-                "hook writes or reads the load-factor column, which this contract replaces "
-                "with a path-angle target"
+                f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r} is not "
+                f"built for control_thrust_parameterization={law!r}: a fitted-teacher "
+                "table does not say which coordinate its schedules are in"
             )
         if self.hook.active:
+            hook = self.hook.control_command_hook
+            unbuilt = [
+                module for module in CONTROL_HOOK_MEMBERS.get(hook, (hook,))
+                if module not in scope.hook_modules
+            ]
+            if unbuilt:
+                raise ValueError(
+                    f"control_command_hook={hook!r}: {', '.join(map(repr, unbuilt))} is not "
+                    f"built for control_thrust_parameterization={law!r} ({scope.hook_note})"
+                )
             if self.dynamics.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
                 raise ValueError(
                     "the command hook is implemented on the first-order-lag dynamics (its "

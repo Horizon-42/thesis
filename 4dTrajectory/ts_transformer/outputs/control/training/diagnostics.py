@@ -14,8 +14,7 @@ import math
 import torch
 import torch.nn as nn
 
-from ts_transformer.config import CONTROL_THRUST_FRACTION
-from ts_transformer.outputs.control.heads import CONTROL_NAMES, ControlPrediction
+from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.envelope import control_contract
 
 
@@ -24,15 +23,9 @@ SATURATION_THRESHOLD_FRACTION = 0.01
 
 
 def saturation_labels(parameterization: str) -> tuple[str, ...]:
-    """The per-column keys of an epoch's ``control_saturation.by_control``.
-
-    Under thrust-fraction the historical labels every stored ``history.json`` carries (its
-    first key reads ``thrust_N`` although the column is the thrust FRACTION — kept so new
-    runs stay comparable key for key); under any other law the contract's own names.
-    """
-    if parameterization == CONTROL_THRUST_FRACTION:
-        return CONTROL_NAMES
-    return control_contract(parameterization).names
+    """The per-column keys of an epoch's ``control_saturation.by_control``
+    (``ControlContract.saturation_labels``)."""
+    return control_contract(parameterization).saturation_labels
 
 
 def _gradient_group(parameter_name: str) -> str:

@@ -189,7 +189,7 @@ def test_an_inversion_names_its_coordinate_or_refuses():
     states = np.tile(np.array(INITIAL_STATE), (4, 1))
     with pytest.raises(TypeError):
         actual_controls(states, np.arange(4.0), aero_params=np.array(AERO), max_thrust_n=MAX_THRUST_N)
-    with pytest.raises(ValueError, match="parameterization must be one of"):
+    with pytest.raises(ValueError, match="no control contract for 'newtons'"):
         actual_controls(states, np.arange(4.0), aero_params=np.array(AERO),
                         max_thrust_n=MAX_THRUST_N, parameterization="newtons")
 
@@ -278,12 +278,12 @@ def _forecast_and_record(config: TSConfig):
 def test_a_specific_force_record_says_so_and_prices_its_thrust_where_each_segment_begins():
     config = _config(**SPECIFIC_FORCE)
     series, forecast, record = _forecast_and_record(config)
-    assert forecast.longitudinal_parameterization == CONTROL_SPECIFIC_FORCE
-    assert len(forecast.longitudinal_commands) == len(forecast.controls) == config.n_segments
+    assert forecast.control_parameterization == CONTROL_SPECIFIC_FORCE
+    assert len(forecast.commands) == len(forecast.controls) == config.n_segments
     source = record.states_payload["source"]
     assert source["controlThrustParameterization"] == CONTROL_SPECIFIC_FORCE
     segments = record.states_payload["control_segments"]
-    assert [s["specific_force"] for s in segments] == pytest.approx(list(forecast.longitudinal_commands))
+    assert [s["specific_force"] for s in segments] == pytest.approx(list(forecast.commands[:, 0]))
     # Every segment's thrust, evaluated independently (numpy drag) at ITS start state: the
     # anchor for segment 0, the record's own row at the previous boundary after that (the
     # dense grid carries every boundary exactly).
@@ -315,7 +315,7 @@ def test_a_specific_force_record_says_so_and_prices_its_thrust_where_each_segmen
 def test_a_thrust_fraction_record_carries_no_new_key():
     config = _config(**LAG)
     _series_item, forecast, record = _forecast_and_record(config)
-    assert forecast.longitudinal_commands is None and forecast.longitudinal_parameterization is None
+    assert forecast.control_parameterization == CONTROL_THRUST_FRACTION
     assert "controlThrustParameterization" not in record.states_payload["source"]
     assert all("specific_force" not in s for s in record.states_payload["control_segments"])
 

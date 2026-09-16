@@ -350,15 +350,24 @@ def control_heading_rate_mse(
         return value.to(dtype=dtype, device=device)
 
     actual = cast(rollout.actual_controls)
+    # The load the rollout FLEW is the contract law's resolution of the actuators at each
+    # endpoint: the third actuator itself under every law but the path-angle one, whose loop
+    # re-solves it from the state (`_ControlLaw.geodetic_load`) — so under that contract γ*
+    # reaches the turn rate through the lift, as the load does under the others.
+    load = control_contract(config.control_thrust_parameterization).law.geodetic_load(
+        states, actual,
+        max_thrust_n=cast(dynamics["max_thrust_n"]),
+        initial_geodetic_states=cast(dynamics["initial_state"]),
+    )
     predicted_dps = torch.rad2deg(
         heading_rate_rad_s(
             states,
             # The psi row reads bank and the (stall-limited) load factor only, never the
-            # thrust, so the thrust column is passed as ZERO under both contracts: exact, and
-            # the specific-force thrust would need each endpoint's drag for a value the row
-            # never reads (`tests/test_specific_force.py::test_the_turn_rate_row_never_reads_the_thrust_column`
+            # thrust, so the thrust column is passed as ZERO under every contract: exact, and
+            # the resolved thrust would need each endpoint's drag for a value the row never
+            # reads (`tests/test_specific_force.py::test_the_turn_rate_row_never_reads_the_thrust_column`
             # pins the independence).
-            torch.cat((torch.zeros_like(actual[..., :1]), actual[..., 1:]), dim=-1),
+            torch.stack((torch.zeros_like(load), actual[..., 1], load), dim=-1),
             # Per-flight ``[B,6]`` against per-endpoint ``[B,N,7]`` states.
             cast(dynamics["aero_params"]).unsqueeze(-2),
         )

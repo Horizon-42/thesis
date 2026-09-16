@@ -13,6 +13,7 @@ controls use ``(thrust_N, bank_rad, load_factor)``, exactly like ``CasadiSimulat
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import torch
 
@@ -78,69 +79,49 @@ def drag_force_n(
     return 0.5 * density * speed_mps.square() * cd * area_m2
 
 
-def specific_force_thrust_n(
-    specific_force: torch.Tensor,
-    load_factor: torch.Tensor,
-    speed_mps: torch.Tensor,
-    altitude_m: torch.Tensor,
-    mass_kg: torch.Tensor,
-    aero_params: torch.Tensor,
-    min_thrust_n: torch.Tensor,
-    max_thrust_n: torch.Tensor,
-) -> torch.Tensor:
-    """The thrust that flies the specific force ``n_x = (T - D)/W``, clamped to the engine.
+class FlightCondition(NamedTuple):
+    """What the polar and every control law read of a state: airspeed, the path's sine, mass and
+    air density. Built from a transport-chart state (``transport_chart_kinematics``) or a
+    geodetic one (:func:`geodetic_flight_condition`), so a law resolves its command from the
+    same four numbers wherever it is asked."""
 
-    ``T = m·g·n_x + D`` with ``D`` from :func:`aerodynamic_coefficients` at the same load
-    factor, speed, mass and density the RHS reads — so where the clamp does not bind, the
-    RHS subtracts exactly this drag again and ``V' = g·(n_x - sin(gamma))``: the mass, the
-    installed thrust and the polar leave the speed equation. ``[min_thrust_n, max_thrust_n]``
-    is the engine's range; where it binds, the speed law is the thrust law's at that bound.
-    """
-    density = isa_density(altitude_m)
-    _cl, cd, _stalled = aerodynamic_coefficients(
-        load_factor, speed_mps, mass_kg, density, aero_params
+    speed_mps: torch.Tensor
+    sin_gamma: torch.Tensor
+    mass_kg: torch.Tensor
+    density: torch.Tensor
+
+
+def geodetic_flight_condition(states_geo: torch.Tensor) -> FlightCondition:
+    """:class:`FlightCondition` of geodetic ``(lat, lon, alt, V, psi, gamma, m)`` rows."""
+    _require_last_dim(states_geo, len(STATE_NAMES), "states_geo")
+    return FlightCondition(
+        speed_mps=states_geo[..., 3],
+        sin_gamma=torch.sin(states_geo[..., 5]),
+        mass_kg=states_geo[..., 6],
+        density=isa_density(states_geo[..., 2]),
     )
-    drag = drag_force_n(density, speed_mps, cd, aero_params[..., 0])
-    thrust = mass_kg * GRAVITY_MPS2 * specific_force + drag
-    return torch.minimum(torch.maximum(thrust, min_thrust_n), max_thrust_n)
 
 
-def speed_loop_specific_force(
-    speed_command_mps: torch.Tensor,
-    speed_mps: torch.Tensor,
-    sin_gamma: torch.Tensor,
-    speed_time_constant_s: torch.Tensor | float,
-) -> torch.Tensor:
-    """The specific force a first-order speed loop asks for, ``sin γ + (v_c − V)/(g·τ_V)``:
-    flown through :func:`specific_force_thrust_n`, it makes ``V' = (v_c − V)/τ_V`` wherever
-    the engine's clamp does not bind. The one expression the lag RHS and the exported record
-    thrust both read."""
-    return sin_gamma + (speed_command_mps - speed_mps) / (GRAVITY_MPS2 * speed_time_constant_s)
+class FlightAerodynamics(NamedTuple):
+    """The polar at one load factor: whether the wing stalls asking for it, and the drag."""
+
+    stalled: torch.Tensor
+    drag_n: torch.Tensor
 
 
-def path_angle_load_factor(
-    path_angle_command_rad: torch.Tensor,
-    sin_gamma: torch.Tensor,
-    cos_gamma: torch.Tensor,
-    speed_mps: torch.Tensor,
-    bank_rad: torch.Tensor,
-    path_angle_time_constant_s: torch.Tensor | float,
-    min_load_factor: torch.Tensor | float,
-    max_load_factor: torch.Tensor | float,
-) -> torch.Tensor:
-    """The load factor a first-order PATH loop asks for, the vertical analogue of
-    :func:`speed_loop_specific_force`.
-
-    ``n = [cos γ + V·(γ* − γ)/(g·τ_γ)] / cos φ``, clipped to the load box. Flown through the
-    unchanged RHS it gives ``γ' = (γ* − γ)/τ_γ`` wherever neither the box nor the stall clamp
-    binds, on every airframe. γ is read as ``atan2(sin γ, cos γ)`` from the caller's own
-    components so the chart and the geodetic callers agree on it. The one expression the lag
-    RHS and the exported record load both read."""
-    gamma = torch.atan2(sin_gamma, cos_gamma)
-    vertical = cos_gamma + speed_mps * (path_angle_command_rad - gamma) / (
-        GRAVITY_MPS2 * path_angle_time_constant_s
+def flight_aerodynamics(
+    condition: FlightCondition, load_factor: torch.Tensor, aero_params: torch.Tensor
+) -> FlightAerodynamics:
+    """:func:`aerodynamic_coefficients` and :func:`drag_force_n` at ``load_factor`` — computed
+    ONCE per RHS evaluation, so the drag a control law adds back (the specific-force thrust) is
+    the very tensor the RHS subtracts."""
+    _cl, cd, stalled = aerodynamic_coefficients(
+        load_factor, condition.speed_mps, condition.mass_kg, condition.density, aero_params
     )
-    return torch.clamp(vertical / torch.cos(bank_rad), min_load_factor, max_load_factor)
+    return FlightAerodynamics(
+        stalled=stalled,
+        drag_n=drag_force_n(condition.density, condition.speed_mps, cd, aero_params[..., 0]),
+    )
 
 
 def enu_rhs(

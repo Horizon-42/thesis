@@ -58,9 +58,7 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_NAMES,
-    CONTROL_SPECIFIC_FORCE,
-    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
-    CONTROL_SPEED_COMMAND,
+    CONTROL_PARAMETERIZATION_SCOPES,
     CONTROL_THRUST_FRACTION,
     DEFAULT_N_SEGMENTS_BY_MODEL,
     HORIZON_FULL,
@@ -79,14 +77,6 @@ _DYNAMICS_SLUG = {
     "kinematic": "kin",
     CONTROL_DYNAMICS_POINT_MASS: "pm",
     CONTROL_DYNAMICS_FIRST_ORDER_LAG: "lag",
-}
-#: The longitudinal contract off its default, as the dynamics word and the slug spell it.
-#: It is physics — WHICH quantity the rollout integrates the head's first column as — so it
-#: sits in the always-shown dynamics word, never in the foldable meta list.
-_THRUST_PARAMETERIZATION_SLUG = {
-    CONTROL_SPECIFIC_FORCE: "sf",
-    CONTROL_SPEED_COMMAND: "sc",
-    CONTROL_SPECIFIC_FORCE_PATH_ANGLE: "sfpa",
 }
 _BACKEND_SLUG = {
     # `transport-chart-velocity` is RETIRED from the config vocabulary (T2, 2026-09-07) and
@@ -845,7 +835,10 @@ def run_slug(config: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
     dyn = _DYNAMICS_SLUG.get(model, _slugify(str(model)))
     thrust = _thrust_parameterization(config)
     if config.get("prediction_output") == PREDICTION_CONTROL and thrust != CONTROL_THRUST_FRACTION:
-        dyn += f"-{_THRUST_PARAMETERIZATION_SLUG.get(thrust, _slugify(thrust))}"
+        # The control contract off its default is physics — WHICH quantities the rollout
+        # integrates the head's columns as — so it sits in the always-shown dynamics word, never
+        # in the foldable meta list; its word is the config scope row's.
+        dyn += f"-{CONTROL_PARAMETERIZATION_SCOPES[thrust].slug}"
     backend = config.get("control_dynamics_backend") or CONTROL_DYNAMICS_REANCHORED_RK4
     if config.get("prediction_output") == PREDICTION_CONTROL and (
         backend != CONTROL_DYNAMICS_REANCHORED_RK4

@@ -5,6 +5,8 @@ Under the specific-force law the RHS re-solves the thrust at every stage as
 read ``V' = g·(a_x - sin γ)`` wherever the clamp does not bind — for every airframe — and
 must read exactly the thrust-fraction law's where it does. The thrust-fraction law is pinned
 to its own composition so the refactor that made room for the second law cannot move it.
+Since the laws share one RHS (2026-09-16), a law is exercised through that RHS and its own two
+resolvers, and the geodetic reading the record uses is pinned to the one the RHS flies.
 """
 
 from __future__ import annotations
@@ -14,20 +16,20 @@ import math
 import pytest
 import torch
 
-from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, specific_force_thrust_n
+from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, flight_aerodynamics
 from aerodynamic_model.torch_lag_dynamics import (
     THRUST_FRACTION_LAW,
     SpecificForceLaw,
     lag_rhs,
-    lag_rhs_specific_force,
     lag_state_from_geodetic,
     lag_state_scale,
+    lag_step_context,
     rollout_piecewise_constant,
     rollout_piecewise_constant_at_times,
 )
 from aerodynamic_model.torch_transport_chart_dynamics import (
+    transport_chart_kinematics,
     transport_chart_rhs,
-    transport_chart_specific_force_thrust_n,
 )
 
 FRAME = torch.tensor([[35.9, -78.8, 120.0, 0.3]], dtype=torch.float64)
@@ -42,16 +44,24 @@ AIRFRAMES = (
 )
 
 
-def _lag_state(airframe, *, speed=85.0, gamma=-0.05, altitude=900.0, actuators):
-    aero, mass, _thrust = airframe
-    geodetic = torch.tensor(
-        [[35.95, -78.75, altitude, speed, 1.1, gamma, mass]], dtype=torch.float64
+def _geodetic(airframe, *, speed=85.0, gamma=-0.05, altitude=900.0):
+    return torch.tensor(
+        [[35.95, -78.75, altitude, speed, 1.1, gamma, airframe[1]]], dtype=torch.float64
     )
+
+
+def _lag_state(airframe, *, speed=85.0, gamma=-0.05, altitude=900.0, actuators):
+    geodetic = _geodetic(airframe, speed=speed, gamma=gamma, altitude=altitude)
     scale = lag_state_scale(None, FRAME)
     state = lag_state_from_geodetic(
         geodetic, torch.tensor([actuators], dtype=torch.float64), FRAME, scale
     )
-    return state, torch.tensor([aero], dtype=torch.float64), scale
+    return state, torch.tensor([airframe[0]], dtype=torch.float64), scale
+
+
+def _rhs(law, state, commands, aero, thrust, scale):
+    context = lag_step_context(law, FRAME, TAU, thrust, scale, state.new_zeros((1, 7)))
+    return lag_rhs(state, commands, aero, context, law)
 
 
 def _speed_rate(state: torch.Tensor, rate: torch.Tensor) -> torch.Tensor:
@@ -66,9 +76,7 @@ def test_drag_cancels_so_the_specific_force_moves_every_airframe_alike(airframe,
     state, aero, scale = _lag_state(airframe, actuators=(specific_force, 0.2, 1.05))
     thrust = torch.tensor([airframe[2]], dtype=torch.float64)
     commands = state[..., 7:]           # actuators at their commands: the lag rows are zero
-    rate = lag_rhs_specific_force(
-        state, commands, aero, FRAME, TAU, MIN_FRACTION * thrust, thrust, scale
-    )
+    rate = _rhs(SpecificForceLaw(MIN_FRACTION), state, commands, aero, thrust, scale)
     sin_gamma = state[..., 5] / state[..., 3:6].norm(dim=-1)
     expected = GRAVITY_MPS2 * (specific_force - sin_gamma)
     assert _speed_rate(state, rate).item() == pytest.approx(expected.item(), rel=1e-9, abs=1e-12)
@@ -84,10 +92,8 @@ def test_where_the_clamp_binds_the_law_is_the_thrust_fractions_at_that_bound(
     thrust = torch.tensor([airframe[2]], dtype=torch.float64)
     sf_state, aero, scale = _lag_state(airframe, actuators=(specific_force, 0.2, 1.05))
     tf_state, _aero, _scale = _lag_state(airframe, actuators=(fraction, 0.2, 1.05))
-    sf_rate = lag_rhs_specific_force(
-        sf_state, sf_state[..., 7:], aero, FRAME, TAU, MIN_FRACTION * thrust, thrust, scale
-    )
-    tf_rate = lag_rhs(tf_state, tf_state[..., 7:], aero, FRAME, TAU, thrust, scale)
+    sf_rate = _rhs(SpecificForceLaw(MIN_FRACTION), sf_state, sf_state[..., 7:], aero, thrust, scale)
+    tf_rate = _rhs(THRUST_FRACTION_LAW, tf_state, tf_state[..., 7:], aero, thrust, scale)
     assert torch.allclose(sf_rate[..., :7], tf_rate[..., :7], rtol=0.0, atol=1e-12)
 
 
@@ -103,26 +109,28 @@ def test_the_thrust_fraction_law_is_its_own_composition_unchanged():
         (transport_chart_rhs(state[..., :7], physical, aero, FRAME), (commands - actual) / TAU),
         dim=-1,
     )
-    assert torch.equal(lag_rhs(state, commands, aero, FRAME, TAU, thrust, scale), expected)
+    assert torch.equal(_rhs(THRUST_FRACTION_LAW, state, commands, aero, thrust, scale), expected)
 
 
-def test_the_chart_thrust_reads_the_state_the_way_the_rhs_does():
-    """At a chart state the thrust helper equals the generic one fed the RHS's own reading."""
+def test_the_geodetic_reading_resolves_the_thrust_the_rhs_flies():
+    """The record and the heading-rate loss read a law off a GEODETIC state
+    (``geodetic_controls``); it must resolve what the RHS resolves at the same chart state."""
     airframe = AIRFRAMES[2]
+    law = SpecificForceLaw(MIN_FRACTION)
     thrust = torch.tensor([airframe[2]], dtype=torch.float64)
-    state, aero, _scale = _lag_state(airframe, speed=92.0, altitude=1500.0, actuators=(0.0, 0.0, 1.0))
-    chart = state[..., :7]
-    speed = chart[..., 3:6].norm(dim=-1)
-    altitude = FRAME[:, 2] + chart[..., 2]
-    generic = specific_force_thrust_n(
-        torch.tensor([-0.03], dtype=torch.float64), torch.tensor([1.2], dtype=torch.float64),
-        speed, altitude, chart[..., 6], aero, MIN_FRACTION * thrust, thrust,
+    actual = torch.tensor([[-0.03, 0.2, 1.2]], dtype=torch.float64)
+    geodetic = _geodetic(airframe, speed=92.0, altitude=1500.0)
+    state, aero, scale = _lag_state(airframe, speed=92.0, altitude=1500.0, actuators=actual[0].tolist())
+    kinematics = transport_chart_kinematics(state[..., :7], FRAME)
+    parameters = law.parameter_matrix(thrust, geodetic, dtype=torch.float64, device=torch.device("cpu"))
+    drag = flight_aerodynamics(kinematics.condition, actual[..., 2], aero).drag_n
+    via_chart = law.resolve_thrust(kinematics.condition, actual, drag, thrust, parameters)
+    via_geodetic = law.geodetic_controls(
+        geodetic.unsqueeze(1), actual.unsqueeze(1), max_thrust_n=thrust,
+        initial_geodetic_states=geodetic, aero_params=aero,
     )
-    via_chart = transport_chart_specific_force_thrust_n(
-        chart, torch.tensor([-0.03], dtype=torch.float64), torch.tensor([1.2], dtype=torch.float64),
-        aero, FRAME, MIN_FRACTION * thrust, thrust,
-    )
-    assert torch.allclose(generic, via_chart, rtol=1e-14, atol=0.0)
+    assert torch.allclose(via_geodetic[:, 0, 0], via_chart, rtol=1e-12, atol=0.0)
+    assert torch.equal(via_geodetic[0, 0, 1:], actual[0, 1:])
 
 
 def _schedule(n_segments=6):

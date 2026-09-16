@@ -1593,3 +1593,13 @@ not identified. It is the stratum both laws are worst at, and it is the open ite
 - **Adoption is the user's call.** What the evidence supports: the specific force as the longitudinal
   contract AND the path angle as the vertical one, together — the longitudinal change alone tripped a veto
   (§7.3), and the vertical change is what turned it into a win.
+
+## 16. The contracts as one row each (2026-09-16, after the merge into `dev-two-tier`)
+
+The contract code of §2–§14 (per-law RHS copies, `backends._LAG_CONTROL_LAWS`, `inverse.anchor_relative`,
+`envelope.speed_command_identity()` / `path_angle_identity()`, `Forecast.longitudinal_commands` /
+`vertical_commands`) was refactored into one `ControlContract` row + one `CONTROL_PARAMETERIZATION_SCOPES` row per
+value and one law protocol over one lag RHS. Names in the sections above are the names at the time; the structure,
+its verification (every stored checkpoint bit-identical) and the one behaviour change (the heading-rate loss
+admitted under the path-angle contract) are in `docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11.
+

@@ -274,7 +274,8 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 |---|---|---|---|
 | T0(a) | 完成（§3） | 8a03408 | — |
 | T0(b) 链式敏感度 L | **完成并发布**（§10.4；KRDU picker 4 个类别 `…@chain-60s` / `…@chain-30s`，native32 与 A0b，165 类 0 错误）：开环链式在两臂上都不赢；native32 的累积主要是锚点分布外 | ec9323e；`outputs/KRDU/experiments/two_tier_t0b_20260916/{chain_60s,chain_30s,identity_check.json,lead_time_error.*}` | 雷达引导整段 ADE：native32 一次成形 2870 → 链 60 s 9893 / 30 s 11930；A0b 3839 → 5585；L：native32 1.2–1.7，A0b 0.5–0.95 |
-| T0(c) 长历史信息 | 9d12b11 首次启动在第一臂建数据时崩（锚点 119 处 38 架 KRDU 航班观测余量 < 3 点，模仿项反演拒绝）→ f5b2531 修正（该锚点不监督任何段，文档既有的全零情形）；**6 臂训练中**（队列 agent，runs worktree @ f5b2531，约 7–8 h） | campaign `outputs/KRDU/experiments/two_tier_t0c_20260916`（首次失败臂移作 `T0c_L60_s1337.aborted-*`） | 三臂共同 cohort 1371（KRDU val） |
+| T0(c) 长历史信息 | **完成：G2 不过（两种子）**（§10.6）：238 s 回看对 118 s，雷达引导配对 ΔADE 均值 −13.9 / +9.7 m（门要求改善 ≥ 125 m），直线 +11.4 / −7.7 m；L90 剂量臂同样无方向。T3 不建。发布交给 opus agent（进行中） | runs worktree @ f5b2531，4 h 28 min，6 臂全 completed；`outputs/KRDU/experiments/two_tier_t0c_20260916/{readout_s1337,readout_s2024}.{txt,json}`、`g2_paired.json` | cohort 1371（雷达引导 468 / 直线 901），全部配对 |
+| 契约合入与重构 | **进行中（§十一）**：sf-n7 已合入 `82e27e8`；重构计划 §11.2–11.3，T1a/T2 待其提交后改用航迹角契约重发 | §11.0 | — |
 | T1 学习型第一层 | T1.1/T1.2 已提交 d9f40d9（opus review ×2）；T2 review 中发现并修正的 lockstep 捕获高度规则在 7d24238；T1.3 臂 `docs/experiments/t1a_plan_tracker_arms.json`（p50 ×2 种子 + p0）+ intents；**排队：J6 = T0(c) 之后训练（runs worktree @ 7d24238）→ `tracker_lockstep`（receding / one-shot / receding-no-plan）→ `python -m evaluation` → 读 G1** | campaign `outputs/KRDU/experiments/two_tier_t1a_20260916`（`lockstep_30s`, `lockstep_30s_noplan`） | — |
 | T2 端到端 | **代码已提交 7d24238**（§10.5，opus review ×2）：`tracker_lockstep --plan-head step3g_fan4_head`；**排队：J7 = J6 之后**，同一批 T1a checkpoint，读 G3 | `…/two_tier_t1a_20260916/{lockstep_30s_head,lockstep_30s_head_noplan}` | — |
 | T3 | **按现有 harvest 不可建**（§10.2：10 分钟历史不存在） | — | — |
@@ -367,3 +368,69 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 - 读未来的地方都去掉：时间上限改为 `cap_factor × 第一次询问的到达时间`（真值来源下 = 真值时长，头来源下 = 头自己的 T）；头在任何它训练过的航班上被拒（逐航班对照头的 train 名册）。**跑道仍是已知的**（包内通例：阈值锚定坐标系）。
 - 门 G3（§6）：雷达引导整段 ADE ≤ 2745 m 且直线 ≤ 415 m（对 native32 一次成形 2870 / 445，两种子）；读 top-1，fan 不作交付。同时报 `receding-no-plan`（只给头的 T）与 `one-shot`（头的计划只在 L−1 给一次）。
 - 冒烟（native32 + 头，30 架，CPU 33 s）：机制跑通；native32 本身不读 token / CTA，所以数字只是链式本身（雷达引导 12 km），不代表 T2。
+
+### 10.6 T0(c) 结果（2026-09-16，KRDU val 1371 架，共同锚点 119，队列 agent @ f5b2531）
+
+| 种子，分层 | L60 | L90 | L120 |（ADE 均值 / FDE p50 / chamfer p50，m）
+|---|---|---|---|
+| s1337 雷达引导（468） | 2929 / 2361 / 1058 | 2938 / 2399 / 1078 | 2915 / 2451 / 1077 |
+| s1337 直线（901） | 131 / 148 / 85 | 126 / 160 / 71 | 143 / 166 / 85 |
+| s2024 雷达引导 | 2917 / 2224 / 1011 | 2921 / 2212 / 1068 | 2926 / 2275 / 1064 |
+| s2024 直线 | 124 / 124 / 61 | 112 / 140 / 55 | 116 / 151 / 59 |
+
+配对 ΔADE（L120 − L60，均值 / 中位，负 = 长回看更好）：雷达引导 −13.9 / −16.5（s1337）、+9.7 / +10.3（s2024）；直线 +11.4 / +2.4、−7.7 / +1.8；L120 更好的航班占 39–52 %。L90 − L60 同样在 ±12 m 内无方向。**G2 不过**（读法：改善 = −配对均值，门 125 m；直线不变差 = 配对均值 ≤ 30 m，`g2_paired.json` 记规则）。结论：在 25 km 切片可得的历史范围内，比 118 s 更长的观测历史没有控制路径能用的进近信息；段 token 长历史层（T3）不建，与 §10.2 的数据约束一致。
+
+## 十一、合入航迹角契约（sf-n7）与控制契约重构（2026-09-16 起；压缩 context 后从这里继续）
+
+**为什么。** T1a 若用推力分数契约，G1 的"完全可飞 ≥ 95 %"几乎必不过（δ 孪生只有 0.4 % 完全可飞，航迹角契约 97.7 %，sf 设计 §15）。用户 2026-09-16："合并进来，然后做实验；不要直接合，要审核它的实现；要保证模块化，结构上的简洁高效；两种不同的动力系统应该可以直接切换，而不是胡乱打补丁。"
+
+### 11.0 状态表
+
+| 步 | 状态 | commit / 产物 |
+|---|---|---|
+| M0 合并 sf-n7 | **完成**：8 个文本冲突两边都留；一处语义冲突（`tracker_lockstep.ask_row` 未把契约传给 `dynamics_arrays`）当场修。ts 743 + 525、aerodynamic_model 140 全过 | `82e27e8` |
+| 架构审查 | **完成**（opus，只读 sf-n7 @ ccd71cb）：见 11.1 | — |
+| 金标准 | **已采集**：合并后代码上 CPU 急切模式 153 项（4 种定律 × 端点/稠密/hook 三种引擎 + 梯度；N4_twin / N3 / N6 / N7 真实 checkpoint 各 3 架 val 的预测、导出记录、损失分量、教师、初始作动器、probe、名字、契约串、饱和标签）；复跑 0 差 | scratchpad `golden_contracts.py` + `golden_merge_82e27e8.pt` |
+| R1 物理层 | **建成，opus review 完**：前向（端点/稠密/hook，四种定律，543 个张量）逐位不变；review 发现运动学构造顺序变了导致点质量与推力分数的梯度有舍入差 → 恢复原顺序后逐位不变；参数列 dtype 统一由消费方指定、几何读数检查形状、删多余的 `_step`；新增 `aerodynamic_model/tests/test_torch_lag_laws.py`（三种定律端点金标准、每类编译入口飞自己的定律、批量几何读数） | 未提交 |
+| R2 契约行 + 消费方 | **建成，opus review 完**：无阻断/中等问题；T1a 形状的配置（路径角 + heading-rate 8 + 随机锚点 + plan token + lockstep + 导出）在合成数据上端到端跑通；89 个可构造的存量 config 名字/slug/身份串全部不变。低级问题已修：记录段字段一处定义（`export.CONTROL_SEGMENT_FIELDS`）且测试查契约列名不与之冲突；`Forecast` 不变式加形状对齐；记录写契约名改为"非默认即写"；`concatenate` 拒绝拼接相对锚点空速的 speed-command 指令；删 `lag_control_law` 别名与 heads 的第三份 `CONTROL_NAMES`；导入期检查改 `raise RuntimeError`；inverse 文档串更正 | 见下 |
+| R3 测试 + 金标准 + 全套 | **金标准全量 153 项**：除预期的两类外逐位不变——比力族（SF/SC/PA）梯度 float64 相对 ≤ 5e-14（共享一个阻力张量，重训 N3/N6/N7 不再逐位复现），PA 记录里的解算过载 ≤ 1e-16 相对（cos γ 改为 √(1−sin²γ)）。**CUDA**（§11.3 第 4 步，16 架 × 8 段，三种定律）：每个版本自身运行间逐位确定，但新旧代码的编译核不同，端点/稠密/梯度差 ≤ 1.6e-13 相对（推力分数也在内）——GPU 上重预测存量 run 与其记录只差舍入，GPU 上重训任何存量 run 不再逐位复现（与升级 torch 同类；对照一律同代码孪生）；修完后 ts 704 + 573、aerodynamic_model 154 全过，金标准不变；新增 `tests/test_control_contracts.py`、PA 下 heading-rate 项测试 | 未提交 |
+| T1a / T2 重发 | 臂已改为航迹角契约（`t1a_plan_tracker_arms.json` base 加 `control_thrust_parameterization`，三臂 TSConfig 构造通过；intents 同步）；待 R2 review 修完并提交 | — |
+
+### 11.1 审查结论（sf-n7 原样不满足要求）
+
+公式本身只定义一次（`path_angle_load_factor`、`specific_force_thrust_n`、`drag_force_n`），物理是对的；结构不是：
+- **契约是一个字符串，行为散在约 15 个模块、4 张平行查表里**（`envelope._CONTRACTS` 盒子、`backends._LAG_CONTROL_LAWS` 定律、`inverse` 的教师 `==` 链、`strategy` 的身份串 `==` 链；另有 `forecast` 的 `isinstance` 链、`diagnostics` / `speed_floor` 的字符串比较、`config` 5 条手写拒绝、`run_naming` 的 slug 表），没有任何东西检查这些表的键一致。
+- **物理层每种定律一整套复制**：RHS、RK4 步、上下文解包、两个 CUDA 编译入口、rollout 入口，4 × 6 = 24 个函数加 4 份手写 step_context 偏移，约占 `torch_lag_dynamics.py` 994 行里的 500 行。编译缓存按代码对象分确实需要"每定律独立代码对象"，但 RHS / RK4 / 解包不需要复制。
+- **每个 RK4 stage 重复算**：比力定律密度、气动系数、阻力各 2 次，航迹角定律几何 3 次；CPU 急切模式每次 RHS 比推力分数慢 39 % / 65 %（B=512 实测）。
+- **潜在错读**：heading-rate 项、barrier、trombone、速度下限都把第 3 列当过载读（航迹角契约下是弧度），靠 config 拒绝挡住；速度下限按 `== specific-force` 选分支，航迹角契约若解禁会静默走推力分数分支。
+- `cut_rows` / `concatenate`（本分支 T0(b)/T1 新增）不切契约的指令字段——合并后的语义冲突，重构里一并消掉。
+- 已失败的速度指令契约（N6）全量接线约 250 行生产代码。**决定：保留为注册表里的一行**（N6 两个 checkpoint 仍可加载；已告知用户），它特有的两件事（锚点空速进 step_context、教师输出相对锚点空速）变成定律参数与契约行上的一个布尔，不再在调用处分支。
+
+### 11.2 目标结构
+
+**物理层**（`aerodynamic_model/`，只依赖 torch）：
+- `torch_dynamics.py`：`FlightCondition(speed, sin γ, mass, density)` 与 `geodetic_flight_condition(states)`；`flight_aerodynamics(condition, load, aero) -> (stalled, drag)`——系数与阻力的唯一入口。
+- `torch_transport_chart_dynamics.py`：`transport_chart_rhs` 拆成 `transport_chart_kinematics(state, frame)`（几何、速度基、`FlightCondition`）+ `transport_chart_rate(kinematics, thrust, bank, load, aerodynamics, aero)`；`transport_chart_rhs` = 两者组合（点质量行照旧调用，逐位不变）。三个 `transport_chart_*_thrust/load` 辅助函数与 `_chart_speed_altitude_mass` 删除。
+- `torch_lag_dynamics.py`：**一个定律协议**。每个定律是冻结 dataclass：`PARAMETERS`（进 step_context 的列名）、`parameters(max_thrust, initial_states)`、静态 `resolve_load(condition, actual, params)`、静态 `resolve_thrust(condition, actual, drag, max_thrust, params)`，以及两个 2 行的编译入口（每类独立代码对象，这是 torch.compile 缓存要求）。**一个** `_lag_rate`（运动学一次、气动一次、定律两次调用、actuator ODE）、**一个** RK4、**一个**解包（布局 `[frame 4 | τ 3 | T_max 1 | 定律参数 k | scale 10]`，四种定律现有布局恰好都是它的特例）、一个分派。几何读数（记录、heading-rate 项）走 `law.geodetic_load(...)` / `law.geodetic_controls(...)`，与 RHS 调同一对静态方法。
+- 为逐位复现：航迹角定律的 cos γ 仍由 sin γ 开方得到（N7 的写法）；比力推力复用本 stage 已算的阻力张量（值与原来两次计算逐位相同）；**不**化简成 `V' = g(n_x − sin γ)`。记录里航迹角契约的过载从 `cos(γ)` 改为定律自己的 `√(1−sin²γ)`，差在 1e-16 相对量级（记录不重写，只是今后导出的末位可能不同）。
+
+**契约层**（ts 侧）：
+- `config.py`：一张纯数据表 `CONTROL_PARAMETERIZATION_SCOPES`，每个取值一行：slug、能否走点质量行、能否用 fitted 教师、建好了哪些 hook 成员（及不支持的理由）。词表 `CONTROL_THRUST_PARAMETERIZATIONS` 从表派生；5 条手写拒绝变成 3 条读表的检查；**heading-rate 的拒绝删除**。
+- `outputs/envelope.py` 的 `ControlContract` 一行持有该契约的全部行为：名字、单位、盒子、中性值、`law`、`teacher`（逆动力学列，numpy）、`relative_to_anchor_speed`、`identity_suffix`（TF/SF 为空，N6/N7 为现存串原文）、`saturation_labels`（TF 保留历史 `thrust_N`）、`record_command_columns`（TF `()`、SF/SC `(0,)`、PA `(0, 2)`）、`longitudinal`（速度下限选反演用）。导入时断言：注册表键 == config 词表。
+- 消费方只调契约行：`backends`（删 `_LAG_CONTROL_LAWS` / `lag_control_law`）、`inverse`（删 `==` 链与 `anchor_relative` 分支）、`strategy.target_contract` 与 `record_fields`、`diagnostics.saturation_labels`、`control/forecast`（记录换算对四种定律同一条路径，TF 的 `physical_controls` 特例删掉）、`speed_floor`（按 `longitudinal` 查表，导入时断言 config 允许 speed-floor 的契约都有实现）、`run_naming`（slug 读 config 表）。
+- `Forecast`：`longitudinal_commands` / `longitudinal_parameterization` / `vertical_commands` 三个字段换成 `commands [N,3]`（契约单位的已飞指令）+ `control_parameterization`；导出按 `record_command_columns` 循环写列；`cut_at_threshold_crossing`、`cut_rows`、`concatenate` 与 `controls` 一起切 `commands`。记录格式不变（金标准比对 JSON）。
+- **heading-rate 项**：预测侧的过载改为 `contract.law.geodetic_load(states, actual, …)`。TF/SF/SC 下就是第 3 列原样（逐位不变）；航迹角契约下是回路解出的过载——γ* 通过升力对转弯率有一个小梯度，这是正确的物理（与 δ 契约下过载对转弯率的作用同类）。
+- **不在本次范围**（记入 code-health follow-ups）：barrier / trombone / 速度下限在航迹角契约下仍拒绝（组合是单独的设计，§14.4）；plan guidance 里重写的路径回路、五份滞后补偿反演、三处 cos γ 写法。
+
+### 11.3 次序与门
+
+1. **R1 物理层** → `golden_contracts.py compare --physics-only` 必须 0 差 → aerodynamic_model 测试改到新 API → opus review（后台，只看物理层代码）。
+2. **R2 契约层 + 消费方**（与 R1 review 并行，文件不重叠）。
+3. **R3** 新测试：注册表完整性（契约键 == config 词表 == scope 表；每个契约行字段自洽）、航迹角契约下 heading-rate 项等于用回路过载显式算出的 ψ 行、`cut_rows`/`concatenate` 切 `commands`、速度下限实现覆盖；**全量金标准 0 差**；ts 全套 + aerodynamic_model 全套 → opus review → 修 → 复核 → 提交。
+4. CUDA 编译路径：GPU 空出后跑一次 CUDA 上的小批量对比（编译后代码对象变了，可能有 ULP 级漂移；对比而非假设）。
+
+### 11.4 T1a / T2 的调整（R 系列提交后）
+
+- 臂 `docs/experiments/t1a_plan_tracker_arms.json`：`control_thrust_parameterization=specific-force+path-angle`，其余不变（A2b 配方：heading-rate 8、bank TV 1、随机锚点、剩余路径均匀、l1 份额；plan token；CTA given）。campaign 名与 intents 同步改（旧名下没有任何产物）。
+- 队列 agent 的 J6 / J7 换到新 commit；J6 冒烟先跑 1 epoch 核对 heading-rate 项非零、有限。
+- G1 / G3 门不变（绝对阈值）。

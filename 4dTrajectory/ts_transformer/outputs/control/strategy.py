@@ -18,11 +18,10 @@ from torch import nn
 from ts_transformer.data.batch_contract import LossComponents, anchor_state
 from ts_transformer.data.channels import IDX
 from ts_transformer.config import (
+    CONTROL_THRUST_FRACTION,
     CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_HOOK_OFF,
-    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
-    CONTROL_SPEED_COMMAND,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -74,7 +73,7 @@ from ts_transformer.outputs.control.loss.objective import (
     control_prediction_loss_components,
 )
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
-from ts_transformer.outputs.envelope import path_angle_identity, speed_command_identity
+from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.outputs.control.supervision import (
     probe_dynamics,
     reference_control_supervision,
@@ -317,18 +316,13 @@ class ControlStrategy(OutputStrategy):
         return ControlOutputModel(config, build_state_forecaster(config))
 
     def target_contract(self, config: TSConfig) -> str:
-        contract = self._objective_target_contract(config)
-        # Under speed-command the loop constant and the box are module constants; spelling
-        # them here makes a checkpoint trained under other constants fail to load
-        # (`envelope.speed_command_identity`). The other laws' strings are unchanged.
-        if config.control_thrust_parameterization == CONTROL_SPEED_COMMAND:
-            contract = f"{contract}+{speed_command_identity()}"
-        # The same for the path-angle contract: τ_γ, its box and its neutral are module
-        # constants (`envelope.path_angle_identity`), so a checkpoint trained under other
-        # values is refused at load instead of flying under these.
-        if config.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE_PATH_ANGLE:
-            contract = f"{contract}+{path_angle_identity()}"
-        return contract
+        # A contract whose constants are module constants rather than config fields spells them
+        # (`ControlContract.identity_suffix`), so a checkpoint trained under other values is
+        # refused at load instead of flying under these.
+        return (
+            self._objective_target_contract(config)
+            + control_contract(config.control_thrust_parameterization).identity_suffix
+        )
 
     def _objective_target_contract(self, config: TSConfig) -> str:
         base = CONTROL_TARGET_CONTRACTS[
@@ -582,11 +576,10 @@ class ControlStrategy(OutputStrategy):
 
     def record_fields(self, forecast: Forecast) -> dict[str, Any]:
         return {
-            # The longitudinal contract the schedule was predicted in — written only off
-            # thrust-fraction (`control_segments[*].<contract column>` carries the commands);
-            # absent means thrust-fraction, so every such record reproduces to the bit.
-            **({"controlThrustParameterization": forecast.longitudinal_parameterization}
-               if forecast.longitudinal_commands is not None else {}),
+            # The contract the schedule was predicted in, off the default; absent means
+            # thrust-fraction, so every such record reproduces to the bit.
+            **({"controlThrustParameterization": forecast.control_parameterization}
+               if forecast.control_parameterization != CONTROL_THRUST_FRACTION else {}),
             # Latent control output: which prior sample this is (None = the top-1 the
             # contract carries) and its probability; whether it was decoded from another
             # flight's latent (the collapse diagnostic). z itself is never written.

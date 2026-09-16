@@ -80,6 +80,7 @@ def _truth_forecast(series, anchor: int, config: TSConfig) -> Forecast:
         predicted_final_time_s=float(offsets[-1]), horizon_mode=config.horizon_mode, passes=1,
         truncated_at_threshold=False, horizon_capped=False, sample_durations_s=durations,
         segment_durations_s=durations, controls=np.zeros((len(offsets), 3)),
+        commands=np.zeros((len(offsets), 3)), control_parameterization=config.control_thrust_parameterization,
         geodetic_values=np.zeros((len(offsets), 7)), prediction_output=PREDICTION_CONTROL,
     )
 
@@ -168,6 +169,8 @@ def test_cut_at_lead_lands_on_the_row_and_keeps_the_clocks_aligned(trained) -> N
     assert cut.final_time_s == pytest.approx(STEP_S)
     assert float(np.sum(cut.segment_durations_s)) == pytest.approx(STEP_S)
     assert len(cut.controls) == len(cut.segment_durations_s)
+    # the commands are cut with the controls they are the contract's reading of
+    assert np.array_equal(cut.commands, forecast.commands[: len(cut.controls)])
     assert cut.command_hook_diagnostics is None
     with pytest.raises(ValueError, match="no rollout row"):
         runner.cut_at_lead(forecast, STEP_S + 0.25)
@@ -187,6 +190,9 @@ def test_hook_free_legs_concatenate_into_one_record_clock(trained) -> None:
     assert whole.predicted_final_time_s == 99.0
     assert whole.command_hook_diagnostics is None
     assert len(whole.controls) == len(whole.segment_durations_s)
+    assert np.array_equal(whole.commands, np.concatenate((first.commands, second.commands)))
+    with pytest.raises(ValueError, match="different control contracts"):
+        concatenate([first, replace(second, control_parameterization="specific-force")], a0, 99.0)
 
 
 def test_the_chain_links_are_independent_reasks_on_the_flown_rows(trained) -> None:

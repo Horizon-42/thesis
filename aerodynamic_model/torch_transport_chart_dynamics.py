@@ -10,6 +10,7 @@ re-anchored CasADi/PyTorch baseline omits it as well.
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import torch
 
@@ -23,12 +24,10 @@ from aerodynamic_model.torch_dynamics import (
     CONTROL_NAMES,
     GRAVITY_MPS2,
     STATE_NAMES,
-    aerodynamic_coefficients,
-    drag_force_n,
+    FlightAerodynamics,
+    FlightCondition,
+    flight_aerodynamics,
     isa_density,
-    path_angle_load_factor,
-    specific_force_thrust_n,
-    speed_loop_specific_force,
 )
 from aerodynamic_model.torch_piecewise_rollout import (
     rollout_piecewise_constant_with_step,
@@ -189,49 +188,95 @@ def transport_chart_state_to_channels(
     )
 
 
-def transport_chart_rhs(
-    state_chart: torch.Tensor,
-    controls: torch.Tensor,
-    aero_params: torch.Tensor,
-    frame_params: torch.Tensor,
-) -> torch.Tensor:
-    """Full-transport continuous RHS in chart position/local-ENU velocity form."""
+class TransportChartKinematics(NamedTuple):
+    """Everything :func:`transport_chart_rate` reads off a chart state, read once: the WGS84
+    geometry, the velocity basis, and the :class:`FlightCondition` the polar and the control
+    laws share."""
+
+    condition: FlightCondition
+    lat0_rad: torch.Tensor
+    lat_rad: torch.Tensor
+    altitude_m: torch.Tensor
+    radius_m: torch.Tensor
+    radius_n: torch.Tensor
+    ve: torch.Tensor
+    vn: torch.Tensor
+    vu: torch.Tensor
+    cos_gamma: torch.Tensor
+    cos_psi: torch.Tensor
+    sin_psi: torch.Tensor
+
+
+def transport_chart_kinematics(
+    state_chart: torch.Tensor, frame_params: torch.Tensor
+) -> TransportChartKinematics:
+    """Read a chart state once for one RHS evaluation."""
     _require_last_dim(
         state_chart, len(TRANSPORT_CHART_STATE_NAMES), "state_chart"
     )
-    _require_last_dim(controls, len(CONTROL_NAMES), "controls")
-    _require_last_dim(aero_params, len(AERO_PARAMETER_NAMES), "aero_params")
-    east, north, up, ve, vn, vu, mass = state_chart.unbind(-1)
-    del east
-    thrust, bank, load_command = controls.unbind(-1)
+    _east, north, up, ve, vn, vu, mass = state_chart.unbind(-1)
     lat0_rad, lat_rad, altitude, radius_m, radius_n, _alt0 = _wgs84_geometry(
         north, up, frame_params
     )
     horizontal_speed = torch.sqrt(ve.square() + vn.square())
     speed = torch.sqrt(horizontal_speed.square() + vu.square())
+    # Built in the order the monolithic RHS built them: autograd sums the gradients flowing
+    # into a shared tensor in creation order, so another order moves every gradient by
+    # round-off and a retrained run by more (review 2026-09-16, R1 finding 1).
     cos_gamma = horizontal_speed / speed
     sin_gamma = vu / speed
     cos_psi = ve / horizontal_speed
     sin_psi = vn / horizontal_speed
-
     density = isa_density(altitude)
-    _cl, cd, stalled = aerodynamic_coefficients(
-        load_command, speed, mass, density, aero_params
+    return TransportChartKinematics(
+        condition=FlightCondition(
+            speed_mps=speed, sin_gamma=sin_gamma, mass_kg=mass, density=density
+        ),
+        lat0_rad=lat0_rad,
+        lat_rad=lat_rad,
+        altitude_m=altitude,
+        radius_m=radius_m,
+        radius_n=radius_n,
+        ve=ve,
+        vn=vn,
+        vu=vu,
+        cos_gamma=cos_gamma,
+        cos_psi=cos_psi,
+        sin_psi=sin_psi,
     )
+
+
+def transport_chart_rate(
+    kinematics: TransportChartKinematics,
+    thrust_n: torch.Tensor,
+    bank_rad: torch.Tensor,
+    load_command: torch.Tensor,
+    aerodynamics: FlightAerodynamics,
+    aero_params: torch.Tensor,
+) -> torch.Tensor:
+    """Full-transport continuous RHS at newton controls, given the polar already evaluated at
+    ``load_command`` (:func:`flight_aerodynamics`) — the half a control law cannot change. The
+    caller evaluates that polar at THIS ``load_command``; nothing here can check it."""
+    _require_last_dim(aero_params, len(AERO_PARAMETER_NAMES), "aero_params")
+    condition = kinematics.condition
+    speed, sin_gamma, mass = condition.speed_mps, condition.sin_gamma, condition.mass_kg
+    cos_gamma, cos_psi, sin_psi = kinematics.cos_gamma, kinematics.cos_psi, kinematics.sin_psi
+    ve, vn, vu = kinematics.ve, kinematics.vn, kinematics.vu
+    lat_rad, altitude = kinematics.lat_rad, kinematics.altitude_m
+    radius_m, radius_n = kinematics.radius_m, kinematics.radius_n
     area = aero_params[..., 0]
     cl_max = aero_params[..., 1]
     realized_load = torch.where(
-        stalled,
+        aerodynamics.stalled,
         0.5
-        * density
+        * condition.density
         * speed.square()
         * cl_max
         * area
         / (mass * GRAVITY_MPS2),
         load_command,
     )
-    drag = drag_force_n(density, speed, cd, area)
-    speed_rate = (thrust - drag) / mass - GRAVITY_MPS2 * sin_gamma
+    speed_rate = (thrust_n - aerodynamics.drag_n) / mass - GRAVITY_MPS2 * sin_gamma
 
     tangent = torch.stack(
         (cos_gamma * cos_psi, cos_gamma * sin_psi, sin_gamma), dim=-1
@@ -246,10 +291,10 @@ def transport_chart_rhs(
         speed_rate.unsqueeze(-1) * tangent
         + (
             GRAVITY_MPS2
-            * (realized_load * torch.cos(bank) - cos_gamma)
+            * (realized_load * torch.cos(bank_rad) - cos_gamma)
         ).unsqueeze(-1)
         * gamma_normal
-        + (GRAVITY_MPS2 * realized_load * torch.sin(bank)).unsqueeze(-1)
+        + (GRAVITY_MPS2 * realized_load * torch.sin(bank_rad)).unsqueeze(-1)
         * heading_normal
     )
 
@@ -270,7 +315,7 @@ def transport_chart_rhs(
 
     east_rate = ve * (
         WGS84_A
-        * torch.cos(lat0_rad)
+        * torch.cos(kinematics.lat0_rad)
         / ((radius_n + altitude) * torch.cos(lat_rad))
     )
     north_rate = vn * WGS84_A / (radius_m + altitude)
@@ -284,90 +329,24 @@ def transport_chart_rhs(
     )
 
 
-def _chart_speed_altitude_mass(
-    state_chart: torch.Tensor, frame_params: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``(speed, vertical speed, altitude, mass)`` read off a chart state exactly as
-    :func:`transport_chart_rhs` reads them — the one reading both thrust helpers share, so
-    the drag they add is the drag the RHS subtracts."""
-    _require_last_dim(
-        state_chart, len(TRANSPORT_CHART_STATE_NAMES), "state_chart"
-    )
-    _east, north, up, ve, vn, vu, mass = state_chart.unbind(-1)
-    _lat0, _lat, altitude, _radius_m, _radius_n, _alt0 = _wgs84_geometry(
-        north, up, frame_params
-    )
-    horizontal_speed = torch.sqrt(ve.square() + vn.square())
-    speed = torch.sqrt(horizontal_speed.square() + vu.square())
-    return speed, vu, altitude, mass
-
-
-def transport_chart_specific_force_thrust_n(
+def transport_chart_rhs(
     state_chart: torch.Tensor,
-    specific_force: torch.Tensor,
-    load_factor: torch.Tensor,
+    controls: torch.Tensor,
     aero_params: torch.Tensor,
     frame_params: torch.Tensor,
-    min_thrust_n: torch.Tensor,
-    max_thrust_n: torch.Tensor,
 ) -> torch.Tensor:
-    """:func:`specific_force_thrust_n` at a chart state, read the way
-    :func:`transport_chart_rhs` reads it (same speed, same ``_wgs84_geometry`` altitude,
-    same mass), so the drag it adds is the drag the RHS subtracts."""
-    speed, _vu, altitude, mass = _chart_speed_altitude_mass(state_chart, frame_params)
-    return specific_force_thrust_n(
-        specific_force, load_factor, speed, altitude, mass, aero_params,
-        min_thrust_n, max_thrust_n,
-    )
-
-
-def transport_chart_speed_command_thrust_n(
-    state_chart: torch.Tensor,
-    speed_command_mps: torch.Tensor,
-    speed_time_constant_s: torch.Tensor,
-    load_factor: torch.Tensor,
-    aero_params: torch.Tensor,
-    frame_params: torch.Tensor,
-    min_thrust_n: torch.Tensor,
-    max_thrust_n: torch.Tensor,
-) -> torch.Tensor:
-    """The thrust a first-order speed loop asks for at a chart state: the specific force
-    ``sin γ + (v_c − V)/(g·τ_V)`` flown through :func:`specific_force_thrust_n`, with V and γ
-    read as :func:`transport_chart_rhs` reads them. Wherever the clamp does not bind, the RHS
-    then integrates ``V' = (v_c − V)/τ_V`` on every airframe."""
-    speed, vu, altitude, mass = _chart_speed_altitude_mass(state_chart, frame_params)
-    specific_force = speed_loop_specific_force(
-        speed_command_mps, speed, vu / speed, speed_time_constant_s
-    )
-    return specific_force_thrust_n(
-        specific_force, load_factor, speed, altitude, mass, aero_params,
-        min_thrust_n, max_thrust_n,
-    )
-
-
-def transport_chart_path_angle_load_factor(
-    state_chart: torch.Tensor,
-    path_angle_command_rad: torch.Tensor,
-    bank_rad: torch.Tensor,
-    path_angle_time_constant_s: torch.Tensor,
-    frame_params: torch.Tensor,
-    min_load_factor: torch.Tensor | float,
-    max_load_factor: torch.Tensor | float,
-) -> torch.Tensor:
-    """The load factor a first-order path loop asks for at a chart state, with V and γ read as
-    :func:`transport_chart_rhs` reads them. Wherever neither the load box nor the stall clamp
-    binds, the RHS then integrates ``γ' = (γ* − γ)/τ_γ`` on every airframe."""
-    speed, vu, _altitude, _mass = _chart_speed_altitude_mass(state_chart, frame_params)
-    sin_gamma = vu / speed
-    return path_angle_load_factor(
-        path_angle_command_rad,
-        sin_gamma,
-        torch.sqrt(torch.clamp(1.0 - sin_gamma * sin_gamma, min=0.0)),
-        speed,
-        bank_rad,
-        path_angle_time_constant_s,
-        min_load_factor,
-        max_load_factor,
+    """Full-transport continuous RHS in chart position/local-ENU velocity form, at newton
+    controls ``(thrust_N, bank_rad, load_factor)``."""
+    _require_last_dim(controls, len(CONTROL_NAMES), "controls")
+    kinematics = transport_chart_kinematics(state_chart, frame_params)
+    thrust, bank, load_command = controls.unbind(-1)
+    return transport_chart_rate(
+        kinematics,
+        thrust,
+        bank,
+        load_command,
+        flight_aerodynamics(kinematics.condition, load_command, aero_params),
+        aero_params,
     )
 
 

@@ -90,7 +90,13 @@ from aerodynamic_model.torch_dynamics import (
     drag_force_n,
     isa_density,
 )
-from ts_transformer.config import CONTROL_SPECIFIC_FORCE, TSConfig
+from ts_transformer.config import (
+    CONTROL_HOOK_SPEED_FLOOR,
+    CONTROL_PARAMETERIZATION_SCOPES,
+    CONTROL_SPECIFIC_FORCE,
+    CONTROL_THRUST_FRACTION,
+    TSConfig,
+)
 from ts_transformer.outputs.constraints.gates import RunwayAxesView, runway_axes_view
 from ts_transformer.outputs.constraints.saturation import SOFTPLUS_LINEAR_THRESHOLD, soft_max
 from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
@@ -167,9 +173,10 @@ class SpeedFloor:
         self.margin = config.control_speed_floor_margin
         self.thrust_lag_s = config.control_thrust_time_constant_s
         self.hard = hard
-        # WHICH quantity the first column is (the module docstring's last section).
-        self.specific_force = config.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE
         contract = control_contract(config.control_thrust_parameterization)
+        # WHICH quantity the first column is (the module docstring's last section) picks the
+        # inversion; config admits the floor only on contracts that have one (asserted below).
+        self._floor = _FLOORS[contract.longitudinal]
         # The head's floor: an in-box command is always at or above it (the hook's parking).
         self.command_floor = contract.lower[0]
         self.softness = (
@@ -182,8 +189,11 @@ class SpeedFloor:
     def __call__(
         self, state: RolloutStateView, command: torch.Tensor, segment_index: int
     ) -> torch.Tensor:
-        if self.specific_force:
-            return self._specific_force_floor(state, command)
+        return self._floor(self, state, command)
+
+    def _thrust_fraction_floor(
+        self, state: RolloutStateView, command: torch.Tensor
+    ) -> torch.Tensor:
         view = runway_axes_view(state, self.runway_heading)
         dtype = command.dtype
         hold = view.hold_s
@@ -319,3 +329,18 @@ class SpeedFloor:
     def diagnostic_labels(self) -> dict[str, str]:
         """No named variants: this module computes one thing one way."""
         return {}
+
+
+#: The floor's inversion per longitudinal law (``ControlContract.longitudinal``).
+_FLOORS = {
+    CONTROL_THRUST_FRACTION: SpeedFloor._thrust_fraction_floor,
+    CONTROL_SPECIFIC_FORCE: SpeedFloor._specific_force_floor,
+}
+# Fail at import: every contract config lets the floor run on (`ControlParameterizationScope.
+# hook_modules`) must have its inversion here, or a new pairing would die inside a rollout.
+for _value, _scope in CONTROL_PARAMETERIZATION_SCOPES.items():
+    if (CONTROL_HOOK_SPEED_FLOOR in _scope.hook_modules
+            and control_contract(_value).longitudinal not in _FLOORS):
+        raise RuntimeError(
+            f"config admits the speed floor under {_value!r} and no inversion is built for it"
+        )

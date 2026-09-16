@@ -235,11 +235,11 @@ def test_a_speed_command_record_says_so_and_prices_its_thrust_where_each_segment
     forecast = forecast_control_batch(model, series, config, normalizer, anchor, torch.device("cpu"))[0]
     record = build_prediction_record(series[0], forecast, index=0, model_name=config.model,
                                      horizon_mode=config.horizon_mode)
-    assert forecast.longitudinal_parameterization == CONTROL_SPEED_COMMAND
-    assert len(forecast.longitudinal_commands) == len(forecast.controls) == config.n_segments
+    assert forecast.control_parameterization == CONTROL_SPEED_COMMAND
+    assert len(forecast.commands) == len(forecast.controls) == config.n_segments
     assert record.states_payload["source"]["controlThrustParameterization"] == CONTROL_SPEED_COMMAND
     segments = record.states_payload["control_segments"]
-    assert [s["speed_command_delta"] for s in segments] == pytest.approx(list(forecast.longitudinal_commands))
+    assert [s["speed_command_delta"] for s in segments] == pytest.approx(list(forecast.commands[:, 0]))
     assert all("specific_force" not in s for s in segments)
     # Each thrust, evaluated independently at ITS segment's start (numpy drag): the loop's
     # specific force toward V₀ + Δv at that state, clamped to the engine.
@@ -364,21 +364,23 @@ def test_every_named_recipe_refuses_the_speed_command():
     TSConfig(**{**recipe_settings("simple-v3", keep_name=False), **SPEED_COMMAND})
 
 
-def test_the_target_contract_spells_the_speed_command_constants(monkeypatch):
+def test_the_target_contract_spells_the_speed_command_constants():
     """The loop constant and the box are module constants, so the checkpoint's target
     contract carries them: a checkpoint trained under other constants is refused at load
     (review S2). The other laws' contracts do not change."""
-    import ts_transformer.outputs.envelope as envelope
     from ts_transformer.outputs import strategy
 
     config = _config(**SPEED_COMMAND)
     contract = strategy(config).target_contract(config)
-    assert contract.endswith("+" + envelope.speed_command_identity())
-    assert "tau-v=8s" in contract and "box=-90..20m/s" in contract
+    assert contract.endswith(SPEED_COMMAND_CONTRACT.identity_suffix)
+    # verbatim as the stored N6 checkpoints carry it
+    assert contract.endswith("+speed-command(tau-v=8s,box=-90..20m/s,neutral=0)-v1")
+    # spelled from the constants the law flies and the box the head predicts in
+    law = SPEED_COMMAND_CONTRACT.law
+    assert f"tau-v={law.speed_time_constant_s:g}s" in contract
+    assert f"box={SPEED_COMMAND_CONTRACT.lower[0]:g}..{SPEED_COMMAND_CONTRACT.upper[0]:g}m/s" in contract
     for other in (_config(**LAG), _config(**SPECIFIC_FORCE)):
         assert "speed-command" not in strategy(other).target_contract(other)
-    monkeypatch.setattr(envelope, "SPEED_LOOP_TIME_CONSTANT_S", 10.0)
-    assert strategy(config).target_contract(config) != contract
 
 
 def test_the_anchor_actuator_is_clipped_to_the_speed_command_box(monkeypatch):
@@ -391,12 +393,6 @@ def test_the_anchor_actuator_is_clipped_to_the_speed_command_box(monkeypatch):
                         lambda *args, **kwargs: np.array([500.0, 0.0, 1.0]))
     row = _rows(config, [series], config.seq_len - 1)[0]
     assert row["initial_controls"][0] == SPEED_COMMAND_CONTRACT.upper[0]
-
-
-def test_the_saturation_labels_are_the_contracts():
-    from ts_transformer.outputs.control.training.diagnostics import saturation_labels
-
-    assert saturation_labels(CONTROL_SPEED_COMMAND) == SPEED_COMMAND_CONTRACT.names
 
 
 def test_the_name_and_the_recipe_carry_the_law():

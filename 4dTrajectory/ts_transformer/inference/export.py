@@ -92,6 +92,14 @@ class PredictionRecord:
         return float(self.eval_record["final_time_s"])
 
 
+#: A record's ``control_segments[*]`` fields, in order; a contract's command columns ride beside them
+#: under the contract's own names, which must never be one of these
+#: (``tests/test_control_contracts.py``).
+CONTROL_SEGMENT_FIELDS = (
+    "segment_index", "start_t", "end_t", "duration_s", "thrust", "bank_rad", "load_factor",
+)
+
+
 def build_prediction_record(
     series: FlightSeries,
     forecast: Forecast,
@@ -224,39 +232,23 @@ def build_prediction_record(
         predicted_state_rows = list(eval_record["states"])
         starts = np.concatenate(([0.0], control_boundaries[:-1]))
         control_segments = [
-            {
-                "segment_index": index,
-                "start_t": float(start),
-                "end_t": float(end),
-                "duration_s": float(duration),
-                "thrust": float(control.thrust),
-                "bank_rad": float(control.bank_rad),
-                "load_factor": float(control.load_factor),
-            }
+            dict(zip(CONTROL_SEGMENT_FIELDS, (
+                index, float(start), float(end), float(duration),
+                float(control.thrust), float(control.bank_rad), float(control.load_factor),
+            ), strict=True))
             for index, (start, end, duration, control) in enumerate(
                 zip(starts, control_boundaries, forecast.segment_durations_s, controls)
             )
         ]
-        # Under specific-force or speed-command, `thrust` above is the command's thrust at the
-        # segment's start, and the command itself rides beside it under its contract's name
-        # (`specific_force`, `speed_command_delta`). Absent under thrust-fraction, whose
-        # thrust IS the command, so every such record reproduces to the bit.
-        if forecast.longitudinal_commands is not None:
-            name = control_contract(forecast.longitudinal_parameterization).names[0]
-            for segment, command in zip(
-                control_segments, forecast.longitudinal_commands, strict=True
-            ):
-                segment[name] = float(command)
-        # Under `specific-force+path-angle` the third column is the head's path-angle target
-        # and the record's `load_factor` is the load the loop resolved where the segment began
-        # (`outputs/control/forecast.record_newton_controls`), so the command rides beside it
-        # under its own contract name.
-        if forecast.vertical_commands is not None:
-            name = control_contract(forecast.longitudinal_parameterization).names[2]
-            for segment, command in zip(
-                control_segments, forecast.vertical_commands, strict=True
-            ):
-                segment[name] = float(command)
+        # Where a newton column above is the contract law's resolution of the command (the
+        # thrust at the segment's start under the specific force, the load the path loop
+        # resolved), the command itself rides beside it under its contract's name. None under
+        # thrust-fraction, whose thrust IS the command, so every such record reproduces to
+        # the bit.
+        contract = control_contract(forecast.control_parameterization)
+        for segment, command in zip(control_segments, forecast.commands, strict=True):
+            for column in contract.record_command_columns:
+                segment[contract.names[column]] = float(command[column])
     eval_record["reference_file"] = f"{REFERENCES_DIR}/{record_stem(scenario.source, index)}{_REFERENCE_EVAL_SUFFIX}"
 
     reference_record = reference_evaluation_record(

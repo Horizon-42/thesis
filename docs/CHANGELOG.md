@@ -4,6 +4,47 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-16 — the control contracts merged into dev-two-tier and refactored into one row each; T0(c) measured
+
+**Ask.** The user, on merging the path-angle contract (branch `sf-n7`) for the two-tier T1a experiment: "不要直接合，
+要审核一下它的实现；要保证模块化，结构上的简洁高效；两种不同的动力系统，应该是可以直接切换的，而不是胡乱打补丁。"
+
+**Merge** `82e27e8`: 8 textual conflicts kept both sides; one semantic conflict fixed (`tracker_lockstep.ask_row`
+built its dynamics row without the contract).
+
+**Review before refactor** (opus, read-only): a contract was one string whose behaviour sat in ~15 modules and 4
+parallel lookup tables with no key check; the lag module carried 4 laws × 6 near-identical functions (~500 lines)
+and re-read the geometry, density and drag up to three times per RK4 stage (eager CPU +39 % / +65 %).
+
+**Refactor** (`4dTrajectory/ts_transformer/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11):
+- `aerodynamic_model`: `FlightCondition` / `flight_aerodynamics` (the polar once per stage);
+  `transport_chart_rhs` = `transport_chart_kinematics` + `transport_chart_rate`; ONE law protocol
+  (`_ControlLaw`: `PARAMETERS`, `resolve_load`, `resolve_thrust`, geodetic readers) with ONE `lag_rhs`, ONE RK4 and
+  one step-context layout; each law keeps two compile entry points (torch.compile caches per code object).
+- ts side: `ControlContract` owns law, teacher, identity suffix, record command columns, saturation labels and the
+  longitudinal kind; `config.CONTROL_PARAMETERIZATION_SCOPES` owns where a value may be used (the vocabulary is
+  derived from it); consumers read rows (backends, inverse, strategy, diagnostics, record export, speed floor,
+  run naming). `Forecast.commands` + `control_parameterization` replace three contract-specific fields, so the
+  threshold cut, `cut_rows` and `concatenate` carry commands (the merge's latent gap).
+- **The heading-rate loss is admitted under `specific-force+path-angle`**: it reads the load the path loop resolved.
+- Kept: `speed-command` (N6, failed) as a row, loadable.
+- Not in scope, logged as `docs/code-health-followups.md` §38: the plan guidance's restated path loop, five copies of
+  the lag-credit inversion, hooks under path-angle.
+
+**Verified.** A golden harness captured on the merge (real N4_twin / N3 / N6 / N7 checkpoints, 3 KRDU val flights
+each: forecasts, export records, every loss component with and without heading-rate, teacher targets, initial
+actuators, probes, names, slugs, identities, saturation labels; plus the three lag engines for all four laws):
+bit-identical, except the path-angle record's resolved load (≤ 1e-16 relative, cos γ now √(1−sin²γ) as in the
+RHS). Gradients: bit-identical under thrust-fraction and on the point-mass rows (a review found the kinematics
+built in another order and it was restored); round-off (float64 ≤ 5e-14 relative) under the three drag-resolving
+laws, which share one drag tensor. **CUDA:** deterministic per code, but the compiled kernels changed — ≤ 2e-13
+relative from the old code for every contract, thrust-fraction included — so a GPU retrain of any stored run at
+this code is not bit-identical (same-code twins stay the rule). Two opus reviews (physics layer; contract layer).
+
+**T0(c) measured and published** (6 KRDU categories; validator 171 / 0 errors after a dev-server restart): G2 FAILS
+on both seeds — 238 s of lookback against 118 s at the common anchor 119 moves vectored ADE by −13.9 / +9.7 m paired
+(gate 125 m). No long-history segment-token layer.
+
 ### 2026-09-16 — two-tier transformer feasibility report + `lead_time_error` readout
 
 **Ask.** The user: is a two-tier transformer worth building — a short-horizon iTransformer predicting

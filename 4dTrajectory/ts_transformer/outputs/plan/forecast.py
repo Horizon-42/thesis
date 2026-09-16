@@ -269,6 +269,7 @@ def fly_routes(
     controls = (
         physical_controls(rollout.controls, dynamics["max_thrust_n"]).detach().cpu().numpy().astype(np.float64)
     )
+    commands = rollout.controls.detach().cpu().numpy().astype(np.float64)
     diagnostics = per_flight_hook_diagnostics(hook)
     # one segment count for the batch, so the hold FLOWN is each flight's own T / N — at
     # most HOLD_S, shorter on a flight with less time than the batch's longest; the record
@@ -293,6 +294,9 @@ def fly_routes(
             truncated_at_threshold=False,
             horizon_capped=False,
             controls=controls[row],
+            # the guidance commands the thrust-fraction contract (`guidance_config`)
+            commands=commands[row],
+            control_parameterization=CONTROL_THRUST_FRACTION,
             sample_durations_s=np.diff(np.concatenate(([0.0], row_offsets))),
             segment_durations_s=durations[row],
             geodetic_values=query_geodetic[row, :count],

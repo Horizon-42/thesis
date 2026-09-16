@@ -16,7 +16,7 @@ from ts_transformer.data.channels import states_from_channels
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays
 from ts_transformer.outputs.conditioning import condition_vector
-from ts_transformer.outputs.dynamics.inverse import actual_controls, anchor_relative
+from ts_transformer.outputs.dynamics.inverse import actual_controls
 from ts_transformer.outputs.envelope import control_contract
 
 # How much observed lookback the anchor-state control inversion differentiates. It needs
@@ -61,7 +61,7 @@ def anchor_controls(
         max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
         parameterization=parameterization,
     )[-1]
-    return anchor_relative(actual, float(states[-1, 3]), parameterization=parameterization)
+    return control_contract(parameterization).relative_to_anchor(actual, float(states[-1, 3]))
 
 
 def dynamics_arrays(

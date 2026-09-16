@@ -29,6 +29,7 @@ from ts_transformer.geometry.final_approach_geometry import (
     threshold_crossing_index,
 )
 from ts_transformer.outputs import ForecastOptions, strategy
+from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.data.target_conditioning import conditioned_history
 
 
@@ -52,19 +53,13 @@ class Forecast:
     sample_durations_s: np.ndarray
     segment_durations_s: np.ndarray
     controls: np.ndarray | None = None
-    # Control output under a `control_thrust_parameterization` other than thrust-fraction
-    # only: the command itself per segment, in that contract's first column (n_x, or the
-    # speed-command Δv; 1:1 with ``controls``, whose thrust column is then the command's
-    # thrust at each segment's START state), and the parameterisation that names it. None
-    # under thrust-fraction, whose newton thrust IS the command — so a record says which
-    # contract it came from.
-    longitudinal_commands: np.ndarray | None = None
-    longitudinal_parameterization: str | None = None
-    # The VERTICAL command per segment, only under a contract whose third column is not the
-    # load factor (``specific-force+path-angle``: the path-angle target in radians). The
-    # record's own third column is the load the law resolved at each segment's start, so
-    # without this the command the head actually emitted would not be in the record.
-    vertical_commands: np.ndarray | None = None
+    # The schedule FLOWN in its contract's own units, ``[N, 3]`` 1:1 with ``controls`` (whose
+    # newton columns are the contract law's resolution of it at each segment's START state),
+    # and the ``control_thrust_parameterization`` naming the columns. Present exactly when
+    # ``controls`` is; a record carries the contract's ``record_command_columns`` of it, so
+    # the command the head emitted is in the record wherever the newton column is not it.
+    commands: np.ndarray | None = None
+    control_parameterization: str | None = None
     geodetic_values: np.ndarray | None = None
     prediction_output: str = PREDICTION_STATE
     # The corridor gate the inference-time projection applied (``project_onto_final``),
@@ -120,6 +115,18 @@ class Forecast:
     cta_from_quantiles: bool = False
     cta_quantile: float | None = None
     cta_interval: dict[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        if not (self.controls is None) == (self.commands is None) == (self.control_parameterization is None):
+            raise ValueError(
+                "a forecast carries controls, their commands and the contract naming them "
+                "together or not at all"
+            )
+        if self.controls is not None and self.commands.shape != self.controls.shape:
+            raise ValueError(
+                f"commands {self.commands.shape} and controls {self.controls.shape} must align "
+                "segment for segment; a cut or a join that shortens one shortens both"
+            )
 
     @property
     def n_steps(self) -> int:
@@ -302,12 +309,10 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
     # The clock `export` reconstructs, so the two agree to the bit rather than to a sum.
     offsets = np.cumsum(sample_durations_s)
     final_time_s = float(offsets[-1])
-    longitudinal_commands = forecast.longitudinal_commands
-    vertical_commands = forecast.vertical_commands
     if forecast.controls is None:
         # Every non-control forecast carries one clock: segments ARE samples.
         segment_durations_s = forecast.segment_durations_s[: cut + 1]
-        controls = None
+        controls = commands = None
     else:
         boundaries = np.cumsum(forecast.segment_durations_s)
         # `side="left"` gives the first boundary at or after the new end, so the shortened
@@ -317,10 +322,7 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
         segment_durations_s = forecast.segment_durations_s[: last + 1].copy()
         segment_durations_s[-1] = final_time_s - (0.0 if last == 0 else boundaries[last - 1])
         controls = forecast.controls[: last + 1]
-        if longitudinal_commands is not None:
-            longitudinal_commands = longitudinal_commands[: last + 1]
-        if vertical_commands is not None:
-            vertical_commands = vertical_commands[: last + 1]
+        commands = forecast.commands[: last + 1]
     return replace(
         forecast,
         times=forecast.times[: cut + 1],
@@ -331,8 +333,7 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
         sample_durations_s=sample_durations_s,
         segment_durations_s=segment_durations_s,
         controls=controls,
-        longitudinal_commands=longitudinal_commands,
-        vertical_commands=vertical_commands,
+        commands=commands,
         geodetic_values=(
             None if forecast.geodetic_values is None else forecast.geodetic_values[: cut + 1]
         ),
@@ -354,13 +355,16 @@ def cut_rows(forecast: Forecast, count: int) -> Forecast:
     offsets = np.cumsum(sample_durations_s)
     final_time_s = float(offsets[-1])
     if forecast.controls is None:
-        segment_durations_s, controls, last = forecast.segment_durations_s[:count], None, count - 1
+        segment_durations_s, controls, commands, last = (
+            forecast.segment_durations_s[:count], None, None, count - 1
+        )
     else:
         boundaries = np.cumsum(forecast.segment_durations_s)
         last = int(np.searchsorted(boundaries, final_time_s, side="left"))
         segment_durations_s = forecast.segment_durations_s[: last + 1].copy()
         segment_durations_s[-1] = final_time_s - (0.0 if last == 0 else boundaries[last - 1])
         controls = forecast.controls[: last + 1]
+        commands = forecast.commands[: last + 1]
     diagnostics = (
         None if forecast.command_hook_diagnostics is None
         else {**forecast.command_hook_diagnostics, "steps": float(last + 1)}
@@ -369,7 +373,7 @@ def cut_rows(forecast: Forecast, count: int) -> Forecast:
         forecast, times=forecast.times[:count], values=forecast.values[:count],
         normalized_progress=offsets / final_time_s, final_time_s=final_time_s,
         sample_durations_s=sample_durations_s, segment_durations_s=segment_durations_s,
-        controls=controls,
+        controls=controls, commands=commands,
         geodetic_values=None if forecast.geodetic_values is None else forecast.geodetic_values[:count],
         command_hook_diagnostics=diagnostics,
     )
@@ -379,16 +383,26 @@ def concatenate(legs: Sequence[Forecast], anchor: int, predicted_final_time_s: f
     """The legs as one forecast: the rows run on (a leg's rows start one query step after
     its anchor, so nothing repeats), ``passes`` counts the legs; a hooked leg set's counts
     are summed over the legs' steps (`rolledLegs` says how many legs), a hook-free one
-    carries none, and a set that mixes the two is refused."""
+    carries none, and a set that mixes the two is refused, as is one that mixes contracts."""
     first = legs[0]
     if len({leg.command_hook_diagnostics is None for leg in legs}) > 1:
         raise ValueError("cannot concatenate hooked and hook-free legs into one forecast")
+    if len({leg.control_parameterization for leg in legs}) > 1:
+        raise ValueError("cannot concatenate legs flown under different control contracts")
+    if len(legs) > 1 and control_contract(first.control_parameterization).relative_to_anchor_speed:
+        # each leg's command is relative to ITS OWN ask's anchor airspeed; joined, the record's
+        # column would mix references and say nothing about which
+        raise ValueError(
+            f"cannot concatenate {first.control_parameterization!r} legs: their commands are "
+            "relative to each leg's own anchor airspeed"
+        )
     times = np.concatenate([leg.times for leg in legs])
     values = np.concatenate([leg.values for leg in legs])
     geodetic = np.concatenate([leg.geodetic_values for leg in legs])
     samples = np.concatenate([leg.sample_durations_s for leg in legs])
     segments = np.concatenate([leg.segment_durations_s for leg in legs])
     controls = np.concatenate([leg.controls for leg in legs])
+    commands = np.concatenate([leg.commands for leg in legs])
     final_time_s = float(np.sum(samples))
     diagnostics: dict[str, float | str] | None = None
     if first.command_hook_diagnostics is not None:
@@ -405,7 +419,7 @@ def concatenate(legs: Sequence[Forecast], anchor: int, predicted_final_time_s: f
         diagnostics["rolledLegs"] = float(len(legs))
     return replace(
         first, times=times, values=values, geodetic_values=geodetic, sample_durations_s=samples,
-        segment_durations_s=segments, controls=controls, normalized_progress=np.cumsum(samples) / max(final_time_s, 1e-9),
+        segment_durations_s=segments, controls=controls, commands=commands, normalized_progress=np.cumsum(samples) / max(final_time_s, 1e-9),
         final_time_s=final_time_s, predicted_final_time_s=float(predicted_final_time_s), anchor=int(anchor),
         passes=len(legs), command_hook_diagnostics=diagnostics,
     )

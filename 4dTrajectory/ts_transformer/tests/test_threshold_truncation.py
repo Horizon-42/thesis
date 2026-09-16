@@ -109,6 +109,8 @@ def _forecast_along(series, d_m: np.ndarray, xt_m: np.ndarray, *, segments: int)
         sample_durations_s=sample_durations,
         segment_durations_s=np.full(segments, total / segments),
         controls=np.tile(np.array([0.2, 0.0, 1.0]), (segments, 1)),
+        commands=np.tile(np.array([0.2, 0.0, 1.0]), (segments, 1)),
+        control_parameterization="thrust-fraction",
         geodetic_values=geodetic,
         prediction_output=PREDICTION_CONTROL,
     )
@@ -140,24 +142,22 @@ def test_a_forecast_that_flies_past_the_threshold_is_cut_at_the_crossing():
     assert not forecast.truncated_at_threshold and forecast.n_steps == len(d_m)
 
 
-def test_the_longitudinal_commands_are_cut_with_the_controls_they_price():
-    """Off thrust-fraction the record carries the command (n_x, or the speed-command Δv)
-    beside each segment's newton thrust (`Forecast.longitudinal_commands`); the cut must
-    shorten the two together or `export` would pair a thrust with another segment's
-    command."""
+def test_the_commands_are_cut_with_the_controls_they_price():
+    """The record carries a contract's commands beside each segment's newton controls
+    (`Forecast.commands`); the cut must shorten the two together or `export` would pair a
+    thrust with another segment's command."""
     series = _series(_config())
     d_m = np.linspace(6_000.0, -2_000.0, 41)
     forecast = replace(
         _forecast_along(series, d_m, np.zeros_like(d_m), segments=8),
-        longitudinal_commands=np.linspace(-0.1, 0.0, 8),
-        longitudinal_parameterization="specific-force",
+        commands=np.column_stack((np.linspace(-0.1, 0.0, 8), np.zeros(8), np.linspace(-0.05, 0.0, 8))),
+        control_parameterization="specific-force+path-angle",
     )
     cut = cut_at_threshold_crossing(forecast, series)
     assert cut.truncated_at_threshold
-    assert len(cut.longitudinal_commands) == len(cut.controls) < 8
-    assert np.array_equal(cut.longitudinal_commands,
-                          forecast.longitudinal_commands[: len(cut.controls)])
-    assert cut.longitudinal_parameterization == "specific-force"
+    assert len(cut.commands) == len(cut.controls) < 8
+    assert np.array_equal(cut.commands, forecast.commands[: len(cut.controls)])
+    assert cut.control_parameterization == "specific-force+path-angle"
 
 
 def test_a_forecast_that_never_reaches_the_threshold_is_left_whole_and_says_so():
@@ -312,7 +312,7 @@ def test_a_state_forecast_is_cut_on_its_single_clock():
     d_m = np.linspace(5_000.0, -1_000.0, 31)
     forecast = replace(
         _forecast_along(series, d_m, np.zeros_like(d_m), segments=31),
-        controls=None, geodetic_values=None,
+        controls=None, commands=None, control_parameterization=None, geodetic_values=None,
         segment_durations_s=np.full(31, STEP_S),
     )
     cut = cut_at_threshold_crossing(forecast, series)

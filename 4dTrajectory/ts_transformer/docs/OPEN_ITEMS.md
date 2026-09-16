@@ -6,7 +6,7 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
-## Two-tier transformer feasibility — ASSESSED, no training (2026-09-16, `docs/2026-09-16_two_tier_transformer_feasibility.zh.md`)
+## Two-tier transformer — T0(b) and T0(c) MEASURED (both negative), T1/T2 built, the path-angle contract merged (2026-09-16, `docs/2026-09-16_two_tier_transformer_feasibility.zh.md`, branch `dev-two-tier`)
 
 The user asked whether a two-tier transformer is worth building: a short-horizon (30–60 s) control layer
 re-asked repeatedly, under a long-horizon plan layer that tokenises time SEGMENTS, later a graph layer over
@@ -27,8 +27,23 @@ tokens must move vectored ADE ≥ 300 m paired) — its measured signal is runwa
 R series), not single-flight ADE. New readout **`run_ts.py lead_time_error`** (displacement against lead
 time per stratum, the growth exponent paired over the flights present at both leads; `tests/test_lead_time_error.py`); artifact
 `outputs/KRDU/experiments/two_tier_feasibility_20260916/lead_time_error.{json,txt}` (native32, L3_cta,
-state A_threshold_enu). Literature: repo `docs/literature/hierarchical_prediction/`. Next (the user's call):
-T0(b) + T0(c), then T1.
+state A_threshold_enu). Literature: repo `docs/literature/hierarchical_prediction/`.
+
+**Status (execution record: the doc's §10–11):**
+- **T0(b) chain sensitivity — done, published** (`run_ts.py chain_sensitivity`): open-loop chaining loses on
+  both arms (native32 vectored ADE 2870 → 9893 m at 60 s links); native32's compounding is mostly
+  anchor out-of-distribution (L 1.2–1.7; the random-anchor A0b 0.5–0.95).
+- **T0(c) long history — done, G2 FAILS on both seeds, published** (6 KRDU categories, validator 171 / 0
+  errors): at the common anchor 119, 238 s of lookback against 118 s moves vectored ADE by −13.9 / +9.7 m
+  paired (the gate needed 125 m). No segment-token long-history layer (T3).
+- **T1 (plan token + `tracker_lockstep`) and T2 (`--plan-head`) — built and reviewed** (d9f40d9, 7d24238);
+  T1a not trained yet.
+- **The path-angle contract (sf-n7) merged** (82e27e8) because G1's "fully flyable ≥ 95 %" is out of reach
+  under thrust-fraction (0.4 %); **then the contracts were refactored into one row each** (doc §11: one law
+  protocol and one lag RHS in `aerodynamic_model`, `ControlContract` + `CONTROL_PARAMETERIZATION_SCOPES` on
+  the ts side, `Forecast.commands`); every stored checkpoint of the four contracts reproduces bit for bit;
+  the heading-rate loss is admitted under path-angle. T1a arms now fly that contract.
+- **Next:** T1a training (3 arms) → lockstep → G1; then T2 → G3.
 
 ## Specific-force control parameterisation — MEASURED, NOT ADOPTED; the final descent diagnosed (2026-09-15, branch `specific-force-control`)
 

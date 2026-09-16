@@ -291,12 +291,13 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         choices=CONTROL_THRUST_PARAMETERIZATIONS,
         default=None,
         help=(
-            "what the head's first control column is: thrust-fraction (T/T_max, every run "
-            "before 2026-09-14), specific-force ((T-D)/W, the thrust re-solved inside the "
-            "lagged RHS so the same command moves every airframe alike) or speed-command "
-            "(a target airspeed relative to the anchor's, flown by a speed loop through the "
-            "same thrust); the last two first-order-lag only "
-            "(docs/2026-09-14_specific_force_control_design.md §2, §12)"
+            "the control contract: thrust-fraction (T/T_max, every run before 2026-09-14), "
+            "specific-force ((T-D)/W, the thrust re-solved inside the lagged RHS so the same "
+            "command moves every airframe alike), speed-command (a target airspeed relative "
+            "to the anchor's, flown by a speed loop through the same thrust) or "
+            "specific-force+path-angle (the specific force, and a path-angle target in place "
+            "of the load factor, flown by a path loop); all but the first first-order-lag "
+            "only (docs/2026-09-14_specific_force_control_design.md §2, §12, §14)"
         ),
     )
     parser.add_argument(

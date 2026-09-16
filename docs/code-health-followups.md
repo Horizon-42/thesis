@@ -809,8 +809,34 @@ never runs a CTA arm.
   They are not config fields, and the control target contract does not spell them.
 - So a stored specific-force checkpoint would load and fly under moved constants with the same name. Today
   that is the two `sf_n3` checkpoints.
-- The speed-command law spells its constants into the target contract (`envelope.speed_command_identity()`).
+- The speed-command and path-angle contracts spell their constants into the target contract
+  (`ControlContract.identity_suffix`, since 2026-09-16; before, `envelope.speed_command_identity()`).
 
 **Judgement**: do the same for specific-force. Adding it would refuse the two stored `sf_n3` checkpoints,
 so it needs a reading of the absent spelling as today's values (like `absent_field_defaults`), or a re-save.
 It is the owner's call.
+
+## 38. Formulas the control-contract refactor left restated outside the contract rows (2026-09-16)
+
+Found by the sf-n7 architecture review before the merge; out of the refactor's scope
+(`4dTrajectory/ts_transformer/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11.2), recorded so they
+are not rediscovered.
+
+**Verified** (code read, 2026-09-16):
+- The plan guidance restates the path loop: `outputs/plan/guidance/controller.py` computes
+  `γ̇ = (γ_cmd − γ)/hold`, `n = cos γ + V·γ̇/g`, `/cos φ`, clamp — the thrust-fraction-pinned plan path's own
+  loop, predating `torch_lag_dynamics.path_angle_load_factor`.
+- The lag-credit inversion `(mean·hold − flying·τ_eff)/(hold − τ_eff)` has five copies: the speed floor's
+  two inversions, `PlanGuidance`, the barrier's bank and the trombone's bank.
+- `cos γ` has three spellings: `√(1−sin²γ)` (the path loop), `horizontal/speed` (the chart RHS), `cos(γ)`
+  (the ENU twin and the numpy inverse).
+- `CONTROL_NAMES` exists three times with two spellings: `aerodynamic_model.torch_dynamics` and
+  `outputs/control/heads.py` (`thrust_N`, …) and `outputs/envelope.py` (`thrust_fraction`, …).
+- The barrier, the trombone and the speed floor read the third command/actuator as a load factor; they are
+  refused under `specific-force+path-angle` by the scope table rather than asking the law for the load.
+
+**Judgement**: the first two are the ones worth doing — one lag-credit helper, and the guidance asking
+`path_angle_load_factor` — but each moves a stored plan-path or hook artifact at round-off, so each needs its
+own golden check. Composing hooks with the path-angle contract is a design question (sf design §14.4), not
+cleanup.
+

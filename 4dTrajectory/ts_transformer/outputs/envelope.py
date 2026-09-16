@@ -25,11 +25,16 @@ stage and the drag cancels, so the same n_x moves a C550 and a B77W identically
 (``docs/2026-09-14_specific_force_control_design.md``). ``speed-command`` keeps that
 invariance and adds the restoring force n_x lacks; ``specific-force+path-angle`` leaves the
 speed to n_x and closes the VERTICAL channel instead, which is the one the open-loop load
-factor turns into a double integrator (design §7.5.3). Under thrust-fraction the newton
-conversion is :func:`physical_controls`, once, on the way into the dynamics and out to the
-record; under the other three it needs the state's drag and lives in the lag RHS
-(``aerodynamic_model.torch_lag_dynamics``) and in the record export. The evaluation record
-contract is newtons either way, shared with the CasADi optimizer.
+factor turns into a double integrator (design §7.5.3). The evaluation record contract is newtons
+under every one, shared with the CasADi optimizer.
+
+**One row per contract** (:class:`ControlContract`): the box and neutral, the lag law that flies
+the columns (``aerodynamic_model.torch_lag_dynamics``; it resolves the newton thrust and the load
+factor at every RK4 stage and, off a geodetic state, for the record and the heading-rate loss),
+the inverse-dynamics teacher, the checkpoint identity, the record's command columns and the
+saturation labels. Consumers read the row; none compares the value. Where each value may be USED
+(point-mass rows, the fitted teacher, command hooks) is the config layer's
+``CONTROL_PARAMETERIZATION_SCOPES``, whose keys the registry below asserts equal.
 
 **Negative thrust is deliberate.** ``MIN_THRUST_FRACTION`` is below zero because a real
 approach needs net-negative propulsive force: idle thrust plus the drag of speedbrake,
@@ -51,14 +56,25 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Callable, NamedTuple
 
 import numpy as np
+import torch
 
+from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, CONTROL_NAMES as NEWTON_CONTROL_NAMES
+from aerodynamic_model.torch_lag_dynamics import (
+    THRUST_FRACTION_LAW,
+    LagControlLaw,
+    PathAngleLaw,
+    SpecificForceLaw,
+    SpeedCommandLaw,
+)
 from ts_transformer.config import (
     CONTROL_SPECIFIC_FORCE,
     CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
     CONTROL_SPEED_COMMAND,
     CONTROL_THRUST_FRACTION,
+    CONTROL_THRUST_PARAMETERIZATIONS,
 )
 
 
@@ -117,6 +133,7 @@ NEUTRAL_SPECIFIC_FORCE = -0.05
 # that wants another value is another contract.
 MIN_SPEED_COMMAND_DELTA_MPS = -90.0
 MAX_SPEED_COMMAND_DELTA_MPS = 20.0
+NEUTRAL_SPEED_COMMAND_DELTA_MPS = 0.0
 SPEED_LOOP_TIME_CONSTANT_S = 8.0
 # The path-angle contract (design §14): the head's THIRD column is the target path angle γ*
 # in radians, flown by a first-order path loop of time constant PATH_ANGLE_TIME_CONSTANT_S
@@ -140,10 +157,70 @@ NEUTRAL_PATH_ANGLE_RAD = math.radians(-2.9)
 PATH_ANGLE_TIME_CONSTANT_S = 3.0
 
 
+class InverseKinematics(NamedTuple):
+    """What the inverse dynamics measured at each observed sample, decomposed in the forward
+    RHS's own basis (``outputs/dynamics/inverse.actual_controls``) — everything a contract's
+    teacher reads to write its columns."""
+
+    speed_mps: np.ndarray
+    gamma_rad: np.ndarray
+    mass_kg: np.ndarray
+    #: The specific force along the path times g, transport included: ``V' + ...`` in m/s².
+    tangential_mps2: np.ndarray
+    bank_rad: np.ndarray
+    load_factor: np.ndarray
+    #: The polar's drag at the measured load factor, in newtons.
+    drag_n: np.ndarray
+    max_thrust_n: float
+
+
+def _specific_force(kinematics: InverseKinematics) -> np.ndarray:
+    return kinematics.tangential_mps2 / GRAVITY_MPS2 + np.sin(kinematics.gamma_rad)
+
+
+def _thrust_fraction_teacher(kinematics: InverseKinematics) -> np.ndarray:
+    thrust_n = kinematics.mass_kg * (
+        kinematics.tangential_mps2 + GRAVITY_MPS2 * np.sin(kinematics.gamma_rad)
+    ) + kinematics.drag_n
+    return fraction_controls(
+        np.column_stack((thrust_n, kinematics.bank_rad, kinematics.load_factor)),
+        np.asarray(float(kinematics.max_thrust_n)),
+    )
+
+
+def _specific_force_teacher(kinematics: InverseKinematics) -> np.ndarray:
+    return np.column_stack((_specific_force(kinematics), kinematics.bank_rad, kinematics.load_factor))
+
+
+def _speed_command_teacher(kinematics: InverseKinematics) -> np.ndarray:
+    # The ABSOLUTE target the loop would have to hold, `V + τ_V·V'`; the contract's column is
+    # relative to the anchor's airspeed (`ControlContract.relative_to_anchor`).
+    return np.column_stack((
+        kinematics.speed_mps + SPEED_LOOP_TIME_CONSTANT_S * kinematics.tangential_mps2,
+        kinematics.bank_rad, kinematics.load_factor,
+    ))
+
+
+def _path_angle_teacher(kinematics: InverseKinematics) -> np.ndarray:
+    # The THIRD column is the path-angle target the loop would have to hold to fly the
+    # realised path rate: `γ* = γ + τ_γ·γ̇`, with γ̇ taken from the realised load the same
+    # inversion produced, `γ̇ = g(n cos φ − cos γ)/V`, not from a second differentiation of γ
+    # (design §14.3). The first column is the specific force, unchanged.
+    path_rate = GRAVITY_MPS2 * (
+        kinematics.load_factor * np.cos(kinematics.bank_rad) - np.cos(kinematics.gamma_rad)
+    ) / kinematics.speed_mps
+    return np.column_stack((
+        _specific_force(kinematics), kinematics.bank_rad,
+        kinematics.gamma_rad + PATH_ANGLE_TIME_CONSTANT_S * path_rate,
+    ))
+
+
 @dataclass(frozen=True)
 class ControlContract:
-    """One longitudinal parameterisation's box: what each column means, where the head's
-    sigmoid maps it, and the "doing nothing" command a zeroed head starts every flight at."""
+    """One control contract: what each column means, where the head's sigmoid maps it, the
+    "doing nothing" command a zeroed head starts every flight at, and everything the package
+    does with the columns — how the lag RHS flies them, how the teacher writes them, what a
+    checkpoint and a record say about them."""
 
     parameterization: str
     names: tuple[str, str, str]
@@ -157,6 +234,28 @@ class ControlContract:
     #: the anchor's own speed held; under the path-angle contract that same speed hold and
     #: :data:`NEUTRAL_PATH_ANGLE_RAD`, the teacher's own median descent.
     neutral: tuple[float, float, float]
+    #: The lag law the rollout integrates the columns under.
+    law: LagControlLaw
+    #: The inverse-dynamics teacher: the contract's columns from what a track measured.
+    teacher: Callable[[InverseKinematics], np.ndarray]
+    #: WHICH quantity the first column is, as the speed floor inverts it: the parameterisation
+    #: value that names that longitudinal law alone (the path-angle contract's is the specific
+    #: force).
+    longitudinal: str
+    #: The per-column keys of an epoch's ``control_saturation.by_control``.
+    saturation_labels: tuple[str, str, str]
+    #: Columns a prediction record carries beside its newton controls, under ``names``: the
+    #: command where the record's own column is the law's resolution of it (the thrust at the
+    #: segment's start state, the load the path loop resolved). None under thrust-fraction,
+    #: whose newton thrust IS the command, so every such record reproduces to the bit.
+    record_command_columns: tuple[int, ...] = ()
+    #: Appended to the checkpoint's target contract: the constants a checkpoint would otherwise
+    #: load and fly under silently (a loop's time constant, a box that is not a config field).
+    #: Empty where no such constant exists — and must stay empty there, or every stored
+    #: checkpoint of the contract is refused at load.
+    identity_suffix: str = ""
+    #: The first column is relative to the anchor's airspeed (the speed command).
+    relative_to_anchor_speed: bool = False
 
     def __post_init__(self) -> None:
         if not all(lo < mid < hi for lo, mid, hi in zip(self.lower, self.neutral, self.upper)):
@@ -177,6 +276,28 @@ class ControlContract:
         drowning the others."""
         return (self.upper_array - self.lower_array) / 2.0
 
+    def relative_to_anchor(self, controls: np.ndarray, anchor_speed_mps: float) -> np.ndarray:
+        """Teacher columns in the contract's own units: the speed command less the anchor's
+        airspeed (the speed the law's actuator is relative to), every other column as is."""
+        if not self.relative_to_anchor_speed:
+            return controls
+        relative = np.array(controls, dtype=np.float64, copy=True)
+        relative[..., 0] -= float(anchor_speed_mps)
+        return relative
+
+
+# The identities of the contracts whose constants are module constants rather than config
+# fields. Spelled from the constants, verbatim as the stored checkpoints carry them.
+_SPEED_COMMAND_IDENTITY = (
+    f"+speed-command(tau-v={SPEED_LOOP_TIME_CONSTANT_S:g}s,"
+    f"box={MIN_SPEED_COMMAND_DELTA_MPS:g}..{MAX_SPEED_COMMAND_DELTA_MPS:g}m/s,"
+    f"neutral={NEUTRAL_SPEED_COMMAND_DELTA_MPS:g})-v1"
+)
+_PATH_ANGLE_IDENTITY = (
+    f"+specific-force+path-angle(tau-gamma={PATH_ANGLE_TIME_CONSTANT_S:g}s,"
+    f"box={math.degrees(MIN_PATH_ANGLE_COMMAND_RAD):g}..{math.degrees(MAX_PATH_ANGLE_COMMAND_RAD):g}deg,"
+    f"neutral={math.degrees(NEUTRAL_PATH_ANGLE_RAD):g}deg)-v1"
+)
 
 THRUST_FRACTION_CONTRACT = ControlContract(
     parameterization=CONTROL_THRUST_FRACTION,
@@ -185,6 +306,13 @@ THRUST_FRACTION_CONTRACT = ControlContract(
     lower=(MIN_THRUST_FRACTION, -MAX_BANK_RAD, MIN_LOAD_FACTOR),
     upper=(MAX_THRUST_FRACTION, MAX_BANK_RAD, MAX_LOAD_FACTOR),
     neutral=(0.2, 0.0, 1.0),
+    law=THRUST_FRACTION_LAW,
+    teacher=_thrust_fraction_teacher,
+    longitudinal=CONTROL_THRUST_FRACTION,
+    # The historical labels every stored `history.json` carries: its first key reads
+    # `thrust_N` although the column is the thrust FRACTION — kept so runs stay comparable key
+    # for key.
+    saturation_labels=NEWTON_CONTROL_NAMES,
 )
 SPECIFIC_FORCE_CONTRACT = ControlContract(
     parameterization=CONTROL_SPECIFIC_FORCE,
@@ -193,6 +321,13 @@ SPECIFIC_FORCE_CONTRACT = ControlContract(
     lower=(MIN_SPECIFIC_FORCE, -MAX_BANK_RAD, MIN_LOAD_FACTOR),
     upper=(MAX_SPECIFIC_FORCE, MAX_BANK_RAD, MAX_LOAD_FACTOR),
     neutral=(NEUTRAL_SPECIFIC_FORCE, 0.0, 1.0),
+    # The engine floor is the thrust-fraction box's, so the two admit the same thrusts
+    # (design §2.1).
+    law=SpecificForceLaw(min_thrust_fraction=MIN_THRUST_FRACTION),
+    teacher=_specific_force_teacher,
+    longitudinal=CONTROL_SPECIFIC_FORCE,
+    saturation_labels=("specific_force", "bank_rad", "load_factor"),
+    record_command_columns=(0,),
 )
 SPEED_COMMAND_CONTRACT = ControlContract(
     parameterization=CONTROL_SPEED_COMMAND,
@@ -200,7 +335,17 @@ SPEED_COMMAND_CONTRACT = ControlContract(
     units=("m/s", "rad", "1"),
     lower=(MIN_SPEED_COMMAND_DELTA_MPS, -MAX_BANK_RAD, MIN_LOAD_FACTOR),
     upper=(MAX_SPEED_COMMAND_DELTA_MPS, MAX_BANK_RAD, MAX_LOAD_FACTOR),
-    neutral=(0.0, 0.0, 1.0),
+    neutral=(NEUTRAL_SPEED_COMMAND_DELTA_MPS, 0.0, 1.0),
+    law=SpeedCommandLaw(
+        min_thrust_fraction=MIN_THRUST_FRACTION,
+        speed_time_constant_s=SPEED_LOOP_TIME_CONSTANT_S,
+    ),
+    teacher=_speed_command_teacher,
+    longitudinal=CONTROL_SPEED_COMMAND,
+    saturation_labels=("speed_command_delta", "bank_rad", "load_factor"),
+    record_command_columns=(0,),
+    identity_suffix=_SPEED_COMMAND_IDENTITY,
+    relative_to_anchor_speed=True,
 )
 PATH_ANGLE_CONTRACT = ControlContract(
     parameterization=CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
@@ -209,6 +354,20 @@ PATH_ANGLE_CONTRACT = ControlContract(
     lower=(MIN_SPECIFIC_FORCE, -MAX_BANK_RAD, MIN_PATH_ANGLE_COMMAND_RAD),
     upper=(MAX_SPECIFIC_FORCE, MAX_BANK_RAD, MAX_PATH_ANGLE_COMMAND_RAD),
     neutral=(NEUTRAL_SPECIFIC_FORCE, 0.0, NEUTRAL_PATH_ANGLE_RAD),
+    # The path loop resolves a LOAD FACTOR, so it reads the load box the head's own column
+    # used to be bounded by: the search space the commands lived in is the range the loop may
+    # ask for (design §14.2).
+    law=PathAngleLaw(
+        min_thrust_fraction=MIN_THRUST_FRACTION,
+        path_angle_time_constant_s=PATH_ANGLE_TIME_CONSTANT_S,
+        min_load_factor=MIN_LOAD_FACTOR,
+        max_load_factor=MAX_LOAD_FACTOR,
+    ),
+    teacher=_path_angle_teacher,
+    longitudinal=CONTROL_SPECIFIC_FORCE,
+    saturation_labels=("specific_force", "bank_rad", "path_angle_command"),
+    record_command_columns=(0, 2),
+    identity_suffix=_PATH_ANGLE_IDENTITY,
 )
 _CONTRACTS = {
     contract.parameterization: contract
@@ -219,34 +378,11 @@ _CONTRACTS = {
         PATH_ANGLE_CONTRACT,
     )
 }
-
-
-def speed_command_identity() -> str:
-    """The speed-command contract's constants, spelled for a checkpoint's target contract.
-
-    The loop constant and the box are constants of this module, not config fields, so
-    nothing else a checkpoint stores would change if one moved: a speed-command checkpoint
-    trained under other constants would load and fly under these. Spelled into the target
-    contract (``outputs.control.strategy``), a moved constant is refused at load instead."""
-    contract = SPEED_COMMAND_CONTRACT
-    return (
-        f"speed-command(tau-v={SPEED_LOOP_TIME_CONSTANT_S:g}s,"
-        f"box={contract.lower[0]:g}..{contract.upper[0]:g}m/s,"
-        f"neutral={contract.neutral[0]:g})-v1"
-    )
-
-
-def path_angle_identity() -> str:
-    """The path-angle contract's constants, spelled for a checkpoint's target contract.
-
-    Same reason as :func:`speed_command_identity`: the loop constant, the box and the neutral
-    are constants of this module rather than config fields, so a checkpoint trained under other
-    values would otherwise load and fly under these without a word."""
-    contract = PATH_ANGLE_CONTRACT
-    return (
-        f"specific-force+path-angle(tau-gamma={PATH_ANGLE_TIME_CONSTANT_S:g}s,"
-        f"box={math.degrees(contract.lower[2]):g}..{math.degrees(contract.upper[2]):g}deg,"
-        f"neutral={math.degrees(contract.neutral[2]):g}deg)-v1"
+# Fail at import: a value config admits with no contract row would pass construction and die
+# (or, worse, fall back) at its first consumer. The same values in the same order.
+if tuple(_CONTRACTS) != CONTROL_THRUST_PARAMETERIZATIONS:
+    raise RuntimeError(
+        f"contract registry {tuple(_CONTRACTS)} != config vocabulary {CONTROL_THRUST_PARAMETERIZATIONS}"
     )
 
 
@@ -280,8 +416,6 @@ def _rescaled_thrust(controls, max_thrust_n, *, to_newtons: bool):
     rest = controls[..., 1:]
     if isinstance(controls, np.ndarray):
         return np.concatenate((thrust, rest), axis=-1)
-    import torch
-
     return torch.cat((thrust, rest), dim=-1)
 
 

@@ -14,6 +14,7 @@ it to be the same flight model read another way, and for nothing stored to move:
   deliver is clipped rather than flown;
 * the record stays in newtons with a resolved load factor, carries the path-angle command beside
   it, and says which contract it came from;
+* the heading-rate term prices the load the loop resolved, not the γ* column;
 * the config refuses the pairings not built (every command hook among them), every named recipe
   pins thrust-fraction, and the name moves only off the default.
 """
@@ -59,18 +60,16 @@ from ts_transformer.outputs.control.supervision import probe_dynamics
 from ts_transformer.outputs.dynamics.backends import (
     RolloutInputs,
     control_dynamics_backend,
-    lag_control_law,
 )
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.outputs.dynamics.inverse import reference_controls
-from aerodynamic_model.torch_dynamics import path_angle_load_factor  # noqa: E402
+from aerodynamic_model.torch_lag_dynamics import path_angle_load_factor  # noqa: E402
 from ts_transformer.outputs.envelope import (
     MAX_LOAD_FACTOR,
     MIN_LOAD_FACTOR,
     PATH_ANGLE_CONTRACT,
     PATH_ANGLE_TIME_CONSTANT_S,
     control_contract,
-    path_angle_identity,
 )
 from ts_transformer.run_naming import run_display_name, run_slug
 
@@ -261,7 +260,7 @@ def test_a_target_the_load_box_cannot_deliver_is_clipped_not_flown():
     first version did not (§14.9, finding 10): `n = 1 + V·Δγ/(g·τ_γ)` needs Δγ > 19.8° at
     85 m/s to reach 2.0, so the flight is anchored steep and the target is the box's ceiling."""
     config = _config(**PATH_ANGLE, control_rollout_integrator_dt_s=0.05)
-    law = lag_control_law(config)
+    law = control_contract(config.control_thrust_parameterization).law
     assert (law.min_load_factor, law.max_load_factor) == (MIN_LOAD_FACTOR, MAX_LOAD_FACTOR)
     contract = control_contract(CONTROL_SPECIFIC_FORCE_PATH_ANGLE)
     for gamma, target, bound in ((math.radians(-14.0), contract.upper[2], MAX_LOAD_FACTOR),
@@ -274,9 +273,8 @@ def test_a_target_the_load_box_cannot_deliver_is_clipped_not_flown():
             f"the demand {demanded:.2f} is inside the box; this case clips nothing"
         )
         resolved = float(path_angle_load_factor(
-            torch.tensor(target), torch.tensor(math.sin(gamma)), torch.tensor(math.cos(gamma)),
-            torch.tensor(speed), torch.tensor(0.0), PATH_ANGLE_TIME_CONSTANT_S,
-            MIN_LOAD_FACTOR, MAX_LOAD_FACTOR,
+            torch.tensor(target), torch.tensor(math.sin(gamma)), torch.tensor(speed),
+            torch.tensor(0.0), PATH_ANGLE_TIME_CONSTANT_S, MIN_LOAD_FACTOR, MAX_LOAD_FACTOR,
         ))
         assert resolved == pytest.approx(bound)
     # …and flown, the path rate stays under what that ceiling allows.
@@ -311,34 +309,23 @@ def test_the_record_carries_a_resolved_load_and_the_path_angle_command():
         model, series, config, Normalizer.fit(series), config.seq_len - 1, torch.device("cpu")
     )
     forecast = forecasts[0]
-    assert forecast.longitudinal_parameterization == CONTROL_SPECIFIC_FORCE_PATH_ANGLE
-    assert len(forecast.vertical_commands) == config.n_segments
+    assert forecast.control_parameterization == CONTROL_SPECIFIC_FORCE_PATH_ANGLE
+    assert len(forecast.commands) == len(forecast.controls) == config.n_segments
     record = build_prediction_record(
         series[0], forecast, index=0, model_name=config.model, horizon_mode=config.horizon_mode
     )
     segments = record.states_payload["control_segments"]
-    assert [s["path_angle_command"] for s in segments] == pytest.approx(
-        list(forecast.vertical_commands)
-    )
-    assert [s["specific_force"] for s in segments] == pytest.approx(
-        list(forecast.longitudinal_commands)
-    )
+    assert [s["path_angle_command"] for s in segments] == pytest.approx(list(forecast.commands[:, 2]))
+    assert [s["specific_force"] for s in segments] == pytest.approx(list(forecast.commands[:, 0]))
     loads = np.array([s["load_factor"] for s in segments])
     assert np.all(loads >= MIN_LOAD_FACTOR) and np.all(loads <= MAX_LOAD_FACTOR)
     # …and it is the LAW's own resolver at each segment's start state, not a constant that
     # happens to look like a load (review §14.9, finding 14).
-    starts = np.concatenate((
-        np.array(forecast.geodetic_values[:1]) if forecast.geodetic_values is not None else
-        np.array([[np.nan] * 7]),
-        np.array([[np.nan] * 7]),
-    )) if False else None
-    states = np.array(record.states_payload["predicted_states"])
     start_states = [next(s for s in record.states_payload["predicted_states"]
                          if s["t"] >= segment["start_t"] - 1e-9) for segment in segments]
     expected = [float(path_angle_load_factor(
         torch.tensor(segment["path_angle_command"]), torch.tensor(math.sin(state["gamma"])),
-        torch.tensor(math.cos(state["gamma"])), torch.tensor(state["V"]),
-        torch.tensor(segment["bank_rad"]), PATH_ANGLE_TIME_CONSTANT_S,
+        torch.tensor(state["V"]), torch.tensor(segment["bank_rad"]), PATH_ANGLE_TIME_CONSTANT_S,
         MIN_LOAD_FACTOR, MAX_LOAD_FACTOR,
     )) for segment, state in zip(segments, start_states)]
     assert loads == pytest.approx(expected, abs=2e-3)
@@ -347,15 +334,67 @@ def test_the_record_carries_a_resolved_load_and_the_path_angle_command():
     )
 
 
+# ── the heading-rate term reads the load the loop resolved ─────────────────────
+
+
+def test_the_heading_rate_term_prices_the_load_the_path_loop_flew():
+    """Under this contract the third actuator is γ*, so the term must read the load the loop
+    RESOLVED at each endpoint (`_ControlLaw.geodetic_load`) — exactly the ψ row at that load —
+    and γ* must reach the turn rate (through the lift) with a finite gradient."""
+    from aerodynamic_model.torch_dynamics import heading_rate_rad_s
+    from ts_transformer.outputs.control.loss.objective import control_heading_rate_mse
+    from ts_transformer.outputs.dynamics.backends import EndpointControlRollout
+
+    config = _config(**PATH_ANGLE, control_heading_rate_loss_weight=8.0)
+    generator = torch.Generator().manual_seed(11)
+    batch, n = 2, int(config.n_segments)
+    states = torch.tensor([INITIAL_STATE] * batch, dtype=torch.float64).unsqueeze(1).repeat(1, n, 1)
+    states[..., 3] += torch.rand((batch, n), generator=generator, dtype=torch.float64) * 20.0
+    states[..., 5] = torch.deg2rad(-4.0 + 3.0 * torch.rand((batch, n), generator=generator, dtype=torch.float64))
+    actual = torch.stack((
+        torch.full((batch, n), -0.05, dtype=torch.float64),
+        0.4 * torch.rand((batch, n), generator=generator, dtype=torch.float64) - 0.2,
+        torch.deg2rad(-5.0 + 4.0 * torch.rand((batch, n), generator=generator, dtype=torch.float64)),
+    ), dim=-1).requires_grad_(True)
+    dynamics = {
+        "aero_params": torch.tensor([AERO] * batch, dtype=torch.float64),
+        "max_thrust_n": torch.full((batch,), MAX_THRUST_N, dtype=torch.float64),
+        "initial_state": torch.tensor([INITIAL_STATE] * batch, dtype=torch.float64),
+        "reference_heading_rate_dps": torch.zeros((batch, n), dtype=torch.float64),
+        "reference_heading_rate_weight": torch.ones((batch, n), dtype=torch.float64),
+    }
+    rollout = EndpointControlRollout(
+        channels=torch.zeros((batch, n, 6)), geodetic_states=states, controls=actual.detach(),
+        actual_controls=actual,
+    )
+    loss = control_heading_rate_mse(rollout, config, dynamics)
+    load = path_angle_load_factor(
+        actual[..., 2], torch.sin(states[..., 5]), states[..., 3], actual[..., 1],
+        PATH_ANGLE_TIME_CONSTANT_S, MIN_LOAD_FACTOR, MAX_LOAD_FACTOR,
+    )
+    expected_dps = torch.rad2deg(heading_rate_rad_s(
+        states, torch.stack((torch.zeros_like(load), actual[..., 1], load), dim=-1),
+        dynamics["aero_params"].unsqueeze(-2),
+    ))
+    expected = ((expected_dps / config.control_heading_rate_loss_scale_dps).square()).mean(dim=1)
+    assert torch.allclose(loss, expected, rtol=1e-12, atol=0.0)
+    # the γ* column is NOT read as a load: a load of ~−0.07 would turn the other way
+    assert (load > 0.5).all()
+    loss.sum().backward()
+    assert torch.isfinite(actual.grad).all() and actual.grad[..., 2].abs().sum() > 0.0
+
+
 # ── what the axis must not disturb ────────────────────────────────────────────
 
 
 def test_the_contract_identity_is_spelled_into_the_target_contract():
     config = _config(**PATH_ANGLE)
     contract = ControlStrategy().target_contract(config)
-    assert path_angle_identity() in contract
-    assert f"tau-gamma={PATH_ANGLE_TIME_CONSTANT_S:g}s" in contract
-    assert path_angle_identity() not in ControlStrategy().target_contract(_config(**SPECIFIC_FORCE))
+    # verbatim as the stored N7 checkpoints carry it
+    assert contract.endswith("+specific-force+path-angle(tau-gamma=3s,box=-15..10deg,neutral=-2.9deg)-v1")
+    assert contract.endswith(PATH_ANGLE_CONTRACT.identity_suffix)
+    assert f"tau-gamma={PATH_ANGLE_CONTRACT.law.path_angle_time_constant_s:g}s" in contract
+    assert "path-angle" not in ControlStrategy().target_contract(_config(**SPECIFIC_FORCE))
 
 
 def test_the_config_refuses_what_is_not_built():
