@@ -81,7 +81,7 @@ from ts_transformer.data.anchor_grid import (
     anchors_for_bin,
     bin_label,
     remaining_path_profiles,
-    strata_fixed_at_l1,
+    strata_fixed_at_anchor,
 )
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_VECTORED  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
@@ -92,6 +92,7 @@ from ts_transformer.config import (  # noqa: E402
     INTENT_CONDITIONING_NONE,
     PREDICTION_CONTROL,
     TSConfig,
+    default_anchor,
 )
 from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
@@ -359,6 +360,9 @@ def measure_bin(model, series, profiles, keys, target_m, *, config, normalizer, 
     for index, anchor in anchors_for_bin(
         series, profiles, target_m,
         seq_len=config.seq_len, min_future_s=min_future_s,
+        # never before the checkpoint's own fixed anchor (a floor-trained run's is later
+        # than L-1, and the curve's cohort is filtered there)
+        minimum_anchor_index=default_anchor(config),
     ).items():
         groups.setdefault(anchor, []).append(index)
 
@@ -714,12 +718,12 @@ def measure_checkpoint(arm: Arm, series: list, grid: Grid, device: torch.device,
     anchor."""
     started = time.time()
     config = arm.config
-    anchor_l1 = config.seq_len - 1
+    anchor_l1 = default_anchor(config)
     keys = [item.dataset_id for item in series]
     # §六 1: ONE label per flight, taken at the evaluation anchor and reused at every bin.
     # Relabelling per bin would drop each flight out of the vectored stratum exactly when
     # it rolled out on the centreline, and the curve would measure the survivors.
-    masks = strata_fixed_at_l1(series, keys, seq_len=config.seq_len)
+    masks = strata_fixed_at_anchor(series, keys, anchor=anchor_l1)
     stratum_size = {stratum: int(mask.sum()) for stratum, mask in masks.items()}
     profiles = remaining_path_profiles(series)
     batch_size = grid.batch_size or config.batch_size
@@ -927,7 +931,7 @@ def main(argv: list[str] | None = None) -> int:
                 "write_records": grid.write_records,
             },
             "anchor_definition": ANCHOR_DEFINITION,
-            "strata_anchor": "L-1 (seq_len - 1), computed once and fixed for every bin",
+            "strata_anchor": "the fixed anchor (default_anchor: L-1 unless the run carries an anchor floor), computed once and fixed for every bin",
             "geometry_truth": GEOMETRY_TRUTH,
             "partial_coverage_threshold": PARTIAL_COVERAGE,
             "device": str(device),

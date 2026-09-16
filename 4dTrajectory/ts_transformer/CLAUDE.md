@@ -458,7 +458,7 @@ weights all read the one number):
 **`data/anchor_grid.py` is the one definition of the grid** — bins (`DEFAULT_ANCHOR_GRID_KM`
 20/16/12/8/6/4/2 km, `VALIDATION_ANCHOR_GRID_KM` the four the metric may select on), the
 60 s future floor, `PARTIAL_COVERAGE` = 0.5, the per-flight `bin_anchor` rule and the
-fixed-at-L−1 `strata_fixed_at_l1` rule. `run_ts.py anytime_curve` and the selection metric
+fixed-at-the-evaluation-anchor `strata_fixed_at_anchor` rule. `run_ts.py anytime_curve` and the selection metric
 import the SAME objects (`tests/test_anchor_grid.py` asserts identity, not equality): two
 grids that merely agreed today would make "the curve improved" and "this epoch was selected
 on the curve" claims about different anchors.

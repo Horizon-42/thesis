@@ -65,7 +65,7 @@ def test_the_runner_grid_is_the_packages() -> None:
     """Not "equal today": the same objects, so a change here cannot miss the runner."""
     assert runner.bin_anchor is anchor_grid.bin_anchor
     assert runner.anchors_for_bin is anchor_grid.anchors_for_bin
-    assert runner.strata_fixed_at_l1 is anchor_grid.strata_fixed_at_l1
+    assert runner.strata_fixed_at_anchor is anchor_grid.strata_fixed_at_anchor
     assert runner.DEFAULT_MIN_FUTURE_S == anchor_grid.DEFAULT_GRID_MIN_FUTURE_S
     # The `partial` threshold is one number: the curve refuses to READ such a bin and the
     # selection metric refuses to AVERAGE it, off the same constant.
@@ -161,7 +161,7 @@ def test_the_four_candidate_bins_are_populated_and_four_km_is_not(cohort) -> Non
 
 def test_the_strata_are_the_covariates_read_once_at_l_minus_one(cohort) -> None:
     keys = [item.dataset_id for item in cohort]
-    masks = anchor_grid.strata_fixed_at_l1(cohort, keys, seq_len=8)
+    masks = anchor_grid.strata_fixed_at_anchor(cohort, keys, anchor=7)
     expected = strata_masks(
         {key: approach_difficulty(item, 7).to_dict() for key, item in zip(keys, cohort)},
         keys,

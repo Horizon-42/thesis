@@ -316,3 +316,75 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
             None if forecast.geodetic_values is None else forecast.geodetic_values[: cut + 1]
         ),
     )
+
+
+def cut_rows(forecast: Forecast, count: int) -> Forecast:
+    """The forecast's first ``count`` rows, its control segments cut to the one containing
+    the new end and that one shortened to land on it — :func:`cut_at_threshold_crossing`'s
+    clock rule, without its crossing rule (and like it, a forecast with no controls carries
+    one clock: its segments ARE its samples). A hooked forecast's `steps` becomes the
+    segments kept; its shares stay the rollout's (the cut steps' own counts are not
+    recoverable from a per-flight share). Moved here from `outputs/plan/forecast.py`
+    (2026-09-16): the control path's chained re-ask (`experiments/chain_sensitivity.py`)
+    cuts hook-free forecasts too."""
+    if count >= len(forecast.times):
+        return forecast
+    sample_durations_s = forecast.sample_durations_s[:count]
+    offsets = np.cumsum(sample_durations_s)
+    final_time_s = float(offsets[-1])
+    if forecast.controls is None:
+        segment_durations_s, controls, last = forecast.segment_durations_s[:count], None, count - 1
+    else:
+        boundaries = np.cumsum(forecast.segment_durations_s)
+        last = int(np.searchsorted(boundaries, final_time_s, side="left"))
+        segment_durations_s = forecast.segment_durations_s[: last + 1].copy()
+        segment_durations_s[-1] = final_time_s - (0.0 if last == 0 else boundaries[last - 1])
+        controls = forecast.controls[: last + 1]
+    diagnostics = (
+        None if forecast.command_hook_diagnostics is None
+        else {**forecast.command_hook_diagnostics, "steps": float(last + 1)}
+    )
+    return replace(
+        forecast, times=forecast.times[:count], values=forecast.values[:count],
+        normalized_progress=offsets / final_time_s, final_time_s=final_time_s,
+        sample_durations_s=sample_durations_s, segment_durations_s=segment_durations_s,
+        controls=controls,
+        geodetic_values=None if forecast.geodetic_values is None else forecast.geodetic_values[:count],
+        command_hook_diagnostics=diagnostics,
+    )
+
+
+def concatenate(legs: Sequence[Forecast], anchor: int, predicted_final_time_s: float) -> Forecast:
+    """The legs as one forecast: the rows run on (a leg's rows start one query step after
+    its anchor, so nothing repeats), ``passes`` counts the legs; a hooked leg set's counts
+    are summed over the legs' steps (`rolledLegs` says how many legs), a hook-free one
+    carries none, and a set that mixes the two is refused."""
+    first = legs[0]
+    if len({leg.command_hook_diagnostics is None for leg in legs}) > 1:
+        raise ValueError("cannot concatenate hooked and hook-free legs into one forecast")
+    times = np.concatenate([leg.times for leg in legs])
+    values = np.concatenate([leg.values for leg in legs])
+    geodetic = np.concatenate([leg.geodetic_values for leg in legs])
+    samples = np.concatenate([leg.sample_durations_s for leg in legs])
+    segments = np.concatenate([leg.segment_durations_s for leg in legs])
+    controls = np.concatenate([leg.controls for leg in legs])
+    final_time_s = float(np.sum(samples))
+    diagnostics: dict[str, float | str] | None = None
+    if first.command_hook_diagnostics is not None:
+        steps = [float(leg.command_hook_diagnostics["steps"]) for leg in legs]
+        diagnostics = {"steps": float(sum(steps))}
+        for key in first.command_hook_diagnostics:
+            if key == "steps":
+                continue
+            values_by_leg = [leg.command_hook_diagnostics[key] for leg in legs]
+            if all(isinstance(v, (int, float)) for v in values_by_leg):
+                diagnostics[key] = float(np.average(values_by_leg, weights=steps))
+            else:
+                diagnostics[key] = values_by_leg[0]
+        diagnostics["rolledLegs"] = float(len(legs))
+    return replace(
+        first, times=times, values=values, geodetic_values=geodetic, sample_durations_s=samples,
+        segment_durations_s=segments, controls=controls, normalized_progress=np.cumsum(samples) / max(final_time_s, 1e-9),
+        final_time_s=final_time_s, predicted_final_time_s=float(predicted_final_time_s), anchor=int(anchor),
+        passes=len(legs), command_hook_diagnostics=diagnostics,
+    )

@@ -451,7 +451,7 @@ def test_the_curve_runs_end_to_end_and_states_its_coverage(
         "min_future_s": 10.0, "limit": 0, "write_records": False,
     }
     assert "closest" in payload["anchor_definition"]
-    assert payload["strata_anchor"].startswith("L-1")
+    assert payload["strata_anchor"].startswith("the fixed anchor (default_anchor")
     assert "supervision rows" in payload["geometry_truth"]
 
     arm = payload["checkpoints"]["tiny"]

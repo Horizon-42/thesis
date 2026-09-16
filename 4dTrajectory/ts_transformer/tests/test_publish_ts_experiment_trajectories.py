@@ -343,6 +343,21 @@ def test_a_category_variant_separates_two_publications_of_one_checkpoint(
     assert publish[publish.index("--experiment-id") + 1] == metadata["id"]
 
 
+def test_replay_runner_records_are_refused_without_a_variant(monkeypatch, tmp_path):
+    """`run_ts.py chain_sensitivity --write-records` re-flies a checkpoint (its one-shot and its
+    chain): published bare, either directory would take the checkpoint's own L−1 category."""
+    index, checkpoint = _indexed_checkpoint(tmp_path)
+    experiment = publisher.discover_checkpoints(index)[0]
+    monkeypatch.setattr(publisher, "REPO_ROOT", tmp_path)
+    directory = _plain_prediction_dir(tmp_path, checkpoint, "chain_60s")
+    summary = json.loads((directory / "summary.json").read_text())
+    _write_json(directory / "summary.json", {**summary, "chain": {"variant": "chain_60s"}})
+    with pytest.raises(ValueError, match="'chain' block"):
+        _variant_plan(tmp_path, experiment, directory, None)
+    plan = _variant_plan(tmp_path, experiment, directory, publisher._parse_category_variant("chain-60s"))
+    assert plan.category_variant.key_suffix == "chain-60s"
+
+
 def test_a_variant_slug_defaults_its_own_label_and_rejects_an_unusable_one():
     plain = publisher._parse_category_variant("barrier-infer-soft")
     assert plain.key_suffix == plain.id_suffix == plain.label_suffix == "barrier-infer-soft"

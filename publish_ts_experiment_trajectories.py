@@ -109,6 +109,12 @@ INTENT_REGISTRY_SCHEMA = "ts-experiment-intents-v1"
 #: whole ts package, and this script is a subprocess orchestrator that must stay importable
 #: without them. Change the two together.
 ANYTIME_RECORDS_SCHEMA = "ts-anytime-records-v1"
+#: The summary blocks the REPLAY runners write beside a checkpoint's own forecasts — MIRRORS of
+#: ``experiments.chain_sensitivity`` (``chain``: the one-shot and the chained re-ask of one
+#: checkpoint), for the same reason the anytime schema above is one. A directory carrying one is
+#: a VARIANT of that checkpoint's prediction and has no category of its own without
+#: ``--category-variant``: published bare, it would be filed as the checkpoint's L−1 prediction.
+VARIANT_RECORD_BLOCKS = ("chain",)
 
 
 def _utc_now() -> str:
@@ -560,6 +566,17 @@ class PublicationPlan:
             raise ValueError(
                 f"reused prediction directory {self.prediction_dir} has no summary.json"
             )
+        if self.prediction_dir is not None and self.variant is None:
+            carried = [
+                name for name in VARIANT_RECORD_BLOCKS
+                if name in _load_object(self.prediction_dir / "summary.json")
+            ]
+            if carried:
+                raise ValueError(
+                    f"{self.prediction_dir} carries a {carried[0]!r} block: its records were re-flown "
+                    "by a replay runner from the checkpoint, not predicted by it — give "
+                    "--category-variant, or they would be filed as the checkpoint's own prediction"
+                )
         if self.variant is not None and self.prediction_dir is None:
             # Without a reused directory the predict step would run again and differ only in
             # --output-dir: the same checkpoint, the same flags, the same forecasts, published

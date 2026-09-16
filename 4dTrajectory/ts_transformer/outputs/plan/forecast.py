@@ -29,7 +29,7 @@ from ts_transformer.config import (
 from ts_transformer.data.channels import IDX
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import GLIDEPATH_ABOVE_M, GLIDEPATH_BELOW_M
-from ts_transformer.inference.forecast import Forecast, cut_at_threshold_crossing
+from ts_transformer.inference.forecast import Forecast, concatenate, cut_at_threshold_crossing, cut_rows
 from ts_transformer.outputs.dynamics import rollout as control_rollout
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
@@ -652,61 +652,6 @@ def turn_done_row(forecast: Forecast, instruction: Instruction) -> int | None:
     done = np.abs((psi - instruction.heading_out_rad + math.pi) % (2.0 * math.pi) - math.pi) <= TURN_DONE_RAD
     rows = np.flatnonzero(past & done)
     return int(rows[0]) if rows.size else None
-
-
-def cut_rows(forecast: Forecast, count: int) -> Forecast:
-    """The forecast's first ``count`` rows, its control segments cut to the one containing
-    the new end and that one shortened to land on it — `inference.forecast.
-    cut_at_threshold_crossing`'s clock rule, without its crossing rule."""
-    if count >= len(forecast.times):
-        return forecast
-    sample_durations_s = forecast.sample_durations_s[:count]
-    offsets = np.cumsum(sample_durations_s)
-    final_time_s = float(offsets[-1])
-    boundaries = np.cumsum(forecast.segment_durations_s)
-    last = int(np.searchsorted(boundaries, final_time_s, side="left"))
-    segment_durations_s = forecast.segment_durations_s[: last + 1].copy()
-    segment_durations_s[-1] = final_time_s - (0.0 if last == 0 else boundaries[last - 1])
-    # the hook's `steps` is the segments kept; its shares stay the rollout's (the cut
-    # steps' own counts are not recoverable from a per-flight share)
-    diagnostics = {**forecast.command_hook_diagnostics, "steps": float(last + 1)}
-    return replace(
-        forecast, times=forecast.times[:count], values=forecast.values[:count],
-        normalized_progress=offsets / final_time_s, final_time_s=final_time_s,
-        sample_durations_s=sample_durations_s, segment_durations_s=segment_durations_s,
-        controls=forecast.controls[: last + 1], geodetic_values=forecast.geodetic_values[:count],
-        command_hook_diagnostics=diagnostics,
-    )
-
-
-def concatenate(legs: Sequence[Forecast], anchor: int, predicted_final_time_s: float) -> Forecast:
-    """The legs as one forecast: the rows run on (a leg's rows start one query step after
-    its anchor, so nothing repeats); the hook counts are summed over the legs' steps."""
-    first = legs[0]
-    times = np.concatenate([leg.times for leg in legs])
-    values = np.concatenate([leg.values for leg in legs])
-    geodetic = np.concatenate([leg.geodetic_values for leg in legs])
-    samples = np.concatenate([leg.sample_durations_s for leg in legs])
-    segments = np.concatenate([leg.segment_durations_s for leg in legs])
-    controls = np.concatenate([leg.controls for leg in legs])
-    final_time_s = float(np.sum(samples))
-    steps = [float(leg.command_hook_diagnostics["steps"]) for leg in legs]
-    diagnostics: dict[str, float | str] = {"steps": float(sum(steps))}
-    for key in legs[0].command_hook_diagnostics:
-        if key == "steps":
-            continue
-        values_by_leg = [leg.command_hook_diagnostics[key] for leg in legs]
-        if all(isinstance(v, (int, float)) for v in values_by_leg):
-            diagnostics[key] = float(np.average(values_by_leg, weights=steps))
-        else:
-            diagnostics[key] = values_by_leg[0]
-    diagnostics["rolledLegs"] = float(len(legs))
-    return replace(
-        first, times=times, values=values, geodetic_values=geodetic, sample_durations_s=samples,
-        segment_durations_s=segments, controls=controls, normalized_progress=np.cumsum(samples) / max(final_time_s, 1e-9),
-        final_time_s=final_time_s, predicted_final_time_s=float(predicted_final_time_s), anchor=int(anchor),
-        command_hook_diagnostics=diagnostics,
-    )
 
 
 #: What ended a rolled flight before its closing closed naturally (`RolledFlight.capped_by`,

@@ -29,8 +29,9 @@ then tested for admissibility — a full lookback (``anchor >= seq_len - 1``) an
 ``min_future_s`` of truth after it — so a flight whose closest sample cannot be an anchor
 has NO reading at that bin, rather than a reading taken somewhere else on its track.
 
-**The stratum rule** (:func:`strata_fixed_at_l1`): the label is computed once at the L−1
-evaluation anchor and reused at every bin. Relabelling per bin would drop each flight out
+**The stratum rule** (:func:`strata_fixed_at_anchor`): the label is computed once at the
+evaluation anchor (the checkpoint's fixed anchor, `config.default_anchor`: L−1 unless the run
+carries an `anchor_floor_index`) and reused at every bin. Relabelling per bin would drop each flight out
 of the vectored stratum exactly when it rolled out on the centreline, and the curve would
 be measuring the survivors.
 """
@@ -144,16 +145,18 @@ def anchors_for_bin(series: Sequence[FlightSeries], profiles: Sequence[np.ndarra
     return anchors
 
 
-def strata_fixed_at_l1(series: Sequence[FlightSeries], keys: Sequence[str], *,
-                       seq_len: int) -> dict[str, np.ndarray]:
-    """The stratum masks, computed ONCE at the L−1 anchor and valid at every bin.
+def strata_fixed_at_anchor(series: Sequence[FlightSeries], keys: Sequence[str], *,
+                           anchor: int) -> dict[str, np.ndarray]:
+    """The stratum masks, computed ONCE at the evaluation ``anchor`` and valid at every bin
+    (and every later lead).
 
     §六 1: a flight that is vectored at the evaluation anchor and established at 8 km stays
-    in the vectored stratum at 8 km.
+    in the vectored stratum at 8 km. The anchor is the caller's `default_anchor(config)` —
+    a checkpoint trained at a common floor is judged there, and stratified there (it was
+    ``seq_len - 1`` until 2026-09-16, when the floor made the two differ).
     """
-    anchor_l1 = seq_len - 1
     difficulty = {
-        key: approach_difficulty(item, anchor_l1).to_dict()
+        key: approach_difficulty(item, anchor).to_dict()
         for key, item in zip(keys, series, strict=True)
     }
     return strata_masks(difficulty, list(keys))
