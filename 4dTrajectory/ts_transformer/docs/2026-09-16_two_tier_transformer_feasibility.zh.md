@@ -394,7 +394,7 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 | R1 物理层 | **建成，opus review 完**：前向（端点/稠密/hook，四种定律，543 个张量）逐位不变；review 发现运动学构造顺序变了导致点质量与推力分数的梯度有舍入差 → 恢复原顺序后逐位不变；参数列 dtype 统一由消费方指定、几何读数检查形状、删多余的 `_step`；新增 `aerodynamic_model/tests/test_torch_lag_laws.py`（三种定律端点金标准、每类编译入口飞自己的定律、批量几何读数） | 未提交 |
 | R2 契约行 + 消费方 | **建成，opus review 完**：无阻断/中等问题；T1a 形状的配置（路径角 + heading-rate 8 + 随机锚点 + plan token + lockstep + 导出）在合成数据上端到端跑通；89 个可构造的存量 config 名字/slug/身份串全部不变。低级问题已修：记录段字段一处定义（`export.CONTROL_SEGMENT_FIELDS`）且测试查契约列名不与之冲突；`Forecast` 不变式加形状对齐；记录写契约名改为"非默认即写"；`concatenate` 拒绝拼接相对锚点空速的 speed-command 指令；删 `lag_control_law` 别名与 heads 的第三份 `CONTROL_NAMES`；导入期检查改 `raise RuntimeError`；inverse 文档串更正 | 见下 |
 | R3 测试 + 金标准 + 全套 | **金标准全量 153 项**：除预期的两类外逐位不变——比力族（SF/SC/PA）梯度 float64 相对 ≤ 5e-14（共享一个阻力张量，重训 N3/N6/N7 不再逐位复现），PA 记录里的解算过载 ≤ 1e-16 相对（cos γ 改为 √(1−sin²γ)）。**CUDA**（§11.3 第 4 步，16 架 × 8 段，三种定律）：每个版本自身运行间逐位确定，但新旧代码的编译核不同，端点/稠密/梯度差 ≤ 1.6e-13 相对（推力分数也在内）——GPU 上重预测存量 run 与其记录只差舍入，GPU 上重训任何存量 run 不再逐位复现（与升级 torch 同类；对照一律同代码孪生）；修完后 ts 704 + 573、aerodynamic_model 154 全过，金标准不变；新增 `tests/test_control_contracts.py`、PA 下 heading-rate 项测试 | 未提交 |
-| T1a / T2 重发 | 臂已改为航迹角契约（`t1a_plan_tracker_arms.json` base 加 `control_thrust_parameterization`，三臂 TSConfig 构造通过；intents 同步）；待 R2 review 修完并提交 | — |
+| T1a / T2 重发 | **J6 训练中**（2026-09-16 22:32 起，runs worktree @ 77e1372，队列 agent；预计 7–8 h）：冒烟 1 epoch（全 KRDU，train 6851 / val 1404）所有损失项有限，heading-rate 项 train 0.978 / val 1.276（非零），梯度裁剪 13/14 步，53 s/epoch（航迹角契约 + 随机锚点，180 epoch 无早停 → 每臂约 2.3–2.7 h）。之后 lockstep → evaluation → G1；J7（`--plan-head`）→ G3 | campaign `outputs/KRDU/experiments/two_tier_t1a_20260916` |
 
 ### 11.1 审查结论（sf-n7 原样不满足要求）
 
