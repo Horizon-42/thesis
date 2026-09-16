@@ -1,0 +1,29 @@
+{
+ "_comment": "N7' of docs/2026-09-14_specific_force_control_design.md §14. BASE = the same base as sf_n3 (b1_quantile_20260907's B1_point_matched as `custom`, N=32, simple-v3's supervision, imitation 64, velocity 0.003, point duration head at final_time_loss_weight 26) with ONE field moved: control_thrust_parameterization=specific-force+path-angle — the head's THIRD column becomes a path-angle target gamma*, flown by a first-order loop that re-solves the load factor at every RK4 stage, clipped to the load box, with the stall clamp unchanged. The delta twins are sf_n4's N4_twin / N4_twin_s2024 and the n_x arms are sf_n3's, all on the same split (split-seed 1337) and the same code generation. Launch: run_ts.py frame_ablation --arms <this> --campaign 4dTrajectory/outputs/KRDU/experiments/sf_n7 --airport KRDU --split-seed 1337 (formal: from a clean tree, the intent entry committed first). WHAT IT MEASURES: the final-descent defect diagnosed in design §7.5 is that the vertical channel is an OPEN-LOOP double integrator — a load-command bias of 0.004 grows a height error like 0.5*g*bias*t^2, measured as +92 m and -5.3 m/s at the end on real flights (§13.3). A path-angle target does not accumulate that way (+17 m for the same instantaneous error) and its teacher replays its own truth far better open loop (straight-in ADE p50 32 m against 63 m for n_x and 145 m for delta, §13.2). PRIMARY GATES: (1) the pre-registered break-even of §13.4 — the head's per-flight gamma* bias at or below 0.11 deg; (2) the stall-bound share on the last 5-1 km falls from 32/45 %, the along-track lag of that group falls from 1.0-1.1 km, and the last-km height error falls from ~95 m; (3) regression check, the per-class n_x bias stays at the truth's own spread (the longitudinal channel is unchanged). VETO: pooled ADE worse than N4_twin beyond the ~125 m seed line; straight-in FDE worse READ WITH ITS ALONG/VERTICAL SPLIT (design §7.5.5: a dive that buys along-track at the cost of height is not better). DISCLOSED: this is a change of the vertical CONTRACT, not of the information the head is given — no procedure, glidepath or corridor enters the law, and the profile stays the model's own prediction (the user's rule, 2026-09-16).",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_state_loss_grid": "native-segment-endpoints",
+  "control_state_objective": "true-time-position",
+  "control_imitation_loss_weight": 64.0,
+  "control_velocity_loss_weight": 0.003,
+  "duration_head": "point",
+  "final_time_loss_weight": 26.0,
+  "control_thrust_parameterization": "specific-force+path-angle"
+ },
+ "arms": [
+  {
+   "key": "N7_path_angle",
+   "label": "B1_point_matched with the head's vertical column a path-angle target gamma* (seed 1337)",
+   "overrides": {}
+  },
+  {
+   "key": "N7_path_angle_s2024",
+   "label": "the same, seed 2024 (same split) — the control path's seed line is ~125 m of pooled ADE",
+   "overrides": {
+    "seed": 2024
+   }
+  }
+ ]
+}

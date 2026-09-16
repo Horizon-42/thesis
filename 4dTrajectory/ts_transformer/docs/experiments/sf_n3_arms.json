@@ -1,0 +1,29 @@
+{
+ "_comment": "N3 of docs/2026-09-14_specific_force_control_design.md §7. BASE = b1_quantile_20260907's B1_point_matched exactly (custom, N=32, simple-v3's supervision, imitation 64, velocity 0.003, point duration head at final_time_loss_weight 26) with ONE field moved: control_thrust_parameterization=specific-force. The thrust-fraction twins are the STORED B1_point_matched / B1_point_matched_s2024 (same split, split-seed 1337, same seeds) — not re-run. Launch like that campaign: run_ts.py frame_ablation --arms <this> --campaign 4dTrajectory/outputs/KRDU/experiments/sf_n3 (the campaign id `sf_n3` is the intents.json key) --airport KRDU --split-seed 1337 (formal: from a clean tree, the intent entry committed first). WHAT IT MEASURES: whether a head that predicts in the effect-normalised coordinate removes the class-dependent speed-rate bias the thrust-fraction head carries on KRDU val (established stratum: n_x bias range 0.0104 / 0.0116 g across B737 / A320 / regional / heavy against the truth's own 0.0045 g; heavy − B737 speed bias 4.7 / 4.9 m/s). PRIMARY GATES (mechanism; instrument docs/literature/control_normalization/measurements/per_class_readout.py on each arm's pred_val beside its twin's): the per-class n_x bias range falls toward 0.0045 g on BOTH seeds; the heavy − B737 speed-bias gap shrinks on both seeds. VETO: pooled ADE worse than its twin by more than the control path's ~125 m seed line; straight-in FDE worse beyond its seed spread; flyability delta against observed worse. NOT A PURE CHANGE OF COORDINATES, disclosed: the same thrust range at every state, but with the drag cancelled the speed has no drag feedback (design §2.1), and the neutral init is a descent speed hold (−0.05 g) where the thrust-fraction neutral is level trim — a pooled-ADE tie is the expected in-distribution outcome (Villar Exp. 1, QuadBenchmark Table V); the claim is the class structure.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_state_loss_grid": "native-segment-endpoints",
+  "control_state_objective": "true-time-position",
+  "control_imitation_loss_weight": 64.0,
+  "control_velocity_loss_weight": 0.003,
+  "duration_head": "point",
+  "final_time_loss_weight": 26.0,
+  "control_thrust_parameterization": "specific-force"
+ },
+ "arms": [
+  {
+   "key": "N3_specific_force",
+   "label": "B1_point_matched with the head predicting the specific force n_x = (T−D)/W (seed 1337)",
+   "overrides": {}
+  },
+  {
+   "key": "N3_specific_force_s2024",
+   "label": "the same, seed 2024 (same split) — the control path's seed line is ~125 m of pooled ADE",
+   "overrides": {
+    "seed": 2024
+   }
+  }
+ ]
+}

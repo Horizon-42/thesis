@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, aerodynamic_coefficients
+from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, aerodynamic_coefficients, drag_force_n
 from ts_transformer.config import TSConfig
 from ts_transformer.geometry.flyability import Envelope
 from ts_transformer.outputs.constraints.barrier_filter import BarrierFilter
@@ -262,7 +262,7 @@ class PlanGuidance:
         )
         v_target = torch.maximum(v_target, floor)
         _cl, cd, _stalled = aerodynamic_coefficients(load, speed, view.mass, density, aero)
-        drag = 0.5 * density * speed.square() * cd * aero[:, 0]
+        drag = drag_force_n(density, speed, cd, aero[:, 0])
         mean_required = view.mass * (
             (v_target - speed) / hold + GRAVITY_MPS2 * torch.sin(view.path_angle)
         ) + drag

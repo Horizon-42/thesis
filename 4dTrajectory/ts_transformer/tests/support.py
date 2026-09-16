@@ -13,7 +13,7 @@ import torch
 
 from evaluation.thresholds import AssessmentContext
 from ts_transformer.data.data_provenance import ARRIVAL_DATA_PROVENANCE_SCHEMA
-from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.conditioning import CONDITION_WIDTH
 from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 
 AIRPORT, RUNWAY = "KRDU", "05L"
@@ -35,7 +35,7 @@ def dynamics_context(batch: int, cta_s: torch.Tensor | None = None) -> dict[str,
     """A control model's per-flight context for ``batch`` synthetic flights: a random
     condition vector and the shared dimensionless control box, plus the CTA when given."""
     rows = {
-        "condition": torch.randn(batch, len(DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.randn(batch, CONDITION_WIDTH),
         "control_lower": torch.tensor(CONTROL_LOWER, dtype=torch.float32).expand(batch, -1).clone(),
         "control_upper": torch.tensor(CONTROL_UPPER, dtype=torch.float32).expand(batch, -1).clone(),
     }

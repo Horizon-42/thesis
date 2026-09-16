@@ -1,0 +1,29 @@
+{
+ "_comment": "N6 of docs/2026-09-14_specific_force_control_design.md §12 — the specific force's invariance WITH a restoring force. BASE = b1_quantile_20260907's B1_point_matched exactly (custom, N=32, simple-v3's supervision, imitation 64, velocity 0.003, point duration head at final_time_loss_weight 26) with ONE field moved: control_thrust_parameterization=speed-command (the head's first column is a target airspeed RELATIVE to the anchor's, Δv ∈ [−90, +20] m/s, neutral 0 = hold the anchor speed; the lag RHS flies it through an 8 s speed loop, V' = (V₀ + Δv − V)/τ_V wherever the thrust clamp does not bind, the thrust re-solved at every RK4 stage as under specific-force). The twins are sf_n4's N4_twin / N4_twin_s2024 (B1_point_matched re-trained at the N3/N4 code; the stored pair predates c544db0, §11.6) — same split, split-seed 1337, same seeds. Launch like N3/N4 from the runner worktree: run_ts.py frame_ablation --arms <this> --campaign 4dTrajectory/outputs/KRDU/experiments/sf_n6 (the campaign id `sf_n6` is the intents.json key) --airport KRDU --split-seed 1337 (formal: from a clean tree, the intent entry committed first). WHY: N3 (specific force) collapsed the per-class n_x bias to the truth's own spread on both seeds but failed the heavy − B737 speed gap and tripped the straight-in FDE veto (887 / 885 m p50; the last 5 km flown 4.4 m/s slow) — the missing drag feedback, dV'/dV = 0. A speed loop restores dV'/dV = −1/τ_V on every airframe. GATES (N3's instrument, docs/literature/control_normalization/measurements/per_class_readout.py on each arm's pred_val beside its twin's): the per-class n_x bias range toward the truth's 0.0045 g (N3 passed it); the heavy − B737 speed-bias gap closing (N3 failed it); the straight-in FDE p50 back inside the twins' seed spread (N3 failed it). VETO: pooled ADE worse than its twin by more than the ~125 m seed line. READING: all three where N3 passed one ⇒ the invariant needed the restoring force.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_state_loss_grid": "native-segment-endpoints",
+  "control_state_objective": "true-time-position",
+  "control_imitation_loss_weight": 64.0,
+  "control_velocity_loss_weight": 0.003,
+  "duration_head": "point",
+  "final_time_loss_weight": 26.0,
+  "control_thrust_parameterization": "speed-command"
+ },
+ "arms": [
+  {
+   "key": "N6_speed_command",
+   "label": "B1_point_matched with the head predicting a speed command relative to the anchor, flown by an 8 s speed loop (seed 1337)",
+   "overrides": {}
+  },
+  {
+   "key": "N6_speed_command_s2024",
+   "label": "the same, seed 2024 (same split) — the control path's seed line is ~125 m of pooled ADE",
+   "overrides": {
+    "seed": 2024
+   }
+  }
+ ]
+}

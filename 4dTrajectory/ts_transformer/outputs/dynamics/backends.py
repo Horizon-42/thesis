@@ -21,8 +21,12 @@ lines each and agreed on the rest.
 
 Training, validation and forecasting consume one channel/geodetic result contract, so a
 representation change never reaches the model, the loss or the data pipeline. Controls
-arrive in the dimensionless envelope (``control_envelope``); conversion to the newton
-contract ``aerodynamic_model`` expects happens once, here, at the boundary.
+arrive in the dimensionless contract ``config.control_thrust_parameterization`` names
+(``outputs/envelope.py``). The point-mass rows convert to newtons once, here, at the
+boundary (``RolloutInputs.newton_controls``), and are thrust-fraction only (`TSConfig`
+refuses the other pairing). The lag rows never convert here: they hand the RHS the control
+LAW (:func:`lag_control_law`) and it converts inside, per stage — ``a_x·T_max`` under
+thrust-fraction, the drag-dependent thrust under specific-force.
 """
 
 from __future__ import annotations
@@ -43,6 +47,11 @@ from aerodynamic_model.torch_dynamics import (
     rollout_piecewise_constant as reanchored_endpoint_rollout,
 )
 from aerodynamic_model.torch_lag_dynamics import (
+    THRUST_FRACTION_LAW,
+    LagControlLaw,
+    PathAngleLaw,
+    SpecificForceLaw,
+    SpeedCommandLaw,
     lag_actuator_states,
     lag_state_scale,
     lag_state_to_transport_chart,
@@ -65,9 +74,47 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
+    CONTROL_SPEED_COMMAND,
+    CONTROL_THRUST_FRACTION,
     TSConfig,
 )
-from ts_transformer.outputs.envelope import physical_controls
+from ts_transformer.outputs.envelope import (
+    MAX_LOAD_FACTOR,
+    MIN_LOAD_FACTOR,
+    MIN_THRUST_FRACTION,
+    PATH_ANGLE_TIME_CONSTANT_S,
+    SPEED_LOOP_TIME_CONSTANT_S,
+    physical_controls,
+)
+
+
+#: The lag RHS's control law per ``control_thrust_parameterization`` — the one place the
+#: config field meets the physics. The specific-force law's engine floor is the
+#: thrust-fraction box's, so the two admit the same thrusts (design §2.1).
+_LAG_CONTROL_LAWS: dict[str, LagControlLaw] = {
+    CONTROL_THRUST_FRACTION: THRUST_FRACTION_LAW,
+    CONTROL_SPECIFIC_FORCE: SpecificForceLaw(min_thrust_fraction=MIN_THRUST_FRACTION),
+    CONTROL_SPEED_COMMAND: SpeedCommandLaw(
+        min_thrust_fraction=MIN_THRUST_FRACTION,
+        speed_time_constant_s=SPEED_LOOP_TIME_CONSTANT_S,
+    ),
+    # The path loop resolves a LOAD FACTOR, so it reads the load box the head's own column
+    # used to be bounded by: the search space the commands lived in is the range the loop may
+    # ask for (design §14.2).
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE: PathAngleLaw(
+        min_thrust_fraction=MIN_THRUST_FRACTION,
+        path_angle_time_constant_s=PATH_ANGLE_TIME_CONSTANT_S,
+        min_load_factor=MIN_LOAD_FACTOR,
+        max_load_factor=MAX_LOAD_FACTOR,
+    ),
+}
+
+
+def lag_control_law(config: TSConfig) -> LagControlLaw:
+    """The control law the lagged rollout integrates this config's commands under."""
+    return _LAG_CONTROL_LAWS[config.control_thrust_parameterization]
 
 
 @dataclass(frozen=True)
@@ -75,8 +122,8 @@ class RolloutInputs:
     """Everything a rollout needs, already on one dtype and device."""
 
     initial_state: torch.Tensor       # [B,7] geodetic
-    initial_controls: torch.Tensor    # [B,3] envelope units, in effect at the anchor
-    controls: torch.Tensor            # [B,N,3] envelope units (commands, if lagged)
+    initial_controls: torch.Tensor    # [B,3] contract units, in effect at the anchor
+    controls: torch.Tensor            # [B,N,3] contract units (commands, if lagged)
     segment_durations_s: torch.Tensor  # [B,N]
     aero_params: torch.Tensor         # [B,6]
     frame_params: torch.Tensor        # [B,4]
@@ -84,7 +131,9 @@ class RolloutInputs:
 
     @property
     def newton_controls(self) -> torch.Tensor:
-        """The schedule in the newton contract ``aerodynamic_model`` integrates."""
+        """The schedule in the newton contract ``aerodynamic_model`` integrates — the
+        thrust-fraction contract only, which is the only one the point-mass rows (its
+        sole readers) admit."""
         return physical_controls(self.controls, self.max_thrust_n)
 
 
@@ -99,7 +148,10 @@ class EndpointControlRollout:
     # units. Under the point-mass model a piecewise-constant command is in effect
     # instantly, so this IS ``controls``; under the first-order lag the three controls are
     # states chasing their command and this is where they got to. A term that prices what
-    # the rollout flew (the heading-rate loss) must read this, never the command.
+    # the rollout flew (the heading-rate loss) must read this, never the command — in EACH
+    # law's own unit: column 2 is a load factor under every law except the path-angle one,
+    # where it is the target angle and the flown load has to be re-solved from the state
+    # (config refuses that pairing rather than let the term read radians as a load).
     actual_controls: torch.Tensor
 
 
@@ -290,6 +342,7 @@ def _lag_hooked_schedule(
         inputs.frame_params.new_tensor(config.control_time_constants_s),
         inputs.max_thrust_n,
         raw_hook,
+        control_law=lag_control_law(config),
         track_reference=command_hook.needs_reference,
         chart_scale=chart_scale,
         integrator_dt_s=config.control_rollout_integrator_dt_s,
@@ -323,6 +376,7 @@ def _lag_endpoint(
             inputs.frame_params,
             inputs.frame_params.new_tensor(config.control_time_constants_s),
             inputs.max_thrust_n,
+            control_law=lag_control_law(config),
             chart_scale=chart_scale,
             integrator_dt_s=config.control_rollout_integrator_dt_s,
         )
@@ -362,6 +416,7 @@ def _lag_dense(
         inputs.max_thrust_n,
         query_offsets_s,
         query_valid,
+        control_law=lag_control_law(config),
         chart_scale=chart_scale,
         integrator_dt_s=config.control_rollout_integrator_dt_s,
     )

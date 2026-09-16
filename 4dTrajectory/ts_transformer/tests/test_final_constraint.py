@@ -445,7 +445,10 @@ def test_control_dynamics_carry_the_glidepath_for_the_rollout_penalty():
     from ts_transformer.outputs.dynamics.context import dynamics_arrays
 
     series, config = _series(n_flights=1)
-    rows = dynamics_arrays(series[0], config.seq_len - 1)
+    rows = dynamics_arrays(
+        series[0], config.seq_len - 1, parameterization=config.control_thrust_parameterization,
+        condition_features=config.control_condition_features,
+    )
     assert rows["glidepath_tan"] == pytest.approx(math.tan(-series[0].scenario.target.gamma))
     assert "final_approach_fix_m" not in rows
     assert "glidepath_tan" in probe_dynamics(2, torch.device("cpu"), config)

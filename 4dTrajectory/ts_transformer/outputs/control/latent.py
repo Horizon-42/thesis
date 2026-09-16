@@ -49,6 +49,7 @@ from ts_transformer.outputs.control.heads import (
     duration_head_for,
 )
 from ts_transformer.outputs.control.heads import ControlPrediction
+from ts_transformer.outputs.envelope import control_contract
 
 LATENT_KL_COMPONENT = "latent_kl"
 #: The auxiliary intent target's loss component (L2.f arm 2); registered only when
@@ -333,7 +334,9 @@ class LatentControlModel(ControlFeatureModel):
             self.latent_duration.weight.zero_()
             self.latent_duration.bias.zero_()
         self.control_head = control_head_for(config)
-        _initialize_control_head(self.control_head)
+        _initialize_control_head(
+            self.control_head, control_contract(config.control_thrust_parameterization)
+        )
         _initialize_duration_head(self.final_time_head)
         # The auxiliary intent target (L2.f): built only when it is weighted, so a
         # checkpoint trained without it has no such parameters to load. It reads the

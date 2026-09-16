@@ -742,3 +742,75 @@ on the placeholder's length (synthetic leg, heading away from the join: 6.8 s of
 leg's points at the route's own coordinates (the anchor at `route.remaining_m(0)`, the fix at its first
 pass). Changes the flown speed on every instruction leg → a re-measure of the plan-path steps; not done.
 
+## 33. Three more readers compare a stored config field by field with `!=` (2026-09-14)
+
+**Verified** (M1 review of the specific-force axis):
+- **The readers:** `experiments/pipeline.cv_reuse_error` compares the full `TSConfig(...).to_dict()` with a stored
+  `cv_results.json`'s `base_config`. `experiments/coordinate_ablation` (one stored CV result against another) and
+  `inference/build_multiflight_capacity_report._load_results` have the same shape.
+- **The problem:** a field added after the artifact was written reads as a difference. Both stored
+  `cv_results.json` already lacked 45–50 fields at `775b59e`, so neither was reusable before the change either.
+- **The fix is ready:** the campaign runner's resume check got exactly this rule, `config.absent_field_defaults`,
+  on 2026-09-14.
+
+**Judgement**: adopt the same helper in the three readers. It turns "never reusable" into "reusable when only
+absent fields differ", so it changes which stored CV results a `pipeline --skip-train` run reuses — the owner's
+call.
+
+## 34. The thrust-fraction speed floor's soft form is inert by a rounding accident (2026-09-14)
+
+**Verified** (while building the specific-force floor):
+- **The design:** `soft_max(x, b, s) = b + s·softplus((x − b)/s)` equals `x` exactly only where softplus takes
+  its linear branch, input > 20.
+- **The accident:** `_INERT_DEMAND` parks the demand exactly 20 softnesses below the box. At the box floor that
+  ratio is `(−0.2 + 0.6)/0.02 = 20.000000000000004`, so the branch is taken, and `b + s·((x − b)/s)` happens to
+  round back to `x`.
+- **Evidence:** `test_the_soft_speed_floor_is_inert_where_it_demands_nothing` passes on those exact values. The
+  specific-force twin, at 20 softnesses of 0.00717 g, did NOT round back. Its first fix, returning the command
+  past the switch, still sat ON the switch at the box floor (M2 review: 25–29 % of random boxes miss). It is now
+  parked ONE softness further, so every in-box command is strictly past the switch.
+
+**Judgement**: harmless today, and pinned by the test. But any change to `MIN_THRUST_FRACTION`, the softness or
+the multiplier can break it silently in the soft path (the test would catch the box-floor case only). Adopting
+the specific-force form (park 21 softnesses below and `torch.where(x − b ≥ 20·s, x, soft_max(...))`) would
+make it structural. That could
+move thrust-fraction outputs by an ulp where they are currently not exact, so it is the owner's call.
+
+**Addendum (2026-09-15, N4 review):** `control_condition_features` is one more field every stored
+`cv_results.json` lacks. Nothing new breaks, since both stored files were already unusable for reuse.
+
+## 35. The control path's anchor-eligibility gate restates the stall speed (2026-09-15)
+
+**Verified** (N4 review):
+- `outputs/control/strategy.airborne_control_candidates` computes `√(2 m g / (ρ₀ S Cl_max))` inline.
+- It uses its own `SEA_LEVEL_DENSITY_KG_M3 = 1.225` and `flyability`'s `G`.
+- The repository's one definition is `aircraft.aero_params.stall_speed_ms`. The optimizer's floor, evaluation's
+  threshold speed gate and (since N4) the `ratios` condition channel all call it.
+
+**Judgement**: the values agree today (both 1.225 and 9.81). Calling `stall_speed_ms` would make that
+structural. The gate is spelled into the stored `airborne-1.10-stall-margin-v1` output-eligibility policy, so
+the change must be shown to select the same anchors before it lands.
+
+## 36. `predictability_report.batch_dynamics_tensors` duplicates the forecast's context batch (2026-09-15)
+
+**Verified** (N4 review):
+- It is `outputs/control/forecast._dynamics_batch` without the CTA branch.
+- So every argument added to `dynamics_arrays` has to be added in both places. Both
+  `control_thrust_parameterization` and `control_condition_features` were.
+- A test now pins that its condition rows equal the forecast's.
+
+**Judgement**: make `_dynamics_batch` public and call it from the report. The report is validation-only and
+never runs a CTA arm.
+
+## 37. The specific-force contract's constants are not in any checkpoint's identity (2026-09-15)
+
+**Verified** (N6 review S2):
+- The specific-force box `[−0.20, 0.23]` g and its neutral −0.05 are constants of `outputs/envelope.py`.
+  They are not config fields, and the control target contract does not spell them.
+- So a stored specific-force checkpoint would load and fly under moved constants with the same name. Today
+  that is the two `sf_n3` checkpoints.
+- The speed-command law spells its constants into the target contract (`envelope.speed_command_identity()`).
+
+**Judgement**: do the same for specific-force. Adding it would refuse the two stored `sf_n3` checkpoints,
+so it needs a reading of the absent spelling as today's values (like `absent_field_defaults`), or a re-save.
+It is the owner's call.

@@ -24,7 +24,11 @@ from aerodynamic_model.torch_dynamics import (
     GRAVITY_MPS2,
     STATE_NAMES,
     aerodynamic_coefficients,
+    drag_force_n,
     isa_density,
+    path_angle_load_factor,
+    specific_force_thrust_n,
+    speed_loop_specific_force,
 )
 from aerodynamic_model.torch_piecewise_rollout import (
     rollout_piecewise_constant_with_step,
@@ -226,7 +230,7 @@ def transport_chart_rhs(
         / (mass * GRAVITY_MPS2),
         load_command,
     )
-    drag = 0.5 * density * speed.square() * cd * area
+    drag = drag_force_n(density, speed, cd, area)
     speed_rate = (thrust - drag) / mass - GRAVITY_MPS2 * sin_gamma
 
     tangent = torch.stack(
@@ -277,6 +281,93 @@ def transport_chart_rhs(
             torch.zeros_like(mass).unsqueeze(-1),
         ),
         dim=-1,
+    )
+
+
+def _chart_speed_altitude_mass(
+    state_chart: torch.Tensor, frame_params: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """``(speed, vertical speed, altitude, mass)`` read off a chart state exactly as
+    :func:`transport_chart_rhs` reads them — the one reading both thrust helpers share, so
+    the drag they add is the drag the RHS subtracts."""
+    _require_last_dim(
+        state_chart, len(TRANSPORT_CHART_STATE_NAMES), "state_chart"
+    )
+    _east, north, up, ve, vn, vu, mass = state_chart.unbind(-1)
+    _lat0, _lat, altitude, _radius_m, _radius_n, _alt0 = _wgs84_geometry(
+        north, up, frame_params
+    )
+    horizontal_speed = torch.sqrt(ve.square() + vn.square())
+    speed = torch.sqrt(horizontal_speed.square() + vu.square())
+    return speed, vu, altitude, mass
+
+
+def transport_chart_specific_force_thrust_n(
+    state_chart: torch.Tensor,
+    specific_force: torch.Tensor,
+    load_factor: torch.Tensor,
+    aero_params: torch.Tensor,
+    frame_params: torch.Tensor,
+    min_thrust_n: torch.Tensor,
+    max_thrust_n: torch.Tensor,
+) -> torch.Tensor:
+    """:func:`specific_force_thrust_n` at a chart state, read the way
+    :func:`transport_chart_rhs` reads it (same speed, same ``_wgs84_geometry`` altitude,
+    same mass), so the drag it adds is the drag the RHS subtracts."""
+    speed, _vu, altitude, mass = _chart_speed_altitude_mass(state_chart, frame_params)
+    return specific_force_thrust_n(
+        specific_force, load_factor, speed, altitude, mass, aero_params,
+        min_thrust_n, max_thrust_n,
+    )
+
+
+def transport_chart_speed_command_thrust_n(
+    state_chart: torch.Tensor,
+    speed_command_mps: torch.Tensor,
+    speed_time_constant_s: torch.Tensor,
+    load_factor: torch.Tensor,
+    aero_params: torch.Tensor,
+    frame_params: torch.Tensor,
+    min_thrust_n: torch.Tensor,
+    max_thrust_n: torch.Tensor,
+) -> torch.Tensor:
+    """The thrust a first-order speed loop asks for at a chart state: the specific force
+    ``sin γ + (v_c − V)/(g·τ_V)`` flown through :func:`specific_force_thrust_n`, with V and γ
+    read as :func:`transport_chart_rhs` reads them. Wherever the clamp does not bind, the RHS
+    then integrates ``V' = (v_c − V)/τ_V`` on every airframe."""
+    speed, vu, altitude, mass = _chart_speed_altitude_mass(state_chart, frame_params)
+    specific_force = speed_loop_specific_force(
+        speed_command_mps, speed, vu / speed, speed_time_constant_s
+    )
+    return specific_force_thrust_n(
+        specific_force, load_factor, speed, altitude, mass, aero_params,
+        min_thrust_n, max_thrust_n,
+    )
+
+
+def transport_chart_path_angle_load_factor(
+    state_chart: torch.Tensor,
+    path_angle_command_rad: torch.Tensor,
+    bank_rad: torch.Tensor,
+    path_angle_time_constant_s: torch.Tensor,
+    frame_params: torch.Tensor,
+    min_load_factor: torch.Tensor | float,
+    max_load_factor: torch.Tensor | float,
+) -> torch.Tensor:
+    """The load factor a first-order path loop asks for at a chart state, with V and γ read as
+    :func:`transport_chart_rhs` reads them. Wherever neither the load box nor the stall clamp
+    binds, the RHS then integrates ``γ' = (γ* − γ)/τ_γ`` on every airframe."""
+    speed, vu, _altitude, _mass = _chart_speed_altitude_mass(state_chart, frame_params)
+    sin_gamma = vu / speed
+    return path_angle_load_factor(
+        path_angle_command_rad,
+        sin_gamma,
+        torch.sqrt(torch.clamp(1.0 - sin_gamma * sin_gamma, min=0.0)),
+        speed,
+        bank_rad,
+        path_angle_time_constant_s,
+        min_load_factor,
+        max_load_factor,
     )
 
 

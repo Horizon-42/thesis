@@ -58,6 +58,10 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_NAMES,
+    CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
+    CONTROL_SPEED_COMMAND,
+    CONTROL_THRUST_FRACTION,
     DEFAULT_N_SEGMENTS_BY_MODEL,
     HORIZON_FULL,
     HORIZON_WINDOW,
@@ -75,6 +79,14 @@ _DYNAMICS_SLUG = {
     "kinematic": "kin",
     CONTROL_DYNAMICS_POINT_MASS: "pm",
     CONTROL_DYNAMICS_FIRST_ORDER_LAG: "lag",
+}
+#: The longitudinal contract off its default, as the dynamics word and the slug spell it.
+#: It is physics — WHICH quantity the rollout integrates the head's first column as — so it
+#: sits in the always-shown dynamics word, never in the foldable meta list.
+_THRUST_PARAMETERIZATION_SLUG = {
+    CONTROL_SPECIFIC_FORCE: "sf",
+    CONTROL_SPEED_COMMAND: "sc",
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE: "sfpa",
 }
 _BACKEND_SLUG = {
     # `transport-chart-velocity` is RETIRED from the config vocabulary (T2, 2026-09-07) and
@@ -189,6 +201,11 @@ META_FIELDS = (
     # and the named recipes pin this at `point`, so a `quantile` or `two-head` run is
     # `custom` and this item shows (`T=q5` / `T=2h`).
     "duration_head",
+    # N4: how the airframe is written into the head's condition vector. It is the whole
+    # difference between an N4 arm and its twin, so it sits ahead of the backbone knobs that
+    # fold. Every stored config predates it and reads as the default, so adding it renames
+    # nothing.
+    "control_condition_features",
     "d_model",
     "n_heads",
     "d_ff",
@@ -316,6 +333,7 @@ _ABBREV = {
     "cta_conditioning": "cta",
     "plan_conditioning": "plan",
     "plan_conditioning_dropout": "plan-drop",
+    "control_condition_features": "airframe",
     "closure_labels_path": "labels",
     "control_fitted_teacher_path": "teacher",
     "plan_rolled_windows_path": "rolled",
@@ -382,7 +400,7 @@ if _unknown:  # fail at import: a renamed TSConfig field must rename here too
 #: recipe, the horizon and the seed are spelled by their own functions below.
 _DIRECTLY_NAMED_FIELDS = frozenset({
     "model", "prediction_output", "control_recipe_name", "horizon_mode", "seed",
-    "control_dynamics_model", "control_dynamics_backend",
+    "control_dynamics_model", "control_dynamics_backend", "control_thrust_parameterization",
     "latent_dim", "latent_prior_components",
 })
 
@@ -451,7 +469,10 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "closure_labels_path", "control_fitted_teacher_path",
         "plan_rolled_windows_path", "plan_rolled_share",
     )),
-    ("Conditioning", ("target_conditioning", *INTENT_FIELDS, *CTA_FIELDS, *PLAN_CONDITIONING_FIELDS)),
+    ("Conditioning", (
+        "target_conditioning", *INTENT_FIELDS, *CTA_FIELDS, *PLAN_CONDITIONING_FIELDS,
+        "control_condition_features",
+    )),
     ("Control rollout", (
         "control_duration_parameterization", "control_duration_uniform_floor",
         "control_rollout_integrator_dt_s", *CONTROL_HOOK_FIELDS,
@@ -656,10 +677,18 @@ def dynamics_name(config: Mapping[str, Any]) -> str:
         ]
         if taus:
             name += f"({', '.join(taus)})"
+    thrust = _thrust_parameterization(config)
+    if thrust != CONTROL_THRUST_FRACTION:
+        name += f"+{thrust}"
     backend = config.get("control_dynamics_backend") or CONTROL_DYNAMICS_REANCHORED_RK4
     if backend != CONTROL_DYNAMICS_REANCHORED_RK4:
         name += f" @{backend}"
     return name
+
+
+def _thrust_parameterization(config: Mapping[str, Any]) -> str:
+    """A stored config predating the field ran the default law."""
+    return config.get("control_thrust_parameterization") or CONTROL_THRUST_FRACTION
 
 
 def _meta_diffs(
@@ -814,6 +843,9 @@ def run_slug(config: Mapping[str, Any], *, extra: Sequence[str] = ()) -> str:
         else "kinematic"
     )
     dyn = _DYNAMICS_SLUG.get(model, _slugify(str(model)))
+    thrust = _thrust_parameterization(config)
+    if config.get("prediction_output") == PREDICTION_CONTROL and thrust != CONTROL_THRUST_FRACTION:
+        dyn += f"-{_THRUST_PARAMETERIZATION_SLUG.get(thrust, _slugify(thrust))}"
     backend = config.get("control_dynamics_backend") or CONTROL_DYNAMICS_REANCHORED_RK4
     if config.get("prediction_output") == PREDICTION_CONTROL and (
         backend != CONTROL_DYNAMICS_REANCHORED_RK4

@@ -11,7 +11,12 @@ import pytest
 import torch
 
 from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT
-from ts_transformer.config import TSConfig, default_anchor
+from ts_transformer.config import (
+    CONTROL_CONDITION_FEATURES_RAW,
+    CONTROL_THRUST_FRACTION,
+    TSConfig,
+    default_anchor,
+)
 from ts_transformer.data.channels import IDX
 from ts_transformer.data.dataset import build_series
 from ts_transformer.data.synthetic import synthetic_arrivals
@@ -248,7 +253,10 @@ def test_the_bank_turns_the_aircraft_toward_its_route():
     """Positive bank is a CCW (left) turn in the math-ENU chart: an aircraft RIGHT of its
     route (+xt) banks positive, one LEFT of it banks negative, by the same amount."""
     series, config, skeleton, anchor, _labels = _cohort(1)
-    row = dynamics_arrays(series[0], anchor)
+    row = dynamics_arrays(
+        series[0], anchor, parameterization=CONTROL_THRUST_FRACTION,
+        condition_features=CONTROL_CONDITION_FEATURES_RAW,
+    )
     dynamics = {name: torch.from_numpy(np.stack([row[name]] * 2)) for name in row}
     course = skeleton.course_rad
     e_on, n_on = _pose(skeleton, 12_000.0, 0.0)

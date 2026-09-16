@@ -21,6 +21,7 @@ import numpy as np
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "4dTrajectory"))
+from ts_transformer.config import CONTROL_THRUST_FRACTION  # noqa: E402
 from ts_transformer.outputs.dynamics.inverse import actual_controls  # noqa: E402
 
 EXPERIMENTS = REPO / "4dTrajectory" / "outputs" / "KSJC" / "experiments"
@@ -80,7 +81,8 @@ def load(campaign: str, arm: str = ARM) -> dict:
         states, times = states[keep], times[keep]
         try:
             bank = actual_controls(
-                states, times, aero_params=AERO, max_thrust_n=MAX_THRUST_N
+                states, times, aero_params=AERO, max_thrust_n=MAX_THRUST_N,
+                parameterization=CONTROL_THRUST_FRACTION,
             )[:, 1]
         except ValueError:
             continue

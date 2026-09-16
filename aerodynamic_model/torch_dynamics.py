@@ -70,6 +70,79 @@ def aerodynamic_coefficients(
     return cl, cd, stalled
 
 
+def drag_force_n(
+    density: torch.Tensor, speed_mps: torch.Tensor, cd: torch.Tensor, area_m2: torch.Tensor
+) -> torch.Tensor:
+    """``D = ½ρV²·C_D·S`` — the ONE expression every RHS here subtracts and the
+    specific-force thrust adds back, so their cancellation is exact by construction."""
+    return 0.5 * density * speed_mps.square() * cd * area_m2
+
+
+def specific_force_thrust_n(
+    specific_force: torch.Tensor,
+    load_factor: torch.Tensor,
+    speed_mps: torch.Tensor,
+    altitude_m: torch.Tensor,
+    mass_kg: torch.Tensor,
+    aero_params: torch.Tensor,
+    min_thrust_n: torch.Tensor,
+    max_thrust_n: torch.Tensor,
+) -> torch.Tensor:
+    """The thrust that flies the specific force ``n_x = (T - D)/W``, clamped to the engine.
+
+    ``T = m·g·n_x + D`` with ``D`` from :func:`aerodynamic_coefficients` at the same load
+    factor, speed, mass and density the RHS reads — so where the clamp does not bind, the
+    RHS subtracts exactly this drag again and ``V' = g·(n_x - sin(gamma))``: the mass, the
+    installed thrust and the polar leave the speed equation. ``[min_thrust_n, max_thrust_n]``
+    is the engine's range; where it binds, the speed law is the thrust law's at that bound.
+    """
+    density = isa_density(altitude_m)
+    _cl, cd, _stalled = aerodynamic_coefficients(
+        load_factor, speed_mps, mass_kg, density, aero_params
+    )
+    drag = drag_force_n(density, speed_mps, cd, aero_params[..., 0])
+    thrust = mass_kg * GRAVITY_MPS2 * specific_force + drag
+    return torch.minimum(torch.maximum(thrust, min_thrust_n), max_thrust_n)
+
+
+def speed_loop_specific_force(
+    speed_command_mps: torch.Tensor,
+    speed_mps: torch.Tensor,
+    sin_gamma: torch.Tensor,
+    speed_time_constant_s: torch.Tensor | float,
+) -> torch.Tensor:
+    """The specific force a first-order speed loop asks for, ``sin γ + (v_c − V)/(g·τ_V)``:
+    flown through :func:`specific_force_thrust_n`, it makes ``V' = (v_c − V)/τ_V`` wherever
+    the engine's clamp does not bind. The one expression the lag RHS and the exported record
+    thrust both read."""
+    return sin_gamma + (speed_command_mps - speed_mps) / (GRAVITY_MPS2 * speed_time_constant_s)
+
+
+def path_angle_load_factor(
+    path_angle_command_rad: torch.Tensor,
+    sin_gamma: torch.Tensor,
+    cos_gamma: torch.Tensor,
+    speed_mps: torch.Tensor,
+    bank_rad: torch.Tensor,
+    path_angle_time_constant_s: torch.Tensor | float,
+    min_load_factor: torch.Tensor | float,
+    max_load_factor: torch.Tensor | float,
+) -> torch.Tensor:
+    """The load factor a first-order PATH loop asks for, the vertical analogue of
+    :func:`speed_loop_specific_force`.
+
+    ``n = [cos γ + V·(γ* − γ)/(g·τ_γ)] / cos φ``, clipped to the load box. Flown through the
+    unchanged RHS it gives ``γ' = (γ* − γ)/τ_γ`` wherever neither the box nor the stall clamp
+    binds, on every airframe. γ is read as ``atan2(sin γ, cos γ)`` from the caller's own
+    components so the chart and the geodetic callers agree on it. The one expression the lag
+    RHS and the exported record load both read."""
+    gamma = torch.atan2(sin_gamma, cos_gamma)
+    vertical = cos_gamma + speed_mps * (path_angle_command_rad - gamma) / (
+        GRAVITY_MPS2 * path_angle_time_constant_s
+    )
+    return torch.clamp(vertical / torch.cos(bank_rad), min_load_factor, max_load_factor)
+
+
 def enu_rhs(
     state_enu: torch.Tensor,
     controls: torch.Tensor,
@@ -91,7 +164,7 @@ def enu_rhs(
         0.5 * density * speed.square() * cl_max * area / (mass * GRAVITY_MPS2),
         load_command,
     )
-    drag = 0.5 * density * speed.square() * cd * area
+    drag = drag_force_n(density, speed, cd, area)
     cos_gamma = torch.cos(gamma)
     return torch.stack(
         (

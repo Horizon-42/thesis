@@ -30,6 +30,121 @@ time per stratum, the growth exponent paired over the flights present at both le
 state A_threshold_enu). Literature: repo `docs/literature/hierarchical_prediction/`. Next (the user's call):
 T0(b) + T0(c), then T1.
 
+## Specific-force control parameterisation — MEASURED, NOT ADOPTED; the final descent diagnosed (2026-09-15, branch `specific-force-control`)
+
+Design `docs/2026-09-14_specific_force_control_design.md`; literature
+`docs/literature/control_normalization/` (repo root).
+
+**The ask.** The user: "…是不是可以修改aerodynamic 或者增加一个normalize 处理？" The head's thrust channel was
+normalised by the actuator (δ = T/T_max). The new axis `control_thrust_parameterization=specific-force` normalises
+it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
+
+**Why it may matter** (KRDU `B1_point_matched`, 2 seeds, established stratum):
+- The head's δ is class-invariant; the truth's is not.
+- The class-dependent n_x bias spans 0.010–0.012 g, against the truth's own 0.0045 g.
+- Heavies fly 4.7–4.9 m/s fast relative to the 737 family.
+
+**Status and next steps:**
+- **M1** (`8ce4568`) and **M2** (the speed floor, CLI, docs, smoke) are built and reviewed. Defaults are
+  bit-identical, and no stored run is renamed or refused.
+- **N3 — the measurement:** KRDU `B1_point_matched` as `custom` + specific-force, seeds 1337/2024
+  (`docs/experiments/sf_n3_arms.json`). **Ran** 2026-09-15 00:18–02:33 UTC from the `specific-force` worktree
+  at `47b4b40`; campaign `4dTrajectory/outputs/KRDU/experiments/sf_n3`.
+  - Gates: the per-class n_x bias range falls toward 0.0045 g; the heavy − 737 speed gap closes.
+  - Veto: pooled ADE within ~125 m of the base; the straight-in FDE veto.
+- **N4 — the alternative-hypothesis control, RAN; REJECTED on both seeds** (design §11.7). Ratios move the δ head's
+  class bias only 0.0125 → 0.0119 / 0.0118 → 0.0105 g, where the specific force moves it to 0.0042 / 0.0044: the
+  class structure is the parameterisation's. `ratios` is not adopted. Design: (branch `sf-n4`, design §11): `control_condition_features=
+  ratios` hands the thrust-fraction head T_max/W and the 1-g stall speed in place of T_max and S (same information,
+  same width, same initial weights). If it closes the class bias as far as N3, the conditioning's presentation
+  explains the failure; if not, the parameterisation does. Arms `docs/experiments/sf_n4_arms.json`; launch after
+  N3's runner exits. Measured on the way: Cd0, k and the stall parameters are constant on KRDU's 26 types — 4 of
+  the 8 channels carry nothing.
+- **The stored `B1_point_matched` twins do NOT reproduce at the current code** (design §11.6): the same config,
+  seed and split, re-trained deterministically, reads epoch-1 val 7.737 against the twin's 8.381, and the data,
+  init and environment are the same. So `sf_n4` also re-trains the δ twins (`N4_twin`, `N4_twin_s2024`, first),
+  and N3 and N4 are both read against them. **Cause (bisected): `c544db0`**, review A-3's single terminal
+  supervision contract. It is an intended, documented fix, but with no config field, so it is invisible in run
+  names. Any comparison of a new run against a pre-2026-09-09 state/control artifact carries it.
+- **N5:** the pooled five-airport arm, only if N3's mechanism holds on both seeds (no pooled δ twin is stored, so
+  it is four arms).
+- **N3 final, both seeds against same-code twins (design §7.3):**
+  - gate 1 passes (n_x class range 0.0042 / 0.0044 vs 0.0125 / 0.0118 g);
+  - gate 2 fails (the heavy − 737 gap grows 1.0 / 1.4 m/s);
+  - the straight-in FDE veto trips (+240 / +222 m p50);
+  - pooled ADE is −57 / −73 m.
+
+  Not adopted. The same-code δ twins differ by only 30 m of pooled ADE, against the stored pair's 125 m, so the
+  control path's seed line needs re-measuring on converged pairs.
+- **The FDE veto's cause, re-measured (design §7.4):** not a missing restoring force.
+  - Straight-in flights fly below the model's minimum-drag speed, where δ's drag feedback amplifies errors.
+  - The two laws match the truth equally to 5 km out.
+  - On the last 5 km the n_x run ends 36–54 m HIGH and 4.4–6.4 m/s SLOW with the total energy right. δ ends
+    ~30 m low at the right speed.
+  - Why the n_x head flies the final descent shallower (the load-factor channel): diagnosed below. A
+    longitudinal law change (N6) does not address it.
+- **The final-descent split, diagnosed (design §7.5, read-only, the four same-code runs):**
+  - The truth flies the final descent at ~0.6 Cl_max (about 1.3 V_s). Rollouts reach the stall boundary only
+    by losing 16–21 m/s.
+  - SF's error is a tail (32 / 45 % of straight-ins) with the energy right. Its vertical-load command sits
+    +0.004 above the truth. Integrated twice open loop, that bias predicts the height error at 5 km (Spearman
+    +0.76 / +0.82). Height comes out of speed; the tail ends ~95 m high, ~8 m/s slow, 1.0–1.1 km behind.
+  - δ's load bias is 2–6 × larger. Its rollouts reach the stall boundary on 63 / 68 % of flights, and the lift
+    cap dives them: they end ~100 m low and ON TIME. That is its straight-in FDE edge. δ's other flights have a
+    worse FDE than SF's (714 / 799 vs 667 / 683 m), and δ ends with the larger |vertical| (127 / 139 vs
+    77 / 90 m).
+  - A straight-in FDE is 60–77 % along-track and 1–2 % vertical (of Σ FDE²), so the N3 veto rewards δ's
+    compensating error. Read it with its along/vertical split.
+- **N7 (an inference-time glidepath hook) — WITHDRAWN as a model fix** (the user, 2026-09-16, design
+  §7.5.6). It computes the final's vertical profile from the published procedure, so the result would be the
+  rule's, not the model's. Kept only as a labelled diagnostic or baseline component.
+- **N7′ — BUILT and RUNNING (2026-09-16, branch `sf-n7`, design §14).** The contract
+  `control_thrust_parameterization=specific-force+path-angle`: the head's third column is a path-angle
+  target γ*, the lag RHS re-solves the load factor at every RK4 stage (clipped to the load box, stall clamp
+  unchanged), the specific force keeps the longitudinal channel so the vertical law is energy-neutral.
+  - P1 reviewed (§14.9, opus, code only): one real bug — the heading-rate loss read the third actuator as a
+    load factor — now refused; six tests rewritten because the reviewer showed they passed vacuously.
+  - Defaults bit-identical; the 247-history census is unchanged in name, slug and parameter rows;
+    ts + `aerodynamic_model` 1350 passed; a 2-epoch smoke on real KRDU data completed the chain.
+  - **Campaign `sf_n7` RAN 2026-09-16 01:31–03:30 UTC at `87497be` and PASSES EVERY GATE ON BOTH SEEDS
+    (design §15).** γ* bias 0.088 / 0.091° (gate 0.11°); stall-bound share 33/45 % → **1 %**; last-km height
+    +39/+54 m → **+6/+3 m**; straight-in FDE p50 **543 / 559** against the δ twin's 647 / 663, a win on both
+    components of the split; pooled ADE **1173 / 1182** against 1325 / 1295 (70/69 % of flights better
+    paired); **fully flyable 97.7 / 97.4 % against 0.4 / 0.2 %**; and both N3 gates pass, the heavy − 737
+    speed gap included. **One regression:** the vectored endpoint (FDE p50 +625 / +704 m), cross-track and
+    unexplained — turn authority is measured not to be the cause (§15.3).
+  - **Adoption is the user's call**, and what the evidence supports is the PAIR: the specific force
+    longitudinally AND the path angle vertically. The longitudinal change alone tripped a veto (§7.3).
+  - Gates (§14.8, pre-registered): the head's per-flight γ* bias ≤ **0.11°**; the stall-bound share and that
+    group's 1.0–1.1 km along-track lag fall; straight-in FDE read WITH its along/vertical split; the
+    per-class n_x bias stays at the truth's spread. Veto: pooled ADE beyond the ~125 m seed line.
+  - The pre-measurement that justified building it (design §13): a learned vertical target. The
+  head predicts the path angle per segment, and a fixed tracking law with no procedure in it flies the head's
+  own target. Under SF, `Ė = V·n_x`, so the law cannot hide an energy cost the way N6's speed loop did.
+  - The teacher is identifiable: flown open loop, its replay is straight-in ADE p50 **32 m** against 63 m
+    (n_x) and 145 m (δ), ending **5 m** off in height against 27 / 42 m; pooled 60 vs 117 / 259 m; vectored
+    1956 vs 6491 / 6680 m. The scratch integrator matches the package driver to 0.04 m.
+  - τ_γ is insensitive between 2 and 5 s; the target's box is p1/p50/p99 = −4.9 / −2.9 / +0.25°, segment step
+    p50 0.30°.
+  - The same instantaneous vertical error costs **5.3× less height** (+17.2 m against +91.6 m) and 3.6× less
+    speed. The load row reproduces the N3 tail exactly (+0.004 of load = +92 m, −5.3 m/s).
+  - **Not a free win:** γ* varies more than the load factor, so the break-even is a per-flight bias of
+    **0.11°** (9 % of the teacher's γ* spread); the same bias-to-spread accuracy the N3 head shows in load
+    (7.4 %) lands at 33 m against today's 41 m. What tips it is predictability: the load teacher is mostly
+    per-segment noise (lag-1 +0.26, the head's residual is 102 % of its spread), the path-angle teacher is
+    structure (lag-1 +0.61).
+- **N6 — the speed command: RAN, FAILED — unstable in training** (design §12.9).
+  - The first arm diverged from epoch 26: pre-clip control-head gradients 1e7–1e10, from zoom climbs the speed
+    loop hides until the T_max clamp binds.
+  - Pooled ADE 2335 vs 1325 m against the same-code twin. The second seed was stopped before training.
+  - Not adopted. The next design (bounded loop authority / a vertical loop / damped n_x) is the user's call.
+  - The original entry: BUILT and reviewed on `sf-n6` (design §12). The head predicts a target airspeed
+  relative to the anchor's, flown by an 8 s speed loop through the specific-force clamp: the invariance N3 showed,
+  plus the restoring force whose absence is the FDE veto's mechanism. The reviewer measured each law's teacher flown
+  open-loop (300 KRDU val flights): ADE 375 m against 2606 (n_x) and 2700 (δ). §12.6's condition is met: N6 is
+  queued after `sf_n4` (`docs/experiments/sf_n6_arms.json`).
+- **Known difference, not a bug:** the specific-force speed has no drag feedback (design §2.1).
+
 ## Runway intent — R3.1 / R3.2 / R3.3 (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §18)
 
 The user: "先做1, 2, 最后3" — §17.8's uncertainty-aware scheduling, the closure's time delivery, publishing R3.

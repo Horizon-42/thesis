@@ -214,6 +214,7 @@ def test_lag_commands_lead_the_actual_controls_they_produce():
         times,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
+        parameterization=config.control_thrust_parameterization,
     )
     commanded = reference_controls(
         states,
@@ -305,6 +306,7 @@ def test_the_lag_keeps_the_realised_bank_continuous_across_segment_boundaries():
         times,
         aero_params=np.array(AERO),
         max_thrust_n=MAX_THRUST_N,
+        parameterization=config.control_thrust_parameterization,
     )
     # The command steps 25 degrees instantly at a boundary. The realised bank cannot: over
     # one 2 s reference interval a first-order actuator can only cover

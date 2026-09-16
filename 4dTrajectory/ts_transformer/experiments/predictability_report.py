@@ -48,6 +48,7 @@ from ts_transformer.data.data_provenance import (  # noqa: E402
 )
 from ts_transformer.data.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
 from ts_transformer.outputs.dynamics.context import dynamics_arrays  # noqa: E402
+from ts_transformer.outputs.envelope import ControlContract, control_contract  # noqa: E402
 from ts_transformer.training.fixed_anchor_validation import (  # noqa: E402
     fixed_anchor_common_truth,
     resample_prediction_to_physical_time,
@@ -189,7 +190,13 @@ def batch_dynamics_tensors(
 ) -> dict[str, torch.Tensor]:
     """Build the exact per-flight conditioning/rollout tensors used by training."""
     anchor = default_anchor(config)
-    rows = [dynamics_arrays(item, anchor) for item in series]
+    rows = [
+        dynamics_arrays(
+            item, anchor, parameterization=config.control_thrust_parameterization,
+            condition_features=config.control_condition_features,
+        )
+        for item in series
+    ]
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
@@ -259,6 +266,7 @@ def control_distribution_statistics(
     durations_s: np.ndarray,
     lower: np.ndarray,
     upper: np.ndarray,
+    contract: ControlContract,
 ) -> dict[str, Any]:
     """Unweighted validation distributions required by the control experiment guide.
 
@@ -288,10 +296,10 @@ def control_distribution_statistics(
     bound_fraction = 0.01
     ranges = upper - lower
     changes = np.abs(np.diff(controls, axis=1))
-    units = ("N", "rad", "1")
-    names = ("thrust_N", "bank_rad", "load_factor")
+    # The columns are in the run's control contract — never newtons (the head never
+    # emits them): the thrust fraction is unit 1, the specific force g, the speed command m/s.
     channel_statistics: dict[str, dict[str, float | str]] = {}
-    for channel, (name, unit) in enumerate(zip(names, units)):
+    for channel, (name, unit) in enumerate(zip(contract.names, contract.units, strict=True)):
         values = controls[..., channel].reshape(-1)
         adjacent = changes[..., channel].reshape(-1)
         low_distance = controls[..., channel] - lower[:, None, channel]
@@ -390,12 +398,20 @@ def run_deterministic(
     )
     control_diagnostics = None
     if raw_controls:
-        dynamics = [dynamics_arrays(item, default_anchor(run.config)) for item in series]
+        dynamics = [
+            dynamics_arrays(
+                item, default_anchor(run.config),
+                parameterization=run.config.control_thrust_parameterization,
+                condition_features=run.config.control_condition_features,
+            )
+            for item in series
+        ]
         control_diagnostics = control_distribution_statistics(
             np.concatenate(raw_controls),
             np.concatenate(raw_control_durations),
             np.stack([row["control_lower"] for row in dynamics]),
             np.stack([row["control_upper"] for row in dynamics]),
+            control_contract(run.config.control_thrust_parameterization),
         )
     error = displacement_errors(common_array, truth)
     return {

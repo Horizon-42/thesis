@@ -22,6 +22,8 @@ from ts_transformer.config import (
     CHECKPOINT_SELECTION_METRICS,
     CONTROL_DYNAMICS_BACKENDS,
     CONTROL_DYNAMICS_MODELS,
+    CONTROL_THRUST_PARAMETERIZATIONS,
+    CONTROL_CONDITION_FEATURES,
     CONTROL_DURATION_PARAMETERIZATIONS,
     CONTROL_HOOKS_AVAILABLE,
     CTA_CONDITIONINGS_AVAILABLE,
@@ -282,6 +284,30 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
             "flight model: point-mass applies each control instantly; first-order-lag "
             "drives thrust, bank and load factor towards their command with a time "
             "constant, so they stay continuous across a segment boundary"
+        ),
+    )
+    parser.add_argument(
+        "--control-thrust-parameterization",
+        choices=CONTROL_THRUST_PARAMETERIZATIONS,
+        default=None,
+        help=(
+            "what the head's first control column is: thrust-fraction (T/T_max, every run "
+            "before 2026-09-14), specific-force ((T-D)/W, the thrust re-solved inside the "
+            "lagged RHS so the same command moves every airframe alike) or speed-command "
+            "(a target airspeed relative to the anchor's, flown by a speed loop through the "
+            "same thrust); the last two first-order-lag only "
+            "(docs/2026-09-14_specific_force_control_design.md §2, §12)"
+        ),
+    )
+    parser.add_argument(
+        "--control-condition-features",
+        choices=CONTROL_CONDITION_FEATURES,
+        default=None,
+        help=(
+            "how the airframe is written into the control head's condition vector: raw "
+            "(mass, installed thrust, wing area, polar; every run before 2026-09-15) or "
+            "ratios (mass, thrust-to-weight, 1-g stall speed, polar — the same information "
+            "and width, in the groups the rollout depends on; design §11)"
         ),
     )
     parser.add_argument("--control-thrust-time-constant-s", type=float, default=None)
@@ -581,6 +607,8 @@ CLI_CONFIG_FIELDS = (
     "control_duration_uniform_floor",
     "control_dynamics_backend",
     "control_dynamics_model",
+    "control_thrust_parameterization",
+    "control_condition_features",
     "control_thrust_time_constant_s",
     "control_bank_time_constant_s",
     "control_load_time_constant_s",

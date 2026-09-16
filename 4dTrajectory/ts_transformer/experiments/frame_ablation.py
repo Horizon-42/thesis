@@ -57,7 +57,7 @@ from ts_transformer.experiments.support import REPO_ROOT, TS_SCRIPT
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 
 
-from ts_transformer.config import TSConfig, recipe_settings  # noqa: E402
+from ts_transformer.config import TSConfig, absent_field_defaults, recipe_settings  # noqa: E402
 from ts_transformer.run_naming import run_display_name, run_slug  # noqa: E402
 
 # A state arm on one airport: ~50 MB of checkpoint/history + ~0.3 GB of validation records.
@@ -115,6 +115,11 @@ def stale_arm_error(key: str, train_dir: Path, declared: dict) -> str | None:
     if not history.exists():
         return None
     stored = json.loads(history.read_text(encoding="utf-8")).get("config") or {}
+    # A field the stored config predates reads the way `TSConfig.from_dict` reads it — its
+    # default, unless it is a REQUIRED field (then it stays absent, and differs). Read as
+    # None instead, the first field a recipe pins after an arm trained refused every such
+    # arm's resume (control_thrust_parameterization, 2026-09-14).
+    stored = {**absent_field_defaults(stored), **stored}
     # JSON round trip on both sides: the stored config went through json, the declared
     # settings may hold tuples where it holds lists.
     declared = json.loads(json.dumps(declared))

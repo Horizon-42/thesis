@@ -242,9 +242,12 @@ T      = W·n_x,r + D   → the evaluation record stays in newtons
 ```
 
 Where thrust is not saturated, drag cancels out of V̇. The airframe (m, T_max, S, CLmax, polar) enters only
-through the two saturations and the exported thrust. Keeping today's thrust floor means the set of admissible
-trajectories is today's set; only the coordinate the head predicts in changes, so the arm is a clean test of
-the parameterisation. This is the quadrotor mass-normalised collective thrust (QuadBenchmark, Swift, XAdapt),
+through the two saturations and the exported thrust. Keeping today's thrust floor keeps today's thrust RANGE at
+every state. It does not keep today's dynamics: with the drag cancelled the speed has no drag feedback
+(∂V̇/∂V = 0 unclamped), so a biased command drifts where the thrust-fraction law settles. The M1 review measured
+untrained level-trim heads on synthetic descents at 311–328 m/s against 209–213 m/s. The arm therefore tests the
+parameterisation including that difference, and its neutral is a descent speed hold, not level trim
+(`4dTrajectory/ts_transformer/docs/2026-09-14_specific_force_control_design.md` §2.1, §2.3). This is the quadrotor mass-normalised collective thrust (QuadBenchmark, Swift, XAdapt),
 Khatib's unit-mass command `F = Λ̂F* + μ̂ + p̂`, and BADA's `(T − D)/(mg)`. It also matches DKM and
 Trajectron++, which emit accelerations with no mass anywhere. The fleet-wide head box would be about
 [−0.16, +0.35] at the §3.2 operating point; it is sized in the design.

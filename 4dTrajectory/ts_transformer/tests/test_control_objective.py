@@ -11,8 +11,7 @@ import pytest
 import torch
 
 import ts_transformer.data.channels as ch
-from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
-from ts_transformer.outputs.control import heads as control_models
+from ts_transformer.outputs.conditioning import CONDITION_WIDTH
 import ts_transformer.outputs.dynamics.rollout as control_rollout_module
 import ts_transformer.training.objective as objective
 import ts_transformer.outputs.control.loss.objective as control_objective
@@ -29,7 +28,7 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
 )
-from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER, THRUST_FRACTION_CONTRACT
 from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
 from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
 from ts_transformer.backbone.adapters import build_model
@@ -122,7 +121,7 @@ def test_control_models_use_per_sample_bounds_and_aircraft_condition(
     lower = torch.tensor([[0.0, -0.5, 0.5], [0.0, -0.7, 0.6]])
     upper = torch.tensor([[10_000.0, 0.5, 1.8], [250_000.0, 0.7, 2.0]])
     dynamics = {
-        "condition": torch.rand(2, len(DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.rand(2, CONDITION_WIDTH),
         "control_lower": lower,
         "control_upper": upper,
     }
@@ -303,7 +302,7 @@ def test_control_model_starts_from_neutral_uniform_rollout():
     lower = torch.tensor([CONTROL_LOWER, CONTROL_LOWER], dtype=torch.float32)
     upper = torch.tensor([CONTROL_UPPER, CONTROL_UPPER], dtype=torch.float32)
     dynamics = {
-        "condition": torch.randn(2, len(DYNAMICS_CONDITION_NAMES)),
+        "condition": torch.randn(2, CONDITION_WIDTH),
         "control_lower": lower,
         "control_upper": upper,
     }
@@ -311,7 +310,7 @@ def test_control_model_starts_from_neutral_uniform_rollout():
     prediction = model(history, dynamics)
     # The untrained head emits the neutral physical control, not a fixed fraction of
     # whatever the bounds happen to be: 20% thrust, wings level, load factor one.
-    expected = torch.tensor(control_models.NEUTRAL_CONTROLS).view(1, 1, 3)
+    expected = torch.tensor(THRUST_FRACTION_CONTRACT.neutral).view(1, 1, 3)
     expected_time = math.log(2.0) * config.final_time_scale_s
 
     torch.testing.assert_close(

@@ -52,6 +52,19 @@ class Forecast:
     sample_durations_s: np.ndarray
     segment_durations_s: np.ndarray
     controls: np.ndarray | None = None
+    # Control output under a `control_thrust_parameterization` other than thrust-fraction
+    # only: the command itself per segment, in that contract's first column (n_x, or the
+    # speed-command Δv; 1:1 with ``controls``, whose thrust column is then the command's
+    # thrust at each segment's START state), and the parameterisation that names it. None
+    # under thrust-fraction, whose newton thrust IS the command — so a record says which
+    # contract it came from.
+    longitudinal_commands: np.ndarray | None = None
+    longitudinal_parameterization: str | None = None
+    # The VERTICAL command per segment, only under a contract whose third column is not the
+    # load factor (``specific-force+path-angle``: the path-angle target in radians). The
+    # record's own third column is the load the law resolved at each segment's start, so
+    # without this the command the head actually emitted would not be in the record.
+    vertical_commands: np.ndarray | None = None
     geodetic_values: np.ndarray | None = None
     prediction_output: str = PREDICTION_STATE
     # The corridor gate the inference-time projection applied (``project_onto_final``),
@@ -289,6 +302,8 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
     # The clock `export` reconstructs, so the two agree to the bit rather than to a sum.
     offsets = np.cumsum(sample_durations_s)
     final_time_s = float(offsets[-1])
+    longitudinal_commands = forecast.longitudinal_commands
+    vertical_commands = forecast.vertical_commands
     if forecast.controls is None:
         # Every non-control forecast carries one clock: segments ARE samples.
         segment_durations_s = forecast.segment_durations_s[: cut + 1]
@@ -302,6 +317,10 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
         segment_durations_s = forecast.segment_durations_s[: last + 1].copy()
         segment_durations_s[-1] = final_time_s - (0.0 if last == 0 else boundaries[last - 1])
         controls = forecast.controls[: last + 1]
+        if longitudinal_commands is not None:
+            longitudinal_commands = longitudinal_commands[: last + 1]
+        if vertical_commands is not None:
+            vertical_commands = vertical_commands[: last + 1]
     return replace(
         forecast,
         times=forecast.times[: cut + 1],
@@ -312,6 +331,8 @@ def cut_at_threshold_crossing(forecast: Forecast, series: FlightSeries) -> Forec
         sample_durations_s=sample_durations_s,
         segment_durations_s=segment_durations_s,
         controls=controls,
+        longitudinal_commands=longitudinal_commands,
+        vertical_commands=vertical_commands,
         geodetic_values=(
             None if forecast.geodetic_values is None else forecast.geodetic_values[: cut + 1]
         ),

@@ -10,7 +10,7 @@ mechanism and result tables in the package `README.md`; history in the repo's `d
 (2026-07-19, 07-20 ×2).
 Read the notes before designing an experiment or touching the loss, rollout or output layer.
 
-- **Seed noise on the control path is ~125 m of pooled ADE, not 30 m** (2026-09-08: `B1_point_matched` seeds 1337/2024 = 1248/1373 m around native32's 1322; duration MAE spread ~1 s). The 30 m line came from two-seed STATE arms. A single-seed control-arm ADE difference below ~125 m is not evidence; a gate on it needs a second seed (early stopping off, as A0.b's p180) or must be read against this line. Straight-in FDE and duration MAE spreads are smaller (~0.9 s MAE) but still single-seed unless replicated.
+- **Seed noise on the control path is ~125 m of pooled ADE, not 30 m** (2026-09-08: `B1_point_matched` seeds 1337/2024 = 1248/1373 m around native32's 1322; duration MAE spread ~1 s). The 30 m line came from two-seed STATE arms. A single-seed control-arm ADE difference below ~125 m is not evidence; a gate on it needs a second seed (early stopping off, as A0.b's p180) or must be read against this line. Straight-in FDE and duration MAE spreads are smaller (~0.9 s MAE) but still single-seed unless replicated. **The same config re-trained at the 2026-09-15 code as a pair (`sf_n4/N4_twin` / `_s2024`, 180 / 168 epochs) differs by only 30 m of pooled ADE and 16 m of straight-in FDE p50.** The stored pair's 125 m came with an early stop at 143 epochs, so the line may be inflated by convergence. Keep 125 m as the conservative line until more converged pairs are measured (specific-force design §7.3).
 
 ## Commands
 
@@ -262,6 +262,30 @@ flight model.
   rule: the caller's alignment is a central difference over POSITIONS, so the flying just after a
   row is in its direction; and `MEMBERSHIP_FLOOR_M` (500 m) is what decides whether a record is
   cut at all.
+- **The longitudinal column has THREE contracts — `control_thrust_parameterization`**
+  (2026-09-14, `docs/2026-09-14_specific_force_control_design.md`):
+  - **`thrust-fraction`** (the default, every stored run, pinned by every named recipe) is the
+    box below.
+  - **`specific-force`** makes the head's first column `n_x = (T − D)/W`. Its box is
+    `[−0.20, 0.23]` g and its neutral −0.05. It runs on `first-order-lag` only, and the lag RHS
+    re-solves `T = clamp(W·a_x + D, −0.2·T_max, T_max)` at EVERY RK4 stage, so drag cancels and
+    `V̇ = g(a_x − sin γ)`.
+  - **`speed-command`** (§12) makes it a target airspeed RELATIVE to the anchor's, Δv ∈
+    `[−90, +20]` m/s, neutral 0 (hold the speed you have). The lag RHS flies it through an 8 s
+    speed loop (`envelope.SPEED_LOOP_TIME_CONSTANT_S`, a CONTRACT constant, not a field): the
+    specific force `sin γ + (V₀ + a_Δ − V)/(g·τ_V)` through the same clamp, so
+    `V̇ = (V₀ + a_Δ − V)/τ_V`, the invariance plus the restoring force n_x lacks. `actual_controls`
+    returns the loop's ABSOLUTE target there, and `inverse.anchor_relative` makes it the contract's
+    Δv. Only the teacher (`reference_controls`, `states[0]`) and `anchor_controls` (the window's
+    last row) know the anchor, so only they call it. The speed floor is refused under it (not built).
+  - **Rules:** `dynamics_arrays` / `anchor_controls` / `actual_controls` / `commanded_controls`
+    take the parameterisation as a REQUIRED argument; the box, neutral and half width come from
+    `envelope.control_contract()`; the plan path pins thrust-fraction. `dynamics_arrays` and
+    `condition_vector` also take the condition feature set (`control_condition_features`) as a
+    REQUIRED argument — the sets share one width, so a forgotten one is a silent mislabel.
+  - **The same thrust RANGE is not the same dynamics:** with the drag cancelled the speed has
+    NO drag feedback, so a biased n_x drifts where a biased δ settles. That is why its neutral
+    is a descent speed hold, not level trim.
 - **Controls are DIMENSIONLESS in this package** (`outputs/envelope.py` is the single source):
   `(thrust_fraction ∈ [-0.2, 1.0], bank_rad ∈ ±π/4, load_factor ∈ [0.2, 2.0])`, same box on every
   airframe. Newtons appear in exactly two places — `physical_controls()` into the dynamics, and
@@ -423,6 +447,10 @@ flight model.
 | `coordinate_frame` | `enu` | keep — the airport frame makes the model average across parallel pairs. `airport-enu` / `runway-aligned` are FROZEN (2026-09-09, `COORDINATE_FRAMES_AVAILABLE`): the 2026-09-03 arms load, no new run selects them |
 | `state_position_reference` | `absolute` | `corridor-bounded` ADOPTED as candidate default (4 seeds, no regression); **`anchor-relative` is VETOED by its own pre-registered rule.** It follows the package's one mechanism for a value like this: it is in `STATE_POSITION_REFERENCES` (what a STORED config may say, so the 2026-09-03 `state_v2_20260903/A_anchor_relative` artifact still loads and names) and NOT in `STATE_POSITION_REFERENCES_AVAILABLE` (what a NEW run may select — the CLI's choices, and what `cli.common._refuse_unavailable_selection` checks so `--config-overrides` cannot get past it either). `control_command_hook="nominal-residual"` is the same pair |
 | control recipe | `simple-v3` | = `simple-v2` + `control_imitation_loss_weight`; **its weight 64.0 does NOT transfer between airports — recalibrate per airport**. A named recipe is a published DETERMINISTIC arm: all seven `latent_*` fields are pinned at their defaults, so **a latent run is `custom`** (every latent arm file already says so; adopted 2026-09-07 after measuring that no stored artifact changes name, slug or loading) |
+| `control_thrust_parameterization` | `thrust-fraction` | `specific-force` = the head predicts `n_x = (T − D)/W` (the contract above). **Measured (N3, design §7.3, both seeds against same-code twins): NOT adopted.** It collapses the per-class n_x bias to the truth's own spread (0.0042 / 0.0044 vs 0.0125 / 0.0118 g), but the heavy − 737 speed gap grows and straight-in FDE p50 is +240 / +222 m. **That is NOT the missing drag feedback** (design §7.4): straight-in approaches fly below the minimum-drag speed, where δ's drag feedback amplifies errors. The error is the last 5 km's height/speed SPLIT: 36–54 m high and 4.4–6.4 m/s slow, with the total energy right. **Diagnosed (design §7.5):** the split is the vertical-load command integrated open loop, and δ's straight-in FDE edge is a stall-bound dive that ends ~100 m low and on time. An inference-time glidepath hook (N7) was WITHDRAWN as a fix: it computes the answer from the procedure. N7′ (a learned per-segment path-angle target flown by a fixed tracking law) is proposed, not built. First-order-lag only; refused with the fitted teacher. The speed floor inverts it drag-free and saturates at the engine's `(T_max − D)/W` — NOT at the head's 0.23 g box, which sits below the engine on this fleet (a box-capped floor had less authority than the thrust-fraction one). Names a run `first-order-lag+specific-force …` / slug `lag-sf-…`, only off the default. `control_recipe()` carries it only off the default, because `pipeline` compares that dict for checkpoint reuse |
+| `control_thrust_parameterization` = `speed-command` | — | N6 (design §12, branch `sf-n6`): **ran 2026-09-15 and FAILED — unstable in training** (§12.9: the loop hides a pull-up's energy cost until the T_max clamp binds; zoom climbs, pre-clip gradients 1e7–1e10, pooled ADE 2335 vs 1325 m). Do not train it again as is. Its premise was also wrong (§7.4). `sf_n6_arms.json` is launched only if N3's straight-in FDE veto holds against the same-code twin (§12.6). Named `first-order-lag+speed-command` / slug `lag-sc-…`; the record carries `speed_command_delta` per segment |
+| `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′ (design §14, branch `sf-n7`): the one value that also moves the VERTICAL column. The head's third column is a path-angle target γ\* (box [−15°, +10°], neutral −2.9° = the teacher's own median, τ_γ = 3 s — all CONTRACT constants, spelled into the target contract by `path_angle_identity()`), and the lag RHS re-solves the load factor `n = [cos γ + V(γ\* − γ)/(g·τ_γ)]/cos φ` at every RK4 stage, clipped to the load box with the stall clamp unchanged; longitudinally it stays the specific force, so `Ė = V·n_x` and the vertical law is energy-neutral. **Why:** the load-factor column is an OPEN-LOOP double integrator — a bias δn grows a height error like `½·g·δn·t²`, measured at +92 m and −5.3 m/s at the end for δn = 0.004 against +17 m for the same instantaneous error here (design §7.5.3, §13.3). The target is ABSOLUTE, not anchor-relative: the anchor's own γ carries ADS-B noise the size of the whole error budget. **Refused with** the point-mass model, the `fitted` teacher, every command hook (they read or write the load column) and `control_heading_rate_loss_weight` (that term reads the third actuator as a load factor). The record's `load_factor` is the load the loop resolves at each segment's START state and `path_angle_command` rides beside it. **MEASURED (N7′, design §15, both seeds against the same-code δ twins): it passes every pre-registered gate.** γ\* bias 0.088 / 0.091° against the pre-registered break-even 0.11°; the stall-bound share on the last 5–1 km falls from 33/45 % (n_x) and 64/68 % (δ) to **1 %**; the last-km height error from +39/+54 m to **+6/+3 m**; straight-in FDE p50 **543 / 559** against the twin's 647 / 663 (a win on BOTH components of the along/vertical split); pooled ADE **1173 / 1182** against 1325 / 1295, better on 70/69 % of flights paired; **fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %** — a closed vertical loop keeps the rollout in the envelope. Both N3 gates pass as well, the heavy − 737 speed gap included (+3.98/+3.76 against the twin's +5.16/+4.89, where N3 alone widened it to +6.17/+6.31). ONE regression: the vectored endpoint, FDE p50 +625/+704 m, which decomposes as cross-track (vectored ADE is 242/147 m better) and is unexplained — turn authority is measured NOT to be the cause. Adoption is the user's call. Names a run `first-order-lag+specific-force+path-angle` / slug `lag-sfpa-…` |
+| `control_condition_features` | `raw` | HOW the airframe is written into the control head's 8-channel condition vector (`outputs/conditioning.py`, design §11). `ratios` keeps the mass and the polar and replaces the installed thrust and the wing area by `T_max/(m g)` and the 1-g stall speed (`aircraft.aero_params.stall_speed_ms`) — the same information and the SAME WIDTH, so a ratios arm starts from its raw twin's weights. On KRDU's 26 types the raw thrust channel spans 46×, T_max/W 1.3×; Cd0, k and the stall parameters are constant on the whole fleet (4 of the 8 channels carry nothing). **Built, not yet measured**: N4 (`sf_n4_arms.json`) is the alternative-hypothesis control for N3, and it re-trains the δ twins because the stored `B1_point_matched` pair does not reproduce at the current code (design §11.6). Every named recipe pins `raw`; names a run `airframe=ratios`; `control_recipe()` carries it only off the default; `predict` takes the checkpoint's own value and has no override (a head trained on one set reads the other without a shape error) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag` buys smoothness + 3.4 % ADE; τ=2.0 s is defensible, not CV-selected. In `run_ts.py pipeline` the model is an axis of the cell: a lag cell's `train_dir` / `pred_dir` / category carry `_lag`, and the ONE override dict (`TrainingPlan._plan_overrides`) feeds the label, `--skip-train` and CV reuse — before 2026-09-09 two hand-written copies both lacked the field, so a lag cell was rebuilt as point-mass everywhere but the training command and shared its directory with the point-mass cell (review A-1) |
 | procedure penalty (state + control) | weights at 0 | NOT adopted — kept as an option. Its two hinge SCALES (100 m / 30 m) are `objective.PROCEDURE_{LATERAL,VERTICAL}_SCALE_M` module constants, not fields: units, never swept, retired 2026-09-07. The closure timing group's 60 s is `outputs.closure.model.CLOSURE_TIMING_SCALE_S` for the same reason. The four scales a named recipe PINS (`position_loss_scale_m`, `final_time_scale_s`, `control_velocity_loss_scale_mps`, `control_heading_rate_loss_scale_dps`) stay fields — a module constant there would silently redefine every published simple-v* comparison |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained THROUGH a hook beat its predict-time counterpart (six tried). THREE modules are live — `barrier` (lateral, gated ON the final), `speed-floor` (the stall margin on the thrust command, UNGATED — L3.d, 2026-09-08), `trombone` (the pre-final path stretch, gated OFF the final — L3.e, 2026-09-08) — and the vocabulary carries three combinations: `barrier+speed-floor`, `barrier+trombone`, `barrier+speed-floor+trombone`, each applied in the order it spells. The `+` is a LOOKUP in `config.CONTROL_HOOK_MEMBERS`, never a split: `speed-floor+barrier`, `barrier+trombone+speed-floor` and a SOLO `trombone` are not members and are refused with the vocabulary (the trombone hands the command back at the final approach course and has nothing to hand it to without the barrier) |
@@ -1131,6 +1159,33 @@ entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-
 --output-root <root>` restamps a published root (metadata only, all-or-nothing on intents).
 
 ## Traps (one line each; evidence in `docs/ENGINEERING_NOTES.md`)
+
+- **A stored config lacks every field added after it trained — read the absence as
+  `from_dict` does** (`config.absent_field_defaults`: the default, except REQUIRED fields).
+  Reading it as `None` refused every recipe arm's campaign resume the day a recipe pinned
+  `control_thrust_parameterization` (2026-09-14). `pipeline.cv_reuse_error` still compares with
+  `!=` (`docs/code-health-followups.md` §33).
+- **A specific-force rollout's speed drift is not a bug in the law** — the speed integrates
+  the command (no drag feedback, design §2.1). Never give that contract a level-trim neutral.
+- **The third actuator is a load factor under every law EXCEPT `specific-force+path-angle`**, where it is
+  the path-angle target in radians and the flown load is re-solved from the state
+  (`torch_dynamics.path_angle_load_factor`). A term that prices what the rollout FLEW reads
+  `EndpointControlRollout.actual_controls`; reading column 2 there blind under that contract gives radians
+  where a load belongs — it cost the heading-rate loss a sign-flipped, 20×-small target before the config
+  refused the pairing (design §14.9).
+- **A straight-in FDE is a TIMING number.** Along-track carries 60–77 % of Σ FDE² and vertical 1–2 %
+  (specific-force design §7.5). A law whose rollouts dive ~100 m low to regain speed wins FDE: δ does exactly
+  that at the stall boundary.
+  - Read any straight-in FDE comparison with its along/cross/vertical split (`geometry/metrics.py` already
+    computes the components per grid point).
+  - The vertical-load channel is open loop on every law: a load bias δn grows a height error of about
+    `½·g·δn·t²`, ~200 m for 0.004 g over 100 s.
+- **A state/control checkpoint trained before `c544db0` (2026-09-09) is NOT a same-code baseline for a run
+  trained after it**, even with an identical config. Review A-3 moved the terminal supervision weights of
+  the flights whose observed track reaches the threshold (1.9 % of KRDU train). It is a data-side contract
+  with no config field, so nothing in the name shows it. `B1_point_matched` retrained with the same seed:
+  epoch-1 selection ADE −11 %, and `val_loss` is not comparable across it at all. Re-train the twin
+  (specific-force design §11.6).
 
 - **Every ts number assumes the LANDED runway is known** — the threshold anchor (and the plan
   path's CIFP skeleton) is the harvest's final-approach runway, i.e. future information; no

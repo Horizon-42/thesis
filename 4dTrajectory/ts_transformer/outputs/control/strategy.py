@@ -21,6 +21,8 @@ from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_HOOK_OFF,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
+    CONTROL_SPEED_COMMAND,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -72,6 +74,7 @@ from ts_transformer.outputs.control.loss.objective import (
     control_prediction_loss_components,
 )
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
+from ts_transformer.outputs.envelope import path_angle_identity, speed_command_identity
 from ts_transformer.outputs.control.supervision import (
     probe_dynamics,
     reference_control_supervision,
@@ -79,6 +82,7 @@ from ts_transformer.outputs.control.supervision import (
 )
 from ts_transformer.outputs.control.training.diagnostics import (
     ControlTrainingDiagnosticsAccumulator,
+    saturation_labels,
 )
 
 if TYPE_CHECKING:
@@ -180,7 +184,10 @@ class ControlContext(WindowContext):
         windows, config = self.windows, self.config
         s_idx, anchor = windows.index[i]
         series = windows.series[s_idx]
-        arrays = dynamics_arrays(series, anchor)
+        arrays = dynamics_arrays(
+            series, anchor, parameterization=config.control_thrust_parameterization,
+            condition_features=config.control_condition_features,
+        )
         if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
             # Training feeds the truth as the controlled time of arrival.
             arrays["cta_s"] = np.array(truth_duration_s(series, anchor), dtype=np.float64)
@@ -310,6 +317,20 @@ class ControlStrategy(OutputStrategy):
         return ControlOutputModel(config, build_state_forecaster(config))
 
     def target_contract(self, config: TSConfig) -> str:
+        contract = self._objective_target_contract(config)
+        # Under speed-command the loop constant and the box are module constants; spelling
+        # them here makes a checkpoint trained under other constants fail to load
+        # (`envelope.speed_command_identity`). The other laws' strings are unchanged.
+        if config.control_thrust_parameterization == CONTROL_SPEED_COMMAND:
+            contract = f"{contract}+{speed_command_identity()}"
+        # The same for the path-angle contract: τ_γ, its box and its neutral are module
+        # constants (`envelope.path_angle_identity`), so a checkpoint trained under other
+        # values is refused at load instead of flying under these.
+        if config.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE_PATH_ANGLE:
+            contract = f"{contract}+{path_angle_identity()}"
+        return contract
+
+    def _objective_target_contract(self, config: TSConfig) -> str:
         base = CONTROL_TARGET_CONTRACTS[
             (
                 config.control_duration_parameterization,
@@ -453,7 +474,10 @@ class ControlStrategy(OutputStrategy):
 
     def training_diagnostics(self, config: TSConfig) -> ControlTrainingDiagnosticsAccumulator | None:
         if config.control_gradient_clip_norm > 0.0:
-            return ControlTrainingDiagnosticsAccumulator(config.control_gradient_clip_norm)
+            return ControlTrainingDiagnosticsAccumulator(
+                config.control_gradient_clip_norm,
+                saturation_labels(config.control_thrust_parameterization),
+            )
         return None
 
     def epoch_record(
@@ -558,6 +582,11 @@ class ControlStrategy(OutputStrategy):
 
     def record_fields(self, forecast: Forecast) -> dict[str, Any]:
         return {
+            # The longitudinal contract the schedule was predicted in — written only off
+            # thrust-fraction (`control_segments[*].<contract column>` carries the commands);
+            # absent means thrust-fraction, so every such record reproduces to the bit.
+            **({"controlThrustParameterization": forecast.longitudinal_parameterization}
+               if forecast.longitudinal_commands is not None else {}),
             # Latent control output: which prior sample this is (None = the top-1 the
             # contract carries) and its probability; whether it was decoded from another
             # flight's latent (the collapse diagnostic). z itself is never written.

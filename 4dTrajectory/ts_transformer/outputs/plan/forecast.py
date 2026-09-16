@@ -17,9 +17,11 @@ import numpy as np
 import torch
 
 from ts_transformer.config import (
+    CONTROL_CONDITION_FEATURES_RAW,
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_HOOK_OFF,
+    CONTROL_THRUST_FRACTION,
     CONTROL_RECIPE_CUSTOM,
     PREDICTION_CONTROL,
     PREDICTION_PLAN,
@@ -75,6 +77,9 @@ GUIDANCE_DYNAMICS = dict(
     prediction_output=PREDICTION_CONTROL,
     control_dynamics_model=CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     control_dynamics_backend=CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
+    # The controller writes thrust FRACTIONS (the speed floor's inversion), so the rollout
+    # must read them as such — pinned here, not inherited from a default.
+    control_thrust_parameterization=CONTROL_THRUST_FRACTION,
     control_command_hook=CONTROL_HOOK_OFF,
     control_recipe_name=CONTROL_RECIPE_CUSTOM,
 )
@@ -184,7 +189,15 @@ def fly_plans(
         raise ValueError("one anchor per flight")
     device = device or torch.device("cpu")
     config = guidance_config(config)
-    rows = [dynamics_arrays(item, a) for item, a in zip(series, anchors, strict=True)]
+    # The guidance commands δ (the speed floor's thrust inversion): thrust-fraction, always.
+    # No plan head reads the condition row, so its feature set is the raw one, stated.
+    rows = [
+        dynamics_arrays(
+            item, a, parameterization=CONTROL_THRUST_FRACTION,
+            condition_features=CONTROL_CONDITION_FEATURES_RAW,
+        )
+        for item, a in zip(series, anchors, strict=True)
+    ]
     anchor_heights = [float(item.values[a, IDX["u"]]) for item, a in zip(series, anchors, strict=True)]
     routes = [
         route_for(item, a, lab, skeleton, row["initial_state"], route=route)
@@ -397,7 +410,10 @@ LegOrders = Callable[[Anchor, int, Sequence[Forecast]], LegOrder]
 
 
 def first_anchor(series: FlightSeries, anchor: int, remaining_m: float) -> Anchor:
-    row = dynamics_arrays(series, anchor)
+    row = dynamics_arrays(
+        series, anchor, parameterization=CONTROL_THRUST_FRACTION,
+        condition_features=CONTROL_CONDITION_FEATURES_RAW,
+    )
     state = row["initial_state"]
     values = series.values[anchor]
     return Anchor(

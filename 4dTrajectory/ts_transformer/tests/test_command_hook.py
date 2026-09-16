@@ -34,7 +34,13 @@ def _batch(config: TSConfig, n_flights: int = 3, segments: int = 6):
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=n_flights, seed=5)
     series, _ = build_series(flights, config, airport=AIRPORT)
     anchor = config.seq_len - 1
-    rows = [dynamics_arrays(item, anchor) for item in series]
+    rows = [
+        dynamics_arrays(
+            item, anchor, parameterization=config.control_thrust_parameterization,
+            condition_features=config.control_condition_features,
+        )
+        for item in series
+    ]
     dynamics = {key: torch.from_numpy(np.stack([row[key] for row in rows])) for key in rows[0]}
     generator = torch.Generator().manual_seed(11)
     lower, upper = torch.tensor(CONTROL_LOWER, dtype=torch.float32), torch.tensor(CONTROL_UPPER, dtype=torch.float32)

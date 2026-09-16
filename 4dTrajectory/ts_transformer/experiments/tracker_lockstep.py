@@ -252,7 +252,10 @@ class HeadPlans:
 def ask_row(run: FlightRun, history: FlightSeries, anchor: int, config, plan_at: AskPlan, *, with_plan: bool) -> dict[str, np.ndarray]:
     """The dynamics row of one ask: the anchor state of ``history`` and, as the checkpoint reads
     them, the arrival time and the plan token at that pose."""
-    row = dynamics_arrays(history, anchor)
+    row = dynamics_arrays(
+        history, anchor, parameterization=config.control_thrust_parameterization,
+        condition_features=config.control_condition_features,
+    )
     if config.cta_conditioning == CTA_CONDITIONING_GIVEN:
         run.asks_below_floor += int(plan_at.arrival_s < config.random_train_anchor_min_future_s)
         row["cta_s"] = np.array(plan_at.arrival_s, dtype=np.float64)

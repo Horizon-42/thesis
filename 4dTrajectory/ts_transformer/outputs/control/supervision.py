@@ -9,13 +9,14 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from aircraft.aero_params import AeroParams
 from ts_transformer.data.channels import states_from_channels
 from ts_transformer.config import CTA_CONDITIONING_GIVEN, PLAN_CONDITIONING_OFF, TSConfig
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays, probe_final_approach
 from ts_transformer.outputs.conditioning import condition_vector
 from ts_transformer.outputs.dynamics.inverse import MINIMUM_INVERSE_STATES, segment_controls
-from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, plan_token
 from ts_transformer.outputs.plan.labels import TARGETS, PlanTargets
 
@@ -80,6 +81,7 @@ def reference_control_supervision(
         dtype=np.float64,
     )
     aero = series.scenario.aero
+    contract = control_contract(config.control_thrust_parameterization)
     inverted = segment_controls(
         states,
         times,
@@ -89,8 +91,8 @@ def reference_control_supervision(
             dtype=np.float64,
         ),
         max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
-        control_lower=CONTROL_LOWER,
-        control_upper=CONTROL_UPPER,
+        control_lower=contract.lower_array,
+        control_upper=contract.upper_array,
         n_segments=n_segments,
         total_duration_s=total_duration_s,
     )
@@ -237,13 +239,20 @@ def probe_dynamics(
     (review B-1): ``--batch-size auto`` then died with a bare ``KeyError`` inside the
     objective, after the dataset build, on every custom arm that weighted either term.
     """
+    contract = control_contract(config.control_thrust_parameterization)
+    # A mid-size narrowbody. Its condition row is written by the feature set the head reads,
+    # from the same airframe the aero row and the installed thrust below describe.
+    aero = AeroParams(S=122.6, Cl_max=2.7, Cd0=0.02, k=0.04, stall_threshold=0.9, k_stall=0.1)
+    mass_kg, max_thrust_n = 66_000.0, 240_000.0
     rows = {
-        "condition": [0.66, 0.24, 0.2452, 0.9, 0.2, 0.4, 0.9, 0.5],
-        "initial_state": [35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, 66_000.0],
-        "aero_params": [122.6, 2.7, 0.02, 0.04, 0.9, 0.1],
-        "control_lower": CONTROL_LOWER.tolist(),
-        "control_upper": CONTROL_UPPER.tolist(),
-        "initial_controls": [0.2, 0.0, 1.0],
+        "condition": condition_vector(
+            mass_kg, max_thrust_n, aero, features=config.control_condition_features
+        ).tolist(),
+        "initial_state": [35.9, -78.8, 1000.0, 80.0, 2.0, -0.05, mass_kg],
+        "aero_params": [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
+        "control_lower": list(contract.lower),
+        "control_upper": list(contract.upper),
+        "initial_controls": list(contract.neutral),
         "frame_params": [35.9, -78.8, 100.0, 0.0],
     }
     dynamics = {
@@ -253,7 +262,7 @@ def probe_dynamics(
         for name, value in rows.items()
     }
     dynamics["max_thrust_n"] = torch.full(
-        (batch_size,), 240_000.0, dtype=torch.float32, device=device
+        (batch_size,), max_thrust_n, dtype=torch.float32, device=device
     )
     probe = probe_final_approach(batch_size, device)
     dynamics["runway_heading_rad"] = probe["runway_heading_rad"]
@@ -274,7 +283,7 @@ def probe_dynamics(
         dynamics[PLAN_TOKEN_KEY] = torch.from_numpy(present).to(device).unsqueeze(0).expand(batch_size, -1)
     if config.control_imitation_loss_weight:
         dynamics["reference_controls"] = torch.tensor(
-            [[[0.2, 0.0, 1.0]]], dtype=torch.float64, device=device
+            [[list(contract.neutral)]], dtype=torch.float64, device=device
         ).expand(batch_size, n_segments, -1)
         dynamics["reference_control_weight"] = torch.ones(
             (batch_size, n_segments), dtype=torch.float64, device=device

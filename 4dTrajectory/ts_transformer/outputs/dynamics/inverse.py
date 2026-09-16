@@ -36,9 +36,18 @@ from aerodynamic_model.torch_dynamics import (
 from ts_transformer.config import (
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
+    CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
+    CONTROL_SPEED_COMMAND,
+    CONTROL_THRUST_PARAMETERIZATIONS,
     TSConfig,
 )
-from ts_transformer.outputs.envelope import CONTROL_NAMES, fraction_controls
+from ts_transformer.outputs.envelope import (
+    CONTROL_NAMES,
+    PATH_ANGLE_TIME_CONSTANT_S,
+    SPEED_LOOP_TIME_CONSTANT_S,
+    fraction_controls,
+)
 from geokit import WGS84_A, WGS84_E2
 
 # The command inversion differentiates a control signal that is itself built from second
@@ -55,7 +64,7 @@ STATE_COLUMNS = ("latitude", "longitude", "altitude", "V", "psi", "gamma", "mass
 class InvertedControls:
     """Controls in the dimensionless envelope, plus what the bounds had to clip."""
 
-    controls: np.ndarray             # [M, 3], unit-box contract, unclipped values kept
+    controls: np.ndarray             # [M, 3], the contract's units, unclipped values kept
     raw_control_min: np.ndarray
     raw_control_max: np.ndarray
     clipped_fraction: np.ndarray
@@ -153,12 +162,33 @@ def actual_controls(
     *,
     aero_params: np.ndarray,
     max_thrust_n: float,
+    parameterization: str,
 ) -> np.ndarray:
     """Return the ``[M,3]`` control the aircraft was flying at each reference sample.
 
     ``states`` is ``[M,7] = (lat, lon, alt, V, psi, gamma, mass)``. The result is in the
-    dimensionless envelope contract and is NOT clipped — clipping is a bound decision the
-    caller makes and reports, not something an inversion may do silently.
+    contract ``parameterization`` names (``outputs/envelope.py``; the one exception, the
+    speed command's ABSOLUTE target, is below) and is NOT
+    clipped — clipping is a bound decision the caller makes and reports, not something an
+    inversion may do silently. REQUIRED, never defaulted: the two longitudinal columns
+    differ by a factor of ~3 and an offset of ~0.08, and a teacher inverted in the wrong
+    one is a bounded, plausible, silently wrong target.
+
+    Under ``specific-force`` the first column is ``(T - D)/W = tangential/g + sin(gamma)``,
+    read off the kinematics alone — ``aero_params`` and ``max_thrust_n`` are not read,
+    which is the parameterisation's point: the tracks identify ``(T - D)/m``, never T and
+    m apart.
+
+    Under ``specific-force+path-angle`` the first column is that same specific force and the
+    THIRD is the path-angle target ``γ + τ_γ·γ̇`` in radians, an ABSOLUTE angle (design §14.1:
+    an anchor-relative target would inherit the anchor's own ADS-B path-angle noise as a
+    per-flight bias, the quantity §7.5.3 shows integrating into the height error).
+
+    Under ``speed-command`` the first column is the speed loop's ABSOLUTE target,
+    ``V + τ_V·tangential`` (m/s) — the airspeed that ``V' = (target − V)/τ_V`` needs, again
+    from the kinematics alone. The contract's column is that target RELATIVE to the anchor's
+    airspeed, which this function does not know: :func:`anchor_relative` makes it so, and
+    the two callers that know the anchor (the teacher and the anchor actuator) call it.
 
     These are the ACTUAL controls: for the lagged model they are the actuator states, and
     the commands that produced them are :func:`commanded_controls`.
@@ -173,6 +203,11 @@ def actual_controls(
         raise ValueError("reference times must be strictly increasing")
     if np.asarray(aero_params).shape != (6,):
         raise ValueError("aero parameters must contain six values")
+    if parameterization not in CONTROL_THRUST_PARAMETERIZATIONS:
+        raise ValueError(
+            f"parameterization must be one of {CONTROL_THRUST_PARAMETERIZATIONS}, "
+            f"got {parameterization!r}"
+        )
 
     altitude = states[:, 2]
     speed = np.maximum(states[:, 3], 1e-3)
@@ -214,12 +249,41 @@ def actual_controls(
 
     load_factor = np.hypot(lateral, vertical)
     bank = np.arctan2(lateral, vertical)
+    if parameterization == CONTROL_SPECIFIC_FORCE:
+        specific_force = tangential / GRAVITY_MPS2 + np.sin(gamma)
+        return np.column_stack((specific_force, bank, load_factor))
+    if parameterization == CONTROL_SPEED_COMMAND:
+        target_speed = speed + SPEED_LOOP_TIME_CONSTANT_S * tangential
+        return np.column_stack((target_speed, bank, load_factor))
+    if parameterization == CONTROL_SPECIFIC_FORCE_PATH_ANGLE:
+        # The THIRD column is the path-angle target the loop would have to hold to fly the
+        # realised path rate: `γ* = γ + τ_γ·γ̇`, with γ̇ taken from the realised load the same
+        # inversion just produced, `γ̇ = g(n cos φ − cos γ)/V`, not from a second differentiation
+        # of γ (design §14.3). The first column is the specific force, unchanged.
+        path_rate = GRAVITY_MPS2 * (load_factor * np.cos(bank) - cos_gamma) / speed
+        specific_force = tangential / GRAVITY_MPS2 + np.sin(gamma)
+        return np.column_stack(
+            (specific_force, bank, gamma + PATH_ANGLE_TIME_CONSTANT_S * path_rate)
+        )
     drag = _drag_force(altitude, speed, mass, load_factor, np.asarray(aero_params))
     thrust_n = mass * (tangential + GRAVITY_MPS2 * np.sin(gamma)) + drag
     return fraction_controls(
         np.column_stack((thrust_n, bank, load_factor)),
         np.asarray(float(max_thrust_n)),
     )
+
+
+def anchor_relative(
+    controls: np.ndarray, anchor_speed_mps: float, *, parameterization: str
+) -> np.ndarray:
+    """``controls`` in the contract's own units: under ``speed-command`` the first column
+    (an absolute target airspeed, :func:`actual_controls`) less the anchor's airspeed, the
+    speed the lag law's actuator is relative to; the identity under the other laws."""
+    if parameterization != CONTROL_SPEED_COMMAND:
+        return controls
+    relative = np.array(controls, dtype=np.float64, copy=True)
+    relative[..., 0] -= float(anchor_speed_mps)
+    return relative
 
 
 def _smoothed(values: np.ndarray, window: int) -> np.ndarray:
@@ -242,19 +306,26 @@ def commanded_controls(
     aero_params: np.ndarray,
     max_thrust_n: float,
     time_constants_s: np.ndarray,
+    parameterization: str,
 ) -> np.ndarray:
     """Invert the first-order lag: ``u_cmd = u + tau * du/dt``.
 
     Exact for the continuous system, so a command schedule recovered from a trajectory the
     lagged model produced reproduces that trajectory. The derivative is taken on a smoothed
     copy (:data:`COMMAND_SMOOTHING_SAMPLES`) because ``u`` already carries two numerical
-    differentiations of position.
+    differentiations of position. The lag is the same first-order ODE on whichever
+    quantity ``parameterization`` makes an actuator — the first column under three of the
+    contracts and the THIRD under ``specific-force+path-angle`` — so one inversion serves all
+    four. Under ``speed-command`` it acts on the ABSOLUTE target :func:`actual_controls`
+    returns, which commutes with :func:`anchor_relative`'s constant shift; under the
+    path-angle contract the third column is already absolute.
     """
     actual = actual_controls(
         states,
         times_s,
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
+        parameterization=parameterization,
     )
     tau = np.asarray(time_constants_s, dtype=np.float64).reshape(-1)
     if tau.shape != (len(CONTROL_NAMES),) or not np.all(tau > 0.0):
@@ -273,12 +344,12 @@ def _point_mass_inverse(
     max_thrust_n: float,
     config: TSConfig,
 ) -> np.ndarray:
-    del config
     return actual_controls(
         states,
         times_s,
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
+        parameterization=config.control_thrust_parameterization,
     )
 
 
@@ -296,6 +367,7 @@ def _first_order_lag_inverse(
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
         time_constants_s=config.control_time_constants_s,
+        parameterization=config.control_thrust_parameterization,
     )
 
 
@@ -313,13 +385,18 @@ def reference_controls(
     aero_params: np.ndarray,
     max_thrust_n: float,
 ) -> np.ndarray:
-    """Return the ``[M,3]`` control schedule the CONFIGURED forward model would need."""
-    return CONTROL_INVERSES[config.control_dynamics_model](
+    """Return the ``[M,3]`` control schedule the CONFIGURED forward model would need, in its
+    contract's units. ``states[0]`` is the anchor the rollout starts from, so under
+    ``speed-command`` the command is relative to ITS airspeed (:func:`anchor_relative`)."""
+    schedule = CONTROL_INVERSES[config.control_dynamics_model](
         states,
         times_s,
         aero_params=aero_params,
         max_thrust_n=max_thrust_n,
         config=config,
+    )
+    return anchor_relative(
+        schedule, float(states[0][3]), parameterization=config.control_thrust_parameterization
     )
 
 

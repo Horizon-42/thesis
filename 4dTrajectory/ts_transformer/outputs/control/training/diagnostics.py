@@ -14,11 +14,25 @@ import math
 import torch
 import torch.nn as nn
 
+from ts_transformer.config import CONTROL_THRUST_FRACTION
 from ts_transformer.outputs.control.heads import CONTROL_NAMES, ControlPrediction
+from ts_transformer.outputs.envelope import control_contract
 
 
 GRADIENT_GROUPS = ("backbone", "control_head", "final_time_head")
 SATURATION_THRESHOLD_FRACTION = 0.01
+
+
+def saturation_labels(parameterization: str) -> tuple[str, ...]:
+    """The per-column keys of an epoch's ``control_saturation.by_control``.
+
+    Under thrust-fraction the historical labels every stored ``history.json`` carries (its
+    first key reads ``thrust_N`` although the column is the thrust FRACTION — kept so new
+    runs stay comparable key for key); under any other law the contract's own names.
+    """
+    if parameterization == CONTROL_THRUST_FRACTION:
+        return CONTROL_NAMES
+    return control_contract(parameterization).names
 
 
 def _gradient_group(parameter_name: str) -> str:
@@ -86,6 +100,8 @@ class ControlTrainingDiagnosticsAccumulator:
     """Aggregate batch diagnostics into one JSON-serializable epoch record."""
 
     max_norm: float
+    #: The column labels (:func:`saturation_labels`), one per control.
+    control_names: tuple[str, ...]
     batch_count: int = 0
     clipped_batches: int = 0
     gradient_sum: dict[str, float] = field(
@@ -96,10 +112,11 @@ class ControlTrainingDiagnosticsAccumulator:
     )
     coefficient_sum: float = 0.0
     coefficient_min: float = 1.0
-    saturated_by_control: list[int] = field(
-        default_factory=lambda: [0 for _name in CONTROL_NAMES]
-    )
+    saturated_by_control: list[int] = field(init=False)
     controls_by_control: int = 0
+
+    def __post_init__(self) -> None:
+        self.saturated_by_control = [0 for _name in self.control_names]
 
     def record_prediction(
         self,
@@ -132,7 +149,7 @@ class ControlTrainingDiagnosticsAccumulator:
     def summary(self) -> dict[str, object]:
         if self.batch_count <= 0 or self.controls_by_control <= 0:
             raise RuntimeError("control training diagnostics contain no batches")
-        total_controls = self.controls_by_control * len(CONTROL_NAMES)
+        total_controls = self.controls_by_control * len(self.control_names)
         return {
             "gradient_norm_pre_clip": {
                 "mean": {
@@ -154,7 +171,9 @@ class ControlTrainingDiagnosticsAccumulator:
                 "overall_rate": sum(self.saturated_by_control) / total_controls,
                 "by_control": {
                     name: count / self.controls_by_control
-                    for name, count in zip(CONTROL_NAMES, self.saturated_by_control)
+                    for name, count in zip(
+                        self.control_names, self.saturated_by_control, strict=True
+                    )
                 },
             },
         }

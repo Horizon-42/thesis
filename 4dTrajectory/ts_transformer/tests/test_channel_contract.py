@@ -14,7 +14,12 @@ import ts_transformer.data.coordinate_frames as frames
 import ts_transformer.data.dataset as dataset_module
 import ts_transformer.outputs.dynamics.context as supervision_module
 from aerodynamic_model.common import GeodeticState
-from ts_transformer.config import COORDINATE_FRAMES, TSConfig
+from ts_transformer.config import (
+    CONTROL_CONDITION_FEATURES_RAW,
+    CONTROL_THRUST_FRACTION,
+    COORDINATE_FRAMES,
+    TSConfig,
+)
 from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer, build_series
 from ts_transformer.inference.forecast import forecast_approach
 from ts_transformer.backbone.adapters import build_model
@@ -188,8 +193,14 @@ def test_coordinate_frame_setting_selects_a_concrete_implementation():
     # Any anchor the pipeline builds has the whole lookback behind it; the anchor-state
     # control inversion differentiates that window, so it needs a real anchor, not 0.
     anchor = supervision_module.ANCHOR_CONTROL_SAMPLES
-    enu_dynamics = supervision_module.dynamics_arrays(enu_series[0], anchor)
-    aligned_dynamics = supervision_module.dynamics_arrays(aligned_series[0], anchor)
+    enu_dynamics = supervision_module.dynamics_arrays(
+        enu_series[0], anchor, parameterization=CONTROL_THRUST_FRACTION,
+        condition_features=CONTROL_CONDITION_FEATURES_RAW,
+    )
+    aligned_dynamics = supervision_module.dynamics_arrays(
+        aligned_series[0], anchor, parameterization=CONTROL_THRUST_FRACTION,
+        condition_features=CONTROL_CONDITION_FEATURES_RAW,
+    )
     runway_heading = enu_series[0].scenario.target.psi
     assert enu_dynamics["frame_params"][3] == pytest.approx(0.0)
     assert aligned_dynamics["frame_params"][3] == pytest.approx(runway_heading)
@@ -244,7 +255,10 @@ def test_airport_enu_series_differ_from_threshold_enu_only_by_the_anchor():
         assert apt.supervision_times[-1] == pytest.approx(enu.supervision_times[-1], abs=1e-3)
         assert np.allclose(apt.supervision_weights, enu.supervision_weights)
         anchor = supervision_module.ANCHOR_CONTROL_SAMPLES
-        dynamics = supervision_module.dynamics_arrays(apt, anchor)
+        dynamics = supervision_module.dynamics_arrays(
+            apt, anchor, parameterization=CONTROL_THRUST_FRACTION,
+            condition_features=CONTROL_CONDITION_FEATURES_RAW,
+        )
         assert dynamics["frame_params"][:3] == pytest.approx(
             [apt.frame.lat0, apt.frame.lon0, apt.frame.alt0]
         )

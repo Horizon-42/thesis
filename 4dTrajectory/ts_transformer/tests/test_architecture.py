@@ -535,21 +535,25 @@ def test_the_conditioning_names_and_their_scalings_are_one_source():
     """
     from types import SimpleNamespace
 
+    from ts_transformer.config import CONTROL_CONDITION_FEATURES_RAW
     from ts_transformer.outputs.conditioning import (
-        CONDITION_CHANNELS,
-        DYNAMICS_CONDITION_NAMES,
+        CONDITION_FEATURE_SETS,
+        condition_names,
         condition_vector,
     )
 
-    assert DYNAMICS_CONDITION_NAMES == tuple(name for name, _ in CONDITION_CHANNELS)
+    for features, channels in CONDITION_FEATURE_SETS.items():
+        assert condition_names(features) == tuple(name for name, _ in channels)
 
     aero = SimpleNamespace(S=500.0, Cl_max=3.0, Cd0=0.1, k=0.1, stall_threshold=0.8,
                            k_stall=0.2)
-    vector = condition_vector(mass_kg=100_000.0, max_thrust_n=1_000_000.0, aero=aero)
+    vector = condition_vector(mass_kg=100_000.0, max_thrust_n=1_000_000.0, aero=aero,
+                              features=CONTROL_CONDITION_FEATURES_RAW)
 
     # Every channel fed exactly the quantity its name declares, so each must read 1.0 —
-    # except stall_threshold, which the name says is already dimensionless.
-    named = dict(zip(DYNAMICS_CONDITION_NAMES, vector))
+    # except stall_threshold, which the name says is already dimensionless. The ratios
+    # set's two derived channels are checked the same way in `test_condition_features.py`.
+    named = dict(zip(condition_names(CONTROL_CONDITION_FEATURES_RAW), vector))
     assert named["stall_threshold"] == 0.8
     for name, value in named.items():
         if name != "stall_threshold":

@@ -15,8 +15,9 @@ would break the byte-identical property PROVENANCE.md promises.
 from __future__ import annotations
 
 from dataclasses import MISSING, asdict, dataclass, field, fields
+import json
 import math
-from typing import Any
+from typing import Any, Mapping
 
 # Channel order is a hard contract between the data build, the model, and the export.
 # It lives in channels.py; imported here so the default cannot drift from it.
@@ -296,6 +297,50 @@ CONTROL_DYNAMICS_BACKENDS = (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
 )
+# WHICH quantity the longitudinal control is (docs/2026-09-14_specific_force_control_design.md).
+# ``thrust-fraction`` commands T / T_max — normalised by the actuator; every run before
+# 2026-09-14 trained under it and every named recipe pins it. ``specific-force`` commands
+# n_x = (T - D)/W — normalised by the EFFECT: the lag RHS re-solves the thrust at every RK4
+# stage, the drag cancels, and the airframe enters only through the thrust clamp (the same
+# [-0.2, 1] x T_max range at every state), the stall clamp and the exported thrust. The SAME
+# thrust range is not the same dynamical system: with the drag cancelled the speed has no
+# drag feedback, so a biased command drifts where the thrust-fraction law settles (design
+# §2.1). ``speed-command`` (design §12) commands a target airspeed relative to the anchor's,
+# Δv, flown by a first-order speed loop through the specific-force law's thrust: the same
+# invariance, plus the restoring force the specific force lacks (``V' = (V₀ + Δv − V)/τ_V``
+# wherever the clamp does not bind). Both non-default laws are first-order-lag only: the
+# point-mass rows hold newton controls across a segment and have no per-stage thrust.
+CONTROL_THRUST_FRACTION = "thrust-fraction"
+CONTROL_SPECIFIC_FORCE = "specific-force"
+CONTROL_SPEED_COMMAND = "speed-command"
+# ``specific-force+path-angle`` (design §14) is the one value that also moves the VERTICAL
+# column: the head commands the target path angle γ* and the lag RHS re-solves the load factor
+# that flies it, `n = [cos γ + V(γ* − γ)/(g τ_γ)] / cos φ`, clipped to the load box with the
+# stall clamp unchanged. It exists because the load-factor column is an open-loop integrator —
+# a bias δn grows a height error like ½·g·δn·t² (design §7.5.3, measured: +0.004 of load is
+# +92 m at the end) — while a path-angle target does not accumulate that way (+17 m for the
+# same instantaneous error, §13.3). Only THIS combination is spelled, and the ``+`` is a
+# LOOKUP, never a split, exactly as in CONTROL_HOOK_MEMBERS: the vertical law is
+# energy-neutral (Ė = V·n_x, no γ) only under the specific force, and under a thrust fraction
+# it would change the induced drag and need the second law the 2026-09-06 nominal hook needed.
+# Every non-default law is first-order-lag only: the point-mass rows hold newton controls
+# across a segment and have no per-stage re-solve.
+CONTROL_SPECIFIC_FORCE_PATH_ANGLE = "specific-force+path-angle"
+CONTROL_THRUST_PARAMETERIZATIONS = (
+    CONTROL_THRUST_FRACTION,
+    CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPEED_COMMAND,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
+)
+# HOW the airframe is presented to the control head (`outputs/conditioning.py`; design N4).
+# ``raw`` scales each quantity on its own (mass, installed thrust, wing area, the polar) —
+# every run before 2026-09-15, pinned by every named recipe. ``ratios`` hands the head the
+# dynamics' own groups in place of the thrust and the area: the thrust-to-weight ratio and the
+# 1-g stall speed. The two sets carry the same information and have the same width, so an arm
+# that moves only this field starts from the same weights and differs only in what it reads.
+CONTROL_CONDITION_FEATURES_RAW = "raw"
+CONTROL_CONDITION_FEATURES_RATIOS = "ratios"
+CONTROL_CONDITION_FEATURES = (CONTROL_CONDITION_FEATURES_RAW, CONTROL_CONDITION_FEATURES_RATIOS)
 CONTROL_RECIPE_CUSTOM = "custom"
 CONTROL_RECIPE_SIMPLE_V1 = "simple-v1"
 # simple-v1 with the lagged flight model substituted and nothing else changed, so the two
@@ -890,6 +935,12 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "duration_head": "point",
         "control_dynamics_backend": CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
         "control_dynamics_model": CONTROL_DYNAMICS_POINT_MASS,
+        # Every published simple-v* comparison flew the thrust-fraction law; an n_x arm
+        # varies a field the recipe freezes, so it is `custom` and its dynamics word says so.
+        "control_thrust_parameterization": CONTROL_THRUST_FRACTION,
+        # ...and read the airframe as raw quantities; a `ratios` arm is `custom` and wears
+        # `airframe=ratios`.
+        "control_condition_features": CONTROL_CONDITION_FEATURES_RAW,
         "control_state_supervision_clock": CONTROL_STATE_CLOCK_OBSERVED,
         "control_state_loss_grid": CONTROL_STATE_LOSS_GRID_NATIVE,
         "control_state_objective": CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
@@ -1392,6 +1443,7 @@ class DynamicsSpec:
 
     control_dynamics_model: str
     control_dynamics_backend: str
+    control_thrust_parameterization: str
     control_thrust_time_constant_s: float
     control_bank_time_constant_s: float
     control_load_time_constant_s: float
@@ -1405,6 +1457,20 @@ class DynamicsSpec:
         _require_member(
             "control_dynamics_model", self.control_dynamics_model, CONTROL_DYNAMICS_MODELS
         )
+        _require_member(
+            "control_thrust_parameterization", self.control_thrust_parameterization,
+            CONTROL_THRUST_PARAMETERIZATIONS,
+        )
+        if (self.control_thrust_parameterization != CONTROL_THRUST_FRACTION
+                and self.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG):
+            # A scope statement, not physics: the specific force and the speed loop both need
+            # the thrust re-solved at every RK4 stage, which only the lag RHS does. The
+            # point-mass rows convert to newtons once per segment and would hold T.
+            raise ValueError(
+                f"control_thrust_parameterization={self.control_thrust_parameterization!r} "
+                "is implemented on the first-order-lag flight model only; "
+                f"control_dynamics_model={self.control_dynamics_model!r}"
+            )
         for name in sorted(TIME_CONSTANT_FIELDS):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0.0:
@@ -1719,6 +1785,7 @@ class ControlOutput(OutputSpec):
     cta_conditioning: str
     plan_conditioning: str
     plan_conditioning_dropout: float
+    control_condition_features: str
     duration: DurationSpec
     dynamics: DynamicsSpec
     objective: ControlObjective
@@ -1745,6 +1812,10 @@ class ControlOutput(OutputSpec):
                 "a plan token beside a latent intent is two answers to one question (what the "
                 "flight is going to do); the latent line is its own axis"
             )
+        _require_member(
+            "control_condition_features", self.control_condition_features,
+            CONTROL_CONDITION_FEATURES,
+        )
         if self.horizon_mode != HORIZON_NORMALIZED:
             raise ValueError(
                 "control output uses learned non-uniform segments and currently requires "
@@ -1782,6 +1853,50 @@ class ControlOutput(OutputSpec):
                 "point term — the pinball sum replaced it under the same component name. "
                 "Weigh the pinball with duration_quantile_loss_weight, or take the point "
                 f"term back with duration_head={DURATION_HEAD_TWO_HEAD!r}"
+            )
+        law = self.dynamics.control_thrust_parameterization
+        if law != CONTROL_THRUST_FRACTION:
+            if self.objective.control_imitation_target == CONTROL_IMITATION_TARGET_FITTED:
+                # The table's schema names no parameterisation, so an n_x or a speed-command
+                # run could read a thrust-fraction table and imitate δ as if it were its own.
+                raise ValueError(
+                    f"control_imitation_target={CONTROL_IMITATION_TARGET_FITTED!r} is not "
+                    f"built for control_thrust_parameterization={law!r}: a fitted-teacher "
+                    "table does not say which coordinate its schedules are in"
+                )
+        if (law == CONTROL_SPEED_COMMAND
+                and CONTROL_HOOK_SPEED_FLOOR
+                in CONTROL_HOOK_MEMBERS.get(self.hook.control_command_hook, ())):
+            # Not built yet (design §12.4): the floor writes the thrust channel by inverting a
+            # thrust or specific-force law, and under the speed loop its demand is a speed.
+            raise ValueError(
+                f"a command hook containing {CONTROL_HOOK_SPEED_FLOOR!r} is not built for "
+                f"control_thrust_parameterization={CONTROL_SPEED_COMMAND!r} yet"
+            )
+        if (law == CONTROL_SPECIFIC_FORCE_PATH_ANGLE
+                and self.objective.control_heading_rate_loss_weight != 0.0):
+            # The heading-rate term prices what the rollout FLEW, so it reads the third
+            # ACTUATOR (`backends.EndpointControlRollout.actual_controls`) as a load factor and
+            # feeds it to the psi row `g·n·sin φ/(V cos γ)`. Under this contract that actuator is
+            # a path angle in radians: the term would read −0.05 where the flight flew 1.06, a
+            # full-scale wrong target on every segment, silently (review §14.9, finding 1).
+            # Resolving the load inside the term is the other fix; nothing needs it yet.
+            raise ValueError(
+                "control_heading_rate_loss_weight is not built for "
+                f"control_thrust_parameterization={CONTROL_SPECIFIC_FORCE_PATH_ANGLE!r}: the "
+                "term reads the third actuator as a load factor and this contract holds a "
+                "path angle there"
+            )
+        if law == CONTROL_SPECIFIC_FORCE_PATH_ANGLE and self.hook.active:
+            # Design §14.4: the barrier and the trombone rewrite the LOAD FACTOR and the speed
+            # floor reads a commanded load, and under this contract the third column is a path
+            # angle — none of them speaks it. Composing them is a separate design; the arms run
+            # with the hook off.
+            raise ValueError(
+                f"control_command_hook={self.hook.control_command_hook!r} is not built for "
+                f"control_thrust_parameterization={CONTROL_SPECIFIC_FORCE_PATH_ANGLE!r}: every "
+                "hook writes or reads the load-factor column, which this contract replaces "
+                "with a path-angle target"
             )
         if self.hook.active:
             if self.dynamics.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:
@@ -2155,6 +2270,10 @@ class TSConfig:
     # samples whose plan token is dropped.
     plan_conditioning: str = PLAN_CONDITIONING_OFF
     plan_conditioning_dropout: float = 0.0
+    # How the airframe is written into the head's condition vector (CONTROL_CONDITION_FEATURES).
+    # Not in REQUIRED_SERIALIZED_CONTROL_FIELDS: every checkpoint trained before the field
+    # existed read the raw set, so absence reproduces it exactly.
+    control_condition_features: str = CONTROL_CONDITION_FEATURES_RAW
     # WHAT the duration head emits (DURATION_HEADS, B1/B1.b): one point estimate, the five
     # DURATION_QUANTILES, or both. Every value but `point` belongs to the control output
     # only. Under `quantile` the median walks the existing `final_time_s` contract (it IS
@@ -2212,6 +2331,10 @@ class TSConfig:
     # it reduces to ``point-mass`` as the time constants go to zero, and reuses the same
     # force equations, so the two are comparable rather than two separate models.
     control_dynamics_model: str = CONTROL_DYNAMICS_POINT_MASS
+    # Which quantity the longitudinal control is (see CONTROL_THRUST_PARAMETERIZATIONS).
+    # Not in REQUIRED_SERIALIZED_CONTROL_FIELDS: every checkpoint trained before the field
+    # existed ran the default, so absence reproduces it exactly.
+    control_thrust_parameterization: str = CONTROL_THRUST_FRACTION
     # Actuator/autopilot time constants, in the control contract's order
     # (thrust, bank, load factor). Bank is the slow one: rolling into and out of a
     # vectored turn is what the meeting identified as the discontinuity worth fixing,
@@ -2544,17 +2667,7 @@ class TSConfig:
         safe stand-in for "the old runs did this" is therefore required, not defaulted.
         """
         data = dict(data)
-        missing = [name for name in REQUIRED_SERIALIZED_FIELDS if name not in data]
-        if uses_control_dynamics(data.get("prediction_output", PREDICTION_STATE)):
-            missing += [
-                name for name in REQUIRED_SERIALIZED_CONTROL_FIELDS if name not in data
-            ]
-        if uses_closure_labels(data.get("prediction_output", PREDICTION_STATE)):
-            missing += [
-                name for name in REQUIRED_SERIALIZED_CLOSURE_FIELDS if name not in data
-            ]
-        if uses_plan_labels(data.get("prediction_output", PREDICTION_STATE)):
-            missing += [name for name in REQUIRED_SERIALIZED_PLAN_FIELDS if name not in data]
+        missing = missing_required_fields(data)
         if missing:
             raise ValueError(
                 f"serialized config is missing {', '.join(sorted(missing))}; "
@@ -2646,6 +2759,41 @@ def _check_view_partition() -> None:
 _check_view_partition()
 
 
+def _required_serialized_fields(data: Mapping[str, Any]) -> tuple[str, ...]:
+    """The fields `TSConfig.from_dict` REQUIRES of a stored config of this output."""
+    output = data.get("prediction_output", PREDICTION_STATE)
+    return (
+        *REQUIRED_SERIALIZED_FIELDS,
+        *(REQUIRED_SERIALIZED_CONTROL_FIELDS if uses_control_dynamics(output) else ()),
+        *(REQUIRED_SERIALIZED_CLOSURE_FIELDS if uses_closure_labels(output) else ()),
+        *(REQUIRED_SERIALIZED_PLAN_FIELDS if uses_plan_labels(output) else ()),
+    )
+
+
+def missing_required_fields(data: Mapping[str, Any]) -> list[str]:
+    """The required fields a stored config lacks — what `TSConfig.from_dict` refuses."""
+    return [name for name in _required_serialized_fields(data) if name not in data]
+
+
+def absent_field_defaults(data: Mapping[str, Any]) -> dict[str, Any]:
+    """What `TSConfig.from_dict` reads for every field a stored config does NOT carry: this
+    build's default, for each field it does not require (a missing REQUIRED field is refused
+    there, so it is left out here and still reads as absent).
+
+    This is the ABSENT-field half of `from_dict`'s rule (it does not normalise fields that
+    are present but owned by another output), for readers that compare a stored config field
+    by field. The campaign runner's resume check read an absent field as ``None``, so the
+    first field a recipe pins AFTER an arm was trained (``control_thrust_parameterization``,
+    2026-09-14) refused every such arm's resume although the arm flew exactly the default.
+    """
+    required = set(_required_serialized_fields(data))
+    return {
+        name: value
+        for name, value in json.loads(json.dumps(TSConfig().to_dict())).items()
+        if name not in data and name not in required
+    }
+
+
 def lookback_anchor(config: TSConfig) -> int:
     """The earliest anchor with a complete observed lookback: ``L-1``, what the label "L-1"
     names wherever an artifact says which anchor it was taken at."""
@@ -2697,6 +2845,13 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
     }
     if config.control_recipe_name != CONTROL_RECIPE_CUSTOM:
         base["name"] = config.control_recipe_name
+    # Present only off the default: every stored checkpoint's metadata predates the field,
+    # and `experiments.pipeline` compares this dict for reuse — writing the default too
+    # would refuse every one of them.
+    if config.control_thrust_parameterization != CONTROL_THRUST_FRACTION:
+        base["thrust_parameterization"] = config.control_thrust_parameterization
+    if config.control_condition_features != CONTROL_CONDITION_FEATURES_RAW:
+        base["condition_features"] = config.control_condition_features
     if not uses_control_dynamics(config.prediction_output):
         raise ValueError("state output has no control recipe")
     return base

@@ -26,6 +26,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, ROOT + "/4dTrajectory")
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from flight_scenarios.scenario import aircraft_for_code  # noqa: E402
+from ts_transformer.config import CONTROL_THRUST_FRACTION  # noqa: E402
 from ts_transformer.outputs.dynamics.inverse import actual_controls  # noqa: E402
 
 CLASSES = {
@@ -75,7 +76,8 @@ def flight_row(pred_dir: Path, row):
         return float(np.trapezoid(np.gradient(v, t) / 9.81 + np.sin(g), t) / (t[-1] - t[0]))
 
     t_obs = np.array([s["t"] for s in span_obs])
-    req = actual_controls(as_array(span_obs), t_obs, aero_params=aero_row, max_thrust_n=tmax)
+    req = actual_controls(as_array(span_obs), t_obs, aero_params=aero_row, max_thrust_n=tmax,
+                          parameterization=CONTROL_THRUST_FRACTION)
     frac_req = float(np.trapezoid(req[:, 0], t_obs) / (t_obs[-1] - t_obs[0]))
     span_pred = [s for s in pred if s["t"] <= end]
     return dict(

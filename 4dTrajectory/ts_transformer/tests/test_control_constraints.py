@@ -430,6 +430,189 @@ def test_speed_floor_keeps_a_decelerating_rollout_off_the_stall(saturation):
     assert torch.all(hooked.controls[:, :, 0] >= decelerating.to(hooked.controls.dtype)[:, :, 0] - 1e-9)
 
 
+# ── speed floor under the specific-force law ─────────────────────────────────
+
+def _sf_floor_config(**overrides) -> TSConfig:
+    return _hook_config(control_command_hook=CONTROL_HOOK_SPEED_FLOOR,
+                        control_thrust_parameterization="specific-force", **overrides)
+
+
+def _sf_view(d_m, *, speed, actuator=-0.05):
+    view = _view(d_m, [0.0] * len(d_m), speed=speed)
+    view.actuators[:, 0] = actuator          # the lagged SPECIFIC FORCE being flown, in g
+    return view
+
+
+def test_the_specific_force_floor_acts_on_column_0_alone_and_only_upward():
+    hook = SpeedFloor(_sf_floor_config(), _context(2), hard=True)
+    command = _command([0.3, -0.2], load=1.15, thrust=-0.12)
+    # The floor here is ~68 m/s (1.1 x the stall speed at n = 1.15, ~420 m): 85 m/s holds
+    # it through a -0.12 g hold, 45 m/s does not.
+    fast = hook(_sf_view([8_000.0] * 2, speed=85.0), command, 0)
+    slow = hook(_sf_view([8_000.0] * 2, speed=45.0), command, 1)
+    for out in (fast, slow):
+        assert torch.equal(out[:, 1], command[:, 1]) and torch.equal(out[:, 2], command[:, 2])
+    assert torch.equal(fast[:, 0], command[:, 0])
+    # Raised, and never past what the engine could give with no drag at all (T_max/W).
+    assert torch.all(slow[:, 0] > command[:, 0])
+    assert torch.all(slow[:, 0] <= 2.0e5 / (66000.0 * 9.81))
+    assert hook.diagnostics()["hook_floor_bound_steps"] == 2.0
+
+
+def test_the_specific_force_demand_puts_the_speed_on_the_floor_where_the_hold_ends():
+    """The inversion is exact for the law it inverts: flying the returned command through the
+    lagged actuator for one hold, V(dt) = V + g·(mean a_x - sin γ)·dt lands on V_floor."""
+    from ts_transformer.outputs.constraints.gates import runway_axes_view
+    from ts_transformer.outputs.constraints.speed_floor import floor_speed
+
+    config = _sf_floor_config()
+    context = _context(1)
+    hook = SpeedFloor(config, context, hard=True)
+    # Just under the ~66 m/s floor at n = 1.1, so the demand is inside the engine's range.
+    view_state = _sf_view([8_000.0], speed=64.0, actuator=-0.03)
+    out = hook(view_state, _command([0.0], load=1.1, thrust=-0.2), 0)
+    view = runway_axes_view(view_state, context["runway_heading_rad"])
+    floor, _density = floor_speed(view, aero=context["aero_params"], origin_altitude_m=context["frame_params"][:, 2],
+                                  margin=config.control_speed_floor_margin,
+                                  commanded_load=torch.tensor([1.1], dtype=torch.float64))
+    tau = config.control_thrust_time_constant_s
+    hold = HOLD_S
+    tau_eff = tau * (1.0 - math.exp(-hold / tau))
+    mean = (float(out[0, 0]) * (hold - tau_eff) + (-0.03) * tau_eff) / hold
+    assert -0.2 < float(out[0, 0]) < 0.23              # the exact case, not a capped one
+    # `_view`'s speed is the HORIZONTAL one; the airspeed the hook reads is along the path.
+    end_speed = float(view.speed) + 9.81 * (mean - float(torch.sin(view.path_angle))) * hold
+    assert end_speed == pytest.approx(float(floor), abs=1e-9)
+
+
+def test_the_soft_specific_force_floor_is_inert_where_it_demands_nothing():
+    soft = SpeedFloor(_sf_floor_config(), _context(3), hard=False)
+    hard = SpeedFloor(_sf_floor_config(), _context(3), hard=True)
+    view = _sf_view([8_000.0] * 3, speed=95.0)
+    command = _command([0.0] * 3, thrust=-0.2)         # the box floor: the common decel band
+    assert torch.equal(soft(view, command, 0)[:, 0], hard(view, command, 0)[:, 0])
+    assert torch.equal(soft(view, command, 1)[:, 0], command[:, 0])
+    assert soft.diagnostics()["hook_floor_bound_steps"] == 0.0
+    assert soft.diagnostics()["hook_thrust_change"] == 0.0
+
+
+def _engine_ceiling(view_state, load: float, context=None) -> float:
+    """``(T_max - D)/W`` at the floor's own state: its density (the end-of-hold height),
+    the segment-start speed and the commanded load — wiring check, the RHS's own polar."""
+    from aerodynamic_model.torch_dynamics import aerodynamic_coefficients, drag_force_n
+    from ts_transformer.outputs.constraints.gates import runway_axes_view
+    from ts_transformer.outputs.constraints.speed_floor import floor_speed
+
+    context = _context(1) if context is None else context
+    view = runway_axes_view(view_state, context["runway_heading_rad"])
+    loads = torch.tensor([load], dtype=torch.float64)
+    _floor, density = floor_speed(view, aero=context["aero_params"],
+                                  origin_altitude_m=context["frame_params"][:, 2],
+                                  margin=_sf_floor_config().control_speed_floor_margin,
+                                  commanded_load=loads)
+    _cl, cd, _stalled = aerodynamic_coefficients(loads, view.speed, view.mass, density, context["aero_params"])
+    drag = drag_force_n(density, view.speed, cd, context["aero_params"][:, 0])
+    return float((context["max_thrust_n"] - drag) / (view.mass * 9.81))
+
+
+@pytest.mark.parametrize("speed,engine_below_box", [(55.0, True), (40.0, False)])
+def test_the_specific_force_floor_saturates_at_the_engine_not_the_box(speed, engine_below_box):
+    """Saturation is the ENGINE's ceiling at this state, (T_max - D)/W — "full thrust is not
+    enough", as under thrust-fraction. At 55 m/s it sits below the head's 0.23 g box and
+    binds there; at 40 m/s (deep in the stall, the lift coefficient capped, the drag falls)
+    it sits ABOVE the box and the hook goes past the box to it: the box is the network's
+    search space, not a limit on a physical safety layer (M2 review)."""
+    hook = SpeedFloor(_sf_floor_config(), _context(1), hard=True)
+    view = _sf_view([8_000.0], speed=speed)
+    engine = _engine_ceiling(view, 1.0)
+    assert (engine < 0.23) is engine_below_box, engine
+    out = hook(view, _command([0.0], thrust=0.0), 0)
+    assert float(out[0, 0]) == pytest.approx(engine, rel=1e-12)
+    assert hook.diagnostics()["hook_floor_saturated_steps"] == 1.0
+
+
+def test_a_demand_past_the_box_but_within_the_engine_is_met_and_not_saturated():
+    """What separates "saturated on the engine" from "on the box" (M2 re-review): a higher
+    thrust-to-weight airframe (T/W 0.40) at 52.5 m/s needs more than the box's 0.23 g, the
+    engine can give it, so the hook flies it and counts NO saturation."""
+    context = _context(1)
+    context["max_thrust_n"] = torch.full((1,), 2.6e5, dtype=torch.float64)
+    hook = SpeedFloor(_sf_floor_config(), context, hard=True)
+    view = _sf_view([8_000.0], speed=52.5)
+    out = float(hook(view, _command([0.0], thrust=0.0), 0)[0, 0])
+    assert 0.23 < out < _engine_ceiling(view, 1.0, context)
+    assert hook.diagnostics()["hook_floor_saturated_steps"] == 0.0
+
+
+def test_the_soft_floor_never_overshoots_the_engine_it_is_bound_by():
+    """The soft max overshoots its bound by up to softness·ln 2; where the bound IS the
+    engine and the command sits just under it, the output is held at the engine exactly."""
+    view = _sf_view([8_000.0], speed=55.0)
+    engine = _engine_ceiling(view, 1.0)
+    out = SpeedFloor(_sf_floor_config(), _context(1), hard=False)(
+        view, _command([0.0], thrust=engine - 0.001), 0)
+    assert float(out[0, 0]) == engine
+
+
+def test_a_spooled_actuator_is_credited_no_higher_than_the_engine_flies_it():
+    """The RHS's thrust clamp caps what an actuator spooled ABOVE the engine's ceiling
+    actually flies, so the lag credit must read the ceiling there, not the raw actuator —
+    crediting 0.23 g the engine cannot give ended the hold ~1.2 m/s under the floor (M2
+    review). An actuator past the ceiling therefore gets exactly the command one AT it gets."""
+    speed, load = 62.0, 1.3
+    probe = _sf_view([8_000.0], speed=speed)
+    engine = _engine_ceiling(probe, load)
+    assert engine < 0.23, engine                        # the case: spooled past the engine
+    command = _command([0.0], load=load, thrust=-0.2)
+    past = SpeedFloor(_sf_floor_config(), _context(1), hard=True)(
+        _sf_view([8_000.0], speed=speed, actuator=0.23), command, 0)
+    at = SpeedFloor(_sf_floor_config(), _context(1), hard=True)(
+        _sf_view([8_000.0], speed=speed, actuator=engine), command, 0)
+    assert torch.equal(past, at)
+    # ...and where the hook is NOT saturated the credit is exactly the engine's: flying the
+    # returned command with a0 = engine lands the hold on the floor (64 m/s, n = 1.3).
+    from ts_transformer.outputs.constraints.gates import runway_axes_view
+    from ts_transformer.outputs.constraints.speed_floor import floor_speed
+
+    config, context = _sf_floor_config(), _context(1)
+    state = _sf_view([8_000.0], speed=64.0, actuator=0.23)
+    engine = _engine_ceiling(state, load)
+    hook = SpeedFloor(config, context, hard=True)
+    out = float(hook(state, command, 0)[0, 0])
+    assert out < engine and hook.diagnostics()["hook_floor_saturated_steps"] == 0.0
+    view = runway_axes_view(state, context["runway_heading_rad"])
+    floor, _density = floor_speed(view, aero=context["aero_params"], origin_altitude_m=context["frame_params"][:, 2],
+                                  margin=config.control_speed_floor_margin,
+                                  commanded_load=torch.tensor([load], dtype=torch.float64))
+    tau = config.control_thrust_time_constant_s
+    tau_eff = tau * (1.0 - math.exp(-HOLD_S / tau))
+    mean = (out * (HOLD_S - tau_eff) + engine * tau_eff) / HOLD_S
+    end_speed = float(view.speed) + 9.81 * (mean - float(torch.sin(view.path_angle))) * HOLD_S
+    assert end_speed == pytest.approx(float(floor), abs=1e-9)
+
+
+@pytest.mark.parametrize("saturation", ["soft", HOOK_SATURATION_HARD])
+def test_the_specific_force_floor_keeps_a_decelerating_rollout_off_the_stall(saturation):
+    """The δ test's twin: n_x held at the box floor for a 14 km approach stalls unhooked;
+    the hook, which may only raise n_x, keeps the same schedule off the stall."""
+    config = _sf_floor_config(control_hook_saturation=saturation)
+    dynamics, controls, durations = _final_batch(config, xt_m=0.0, d_m=14_000.0, segments=24,
+                                                 speed=95.0, thrust=-0.052)
+    decelerating = controls.detach().clone()
+    decelerating[:, :, 0] = -0.2
+    hook = build_command_hook(config, dynamics)
+    hooked = control_rollout.rollout_control_endpoints(decelerating, durations, dynamics, config, command_hook=hook)
+    plain = control_rollout.rollout_control_endpoints(decelerating, durations, dynamics, config)
+    series, _ = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9), config, airport=AIRPORT)
+    aircraft = series[0].scenario.aircraft
+    plain_summary, plain_slack = _stall_readout(plain, dynamics, durations, aircraft)
+    hooked_summary, hooked_slack = _stall_readout(hooked, dynamics, durations, aircraft)
+    assert plain_summary["violations"]["stall"] > 0 and plain_slack < -5.0
+    assert hooked_summary["violations"].get("stall", 0) == 0
+    assert hooked_slack > -1.0, hooked_slack
+    assert torch.equal(hooked.controls[:, :, 1:], decelerating.to(hooked.controls.dtype)[:, :, 1:])
+
+
 # ── trombone ─────────────────────────────────────────────────────────────────
 
 def _trombone_view(*, d_m, xt_m, heading_error_rad, remaining_s, speed=72.0, hold_s=HOLD_S,
@@ -1492,7 +1675,13 @@ def _final_batch(config: TSConfig, *, xt_m: float, d_m: float, height_above_gp_m
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=9)
     series, _ = build_series(flights, config, airport=AIRPORT)
     anchor = config.seq_len - 1
-    rows = [dynamics_arrays(item, anchor) for item in series]
+    rows = [
+        dynamics_arrays(
+            item, anchor, parameterization=config.control_thrust_parameterization,
+            condition_features=config.control_condition_features,
+        )
+        for item in series
+    ]
     dynamics = {key: torch.from_numpy(np.stack([row[key] for row in rows])) for key in rows[0]}
     threshold = find_threshold(AIRPORT, RUNWAY)
     frame = ENUFrame(lat0=float(threshold["lat"]), lon0=float(threshold["lon"]), alt0=float(threshold["elevation_m"]))
