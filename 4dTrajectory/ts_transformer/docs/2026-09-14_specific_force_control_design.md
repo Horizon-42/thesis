@@ -22,7 +22,7 @@ the literature (36 sources) and the measurements behind the choice are in
 | N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | built and reviewed 2026-09-15 on branch `sf-n6` (`94f822e`; review §12.8). Ran 06:01 UTC at `eaf409a`. **FAILED: unstable in training** (§12.9). Arm 1 diverged from epoch 26 (pre-clip control-head gradient norm 1e7–1e10) and early-stopped at 38 (best 18): pooled ADE 2335 vs 1325 m. Seed 2024 stopped at dataset build (only `config.json`). Not adopted; the next design is the user's call (§12.9) | §12.9 |
 | F | the final-descent split, diagnosed (the user: "开始排查") | **done** 2026-09-15, read-only on the four same-code runs. The truth flies at ~0.6 Cl_max; the rollouts reach the stall boundary by losing speed. SF's split is its vertical-load command integrated open loop: the twice-integrated command bias predicts the height error at 5 km with Spearman +0.76 / +0.82, and the energy is right. δ has the same open channel, worse; its straight-in FDE edge is a stall-bound dive that ends ~100 m low and on time. A straight-in FDE is 60–77 % along-track, 1–2 % vertical | §7.5 |
 | N7 | an inference-time glidepath hook on the specific-force contract | **withdrawn as a model fix** (the user, 2026-09-16): it computes the final's vertical profile from the published procedure, so the result would be the rule's, not the model's. Kept only as a labelled diagnostic or baseline component (§7.5.6) | §7.5.6 |
-| N7′ | a learned vertical target: the head predicts the path angle (or height) per segment, and a fixed tracking law with no procedure in it flies it. The diagnosed integrator goes, and the profile stays the model's | **pre-measured 2026-09-16 (§13), not built.** The teacher is identifiable and τ-insensitive: its open-loop replay is straight-in ADE p50 32 m against 63 m (n_x) and 145 m (δ), ending 5 m off in height against 27 / 42 m. The same instantaneous vertical error costs 5.3× less height. But γ\* varies more than the load factor, so the break-even is a per-flight bias of 0.11°, and the gain is not automatic. Its target is the more predictable of the two (lag-1 +0.61 against +0.26). Build/no-build is the user's call | §13 |
+| N7′ | a learned vertical target: the head predicts the path angle per segment, and a fixed tracking law with no procedure in it flies it. The diagnosed integrator goes, and the profile stays the model's | **BUILT, RAN, and it passes every pre-registered gate on both seeds (§15).** γ\* bias 0.088 / 0.091° against the pre-registered 0.11°; the stall-bound share falls 33/45 % → 1 %; the last-km height error +39/+54 m → +6/+3 m; the straight-in FDE veto that killed N3 becomes a 104 m win on both seeds, on both components of its split; pooled ADE −152 / −113 m against the same-code δ twin with 70 / 69 % of flights better paired; **fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %**. Both N3 gates pass too, including the heavy − 737 speed gap N3 widened. One regression: the vectored endpoint (FDE p50 +625 / +704 m), which is cross-track and unexplained. Adoption is the user's call. Pre-measurement (§13): The teacher is identifiable and τ-insensitive: its open-loop replay is straight-in ADE p50 32 m against 63 m (n_x) and 145 m (δ), ending 5 m off in height against 27 / 42 m. The same instantaneous vertical error costs 5.3× less height. But γ\* varies more than the load factor, so the break-even is a per-flight bias of 0.11°, and the gain is not automatic. Its target is the more predictable of the two (lag-1 +0.61 against +0.26). Build/no-build is the user's call | §13 |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
 the user merges. Every code milestone gets a subagent review before its commit
@@ -1514,3 +1514,82 @@ numerically.
 Remaining nit, not acted on: `inference/export.py` names the vertical column through
 `forecast.longitudinal_parameterization` (finding 4). The two are one config field and the gate that sets
 `vertical_commands` is contract-driven, so the coupling is latent, not live.
+
+
+## 15. N7′ results — the path-angle contract passes every pre-registered gate, on both seeds (2026-09-16)
+
+**Ran:** campaign `4dTrajectory/outputs/KRDU/experiments/sf_n7`, launched 01:31 UTC from the runner worktree
+at `87497be`, finished 03:30 UTC. `N7_path_angle` early-stopped at 168 epochs (best 163), `N7_path_angle_s2024`
+at 143 (best 132). Both `completed`. Read against the SAME-CODE δ twins (`sf_n4/N4_twin`, `_s2024`) and the
+n_x arms (`sf_n3`), same split, same split-seed.
+
+### 15.1 The gates
+
+| gate (§14.8) | seed 1337 | seed 2024 | verdict |
+|---|---|---|---|
+| **break-even**: the head's per-flight γ\* bias, p50 (≤ 0.11°) | **0.088°** | **0.091°** | **pass** |
+| stall-bound share of the last 5–1 km (n_x: 33 / 45 %, δ: 64 / 68 %) | **1 %** | **1 %** | **pass** |
+| last-km height error (n_x: +39 / +54 m) | **+6 m** | **+3 m** | **pass** |
+| last-km speed error (n_x: −3.2 / −6.4 m/s) | **−1.3 m/s** | **−0.7 m/s** | **pass** |
+| \|vertical\| at the end (n_x 77 / 90 m, δ 127 / 139 m) | **28 m** | **27 m** | **pass** |
+| per-class n_x bias range, truth's own spread 0.0045 g (δ twin 0.0125 / 0.0118) | **0.0045** | **0.0047** | **pass** |
+| heavy − B737 speed gap (δ twin +5.16 / +4.89; **N3 grew it to +6.17 / +6.31**) | **+3.98** | **+3.76** | **pass** |
+
+The second one is the gate N3 FAILED. Predicting the specific force alone moved the class bias but widened
+the heavy − 737 speed gap; with the vertical channel closed the same longitudinal head narrows it.
+
+### 15.2 Against the same-code twins
+
+| KRDU val, 1404 flights | N7 1337 | N7 2024 | δ twin 1337 | δ twin 2024 | n_x 1337 | n_x 2024 |
+|---|---|---|---|---|---|---|
+| ADE pooled | **1173** | **1182** | 1325 | 1295 | 1268 | 1222 |
+| ADE straight-in | **341** | **351** | 444 | 446 | 437 | 412 |
+| ADE vectored | **2638** | **2646** | 2880 | 2793 | 2772 | 2686 |
+| ADE established | **322** | **329** | 420 | 420 | — | — |
+| FDE p50 straight-in | **543** | **559** | 647 | 663 | 887 | 885 |
+| FDE p50 vectored | 2769 | 2661 | **2144** | **1957** | 1872 | 1809 |
+| duration MAE pooled (s) | 25.8 | 26.1 | 25.5 | 25.4 | 26.2 | 25.7 |
+| paired ADE vs its twin, arm better | **70.2 %** (−92 m) | **69.2 %** (−91 m) | — | — | 54 % | 59 % |
+| flyability Δ vs observed, fully | **−0.007** | **−0.010** | −0.980 | −0.982 | −0.634 | −0.724 |
+
+- **Pooled ADE is 152 / 113 m better than the δ twin** — at or beyond the control path's ~125 m seed line on
+  one seed and just inside it on the other, in the same direction on both, with 70 / 69 % of flights better
+  paired.
+- **The straight-in FDE veto that killed N3 is now a 104 m WIN on both seeds**, and read with its split
+  (§7.5.5) it is a win on both components: along-track −283 / −237 m against the twin's −294 / −305, and
+  |vertical| 28 / 27 m against 127 / 139.
+- **Flyability is the headline:** 97.7 / 97.4 % of predictions fully flyable against the observed tracks'
+  98.4 %. The δ twin is at 0.4 / 0.2 %, the n_x arms at 35 / 28 %. A rollout whose vertical channel is a
+  closed loop stays inside the envelope; one that integrates a load command does not.
+
+### 15.3 The one regression: the vectored endpoint
+
+`FDE p50` on the vectored stratum is **2769 / 2661 m against the twin's 2144 / 1957** (+625 / +704), on both
+seeds, while vectored ADE is 242 / 147 m BETTER. Decomposed at the true final time (seed 1337, 449 vectored
+flights):
+
+| | N7 | δ twin |
+|---|---|---|
+| along-track p50 | −1136 m | −1217 m |
+| \|vertical\| p50 | 134 m | 186 m |
+| share of Σ FDE² along / cross / vertical | 0.54 / **0.46** / 0.00 | 0.76 / **0.23** / 0.00 |
+
+So the regression is **cross-track**, and the arm is better along-track and vertically. The obvious
+explanation — that tying the load to bank by coordination costs turn authority — is **measured and does not
+hold**: the turn-rate distributions match (|ψ̇| p95 1.43 against 1.50 °/s) and the arm banks slightly MORE
+(|bank| command p95 16.0° against 13.6°) at a lower resolved load. Where the cross-track error comes from is
+not identified. It is the stratum both laws are worst at, and it is the open item this campaign leaves.
+
+### 15.4 Reading
+
+- **The design's premise was right:** §7.5 diagnosed an open-loop double integrator in the vertical channel
+  and predicted that a target that does not accumulate that way would fix the final descent. It did, and by
+  about the margin §13.3's amplification measurement implied.
+- **The break-even was honest:** §13.4 pre-registered 0.11° as the accuracy the head would need, and the
+  head landed at 0.088 / 0.091° — inside, but not by much. Had it come in at 0.2° the contract would have
+  bought nothing, and the measurement said so in advance.
+- **No procedure enters the law.** The glidepath is not in the rollout, in the loss or in the head's inputs;
+  the profile is the model's own prediction (the user's rule, 2026-09-16, §7.5.6).
+- **Adoption is the user's call.** What the evidence supports: the specific force as the longitudinal
+  contract AND the path angle as the vertical one, together — the longitudinal change alone tripped a veto
+  (§7.3), and the vertical change is what turned it into a win.

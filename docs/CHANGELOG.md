@@ -4,6 +4,26 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-16 — ts_transformer: the path-angle contract RAN and passes every pre-registered gate (N7′, both seeds)
+
+Campaign `sf_n7` (KRDU, two seeds, same split and code as the δ twins), design §15.
+- **The pre-registered break-even holds:** the head's per-flight γ* bias is 0.088 / 0.091° against the
+  0.11° §13.4 fixed in advance.
+- **The diagnosed defect is gone:** the stall-bound share of the last 5–1 km falls from 33 / 45 % (n_x) and
+  64 / 68 % (δ) to **1 %**; the last-km height error from +39 / +54 m to +6 / +3 m; the end |vertical| from
+  77 / 90 m to 27 / 28 m.
+- **The veto that killed N3 becomes a win:** straight-in FDE p50 543 / 559 m against the δ twin's 647 / 663,
+  better on BOTH components of the along/vertical split.
+- **Pooled ADE 1173 / 1182 m against 1325 / 1295**, with 70 / 69 % of flights better paired.
+- **Fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %** (observed tracks: 98.4 %).
+- Both N3 gates pass as well — the per-class n_x bias sits at the truth's own spread AND the heavy − 737
+  speed gap narrows, which the specific force alone had widened.
+- **One regression:** the vectored endpoint, FDE p50 +625 / +704 m. It decomposes as cross-track (vectored
+  ADE is 242 / 147 m better, and the vertical component is better too), and the obvious explanation —
+  coordination costing turn authority — is measured not to be the cause.
+- Adoption is the user's call; the evidence supports the PAIR (specific force longitudinally, path angle
+  vertically), not either half alone.
+
 ### 2026-09-16 — ts_transformer: the path-angle vertical contract, built (N7′ P1+P2, branch `sf-n7`)
 
 A fourth `control_thrust_parameterization`, **`specific-force+path-angle`** (design §14): the control head's

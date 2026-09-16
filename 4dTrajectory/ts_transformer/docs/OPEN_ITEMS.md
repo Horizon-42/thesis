@@ -82,7 +82,15 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
     load factor — now refused; six tests rewritten because the reviewer showed they passed vacuously.
   - Defaults bit-identical; the 247-history census is unchanged in name, slug and parameter rows;
     ts + `aerodynamic_model` 1350 passed; a 2-epoch smoke on real KRDU data completed the chain.
-  - Campaign `sf_n7` (`N7_path_angle`, `N7_path_angle_s2024`) launched 2026-09-16 01:31 UTC at `87497be`.
+  - **Campaign `sf_n7` RAN 2026-09-16 01:31–03:30 UTC at `87497be` and PASSES EVERY GATE ON BOTH SEEDS
+    (design §15).** γ* bias 0.088 / 0.091° (gate 0.11°); stall-bound share 33/45 % → **1 %**; last-km height
+    +39/+54 m → **+6/+3 m**; straight-in FDE p50 **543 / 559** against the δ twin's 647 / 663, a win on both
+    components of the split; pooled ADE **1173 / 1182** against 1325 / 1295 (70/69 % of flights better
+    paired); **fully flyable 97.7 / 97.4 % against 0.4 / 0.2 %**; and both N3 gates pass, the heavy − 737
+    speed gap included. **One regression:** the vectored endpoint (FDE p50 +625 / +704 m), cross-track and
+    unexplained — turn authority is measured not to be the cause (§15.3).
+  - **Adoption is the user's call**, and what the evidence supports is the PAIR: the specific force
+    longitudinally AND the path angle vertically. The longitudinal change alone tripped a veto (§7.3).
   - Gates (§14.8, pre-registered): the head's per-flight γ* bias ≤ **0.11°**; the stall-bound share and that
     group's 1.0–1.1 km along-track lag fall; straight-in FDE read WITH its along/vertical split; the
     per-class n_x bias stays at the truth's spread. Veto: pooled ADE beyond the ~125 m seed line.
