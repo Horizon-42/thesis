@@ -797,3 +797,29 @@ def test_a_term_the_objective_does_not_build_is_refused_not_ignored(field):
     with pytest.raises(ValueError, match="only built by"):
         _config(control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE, **{field: 1.0})
     _config(control_state_objective=CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE)   # zero is fine
+
+
+def test_an_anchor_without_an_observed_remainder_supervises_no_segment():
+    """Two-tier T0(c), 2026-09-16: at a common anchor late in a short track the anchor can be
+    the last or second-last observed sample; the imitation target's inversion needs three
+    states and killed the campaign's first build. That anchor is the docstring's all-zero
+    case — no segment supervised — not a refusal."""
+    from ts_transformer.outputs.control.supervision import reference_control_supervision
+    from ts_transformer.outputs.dynamics.inverse import MINIMUM_INVERSE_STATES
+
+    config = _config(control_imitation_loss_weight=64.0)
+    series, _report = build_series(
+        synthetic_arrivals(AIRPORT, RUNWAY, n_flights=1, seed=3), config, airport=AIRPORT
+    )
+    item = series[0]
+    for remainder in range(1, MINIMUM_INVERSE_STATES):
+        anchor = item.n_samples - remainder
+        out = reference_control_supervision(
+            item, anchor, config, total_duration_s=10.0, last_measured_time_s=0.0,
+        )
+        assert out["reference_controls"].shape == (config.n_segments, 3)
+        assert np.all(out["reference_control_weight"] == 0.0)
+    # three states from the anchor still invert
+    anchor = item.n_samples - MINIMUM_INVERSE_STATES
+    out = reference_control_supervision(item, anchor, config, total_duration_s=10.0, last_measured_time_s=4.0)
+    assert out["reference_control_weight"].sum() > 0.0

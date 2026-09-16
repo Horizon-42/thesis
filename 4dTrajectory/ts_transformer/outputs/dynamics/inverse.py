@@ -70,6 +70,10 @@ class InvertedControls:
         }
 
 
+#: The fewest observed states an inversion differentiates (a second-order difference).
+MINIMUM_INVERSE_STATES = 3
+
+
 def _drag_force(
     altitude_m: np.ndarray,
     speed_mps: np.ndarray,
@@ -163,8 +167,8 @@ def actual_controls(
     times = np.asarray(times_s, dtype=np.float64)
     if states.ndim != 2 or states.shape[1] != len(STATE_COLUMNS):
         raise ValueError(f"states must be [M,{len(STATE_COLUMNS)}]")
-    if times.shape != (len(states),) or len(times) < 3:
-        raise ValueError("times must align with at least three states")
+    if times.shape != (len(states),) or len(times) < MINIMUM_INVERSE_STATES:
+        raise ValueError(f"times must align with at least {MINIMUM_INVERSE_STATES} states")
     if not np.all(np.diff(times) > 0.0):
         raise ValueError("reference times must be strictly increasing")
     if np.asarray(aero_params).shape != (6,):

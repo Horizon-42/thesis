@@ -17,6 +17,10 @@
     "A0_random_hr8_tv1_grid": "A1：p180 臂改用 anchor-grid-common-grid-ade 选 checkpoint（L-1 与 12/8/6 km 锚点集 ADE 均值），代替只看 L-1 的指标；其最佳轮次回答「是不是选点指标的问题」。",
     "A0b_lr_objective": "A0.b(i)：grid 臂只改一处——ReduceLROnPlateau 改看验证 objective，不再挂在停滞的选点指标上被持续减半；读 L-1/12 km 锚点集是否不再退化、最佳轮是否后移。",
     "A0b_lr_objective_path_uniform": "A0.b(ii)：再把锚点抽样从按时间均匀（偏向近跑道）改为按剩余路程均匀（remaining-path-uniform）；与上一臂配对，区分 LR 塌缩与锚点偏斜两种机制。"
+   },
+   "variants": {
+    "A0b_lr_objective_path_uniform@chain-60s": "两重 Transformer T0(b)：不重训，每 60 s 在自己的 rollout 上再问一次（开环链式，无新观测），量误差累积系数 L；对照同一 checkpoint 的一次成形。结论：链式不产生信息，雷达引导整段 ADE 变差（§10.4）。",
+    "A0b_lr_objective_path_uniform@chain-30s": "两重 Transformer T0(b)：同上，每 30 s 再问一次（10 次），看再问变密是否更糟（§10.4）。"
    }
   },
   "anytime_a0b_records_20260908": {
@@ -140,6 +144,10 @@
     "L1_dense32": "N=32、稠密 fixed-dt 监督、无模仿与速度项（交付候选）；对照 A_control_v3 分层读两类指标，bank skill 必读（2026-08 的坡度摆动可能复现）。",
     "L1_dense64": "N=64、稠密监督、无教师；与 L1_dense32 对比隔离宽度。",
     "L1_native32": "N=32、沿用 simple-v3 自身监督（native 段端点、true-time-position、模仿 64）；在旧监督下对照 A_control_v3（N=64）隔离宽度，此后成为 native32 基座。"
+   },
+   "variants": {
+    "L1_native32@chain-60s": "两重 Transformer T0(b)：不重训，每 60 s 在自己的 rollout 上再问一次（开环链式，无新观测），量误差累积系数 L；对照同一 checkpoint 的一次成形。结论：链式不产生信息，雷达引导整段 ADE 变差（§10.4）。",
+    "L1_native32@chain-30s": "两重 Transformer T0(b)：同上，每 30 s 再问一次（10 次），看再问变密是否更糟（§10.4）。"
    }
   },
   "l1b_full_20260907": {

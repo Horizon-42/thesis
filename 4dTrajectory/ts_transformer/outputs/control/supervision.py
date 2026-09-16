@@ -14,7 +14,7 @@ from ts_transformer.config import CTA_CONDITIONING_GIVEN, TSConfig
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays, probe_final_approach
 from ts_transformer.outputs.conditioning import condition_vector
-from ts_transformer.outputs.dynamics.inverse import segment_controls
+from ts_transformer.outputs.dynamics.inverse import MINIMUM_INVERSE_STATES, segment_controls
 from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 
 
@@ -55,6 +55,17 @@ def reference_control_supervision(
     imitation" (review C-17). Under the default 60 s future floor no training anchor
     reaches it.
     """
+    n_segments = int(config.n_segments)
+    if series.n_samples - anchor < MINIMUM_INVERSE_STATES:
+        # The all-zero case above, reached before the inversion can run: from an anchor on
+        # the flight's last or second-last observed sample there is no measured velocity to
+        # differentiate, so no segment is supervised. Never at L-1 on the stored cohorts;
+        # two-tier T0(c)'s common anchor 119 put 38 KRDU train+val flights there and the
+        # inversion's own refusal killed the campaign's first build (2026-09-16).
+        return {
+            "reference_controls": np.zeros((n_segments, 3), dtype=np.float64),
+            "reference_control_weight": np.zeros(n_segments, dtype=np.float64),
+        }
     mass_kg = float(series.scenario.initial.m)
     anchor_time = float(series.times[anchor])
     times = series.times[anchor:] - anchor_time
@@ -67,7 +78,6 @@ def reference_control_supervision(
         dtype=np.float64,
     )
     aero = series.scenario.aero
-    n_segments = int(config.n_segments)
     inverted = segment_controls(
         states,
         times,

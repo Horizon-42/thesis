@@ -273,7 +273,7 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 | 步 | 状态 | 产物 / commit | 关键数字 |
 |---|---|---|---|
 | T0(a) | 完成（§3） | 8a03408 | — |
-| T0(b) 链式敏感度 L | runner 已提交 ec9323e（opus review ×2）；**全量读数排队中**（队列 agent：Δ 60 s / 30 s，native32 + A0b，写记录 + 身份检查 + lead_time_error） | `run_ts.py chain_sensitivity`；产物 `outputs/KRDU/experiments/two_tier_t0b_20260916/{chain_60s,chain_30s}` | 40 架冒烟：native32 雷达引导 120 s 处 e_chain/e_one p50 1288/1369，300 s 10651/2694（L lsq 1.50）；A0b L 0.5–0.9（冒烟，不作数） |
+| T0(b) 链式敏感度 L | **完成**（§10.4）：开环链式在两臂上都不赢；native32 的累积主要是锚点分布外 | ec9323e；`outputs/KRDU/experiments/two_tier_t0b_20260916/{chain_60s,chain_30s,identity_check.json,lead_time_error.*}` | 雷达引导整段 ADE：native32 一次成形 2870 → 链 60 s 9893 / 30 s 11930；A0b 3839 → 5585；L：native32 1.2–1.7，A0b 0.5–0.95 |
 | T0(c) 长历史信息 | `anchor_floor_index` 已建（opus review：4 个 bug 修正后复核通过，见 commit）；6 臂声明 `docs/experiments/t0c_history_floor_arms.json` + intents；**待队列 agent 启动** | campaign `outputs/KRDU/experiments/two_tier_t0c_20260916` | 三臂共同 cohort 1371（KRDU val） |
 | T1 学习型第一层 | **设计定稿 §10.3**（滚动时域 + 计划 token + CTA given）；T1.1 开建（`outputs/control/plan_token.py` 已写，`SkeletonCache` 移到 `outputs/plan/skeleton.py`） | — | — |
 | T2 端到端 | 未开始 | — | — |
@@ -324,3 +324,35 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 5. **臂（T1a）**：`T1a_plan_p50_s1337`、`T1a_plan_p50_s2024`（门）、`T1a_plan_p0_s1337`（不遮，读风险 2 的"过度依赖"）。~70 min × 3 GPU。
 
 **实施步骤**（每步 opus review → 提交）：T1.1 配置轴 + token + 上下文行 / forecast / probe 键一致 + 测试；T1.2 `tracker_lockstep` runner（把链式共用件移到一处）+ 测试；T1.3 arms + intents → 启动 → 读 G1。
+
+### 10.4 T0(b) 结果（2026-09-16，KRDU val 1404 架，队列 agent 于 runs worktree @ ec9323e 运行）
+
+产物 `4dTrajectory/outputs/KRDU/experiments/two_tier_t0b_20260916/`：`chain_60s/`、`chain_30s/`（`chain_sensitivity.{txt,json}` + `records/<臂>/{oneshot,chain_*}`）、`identity_check.json`、`lead_time_error.{json,txt}`。耗时 2 min（Δ60）/ 3 min（Δ30），GPU。**身份检查**：native32 一次成形记录与存档 `L1_native32_pred_val` 逐航班 ADE/FDE/时长 |Δ| = 0（1404/1404）。
+
+整段 ADE 均值（`lead_time_error` 口径，全体 | 直线 | 雷达引导，m）：
+
+| 记录集 | 全体 | 直线 | 雷达引导 |
+|---|---:|---:|---:|
+| native32 一次成形 | 1322 | 445 | 2870 |
+| native32 链 Δ60（5 次再问） | 3840 | 485 | **9893** |
+| native32 链 Δ30（10 次再问） | 4563 | 488 | **11930** |
+| A0b 一次成形 | 1782 | 628 | 3839 |
+| A0b 链 Δ60 | 2404 | 633 | **5585** |
+
+位移 p50（m），雷达引导，Δ60：
+
+| 提前量 | native32 一次 / 链 / ε | L 中位 / lsq | A0b 一次 / 链 / ε | L 中位 / lsq |
+|---:|---|---|---|---|
+| 60 s | 632 / 632 / 632 | — | 1995 / 1995 / 1995 | — |
+| 120 s | 1887 / 1930 / 779 | 1.69 / 1.71 | 2027 / 2998 / 2028 | 0.49 / 0.53 |
+| 180 s | 2497 / 3605 / 1200 | 1.26 / 1.27 | 3602 / 4886 / 2071 | 0.92 / 0.95 |
+| 300 s | 3658 / 11257 / 1392 | 1.33 / 1.24 | 5605 / 5740 / 1472 | 0.75 / 0.85 |
+
+Δ30 雷达引导（native32）：30 s 148 · 60 s 605（ε 159，L 2.81/2.33）· 120 s 2917（ε 185）· 300 s 14753（ε 313）。直线进近两臂链式只输 30–70 m 整段 ADE。
+
+读法：
+
+1. **开环链式不产生信息，两臂都输**（§4.2 的预期）。native32 的 L > 1（1.2–2.8）且随询问变密更糟：它只在 L−1 训练，链上的每次再问都在没见过的锚点上，又喂自己平滑的历史——两个分布外叠加。
+2. **随机锚点训练把 L 压到 1 以下**（A0b 0.5–0.95：模型对偏离的历史有收缩，雷达引导链/一次成形在 300 s 处 0.89–1.22，而 native32 3.0–4.2）——所以累积主要是**锚点分布外**，不是"自己的历史"本身；但 A0b 自己的短时误差大（60 s 处雷达引导 p50 1995 m 对 native32 632），链式整体仍输。
+3. **协议 B 的 ε 很小**：native32 在真实历史上逐 30 s 再锚，30 s 提前量的位移 p50 雷达引导 148–313 m——"再问能降误差"只在有**新观测**时成立。
+4. **对 T1 的决定（预注册读法 §10.1）**：native32 触发"L_med > 1.05 且 120 s 处链式更差"。T1a 的设计已经用随机锚点训练（A0b 显示这一项把 L 压到 1 以下）且每次询问都重新给真值计划 token（外部信息，抵消漂移），所以**T1a 按原设计先建**；若 T1a 在 lockstep 里漂移（每步 e(30 s) 相对滚动真值上升），T1c（离轨状态上的时间平移真值目标）升为必做。
