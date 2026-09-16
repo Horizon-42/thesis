@@ -16,7 +16,7 @@ import torch
 
 from ts_transformer.geometry.arc_length_geometry import arc_length_geometry_metrics, arc_length_velocity_metrics
 from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
-from ts_transformer.config import HORIZON_NORMALIZED, TSConfig, default_anchor
+from ts_transformer.config import HORIZON_NORMALIZED, TSConfig, fixed_anchor_label
 from ts_transformer.data.dataset import FlightSeries, Normalizer
 from ts_transformer.geometry.metrics import signed_spread
 from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
@@ -635,7 +635,7 @@ def fixed_anchor_common_grid_report_metrics(
         predicted_arrival - truth[:, -1, list(POSITION_IDX)], axis=-1
     )
     return {
-        "anchor": FIXED_ANCHOR_LABEL if anchor == default_anchor(config) else f"fixed index {anchor}",
+        "anchor": fixed_anchor_label(config, anchor),
         "metric_grid": "common true physical-time grid",
         "points": points,
         "flights": len(series),

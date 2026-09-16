@@ -124,7 +124,7 @@ def common_truth(
 def history_tensor(
     series: Sequence[FlightSeries], config: TSConfig, normalizer: Any
 ) -> np.ndarray:
-    anchor = config.seq_len - 1
+    anchor = default_anchor(config)
     return np.stack([
         normalizer.encode(item.values[anchor - config.seq_len + 1 : anchor + 1])
         for item in series
@@ -188,7 +188,7 @@ def batch_dynamics_tensors(
     series: Sequence[FlightSeries], config: TSConfig, device: torch.device
 ) -> dict[str, torch.Tensor]:
     """Build the exact per-flight conditioning/rollout tensors used by training."""
-    anchor = config.seq_len - 1
+    anchor = default_anchor(config)
     rows = [dynamics_arrays(item, anchor) for item in series]
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
@@ -338,7 +338,7 @@ def run_deterministic(
 ) -> dict[str, Any]:
     run.model.to(device).eval()
     histories = history_tensor(series, run.config, run.normalizer)
-    anchors = np.stack([item.values[run.config.seq_len - 1] for item in series])
+    anchors = np.stack([item.values[default_anchor(run.config)] for item in series])
     common: list[np.ndarray] = []
     raw_values: list[np.ndarray] = []
     final_times: list[np.ndarray] = []
@@ -390,7 +390,7 @@ def run_deterministic(
     )
     control_diagnostics = None
     if raw_controls:
-        dynamics = [dynamics_arrays(item, run.config.seq_len - 1) for item in series]
+        dynamics = [dynamics_arrays(item, default_anchor(run.config)) for item in series]
         control_diagnostics = control_distribution_statistics(
             np.concatenate(raw_controls),
             np.concatenate(raw_control_durations),
@@ -432,7 +432,7 @@ def mc_dropout_coverage(
     run.model.to(device)
     enable_mc_dropout(run.model)
     histories = history_tensor(series, run.config, run.normalizer)
-    anchors = np.stack([item.values[run.config.seq_len - 1] for item in series])
+    anchors = np.stack([item.values[default_anchor(run.config)] for item in series])
     sums = {k: {"minade": 0.0, "minfde": 0.0} for k in k_values}
     per_flight_minade = np.empty(len(series), dtype=np.float64)
     per_flight_minfde = np.empty(len(series), dtype=np.float64)
@@ -488,7 +488,7 @@ def anchor_descriptor(
 ) -> np.ndarray:
     """Five history snapshots, retaining absolute threshold-relative state."""
     lags = np.unique(np.linspace(0, config.seq_len - 1, 5).round().astype(int))
-    anchor = config.seq_len - 1
+    anchor = default_anchor(config)
     rows = []
     for item in series:
         encoded = normalizer.encode(item.values[anchor - lags])
@@ -1033,6 +1033,8 @@ def comparison_identity_error(reference: LoadedRun, candidate: LoadedRun) -> str
     """Return why two checkpoints cannot share a validation-only report."""
     for field in (
         "seq_len",
+        # the fixed anchor is max(L-1, this): same L, another floor, another truth
+        "anchor_floor_index",
         "dt_s",
         "seed",
         "coordinate_frame",

@@ -38,6 +38,7 @@ from ts_transformer.config import (
     LR_PLATEAU_METRIC_SELECTION,
     TSConfig,
     default_anchor,
+    fixed_anchor_label,
 )
 from ts_transformer.data.data_provenance import (
     ARRIVAL_DATA_PROVENANCE_SCHEMA,
@@ -303,7 +304,7 @@ def evaluate_fit_splits(
         "evaluation_contract": {
             "model_mode": "eval",
             "dropout": "disabled",
-            "anchor": "fixed L-1",
+            "anchor": fixed_anchor_label(config),
             "batch_order": "sequential (shuffle disabled)",
             "splits": ["train", "val"],
             "metric_grid": (
@@ -391,7 +392,7 @@ def usable_series(
         )) > 0
     ]
     if len(usable) < len(series) and verbose:
-        need = config.seq_len + 1
+        need = fixed_anchor_index(config, minimum_anchor_index) + 2
         print(f"  excluded   {len(series) - len(usable)} flight(s) too short to yield one "
               f"training window (need {need} samples = {need * config.dt_s:.0f}s)")
     return usable
@@ -424,7 +425,7 @@ def filter_training_cohort(
             })
     audit = {
         "scope": "train only after by-flight split",
-        "anchor": "fixed L-1" if anchor == default_anchor(config) else f"fixed index {anchor}",
+        "anchor": fixed_anchor_label(config, anchor),
         "minimum_future_s": minimum,
         "input_flights": len(series),
         "retained_flights": len(retained),
@@ -661,7 +662,7 @@ def describe_session(session: TrainingSession) -> None:
     )
     print(f"  flights    train {session.train_flights} / val {session.val_flights}")
     print(f"  windows    train {len(train_set)} / val {val_window_count} "
-          "(validation anchor: fixed L-1)")
+          f"(validation anchor: {fixed_anchor_label(config, fixed_anchor_index(config, minimum_anchor_index))})")
     print(f"  anchors    {train_set.anchor_description}")
     if config.random_train_anchor:
         print(
@@ -680,7 +681,8 @@ def describe_session(session: TrainingSession) -> None:
             "store no such anchor and are reserved at their earliest admissible one"
         )
     print(
-        f"  selection  {config.checkpoint_selection_metric} on fixed L-1 validation"
+        f"  selection  {config.checkpoint_selection_metric} on "
+        f"{fixed_anchor_label(config, fixed_anchor_index(config, minimum_anchor_index))} validation"
     )
     if anchor_grid_plans is not None:
         coverage = anchor_grid_coverage(anchor_grid_plans)
@@ -693,9 +695,10 @@ def describe_session(session: TrainingSession) -> None:
                 item["bin"] for item in anchor_grid_plans.dropped
             ) + f" under {anchor_grid_plans.minimum_coverage:.0%} coverage"
         ))
-    if minimum_anchor_index is not None:
-        print(f"  anchor     common minimum index {minimum_anchor_index} "
-              f"({minimum_anchor_index * config.dt_s:.0f}s after track entry)")
+    if minimum_anchor_index is not None or config.anchor_floor_index:
+        common = fixed_anchor_index(config, minimum_anchor_index)
+        print(f"  anchor     common fixed index {common} "
+              f"({common * config.dt_s:.0f}s after track entry)")
     print(
         f"  sampling   one shuffled sample/flight; {flights_per_epoch} flight(s)/epoch; "
         "airport-macro loss weights"
@@ -1200,7 +1203,7 @@ def train(
         "validation_selection": {
             "metric": config.checkpoint_selection_metric,
             "best_value": fit.best_validation_selection,
-            "anchor": "fixed L-1",
+            "anchor": fixed_anchor_label(config),
             "common_grid_points": config.validation_common_grid_points,
         },
         "training_anchor_contract": training_anchor_contract,
@@ -1312,7 +1315,7 @@ def train(
         "validation_selection": {
             "metric": config.checkpoint_selection_metric,
             "best_value": fit.best_validation_selection,
-            "anchor": "fixed L-1",
+            "anchor": fixed_anchor_label(config),
             "common_grid_points": config.validation_common_grid_points,
         },
         "training_anchor_contract": training_anchor_contract,

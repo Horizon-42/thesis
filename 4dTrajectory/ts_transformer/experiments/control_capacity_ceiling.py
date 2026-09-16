@@ -29,7 +29,7 @@ import torch  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 import ts_transformer.experiments.predictability_report as common_report  # noqa: E402
-from ts_transformer.config import PREDICTION_CONTROL  # noqa: E402
+from ts_transformer.config import PREDICTION_CONTROL, default_anchor  # noqa: E402
 from ts_transformer.outputs.dynamics.rollout import rollout_control_endpoints  # noqa: E402
 from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
@@ -219,7 +219,7 @@ def _common_metrics(
     progress: np.ndarray,
     config: Any,
 ) -> tuple[np.ndarray, np.ndarray]:
-    anchors = np.stack([item.values[config.seq_len - 1] for item in series])
+    anchors = np.stack([item.values[default_anchor(config)] for item in series])
     sampled = []
     for index in range(len(series)):
         row, _capped = common_report.resample_prediction(

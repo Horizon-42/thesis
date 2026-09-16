@@ -15,8 +15,8 @@
 | 新测量 | `run_ts.py lead_time_error`（`experiments/lead_time_error.py`，`tests/test_lead_time_error.py`）：**误差随提前量**的曲线，逐分层。产物 `4dTrajectory/outputs/KRDU/experiments/two_tier_feasibility_20260916/lead_time_error.{json,txt}`（native32、L3_cta、state_A_threshold_enu 三臂，KRDU val）。 |
 | 关键数字（KRDU val，native32，雷达引导 497 架，位移 p50） | 10 s 26 m · 30 s 148 · 60 s 632 · 120 s 1884 · 300 s 3659；ADE[0,60 s] 250 m（均值）；整段 2870。增长指数 α（p50 的 log-log 斜率）10→60 s **1.77**、60→120 s 1.58；直线进近 1.55 / 1.29。 |
 | 文献 | 仓库 `docs/literature/hierarchical_prediction/`（32 篇 PDF，README 逐篇笔记 + `download.sh`），四簇：分层航迹预测、多尺度/段 token 时序 transformer、迭代 vs 直接多步预测的误差累积理论、多机图/意图输入的航空论文。§5。三句话：分层买的是模态覆盖不是点误差（MTR、QCNet）；段 token 只在长时域付钱、短时域更差（Crossformer）；本包的 control 路径在理论上是"中间预测器"，两种设定下都不是最好也不是最差（Somalwar 2026），go/no-go 取决于短时模型是否错设——动力学层没错设，意图层错设。 |
-| 决定状态 | 报告已写；**未启动任何训练**。等用户对 §7 的 T0(b)(c) 与 T1 表态。每个训练 campaign 启动前先写 `docs/experiments/intents.json` 条目（仓库规则）。 |
-| commit | 未提交（runner + 测试 + 本文 + 文献目录在工作树上）。 |
+| 决定状态 | 用户 2026-09-16："按照计划开始开发和试验，每完成一个节点要 review（opus agent）"。**执行记录与最新状态见 §十**（T0(b) → T0(c) → T1 → T2，分支 `dev-two-tier`，worktree `.claude/worktrees/two-tier`，基于 `dev-two-tier-feasibility` 6e8a6a2；大改动，用户合并）。每个训练 campaign 启动前先写 `docs/experiments/intents.json` 条目（仓库规则）。 |
+| commit | 报告 6e8a6a2、runner 8a03408（分支 `dev-two-tier-feasibility`）；之后的提交见 §十。 |
 
 ---
 
@@ -263,3 +263,64 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 | 误差随提前量 e(h)、α | `run_ts.py lead_time_error`，`p50_log_log_slope` |
 | 意图上界 | Phase 0 `intent_conditioning=truth-*`（FROZEN，只作 oracle） |
 | 图层前置 oracle | 新臂：前机真值计划 token 作 `intent_conditioning` 类输入 |
+
+## 十、执行记录（2026-09-16 起；压缩 context 后从这里继续）
+
+分支 `dev-two-tier`（worktree `.claude/worktrees/two-tier`，数据目录是指向主树的软链接；大改动，**用户合并**，完成后报告能否 `git merge --ff-only`）。每个节点：写代码 → 单测 → opus review（只审代码）→ 修 → 提交 → 实验（opus 队列 agent 串行跑，按 PID 看）→ 读数 → 记录 → 发布（带 intent）。实验原则：只用 val，不碰 test；单机场 KRDU（均衡采样器未被行使，读数里写明）；正式 campaign 从**单独的 runs worktree**（固定在已提交的 commit）启动，开发 worktree 可以脏。
+
+### 10.0 状态表
+
+| 步 | 状态 | 产物 / commit | 关键数字 |
+|---|---|---|---|
+| T0(a) | 完成（§3） | 8a03408 | — |
+| T0(b) 链式敏感度 L | runner 已提交 ec9323e（opus review ×2）；**全量读数排队中**（队列 agent：Δ 60 s / 30 s，native32 + A0b，写记录 + 身份检查 + lead_time_error） | `run_ts.py chain_sensitivity`；产物 `outputs/KRDU/experiments/two_tier_t0b_20260916/{chain_60s,chain_30s}` | 40 架冒烟：native32 雷达引导 120 s 处 e_chain/e_one p50 1288/1369，300 s 10651/2694（L lsq 1.50）；A0b L 0.5–0.9（冒烟，不作数） |
+| T0(c) 长历史信息 | `anchor_floor_index` 已建（opus review：4 个 bug 修正后复核通过，见 commit）；6 臂声明 `docs/experiments/t0c_history_floor_arms.json` + intents；**待队列 agent 启动** | campaign `outputs/KRDU/experiments/two_tier_t0c_20260916` | 三臂共同 cohort 1371（KRDU val） |
+| T1 学习型第一层 | **设计定稿 §10.3**（滚动时域 + 计划 token + CTA given）；T1.1 开建（`outputs/control/plan_token.py` 已写，`SkeletonCache` 移到 `outputs/plan/skeleton.py`） | — | — |
+| T2 端到端 | 未开始 | — | — |
+| T3 | **按现有 harvest 不可建**（§10.2：10 分钟历史不存在） | — | — |
+| T4 | 未开始（前置 oracle） | — | — |
+
+### 10.1 T0(b) 设计：`run_ts.py chain_sensitivity`
+
+问题：§4.2 的链式界 `e_k ≤ ε + L·e_{k−1}` 在控制路径上 L 是多少，链式（开环，用自己的 rollout 续窗口再问）在 60 / 120 / … s 处比一次成形好还是差。
+
+- 臂：`native32`（`l1_lowdim_20260907/L1_native32`，固定 L−1 训练）+ `A0b_path_uniform`（`a0_random_20260907/A0b_lr_objective_path_uniform`，全锚点随机训练）。第二臂是必须的：native32 只在 L−1 训练，链上每次再问都在它**没见过的锚点**，L 会把"锚点分布外"与"自身历史漂移"混在一起；随机锚点臂只剩后者。
+- 每架航班（KRDU val，锚点 a₀ = L−1）三种预测，同一 checkpoint、同一前向代码（`forecast_approaches`）：
+  1. **一次成形**：a₀ 处预测（跑完后另行与存档 predict 目录逐航班比对，作身份检查）。
+  2. **链式**：第 k 段在锚点 a_k = a₀ + kΔ/dt 上，对"观测轨迹到 a₀ + 已飞的链式行（插到 2 s 网格）"组成的**滚动序列**再问（窗口、锚点状态、作动器初值都走模型自己的 predict 路径——作动器初值由滚动行反演，与训练时从观测回看反演同一规则），保留前 Δ 秒；最后一段整段保留。某段预测在 Δ 内结束（预测落地）则链在那里结束。
+  3. **真实历史再锚**（协议 B）：观测序列在 a_(k−1) 处预测，读它在提前量 Δ（即绝对 kΔ）处的位移 ε_k（锚点在观测序列上可用才有；k=1 就是一次成形）。
+- 读数（按 `strata_fixed_at_anchor` 在 a₀ 处分层，逐航班配对）：k = 1…links+1 的 kΔ 处 e_one、e_chain、ε_k 的 p50/均值与 n（最后一段的前 Δ 也计分）；L 的两个估计——配对中位数 `(e_chain(kΔ) − ε_k)/e_chain((k−1)Δ)` 与过原点最小二乘斜率；链/一次成形之比。`--write-records` 把一次成形与链式写成 predict 形状的目录（`python -m evaluation`、`lead_time_error`、发布器都能直接读）。
+- 默认 Δ = 60 s、K = 5 段；另跑 Δ = 30 s（lockstep 的再问周期）。
+- 读法（预注册）：L_med > 1.05 且链在 120 s 处 p50 比一次成形差 → T1 **必须**在滚动窗口表上训练（与 v5.2 在 plan 路径上的结论同向）；L_med ≤ 1 → 模型对自身历史漂移是收缩的，T1 的滚动窗口训练降为可选但仍保留（v5.2 的证据）。无论哪个结果都不改 T1 的结构，所以 T0(b) 不阻塞 T1 开发。
+
+### 10.2 T0(c) 修订：数据里没有 10 分钟历史
+
+测量（2026-09-16，KRDU val 1404 架，`usable_series` 在共同锚点 L−1 处）：序列时长 p10/p50/p90 = 256 / 296 / 636 s（到达切片从 25 km 起，首次接收中位只早 45 s）。
+
+| seq_len | 回看 | 共同锚点 | val 可用 |
+|---:|---:|---:|---:|
+| 60 | 118 s | 59 | 1404（100 %） |
+| 90 | 178 s | 89 | 1401 |
+| 120 | 238 s | 119 | **1382（98.4 %）**；按固定锚点的建序列规则（review 修正后，三臂共用）为 **1371（97.6 %）**，L=60/90/120 逐航班相同 |
+| 150 | 298 s | 149 | 701（49.9 %） |
+| 300 | 598 s | 299 | 250（17.8 %，全是长雷达引导） |
+
+所以 §7 的"10 min 段 token 变体"与 seq_len 300 在现有 harvest 上**做不了**（剩下的 18 % 是按结果挑出来的长航班，不是一个可比的 cohort）；T3 所说的"长历史"要先扩 harvest 的接收窗口（数据面改动，用户决定，记入 OPEN_ITEMS）。T0(c) 改为：
+
+- 臂：L ∈ {60, 90, 120} × 种子 {1337, 2024}，**共同锚点 119**（切片起点后 238 s），配方 = native32（`l1_lowdim_arms.json` 的 `L1_native32`：simple-v3 + N=32 + native 端点 + imitation 64 + velocity 0.003，lag 动力学）。6 臂 × ~65 min GPU。
+- 需要的代码：`TSConfig.anchor_floor_index`（默认 0；`default_anchor = max(seq_len − 1, floor)`，于是训练 cohort、固定锚点、predict、验证全部跟着走——`history_ablation` 已有的 `minimum_anchor_index` 管道只在 fit_model 内部，train/predict CLI 不传）；命名 `anchor-floor=`；把仍然手写 `seq_len - 1` 当"固定锚点"的 runner 改成读 `default_anchor`。
+- 门 G2（不变）：L=120 vs L=60 在共同锚点处雷达引导 ADE 配对改善 > 125 m，两个种子都过；L=90 给剂量方向。注意这是 238 s vs 118 s，不是 10 min vs 2 min。
+
+### 10.3 T1 设计（2026-09-16 定稿，未开建）：计划给定下的学习型跟踪器（协议 C）
+
+**问题**：给定真值计划（协议 C，读未来，oracle），学习型控制层每 30 s 在自己飞出的行上再问，能否把计划飞得比规则制导近——G1：雷达引导 ADE@L−1 < 1000 m、直线 < 200 m，两种子；完全可飞 ≥ 95 %；建立率 ≥ 规则制导的 88 %（`plan_guidance` 设计 §12.5：lockstep 1847 / 283 m，建立 87.9 % / 99.8 %；leg form 1492；整条真值路径 1159）。对照：L3_cta（一次成形、只给真值时长）雷达引导 1596 m——只给时长的一次成形已经比规则制导近，所以 G1 真正要证明的是"计划 token + 再问"再往下拿走 ≥ 600 m。
+
+**决定（在规则内自定，理由写明）**：
+
+1. **形态 = 滚动时域（receding），不是 §7 表里写的"固定 60 s、N₁ 段"头**。每次询问仍预测到入口的整段 32 段控制，但**只飞前 30 s**，然后在自己的滚动行上再问。理由：(a) 计划层给出剩余时间 T，用现成的 `cta_conditioning=given` 让 rollout 时长 = 计划的 T——这同时消掉了 duration head 的 ~125 s 地板（近跑道再问时它会把控制拉长，固定 60 s 头也要单独解决）；(b) 零改动 spine（数据集目标网格、目标函数、验证指标、记录契约都不动）；(c) 飞出去的部分就是用户提议的"短时控制"。固定 Δ 头留作 **T1b**：只有 T1a 没过 G1、且差在每次询问的前 30 s 跟踪（读每步 e(30 s) 对滚动真值）时才建。
+2. **计划 token**：plan 路径的目标向量在锚点处的读数（`outputs/plan/labels.targets_from_labels`，与 plan 头的标签同一定义）——14 个值按 `SCALES` 缩放、14 位有效掩码、"前方无定位点"标志、1 位"计划在场"标志，共 30 维，作为与 CTA token 并列的一个融合 token 进 `ControlFeatureModel`。新配置轴 `plan_conditioning ∈ {off, truth-next}`（名 `plan=truth-next`，读未来）与 `plan_conditioning_dropout`（名 `plan-drop=`；训练时逐样本以该概率把 token 置零、在场位 0——计划不可靠时退回窗口，§7 风险 2）。标签抽取实测 0.3 ms/锚点（KRDU val 1000 次），逐抽样现算，不缓存。
+3. **训练**：随机锚点（`remaining-path-uniform`，`l1-share 0.5`，A2b 的配方：heading-rate 8、bank TV 1、velocity 0.003，**无模仿项**——随机锚点 + 模仿是已知性能悬崖），`cta=given`，180 epoch 不早停（patience 180），选择指标 fixed-anchor common-grid ADE（anchor-grid 指标在 `cta=given` 下被拒）。**不先上滚动窗口表**：跟踪器在离开真值轨迹的状态上没有定义好的监督目标（plan 头的标签是"那里该下的指令"，控制层的标签是"从那里怎么飞"，真值不给）；先读 T1a 在 lockstep 里是否漂移，再决定 T1c（目标 = 最近真值行起的真值未来，时间平移）。
+4. **部署 / 读数** `run_ts.py tracker_lockstep`（T0(b) 链式机器的推广，共用 `rolled_series` / `cut_at_lead` / 位移定义）：从 L−1 起每 30 s 在滚动序列上再问；每次询问的 CTA 与计划 token 来自在 L−1 处建好、按时间顺序读取的 `TruthExpert`（`fly_lockstep` 的真值策略同一个对象）；飞前 30 s；在入口 on-final 过线处截断（`cut_at_threshold_crossing`）、或一次询问的预测在 30 s 内结束、或时间上限 1.5× 真值时长。变体（同一 checkpoint）：计划在场 / 计划遮掉（在场位 0）/ 一次成形（不再问）。写 predict 形状的记录 → `python -m evaluation`（可飞、建立）+ `lead_time_error`。
+5. **臂（T1a）**：`T1a_plan_p50_s1337`、`T1a_plan_p50_s2024`（门）、`T1a_plan_p0_s1337`（不遮，读风险 2 的"过度依赖"）。~70 min × 3 GPU。
+
+**实施步骤**（每步 opus review → 提交）：T1.1 配置轴 + token + 上下文行 / forecast / probe 键一致 + 测试；T1.2 `tracker_lockstep` runner（把链式共用件移到一处）+ 测试；T1.3 arms + intents → 启动 → 读 G1。

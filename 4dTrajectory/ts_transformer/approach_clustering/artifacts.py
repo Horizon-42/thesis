@@ -33,6 +33,7 @@ def write_clustering_artifacts(
     runway: str,
     manifest_path: str | Path,
     config: dict[str, Any],
+    anchor_index: int,
     feature_points: int,
     pca_components: int,
     cluster_seed: int,
@@ -67,7 +68,7 @@ def write_clustering_artifacts(
             "channels": ["e", "n"],
             "parameterization": "equal-horizontal-arc",
             "points": feature_points,
-            "anchor_index": config["seq_len"] - 1,
+            "anchor_index": int(anchor_index),
             "pca_components": pca_components,
         },
         "selection": {

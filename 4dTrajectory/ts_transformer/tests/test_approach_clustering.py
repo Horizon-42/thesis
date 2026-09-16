@@ -100,6 +100,7 @@ def test_clustering_artifact_preserves_zero_split_seed(tmp_path: Path) -> None:
         runway="30L",
         manifest_path=manifest,
         config={"seed": 1337, "split_seed": 0, "seq_len": 60},
+        anchor_index=59,
         feature_points=32,
         pca_components=2,
         cluster_seed=17,

@@ -476,6 +476,16 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--anchor-floor-index",
+        type=int,
+        default=None,
+        help=(
+            "a common fixed anchor: the fixed anchor is max(L-1, this index), so arms with "
+            "different --seq-len train and are judged at one anchor on one cohort "
+            "(default: 0, i.e. L-1)"
+        ),
+    )
+    parser.add_argument(
         "--random-train-anchor-min-future-s",
         type=float,
         default=None,
@@ -604,6 +614,7 @@ CLI_CONFIG_FIELDS = (
     "random_train_anchor_min_future_s",
     "random_train_anchor_sampling",
     "random_train_anchor_l1_share",
+    "anchor_floor_index",
     "checkpoint_selection_metric",
     "validation_common_grid_points",
 )

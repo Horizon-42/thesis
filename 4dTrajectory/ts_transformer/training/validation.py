@@ -49,6 +49,7 @@ from ts_transformer.data.dataset import (
     FlightSeries,
     Normalizer,
     TrajectoryWindows,
+    fixed_anchor_index,
     iter_batches,
 )
 from ts_transformer.training.fixed_anchor_validation import (
@@ -664,7 +665,9 @@ def build_anchor_grid_validation_plans(
                 target_m,
                 seq_len=dataset.config.seq_len,
                 min_future_s=DEFAULT_GRID_MIN_FUTURE_S,
-                minimum_anchor_index=minimum_anchor_index,
+                # the run's fixed anchor, config floor included (`fixed_anchor_index`): a
+                # bin before it is an anchor the window set cannot hold
+                minimum_anchor_index=fixed_anchor_index(dataset.config, minimum_anchor_index),
             )
             for airport, dataset in val_sets.items()
         }

@@ -160,7 +160,8 @@ def run_history_ablation(
     """Run outer-train-only CV over L while holding the anchor population fixed."""
     candidates_l = tuple(sorted(set(seq_lens)))
     maximum_l = max(candidates_l)
-    common_anchor_index = maximum_l - 1
+    # the longest lookback's L-1, or a later floor the base config carries
+    common_anchor_index = max(maximum_l - 1, base_config.anchor_floor_index)
     population_config = replace(base_config, seq_len=maximum_l)
     usable = usable_series(
         series,
@@ -315,7 +316,7 @@ def run_history_ablation(
         "common_anchor": {
             "index": common_anchor_index,
             "elapsed_s_after_entry": common_anchor_index * base_config.dt_s,
-            "defined_by": "max(seq_lens) - 1",
+            "defined_by": "max(max(seq_lens) - 1, anchor_floor_index)",
             "outer_train_window_count": reference_count,
             "outer_train_anchor_sha256": reference_digest,
         },

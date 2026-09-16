@@ -999,6 +999,7 @@ class CohortSpec:
     random_train_anchor_min_future_s: float
     random_train_anchor_sampling: str
     random_train_anchor_l1_share: float
+    anchor_floor_index: int
 
     def __post_init__(self) -> None:
         _require_member("coordinate_frame", self.coordinate_frame, COORDINATE_FRAMES)
@@ -1018,6 +1019,8 @@ class CohortSpec:
             raise ValueError("random_train_anchor_min_future_s must be non-negative")
         if self.training_cohort_min_future_s < 0.0:
             raise ValueError("training_cohort_min_future_s must be non-negative")
+        if self.anchor_floor_index < 0:
+            raise ValueError(f"anchor_floor_index is a sample index, got {self.anchor_floor_index!r}")
         if not 0.0 <= self.random_train_anchor_l1_share <= 1.0:
             raise ValueError(
                 "random_train_anchor_l1_share is a share of the per-flight draws and must "
@@ -2003,6 +2006,13 @@ class TSConfig:
     # 0 is the pure draw; a non-zero share needs `remaining-path-uniform`, so it can never
     # be the silent difference between two runs of the default policy.
     random_train_anchor_l1_share: float = 0.0
+    # A common FIXED anchor for arms whose lookbacks differ (two-tier T0(c), 2026-09-16):
+    # `default_anchor` is `max(L-1, anchor_floor_index)`, so the fixed anchor every window
+    # set, validation replay, cohort filter and `predict` reads moves to the floor together,
+    # and arms at L = 60 / 90 / 120 with the floor at 119 train and are judged on the SAME
+    # flights at the SAME anchor. 0 = L-1, every stored run. `run_ts.py history_ablation`'s
+    # `minimum_anchor_index` is the same floor passed at call time; this one is the run's own.
+    anchor_floor_index: int = 0
     # One formal development score: fixed-anchor, common true-physical-time, airport-macro
     # 3D ADE.  It is shared by CV, the LR scheduler, early stopping and checkpointing.
     checkpoint_selection_metric: str = CHECKPOINT_SELECTION_COMMON_GRID_ADE
@@ -2583,16 +2593,31 @@ def _check_view_partition() -> None:
 _check_view_partition()
 
 
-def default_anchor(config: TSConfig) -> int:
-    """Use the earliest anchor with a complete observed lookback.
-
-    It is `L-1`: the anchor every fixed-anchor arm trains at, the anchor every prediction
-    defaults to, and — since A2b — the anchor a random-anchor run reserves a share of its
-    draws for. It lives HERE rather than in `forecast` because `dataset` needs the same
-    index and `forecast` imports `dataset`; re-exported there so every existing call site
-    is unchanged.
-    """
+def lookback_anchor(config: TSConfig) -> int:
+    """The earliest anchor with a complete observed lookback: ``L-1``, what the label "L-1"
+    names wherever an artifact says which anchor it was taken at."""
     return config.seq_len - 1
+
+
+def fixed_anchor_label(config: TSConfig, anchor: int | None = None) -> str:
+    """What an artifact says about the anchor it was taken at (``anchor``, by default the
+    run's fixed one): ``fixed L-1`` where it IS L-1, ``fixed index N`` elsewhere — one
+    rendering, so a floored run's fit evaluation, checkpoint and cohort audit agree."""
+    anchor = default_anchor(config) if anchor is None else int(anchor)
+    return "fixed L-1" if anchor == lookback_anchor(config) else f"fixed index {anchor}"
+
+
+def default_anchor(config: TSConfig) -> int:
+    """The fixed anchor: the earliest with a complete lookback, or the run's common floor.
+
+    It is `L-1` unless `anchor_floor_index` sets a later one (two-tier T0(c): arms with
+    different lookbacks judged at one anchor): the anchor every fixed-anchor arm trains at,
+    the anchor every prediction defaults to, and — since A2b — the anchor a random-anchor
+    run reserves a share of its draws for. It lives HERE rather than in `forecast` because
+    `dataset` needs the same index and `forecast` imports `dataset`; re-exported there so
+    every existing call site is unchanged.
+    """
+    return max(lookback_anchor(config), config.anchor_floor_index)
 
 
 def control_recipe(config: TSConfig) -> dict[str, Any]:

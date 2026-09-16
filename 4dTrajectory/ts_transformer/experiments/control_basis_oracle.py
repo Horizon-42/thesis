@@ -79,6 +79,7 @@ from ts_transformer.config import (  # noqa: E402
     INTENT_CONDITIONING_NONE,
     PREDICTION_CONTROL,
     TSConfig,
+    default_anchor,
 )
 from ts_transformer.outputs.control.loss.fixed_dt import fixed_dt_control_state_loss  # noqa: E402
 from ts_transformer.outputs.control.basis_fit import (  # noqa: E402
@@ -554,7 +555,7 @@ def run_width_study(
     series, series_keys, manifest = build_cohort_series(
         cohort_keys, compact_of, airport, base_config
     )
-    anchor = base_config.seq_len - 1
+    anchor = default_anchor(base_config)
     normalizer = Normalizer.fit(series, balance_airports_and_flights=True)
     print(f"{airport}: {len(series)} flights of {coverage['scored_rows']} scored, "
           f"anchor {anchor}, device {device}; N={segment_counts} x duration={duration_modes}",
@@ -750,7 +751,7 @@ def run_teacher_fit(
     # The RESOLVED device, so the stored config says where the fit ran rather than "auto"
     # (`config_sha256` excludes it either way — see _CONFIG_DIGEST_EXCLUDES).
     config = teacher_config(checkpoint_config, str(device))
-    anchor = config.seq_len - 1
+    anchor = default_anchor(config)
     model = model.to(device)
     split_of = {
         key: split for split in splits for key in payload["split"][split]

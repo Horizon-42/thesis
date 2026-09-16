@@ -21,7 +21,7 @@ import torch  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 import ts_transformer.experiments.predictability_report as common_report  # noqa: E402
-from ts_transformer.config import PREDICTION_CONTROL  # noqa: E402
+from ts_transformer.config import PREDICTION_CONTROL, default_anchor  # noqa: E402
 from ts_transformer.outputs.dynamics.rollout import rollout_control_endpoints  # noqa: E402
 from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
@@ -101,7 +101,7 @@ def evaluate_clock_variants(
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     run.model.to(device).eval()
     histories = common_report.history_tensor(series, run.config, run.normalizer)
-    anchors = np.stack([item.values[run.config.seq_len - 1] for item in series])
+    anchors = np.stack([item.values[default_anchor(run.config)] for item in series])
     predictions: dict[str, list[np.ndarray]] = {label: [] for label in VARIANT_LABELS}
     final_times: dict[str, list[np.ndarray]] = {label: [] for label in VARIANT_LABELS}
 

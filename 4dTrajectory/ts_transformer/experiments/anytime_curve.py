@@ -3,8 +3,9 @@
 
 Anytime-prediction design
 (`4dTrajectory/ts_transformer/docs/2026-09-07_anytime_prediction_and_calibrated_eta_design.zh.md`)
-§二 2.1–2.4. Every evaluation in this package anchors at L−1 (`seq_len − 1`, 120 s after the
-25 km slice starts), which is the moment the ego history knows LEAST about where the
+§二 2.1–2.4. Every evaluation in this package anchors at the fixed anchor (`default_anchor`:
+L−1, `seq_len − 1`, 120 s after the 25 km slice starts, unless a run carries an
+`anchor_floor_index`), which is the moment the ego history knows LEAST about where the
 controller is going to send the aircraft. The intent that error budget is made of is not a
 property of the flight, it is a property of that instant: it gets exposed as the flight
 proceeds. This runner measures how much, by replaying the SAME checkpoint from a grid of
@@ -160,7 +161,8 @@ ANCHOR_DEFINITION = (
     "per flight and bin, the observed sample whose remaining path "
     "(approach_difficulty.remaining_path_profile_m — the horizontal arc length the truth "
     "still flies) is closest to the bin value; empty when that sample has no full lookback "
-    "(anchor < seq_len - 1) or less than --min-future-s of truth after it"
+    "or lies before the checkpoint's fixed anchor (default_anchor), or has less than "
+    "--min-future-s of truth after it"
 )
 GEOMETRY_TRUTH = (
     "the post-anchor supervision rows — the same curve ADE is scored against, not the "
@@ -574,7 +576,7 @@ def render(payload: dict) -> str:
             "",
             f"── {label} [{arm['arm']}] — {'/'.join(arm['airports'])}, {arm['flights']} "
             f"flights of {arm['split_flights']} in the split, {arm['prediction_output']} "
-            f"output, anchor L-1 = {arm['anchor_l1']}"
+            f"output, fixed anchor = {arm['anchor_l1']}"
             + ("" if arm["command_hook"] is None else f", hook {arm['command_hook']}"),
             f"   {arm['checkpoint']}",
         ]
@@ -728,7 +730,7 @@ def measure_checkpoint(arm: Arm, series: list, grid: Grid, device: torch.device,
     profiles = remaining_path_profiles(series)
     batch_size = grid.batch_size or config.batch_size
     print(f"{arm.label} [{arm.arm}]: {'/'.join(arm.airports)} {grid.split} split, "
-          f"{len(series)} flights, anchor L-1 {anchor_l1}, batch {batch_size}, "
+          f"{len(series)} flights, fixed anchor {anchor_l1}, batch {batch_size}, "
           f"device {device}", flush=True)
 
     curve: dict[float, dict] = {}

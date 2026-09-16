@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ts_transformer.config import PREDICTION_PLAN, default_anchor
+from ts_transformer.config import PREDICTION_PLAN, default_anchor, lookback_anchor
 from ts_transformer.data.anchor_strata import remaining_path_uniform_offset
 from ts_transformer.data.approach_difficulty import (
     STRATUM_ALL,
@@ -100,7 +100,7 @@ def next_instruction_row(series, anchor: int, skeleton, kind: str, arm=None) -> 
         })
     # the head reads the anchors it has a full lookback at; the truth reading covers every
     # admissible anchor (the head's cells are over the anchors it read)
-    if arm is not None and arm.config.prediction_output == PREDICTION_PLAN and anchor >= arm.config.seq_len - 1:
+    if arm is not None and arm.config.prediction_output == PREDICTION_PLAN and anchor >= lookback_anchor(arm.config):
         targets = targets_from_labels(labels, series, anchor, skeleton)
         row["targets"] = {name: float(v) for name, v in zip(TARGETS, targets.values, strict=True)}
         row["targets_valid"] = {name: bool(v) for name, v in zip(TARGETS, targets.valid, strict=True)}

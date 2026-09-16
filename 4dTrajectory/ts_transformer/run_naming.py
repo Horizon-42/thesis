@@ -195,6 +195,11 @@ META_FIELDS = (
     "stride",
     "n_segments",
     "seq_len",
+    # Two-tier T0(c): a common fixed anchor moves every window, the cohort and the anchor a
+    # run is judged at, so two runs differing only here are different experiments. Beside
+    # `seq_len`, which it is compared with, so it is spelled out rather than folded. Every
+    # stored config predates it and carries the default 0, so adding it renames nothing.
+    "anchor_floor_index",
     "dt_s",
     "full_horizon_steps",
     "window_horizon_steps",
@@ -327,6 +332,7 @@ _ABBREV = {
     "random_train_anchor": "random-anchor",
     "random_train_anchor_sampling": "anchors",
     "random_train_anchor_l1_share": "l1-share",
+    "anchor_floor_index": "anchor-floor",
     "control_duration_parameterization": "duration",
     "control_duration_uniform_floor": "duration-floor",
     "control_gradient_clip_norm": "grad-clip",
@@ -434,7 +440,7 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "split_seed", "val_fraction", "test_fraction", "aircraft_filter", "aircraft_type",
         "coordinate_frame", "state_position_reference", "reference_velocity_source",
         "random_train_anchor", "random_train_anchor_sampling", "random_train_anchor_l1_share",
-        "random_train_anchor_min_future_s", "training_cohort_min_future_s",
+        "random_train_anchor_min_future_s", "training_cohort_min_future_s", "anchor_floor_index",
     )),
     ("Supervision sources", (
         "closure_labels_path", "control_fitted_teacher_path",

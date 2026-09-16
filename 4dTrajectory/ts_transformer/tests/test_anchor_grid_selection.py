@@ -20,6 +20,8 @@ decide whether that number means what it says, and each is a test here:
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import json
 
 import numpy as np
@@ -594,3 +596,17 @@ def test_the_l1_plan_truth_follows_a_common_anchor_floor(cohort) -> None:
     # ...and the unfloored set anchors at L-1, where it always did.
     plain = validation_datasets(series, config, normalizer)[AIRPORT]
     assert plain.anchor == config.seq_len - 1
+
+
+def test_the_anchor_grid_plans_honour_a_config_floor(cohort) -> None:
+    """Review 2026-09-16: the grid's admissibility read only the call-time floor, so a run
+    carrying `anchor_floor_index` died in `prepare_session` ("cannot be anchored at …")
+    under the anchor-grid metric while the same floor passed at call time built fine."""
+    config, series, normalizer, _model, _val_sets = cohort
+    floor = config.seq_len - 1 + 3
+    by_config = validation_datasets(series, replace(config, anchor_floor_index=floor), normalizer)
+    by_call = validation_datasets(series, config, normalizer, minimum_anchor_index=floor)
+    ours = build_anchor_grid_validation_plans(by_config, 8)
+    theirs = build_anchor_grid_validation_plans(by_call, 8, minimum_anchor_index=floor)
+    assert ours.dropped == theirs.dropped
+    assert list(ours.bins) == list(theirs.bins)

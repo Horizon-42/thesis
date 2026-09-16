@@ -305,6 +305,18 @@ def test_the_scheduler_patience_factor_and_anchor_floor_name_a_custom_run():
     assert recipe["lr_plateau_patience"] == 8 and "lr-patience" not in recipe_name
 
 
+def test_a_common_anchor_floor_names_the_run_and_only_off_its_default():
+    """Two-tier T0(c): arms at different lookbacks judged at one fixed anchor. The floor moves
+    the cohort and the anchor a run is judged at, so it names the run; the default 0 (every
+    stored config) names nothing."""
+    from ts_transformer.run_naming import run_slug
+    base = _state_defaults()
+    floored = {**base, "anchor_floor_index": 119}
+    assert "anchor-floor=119" in run_display_name(floored)
+    assert "anchor-floor" not in run_display_name(base)
+    assert run_slug(floored) != run_slug(base)
+
+
 # ── the structured form (the frontend Experiments picker's parameter rows) ─────────────────
 
 def _rows_by_section(rows: list[dict]) -> dict[str, dict[str, str]]:

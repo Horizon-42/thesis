@@ -411,7 +411,9 @@ def build_series(
 
     A flight is skipped when it has no published runway threshold (no ENU frame and no
     target to judge against), when the track is too short to resample onto the grid, or
-    when it cannot furnish one full window (``seq_len + 1`` samples minimum).
+    when it cannot furnish one window at the fixed anchor (``default_anchor + 2`` samples
+    minimum: ``seq_len + 1`` at L-1 — counted on the lookback length before 2026-09-16, so
+    under an ``anchor_floor_index`` arms at different L kept different cohorts).
 
     ``aircraft_type`` is the fallback when the flight dict does not name a resolvable type.
     Every harvested arrival currently carries ``"type": "UNK"`` (``czml_export`` hardcodes
@@ -420,7 +422,10 @@ def build_series(
     sets the target state's Vref and threshold-crossing height, which is what the
     evaluation gates measure the final state against.
     """
-    minimum_samples = config.seq_len + 1
+    minimum_samples = default_anchor(config) + 2
+    # Stated in seconds of track: at L-1 this is the lookback, the text every stored build
+    # report carries.
+    too_short = f"track shorter than one window ({(minimum_samples - 1) * config.dt_s:.0f}s)"
     series: list[FlightSeries] = []
     report = BuildReport()
 
@@ -448,7 +453,7 @@ def build_series(
         # velocity fits), which too-short flights would otherwise pay for in full.
         span = float(waypoints[-1][0]) - float(waypoints[0][0])
         if span < config.dt_s * (minimum_samples - 1):
-            report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
+            report.skip(too_short)
             continue
 
         # Apply the strict fleet contract before geoid conversion, scenario construction,
@@ -505,7 +510,7 @@ def build_series(
         # Not redundant with the span pre-check: for a non-dyadic dt the multiply and
         # resample_uniform's floor-divide can round differently at the boundary.
         if len(grid) < minimum_samples:
-            report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
+            report.skip(too_short)
             continue
 
         fitted = fit_flight_final_approach(flight)
@@ -522,8 +527,8 @@ def build_series(
             before_crossing = grid < crossing_time
             grid = grid[before_crossing]
             resampled = resampled[before_crossing]
-            if len(grid) < config.seq_len:
-                report.skip(f"track shorter than one window ({config.lookback_s:.0f}s)")
+            if len(grid) < minimum_samples - 1:
+                report.skip(too_short)
                 continue
 
         supervision_times, supervision_values, supervision_weights = _build_supervision(

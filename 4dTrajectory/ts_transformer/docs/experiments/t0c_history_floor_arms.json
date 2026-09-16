@@ -1,0 +1,63 @@
+{
+ "_comment": "Two-tier feasibility T0(c) (docs/2026-09-16_two_tier_transformer_feasibility.zh.md §7, revised §10.2): does observed history LONGER than 120 s carry information about the approach the control path can use? The plan's '10 min history' variant is not buildable on this harvest: the arrival series start at the 25 km slice (first reception a median 45 s earlier) and measured on KRDU val a 598 s lookback leaves 250 of 1404 flights (17.8 %, all long vectored), 298 s leaves 701 (49.9 %), 238 s leaves 1382 (98.4 %) by the lookback filter and 1371 (97.6 %) under the fixed-anchor build rule every arm now shares (measured 2026-09-16 after the review fix: L = 60 / 90 / 120 at floor 119 keep the identical 1371). So the arms compare L = 60 / 90 / 120 samples (118 / 178 / 238 s) at ONE common fixed anchor, index 119 (238 s after the slice starts), through the new TSConfig field `anchor_floor_index` (default_anchor = max(L-1, floor)): every arm trains, is selected and predicts on the same flights at the same anchor, so the only difference is how much of the past the model is shown. Recipe = native32 (l1_lowdim_20260907/L1_native32: simple-v3 + N=32, native segment endpoints, true-time-position, imitation 64, velocity 0.003, first-order-lag), two seeds. Single airport KRDU — the airport-balanced sampler is not exercised; val split only. PRE-REGISTERED GATE G2: L=120 vs L=60, vectored-stratum ADE at the common anchor improved by > 125 m PAIRED under BOTH seeds (the control path's seed line), with straight-in ADE not worse beyond 30 m; L=90 gives the dose direction only. Read beside the time-free chamfer (a timing-only gain reads as a model gain on ADE alone). If G2 fails, the two-tier plan's second layer has no 'long range' on this harvest and stays the current plan head (T3 not built); if it passes, T3 still needs a harvest with a longer reception window (a data-plane decision for the user). Arm order puts the gate pair of both seeds first.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_state_loss_grid": "native-segment-endpoints",
+  "control_state_objective": "true-time-position",
+  "control_imitation_loss_weight": 64.0,
+  "control_velocity_loss_weight": 0.003,
+  "anchor_floor_index": 119
+ },
+ "arms": [
+  {
+   "key": "T0c_L60_s1337",
+   "label": "118 s lookback at the common anchor 119, seed 1337",
+   "overrides": {
+    "seq_len": 60,
+    "seed": 1337
+   }
+  },
+  {
+   "key": "T0c_L120_s1337",
+   "label": "238 s lookback at the common anchor 119, seed 1337",
+   "overrides": {
+    "seq_len": 120,
+    "seed": 1337
+   }
+  },
+  {
+   "key": "T0c_L60_s2024",
+   "label": "118 s lookback at the common anchor 119, seed 2024",
+   "overrides": {
+    "seq_len": 60,
+    "seed": 2024
+   }
+  },
+  {
+   "key": "T0c_L120_s2024",
+   "label": "238 s lookback at the common anchor 119, seed 2024",
+   "overrides": {
+    "seq_len": 120,
+    "seed": 2024
+   }
+  },
+  {
+   "key": "T0c_L90_s1337",
+   "label": "178 s lookback at the common anchor 119, seed 1337 (dose)",
+   "overrides": {
+    "seq_len": 90,
+    "seed": 1337
+   }
+  },
+  {
+   "key": "T0c_L90_s2024",
+   "label": "178 s lookback at the common anchor 119, seed 2024 (dose)",
+   "overrides": {
+    "seq_len": 90,
+    "seed": 2024
+   }
+  }
+ ]
+}

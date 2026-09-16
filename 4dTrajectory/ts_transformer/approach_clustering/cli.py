@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ts_transformer.config import TSConfig
+from ts_transformer.config import TSConfig, default_anchor
 from ts_transformer.data.data_provenance import arrival_data_provenance
 from ts_transformer.data.dataset import build_series, load_flight_dicts
 from ts_transformer.data.splits import flight_keys_by_split, split_by_flight
@@ -68,7 +68,7 @@ def _build_clusters(args: argparse.Namespace) -> int:
     runway = args.runway.strip().upper()
     train = [item for item in train if item.scenario.source["runway"] == runway]
     val = [item for item in val if item.scenario.source["runway"] == runway]
-    anchor_index = config.seq_len - 1
+    anchor_index = default_anchor(config)
     train_features = horizontal_arc_features(
         train, anchor_index=anchor_index, points=args.feature_points
     )
@@ -88,6 +88,7 @@ def _build_clusters(args: argparse.Namespace) -> int:
         runway=runway,
         manifest_path=args.data,
         config=config.to_dict(),
+        anchor_index=anchor_index,
         feature_points=args.feature_points,
         pca_components=args.pca_components,
         cluster_seed=args.seed,

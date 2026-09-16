@@ -249,3 +249,87 @@ def test_training_cohort_floor_filters_only_the_supplied_train_roster():
             "fixed_anchor_remaining_s": 50.0,
         }],
     }
+
+
+def test_the_run_anchor_floor_is_the_ablation_floor_carried_by_the_config():
+    """`anchor_floor_index` (two-tier T0(c), 2026-09-16) is the common anchor the history
+    ablation passes at call time, carried by the run itself: every lookback's window set is
+    identical to the call-time floor's, anchor and targets alike."""
+    series, base = _series(n_flights=2)
+    normalizer = Normalizer.fit(series)
+    floor = 89
+    for seq_len in (30, 60, 90):
+        by_config = FixedAnchorTrajectoryWindows(
+            series, replace(base, seq_len=seq_len, anchor_floor_index=floor), normalizer
+        )
+        by_call = FixedAnchorTrajectoryWindows(
+            series, replace(base, seq_len=seq_len), normalizer, minimum_anchor_index=floor
+        )
+        assert by_config.anchor == by_call.anchor == floor
+        assert by_config.index == by_call.index
+        for ours, theirs in zip(by_config.batch([0, 1])[:5], by_call.batch([0, 1])[:5]):
+            assert torch.equal(ours, theirs)
+
+
+def test_default_anchor_is_the_later_of_the_lookback_and_the_floor():
+    from ts_transformer.config import default_anchor, lookback_anchor
+
+    assert default_anchor(TSConfig(seq_len=60)) == lookback_anchor(TSConfig(seq_len=60)) == 59
+    assert default_anchor(TSConfig(seq_len=60, anchor_floor_index=119)) == 119
+    # a floor inside the lookback moves nothing
+    assert default_anchor(TSConfig(seq_len=120, anchor_floor_index=100)) == 119
+    with pytest.raises(ValueError, match="anchor_floor_index"):
+        TSConfig(anchor_floor_index=-1)
+    # every stored config predates the field and reads as L-1
+    stored = TSConfig(seq_len=60).to_dict()
+    del stored["anchor_floor_index"]
+    assert default_anchor(TSConfig.from_dict(stored)) == 59
+
+
+def test_a_floored_run_says_which_anchor_its_cohort_was_filtered_at():
+    """The audit label names L-1 only where the anchor IS L-1: at L=90 a floor of 89 is L-1,
+    at L=30 it is not."""
+    series, base = _series(n_flights=2)
+    _kept, at_l1 = train_module.filter_training_cohort(
+        series, replace(base, seq_len=90, anchor_floor_index=89), verbose=False
+    )
+    _kept, floored = train_module.filter_training_cohort(
+        series, replace(base, seq_len=30, anchor_floor_index=89), verbose=False
+    )
+    assert at_l1["anchor"] == "fixed L-1"
+    assert floored["anchor"] == "fixed index 89"
+
+
+def test_predict_defaults_to_the_floor():
+    from ts_transformer.backbone.adapters import build_model
+    from ts_transformer.inference.forecast import forecast_approaches
+
+    series, base = _series(n_flights=2, device="cpu", d_model=16, d_ff=32, n_heads=4, e_layers=1)
+    config = replace(base, seq_len=30, anchor_floor_index=89)
+    normalizer = Normalizer.fit(series)
+    model = build_model(config, normalizer)
+    forecasts = forecast_approaches(model, series, config, normalizer, device=torch.device("cpu"))
+    assert [forecast.anchor for forecast in forecasts] == [89, 89]
+    assert all(forecast.times[0] > series[i].times[89] for i, forecast in enumerate(forecasts))
+
+
+def test_a_floored_build_keeps_the_same_flights_for_every_lookback():
+    """Review 2026-09-16: `build_series` dropped short tracks by the LOOKBACK (``seq_len + 1``
+    samples), so under a common floor the L=120 arm lost flights the L=60 arm kept (11 of
+    1382 on KRDU val). The rule is the fixed anchor's: one cohort for every L."""
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=4, seed=3)
+    trimmed = dict(flights[0])
+    t0 = float(trimmed["waypoints"][0][0])
+    # 150 s of track: one window at L=30 (60 s), none at the floor 89 (178 s)
+    trimmed["waypoints"] = [w for w in trimmed["waypoints"] if float(w[0]) - t0 <= 150.0]
+    cohort = [trimmed, *flights[1:]]
+    built = {}
+    for seq_len in (30, 60, 90):
+        config = TSConfig(seq_len=seq_len, anchor_floor_index=89)
+        series, report = build_series(cohort, config, airport=AIRPORT)
+        built[seq_len] = (
+            [item.dataset_id for item in train_module.usable_series(series, config, verbose=False)],
+            [item.dataset_id for item in series],
+        )
+    assert built[30] == built[60] == built[90]
+    assert len(built[30][1]) == 3            # the trimmed flight is out at build, for every L
