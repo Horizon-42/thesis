@@ -118,6 +118,31 @@ def speed_loop_specific_force(
     return sin_gamma + (speed_command_mps - speed_mps) / (GRAVITY_MPS2 * speed_time_constant_s)
 
 
+def path_angle_load_factor(
+    path_angle_command_rad: torch.Tensor,
+    sin_gamma: torch.Tensor,
+    cos_gamma: torch.Tensor,
+    speed_mps: torch.Tensor,
+    bank_rad: torch.Tensor,
+    path_angle_time_constant_s: torch.Tensor | float,
+    min_load_factor: torch.Tensor | float,
+    max_load_factor: torch.Tensor | float,
+) -> torch.Tensor:
+    """The load factor a first-order PATH loop asks for, the vertical analogue of
+    :func:`speed_loop_specific_force`.
+
+    ``n = [cos γ + V·(γ* − γ)/(g·τ_γ)] / cos φ``, clipped to the load box. Flown through the
+    unchanged RHS it gives ``γ' = (γ* − γ)/τ_γ`` wherever neither the box nor the stall clamp
+    binds, on every airframe. γ is read as ``atan2(sin γ, cos γ)`` from the caller's own
+    components so the chart and the geodetic callers agree on it. The one expression the lag
+    RHS and the exported record load both read."""
+    gamma = torch.atan2(sin_gamma, cos_gamma)
+    vertical = cos_gamma + speed_mps * (path_angle_command_rad - gamma) / (
+        GRAVITY_MPS2 * path_angle_time_constant_s
+    )
+    return torch.clamp(vertical / torch.cos(bank_rad), min_load_factor, max_load_factor)
+
+
 def enu_rhs(
     state_enu: torch.Tensor,
     controls: torch.Tensor,

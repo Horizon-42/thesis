@@ -21,6 +21,7 @@ from ts_transformer.config import (
     CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_HOOK_OFF,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
     CONTROL_SPEED_COMMAND,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
@@ -69,7 +70,7 @@ from ts_transformer.outputs.control.loss.objective import (
     control_prediction_loss_components,
 )
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
-from ts_transformer.outputs.envelope import speed_command_identity
+from ts_transformer.outputs.envelope import path_angle_identity, speed_command_identity
 from ts_transformer.outputs.control.supervision import (
     probe_dynamics,
     reference_control_supervision,
@@ -308,6 +309,11 @@ class ControlStrategy(OutputStrategy):
         # (`envelope.speed_command_identity`). The other laws' strings are unchanged.
         if config.control_thrust_parameterization == CONTROL_SPEED_COMMAND:
             contract = f"{contract}+{speed_command_identity()}"
+        # The same for the path-angle contract: τ_γ, its box and its neutral are module
+        # constants (`envelope.path_angle_identity`), so a checkpoint trained under other
+        # values is refused at load instead of flying under these.
+        if config.control_thrust_parameterization == CONTROL_SPECIFIC_FORCE_PATH_ANGLE:
+            contract = f"{contract}+{path_angle_identity()}"
         return contract
 
     def _objective_target_contract(self, config: TSConfig) -> str:

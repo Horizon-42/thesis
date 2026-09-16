@@ -49,6 +49,7 @@ from aerodynamic_model.torch_dynamics import (
 from aerodynamic_model.torch_lag_dynamics import (
     THRUST_FRACTION_LAW,
     LagControlLaw,
+    PathAngleLaw,
     SpecificForceLaw,
     SpeedCommandLaw,
     lag_actuator_states,
@@ -74,12 +75,16 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
     CONTROL_SPEED_COMMAND,
     CONTROL_THRUST_FRACTION,
     TSConfig,
 )
 from ts_transformer.outputs.envelope import (
+    MAX_LOAD_FACTOR,
+    MIN_LOAD_FACTOR,
     MIN_THRUST_FRACTION,
+    PATH_ANGLE_TIME_CONSTANT_S,
     SPEED_LOOP_TIME_CONSTANT_S,
     physical_controls,
 )
@@ -94,6 +99,15 @@ _LAG_CONTROL_LAWS: dict[str, LagControlLaw] = {
     CONTROL_SPEED_COMMAND: SpeedCommandLaw(
         min_thrust_fraction=MIN_THRUST_FRACTION,
         speed_time_constant_s=SPEED_LOOP_TIME_CONSTANT_S,
+    ),
+    # The path loop resolves a LOAD FACTOR, so it reads the load box the head's own column
+    # used to be bounded by: the search space the commands lived in is the range the loop may
+    # ask for (design §14.2).
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE: PathAngleLaw(
+        min_thrust_fraction=MIN_THRUST_FRACTION,
+        path_angle_time_constant_s=PATH_ANGLE_TIME_CONSTANT_S,
+        min_load_factor=MIN_LOAD_FACTOR,
+        max_load_factor=MAX_LOAD_FACTOR,
     ),
 }
 
@@ -134,7 +148,10 @@ class EndpointControlRollout:
     # units. Under the point-mass model a piecewise-constant command is in effect
     # instantly, so this IS ``controls``; under the first-order lag the three controls are
     # states chasing their command and this is where they got to. A term that prices what
-    # the rollout flew (the heading-rate loss) must read this, never the command.
+    # the rollout flew (the heading-rate loss) must read this, never the command — in EACH
+    # law's own unit: column 2 is a load factor under every law except the path-angle one,
+    # where it is the target angle and the flown load has to be re-solved from the state
+    # (config refuses that pairing rather than let the term read radians as a load).
     actual_controls: torch.Tensor
 
 

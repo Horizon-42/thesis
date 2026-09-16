@@ -300,8 +300,24 @@ CONTROL_DYNAMICS_BACKENDS = (
 CONTROL_THRUST_FRACTION = "thrust-fraction"
 CONTROL_SPECIFIC_FORCE = "specific-force"
 CONTROL_SPEED_COMMAND = "speed-command"
+# ``specific-force+path-angle`` (design §14) is the one value that also moves the VERTICAL
+# column: the head commands the target path angle γ* and the lag RHS re-solves the load factor
+# that flies it, `n = [cos γ + V(γ* − γ)/(g τ_γ)] / cos φ`, clipped to the load box with the
+# stall clamp unchanged. It exists because the load-factor column is an open-loop integrator —
+# a bias δn grows a height error like ½·g·δn·t² (design §7.5.3, measured: +0.004 of load is
+# +92 m at the end) — while a path-angle target does not accumulate that way (+17 m for the
+# same instantaneous error, §13.3). Only THIS combination is spelled, and the ``+`` is a
+# LOOKUP, never a split, exactly as in CONTROL_HOOK_MEMBERS: the vertical law is
+# energy-neutral (Ė = V·n_x, no γ) only under the specific force, and under a thrust fraction
+# it would change the induced drag and need the second law the 2026-09-06 nominal hook needed.
+# Every non-default law is first-order-lag only: the point-mass rows hold newton controls
+# across a segment and have no per-stage re-solve.
+CONTROL_SPECIFIC_FORCE_PATH_ANGLE = "specific-force+path-angle"
 CONTROL_THRUST_PARAMETERIZATIONS = (
-    CONTROL_THRUST_FRACTION, CONTROL_SPECIFIC_FORCE, CONTROL_SPEED_COMMAND,
+    CONTROL_THRUST_FRACTION,
+    CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPEED_COMMAND,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
 )
 # HOW the airframe is presented to the control head (`outputs/conditioning.py`; design N4).
 # ``raw`` scales each quantity on its own (mass, installed thrust, wing area, the polar) —
@@ -1815,6 +1831,31 @@ class ControlOutput(OutputSpec):
             raise ValueError(
                 f"a command hook containing {CONTROL_HOOK_SPEED_FLOOR!r} is not built for "
                 f"control_thrust_parameterization={CONTROL_SPEED_COMMAND!r} yet"
+            )
+        if (law == CONTROL_SPECIFIC_FORCE_PATH_ANGLE
+                and self.objective.control_heading_rate_loss_weight != 0.0):
+            # The heading-rate term prices what the rollout FLEW, so it reads the third
+            # ACTUATOR (`backends.EndpointControlRollout.actual_controls`) as a load factor and
+            # feeds it to the psi row `g·n·sin φ/(V cos γ)`. Under this contract that actuator is
+            # a path angle in radians: the term would read −0.05 where the flight flew 1.06, a
+            # full-scale wrong target on every segment, silently (review §14.9, finding 1).
+            # Resolving the load inside the term is the other fix; nothing needs it yet.
+            raise ValueError(
+                "control_heading_rate_loss_weight is not built for "
+                f"control_thrust_parameterization={CONTROL_SPECIFIC_FORCE_PATH_ANGLE!r}: the "
+                "term reads the third actuator as a load factor and this contract holds a "
+                "path angle there"
+            )
+        if law == CONTROL_SPECIFIC_FORCE_PATH_ANGLE and self.hook.active:
+            # Design §14.4: the barrier and the trombone rewrite the LOAD FACTOR and the speed
+            # floor reads a commanded load, and under this contract the third column is a path
+            # angle — none of them speaks it. Composing them is a separate design; the arms run
+            # with the hook off.
+            raise ValueError(
+                f"control_command_hook={self.hook.control_command_hook!r} is not built for "
+                f"control_thrust_parameterization={CONTROL_SPECIFIC_FORCE_PATH_ANGLE!r}: every "
+                "hook writes or reads the load-factor column, which this contract replaces "
+                "with a path-angle target"
             )
         if self.hook.active:
             if self.dynamics.control_dynamics_model != CONTROL_DYNAMICS_FIRST_ORDER_LAG:

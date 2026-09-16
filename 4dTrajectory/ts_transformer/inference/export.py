@@ -247,6 +247,16 @@ def build_prediction_record(
                 control_segments, forecast.longitudinal_commands, strict=True
             ):
                 segment[name] = float(command)
+        # Under `specific-force+path-angle` the third column is the head's path-angle target
+        # and the record's `load_factor` is the load the loop resolved where the segment began
+        # (`outputs/control/forecast.record_newton_controls`), so the command rides beside it
+        # under its own contract name.
+        if forecast.vertical_commands is not None:
+            name = control_contract(forecast.longitudinal_parameterization).names[2]
+            for segment, command in zip(
+                control_segments, forecast.vertical_commands, strict=True
+            ):
+                segment[name] = float(command)
     eval_record["reference_file"] = f"{REFERENCES_DIR}/{record_stem(scenario.source, index)}{_REFERENCE_EVAL_SUFFIX}"
 
     reference_record = reference_evaluation_record(

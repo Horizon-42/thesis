@@ -58,6 +58,7 @@ from ts_transformer.config import (
     CONTROL_RECIPE_CUSTOM,
     CONTROL_RECIPE_NAMES,
     CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
     CONTROL_SPEED_COMMAND,
     CONTROL_THRUST_FRACTION,
     DEFAULT_N_SEGMENTS_BY_MODEL,
@@ -81,7 +82,11 @@ _DYNAMICS_SLUG = {
 #: The longitudinal contract off its default, as the dynamics word and the slug spell it.
 #: It is physics — WHICH quantity the rollout integrates the head's first column as — so it
 #: sits in the always-shown dynamics word, never in the foldable meta list.
-_THRUST_PARAMETERIZATION_SLUG = {CONTROL_SPECIFIC_FORCE: "sf", CONTROL_SPEED_COMMAND: "sc"}
+_THRUST_PARAMETERIZATION_SLUG = {
+    CONTROL_SPECIFIC_FORCE: "sf",
+    CONTROL_SPEED_COMMAND: "sc",
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE: "sfpa",
+}
 _BACKEND_SLUG = {
     # `transport-chart-velocity` is RETIRED from the config vocabulary (T2, 2026-09-07) and
     # stays here on purpose: 13 stored 2026-07/08 configs carry it, their on-disk run

@@ -37,12 +37,14 @@ from ts_transformer.config import (
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,
     CONTROL_DYNAMICS_POINT_MASS,
     CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
     CONTROL_SPEED_COMMAND,
     CONTROL_THRUST_PARAMETERIZATIONS,
     TSConfig,
 )
 from ts_transformer.outputs.envelope import (
     CONTROL_NAMES,
+    PATH_ANGLE_TIME_CONSTANT_S,
     SPEED_LOOP_TIME_CONSTANT_S,
     fraction_controls,
 )
@@ -173,6 +175,11 @@ def actual_controls(
     which is the parameterisation's point: the tracks identify ``(T - D)/m``, never T and
     m apart.
 
+    Under ``specific-force+path-angle`` the first column is that same specific force and the
+    THIRD is the path-angle target ``γ + τ_γ·γ̇`` in radians, an ABSOLUTE angle (design §14.1:
+    an anchor-relative target would inherit the anchor's own ADS-B path-angle noise as a
+    per-flight bias, the quantity §7.5.3 shows integrating into the height error).
+
     Under ``speed-command`` the first column is the speed loop's ABSOLUTE target,
     ``V + τ_V·tangential`` (m/s) — the airspeed that ``V' = (target − V)/τ_V`` needs, again
     from the kinematics alone. The contract's column is that target RELATIVE to the anchor's
@@ -244,6 +251,16 @@ def actual_controls(
     if parameterization == CONTROL_SPEED_COMMAND:
         target_speed = speed + SPEED_LOOP_TIME_CONSTANT_S * tangential
         return np.column_stack((target_speed, bank, load_factor))
+    if parameterization == CONTROL_SPECIFIC_FORCE_PATH_ANGLE:
+        # The THIRD column is the path-angle target the loop would have to hold to fly the
+        # realised path rate: `γ* = γ + τ_γ·γ̇`, with γ̇ taken from the realised load the same
+        # inversion just produced, `γ̇ = g(n cos φ − cos γ)/V`, not from a second differentiation
+        # of γ (design §14.3). The first column is the specific force, unchanged.
+        path_rate = GRAVITY_MPS2 * (load_factor * np.cos(bank) - cos_gamma) / speed
+        specific_force = tangential / GRAVITY_MPS2 + np.sin(gamma)
+        return np.column_stack(
+            (specific_force, bank, gamma + PATH_ANGLE_TIME_CONSTANT_S * path_rate)
+        )
     drag = _drag_force(altitude, speed, mass, load_factor, np.asarray(aero_params))
     thrust_n = mass * (tangential + GRAVITY_MPS2 * np.sin(gamma)) + drag
     return fraction_controls(
@@ -293,9 +310,11 @@ def commanded_controls(
     lagged model produced reproduces that trajectory. The derivative is taken on a smoothed
     copy (:data:`COMMAND_SMOOTHING_SAMPLES`) because ``u`` already carries two numerical
     differentiations of position. The lag is the same first-order ODE on whichever
-    quantity ``parameterization`` makes the first actuator, so one inversion serves all
-    three — under ``speed-command`` on the ABSOLUTE target :func:`actual_controls` returns,
-    which commutes with :func:`anchor_relative`'s constant shift.
+    quantity ``parameterization`` makes an actuator — the first column under three of the
+    contracts and the THIRD under ``specific-force+path-angle`` — so one inversion serves all
+    four. Under ``speed-command`` it acts on the ABSOLUTE target :func:`actual_controls`
+    returns, which commutes with :func:`anchor_relative`'s constant shift; under the
+    path-angle contract the third column is already absolute.
     """
     actual = actual_controls(
         states,

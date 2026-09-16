@@ -4,24 +4,30 @@ Three numbers with three different natural magnitudes — thrust in hundreds of 
 bank in radians, load factor around one — cannot share a sigmoid, a regularizer or a
 teacher-imitation MSE without one of them dominating. So the CONTRACT this package
 predicts in is one box per ``control_thrust_parameterization`` (:func:`control_contract`),
-the same on every airframe — three since 2026-09-15:
+the same on every airframe — four since 2026-09-16:
 
     thrust-fraction   delta_T = T / T_max     normalised by the ACTUATOR (T_max installed)
     specific-force    n_x = (T - D) / W       normalised by the EFFECT (speed-rate in g)
     speed-command     Δv = v_c − V₀ (m/s)     a target speed relative to the anchor's, flown by
                                               a speed loop (design §12); the one column in
                                               physical units, since a speed IS airframe-free
+    specific-force+path-angle                 the same first column, and the THIRD becomes the
+                      γ* (rad)                target path angle, flown by a path loop through
+                                              the load the RHS re-solves (design §14)
     bank_rad          unchanged; a quarter turn is already order one
-    load_factor       unchanged; it is a ratio by definition
+    load_factor       unchanged; it is a ratio by definition — except under the path-angle
+                      contract, where that column is γ* and the load is resolved, not named
 
 ``thrust-fraction`` made the box mean the same ACTUATOR setting on every airframe (before
 2026-08-18 one sigmoid output meant 100 kN on a small jet and 400 kN on a heavy).
 ``specific-force`` makes it mean the same MOTION: the lag RHS re-solves the thrust at every
 stage and the drag cancels, so the same n_x moves a C550 and a B77W identically
 (``docs/2026-09-14_specific_force_control_design.md``). ``speed-command`` keeps that
-invariance and adds the restoring force n_x lacks. Under thrust-fraction the newton
+invariance and adds the restoring force n_x lacks; ``specific-force+path-angle`` leaves the
+speed to n_x and closes the VERTICAL channel instead, which is the one the open-loop load
+factor turns into a double integrator (design §7.5.3). Under thrust-fraction the newton
 conversion is :func:`physical_controls`, once, on the way into the dynamics and out to the
-record; under the other two it needs the state's drag and lives in the lag RHS
+record; under the other three it needs the state's drag and lives in the lag RHS
 (``aerodynamic_model.torch_lag_dynamics``) and in the record export. The evaluation record
 contract is newtons either way, shared with the CasADi optimizer.
 
@@ -50,6 +56,7 @@ import numpy as np
 
 from ts_transformer.config import (
     CONTROL_SPECIFIC_FORCE,
+    CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
     CONTROL_SPEED_COMMAND,
     CONTROL_THRUST_FRACTION,
 )
@@ -111,6 +118,26 @@ NEUTRAL_SPECIFIC_FORCE = -0.05
 MIN_SPEED_COMMAND_DELTA_MPS = -90.0
 MAX_SPEED_COMMAND_DELTA_MPS = 20.0
 SPEED_LOOP_TIME_CONSTANT_S = 8.0
+# The path-angle contract (design §14): the head's THIRD column is the target path angle γ*
+# in radians, flown by a first-order path loop of time constant PATH_ANGLE_TIME_CONSTANT_S
+# through the load factor the lag RHS re-solves at every stage. Unlike the speed command it
+# is ABSOLUTE, not anchor-relative: the anchor's own γ comes from an ADS-B vertical rate and
+# its noise is the size of the whole error budget (§13.4: the break-even per-flight bias is
+# 0.11°), so an anchor-relative target would carry that noise into exactly the quantity
+# §7.5.3 shows integrating. The box is a flight-envelope bound, not a data bound: −15° is
+# ~3,600 fpm at 70 m/s and +10° a go-around climb, against a teacher whose p1/p99 are
+# −4.89/+0.25° (§13.2).
+MIN_PATH_ANGLE_COMMAND_RAD = math.radians(-15.0)
+MAX_PATH_ANGLE_COMMAND_RAD = math.radians(10.0)
+# The neutral is the teacher's OWN median on KRDU val (−2.94°, §13.2), so a zeroed head flies a
+# steady ~3° descent on every airframe: no zoom climb and no stall, and nothing airframe-
+# specific. It is data-derived, not read from any published procedure — the head learns the
+# profile; this is only where an untrained one starts.
+NEUTRAL_PATH_ANGLE_RAD = math.radians(-2.9)
+# Measured insensitive between 2 and 5 s (§13.2); 3 s sits above the 0.8 s load actuator and
+# below the ~5.3 s segment hold, and keeps the load transient of a 1° step near 0.04 g. Like
+# the speed loop's constant it is part of the CONTRACT, not a config field.
+PATH_ANGLE_TIME_CONSTANT_S = 3.0
 
 
 @dataclass(frozen=True)
@@ -127,7 +154,8 @@ class ControlContract:
     #: thrust — the level-flight trim of the median airframe (0.2 x 0.358 ≈ its D/W 0.076);
     #: under specific-force :data:`NEUTRAL_SPECIFIC_FORCE`, a descent's speed hold on EVERY
     #: airframe (why not level trim: that constant's comment); under speed-command Δv = 0,
-    #: the anchor's own speed held.
+    #: the anchor's own speed held; under the path-angle contract that same speed hold and
+    #: :data:`NEUTRAL_PATH_ANGLE_RAD`, the teacher's own median descent.
     neutral: tuple[float, float, float]
 
     def __post_init__(self) -> None:
@@ -174,9 +202,22 @@ SPEED_COMMAND_CONTRACT = ControlContract(
     upper=(MAX_SPEED_COMMAND_DELTA_MPS, MAX_BANK_RAD, MAX_LOAD_FACTOR),
     neutral=(0.0, 0.0, 1.0),
 )
+PATH_ANGLE_CONTRACT = ControlContract(
+    parameterization=CONTROL_SPECIFIC_FORCE_PATH_ANGLE,
+    names=("specific_force", "bank_rad", "path_angle_command"),
+    units=("g", "rad", "rad"),
+    lower=(MIN_SPECIFIC_FORCE, -MAX_BANK_RAD, MIN_PATH_ANGLE_COMMAND_RAD),
+    upper=(MAX_SPECIFIC_FORCE, MAX_BANK_RAD, MAX_PATH_ANGLE_COMMAND_RAD),
+    neutral=(NEUTRAL_SPECIFIC_FORCE, 0.0, NEUTRAL_PATH_ANGLE_RAD),
+)
 _CONTRACTS = {
     contract.parameterization: contract
-    for contract in (THRUST_FRACTION_CONTRACT, SPECIFIC_FORCE_CONTRACT, SPEED_COMMAND_CONTRACT)
+    for contract in (
+        THRUST_FRACTION_CONTRACT,
+        SPECIFIC_FORCE_CONTRACT,
+        SPEED_COMMAND_CONTRACT,
+        PATH_ANGLE_CONTRACT,
+    )
 }
 
 
@@ -192,6 +233,20 @@ def speed_command_identity() -> str:
         f"speed-command(tau-v={SPEED_LOOP_TIME_CONSTANT_S:g}s,"
         f"box={contract.lower[0]:g}..{contract.upper[0]:g}m/s,"
         f"neutral={contract.neutral[0]:g})-v1"
+    )
+
+
+def path_angle_identity() -> str:
+    """The path-angle contract's constants, spelled for a checkpoint's target contract.
+
+    Same reason as :func:`speed_command_identity`: the loop constant, the box and the neutral
+    are constants of this module rather than config fields, so a checkpoint trained under other
+    values would otherwise load and fly under these without a word."""
+    contract = PATH_ANGLE_CONTRACT
+    return (
+        f"specific-force+path-angle(tau-gamma={PATH_ANGLE_TIME_CONSTANT_S:g}s,"
+        f"box={math.degrees(contract.lower[2]):g}..{math.degrees(contract.upper[2]):g}deg,"
+        f"neutral={math.degrees(contract.neutral[2]):g}deg)-v1"
     )
 
 

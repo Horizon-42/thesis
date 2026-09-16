@@ -1381,6 +1381,16 @@ target contract through `path_angle_identity()`. Measured insensitive between 2 
 above the 0.8 s load actuator and below the ~5.3 s segment hold, and keeps the load transient of a 1° step
 near 0.04 g.
 
+**The loop's clip is the head's OLD box, [0.2, 2.0], and that is a decision, not an oversight** (review
+§14.9, finding 2). The load the loop resolves is a by-product of a path angle now, not a number the head
+names, and the grader's floor is 0.5 (`flyability.Envelope.min_load_factor`), so a resolved load in
+[0.2, 0.5) is scored unflyable on the published metric. Reaching it needs a large in-box step:
+`n = cos γ + V·Δγ/(g·τ_γ)` gives n = 0.5 at Δγ = −9.9° (85 m/s) or −7.2° (120 m/s), and n = 0.2 at −15.8° /
+−11.6°. The box stays where it is — it is the same search space the vertical column had, and narrowing it
+here would make the two contracts' feasibility differ for a reason that has nothing to do with the
+experiment — and the readout reports the share of resolved loads below 0.5 so the arm is judged on whether
+it ever happens rather than on the assumption that it cannot.
+
 ### 14.3 The inverse
 
 `γ*_actual = γ + τ_γ·γ̇`, with `γ̇ = g·(n·cos φ − cos γ)/V` from the same kinematic inversion
@@ -1417,11 +1427,15 @@ a no-op for this contract (the target is absolute).
 ### 14.6 Tests
 
 - `tests/test_path_angle.py`: the contract's box/neutral/identity; the inverse's round trip (a teacher
-  inverted from a synthetic lag rollout replays it); the law's fixed point (a held γ\* drives γ to it within
-  a few τ_γ); the clip (a γ\* that would need more than the load box asks for is clipped, and the stall cap
-  still binds); the anchor actuator's unit; the refusals (point-mass, `fitted`, every hook).
-- `aerodynamic_model/tests/test_torch_lag_path_angle.py`: the RHS against a hand-integrated reference; the
-  law reduces to the specific-force law when γ\* tracks γ; batch/CUDA parity where the other laws are tested.
+  inverted from a synthetic lag rollout replays it, sampled where γ is still moving so the τ_γ term binds);
+  the law's fixed point on three airframes (a held γ\* drives γ to it within a few τ_γ); the clip at BOTH
+  ends of the load box, reached by commands inside the head's own γ\* box; the record's load against the
+  law's own resolver; the anchor actuator's unit; the refusals (point-mass, `fitted`, every hook, the
+  heading-rate term).
+- `aerodynamic_model/tests/test_torch_lag_path_angle.py`: the loop's rate, identical across three airframes;
+  the box clip against the specific-force law at the clipped load; the settling law in closed form; the
+  reduction to the specific-force law at γ\* = γ; the STALL clamp still deciding what the loop gets; batch
+  parity and the CUDA compile/backward path.
 - The existing suites must stay green and DEFAULT-IDENTICAL (the M1 rule): the census of stored run names
   and the golden lag rollout unchanged.
 
@@ -1443,3 +1457,60 @@ a no-op for this contract (the target is absolute).
   unchanged, so this is a regression check, not a claim).
 - **Veto:** pooled ADE worse than `N4_twin` beyond the seed line; straight-in FDE worse READ WITH ITS
   SPLIT (§7.5.5), i.e. a dive that buys along-track at the cost of height does not count as better.
+
+
+### 14.9 P1 review (2026-09-16, opus subagent, code only)
+
+The reviewer re-ran `aerodynamic_model/tests` plus the specific-force / speed-command / inverse / naming
+suites (219 passed), the full ts suite (1208) and the two new files (22), and checked the law's algebra
+numerically.
+
+**Cleared, with the reasoning recorded:**
+- The inverse is EXACT, not approximate: `n·cos φ ≡ vertical` by construction in `actual_controls`, and
+  `vertical = (γ̇·V + transport·γ̂)/g + cos γ`, so `g(n cos φ − cos γ)/V` is the flat-earth rate the forward
+  loop sets — the transport term cancels between teacher and rollout. Round trip on a synthetic lag rollout:
+  max |Δn_x| 6.2e-7 g, |Δbank| 0.005°, |Δγ\*| 1e-4°.
+- Default identity holds: the new `torch.stack` in `record_newton_controls` is bit-identical to the old
+  `torch.cat` for every other law, and every other change is additive.
+- The packed context is self-consistent (width 22 = 4+3+5+10; every slice read back what `_law_step` put in,
+  with an asymmetric box to catch a swap), and the CUDA path compiles with a finite, non-zero
+  `d(final V)/d(γ\*)`.
+- Nothing else reads the third column blind: the hooks all do and are all refused; `flyability` recomputes
+  the load from the STATES; the saturation labels, the imitation MSE and the probes key off the contract.
+
+**Fixed in this milestone:**
+1. **(the one real bug) The heading-rate loss read the third actuator as a load factor.**
+   `control_heading_rate_mse` prices what the rollout flew, so it reads the ACTUATOR — a path angle here.
+   Measured: the ψ row got −0.084 °/s where the flight flew +1.70 °/s, a sign-flipped, 20×-small target on
+   every segment, silently. The weight defaults to 0, so nothing stored moved, but the axis is live.
+   `TSConfig` now refuses the pairing, and the two docstrings that promised a load factor in that column
+   (`EndpointControlRollout.actual_controls`, `lag_actuator_states`) say what it is per law.
+2. **The load floor is the head's 0.2, not the grader's 0.5** — kept, with the numbers, in §14.2, and the
+   readout reports the share of resolved loads below 0.5.
+3. The record's load comment overstated what it is: it is the load the loop would ask for at the segment's
+   START state given THAT segment's new command, a stand-in exactly as the thrust column is, and
+   `evaluation`'s crossing load factor reads the last one.
+6. `_pack_context` rounded a python float through float32 (the clip floor read back 0.20000000298), so the
+   RHS's floor and the law's constant differed by 3e-9. It now takes the frame's dtype first.
+7. The transport term's fixed-point offset is 30–50× below the break-even, not "three orders".
+8. The docstrings that still counted three laws.
+- The dead `CONTROL_SPECIFIC_FORCE_LAWS` group (finding 5) was dropped rather than wired.
+
+**Tests the review found vacuous, and what they are now:**
+9. The round trip sampled segment MIDPOINTS of a step-and-settle schedule, where γ has settled onto γ\* and
+   the `τ_γ·γ̇` term is ~0 — it passed with the inverse's τ_γ monkeypatched to 0.3. It now ramps over
+   segments a few τ_γ long and asserts that the flown path angle is more than 2× the tolerance away from the
+   command at the sample points, so an inverse that read γ as the target fails it.
+10. The clip test never clipped (the demand was n ∈ [0.985, 1.366]; replacing the box with ±1e9 changed the
+    rollout by exactly 0.000e+00). It now drives both ends of the box from states and commands inside the
+    head's own γ\* box, and asserts the resolved load equals the bound.
+11. The neutral's "on every airframe" was tested on one; it now runs on three.
+12. An unreachable zero branch in the rate test now runs (γ\* = γ).
+13. Added: the stall clamp (a command inside the box whose load the wing cannot make at 1.1 V_s) and the
+    CUDA compile/backward parity the other laws have.
+14. The record test accepted any load in the box; it now checks each segment's value against
+    `path_angle_load_factor` at that segment's start state.
+
+Remaining nit, not acted on: `inference/export.py` names the vertical column through
+`forecast.longitudinal_parameterization` (finding 4). The two are one config field and the gate that sets
+`vertical_commands` is contract-driven, so the coupling is latent, not live.

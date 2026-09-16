@@ -12,8 +12,12 @@ import torch.nn as nn
 
 from ts_transformer.data.approach_difficulty import approach_difficulty
 from ts_transformer.inference.calibration import conformal_intervals, interval_stratum
-from aerodynamic_model.torch_dynamics import specific_force_thrust_n, speed_loop_specific_force
-from aerodynamic_model.torch_lag_dynamics import SpeedCommandLaw
+from aerodynamic_model.torch_dynamics import (
+    path_angle_load_factor,
+    specific_force_thrust_n,
+    speed_loop_specific_force,
+)
+from aerodynamic_model.torch_lag_dynamics import PathAngleLaw, SpeedCommandLaw
 from ts_transformer.config import (
     CONTROL_THRUST_FRACTION,
     CTA_CONDITIONING_OFF,
@@ -33,7 +37,11 @@ from ts_transformer.outputs.dynamics import rollout as control_rollout
 from ts_transformer.outputs.dynamics.rollout import padded_dense_queries
 from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
 from ts_transformer.outputs.dynamics.backends import lag_control_law
-from ts_transformer.outputs.envelope import physical_controls
+from ts_transformer.outputs.envelope import (
+    CONTROL_NAMES,
+    control_contract,
+    physical_controls,
+)
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 
@@ -44,8 +52,8 @@ def record_newton_controls(
     dynamics: dict[str, torch.Tensor],
     config: TSConfig,
 ) -> torch.Tensor:
-    """A SPECIFIC-FORCE or SPEED-COMMAND schedule flown, in the record's newton contract,
-    ``[B, N, 3]``.
+    """A SPECIFIC-FORCE, SPEED-COMMAND or PATH-ANGLE schedule flown, in the record's newton
+    contract, ``[B, N, 3]``.
 
     The thrust column is the thrust the command asks for where its segment BEGINS —
     ``clamp(W·n_x + D, T_lo, T_max)`` at the segment's start state and COMMANDED load factor,
@@ -74,13 +82,20 @@ def record_newton_controls(
             initial[:, 3:4] + flown[..., 0], starts[..., 3], torch.sin(starts[..., 5]),
             law.speed_time_constant_s,
         )
+    load_factor = flown[..., 2]
+    if isinstance(law, PathAngleLaw):
+        load_factor = path_angle_load_factor(
+            flown[..., 2], torch.sin(starts[..., 5]), torch.cos(starts[..., 5]),
+            starts[..., 3], flown[..., 1], law.path_angle_time_constant_s,
+            law.min_load_factor, law.max_load_factor,
+        )
     thrust = specific_force_thrust_n(
-        specific_force, flown[..., 2],
+        specific_force, load_factor,
         starts[..., 3], starts[..., 2], starts[..., 6],
         dynamics["aero_params"].to(flown).unsqueeze(1),
         law.min_thrust_fraction * max_thrust, max_thrust,
     )
-    return torch.cat((thrust.unsqueeze(-1), flown[..., 1:]), dim=-1)
+    return torch.stack((thrust, flown[..., 1], load_factor), dim=-1)
 
 
 def _dynamics_batch(
@@ -229,6 +244,15 @@ def forecast_control_batch(
     longitudinal_commands = (
         flown[..., 0].detach().cpu().numpy().astype(np.float64) if longitudinal else None
     )
+    # The VERTICAL column, only where the contract's third column is not the load factor (the
+    # path-angle target): the newton record's third column is the load the loop resolved, so
+    # the command itself would otherwise be lost.
+    vertical_commands = (
+        flown[..., 2].detach().cpu().numpy().astype(np.float64)
+        if control_contract(config.control_thrust_parameterization).names[2]
+        != CONTROL_NAMES[2]
+        else None
+    )
     predicted_final_time = (
         prediction.final_time_s.detach().cpu().numpy().astype(np.float64)
     )
@@ -260,6 +284,9 @@ def forecast_control_batch(
             ),
             longitudinal_parameterization=(
                 config.control_thrust_parameterization if longitudinal else None
+            ),
+            vertical_commands=(
+                None if vertical_commands is None else vertical_commands[row]
             ),
             sample_durations_s=np.diff(np.concatenate(([0.0], row_offsets))),
             segment_durations_s=durations[row],

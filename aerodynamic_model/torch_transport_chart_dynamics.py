@@ -26,6 +26,7 @@ from aerodynamic_model.torch_dynamics import (
     aerodynamic_coefficients,
     drag_force_n,
     isa_density,
+    path_angle_load_factor,
     specific_force_thrust_n,
     speed_loop_specific_force,
 )
@@ -341,6 +342,32 @@ def transport_chart_speed_command_thrust_n(
     return specific_force_thrust_n(
         specific_force, load_factor, speed, altitude, mass, aero_params,
         min_thrust_n, max_thrust_n,
+    )
+
+
+def transport_chart_path_angle_load_factor(
+    state_chart: torch.Tensor,
+    path_angle_command_rad: torch.Tensor,
+    bank_rad: torch.Tensor,
+    path_angle_time_constant_s: torch.Tensor,
+    frame_params: torch.Tensor,
+    min_load_factor: torch.Tensor | float,
+    max_load_factor: torch.Tensor | float,
+) -> torch.Tensor:
+    """The load factor a first-order path loop asks for at a chart state, with V and γ read as
+    :func:`transport_chart_rhs` reads them. Wherever neither the load box nor the stall clamp
+    binds, the RHS then integrates ``γ' = (γ* − γ)/τ_γ`` on every airframe."""
+    speed, vu, _altitude, _mass = _chart_speed_altitude_mass(state_chart, frame_params)
+    sin_gamma = vu / speed
+    return path_angle_load_factor(
+        path_angle_command_rad,
+        sin_gamma,
+        torch.sqrt(torch.clamp(1.0 - sin_gamma * sin_gamma, min=0.0)),
+        speed,
+        bank_rad,
+        path_angle_time_constant_s,
+        min_load_factor,
+        max_load_factor,
     )
 
 

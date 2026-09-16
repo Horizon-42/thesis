@@ -418,6 +418,15 @@
     "N6_speed_command": "B1_point_matched 只改 control_thrust_parameterization=speed-command（seed 1337）；门：分类比力偏差范围向真值自身 0.0045 g 收敛（N3 已通过）、重型−737 速度偏差差距缩小（N3 未通过）、直线进近 FDE p50 回到孪生的种子散布内（N3 未通过）；否决：总体 ADE 劣于孪生 N4_twin 超过约 125 m 种子线。",
     "N6_speed_command_s2024": "同上，seed 2024（同分割），孪生 N4_twin_s2024：门需两个种子同向。"
    }
+  },
+  "sf_n7": {
+   "title": "N7′ · 垂直通道改为航迹角目标（比力 + 路径角）",
+   "intent": "设计 §7.5 的诊断：垂直通道是开环二重积分——载荷指令偏差 0.004 会按 ½·g·δn·t² 长成高度误差，实测在真实航班上是终点 +92 m、−5.3 m/s；而同样大小的瞬时误差在航迹角目标下只有 +17 m（§13.3），其教师开环回放也好得多（直线进近 ADE p50 32 m，对比 n_x 的 63 m、δ 的 145 m，§13.2）。本臂把控制头的第三列从载荷因子换成航迹角目标 γ*，由一阶回路在每个 RK4 子步重解载荷（夹在载荷箱内，失速钳不变），纵向仍是比力。门：(1) 预先登记的盈亏平衡——每架航班的 γ* 偏差 ≤ 0.11°；(2) 最后 5–1 km 触及失速边界的航班比例从 32/45 % 下降，该组的沿航迹落后从 1.0–1.1 km 下降，最后一公里高度误差从约 95 m 下降；(3) 回归检查：分类比力偏差仍在真值自身的散布上。否决：总体 ADE 劣于 N4_twin 超过约 125 m 种子线；直线进近 FDE 按沿航迹/垂直分解读（俯冲换时间不算更好）。声明：这是垂直合约的改变，不是给模型更多信息——律里没有任何程序、下滑道或走廊，剖面仍由模型自己预测。",
+   "design": "4dTrajectory/ts_transformer/docs/2026-09-14_specific_force_control_design.md §14",
+   "runs": {
+    "N7_path_angle": "B1_point_matched 只改 control_thrust_parameterization=specific-force+path-angle（seed 1337）；对照 sf_n4 的 N4_twin（δ）与 sf_n3 的 N3_specific_force（n_x），同分割同代码。",
+    "N7_path_angle_s2024": "同上，seed 2024（同分割）：门需两个种子同向。"
+   }
   }
  }
 }
