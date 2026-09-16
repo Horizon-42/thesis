@@ -4,6 +4,26 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-16 — ts_transformer: the path-angle vertical contract, built (N7′ P1+P2, branch `sf-n7`)
+
+A fourth `control_thrust_parameterization`, **`specific-force+path-angle`** (design §14): the control head's
+THIRD column becomes a path-angle target γ*, and the lag RHS re-solves the load factor
+`n = [cos γ + V(γ* − γ)/(g·τ_γ)]/cos φ` at every RK4 stage, clipped to the load box with the stall clamp
+unchanged. Longitudinally it stays the specific force, so `Ė = V·n_x` and the vertical law can only move
+energy between height and speed.
+- **Why:** the load-factor column is an open-loop double integrator (design §7.5.3). Measured: 0.004 of load
+  bias is +92 m of end height and −5.3 m/s; the same instantaneous error under a path-angle target is +17 m.
+- **Contract constants** (box [−15°, +10°], neutral −2.9° — the teacher's own median, τ_γ = 3 s) are spelled
+  into the target contract, so a checkpoint trained under other values is refused at load.
+- **Refused:** the point-mass model, the `fitted` teacher, every command hook, and the heading-rate loss —
+  that term reads the third actuator as a load factor, which under this contract is radians (the one real
+  bug the P1 review found; it would have priced a sign-flipped, 20×-small turn rate).
+- **Nothing stored moves:** defaults are bit-identical and the 247-history census is unchanged in name, slug
+  and parameter rows. ts + `aerodynamic_model` 1350 passed; a 2-epoch smoke completed train → predict →
+  evaluate on real KRDU data with 1404/1404 solved.
+- **Campaign `sf_n7`** (two seeds) launched 2026-09-16 01:31 UTC; gates pre-registered in §14.8, the
+  headline one being a per-flight γ* bias at or below 0.11°.
+
 ### 2026-09-16 — ts_transformer: the glidepath hook (N7) withdrawn as a model fix; a learned vertical target (N7′) proposed
 
 - **Withdrawn (the user's objection):** the model's purpose is to LEARN to fly a procedure-conforming track.

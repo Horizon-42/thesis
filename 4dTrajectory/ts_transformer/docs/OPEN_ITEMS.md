@@ -74,7 +74,19 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
 - **N7 (an inference-time glidepath hook) — WITHDRAWN as a model fix** (the user, 2026-09-16, design
   §7.5.6). It computes the final's vertical profile from the published procedure, so the result would be the
   rule's, not the model's. Kept only as a labelled diagnostic or baseline component.
-- **N7′ — PRE-MEASURED 2026-09-16, not built (the user's call; design §13):** a learned vertical target. The
+- **N7′ — BUILT and RUNNING (2026-09-16, branch `sf-n7`, design §14).** The contract
+  `control_thrust_parameterization=specific-force+path-angle`: the head's third column is a path-angle
+  target γ*, the lag RHS re-solves the load factor at every RK4 stage (clipped to the load box, stall clamp
+  unchanged), the specific force keeps the longitudinal channel so the vertical law is energy-neutral.
+  - P1 reviewed (§14.9, opus, code only): one real bug — the heading-rate loss read the third actuator as a
+    load factor — now refused; six tests rewritten because the reviewer showed they passed vacuously.
+  - Defaults bit-identical; the 247-history census is unchanged in name, slug and parameter rows;
+    ts + `aerodynamic_model` 1350 passed; a 2-epoch smoke on real KRDU data completed the chain.
+  - Campaign `sf_n7` (`N7_path_angle`, `N7_path_angle_s2024`) launched 2026-09-16 01:31 UTC at `87497be`.
+  - Gates (§14.8, pre-registered): the head's per-flight γ* bias ≤ **0.11°**; the stall-bound share and that
+    group's 1.0–1.1 km along-track lag fall; straight-in FDE read WITH its along/vertical split; the
+    per-class n_x bias stays at the truth's spread. Veto: pooled ADE beyond the ~125 m seed line.
+  - The pre-measurement that justified building it (design §13): a learned vertical target. The
   head predicts the path angle per segment, and a fixed tracking law with no procedure in it flies the head's
   own target. Under SF, `Ė = V·n_x`, so the law cannot hide an energy cost the way N6's speed loop did.
   - The teacher is identifiable: flown open loop, its replay is straight-in ADE p50 **32 m** against 63 m
