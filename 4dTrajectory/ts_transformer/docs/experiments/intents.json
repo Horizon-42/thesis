@@ -410,6 +410,26 @@
     "T0c_L90_s1337": "178 s 回看（L=90），锚点 119，种子 1337：剂量方向，不进门。",
     "T0c_L90_s2024": "178 s 回看，锚点 119，种子 2024：剂量方向，不进门。"
    }
+  },
+  "two_tier_t1a_20260916": {
+   "title": "T1a · 计划给定的学习型跟踪器（协议 C）",
+   "intent": "两重 Transformer T1：学习型控制层被告知真值计划（plan 头的标签）与真值到达时间，随机锚点训练，每 30 s 在自己飞出的行上再问——能否把计划飞得比规则制导近？门 G1：雷达引导 ADE < 1000 m、直线 < 200 m（两种子），可飞 ≥ 95 %，建立率 ≥ 规则制导的 88 %。读未来，是 oracle，不是预测结果。",
+   "design": "4dTrajectory/ts_transformer/docs/2026-09-16_two_tier_transformer_feasibility.zh.md §10.3",
+   "runs": {
+    "T1a_plan_p50_s1337": "真值计划 token + 真值 CTA，训练时 50 % 样本遮掉 token，种子 1337：G1 的被测臂。",
+    "T1a_plan_p50_s2024": "同上，种子 2024：G1 的第二种子。",
+    "T1a_plan_p0_s1337": "真值计划 token 从不遮掉，种子 1337：读风险 2（过度依赖计划）。"
+   },
+   "variants": {
+    "T1a_plan_p50_s1337@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来）：G1 的读数。",
+    "T1a_plan_p50_s1337@lockstep-no-plan": "同一权重、计划 token 置为缺席、仍给真值到达时间：计划 token 值多少。",
+    "T1a_plan_p50_s1337@lockstep-one-shot": "只在 L−1 问一次、整段飞完：再问值多少。",
+    "T1a_plan_p50_s2024@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来）：G1 的读数。",
+    "T1a_plan_p50_s2024@lockstep-no-plan": "同一权重、计划 token 置为缺席、仍给真值到达时间：计划 token 值多少。",
+    "T1a_plan_p50_s2024@lockstep-one-shot": "只在 L−1 问一次、整段飞完：再问值多少。",
+    "T1a_plan_p0_s1337@lockstep-receding": "每 30 s 在自己飞出的行上再问，真值计划与到达时间在飞到的位置读取（协议 C，读未来）：G1 的读数。",
+    "T1a_plan_p0_s1337@lockstep-one-shot": "只在 L−1 问一次、整段飞完：再问值多少。"
+   }
   }
  }
 }

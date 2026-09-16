@@ -121,6 +121,19 @@ CTA_CONDITIONINGS = (
 CTA_CONDITIONINGS_AVAILABLE = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
 CTA_FIELDS = ("cta_conditioning",)
 
+# Two-tier T1 (`docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §10.3): the PLAN as a
+# decoder input — the plan path's target vector at the anchor (`outputs/plan/labels.TARGETS`,
+# the operating parameters and the next instruction) as one token fused beside the aircraft
+# condition and the CTA (`outputs/control/plan_token.py`). ``truth-next`` is the TRUTH's plan,
+# the plan head's own label: it READS THE FUTURE — the protocol-C oracle a plan-given tracker
+# is judged under, never a prediction result — and the run name says ``plan=truth-next``.
+# ``plan_conditioning_dropout`` replaces the token by the ABSENT token for that share of the
+# training samples (the fallback a tracker needs when the plan it is handed is unreliable).
+PLAN_CONDITIONING_OFF = "off"
+PLAN_CONDITIONING_TRUTH_NEXT = "truth-next"
+PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF, PLAN_CONDITIONING_TRUTH_NEXT)
+PLAN_CONDITIONING_FIELDS = ("plan_conditioning", "plan_conditioning_dropout")
+
 # The duration head (B1, §三 3.1; B1.b, §三 3.1b). ``point`` is the package's original
 # scalar ``FinalTimeHead``; ``quantile`` is ``outputs.duration_heads.QuantileFinalTimeHead`` —
 # five monotone quantiles of the SAME quantity, trained by the sum of their pinball losses
@@ -849,6 +862,9 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "training_cohort_min_future_s": 0.0,
         "random_train_anchor_min_future_s": 60.0,
         "random_train_anchor_sampling": RANDOM_TRAIN_ANCHOR_SAMPLING_UNIFORM,
+        # A named recipe is judged at L-1: a common floor (two-tier T0(c)) is a `custom` run.
+        # Every stored recipe config carries the default 0, so pinning renames nothing.
+        "anchor_floor_index": 0,
         # `random_train_anchor_l1_share` is deliberately NOT pinned beside it, for the same
         # reason as `duration_quantile_loss_weight` below: with `random_train_anchor` pinned
         # False a non-zero share is already refused outright, and a bound that cannot bind
@@ -901,6 +917,10 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "latent_posterior_init_std": 1.0,
         "latent_beta_warmup_epochs": 0,
         "latent_aux_duration_weight": 0.0,
+        # ...and so is the plan token (two-tier T1, which reads the truth's plan): a recipe
+        # run is told no plan. `plan_conditioning_dropout` is not pinned beside it — with the
+        # token pinned off a non-zero dropout is already refused.
+        "plan_conditioning": PLAN_CONDITIONING_OFF,
         "control_state_duration_gradient": False,
         "control_gradient_clip_norm": 20.0,
         "control_rollout_integrator_dt_s": 0.5,
@@ -1697,6 +1717,8 @@ class ControlOutput(OutputSpec):
 
     control_recipe_name: str
     cta_conditioning: str
+    plan_conditioning: str
+    plan_conditioning_dropout: float
     duration: DurationSpec
     dynamics: DynamicsSpec
     objective: ControlObjective
@@ -1707,6 +1729,22 @@ class ControlOutput(OutputSpec):
         super().__post_init__()
         _require_member("control_recipe_name", self.control_recipe_name, CONTROL_RECIPE_NAMES)
         _require_member("cta_conditioning", self.cta_conditioning, CTA_CONDITIONINGS)
+        _require_member("plan_conditioning", self.plan_conditioning, PLAN_CONDITIONINGS)
+        if not 0.0 <= self.plan_conditioning_dropout < 1.0:
+            raise ValueError(
+                "plan_conditioning_dropout is the share of training samples whose plan token is "
+                f"absent, in [0, 1), got {self.plan_conditioning_dropout!r}"
+            )
+        if self.plan_conditioning == PLAN_CONDITIONING_OFF and self.plan_conditioning_dropout:
+            raise ValueError(
+                f"plan_conditioning_dropout={self.plan_conditioning_dropout!r} drops a plan token, "
+                "and plan_conditioning='off' builds none"
+            )
+        if self.plan_conditioning != PLAN_CONDITIONING_OFF and self.latent.active:
+            raise ValueError(
+                "a plan token beside a latent intent is two answers to one question (what the "
+                "flight is going to do); the latent line is its own axis"
+            )
         if self.horizon_mode != HORIZON_NORMALIZED:
             raise ValueError(
                 "control output uses learned non-uniform segments and currently requires "
@@ -2113,6 +2151,10 @@ class TSConfig:
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
+    # The plan as a decoder input (PLAN_CONDITIONINGS, two-tier T1) and the share of training
+    # samples whose plan token is dropped.
+    plan_conditioning: str = PLAN_CONDITIONING_OFF
+    plan_conditioning_dropout: float = 0.0
     # WHAT the duration head emits (DURATION_HEADS, B1/B1.b): one point estimate, the five
     # DURATION_QUANTILES, or both. Every value but `point` belongs to the control output
     # only. Under `quantile` the median walks the existing `final_time_s` contract (it IS
@@ -2357,6 +2399,11 @@ class TSConfig:
                 raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
         if self.control_command_hook != CONTROL_HOOK_OFF and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError("the command hook reads the threshold-anchored ENU chart")
+        if self.plan_conditioning != PLAN_CONDITIONING_OFF and self.coordinate_frame != COORDINATE_FRAME_ENU:
+            raise ValueError(
+                "the plan token is read through the plan path's skeleton, written in the "
+                f"threshold-anchored ENU chart; coordinate_frame={self.coordinate_frame!r}"
+            )
         if self.prediction_output == PREDICTION_PLAN and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(
                 "the plan path's skeleton and guidance are written in the threshold-anchored ENU "
@@ -2409,6 +2456,12 @@ class TSConfig:
                     "(the truth join point / the lead's true landing time) and "
                     f"{CHECKPOINT_SELECTION_ANCHOR_GRID_ADE} re-reads it afresh at every "
                     "bin anchor, so the metric would be selecting on the oracle, not the model"
+                )
+            if self.plan_conditioning != PLAN_CONDITIONING_OFF:
+                raise ValueError(
+                    f"plan_conditioning={self.plan_conditioning!r} reads the truth's plan and "
+                    f"{CHECKPOINT_SELECTION_ANCHOR_GRID_ADE} re-reads it at every bin anchor, so "
+                    "the metric would be selecting on the oracle, not the model"
                 )
 
     # ── derived values, kept on the flat config for every existing reader ────

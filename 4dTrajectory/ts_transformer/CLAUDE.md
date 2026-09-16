@@ -1058,6 +1058,8 @@ is control-specific. `terminal_state_loss`, `arc_length_geometry`, `fixed_dt_sup
 them with the state path, and filing them under the control path would claim an ownership
 that does not exist.
 
+**Direction between paths**: the control path may read the plan path (two-tier T1's plan token, `outputs/control/plan_token.py`, fuses the plan head's label), never the reverse (`test_the_plan_path_never_imports_the_control_path`).
+
 **Direction**: the loop, the replay, the export and the CLI import `outputs/`, never the
 reverse. Only a path's STRATEGY SEAM (`strategy`, `forecast`, `supervision`, `loss` /
 `loss/objective`) reaches the spine's shared modules (`objective`, `forecast`, `models`,

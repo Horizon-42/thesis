@@ -10,12 +10,14 @@ import numpy as np
 import torch
 
 from ts_transformer.data.channels import states_from_channels
-from ts_transformer.config import CTA_CONDITIONING_GIVEN, TSConfig
+from ts_transformer.config import CTA_CONDITIONING_GIVEN, PLAN_CONDITIONING_OFF, TSConfig
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays, probe_final_approach
 from ts_transformer.outputs.conditioning import condition_vector
 from ts_transformer.outputs.dynamics.inverse import MINIMUM_INVERSE_STATES, segment_controls
 from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
+from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, plan_token
+from ts_transformer.outputs.plan.labels import TARGETS, PlanTargets
 
 
 def reference_control_supervision(
@@ -263,6 +265,13 @@ def probe_dynamics(
         dynamics["cta_s"] = torch.full(
             (batch_size,), config.final_time_scale_s, dtype=torch.float64, device=device
         )
+    if config.plan_conditioning != PLAN_CONDITIONING_OFF:
+        # a PRESENT token (an all-invalid plan with no fix ahead), built by the token builder
+        present = plan_token(PlanTargets(
+            values=np.zeros(len(TARGETS), dtype=np.float32), valid=np.zeros(len(TARGETS), dtype=np.float32),
+            next_is_join=False,
+        ))
+        dynamics[PLAN_TOKEN_KEY] = torch.from_numpy(present).to(device).unsqueeze(0).expand(batch_size, -1)
     if config.control_imitation_loss_weight:
         dynamics["reference_controls"] = torch.tensor(
             [[[0.2, 0.0, 1.0]]], dtype=torch.float64, device=device

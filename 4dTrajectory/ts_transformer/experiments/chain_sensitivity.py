@@ -49,7 +49,7 @@ are the arm's own properties, which is why the artifact names each checkpoint's 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
@@ -64,13 +64,13 @@ import torch
 from ts_transformer.config import CONTROL_HOOK_OFF, DURATION_HEAD_POINT, PREDICTION_CONTROL, default_anchor
 from ts_transformer.data.anchor_grid import strata_fixed_at_anchor
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED
-from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.data.dataset import FlightSeries, window_anchors
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.experiments.anytime_curve import FORBIDDEN_SPLIT, Arm, Grid, cohort_series, load_arm, parse_arms
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
-from ts_transformer.inference.forecast import Forecast, concatenate, cut_rows, forecast_approaches
+from ts_transformer.inference.forecast import Forecast, concatenate, forecast_approaches
+from ts_transformer.inference.receding import ROW_TOLERANCE_S, cut_at_lead, displacement_at, rolled_series
 from ts_transformer.io_utils import file_sha256
 
 RESULT_SCHEMA = "ts-chain-sensitivity-v1"
@@ -79,10 +79,6 @@ RECORDS_DIR = "records"
 INSTRUMENT = "the chain-sensitivity readout"
 DEFAULT_STEP_S = 60.0
 DEFAULT_LINKS = 5
-#: A cut lead must fall on a rollout query row: the dense grid is the integrator step plus the
-#: segment boundaries (`dense_query_offsets`), so a Δ that is a whole multiple of the step has
-#: a row exactly there. This is the tolerance that row is found at.
-ROW_TOLERANCE_S = 1e-6
 
 
 @dataclass(frozen=True)
@@ -95,70 +91,6 @@ class ChainPlan:
     limit: int
     batch_size: int | None
     write_records: bool
-
-
-# ── the rolled series: the observed track continued by what was flown ─────────
-
-def rolled_series(series: FlightSeries, anchor: int, flown: Forecast, until: int, dt_s: float) -> FlightSeries:
-    """``series`` with every row after ``anchor`` replaced by the ``flown`` rows, sampled on
-    the series' own uniform grid up to index ``until`` — the history a chained re-ask at
-    ``until`` is shown. The flown rows start one query step after the anchor, so the anchor's
-    own observed row stands in before them. The supervision arrays are dropped (a rolled
-    series has no truth); nothing on the forecast path reads them for a hook-free, CTA-free
-    control checkpoint, which `load_arm` and `check_arm` guarantee."""
-    if until <= anchor:
-        raise ValueError(f"a rolled series continues past its anchor {anchor}, not to {until}")
-    origin = float(series.times[anchor])
-    grid = origin + dt_s * np.arange(1, until - anchor + 1, dtype=np.float64)
-    if grid[-1] > float(flown.times[-1]) + ROW_TOLERANCE_S:
-        raise ValueError(
-            f"the flown rows end at {float(flown.times[-1]) - origin:.3f} s, the rolled series needs "
-            f"{grid[-1] - origin:.3f} s"
-        )
-    times = np.concatenate(([origin], np.asarray(flown.times, dtype=np.float64)))
-    values = np.concatenate((np.asarray(series.values[anchor : anchor + 1], dtype=np.float64),
-                             np.asarray(flown.values, dtype=np.float64)))
-    rows = np.stack([np.interp(grid, times, values[:, c]) for c in range(values.shape[1])], axis=1)
-    return replace(
-        series,
-        times=np.concatenate((np.asarray(series.times[: anchor + 1], dtype=np.float64), grid)),
-        values=np.concatenate((np.asarray(series.values[: anchor + 1], dtype=np.float64), rows)),
-        supervision_times=None, supervision_values=None, supervision_weights=None,
-    )
-
-
-def cut_at_lead(forecast: Forecast, lead_s: float) -> Forecast:
-    """The forecast's rows up to and including the query row at ``lead_s`` from its anchor."""
-    offsets = np.cumsum(forecast.sample_durations_s)
-    rows = np.flatnonzero(np.abs(offsets - lead_s) <= ROW_TOLERANCE_S)
-    if not rows.size:
-        raise ValueError(
-            f"no rollout row at {lead_s:g} s (the dense grid is the integrator step plus the "
-            "segment boundaries; the step must be a whole multiple of the integrator step)"
-        )
-    return cut_rows(forecast, int(rows[0]) + 1)
-
-
-# ── displacement at a lead ─────────────────────────────────────────────────────
-
-def displacement_at(series: FlightSeries, forecast: Forecast, origin_index: int, time_s: float) -> float | None:
-    """The 3D chart displacement between ``forecast`` (the observed row at ``origin_index``
-    standing in before its first row) and the observed track at absolute ``time_s``; None
-    when either ends before it."""
-    truth_times = np.asarray(series.times, dtype=np.float64)
-    if time_s > float(forecast.times[-1]) + ROW_TOLERANCE_S or time_s > float(truth_times[-1]) + ROW_TOLERANCE_S:
-        return None
-    position = list(POSITION_IDX)
-    times = np.concatenate(([float(series.times[origin_index])], np.asarray(forecast.times, dtype=np.float64)))
-    values = np.concatenate((np.asarray(series.values[origin_index : origin_index + 1], dtype=np.float64)[:, position],
-                             np.asarray(forecast.values, dtype=np.float64)[:, position]))
-    truth = np.asarray(series.values, dtype=np.float64)[:, position]
-    predicted = np.array([np.interp(time_s, times, values[:, c]) for c in range(3)])
-    observed = np.array([np.interp(time_s, truth_times, truth[:, c]) for c in range(3)])
-    value = float(np.linalg.norm(predicted - observed))
-    if not math.isfinite(value):
-        raise ValueError(f"{series.dataset_id}: non-finite displacement at {time_s - float(series.times[origin_index]):g} s")
-    return value
 
 
 # ── the forecasts ──────────────────────────────────────────────────────────────

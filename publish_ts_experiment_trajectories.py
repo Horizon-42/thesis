@@ -111,10 +111,11 @@ INTENT_REGISTRY_SCHEMA = "ts-experiment-intents-v1"
 ANYTIME_RECORDS_SCHEMA = "ts-anytime-records-v1"
 #: The summary blocks the REPLAY runners write beside a checkpoint's own forecasts — MIRRORS of
 #: ``experiments.chain_sensitivity`` (``chain``: the one-shot and the chained re-ask of one
-#: checkpoint), for the same reason the anytime schema above is one. A directory carrying one is
+#: checkpoint) and ``experiments.tracker_lockstep.RECORDS_BLOCK`` (``lockstep``: a plan-given
+#: tracker re-asked in lockstep), for the same reason the anytime schema above is one. A directory carrying one is
 #: a VARIANT of that checkpoint's prediction and has no category of its own without
 #: ``--category-variant``: published bare, it would be filed as the checkpoint's L−1 prediction.
-VARIANT_RECORD_BLOCKS = ("chain",)
+VARIANT_RECORD_BLOCKS = ("chain", "lockstep")
 
 
 def _utc_now() -> str:

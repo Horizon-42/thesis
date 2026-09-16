@@ -274,8 +274,8 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 |---|---|---|---|
 | T0(a) | 完成（§3） | 8a03408 | — |
 | T0(b) 链式敏感度 L | **完成**（§10.4）：开环链式在两臂上都不赢；native32 的累积主要是锚点分布外 | ec9323e；`outputs/KRDU/experiments/two_tier_t0b_20260916/{chain_60s,chain_30s,identity_check.json,lead_time_error.*}` | 雷达引导整段 ADE：native32 一次成形 2870 → 链 60 s 9893 / 30 s 11930；A0b 3839 → 5585；L：native32 1.2–1.7，A0b 0.5–0.95 |
-| T0(c) 长历史信息 | `anchor_floor_index` 已建（opus review：4 个 bug 修正后复核通过，见 commit）；6 臂声明 `docs/experiments/t0c_history_floor_arms.json` + intents；**待队列 agent 启动** | campaign `outputs/KRDU/experiments/two_tier_t0c_20260916` | 三臂共同 cohort 1371（KRDU val） |
-| T1 学习型第一层 | **设计定稿 §10.3**（滚动时域 + 计划 token + CTA given）；T1.1 开建（`outputs/control/plan_token.py` 已写，`SkeletonCache` 移到 `outputs/plan/skeleton.py`） | — | — |
+| T0(c) 长历史信息 | 9d12b11 首次启动在第一臂建数据时崩（锚点 119 处 38 架 KRDU 航班观测余量 < 3 点，模仿项反演拒绝）→ f5b2531 修正（该锚点不监督任何段，文档既有的全零情形）；**6 臂训练中**（队列 agent，runs worktree @ f5b2531，约 7–8 h） | campaign `outputs/KRDU/experiments/two_tier_t0c_20260916`（首次失败臂移作 `T0c_L60_s1337.aborted-*`） | 三臂共同 cohort 1371（KRDU val） |
+| T1 学习型第一层 | T1.1（`plan_conditioning` 轴 + 融合 token）、T1.2（`inference/receding.py` + `run_ts.py tracker_lockstep`）已提交（opus review：1 个读数 bug——one-shot 与 receding 截断口径不一——等 10 项修正并复核）；T1.3 臂声明 `docs/experiments/t1a_plan_tracker_arms.json`（p50 ×2 种子 + p0）+ intents；**排在 T0(c) 之后训练**，然后 `tracker_lockstep --write-records` + `python -m evaluation` 读 G1 | 见 §10.3；lockstep 细则：最后一次询问 = 预测时长 ≤ Δ + 训练未来下限（T1a 为 20 s），每个变体都在 on-final 过线处截断 | — |
 | T2 端到端 | 未开始 | — | — |
 | T3 | **按现有 harvest 不可建**（§10.2：10 分钟历史不存在） | — | — |
 | T4 | 未开始（前置 oracle） | — | — |

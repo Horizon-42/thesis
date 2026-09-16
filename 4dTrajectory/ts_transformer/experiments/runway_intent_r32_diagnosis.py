@@ -30,7 +30,8 @@ from ts_transformer.experiments.runway_hypotheses import HARVEST_ROOT, identity
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.inference.forecast import cut_at_threshold_crossing, default_anchor
 from ts_transformer.outputs.plan.guidance.timing import TIME_TOLERANCE_S
-from ts_transformer.outputs.plan.strategy import Assignment, SkeletonCache, rolled_predictions_lockstep
+from ts_transformer.outputs.plan.skeleton import SkeletonCache
+from ts_transformer.outputs.plan.strategy import Assignment, rolled_predictions_lockstep
 from ts_transformer.training.train import load_checkpoint
 
 SCHEMA = "ts-runway-intent-r32-diagnosis-v1"

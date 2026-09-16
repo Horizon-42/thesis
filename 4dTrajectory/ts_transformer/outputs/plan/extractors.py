@@ -164,7 +164,7 @@ class PlanLabels:
         return out
 
 
-def _ground_speeds(series: FlightSeries, rows: slice) -> np.ndarray:
+def ground_speeds(series: FlightSeries, rows: slice) -> np.ndarray:
     """Physical horizontal ground speed (m/s) of the observed rows, from the chart velocities
     through the same inverse the export uses (never the chart derivatives themselves)."""
     states = states_from_channels(
@@ -280,7 +280,7 @@ def extract_plan(series: FlightSeries, anchor: int, skeleton: RunwaySkeleton, *,
     e, n, u = values[:, IDX["e"]], values[:, IDX["n"]], values[:, IDX["u"]]
     d, xt = skeleton.axes(e, n)
     remaining = np.asarray(remaining_path_profile_m(series)[rows], dtype=np.float64)
-    speed = _ground_speeds(series, rows)
+    speed = ground_speeds(series, rows)
     dt = float(series.times[1] - series.times[0]) if series.n_samples > 1 else 1.0
 
     # the join: the measurement's gate on the observed rows

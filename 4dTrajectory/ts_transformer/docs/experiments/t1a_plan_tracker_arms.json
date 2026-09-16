@@ -1,0 +1,46 @@
+{
+ "_comment": "Two-tier T1a (docs/2026-09-16_two_tier_transformer_feasibility.zh.md §10.3): a learned short-horizon control layer told the TRUTH's plan (plan_conditioning=truth-next, the plan head's own label read at the anchor) and arrival time (cta_conditioning=given), trained at random anchors so it can be asked anywhere, and flown in lockstep by `run_ts.py tracker_lockstep` (re-asked every 30 s on its own flown rows, the truth expert read at the flown pose). PROTOCOL C: it reads the future (the plan and the arrival time) and is never a prediction result; its comparison is the rule guidance flying the same plan (plan_oracle lockstep, design §12.5: vectored 1847 m / straight-in 283 m at L-1) and L3_cta's one-shot with only the truth duration (vectored 1596 m). Supervision = A2b's random-anchor recipe (heading-rate 8 + bank TV 1 + velocity 0.003, no imitation: random anchors + imitation is the known performance cliff), remaining-path-uniform anchors with half the draws reserved for L-1, 180 epochs without early stopping; selection on the fixed-anchor common-grid ADE (the anchor-grid metric is refused under a read-the-future input). Single airport KRDU, val split only; the airport-balanced sampler is not exercised. PRE-REGISTERED GATE G1 (both seeds of the p=0.5 arm, read off tracker_lockstep's `receding` variant at L-1): vectored ADE < 1000 m AND straight-in ADE < 200 m; fully flyable >= 95 % and established >= 88 % of the guidance's share (python -m evaluation on the records). Readings beside the gate: `receding-no-plan` (the absent token on the same weights: what the plan buys), `one-shot` (what re-asking buys), T1a_plan_p0 (risk 2: a model never shown the absent token — does it over-rely on the plan?). If G1 fails with per-ask drift (e(30 s) against the truth rising along the flight), T1c (rolled-state targets) becomes the next step.",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "n_segments": 32,
+  "control_imitation_loss_weight": 0.0,
+  "control_heading_rate_loss_weight": 8.0,
+  "control_bank_tv_loss_weight": 1.0,
+  "random_train_anchor": true,
+  "random_train_anchor_min_future_s": 20.0,
+  "random_train_anchor_sampling": "remaining-path-uniform",
+  "random_train_anchor_l1_share": 0.5,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "lr_plateau_metric": "objective",
+  "epochs": 180,
+  "patience": 180,
+  "cta_conditioning": "given",
+  "plan_conditioning": "truth-next"
+ },
+ "arms": [
+  {
+   "key": "T1a_plan_p50_s1337",
+   "label": "truth plan token + truth CTA, token dropped on 50 % of training rows, seed 1337",
+   "overrides": {
+    "plan_conditioning_dropout": 0.5,
+    "seed": 1337
+   }
+  },
+  {
+   "key": "T1a_plan_p50_s2024",
+   "label": "the same, seed 2024 (G1's second seed)",
+   "overrides": {
+    "plan_conditioning_dropout": 0.5,
+    "seed": 2024
+   }
+  },
+  {
+   "key": "T1a_plan_p0_s1337",
+   "label": "truth plan token never dropped, seed 1337 (risk 2: over-reliance)",
+   "overrides": {
+    "seed": 1337
+   }
+  }
+ ]
+}

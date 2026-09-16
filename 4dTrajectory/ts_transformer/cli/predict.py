@@ -20,6 +20,7 @@ from ts_transformer.config import (
     DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
     DURATION_QUANTILES,
+    PLAN_CONDITIONING_OFF,
     TSConfig,
     CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_BARRIER,
@@ -495,6 +496,12 @@ def parse_predict_options(args, config, parser, series):
         )
     if args.cta_offset_s and config.cta_conditioning != CTA_CONDITIONING_GIVEN:
         parser.error("--cta-offset-s needs a checkpoint trained with cta_conditioning=given")
+    if (args.cta_offset_s or args.cta_from_quantiles) and config.plan_conditioning != PLAN_CONDITIONING_OFF:
+        parser.error(
+            f"plan_conditioning={config.plan_conditioning!r} hands the decoder the truth's plan, whose "
+            "arrival time is the truth's: a shifted or self-quantile CTA beside it is two arrival times, "
+            "and a self-quantile decode would still read the future through the token"
+        )
     if args.interval_endpoints and not args.cta_from_quantiles:
         parser.error("--interval-endpoints is part of the quantile fan; it needs "
                      "--cta-from-quantiles")

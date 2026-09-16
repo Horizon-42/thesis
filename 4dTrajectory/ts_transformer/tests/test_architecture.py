@@ -277,6 +277,18 @@ def test_the_shared_output_parts_import_no_path():
             )
 
 
+def test_the_plan_path_never_imports_the_control_path():
+    """Two-tier T1 (2026-09-16): the control path reads the plan path's labels as an INPUT
+    (`outputs/control/plan_token.py`), so the edge runs control -> plan. The reverse would
+    close a cycle through `outputs.control.strategy`."""
+    for path in (OUTPUTS / "plan").rglob("*.py"):
+        offending = {name for name in _imported_names(path) if name.split(".")[:2] == ["outputs", "control"]}
+        assert not offending, (
+            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; the plan path is the control "
+            "path's input, never its consumer"
+        )
+
+
 def test_nothing_under_outputs_imports_the_training_loop():
     """outputs/ is imported BY the loop, the replay, the export and the CLI — never the
     other way round. A strategy that imported `train` would make its path unusable outside

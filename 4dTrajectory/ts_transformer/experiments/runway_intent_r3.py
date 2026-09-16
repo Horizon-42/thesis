@@ -72,8 +72,9 @@ from ts_transformer.inference.runway_schedule import (
     wake_category,
 )
 from ts_transformer.outputs.plan.guidance.timing import TIME_TOLERANCE_S
+from ts_transformer.outputs.plan.skeleton import SkeletonCache
 from ts_transformer.outputs.plan.strategy import (
-    Assignment, SkeletonCache, rolled_flight_forecast, rolled_predictions_lockstep,
+    Assignment, rolled_flight_forecast, rolled_predictions_lockstep,
 )
 from ts_transformer.run_naming import SPLIT_DAYVAL
 from ts_transformer.training.train import load_checkpoint

@@ -80,25 +80,12 @@ from ts_transformer.outputs.plan.model import (
     probe_plan_context,
 )
 from ts_transformer.outputs.plan.rolled import RolledDraw, RolledWindowTable, load_rolled_windows
-from ts_transformer.outputs.plan.skeleton import RunwaySkeleton, runway_skeleton
+from ts_transformer.outputs.plan.skeleton import RunwaySkeleton, SkeletonCache
 
 if TYPE_CHECKING:
     from ts_transformer.data.dataset import FlightSeries, Normalizer, TrajectoryWindows
     from ts_transformer.data.fixed_dt_supervision import FixedDTControlSupervision
     from ts_transformer.training.objective import ProcedureMultipliers
-
-
-class SkeletonCache:
-    """One skeleton per (airport, runway), read on first use."""
-
-    def __init__(self) -> None:
-        self._by_key: dict[tuple[str, str], RunwaySkeleton] = {}
-
-    def for_series(self, series: FlightSeries) -> RunwaySkeleton:
-        key = (series.airport, str(series.scenario.source.get("runway")))
-        if key not in self._by_key:
-            self._by_key[key] = runway_skeleton(series)
-        return self._by_key[key]
 
 
 class PlanContext(WindowContext):

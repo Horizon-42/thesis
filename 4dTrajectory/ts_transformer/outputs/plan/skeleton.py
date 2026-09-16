@@ -205,3 +205,18 @@ def runway_skeleton(
         ),
         **axes,
     )
+
+
+class SkeletonCache:
+    """One skeleton per (airport, runway), read on first use — beside `runway_skeleton`,
+    which it caches (moved from `outputs/plan/strategy.py` 2026-09-16: the control path's
+    plan token reads skeletons too, and a cache of this module's reading is this module's)."""
+
+    def __init__(self) -> None:
+        self._by_key: dict[tuple[str, str], RunwaySkeleton] = {}
+
+    def for_series(self, series: FlightSeries) -> RunwaySkeleton:
+        key = (series.airport, str(series.scenario.source.get("runway")))
+        if key not in self._by_key:
+            self._by_key[key] = runway_skeleton(series)
+        return self._by_key[key]

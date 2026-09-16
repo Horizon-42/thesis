@@ -27,6 +27,8 @@ from ts_transformer.config import (
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_OFF,
     DURATION_HEAD_TWO_HEAD,
+    PLAN_CONDITIONING_OFF,
+    PLAN_CONDITIONING_TRUTH_NEXT,
     HOOK_SATURATION_HARD,
     PREDICTION_CONTROL,
     ControlOutput,
@@ -34,6 +36,8 @@ from ts_transformer.config import (
     control_recipe,
 )
 from ts_transformer.data.dataset import truth_duration_s
+from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, truth_plan_token
+from ts_transformer.outputs.plan.skeleton import SkeletonCache
 from ts_transformer.data.fixed_dt_supervision import (
     FixedDTControlSupervision,
     FixedDTSupervisionRow,
@@ -158,6 +162,8 @@ class ControlContext(WindowContext):
                 anchor_indices={int(anchor) for _item, anchor in covered},
                 n_segments=int(self.config.n_segments),
             )
+        # the plan token's skeletons (two-tier T1), one per runway, read on first use
+        self.skeletons = SkeletonCache()
         self._rows: list[dict[str, np.ndarray]] | None = None
         self._fixed_dt: tuple[FixedDTSupervisionRow, ...] | None = None
         if windows.cache_context_rows:
@@ -186,6 +192,14 @@ class ControlContext(WindowContext):
             raise ValueError(
                 f"cta_conditioning={config.cta_conditioning!r} names no training-time "
                 "source for the CTA token; only 'given' (the truth duration) is defined"
+            )
+        if config.plan_conditioning == PLAN_CONDITIONING_TRUTH_NEXT:
+            # the truth's plan at this anchor: the plan head's label there (reads the future)
+            arrays[PLAN_TOKEN_KEY] = truth_plan_token(series, anchor, self.skeletons)
+        elif config.plan_conditioning != PLAN_CONDITIONING_OFF:
+            raise ValueError(
+                f"plan_conditioning={config.plan_conditioning!r} names no training-time source "
+                "for the plan token; only 'truth-next' is defined"
             )
         if not windows.control_supervision:
             return arrays

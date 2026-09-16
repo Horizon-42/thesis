@@ -47,6 +47,7 @@ from typing import Any
 from ts_transformer.config import (
     CONTROL_HOOK_FIELDS,
     CTA_FIELDS,
+    PLAN_CONDITIONING_FIELDS,
     DURATION_HEAD_QUANTILE,
     DURATION_HEAD_TWO_HEAD,
     DURATION_QUANTILES,
@@ -182,6 +183,8 @@ META_FIELDS = (
     *INTENT_FIELDS,
     # The CTA axis reads the future the same way: a given-CTA run must wear it.
     *CTA_FIELDS,
+    # ...and the plan token (two-tier T1): a `plan=truth-next` run reads the truth's plan.
+    *PLAN_CONDITIONING_FIELDS,
     # B1 / B1.b: which duration head. The interval a run publishes is part of what it IS,
     # and the named recipes pin this at `point`, so a `quantile` or `two-head` run is
     # `custom` and this item shows (`T=q5` / `T=2h`).
@@ -311,6 +314,8 @@ _ABBREV = {
     "target_conditioning": "target",
     "intent_conditioning": "intent",
     "cta_conditioning": "cta",
+    "plan_conditioning": "plan",
+    "plan_conditioning_dropout": "plan-drop",
     "closure_labels_path": "labels",
     "control_fitted_teacher_path": "teacher",
     "plan_rolled_windows_path": "rolled",
@@ -446,7 +451,7 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "closure_labels_path", "control_fitted_teacher_path",
         "plan_rolled_windows_path", "plan_rolled_share",
     )),
-    ("Conditioning", ("target_conditioning", *INTENT_FIELDS, *CTA_FIELDS)),
+    ("Conditioning", ("target_conditioning", *INTENT_FIELDS, *CTA_FIELDS, *PLAN_CONDITIONING_FIELDS)),
     ("Control rollout", (
         "control_duration_parameterization", "control_duration_uniform_floor",
         "control_rollout_integrator_dt_s", *CONTROL_HOOK_FIELDS,

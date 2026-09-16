@@ -91,6 +91,7 @@ from ts_transformer.config import (  # noqa: E402
     CTA_CONDITIONING_GIVEN,
     HOOK_SATURATIONS,
     INTENT_CONDITIONING_NONE,
+    PLAN_CONDITIONING_OFF,
     PREDICTION_CONTROL,
     TSConfig,
     default_anchor,
@@ -260,7 +261,8 @@ ANYTIME_INSTRUMENT = "the anytime curve"
 
 def load_arm(label: str, path: Path, grid: Grid, device: torch.device,
              *, command_hook: str | None = None, hook_saturation: str | None = None,
-             instrument: str = ANYTIME_INSTRUMENT, refuse_cta_given: bool = True) -> Arm:
+             instrument: str = ANYTIME_INSTRUMENT, refuse_cta_given: bool = True,
+             refuse_plan: bool = True) -> Arm:
     """Every refusal this runner can make about a checkpoint, before it reads one track.
 
     The airports come from the checkpoint's own provenance — never chosen here, which is
@@ -268,7 +270,10 @@ def load_arm(label: str, path: Path, grid: Grid, device: torch.device,
     allows for a pooled checkpoint narrowed by ``--data``. ``instrument`` names the
     measurement in the refusals, for the runners that share this loader.
 
-    ``refuse_cta_given=False`` is for the ONE instrument the CTA cannot corrupt: the ETA
+    ``refuse_cta_given=False`` / ``refuse_plan=False`` are for `tracker_lockstep` (two-tier T1),
+    whose question IS the plan-given tracker under the truth's plan and arrival time (protocol C,
+    the oracle it names in every artifact); and ``refuse_cta_given=False`` alone for the ONE
+    instrument the CTA cannot corrupt: the ETA
     calibration (B2) reads the DURATION HEAD alone — no rollout, no CTA token — so a
     ``given`` checkpoint's quantiles are the same function of the history that a prediction
     would use. The intent refusal below still applies to it, because that oracle is IN the
@@ -286,6 +291,12 @@ def load_arm(label: str, path: Path, grid: Grid, device: torch.device,
             f"{label} ({path}): intent_conditioning={config.intent_conditioning!r} reads the "
             f"FUTURE (the truth join point / the lead's true landing time), so {instrument} "
             "would be measuring the oracle, not the model"
+        )
+    if refuse_plan and config.plan_conditioning != PLAN_CONDITIONING_OFF:
+        raise SystemExit(
+            f"{label} ({path}): plan_conditioning={config.plan_conditioning!r} reads the truth's "
+            f"plan, so {instrument} would be measuring the oracle, not the model "
+            "(a plan-given tracker is read by `run_ts.py tracker_lockstep`)"
         )
     if grid.split not in payload["split"]:
         raise SystemExit(f"{label} ({path}): the checkpoint has no {grid.split!r} split")

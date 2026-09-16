@@ -12,6 +12,7 @@ import torch.nn as nn
 from ts_transformer.config import TSConfig
 from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 from ts_transformer.outputs.conditioning import DYNAMICS_CONDITION_NAMES
+from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, PLAN_TOKEN_WIDTH
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
@@ -22,6 +23,7 @@ from ts_transformer.config import (
     DURATION_HEADS_WITH_POINT,
     DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
+    PLAN_CONDITIONING_OFF,
 )
 from ts_transformer.outputs.duration_heads import FinalTimeHead, QuantileFinalTimeHead
 
@@ -209,8 +211,21 @@ class ControlFeatureModel(nn.Module):
         self.cta_encoder = (
             nn.Sequential(nn.Linear(1, config.d_model), nn.GELU()) if self.cta_given else None
         )
+        # The plan as one more fused token (two-tier T1, `outputs/control/plan_token.py`),
+        # built only under a plan so every plan-free run draws the initialization it always
+        # drew. In training a `plan_conditioning_dropout` share of the rows sees the ABSENT
+        # token (all zeros, the present bit included) — the mode the tracker falls back to.
+        self.plan_given = config.plan_conditioning != PLAN_CONDITIONING_OFF
+        self.plan_dropout = float(config.plan_conditioning_dropout)
+        self.plan_encoder = (
+            nn.Sequential(nn.Linear(PLAN_TOKEN_WIDTH, config.d_model), nn.GELU())
+            if self.plan_given else None
+        )
         self.feature_fusion = nn.Sequential(
-            nn.Linear((config.enc_in + 1 + int(self.cta_given)) * config.d_model, config.d_model),
+            nn.Linear(
+                (config.enc_in + 1 + int(self.cta_given) + int(self.plan_given)) * config.d_model,
+                config.d_model,
+            ),
             nn.GELU(),
             nn.LayerNorm(config.d_model),
         )
@@ -234,6 +249,12 @@ class ControlFeatureModel(nn.Module):
         if self.cta_given:
             cta = (dynamics["cta_s"] / self.cta_scale_s).to(encoded.dtype).unsqueeze(-1)
             parts.append(self.cta_encoder(cta))
+        if self.plan_given:
+            token = dynamics[PLAN_TOKEN_KEY].to(encoded.dtype)
+            if self.training and self.plan_dropout:
+                kept = torch.rand(token.shape[0], 1, device=token.device) >= self.plan_dropout
+                token = token * kept.to(token.dtype)
+            parts.append(self.plan_encoder(token))
         return self.feature_fusion(torch.cat(parts, dim=-1))
 
     def quantile_head(self) -> QuantileFinalTimeHead | None:
