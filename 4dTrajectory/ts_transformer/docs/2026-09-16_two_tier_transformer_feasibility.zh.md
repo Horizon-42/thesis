@@ -380,6 +380,46 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 
 配对 ΔADE（L120 − L60，均值 / 中位，负 = 长回看更好）：雷达引导 −13.9 / −16.5（s1337）、+9.7 / +10.3（s2024）；直线 +11.4 / +2.4、−7.7 / +1.8；L120 更好的航班占 39–52 %。L90 − L60 同样在 ±12 m 内无方向。**G2 不过**（读法：改善 = −配对均值，门 125 m；直线不变差 = 配对均值 ≤ 30 m，`g2_paired.json` 记规则）。结论：在 25 km 切片可得的历史范围内，比 118 s 更长的观测历史没有控制路径能用的进近信息；段 token 长历史层（T3）不建，与 §10.2 的数据约束一致。
 
+### 10.7 T1.4 门读数（2026-09-16 设计，J6 训练期间开建；不依赖 G1 的结果）
+
+**缺口**：G1 的"建立率 ≥ 规则制导的 88 %"与"完全可飞"基线来自 `plan_oracle` 的逐航班 `reference_verdicts`（建立 = 在五边上过阈值 `truncated_at_threshold`；完全可飞 = `required_controls` → `flyability_summary`；另有走廊/下滑道/高度下限违例）。`tracker_lockstep` 记了过阈值数，却没算完全可飞与走廊判定；原计划改由 `python -m evaluation` 读记录——那是另一套"建立"定义，与基线不是同一把尺。T0(c) 的 G2 由队列 agent 的一次性脚本判定，不可复现。
+
+**基线**：`outputs/KRDU/experiments/plan_guidance_20260910/step3d_lockstep_l1/plan_oracle.json`（规则制导飞真值计划，`--route next --policy truth`，native32 的 val 1404 架，锚点 59）：雷达引导 497 架 ADE 1847 m、建立 0.879、完全可飞 0.998；直线 904 架 283 m、0.998、0.999。T1a 的 val 与锚点（L−1 = 59）相同，逐航班配对。
+
+**建（每步 opus review）**：
+1. `tracker_lockstep` 每架加 `reference` = `plan_oracle.reference_verdicts`（同一函数、同一定义），分层块加完全可飞 / 建立 / 各违例比例；schema v2。
+2. 新 runner `run_ts.py two_tier_gates`：读若干 lockstep 产物（`标签=路径`）与基线 `plan_oracle.json`，先核对同一队列（航班集合、锚点），输出：
+   - **G1**（`receding`，每个 p50 种子各判，两种子都过才过）：雷达引导 ADE 均值 < 1000 m 且直线 < 200 m；**完全可飞比例（全部航班）≥ 0.95**；**建立比例按层 ≥ 0.88 × 基线同层比例**（雷达引导 ≥ 0.774、直线 ≥ 0.878）。这些读法在看到任何 T1a 数字之前定下。
+   - **G3**（`head-receding`）：雷达引导 ≤ 2745 m 且直线 ≤ 415 m（预注册常数，§6）；完全可飞 ≥ 0.95（见下方修订）；建立 ≥ 94 %（全部航班）。
+   - 旁读：`receding` 对 `receding-no-plan` 与对 `one-shot` 的逐航班配对 ΔADE（风险 2/6：计划值多少、再问值多少）；对基线的配对 ΔADE；提前量 30/60/120/180/300 s 的位移 p50（漂移判据：`receding` 的位移随提前量增长快于 `one-shot` → T1c 升为必做）。
+   - 产物不可覆盖（`--out` 已存在即拒绝），JSON + 文本表。
+3. 队列 agent：J6 训练全部结束后才把 runs worktree 移到新 commit（训练中途移 HEAD 会让后面的臂用另一份代码），再跑 lockstep 与本读数。
+
+**review 后的修订（2026-09-16，任何 T1a lockstep 数字出现之前定下）**：
+- **结束规则（高）**：原 lockstep 在到达时间上结束——`cta=given` 的 rollout 恰好飞完所给的 CTA，最后一问"整段保留"就停；准时的航迹恰在 d≈0 处结束，"建立"由舍入的符号决定（审查实测：真值行作预报、到达即止，40 架里只有 15 架判为建立），而基线制导的 rollout 一直飞到 `T + max(30 s, 0.1·T)`。改为**与基线同一个时限**：每架的时限 = `T₀ + max(30 s, 0.1·T₀)`（`plan_oracle.closing_horizon_s`，T₀ = 第一次询问的到达时间：真值下为真值时长，计划头下为头自己的 T），航班只在五边上过阈值或到时限时结束；每次询问给的 CTA 不小于 `max(训练未来下限, 一步 Δ)`（腿始终是整步，lockstep 保持同步；抬高的询问计入 `asks_below_floor`）；one-shot 在第一次询问飞到最后一个整步，之后与 receding 同样收尾（它读的"再问值多少"只在计划时长之内）。无给定 CTA 的 checkpoint 若预报短于一步，整段飞完即止（`forecast-end`）。
+- **同队列核对（中）**：逐行锚点 = 跟踪器锚点；基线的 `schema_version`、`policy=truth`、`route=next`、`rolling=lockstep`、`split=val`、`limit=0` 都核对；两边每架的分层归属一致，否则拒绝。
+- **G3 与冒烟（中）**：任何 `limit ≠ 0` 或 `split ≠ val` 的 lockstep 产物被拒；每个门至少两个 gate arm（两种子）。
+- **G3 的完全可飞条（决定）**：plan 路径 lockstep 的完全可飞是 1.000（规则制导按构造可飞），字面"不低于 plan 路径"等于要求每一架都完全可飞。改为与 G1 相同的 ≥ 0.95，plan 路径的比例并列报告。这是在没有任何 T2 数字时做的决定。
+- 空分层明确拒绝；分层规则只留一份（`anchor_grid` 给出每架的难度协变量）；产物记输入的 sha256；同义反复的测试换成"整条记录重新切割 = 飞行时的过线判定"与结束规则的单元测试。
+
+**之后（同样不依赖 G1）**：航迹角契约下的走廊屏障合成（§7 T1 原设计"走廊屏障照旧合成"，现在该契约拒绝一切 hook；sf 设计 §14.4 的组合问题）——建立率不达标时它就是第一修复手段，达标时它是交付形态的一部分。
+
+### 10.8 T1.5 航迹角契约下的 hook（2026-09-16 设计；不依赖 G1）
+
+**为什么现在做**：§7 的 T1 原设计是"学习型跟踪器 + 走廊屏障照旧合成"，但航迹角契约目前拒绝一切 hook（sf 设计 §14.4，当时的理由是三个模块都把第 3 列当过载读写）。G1 的"建立率"若不达标，屏障是第一修复手段；若达标，屏障仍是交付形态的一部分。这项工作的产出不取决于 G1 的数字。
+
+**逐个模块读了第 3 列的地方**（`outputs/constraints/`）：
+- `barrier_filter`：`lift = actuators[:,2]·cos μ`（算转弯率）；改坡度后 `n' = n cos μ / cos μ'` 重写第 3 列（保持升力垂直分量）。
+- `speed_floor`：`commanded_load = command[:,2]` 求失速地板速度与阻力。
+- `trombone`：同 barrier 的 lift 与重协调；同 speed_floor 的 commanded load。
+
+**设计：hook 问契约的定律，不读第 3 列**。
+- 物理层 `_ControlLaw` 加一个类常量 `RESOLVES_LOAD_AT_FLOWN_BANK`（航迹角定律为真：回路 `n = [cos γ + V(γ*−γ)/(gτ_γ)]/cos φ` 在任何坡度下保持升力垂直分量，所以"改坡度要重协调过载"对它不成立）。
+- 新 `outputs/constraints/vertical.py` `VerticalChannel(config, dynamics)`：`load_factor(state, vector)` = 契约定律在这一状态下从一个 [B,3] 向量（在飞的作动器，或一条指令）解算出的过载（推力分数/比力/速度指令下就是第 3 列原值）；`keep_lift(vertical, bank, new_bank)` = 重协调后的第 3 列（过载型：原式并夹到契约盒子；航迹角：原值不动）。三个模块改读它。
+- config 表：航迹角契约的 `hook_modules` 放开 barrier / speed-floor / trombone（speed-floor 走比力反演，已在 `_FLOORS` 里）。
+- **review 后的修订（2026-09-16）**：speed floor 原先把一条航迹角指令按"悬停段起点处回路解出的过载"定价，整步 γ*−γ 都进了拉起项；回路在一个悬停段里飞不到这么低的过载（作动器 0.8 s + 回路 3 s 的滞后），所以**下降指令的地板被压低**（审查的 RK4 模拟：−6° 目标、60 m/s，段末速度比地板低 3.4 m/s，而比力孪生高 3.1 m/s）。改为定律方法 `held_load`：航迹角定律取"起点解算值"与"到达目标后的不动点 `cos γ*/cos φ`"中较大者（过载型定律：第 3 列原值）；地板与 trombone 的配速读它，barrier / trombone 的升力读 `flown_load`（作动器的解算值）。`VerticalChannel` 对过载型契约不再算运动学（原来每段多 35 % 的算子），参数矩阵在构造时建一次。孪生测试重做到不饱和、有 1 g 反例对照的状态；加了"同一 γ* 在 0° 与 25° 坡度下飞同一航迹角"的定律测试。
+- **门**：推力分数与比力 checkpoint（N4_twin、N3）的 hook 预测与损失逐位不变——金标准已采（`golden_hooks.py`，4 架 × {barrier, speed-floor, barrier+speed-floor, barrier+speed-floor+trombone} × {hard 预测, soft 损失}，144 项）；航迹角下新测试：barrier 的 lift 等于回路过载 × cos μ、不改第 3 列；speed floor / trombone 的地板读回路过载；带 hook 的航迹角预测有限。opus review 后提交。
+
 ## 十一、合入航迹角契约（sf-n7）与控制契约重构（2026-09-16 起；压缩 context 后从这里继续）
 
 **为什么。** T1a 若用推力分数契约，G1 的"完全可飞 ≥ 95 %"几乎必不过（δ 孪生只有 0.4 % 完全可飞，航迹角契约 97.7 %，sf 设计 §15）。用户 2026-09-16："合并进来，然后做实验；不要直接合，要审核它的实现；要保证模块化，结构上的简洁高效；两种不同的动力系统应该可以直接切换，而不是胡乱打补丁。"
@@ -394,6 +434,8 @@ $$e_{\rm track}(h)\le \frac{\varepsilon_1}{1-\rho}\quad\text{与 }h\text{ 无关
 | R1 物理层 | **建成，opus review 完**：前向（端点/稠密/hook，四种定律，543 个张量）逐位不变；review 发现运动学构造顺序变了导致点质量与推力分数的梯度有舍入差 → 恢复原顺序后逐位不变；参数列 dtype 统一由消费方指定、几何读数检查形状、删多余的 `_step`；新增 `aerodynamic_model/tests/test_torch_lag_laws.py`（三种定律端点金标准、每类编译入口飞自己的定律、批量几何读数） | 未提交 |
 | R2 契约行 + 消费方 | **建成，opus review 完**：无阻断/中等问题；T1a 形状的配置（路径角 + heading-rate 8 + 随机锚点 + plan token + lockstep + 导出）在合成数据上端到端跑通；89 个可构造的存量 config 名字/slug/身份串全部不变。低级问题已修：记录段字段一处定义（`export.CONTROL_SEGMENT_FIELDS`）且测试查契约列名不与之冲突；`Forecast` 不变式加形状对齐；记录写契约名改为"非默认即写"；`concatenate` 拒绝拼接相对锚点空速的 speed-command 指令；删 `lag_control_law` 别名与 heads 的第三份 `CONTROL_NAMES`；导入期检查改 `raise RuntimeError`；inverse 文档串更正 | 见下 |
 | R3 测试 + 金标准 + 全套 | **金标准全量 153 项**：除预期的两类外逐位不变——比力族（SF/SC/PA）梯度 float64 相对 ≤ 5e-14（共享一个阻力张量，重训 N3/N6/N7 不再逐位复现），PA 记录里的解算过载 ≤ 1e-16 相对（cos γ 改为 √(1−sin²γ)）。**CUDA**（§11.3 第 4 步，16 架 × 8 段，三种定律）：每个版本自身运行间逐位确定，但新旧代码的编译核不同，端点/稠密/梯度差 ≤ 1.6e-13 相对（推力分数也在内）——GPU 上重预测存量 run 与其记录只差舍入，GPU 上重训任何存量 run 不再逐位复现（与升级 torch 同类；对照一律同代码孪生）；修完后 ts 704 + 573、aerodynamic_model 154 全过，金标准不变；新增 `tests/test_control_contracts.py`、PA 下 heading-rate 项测试 | 未提交 |
+| T1.4 门读数 | **完成 `c660600`**：结束规则与基线同一时限、同队列/协议/分层核对、G3 可飞条 0.95、≥ 2 种子；两轮 opus review + 复核（复核抓到时限切在首行之前的崩溃，已修，复现脚本通过） | `run_ts.py two_tier_gates`；队列 agent 用它读 G1/G3 |
+| T1.5 航迹角下的 hook | **完成（本 commit）**：`VerticalChannel`（`flown_load` / `held_load` / `keep_lift`）+ 定律 `held_load` 与 `RESOLVES_LOAD_AT_FLOWN_BANK`；hook 金标准 144 项 0 差；复核：下降指令的段末余量 +0.4…+8.4 m/s，不触推力上限时最差 +0.0008 m/s；全部变异测试都有测试失败 | — |
 | T1a / T2 重发 | **J6 训练中**（2026-09-16 22:32 起，runs worktree @ 77e1372，队列 agent；预计 7–8 h）：冒烟 1 epoch（全 KRDU，train 6851 / val 1404）所有损失项有限，heading-rate 项 train 0.978 / val 1.276（非零），梯度裁剪 13/14 步，53 s/epoch（航迹角契约 + 随机锚点，180 epoch 无早停 → 每臂约 2.3–2.7 h）。之后 lockstep → evaluation → G1；J7（`--plan-head`）→ G3 | campaign `outputs/KRDU/experiments/two_tier_t1a_20260916` |
 
 ### 11.1 审查结论（sf-n7 原样不满足要求）

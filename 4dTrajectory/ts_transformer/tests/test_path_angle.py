@@ -15,8 +15,9 @@ it to be the same flight model read another way, and for nothing stored to move:
 * the record stays in newtons with a resolved load factor, carries the path-angle command beside
   it, and says which contract it came from;
 * the heading-rate term prices the load the loop resolved, not the γ* column;
-* the config refuses the pairings not built (every command hook among them), every named recipe
-  pins thrust-fraction, and the name moves only off the default.
+* the config refuses the pairings not built (the point-mass rows, the fitted teacher) and admits every
+  command hook (they read the load through the law), every named recipe pins thrust-fraction, and the
+  name moves only off the default.
 """
 
 from __future__ import annotations
@@ -387,6 +388,25 @@ def test_the_heading_rate_term_prices_the_load_the_path_loop_flew():
 # ── what the axis must not disturb ────────────────────────────────────────────
 
 
+def test_a_hooked_path_angle_forecast_flies_and_exports():
+    """The whole stack under the path-angle contract, hard: finite, the target column inside its box,
+    the record exported with its commands."""
+    config = _config(**PATH_ANGLE, control_command_hook="barrier+speed-floor+trombone", control_hook_saturation="hard")
+    series = _series(config, n_flights=2)
+    model = build_model(config).eval()
+    forecasts = forecast_control_batch(
+        model, series, config, Normalizer.fit(series), config.seq_len - 1, torch.device("cpu")
+    )
+    for item, forecast in zip(series, forecasts, strict=True):
+        assert np.isfinite(forecast.values).all() and np.isfinite(forecast.controls).all()
+        assert forecast.command_hook == "barrier+speed-floor+trombone/hard"
+        assert np.all(forecast.commands[:, 2] >= PATH_ANGLE_CONTRACT.lower[2] - 1e-6)
+        assert np.all(forecast.commands[:, 2] <= PATH_ANGLE_CONTRACT.upper[2] + 1e-6)
+        record = build_prediction_record(item, forecast, index=0, model_name=config.model, horizon_mode=config.horizon_mode)
+        segments = record.states_payload["control_segments"]
+        assert [s["path_angle_command"] for s in segments] == pytest.approx(list(forecast.commands[:, 2]))
+
+
 def test_the_contract_identity_is_spelled_into_the_target_contract():
     config = _config(**PATH_ANGLE)
     contract = ControlStrategy().target_contract(config)
@@ -403,11 +423,9 @@ def test_the_config_refuses_what_is_not_built():
     with pytest.raises(ValueError, match="does not say which coordinate"):
         _config(**PATH_ANGLE, control_imitation_target=CONTROL_IMITATION_TARGET_FITTED,
                 control_fitted_teacher_path="teacher.json", control_imitation_loss_weight=1.0)
+    # every selectable hook is built for it (the modules read the load through the law, §10.8)
     for hook in CONTROL_HOOKS_AVAILABLE:
-        if hook == CONTROL_HOOK_OFF:
-            continue
-        with pytest.raises(ValueError, match="load-factor column"):
-            _config(**PATH_ANGLE, control_command_hook=hook)
+        _config(**PATH_ANGLE, control_command_hook=hook)
 
 
 def test_every_named_recipe_still_pins_thrust_fraction():

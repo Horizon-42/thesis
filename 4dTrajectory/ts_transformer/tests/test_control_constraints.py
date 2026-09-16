@@ -96,7 +96,9 @@ def _context(batch: int) -> dict[str, torch.Tensor]:
             "glidepath_tan": torch.full((batch,), TAN_GPA, dtype=torch.float64),
             "max_thrust_n": torch.full((batch,), 2.0e5, dtype=torch.float64),
             "aero_params": torch.tensor([[122.6, 2.7, 0.02, 0.04, 0.9, 0.1]], dtype=torch.float64).expand(batch, -1).clone(),
-            "frame_params": torch.tensor([[35.9, -78.8, 0.0, 0.0]], dtype=torch.float64).expand(batch, -1).clone()}
+            "frame_params": torch.tensor([[35.9, -78.8, 0.0, 0.0]], dtype=torch.float64).expand(batch, -1).clone(),
+            # the anchor state every real dynamics row carries (a law with a per-flight reference reads it)
+            "initial_state": torch.tensor([[35.9, -78.8, 1000.0, 80.0, 0.0, -0.05, 66000.0]], dtype=torch.float64).expand(batch, -1).clone()}
 
 
 def _floor_mps(height_m: float, *, mass_kg: float, area_m2: float, cl_max: float,
@@ -1910,3 +1912,108 @@ def test_predicting_a_stored_nominal_law_checkpoint_refuses_instead_of_substitut
 
     with pytest.raises(ValueError, match="archived"):
         forecast_approach(AnyControlModel(), series[0], config, normalizer, device=torch.device("cpu"))
+
+
+# ── the hooks under the path-angle contract (two-tier design §10.8) ──────────
+
+
+def _loop_loads(chart, command):
+    """The path loop's load written out independently: ``(resolved at this state, fixed point at the
+    target)`` for a ``[B,3]`` vector ``(a_x, bank, γ*)``."""
+    from aerodynamic_model.torch_lag_dynamics import path_angle_load_factor
+    from ts_transformer.outputs.envelope import MAX_LOAD_FACTOR, MIN_LOAD_FACTOR, PATH_ANGLE_TIME_CONSTANT_S
+
+    speed = chart[:, 3:6].norm(dim=-1)
+    resolved = path_angle_load_factor(command[:, 2], chart[:, 5] / speed, speed, command[:, 1],
+                                      PATH_ANGLE_TIME_CONSTANT_S, MIN_LOAD_FACTOR, MAX_LOAD_FACTOR)
+    steady = (torch.cos(command[:, 2]) / torch.cos(command[:, 1])).clamp(MIN_LOAD_FACTOR, MAX_LOAD_FACTOR)
+    return resolved, steady
+
+
+def _contract_hook(module, hook_value: str, parameterization: str):
+    return module(_hook_config(control_command_hook=hook_value, control_thrust_parameterization=parameterization),
+                  _context(1), hard=True)
+
+
+def _with_vertical(view: RolloutStateView, value: float) -> RolloutStateView:
+    actuators = view.actuators.clone()
+    actuators[:, 2] = value
+    return RolloutStateView(chart=view.chart, actuators=actuators, duration_s=view.duration_s,
+                            remaining_s=view.remaining_s, reference=view.reference)
+
+
+def test_under_the_path_angle_contract_the_barrier_prices_the_loop_load_and_keeps_the_target():
+    """The turn a bank produces is priced at the lift the path loop resolves from the actuators (the
+    specific-force twin handed that load sets the same bank; handed a plain 1 g it does not), and the
+    target column is left alone: the loop keeps the vertical lift at any bank."""
+    from ts_transformer.config import CONTROL_SPECIFIC_FORCE, CONTROL_SPECIFIC_FORCE_PATH_ANGLE
+
+    d = torch.tensor([17_000.0], dtype=torch.float64)
+    edge = fag.K_MARGIN * fag.corridor_halfwidth(d) - 70.0
+    pa_view = _view(d.tolist(), edge.tolist(), heading_error_rad=-math.radians(30.0), speed=93.0, hold_s=7.0,
+                    bank_now_rad=math.radians(10.0), load_now=math.radians(-0.5))
+    pa_view.actuators[:, 0] = -0.05
+    flown, _steady = _loop_loads(pa_view.chart, pa_view.actuators)
+    assert abs(float(flown[0]) - 1.0) > 0.05                         # the reading matters here
+    command = torch.tensor([[-0.05, math.radians(7.0), math.radians(-3.5)]], dtype=torch.float64)
+    pa = _contract_hook(BarrierFilter, CONTROL_HOOK_BARRIER, CONTROL_SPECIFIC_FORCE_PATH_ANGLE)(pa_view, command, 0)
+    twin = _contract_hook(BarrierFilter, CONTROL_HOOK_BARRIER, CONTROL_SPECIFIC_FORCE)
+    sf = twin(_with_vertical(pa_view, float(flown[0])), command, 0)
+    one_g = _contract_hook(BarrierFilter, CONTROL_HOOK_BARRIER, CONTROL_SPECIFIC_FORCE)(_with_vertical(pa_view, 1.0), command, 0)
+    assert math.radians(7.0) < float(pa[0, 1]) < MAX_BANK_RAD - 1e-6   # it acted, inside the envelope
+    assert torch.allclose(pa[:, 1], sf[:, 1], rtol=1e-12, atol=0.0)
+    assert not torch.allclose(pa[:, 1], one_g[:, 1], rtol=1e-6, atol=0.0)
+    assert torch.equal(pa[:, 2], command[:, 2])
+
+
+@pytest.mark.parametrize("target_deg, priced_at", [(-0.8, "resolved"), (-9.0, "steady")])
+def test_under_the_path_angle_contract_the_speed_floor_prices_the_held_load(target_deg, priced_at):
+    """A rising target is priced at the pull the loop resolves where the hold starts; a DESCENDING one at
+    the loop's fixed point at the target — the loop never flies the start value's low load within a hold
+    (review 2026-09-16). Either way the thrust is the specific-force twin's handed that load, not the
+    twin's handed the other one."""
+    from ts_transformer.config import CONTROL_SPECIFIC_FORCE, CONTROL_SPECIFIC_FORCE_PATH_ANGLE
+
+    view = _view([8_000.0], [0.0], speed=64.0, load_now=math.radians(-3.0))
+    view.actuators[:, 0] = -0.05
+    command = torch.tensor([[-0.2, math.radians(20.0), math.radians(target_deg)]], dtype=torch.float64)
+    resolved, steady = _loop_loads(view.chart, command)
+    held, other = (resolved, steady) if priced_at == "resolved" else (steady, resolved)
+    assert float(held[0]) > float(other[0]) + 0.05
+    hook = _contract_hook(SpeedFloor, CONTROL_HOOK_SPEED_FLOOR, CONTROL_SPECIFIC_FORCE_PATH_ANGLE)
+    pa = hook(view, command, 0)
+    assert float(pa[0, 0]) > float(command[0, 0]) and float(hook.diagnostics()["hook_floor_saturated_steps"]) == 0.0
+    for load, same in ((held, True), (other, False)):
+        twin_command = command.clone()
+        twin_command[:, 2] = load
+        sf = _contract_hook(SpeedFloor, CONTROL_HOOK_SPEED_FLOOR, CONTROL_SPECIFIC_FORCE)(view, twin_command, 0)
+        assert torch.allclose(pa[:, 0], sf[:, 0], rtol=1e-12, atol=1e-15) == same
+    assert torch.equal(pa[:, 1:], command[:, 1:])
+
+
+def test_under_the_path_angle_contract_the_trombone_prices_the_loop_load_and_keeps_the_target():
+    """Below the turn cap the trombone's bank depends on the lift being flown: the loop's resolved load
+    (the specific-force twin handed it agrees; handed 1 g it does not). The target column is untouched."""
+    from ts_transformer.config import CONTROL_SPECIFIC_FORCE, CONTROL_SPECIFIC_FORCE_PATH_ANGLE
+
+    pa_view = _trombone_view(d_m=12_000.0, xt_m=3_000.0, heading_error_rad=-math.radians(36.0), remaining_s=300.0,
+                             speed=62.0)
+    pa_view = _with_vertical(pa_view, math.radians(2.4))
+    pa_view.actuators[:, 0] = -0.05
+    flown, _steady = _loop_loads(pa_view.chart, pa_view.actuators)
+    assert float(flown[0]) > 1.1
+    command = torch.tensor([[-0.05, 0.0, math.radians(-3.0)]], dtype=torch.float64)
+    # the twin is handed the loop's loads in both places the trombone reads one: the lift being flown,
+    # and the load its floor prices the held command at
+    resolved, steady = _loop_loads(pa_view.chart, command)
+    twin_command = command.clone()
+    twin_command[:, 2] = torch.maximum(resolved, steady)
+    pa = _contract_hook(Trombone, CONTROL_HOOK_BARRIER_TROMBONE, CONTROL_SPECIFIC_FORCE_PATH_ANGLE)(pa_view, command, 0)
+    sf = _contract_hook(Trombone, CONTROL_HOOK_BARRIER_TROMBONE, CONTROL_SPECIFIC_FORCE)(
+        _with_vertical(pa_view, float(flown[0])), twin_command, 0)
+    one_g = _contract_hook(Trombone, CONTROL_HOOK_BARRIER_TROMBONE, CONTROL_SPECIFIC_FORCE)(
+        _with_vertical(pa_view, 1.0), twin_command, 0)
+    assert 0.5 < math.degrees(abs(float(pa[0, 1]))) < math.degrees(trombone_module.TURN_BANK_MAX_RAD) - 0.5
+    assert torch.allclose(pa[:, 1], sf[:, 1], rtol=1e-12, atol=0.0)
+    assert not torch.allclose(pa[:, 1], one_g[:, 1], rtol=1e-6, atol=0.0)
+    assert torch.equal(pa[:, 2], command[:, 2])

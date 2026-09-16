@@ -20,7 +20,10 @@ the height it will be at, not at sea level. The hook holds
 with ``k_margin`` = ``config.control_speed_floor_margin`` (default 1.10, the package's
 existing stall margin — see ``config.CONTROL_SPEED_FLOOR_MARGIN_DEFAULT``). ``n`` is the
 COMMANDED load factor, which under ``barrier+speed-floor`` is the barrier's re-coordinated
-one: the floor prices the manoeuvre the aircraft is actually being asked to fly.
+one: the floor prices the manoeuvre the aircraft is actually being asked to fly. Under the path-angle
+contract the command is a target, and the load it is priced at is the path loop's
+(``outputs/constraints/vertical.VerticalChannel.held_load``: the larger of the load resolved where the
+hold starts and the loop's fixed point at the target).
 
 **Through the controls, with the lag compensated.** Speed obeys
 ``V' = (T - D)/m - g sin(gamma)``, the command is HELD for the segment, and the thrust
@@ -99,6 +102,7 @@ from ts_transformer.config import (
 )
 from ts_transformer.outputs.constraints.gates import RunwayAxesView, runway_axes_view
 from ts_transformer.outputs.constraints.saturation import SOFTPLUS_LINEAR_THRESHOLD, soft_max
+from ts_transformer.outputs.constraints.vertical import VerticalChannel
 from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from ts_transformer.outputs.envelope import (
     MAX_THRUST_FRACTION,
@@ -173,6 +177,8 @@ class SpeedFloor:
         self.margin = config.control_speed_floor_margin
         self.thrust_lag_s = config.control_thrust_time_constant_s
         self.hard = hard
+        # The load factor a command flies: the contract law's reading of its third column.
+        self.vertical = VerticalChannel(config, dynamics)
         contract = control_contract(config.control_thrust_parameterization)
         # WHICH quantity the first column is (the module docstring's last section) picks the
         # inversion; config admits the floor only on contracts that have one (asserted below).
@@ -200,7 +206,7 @@ class SpeedFloor:
         thrust, bank, load = command[:, 0], command[:, 1], command[:, 2]
         aero = self.aero_params.to(view.d.dtype)
         area = aero[:, 0]
-        commanded_load = load.to(view.d.dtype)
+        commanded_load = self.vertical.held_load(state, command.to(view.d.dtype))
         # The floor at the height the command's effect is measured at, and the density there.
         floor, density = floor_speed(
             view,
@@ -254,7 +260,7 @@ class SpeedFloor:
         hold = view.hold_s
         specific_force, bank, load = command[:, 0], command[:, 1], command[:, 2]
         aero = self.aero_params.to(view.d.dtype)
-        commanded_load = load.to(view.d.dtype)
+        commanded_load = self.vertical.held_load(state, command.to(view.d.dtype))
         floor, density = floor_speed(
             view,
             aero=aero,

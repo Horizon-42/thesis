@@ -60,7 +60,10 @@ load factor, so the load factor is re-coordinated to keep it: ``n' = n cos μ / 
 clamped to the envelope (the clamp binds only above ``n ≈ 1.41`` with a full-scale bank
 change; on the measured band of the heads it never does — 0 of 80 000 sampled states).
 Without it a filtered turn steepens the path — the first campaign's worst flight went
-from γ = −1° to −10°, 93 to 200 m/s, and 16 km past the threshold. ``hard`` selects the
+from γ = −1° to −10°, 93 to 200 m/s, and 16 km past the threshold. Under the path-angle contract the third
+column is a path-angle target and the loop resolves the load at the flown bank, so the lift is kept
+without touching it (``outputs/constraints/vertical.py``; ``hook_load_change`` is then zero) and the
+lift factor above is the loop's resolved load. ``hard`` selects the
 hard saturation AND the hard gate: a deployed filter has no partially-gated rows, and the
 soft pair is the C¹ training form of the same rule.
 
@@ -100,8 +103,9 @@ from ts_transformer.outputs.constraints.saturation import (
     soft_max,
     soft_min,
 )
+from ts_transformer.outputs.constraints.vertical import VerticalChannel
 from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from ts_transformer.outputs.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
+from ts_transformer.outputs.envelope import MAX_BANK_RAD
 from ts_transformer.geometry.final_approach_geometry import K_MARGIN, corridor_halfwidth, corridor_halfwidth_slope
 
 _SATURATED_INTERVAL_RAD = math.radians(0.1)   # a bank interval this narrow is a corner, not a bound
@@ -125,6 +129,8 @@ class BarrierFilter:
         self.hard = hard
         # Set by the composite when a trombone is a member (module docstring, last paragraph).
         self.confine_to_hard_gate = confine_to_hard_gate
+        # The load behind the contract's third column and the column that keeps the lift.
+        self.vertical = VerticalChannel(config, dynamics)
         # ``[len(_DIAGNOSTIC_KEYS), B]``, on the device: the counts are kept PER ROW so a
         # prediction record can carry its own flight's shares. ``diagnostics`` sums them.
         self._counts: torch.Tensor | None = None
@@ -168,9 +174,9 @@ class BarrierFilter:
         committed = torch.tan(actuators[:, 1]) * tau_eff
         # The vertical lift factor n·cos μ being flown sets the turn rate a bank produces
         # (the coordination below keeps the commanded one, so the two agree once the
-        # actuators settle); read from the actuator state so the bounds stay a function of
-        # the state alone. Floored well below any flown value.
-        lift = (actuators[:, 2] * torch.cos(actuators[:, 1])).clamp(min=0.5)
+        # actuators settle); the load the contract's law resolves from the actuator state, so
+        # the bounds stay a function of the state alone. Floored well below any flown value.
+        lift = (self.vertical.flown_load(state, actuators) * torch.cos(actuators[:, 1])).clamp(min=0.5)
         scale = view.ground_speed / (GRAVITY_MPS2 * lift)
         bank, load = command[:, 1], command[:, 2]
         tan_min = (scale * heading_change_min - committed) / (hold - tau_eff)
@@ -188,8 +194,8 @@ class BarrierFilter:
             # hard gate, and the hard gate is the trombone's complement.
             weight = weight * on_final_weight(view, hard=True).to(dtype)
         filtered = (bank + weight * (bounded - bank)).clamp(min=-MAX_BANK_RAD, max=MAX_BANK_RAD)
-        # Keep the vertical lift component the network paired with its load factor.
-        coordinated = (load * torch.cos(bank) / torch.cos(filtered)).clamp(min=MIN_LOAD_FACTOR, max=MAX_LOAD_FACTOR)
+        # Keep the vertical lift component the network paired with its vertical command.
+        coordinated = self.vertical.keep_lift(load, bank, filtered)
         change = (filtered - bank).abs().detach()
         gated = (weight > 0.5).detach()
         counts = torch.stack((

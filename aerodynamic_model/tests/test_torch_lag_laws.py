@@ -31,6 +31,7 @@ from aerodynamic_model.torch_lag_dynamics import (
     lag_step_context,
     rk4_lag_step,
     rollout_piecewise_constant,
+    rollout_piecewise_constant_at_times,
 )
 
 FRAME = torch.tensor([[35.9, -78.8, 120.0, 0.3]], dtype=torch.float64)
@@ -184,3 +185,27 @@ def test_the_parameter_columns_take_the_consumers_dtype():
     columns = law.parameter_matrix(thrust32, initial, dtype=torch.float64, device=torch.device("cpu"))
     assert columns.dtype == torch.float64
     assert columns[0, 2].item() == 0.2 and columns[0, 1].item() == 3.0
+
+
+def test_the_path_loop_keeps_the_path_when_the_bank_moves():
+    """Why a hook that moves the bank leaves the path-angle target alone: the loop divides by the flown
+    bank at every stage, so the same target flies the same path angle at 0° and at 25° of bank."""
+    law = LAWS["path-angle"]
+    target = math.radians(-3.5)
+    paths = []
+    for bank_deg in (0.0, 25.0):
+        commands = torch.tensor([[[-0.05, math.radians(bank_deg), target]] * 6], dtype=torch.float64)
+        queries = torch.arange(1.0, 60.0, 1.0, dtype=torch.float64).unsqueeze(0)
+        dense = rollout_piecewise_constant_at_times(
+            torch.tensor([[35.95, -78.75, 1500.0, 85.0, 1.1, math.radians(-3.0), MASS]], dtype=torch.float64),
+            torch.tensor([[-0.05, 0.0, math.radians(-3.0)]], dtype=torch.float64), commands,
+            torch.full((1, 6), 10.0, dtype=torch.float64), torch.tensor([AERO], dtype=torch.float64), FRAME, TAU,
+            torch.tensor([THRUST], dtype=torch.float64), queries, torch.ones_like(queries, dtype=torch.bool),
+            control_law=law, integrator_dt_s=0.1,
+        )
+        velocity = dense.query_states[0, :, 3:6]
+        paths.append(torch.asin(velocity[:, 2] / velocity.norm(dim=-1)))
+    settled = slice(20, None)
+    assert torch.allclose(paths[0][settled], paths[1][settled], rtol=0.0, atol=math.radians(0.05))
+    assert abs(float(paths[1][-1]) - target) < math.radians(0.05)
+

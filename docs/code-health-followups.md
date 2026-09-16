@@ -832,11 +832,22 @@ are not rediscovered.
   (the ENU twin and the numpy inverse).
 - `CONTROL_NAMES` exists three times with two spellings: `aerodynamic_model.torch_dynamics` and
   `outputs/control/heads.py` (`thrust_N`, …) and `outputs/envelope.py` (`thrust_fraction`, …).
-- The barrier, the trombone and the speed floor read the third command/actuator as a load factor; they are
-  refused under `specific-force+path-angle` by the scope table rather than asking the law for the load.
+- (Resolved 2026-09-16: the barrier, the trombone and the speed floor read the load through
+  `outputs/constraints/vertical.VerticalChannel` and are admitted under `specific-force+path-angle`.)
 
 **Judgement**: the first two are the ones worth doing — one lag-credit helper, and the guidance asking
 `path_angle_load_factor` — but each moves a stored plan-path or hook artifact at round-off, so each needs its
-own golden check. Composing hooks with the path-angle contract is a design question (sf design §14.4), not
-cleanup.
+own golden check.
 
+
+## 39. The specific-force speed floor holds sin γ at the hold's start (2026-09-16)
+
+**Verified** (T1.5 re-verification, RK4 simulation of one hold): `outputs/constraints/speed_floor.py`
+`_specific_force_floor` inverts `V' = g(n_x − sin γ)` with `sin γ` read at the segment's START. When the path is
+still rising at the start of the hold (under the path-angle contract: the loop still pulling up, γ* 3° above γ) and
+the command holds the path, the hold ends 0.24 m/s under the floor with the thrust ceiling not binding; the
+specific-force contract's own twin shows the same effect (−0.85 m/s). Not introduced by the path-angle hooks.
+
+**Judgement**: small in practice (a realistic loop lag at a segment start is ~10 % of that 3°). A fix would use
+the hold-mean `sin γ` from the two-lag closed form, and moves every stored hooked specific-force artifact, so it
+needs its own golden check.

@@ -38,9 +38,11 @@ class RolloutStateView:
 
     ``chart`` is ``[B,7]``: ``e, n, u`` (m, threshold-anchored ENU), ``ve, vn, vu`` (m/s)
     and mass (kg) — ``aerodynamic_model.torch_transport_chart_dynamics``'s state.
-    ``actuators`` is ``[B,3]`` (the contract's longitudinal command — thrust fraction or
-    specific force, ``control_thrust_parameterization`` — then bank, load factor) the
-    aircraft is actually doing, or None for a backend without actuator states. ``duration_s`` is
+    ``actuators`` is ``[B,3]`` — what the aircraft is actually doing in the contract's own
+    columns (``control_thrust_parameterization``: the longitudinal command, bank, and a load
+    factor or, under the path-angle contract, a path-angle target) — or None for a backend
+    without actuator states. A module that wants the LOAD asks the contract's law
+    (``outputs/constraints/vertical.VerticalChannel``), never reads column 2. ``duration_s`` is
     ``[B]``, how long the command returned for this segment will be held — a hook that
     reasons in rates must not ask for one faster than the hold can realise.
     ``remaining_s`` is ``[B]``: how much of the SCHEDULE is left from this segment's start,

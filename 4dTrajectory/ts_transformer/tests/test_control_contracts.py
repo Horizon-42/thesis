@@ -104,4 +104,6 @@ def test_every_contract_the_speed_floor_is_admitted_on_has_an_inversion():
         if CONTROL_HOOK_SPEED_FLOOR in scope.hook_modules:
             assert control_contract(value).longitudinal in speed_floor._FLOORS, value
     assert CONTROL_HOOK_SPEED_FLOOR not in CONTROL_PARAMETERIZATION_SCOPES[CONTROL_SPEED_COMMAND].hook_modules
-    assert CONTROL_PARAMETERIZATION_SCOPES[CONTROL_SPECIFIC_FORCE_PATH_ANGLE].hook_modules == ()
+    # the path-angle contract's modules read the load through its law (two-tier design §10.8)
+    assert set(CONTROL_PARAMETERIZATION_SCOPES[CONTROL_SPECIFIC_FORCE_PATH_ANGLE].hook_modules) == set(
+        CONTROL_PARAMETERIZATION_SCOPES[CONTROL_SPECIFIC_FORCE].hook_modules)

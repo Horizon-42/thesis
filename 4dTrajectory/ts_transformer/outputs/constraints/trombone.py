@@ -218,7 +218,8 @@ from ts_transformer.outputs.constraints.saturation import (
 )
 from ts_transformer.outputs.constraints.speed_floor import floor_speed
 from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
-from ts_transformer.outputs.envelope import MAX_BANK_RAD, MAX_LOAD_FACTOR, MIN_LOAD_FACTOR
+from ts_transformer.outputs.constraints.vertical import VerticalChannel
+from ts_transformer.outputs.envelope import MAX_BANK_RAD
 from ts_transformer.geometry.final_approach_geometry import (
     alignment_cosine,
     hard_aligned,
@@ -287,6 +288,8 @@ class Trombone:
         self.margin = config.control_speed_floor_margin
         self.bank_lag_s = config.control_bank_time_constant_s
         self.hard = hard
+        # The load behind the contract's third column and the column that keeps the lift.
+        self.vertical = VerticalChannel(config, dynamics)
         # WHAT the surplus is measured against, and the one thing that follows from it: the
         # `reference-rollout` estimator reads the hook-free schedule's own rollout, so this
         # instance asks the engine for it. `beeline` asks for nothing and is what every
@@ -331,7 +334,7 @@ class Trombone:
             aero=self.aero_params.to(real),
             origin_altitude_m=self.origin_altitude_m.to(real),
             margin=self.margin,
-            commanded_load=load.to(real),
+            commanded_load=self.vertical.held_load(state, command.to(real)),
         )
         # Beeline to the threshold. Clamped BEFORE the root, as `alignment_cosine` clamps its
         # own: hypot's backward is NaN at exactly (0, 0), and one NaN gradient poisons the
@@ -409,7 +412,7 @@ class Trombone:
         # The vertical lift factor being flown sets the turn rate a bank produces; the
         # coordination below keeps the commanded one, so the two agree once the actuators
         # settle. Floored well below any flown value, as the barrier floors it.
-        lift = (actuators[:, 2] * torch.cos(actuators[:, 1])).clamp(min=0.5)
+        lift = (self.vertical.flown_load(state, actuators) * torch.cos(actuators[:, 1])).clamp(min=0.5)
         scale = view.ground_speed / (GRAVITY_MPS2 * lift)
         change = target - view.heading_error
         change = torch.atan2(torch.sin(change), torch.cos(change))
@@ -436,13 +439,7 @@ class Trombone:
         # (measured: it differs by an ULP for ~40 % of operand pairs), and a hook that is
         # supposed to be inert must not perturb the load of a row it never touched: the
         # arm-vs-arm "to the bit" comparison is exactly what that inertness is for.
-        coordinated = torch.where(
-            filtered == bank,
-            load,
-            (load * torch.cos(bank) / torch.cos(filtered)).clamp(
-                min=MIN_LOAD_FACTOR, max=MAX_LOAD_FACTOR
-            ),
-        )
+        coordinated = torch.where(filtered == bank, load, self.vertical.keep_lift(load, bank, filtered))
 
         moved = (filtered - bank).abs().detach()
         engaged_f = engaged.to(torch.float64)

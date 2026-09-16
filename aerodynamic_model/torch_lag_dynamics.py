@@ -174,6 +174,11 @@ class _ControlLaw:
     """
 
     PARAMETERS: ClassVar[tuple[str, ...]] = ()
+    #: The law resolves the load factor from the STATE and a vertical TARGET, dividing by the flown
+    #: bank's cosine — so reading the load needs the state, its vertical lift ``n cos μ`` is the same
+    #: at any bank, and a module that moves the bank must not re-coordinate the third column (it is
+    #: not a load factor). False: the load factor IS the third actuator.
+    RESOLVES_LOAD_AT_FLOWN_BANK: ClassVar[bool] = False
 
     def parameters(
         self, max_thrust_n: torch.Tensor, initial_geodetic_states: torch.Tensor
@@ -187,6 +192,14 @@ class _ControlLaw:
     ) -> torch.Tensor:
         """The load factor the RHS flies: the third actuator, unless the law resolves it."""
         return actual[..., VERTICAL_ACTUATOR]
+
+    @staticmethod
+    def held_load(
+        condition: FlightCondition, command: torch.Tensor, parameters: torch.Tensor
+    ) -> torch.Tensor:
+        """The load factor a command HELD over a segment is priced at by a stall floor, from the
+        state where the segment starts: a load command is held as given."""
+        return command[..., VERTICAL_ACTUATOR]
 
     @staticmethod
     def resolve_thrust(
@@ -428,6 +441,7 @@ class PathAngleLaw(_ControlLaw):
     PARAMETERS: ClassVar[tuple[str, ...]] = (
         "min_thrust_n", "path_angle_time_constant_s", "min_load_factor", "max_load_factor",
     )
+    RESOLVES_LOAD_AT_FLOWN_BANK: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
         _require_engine_floor(self.min_thrust_fraction)
@@ -454,6 +468,20 @@ class PathAngleLaw(_ControlLaw):
             actual[..., BANK_ACTUATOR], parameters[..., 1], parameters[..., 2],
             parameters[..., 3],
         )
+
+    @staticmethod
+    def held_load(condition, command, parameters):
+        """Over a hold the loop flies loads between the one it resolves where the segment starts (the
+        whole step ``γ* − γ`` in the pull term) and its fixed point once the path has reached the
+        target, ``cos γ*/cos φ``; a stall floor prices the larger. The start value alone under-prices a
+        DESCENDING target — the loop never flies that low a load within a hold, because the actuator
+        and the loop lag (review 2026-09-16: a −6° step at 60 m/s left the speed 3.4 m/s under its
+        floor at the hold's end, where the specific-force twin kept +3.1 m/s)."""
+        steady = torch.clamp(
+            torch.cos(command[..., VERTICAL_ACTUATOR]) / torch.cos(command[..., BANK_ACTUATOR]),
+            parameters[..., 2], parameters[..., 3],
+        )
+        return torch.maximum(PathAngleLaw.resolve_load(condition, command, parameters), steady)
 
     @staticmethod
     def resolve_thrust(condition, actual, drag_n, max_thrust_n, parameters):

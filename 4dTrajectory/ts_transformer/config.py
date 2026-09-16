@@ -722,10 +722,10 @@ CONTROL_PARAMETERIZATION_SCOPES: dict[str, ControlParameterizationScope] = {
     ),
     CONTROL_SPECIFIC_FORCE_PATH_ANGLE: ControlParameterizationScope(
         slug="sfpa", point_mass=False, fitted_teacher=False,
-        hook_modules=(),
-        # design §14.4: composing them is a separate design
-        hook_note="every hook writes or reads the load-factor column, which this contract "
-        "replaces with a path-angle target",
+        # Every module reads the load through the law (`outputs/constraints/vertical.py`, two-tier
+        # design §10.8) and the speed floor inverts the specific force.
+        hook_modules=(CONTROL_HOOK_BARRIER, CONTROL_HOOK_SPEED_FLOOR, CONTROL_HOOK_TROMBONE),
+        hook_note="the retired nominal-residual hook was only ever built for thrust-fraction",
     ),
 }
 CONTROL_THRUST_PARAMETERIZATIONS = tuple(CONTROL_PARAMETERIZATION_SCOPES)
