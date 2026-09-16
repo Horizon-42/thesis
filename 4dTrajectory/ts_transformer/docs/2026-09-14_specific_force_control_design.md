@@ -1329,3 +1329,117 @@ Measured on the same 300 straight-in flights, per segment:
 - Arms, if it is built: `N7_path_angle` against `N4_twin` (and the N3 arm), two seeds, the same gates as
   N3 plus the vertical ones — the stall-bound share, the along-track lag of that group, straight-in FDE
   read with its along/vertical split.
+
+
+## 14. N7′ — the path-angle vertical contract (design, 2026-09-16)
+
+The user: "开始吧 在完成之前不要停". Built on branch `sf-n7` (from `sf-n6`), worktree
+`.claude/worktrees/sf-n6`. §13 is the evidence this is worth building; §7.5 is the defect it aims at.
+
+### 14.1 The contract
+
+A FOURTH value of `control_thrust_parameterization`, **`specific-force+path-angle`**, not a second
+config axis. The field names the control CONTRACT, not only its first column (`speed-command` is already
+not a thrust), and the vocabulary's `+` spelling is a LOOKUP, exactly as `CONTROL_HOOK_MEMBERS` does it.
+Only this one combination is spelled, because the vertical law is energy-neutral only under the specific
+force (§7.5.6): under a thrust fraction the same law changes the induced drag and needs the second law the
+2026-09-06 nominal hook needed.
+
+| column | quantity | unit | box | neutral |
+|---|---|---|---|---|
+| 0 | `specific_force` = (T − D)/W | g | the specific-force box, unchanged | −0.05 (unchanged) |
+| 1 | `bank_rad` | rad | ±45°, unchanged | 0 |
+| 2 | **`path_angle_command`** = the target path angle γ\* | rad | **[−15°, +10°]** | **−2.9°** |
+
+- **Absolute, not anchor-relative** — unlike `speed-command`. The anchor's own γ comes from an ADS-B
+  vertical rate and carries noise of the same order as the whole error budget (§13.4: the break-even bias
+  is 0.11°), so an anchor-relative target would inherit that noise as a per-flight bias, which is exactly
+  the quantity §7.5.3 shows integrating into the height error. With an absolute target the tracking law
+  ERASES an initial γ error within τ_γ instead of carrying it.
+- **The box** holds the teacher with room (§13.2: p1 / p99 = −4.89 / +0.25°) and is a flight-envelope
+  bound, not a data bound: −15° is ~3,600 fpm at 70 m/s, +10° a go-around climb.
+- **The neutral is the teacher's own median** (−2.94° on KRDU val, §13.2), so a zeroed head flies a steady
+  ~3° descent on every airframe: no zoom climb, no stall, and nothing airframe-specific. It is NOT read
+  from any procedure; it is where an untrained head starts, and the head learns the profile.
+
+### 14.2 The law
+
+`PathAngleLaw(min_thrust_fraction, path_angle_time_constant_s)`, the vertical analogue of
+`SpeedCommandLaw`. The third actuator holds γ\* and lags toward the command with the load actuator's own
+τ; at EVERY RK4 stage the load factor is re-solved from the state,
+
+```
+n = [cos γ + V·(γ*_actuator − γ)/(g·τ_γ)] / cos φ,   clipped to [MIN_LOAD_FACTOR, MAX_LOAD_FACTOR]
+```
+
+and the thrust is re-solved exactly as under `SpecificForceLaw`. The stall cap inside
+`aerodynamic_coefficients` still limits the lift actually produced, so feasibility is unchanged: the head
+cannot command a manoeuvre the aircraft cannot fly, it can only ask.
+
+`PATH_ANGLE_TIME_CONSTANT_S = 3.0`, a CONTRACT constant like `SPEED_LOOP_TIME_CONSTANT_S`, spelled into the
+target contract through `path_angle_identity()`. Measured insensitive between 2 and 5 s (§13.2); 3 s sits
+above the 0.8 s load actuator and below the ~5.3 s segment hold, and keeps the load transient of a 1° step
+near 0.04 g.
+
+### 14.3 The inverse
+
+`γ*_actual = γ + τ_γ·γ̇`, with `γ̇ = g·(n·cos φ − cos γ)/V` from the same kinematic inversion
+`actual_controls` already performs (so the third column is a function of the realised load, not of a second
+differentiation of γ). The command is then the package's existing first-order lag inverse,
+`γ*_cmd = γ*_actual + τ_load · d γ*_actual/dt`, on the smoothed copy it already uses. `anchor_relative` is
+a no-op for this contract (the target is absolute).
+
+### 14.4 Scope and refusals
+
+- The lag model only (`control_dynamics_model=first-order-lag`), as for the other non-default laws; refused
+  with the `fitted` imitation teacher.
+- **Refused with every command hook in v1.** The barrier and the trombone rewrite the LOAD FACTOR and the
+  speed floor reads a commanded load; none of them speaks this contract's third column. The N3/N7 arms run
+  with `control_command_hook=off`, so nothing is lost; composing them is a separate design.
+- `control_condition_features` is untouched and both values remain available.
+- Defaults are bit-identical: nothing changes for a run that does not name the new value.
+
+### 14.5 Code plan
+
+| file | change |
+|---|---|
+| `ts_transformer/config.py` | `CONTROL_SPECIFIC_FORCE_PATH_ANGLE` value, vocabulary entry, the lag-model / `fitted` / hook refusals, run naming (`first-order-lag+specific-force+path-angle`, slug `lag-sfpa-`) |
+| `ts_transformer/outputs/envelope.py` | `MIN/MAX_PATH_ANGLE_COMMAND_RAD`, `NEUTRAL_PATH_ANGLE_RAD`, `PATH_ANGLE_TIME_CONSTANT_S`, `PATH_ANGLE_CONTRACT`, `path_angle_identity()` |
+| `aerodynamic_model/torch_dynamics.py` | `path_angle_load_factor(...)` — the loop, one definition, imported by the chart law |
+| `aerodynamic_model/torch_transport_chart_dynamics.py` | `transport_chart_path_angle_load_factor(...)`: γ and V from the chart velocities, the loop, the clip |
+| `aerodynamic_model/torch_lag_dynamics.py` | `PathAngleLaw`, `lag_rhs_path_angle`, `rk4_lag_step_path_angle`, the packed-context row, the unpacked/CUDA/rollout steps, the `_law_step` dispatch |
+| `ts_transformer/outputs/dynamics/inverse.py` | the third column under the new contract in `actual_controls`; `anchor_relative` unchanged |
+| `ts_transformer/outputs/dynamics/context.py` | the anchor actuator in the new unit (it already routes through `actual_controls`) |
+| `ts_transformer/outputs/control/{strategy,forecast}.py` | the target-contract identity, the law construction, `path_angle_command` in the segment record |
+| `ts_transformer/inference/{forecast,export}.py` | the record's third-column name and the law for the forecast rollout |
+| tests | below |
+
+### 14.6 Tests
+
+- `tests/test_path_angle.py`: the contract's box/neutral/identity; the inverse's round trip (a teacher
+  inverted from a synthetic lag rollout replays it); the law's fixed point (a held γ\* drives γ to it within
+  a few τ_γ); the clip (a γ\* that would need more than the load box asks for is clipped, and the stall cap
+  still binds); the anchor actuator's unit; the refusals (point-mass, `fitted`, every hook).
+- `aerodynamic_model/tests/test_torch_lag_path_angle.py`: the RHS against a hand-integrated reference; the
+  law reduces to the specific-force law when γ\* tracks γ; batch/CUDA parity where the other laws are tested.
+- The existing suites must stay green and DEFAULT-IDENTICAL (the M1 rule): the census of stored run names
+  and the golden lag rollout unchanged.
+
+### 14.7 Milestones and review gates
+
+| step | what | gate |
+|---|---|---|
+| P1 | the contract, the law, the inverse, the plumbing, the tests | ts + `aerodynamic_model` suites green; an opus subagent review (code only) against §14; findings fixed and re-verified |
+| P2 | arms + `intents.json` + a smoke train→predict→evaluate on real data | the smoke chain completes; the census unchanged; committed BEFORE the campaign |
+| N7 | the KRDU campaign: `N7_path_angle` seeds 1337 / 2024 against `N4_twin` / `N4_twin_s2024` and the N3 arms | §14.8 |
+
+### 14.8 Gates
+
+- **Break-even (the pre-registered one, §13.4):** the head's per-flight γ\* bias must be at or below
+  **0.11°**; above it the contract buys nothing on the vertical channel.
+- **Mechanism:** the stall-bound share on 5–1 km falls from 32 / 45 %; the along-track lag of that group
+  falls from 1.0–1.1 km; the last-km height error falls from ~95 m.
+- **Kept from N3:** the per-class n_x bias stays at the truth's spread (the longitudinal channel is
+  unchanged, so this is a regression check, not a claim).
+- **Veto:** pooled ADE worse than `N4_twin` beyond the seed line; straight-in FDE worse READ WITH ITS
+  SPLIT (§7.5.5), i.e. a dive that buys along-track at the cost of height does not count as better.
