@@ -6,6 +6,30 @@ Newest campaigns first, long-standing scope limits last.
 
 ---
 
+## Two-tier transformer feasibility — ASSESSED, no training (2026-09-16, `docs/2026-09-16_two_tier_transformer_feasibility.zh.md`)
+
+The user asked whether a two-tier transformer is worth building: a short-horizon (30–60 s) control layer
+re-asked repeatedly, under a long-horizon plan layer that tokenises time SEGMENTS, later a graph layer over
+several aircraft's predicted segments. **Assessed against the package's own measurements; no arm trained.**
+The premise "a short horizon cuts ADE a lot" is a property of the evaluation PROTOCOL, not of a model:
+native32's ADE over its first 60 s is already 250 m (vectored) / 115 m (straight-in) against 2870 / 445 m
+whole-approach, and the displacement median grows as h^1.6–1.8 (a turn-decision error integrated twice, not a
+heading bias). A hierarchy turns the chained model's compounding term into a bounded tracking term (§4.3) and
+leaves the plan term, which the intent information bounds from below (truth join + duration given: 2011 m
+vectored, Phase 0) — so on the from-anchor whole-approach metric the room is ≤ 600–850 m vectored, ≤ 250 m
+straight-in. What it CAN move by a lot is the representation/tracking term: the rule-based guidance flies the
+truth's own plan to 1847 m vectored at L−1 (lockstep), a learned 60 s control layer under the plan has a
+ceiling near the control basis's 106 m p50 — that is **T1**, and it is also the better tracker for the
+scheduler's assigned plan (v5.4). Plan T0–T4 with pre-registered gates in the doc §6–7: T0(b) the chain
+sensitivity of native32, T0(c) a long-history information test (gate: > 125 m at the common anchor, two
+seeds) BEFORE any segment-token layer; the graph layer stays behind an L4-type oracle (the lead's TRUE plan
+tokens must move vectored ADE ≥ 300 m paired) — its measured signal is runway / configuration / order (the
+R series), not single-flight ADE. New readout **`run_ts.py lead_time_error`** (displacement against lead
+time per stratum, the growth exponent paired over the flights present at both leads; `tests/test_lead_time_error.py`); artifact
+`outputs/KRDU/experiments/two_tier_feasibility_20260916/lead_time_error.{json,txt}` (native32, L3_cta,
+state A_threshold_enu). Literature: repo `docs/literature/hierarchical_prediction/`. Next (the user's call):
+T0(b) + T0(c), then T1.
+
 ## Runway intent — R3.1 / R3.2 / R3.3 (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §18)
 
 The user: "先做1, 2, 最后3" — §17.8's uncertainty-aware scheduling, the closure's time delivery, publishing R3.

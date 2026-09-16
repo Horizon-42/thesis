@@ -4,6 +4,50 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-16 — two-tier transformer feasibility report + `lead_time_error` readout
+
+**Ask.** The user: is a two-tier transformer worth building — a short-horizon iTransformer predicting
+control parameters (re-asked, "the short horizon should cut ADE a lot"), under a long-horizon layer that
+tokenises time segments and predicts the flight plan, later a graph layer over several aircraft's predicted
+segments; with a literature search, mathematical reasoning, and uses beyond trajectory prediction.
+
+**Written** `4dTrajectory/ts_transformer/docs/2026-09-16_two_tier_transformer_feasibility.zh.md`:
+- three evaluation protocols separated (A whole-approach from one anchor, B rolling re-anchored on real
+  observations, C plan-given tracking oracle) — the premise holds under B for the EXISTING model
+  (native32 ADE over its first 60 s: 250 m vectored / 115 m straight-in, whole approach 2870 / 445) and
+  cannot hold under A for any model (`ADE_Δ / ADE_T = (Δ/T)^α`);
+- the error decomposition `e ≤ e_track + e_plan + e_repr`: a stable short-horizon tracker bounds
+  `e_track` independent of horizon (the chained model's `L^k` term becomes a constant), `e_plan` stays
+  bounded below by the intent information (truth join + duration: 2011 m vectored), and the term a learned
+  layer can move is `e_repr + e_track` — the rule-based guidance flies the truth's plan to 1847 m, the
+  control basis reproduces it to 106 m p50;
+- per-tier "iterated vs direct": tier 1 iterated in the (Markov, exact) dynamics, tier 2 direct and
+  multi-modal in the (non-Markov) intent;
+- the graph layer gated by an L4-type oracle (its measured signal is runway / configuration / order);
+- plan T0–T4 with pre-registered gates; seven uses beyond trajectory prediction (CTA delivery, separation
+  probability, instruction recognition / conformance, go-around detection, runway configuration, traffic
+  generation, procedure-design feedback).
+
+**Measured** (new runner `run_ts.py lead_time_error`, `experiments/lead_time_error.py` +
+`tests/test_lead_time_error.py`): displacement against lead time per stratum off stored records, both
+series on a 1 s grid, a flight absent (never 0, never held) at a lead its records do not reach; the growth
+exponent as the median's log-log slope PAIRED over the flights present at both leads (an opus review
+caught the unpaired form reading 1.34 on a fixture whose every flight grows linearly; also: leads off the
+1 s grid refused instead of rounded, the `.txt` sidecar under the same immutability rule, the chart
+from `geometric_metrics.chart_rows` instead of a restated one). Artifact
+`4dTrajectory/outputs/KRDU/experiments/two_tier_feasibility_20260916/lead_time_error.{json,txt}` over
+native32, L3_cta and the state arm A_threshold_enu: the control path's error starts from ~20 m at 10 s and
+grows as h^1.55 (straight-in) / h^1.77 (vectored) to 60 s; the state path starts from 400–600 m (its known
+first-step offset) and does not grow until 90 s; the given-true-duration arm matches native32 to 60 s and
+only pulls the error back after 180 s.
+
+**Literature** `docs/literature/hierarchical_prediction/` (README index + `download.sh`; PDFs untracked):
+hierarchical / two-stage motion forecasting, multi-scale time-series transformers, the compounding-error
+theory of iterated vs direct multi-step prediction, multi-aircraft graph and intent-input aviation papers.
+
+Docs: `OPEN_ITEMS.md` entry, `CLAUDE.md` where-to-go-next row. No training run, nothing committed by the
+session.
+
 ### 2026-09-14 — runway intent R3.3: R3's flown schedule as a held-out-days (`dayval`) publication; a test overwrote the live KRDU categories.json
 
 **Ask.** The user: "先做1, 2, 最后3" — item 3, publish R3's trajectories (plan §18.3).
