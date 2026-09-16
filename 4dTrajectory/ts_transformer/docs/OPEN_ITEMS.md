@@ -74,10 +74,21 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
 - **N7 (an inference-time glidepath hook) — WITHDRAWN as a model fix** (the user, 2026-09-16, design
   §7.5.6). It computes the final's vertical profile from the published procedure, so the result would be the
   rule's, not the model's. Kept only as a labelled diagnostic or baseline component.
-- **N7′ — proposed, not built (the user's call):** a learned vertical target. The head predicts the path angle
-  (or height) per segment, and a fixed tracking law with no procedure in it flies the head's own target. The
-  height error then grows linearly or not at all, instead of quadratically. Under SF, `Ė = V·n_x`, so the law
-  cannot hide an energy cost the way N6's speed loop did.
+- **N7′ — PRE-MEASURED 2026-09-16, not built (the user's call; design §13):** a learned vertical target. The
+  head predicts the path angle per segment, and a fixed tracking law with no procedure in it flies the head's
+  own target. Under SF, `Ė = V·n_x`, so the law cannot hide an energy cost the way N6's speed loop did.
+  - The teacher is identifiable: flown open loop, its replay is straight-in ADE p50 **32 m** against 63 m
+    (n_x) and 145 m (δ), ending **5 m** off in height against 27 / 42 m; pooled 60 vs 117 / 259 m; vectored
+    1956 vs 6491 / 6680 m. The scratch integrator matches the package driver to 0.04 m.
+  - τ_γ is insensitive between 2 and 5 s; the target's box is p1/p50/p99 = −4.9 / −2.9 / +0.25°, segment step
+    p50 0.30°.
+  - The same instantaneous vertical error costs **5.3× less height** (+17.2 m against +91.6 m) and 3.6× less
+    speed. The load row reproduces the N3 tail exactly (+0.004 of load = +92 m, −5.3 m/s).
+  - **Not a free win:** γ* varies more than the load factor, so the break-even is a per-flight bias of
+    **0.11°** (9 % of the teacher's γ* spread); the same bias-to-spread accuracy the N3 head shows in load
+    (7.4 %) lands at 33 m against today's 41 m. What tips it is predictability: the load teacher is mostly
+    per-segment noise (lag-1 +0.26, the head's residual is 102 % of its spread), the path-angle teacher is
+    structure (lag-1 +0.61).
 - **N6 — the speed command: RAN, FAILED — unstable in training** (design §12.9).
   - The first arm diverged from epoch 26: pre-clip control-head gradients 1e7–1e10, from zoom climbs the speed
     loop hides until the T_max clamp binds.

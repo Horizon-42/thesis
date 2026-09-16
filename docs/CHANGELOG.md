@@ -18,6 +18,14 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 - **Proposed instead (not built, the user's call): N7′.** The head predicts a per-segment path-angle (or
   height) target, and a fixed tracking law with no procedure in it flies it. The profile stays the model's;
   the open-loop double integration diagnosed in design §7.5 goes.
+- **Pre-measured the same day (design §13), read-only, 300 KRDU val flights:** each contract's teacher
+  inverted from the truth and flown open loop through the package's own dynamics.
+  - Straight-in replay ADE p50 **32 m** for the path-angle contract, against 63 m (n_x) and 145 m (δ),
+    ending 5 m off in height against 27 / 42 m; vectored 1956 vs 6491 / 6680 m. τ_γ insensitive (2 vs 5 s).
+  - The same instantaneous vertical error costs 5.3× less height under the path-angle contract; the
+    load-factor row reproduces the N3 tail (+0.004 of load = +92 m, −5.3 m/s).
+  - Break-even for a path-angle head is a per-flight bias of 0.11°, so the gain is not automatic; the
+    path-angle target is however the more predictable one (lag-1 autocorrelation +0.61 against +0.26).
 
 ### 2026-09-15 — ts_transformer: the final-descent split diagnosed — the vertical channel is open loop; δ's straight-in FDE edge is a stall-bound dive
 

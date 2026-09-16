@@ -22,7 +22,7 @@ the literature (36 sources) and the measurements behind the choice are in
 | N6 | a speed command (`speed-command`, Δv relative to the anchor speed through a τ_V speed loop): the invariant WITH a restoring force (§12) | built and reviewed 2026-09-15 on branch `sf-n6` (`94f822e`; review §12.8). Ran 06:01 UTC at `eaf409a`. **FAILED: unstable in training** (§12.9). Arm 1 diverged from epoch 26 (pre-clip control-head gradient norm 1e7–1e10) and early-stopped at 38 (best 18): pooled ADE 2335 vs 1325 m. Seed 2024 stopped at dataset build (only `config.json`). Not adopted; the next design is the user's call (§12.9) | §12.9 |
 | F | the final-descent split, diagnosed (the user: "开始排查") | **done** 2026-09-15, read-only on the four same-code runs. The truth flies at ~0.6 Cl_max; the rollouts reach the stall boundary by losing speed. SF's split is its vertical-load command integrated open loop: the twice-integrated command bias predicts the height error at 5 km with Spearman +0.76 / +0.82, and the energy is right. δ has the same open channel, worse; its straight-in FDE edge is a stall-bound dive that ends ~100 m low and on time. A straight-in FDE is 60–77 % along-track, 1–2 % vertical | §7.5 |
 | N7 | an inference-time glidepath hook on the specific-force contract | **withdrawn as a model fix** (the user, 2026-09-16): it computes the final's vertical profile from the published procedure, so the result would be the rule's, not the model's. Kept only as a labelled diagnostic or baseline component (§7.5.6) | §7.5.6 |
-| N7′ | a learned vertical target: the head predicts the path angle (or height) per segment, and a fixed tracking law with no procedure in it flies it. The diagnosed integrator goes, and the profile stays the model's | **proposed, not built**: the user's call (§7.5.6) | §7.5.6 |
+| N7′ | a learned vertical target: the head predicts the path angle (or height) per segment, and a fixed tracking law with no procedure in it flies it. The diagnosed integrator goes, and the profile stays the model's | **pre-measured 2026-09-16 (§13), not built.** The teacher is identifiable and τ-insensitive: its open-loop replay is straight-in ADE p50 32 m against 63 m (n_x) and 145 m (δ), ending 5 m off in height against 27 / 42 m. The same instantaneous vertical error costs 5.3× less height. But γ\* varies more than the load factor, so the break-even is a per-flight bias of 0.11°, and the gain is not automatic. Its target is the more predictable of the two (lag-1 +0.61 against +0.26). Build/no-build is the user's call | §13 |
 
 **Decision state.** The user approved on 2026-09-14: design, then implement on a new branch
 the user merges. Every code milestone gets a subagent review before its commit
@@ -637,6 +637,8 @@ over flights, as Δ = prediction − truth. Command Δ is the model's segment co
     N6's speed loop, which hid a pull-up's cost behind the thrust.
   - It trains, so N6's stability lesson applies: clamp the loop's load into the envelope and the stall
     margin, and zero-init the γ* head at level-trim of the anchor path.
+  - **Pre-measured before any code (§13, 2026-09-16):** identifiable, τ-insensitive, 5.3× less
+    error-amplifying, with the break-even accuracy stated. Build/no-build is the user's call.
 - **Alternatives, second choice:**
   - Closed-loop re-prediction: re-run the network on the rollout's own state every few segments. It is the
     closest to "learn to correct", at the highest cost and risk (compounding error; DAgger, Ross et al.
@@ -1230,3 +1232,100 @@ runner worktree at `eaf409a`.
 **And the premise was wrong (§7.4).** N3's FDE veto is a final-descent height/speed split, not a missing
 restoring force. None of the three candidates above is the next step; the final descent's vertical profile
 under the n_x law is. Diagnosed in §7.5: the vertical channel is open loop, and the proposal is N7 (§7.5.6).
+
+
+## 13. N7′ pre-measurement — is a path-angle contract worth building? (2026-09-16)
+
+Two read-only measurements, before any code: the user asked for them instead of a build.
+**Verdict: the evidence supports building it, and it is not a free win — the benefit hinges on how
+accurately a head predicts γ\*, and the break-even is stated below.**
+
+### 13.1 Method
+
+- 300 KRDU val flights of `sf_n3/N3_specific_force_pred_val` (205 straight-in, `route_tortuosity < 1.05`),
+  their OBSERVED tracks, 32 uniform segments, the midpoint sample `segment_controls` teaches.
+- Each contract's teacher is inverted from the truth and then flown **open loop** from the anchor through
+  the package's own lag dynamics (`rollout_piecewise_constant_at_times`, `integrator_dt_s = 0.5`), and
+  compared with the truth at the truth's own sample times. A contract whose teacher cannot replay its own
+  truth cannot be learned to better than that error.
+- The path-angle law is written in the session scratchpad (`path_angle_teacher.py`), not in the package. It
+  is the vertical analogue of `SpeedCommandLaw`: the third actuator holds γ\* (lagging toward the command
+  with the load actuator's τ = 0.8 s), and the load factor is re-solved at every RK4 stage from the state,
+  `n = [cos γ + V·(γ\* − γ)/(g·τ_γ)] / cos φ`, clipped to the load box, so the stall cap and the envelope
+  still decide what is flown. Longitudinally it is the specific force, so only the vertical channel differs
+  from N3. Inversion on the truth: `γ\*_actual = γ + τ_γ·γ̇` with γ̇ from the realised load (as
+  `actual_controls` derives it), then the package's own lag inverse `γ\*_cmd = γ\*_actual + τ_load·d/dt`
+  on a 5-sample smoothed copy.
+- **Integrator check:** the same law flown by the scratch loop and by the package driver agrees to
+  **0.04 m** (3D, worst of 5 flights), so the comparison is not an artefact of the scratch integrator.
+
+### 13.2 Teacher replay (p50 over flights)
+
+| contract | ADE all | ADE straight-in | FDE straight-in | \|Δh\| at the end | ΔV at the end | ADE vectored |
+|---|---|---|---|---|---|---|
+| δ — thrust fraction + load factor | 259 m | 145 m | 503 m | 42 m | +5.9 m/s | 6680 m |
+| n_x — specific force + load factor (N3) | 117 m | 63 m | 176 m | 27 m | +0.3 m/s | 6491 m |
+| **γ\* — specific force + path angle, τ_γ = 2 s** | **60 m** | **32 m** | **68 m** | **5 m** | +0.1 m/s | **1956 m** |
+| γ\* — the same, τ_γ = 5 s | 61 m | 33 m | 73 m | 5 m | +0.1 m/s | 1952 m |
+
+- **The vertical contract, not the longitudinal one, sets how well an open-loop schedule can fly a
+  trajectory at all.** Under a load-factor command the teacher's own replay ends 27–42 m off in height on
+  a straight-in and 0.9–2.1 km off on a vectored flight; under a path-angle target, 5 m and ~100 m.
+- τ_γ is not a sensitive choice between 2 and 5 s. A value at or above the segment hold (5.3 s) and well
+  above the load actuator's 0.8 s is what the barrier v1 bang-bang lesson asks for, and it costs almost
+  nothing here.
+- The teacher's γ\* sits in a learnable range: p1 / p50 / p99 = **−4.89 / −2.94 / +0.25°**, segment-to-segment
+  step p50 0.30°, p99 2.91°. A box of [−15°, +10°] holds it with room.
+
+### 13.3 Error amplification — the same mistake under each contract
+
+A constant bias is added to the teacher's vertical channel and the replay is repeated: `+0.004` of load
+factor, against the path-angle bias that produces the SAME initial path rate (`0.004·g·τ_γ/V₀`, a median
+of 0.047°). Straight-in p50 of the change at the end:
+
+| contract | Δ height | Δ speed |
+|---|---|---|
+| load factor | **+91.6 m** | −5.29 m/s |
+| path angle | **+17.2 m** | −1.47 m/s |
+
+- **5.3× less height and 3.6× less speed for the same instantaneous error**, which is the linear-versus-
+  quadratic accumulation of §7.5.3 measured on real flights.
+- The load row also reproduces the diagnosis: +0.004 of load bias is exactly the +95 m and −8 m/s the
+  stall-bound tail of the N3 runs ends with.
+
+### 13.4 What accuracy the new head would need (the honest part)
+
+Measured on the same 300 straight-in flights, per segment:
+
+| quantity | value |
+|---|---|
+| teacher load factor, spread over segments (std) | 0.0243 |
+| teacher path angle, spread over segments (std) | 1.225° |
+| the N3 head's load residual, std | 0.0248 = **102 %** of the teacher's spread |
+| the N3 head's load BIAS per flight, \|mean\| p50 | 0.0018 = 7.4 % of that spread → ≈41 m of end height |
+| **break-even for a path-angle head** | a per-flight bias of **0.11°** = 9 % of the teacher's γ\* spread |
+| the same bias share (7.4 %) applied to γ\* | 0.09° → 33 m of end height, against today's 41 m |
+
+- **So the amplification factor is not the expected gain.** γ\* varies far more than the load factor does,
+  so a head with the same bias-to-spread accuracy lands at about break-even (33 m against 41 m).
+- What tips it: **predictability**. The teacher load factor is mostly segment-to-segment noise (lag-1
+  autocorrelation +0.26; 44 % of the variance survives a 3-segment smoother) and the N3 head predicts
+  essentially none of it — its residual is 102 % of the spread, i.e. it emits a near-constant. The teacher
+  path angle is structure (lag-1 +0.61, 66 % survives), which is what a sequence model can actually fit.
+- And the contract's own floor is better: the teacher replay is 2× better on straight-ins and 3× pooled
+  (§13.2), so the best a head could do is better too.
+
+### 13.5 Reading, and what would settle it
+
+- **Build it as an axis, measure it like N3.** The pre-measurement cannot prove the head will hit 0.11°;
+  it shows the contract is identifiable, τ-insensitive, boxable, 5× less error-amplifying, and that its
+  target is the more predictable of the two.
+- Risks to carry into the design:
+  - the head must be better than break-even, not merely different (state 0.11° as the gate);
+  - it trains, so the N6 stability lesson applies — clamp the resolved load into the envelope and the
+    stall margin (already in the scratch law), and zero-init the γ\* head at the anchor path's trim;
+  - the barrier hook re-coordinates the load factor, so the vertical axis and that hook must either be
+    composed deliberately or refused together in the config, as `speed-command` refuses the speed floor.
+- Arms, if it is built: `N7_path_angle` against `N4_twin` (and the N3 arm), two seeds, the same gates as
+  N3 plus the vertical ones — the stall-bound share, the along-track lag of that group, straight-in FDE
+  read with its along/vertical split.
