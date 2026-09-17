@@ -634,6 +634,51 @@
     "B_s2024@readout-8km": "在剩余路程 8 km 的锚点重锚后画出的计划。",
     "B_s2024@readout-6km": "在剩余路程 6 km 的锚点重锚后画出的计划。"
    }
+  },
+  "two_tier_l1b_20260917": {
+   "title": "L1b · 为什么 L1 不用计划 token（诊断臂，单种子）",
+   "intent": "L1 campaign 的短时读数：六个主臂带真值航路点与不带的 ADE[0,60] 只差 2–4 m（pa_s1337 固定锚点雷达引导 181 / 183 m），把 token 里的航路点向北平移 2 km 只让 60 s 终点动 67 m（48 个验证航班的 p50）——控制头学会了做好的短时预测器（不带 token 时优于 native32 切到 60 s：固定锚点 136 对 163 m，8 km 处 77 对 136 m），但没学会朝给定航路点飞。四个单种子臂在架构改动前隔离优化侧的原因：token 遮蔽率 0；学习率不按 plateau 减半；两者都要；遮蔽率 0 并关掉平滑项（航向率 8、坡度 TV 1）。读数同 L1（`short_horizon_readout` 对 native32，带/不带 token 配对）。若四臂都不用 token，需要把 token 直接接进控制头（架构改动，用户决定）。",
+   "design": "4dTrajectory/ts_transformer/docs/2026-09-17_two_tier_plan_v2.zh.md §10（S5 诊断，2026-09-17 晚）",
+   "runs": {
+    "L1b_pa_nodrop": "航迹角契约，token 遮蔽率 0（每行都看到真值航路点）；其余同 L1_pa_s1337。",
+    "L1b_pa_lrflat": "航迹角契约，遮蔽率 0.5，学习率不按 plateau 减半（L1 臂到 126 轮时 lr 已降到 1e-7）。",
+    "L1b_pa_nodrop_lrflat": "航迹角契约，遮蔽率 0 且学习率不减半。",
+    "L1b_pa_nodrop_position": "航迹角契约，遮蔽率 0 且关掉航向率（8）与坡度 TV（1）项：目标函数只剩位置与速度。"
+   },
+   "variants": {
+    "L1b_pa_nodrop@short-truth-plan-fixed": "短时读数：从共同固定锚点 59起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop@short-no-plan-fixed": "短时读数：从共同固定锚点 59起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop@short-truth-plan-12km": "短时读数：从剩余路程 12 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop@short-no-plan-12km": "短时读数：从剩余路程 12 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop@short-truth-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop@short-no-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop@short-truth-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop@short-no-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_lrflat@short-truth-plan-fixed": "短时读数：从共同固定锚点 59起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_lrflat@short-no-plan-fixed": "短时读数：从共同固定锚点 59起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_lrflat@short-truth-plan-12km": "短时读数：从剩余路程 12 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_lrflat@short-no-plan-12km": "短时读数：从剩余路程 12 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_lrflat@short-truth-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_lrflat@short-no-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_lrflat@short-truth-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_lrflat@short-no-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop_lrflat@short-truth-plan-fixed": "短时读数：从共同固定锚点 59起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop_lrflat@short-no-plan-fixed": "短时读数：从共同固定锚点 59起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop_lrflat@short-truth-plan-12km": "短时读数：从剩余路程 12 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop_lrflat@short-no-plan-12km": "短时读数：从剩余路程 12 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop_lrflat@short-truth-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop_lrflat@short-no-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop_lrflat@short-truth-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop_lrflat@short-no-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop_position@short-truth-plan-fixed": "短时读数：从共同固定锚点 59起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop_position@short-no-plan-fixed": "短时读数：从共同固定锚点 59起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop_position@short-truth-plan-12km": "短时读数：从剩余路程 12 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop_position@short-no-plan-12km": "短时读数：从剩余路程 12 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop_position@short-truth-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop_position@short-no-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop_position@short-truth-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
+    "L1b_pa_nodrop_position@short-no-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。"
+   }
   }
  }
 }

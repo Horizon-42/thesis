@@ -31,6 +31,7 @@
 | S2.1 `segment-plan` 输出 | **完成** 9d9afc8（opus review 12 项已处理、全套测试通过）；本文件 §4 已按实现改：输出在**跑道系**而非 chart；到达 = 真值终点 `truth_duration_s`；每 epoch 的 `segment_plan_validation` 读数块 |
 | S2.2 L2 读数 runner | **代码完成**：`run_ts.py segment_plan_readout`（每个 checkpoint 在共同固定锚点——各自固定锚点中最晚的——与 12/8/6 km bin 上预测，60/120/180/300 s 的位移分层；forecast 结束后**保持末行**（到达的计划停在入口，读的是它的到达判断），只有真值落地才缺席；每个 checkpoint 在**自己的 split** 上读、按共同航班配对——native32 是 openap-direct 队列（val 1404），state 臂与 L2 臂是全机型（val 2104，前者 ⊂ 后者，已核）；匀速外推内置参照；segment-plan 臂带计划块）+ `two_tier_gates --segment-readout`（门 L2：120 与 180 s 雷达引导 p50 比**每个**整段参照都低 ≥ 125 m、直线不高于，两种子）。opus review 11 项已处理（固定锚点集要求该锚点存在且其后 ≥ 60 s 观测轨迹、held 计数进配对格与门判据行、多个 readout 参照/锚点/提前量不一致拒绝、segment-plan 臂一次前向、`window` 参照拒绝、`strata_fixed_at_anchor`）。测试 `test_segment_plan_readout.py`（8）、`test_two_tier_gates.py` L2 段（5）。**待用户定**：直线"不差"= 差 ≤ 0（零容差；包内直线种子线是 30 m，review 建议考虑）；参照的记录也写出（S4 需为 native32/state 注册 `@readout-*` 变体或跳过） |
 | S2.3 L2 臂 + intents | **已写**：`docs/experiments/two_tier_l2_arms.json`（A/B × 2 种子，seq_len 61，M = 10，全机型 cohort，随机锚点 remaining-path-uniform、未来 ≥ 30 s、半数留在固定锚点 60，180 epoch，按目标函数选），dry run 通过；intents `two_tier_l2_20260917`（4 run + `@readout-<set>` 变体）；cohort 已写 `two_tier_l2_20260917/development_cohort.json`（10102 / 2104，丢 3 个训练航班）。等 L1 campaign 跑完后交队列 agent：训练 4 臂 → `segment_plan_readout`（参照 native32 + `airport_frame_20260903/A_threshold_enu`，`--write-records`）→ `two_tier_gates --segment-readout`（A 两种子、B 两种子各判一次） |
+| **首批读数（2026-09-17 晚，2a）** | **L1 不用它的计划 token**：六个主臂带真值航路点与不带的 ADE[0,60] 只差 2–4 m（见 §10）；不带 token 时优于 native32 切到 60 s。诊断臂 `docs/experiments/two_tier_l1b_arms.json`（4 臂、单种子、pa 契约：遮蔽率 0 / 不减 lr / 两者 / 关平滑项）+ intents `two_tier_l1b_20260917`，排在 L2 之后、E2E 之前 |
 | S3 联合 lockstep + 门 E2E | **完成** a1e58aa：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。等 L1 门与 L2 门的结果后由队列 agent 跑（种子配对：L1 s1337 + L2 s1337 …；brief 第 4 步） |
 
 ## 2. 架构
@@ -164,7 +165,7 @@ L2 − 真值粗计划的差就是 e_plan，L1 在真值计划下的误差就是
 | S2.3 | 臂文件 + intents（A / B × 2 种子）→ 队列 agent | 门 L2 的数 |
 | S3 | lockstep 接 L2（`SegmentHeadWaypoints`、`--anchor-floor-index`、e_plan 旁读）；门 E2E 归入 `two_tier_gates` | **代码完成**；实验待 L1/L2 门 |
 | S4 | 发布 S1–S3 结果 | — |
-| S5（条件性） | 横向闭环定律；L2 的 K 混合；L1 在自身状态上训练（若 e(30 s) 沿航班上升） | 各自的门 |
+| S5（条件性） | 横向闭环定律；L2 的 K 混合；L1 在自身状态上训练（若 e(30 s) 沿航班上升）；**L1b：L1 为什么不用 token（4 个诊断臂，已写，见 §10）** | 各自的门 |
 | S6 | L3 多机图层：以 L2 的多机预测段为节点；先做前机真值段的 oracle 前置测量 | 后续设计 |
 
 S1 与 S2 代码互不依赖，可并行开发；GPU 串行，S1 先训。
@@ -210,3 +211,29 @@ rm -rf $D/lockstep_30s/records $D/lockstep_30s_head/records $D/T1a_plan_p0_s1337
 ```
 
 S1 的 8 个 checkpoint 约 0.4 GB；两个读数 runner 的记录（1404 架 × 变体）按 T1a 的 lockstep 记录树估计每臂 2 GB 量级，只给门臂写。
+
+
+## 10. 首批读数（2026-09-17 晚）
+
+### 10.1 L1 短时读数（2a，`two_tier_l1_20260917/short_horizon`，KRDU val，固定锚点 59，horizon 60 s）
+
+ADE[0,60] 均值 m（全部 n=1401 / 雷达引导 n=497），fixed 与 8 km 两档；native32 = 整段头切到 60 s：
+
+| 臂 | truth-plan fixed 全部/雷达 | no-plan fixed 全部/雷达 | truth-plan 8 km 全部/雷达 | no-plan 8 km 全部/雷达 |
+|---|---|---|---|---|
+| native32（参照） | — | 163 / 250 | — | 136 / 143 |
+| L1_tf_s1337 | 165 / 218 | 165 / 215 | 106 / 113 | 105 / 112 |
+| L1_tf_s2024 | 161 / 217 | 163 / 218 | 103 / 110 | 103 / 111 |
+| L1_sf_s1337 | 152 / 214 | 151 / 210 | 82 / 88 | 82 / 87 |
+| L1_sf_s2024 | 149 / 212 | 149 / 209 | 82 / 89 | 83 / 89 |
+| L1_pa_s1337 | 134 / 181 | 136 / 183 | 77 / 84 | 77 / 84 |
+| L1_pa_s2024 | 135 / 185 | （待 artifact） | 80 / 88 | （待 artifact） |
+
+读法：
+- **门 L1 第一句不过**：truth-plan 雷达引导 181–218 m ≫ 125 m；直线约 108 m ≫ 60 m（由全部与雷达引导反推）。
+- **第二句过**：no-plan 优于 native32（固定锚点 136 对 163；8 km 处 77 对 136）——固定 60 s 时域的控制头是更好的短时预测器，航迹角契约最好，推力分数最差（与 N7′ 的次序一致）。
+- **关键发现：truth-plan ≈ no-plan**。头没有用 token。探针（`scratchpad/token_probe.py`，L1_pa_s1337，val 前 48 航班，CPU）：把 token 的航路点向北平移 2 km，60 s 终点只动 67 m（p50）；向上 2 km 动 161 m；带 token 对不带，终点差 40 m。token 确实进了 `feature_fusion`（`heads.py`，一个 Linear+GELU 并进 6·d_model 的编码特征旁），训练行与读数行用同一个 `training_plan_token`，所以这是**优化侧没学会用**，不是接线错误。
+- 三个可疑的优化因素：token 遮蔽率 0.5（半数行没有 token）；lr 从 3e-5 起、按 objective plateau（patience 3）减半，到 126 轮已是 1e-7（大半个 campaign 没在训练）；平滑项（航向率 8、坡度 TV 1）主导目标。L1b 四臂各隔离一个（§7 S5）。若都不用 token → 需要把 token 直接接到控制头（架构改动，用户定）。
+- 对 S3/E2E 的含义：在 L1 不用 token 之前，端到端 lockstep 里 L2 的计划不影响 L1，E2E 读数等于协议 B 的 lockstep；E2E 排在 L1b 之后（brief 第 4 步）。
+
+（2b–2d 与 L2 的数待队列 agent 汇报后补入。）

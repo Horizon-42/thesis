@@ -1,0 +1,63 @@
+{
+ "_comment": "Two-tier v2 S5 diagnostic L1b (2026-09-17, after the L1 campaign's short-horizon readout): every L1 arm reads its truth waypoint token and ignores it — truth-plan and no-plan ADE[0,60] within 2-4 m on all six main arms (pa_s1337 fixed anchor: 181 / 183 m vectored), and a token whose waypoints are shifted 2 km north moves the 60 s endpoint by 67 m (p50, 48 val flights; 2 km up: 161 m). The head's no-plan reading beats native32 cut at 60 s (136 vs 163 m at the fixed anchor, 77 vs 136 at 8 km), so it is a good short-horizon predictor that never learned to steer to a given waypoint. Four single-seed arms on the path-angle contract isolate the optimisation levers before any architecture change: the 50 % token dropout off (the head sees the token on every row), the LR plateau cuts off (the L1 arms' rate fell from 3e-5 to 1e-7 by epoch ~126 under patience 3 on a noisy objective, so most of the 180 epochs trained at nothing), both, and dropout off with the smoothness terms (heading-rate 8, bank TV 1) off so the position term is the objective. Same cohort, anchor and readouts as the L1 campaign (`short_horizon_readout` against native32; the truth-plan against no-plan pairing is the reading). A head that follows its token shows truth-plan ADE[0,60] well below no-plan and an endpoint that moves with a shifted token; if none of the four does, the token needs a direct pathway into the control head (an architecture change, the user's call).",
+ "predict": false,
+ "development_cohort": "4dTrajectory/outputs/{airport}/experiments/two_tier_l1_20260917/development_cohort.json",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "seq_len": 30,
+  "n_segments": 6,
+  "control_horizon_s": 60.0,
+  "anchor_floor_index": 59,
+  "control_imitation_loss_weight": 0.0,
+  "control_heading_rate_loss_weight": 8.0,
+  "control_bank_tv_loss_weight": 1.0,
+  "final_time_loss_weight": 0.0,
+  "state_endpoint_loss_weight": 0.0,
+  "random_train_anchor": true,
+  "random_train_anchor_min_future_s": 60.0,
+  "random_train_anchor_sampling": "remaining-path-uniform",
+  "random_train_anchor_l1_share": 0.5,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "lr_plateau_metric": "objective",
+  "epochs": 180,
+  "patience": 180,
+  "plan_conditioning": "waypoints",
+  "plan_conditioning_dropout": 0.5,
+  "control_thrust_parameterization": "specific-force+path-angle",
+  "seed": 1337
+ },
+ "arms": [
+  {
+   "key": "L1b_pa_nodrop",
+   "label": "path-angle, token dropout 0 (the token on every row)",
+   "overrides": {
+    "plan_conditioning_dropout": 0.0
+   }
+  },
+  {
+   "key": "L1b_pa_lrflat",
+   "label": "path-angle, dropout 0.5, no LR plateau cuts",
+   "overrides": {
+    "lr_plateau_patience": 180
+   }
+  },
+  {
+   "key": "L1b_pa_nodrop_lrflat",
+   "label": "path-angle, dropout 0 + no LR plateau cuts",
+   "overrides": {
+    "plan_conditioning_dropout": 0.0,
+    "lr_plateau_patience": 180
+   }
+  },
+  {
+   "key": "L1b_pa_nodrop_position",
+   "label": "path-angle, dropout 0 + heading-rate and bank-TV terms off",
+   "overrides": {
+    "plan_conditioning_dropout": 0.0,
+    "control_heading_rate_loss_weight": 0.0,
+    "control_bank_tv_loss_weight": 0.0
+   }
+  }
+ ]
+}
