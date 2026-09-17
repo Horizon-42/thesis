@@ -120,14 +120,17 @@ def decode_series(
     normalizer: Normalizer,
     anchor: int,
     device: torch.device,
+    *,
+    batch_size: int | None = None,
 ) -> list[DecodedPlan]:
-    """Every flight's plan at ``anchor``: forward passes of ``config.batch_size`` flights,
-    the model in eval mode, no gradients."""
+    """Every flight's plan at ``anchor``: forward passes of ``batch_size`` flights (the
+    checkpoint's own by default), the model in eval mode, no gradients."""
+    batch_size = batch_size or config.batch_size
     model.eval()
     plans: list[DecodedPlan] = []
     with torch.no_grad():
-        for start in range(0, len(series), config.batch_size):
-            chunk = series[start : start + config.batch_size]
+        for start in range(0, len(series), batch_size):
+            chunk = series[start : start + batch_size]
             history = torch.from_numpy(history_batch(chunk, config, normalizer, anchor)).to(device)
             headings = np.array([runway_heading_rad(item) for item in chunk], dtype=np.float64)
             context = {

@@ -10,11 +10,22 @@ straight-in 283 m at L−1)::
 
     python run_ts.py tracker_lockstep --checkpoint T1a=<ckpt> --out <dir> --step-s 30 --write-records
     python run_ts.py tracker_lockstep --checkpoint T1a=<ckpt> --plan-head <plan ckpt> --out <dir> ...   # T2
+    python run_ts.py tracker_lockstep --checkpoint L1_pa_s1337=<ckpt> --plan-head <segment-plan ckpt> \
+        --anchor-floor-index 60 --out <dir> ...                                                        # two-tier E2E (S3)
 
-WHERE THE PLAN COMES FROM is the protocol (`TruthPlans` / `HeadPlans`): by default the TRUTH's (T1, protocol C,
-an oracle); with ``--plan-head`` a plan head's OWN prediction on the same rolled history at every
-ask (T2, protocol A: `order_from_prediction` → `targets_at`, the same token and the same arrival
-time the truth goes through). One rule is shared by both after the first ask (`on_final_capture`):
+WHERE THE PLAN COMES FROM is the protocol (`TruthPlans` / `TruthWaypoints` / `HeadPlans` /
+`SegmentHeadWaypoints`): by default the TRUTH's (T1 / two-tier L1, protocol C, an oracle); with
+``--plan-head`` a head's OWN prediction on the same rolled history at every ask (protocol A) — a plan
+head's next instruction (T2, `order_from_prediction` → `targets_at`) for a ``truth-next`` tracker, or a
+SEGMENT-PLAN head's next coarse waypoints (two-tier v2 §5, the E2E lockstep: `decode_series` → the
+head's waypoints relative to the flown row, its own arrival time as the first ask's horizon — the
+plan's span where it draws no arrival) for a ``waypoints`` tracker; a head of the other kind is
+refused. Under the segment head every ask also records **e_plan** — the head's waypoints against the
+truth's at the same flown time and position (`truth_waypoints`, the reading that never enters an
+input) — beside the step error, so the design's e_plan and e_track are read from one run.
+``--anchor-floor-index N`` reads every tracker at anchor N instead of its own fixed anchor (a head
+whose lookback does not fit before the tracker's anchor — the L2 head's 61 samples against the L1
+arms' 59 — needs it; stated in the artifact, refused below the tracker's own anchor). One rule is shared by both after the first ask (`on_final_capture`):
 the capture height is undefined where the aircraft is ON the final at the ask (`labels.on_final_pose`)
 — the observable reading of the training label's `join_at_anchor`, which a `TruthExpert` built at
 ``a0`` would otherwise keep from ``a0`` for the whole flight. The truth's first ask is the label
@@ -92,6 +103,7 @@ from ts_transformer.config import (
     PLAN_CONDITIONING_WAYPOINTS,
     PREDICTION_CONTROL,
     PREDICTION_PLAN,
+    PREDICTION_SEGMENT_PLAN,
     default_anchor,
     plan_waypoint_count,
 )
@@ -108,7 +120,7 @@ from ts_transformer.inference.receding import ROW_TOLERANCE_S, cut_at_lead, disp
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.outputs.control.forecast import forecast_control_batch
 from ts_transformer.outputs.control.plan_token import (
-    PLAN_TOKEN_KEY, plan_token, plan_token_width, truth_waypoints, waypoint_token,
+    PLAN_TOKEN_KEY, Waypoints, plan_token, plan_token_width, truth_waypoints, waypoint_token,
 )
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.outputs.plan.extractors import extract_plan, ground_speeds
@@ -117,13 +129,18 @@ from ts_transformer.outputs.plan.labels import (
 )
 from ts_transformer.outputs.plan.model import prediction_rows
 from ts_transformer.outputs.plan.skeleton import RunwaySkeleton, SkeletonCache
+from ts_transformer.outputs.segment_plan.strategy import decode_series
 
 # v2 (2026-09-16): every flight row carries `difficulty` and the plan oracle's `reference`
 # verdicts; every stratum block their shares. v3 (2026-09-17, two-tier v2 §3): every flight
 # row carries `asks_e_m` — the displacement from the truth at the END of every leg flown (the
 # per-ask step error, the drift reading) — and every stratum block its p50 by ask; the plan
-# records the command hook the arms were flown under.
-RESULT_SCHEMA = "ts-tracker-lockstep-v3"
+# records the command hook the arms were flown under. v4 (2026-09-17, two-tier v2 §5): every
+# flight row carries `asks_plan_e_m` (e_plan per ask under a segment-plan head, empty otherwise)
+# and `horizon_from_plan_span` (the first ask's horizon came from the plan's span, not an arrival
+# it drew); the plan records `anchor_floor_index`. The L1 campaign's artifacts are v3.
+RESULT_SCHEMA = "ts-tracker-lockstep-v4"
+RESULT_SCHEMA_V3 = "ts-tracker-lockstep-v3"   # what the gates still read: the L1 campaign's artifacts
 #: The block each record directory's summary carries — the publisher's
 #: `VARIANT_RECORD_BLOCKS` mirrors this name.
 RECORDS_BLOCK = "lockstep"
@@ -155,6 +172,8 @@ class LockstepPlan:
     #: own schedule. Two-tier v2 §3: the gate reads the hook-free run, the hooked one is the
     #: delivery-form reading beside it.
     command_hook: str | None = None
+    #: ``--anchor-floor-index``: every tracker read at this anchor instead of its own (None = its own).
+    anchor_floor_index: int | None = None
 
 
 @dataclass
@@ -175,6 +194,14 @@ class FlightRun:
     #: truth at its END (None past the truth's end) — the per-ask step error a drift reading
     #: lines up along the flight.
     asks_e: list[dict] = field(default_factory=list)
+    #: Under a segment-plan head, per ask: the head's waypoints against the truth's at the same
+    #: flown time and position — e_plan (two-tier v2 §5), per waypoint and pooled; empty otherwise.
+    asks_plan_e: list[dict] = field(default_factory=list)
+    #: Under a segment-plan head: whether the FIRST ask's plan drew an arrival (its time is then the
+    #: horizon) or not (the plan's span is — a cap, and the flight that outlives it ends at the
+    #: horizon un-established), and that segment's arrival probability. None under any other source.
+    plan_arrives_at_a0: bool | None = None
+    plan_arrival_probability_at_a0: float | None = None
 
     @property
     def flown_s(self) -> float:
@@ -253,7 +280,8 @@ class HeadPlans:
     reads_the_future = ("nothing but the landed runway (the threshold frame and the skeleton, as every ts "
                         "number): the plan and the arrival time are the plan head's own (protocol A)")
 
-    def __init__(self, head: Arm, batch_size: int, device: torch.device) -> None:
+    def __init__(self, head: Arm, batch_size: int, device: torch.device, config) -> None:
+        del config   # the tracker's; the instruction token has one shape
         self.head, self.batch_size, self.device = head, batch_size, device
 
     def at_ask(self, runs: list[FlightRun], histories: list[FlightSeries], anchor: int, *, first: bool) -> list[AskPlan]:
@@ -311,12 +339,67 @@ class TruthWaypoints:
         return out
 
 
+class SegmentHeadWaypoints:
+    """Two-tier v2 §5 (S3), protocol A: the SEGMENT-PLAN head's own coarse plan on the ask's rolled
+    history — its waypoints every `PLAN_WAYPOINT_SEGMENT_S` after the ask relative to the flown row
+    (the token shape `TruthWaypoints` hands over; a waypoint past the head's own arrival is
+    invalid, as the truth's past its end), and its own arrival time as the first ask's horizon
+    (the plan's span where it draws no arrival: the head sees no landing inside it). Beside the
+    token every ask records e_plan — the head's waypoints against `truth_waypoints` at the same
+    flown time and position, per waypoint and pooled over the waypoints both hold — a reading
+    that enters no input."""
+
+    source = "segment-head"
+    reads_the_future = ("nothing but the landed runway: the waypoints and the arrival time are the segment-plan "
+                        "head's own on the flown history (protocol A); the e_plan reading beside each ask compares "
+                        "them with the truth's waypoints and enters no input")
+
+    def __init__(self, head: Arm, batch_size: int, device: torch.device, config) -> None:
+        self.head, self.batch_size, self.device, self.count = head, batch_size, device, plan_waypoint_count(config)
+        if int(head.config.segment_plan_segments) < self.count:
+            raise SystemExit(f"--plan-head {head.path}: draws {head.config.segment_plan_segments} segments, the tracker "
+                             f"reads {self.count} waypoints")
+
+    def at_ask(self, runs: list[FlightRun], histories: list[FlightSeries], anchor: int, *, first: bool) -> list[AskPlan]:
+        plans = decode_series(self.head.model, histories, self.head.config, self.head.normalizer, anchor, self.device,
+                              batch_size=self.batch_size)
+        out = []
+        for run, history, plan in zip(runs, histories, plans, strict=True):
+            origin_time = float(history.times[anchor])
+            origin = np.asarray(history.values[anchor], dtype=np.float64)[list(POSITION_IDX)]
+            lead_s = plan.times_s[: self.count]
+            valid = np.ones(self.count, dtype=bool) if not plan.arrives else lead_s <= plan.arrival_time_s + ROW_TOLERANCE_S
+            waypoints = Waypoints(deltas=(plan.waypoints[: self.count] - origin) * valid[:, None], lead_s=lead_s,
+                                  valid=valid.astype(np.float64))
+            truth = truth_waypoints(run.series, origin_time, origin, self.count)
+            both = valid & (truth.valid > 0)
+            per = np.linalg.norm(waypoints.deltas - truth.deltas, axis=1)
+            # `run.next_ask` IS the lockstep ask index of this ask (the filter that made the run
+            # active), so e_plan lines up with `asks_e_m` under one-shot legs too
+            run.asks_plan_e.append({
+                "ask": run.next_ask,
+                "per_waypoint_m": [float(per[k]) if both[k] else None for k in range(self.count)],
+                "e_m": float(per[both].mean()) if both.any() else None,
+            })
+            if first:
+                run.plan_arrives_at_a0, run.plan_arrival_probability_at_a0 = plan.arrives, plan.arrival_probability
+            out.append(AskPlan(arrival_s=float(plan.arrival_time_s if plan.arrives else plan.times_s[-1]),
+                               token=waypoint_token(waypoints, self.count)))
+        return out
+
+
 def plan_source_class(head: Arm | None, config):
-    """WHICH source flies the plan: a plan head when one is given, else the truth's — in the
-    token shape the checkpoint reads (`plan_conditioning`; a plan-free checkpoint takes the
-    instruction source for its arrival time alone)."""
+    """WHICH source flies the plan: a head when one is given (a segment-plan head for a
+    ``waypoints`` tracker, a plan head for a ``truth-next`` one — the head must hand over the
+    token shape the tracker reads), else the truth's in that shape (a plan-free checkpoint
+    takes the instruction source for its arrival time alone)."""
     if head is not None:
-        return HeadPlans
+        segment = head.config.prediction_output == PREDICTION_SEGMENT_PLAN
+        waypoints = config.plan_conditioning == PLAN_CONDITIONING_WAYPOINTS
+        if segment != waypoints:
+            raise SystemExit(f"--plan-head {head.path} hands over {'waypoints' if segment else 'the next instruction'}; "
+                             f"the tracker reads plan_conditioning={config.plan_conditioning!r}")
+        return SegmentHeadWaypoints if segment else HeadPlans
     return TruthWaypoints if config.plan_conditioning == PLAN_CONDITIONING_WAYPOINTS else TruthPlans
 
 
@@ -355,7 +438,7 @@ def fly_variant(arm: Arm, series: list[FlightSeries], variant: str, plan: Lockst
     skeletons = SkeletonCache()
     runs = [FlightRun(series=item, skeleton=skeletons.for_series(item)) for item in series]
     source = plan_source_class(head, config)
-    plans = HeadPlans(head, batch_size, device) if source is HeadPlans else source(runs, a0, config)
+    plans = source(head, batch_size, device, config) if head is not None else source(runs, a0, config)
     floor_s = ask_floor_s(config, plan.step_s)
     ask = 0
     while any(run.ended is None for run in runs):
@@ -457,6 +540,10 @@ def flight_row(run: FlightRun, forecast: Forecast, a0: int, points: int, difficu
         "chamfer_m": float(geometry["chamfer_m"]), "frechet_m": float(geometry["frechet_m"]),
         "at": {f"{lead:g}": displacement_at(run.series, forecast, a0, origin + lead) for lead in LEADS_S},
         "asks_e_m": run.asks_e,
+        "asks_plan_e_m": run.asks_plan_e,
+        # the first ask's horizon came from the plan's SPAN (no arrival drawn) — a cap, stated
+        "horizon_from_plan_span": run.plan_arrives_at_a0 is False,
+        "plan_arrival_probability_at_a0": run.plan_arrival_probability_at_a0,
     }
     return row, metrics
 
@@ -479,10 +566,35 @@ def e_by_ask(cells: list[dict]) -> dict[str, dict]:
     }
 
 
+def plan_e_by_ask(cells: list[dict]) -> dict[str, dict]:
+    """e_plan pooled over ``cells`` per ask: ``{ask: {n, p50, per_waypoint_p50, per_waypoint_n}}`` —
+    ``n`` the asks whose head and truth waypoints overlap anywhere, ``p50`` over their pooled
+    ``e_m`` (a mean over 1 or 2 waypoints, so the per-waypoint curve is the honest reading), each
+    waypoint's p50 over the ``per_waypoint_n`` asks both sides hold it. Empty under a source that
+    draws no plan — and under the L1 campaign's v3 artifacts, whose rows carry no `asks_plan_e_m`
+    (the gates read those through this function)."""
+    by_ask: dict[int, list[dict]] = {}
+    for cell in cells:
+        for entry in cell.get("asks_plan_e_m", ()):
+            if entry["e_m"] is not None:
+                by_ask.setdefault(int(entry["ask"]), []).append(entry)
+    out = {}
+    for ask, entries in sorted(by_ask.items()):
+        count = len(entries[0]["per_waypoint_m"])
+        per = [[e["per_waypoint_m"][k] for e in entries if e["per_waypoint_m"][k] is not None] for k in range(count)]
+        out[str(ask)] = {
+            "n": len(entries), "p50": _p50([e["e_m"] for e in entries]),
+            "per_waypoint_p50": [_p50(values) for values in per],
+            "per_waypoint_n": [len(values) for values in per],
+        }
+    return out
+
+
 def stratum_block(rows: dict[str, dict], keys: list[str]) -> dict:
     cells = [rows[key] for key in keys]
     return {
         "e_by_ask_p50_m": e_by_ask(cells),
+        "plan_e_by_ask_p50_m": plan_e_by_ask(cells),
         "n": len(cells),
         "ade_mean_m": float(np.mean([c["ade_m"] for c in cells])) if cells else None,
         "ade_p50_m": _p50([c["ade_m"] for c in cells]),
@@ -495,6 +607,8 @@ def stratum_block(rows: dict[str, dict], keys: list[str]) -> dict:
         # how far the raise reached: a flight told 30 s at 29 s to go is not one told 30 s at 2 s
         "cta_raised_max_p50_s": _p50([c["cta_raised_max_s"] for c in cells if c["asks_below_floor"]]),
         "truncated_at_threshold": sum(1 for c in cells if c["truncated_at_threshold"]),
+        # under a segment-plan head: flights whose first ask drew no arrival, so their horizon is the plan's span
+        "horizon_from_plan_span": sum(1 for c in cells if c.get("horizon_from_plan_span")),
         "ended": {name: sum(1 for c in cells if c["ended"] == name) for name in sorted({c["ended"] for c in cells})},
         "at_lead_p50_m": {
             lead: {"n": len(v), "p50": _p50(v)}
@@ -540,6 +654,13 @@ def render(payload: dict) -> str:
                 )
                 steps = " ".join(f"k{ask} {_fmt(v['p50'])}({v['n']})" for ask, v in cell["e_by_ask_p50_m"].items())
                 lines.append(f"   {'':<17s} {'step error p50 by ask':<34s} {steps}")
+                if cell["plan_e_by_ask_p50_m"]:
+                    plan_steps = " ".join(
+                        f"k{ask} {_fmt(v['p50'])}[{'/'.join(f'{_fmt(w)}({m})' for w, m in zip(v['per_waypoint_p50'], v['per_waypoint_n']))}]({v['n']})"
+                        for ask, v in cell["plan_e_by_ask_p50_m"].items()
+                    )
+                    lines.append(f"   {'':<17s} {'plan error p50 by ask [per waypoint(n)]':<34s} {plan_steps}"
+                                 f" | horizon from the plan's span {cell['horizon_from_plan_span']}")
     return "\n".join(lines) + "\n"
 
 
@@ -610,7 +731,7 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: LockstepPlan, device
                 extra_summary={RECORDS_BLOCK: {
                     "schema": RECORDS_SCHEMA, "campaign": campaign, "label": arm.label, "variant": variant,
                     "step_s": plan.step_s, "horizon": HORIZON_RULE, "ask_floor_s": ask_floor_s(config, plan.step_s),
-                    "anchor": a0, "command_hook": plan.command_hook,
+                    "anchor": a0, "anchor_floor_index": plan.anchor_floor_index, "command_hook": plan.command_hook,
                     "plan_conditioning": config.plan_conditioning, "cta_conditioning": config.cta_conditioning,
                     "control_horizon_s": config.control_horizon_s,
                     "plan_source": plan_source(head, config),
@@ -631,6 +752,19 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: LockstepPlan, device
     }
 
 
+def at_anchor_floor(loaded: list[Arm], floor: int | None) -> list[Arm]:
+    """Every tracker read at anchor ``floor`` (`--anchor-floor-index`): its config's floor replaced,
+    refused below the tracker's own fixed anchor — a tracker is read at or after the anchor it
+    trained at, never before it."""
+    if floor is None:
+        return loaded
+    for arm in loaded:
+        if floor < default_anchor(arm.config):
+            raise SystemExit(f"--anchor-floor-index {floor} is before {arm.label}'s own fixed anchor "
+                             f"{default_anchor(arm.config)}; a tracker is read at or after the anchor it trained at")
+    return [replace(arm, config=replace(arm.config, anchor_floor_index=floor)) for arm in loaded]
+
+
 def plan_source(head: Arm | None, config) -> str:
     source = plan_source_class(head, config)
     return f"{source.source}:{head.path}" if head is not None else source.source
@@ -639,7 +773,7 @@ def plan_source(head: Arm | None, config) -> str:
 def load_head(path: Path, grid: Grid, device: torch.device) -> Arm:
     head = load_arm("plan-head", path if path.is_absolute() else REPO_ROOT / path, grid, device,
                     instrument=f"{INSTRUMENT}'s plan head")
-    if head.config.prediction_output != PREDICTION_PLAN:
+    if head.config.prediction_output not in (PREDICTION_PLAN, PREDICTION_SEGMENT_PLAN):
         raise SystemExit(f"--plan-head {path}: predicts {head.config.prediction_output!r}, not a plan")
     return head
 
@@ -684,8 +818,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--write-records", action="store_true")
     parser.add_argument("--plan-head", type=Path, default=None, metavar="PATH",
-                        help="T2: a plan checkpoint whose own prediction on each ask's history is the plan "
-                             "and the arrival time (protocol A); default: the truth's (T1, protocol C)")
+                        help="a plan checkpoint (T2) or a segment-plan checkpoint (two-tier E2E) whose own prediction "
+                             "on each ask's history is the plan and the arrival time (protocol A); default: the "
+                             "truth's (protocol C)")
+    parser.add_argument("--anchor-floor-index", type=int, default=None, metavar="N",
+                        help="read every tracker at anchor N instead of its own fixed anchor (a head whose lookback "
+                             "does not fit before it needs one); refused below the tracker's own anchor")
     parser.add_argument("--command-hook", choices=CONTROL_HOOKS_AVAILABLE, default=None,
                         help="fly every arm under this command hook (what it means in `predict`); the "
                              "delivery-form reading beside the hook-free gate run (two-tier v2 §3)")
@@ -708,10 +846,13 @@ def parse_plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Loc
         parser.error("--limit must be non-negative")
     if args.batch_size is not None and args.batch_size < 1:
         parser.error("--batch-size must be positive")
+    if args.anchor_floor_index is not None and args.anchor_floor_index < 0:
+        parser.error("--anchor-floor-index is a sample index")
     return LockstepPlan(split=args.split, step_s=float(args.step_s),
                         variants=variants, limit=int(args.limit), batch_size=args.batch_size,
                         write_records=bool(args.write_records),
-                        command_hook=None if args.command_hook is None else f"{args.command_hook}/{args.hook_saturation}")
+                        command_hook=None if args.command_hook is None else f"{args.command_hook}/{args.hook_saturation}",
+                        anchor_floor_index=args.anchor_floor_index)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -730,6 +871,7 @@ def main(argv: list[str] | None = None) -> int:
                  hook_saturation=None if args.command_hook is None else args.hook_saturation)
         for label, path in arms.items()
     ]
+    loaded = at_anchor_floor(loaded, plan.anchor_floor_index)
     for arm in loaded:
         check_arm(arm, plan)
     head = None if args.plan_head is None else load_head(args.plan_head, grid, device)
@@ -748,7 +890,7 @@ def main(argv: list[str] | None = None) -> int:
             "schema": RESULT_SCHEMA,
             "plan": {"split": plan.split, "step_s": plan.step_s, "horizon": HORIZON_RULE,
                      "variants": list(plan.variants), "limit": plan.limit, "write_records": plan.write_records,
-                     "command_hook": plan.command_hook},
+                     "command_hook": plan.command_hook, "anchor_floor_index": plan.anchor_floor_index},
             "plan_source": plan_source(head, source_config),
             "plan_head_sha256": None if head is None else file_sha256(head.path),
             "reads_the_future": plan_source_class(head, source_config).reads_the_future,

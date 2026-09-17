@@ -63,6 +63,7 @@ SEGMENT_PLAN_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "termin
 #: 3° descent — plausible waypoints, so the first replays draw approaches.
 INITIAL_ALONG_MPS = 80.0
 INITIAL_DESCENT_RATE_MPS = 4.0
+INITIAL_ARRIVED_LOGIT = -1.0
 
 
 @dataclass(frozen=True)
@@ -171,6 +172,9 @@ class SegmentPlanModel(nn.Module):
             ends = PLAN_WAYPOINT_SEGMENT_S * torch.arange(1, self.segments + 1, dtype=torch.float32)
             initial = torch.stack((INITIAL_ALONG_MPS * ends, torch.zeros_like(ends), -INITIAL_DESCENT_RATE_MPS * ends), dim=1)
             last.bias[: 3 * self.segments] = (initial / self.position_scale).reshape(-1)
+            # the arrival bits start BELOW the decode threshold (P ≈ 0.27): an untrained head draws a
+            # plan that flies on, never one that has already landed at its first segment
+            last.bias[3 * self.segments : 4 * self.segments] = INITIAL_ARRIVED_LOGIT
 
     def bind_normalizer(self, normalizer) -> None:
         self.channel_mean.copy_(torch.as_tensor(normalizer.mean, dtype=torch.float32))

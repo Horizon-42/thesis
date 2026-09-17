@@ -92,6 +92,31 @@ seq_len 61, M 10, all-aircraft, remaining-path-uniform anchors ≥ 30 s with hal
 train flights dropped) + the `two_tier_l2_20260917` intents entry. Tests `test_segment_plan_readout.py`
 (5) and the L2 block of `test_two_tier_gates.py` (4).
 
+**S3 the two tiers end to end.** `tracker_lockstep --plan-head` now takes a `segment-plan` checkpoint:
+`SegmentHeadWaypoints` (protocol A) decodes the head's plan on the rolled history at every ask, hands the
+L1 tracker the next K waypoints relative to the flown row (a waypoint past the head's own arrival invalid,
+as the truth's past its end) and the head's arrival time as the first ask's horizon (the plan's span where
+it draws no arrival), and records e_plan — the head's waypoints against `truth_waypoints` at the same
+flown time, per waypoint and pooled — beside the step error (`asks_plan_e_m`, `plan_e_by_ask_p50_m`); a
+head of the other token shape is refused (`plan_source_class`). `--anchor-floor-index N` reads every
+tracker at anchor N (the L2 head's 61-sample lookback does not fit before the L1 arms' 59; refused below a
+tracker's own anchor; stated in the artifact). `two_tier_gates` maps the `segment-head` source to gate
+E2E, judged by G3's pre-registered criteria (plan v2 §5 = feasibility §6), with e_plan rendered beside.
+The segment-plan head's arrival logits now start at −1 (P ≈ 0.27): an untrained head drew a plan that had
+landed at its first segment (P = 0.5 exactly, the decode's `>=`). The opus review (7 items) applied: e_plan's
+ask index is the lockstep's (`run.next_ask`, so one-shot legs line up with the step error); a first ask that
+draws no arrival is COUNTED (`horizon_from_plan_span` per flight and per stratum — its horizon is the plan's
+span, a cap that ends a longer flight un-established, the number that explains an E2E established failure);
+`--batch-size` reaches the head (`decode_series(batch_size=)`); per-waypoint counts beside the p50s; the
+floor in the record block; the lockstep schema is v4 and the gates read v3 (the L1 campaign's artifacts)
+with an empty e_plan. Tests: the E2E block of `test_tracker_lockstep.py` (6, one driving `main` with
+`--plan-head <segment head> --anchor-floor-index`), `test_e2e_…` and the v3 read in `test_two_tier_gates.py`.
+
+**S4 groundwork.** `publish_ts_experiment_trajectories.py` learned the two readouts' record blocks
+(`short_horizon`, `segment_plan` join `chain` and `lockstep` in `VARIANT_RECORD_BLOCKS`): such a directory is
+a VARIANT of its checkpoint's prediction and is refused without `--category-variant`; the mirror is pinned
+against the runners' `RECORDS_BLOCK` constants in the publisher's test file.
+
 ### 2026-09-16 — the control contracts merged into dev-two-tier and refactored into one row each; T0(c) measured
 
 **Ask.** The user, on merging the path-angle contract (branch `sf-n7`) for the two-tier T1a experiment: "不要直接合，

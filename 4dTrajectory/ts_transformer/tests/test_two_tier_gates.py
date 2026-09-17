@@ -269,6 +269,34 @@ def test_the_readout_refuses_another_cohort_anchor_schema_or_a_missing_gate_arm(
                     "--out", str(tmp_path / "exists")])
 
 
+# ── E2E ────────────────────────────────────────────────────────────────────────
+
+
+def test_e2e_reads_a_segment_head_artifact_by_g3s_criteria_with_e_plan_beside(tmp_path):
+    variants = {VARIANT_RECEDING: _flights(400.0, 2700.0), VARIANT_NO_PLAN: _flights(450.0, 3100.0)}
+    for rows in variants.values():
+        for row in rows.values():
+            row["asks_plan_e_m"] = [{"ask": k, "per_waypoint_m": [100.0 + k, 200.0 + k], "e_m": 150.0 + k} for k in range(3)]
+    lockstep = _lockstep(tmp_path, "e2e", {"s1337": variants, "s2024": variants}, source="segment-head", anchor=60)
+    result = _run(tmp_path, lockstep)
+    block = result["gates"][gates.GATE_E2E]
+    assert block["pass"]
+    names = [c["criterion"] for c in block["verdicts"]["s1337"]["criteria"]]
+    assert names[0].startswith("ADE mean") and any("fully flyable" in n for n in names) and any("established" in n for n in names)
+    cell = block["arms"]["s1337"]["variants"][VARIANT_RECEDING][STRATUM_ALL]
+    assert cell["plan_e_by_ask_p50_m"]["0"] == {"n": 8, "p50": 150.0, "per_waypoint_p50": [100.0, 200.0], "per_waypoint_n": [8, 8]}
+    assert "e_plan" in (tmp_path / "gates" / "two_tier_gates.txt").read_text()
+
+
+def test_a_v3_lockstep_artifact_is_still_read_with_no_e_plan(tmp_path):
+    """The L1 campaign's artifacts are v3: no `asks_plan_e_m`, no plan-span flag — read, with an empty e_plan."""
+    lockstep = _lockstep(tmp_path, "l1v3", {"s1337": _variants(200.0, 1400.0), "s2024": _variants(200.0, 1400.0)},
+                         source="truth-waypoints", schema=gates.LOCKSTEP_SCHEMA_V3)
+    result = _run(tmp_path, lockstep, baseline=_guidance(tmp_path))
+    cell = result["gates"][gates.GATE_L1]["arms"]["s1337"]["variants"][VARIANT_RECEDING][STRATUM_ALL]
+    assert cell["plan_e_by_ask_p50_m"] == {}
+
+
 # ── L2 ─────────────────────────────────────────────────────────────────────────
 
 

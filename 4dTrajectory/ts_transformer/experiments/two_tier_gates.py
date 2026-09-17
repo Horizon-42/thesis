@@ -1,4 +1,4 @@
-"""Two-tier gates L1 / L2 / G1 / G3 off `tracker_lockstep` and `segment_plan_readout` artifacts, flight by flight.
+"""Two-tier gates L1 / L2 / E2E / G1 / G3 off `tracker_lockstep` and `segment_plan_readout` artifacts, flight by flight.
 
 Two-tier v2 `docs/2026-09-17_two_tier_plan_v2.zh.md` §3 (gate L1, the drift reading) over the feasibility
 design's §6 / §10.7 gates (G1 / G3, the abandoned T1a design's, kept for the artifacts that carry them).
@@ -11,6 +11,11 @@ A gate is judged per GATE ARM (the checkpoint labels ``--gate-arms`` names, the 
   stratum over the SAME flights (``--baseline``, as G1). Beside it, never inside it, the DRIFT reading:
   the per-ask step error (`asks_e_m`) pooled per stratum, its p50 over asks ≥ 3 against the p50 over
   asks 0–2 — a ratio over 1.5 is "rising" and triggers S5 (training on the tracker's own states).
+
+* **E2E** — an artifact whose plans are a SEGMENT-PLAN head's own waypoints (`tracker_lockstep.SegmentHeadWaypoints`,
+  protocol A, two-tier v2 §5): the two tiers end to end, judged as G3 is (native32's one-shot 2870 / 445 m less
+  the seed lines: vectored ADE mean ≤ 2745 m, straight-in ≤ 415 m; fully flyable ≥ 95 %; established ≥ 94 %),
+  with e_plan (the head's waypoints against the truth's at each ask) read beside e_track.
 
 * **G1** — an artifact whose plans are the TRUTH's (protocol C): vectored ADE mean < 1000 m AND
   straight-in < 200 m; fully flyable on ≥ 95 % of all flights; established (crossed the threshold on the
@@ -77,12 +82,15 @@ from ts_transformer.experiments.segment_plan_readout import (
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.experiments.tracker_lockstep import (
     RESULT_SCHEMA as LOCKSTEP_SCHEMA,
+    RESULT_SCHEMA_V3 as LOCKSTEP_SCHEMA_V3,
     VARIANT_NO_PLAN,
     VARIANT_ONE_SHOT,
     VARIANT_RECEDING,
     HeadPlans,
+    SegmentHeadWaypoints,
     TruthPlans,
     TruthWaypoints,
+    plan_e_by_ask,
 )
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 
@@ -91,8 +99,10 @@ GATE_G1 = "G1"
 GATE_G3 = "G3"
 GATE_L1 = "L1"
 GATE_L2 = "L2"
+GATE_E2E = "E2E"
 #: The gate an artifact is judged under, by where its plans came from (`tracker_lockstep.plan_source`).
-GATE_BY_SOURCE = {TruthPlans.source: GATE_G1, HeadPlans.source: GATE_G3, TruthWaypoints.source: GATE_L1}
+GATE_BY_SOURCE = {TruthPlans.source: GATE_G1, HeadPlans.source: GATE_G3, TruthWaypoints.source: GATE_L1,
+                  SegmentHeadWaypoints.source: GATE_E2E}   # E2E is judged by G3's criteria (two-tier v2 §5 = feasibility §6)
 GATE_STRATA = (STRATUM_STRAIGHT_IN, STRATUM_VECTORED)
 #: The split every gate is read on, and the fewest gate arms (seeds) a gate is judged over.
 GATE_SPLIT = "val"
@@ -165,10 +175,11 @@ def _mean(values) -> float | None:
 def load_lockstep(path: Path) -> list[ArmReading]:
     file = path / "tracker_lockstep.json" if path.is_dir() else path
     payload = json.loads(file.read_text(encoding="utf-8"))
-    if payload.get("schema") != LOCKSTEP_SCHEMA:
+    # v3 (the L1 campaign's artifacts) lacks only e_plan and the plan-span flag, both of a segment-head run
+    if payload.get("schema") not in (LOCKSTEP_SCHEMA, LOCKSTEP_SCHEMA_V3):
         raise SystemExit(
-            f"{file}: schema {payload.get('schema')!r}, this readout needs {LOCKSTEP_SCHEMA!r} (its flight rows "
-            "carry the plan oracle's reference verdicts) — re-run tracker_lockstep at this code"
+            f"{file}: schema {payload.get('schema')!r}, this readout needs {LOCKSTEP_SCHEMA!r} or {LOCKSTEP_SCHEMA_V3!r} "
+            "(their flight rows carry the plan oracle's reference verdicts) — re-run tracker_lockstep at this code"
         )
     plan = payload["plan"]
     if plan["limit"] or plan["split"] != GATE_SPLIT:
@@ -232,6 +243,8 @@ def variant_block(rows: dict[str, dict]) -> dict:
                 lead: _p50([rows[i]["at"][lead] for i in members if rows[i]["at"][lead] is not None])
                 for lead in (rows[members[0]]["at"] if members else {})
             },
+            # e_plan by ask (a segment-head artifact; empty elsewhere): the head's waypoints against the truth's
+            "plan_e_by_ask_p50_m": plan_e_by_ask([rows[i] for i in members]),
         }
     return out
 
@@ -517,6 +530,11 @@ def render(result: dict) -> str:
                     lines.append(f"     receding − {name:<16s} {stratum[:30]:<30s} n={cell['n']:>4d} ΔADE mean "
                                  f"{_fmt(cell['delta_mean_m']):>6} p50 {_fmt(cell['delta_p50_m']):>6} "
                                  f"receding better {_fmt(cell['arm_better_share'], 3)}")
+            for variant, strata in arm["variants"].items():
+                for stratum, cell in strata.items():
+                    if cell["plan_e_by_ask_p50_m"]:
+                        curve = " ".join(f"k{ask} {_fmt(v['p50'])}({v['n']})" for ask, v in cell["plan_e_by_ask_p50_m"].items())
+                        lines.append(f"     e_plan {variant:<16s} {stratum[:30]:<30s} p50 by ask | {curve}")
             for variant, strata in arm["drift"].items():
                 for stratum, cell in strata.items():
                     verdict = "—" if cell["rising"] is None else ("RISING" if cell["rising"] else "flat")

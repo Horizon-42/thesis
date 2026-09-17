@@ -31,6 +31,7 @@ from ts_transformer.config import (
     default_anchor,
 )
 from ts_transformer.data.approach_difficulty import STRATUM_ALL
+from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.inference.forecast import Forecast
 from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, build_series, dataset_flight_key, truth_duration_s
 from ts_transformer.data.synthetic import synthetic_arrivals
@@ -360,7 +361,7 @@ def test_a_head_ask_hands_over_the_heads_own_order_as_token_and_arrival(trained,
         items = [item for item in series if anchor_of(item) == anchor_of(series[0])][:4]
         anchor = anchor_of(items[0])
         runs = [runner.FlightRun(series=item, skeleton=runner.SkeletonCache().for_series(item)) for item in items]
-        asked = runner.HeadPlans(head, 2, torch.device("cpu")).at_ask(runs, items, anchor, first=True)
+        asked = runner.HeadPlans(head, 2, torch.device("cpu"), arm.config).at_ask(runs, items, anchor, first=True)
         with torch.no_grad():
             values, probability = prediction_rows(head.model(torch.from_numpy(
                 history_batch(items, head.config, head.normalizer, anchor))))
@@ -391,7 +392,7 @@ def test_a_head_run_reads_no_truth_and_ends_at_its_own_horizon(monkeypatch, trai
     blind = [replace(item, supervision_times=None, supervision_values=None, supervision_weights=None) for item in series[:3]]
     a0 = default_anchor(arm.config)
     probe = [runner.FlightRun(series=item, skeleton=runner.SkeletonCache().for_series(item)) for item in blind]
-    first = runner.HeadPlans(head, 4, torch.device("cpu")).at_ask(probe, blind, a0, first=True)
+    first = runner.HeadPlans(head, 4, torch.device("cpu"), arm.config).at_ask(probe, blind, a0, first=True)
     monkeypatch.setattr(runner, "TruthExpert", None)
     monkeypatch.setattr(labels_module, "TruthExpert", None)
     monkeypatch.setattr(runner, "truth_duration_s", None)
@@ -452,3 +453,207 @@ def test_the_lockstep_refuses_what_it_cannot_fly(config_overrides, variants, mes
     })
     with pytest.raises(SystemExit, match=message):
         runner.check_arm(SimpleNamespace(label="x", path="x", config=config), _plan(variants=variants))
+
+
+# ── two-tier E2E (S3): the segment-plan head as the plan source ─────────────────
+
+
+@pytest.fixture(scope="module")
+def waypoint_tracker(trained, tmp_path_factory):
+    """A fixed-horizon control checkpoint told the truth's next two waypoints (the L1 shape)."""
+    from ts_transformer.config import CTA_CONDITIONING_OFF, PLAN_CONDITIONING_WAYPOINTS
+
+    flights, _series, _arm = trained
+    config = _config(cta_conditioning=CTA_CONDITIONING_OFF, plan_conditioning=PLAN_CONDITIONING_WAYPOINTS,
+                     control_horizon_s=60.0, final_time_loss_weight=0.0)      # two 30 s waypoints, three 20 s steps
+    series, _report = build_series(flights, config, airport=AIRPORT)
+    out = tmp_path_factory.mktemp("waypoint_tracker")
+    torch.manual_seed(0)
+    train(series, config, output_dir=out, data_provenance=fake_data_provenance(), verbose=False)
+    model, loaded, normalizer, payload = load_checkpoint(out / "checkpoint.pt")
+    return series, anytime.Arm(label="l1", path=out / "checkpoint.pt", model=model, config=loaded, normalizer=normalizer,
+                               payload=payload, airports=(AIRPORT,), manifests=[out / "manifest.json"])
+
+
+@pytest.fixture(scope="module")
+def segment_head(trained, tmp_path_factory):
+    """A tiny segment-plan head on the same flights: one coarse input segment (seq_len 16, a LONGER
+    lookback than the tracker's 8 — the real pair is 61 against 60), four segments ahead."""
+    from ts_transformer.config import CHECKPOINT_SELECTION_OBJECTIVE, PREDICTION_SEGMENT_PLAN
+
+    flights, _series, _arm = trained
+    config = TSConfig(prediction_output=PREDICTION_SEGMENT_PLAN, seq_len=16, segment_plan_segments=4, n_segments=4,
+                      d_model=16, n_heads=4, d_ff=32, e_layers=1, device="cpu", horizon_mode="normalized",
+                      checkpoint_selection_metric=CHECKPOINT_SELECTION_OBJECTIVE, epochs=1, patience=1, batch_size=8,
+                      dropout=0.0, val_fraction=0.25, test_fraction=0.25)
+    series, _report = build_series(flights, config, airport=AIRPORT)
+    out = tmp_path_factory.mktemp("segment_head")
+    torch.manual_seed(0)
+    train(series, config, output_dir=out, data_provenance=fake_data_provenance(), verbose=False)
+    model, loaded, normalizer, payload = load_checkpoint(out / "checkpoint.pt")
+    return anytime.Arm(label="segment-head", path=out / "checkpoint.pt", model=model, config=loaded,
+                       normalizer=normalizer, payload=payload, airports=(AIRPORT,), manifests=[out / "manifest.json"])
+
+
+def test_a_segment_head_ask_hands_over_its_own_waypoints_and_arrival_and_reads_e_plan(waypoint_tracker, segment_head):
+    from ts_transformer.config import plan_waypoint_count
+    from ts_transformer.outputs.control.plan_token import Waypoints, truth_waypoints, waypoint_token
+    from ts_transformer.outputs.segment_plan.strategy import decode_series
+
+    series, arm = waypoint_tracker
+    anchor = segment_head.config.seq_len - 1                         # the head's own lookback fits here
+    items = series[:4]
+    runs = [runner.FlightRun(series=item, skeleton=runner.SkeletonCache().for_series(item)) for item in items]
+    source = runner.plan_source_class(segment_head, arm.config)
+    assert source is runner.SegmentHeadWaypoints
+    asked = source(segment_head, 2, torch.device("cpu"), arm.config).at_ask(runs, items, anchor, first=True)
+    count = plan_waypoint_count(arm.config)
+    plans = decode_series(segment_head.model, items, segment_head.config, segment_head.normalizer, anchor, torch.device("cpu"))
+    for run, item, plan_at, plan in zip(runs, items, asked, plans, strict=True):
+        origin = item.values[anchor, list(POSITION_IDX)]
+        lead_s = plan.times_s[:count]
+        valid = np.ones(count, dtype=bool) if not plan.arrives else lead_s <= plan.arrival_time_s + runner.ROW_TOLERANCE_S
+        expected = waypoint_token(Waypoints(deltas=(plan.waypoints[:count] - origin) * valid[:, None], lead_s=lead_s,
+                                            valid=valid.astype(np.float64)), count)
+        np.testing.assert_allclose(plan_at.token, expected, rtol=1e-6, atol=1e-6)
+        assert plan_at.arrival_s == pytest.approx(plan.arrival_time_s if plan.arrives else plan.times_s[-1])
+        # e_plan: the head's waypoints against the truth's at the same time and position
+        assert len(run.asks_plan_e) == 1 and run.asks_plan_e[0]["ask"] == run.next_ask == 0
+        assert run.plan_arrives_at_a0 == plan.arrives and run.plan_arrival_probability_at_a0 == plan.arrival_probability
+        truth = truth_waypoints(item, float(item.times[anchor]), origin, count)
+        both = valid & (truth.valid > 0)
+        per = np.linalg.norm((plan.waypoints[:count] - origin) * valid[:, None] - truth.deltas, axis=1)
+        for k in range(count):
+            if both[k]:
+                assert run.asks_plan_e[0]["per_waypoint_m"][k] == pytest.approx(per[k], rel=1e-6)
+            else:
+                assert run.asks_plan_e[0]["per_waypoint_m"][k] is None
+        # the row the tracker is handed carries exactly that token
+        row = runner.ask_row(run, item, anchor, arm.config, plan_at, with_plan=True, floor_s=runner.ask_floor_s(arm.config, STEP_S))
+        np.testing.assert_allclose(row[PLAN_TOKEN_KEY], expected, rtol=1e-6, atol=1e-6)
+
+
+def test_a_head_must_hand_over_the_token_shape_the_tracker_reads(trained, waypoint_tracker, segment_head, head):
+    from dataclasses import replace as dc_replace
+
+    _flights, _series, truth_next_tracker = trained
+    _series2, waypoints_tracker = waypoint_tracker
+    # ...and draw at least as many segments as the tracker reads waypoints
+    wide = dc_replace(waypoints_tracker.config, control_horizon_s=150.0)
+    with pytest.raises(SystemExit, match="draws 4 segments, the tracker reads 5 waypoints"):
+        runner.SegmentHeadWaypoints(segment_head, 2, torch.device("cpu"), wide)
+    with pytest.raises(SystemExit, match="hands over waypoints"):
+        runner.plan_source_class(segment_head, truth_next_tracker.config)
+    with pytest.raises(SystemExit, match="hands over the next instruction"):
+        runner.plan_source_class(head, waypoints_tracker.config)
+    assert runner.plan_source_class(head, truth_next_tracker.config) is runner.HeadPlans
+    assert runner.plan_source(segment_head, waypoints_tracker.config) == f"segment-head:{segment_head.path}"
+
+
+def test_an_e2e_run_reads_no_truth_and_lands_in_the_e2e_gate(monkeypatch, waypoint_tracker, segment_head, tmp_path) -> None:
+    """The whole lockstep under the segment head on the waypoint tracker, read at the head's anchor
+    (`--anchor-floor-index`): the truth's waypoints are read for e_plan only — never handed over."""
+    from dataclasses import replace as dc_replace
+
+    series, arm = waypoint_tracker
+    floor = segment_head.config.seq_len - 1
+    assert floor > default_anchor(arm.config)
+    floored = dc_replace(arm, config=dc_replace(arm.config, anchor_floor_index=floor))
+    handed: list[np.ndarray] = []
+    original = runner.waypoint_token
+
+    def spy(waypoints, count):
+        token = original(waypoints, count)
+        handed.append(token)
+        return token
+
+    monkeypatch.setattr(runner, "waypoint_token", spy)
+    decoded: list[tuple[int, list, list]] = []
+    original_decode = runner.decode_series
+
+    def spy_decode(model, histories, config, normalizer, anchor, device, batch_size=None):
+        plans = original_decode(model, histories, config, normalizer, anchor, device, batch_size=batch_size)
+        decoded.append((anchor, list(histories), plans))
+        return plans
+
+    monkeypatch.setattr(runner, "decode_series", spy_decode)
+    runs = runner.fly_variant(floored, series[:6], runner.VARIANT_RECEDING, _plan(variants=(runner.VARIANT_RECEDING,)),
+                              torch.device("cpu"), 4, head=segment_head)
+    assert all(run.ended in (runner.ENDED_CROSSED, runner.ENDED_HORIZON, runner.ENDED_FORECAST) for run in runs)
+    assert all(len(run.asks_plan_e) == run.asks or len(run.asks_plan_e) == run.asks + 1 for run in runs)
+    assert all(entry["ask"] == k for run in runs for k, entry in enumerate(run.asks_plan_e))   # receding: ask k is leg k
+    assert all(run.plan_arrives_at_a0 is not None for run in runs)
+    assert handed and all(token[-1] == 1.0 for token in handed)      # every ask handed a PRESENT token, the head's
+    # at a LATER ask the token is the head's own decode of the ROLLED history about the flown row —
+    # and not the truth's waypoints there
+    from ts_transformer.config import plan_waypoint_count
+    from ts_transformer.outputs.control.plan_token import Waypoints, truth_waypoints, waypoint_token as build_token
+
+    assert len(decoded) >= 2, "the fixture's flights end after the first ask"
+    anchor1, histories1, plans1 = decoded[1]
+    count = plan_waypoint_count(arm.config)
+    history, plan = histories1[0], plans1[0]
+    assert anchor1 > floor and history.n_samples == anchor1 + 1
+    origin = history.values[anchor1, list(POSITION_IDX)]
+    lead_s = plan.times_s[:count]
+    valid = np.ones(count, dtype=bool) if not plan.arrives else lead_s <= plan.arrival_time_s + runner.ROW_TOLERANCE_S
+    rebuilt = build_token(Waypoints(deltas=(plan.waypoints[:count] - origin) * valid[:, None], lead_s=lead_s,
+                                    valid=valid.astype(np.float64)), count)
+    np.testing.assert_allclose(handed[len(decoded[0][1])], rebuilt, rtol=1e-6, atol=1e-6)
+    run = next(run for run in runs if run.series.dataset_id == history.dataset_id)
+    truth = build_token(truth_waypoints(run.series, float(history.times[anchor1]), origin, count), count)
+    assert not np.allclose(handed[len(decoded[0][1])], truth)
+    block = runner.stratum_block({item.dataset_id: runner.flight_row(run, runner.whole_forecast(run, floor), floor, 8,
+                                                                      {"route_tortuosity": 1.0, "established_at_anchor": False,
+                                                                       "remaining_path_m": 1e4})[0]
+                                  for item, run in zip(series[:6], runs, strict=True)},
+                                 [item.dataset_id for item in series[:6]])
+    assert block["plan_e_by_ask_p50_m"] and block["plan_e_by_ask_p50_m"]["0"]["n"] == 6
+    assert len(block["plan_e_by_ask_p50_m"]["0"]["per_waypoint_p50"]) == 2
+    assert gates.GATE_BY_SOURCE[runner.SegmentHeadWaypoints.source] == gates.GATE_E2E
+
+
+def test_an_e2e_run_through_main_records_the_floor_and_the_source(monkeypatch, tmp_path, waypoint_tracker, segment_head) -> None:
+    """`main` with `--plan-head <segment head> --anchor-floor-index N`: the floor is applied BEFORE
+    `check_head` (the only order under which the head's longer lookback fits), and the artifact and
+    its record block say the floor, the source and the head."""
+    from ts_transformer.data.dataset import dataset_flight_key
+
+    series, arm = waypoint_tracker
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    floor = segment_head.config.seq_len - 1
+    out = tmp_path / "e2e"
+    # the val split: the head trained on the same flights under the same split rule, and `check_head`
+    # refuses a head on any flight it trained on
+    assert runner.main([
+        "--checkpoint", f"l1={arm.path}", "--plan-head", str(segment_head.path), "--anchor-floor-index", str(floor),
+        "--out", str(out), "--device", "cpu", "--split", "val", "--step-s", str(STEP_S),
+        "--variants", runner.VARIANT_RECEDING, "--write-records", "--batch-size", "2",
+    ]) == 0
+    payload = json.loads((out / "tracker_lockstep.json").read_text())
+    assert payload["schema"] == runner.RESULT_SCHEMA and payload["plan"]["anchor_floor_index"] == floor
+    assert payload["plan_source"] == f"segment-head:{segment_head.path}" and payload["plan_head_sha256"]
+    block = payload["checkpoints"]["l1"]
+    assert block["anchor"] == floor
+    rows = block["variants"][runner.VARIANT_RECEDING]["flights"]
+    assert all("asks_plan_e_m" in row and "horizon_from_plan_span" in row for row in rows.values())
+    cell = block["variants"][runner.VARIANT_RECEDING]["strata"][STRATUM_ALL]
+    assert cell["plan_e_by_ask_p50_m"]["0"]["per_waypoint_n"] and "horizon_from_plan_span" in cell
+    summary = json.loads((out / "records" / "l1" / runner.VARIANT_RECEDING / "summary.json").read_text())
+    assert summary[runner.RECORDS_BLOCK]["anchor_floor_index"] == floor
+    assert summary[runner.RECORDS_BLOCK]["plan_source"].startswith("segment-head:")
+    # without the floor the head's lookback does not fit before the tracker's anchor: refused, by name
+    with pytest.raises(SystemExit, match="lookback does not fit"):
+        runner.main(["--checkpoint", f"l1={arm.path}", "--plan-head", str(segment_head.path), "--out", str(tmp_path / "x"),
+                     "--device", "cpu", "--split", "val", "--step-s", str(STEP_S), "--variants", runner.VARIANT_RECEDING])
+
+
+def test_the_anchor_floor_override_is_refused_before_the_trackers_own_anchor(waypoint_tracker) -> None:
+    _series, arm = waypoint_tracker
+    own = default_anchor(arm.config)
+    with pytest.raises(SystemExit, match="before l1's own fixed anchor"):
+        runner.at_anchor_floor([arm], own - 1)
+    assert runner.at_anchor_floor([arm], None) == [arm]
+    [later] = runner.at_anchor_floor([arm], own + 3)
+    assert default_anchor(later.config) == own + 3 and later.path == arm.path
