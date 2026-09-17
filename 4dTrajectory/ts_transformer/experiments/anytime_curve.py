@@ -329,19 +329,6 @@ def cohort_series(arm: Arm, grid: Grid) -> list:
     ``--limit`` narrows the split DELIBERATELY (a smoke test on a real checkpoint) and the
     denominators then come from the flights actually built — the artifact says both counts.
     """
-    series, missing = rebuild_cohort(arm, grid)
-    if missing:
-        raise SystemExit(
-            f"{len(missing)} of {len(series) + len(missing)} checkpoint flights could not be rebuilt; the "
-            f"curve must cover the whole cohort. First missing: {missing[0]!r}"
-        )
-    return series
-
-
-def rebuild_cohort(arm: Arm, grid: Grid) -> tuple[list[FlightSeries], list[str]]:
-    """The arm's own ``split`` flights that rebuild under its config, in the checkpoint's order,
-    and the keys that do not (too short for the config's anchor and the truth it needs after it).
-    `cohort_series` refuses any missing key; a caller that tolerates them states the count."""
     wanted = arm.payload["split"][grid.split]
     if grid.limit:
         wanted = wanted[: grid.limit]
@@ -356,7 +343,12 @@ def rebuild_cohort(arm: Arm, grid: Grid) -> tuple[list[FlightSeries], list[str]]
         for item in usable_series(built, arm.config, verbose=False)
     }
     missing = [key for key in wanted if key not in by_id]
-    return [by_id[key] for key in wanted if key in by_id], missing
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} of {len(wanted)} checkpoint flights could not be rebuilt; the "
+            f"curve must cover the whole cohort. First missing: {missing[0]!r}"
+        )
+    return [by_id[key] for key in wanted]
 
 
 # ── one bin: forecast at each flight's own anchor, score after it ────────────

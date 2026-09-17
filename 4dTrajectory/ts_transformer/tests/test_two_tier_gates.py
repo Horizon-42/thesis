@@ -55,7 +55,9 @@ def _lockstep(tmp_path, name: str, checkpoints: dict[str, dict[str, dict]], *, s
         "plan": {"split": split, "limit": limit},
         "plan_source": f"{source}:/some/plan/checkpoint.pt" if source == "head" else source,
         "checkpoints": {
-            label: {"anchor": anchor, "variants": {v: {"flights": rows} for v, rows in variants.items()}}
+            label: {"anchor": anchor, "flights": len(next(iter(variants.values()))),
+                    "split_flights": len(next(iter(variants.values()))),
+                    "variants": {v: {"flights": rows} for v, rows in variants.items()}}
             for label, variants in checkpoints.items()
         },
     }
@@ -280,13 +282,22 @@ def test_e2e_reads_a_segment_head_artifact_by_g3s_criteria_with_e_plan_beside(tm
     lockstep = _lockstep(tmp_path, "e2e", {"s1337": variants, "s2024": variants}, source="segment-head", anchor=60)
     # a v4 block may carry the floor's exclusion: the gate says the coverage beside the arm, judges the rest
     artifact = json.loads((lockstep / "tracker_lockstep.json").read_text())
-    artifact["checkpoints"]["s1337"]["anchor_floor_excluded"] = {"count": 2, "of": 10, "flight_keys": ["a", "b"]}
+    one = artifact["checkpoints"]["s1337"]
+    one["split_flights"] = one["flights"] + 2
+    one["anchor_floor_excluded"] = {"count": 2, "flight_keys": ["a", "b"]}
     (lockstep / "tracker_lockstep.json").write_text(json.dumps(artifact))
     result = _run(tmp_path, lockstep)
     block = result["gates"][gates.GATE_E2E]
     assert block["pass"]
-    assert block["arms"]["s1337"]["cohort"] == {"flights": 8, "of": 10, "floor_excluded": 2}
-    assert block["arms"]["s2024"]["cohort"]["floor_excluded"] == 0
+    n = artifact["checkpoints"]["s2024"]["flights"]
+    assert block["arms"]["s1337"]["cohort"] == {"flights": n, "split_flights": n + 2, "floor_excluded": 2}
+    assert block["arms"]["s2024"]["cohort"] == {"flights": n, "split_flights": n, "floor_excluded": 0}
+    # the verdict carries the cohort and every share criterion names the reduced denominator
+    verdict = block["verdicts"]["s1337"]
+    assert verdict["cohort"]["floor_excluded"] == 2
+    shares = [c["criterion"] for c in verdict["criteria"] if "share" in c["criterion"]]
+    assert shares and all(f"(over {n} of {n + 2} split flights)" in name for name in shares)
+    assert not any("split flights)" in c["criterion"] for c in block["verdicts"]["s2024"]["criteria"])
     assert "2 split flights cannot host the anchor floor" in (tmp_path / "gates" / "two_tier_gates.txt").read_text()
     names = [c["criterion"] for c in block["verdicts"]["s1337"]["criteria"]]
     assert names[0].startswith("ADE mean") and any("fully flyable" in n for n in names) and any("established" in n for n in names)

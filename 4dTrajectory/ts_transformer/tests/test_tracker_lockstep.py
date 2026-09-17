@@ -672,14 +672,14 @@ def test_a_floor_some_flights_cannot_host_excludes_and_counts_them(monkeypatch, 
         "--variants", runner.VARIANT_RECEDING, "--batch-size", "2",
     ]) == 0
     block = json.loads((out / "tracker_lockstep.json").read_text())["checkpoints"]["l1"]
-    assert block["anchor_floor_excluded"] == {"count": len(cannot), "of": len(val), "flight_keys": cannot}
-    assert block["flights"] == len(val) - len(cannot)
+    assert block["anchor_floor_excluded"] == {"count": len(cannot), "flight_keys": cannot}
+    assert block["flights"] == len(val) - len(cannot) and block["split_flights"] == len(val)
     assert set(block["variants"][runner.VARIANT_RECEDING]["flights"]).isdisjoint(cannot)
     text = (out / "tracker_lockstep.txt").read_text()
     assert f"{len(cannot)} of {len(val)} split flights cannot host anchor {floor}" in text
     # the gate reads the coverage off the block and says it beside the arm
     reading = gates.load_lockstep(out)[0]
-    assert reading.floor_excluded == len(cannot) and reading.split_flights == len(val)
+    assert (reading.flights, reading.split_flights, reading.floor_excluded) == (len(val) - len(cannot), len(val), len(cannot))
 
 
 def test_the_anchor_floor_override_is_refused_before_the_trackers_own_anchor(waypoint_tracker) -> None:

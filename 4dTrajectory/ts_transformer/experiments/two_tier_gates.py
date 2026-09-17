@@ -161,9 +161,10 @@ class ArmReading:
     label: str
     artifact: str
     anchor: int
+    flights: int                             # the cohort read (the block's `flights`)
+    split_flights: int                       # the split roster (the block's `split_flights`)
+    floor_excluded: int                      # split flights an anchor-floor override excluded (v4, optional field)
     variants: dict[str, dict[str, dict]]     # variant -> dataset_id -> flight row
-    floor_excluded: int = 0                  # split flights an anchor-floor override excluded (v4, optional)
-    split_flights: int = 0
 
 
 def _p50(values) -> float | None:
@@ -191,9 +192,10 @@ def load_lockstep(path: Path) -> list[ArmReading]:
     gate = GATE_BY_SOURCE[source]
     return [
         ArmReading(gate=gate, label=label, artifact=str(file), anchor=int(block["anchor"]),
-                   variants={name: variant["flights"] for name, variant in block["variants"].items()},
-                   floor_excluded=int((block.get("anchor_floor_excluded") or {}).get("count", 0)),
-                   split_flights=int((block.get("anchor_floor_excluded") or {}).get("of", block.get("flights", 0))))
+                   flights=int(block["flights"]), split_flights=int(block["split_flights"]),
+                   # v3 blocks predate the field; a v4 block without a floor carries count 0
+                   floor_excluded=int(block.get("anchor_floor_excluded", {"count": 0})["count"]),
+                   variants={name: variant["flights"] for name, variant in block["variants"].items()})
         for label, block in payload["checkpoints"].items()
     ]
 
@@ -312,6 +314,15 @@ def require_members(arm: ArmReading, block: dict) -> None:
         raise SystemExit(f"{arm.label} ({arm.artifact}): no flight in {empty}; a gate stratum cannot be judged empty")
 
 
+def cohort_block(arm: ArmReading) -> dict:
+    return {"flights": arm.flights, "split_flights": arm.split_flights, "floor_excluded": arm.floor_excluded}
+
+
+def share_scope(arm: ArmReading) -> str:
+    """Named on every share criterion when an anchor floor excluded flights: the denominator."""
+    return f" (over {arm.flights} of {arm.split_flights} split flights)" if arm.floor_excluded else ""
+
+
 def judge_truth_gate(arm: ArmReading, baseline: dict, gate: TruthGate) -> dict:
     require_same_cohort(arm, baseline)
     rows = arm.variants[VARIANT_RECEDING]
@@ -324,16 +335,16 @@ def judge_truth_gate(arm: ArmReading, baseline: dict, gate: TruthGate) -> dict:
         criterion(f"ADE mean {stratum}", block[stratum]["ade_mean_m"], gate.ade_below_m[stratum], "<")
         for stratum in GATE_STRATA
     ]
-    criteria.append(criterion("fully flyable share, all", block[STRATUM_ALL]["fully_flyable_share"],
+    criteria.append(criterion(f"fully flyable share, all{share_scope(arm)}", block[STRATUM_ALL]["fully_flyable_share"],
                               gate.fully_flyable_at_least, ">="))
     for stratum in GATE_STRATA:
         members = [i for i, keep in zip(ids, masks[stratum], strict=True) if keep]
         guidance_share = _mean([float(guidance[i]["reference"]["established"]) for i in members])
         criteria.append(criterion(
-            f"established share {stratum} (guidance {guidance_share:.3f} on the same flights)",
+            f"established share {stratum} (guidance {guidance_share:.3f} on the same flights){share_scope(arm)}",
             block[stratum]["established_share"], gate.established_fraction_of_guidance * guidance_share, ">=",
         ))
-    return {"criteria": criteria, "pass": all(c["pass"] for c in criteria),
+    return {"criteria": criteria, "pass": all(c["pass"] for c in criteria), "cohort": cohort_block(arm),
             "baseline_flights_not_in_tracker": baseline_flights_not_in_tracker(arm, baseline)}
 
 
@@ -420,11 +431,12 @@ def judge_g3(arm: ArmReading, plan_path: dict | None) -> dict:
         f"anchor {plan_path['anchor']}, {plan_path['flights']} flights — read beside, not a pairing)"
     )
     criteria.append(criterion(
-        f"fully flyable share, all{beside}", block[STRATUM_ALL]["fully_flyable_share"], G3_FULLY_FLYABLE_AT_LEAST, ">=",
+        f"fully flyable share, all{share_scope(arm)}{beside}", block[STRATUM_ALL]["fully_flyable_share"],
+        G3_FULLY_FLYABLE_AT_LEAST, ">=",
     ))
-    criteria.append(criterion("established share, all", block[STRATUM_ALL]["established_share"],
+    criteria.append(criterion(f"established share, all{share_scope(arm)}", block[STRATUM_ALL]["established_share"],
                               G3_ESTABLISHED_AT_LEAST, ">="))
-    return {"criteria": criteria, "pass": all(c["pass"] for c in criteria)}
+    return {"criteria": criteria, "pass": all(c["pass"] for c in criteria), "cohort": cohort_block(arm)}
 
 
 def arm_readings(arm: ArmReading, baseline: dict | None) -> dict:
@@ -437,8 +449,7 @@ def arm_readings(arm: ArmReading, baseline: dict | None) -> dict:
         against["guidance"] = {i: row["prediction"]["ade_m"] for i, row in baseline["rows_by_id"].items()}
     return {
         "artifact": arm.artifact, "anchor": arm.anchor,
-        "cohort": {"flights": arm.split_flights - arm.floor_excluded, "of": arm.split_flights,
-                   "floor_excluded": arm.floor_excluded},
+        "cohort": cohort_block(arm),
         "variants": {name: variant_block(rows) for name, rows in arm.variants.items()},
         "receding_minus": {name: paired(receding, base) for name, base in against.items()},
         # the drift reading of every variant: read, never judged (v2 §3 — it triggers S5)
@@ -523,9 +534,9 @@ def render(result: dict) -> str:
                 lines.append(f"    [{'x' if c['pass'] else ' '}] {c['criterion']}: {_fmt(c['value'], 3)} "
                              f"{c['relation']} {_fmt(c['threshold'], 3)}")
         for label, arm in block["arms"].items():
-            cohort = arm.get("cohort") or {"floor_excluded": 0}
-            note = (f"; cohort {cohort['flights']} of {cohort['of']} — {cohort['floor_excluded']} split flights cannot host "
-                    f"the anchor floor, excluded and counted, the shares are over the {cohort['flights']}"
+            cohort = arm["cohort"]
+            note = (f"; cohort {cohort['flights']} of {cohort['split_flights']} — {cohort['floor_excluded']} split flights "
+                    f"cannot host the anchor floor, excluded and counted, the shares are over the {cohort['flights']}"
                     if cohort["floor_excluded"] else "")
             lines.append(f"  ── {label} ({arm['artifact']}, a0={arm['anchor']}{note})")
             for variant, strata in arm["variants"].items():
