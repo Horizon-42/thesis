@@ -18,7 +18,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 分支 / 目录 | 开发分支 `dev-two-tier`，worktree `.claude/worktrees/two-tier`（数据目录软链到主树）；主树 `dev-two-tier-feasibility` 与它同在 15fb8f3，**用户合并**；runs worktree `two-tier-runs`（队列 agent，训练前移到已提交的 commit），pub worktree `two-tier-pub` |
+| 分支 / 目录 | 主树 `dev-two-tier-feasibility`（2026-09-17 深夜已快进合并 `dev-two-tier` 的 25 个提交到 edc66dd，开发 worktree 与分支已删；用户：这个分支没有别人开发，以后直接在主树上提交，不另开 worktree）；runs worktree `two-tier-runs`（队列 agent，detached，训练前移到已提交的 commit），pub worktree `two-tier-pub`（发布） |
 | 保留的代码 | 控制契约注册表（77e1372，四种动力学一行一个、可直接切换）、航迹角下的 hook（87f46cc）、`tracker_lockstep` + `two_tier_gates`（c660600，结束规则与规则制导同时限）、`inference/receding.py`、`plan_conditioning` 的 token 机制、`anchor_floor_index`、`lead_time_error`、`chain_sensitivity` |
 | 废弃的设计 | 旧文档 §4 的"改前提"论证；T1a 的整段跟踪器；T0(c) 作为高层的门；旧 plan 头作为高层；`control_horizon_curriculum_s`（已退役字段，与本计划的 `control_horizon_s` 无关） |
 | 旧实验 | T0(b)/T0(c) 已发布（picker）；T1a/T2 留在 `4dTrajectory/outputs/KRDU/experiments/two_tier_t1a_20260916/`：**用户已批准删除**两个 lockstep 记录树（`lockstep_30s/records` 2.2 GB、`lockstep_30s_head/records` 2.4 GB）与三个 `*_pred_val`（各 222 MB），留 3 个 checkpoint、`gates*`、`tracker_lockstep.{json,txt}`；沙盒拒绝 `rm -rf`，命令见 §9，由用户执行 |
