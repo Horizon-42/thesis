@@ -111,7 +111,7 @@ from ts_transformer.data.anchor_grid import difficulty_at_anchor
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks
 from ts_transformer.data.channels import IDX, POSITION_IDX
 from ts_transformer.data.dataset import FlightSeries, truth_duration_s
-from ts_transformer.experiments.anytime_curve import FORBIDDEN_SPLIT, Arm, Grid, cohort_series, load_arm, parse_arms
+from ts_transformer.experiments.anytime_curve import FORBIDDEN_SPLIT, Arm, Grid, cohort_series, load_arm, parse_arms, rebuild_cohort
 from ts_transformer.experiments.plan_oracle import closing_horizon_s, reference_verdicts
 from ts_transformer.experiments.support import REPO_ROOT, forecast_geometry
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
@@ -138,7 +138,9 @@ from ts_transformer.outputs.segment_plan.strategy import decode_series
 # records the command hook the arms were flown under. v4 (2026-09-17, two-tier v2 §5): every
 # flight row carries `asks_plan_e_m` (e_plan per ask under a segment-plan head, empty otherwise)
 # and `horizon_from_plan_span` (the first ask's horizon came from the plan's span, not an arrival
-# it drew); the plan records `anchor_floor_index`. The L1 campaign's artifacts are v3.
+# it drew); the plan records `anchor_floor_index`. The L1 campaign's artifacts are v3. 2026-09-18: each
+# checkpoint block also carries `anchor_floor_excluded` (count / of / flight_keys — the split flights a
+# floor override excluded; optional for a reader, zero without a floor).
 RESULT_SCHEMA = "ts-tracker-lockstep-v4"
 RESULT_SCHEMA_V3 = "ts-tracker-lockstep-v3"   # what the gates still read: the L1 campaign's artifacts
 #: The block each record directory's summary carries — the publisher's
@@ -641,7 +643,10 @@ def render(payload: dict) -> str:
         lines.append(f"command hook {plan['command_hook']} on every arm (the delivery-form reading; a gate reads the hook-free run).")
     for label, arm in payload["checkpoints"].items():
         lines.append("")
-        lines.append(f"── {label} — {arm['checkpoint']} ({arm['flights']} flights, a0={arm['anchor']})")
+        excluded = arm.get("anchor_floor_excluded") or {"count": 0}
+        note = (f"; {excluded['count']} of {excluded['of']} split flights cannot host anchor {arm['anchor']} — excluded, counted"
+                if excluded["count"] else "")
+        lines.append(f"── {label} — {arm['checkpoint']} ({arm['flights']} flights, a0={arm['anchor']}{note})")
         for variant, block in arm["variants"].items():
             for stratum, cell in block["strata"].items():
                 leads = " ".join(f"{k}s {_fmt(v['p50'])}" for k, v in cell["at_lead_p50_m"].items())
@@ -765,6 +770,23 @@ def at_anchor_floor(loaded: list[Arm], floor: int | None) -> list[Arm]:
     return [replace(arm, config=replace(arm.config, anchor_floor_index=floor)) for arm in loaded]
 
 
+def floor_cohort(arm: Arm, grid: Grid, plan: LockstepPlan) -> tuple[list[FlightSeries], dict]:
+    """The arm's cohort for this run, with the coverage block the artifact carries. Without a floor
+    override every split flight must rebuild (`cohort_series`). Under ``--anchor-floor-index`` a
+    flight too short to host the floor with the tracker's horizon after it is EXCLUDED and counted
+    (`anchor_floor_excluded`: count, of, keys) — the artifact and the gate say the coverage; a
+    silent subset would be a different cohort."""
+    if plan.anchor_floor_index is None:
+        series = cohort_series(arm, grid)
+        return series, {"count": 0, "of": len(series), "flight_keys": []}
+    series, missing = rebuild_cohort(arm, grid)
+    if missing:
+        print(f"{arm.label}: {len(missing)} of {len(series) + len(missing)} split flights cannot host anchor "
+              f"{plan.anchor_floor_index} with the horizon after it — excluded, counted (first {missing[0]!r})",
+              flush=True)
+    return series, {"count": len(missing), "of": len(series) + len(missing), "flight_keys": missing}
+
+
 def plan_source(head: Arm | None, config) -> str:
     source = plan_source_class(head, config)
     return f"{source.source}:{head.path}" if head is not None else source.source
@@ -886,6 +908,11 @@ def main(argv: list[str] | None = None) -> int:
     staged = Path(tempfile.mkdtemp(dir=out.parent, prefix=f"{out.name}.partial-"))
     try:
         records_root = staged / RECORDS_DIR if plan.write_records else None
+        checkpoints = {}
+        for arm in loaded:
+            series, excluded = floor_cohort(arm, grid, plan)
+            checkpoints[arm.label] = {**measure_arm(arm, series, plan, device, records_root, out.name, head),
+                                      "anchor_floor_excluded": excluded}
         payload = {
             "schema": RESULT_SCHEMA,
             "plan": {"split": plan.split, "step_s": plan.step_s, "horizon": HORIZON_RULE,
@@ -897,10 +924,7 @@ def main(argv: list[str] | None = None) -> int:
             "strata_anchor": "a0 = default_anchor (strata_fixed_at_anchor)",
             "leads_s": list(LEADS_S),
             "device": str(device),
-            "checkpoints": {
-                arm.label: measure_arm(arm, cohort_series(arm, grid), plan, device, records_root, out.name, head)
-                for arm in loaded
-            },
+            "checkpoints": checkpoints,
         }
         (staged / "tracker_lockstep.json").write_text(json.dumps(payload, indent=1))
         text = render(payload)

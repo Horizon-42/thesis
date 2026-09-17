@@ -278,9 +278,16 @@ def test_e2e_reads_a_segment_head_artifact_by_g3s_criteria_with_e_plan_beside(tm
         for row in rows.values():
             row["asks_plan_e_m"] = [{"ask": k, "per_waypoint_m": [100.0 + k, 200.0 + k], "e_m": 150.0 + k} for k in range(3)]
     lockstep = _lockstep(tmp_path, "e2e", {"s1337": variants, "s2024": variants}, source="segment-head", anchor=60)
+    # a v4 block may carry the floor's exclusion: the gate says the coverage beside the arm, judges the rest
+    artifact = json.loads((lockstep / "tracker_lockstep.json").read_text())
+    artifact["checkpoints"]["s1337"]["anchor_floor_excluded"] = {"count": 2, "of": 10, "flight_keys": ["a", "b"]}
+    (lockstep / "tracker_lockstep.json").write_text(json.dumps(artifact))
     result = _run(tmp_path, lockstep)
     block = result["gates"][gates.GATE_E2E]
     assert block["pass"]
+    assert block["arms"]["s1337"]["cohort"] == {"flights": 8, "of": 10, "floor_excluded": 2}
+    assert block["arms"]["s2024"]["cohort"]["floor_excluded"] == 0
+    assert "2 split flights cannot host the anchor floor" in (tmp_path / "gates" / "two_tier_gates.txt").read_text()
     names = [c["criterion"] for c in block["verdicts"]["s1337"]["criteria"]]
     assert names[0].startswith("ADE mean") and any("fully flyable" in n for n in names) and any("established" in n for n in names)
     cell = block["arms"]["s1337"]["variants"][VARIANT_RECEDING][STRATUM_ALL]

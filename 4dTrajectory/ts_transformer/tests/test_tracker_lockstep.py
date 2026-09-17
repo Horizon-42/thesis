@@ -649,6 +649,39 @@ def test_an_e2e_run_through_main_records_the_floor_and_the_source(monkeypatch, t
                      "--device", "cpu", "--split", "val", "--step-s", str(STEP_S), "--variants", runner.VARIANT_RECEDING])
 
 
+def test_a_floor_some_flights_cannot_host_excludes_and_counts_them(monkeypatch, tmp_path, waypoint_tracker, segment_head) -> None:
+    """`--anchor-floor-index N` past what the shortest val flights can host (N plus the tracker's horizon
+    after it): those flights are EXCLUDED and counted — in the checkpoint block, its text and the flight
+    count — never a silent subset and never a refusal of the whole run (`cohort_series` keeps refusing a
+    missing flight when no floor is given)."""
+    from ts_transformer.data.dataset import window_anchors
+
+    series, arm = waypoint_tracker
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)
+    _patch_data_plane(monkeypatch, flights, tmp_path)
+    val = [item for item in series if item.dataset_id in set(arm.payload["split"]["val"])]
+    # the latest anchor each val flight hosts with the horizon after it (independent of the floor)
+    caps = {item.dataset_id: max(window_anchors(item, arm.config)) for item in val}
+    floor = max(sorted(caps.values())[len(caps) // 2], segment_head.config.seq_len - 1)
+    cannot = sorted(key for key, cap in caps.items() if cap < floor)
+    assert cannot and len(cannot) < len(val), "the fixture must hold flights on both sides of the floor"
+    out = tmp_path / "e2e_floor"
+    assert runner.main([
+        "--checkpoint", f"l1={arm.path}", "--plan-head", str(segment_head.path), "--anchor-floor-index", str(floor),
+        "--out", str(out), "--device", "cpu", "--split", "val", "--step-s", str(STEP_S),
+        "--variants", runner.VARIANT_RECEDING, "--batch-size", "2",
+    ]) == 0
+    block = json.loads((out / "tracker_lockstep.json").read_text())["checkpoints"]["l1"]
+    assert block["anchor_floor_excluded"] == {"count": len(cannot), "of": len(val), "flight_keys": cannot}
+    assert block["flights"] == len(val) - len(cannot)
+    assert set(block["variants"][runner.VARIANT_RECEDING]["flights"]).isdisjoint(cannot)
+    text = (out / "tracker_lockstep.txt").read_text()
+    assert f"{len(cannot)} of {len(val)} split flights cannot host anchor {floor}" in text
+    # the gate reads the coverage off the block and says it beside the arm
+    reading = gates.load_lockstep(out)[0]
+    assert reading.floor_excluded == len(cannot) and reading.split_flights == len(val)
+
+
 def test_the_anchor_floor_override_is_refused_before_the_trackers_own_anchor(waypoint_tracker) -> None:
     _series, arm = waypoint_tracker
     own = default_anchor(arm.config)

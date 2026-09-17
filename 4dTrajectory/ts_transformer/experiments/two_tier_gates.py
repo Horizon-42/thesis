@@ -162,6 +162,8 @@ class ArmReading:
     artifact: str
     anchor: int
     variants: dict[str, dict[str, dict]]     # variant -> dataset_id -> flight row
+    floor_excluded: int = 0                  # split flights an anchor-floor override excluded (v4, optional)
+    split_flights: int = 0
 
 
 def _p50(values) -> float | None:
@@ -189,7 +191,9 @@ def load_lockstep(path: Path) -> list[ArmReading]:
     gate = GATE_BY_SOURCE[source]
     return [
         ArmReading(gate=gate, label=label, artifact=str(file), anchor=int(block["anchor"]),
-                   variants={name: variant["flights"] for name, variant in block["variants"].items()})
+                   variants={name: variant["flights"] for name, variant in block["variants"].items()},
+                   floor_excluded=int((block.get("anchor_floor_excluded") or {}).get("count", 0)),
+                   split_flights=int((block.get("anchor_floor_excluded") or {}).get("of", block.get("flights", 0))))
         for label, block in payload["checkpoints"].items()
     ]
 
@@ -433,6 +437,8 @@ def arm_readings(arm: ArmReading, baseline: dict | None) -> dict:
         against["guidance"] = {i: row["prediction"]["ade_m"] for i, row in baseline["rows_by_id"].items()}
     return {
         "artifact": arm.artifact, "anchor": arm.anchor,
+        "cohort": {"flights": arm.split_flights - arm.floor_excluded, "of": arm.split_flights,
+                   "floor_excluded": arm.floor_excluded},
         "variants": {name: variant_block(rows) for name, rows in arm.variants.items()},
         "receding_minus": {name: paired(receding, base) for name, base in against.items()},
         # the drift reading of every variant: read, never judged (v2 §3 — it triggers S5)
@@ -517,7 +523,11 @@ def render(result: dict) -> str:
                 lines.append(f"    [{'x' if c['pass'] else ' '}] {c['criterion']}: {_fmt(c['value'], 3)} "
                              f"{c['relation']} {_fmt(c['threshold'], 3)}")
         for label, arm in block["arms"].items():
-            lines.append(f"  ── {label} ({arm['artifact']}, a0={arm['anchor']})")
+            cohort = arm.get("cohort") or {"floor_excluded": 0}
+            note = (f"; cohort {cohort['flights']} of {cohort['of']} — {cohort['floor_excluded']} split flights cannot host "
+                    f"the anchor floor, excluded and counted, the shares are over the {cohort['flights']}"
+                    if cohort["floor_excluded"] else "")
+            lines.append(f"  ── {label} ({arm['artifact']}, a0={arm['anchor']}{note})")
             for variant, strata in arm["variants"].items():
                 for stratum, cell in strata.items():
                     leads = " ".join(f"{k}s {_fmt(v)}" for k, v in cell["at_lead_p50_m"].items())
