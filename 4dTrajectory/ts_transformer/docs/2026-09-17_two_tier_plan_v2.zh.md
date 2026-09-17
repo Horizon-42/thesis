@@ -33,7 +33,7 @@
 | S2.3 L2 臂 + intents | **完成**（训练 §10.5；读数 + 门 §10.6：**门 L2 B 轴（segments）PASS 两种子，A 轴 FAIL**；readout 记录 2.4 GB 已写，磁盘 8.5 GB。历史：首次启动死在第 1 轮的打印行——`segment_plan_validation` 的到达时间误差为 None，3512fdc 修；重启 @3512fdc，PID 2140320，第 1 轮的损失与中断那次逐位相同；3.6 s/epoch，4 臂 ≈ 45 min，然后读数带记录、门 L2 ×2）：`docs/experiments/two_tier_l2_arms.json`（A/B × 2 种子，seq_len 61，M = 10，全机型 cohort，随机锚点 remaining-path-uniform、未来 ≥ 30 s、半数留在固定锚点 60，180 epoch，按目标函数选），dry run 通过；intents `two_tier_l2_20260917`（4 run + `@readout-<set>` 变体）；cohort 已写 `two_tier_l2_20260917/development_cohort.json`（10102 / 2104，丢 3 个训练航班）。等 L1 campaign 跑完后交队列 agent：训练 4 臂 → `segment_plan_readout`（参照 native32 + `airport_frame_20260903/A_threshold_enu`，`--write-records`）→ `two_tier_gates --segment-readout`（A 两种子、B 两种子各判一次） |
 | **首批读数（2026-09-17 晚，2a）** | **L1 不用它的计划 token**：六个主臂带真值航路点与不带的 ADE[0,60] 只差 2–4 m（见 §10）；不带 token 时优于 native32 切到 60 s。诊断臂 `docs/experiments/two_tier_l1b_arms.json`（4 臂、单种子、pa 契约：遮蔽率 0 / 不减 lr / 两者 / 关平滑项）+ intents `two_tier_l1b_20260917`，排在 L2 之后、E2E 之前。**读数 §10.8**：token 遮蔽率 0 是杠杆（配对 Δ −32 / −48 / −258），lr 不是（−0）；关平滑项少 45 m（88 对 134）；带真值 token 的 ADE 本身几乎不变 |
 | S4 发布 | **L1 短时读数已发布**（2026-09-17 晚，opus agent，pub worktree @cbdf6ca）：6 个主臂 × {truth-plan, no-plan} × {fixed, 8km} = 24 个类目 `experiment_<arm>_<token>_short-<variant>-<set>_val`，intents 标题「L1 · 短时控制层…」与每 run/变体行已盖章；`npm run check-publication -- --airport KRDU --server http://localhost:5173` → 195 类目 0 错 0 警；前端重启后在 app 里打开确认渲染。发布命令形状（publisher 默认根指向 POOLED，需显式 `--experiment-index …/KRDU/experiments/index.json --output-root …/KRDU/experiment_predictions`；索引先用 `python -m ts_transformer.training.experiment_index --root outputs/KRDU/experiments` 重建）在 scratchpad `publish_brief_two_tier.md`。**L2 读数已发布**（2026-09-17 20:17 UTC，opus agent，pub worktree @02517d6）：4 臂 × {fixed, 8km} = 8 个类目 `experiment_<arm>_<hash>_readout-<set>_val`（`experiment.group = two_tier_l2_20260917`，`predictionOutput = segment-plan`），intents 标题「L2 · 段 token 计划层…」与每 run/变体行已盖章；validator 203 类目 0 错 0 警；前端重启（杀掉旧 vite node 子进程）后在 app 里打开 B_s1337/readout-fixed 确认渲染（评估卡 2100 条，ADE 均值 1783 m）。跳过：12km/6km 档；native32/state 参照的记录——publisher 的 `experiment_intent` 只在 checkpoint 自己训练 campaign 的 `variants` 里查变体 intent，不查 `--category-group` 的 campaign，所以要发布参照需在 `l1_lowdim_20260907` / `airport_frame_20260903` 登记 `@readout-fixed/-8km`（未做）。未发布：lockstep / E2E（无记录）。磁盘 9 GB |
-| S3 联合 lockstep + 门 E2E | **完成** a1e58aa：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。**E2E 已跑**（§10.9，`e2e_pa_B_s{1337,2024}`，B 配 `L1_pa_s<seed>`，hook 关，无记录，每次 ~80 s）：**门 E2E 两种子 FAIL**（雷达 ADE 3755 / 3712 > 2745，建立 0.59 / 0.61 < 0.94；直线与可飞过）；receding − no-plan ΔADE p50 +1 / +25 — 计划进不了不看 token 的跟踪器。补充 §10.10（三个用 token 的 L1b 臂各一次 E2E，单种子读数）：`nodrop_position`（遮蔽率 0 + 关平滑项）ADE 1268 / 直线 263 / 雷达 3044、可飞 0.997、直线建立 0.970——目前最好的两层；带平滑项的两个 nodrop 臂吃进计划后雷达层可飞掉到 0.07–0.09。两个不过的判据都在雷达层，来自 L2 的远程雷达误差。**待用户定**：是否以该配方正式跑两种子；门线是否可达 |
+| S3 联合 lockstep + 门 E2E | **完成** a1e58aa（**L1c 正式配方 §12.1：门 L1 三契约 FAIL，门 E2E 三契约 FAIL；pa 两种子只差雷达 ADE 3044 / 3074 > 2745 与雷达建立 0.04，可飞 0.99；tf / sf 关平滑项后不可飞**）：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。**E2E 已跑**（§10.9，`e2e_pa_B_s{1337,2024}`，B 配 `L1_pa_s<seed>`，hook 关，无记录，每次 ~80 s）：**门 E2E 两种子 FAIL**（雷达 ADE 3755 / 3712 > 2745，建立 0.59 / 0.61 < 0.94；直线与可飞过）；receding − no-plan ΔADE p50 +1 / +25 — 计划进不了不看 token 的跟踪器。补充 §10.10（三个用 token 的 L1b 臂各一次 E2E，单种子读数）：`nodrop_position`（遮蔽率 0 + 关平滑项）ADE 1268 / 直线 263 / 雷达 3044、可飞 0.997、直线建立 0.970——目前最好的两层；带平滑项的两个 nodrop 臂吃进计划后雷达层可飞掉到 0.07–0.09。两个不过的判据都在雷达层，来自 L2 的远程雷达误差。**待用户定**：是否以该配方正式跑两种子；门线是否可达 |
 
 ## 2. 架构
 
@@ -451,3 +451,51 @@ L1 的六个主臂（tf / sf / pa × 1337 / 2024）按 `L1b_pa_nodrop_position` 
 ### 11.3 预计
 
 L1c 6 臂 × ~17 min ≈ 1.7 h；短时读数 + lockstep + 门 ≈ 25 min；E2E 6 次 ≈ 10 min；L2c/L2d 4 臂 ≈ 1–1.5 h（seq_len 更长）；两次 L2 读数 ≈ 25 min；E2E 12 次 ≈ 20 min。合计 ≈ 4–4.5 h，磁盘需 < 3 GB（无记录；runner 预检）。
+
+## 12. 后续读数（2026-09-17 深夜 → 09-18）
+
+### 12.1 L1c（`two_tier_l1c_20260917`，@40b19b9，6 臂各 180 epoch，4.1 s/epoch，共 77 min；KRDU val 1401，固定锚点 59）
+
+**训练 + 短时读数**（ADE[0,60] 均值 / p50，m；配对 Δ = 同臂带真值 token − 不带，p50，"带更好"份额；参照 native32 切到 60 s = 163 / 121）：
+
+| 臂 | 选择 ADE | 带 token 固定 全 / 直 / 雷 | 不带 token 固定 全 | 配对 Δ 固定 / 8 km | 带 token 8 km |
+|---|---|---|---|---|---|
+| L1_pa_s1337（对照，§10.1） | 136.4 | 134 / — / — | 136 | −2 / ≈0 | 77 |
+| L1c_tf_s1337 | 91.7 | 90 / 61 / 84 | 391 | −291（0.99）/ −160（0.98） | — |
+| L1c_tf_s2024 | 87.7 | 86 / 58 / 80 | 385 | −280（0.98）/ −138（0.90） | — |
+| L1c_sf_s1337 | 85.1 | **84 / 56 / 79** | 508 | −407（0.995）/ −230（0.98） | — |
+| L1c_sf_s2024 | 82.4 | **81 / 57 / 79** | 501 | −398（0.999）/ −225（0.99） | — |
+| L1c_pa_s1337 | 88.8（= L1b_pa_nodrop_position，逐位可复现） | 88 / 61 / 83 | 359 | −258（0.96）/ −125（0.96） | 61 |
+| L1c_pa_s2024 | 86.7 | 85 / 58 / 82 | 340 | −236（0.97）/ −116（0.91） | — |
+
+六臂两种子一致，全部用 token（Δ −236 … −407）；带 token 的 ADE 81–90 m，是 L1 主臂（134–136）的三分之二、native32 的一半。不带 token 全部是分布外（340–508）。
+
+**门 L1**（`lockstep_30s`，真值航路点，默认三变体，无记录；基线规则制导 `plan_guidance_20260910/step3d_lockstep_l1`，同航班建立份额直线 0.998 / 雷达 0.879；判据 ADE 直线 < 250、雷达 < 1500，可飞 ≥ 0.95，建立 ≥ 0.88 × 制导）——**三契约 FAIL**：
+
+| 契约 | 直线 ADE | 雷达 ADE | 全程可飞 | 直线建立（≥0.878） | 雷达建立（≥0.774） | 不过的判据 |
+|---|---|---|---|---|---|---|
+| tf s1337 / s2024 | 263 / 249 | 737 / 638 | **0.556 / 0.454** | 0.932 / 0.991 | **0.670** / 0.775 | 可飞；s1337 的直线 ADE 与雷达建立 |
+| sf | 186 / 177 | 891 / 658 | **0.258 / 0.033** | 0.931 / 0.973 | **0.579 / 0.592** | 可飞、雷达建立 |
+| pa | 211 / 187 | 728 / 661 | 0.996 / 0.989 | 0.960 / 0.993 | **0.620 / 0.682** | 只差雷达建立 |
+
+（对照 §10.3：L1 主臂带平滑项时的失败点是 ADE / 建立，可飞 ≥ 0.95。）
+
+**门 E2E**（`--plan-head B_s<seed>`，a0 = 60，hook 关，无记录，每次 ~85 s；判据 G3：直线 ADE ≤ 415，雷达 ≤ 2745，可飞 ≥ 0.95，建立 ≥ 0.94）——**三契约 FAIL**：
+
+| 契约 | 变体 | ADE 全 / 直 / 雷 | 可飞 全 / 直 / 雷 | 建立 全 / 直 / 雷 | receding − no-plan ΔADE p50 |
+|---|---|---|---|---|---|
+| tf s1337 | receding | 1246 / 312 / 2894 | 0.567 / 0.370 / 0.926 | 0.577 / 0.875 / 0.034 | −1954（0.997） |
+| tf s2024 | receding | 1288 / 302 / 3030 | 0.484 / 0.241 / 0.926 | 0.642 / 0.974 / 0.036 | −1173 |
+| sf s1337 | receding | 1199 / 268 / 2841 | 0.387 / 0.090 / 0.928 | 0.591 / 0.898 / 0.034 | −1868 |
+| sf s2024 | receding | 1226 / 265 / 2924 | 0.326 / 0.000 / 0.920 | 0.638 / 0.968 / 0.038 | −1425 |
+| **pa s1337** | receding | **1268 / 263 / 3044** | **0.997 / 0.999 / 0.994** | 0.640 / **0.970** / 0.038 | −1748 |
+| **pa s2024** | receding | **1275 / 259 / 3074** | **0.994 / 0.997 / 0.990** | 0.649 / **0.987** / 0.034 | −1327 |
+| L1_pa（§10.9，对照） | receding | 1578 / 353 / 3755 | 0.982 | 0.590 / 0.915 / 0.000 | +1 / +25 |
+
+读法：
+- **计划进了每个跟踪器**（receding − no-plan −1173 … −1954，份额 ≥ 0.98），E2E 的整体 ADE 从 pa 主臂的 1578 降到 1199–1288，直线 353 → 259–312，雷达 3755 → 2841–3074。
+- **关平滑项后只有 pa 契约可飞**（E2E 0.994 / 0.997；tf 0.48–0.57，sf 0.33–0.39，直线层更差）：航迹角契约的垂直闭环替代了平滑项，tf / sf 没有——"平滑项多余"只对 pa 成立，tf / sf 若要用需保留平滑项（未跑）。
+- **pa 两种子只差两条判据，都在雷达层**：雷达 ADE 3044 / 3074 对线 2745（差 300 / 330），雷达建立 0.038 / 0.034（全体 0.640 / 0.649 对 0.94）；直线建立 0.970 / 0.987。e_plan（L2 航路点对真值）雷达层 k0 284 → k3 899 → k5 1926，即 L2 在 90–180 s 处给的航路点已偏 1–2 km，跟踪器照着飞。
+- 门 L1 的 pa 也只差雷达建立（0.62 / 0.68 对 0.774），且是在**真值**航路点下：跟踪器每 30 s 朝 30 / 60 s 后的真值点飞，在雷达引导段的转弯上仍建立不了——雷达层的建立不只是 L2 的问题，L1 的 60 s 时域在转弯段也不够（§10.2 的 L1 lockstep 雷达 0.000 是同一现象）。
+
+**结论（读数）**：pa 契约 + 遮蔽率 0 + 关平滑项是正式配方里可用的那一个（两种子一致）；两层的短板收敛到雷达引导层：L2 的 90–300 s 航路点误差与 L1 在转弯段的建立。§11.2 的更长回看（L2c / L2d）直接对着前者；后者需要下一轮决定（更长的 L1 时域 / 转弯段的 token 设计）。
