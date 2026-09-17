@@ -2,8 +2,8 @@
 #
 # It must be sourced (not executed): activation has to mutate the caller's shell so the
 # env's activate.d hooks run — zz-libstdcxx.sh prepends $CONDA_PREFIX/lib to
-# LD_LIBRARY_PATH, and invoking envs/<env>/bin/python directly bypasses it (see CLAUDE.md
-# "Operational Gotchas": that bypass is how the torch/matplotlib CXXABI clash comes back).
+# LD_LIBRARY_PATH, and invoking envs/<env>/bin/python directly bypasses it (see
+# docs/environment.md E5: that bypass is how the torch/matplotlib CXXABI clash comes back).
 #
 # Resolution:
 #   AEROVIZ_CONDA_ENV set  -> that env and ONLY that env. A typo fails loudly instead of

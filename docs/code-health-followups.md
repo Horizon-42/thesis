@@ -865,3 +865,29 @@ than raise, and the segment-plan readout admits its fixed set on the observed ro
 **Judgement**: one convention would be better — either the readouts read the supervision rows (the package's
 stated truth) or the anchor sets admit on the observed ones — but changing `displacement_at`'s truth moves
 every S1 number and the `lead_time_error` accounting it mirrors, so it is a decision, not a fix.
+
+## 41. The observed evaluator's stale-record error prescribes the roster-deleting rebuild (2026-09-16)
+
+**Verified** (code read while slimming the CLAUDE.md files): `evaluation/arrival.py`
+(`_observed_arrival`, the "estimated threshold event but no crossing_span" `ValueError`) tells the
+operator to "rebuild the observed records (--evaluate-only)". Since 2026-09-08 the harvest has
+`--observed-only`, which rebuilds exactly `approach/` and leaves `arrivals/` and
+`lateral_pass_eligibility.json` alone; `--evaluate-only` also re-rosters `arrivals/` (writing v6,
+which changes every ts split) and deletes the lateral roster. **Judgement**: change the message to
+`--observed-only`; one string, but it is the command a session will copy, so it is worth the edit.
+
+## 42. `AGENTS.md` (the Codex guide) is a stale fork of an early root `CLAUDE.md` (2026-09-16)
+
+**Verified**: last touched 2197412 (2026-08-11); it lists three subsystems (no `final_approach`,
+`flight_scenarios`, `evaluation`, `geokit`, `ts_transformer`, backend) and none of the
+cross-cutting invariants. Claude Code does not load it, so it costs no context, but a Codex
+session reads a map a month old. **Judgement**: replace its body with a pointer to the root and
+subsystem `CLAUDE.md` files (and their reference docs) rather than maintaining a second copy.
+
+## 43. `.claude/worktrees/arrival-quality` is committed as a gitlink (2026-09-16)
+
+**Verified**: `git ls-files -s .claude/worktrees/arrival-quality` is mode `160000`
+(commit `f58ecf3`), added by bdc82cb (2026-08-24), with no `.gitmodules` entry — a nested
+worktree swept into a commit. `.git/info/exclude` hides `.claude/worktrees/` for NEW files only.
+**Judgement**: `git rm --cached .claude/worktrees/arrival-quality` in the owner's own commit (the
+worktree itself, `feat/arrival-takeoff-filter`, is the owner's and stays on disk).

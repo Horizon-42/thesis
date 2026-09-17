@@ -63,9 +63,27 @@ change you are making go in `docs/code-health-followups.md` instead.
   with the ts_transformer experiments, so check it right before launching.
   The runner refuses to start if the estimate does not fit. Order: prepare → optimize
   (`--resume` is cheap to restart) → the CZML/report tails run automatically per cell.
-- Optimizer: KRDU RW32 systematically hard (not a truncation artifact); per-leg RNP not extracted
-  from CIFP; CIFP leg speed restrictions not extracted; HSL linear-solver hook dormant;
-  pre-existing numpy 2.x failure in `test_optimizer.py`. → `4dTrajectory/CLAUDE.md`
+- Optimizer (moved verbatim from `4dTrajectory/CLAUDE.md` "Open items", 2026-09-16):
+  - **KRDU RW32 is systematically hard, and it is NOT the old truncation artifact.** The full
+    2026-07-20 batch re-run (post-truncation/floor/HS/identity fixes, all 15 airport×category cells
+    fresh) kept the concentration: KRDU runway_cons RW32 = 79 offTarget + 59 failed vs 60 clean
+    solves (198 flights; every other runway ≤ 9 offTarget), and KRDU **asdb RW32 fails 197/198**
+    (IPOPT infeasible). Runway/procedure-specific — check against the per-leg-RNP item below
+    (H05LZ is RNP-AR) before touching solver knobs. KSTL runway_cons has a milder cluster (12R
+    53/200, 30R 41/168, 30L 30/200, 24 21/80; the "all IAF(s) infeasible" rows repeatedly name
+    `PAULY`).
+  - Per-leg RNP is not extracted from CIFP — RNP-AR procedures (H05LZ) get the default RNP 1.0 disc
+    (~926 m at k=0.5) instead of ~278 m (RNP 0.3).
+  - CIFP leg speed restrictions not extracted (no speed-bearing data source in the dataset yet; the
+    canonical `speedMaxKt` field is ready).
+  - HSL linear-solver hook dormant (free MA27 measured slower than MUMPS); revisit with an MA57
+    academic license.
+  - **Pre-existing numpy failure in `collocation/tests/test_optimizer.py::test_fixed_time_objective_weights_control_effort_at_one`
+    is BACK (2026-07-21).** `float(np.array(grad(x0))[0])` raises
+    `TypeError: only 0-dimensional arrays can be converted to Python scalars` under numpy 2.x. It
+    went green on 2026-07-20 and failed again on 07-21 with no optimizer change in between, so it
+    tracks the numpy version, not the code. Verified unrelated to any working-tree change by
+    re-running with the tree stashed. Modeling suite is otherwise 588 pass.
 - Optimizer quality, measured 2026-08-19 and NOT fixed: on 120 random KRDU `runway` flights,
   **15 of 120 (12.5 %) fail only because the replay stops 1–10 m short of the threshold
   plane** (`event_status: not_reached` → lateral/vertical indeterminate → fail). Recovering
@@ -106,6 +124,14 @@ change you are making go in `docs/code-health-followups.md` instead.
   checkpoints are unaffected. The lagged flight model (`simple-v1-lag`) has no published
   train→predict→evaluate result yet; its τ_bank CV sweep is the open experiment.
   → `4dTrajectory/ts_transformer/CLAUDE.md`
-- Viewer: local terrain vs aircraft CZML disagree by ~33 m; Observe 3-colour comparison overlay
-  not yet fed to the approach view (+ ungated `useCzmlLoader` clock write); approach-view
-  interior-gap `break` latent. → `aeroviz-4d/CLAUDE.md`
+- Viewer (moved verbatim from `aeroviz-4d/CLAUDE.md` "Open items", 2026-09-16):
+  - **Local terrain and aircraft CZML disagree by ~33 m in the viewer.** `local-terrain` heightmaps
+    come from USGS TNM DSM (NAVD88 ≈ MSL) and the metadata records
+    `vertical: "Source GeoTIFF elevation values, used directly as metres"` — no datum handling —
+    while Cesium expects ellipsoidal heights and the aircraft CZML correctly supplies them. Found
+    while chasing the datum bug; not investigated further.
+  - Approach view: the Observe 3-colour comparison overlay is a separate datasource not yet fed to
+    the view (Observe-with-comparison plots neither source); the pre-existing `useCzmlLoader` clock
+    write is still ungated for the Observe+comparison two-writer case.
+  - Approach-view interior-gap `break` is latent (current CZMLs are single-interval); the 07-07
+    approach-view changes were verified via tests/tsc/build but not re-checked in-browser.

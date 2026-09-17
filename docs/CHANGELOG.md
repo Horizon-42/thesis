@@ -4,6 +4,69 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-18 — CLAUDE.md files become indexes; their full text moves verbatim into reference docs
+
+**Why.** The tree's CLAUDE.md files had reached 221 KB; `ts_transformer/CLAUDE.md` alone was 118 KB
+(1,202 lines) and loaded — with `4dTrajectory/CLAUDE.md` and the root file — into every ts session
+(~43k tokens before any work). That file's own charter ("the map … a one-line trigger for every
+trap") had been outgrown by campaign logs, runner manuals, module line counts and refactoring
+history, and several files had gone stale against the code.
+
+**Change** (branch `docs-claude-md-slim`, written against `dev-leg-ctrl` 683e604 on 2026-09-16 and
+rebased onto `dev-two-tier-feasibility` on 09-18). Each CLAUDE.md keeps one line per
+contract/gotcha/default ending in an ID; the text behind it moved VERBATIM under `### <ID> ·`
+headings:
+
+| index | reference | before → after |
+|---|---|---|
+| `4dTrajectory/ts_transformer/CLAUDE.md` | `ts_transformer/docs/reference/{prediction_paths,contracts,defaults,layout,runners,traps}.md` (P, C, D/S/G/H, L, R, T/W) | 126 → 31 KB |
+| root `CLAUDE.md` | `docs/environment.md` (E1–E12); Open Items condensed onto `docs/open-items.md` | 20.3 → 17 KB |
+| `4dTrajectory/CLAUDE.md` | `4dTrajectory/docs/optimizer_reference.md` (O1–O12, K1–K9); open items → `docs/open-items.md` "Optimizer" | 12.9 → 4.9 KB |
+| `evaluation/CLAUDE.md` | `evaluation/docs/EVALUATION_REFERENCE.md` (EV1–EV21) | 17.1 → 5.5 KB |
+| `trajectory_data_process/CLAUDE.md` | `trajectory_data_process/docs/06-harvest-reference.md` (TD1–TD19) | 15.5 → 5.5 KB |
+| `aeroviz-4d/CLAUDE.md` | `aeroviz-4d/docs/35-viewer-reference.md` (AV1–AV18); open items → `docs/open-items.md` "Viewer" | 13.9 → 7.3 KB |
+| `flight_scenarios/CLAUDE.md` (Population only) | `flight_scenarios/docs/population_reference.md` (FS1–FS4) | 11.8 → 9.8 KB |
+
+`geokit`, `aeroviz_backend`, `final_approach` were already short and are unchanged. The convention
+is in the root file's Changelog block: a new fact gets a new ID in the reference doc and ONE line in
+the index.
+
+**The 2026-09-14…09-17 additions were placed in that structure, not merged into it** (the rebase's
+real work): the four control contracts → C27; `control_thrust_parameterization`'s three values,
+`control_condition_features`, `control_horizon_s`, `plan_conditioning=waypoints` → D25–D30;
+`prediction_output=segment-plan` → **P9** (it is a prediction path, so it is indexed with the other
+four rather than as a defaults row); the renamed `strata_fixed_at_anchor` → G1; direction between
+paths → L28; the six new traps → T18–T23; the two-tier "read first" row → W2. The extended
+seed-noise line stays in "How to read results".
+
+**No-loss check** (scratch scripts, not committed): every non-blank line of each original file is
+present, whitespace-normalised, in the new corpus, except (a) the two ts paragraphs split into
+sections (the `plan` bullet → P4.a–h, the `outputs/plan` layout paragraph → L6–L17), which
+reassemble byte-for-byte; (b) the rewritten index headers; (c) the root's INTENT / eligible-SET
+invariants and Open Items, condensed after checking each fact is in `docs/open-items.md` or the ts
+reference; (d) the corrections below. Every ID cited in an index is defined in its reference and
+every reference ID is cited (148 in the ts pair).
+
+**Stale statements found and corrected** (as dated notes beside the kept original text):
+- `evaluation`: the 9.15 m vertical gate, the autocorrelation-corrected crossing CI and the
+  `marginal` count were still described as live — `marginal` went in fb7b173 (2026-08-12), the gate
+  is ±22 m since c9ca54b (2026-08-15); the fit window now lives in
+  `final_approach.fit.DEFAULT_WINDOW_M` (EV11–EV13).
+- `trajectory_data_process`: "arrival manifest schema v5, loaders compare exactly" — the writer is
+  v6 and loaders accept v5+v6 (TD16); the stale-record cure named `--evaluate-only`, which deletes
+  the lateral roster — `--observed-only` is the rebuild (TD3; the evaluator's error message still
+  says `--evaluate-only`: follow-up #41). The index now opens with a which-rebuild table.
+- `aeroviz-4d`: "the published reports on disk are v5 and their optimizer batches are gone" — the
+  published reports mix v5–v9 (first 400 files: v5 67, v6 7, v7 74, v9 124) and the batches are
+  back on disk (AV1).
+- `ts_transformer`: a pointer to a "Conventions" section that never existed (L1) and an import
+  example from `ts_transformer.control.envelope` (it is `outputs.envelope`, L22).
+- `scripts/activate_aeroviz_env.sh` pointed at a root "Operational Gotchas" section that no longer
+  exists; it now points at `docs/environment.md` E5.
+
+Follow-ups recorded, not fixed: #41 (the evaluator's rebuild message), #42 (`AGENTS.md` is a stale
+fork of an early root CLAUDE.md), #43 (`.claude/worktrees/arrival-quality` committed as a gitlink).
+
 ### 2026-09-18 — two-tier follow-up: the token-using recipe as a formal L1, longer L2 lookbacks, the anchor-floor exclusion; paused
 
 **Ask.** The user's three decisions of 22:10 on 09-17: promote the `L1b_pa_nodrop_position` recipe

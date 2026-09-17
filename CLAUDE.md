@@ -98,57 +98,28 @@ Modeling pipeline: `arrivals/manifest.json` → `flight_scenarios` (`FlightScena
 
 ## Environment
 
-- **`aeroviz` (Python 3.12) is THE thesis env on this machine** — data acquisition (`traffic`,
-  `pyopensky`), CIFP parsing (`cifparse`, `arinc424`), `casadi` + IPOPT, `openap`, the
-  conda-forge geospatial stack, editable `geokit`, and `torch`. One env runs everything;
-  `run_all_tests.sh` picks it and its `4dTrajectory` entry covers the ts_transformer suite.
-- **Machine-dependent (READ THIS FIRST on a new machine):** on THIS Mac there is no `aeroviz` env
-  — `aviation` (py3.13, casadi 3.7.2) IS the thesis env, and `scripts/activate_aeroviz_env.sh`
-  resolves to it correctly by probing for casadi. The warning below is written from the Linux
-  compute box's perspective and misleads when read here; trust the resolver, which selects by
-  CONTENT not name.
-- **`aviation` on the LINUX box is NOT the thesis env** — it belongs to
-  `/home/supercomputing/studys/AivationTransformer` (a different project; pure-pip, py3.11).
-  The name collides because on another machine the thesis env IS called `aviation`.
-  **Do not install thesis packages into it and do not delete it.** `run_all_tests.sh` and
-  `start_aeroviz_fullstack.sh` both resolve the env via `scripts/activate_aeroviz_env.sh`,
-  which probes candidates with `import casadi` (so the wrong-project `aviation` here is
-  skipped by content, not trusted by name), keeps a qualifying already-active env,
-  ACTIVATES (never direct-execs `envs/<env>/bin/python` — activate.d hooks must run), and
-  treats an explicit `AEROVIZ_CONDA_ENV` as the only candidate (a typo fails loudly).
-- **Consolidating the thesis into a py3.11 env is BLOCKED**, tested: `cifparse` >= 2.0.4
-  (aeroviz has 2.0.9) uses PEP 701 f-strings — nested same-type quotes — which is Python
-  3.12+ syntax; every version from 2.0.4 up fails `compileall` on 3.11. Only 2.0.0 and
-  earlier import there, i.e. a 9-patch regression in the ARINC 424 parser that feeds
-  `approach_constraints`. Its PyPI metadata claims `>=3.10` and is simply wrong.
-- **`import torch` BEFORE `import traffic` used to break matplotlib** — pip's manylinux torch
-  wheel resolves `libstdc++.so.6` from `/lib/x86_64-linux-gnu` (CXXABI ≤ 1.3.13); once that
-  SONAME is loaded, conda-forge matplotlib's `_c_internal_utils.so` (needs CXXABI_1.3.15) fails.
-  The reverse import order worked, and `run_all_tests.sh` runs both suites in ONE pytest process
-  with `4dTrajectory` (torch) ahead of `trajectory_data_process` (traffic) — i.e. exactly the
-  failing order. Fixed by `$CONDA_PREFIX/etc/conda/activate.d/zz-libstdcxx.sh`, which prepends
-  `$CONDA_PREFIX/lib` to `LD_LIBRARY_PATH` (with a matching `deactivate.d`). **This only applies
-  under `conda activate`** — invoking `envs/aeroviz/bin/python` directly bypasses it and the old
-  failure returns.
-- Python env is conda **`aeroviz`**. This line used to say `aviation`, which is a DIFFERENT
-  project's env on this machine, and that caused a near-miss deletion — hence the warning above.
-- **A nested git worktree under `.claude/worktrees/` shows up as untracked in the main tree**,
-  and a formal ts run (`--campaign-id`/`--experiment-id`) refuses to start on a dirty tree
-  (`experiment_index.begin_run`) — so creating one mid-campaign would abort the next arm. On this
-  machine `.git/info/exclude` carries `.claude/worktrees/` (local, not committed); re-add it
-  after a fresh clone before working in a worktree beside a running campaign.
-- **A killed formal run leaves a `running` `experiment_manifest.json` that makes the relaunch
-  refuse the arm directory as occupied** (`begin_run` writes the manifest before training
-  starts). Recovery: if the directory holds only `config.json` + the manifest, move it aside
-  as `<arm>.aborted-<UTC>` (evidence, never deleted) and rerun the SAME campaign command —
-  `run_ts.py frame_ablation` has no `--resume`; it skips every step whose artifact exists.
-- Env spec backups (regenerate `aeroviz` if ever needed): `.env-backup/aeroviz-pip-freeze.txt`,
-  `aeroviz-conda-explicit.txt`, `aeroviz-environment.yml`.
-- GPU: RTX 4060, 8 GB (compute capability 8.9), cu128 wheels.
-- This machine: 16 GB RAM, frequently swap-bound — memory pressure (Cesium + casadi + IDE +
-  browser) causes UI lag independent of code changes.
-- Frontend build config (Cesium Ion token, vite-plugin-cesium, TS strict, jsdom):
-  `aeroviz-4d/CLAUDE.md`.
+Full text, with the investigation behind each line: `docs/environment.md` (E1–E12).
+
+- **`aeroviz` (Python 3.12) is THE thesis env on this Linux box** — `traffic`/`pyopensky`,
+  `cifparse`/`arinc424`, `casadi` + IPOPT, `openap`, the geospatial stack, editable `geokit` and
+  `torch`; `run_all_tests.sh` picks it and covers the ts_transformer suite (E1).
+- **Resolve the env by CONTENT, never by name.** `scripts/activate_aeroviz_env.sh` (used by
+  `run_all_tests.sh` and `start_aeroviz_fullstack.sh`) probes candidates with `import casadi`,
+  keeps a qualifying active env, ACTIVATES, and treats an explicit `AEROVIZ_CONDA_ENV` as the only
+  candidate. On the Mac the thesis env is `aviation` (py3.13) (E2); **on this Linux box `aviation`
+  belongs to `/home/supercomputing/studys/AivationTransformer` — never install thesis packages into
+  it, never delete it** (it once nearly was) (E3, E6).
+- **Always `conda activate`; never run `envs/aeroviz/bin/python` directly** — the
+  `activate.d/zz-libstdcxx.sh` hook is what stops `import torch` before `import traffic` (the order
+  `run_all_tests.sh` uses) from breaking matplotlib's CXXABI (E5).
+- A py3.11 consolidation is BLOCKED: `cifparse` ≥ 2.0.4 needs Python 3.12 syntax (E4).
+- ts campaigns run from the main tree: `.git/info/exclude` must carry `.claude/worktrees/`, or a
+  nested worktree dirties the tree and a formal run refuses to start (E7); a killed formal run
+  leaves a `running` manifest — if the arm directory holds only `config.json` + the manifest, move
+  it aside as `<arm>.aborted-<UTC>` and rerun the SAME campaign command (E8).
+- Env spec backups in `.env-backup/` (E9); GPU RTX 4060 8 GB, cc 8.9, cu128 wheels (E10); 16 GB
+  RAM, frequently swap-bound — UI lag is memory pressure, not a code change (E11); frontend build
+  config → `aeroviz-4d/CLAUDE.md` (E12).
 
 ## Domain Context
 
@@ -199,21 +170,17 @@ Short index; the full text (with measurements) is in the named file, which loads
 - **Observed tracks have TWO time windows** (first reception vs the 25 km arrival slice, median
   45 s apart). The comparison overlay must use the model one, or the group renders ~5 km early
   and it reads as model error. → `aeroviz_backend/CLAUDE.md`
-- **Every published experiment states its INTENT** (the user's rule, 2026-09-12: every
-  publication of experiment results also says what the experiment is for).
-  `4dTrajectory/ts_transformer/docs/experiments/intents.json` holds each campaign's title +
-  question and one line per run (optionally per predict-time variant);
-  `publish_ts_experiment_trajectories.py` stamps it into the Experiments picker beside the run's
-  parameters as named rows, BLOCKS a publication that has no entry, and `--refresh-labels-only`
-  writes nothing while any listed category lacks one. Write the entries when the campaign is
-  designed and commit them with its arm declaration BEFORE launch (editing the registry under a
-  running campaign dirties the main tree); when reporting a publication, state each campaign's
-  intent in the report too. → `4dTrajectory/ts_transformer/CLAUDE.md`
+- **Every published experiment states its INTENT** (the user's rule, 2026-09-12): each campaign's
+  title + question and one line per run live in
+  `4dTrajectory/ts_transformer/docs/experiments/intents.json`, and the publisher BLOCKS a run
+  without an entry. Write the entries when the campaign is designed and commit them with its arm
+  declaration BEFORE launch (editing the registry under a running campaign dirties the main tree);
+  when reporting a publication, state each campaign's intent too. →
+  `4dTrajectory/ts_transformer/CLAUDE.md` (L27)
 - **A ts checkpoint's data identity is the eligible SET, never the eligibility roster's bytes** —
-  the roster embeds upstream provenance (which observed evaluation report it was joined against),
-  which legitimately moves over an unchanged set; a byte-bound identity refused every checkpoint
-  the day the reports were regenerated (2026-09-07). →
-  `4dTrajectory/ts_transformer/CLAUDE.md`
+  the roster embeds upstream provenance that legitimately moves over an unchanged set (a
+  byte-bound identity refused every checkpoint on 2026-09-07). →
+  `4dTrajectory/ts_transformer/CLAUDE.md` (C26)
 - **One definition of every geodetic constant** (`geokit.METRES_PER_DEG_LAT`,
   `wgs84_curvature_radii`); the frontend `geoConstants.json` and the casadi RHS are generated
   mirrors. → `geokit/CLAUDE.md`
@@ -241,37 +208,34 @@ Maintenance convention:
 - Code-health findings noticed **outside** the change you are making go in
   **`docs/code-health-followups.md`** (deferred, one entry each, marked verified vs judgement) —
   not into the change, and not into Open Items unless they block something.
+- **A subsystem `CLAUDE.md` is an INDEX, not a store** (2026-09-16: the tree's CLAUDE.md files
+  had reached 221 KB, the ts one 118 KB). One line per contract/gotcha/default, ending in an ID;
+  the full text — measurements, history, runner manuals — lives in that subsystem's reference doc
+  (`ts_transformer/docs/reference/`, `4dTrajectory/docs/optimizer_reference.md`,
+  `evaluation/docs/EVALUATION_REFERENCE.md`, `trajectory_data_process/docs/06-harvest-reference.md`,
+  `aeroviz-4d/docs/35-viewer-reference.md`, `flight_scenarios/docs/population_reference.md`,
+  `docs/environment.md`). A new fact gets a new ID there and ONE line in the index.
 
 ## Open Items
 
 Full status — every campaign, measurement and blocked item — is **`docs/open-items.md`**.
 Only the hazards that must fire unprompted are repeated here.
 
-- **`--evaluate-only` DELETES the v5 arrivals roster.** All five
-  `outputs/harvest/<ICAO>/arrivals/manifest.json` are `harvest-arrivals-v5-takeoff-excluded`
-  (re-measured on disk 2026-09-06, **42,650** arrivals — KRDU 14,435 / KSJC 11,082 / KSTL 8,767 /
-  KSMF 4,219 / KMSY 4,147) with their `lateral_pass_eligibility.json`. Readers accept v5 and
-  the current writer version `harvest-arrivals-v6-published-vertical-path` (2026-09-07: the
-  cohort gains KRDU 32 + KSMF 35R via the RNAV approach-leg TCH, +1,876 arrivals on the next
-  harvest, which changes every ts dataset split). Do not re-run it without need, and never
-  under a running campaign. **To rebuild only the observed evaluation records/report
-  (`approach/`) use `--observed-only`** — it leaves `arrivals/` and the lateral roster alone.
-- **All control-output ts checkpoints are stale as of 2026-08-18** — the control contract
-  changed units (newtons → fraction of installed thrust) and `TSConfig` gained required fields,
-  so `load_checkpoint` refuses them. `state` checkpoints are unaffected, but any trained before
-  2026-08-24 predates the v5 cohort.
-- **A per-airport ADE/FDE quoted without its route mix is not a comparison** (KSJC 483 → 1526 m
-  reweighted, best of five to worst). Published tables predate the covariates and need
-  re-deriving. → `4dTrajectory/ts_transformer/CLAUDE.md`
-- **Quote only current-artifact numbers** — the KRDU ts run has three generations and the first
-  is not reproducible; the gate-pass conclusion still needs re-deriving after the datum fix.
-- **The optimizer solves ARE on disk; their REPORTS are stale (v6, speed-indeterminate).**
-  `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}` hold 15 v6-evaluated batches,
-  **70,267 records** (measured 2026-09-07), solved from the 2026-08-23 `flight_scenarios/outputs`
-  scenarios. Their v6 reports grade speed indeterminate on every row (they predate
-  `landing_aero`), so no optimizer pass rate on disk is quotable — but every record carries
-  `source.dynamics_typecode`, which is all the v9 published-V_ref gate keys on: regenerate the
-  15 reports (`run_all_evaluations.py`, ~70 GB of record reads, run it between GPU campaigns);
-  no backfill, no re-solve. A re-solve is ~30 h at `--jobs 24`, 12.3 GiB (`--rollout-dt 1.0`
-  → 8.1 GiB); free space is the binding constraint and the runner refuses to start if its
-  estimate does not fit.
+- **`--evaluate-only` DELETES `lateral_pass_eligibility.json` and re-rosters `arrivals/`.** The five
+  manifests on disk are `harvest-arrivals-v5-takeoff-excluded` (**42,650** arrivals — KRDU 14,435 /
+  KSJC 11,082 / KSTL 8,767 / KSMF 4,219 / KMSY 4,147); a rebuild writes
+  `harvest-arrivals-v6-published-vertical-path` (+1,876 arrivals: KRDU 32 + KSMF 35R), which
+  changes every ts dataset split. Not without need, never under a running campaign. **To rebuild
+  only the observed evaluation records/report (`approach/`) use `--observed-only`.**
+- **All control-output ts checkpoints from before 2026-08-18 are stale** — the control contract
+  changed units (newtons → fraction of installed thrust) and `TSConfig` gained required fields, so
+  `load_checkpoint` refuses them; any ts checkpoint trained before 2026-08-24 predates the v5 cohort.
+- **ts numbers: quote only current-artifact numbers, and never a per-airport ADE/FDE without its
+  route mix** (KSJC 483 → 1526 m reweighted, best of five to worst); published tables predate the
+  covariates, and the gate-pass conclusion still needs re-deriving after the datum fix. →
+  `4dTrajectory/ts_transformer/CLAUDE.md` "How to read results"
+- **No optimizer pass rate on disk is quotable.** `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}`
+  hold 15 batches, **70,267 records**, whose v6 reports grade speed indeterminate on every row;
+  every record carries `source.dynamics_typecode`, so regenerate the 15 reports
+  (`run_all_evaluations.py`, ~70 GB of reads, between GPU campaigns) — no backfill, no re-solve (a
+  re-solve is ~30 h at `--jobs 24`, 12.3 GiB; the runner refuses to start if it does not fit).
