@@ -20,8 +20,6 @@ fact gets a new ID there and one line here.
 Never under a running ts campaign: a rebuilt roster changes every ts dataset split (2026-08-21: a
 rebuild under a running campaign cost an arm). A harvest killed with SIGTERM can still
 finish its write — confirm the process is gone (`kill -0`) before rebuilding downstream (TD19).
-(`evaluation/arrival.py`'s stale-record error still names `--evaluate-only`; `--observed-only` is
-the lighter cure — `docs/code-health-followups.md`.)
 
 ## Contracts
 

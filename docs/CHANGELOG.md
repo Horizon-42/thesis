@@ -4,6 +4,24 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-18 — follow-ups #41 / #42 closed: the stale-record error names `--observed-only`, AGENTS.md becomes policy + pointers
+
+- `evaluation/arrival.py`: the "estimated threshold event but no crossing_span" `ValueError` told
+  the operator to rebuild with `--evaluate-only` — the command that re-rosters `arrivals/` and
+  deletes `lateral_pass_eligibility.json`. It now names `--observed-only` (which rebuilds
+  `approach/` alone) and says what the heavier flag also does. No test pinned the string;
+  `evaluation/tests` 117 pass.
+- `AGENTS.md` (Codex's guide, not loaded by Claude Code) was a fork of an early root `CLAUDE.md`,
+  last touched 2026-08-11: three subsystems, `public/data/airport.json`, and `--evaluate-only`
+  described as a harmless rebuild of derived views. Rewritten as what only it carries — the Change
+  Scope, Compatibility/Risk and ML-Experiment-Isolation rules, the Python-env rule and a data-safety
+  section — plus pointers to the `CLAUDE.md` indexes, their reference docs and `docs/open-items.md`.
+  Its 2026-04 changelog tail was dropped: `docs/CHANGELOG.md` already carries those entries.
+- `docs/code-health-followups.md`: #41 and #42 removed (fixed). **#43 stays** — the
+  `.claude/worktrees/arrival-quality` gitlink is in the owner's own worktree.
+- `evaluation/docs/EVALUATION_REFERENCE.md` EV9 carries a dated note (its verbatim text quotes the
+  old message); `trajectory_data_process/CLAUDE.md` drops the caveat that pointed at #41.
+
 ### 2026-09-18 — CLAUDE.md files become indexes; their full text moves verbatim into reference docs
 
 **Why.** The tree's CLAUDE.md files had reached 221 KB; `ts_transformer/CLAUDE.md` alone was 118 KB

@@ -350,7 +350,9 @@ def _observed_arrival(
     if marker is None:
         raise ValueError(
             "record carries an estimated threshold event but no crossing_span; "
-            "rebuild the observed records (--evaluate-only)"
+            "rebuild the observed records (harvest --observed-only, which rebuilds "
+            "approach/ alone; --evaluate-only also re-rosters arrivals/ and deletes "
+            "lateral_pass_eligibility.json)"
         )
     # The record's states are MSL by the producing seam's conversion; the
     # cross-check below still guards the ~33 m datum class without re-applying it.

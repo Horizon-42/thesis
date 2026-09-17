@@ -152,6 +152,10 @@ gets a new ID here and ONE new line in the index.**
   (reception gap ≠ model shortfall) and the speed-gate scope (observed V is ground
   speed).
 
+**Correction (2026-09-18):** that `ValueError` now names `--observed-only` (the rebuild that
+leaves `arrivals/` and the lateral roster alone); it said `--evaluate-only` when this text was
+written — follow-up #41, fixed.
+
 ### EV10 · an observed track's `states[-1]` is not its arrival
 
 - **An observed track's `states[-1]` is NOT its arrival at the target.** A solve terminates at

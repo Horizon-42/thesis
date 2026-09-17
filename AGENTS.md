@@ -1,118 +1,54 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+Guidance for Codex in this repository.
 
-## Project Overview
+**The map is not here.** Layout, commands, architecture, data formats, contracts and gotchas live
+in the `CLAUDE.md` files — the root one and one per subsystem — and in the reference docs they
+index. They are maintained with the code; this file was a fork of an early root `CLAUDE.md` and had
+been stale for a month (rewritten 2026-09-18). Read, in this order:
 
-AeroViz-4D: Airport 4D trajectory and terrain digital-twin visualization system for thesis research. Combines a React/TypeScript/CesiumJS frontend with Python data pipeline tools to visualize aircraft trajectories (position + time) in 3D terminal airspace.
+- **Root `CLAUDE.md`** — project overview, repository layout, build & dev commands, data flow, key
+  data formats, environment, coding conventions, cross-cutting invariants, open-item hazards.
+- **The subsystem's own `CLAUDE.md`** — it loads with the tree you are changing:
+  `aeroviz-4d/`, `aeroviz_backend/`, `trajectory_data_process/`, `final_approach/`,
+  `flight_scenarios/`, `evaluation/`, `4dTrajectory/`, `4dTrajectory/ts_transformer/`, `geokit/`.
+  Each is an INDEX: one line per contract/gotcha/default ending in an ID (`C7`, `TD16`, `EV12`, …).
+- **The reference doc behind an ID** — `4dTrajectory/ts_transformer/docs/reference/*.md`,
+  `4dTrajectory/docs/optimizer_reference.md`, `evaluation/docs/EVALUATION_REFERENCE.md`,
+  `trajectory_data_process/docs/06-harvest-reference.md`, `aeroviz-4d/docs/35-viewer-reference.md`,
+  `flight_scenarios/docs/population_reference.md`, `docs/environment.md`.
+  Find one with `grep -n '^### C7 ·' <reference dir>/*.md`.
+- **Status and history** — `docs/open-items.md` (what is blocked or measured-but-unfixed),
+  `docs/code-health-followups.md` (deferred findings), `docs/CHANGELOG.md` (dated log; append new
+  entries at the top).
 
-## Repository Layout
+When a change produces a durable fact, add it to the subsystem's reference doc under a new ID and
+ONE line to that `CLAUDE.md` index — not to this file.
 
-- **aeroviz-4d/** — Main visualization app (React + CesiumJS frontend, Python CZML generator)
-- **trajectory_data_process/** — Trajectory acquisition, processing, and dataset helpers
-- **bc_lidar_downloader/** — BC LiDAR terrain data downloader
-- **prepare_scenario_inputs.py** — Rebuild derived arrivals/observed outputs and scenario JSON
-- **run_scenario_optimization.py** — Optimize prepared scenarios and publish comparisons
+## Python environment
 
-## Build & Dev Commands
+- Use the conda `aeroviz` environment for every Python script and test; `conda run -n aeroviz …`
+  for non-interactive commands. Never the system Python, Homebrew Python, or a bare `python`.
+- Prefer `conda activate` / `scripts/activate_aeroviz_env.sh` over
+  `envs/aeroviz/bin/python`: the env's `activate.d` hook sets `LD_LIBRARY_PATH`, and bypassing it
+  brings back the torch/matplotlib CXXABI clash (`docs/environment.md` E5).
 
-### Frontend (aeroviz-4d/)
+## Data safety
 
-```bash
-cd aeroviz-4d
-npm install
-npm run dev                          # Vite dev server with HMR
-npm run build                        # tsc + vite production build
-npm test                             # Vitest (watch mode)
-npx vitest run                       # Single run, no watch
-npx vitest run src/utils/__tests__/ocsGeometry.test.ts  # Single test file
-npm run test:coverage                # Coverage report
-npm run build:local-terrain          # Generate airport-local heightmap terrain
-npm run build:local-terrain:visual-assets  # Regenerate terrain visual aids only
-```
-
-### Python (aeroviz-4d/python/)
-
-```bash
-conda run -n aeroviz pip install -r aeroviz-4d/python/requirements.txt
-conda run -n aeroviz python -m pytest aeroviz-4d/python/tests/test_generate_czml.py -v
-conda run -n aeroviz python -m pytest aeroviz-4d/python/tests/ --cov=. --cov-report=html
-```
-
-### Data Pipeline (end-to-end)
-
-```bash
-# Full observed pipeline: harvest history → manifests → observed CZML/evaluation
-conda run -n aeroviz python -m trajectory_data_process.harvest \
-  --airport CYYC --count 200
-
-# Reuse tracks/manifest.json and rebuild every derived view without fetching
-conda run -n aeroviz python -m trajectory_data_process.harvest --airport CYYC --evaluate-only
-
-# Explicit standalone rendering utility (does not create a harvest)
-conda run -n aeroviz python aeroviz-4d/python/generate_czml.py \
-  --airport CYYC --input path/to/flight_array.json \
-  --output aeroviz-4d/public/data/airports/CYYC/trajectories.czml
-```
-
-## Architecture
-
-### Frontend State & Component Structure
-
-Global state lives in `AppContext` (context + useState, no Redux). Key state: `viewer` (CesiumJS Viewer instance), `airport` config, `selectedFlightId`, `layers` visibility toggles, `playbackSpeed`.
-
-Components read context via `useApp()` hook. CesiumJS logic is encapsulated in custom hooks:
-- `useCesiumViewer` — initializes Viewer, loads airport.json, sets camera
-- `useCzmlLoader` — loads CZML data source, syncs Cesium clock
-- `useRunwayLayer` / `useTerrainLayer` — data layer management
-- `useAirportLocalTerrainLayer` — loads airport-scoped `.f32` heightmap tiles
-  via `terrain/airportLocalTerrain.ts`; controlled by the
-  `layers.airportLocalTerrain` toggle in the main app
-- `useTerrainHillshadeLayer` / `useTerrainHeightTintLayer` — drape generated
-  local-terrain visual aids over the active airport
-
-UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via CSS grid with `pointer-events: none`.
-
-### Data Flow
-
-```
-OpenSky history DB → trajectory_data_process.harvest → tracks/manifest.json (all outcomes, HAE)
-    ├→ observed evaluation + generate_czml.py → trajectories.czml → useCzmlLoader
-    └→ arrivals/manifest.json (model-ready final arrivals)
-         ├→ flight_scenarios → optimization/evaluation
-         └→ ts_transformer training/prediction
-```
-
-Static data follows a similar pattern: OurAirports CSV → `preprocess_airports.py` → `runway.geojson`; ARINC 424 CIFP → `preprocess_waypoints.py` → `waypoints.geojson`.
-
-### Key Data Formats
-
-- **CZML**: JSON array where first element is a "document" packet (clock config), subsequent elements are entity packets with time-sampled positions via `cartographicDegrees: [secondsOffset, lon, lat, altMetres, ...]`
-- **GeoJSON**: Used for static layers (runways, waypoints, OCS surfaces)
-- Airport config: `public/data/airport.json` — `{code, lon, lat, height}`
-
-### Utility Modules
-
-- `ocsGeometry.ts` — Pure math for PANS-OPS obstacle clearance surface computation (no side effects)
-- `czmlBuilder.ts` — Pure CZML packet construction helpers
-
-## Environment
-
-- Requires `VITE_CESIUM_ION_TOKEN` in `.env` (Cesium Ion access token)
-- Vite config uses `vite-plugin-cesium` which handles Cesium asset copying and `CESIUM_BASE_URL` setup
-- TypeScript strict mode is enabled (strict null checks, noUnusedLocals, noUnusedParameters)
-- Test environment: jsdom with vitest globals enabled
-- Prefer the conda `aeroviz` environment for all Python scripts and Python tests.
-- Use `conda run -n aeroviz ...` for non-interactive Python commands. On the Linux
-  workstation, `/home/supercomputing/miniconda3/envs/aeroviz/bin/python3` is also an
-  acceptable explicit interpreter when conda activation is unnecessary.
-- Do not run project Python commands with the system Python, Homebrew Python, or an unqualified `python` command.
+- Downloaded tracks are NOT regenerable. `tracks/` is never edited; derived repairs and slices are
+  read-time (root `CLAUDE.md` → Cross-Cutting Invariants).
+- Know which rebuild you are running before you run one: `--observed-only` rebuilds `approach/`
+  alone, while `--evaluate-only` re-rosters `arrivals/` and DELETES
+  `lateral_pass_eligibility.json`, which changes every ts dataset split
+  (`trajectory_data_process/CLAUDE.md` → "Which rebuild").
+- Never re-run an evaluation/harvest or overwrite published artifacts without the owner asking for
+  that specific action.
 
 ## Change Scope
 
 - Each turn must only make the changes explicitly requested by the user.
 - Do not modify additional files, modules, APIs, tests, or docs merely to make broader test suites pass or to synchronize adjacent code.
-- If a requested change exposes unrelated failures or stale interfaces, report them clearly instead of fixing them without explicit permission.
+- If a requested change exposes unrelated failures or stale interfaces, report them clearly instead of fixing them without explicit permission (`docs/code-health-followups.md` is where such findings go).
 - Refactoring may reorganize an implementation, but it must preserve every existing user-facing
   feature and experiment mode unless the user explicitly requests that feature's removal.
 - Never infer permission to delete, replace, or retire functionality from a request to add a new
@@ -149,43 +85,10 @@ Static data follows a similar pattern: OurAirports CSV → `preprocess_airports.
 
 ## Domain Context
 
-This is a thesis research project. Key aviation concepts in the code:
+This is a thesis research project, serving both thesis visualization/validation and a reusable
+research component library. Key aviation concepts:
+
 - **TMA** (Terminal Maneuvering Area) — controlled airspace around airports
 - **OCS** (Obstacle Clearance Surface) — PANS-OPS geometry ensuring terrain clearance on approach
 - **4D Trajectory** — aircraft position (lon, lat, alt) + time; the "4th dimension" is the scheduled arrival time
 - **CTA** (Controlled Time of Arrival) — ATC-assigned time slot at a fix point
-
-The project serves dual purposes: thesis visualization/validation, and reusable research component library.
-
-## Changelog
-
-### 2026-04-20 — Finish OCS geometry and add final-approach OCS layer
-
-Completed the PANS-OPS final-approach Obstacle Clearance Surface (OCS) pipeline: filled in the TODO in `src/utils/ocsGeometry.ts`, wrote full unit-test assertions, and added a new `useOcsLayer` hook that derives FAF→threshold pairs from `procedures.geojson` and renders three semi-transparent Cesium polygons per route (red primary + two orange 7:1-slope secondary panels, `perPositionHeight: true` for the slope to show).
-
-- `src/utils/ocsGeometry.ts` — implemented `buildFinalApproachOCS` (bearing → perpendiculars → primary trapezoid → secondary outer edges with `faf.altM − secondaryWidthM/7` drop at FAF and `threshold.altM` at the runway end). 13/13 unit tests pass.
-- `src/hooks/useOcsLayer.ts` (new) — dual-useEffect pattern matching `useObstacleLayer`; primary half-width pulled from the route's tunnel descriptor (`tunnel.lateralHalfWidthNm × 1852`), falls back to 150 m.
-- `src/components/CesiumViewer.tsx` — activated `useOcsLayer()`.
-- `src/components/ControlPanel.tsx` — added `ocsSurfaces` to `ACTIVE_LAYER_KEYS` so the toggle renders.
-- `docs/03-ocs-geometry.zh.md` (new) — Chinese tutorial with the flat-earth math derivation, a worked KRDU R05LY example, the altitude-provenance section (geometry altitude vs MCA and how to switch), and a concepts clarifier for OCS vs OCH vs MCA.
-
-Altitudes are currently read from the LineString z-values (i.e. CIFP `geometryAltitudeFt × 0.3048`). Switching to MCA (`altitudeFt`) is a one-function change documented in `docs/03-ocs-geometry.zh.md §5.6`.
-
-### 2026-04-20 — Add FAA DOF obstacle visualization layer
-
-Added end-to-end pipeline for rendering FAA Digital Obstacle File (DOF) obstacles as 3D cylinders in CesiumJS. Obstacles are color-coded by type (TOWER=red, BLDG=steelblue, WINDMILL=green, etc.) and positioned with `HeightReference.RELATIVE_TO_GROUND` so they sit on terrain.
-
-- `python/preprocess_obstacles.py` — parses fixed-width DOF `.Dat` files, filters by haversine radius (default 20 km / ~10.8 NM to cover the approach corridor), outputs `obstacles.geojson`
-- `useObstacleLayer` hook — loads GeoJSON, creates cylinder entities with AGL-height labels; follows `useWaypointLayer` dual-useEffect pattern
-- Added `"obstacles"` to `LayerKey` with toggle in `ControlPanel`
-- DOF data documentation at `data/DOF/README.md`
-
-Usage: `python preprocess_obstacles.py --input <DOF .Dat> --airport`
-
-### 2026-04-19 — Refactor DSM terrain into reusable hook
-
-Rewrote `useDsmTerrainLayer` to use the preprocessed heightmap pipeline (`terrain/dsmHeightmapTerrain.ts`) instead of decoding raw GeoTIFF in the browser. The hook now returns `{ status, metadata, provider, error }` and can be dropped into any page.
-
-- `DsmTerrainDemoPage` delegates terrain loading to the hook (keeps its own overlay/camera logic)
-- `CesiumViewer` wires the hook so DSM terrain is available in the main flight view
-- Added `dsmTerrain` to `LayerKey` with a toggle in `ControlPanel`
