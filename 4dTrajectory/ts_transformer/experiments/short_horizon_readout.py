@@ -23,7 +23,11 @@ a flight's bin anchor is the same sample under every arm and the pairing is anch
 anchor, exactly the training row's — reads the future) and ``no-plan`` (the ABSENT token). A
 plan-free checkpoint is read once, as ``no-plan``. A whole-approach forecast is CUT at Δ
 (`cut_at_lead`); one that ends before Δ (a predicted duration under the horizon) is ABSENT at
-that anchor and counted, never held or scored short.
+that anchor and counted, never held or scored short. **So is a flight whose OBSERVED track ends
+before Δ after the anchor** (``truth_shorter_than_horizon``): the anchor sets admit on the
+supervision rows — the track closed to the threshold, `truth_duration_s` — while the readings
+are against the observed rows (`mean_displacement_to`, `lead_time_error`'s accounting), and the
+two ends differ by the fitted tail (KRDU: one flight of 1401 at the fixed anchor).
 
 **Numbers**, per arm · variant · anchor set · stratum: the displacement at each lead (p50 / mean)
 and the mean displacement over [0, Δ] on the 1 s grid (`mean_displacement_to`, `lead_time_error`'s
@@ -175,15 +179,26 @@ def anchor_sets(arm: Arm, series: list[FlightSeries], profiles, plan: ReadoutPla
     return sets
 
 
+def observed_reaches(item: FlightSeries, anchor: int, horizon_s: float) -> bool:
+    """Whether the OBSERVED track (what the readings are taken against) reaches ``horizon_s``
+    after ``anchor``; the anchor sets admit on the supervision rows, which run on to the threshold."""
+    return float(item.times[-1] - item.times[anchor]) >= horizon_s - ROW_TOLERANCE_S
+
+
 def measure_variant(arm: Arm, series: list[FlightSeries], anchors: dict[int, int], variant: str, plan: ReadoutPlan,
                     device: torch.device, batch_size: int, skeletons: SkeletonCache, *, build_records: bool,
-                    ) -> tuple[dict[str, dict], list[tuple[int, object, dict]], int]:
+                    ) -> tuple[dict[str, dict], list[tuple[int, object, dict]], int, int]:
     """Every flight of one anchor set, forecast from its anchor and scored inside the horizon.
-    Returns the per-flight rows by key, the record pairs (index, record, metrics) and the count of
-    forecasts that ended before the horizon (absent)."""
+    Returns the per-flight rows by key, the record pairs (index, record, metrics), the count of
+    forecasts that ended before the horizon (absent) and the count of flights whose observed
+    track does (absent too, never scored against a truth that is not there)."""
     config = arm.config
     groups: dict[int, list[int]] = {}
+    truth_short = 0
     for index, anchor in anchors.items():
+        if not observed_reaches(series[index], anchor, plan.horizon_s):
+            truth_short += 1
+            continue
         groups.setdefault(anchor, []).append(index)
     rows: dict[str, dict] = {}
     pairs: list[tuple[int, object, dict]] = []
@@ -214,7 +229,7 @@ def measure_variant(arm: Arm, series: list[FlightSeries], anchors: dict[int, int
                         item, inside, index=index, model_name=config.model, horizon_mode=config.horizon_mode,
                         split=plan.split,
                     ), observed_series_metrics(item, inside, points=config.validation_common_grid_points)))
-    return rows, pairs, short
+    return rows, pairs, short, truth_short
 
 
 def _p50(values) -> float | None:
@@ -260,7 +275,7 @@ def paired(arm_rows: dict[str, dict], base_rows: dict[str, dict], masks: dict[st
 
 
 def records_block(arm: Arm, variant: str, set_label: str, plan: ReadoutPlan, *, campaign: str, measured: int,
-                  records: int, short: int) -> dict:
+                  records: int, short: int, truth_short: int) -> dict:
     return {
         "schema": RECORDS_SCHEMA, "campaign": campaign, "label": arm.label, "variant": variant,
         "anchor_set": set_label, "horizon_s": plan.horizon_s, "leads_s": list(plan.leads_s),
@@ -269,6 +284,7 @@ def records_block(arm: Arm, variant: str, set_label: str, plan: ReadoutPlan, *, 
         "reads_the_future": READS_THE_FUTURE[variant],
         "split": plan.split, "limit": plan.limit, "split_flights": len(arm.payload["split"][plan.split]),
         "measured_flights": measured, "records": records, "forecasts_shorter_than_horizon": short,
+        "truth_shorter_than_horizon": truth_short,
     }
 
 
@@ -291,12 +307,13 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: ReadoutPlan, device:
     for variant in variants_of(arm):
         variants[variant] = {"sets": {}}
         for set_label, anchors in sets.items():
-            rows, pairs, short = measure_variant(
+            rows, pairs, short, truth_short = measure_variant(
                 arm, series, anchors, variant, plan, device, batch_size, skeletons,
                 build_records=records_root is not None,
             )
             variants[variant]["sets"][set_label] = {
                 "anchored_flights": len(anchors), "forecasts_shorter_than_horizon": short,
+                "truth_shorter_than_horizon": truth_short,
                 "strata": stratum_cells(rows, masks, keys, plan.leads_s), "flights": rows,
             }
             if records_root is not None and pairs:
@@ -307,14 +324,14 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: ReadoutPlan, device:
                     flight_metrics=[metrics for _, _, metrics in ordered], checkpoint=str(arm.path), split=plan.split,
                     extra_summary={RECORDS_BLOCK: records_block(
                         arm, variant, set_label, plan, campaign=campaign, measured=len(series),
-                        records=len(ordered), short=short,
+                        records=len(ordered), short=short, truth_short=truth_short,
                     )},
                 )
                 record_dirs.setdefault(variant, {})[set_label] = str(directory.relative_to(records_root.parent))
             cell = variants[variant]["sets"][set_label]["strata"]
             print(f"  {variant:<10s} {set_label:<6s} n={cell[STRATUM_ALL]['n']:>4d} ADE[0,{plan.horizon_s:g}] mean "
                   f"{_fmt(cell[STRATUM_ALL]['ade_mean_m'])} | vectored {_fmt(cell[STRATUM_VECTORED]['ade_mean_m'])} "
-                  f"(n {cell[STRATUM_VECTORED]['n']}) | short {short}", flush=True)
+                  f"(n {cell[STRATUM_VECTORED]['n']}) | short {short} | truth short {truth_short}", flush=True)
     return {
         "checkpoint": str(arm.path), "checkpoint_sha256": file_sha256(arm.path), "fixed_anchor": fixed,
         "plan_conditioning": config.plan_conditioning, "control_horizon_s": config.control_horizon_s,
@@ -373,7 +390,8 @@ def render(payload: dict) -> str:
                     leads = " ".join(f"e({k}) {_fmt(v['p50'])}/{_fmt(v['mean'])}" for k, v in s["at_lead_m"].items())
                     lines.append(f"   {variant:<10s} {set_label:<6s} {stratum[:30]:<30s} n={s['n']:>4d} "
                                  f"ADE {_fmt(s['ade_mean_m']):>5}/{_fmt(s['ade_p50_m']):>5} | {leads}"
-                                 + (f" | short {cell['forecasts_shorter_than_horizon']}" if stratum == STRATUM_ALL else ""))
+                                 + (f" | short {cell['forecasts_shorter_than_horizon']} truth-short {cell['truth_shorter_than_horizon']}"
+                                    if stratum == STRATUM_ALL else ""))
     lines.append("")
     lines.append("paired (mean / p50 ΔADE, arm-better share; over the flights both hold at the anchor set):")
     for label, readings in payload["paired"].items():

@@ -88,6 +88,7 @@ def test_the_readout_spans_the_horizon_from_every_anchor_set_with_and_without_th
     assert set(sets) == {runner.FIXED_SET, "12km", "8km"}
     fixed = sets[runner.FIXED_SET]
     assert fixed["anchored_flights"] == len(series) and fixed["forecasts_shorter_than_horizon"] == 0
+    assert fixed["truth_shorter_than_horizon"] == 0
     for row in fixed["flights"].values():
         assert row["anchor_index"] == default_anchor(l1.config)
         assert row["predicted_final_time_s"] == pytest.approx(HORIZON_S)
@@ -112,7 +113,7 @@ def test_the_readout_spans_the_horizon_from_every_anchor_set_with_and_without_th
 
 def test_a_whole_approach_forecast_is_cut_at_the_horizon_or_absent(arms) -> None:
     series, _l1, reference = arms
-    rows, _pairs, short = runner.measure_variant(
+    rows, _pairs, short, _truth_short = runner.measure_variant(
         reference, series, {i: default_anchor(reference.config) for i in range(len(series))}, runner.VARIANT_NO_PLAN,
         _plan(), torch.device("cpu"), 4, runner.SkeletonCache(), build_records=False,
     )
@@ -177,3 +178,24 @@ def test_records_are_written_per_arm_variant_and_anchor_set(arms, tmp_path) -> N
     block = summary[runner.RECORDS_BLOCK]
     assert block["schema"] == runner.RECORDS_SCHEMA and block["variant"] == runner.VARIANT_PLAN
     assert block["horizon_s"] == HORIZON_S and block["records"] == len(series) and "protocol C" in block["reads_the_future"]
+
+
+def test_a_flight_whose_observed_track_ends_inside_the_horizon_is_absent_and_counted(arms) -> None:
+    """The anchor sets admit on the supervision rows (closed to the threshold); the readings are
+    against the OBSERVED rows. A flight whose observed track ends inside the horizon after its
+    anchor — the fitted tail carrying its supervision past it — is skipped and counted, never
+    scored against a truth that is not there (KRDU: one flight of 1401 at the fixed anchor)."""
+    from dataclasses import replace
+
+    series, l1, _reference = arms
+    anchor = default_anchor(l1.config)
+    cut = anchor + int(HORIZON_S / 2 / l1.config.dt_s)          # observed rows end 30 s after the anchor
+    short_flight = replace(series[0], times=series[0].times[:cut], values=series[0].values[:cut])
+    assert short_flight.supervision_times[-1] - short_flight.times[anchor] >= HORIZON_S     # admitted by the sets
+    assert not runner.observed_reaches(short_flight, anchor, HORIZON_S)
+    cohort = [short_flight, *series[1:]]
+    rows, _pairs, short, truth_short = runner.measure_variant(
+        l1, cohort, {i: anchor for i in range(len(cohort))}, runner.VARIANT_PLAN, _plan(), torch.device("cpu"), 4,
+        runner.SkeletonCache(), build_records=False,
+    )
+    assert truth_short == 1 and short_flight.dataset_id not in rows and len(rows) + short == len(cohort) - 1
