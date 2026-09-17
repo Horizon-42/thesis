@@ -33,7 +33,7 @@
 | S2.3 L2 臂 + intents | **完成**（训练 §10.5；读数 + 门 §10.6：**门 L2 B 轴（segments）PASS 两种子，A 轴 FAIL**；readout 记录 2.4 GB 已写，磁盘 8.5 GB。历史：首次启动死在第 1 轮的打印行——`segment_plan_validation` 的到达时间误差为 None，3512fdc 修；重启 @3512fdc，PID 2140320，第 1 轮的损失与中断那次逐位相同；3.6 s/epoch，4 臂 ≈ 45 min，然后读数带记录、门 L2 ×2）：`docs/experiments/two_tier_l2_arms.json`（A/B × 2 种子，seq_len 61，M = 10，全机型 cohort，随机锚点 remaining-path-uniform、未来 ≥ 30 s、半数留在固定锚点 60，180 epoch，按目标函数选），dry run 通过；intents `two_tier_l2_20260917`（4 run + `@readout-<set>` 变体）；cohort 已写 `two_tier_l2_20260917/development_cohort.json`（10102 / 2104，丢 3 个训练航班）。等 L1 campaign 跑完后交队列 agent：训练 4 臂 → `segment_plan_readout`（参照 native32 + `airport_frame_20260903/A_threshold_enu`，`--write-records`）→ `two_tier_gates --segment-readout`（A 两种子、B 两种子各判一次） |
 | **首批读数（2026-09-17 晚，2a）** | **L1 不用它的计划 token**：六个主臂带真值航路点与不带的 ADE[0,60] 只差 2–4 m（见 §10）；不带 token 时优于 native32 切到 60 s。诊断臂 `docs/experiments/two_tier_l1b_arms.json`（4 臂、单种子、pa 契约：遮蔽率 0 / 不减 lr / 两者 / 关平滑项）+ intents `two_tier_l1b_20260917`，排在 L2 之后、E2E 之前。**读数 §10.8**：token 遮蔽率 0 是杠杆（配对 Δ −32 / −48 / −258），lr 不是（−0）；关平滑项少 45 m（88 对 134）；带真值 token 的 ADE 本身几乎不变 |
 | S4 发布 | **L1 短时读数已发布**（2026-09-17 晚，opus agent，pub worktree @cbdf6ca）：6 个主臂 × {truth-plan, no-plan} × {fixed, 8km} = 24 个类目 `experiment_<arm>_<token>_short-<variant>-<set>_val`，intents 标题「L1 · 短时控制层…」与每 run/变体行已盖章；`npm run check-publication -- --airport KRDU --server http://localhost:5173` → 195 类目 0 错 0 警；前端重启后在 app 里打开确认渲染。发布命令形状（publisher 默认根指向 POOLED，需显式 `--experiment-index …/KRDU/experiments/index.json --output-root …/KRDU/experiment_predictions`；索引先用 `python -m ts_transformer.training.experiment_index --root outputs/KRDU/experiments` 重建）在 scratchpad `publish_brief_two_tier.md`。未发布：12km/6km 档、两个 H 消融臂、native32 的记录、lockstep/L2/E2E（未就绪）。磁盘 5.9 GB（99 %） |
-| S3 联合 lockstep + 门 E2E | **完成** a1e58aa：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。**E2E 已跑**（§10.9，`e2e_pa_B_s{1337,2024}`，B 配 `L1_pa_s<seed>`，hook 关，无记录，每次 ~80 s）：**门 E2E 两种子 FAIL**（雷达 ADE 3755 / 3712 > 2745，建立 0.59 / 0.61 < 0.94；直线与可飞过）；receding − no-plan ΔADE p50 +1 / +25 — 计划进不了不看 token 的跟踪器。补充：用 token 的三个 L1b 臂各一次 E2E（§10.10，第二条链） |
+| S3 联合 lockstep + 门 E2E | **完成** a1e58aa：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。**E2E 已跑**（§10.9，`e2e_pa_B_s{1337,2024}`，B 配 `L1_pa_s<seed>`，hook 关，无记录，每次 ~80 s）：**门 E2E 两种子 FAIL**（雷达 ADE 3755 / 3712 > 2745，建立 0.59 / 0.61 < 0.94；直线与可飞过）；receding − no-plan ΔADE p50 +1 / +25 — 计划进不了不看 token 的跟踪器。补充 §10.10（三个用 token 的 L1b 臂各一次 E2E，单种子读数）：`nodrop_position`（遮蔽率 0 + 关平滑项）ADE 1268 / 直线 263 / 雷达 3044、可飞 0.997、直线建立 0.970——目前最好的两层；带平滑项的两个 nodrop 臂吃进计划后雷达层可飞掉到 0.07–0.09。两个不过的判据都在雷达层，来自 L2 的远程雷达误差。**待用户定**：是否以该配方正式跑两种子；门线是否可达 |
 
 ## 2. 架构
 
@@ -399,3 +399,27 @@ L1 = `L1_pa_s<seed>`（门 L1 全 FAIL，pa 作读数），L2 = `B_s<seed>`（�
 - 直线层跟 §10.2 的 L1 lockstep 同量级（ADE 353 对真值航路点时的读数），即 L2 换真值航路点在直线上没有差别——这层本来就不需要计划。
 
 **结论（读数，非门）**：两层的短板在 L1 不用 token，不在 L2。E2E 的判定要等用 token 的 L1b 臂的读数（§10.10）。
+
+### 10.10 用 token 的 L1b 臂的端到端（`e2e_l1b-{nodrop,nodrop_lrflat,nodrop_position}_B_s1337`，单种子 1337，B_s1337 供计划，a0 = 60，hook 关，无记录；读数，不是门——`two_tier_gates` 按设计拒绝单种子）
+
+| L1 跟踪器 | 变体 | ADE 均值 / p50 | FDE p50 | 直线 ADE | 雷达 ADE | 全程可飞（全 / 直 / 雷） | 建立（全 / 直 / 雷） | 位移 p50 60 / 120 / 180 s |
+|---|---|---|---|---|---|---|---|---|
+| L1_pa_s1337（§10.9，对照） | receding | 1578 / 470 | 373 | 353 | 3755 | 0.982 / 0.992 / 0.964 | 0.590 / 0.915 / 0.000 | 236 / 608 / 2093 |
+| L1b_pa_nodrop | receding | 1566 / 487 | 814 | 359 | 3712 | 0.650 / 0.960 / **0.085** | 0.578 / 0.893 / 0.004 | 240 / 615 / 2198 |
+| L1b_pa_nodrop | no-plan | 2782 / 861 | 2038 | 653 | 6602 | 0.789 / 0.954 / 0.489 | 0.303 / 0.469 / 0.000 | 411 / 1202 / 4584 |
+| L1b_pa_nodrop_lrflat | receding | 1609 / 481 | 627 | 356 | 3837 | 0.652 / 0.970 / **0.072** | 0.598 / 0.917 / 0.018 | 235 / 606 / 1685 |
+| L1b_pa_nodrop_lrflat | no-plan | 3027 / 968 | 2611 | 799 | 7024 | 0.833 / 0.962 / 0.598 | 0.092 / 0.141 / 0.002 | 426 / 1443 / 5164 |
+| **L1b_pa_nodrop_position** | receding | **1268 / 356** | 494 | **263** | **3044** | **0.997 / 0.999 / 0.994** | **0.640 / 0.970 / 0.038** | **184 / 426 / 1138** |
+| L1b_pa_nodrop_position | no-plan | 4656 / 2011 | 5149 | 1891 | 9633 | 0.334 / 0.228 / 0.527 | 0.000 / 0.000 / 0.000 | 909 / 3084 / 8662 |
+
+对 G3 判据的读数（单种子）：`nodrop_position` 直线 ADE 263 ≤ 415 过、可飞 0.997 ≥ 0.95 过、雷达 ADE 3044 ≤ 2745 **不过**（比 pa 的 3755 少 711）、建立 0.640 ≥ 0.94 **不过**（直线 0.970，雷达 0.038）。另两臂：直线过、可飞 0.65 **不过**、雷达与建立不过。
+
+读法：
+- **计划这回真的进了跟踪器**：三臂的 receding 与 no-plan 相差 1.2–3.4 km ADE（pa 是 +1 m）。no-plan 是分布外（遮蔽率 0 的臂没见过缺席 token），只说明依赖，不是"没有计划时的能力"。
+- **带平滑项的两个 nodrop 臂吃进计划后没有变好，而且飞不出去**：整体 ADE 1566 / 1609 对 pa 的 1578，雷达层可飞 0.085 / 0.072（pa 0.964）。它们每 30 s 朝 L2 的航路点转，在雷达引导的长航班上转出不可飞的控制序列——用 token 但目标函数仍压平滑，两头不讨好。
+- **关平滑项的臂是目前最好的两层**：ADE 1268（−310 对 pa），直线 263（−90），雷达 3044（−711），全程可飞 0.997，直线建立 0.970；e_plan 上升也慢（k4 全体 663 对 935，雷达 1351 对 1975）——跟踪器贴得住真值，L2 读到的历史就不偏。雷达层仍然不建立（0.038）：300 s 位移 4668，与 L2 自己在固定锚点的雷达 300 s 读数（B 3449）同量级，即上限在 L2 的长程雷达预测。
+- 两个"不过"的判据都在雷达层，且都是 L2 的雷达远程误差（§10.6 B 雷达 180 s p50 1396、300 s 3449）通过跟踪器传下来的；下一步是 L2 的雷达层，不是 L1。
+
+**待用户决定**（§8 之外的新问题）：
+1. 是否把 `plan_conditioning_dropout=0` + 关平滑项（`control_heading_rate_loss_weight=0`、`control_bank_tv_loss_weight=0`）作为 L1 的正式配方跑两种子（含 tf / sf 契约），使门 E2E 可以正式判定；平滑项本是 §4 为"可飞"加的，而这个臂不带平滑项可飞 0.997——平滑项在 pa 契约下看来是多余的约束（要用 `flyable` 的定义核一遍，见 §5）。
+2. 门 E2E 的雷达 ADE 线 2745 与建立 0.94 在 L2 的雷达远程误差下无法达到；是改 L2（更长的回看、更多段、雷达层加权）还是改门。
