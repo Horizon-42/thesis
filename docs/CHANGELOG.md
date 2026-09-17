@@ -4,6 +4,51 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-17 — two-tier results: gate L2 passes on the segments axis, E2E fails through L1, the token-masking diagnosis
+
+**Where the numbers live.** `4dTrajectory/ts_transformer/docs/2026-09-17_two_tier_plan_v2.zh.md` §10.5–10.10
+(every table with n); artifacts under `4dTrajectory/outputs/KRDU/experiments/two_tier_{l1,l1b,l2}_20260917`.
+Everything ran on KRDU val (2104 flights all-type, 1404 for the openap-direct native32 pairing) at the
+common fixed anchor, commit `3512fdc` in the detached runs worktree.
+
+**L2 (`segment-plan`, S2.3).** Four arms (channels vs segments attention × two seeds, M = 10, 180 epochs).
+Segments attention halves channels' error everywhere (last-epoch covered-ADE 908 vs 1816–1867 m; readout
+plan block 910 vs 1841–1895 m; |dT| 9.7 vs 12.8–13.8 s). **Gate L2: B (segments) PASS on both seeds** —
+vectored p50 at 120/180 s is 1288/1236 m under native32 and 302/296 m under the state arm, straight-in
+165–491 m under both; **A (channels) FAIL** on both seeds, broken on the vectored stratum at the far anchor
+(60 s p50 1212/2711 m) while fine in the 12/8/6 km bins. The straight-in zero-tolerance question turned
+out moot (A's straight-in miss is +31/+37 m, B's margins ≥ 165 m). B beats both whole-approach references
+at 60 s too (paired −50 m vs native32, −196 m vs state). Readout records written (2.4 GB).
+
+**L1b diagnosis (why L1 ignores its waypoint token; four single-seed pa arms).** `plan_conditioning_dropout`
+is the lever, the LR schedule is not: with the masking rate at 0 the paired truth-plan − no-plan ΔADE p50
+is −32 / −48 / −258 m (0.5 → −0 for the LR-only arm), but the truth-token ADE itself barely moves
+(128–130 vs 134 m) — the token shows up as dependence (no-plan 204–206 m, an out-of-distribution read),
+not as accuracy. Turning the two control-smoothness terms off (heading rate 8, bank TV 1) cuts the
+fixed-anchor ADE by a third (88 vs 130–134 m; 8 km bin 61 vs 79).
+
+**E2E (S3, protocol A: L2 `B_s<seed>` draws the next two waypoints on the rolling history every 30 s, hook
+off, a0 = 60).** With the pre-registered trackers `L1_pa_s{1337,2024}`: **gate E2E FAIL on both seeds** —
+straight-in ADE 353/374 ≤ 415 and fully-flyable 0.98/0.96 pass; vectored ADE 3755/3712 > 2745 and
+established 0.59/0.61 < 0.94 fail; receding − no-plan ΔADE p50 +1/+25 m, i.e. the plan never enters a
+tracker that ignores its token. The `two_tier_gates` E2E branch reads lockstep schema v4 (`tracker_lockstep`
+with `--plan-head`). Single-seed readings with the token-using L1b arms (the gate refuses one seed by
+design): the two smoothed nodrop arms take the plan (receding vs no-plan differ by 1.2–1.4 km) but do not
+improve (ADE 1566/1609 vs 1578) and go unflyable on vectored flights (0.085/0.072); **`L1b_pa_nodrop_position`
+is the best two-tier so far**: ADE 1268 (−310), straight-in 263 (−90), vectored 3044 (−711), fully flyable
+0.997, straight-in established 0.970. Its two remaining misses are the vectored ADE (3044 > 2745) and the
+vectored established share (0.038), both inherited from L2's long-lead vectored error (B's 180/300 s
+vectored p50 1396/3449 m at the fixed anchor). Open for the user: promote that recipe (masking 0, smoothness
+off) to a two-seed formal L1 so gate E2E can be judged; whether the vectored gate lines are reachable
+without an L2 change.
+
+**Queue continuity (the user's question of the evening).** The queue agent idled twice (5.5 h after the L1
+lockstep, 3.7 h after L2 training: its Monitor wake-ups never fired; it resumed only on a message). The rest
+of the queue ran as ONE detached shell chain (`<campaign>/queue_rest.sh`, PID file + unbuffered log, each
+step skipped on its artifact, a failed step retried once after any concurrent run_ts exits, disk floor
+3 GB), and a second chain for the L1b E2E readings; the L1b training + readout + E2E ×2 + gate took 76 min
+end to end. `tracker_lockstep` without records costs ~80 s per 1401-flight arm.
+
 ### 2026-09-17 — two-tier plan v2 and its S1: the fixed-horizon control head, the waypoint token, the readouts
 
 **Ask.** The user, after the T1a design failed its gate: the 09-16 feasibility doc had rewritten the

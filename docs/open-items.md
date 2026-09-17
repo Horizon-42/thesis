@@ -9,6 +9,21 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
+- **Two-tier (2026-09-17 evening; full numbers in
+  `4dTrajectory/ts_transformer/docs/2026-09-17_two_tier_plan_v2.zh.md` §10):** gate L1 FAIL (all three
+  contracts, the trackers ignore their waypoint token), **gate L2 PASS on the segments-attention axis
+  `B_s*`** (channels `A_s*` FAIL), **gate E2E FAIL** with the pre-registered pa trackers (vectored ADE
+  3755/3712 > 2745, established 0.59/0.61 < 0.94; the plan never enters the tracker). Diagnosis: the
+  plan-token masking rate (`plan_conditioning_dropout` 0.5 → 0) is what makes a tracker use its token,
+  and the two control-smoothness terms cost a third of the fixed-anchor ADE. Single-seed reading:
+  `L1b_pa_nodrop_position` (masking 0, smoothness off) + `B_s1337` gives ADE 1268 / flyable 0.997 /
+  straight-in established 0.970 — the vectored misses are L2's long-lead error. **User decisions
+  pending:** (1) promote that recipe to a two-seed formal L1 (tf/sf/pa) so gate E2E can be judged;
+  (2) whether the vectored gate lines (2745 m, 0.94) are reachable without an L2 change (longer
+  lookback / more segments / vectored weighting). Publication: L1 short-horizon (24 categories) done;
+  L2 readout (8) in progress 2026-09-17 evening; the L1 lockstep and every E2E have NO records
+  (a records re-run is ~6 GB, disk 9 GB free) — publish only if the user wants them in the picker.
+
 
 - **The v5 re-roster is DONE (verified on disk 2026-09-03):** all five
   `outputs/harvest/<ICAO>/arrivals/manifest.json` are `harvest-arrivals-v5-takeoff-excluded`
