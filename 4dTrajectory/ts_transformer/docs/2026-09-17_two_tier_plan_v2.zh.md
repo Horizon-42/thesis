@@ -31,9 +31,9 @@
 | S2.1 `segment-plan` 输出 | **完成** 9d9afc8（opus review 12 项已处理、全套测试通过）；本文件 §4 已按实现改：输出在**跑道系**而非 chart；到达 = 真值终点 `truth_duration_s`；每 epoch 的 `segment_plan_validation` 读数块 |
 | S2.2 L2 读数 runner | **代码完成**：`run_ts.py segment_plan_readout`（每个 checkpoint 在共同固定锚点——各自固定锚点中最晚的——与 12/8/6 km bin 上预测，60/120/180/300 s 的位移分层；forecast 结束后**保持末行**（到达的计划停在入口，读的是它的到达判断），只有真值落地才缺席；每个 checkpoint 在**自己的 split** 上读、按共同航班配对——native32 是 openap-direct 队列（val 1404），state 臂与 L2 臂是全机型（val 2104，前者 ⊂ 后者，已核）；匀速外推内置参照；segment-plan 臂带计划块）+ `two_tier_gates --segment-readout`（门 L2：120 与 180 s 雷达引导 p50 比**每个**整段参照都低 ≥ 125 m、直线不高于，两种子）。opus review 11 项已处理（固定锚点集要求该锚点存在且其后 ≥ 60 s 观测轨迹、held 计数进配对格与门判据行、多个 readout 参照/锚点/提前量不一致拒绝、segment-plan 臂一次前向、`window` 参照拒绝、`strata_fixed_at_anchor`）。测试 `test_segment_plan_readout.py`（8）、`test_two_tier_gates.py` L2 段（5）。**待用户定**：直线"不差"= 差 ≤ 0（零容差；包内直线种子线是 30 m，review 建议考虑）；参照的记录也写出（S4 需为 native32/state 注册 `@readout-*` 变体或跳过）。→ §10.6：本轮零容差没有决定任何判定（A 的直线 180 s 对 state 是 +31 / +37，30 m 线也放不过；B 的直线全部 ≤ −165） |
 | S2.3 L2 臂 + intents | **完成**（训练 §10.5；读数 + 门 §10.6：**门 L2 B 轴（segments）PASS 两种子，A 轴 FAIL**；readout 记录 2.4 GB 已写，磁盘 8.5 GB。历史：首次启动死在第 1 轮的打印行——`segment_plan_validation` 的到达时间误差为 None，3512fdc 修；重启 @3512fdc，PID 2140320，第 1 轮的损失与中断那次逐位相同；3.6 s/epoch，4 臂 ≈ 45 min，然后读数带记录、门 L2 ×2）：`docs/experiments/two_tier_l2_arms.json`（A/B × 2 种子，seq_len 61，M = 10，全机型 cohort，随机锚点 remaining-path-uniform、未来 ≥ 30 s、半数留在固定锚点 60，180 epoch，按目标函数选），dry run 通过；intents `two_tier_l2_20260917`（4 run + `@readout-<set>` 变体）；cohort 已写 `two_tier_l2_20260917/development_cohort.json`（10102 / 2104，丢 3 个训练航班）。等 L1 campaign 跑完后交队列 agent：训练 4 臂 → `segment_plan_readout`（参照 native32 + `airport_frame_20260903/A_threshold_enu`，`--write-records`）→ `two_tier_gates --segment-readout`（A 两种子、B 两种子各判一次） |
-| **首批读数（2026-09-17 晚，2a）** | **L1 不用它的计划 token**：六个主臂带真值航路点与不带的 ADE[0,60] 只差 2–4 m（见 §10）；不带 token 时优于 native32 切到 60 s。诊断臂 `docs/experiments/two_tier_l1b_arms.json`（4 臂、单种子、pa 契约：遮蔽率 0 / 不减 lr / 两者 / 关平滑项）+ intents `two_tier_l1b_20260917`，排在 L2 之后、E2E 之前 |
+| **首批读数（2026-09-17 晚，2a）** | **L1 不用它的计划 token**：六个主臂带真值航路点与不带的 ADE[0,60] 只差 2–4 m（见 §10）；不带 token 时优于 native32 切到 60 s。诊断臂 `docs/experiments/two_tier_l1b_arms.json`（4 臂、单种子、pa 契约：遮蔽率 0 / 不减 lr / 两者 / 关平滑项）+ intents `two_tier_l1b_20260917`，排在 L2 之后、E2E 之前。**读数 §10.8**：token 遮蔽率 0 是杠杆（配对 Δ −32 / −48 / −258），lr 不是（−0）；关平滑项少 45 m（88 对 134）；带真值 token 的 ADE 本身几乎不变 |
 | S4 发布 | **L1 短时读数已发布**（2026-09-17 晚，opus agent，pub worktree @cbdf6ca）：6 个主臂 × {truth-plan, no-plan} × {fixed, 8km} = 24 个类目 `experiment_<arm>_<token>_short-<variant>-<set>_val`，intents 标题「L1 · 短时控制层…」与每 run/变体行已盖章；`npm run check-publication -- --airport KRDU --server http://localhost:5173` → 195 类目 0 错 0 警；前端重启后在 app 里打开确认渲染。发布命令形状（publisher 默认根指向 POOLED，需显式 `--experiment-index …/KRDU/experiments/index.json --output-root …/KRDU/experiment_predictions`；索引先用 `python -m ts_transformer.training.experiment_index --root outputs/KRDU/experiments` 重建）在 scratchpad `publish_brief_two_tier.md`。未发布：12km/6km 档、两个 H 消融臂、native32 的记录、lockstep/L2/E2E（未就绪）。磁盘 5.9 GB（99 %） |
-| S3 联合 lockstep + 门 E2E | **完成** a1e58aa：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。E2E 由 detached 链 `queue_rest.sh` 在 L1b 之后跑（§10.7）：`--plan-head B_s<seed>` 配 `L1_pa_s<seed>`（门 L1 全 FAIL，pa 作读数），hook 关，无记录；然后门 E2E `gates_e2e_pa_B` |
+| S3 联合 lockstep + 门 E2E | **完成** a1e58aa：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。**E2E 已跑**（§10.9，`e2e_pa_B_s{1337,2024}`，B 配 `L1_pa_s<seed>`，hook 关，无记录，每次 ~80 s）：**门 E2E 两种子 FAIL**（雷达 ADE 3755 / 3712 > 2745，建立 0.59 / 0.61 < 0.94；直线与可飞过）；receding − no-plan ΔADE p50 +1 / +25 — 计划进不了不看 token 的跟踪器。补充：用 token 的三个 L1b 臂各一次 E2E（§10.10，第二条链） |
 
 ## 2. 架构
 
@@ -379,3 +379,23 @@ hook 关 → 开，receding：
 - native32 切到 60 s（163 / 121）仍比每个带 token 的 L1b 臂差；不带 token 时 nodrop 类臂（204–206）比 native32 差、lrflat（133）与 L1_pa（136）比它好。
 
 **对 E2E 的影响**：主链的 E2E 用 `L1_pa_s<seed>`（不看 token，两种子，预注册门）。补充读数（第二条 detached 链 `queue_e2e_l1b.sh`，主链结束后接，单种子 1337 配 B_s1337，每次 ~80 s）：三个用 token 的臂 `L1b_pa_nodrop` / `L1b_pa_nodrop_lrflat` / `L1b_pa_nodrop_position` 各跑一次 lockstep（receding + receding-no-plan）与门 E2E 判据（单种子，作读数）。intents `two_tier_l1b_20260917` 已登记 `@lockstep-e2e-B` / `-B-no-plan` 六个变体。
+
+### 10.9 两层端到端（S3，`e2e_pa_B_s{1337,2024}` + `gates_e2e_pa_B`，@3512fdc，a0 = 60，每 30 s 再问，hook 关，无记录）
+
+L1 = `L1_pa_s<seed>`（门 L1 全 FAIL，pa 作读数），L2 = `B_s<seed>`（门 L2 PASS），种子配对；协议 A：每次询问 L2 在**滚动历史**（跟踪器自己飞出的行）上画下 2 个航路点交给 L1。每次 lockstep 约 80 s（1401 架）。
+
+| 种子 | 变体 | ADE 均值 / p50 | FDE p50 | 直线 ADE 均值 | 雷达 ADE 均值 | 全程可飞 | 建立份额（全体 / 直线 / 雷达） | 位移 p50 60 / 120 / 180 s |
+|---|---|---|---|---|---|---|---|---|
+| 1337 | receding | 1578 / 470 | 373 | 353 | 3755 | 0.982 | 0.590 / 0.915 / 0.000 | 236 / 608 / 2093 |
+| 1337 | receding-no-plan | 1562 / 475 | 425 | 358 | 3702 | 0.983 | 0.581 / 0.898 / 0.004 | 232 / 631 / 2125 |
+| 2024 | receding | 1576 / 477 | 407 | 374 | 3712 | 0.962 | 0.610 / 0.940 / 0.010 | 236 / 598 / 1609 |
+| 2024 | receding-no-plan | 1548 / 477 | 438 | 363 | 3654 | 0.969 | 0.607 / 0.935 / 0.010 | 234 / 576 / 1579 |
+
+**门 E2E：两种子 FAIL**（G3 判据）：直线 ADE 353 / 374 ≤ 415 过；全程可飞 0.982 / 0.962 ≥ 0.95 过；雷达 ADE 3755 / 3712 ≤ 2745 **不过**；建立份额 0.590 / 0.610 ≥ 0.94 **不过**。
+
+- **计划没有进入跟踪器**：receding − no-plan 的配对 ΔADE p50 +1 / +25 m（"带计划更好"份额 0.478 / 0.332）——与 §10.1/§10.2 一致，pa 臂不看 token，L2 的计划再好也进不去。
+- **e_plan（L2 航路点对同刻真值航路点，p50）随询问次数上升**：s1337 全体 k0 195 → k2 463 → k4 908 → k6 3264；雷达 k0 284 → k3 1115 → k5 2782；直线 k0 151 → k3 480 → k5 724。k0 就是 §10.6 的固定锚点读数量级（B 的 60 s 位移 296）；之后的上升是跟踪器偏离真值后 L2 读到的是偏离的历史（e_plan 继承漂移），不是 L2 本身变差。
+- **漂移 RISING**：early / late(≥k3) 比 8.2 / 7.0（上限 1.5），雷达 9.8 / 9.1；雷达层无一建立（0.000 / 0.010），k7 以后 step error p50 3.5–3.9 km。
+- 直线层跟 §10.2 的 L1 lockstep 同量级（ADE 353 对真值航路点时的读数），即 L2 换真值航路点在直线上没有差别——这层本来就不需要计划。
+
+**结论（读数，非门）**：两层的短板在 L1 不用 token，不在 L2。E2E 的判定要等用 token 的 L1b 臂的读数（§10.10）。
