@@ -851,3 +851,17 @@ specific-force contract's own twin shows the same effect (−0.85 m/s). Not intr
 **Judgement**: small in practice (a realistic loop lag at a segment start is ~10 % of that 3°). A fix would use
 the hold-mean `sin γ` from the two-lag closed form, and moves every stored hooked specific-force artifact, so it
 needs its own golden check.
+
+## 40. Two definitions of "the truth's end" across the ts readouts (2026-09-17)
+
+**Verified** (the L1 campaign's first `short_horizon_readout` died on it; fixed by counting, `4066345`): the
+anchor sets (`anchor_grid.anchors_for_bin`, `window_anchors`, `truth_duration_s`) admit a flight on its
+SUPERVISION rows — the observed track closed to the threshold — while `inference/receding.py`
+(`mean_displacement_to`, `displacement_at`) and `lead_time_error` read the OBSERVED rows, which stop a median
+6 s / 380 m short at KRDU. So a flight can be admitted with 60 s of truth after its anchor and have 45 s of
+readable truth. Both readouts now state the gap (`truth_shorter_than_horizon`, held / absent counts) rather
+than raise, and the segment-plan readout admits its fixed set on the observed rows.
+
+**Judgement**: one convention would be better — either the readouts read the supervision rows (the package's
+stated truth) or the anchor sets admit on the observed ones — but changing `displacement_at`'s truth moves
+every S1 number and the `lead_time_error` accounting it mirrors, so it is a decision, not a fix.
