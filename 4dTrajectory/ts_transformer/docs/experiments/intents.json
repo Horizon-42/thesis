@@ -677,7 +677,13 @@
     "L1b_pa_nodrop_position@short-truth-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
     "L1b_pa_nodrop_position@short-no-plan-8km": "短时读数：从剩余路程 8 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
     "L1b_pa_nodrop_position@short-truth-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，带真值航路点 token（协议 C）。",
-    "L1b_pa_nodrop_position@short-no-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。"
+    "L1b_pa_nodrop_position@short-no-plan-6km": "短时读数：从剩余路程 6 km 的锚点起的前 60 s 预测，token 缺席（协议 B）。",
+    "L1b_pa_nodrop@lockstep-e2e-B": "两层端到端（协议 A，S3；L1b 诊断臂，单种子 1337）：每 30 s 由 L2 段 token 计划头 B_s1337（segments 注意力）在滚动历史上画出下 2 个航路点交给这个用 token 的 L1b 臂（短时读数里带真值 token 比不带的配对 ΔADE p50 −32 m），L1 飞 30 s；读在锚点 60；hook 关。旁记 e_plan。单种子读数，不是预注册的两种子门。",
+    "L1b_pa_nodrop@lockstep-e2e-B-no-plan": "同一次端到端 run 里 token 置为缺席（协议 B）：这个臂没有 L2 计划时值多少（遮蔽率 0 训练的臂从没见过缺席 token，读的是分布外）。",
+    "L1b_pa_nodrop_lrflat@lockstep-e2e-B": "两层端到端（协议 A，S3；L1b 诊断臂，单种子 1337）：每 30 s 由 L2 段 token 计划头 B_s1337（segments 注意力）在滚动历史上画出下 2 个航路点交给这个用 token 的 L1b 臂（短时读数里带真值 token 比不带的配对 ΔADE p50 −48 m），L1 飞 30 s；读在锚点 60；hook 关。旁记 e_plan。单种子读数，不是预注册的两种子门。",
+    "L1b_pa_nodrop_lrflat@lockstep-e2e-B-no-plan": "同一次端到端 run 里 token 置为缺席（协议 B）：这个臂没有 L2 计划时值多少（遮蔽率 0 训练的臂从没见过缺席 token，读的是分布外）。",
+    "L1b_pa_nodrop_position@lockstep-e2e-B": "两层端到端（协议 A，S3；L1b 诊断臂，单种子 1337）：每 30 s 由 L2 段 token 计划头 B_s1337（segments 注意力）在滚动历史上画出下 2 个航路点交给这个用 token 的 L1b 臂（短时读数里带真值 token 比不带的配对 ΔADE p50 −258 m），L1 飞 30 s；读在锚点 60；hook 关。旁记 e_plan。单种子读数，不是预注册的两种子门。",
+    "L1b_pa_nodrop_position@lockstep-e2e-B-no-plan": "同一次端到端 run 里 token 置为缺席（协议 B）：这个臂没有 L2 计划时值多少（遮蔽率 0 训练的臂从没见过缺席 token，读的是分布外）。"
    }
   }
  }
