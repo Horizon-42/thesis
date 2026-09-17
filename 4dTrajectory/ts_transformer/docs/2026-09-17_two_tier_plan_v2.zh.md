@@ -34,6 +34,7 @@
 | **首批读数（2026-09-17 晚，2a）** | **L1 不用它的计划 token**：六个主臂带真值航路点与不带的 ADE[0,60] 只差 2–4 m（见 §10）；不带 token 时优于 native32 切到 60 s。诊断臂 `docs/experiments/two_tier_l1b_arms.json`（4 臂、单种子、pa 契约：遮蔽率 0 / 不减 lr / 两者 / 关平滑项）+ intents `two_tier_l1b_20260917`，排在 L2 之后、E2E 之前。**读数 §10.8**：token 遮蔽率 0 是杠杆（配对 Δ −32 / −48 / −258），lr 不是（−0）；关平滑项少 45 m（88 对 134）；带真值 token 的 ADE 本身几乎不变 |
 | S4 发布 | **L1 短时读数已发布**（2026-09-17 晚，opus agent，pub worktree @cbdf6ca）：6 个主臂 × {truth-plan, no-plan} × {fixed, 8km} = 24 个类目 `experiment_<arm>_<token>_short-<variant>-<set>_val`，intents 标题「L1 · 短时控制层…」与每 run/变体行已盖章；`npm run check-publication -- --airport KRDU --server http://localhost:5173` → 195 类目 0 错 0 警；前端重启后在 app 里打开确认渲染。发布命令形状（publisher 默认根指向 POOLED，需显式 `--experiment-index …/KRDU/experiments/index.json --output-root …/KRDU/experiment_predictions`；索引先用 `python -m ts_transformer.training.experiment_index --root outputs/KRDU/experiments` 重建）在 scratchpad `publish_brief_two_tier.md`。**L2 读数已发布**（2026-09-17 20:17 UTC，opus agent，pub worktree @02517d6）：4 臂 × {fixed, 8km} = 8 个类目 `experiment_<arm>_<hash>_readout-<set>_val`（`experiment.group = two_tier_l2_20260917`，`predictionOutput = segment-plan`），intents 标题「L2 · 段 token 计划层…」与每 run/变体行已盖章；validator 203 类目 0 错 0 警；前端重启（杀掉旧 vite node 子进程）后在 app 里打开 B_s1337/readout-fixed 确认渲染（评估卡 2100 条，ADE 均值 1783 m）。跳过：12km/6km 档；native32/state 参照的记录——publisher 的 `experiment_intent` 只在 checkpoint 自己训练 campaign 的 `variants` 里查变体 intent，不查 `--category-group` 的 campaign，所以要发布参照需在 `l1_lowdim_20260907` / `airport_frame_20260903` 登记 `@readout-fixed/-8km`（未做）。未发布：lockstep / E2E（无记录）。磁盘 9 GB |
 | S3 联合 lockstep + 门 E2E | **完成** a1e58aa（**L1c 正式配方 §12.1：门 L1 三契约 FAIL，门 E2E 三契约 FAIL；pa 两种子只差雷达 ADE 3044 / 3074 > 2745 与雷达建立 0.04，可飞 0.99；tf / sf 关平滑项后不可飞**）：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。**E2E 已跑**（§10.9，`e2e_pa_B_s{1337,2024}`，B 配 `L1_pa_s<seed>`，hook 关，无记录，每次 ~80 s）：**门 E2E 两种子 FAIL**（雷达 ADE 3755 / 3712 > 2745，建立 0.59 / 0.61 < 0.94；直线与可飞过）；receding − no-plan ΔADE p50 +1 / +25 — 计划进不了不看 token 的跟踪器。补充 §10.10（三个用 token 的 L1b 臂各一次 E2E，单种子读数）：`nodrop_position`（遮蔽率 0 + 关平滑项）ADE 1268 / 直线 263 / 雷达 3044、可飞 0.997、直线建立 0.970——目前最好的两层；带平滑项的两个 nodrop 臂吃进计划后雷达层可飞掉到 0.07–0.09。两个不过的判据都在雷达层，来自 L2 的远程雷达误差。**待用户定**：是否以该配方正式跑两种子；门线是否可达 |
+| **后续（09-17 22:10 决定 → 09-18 01:00 暂停）** | L1c 六臂（§12.1）：全部用 token，门 L1 / E2E 三契约 FAIL，pa 只差雷达层；L2c（seq_len 91）/ L2d（121）：门 L2 PASS，雷达 60–120 s 好三成、180 s 后不动（§12.2）；E2E 配 B91：pa 雷达没变好，闭环 e_plan 反而更快变差（§12.3）；配 B121 的 E2E 死于几何指标的 <2 点异常（§12.4，未修）。**交接 §13**：无进程、主树干净、runs worktree 待移到最新提交；待用户决定见 §13.4 |
 
 ## 2. 架构
 
@@ -499,3 +500,97 @@ L1c 6 臂 × ~17 min ≈ 1.7 h；短时读数 + lockstep + 门 ≈ 25 min；E2E 
 - 门 L1 的 pa 也只差雷达建立（0.62 / 0.68 对 0.774），且是在**真值**航路点下：跟踪器每 30 s 朝 30 / 60 s 后的真值点飞，在雷达引导段的转弯上仍建立不了——雷达层的建立不只是 L2 的问题，L1 的 60 s 时域在转弯段也不够（§10.2 的 L1 lockstep 雷达 0.000 是同一现象）。
 
 **结论（读数）**：pa 契约 + 遮蔽率 0 + 关平滑项是正式配方里可用的那一个（两种子一致）；两层的短板收敛到雷达引导层：L2 的 90–300 s 航路点误差与 L1 在转弯段的建立。§11.2 的更长回看（L2c / L2d）直接对着前者；后者需要下一轮决定（更长的 L1 时域 / 转弯段的 token 设计）。
+
+### 12.2 L2c / L2d —— B 轴更长回看（`two_tier_l2c_20260917` seq_len 91、`two_tier_l2d_20260917` seq_len 121，@40b19b9，各两种子 180 epoch）
+
+训练：B91 2.4 s/epoch（7 min/臂），val-macro 目标 0.261 / 0.261；B121 0.262 / 0.263（seq_len 61 的 B：0.306——不同锚点分布，不能直接比）。
+
+**共同锚点 90 的读数**（`two_tier_l2c_20260917/readout`，2062 架，雷达 790 / 直线 1268；seq_len 61 的 B 两臂作对照臂在同一锚点读；p50，m）：
+
+| 层 | 60 s | 120 s | 180 s | 300 s | 计划块 covered-ADE |
+|---|---|---|---|---|---|
+| 雷达 B61（s1337） | 853 | 1613 | 2703 | 3203 | 2315 |
+| **雷达 B91（s1337 / s2024）** | **489 / 461** | **1069 / 1114** | 2589 / 2605 | 3086 / — | **2127** |
+| 直线 B61 | 208 | 370 | 661 | 549（n13） | 221 |
+| 直线 B91 | 191 / — | 345 / 328 | 596 / 579 | 869（n13） | 214 |
+| 全体 B61 | 359 | 1050 | 2564 | 3120 | 1035 |
+| 全体 B91 | 282 / 283 | 732 / 752 | 2442 / 2496 | 3050 / 3002 | 959 |
+
+**门 L2（B91）：两种子 PASS**，8 条判据全过（对 native32 雷达 120 / 180 s −1875 / −534，直线 −412 / −1463（n18）；对 state 雷达 −2654 / −2055，直线 −317 / −382；s2024 同量级）。注意 native32 与 state 是固定锚点 59 训练的，读在锚点 90 时明显变差（state 雷达 120 s p50 3723 对锚点 60 时的 1071），门的余量因此偏大；**干净的比较是 B91 对 B61 在同一锚点**：雷达 60–120 s 好三成（−364 / −544），180 s 以后几乎不动（−114 / −117）。
+
+**共同锚点 120 的读数**（`two_tier_l2d_20260917/readout`，1159 架，雷达 754 / 直线 402——直线短航班一半已落地）：雷达 B61 → B121 p50 60 s 1217 → 909，120 s 2538 → 2327，180 s 3285 → 3021，300 s 2506 ↔ 2544；全体 750 → 545，2268 → 2118，3142 → 2826；covered-ADE 1810 → 1715。**门 L2（B121）：两种子 PASS**。收益比 91 小：历史再长收益递减，雷达 120–300 s 的 2.3–3 km 不是历史长度能补的。
+
+### 12.3 端到端配 B91（a0 = 90，`two_tier_l2c_20260917/e2e_<c>_B91_s<seed>` + `gates_e2e_<c>_B91`，@2cfdd7d）
+
+L1 val 1401 架里 10 架放不下锚点 90 + 60 s 时域：**明确排除并计数**（artifact 与门都写"1391 of 1401"，见 §13.2 的代码改动），读数在 1391 架上。
+
+| 契约 | ADE 全 / 直 / 雷 | 可飞 全 / 直 / 雷 | 建立 全 / 直 / 雷 | 门 E2E |
+|---|---|---|---|---|
+| tf s1337 / s2024 | 1146 / 187 / 2918 · 1136 / 175 / 2912 | 0.554 / 0.371 / 0.906 · 0.438 / 0.249 / 0.799 | 0.620 / 0.926 / 0.038 · 0.660 / 0.997 / 0.021 | FAIL |
+| sf | 1170 / 171 / 3020 · 1132 / 170 / 2912 | 0.370 / 0.086 / 0.914 · 0.257 / 0.000 / 0.749 | 0.618 / 0.926 / 0.029 · 0.659 / 0.993 / 0.023 | FAIL |
+| **pa** | **1189 / 143 / 3128 · 1177 / 137 / 3106** | **0.996 / 0.997 / 0.998 · 0.992 / 0.995 / 0.990** | 0.681 / **0.993** / 0.086 · 0.679 / **0.996** / 0.077 | FAIL（雷达 ADE > 2745、建立 < 0.94） |
+| pa 配 B61，a0 = 60（§12.1，对照） | 1268 / 263 / 3044 · 1275 / 259 / 3074 | 0.997 · 0.994 | 0.640 / 0.970 / 0.038 · 0.649 / 0.987 / 0.034 | FAIL |
+
+读法：
+- **雷达层没有变好**：pa 雷达 ADE 3128 / 3106 对 B61 时的 3044 / 3074（锚点晚 30 s、队列少 10 架，不严格同口径，但方向是没有改善）；雷达建立 0.08 对 0.04。直线 ADE 143 对 263 主要是锚点更晚、剩余直线段更短。
+- **e_plan 在闭环里比开环读数差得多**：pa s1337 雷达 e_plan 逐问 k0 372、k1 736、k2 1111、k3 1943、k4 3265、k5 4378；配 B61（a0 60）是 k0 284、k1 532、k2 626、k3 899、k4 1351、k5 1926。开环读数里 B91 在 60–120 s 比 B61 好三成，闭环里却更快变差。**假设**（未验证）：B91 的 182 s 窗口里 L1 飞出的行占比更大（k2 起窗口过半是自己飞的），L2 读到的是跟踪器自己的漂移，更长的回看放大了闭环耦合。验证办法：一次诊断性的 E2E，让 L2 读真值历史而不是飞出的历史（协议变体，代码里没有，需加），或按"距落地时间"配对比较 e_plan。
+- 漂移 RISING 比值 17–24（B61 时 7），同一现象。
+
+### 12.4 端到端配 B121（a0 = 120）——未完成
+
+第一次（tf s1337）先按预期排除 652 / 1401（剩 749 架，直线短航班基本都没了），随后死在
+`ValueError: arc-length curve must contain at least two points`（`tracker_lockstep.py:532 flight` → `support.py:57 forecast_geometry` → `geometric_metrics.py:179 path_metrics` → `:140 arc_aligned` → `arc_length_geometry.py:78 resample` / `:32`；完整回溯在 `two_tier_l1c_20260917/queue_l1c.log` 约 640–666 行，重试同样失败，链停在 00:56:42）。**假设**：某架航班在锚点 120 之后、按"在最后进近上的穿越"截断的真值段少于 2 个采样——下限只保证锚点后有 60 s 观测，几何指标要的是截断后的真值段。用户此时叫停，未修。给下一位的两个选项：(a) 几何指标遇到不足 2 点的真值段时跳过并计数（写进 artifact，不是静默）；(b) 放弃 B121 的 E2E（它本来是探针；readout 与门 L2 已经有了）。
+
+## 13. 交接（2026-09-18 01:00 暂停；用户："暂停，然后在设计文档里说明当前结果和进度，保证下一次其他 agent 也可以继续跑实验和开发"）
+
+### 13.1 现状一览
+
+| 项 | 状态 | 在哪 |
+|---|---|---|
+| 主树 | `dev-two-tier-feasibility`，干净；代码最后一个提交 13d5367（lockstep 下限排除 + review 修正），文档提交在其后 | `/home/supercomputing/studys/thesis` |
+| runs worktree | `.claude/worktrees/two-tier-runs`，detached，**要移到本节所在的提交**再启动任何 campaign（`git -C <runs> checkout --detach <sha>`；`status --porcelain` 必须为空） | 数据目录是到主树的 symlink |
+| pub worktree | `.claude/worktrees/two-tier-pub` @02517d6（发布用） | — |
+| 进程 | 无。链 `two_tier_l1c_20260917/queue_l1c.sh` 已退出（STOP 于 B121 E2E 第一步）；GPU 空闲；磁盘约 8 GB | — |
+| 已完成的 campaign | L1（8 臂）、L1b（4）、L2（4）、L1c（6）、L2c（2）、L2d（2）：训练、短时读数、lockstep、门 L1 / L2 / E2E 全部落盘 | `4dTrajectory/outputs/KRDU/experiments/two_tier_*` |
+| 未完成 | B121 的 E2E ×6 + 门 ×3（§12.4）；无其他 | `queue_l1c.sh` 第 7 段 |
+| 已发布 | L1 短时读数 24 类目、L2 读数 8 类目（validator 203 / 0 / 0） | 前端 Experiments picker |
+| 未发布 | L1b / L1c / L2c / L2d 的读数（**都没写记录**：短时读数、lockstep、E2E 均无 `--write-records`，发布需补跑；用户 2026-09-17 决定"先不补写"）；native32 / state 参照的读数记录需在各自训练 campaign 登记 `@readout-*` intent | — |
+| 测试 | 触及的 5 个套件 79 通过（13d5367 前）；**全套 `./run_all_tests.sh` 自 40b19b9 之后没跑**，下次正式 campaign 前先跑 | — |
+| review | 2cfdd7d 由 opus 审过（6 条），13d5367 全部处理，**13d5367 本身未再审** | — |
+
+### 13.2 本轮改的代码（都在主树、已提交）
+
+- `tracker_lockstep --anchor-floor-index N`：放不下 N + 时域的 val 航班**排除并计数**（每个 checkpoint 块 `anchor_floor_excluded = {count, flight_keys}`，旁边是既有的 `flights` / `split_flights`；文本头写"k of N split flights cannot host anchor N"；记录块 `RECORDS_BLOCK` 也带 count）。只有下限能排除：cohort 先按臂自己的锚点整体重建（`cohort_series`，数据面的丢失仍拒绝），再按 `window_anchors(item, 下限后的 config)` 过滤。不给下限时行为不变。
+- `two_tier_gates`：`ArmReading` 带 `flights / split_flights / floor_excluded`（从块里读，不再算）；每个 verdict 带 `cohort`；有排除时每条份额判据名末尾写 `(over k of N split flights)`；臂头写覆盖率。
+- 测试：`test_tracker_lockstep.py::test_a_floor_some_flights_cannot_host_excludes_and_counts_them`、`test_two_tier_gates.py` E2E 测试扩展（fixture 块现在带 `flights` / `split_flights`）。
+
+### 13.3 怎么继续跑
+
+1. 环境 `conda activate aeroviz`（或 `conda run -n aeroviz --no-capture-output python …`），绝对路径。
+2. 把 runs worktree 移到最新提交；`git status --porcelain` 为空。
+3. 队列用 **detached 链**，不用会睡着的 agent（§10.7）：`nohup setsid bash <campaign>/queue_*.sh > <campaign>/queue_*.log 2>&1 &`，PID 在 `queue_*.pid`，每步产物存在即跳过、失败重试一次、磁盘 < 3 GB 停；用 Monitor 看日志（30 min 一期，到期重挂）。现成脚本：`two_tier_l2_20260917/queue_rest.sh`、`queue_e2e_l1b.sh`，`two_tier_l1c_20260917/queue_l1c.sh`（重启它会直接从 B121 的 E2E 开始并再次失败，除非先修 §12.4 或删掉第 7 段的 B121 分支）。
+4. 新 campaign 的规矩：臂声明 `docs/experiments/two_tier_*_arms.json` + intents 条目（run 与变体）**先提交再 launch**（正式 run 拒绝脏树）；cohort 用 `run_ts.py plan_cohort`（§11.2 的调用形状：`--data <harvest>/KRDU/arrivals/manifest.json --eligibility-roster …/lateral_pass_eligibility.json --airport KRDU --aircraft-filter all --prediction-output … --seq-len … --random-train-anchor --random-train-anchor-min-future-s 30 --random-train-anchor-sampling remaining-path-uniform --random-train-anchor-l1-share 0.5 --checkpoint-selection-metric … --epochs 180 --split-seed 1337 --output-dir <campaign> --name <campaign>`）；`frame_ablation --dry-run` 先过。
+5. 读数命令形状都在链脚本里；门工具按设计**拒绝单种子**（"a gate is judged over at least 2 seeds"）。
+6. 不删、不覆盖任何产物；readout / gate 的输出目录是不可变的（存在即拒绝），要重生成先问用户。
+7. 发布：`publish_ts_experiment_trajectories.py`（形状在 scratchpad `publish_brief_two_tier.md`，已复制进 §13.5），只能发布带记录的目录。
+
+### 13.4 待用户决定 / 下一步候选（按我的优先级）
+
+1. **雷达引导层是两层的短板，两端都在**：L2 的 90–300 s 航路点（更长回看只改善 60–120 s；闭环里 B91 反而更快变差，§12.3 假设待验证）和 L1 在转弯段的建立（真值航路点下 pa 也只有 0.62–0.68，门线 0.774）。候选：(a) 诊断 E2E——L2 读真值历史（隔离闭环耦合）；(b) L1 更长时域（90 / 120 s，token 3–4 个点）；(c) L2 的雷达层加权或按剩余路程分层训练；(d) 转弯段的 token 设计（航向变化 / 转弯方向）。
+2. tf / sf 契约关平滑项后不可飞（§12.1）：要用它们得保留平滑项——是否值得再跑（pa 已是可用的那个）。
+3. §12.4 的 B121 E2E：修几何指标（计数跳过）还是放弃。
+4. 发布：L1c / L2c / L2d 的读数要进前端需补记录（各几 GB；磁盘 8 GB）。
+5. 全套测试 + 对 13d5367 的 review（若继续改 lockstep）。
+
+### 13.5 发布命令形状（从 scratchpad 抄来，scratchpad 不保证存在）
+
+```
+cd <pub>/4dTrajectory && conda run -n aeroviz --no-capture-output python -m ts_transformer.training.experiment_index --root outputs/KRDU/experiments
+python <pub>/publish_ts_experiment_trajectories.py --airport KRDU --split val --device cpu \
+    --experiment-index <thesis>/4dTrajectory/outputs/KRDU/experiments/index.json \
+    --output-root <thesis>/4dTrajectory/outputs/KRDU/experiment_predictions \
+    --checkpoint <campaign>/<arm> --reuse-prediction-dir "<campaign>/<arm>=<absolute records dir>" \
+    --category-variant <variant id after '@'> [--dry-run]
+npm run check-publication -- --airport KRDU --server http://localhost:5173     # in aeroviz-4d; restart the supervisor first (kill the stale vite node child on 5173)
+```
+publisher 只在 checkpoint 自己训练 campaign 的 `variants` 里查变体 intent（不查 `--category-group`）；缺 intent 就拒绝——那是信号，不要绕。

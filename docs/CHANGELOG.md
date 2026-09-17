@@ -4,6 +4,40 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-18 — two-tier follow-up: the token-using recipe as a formal L1, longer L2 lookbacks, the anchor-floor exclusion; paused
+
+**Ask.** The user's three decisions of 22:10 on 09-17: promote the `L1b_pa_nodrop_position` recipe
+(plan-token masking 0, control-smoothness terms off) to a formal two-seed L1 over the three contracts; give
+L2 a longer lookback; write no records. Then at 01:00: pause and hand over in the design doc
+(`4dTrajectory/ts_transformer/docs/2026-09-17_two_tier_plan_v2.zh.md` §11–§13).
+
+**L1c (`two_tier_l1c_20260917`, 6 arms, 77 min).** Every arm uses its token (paired truth-plan − no-plan
+ΔADE p50 −236 … −407 m), truth-token ADE[0,60] 81–90 m (L1 main arms 134–136). Gate L1 (truth waypoints,
+rule-guidance baseline) FAIL on all three contracts, on different lines than before: tf/sf go unflyable
+without the smoothness terms (0.03–0.56), pa stays flyable (0.99) and misses only the vectored established
+share (0.62/0.68 < 0.774). Gate E2E with the seq_len-61 B heads: FAIL everywhere; pa's two misses are the
+vectored ADE (3044/3074 > 2745) and the established share (0.64/0.65 < 0.94; straight-in 0.97/0.99,
+vectored 0.04). The plan now enters every tracker (receding − no-plan −1.2 … −2.0 km).
+
+**L2c / L2d (`two_tier_l2c_20260917` seq_len 91 = 182 s, `two_tier_l2d_20260917` seq_len 121 = 242 s;
+B axis, two seeds each).** Both pass gate L2. At the common anchor the longer lookback cuts the open-loop
+vectored p50 by a third at 60–120 s (B61 → B91: 853 → 489, 1613 → 1069 m) and by ~4 % at 180–300 s; 121
+adds less than 91 did. Closed loop (E2E with B91 at a0 = 90, 1391 of 1401 flights): pa ADE 1189/1177,
+vectored 3128/3106 — no better than with B61 — and e_plan grows FASTER with the ask (vectored k3 1943 vs
+899). Hypothesis recorded, not tested: the longer window holds more of the tracker's own flown rows.
+
+**Tooling.** `tracker_lockstep --anchor-floor-index N` now EXCLUDES and counts the split flights that
+cannot host the floor with the horizon after it (`anchor_floor_excluded` in the block, the text, the
+records block; the gate's verdict carries the cohort and every share criterion names the reduced
+denominator); only the floor excludes — the cohort is rebuilt at the arm's own anchor first and any
+data-plane drop still refuses. Reviewed (opus, six findings, all applied in 13d5367). The B121 E2E then
+died in the arc-length geometry (`arc_length_geometry.py:32`, a truth segment after a0 = 120 shorter than
+two points) — unfixed, options in §12.4.
+
+**Process.** The whole evening ran as detached shell chains (`queue_l1c.sh`), no idle gaps; the three
+chains' logs stay in their campaign directories. Publications: L2 readout (8 categories) went to the
+picker at 20:17; nothing else has records to publish.
+
 ### 2026-09-17 — two-tier results: gate L2 passes on the segments axis, E2E fails through L1, the token-masking diagnosis
 
 **Where the numbers live.** `4dTrajectory/ts_transformer/docs/2026-09-17_two_tier_plan_v2.zh.md` §10.5–10.10
