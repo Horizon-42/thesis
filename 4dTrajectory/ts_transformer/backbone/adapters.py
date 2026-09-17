@@ -17,6 +17,7 @@ non-uniform time partition.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import torch
@@ -78,6 +79,29 @@ class ITransformerAdapter(nn.Module):
     def discard_state_head(self) -> None:
         """Remove the unused state projector when this adapter feeds a control head."""
         self.inner.projector = nn.Identity()
+
+
+class ITransformerEncoderStack(nn.Module):
+    """The vendored iTransformer's inverted embedding and encoder over tokens that are
+    ``token_length``-long series, its state projector discarded — what a head that reads
+    the encoder's tokens directly (the segment-plan path) is built on, so the stack is
+    constructed in ONE place. ``forward`` takes ``[B, token_length, tokens]`` and returns
+    ``[B, tokens, d_model]``. No instance normalisation: such a head's tokens are relative
+    quantities already, and `TSConfig` refuses ``use_norm`` on that path."""
+
+    def __init__(self, config: TSConfig, token_length: int):
+        super().__init__()
+        # The vendored constructor reads `seq_len` as the token length; a TSConfig cannot be
+        # rebuilt with another one (its rules read seq_len), so the knobs go as a namespace.
+        knobs = SimpleNamespace(**{**config.to_dict(), "seq_len": int(token_length), "pred_len": 1})
+        self.inner = VendoredITransformer(knobs)
+        self.inner.projector = nn.Identity()
+        self.d_model = int(config.d_model)
+
+    def forward(self, series: torch.Tensor) -> torch.Tensor:
+        encoded = self.inner.enc_embedding(series, None)
+        encoded, _attentions = self.inner.encoder(encoded, attn_mask=None)
+        return encoded
 
 
 class PatchTSTAdapter(nn.Module):

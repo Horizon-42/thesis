@@ -27,8 +27,10 @@
 | S1.1 `control_horizon_s` | **完成** 29646ab + review 修正 1604b65（opus 6 项确认：anchor-grid 与 anytime 的未来下限跟 Δ、每 epoch 报告的终端速度/弧长几何读 Δ 内的真值、排除原因写明 Δ、审计里的下限是生效值、`intent=truth-join-duration` 拒绝、命名改 `ctrl-horizon=`、时长项为零写明） |
 | S1.2 `plan_conditioning=waypoints` | **完成** ddfbf82（token 11 维、训练行/forecast 行/probe 一处分派、`PLAN_WAYPOINT_SEGMENT_S=30`） |
 | S1.3 读数工具 | **完成** bea33af：`tracker_lockstep` 航路点来源 + 逐次 e + `--command-hook`（schema v3）；`two_tier_gates` 门 L1 + 漂移读数（schema v2，cohort 可为基线子集并计数）；`short_horizon_readout` 新 runner；`frame_ablation` `"predict": false`。全套 1318 测试通过 |
-| S1.4 臂 + intents | **已写**：`docs/experiments/two_tier_l1_arms.json`（8 臂，dry run 通过）、intents `two_tier_l1_20260917`；campaign 待队列 agent 启动（runs worktree 先移到已提交的 commit） |
-| S2 L2 段 token 计划头 | 未开建 |
+| S1.4 臂 + intents | **campaign 运行中**：`docs/experiments/two_tier_l1_arms.json`（8 臂）、intents `two_tier_l1_20260917`；首次 launch 死在 `prepare_session`（60 s 未来契约覆盖 6848/6849 训练航班，`KRDU:FFT1168_05L_a8d27e_20260501T121308Z` 无可用锚点）→ 82294f3：`frame_ablation` 把声明里的 `"development_cohort"` 传给每个 train 步，臂文件声明 `<campaign>/development_cohort.json`（队列 agent 用 `run_ts.py plan_cohort` 写出：6848 / 1401，h30 臂交叉核对相同）；队列 agent 于 03:47 UTC 重启（PID 1967516），~5.6 s/epoch，臂 1 `L1_tf_s1337` 完成（选择 ADE 168.2 m），全部 8 臂约 2.5–3 h，之后自动跑 2a–2d（`short_horizon_readout` → lockstep hook 关 / 开 → `two_tier_gates` ×3 契约）并汇报 |
+| S2.1 `segment-plan` 输出 | **代码完成、opus review 12 项已处理、全套测试通过（1331）**，提交见 git log（`feat: segment-plan output`）；本文件 §4 已按实现改：输出在**跑道系**而非 chart；到达 = 真值终点 `truth_duration_s`；每 epoch 的 `segment_plan_validation` 读数块 |
+| S2.2 L2 读数 runner | 未开建（对照 native32 与 state 臂 `airport_frame_20260903/A_threshold_enu`，按共同航班配对） |
+| S2.3 L2 臂 + intents | 未写（A / B × 2 种子，seq_len 61，M = 10，随机锚点；`checkpoint_selection_metric=fixed-anchor-objective`） |
 | S3 联合 lockstep + 门 | 未开建 |
 
 ## 2. 架构
@@ -111,11 +113,13 @@ L2 的段特征按跑道航向旋转是特征工程，它的输出在接口处�
 - **A（主）**：iTransformer 反转——每个 channel 在 K_in 段上的序列是一个 token，注意力在 channel 之间（用户的"作为 channel 计算注意力"）。复用现有骨干，只换 `channels` 与 `seq_len`。
 - **B**：PatchTST 式——每段一个 token，由该段的 channel 嵌入，注意力在段之间。
 
-**输出**：未来 M = 10 段（300 s）的终点 (Δe, Δn, Δu) 相对锚点、在 chart 里，每段一个"已到达"位（到达段内的分数给到达时间）。一次直接输出 M 段（非自回归）。单模态先做；K 混合（多模态）为 S5。
+**输出**（按实现，2026-09-17 S2.1）：未来 M = 10 段（300 s）的终点 (along, across, up) 相对锚点、**在跑道系里**（`labels.runway_deltas`；接 L1 的 token 时用 `chart_deltas` 转回 chart），每段一个"已到达"位（到达段内的分数给到达时间）。一次直接输出 M 段（非自回归）。单模态先做；K 混合（多模态）为 S5。两臂的 token 经**同一个学习查询**（`TokenPool`）读出为 d_model 再进同一个头——review 指出展平读出让 A 臂的头是 27·d_model、B 臂 K·d_model，门 L2 的 A/B 比较会变成容量比较。
 
-**标签**：真值轨迹在锚点后 t = 30k s 的位置；到达 = 在五边上过阈值（`threshold_crossing_index`，包内唯一规则）所在段及其分数；到达之后的段无效（掩码）。300 s 处只有长雷达引导航班还在，读数带 n。
+**标签**：真值轨迹（监督行：观测轨迹按过阈值点——观测到的或拟合的——闭合到入口）在锚点后 t = 30k s 的位置；**到达 = 真值终点 `truth_duration_s`**（包内每条路径的时长头都训练的那一个定义；未拟合到五边的航班在轨迹末尾结束，与其它路径一致）所在段及其分数；真值没到的段无位置目标（掩码），到达位每段都监督。300 s 处只有长雷达引导航班还在，读数带 n。
 
 **损失**：终点的掩码 L1（按尺度归一）+ 到达位的 BCE + 到达分数的 L1。
+
+**解码与记录**：第一个到达概率 ≥ 0.5 的段为到达段；forecast 行 = 之前各段的航路点 + 到达时刻的入口（`truncatedAtThreshold`），没到达则 M 个航路点（`horizonCapped`）；记录写 `segmentPlanArrivalSegment` / `segmentPlanArrivalProbability`。验证回放把计划补到 M 行（入口按 30 s 保持、零速度）并用 `Replay.row_valid` 告诉运动学读数哪些行是补的。**每 epoch 读数块 `segment_plan_validation`**（`readout.py`）：[0, min(T_真值, M·30)] 上的 ADE、各段末的 e(30k) 及 n、到达混淆（计划/真值在 300 s 内到达）、带号到达时间误差——common-grid 报告块把最后一个航路点平推到落地、cap rate 结构性为 0，不能引用。
 
 **评估**：航路点误差 p50 在 60 / 120 / 180 / 300 s，分层。对照：(i) 匀速直线外推；(ii) native32 自身 rollout 在同一提前量的位移（`lead_time_error` 已有：雷达引导 632 / 1884 / 3659 m at 60 / 120 / 300 s）；
 (iii) **state 路径**（现有 `airport_frame_20260903/A_threshold_enu` checkpoint，与 L2 按共同航班配对；旧文档 §3 表里它在 120 / 180 s 是 1109 / 1673 m，已经好于 native32）。
@@ -154,7 +158,9 @@ L2 − 真值粗计划的差就是 e_plan，L1 在真值计划下的误差就是
 | S1.2 | `plan_conditioning=waypoints`：token、训练行、forecast 行、probe、测试 | **完成** |
 | S1.3 | `tracker_lockstep` 航路点来源 + 逐次 e(30) + hook 旁读；`two_tier_gates` 门 L1；`short_horizon_readout`；`frame_ablation` 只训练；测试 | **完成** |
 | S1.4 | 臂文件 `docs/experiments/two_tier_l1_arms.json` + intents `two_tier_l1_20260917`（**launch 前提交**）→ 队列 agent：6 + 2 臂训练 → `short_horizon_readout`（8 臂 + native32 参照）→ `tracker_lockstep`（hook 关；另一次 `--command-hook barrier+speed-floor`）→ `two_tier_gates --baseline plan_guidance_20260910/step3d_lockstep_l1` | 门 L1 |
-| S2 | L2：段特征 + 标签 + 新输出 `segment-plan`（A、B 两臂）+ 读数 runner（含 state 对照）；2 臂 × 2 种子 | 门 L2 |
+| S2.1 | L2：段特征 + 标签 + 新输出 `segment-plan`（A、B 两臂，共用读出头）+ 每 epoch 读数块 | **完成**（review 12 项：到达定义写明、回放行掩码回到 `raw_kinematic_metrics`、cap 读数块、容量配平、`use_norm` 拒绝、编码栈一处构造、记录字段独立、特征从 `target_chart` 量、子采样退化拒绝；测试 15） |
+| S2.2 | L2 读数 runner（航路点 p50 at 60/120/180/300 s 分层；对照匀速外推、native32、state 臂，共同航班配对）+ 门 L2 判定 | 门 L2 |
+| S2.3 | 臂文件 + intents（A / B × 2 种子）→ 队列 agent | 门 L2 的数 |
 | S3 | lockstep 接 L2；联合读数 | 门 E2E |
 | S4 | 发布 S1–S3 结果 | — |
 | S5（条件性） | 横向闭环定律；L2 的 K 混合；L1 在自身状态上训练（若 e(30 s) 沿航班上升） | 各自的门 |

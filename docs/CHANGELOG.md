@@ -45,6 +45,37 @@ arm shares native32's and the guidance baseline's anchor; dry run passes) and th
 `two_tier_l1_20260917`. Full ts suite green at every step (1299 → 1318 tests). Commits on
 `dev-two-tier`: 1625dc3 (S0 doc), 29646ab (S1.1), 1604b65 (its review fixes), ddfbf82 (S1.2), bea33af (S1.3).
 
+**S2.1 the `segment-plan` output** (two-tier v2 §4, the L2 plan layer; `outputs/segment_plan/`): the
+observed window as coarse segment tokens — 27 runway-axis features per 30 s segment
+(`features.segment_features`, measured about the anchor and from `target_chart`), the vendored iTransformer
+encoder under `segment_plan_attention` ∈ {`channels`: one token per feature's K-series (the inversion the
+requirement names), `segments`: one token per segment + a learned position}, ONE learned-query read-out
+(`TokenPool`) so both arms feed the same head (the first draft flattened the tokens: 27·d_model against
+K·d_model — the opus review's capacity confound, fixed), an MLP decoding M = `segment_plan_segments` (10)
+segments in one shot: the position at each segment's end in runway axes, the arrival bit, the arrival
+fraction. Labels (`labels.segment_labels`) are the truth's supervision rows at 30k s; the arrival is
+`truth_duration_s` (the one duration every path trains on); unreached segments are masked. The decode
+(`decode.py`) makes the first segment whose arrival probability clears 0.5 the arrival and lays the
+forecast as the waypoints before it plus the threshold at the arrival time. Config: `SegmentPlanOutput`
+(4 owned fields), the cross rules (enu, itransformer, `dt_s | 30`, `(seq_len − 1) % 15 == 0`,
+objective selection, `use_norm` refused — it was recorded and never applied, measured), the encoder stack
+built in one place (`backbone.adapters.ITransformerEncoderStack`). Spine changes the review asked for:
+`Forecast.segment_plan_arrival_{segment,probability}` (the first draft rode on `command_hook_diagnostics`,
+whose contract says "absent when no hook ran"); `Replay.row_valid` → `SplitPredictionReplay.row_valid`
+→ `raw_kinematic_metrics(row_valid=)` (the padded-suffix mask review C-10 deleted is back, because the
+segment-plan replay is the first live path that pads — the threshold held at zero velocity after an early
+arrival read as a stop the model drew, `turn_rate_p95` NaN on a batch that all arrived in segment 0);
+`EpochResult.segment_plan_validation` (`readout.py`: the plan judged inside its span — covered ADE, e(30k)
+per segment with n, the arrival confusion, the signed arrival-time error — because the common-grid block
+holds the last waypoint flat past M × 30 s and its `prediction_horizon_cap_rate` is structurally 0 under
+the normalized horizon). The frontend mirror `EXPERIMENT_PREDICTION_OUTPUTS` gained the value (the
+pinned test caught it, as designed). Tests: `tests/test_segment_plan.py` (15: the contract, the labels
+against the truth, the features' runway-axis invariance AND the sign of `across` on a window flying the
+course, the two arms' shared head, the model blind to the truth in its context, the loss zero on the
+labels and blind to unreached segments, the decode, the readout on the truth's own plan, the whole chain
+with the one-row forecast of a plan arriving in segment 0). Full suite 1331 (686 + 645 in two passes).
+Not done: the L2 readout runner against native32 / the state arm (S2.2), the arms + intents (S2.3).
+
 ### 2026-09-16 — the control contracts merged into dev-two-tier and refactored into one row each; T0(c) measured
 
 **Ask.** The user, on merging the path-angle contract (branch `sf-n7`) for the two-tier T1a experiment: "不要直接合，

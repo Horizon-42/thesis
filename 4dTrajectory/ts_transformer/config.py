@@ -210,12 +210,18 @@ PREDICTION_CLOSURE = "closure"
 # The plan-and-guidance path (design v5, 2026-09-11): the network predicts the operating
 # parameters and the NEXT instruction, a deterministic guidance layer flies them.
 PREDICTION_PLAN = "plan"
-PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_CLOSURE, PREDICTION_PLAN)
+# The two-tier plan layer (design v2 §4, 2026-09-17): the observed window cut into coarse
+# segments whose features are the attention tokens; the head decodes the next M segments'
+# waypoints in runway axes and whether the flight has arrived by each (`outputs/segment_plan`).
+PREDICTION_SEGMENT_PLAN = "segment-plan"
+PREDICTION_OUTPUTS = (
+    PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_CLOSURE, PREDICTION_PLAN, PREDICTION_SEGMENT_PLAN,
+)
 # What a NEW run may select (review §5, 2026-09-09). A value in the stored vocabulary above
 # but not here is FROZEN: its checkpoints load, predict and publish exactly as before, and
 # `cli.common._refuse_unavailable_selection` refuses it for training. Closure is a comparison
 # arm with published numbers and a DELETED tracker (2026-09-07); it is not trained anew.
-PREDICTION_OUTPUTS_AVAILABLE = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_PLAN)
+PREDICTION_OUTPUTS_AVAILABLE = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_PLAN, PREDICTION_SEGMENT_PLAN)
 # The truth-join oracles were the scene design's Phase 0 instrument; the L4 gate failed and
 # the scene encoder is archived (archive/scene_encoder_2026_09/), so no new oracle arm.
 INTENT_CONDITIONINGS_AVAILABLE = (INTENT_CONDITIONING_NONE,)
@@ -236,6 +242,19 @@ REQUIRED_SERIALIZED_CLOSURE_FIELDS = CLOSURE_FIELDS
 # The plan output's own fields (design v5 §6): the two loss weights. Required the same way.
 PLAN_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight")
 REQUIRED_SERIALIZED_PLAN_FIELDS = PLAN_FIELDS
+# The segment-plan output's own fields (two-tier v2 §4): how many coarse segments the head
+# decodes, which axis the encoder attends over, the two loss weights. No earlier behaviour
+# to reproduce, so every one is required of a stored config.
+SEGMENT_PLAN_ATTENTION_CHANNELS = "channels"   # one token per FEATURE (its K-long series) — iTransformer's inversion
+SEGMENT_PLAN_ATTENTION_SEGMENTS = "segments"   # one token per SEGMENT (its feature vector) — the patch form
+SEGMENT_PLAN_ATTENTIONS = (SEGMENT_PLAN_ATTENTION_CHANNELS, SEGMENT_PLAN_ATTENTION_SEGMENTS)
+SEGMENT_PLAN_FIELDS = (
+    "segment_plan_segments",
+    "segment_plan_attention",
+    "segment_plan_position_loss_weight",
+    "segment_plan_arrival_loss_weight",
+)
+REQUIRED_SERIALIZED_SEGMENT_PLAN_FIELDS = SEGMENT_PLAN_FIELDS
 # The profile knot widths a closure labels file carries (outputs.closure.model.fit_labels writes
 # both); a config may only ask for one of them.
 CLOSURE_LABEL_KNOTS = (4, 8)
@@ -497,6 +516,11 @@ def uses_closure_labels(prediction_output: str) -> bool:
 def uses_plan_labels(prediction_output: str) -> bool:
     """Whether an output strategy reads the plan labels per drawn anchor as its context."""
     return prediction_output == PREDICTION_PLAN
+
+
+def uses_segment_plan_labels(prediction_output: str) -> bool:
+    """Whether an output strategy reads the truth's coarse segment plan as its context."""
+    return prediction_output == PREDICTION_SEGMENT_PLAN
 
 
 HORIZON_NORMALIZED = "normalized"
@@ -1477,6 +1501,35 @@ class PlanOutput(OutputSpec):
 
 
 @dataclass(frozen=True)
+class SegmentPlanOutput(OutputSpec):
+    """The two-tier plan layer (design v2 §4): the observed window's coarse segments as
+    attention tokens, the next M segments' waypoints in runway axes and the arrival bit per
+    segment decoded in one shot. ``segment_plan_attention`` names the token axis —
+    ``channels`` (one token per feature, attention between the features the requirement
+    names) or ``segments`` (one token per segment). Two loss weights: the positions and
+    the arrival group (the arrival bits and the arrival segment's fraction)."""
+
+    segment_plan_segments: int
+    segment_plan_attention: str
+    segment_plan_position_loss_weight: float
+    segment_plan_arrival_loss_weight: float
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.horizon_mode != HORIZON_NORMALIZED:
+            raise ValueError(
+                "the segment-plan output draws its own clock (one row per coarse segment); only "
+                "the normalized horizon contract fits it"
+            )
+        _require_member("segment_plan_attention", self.segment_plan_attention, SEGMENT_PLAN_ATTENTIONS)
+        if self.segment_plan_segments < 1:
+            raise ValueError(f"segment_plan_segments must be >= 1, got {self.segment_plan_segments!r}")
+        for name in ("segment_plan_position_loss_weight", "segment_plan_arrival_loss_weight"):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
+
+
+@dataclass(frozen=True)
 class DurationSpec:
     """How the rollout's total duration is predicted and partitioned into segments."""
 
@@ -2027,6 +2080,7 @@ _OUTPUT_VIEWS: dict[str, type[OutputSpec]] = {
     PREDICTION_CLOSURE: ClosureOutput,
     PREDICTION_CONTROL: ControlOutput,
     PREDICTION_PLAN: PlanOutput,
+    PREDICTION_SEGMENT_PLAN: SegmentPlanOutput,
 }
 if set(_OUTPUT_VIEWS) != set(PREDICTION_OUTPUTS):
     raise RuntimeError("every prediction_output needs an OutputSpec view")
@@ -2146,6 +2200,12 @@ class TSConfig:
     # of the instruction group's L1; the point prediction is the top-weight component, the
     # fan every component flown as its own lockstep member).
     plan_fan_components: int = 0
+    # ── the segment-plan output (two-tier v2 §4): M coarse segments decoded, the token
+    # axis the encoder attends over, the two loss weights ─────────────────────────────
+    segment_plan_segments: int = 10
+    segment_plan_attention: str = SEGMENT_PLAN_ATTENTION_CHANNELS
+    segment_plan_position_loss_weight: float = 1.0
+    segment_plan_arrival_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
     # bounded to the final-approach corridor (see the constants). ``anchor-relative`` is
@@ -2657,6 +2717,44 @@ class TSConfig:
                 "the plan path's skeleton and guidance are written in the threshold-anchored ENU "
                 f"chart (the course applied to chart deltas); coordinate_frame={self.coordinate_frame!r}"
             )
+        # cohort × backbone × output — the segment-plan path (two-tier v2 §4) cuts the
+        # observed window into whole coarse segments of PLAN_WAYPOINT_SEGMENT_S, so the
+        # window length and the sample step must divide into them; its features are runway
+        # axes about the threshold (the ENU chart's origin); its encoder is the vendored
+        # iTransformer stack; and it is selected on the objective — no drawn path is the
+        # thing it predicts.
+        if self.prediction_output == PREDICTION_SEGMENT_PLAN:
+            if self.coordinate_frame != COORDINATE_FRAME_ENU:
+                raise ValueError(
+                    "the segment-plan path reads runway axes about the threshold-anchored ENU chart; "
+                    f"coordinate_frame={self.coordinate_frame!r}"
+                )
+            if self.model != "itransformer":
+                raise ValueError(
+                    f"the segment-plan encoder is the vendored iTransformer stack; model={self.model!r}"
+                )
+            samples = PLAN_WAYPOINT_SEGMENT_S / self.dt_s
+            if abs(samples - round(samples)) > 1e-9 or round(samples) < 1:
+                raise ValueError(
+                    f"a coarse segment of {PLAN_WAYPOINT_SEGMENT_S:g} s must be a whole number of "
+                    f"dt_s={self.dt_s:g} s samples"
+                )
+            if (self.seq_len - 1) % int(round(samples)) or self.seq_len - 1 < int(round(samples)):
+                raise ValueError(
+                    f"the segment-plan window (seq_len - 1 = {self.seq_len - 1} intervals) must be a "
+                    f"whole number of {int(round(samples))}-sample coarse segments, at least one"
+                )
+            if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
+                raise ValueError(
+                    "the segment-plan path is selected on its objective (the waypoints ARE the "
+                    f"prediction); checkpoint_selection_metric={self.checkpoint_selection_metric!r}"
+                )
+            if self.use_norm:
+                raise ValueError(
+                    "the segment-plan encoder reads the vendored stack below its instance "
+                    "normalisation (its tokens are already relative to the anchor); use_norm "
+                    "would be recorded and never applied"
+                )
         if self.uses_fitted_teacher and self.random_train_anchor:
             raise ValueError(
                 "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
@@ -2892,6 +2990,7 @@ def _required_serialized_fields(data: Mapping[str, Any]) -> tuple[str, ...]:
         *(REQUIRED_SERIALIZED_CONTROL_FIELDS if uses_control_dynamics(output) else ()),
         *(REQUIRED_SERIALIZED_CLOSURE_FIELDS if uses_closure_labels(output) else ()),
         *(REQUIRED_SERIALIZED_PLAN_FIELDS if uses_plan_labels(output) else ()),
+        *(REQUIRED_SERIALIZED_SEGMENT_PLAN_FIELDS if uses_segment_plan_labels(output) else ()),
     )
 
 
@@ -2938,6 +3037,18 @@ def plan_waypoint_count(config: TSConfig) -> int:
     horizon in coarse segments (`ControlOutput` refuses a horizon that is not a whole number
     of them)."""
     return int(round(config.control_horizon_s / PLAN_WAYPOINT_SEGMENT_S))
+
+
+def segment_plan_segment_samples(config: TSConfig) -> int:
+    """How many sample intervals one coarse segment spans (15 at ``dt_s`` 2; the config
+    refuses a step that does not divide `PLAN_WAYPOINT_SEGMENT_S`)."""
+    return int(round(PLAN_WAYPOINT_SEGMENT_S / config.dt_s))
+
+
+def segment_plan_input_segments(config: TSConfig) -> int:
+    """How many coarse segments the segment-plan window holds, K = (L − 1) / 15 (the config
+    refuses a window that is not a whole number of them)."""
+    return (config.seq_len - 1) // segment_plan_segment_samples(config)
 
 
 def default_anchor(config: TSConfig) -> int:

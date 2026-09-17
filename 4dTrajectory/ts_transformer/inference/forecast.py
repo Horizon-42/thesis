@@ -78,6 +78,11 @@ class Forecast:
     # and whether it was drawn from the flight's LABEL rather than a model output.
     closure_construction: str | None = None
     closure_from_labels: bool = False
+    # Segment-plan output only: the coarse segment (0-based) the decoded plan arrives in —
+    # None when no segment's arrival probability clears the decode threshold, and the rows
+    # then run to the last waypoint — and that segment's arrival probability.
+    segment_plan_arrival_segment: int | None = None
+    segment_plan_arrival_probability: float | None = None
     # Latent control output only: which prior SAMPLE this forecast decodes (None = the
     # deterministic top-1 the record contract carries) and its probability — the mixture
     # weight of the component it was drawn from, or 1/samples under a single Gaussian.

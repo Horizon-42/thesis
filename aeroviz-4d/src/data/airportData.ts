@@ -148,6 +148,7 @@ export const EXPERIMENT_PREDICTION_OUTPUTS = [
   "control",
   "closure",
   "plan",
+  "segment-plan",
 ] as const;
 export type ExperimentPredictionOutput = typeof EXPERIMENT_PREDICTION_OUTPUTS[number];
 

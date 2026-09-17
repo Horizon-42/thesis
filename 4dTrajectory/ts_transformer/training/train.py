@@ -138,6 +138,11 @@ class EpochResult:
     # the selection value. Empty for every other run.
     plan_rolled_training: dict[str, Any] = field(default_factory=dict)
     plan_rolled_validation: dict[str, Any] = field(default_factory=dict)
+    # The segment-plan head (two-tier v2 §4): its own reading of the val split at the fixed
+    # anchor — the plan's covered ADE, the per-segment errors, the arrival confusion — a
+    # readout beside the selection value (the common-grid block above holds the last
+    # waypoint flat past the plan's span and cannot say so). Empty for every other run.
+    segment_plan_validation: dict[str, Any] = field(default_factory=dict)
     validation_profile_by_airport: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -954,6 +959,16 @@ def describe_epoch(session: TrainingSession, result: EpochResult, marker: str) -
             f"{name}={val_components[name]:.4f}" for name in component_names
         )
     )
+    if result.segment_plan_validation:
+        block = result.segment_plan_validation
+        confusion = block["arrival_confusion"]
+        print(
+            f"             segment-plan  covered-ADE={block['covered_ade_m']:.1f}m over {block['covered_s_mean']:.0f}s  "
+            f"e(30)={block['segment_error_m'][0]['mean']:.1f}m  "
+            f"arrival plan/truth within {block['span_s']:.0f}s: {block['plan_arrives_share']:.2f}/{block['truth_arrives_share']:.2f} "
+            f"(both {confusion['both']}, plan-only {confusion['plan_only']}, truth-only {confusion['truth_only']})  "
+            f"|dT|={block['arrival_time_error_s']['mean_abs']:.1f}s n={block['arrival_time_error_s']['n']}"
+        )
     if result.plan_rolled_validation:
         rolled = result.plan_rolled_validation
         share = result.plan_rolled_training.get("share") if result.plan_rolled_training else None

@@ -66,6 +66,7 @@ from ts_transformer.config import (
     PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     PREDICTION_PLAN,
+    PREDICTION_SEGMENT_PLAN,
     TSConfig,
     control_recipe_overrides,
 )
@@ -150,6 +151,10 @@ CLOSURE_LOSS_FIELDS = (
 #: is redesigned.
 PLAN_LOSS_BASE = "plan-v1"
 PLAN_LOSS_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight", "plan_fan_components")
+#: The segment-plan output's objective fields (two-tier v2 §4); the base bumps when the
+#: regression itself is redesigned.
+SEGMENT_PLAN_LOSS_BASE = "segment-plan-v1"
+SEGMENT_PLAN_LOSS_FIELDS = ("segment_plan_position_loss_weight", "segment_plan_arrival_loss_weight")
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
 # in different directories must not read as one).
 _PATH_FIELDS = frozenset({"closure_labels_path", "control_fitted_teacher_path", "plan_rolled_windows_path"})
@@ -200,6 +205,11 @@ META_FIELDS = (
     # fold. Every stored config predates it and reads as the default, so adding it renames
     # nothing.
     "control_condition_features",
+    # Two-tier v2 §4: the segment-plan head's decoded segment count and its token axis —
+    # the whole difference between the two attention arms, so they sit ahead of the backbone
+    # knobs that fold. Every stored config predates them and carries the defaults.
+    "segment_plan_segments",
+    "segment_plan_attention",
     "d_model",
     "n_heads",
     "d_ff",
@@ -333,6 +343,10 @@ _ABBREV = {
     "plan_rolled_windows_path": "rolled",
     "plan_rolled_share": "rolled-share",
     "plan_fan_components": "fan",
+    "segment_plan_segments": "M",
+    "segment_plan_attention": "attend",
+    "segment_plan_position_loss_weight": "seg-pos",
+    "segment_plan_arrival_loss_weight": "seg-arrival",
     "state_position_reference": "pos-ref",
     "procedure_loss_lateral_weight": "proc-lat",
     "procedure_loss_vertical_weight": "proc-vert",
@@ -428,6 +442,7 @@ KNOWN_UNNAMED_FIELDS: dict[str, str] = {
 }
 _named = (
     set(CONTROL_LOSS_FIELDS) | set(STATE_LOSS_FIELDS) | set(CLOSURE_LOSS_FIELDS) | set(PLAN_LOSS_FIELDS)
+    | set(SEGMENT_PLAN_LOSS_FIELDS)
     | set(META_FIELDS) | {field for field, _ in _TAU_FIELDS} | set(LATENT_OUTPUT_FIELDS)
     | _DIRECTLY_NAMED_FIELDS
 )
@@ -446,7 +461,7 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Architecture", (
         "d_model", "n_heads", "d_ff", "e_layers", "dropout", "patch_len", "stride",
         "n_segments", "seq_len", "dt_s", "full_horizon_steps", "window_horizon_steps",
-        "use_norm", "revin", "duration_head",
+        "use_norm", "revin", "duration_head", "segment_plan_segments", "segment_plan_attention",
     )),
     ("Training", (
         "epochs", "patience", "batch_size", "learning_rate", "weight_decay",
@@ -603,6 +618,8 @@ def loss_design_parts(config: Mapping[str, Any]) -> tuple[str, list[tuple[str, A
         return CLOSURE_LOSS_BASE, _field_diffs(config, CLOSURE_LOSS_FIELDS)
     if config.get("prediction_output") == PREDICTION_PLAN:
         return PLAN_LOSS_BASE, _field_diffs(config, PLAN_LOSS_FIELDS)
+    if config.get("prediction_output") == PREDICTION_SEGMENT_PLAN:
+        return SEGMENT_PLAN_LOSS_BASE, _field_diffs(config, SEGMENT_PLAN_LOSS_FIELDS)
     if config.get("prediction_output") != PREDICTION_CONTROL:
         return STATE_LOSS_BASE, _field_diffs(config, STATE_LOSS_FIELDS)
     recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
@@ -660,6 +677,8 @@ def dynamics_name(config: Mapping[str, Any]) -> str:
         return "closed-form"
     if config.get("prediction_output") == PREDICTION_PLAN:
         return "guidance"
+    if config.get("prediction_output") == PREDICTION_SEGMENT_PLAN:
+        return "waypoints"   # coarse waypoints drawn straight from the head; no dynamics of its own
     if config.get("prediction_output") != PREDICTION_CONTROL:
         return "kinematic"
     model = config.get("control_dynamics_model") or CONTROL_DYNAMICS_POINT_MASS

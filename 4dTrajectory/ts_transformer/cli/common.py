@@ -47,6 +47,7 @@ from ts_transformer.config import (
     PREDICTION_OUTPUTS_AVAILABLE,
     PROCEDURE_LOSS_FIELDS,
     RANDOM_TRAIN_ANCHOR_SAMPLINGS,
+    SEGMENT_PLAN_ATTENTIONS,
     STATE_POSITION_REFERENCES_AVAILABLE,
     TARGET_CONDITIONINGS,
     TIME_CONSTANT_FIELDS,
@@ -166,11 +167,21 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         "--prediction-output",
         choices=PREDICTION_OUTPUTS_AVAILABLE,
         default=None,
-        help="predict state endpoints (default), bounded controls with dynamics rollout, or "
+        help="predict state endpoints (default), bounded controls with dynamics rollout, "
              "a plan (the operating parameters and the next instruction, flown by the guidance "
-             "layer; design v5) — the closure output is frozen: its checkpoints load, no new "
-             "run trains it",
+             "layer; design v5), or a segment plan (the next coarse waypoints in runway axes off "
+             "the window's segment tokens; two-tier v2 §4) — the closure output is frozen: its "
+             "checkpoints load, no new run trains it",
     )
+    parser.add_argument("--segment-plan-segments", type=int, default=None,
+                        help="segment-plan output: M coarse 30 s segments decoded ahead of the anchor")
+    parser.add_argument("--segment-plan-attention", choices=SEGMENT_PLAN_ATTENTIONS, default=None,
+                        help="segment-plan output: the token axis the encoder attends over — one token "
+                             "per feature (channels) or per segment (segments)")
+    parser.add_argument("--segment-plan-position-loss-weight", type=float, default=None,
+                        help="segment-plan output: weight of the waypoint regression")
+    parser.add_argument("--segment-plan-arrival-loss-weight", type=float, default=None,
+                        help="segment-plan output: weight of the arrival bits and the arrival fraction")
     parser.add_argument(
         "--closure-labels-path", default=None, metavar="JSON",
         help="closure output: the per-flight labels written by docs/p1_closure_oracle.py labels",
@@ -596,6 +607,10 @@ CLI_CONFIG_FIELDS = (
     "plan_rolled_windows_path",
     "plan_rolled_share",
     "plan_fan_components",
+    "segment_plan_segments",
+    "segment_plan_attention",
+    "segment_plan_position_loss_weight",
+    "segment_plan_arrival_loss_weight",
     "seq_len",
     "n_segments",
     "horizon_mode",

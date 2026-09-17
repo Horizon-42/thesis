@@ -91,6 +91,10 @@ class Replay:
     #: clock when it does not (the control rollout).
     metric_targets: torch.Tensor
     metric_weights: torch.Tensor
+    #: ``[B, M]`` which rows are the path's OWN prediction, or None for every row: a path
+    #: that pads a fixed-width replay (the segment plan holds the threshold after the
+    #: arrival) says so, and the raw kinematics are scored on the prediction alone.
+    row_valid: np.ndarray | None = None
 
 
 class WindowContext:

@@ -223,6 +223,7 @@ def raw_kinematic_metrics(
     anchor_values: np.ndarray,
     predicted_values: np.ndarray,
     segment_durations_s: np.ndarray,
+    row_valid: np.ndarray | None = None,
 ) -> dict[str, float | int]:
     """Physical smoothness of unfiltered model output on its own time grid.
 
@@ -236,10 +237,11 @@ def raw_kinematic_metrics(
     only for the position/velocity RMSE and heading-consistency checks; a model cannot earn
     a smoothness score by predicting smooth velocities beside a jagged position path.
 
-    Every segment is scored: a replay's durations are positive by construction (the
-    output layers emit them so), and the padded-suffix mask this function used to accept
-    could never be False on a live path (review C-10) — so it is gone rather than kept as
-    a bound that cannot bind.
+    Every segment is scored unless ``row_valid`` (``[B,N]``) says which rows are the
+    path's own prediction: the segment-plan replay pads a plan that arrived early with the
+    threshold HELD at zero velocity (`outputs.segment_plan.decode.replay_rows`), and scoring
+    that suffix would read a landed aircraft as a stop the model drew (review C-10 removed
+    the mask while no live path padded; two-tier S2 is the path that does).
     """
     anchor = np.asarray(anchor_values, dtype=np.float64)
     predicted = np.asarray(predicted_values, dtype=np.float64)
@@ -250,7 +252,9 @@ def raw_kinematic_metrics(
         raise ValueError("raw kinematic metric shapes do not share B, N and C")
     if np.any(durations <= 0.0):
         raise ValueError("segment durations must be positive")
-    valid = np.ones_like(durations, dtype=bool)
+    valid = np.ones_like(durations, dtype=bool) if row_valid is None else np.asarray(row_valid, dtype=bool)
+    if valid.shape != durations.shape:
+        raise ValueError("row_valid must be [B,N] like the durations")
     safe_durations = durations
 
     nodes = np.concatenate((anchor[:, None, :], predicted), axis=1)

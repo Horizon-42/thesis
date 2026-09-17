@@ -82,6 +82,8 @@ class SplitPredictionReplay:
     truth_time_s: np.ndarray
     anchors: np.ndarray
     segment_durations_s: np.ndarray
+    #: `outputs.base.Replay.row_valid`: the rows that are the prediction (None = all).
+    row_valid: np.ndarray | None = None
 
 
 def _prediction_batch_replay(
@@ -111,6 +113,7 @@ def _prediction_batch_replay(
         truth_time_s=final_time_s.detach().cpu().numpy(),
         anchors=anchors,
         segment_durations_s=replay.segment_durations_s,
+        row_valid=replay.row_valid,
     )
 
 
@@ -132,12 +135,16 @@ def _merge_prediction_replays(
             [getattr(item[1], name) for item in chunks], axis=0
         )[order]
 
+    padded = [item[1].row_valid is not None for item in chunks]
+    if any(padded) != all(padded):
+        raise ValueError("a path pads every replay batch or none")
     return SplitPredictionReplay(
         predicted=merged("predicted"),
         predicted_time_s=merged("predicted_time_s"),
         truth_time_s=merged("truth_time_s"),
         anchors=merged("anchors"),
         segment_durations_s=merged("segment_durations_s"),
+        row_valid=merged("row_valid") if all(padded) else None,
     )
 
 
@@ -284,6 +291,7 @@ def evaluate_split(
         replay.anchors,
         replay.predicted,
         replay.segment_durations_s,
+        row_valid=replay.row_valid,
     )
     observed_nodes, observed_duration_s, _ = fixed_anchor_common_truth(
         dataset.series, config, replay.predicted.shape[1], anchor=dataset.anchor
