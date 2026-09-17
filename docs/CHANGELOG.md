@@ -74,7 +74,23 @@ against the truth, the features' runway-axis invariance AND the sign of `across`
 course, the two arms' shared head, the model blind to the truth in its context, the loss zero on the
 labels and blind to unreached segments, the decode, the readout on the truth's own plan, the whole chain
 with the one-row forecast of a plan arriving in segment 0). Full suite 1331 (686 + 645 in two passes).
-Not done: the L2 readout runner against native32 / the state arm (S2.2), the arms + intents (S2.3).
+
+**S2.2 the L2 readout and gate.** `run_ts.py segment_plan_readout`: every checkpoint (plan heads and
+whole-approach references, plus a built-in constant-velocity extrapolation) forecast from ONE common
+fixed anchor — the latest of their own — and the 12/8/6 km bins; the 3D displacement at 60/120/180/300 s
+per stratum with the forecast's last row HELD past its end (`receding.displacement_at(hold_forecast_end=)`:
+a plan that says it arrived is at the threshold and a later lead reads that claim — the S1 rule "absent,
+never scored" would let an early arrival escape; only the truth's landing makes a lead absent, held counts
+stated); each checkpoint on its OWN split (native32 openap-direct 1404 val flights, the state arm and a
+plan head all-aircraft 2104 — the former inside the latter, verified) paired over the flights both hold:
+each side's p50 over those flights and their difference `delta_of_p50_m`; a segment-plan head's plan block
+beside. `two_tier_gates --segment-readout` (schema v3): gate L2 = at 120 AND 180 s the vectored p50 at
+least 125 m below EVERY whole-approach reference's and the straight-in p50 not above it, both seeds;
+`--lockstep` optional. **S2.3** `docs/experiments/two_tier_l2_arms.json` (channels / segments × 2 seeds,
+seq_len 61, M 10, all-aircraft, remaining-path-uniform anchors ≥ 30 s with half at the fixed anchor 60,
+180 epochs, objective selection, `"predict": false`, a development cohort — written: 10102 / 2104, 3
+train flights dropped) + the `two_tier_l2_20260917` intents entry. Tests `test_segment_plan_readout.py`
+(5) and the L2 block of `test_two_tier_gates.py` (4).
 
 ### 2026-09-16 — the control contracts merged into dev-two-tier and refactored into one row each; T0(c) measured
 

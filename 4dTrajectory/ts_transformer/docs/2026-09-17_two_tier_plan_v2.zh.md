@@ -28,9 +28,9 @@
 | S1.2 `plan_conditioning=waypoints` | **完成** ddfbf82（token 11 维、训练行/forecast 行/probe 一处分派、`PLAN_WAYPOINT_SEGMENT_S=30`） |
 | S1.3 读数工具 | **完成** bea33af：`tracker_lockstep` 航路点来源 + 逐次 e + `--command-hook`（schema v3）；`two_tier_gates` 门 L1 + 漂移读数（schema v2，cohort 可为基线子集并计数）；`short_horizon_readout` 新 runner；`frame_ablation` `"predict": false`。全套 1318 测试通过 |
 | S1.4 臂 + intents | **campaign 运行中**：`docs/experiments/two_tier_l1_arms.json`（8 臂）、intents `two_tier_l1_20260917`；首次 launch 死在 `prepare_session`（60 s 未来契约覆盖 6848/6849 训练航班，`KRDU:FFT1168_05L_a8d27e_20260501T121308Z` 无可用锚点）→ 82294f3：`frame_ablation` 把声明里的 `"development_cohort"` 传给每个 train 步，臂文件声明 `<campaign>/development_cohort.json`（队列 agent 用 `run_ts.py plan_cohort` 写出：6848 / 1401，h30 臂交叉核对相同）；队列 agent 于 03:47 UTC 重启（PID 1967516），~5.6 s/epoch，臂 1 `L1_tf_s1337` 完成（选择 ADE 168.2 m），全部 8 臂约 2.5–3 h，之后自动跑 2a–2d（`short_horizon_readout` → lockstep hook 关 / 开 → `two_tier_gates` ×3 契约）并汇报 |
-| S2.1 `segment-plan` 输出 | **代码完成、opus review 12 项已处理、全套测试通过（1331）**，提交见 git log（`feat: segment-plan output`）；本文件 §4 已按实现改：输出在**跑道系**而非 chart；到达 = 真值终点 `truth_duration_s`；每 epoch 的 `segment_plan_validation` 读数块 |
-| S2.2 L2 读数 runner | 未开建（对照 native32 与 state 臂 `airport_frame_20260903/A_threshold_enu`，按共同航班配对） |
-| S2.3 L2 臂 + intents | 未写（A / B × 2 种子，seq_len 61，M = 10，随机锚点；`checkpoint_selection_metric=fixed-anchor-objective`） |
+| S2.1 `segment-plan` 输出 | **完成** 9d9afc8（opus review 12 项已处理、全套测试通过）；本文件 §4 已按实现改：输出在**跑道系**而非 chart；到达 = 真值终点 `truth_duration_s`；每 epoch 的 `segment_plan_validation` 读数块 |
+| S2.2 L2 读数 runner | **代码完成**：`run_ts.py segment_plan_readout`（每个 checkpoint 在共同固定锚点——各自固定锚点中最晚的——与 12/8/6 km bin 上预测，60/120/180/300 s 的位移分层；forecast 结束后**保持末行**（到达的计划停在入口，读的是它的到达判断），只有真值落地才缺席；每个 checkpoint 在**自己的 split** 上读、按共同航班配对——native32 是 openap-direct 队列（val 1404），state 臂与 L2 臂是全机型（val 2104，前者 ⊂ 后者，已核）；匀速外推内置参照；segment-plan 臂带计划块）+ `two_tier_gates --segment-readout`（门 L2：120 与 180 s 雷达引导 p50 比**每个**整段参照都低 ≥ 125 m、直线不高于，两种子）。opus review 11 项已处理（固定锚点集要求该锚点存在且其后 ≥ 60 s 观测轨迹、held 计数进配对格与门判据行、多个 readout 参照/锚点/提前量不一致拒绝、segment-plan 臂一次前向、`window` 参照拒绝、`strata_fixed_at_anchor`）。测试 `test_segment_plan_readout.py`（8）、`test_two_tier_gates.py` L2 段（5）。**待用户定**：直线"不差"= 差 ≤ 0（零容差；包内直线种子线是 30 m，review 建议考虑）；参照的记录也写出（S4 需为 native32/state 注册 `@readout-*` 变体或跳过） |
+| S2.3 L2 臂 + intents | **已写**：`docs/experiments/two_tier_l2_arms.json`（A/B × 2 种子，seq_len 61，M = 10，全机型 cohort，随机锚点 remaining-path-uniform、未来 ≥ 30 s、半数留在固定锚点 60，180 epoch，按目标函数选），dry run 通过；intents `two_tier_l2_20260917`（4 run + `@readout-<set>` 变体）；cohort 已写 `two_tier_l2_20260917/development_cohort.json`（10102 / 2104，丢 3 个训练航班）。等 L1 campaign 跑完后交队列 agent：训练 4 臂 → `segment_plan_readout`（参照 native32 + `airport_frame_20260903/A_threshold_enu`，`--write-records`）→ `two_tier_gates --segment-readout`（A 两种子、B 两种子各判一次） |
 | S3 联合 lockstep + 门 | 未开建 |
 
 ## 2. 架构
@@ -123,7 +123,7 @@ L2 的段特征按跑道航向旋转是特征工程，它的输出在接口处�
 
 **评估**：航路点误差 p50 在 60 / 120 / 180 / 300 s，分层。对照：(i) 匀速直线外推；(ii) native32 自身 rollout 在同一提前量的位移（`lead_time_error` 已有：雷达引导 632 / 1884 / 3659 m at 60 / 120 / 300 s）；
 (iii) **state 路径**（现有 `airport_frame_20260903/A_threshold_enu` checkpoint，与 L2 按共同航班配对；旧文档 §3 表里它在 120 / 180 s 是 1109 / 1673 m，已经好于 native32）。
-**门 L2（两种子）**：120 s 与 180 s 的雷达引导航路点 p50 比 native32 与 state 臂中**更强的一个**好 ≥ 125 m（种子线），直线不差；A 与 B 谁过谁用。
+**门 L2（两种子）**：120 s 与 180 s 的雷达引导航路点 p50 比 native32 与 state 臂中**更强的一个**好 ≥ 125 m（种子线），直线不差；A 与 B 谁过谁用。实现（S2.2，`two_tier_gates --segment-readout`）："更强的一个" = 对每个整段参照都成立；p50 在双方共同持有的航班上各算一次再相减（`delta_of_p50_m`），直线"不差" = 差 ≤ 0；匀速外推只旁读不判。读数在 forecast 结束后保持末行——到达的计划停在入口，120 s 处读到的是它的到达判断，S1 读数的"缺席不计"会让早到逃掉；只有真值落地才缺席。每个 checkpoint 在自己的 split 上读（native32 openap-direct 1404 航班，state 臂与 L2 全机型 2104，前者是后者的子集），配对按共同航班，n 写在每格。
 
 ## 5. 联合评估与门
 
@@ -192,6 +192,12 @@ S1 与 S2 代码互不依赖，可并行开发；GPU 串行，S1 先训。
 - 门的 cohort 允许 L1 是基线的子集（配对在 L1 的航班上，缺的数目写进判定），因为固定 Δ 会排除锚点后真值不足 60 s 的航班。
 - 命名 `ctrl-horizon=`（review 指出 `horizon=` 与 `horizon_mode` 的词撞）。
 - S4 发布前 publisher 要认 `short_horizon` 记录块；hooked lockstep 的记录先不注册 intents 变体。
+- **S2（2026-09-17 下午）**：L2 的输出在**跑道系**（along/across/up 相对锚点）而非 chart——同一基线转弯在 05L 与 23R 是同一个标签，接 L1 时 `chart_deltas` 转回；到达 = 真值终点 `truth_duration_s`（包内每条路径时长头的同一定义），不另做 `threshold_crossing_index` 标志；两臂共用一个学习查询读出（`TokenPool`），否则 A 臂的头是 27·d_model、B 臂 K·d_model，门 L2 的 A/B 比较会变成容量比较；`use_norm` 在 segment-plan 下拒绝（编码栈读在 vendored 实例归一化之下，写进 config 却不生效）；验证回放补到 M 行时入口按 30 s 保持、`Replay.row_valid` 告诉运动学读数哪些是补的（review C-10 删掉的掩码回来了——这是第一条会补行的活路径）；每 epoch 的 `segment_plan_validation` 块是 L2 的可引用数（common-grid 报告把末航路点平推到落地、cap rate 结构性为 0）。
+- **L2 的 cohort 是全机型**（`aircraft_filter=all`，train 10102 / val 2104），比 native32 的 openap-direct（6851 / 1404）大：计划层不含动力学，不需要 openap 机型；读数在每个 checkpoint 自己的 split 上读、按共同航班配对（native32 的 val 是 L2 val 的子集，已核），state 臂 `A_threshold_enu` 本就是全机型。
+- 读数的共同锚点取各 checkpoint 固定锚点中**最晚的**（L2 seq_len 61 → 60；native32 与 state 臂 59，晚一个采样读它们），不加 `anchor_floor_index`。
+- 读数在 forecast 结束后**保持末行**而不是缺席：到达的计划停在入口，120 s 处读到的是它的到达判断；S1 的"缺席不计"会让早到逃掉。
+- 门 L2 的"更强的一个" = 对每个整段参照都成立；p50 在共同航班上各算再相减；直线"不差"= 差 ≤ 0；匀速外推旁读不判。
+- 随机锚点未来下限 30 s（第一段总有监督）、半数留在固定锚点 60（读数与门在那里）；180 epoch 不早停，与 L1 同。
 
 ## 9. 磁盘
 

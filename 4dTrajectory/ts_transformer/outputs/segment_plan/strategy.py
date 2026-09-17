@@ -142,6 +142,32 @@ def decode_series(
     return plans
 
 
+def forecast_from_plan(item: FlightSeries, plan: DecodedPlan, anchor: int, config: TSConfig) -> Forecast:
+    """One decoded plan laid as the rows a record carries (`decode.plan_rows`), velocities derived."""
+    anchor_values = np.asarray(item.values[anchor], dtype=np.float64)
+    offsets, positions = plan_rows(plan, item.target_chart)
+    durations = np.diff(np.concatenate([[0.0], offsets]))
+    final_time_s = float(offsets[-1])
+    return Forecast(
+        times=float(item.times[anchor]) + offsets,
+        values=_states(anchor_values, positions, durations, len(config.channels)),
+        normalized_progress=offsets / final_time_s,
+        anchor=anchor,
+        final_time_s=final_time_s,
+        predicted_final_time_s=final_time_s,
+        horizon_mode=config.horizon_mode,
+        passes=1,
+        # a plan that arrives ends AT the threshold; one that does not is cut by its M segments
+        truncated_at_threshold=plan.arrives,
+        horizon_capped=not plan.arrives,
+        sample_durations_s=durations,
+        segment_durations_s=durations,
+        prediction_output=config.prediction_output,
+        segment_plan_arrival_segment=plan.arrival_segment,
+        segment_plan_arrival_probability=plan.arrival_probability,
+    )
+
+
 def forecast_segment_plan(
     model: nn.Module,
     series: Sequence[FlightSeries],
@@ -151,31 +177,10 @@ def forecast_segment_plan(
     device: torch.device,
 ) -> list[Forecast]:
     """Every flight's plan at ``anchor``, decoded and laid as the rows a record carries."""
-    forecasts = []
-    for item, plan in zip(series, decode_series(model, series, config, normalizer, anchor, device), strict=True):
-        anchor_values = np.asarray(item.values[anchor], dtype=np.float64)
-        offsets, positions = plan_rows(plan, item.target_chart)
-        durations = np.diff(np.concatenate([[0.0], offsets]))
-        final_time_s = float(offsets[-1])
-        forecasts.append(Forecast(
-            times=float(item.times[anchor]) + offsets,
-            values=_states(anchor_values, positions, durations, len(config.channels)),
-            normalized_progress=offsets / final_time_s,
-            anchor=anchor,
-            final_time_s=final_time_s,
-            predicted_final_time_s=final_time_s,
-            horizon_mode=config.horizon_mode,
-            passes=1,
-            # a plan that arrives ends AT the threshold; one that does not is cut by its M segments
-            truncated_at_threshold=plan.arrives,
-            horizon_capped=not plan.arrives,
-            sample_durations_s=durations,
-            segment_durations_s=durations,
-            prediction_output=config.prediction_output,
-            segment_plan_arrival_segment=plan.arrival_segment,
-            segment_plan_arrival_probability=plan.arrival_probability,
-        ))
-    return forecasts
+    return [
+        forecast_from_plan(item, plan, anchor, config)
+        for item, plan in zip(series, decode_series(model, series, config, normalizer, anchor, device), strict=True)
+    ]
 
 
 class SegmentPlanStrategy(OutputStrategy):
@@ -314,5 +319,5 @@ STRATEGY = SegmentPlanStrategy()
 
 __all__ = [
     "ARRIVAL_PROBABILITY_KEY", "ARRIVAL_SEGMENT_KEY", "STRATEGY", "SegmentPlanContext", "SegmentPlanStrategy",
-    "decode_batch", "decode_series", "forecast_segment_plan",
+    "decode_batch", "decode_series", "forecast_from_plan", "forecast_segment_plan",
 ]

@@ -1,4 +1,4 @@
-"""Two-tier gates L1 / G1 / G3 off `tracker_lockstep` artifacts, flight by flight against the rule guidance.
+"""Two-tier gates L1 / L2 / G1 / G3 off `tracker_lockstep` and `segment_plan_readout` artifacts, flight by flight.
 
 Two-tier v2 `docs/2026-09-17_two_tier_plan_v2.zh.md` §3 (gate L1, the drift reading) over the feasibility
 design's §6 / §10.7 gates (G1 / G3, the abandoned T1a design's, kept for the artifacts that carry them).
@@ -27,6 +27,13 @@ A gate is judged per GATE ARM (the checkpoint labels ``--gate-arms`` names, the 
   number existed (§10.7), with the plan path's share (``--plan-path-baseline``, another anchor and cohort)
   reported beside it.
 
+* **L2** — off a `segment_plan_readout` artifact (``--segment-readout``, two-tier v2 §4): at the common
+  fixed anchor, for every whole-approach reference the readout names (native32, the state arm — the
+  built-in constant-velocity extrapolation is a floor reading, shown beside, never judged), at 120 s AND
+  180 s: the vectored waypoint p50 over the flights both hold is at least the seed line (125 m) BELOW the
+  reference's, and the straight-in p50 is not above it. Both seeds; "the stronger of the references" is
+  beating every reference.
+
 Refused: an artifact of a smoke run (``--limit``) or of any split but ``val``; fewer than two gate arms
 (the gates are two-seed gates); for G1, a baseline of another schema, protocol (policy ``truth``, route
 ``next``, rolling ``lockstep``), split, limit, flight set, per-row anchor or stratum membership; a gate
@@ -42,6 +49,7 @@ the ``one-shot``'s is what would make T1c necessary, §10.4 — read, not judged
         --gate-arms T1a_plan_p50_s1337,T1a_plan_p50_s2024 \\
         --baseline <plan_guidance_20260910/step3d_lockstep_l1> \\
         [--plan-path-baseline <plan_guidance_20260910/step3g_fan4_top1_lockstep_l1>] --out <dir>
+    python run_ts.py two_tier_gates --segment-readout <segment_plan_readout dir> --gate-arms A_s1337,A_s2024 --out <dir>
 """
 
 from __future__ import annotations
@@ -61,6 +69,11 @@ from ts_transformer.experiments.plan_oracle import (  # noqa: E402
     ROUTE_NEXT,
     SCHEMA as PLAN_ORACLE_SCHEMA,
 )
+from ts_transformer.experiments.segment_plan_readout import (
+    CONSTANT_VELOCITY,
+    FIXED_SET,
+    RESULT_SCHEMA as SEGMENT_READOUT_SCHEMA,
+)
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.experiments.tracker_lockstep import (
     RESULT_SCHEMA as LOCKSTEP_SCHEMA,
@@ -73,10 +86,11 @@ from ts_transformer.experiments.tracker_lockstep import (
 )
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 
-SCHEMA = "ts-two-tier-gates-v2"   # v2 (2026-09-17): gate L1 (two-tier v2 §3) and the drift reading beside every arm
+SCHEMA = "ts-two-tier-gates-v3"   # v3 (2026-09-17): gate L2 off the segment-plan readout; v2: gate L1 and the drift reading
 GATE_G1 = "G1"
 GATE_G3 = "G3"
 GATE_L1 = "L1"
+GATE_L2 = "L2"
 #: The gate an artifact is judged under, by where its plans came from (`tracker_lockstep.plan_source`).
 GATE_BY_SOURCE = {TruthPlans.source: GATE_G1, HeadPlans.source: GATE_G3, TruthWaypoints.source: GATE_L1}
 GATE_STRATA = (STRATUM_STRAIGHT_IN, STRATUM_VECTORED)
@@ -120,6 +134,13 @@ G3_ESTABLISHED_AT_LEAST = 0.94
 # over asks from DRIFT_LATE_FROM_ASK on exceeds DRIFT_RATIO_MAX × the p50 over the asks before it.
 DRIFT_LATE_FROM_ASK = 3
 DRIFT_RATIO_MAX = 1.5
+# L2 (two-tier v2 §4): the plan head's vectored waypoint p50 at these leads beats EVERY whole-approach
+# reference by the seed line, and its straight-in p50 is not worse, over the flights both hold at the
+# readout's fixed anchor.
+L2_LEADS_S = ("120", "180")
+L2_SEED_LINE_M = 125.0
+L2_STRAIGHT_IN_MAX_WORSE_M = 0.0
+L2_SET = FIXED_SET
 
 
 @dataclass(frozen=True)
@@ -160,6 +181,24 @@ def load_lockstep(path: Path) -> list[ArmReading]:
                    variants={name: variant["flights"] for name, variant in block["variants"].items()})
         for label, block in payload["checkpoints"].items()
     ]
+
+
+def load_segment_readout(path: Path) -> dict:
+    file = path / "segment_plan_readout.json" if path.is_dir() else path
+    payload = json.loads(file.read_text(encoding="utf-8"))
+    if payload.get("schema") != SEGMENT_READOUT_SCHEMA:
+        raise SystemExit(f"{file}: schema {payload.get('schema')!r}, this readout needs {SEGMENT_READOUT_SCHEMA!r}")
+    plan = payload["plan"]
+    if plan["limit"] or plan["split"] != GATE_SPLIT:
+        raise SystemExit(f"{file}: split {plan['split']!r}, limit {plan['limit']} — a gate reads the whole "
+                         f"{GATE_SPLIT!r} split, never a smoke run")
+    missing = [lead for lead in L2_LEADS_S if lead not in {f"{h:g}" for h in plan["leads_s"]}]
+    if missing:
+        raise SystemExit(f"{file}: the readout has no lead {missing} (leads {plan['leads_s']}); gate L2 reads {L2_LEADS_S}")
+    if L2_SET not in payload["plan"]["bins"]:
+        raise SystemExit(f"{file}: no {L2_SET!r} anchor set; gate L2 is judged at the fixed anchor")
+    payload["path"] = str(file)
+    return payload
 
 
 def load_plan_oracle(path: Path) -> dict:
@@ -289,6 +328,43 @@ def judge_l1(arm: ArmReading, baseline: dict) -> dict:
     return judge_truth_gate(arm, baseline, TRUTH_GATES[GATE_L1])
 
 
+def judge_l2(label: str, readout: dict) -> dict:
+    """Gate L2 for one plan head off the readout's paired block at the fixed anchor."""
+    references = [name for name in readout["references"] if name != CONSTANT_VELOCITY]
+    if not references:
+        raise SystemExit(f"{readout['path']}: no whole-approach reference beside {CONSTANT_VELOCITY!r}; gate L2 needs one")
+    criteria = []
+    for reference in references:
+        cells = readout["paired"][label][reference][L2_SET]
+        for lead in L2_LEADS_S:
+            vectored, straight = cells[STRATUM_VECTORED][lead], cells[STRATUM_STRAIGHT_IN][lead]
+            if not vectored["n"] or not straight["n"]:
+                raise SystemExit(f"{label} − {reference} at {lead} s: an empty gate stratum "
+                                 f"(vectored n {vectored['n']}, straight-in n {straight['n']}) cannot be judged")
+            criteria.append(criterion(
+                f"vectored p50 at {lead} s − {reference}'s over the same {vectored['n']} flights "
+                f"({_fmt(vectored['arm_p50_m'])} − {_fmt(vectored['reference_p50_m'])}; held past the forecast's end "
+                f"{vectored['arm_held']} / {vectored['reference_held']})",
+                vectored["delta_of_p50_m"], -L2_SEED_LINE_M, "<=",
+            ))
+            criteria.append(criterion(
+                f"straight-in p50 at {lead} s − {reference}'s over the same {straight['n']} flights "
+                f"({_fmt(straight['arm_p50_m'])} − {_fmt(straight['reference_p50_m'])}; held "
+                f"{straight['arm_held']} / {straight['reference_held']})",
+                straight["delta_of_p50_m"], L2_STRAIGHT_IN_MAX_WORSE_M, "<=",
+            ))
+    return {"criteria": criteria, "pass": all(c["pass"] for c in criteria), "references": references}
+
+
+def l2_arm_readings(label: str, readout: dict) -> dict:
+    block = readout["checkpoints"][label]
+    return {
+        "artifact": readout["path"], "anchor": readout["anchor"], "own_fixed_anchor": block["own_fixed_anchor"],
+        "sets": {set_label: {"strata": cell["strata"], "plan": cell.get("plan")} for set_label, cell in block["sets"].items()},
+        "paired": readout["paired"].get(label, {}),
+    }
+
+
 def drift_reading(rows: dict[str, dict]) -> dict:
     """The per-ask step error of one variant, per stratum: its p50 by ask, the early / late
     p50s and their ratio, and whether it is RISING (`DRIFT_RATIO_MAX`). A stratum whose flights
@@ -351,11 +427,40 @@ def arm_readings(arm: ArmReading, baseline: dict | None) -> dict:
     }
 
 
-def build(arms: list[ArmReading], gate_arms: tuple[str, ...], baseline: dict | None, plan_path: dict | None) -> dict:
+def build(arms: list[ArmReading], gate_arms: tuple[str, ...], baseline: dict | None, plan_path: dict | None,
+          segment_readouts: list[dict] = ()) -> dict:
     if len(set(gate_arms)) < MIN_GATE_ARMS:
         raise SystemExit(f"--gate-arms names {len(set(gate_arms))} arm(s); a gate is judged over at least "
                          f"{MIN_GATE_ARMS} seeds")
     result: dict = {"schema": SCHEMA, "generated_at": utc_now(), "gate_arms": list(gate_arms), "gates": {}}
+    if segment_readouts:
+        # every readout judged together names the same references, anchor and leads, or the seeds
+        # would be judged against different things under one verdict
+        first = segment_readouts[0]
+        for readout in segment_readouts[1:]:
+            for key in ("references", "anchor"):
+                if readout[key] != first[key]:
+                    raise SystemExit(f"{GATE_L2}: {readout['path']} has {key} {readout[key]!r}, {first['path']} "
+                                     f"{first[key]!r}; one gate reads one reference set at one anchor")
+            if readout["plan"]["leads_s"] != first["plan"]["leads_s"]:
+                raise SystemExit(f"{GATE_L2}: the readouts' leads differ ({readout['plan']['leads_s']} against "
+                                 f"{first['plan']['leads_s']})")
+        by_label = {}
+        for readout in segment_readouts:
+            for label in readout["arms"]:
+                if label in by_label:
+                    raise SystemExit(f"{GATE_L2}: a checkpoint label appears in two readouts: {label!r}")
+                by_label[label] = readout
+        missing = [label for label in gate_arms if label not in by_label]
+        if missing:
+            raise SystemExit(f"{GATE_L2}: gate arm(s) {missing} are in no segment-plan readout (have {sorted(by_label)})")
+        verdicts = {label: {**judge_l2(label, by_label[label]), "artifact": by_label[label]["path"]} for label in gate_arms}
+        result["gates"][GATE_L2] = {
+            "pass": all(v["pass"] for v in verdicts.values()),
+            "verdicts": verdicts,
+            "arms": {label: l2_arm_readings(label, readout) for label, readout in by_label.items()},
+            "baseline": sorted({name for readout in segment_readouts for name in readout["references"]}),
+        }
     for gate in sorted({arm.gate for arm in arms}):
         members = [arm for arm in arms if arm.gate == gate]
         labels = [arm.label for arm in members]
@@ -388,6 +493,9 @@ def render(result: dict) -> str:
     lines = [f"two-tier gates — gate arms {', '.join(result['gate_arms'])} (each must pass every criterion)"]
     for gate, block in result["gates"].items():
         lines += ["", f"══ {gate}: {'PASS' if block['pass'] else 'FAIL'}   (baseline {block['baseline']})"]
+        if gate == GATE_L2:
+            lines += _render_l2(block)
+            continue
         for label, verdict in block["verdicts"].items():
             dropped = verdict.get("baseline_flights_not_in_tracker", 0)
             lines.append(f"  {label}: {'pass' if verdict['pass'] else 'FAIL'}"
@@ -419,12 +527,45 @@ def render(result: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _render_l2(block: dict) -> list[str]:
+    lines = []
+    for label, verdict in block["verdicts"].items():
+        lines.append(f"  {label}: {'pass' if verdict['pass'] else 'FAIL'}   (against {', '.join(verdict['references'])}; "
+                     f"{CONSTANT_VELOCITY} read beside, never judged)")
+        for c in verdict["criteria"]:
+            lines.append(f"    [{'x' if c['pass'] else ' '}] {c['criterion']}: {_fmt(c['value'], 1)} {c['relation']} "
+                         f"{_fmt(c['threshold'], 1)}")
+    for label, arm in block["arms"].items():
+        lines.append(f"  ── {label} ({arm['artifact']}, a0={arm['anchor']}, own fixed anchor {arm['own_fixed_anchor']})")
+        for set_label, cell in arm["sets"].items():
+            for stratum, s in cell["strata"].items():
+                leads = " ".join(f"e({k}) {_fmt(v['p50'])} n{v['n']}" for k, v in s["at_lead_m"].items())
+                lines.append(f"     {set_label:<6s} {stratum[:30]:<30s} n={s['n']:>4d} | {leads}")
+            if cell.get("plan"):
+                for stratum, p in cell["plan"].items():
+                    if p is None:
+                        continue
+                    c = p["arrival_confusion"]
+                    lines.append(f"     {set_label:<6s} {stratum[:30]:<30s} plan: covered ADE {_fmt(p['covered_ade_m'])} | "
+                                 f"arrives plan/truth {p['plan_arrives_share']:.2f}/{p['truth_arrives_share']:.2f} "
+                                 f"(both {c['both']}, plan-only {c['plan_only']}, truth-only {c['truth_only']}) | "
+                                 f"|dT| {_fmt(p['arrival_time_error_s']['mean_abs'], 1)} s n{p['arrival_time_error_s']['n']}")
+        for reference, sets in arm["paired"].items():
+            for set_label, strata in sets.items():
+                for stratum, cells in strata.items():
+                    parts = " ".join(f"{k}s {_fmt(v['delta_of_p50_m'])} (n{v['n']})" for k, v in cells.items())
+                    lines.append(f"     − {reference:<17s} {set_label:<6s} {stratum[:30]:<30s} Δ of p50 {parts}")
+    return lines
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                      allow_abbrev=False)
-    parser.add_argument("--lockstep", type=Path, action="append", required=True,
-                        help="a tracker_lockstep artifact (repeatable; truth-plan artifacts are judged under G1, "
+    parser.add_argument("--lockstep", type=Path, action="append", default=None,
+                        help="a tracker_lockstep artifact (repeatable; truth-plan artifacts are judged under G1 / L1, "
                              "head-plan ones under G3)")
+    parser.add_argument("--segment-readout", type=Path, action="append", default=None,
+                        help="a segment_plan_readout artifact (repeatable): gate L2")
     parser.add_argument("--gate-arms", required=True, help="comma-separated checkpoint labels the gates judge")
     parser.add_argument("--baseline", type=Path, default=None,
                         help="G1: the rule guidance's plan-oracle artifact at the same anchor and cohort")
@@ -443,15 +584,19 @@ def main(argv: list[str] | None = None) -> int:
     gate_arms = tuple(label.strip() for label in args.gate_arms.split(",") if label.strip())
     if not gate_arms:
         parser.error("--gate-arms names no checkpoint")
-    arms = [arm for path in args.lockstep for arm in load_lockstep(path)]
+    if not args.lockstep and not args.segment_readout:
+        parser.error("nothing to judge: give --lockstep and/or --segment-readout")
+    arms = [arm for path in (args.lockstep or []) for arm in load_lockstep(path)]
+    segment_readouts = [load_segment_readout(path) for path in (args.segment_readout or [])]
     for arm in arms:
         if VARIANT_RECEDING not in arm.variants:
             raise SystemExit(f"{arm.label} ({arm.artifact}): no {VARIANT_RECEDING!r} variant, which every gate reads")
     baseline = None if args.baseline is None else load_plan_oracle(args.baseline)
     plan_path = None if args.plan_path_baseline is None else load_plan_oracle(args.plan_path_baseline)
-    result = build(arms, gate_arms, baseline, plan_path)
+    result = build(arms, gate_arms, baseline, plan_path, segment_readouts)
     result["inputs"] = {
         "lockstep": [{"path": arm_file, "sha256": file_sha256(Path(arm_file))} for arm_file in sorted({arm.artifact for arm in arms})],
+        "segment_readouts": [{"path": readout["path"], "sha256": file_sha256(Path(readout["path"]))} for readout in segment_readouts],
         "baseline": None if baseline is None else {"path": baseline["path"], "sha256": file_sha256(Path(baseline["path"]))},
         "plan_path_baseline": None if plan_path is None else {
             "path": plan_path["path"], "sha256": file_sha256(Path(plan_path["path"]))},

@@ -267,3 +267,109 @@ def test_the_readout_refuses_another_cohort_anchor_schema_or_a_missing_gate_arm(
     with pytest.raises(FileExistsError):
         gates.main(["--lockstep", str(truth), "--gate-arms", "s1337", "--baseline", str(guidance),
                     "--out", str(tmp_path / "exists")])
+
+
+# ── L2 ─────────────────────────────────────────────────────────────────────────
+
+
+def _lead_cells(arm_p50: float, reference_p50: float, n: int = 4) -> dict:
+    return {lead: {"n": n, "arm_p50_m": arm_p50, "reference_p50_m": reference_p50,
+                   "delta_of_p50_m": arm_p50 - reference_p50, "delta_p50_m": arm_p50 - reference_p50,
+                   "arm_better_share": 1.0 if arm_p50 < reference_p50 else 0.0, "arm_held": 0, "reference_held": 1}
+            for lead in ("60", "120", "180")}
+
+
+def _segment_readout(tmp_path, name: str, arms: dict[str, dict[str, tuple[float, float]]], *, references=("native32", "state"),
+                     split: str = "val", limit: int = 0, schema: str = gates.SEGMENT_READOUT_SCHEMA):
+    """``arms[label][reference] = (vectored delta, straight-in delta)`` against a reference p50 of 1000 / 300."""
+    directory = tmp_path / name
+    directory.mkdir()
+    strata_cells = {"n": 4, "at_lead_m": {lead: {"n": 4, "p50": 500.0, "mean": 500.0, "held": 0} for lead in ("60", "120", "180")}}
+    checkpoints = {}
+    paired = {}
+    for label, deltas in arms.items():
+        checkpoints[label] = {"checkpoint": f"/ckpt/{label}.pt", "own_fixed_anchor": 60, "seq_len": 61, "prediction_output": "segment-plan",
+                              "segment_plan_segments": 10,
+                              "sets": {gates.FIXED_SET: {"strata": {s: strata_cells for s in (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED)},
+                                                         "plan": None}}}
+        paired[label] = {}
+        for reference in (*references, gates.CONSTANT_VELOCITY):
+            vectored, straight = deltas.get(reference, (-200.0, -10.0))
+            paired[label][reference] = {gates.FIXED_SET: {
+                STRATUM_ALL: _lead_cells(800.0, 1000.0), STRATUM_VECTORED: _lead_cells(1000.0 + vectored, 1000.0),
+                STRATUM_STRAIGHT_IN: _lead_cells(300.0 + straight, 300.0),
+            }}
+    for reference in (*references, gates.CONSTANT_VELOCITY):
+        checkpoints[reference] = {"checkpoint": None if reference == gates.CONSTANT_VELOCITY else f"/ckpt/{reference}.pt",
+                                  "own_fixed_anchor": 59, "seq_len": 60, "prediction_output": "state", "segment_plan_segments": None,
+                                  "sets": {gates.FIXED_SET: {"strata": {s: strata_cells for s in (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED)}}}}
+    payload = {"schema": schema, "plan": {"split": split, "limit": limit, "leads_s": [60.0, 120.0, 180.0], "bins": [gates.FIXED_SET]},
+               "anchor": 60, "arms": list(arms), "references": [*references, gates.CONSTANT_VELOCITY],
+               "checkpoints": checkpoints, "paired": paired}
+    (directory / "segment_plan_readout.json").write_text(json.dumps(payload))
+    return directory
+
+
+def _run_l2(tmp_path, *readouts, gate_arms="A_s1337,A_s2024"):
+    out = tmp_path / f"gates_{len(list(tmp_path.glob('gates_*')))}"    # each run its own immutable artifact
+    argv = [arg for path in readouts for arg in ("--segment-readout", str(path))]
+    argv += ["--gate-arms", gate_arms, "--out", str(out)]
+    assert gates.main(argv) == 0
+    return json.loads((out / "two_tier_gates.json").read_text())
+
+
+def test_l2_passes_when_both_seeds_beat_every_reference_by_the_seed_line_and_hold_straight_in(tmp_path):
+    readout = _segment_readout(tmp_path, "readout", {
+        "A_s1337": {"native32": (-125.0, 0.0), "state": (-130.0, -5.0)},
+        "A_s2024": {"native32": (-200.0, -1.0), "state": (-126.0, 0.0)},
+    })
+    result = _run_l2(tmp_path, readout)
+    block = result["gates"][gates.GATE_L2]
+    assert block["pass"] and set(block["verdicts"]) == {"A_s1337", "A_s2024"}
+    verdict = block["verdicts"]["A_s1337"]
+    assert verdict["references"] == ["native32", "state"]      # the constant-velocity floor is never judged
+    assert len(verdict["criteria"]) == 2 * 2 * 2                 # references × leads × strata
+    assert all(c["pass"] for c in verdict["criteria"])
+    assert result["schema"] == gates.SCHEMA and block["baseline"] == ["constant-velocity", "native32", "state"]
+    assert set(block["arms"]) == {"A_s1337", "A_s2024"}
+    text = (tmp_path / "gates_0" / "two_tier_gates.txt").read_text()
+    assert "L2: PASS" in text and gates.CONSTANT_VELOCITY in text and "held past the forecast's end 0 / 1" in text
+
+
+@pytest.mark.parametrize("deltas, failing", [
+    ({"native32": (-124.0, 0.0)}, "vectored p50 at 120 s − native32"),   # short of the seed line against one reference
+    ({"state": (-300.0, 1.0)}, "straight-in p50 at 120 s − state"),      # straight-in worse
+])
+def test_l2_fails_on_one_seed_and_names_the_criterion(tmp_path, deltas, failing):
+    readout = _segment_readout(tmp_path, "readout", {"A_s1337": {}, "A_s2024": deltas})
+    block = _run_l2(tmp_path, readout)["gates"][gates.GATE_L2]
+    assert not block["pass"] and block["verdicts"]["A_s1337"]["pass"] and not block["verdicts"]["A_s2024"]["pass"]
+    failed = [c["criterion"] for c in block["verdicts"]["A_s2024"]["criteria"] if not c["pass"]]
+    assert failed and all(name.startswith(failing) or name.startswith(failing.replace("120", "180")) for name in failed)
+
+
+def test_l2_judges_two_readouts_together_only_when_they_agree_on_references_anchor_and_leads(tmp_path):
+    one = _segment_readout(tmp_path, "one", {"A_s1337": {}})
+    two = _segment_readout(tmp_path, "two", {"A_s2024": {}})
+    block = _run_l2(tmp_path, one, two)["gates"][gates.GATE_L2]
+    assert block["pass"] and {v["artifact"] for v in block["verdicts"].values()} == {str(one / "segment_plan_readout.json"),
+                                                                                       str(two / "segment_plan_readout.json")}
+    other = _segment_readout(tmp_path, "other", {"A_s2024": {}}, references=("native32",))
+    with pytest.raises(SystemExit, match="one gate reads one reference set"):
+        _run_l2(tmp_path, one, other)
+    with pytest.raises(SystemExit, match="appears in two readouts"):
+        _run_l2(tmp_path, one, _segment_readout(tmp_path, "dup", {"A_s1337": {}, "A_s2024": {}}))
+
+
+def test_l2_refuses_a_smoke_readout_a_missing_gate_arm_or_a_reference_less_readout(tmp_path):
+    with pytest.raises(SystemExit, match="never a smoke run"):
+        _run_l2(tmp_path, _segment_readout(tmp_path, "smoke", {"A_s1337": {}, "A_s2024": {}}, limit=10))
+    with pytest.raises(SystemExit, match="in no segment-plan readout"):
+        _run_l2(tmp_path, _segment_readout(tmp_path, "one", {"A_s1337": {}}))
+    with pytest.raises(SystemExit, match="no whole-approach reference"):
+        _run_l2(tmp_path, _segment_readout(tmp_path, "cv", {"A_s1337": {}, "A_s2024": {}}, references=()))
+    with pytest.raises(SystemExit, match="schema"):
+        _run_l2(tmp_path, _segment_readout(tmp_path, "old", {"A_s1337": {}, "A_s2024": {}}, schema="ts-old"))
+    parser = gates.build_parser()
+    with pytest.raises(SystemExit):
+        gates.main(["--gate-arms", "a,b", "--out", str(tmp_path / "nothing")])

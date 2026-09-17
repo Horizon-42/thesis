@@ -1,0 +1,43 @@
+{
+ "_comment": "Two-tier v2 S2 (docs/2026-09-17_two_tier_plan_v2.zh.md §4): the L2 SEGMENT-TOKEN PLAN LAYER. Each arm is a `segment-plan` head: the observed window (seq_len 61 = K_in 4 coarse segments of 30 s + the anchor) cut into segment tokens — 27 runway-axis features per segment — through the vendored iTransformer encoder, ONE learned-query read-out, and an MLP decoding M = 10 segments (300 s) in one shot: the position at each segment's end in runway axes about the anchor, the arrival bit per segment, the arrival fraction. TWO TOKEN AXES × two seeds: A = `channels` (one token per feature, its K-series — the inversion the requirement names: 'the path itself, the start and end points, the overall direction as channels computing attention'), B = `segments` (one token per segment + a learned position, PatchTST's form). Both arms feed the same head (the review's capacity confound is removed by the read-out), so A against B is a reading of the token axis alone. Labels are the truth's supervision rows at 30k s with the arrival at `truth_duration_s`; loss = masked L1 positions + BCE arrival bits + L1 arrival fraction. Selection on the objective (`fixed-anchor-objective`: the waypoints ARE the prediction; the common-grid ADE holds the last waypoint flat past 300 s). Random anchors (remaining-path-uniform, ≥ 30 s of truth after the anchor so the first segment is always supervised) with half the draws reserved for the fixed anchor 60 (L−1 of seq_len 61 — one sample after native32's and the state arm's 59; the readout reads every checkpoint at the latest fixed anchor). 180 epochs without early stopping. Single airport KRDU, val split only. \"development_cohort\": the explicit train roster (`run_ts.py plan_cohort --config-overrides <any arm's config.json> --name two_tier_l2_20260917 --output-dir <campaign>`, written into the campaign directory before launch — the 30 s future contract at anchor 60 may leave a short train flight without an admissible anchor, and the train CLI refuses to drop one silently). \"predict\": false — the whole-approach evaluation report means nothing for a plan that ends at 300 s; the campaign's readout is `run_ts.py segment_plan_readout` (§4 evaluation: the displacement at 60 / 120 / 180 / 300 s from the fixed anchor and the 12/8/6 km bins, per stratum, paired flight by flight against native32, the state arm airport_frame_20260903/A_threshold_enu and the constant-velocity extrapolation; a segment-plan head's plan block — covered ADE, per-segment errors, the arrival confusion — beside) → `run_ts.py two_tier_gates --segment-readout` (gate L2, both seeds of one token axis: the vectored waypoint p50 at 120 AND 180 s at least 125 m — the seed line — below EVERY whole-approach reference's over the same flights, the straight-in p50 not above it; A and B judged separately, whichever passes is the plan layer, A preferred when both do).",
+ "predict": false,
+ "development_cohort": "4dTrajectory/outputs/{airport}/experiments/two_tier_l2_20260917/development_cohort.json",
+ "base": {
+  "prediction_output": "segment-plan",
+  "model": "itransformer",
+  "horizon_mode": "normalized",
+  "seq_len": 61,
+  "segment_plan_segments": 10,
+  "segment_plan_position_loss_weight": 1.0,
+  "segment_plan_arrival_loss_weight": 1.0,
+  "checkpoint_selection_metric": "fixed-anchor-objective",
+  "random_train_anchor": true,
+  "random_train_anchor_min_future_s": 30.0,
+  "random_train_anchor_sampling": "remaining-path-uniform",
+  "random_train_anchor_l1_share": 0.5,
+  "epochs": 180,
+  "patience": 180
+ },
+ "arms": [
+  {
+   "key": "A_s1337",
+   "label": "A · channels attention (one token per feature), seed 1337",
+   "overrides": {"segment_plan_attention": "channels", "seed": 1337}
+  },
+  {
+   "key": "A_s2024",
+   "label": "A · channels attention, seed 2024",
+   "overrides": {"segment_plan_attention": "channels", "seed": 2024}
+  },
+  {
+   "key": "B_s1337",
+   "label": "B · segments attention (one token per segment), seed 1337",
+   "overrides": {"segment_plan_attention": "segments", "seed": 1337}
+  },
+  {
+   "key": "B_s2024",
+   "label": "B · segments attention, seed 2024",
+   "overrides": {"segment_plan_attention": "segments", "seed": 2024}
+  }
+ ]
+}

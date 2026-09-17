@@ -93,12 +93,17 @@ def mean_displacement_to(series: FlightSeries, forecast: Forecast, origin_index:
     return value
 
 
-def displacement_at(series: FlightSeries, forecast: Forecast, origin_index: int, time_s: float) -> float | None:
+def displacement_at(series: FlightSeries, forecast: Forecast, origin_index: int, time_s: float,
+                    *, hold_forecast_end: bool = False) -> float | None:
     """The 3D chart displacement between ``forecast`` (the observed row at ``origin_index``
     standing in before its first row) and the observed track at absolute ``time_s``; None
-    when either ends before it."""
+    when either ends before it. With ``hold_forecast_end`` the forecast's LAST row stands in
+    past its end — a plan that says it arrived is at the threshold, and a reading past that
+    claim measures the claim — so only the truth's end makes the reading absent."""
     truth_times = np.asarray(series.times, dtype=np.float64)
-    if time_s > float(forecast.times[-1]) + ROW_TOLERANCE_S or time_s > float(truth_times[-1]) + ROW_TOLERANCE_S:
+    if time_s > float(truth_times[-1]) + ROW_TOLERANCE_S:
+        return None
+    if not hold_forecast_end and time_s > float(forecast.times[-1]) + ROW_TOLERANCE_S:
         return None
     position = list(POSITION_IDX)
     times = np.concatenate(([float(series.times[origin_index])], np.asarray(forecast.times, dtype=np.float64)))
