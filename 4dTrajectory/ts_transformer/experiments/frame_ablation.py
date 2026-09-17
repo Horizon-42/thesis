@@ -182,7 +182,7 @@ def arm_steps(
     key: str, config_path: Path, declared: dict, *,
     airport: str, campaign: Path, split: str, device: str, seed: int | None,
     split_seed: int | None, formal: bool = True, predict_args: list[str] = (),
-    predict: bool = True,
+    predict: bool = True, development_cohort: Path | None = None,
 ) -> list[tuple[str, list[str], Path]]:
     """(step label, command, artifact whose existence means the step is done).
 
@@ -190,6 +190,12 @@ def arm_steps(
     step: a campaign whose checkpoints are read by their own runners (two-tier L1's fixed-horizon
     heads, whose 60 s records mean nothing to the whole-approach evaluation report) writes no
     prediction directory here.
+
+    ``development_cohort`` (the declaration's top-level ``"development_cohort"``, ``{airport}``
+    substituted) is handed to every train step as ``--development-cohort``: the explicit train
+    roster the train CLI demands when a random-anchor future contract covers fewer train
+    flights than the locked split holds (`run_ts.py plan_cohort` writes it from the same
+    config; two-tier L1's 60 s floor at anchor 59 leaves one KRDU train flight uncovered).
     """
     manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
     roster = HARVEST_ROOT / airport / "arrivals" / "lateral_pass_eligibility.json"
@@ -206,10 +212,11 @@ def arm_steps(
     # A formal run stamps an experiment manifest (git commit, command, data selection) and
     # refuses a dirty worktree — including untracked files that are not this campaign's.
     formal_identity = ["--campaign-id", campaign.name, "--experiment-id", key] if formal else []
+    cohort = [] if development_cohort is None else ["--development-cohort", str(development_cohort)]
     train_step = (f"{key}: train", [
         py, str(TS_SCRIPT), "train",
         "--data", str(manifest), "--eligibility-roster", str(roster),
-        "--airport", airport, "--config-overrides", str(config_path),
+        "--airport", airport, "--config-overrides", str(config_path), *cohort,
         *identity, "--device", device, "--output-dir", str(train_dir),
         *formal_identity,
     ], train_dir / TRAIN_COMPLETE_ARTIFACT)
@@ -262,6 +269,15 @@ def main(argv: list[str] | None = None) -> int:
     predict = bool(declaration.get("predict", True))
     if not predict and any("checkpoint" in arm for arm in arms):
         parser.error("\"predict\": false trains only, and a predict-only arm has nothing else to do")
+    # `"development_cohort"` — the explicit train roster every train step is handed; it is
+    # DATA written before the campaign (`run_ts.py plan_cohort`), so a missing file is a
+    # plan-time error, dry run included
+    development_cohort = None
+    if declaration.get("development_cohort"):
+        development_cohort = REPO_ROOT / str(declaration["development_cohort"]).format(airport=args.airport.upper())
+        if not development_cohort.is_file():
+            parser.error(f"development_cohort {development_cohort} does not exist; write it with "
+                         "`run_ts.py plan_cohort` from one arm's config before launching")
     airport = args.airport.upper()
     campaign = args.campaign if args.campaign.is_absolute() else REPO_ROOT / args.campaign
     for name in ("manifest.json", "lateral_pass_eligibility.json"):
@@ -269,7 +285,8 @@ def main(argv: list[str] | None = None) -> int:
         if not path.is_file():
             parser.error(f"{path} is missing (a harvest rebuild deletes the roster — "
                          "see trajectory_data_process/CLAUDE.md)")
-    print(f"frame-ablation campaign · {airport} · split={args.split}\ncampaign: {campaign}")
+    print(f"frame-ablation campaign · {airport} · split={args.split}\ncampaign: {campaign}"
+          + (f"\ndevelopment cohort: {development_cohort}" if development_cohort is not None else ""))
 
     steps: list[tuple[str, list[str], Path]] = []
     trained_arms = 0
@@ -308,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             key, config_path, declared, airport=airport,
             campaign=campaign, split=args.split, device=args.device,
             seed=args.seed, split_seed=args.split_seed, formal=not args.informal,
-            predict_args=predict_args, predict=predict,
+            predict_args=predict_args, predict=predict, development_cohort=development_cohort,
         )
 
     pending = [step for step in steps if not step[2].exists()]

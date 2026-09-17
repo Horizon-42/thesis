@@ -170,6 +170,33 @@ def test_a_train_only_declaration_plans_no_predict_step(tmp_path, monkeypatch, c
         runner.main(["--arms", str(mixed), "--campaign", str(tmp_path / "campaign2"), "--airport", "KRDU", "--dry-run"])
 
 
+def test_a_development_cohort_is_handed_to_every_train_step_and_must_exist(tmp_path, monkeypatch, capsys):
+    """`"development_cohort"` (two-tier L1): the explicit train roster the train CLI demands when
+    the random-anchor future contract leaves a train flight without an anchor — data written
+    before the campaign, so a missing file is refused at plan time, dry run included."""
+    _config, declared = runner.arm_config(ARMS["base"], {})
+    cohort = tmp_path / "development_cohort.json"
+    steps = runner.arm_steps(
+        "A", tmp_path / "A" / "config.json", declared, airport="KRDU",
+        campaign=tmp_path, split="val", device="cpu", seed=1, split_seed=1, formal=False,
+        development_cohort=cohort,
+    )
+    command = steps[0][1]
+    assert command[command.index("--development-cohort") + 1] == str(cohort)
+    _harvest(tmp_path, monkeypatch)
+    relative = cohort.relative_to(runner.REPO_ROOT) if cohort.is_relative_to(runner.REPO_ROOT) else cohort
+    declaration = tmp_path / "cohort_arms.json"
+    declaration.write_text(json.dumps({**ARMS, "development_cohort": str(relative).replace("KRDU", "{airport}")}),
+                           encoding="utf-8")
+    with pytest.raises(SystemExit):        # not written yet
+        runner.main(["--arms", str(declaration), "--campaign", str(tmp_path / "campaign"), "--airport", "KRDU", "--dry-run"])
+    cohort.write_text("{}", encoding="utf-8")
+    assert runner.main(["--arms", str(declaration), "--campaign", str(tmp_path / "campaign"), "--airport", "KRDU",
+                        "--dry-run"]) == 0
+    printed = capsys.readouterr().out
+    assert f"development cohort: {cohort}" in printed and printed.count("--development-cohort") == 2
+
+
 def _harvest(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "HARVEST_ROOT", tmp_path / "harvest")
     for name in ("manifest.json", "lateral_pass_eligibility.json"):
