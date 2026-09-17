@@ -423,3 +423,31 @@ L1 = `L1_pa_s<seed>`（门 L1 全 FAIL，pa 作读数），L2 = `B_s<seed>`（�
 **待用户决定**（§8 之外的新问题）：
 1. 是否把 `plan_conditioning_dropout=0` + 关平滑项（`control_heading_rate_loss_weight=0`、`control_bank_tv_loss_weight=0`）作为 L1 的正式配方跑两种子（含 tf / sf 契约），使门 E2E 可以正式判定；平滑项本是 §4 为"可飞"加的，而这个臂不带平滑项可飞 0.997——平滑项在 pa 契约下看来是多余的约束（要用 `flyable` 的定义核一遍，见 §5）。
 2. 门 E2E 的雷达 ADE 线 2745 与建立 0.94 在 L2 的雷达远程误差下无法达到；是改 L2（更长的回看、更多段、雷达层加权）还是改门。
+
+## 11. 后续 campaign（用户 2026-09-17 22:10 决定：1 正式配方跑两种子——是；2 L2——更长回看；3 lockstep/E2E 记录——先不补）
+
+声明在 launch 前提交（intents 已登记）；都由一条 detached 链 `two_tier_l1c_20260917/queue_l1c.sh` 串行跑，产物存在即跳过。
+
+### 11.1 L1c —— 用 token 的控制层正式配方（`docs/experiments/two_tier_l1c_arms.json`，intents `two_tier_l1c_20260917`）
+
+L1 的六个主臂（tf / sf / pa × 1337 / 2024）按 `L1b_pa_nodrop_position` 的配方重训：`plan_conditioning_dropout` 0.5 → **0**、`control_heading_rate_loss_weight` 8 → **0**、`control_bank_tv_loss_weight` 1 → **0**；其余（seq_len 30、H 60 s、随机锚点、选择指标）同 L1；同一 L1 cohort（6848 / 1401）。预注册读数：
+- 短时读数（`short_horizon_readout`，参照 native32，无记录）：带 / 不带 token 的 ADE[0,60] 与配对 Δ——三契约是否都"用 token"（Δ p50 < −30）。
+- **门 L1**（真值航路点 lockstep `lockstep_30s`，默认三变体，无记录；`two_tier_gates --baseline plan_guidance_20260910/step3d_lockstep_l1`，每契约两种子）。
+- **门 E2E**（`--plan-head B_s<seed>`，a0 = 60，hook 关，无记录；每契约两种子 `gates_e2e_<c>_B`）。§10.10 单种子读的 pa 为 ADE 1268 / 可飞 0.997 / 建立 0.640；正式判定看两种子与三契约。
+- 之后再配 §11.2 的 B91（a0 = 90）与 B121（a0 = 120）各跑一遍 E2E + 门（`two_tier_l2c/l2d_20260917/e2e_<c>_B91|B121_s<seed>`、`gates_e2e_<c>_B91|B121`）。
+
+### 11.2 L2c / L2d —— B 轴更长回看（`two_tier_l2c_arms.json` / `two_tier_l2d_arms.json`）
+
+约束：dt 2 s，30 s 一段 = 15 个采样，seq_len − 1 必须是 15 的倍数；固定锚点 = seq_len − 1（更长回看 = 更晚的锚点 = 更短的剩余航程队列）。§10.6 在锚点 60 的 val：2062 / 2100 架在 120 s 后仍在飞，1159 架在 180 s 后仍在飞——即锚点 90 几乎不丢航班，锚点 120 丢近一半直线航班。因此两个 campaign：
+
+| campaign | seq_len | 段 / 历史 | 固定锚点 | cohort（train / val） | 说明 |
+|---|---|---|---|---|---|
+| L2（已有） | 61 | 4 / 122 s | 60 | 10102 / 2104 | 门 L2 PASS（B） |
+| **L2c** `B91_s{1337,2024}` | 91 | 6 / 182 s | 90 | 10099 / 2100（丢 1 训练航班，18 条短于窗口） | 主臂：同队列的更长回看 |
+| **L2d** `B121_s{1337,2024}` | 121 | 8 / 242 s | 120 | 8741 / 2052（30 s 契约丢 1117 训练航班，308 条短于窗口） | 探针：长航班队列，不与 L2 同队列 |
+
+预注册读数：`segment_plan_readout` 各一次（L2c：B91 两种子 + seq_len 61 的 B 两臂作对照臂 + native32 / state 参照，共同固定锚点 90；L2d 同样，锚点 120；无记录），`two_tier_gates --segment-readout` 判 B91 对、B121 对；E2E 见 §11.1 末。问题：更长的历史是否压低雷达层 120–300 s 的位移与 |dT|；代价是多少航班。
+
+### 11.3 预计
+
+L1c 6 臂 × ~17 min ≈ 1.7 h；短时读数 + lockstep + 门 ≈ 25 min；E2E 6 次 ≈ 10 min；L2c/L2d 4 臂 ≈ 1–1.5 h（seq_len 更长）；两次 L2 读数 ≈ 25 min；E2E 12 次 ≈ 20 min。合计 ≈ 4–4.5 h，磁盘需 < 3 GB（无记录；runner 预检）。

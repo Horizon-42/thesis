@@ -1,0 +1,78 @@
+{
+  "_comment": "Two-tier v2 follow-up L1c (2026-09-17 late, user decision: 'promote the recipe'): the L1 main arms re-trained with the L1b_pa_nodrop_position recipe — plan-token masking rate 0 (the token on every training row) and the two control-smoothness terms off (heading rate 8 -> 0, bank TV 1 -> 0). L1b (plan doc §10.8/§10.10) showed the masking rate is what makes a tracker use its waypoint token (paired truth-plan − no-plan ΔADE p50 −32/−48/−258 m vs −0 without it) and that the smoothness terms cost a third of the fixed-anchor ADE (88 vs 130–134 m); end to end with L2 B_s1337 that arm gave ADE 1268 / fully flyable 0.997 / straight-in established 0.970 (single seed). Three contracts × two seeds so gate L1 and gate E2E can be judged formally. Same cohort as L1.",
+  "predict": false,
+  "development_cohort": "4dTrajectory/outputs/{airport}/experiments/two_tier_l1_20260917/development_cohort.json",
+  "base_recipe": "simple-v3",
+  "base": {
+    "control_recipe_name": "custom",
+    "seq_len": 30,
+    "n_segments": 6,
+    "control_horizon_s": 60.0,
+    "anchor_floor_index": 59,
+    "control_imitation_loss_weight": 0.0,
+    "control_heading_rate_loss_weight": 0.0,
+    "control_bank_tv_loss_weight": 0.0,
+    "final_time_loss_weight": 0.0,
+    "state_endpoint_loss_weight": 0.0,
+    "random_train_anchor": true,
+    "random_train_anchor_min_future_s": 60.0,
+    "random_train_anchor_sampling": "remaining-path-uniform",
+    "random_train_anchor_l1_share": 0.5,
+    "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+    "lr_plateau_metric": "objective",
+    "epochs": 180,
+    "patience": 180,
+    "plan_conditioning": "waypoints",
+    "plan_conditioning_dropout": 0.0
+  },
+  "arms": [
+    {
+      "key": "L1c_tf_s1337",
+      "label": "thrust-fraction (δ, bank, load), H 60 s, token masking 0, smoothness terms off, seed 1337",
+      "overrides": {
+        "control_thrust_parameterization": "thrust-fraction",
+        "seed": 1337
+      }
+    },
+    {
+      "key": "L1c_tf_s2024",
+      "label": "thrust-fraction (δ, bank, load), H 60 s, token masking 0, smoothness terms off, seed 2024",
+      "overrides": {
+        "control_thrust_parameterization": "thrust-fraction",
+        "seed": 2024
+      }
+    },
+    {
+      "key": "L1c_sf_s1337",
+      "label": "specific-force (n_x, bank, load), H 60 s, token masking 0, smoothness terms off, seed 1337",
+      "overrides": {
+        "control_thrust_parameterization": "specific-force",
+        "seed": 1337
+      }
+    },
+    {
+      "key": "L1c_sf_s2024",
+      "label": "specific-force (n_x, bank, load), H 60 s, token masking 0, smoothness terms off, seed 2024",
+      "overrides": {
+        "control_thrust_parameterization": "specific-force",
+        "seed": 2024
+      }
+    },
+    {
+      "key": "L1c_pa_s1337",
+      "label": "specific-force+path-angle (n_x, bank, γ*), H 60 s, token masking 0, smoothness terms off, seed 1337",
+      "overrides": {
+        "control_thrust_parameterization": "specific-force+path-angle",
+        "seed": 1337
+      }
+    },
+    {
+      "key": "L1c_pa_s2024",
+      "label": "specific-force+path-angle (n_x, bank, γ*), H 60 s, token masking 0, smoothness terms off, seed 2024",
+      "overrides": {
+        "control_thrust_parameterization": "specific-force+path-angle",
+        "seed": 2024
+      }
+    }
+  ]
+}

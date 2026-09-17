@@ -1,0 +1,38 @@
+{
+  "_comment": "Two-tier v2 follow-up L2d (2026-09-17 late, user decision: 'longer lookback'): the passing L2 axis (B, segments attention; gate L2 PASS on both seeds at seq_len 61 = 4 segments / 122 s) re-trained with seq_len 121 = 8 coarse 30 s segments / 242 s of history. The E2E misses with the best tracker are both on the vectored stratum and inherited from L2's long-lead vectored error (B's fixed-anchor vectored p50 1396 m at 180 s, 3449 m at 300 s). Its own fixed anchor is 120; the readout pairs it with the seq_len-61 B arms and the references at that common anchor. Cohort 8741 train / 2052 val (1117 train flights dropped by the 30 s future contract, 308 tracks shorter than the window): a 13 % smaller, longer-flight training set — a probe beside L2c, not a like-for-like arm.",
+  "predict": false,
+  "development_cohort": "4dTrajectory/outputs/{airport}/experiments/two_tier_l2d_20260917/development_cohort.json",
+  "base": {
+    "prediction_output": "segment-plan",
+    "model": "itransformer",
+    "horizon_mode": "normalized",
+    "seq_len": 121,
+    "segment_plan_segments": 10,
+    "segment_plan_position_loss_weight": 1.0,
+    "segment_plan_arrival_loss_weight": 1.0,
+    "checkpoint_selection_metric": "fixed-anchor-objective",
+    "random_train_anchor": true,
+    "random_train_anchor_min_future_s": 30.0,
+    "random_train_anchor_sampling": "remaining-path-uniform",
+    "random_train_anchor_l1_share": 0.5,
+    "epochs": 180,
+    "patience": 180,
+    "segment_plan_attention": "segments"
+  },
+  "arms": [
+    {
+      "key": "B121_s1337",
+      "label": "B · segments attention, seq_len 121 (8 × 30 s history), seed 1337",
+      "overrides": {
+        "seed": 1337
+      }
+    },
+    {
+      "key": "B121_s2024",
+      "label": "B · segments attention, seq_len 121 (8 × 30 s history), seed 2024",
+      "overrides": {
+        "seed": 2024
+      }
+    }
+  ]
+}
