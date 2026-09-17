@@ -145,6 +145,31 @@ def test_the_train_step_is_done_when_history_json_exists(tmp_path):
     assert steps[0][2] == tmp_path / "A" / "history.json"
 
 
+def test_a_train_only_declaration_plans_no_predict_step(tmp_path, monkeypatch, capsys):
+    """`"predict": false` (two-tier L1): the campaign's own runners read the checkpoints, so
+    an arm is its train step alone — and a predict-only arm has nothing left to do there."""
+    _config, declared = runner.arm_config(ARMS["base"], {})
+    steps = runner.arm_steps(
+        "A", tmp_path / "A" / "config.json", declared, airport="KRDU",
+        campaign=tmp_path, split="val", device="cpu", seed=1, split_seed=1, formal=False, predict=False,
+    )
+    assert [label for label, _command, _artifact in steps] == ["A: train"]
+    _harvest(tmp_path, monkeypatch)
+    declaration = tmp_path / "train_only.json"
+    declaration.write_text(json.dumps({**ARMS, "predict": False}), encoding="utf-8")
+    assert runner.main(["--arms", str(declaration), "--campaign", str(tmp_path / "campaign"),
+                        "--airport", "KRDU", "--dry-run"]) == 0
+    printed = capsys.readouterr().out
+    assert "A_threshold_enu: train" in printed and "predict" not in printed.split("steps pending")[1]
+    mixed = tmp_path / "mixed.json"
+    mixed.write_text(json.dumps({"predict": False, "base": ARMS["base"], "arms": [
+        {"key": "A", "label": "trains", "overrides": {}},
+        {"key": "B", "label": "reads", "checkpoint": "elsewhere/checkpoint.pt"},
+    ]}), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        runner.main(["--arms", str(mixed), "--campaign", str(tmp_path / "campaign2"), "--airport", "KRDU", "--dry-run"])
+
+
 def _harvest(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "HARVEST_ROOT", tmp_path / "harvest")
     for name in ("manifest.json", "lateral_pass_eligibility.json"):

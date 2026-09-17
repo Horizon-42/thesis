@@ -29,9 +29,15 @@ def _difficulty(kind: str) -> dict:
             "remaining_path_m": 20_000.0}
 
 
-def _row(kind: str, ade: float, *, flyable: bool = True, established: bool = True) -> dict:
+def _asks_e(ade: float, *, late_factor: float = 1.0) -> list[dict]:
+    """Six 30 s legs: the first three at ``ade / 10``, the later ones ``late_factor`` times that."""
+    return [{"ask": k, "lead_s": 30.0, "e_m": ade / 10 * (late_factor if k >= 3 else 1.0)} for k in range(6)]
+
+
+def _row(kind: str, ade: float, *, flyable: bool = True, established: bool = True, late_factor: float = 1.0) -> dict:
     return {"difficulty": _difficulty(kind), "ade_m": ade, "fde_m": ade, "at": {lead: ade / 2 for lead in LEADS},
-            "reference": {"fully_flyable": flyable, "established": established}}
+            "reference": {"fully_flyable": flyable, "established": established},
+            "asks_e_m": _asks_e(ade, late_factor=late_factor)}
 
 
 def _flights(straight_ade: float, vectored_ade: float, **flags) -> dict[str, dict]:
@@ -47,7 +53,7 @@ def _lockstep(tmp_path, name: str, checkpoints: dict[str, dict[str, dict]], *, s
     payload = {
         "schema": schema,
         "plan": {"split": split, "limit": limit},
-        "plan_source": source if source == "truth" else f"{source}:/some/plan/checkpoint.pt",
+        "plan_source": f"{source}:/some/plan/checkpoint.pt" if source == "head" else source,
         "checkpoints": {
             label: {"anchor": anchor, "variants": {v: {"flights": rows} for v, rows in variants.items()}}
             for label, variants in checkpoints.items()
@@ -145,6 +151,53 @@ def test_g1_established_is_a_fraction_of_the_guidance_on_the_same_flights(tmp_pa
     assert g1["verdicts"]["s1337"]["pass"]
 
 
+# ── L1 (two-tier v2 §3) ─────────────────────────────────────────────────────────
+
+def test_l1_reads_a_waypoint_artifact_against_the_guidance_with_the_drift_beside(tmp_path):
+    """The truth-waypoint source is judged under L1's own numbers (1500 / 250 m, the guidance's
+    established share × 0.88), and the drift reading is REPORTED per variant, never judged."""
+    steady = _variants(240.0, 1400.0)
+    drifting = {VARIANT_RECEDING: _flights(240.0, 1400.0, late_factor=2.0),
+                VARIANT_NO_PLAN: _flights(300.0, 1900.0)}
+    lockstep = _lockstep(tmp_path, "l1", {"s1337": steady, "s2024": drifting}, source="truth-waypoints")
+    result = _run(tmp_path, lockstep, baseline=_guidance(tmp_path))
+    assert set(result["gates"]) == {"L1"}
+    l1 = result["gates"]["L1"]
+    assert l1["pass"]                                        # 1400 < 1500 and 240 < 250, both seeds
+    [vectored] = [c for c in l1["verdicts"]["s1337"]["criteria"] if c["criterion"].startswith("ADE mean vectored")]
+    assert vectored["threshold"] == gates.L1_ADE_BELOW_M[STRATUM_VECTORED] == 1500.0
+    assert "guidance" in l1["arms"]["s1337"]["receding_minus"]
+    steady_drift = l1["arms"]["s1337"]["drift"][VARIANT_RECEDING][STRATUM_VECTORED]
+    rising = l1["arms"]["s2024"]["drift"][VARIANT_RECEDING][STRATUM_VECTORED]
+    assert steady_drift["ratio"] == pytest.approx(1.0) and steady_drift["rising"] is False
+    assert rising["ratio"] == pytest.approx(2.0) and rising["rising"] is True     # 2.0 > 1.5
+    assert rising["p50_by_ask_m"]["3"]["p50"] == pytest.approx(280.0) and rising["p50_by_ask_m"]["0"]["n"] == 4
+    assert l1["verdicts"]["s2024"]["pass"]                   # the drift never enters the verdict
+
+
+def test_a_tracker_cohort_inside_the_baselines_is_paired_and_the_dropped_count_stated(tmp_path):
+    """A fixed horizon admits only flights with Δ of truth after the anchor, so the tracker may
+    hold FEWER flights than the guidance baseline: paired over the tracker's, the gap stated."""
+    subset = _variants(240.0, 1400.0)
+    for rows in subset.values():
+        rows.pop("v3")
+    lockstep = _lockstep(tmp_path, "l1", {"s1337": subset, "s2024": _variants(240.0, 1400.0)},
+                         source="truth-waypoints")
+    l1 = _run(tmp_path, lockstep, baseline=_guidance(tmp_path))["gates"]["L1"]
+    assert l1["pass"]
+    assert l1["verdicts"]["s1337"]["baseline_flights_not_in_tracker"] == 1
+    assert l1["verdicts"]["s2024"]["baseline_flights_not_in_tracker"] == 0
+    assert l1["arms"]["s1337"]["receding_minus"]["guidance"][STRATUM_VECTORED]["n"] == 3
+
+
+def test_l1_fails_at_its_own_thresholds(tmp_path):
+    lockstep = _lockstep(tmp_path, "l1", {"s1337": _variants(240.0, 1400.0), "s2024": _variants(250.0, 1400.0)},
+                         source="truth-waypoints")
+    l1 = _run(tmp_path, lockstep, baseline=_guidance(tmp_path))["gates"]["L1"]
+    failed = [c["criterion"] for c in l1["verdicts"]["s2024"]["criteria"] if not c["pass"]]
+    assert not l1["pass"] and len(failed) == 1 and failed[0].startswith("ADE mean straight-in")   # strict: 250 is not below 250
+
+
 # ── G3 ─────────────────────────────────────────────────────────────────────────
 
 def test_g3_reads_a_head_artifact_with_inclusive_ade_and_the_plan_paths_flyable_share_beside(tmp_path):
@@ -174,7 +227,7 @@ def test_g1_and_g3_artifacts_are_judged_side_by_side(tmp_path):
 def test_the_readout_refuses_another_cohort_anchor_schema_or_a_missing_gate_arm(tmp_path):
     guidance = _guidance(tmp_path)
     fewer = _flights(150.0, 900.0)
-    fewer.pop("v3")
+    fewer["v9"] = _row("vectored", 900.0)                 # a tracker flight the baseline never flew
     both = {"s1337": _variants(150.0, 900.0), "s2024": _variants(150.0, 900.0)}
     restratified = _flights(150.0, 900.0)
     restratified["s0"]["difficulty"] = _difficulty("vectored")

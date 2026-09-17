@@ -81,18 +81,23 @@ import torch
 
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.config import (
+    CONTROL_HOOKS_AVAILABLE,
     CONTROL_HOOK_OFF,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_OFF,
     DURATION_HEAD_POINT,
+    HOOK_SATURATIONS,
+    HOOK_SATURATION_SOFT,
     PLAN_CONDITIONING_OFF,
+    PLAN_CONDITIONING_WAYPOINTS,
     PREDICTION_CONTROL,
     PREDICTION_PLAN,
     default_anchor,
+    plan_waypoint_count,
 )
 from ts_transformer.data.anchor_grid import difficulty_at_anchor
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks
-from ts_transformer.data.channels import IDX
+from ts_transformer.data.channels import IDX, POSITION_IDX
 from ts_transformer.data.dataset import FlightSeries, truth_duration_s
 from ts_transformer.experiments.anytime_curve import FORBIDDEN_SPLIT, Arm, Grid, cohort_series, load_arm, parse_arms
 from ts_transformer.experiments.plan_oracle import closing_horizon_s, reference_verdicts
@@ -102,7 +107,9 @@ from ts_transformer.inference.forecast import Forecast, concatenate, cut_at_thre
 from ts_transformer.inference.receding import ROW_TOLERANCE_S, cut_at_lead, displacement_at, rolled_series
 from ts_transformer.io_utils import file_sha256
 from ts_transformer.outputs.control.forecast import forecast_control_batch
-from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, plan_token
+from ts_transformer.outputs.control.plan_token import (
+    PLAN_TOKEN_KEY, plan_token, plan_token_width, truth_waypoints, waypoint_token,
+)
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.outputs.plan.extractors import extract_plan, ground_speeds
 from ts_transformer.outputs.plan.labels import (
@@ -112,8 +119,11 @@ from ts_transformer.outputs.plan.model import prediction_rows
 from ts_transformer.outputs.plan.skeleton import RunwaySkeleton, SkeletonCache
 
 # v2 (2026-09-16): every flight row carries `difficulty` and the plan oracle's `reference`
-# verdicts; every stratum block their shares.
-RESULT_SCHEMA = "ts-tracker-lockstep-v2"
+# verdicts; every stratum block their shares. v3 (2026-09-17, two-tier v2 §3): every flight
+# row carries `asks_e_m` — the displacement from the truth at the END of every leg flown (the
+# per-ask step error, the drift reading) — and every stratum block its p50 by ask; the plan
+# records the command hook the arms were flown under.
+RESULT_SCHEMA = "ts-tracker-lockstep-v3"
 #: The block each record directory's summary carries — the publisher's
 #: `VARIANT_RECORD_BLOCKS` mirrors this name.
 RECORDS_BLOCK = "lockstep"
@@ -141,6 +151,10 @@ class LockstepPlan:
     limit: int
     batch_size: int | None
     write_records: bool
+    #: The command hook every arm is flown under (``hook/saturation``), or None: the network's
+    #: own schedule. Two-tier v2 §3: the gate reads the hook-free run, the hooked one is the
+    #: delivery-form reading beside it.
+    command_hook: str | None = None
 
 
 @dataclass
@@ -157,6 +171,10 @@ class FlightRun:
     cta_raised_max_s: float = 0.0  # the largest amount an ask's arrival time was raised by
     ended: str | None = None
     truncated: bool = False
+    #: Per leg flown: the ask it came from, the seconds it spans and the displacement from the
+    #: truth at its END (None past the truth's end) — the per-ask step error a drift reading
+    #: lines up along the flight.
+    asks_e: list[dict] = field(default_factory=list)
 
     @property
     def flown_s(self) -> float:
@@ -167,11 +185,12 @@ class FlightRun:
 
 @dataclass(frozen=True)
 class AskPlan:
-    """What one ask hands the checkpoint besides its history: the arrival time and the plan."""
+    """What one ask hands the checkpoint besides its history: the arrival time (the CTA of a
+    ``cta=given`` checkpoint, and the first ask's horizon) and the plan TOKEN, already in the
+    shape the checkpoint reads (`plan_token` / `waypoint_token`)."""
 
     arrival_s: float
-    operating: Operating
-    instruction: Instruction | None
+    token: np.ndarray
 
 
 def pose(history: FlightSeries, anchor: int) -> tuple[float, float, float, float]:
@@ -199,7 +218,8 @@ class TruthPlans:
     source = "truth"
     reads_the_future = "the truth's plan and arrival time at every ask (protocol C, an oracle)"
 
-    def __init__(self, runs: list[FlightRun], a0: int) -> None:
+    def __init__(self, runs: list[FlightRun], a0: int, config=None) -> None:
+        del config    # the instruction plan reads the skeleton, not the run's token shape
         self.experts = {
             id(run): TruthExpert(extract_plan(run.series, a0, run.skeleton), run.series, a0, run.skeleton)
             for run in runs
@@ -220,7 +240,7 @@ class TruthPlans:
             arrival = truth_duration_s(run.series, anchor) if first else float(operating.T_s)
             if not first:
                 operating = on_final_capture(operating, run.skeleton, e, n, heading)
-            out.append(AskPlan(arrival_s=arrival, operating=operating, instruction=instruction))
+            out.append(AskPlan(arrival_s=arrival, token=plan_token(targets_at(operating, instruction, e, n, run.skeleton))))
         return out
 
 
@@ -257,8 +277,47 @@ class HeadPlans:
                 T_s=order.T_s, V_mid_mps=order.V_mid_mps, d_decel_m=order.d_decel_m, V_final_mps=order.V_final_mps,
                 h_capture_m=order.h_capture_m, d_join_m=order.d_join_m, remaining_m=order.remaining_m,
             ), run.skeleton, e, n, heading)
-            out.append(AskPlan(arrival_s=float(order.T_s), operating=operating, instruction=order.instruction))
+            out.append(AskPlan(arrival_s=float(order.T_s),
+                               token=plan_token(targets_at(operating, order.instruction, e, n, run.skeleton))))
         return out
+
+
+class TruthWaypoints:
+    """Two-tier v2 §3, protocol C: the TRUTH's coarse plan seen from where the aircraft IS — its
+    position every `PLAN_WAYPOINT_SEGMENT_S` after the ask's flown time, relative to the flown
+    row (`plan_token.truth_waypoints`: the training row's own definition with the origin moved
+    from the observed anchor to the flown state). Time-indexed, not pose-indexed: a tracker
+    that has fallen behind is told where the truth IS at the next coarse instants, so the
+    plan carries the schedule as well as the path. The first ask's arrival time is the truth
+    duration at ``a0``, read for the horizon only — a fixed-horizon checkpoint takes no CTA."""
+
+    source = "truth-waypoints"
+    reads_the_future = ("the truth's position at the next coarse waypoints from every ask's flown time and "
+                        "position, and its duration at a0 for the horizon (protocol C, an oracle)")
+
+    def __init__(self, runs: list[FlightRun], a0: int, config) -> None:
+        del runs
+        self.a0, self.count = a0, plan_waypoint_count(config)
+
+    def at_ask(self, runs: list[FlightRun], histories: list[FlightSeries], anchor: int, *, first: bool) -> list[AskPlan]:
+        del first
+        out = []
+        for run, history in zip(runs, histories, strict=True):
+            # the rolled series keeps the observed clock, so its anchor row IS the flown time
+            origin = np.asarray(history.values[anchor], dtype=np.float64)[list(POSITION_IDX)]
+            waypoints = truth_waypoints(run.series, float(history.times[anchor]), origin, self.count)
+            out.append(AskPlan(arrival_s=truth_duration_s(run.series, self.a0),
+                               token=waypoint_token(waypoints, self.count)))
+        return out
+
+
+def plan_source_class(head: Arm | None, config):
+    """WHICH source flies the plan: a plan head when one is given, else the truth's — in the
+    token shape the checkpoint reads (`plan_conditioning`; a plan-free checkpoint takes the
+    instruction source for its arrival time alone)."""
+    if head is not None:
+        return HeadPlans
+    return TruthWaypoints if config.plan_conditioning == PLAN_CONDITIONING_WAYPOINTS else TruthPlans
 
 
 # ── one ask ────────────────────────────────────────────────────────────────────
@@ -281,9 +340,10 @@ def ask_row(run: FlightRun, history: FlightSeries, anchor: int, config, plan_at:
         run.cta_raised_max_s = max(run.cta_raised_max_s, floor_s - plan_at.arrival_s)
         row["cta_s"] = np.array(max(plan_at.arrival_s, floor_s), dtype=np.float64)
     if config.plan_conditioning != PLAN_CONDITIONING_OFF:
-        e, n, _heading, _speed = pose(history, anchor)
-        targets = targets_at(plan_at.operating, plan_at.instruction, e, n, run.skeleton) if with_plan else None
-        row[PLAN_TOKEN_KEY] = plan_token(targets)
+        # the source's token, or the ABSENT token of this checkpoint's width
+        row[PLAN_TOKEN_KEY] = (
+            plan_at.token if with_plan else np.zeros(plan_token_width(config), dtype=np.float32)
+        )
     return row
 
 
@@ -294,7 +354,8 @@ def fly_variant(arm: Arm, series: list[FlightSeries], variant: str, plan: Lockst
     step_rows = int(round(plan.step_s / config.dt_s))
     skeletons = SkeletonCache()
     runs = [FlightRun(series=item, skeleton=skeletons.for_series(item)) for item in series]
-    plans = TruthPlans(runs, a0) if head is None else HeadPlans(head, batch_size, device)
+    source = plan_source_class(head, config)
+    plans = HeadPlans(head, batch_size, device) if source is HeadPlans else source(runs, a0, config)
     floor_s = ask_floor_s(config, plan.step_s)
     ask = 0
     while any(run.ended is None for run in runs):
@@ -326,19 +387,22 @@ def fly_variant(arm: Arm, series: list[FlightSeries], variant: str, plan: Lockst
         for run, history, forecast in zip(active, histories, forecasts, strict=True):
             steps = (int((forecast.final_time_s + ROW_TOLERANCE_S) // plan.step_s)
                      if variant == VARIANT_ONE_SHOT and ask == 0 else 1)
-            fly_leg(run, history, forecast, steps=steps, step_s=plan.step_s, ask=ask)
+            fly_leg(run, history, forecast, steps=steps, step_s=plan.step_s, ask=ask, a0=a0)
         print(f"    {variant} ask {ask}: {len(active)} flights at anchor {anchor}, "
               f"{sum(1 for run in runs if run.ended is None)} continue", flush=True)
         ask += 1
     return runs
 
 
-def fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, steps: int, step_s: float, ask: int) -> None:
+def fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, steps: int, step_s: float, ask: int,
+            a0: int) -> None:
     """Fly ``steps`` whole steps of this ask's ``forecast`` (a forecast shorter than one step — only
-    without a given CTA — is flown whole and ends the flight), and end the flight where it crosses
-    the threshold on the final or reaches its horizon, whichever comes first. The next ask is
-    ``ask + steps``. ``run.asks`` counts the asks that flew a leg: an ask whose flight's horizon falls
-    before the forecast's first row ends the flight there and flies nothing."""
+    without a given CTA or a fixed horizon — is flown whole and ends the flight), and end the flight
+    where it crosses the threshold on the final or reaches its horizon, whichever comes first. The
+    next ask is ``ask + steps``. ``run.asks`` counts the asks that flew a leg: an ask whose flight's
+    horizon falls before the forecast's first row ends the flight there and flies nothing. Every leg
+    flown records the displacement from the truth at its END (`run.asks_e`; None past the truth's
+    end) — the step error of that ask, which a drift reading lines up along the flight."""
     crossed = cut_at_threshold_crossing(forecast, history)
     remaining_s = run.horizon_s - run.flown_s
     short = forecast.final_time_s < step_s - ROW_TOLERANCE_S
@@ -356,6 +420,12 @@ def fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, steps:
     if leg is not None:
         run.legs.append(leg)
         run.asks += 1
+        # a0's observed row stands in as the leg's t=0 row; the reading is at the leg's END,
+        # which lies on the leg's own rows, so a rolled ask reads its flown position there
+        run.asks_e.append({
+            "ask": ask, "lead_s": float(np.sum(leg.sample_durations_s)),
+            "e_m": displacement_at(run.series, leg, a0, float(leg.times[-1])),
+        })
 
 
 def whole_forecast(run: FlightRun, a0: int) -> Forecast:
@@ -386,6 +456,7 @@ def flight_row(run: FlightRun, forecast: Forecast, a0: int, points: int, difficu
         "final_time_error_s": float(metrics["final_time_error_s"]),
         "chamfer_m": float(geometry["chamfer_m"]), "frechet_m": float(geometry["frechet_m"]),
         "at": {f"{lead:g}": displacement_at(run.series, forecast, a0, origin + lead) for lead in LEADS_S},
+        "asks_e_m": run.asks_e,
     }
     return row, metrics
 
@@ -394,9 +465,24 @@ def _p50(values: list[float]) -> float | None:
     return float(np.median(values)) if values else None
 
 
+def e_by_ask(cells: list[dict]) -> dict[str, dict]:
+    """The per-ask step error pooled over ``cells``: ``{ask: {n, lead_s, p50}}`` over the legs whose
+    end the truth still covers — the drift reading's raw curve (two-tier v2 §3)."""
+    by_ask: dict[int, list[dict]] = {}
+    for cell in cells:
+        for entry in cell["asks_e_m"]:
+            if entry["e_m"] is not None:
+                by_ask.setdefault(int(entry["ask"]), []).append(entry)
+    return {
+        str(ask): {"n": len(entries), "lead_s": _p50([e["lead_s"] for e in entries]), "p50": _p50([e["e_m"] for e in entries])}
+        for ask, entries in sorted(by_ask.items())
+    }
+
+
 def stratum_block(rows: dict[str, dict], keys: list[str]) -> dict:
     cells = [rows[key] for key in keys]
     return {
+        "e_by_ask_p50_m": e_by_ask(cells),
         "n": len(cells),
         "ade_mean_m": float(np.mean([c["ade_m"] for c in cells])) if cells else None,
         "ade_p50_m": _p50([c["ade_m"] for c in cells]),
@@ -437,6 +523,8 @@ def render(payload: dict) -> str:
         "chamfer / Fréchet time-free; disp p50 at leads from a0; below-floor = flights with an ask whose arrival "
         "time was raised to the ask floor max(the training future floor, one step).",
     ]
+    if plan.get("command_hook"):
+        lines.append(f"command hook {plan['command_hook']} on every arm (the delivery-form reading; a gate reads the hook-free run).")
     for label, arm in payload["checkpoints"].items():
         lines.append("")
         lines.append(f"── {label} — {arm['checkpoint']} ({arm['flights']} flights, a0={arm['anchor']})")
@@ -450,6 +538,8 @@ def render(payload: dict) -> str:
                     f"ended {cell['ended']} cut {cell['truncated_at_threshold']} below-floor {cell['flights_with_an_ask_below_floor']} "
                     f"flyable {_fmt(cell['fully_flyable_share'], 3)} established {_fmt(cell['established_share'], 3)} | {leads}"
                 )
+                steps = " ".join(f"k{ask} {_fmt(v['p50'])}({v['n']})" for ask, v in cell["e_by_ask_p50_m"].items())
+                lines.append(f"   {'':<17s} {'step error p50 by ask':<34s} {steps}")
     return "\n".join(lines) + "\n"
 
 
@@ -458,9 +548,12 @@ def check_arm(arm: Arm, plan: LockstepPlan) -> None:
     if config.prediction_output != PREDICTION_CONTROL:
         raise SystemExit(f"{arm.label} ({arm.path}): {INSTRUMENT} flies a CONTROL checkpoint, "
                          f"this one predicts {config.prediction_output!r}")
-    if config.control_command_hook != CONTROL_HOOK_OFF:
-        raise SystemExit(f"{arm.label} ({arm.path}): a hooked checkpoint rewrites the schedule; "
-                         f"{INSTRUMENT} flies the network's own")
+    if config.control_command_hook != CONTROL_HOOK_OFF and plan.command_hook is None:
+        raise SystemExit(f"{arm.label} ({arm.path}): trained under command hook {config.control_command_hook!r}; "
+                         f"{INSTRUMENT} flies the network's own schedule unless --command-hook names one")
+    if config.control_horizon_s and config.control_horizon_s < plan.step_s - ROW_TOLERANCE_S:
+        raise SystemExit(f"{arm.label} ({arm.path}): a {config.control_horizon_s:g} s fixed horizon does not cover "
+                         f"one {plan.step_s:g} s step; every leg would end the flight")
     if config.latent_dim or config.duration_head != DURATION_HEAD_POINT:
         raise SystemExit(f"{arm.label} ({arm.path}): {INSTRUMENT} is defined on the deterministic point head")
     if config.cta_conditioning not in (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN):
@@ -517,11 +610,12 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: LockstepPlan, device
                 extra_summary={RECORDS_BLOCK: {
                     "schema": RECORDS_SCHEMA, "campaign": campaign, "label": arm.label, "variant": variant,
                     "step_s": plan.step_s, "horizon": HORIZON_RULE, "ask_floor_s": ask_floor_s(config, plan.step_s),
-                    "anchor": a0,
+                    "anchor": a0, "command_hook": plan.command_hook,
                     "plan_conditioning": config.plan_conditioning, "cta_conditioning": config.cta_conditioning,
-                    "plan_source": plan_source(head),
+                    "control_horizon_s": config.control_horizon_s,
+                    "plan_source": plan_source(head, config),
                     "plan_head_sha256": None if head is None else file_sha256(head.path),
-                    "reads_the_future": (TruthPlans if head is None else HeadPlans).reads_the_future,
+                    "reads_the_future": plan_source_class(head, config).reads_the_future,
                     "split": plan.split, "limit": plan.limit,
                     "split_flights": len(arm.payload["split"][plan.split]), "records": len(records),
                 }},
@@ -537,8 +631,9 @@ def measure_arm(arm: Arm, series: list[FlightSeries], plan: LockstepPlan, device
     }
 
 
-def plan_source(head: Arm | None) -> str:
-    return TruthPlans.source if head is None else f"{HeadPlans.source}:{head.path}"
+def plan_source(head: Arm | None, config) -> str:
+    source = plan_source_class(head, config)
+    return f"{source.source}:{head.path}" if head is not None else source.source
 
 
 def load_head(path: Path, grid: Grid, device: torch.device) -> Arm:
@@ -591,6 +686,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan-head", type=Path, default=None, metavar="PATH",
                         help="T2: a plan checkpoint whose own prediction on each ask's history is the plan "
                              "and the arrival time (protocol A); default: the truth's (T1, protocol C)")
+    parser.add_argument("--command-hook", choices=CONTROL_HOOKS_AVAILABLE, default=None,
+                        help="fly every arm under this command hook (what it means in `predict`); the "
+                             "delivery-form reading beside the hook-free gate run (two-tier v2 §3)")
+    parser.add_argument("--hook-saturation", choices=HOOK_SATURATIONS, default=HOOK_SATURATION_SOFT,
+                        help=f"the hook's saturation (default {HOOK_SATURATION_SOFT}); read with --command-hook only")
     parser.add_argument("--device", default="auto")
     return parser
 
@@ -610,7 +710,8 @@ def parse_plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Loc
         parser.error("--batch-size must be positive")
     return LockstepPlan(split=args.split, step_s=float(args.step_s),
                         variants=variants, limit=int(args.limit), batch_size=args.batch_size,
-                        write_records=bool(args.write_records))
+                        write_records=bool(args.write_records),
+                        command_hook=None if args.command_hook is None else f"{args.command_hook}/{args.hook_saturation}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -624,7 +725,9 @@ def main(argv: list[str] | None = None) -> int:
     device = resolve_device(args.device)
     grid = Grid(split=plan.split, bins_m=(), min_future_s=0.0, batch_size=plan.batch_size, limit=plan.limit)
     loaded = [
-        load_arm(label, path, grid, device, instrument=INSTRUMENT, refuse_cta_given=False, refuse_plan=False)
+        load_arm(label, path, grid, device, instrument=INSTRUMENT, refuse_cta_given=False, refuse_plan=False,
+                 command_hook=args.command_hook,
+                 hook_saturation=None if args.command_hook is None else args.hook_saturation)
         for label, path in arms.items()
     ]
     for arm in loaded:
@@ -632,6 +735,11 @@ def main(argv: list[str] | None = None) -> int:
     head = None if args.plan_head is None else load_head(args.plan_head, grid, device)
     if head is not None:
         check_head(head, loaded, grid)
+    # one plan SOURCE per artifact: the gates key on it, so two token shapes cannot share one
+    sources = {plan_source(head, arm.config) for arm in loaded}
+    if len(sources) != 1:
+        raise SystemExit(f"the arms read different plan sources {sorted(sources)}; one artifact holds one source")
+    source_config = loaded[0].config
     out.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(dir=out.parent, prefix=f"{out.name}.partial-"))
     try:
@@ -639,10 +747,11 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "schema": RESULT_SCHEMA,
             "plan": {"split": plan.split, "step_s": plan.step_s, "horizon": HORIZON_RULE,
-                     "variants": list(plan.variants), "limit": plan.limit, "write_records": plan.write_records},
-            "plan_source": plan_source(head),
+                     "variants": list(plan.variants), "limit": plan.limit, "write_records": plan.write_records,
+                     "command_hook": plan.command_hook},
+            "plan_source": plan_source(head, source_config),
             "plan_head_sha256": None if head is None else file_sha256(head.path),
-            "reads_the_future": (TruthPlans if head is None else HeadPlans).reads_the_future,
+            "reads_the_future": plan_source_class(head, source_config).reads_the_future,
             "strata_anchor": "a0 = default_anchor (strata_fixed_at_anchor)",
             "leads_s": list(LEADS_S),
             "device": str(device),

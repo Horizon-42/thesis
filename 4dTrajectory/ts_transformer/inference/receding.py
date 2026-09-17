@@ -66,6 +66,33 @@ def cut_at_lead(forecast: Forecast, lead_s: float) -> Forecast:
     return cut_rows(forecast, int(rows[0]) + 1)
 
 
+def mean_displacement_to(series: FlightSeries, forecast: Forecast, origin_index: int, horizon_s: float,
+                         *, grid_dt_s: float = 1.0) -> float:
+    """ADE[0, horizon]: the mean 3D chart displacement between ``forecast`` and the observed track
+    on the ``grid_dt_s`` grid from the origin to ``horizon_s`` INCLUSIVE — `lead_time_error`'s
+    accounting (the t=0 point, identically zero, is in the mean). Both must reach the horizon."""
+    grid = np.arange(0.0, horizon_s + ROW_TOLERANCE_S, grid_dt_s)
+    origin_time = float(series.times[origin_index])
+    if origin_time + grid[-1] > float(forecast.times[-1]) + ROW_TOLERANCE_S:
+        raise ValueError(f"the forecast ends {float(forecast.times[-1]) - origin_time:.3f} s after the origin, "
+                         f"before the {horizon_s:g} s horizon")
+    if origin_time + grid[-1] > float(series.times[-1]) + ROW_TOLERANCE_S:
+        raise ValueError(f"{series.dataset_id}: the truth ends before the {horizon_s:g} s horizon")
+    position = list(POSITION_IDX)
+    times = np.concatenate(([origin_time], np.asarray(forecast.times, dtype=np.float64)))
+    values = np.concatenate((np.asarray(series.values[origin_index : origin_index + 1], dtype=np.float64)[:, position],
+                             np.asarray(forecast.values, dtype=np.float64)[:, position]))
+    truth_times = np.asarray(series.times, dtype=np.float64)
+    truth = np.asarray(series.values, dtype=np.float64)[:, position]
+    query = origin_time + grid
+    predicted = np.column_stack([np.interp(query, times, values[:, c]) for c in range(3)])
+    observed = np.column_stack([np.interp(query, truth_times, truth[:, c]) for c in range(3)])
+    value = float(np.linalg.norm(predicted - observed, axis=1).mean())
+    if not math.isfinite(value):
+        raise ValueError(f"{series.dataset_id}: non-finite displacement inside {horizon_s:g} s of the origin")
+    return value
+
+
 def displacement_at(series: FlightSeries, forecast: Forecast, origin_index: int, time_s: float) -> float | None:
     """The 3D chart displacement between ``forecast`` (the observed row at ``origin_index``
     standing in before its first row) and the observed track at absolute ``time_s``; None
@@ -86,4 +113,4 @@ def displacement_at(series: FlightSeries, forecast: Forecast, origin_index: int,
     return value
 
 
-__all__ = ["ROW_TOLERANCE_S", "cut_at_lead", "displacement_at", "rolled_series"]
+__all__ = ["ROW_TOLERANCE_S", "cut_at_lead", "displacement_at", "mean_displacement_to", "rolled_series"]

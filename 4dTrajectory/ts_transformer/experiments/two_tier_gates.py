@@ -1,9 +1,16 @@
-"""Two-tier gates G1 / G3 off `tracker_lockstep` artifacts, flight by flight against the rule guidance.
+"""Two-tier gates L1 / G1 / G3 off `tracker_lockstep` artifacts, flight by flight against the rule guidance.
 
-Feasibility design `docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §6 (the gates) and §10.7
-(this readout, its readings fixed before any T1a number existed). A gate is judged per GATE ARM (the
-checkpoint labels ``--gate-arms`` names, the two seeds) on the ``receding`` variant, and passes only when
-every gate arm passes every criterion:
+Two-tier v2 `docs/2026-09-17_two_tier_plan_v2.zh.md` §3 (gate L1, the drift reading) over the feasibility
+design's §6 / §10.7 gates (G1 / G3, the abandoned T1a design's, kept for the artifacts that carry them).
+A gate is judged per GATE ARM (the checkpoint labels ``--gate-arms`` names, the two seeds) on the
+``receding`` variant, and passes only when every gate arm passes every criterion:
+
+* **L1** — an artifact whose plans are the truth's coarse WAYPOINTS (`tracker_lockstep.TruthWaypoints`,
+  protocol C): vectored ADE mean < 1500 m AND straight-in < 250 m (better than the rule guidance's
+  1847 / 283 m); fully flyable on ≥ 95 % of all flights; established on ≥ 0.88 × the guidance's share per
+  stratum over the SAME flights (``--baseline``, as G1). Beside it, never inside it, the DRIFT reading:
+  the per-ask step error (`asks_e_m`) pooled per stratum, its p50 over asks ≥ 3 against the p50 over
+  asks 0–2 — a ratio over 1.5 is "rising" and triggers S5 (training on the tracker's own states).
 
 * **G1** — an artifact whose plans are the TRUTH's (protocol C): vectored ADE mean < 1000 m AND
   straight-in < 200 m; fully flyable on ≥ 95 % of all flights; established (crossed the threshold on the
@@ -48,7 +55,7 @@ from pathlib import Path
 import numpy as np
 
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks
-from ts_transformer.experiments.plan_oracle import (
+from ts_transformer.experiments.plan_oracle import (  # noqa: E402
     POLICY_TRUTH,
     ROLLING_LOCKSTEP,
     ROUTE_NEXT,
@@ -62,28 +69,57 @@ from ts_transformer.experiments.tracker_lockstep import (
     VARIANT_RECEDING,
     HeadPlans,
     TruthPlans,
+    TruthWaypoints,
 )
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 
-SCHEMA = "ts-two-tier-gates-v1"
+SCHEMA = "ts-two-tier-gates-v2"   # v2 (2026-09-17): gate L1 (two-tier v2 §3) and the drift reading beside every arm
 GATE_G1 = "G1"
 GATE_G3 = "G3"
+GATE_L1 = "L1"
 #: The gate an artifact is judged under, by where its plans came from (`tracker_lockstep.plan_source`).
-GATE_BY_SOURCE = {TruthPlans.source: GATE_G1, HeadPlans.source: GATE_G3}
+GATE_BY_SOURCE = {TruthPlans.source: GATE_G1, HeadPlans.source: GATE_G3, TruthWaypoints.source: GATE_L1}
 GATE_STRATA = (STRATUM_STRAIGHT_IN, STRATUM_VECTORED)
 #: The split every gate is read on, and the fewest gate arms (seeds) a gate is judged over.
 GATE_SPLIT = "val"
 MIN_GATE_ARMS = 2
 READ_STRATA = (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED)
 
-# G1 (§6, §10.3): the learned tracker flies the truth's plan closer than the rule guidance does.
+
+@dataclass(frozen=True)
+class TruthGate:
+    """A gate on a TRUTH-plan artifact (protocol C): the tracker flies the truth's plan closer than
+    the rule guidance does, stays flyable, and gets established nearly as often as the guidance
+    over the SAME flights."""
+
+    ade_below_m: dict[str, float]
+    fully_flyable_at_least: float
+    established_fraction_of_guidance: float
+
+
+# G1 (feasibility §6, §10.3): the whole-approach tracker under the instruction plan (T1a, abandoned).
 G1_ADE_BELOW_M = {STRATUM_VECTORED: 1000.0, STRATUM_STRAIGHT_IN: 200.0}
 G1_FULLY_FLYABLE_AT_LEAST = 0.95
 G1_ESTABLISHED_FRACTION_OF_GUIDANCE = 0.88
+# L1 (two-tier v2 §3): the short-horizon control layer under the truth's coarse waypoints, in
+# lockstep — better than the rule guidance (1847 / 283 m), flyable, established ≥ 88 % of it.
+L1_ADE_BELOW_M = {STRATUM_VECTORED: 1500.0, STRATUM_STRAIGHT_IN: 250.0}
+L1_FULLY_FLYABLE_AT_LEAST = 0.95
+L1_ESTABLISHED_FRACTION_OF_GUIDANCE = 0.88
+TRUTH_GATES = {
+    GATE_G1: TruthGate(G1_ADE_BELOW_M, G1_FULLY_FLYABLE_AT_LEAST, G1_ESTABLISHED_FRACTION_OF_GUIDANCE),
+    GATE_L1: TruthGate(L1_ADE_BELOW_M, L1_FULLY_FLYABLE_AT_LEAST, L1_ESTABLISHED_FRACTION_OF_GUIDANCE),
+}
 # G3 (§6): the two tiers end to end beat native32's one-shot (2870 / 445 m) by the seed lines (125 / 30 m).
 G3_ADE_AT_MOST_M = {STRATUM_VECTORED: 2745.0, STRATUM_STRAIGHT_IN: 415.0}
 G3_FULLY_FLYABLE_AT_LEAST = 0.95
 G3_ESTABLISHED_AT_LEAST = 0.94
+# The DRIFT reading (two-tier v2 §3, "我替你选的"): read beside every arm, never part of a gate — it
+# decides whether S5 (training on the tracker's own states) is triggered. The per-ask step error
+# (`asks_e_m`, the displacement at the end of each leg) is pooled per stratum; "rising" = the p50
+# over asks from DRIFT_LATE_FROM_ASK on exceeds DRIFT_RATIO_MAX × the p50 over the asks before it.
+DRIFT_LATE_FROM_ASK = 3
+DRIFT_RATIO_MAX = 1.5
 
 
 @dataclass(frozen=True)
@@ -192,19 +228,26 @@ def require_same_cohort(arm: ArmReading, baseline: dict) -> None:
     if wrong:
         raise SystemExit(f"{baseline['path']}: {wrong} — G1's baseline is the guidance flying the truth's plan in "
                          f"lockstep over the whole {GATE_SPLIT!r} split ({protocol})")
-    if set(receding) != set(rows):
-        common = len(set(receding) & set(rows))
-        raise SystemExit(f"{arm.label}: {len(receding)} flights against the guidance baseline's "
-                         f"{len(rows)} ({common} common) — G1 pairs the same cohort")
-    anchors = sorted({int(row["anchor"]) for row in rows.values()})
+    # every tracker flight must be in the baseline (the pairing is over the tracker's flights); a
+    # baseline flight the tracker's cohort dropped (a fixed horizon admits only flights with Δ of
+    # truth after the anchor) is stated in the verdict, never silently absent
+    missing = sorted(set(receding) - set(rows))
+    if missing:
+        raise SystemExit(f"{arm.label}: {len(missing)} tracker flights are not in the guidance baseline's "
+                         f"{len(rows)} (first: {missing[0]!r}) — a truth gate pairs the same cohort")
+    anchors = sorted({int(rows[i]["anchor"]) for i in receding})
     if anchors != [arm.anchor]:
         raise SystemExit(f"{arm.label}: anchor {arm.anchor} against the guidance baseline's row anchors {anchors[:5]} "
-                         f"({baseline['path']}) — G1 pairs the same flights at the same anchor")
+                         f"({baseline['path']}) — a truth gate pairs the same flights at the same anchor")
     ids = sorted(receding)
     ours, theirs = masks_of(receding, ids), masks_of(rows, ids)
     moved = {stratum: int(np.sum(ours[stratum] != theirs[stratum])) for stratum in READ_STRATA}
     if any(moved.values()):
         raise SystemExit(f"{arm.label}: flights stratified differently in the tracker and the baseline {moved}")
+
+
+def baseline_flights_not_in_tracker(arm: ArmReading, baseline: dict) -> int:
+    return len(set(baseline["rows_by_id"]) - set(arm.variants[VARIANT_RECEDING]))
 
 
 def require_members(arm: ArmReading, block: dict) -> None:
@@ -213,7 +256,7 @@ def require_members(arm: ArmReading, block: dict) -> None:
         raise SystemExit(f"{arm.label} ({arm.artifact}): no flight in {empty}; a gate stratum cannot be judged empty")
 
 
-def judge_g1(arm: ArmReading, baseline: dict) -> dict:
+def judge_truth_gate(arm: ArmReading, baseline: dict, gate: TruthGate) -> dict:
     require_same_cohort(arm, baseline)
     rows = arm.variants[VARIANT_RECEDING]
     block = variant_block(rows)
@@ -222,19 +265,54 @@ def judge_g1(arm: ArmReading, baseline: dict) -> dict:
     masks = masks_of(rows, ids)
     guidance = baseline["rows_by_id"]
     criteria = [
-        criterion(f"ADE mean {stratum}", block[stratum]["ade_mean_m"], G1_ADE_BELOW_M[stratum], "<")
+        criterion(f"ADE mean {stratum}", block[stratum]["ade_mean_m"], gate.ade_below_m[stratum], "<")
         for stratum in GATE_STRATA
     ]
     criteria.append(criterion("fully flyable share, all", block[STRATUM_ALL]["fully_flyable_share"],
-                              G1_FULLY_FLYABLE_AT_LEAST, ">="))
+                              gate.fully_flyable_at_least, ">="))
     for stratum in GATE_STRATA:
         members = [i for i, keep in zip(ids, masks[stratum], strict=True) if keep]
         guidance_share = _mean([float(guidance[i]["reference"]["established"]) for i in members])
         criteria.append(criterion(
             f"established share {stratum} (guidance {guidance_share:.3f} on the same flights)",
-            block[stratum]["established_share"], G1_ESTABLISHED_FRACTION_OF_GUIDANCE * guidance_share, ">=",
+            block[stratum]["established_share"], gate.established_fraction_of_guidance * guidance_share, ">=",
         ))
-    return {"criteria": criteria, "pass": all(c["pass"] for c in criteria)}
+    return {"criteria": criteria, "pass": all(c["pass"] for c in criteria),
+            "baseline_flights_not_in_tracker": baseline_flights_not_in_tracker(arm, baseline)}
+
+
+def judge_g1(arm: ArmReading, baseline: dict) -> dict:
+    return judge_truth_gate(arm, baseline, TRUTH_GATES[GATE_G1])
+
+
+def judge_l1(arm: ArmReading, baseline: dict) -> dict:
+    return judge_truth_gate(arm, baseline, TRUTH_GATES[GATE_L1])
+
+
+def drift_reading(rows: dict[str, dict]) -> dict:
+    """The per-ask step error of one variant, per stratum: its p50 by ask, the early / late
+    p50s and their ratio, and whether it is RISING (`DRIFT_RATIO_MAX`). A stratum whose flights
+    never reach ask `DRIFT_LATE_FROM_ASK` has no late reading and no verdict (None)."""
+    ids = sorted(rows)
+    masks = masks_of(rows, ids)
+    out = {}
+    for stratum in READ_STRATA:
+        members = [i for i, keep in zip(ids, masks[stratum], strict=True) if keep]
+        entries = [entry for i in members for entry in rows[i]["asks_e_m"] if entry["e_m"] is not None]
+        by_ask: dict[int, list[float]] = {}
+        for entry in entries:
+            by_ask.setdefault(int(entry["ask"]), []).append(float(entry["e_m"]))
+        early = [entry["e_m"] for entry in entries if entry["ask"] < DRIFT_LATE_FROM_ASK]
+        late = [entry["e_m"] for entry in entries if entry["ask"] >= DRIFT_LATE_FROM_ASK]
+        early_p50, late_p50 = _p50(early), _p50(late)
+        ratio = None if not early_p50 or late_p50 is None else late_p50 / early_p50
+        out[stratum] = {
+            "p50_by_ask_m": {str(ask): {"n": len(v), "p50": _p50(v)} for ask, v in sorted(by_ask.items())},
+            "early_p50_m": early_p50, "late_p50_m": late_p50, "late_from_ask": DRIFT_LATE_FROM_ASK,
+            "ratio": ratio, "ratio_max": DRIFT_RATIO_MAX,
+            "rising": None if ratio is None else bool(ratio > DRIFT_RATIO_MAX),
+        }
+    return out
 
 
 def judge_g3(arm: ArmReading, plan_path: dict | None) -> dict:
@@ -262,12 +340,14 @@ def arm_readings(arm: ArmReading, baseline: dict | None) -> dict:
         name: {i: row["ade_m"] for i, row in arm.variants[name].items()}
         for name in (VARIANT_NO_PLAN, VARIANT_ONE_SHOT) if name in arm.variants
     }
-    if arm.gate == GATE_G1 and baseline is not None:
+    if arm.gate in TRUTH_GATES and baseline is not None:
         against["guidance"] = {i: row["prediction"]["ade_m"] for i, row in baseline["rows_by_id"].items()}
     return {
         "artifact": arm.artifact, "anchor": arm.anchor,
         "variants": {name: variant_block(rows) for name, rows in arm.variants.items()},
         "receding_minus": {name: paired(receding, base) for name, base in against.items()},
+        # the drift reading of every variant: read, never judged (v2 §3 — it triggers S5)
+        "drift": {name: drift_reading(rows) for name, rows in arm.variants.items()},
     }
 
 
@@ -284,17 +364,18 @@ def build(arms: list[ArmReading], gate_arms: tuple[str, ...], baseline: dict | N
         missing = [label for label in gate_arms if label not in labels]
         if missing:
             raise SystemExit(f"{gate}: gate arm(s) {missing} are in no {gate} artifact (have {labels})")
-        if gate == GATE_G1 and baseline is None:
-            raise SystemExit("a truth-plan (G1) artifact needs --baseline, the guidance's plan-oracle artifact")
+        if gate in TRUTH_GATES and baseline is None:
+            raise SystemExit(f"a truth-plan ({gate}) artifact needs --baseline, the guidance's plan-oracle artifact")
         verdicts = {
-            arm.label: (judge_g1(arm, baseline) if gate == GATE_G1 else judge_g3(arm, plan_path))
+            arm.label: (judge_truth_gate(arm, baseline, TRUTH_GATES[gate]) if gate in TRUTH_GATES
+                        else judge_g3(arm, plan_path))
             for arm in members if arm.label in gate_arms
         }
         result["gates"][gate] = {
             "pass": all(v["pass"] for v in verdicts.values()),
             "verdicts": verdicts,
             "arms": {arm.label: arm_readings(arm, baseline) for arm in members},
-            "baseline": baseline["path"] if gate == GATE_G1 else (None if plan_path is None else plan_path["path"]),
+            "baseline": baseline["path"] if gate in TRUTH_GATES else (None if plan_path is None else plan_path["path"]),
         }
     return result
 
@@ -308,7 +389,9 @@ def render(result: dict) -> str:
     for gate, block in result["gates"].items():
         lines += ["", f"══ {gate}: {'PASS' if block['pass'] else 'FAIL'}   (baseline {block['baseline']})"]
         for label, verdict in block["verdicts"].items():
-            lines.append(f"  {label}: {'pass' if verdict['pass'] else 'FAIL'}")
+            dropped = verdict.get("baseline_flights_not_in_tracker", 0)
+            lines.append(f"  {label}: {'pass' if verdict['pass'] else 'FAIL'}"
+                         + (f"   ({dropped} baseline flights are not in the tracker's cohort)" if dropped else ""))
             for c in verdict["criteria"]:
                 lines.append(f"    [{'x' if c['pass'] else ' '}] {c['criterion']}: {_fmt(c['value'], 3)} "
                              f"{c['relation']} {_fmt(c['threshold'], 3)}")
@@ -326,6 +409,13 @@ def render(result: dict) -> str:
                     lines.append(f"     receding − {name:<16s} {stratum[:30]:<30s} n={cell['n']:>4d} ΔADE mean "
                                  f"{_fmt(cell['delta_mean_m']):>6} p50 {_fmt(cell['delta_p50_m']):>6} "
                                  f"receding better {_fmt(cell['arm_better_share'], 3)}")
+            for variant, strata in arm["drift"].items():
+                for stratum, cell in strata.items():
+                    verdict = "—" if cell["rising"] is None else ("RISING" if cell["rising"] else "flat")
+                    curve = " ".join(f"k{ask} {_fmt(v['p50'])}" for ask, v in cell["p50_by_ask_m"].items())
+                    lines.append(f"     drift {variant:<17s} {stratum[:30]:<30s} early p50 {_fmt(cell['early_p50_m']):>5} "
+                                 f"late(≥k{cell['late_from_ask']}) {_fmt(cell['late_p50_m']):>5} ratio "
+                                 f"{_fmt(cell['ratio'], 2):>5} (max {cell['ratio_max']:g}) {verdict} | {curve}")
     return "\n".join(lines) + "\n"
 
 

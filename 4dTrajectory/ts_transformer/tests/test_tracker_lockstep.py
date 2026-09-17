@@ -277,30 +277,34 @@ def test_a_leg_is_whole_steps_and_a_flight_ends_only_by_crossing_or_at_its_horiz
     skeleton = runner.SkeletonCache().for_series(item)
     # far from its horizon: one step flown, asked again next
     run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=1e6)
-    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=3)
+    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=3, a0=a0)
     assert run.ended is None and run.next_ask == 4 and run.legs[-1].final_time_s == pytest.approx(STEP_S)
+    # ...and the leg's step error is recorded at its end: a truth leg reads (nearly) zero there
+    [entry] = run.asks_e
+    assert entry["ask"] == 3 and entry["lead_s"] == pytest.approx(STEP_S) and entry["e_m"] < 1.0
     # a one-shot leg of two whole steps: the next ask waits two steps
     run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=1e6)
-    runner.fly_leg(run, item, leg, steps=2, step_s=STEP_S, ask=0)
+    runner.fly_leg(run, item, leg, steps=2, step_s=STEP_S, ask=0, a0=a0)
     assert run.ended is None and run.next_ask == 2 and run.legs[-1].final_time_s == pytest.approx(2 * STEP_S)
+    assert run.asks_e[0]["lead_s"] == pytest.approx(2 * STEP_S)
     # its horizon inside the step: cut there, ended at the horizon, not established
     run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=0.5 * STEP_S)
-    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=0)
+    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=0, a0=a0)
     assert run.ended == runner.ENDED_HORIZON and not run.truncated
     assert run.flown_s <= 0.5 * STEP_S + 1e-6 and run.flown_s > 0.5 * STEP_S - float(np.max(leg.sample_durations_s)) - 1e-6
     # a horizon before the forecast's first row: the flight ends there and flies (and counts) nothing
     first_row_s = float(leg.sample_durations_s[0])
     run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=0.5 * first_row_s)
-    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=0)
-    assert run.ended == runner.ENDED_HORIZON and run.legs == [] and run.asks == 0
+    runner.fly_leg(run, item, leg, steps=1, step_s=STEP_S, ask=0, a0=a0)
+    assert run.ended == runner.ENDED_HORIZON and run.legs == [] and run.asks == 0 and run.asks_e == []
     # a forecast shorter than one step (only without a given CTA) is flown whole and ends the flight…
     short = runner.cut_at_lead(leg, float(np.cumsum(leg.sample_durations_s)[2]))
     run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=1e6)
-    runner.fly_leg(run, item, short, steps=1, step_s=STEP_S, ask=0)
+    runner.fly_leg(run, item, short, steps=1, step_s=STEP_S, ask=0, a0=a0)
     assert run.ended in (runner.ENDED_FORECAST, runner.ENDED_CROSSED) and run.asks == 1
     # …unless its horizon comes first
     run = runner.FlightRun(series=item, skeleton=skeleton, horizon_s=float(np.cumsum(leg.sample_durations_s)[1]))
-    runner.fly_leg(run, item, short, steps=1, step_s=STEP_S, ask=0)
+    runner.fly_leg(run, item, short, steps=1, step_s=STEP_S, ask=0, a0=a0)
     assert run.ended == runner.ENDED_HORIZON and run.flown_s <= run.horizon_s + 1e-6
 
 
@@ -311,7 +315,7 @@ def test_an_ask_hands_at_least_one_step_and_counts_a_raised_arrival(trained) -> 
     assert floor == max(arm.config.random_train_anchor_min_future_s, STEP_S)
     run = runner.FlightRun(series=series[0], skeleton=runner.SkeletonCache().for_series(series[0]))
     plan_at = runner.TruthPlans([run], a0).at_ask([run], [series[0]], a0, first=True)[0]
-    low = runner.AskPlan(arrival_s=0.25 * floor, operating=plan_at.operating, instruction=plan_at.instruction)
+    low = runner.AskPlan(arrival_s=0.25 * floor, token=plan_at.token)
     row = runner.ask_row(run, series[0], a0, arm.config, low, with_plan=True, floor_s=floor)
     assert float(row["cta_s"]) == floor and run.asks_below_floor == 1
     assert run.cta_raised_max_s == pytest.approx(0.75 * floor)
@@ -442,7 +446,7 @@ def test_a_head_is_refused_on_a_flight_it_trained_on_or_another_series_contract(
 def test_the_lockstep_refuses_what_it_cannot_fly(config_overrides, variants, message) -> None:
     config = SimpleNamespace(**{
         "prediction_output": PREDICTION_CONTROL, "control_command_hook": "off", "latent_dim": 0,
-        "duration_head": "point", "cta_conditioning": CTA_CONDITIONING_GIVEN,
+        "duration_head": "point", "cta_conditioning": CTA_CONDITIONING_GIVEN, "control_horizon_s": 0.0,
         "plan_conditioning": PLAN_CONDITIONING_TRUTH_NEXT, "dt_s": 2.0, "control_rollout_integrator_dt_s": 0.5,
         **config_overrides,
     })

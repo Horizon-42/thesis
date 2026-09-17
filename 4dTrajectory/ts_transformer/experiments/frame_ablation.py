@@ -182,8 +182,15 @@ def arm_steps(
     key: str, config_path: Path, declared: dict, *,
     airport: str, campaign: Path, split: str, device: str, seed: int | None,
     split_seed: int | None, formal: bool = True, predict_args: list[str] = (),
+    predict: bool = True,
 ) -> list[tuple[str, list[str], Path]]:
-    """(step label, command, artifact whose existence means the step is done)."""
+    """(step label, command, artifact whose existence means the step is done).
+
+    ``predict=False`` (the declaration's top-level ``"predict": false``) stops after the train
+    step: a campaign whose checkpoints are read by their own runners (two-tier L1's fixed-horizon
+    heads, whose 60 s records mean nothing to the whole-approach evaluation report) writes no
+    prediction directory here.
+    """
     manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
     roster = HARVEST_ROOT / airport / "arrivals" / "lateral_pass_eligibility.json"
     train_dir = campaign / key
@@ -199,14 +206,17 @@ def arm_steps(
     # A formal run stamps an experiment manifest (git commit, command, data selection) and
     # refuses a dirty worktree — including untracked files that are not this campaign's.
     formal_identity = ["--campaign-id", campaign.name, "--experiment-id", key] if formal else []
+    train_step = (f"{key}: train", [
+        py, str(TS_SCRIPT), "train",
+        "--data", str(manifest), "--eligibility-roster", str(roster),
+        "--airport", airport, "--config-overrides", str(config_path),
+        *identity, "--device", device, "--output-dir", str(train_dir),
+        *formal_identity,
+    ], train_dir / TRAIN_COMPLETE_ARTIFACT)
+    if not predict:
+        return [train_step]
     return [
-        (f"{key}: train", [
-            py, str(TS_SCRIPT), "train",
-            "--data", str(manifest), "--eligibility-roster", str(roster),
-            "--airport", airport, "--config-overrides", str(config_path),
-            *identity, "--device", device, "--output-dir", str(train_dir),
-            *formal_identity,
-        ], train_dir / TRAIN_COMPLETE_ARTIFACT),
+        train_step,
         (f"{key}: predict ({split})", [
             py, str(TS_SCRIPT), "predict",
             "--checkpoint", str(train_dir / "checkpoint.pt"),
@@ -248,6 +258,10 @@ def main(argv: list[str] | None = None) -> int:
     arms = declaration["arms"]
     if not arms:
         parser.error("the arm declaration is empty")
+    # `"predict": false` — train only; the campaign's own runners read the checkpoints
+    predict = bool(declaration.get("predict", True))
+    if not predict and any("checkpoint" in arm for arm in arms):
+        parser.error("\"predict\": false trains only, and a predict-only arm has nothing else to do")
     airport = args.airport.upper()
     campaign = args.campaign if args.campaign.is_absolute() else REPO_ROOT / args.campaign
     for name in ("manifest.json", "lateral_pass_eligibility.json"):
@@ -294,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
             key, config_path, declared, airport=airport,
             campaign=campaign, split=args.split, device=args.device,
             seed=args.seed, split_seed=args.split_seed, formal=not args.informal,
-            predict_args=predict_args,
+            predict_args=predict_args, predict=predict,
         )
 
     pending = [step for step in steps if not step[2].exists()]
