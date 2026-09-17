@@ -12,7 +12,7 @@ import torch.nn as nn
 from ts_transformer.config import TSConfig
 from ts_transformer.outputs.envelope import CONTROL_NAMES, ControlContract, control_contract
 from ts_transformer.outputs.conditioning import condition_names
-from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, PLAN_TOKEN_WIDTH
+from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, plan_token_width
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
@@ -221,7 +221,7 @@ class ControlFeatureModel(nn.Module):
         self.plan_given = config.plan_conditioning != PLAN_CONDITIONING_OFF
         self.plan_dropout = float(config.plan_conditioning_dropout)
         self.plan_encoder = (
-            nn.Sequential(nn.Linear(PLAN_TOKEN_WIDTH, config.d_model), nn.GELU())
+            nn.Sequential(nn.Linear(plan_token_width(config), config.d_model), nn.GELU())
             if self.plan_given else None
         )
         self.feature_fusion = nn.Sequential(

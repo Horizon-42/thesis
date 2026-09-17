@@ -29,7 +29,6 @@ from ts_transformer.config import (
     CTA_CONDITIONING_OFF,
     DURATION_HEAD_TWO_HEAD,
     PLAN_CONDITIONING_OFF,
-    PLAN_CONDITIONING_TRUTH_NEXT,
     HOOK_SATURATION_HARD,
     PREDICTION_CONTROL,
     ControlOutput,
@@ -37,7 +36,7 @@ from ts_transformer.config import (
     control_recipe,
 )
 from ts_transformer.data.dataset import target_horizon_s, truth_duration_s
-from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, truth_plan_token
+from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, training_plan_token
 from ts_transformer.outputs.plan.skeleton import SkeletonCache
 from ts_transformer.data.fixed_dt_supervision import (
     FixedDTControlSupervision,
@@ -199,14 +198,9 @@ class ControlContext(WindowContext):
                 f"cta_conditioning={config.cta_conditioning!r} names no training-time "
                 "source for the CTA token; only 'given' (the truth duration) is defined"
             )
-        if config.plan_conditioning == PLAN_CONDITIONING_TRUTH_NEXT:
-            # the truth's plan at this anchor: the plan head's label there (reads the future)
-            arrays[PLAN_TOKEN_KEY] = truth_plan_token(series, anchor, self.skeletons)
-        elif config.plan_conditioning != PLAN_CONDITIONING_OFF:
-            raise ValueError(
-                f"plan_conditioning={config.plan_conditioning!r} names no training-time source "
-                "for the plan token; only 'truth-next' is defined"
-            )
+        if config.plan_conditioning != PLAN_CONDITIONING_OFF:
+            # the truth's plan at this anchor, in the token this run reads (reads the future)
+            arrays[PLAN_TOKEN_KEY] = training_plan_token(series, anchor, config, self.skeletons)
         if not windows.control_supervision:
             return arrays
         anchor_time = float(series.times[anchor])

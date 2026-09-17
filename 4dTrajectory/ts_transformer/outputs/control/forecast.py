@@ -15,7 +15,6 @@ from ts_transformer.inference.calibration import conformal_intervals, interval_s
 from ts_transformer.config import (
     CTA_CONDITIONING_OFF,
     PLAN_CONDITIONING_OFF,
-    PLAN_CONDITIONING_TRUTH_NEXT,
     DURATION_HEADS_WITH_QUANTILES,
     TSConfig,
     default_anchor,
@@ -34,7 +33,7 @@ from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
 from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
-from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, truth_plan_token
+from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, training_plan_token
 from ts_transformer.outputs.plan.skeleton import SkeletonCache
 
 
@@ -99,16 +98,12 @@ def _dynamics_batch(
         )
         for row, value in zip(rows, given, strict=True):
             row["cta_s"] = np.array(value, dtype=np.float64)
-    if config.plan_conditioning == PLAN_CONDITIONING_TRUTH_NEXT:
-        # the truth's plan at the anchor, as training reads it (two-tier T1; reads the future)
+    if config.plan_conditioning != PLAN_CONDITIONING_OFF:
+        # the truth's plan at the anchor, as training reads it (two-tier; reads the future).
+        # A caller with another source (the lockstep's rolled asks) passes `dynamics` itself.
         skeletons = SkeletonCache()
         for row, item in zip(rows, series, strict=True):
-            row[PLAN_TOKEN_KEY] = truth_plan_token(item, anchor, skeletons)
-    elif config.plan_conditioning != PLAN_CONDITIONING_OFF:
-        raise ValueError(
-            f"plan_conditioning={config.plan_conditioning!r} names no predict-time source for the "
-            "plan token here; a caller that supplies one passes `dynamics` itself"
-        )
+            row[PLAN_TOKEN_KEY] = training_plan_token(item, anchor, config, skeletons)
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]

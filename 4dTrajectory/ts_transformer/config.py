@@ -132,8 +132,18 @@ CTA_FIELDS = ("cta_conditioning",)
 # training samples (the fallback a tracker needs when the plan it is handed is unreliable).
 PLAN_CONDITIONING_OFF = "off"
 PLAN_CONDITIONING_TRUTH_NEXT = "truth-next"
-PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF, PLAN_CONDITIONING_TRUTH_NEXT)
+# Two-tier L1 (`docs/2026-09-17_two_tier_plan_v2.zh.md` §3): the COARSE PLAN's next waypoints
+# — the position every `PLAN_WAYPOINT_SEGMENT_S` after the ask, relative to the current
+# position in the chart, with the seconds until it — one per coarse segment inside the fixed
+# horizon (`plan_waypoint_count`). In training and the protocol-C lockstep the waypoints are
+# the TRUTH's (reads the future; the run name says ``plan=waypoints``); in the two-tier
+# lockstep (S3) the plan layer's own.
+PLAN_CONDITIONING_WAYPOINTS = "waypoints"
+PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF, PLAN_CONDITIONING_TRUTH_NEXT, PLAN_CONDITIONING_WAYPOINTS)
 PLAN_CONDITIONING_FIELDS = ("plan_conditioning", "plan_conditioning_dropout")
+#: The coarse plan's segment length — the plan layer's Δ₂ (two-tier v2 §4): the spacing of
+#: the waypoint token's points and of the segment-plan head's outputs, ONE constant.
+PLAN_WAYPOINT_SEGMENT_S = 30.0
 
 # The duration head (B1, §三 3.1; B1.b, §三 3.1b). ``point`` is the package's original
 # scalar ``FinalTimeHead``; ``quantile`` is ``outputs.duration_heads.QuantileFinalTimeHead`` —
@@ -1912,6 +1922,17 @@ class ControlOutput(OutputSpec):
                     "the imitation teacher is inverted over the whole remaining approach and is "
                     f"not built over a control_horizon_s={self.control_horizon_s:g} window"
                 )
+        if self.plan_conditioning == PLAN_CONDITIONING_WAYPOINTS:
+            # one waypoint per coarse segment inside the horizon: the horizon must hold a
+            # whole, positive number of them
+            segments = self.control_horizon_s / PLAN_WAYPOINT_SEGMENT_S
+            if segments < 1.0 or abs(segments - round(segments)) > 1e-9:
+                raise ValueError(
+                    f"plan_conditioning={PLAN_CONDITIONING_WAYPOINTS!r} carries one waypoint per "
+                    f"{PLAN_WAYPOINT_SEGMENT_S:g} s coarse segment inside the fixed horizon, and "
+                    f"control_horizon_s={self.control_horizon_s:g} is not a positive whole number "
+                    "of them"
+                )
         _require_member(
             "control_condition_features", self.control_condition_features,
             CONTROL_CONDITION_FEATURES,
@@ -2349,7 +2370,7 @@ class TSConfig:
     # (every stored run). Under Δ > 0 the schedule is rolled over exactly Δ, the targets cover
     # [0, Δ] (`dataset.target_horizon_s`), every anchor needs Δ of truth after it
     # (`dataset.window_anchors`) and no duration head is built (`ControlOutput` refuses the
-    # axes that would decide a duration). Named `horizon=`.
+    # axes that would decide a duration). Named `ctrl-horizon=`.
     control_horizon_s: float = 0.0
     # How the airframe is written into the head's condition vector (CONTROL_CONDITION_FEATURES).
     # Not in REQUIRED_SERIALIZED_CONTROL_FIELDS: every checkpoint trained before the field
@@ -2605,8 +2626,9 @@ class TSConfig:
             raise ValueError("the command hook reads the threshold-anchored ENU chart")
         if self.plan_conditioning != PLAN_CONDITIONING_OFF and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(
-                "the plan token is read through the plan path's skeleton, written in the "
-                f"threshold-anchored ENU chart; coordinate_frame={self.coordinate_frame!r}"
+                "the plan token is written in the threshold-anchored ENU chart (the plan path's "
+                "skeleton, or the waypoints' chart deltas); "
+                f"coordinate_frame={self.coordinate_frame!r}"
             )
         # cohort × output — under a fixed horizon the targets cover [0, Δ], so a train anchor
         # needs Δ of truth after it. `dataset.window_anchors` raises every window set's floor
@@ -2621,6 +2643,14 @@ class TSConfig:
                 f"random_train_anchor_min_future_s={self.random_train_anchor_min_future_s:g} is "
                 f"below control_horizon_s={self.control_horizon_s:g}: the targets cover the whole "
                 "horizon, so every train anchor needs at least that much truth after it"
+            )
+        # ...and the one intent channel that carries the truth's remaining DURATION is the leak
+        # the CTA refusal under Δ exists to prevent, one input over.
+        if self.control_horizon_s and self.intent_conditioning == INTENT_CONDITIONING_TRUTH_JOIN_DURATION:
+            raise ValueError(
+                f"intent_conditioning={self.intent_conditioning!r} feeds the truth's remaining "
+                f"duration to a control_horizon_s={self.control_horizon_s:g} run, which predicts "
+                "no duration and must not read one"
             )
         if self.prediction_output == PREDICTION_PLAN and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(
@@ -2901,6 +2931,13 @@ def fixed_anchor_label(config: TSConfig, anchor: int | None = None) -> str:
     rendering, so a floored run's fit evaluation, checkpoint and cohort audit agree."""
     anchor = default_anchor(config) if anchor is None else int(anchor)
     return "fixed L-1" if anchor == lookback_anchor(config) else f"fixed index {anchor}"
+
+
+def plan_waypoint_count(config: TSConfig) -> int:
+    """How many coarse waypoints a ``plan_conditioning=waypoints`` token carries: the fixed
+    horizon in coarse segments (`ControlOutput` refuses a horizon that is not a whole number
+    of them)."""
+    return int(round(config.control_horizon_s / PLAN_WAYPOINT_SEGMENT_S))
 
 
 def default_anchor(config: TSConfig) -> int:
