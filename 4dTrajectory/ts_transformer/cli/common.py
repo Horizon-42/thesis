@@ -442,6 +442,16 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="maximum differentiable dynamics RK4 step in seconds (default: 0.5)",
     )
+    parser.add_argument(
+        "--control-horizon-s",
+        type=float,
+        default=None,
+        help=(
+            "two-tier L1: roll the control schedule over exactly this many seconds and "
+            "supervise [0, Δ] only — no duration head, every anchor needs Δ of truth after it "
+            "(default: 0, the whole remaining approach)"
+        ),
+    )
     parser.add_argument("--patience", type=int, default=None, help="early-stopping patience")
     parser.add_argument("--d-model", type=int, default=None)
     parser.add_argument("--e-layers", type=int, default=None)
@@ -626,6 +636,7 @@ CLI_CONFIG_FIELDS = (
     "control_barrier_alpha",
     "control_barrier_heading_gain",
     "control_rollout_integrator_dt_s",
+    "control_horizon_s",
     "d_model",
     "e_layers",
     "n_heads",

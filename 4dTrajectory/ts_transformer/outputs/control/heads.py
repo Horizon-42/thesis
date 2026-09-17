@@ -202,6 +202,10 @@ class ControlFeatureModel(nn.Module):
         # model's own duration quantiles — because they differ in WHERE the number comes
         # from, not in what the network does with it.
         self.cta_given = config.cta_conditioning != CTA_CONDITIONING_OFF
+        # Two-tier L1: a FIXED rollout horizon — the duration is this constant, no head
+        # predicts it (`duration_head_for` builds none), and `ControlOutput` refuses the CTA
+        # and the quantile head beside it.
+        self.fixed_horizon_s = float(config.control_horizon_s)
         # WHICH duration heads this run carries. Both are True only under `two-head`, where
         # the point head drives the rollout and the quantile head is published beside it.
         self.quantile_duration = config.duration_head in DURATION_HEADS_WITH_QUANTILES
@@ -305,7 +309,13 @@ class ControlFeatureModel(nn.Module):
         because the refusal would be new law over the stored L3 ``cta=given`` arms. The
         QUANTILE head is still read and still trained there, deliberately: B3 decodes a
         ``given`` checkpoint at its own quantiles, which only exist if the head learned them.
+
+        Under a FIXED horizon (two-tier L1) the duration is the horizon itself: no head is
+        built, nothing is read, and the config has already refused every axis that would
+        decide otherwise.
         """
+        if self.fixed_horizon_s:
+            return history.new_full((history.shape[0],), self.fixed_horizon_s), None
         quantiles = self.duration_quantiles(history)
         if self.cta_given:
             return dynamics["cta_s"].to(history.dtype), quantiles
@@ -388,7 +398,11 @@ _DURATION_HEADS = {
 }
 
 
-def duration_head_for(config: TSConfig) -> FinalTimeHead | QuantileFinalTimeHead:
+def duration_head_for(config: TSConfig) -> FinalTimeHead | QuantileFinalTimeHead | None:
+    """The duration head, or None under a fixed horizon (two-tier L1), where the duration is
+    the constant `ControlFeatureModel.duration` returns and no parameter predicts it."""
+    if config.control_horizon_s:
+        return None
     return _DURATION_HEADS[config.duration_head](config)
 
 
@@ -428,12 +442,13 @@ class ControlOutputModel(ControlFeatureModel):
 
     def __init__(self, config: TSConfig, feature_encoder: nn.Module):
         super().__init__(config, feature_encoder)
-        self.final_time_head = duration_head_for(config)
+        self.final_time_head = duration_head_for(config)   # None under a fixed horizon
         self.control_head = control_head_for(config)
         _initialize_control_head(
             self.control_head, control_contract(config.control_thrust_parameterization)
         )
-        _initialize_duration_head(self.final_time_head)
+        if self.final_time_head is not None:
+            _initialize_duration_head(self.final_time_head)
         # LAST (see the base class): with it built here, every parameter a `point` run has
         # draws exactly what it would have drawn, so two arms that differ only in
         # `duration_head` start from the same point head and the same backbone. What cannot

@@ -1027,6 +1027,10 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         # run is told no plan. `plan_conditioning_dropout` is not pinned beside it — with the
         # token pinned off a non-zero dropout is already refused.
         "plan_conditioning": PLAN_CONDITIONING_OFF,
+        # ...and the rollout horizon (two-tier L1): a recipe run predicts the whole remaining
+        # approach. Every stored recipe config predates the field and reads as 0, so pinning
+        # it renames nothing.
+        "control_horizon_s": 0.0,
         "control_state_duration_gradient": False,
         "control_gradient_clip_norm": 20.0,
         "control_rollout_integrator_dt_s": 0.5,
@@ -1838,6 +1842,7 @@ class ControlOutput(OutputSpec):
     cta_conditioning: str
     plan_conditioning: str
     plan_conditioning_dropout: float
+    control_horizon_s: float
     control_condition_features: str
     duration: DurationSpec
     dynamics: DynamicsSpec
@@ -1865,6 +1870,48 @@ class ControlOutput(OutputSpec):
                 "a plan token beside a latent intent is two answers to one question (what the "
                 "flight is going to do); the latent line is its own axis"
             )
+        # Two-tier L1 (`docs/2026-09-17_two_tier_plan_v2.zh.md` §3): a FIXED rollout horizon.
+        # Under Δ > 0 nothing predicts the duration — the head emits its N segments over
+        # exactly Δ seconds and the targets cover [0, Δ] (`dataset.target_horizon_s`) — so
+        # every axis that would decide the duration has nothing to decide and is REFUSED
+        # rather than left inert: the CTA (it would BE the duration), a quantile head
+        # (quantiles of a constant), the point term's weight (an identically-zero residual)
+        # and the latent (it reaches the duration through the point head's logit). The
+        # imitation teacher is inverted over the whole remainder and is not built over a
+        # window, so its weight is refused too.
+        if not math.isfinite(self.control_horizon_s) or self.control_horizon_s < 0.0:
+            raise ValueError(
+                "control_horizon_s is the rollout horizon in seconds (0 = the whole remaining "
+                f"approach), got {self.control_horizon_s!r}"
+            )
+        if self.control_horizon_s:
+            if self.cta_conditioning != CTA_CONDITIONING_OFF:
+                raise ValueError(
+                    f"control_horizon_s={self.control_horizon_s:g} fixes the rollout duration; "
+                    f"cta_conditioning={self.cta_conditioning!r} would hand it another one"
+                )
+            if self.duration.duration_head != DURATION_HEAD_POINT:
+                raise ValueError(
+                    f"control_horizon_s={self.control_horizon_s:g} predicts no duration; "
+                    f"duration_head={self.duration.duration_head!r} would emit quantiles of a "
+                    "constant"
+                )
+            if self.final_time_loss_weight:
+                raise ValueError(
+                    f"final_time_loss_weight={self.final_time_loss_weight!r} weighs the duration "
+                    f"residual, which is identically zero under control_horizon_s="
+                    f"{self.control_horizon_s:g}; set it to 0"
+                )
+            if self.latent.active:
+                raise ValueError(
+                    "a latent intent reaches the duration through the point head, which a "
+                    f"control_horizon_s={self.control_horizon_s:g} run does not build"
+                )
+            if self.objective.control_imitation_loss_weight:
+                raise ValueError(
+                    "the imitation teacher is inverted over the whole remaining approach and is "
+                    f"not built over a control_horizon_s={self.control_horizon_s:g} window"
+                )
         _require_member(
             "control_condition_features", self.control_condition_features,
             CONTROL_CONDITION_FEATURES,
@@ -2298,6 +2345,12 @@ class TSConfig:
     # samples whose plan token is dropped.
     plan_conditioning: str = PLAN_CONDITIONING_OFF
     plan_conditioning_dropout: float = 0.0
+    # Two-tier L1: the rollout's FIXED horizon in seconds; 0 = the whole remaining approach
+    # (every stored run). Under Δ > 0 the schedule is rolled over exactly Δ, the targets cover
+    # [0, Δ] (`dataset.target_horizon_s`), every anchor needs Δ of truth after it
+    # (`dataset.window_anchors`) and no duration head is built (`ControlOutput` refuses the
+    # axes that would decide a duration). Named `horizon=`.
+    control_horizon_s: float = 0.0
     # How the airframe is written into the head's condition vector (CONTROL_CONDITION_FEATURES).
     # Not in REQUIRED_SERIALIZED_CONTROL_FIELDS: every checkpoint trained before the field
     # existed read the raw set, so absence reproduces it exactly.
@@ -2554,6 +2607,20 @@ class TSConfig:
             raise ValueError(
                 "the plan token is read through the plan path's skeleton, written in the "
                 f"threshold-anchored ENU chart; coordinate_frame={self.coordinate_frame!r}"
+            )
+        # cohort × output — under a fixed horizon the targets cover [0, Δ], so a train anchor
+        # needs Δ of truth after it. `dataset.window_anchors` raises every window set's floor
+        # to Δ; a stated random-anchor floor BELOW it would name a population the run never
+        # trains on, so it is refused rather than silently raised.
+        if (
+            self.control_horizon_s
+            and self.random_train_anchor
+            and self.random_train_anchor_min_future_s < self.control_horizon_s
+        ):
+            raise ValueError(
+                f"random_train_anchor_min_future_s={self.random_train_anchor_min_future_s:g} is "
+                f"below control_horizon_s={self.control_horizon_s:g}: the targets cover the whole "
+                "horizon, so every train anchor needs at least that much truth after it"
             )
         if self.prediction_output == PREDICTION_PLAN and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(
@@ -2880,6 +2947,8 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         base["thrust_parameterization"] = config.control_thrust_parameterization
     if config.control_condition_features != CONTROL_CONDITION_FEATURES_RAW:
         base["condition_features"] = config.control_condition_features
+    if config.control_horizon_s:
+        base["horizon_s"] = config.control_horizon_s
     if not uses_control_dynamics(config.prediction_output):
         raise ValueError("state output has no control recipe")
     return base

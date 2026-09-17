@@ -185,6 +185,18 @@ def truth_duration_s(series: FlightSeries, anchor: int) -> float:
     return float(series.supervision_times[-1] - series.times[anchor])
 
 
+def target_horizon_s(series: FlightSeries, anchor: int, config: TSConfig) -> float:
+    """The span the targets from ``anchor`` cover — the ONE definition every consumer of
+    "how long is this sample" reads: the sample's ``final_time_s`` and its target grid, the
+    control supervision's endpoints, the common-grid truth the selection metric scores on.
+
+    The truth's remaining duration (:func:`truth_duration_s`), or under a fixed horizon
+    (``control_horizon_s``, two-tier L1) exactly Δ — :func:`window_anchors` admits no anchor
+    with less than Δ of truth after it, so the grid never runs past the truth's end.
+    """
+    return float(config.control_horizon_s) or truth_duration_s(series, anchor)
+
+
 @dataclass(frozen=True)
 class Normalizer:
     """Per-channel standardisation, fit on the TRAINING split only.
@@ -765,6 +777,11 @@ def window_anchors(
     """
     if minimum_future_s < 0.0:
         raise ValueError("minimum_future_s must be non-negative")
+    # A fixed horizon supervises [0, Δ] from every anchor (`target_horizon_s`), so every
+    # window set — fixed, explicit or random — needs Δ of truth after each anchor. Raised
+    # HERE, once, rather than at each caller: a flight with less is excluded and counted
+    # (`usable_series`), never given a grid past its own end.
+    minimum_future_s = max(minimum_future_s, float(config.control_horizon_s))
     first = fixed_anchor_index(config, minimum_anchor_index)
     # An anchor is always observed; fitted rows can be targets but never model inputs.
     last_with_remainder = series.n_supervision_samples - 2
@@ -1048,7 +1065,7 @@ class TrajectoryWindows(Dataset, ABC):
             values[anchor - L + 1 : anchor + 1], self.conditioning[s_idx]
         )
         anchor_time = float(series.times[anchor])
-        final_time_s = float(series.supervision_times[-1] - anchor_time)
+        final_time_s = target_horizon_s(series, anchor, self.config)
         time_grid = output_time_grid(final_time_s, self.config)
         query_times = anchor_time + time_grid.offsets_s
 

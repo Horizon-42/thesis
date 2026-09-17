@@ -36,7 +36,7 @@ from ts_transformer.config import (
     TSConfig,
     control_recipe,
 )
-from ts_transformer.data.dataset import truth_duration_s
+from ts_transformer.data.dataset import target_horizon_s, truth_duration_s
 from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, truth_plan_token
 from ts_transformer.outputs.plan.skeleton import SkeletonCache
 from ts_transformer.data.fixed_dt_supervision import (
@@ -210,7 +210,8 @@ class ControlContext(WindowContext):
         if not windows.control_supervision:
             return arrays
         anchor_time = float(series.times[anchor])
-        total_duration_s = float(series.supervision_times[-1] - anchor_time)
+        # the span the segments cover — the whole remainder, or the fixed horizon's Δ
+        total_duration_s = target_horizon_s(series, anchor, config)
         last_measured_time_s = float(
             windows.last_supervised_times[s_idx][windows.kinematic_channels].min() - anchor_time
         )

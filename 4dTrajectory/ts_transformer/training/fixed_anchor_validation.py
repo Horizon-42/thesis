@@ -17,7 +17,7 @@ import torch
 from ts_transformer.geometry.arc_length_geometry import arc_length_geometry_metrics, arc_length_velocity_metrics
 from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
 from ts_transformer.config import HORIZON_NORMALIZED, TSConfig, fixed_anchor_label
-from ts_transformer.data.dataset import FlightSeries, Normalizer
+from ts_transformer.data.dataset import FlightSeries, Normalizer, target_horizon_s
 from ts_transformer.geometry.metrics import signed_spread
 from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
 from ts_transformer.geometry.terminal_state_loss import last_reliable_terminal_velocity_target, terminal_state_metrics_numpy
@@ -53,7 +53,8 @@ def common_truth_at_anchors(
     :func:`fixed_anchor_common_truth` below, and the ``anchor-grid-common-grid-ade``
     selection metric passes its own remaining-path anchors here. The truth is the same
     object in both cases — the flight's supervision rows resampled at equal fractions of
-    the time it still has to fly — which is what makes the anchor sets comparable.
+    the span the targets cover (`dataset.target_horizon_s`: the time it still has to fly,
+    or a fixed horizon's Δ) — which is what makes the anchor sets comparable.
     """
     if points <= 1:
         raise ValueError("common-grid points must be greater than one")
@@ -67,7 +68,7 @@ def common_truth_at_anchors(
             raise ValueError(
                 f"flight {item.dataset_id!r} has no anchor {anchor}"
             )
-        duration = float(item.supervision_times[-1] - item.times[anchor])
+        duration = target_horizon_s(item, anchor, config)
         if duration <= 0.0:
             raise ValueError(
                 f"flight {item.dataset_id!r} has no future after anchor {anchor}"

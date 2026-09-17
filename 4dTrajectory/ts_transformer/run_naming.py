@@ -187,6 +187,10 @@ META_FIELDS = (
     *CTA_FIELDS,
     # ...and the plan token (two-tier T1): a `plan=truth-next` run reads the truth's plan.
     *PLAN_CONDITIONING_FIELDS,
+    # Two-tier L1: a fixed rollout horizon predicts a different thing (Δ seconds of the
+    # approach, no duration head), so it is spelled out ahead of the backbone knobs that fold.
+    # Every stored config predates it and carries 0, so adding it renames nothing.
+    "control_horizon_s",
     # B1 / B1.b: which duration head. The interval a run publishes is part of what it IS,
     # and the named recipes pin this at `point`, so a `quantile` or `two-head` run is
     # `custom` and this item shows (`T=q5` / `T=2h`).
@@ -350,6 +354,7 @@ _ABBREV = {
     "control_duration_uniform_floor": "duration-floor",
     "control_gradient_clip_norm": "grad-clip",
     "control_rollout_integrator_dt_s": "rollout-dt",
+    "control_horizon_s": "horizon",
     "control_command_hook": "hook",
     "control_hook_saturation": "hook-sat",
     "control_barrier_alpha": "barrier-alpha",
@@ -465,7 +470,7 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
     ("Control rollout", (
         "control_duration_parameterization", "control_duration_uniform_floor",
-        "control_rollout_integrator_dt_s", *CONTROL_HOOK_FIELDS,
+        "control_rollout_integrator_dt_s", "control_horizon_s", *CONTROL_HOOK_FIELDS,
     )),
 )
 _SECTION_OF = {field: section for section, fields in SETTING_SECTIONS for field in fields}
