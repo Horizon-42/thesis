@@ -23,8 +23,11 @@
 | 废弃的设计 | 旧文档 §4 的"改前提"论证；T1a 的整段跟踪器；T0(c) 作为高层的门；旧 plan 头作为高层；`control_horizon_curriculum_s`（已退役字段，与本计划的 `control_horizon_s` 无关） |
 | 旧实验 | T0(b)/T0(c) 已发布（picker）；T1a/T2 留在 `4dTrajectory/outputs/KRDU/experiments/two_tier_t1a_20260916/`：**用户已批准删除**两个 lockstep 记录树（`lockstep_30s/records` 2.2 GB、`lockstep_30s_head/records` 2.4 GB）与三个 `*_pred_val`（各 222 MB），留 3 个 checkpoint、`gates*`、`tracker_lockstep.{json,txt}`；沙盒拒绝 `rm -rf`，命令见 §9，由用户执行 |
 | 决定 | §8 的八项已由用户拍板（2026-09-17，"按建议来"）；开发中需要选择的按直觉选、次日汇报，不中断（§8 末"我替你选的"） |
-| S0 文档 + 磁盘 | 本文件；删除待用户执行 |
-| S1 L1 短时控制头 | **开建**（§7 的 S1.1–S1.4） |
+| S0 文档 + 磁盘 | 本文件（1625dc3）；删除待用户执行 |
+| S1.1 `control_horizon_s` | **完成** 29646ab + review 修正 1604b65（opus 6 项确认：anchor-grid 与 anytime 的未来下限跟 Δ、每 epoch 报告的终端速度/弧长几何读 Δ 内的真值、排除原因写明 Δ、审计里的下限是生效值、`intent=truth-join-duration` 拒绝、命名改 `ctrl-horizon=`、时长项为零写明） |
+| S1.2 `plan_conditioning=waypoints` | **完成** ddfbf82（token 11 维、训练行/forecast 行/probe 一处分派、`PLAN_WAYPOINT_SEGMENT_S=30`） |
+| S1.3 读数工具 | **完成** bea33af：`tracker_lockstep` 航路点来源 + 逐次 e + `--command-hook`（schema v3）；`two_tier_gates` 门 L1 + 漂移读数（schema v2，cohort 可为基线子集并计数）；`short_horizon_readout` 新 runner；`frame_ablation` `"predict": false`。全套 1318 测试通过 |
+| S1.4 臂 + intents | **已写**：`docs/experiments/two_tier_l1_arms.json`（8 臂，dry run 通过）、intents `two_tier_l1_20260917`；campaign 待队列 agent 启动（runs worktree 先移到已提交的 commit） |
 | S2 L2 段 token 计划头 | 未开建 |
 | S3 联合 lockstep + 门 | 未开建 |
 
@@ -67,12 +70,14 @@ L2 的段特征按跑道航向旋转是特征工程，它的输出在接口处�
 三种都跑（用户 2026-09-17 定）：过载族用 δ 与 n_x 两行，航迹角族一行；全部 `first-order-lag`。**改进（S5，条件性）**：横向也做成闭环——坡度列换成航向变化率目标 ψ̇*，RHS 按 `n sinφ = V cosγ ψ̇*/g` 解坡度；
 只在 L1 结果显示横向误差主导时做。
 
-**训练（新配置轴 `control_horizon_s = Δ`，默认 0 = 整段）**
-- 窗口规则：锚点之后的真值 ≥ Δ（`window_anchors` 对每个窗口集取 `max(min_future, Δ)`；随机锚点的 `random_train_anchor_min_future_s` 不得小于 Δ；不满足的航班不入 cohort，计数）。
+**训练（新配置轴 `control_horizon_s = Δ`，默认 0 = 整段；命名 `ctrl-horizon=`）**
+- 窗口规则：锚点之后的真值 ≥ Δ（`effective_min_future_s` 一处定义：`window_anchors`、anchor-grid 的档、anytime 曲线都取 `max(下限, Δ)`；随机锚点的 `random_train_anchor_min_future_s` 不得小于 Δ；不满足的航班不入 cohort，排除通知写明 Δ，审计里记生效的下限）。
+- 锚点：所有臂 `anchor_floor_index = 59`，固定锚点与 native32（seq_len 60 的 L−1）和规则制导基线（anchor 59）对齐，H 消融也在同一锚点判；L1 的 val cohort 可能是基线的子集（Δ 后真值不足的被排除），门逐航班在 L1 的集合上配对并报缺的数目。
 - 目标网格：N₁ 个节点在 (k+1)·Δ/N₁，真值按 2 s 采样插值；`final_time_s = Δ`；heading-rate 项的端点同一网格。
 - 头：无时长头（不建、不训）；`cta_conditioning` 必须 off；`duration_head` 必须 point；`final_time_loss_weight` 必须 0（项恒为零）；模仿项未建（拒绝非零）。
 - 损失只算 [0, Δ]：位置项、velocity 0.003、heading-rate 8、bank TV 1（A2b 配方）；`state_endpoint_loss_weight = 0`（臂文件置零，不是硬规则）。
-- 选择指标 `fixed-anchor-common-grid-ade`：共同网格的真值跨度也是 Δ（`common_truth_at_anchors` 读同一个 horizon 函数），即 L−1 处的 ADE[0,Δ]。
+- 选择指标 `fixed-anchor-common-grid-ade`：共同网格的真值跨度也是 Δ（`common_truth_at_anchors` 读同一个 `target_horizon_s`），即固定锚点处的 ADE[0,Δ]；每 epoch 的报告块（终端速度、弧长几何）对 Δ 内截断的真值（`series_within_horizon`）读。
+- 记录：读数 runner 写的 predict 形状记录，其 summary 的 ade/fde 仍是 export 的整段记账（预测被 hold 到真值结束），只有 `coverage_ratio` 说明它；读数自己的 [0,Δ] 数字才是 L1 的数。
 - 随机锚点（remaining-path-uniform，l1-share 0.5）；计划 token 按 50 % 遮掉；180 epoch 不早停；hook 关。
 - 臂：3 契约 × 2 种子 = 6，加 H 消融 2（航迹角契约、种子 1337、H = 30 / 118 s），KRDU。每臂预计 < 1 h。campaign 只训练（arm 文件 `"predict": false`），记录由读数 runner 自己写。
 
@@ -132,8 +137,10 @@ L2 − 真值粗计划的差就是 e_plan，L1 在真值计划下的误差就是
 | `outputs/control/heads.py` | 固定 Δ 下不建时长头，`duration()` 返回 Δ |
 | `outputs/control/plan_token.py` | 新 token `waypoint_token` + `truth_waypoints`；宽度按取值 |
 | `experiments/tracker_lockstep.py`、`two_tier_gates.py` | 改造：计划来源按 checkpoint 的 `plan_conditioning`（`TruthWaypoints` 新增，S3 加 L2 头）；每架记录逐次 e(30 s)；`--command-hook` 旁读；门 L1 按 §3，E2E 按 §5 |
-| `experiments/short_horizon_readout.py` | 新：§3 评估 1 |
+| `experiments/short_horizon_readout.py` | 新：§3 评估 1（`--checkpoint L=ckpt` 多臂 + `--reference native32=ckpt`；固定锚点 + 12/8/6 km 档；`truth-plan` / `no-plan` 两列；配对；`--write-records`） |
+| `inference/receding.py` | 加 `mean_displacement_to`（ADE[0,Δ]，`lead_time_error` 口径） |
 | `experiments/frame_ablation.py` | arm 文件顶层 `"predict": false`：只训练 |
+| `publish_ts_experiment_trajectories.py` | S4 待做：识别 `short_horizon` 记录块，hooked lockstep 记录的 variant id 加 hook 后缀 |
 | `anchor_floor_index`、`lead_time_error`、`chain_sensitivity` | 保留（读数工具） |
 | T1a 臂文件、intents `two_tier_t1a_20260916` | 废弃（不发布，intents 条目留作记录） |
 | 旧 plan 头（`outputs/plan/*`） | 不作为高层；`plan_guidance` 线的产物不动；`truth-next` token 保留可加载 |
@@ -143,10 +150,10 @@ L2 − 真值粗计划的差就是 e_plan，L1 在真值计划下的误差就是
 | 步 | 内容 | 产物 / 门 |
 |---|---|---|
 | S0 | 本文档；磁盘（T1a 5 GB）由用户执行删除 | 提交 |
-| S1.1 | `control_horizon_s`：config 规则、`target_horizon_s`、窗口下限、无时长头、命名、CLI、测试 | 提交 |
-| S1.2 | `plan_conditioning=waypoints`：token、训练行、forecast 行、probe、测试 | 提交 |
-| S1.3 | `tracker_lockstep` 航路点来源 + 逐次 e(30) + hook 旁读；`two_tier_gates` 门 L1；`short_horizon_readout`；`frame_ablation` 只训练；测试 | 提交 |
-| S1.4 | 臂文件 `docs/experiments/two_tier_l1_arms.json` + intents `two_tier_l1_20260917`（**launch 前提交**）→ 队列 agent：6 + 2 臂训练 → 两种读数 → 门 L1 | 门 L1 |
+| S1.1 | `control_horizon_s`：config 规则、`target_horizon_s`、窗口下限、无时长头、命名、CLI、测试 | **完成** 29646ab + review 修正 |
+| S1.2 | `plan_conditioning=waypoints`：token、训练行、forecast 行、probe、测试 | **完成** |
+| S1.3 | `tracker_lockstep` 航路点来源 + 逐次 e(30) + hook 旁读；`two_tier_gates` 门 L1；`short_horizon_readout`；`frame_ablation` 只训练；测试 | **完成** |
+| S1.4 | 臂文件 `docs/experiments/two_tier_l1_arms.json` + intents `two_tier_l1_20260917`（**launch 前提交**）→ 队列 agent：6 + 2 臂训练 → `short_horizon_readout`（8 臂 + native32 参照）→ `tracker_lockstep`（hook 关；另一次 `--command-hook barrier+speed-floor`）→ `two_tier_gates --baseline plan_guidance_20260910/step3d_lockstep_l1` | 门 L1 |
 | S2 | L2：段特征 + 标签 + 新输出 `segment-plan`（A、B 两臂）+ 读数 runner（含 state 对照）；2 臂 × 2 种子 | 门 L2 |
 | S3 | lockstep 接 L2；联合读数 | 门 E2E |
 | S4 | 发布 S1–S3 结果 | — |
@@ -174,6 +181,11 @@ S1 与 S2 代码互不依赖，可并行开发；GPU 串行，S1 先训。
 - campaign 只训练，60 s 的 predict 记录不写（对整段进近的评估报告没有意义），记录由两个读数 runner 写。
 - `random_train_anchor_min_future_s` 保持 60 s（= Δ）；T1a 的 20 s 在固定 Δ 下不合法。
 - one-shot 变体在固定 Δ 头下的含义是"整段 Δ 都执行"（询问周期 60 s 对 30 s），名字不改，runner 文档写明。
+- 所有 L1 臂 `anchor_floor_index = 59`：不然 seq_len 30 的固定锚点是 29，lockstep 无法与 anchor 59 的规则制导基线逐航班配对，H 消融也不在一个锚点上。代价为零（前 60 s 只作历史）。
+- lockstep 里真值航路点按**时间**索引（飞到的时刻 + 30k s 的真值位置，相对飞到的位置），不按最近真值行的位姿：粗计划是带时刻的日程，落后的跟踪器被告知真值此刻在哪。
+- 门的 cohort 允许 L1 是基线的子集（配对在 L1 的航班上，缺的数目写进判定），因为固定 Δ 会排除锚点后真值不足 60 s 的航班。
+- 命名 `ctrl-horizon=`（review 指出 `horizon=` 与 `horizon_mode` 的词撞）。
+- S4 发布前 publisher 要认 `short_horizon` 记录块；hooked lockstep 的记录先不注册 intents 变体。
 
 ## 9. 磁盘
 

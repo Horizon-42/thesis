@@ -4,6 +4,47 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-17 — two-tier plan v2 and its S1: the fixed-horizon control head, the waypoint token, the readouts
+
+**Ask.** The user, after the T1a design failed its gate: the 09-16 feasibility doc had rewritten the
+requirement (a whole-approach tracker, the plan layer never built). `4dTrajectory/ts_transformer/docs/
+2026-09-17_two_tier_plan_v2.zh.md` restates the requirement verbatim and plans L1 (a short-horizon control
+head told the coarse plan's next waypoints) → L2 (segment-token plan head) → L3 (graph). The doc was
+reviewed first; the user decided its eight open parameters ("就按照你的建议来"), including three control
+contracts × two seeds, the hook off for the gate, and the deletion of T1a's record trees (a command the
+sandbox refused; left to the user). Mid-development choices are made by judgement and reported, not asked
+(the user's rule of the day).
+
+**S1.1 `control_horizon_s`** (`29646ab` + review fixes): a FIXED rollout horizon Δ. One definition of a
+sample's span (`dataset.target_horizon_s`), one floor rule (`effective_min_future_s`, every window set and
+both anchor-grid consumers), no duration head, the selection truth spans Δ, the per-epoch report block
+reads the truth cut at Δ (`series_within_horizon`). `ControlOutput` refuses the CTA, quantile heads, a
+non-zero duration weight, the latent, the imitation teacher and `intent=truth-join-duration` under Δ.
+Named `ctrl-horizon=`. The opus review of the commit found six confirmed defects, all fixed: the
+anchor-grid selection plans and the anytime curve kept the 60 s floor (an `ExplicitAnchorTrajectoryWindows`
+then RAISED on a bin anchor with less than Δ of truth); the report metrics measured a Δ-long prediction
+against touchdown (a fabricated ~50 m/s terminal-velocity error); the exclusion notice and the epoch
+audit stated the wrong floor; the intent-duration leak; an unmovable `time=0.00` gradient line; the
+`horizon=` name colliding with `horizon_mode`'s word.
+
+**S1.2 `plan_conditioning=waypoints`**: the truth's position every `PLAN_WAYPOINT_SEGMENT_S` (30 s) after
+the ask, relative to the current chart position, with the lead; K = Δ / 30 waypoints; 11-wide token at
+K = 2; `training_plan_token` / `probe_plan_token` are the one door for a training row, `predict` and the
+batch-size probe. `plan_token_width(config)` sizes the decoder's plan encoder.
+
+**S1.3 readouts**: `tracker_lockstep` gains the time-indexed `TruthWaypoints` source, the per-ask step
+error (`asks_e_m`, schema v3) and `--command-hook`; `two_tier_gates` gains gate L1 (1500 / 250 m, flyable
+≥ 0.95, established ≥ 0.88 × guidance) with the drift reading beside it and accepts a tracker cohort
+that is a subset of the baseline's (a fixed horizon drops flights short of Δ; the count is stated);
+`run_ts.py short_horizon_readout` is new (e(30), e(60), ADE[0,Δ] at the fixed anchor and the 12/8/6 km
+bins, truth-plan vs no-plan, paired against a whole-approach reference cut at Δ);
+`inference/receding.mean_displacement_to`; `frame_ablation` takes `"predict": false`.
+
+**S1.4 declared**: `docs/experiments/two_tier_l1_arms.json` (8 arms, `anchor_floor_index 59` so every
+arm shares native32's and the guidance baseline's anchor; dry run passes) and the intents entry
+`two_tier_l1_20260917`. Full ts suite green at every step (1299 → 1318 tests). Commits on
+`dev-two-tier`: 1625dc3 (S0 doc), 29646ab (S1.1), 1604b65 (its review fixes), ddfbf82 (S1.2), bea33af (S1.3).
+
 ### 2026-09-16 — the control contracts merged into dev-two-tier and refactored into one row each; T0(c) measured
 
 **Ask.** The user, on merging the path-angle contract (branch `sf-n7`) for the two-tier T1a experiment: "不要直接合，

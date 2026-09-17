@@ -1,0 +1,69 @@
+{
+ "_comment": "Two-tier v2 S1 (docs/2026-09-17_two_tier_plan_v2.zh.md §3): the L1 SHORT-HORIZON control layer. Each arm is a control head that rolls exactly control_horizon_s = 60 s (N=6 segments of 10 s) from a 60 s history (seq_len 30) and is told the truth's coarse plan — plan_conditioning=waypoints: the truth's position 30 s and 60 s after the anchor, relative to the anchor row, dropped on 50 % of training rows (the fallback a tracker needs when its plan is unreliable). PROTOCOL C in training and in the truth-waypoint lockstep (reads the future); the SAME weights with the token absent are the protocol-B reading (`run_ts.py short_horizon_readout`). No duration head, no CTA: the targets cover [0, 60 s] at the six segment ends, the endpoint and duration terms are off (the window holds no runway threshold), supervision = A2b's random-anchor recipe (heading-rate 8 + bank TV 1 + velocity 0.003 from simple-v2/v3, no imitation — random anchors + imitation is the known performance cliff; the fixed horizon refuses it anyway), remaining-path-uniform anchors with half the draws reserved for the fixed anchor, 180 epochs without early stopping, selection on the fixed-anchor common-grid ADE (= ADE[0,60] at the fixed anchor; the anchor-grid metric is refused under a read-the-future input). anchor_floor_index 59 puts every arm's fixed anchor at native32's L-1 (seq_len 60), so the lockstep pairs flight by flight against the rule-guidance baseline flown at 59 (plan_guidance_20260910/step3d_lockstep_l1) and the H ablation is judged at one anchor. THREE CONTROL CONTRACTS × two seeds (user 2026-09-17: the requirement names a load-factor family and a path-angle family; thrust-fraction is native32's contract, specific-force isolates the longitudinal loop, specific-force+path-angle adds the vertical loop): tf = thrust-fraction (δ, bank, load), sf = specific-force (n_x, bank, load), pa = specific-force+path-angle (n_x, bank, γ*). Plus the history ablation on the path-angle contract, seed 1337: h30 (seq_len 15) and h118 (seq_len 60). Single airport KRDU, val split only; the airport-balanced sampler is not exercised. \"predict\": false — the whole-approach evaluation report means nothing for a 60 s record; the campaign's readouts write their own: `run_ts.py short_horizon_readout` (§3 evaluation 1: e(30), e(60), ADE[0,60] at the fixed anchor and the 12/8/6 km bins, truth-plan and no-plan, paired against native32 cut at 60 s) and `run_ts.py tracker_lockstep` (§3 evaluation 2: re-asked every 30 s on its own flown rows under the truth's waypoints, hook OFF for the gate; a second run under --command-hook barrier+speed-floor --hook-saturation soft is the delivery-form reading beside it) → `run_ts.py two_tier_gates` (gate L1, both seeds of one contract: lockstep vectored ADE < 1500 m and straight-in < 250 m, fully flyable >= 95 %, established >= 88 % of the guidance's share; the drift reading — per-ask step error rising along the flight — triggers S5, never the gate). Gate L1's first clause is read off the short-horizon readout: truth-plan ADE[0,60] vectored < 125 m and straight-in < 60 m (e_track), and no-plan ADE[0,60] not worse than native32's on the same anchors.",
+ "predict": false,
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "seq_len": 30,
+  "n_segments": 6,
+  "control_horizon_s": 60.0,
+  "anchor_floor_index": 59,
+  "control_imitation_loss_weight": 0.0,
+  "control_heading_rate_loss_weight": 8.0,
+  "control_bank_tv_loss_weight": 1.0,
+  "final_time_loss_weight": 0.0,
+  "state_endpoint_loss_weight": 0.0,
+  "random_train_anchor": true,
+  "random_train_anchor_min_future_s": 60.0,
+  "random_train_anchor_sampling": "remaining-path-uniform",
+  "random_train_anchor_l1_share": 0.5,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "lr_plateau_metric": "objective",
+  "epochs": 180,
+  "patience": 180,
+  "plan_conditioning": "waypoints",
+  "plan_conditioning_dropout": 0.5
+ },
+ "arms": [
+  {
+   "key": "L1_tf_s1337",
+   "label": "thrust-fraction (δ, bank, load), H 60 s, seed 1337",
+   "overrides": {"control_thrust_parameterization": "thrust-fraction", "seed": 1337}
+  },
+  {
+   "key": "L1_tf_s2024",
+   "label": "thrust-fraction, H 60 s, seed 2024",
+   "overrides": {"control_thrust_parameterization": "thrust-fraction", "seed": 2024}
+  },
+  {
+   "key": "L1_sf_s1337",
+   "label": "specific-force (n_x, bank, load), H 60 s, seed 1337",
+   "overrides": {"control_thrust_parameterization": "specific-force", "seed": 1337}
+  },
+  {
+   "key": "L1_sf_s2024",
+   "label": "specific-force, H 60 s, seed 2024",
+   "overrides": {"control_thrust_parameterization": "specific-force", "seed": 2024}
+  },
+  {
+   "key": "L1_pa_s1337",
+   "label": "specific-force+path-angle (n_x, bank, γ*), H 60 s, seed 1337",
+   "overrides": {"control_thrust_parameterization": "specific-force+path-angle", "seed": 1337}
+  },
+  {
+   "key": "L1_pa_s2024",
+   "label": "specific-force+path-angle, H 60 s, seed 2024",
+   "overrides": {"control_thrust_parameterization": "specific-force+path-angle", "seed": 2024}
+  },
+  {
+   "key": "L1_pa_h30_s1337",
+   "label": "path-angle contract, H 30 s (seq_len 15), seed 1337 — the history ablation",
+   "overrides": {"control_thrust_parameterization": "specific-force+path-angle", "seq_len": 15, "seed": 1337}
+  },
+  {
+   "key": "L1_pa_h118_s1337",
+   "label": "path-angle contract, H 118 s (seq_len 60), seed 1337 — the history ablation",
+   "overrides": {"control_thrust_parameterization": "specific-force+path-angle", "seq_len": 60, "seed": 1337}
+  }
+ ]
+}
