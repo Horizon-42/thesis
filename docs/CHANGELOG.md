@@ -117,6 +117,17 @@ with an empty e_plan. Tests: the E2E block of `test_tracker_lockstep.py` (6, one
 a VARIANT of its checkpoint's prediction and is refused without `--category-variant`; the mirror is pinned
 against the runners' `RECORDS_BLOCK` constants in the publisher's test file.
 
+**The L1 campaign's first readout died on a definition mismatch (fixed, `4066345`).** `short_horizon_readout`
+admitted flights on the supervision rows (the track closed to the threshold, `truth_duration_s`) and read
+them against the observed rows (`mean_displacement_to`), and on KRDU 3 of native32's 1404 val flights have
+less than 60 s of observed track after the fixed anchor — the first of them raised inside `measure_arm`
+and the whole campaign readout exited. Such a flight is now absent at that anchor set and COUNTED
+(`truth_shorter_than_horizon` in the set block, the record block, the print and the render). The same
+mismatch is what the S2.2 review called finding 7; the segment-plan readout was written with the
+observed-track admission from the start. Two earlier launches were misread as silent deaths (a
+block-buffered log and a `setsid` PID); the queue agent runs every detached job with
+`PYTHONUNBUFFERED=1` and a PID file from here.
+
 ### 2026-09-16 — the control contracts merged into dev-two-tier and refactored into one row each; T0(c) measured
 
 **Ask.** The user, on merging the path-angle contract (branch `sf-n7`) for the two-tier T1a experiment: "不要直接合，

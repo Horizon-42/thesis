@@ -27,7 +27,7 @@ that anchor and counted, never held or scored short. **So is a flight whose OBSE
 before Δ after the anchor** (``truth_shorter_than_horizon``): the anchor sets admit on the
 supervision rows — the track closed to the threshold, `truth_duration_s` — while the readings
 are against the observed rows (`mean_displacement_to`, `lead_time_error`'s accounting), and the
-two ends differ by the fitted tail (KRDU: one flight of 1401 at the fixed anchor).
+two ends differ by the fitted tail (KRDU at the fixed anchor 59: 3 of native32's 1404 val flights).
 
 **Numbers**, per arm · variant · anchor set · stratum: the displacement at each lead (p50 / mean)
 and the mean displacement over [0, Δ] on the 1 s grid (`mean_displacement_to`, `lead_time_error`'s
