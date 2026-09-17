@@ -475,3 +475,21 @@ def test_train_checkpoint_forecast_export_and_evaluate(tmp_path, attention):
     assert record.eval_record["final_time_s"] == pytest.approx(forecast.final_time_s, abs=1e-6)
     assert record.source[ARRIVAL_SEGMENT_KEY] == forecast.segment_plan_arrival_segment
     assert np.isfinite(observed_series_metrics(item, forecast)["ade_m"])
+
+
+def test_the_epoch_line_prints_with_no_arrival_inside_the_span():
+    """The L2 campaign's first arm died at epoch 1 formatting a None: no flight yet had both a plan
+    arrival and a truth arrival inside the span. The line prints a dash there."""
+    from ts_transformer.training.train import segment_plan_epoch_line
+
+    block = {
+        "flights": 3, "span_s": 300.0, "covered_ade_m": 512.3, "covered_s_mean": 240.0,
+        "segment_error_m": [{"end_s": 30.0, "mean": None, "n": 0}] + [{"end_s": 30.0 * k, "mean": 100.0, "n": 3} for k in range(2, 11)],
+        "truth_arrives_share": 0.0, "plan_arrives_share": 0.3,
+        "arrival_confusion": {"both": 0, "plan_only": 1, "truth_only": 0, "neither": 2},
+        "arrival_time_error_s": {"mean_abs": None, "mean_signed": None, "n": 0},
+    }
+    line = segment_plan_epoch_line(block)
+    assert "covered-ADE=512.3m" in line and "e(30)=—m" in line and "|dT|=—s n=0" in line
+    block["arrival_time_error_s"] = {"mean_abs": 12.25, "mean_signed": -3.0, "n": 2}
+    assert "|dT|=12.2s n=2" in segment_plan_epoch_line(block)

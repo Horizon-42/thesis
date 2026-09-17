@@ -927,6 +927,25 @@ def procedure_update(
     return procedure_epoch, epoch_multipliers
 
 
+def segment_plan_epoch_line(block: dict[str, Any]) -> str:
+    """The segment-plan head's per-epoch line (`segment_plan_validation`). Two of its numbers are
+    None until some flight carries them — the arrival-time error needs a flight whose plan AND
+    truth arrive inside the span, a segment's error a flight whose truth reaches it — and the
+    first epochs of a real run have neither (the L2 campaign's first arm died printing this)."""
+    def num(value: float | None, spec: str) -> str:
+        return "—" if value is None else format(value, spec)
+
+    confusion = block["arrival_confusion"]
+    timing = block["arrival_time_error_s"]
+    return (
+        f"             segment-plan  covered-ADE={num(block['covered_ade_m'], '.1f')}m over {num(block['covered_s_mean'], '.0f')}s  "
+        f"e(30)={num(block['segment_error_m'][0]['mean'], '.1f')}m  "
+        f"arrival plan/truth within {block['span_s']:.0f}s: {block['plan_arrives_share']:.2f}/{block['truth_arrives_share']:.2f} "
+        f"(both {confusion['both']}, plan-only {confusion['plan_only']}, truth-only {confusion['truth_only']})  "
+        f"|dT|={num(timing['mean_abs'], '.1f')}s n={timing['n']}"
+    )
+
+
 def describe_epoch(session: TrainingSession, result: EpochResult, marker: str) -> None:
     """The epoch's lines: the losses, the selection value, the anchor sets, the parts, and
     the control gradient reading when there is one."""
@@ -960,15 +979,7 @@ def describe_epoch(session: TrainingSession, result: EpochResult, marker: str) -
         )
     )
     if result.segment_plan_validation:
-        block = result.segment_plan_validation
-        confusion = block["arrival_confusion"]
-        print(
-            f"             segment-plan  covered-ADE={block['covered_ade_m']:.1f}m over {block['covered_s_mean']:.0f}s  "
-            f"e(30)={block['segment_error_m'][0]['mean']:.1f}m  "
-            f"arrival plan/truth within {block['span_s']:.0f}s: {block['plan_arrives_share']:.2f}/{block['truth_arrives_share']:.2f} "
-            f"(both {confusion['both']}, plan-only {confusion['plan_only']}, truth-only {confusion['truth_only']})  "
-            f"|dT|={block['arrival_time_error_s']['mean_abs']:.1f}s n={block['arrival_time_error_s']['n']}"
-        )
+        print(segment_plan_epoch_line(result.segment_plan_validation))
     if result.plan_rolled_validation:
         rolled = result.plan_rolled_validation
         share = result.plan_rolled_training.get("share") if result.plan_rolled_training else None
