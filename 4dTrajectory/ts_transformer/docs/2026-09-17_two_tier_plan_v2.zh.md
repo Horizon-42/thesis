@@ -548,7 +548,7 @@ L1 val 1401 架里 10 架放不下锚点 90 + 60 s 时域：**明确排除并计
 | 项 | 状态 | 在哪 |
 |---|---|---|
 | 主树 | `dev-two-tier-feasibility`，干净；代码最后一个提交 13d5367（lockstep 下限排除 + review 修正），文档提交在其后 | `/home/supercomputing/studys/thesis` |
-| runs worktree | `.claude/worktrees/two-tier-runs`，detached，**要移到本节所在的提交**再启动任何 campaign（`git -C <runs> checkout --detach <sha>`；`status --porcelain` 必须为空） | 数据目录是到主树的 symlink |
+| runs worktree | `.claude/worktrees/two-tier-runs`，detached，**已移到 0a21bb6（本节的提交）**；之后每个新提交都要再移一次（`git -C <runs> checkout --detach <sha>`；`status --porcelain` 必须为空） | 数据目录是到主树的 symlink |
 | pub worktree | `.claude/worktrees/two-tier-pub` @02517d6（发布用） | — |
 | 进程 | 无。链 `two_tier_l1c_20260917/queue_l1c.sh` 已退出（STOP 于 B121 E2E 第一步）；GPU 空闲；磁盘约 8 GB | — |
 | 已完成的 campaign | L1（8 臂）、L1b（4）、L2（4）、L1c（6）、L2c（2）、L2d（2）：训练、短时读数、lockstep、门 L1 / L2 / E2E 全部落盘 | `4dTrajectory/outputs/KRDU/experiments/two_tier_*` |
