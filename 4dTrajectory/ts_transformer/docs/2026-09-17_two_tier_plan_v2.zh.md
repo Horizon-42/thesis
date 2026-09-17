@@ -29,11 +29,11 @@
 | S1.3 读数工具 | **完成** bea33af：`tracker_lockstep` 航路点来源 + 逐次 e + `--command-hook`（schema v3）；`two_tier_gates` 门 L1 + 漂移读数（schema v2，cohort 可为基线子集并计数）；`short_horizon_readout` 新 runner；`frame_ablation` `"predict": false`。全套 1318 测试通过 |
 | S1.4 臂 + intents | **完成**（训练 8 臂 + 2a–2d 读数，结果 §10.1–10.4；门 L1 三契约全 FAIL）：`docs/experiments/two_tier_l1_arms.json`（8 臂）、intents `two_tier_l1_20260917`；首次 launch 死在 `prepare_session`（60 s 未来契约覆盖 6848/6849 训练航班，`KRDU:FFT1168_05L_a8d27e_20260501T121308Z` 无可用锚点）→ 82294f3：`frame_ablation` 把声明里的 `"development_cohort"` 传给每个 train 步，臂文件声明 `<campaign>/development_cohort.json`（队列 agent 用 `run_ts.py plan_cohort` 写出：6848 / 1401，h30 臂交叉核对相同）；队列 agent 于 03:47 UTC 重启（PID 1967516），~5.6 s/epoch，臂 1 `L1_tf_s1337` 完成（选择 ADE 168.2 m），全部 8 臂约 2.5–3 h，之后自动跑 2a–2d（`short_horizon_readout` → lockstep hook 关 / 开 → `two_tier_gates` ×3 契约）并汇报 |
 | S2.1 `segment-plan` 输出 | **完成** 9d9afc8（opus review 12 项已处理、全套测试通过）；本文件 §4 已按实现改：输出在**跑道系**而非 chart；到达 = 真值终点 `truth_duration_s`；每 epoch 的 `segment_plan_validation` 读数块 |
-| S2.2 L2 读数 runner | **代码完成**：`run_ts.py segment_plan_readout`（每个 checkpoint 在共同固定锚点——各自固定锚点中最晚的——与 12/8/6 km bin 上预测，60/120/180/300 s 的位移分层；forecast 结束后**保持末行**（到达的计划停在入口，读的是它的到达判断），只有真值落地才缺席；每个 checkpoint 在**自己的 split** 上读、按共同航班配对——native32 是 openap-direct 队列（val 1404），state 臂与 L2 臂是全机型（val 2104，前者 ⊂ 后者，已核）；匀速外推内置参照；segment-plan 臂带计划块）+ `two_tier_gates --segment-readout`（门 L2：120 与 180 s 雷达引导 p50 比**每个**整段参照都低 ≥ 125 m、直线不高于，两种子）。opus review 11 项已处理（固定锚点集要求该锚点存在且其后 ≥ 60 s 观测轨迹、held 计数进配对格与门判据行、多个 readout 参照/锚点/提前量不一致拒绝、segment-plan 臂一次前向、`window` 参照拒绝、`strata_fixed_at_anchor`）。测试 `test_segment_plan_readout.py`（8）、`test_two_tier_gates.py` L2 段（5）。**待用户定**：直线"不差"= 差 ≤ 0（零容差；包内直线种子线是 30 m，review 建议考虑）；参照的记录也写出（S4 需为 native32/state 注册 `@readout-*` 变体或跳过） |
-| S2.3 L2 臂 + intents | **campaign 运行中**（首次启动死在第 1 轮的打印行——`segment_plan_validation` 的到达时间误差为 None，3512fdc 修；重启 @3512fdc，PID 2140320，第 1 轮的损失与中断那次逐位相同；3.6 s/epoch，4 臂 ≈ 45 min，然后读数带记录、门 L2 ×2）：`docs/experiments/two_tier_l2_arms.json`（A/B × 2 种子，seq_len 61，M = 10，全机型 cohort，随机锚点 remaining-path-uniform、未来 ≥ 30 s、半数留在固定锚点 60，180 epoch，按目标函数选），dry run 通过；intents `two_tier_l2_20260917`（4 run + `@readout-<set>` 变体）；cohort 已写 `two_tier_l2_20260917/development_cohort.json`（10102 / 2104，丢 3 个训练航班）。等 L1 campaign 跑完后交队列 agent：训练 4 臂 → `segment_plan_readout`（参照 native32 + `airport_frame_20260903/A_threshold_enu`，`--write-records`）→ `two_tier_gates --segment-readout`（A 两种子、B 两种子各判一次） |
+| S2.2 L2 读数 runner | **代码完成**：`run_ts.py segment_plan_readout`（每个 checkpoint 在共同固定锚点——各自固定锚点中最晚的——与 12/8/6 km bin 上预测，60/120/180/300 s 的位移分层；forecast 结束后**保持末行**（到达的计划停在入口，读的是它的到达判断），只有真值落地才缺席；每个 checkpoint 在**自己的 split** 上读、按共同航班配对——native32 是 openap-direct 队列（val 1404），state 臂与 L2 臂是全机型（val 2104，前者 ⊂ 后者，已核）；匀速外推内置参照；segment-plan 臂带计划块）+ `two_tier_gates --segment-readout`（门 L2：120 与 180 s 雷达引导 p50 比**每个**整段参照都低 ≥ 125 m、直线不高于，两种子）。opus review 11 项已处理（固定锚点集要求该锚点存在且其后 ≥ 60 s 观测轨迹、held 计数进配对格与门判据行、多个 readout 参照/锚点/提前量不一致拒绝、segment-plan 臂一次前向、`window` 参照拒绝、`strata_fixed_at_anchor`）。测试 `test_segment_plan_readout.py`（8）、`test_two_tier_gates.py` L2 段（5）。**待用户定**：直线"不差"= 差 ≤ 0（零容差；包内直线种子线是 30 m，review 建议考虑）；参照的记录也写出（S4 需为 native32/state 注册 `@readout-*` 变体或跳过）。→ §10.6：本轮零容差没有决定任何判定（A 的直线 180 s 对 state 是 +31 / +37，30 m 线也放不过；B 的直线全部 ≤ −165） |
+| S2.3 L2 臂 + intents | **完成**（训练 §10.5；读数 + 门 §10.6：**门 L2 B 轴（segments）PASS 两种子，A 轴 FAIL**；readout 记录 2.4 GB 已写，磁盘 8.5 GB。历史：首次启动死在第 1 轮的打印行——`segment_plan_validation` 的到达时间误差为 None，3512fdc 修；重启 @3512fdc，PID 2140320，第 1 轮的损失与中断那次逐位相同；3.6 s/epoch，4 臂 ≈ 45 min，然后读数带记录、门 L2 ×2）：`docs/experiments/two_tier_l2_arms.json`（A/B × 2 种子，seq_len 61，M = 10，全机型 cohort，随机锚点 remaining-path-uniform、未来 ≥ 30 s、半数留在固定锚点 60，180 epoch，按目标函数选），dry run 通过；intents `two_tier_l2_20260917`（4 run + `@readout-<set>` 变体）；cohort 已写 `two_tier_l2_20260917/development_cohort.json`（10102 / 2104，丢 3 个训练航班）。等 L1 campaign 跑完后交队列 agent：训练 4 臂 → `segment_plan_readout`（参照 native32 + `airport_frame_20260903/A_threshold_enu`，`--write-records`）→ `two_tier_gates --segment-readout`（A 两种子、B 两种子各判一次） |
 | **首批读数（2026-09-17 晚，2a）** | **L1 不用它的计划 token**：六个主臂带真值航路点与不带的 ADE[0,60] 只差 2–4 m（见 §10）；不带 token 时优于 native32 切到 60 s。诊断臂 `docs/experiments/two_tier_l1b_arms.json`（4 臂、单种子、pa 契约：遮蔽率 0 / 不减 lr / 两者 / 关平滑项）+ intents `two_tier_l1b_20260917`，排在 L2 之后、E2E 之前 |
 | S4 发布 | **L1 短时读数已发布**（2026-09-17 晚，opus agent，pub worktree @cbdf6ca）：6 个主臂 × {truth-plan, no-plan} × {fixed, 8km} = 24 个类目 `experiment_<arm>_<token>_short-<variant>-<set>_val`，intents 标题「L1 · 短时控制层…」与每 run/变体行已盖章；`npm run check-publication -- --airport KRDU --server http://localhost:5173` → 195 类目 0 错 0 警；前端重启后在 app 里打开确认渲染。发布命令形状（publisher 默认根指向 POOLED，需显式 `--experiment-index …/KRDU/experiments/index.json --output-root …/KRDU/experiment_predictions`；索引先用 `python -m ts_transformer.training.experiment_index --root outputs/KRDU/experiments` 重建）在 scratchpad `publish_brief_two_tier.md`。未发布：12km/6km 档、两个 H 消融臂、native32 的记录、lockstep/L2/E2E（未就绪）。磁盘 5.9 GB（99 %） |
-| S3 联合 lockstep + 门 E2E | **完成** a1e58aa：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。等 L1 门与 L2 门的结果后由队列 agent 跑（种子配对：L1 s1337 + L2 s1337 …；brief 第 4 步） |
+| S3 联合 lockstep + 门 E2E | **完成** a1e58aa：`tracker_lockstep --plan-head <segment-plan ckpt>` 的来源 `SegmentHeadWaypoints`（协议 A：L2 在滚动历史上的下 K 个航路点相对飞到的行、自己的到达时间作首次询问的时限；每次询问旁记 e_plan = L2 航路点对同一时刻真值航路点的误差，逐航路点与合并）；`--anchor-floor-index 60`（L2 seq_len 61 的回看放不进 L1 的锚点 59，把所有 tracker 读在 60；拒绝早于其自身锚点）；门 E2E = G3 的判据（§5 = 旧 §6 的数）；`two_tier_gates` 按 plan source `segment-head` 归到 E2E。opus review 7 项已处理（e_plan 的 ask 用 lockstep 的序号、首问没画出到达的航班按"时限来自计划跨度"逐航班计数、`--batch-size` 传到头、逐航路点 n、record 块写 floor、schema v4 而门仍读 v3）。E2E 由 detached 链 `queue_rest.sh` 在 L1b 之后跑（§10.7）：`--plan-head B_s<seed>` 配 `L1_pa_s<seed>`（门 L1 全 FAIL，pa 作读数），hook 关，无记录；然后门 E2E `gates_e2e_pa_B` |
 
 ## 2. 架构
 
@@ -305,3 +305,56 @@ hook 关 → 开，receding：
 | B_s2024 | 0.306 | **908** | **248** | 0.62 / 0.62 | 1294 / 12 / 17 | 9.7 |
 
 **B（每段一个 token）比 A（每个特征一个 token）好一倍**，两种子几乎逐位一致（908.2 / 908.1）；A 的两种子也一致（1816 / 1867）。均值受长雷达引导航班拉高；门 L2 看读数的分层 p50 与对 native32 / state 臂的逐航班配对（待）。到达判断两轴一样（0.62 = 真值在 300 s 内到达的份额，混淆极少）。
+
+### 10.6 L2 读数与门 L2（`two_tier_l2_20260917/readout` + `gates_A` / `gates_B`，@3512fdc，KRDU val，共同固定锚点 60）
+
+读数：每个 checkpoint 在自己的 split 上从共同固定锚点（各自固定锚点中最晚的 = 60）与 12/8/6 km bin 预测，读 60/120/180/300 s 的位移；forecast 结束后保持末行，只有真值落地才缺席。队列：native32 1404（openap-direct）、其余 2104；配对按共同航班。记录已写（`readout/records`，2.4 GB，磁盘 11 → 8.5 GB）。
+
+**固定锚点 60 的位移 p50 / 均值（m）**（h = 保持在 forecast 末行的读数数）：
+
+| checkpoint | 层 | n | 60 s | 120 s | 180 s | 300 s |
+|---|---|---|---|---|---|---|
+| native32（控制层，L=60） | 直线 | 901 | 216 / 277 | 526 / 639（n871） | 967 / 1295（n181，h60） | —（n0） |
+| native32 | 雷达 | 497 | 625 / 700 | 1906 / 2272 | 2474 / 2977（n494） | 3666 / 4328（n474） |
+| state（`A_threshold_enu`） | 直线 | 1271 | 404 / 491 | 531 / 660（n1233） | 798 / 972（n333，h29） | 1587 / 1517（n21） |
+| state | 雷达 | 825 | 663 / 956 | 1071 / 1500 | 1692 / 2304（n822） | 3455 / 3996（n766） |
+| 匀速外推 | 直线 | 1271 | 506 / 639 | 1587 / 1887 | 2683 / 3748 | 1370 / 2230（n21） |
+| 匀速外推 | 雷达 | 825 | 445 / 702 | 2379 / 3061 | 6233 / 6733 | 23493 / 22656 |
+| A_s1337（channels） | 直线 | 1271 | 310 / 484 | 485 / 709 | 835 / 1241（h99） | 3096 / 3409（n21） |
+| A_s1337 | 雷达 | 825 | 1212 / 2198 | 1596 / 3404 | 2606 / 4547（h8） | 4932 / 6621（h27） |
+| A_s2024 | 直线 | 1271 | 310 / 458 | 507 / 696 | 829 / 1178（h99） | 4275 / 4256（n21） |
+| A_s2024 | 雷达 | 825 | 2711 / 2510 | 2905 / 3820 | 2288 / 4508（h7） | 4974 / 6508（h32） |
+| **B_s1337（segments）** | 直线 | 1271 | **213 / 272** | **366 / 464** | **587 / 708**（h56） | **1542 / 1554**（n21） |
+| **B_s1337** | 雷达 | 825 | **448 / 750** | **768 / 1199** | **1396 / 1936**（h2） | **3449 / 3810**（h8） |
+| **B_s2024** | 直线 | 1271 | **218 / 272** | **365 / 460** | **591 / 691**（h52） | 1828 / 1596（n21） |
+| **B_s2024** | 雷达 | 825 | **461 / 743** | **760 / 1193** | **1422 / 1951**（h2） | **3407 / 3802**（h7） |
+
+8 km bin 的 60 s（全体 p50，n≈2100，native32 n1400）：native32 391、state 935、匀速 253、A_s1337 285、A_s2024 221、**B 197 / 198**。12 km bin 的 120 s（全体，n1637）：state 814、A 565 / 570、**B 406 / 401**；对 native32（n1048）673 → B 352 / 356。
+
+**门 L2 的判据行**（arm p50 − 参照 p50，同航班；判据：雷达 ≤ −125，直线 ≤ 0；held = arm / 参照）：
+
+| 臂 | 参照 | 120 s 雷达 | 120 s 直线 | 180 s 雷达 | 180 s 直线 | 判定 |
+|---|---|---|---|---|---|---|
+| A_s1337 | native32 | 1187 − 1906 = −719 | 440 − 526 = −87 | 1887 − 2474 = −587（held 4/0） | 717 − 967 = −250（53/60） | 过 |
+| A_s1337 | state | 1596 − 1071 = **+526** | 485 − 531 = −47 | 2606 − 1692 = **+914**（8/1） | 835 − 798 = **+37**（99/29） | **不过** |
+| A_s2024 | native32 | 2521 − 1906 = **+615** | 451 − 526 = −76 | 1663 − 2474 = −811（3/0） | 646 − 967 = −321（51/60） | **不过** |
+| A_s2024 | state | 2905 − 1071 = **+1835** | 507 − 531 = −24 | 2288 − 1692 = **+596**（7/1） | 829 − 798 = **+31**（99/29） | **不过** |
+| B_s1337 | native32 | 618 − 1906 = −1288 | 333 − 526 = −194 | 1239 − 2474 = −1236（1/0） | 497 − 967 = −470（23/60） | 过 |
+| B_s1337 | state | 768 − 1071 = −302 | 366 − 531 = −165 | 1396 − 1692 = −296（2/1） | 587 − 798 = −212（56/29） | 过 |
+| B_s2024 | native32 | 622 − 1906 = −1285 | 346 − 526 = −181 | 1306 − 2474 = −1169（1/0） | 476 − 967 = −491（22/60） | 过 |
+| B_s2024 | state | 760 − 1071 = −311 | 365 − 531 = −166 | 1422 − 1692 = −270（2/1） | 591 − 798 = −207（52/29） | 过 |
+
+**门 L2：B 轴 PASS（两种子、对两个整段参照的全部 8 条判据），A 轴 FAIL（两种子）。** 匀速外推旁读不计门（B 对它 120 s 雷达 −1610 / −1619，180 s −4836 / −4811）。逐航班配对的 Δp50 与"arm 更好"份额（固定锚点）：B_s1337 对 native32 120 s 直线 −211（0.71）、雷达 −1044（0.85），180 s 直线 −507（0.81）、雷达 −1248（0.87）；对 state 120 s 直线 −180（0.77）、雷达 −285（0.71），180 s 直线 −213（0.73）、雷达 −208（0.66）；B_s2024 同量级（雷达 −1024 / −1195 对 native32，−260 / −174 对 state）。A_s1337 对 state 雷达 +365（0.29）/ +557（0.30）。
+
+读法（只读数字，不超出门）：
+- **B 在每个提前量、每个层都低于两个整段参照**，含 60 s（B 对 native32 同 1401 航班的 60 s Δp50 −50，直线 −27、雷达 −195；对 state −196）——即 L2 在 L1 的时限内也比控制层 native32 的位移小。远锚点的雷达 180 s 是 B 对 state 最小的优势（−270 / −296，"更好"份额 0.63–0.66）。
+- **A 坏在固定锚点的雷达层**：60 s 就 1212 / 2711 m，而它在 12/8/6 km bin 里正常（8 km 全体 60 s 285 / 221，对 state −617 / −697）；channels attention 在远离跑道的引导航班上画不出整段路径。A 对 native32 的雷达 120 s 一种子过一种子不过（−719 / +615）。
+- 直线层的零容差没有决定任何判定：A 的直线 180 s 对 state 是 +37 / +31（30 m 种子线也不会放过 +37），B 的直线全部 ≤ −165。§8 那条"待用户定"的容差问题对本轮无实际影响。
+- 计划块（固定锚点）：B covered-ADE 910 / 911 m（A 1841 / 1895），直线 333 / 331（A 522 / 514），雷达 1785 / 1790（A 3861 / 4011）；到达判断两轴都 0.62 / 0.62（混淆 B 13 / 17，A 33 / 33）；|dT| B 9.7 / 9.6 s（A 12.8 / 13.0）。雷达层的到达格只有 28–41 架（真值 300 s 内到达份额 0.07）。
+- 8 km bin 的 120 s 有大量 held（B 直线 h92 / n199：计划已到达入口而真值还在飞）——近场的 120 s 比较是"到达判断"而非位移。
+
+**结论用于 E2E**：按 brief 第 4 步，E2E 跑 B 轴（`--plan-head B_s<seed>`）配 `L1_pa_s<seed>`（门 L1 三契约全 FAIL，pa 作读数，见 §10.3），hook 关，`--anchor-floor-index 60`，无记录（磁盘 8.5 GB）。
+
+### 10.7 队列连续性（2026-09-17，用户问"实验队列没有中断浪费时间吗"）
+
+**有两段空转**，都是队列 agent 的 Monitor 唤醒没有触发、直到我发消息才继续（从 agent 的记录读出，UTC）：2b lockstep 完成后 06:46 → 12:17（**5.5 h**），L2 训练完成后 13:11 → 16:53（**3.7 h**）。GPU 在这两段里闲置；没有实验被重复跑或损坏（agent 的一次重复启动 readout 被拒于产物已存在）。修法：其余步骤改成**一个 detached 的 shell 链** `two_tier_l2_20260917/queue_rest.sh`（PID 文件 `queue_rest.pid`，日志 `queue_rest.log`，`PYTHONUNBUFFERED=1`）：等 readout → 门 A / B → L1b 4 臂训练 → L1b 短时读数 → E2E lockstep ×2（B 配 pa，种子配对）→ 门 E2E；每步产物存在即跳过，失败先等并发进程结束再重试一次，产物出现即视为完成；磁盘 < 3 GB 停。18:58:31 本地启动（第三次：前两次分别是未打补丁与断言误算，各活了 < 1 min，日志留作 `queue_rest.attempt{1,2}.log`），18:59:01–18:59:05 门 A / B 完成，18:59:05 起 L1b 训练（`[1/4] L1b_pa_nodrop`）。队列 agent 已交回并停手（不再启动任何东西）。
