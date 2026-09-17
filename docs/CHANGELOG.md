@@ -128,6 +128,15 @@ observed-track admission from the start. Two earlier launches were misread as si
 block-buffered log and a `setsid` PID); the queue agent runs every detached job with
 `PYTHONUNBUFFERED=1` and a PID file from here.
 
+**Published (S4, first batch):** the L1 short-horizon readout's records for the six main arms × truth-plan /
+no-plan × fixed / 8 km — 24 picker categories `experiment_<arm>_<token>_short-<variant>-<set>_val` under the
+`two_tier_l1_20260917` heading with the campaign, run and variant intents stamped; validator 195 categories,
+0 errors; frontend restarted (the vite node child) and one category opened in the app. Two things the next
+publication needs to know: the publisher's default roots point at `POOLED`, so `--experiment-index
+…/KRDU/experiments/index.json --output-root …/KRDU/experiment_predictions` are explicit; and the index is
+rebuilt with `python -m ts_transformer.training.experiment_index --root outputs/KRDU/experiments` (it was five
+days stale and the campaign was invisible to the publisher until then).
+
 ### 2026-09-16 — the control contracts merged into dev-two-tier and refactored into one row each; T0(c) measured
 
 **Ask.** The user, on merging the path-angle contract (branch `sf-n7`) for the two-tier T1a experiment: "不要直接合，
