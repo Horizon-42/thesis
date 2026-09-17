@@ -104,6 +104,7 @@ from ts_transformer.data.data_provenance import (  # noqa: E402
 from ts_transformer.data.dataset import (  # noqa: E402
     Normalizer,
     build_series,
+    effective_min_future_s,
     load_flight_dicts,
 )
 from ts_transformer.inference.export import (  # noqa: E402
@@ -372,7 +373,8 @@ def measure_bin(model, series, profiles, keys, target_m, *, config, normalizer, 
     groups: dict[int, list[int]] = {}
     for index, anchor in anchors_for_bin(
         series, profiles, target_m,
-        seq_len=config.seq_len, min_future_s=min_future_s,
+        # the curve's floor, raised to a fixed horizon's Δ (`effective_min_future_s`)
+        seq_len=config.seq_len, min_future_s=effective_min_future_s(config, min_future_s),
         # never before the checkpoint's own fixed anchor (a floor-trained run's is later
         # than L-1, and the curve's cohort is filtered there)
         minimum_anchor_index=default_anchor(config),

@@ -354,7 +354,7 @@ _ABBREV = {
     "control_duration_uniform_floor": "duration-floor",
     "control_gradient_clip_norm": "grad-clip",
     "control_rollout_integrator_dt_s": "rollout-dt",
-    "control_horizon_s": "horizon",
+    "control_horizon_s": "ctrl-horizon",   # `horizon` alone reads as `horizon_mode`'s word
     "control_command_hook": "hook",
     "control_hook_saturation": "hook-sat",
     "control_barrier_alpha": "barrier-alpha",

@@ -26,7 +26,7 @@ import hashlib
 import json
 from abc import ABC, abstractmethod
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
@@ -192,9 +192,53 @@ def target_horizon_s(series: FlightSeries, anchor: int, config: TSConfig) -> flo
 
     The truth's remaining duration (:func:`truth_duration_s`), or under a fixed horizon
     (``control_horizon_s``, two-tier L1) exactly Δ — :func:`window_anchors` admits no anchor
-    with less than Δ of truth after it, so the grid never runs past the truth's end.
+    with less than Δ of truth after it, and an anchor that reached this function another way
+    (a caller-supplied one) is refused here by name rather than given a grid past the truth.
     """
-    return float(config.control_horizon_s) or truth_duration_s(series, anchor)
+    remaining = truth_duration_s(series, anchor)
+    horizon = float(config.control_horizon_s)
+    if not horizon:
+        return remaining
+    if remaining < horizon - 1e-9:
+        raise ValueError(
+            f"{series.dataset_id}: anchor {anchor} has {remaining:.1f} s of truth after it, under the "
+            f"{horizon:g} s control horizon (window_anchors admits no such anchor)"
+        )
+    return horizon
+
+
+def effective_min_future_s(config: TSConfig, minimum_future_s: float = 0.0) -> float:
+    """The truth an anchor must have after it: the caller's floor, raised to the fixed horizon
+    (``control_horizon_s``) whose targets cover [0, Δ] from every anchor. ONE definition for
+    every anchor rule — :func:`window_anchors`, the anchor grid's bins (`anchor_grid`,
+    `validation`, the anytime curve) — so a fixed-horizon run can never be handed an anchor
+    its own windows would refuse."""
+    if minimum_future_s < 0.0:
+        raise ValueError("minimum_future_s must be non-negative")
+    return max(float(minimum_future_s), float(config.control_horizon_s))
+
+
+def series_within_horizon(series: FlightSeries, anchor: int, config: TSConfig) -> FlightSeries:
+    """``series`` with its supervision rows CUT at the target horizon from ``anchor`` — the
+    reference a fixed-horizon run's report metrics are read against (the terminal velocity,
+    the arc-length geometry: `fixed_anchor_validation.fixed_anchor_common_grid_metrics`),
+    ending on an interpolated row exactly Δ after the anchor. Under the whole-approach
+    horizon (0) it is ``series`` itself, so every stored run's report is unchanged."""
+    if not config.control_horizon_s:
+        return series
+    end = float(series.times[anchor]) + target_horizon_s(series, anchor, config)
+    times = np.asarray(series.supervision_times, dtype=np.float64)
+    keep = times < end - 1e-9
+    end_values = np.array([np.interp(end, times, series.supervision_values[:, c])
+                           for c in range(series.supervision_values.shape[1])])
+    end_weights = np.array([np.interp(end, times, series.supervision_weights[:, c])
+                            for c in range(series.supervision_weights.shape[1])])
+    return replace(
+        series,
+        supervision_times=np.concatenate((times[keep], [end])),
+        supervision_values=np.concatenate((series.supervision_values[keep], end_values[None, :])),
+        supervision_weights=np.concatenate((series.supervision_weights[keep], end_weights[None, :])),
+    )
 
 
 @dataclass(frozen=True)
@@ -775,13 +819,11 @@ def window_anchors(
     complete remainder and full masks a short padded suffix. Window mode requires a complete
     fixed-dt short horizon because those targets train one recursive forecasting pass.
     """
-    if minimum_future_s < 0.0:
-        raise ValueError("minimum_future_s must be non-negative")
     # A fixed horizon supervises [0, Δ] from every anchor (`target_horizon_s`), so every
-    # window set — fixed, explicit or random — needs Δ of truth after each anchor. Raised
-    # HERE, once, rather than at each caller: a flight with less is excluded and counted
-    # (`usable_series`), never given a grid past its own end.
-    minimum_future_s = max(minimum_future_s, float(config.control_horizon_s))
+    # window set — fixed, explicit or random — needs Δ of truth after each anchor
+    # (`effective_min_future_s`, the one floor rule): a flight with less is excluded and
+    # counted (`usable_series` names the horizon), never given a grid past its own end.
+    minimum_future_s = effective_min_future_s(config, minimum_future_s)
     first = fixed_anchor_index(config, minimum_anchor_index)
     # An anchor is always observed; fitted rows can be targets but never model inputs.
     last_with_remainder = series.n_supervision_samples - 2
@@ -847,7 +889,9 @@ class TrajectoryWindows(Dataset, ABC):
         self.config = config
         self.normalizer = normalizer
         self.minimum_anchor_index = minimum_anchor_index
-        self.minimum_future_s = float(minimum_future_s)
+        # the floor the anchors were actually admitted under (a fixed horizon raises the
+        # caller's), so the epoch audit reports the rule the population obeys
+        self.minimum_future_s = effective_min_future_s(config, minimum_future_s)
         self.index: list[tuple[int, int]] = []
         self.series_ranges: dict[int, tuple[int, int]] = {}
         self.temporal_candidate_anchors = 0

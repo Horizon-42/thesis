@@ -394,7 +394,9 @@ def usable_series(
     if len(usable) < len(series) and verbose:
         need = fixed_anchor_index(config, minimum_anchor_index) + 2
         print(f"  excluded   {len(series) - len(usable)} flight(s) too short to yield one "
-              f"training window (need {need} samples = {need * config.dt_s:.0f}s)")
+              f"training window (need {need} samples = {need * config.dt_s:.0f}s"
+              + (f", and {config.control_horizon_s:g}s of truth after the anchor for the fixed horizon)"
+                 if config.control_horizon_s else ")"))
     return usable
 
 
@@ -964,13 +966,17 @@ def describe_epoch(session: TrainingSession, result: EpochResult, marker: str) -
         gradients = control_training_diagnostics["gradient_norm_pre_clip"]
         clip = control_training_diagnostics["clip"]
         saturation = control_training_diagnostics["control_saturation"]
+        # under a fixed horizon there is no duration head: the group has no parameter, and
+        # a "0.00" there would be a number that can never move
+        time_group = ("n/a (fixed horizon)" if config.control_horizon_s
+                      else f"{gradients['max']['final_time_head']:.2f}")
         print(
             "             gradients  "
             f"total mean/max={gradients['mean']['total']:.2f}/"
             f"{gradients['max']['total']:.2f}  "
             f"backbone={gradients['max']['backbone']:.2f}  "
             f"control={gradients['max']['control_head']:.2f}  "
-            f"time={gradients['max']['final_time_head']:.2f}"
+            f"time={time_group}"
         )
         print(
             "             stability "

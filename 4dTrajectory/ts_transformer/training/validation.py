@@ -49,6 +49,7 @@ from ts_transformer.data.dataset import (
     FlightSeries,
     Normalizer,
     TrajectoryWindows,
+    effective_min_future_s,
     fixed_anchor_index,
     iter_batches,
 )
@@ -664,7 +665,9 @@ def build_anchor_grid_validation_plans(
                 remaining_path_profiles(dataset.series),
                 target_m,
                 seq_len=dataset.config.seq_len,
-                min_future_s=DEFAULT_GRID_MIN_FUTURE_S,
+                # the grid's floor, raised to a fixed horizon's Δ (`effective_min_future_s`):
+                # the explicit window set below refuses an anchor with less truth after it
+                min_future_s=effective_min_future_s(dataset.config, DEFAULT_GRID_MIN_FUTURE_S),
                 # the run's fixed anchor, config floor included (`fixed_anchor_index`): a
                 # bin before it is an anchor the window set cannot hold
                 minimum_anchor_index=fixed_anchor_index(dataset.config, minimum_anchor_index),

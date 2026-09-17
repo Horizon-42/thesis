@@ -17,7 +17,7 @@ import torch
 from ts_transformer.geometry.arc_length_geometry import arc_length_geometry_metrics, arc_length_velocity_metrics
 from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
 from ts_transformer.config import HORIZON_NORMALIZED, TSConfig, fixed_anchor_label
-from ts_transformer.data.dataset import FlightSeries, Normalizer, target_horizon_s
+from ts_transformer.data.dataset import FlightSeries, Normalizer, series_within_horizon, target_horizon_s
 from ts_transformer.geometry.metrics import signed_spread
 from ts_transformer.data.fixed_dt_supervision import build_fixed_dt_supervision
 from ts_transformer.geometry.terminal_state_loss import last_reliable_terminal_velocity_target, terminal_state_metrics_numpy
@@ -679,7 +679,14 @@ def fixed_anchor_common_grid_metrics(
     anchor: int,
     normalizer: Normalizer | None = None,
 ) -> dict[str, Any]:
-    """Full post-fit diagnostics on the formal common physical-time grid."""
+    """Full post-fit diagnostics on the formal common physical-time grid.
+
+    Under a fixed horizon the reference the terminal velocity and the arc-length geometry
+    are read against is the truth INSIDE the horizon (`dataset.series_within_horizon`): a
+    Δ-long prediction measured against touchdown would report the flight's own descent as
+    the model's velocity error. The whole-approach horizon leaves the series untouched.
+    """
+    series = [series_within_horizon(item, anchor, config) for item in series]
     truth, common, true_duration_s, progress, capped, error = (
         _fixed_anchor_common_position_arrays(
             series,

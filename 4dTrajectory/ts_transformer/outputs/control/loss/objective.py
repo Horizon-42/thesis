@@ -577,6 +577,9 @@ def control_prediction_loss_terms(
         if config.duration_head == DURATION_HEAD_QUANTILE
         else config.final_time_loss_weight
     )
+    # Under a fixed horizon (`control_horizon_s`) both sides are Δ: the residual is
+    # structurally zero and the config pins its weight at 0 — the component keeps its place
+    # among the four fixed names as a stated zero, exactly as `kinematic` does on this path.
     time_loss = (
         pinball_duration_loss(
             prediction.duration_quantiles_s, target_final_time_s, config.final_time_scale_s

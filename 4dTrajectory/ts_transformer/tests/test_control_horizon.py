@@ -33,6 +33,7 @@ from ts_transformer.data.dataset import (
     FixedAnchorTrajectoryWindows,
     Normalizer,
     build_series,
+    effective_min_future_s,
     target_horizon_s,
     truth_duration_s,
     window_anchors,
@@ -79,7 +80,7 @@ def cohort():
 
 def test_the_axis_is_named_pinned_by_the_recipes_and_absent_as_zero() -> None:
     config = _config()
-    assert "horizon=16" in run_display_name(config.to_dict())
+    assert "ctrl-horizon=16" in run_display_name(config.to_dict())
     assert control_recipe(config)["horizon_s"] == HORIZON_S
     whole = _config(control_horizon_s=0.0, final_time_loss_weight=1.0)
     assert "horizon_s" not in control_recipe(whole)      # every stored checkpoint's metadata
@@ -190,7 +191,98 @@ def test_a_fixed_horizon_run_trains_loads_and_predicts(tmp_path, cohort) -> None
     model, loaded, normalizer, _payload = load_checkpoint(tmp_path / "run" / "checkpoint.pt")
     assert loaded.control_horizon_s == HORIZON_S and model.final_time_head is None
     history = json.loads((tmp_path / "run" / "history.json").read_text())
-    assert np.isfinite(history["history"][-1]["val_loss"])
-    assert np.isfinite(history["history"][-1]["validation_selection_value"])
+    last = history["history"][-1]
+    assert np.isfinite(last["val_loss"]) and np.isfinite(last["validation_selection_value"])
+    # the duration term is a stated zero, and the sampling audit names the horizon as its floor
+    assert last["train_components"]["final_time"] == 0.0 and last["val_components"]["final_time"] == 0.0
+    assert last["train_anchor_sampling"]["minimum_future_s"] == HORIZON_S
     forecasts = forecast_approaches(model, series[:2], loaded, normalizer, device=torch.device("cpu"))
     assert all(f.final_time_s == pytest.approx(HORIZON_S) for f in forecasts)
+
+
+# ── the review's gaps (2026-09-17): every window class, the stated floor, the report's reference ──
+
+def test_every_window_class_admits_only_anchors_with_the_horizon_of_truth_after_them(cohort) -> None:
+    from ts_transformer.data.anchor_grid import anchors_for_bin, remaining_path_profiles
+    from ts_transformer.data.dataset import ExplicitAnchorTrajectoryWindows, RandomAnchorTrajectoryWindows
+
+    _flights, series, config = cohort
+    normalizer = Normalizer.fit(series)
+    random_config = _config(random_train_anchor=True, random_train_anchor_min_future_s=HORIZON_S)
+    for windows in (
+        FixedAnchorTrajectoryWindows(series, config, normalizer),
+        RandomAnchorTrajectoryWindows(series, random_config, normalizer),
+        RandomAnchorTrajectoryWindows(series, _config(random_train_anchor=True, random_train_anchor_min_future_s=HORIZON_S,
+                                                       random_train_anchor_sampling="remaining-path-uniform"), normalizer),
+    ):
+        assert windows.minimum_future_s == HORIZON_S          # the floor the audit reports
+        assert all(truth_duration_s(series[s], anchor) >= HORIZON_S - 1e-9 for s, anchor in windows.index)
+    # the anchor grid's floor is raised to the horizon (`effective_min_future_s`), so an explicit
+    # set built from its bins never receives an anchor the windows refuse…
+    profiles = remaining_path_profiles(series)
+    floor = effective_min_future_s(config, 4.0)
+    assert floor == HORIZON_S and effective_min_future_s(config, 100.0) == 100.0
+    anchors = anchors_for_bin(series, profiles, 8_000.0, seq_len=config.seq_len, min_future_s=floor,
+                              minimum_anchor_index=default_anchor(config))
+    assert anchors
+    ExplicitAnchorTrajectoryWindows([series[i] for i in anchors], config, normalizer,
+                                    anchors={series[i].dataset_id: a for i, a in anchors.items()}, supervision=False)
+    # …while one short of it is refused by name, both by the windows and by the target rule
+    item = series[0]
+    late = window_anchors(item, config).stop      # the first anchor with less than Δ after it
+    with pytest.raises(ValueError, match="cannot be anchored"):
+        ExplicitAnchorTrajectoryWindows([item], config, normalizer, anchors={item.dataset_id: late}, supervision=False)
+    with pytest.raises(ValueError, match="under the 16 s control horizon"):
+        target_horizon_s(item, late, config)
+
+
+def test_the_exclusion_notice_names_the_horizon(cohort, capsys) -> None:
+    from ts_transformer.training.train import usable_series
+
+    _flights, series, _cohort_config = cohort
+    long = _config(control_horizon_s=240.0, random_train_anchor_min_future_s=240.0)
+    kept = usable_series(series, long, verbose=True)
+    assert len(kept) < len(series)
+    assert "240s of truth after the anchor for the fixed horizon" in capsys.readouterr().out
+
+
+def test_the_targets_interpolate_the_truth_at_endpoints_off_the_sample_grid(cohort) -> None:
+    """Δ = 14 s over 4 segments puts the endpoints at 3.5 s multiples, between the 2 s samples."""
+    _flights, series, _cohort_config = cohort
+    config = _config(control_horizon_s=14.0)
+    normalizer = Normalizer.fit(series)
+    windows = FixedAnchorTrajectoryWindows(series, config, normalizer)
+    _x, y, _w, final_time_s, _fw, _c, _d = unpack_batch(windows.batch([0]))
+    assert final_time_s.tolist() == [14.0]
+    s_idx, anchor = windows.index[0]
+    item = series[s_idx]
+    ends = float(item.times[anchor]) + np.array([3.5, 7.0, 10.5, 14.0])
+    expected = np.column_stack([np.interp(ends, item.supervision_times, item.supervision_values[:, c]) for c in range(6)])
+    assert y[0].numpy() == pytest.approx(normalizer.encode(expected).astype(np.float32), abs=1e-5)
+
+
+def test_the_report_metrics_read_the_truth_inside_the_horizon(cohort) -> None:
+    from ts_transformer.data.dataset import series_within_horizon
+    from ts_transformer.training.fixed_anchor_validation import fixed_anchor_common_grid_metrics
+
+    _flights, series, config = cohort
+    anchor = default_anchor(config)
+    item = series[0]
+    cut = series_within_horizon(item, anchor, config)
+    assert cut.supervision_times[-1] == pytest.approx(float(item.times[anchor]) + HORIZON_S)
+    assert len(cut.supervision_times) < len(item.supervision_times)
+    assert series_within_horizon(item, anchor, _config(control_horizon_s=0.0, final_time_loss_weight=1.0)) is item
+    # a prediction that IS the truth at the segment ends: its terminal velocity is the truth's at
+    # Δ, so the report's terminal-velocity error reads ~0 (against touchdown it would read the
+    # flight's own deceleration, tens of m/s)
+    normalizer = Normalizer.fit(series)
+    ends = float(item.times[anchor]) + np.arange(1, config.n_segments + 1) * HORIZON_S / config.n_segments
+    truth_nodes = np.column_stack([np.interp(ends, item.supervision_times, item.supervision_values[:, c]) for c in range(6)])
+    metrics = fixed_anchor_common_grid_metrics(
+        [item], config, np.asarray(item.values[anchor : anchor + 1]), truth_nodes[None].astype(np.float32),
+        np.array([HORIZON_S]), np.full((1, config.n_segments), HORIZON_S / config.n_segments),
+        points=8, anchor=anchor, normalizer=normalizer,
+    )
+    assert metrics["true_final_time_s"].tolist() == [HORIZON_S]
+    assert metrics["terminal_velocity_error_mps"] < 1.0
+    assert metrics["arc_length_reference_horizontal_length_m"] < 3000.0     # ~a minute of approach, not 25 km
