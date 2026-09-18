@@ -19,16 +19,13 @@ import torch
 
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.config import TSConfig
-from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
-from ts_transformer.data.dataset import build_series, load_flight_dicts
 from ts_transformer.experiments.manoeuvre_lockstep import load_prior
-from ts_transformer.experiments.support import REPO_ROOT
+from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.prior import bigram_nll, evaluate, flip_rate
 from ts_transformer.manoeuvre.sequences import continuous_targets, flight_sequences
 from ts_transformer.manoeuvre.tokenizer import load_codebook
-from ts_transformer.repo_layout import arrival_manifest_path
-from ts_transformer.training.train import load_checkpoint_payload, usable_series
+from ts_transformer.training.train import load_checkpoint_payload
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,23 +50,13 @@ def main(argv: list[str] | None = None) -> int:
     executor = Path(prior_payload["executor"])
     payload = load_checkpoint_payload(executor)
     config = TSConfig.from_dict(payload["config"])
-    airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
-    manifests = [arrival_manifest_path(item) for item in airports]
-    require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
     split = {name: list(keys) for name, keys in prior_payload["split"].items()}
     if args.limit:
         split = {name: keys[: args.limit] for name, keys in split.items()}
-    wanted = set(split["train"]) | set(split["val"])
-    built, report = build_series(load_flight_dicts(manifests, include_flight_keys=wanted, verbose=False), config,
-                                 aircraft_type=config.aircraft_type)
-    print(f"  {report.format()}", flush=True)
-    by_id = {item.dataset_id: item for item in usable_series(built, config, verbose=False)}
-    missing = [key for key in wanted if key not in by_id]
-    if missing:
-        raise SystemExit(f"{len(missing)} of {len(wanted)} cohort flights could not be rebuilt (first: {missing[0]!r})")
+    cohort = rebuild_cohort(payload, config, [*split["train"], *split["val"]])
     anchor = int(prior_payload["anchor"])
-    train_sequences = flight_sequences([by_id[key] for key in split["train"]], codebook, anchor)
-    val_series = [by_id[key] for key in split["val"]]
+    train_sequences = flight_sequences(cohort[: len(split["train"])], codebook, anchor)
+    val_series = cohort[len(split["train"]) :]
     val_sequences = flight_sequences(val_series, codebook, anchor)
     continuous = prior.model.config.continuous
     val_targets = continuous_targets(val_series, val_sequences, codebook) if continuous else None

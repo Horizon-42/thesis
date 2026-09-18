@@ -28,9 +28,7 @@ import torch
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.config import default_anchor as default_anchor_of
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_SHORT, strata_masks
-from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
-from ts_transformer.data.dataset import build_series, load_flight_dicts
-from ts_transformer.experiments.support import REPO_ROOT
+from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.inference.export import build_prediction_record, write_batch
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre import lockstep as ls
@@ -38,9 +36,8 @@ from ts_transformer.manoeuvre.context import TypeVocabulary
 from ts_transformer.manoeuvre.prior import ManoeuvrePrior, PriorConfig
 from ts_transformer.manoeuvre.readout import STRATA
 from ts_transformer.manoeuvre.tokenizer import load_codebook
-from ts_transformer.repo_layout import arrival_manifest_path
 from ts_transformer.run_naming import run_display_name
-from ts_transformer.training.train import load_checkpoint, usable_series
+from ts_transformer.training.train import load_checkpoint
 
 LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v1"
 #: The summary block a written record directory carries.
@@ -179,18 +176,8 @@ def main(argv: list[str] | None = None) -> int:
         if int(prior_payload["anchor"]) != default_anchor_of(config) or float(prior_payload["segment_s"]) != codebook.segment_s:
             parser.error(f"{args.prior} was trained at anchor {prior_payload['anchor']} / segment {prior_payload['segment_s']:g} s, "
                          f"not this executor's {default_anchor_of(config)} / {codebook.segment_s:g} s")
-    airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
-    manifests = [arrival_manifest_path(item) for item in airports]
-    require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
     wanted = payload["split"][args.split][: args.limit] if args.limit else payload["split"][args.split]
-    built, report = build_series(load_flight_dicts(manifests, include_flight_keys=set(wanted), verbose=False), config,
-                                 aircraft_type=config.aircraft_type)
-    print(f"  {report.format()}", flush=True)
-    by_id = {item.dataset_id: item for item in usable_series(built, config, verbose=False)}
-    missing = [key for key in wanted if key not in by_id]
-    if missing:
-        raise SystemExit(f"{len(missing)} of {len(wanted)} val flights could not be rebuilt (first: {missing[0]!r})")
-    series = [by_id[key] for key in wanted]
+    series = rebuild_cohort(payload, config, wanted)
     print(f"  {args.protocol}: {len(series)} flights, {run_display_name(config.to_dict())}", flush=True)
 
     runs = ls.fly(executor, codebook, series, args.protocol, prior=prior, device=device, batch_size=args.batch_size,

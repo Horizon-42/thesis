@@ -12,10 +12,17 @@ from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 
+from pathlib import Path
+from typing import Any
+
 from ts_transformer.cli.common import parse_airports
+from ts_transformer.config import TSConfig
 from ts_transformer.data.channels import POSITION_IDX
+from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
+from ts_transformer.data.dataset import build_series, load_flight_dicts
 import ts_transformer.geometry.geometric_metrics as gm
-from ts_transformer.repo_layout import REPO_ROOT, TS_DIR, TS_SCRIPT
+from ts_transformer.repo_layout import REPO_ROOT, TS_DIR, TS_SCRIPT, arrival_manifest_path
+from ts_transformer.training.train import usable_series
 
 if TYPE_CHECKING:
     from ts_transformer.data.dataset import FlightSeries
@@ -23,12 +30,35 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EXPERIMENTS_MAIN", "REPO_ROOT", "RUN_TS", "TS_DIR", "TS_SCRIPT",
-    "forecast_geometry", "parse_airports", "series_digest",
+    "checkpoint_manifests", "forecast_geometry", "parse_airports", "rebuild_cohort", "series_digest",
 ]
 
 #: The runners' own entry point, for a runner that spawns another runner.
 EXPERIMENTS_MAIN = TS_DIR / "experiments" / "__main__.py"
 RUN_TS = REPO_ROOT / "run_ts.py"
+
+
+def checkpoint_manifests(payload: dict[str, Any]) -> list[Path]:
+    """The arrival manifests a checkpoint's own provenance names, in its order."""
+    return [arrival_manifest_path(entry["airport"]) for entry in payload["data_provenance"]["manifests"]]
+
+
+def rebuild_cohort(payload: dict[str, Any], config: TSConfig, keys: Sequence[str]) -> list[FlightSeries]:
+    """The checkpoint's flights ``keys`` rebuilt under ``config`` in the given order, the
+    provenance verified against today's manifests first (C25: through
+    `checkpoint_data_provenance`); a flight that cannot be rebuilt refuses the run — a readout
+    over a silent subset is a different cohort. The one cohort door of the manoeuvre runners."""
+    manifests = checkpoint_manifests(payload)
+    require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
+    built, report = build_series(
+        load_flight_dicts(manifests, include_flight_keys=set(keys), verbose=False), config, aircraft_type=config.aircraft_type,
+    )
+    print(f"  {report.format()}", flush=True)
+    by_id = {item.dataset_id: item for item in usable_series(built, config, verbose=False)}
+    missing = [key for key in keys if key not in by_id]
+    if missing:
+        raise SystemExit(f"{len(missing)} of {len(keys)} checkpoint flights could not be rebuilt (first: {missing[0]!r})")
+    return [by_id[key] for key in keys]
 
 
 def series_digest(series: Sequence[FlightSeries]) -> str:

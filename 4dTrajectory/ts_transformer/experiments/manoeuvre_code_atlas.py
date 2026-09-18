@@ -19,14 +19,11 @@ import numpy as np
 
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.data.approach_difficulty import STRAIGHT_TORTUOSITY, approach_difficulty
-from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
-from ts_transformer.data.dataset import build_series, load_flight_dicts
-from ts_transformer.experiments.support import REPO_ROOT
+from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.readout import ATLAS_PATH_STRIDE, code_atlas
 from ts_transformer.manoeuvre.tokenizer import load_codebook
-from ts_transformer.repo_layout import arrival_manifest_path
-from ts_transformer.training.train import load_checkpoint, usable_series
+from ts_transformer.training.train import load_checkpoint
 from ts_transformer.config import default_anchor
 
 
@@ -52,23 +49,14 @@ def main(argv: list[str] | None = None) -> int:
     bound = model.codebook_sha256 == codebook.sha256 if config.manoeuvre_codebook else codebook.source.get("checkpoint_sha256") == executor_sha
     if not bound:
         parser.error(f"{codebook.path} is not this executor's codebook")
-    airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
-    manifests = [arrival_manifest_path(item) for item in airports]
-    require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
     # the draw: seeded, then half straight-in / half vectored where possible — the series are
     # built for a generous prefix and the covariates decide
     rng = np.random.default_rng(args.seed)
     val = list(payload["split"]["val"])
     candidates = [val[i] for i in rng.permutation(len(val))[: max(8 * args.flights, 64)]]
-    built, _report = build_series(load_flight_dicts(manifests, include_flight_keys=set(candidates), verbose=False), config,
-                                  aircraft_type=config.aircraft_type)
-    by_id = {item.dataset_id: item for item in usable_series(built, config, verbose=False)}
     anchor = default_anchor(config)
     straight, vectored = [], []
-    for key in candidates:
-        item = by_id.get(key)
-        if item is None:
-            continue
+    for item in rebuild_cohort(payload, config, candidates):
         (straight if approach_difficulty(item, anchor).route_tortuosity < STRAIGHT_TORTUOSITY else vectored).append(item)
     half = args.flights // 2
     chosen = straight[:half] + vectored[: args.flights - half]

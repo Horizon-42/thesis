@@ -37,18 +37,16 @@ import torch
 
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.config import TSConfig, default_anchor
-from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
-from ts_transformer.data.dataset import build_series, load_flight_dicts, truth_duration_s
-from ts_transformer.experiments.support import REPO_ROOT
+from ts_transformer.data.dataset import truth_duration_s
+from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, sha256_bytes, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.context import TypeVocabulary
 from ts_transformer.manoeuvre.lockstep import required_positions
 from ts_transformer.manoeuvre.prior import PRIOR_SCHEMA, ManoeuvrePrior, PriorConfig, bigram_nll, evaluate, fit
 from ts_transformer.manoeuvre.sequences import continuous_targets, flight_sequences
 from ts_transformer.manoeuvre.tokenizer import load_codebook
-from ts_transformer.repo_layout import arrival_manifest_path
 from ts_transformer.training.experiment_index import begin_run, finish_run
-from ts_transformer.training.train import load_checkpoint_payload, usable_series
+from ts_transformer.training.train import load_checkpoint_payload
 
 PRIOR_FILE = "prior.pt"
 
@@ -132,22 +130,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.rolled is not None and args.continuous:
         parser.error("the closed-loop training is defined for the discrete prior (plan §2.7)")
     anchor = default_anchor(config)
-    airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
-    manifests = [arrival_manifest_path(item) for item in airports]
-    require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
     split = {name: list(payload["split"][name]) for name in ("train", "val")}
     if args.limit:
         split = {name: keys[: args.limit] for name, keys in split.items()}
-    wanted = set(split["train"]) | set(split["val"])
-    built, report = build_series(load_flight_dicts(manifests, include_flight_keys=wanted, verbose=False), config,
-                                 aircraft_type=config.aircraft_type)
-    print(f"  {report.format()}", flush=True)
-    by_id = {item.dataset_id: item for item in usable_series(built, config, verbose=False)}
-    missing = [key for key in wanted if key not in by_id]
-    if missing:
-        raise SystemExit(f"{len(missing)} of {len(wanted)} cohort flights could not be rebuilt (first: {missing[0]!r})")
-    train_series = [by_id[key] for key in split["train"]]
-    val_series = [by_id[key] for key in split["val"]]
+    cohort = rebuild_cohort(payload, config, [*split["train"], *split["val"]])
+    train_series, val_series = cohort[: len(split["train"])], cohort[len(split["train"]) :]
 
     manifest_path = None
     if args.campaign_id:

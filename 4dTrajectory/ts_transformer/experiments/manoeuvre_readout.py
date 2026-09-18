@@ -23,18 +23,15 @@ import re
 import time
 
 from ts_transformer.backbone.adapters import resolve_device
-from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
-from ts_transformer.data.dataset import build_series, load_flight_dicts
 from ts_transformer.experiments.frame_ablation import TRAIN_COMPLETE_ARTIFACT
-from ts_transformer.experiments.support import REPO_ROOT
+from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.inference.export import write_batch
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.readout import (
     READOUT_SCHEMA, RECORDS_BLOCK, arm_reading, fixed_anchor_readings, gate_t, records_block, render,
 )
-from ts_transformer.repo_layout import arrival_manifest_path
 from ts_transformer.run_naming import run_display_name
-from ts_transformer.training.train import load_checkpoint, usable_series
+from ts_transformer.training.train import load_checkpoint
 
 def discover_arms(campaign: Path, segment_s: float) -> tuple[list[Path], list[str]]:
     """``(trained arm directories, pending arm keys)`` of one segment length, in name order."""
@@ -76,33 +73,20 @@ def main(argv: list[str] | None = None) -> int:
         model, config, normalizer, payload = load_checkpoint(path / "checkpoint.pt")
         if config.control_horizon_s != args.segment_s:
             parser.error(f"{path.name}: control_horizon_s={config.control_horizon_s:g} is not the segment {args.segment_s:g}")
-        airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
-        manifests = [arrival_manifest_path(item) for item in airports]
-        require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
-        loaded.append((path, model.to(device).eval(), config, normalizer, payload, manifests))
+        loaded.append((path, model.to(device).eval(), config, normalizer, payload))
         print(f"  {path.name:<18} {run_display_name(config.to_dict())}", flush=True)
 
     # one cohort: every arm's val split is the same list, in the same order
     val_ids = loaded[0][4]["split"]["val"]
-    for path, _m, _c, _n, payload, _mf in loaded[1:]:
+    for path, _m, _c, _n, payload in loaded[1:]:
         if payload["split"]["val"] != val_ids:
             parser.error(f"{path.name}: its val split differs from {loaded[0][0].name}'s — not one campaign cohort")
     wanted = val_ids[: args.limit] if args.limit else val_ids
-    reference_config = loaded[0][2]
-    built, report = build_series(
-        load_flight_dicts(loaded[0][5], include_flight_keys=set(wanted), verbose=False),
-        reference_config, aircraft_type=reference_config.aircraft_type,
-    )
-    print(f"  {report.format()}", flush=True)
-    by_id = {item.dataset_id: item for item in usable_series(built, reference_config, verbose=False)}
-    missing = [key for key in wanted if key not in by_id]
-    if missing:
-        raise SystemExit(f"{len(missing)} of {len(wanted)} val flights could not be rebuilt (first: {missing[0]!r})")
-    series = [by_id[key] for key in wanted]
+    series = rebuild_cohort(loaded[0][4], loaded[0][2], wanted)
 
     readings = []
     record_dirs: dict[str, str] = {}
-    for path, model, config, normalizer, payload, _manifests in loaded:
+    for path, model, config, normalizer, payload in loaded:
         pairs = [] if args.write_records else None
         rows = fixed_anchor_readings(model, config, normalizer, series, device, batch_size=args.batch_size, records=pairs)
         reading = arm_reading(path.name, config, rows)
