@@ -153,6 +153,13 @@ class FSQ(nn.Module):
         shift = torch.atanh(offset / half_l)
         return torch.tanh(h + shift) * half_l - offset
 
+    def continuous(self, h: torch.Tensor) -> torch.Tensor:
+        """The UNROUNDED coordinates ``[B, D]`` in z's own space (the bound, scaled like z): what
+        the continuous prior regresses (plan §3.3, the discrete-vs-continuous control)."""
+        if h.ndim != 2 or h.shape[1] != self.z_dim:
+            raise ValueError(f"FSQ pre-activations are [B, {self.z_dim}], got {tuple(h.shape)}")
+        return self.bound(h) / self._half_width
+
     def quantize(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """``(z [B, D], code [B])`` from pre-activations ``[B, D]``; the round is straight-through."""
         if h.ndim != 2 or h.shape[1] != self.z_dim:
@@ -249,13 +256,19 @@ class LearnedTokenizer(nn.Module):
     def z_dim(self) -> int:
         return self.fsq.z_dim
 
-    def forward(self, segment_rows: torch.Tensor, state_rows: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def pre_activations(self, segment_rows: torch.Tensor, state_rows: torch.Tensor) -> torch.Tensor:
         scale = self._segment_scale.to(segment_rows.dtype)
-        h = self.encoder(
+        return self.encoder(
             (segment_rows / scale).to(torch.float32),
             (state_rows / self._state_scale.to(state_rows.dtype)).to(torch.float32),
         )
-        return self.fsq.quantize(h)
+
+    def forward(self, segment_rows: torch.Tensor, state_rows: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.fsq.quantize(self.pre_activations(segment_rows, state_rows))
+
+    def continuous(self, segment_rows: torch.Tensor, state_rows: torch.Tensor) -> torch.Tensor:
+        """The unrounded coordinates ``[B, Z]`` (`FSQ.continuous`) of physical rows."""
+        return self.fsq.continuous(self.pre_activations(segment_rows, state_rows))
 
     def codes_to_z(self, codes: torch.Tensor) -> torch.Tensor:
         return self.fsq.codes_to_z(codes)
@@ -413,6 +426,20 @@ class Codebook:
             z, codes = self.tokenizer(torch.from_numpy(segment), torch.from_numpy(state))
         z, codes = z.cpu().numpy(), codes.cpu().numpy().astype(np.int64)
         return (codes[0], z[0]) if single else (codes, z)
+
+    def encode_continuous(self, segment_rows: np.ndarray, state_rows: np.ndarray) -> np.ndarray:
+        """The UNROUNDED coordinates ``[B, Z]`` of a batch (a single segment: ``[Z]``): the
+        continuous prior's regression target. The command vocabulary has no continuous form."""
+        if self.kind != MANOEUVRE_TOKENIZER_LEARNED:
+            raise ValueError(f"a {self.kind} codebook has no continuous coordinates")
+        segment = np.asarray(segment_rows, dtype=np.float32)
+        state = np.asarray(state_rows, dtype=np.float32)
+        single = segment.ndim == 2
+        if single:
+            segment, state = segment[None], state[None]
+        with torch.no_grad():
+            vector = self.tokenizer.continuous(torch.from_numpy(segment), torch.from_numpy(state)).cpu().numpy()
+        return vector[0] if single else vector
 
 
 def _tokenizer_spec(tokenizer: nn.Module, segment_s: float, dt_s: float) -> dict[str, Any]:
