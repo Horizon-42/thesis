@@ -3,9 +3,13 @@
 The shortest path between two poses at a fixed turn radius (`dubins_csc`: the four CSC
 families), arcs and straights sampled at most `PATH_STEP_M` apart, the turn radius a
 `BANK_RAD` bank gives at approach speed, and the runway-axes mirrors the NumPy fitting loops
-use. Drawn by two prediction paths — the closure decoder (`outputs/closure/geometry`) and the
-plan route builder (`outputs/plan/guidance/route`) — so they live in the geometry plane;
-`tests/test_closure_geometry.py` pins the axes mirrors to the torch versions.
+use. They live in the geometry plane because two consumers drew them; since the closure
+decoder was archived (2026-09-18, `archive/closure_2026_09/closure/geometry.py`, whose
+`test_closure_geometry.py` pinned the axes mirrors to that path's torch versions) the one
+live drawer is the rule guidance's route builder (`outputs/guidance/route`), which uses
+`chart_from_axes_np`, `dubins_csc`, `arc_points`, `segment_points` and `unit_vector` —
+`runway_axes_np` and `turn_radius_m` / `BANK_RAD` are kept unread for the manoeuvre-token
+plan's segment geometry.
 """
 
 from __future__ import annotations

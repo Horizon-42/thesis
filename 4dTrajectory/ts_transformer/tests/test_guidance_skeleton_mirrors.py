@@ -1,4 +1,4 @@
-"""The two optimizer constants `outputs/plan/skeleton.py` mirrors (the optimizer's package is
+"""The two optimizer constants `outputs/guidance/skeleton.py` mirrors (the optimizer's package is
 not on this package's import path) are asserted equal to their owners, the way
 `test_final_approach_geometry.py` pins the corridor's."""
 
@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 
-from ts_transformer.outputs.plan.skeleton import RNP_HALF_WIDTH_M, THRESHOLD_TOLERANCE_M
+from ts_transformer.outputs.guidance.skeleton import RNP_HALF_WIDTH_M, THRESHOLD_TOLERANCE_M
 from ts_transformer.repo_layout import REPO_ROOT
 
 

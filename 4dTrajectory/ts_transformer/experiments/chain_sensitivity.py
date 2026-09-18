@@ -75,6 +75,9 @@ from ts_transformer.io_utils import file_sha256
 
 RESULT_SCHEMA = "ts-chain-sensitivity-v1"
 RECORDS_SCHEMA = "ts-chain-records-v1"
+#: The summary block this runner writes beside the records — mirrored by the publisher
+#: (`publish_ts_experiment_trajectories.VARIANT_RECORD_BLOCKS`, which cannot import torch).
+RECORDS_BLOCK = "chain"
 RECORDS_DIR = "records"
 INSTRUMENT = "the chain-sensitivity readout"
 DEFAULT_STEP_S = 60.0
@@ -279,7 +282,7 @@ def write_records(arm: Arm, series: list[FlightSeries], forecasts: list[Forecast
     write_batch(
         records, output_dir=directory, config_dict=arm.config.to_dict(), flight_metrics=metrics,
         checkpoint=str(arm.path), split=plan.split,
-        extra_summary={"chain": {
+        extra_summary={RECORDS_BLOCK: {
             "schema": RECORDS_SCHEMA, "campaign": campaign, "label": arm.label, "variant": variant,
             "step_s": plan.step_s, "links": plan.links, "anchor": default_anchor(arm.config),
             "split": plan.split, "limit": plan.limit,

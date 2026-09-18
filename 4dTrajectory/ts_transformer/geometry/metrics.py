@@ -238,10 +238,10 @@ def raw_kinematic_metrics(
     a smoothness score by predicting smooth velocities beside a jagged position path.
 
     Every segment is scored unless ``row_valid`` (``[B,N]``) says which rows are the
-    path's own prediction: the segment-plan replay pads a plan that arrived early with the
-    threshold HELD at zero velocity (`outputs.segment_plan.decode.replay_rows`), and scoring
-    that suffix would read a landed aircraft as a stop the model drew (review C-10 removed
-    the mask while no live path padded; two-tier S2 is the path that does).
+    path's own prediction: a replay that pads a forecast which arrived early with the
+    threshold HELD at zero velocity (the archived segment-plan path did; the manoeuvre-token
+    prior's `LANDED` rows will) must not have that suffix scored as a stop the model drew
+    (review C-10 removed the mask while no live path padded).
     """
     anchor = np.asarray(anchor_values, dtype=np.float64)
     predicted = np.asarray(predicted_values, dtype=np.float64)

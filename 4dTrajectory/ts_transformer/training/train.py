@@ -133,16 +133,6 @@ class EpochResult:
     train_anchor_sampling: dict[str, Any] = field(default_factory=dict)
     control_training_diagnostics: dict[str, Any] = field(default_factory=dict)
     timing: dict[str, float] = field(default_factory=dict)
-    # The plan head under a rolled-window table (design v5.2): the epoch's realised
-    # rolled share, and the loss over the val split's rolled windows — a readout beside
-    # the selection value. Empty for every other run.
-    plan_rolled_training: dict[str, Any] = field(default_factory=dict)
-    plan_rolled_validation: dict[str, Any] = field(default_factory=dict)
-    # The segment-plan head (two-tier v2 §4): its own reading of the val split at the fixed
-    # anchor — the plan's covered ADE, the per-segment errors, the arrival confusion — a
-    # readout beside the selection value (the common-grid block above holds the last
-    # waypoint flat past the plan's span and cannot say so). Empty for every other run.
-    segment_plan_validation: dict[str, Any] = field(default_factory=dict)
     validation_profile_by_airport: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -927,25 +917,6 @@ def procedure_update(
     return procedure_epoch, epoch_multipliers
 
 
-def segment_plan_epoch_line(block: dict[str, Any]) -> str:
-    """The segment-plan head's per-epoch line (`segment_plan_validation`). Two of its numbers are
-    None until some flight carries them — the arrival-time error needs a flight whose plan AND
-    truth arrive inside the span, a segment's error a flight whose truth reaches it — and the
-    first epochs of a real run have neither (the L2 campaign's first arm died printing this)."""
-    def num(value: float | None, spec: str) -> str:
-        return "—" if value is None else format(value, spec)
-
-    confusion = block["arrival_confusion"]
-    timing = block["arrival_time_error_s"]
-    return (
-        f"             segment-plan  covered-ADE={num(block['covered_ade_m'], '.1f')}m over {num(block['covered_s_mean'], '.0f')}s  "
-        f"e(30)={num(block['segment_error_m'][0]['mean'], '.1f')}m  "
-        f"arrival plan/truth within {block['span_s']:.0f}s: {block['plan_arrives_share']:.2f}/{block['truth_arrives_share']:.2f} "
-        f"(both {confusion['both']}, plan-only {confusion['plan_only']}, truth-only {confusion['truth_only']})  "
-        f"|dT|={num(timing['mean_abs'], '.1f')}s n={timing['n']}"
-    )
-
-
 def describe_epoch(session: TrainingSession, result: EpochResult, marker: str) -> None:
     """The epoch's lines: the losses, the selection value, the anchor sets, the parts, and
     the control gradient reading when there is one."""
@@ -978,16 +949,6 @@ def describe_epoch(session: TrainingSession, result: EpochResult, marker: str) -
             f"{name}={val_components[name]:.4f}" for name in component_names
         )
     )
-    if result.segment_plan_validation:
-        print(segment_plan_epoch_line(result.segment_plan_validation))
-    if result.plan_rolled_validation:
-        rolled = result.plan_rolled_validation
-        share = result.plan_rolled_training.get("share") if result.plan_rolled_training else None
-        print(
-            f"             rolled     val-rolled={rolled['loss']:.4f}  "
-            + "  ".join(f"{name}={value:.4f}" for name, value in rolled["components"].items())
-            + (f"  train-share={share:.2f}" if share is not None else "")
-        )
     if control_training_diagnostics:
         gradients = control_training_diagnostics["gradient_norm_pre_clip"]
         clip = control_training_diagnostics["clip"]

@@ -27,7 +27,6 @@ from ts_transformer.config import (
     DURATION_HEAD_QUANTILE,
     DURATION_MEDIAN_INDEX,
     DURATION_QUANTILES,
-    PREDICTION_CLOSURE,
     PREDICTION_STATE,
     TSConfig,
 )
@@ -197,14 +196,6 @@ def test_the_loss_component_names_do_not_change():
 def test_the_quantile_head_is_refused_off_the_control_output():
     with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(prediction_output=PREDICTION_STATE, duration_head=DURATION_HEAD_QUANTILE)
-    with pytest.raises(ValueError, match="belongs to the control output"):
-        TSConfig(
-            prediction_output=PREDICTION_CLOSURE,
-            horizon_mode="normalized",
-            checkpoint_selection_metric="fixed-anchor-objective",
-            closure_labels_path="labels.json",
-            duration_head=DURATION_HEAD_QUANTILE,
-        )
 
 
 def test_the_quantile_head_is_refused_with_a_latent():

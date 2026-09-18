@@ -31,7 +31,7 @@ from ts_transformer.outputs.constraints.gates import runway_axes_view
 from ts_transformer.outputs.constraints.speed_floor import floor_speed
 from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
 from ts_transformer.outputs.envelope import MAX_THRUST_FRACTION, MIN_THRUST_FRACTION
-from ts_transformer.outputs.plan.guidance.route import Route, speed_schedule_mps
+from ts_transformer.outputs.guidance.route import Route, speed_schedule_mps
 
 #: The guidance's own bounds, inside the grader's envelope (`flyability.Envelope`: bank
 #: ±45°, load factor 0.5–2.0) with room for the lagging actuators' overshoot.

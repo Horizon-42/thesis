@@ -44,40 +44,13 @@ of the package, not a migration in progress.
   learned component is measured on its own (P1).
 - **`control`** — the model emits bounded controls and a differentiable RK4 rollout of the shared
   point-mass equations flies them: dynamically admissible by construction (P2).
-- **`closure`** — **FROZEN 2026-09-09**: its two stored checkpoints load, predict and publish; no
-  NEW run may select it (`PREDICTION_OUTPUTS_AVAILABLE`). Its P1.d tracker is DELETED — do not
-  rebuild it (P3).
-- **`plan`** — plan-and-guidance (`docs/2026-09-09_plan_and_guidance_design.md`): the head
-  predicts operating parameters + the NEXT instruction, a deterministic guidance layer flies them
-  and re-asks the head every 30 s in lockstep; "no fix ahead" is supervised on every sample (an
-  aircraft on the final has no next fix) (P4.a).
-  - v5.2: the head trained on ROLLED windows (`run_ts.py plan_rolled_windows`, `train
-    --plan-rolled-windows-path/--plan-rolled-share`; the table must cover every train AND val
-    flight) — vectored ADE 5391 → 3641 m at share 0.75, tied with 1.0; DAgger round 1 did not help (P4.b).
-  - v5.3: the order hold is an AXIS, default 1 (adopt at once); at 2 it cost 26 points of vectored
-    established — do not re-litigate without a head whose next fix is steady between asks (P4.c).
-  - Two plan-oracle artifacts are compared ONLY with `run_ts.py plan_oracle_pair`, flight by
-    flight, never two summary tables (P4.d).
-  - v5.3: `plan_fan_components` K ≥ 2 = mixture head (its `kinematic` loss becomes an NLL,
-    comparable within a fan run only); the TOP-1 beats the L1 point head by 550–600 m vectored ADE
-    on two seeds, so `--plan-fan-components 4` is the recipe (config default stays 0 for stored
-    heads); the fan itself is NOT a deliverable — read it against the displaced control
-    (`run_ts.py plan_fan_readout`) (P4.e).
-  - v5.4: the scheduler's assignment (`strategy.Assignment`) and the time closure — speed lever,
-    then path lever; three rules that cost real flights (integrate from the PROGRESS POINT, scale
-    the plan AS LAID, the assigned time is a TARGET not the budget); `--assign-time truth` READS
-    THE FUTURE (P4.f).
-  - v5.5: pooled five-airport tooling — `run_ts.py plan_cohort`; a truth-policy table's bootstrap
-    head needs ONE epoch; `plan_oracle --by-airport`, `plan_oracle_pair --common` (P4.g).
-  - A per-airport head's seed line scales with its cohort — KSMF/KMSY (~2.4k flights) need both
-    seeds for any per-airport claim (P4.h).
-- **`segment-plan`** — the two-tier L2 plan layer, a FIFTH path (`outputs/segment_plan/`,
-  `docs/2026-09-17_two_tier_plan_v2.zh.md` §4): the observed window becomes K coarse 30 s segments
-  (27 features each, runway axes about the anchor), one learned query reads the tokens under either
-  attention axis, and the head decodes M = 10 segment ends in one shot with an "arrived by its end"
-  bit. **The number to read is the epoch record's `segment_plan_validation` block**, not the
-  common-grid report (it holds the last waypoint flat past M × 30 s and its cap rate cannot say so);
-  `run_ts.py segment_plan_readout` → gate L2, E2E through `tracker_lockstep --plan-head` (P9).
+- **`closure`, `plan`, `segment-plan` — RETIRED 2026-09-18** (`config.PREDICTION_OUTPUTS_RETIRED`):
+  code under `archive/{closure,plan_head,two_tier_v2}_2026_09/` (a README each), stored checkpoints
+  refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
+  Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
+  `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
+- **`manoeuvre` — IN DEVELOPMENT**: the manoeuvre-token plan (discrete segment codes, a causal
+  prior, the control path as executor, a multi-aircraft graph): `docs/2026-09-18_manoeuvre_token_plan.zh.md` (P10).
 - **Control-path axes**: `latent_dim > 0` (latent intent z) and `cta_conditioning=given` (the
   given arrival time IS the duration) — their oracle forms READ THE FUTURE and the run name says so
   (`control+z8`, `z=posterior`, `cta=given`), never a prediction result (P5). The duration head:
@@ -166,7 +139,7 @@ of the package, not a migration in progress.
 | `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′: the third column is a path-angle target flown by a 3 s loop. **Passes every pre-registered gate on both seeds** — fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %, straight-in FDE p50 543 / 559 vs 647 / 663, pooled ADE 1173 / 1182 vs 1325 / 1295. ONE regression: vectored FDE p50 +625 / +704 m, unexplained (not turn authority). **Adoption is the user's call** (D27) |
 | `control_condition_features` | `raw` | `ratios` carries the SAME information at the SAME width (so a ratios arm starts from its raw twin's weights); 4 of the 8 raw channels are constant on this fleet. Built, not yet measured (D28) |
 | `control_horizon_s` | `0` (whole approach) | two-tier L1: a FIXED rollout horizon Δ — ONE span definition (`dataset.target_horizon_s`), ONE floor rule (`dataset.effective_min_future_s`), and every duration-deciding axis (CTA, quantile head, `final_time_loss_weight`, latent, imitation teacher) refused. **An L1 arm's numbers are its readouts' [0, Δ], never the record summary's** whole-remainder ADE/FDE (D29) |
-| `plan_conditioning` = `waypoints` | — | the coarse plan's next K waypoints (every 30 s, ENU chart, relative to the current position) as the plan token; in training and the truth lockstep they are the TRUTH's, so the run name says `plan=waypoints`; the lockstep's truth source is TIME-indexed, not pose-indexed (D30) |
+| `plan_conditioning` | `off` | `truth-next` / `waypoints` RETIRED with two-tier v2 (archived 2026-09-18); `manoeuvre-code` arrives in P3.1 of the manoeuvre-token plan, with `plan_conditioning_dropout` pinned at 0 — 0.5 taught the head to ignore the token (D30) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag`: smoothness + 3.4 % ADE, τ = 2.0 s not CV-selected; a pipeline lag cell carries `_lag` (D4) |
 | procedure penalty | weights 0 | NOT adopted; hinge scales are module constants (D5) |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained through a hook beat it; `+` combinations are a lookup, their order the application order (D6) |
@@ -263,12 +236,10 @@ of the package, not a migration in progress.
 - `outputs/control/` is organised by role; what any rollout needs (`outputs/dynamics`,
   `outputs/constraints`, `outputs/envelope`, `outputs/conditioning`) is shared and imports no
   path (L6).
-- `outputs/plan/`: skeleton + extractors (L7); `guidance/route` and its six measured route rules
-  (L8); `controller.PlanGuidance`, hold ≤ ~3 s (L9); fixed-K fly-by waypoints carrying the truth's
-  speed at each turn (L10); `run_ts.py plan_oracle` (L11); the modules moved up for both paths
-  (L12); the plan head's strategy/labels/model (L13); the oracle's vertical verdict — the truth
-  itself fails the pre-FAF floor on 29 % of smoke flights, so no share there is a gate (L14); the
-  closure and state packages (L15).
+- `outputs/guidance/` (was `outputs/plan/guidance` + `skeleton`, lifted 2026-09-18): the rule
+  guidance — `route` and its six measured route rules (L8), `controller.PlanGuidance`, hold ≤ ~3 s
+  (L9), `timing`, `skeleton` (the CIFP reader); the manoeuvre-token plan's second executor. The
+  plan head, its extractors and oracle runner are archived — L7, L10–L15 describe archived code.
 - `constraints/saturation` is the ONE soft-saturation definition; `composite` refuses duplicate
   diagnostics; barrier and trombone gates are complementary by construction (L16).
   `RolloutStateView.reference` is the hook-free schedule, built only under `needs_reference` (L17).
@@ -280,7 +251,7 @@ of the package, not a migration in progress.
 - `tests/` is one file per topic; shared fixtures in `tests/support.py` (L21).
 - A module belongs under `outputs/control/` only if EVERY consumer is control-specific (L23);
   import direction rules, all enforced by `tests/test_architecture.py` (L24). **Between paths**: the
-  control path may read the plan path (the two-tier plan token), never the reverse (L28).
+  guidance layer never imports the control path (L28).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;
@@ -351,6 +322,6 @@ noise (sd ≈ 0.05, sign flips), the table is a sidecar never in `data_provenanc
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the two-tier model (L1 short-horizon control layer, L2 segment-token plan layer, L3 graph layer) | **`docs/2026-09-17_two_tier_plan_v2.zh.md`** — the current plan (the requirement verbatim, the eight decisions, gates L1 / L2 / E2E). The 09-16 feasibility doc is SUPERSEDED: its design is abandoned, only its measurements are citable — which ones, and the readouts: W2 |
+| building or reading the **manoeuvre-token** model (discrete 60 s manoeuvre codes, a causal prior over code sequences, a learned executor, a multi-aircraft graph with separation masks) | **`docs/2026-09-18_manoeuvre_token_plan.zh.md`** — the current plan (design, pre-registered gates T/P/X/E/R/G, the archive list, the decisions still open); readouts go to `docs/2026-09-18_manoeuvre_token_results.zh.md`. The two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12): W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

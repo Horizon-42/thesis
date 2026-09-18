@@ -17,7 +17,7 @@ import re
 
 import pytest
 
-from ts_transformer.config import HORIZON_MODES, PREDICTION_OUTPUTS
+from ts_transformer.config import HORIZON_MODES, PREDICTION_OUTPUTS_PUBLISHED
 from ts_transformer.repo_layout import REPO_ROOT
 
 AIRPORT_DATA_TS = REPO_ROOT / "aeroviz-4d" / "src" / "data" / "airportData.ts"
@@ -36,7 +36,7 @@ def frontend_vocabulary(name: str) -> tuple[str, ...]:
 @pytest.mark.parametrize(
     ("frontend_name", "vocabulary"),
     [
-        ("EXPERIMENT_PREDICTION_OUTPUTS", PREDICTION_OUTPUTS),
+        ("EXPERIMENT_PREDICTION_OUTPUTS", PREDICTION_OUTPUTS_PUBLISHED),
         ("EXPERIMENT_HORIZON_MODES", HORIZON_MODES),
     ],
 )

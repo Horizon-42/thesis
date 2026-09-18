@@ -35,7 +35,6 @@ from ts_transformer.config import (
     CONTROL_STATE_LOSS_GRID_NATIVE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
     PREDICTION_CONTROL,
-    PREDICTION_PLAN,
     TSConfig,
     control_recipe,
     recipe_settings,
@@ -243,8 +242,6 @@ def test_the_axis_belongs_to_the_control_output_and_knows_its_values():
         TSConfig(**RATIOS)
     with pytest.raises(ValueError, match="control_condition_features"):
         _config(control_condition_features="dimensionless")
-    with pytest.raises(ValueError, match="belongs to the control output"):
-        TSConfig(prediction_output=PREDICTION_PLAN, horizon_mode="normalized", **RATIOS)
 
 
 def test_every_named_recipe_pins_the_raw_set():

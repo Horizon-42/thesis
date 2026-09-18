@@ -271,9 +271,9 @@ def load_arm(label: str, path: Path, grid: Grid, device: torch.device,
     allows for a pooled checkpoint narrowed by ``--data``. ``instrument`` names the
     measurement in the refusals, for the runners that share this loader.
 
-    ``refuse_cta_given=False`` / ``refuse_plan=False`` are for `tracker_lockstep` (two-tier T1),
-    whose question IS the plan-given tracker under the truth's plan and arrival time (protocol C,
-    the oracle it names in every artifact); and ``refuse_cta_given=False`` alone for the ONE
+    ``refuse_cta_given=False`` / ``refuse_plan=False`` are for a lockstep whose question IS the
+    plan-given tracker under the truth's plan (protocol C, the oracle it names in every
+    artifact); and ``refuse_cta_given=False`` alone for the ONE
     instrument the CTA cannot corrupt: the ETA
     calibration (B2) reads the DURATION HEAD alone — no rollout, no CTA token — so a
     ``given`` checkpoint's quantiles are the same function of the history that a prediction
@@ -297,7 +297,7 @@ def load_arm(label: str, path: Path, grid: Grid, device: torch.device,
         raise SystemExit(
             f"{label} ({path}): plan_conditioning={config.plan_conditioning!r} reads the truth's "
             f"plan, so {instrument} would be measuring the oracle, not the model "
-            "(a plan-given tracker is read by `run_ts.py tracker_lockstep`)"
+            "(a plan-given tracker is read by its lockstep runner)"
         )
     if grid.split not in payload["split"]:
         raise SystemExit(f"{label} ({path}): the checkpoint has no {grid.split!r} split")

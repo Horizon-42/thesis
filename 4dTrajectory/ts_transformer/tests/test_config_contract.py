@@ -123,3 +123,70 @@ def test_prediction_provenance_accepts_only_exact_training_airport_subset():
         require_matching_data_provenance(
             {"data_provenance": stored}, changed, allow_subset=True
         )
+
+
+def test_a_retired_output_field_is_dropped_at_its_old_default_and_named_anywhere_else():
+    """The third retirement kind (2026-09-18): the closure, plan and segment-plan views left
+    the contract with their outputs, so every state/control checkpoint written before then
+    carries fields `TSConfig` no longer declares. Each is dropped at the default the
+    ownership rule pinned it to — nothing read it there — and a moved value is NAMED, because
+    it belongs to a run of the retired output itself (measured: no stored state or control
+    artifact moves one).
+    """
+    from dataclasses import fields as dataclass_fields
+
+    from ts_transformer.config import (
+        PREDICTION_CONTROL,
+        RETIRED_CONSTANT_FIELDS,
+        RETIRED_FIELD_NAMES,
+        RETIRED_OUTPUT_FIELDS,
+        RETIRED_SERIALIZED_FIELDS,
+    )
+
+    live = {field.name for field in dataclass_fields(TSConfig)}
+    retired = {name: default
+               for names in RETIRED_OUTPUT_FIELDS.values() for name, default in names.items()}
+    assert not (retired.keys() & live), "a retired output's field is still declared"
+    assert not (retired.keys() & set(RETIRED_SERIALIZED_FIELDS))
+    assert not (retired.keys() & set(RETIRED_CONSTANT_FIELDS))
+    assert RETIRED_FIELD_NAMES == (
+        set(RETIRED_SERIALIZED_FIELDS) | set(RETIRED_CONSTANT_FIELDS) | retired.keys()
+    ), "the flat set the CLI reads must cover all three kinds"
+
+    stored = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
+    at_defaults = {**stored, **retired}
+    assert TSConfig.from_dict(at_defaults).prediction_output == PREDICTION_CONTROL
+
+    moved = {"closure_labels_path": "/labels.json", "plan_rolled_share": 0.5,
+             "plan_fan_components": 4, "segment_plan_attention": "segments"}
+    assert moved.keys() <= retired.keys()
+    for name, value in moved.items():
+        with pytest.raises(ValueError, match=f"{name}=") as info:
+            TSConfig.from_dict({**at_defaults, name: value})
+        assert "retired" in str(info.value) and repr(value) in str(info.value)
+
+
+def test_a_config_of_a_retired_output_is_refused_by_its_output_not_by_its_fields():
+    """A closure/plan/segment-plan run DID move its own fields. Loading one must fail on the
+    output — the reason — and not on whichever field `from_dict` happened to reach first."""
+    from ts_transformer.config import PREDICTION_OUTPUTS_RETIRED, RETIRED_OUTPUT_FIELDS
+
+    stored = TSConfig().to_dict()
+    for output in PREDICTION_OUTPUTS_RETIRED:
+        moved = {name: ("moved" if isinstance(default, str) else 7)
+                 for name, default in RETIRED_OUTPUT_FIELDS[output].items()}
+        with pytest.raises(ValueError, match="prediction_output"):
+            TSConfig.from_dict({**stored, **moved, "prediction_output": output})
+
+
+def test_a_stored_two_tier_v2_plan_token_is_refused_as_retired_not_as_unknown():
+    """21 stored L1 CONTROL checkpoints carry `plan_conditioning='waypoints'` / `'truth-next'`.
+    Their token builder is archived, so they cannot load — but the refusal must say retired
+    and point at the archive, or the reader reads a live vocabulary value as corruption."""
+    from ts_transformer.config import PLAN_CONDITIONINGS, PLAN_CONDITIONINGS_RETIRED
+
+    assert not set(PLAN_CONDITIONINGS_RETIRED) & set(PLAN_CONDITIONINGS)
+    for value in PLAN_CONDITIONINGS_RETIRED:
+        with pytest.raises(ValueError, match="retired") as info:
+            TSConfig(prediction_output="control", plan_conditioning=value)
+        assert "archive/two_tier_v2_2026_09" in str(info.value)

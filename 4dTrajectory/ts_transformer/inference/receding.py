@@ -1,8 +1,9 @@
 """Receding-horizon pieces: a forecast flown for Δ, the rolled history a re-ask reads, and the
 displacement of a forecast from its truth at a lead.
 
-Shared by `experiments/chain_sensitivity.py` (two-tier T0(b): a checkpoint chained on its own
-rollout) and `experiments/tracker_lockstep.py` (T1: a plan-given tracker re-asked every Δ).
+Shared by `experiments/chain_sensitivity.py` (a checkpoint chained on its own rollout) and the
+manoeuvre-token lockstep (`manoeuvre/lockstep.py`, plan §2.7; the archived two-tier tracker
+read it the same way).
 A re-ask on `rolled_series` IS the model's ordinary predict path on that history — the window,
 the anchor state and the lagged actuators' initial condition inverted from the rolled lookback —
 which `tests/test_chain_sensitivity.py` pins with a displaced flown history.
@@ -31,8 +32,8 @@ def rolled_series(series: FlightSeries, anchor: int, flown: Forecast, until: int
     ``until`` is shown. The flown rows start one query step after the anchor, so the anchor's
     own observed row stands in before them. The supervision arrays are dropped (a rolled
     series has no truth): a caller whose checkpoint reads a CTA or a plan supplies them itself
-    (`tracker_lockstep`: off the original series' truth expert, or a plan head's prediction), and nothing else on
-    the hook-free control forecast path reads the truth."""
+    (a lockstep: the truth's, or the prior's), and nothing else on the hook-free control forecast
+    path reads the truth."""
     if until <= anchor:
         raise ValueError(f"a rolled series continues past its anchor {anchor}, not to {until}")
     origin = float(series.times[anchor])

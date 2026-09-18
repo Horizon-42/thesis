@@ -1,3 +1,5 @@
+> **已被取代（2026-09-18）**：设计与开发计划见 `2026-09-18_manoeuvre_token_plan.zh.md`；本文不再更新，只作 §10–§12 读数的引用来源。
+
 # 两重 Transformer 开发计划 v2（2026-09-17）
 
 本文件取代 `2026-09-16_two_tier_transformer_feasibility.zh.md` 的设计与开发方案（那份文档改写了需求：

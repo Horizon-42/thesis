@@ -1,3 +1,5 @@
+> **Superseded (2026-09-18)**: the plan head is replaced by the manoeuvre-token prior (`2026-09-18_manoeuvre_token_plan.zh.md`); the guidance layer (§4) stays as the second executor. This file is no longer updated; §12 remains the citable record.
+
 # Plan-and-guidance: the next model (design v5, 2026-09-12)
 
 Status: **v5.5 step 5b TWO-SEED CHECK MEASURED (2026-09-12, evening; §12.11, its last block):

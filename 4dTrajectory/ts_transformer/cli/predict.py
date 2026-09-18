@@ -32,7 +32,6 @@ from ts_transformer.config import (
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_SELF_QUANTILE,
     HOOK_SATURATIONS,
-    PREDICTION_CLOSURE,
     TROMBONE_SURPLUS_REFERENCES,
 )
 from ts_transformer.data.approach_difficulty import approach_difficulty
@@ -46,7 +45,6 @@ from ts_transformer.inference.calibration import (
     quantile_directory_name,
 )
 from ts_transformer.data.data_provenance import require_matching_data_provenance
-from ts_transformer.outputs.closure.model import ClosureLabels, load_labels
 from ts_transformer.data.dataset import dataset_flight_key, load_flight_dicts, truth_duration_s
 from ts_transformer.inference.evaluation_protocol import (
     TestReleaseError,
@@ -66,7 +64,6 @@ from ts_transformer.outputs.control.forecast import (
     random_latent_forecasts,
     shuffled_latent_forecasts,
 )
-from ts_transformer.outputs.closure.forecast import forecast_closure_from_labels
 from ts_transformer.outputs import ForecastOptions
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.training.train import load_checkpoint
@@ -226,12 +223,6 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
              "hook-free reference rollout, i.e. what the network itself intends to fly)",
     )
     parser.add_argument(
-        "--closure-from-labels", default=None, metavar="JSON",
-        help="closure output: draw every flight from its LABEL in this file instead of the "
-             "model's decision (the family's own ceiling — the oracle arm); records carry "
-             "source.closureFromLabels",
-    )
-    parser.add_argument(
         "--latent-samples", type=int, default=0, metavar="K",
         help="latent control output: besides the top-1 records, decode K prior samples per "
              "flight and write each as a full prediction directory under modes/modeNN/ "
@@ -308,7 +299,6 @@ class PredictOptions:
     are decoded beside the top-1 records, and the cohort the CTA offset skipped."""
 
     forecast: ForecastOptions
-    closure_labels: ClosureLabels | None
     cta_from_quantiles: bool
     interval_endpoints: bool
     z_from_posterior: bool
@@ -478,14 +468,6 @@ def parse_predict_options(args, config, parser, series):
             f"{named} need --command-hook; without it the rollout runs the checkpoint's "
             "own hook setting"
         )
-    closure_labels = None
-    if args.closure_from_labels is not None:
-        if config.prediction_output != PREDICTION_CLOSURE:
-            parser.error("--closure-from-labels requires a closure checkpoint")
-        if args.project_final is not None or args.no_truncate:
-            parser.error("--closure-from-labels draws the label as it is; --project-final / --no-truncate do not apply")
-        closure_labels = load_labels(args.closure_from_labels)
-        print(f"  drawing every flight from its label in {args.closure_from_labels} (the oracle arm)")
     if args.truncate_at_threshold and args.no_truncate:
         parser.error(
             "--no-truncate keeps a fixed-time STATE forecast past its closest threshold "
@@ -592,7 +574,6 @@ def parse_predict_options(args, config, parser, series):
                 conformal=conformal,
                 truncate_at_threshold=args.truncate_at_threshold,
             ),
-            closure_labels=closure_labels,
             cta_from_quantiles=args.cta_from_quantiles,
             interval_endpoints=args.interval_endpoints,
             z_from_posterior=args.z_from_posterior,
@@ -691,12 +672,7 @@ def predict_sets(model, series, config, normalizer, device, options: PredictOpti
                 shuffled_metrics.append(observed_series_metrics(
                     s, forecast, points=config.validation_common_grid_points,
                 ))
-        if options.closure_labels is not None:
-            forecasts = _cut_at_threshold(
-                forecast_closure_from_labels(batch_series, config, options.closure_labels),
-                batch_series, options.forecast.truncate_at_threshold,
-            )
-        elif options.z_from_posterior:
+        if options.z_from_posterior:
             forecasts = _cut_at_threshold(posterior_latent_forecasts(
                 model, batch_series, config, normalizer, device=device, cta_offset_s=options.forecast.cta_offset_s,
             ), batch_series, options.forecast.truncate_at_threshold)

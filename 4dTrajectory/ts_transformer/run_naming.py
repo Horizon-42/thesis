@@ -63,10 +63,7 @@ from ts_transformer.config import (
     DEFAULT_N_SEGMENTS_BY_MODEL,
     HORIZON_FULL,
     HORIZON_WINDOW,
-    PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
-    PREDICTION_PLAN,
-    PREDICTION_SEGMENT_PLAN,
     TSConfig,
     control_recipe_overrides,
 )
@@ -137,27 +134,9 @@ CONTROL_LOSS_FIELDS = (
     "latent_beta_warmup_epochs",
     "latent_aux_duration_weight",
 )
-#: The closure output's objective fields; its base name bumps when the regression
-#: itself is redesigned.
-CLOSURE_LOSS_BASE = "closure-v1"
-CLOSURE_LOSS_FIELDS = (
-    "closure_slowness_knots",
-    "closure_height_knots",
-    "closure_geometry_loss_weight",
-    "closure_timing_loss_weight",
-    "closure_height_loss_weight",
-)
-#: The plan output's objective fields; its base name bumps when the regression itself
-#: is redesigned.
-PLAN_LOSS_BASE = "plan-v1"
-PLAN_LOSS_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight", "plan_fan_components")
-#: The segment-plan output's objective fields (two-tier v2 §4); the base bumps when the
-#: regression itself is redesigned.
-SEGMENT_PLAN_LOSS_BASE = "segment-plan-v1"
-SEGMENT_PLAN_LOSS_FIELDS = ("segment_plan_position_loss_weight", "segment_plan_arrival_loss_weight")
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
 # in different directories must not read as one).
-_PATH_FIELDS = frozenset({"closure_labels_path", "control_fitted_teacher_path", "plan_rolled_windows_path"})
+_PATH_FIELDS = frozenset({"control_fitted_teacher_path"})
 STATE_LOSS_FIELDS = (
     "fitted_tail_position_weight",
     "fitted_terminal_position_weight",
@@ -176,21 +155,15 @@ META_FIELDS = (
     # and its name is what keeps it from being quoted as a predictor, so it never folds.
     "seed",
     "split_seed",
-    # The supervision target of a closure run: two runs on different label files are
-    # different runs, whatever else matches.
-    "closure_labels_path",
-    # ...and the same for the imitation term's fitted teacher: `imit-target=fitted` says
-    # WHICH KIND of teacher, this says which one. A table is width-, anchor- and
-    # cohort-specific, so two generations of it are two different runs.
+    # The imitation term's fitted teacher: `imit-target=fitted` says WHICH KIND of teacher,
+    # this says which one. A table is width-, anchor- and cohort-specific, so two
+    # generations of it are two different runs.
     "control_fitted_teacher_path",
-    # ...and the plan head's rolled-window table (v5.2): which lockstep flights' windows it
-    # trained on, and at what share of its draws — a second table is a second run.
-    "plan_rolled_windows_path",
-    "plan_rolled_share",
     *INTENT_FIELDS,
     # The CTA axis reads the future the same way: a given-CTA run must wear it.
     *CTA_FIELDS,
-    # ...and the plan token (two-tier T1): a `plan=truth-next` run reads the truth's plan.
+    # ...and the plan token: which plan the control head is handed, and how often it is
+    # withheld in training.
     *PLAN_CONDITIONING_FIELDS,
     # Two-tier L1: a fixed rollout horizon predicts a different thing (Δ seconds of the
     # approach, no duration head), so it is spelled out ahead of the backbone knobs that fold.
@@ -205,11 +178,6 @@ META_FIELDS = (
     # fold. Every stored config predates it and reads as the default, so adding it renames
     # nothing.
     "control_condition_features",
-    # Two-tier v2 §4: the segment-plan head's decoded segment count and its token axis —
-    # the whole difference between the two attention arms, so they sit ahead of the backbone
-    # knobs that fold. Every stored config predates them and carries the defaults.
-    "segment_plan_segments",
-    "segment_plan_attention",
     "d_model",
     "n_heads",
     "d_ff",
@@ -338,15 +306,7 @@ _ABBREV = {
     "plan_conditioning": "plan",
     "plan_conditioning_dropout": "plan-drop",
     "control_condition_features": "airframe",
-    "closure_labels_path": "labels",
     "control_fitted_teacher_path": "teacher",
-    "plan_rolled_windows_path": "rolled",
-    "plan_rolled_share": "rolled-share",
-    "plan_fan_components": "fan",
-    "segment_plan_segments": "M",
-    "segment_plan_attention": "attend",
-    "segment_plan_position_loss_weight": "seg-pos",
-    "segment_plan_arrival_loss_weight": "seg-arrival",
     "state_position_reference": "pos-ref",
     "procedure_loss_lateral_weight": "proc-lat",
     "procedure_loss_vertical_weight": "proc-vert",
@@ -380,7 +340,9 @@ _ABBREV = {
 #: The validation days of a day partition (the runway-intent R series, `experiments.runway_intent_r1`
 #: `day_folds`), flown by a checkpoint trained and selected on that partition's training days only —
 #: none of the checkpoint's own splits, and not the sealed outer test. Records under it come from a
-#: runner (`runway_intent_r3 --write-records`), never from `predict`.
+#: runner, never from `predict` — the one that wrote them is archived
+#: (`archive/plan_head_2026_09/runway_intent/runway_intent_r3.py --write-records`), and the split
+#: stays because its published categories do.
 SPLIT_DAYVAL = "dayval"
 #: Split prefixes shared by every category-label producer (publisher, pipeline,
 #: relabeler). The wording is asserted by frontend fixtures — change with care.
@@ -441,8 +403,7 @@ KNOWN_UNNAMED_FIELDS: dict[str, str] = {
     "subtract_last": "backbone knob, never set",
 }
 _named = (
-    set(CONTROL_LOSS_FIELDS) | set(STATE_LOSS_FIELDS) | set(CLOSURE_LOSS_FIELDS) | set(PLAN_LOSS_FIELDS)
-    | set(SEGMENT_PLAN_LOSS_FIELDS)
+    set(CONTROL_LOSS_FIELDS) | set(STATE_LOSS_FIELDS)
     | set(META_FIELDS) | {field for field, _ in _TAU_FIELDS} | set(LATENT_OUTPUT_FIELDS)
     | _DIRECTLY_NAMED_FIELDS
 )
@@ -461,7 +422,7 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Architecture", (
         "d_model", "n_heads", "d_ff", "e_layers", "dropout", "patch_len", "stride",
         "n_segments", "seq_len", "dt_s", "full_horizon_steps", "window_horizon_steps",
-        "use_norm", "revin", "duration_head", "segment_plan_segments", "segment_plan_attention",
+        "use_norm", "revin", "duration_head",
     )),
     ("Training", (
         "epochs", "patience", "batch_size", "learning_rate", "weight_decay",
@@ -475,10 +436,7 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "random_train_anchor", "random_train_anchor_sampling", "random_train_anchor_l1_share",
         "random_train_anchor_min_future_s", "training_cohort_min_future_s", "anchor_floor_index",
     )),
-    ("Supervision sources", (
-        "closure_labels_path", "control_fitted_teacher_path",
-        "plan_rolled_windows_path", "plan_rolled_share",
-    )),
+    ("Supervision sources", ("control_fitted_teacher_path",)),
     ("Conditioning", (
         "target_conditioning", *INTENT_FIELDS, *CTA_FIELDS, *PLAN_CONDITIONING_FIELDS,
         "control_condition_features",
@@ -609,17 +567,10 @@ def _non_loss_recipe_mismatches(
 def loss_design_parts(config: Mapping[str, Any]) -> tuple[str, list[tuple[str, Any]]]:
     """Field 4 decomposed: the base design and EVERY loss-field edit from it, unfolded.
 
-    The base is the output's own versioned objective (``state-v1`` / ``closure-v1`` /
-    ``plan-v1``), the named recipe, or — for a ``custom`` control run — its NEAREST recipe
+    The base is the output's own versioned objective (``state-v1``), the named recipe, or — for a ``custom`` control run — its NEAREST recipe
     (``custom`` itself when no recipe is nearer than the plain defaults). ``loss_design_name``
     renders the name from this; the structured parameter view lists the edits in full.
     """
-    if config.get("prediction_output") == PREDICTION_CLOSURE:
-        return CLOSURE_LOSS_BASE, _field_diffs(config, CLOSURE_LOSS_FIELDS)
-    if config.get("prediction_output") == PREDICTION_PLAN:
-        return PLAN_LOSS_BASE, _field_diffs(config, PLAN_LOSS_FIELDS)
-    if config.get("prediction_output") == PREDICTION_SEGMENT_PLAN:
-        return SEGMENT_PLAN_LOSS_BASE, _field_diffs(config, SEGMENT_PLAN_LOSS_FIELDS)
     if config.get("prediction_output") != PREDICTION_CONTROL:
         return STATE_LOSS_BASE, _field_diffs(config, STATE_LOSS_FIELDS)
     recipe = config.get("control_recipe_name") or CONTROL_RECIPE_CUSTOM
@@ -653,7 +604,7 @@ def loss_design_name(config: Mapping[str, Any]) -> str:
     if not diffs:
         return base
     if config.get("prediction_output") != PREDICTION_CONTROL:
-        # state / closure / plan: the output's own objective, edits inline up to the cap.
+        # state: the output's own objective, edits inline up to the cap.
         if len(diffs) <= _MAX_LISTED_DIFFS:
             return f"{base}({', '.join(_diff_items(diffs))})"
         return f"{base}-{_diff_hash(diffs)}"
@@ -670,15 +621,7 @@ def loss_design_name(config: Mapping[str, Any]) -> str:
 
 
 def dynamics_name(config: Mapping[str, Any]) -> str:
-    """Field 3: ``kinematic`` for state output, ``closed-form`` for closure, ``guidance``
-    for the plan (the guidance layer on the lagged rollout); flight model (+τ, +backend)
-    for control."""
-    if config.get("prediction_output") == PREDICTION_CLOSURE:
-        return "closed-form"
-    if config.get("prediction_output") == PREDICTION_PLAN:
-        return "guidance"
-    if config.get("prediction_output") == PREDICTION_SEGMENT_PLAN:
-        return "waypoints"   # coarse waypoints drawn straight from the head; no dynamics of its own
+    """Field 3: ``kinematic`` for state output; flight model (+τ, +backend) for control."""
     if config.get("prediction_output") != PREDICTION_CONTROL:
         return "kinematic"
     model = config.get("control_dynamics_model") or CONTROL_DYNAMICS_POINT_MASS

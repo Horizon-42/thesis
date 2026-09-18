@@ -159,7 +159,7 @@ def floor_speed(
 def stall_speed_mps(load, mass_kg, density, area_m2, cl_max):
     """The stall speed at load factor ``load``, ``√(2 n m g / (ρ S Cl_max))`` — the ONE
     expression behind the tensor floor above and the plan's scalar closure
-    (`outputs.plan.guidance.timing.stall_floor_mps`); ``** 0.5`` so it reads a tensor or a
+    (`outputs.guidance.timing.stall_floor_mps`); ``** 0.5`` so it reads a tensor or a
     float alike."""
     return (2.0 * load * mass_kg * GRAVITY_MPS2 / (density * area_m2 * cl_max)) ** 0.5
 

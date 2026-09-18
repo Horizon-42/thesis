@@ -55,8 +55,6 @@ def main(argv: list[str] | None = None) -> int:
     config, _batch_auto = config_from_args(args, parser)
     if not config.random_train_anchor:
         parser.error("the cohort rule is the random-anchor future contract; the config has random_train_anchor=False")
-    if config.plan_rolled_windows_path:
-        parser.error("a rolled-window table follows a cohort, never precedes it: drop plan_rolled_windows_path / plan_rolled_share")
     strategy(config).check_trainable(config)
     run = prepare_training_run(args, parser, argv)
     config = run.config

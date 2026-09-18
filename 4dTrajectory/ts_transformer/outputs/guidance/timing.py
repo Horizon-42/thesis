@@ -32,9 +32,11 @@ import numpy as np
 
 from ts_transformer.geometry.flyability import isa_density
 from ts_transformer.outputs.constraints.speed_floor import stall_speed_mps
-from ts_transformer.outputs.plan.guidance.controller import STALL_MARGIN, PlanToFly
-from ts_transformer.outputs.plan.guidance.route import DECEL_RATE_MPS2, OVERRUN_M, Route, route_time_s
-from ts_transformer.outputs.plan.labels import SPEED_MAX_MPS
+from ts_transformer.outputs.guidance.controller import STALL_MARGIN, PlanToFly
+from ts_transformer.outputs.guidance.route import DECEL_RATE_MPS2, OVERRUN_M, Route, route_time_s
+
+#: The fastest ground speed a plan may ask for (was the plan head's label ceiling).
+SPEED_MAX_MPS = 140.0
 
 #: An assignment met within this is closed; the lockstep's own step is 30 s and the
 #: guidance tracks the schedule to a few seconds.

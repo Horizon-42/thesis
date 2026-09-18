@@ -137,8 +137,10 @@ export type DatasetSplit = typeof DATASET_SPLITS[number];
 export const COMPARISON_INDEX_SCHEMA_VERSION = "comparison-v2-generation" as const;
 
 /**
- * MUST match `4dTrajectory/ts_transformer/config.py::PREDICTION_OUTPUTS` — an unlisted value
- * fails `isComparisonCategory`, and one failing category empties the whole airport's manifest.
+ * MUST match `4dTrajectory/ts_transformer/config.py::PREDICTION_OUTPUTS_PUBLISHED` — the LIVE
+ * outputs plus the retired ones whose CZML is published (a publication does not need its code,
+ * so retiring an output must not unlist it). An unlisted value fails `isComparisonCategory`,
+ * and one failing category empties the whole airport's manifest.
  * (`control-mixture` was listed here but no producer ever emitted it; `closure` was emitted
  * and not listed, which is what took the KRDU picker down; `plan` did the same on 2026-09-12.
  * Pinned by `ts_transformer/tests/test_frontend_mirrors.py`.)

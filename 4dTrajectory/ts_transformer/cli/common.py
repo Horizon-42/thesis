@@ -36,8 +36,7 @@ from ts_transformer.config import (
     CONTROL_STATE_LOSS_GRIDS_AVAILABLE,
     CONTROL_STATE_OBJECTIVES,
     COORDINATE_FRAMES_AVAILABLE,
-    RETIRED_CONSTANT_FIELDS,
-    RETIRED_SERIALIZED_FIELDS,
+    RETIRED_FIELD_NAMES,
     DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     INTENT_CONDITIONINGS_AVAILABLE,
@@ -47,7 +46,6 @@ from ts_transformer.config import (
     PREDICTION_OUTPUTS_AVAILABLE,
     PROCEDURE_LOSS_FIELDS,
     RANDOM_TRAIN_ANCHOR_SAMPLINGS,
-    SEGMENT_PLAN_ATTENTIONS,
     STATE_POSITION_REFERENCES_AVAILABLE,
     TARGET_CONDITIONINGS,
     TIME_CONSTANT_FIELDS,
@@ -167,38 +165,8 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
         "--prediction-output",
         choices=PREDICTION_OUTPUTS_AVAILABLE,
         default=None,
-        help="predict state endpoints (default), bounded controls with dynamics rollout, "
-             "a plan (the operating parameters and the next instruction, flown by the guidance "
-             "layer; design v5), or a segment plan (the next coarse waypoints in runway axes off "
-             "the window's segment tokens; two-tier v2 §4) — the closure output is frozen: its "
-             "checkpoints load, no new run trains it",
+        help="predict state endpoints (default) or bounded controls with dynamics rollout",
     )
-    parser.add_argument("--segment-plan-segments", type=int, default=None,
-                        help="segment-plan output: M coarse 30 s segments decoded ahead of the anchor")
-    parser.add_argument("--segment-plan-attention", choices=SEGMENT_PLAN_ATTENTIONS, default=None,
-                        help="segment-plan output: the token axis the encoder attends over — one token "
-                             "per feature (channels) or per segment (segments)")
-    parser.add_argument("--segment-plan-position-loss-weight", type=float, default=None,
-                        help="segment-plan output: weight of the waypoint regression")
-    parser.add_argument("--segment-plan-arrival-loss-weight", type=float, default=None,
-                        help="segment-plan output: weight of the arrival bits and the arrival fraction")
-    parser.add_argument(
-        "--closure-labels-path", default=None, metavar="JSON",
-        help="closure output: the per-flight labels written by docs/p1_closure_oracle.py labels",
-    )
-    parser.add_argument("--plan-operating-loss-weight", type=float, default=None,
-                        help="plan output: weight of the operating-parameter regression")
-    parser.add_argument("--plan-instruction-loss-weight", type=float, default=None,
-                        help="plan output: weight of the next-instruction regression")
-    parser.add_argument("--plan-rolled-windows-path", default=None, metavar="NPZ",
-                        help="plan output: the rolled-window table written by run_ts.py plan_rolled_windows "
-                             "(design v5.2); needs --plan-rolled-share")
-    parser.add_argument("--plan-rolled-share", type=float, default=None,
-                        help="plan output: the share of each epoch's per-flight draws taken from the "
-                             "rolled-window table instead of the observed anchors")
-    parser.add_argument("--plan-fan-components", type=int, default=None,
-                        help="plan output: K mixture components over the next instruction, the fan "
-                             "(design v5.3 §9 step 3(g)); 0 = the point head")
     parser.add_argument("--seq-len", type=int, default=None, help="lookback L, in steps")
     parser.add_argument("--n-segments", type=int, default=None,
                         help="N normalized state endpoints or non-uniform control segments")
@@ -601,16 +569,6 @@ def add_training_args(parser: argparse.ArgumentParser) -> None:
 CLI_CONFIG_FIELDS = (
     "model",
     "prediction_output",
-    "closure_labels_path",
-    "plan_operating_loss_weight",
-    "plan_instruction_loss_weight",
-    "plan_rolled_windows_path",
-    "plan_rolled_share",
-    "plan_fan_components",
-    "segment_plan_segments",
-    "segment_plan_attention",
-    "segment_plan_position_loss_weight",
-    "segment_plan_arrival_loss_weight",
     "seq_len",
     "n_segments",
     "horizon_mode",
@@ -697,9 +655,6 @@ _NEW_RUN_VOCABULARIES = (
      "rule; the value exists so that campaign's artifact still loads"),
     # Frozen 2026-09-09 (package review §5): axes with published numbers whose checkpoints
     # keep loading, predicting and publishing, and which no new run trains.
-    ("prediction_output", PREDICTION_OUTPUTS_AVAILABLE,
-     "the closure output is a comparison arm (2026-09-05/06) whose tracker was deleted; "
-     "its two stored runs load and predict"),
     ("intent_conditioning", INTENT_CONDITIONINGS_AVAILABLE,
      "the truth-join oracles were the scene design's Phase 0 instrument; the L4 gate failed "
      "and the scene encoder is archived (archive/scene_encoder_2026_09/)"),
@@ -740,8 +695,7 @@ def config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser) 
         allowed = {field.name for field in fields(TSConfig)}
         unknown = sorted(key for key in loaded if key not in allowed)
         if unknown:
-            retired = [key for key in unknown
-                       if key in RETIRED_SERIALIZED_FIELDS or key in RETIRED_CONSTANT_FIELDS]
+            retired = [key for key in unknown if key in RETIRED_FIELD_NAMES]
             why = (
                 f" ({', '.join(retired)} was retired from the contract; a stored config may "
                 "still carry it, a new run may not set it)"

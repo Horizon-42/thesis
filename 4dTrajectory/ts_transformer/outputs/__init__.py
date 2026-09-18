@@ -25,11 +25,9 @@ import importlib
 from functools import lru_cache
 
 from ts_transformer.config import (
-    PREDICTION_CLOSURE,
     PREDICTION_CONTROL,
     PREDICTION_OUTPUTS,
-    PREDICTION_PLAN,
-    PREDICTION_SEGMENT_PLAN,
+    PREDICTION_OUTPUTS_RETIRED,
     PREDICTION_STATE,
     TSConfig,
 )
@@ -42,10 +40,7 @@ from ts_transformer.outputs.base import (
 
 _STRATEGY_MODULES: dict[str, str] = {
     PREDICTION_STATE: "ts_transformer.outputs.state.strategy",
-    PREDICTION_CLOSURE: "ts_transformer.outputs.closure.strategy",
     PREDICTION_CONTROL: "ts_transformer.outputs.control.strategy",
-    PREDICTION_PLAN: "ts_transformer.outputs.plan.strategy",
-    PREDICTION_SEGMENT_PLAN: "ts_transformer.outputs.segment_plan.strategy",
 }
 if set(_STRATEGY_MODULES) != set(PREDICTION_OUTPUTS):
     raise RuntimeError("every prediction_output needs a strategy module")
@@ -57,6 +52,11 @@ def strategy_for(prediction_output: str) -> OutputStrategy:
     try:
         module = _STRATEGY_MODULES[prediction_output]
     except KeyError:
+        if prediction_output in PREDICTION_OUTPUTS_RETIRED:
+            raise ValueError(
+                f"prediction_output {prediction_output!r} is retired (2026-09-18): its strategy is "
+                "under archive/ and its checkpoints no longer load"
+            ) from None
         raise ValueError(
             f"unknown prediction_output {prediction_output!r}; expected one of "
             f"{PREDICTION_OUTPUTS}"

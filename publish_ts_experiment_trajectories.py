@@ -5,8 +5,8 @@ The script is intentionally an orchestration layer.  It does not define another 
 or evaluation format; every job calls the existing predictor, the shared ``evaluation`` package,
 and the existing comparison-CZML publisher in that order.  Publications are resumable and kept
 under a checkpoint-specific raw-output directory.  ``--reuse-prediction-dir`` publishes the
-records a campaign already wrote (its extra predict flags — latent sampling, closure labels,
-a given CTA — are not reconstructable from the checkpoint alone) instead of predicting again;
+records a campaign already wrote (its extra predict flags — latent sampling, a given CTA,
+a quantile-decoded CTA — are not reconstructable from the checkpoint alone) instead of predicting again;
 that directory is read-only here. ``--result-source prediction`` publishes a
 primary result under Prediction; the default ``experiment`` source includes checkpoint metadata
 for the Experiments picker.
@@ -111,15 +111,13 @@ INTENT_REGISTRY_SCHEMA = "ts-experiment-intents-v1"
 ANYTIME_RECORDS_SCHEMA = "ts-anytime-records-v1"
 #: The summary blocks the REPLAY runners write beside a checkpoint's own forecasts — MIRRORS of
 #: ``experiments.chain_sensitivity`` (``chain``: the one-shot and the chained re-ask of one
-#: checkpoint), ``experiments.tracker_lockstep.RECORDS_BLOCK`` (``lockstep``: a plan-given
-#: tracker re-asked in lockstep), ``experiments.short_horizon_readout.RECORDS_BLOCK``
-#: (``short_horizon``: a fixed-horizon head's first Δ seconds from an anchor set, with or without
-#: its plan token) and ``experiments.segment_plan_readout.RECORDS_BLOCK`` (``segment_plan``: a
-#: plan head's or a reference's forecast from a common anchor set), for the same reason the
-#: anytime schema above is one. A directory carrying one is a VARIANT of that checkpoint's
-#: prediction and has no category of its own without ``--category-variant``: published bare, it
-#: would be filed as the checkpoint's L−1 prediction.
-VARIANT_RECORD_BLOCKS = ("chain", "lockstep", "short_horizon", "segment_plan")
+#: checkpoint) and the archived two-tier lockstep's ``lockstep`` block (its published
+#: categories keep it readable; `archive/two_tier_v2_2026_09/tracker_lockstep.py`), for the same
+#: reason the anytime schema above is one. The manoeuvre-token readouts register their own
+#: blocks here when they publish (plan §4.2). A directory carrying one is a VARIANT of that
+#: checkpoint's prediction and has no category of its own without ``--category-variant``:
+#: published bare, it would be filed as the checkpoint's L−1 prediction.
+VARIANT_RECORD_BLOCKS = ("chain", "lockstep")
 
 
 def _utc_now() -> str:

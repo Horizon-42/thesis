@@ -192,7 +192,7 @@ def test_no_control_prefixed_module_returns_to_the_top_level():
     for part in SHARED_OUTPUT_PARTS:
         target = OUTPUTS / part if part.endswith(".py") else OUTPUTS / part / "__init__.py"
         assert target.is_file(), f"outputs/{part} is shared by the paths and lives under outputs/"
-    for path in ("state", "closure", "control"):
+    for path in ("state", "control"):
         assert (OUTPUTS / path / "strategy.py").is_file(), f"outputs/{path} has no strategy"
 
 
@@ -277,15 +277,15 @@ def test_the_shared_output_parts_import_no_path():
             )
 
 
-def test_the_plan_path_never_imports_the_control_path():
-    """Two-tier T1 (2026-09-16): the control path reads the plan path's labels as an INPUT
-    (`outputs/control/plan_token.py`), so the edge runs control -> plan. The reverse would
+def test_the_guidance_layer_never_imports_the_control_path():
+    """The rule guidance (`outputs/guidance/`, the manoeuvre-token plan's second executor) is
+    consumed beside the control path, never by way of it: an import of `outputs.control` would
     close a cycle through `outputs.control.strategy`."""
-    for path in (OUTPUTS / "plan").rglob("*.py"):
+    for path in (OUTPUTS / "guidance").rglob("*.py"):
         offending = {name for name in _imported_names(path) if name.split(".")[:2] == ["outputs", "control"]}
         assert not offending, (
-            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; the plan path is the control "
-            "path's input, never its consumer"
+            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; the guidance layer is an "
+            "executor beside the control path, never its consumer"
         )
 
 
@@ -478,7 +478,6 @@ def test_every_training_flag_is_named_after_the_field_it_sets():
 #: The 2026-09-07 (T3-19) renames, old spelling -> new. Every old one must be REFUSED:
 #: argparse's default prefix matching accepted four of them silently.
 RENAMED_FLAGS_2026_09_07 = {
-    "--closure-labels": "--closure-labels-path",
     "--dt": "--dt-s",
     "--fitted-tail-weight": "--fitted-tail-position-weight",
     "--fitted-terminal-weight": "--fitted-terminal-position-weight",
@@ -500,8 +499,8 @@ def test_a_renamed_flag_is_refused_not_prefix_matched(capsys):
     """`--dt 2` must not keep working as `--dt-s 2`.
 
     argparse accepts any unambiguous PREFIX by default, so four of the fifteen renamed
-    flags (`--dt`, `--control-recipe`, `--closure-labels`, `--control-fitted-teacher`)
-    still parsed after T3-19 — a stale command line would have set the field it looks like
+    flags (`--dt`, `--control-recipe`, `--control-fitted-teacher`; `--closure-labels` retired
+    with the closure output) still parsed after T3-19 — a stale command line would have set the field it looks like
     it sets while reading as up to date. Every subparser passes `allow_abbrev=False`.
     """
     import importlib.util
@@ -514,7 +513,7 @@ def test_a_renamed_flag_is_refused_not_prefix_matched(capsys):
 
     prefixes = {old for old, new in RENAMED_FLAGS_2026_09_07.items() if new.startswith(old)}
     assert prefixes == {
-        "--dt", "--control-recipe", "--closure-labels", "--control-fitted-teacher",
+        "--dt", "--control-recipe", "--control-fitted-teacher",
     }, f"the set of old spellings argparse could prefix-match has changed: {sorted(prefixes)}"
 
     for old in RENAMED_FLAGS_2026_09_07:
@@ -594,7 +593,6 @@ def test_every_new_run_vocabulary_is_actually_refused(tmp_path, capsys):
         "state_position_reference": (STATE_POSITION_REFERENCES, {}),
         # Frozen 2026-09-09 (package review §5).
         "prediction_output": (PREDICTION_OUTPUTS, {
-            "closure_labels_path": "labels.json",
             "checkpoint_selection_metric": "fixed-anchor-objective",
         }),
         "intent_conditioning": (INTENT_CONDITIONINGS, {}),

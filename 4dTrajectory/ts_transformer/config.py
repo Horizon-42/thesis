@@ -122,28 +122,20 @@ CTA_CONDITIONINGS = (
 CTA_CONDITIONINGS_AVAILABLE = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
 CTA_FIELDS = ("cta_conditioning",)
 
-# Two-tier T1 (`docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §10.3): the PLAN as a
-# decoder input — the plan path's target vector at the anchor (`outputs/plan/labels.TARGETS`,
-# the operating parameters and the next instruction) as one token fused beside the aircraft
-# condition and the CTA (`outputs/control/plan_token.py`). ``truth-next`` is the TRUTH's plan,
-# the plan head's own label: it READS THE FUTURE — the protocol-C oracle a plan-given tracker
-# is judged under, never a prediction result — and the run name says ``plan=truth-next``.
-# ``plan_conditioning_dropout`` replaces the token by the ABSENT token for that share of the
-# training samples (the fallback a tracker needs when the plan it is handed is unreliable).
+# The plan token: one fused decoder input beside the aircraft condition and the CTA
+# (`outputs/control/plan_token.py`). The two-tier v2 tokens (``truth-next``, ``waypoints``)
+# are archived (`archive/two_tier_v2_2026_09/`); the manoeuvre-token plan adds
+# ``manoeuvre-code`` in P3.1 (`docs/2026-09-18_manoeuvre_token_plan.zh.md` §2.6).
+# ``plan_conditioning_dropout`` replaces the token by the ABSENT token for that share of
+# the training samples — measured to make the head IGNORE the token at 0.5 (v2 §10.8), so
+# the manoeuvre-code token pins it at 0.
 PLAN_CONDITIONING_OFF = "off"
-PLAN_CONDITIONING_TRUTH_NEXT = "truth-next"
-# Two-tier L1 (`docs/2026-09-17_two_tier_plan_v2.zh.md` §3): the COARSE PLAN's next waypoints
-# — the position every `PLAN_WAYPOINT_SEGMENT_S` after the ask, relative to the current
-# position in the chart, with the seconds until it — one per coarse segment inside the fixed
-# horizon (`plan_waypoint_count`). In training and the protocol-C lockstep the waypoints are
-# the TRUTH's (reads the future; the run name says ``plan=waypoints``); in the two-tier
-# lockstep (S3) the plan layer's own.
-PLAN_CONDITIONING_WAYPOINTS = "waypoints"
-PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF, PLAN_CONDITIONING_TRUTH_NEXT, PLAN_CONDITIONING_WAYPOINTS)
+PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF,)
+#: The two values a stored two-tier v2 control config may carry that no longer build a token.
+#: Named separately from the vocabulary so the refusal reads as a RETIREMENT with a pointer
+#: rather than as a corrupt value (21 stored L1 control checkpoints carry one).
+PLAN_CONDITIONINGS_RETIRED = ("truth-next", "waypoints")
 PLAN_CONDITIONING_FIELDS = ("plan_conditioning", "plan_conditioning_dropout")
-#: The coarse plan's segment length — the plan layer's Δ₂ (two-tier v2 §4): the spacing of
-#: the waypoint token's points and of the segment-plan head's outputs, ONE constant.
-PLAN_WAYPOINT_SEGMENT_S = 30.0
 
 # The duration head (B1, §三 3.1; B1.b, §三 3.1b). ``point`` is the package's original
 # scalar ``FinalTimeHead``; ``quantile`` is ``outputs.duration_heads.QuantileFinalTimeHead`` —
@@ -206,58 +198,25 @@ AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
 AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
 PREDICTION_STATE = "state"
 PREDICTION_CONTROL = "control"
-PREDICTION_CLOSURE = "closure"
-# The plan-and-guidance path (design v5, 2026-09-11): the network predicts the operating
-# parameters and the NEXT instruction, a deterministic guidance layer flies them.
-PREDICTION_PLAN = "plan"
-# The two-tier plan layer (design v2 §4, 2026-09-17): the observed window cut into coarse
-# segments whose features are the attention tokens; the head decodes the next M segments'
-# waypoints in runway axes and whether the flight has arrived by each (`outputs/segment_plan`).
-PREDICTION_SEGMENT_PLAN = "segment-plan"
-PREDICTION_OUTPUTS = (
-    PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_CLOSURE, PREDICTION_PLAN, PREDICTION_SEGMENT_PLAN,
-)
-# What a NEW run may select (review §5, 2026-09-09). A value in the stored vocabulary above
-# but not here is FROZEN: its checkpoints load, predict and publish exactly as before, and
-# `cli.common._refuse_unavailable_selection` refuses it for training. Closure is a comparison
-# arm with published numbers and a DELETED tracker (2026-09-07); it is not trained anew.
-PREDICTION_OUTPUTS_AVAILABLE = (PREDICTION_STATE, PREDICTION_CONTROL, PREDICTION_PLAN, PREDICTION_SEGMENT_PLAN)
+PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL)
+# Retired outputs (2026-09-18, `docs/2026-09-18_manoeuvre_token_plan.zh.md` §5): the closure
+# arm (scene design P1.c), the plan-and-guidance head (design v5) and the two-tier v2
+# segment-plan layer. Their code is under archive/ and their checkpoints no longer load;
+# the NAMES stay so a published category or an old run directory still reads and names.
+PREDICTION_OUTPUTS_RETIRED = ("closure", "plan", "segment-plan")
+# Every output name a published category may carry — what the frontend mirrors
+# (`tests/test_frontend_mirrors.py`): the live ones and the retired ones with published CZML.
+PREDICTION_OUTPUTS_PUBLISHED = PREDICTION_OUTPUTS + PREDICTION_OUTPUTS_RETIRED
+# What a NEW run may select. A value in the stored vocabulary but not here is FROZEN: its
+# checkpoints load, predict and publish, and `cli.common._refuse_unavailable_selection`
+# refuses it for training. Both live outputs are selectable.
+PREDICTION_OUTPUTS_AVAILABLE = PREDICTION_OUTPUTS
 # The truth-join oracles were the scene design's Phase 0 instrument; the L4 gate failed and
 # the scene encoder is archived (archive/scene_encoder_2026_09/), so no new oracle arm.
 INTENT_CONDITIONINGS_AVAILABLE = (INTENT_CONDITIONING_NONE,)
 # The threshold-anchored chart is the model's runway knowledge (2026-09-03 frame ablation:
 # the airport frame averages across parallel pairs); the two alternatives keep loading.
 COORDINATE_FRAMES_AVAILABLE = (COORDINATE_FRAME_ENU,)
-# The closure output's own fields (scene design P1.c): a recipe leaves them open.
-CLOSURE_FIELDS = (
-    "closure_labels_path",
-    "closure_slowness_knots",
-    "closure_height_knots",
-    "closure_geometry_loss_weight",
-    "closure_timing_loss_weight",
-    "closure_height_loss_weight",
-)
-# There is no pre-closure behaviour to reproduce, so every closure field is required.
-REQUIRED_SERIALIZED_CLOSURE_FIELDS = CLOSURE_FIELDS
-# The plan output's own fields (design v5 §6): the two loss weights. Required the same way.
-PLAN_FIELDS = ("plan_operating_loss_weight", "plan_instruction_loss_weight")
-REQUIRED_SERIALIZED_PLAN_FIELDS = PLAN_FIELDS
-# The segment-plan output's own fields (two-tier v2 §4): how many coarse segments the head
-# decodes, which axis the encoder attends over, the two loss weights. No earlier behaviour
-# to reproduce, so every one is required of a stored config.
-SEGMENT_PLAN_ATTENTION_CHANNELS = "channels"   # one token per FEATURE (its K-long series) — iTransformer's inversion
-SEGMENT_PLAN_ATTENTION_SEGMENTS = "segments"   # one token per SEGMENT (its feature vector) — the patch form
-SEGMENT_PLAN_ATTENTIONS = (SEGMENT_PLAN_ATTENTION_CHANNELS, SEGMENT_PLAN_ATTENTION_SEGMENTS)
-SEGMENT_PLAN_FIELDS = (
-    "segment_plan_segments",
-    "segment_plan_attention",
-    "segment_plan_position_loss_weight",
-    "segment_plan_arrival_loss_weight",
-)
-REQUIRED_SERIALIZED_SEGMENT_PLAN_FIELDS = SEGMENT_PLAN_FIELDS
-# The profile knot widths a closure labels file carries (outputs.closure.model.fit_labels writes
-# both); a config may only ask for one of them.
-CLOSURE_LABEL_KNOTS = (4, 8)
 CONTROL_STATE_CLOCK_PREDICTED = "predicted"
 CONTROL_STATE_CLOCK_OBSERVED = "observed"
 CONTROL_STATE_CLOCKS = (
@@ -506,21 +465,6 @@ RANDOM_TRAIN_ANCHOR_SAMPLINGS = (
 def uses_control_dynamics(prediction_output: str) -> bool:
     """Whether an output strategy requires per-flight aircraft dynamics."""
     return prediction_output == PREDICTION_CONTROL
-
-
-def uses_closure_labels(prediction_output: str) -> bool:
-    """Whether an output strategy carries the per-flight closure labels as its context."""
-    return prediction_output == PREDICTION_CLOSURE
-
-
-def uses_plan_labels(prediction_output: str) -> bool:
-    """Whether an output strategy reads the plan labels per drawn anchor as its context."""
-    return prediction_output == PREDICTION_PLAN
-
-
-def uses_segment_plan_labels(prediction_output: str) -> bool:
-    """Whether an output strategy reads the truth's coarse segment plan as its context."""
-    return prediction_output == PREDICTION_SEGMENT_PLAN
 
 
 HORIZON_NORMALIZED = "normalized"
@@ -847,10 +791,8 @@ RETIRED_SERIALIZED_FIELDS = (
 #: `objective.procedure_loss`.
 PROCEDURE_LATERAL_SCALE_M = 100.0
 PROCEDURE_VERTICAL_SCALE_M = 30.0
-#: The closure timing group's seconds-to-loss scale. Measured at initialisation on synthetic
-#: arrivals with the three weights at 1.0: geometry ~ 1.7, timing ~ 1.5 at 60 s, height
-#: ~ 0.9 — a minute puts the groups within a factor of two (at `final_time_scale_s`'s 600 s
-#: the timing group was 20x under the geometry). Read by `outputs.closure.model`.
+#: The retired closure output's timing scale (its code is archived): kept ONLY as the value
+#: `RETIRED_CONSTANT_FIELDS` drops from a stored state/control config written while it existed.
 CLOSURE_TIMING_SCALE_S = 60.0
 
 # The MEASURED-CONSTANT kind of retirement (T3-21, 2026-09-07). These three were live loss
@@ -868,6 +810,52 @@ RETIRED_CONSTANT_FIELDS: dict[str, Any] = {
     "procedure_loss_vertical_scale_m": PROCEDURE_VERTICAL_SCALE_M,
     "closure_timing_scale_s": CLOSURE_TIMING_SCALE_S,
 }
+
+# The RETIRED-OUTPUT kind (2026-09-18, `docs/2026-09-18_manoeuvre_token_plan.zh.md` §5). These
+# fields belonged to the closure, plan and segment-plan views, which left the contract with
+# their outputs (`PREDICTION_OUTPUTS_RETIRED`, code under archive/). A state or control config
+# written while they existed carries each at the default below — the ownership rule
+# (`_OUTPUT_OWNED_FIELDS`) refused a foreign view's field anywhere else — so nothing read it
+# there and dropping it cannot change that run. A config that MOVED one was produced by the
+# retired output ITSELF, and `__post_init__` refuses that `prediction_output` with the reason;
+# a live-output config with a moved value is named rather than dropped, the same rule
+# `RETIRED_CONSTANT_FIELDS` follows. Measured 2026-09-18 over all 289 stored checkpoints under
+# 4dTrajectory/outputs/**: 112 carry the closure fields, 70 the plan fields, 18 the
+# segment-plan fields; all 48 off-default values sit in a checkpoint of their own retired
+# output (2 closure, 40 plan, 6 segment-plan) and NONE in a state or control one.
+RETIRED_OUTPUT_FIELDS: dict[str, dict[str, Any]] = {
+    "closure": {
+        "closure_labels_path": "",
+        "closure_slowness_knots": 4,
+        "closure_height_knots": 4,
+        "closure_geometry_loss_weight": 1.0,
+        "closure_timing_loss_weight": 1.0,
+        "closure_height_loss_weight": 1.0,
+    },
+    "plan": {
+        "plan_operating_loss_weight": 1.0,
+        "plan_instruction_loss_weight": 1.0,
+        "plan_rolled_windows_path": "",
+        "plan_rolled_share": 0.0,
+        "plan_fan_components": 0,
+    },
+    "segment-plan": {
+        "segment_plan_segments": 10,
+        # The attention vocabulary went with the layer; "channels" was its default member.
+        "segment_plan_attention": "channels",
+        "segment_plan_position_loss_weight": 1.0,
+        "segment_plan_arrival_loss_weight": 1.0,
+    },
+}
+
+#: Every field name a stored config may still carry that the contract no longer declares —
+#: the three retirement kinds as one set, so a reader that only needs "was this retired?"
+#: (the CLI's `--config-overrides` message) cannot learn about two kinds and miss the third.
+RETIRED_FIELD_NAMES: frozenset[str] = (
+    frozenset(RETIRED_SERIALIZED_FIELDS)
+    | frozenset(RETIRED_CONSTANT_FIELDS)
+    | frozenset(name for names in RETIRED_OUTPUT_FIELDS.values() for name in names)
+)
 
 CONTROL_HOOK_FIELDS = (
     "control_command_hook",
@@ -1424,112 +1412,6 @@ class StateOutput(OutputSpec):
 
 
 @dataclass(frozen=True)
-class ClosureOutput(OutputSpec):
-    """The closed-form decision vector regressed on per-flight labels (frozen path)."""
-
-    closure_labels_path: str
-    closure_slowness_knots: int
-    closure_height_knots: int
-    closure_geometry_loss_weight: float
-    closure_timing_loss_weight: float
-    closure_height_loss_weight: float
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if not self.closure_labels_path:
-            raise ValueError(
-                "the closure output regresses per-flight labels: set closure_labels_path "
-                "to the JSON written by docs/p1_closure_oracle.py labels"
-            )
-        if self.horizon_mode != HORIZON_NORMALIZED:
-            raise ValueError(
-                "the closure output draws its own clock; only the normalized horizon "
-                "contract (n_segments target nodes) fits it"
-            )
-        if (self.closure_slowness_knots not in CLOSURE_LABEL_KNOTS
-                or self.closure_height_knots not in CLOSURE_LABEL_KNOTS):
-            raise ValueError(
-                f"closure labels carry the knot widths {CLOSURE_LABEL_KNOTS}; got "
-                f"slowness {self.closure_slowness_knots}, height {self.closure_height_knots}"
-            )
-
-
-@dataclass(frozen=True)
-class PlanOutput(OutputSpec):
-    """The plan-and-guidance path (design v5): the operating parameters and the next
-    instruction regressed on the labels the extractors read at each drawn anchor; the
-    guidance layer flies them at inference. Two loss weights: the operating group (the
-    arrival time, the speeds, the deceleration and join distances, the capture height,
-    the remaining path) and the instruction group (the next fix, its heading on, its
-    speed, remaining path and height, and whether there is one)."""
-
-    plan_operating_loss_weight: float
-    plan_instruction_loss_weight: float
-    #: v5.2 (§9 step 3(e)): the rolled-window table (`outputs.plan.rolled`, written by
-    #: `run_ts.py plan_rolled_windows`) and the share of each epoch's per-flight draws it
-    #: replaces — the head trained on the windows a lockstep flight produces. Together or
-    #: not at all: a table is drawn at a share, a share draws from a table.
-    plan_rolled_windows_path: str
-    plan_rolled_share: float
-    #: v5.3 (§9 step 3(g)): the fan over the next fix — 0 the point head, K ≥ 2 a
-    #: K-component mixture over the instruction group (`outputs.plan.model`).
-    plan_fan_components: int
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if self.horizon_mode != HORIZON_NORMALIZED:
-            raise ValueError(
-                "the plan output draws its own clock; only the normalized horizon contract "
-                "(n_segments target nodes) fits it"
-            )
-        for name in ("plan_operating_loss_weight", "plan_instruction_loss_weight"):
-            if getattr(self, name) < 0.0:
-                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
-        if self.plan_fan_components < 0 or self.plan_fan_components == 1:
-            raise ValueError(
-                "plan_fan_components is 0 (the point head) or at least 2 (a mixture over the next "
-                f"instruction), got {self.plan_fan_components!r}"
-            )
-        if not 0.0 <= self.plan_rolled_share <= 1.0:
-            raise ValueError(f"plan_rolled_share must be in [0, 1], got {self.plan_rolled_share!r}")
-        if bool(self.plan_rolled_windows_path) != (self.plan_rolled_share > 0.0):
-            raise ValueError(
-                "plan_rolled_windows_path and plan_rolled_share go together: the table is drawn at "
-                f"the share, the share draws from the table (got path {self.plan_rolled_windows_path!r}, "
-                f"share {self.plan_rolled_share!r})"
-            )
-
-
-@dataclass(frozen=True)
-class SegmentPlanOutput(OutputSpec):
-    """The two-tier plan layer (design v2 §4): the observed window's coarse segments as
-    attention tokens, the next M segments' waypoints in runway axes and the arrival bit per
-    segment decoded in one shot. ``segment_plan_attention`` names the token axis —
-    ``channels`` (one token per feature, attention between the features the requirement
-    names) or ``segments`` (one token per segment). Two loss weights: the positions and
-    the arrival group (the arrival bits and the arrival segment's fraction)."""
-
-    segment_plan_segments: int
-    segment_plan_attention: str
-    segment_plan_position_loss_weight: float
-    segment_plan_arrival_loss_weight: float
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if self.horizon_mode != HORIZON_NORMALIZED:
-            raise ValueError(
-                "the segment-plan output draws its own clock (one row per coarse segment); only "
-                "the normalized horizon contract fits it"
-            )
-        _require_member("segment_plan_attention", self.segment_plan_attention, SEGMENT_PLAN_ATTENTIONS)
-        if self.segment_plan_segments < 1:
-            raise ValueError(f"segment_plan_segments must be >= 1, got {self.segment_plan_segments!r}")
-        for name in ("segment_plan_position_loss_weight", "segment_plan_arrival_loss_weight"):
-            if getattr(self, name) < 0.0:
-                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)!r}")
-
-
-@dataclass(frozen=True)
 class DurationSpec:
     """How the rollout's total duration is predicted and partitioned into segments."""
 
@@ -1917,6 +1799,13 @@ class ControlOutput(OutputSpec):
         super().__post_init__()
         _require_member("control_recipe_name", self.control_recipe_name, CONTROL_RECIPE_NAMES)
         _require_member("cta_conditioning", self.cta_conditioning, CTA_CONDITIONINGS)
+        if self.plan_conditioning in PLAN_CONDITIONINGS_RETIRED:
+            raise ValueError(
+                f"plan_conditioning={self.plan_conditioning!r} is retired (2026-09-18): the "
+                "two-tier v2 plan tokens are under archive/two_tier_v2_2026_09/ and the "
+                "checkpoints that carry them no longer load "
+                "(docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
+            )
         _require_member("plan_conditioning", self.plan_conditioning, PLAN_CONDITIONINGS)
         if not 0.0 <= self.plan_conditioning_dropout < 1.0:
             raise ValueError(
@@ -1974,17 +1863,6 @@ class ControlOutput(OutputSpec):
                 raise ValueError(
                     "the imitation teacher is inverted over the whole remaining approach and is "
                     f"not built over a control_horizon_s={self.control_horizon_s:g} window"
-                )
-        if self.plan_conditioning == PLAN_CONDITIONING_WAYPOINTS:
-            # one waypoint per coarse segment inside the horizon: the horizon must hold a
-            # whole, positive number of them
-            segments = self.control_horizon_s / PLAN_WAYPOINT_SEGMENT_S
-            if segments < 1.0 or abs(segments - round(segments)) > 1e-9:
-                raise ValueError(
-                    f"plan_conditioning={PLAN_CONDITIONING_WAYPOINTS!r} carries one waypoint per "
-                    f"{PLAN_WAYPOINT_SEGMENT_S:g} s coarse segment inside the fixed horizon, and "
-                    f"control_horizon_s={self.control_horizon_s:g} is not a positive whole number "
-                    "of them"
                 )
         _require_member(
             "control_condition_features", self.control_condition_features,
@@ -2077,10 +1955,7 @@ class ControlOutput(OutputSpec):
 #: The view each ``prediction_output`` builds.
 _OUTPUT_VIEWS: dict[str, type[OutputSpec]] = {
     PREDICTION_STATE: StateOutput,
-    PREDICTION_CLOSURE: ClosureOutput,
     PREDICTION_CONTROL: ControlOutput,
-    PREDICTION_PLAN: PlanOutput,
-    PREDICTION_SEGMENT_PLAN: SegmentPlanOutput,
 }
 if set(_OUTPUT_VIEWS) != set(PREDICTION_OUTPUTS):
     raise RuntimeError("every prediction_output needs an OutputSpec view")
@@ -2179,33 +2054,6 @@ class TSConfig:
     # reason; the lead channel is measured at the fixed anchor, so random train anchors
     # are refused with it.
     intent_conditioning: str = INTENT_CONDITIONING_NONE
-    # ── the closure output (scene design P1.c): the labels file and the decision vector's
-    # profile widths; the loss weights of its three regression groups ────────────────
-    closure_labels_path: str = ""
-    closure_slowness_knots: int = 4
-    closure_height_knots: int = 4
-    closure_geometry_loss_weight: float = 1.0
-    closure_timing_loss_weight: float = 1.0
-    closure_height_loss_weight: float = 1.0
-    # ── the plan output (design v5 §6) ─────────────────────────────────────────
-    plan_operating_loss_weight: float = 1.0
-    plan_instruction_loss_weight: float = 1.0
-    # v5.2: the rolled-window table and its draw share (both off: the observed anchors
-    # alone, what every plan run before 2026-09-11 trained on).
-    plan_rolled_windows_path: str = ""
-    plan_rolled_share: float = 0.0
-    # v5.3 §9 step 3(g): the FAN over the next fix — K mixture components over the
-    # instruction group (0: the point head, every plan run before 2026-09-12; K ≥ 2: a
-    # K-component diagonal-Gaussian mixture trained by its negative log-likelihood in place
-    # of the instruction group's L1; the point prediction is the top-weight component, the
-    # fan every component flown as its own lockstep member).
-    plan_fan_components: int = 0
-    # ── the segment-plan output (two-tier v2 §4): M coarse segments decoded, the token
-    # axis the encoder attends over, the two loss weights ─────────────────────────────
-    segment_plan_segments: int = 10
-    segment_plan_attention: str = SEGMENT_PLAN_ATTENTION_CHANNELS
-    segment_plan_position_loss_weight: float = 1.0
-    segment_plan_arrival_loss_weight: float = 1.0
     # State output only: position channels as absolute chart coordinates (state-v1), as
     # displacements from the anchor added back in normalized space, or absolute and
     # bounded to the final-approach corridor (see the constants). ``anchor-relative`` is
@@ -2548,6 +2396,12 @@ class TSConfig:
         # SEQUENCE_FIELDS / coerce_sequence_fields — the CLI's recipe check uses the same).
         for name in SEQUENCE_FIELDS:
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        if self.prediction_output in PREDICTION_OUTPUTS_RETIRED:
+            raise ValueError(
+                f"prediction_output={self.prediction_output!r} is retired (2026-09-18): its code is "
+                "under archive/ and its checkpoints no longer load "
+                "(docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
+            )
         _require_member("prediction_output", self.prediction_output, PREDICTION_OUTPUTS)
         self._validate_ownership()
         cohort = CohortSpec(**_own(CohortSpec, self))
@@ -2586,8 +2440,8 @@ class TSConfig:
 
     @property
     def output(self) -> OutputSpec:
-        """The typed view of this run's prediction path: `StateOutput`, `ClosureOutput`
-        or `ControlOutput` by ``prediction_output``."""
+        """The typed view of this run's prediction path: `StateOutput` or `ControlOutput`
+        by ``prediction_output``."""
         return self._views[3]
 
     def _validate_ownership(self) -> None:
@@ -2668,26 +2522,11 @@ class TSConfig:
                 f"east/north axes; coordinate_frame={self.coordinate_frame!r} would measure "
                 "it from the wrong point or rotate it twice"
             )
-        if self.prediction_output == PREDICTION_CLOSURE:
-            if self.coordinate_frame != COORDINATE_FRAME_ENU:
-                raise ValueError(
-                    "the closure geometry is written in the threshold-anchored ENU chart; "
-                    f"coordinate_frame={self.coordinate_frame!r} would draw it from the wrong origin"
-                )
-            if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
-                raise ValueError(
-                    "the closure output selects its checkpoint on its regression objective; "
-                    f"checkpoint_selection_metric={self.checkpoint_selection_metric!r} replays "
-                    "a trajectory the training loop never draws"
-                )
-            if self.random_train_anchor:
-                raise ValueError("closure labels are fitted at the fixed anchor; random_train_anchor is refused")
         if self.control_command_hook != CONTROL_HOOK_OFF and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError("the command hook reads the threshold-anchored ENU chart")
         if self.plan_conditioning != PLAN_CONDITIONING_OFF and self.coordinate_frame != COORDINATE_FRAME_ENU:
             raise ValueError(
-                "the plan token is written in the threshold-anchored ENU chart (the plan path's "
-                "skeleton, or the waypoints' chart deltas); "
+                "the plan token is written in the threshold-anchored ENU chart; "
                 f"coordinate_frame={self.coordinate_frame!r}"
             )
         # cohort × output — under a fixed horizon the targets cover [0, Δ], so a train anchor
@@ -2712,49 +2551,6 @@ class TSConfig:
                 f"duration to a control_horizon_s={self.control_horizon_s:g} run, which predicts "
                 "no duration and must not read one"
             )
-        if self.prediction_output == PREDICTION_PLAN and self.coordinate_frame != COORDINATE_FRAME_ENU:
-            raise ValueError(
-                "the plan path's skeleton and guidance are written in the threshold-anchored ENU "
-                f"chart (the course applied to chart deltas); coordinate_frame={self.coordinate_frame!r}"
-            )
-        # cohort × backbone × output — the segment-plan path (two-tier v2 §4) cuts the
-        # observed window into whole coarse segments of PLAN_WAYPOINT_SEGMENT_S, so the
-        # window length and the sample step must divide into them; its features are runway
-        # axes about the threshold (the ENU chart's origin); its encoder is the vendored
-        # iTransformer stack; and it is selected on the objective — no drawn path is the
-        # thing it predicts.
-        if self.prediction_output == PREDICTION_SEGMENT_PLAN:
-            if self.coordinate_frame != COORDINATE_FRAME_ENU:
-                raise ValueError(
-                    "the segment-plan path reads runway axes about the threshold-anchored ENU chart; "
-                    f"coordinate_frame={self.coordinate_frame!r}"
-                )
-            if self.model != "itransformer":
-                raise ValueError(
-                    f"the segment-plan encoder is the vendored iTransformer stack; model={self.model!r}"
-                )
-            samples = PLAN_WAYPOINT_SEGMENT_S / self.dt_s
-            if abs(samples - round(samples)) > 1e-9 or round(samples) < 1:
-                raise ValueError(
-                    f"a coarse segment of {PLAN_WAYPOINT_SEGMENT_S:g} s must be a whole number of "
-                    f"dt_s={self.dt_s:g} s samples"
-                )
-            if (self.seq_len - 1) % int(round(samples)) or self.seq_len - 1 < int(round(samples)):
-                raise ValueError(
-                    f"the segment-plan window (seq_len - 1 = {self.seq_len - 1} intervals) must be a "
-                    f"whole number of {int(round(samples))}-sample coarse segments, at least one"
-                )
-            if self.checkpoint_selection_metric != CHECKPOINT_SELECTION_OBJECTIVE:
-                raise ValueError(
-                    "the segment-plan path is selected on its objective (the waypoints ARE the "
-                    f"prediction); checkpoint_selection_metric={self.checkpoint_selection_metric!r}"
-                )
-            if self.use_norm:
-                raise ValueError(
-                    "the segment-plan encoder reads the vendored stack below its instance "
-                    "normalisation (its tokens are already relative to the anchor); use_norm "
-                    "would be recorded and never applied"
-                )
         if self.uses_fitted_teacher and self.random_train_anchor:
             raise ValueError(
                 "the fitted teacher is a table of schedules fitted AT the fixed anchor; "
@@ -2915,11 +2711,28 @@ class TSConfig:
                     f"to the constant {constant!r} because nothing on disk moved it; this "
                     "artifact was produced under a value this build cannot reproduce"
                 )
+        output = data.get("prediction_output", PREDICTION_STATE)
+        # A field of a RETIRED OUTPUT is dropped at the default it held under a live output,
+        # where the ownership rule pinned it and nothing read it. A moved value belongs to
+        # that output's own run: under its own `prediction_output` the config is refused
+        # below by `__post_init__`, which gives the reason, so only a state/control config
+        # carrying a moved value is named here.
+        for retired_output, retired_fields in RETIRED_OUTPUT_FIELDS.items():
+            for name, default in retired_fields.items():
+                if name not in data:
+                    continue
+                stored = data.pop(name)
+                if stored != default and output not in PREDICTION_OUTPUTS_RETIRED:
+                    raise ValueError(
+                        f"serialized config sets {name}={stored!r}, a field of the retired "
+                        f"{retired_output!r} output (2026-09-18) whose code is under archive/; "
+                        f"only the default {default!r} it holds under a live output is dropped, "
+                        "and no stored state or control artifact moved it"
+                    )
         # A field owned by ANOTHER output variant was unread under this run's output, so
         # its stored value could not have changed the run: it is normalised to the default
         # the ownership rule requires (`_OUTPUT_OWNED_FIELDS`) rather than refused.
         # Measured 2026-09-10 across every stored config that loads: none moves.
-        output = data.get("prediction_output", PREDICTION_STATE)
         for owner, names in _OUTPUT_OWNED_FIELDS.items():
             if owner != output:
                 for name in names:
@@ -2944,9 +2757,8 @@ _UNVIEWED_FIELDS: frozenset[str] = frozenset({"notes"})
 def owned_field_defaults(prediction_output: str) -> dict[str, Any]:
     """The defaults of the fields ``prediction_output``'s view OWNS — what a config must
     carry for them to be read as another output's (`_validate_ownership` refuses them off
-    their defaults there). The plan guidance flies its rollout under a CONTROL config
-    derived from the plan run's (`outputs.plan.forecast.guidance_config`), and a plan run's
-    own fields must not ride along into it."""
+    their defaults there). A rollout flown under a CONTROL config derived from another
+    output's run must not carry that run's own fields along into it."""
     return {name: _OWNED_FIELD_DEFAULTS[name] for name in _OUTPUT_OWNED_FIELDS[prediction_output]}
 
 
@@ -2988,9 +2800,6 @@ def _required_serialized_fields(data: Mapping[str, Any]) -> tuple[str, ...]:
     return (
         *REQUIRED_SERIALIZED_FIELDS,
         *(REQUIRED_SERIALIZED_CONTROL_FIELDS if uses_control_dynamics(output) else ()),
-        *(REQUIRED_SERIALIZED_CLOSURE_FIELDS if uses_closure_labels(output) else ()),
-        *(REQUIRED_SERIALIZED_PLAN_FIELDS if uses_plan_labels(output) else ()),
-        *(REQUIRED_SERIALIZED_SEGMENT_PLAN_FIELDS if uses_segment_plan_labels(output) else ()),
     )
 
 
@@ -3030,25 +2839,6 @@ def fixed_anchor_label(config: TSConfig, anchor: int | None = None) -> str:
     rendering, so a floored run's fit evaluation, checkpoint and cohort audit agree."""
     anchor = default_anchor(config) if anchor is None else int(anchor)
     return "fixed L-1" if anchor == lookback_anchor(config) else f"fixed index {anchor}"
-
-
-def plan_waypoint_count(config: TSConfig) -> int:
-    """How many coarse waypoints a ``plan_conditioning=waypoints`` token carries: the fixed
-    horizon in coarse segments (`ControlOutput` refuses a horizon that is not a whole number
-    of them)."""
-    return int(round(config.control_horizon_s / PLAN_WAYPOINT_SEGMENT_S))
-
-
-def segment_plan_segment_samples(config: TSConfig) -> int:
-    """How many sample intervals one coarse segment spans (15 at ``dt_s`` 2; the config
-    refuses a step that does not divide `PLAN_WAYPOINT_SEGMENT_S`)."""
-    return int(round(PLAN_WAYPOINT_SEGMENT_S / config.dt_s))
-
-
-def segment_plan_input_segments(config: TSConfig) -> int:
-    """How many coarse segments the segment-plan window holds, K = (L − 1) / 15 (the config
-    refuses a window that is not a whole number of them)."""
-    return (config.seq_len - 1) // segment_plan_segment_samples(config)
 
 
 def default_anchor(config: TSConfig) -> int:

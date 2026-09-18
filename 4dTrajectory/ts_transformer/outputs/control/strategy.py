@@ -37,7 +37,6 @@ from ts_transformer.config import (
 )
 from ts_transformer.data.dataset import target_horizon_s, truth_duration_s
 from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, training_plan_token
-from ts_transformer.outputs.plan.skeleton import SkeletonCache
 from ts_transformer.data.fixed_dt_supervision import (
     FixedDTControlSupervision,
     FixedDTSupervisionRow,
@@ -164,8 +163,6 @@ class ControlContext(WindowContext):
                 anchor_indices={int(anchor) for _item, anchor in covered},
                 n_segments=int(self.config.n_segments),
             )
-        # the plan token's skeletons (two-tier T1), one per runway, read on first use
-        self.skeletons = SkeletonCache()
         self._rows: list[dict[str, np.ndarray]] | None = None
         self._fixed_dt: tuple[FixedDTSupervisionRow, ...] | None = None
         if windows.cache_context_rows:
@@ -200,7 +197,7 @@ class ControlContext(WindowContext):
             )
         if config.plan_conditioning != PLAN_CONDITIONING_OFF:
             # the truth's plan at this anchor, in the token this run reads (reads the future)
-            arrays[PLAN_TOKEN_KEY] = training_plan_token(series, anchor, config, self.skeletons)
+            arrays[PLAN_TOKEN_KEY] = training_plan_token(series, anchor, config)
         if not windows.control_supervision:
             return arrays
         anchor_time = float(series.times[anchor])

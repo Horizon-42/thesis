@@ -70,11 +70,9 @@ from ts_transformer.inference.forecast import Forecast, default_anchor, forecast
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402
 from ts_transformer.data.lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
 from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
-from ts_transformer.config import PREDICTION_PLAN  # noqa: E402
 from ts_transformer.data.runway_context import RULES as CONTEXT_RULES  # noqa: E402
 from ts_transformer.data.runway_context import build_airport_context  # noqa: E402
 from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
-from ts_transformer.outputs.plan.skeleton import runway_skeleton  # noqa: E402
 from ts_transformer.training.train import load_checkpoint  # noqa: E402
 from flight_scenarios.identity import flight_key  # noqa: E402
 
@@ -178,27 +176,6 @@ def mirror_target(own: dict[str, Any], sibling: dict[str, Any]) -> dict[str, Any
     d_lat = sibling["lat"] - own["lat"]
     d_lon = sibling["lon"] - own["lon"]
     return {**own, "lat": own["lat"] - d_lat, "lon": own["lon"] - d_lon}
-
-
-def skeleton_error(
-    flights: list[dict[str, Any]], runway: str, target: dict[str, Any], config: Any, airport: str,
-) -> str | None:
-    """Why the plan path cannot fly ``runway`` (its CIFP skeleton refuses the manifest's
-    target), or None. Probed on the first validation flight that builds under that runway —
-    the refusal is a property of the runway's document, not of the flight."""
-    for flight in flights:
-        probes, _report = build_series(
-            [{**flight, "runway": runway, "runway_target": target}], config,
-            airport=airport, aircraft_type=config.aircraft_type,
-        )
-        if not probes:
-            continue
-        try:
-            runway_skeleton(probes[0])
-        except ValueError as error:
-            return str(error)
-        return None
-    raise ValueError(f"no validation flight builds a series under {airport} {runway}")
 
 
 def active_configuration(
@@ -377,16 +354,7 @@ def main(argv: list[str] | None = None) -> int:
     # Build + forecast once per candidate; every clone keeps the ORIGINAL dict untouched.
     per_candidate: dict[str, dict[str, tuple[FlightSeries, Forecast]]] = {}
     targets = manifest["runway_targets"]
-    plan_path = config.prediction_output == PREDICTION_PLAN
-    unflyable: dict[str, str] = {}
-    if plan_path:
-        for runway in candidates:
-            error = skeleton_error(raw_flights, runway, targets[runway], config, airport)
-            if error is not None:
-                unflyable[runway] = error
-                print(f"  {runway}: not a plan-path hypothesis — {error}")
-        candidates = [runway for runway in candidates if runway not in unflyable]
-    mirrors = {} if plan_path else {
+    mirrors = {
         runway: mirror_target(targets[runway], targets[sibling])
         for runway in candidates
         if (sibling := parallel_sibling(runway, targets)) is not None
@@ -423,19 +391,15 @@ def main(argv: list[str] | None = None) -> int:
 
     selectors = [
         "assigned", "oracle_fde", "oracle_ade", "oracle_same_direction",
-        *([] if plan_path else ["oracle_mirror_control"]),
+        "oracle_mirror_control",
         "self_consistency", "course_gate_then_self", "active_config",
         "active_config_then_gate", *CONTEXT_RULES,
     ]
     flights: list[dict[str, Any]] = []
     missing_context = 0
-    unflyable_assigned = 0
     for flight in raw_flights:
         key = identity(flight)
         assigned = flight["runway"]
-        if assigned in unflyable:
-            unflyable_assigned += 1   # the plan path cannot fly its own runway: no baseline
-            continue
         if key not in per_candidate[assigned]:
             continue  # unbuildable under its own runway: not in the baseline either
         truth, _ = per_candidate[assigned][key]
@@ -492,8 +456,6 @@ def main(argv: list[str] | None = None) -> int:
         "course_gate_deg": COURSE_GATE_DEG,
         "context_window_min": args.context_window_min,
         "context_pool": "development roster (train + validation), landings before entry",
-        "unflyable_candidates": unflyable,
-        "flights_on_unflyable_runways": unflyable_assigned,
         "context_rules": {
             "rules": list(CONTEXT_RULES),
             "pool": "tracks-roster assigned landings + arrivals-roster entry sectors, minus every "

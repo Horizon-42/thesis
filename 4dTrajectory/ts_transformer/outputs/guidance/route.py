@@ -3,7 +3,7 @@
 The plan says WHERE the flight joins the final (``d_join``), from WHICH side (``side``) and
 HOW MUCH path it flies before that (``L_pre``); the skeleton says where the final is. The
 route is: the shortest turn-straight-turn path from the anchor pose to the join pose
-(`outputs.closure.geometry.dubins_csc`, at the aircraft's own turn radius), lengthened to
+(`geometry.dubins.dubins_csc`, at the aircraft's own turn radius), lengthened to
 ``L_pre`` by a dog-leg on the plan's side when the shortest path is shorter than the plan,
 then the final leg to the threshold. What the shortest path does not allow — a plan whose
 ``L_pre`` is shorter than the minimum, or longer than the dog-leg can lay — is reported on
@@ -32,8 +32,11 @@ from ts_transformer.geometry.dubins import (
 )
 from ts_transformer.geometry.final_approach_geometry import ALIGNMENT_MAX_DEG
 from ts_transformer.geometry.flyability import G as GRAVITY_MPS2
-from ts_transformer.outputs.plan.extractors import ON_COURSE_FIX_M
-from ts_transformer.outputs.plan.skeleton import RNP_HALF_WIDTH_M, RunwaySkeleton
+from ts_transformer.outputs.guidance.skeleton import RNP_HALF_WIDTH_M, RunwaySkeleton
+
+#: A fix this close to the centreline is ON it: the fix of the turn onto the final (was
+#: the plan head's extractor constant; the head is archived, the guidance keeps the rule).
+ON_COURSE_FIX_M = 300.0
 
 #: How far past the threshold the route continues, so the tracker has a leg to follow
 #: while the rollout's last hold crosses the plane (the record is cut at the crossing).

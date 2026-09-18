@@ -34,7 +34,6 @@ from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, training_plan_token
-from ts_transformer.outputs.plan.skeleton import SkeletonCache
 
 
 def record_newton_controls(
@@ -101,9 +100,8 @@ def _dynamics_batch(
     if config.plan_conditioning != PLAN_CONDITIONING_OFF:
         # the truth's plan at the anchor, as training reads it (two-tier; reads the future).
         # A caller with another source (the lockstep's rolled asks) passes `dynamics` itself.
-        skeletons = SkeletonCache()
         for row, item in zip(rows, series, strict=True):
-            row[PLAN_TOKEN_KEY] = training_plan_token(item, anchor, config, skeletons)
+            row[PLAN_TOKEN_KEY] = training_plan_token(item, anchor, config)
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
