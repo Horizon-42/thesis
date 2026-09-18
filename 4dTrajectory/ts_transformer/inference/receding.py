@@ -18,12 +18,14 @@ import numpy as np
 
 from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.data.dataset import FlightSeries
+from ts_transformer.data.time_grids import ROW_TOLERANCE_S
 from ts_transformer.inference.forecast import Forecast, cut_rows
 
-#: A cut lead must fall on a rollout query row: the dense grid is the integrator step plus the
-#: segment boundaries (`dense_query_offsets`), so a Δ that is a whole multiple of the step has
-#: a row exactly there. This is the tolerance that row is found at.
-ROW_TOLERANCE_S = 1e-6
+# A cut lead must fall on a rollout query row: the dense grid is the integrator step plus the
+# segment boundaries (`dense_query_offsets`), so a Δ that is a whole multiple of the step has
+# a row exactly there. `ROW_TOLERANCE_S` (one definition, `data/time_grids.py`) is the
+# tolerance that row is found at; re-exported here for the readers that always took it from
+# this module.
 
 
 def rolled_series(series: FlightSeries, anchor: int, flown: Forecast, until: int, dt_s: float) -> FlightSeries:

@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ts_transformer.data.channels import CHANNELS, POSITION_IDX, VELOCITY_IDX
+from ts_transformer.data.time_grids import ROW_TOLERANCE_S
 
 if TYPE_CHECKING:
     from ts_transformer.data.dataset import FlightSeries
@@ -42,8 +43,11 @@ if TYPE_CHECKING:
 
 #: The segment rows' channels, in the start frame, in the chart channels' order.
 SEGMENT_CHANNELS: tuple[str, ...] = ("x", "y", "z", "xdot", "ydot", "zdot")
-#: A segment must be a whole number of `dt_s` steps; this is the tolerance that is judged at.
-STEP_TOLERANCE_S = 1e-6
+#: A segment must be a whole number of `dt_s` steps, a query must fall inside the polyline's
+#: span and a segment must end at or before the truth's end — all judged at the one row
+#: tolerance (`data/time_grids.ROW_TOLERANCE_S`), so `segment_start_times` can never admit a
+#: segment `segment_rows` then refuses.
+STEP_TOLERANCE_S = ROW_TOLERANCE_S
 #: A start row must carry a ground-track direction: below this ground speed (m/s) the course
 #: is undefined and the frame is refused by name. An approach flies at 60–80 m/s; only a
 #: corrupt row or a stationary synthetic one can bind it.
@@ -135,7 +139,8 @@ class SegmentFrame:
 
 def interpolate_rows(times: np.ndarray, values: np.ndarray, query_times: np.ndarray) -> np.ndarray:
     """The polyline ``(times, values)`` read at ``query_times``, every channel linearly; refuses
-    a query outside the polyline's span (nothing is extrapolated or held)."""
+    a query outside the polyline's span by more than the row tolerance (nothing is
+    extrapolated; within the tolerance the end row is what is read)."""
     times = np.asarray(times, dtype=np.float64)
     values = np.asarray(values, dtype=np.float64)
     query_times = np.asarray(query_times, dtype=np.float64)
@@ -180,6 +185,9 @@ def flown_polyline(series: FlightSeries, anchor: int, forecast: Forecast) -> tup
     flown rows (`inference/receding.py` reads a flown history the same way)."""
     if int(forecast.anchor) != int(anchor):
         raise ValueError(f"the forecast was made at anchor {forecast.anchor}, not {anchor}")
+    # MUST match `inference/receding.py::rolled_series` (a leaf cannot import it): the flown
+    # rows start one query step after the anchor, so the anchor's observed row stands in before
+    # them; a forecast row AT the anchor time would trip the strictly-increasing check below.
     times = np.concatenate(([float(series.times[anchor])], np.asarray(forecast.times, dtype=np.float64)))
     values = np.concatenate((
         np.asarray(series.values[anchor : anchor + 1], dtype=np.float64),
@@ -204,10 +212,10 @@ def segment_start_times(series: FlightSeries, anchor: int, segment_s: float) -> 
     ``LANDED`` business (plan §2.5), not a shorter segment."""
     if segment_s <= 0.0:
         raise ValueError(f"segment_s is positive seconds, got {segment_s!r}")
-    start = float(series.times[anchor])
+    start = float(series.times[anchor])   # an observed row: never past the supervision end
     end = float(series.supervision_times[-1])
     count = int(math.floor((end - start + STEP_TOLERANCE_S) / segment_s))
-    return start + segment_s * np.arange(max(count, 0), dtype=np.float64)
+    return start + segment_s * np.arange(count, dtype=np.float64)
 
 
 __all__ = [

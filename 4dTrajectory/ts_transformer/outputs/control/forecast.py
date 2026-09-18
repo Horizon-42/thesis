@@ -33,7 +33,7 @@ from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
 from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
-from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, training_plan_token
+from ts_transformer.outputs.control.plan_token import MANOEUVRE_Z_KEY, training_plan_context
 
 
 def record_newton_controls(
@@ -98,10 +98,10 @@ def _dynamics_batch(
         for row, value in zip(rows, given, strict=True):
             row["cta_s"] = np.array(value, dtype=np.float64)
     if config.plan_conditioning != PLAN_CONDITIONING_OFF:
-        # the truth's plan at the anchor, as training reads it (two-tier; reads the future).
-        # A caller with another source (the lockstep's rolled asks) passes `dynamics` itself.
+        # the truth's segment at the anchor, as training reads it (reads the future). A caller
+        # with another source (the lockstep handing the prior's z) passes `dynamics` itself.
         for row, item in zip(rows, series, strict=True):
-            row[PLAN_TOKEN_KEY] = training_plan_token(item, anchor, config)
+            row.update(training_plan_context(item, anchor, config))
     return {
         name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
         for name in rows[0]
@@ -143,6 +143,10 @@ def _control_prediction_batch(
             torch.cat([item.duration_quantiles_s for item in predictions], dim=0)
             if predictions[0].duration_quantiles_s is not None else None
         ),
+        manoeuvre_code=(
+            torch.cat([item.manoeuvre_code for item in predictions], dim=0)
+            if predictions[0].manoeuvre_code is not None else None
+        ),
     )
 
 
@@ -178,6 +182,13 @@ def forecast_control_batch(
     if dynamics is None:
         dynamics = _dynamics_batch(series, anchor, device, config, cta_offset_s, cta_s)
     prediction = _control_prediction_batch(model, histories, dynamics, device, latent=latent)
+    manoeuvre_codes = (
+        None if prediction.manoeuvre_code is None
+        else prediction.manoeuvre_code.detach().cpu().numpy().astype(np.int64)
+    )
+    manoeuvre_source = (
+        None if manoeuvre_codes is None else ("given" if MANOEUVRE_Z_KEY in dynamics else "truth")
+    )
     cta = (
         dynamics["cta_s"].detach().cpu().numpy().astype(np.float64)
         if config.cta_conditioning != CTA_CONDITIONING_OFF else None
@@ -264,6 +275,8 @@ def forecast_control_batch(
             duration_quantiles_s=(
                 None if duration_quantiles is None else duration_quantiles[row]
             ),
+            manoeuvre_code=None if manoeuvre_codes is None else int(manoeuvre_codes[row]),
+            manoeuvre_code_source=manoeuvre_source,
             **_calibrated_interval_fields(
                 item, anchor, None if duration_quantiles is None else duration_quantiles[row],
                 conformal,

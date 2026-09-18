@@ -343,6 +343,10 @@ that does not exist.
 
 **Direction between paths**: the control path may read the plan path (two-tier T1's plan token, `outputs/control/plan_token.py`, fuses the plan head's label), never the reverse (`test_the_plan_path_never_imports_the_control_path`).
 
+### L29 · the manoeuvre package: two leaves BELOW the control path, everything else above it
+
+`manoeuvre/` (the intent-token model, plan §5.3; 2026-09-18) is a regular group beside `outputs/`. **`manoeuvre.segments` and `manoeuvre.tokenizer` are LEAVES**: they import the data plane, `config`, `io_utils` and torch only — an ALLOW-list, `tests/test_architecture.py::test_the_manoeuvre_leaves_import_no_layer_above_the_data_plane` — because the control path builds the truth segment rows into its context rows (`outputs/control/plan_token.py`) and holds the tokenizer as a submodule of the executor (`outputs/control/heads.py`). Only `outputs/control/*` and `experiments/*` may import `manoeuvre` at all, and the control path only those two leaves (`test_the_control_path_reaches_only_the_manoeuvre_leaves_and_nothing_else_reaches_manoeuvre`). Every other manoeuvre module (`sequences`, `prior`, `lockstep`, `readout`, `gates`, `scene`, `graph`, `decode`) imports the control path, the guidance layer, the data plane and the inference helpers, never the reverse; nothing in `manoeuvre/` imports `experiments` or `cli` (runners are consumers, L3). The decision: the plan's "manoeuvre may import outputs.control, reverse forbidden" could not hold literally once the tokenizer became the executor's submodule; the two leaves are the one reverse edge, and they cannot form a cycle because they reach no `outputs` module.
+
 ### L24 · import direction
 
 **Direction**: the loop, the replay, the export and the CLI import `outputs/`, never the

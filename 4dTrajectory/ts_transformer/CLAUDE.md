@@ -86,6 +86,11 @@ of the package, not a migration in progress.
   RANGE is not the same dynamics (with drag cancelled the speed has no drag feedback). Across the
   2026-09-16 refactor every stored checkpoint replays bit-identically on CPU, ≤ 2e-13 relative on
   CUDA (C27).
+- **A codebook is a hashed artefact** (`manoeuvre/tokenizer.py`: kind, levels, segment, the SCALE
+  constants, the cohort identity, the source checkpoint and the weights under one sha; never
+  overwritten, refused when this build's scales differ) **and an executor trained against one
+  binds to `codebook_sha256`** — `load_checkpoint` refuses it once the directory's tokenizer
+  weights differ from the checkpoint's (C28).
 - Controls are DIMENSIONLESS (`outputs/envelope.py`); the thrust floor is negative on purpose; the
   head's n ≥ 0.2 and `flyability`'s n ≥ 0.5 differ on purpose and neither moves; a guidance layer
   commanding n reads `flyability`'s envelope (C4).
@@ -140,7 +145,7 @@ of the package, not a migration in progress.
 | `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′: the third column is a path-angle target flown by a 3 s loop. **Passes every pre-registered gate on both seeds** — fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %, straight-in FDE p50 543 / 559 vs 647 / 663, pooled ADE 1173 / 1182 vs 1325 / 1295. ONE regression: vectored FDE p50 +625 / +704 m, unexplained (not turn authority). **Adoption is the user's call** (D27) |
 | `control_condition_features` | `raw` | `ratios` carries the SAME information at the SAME width (so a ratios arm starts from its raw twin's weights); 4 of the 8 raw channels are constant on this fleet. Built, not yet measured (D28) |
 | `control_horizon_s` | `0` (whole approach) | two-tier L1: a FIXED rollout horizon Δ — ONE span definition (`dataset.target_horizon_s`), ONE floor rule (`dataset.effective_min_future_s`), and every duration-deciding axis (CTA, quantile head, `final_time_loss_weight`, latent, imitation teacher) refused. **An L1 arm's numbers are its readouts' [0, Δ], never the record summary's** whole-remainder ADE/FDE (D29) |
-| `plan_conditioning` | `off` | `truth-next` / `waypoints` RETIRED with two-tier v2 (archived 2026-09-18); `manoeuvre-code` arrives in P3.1 of the manoeuvre-token plan, with `plan_conditioning_dropout` pinned at 0 — 0.5 taught the head to ignore the token (D30) |
+| `plan_conditioning` | `off` | `manoeuvre-code` (P1.3, 2026-09-18): the token is the segment's code vector z from the tokenizer held as the executor's SUBMODULE — joint training, or a frozen `manoeuvre_codebook`; REQUIRES `control_horizon_s` (the segment IS the horizon); one z source per batch (the truth segment + anchor state, or a given z); `manoeuvre_tokenizer` / `manoeuvre_fsq_levels` refused off default under any other value; `plan_conditioning_dropout` RETIRED at 0 (0.5 taught the head to ignore the token); `truth-next` / `waypoints` archived and refused at load (D30) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag`: smoothness + 3.4 % ADE, τ = 2.0 s not CV-selected; a pipeline lag cell carries `_lag` (D4) |
 | procedure penalty | weights 0 | NOT adopted; hinge scales are module constants (D5) |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained through a hook beat it; `+` combinations are a lookup, their order the application order (D6) |
@@ -252,7 +257,10 @@ of the package, not a migration in progress.
 - `tests/` is one file per topic; shared fixtures in `tests/support.py` (L21).
 - A module belongs under `outputs/control/` only if EVERY consumer is control-specific (L23);
   import direction rules, all enforced by `tests/test_architecture.py` (L24). **Between paths**: the
-  guidance layer never imports the control path (L28).
+  guidance layer never imports the control path (L28). **`manoeuvre/`**: `segments` and
+  `tokenizer` are LEAVES below the control path (data plane, `config`, `io_utils`, torch only — an
+  allow-list) because the executor holds the tokenizer as a submodule; every other manoeuvre
+  module imports the control path, and only `outputs/control/*` and runners import `manoeuvre` (L29).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;

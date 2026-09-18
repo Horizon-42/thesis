@@ -124,18 +124,36 @@ CTA_FIELDS = ("cta_conditioning",)
 
 # The plan token: one fused decoder input beside the aircraft condition and the CTA
 # (`outputs/control/plan_token.py`). The two-tier v2 tokens (``truth-next``, ``waypoints``)
-# are archived (`archive/two_tier_v2_2026_09/`); the manoeuvre-token plan adds
-# ``manoeuvre-code`` in P3.1 (`docs/2026-09-18_manoeuvre_token_plan.zh.md` §2.6).
-# ``plan_conditioning_dropout`` replaces the token by the ABSENT token for that share of
-# the training samples — measured to make the head IGNORE the token at 0.5 (v2 §10.8), so
-# the manoeuvre-code token pins it at 0.
+# are archived (`archive/two_tier_v2_2026_09/`). ``manoeuvre-code`` is the manoeuvre-token
+# plan's executor conditioning (`docs/2026-09-18_manoeuvre_token_plan.zh.md` §2.6): the token
+# is the segment's code vector z — the TRUTH segment's, through the tokenizer, in training,
+# `predict` and protocol C (reads the future); the prior's in protocol A. The masking share
+# that used to sit beside the token (``plan_conditioning_dropout``) is RETIRED at its
+# constant 0 (`RETIRED_CONSTANT_FIELDS`): 0.5 taught the head to ignore the token (v2 §10.8).
 PLAN_CONDITIONING_OFF = "off"
-PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF,)
+PLAN_CONDITIONING_MANOEUVRE_CODE = "manoeuvre-code"
+PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF, PLAN_CONDITIONING_MANOEUVRE_CODE)
 #: The two values a stored two-tier v2 control config may carry that no longer build a token.
 #: Named separately from the vocabulary so the refusal reads as a RETIREMENT with a pointer
 #: rather than as a corrupt value (21 stored L1 control checkpoints carry one).
 PLAN_CONDITIONINGS_RETIRED = ("truth-next", "waypoints")
-PLAN_CONDITIONING_FIELDS = ("plan_conditioning", "plan_conditioning_dropout")
+PLAN_CONDITIONING_FIELDS = ("plan_conditioning",)
+
+# The tokenizer behind the manoeuvre-code token (plan §2.4): WHICH intent space the code
+# comes from — the learned encoder + FSQ (`manoeuvre/tokenizer.py`; ``manoeuvre_fsq_levels``
+# are its per-dimension level counts, K = their product) or the rule-read command vocabulary
+# (baseline B, 45 codes, no levels). ``manoeuvre_codebook`` names a FROZEN codebook directory
+# an executor is trained against (P3.3; the checkpoint binds to its sha); empty = the
+# tokenizer trains jointly with the executor (P1.3) and is exported afterwards
+# (`run_ts.py manoeuvre_codebook`). All three are read only under ``manoeuvre-code``.
+MANOEUVRE_TOKENIZER_LEARNED = "learned"
+MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY = "command-vocabulary"
+MANOEUVRE_TOKENIZERS = (MANOEUVRE_TOKENIZER_LEARNED, MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY)
+MANOEUVRE_FIELDS = ("manoeuvre_tokenizer", "manoeuvre_fsq_levels", "manoeuvre_codebook")
+#: An FSQ dimension needs an interior level: at L = 2 the bound's half-step shift is
+#: atanh(1 / (1 - eps)) = NaN, so the smallest admissible level count is 3 (validated here,
+#: at the boundary, and again by `manoeuvre.tokenizer.FSQ`).
+FSQ_MINIMUM_LEVELS = 3
 
 # The duration head (B1, §三 3.1; B1.b, §三 3.1b). ``point`` is the package's original
 # scalar ``FinalTimeHead``; ``quantile`` is ``outputs.duration_heads.QuantileFinalTimeHead`` —
@@ -809,6 +827,11 @@ RETIRED_CONSTANT_FIELDS: dict[str, Any] = {
     "procedure_loss_lateral_scale_m": PROCEDURE_LATERAL_SCALE_M,
     "procedure_loss_vertical_scale_m": PROCEDURE_VERTICAL_SCALE_M,
     "closure_timing_scale_s": CLOSURE_TIMING_SCALE_S,
+    # The plan token's training-time masking share (two-tier v2, 2026-09-16 … 09-18): 0.5
+    # taught the head to ignore its token (v2 §10.8) and the manoeuvre-code token pins it at
+    # 0, so the field is a constant. The stored 0.5 configs are the archived L1 / L1b arms,
+    # whose plan value is refused anyway; every other stored control config carries 0.0.
+    "plan_conditioning_dropout": 0.0,
 }
 
 # The RETIRED-OUTPUT kind (2026-09-18, `docs/2026-09-18_manoeuvre_token_plan.zh.md` §5). These
@@ -894,7 +917,7 @@ RK4_REAL_AXIS_STABILITY_LIMIT = 2.785
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
 # coerce them first, through this one function, or ``[] != ()`` refuses a faithful copy.
-SEQUENCE_FIELDS = ("channels",)
+SEQUENCE_FIELDS = ("channels", "manoeuvre_fsq_levels")
 
 
 def coerce_sequence_fields(settings: dict[str, Any]) -> dict[str, Any]:
@@ -1045,9 +1068,9 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "latent_posterior_init_std": 1.0,
         "latent_beta_warmup_epochs": 0,
         "latent_aux_duration_weight": 0.0,
-        # ...and so is the plan token (two-tier T1, which reads the truth's plan): a recipe
-        # run is told no plan. `plan_conditioning_dropout` is not pinned beside it — with the
-        # token pinned off a non-zero dropout is already refused.
+        # ...and so is the plan token (which reads the truth's segment): a recipe run is told
+        # no plan. The manoeuvre fields are not pinned beside it — with the token off they are
+        # refused off their defaults (`ControlOutput`).
         "plan_conditioning": PLAN_CONDITIONING_OFF,
         # ...and the rollout horizon (two-tier L1): a recipe run predicts the whole remaining
         # approach. Every stored recipe config predates the field and reads as 0, so pinning
@@ -1786,7 +1809,9 @@ class ControlOutput(OutputSpec):
     control_recipe_name: str
     cta_conditioning: str
     plan_conditioning: str
-    plan_conditioning_dropout: float
+    manoeuvre_tokenizer: str
+    manoeuvre_fsq_levels: tuple[int, ...]
+    manoeuvre_codebook: str
     control_horizon_s: float
     control_condition_features: str
     duration: DurationSpec
@@ -1807,16 +1832,46 @@ class ControlOutput(OutputSpec):
                 "(docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
             )
         _require_member("plan_conditioning", self.plan_conditioning, PLAN_CONDITIONINGS)
-        if not 0.0 <= self.plan_conditioning_dropout < 1.0:
-            raise ValueError(
-                "plan_conditioning_dropout is the share of training samples whose plan token is "
-                f"absent, in [0, 1), got {self.plan_conditioning_dropout!r}"
-            )
-        if self.plan_conditioning == PLAN_CONDITIONING_OFF and self.plan_conditioning_dropout:
-            raise ValueError(
-                f"plan_conditioning_dropout={self.plan_conditioning_dropout!r} drops a plan token, "
-                "and plan_conditioning='off' builds none"
-            )
+        _require_member("manoeuvre_tokenizer", self.manoeuvre_tokenizer, MANOEUVRE_TOKENIZERS)
+        # The manoeuvre-code token (plan §2.6): the executor is conditioned on ONE segment's
+        # code and flies exactly that segment, so the segment length IS the fixed horizon —
+        # `control_horizon_s` is required — and the tokenizer's fields are read only here.
+        if self.plan_conditioning == PLAN_CONDITIONING_MANOEUVRE_CODE:
+            if not self.control_horizon_s:
+                raise ValueError(
+                    "plan_conditioning='manoeuvre-code' conditions the executor on one segment's "
+                    "code and the segment is the fixed rollout horizon: set control_horizon_s to "
+                    "the segment length"
+                )
+            learned = self.manoeuvre_tokenizer == MANOEUVRE_TOKENIZER_LEARNED
+            if learned and (
+                not self.manoeuvre_fsq_levels
+                or any(not isinstance(level, int) or level < FSQ_MINIMUM_LEVELS
+                       for level in self.manoeuvre_fsq_levels)
+            ):
+                raise ValueError(
+                    "a learned tokenizer needs its FSQ levels: manoeuvre_fsq_levels, one integer "
+                    f"level count ≥ {FSQ_MINIMUM_LEVELS} per dimension, K = their product; got "
+                    f"{self.manoeuvre_fsq_levels!r}"
+                )
+            if not learned and self.manoeuvre_fsq_levels:
+                raise ValueError(
+                    f"manoeuvre_tokenizer={self.manoeuvre_tokenizer!r} has no FSQ levels; "
+                    "manoeuvre_fsq_levels must be empty"
+                )
+        else:
+            moved = [
+                name for name, default in (
+                    ("manoeuvre_tokenizer", MANOEUVRE_TOKENIZER_LEARNED),
+                    ("manoeuvre_fsq_levels", ()),
+                    ("manoeuvre_codebook", ""),
+                ) if getattr(self, name) != default
+            ]
+            if moved:
+                raise ValueError(
+                    f"{', '.join(moved)} belong(s) to plan_conditioning='manoeuvre-code'; "
+                    f"plan_conditioning={self.plan_conditioning!r} builds no tokenizer"
+                )
         if self.plan_conditioning != PLAN_CONDITIONING_OFF and self.latent.active:
             raise ValueError(
                 "a plan token beside a latent intent is two answers to one question (what the "
@@ -2270,10 +2325,16 @@ class TSConfig:
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
-    # The plan as a decoder input (PLAN_CONDITIONINGS, two-tier T1) and the share of training
-    # samples whose plan token is dropped.
+    # The plan as a decoder input (PLAN_CONDITIONINGS): under `manoeuvre-code` the token is the
+    # segment's code vector z from the tokenizer below (plan §2.6).
     plan_conditioning: str = PLAN_CONDITIONING_OFF
-    plan_conditioning_dropout: float = 0.0
+    # The tokenizer (MANOEUVRE_TOKENIZERS), its FSQ levels (K = the product; empty for the
+    # command vocabulary) and the FROZEN codebook directory an executor is trained against
+    # (empty = the tokenizer trains jointly and is exported afterwards). Read only under
+    # `manoeuvre-code`; refused off their defaults otherwise.
+    manoeuvre_tokenizer: str = MANOEUVRE_TOKENIZER_LEARNED
+    manoeuvre_fsq_levels: tuple[int, ...] = ()
+    manoeuvre_codebook: str = ""
     # Two-tier L1: the rollout's FIXED horizon in seconds; 0 = the whole remaining approach
     # (every stored run). Under Δ > 0 the schedule is rolled over exactly Δ, the targets cover
     # [0, Δ] (`dataset.target_horizon_s`), every anchor needs Δ of truth after it
@@ -2402,6 +2463,9 @@ class TSConfig:
                 "under archive/ and its checkpoints no longer load "
                 "(docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
             )
+        # A sequence field arrives as a tuple, a JSON list or an arm file's list: ONE form.
+        for name in SEQUENCE_FIELDS:
+            object.__setattr__(self, name, tuple(getattr(self, name)))
         _require_member("prediction_output", self.prediction_output, PREDICTION_OUTPUTS)
         self._validate_ownership()
         cohort = CohortSpec(**_own(CohortSpec, self))
@@ -2674,7 +2738,8 @@ class TSConfig:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["channels"] = list(self.channels)  # JSON has no tuple
+        for name in SEQUENCE_FIELDS:
+            data[name] = list(getattr(self, name))  # JSON has no tuple
         return data
 
     @classmethod
@@ -2708,8 +2773,8 @@ class TSConfig:
             if stored != constant:
                 raise ValueError(
                     f"serialized config sets {name}={stored!r}, but the field was retired "
-                    f"to the constant {constant!r} because nothing on disk moved it; this "
-                    "artifact was produced under a value this build cannot reproduce"
+                    f"to the constant {constant!r} (this build has no other value of it); "
+                    "this artifact was produced under a value this build cannot reproduce"
                 )
         output = data.get("prediction_output", PREDICTION_STATE)
         # A field of a RETIRED OUTPUT is dropped at the default it held under a live output,
@@ -2738,7 +2803,9 @@ class TSConfig:
                 for name in names:
                     if name in data:
                         data[name] = _OWNED_FIELD_DEFAULTS[name]
-        data["channels"] = tuple(data["channels"])
+        for name in SEQUENCE_FIELDS:
+            if name in data:
+                data[name] = tuple(data[name])
         return cls(**data)
 
 
@@ -2887,6 +2954,13 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         base["condition_features"] = config.control_condition_features
     if config.control_horizon_s:
         base["horizon_s"] = config.control_horizon_s
+    if config.plan_conditioning != PLAN_CONDITIONING_OFF:
+        base["plan"] = config.plan_conditioning
+        base["manoeuvre"] = {
+            "tokenizer": config.manoeuvre_tokenizer,
+            "fsq_levels": list(config.manoeuvre_fsq_levels),
+            "codebook": config.manoeuvre_codebook,
+        }
     if not uses_control_dynamics(config.prediction_output):
         raise ValueError("state output has no control recipe")
     return base

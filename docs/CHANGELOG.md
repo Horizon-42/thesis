@@ -4,6 +4,27 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-19 — manoeuvre-token plan P1.1–P1.3: segments, the tokenizer + codebook, the executor wiring
+
+- `4dTrajectory/ts_transformer/manoeuvre/` is the intent-token package (plan
+  `docs/2026-09-18_manoeuvre_token_plan.zh.md`). `segments.py`: the segment cut from an anchor,
+  the segment-START frame (origin = first row, x = its ground-track course, y left, z up; the first
+  row is always (0, 0, 0, V, 0, udot)), one polyline function feeding both the truth and a flown
+  forecast. `tokenizer.py`: encoder + FSQ (learned) and the rule-read command vocabulary (7 × 3 × 3
+  = 63 codes) behind one interface; the codebook artefact, hashed with its scales, cohort identity
+  and source checkpoint (C28). Layering: the two are leaves below the control path (L29).
+- Executor (`plan_conditioning = manoeuvre-code`, D30): the tokenizer is a submodule of the control
+  model, trained jointly (gradient through z) or loaded frozen from `manoeuvre_codebook` with the
+  checkpoint bound to `codebook_sha256`; the context row carries the truth segment + anchor state,
+  or a given z; records carry `manoeuvreCode` / `manoeuvreCodeSource`; the epoch record carries
+  code usage and a tokenizer gradient group. `plan_conditioning_dropout` retired at 0.
+  `run_ts.py manoeuvre_codebook` exports the codebook. The row tolerance has ONE definition
+  (`data/time_grids.ROW_TOLERANCE_S`, re-exported by `inference/receding.py`).
+- Review (opus, P1.1+P1.2): heading wrap at ±180° in the command vocabulary (fixed: unwrapped
+  course), scales absent from the codebook identity (fixed: inside the sha, refused on mismatch),
+  `z_to_codes` out of range off the grid (fixed: nearest level), duplicated constants (fixed:
+  from `config`), frozen mode under `train()` (fixed: `train()` override). ts suite 1218 pass.
+
 ### 2026-09-18 — follow-ups #41 / #42 closed: the stale-record error names `--observed-only`, AGENTS.md becomes policy + pointers
 
 - `evaluation/arrival.py`: the "estimated threshold event but no crossing_span" `ValueError` told

@@ -1383,6 +1383,7 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
     """Rebuild a trained model from a checkpoint written by :func:`train`."""
     payload = load_checkpoint_payload(path)
     config = TSConfig.from_dict(payload["config"])
+    strategy(config).verify_checkpoint_payload(config, payload)
     expected_contract = target_contract(config)
     if payload.get("target_contract") != expected_contract:
         raise ValueError(

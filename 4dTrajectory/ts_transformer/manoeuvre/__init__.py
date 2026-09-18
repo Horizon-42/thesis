@@ -16,8 +16,8 @@ Grouped by role, one module each (plan §5.3):
     scene, graph, decode   the multi-aircraft layer (P5)
 
 **Layering** (`tests/test_architecture.py`): `segments` and `tokenizer` are LEAVES — they import
-the data plane and torch only — because the control path builds the truth segment rows into
-its context rows and holds the tokenizer as a submodule of the executor
+the data plane, `config`, `io_utils` and torch only — because the control path builds the
+truth segment rows into its context rows and holds the tokenizer as a submodule of the executor
 (`outputs/control/plan_token.py`, `outputs/control/heads.py`). Every other module here imports
 the control path, the guidance layer, the data plane and the inference helpers, never the
 reverse; runners under `experiments/` are consumers of this package. Nothing is re-exported

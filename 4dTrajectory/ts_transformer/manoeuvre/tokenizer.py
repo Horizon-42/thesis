@@ -19,16 +19,23 @@ Two tokenizers, ONE interface (``forward(segment_rows, state_rows) → (z, code)
   ATC-like); ``z`` is the one-hot. No parameters; same interface, same gate T.
 
 Scales are FIXED module constants (`SEGMENT_ROW_SCALE`, `STATE_ROW_SCALE`), not a dataset
-normalizer, so a frozen codebook is self-contained: any segment of any flight encodes to the
+normalizer, and the artefact RECORDS them (a codebook written under other scales is refused
+on load), so a frozen codebook is self-contained: any segment of any flight encodes to the
 same code in any process (plan §2.4, "码在冻结后是稳定身份"). The encoder's size is a module
 constant too — ``K`` and ``segment_s`` are the knobs, the encoder is not.
 
 **The codebook artefact** (`write_codebook` / `load_codebook`, plan §2.4): a directory holding
-``codebook.pt`` (the tokenizer's kind, shape and weights) and ``codebook.json`` (the same
-minus the weights, plus the ``sha256`` of ``codebook.pt``, the segment length, the fitted
-cohort's identity and the source checkpoint). ``codebook_sha256`` is what every prior and
-executor checkpoint binds to and refuses on mismatch (C12's rule for the conformal table).
-Writing refuses an existing directory; loading verifies the sha.
+``codebook.pt`` — the tokenizer's kind, shape, scales and weights, the segment length, the
+fitted cohort's identity and the source checkpoint, ALL under one ``sha256`` — and
+``codebook.json``, the same minus the weights plus that sha, for readers that open no torch
+file. ``codebook_sha256`` is what every prior and executor checkpoint binds to and refuses on
+mismatch (C12's rule for the conformal table). Writing refuses an existing directory and an
+artefact with no cohort identity; loading verifies the sha and that the manifest mirrors
+the payload.
+
+A loaded codebook's tokenizer is FROZEN: its parameters take no gradient and its mode stays
+``eval`` under the executor's ``train()`` (the encoder carries no dropout or normalisation
+statistics today, so the mode changes nothing numerically — and this keeps it so).
 """
 
 from __future__ import annotations
@@ -43,21 +50,25 @@ import numpy as np
 import torch
 from torch import nn
 
-from ts_transformer.data.channels import CHANNELS
+from ts_transformer.config import (
+    FSQ_MINIMUM_LEVELS,
+    MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY,
+    MANOEUVRE_TOKENIZER_LEARNED,
+    MANOEUVRE_TOKENIZERS,
+)
+from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.manoeuvre.segments import SEGMENT_CHANNELS, segment_row_count
-
-MANOEUVRE_TOKENIZER_LEARNED = "learned"
-MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY = "command-vocabulary"
-MANOEUVRE_TOKENIZERS = (MANOEUVRE_TOKENIZER_LEARNED, MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY)
+from ts_transformer.manoeuvre.segments import MINIMUM_GROUND_SPEED_MPS, SEGMENT_CHANNELS, segment_row_count
 
 #: The segment rows' scale, one per `SEGMENT_CHANNELS` entry: a minute of approach flying
 #: laterally (5 km), its descent (300 m), the approach speed (100 m/s) and the descent rate
-#: (10 m/s) — every scaled entry is O(1).
+#: (10 m/s) — every scaled entry is O(1). Recorded in every codebook (see `load_codebook`).
 SEGMENT_ROW_SCALE = np.array([5000.0, 5000.0, 300.0, 100.0, 100.0, 10.0], dtype=np.float32)
 #: The state row's scale, one per chart channel: the 25 km slice (20 km), its height (2 km),
 #: the same speeds.
 STATE_ROW_SCALE = np.array([20000.0, 20000.0, 2000.0, 100.0, 100.0, 10.0], dtype=np.float32)
+SEGMENT_ROW_SCALE.setflags(write=False)
+STATE_ROW_SCALE.setflags(write=False)
 
 #: The learned encoder's size. Constants on purpose: the plan's knobs are K and the segment
 #: length; the state dict pins the shape into every checkpoint and codebook.
@@ -65,21 +76,26 @@ ENCODER_D_MODEL = 64
 ENCODER_HEADS = 4
 ENCODER_LAYERS = 2
 ENCODER_D_FF = 128
-#: The bound leaves this much of the outermost half-step unused so the extreme levels are
-#: reachable by rounding (the FSQ paper's eps).
+#: The bound shrinks the range by this much (the FSQ paper's eps) so that its ends fall
+#: strictly inside the outermost levels' rounding cells: a bounded value can then never sit
+#: exactly on a .5 boundary, where `round` would be ambiguous.
 FSQ_BOUND_EPS = 1e-3
-#: A dimension needs an interior level: at L = 2 the bound's shift is undefined
-#: (`atanh(1)`), so the smallest admissible level count is 3.
-FSQ_MINIMUM_LEVELS = 3
 
-#: The command vocabulary's classes (plan §2.4 baseline B; the thresholds are readings, not
-#: regulation values). Heading: the change of ground-track direction over the segment (the
-#: last row's course in the start frame, where the first row's is 0; positive = left).
+#: The command vocabulary's classes (plan §2.4 baseline B: 航向 ≤±15°、±45°、±90°、反向 ×
+#: 高度 × 速度; the thresholds are readings, not regulation values). Heading: the change of
+#: ground-track direction over the segment, the course UNWRAPPED along the rows (a 180°
+#: reversal is a reversal, never the opposite turn read off a wrapped angle); positive = left.
 #: Vertical and speed: the mean rate over the segment, so the classes do not move with the
-#: segment length (a 120 s segment is not "descending" because it is long).
-COMMAND_HEADING_CLASSES = ("straight", "left-small", "right-small", "left-large", "right-large")
+#: segment length (a 120 s segment is not "descending" because it is long). A segment reaching
+#: into the fitted tail reads that tail's HELD velocity columns (`segments.py`): its last
+#: segment's speed change and course are measured against a frozen endpoint.
+COMMAND_HEADING_CLASSES = (
+    "straight", "left-small", "right-small", "left-medium", "right-medium",
+    "left-reversal", "right-reversal",
+)
 COMMAND_HEADING_SMALL_DEG = 15.0
-COMMAND_HEADING_LARGE_DEG = 45.0
+COMMAND_HEADING_MEDIUM_DEG = 45.0
+COMMAND_HEADING_REVERSAL_DEG = 90.0
 COMMAND_VERTICAL_CLASSES = ("level", "descend", "climb")
 COMMAND_LEVEL_RATE_MPS = 1.0
 COMMAND_SPEED_CLASSES = ("hold", "decelerate", "accelerate")
@@ -89,7 +105,6 @@ COMMAND_VOCABULARY_SIZE = (
 )
 
 _ROW_WIDTH = len(SEGMENT_CHANNELS)
-assert _ROW_WIDTH == len(CHANNELS)
 
 
 # ── FSQ ──────────────────────────────────────────────────────────────────────
@@ -148,8 +163,11 @@ class FSQ(nn.Module):
         return z, self.z_to_codes(z)
 
     def level_indices(self, z: torch.Tensor) -> torch.Tensor:
-        """``[B, D]`` per-dimension level indices of grid coordinates ``z``."""
-        return torch.round(z * self._half_width + self._half_width).to(torch.long)
+        """``[B, D]`` per-dimension level indices of ``z``: exact on a grid coordinate, the
+        NEAREST level for a z off the grid (a continuous decode, a clamped or averaged z) — so
+        a code is always inside the vocabulary the prior embeds."""
+        indices = torch.round(z * self._half_width + self._half_width)
+        return torch.minimum(indices.clamp(min=0.0), self._levels - 1.0).to(torch.long)
 
     def z_to_codes(self, z: torch.Tensor) -> torch.Tensor:
         return (self.level_indices(z) * self._basis).sum(dim=-1)
@@ -202,6 +220,11 @@ class LearnedTokenizer(nn.Module):
 
     kind = MANOEUVRE_TOKENIZER_LEARNED
     trainable = True
+    #: Set by `load_codebook`: the mode stays `eval` whatever the parent module is put into.
+    frozen = False
+
+    def train(self, mode: bool = True):
+        return super().train(mode and not self.frozen)
 
     def __init__(self, levels: Sequence[int], rows: int):
         super().__init__()
@@ -244,19 +267,35 @@ class LearnedTokenizer(nn.Module):
 # ── the command-vocabulary baseline ──────────────────────────────────────────
 
 def command_classes(segment_rows: np.ndarray, segment_s: float) -> tuple[int, int, int]:
-    """``(heading, vertical, speed)`` class indices of ONE segment's rows in the start frame."""
+    """``(heading, vertical, speed)`` class indices of ONE segment's rows in the start frame.
+
+    The heading change is the course unwrapped row by row (2 s rows cannot turn 180° between
+    two of them), so a reversal reads as ``±reversal`` and never as the opposite small turn.
+    A start row without a course (below `MINIMUM_GROUND_SPEED_MPS`) is refused, as the frame
+    refuses it — a padded row must not read as ``straight/level/hold``.
+    """
     rows = np.asarray(segment_rows, dtype=np.float64)
-    last = rows[-1]
-    heading_deg = math.degrees(math.atan2(last[4], last[3]))   # the first row's course is 0
-    if abs(heading_deg) <= COMMAND_HEADING_SMALL_DEG:
+    horizontal_dot = list(VELOCITY_IDX[:2])
+    ground_speed = np.hypot(rows[:, horizontal_dot[0]], rows[:, horizontal_dot[1]])
+    if ground_speed[0] < MINIMUM_GROUND_SPEED_MPS:
+        raise ValueError(
+            f"the segment's start row has {ground_speed[0]:.3f} m/s of ground speed: no course to "
+            "read a heading change from"
+        )
+    course = np.unwrap(np.arctan2(rows[:, horizontal_dot[1]], rows[:, horizontal_dot[0]]))
+    heading_deg = math.degrees(course[-1] - course[0])     # the first row's course is 0
+    size = abs(heading_deg)
+    if size <= COMMAND_HEADING_SMALL_DEG:
         heading = 0
-    elif abs(heading_deg) <= COMMAND_HEADING_LARGE_DEG:
+    elif size <= COMMAND_HEADING_MEDIUM_DEG:
         heading = 1 if heading_deg > 0.0 else 2
-    else:
+    elif size <= COMMAND_HEADING_REVERSAL_DEG:
         heading = 3 if heading_deg > 0.0 else 4
-    vertical_rate = last[2] / segment_s
+    else:
+        heading = 5 if heading_deg > 0.0 else 6
+    vertical_rate = rows[-1, POSITION_IDX[2]] / segment_s
     vertical = 0 if abs(vertical_rate) <= COMMAND_LEVEL_RATE_MPS else (1 if vertical_rate < 0.0 else 2)
-    acceleration = (math.hypot(last[3], last[4]) - math.hypot(rows[0, 3], rows[0, 4])) / segment_s
+    acceleration = (ground_speed[-1] - ground_speed[0]) / segment_s
     speed = 0 if abs(acceleration) <= COMMAND_HOLD_ACCELERATION_MPS2 else (1 if acceleration < 0.0 else 2)
     return heading, vertical, speed
 
@@ -279,7 +318,11 @@ class CommandVocabularyTokenizer(nn.Module):
 
     kind = MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY
     trainable = False
+    frozen = False
     levels: tuple[int, ...] = ()
+
+    def train(self, mode: bool = True):
+        return super().train(mode and not self.frozen)
 
     def __init__(self, rows: int, segment_s: float):
         super().__init__()
@@ -381,6 +424,17 @@ def _tokenizer_spec(tokenizer: nn.Module, segment_s: float, dt_s: float) -> dict
         "z_dim": int(tokenizer.z_dim),
         "segment_s": float(segment_s),
         "dt_s": float(dt_s),
+        # The scales the rows were encoded under: part of what decides a code, so part of the
+        # artefact and of its sha (a build with other constants refuses the codebook).
+        "segment_row_scale": [float(value) for value in SEGMENT_ROW_SCALE],
+        "state_row_scale": [float(value) for value in STATE_ROW_SCALE],
+    }
+
+
+def _current_scales() -> dict[str, list[float]]:
+    return {
+        "segment_row_scale": [float(value) for value in SEGMENT_ROW_SCALE],
+        "state_row_scale": [float(value) for value in STATE_ROW_SCALE],
     }
 
 
@@ -399,14 +453,20 @@ def write_codebook(
             f"the tokenizer reads {tokenizer.rows} rows, a {segment_s:g} s / {dt_s:g} s segment has "
             f"{segment_row_count(segment_s, dt_s)}"
         )
+    if not data_identity:
+        raise ValueError("a codebook without its fitted cohort's identity is refused (C26)")
     spec = _tokenizer_spec(tokenizer, segment_s, dt_s)
     directory.mkdir(parents=True)
     weights = directory / CODEBOOK_WEIGHTS
-    torch.save({
+    # Everything that identifies the codebook is INSIDE the hashed file; the manifest mirrors it.
+    payload = {
         "schema": CODEBOOK_SCHEMA,
         "tokenizer": spec,
+        "data_identity": dict(data_identity),
+        "source": dict(source),
         "state_dict": {key: value.detach().cpu() for key, value in tokenizer.state_dict().items()},
-    }, weights)
+    }
+    torch.save(payload, weights)
     sha256 = file_sha256(weights)
     write_json_atomic(directory / CODEBOOK_MANIFEST, {
         "schema": CODEBOOK_SCHEMA,
@@ -414,8 +474,8 @@ def write_codebook(
         "tokenizer": spec,
         "weights_file": CODEBOOK_WEIGHTS,
         "sha256": sha256,
-        "data_identity": data_identity,
-        "source": source,
+        "data_identity": payload["data_identity"],
+        "source": payload["source"],
     })
     return load_codebook(directory)
 
@@ -432,16 +492,24 @@ def load_codebook(directory: str | Path) -> Codebook:
         raise ValueError(f"{directory}: {weights.name} sha256 {sha256[:12]}… is not the manifest's {manifest['sha256'][:12]}…")
     payload = torch.load(weights, map_location="cpu", weights_only=True)
     spec = payload["tokenizer"]
-    if spec != manifest["tokenizer"]:
-        raise ValueError(f"{directory}: the weights file's tokenizer spec differs from the manifest's")
+    for key in ("tokenizer", "data_identity", "source"):
+        if payload[key] != manifest[key]:
+            raise ValueError(f"{directory}: the manifest's {key!r} differs from the hashed payload's")
+    scales = {key: spec[key] for key in ("segment_row_scale", "state_row_scale")}
+    if scales != _current_scales():
+        raise ValueError(
+            f"{directory}: the codebook was written under scales {scales}, this build's are "
+            f"{_current_scales()}; its codes would not be reproduced"
+        )
     tokenizer = tokenizer_for(spec["kind"], levels=spec["levels"], segment_s=spec["segment_s"], dt_s=spec["dt_s"])
     tokenizer.load_state_dict(payload["state_dict"])
+    tokenizer.frozen = True
     tokenizer.eval()
     tokenizer.requires_grad_(False)
     return Codebook(
         tokenizer=tokenizer, kind=spec["kind"], levels=tuple(spec["levels"]), rows=int(spec["rows"]),
         segment_s=float(spec["segment_s"]), dt_s=float(spec["dt_s"]),
-        data_identity=dict(manifest["data_identity"]), source=dict(manifest["source"]),
+        data_identity=dict(payload["data_identity"]), source=dict(payload["source"]),
         sha256=sha256, path=directory,
     )
 
@@ -450,9 +518,7 @@ __all__ = [
     "CODEBOOK_MANIFEST", "CODEBOOK_SCHEMA", "CODEBOOK_WEIGHTS", "COMMAND_HEADING_CLASSES",
     "COMMAND_SPEED_CLASSES", "COMMAND_VERTICAL_CLASSES", "COMMAND_VOCABULARY_SIZE",
     "ENCODER_D_MODEL", "ENCODER_D_FF", "ENCODER_HEADS", "ENCODER_LAYERS", "FSQ",
-    "FSQ_MINIMUM_LEVELS", "MANOEUVRE_TOKENIZERS", "MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY",
-    "MANOEUVRE_TOKENIZER_LEARNED", "SEGMENT_ROW_SCALE", "STATE_ROW_SCALE", "Codebook",
-    "CommandVocabularyTokenizer", "LearnedTokenizer", "SegmentEncoder", "command_classes",
-    "command_code", "command_label", "fsq_code_count", "load_codebook", "tokenizer_for",
-    "write_codebook",
+    "SEGMENT_ROW_SCALE", "STATE_ROW_SCALE", "Codebook", "CommandVocabularyTokenizer",
+    "LearnedTokenizer", "SegmentEncoder", "command_classes", "command_code", "command_label",
+    "fsq_code_count", "load_codebook", "tokenizer_for", "write_codebook",
 ]

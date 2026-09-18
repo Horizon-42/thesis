@@ -15,7 +15,7 @@ campaign 的读数进 `2026-09-18_manoeuvre_token_results.zh.md`（每个 campai
 | 阶段 | 状态 | 产物 / 指向 |
 |---|---|---|
 | P0 文档 + 文献 + 仓库整理 | **完成 2026-09-18**：文献 `docs/literature/manoeuvre_tokens/`（13 篇，引用全部核实）；代码归档 §5.1 已执行并提交（**9dbb492**：ts 套件 1177 全过，退役字段在默认值时由 `from_dict` 丢弃、否则报名字拒绝，289 个存档 checkpoint 逐个量过，原来能加载的一个没变）；磁盘 §5.4 已执行；38 个 two_tier 类目已撤下、索引已重建、validator 165 类目 0 错 | 本文 §5；**等用户审核本文后才开始 P1** |
-| P1 分词器 + 执行器（联合） | 未开始 | §4.1 P1.1–P1.4，门 T（§3.3） |
+| P1 分词器 + 执行器（联合） | **P1.1–P1.3 完成 2026-09-19**（`manoeuvre/segments.py` 81ca7b1、`manoeuvre/tokenizer.py` 31b9c24、执行器接线 + review 修正 + 码本导出 runner 见下一提交）：ts 套件 1218 全过；opus review 的 2 BLOCKER / 3 MAJOR / 6 MINOR 全部修掉（航向 wrap、码本未记录尺度、越界码、常量重复、冻结模式、身份进 sha）。P1.4 campaign 未启动 | §4.1 P1.1–P1.4，门 T（§3.3）；§6.3 我替你选的 |
 | P2 先验（单机，跑道已知）+ 离散对连续的对照 | 未开始 | 门 P |
 | P3 lockstep：真值码、端到端、闭环再训 | 未开始 | 门 X、S、E |
 | P4 跑道 token + 程序上下文 | 未开始 | 门 R |
@@ -471,6 +471,25 @@ find $A -type d \( -name records -o -name '*_pred_val' \) -prune -exec rm -rf {}
 6. **分词器以 L1 为解码器，码只装当前状态决定不了的决策；K 小；重建误差不作门**（晚间讨论，用户：L2 层要学习的应该是意图或者一个可用的解空间）。
 
 其余选择（K、pa 契约为唯一主臂、跑道在 P4 才作输出）按"规则允许的由我定"处理，写在本文，不再另问。
+
+### 6.3 我替你选的（2026-09-19 夜，P1.1–P1.3；明天审核，改了就是新臂）
+
+1. **分层的一个反向边。** 执行器把分词器挂成子模块、把真值段行写进 context row，所以 `outputs/control` 必须 import
+   `manoeuvre.segments` 与 `manoeuvre.tokenizer`。这两个是**叶子**（只 import data、config、io_utils、torch，白名单，
+   `test_architecture` 断言）；其余 manoeuvre 模块 import 控制路径，反向禁止。§4.2 的"反向禁止"按此解释（L29）。
+2. **`segment_s` 就是 `control_horizon_s`**，不另设字段：执行器一轮飞满一段，段长与时域是同一个数；码本产物记 `segment_s`。
+3. **`plan_conditioning_dropout` 退役为常量 0**（不是"强制 0"的校验）：存 0.5 的只有已归档的 L1/L1b，加载本就被拒。
+4. **FSQ 档位的分解**（K → levels）：16 = (4,4)、32 = (8,4)、64 = (4,4,4)、128 = (8,4,4)、256 = (4,4,4,4)——2–4 维、每维 ≥ 3 档
+   （L=2 时 bound 的位移是 atanh(1)）；z 的维数就是 L1 条件向量的宽度。编码器尺寸是模块常量（d 64、2 层、4 头），不是实验轴。
+5. **编码器的"当前状态"输入 = 锚点行（跑道入口 ENU 图的六通道）**，不是整段历史；尺度是固定常量并写进码本（review MAJOR-3）。
+6. **指令词表是 7 × 3 × 3 = 63**，不是 §2.4 写的"约 45"：航向按 §2.4 列出的四档（≤15°、≤45°、≤90°、反向）× 左右 + 直飞，
+   航向变化沿行**展开**（unwrap）读，180° 反向不再被 wrap 读成反方向（review BLOCKER-1）。高度、速度按段内平均速率分档
+   （±1 m/s、±0.03 m/s²，reading），与段长无关；真实队列上的 63 类直方图在 P1.4 读数里报，不预设覆盖。
+7. **N₁ = segment_s / 10 是 campaign 约定**（写在臂文件），不是 config 规则：N₁ 消融不该要改代码。
+8. **码用量与分词器梯度进每轮记录**：`control_training_diagnostics.manoeuvre_codes`（K、用了几个、最大份额、熵）与梯度组
+   `manoeuvre_tokenizer`（其他 run 恒为 0——多一个 key 的代价接受了）。
+9. **码本身份（尺度、队列身份、来源 checkpoint）都在 sha 之内**；空身份拒写；对着码本训的执行器在 `load_checkpoint` 时
+   校验目录里的权重仍是 checkpoint 里的那份（C28）。
 
 ---
 

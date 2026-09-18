@@ -405,7 +405,7 @@ def test_a_stored_config_carrying_a_retired_field_still_loads_and_an_unknown_one
 
 
 def test_a_measured_constant_field_is_dropped_at_its_constant_and_refused_anywhere_else():
-    """The other retirement kind: these three WERE read, so a different value is history.
+    """The other retirement kind: these fields WERE read, so a different value is history.
 
     `procedure_loss_{lateral,vertical}_scale_m` and `closure_timing_scale_s` are loss
     denominators. They were retired because nothing on disk ever moved them — not because
@@ -419,9 +419,10 @@ def test_a_measured_constant_field_is_dropped_at_its_constant_and_refused_anywhe
     assert TSConfig.from_dict(at_constant).prediction_output == PREDICTION_CONTROL
 
     for name, constant in RETIRED_CONSTANT_FIELDS.items():
+        moved = constant * 2 if constant else constant + 0.5   # a zero constant doubled is itself
         with pytest.raises(ValueError, match=f"{name}=") as info:
-            TSConfig.from_dict({**at_constant, name: constant * 2})
-        assert repr(constant * 2) in str(info.value) and "retired" in str(info.value)
+            TSConfig.from_dict({**at_constant, name: moved})
+        assert repr(moved) in str(info.value) and "retired" in str(info.value)
 
 
 @pytest.mark.skipif(not L1_NATIVE32_CHECKPOINT.is_file(), reason="the L1 native32 checkpoint is not on this machine")

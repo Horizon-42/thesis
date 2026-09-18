@@ -14,6 +14,7 @@ from ts_transformer.manoeuvre import tokenizer as tok
 from ts_transformer.manoeuvre.segments import segment_offsets_s, segment_rows
 
 DT_S = 2.0
+IDENTITY = {"schema": "ts-arrival-data-v4-eligible-set", "eligible_set_sha256": {"KRDU": "b" * 64}}
 
 
 def _segment(segment_s: float = 60.0, *, speed: float = 70.0, rate_dps: float = 0.0,
@@ -62,12 +63,26 @@ def test_fsq_passes_a_straight_through_gradient_and_refuses_two_levels():
     z, _codes = fsq.quantize(h)
     z.sum().backward()
     assert h.grad is not None and bool((h.grad != 0).all())
+    # ...and, faithfully to the bound, none once tanh has saturated: a pre-activation far out
+    # is a code the encoder can no longer move by gradient
+    far = torch.full((1, 2), 30.0, requires_grad=True)
+    fsq.quantize(far)[0].sum().backward()
+    assert bool((far.grad == 0).all())
     with pytest.raises(ValueError, match="levels"):
         tok.FSQ((2, 4))
     with pytest.raises(ValueError, match="levels"):
         tok.FSQ(())
     with pytest.raises(ValueError, match="codes"):
         fsq.codes_to_z(torch.tensor([16]))
+
+
+def test_a_z_off_the_grid_never_produces_a_code_outside_the_vocabulary():
+    """A continuous decode or an averaged z is mapped to the NEAREST level of every dimension
+    (the prior embeds K codes; K + 4 would be a device-side assert)."""
+    fsq = tok.FSQ((4, 4))
+    codes = fsq.z_to_codes(torch.tensor([[1.0, 1.0], [-1.3, 0.2], [0.49, -0.51], [5.0, -5.0]]))
+    assert bool((codes >= 0).all()) and bool((codes < 16).all())
+    assert codes.tolist() == [15, 0 + 4 * 2, 3 + 4 * 1, 3 + 4 * 0]   # level 3 is the top of an even L = 4
 
 
 # ── the learned tokenizer ────────────────────────────────────────────────────
@@ -97,13 +112,15 @@ def test_the_learned_tokenizer_is_small():
 # ── the command vocabulary ───────────────────────────────────────────────────
 
 def test_the_command_vocabulary_reads_turns_descents_and_decelerations_by_rule():
-    assert tok.COMMAND_VOCABULARY_SIZE == 45
+    assert tok.COMMAND_VOCABULARY_SIZE == 63
     cases = {
         _segment().tobytes(): (0, 0, 0),                                   # straight, level, hold
         _segment(rate_dps=0.5).tobytes(): (1, 0, 0),                       # 30° left over 60 s
         _segment(rate_dps=-0.5).tobytes(): (2, 0, 0),                      # 30° right
-        _segment(rate_dps=1.5).tobytes(): (3, 0, 0),                       # 90° left
-        _segment(rate_dps=-2.5).tobytes(): (4, 0, 0),                      # 150° right
+        _segment(rate_dps=1.2).tobytes(): (3, 0, 0),                       # 72° left
+        _segment(rate_dps=-1.2).tobytes(): (4, 0, 0),                      # 72° right
+        _segment(rate_dps=2.5).tobytes(): (5, 0, 0),                       # 150° left: a reversal
+        _segment(rate_dps=-2.5).tobytes(): (6, 0, 0),                      # 150° right
         _segment(descent=-3.5).tobytes(): (0, 1, 0),                       # descending
         _segment(descent=2.0).tobytes(): (0, 2, 0),                        # climbing
         _segment(accel=-0.1).tobytes(): (0, 0, 1),                         # decelerating
@@ -119,16 +136,29 @@ def test_the_command_vocabulary_reads_turns_descents_and_decelerations_by_rule()
     assert tok.command_classes(_segment(120.0, descent=-0.5), 120.0)[1] == 0
 
 
+def test_a_reversal_reads_as_a_reversal_never_as_the_opposite_turn():
+    """The course is unwrapped along the rows: a 180° left turn over 90 s, a 360° left turn over
+    120 s and a 198° left turn are all `left-reversal`, whatever a wrapped angle would say."""
+    assert tok.command_classes(_segment(90.0, rate_dps=2.0), 90.0)[0] == 5      # +180°
+    assert tok.command_classes(_segment(60.0, rate_dps=3.0), 60.0)[0] == 5      # +180°
+    assert tok.command_classes(_segment(90.0, rate_dps=2.2), 90.0)[0] == 5      # +198°
+    assert tok.command_classes(_segment(120.0, rate_dps=3.0), 120.0)[0] == 5    # +360°
+    assert tok.command_classes(_segment(90.0, rate_dps=-2.0), 90.0)[0] == 6     # -180°
+    # a start row without a course is refused, as the segment frame refuses it
+    with pytest.raises(ValueError, match="ground speed"):
+        tok.command_classes(np.zeros((31, 6)), 60.0)
+
+
 def test_the_command_vocabulary_shares_the_tokenizer_interface_and_has_no_parameters():
     tokenizer = tok.tokenizer_for("command-vocabulary", levels=(), segment_s=60.0, dt_s=DT_S)
-    assert not tokenizer.trainable and tokenizer.code_count == 45 and tokenizer.z_dim == 45
+    assert not tokenizer.trainable and tokenizer.code_count == 63 and tokenizer.z_dim == 63
     assert sum(p.numel() for p in tokenizer.parameters()) == 0
-    segment = torch.tensor(np.stack([_segment(), _segment(rate_dps=1.5, descent=-3.0)]), dtype=torch.float32)
+    segment = torch.tensor(np.stack([_segment(), _segment(rate_dps=1.2, descent=-3.0)]), dtype=torch.float32)
     z, codes = tokenizer(segment, _state(2))
-    assert z.shape == (2, 45) and codes.tolist() == [tok.command_code(0, 0, 0), tok.command_code(3, 1, 0)]
+    assert z.shape == (2, 63) and codes.tolist() == [tok.command_code(0, 0, 0), tok.command_code(3, 1, 0)]
     assert torch.equal(tokenizer.codes_to_z(codes), z) and torch.equal(tokenizer.z_to_codes(z), codes)
-    assert tok.command_label(codes[1].item()) == "left-large/descend/hold"
-    for code in range(45):
+    assert tok.command_label(codes[1].item()) == "left-medium/descend/hold"
+    for code in range(63):
         assert tok.command_label(code).count("/") == 2
     with pytest.raises(ValueError, match="levels"):
         tok.tokenizer_for("command-vocabulary", levels=(4, 4), segment_s=60.0, dt_s=DT_S)
@@ -145,7 +175,7 @@ def test_a_codebook_round_trips_frozen_and_is_bound_by_its_sha(tmp_path):
     state = _state(2).numpy()
     with torch.no_grad():
         z_live, codes_live = tokenizer(torch.from_numpy(segment), torch.from_numpy(state))
-    identity = {"schema": "ts-arrival-data-v4-eligible-set", "digest": "b" * 64}
+    identity = IDENTITY
     codebook = tok.write_codebook(
         tmp_path / "cb", tokenizer, segment_s=30.0, dt_s=DT_S, data_identity=identity,
         source={"checkpoint_sha256": "c" * 64, "run": "manoeuvre_tok/K32_s60"},
@@ -154,6 +184,12 @@ def test_a_codebook_round_trips_frozen_and_is_bound_by_its_sha(tmp_path):
     assert codebook.segment_s == 30.0 and codebook.code_count == 32 and codebook.z_dim == 2
     assert codebook.data_identity == identity and len(codebook.sha256) == 64
     assert not any(p.requires_grad for p in codebook.tokenizer.parameters())
+    # frozen in MODE too: a parent put into train() leaves it in eval
+    parent = torch.nn.ModuleDict({"tokenizer": codebook.tokenizer}).train()
+    assert parent.training and not codebook.tokenizer.training
+    assert not tok.tokenizer_for("learned", levels=(8, 4), segment_s=30.0, dt_s=DT_S).frozen   # a fresh one trains
+    with pytest.raises(ValueError, match="identity"):
+        tok.write_codebook(tmp_path / "cb0", tokenizer, segment_s=30.0, dt_s=DT_S, data_identity={}, source={})
     codes, z = codebook.encode(segment, state)
     assert codes.tolist() == codes_live.tolist() and np.allclose(z, z_live.numpy())
     single_code, single_z = codebook.encode(segment[1], state[1])
@@ -162,10 +198,17 @@ def test_a_codebook_round_trips_frozen_and_is_bound_by_its_sha(tmp_path):
     again = tok.load_codebook(tmp_path / "cb")
     assert again.sha256 == codebook.sha256
     with pytest.raises(FileExistsError):
-        tok.write_codebook(tmp_path / "cb", tokenizer, segment_s=30.0, dt_s=DT_S, data_identity={}, source={})
+        tok.write_codebook(tmp_path / "cb", tokenizer, segment_s=30.0, dt_s=DT_S, data_identity=IDENTITY, source={})
     # a tokenizer sized for another segment cannot be written as this segment's codebook
     with pytest.raises(ValueError, match="rows"):
-        tok.write_codebook(tmp_path / "cb2", tokenizer, segment_s=60.0, dt_s=DT_S, data_identity={}, source={})
+        tok.write_codebook(tmp_path / "cb2", tokenizer, segment_s=60.0, dt_s=DT_S, data_identity=IDENTITY, source={})
+    # an edited manifest is refused: the hashed payload is the identity, the manifest a mirror
+    manifest = tmp_path / "cb" / tok.CODEBOOK_MANIFEST
+    text = manifest.read_text(encoding="utf-8")
+    manifest.write_text(text.replace("b" * 64, "d" * 64), encoding="utf-8")
+    with pytest.raises(ValueError, match="differs from the hashed payload"):
+        tok.load_codebook(tmp_path / "cb")
+    manifest.write_text(text, encoding="utf-8")
     # tampered weights are refused on load
     weights = tmp_path / "cb" / tok.CODEBOOK_WEIGHTS
     weights.write_bytes(weights.read_bytes() + b"\0")
@@ -173,9 +216,21 @@ def test_a_codebook_round_trips_frozen_and_is_bound_by_its_sha(tmp_path):
         tok.load_codebook(tmp_path / "cb")
 
 
+def test_a_codebook_written_under_other_scales_is_refused(tmp_path, monkeypatch):
+    """The scales decide the codes: they are inside the hashed artefact, and a build whose
+    constants differ refuses the codebook instead of encoding every segment differently."""
+    tokenizer = tok.tokenizer_for("learned", levels=(4, 4), segment_s=20.0, dt_s=DT_S)
+    tok.write_codebook(tmp_path / "cb", tokenizer, segment_s=20.0, dt_s=DT_S, data_identity=IDENTITY, source={})
+    other = tok.SEGMENT_ROW_SCALE.copy()
+    other[0] = 4000.0
+    monkeypatch.setattr(tok, "SEGMENT_ROW_SCALE", other)
+    with pytest.raises(ValueError, match="scales"):
+        tok.load_codebook(tmp_path / "cb")
+
+
 def test_a_command_vocabulary_codebook_is_an_artefact_too(tmp_path):
     tokenizer = tok.tokenizer_for("command-vocabulary", levels=(), segment_s=60.0, dt_s=DT_S)
-    codebook = tok.write_codebook(tmp_path / "cv", tokenizer, segment_s=60.0, dt_s=DT_S, data_identity={}, source={})
-    assert codebook.kind == "command-vocabulary" and codebook.code_count == 45 and codebook.levels == ()
-    codes, z = codebook.encode(np.stack([_segment(rate_dps=1.5)]).astype(np.float32), _state(1).numpy())
-    assert codes.tolist() == [tok.command_code(3, 0, 0)] and z.shape == (1, 45)
+    codebook = tok.write_codebook(tmp_path / "cv", tokenizer, segment_s=60.0, dt_s=DT_S, data_identity=IDENTITY, source={})
+    assert codebook.kind == "command-vocabulary" and codebook.code_count == 63 and codebook.levels == ()
+    codes, z = codebook.encode(np.stack([_segment(rate_dps=1.2)]).astype(np.float32), _state(1).numpy())
+    assert codes.tolist() == [tok.command_code(3, 0, 0)] and z.shape == (1, 63)

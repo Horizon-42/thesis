@@ -17,7 +17,7 @@ from ts_transformer.geometry.final_approach_geometry import final_approach_array
 from ts_transformer.outputs.conditioning import condition_vector
 from ts_transformer.outputs.dynamics.inverse import MINIMUM_INVERSE_STATES, segment_controls
 from ts_transformer.outputs.envelope import control_contract
-from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, probe_plan_token
+from ts_transformer.outputs.control.plan_token import probe_plan_context
 
 
 def reference_control_supervision(
@@ -274,10 +274,8 @@ def probe_dynamics(
             (batch_size,), config.final_time_scale_s, dtype=torch.float64, device=device
         )
     if config.plan_conditioning != PLAN_CONDITIONING_OFF:
-        # a PRESENT token with nothing defined in it, of this run's width, by the token builder
-        dynamics[PLAN_TOKEN_KEY] = (
-            torch.from_numpy(probe_plan_token(config)).to(device).unsqueeze(0).expand(batch_size, -1)
-        )
+        # a segment and a state with nothing in them but a forward speed, of this run's shape
+        dynamics.update(probe_plan_context(config, batch_size, device))
     if config.control_imitation_loss_weight:
         dynamics["reference_controls"] = torch.tensor(
             [[list(contract.neutral)]], dtype=torch.float64, device=device

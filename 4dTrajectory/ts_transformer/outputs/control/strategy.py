@@ -36,7 +36,8 @@ from ts_transformer.config import (
     control_recipe,
 )
 from ts_transformer.data.dataset import target_horizon_s, truth_duration_s
-from ts_transformer.outputs.control.plan_token import PLAN_TOKEN_KEY, training_plan_token
+from ts_transformer.outputs.control.plan_token import manoeuvre_code_count, training_plan_context
+from ts_transformer.manoeuvre.tokenizer import load_codebook
 from ts_transformer.data.fixed_dt_supervision import (
     FixedDTControlSupervision,
     FixedDTSupervisionRow,
@@ -196,8 +197,9 @@ class ControlContext(WindowContext):
                 "source for the CTA token; only 'given' (the truth duration) is defined"
             )
         if config.plan_conditioning != PLAN_CONDITIONING_OFF:
-            # the truth's plan at this anchor, in the token this run reads (reads the future)
-            arrays[PLAN_TOKEN_KEY] = training_plan_token(series, anchor, config)
+            # the truth's segment at this anchor and the anchor's chart row — the tokenizer's
+            # inputs (reads the future)
+            arrays.update(training_plan_context(series, anchor, config))
         if not windows.control_supervision:
             return arrays
         anchor_time = float(series.times[anchor])
@@ -463,6 +465,7 @@ class ControlStrategy(OutputStrategy):
             return ControlTrainingDiagnosticsAccumulator(
                 config.control_gradient_clip_norm,
                 saturation_labels(config.control_thrust_parameterization),
+                manoeuvre_code_count=manoeuvre_code_count(config),
             )
         return None
 
@@ -498,7 +501,29 @@ class ControlStrategy(OutputStrategy):
         }
 
     def checkpoint_metadata(self, config: TSConfig) -> dict[str, Any]:
-        return {"control_recipe": control_recipe(config)}
+        return {
+            "control_recipe": control_recipe(config),
+            # The frozen codebook this executor was trained against (plan §2.4): the sha the
+            # tokenizer weights inside the checkpoint are bound to (`verify_checkpoint_payload`).
+            **({"codebook_sha256": load_codebook(config.manoeuvre_codebook).sha256}
+               if config.manoeuvre_codebook else {}),
+        }
+
+    def verify_checkpoint_payload(self, config: TSConfig, payload: dict[str, Any]) -> None:
+        """An executor trained against a frozen codebook carries that codebook's tokenizer
+        weights; the directory the config names must still hold the SAME weights, or the
+        prior's codes and this executor's z would be two different vocabularies."""
+        if not config.manoeuvre_codebook:
+            return
+        expected = load_codebook(config.manoeuvre_codebook).tokenizer.state_dict()
+        stored = payload["model_state"]
+        for key, value in expected.items():
+            if not torch.equal(stored[f"manoeuvre_tokenizer.{key}"].cpu(), value):
+                raise ValueError(
+                    f"checkpoint tokenizer weights differ from the codebook at "
+                    f"{config.manoeuvre_codebook} ({key}): the executor was trained against "
+                    "another codebook, and its z and this codebook's codes are two vocabularies"
+                )
 
     # ── inference ────────────────────────────────────────────────────────────
 
@@ -568,6 +593,12 @@ class ControlStrategy(OutputStrategy):
 
     def record_fields(self, forecast: Forecast) -> dict[str, Any]:
         return {
+            # Manoeuvre-code output: the code the executor flew this segment under and where it
+            # came from — `truth` (the truth segment through the tokenizer; reads the future) or
+            # `given` (a z handed in: the prior's, protocol A).
+            **({"manoeuvreCode": forecast.manoeuvre_code,
+                "manoeuvreCodeSource": forecast.manoeuvre_code_source}
+               if forecast.manoeuvre_code is not None else {}),
             # The contract the schedule was predicted in, off the default; absent means
             # thrust-fraction, so every such record reproduces to the bit.
             **({"controlThrustParameterization": forecast.control_parameterization}
