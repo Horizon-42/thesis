@@ -17,7 +17,7 @@
 |---|---|---|---|
 | A-dev1 | 网格臂文件：`docs/experiments/two_tier_v3_grid_arms.json`，40 臂，键 `L<L>_D<Δ>_s<seed>`，每臂自己的 cohort 路径；`frame_ablation --only KEY…` 只跑指定臂；测试钉住 D1/D2/D4–D8/D10 | 完成（review 1 通过并修） | fa0426f（文档 4dd2082） |
 | A-dev2 | cohort：`plan_cohort --arms <臂文件>` 一次加载、按格写 20 份 `cohorts/L<L>_D<Δ>/development_cohort.json`（已写出，n 表见 §2）；`frame_ablation` 每臂用自己的 cohort；`rebuild_cohort` 不用改（读 checkpoint 自带的 split） | 完成（review 1 通过并修；cohort 已写出） | fa0426f（文档 4dd2082） |
-| A-dev3 | 首问 = L−1 行：臂文件 `anchor_floor_index = 0`，测试钉住 `default_anchor == seq_len − 1` | 完成（含在 dev1 测试里） | fa0426f（文档 4dd2082） |
+| A-dev3 | 第一次预测在第 L−1 行：臂文件 `anchor_floor_index = 0`，测试钉住 `default_anchor == seq_len − 1` | 完成（含在 dev1 测试里） | fa0426f（文档 4dd2082） |
 | A-dev4 | `manoeuvre_lockstep --anchor-remaining-km 12|8|6`：`lockstep.from_remaining_path` 把每架从 bin 行（`anchor_grid.bin_anchor`：剩余路程最接近 X km 的行）切起，使该行成为固定锚点；协议 `none` 不再要 codebook；payload schema v2（`first_ask` 块、每行 `first_ask_row`） | 完成（review 通过并修，冒烟通过） | fa0426f（文档 4dd2082） |
 | A-dev5 | 训练锚点全随机：臂文件 `random_train_anchor_l1_share = 0.0`，测试钉住 | 完成（含在 dev1 测试里） | fa0426f（文档 4dd2082） |
 | A-dev6 | `executor_failure_modes --lockstep <dir> --out <dir>`（`manoeuvre/failure_modes.py`）：course 坐标系、六类失败方式、每类记录子集 `records_<mode>/`（`export.copy_record_subset`） | 完成（review 通过并修，冒烟通过） | fa0426f（文档 4dd2082） |
@@ -32,7 +32,7 @@
 
 - 训练 runner：`experiments/frame_ablation.py`，吃臂文件 JSON（09-18 的在 `docs/experiments/manoeuvre_tok_20260918_s{20,30,60,90,120}_arms.json`）；
   每臂目录 `<campaign>/<arm>/{config.json, checkpoint.pt, history.json, experiment_manifest.json, data_selection.json}`；训练完成的标志 `history.json`（`TRAIN_COMPLETE_ARTIFACT`）。
-- 首问行：`config.default_anchor(config)` = `seq_len − 1`，除非 `anchor_floor_index` 设了更晚的行；`data/dataset.fixed_anchor_index` 是唯一定义（C17）。
+- 开始预测的行：`config.default_anchor(config)` = `seq_len − 1`，除非 `anchor_floor_index` 设了更晚的行；`data/dataset.fixed_anchor_index` 是唯一定义（C17）。
   09-18 campaign 用 floor 59（"120 s 契约"），v3 不设。
 - 训练锚点：`random_train_anchor = True`、`random_train_anchor_sampling = remaining-path-uniform`；`random_train_anchor_l1_share` 是钉在固定锚点的份额（09-18 为 0.5）。
 - cohort：`<campaign>/development_cohort.json`（schema `ts-development-cohort-v1`，`selection` + `splits`）；09-18 的选法是"锁定划分（split_seed None，openap-direct）去掉
@@ -46,7 +46,7 @@
 - 每臂约 45 MB；GPU RTX 4060 8 GB；每臂 12–15 min。
 - **各格 cohort（已写出，`two_tier_v3_grid_20260918/cohorts.json`）**：锁定划分 12218 架里 3956 架被机型过滤（openap-direct）拒掉，与格无关；
   可用集 train 6798–6857 / val 1392–1405（L30_D20 最多，L120_D120 最少；随机锚点覆盖不到的 train 航班 0–3 架）。各格 n 差 ≤ 65 架。
-- **距离起问的读数（冒烟，09-18 的 S60_nt 臂，24 架）**：12 km 处 3 架没有可用行；在 12 km 行重读分组时几乎全是 straight-in（曲折度 < 1.05），
+- **从固定距离处开始预测的读数（冒烟，09-18 的 S60_nt 臂，24 架）**：12 km 处 3 架没有可用行；在 12 km 行重读分组时几乎全是 straight-in（曲折度 < 1.05），
   雷达引导组会很薄——读数 (b) 主要看"全部"与 straight-in，8 / 6 km 更甚；写结果时要报每组 n。
 - `series_from_row(series, r)`（`data/dataset.py`）：航班从第 r 行起看，时钟不变、真值同样切；lockstep 的 bin 读数靠它把 bin 行变成固定锚点。
 - 发布：`publish_ts_experiment_trajectories.py --reuse-prediction-dir … --category-variant …`，intents 变体 key 大小写不敏感（57ae87e）；`VARIANT_RECORD_BLOCKS` 含 `manoeuvre_lockstep`。
@@ -60,7 +60,7 @@
   未改的提醒：距离读数 (b) 的覆盖随 Δ 变（写进 D3）。
 - opus review 2（dev6–8）已做完并修：记录子集自带重算的 `accuracy`（`export.metrics_from_row`；`write_batch` 的行多了 `cross_track_p95_m` / `altitude_p95_m`
   两列，旧记录目录做不了子集）；`gate_grid` 的 decisive 看两项主指标、只认恰好两 seed；`cell_reading` 单独成函数；队列的格名来自配置（与 gate 表一致）、PID 文件退出即删、
-  有活着的 PID 拒绝再起；失败方式：航向用 chart track、只数入口前的中线穿越、加 `first_aligned_s` 与首问时的 to-go、`FAILURE_MODES_BLOCK` 登记进 publisher。
+  有活着的 PID 拒绝再起；失败方式：航向用 chart track、只数入口前的中线穿越、加 `first_aligned_s` 与开始预测时的 to-go、`FAILURE_MODES_BLOCK` 登记进 publisher。
 - 冒烟（09-18 S60_nt 臂 24 架、从第 59 行起）：10 架雷达引导没穿越 → established-short 1、overshoot 1、passed-abeam 8；子集 summary 能过 picker 的 accuracy 读取。
 - intents 登记：`two_tier_v3_grid_20260918`（40 runs + 每 run 4 个 reading 变体 `@lockstep-none[-12km|-8km|-6km]`）；失败方式子集发布时再加 `@failure-<mode>` 变体。
 
