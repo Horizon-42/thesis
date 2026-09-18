@@ -1234,7 +1234,7 @@
   },
   "two_tier_v3_grid_20260918": {
    "title": "两层计划 v3 · 阶段 A1：无 token 执行器的 lookback × 段长网格（4 × 5 格 × 2 种子）",
-   "intent": "v3 计划（docs/2026-09-18_two_tier_plan_v3.zh.md §5.1、§6 D1–D11）的第一个 campaign：09-18 的 token campaign 建立在没有消融过的执行器基线上（lookback 被悄悄定在 60 s，段长成了 token campaign 的轴），所以先把执行器自身的两个轴——看多长历史 L ∈ {30, 60, 90, 120} s、一次飞多长 Δ ∈ {20, 30, 60, 90, 120} s——在无任何第二层信息的执行器上做全网格，每格两个种子。问题：哪一格在闭环里 established（全部与雷达引导组）最高、fully flyable ≥ 0.95；差在本网格自己的 seed 线内算平手，平手取 Δ 短、L 短的（§3.3 A1 行）；若整张网格都在 seed 线内，结论是「在这个范围内 L、Δ 不是关键变量」。每臂两种读数：(a) 从进圈后 L 秒起的闭环；(b) 从剩余 12 / 8 / 6 km 起的闭环。胜出格再做 A2 失败方式诊断（雷达引导组没穿越的航班停在哪、对准过没有、转弯早晚）。09-18 campaign 的三格不复用（cohort 与首问不同）。KRDU only，val split。",
+   "intent": "v3 计划（docs/2026-09-18_two_tier_plan_v3.zh.md §5.1、§6 D1–D11）的第一个 campaign：09-18 的 token campaign 建立在没有消融过的执行器基线上（lookback 被悄悄定在 60 s，段长成了 token campaign 的轴），所以先把执行器自身的两个轴——看多长历史 L ∈ {30, 60, 90, 120} s、一次飞多长 Δ ∈ {20, 30, 60, 90, 120} s——在无任何第二层信息的执行器上做全网格，每格两个种子。问题：哪一格在闭环里 established（全部与雷达引导组）最高、fully flyable ≥ 0.95；差在本网格自己的 seed 线内算平手，平手取 Δ 短、L 短的（§3.3 A1 行）；若整张网格都在 seed 线内，结论是「在这个范围内 L、Δ 不是关键变量」。每臂两种读数：(a) 从进圈后 L 秒起的闭环；(b) 从剩余 12 / 8 / 6 km 起的闭环。胜出格再做 A2 失败方式诊断（雷达引导组没穿越的航班停在哪、对准过没有、转弯早晚）。09-18 campaign 的三格不复用（cohort 与开始预测的时刻不同）。KRDU only，val split。",
    "design": "4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md §5–§8；决定 §6 D1–D11；开发笔记 docs/2026-09-18_two_tier_v3_stage_a_notes.md",
    "runs": {
     "L30_D20_s1337": "无 token 执行器（`plan_conditioning=off`，pa 契约、一阶滞后），lookback 30 s（seq_len 15 行）、段长 20 s、N₁ = 2、种子 1337；第一次预测在第 14 行（进圈后 30 s，无 floor）；训练锚点全随机（remaining-path-uniform，固定锚点份额 0）；该格 cohort = 记录 ≥ 30 + 20 s 的航班（train / val 同一条件）。网格 (L, Δ) 的一格，两种子之一。",
