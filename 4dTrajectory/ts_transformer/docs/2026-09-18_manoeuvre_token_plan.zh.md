@@ -15,7 +15,7 @@ campaign 的读数进 `2026-09-18_manoeuvre_token_results.zh.md`（每个 campai
 | 阶段 | 状态 | 产物 / 指向 |
 |---|---|---|
 | P0 文档 + 文献 + 仓库整理 | **完成 2026-09-18**：文献 `docs/literature/manoeuvre_tokens/`（13 篇，引用全部核实）；代码归档 §5.1 已执行并提交（**9dbb492**：ts 套件 1177 全过，退役字段在默认值时由 `from_dict` 丢弃、否则报名字拒绝，289 个存档 checkpoint 逐个量过，原来能加载的一个没变）；磁盘 §5.4 已执行；38 个 two_tier 类目已撤下、索引已重建、validator 165 类目 0 错 | 本文 §5；**等用户审核本文后才开始 P1** |
-| P1 分词器 + 执行器（联合） | **P1.1–P1.3 完成 2026-09-19**（`manoeuvre/segments.py` 81ca7b1、`manoeuvre/tokenizer.py` 31b9c24、执行器接线 + review 修正 + 码本导出 runner 见下一提交）：ts 套件 1218 全过；opus review 的 2 BLOCKER / 3 MAJOR / 6 MINOR 全部修掉（航向 wrap、码本未记录尺度、越界码、常量重复、冻结模式、身份进 sha）。P1.4 campaign 未启动 | §4.1 P1.1–P1.4，门 T（§3.3）；§6.3 我替你选的 |
+| P1 分词器 + 执行器（联合） | **P1.1–P1.3 完成 2026-09-18**（`manoeuvre/segments.py` 81ca7b1、`manoeuvre/tokenizer.py` 31b9c24、执行器接线 + review 修正 + 码本导出 runner 见下一提交）：ts 套件 1218 全过；opus review 的 2 BLOCKER / 3 MAJOR / 6 MINOR 全部修掉（航向 wrap、码本未记录尺度、越界码、常量重复、冻结模式、身份进 sha）。P1.4 campaign 未启动 | §4.1 P1.1–P1.4，门 T（§3.3）；§6.3 我替你选的 |
 | P2 先验（单机，跑道已知）+ 离散对连续的对照 | 未开始 | 门 P |
 | P3 lockstep：真值码、端到端、闭环再训 | 未开始 | 门 X、S、E |
 | P4 跑道 token + 程序上下文 | 未开始 | 门 R |
@@ -472,7 +472,7 @@ find $A -type d \( -name records -o -name '*_pred_val' \) -prune -exec rm -rf {}
 
 其余选择（K、pa 契约为唯一主臂、跑道在 P4 才作输出）按"规则允许的由我定"处理，写在本文，不再另问。
 
-### 6.3 我替你选的（2026-09-19 夜，P1.1–P1.3；明天审核，改了就是新臂）
+### 6.3 我替你选的（2026-09-18，P1.1–P1.3；明天审核，改了就是新臂）
 
 1. **分层的一个反向边。** 执行器把分词器挂成子模块、把真值段行写进 context row，所以 `outputs/control` 必须 import
    `manoeuvre.segments` 与 `manoeuvre.tokenizer`。这两个是**叶子**（只 import data、config、io_utils、torch，白名单，

@@ -1,0 +1,191 @@
+{
+  "_comment": "Manoeuvre-token plan P1.4 (docs/2026-09-18_manoeuvre_token_plan.zh.md §4.1, gate T §3.3): the tokenizer + executor trained JOINTLY, one file per segment length segment_s = control_horizon_s (20/30/60/90/120 s; N1 = segment_s / 10 ten-second control segments; the random-anchor future floor = segment_s). Executor recipe = v2's L1c pa (§2.6): simple-v3 base, specific-force+path-angle + first-order-lag, imitation / heading-rate / bank-TV / final-time / endpoint terms off, 60 s history (seq_len 30), anchor floor 59, remaining-path-uniform anchors with half the draws at L-1, 180 epochs without early stopping, selection on the fixed-anchor common-grid ADE (= ADE[0, segment_s]). Arms per segment length: the learned tokenizer at K in {16, 32, 64, 128, 256} (FSQ levels 4/4, 8/4, 4/4/4, 8/4/4, 4/4/4/4) x two seeds; a NO-TOKEN twin (plan_conditioning off, same recipe) x two seeds = gate T(i)'s baseline; the COMMAND-VOCABULARY baseline B (63 rule codes, z = one-hot) x two seeds. File order = queue priority: no-token, K32, K128, command-vocabulary at seed 1337, the same at 2024, then K16 / K64 / K256. ONE development cohort for the whole campaign, written at the strictest contract (120 s at anchor 59) so the segment-length axis is compared on the same train flights. KRDU only, val split; the airport-balanced sampler is not exercised. No records (\"predict\": false): the readouts (run_ts.py manoeuvre_readout) read the checkpoints.",
+  "predict": false,
+  "development_cohort": "4dTrajectory/outputs/{airport}/experiments/manoeuvre_tok_20260918/development_cohort.json",
+  "base_recipe": "simple-v3",
+  "base": {
+    "control_recipe_name": "custom",
+    "control_thrust_parameterization": "specific-force+path-angle",
+    "seq_len": 30,
+    "anchor_floor_index": 59,
+    "control_imitation_loss_weight": 0.0,
+    "control_heading_rate_loss_weight": 0.0,
+    "control_bank_tv_loss_weight": 0.0,
+    "final_time_loss_weight": 0.0,
+    "state_endpoint_loss_weight": 0.0,
+    "random_train_anchor": true,
+    "random_train_anchor_sampling": "remaining-path-uniform",
+    "random_train_anchor_l1_share": 0.5,
+    "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+    "lr_plateau_metric": "objective",
+    "epochs": 180,
+    "patience": 180,
+    "control_horizon_s": 90.0,
+    "n_segments": 9,
+    "random_train_anchor_min_future_s": 90.0
+  },
+  "arms": [
+    {
+      "key": "S90_nt_s1337",
+      "label": "no-token twin, segment 90 s, N1=9, seed 1337",
+      "overrides": {
+        "plan_conditioning": "off",
+        "seed": 1337
+      }
+    },
+    {
+      "key": "S90_K32_s1337",
+      "label": "learned tokenizer K=32 (FSQ 8/4), segment 90 s, N1=9, seed 1337",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          8,
+          4
+        ],
+        "seed": 1337
+      }
+    },
+    {
+      "key": "S90_K128_s1337",
+      "label": "learned tokenizer K=128 (FSQ 8/4/4), segment 90 s, N1=9, seed 1337",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          8,
+          4,
+          4
+        ],
+        "seed": 1337
+      }
+    },
+    {
+      "key": "S90_cv_s1337",
+      "label": "command-vocabulary baseline B (63 rule codes), segment 90 s, N1=9, seed 1337",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_tokenizer": "command-vocabulary",
+        "seed": 1337
+      }
+    },
+    {
+      "key": "S90_nt_s2024",
+      "label": "no-token twin, segment 90 s, N1=9, seed 2024",
+      "overrides": {
+        "plan_conditioning": "off",
+        "seed": 2024
+      }
+    },
+    {
+      "key": "S90_K32_s2024",
+      "label": "learned tokenizer K=32 (FSQ 8/4), segment 90 s, N1=9, seed 2024",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          8,
+          4
+        ],
+        "seed": 2024
+      }
+    },
+    {
+      "key": "S90_K128_s2024",
+      "label": "learned tokenizer K=128 (FSQ 8/4/4), segment 90 s, N1=9, seed 2024",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          8,
+          4,
+          4
+        ],
+        "seed": 2024
+      }
+    },
+    {
+      "key": "S90_cv_s2024",
+      "label": "command-vocabulary baseline B (63 rule codes), segment 90 s, N1=9, seed 2024",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_tokenizer": "command-vocabulary",
+        "seed": 2024
+      }
+    },
+    {
+      "key": "S90_K16_s1337",
+      "label": "learned tokenizer K=16 (FSQ 4/4), segment 90 s, N1=9, seed 1337",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          4,
+          4
+        ],
+        "seed": 1337
+      }
+    },
+    {
+      "key": "S90_K16_s2024",
+      "label": "learned tokenizer K=16 (FSQ 4/4), segment 90 s, N1=9, seed 2024",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          4,
+          4
+        ],
+        "seed": 2024
+      }
+    },
+    {
+      "key": "S90_K64_s1337",
+      "label": "learned tokenizer K=64 (FSQ 4/4/4), segment 90 s, N1=9, seed 1337",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          4,
+          4,
+          4
+        ],
+        "seed": 1337
+      }
+    },
+    {
+      "key": "S90_K64_s2024",
+      "label": "learned tokenizer K=64 (FSQ 4/4/4), segment 90 s, N1=9, seed 2024",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          4,
+          4,
+          4
+        ],
+        "seed": 2024
+      }
+    },
+    {
+      "key": "S90_K256_s1337",
+      "label": "learned tokenizer K=256 (FSQ 4/4/4/4), segment 90 s, N1=9, seed 1337",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          4,
+          4,
+          4,
+          4
+        ],
+        "seed": 1337
+      }
+    },
+    {
+      "key": "S90_K256_s2024",
+      "label": "learned tokenizer K=256 (FSQ 4/4/4/4), segment 90 s, N1=9, seed 2024",
+      "overrides": {
+        "plan_conditioning": "manoeuvre-code",
+        "manoeuvre_fsq_levels": [
+          4,
+          4,
+          4,
+          4
+        ],
+        "seed": 2024
+      }
+    }
+  ]
+}

@@ -4,7 +4,7 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
-### 2026-09-19 — manoeuvre-token plan P1.1–P1.3: segments, the tokenizer + codebook, the executor wiring
+### 2026-09-18 — manoeuvre-token plan P1.1–P1.3: segments, the tokenizer + codebook, the executor wiring
 
 - `4dTrajectory/ts_transformer/manoeuvre/` is the intent-token package (plan
   `docs/2026-09-18_manoeuvre_token_plan.zh.md`). `segments.py`: the segment cut from an anchor,
