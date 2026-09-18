@@ -232,17 +232,20 @@ def fly(
             step = _prior_step(prior, prefix_codes, prefix_states, active, codebook, device)
             landed = step.landed_probability.cpu().numpy()
             fraction = step.landed_fraction.cpu().numpy()
+            # the codebook's tokenizer lives on the CPU; the prior may be on the GPU
+            step_codes = None if step.code is None else step.code.cpu()
+            step_z = None if step.z is None else step.z.cpu()
             for row, run in enumerate(active):
                 run.landed_probabilities.append(float(landed[row]))
                 # the prior says the flight lands inside this segment: the top-1 code is flown for
                 # that fraction of it (the last, partial segment), then the flight ends
                 run.landing_this_round = float(fraction[row]) if landed[row] > LANDED_THRESHOLD else None
-                if step.code is not None:
-                    codes.append(int(step.code[row]))
-                    z_rows.append(codebook.tokenizer.codes_to_z(step.code[row : row + 1]).cpu().numpy()[0])
+                if step_codes is not None:
+                    codes.append(int(step_codes[row]))
+                    z_rows.append(codebook.tokenizer.codes_to_z(step_codes[row : row + 1]).numpy()[0])
                 else:
-                    z_rows.append(step.z[row].cpu().numpy())
-                    codes.append(int(codebook.tokenizer.z_to_codes(step.z[row : row + 1]).cpu().numpy()[0]))
+                    z_rows.append(step_z[row].numpy())
+                    codes.append(int(codebook.tokenizer.z_to_codes(step_z[row : row + 1]).numpy()[0]))
         z = np.stack(z_rows)
         forecasts = _fly(executor, histories, anchor, z, device, batch_size)
         plan_legs: list[Forecast] | None = None

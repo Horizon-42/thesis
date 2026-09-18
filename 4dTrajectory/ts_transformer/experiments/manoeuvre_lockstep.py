@@ -1,0 +1,212 @@
+"""Fly one lockstep protocol (plan §2.7) over the executor's val cohort and write the readout.
+
+    python run_ts.py manoeuvre_lockstep --executor <arm>/checkpoint.pt --codebook <dir> --protocol C \\
+        --out <dir> [--batch-size 64] [--limit N] [--device auto] [--write-records]
+    python run_ts.py manoeuvre_lockstep --executor … --codebook … --protocol A --prior <dir>/prior.pt --out …
+    python run_ts.py manoeuvre_lockstep --executor … --codebook … --protocol A-truth --prior … --out …
+
+The three artefacts must be ONE vocabulary: a jointly trained executor's codebook is the one
+exported from it (the codebook's ``source.checkpoint_sha256`` is the executor's), an executor
+trained against a codebook carries its sha (`codebook_sha256`), and the prior carries the sha
+of the codebook it was trained on — a mismatch refuses. The cohort is the executor's val split
+(rebuilt, provenance verified). Writes ``manoeuvre_lockstep.json`` (per-flight rows included)
+and ``manoeuvre_lockstep.txt`` under ``--out`` (refused if it exists); ``--write-records``
+adds the flown paths as a predict-shaped record directory under ``<out>/records/``.
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from pathlib import Path
+import time
+from typing import Any
+
+import numpy as np
+import torch
+
+from ts_transformer.backbone.adapters import resolve_device
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_SHORT, strata_masks
+from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
+from ts_transformer.data.dataset import build_series, load_flight_dicts
+from ts_transformer.experiments.support import REPO_ROOT
+from ts_transformer.inference.export import build_prediction_record, write_batch
+from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.manoeuvre import lockstep as ls
+from ts_transformer.manoeuvre.context import TypeVocabulary
+from ts_transformer.manoeuvre.prior import ManoeuvrePrior, PriorConfig
+from ts_transformer.manoeuvre.readout import STRATA
+from ts_transformer.manoeuvre.tokenizer import load_codebook
+from ts_transformer.repo_layout import arrival_manifest_path
+from ts_transformer.run_naming import run_display_name
+from ts_transformer.training.train import load_checkpoint, usable_series
+
+LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v1"
+
+
+def load_prior(path: Path, device: torch.device) -> tuple[ls.Prior, dict[str, Any]]:
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    model = ManoeuvrePrior(PriorConfig.from_dict(payload["prior_config"]))
+    model.load_state_dict(payload["state_dict"])
+    return ls.Prior(model=model.to(device).eval(), vocabulary=TypeVocabulary.from_dict(payload["vocabulary"])), payload
+
+
+def _p50(values) -> float | None:
+    values = [v for v in values if v is not None]
+    return float(np.median(values)) if values else None
+
+
+def stratum_table(rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    keys = list(rows)
+    masks = strata_masks(rows, keys)
+    out: dict[str, dict[str, Any]] = {}
+    for stratum in STRATA:
+        chosen = [rows[key] for key, keep in zip(keys, masks[stratum]) if keep]
+        if not chosen:
+            out[stratum] = {"n": 0}
+            continue
+        out[stratum] = {
+            "n": len(chosen),
+            "ade_mean_m": float(np.mean([r["ade_m"] for r in chosen])),
+            "ade_p50_m": _p50([r["ade_m"] for r in chosen]),
+            "fde_p50_m": _p50([r["fde_m"] for r in chosen]),
+            "chamfer_p50_m": _p50([r["chamfer_m"] for r in chosen]),
+            "final_time_error_mae_s": float(np.mean([abs(r["final_time_error_s"]) for r in chosen])),
+            "fully_flyable_share": float(np.mean([r["reference"]["fully_flyable"] for r in chosen])),
+            "established_share": float(np.mean([r["reference"]["established"] for r in chosen])),
+            "at_p50_m": {lead: _p50([r["at"][lead] for r in chosen]) for lead in chosen[0]["at"]},
+            "at_n": {lead: sum(r["at"][lead] is not None for r in chosen) for lead in chosen[0]["at"]},
+            "ended": dict(Counter(r["ended"] for r in chosen)),
+            "asks_p50": _p50([r["asks"] for r in chosen]),
+            "e_track_by_round_p50_m": _by_round(chosen, "e_track_m"),
+            "e_plan_by_round_p50_m": _by_round(chosen, "e_plan_m"),
+        }
+    return out
+
+
+def _by_round(rows, key) -> dict[str, float | None]:
+    by_round: dict[int, list[float]] = {}
+    for row in rows:
+        for ask in row["asks_e"]:
+            if ask.get(key) is not None:
+                by_round.setdefault(ask["round"], []).append(ask[key])
+    return {str(k): float(np.median(v)) for k, v in sorted(by_round.items())}
+
+
+def render(payload: dict[str, Any]) -> str:
+    lines = [
+        f"manoeuvre lockstep · {payload['protocol']} · {payload['executor_name']} · {payload['flights']} flights · "
+        f"segment {payload['segment_s']:g} s · anchor {payload['anchor']}"
+        + (f" · prior {payload['prior']}" if payload.get("prior") else ""),
+        "",
+        f"{'stratum':<14}{'n':>6}{'ADE mean':>10}{'ADE p50':>9}{'FDE p50':>9}{'flyable':>9}{'estab':>8}"
+        f"{'e60':>7}{'e120':>7}{'e180':>7}{'e300':>7}{'asks':>6}  ended",
+    ]
+    for stratum in STRATA:
+        cell = payload["strata"][stratum]
+        if not cell["n"]:
+            continue
+        at = cell["at_p50_m"]
+        fmt = lambda v: f"{v:>7.0f}" if v is not None else f"{'—':>7}"
+        lines.append(
+            f"{STRATUM_SHORT[stratum]:<14}{cell['n']:>6}{cell['ade_mean_m']:>10.0f}{cell['ade_p50_m']:>9.0f}{cell['fde_p50_m']:>9.0f}"
+            f"{cell['fully_flyable_share']:>9.3f}{cell['established_share']:>8.3f}"
+            f"{fmt(at['60'])}{fmt(at['120'])}{fmt(at['180'])}{fmt(at['300'])}{cell['asks_p50']:>6.0f}  "
+            + ", ".join(f"{k} {v}" for k, v in sorted(cell["ended"].items()))
+        )
+    pooled = payload["strata"][STRATUM_ALL]
+    lines.append("")
+    lines.append("e_track p50 by round: " + "  ".join(f"r{k} {v:.0f}" for k, v in pooled["e_track_by_round_p50_m"].items()))
+    if pooled["e_plan_by_round_p50_m"]:
+        lines.append("e_plan  p50 by round: " + "  ".join(f"r{k} {v:.0f}" for k, v in pooled["e_plan_by_round_p50_m"].items()))
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
+    parser.add_argument("--executor", type=Path, required=True)
+    parser.add_argument("--codebook", type=Path, required=True)
+    parser.add_argument("--protocol", required=True, choices=ls.PROTOCOLS)
+    parser.add_argument("--prior", type=Path, default=None)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the val cohort (a smoke test)")
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--write-records", action="store_true")
+    args = parser.parse_args(argv)
+    out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
+    if out.exists():
+        parser.error(f"{out} exists; a lockstep readout is never overwritten")
+    if (args.protocol != ls.PROTOCOL_C) != (args.prior is not None):
+        parser.error("protocols A and A-truth take --prior; protocol C takes none")
+    device = resolve_device(args.device)
+    started = time.perf_counter()
+
+    executor_path = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
+    model, config, normalizer, payload = load_checkpoint(executor_path)
+    executor = ls.Executor(model=model.to(device).eval(), config=config, normalizer=normalizer)
+    codebook = load_codebook(args.codebook if args.codebook.is_absolute() else REPO_ROOT / args.codebook)
+    executor_sha = file_sha256(executor_path)
+    bound = model.codebook_sha256 == codebook.sha256 if config.manoeuvre_codebook else codebook.source.get("checkpoint_sha256") == executor_sha
+    if not bound:
+        parser.error(f"{codebook.path} is not this executor's codebook (an executor trained against a codebook carries its sha; "
+                     "a jointly trained one is the codebook's source)")
+    prior = prior_payload = None
+    if args.prior is not None:
+        prior, prior_payload = load_prior(args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior, device)
+        if prior_payload["codebook_sha256"] != codebook.sha256:
+            parser.error(f"{args.prior} was trained on codebook {prior_payload['codebook_sha256'][:12]}…, not {codebook.sha256[:12]}…")
+    airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
+    manifests = [arrival_manifest_path(item) for item in airports]
+    require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
+    wanted = payload["split"]["val"][: args.limit] if args.limit else payload["split"]["val"]
+    built, report = build_series(load_flight_dicts(manifests, include_flight_keys=set(wanted), verbose=False), config,
+                                 aircraft_type=config.aircraft_type)
+    print(f"  {report.format()}", flush=True)
+    by_id = {item.dataset_id: item for item in usable_series(built, config, verbose=False)}
+    missing = [key for key in wanted if key not in by_id]
+    if missing:
+        raise SystemExit(f"{len(missing)} of {len(wanted)} val flights could not be rebuilt (first: {missing[0]!r})")
+    series = [by_id[key] for key in wanted]
+    print(f"  {args.protocol}: {len(series)} flights, {run_display_name(config.to_dict())}", flush=True)
+
+    runs = ls.fly(executor, codebook, series, args.protocol, prior=prior, device=device, batch_size=args.batch_size,
+                  log=lambda line: print(line, flush=True))
+    rows: dict[str, dict[str, Any]] = {}
+    pairs = []
+    for index, run in enumerate(runs):
+        if not run.legs:
+            continue
+        row, metrics = ls.flight_row(run, points=config.validation_common_grid_points)
+        rows[run.series.dataset_id] = row
+        if args.write_records:
+            forecast = ls.whole_forecast(run)
+            pairs.append((build_prediction_record(run.series, forecast, index=index, model_name=config.model,
+                                                  horizon_mode=config.horizon_mode, split="val"), metrics))
+    flown_none = len(runs) - len(rows)
+    payload_out = {
+        "schema": LOCKSTEP_SCHEMA, "written_utc": utc_now(), "protocol": args.protocol,
+        "executor": str(executor_path), "executor_sha256": executor_sha, "executor_name": run_display_name(config.to_dict()),
+        "codebook": str(codebook.path), "codebook_sha256": codebook.sha256,
+        "prior": None if args.prior is None else str(args.prior),
+        "prior_sha256": None if args.prior is None else file_sha256(args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior),
+        "prior_continuous": None if prior is None else prior.model.config.continuous,
+        "segment_s": codebook.segment_s, "anchor": runs[0].anchor, "split": "val", "limit": args.limit or None,
+        "flights": len(rows), "flights_without_a_leg": flown_none,
+        "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first ask (a cap; under A the prior's landed decides)",
+        "strata": stratum_table(rows), "rows": rows, "elapsed_s": time.perf_counter() - started,
+    }
+    out.mkdir(parents=True)
+    write_json_atomic(out / "manoeuvre_lockstep.json", payload_out)
+    table = render(payload_out)
+    (out / "manoeuvre_lockstep.txt").write_text(table, encoding="utf-8")
+    print(table)
+    if pairs:
+        write_batch([r for r, _ in pairs], output_dir=out / "records", config_dict=config.to_dict(),
+                    flight_metrics=[m for _, m in pairs], checkpoint=str(executor_path), split="val",
+                    extra_summary={"manoeuvre_lockstep": {k: v for k, v in payload_out.items() if k not in ("rows", "strata")}})
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
