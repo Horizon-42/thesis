@@ -865,11 +865,3 @@ than raise, and the segment-plan readout admits its fixed set on the observed ro
 **Judgement**: one convention would be better — either the readouts read the supervision rows (the package's
 stated truth) or the anchor sets admit on the observed ones — but changing `displacement_at`'s truth moves
 every S1 number and the `lead_time_error` accounting it mirrors, so it is a decision, not a fix.
-
-## 43. `.claude/worktrees/arrival-quality` is committed as a gitlink (2026-09-16)
-
-**Verified**: `git ls-files -s .claude/worktrees/arrival-quality` is mode `160000`
-(commit `f58ecf3`), added by bdc82cb (2026-08-24), with no `.gitmodules` entry — a nested
-worktree swept into a commit. `.git/info/exclude` hides `.claude/worktrees/` for NEW files only.
-**Judgement**: `git rm --cached .claude/worktrees/arrival-quality` in the owner's own commit (the
-worktree itself, `feat/arrival-takeoff-filter`, is the owner's and stays on disk).

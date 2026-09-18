@@ -19,6 +19,18 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
   Its 2026-04 changelog tail was dropped: `docs/CHANGELOG.md` already carries those entries.
 - `docs/code-health-followups.md`: #41 and #42 removed (fixed). **#43 stays** — the
   `.claude/worktrees/arrival-quality` gitlink is in the owner's own worktree.
+- **#43 closed too** (owner approved): `.claude/worktrees/arrival-quality` was a gitlink (mode
+  160000, `f58ecf3`) swept into bdc82cb on 2026-08-24, with no `.gitmodules` entry. Its branch
+  `feat/arrival-takeoff-filter` is an ancestor of `dev-two-tier-feasibility` with 0 unique commits,
+  so nothing was unmerged. Removed from the index (`git rm --cached`).
+- **Merged worktrees cleaned up**: `arrival-quality` (`feat/arrival-takeoff-filter`), `lnav-vnav`
+  (`dev-observed-load-factor-metar`), `sf-n4` (`sf-n4`), `sf-n6` (`sf-n7`), `specific-force`
+  (`specific-force-control`) — all clean, all 0 unique commits against the current branch; their 17
+  data symlinks were unlinked first (the live `data`, `4dTrajectory/outputs`,
+  `trajectory_data_process/outputs`, `node_modules` and `public/data/airports` verified intact),
+  then `git worktree remove` + `git branch -d`. KEPT: `../thesis-l2`, the unmerged
+  `cifp-thresholds` (1 unique commit) and the locked `runway-intent-plan` (2), and the two-tier
+  `runs` / `pub` worktrees the queue uses.
 - `evaluation/docs/EVALUATION_REFERENCE.md` EV9 carries a dated note (its verbatim text quotes the
   old message); `trajectory_data_process/CLAUDE.md` drops the caveat that pointed at #41.
 
