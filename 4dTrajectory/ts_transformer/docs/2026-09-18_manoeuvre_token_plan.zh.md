@@ -15,9 +15,9 @@ campaign 的读数进 `2026-09-18_manoeuvre_token_results.zh.md`（每个 campai
 | 阶段 | 状态 | 产物 / 指向 |
 |---|---|---|
 | P0 文档 + 文献 + 仓库整理 | **完成 2026-09-18**：文献 `docs/literature/manoeuvre_tokens/`（13 篇，引用全部核实）；代码归档 §5.1 已执行并提交（**9dbb492**：ts 套件 1177 全过，退役字段在默认值时由 `from_dict` 丢弃、否则报名字拒绝，289 个存档 checkpoint 逐个量过，原来能加载的一个没变）；磁盘 §5.4 已执行；38 个 two_tier 类目已撤下、索引已重建、validator 165 类目 0 错 | 本文 §5；**等用户审核本文后才开始 P1** |
-| P1 分词器 + 执行器（联合） | **P1.1–P1.3 完成 2026-09-18**（`manoeuvre/segments.py` 81ca7b1、`manoeuvre/tokenizer.py` 31b9c24、执行器接线 + review 修正 + 码本导出 runner 见下一提交）：ts 套件 1218 全过；opus review 的 2 BLOCKER / 3 MAJOR / 6 MINOR 全部修掉（航向 wrap、码本未记录尺度、越界码、常量重复、冻结模式、身份进 sha）。**P1.4 campaign `manoeuvre_tok_20260918` 已启动 2026-09-18 06:13**（c391265；5 段长 × 14 臂 = 70 臂，队列顺序 60→30→90→20→120 s，每臂约 11 min，链 `<campaign>/queue_p14.sh` PID 2671532；读数 `run_ts.py manoeuvre_readout` 每段训完由 opus 队列代理跑并回报；结果进 results 文件 P1.4 节） | §4.1 P1.1–P1.4，门 T（§3.3）；§6.3 我替你选的 |
-| P2 先验（单机，跑道已知）+ 离散对连续的对照 | **P2.1 代码完成 2026-09-18**（`manoeuvre/sequences.py`、`context.py`、`prior.py`，runner `run_ts.py manoeuvre_prior`：离散与连续同一骨架一个开关，bigram 基线随 metadata 写出；在冒烟 codebook 上端到端跑通）。P2.2 读数与 P2.3 campaign 等 P1.4 的码本（过门 T 的 K）。先验用执行器自己的航班划分（§6.3 第 10 条），运行日划分留给 P4 | 门 P |
-| P3 lockstep：真值码、端到端、闭环再训 | **P3.1 代码完成 2026-09-18**（`manoeuvre/lockstep.py` 协议 C / A / A-truth，一轮 = 段长，飞出段经码本回灌，e_track 与 e_plan 逐问；`manoeuvre/gates.py` 门 X / P / E / S 拒绝单种子；runner `run_ts.py manoeuvre_lockstep`，在冒烟产物上 C 与 A 端到端跑通）。两轮 opus review 的 3 BLOCKER / 4 MAJOR 已修（changelog 2026-09-18）。P3.3 的**先验侧**已写：`manoeuvre_lockstep --protocol C --split train` 把飞出段经码本回灌并写 `flown_codes` / `flown_states`，`manoeuvre_prior --rolled <该 json> --rolled-share 0.75` 以真值码为时间索引标签混训（`sequences.rolled_sequence`）；**执行器侧**（在飞出腿的窗口上再训）未写——需要 `WindowContext.override` 返回时间索引的真值目标，等门 E 第一读决定要不要做。门 X 的规则制导基线取 §3.1 的 step3d 数（0.956）。P3.2 读数等 P1.4 码本 + P2.3 先验 | 门 X、S、E |
+| P1 分词器 + 执行器（联合） | **P1.1–P1.3 完成 2026-09-18**（`manoeuvre/segments.py` 81ca7b1、`manoeuvre/tokenizer.py` 31b9c24、执行器接线 + review 修正 + 码本导出 runner 见下一提交）：ts 套件 1218 全过；opus review 的 2 BLOCKER / 3 MAJOR / 6 MINOR 全部修掉（航向 wrap、码本未记录尺度、越界码、常量重复、冻结模式、身份进 sha）。**P1.4 campaign `manoeuvre_tok_20260918` 已启动 2026-09-18 06:13**（c391265；5 段长 × 14 臂 = 70 臂，队列顺序 60→30→90→20→120 s，每臂约 11 min，链 `<campaign>/queue_p14.sh` PID 2671532；读数 `run_ts.py manoeuvre_readout` 每段训完由 opus 队列代理跑并回报；结果进 results 文件 P1.4 节）。**60 s 段早读 08:00（8/14 臂）：门 T 全 FAIL**——K32 / K128 / 指令词表两种子配对增益 p50 +2…+9 m（线 30 m；增益在雷达引导层、重尾，均值 +35…+45 m），最大码份额 47–79 %（指令词表自己 79 %：25 % 线在这个 cohort 上无法达到）；T(ii) 过（K32 s1337 先验 0.564 对 bigram 1.511 nats/码）；K16 / K64 / K256 训练中，其余段长照跑；事后改门的三个问题在 §6.3 第 14 条 | §4.1 P1.1–P1.4，门 T（§3.3）；§6.3 我替你选的 |
+| P2 先验（单机，跑道已知）+ 离散对连续的对照 | **P2.1 代码完成 2026-09-18**（`manoeuvre/sequences.py`、`context.py`、`prior.py`，runner `run_ts.py manoeuvre_prior`：离散与连续同一骨架一个开关，bigram 基线随 metadata 写出；在冒烟 codebook 上端到端跑通）。P2.2 读数与 P2.3 campaign 等 P1.4 的码本（过门 T 的 K）。先验用执行器自己的航班划分（§6.3 第 10 条），运行日划分留给 P4。**诊断链 `<campaign>/p23_S60_K32/` 2026-09-18 08:08 启动**（未过门 T 的 K32，两种子：码本导出 → 离散 / 连续先验 → 先验读数 → atlas → lockstep C / A-truth / A / A-连续 → 门 E / P / X；§6.3 第 13 条）；先验 s1337：val 下一码 NLL 0.564 对 bigram 1.511、top-1 0.79 | 门 P |
+| P3 lockstep：真值码、端到端、闭环再训 | **P3.1 代码完成 2026-09-18**（`manoeuvre/lockstep.py` 协议 C / A / A-truth，一轮 = 段长，飞出段经码本回灌，e_track 与 e_plan 逐问；`manoeuvre/gates.py` 门 X / P / E / S 拒绝单种子；runner `run_ts.py manoeuvre_lockstep`，在冒烟产物上 C 与 A 端到端跑通）。两轮 opus review 的 3 BLOCKER / 4 MAJOR 已修（changelog 2026-09-18）。P3.3 的**先验侧**已写：`manoeuvre_lockstep --protocol C --split train` 把飞出段经码本回灌并写 `flown_codes` / `flown_states`，`manoeuvre_prior --rolled <该 json> --rolled-share 0.75` 以真值码为时间索引标签混训（`sequences.rolled_sequence`）；**执行器侧**（在飞出腿的窗口上再训）未写——需要 `WindowContext.override` 返回时间索引的真值目标，等门 E 第一读决定要不要做。门 X 的规则制导基线取 §3.1 的 step3d 数（0.956）。P3.2 的第一读来自诊断链 `p23_S60_K32`（P2 行；不是过门 S 的候选，除非用户改门 T） | 门 X、S、E |
 | P4 跑道 token + 程序上下文 | 未开始 | 门 R |
 | P5 多机图层 | 未开始 | 门 G（先做 oracle 上限） |
 | P6 发布 + 索引 | 未开始 | — |
@@ -495,6 +495,19 @@ find $A -type d \( -name records -o -name '*_pred_val' \) -prune -exec rm -rf {}
 11. **先验的状态 token = 跑道入口图里的 (e, n, u, 地速, cos ψ, sin ψ)**（P2–P3 跑道已知，图就是跑道的）；P4 跑道未知时改到机场系。
     `LANDED` 不是第 K+1 类而是每个位置一个独立的二元头（离散、连续两版同一骨架），落地分数 = 末段之后剩余的段分数 ∈ [0, 1)。
 12. **连续对照的回归目标 = 编码器 bound 后、round 前的坐标**（与 z 同一空间，`Codebook.encode_continuous`），执行器按 `manoeuvre_z` 吃它。
+13. **门 T 在 60 s 段 FAIL 后我做的事（2026-09-18 08:08）**：门按预注册判、不改线；campaign 照跑其余段长（30 → 90 → 20 → 120）；
+    在未过门的 (60 s, K32) 上启动 P2.3 + P3.2 的全链作**诊断**（`<campaign>/queue_p23.sh 60 32` → `p23_S60_K32/`），因为它回答的问题
+    （先验的可预测性与翻转率、执行器闭环下的建立与可飞、端到端对 v2 3044 m 的位置）不管 K 怎么选都要读，而且与训练队列并行不抢多少 GPU。
+    它的读数**不是**过门 S 的候选，除非用户改门 T。
+14. **待用户决定（三个事后改门的问题，我没有替你改）**：
+    (a) **T(iii) 的 25 % 最大份额线**：数据自身在固定锚点的主类份额是 79 %（指令词表"直飞 / 下降 / 减速"），随机锚点上 66 %，任何忠实的
+    分词器都过不了。建议改成**相对指令词表**：学习码本的最大份额 ≤ 指令词表的、未用份额 ≤ 指令词表的 + 10 点；或只保留未用份额一条。改了是新门，不是新臂。
+    (b) **T(i) 的 30 m 线**来自 v2 §10.8 的整条进近（ADE 1300 m 量级）；60 s 段上无 token 臂本身只有 85 m，30 m 是它的 35 %，而增益本来就
+    只可能出现在雷达引导层（n 497）。两个方向：按 Δ 与层缩放（如雷达引导层 p50 增益 ≥ 无 token 臂雷达 ADE 的 15 %）——事后设线，要用户定；
+    或保持绝对线、接受 60 s 段 FAIL，由 90 / 120 s 段判（段越长历史决定得越少，码的空间越大，但 §2.3 的单峰性变差）。**我的倾向：保持绝对线，
+    等 90 / 120 s 的读数再说。**
+    (c) **未用码份额 56–84 %**：§6.1 的后备"先冻结一个重建式编码器作初始化再联合；FSQ 档位减少"是设计改动 = 新臂族，不启动；K16 = (4,4) 已是
+    队列里最小的档位，它的读数先看。
 
 ---
 
