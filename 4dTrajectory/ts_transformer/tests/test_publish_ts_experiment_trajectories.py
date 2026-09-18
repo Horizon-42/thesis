@@ -361,10 +361,15 @@ def test_replay_runner_records_are_refused_without_a_variant(monkeypatch, tmp_pa
 
 
 def test_the_publishers_variant_blocks_mirror_the_runners():
-    """The publisher restates the runners' block names (it cannot import torch); pinned here."""
-    from ts_transformer.experiments import chain_sensitivity
+    """The publisher restates the runners' block names (it cannot import torch); pinned here —
+    the chain runner's and both manoeuvre-token readouts' (a lockstep directory published bare
+    would otherwise be filed as the executor's own prediction; 2026-09-18)."""
+    from ts_transformer.experiments import chain_sensitivity, manoeuvre_lockstep
+    from ts_transformer.manoeuvre import readout
 
     assert chain_sensitivity.RECORDS_BLOCK in publisher.VARIANT_RECORD_BLOCKS
+    assert readout.RECORDS_BLOCK in publisher.VARIANT_RECORD_BLOCKS
+    assert manoeuvre_lockstep.LOCKSTEP_RECORDS_BLOCK in publisher.VARIANT_RECORD_BLOCKS
 
 
 def test_a_variant_slug_defaults_its_own_label_and_rejects_an_unusable_one():
@@ -1318,6 +1323,25 @@ def test_refresh_writes_nothing_while_a_listed_category_lacks_an_intent(
     assert publisher.refresh_labels_from_manifests(
         tmp_path / "published", tmp_path / "frontend"
     ) == (1, 0)
+
+
+def test_a_variant_key_is_read_by_its_lower_cased_slug_and_a_case_collision_is_refused(tmp_path):
+    """The registry names protocols as the plan does (``@lockstep-A``) while the category
+    variant slug is lower-cased into the key: the lookup meets in the middle, once, at the
+    registry read (the first manoeuvre lockstep was published without its variant intent
+    because of this, 2026-09-18)."""
+    path = tmp_path / "intents.json"
+    campaign = {"title": "t", "intent": "x", "variants": {"run@lockstep-A": "protocol A"}}
+    _write_json(path, {"schemaVersion": publisher.INTENT_REGISTRY_SCHEMA, "campaigns": {"c": campaign}})
+    assert publisher.load_intent_campaigns(path)["c"]["variants"] == {"run@lockstep-a": "protocol A"}
+    campaign["variants"]["run@lockstep-a"] = "the same variant, twice"
+    _write_json(path, {"schemaVersion": publisher.INTENT_REGISTRY_SCHEMA, "campaigns": {"c": campaign}})
+    with pytest.raises(ValueError, match="differing only by case"):
+        publisher.load_intent_campaigns(path)
+    campaign["variants"] = {"no-at-sign": "x"}
+    _write_json(path, {"schemaVersion": publisher.INTENT_REGISTRY_SCHEMA, "campaigns": {"c": campaign}})
+    with pytest.raises(ValueError, match="not <run>@<variant>"):
+        publisher.load_intent_campaigns(path)
 
 
 @pytest.mark.parametrize("entry, message", [

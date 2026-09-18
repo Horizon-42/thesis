@@ -113,11 +113,14 @@ ANYTIME_RECORDS_SCHEMA = "ts-anytime-records-v1"
 #: ``experiments.chain_sensitivity`` (``chain``: the one-shot and the chained re-ask of one
 #: checkpoint) and the archived two-tier lockstep's ``lockstep`` block (its published
 #: categories keep it readable; `archive/two_tier_v2_2026_09/tracker_lockstep.py`), for the same
-#: reason the anytime schema above is one. The manoeuvre-token readouts register their own
-#: blocks here when they publish (plan §4.2). A directory carrying one is a VARIANT of that
-#: checkpoint's prediction and has no category of its own without ``--category-variant``:
-#: published bare, it would be filed as the checkpoint's L−1 prediction.
-VARIANT_RECORD_BLOCKS = ("chain", "lockstep")
+#: reason the anytime schema above is one — and the manoeuvre-token readouts' blocks
+#: (``manoeuvre_readout``: `manoeuvre.readout.RECORDS_BLOCK`, protocol C at the fixed anchor;
+#: ``manoeuvre_lockstep``: `experiments.manoeuvre_lockstep.LOCKSTEP_RECORDS_BLOCK`, the
+#: closed-loop protocols), registered 2026-09-18 when the first lockstep was published. A
+#: directory carrying one is a VARIANT of that checkpoint's prediction and has no category of
+#: its own without ``--category-variant``: published bare, it would be filed as the checkpoint's
+#: L−1 prediction.
+VARIANT_RECORD_BLOCKS = ("chain", "lockstep", "manoeuvre_readout", "manoeuvre_lockstep")
 
 
 def _utc_now() -> str:
@@ -230,7 +233,13 @@ def _text(value: Any) -> bool:
 def load_intent_campaigns(path: Path) -> dict[str, dict[str, Any]]:
     """The registry's campaigns, validated once here: ``title`` and ``intent`` required,
     ``design`` optional, ``runs`` / ``variants`` optional maps of non-empty strings (read as
-    empty when absent — a record campaign that trained nothing has no runs)."""
+    empty when absent — a record campaign that trained nothing has no runs).
+
+    A variant key is ``<run>@<slug>``; the slug part is read case-insensitively (lower-cased
+    here, once), because a ``--category-variant`` slug is lower-cased into the category key
+    while the registry names protocols the way the plan does (``@lockstep-A``). Two keys that
+    differ only by the slug's case are refused: they would be one variant with two intents.
+    """
     document = _load_object(path)
     if document.get("schemaVersion") != INTENT_REGISTRY_SCHEMA:
         raise ValueError(
@@ -256,9 +265,27 @@ def load_intent_campaigns(path: Path) -> dict[str, dict[str, Any]]:
                 isinstance(k, str) and _text(v) for k, v in value.items()
             ):
                 raise ValueError(f"{where}.{name} must map ids to non-empty strings")
+            if name == "variants":
+                value = _variants_by_lowercase_slug(value, where)
             maps[name] = value
         validated[key] = {**entry, **maps}
     return validated
+
+
+def _variants_by_lowercase_slug(variants: dict[str, str], where: str) -> dict[str, str]:
+    """``<run>@<slug>`` keys with the slug lower-cased; a case-only collision is refused."""
+    normalized: dict[str, str] = {}
+    for key, text in variants.items():
+        run, separator, slug = key.partition("@")
+        if not separator or not run or not slug:
+            raise ValueError(f"{where}.variants key {key!r} is not <run>@<variant>")
+        lowered = f"{run}@{slug.lower()}"
+        if lowered in normalized:
+            raise ValueError(
+                f"{where}.variants has two keys for {lowered!r} differing only by case"
+            )
+        normalized[lowered] = text
+    return normalized
 
 
 def experiment_intent(

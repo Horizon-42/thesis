@@ -6,6 +6,15 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 
 ### 2026-09-18 — manoeuvre-token plan P1.1–P1.3: segments, the tokenizer + codebook, the executor wiring
 
+**Publisher: the manoeuvre record blocks are registered and the variant intent lookup is case-insensitive.**
+The first manoeuvre lockstep publication (p23, (60 s, K32) protocol A, both seeds → KRDU 165 → 167
+categories, validator 0 errors) landed WITHOUT its variant intent: the registry names protocols the
+way the plan does (`S60_K32_s1337@lockstep-A`) while `--category-variant` lower-cases the slug into
+the category key, and the lookup was exact. `load_intent_campaigns` now lower-cases the slug part of
+every variant key once (a case-only collision is refused); `VARIANT_RECORD_BLOCKS` gained
+`manoeuvre_readout` and `manoeuvre_lockstep`, so a readout/lockstep records directory published
+bare is refused instead of being filed as the executor's own L−1 prediction. Tests pin both.
+
 - `4dTrajectory/ts_transformer/manoeuvre/` is the intent-token package (plan
   `docs/2026-09-18_manoeuvre_token_plan.zh.md`). `segments.py`: the segment cut from an anchor,
   the segment-START frame (origin = first row, x = its ground-track course, y left, z up; the first
