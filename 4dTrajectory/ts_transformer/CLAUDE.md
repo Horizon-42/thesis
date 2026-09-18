@@ -49,8 +49,9 @@ of the package, not a migration in progress.
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
   `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
-- **`manoeuvre` — IN DEVELOPMENT**: the manoeuvre-token plan (discrete segment codes, a causal
-  prior, the control path as executor, a multi-aircraft graph): `docs/2026-09-18_manoeuvre_token_plan.zh.md` (P10).
+- **`manoeuvre` — IN DEVELOPMENT**: the intent-token plan (a segment tokenizer whose decoder is the
+  control-path executor, a causal prior over intent codes, a multi-aircraft graph):
+  `docs/2026-09-18_manoeuvre_token_plan.zh.md` (P10).
 - **Control-path axes**: `latent_dim > 0` (latent intent z) and `cta_conditioning=given` (the
   given arrival time IS the duration) — their oracle forms READ THE FUTURE and the run name says so
   (`control+z8`, `z=posterior`, `cta=given`), never a prediction result (P5). The duration head:
@@ -322,6 +323,6 @@ noise (sd ≈ 0.05, sign flips), the table is a sidecar never in `data_provenanc
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **manoeuvre-token** model (discrete 60 s manoeuvre codes, a causal prior over code sequences, a learned executor, a multi-aircraft graph with separation masks) | **`docs/2026-09-18_manoeuvre_token_plan.zh.md`** — the current plan (design, pre-registered gates T/P/X/E/R/G, the archive list, the decisions still open); readouts go to `docs/2026-09-18_manoeuvre_token_results.zh.md`. The two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12): W2 |
+| building or reading the **intent-token** model (a small discrete intent space per segment whose decoder IS the control-path executor, a causal prior over intent sequences, a multi-aircraft graph with separation masks) | **`docs/2026-09-18_manoeuvre_token_plan.zh.md`** — the current plan (the purpose: make L1 short and unimodal; design, pre-registered gates T/P/S/X/E/R/G incl. the discrete-vs-continuous control, the archive list, the decisions); readouts go to `docs/2026-09-18_manoeuvre_token_results.zh.md`. The two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12): W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |
