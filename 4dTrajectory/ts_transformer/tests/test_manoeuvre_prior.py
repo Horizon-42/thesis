@@ -210,3 +210,26 @@ def test_a_batch_of_zero_segment_flights_has_a_finite_loss_and_evaluate_refuses_
     assert all(torch.isfinite(value) for value in terms.values()) and float(terms["next"]) == 0.0
     with pytest.raises(ValueError, match="at least one"):
         pr.evaluate(model, [], None, VOCAB, batch_size=2, device=torch.device("cpu"))
+
+
+def test_a_rolled_sequence_feeds_the_flown_codes_and_targets_the_truths_by_time_index():
+    """Plan §2.7 step 1: the input is what was flown, the label is the truth's code at the same
+    absolute time; where the truth has no full segment left the label is the landing."""
+    from ts_transformer.manoeuvre.sequences import rolled_sequence
+    truth = _sequence([3, 5, 7], key="a")                                  # T = 3
+    flown_states = np.random.default_rng(0).normal(size=(6, 6)).astype(np.float32)
+    # the executor flew FIVE rounds (past the truth's three): the rolled sequence keeps T + 1 = 4
+    rolled = rolled_sequence(truth, [9, 9, 1, 2, 4], flown_states)
+    assert rolled.rolled and rolled.length == 4 and rolled.codes.tolist() == [9, 9, 1, 2]
+    assert rolled.targets.tolist() == [3, 5, 7] and rolled.states.shape == (5, 6)
+    batch = pr.collate([rolled, truth], _config(), VOCAB)
+    assert batch.codes_in[0].tolist() == [K, 9, 9, 1, 2]                  # BOS + the flown codes
+    assert batch.next_code[0].tolist() == [3, 5, 7, pr.IGNORE, pr.IGNORE]  # the truth's, by time index
+    assert batch.landed[0].tolist() == [0.0, 0.0, 0.0, 1.0, 1.0]           # landed from position T on
+    assert batch.next_code[1].tolist() == [3, 5, 7, pr.IGNORE, pr.IGNORE] and batch.landed[1].tolist() == [0.0, 0.0, 0.0, 1.0, 0.0]
+    # a shorter flown history keeps every flown position and still lands after the truth's end
+    short = rolled_sequence(truth, [9], flown_states[:2])
+    short_batch = pr.collate([short], _config(), VOCAB)
+    assert short_batch.next_code[0].tolist() == [3, 5] and short_batch.landed[0].tolist() == [0.0, 0.0]
+    with pytest.raises(ValueError, match="boundary states"):
+        rolled_sequence(truth, [9, 9], flown_states[:2])

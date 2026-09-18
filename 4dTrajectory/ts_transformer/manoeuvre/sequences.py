@@ -15,6 +15,11 @@ boundary — the prior's training rows and the protocol-C history.
   airport frame when the runway becomes an output (plan §2.5, `data/coordinate_frames.py`).
 * ``landed_fraction`` = the truth remaining after the last full segment, in segments ∈ [0, 1):
   the prior's ``LANDED`` position carries it as the arrival time inside the last segment.
+* A ROLLED sequence (plan §2.7, the closed-loop training's first step): the input codes and
+  states are what the executor FLEW (a protocol-C lockstep's legs tokenised back), the targets
+  are the TRUTH's codes at the same absolute time index — ``target_codes`` — and the landing
+  label sits where the truth has no full segment left (`rolled_sequence`). A truth sequence's
+  targets are its own codes (``target_codes`` None).
 * `operational_day_of` / `split_by_operational_day`: the day split (T4, 09Z cut) the runway
   token (P4) and the multi-aircraft layer (P5) are judged on. P2 trains and reads the prior on
   the executor's OWN flight split (the development cohort) so the lockstep pairs the same val
@@ -70,6 +75,9 @@ class CodeSequence:
     landed_fraction: float
     typecode: str
     runway_course_rad: float
+    #: A rolled sequence's targets: the truth's codes by absolute time index (``[T_truth]``);
+    #: None = the sequence is the truth's and its targets are its own codes.
+    target_codes: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         count = len(self.start_times)
@@ -80,10 +88,22 @@ class CodeSequence:
             )
         if not 0.0 <= self.landed_fraction < 1.0:
             raise ValueError(f"{self.dataset_id}: landed_fraction is in [0, 1), got {self.landed_fraction!r}")
+        if self.target_codes is not None and self.target_codes.ndim != 1:
+            raise ValueError(f"{self.dataset_id}: target_codes is a [T] vector")
 
     @property
     def length(self) -> int:
         return len(self.codes)
+
+    @property
+    def targets(self) -> np.ndarray:
+        """The next-code targets by position: the truth's codes (time-indexed) for a rolled
+        sequence, the sequence's own codes otherwise."""
+        return self.codes if self.target_codes is None else self.target_codes
+
+    @property
+    def rolled(self) -> bool:
+        return self.target_codes is not None
 
 
 def _boundaries(series: FlightSeries, anchor: int, segment_s: float) -> tuple[np.ndarray, float]:
@@ -135,6 +155,27 @@ def flight_sequences(
 
 def flight_sequence(series: FlightSeries, codebook: Codebook, anchor: int) -> CodeSequence:
     return flight_sequences([series], codebook, anchor)[0]
+
+
+def rolled_sequence(truth: CodeSequence, flown_codes: Sequence[int], flown_states: Sequence[np.ndarray]) -> CodeSequence:
+    """The rolled counterpart of ``truth``: the flown codes and boundary states as the input,
+    the truth's codes as the time-indexed targets (plan §2.7, v2 §8's decision), the truth's
+    landing where its full segments end. ``flown_states`` holds x_0 and one state per flown
+    leg; a flight that flew more rounds than the truth has segments is cut to the truth's
+    length + 1 positions (past that, every target is the landing)."""
+    codes = np.asarray(flown_codes, dtype=np.int64)
+    states = np.asarray(flown_states, dtype=np.float32)
+    if states.shape[0] != len(codes) + 1:
+        raise ValueError(f"{truth.dataset_id}: {len(codes)} flown codes need {len(codes) + 1} boundary states, got {states.shape[0]}")
+    keep = min(len(codes), truth.length + 1)
+    first = float(truth.start_times[0]) if truth.length else np.nan     # a truth with no full segment has no start
+    return CodeSequence(
+        dataset_id=truth.dataset_id, flight_id=truth.flight_id, anchor=truth.anchor, segment_s=truth.segment_s,
+        start_times=first + truth.segment_s * np.arange(keep, dtype=np.float64),   # the flown rounds' starts
+        codes=codes[:keep], z=np.zeros((keep, truth.z.shape[1]), dtype=np.float32), states=states[: keep + 1],
+        landed_fraction=truth.landed_fraction, typecode=truth.typecode, runway_course_rad=truth.runway_course_rad,
+        target_codes=truth.codes.copy(),
+    )
 
 
 def continuous_targets(
@@ -192,5 +233,5 @@ def split_by_operational_day(
 
 __all__ = [
     "STATE_TOKEN_FEATURES", "STATE_TOKEN_SCALE", "CodeSequence", "continuous_targets", "flight_sequence",
-    "flight_sequences", "operational_day_of", "split_by_operational_day", "state_token",
+    "flight_sequences", "operational_day_of", "rolled_sequence", "split_by_operational_day", "state_token",
 ]

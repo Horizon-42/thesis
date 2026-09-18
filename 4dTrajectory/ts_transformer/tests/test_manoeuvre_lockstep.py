@@ -84,6 +84,11 @@ def _check_runs(runs, protocol):
             assert row["ended"] == run.ended and len(row["codes"]) == run.asks and set(row["at"]) == {"60", "120", "180", "300"}
             assert row["established_at_anchor"] in (True, False) and metrics["ade_m"] >= 0.0
             assert (row["reference"]["established"]) == (run.ended == ls.ENDED_CROSSED)
+        # every whole leg is tokenised back under every protocol (the closed-loop input)
+        whole = [leg for leg in run.legs if float(np.sum(leg.sample_durations_s)) == pytest.approx(SEGMENT_S)]
+        assert len(run.flown_codes) == len(whole) and len(run.flown_states) == len(whole) + 1
+        if run.legs:
+            assert len(row["flown_states"]) == len(run.flown_states) and row["truth_length"] == run.truth.length
         if protocol == ls.PROTOCOL_C:
             assert all(code == run.truth.codes[min(i, run.truth.length - 1)] for i, code in enumerate(run.codes))
             assert run.held_asks == max(run.asks - run.truth.length, 0)

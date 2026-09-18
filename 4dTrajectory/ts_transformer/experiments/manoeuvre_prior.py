@@ -13,6 +13,11 @@ segment. The prior never sees a val flight (§6.3): the lockstep pairs the execu
 flights, so the split is the executor's, not an operating-day split (that is P4's, for the
 runway token). Sequences are the truth's codes through the codebook (`manoeuvre/sequences.py`);
 ``--continuous`` trains gate P's control instead (the unrounded coordinates, one MSE).
+``--rolled <lockstep json>`` (plan §2.7 step 1, the closed-loop training): a protocol-C lockstep
+flown on the TRAIN split with this codebook and executor; its flown code sequences (the truth's
+codes as time-indexed labels, the landing where the truth's segments end) are MIXED into the
+training set at ``--rolled-share`` (default 0.75: three rolled rows per truth row, the plan
+path's share) — the val set stays the truth's.
 
 Writes ``prior.pt`` (weights, the prior config, the type vocabulary, the codebook sha, the
 executor sha, the split ids' sha, the selection), ``history.json`` (every epoch), and
@@ -52,6 +57,35 @@ def _split_sha(keys: list[str]) -> str:
     return sha256_bytes("\n".join(keys).encode())
 
 
+def rolled_training_sequences(lockstep_json: Path, truth: list, *, codebook_sha: str, executor_sha: str,
+                              share: float, seed: int) -> dict:
+    """The flown code sequences of a protocol-C TRAIN lockstep as rolled training rows
+    (`sequences.rolled_sequence`), ``share`` of them per truth row drawn without replacement
+    (seeded) — refused unless the artefact is protocol C on the train split of THIS executor
+    with THIS codebook, so a flown history can never come from another vocabulary."""
+    import json
+    import numpy as np
+    from ts_transformer.manoeuvre.sequences import rolled_sequence
+    payload = json.loads(lockstep_json.read_text(encoding="utf-8"))
+    if payload["protocol"] != "C" or payload["split"] != "train":
+        raise ValueError(f"{lockstep_json}: the closed-loop input is a protocol-C lockstep on the TRAIN split, "
+                         f"got {payload['protocol']!r} on {payload['split']!r}")
+    if payload["codebook_sha256"] != codebook_sha or payload["executor_sha256"] != executor_sha:
+        raise ValueError(f"{lockstep_json} was flown with another codebook or executor than this training's")
+    by_id = {item.dataset_id: item for item in truth}
+    candidates = []
+    for dataset_id, row in payload["rows"].items():
+        if dataset_id not in by_id or not row["flown_codes"]:
+            continue
+        candidates.append(rolled_sequence(by_id[dataset_id], row["flown_codes"], row["flown_states"]))
+    if not candidates:
+        raise ValueError(f"{lockstep_json} holds no flown sequence of a training flight")
+    wanted = min(len(candidates), int(round(share * len(truth))))
+    order = np.random.default_rng(seed).permutation(len(candidates))[:wanted]
+    return {"source": str(lockstep_json), "source_sha256": file_sha256(lockstep_json), "share": share,
+            "rolled_rows": len(candidates), "used": int(wanted), "sequences": [candidates[i] for i in sorted(order)]}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--codebook", type=Path, required=True)
@@ -71,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--landed-loss-weight", type=float, default=1.0)
     parser.add_argument("--landed-fraction-loss-weight", type=float, default=1.0)
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of each split (a smoke test)")
+    parser.add_argument("--rolled", type=Path, default=None, help="a protocol-C TRAIN-split lockstep json (the closed-loop input)")
+    parser.add_argument("--rolled-share", type=float, default=0.75, help="rolled rows per training row (plan path's 0.75)")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--campaign-id", default=None)
     parser.add_argument("--experiment-id", default=None)
@@ -93,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
                      f"{codebook.segment_s:g} s / {codebook.dt_s:g} s")
     if args.continuous and codebook.kind != "learned":
         parser.error("the continuous prior regresses a learned tokenizer's coordinates; the command vocabulary has none")
+    if args.rolled is not None and args.continuous:
+        parser.error("the closed-loop training is defined for the discrete prior (plan §2.7)")
     anchor = default_anchor(config)
     airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
     manifests = [arrival_manifest_path(item) for item in airports]
@@ -123,6 +161,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         train_sequences = flight_sequences(train_series, codebook, anchor)
         val_sequences = flight_sequences(val_series, codebook, anchor)
+        rolled_block = None
+        if args.rolled is not None:
+            rolled_path = args.rolled if args.rolled.is_absolute() else REPO_ROOT / args.rolled
+            rolled_block = rolled_training_sequences(rolled_path, train_sequences, codebook_sha=codebook.sha256,
+                                                     executor_sha=file_sha256(executor), share=args.rolled_share, seed=args.seed)
+            train_sequences = train_sequences + rolled_block["sequences"]
+            print(f"  rolled: {rolled_block['rolled_rows']} flown sequences from {rolled_block['source']} mixed at share "
+                  f"{args.rolled_share:g} ({rolled_block['used']} used)", flush=True)
         train_targets = val_targets = None
         if args.continuous:
             train_targets = continuous_targets(train_series, train_sequences, codebook)
@@ -171,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             "segment_s": codebook.segment_s, "flights": {"train": len(train_sequences), "val": len(val_sequences)},
             "split_sha256": {name: _split_sha(keys) for name, keys in split.items()}, "limit": args.limit or None,
             "best_epoch": result.best_epoch, "epochs_run": len(result.history), "stopped_early": result.stopped_early,
+            "rolled": None if rolled_block is None else {k: v for k, v in rolled_block.items() if k != "sequences"},
             "val": final, "bigram_baseline": baseline,
             "gate_t_ii": None if args.continuous else bool(final["next"] < baseline["nll_per_code"]),
             "elapsed_s": time.perf_counter() - started,

@@ -138,7 +138,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prior", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the val cohort (a smoke test)")
+    parser.add_argument("--split", default="val", choices=("train", "val"),
+                        help="val (every readout); train ONLY as the closed-loop training's input (protocol C, plan §2.7)")
+    parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the cohort (a smoke test)")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--write-records", action="store_true")
     args = parser.parse_args(argv)
@@ -147,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{out} exists; a lockstep readout is never overwritten")
     if (args.protocol != ls.PROTOCOL_C) != (args.prior is not None):
         parser.error("protocols A and A-truth take --prior; protocol C takes none")
+    if args.split == "train" and args.protocol != ls.PROTOCOL_C:
+        parser.error("the train split is flown under protocol C only (the closed-loop training's input); a readout is val")
     device = resolve_device(args.device)
     started = time.perf_counter()
 
@@ -178,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
     manifests = [arrival_manifest_path(item) for item in airports]
     require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
-    wanted = payload["split"]["val"][: args.limit] if args.limit else payload["split"]["val"]
+    wanted = payload["split"][args.split][: args.limit] if args.limit else payload["split"][args.split]
     built, report = build_series(load_flight_dicts(manifests, include_flight_keys=set(wanted), verbose=False), config,
                                  aircraft_type=config.aircraft_type)
     print(f"  {report.format()}", flush=True)
@@ -201,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.write_records:
             forecast = ls.whole_forecast(run)
             pairs.append((build_prediction_record(run.series, forecast, index=index, model_name=config.model,
-                                                  horizon_mode=config.horizon_mode, split="val"), metrics))
+                                                  horizon_mode=config.horizon_mode, split=args.split), metrics))
     flown_none = len(runs) - len(rows)
     payload_out = {
         "schema": LOCKSTEP_SCHEMA, "written_utc": utc_now(), "protocol": args.protocol,
@@ -212,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         "prior_continuous": None if prior is None else prior.model.config.continuous,
         "prior_executor_sha256": None if prior_payload is None else prior_payload["executor_sha256"],
         "prior_trained_on_this_executor": None if prior_payload is None else prior_payload["executor_sha256"] == executor_sha,
-        "segment_s": codebook.segment_s, "anchor": runs[0].anchor, "split": "val", "limit": args.limit or None,
+        "segment_s": codebook.segment_s, "anchor": runs[0].anchor, "split": args.split, "limit": args.limit or None,
         "flights": len(rows), "flights_without_a_leg": flown_none,
         "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first ask (a cap; under A the prior's landed decides)",
         "strata": stratum_table(rows), "rows": rows, "elapsed_s": time.perf_counter() - started,
@@ -224,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     print(table)
     if pairs:
         write_batch([r for r, _ in pairs], output_dir=out / "records", config_dict=config.to_dict(),
-                    flight_metrics=[m for _, m in pairs], checkpoint=str(executor_path), split="val",
+                    flight_metrics=[m for _, m in pairs], checkpoint=str(executor_path), split=args.split,
                     extra_summary={LOCKSTEP_RECORDS_BLOCK: {k: v for k, v in payload_out.items() if k not in ("rows", "strata")}})
     return 0
 

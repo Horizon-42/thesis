@@ -130,8 +130,13 @@ def collate(sequences: Sequence[CodeSequence], config: PriorConfig, vocabulary: 
         codes_in[row, 1 : count + 1] = torch.from_numpy(item.codes)
         states[row, : count + 1] = torch.from_numpy(item.states)
         valid[row, : count + 1] = True
-        next_code[row, :count] = torch.from_numpy(item.codes)          # position t predicts c_{t+1}
-        landed[row, count] = 1.0                                         # after the last segment
+        # position t predicts the target at t: the sequence's own next code, or, for a ROLLED
+        # sequence, the truth's code at that absolute time; the landing sits from the position
+        # where the targets end (the truth's last full segment) to the last valid position
+        targets = item.targets
+        known = min(count + 1, len(targets))
+        next_code[row, :known] = torch.from_numpy(np.asarray(targets[:known], dtype=np.int64))
+        landed[row, known : count + 1] = 1.0
         landed_fraction[row] = item.landed_fraction
         if continuous_targets is not None:
             target = np.asarray(continuous_targets[row], dtype=np.float32)

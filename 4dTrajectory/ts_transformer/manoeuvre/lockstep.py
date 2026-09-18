@@ -274,8 +274,10 @@ def fly(
             if plan_legs is not None:
                 run.asks_e[-1]["e_plan_m"] = _plan_error(leg, plan_legs[row], history)
                 run.asks_e[-1]["truth_code"] = int(run.truth.codes[min(round_index, run.truth.length - 1)])
-            if protocol == PROTOCOL_A:
-                _tokenise_flown_leg(run, codebook, segment_s, dt_s, round_index)
+            # every whole leg is tokenised back — protocol A reads the flown codes at the next
+            # ask, and a protocol-C run on the TRAIN split is the closed-loop training's input
+            # (plan §2.7 step 1: the flown history's codes, the truth's as the labels)
+            _tokenise_flown_leg(run, codebook, segment_s, dt_s, round_index)
         if log is not None:
             log(f"    {protocol} round {round_index}: {len(active)} flights at anchor {anchor}, "
                 f"{sum(1 for run in runs if run.ended is None)} continue")
@@ -397,6 +399,8 @@ def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, A
         "ended": run.ended, "truncated_at_threshold": run.truncated, "asks": run.asks, "held_asks": run.held_asks,
         "codes": list(run.codes), "truth_codes": run.truth.codes.tolist(),
         "flown_codes": list(run.flown_codes),
+        "flown_states": [state.tolist() for state in run.flown_states],
+        "truth_length": run.truth.length, "landed_fraction_truth": run.truth.landed_fraction,
         "landed_fraction": run.landed_fraction, "landed_probabilities": list(run.landed_probabilities),
         "ade_m": float(metrics["ade_m"]), "fde_m": float(metrics["fde_m"]),
         "final_time_error_s": float(metrics["final_time_error_s"]),
