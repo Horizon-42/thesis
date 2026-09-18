@@ -15,16 +15,18 @@
 
 | # | 开发 | 状态 | 提交 |
 |---|---|---|---|
-| A-dev1 | 网格臂文件：`docs/experiments/two_tier_v3_grid_arms.json`，40 臂，键 `L<L>_D<Δ>_s<seed>`，每臂自己的 cohort 路径；`frame_ablation --only KEY…` 只跑指定臂；测试钉住 D1/D2/D4–D8/D10 | 完成（review 1 通过并修） | |
-| A-dev2 | cohort：`plan_cohort --arms <臂文件>` 一次加载、按格写 20 份 `cohorts/L<L>_D<Δ>/development_cohort.json`（已写出，n 表见 §2）；`frame_ablation` 每臂用自己的 cohort；`rebuild_cohort` 不用改（读 checkpoint 自带的 split） | 完成（review 1 通过并修；cohort 已写出） | |
-| A-dev3 | 首问 = L−1 行：臂文件 `anchor_floor_index = 0`，测试钉住 `default_anchor == seq_len − 1` | 完成（含在 dev1 测试里） | |
-| A-dev4 | `manoeuvre_lockstep --anchor-remaining-km 12|8|6`：`lockstep.from_remaining_path` 把每架从 bin 行（`anchor_grid.bin_anchor`：剩余路程最接近 X km 的行）切起，使该行成为固定锚点；协议 `none` 不再要 codebook；payload schema v2（`first_ask` 块、每行 `first_ask_row`） | 完成（review 通过并修，冒烟通过） | |
-| A-dev5 | 训练锚点全随机：臂文件 `random_train_anchor_l1_share = 0.0`，测试钉住 | 完成（含在 dev1 测试里） | |
-| A-dev6 | `executor_failure_modes --lockstep <dir> --out <dir>`（`manoeuvre/failure_modes.py`）：course 坐标系、六类失败方式、每类记录子集 `records_<mode>/`（`export.copy_record_subset`） | 完成（review 通过并修，冒烟通过） | |
-| A-dev7 | `executor_grid_gate --campaign --arms --out [--reading L-1]`（`gates.gate_grid`）：整表 + 胜出格；seed 线 = 本网格 seed 差的 p75 | 完成（review 1 通过并修） | |
-| A-dev8 | `two_tier_grid_queue --arms --campaign --airport KRDU [--readings …] [--cells …] [--dry-run]`：每格 train（`frame_ablation --only`）→ 8 份 lockstep 读数 → 选格表；PID 文件 `<campaign>/two_tier_grid_queue.pid` | 完成（review 2 通过并修，dry-run 通过） | |
+| A-dev1 | 网格臂文件：`docs/experiments/two_tier_v3_grid_arms.json`，40 臂，键 `L<L>_D<Δ>_s<seed>`，每臂自己的 cohort 路径；`frame_ablation --only KEY…` 只跑指定臂；测试钉住 D1/D2/D4–D8/D10 | 完成（review 1 通过并修） | fa0426f（文档 4dd2082） |
+| A-dev2 | cohort：`plan_cohort --arms <臂文件>` 一次加载、按格写 20 份 `cohorts/L<L>_D<Δ>/development_cohort.json`（已写出，n 表见 §2）；`frame_ablation` 每臂用自己的 cohort；`rebuild_cohort` 不用改（读 checkpoint 自带的 split） | 完成（review 1 通过并修；cohort 已写出） | fa0426f（文档 4dd2082） |
+| A-dev3 | 首问 = L−1 行：臂文件 `anchor_floor_index = 0`，测试钉住 `default_anchor == seq_len − 1` | 完成（含在 dev1 测试里） | fa0426f（文档 4dd2082） |
+| A-dev4 | `manoeuvre_lockstep --anchor-remaining-km 12|8|6`：`lockstep.from_remaining_path` 把每架从 bin 行（`anchor_grid.bin_anchor`：剩余路程最接近 X km 的行）切起，使该行成为固定锚点；协议 `none` 不再要 codebook；payload schema v2（`first_ask` 块、每行 `first_ask_row`） | 完成（review 通过并修，冒烟通过） | fa0426f（文档 4dd2082） |
+| A-dev5 | 训练锚点全随机：臂文件 `random_train_anchor_l1_share = 0.0`，测试钉住 | 完成（含在 dev1 测试里） | fa0426f（文档 4dd2082） |
+| A-dev6 | `executor_failure_modes --lockstep <dir> --out <dir>`（`manoeuvre/failure_modes.py`）：course 坐标系、六类失败方式、每类记录子集 `records_<mode>/`（`export.copy_record_subset`） | 完成（review 通过并修，冒烟通过） | fa0426f（文档 4dd2082） |
+| A-dev7 | `executor_grid_gate --campaign --arms --out [--reading L-1]`（`gates.gate_grid`）：整表 + 胜出格；seed 线 = 本网格 seed 差的 p75 | 完成（review 1 通过并修） | fa0426f（文档 4dd2082） |
+| A-dev8 | `two_tier_grid_queue --arms --campaign --airport KRDU [--readings …] [--cells …] [--dry-run]`：每格 train（`frame_ablation --only`）→ 8 份 lockstep 读数 → 选格表；PID 文件 `<campaign>/two_tier_grid_queue.pid` | 完成（review 2 通过并修，dry-run 通过） | fa0426f（文档 4dd2082） |
 
 顺序建议：dev2 → dev1 → dev3 → dev5（训练侧，一起冒烟）→ dev4 → dev7 → dev6 → dev8。
+
+**M-A0 达成（2026-09-18 晚）**：全部八项提交在主树（fa0426f 代码、4dd2082 文档），全套 ts 测试 1273 通过，两轮 opus review 的发现都已修；runs worktree `.claude/worktrees/manoeuvre-runs` 已移到 4dd2082。**等用户看过 §5–§8 说"跑"（M-A0′）再启动**；启动命令见 §2 布局与 R8。
 
 ## 2. 代码事实（写开发项时查到的）
 
