@@ -24,7 +24,6 @@ executor sha, the split ids' sha, the selection), ``history.json`` (every epoch)
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 import sys
 import time
@@ -34,10 +33,11 @@ import torch
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.config import TSConfig, default_anchor
 from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
-from ts_transformer.data.dataset import build_series, load_flight_dicts
+from ts_transformer.data.dataset import build_series, load_flight_dicts, truth_duration_s
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.io_utils import file_sha256, sha256_bytes, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.context import TypeVocabulary
+from ts_transformer.manoeuvre.lockstep import required_positions
 from ts_transformer.manoeuvre.prior import PRIOR_SCHEMA, ManoeuvrePrior, PriorConfig, bigram_nll, evaluate, fit
 from ts_transformer.manoeuvre.sequences import continuous_targets, flight_sequences
 from ts_transformer.manoeuvre.tokenizer import load_codebook
@@ -129,10 +129,13 @@ def main(argv: list[str] | None = None) -> int:
             val_targets = continuous_targets(val_series, val_sequences, codebook)
         vocabulary = TypeVocabulary.from_typecodes(item.typecode for item in train_sequences)
         longest = max(item.length for item in (*train_sequences, *val_sequences))
+        # sized for the LOCKSTEP's budget (the rounds a flight may be asked for under protocol
+        # A), not for the truth alone (`lockstep.required_positions`)
+        longest_truth_s = max(truth_duration_s(item, anchor) for item in (*train_series, *val_series))
         prior_config = PriorConfig(
             code_count=codebook.code_count, z_dim=codebook.z_dim, type_count=vocabulary.size, continuous=args.continuous,
             d_model=args.d_model, n_heads=args.n_heads, n_layers=args.n_layers, d_ff=args.d_ff, dropout=args.dropout,
-            max_positions=max(longest + 2, 8),
+            max_positions=max(required_positions(longest_truth_s, codebook.segment_s, longest), 8),
             landed_loss_weight=args.landed_loss_weight, landed_fraction_loss_weight=args.landed_fraction_loss_weight,
         )
         model = ManoeuvrePrior(prior_config)

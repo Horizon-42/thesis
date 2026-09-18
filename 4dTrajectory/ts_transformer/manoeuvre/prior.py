@@ -22,13 +22,15 @@ sequence model (plan §2.5).
   words: if it is not beaten in the closed loop, the discrete bottleneck bought nothing.
 
 `bigram_nll` is gate T(ii)'s baseline: a Laplace-smoothed bigram over the code sequence
-(BOS → c_1 … c_T → LANDED) fitted on train and scored on val, in nats per token, the number
-the prior's val NLL must beat.
+(BOS → c_1 … c_T → LANDED) fitted on train and scored on val. Its ``nll_per_code`` is the
+CONDITIONAL next-code NLL (the code columns renormalised, the landing carried apart) — the
+same quantity as the prior's ``next`` term, so the two compare; ``nll_per_token`` is the
+joint over every transition, the landing included.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import math
 from typing import Any, Sequence
 
@@ -202,7 +204,11 @@ class ManoeuvrePrior(nn.Module):
             error = (output.next_z - batch.next_z).square().sum(dim=-1)
             next_term = (error * has_next).sum() / has_next.sum().clamp(min=1)
         else:
-            next_term = F.cross_entropy(output.next_logits.flatten(0, 1), batch.next_code.flatten(), ignore_index=IGNORE)
+            # a sum over the positions with a next segment, over their count clamped at one: a
+            # batch of zero-segment flights (Δ = 120 s has them) reads 0, never NaN
+            next_term = F.cross_entropy(
+                output.next_logits.flatten(0, 1), batch.next_code.flatten(), ignore_index=IGNORE, reduction="sum"
+            ) / has_next.sum().clamp(min=1)
         landed_term = F.binary_cross_entropy_with_logits(output.landed_logit, batch.landed, reduction="none")
         landed_term = (landed_term * batch.valid).sum() / batch.valid.sum()
         at_landing = batch.landed > 0.5
@@ -278,6 +284,8 @@ def evaluate(model: ManoeuvrePrior, sequences: Sequence[CodeSequence], targets: 
              vocabulary: TypeVocabulary, *, batch_size: int, device: torch.device) -> dict[str, float]:
     """The loss parts (token-weighted over the set), the next-code accuracy (discrete) and the
     landed-decision accuracy."""
+    if not sequences:
+        raise ValueError("evaluate needs at least one sequence")
     model.eval()
     sums: dict[str, float] = {}
     weights: dict[str, float] = {}
@@ -313,7 +321,9 @@ def fit(
 ) -> FitResult:
     """Adam, shuffled batches per epoch (seeded), the epoch kept on the val ``next`` term,
     early stop after ``patience`` epochs without improvement. ``log`` is called with each
-    epoch's row when given."""
+    epoch's row when given. The ``train`` terms of a row are flight-weighted means of the
+    batch losses (a monitor); the ``val`` terms are `evaluate`'s token-weighted ones — the
+    two are not the same average, and only the val ones are read."""
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     rng = np.random.default_rng(seed)
@@ -354,33 +364,42 @@ def fit(
 
 # ── the flip rate (plan §2.5's stability reading) ────────────────────────────
 
+def one_step_rolled(batch: PriorBatch, own: torch.Tensor, t: int) -> PriorBatch:
+    """The batch with ONLY position ``t + 1``'s code replaced by the prior's own top-1 for
+    c_{t+1} (``own[:, t]``) — the truth history up to t, one greedy step, the truth's state at
+    t + 1. What the ask at t + 1 would read had the prior's answer at t been flown exactly."""
+    rolled = batch.codes_in.clone()
+    rolled[:, t + 1] = own[:, t]
+    return PriorBatch(rolled, batch.states, batch.valid, batch.next_code, batch.landed, batch.landed_fraction,
+                      batch.next_z, batch.type_index, batch.runway)
+
+
 @torch.no_grad()
 def flip_rate(model: ManoeuvrePrior, sequences: Sequence[CodeSequence], vocabulary: TypeVocabulary, *,
               batch_size: int, device: torch.device) -> dict[str, Any]:
     """How often two ADJACENT asks disagree about the SAME future segment, on the truth history
-    (plan §2.5; the plan path's "fix walked 766 m"): at position t the prior's top-1 for c_{t+2}
-    is read by rolling ONE greedy step (its own top-1 c_{t+1} appended with the TRUTH's state
-    x_{t+1}), and compared with its top-1 for c_{t+2} at position t+1 (c_{t+1} given). A flip is
-    a disagreement; ``rate`` is the share over every (t, t+2) pair the sequences hold. A
-    continuous prior has no code to flip: refused."""
+    (plan §2.5; the plan path's "fix walked 766 m"): the prior's top-1 for c_{t+2} read at
+    position t + 1 with its OWN top-1 c_{t+1} in place (`one_step_rolled`: everything else the
+    truth's), against its top-1 for c_{t+2} at position t + 1 with the TRUTH's c_{t+1}. A flip
+    is a disagreement; ``rate`` is the share over every (t, t+2) pair the sequences hold (one
+    forward per position, batched over flights). A continuous prior has no code to flip:
+    refused."""
     if model.config.continuous:
         raise ValueError("the flip rate reads top-1 codes; a continuous prior predicts a vector")
     model.eval()
     flips = pairs = 0
     order = np.arange(len(sequences))
     for batch in _batches(sequences, None, model.config, vocabulary, batch_size=batch_size, order=order, device=device):
-        direct = model(batch).next_logits.argmax(dim=-1)                  # position t+1 → c_{t+2}, c_{t+1} given
-        rolled = batch.codes_in.clone()
-        # the one-step roll: position t+1's code becomes the prior's own top-1 for c_{t+1}
-        own = model(batch).next_logits.argmax(dim=-1)                      # position t → c_{t+1}
-        rolled[:, 1:] = own[:, :-1]
-        rolled_batch = PriorBatch(rolled, batch.states, batch.valid, batch.next_code, batch.landed, batch.landed_fraction,
-                                  batch.next_z, batch.type_index, batch.runway)
-        ahead = model(rolled_batch).next_logits.argmax(dim=-1)             # position t+1 with the OWN c_{t+1} → c_{t+2}
-        # a pair exists where position t+1 is valid and has a next segment (c_{t+2} exists)
-        has_pair = batch.valid[:, 1:] & (batch.next_code[:, 1:] != IGNORE)
-        flips += int(((ahead[:, 1:] != direct[:, 1:]) & has_pair).sum())
-        pairs += int(has_pair.sum())
+        own = model(batch).next_logits.argmax(dim=-1)                  # position t → c_{t+1}; position t+1 → c_{t+2} (direct)
+        length = batch.codes_in.shape[1]
+        for t in range(length - 1):
+            # a pair exists where position t+1 is valid and has a next segment (c_{t+2} exists)
+            has_pair = batch.valid[:, t + 1] & (batch.next_code[:, t + 1] != IGNORE)
+            if not bool(has_pair.any()):
+                continue
+            ahead = model(one_step_rolled(batch, own, t)).next_logits.argmax(dim=-1)[:, t + 1]
+            flips += int(((ahead != own[:, t + 1]) & has_pair).sum())
+            pairs += int(has_pair.sum())
     return {"rate": flips / max(pairs, 1), "flips": flips, "pairs": pairs}
 
 
@@ -388,32 +407,36 @@ def flip_rate(model: ManoeuvrePrior, sequences: Sequence[CodeSequence], vocabula
 
 def bigram_nll(train: Sequence[CodeSequence], val: Sequence[CodeSequence], code_count: int, *, alpha: float = 1.0) -> dict[str, float]:
     """A Laplace-smoothed bigram over ``BOS → c_1 → … → c_T → LANDED`` fitted on ``train``, scored
-    on ``val``: ``nll_per_token`` in nats over every transition (the LANDED one included) and
-    ``nll_per_code`` over the code transitions alone — the two numbers a prior's ``next`` and
-    ``landed`` terms are read against."""
+    on ``val``. ``nll_per_code``: the CONDITIONAL next-code NLL in nats — the K code columns of
+    a row renormalised on their own, so it is the same quantity as the prior's ``next`` term
+    (whose softmax is over the K codes, the landing a separate head) and gate T(ii) compares
+    like with like. ``nll_per_token``: the JOINT over every transition, the LANDED one included
+    (a row normalised over {codes, LANDED}) — the number a prior's ``next`` + ``landed`` terms
+    together are read against."""
     bos, landed = code_count, code_count + 1
     counts = np.full((code_count + 1, code_count + 1), alpha, dtype=np.float64)   # from {codes, BOS} to {codes, LANDED}
     for item in train:
         chain = [bos, *item.codes.tolist(), landed]
         for a, b in zip(chain[:-1], chain[1:]):
             counts[a, b if b != landed else code_count] += 1.0
-    probabilities = counts / counts.sum(axis=1, keepdims=True)
+    joint = counts / counts.sum(axis=1, keepdims=True)
+    conditional = counts[:, :code_count] / counts[:, :code_count].sum(axis=1, keepdims=True)
     total = codes_only = 0.0
     tokens = code_tokens = 0
     for item in val:
         chain = [bos, *item.codes.tolist(), landed]
         for a, b in zip(chain[:-1], chain[1:]):
-            nll = -math.log(probabilities[a, b if b != landed else code_count])
-            total += nll
+            total += -math.log(joint[a, b if b != landed else code_count])
             tokens += 1
             if b != landed:
-                codes_only += nll
+                codes_only += -math.log(conditional[a, b])
                 code_tokens += 1
     return {"nll_per_token": total / max(tokens, 1), "nll_per_code": codes_only / max(code_tokens, 1),
-            "tokens": tokens, "code_tokens": code_tokens, "alpha": alpha}
+            "tokens": tokens, "code_tokens": code_tokens, "alpha": alpha,
+            "nll_per_code_is": "conditional on a code following (the K columns renormalised): the prior's next term's quantity"}
 
 
 __all__ = [
     "IGNORE", "PRIOR_SCHEMA", "FitResult", "ManoeuvrePrior", "PriorBatch", "PriorConfig", "PriorOutput", "Step",
-    "bigram_nll", "collate", "evaluate", "fit", "flip_rate", "last_position_step",
+    "bigram_nll", "collate", "evaluate", "fit", "flip_rate", "last_position_step", "one_step_rolled",
 ]

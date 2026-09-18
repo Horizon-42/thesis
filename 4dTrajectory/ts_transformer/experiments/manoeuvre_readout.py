@@ -18,16 +18,14 @@ summary block naming the arm, the protocol, the anchor and the horizon.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 import re
 import time
 
-import torch
-
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
 from ts_transformer.data.dataset import build_series, load_flight_dicts
+from ts_transformer.experiments.frame_ablation import TRAIN_COMPLETE_ARTIFACT
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.inference.export import write_batch
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
@@ -38,9 +36,6 @@ from ts_transformer.repo_layout import arrival_manifest_path
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.training.train import load_checkpoint, usable_series
 
-TRAIN_COMPLETE_ARTIFACT = "history.json"   # mirrors `experiments/frame_ablation.TRAIN_COMPLETE_ARTIFACT`
-
-
 def discover_arms(campaign: Path, segment_s: float) -> tuple[list[Path], list[str]]:
     """``(trained arm directories, pending arm keys)`` of one segment length, in name order."""
     pattern = re.compile(rf"(^|_)S{int(segment_s)}_")   # `S60_K32_s1337`, or a prefixed smoke key
@@ -48,7 +43,10 @@ def discover_arms(campaign: Path, segment_s: float) -> tuple[list[Path], list[st
     for path in sorted(campaign.iterdir()):
         if not path.is_dir() or not pattern.search(path.name) or path.name.endswith("_pred_val"):
             continue
-        (trained if (path / TRAIN_COMPLETE_ARTIFACT).is_file() else pending).append(path if (path / TRAIN_COMPLETE_ARTIFACT).is_file() else path.name)
+        if (path / TRAIN_COMPLETE_ARTIFACT).is_file():
+            trained.append(path)
+        else:
+            pending.append(path.name)
     return trained, pending
 
 

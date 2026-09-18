@@ -15,8 +15,9 @@ Two tokenizers, ONE interface (``forward(segment_rows, state_rows) → (z, code)
   conditioned on and the prior looks a code up as. Trained JOINTLY with the executor: the
   control objective's gradient reaches the encoder through ``z``.
 * **command-vocabulary** (`CommandVocabularyTokenizer`, plan §2.4 baseline B): the segment
-  read by rule as one of 5 heading classes × 3 vertical classes × 3 speed classes (45 codes,
-  ATC-like); ``z`` is the one-hot. No parameters; same interface, same gate T.
+  read by rule as one of 7 heading classes (straight; small, medium and large turns to either
+  side — the plan's ≤ 15° / ≤ 45° / ≤ 90° / beyond bands) × 3 vertical × 3 speed classes
+  (63 codes, ATC-like); ``z`` is the one-hot. No parameters; same interface, same gate T.
 
 Scales are FIXED module constants (`SEGMENT_ROW_SCALE`, `STATE_ROW_SCALE`), not a dataset
 normalizer, and the artefact RECORDS them (a codebook written under other scales is refused
@@ -89,9 +90,11 @@ FSQ_BOUND_EPS = 1e-3
 #: segment length (a 120 s segment is not "descending" because it is long). A segment reaching
 #: into the fitted tail reads that tail's HELD velocity columns (`segments.py`): its last
 #: segment's speed change and course are measured against a frozen endpoint.
+#: The last band (beyond 90°) is the plan's 反向 bucket, named "large" because it holds a 96°
+#: turn and a full circle alike — "reversal" would over-claim.
 COMMAND_HEADING_CLASSES = (
     "straight", "left-small", "right-small", "left-medium", "right-medium",
-    "left-reversal", "right-reversal",
+    "left-large", "right-large",
 )
 COMMAND_HEADING_SMALL_DEG = 15.0
 COMMAND_HEADING_MEDIUM_DEG = 45.0

@@ -56,6 +56,12 @@ def _two_seeds(by_seed: Mapping[int, Any], gate: str) -> None:
         raise ValueError(f"gate {gate} is judged on two seeds; got {sorted(by_seed)}")
 
 
+def _require_protocol(by_seed: Mapping[int, dict[str, Any]], expected: str, gate: str) -> None:
+    for seed, payload in by_seed.items():
+        if payload.get("protocol") != expected:
+            raise ValueError(f"gate {gate} reads protocol {expected!r} artefacts; seed {seed}'s is {payload.get('protocol')!r}")
+
+
 def _cell(payload: dict[str, Any], stratum: str) -> dict[str, Any]:
     cell = payload["strata"][stratum]
     if not cell.get("n"):
@@ -67,6 +73,7 @@ def gate_x(lockstep_c: Mapping[int, dict[str, Any]], *, guidance_established: fl
     """Protocol-C payloads keyed by seed; ``guidance_established`` is the rule guidance's
     established share along the truth segments, measured on the same cohort."""
     _two_seeds(lockstep_c, "X")
+    _require_protocol(lockstep_c, "C", "X")
     seeds = {}
     for seed, payload in lockstep_c.items():
         vectored, straight = _cell(payload, STRATUM_VECTORED), _cell(payload, STRATUM_STRAIGHT_IN)
@@ -86,6 +93,7 @@ def gate_p_open_loop(lockstep_a_truth: Mapping[int, dict[str, Any]]) -> dict[str
     """A-truth payloads keyed by seed: the prior's top-1 flown by the executor from the truth
     history, read at 120 / 180 s against B61's open-loop p50s."""
     _two_seeds(lockstep_a_truth, "P")
+    _require_protocol(lockstep_a_truth, "A-truth", "P-open-loop")
     seeds = {}
     for seed, payload in lockstep_a_truth.items():
         vectored, straight = _cell(payload, STRATUM_VECTORED), _cell(payload, STRATUM_STRAIGHT_IN)
@@ -106,6 +114,8 @@ def gate_p_discrete_vs_continuous(discrete: Mapping[int, dict[str, Any]], contin
     on both seeds; a tie is the discrete's (it has the mask and the multi-aircraft interface)."""
     _two_seeds(discrete, "P")
     _two_seeds(continuous, "P")
+    _require_protocol(discrete, "A", "P-discrete-vs-continuous")
+    _require_protocol(continuous, "A", "P-discrete-vs-continuous")
     seeds = {}
     for seed in sorted(set(discrete) & set(continuous)):
         d, c = _cell(discrete[seed], STRATUM_VECTORED), _cell(continuous[seed], STRATUM_VECTORED)
@@ -124,6 +134,7 @@ def gate_p_discrete_vs_continuous(discrete: Mapping[int, dict[str, Any]], contin
 def gate_e(lockstep_a: Mapping[int, dict[str, Any]]) -> dict[str, Any]:
     """Protocol-A payloads keyed by seed: the target (v2 G3) and the progress line."""
     _two_seeds(lockstep_a, "E")
+    _require_protocol(lockstep_a, "A", "E")
     seeds = {}
     for seed, payload in lockstep_a.items():
         vectored, straight = _cell(payload, STRATUM_VECTORED), _cell(payload, STRATUM_STRAIGHT_IN)
@@ -137,8 +148,11 @@ def gate_e(lockstep_a: Mapping[int, dict[str, Any]]) -> dict[str, Any]:
         seeds[seed] = {"vectored_ade_mean_m": vectored["ade_mean_m"], "straight_ade_mean_m": straight["ade_mean_m"],
                        "fully_flyable": pooled["fully_flyable_share"], "established": pooled["established_share"],
                        "target": target, "progress": progress}
+    # the progress line exists for the seeds v2 §12.1 ran (1337 / 2024); a seed without one
+    # reads "not applicable", never "failed"
+    applicable = {seed: s["progress"] for seed, s in seeds.items() if s["progress"] is not None}
     return {"gate": "E", "seeds": seeds, "target": all(s["target"] for s in seeds.values()),
-            "progress": all(s["progress"] for s in seeds.values() if s["progress"] is not None) and all(s["progress"] is not None for s in seeds.values())}
+            "progress": all(applicable.values()) if applicable else None, "progress_seeds": sorted(applicable)}
 
 
 def gate_s(candidates: Mapping[float, Mapping[int, dict[str, Any]]]) -> dict[str, Any]:
@@ -150,6 +164,7 @@ def gate_s(candidates: Mapping[float, Mapping[int, dict[str, Any]]]) -> dict[str
     readings = {}
     for segment, by_seed in candidates.items():
         _two_seeds(by_seed, "S")
+        _require_protocol(by_seed, "A", "S")
         readings[segment] = {
             "vectored_ade_mean_m": {seed: _cell(p, STRATUM_VECTORED)["ade_mean_m"] for seed, p in by_seed.items()},
             "established": {seed: p["strata"]["all"]["established_share"] for seed, p in by_seed.items()},
@@ -180,7 +195,9 @@ def gate_s(candidates: Mapping[float, Mapping[int, dict[str, Any]]]) -> dict[str
                 tie_note, chosen = f"{segment:g} s ties {chosen:g} s within the seed line; the longer segment wins", segment
                 break
     return {"gate": "S", "readings": readings, "best_by_ade": by_ade, "best_by_established": by_established,
-            "selected_segment_s": chosen, "note": tie_note}
+            "selected_segment_s": chosen, "note": tie_note,
+            "tie_rule": "a longer candidate within the seed line on both metrics against the FIRST chosen wins; "
+                        "the longest such candidate is taken (ties are judged against the original, not chained)"}
 
 
 def gate_t(readout_payload: dict[str, Any]) -> dict[str, Any]:

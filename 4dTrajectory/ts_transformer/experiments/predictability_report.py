@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 """Validation-only diagnostics for pooled terminal-trajectory predictors.
 
+Not for a `plan_conditioning=manoeuvre-code` checkpoint: this runner builds its dynamics rows
+itself, without the tokenizer's inputs, and `plan_z` refuses the batch by name.
+
 The report answers three predeclared questions:
 
 1. How does error vary with remaining time, airport, runway and geometric route type?

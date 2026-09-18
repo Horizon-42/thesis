@@ -142,7 +142,8 @@ PLAN_CONDITIONING_FIELDS = ("plan_conditioning",)
 # The tokenizer behind the manoeuvre-code token (plan §2.4): WHICH intent space the code
 # comes from — the learned encoder + FSQ (`manoeuvre/tokenizer.py`; ``manoeuvre_fsq_levels``
 # are its per-dimension level counts, K = their product) or the rule-read command vocabulary
-# (baseline B, 45 codes, no levels). ``manoeuvre_codebook`` names a FROZEN codebook directory
+# (baseline B: 7 heading × 3 vertical × 3 speed = 63 codes, no levels). ``manoeuvre_codebook``
+# names a FROZEN codebook directory
 # an executor is trained against (P3.3; the checkpoint binds to its sha); empty = the
 # tokenizer trains jointly with the executor (P1.3) and is exported afterwards
 # (`run_ts.py manoeuvre_codebook`). All three are read only under ``manoeuvre-code``.
@@ -2597,6 +2598,16 @@ class TSConfig:
         # needs Δ of truth after it. `dataset.window_anchors` raises every window set's floor
         # to Δ; a stated random-anchor floor BELOW it would name a population the run never
         # trains on, so it is refused rather than silently raised.
+        # ...and the horizon is cut into `dt_s` rows (the segment rows, the rollout's query grid):
+        # a horizon that is not a whole number of steps would be refused at model build, past
+        # the campaign runner's dry run.
+        if self.control_horizon_s:
+            steps = self.control_horizon_s / self.dt_s
+            if abs(steps - round(steps)) > 1e-6:
+                raise ValueError(
+                    f"control_horizon_s={self.control_horizon_s:g} is not a whole number of "
+                    f"dt_s={self.dt_s:g} steps"
+                )
         if (
             self.control_horizon_s
             and self.random_train_anchor
@@ -2756,6 +2767,16 @@ class TSConfig:
             raise ValueError(
                 f"serialized config is missing {', '.join(sorted(missing))}; "
                 "regenerate the derived checkpoint"
+            )
+        # A retired PLAN value is named before the retired-constant sweep below: the archived
+        # L1 / L1b arms carry `plan_conditioning_dropout=0.5` beside it, and the constant's
+        # refusal would otherwise fire first and point nowhere.
+        if data.get("plan_conditioning") in PLAN_CONDITIONINGS_RETIRED:
+            raise ValueError(
+                f"plan_conditioning={data['plan_conditioning']!r} is retired (2026-09-18): the "
+                "two-tier v2 plan tokens are under archive/two_tier_v2_2026_09/ and the "
+                "checkpoints that carry them no longer load "
+                "(docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
             )
         # An UNREAD retired field is dropped by name: nothing read it, so the stored value
         # could not have changed the run, and refusing the artifact would be a contract

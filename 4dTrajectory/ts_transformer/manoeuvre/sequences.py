@@ -91,7 +91,9 @@ def _boundaries(series: FlightSeries, anchor: int, segment_s: float) -> tuple[np
     end = float(series.supervision_times[-1])
     last_end = float(series.times[anchor]) + segment_s * len(starts)
     remaining = max(end - last_end, 0.0)
-    return starts, min(remaining / segment_s, math.nextafter(1.0, 0.0))
+    if remaining >= segment_s:
+        raise ValueError(f"{series.dataset_id}: {remaining:.3f} s remain after the last full segment — the cut missed one")
+    return starts, remaining / segment_s
 
 
 def flight_sequences(

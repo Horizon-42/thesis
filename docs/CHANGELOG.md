@@ -24,6 +24,21 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
   course), scales absent from the codebook identity (fixed: inside the sha, refused on mismatch),
   `z_to_codes` out of range off the grid (fixed: nearest level), duplicated constants (fixed:
   from `config`), frozen mode under `train()` (fixed: `train()` override). ts suite 1218 pass.
+- P2.1 + P3.1 (`sequences`, `context`, `prior`, `lockstep`, `gates`, `readout`, six runners) and
+  their opus review: three blockers fixed before any real readout — the prior's position budget
+  was sized from the truth and overflowed `collate` under protocol A on long flights at short
+  segments (now `lockstep.required_positions`, from the closing budget); a landed flight's arrival
+  time was double counted (the flown span IS the arrival); the lead displacements used the
+  "absent when the forecast is short" rule against B61 numbers read with hold-last-row (now
+  `hold_forecast_end=True`, plan §3.1). Majors: a round the budget left no row for wrote its
+  e_plan onto the previous ask (the leg is now returned and gates the bookkeeping); the flip
+  rate replaced the whole history instead of one adjacent code (`one_step_rolled`, one forward
+  per position); the lockstep runner did not bind the prior to the executor's split (now: the
+  prior's train set is disjoint from the executor's val, its val inside it); the bigram baseline
+  was the joint NLL against the prior's conditional CE (now `nll_per_code` is conditional on a
+  code following). Minors: a zero-segment batch made the CE NaN (sum / clamp), every gate checks
+  the artefact's protocol, gate E's progress is "not applicable" for a seed without a v2 line,
+  the lockstep table prints n per lead, e_plan cuts the truth-code leg at its own crossing.
 
 ### 2026-09-18 — follow-ups #41 / #42 closed: the stale-record error names `--observed-only`, AGENTS.md becomes policy + pointers
 

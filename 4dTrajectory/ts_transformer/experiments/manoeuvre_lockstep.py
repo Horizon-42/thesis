@@ -26,6 +26,7 @@ import numpy as np
 import torch
 
 from ts_transformer.backbone.adapters import resolve_device
+from ts_transformer.config import default_anchor as default_anchor_of
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_SHORT, strata_masks
 from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
 from ts_transformer.data.dataset import build_series, load_flight_dicts
@@ -42,6 +43,8 @@ from ts_transformer.run_naming import run_display_name
 from ts_transformer.training.train import load_checkpoint, usable_series
 
 LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v1"
+#: The summary block a written record directory carries.
+LOCKSTEP_RECORDS_BLOCK = "manoeuvre_lockstep"
 
 
 def load_prior(path: Path, device: torch.device) -> tuple[ls.Prior, dict[str, Any]]:
@@ -93,6 +96,10 @@ def _by_round(rows, key) -> dict[str, float | None]:
     return {str(k): float(np.median(v)) for k, v in sorted(by_round.items())}
 
 
+def _lead(value: float | None) -> str:
+    return f"{value:>7.0f}" if value is not None else f"{'—':>7}"
+
+
 def render(payload: dict[str, Any]) -> str:
     lines = [
         f"manoeuvre lockstep · {payload['protocol']} · {payload['executor_name']} · {payload['flights']} flights · "
@@ -100,19 +107,20 @@ def render(payload: dict[str, Any]) -> str:
         + (f" · prior {payload['prior']}" if payload.get("prior") else ""),
         "",
         f"{'stratum':<14}{'n':>6}{'ADE mean':>10}{'ADE p50':>9}{'FDE p50':>9}{'flyable':>9}{'estab':>8}"
-        f"{'e60':>7}{'e120':>7}{'e180':>7}{'e300':>7}{'asks':>6}  ended",
+        f"{'e60':>7}{'e120':>7}{'e180':>7}{'e300':>7}{'asks':>6}  ended · n at each lead",
+        "  (the leads hold the forecast's last row past its end; a lead is absent only where the truth has ended)",
     ]
     for stratum in STRATA:
         cell = payload["strata"][stratum]
         if not cell["n"]:
             continue
-        at = cell["at_p50_m"]
-        fmt = lambda v: f"{v:>7.0f}" if v is not None else f"{'—':>7}"
+        at, at_n = cell["at_p50_m"], cell["at_n"]
         lines.append(
             f"{STRATUM_SHORT[stratum]:<14}{cell['n']:>6}{cell['ade_mean_m']:>10.0f}{cell['ade_p50_m']:>9.0f}{cell['fde_p50_m']:>9.0f}"
             f"{cell['fully_flyable_share']:>9.3f}{cell['established_share']:>8.3f}"
-            f"{fmt(at['60'])}{fmt(at['120'])}{fmt(at['180'])}{fmt(at['300'])}{cell['asks_p50']:>6.0f}  "
+            f"{_lead(at['60'])}{_lead(at['120'])}{_lead(at['180'])}{_lead(at['300'])}{cell['asks_p50']:>6.0f}  "
             + ", ".join(f"{k} {v}" for k, v in sorted(cell["ended"].items()))
+            + f" · n {at_n['60']}/{at_n['120']}/{at_n['180']}/{at_n['300']}"
         )
     pooled = payload["strata"][STRATUM_ALL]
     lines.append("")
@@ -156,6 +164,17 @@ def main(argv: list[str] | None = None) -> int:
         prior, prior_payload = load_prior(args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior, device)
         if prior_payload["codebook_sha256"] != codebook.sha256:
             parser.error(f"{args.prior} was trained on codebook {prior_payload['codebook_sha256'][:12]}…, not {codebook.sha256[:12]}…")
+        # the prior must never have seen this executor's val flights (§6.3) — several executors
+        # can share one frozen codebook: its train set is disjoint from this val set, and its
+        # own val (a prefix of it under --limit) lies inside it
+        executor_val = set(payload["split"]["val"])
+        seen = executor_val & set(prior_payload["split"]["train"])
+        if seen or not set(prior_payload["split"]["val"]) <= executor_val:
+            parser.error(f"{args.prior} was trained on another split than this executor's ({len(seen)} of its train "
+                         "flights are in this val set, or its val is not inside it): the prior may have seen these val flights")
+        if int(prior_payload["anchor"]) != default_anchor_of(config) or float(prior_payload["segment_s"]) != codebook.segment_s:
+            parser.error(f"{args.prior} was trained at anchor {prior_payload['anchor']} / segment {prior_payload['segment_s']:g} s, "
+                         f"not this executor's {default_anchor_of(config)} / {codebook.segment_s:g} s")
     airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
     manifests = [arrival_manifest_path(item) for item in airports]
     require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
@@ -191,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
         "prior": None if args.prior is None else str(args.prior),
         "prior_sha256": None if args.prior is None else file_sha256(args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior),
         "prior_continuous": None if prior is None else prior.model.config.continuous,
+        "prior_executor_sha256": None if prior_payload is None else prior_payload["executor_sha256"],
+        "prior_trained_on_this_executor": None if prior_payload is None else prior_payload["executor_sha256"] == executor_sha,
         "segment_s": codebook.segment_s, "anchor": runs[0].anchor, "split": "val", "limit": args.limit or None,
         "flights": len(rows), "flights_without_a_leg": flown_none,
         "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first ask (a cap; under A the prior's landed decides)",
@@ -204,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     if pairs:
         write_batch([r for r, _ in pairs], output_dir=out / "records", config_dict=config.to_dict(),
                     flight_metrics=[m for _, m in pairs], checkpoint=str(executor_path), split="val",
-                    extra_summary={"manoeuvre_lockstep": {k: v for k, v in payload_out.items() if k not in ("rows", "strata")}})
+                    extra_summary={LOCKSTEP_RECORDS_BLOCK: {k: v for k, v in payload_out.items() if k not in ("rows", "strata")}})
     return 0
 
 

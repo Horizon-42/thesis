@@ -79,7 +79,14 @@ def manoeuvre_tokenizer_for(config: TSConfig) -> tuple[nn.Module, str | None]:
             segment_s=config.control_horizon_s, dt_s=config.dt_s,
         )
         return tokenizer, None
-    codebook = load_codebook(config.manoeuvre_codebook)
+    try:
+        codebook = load_codebook(config.manoeuvre_codebook)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"this executor was trained against the codebook at {config.manoeuvre_codebook}, which "
+            f"is not there ({exc}); the checkpoint binds to it (codebook_sha256 in its "
+            "checkpoint_metadata.json) and cannot be rebuilt without it"
+        ) from exc
     expected = (
         config.manoeuvre_tokenizer, tuple(config.manoeuvre_fsq_levels),
         float(config.control_horizon_s), float(config.dt_s),
@@ -128,6 +135,8 @@ def plan_z(tokenizer: nn.Module, dynamics: dict[str, torch.Tensor]) -> tuple[tor
         )
     if given:
         z = dynamics[MANOEUVRE_Z_KEY]
+        if z.ndim != 2 or z.shape[1] != tokenizer.z_dim:
+            raise ValueError(f"a given z is [B, {tokenizer.z_dim}] for this tokenizer, got {tuple(z.shape)}")
         return z, tokenizer.z_to_codes(z)
     return tokenizer(dynamics[MANOEUVRE_SEGMENT_KEY], dynamics[MANOEUVRE_STATE_KEY])
 

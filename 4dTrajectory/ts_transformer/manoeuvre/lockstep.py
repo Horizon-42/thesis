@@ -39,7 +39,7 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 
-from ts_transformer.config import TSConfig, default_anchor
+from ts_transformer.config import CONTROL_DURATION_UNIFORM, TSConfig, default_anchor
 from ts_transformer.data.approach_difficulty import approach_difficulty
 from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.data.dataset import FlightSeries, Normalizer, truth_duration_s
@@ -51,7 +51,7 @@ from ts_transformer.inference.forecast import Forecast, concatenate, cut_at_thre
 from ts_transformer.inference.receding import cut_at_lead, displacement_at, rolled_series
 from ts_transformer.manoeuvre.context import TypeVocabulary
 from ts_transformer.manoeuvre.prior import ManoeuvrePrior, Step, collate, last_position_step
-from ts_transformer.manoeuvre.segments import segment_rows, state_row
+from ts_transformer.manoeuvre.segments import segment_rows
 from ts_transformer.manoeuvre.sequences import CodeSequence, flight_sequences, state_token
 from ts_transformer.manoeuvre.tokenizer import Codebook
 from ts_transformer.outputs.control.forecast import forecast_control_batch
@@ -79,6 +79,16 @@ LANDED_THRESHOLD = 0.5
 
 def closing_horizon_s(T_s: float) -> float:
     return T_s + max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION * T_s)
+
+
+def required_positions(max_truth_duration_s: float, segment_s: float, longest_truth_segments: int) -> int:
+    """How many positions a prior must hold to be asked at every round of a lockstep: the
+    BUDGET's rounds (`closing_horizon_s` of the longest truth, in segments, rounded up) plus
+    the BOS position and one spare — never fewer than the longest truth sequence needs. Sized
+    from the truth alone, a prior overflowed `collate` under protocol A on the long flights
+    (review 2026-09-18 B1: Δ = 20 s past T ≈ 400 s)."""
+    rounds = int(np.ceil(closing_horizon_s(max_truth_duration_s) / segment_s))
+    return max(rounds + 2, longest_truth_segments + 2)
 
 
 @dataclass(frozen=True)
@@ -194,6 +204,10 @@ def fly(
     segment_s, dt_s = codebook.segment_s, codebook.dt_s
     if config.control_horizon_s != segment_s or config.dt_s != dt_s:
         raise ValueError(f"the executor's horizon {config.control_horizon_s:g} s / {config.dt_s:g} s is not the codebook's {segment_s:g} s / {dt_s:g} s")
+    if config.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
+        # e_plan cuts the truth-code leg at the flown leg's span (`cut_at_lead` needs a row
+        # there): the two legs share their query grid only under uniform segment durations
+        raise ValueError("the lockstep's e_plan reading needs uniform control segment durations (the P1.4 recipe's)")
     a0 = default_anchor(config)
     step_rows = int(round(segment_s / dt_s))
     truths = flight_sequences(series, codebook, a0)
@@ -217,9 +231,9 @@ def fly(
                 z_rows.append(run.truth.z[index])
         else:
             if protocol == PROTOCOL_A_TRUTH:
-                exhausted = [run for run in active if round_index > run.truth.length]
-                for run in exhausted:
-                    run.ended = ENDED_TRUTH_EXHAUSTED
+                for run in active:
+                    if round_index > run.truth.length:
+                        run.ended = ENDED_TRUTH_EXHAUSTED
                 active = [run for run in active if run.ended is None]
                 histories = [_history(run, anchor, dt_s) for run in active]
                 if not active:
@@ -254,12 +268,13 @@ def fly(
             truth_z = np.stack([run.truth.z[min(round_index, run.truth.length - 1)] for run in active])
             plan_legs = _fly(executor, histories, anchor, truth_z, device, batch_size)
         for row, (run, history, forecast) in enumerate(zip(active, histories, forecasts, strict=True)):
-            run.codes.append(codes[row])
-            _fly_leg(run, history, forecast, segment_s=segment_s, round_index=round_index)
-            if plan_legs is not None and run.legs:
-                run.asks_e[-1]["e_plan_m"] = float(np.linalg.norm(_end_point(run.legs[-1]) - _end_point(cut_at_lead(plan_legs[row], float(np.sum(run.legs[-1].sample_durations_s))))))
+            leg = _fly_leg(run, history, forecast, segment_s=segment_s, round_index=round_index, code=codes[row])
+            if leg is None:
+                continue   # the budget ended before this round's first row: nothing flown, nothing recorded
+            if plan_legs is not None:
+                run.asks_e[-1]["e_plan_m"] = _plan_error(leg, plan_legs[row], history)
                 run.asks_e[-1]["truth_code"] = int(run.truth.codes[min(round_index, run.truth.length - 1)])
-            if protocol == PROTOCOL_A and run.legs and run.legs[-1] is not None:
+            if protocol == PROTOCOL_A:
                 _tokenise_flown_leg(run, codebook, segment_s, dt_s, round_index)
         if log is not None:
             log(f"    {protocol} round {round_index}: {len(active)} flights at anchor {anchor}, "
@@ -268,8 +283,20 @@ def fly(
     return runs
 
 
-def _fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, segment_s: float, round_index: int) -> None:
-    """Fly this round's segment whole; end at the crossing on the final or at the budget."""
+def _plan_error(leg: Forecast, plan_leg: Forecast, history: FlightSeries) -> float:
+    """e_plan: the flown leg's end against the truth-code leg's end, the latter cut where it
+    crosses the threshold on the final (as the flown one is) or at the flown leg's span."""
+    plan_cut = cut_at_threshold_crossing(plan_leg, history)
+    span = float(np.sum(leg.sample_durations_s))
+    if not (plan_cut.truncated_at_threshold and plan_cut.final_time_s <= span + ROW_TOLERANCE_S):
+        plan_cut = cut_at_lead(plan_leg, span)
+    return float(np.linalg.norm(_end_point(leg) - _end_point(plan_cut)))
+
+
+def _fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, segment_s: float, round_index: int,
+             code: int) -> Forecast | None:
+    """Fly this round's segment whole; end at the crossing on the final, at the prior's landing
+    or at the budget. Returns the leg appended, or None when the budget left no row to fly."""
     crossed = cut_at_threshold_crossing(forecast, history)
     remaining_s = run.horizon_s - run.flown_s
     landing_s = None if run.landing_this_round is None else run.landing_this_round * segment_s
@@ -286,14 +313,16 @@ def _fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, segme
     else:
         leg = cut_at_lead(forecast, segment_s)
     if leg is None:
-        return
+        return None
     run.legs.append(leg)
+    run.codes.append(code)
     run.asks += 1
     run.flown_s += float(np.sum(leg.sample_durations_s))
     run.asks_e.append({
-        "round": round_index, "lead_s": run.flown_s, "code": run.codes[-1],
+        "round": round_index, "lead_s": run.flown_s, "code": code,
         "e_track_m": displacement_at(run.series, leg, run.anchor, float(leg.times[-1])),
     })
+    return leg
 
 
 def _tokenise_flown_leg(run: FlightRun, codebook: Codebook, segment_s: float, dt_s: float, round_index: int) -> None:
@@ -314,12 +343,12 @@ def _tokenise_flown_leg(run: FlightRun, codebook: Codebook, segment_s: float, dt
 # ── the rows ─────────────────────────────────────────────────────────────────
 
 def whole_forecast(run: FlightRun) -> Forecast:
-    """The flight's legs as one forecast from the anchor: its predicted end is the prior's
-    arrival when it said landed (the flown span plus its fraction of a segment), else the span."""
-    last = run.legs[-1]
+    """The flight's legs as one forecast from the anchor. Its predicted end is the flown span:
+    a flight the prior landed was already flown for its predicted fraction of the last
+    segment (`_fly_leg`), so the span IS the arrival — adding the fraction again double
+    counted it (review 2026-09-18 B2)."""
     span = float(sum(np.sum(leg.sample_durations_s) for leg in run.legs))
-    predicted = span + (run.landed_fraction * run.truth.segment_s if run.landed_fraction is not None else 0.0)
-    whole = concatenate(run.legs, run.anchor, predicted)
+    whole = concatenate(run.legs, run.anchor, span)
     return replace(whole, truncated_at_threshold=run.truncated, horizon_capped=run.ended == ENDED_HORIZON)
 
 
@@ -372,7 +401,12 @@ def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, A
         "ade_m": float(metrics["ade_m"]), "fde_m": float(metrics["fde_m"]),
         "final_time_error_s": float(metrics["final_time_error_s"]),
         "chamfer_m": float(geometry["chamfer_m"]), "frechet_m": float(geometry["frechet_m"]),
-        "at": {f"{lead:g}": displacement_at(run.series, forecast, run.anchor, origin + lead) for lead in LEADS_S},
+        # plan §3.1's absence rule: the forecast's last row is HELD past its end (a flight that
+        # says it has arrived is at the threshold, and a reading past that claim measures the
+        # claim); only the truth's end makes a reading absent — the rule B61's 768 / 1396 were
+        # read under (review 2026-09-18 B3)
+        "at": {f"{lead:g}": displacement_at(run.series, forecast, run.anchor, origin + lead, hold_forecast_end=True)
+               for lead in LEADS_S},
         "asks_e": run.asks_e,
         "route_tortuosity": difficulty.route_tortuosity, "established_at_anchor": difficulty.established_at_anchor,
         "remaining_path_m": difficulty.remaining_path_m,
@@ -384,5 +418,5 @@ __all__ = [
     "ENDED_CROSSED", "ENDED_HORIZON", "ENDED_LANDED", "ENDED_TRUTH_EXHAUSTED", "HORIZON_SLACK_FRACTION",
     "HORIZON_SLACK_S", "LANDED_THRESHOLD", "LEADS_S", "PROTOCOLS", "PROTOCOL_A", "PROTOCOL_A_TRUTH",
     "PROTOCOL_C", "Executor", "FlightRun", "Prior", "closing_horizon_s", "flight_row", "fly",
-    "reference_verdicts", "whole_forecast",
+    "reference_verdicts", "required_positions", "whole_forecast",
 ]

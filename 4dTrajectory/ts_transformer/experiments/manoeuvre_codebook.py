@@ -20,7 +20,7 @@ from pathlib import Path
 
 from ts_transformer.config import PLAN_CONDITIONING_MANOEUVRE_CODE
 from ts_transformer.data.data_provenance import provenance_eligible_set_digests
-from ts_transformer.io_utils import file_sha256
+from ts_transformer.io_utils import file_sha256, sha256_bytes
 from ts_transformer.manoeuvre.tokenizer import write_codebook
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.training.train import load_checkpoint
@@ -42,7 +42,9 @@ def export_codebook(checkpoint: Path, out: Path):
         data_identity={
             "schema_version": provenance.get("schema_version"),
             "eligible_set_sha256": provenance_eligible_set_digests(provenance),
-            "split": {name: len(keys) for name, keys in payload["split"].items()},
+            # the split's IDENTITY (the sorted key lists' shas), never its counts
+            "split_sha256": {name: sha256_bytes("\n".join(sorted(keys)).encode()) for name, keys in payload["split"].items()},
+            "split_counts": {name: len(keys) for name, keys in payload["split"].items()},
         },
         source={
             "checkpoint": str(checkpoint),

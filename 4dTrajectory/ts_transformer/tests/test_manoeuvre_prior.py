@@ -113,10 +113,12 @@ def test_the_bigram_baseline_scores_every_transition_including_the_landing():
     val = [_sequence([0, 1, 2], key="v")]
     baseline = pr.bigram_nll(train, val, code_count=4, alpha=1.0)
     assert baseline["tokens"] == 4 and baseline["code_tokens"] == 3
-    # BOS→0: (25+1)/(25+5) ; 0→1: (25+1)/(25+5) ; 1→2: (20+1)/(25+5) ; 2→LANDED: (20+1)/(20+5)
+    # the JOINT (rows over {codes, LANDED}): BOS→0 26/30 ; 0→1 26/30 ; 1→2 21/30 ; 2→LANDED 21/25
     expected = -(math.log(26 / 30) * 2 + math.log(21 / 30) + math.log(21 / 25))
     assert baseline["nll_per_token"] == pytest.approx(expected / 4)
-    assert baseline["nll_per_code"] == pytest.approx(-(math.log(26 / 30) * 2 + math.log(21 / 30)) / 3)
+    # the CONDITIONAL next code (the four code columns renormalised, the landing apart — the
+    # prior's own quantity): BOS→0 26/29 ; 0→1 26/29 ; 1→2 21/24
+    assert baseline["nll_per_code"] == pytest.approx(-(math.log(26 / 29) * 2 + math.log(21 / 24)) / 3)
     # an unseen transition is smoothed, never infinite
     assert math.isfinite(pr.bigram_nll(train, [_sequence([3, 3], key="w")], code_count=4)["nll_per_token"])
 
@@ -173,3 +175,38 @@ def test_the_flip_rate_counts_disagreements_between_adjacent_asks_on_the_same_se
         assert pr.flip_rate(model, [sequences[0]], VOCAB, batch_size=1, device=torch.device("cpu"))["flips"] == 0
     with pytest.raises(ValueError, match="continuous"):
         pr.flip_rate(pr.ManoeuvrePrior(_config(continuous=True)), sequences, VOCAB, batch_size=2, device=torch.device("cpu"))
+
+
+def test_the_flip_rate_replaces_exactly_one_code_per_ask_and_matches_a_brute_force_loop():
+    torch.manual_seed(5)
+    config = _config()
+    model = pr.ManoeuvrePrior(config).eval()
+    rng = np.random.default_rng(1)
+    sequences = [_sequence(list(rng.integers(0, K, size=n)), key=f"f{i}") for i, n in enumerate((5, 3, 6, 1))]
+    result = pr.flip_rate(model, sequences, VOCAB, batch_size=4, device=torch.device("cpu"))
+    # brute force: one flight at a time, one position at a time, ONLY that position's code replaced
+    flips = pairs = 0
+    with torch.no_grad():
+        for sequence in sequences:
+            batch = pr.collate([sequence], config, VOCAB)
+            own = model(batch).next_logits.argmax(dim=-1)[0]
+            for t in range(sequence.length - 1):           # c_{t+2} exists for t ≤ T-2
+                codes = batch.codes_in.clone()
+                codes[0, t + 1] = own[t]
+                assert int((codes != batch.codes_in).sum()) <= 1
+                rolled = pr.PriorBatch(codes, batch.states, batch.valid, batch.next_code, batch.landed, batch.landed_fraction,
+                                       batch.next_z, batch.type_index, batch.runway)
+                ahead = model(rolled).next_logits.argmax(dim=-1)[0, t + 1]
+                flips += int(ahead != own[t + 1])
+                pairs += 1
+    assert result["pairs"] == pairs == 4 + 2 + 5 + 0 and result["flips"] == flips
+
+
+def test_a_batch_of_zero_segment_flights_has_a_finite_loss_and_evaluate_refuses_nothing():
+    config = _config()
+    model = pr.ManoeuvrePrior(config)
+    batch = pr.collate([_sequence([], key="a"), _sequence([], key="b")], config, VOCAB)
+    terms = model.loss(model(batch), batch)
+    assert all(torch.isfinite(value) for value in terms.values()) and float(terms["next"]) == 0.0
+    with pytest.raises(ValueError, match="at least one"):
+        pr.evaluate(model, [], None, VOCAB, batch_size=2, device=torch.device("cpu"))

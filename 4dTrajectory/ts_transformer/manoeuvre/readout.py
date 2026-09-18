@@ -227,6 +227,8 @@ def gate_t(arms: Sequence[ArmReading]) -> dict[str, Any]:
         if arm.kind == "no-token":
             continue
         name = f"K{arm.k}" if arm.kind == "learned" else arm.kind
+        if arm.seed in by_vocabulary.get(name, {}):
+            raise ValueError(f"two arms read as {name} at seed {arm.seed}: {by_vocabulary[name][arm.seed]['key']} and {arm.key}")
         twin = twins.get(arm.seed)
         entry: dict[str, Any] = {"key": arm.key, "usage": arm.usage, "gate_t_iii": arm.usage["gate_t_iii"]}
         if twin is None:
@@ -273,6 +275,8 @@ def render(payload: dict[str, Any]) -> str:
     lines = [
         f"manoeuvre readout · {payload['campaign']} · segment {payload['segment_s']:g} s · anchor {payload['anchor']} · "
         f"{payload['split']} · {payload['flights']} flights ({payload['truth_shorter_than_horizon']} observed shorter than Δ)",
+        "every token arm is read under PROTOCOL C — the TRUTH segment through its tokenizer (reads the future); the no-token "
+        "twin has no oracle. Gate T(i) is what the code is worth to the executor, not a prediction result.",
         "",
         f"{'arm':<18}{'seed':>6}{'n':>6}" + "".join(f"{'ADE ' + STRATUM_SHORT[s]:>16}" for s in STRATA)
         + f"{'gain all':>10}{'better':>8}{'codes':>12}{'max%':>7}{'H bits':>8}",

@@ -168,7 +168,7 @@ class ControlTrainingDiagnosticsAccumulator:
                 "count": self.manoeuvre_code_count,
                 "used": sum(1 for count in self.code_counts if count),
                 "unused": sum(1 for count in self.code_counts if not count),
-                "max_share": max(shares),
+                "max_share": max(shares, default=0.0),
                 "entropy_bits": -sum(share * math.log2(share) for share in shares),
                 "counts": list(self.code_counts),
             }}

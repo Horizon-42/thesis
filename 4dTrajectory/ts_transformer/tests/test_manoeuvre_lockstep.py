@@ -52,8 +52,13 @@ def world(tmp_path_factory):
     return codebook, executor, series, prior
 
 
-def test_the_closing_budget_is_the_archived_rule():
+def test_the_closing_budget_is_the_archived_rule_and_the_prior_is_sized_for_it():
     assert ls.closing_horizon_s(100.0) == 130.0 and ls.closing_horizon_s(400.0) == 440.0
+    # a 700 s truth at Δ = 20 s: the budget is 770 s = 39 rounds → 41 positions, more than the
+    # truth's 35 segments + 2 (the overflow a truth-sized prior hit under protocol A)
+    assert ls.required_positions(700.0, 20.0, 35) == 41
+    assert ls.required_positions(100.0, 60.0, 1) == 5           # 130 s / 60 → 3 rounds + 2
+    assert ls.required_positions(100.0, 60.0, 9) == 11          # never below the longest truth + 2
 
 
 def _check_runs(runs, protocol):
@@ -69,6 +74,12 @@ def _check_runs(runs, protocol):
             assert run.flown_s == pytest.approx(float(np.sum(np.concatenate([leg.sample_durations_s for leg in run.legs]))))
             assert run.flown_s <= run.horizon_s + 1e-6
             row, metrics = ls.flight_row(run, points=16)
+            whole = ls.whole_forecast(run)
+            assert whole.predicted_final_time_s == pytest.approx(run.flown_s)      # the span IS the arrival
+            assert whole.final_time_s == pytest.approx(run.flown_s)
+            # the leads hold the forecast's last row past its end: 60 s after the anchor is
+            # readable for every flight, however early it ended (the truth reaches it)
+            assert row["at"]["60"] is not None
             assert set(row["reference"]) == {"fully_flyable", "violations", "established"}
             assert row["ended"] == run.ended and len(row["codes"]) == run.asks and set(row["at"]) == {"60", "120", "180", "300"}
             assert row["established_at_anchor"] in (True, False) and metrics["ade_m"] >= 0.0
@@ -114,3 +125,17 @@ def test_protocol_a_truth_reads_the_truth_prefix_and_ends_when_it_runs_out(world
         assert run.asks <= run.truth.length + 1 or run.ended != ls.ENDED_TRUTH_EXHAUSTED
     with pytest.raises(ValueError, match="protocol"):
         ls.fly(executor, codebook, series, "B", prior=prior, device=torch.device("cpu"), batch_size=3)
+
+
+def test_a_round_the_budget_leaves_no_row_for_flies_nothing_and_records_nothing(world):
+    """`_fly_leg` returns None when the remaining budget is below the first query step: no leg,
+    no code, no ask row — the bookkeeping stays aligned (review 2026-09-18 M4)."""
+    codebook, executor, series, _prior = world
+    runs = ls.fly(executor, codebook, series[:1], ls.PROTOCOL_C, prior=None, device=torch.device("cpu"), batch_size=1)
+    run = runs[0]
+    forecast = run.legs[0]
+    run.ended, run.flown_s = None, run.horizon_s - 0.1          # 0.1 s of budget left: under one 0.5 s step
+    before = (len(run.legs), len(run.codes), len(run.asks_e), run.asks)
+    leg = ls._fly_leg(run, run.series, forecast, segment_s=SEGMENT_S, round_index=99, code=7)
+    assert leg is None and run.ended == ls.ENDED_HORIZON
+    assert (len(run.legs), len(run.codes), len(run.asks_e), run.asks) == before
