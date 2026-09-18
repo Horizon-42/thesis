@@ -49,9 +49,14 @@ of the package, not a migration in progress.
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
   `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
-- **`manoeuvre` — IN DEVELOPMENT**: the intent-token plan (a segment tokenizer whose decoder is the
-  control-path executor, a causal prior over intent codes, a multi-aircraft graph):
-  `docs/2026-09-18_manoeuvre_token_plan.zh.md` (P10).
+- **`manoeuvre` — IN DEVELOPMENT** (P1–P3 code landed 2026-09-18, P1.4 campaign running): the
+  intent-token plan — `manoeuvre/segments.py` (the segment-start frame), `tokenizer.py` (encoder +
+  FSQ, the command vocabulary, the codebook artefact, C28), the executor under `plan_conditioning=
+  manoeuvre-code` (D30), `sequences.py` + `context.py` + `prior.py` (the causal prior, discrete or
+  continuous), `lockstep.py` (protocols C / A / A-truth), `readout.py` + `gates.py` (T / X / P / E / S);
+  runners `manoeuvre_codebook`, `manoeuvre_readout`, `manoeuvre_prior`, `manoeuvre_prior_readout`,
+  `manoeuvre_lockstep`, `manoeuvre_gates` (R7). Plan: `docs/2026-09-18_manoeuvre_token_plan.zh.md`;
+  readouts: `docs/2026-09-18_manoeuvre_token_results.zh.md` (P10).
 - **Control-path axes**: `latent_dim > 0` (latent intent z) and `cta_conditioning=given` (the
   given arrival time IS the duration) — their oracle forms READ THE FUTURE and the run name says so
   (`control+z8`, `z=posterior`, `cta=given`), never a prediction result (P5). The duration head:
@@ -277,7 +282,13 @@ noise (sd ≈ 0.05, sign flips), the table is a sidecar never in `data_provenanc
 `cal.hit*` is in-sample on val (R3). `eta_error_readout` — B0; |Δt| p80 is 65.8–72.5 s vectored against
 12.0–20.3 s straight-in (KRDU val), so one pooled ETA interval cannot serve both (R4). `latent_probe` — L2.f;
 `--limit N` is a prefix (a smoke test); the posterior reads the future (R5). `latent_fan_readout`
-— 4(a); the RANDOM fan is the reading, not a footnote (R6).
+— 4(a); the RANDOM fan is the reading, not a footnote (R6). **`manoeuvre_*`** — the intent-token
+chain: `manoeuvre_codebook` exports a joint executor's tokenizer; `manoeuvre_readout` reads gate T
+(protocol C at the fixed anchor, paired with the SAME seed's no-token twin, `--write-records`);
+`manoeuvre_prior` trains the prior on the executor's own split (never an operating-day split before
+P4); `manoeuvre_prior_readout` (val NLL vs the bigram, the flip rate); `manoeuvre_lockstep`
+(`--protocol C|A|A-truth`, one round = the segment, the three artefacts must be ONE vocabulary);
+`manoeuvre_gates` judges over written artefacts, two seeds, never a typed number (R7).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

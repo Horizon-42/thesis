@@ -352,6 +352,38 @@ def fit(
                      stopped_early=stopped_early)
 
 
+# ── the flip rate (plan §2.5's stability reading) ────────────────────────────
+
+@torch.no_grad()
+def flip_rate(model: ManoeuvrePrior, sequences: Sequence[CodeSequence], vocabulary: TypeVocabulary, *,
+              batch_size: int, device: torch.device) -> dict[str, Any]:
+    """How often two ADJACENT asks disagree about the SAME future segment, on the truth history
+    (plan §2.5; the plan path's "fix walked 766 m"): at position t the prior's top-1 for c_{t+2}
+    is read by rolling ONE greedy step (its own top-1 c_{t+1} appended with the TRUTH's state
+    x_{t+1}), and compared with its top-1 for c_{t+2} at position t+1 (c_{t+1} given). A flip is
+    a disagreement; ``rate`` is the share over every (t, t+2) pair the sequences hold. A
+    continuous prior has no code to flip: refused."""
+    if model.config.continuous:
+        raise ValueError("the flip rate reads top-1 codes; a continuous prior predicts a vector")
+    model.eval()
+    flips = pairs = 0
+    order = np.arange(len(sequences))
+    for batch in _batches(sequences, None, model.config, vocabulary, batch_size=batch_size, order=order, device=device):
+        direct = model(batch).next_logits.argmax(dim=-1)                  # position t+1 → c_{t+2}, c_{t+1} given
+        rolled = batch.codes_in.clone()
+        # the one-step roll: position t+1's code becomes the prior's own top-1 for c_{t+1}
+        own = model(batch).next_logits.argmax(dim=-1)                      # position t → c_{t+1}
+        rolled[:, 1:] = own[:, :-1]
+        rolled_batch = PriorBatch(rolled, batch.states, batch.valid, batch.next_code, batch.landed, batch.landed_fraction,
+                                  batch.next_z, batch.type_index, batch.runway)
+        ahead = model(rolled_batch).next_logits.argmax(dim=-1)             # position t+1 with the OWN c_{t+1} → c_{t+2}
+        # a pair exists where position t+1 is valid and has a next segment (c_{t+2} exists)
+        has_pair = batch.valid[:, 1:] & (batch.next_code[:, 1:] != IGNORE)
+        flips += int(((ahead[:, 1:] != direct[:, 1:]) & has_pair).sum())
+        pairs += int(has_pair.sum())
+    return {"rate": flips / max(pairs, 1), "flips": flips, "pairs": pairs}
+
+
 # ── the bigram baseline (gate T(ii)) ─────────────────────────────────────────
 
 def bigram_nll(train: Sequence[CodeSequence], val: Sequence[CodeSequence], code_count: int, *, alpha: float = 1.0) -> dict[str, float]:
@@ -383,5 +415,5 @@ def bigram_nll(train: Sequence[CodeSequence], val: Sequence[CodeSequence], code_
 
 __all__ = [
     "IGNORE", "PRIOR_SCHEMA", "FitResult", "ManoeuvrePrior", "PriorBatch", "PriorConfig", "PriorOutput", "Step",
-    "bigram_nll", "collate", "evaluate", "fit", "last_position_step",
+    "bigram_nll", "collate", "evaluate", "fit", "flip_rate", "last_position_step",
 ]

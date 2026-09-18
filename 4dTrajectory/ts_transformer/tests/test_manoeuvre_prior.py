@@ -149,3 +149,27 @@ def test_fit_keeps_the_epoch_with_the_best_val_next_term_and_stops_early(continu
     model.load_state_dict(result.state_dict)
     again = pr.evaluate(model, val, targets(val), VOCAB, batch_size=8, device=torch.device("cpu"))
     assert again["next"] == pytest.approx(result.best_val_next, abs=1e-6)
+
+
+def test_the_flip_rate_counts_disagreements_between_adjacent_asks_on_the_same_segment():
+    torch.manual_seed(3)
+    config = _config()
+    model = pr.ManoeuvrePrior(config).eval()
+    sequences = [_sequence([3, 5, 7, 2], key="a"), _sequence([1], key="b"), _sequence([], key="c")]
+    result = pr.flip_rate(model, sequences, VOCAB, batch_size=2, device=torch.device("cpu"))
+    # flight a has three (t, t+2) pairs (c_2, c_3, c_4); b and c have none
+    assert result["pairs"] == 3 and 0 <= result["flips"] <= 3 and result["rate"] == result["flips"] / 3
+    # a prior whose top-1 for c_{t+1} IS the truth's cannot flip: overfit one flight and check
+    batch = pr.collate([sequences[0]], config, VOCAB)
+    optimizer = torch.optim.Adam(model.parameters(), lr=3e-3)
+    model.train()
+    for _ in range(150):
+        optimizer.zero_grad()
+        loss = model.loss(model(batch), batch)["total"]
+        loss.backward()
+        optimizer.step()
+    model.eval()
+    if model.next_code_accuracy(model(batch), batch) == 1.0:
+        assert pr.flip_rate(model, [sequences[0]], VOCAB, batch_size=1, device=torch.device("cpu"))["flips"] == 0
+    with pytest.raises(ValueError, match="continuous"):
+        pr.flip_rate(pr.ManoeuvrePrior(_config(continuous=True)), sequences, VOCAB, batch_size=2, device=torch.device("cpu"))
