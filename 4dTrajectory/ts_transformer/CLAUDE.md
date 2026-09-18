@@ -55,7 +55,7 @@ of the package, not a migration in progress.
   manoeuvre-code` (D30), `sequences.py` + `context.py` + `prior.py` (the causal prior, discrete or
   continuous), `lockstep.py` (protocols C / A / A-truth), `readout.py` + `gates.py` (T / X / P / E / S);
   runners `manoeuvre_codebook`, `manoeuvre_readout`, `manoeuvre_prior`, `manoeuvre_prior_readout`,
-  `manoeuvre_lockstep`, `manoeuvre_gates` (R7). Plan: `docs/2026-09-18_manoeuvre_token_plan.zh.md`;
+  `manoeuvre_lockstep`, `manoeuvre_gates`, `manoeuvre_code_atlas` (R7). Plan: `docs/2026-09-18_manoeuvre_token_plan.zh.md`;
   readouts: `docs/2026-09-18_manoeuvre_token_results.zh.md` (P10).
 - **Control-path axes**: `latent_dim > 0` (latent intent z) and `cta_conditioning=given` (the
   given arrival time IS the duration) — their oracle forms READ THE FUTURE and the run name says so

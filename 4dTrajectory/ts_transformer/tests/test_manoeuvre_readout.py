@@ -153,3 +153,26 @@ def test_fixed_anchor_readings_read_every_flight_and_can_write_the_same_forecast
     summary = json.loads((tmp_path / "rec" / "summary.json").read_text())
     assert summary[ro.RECORDS_BLOCK]["protocol"] == "C" and summary[ro.RECORDS_BLOCK]["horizon_s"] == 20.0
     assert len(summary["results"]) == 5
+
+
+def test_the_code_atlas_flies_every_code_from_each_state_in_its_own_frame(tmp_path):
+    import torch
+    from ts_transformer.manoeuvre import tokenizer as tok
+    torch.manual_seed(0)
+    codebook = tok.write_codebook(tmp_path / "cb", tok.tokenizer_for("learned", levels=(4, 4), segment_s=20.0, dt_s=2.0),
+                                  segment_s=20.0, dt_s=2.0, data_identity={"eligible_set_sha256": {"KRDU": "b" * 64}}, source={})
+    config = _config(plan_conditioning="manoeuvre-code", manoeuvre_fsq_levels=(4, 4), manoeuvre_codebook=str(codebook.path), seed=1337)
+    series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3), config, airport=AIRPORT)
+    model = build_model(config).eval()
+    with torch.no_grad():
+        model.control_head.control_projection.weight.normal_(std=0.05)
+    atlas = ro.code_atlas(model, config, Normalizer.fit(series), codebook, series, torch.device("cpu"))
+    assert len(atlas) == 2
+    for entry in atlas:
+        assert len(entry["codes"]) == 16 and [c["code"] for c in entry["codes"]] == list(range(16))
+        assert 0 <= entry["truth_code"] < 16 and len(entry["truth_path"]) == 11
+        ends = np.array([c["end"] for c in entry["codes"]])
+        assert ends.shape == (16, 3) and np.isfinite(ends).all() and (ends[:, 0] > 0).all()   # every code flies ahead
+        assert len(entry["codes"][0]["path"]) >= 2
+        # the codes differ in where they end: the executor is conditioned on z
+        assert np.linalg.norm(ends - ends.mean(axis=0), axis=1).max() > 0.0

@@ -34,6 +34,7 @@ import torch
 from torch import nn
 
 from ts_transformer.config import PLAN_CONDITIONING_OFF, TSConfig, default_anchor
+from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
 from ts_transformer.data.approach_difficulty import (
     STRATUM_ALL,
     STRATUM_ESTABLISHED,
@@ -47,8 +48,11 @@ from ts_transformer.data.dataset import FlightSeries, Normalizer
 from ts_transformer.data.time_grids import ROW_TOLERANCE_S
 from ts_transformer.inference.export import PredictionRecord, build_prediction_record, observed_series_metrics
 from ts_transformer.inference.receding import displacement_at, mean_displacement_to
+from ts_transformer.manoeuvre.segments import SegmentFrame, truth_segment_rows
+from ts_transformer.manoeuvre.tokenizer import Codebook
 from ts_transformer.outputs.control.forecast import forecast_control_batch
-from ts_transformer.outputs.control.plan_token import manoeuvre_code_count
+from ts_transformer.outputs.control.plan_token import MANOEUVRE_Z_KEY, manoeuvre_code_count
+from ts_transformer.outputs.dynamics.context import dynamics_arrays
 
 READOUT_SCHEMA = "ts-manoeuvre-readout-v1"
 #: The summary block a written record directory carries (`write_batch`'s ``extra_summary``):
@@ -307,6 +311,51 @@ def render(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ── the code atlas (plan §2.4: "码怎么看") ────────────────────────────────────
+
+#: Every ``ATLAS_PATH_STRIDE``-th rollout row is kept in an atlas path (the rollout's grid is
+#: the 0.5 s integrator step; a segment of 60 s is 120 rows, kept as 24).
+ATLAS_PATH_STRIDE = 5
+
+
+def code_atlas(
+    model: nn.Module, config: TSConfig, normalizer: Normalizer, codebook: Codebook, series: Sequence[FlightSeries],
+    device: torch.device,
+) -> list[dict[str, Any]]:
+    """Every code flown from each flight's fixed-anchor state: the executor is handed
+    ``codes_to_z(k)`` for k = 0 … K−1 (protocol A's given-z path, `MANOEUVRE_Z_KEY`) and flies
+    one segment per code; the K paths and end points are read in the STATE's start frame
+    (`segments.SegmentFrame`), beside the truth's own segment end and code. A code has no
+    decoding but this (plan §2.4): to see a code is to fly it."""
+    anchor = default_anchor(config)
+    codes = torch.arange(codebook.code_count)
+    z = codebook.tokenizer.codes_to_z(codes).numpy()
+    out = []
+    for item in series:
+        frame = SegmentFrame.at_row(item.values[anchor])
+        rows = dynamics_arrays(item, anchor, parameterization=config.control_thrust_parameterization,
+                               condition_features=config.control_condition_features)
+        dynamics = {name: torch.from_numpy(np.stack([value] * codebook.code_count)).to(device) for name, value in rows.items()}
+        dynamics[MANOEUVRE_Z_KEY] = torch.from_numpy(z.astype(np.float32)).to(device)
+        forecasts = forecast_control_batch(model, [item] * codebook.code_count, config, normalizer, anchor, device, dynamics=dynamics)
+        truth_rows = truth_segment_rows(item, float(item.times[anchor]), config.control_horizon_s, config.dt_s)
+        truth_code, _z = codebook.encode(truth_rows.astype(np.float32), np.asarray(item.values[anchor], dtype=np.float32))
+        difficulty = approach_difficulty(item, anchor)
+        entries = []
+        for code, forecast in zip(codes.tolist(), forecasts, strict=True):
+            path = frame.rows(np.asarray(forecast.values, dtype=np.float64))[:, list(POSITION_IDX)]
+            entries.append({"code": code, "end": path[-1].tolist(), "path": path[::ATLAS_PATH_STRIDE].tolist(),
+                            "flyable_end_speed_mps": float(np.hypot(*np.asarray(forecast.values[-1])[list(VELOCITY_IDX[:2])]))})
+        out.append({
+            "dataset_id": item.dataset_id, "flight_id": item.flight_id, "anchor": anchor,
+            "route_tortuosity": difficulty.route_tortuosity, "established_at_anchor": difficulty.established_at_anchor,
+            "remaining_path_m": difficulty.remaining_path_m,
+            "truth_code": int(truth_code), "truth_end": truth_rows[-1, list(POSITION_IDX)].tolist(),
+            "truth_path": truth_rows[:, list(POSITION_IDX)].tolist(), "codes": entries,
+        })
+    return out
+
+
 def records_block(reading: ArmReading, config: TSConfig, *, campaign: str, flights: int, records: int,
                   limit: int | None) -> dict[str, Any]:
     """The `RECORDS_BLOCK` summary of one arm's written records."""
@@ -323,6 +372,6 @@ def records_block(reading: ArmReading, config: TSConfig, *, campaign: str, fligh
 
 __all__ = [
     "GATE_T_GAIN_M", "GATE_T_K_TOLERANCE_M", "GATE_T_MAX_CODE_SHARE", "GATE_T_UNUSED_CODE_SHARE",
-    "READOUT_SCHEMA", "RECORDS_BLOCK", "STRATA", "ArmReading", "arm_reading", "code_usage",
-    "fixed_anchor_readings", "gate_t", "paired_gain", "records_block", "render", "stratum_summary",
+    "ATLAS_PATH_STRIDE", "READOUT_SCHEMA", "RECORDS_BLOCK", "STRATA", "ArmReading", "arm_reading", "code_atlas",
+    "code_usage", "fixed_anchor_readings", "gate_t", "paired_gain", "records_block", "render", "stratum_summary",
 ]
