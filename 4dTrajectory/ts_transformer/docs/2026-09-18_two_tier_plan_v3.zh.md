@@ -4,6 +4,9 @@
 （用户 2026-09-18："先停下所有实验。我们需要认真敲定计划"）。取代 `2026-09-18_manoeuvre_token_plan.zh.md` 的 §0、§2–§4；
 那份文档的读数（results 文件）全部保留、可引用。
 
+**引用规则**：本文引用任何早先的实验结果时，只作证据或候选，必须写明它是在什么配置上测的（执行器、lookback、segment、cohort、锚点、protocol）
+以及能不能迁移到 v3 的对象；本文自己的结论只来自本文的臂。不写"X 够了 / X 有效"这类句子。
+
 **术语**：没有现成中文译名的概念直接用英文，不硬翻——lookback（回看窗口 L）、segment（段长 Δ）、established、fully flyable、ADE / FDE、oracle、gate、protocol、runway configuration、cohort、seed。
 
 ## 审核表
