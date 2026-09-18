@@ -34,8 +34,12 @@ from ts_transformer.run_naming import run_display_name
 from ts_transformer.training.train import load_checkpoint
 
 def discover_arms(campaign: Path, segment_s: float) -> tuple[list[Path], list[str]]:
-    """``(trained arm directories, pending arm keys)`` of one segment length, in name order."""
-    pattern = re.compile(rf"(^|_)S{int(segment_s)}_")   # `S60_K32_s1337`, or a prefixed smoke key
+    """``(trained arm directories, pending arm keys)`` of one segment length, in name order.
+
+    An arm directory is named ``S<segment>_<K|cv|nt>_s<seed>`` (a smoke campaign may prefix it);
+    the P2/P3 chains write ``p23_S60_K32`` / ``p33_S60_cv`` beside the arms, and those are not arms
+    (they read as six "pending" arms on 2026-09-18 when the pattern only asked for ``S60_``)."""
+    pattern = re.compile(rf"(^|_)S{int(segment_s)}_(K\d+|cv|nt)_s\d+$")
     trained, pending = [], []
     for path in sorted(campaign.iterdir()):
         if not path.is_dir() or not pattern.search(path.name) or path.name.endswith("_pred_val"):

@@ -127,6 +127,8 @@ def test_discover_arms_separates_trained_from_pending(tmp_path):
         if done:
             (tmp_path / key / "history.json").write_text("{}")
     (tmp_path / "S60_K32_s1337_pred_val").mkdir()
+    for other in ("p23_S60_K32", "p33_S60_cv", "readout_s60", "p23_S60_nt"):   # the chains' outputs beside the arms are not arms
+        (tmp_path / other).mkdir()
     trained, pending = discover_arms(tmp_path, 60.0)
     assert [p.name for p in trained] == ["S60_K32_s1337", "smoke_S60_cv_s1337"] and pending == ["S60_nt_s1337"]
 
