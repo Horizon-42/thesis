@@ -31,6 +31,12 @@ options — the inference-time projection arm of the final-approach constraint c
 
 ``{airport}`` in the checkpoint path is substituted with the campaign's airport.
 
+A top-level ``"development_cohort"`` (a path, ``{airport}`` substituted) hands every train step
+its explicit train roster; an arm may declare its own, which wins — a grid whose cells keep
+different flights (the two-tier v3 (L, Δ) grid: a cell's flights are the ones long enough for
+its lookback AND its segment). ``--only KEY …`` runs a subset of the arms, for a queue that
+trains one cell, reads it and moves on.
+
 Every arm shares the manifest, the eligibility roster and ``--split-seed``, so the outer
 split is identical and the arms are paired flight-by-flight. Development scope: predicts
 train or validation, never outer-test. Deliberately NO per-arm cross-validation (a
@@ -53,36 +59,27 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ts_transformer.experiments.support import REPO_ROOT, TS_SCRIPT
+from ts_transformer.experiments.support import REPO_ROOT, TS_SCRIPT, arm_config, declaration_base
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 
 
-from ts_transformer.config import TSConfig, absent_field_defaults, recipe_settings  # noqa: E402
+from ts_transformer.config import absent_field_defaults  # noqa: E402
 from ts_transformer.run_naming import run_display_name, run_slug  # noqa: E402
 
 # A state arm on one airport: ~50 MB of checkpoint/history + ~0.3 GB of validation records.
-# Refuse to start a campaign the disk cannot hold rather than die mid-arm.
+# Refuse to start a campaign the disk cannot hold rather than die mid-arm. A train-only
+# campaign (`"predict": false`) writes the checkpoint side alone: ~45 MB per arm measured on
+# the 2026-09-18 control arms, sized at 100 MB here.
 ESTIMATED_BYTES_PER_ARM = 400 * 1024**2
+ESTIMATED_BYTES_PER_TRAIN_ONLY_ARM = 100 * 1024**2
 MINIMUM_FREE_BYTES = 2 * 1024**3
 
 
-def arm_config(base: dict, overrides: dict) -> tuple[TSConfig, dict]:
-    """Resolve the arm's complete override set: ``(config, settings)``.
-
-    The config is CONSTRUCTED on every run, dry or not — an unrunnable arm must fail here,
-    before training, and finding that out is most of what a dry run is for. Writing the
-    file is a separate step (`write_arm_config`) so that a dry run creates no directory,
-    and so that the resume rule below can compare a stored arm with THIS config before
-    anything on disk is touched.
-    """
-    settings = dict(base)
-    settings.update(overrides)
-    config = TSConfig(**settings)  # validates: an unrunnable arm fails here, before training
-    return config, settings
-
-
 def write_arm_config(destination: Path, settings: dict) -> Path:
-    """Write the override file the training subprocess reads."""
+    """Write the override file the training subprocess reads. Resolving the arm's settings
+    (`support.arm_config`) is a separate step so that a dry run creates no directory, and so
+    that the resume rule below can compare a stored arm with THIS config before anything on
+    disk is touched."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(settings, indent=1), encoding="utf-8")
     return destination
@@ -191,11 +188,11 @@ def arm_steps(
     heads, whose 60 s records mean nothing to the whole-approach evaluation report) writes no
     prediction directory here.
 
-    ``development_cohort`` (the declaration's top-level ``"development_cohort"``, ``{airport}``
-    substituted) is handed to every train step as ``--development-cohort``: the explicit train
-    roster the train CLI demands when a random-anchor future contract covers fewer train
-    flights than the locked split holds (`run_ts.py plan_cohort` writes it from the same
-    config; two-tier L1's 60 s floor at anchor 59 leaves one KRDU train flight uncovered).
+    ``development_cohort`` (the declaration's, or the arm's own, ``{airport}`` substituted) is
+    handed to the train step as ``--development-cohort``: the explicit train roster the train
+    CLI demands when a random-anchor future contract covers fewer train flights than the locked
+    split holds (`run_ts.py plan_cohort` writes it from the same config; two-tier L1's 60 s
+    floor at anchor 59 leaves one KRDU train flight uncovered).
     """
     manifest = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
     roster = HARVEST_ROOT / airport / "arrivals" / "lateral_pass_eligibility.json"
@@ -248,6 +245,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--split-seed", type=int, default=1337)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--only", nargs="+", metavar="KEY", default=None,
+                        help="run only these arms of the declaration (a queue that trains one cell of a grid, "
+                             "reads it, then the next); every arm named must be declared")
     parser.add_argument(
         "--informal", action="store_true",
         help="skip the experiment manifest (and its clean-worktree guard); the checkpoint "
@@ -256,40 +256,52 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     declaration = json.loads(args.arms.read_text(encoding="utf-8"))
-    base = declaration.get("base", {})
-    # A control campaign starts from a NAMED recipe's content and keeps the name, so an
-    # arm may only touch fields the recipe leaves open (TSConfig refuses the rest).
-    base_recipe = declaration.get("base_recipe")
-    if base_recipe:
-        base = {**recipe_settings(base_recipe, keep_name=True), **base}
+    base = declaration_base(declaration)
     arms = declaration["arms"]
     if not arms:
         parser.error("the arm declaration is empty")
+    # `--only`: every arm is still planned and checked (a predict-only arm's producer, the cohorts,
+    # the configs); only the named arms' steps are run
+    selected = {arm["key"] for arm in arms}
+    if args.only:
+        unknown = [key for key in args.only if key not in selected]
+        if unknown:
+            parser.error(f"--only names arms the declaration does not have: {', '.join(unknown)}")
+        selected = set(args.only)
     # `"predict": false` — train only; the campaign's own runners read the checkpoints
     predict = bool(declaration.get("predict", True))
     if not predict and any("checkpoint" in arm for arm in arms):
         parser.error("\"predict\": false trains only, and a predict-only arm has nothing else to do")
-    # `"development_cohort"` — the explicit train roster every train step is handed; it is
-    # DATA written before the campaign (`run_ts.py plan_cohort`), so a missing file is a
-    # plan-time error, dry run included
-    development_cohort = None
-    if declaration.get("development_cohort"):
-        development_cohort = REPO_ROOT / str(declaration["development_cohort"]).format(airport=args.airport.upper())
-        if not development_cohort.is_file():
-            parser.error(f"development_cohort {development_cohort} does not exist; write it with "
-                         "`run_ts.py plan_cohort` from one arm's config before launching")
     airport = args.airport.upper()
+
+    # `"development_cohort"` — the explicit train roster a train step is handed, declared for
+    # the whole file or per arm (an arm's own wins: a grid whose cells keep different flights);
+    # it is DATA written before the campaign (`run_ts.py plan_cohort`), so a missing file is a
+    # plan-time error, dry run included
+    def cohort_path(arm: dict) -> Path | None:
+        declared = arm.get("development_cohort") or declaration.get("development_cohort")
+        if not declared:
+            return None
+        path = REPO_ROOT / str(declared).format(airport=airport)
+        if not path.is_file():
+            parser.error(f"development_cohort {path} does not exist; write it with "
+                         "`run_ts.py plan_cohort` from the arm's config before launching")
+        return path
+
+    cohorts = {arm["key"]: cohort_path(arm) for arm in arms if "checkpoint" not in arm}
     campaign = args.campaign if args.campaign.is_absolute() else REPO_ROOT / args.campaign
     for name in ("manifest.json", "lateral_pass_eligibility.json"):
         path = HARVEST_ROOT / airport / "arrivals" / name
         if not path.is_file():
             parser.error(f"{path} is missing (a harvest rebuild deletes the roster — "
                          "see trajectory_data_process/CLAUDE.md)")
-    print(f"frame-ablation campaign · {airport} · split={args.split}\ncampaign: {campaign}"
-          + (f"\ndevelopment cohort: {development_cohort}" if development_cohort is not None else ""))
+    print(f"frame-ablation campaign · {airport} · split={args.split}\ncampaign: {campaign}")
+    for path in sorted({str(path) for path in cohorts.values() if path is not None}):
+        print(f"development cohort: {path}")
 
     steps: list[tuple[str, list[str], Path]] = []
     trained_arms = 0
+    train_only = 0
     # Checkpoints the training arms of THIS file write, in file order: a later predict-only
     # arm may read one before it exists (the check moves to the step).
     produced: dict[Path, str] = {}
@@ -304,10 +316,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  arm {key:<26s} predict-only from {checkpoint} "
                   f"{' '.join(arm.get('predict_args', []))}"
                   + (f" (produced by arm {produced_by})" if produced_by else ""))
-            steps += predict_only_steps(
-                key, checkpoint, [str(a).format(airport=airport) for a in arm.get("predict_args", [])], airport=airport,
-                campaign=campaign, split=args.split, device=args.device, produced_by=produced_by,
-            )
+            if key in selected:
+                steps += predict_only_steps(
+                    key, checkpoint, [str(a).format(airport=airport) for a in arm.get("predict_args", [])], airport=airport,
+                    campaign=campaign, split=args.split, device=args.device, produced_by=produced_by,
+                )
             continue
         trained_arms += 1
         produced[(campaign / key / "checkpoint.pt").resolve()] = key
@@ -316,21 +329,25 @@ def main(argv: list[str] | None = None) -> int:
         if stale:
             parser.error(stale)
         config_path = campaign / key / "config.json"
-        if not args.dry_run:
-            write_arm_config(config_path, declared)
         predict_args = [str(a).format(airport=airport) for a in arm.get("predict_args", [])]
         print(f"  arm {key:<26s} {run_display_name(config.to_dict(), extra=(key,))} {' '.join(predict_args)}")
         print(f"      slug {run_slug(config.to_dict())}")
+        if key not in selected:
+            continue
+        if not args.dry_run:
+            write_arm_config(config_path, declared)
+        train_only += not predict
         steps += arm_steps(
             key, config_path, declared, airport=airport,
             campaign=campaign, split=args.split, device=args.device,
             seed=args.seed, split_seed=args.split_seed, formal=not args.informal,
-            predict_args=predict_args, predict=predict, development_cohort=development_cohort,
+            predict_args=predict_args, predict=predict, development_cohort=cohorts[key],
         )
 
     pending = [step for step in steps if not step[2].exists()]
     free = shutil.disk_usage(campaign if campaign.exists() else REPO_ROOT).free
-    needed = ESTIMATED_BYTES_PER_ARM * len({s[0].split(":")[0] for s in pending})
+    per_arm = ESTIMATED_BYTES_PER_TRAIN_ONLY_ARM if not predict else ESTIMATED_BYTES_PER_ARM
+    needed = per_arm * len({s[0].split(":")[0] for s in pending})
     print(f"  {len(pending)}/{len(steps)} steps pending · free {free / 1024**3:.1f} GiB · "
           f"estimated need {needed / 1024**3:.1f} GiB")
     if not args.dry_run and free - needed < MINIMUM_FREE_BYTES:

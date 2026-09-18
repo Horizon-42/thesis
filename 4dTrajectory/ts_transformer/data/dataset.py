@@ -95,7 +95,7 @@ from ts_transformer.data.target_conditioning import (
     conditioned_history,
     conditioning_vector,
 )
-from ts_transformer.data.time_grids import output_time_grid
+from ts_transformer.data.time_grids import ROW_TOLERANCE_S, output_time_grid
 from ts_transformer.data.reference_velocity import rebuild_reference_velocities
 
 
@@ -116,7 +116,8 @@ class FlightSeries:
     flight_id: str
     scenario: FlightScenario
     frame: CoordinateFrame
-    times: np.ndarray        # [N] seconds, uniform dt, rebased to 0 at the first sample
+    times: np.ndarray        # [N] seconds, uniform dt, rebased to 0 at the first sample of the BUILT
+                             # flight (a `series_from_row` cut keeps this clock, so its first row is later)
     values: np.ndarray       # [N, C] channel space (see channels.CHANNELS)
     # The observed arrays above remain the only model INPUT and the only arrays exposed to
     # forecast/export.  These arrays extend them with a fitted tail for training TARGETS.
@@ -238,6 +239,26 @@ def series_within_horizon(series: FlightSeries, anchor: int, config: TSConfig) -
         supervision_times=np.concatenate((times[keep], [end])),
         supervision_values=np.concatenate((series.supervision_values[keep], end_values[None, :])),
         supervision_weights=np.concatenate((series.supervision_weights[keep], end_weights[None, :])),
+    )
+
+
+def series_from_row(series: FlightSeries, first_row: int) -> FlightSeries:
+    """``series`` first seen at its observed row ``first_row``: the rows before it are dropped
+    from the observed arrays and from the supervision arrays alike, the clock is kept (a row's
+    time is still its time in the flight). What a lockstep read from a later first ask needs —
+    the executor sees the last ``seq_len`` rows before its anchor and nothing earlier, so the
+    flight from row ``r`` asked at ``L−1`` IS the whole flight asked at ``r + L − 1``, and every
+    truth-side reading (the remaining path, the strata, the budget, ADE / FDE) is taken from the
+    same row. ``first_row`` 0 is ``series`` itself."""
+    if not 0 <= first_row < series.n_samples:
+        raise ValueError(f"{series.flight_id}: first_row {first_row} is not an observed row of {series.n_samples}")
+    origin = float(series.times[first_row])
+    keep = np.asarray(series.supervision_times, dtype=np.float64) >= origin - ROW_TOLERANCE_S
+    return replace(
+        series,
+        times=series.times[first_row:], values=series.values[first_row:],
+        supervision_times=series.supervision_times[keep], supervision_values=series.supervision_values[keep],
+        supervision_weights=series.supervision_weights[keep],
     )
 
 
@@ -456,6 +477,14 @@ def _frame_for_scenario(scenario: FlightScenario, config: TSConfig) -> Coordinat
     return frame_for_state(scenario.target, config.coordinate_frame, airport_ref=airport_ref)
 
 
+def minimum_build_samples(config: TSConfig) -> int:
+    """The observed grid rows a flight needs to be BUILT: one window at the fixed anchor plus a
+    row after it (``default_anchor + 2``; a flight cut at its observed threshold crossing may
+    hold one fewer). A cohort written for a config must keep only flights that pass this gate,
+    or the config's own build would drop a flight the cohort names."""
+    return default_anchor(config) + 2
+
+
 def build_series(
     flights: Sequence[dict[str, Any]],
     config: TSConfig,
@@ -478,7 +507,7 @@ def build_series(
     sets the target state's Vref and threshold-crossing height, which is what the
     evaluation gates measure the final state against.
     """
-    minimum_samples = default_anchor(config) + 2
+    minimum_samples = minimum_build_samples(config)
     # Stated in seconds of track: at L-1 this is the lookback, the text every stored build
     # report carries.
     too_short = f"track shorter than one window ({(minimum_samples - 1) * config.dt_s:.0f}s)"

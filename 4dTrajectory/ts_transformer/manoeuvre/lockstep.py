@@ -13,13 +13,19 @@ three protocols that differ only in WHERE the code comes from.
              states) while the executor flies its own rows: what v2 §12.3 wanted — the prior's
              error alone, the coupling removed. Past the truth's last full segment there is no
              truth prefix to read: the flight ends (``truth-exhausted``).
-    none     NO code: a no-token executor (``plan_conditioning = off``, the campaign's twin arm)
-             re-asked every segment on its own flown rows — the control every protocol above is
-             read against (2026-09-18: the command-vocabulary executor's closed-loop lead over
-             the learned codebook turned out to be code-blindness, so "does the code help" needs
-             the executor WITHOUT one under the same rounds and the same budget). The codebook is
-             the reference labeller only: it defines the segment, the truth's code column and
-             the flown legs' codes (``flown_codes``), and is never handed to the executor.
+    none     NO code and NO codebook: a no-token executor (``plan_conditioning = off``) re-asked
+             every segment on its own flown rows — the baseline every protocol above is read
+             against (2026-09-18: the command-vocabulary executor's closed-loop lead over the
+             learned codebook turned out to be code-blindness, so "does the code help" needs the
+             executor WITHOUT one under the same rounds and the same budget), and the two-tier
+             v3 plan's stage A reading (§3.1). The segment is the executor's horizon; the row
+             carries no code columns.
+
+The first ask is the executor's fixed anchor, L−1 (`config.default_anchor`: no floor under v3 —
+the first row with a complete lookback, L seconds after entry). The second reading of v3 §3.1
+asks from a REMAINING-PATH bin instead (`from_remaining_path`): each flight is first seen at the
+row `anchor_grid.bin_anchor` places at the bin, so the same lockstep from L−1 of the cut flight
+IS the lockstep from that row of the whole flight.
 
 One round = ``segment_s`` = the executor's horizon: the forecast is exactly one segment and is
 flown whole (the one-shot variant, plan §2.6) unless it crosses the threshold ON THE FINAL
@@ -47,9 +53,10 @@ import numpy as np
 import torch
 
 from ts_transformer.config import CONTROL_DURATION_UNIFORM, PLAN_CONDITIONING_OFF, TSConfig, default_anchor
+from ts_transformer.data.anchor_grid import anchors_for_bin, remaining_path_profiles
 from ts_transformer.data.approach_difficulty import approach_difficulty
 from ts_transformer.data.channels import POSITION_IDX
-from ts_transformer.data.dataset import FlightSeries, Normalizer, truth_duration_s
+from ts_transformer.data.dataset import FlightSeries, Normalizer, effective_min_future_s, series_from_row, truth_duration_s
 from ts_transformer.data.time_grids import ROW_TOLERANCE_S
 from ts_transformer.geometry import geometric_metrics
 from ts_transformer.geometry.flyability import flyability_summary, required_controls
@@ -117,7 +124,8 @@ class Prior:
 @dataclass
 class FlightRun:
     series: FlightSeries
-    truth: CodeSequence
+    anchor: int                                  # the first ask's row
+    truth: CodeSequence | None                   # the truth's code sequence; None under protocol none
     horizon_s: float
     legs: list[Forecast] = field(default_factory=list)
     flown_s: float = 0.0
@@ -133,9 +141,20 @@ class FlightRun:
     landed_probabilities: list[float] = field(default_factory=list)
     landing_this_round: float | None = None                    # A / A-truth: fly this fraction of a segment, then end
 
-    @property
-    def anchor(self) -> int:
-        return self.truth.anchor
+
+def from_remaining_path(series: Sequence[FlightSeries], config: TSConfig, target_m: float) -> tuple[list[FlightSeries], dict[str, int]]:
+    """The cohort first seen at the remaining-path bin ``target_m``: every flight cut
+    (`series_from_row`) so that the row `anchor_grid.bin_anchor` places at the bin — the sample
+    nearest ``target_m`` of path left to fly, with a complete lookback before it and the
+    executor's horizon of truth after it — becomes the executor's fixed anchor (`default_anchor`:
+    L−1, or a floored config's floor). ``(the cut flights in cohort order, {dataset id: that row
+    in the whole flight})``; a flight with no admissible row at the bin is absent from both (the
+    caller counts it)."""
+    anchors = anchors_for_bin(series, remaining_path_profiles(series), target_m, seq_len=config.seq_len,
+                              min_future_s=effective_min_future_s(config), minimum_anchor_index=config.anchor_floor_index)
+    # the bin's row lands on the executor's own fixed anchor (L−1, or its floor under a floored config)
+    cut = [series_from_row(series[index], anchor - default_anchor(config)) for index, anchor in anchors.items()]
+    return cut, {series[index].dataset_id: anchor for index, anchor in anchors.items()}
 
 
 def _polyline(run: FlightRun) -> tuple[np.ndarray, np.ndarray]:
@@ -205,30 +224,35 @@ def _prior_step(prior: Prior, codes: Sequence[Sequence[int]], states: Sequence[n
 
 
 def fly(
-    executor: Executor, codebook: Codebook, series: Sequence[FlightSeries], protocol: str, *,
+    executor: Executor, codebook: Codebook | None, series: Sequence[FlightSeries], protocol: str, *,
     prior: Prior | None, device: torch.device, batch_size: int, log=None,
 ) -> list[FlightRun]:
     """Every flight of ``series`` from the executor's fixed anchor, one round at a time for the
-    whole cohort, under ``protocol``."""
+    whole cohort, under ``protocol``. The codebook is the coded protocols' vocabulary; protocol
+    ``none`` takes none."""
     if protocol not in PROTOCOLS:
         raise ValueError(f"protocol is one of {PROTOCOLS}, got {protocol!r}")
     if (protocol in (PROTOCOL_A, PROTOCOL_A_TRUTH)) != (prior is not None):
         raise ValueError("protocols A and A-truth take the prior; protocol C flies the truth's codes and protocol none no code: neither takes one")
+    if (protocol == PROTOCOL_NONE) != (codebook is None):
+        raise ValueError("protocol none takes no codebook (a no-token executor has no vocabulary); every coded protocol takes one")
     config = executor.config
     if (protocol == PROTOCOL_NONE) != (config.plan_conditioning == PLAN_CONDITIONING_OFF):
         raise ValueError(f"protocol none flies a no-token executor (plan_conditioning = off) and the coded protocols a "
                          f"manoeuvre-code one; got {protocol!r} with plan_conditioning {config.plan_conditioning!r}")
-    segment_s, dt_s = codebook.segment_s, codebook.dt_s
-    if config.control_horizon_s != segment_s or config.dt_s != dt_s:
-        raise ValueError(f"the executor's horizon {config.control_horizon_s:g} s / {config.dt_s:g} s is not the codebook's {segment_s:g} s / {dt_s:g} s")
+    segment_s, dt_s = config.control_horizon_s, config.dt_s
+    if not segment_s:
+        raise ValueError("the lockstep flies one fixed segment per round: the executor needs control_horizon_s > 0")
+    if codebook is not None and (codebook.segment_s != segment_s or codebook.dt_s != dt_s):
+        raise ValueError(f"the executor's horizon {segment_s:g} s / {dt_s:g} s is not the codebook's {codebook.segment_s:g} s / {codebook.dt_s:g} s")
     if config.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
         # e_plan cuts the truth-code leg at the flown leg's span (`cut_at_lead` needs a row
         # there): the two legs share their query grid only under uniform segment durations
         raise ValueError("the lockstep's e_plan reading needs uniform control segment durations (the P1.4 recipe's)")
     a0 = default_anchor(config)
     step_rows = int(round(segment_s / dt_s))
-    truths = flight_sequences(series, codebook, a0)
-    runs = [FlightRun(series=item, truth=truth, horizon_s=closing_horizon_s(truth_duration_s(item, a0)))
+    truths = flight_sequences(series, codebook, a0) if codebook is not None else [None] * len(series)
+    runs = [FlightRun(series=item, anchor=a0, truth=truth, horizon_s=closing_horizon_s(truth_duration_s(item, a0)))
             for item, truth in zip(series, truths, strict=True)]
     for run in runs:
         run.flown_states.append(state_token(run.series.values[a0]))
@@ -296,7 +320,8 @@ def fly(
             # every whole leg is tokenised back — protocol A reads the flown codes at the next
             # ask, and a protocol-C run on the TRAIN split is the closed-loop training's input
             # (plan §2.7 step 1: the flown history's codes, the truth's as the labels)
-            _tokenise_flown_leg(run, codebook, segment_s, dt_s, round_index)
+            if codebook is not None:
+                _tokenise_flown_leg(run, codebook, segment_s, dt_s, round_index)
         if log is not None:
             log(f"    {protocol} round {round_index}: {len(active)} flights at anchor {anchor}, "
                 f"{sum(1 for run in runs if run.ended is None)} continue")
@@ -404,6 +429,17 @@ def reference_verdicts(series: FlightSeries, forecast: Forecast) -> dict[str, An
     }
 
 
+def _code_columns(run: FlightRun) -> dict[str, Any]:
+    """The truth's and the flown legs' code columns — a coded protocol's; a protocol-none row
+    has none (no codebook labelled anything)."""
+    if run.truth is None:
+        return {}
+    return {
+        "truth_codes": run.truth.codes.tolist(), "flown_codes": list(run.flown_codes),
+        "truth_length": run.truth.length, "landed_fraction_truth": run.truth.landed_fraction,
+    }
+
+
 def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, Any]]:
     """One flight's row (and the record metrics): the reference verdicts, ADE / FDE, the
     geometry, the displacement at every lead, every ask's step error and e_plan, how it ended."""
@@ -416,10 +452,8 @@ def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, A
         "flight_id": run.series.flight_id,
         "reference": reference_verdicts(run.series, forecast),
         "ended": run.ended, "truncated_at_threshold": run.truncated, "asks": run.asks, "held_asks": run.held_asks,
-        "codes": list(run.codes), "truth_codes": run.truth.codes.tolist(),
-        "flown_codes": list(run.flown_codes),
+        "codes": list(run.codes), **_code_columns(run),
         "flown_states": [state.tolist() for state in run.flown_states],
-        "truth_length": run.truth.length, "landed_fraction_truth": run.truth.landed_fraction,
         "landed_fraction": run.landed_fraction, "landed_probabilities": list(run.landed_probabilities),
         "ade_m": float(metrics["ade_m"]), "fde_m": float(metrics["fde_m"]),
         "final_time_error_s": float(metrics["final_time_error_s"]),
@@ -441,5 +475,5 @@ __all__ = [
     "ENDED_CROSSED", "ENDED_HORIZON", "ENDED_LANDED", "ENDED_TRUTH_EXHAUSTED", "HORIZON_SLACK_FRACTION",
     "HORIZON_SLACK_S", "LANDED_THRESHOLD", "LEADS_S", "PROTOCOLS", "PROTOCOL_A", "PROTOCOL_A_TRUTH",
     "PROTOCOL_C", "PROTOCOL_NONE", "CODE_NONE", "Executor", "FlightRun", "Prior", "closing_horizon_s", "flight_row", "fly",
-    "reference_verdicts", "required_positions", "whole_forecast",
+    "from_remaining_path", "reference_verdicts", "required_positions", "whole_forecast",
 ]

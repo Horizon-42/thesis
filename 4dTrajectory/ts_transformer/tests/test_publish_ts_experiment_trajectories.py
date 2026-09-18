@@ -364,12 +364,13 @@ def test_the_publishers_variant_blocks_mirror_the_runners():
     """The publisher restates the runners' block names (it cannot import torch); pinned here —
     the chain runner's and both manoeuvre-token readouts' (a lockstep directory published bare
     would otherwise be filed as the executor's own prediction; 2026-09-18)."""
-    from ts_transformer.experiments import chain_sensitivity, manoeuvre_lockstep
+    from ts_transformer.experiments import chain_sensitivity, executor_failure_modes, manoeuvre_lockstep
     from ts_transformer.manoeuvre import readout
 
     assert chain_sensitivity.RECORDS_BLOCK in publisher.VARIANT_RECORD_BLOCKS
     assert readout.RECORDS_BLOCK in publisher.VARIANT_RECORD_BLOCKS
     assert manoeuvre_lockstep.LOCKSTEP_RECORDS_BLOCK in publisher.VARIANT_RECORD_BLOCKS
+    assert executor_failure_modes.FAILURE_MODES_BLOCK in publisher.VARIANT_RECORD_BLOCKS
 
 
 def test_a_variant_slug_defaults_its_own_label_and_rejects_an_unusable_one():

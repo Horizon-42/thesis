@@ -856,10 +856,16 @@ def prepare_training_run(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
     argv: list[str] | None,
+    *,
+    config: TSConfig | None = None,
 ) -> TrainingRun:
-    """Resolve the config, load the development cohort and open the experiment manifest."""
+    """Resolve the config, load the development cohort and open the experiment manifest.
+
+    ``config`` replaces the one the flags would resolve (a runner whose configs come from an
+    arm declaration rather than the CLI — `plan_cohort --arms`); the data flags still decide
+    what is loaded."""
     refuse_airport_override_for_pooled_data(args, parser)
-    config, batch_auto = config_from_args(args, parser)
+    config, batch_auto = config_from_args(args, parser) if config is None else (config, False)
     if bool(args.campaign_id) != bool(args.experiment_id):
         parser.error("--campaign-id and --experiment-id must be supplied together")
     data_provenance = provenance_from_args(args)

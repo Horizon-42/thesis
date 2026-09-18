@@ -22,9 +22,11 @@ lockstep artefacts (`experiments/manoeuvre_lockstep.py` payloads) keyed by seed.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
-from ts_transformer.data.approach_difficulty import STRATUM_STRAIGHT_IN, STRATUM_VECTORED
+import numpy as np
+
+from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED
 
 #: The control path's seed line (CLAUDE.md "How to read results"): pooled ADE 125 m; the
 #: established-share line 3 points (plan §3.3 S).
@@ -205,8 +207,106 @@ def gate_t(readout_payload: dict[str, Any]) -> dict[str, Any]:
     return readout_payload["gate_t"]
 
 
+#: Two-tier v3 stage A1 (§3.3, §5.1): the fully-flyable constraint a cell must meet on both seeds.
+GRID_FLYABLE_FLOOR = 0.95
+#: The seed line is read off the grid itself (D9): the p75 of the two seeds' absolute difference
+#: over the cells (the p50 is recorded beside it).
+GRID_SEED_LINE_QUANTILE = 75
+
+
+def cell_name(lookback_s: float, segment_s: float) -> str:
+    return f"L{lookback_s:g}_D{segment_s:g}"
+
+
+def _seed_line(values: Sequence[tuple[float, float]]) -> dict[str, Any]:
+    """The p50 and the p75 of |seed a − seed b| over the cells; the line is the p75
+    (`GRID_SEED_LINE_QUANTILE`), read back under that key."""
+    deltas = np.abs(np.array([a - b for a, b in values], dtype=np.float64))
+    return {"p50": float(np.median(deltas)), "p75": float(np.percentile(deltas, 75)), "cells": int(len(deltas))}
+
+
+def cell_reading(payload: dict[str, Any]) -> dict[str, float]:
+    """The numbers the grid gate reads off one protocol-none lockstep payload."""
+    pooled, vectored, straight = payload["strata"][STRATUM_ALL], _cell(payload, STRATUM_VECTORED), _cell(payload, STRATUM_STRAIGHT_IN)
+    return {
+        "n": payload["flights"], "established_all": pooled["established_share"], "established_vectored": vectored["established_share"],
+        "established_straight": straight["established_share"], "fully_flyable": pooled["fully_flyable_share"],
+        "vectored_ade_mean_m": vectored["ade_mean_m"], "fde_p50_m": pooled["fde_p50_m"],
+    }
+
+
+def gate_grid(cells: Mapping[tuple[float, float], Mapping[int, dict[str, Any]]], *,
+              flyable_floor: float = GRID_FLYABLE_FLOOR) -> dict[str, Any]:
+    """Two-tier v3 A1: pick the (lookback, segment) cell from ``{(L_s, Δ_s): {seed: protocol-none
+    payload}}`` (the L−1 reading; every cell on two seeds).
+
+    §3.3's row: the primary metrics are established over ALL flights and over the VECTORED
+    group, the constraint fully flyable ≥ the floor on both seeds; the seed line is the grid's
+    own (D9); a cell within the seed line of each seed's best is a tie with it ("leader"); the
+    winners are the leaders on both primaries, or — when the two disagree — the leaders on all
+    flights; a tie is broken by the shorter segment, then the shorter lookback. Not decisive
+    when every eligible cell is a leader: L and Δ are then not the deciding variables in this
+    range (§5.1's fallback note), and A2 runs on the shortest cell."""
+    if not cells:
+        raise ValueError("gate grid needs at least one cell")
+    readings: dict[tuple[float, float], dict[str, Any]] = {}
+    for cell, by_seed in cells.items():
+        _two_seeds(by_seed, "grid")
+        _require_protocol(by_seed, "none", "grid")
+        per_seed = {seed: cell_reading(p) for seed, p in by_seed.items()}
+        readings[cell] = {key: {seed: reading[key] for seed, reading in per_seed.items()} for key in next(iter(per_seed.values()))}
+    seeds = sorted(set.intersection(*(set(r["established_all"]) for r in readings.values())))
+    if len(seeds) != 2:
+        raise ValueError(f"the grid is read on exactly two seeds shared by every cell; the cells share {seeds}")
+    metrics = ("established_all", "established_vectored", "vectored_ade_mean_m")
+    seed_line = {m: _seed_line([(r[m][seeds[0]], r[m][seeds[1]]) for r in readings.values()]) for m in metrics}
+    line_key = f"p{GRID_SEED_LINE_QUANTILE}"
+    eligible = [c for c, r in readings.items() if all(r["fully_flyable"][s] >= flyable_floor for s in seeds)]
+    ineligible = [c for c in readings if c not in eligible]
+
+    def leaders(metric: str) -> list[tuple[float, float]]:
+        best = {s: max(readings[c][metric][s] for c in eligible) for s in seeds}
+        return [c for c in eligible if all(readings[c][metric][s] >= best[s] - seed_line[metric][line_key] for s in seeds)]
+
+    def best_on_both(metric: str) -> tuple[float, float] | None:
+        bests = {max(eligible, key=lambda c: readings[c][metric][s]) for s in seeds}
+        return next(iter(bests)) if len(bests) == 1 else None
+
+    lead_all = leaders("established_all") if eligible else []
+    lead_vectored = leaders("established_vectored") if eligible else []
+    both = [c for c in lead_all if c in lead_vectored]
+    winners = both or lead_all
+    selected = min(winners, key=lambda c: (c[1], c[0])) if winners else None      # shorter segment, then shorter lookback
+    # decisive = at least one primary separates the eligible cells beyond the seed line
+    decisive = bool(eligible) and (len(lead_all) < len(eligible) or len(lead_vectored) < len(eligible))
+    if not eligible:
+        note = f"no cell is fully flyable ≥ {flyable_floor:g} on both seeds"
+    elif not decisive:
+        note = ("every eligible cell is within the seed line of the best on both primaries: L and Δ are not the deciding "
+                "variables in this range; the shortest cell is taken for A2")
+    elif not both:
+        note = "the two primaries disagree; established over all flights decides"
+    else:
+        note = None
+    name = cell_name
+    return {
+        "gate": "grid", "seeds": seeds, "flyable_floor": flyable_floor,
+        "seed_line": seed_line, "seed_line_rule": f"the {line_key} of |seed a − seed b| over the cells",
+        "readings": {name(*c): r for c, r in readings.items()},
+        "eligible": [name(*c) for c in eligible], "ineligible": [name(*c) for c in ineligible],
+        "leaders": {"established_all": [name(*c) for c in lead_all], "established_vectored": [name(*c) for c in lead_vectored]},
+        "best_on_both_seeds": {m: (None if best_on_both(m) is None else name(*best_on_both(m))) for m in ("established_all", "established_vectored")} if eligible else {},
+        "winners": [name(*c) for c in winners],
+        "selected": None if selected is None else {"cell": name(*selected), "lookback_s": selected[0], "segment_s": selected[1]},
+        "decisive": decisive, "note": note,
+        "tie_rule": "within the seed line of each seed's best on all flights AND on the vectored group; if none, on all flights; "
+                    "then the shorter segment, then the shorter lookback",
+    }
+
+
 __all__ = [
     "E_ESTABLISHED", "E_FLYABLE", "E_STRAIGHT_ADE_M", "E_VECTORED_ADE_M", "P_B61_STRAIGHT", "P_B61_VECTORED",
     "SEED_LINE_ADE_M", "SEED_LINE_ESTABLISHED", "X_ESTABLISHED_RATIO", "X_FLYABLE", "X_STRAIGHT_ADE_M",
-    "X_VECTORED_ADE_M", "gate_e", "gate_p_discrete_vs_continuous", "gate_p_open_loop", "gate_s", "gate_t", "gate_x",
+    "X_VECTORED_ADE_M", "GRID_FLYABLE_FLOOR", "GRID_SEED_LINE_QUANTILE", "cell_name", "cell_reading", "gate_e", "gate_grid",
+    "gate_p_discrete_vs_continuous", "gate_p_open_loop", "gate_s", "gate_t", "gate_x",
 ]

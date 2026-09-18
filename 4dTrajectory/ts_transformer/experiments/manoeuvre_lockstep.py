@@ -4,18 +4,23 @@
         --out <dir> [--batch-size 64] [--limit N] [--device auto] [--write-records]
     python run_ts.py manoeuvre_lockstep --executor … --codebook … --protocol A --prior <dir>/prior.pt --out …
     python run_ts.py manoeuvre_lockstep --executor … --codebook … --protocol A-truth --prior … --out …
-    python run_ts.py manoeuvre_lockstep --executor <no-token arm>/checkpoint.pt --codebook <any codebook of the
-        same segment> --protocol none --out …          # the control: no code, same rounds and budget
+    python run_ts.py manoeuvre_lockstep --executor <no-token arm>/checkpoint.pt --protocol none --out …
+        [--anchor-remaining-km 12]           # the baseline: no code, no codebook, same rounds and budget
 
-The three artefacts must be ONE vocabulary: a jointly trained executor's codebook is the one
-exported from it (the codebook's ``source.checkpoint_sha256`` is the executor's), an executor
-trained against a codebook carries its sha (`codebook_sha256`), and the prior carries the sha
-of the codebook it was trained on — a mismatch refuses. Under protocol ``none`` the executor
-holds no tokenizer and the codebook is the reference labeller only (the truth's and the flown
-legs' code columns); it must share the executor's segment. The cohort is the executor's val split
-(rebuilt, provenance verified). Writes ``manoeuvre_lockstep.json`` (per-flight rows included)
-and ``manoeuvre_lockstep.txt`` under ``--out`` (refused if it exists); ``--write-records``
-adds the flown paths as a predict-shaped record directory under ``<out>/records/``.
+The coded protocols' three artefacts must be ONE vocabulary: a jointly trained executor's
+codebook is the one exported from it (the codebook's ``source.checkpoint_sha256`` is the
+executor's), an executor trained against a codebook carries its sha (`codebook_sha256`), and
+the prior carries the sha of the codebook it was trained on — a mismatch refuses. Protocol
+``none`` (a `plan_conditioning = off` executor) takes no codebook. The cohort is the executor's
+val split (rebuilt, provenance verified); the first ask is the executor's fixed anchor L−1, or —
+``--anchor-remaining-km X`` (two-tier v3 §3.1's second reading, one of
+`anchor_strata.DEFAULT_ANCHOR_GRID_KM`) — the row where each flight has X km of path left to fly
+(`lockstep.from_remaining_path`; a flight that never has an admissible row there is counted,
+not flown; the row's ``first_ask_row`` is that row in the whole flight, while a record written
+under the bin reading carries the CUT flight's anchor, L−1, as its ``anchorIndex``). Writes
+``manoeuvre_lockstep.json`` (per-flight rows included) and ``manoeuvre_lockstep.txt`` under
+``--out`` (refused if it exists); ``--write-records`` adds the flown paths as a predict-shaped
+record directory under ``<out>/records/``.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ import torch
 
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.config import default_anchor as default_anchor_of
+from ts_transformer.data.anchor_strata import DEFAULT_ANCHOR_GRID_KM
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_SHORT, strata_masks
 from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.inference.export import build_prediction_record, write_batch
@@ -43,7 +49,9 @@ from ts_transformer.manoeuvre.tokenizer import load_codebook
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.training.train import load_checkpoint
 
-LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v1"
+#: v2 (2026-09-18, two-tier v3): `first_ask` names the first-ask rule, every row carries
+#: `first_ask_row`, a protocol-none row has no code columns and its codebook keys are null.
+LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v2"
 #: The summary block a written record directory carries.
 LOCKSTEP_RECORDS_BLOCK = "manoeuvre_lockstep"
 
@@ -102,9 +110,11 @@ def _lead(value: float | None) -> str:
 
 
 def render(payload: dict[str, Any]) -> str:
+    first_ask = payload["first_ask"]
     lines = [
         f"manoeuvre lockstep · {payload['protocol']} · {payload['executor_name']} · {payload['flights']} flights · "
-        f"segment {payload['segment_s']:g} s · anchor {payload['anchor']}"
+        f"segment {payload['segment_s']:g} s · first ask {first_ask['rule']}"
+        + (f" ({first_ask['flights_without_a_row']} flights without a row there)" if first_ask["remaining_km"] else "")
         + (f" · prior {payload['prior']}" if payload.get("prior") else ""),
         "",
         f"{'stratum':<14}{'n':>6}{'ADE mean':>10}{'ADE p50':>9}{'FDE p50':>9}{'flyable':>9}{'estab':>8}"
@@ -134,9 +144,11 @@ def render(payload: dict[str, Any]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--executor", type=Path, required=True)
-    parser.add_argument("--codebook", type=Path, required=True)
+    parser.add_argument("--codebook", type=Path, default=None, help="the coded protocols' vocabulary; none under protocol none")
     parser.add_argument("--protocol", required=True, choices=ls.PROTOCOLS)
     parser.add_argument("--prior", type=Path, default=None)
+    parser.add_argument("--anchor-remaining-km", type=int, default=None, choices=DEFAULT_ANCHOR_GRID_KM,
+                        help="first ask where each flight has this much path left to fly, instead of at L-1")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--split", default="val", choices=("train", "val"),
@@ -150,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{out} exists; a lockstep readout is never overwritten")
     if (args.protocol in (ls.PROTOCOL_A, ls.PROTOCOL_A_TRUTH)) != (args.prior is not None):
         parser.error("protocols A and A-truth take --prior; protocols C and none take none")
+    if (args.protocol == ls.PROTOCOL_NONE) != (args.codebook is None):
+        parser.error("protocol none takes no --codebook (a no-token executor has no vocabulary); every coded protocol takes one")
     if args.split == "train" and args.protocol != ls.PROTOCOL_C:
         parser.error("the train split is flown under protocol C only (the closed-loop training's input); a readout is val")
     device = resolve_device(args.device)
@@ -158,15 +172,14 @@ def main(argv: list[str] | None = None) -> int:
     executor_path = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
     model, config, normalizer, payload = load_checkpoint(executor_path)
     executor = ls.Executor(model=model.to(device).eval(), config=config, normalizer=normalizer)
-    codebook = load_codebook(args.codebook if args.codebook.is_absolute() else REPO_ROOT / args.codebook)
     executor_sha = file_sha256(executor_path)
-    if args.protocol == ls.PROTOCOL_NONE:
-        bound = True    # a no-token executor holds no tokenizer; the codebook only labels (`fly` checks plan_conditioning)
-    else:
+    codebook = None
+    if args.codebook is not None:
+        codebook = load_codebook(args.codebook if args.codebook.is_absolute() else REPO_ROOT / args.codebook)
         bound = model.codebook_sha256 == codebook.sha256 if config.manoeuvre_codebook else codebook.source.get("checkpoint_sha256") == executor_sha
-    if not bound:
-        parser.error(f"{codebook.path} is not this executor's codebook (an executor trained against a codebook carries its sha; "
-                     "a jointly trained one is the codebook's source)")
+        if not bound:
+            parser.error(f"{codebook.path} is not this executor's codebook (an executor trained against a codebook carries its sha; "
+                         "a jointly trained one is the codebook's source)")
     prior = prior_payload = None
     if args.prior is not None:
         prior, prior_payload = load_prior(args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior, device)
@@ -180,12 +193,22 @@ def main(argv: list[str] | None = None) -> int:
         if seen or not set(prior_payload["split"]["val"]) <= executor_val:
             parser.error(f"{args.prior} was trained on another split than this executor's ({len(seen)} of its train "
                          "flights are in this val set, or its val is not inside it): the prior may have seen these val flights")
-        if int(prior_payload["anchor"]) != default_anchor_of(config) or float(prior_payload["segment_s"]) != codebook.segment_s:
+        if int(prior_payload["anchor"]) != default_anchor_of(config) or float(prior_payload["segment_s"]) != config.control_horizon_s:
             parser.error(f"{args.prior} was trained at anchor {prior_payload['anchor']} / segment {prior_payload['segment_s']:g} s, "
-                         f"not this executor's {default_anchor_of(config)} / {codebook.segment_s:g} s")
+                         f"not this executor's {default_anchor_of(config)} / {config.control_horizon_s:g} s")
     wanted = payload["split"][args.split][: args.limit] if args.limit else payload["split"][args.split]
     series = rebuild_cohort(payload, config, wanted)
-    print(f"  {args.protocol}: {len(series)} flights, {run_display_name(config.to_dict())}", flush=True)
+    a0 = default_anchor_of(config)
+    first_rows = {item.dataset_id: a0 for item in series}
+    if args.anchor_remaining_km:
+        series, first_rows = ls.from_remaining_path(series, config, args.anchor_remaining_km * 1000.0)
+        if not series:
+            parser.error(f"no flight of the cohort has an admissible row at {args.anchor_remaining_km} km of remaining path")
+    first_ask = {
+        "rule": f"remaining path {args.anchor_remaining_km} km" if args.anchor_remaining_km else f"fixed L-1 (row {a0})",
+        "remaining_km": args.anchor_remaining_km, "flights_without_a_row": len(wanted) - len(series),
+    }
+    print(f"  {args.protocol}: {len(series)} flights, first ask {first_ask['rule']}, {run_display_name(config.to_dict())}", flush=True)
 
     runs = ls.fly(executor, codebook, series, args.protocol, prior=prior, device=device, batch_size=args.batch_size,
                   log=lambda line: print(line, flush=True))
@@ -195,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         if not run.legs:
             continue
         row, metrics = ls.flight_row(run, points=config.validation_common_grid_points)
+        row["first_ask_row"] = first_rows[run.series.dataset_id]
         rows[run.series.dataset_id] = row
         if args.write_records:
             forecast = ls.whole_forecast(run)
@@ -204,14 +228,13 @@ def main(argv: list[str] | None = None) -> int:
     payload_out = {
         "schema": LOCKSTEP_SCHEMA, "written_utc": utc_now(), "protocol": args.protocol,
         "executor": str(executor_path), "executor_sha256": executor_sha, "executor_name": run_display_name(config.to_dict()),
-        "codebook": str(codebook.path), "codebook_sha256": codebook.sha256,
-        "codebook_role": "reference labeller only (protocol none)" if args.protocol == ls.PROTOCOL_NONE else "the executor's vocabulary",
+        "codebook": None if codebook is None else str(codebook.path), "codebook_sha256": None if codebook is None else codebook.sha256,
         "prior": None if args.prior is None else str(args.prior),
         "prior_sha256": None if args.prior is None else file_sha256(args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior),
         "prior_continuous": None if prior is None else prior.model.config.continuous,
         "prior_executor_sha256": None if prior_payload is None else prior_payload["executor_sha256"],
         "prior_trained_on_this_executor": None if prior_payload is None else prior_payload["executor_sha256"] == executor_sha,
-        "segment_s": codebook.segment_s, "anchor": runs[0].anchor, "split": args.split, "limit": args.limit or None,
+        "segment_s": config.control_horizon_s, "anchor": a0, "first_ask": first_ask, "split": args.split, "limit": args.limit or None,
         "flights": len(rows), "flights_without_a_leg": flown_none,
         "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first ask (a cap; under A the prior's landed decides)",
         "strata": stratum_table(rows), "rows": rows, "elapsed_s": time.perf_counter() - started,

@@ -116,11 +116,12 @@ ANYTIME_RECORDS_SCHEMA = "ts-anytime-records-v1"
 #: reason the anytime schema above is one — and the manoeuvre-token readouts' blocks
 #: (``manoeuvre_readout``: `manoeuvre.readout.RECORDS_BLOCK`, protocol C at the fixed anchor;
 #: ``manoeuvre_lockstep``: `experiments.manoeuvre_lockstep.LOCKSTEP_RECORDS_BLOCK`, the
-#: closed-loop protocols), registered 2026-09-18 when the first lockstep was published. A
-#: directory carrying one is a VARIANT of that checkpoint's prediction and has no category of
-#: its own without ``--category-variant``: published bare, it would be filed as the checkpoint's
-#: L−1 prediction.
-VARIANT_RECORD_BLOCKS = ("chain", "lockstep", "manoeuvre_readout", "manoeuvre_lockstep")
+#: closed-loop protocols), registered 2026-09-18 when the first lockstep was published, and the
+#: stage A failure-mode subsets (``failure_modes``: `experiments.executor_failure_modes.FAILURE_MODES_BLOCK`,
+#: a few flights of one failure class copied out of a lockstep's records). A directory carrying
+#: one is a VARIANT of that checkpoint's prediction and has no category of its own without
+#: ``--category-variant``: published bare, it would be filed as the checkpoint's L−1 prediction.
+VARIANT_RECORD_BLOCKS = ("chain", "lockstep", "manoeuvre_readout", "manoeuvre_lockstep", "failure_modes")
 
 
 def _utc_now() -> str:

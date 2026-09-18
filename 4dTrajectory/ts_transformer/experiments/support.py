@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ts_transformer.cli.common import parse_airports
-from ts_transformer.config import TSConfig
+from ts_transformer.config import TSConfig, recipe_settings
 from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
 from ts_transformer.data.dataset import build_series, load_flight_dicts
@@ -30,12 +30,36 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EXPERIMENTS_MAIN", "REPO_ROOT", "RUN_TS", "TS_DIR", "TS_SCRIPT",
-    "checkpoint_manifests", "forecast_geometry", "parse_airports", "rebuild_cohort", "series_digest",
+    "arm_config", "checkpoint_manifests", "declaration_base", "forecast_geometry", "parse_airports", "rebuild_cohort",
+    "series_digest",
 ]
 
 #: The runners' own entry point, for a runner that spawns another runner.
 EXPERIMENTS_MAIN = TS_DIR / "experiments" / "__main__.py"
 RUN_TS = REPO_ROOT / "run_ts.py"
+
+
+def declaration_base(declaration: dict[str, Any]) -> dict[str, Any]:
+    """The settings every arm of an arm declaration starts from: ``"base"``, laid over a named
+    ``"base_recipe"``'s content when one is named (the recipe keeps its name, so an arm may only
+    touch the fields it leaves open — TSConfig refuses the rest)."""
+    base = dict(declaration.get("base", {}))
+    base_recipe = declaration.get("base_recipe")
+    if base_recipe:
+        base = {**recipe_settings(base_recipe, keep_name=True), **base}
+    return base
+
+
+def arm_config(base: dict[str, Any], overrides: dict[str, Any]) -> tuple[TSConfig, dict[str, Any]]:
+    """One arm's complete settings and the config they construct: ``(config, settings)``.
+
+    The config is CONSTRUCTED on every read, dry or not — an unrunnable arm must fail here,
+    before anything is trained or written, and finding that out is most of what a dry run is for.
+    """
+    settings = dict(base)
+    settings.update(overrides)
+    config = TSConfig(**settings)  # validates: an unrunnable arm fails here, before training
+    return config, settings
 
 
 def checkpoint_manifests(payload: dict[str, Any]) -> list[Path]:

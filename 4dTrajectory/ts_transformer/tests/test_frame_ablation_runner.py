@@ -113,7 +113,7 @@ def test_a_field_added_after_an_arm_trained_reads_as_the_default_it_flew(tmp_pat
     It reads as `TSConfig.from_dict` reads it: the default, which is what those arms flew. A
     missing REQUIRED field stays a difference, because `from_dict` refuses it."""
     # What `main` builds for a declaration that names `"base_recipe": "simple-v3"`.
-    base = {**runner.recipe_settings("simple-v3", keep_name=True), "device": "cpu"}
+    base = {**runner.declaration_base({"base_recipe": "simple-v3"}), "device": "cpu"}
     _config, declared = runner.arm_config(base, {})
     assert declared["control_thrust_parameterization"] == "thrust-fraction"
     # Every field a recipe pins that no stored history.json carries (N4 added the second).
@@ -262,3 +262,46 @@ def test_a_deferred_checkpoint_that_never_appears_is_refused_by_the_producing_ar
             "--airport", "KRDU", "--informal",
         ])
     assert any("train" in c for c in ran[0]), "the producing arm's train step ran first"
+
+
+def test_an_arm_may_declare_its_own_development_cohort_and_only_runs_the_named_arms(tmp_path, monkeypatch, capsys):
+    """Two-tier v3's (L, Δ) grid: a cell's flights are its own, so an arm's ``development_cohort``
+    wins over the file's; ``--only`` runs a subset (the queue trains one cell, reads it, moves on)
+    and refuses a key the declaration does not have."""
+    _harvest(tmp_path, monkeypatch)
+    shared, own = tmp_path / "shared" / "development_cohort.json", tmp_path / "own" / "development_cohort.json"
+    for path in (shared, own):
+        path.parent.mkdir()
+        path.write_text("{}", encoding="utf-8")
+    declaration = tmp_path / "grid.json"
+    declaration.write_text(json.dumps({
+        "predict": False, "development_cohort": str(shared), "base": ARMS["base"], "arms": [
+            {"key": "A", "label": "inherits the file's cohort", "overrides": {}},
+            {"key": "B", "label": "its own cohort", "development_cohort": str(own), "overrides": {}},
+        ],
+    }), encoding="utf-8")
+    common = ["--arms", str(declaration), "--campaign", str(tmp_path / "campaign"), "--airport", "KRDU", "--dry-run"]
+    assert runner.main(common) == 0
+    printed = capsys.readouterr().out
+    commands = [line for line in printed.splitlines() if "--development-cohort" in line]
+    assert len(commands) == 2 and str(shared) in commands[0] and str(own) in commands[1]
+    assert f"development cohort: {own}" in printed and f"development cohort: {shared}" in printed
+    assert runner.main([*common, "--only", "B"]) == 0
+    printed = capsys.readouterr().out
+    assert "B: train" in printed and "A: train" not in printed
+    with pytest.raises(SystemExit):
+        runner.main([*common, "--only", "Z"])
+
+
+def test_only_still_plans_every_arm_so_a_producer_outside_the_subset_is_known(tmp_path, monkeypatch, capsys):
+    """Review 2026-09-18 (3): `--only` filters the steps RUN, not the arms checked — a predict-only
+    arm selected without its producing train arm still knows its producer (and is refused by
+    name if the checkpoint never appears), and every declared arm's config and cohort are checked."""
+    _harvest(tmp_path, monkeypatch)
+    campaign = tmp_path / "campaign"
+    declaration = _dependent_arms(tmp_path, campaign)
+    assert runner.main(["--arms", str(declaration), "--campaign", str(campaign), "--airport", "KRDU", "--dry-run",
+                        "--only", "A_train_hooked"]) == 0
+    printed = capsys.readouterr().out
+    assert "produced by arm A_train" in printed and "A_train: train" not in printed.split("steps pending")[1]
+
