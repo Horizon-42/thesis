@@ -49,7 +49,9 @@ of the package, not a migration in progress.
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
   `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
-- **`manoeuvre` — IN DEVELOPMENT** (P1–P3 code landed 2026-09-18, P1.4 campaign running): the
+- **`manoeuvre` — IN DEVELOPMENT** (P1–P3 code landed 2026-09-18; the P1.4 token campaign was STOPPED
+  the same day — its executor baseline was unsettled — and the plan was rewritten as **two-tier v3**,
+  `docs/2026-09-18_two_tier_plan_v3.zh.md`: stage A = the no-token executor's own (L, Δ) grid, R8): the
   intent-token plan — `manoeuvre/segments.py` (the segment-start frame), `tokenizer.py` (encoder +
   FSQ, the command vocabulary, the codebook artefact, C28), the executor under `plan_conditioning=
   manoeuvre-code` (D30), `sequences.py` + `context.py` + `prior.py` (the causal prior, discrete or
@@ -288,7 +290,14 @@ chain: `manoeuvre_codebook` exports a joint executor's tokenizer; `manoeuvre_rea
 `manoeuvre_prior` trains the prior on the executor's own split (never an operating-day split before
 P4); `manoeuvre_prior_readout` (val NLL vs the bigram, the flip rate); `manoeuvre_lockstep`
 (`--protocol C|A|A-truth`, one round = the segment, the three artefacts must be ONE vocabulary);
-`manoeuvre_gates` judges over written artefacts, two seeds, never a typed number (R7).
+`manoeuvre_gates` judges over written artefacts, two seeds, never a typed number (R7). **Two-tier v3
+stage A** (2026-09-18): `plan_cohort --arms` writes one development cohort PER CELL from one load (an arm's
+own `development_cohort` wins over the file's; `frame_ablation --only` trains a subset); `manoeuvre_lockstep
+--protocol none` takes NO codebook and `--anchor-remaining-km X` asks from the remaining-path bin
+(`lockstep.from_remaining_path` + `dataset.series_from_row`: the same flight first seen at the bin's row);
+`executor_failure_modes` classifies the non-crossing flights (six modes, course frame; not a gate);
+`executor_grid_gate` picks the cell (the seed line read off the grid's own seed pairs, p75; fully flyable
+≥ 0.95; ties → shorter Δ then shorter L); `two_tier_grid_queue` trains and reads one cell at a time (R8).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

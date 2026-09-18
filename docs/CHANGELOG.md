@@ -4,6 +4,41 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-18 — two-tier v3 stage A: the (L, Δ) grid's cohorts, readings, failure modes, gate and queue
+
+**Why a v3.** The P1.4 token campaign (70 arms) was stopped at 15:29 on the user's instruction: its
+executor baseline was never settled — the lookback was fixed at 60 s silently in a doc rewrite (v2 had
+120 s) and the segment length was an axis of the TOKEN campaign instead of the no-token executor's
+own ablation; the token turned out to add nothing in the closed loop. The plan was rewritten item by
+item with the user as `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md`; stage A =
+the no-token executor over lookback L ∈ {30, 60, 90, 120} s × segment Δ ∈ {20, 30, 60, 90, 120} s, two
+seeds (40 arms), first ask at L−1 (no floor), training anchors fully random, one development cohort
+per cell (the flights with L of lookback and Δ of truth after it, both sides), two closed-loop
+readings (from L−1; from the 12 / 8 / 6 km remaining-path bins), then a failure-mode diagnosis of the
+vectored flights that do not cross. **Nothing launches before the user's sign-off (M-A0′).** The
+development notes that survive a context compaction: `docs/2026-09-18_two_tier_v3_stage_a_notes.md`.
+
+**Code (A-dev1…8, R8).** `docs/experiments/two_tier_v3_grid_arms.json` (40 arms, `L<L>_D<Δ>_s<seed>`,
+every decision pinned by `tests/test_two_tier_v3_grid.py`); `experiments/support.declaration_base` /
+`arm_config` (moved from `frame_ablation`); `frame_ablation`: per-arm `development_cohort` (an arm's
+own wins) and `--only KEY …`; `cli/common.prepare_training_run(config=)`; `plan_cohort --arms`: one
+cohort per distinct cohort path from one data load (built under the shortest lookback), refusing an
+unpinned split seed, plus `cohorts.json`; `data/dataset.series_from_row` (a flight first seen at a later
+row, clock kept, supervision cut alike); `manoeuvre/lockstep.py`: protocol `none` takes NO codebook
+(`FlightRun.anchor` is a field, `truth` may be None, a none row has no code columns) and
+`from_remaining_path` (each flight cut so its bin row is the executor's fixed anchor);
+`manoeuvre_lockstep`: `--codebook` optional (required iff coded), `--anchor-remaining-km`, schema
+`ts-manoeuvre-lockstep-v2` (`first_ask`, per-row `first_ask_row`, no `codebook_role`);
+`manoeuvre/failure_modes.py` + `experiments/executor_failure_modes.py` (six modes in the runway's course
+frame, per-mode record subsets via `inference/export.copy_record_subset`; the record suffix constants
+are public there now); `manoeuvre/gates.gate_grid` + `experiments/executor_grid_gate.py` (the seed line
+off the grid's own seed pairs, p75); `experiments/two_tier_grid_queue.py` (one cell at a time: train,
+eight readings, the running gate table). The 20 KRDU cohorts were written the same evening
+(`4dTrajectory/outputs/KRDU/experiments/two_tier_v3_grid_20260918/cohorts/`, train 6798–6857 / val
+1392–1405 per cell). Two memory rules came out of the day: a plan I doubt needs the user's explicit
+confirmation even when told to run, and every fixed parameter is a numbered decision; an earlier
+result is cited only with its configuration and why it transfers, never as a design.
+
 ### 2026-09-18 — manoeuvre-token plan P1.1–P1.3: segments, the tokenizer + codebook, the executor wiring
 
 **Lockstep protocol `none`: the no-token control.** `manoeuvre/lockstep.py` gained `PROTOCOL_NONE`

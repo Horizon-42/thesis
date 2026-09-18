@@ -15,14 +15,14 @@
 
 | # | 开发 | 状态 | 提交 |
 |---|---|---|---|
-| A-dev1 | 网格臂文件：声明 (L, Δ) 网格；每臂 `seq_len = L/2` 行、`control_horizon_s = Δ`、`n_segments = Δ/10`；不设 `anchor_floor_index` | 未开始 | |
-| A-dev2 | 新 cohort：KRDU 全部进场按航班一次划分（split seed 1337）；每格可用集 = 记录 ≥ L + Δ；`rebuild_cohort` 出处校验更新；旧 cohort 文件保留 | 未开始 | |
-| A-dev3 | 首问 = L−1 行（不设 floor 即是）；测试钉住 | 未开始 | |
-| A-dev4 | `manoeuvre_lockstep --anchor-remaining-km 12|8|6`：每架在剩余路程首次 ≤ X km 的行起问 | 未开始 | |
-| A-dev5 | 训练锚点全随机：`random_train_anchor_l1_share = 0`（09-18 是 0.5） | 未开始 | |
-| A-dev6 | 新 runner `executor_failure_modes`：读 lockstep 每架记录，算停在哪 / 对准过没有 / 转弯早晚，归类计数，写记录供发布 | 未开始 | |
-| A-dev7 | 选格 gate：读 40 份 lockstep 产物，按 §5.1 规则输出胜出格与整表；seed 线由本网格 seed 对读出 | 未开始 | |
-| A-dev8 | 队列脚本：按格串行（Δ 升序、L 升序），每格两 seed 训完立即读两种读数并通知；PID 文件；PushNotification | 未开始 | |
+| A-dev1 | 网格臂文件：`docs/experiments/two_tier_v3_grid_arms.json`，40 臂，键 `L<L>_D<Δ>_s<seed>`，每臂自己的 cohort 路径；`frame_ablation --only KEY…` 只跑指定臂；测试钉住 D1/D2/D4–D8/D10 | 完成（review 1 通过并修） | |
+| A-dev2 | cohort：`plan_cohort --arms <臂文件>` 一次加载、按格写 20 份 `cohorts/L<L>_D<Δ>/development_cohort.json`（已写出，n 表见 §2）；`frame_ablation` 每臂用自己的 cohort；`rebuild_cohort` 不用改（读 checkpoint 自带的 split） | 完成（review 1 通过并修；cohort 已写出） | |
+| A-dev3 | 首问 = L−1 行：臂文件 `anchor_floor_index = 0`，测试钉住 `default_anchor == seq_len − 1` | 完成（含在 dev1 测试里） | |
+| A-dev4 | `manoeuvre_lockstep --anchor-remaining-km 12|8|6`：`lockstep.from_remaining_path` 把每架从 bin 行（`anchor_grid.bin_anchor`：剩余路程最接近 X km 的行）切起，使该行成为固定锚点；协议 `none` 不再要 codebook；payload schema v2（`first_ask` 块、每行 `first_ask_row`） | 完成（review 通过并修，冒烟通过） | |
+| A-dev5 | 训练锚点全随机：臂文件 `random_train_anchor_l1_share = 0.0`，测试钉住 | 完成（含在 dev1 测试里） | |
+| A-dev6 | `executor_failure_modes --lockstep <dir> --out <dir>`（`manoeuvre/failure_modes.py`）：course 坐标系、六类失败方式、每类记录子集 `records_<mode>/`（`export.copy_record_subset`） | 完成（review 通过并修，冒烟通过） | |
+| A-dev7 | `executor_grid_gate --campaign --arms --out [--reading L-1]`（`gates.gate_grid`）：整表 + 胜出格；seed 线 = 本网格 seed 差的 p75 | 完成（review 1 通过并修） | |
+| A-dev8 | `two_tier_grid_queue --arms --campaign --airport KRDU [--readings …] [--cells …] [--dry-run]`：每格 train（`frame_ablation --only`）→ 8 份 lockstep 读数 → 选格表；PID 文件 `<campaign>/two_tier_grid_queue.pid` | 完成（review 2 通过并修，dry-run 通过） | |
 
 顺序建议：dev2 → dev1 → dev3 → dev5（训练侧，一起冒烟）→ dev4 → dev7 → dev6 → dev8。
 
@@ -40,10 +40,27 @@
 - 距离 bin：`data/anchor_strata.DEFAULT_ANCHOR_GRID_KM = (20, 16, 12, 8, 6, 4, 2)`；剩余路程 `approach_difficulty(item, anchor).remaining_path_m`；anchor grid 机制在 `data/anchor_grid.py`、runner `anytime_curve`。
 - lockstep：`manoeuvre/lockstep.py`（协议 C / A / A-truth / none；`fly()`、`flight_row()`；预算 `closing_horizon_s`），runner `experiments/manoeuvre_lockstep.py`
   （`--protocol none` 需要一个同段长的 codebook 只作标注；`--split`、`--limit`、`--write-records`）。阶段 A 只用 `none`。
-  **待定**：`none` 下是否还要求 codebook——阶段 A 没有 codebook 可给（无 token 臂），要么允许省略（truth_codes / flown_codes 列为空），要么导出一个占位 codebook。倾向前者（简洁）。
+  已定（A-dev4）：`none` 不带 codebook；行里没有码列。旧的 09-18 `lockstep_none_*` 产物是旧 schema（v1，带标注 codebook），原样保留。
 - 每臂约 45 MB；GPU RTX 4060 8 GB；每臂 12–15 min。
+- **各格 cohort（已写出，`two_tier_v3_grid_20260918/cohorts.json`）**：锁定划分 12218 架里 3956 架被机型过滤（openap-direct）拒掉，与格无关；
+  可用集 train 6798–6857 / val 1392–1405（L30_D20 最多，L120_D120 最少；随机锚点覆盖不到的 train 航班 0–3 架）。各格 n 差 ≤ 65 架。
+- **距离起问的读数（冒烟，09-18 的 S60_nt 臂，24 架）**：12 km 处 3 架没有可用行；在 12 km 行重读分组时几乎全是 straight-in（曲折度 < 1.05），
+  雷达引导组会很薄——读数 (b) 主要看"全部"与 straight-in，8 / 6 km 更甚；写结果时要报每组 n。
+- `series_from_row(series, r)`（`data/dataset.py`）：航班从第 r 行起看，时钟不变、真值同样切；lockstep 的 bin 读数靠它把 bin 行变成固定锚点。
 - 发布：`publish_ts_experiment_trajectories.py --reuse-prediction-dir … --category-variant …`，intents 变体 key 大小写不敏感（57ae87e）；`VARIANT_RECORD_BLOCKS` 含 `manoeuvre_lockstep`。
 - readout 的臂发现按 `S<seg>_(K\\d+|cv|nt)_s<seed>` 形状（01e5286）；新网格的臂名要定（建议 `L<L>_D<Δ>_s<seed>`，并让发现规则认识它，或阶段 A 不用 `manoeuvre_readout`）。
+
+- **产物布局（dev7/dev8 定）**：`<campaign>/<arm>/`（训练）、`<campaign>/lockstep/<arm>/<reading>/manoeuvre_lockstep.json`（reading ∈ L-1、12km、8km、6km）、
+  `<campaign>/gate/after_<cell>/grid_gate.json`（每格完成后的整表；40 臂齐后才有 verdict）、`<campaign>/cohorts/<cell>/development_cohort.json`。
+- `frame_ablation` 的磁盘估算：predict 臂 400 MB、train-only 臂 100 MB（09-18 实测 45 MB）；整文件 40 臂 dry-run 现在报需 3.9 GiB，空余 13.5 GiB。
+- opus review 1（dev1–5）已做完并修：cohort 加 build 的长度门（`dataset.minimum_build_samples`）；`plan_cohort --arms` 要求各格在 `GRID_AXES`
+  之外完全一致、拒绝任何 CLI 配置 flag、cohort 目录名唯一；`frame_ablation --only` 仍校验全部臂、`null` cohort 继承文件级；lockstep 拒绝 `control_horizon_s = 0`。
+  未改的提醒：距离读数 (b) 的覆盖随 Δ 变（写进 D3）。
+- opus review 2（dev6–8）已做完并修：记录子集自带重算的 `accuracy`（`export.metrics_from_row`；`write_batch` 的行多了 `cross_track_p95_m` / `altitude_p95_m`
+  两列，旧记录目录做不了子集）；`gate_grid` 的 decisive 看两项主指标、只认恰好两 seed；`cell_reading` 单独成函数；队列的格名来自配置（与 gate 表一致）、PID 文件退出即删、
+  有活着的 PID 拒绝再起；失败方式：航向用 chart track、只数入口前的中线穿越、加 `first_aligned_s` 与首问时的 to-go、`FAILURE_MODES_BLOCK` 登记进 publisher。
+- 冒烟（09-18 S60_nt 臂 24 架、从第 59 行起）：10 架雷达引导没穿越 → established-short 1、overshoot 1、passed-abeam 8；子集 summary 能过 picker 的 accuracy 读取。
+- intents 登记：`two_tier_v3_grid_20260918`（40 runs + 每 run 4 个 reading 变体 `@lockstep-none[-12km|-8km|-6km]`）；失败方式子集发布时再加 `@failure-<mode>` 变体。
 
 ## 3. 测试与环境
 
