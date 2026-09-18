@@ -45,11 +45,16 @@ from ts_transformer.data.approach_difficulty import (
 )
 from ts_transformer.data.dataset import FlightSeries, Normalizer
 from ts_transformer.data.time_grids import ROW_TOLERANCE_S
+from ts_transformer.inference.export import PredictionRecord, build_prediction_record, observed_series_metrics
 from ts_transformer.inference.receding import displacement_at, mean_displacement_to
 from ts_transformer.outputs.control.forecast import forecast_control_batch
 from ts_transformer.outputs.control.plan_token import manoeuvre_code_count
 
 READOUT_SCHEMA = "ts-manoeuvre-readout-v1"
+#: The summary block a written record directory carries (`write_batch`'s ``extra_summary``):
+#: which arm, which protocol, which anchor — so the publisher and a reader know these are
+#: Δ-long protocol-C forecasts from one anchor, not a whole-approach prediction.
+RECORDS_BLOCK = "manoeuvre_readout"
 #: Gate T (plan §3.3), the pre-registered numbers. (i): the truth-code arm's ADE[0, Δ] p50 sits
 #: below the no-token twin's by at least this, on BOTH seeds — the v2 §10.8 line for "the
 #: head used the token". (iii): the largest code share and the unused-code share.
@@ -72,12 +77,17 @@ def _p50(values: Sequence[float]) -> float:
 def fixed_anchor_readings(
     model: nn.Module, config: TSConfig, normalizer: Normalizer, series: Sequence[FlightSeries],
     device: torch.device, *, batch_size: int,
+    records: list[tuple[int, PredictionRecord, dict[str, Any]]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Per flight (keyed by ``dataset_id``) at the fixed anchor: ``ade_m`` (ADE[0, Δ], None when
     the observed track is shorter than Δ), ``end_error_m`` (e(Δ), None likewise), ``code`` /
     ``code_source`` (None on a no-token arm) and the strata covariates. Every flight handed in
     must be admissible at the anchor (≥ Δ of supervision after it); the runner builds the
-    cohort under the arm's own config, which is what guarantees it."""
+    cohort under the arm's own config, which is what guarantees it.
+
+    With ``records`` (a list), every forecast is ALSO assembled into the publishable record
+    (`build_prediction_record` + `observed_series_metrics`, the pairs `write_batch` takes) —
+    the SAME forecast the reading came from, appended as ``(cohort index, record, metrics)``."""
     anchor = default_anchor(config)
     horizon = float(config.control_horizon_s)
     if not horizon:
@@ -86,7 +96,12 @@ def fixed_anchor_readings(
     for start in range(0, len(series), batch_size):
         batch = list(series[start : start + batch_size])
         forecasts = forecast_control_batch(model, batch, config, normalizer, anchor, device)
-        for item, forecast in zip(batch, forecasts, strict=True):
+        for offset, (item, forecast) in enumerate(zip(batch, forecasts, strict=True)):
+            if records is not None:
+                records.append((start + offset, build_prediction_record(
+                    item, forecast, index=start + offset, model_name=config.model,
+                    horizon_mode=config.horizon_mode, split="val",
+                ), observed_series_metrics(item, forecast, points=config.validation_common_grid_points)))
             anchor_time = float(item.times[anchor])
             observed_reaches = float(item.times[-1]) - anchor_time >= horizon - ROW_TOLERANCE_S
             difficulty = approach_difficulty(item, anchor)
@@ -288,8 +303,22 @@ def render(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def records_block(reading: ArmReading, config: TSConfig, *, campaign: str, flights: int, records: int,
+                  limit: int | None) -> dict[str, Any]:
+    """The `RECORDS_BLOCK` summary of one arm's written records."""
+    return {
+        "schema": READOUT_SCHEMA, "campaign": campaign, "arm": reading.key, "kind": reading.kind, "k": reading.k,
+        "seed": reading.seed, "protocol": "C" if reading.kind != "no-token" else "no-token",
+        "reads_the_future": reading.kind != "no-token",
+        "fixed_anchor": default_anchor(config), "horizon_s": float(config.control_horizon_s),
+        "plan_conditioning": config.plan_conditioning, "split": "val", "limit": limit,
+        "flights": flights, "records": records,
+        "truth_shorter_than_horizon": reading.summary["truth_shorter_than_horizon"],
+    }
+
+
 __all__ = [
     "GATE_T_GAIN_M", "GATE_T_K_TOLERANCE_M", "GATE_T_MAX_CODE_SHARE", "GATE_T_UNUSED_CODE_SHARE",
-    "READOUT_SCHEMA", "STRATA", "ArmReading", "arm_reading", "code_usage", "fixed_anchor_readings",
-    "gate_t", "paired_gain", "render", "stratum_summary",
+    "READOUT_SCHEMA", "RECORDS_BLOCK", "STRATA", "ArmReading", "arm_reading", "code_usage",
+    "fixed_anchor_readings", "gate_t", "paired_gain", "records_block", "render", "stratum_summary",
 ]

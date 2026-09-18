@@ -9,7 +9,10 @@ campaign trains on one development cohort, so their val splits are one list — 
 every flight from the fixed anchor under protocol C (`manoeuvre/readout.py`), pairs each token
 arm with its own seed's no-token twin, and writes ``manoeuvre_readout.json`` (per-flight rows
 included) and ``manoeuvre_readout.txt`` under ``--out`` — refused if it exists. ``--limit N``
-narrows the cohort DELIBERATELY (a smoke test) and the artifact says so.
+narrows the cohort DELIBERATELY (a smoke test) and the artifact says so. ``--write-records``
+also writes every arm's Δ-long protocol-C forecasts as a predict-shaped record directory under
+``<out>/records/<arm>/`` (the shape the publisher takes), each with a ``manoeuvre_readout``
+summary block naming the arm, the protocol, the anchor and the horizon.
 """
 
 from __future__ import annotations
@@ -26,8 +29,11 @@ from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
 from ts_transformer.data.dataset import build_series, load_flight_dicts
 from ts_transformer.experiments.support import REPO_ROOT
+from ts_transformer.inference.export import write_batch
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
-from ts_transformer.manoeuvre.readout import READOUT_SCHEMA, arm_reading, fixed_anchor_readings, gate_t, render
+from ts_transformer.manoeuvre.readout import (
+    READOUT_SCHEMA, RECORDS_BLOCK, arm_reading, fixed_anchor_readings, gate_t, records_block, render,
+)
 from ts_transformer.repo_layout import arrival_manifest_path
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.training.train import load_checkpoint, usable_series
@@ -54,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the val cohort (a smoke test)")
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--write-records", action="store_true",
+                        help="write every arm's protocol-C forecasts as records under <out>/records/<arm>/")
     args = parser.parse_args(argv)
     campaign = args.campaign if args.campaign.is_absolute() else REPO_ROOT / args.campaign
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
@@ -95,10 +103,24 @@ def main(argv: list[str] | None = None) -> int:
     series = [by_id[key] for key in wanted]
 
     readings = []
+    record_dirs: dict[str, str] = {}
     for path, model, config, normalizer, payload, _manifests in loaded:
-        rows = fixed_anchor_readings(model, config, normalizer, series, device, batch_size=args.batch_size)
-        readings.append(arm_reading(path.name, config, rows))
+        pairs = [] if args.write_records else None
+        rows = fixed_anchor_readings(model, config, normalizer, series, device, batch_size=args.batch_size, records=pairs)
+        reading = arm_reading(path.name, config, rows)
+        readings.append(reading)
         print(f"  {path.name:<18} read {len(rows)} flights", flush=True)
+        if pairs:
+            directory = out / "records" / path.name
+            write_batch(
+                [record for _, record, _ in pairs], output_dir=directory, config_dict=config.to_dict(),
+                flight_metrics=[metrics for _, _, metrics in pairs], checkpoint=str(path / "checkpoint.pt"), split="val",
+                extra_summary={RECORDS_BLOCK: records_block(
+                    reading, config, campaign=campaign.name, flights=len(series), records=len(pairs),
+                    limit=args.limit or None,
+                )},
+            )
+            record_dirs[path.name] = str(directory.relative_to(out))
     verdict = gate_t(readings)
     arms_payload = {}
     for reading in readings:
@@ -124,11 +146,12 @@ def main(argv: list[str] | None = None) -> int:
         "flights": len(series),
         "truth_shorter_than_horizon": readings[0].summary["truth_shorter_than_horizon"],
         "pending_arms": pending,
+        "record_dirs": record_dirs,
         "arms": arms_payload,
         "gate_t": verdict,
         "elapsed_s": time.perf_counter() - started,
     }
-    out.mkdir(parents=True)
+    out.mkdir(parents=True, exist_ok=True)   # the record directories may already sit under it
     write_json_atomic(out / "manoeuvre_readout.json", payload)
     table = render(payload)
     (out / "manoeuvre_readout.txt").write_text(table, encoding="utf-8")

@@ -12,8 +12,13 @@ import pytest
 
 from ts_transformer.config import TSConfig, recipe_settings, CONTROL_RECIPE_SIMPLE_V3
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED
+from ts_transformer.backbone.adapters import build_model
+from ts_transformer.data.dataset import Normalizer, build_series
+from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.experiments.manoeuvre_readout import discover_arms
+from ts_transformer.inference.export import write_batch
 from ts_transformer.manoeuvre import readout as ro
+from ts_transformer.tests.support import AIRPORT, RUNWAY
 
 
 def _rows(ade: dict[str, float], *, code: int | None = None, tortuosity: float = 1.0) -> dict[str, dict]:
@@ -124,3 +129,27 @@ def test_discover_arms_separates_trained_from_pending(tmp_path):
     (tmp_path / "S60_K32_s1337_pred_val").mkdir()
     trained, pending = discover_arms(tmp_path, 60.0)
     assert [p.name for p in trained] == ["S60_K32_s1337", "smoke_S60_cv_s1337"] and pending == ["S60_nt_s1337"]
+
+
+def test_fixed_anchor_readings_read_every_flight_and_can_write_the_same_forecasts_as_records(tmp_path):
+    import torch
+    torch.manual_seed(0)
+    config = _config(plan_conditioning="manoeuvre-code", manoeuvre_fsq_levels=(4, 4), seed=1337)
+    series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=5, seed=3), config, airport=AIRPORT)
+    model = build_model(config).eval()
+    normalizer = Normalizer.fit(series)
+    pairs = []
+    rows = ro.fixed_anchor_readings(model, config, normalizer, series, torch.device("cpu"), batch_size=2, records=pairs)
+    assert len(rows) == 5 and all(row["ade_m"] is not None and row["code"] is not None for row in rows.values())
+    assert all(row["code_source"] == "truth" and row["anchor"] == 7 for row in rows.values())
+    reading = ro.arm_reading("S20_K16_s1337", config, rows)
+    assert reading.usage["count"] == 16 and reading.summary[ro.STRATUM_ALL]["n"] == 5
+    # the records are the same forecasts, in cohort order, in the shape the publisher takes
+    assert [index for index, _r, _m in pairs] == list(range(5))
+    assert all(record.source["manoeuvreCode"] == rows[item.dataset_id]["code"] for (_i, record, _m), item in zip(pairs, series))
+    write_batch([r for _, r, _ in pairs], output_dir=tmp_path / "rec", config_dict=config.to_dict(),
+                flight_metrics=[m for _, _, m in pairs], split="val",
+                extra_summary={ro.RECORDS_BLOCK: ro.records_block(reading, config, campaign="c", flights=5, records=5, limit=None)})
+    summary = json.loads((tmp_path / "rec" / "summary.json").read_text())
+    assert summary[ro.RECORDS_BLOCK]["protocol"] == "C" and summary[ro.RECORDS_BLOCK]["horizon_s"] == 20.0
+    assert len(summary["results"]) == 5
