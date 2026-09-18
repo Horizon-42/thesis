@@ -289,6 +289,67 @@ def test_the_guidance_layer_never_imports_the_control_path():
         )
 
 
+#: The manoeuvre-token package's LEAVES (`manoeuvre/__init__.py`): the control path builds
+#: the truth segment rows into its context rows and holds the tokenizer as a submodule of the
+#: executor, so these two are the only `manoeuvre` modules anything under `outputs/` may
+#: import — and they import the data plane and torch only, or the layering would be a cycle.
+MANOEUVRE = TS_DIR / "manoeuvre"
+MANOEUVRE_LEAVES = {"manoeuvre.segments", "manoeuvre.tokenizer"}
+
+
+def test_the_manoeuvre_leaves_import_no_layer_above_the_data_plane():
+    """`manoeuvre.segments` / `manoeuvre.tokenizer` sit BELOW the control path (plan §4.2, the
+    2026-09-18 layering decision): they may read `data`, `config` and the vendored torch, never
+    `outputs`, `training`, `inference`, `experiments`, `cli` or another manoeuvre module."""
+    for leaf in MANOEUVRE_LEAVES:
+        path = TS_DIR / (leaf.replace(".", "/") + ".py")
+        if not path.is_file():
+            continue  # a leaf that is not written yet has nothing to import
+        # runtime imports: a `TYPE_CHECKING` annotation (`inference.forecast.Forecast`) is not
+        # an edge of the import graph
+        offending = {
+            name for name in _runtime_imported_names(path)
+            if name.split(".")[0] in {"outputs", "training", "inference", "experiments", "cli", "manoeuvre"}
+            and name not in MANOEUVRE_LEAVES
+        }
+        assert not offending, (
+            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; a manoeuvre leaf is imported "
+            "BY the control path and reads only the data plane"
+        )
+
+
+def test_the_control_path_reaches_only_the_manoeuvre_leaves_and_nothing_else_reaches_manoeuvre():
+    """Every other `manoeuvre` module imports the control path, the guidance layer, the data
+    plane and the inference helpers (plan §4.2); the reverse edge exists for the two leaves
+    only, and only from the control path."""
+    for path in _module_files():
+        if path.is_relative_to(MANOEUVRE):
+            continue
+        imported = {name for name in _imported_names(path) if name.split(".")[0] == "manoeuvre"}
+        if not imported:
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        assert rel.startswith("outputs/control/") or rel.startswith("experiments/"), (
+            f"{rel} imports {sorted(imported)}; outside the control path only the runners consume "
+            "the manoeuvre package"
+        )
+        if rel.startswith("outputs/control/"):
+            assert imported <= MANOEUVRE_LEAVES, (
+                f"{rel} imports {sorted(imported - MANOEUVRE_LEAVES)}; the control path may reach "
+                f"only the manoeuvre leaves {sorted(MANOEUVRE_LEAVES)}"
+            )
+
+
+def test_the_manoeuvre_package_is_not_a_runner_and_imports_none():
+    """`manoeuvre/` is package code: runners under `experiments/` and the CLI call it, never
+    the reverse (layout rule L3)."""
+    for path in MANOEUVRE.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        offending = {name for name in _imported_names(path) if name.split(".")[0] in {"experiments", "cli"}}
+        assert not offending, f"{path.relative_to(TS_DIR)} imports {sorted(offending)}"
+
+
 def test_nothing_under_outputs_imports_the_training_loop():
     """outputs/ is imported BY the loop, the replay, the export and the CLI — never the
     other way round. A strategy that imported `train` would make its path unusable outside
