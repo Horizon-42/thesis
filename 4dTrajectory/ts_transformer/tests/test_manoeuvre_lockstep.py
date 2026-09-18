@@ -35,6 +35,16 @@ def _config(codebook_dir: str) -> TSConfig:
     return TSConfig(**settings)
 
 
+def _no_token_config() -> TSConfig:
+    settings = recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=False)
+    settings.update(dict(
+        prediction_output=PREDICTION_CONTROL, control_horizon_s=SEGMENT_S, n_segments=2, control_imitation_loss_weight=0.0,
+        final_time_loss_weight=0.0, state_endpoint_loss_weight=0.0, seq_len=8, d_model=16, n_heads=4, d_ff=32,
+        e_layers=1, dropout=0.0, device="cpu", epochs=1, patience=1,
+    ))
+    return TSConfig(**settings)
+
+
 @pytest.fixture(scope="module")
 def world(tmp_path_factory):
     torch.manual_seed(0)
@@ -92,6 +102,10 @@ def _check_runs(runs, protocol):
         if protocol == ls.PROTOCOL_C:
             assert all(code == run.truth.codes[min(i, run.truth.length - 1)] for i, code in enumerate(run.codes))
             assert run.held_asks == max(run.asks - run.truth.length, 0)
+        elif protocol == ls.PROTOCOL_NONE:
+            assert all(code == ls.CODE_NONE for code in run.codes) and run.held_asks == 0
+            assert all("e_plan_m" not in ask for ask in run.asks_e)
+            assert all(leg.manoeuvre_code is None for leg in run.legs)      # nothing was handed to the executor
         else:
             assert len(run.landed_probabilities) >= 1
             assert all("e_plan_m" in ask and "truth_code" in ask for ask in run.asks_e)
@@ -130,6 +144,32 @@ def test_protocol_a_truth_reads_the_truth_prefix_and_ends_when_it_runs_out(world
         assert run.asks <= run.truth.length + 1 or run.ended != ls.ENDED_TRUTH_EXHAUSTED
     with pytest.raises(ValueError, match="protocol"):
         ls.fly(executor, codebook, series, "B", prior=prior, device=torch.device("cpu"), batch_size=3)
+
+
+def test_protocol_none_flies_the_no_token_twin_without_a_code_and_labels_its_legs(world):
+    """The control (2026-09-18): a no-token executor under the same rounds and budget; the
+    codebook only labels the truth's and the flown legs' codes. A coded executor is refused
+    under `none`, the no-token one under every coded protocol, and a prior under `none`."""
+    codebook, _executor, series, prior = world
+    config = _no_token_config()
+    torch.manual_seed(1)
+    model = build_model(config).eval()
+    with torch.no_grad():
+        model.control_head.control_projection.weight.normal_(std=0.05)
+    twin = ls.Executor(model=model, config=config, normalizer=Normalizer.fit(series))
+    runs = ls.fly(twin, codebook, series, ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=2)
+    assert len(runs) == 3
+    _check_runs(runs, ls.PROTOCOL_NONE)
+    for run in runs:
+        assert run.truth.length >= 1 and all(0 <= code < 16 for code in run.flown_codes)
+        row, _metrics = ls.flight_row(run, points=16)
+        assert row["codes"] == [ls.CODE_NONE] * run.asks and row["truth_codes"] == run.truth.codes.tolist()
+    with pytest.raises(ValueError, match="plan_conditioning"):
+        ls.fly(twin, codebook, series, ls.PROTOCOL_C, prior=None, device=torch.device("cpu"), batch_size=2)
+    with pytest.raises(ValueError, match="plan_conditioning"):
+        ls.fly(_executor, codebook, series, ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=2)
+    with pytest.raises(ValueError, match="prior"):
+        ls.fly(twin, codebook, series, ls.PROTOCOL_NONE, prior=prior, device=torch.device("cpu"), batch_size=2)
 
 
 def test_a_round_the_budget_leaves_no_row_for_flies_nothing_and_records_nothing(world):

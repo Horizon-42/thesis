@@ -13,6 +13,13 @@ three protocols that differ only in WHERE the code comes from.
              states) while the executor flies its own rows: what v2 §12.3 wanted — the prior's
              error alone, the coupling removed. Past the truth's last full segment there is no
              truth prefix to read: the flight ends (``truth-exhausted``).
+    none     NO code: a no-token executor (``plan_conditioning = off``, the campaign's twin arm)
+             re-asked every segment on its own flown rows — the control every protocol above is
+             read against (2026-09-18: the command-vocabulary executor's closed-loop lead over
+             the learned codebook turned out to be code-blindness, so "does the code help" needs
+             the executor WITHOUT one under the same rounds and the same budget). The codebook is
+             the reference labeller only: it defines the segment, the truth's code column and
+             the flown legs' codes (``flown_codes``), and is never handed to the executor.
 
 One round = ``segment_s`` = the executor's horizon: the forecast is exactly one segment and is
 flown whole (the one-shot variant, plan §2.6) unless it crosses the threshold ON THE FINAL
@@ -39,7 +46,7 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 
-from ts_transformer.config import CONTROL_DURATION_UNIFORM, TSConfig, default_anchor
+from ts_transformer.config import CONTROL_DURATION_UNIFORM, PLAN_CONDITIONING_OFF, TSConfig, default_anchor
 from ts_transformer.data.approach_difficulty import approach_difficulty
 from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.data.dataset import FlightSeries, Normalizer, truth_duration_s
@@ -61,7 +68,10 @@ from ts_transformer.outputs.dynamics.context import dynamics_arrays
 PROTOCOL_C = "C"
 PROTOCOL_A = "A"
 PROTOCOL_A_TRUTH = "A-truth"
-PROTOCOLS = (PROTOCOL_C, PROTOCOL_A, PROTOCOL_A_TRUTH)
+PROTOCOL_NONE = "none"
+PROTOCOLS = (PROTOCOL_C, PROTOCOL_A, PROTOCOL_A_TRUTH, PROTOCOL_NONE)
+#: The code column of a protocol-``none`` ask: no code was flown.
+CODE_NONE = -1
 #: How a flight ended.
 ENDED_CROSSED = "crossed"            # the threshold on the final, inside a leg
 ENDED_LANDED = "landed"              # the prior said so (A / A-truth)
@@ -145,7 +155,10 @@ def _history(run: FlightRun, anchor: int, dt_s: float) -> FlightSeries:
     return rolled_series(run.series, run.anchor, concatenate(run.legs, run.anchor, 0.0), anchor, dt_s)
 
 
-def _dynamics(executor: Executor, histories: Sequence[FlightSeries], anchor: int, z: np.ndarray, device: torch.device) -> dict[str, torch.Tensor]:
+def _dynamics(executor: Executor, histories: Sequence[FlightSeries], anchor: int, z: np.ndarray | None,
+              device: torch.device) -> dict[str, torch.Tensor]:
+    """The executor's dynamics rows at ``anchor``; ``z`` (the given code vector) is handed over
+    under `MANOEUVRE_Z_KEY`, or nothing is under protocol ``none`` (no key: a no-token executor)."""
     config = executor.config
     rows = [
         dynamics_arrays(history, anchor, parameterization=config.control_thrust_parameterization,
@@ -153,18 +166,19 @@ def _dynamics(executor: Executor, histories: Sequence[FlightSeries], anchor: int
         for history in histories
     ]
     dynamics = {name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device) for name in rows[0]}
-    dynamics[MANOEUVRE_Z_KEY] = torch.from_numpy(np.asarray(z, dtype=np.float32)).to(device)
+    if z is not None:
+        dynamics[MANOEUVRE_Z_KEY] = torch.from_numpy(np.asarray(z, dtype=np.float32)).to(device)
     return dynamics
 
 
-def _fly(executor: Executor, histories: Sequence[FlightSeries], anchor: int, z: np.ndarray, device: torch.device,
+def _fly(executor: Executor, histories: Sequence[FlightSeries], anchor: int, z: np.ndarray | None, device: torch.device,
          batch_size: int) -> list[Forecast]:
     out: list[Forecast] = []
     for start in range(0, len(histories), batch_size):
         chunk = list(histories[start : start + batch_size])
         out.extend(forecast_control_batch(
             executor.model, chunk, executor.config, executor.normalizer, anchor, device,
-            dynamics=_dynamics(executor, chunk, anchor, z[start : start + batch_size], device),
+            dynamics=_dynamics(executor, chunk, anchor, None if z is None else z[start : start + batch_size], device),
         ))
     return out
 
@@ -198,9 +212,12 @@ def fly(
     whole cohort, under ``protocol``."""
     if protocol not in PROTOCOLS:
         raise ValueError(f"protocol is one of {PROTOCOLS}, got {protocol!r}")
-    if (protocol != PROTOCOL_C) != (prior is not None):
-        raise ValueError("protocols A and A-truth take the prior; protocol C flies the truth's codes and takes none")
+    if (protocol in (PROTOCOL_A, PROTOCOL_A_TRUTH)) != (prior is not None):
+        raise ValueError("protocols A and A-truth take the prior; protocol C flies the truth's codes and protocol none no code: neither takes one")
     config = executor.config
+    if (protocol == PROTOCOL_NONE) != (config.plan_conditioning == PLAN_CONDITIONING_OFF):
+        raise ValueError(f"protocol none flies a no-token executor (plan_conditioning = off) and the coded protocols a "
+                         f"manoeuvre-code one; got {protocol!r} with plan_conditioning {config.plan_conditioning!r}")
     segment_s, dt_s = codebook.segment_s, codebook.dt_s
     if config.control_horizon_s != segment_s or config.dt_s != dt_s:
         raise ValueError(f"the executor's horizon {config.control_horizon_s:g} s / {config.dt_s:g} s is not the codebook's {segment_s:g} s / {dt_s:g} s")
@@ -223,7 +240,9 @@ def fly(
         # WHERE the code comes from
         z_rows: list[np.ndarray] = []
         codes: list[int] = []
-        if protocol == PROTOCOL_C:
+        if protocol == PROTOCOL_NONE:
+            codes = [CODE_NONE] * len(active)
+        elif protocol == PROTOCOL_C:
             for run in active:
                 index = min(round_index, run.truth.length - 1)
                 run.held_asks += int(round_index >= run.truth.length)
@@ -260,10 +279,10 @@ def fly(
                 else:
                     z_rows.append(step_z[row].numpy())
                     codes.append(int(codebook.tokenizer.z_to_codes(step_z[row : row + 1]).numpy()[0]))
-        z = np.stack(z_rows)
+        z = np.stack(z_rows) if z_rows else None
         forecasts = _fly(executor, histories, anchor, z, device, batch_size)
         plan_legs: list[Forecast] | None = None
-        if protocol != PROTOCOL_C:
+        if protocol in (PROTOCOL_A, PROTOCOL_A_TRUTH):
             # the truth's code from the SAME state: e_plan's other leg
             truth_z = np.stack([run.truth.z[min(round_index, run.truth.length - 1)] for run in active])
             plan_legs = _fly(executor, histories, anchor, truth_z, device, batch_size)
@@ -421,6 +440,6 @@ def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, A
 __all__ = [
     "ENDED_CROSSED", "ENDED_HORIZON", "ENDED_LANDED", "ENDED_TRUTH_EXHAUSTED", "HORIZON_SLACK_FRACTION",
     "HORIZON_SLACK_S", "LANDED_THRESHOLD", "LEADS_S", "PROTOCOLS", "PROTOCOL_A", "PROTOCOL_A_TRUTH",
-    "PROTOCOL_C", "Executor", "FlightRun", "Prior", "closing_horizon_s", "flight_row", "fly",
+    "PROTOCOL_C", "PROTOCOL_NONE", "CODE_NONE", "Executor", "FlightRun", "Prior", "closing_horizon_s", "flight_row", "fly",
     "reference_verdicts", "required_positions", "whole_forecast",
 ]

@@ -4,11 +4,15 @@
         --out <dir> [--batch-size 64] [--limit N] [--device auto] [--write-records]
     python run_ts.py manoeuvre_lockstep --executor … --codebook … --protocol A --prior <dir>/prior.pt --out …
     python run_ts.py manoeuvre_lockstep --executor … --codebook … --protocol A-truth --prior … --out …
+    python run_ts.py manoeuvre_lockstep --executor <no-token arm>/checkpoint.pt --codebook <any codebook of the
+        same segment> --protocol none --out …          # the control: no code, same rounds and budget
 
 The three artefacts must be ONE vocabulary: a jointly trained executor's codebook is the one
 exported from it (the codebook's ``source.checkpoint_sha256`` is the executor's), an executor
 trained against a codebook carries its sha (`codebook_sha256`), and the prior carries the sha
-of the codebook it was trained on — a mismatch refuses. The cohort is the executor's val split
+of the codebook it was trained on — a mismatch refuses. Under protocol ``none`` the executor
+holds no tokenizer and the codebook is the reference labeller only (the truth's and the flown
+legs' code columns); it must share the executor's segment. The cohort is the executor's val split
 (rebuilt, provenance verified). Writes ``manoeuvre_lockstep.json`` (per-flight rows included)
 and ``manoeuvre_lockstep.txt`` under ``--out`` (refused if it exists); ``--write-records``
 adds the flown paths as a predict-shaped record directory under ``<out>/records/``.
@@ -144,8 +148,8 @@ def main(argv: list[str] | None = None) -> int:
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
         parser.error(f"{out} exists; a lockstep readout is never overwritten")
-    if (args.protocol != ls.PROTOCOL_C) != (args.prior is not None):
-        parser.error("protocols A and A-truth take --prior; protocol C takes none")
+    if (args.protocol in (ls.PROTOCOL_A, ls.PROTOCOL_A_TRUTH)) != (args.prior is not None):
+        parser.error("protocols A and A-truth take --prior; protocols C and none take none")
     if args.split == "train" and args.protocol != ls.PROTOCOL_C:
         parser.error("the train split is flown under protocol C only (the closed-loop training's input); a readout is val")
     device = resolve_device(args.device)
@@ -156,7 +160,10 @@ def main(argv: list[str] | None = None) -> int:
     executor = ls.Executor(model=model.to(device).eval(), config=config, normalizer=normalizer)
     codebook = load_codebook(args.codebook if args.codebook.is_absolute() else REPO_ROOT / args.codebook)
     executor_sha = file_sha256(executor_path)
-    bound = model.codebook_sha256 == codebook.sha256 if config.manoeuvre_codebook else codebook.source.get("checkpoint_sha256") == executor_sha
+    if args.protocol == ls.PROTOCOL_NONE:
+        bound = True    # a no-token executor holds no tokenizer; the codebook only labels (`fly` checks plan_conditioning)
+    else:
+        bound = model.codebook_sha256 == codebook.sha256 if config.manoeuvre_codebook else codebook.source.get("checkpoint_sha256") == executor_sha
     if not bound:
         parser.error(f"{codebook.path} is not this executor's codebook (an executor trained against a codebook carries its sha; "
                      "a jointly trained one is the codebook's source)")
@@ -198,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": LOCKSTEP_SCHEMA, "written_utc": utc_now(), "protocol": args.protocol,
         "executor": str(executor_path), "executor_sha256": executor_sha, "executor_name": run_display_name(config.to_dict()),
         "codebook": str(codebook.path), "codebook_sha256": codebook.sha256,
+        "codebook_role": "reference labeller only (protocol none)" if args.protocol == ls.PROTOCOL_NONE else "the executor's vocabulary",
         "prior": None if args.prior is None else str(args.prior),
         "prior_sha256": None if args.prior is None else file_sha256(args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior),
         "prior_continuous": None if prior is None else prior.model.config.continuous,

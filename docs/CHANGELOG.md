@@ -6,6 +6,16 @@ Entries verified via full test suites + tsc + vite build at the time; "verified 
 
 ### 2026-09-18 — manoeuvre-token plan P1.1–P1.3: segments, the tokenizer + codebook, the executor wiring
 
+**Lockstep protocol `none`: the no-token control.** `manoeuvre/lockstep.py` gained `PROTOCOL_NONE`
+(a `plan_conditioning = off` executor re-asked every segment on its own flown rows, no code handed
+over — `_dynamics` sets `MANOEUVRE_Z_KEY` only when a z exists; `CODE_NONE = -1` in the code
+column; `fly` refuses a coded executor under `none` and a no-token one under C / A / A-truth).
+Why: on (60 s, K32 vs the command vocabulary) the command-vocabulary executor led the closed loop
+by 13–17 points of established, and the atlas + e_plan showed it barely responds to its code
+(segment-end spread 204 m vs K32's 1468 m; a wrong prior code moves it ≤ 230 m vs 760–836 m),
+so "does the code help" needs the executor WITHOUT one under the same rounds. The runner skips
+the codebook binding under `none` (the codebook labels only) and stamps `codebook_role`.
+
 **Publisher: the manoeuvre record blocks are registered and the variant intent lookup is case-insensitive.**
 The first manoeuvre lockstep publication (p23, (60 s, K32) protocol A, both seeds → KRDU 165 → 167
 categories, validator 0 errors) landed WITHOUT its variant intent: the registry names protocols the
