@@ -15,7 +15,7 @@ campaign 的读数进 `2026-09-18_manoeuvre_token_results.zh.md`（每个 campai
 | 阶段 | 状态 | 产物 / 指向 |
 |---|---|---|
 | P0 文档 + 文献 + 仓库整理 | **完成 2026-09-18**：文献 `docs/literature/manoeuvre_tokens/`（13 篇，引用全部核实）；代码归档 §5.1 已执行并提交（**9dbb492**：ts 套件 1177 全过，退役字段在默认值时由 `from_dict` 丢弃、否则报名字拒绝，289 个存档 checkpoint 逐个量过，原来能加载的一个没变）；磁盘 §5.4 已执行；38 个 two_tier 类目已撤下、索引已重建、validator 165 类目 0 错 | 本文 §5；**等用户审核本文后才开始 P1** |
-| P1 分词器 + 执行器（联合） | **P1.1–P1.3 完成 2026-09-18**（`manoeuvre/segments.py` 81ca7b1、`manoeuvre/tokenizer.py` 31b9c24、执行器接线 + review 修正 + 码本导出 runner 见下一提交）：ts 套件 1218 全过；opus review 的 2 BLOCKER / 3 MAJOR / 6 MINOR 全部修掉（航向 wrap、码本未记录尺度、越界码、常量重复、冻结模式、身份进 sha）。P1.4 campaign 未启动 | §4.1 P1.1–P1.4，门 T（§3.3）；§6.3 我替你选的 |
+| P1 分词器 + 执行器（联合） | **P1.1–P1.3 完成 2026-09-18**（`manoeuvre/segments.py` 81ca7b1、`manoeuvre/tokenizer.py` 31b9c24、执行器接线 + review 修正 + 码本导出 runner 见下一提交）：ts 套件 1218 全过；opus review 的 2 BLOCKER / 3 MAJOR / 6 MINOR 全部修掉（航向 wrap、码本未记录尺度、越界码、常量重复、冻结模式、身份进 sha）。**P1.4 campaign `manoeuvre_tok_20260918` 已启动 2026-09-18 06:13**（c391265；5 段长 × 14 臂 = 70 臂，队列顺序 60→30→90→20→120 s，每臂约 11 min，链 `<campaign>/queue_p14.sh` PID 2671532；读数 `run_ts.py manoeuvre_readout` 每段训完由 opus 队列代理跑并回报；结果进 results 文件 P1.4 节） | §4.1 P1.1–P1.4，门 T（§3.3）；§6.3 我替你选的 |
 | P2 先验（单机，跑道已知）+ 离散对连续的对照 | 未开始 | 门 P |
 | P3 lockstep：真值码、端到端、闭环再训 | 未开始 | 门 X、S、E |
 | P4 跑道 token + 程序上下文 | 未开始 | 门 R |
