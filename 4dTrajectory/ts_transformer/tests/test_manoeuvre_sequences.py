@@ -95,3 +95,14 @@ def test_the_operating_day_split_keeps_a_day_together_and_is_a_function_of_the_d
     assert {item.dataset_id for item in again_train} == {item.dataset_id for item in train}
     with pytest.raises(ValueError, match="val_fraction"):
         sq.split_by_operational_day(cohort, val_fraction=1.0, seed=7)
+
+
+def test_continuous_targets_align_with_the_sequences(cohort, codebook):
+    sequences = sq.flight_sequences(cohort, codebook, 7)
+    targets = sq.continuous_targets(cohort, sequences, codebook, batch_size=3)
+    assert len(targets) == len(sequences)
+    for sequence, target in zip(sequences, targets, strict=True):
+        assert target.shape == sequence.z.shape
+        assert np.array_equal(codebook.tokenizer.z_to_codes(torch.from_numpy(target)).numpy(), sequence.codes)
+    with pytest.raises(ValueError, match="is not"):
+        sq.continuous_targets(list(reversed(cohort)), sequences, codebook)

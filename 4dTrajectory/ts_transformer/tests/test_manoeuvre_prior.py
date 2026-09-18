@@ -126,3 +126,26 @@ def test_config_round_trips_and_refuses_a_bad_shape():
     assert pr.PriorConfig.from_dict(config.to_dict()) == config and config.bos == K
     with pytest.raises(ValueError, match="n_heads"):
         _config(d_model=30)
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+def test_fit_keeps_the_epoch_with_the_best_val_next_term_and_stops_early(continuous):
+    torch.manual_seed(2)
+    config = _config(continuous=continuous)
+    rng = np.random.default_rng(0)
+    train = [_sequence(list(rng.integers(0, 4, size=3)), key=f"t{i}") for i in range(24)]
+    val = [_sequence(list(rng.integers(0, 4, size=3)), key=f"v{i}") for i in range(8)]
+    targets = (lambda seqs: [s.z for s in seqs]) if continuous else (lambda seqs: None)
+    rows = []
+    result = pr.fit(pr.ManoeuvrePrior(config), train, val, VOCAB, train_targets=targets(train), val_targets=targets(val),
+                    epochs=30, patience=5, batch_size=8, learning_rate=3e-3, seed=1, device=torch.device("cpu"), log=rows.append)
+    assert len(result.history) == len(rows) <= 30 and result.best_epoch <= len(result.history)
+    assert result.best_val_next == pytest.approx(min(row["val"]["next"] for row in result.history))
+    assert set(result.history[0]["train"]) == {"total", "next", "landed", "landed_fraction"}
+    val_keys = {"next", "landed", "landed_fraction", "total", "landed_accuracy"} | (set() if continuous else {"next_code_accuracy"})
+    assert set(result.history[0]["val"]) == val_keys
+    # the kept weights reproduce the kept epoch's val number
+    model = pr.ManoeuvrePrior(config)
+    model.load_state_dict(result.state_dict)
+    again = pr.evaluate(model, val, targets(val), VOCAB, batch_size=8, device=torch.device("cpu"))
+    assert again["next"] == pytest.approx(result.best_val_next, abs=1e-6)

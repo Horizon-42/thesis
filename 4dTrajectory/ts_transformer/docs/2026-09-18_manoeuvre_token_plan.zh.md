@@ -16,7 +16,7 @@ campaign 的读数进 `2026-09-18_manoeuvre_token_results.zh.md`（每个 campai
 |---|---|---|
 | P0 文档 + 文献 + 仓库整理 | **完成 2026-09-18**：文献 `docs/literature/manoeuvre_tokens/`（13 篇，引用全部核实）；代码归档 §5.1 已执行并提交（**9dbb492**：ts 套件 1177 全过，退役字段在默认值时由 `from_dict` 丢弃、否则报名字拒绝，289 个存档 checkpoint 逐个量过，原来能加载的一个没变）；磁盘 §5.4 已执行；38 个 two_tier 类目已撤下、索引已重建、validator 165 类目 0 错 | 本文 §5；**等用户审核本文后才开始 P1** |
 | P1 分词器 + 执行器（联合） | **P1.1–P1.3 完成 2026-09-18**（`manoeuvre/segments.py` 81ca7b1、`manoeuvre/tokenizer.py` 31b9c24、执行器接线 + review 修正 + 码本导出 runner 见下一提交）：ts 套件 1218 全过；opus review 的 2 BLOCKER / 3 MAJOR / 6 MINOR 全部修掉（航向 wrap、码本未记录尺度、越界码、常量重复、冻结模式、身份进 sha）。**P1.4 campaign `manoeuvre_tok_20260918` 已启动 2026-09-18 06:13**（c391265；5 段长 × 14 臂 = 70 臂，队列顺序 60→30→90→20→120 s，每臂约 11 min，链 `<campaign>/queue_p14.sh` PID 2671532；读数 `run_ts.py manoeuvre_readout` 每段训完由 opus 队列代理跑并回报；结果进 results 文件 P1.4 节） | §4.1 P1.1–P1.4，门 T（§3.3）；§6.3 我替你选的 |
-| P2 先验（单机，跑道已知）+ 离散对连续的对照 | 未开始 | 门 P |
+| P2 先验（单机，跑道已知）+ 离散对连续的对照 | **P2.1 代码完成 2026-09-18**（`manoeuvre/sequences.py`、`context.py`、`prior.py`，runner `run_ts.py manoeuvre_prior`：离散与连续同一骨架一个开关，bigram 基线随 metadata 写出；在冒烟 codebook 上端到端跑通）。P2.2 读数与 P2.3 campaign 等 P1.4 的码本（过门 T 的 K）。先验用执行器自己的航班划分（§6.3 第 10 条），运行日划分留给 P4 | 门 P |
 | P3 lockstep：真值码、端到端、闭环再训 | 未开始 | 门 X、S、E |
 | P4 跑道 token + 程序上下文 | 未开始 | 门 R |
 | P5 多机图层 | 未开始 | 门 G（先做 oracle 上限） |
@@ -490,6 +490,11 @@ find $A -type d \( -name records -o -name '*_pred_val' \) -prune -exec rm -rf {}
    `manoeuvre_tokenizer`（其他 run 恒为 0——多一个 key 的代价接受了）。
 9. **码本身份（尺度、队列身份、来源 checkpoint）都在 sha 之内**；空身份拒写；对着码本训的执行器在 `load_checkpoint` 时
    校验目录里的权重仍是 checkpoint 里的那份（C28）。
+10. **先验（P2）在执行器自己的航班划分上训练与读数**（同一 development cohort 的 train / val），不用运行日划分：lockstep 要在执行器的
+    val 航班上配对，先验不能见过它们；运行日划分（T4）在 P4 跑道 token 时再引入（`sequences.split_by_operational_day` 已写好）。
+11. **先验的状态 token = 跑道入口图里的 (e, n, u, 地速, cos ψ, sin ψ)**（P2–P3 跑道已知，图就是跑道的）；P4 跑道未知时改到机场系。
+    `LANDED` 不是第 K+1 类而是每个位置一个独立的二元头（离散、连续两版同一骨架），落地分数 = 末段之后剩余的段分数 ∈ [0, 1)。
+12. **连续对照的回归目标 = 编码器 bound 后、round 前的坐标**（与 z 同一空间，`Codebook.encode_continuous`），执行器按 `manoeuvre_z` 吃它。
 
 ---
 

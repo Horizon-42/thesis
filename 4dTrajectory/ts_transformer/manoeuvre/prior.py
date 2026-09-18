@@ -248,6 +248,110 @@ def last_position_step(model: ManoeuvrePrior, batch: PriorBatch) -> Step:
     return Step(landed_probability=landed, landed_fraction=fraction, code=probabilities.argmax(dim=-1), probabilities=probabilities)
 
 
+# ── the fit ──────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class FitResult:
+    """``history``: one row per epoch (train / val loss parts, val accuracy, the learning rate);
+    ``best_epoch`` / ``best_val_next``: the kept epoch, selected on the val ``next`` term (the
+    NLL, or the continuous MSE); ``state_dict``: that epoch's weights (CPU)."""
+
+    history: list[dict[str, Any]]
+    best_epoch: int
+    best_val_next: float
+    state_dict: dict[str, torch.Tensor]
+    stopped_early: bool
+
+
+def _batches(sequences: Sequence[CodeSequence], targets: Sequence[np.ndarray] | None, config: PriorConfig,
+             vocabulary: TypeVocabulary, *, batch_size: int, order: np.ndarray, device: torch.device):
+    for start in range(0, len(order), batch_size):
+        chosen = order[start : start + batch_size]
+        yield collate(
+            [sequences[i] for i in chosen], config, vocabulary,
+            continuous_targets=None if targets is None else [targets[i] for i in chosen],
+        ).to(device)
+
+
+@torch.no_grad()
+def evaluate(model: ManoeuvrePrior, sequences: Sequence[CodeSequence], targets: Sequence[np.ndarray] | None,
+             vocabulary: TypeVocabulary, *, batch_size: int, device: torch.device) -> dict[str, float]:
+    """The loss parts (token-weighted over the set), the next-code accuracy (discrete) and the
+    landed-decision accuracy."""
+    model.eval()
+    sums: dict[str, float] = {}
+    weights: dict[str, float] = {}
+    hits = has_next = landed_hits = valid = 0
+    order = np.arange(len(sequences))
+    for batch in _batches(sequences, targets, model.config, vocabulary, batch_size=batch_size, order=order, device=device):
+        output = model(batch)
+        terms = model.loss(output, batch)
+        next_count = float((batch.next_code != IGNORE).sum())
+        valid_count = float(batch.valid.sum())
+        for name, weight in (("next", next_count), ("landed", valid_count), ("landed_fraction", float((batch.landed > 0.5).sum()))):
+            sums[name] = sums.get(name, 0.0) + float(terms[name]) * weight
+            weights[name] = weights.get(name, 0.0) + weight
+        if not model.config.continuous:
+            mask = batch.next_code != IGNORE
+            hits += int(((output.next_logits.argmax(dim=-1) == batch.next_code) & mask).sum())
+            has_next += int(mask.sum())
+        landed_hits += int((((output.landed_logit > 0.0) == (batch.landed > 0.5)) & batch.valid).sum())
+        valid += int(batch.valid.sum())
+    out = {name: sums[name] / max(weights[name], 1.0) for name in sums}
+    out["total"] = out["next"] + model.config.landed_loss_weight * out["landed"] + model.config.landed_fraction_loss_weight * out["landed_fraction"]
+    out["landed_accuracy"] = landed_hits / max(valid, 1)
+    if not model.config.continuous:
+        out["next_code_accuracy"] = hits / max(has_next, 1)
+    return out
+
+
+def fit(
+    model: ManoeuvrePrior, train: Sequence[CodeSequence], val: Sequence[CodeSequence], vocabulary: TypeVocabulary,
+    *, train_targets: Sequence[np.ndarray] | None = None, val_targets: Sequence[np.ndarray] | None = None,
+    epochs: int, patience: int, batch_size: int, learning_rate: float, seed: int, device: torch.device,
+    log=None,
+) -> FitResult:
+    """Adam, shuffled batches per epoch (seeded), the epoch kept on the val ``next`` term,
+    early stop after ``patience`` epochs without improvement. ``log`` is called with each
+    epoch's row when given."""
+    model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    rng = np.random.default_rng(seed)
+    history: list[dict[str, Any]] = []
+    best_val, best_epoch, best_state, since_best = math.inf, 0, None, 0
+    stopped_early = False
+    for epoch in range(1, epochs + 1):
+        model.train()
+        order = rng.permutation(len(train))
+        sums: dict[str, float] = {}
+        count = 0
+        for batch in _batches(train, train_targets, model.config, vocabulary, batch_size=batch_size, order=order, device=device):
+            optimizer.zero_grad()
+            terms = model.loss(model(batch), batch)
+            terms["total"].backward()
+            optimizer.step()
+            for name, value in terms.items():
+                sums[name] = sums.get(name, 0.0) + float(value.detach()) * len(batch.codes_in)
+            count += len(batch.codes_in)
+        validation = evaluate(model, val, val_targets, vocabulary, batch_size=batch_size, device=device)
+        row = {"epoch": epoch, "train": {name: value / count for name, value in sums.items()}, "val": validation,
+               "learning_rate": learning_rate}
+        history.append(row)
+        if log is not None:
+            log(row)
+        if validation["next"] < best_val:
+            best_val, best_epoch, since_best = validation["next"], epoch, 0
+            best_state = {name: value.detach().cpu().clone() for name, value in model.state_dict().items()}
+        else:
+            since_best += 1
+            if since_best >= patience:
+                stopped_early = True
+                break
+    model.load_state_dict(best_state)
+    return FitResult(history=history, best_epoch=best_epoch, best_val_next=best_val, state_dict=best_state,
+                     stopped_early=stopped_early)
+
+
 # ── the bigram baseline (gate T(ii)) ─────────────────────────────────────────
 
 def bigram_nll(train: Sequence[CodeSequence], val: Sequence[CodeSequence], code_count: int, *, alpha: float = 1.0) -> dict[str, float]:
@@ -278,6 +382,6 @@ def bigram_nll(train: Sequence[CodeSequence], val: Sequence[CodeSequence], code_
 
 
 __all__ = [
-    "IGNORE", "PRIOR_SCHEMA", "ManoeuvrePrior", "PriorBatch", "PriorConfig", "PriorOutput", "Step",
-    "bigram_nll", "collate", "last_position_step",
+    "IGNORE", "PRIOR_SCHEMA", "FitResult", "ManoeuvrePrior", "PriorBatch", "PriorConfig", "PriorOutput", "Step",
+    "bigram_nll", "collate", "evaluate", "fit", "last_position_step",
 ]

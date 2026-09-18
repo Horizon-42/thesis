@@ -135,6 +135,32 @@ def flight_sequence(series: FlightSeries, codebook: Codebook, anchor: int) -> Co
     return flight_sequences([series], codebook, anchor)[0]
 
 
+def continuous_targets(
+    series: Sequence[FlightSeries], sequences: Sequence[CodeSequence], codebook: Codebook, *, batch_size: int = 512
+) -> list[np.ndarray]:
+    """The UNROUNDED encoder coordinates ``[T, Z]`` of every sequence's segments (the continuous
+    prior's targets, `Codebook.encode_continuous`), one array per sequence, in the same order."""
+    segment_s, dt_s = codebook.segment_s, codebook.dt_s
+    rows: list[np.ndarray] = []
+    state_rows: list[np.ndarray] = []
+    for item, sequence in zip(series, sequences, strict=True):
+        if sequence.dataset_id != item.dataset_id:
+            raise ValueError(f"sequence {sequence.dataset_id} is not {item.dataset_id}'s")
+        for start in sequence.start_times:
+            rows.append(truth_segment_rows(item, float(start), segment_s, dt_s).astype(np.float32))
+            state_rows.append(state_row(item, float(start)).astype(np.float32))
+    vectors = np.empty((len(rows), codebook.z_dim), dtype=np.float32)
+    for start in range(0, len(rows), batch_size):
+        vectors[start : start + batch_size] = codebook.encode_continuous(
+            np.stack(rows[start : start + batch_size]), np.stack(state_rows[start : start + batch_size])
+        )
+    out, cursor = [], 0
+    for sequence in sequences:
+        out.append(vectors[cursor : cursor + sequence.length].copy())
+        cursor += sequence.length
+    return out
+
+
 # ── the operating-day split (T4) ─────────────────────────────────────────────
 
 def operational_day_of(series: FlightSeries) -> str:
@@ -163,6 +189,6 @@ def split_by_operational_day(
 
 
 __all__ = [
-    "STATE_TOKEN_FEATURES", "STATE_TOKEN_SCALE", "CodeSequence", "flight_sequence", "flight_sequences",
-    "operational_day_of", "split_by_operational_day", "state_token",
+    "STATE_TOKEN_FEATURES", "STATE_TOKEN_SCALE", "CodeSequence", "continuous_targets", "flight_sequence",
+    "flight_sequences", "operational_day_of", "split_by_operational_day", "state_token",
 ]
