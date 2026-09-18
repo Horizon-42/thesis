@@ -14,6 +14,14 @@
 lockstep `lockstep_C / Atruth / A / Ac_s<seed>`（val 1392 航班，一轮 = 60 s，闭合预算 T₀ + max(30, 0.1 T₀)）；最后两种子的门 E / P / X。
 **它的读数不是过门 S 的候选**（门 T 未过），是下一步的依据。
 
+**已发布到 picker（2026-09-18 08:43，opus 代理）**：协议 A 两种子的 1392 架记录 → KRDU 类目 165 → 167，validator 0 错：
+`manoeuvre_tok_20260918/S60_K32_s1337@lockstep-a`、`…_s2024@lockstep-a`（类目键 `experiment_s60_k32_s1337_6a154c7248d7_lockstep-a_val` 等）；
+实验索引重建 110 → 126 条（git-ignored）。**变体意图没盖进类目**：registry 写 `@lockstep-A`、发布器把 slug 小写成 `lockstep-a`，查找是精确匹配——
+已修（57ae87e：registry 读入时小写 slug，大小写冲突拒绝；`VARIANT_RECORD_BLOCKS` 补上两个 manoeuvre 块）。
+**待用户一条命令**（它重写 KRDU 全部 167 个类目的标签元数据，按"不擅自覆盖已发布产物"留给你）：
+`conda run -n aeroviz --no-capture-output python publish_ts_experiment_trajectories.py --refresh-labels-only --output-root 4dTrajectory/outputs/KRDU/experiment_predictions`，
+然后 `cd aeroviz-4d && npm run check-publication -- --airport KRDU --server http://localhost:5173`。
+
 **先验读数（P2.2）。**
 
 | 种子 | 离散先验：选 epoch | val 下一码 NLL nats/码 | bigram 基线（add-one） | T(ii) | top-1 | 落地判断准确率 / 落地份额 L1 | 翻转率（相邻两问，真值历史） | 连续对照：val 坐标损失 |
