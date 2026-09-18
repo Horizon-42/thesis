@@ -6,6 +6,33 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## ts_transformer: the closed-loop training's EXECUTOR side is not written (2026-09-18)
+
+**Judgement** (manoeuvre-token plan §2.7 step 2): retraining the executor on its own flown legs
+needs the training window set to serve a ROLLED window (the flown history) with TIME-INDEXED
+truth targets (the truth's rows at the flown anchor's absolute times) — today
+`WindowContext.override` returns a substitute window with ZERO targets (the plan path's v5.2
+contract), so the control objective would have nothing to track. The change is in
+`data/dataset.py` (`TrajectoryWindows.batch` / `override`) and is a spine change; the plan runs
+this step only if gate E's first reading moves, so it waits for that reading. The prior side
+(`manoeuvre_prior --rolled`) is done.
+
+## ts_transformer: the manoeuvre runners repeat an argument skeleton (2026-09-18)
+
+**Judgement**: `manoeuvre_readout` / `_prior` / `_prior_readout` / `_lockstep` / `_code_atlas` /
+`_gates` each declare `--out` (refused if it exists), `--device`, `--limit` and the
+absolute-or-REPO_ROOT path resolution by hand; the cohort rebuild is one function now
+(`support.rebuild_cohort`), the flags could be one `add_manoeuvre_arguments(parser, …)` +
+`resolve_out(...)`. Cosmetic; do it when a seventh runner arrives.
+
+## ts_transformer: `experiments/predictability_report` builds its own dynamics rows (2026-09-18)
+
+**Verified** (opus review of 9002cc0): it is the only model-forward path that builds dynamics
+rows outside `ControlContext._build_row` / `_dynamics_batch`, so on a `manoeuvre-code`
+checkpoint it dies with `plan_z`'s "a batch carries exactly one z source" — loud, and its
+docstring now says so. Routing it through `_dynamics_batch` would make it work; nobody has
+asked for that report on a manoeuvre arm.
+
 ## ts_transformer: `lead_landings` reads outer-test-hash landings as context (2026-09-13)
 
 **Verified** (code read, runway-intent R0 review): `data/intent_conditioning.py::lead_landings`
