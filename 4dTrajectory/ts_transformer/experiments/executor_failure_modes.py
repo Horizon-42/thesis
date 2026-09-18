@@ -70,7 +70,7 @@ def render(payload: dict[str, Any]) -> str:
     lines.append("")
     lines.append("ever est: share ever established under the centreline rule (cross-track < 500 m, heading within 30°, ahead of the "
                  "threshold) — not the crossing verdict; to-go: metres before the threshold along the final approach course at the "
-                 "first ask / the budget's end (negative = past its abeam line); |cross|: off the course at the end; right: share ending "
+                 "first prediction / the budget's end (negative = past its abeam line); |cross|: off the course at the end; right: share ending "
                  "right of the course; turn delay: flown minus truth onset of the final turn onto the course (s); ΔV / Δh: flown minus "
                  "truth at the end")
     return "\n".join(lines) + "\n"
@@ -98,13 +98,13 @@ def main(argv: list[str] | None = None) -> int:
         stem = row["flight_id"]
         flown = load_record(records / f"{stem}{EVAL_SUFFIX}")
         truth = load_record(records / REFERENCES_DIR / f"{stem}{REFERENCE_EVAL_SUFFIX}")
-        rows[key] = {"flight_id": stem, "ended": row["ended"], "asks": row["asks"],
+        rows[key] = {"flight_id": stem, "ended": row["ended"], "predictions": row["predictions"],
                      **flight_failure(flown.states, truth.states, flown.target_state)}
     modes = summarise(rows)
     result = {
         "schema": FAILURE_MODES_SCHEMA, "written_utc": utc_now(),
         "lockstep": str(artefact), "lockstep_sha256": file_sha256(artefact), "protocol": payload["protocol"],
-        "executor": payload["executor"], "first_ask": payload["first_ask"],
+        "executor": payload["executor"], "first_prediction": payload["first_prediction"],
         "stratum": args.stratum, "stratum_flights": stratum_n, "flights": len(rows),
         "modes": modes, "rows": rows,
     }
@@ -118,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         if not chosen:
             continue
         block = {FAILURE_MODES_BLOCK: {"mode": mode, "stratum": args.stratum, "lockstep": str(artefact), "lockstep_sha256": result["lockstep_sha256"],
-                                       "mode_flights": modes[mode]["n"], "protocol": payload["protocol"], "first_ask": payload["first_ask"]}}
+                                       "mode_flights": modes[mode]["n"], "protocol": payload["protocol"], "first_prediction": payload["first_prediction"]}}
         copy_record_subset(records, out / f"records_{mode}", [rows[key]["flight_id"] for key in chosen], extra_summary=block)
         print(f"  records_{mode}: {len(chosen)} of {modes[mode]['n']} flights")
     return 0

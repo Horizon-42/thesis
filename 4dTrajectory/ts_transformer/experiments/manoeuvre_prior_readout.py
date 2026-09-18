@@ -1,6 +1,6 @@
 """The prior's own readouts (plan §3.2 "先验（开环）" row, the parts that need no executor): val
 NLL / accuracy against the bigram baseline (gate T(ii)), the landed decision's accuracy, and
-the flip rate between adjacent asks on the truth history (plan §2.5's stability reading).
+the flip rate between adjacent predictions on the truth history (plan §2.5's stability reading).
 
     python run_ts.py manoeuvre_prior_readout --prior <dir>/prior.pt --codebook <dir> --out <dir> [--limit N]
 
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         f"  landed accuracy {validation['landed_accuracy']:.3f}  landed-fraction L1 {validation['landed_fraction']:.3f}",
     ]
     if flips is not None:
-        lines.append(f"  flip rate {flips['rate']:.3f} ({flips['flips']} of {flips['pairs']} adjacent-ask pairs)")
+        lines.append(f"  flip rate {flips['rate']:.3f} ({flips['flips']} of {flips['pairs']} adjacent-prediction pairs)")
     text = "\n".join(lines) + "\n"
     (out / "manoeuvre_prior_readout.txt").write_text(text, encoding="utf-8")
     print(text)

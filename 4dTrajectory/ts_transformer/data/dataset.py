@@ -245,9 +245,9 @@ def series_within_horizon(series: FlightSeries, anchor: int, config: TSConfig) -
 def series_from_row(series: FlightSeries, first_row: int) -> FlightSeries:
     """``series`` first seen at its observed row ``first_row``: the rows before it are dropped
     from the observed arrays and from the supervision arrays alike, the clock is kept (a row's
-    time is still its time in the flight). What a lockstep read from a later first ask needs —
+    time is still its time in the flight). What a lockstep started at a later row needs —
     the executor sees the last ``seq_len`` rows before its anchor and nothing earlier, so the
-    flight from row ``r`` asked at ``L−1`` IS the whole flight asked at ``r + L − 1``, and every
+    flight from row ``r`` predicted at ``L−1`` IS the whole flight predicted at ``r + L − 1``, and every
     truth-side reading (the remaining path, the strata, the budget, ADE / FDE) is taken from the
     same row. ``first_row`` 0 is ``series`` itself."""
     if not 0 <= first_row < series.n_samples:

@@ -293,7 +293,7 @@ P4); `manoeuvre_prior_readout` (val NLL vs the bigram, the flip rate); `manoeuvr
 `manoeuvre_gates` judges over written artefacts, two seeds, never a typed number (R7). **Two-tier v3
 stage A** (2026-09-18): `plan_cohort --arms` writes one development cohort PER CELL from one load (an arm's
 own `development_cohort` wins over the file's; `frame_ablation --only` trains a subset); `manoeuvre_lockstep
---protocol none` takes NO codebook and `--anchor-remaining-km X` asks from the remaining-path bin
+--protocol none` takes NO codebook and `--anchor-remaining-km X` starts the closed loop at the remaining-path bin
 (`lockstep.from_remaining_path` + `dataset.series_from_row`: the same flight first seen at the bin's row);
 `executor_failure_modes` classifies the non-crossing flights (six modes, course frame; not a gate);
 `executor_grid_gate` picks the cell (the seed line read off the grid's own seed pairs, p75; fully flyable

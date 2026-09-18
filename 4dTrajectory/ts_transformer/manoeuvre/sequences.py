@@ -1,4 +1,4 @@
-"""A flight as its code sequence (plan §2.5): from the first ask (the fixed anchor) forward, one
+"""A flight as its code sequence (plan §2.5): from the first prediction (the fixed anchor) forward, one
 code per full segment through a FROZEN codebook, with the state token at every segment
 boundary — the prior's training rows and the protocol-C history.
 

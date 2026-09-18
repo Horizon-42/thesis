@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             val_targets = continuous_targets(val_series, val_sequences, codebook)
         vocabulary = TypeVocabulary.from_typecodes(item.typecode for item in train_sequences)
         longest = max(item.length for item in (*train_sequences, *val_sequences))
-        # sized for the LOCKSTEP's budget (the rounds a flight may be asked for under protocol
+        # sized for the LOCKSTEP's budget (the rounds a flight may be flown for under protocol
         # A), not for the truth alone (`lockstep.required_positions`)
         longest_truth_s = max(truth_duration_s(item, anchor) for item in (*train_series, *val_series))
         prior_config = PriorConfig(

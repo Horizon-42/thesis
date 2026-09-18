@@ -1,10 +1,10 @@
-"""Lockstep (plan §2.7): the executor re-asked every ``segment_s`` on its own flown rows, under
+"""Lockstep (plan §2.7): the executor predicts again every ``segment_s`` on its own flown rows, under
 three protocols that differ only in WHERE the code comes from.
 
     C        the TRUTH's code at this absolute time (time-indexed: the code of the truth segment
              that starts when this round starts, `sequences.flight_sequences`) — the executor alone;
              gate X. Past the truth's last full segment the last code is HELD until the flight
-             crosses or the budget ends (counted per flight, ``held_asks``).
+             crosses or the budget ends (counted per flight, ``held_predictions``).
     A        the prior's top-1 on the FLOWN history: every leg flown is tokenised back through the
              codebook (the flown segment's rows and the flown state at its start), the prior reads
              that code sequence with the flown boundary states, and its answer is the next z — the
@@ -13,17 +13,17 @@ three protocols that differ only in WHERE the code comes from.
              states) while the executor flies its own rows: what v2 §12.3 wanted — the prior's
              error alone, the coupling removed. Past the truth's last full segment there is no
              truth prefix to read: the flight ends (``truth-exhausted``).
-    none     NO code and NO codebook: a no-token executor (``plan_conditioning = off``) re-asked
-             every segment on its own flown rows — the baseline every protocol above is read
+    none     NO code and NO codebook: a no-token executor (``plan_conditioning = off``) predicting
+             again every segment on its own flown rows — the baseline every protocol above is read
              against (2026-09-18: the command-vocabulary executor's closed-loop lead over the
              learned codebook turned out to be code-blindness, so "does the code help" needs the
              executor WITHOUT one under the same rounds and the same budget), and the two-tier
              v3 plan's stage A reading (§3.1). The segment is the executor's horizon; the row
              carries no code columns.
 
-The first ask is the executor's fixed anchor, L−1 (`config.default_anchor`: no floor under v3 —
+The first prediction is made at the executor's fixed anchor, L−1 (`config.default_anchor`: no floor under v3 —
 the first row with a complete lookback, L seconds after entry). The second reading of v3 §3.1
-asks from a REMAINING-PATH bin instead (`from_remaining_path`): each flight is first seen at the
+starts from a REMAINING-PATH bin instead (`from_remaining_path`): each flight is first seen at the
 row `anchor_grid.bin_anchor` places at the bin, so the same lockstep from L−1 of the cut flight
 IS the lockstep from that row of the whole flight.
 
@@ -31,7 +31,7 @@ One round = ``segment_s`` = the executor's horizon: the forecast is exactly one 
 flown whole (the one-shot variant, plan §2.6) unless it crosses the threshold ON THE FINAL
 inside the segment (`inference.forecast.cut_at_threshold_crossing`: the flight ends,
 ``crossed``) or the flight's budget runs out (``horizon``). The budget is
-`closing_horizon_s` of the truth's duration at the first ask — T₀ + max(30 s, 0.1·T₀), the
+`closing_horizon_s` of the truth's duration at the first prediction — T₀ + max(30 s, 0.1·T₀), the
 rule copied from the archived plan oracle so "established" is read over one budget in every
 campaign — and is a CAP only: under A the prior's ``landed`` is the decision, the cap is what
 stops a flight that never says so. Under A and A-truth every round ALSO flies the truth's code
@@ -77,7 +77,7 @@ PROTOCOL_A = "A"
 PROTOCOL_A_TRUTH = "A-truth"
 PROTOCOL_NONE = "none"
 PROTOCOLS = (PROTOCOL_C, PROTOCOL_A, PROTOCOL_A_TRUTH, PROTOCOL_NONE)
-#: The code column of a protocol-``none`` ask: no code was flown.
+#: The code column of a protocol-``none`` prediction: no code was flown.
 CODE_NONE = -1
 #: How a flight ended.
 ENDED_CROSSED = "crossed"            # the threshold on the final, inside a leg
@@ -88,7 +88,7 @@ ENDED_TRUTH_EXHAUSTED = "truth-exhausted"   # A-truth past the truth's last full
 #: says (§2.7): T₀ + max(HORIZON_SLACK_S, HORIZON_SLACK_FRACTION·T₀).
 HORIZON_SLACK_S = 30.0
 HORIZON_SLACK_FRACTION = 0.1
-#: The leads (s from the first ask) the displacement is read at (plan §3.2).
+#: The leads (s from the first prediction) the displacement is read at (plan §3.2).
 LEADS_S = (60.0, 120.0, 180.0, 300.0)
 #: The prior says the flight lands within the next segment above this probability.
 LANDED_THRESHOLD = 0.5
@@ -99,7 +99,7 @@ def closing_horizon_s(T_s: float) -> float:
 
 
 def required_positions(max_truth_duration_s: float, segment_s: float, longest_truth_segments: int) -> int:
-    """How many positions a prior must hold to be asked at every round of a lockstep: the
+    """How many positions a prior must hold to be queried at every round of a lockstep: the
     BUDGET's rounds (`closing_horizon_s` of the longest truth, in segments, rounded up) plus
     the BOS position and one spare — never fewer than the longest truth sequence needs. Sized
     from the truth alone, a prior overflowed `collate` under protocol A on the long flights
@@ -124,19 +124,19 @@ class Prior:
 @dataclass
 class FlightRun:
     series: FlightSeries
-    anchor: int                                  # the first ask's row
+    anchor: int                                  # the first prediction's row
     truth: CodeSequence | None                   # the truth's code sequence; None under protocol none
     horizon_s: float
     legs: list[Forecast] = field(default_factory=list)
     flown_s: float = 0.0
     ended: str | None = None
     truncated: bool = False
-    asks: int = 0
-    held_asks: int = 0
+    predictions: int = 0                         # rounds flown
+    held_predictions: int = 0                    # C: rounds past the truth's last full segment (the last code held)
     codes: list[int] = field(default_factory=list)            # the code flown each round
     flown_codes: list[int] = field(default_factory=list)      # A: the flown legs tokenised back
     flown_states: list[np.ndarray] = field(default_factory=list)   # A: the boundary states, x_0 first
-    asks_e: list[dict[str, Any]] = field(default_factory=list)
+    rounds: list[dict[str, Any]] = field(default_factory=list)       # one record per round: lead, code, e_track, e_plan
     landed_fraction: float | None = None                       # the prior's, when it ended the flight
     landed_probabilities: list[float] = field(default_factory=list)
     landing_this_round: float | None = None                    # A / A-truth: fly this fraction of a segment, then end
@@ -269,7 +269,7 @@ def fly(
         elif protocol == PROTOCOL_C:
             for run in active:
                 index = min(round_index, run.truth.length - 1)
-                run.held_asks += int(round_index >= run.truth.length)
+                run.held_predictions += int(round_index >= run.truth.length)
                 codes.append(int(run.truth.codes[index]))
                 z_rows.append(run.truth.z[index])
         else:
@@ -315,10 +315,10 @@ def fly(
             if leg is None:
                 continue   # the budget ended before this round's first row: nothing flown, nothing recorded
             if plan_legs is not None:
-                run.asks_e[-1]["e_plan_m"] = _plan_error(leg, plan_legs[row], history)
-                run.asks_e[-1]["truth_code"] = int(run.truth.codes[min(round_index, run.truth.length - 1)])
+                run.rounds[-1]["e_plan_m"] = _plan_error(leg, plan_legs[row], history)
+                run.rounds[-1]["truth_code"] = int(run.truth.codes[min(round_index, run.truth.length - 1)])
             # every whole leg is tokenised back — protocol A reads the flown codes at the next
-            # ask, and a protocol-C run on the TRAIN split is the closed-loop training's input
+            # round, and a protocol-C run on the TRAIN split is the closed-loop training's input
             # (plan §2.7 step 1: the flown history's codes, the truth's as the labels)
             if codebook is not None:
                 _tokenise_flown_leg(run, codebook, segment_s, dt_s, round_index)
@@ -362,9 +362,9 @@ def _fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, segme
         return None
     run.legs.append(leg)
     run.codes.append(code)
-    run.asks += 1
+    run.predictions += 1
     run.flown_s += float(np.sum(leg.sample_durations_s))
-    run.asks_e.append({
+    run.rounds.append({
         "round": round_index, "lead_s": run.flown_s, "code": code,
         "e_track_m": displacement_at(run.series, leg, run.anchor, float(leg.times[-1])),
     })
@@ -442,7 +442,7 @@ def _code_columns(run: FlightRun) -> dict[str, Any]:
 
 def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, Any]]:
     """One flight's row (and the record metrics): the reference verdicts, ADE / FDE, the
-    geometry, the displacement at every lead, every ask's step error and e_plan, how it ended."""
+    geometry, the displacement at every lead, every round's step error and e_plan, how it ended."""
     forecast = whole_forecast(run)
     metrics = observed_series_metrics(run.series, forecast, points=points)
     geometry = _forecast_geometry(run.series, forecast)
@@ -451,7 +451,7 @@ def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, A
     row = {
         "flight_id": run.series.flight_id,
         "reference": reference_verdicts(run.series, forecast),
-        "ended": run.ended, "truncated_at_threshold": run.truncated, "asks": run.asks, "held_asks": run.held_asks,
+        "ended": run.ended, "truncated_at_threshold": run.truncated, "predictions": run.predictions, "held_predictions": run.held_predictions,
         "codes": list(run.codes), **_code_columns(run),
         "flown_states": [state.tolist() for state in run.flown_states],
         "landed_fraction": run.landed_fraction, "landed_probabilities": list(run.landed_probabilities),
@@ -464,7 +464,7 @@ def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, A
         # read under (review 2026-09-18 B3)
         "at": {f"{lead:g}": displacement_at(run.series, forecast, run.anchor, origin + lead, hold_forecast_end=True)
                for lead in LEADS_S},
-        "asks_e": run.asks_e,
+        "rounds": run.rounds,
         "route_tortuosity": difficulty.route_tortuosity, "established_at_anchor": difficulty.established_at_anchor,
         "remaining_path_m": difficulty.remaining_path_m,
     }

@@ -12,7 +12,7 @@ executor baseline was never settled — the lookback was fixed at 60 s silently 
 own ablation; the token turned out to add nothing in the closed loop. The plan was rewritten item by
 item with the user as `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md`; stage A =
 the no-token executor over lookback L ∈ {30, 60, 90, 120} s × segment Δ ∈ {20, 30, 60, 90, 120} s, two
-seeds (40 arms), first ask at L−1 (no floor), training anchors fully random, one development cohort
+seeds (40 arms), the first prediction at L−1 (no floor), training anchors fully random, one development cohort
 per cell (the flights with L of lookback and Δ of truth after it, both sides), two closed-loop
 readings (from L−1; from the 12 / 8 / 6 km remaining-path bins), then a failure-mode diagnosis of the
 vectored flights that do not cross. **Nothing launches before the user's sign-off (M-A0′).** The
@@ -28,7 +28,7 @@ row, clock kept, supervision cut alike); `manoeuvre/lockstep.py`: protocol `none
 (`FlightRun.anchor` is a field, `truth` may be None, a none row has no code columns) and
 `from_remaining_path` (each flight cut so its bin row is the executor's fixed anchor);
 `manoeuvre_lockstep`: `--codebook` optional (required iff coded), `--anchor-remaining-km`, schema
-`ts-manoeuvre-lockstep-v2` (`first_ask`, per-row `first_ask_row`, no `codebook_role`);
+`ts-manoeuvre-lockstep-v2` (`first_prediction`, per-row `first_prediction_row`, the round record `rounds` and counts `predictions` / `held_predictions` — v1's `asks_e` / `asks` / `held_asks` — no `codebook_role`);
 `manoeuvre/failure_modes.py` + `experiments/executor_failure_modes.py` (six modes in the runway's course
 frame, per-mode record subsets via `inference/export.copy_record_subset`; the record suffix constants
 are public there now); `manoeuvre/gates.gate_grid` + `experiments/executor_grid_gate.py` (the seed line

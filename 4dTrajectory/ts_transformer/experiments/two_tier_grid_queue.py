@@ -8,7 +8,7 @@ One cell = the declaration's arms of one (lookback, segment) (`executor_grid_gat
 `gates.cell_name`: its two seeds). Per cell, in the declaration's order (Δ ascending, then L
 ascending): `frame_ablation --only <its arms>` (an arm whose ``history.json`` exists is skipped by
 the runner itself), then for every arm and reading `manoeuvre_lockstep --protocol none` into
-``<campaign>/lockstep/<arm>/<reading>/`` (``L-1`` = the fixed first ask; ``<X>km`` =
+``<campaign>/lockstep/<arm>/<reading>/`` (``L-1`` = the first prediction at the fixed anchor; ``<X>km`` =
 ``--anchor-remaining-km X``; a reading whose artefact exists is skipped), then `executor_grid_gate`
 into ``<campaign>/gate/after_<cell>/`` — the running table. No records are written here (40 arms ×
 4 readings would be ~6 GB); the winner's readings are re-flown with ``--write-records`` after

@@ -1,4 +1,4 @@
-"""Lockstep (`manoeuvre/lockstep.py`): under every protocol each flight is re-asked once per
+"""Lockstep (`manoeuvre/lockstep.py`): under every protocol each flight is predicted once per
 segment on its own flown rows and ends by crossing, by the budget or by the prior's landing;
 the flown legs are contiguous; protocol A tokenises every whole leg back and reads e_plan;
 the row carries the reference verdicts and the leads. Untrained models: the mechanics are what
@@ -74,7 +74,7 @@ def test_the_closing_budget_is_the_archived_rule_and_the_prior_is_sized_for_it()
 def _check_runs(runs, protocol):
     for run in runs:
         assert run.ended in (ls.ENDED_CROSSED, ls.ENDED_HORIZON, ls.ENDED_LANDED, ls.ENDED_TRUTH_EXHAUSTED)
-        assert run.asks == len(run.legs) == len(run.codes) == len(run.asks_e)
+        assert run.predictions == len(run.legs) == len(run.codes) == len(run.rounds)
         if run.legs:
             # contiguous legs, each one segment long except the last
             times = np.concatenate([leg.times for leg in run.legs])
@@ -91,7 +91,7 @@ def _check_runs(runs, protocol):
             # readable for every flight, however early it ended (the truth reaches it)
             assert row["at"]["60"] is not None
             assert set(row["reference"]) == {"fully_flyable", "violations", "established"}
-            assert row["ended"] == run.ended and len(row["codes"]) == run.asks and set(row["at"]) == {"60", "120", "180", "300"}
+            assert row["ended"] == run.ended and len(row["codes"]) == run.predictions and set(row["at"]) == {"60", "120", "180", "300"}
             assert row["established_at_anchor"] in (True, False) and metrics["ade_m"] >= 0.0
             assert (row["reference"]["established"]) == (run.ended == ls.ENDED_CROSSED)
         # every whole leg is tokenised back under every coded protocol (the closed-loop input);
@@ -108,14 +108,14 @@ def _check_runs(runs, protocol):
                 assert row["truth_length"] == run.truth.length
         if protocol == ls.PROTOCOL_C:
             assert all(code == run.truth.codes[min(i, run.truth.length - 1)] for i, code in enumerate(run.codes))
-            assert run.held_asks == max(run.asks - run.truth.length, 0)
+            assert run.held_predictions == max(run.predictions - run.truth.length, 0)
         elif protocol == ls.PROTOCOL_NONE:
-            assert all(code == ls.CODE_NONE for code in run.codes) and run.held_asks == 0
-            assert all("e_plan_m" not in ask for ask in run.asks_e)
+            assert all(code == ls.CODE_NONE for code in run.codes) and run.held_predictions == 0
+            assert all("e_plan_m" not in record for record in run.rounds)
             assert all(leg.manoeuvre_code is None for leg in run.legs)      # nothing was handed to the executor
         else:
             assert len(run.landed_probabilities) >= 1
-            assert all("e_plan_m" in ask and "truth_code" in ask for ask in run.asks_e)
+            assert all("e_plan_m" in record and "truth_code" in record for record in run.rounds)
             if run.ended == ls.ENDED_LANDED:
                 assert run.landed_fraction is not None and float(np.sum(run.legs[-1].sample_durations_s)) <= SEGMENT_S + 1e-6
 
@@ -148,7 +148,7 @@ def test_protocol_a_truth_reads_the_truth_prefix_and_ends_when_it_runs_out(world
     runs = ls.fly(executor, codebook, series, ls.PROTOCOL_A_TRUTH, prior=prior, device=torch.device("cpu"), batch_size=3)
     _check_runs(runs, ls.PROTOCOL_A_TRUTH)
     for run in runs:
-        assert run.asks <= run.truth.length + 1 or run.ended != ls.ENDED_TRUTH_EXHAUSTED
+        assert run.predictions <= run.truth.length + 1 or run.ended != ls.ENDED_TRUTH_EXHAUSTED
     with pytest.raises(ValueError, match="protocol"):
         ls.fly(executor, codebook, series, "B", prior=prior, device=torch.device("cpu"), batch_size=3)
 
@@ -165,7 +165,7 @@ def _no_token_executor(series) -> ls.Executor:
 def test_protocol_none_flies_the_no_token_twin_without_a_code_or_a_codebook(world):
     """The baseline (2026-09-18; two-tier v3 stage A): a no-token executor under the same rounds
     and budget, no code handed over and no codebook at all — the row has no code columns. The
-    first ask is L−1 (v3 D2: no floor). A coded executor is refused under `none`, the no-token
+    first prediction is at L−1 (v3 D2: no floor). A coded executor is refused under `none`, the no-token
     one under every coded protocol, a codebook under `none`, and a prior under `none`."""
     codebook, _executor, series, prior = world
     twin = _no_token_executor(series)
@@ -175,7 +175,7 @@ def test_protocol_none_flies_the_no_token_twin_without_a_code_or_a_codebook(worl
     for run in runs:
         assert run.truth is None and run.anchor == twin.config.seq_len - 1 == 7 and run.flown_codes == []
         row, _metrics = ls.flight_row(run, points=16)
-        assert row["codes"] == [ls.CODE_NONE] * run.asks
+        assert row["codes"] == [ls.CODE_NONE] * run.predictions
         assert not {"truth_codes", "flown_codes", "truth_length", "landed_fraction_truth"} & set(row)
     with pytest.raises(ValueError, match="codebook"):
         ls.fly(twin, codebook, series, ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=2)
@@ -219,13 +219,13 @@ def test_the_remaining_path_reading_cuts_each_flight_at_its_bin_row(world):
 
 def test_a_round_the_budget_leaves_no_row_for_flies_nothing_and_records_nothing(world):
     """`_fly_leg` returns None when the remaining budget is below the first query step: no leg,
-    no code, no ask row — the bookkeeping stays aligned (review 2026-09-18 M4)."""
+    no code, no round record — the bookkeeping stays aligned (review 2026-09-18 M4)."""
     codebook, executor, series, _prior = world
     runs = ls.fly(executor, codebook, series[:1], ls.PROTOCOL_C, prior=None, device=torch.device("cpu"), batch_size=1)
     run = runs[0]
     forecast = run.legs[0]
     run.ended, run.flown_s = None, run.horizon_s - 0.1          # 0.1 s of budget left: under one 0.5 s step
-    before = (len(run.legs), len(run.codes), len(run.asks_e), run.asks)
+    before = (len(run.legs), len(run.codes), len(run.rounds), run.predictions)
     leg = ls._fly_leg(run, run.series, forecast, segment_s=SEGMENT_S, round_index=99, code=7)
     assert leg is None and run.ended == ls.ENDED_HORIZON
-    assert (len(run.legs), len(run.codes), len(run.asks_e), run.asks) == before
+    assert (len(run.legs), len(run.codes), len(run.rounds), run.predictions) == before

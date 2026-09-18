@@ -14,7 +14,7 @@ def _payload(*, vectored_ade: float, straight_ade: float, flyable: float, establ
     def cell(ade, at):
         return {"n": 10, "ade_mean_m": ade, "ade_p50_m": ade * 0.8, "fde_p50_m": ade, "fully_flyable_share": flyable,
                 "established_share": established, "at_p50_m": {"60": at[0] / 2, "120": at[0], "180": at[1], "300": None},
-                "ended": {"crossed": 8, "horizon": 2}, "asks_p50": 4.0, "e_track_by_round_p50_m": {}, "e_plan_by_round_p50_m": {}}
+                "ended": {"crossed": 8, "horizon": 2}, "predictions_p50": 4.0, "e_track_by_round_p50_m": {}, "e_plan_by_round_p50_m": {}}
     return {"executor_name": name, "protocol": protocol, "strata": {
         STRATUM_ALL: cell((vectored_ade + straight_ade) / 2, at_vectored), STRATUM_VECTORED: cell(vectored_ade, at_vectored),
         STRATUM_STRAIGHT_IN: cell(straight_ade, at_straight), STRATUM_ESTABLISHED: {"n": 0},

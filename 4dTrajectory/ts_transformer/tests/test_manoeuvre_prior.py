@@ -153,7 +153,7 @@ def test_fit_keeps_the_epoch_with_the_best_val_next_term_and_stops_early(continu
     assert again["next"] == pytest.approx(result.best_val_next, abs=1e-6)
 
 
-def test_the_flip_rate_counts_disagreements_between_adjacent_asks_on_the_same_segment():
+def test_the_flip_rate_counts_disagreements_between_adjacent_predictions_on_the_same_segment():
     torch.manual_seed(3)
     config = _config()
     model = pr.ManoeuvrePrior(config).eval()
@@ -177,7 +177,7 @@ def test_the_flip_rate_counts_disagreements_between_adjacent_asks_on_the_same_se
         pr.flip_rate(pr.ManoeuvrePrior(_config(continuous=True)), sequences, VOCAB, batch_size=2, device=torch.device("cpu"))
 
 
-def test_the_flip_rate_replaces_exactly_one_code_per_ask_and_matches_a_brute_force_loop():
+def test_the_flip_rate_replaces_exactly_one_code_per_prediction_and_matches_a_brute_force_loop():
     torch.manual_seed(5)
     config = _config()
     model = pr.ManoeuvrePrior(config).eval()

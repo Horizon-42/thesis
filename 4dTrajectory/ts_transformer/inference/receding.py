@@ -1,10 +1,10 @@
-"""Receding-horizon pieces: a forecast flown for Δ, the rolled history a re-ask reads, and the
+"""Receding-horizon pieces: a forecast flown for Δ, the rolled history the next prediction reads, and the
 displacement of a forecast from its truth at a lead.
 
 Shared by `experiments/chain_sensitivity.py` (a checkpoint chained on its own rollout) and the
 manoeuvre-token lockstep (`manoeuvre/lockstep.py`, plan §2.7; the archived two-tier tracker
 read it the same way).
-A re-ask on `rolled_series` IS the model's ordinary predict path on that history — the window,
+A prediction on `rolled_series` IS the model's ordinary predict path on that history — the window,
 the anchor state and the lagged actuators' initial condition inverted from the rolled lookback —
 which `tests/test_chain_sensitivity.py` pins with a displaced flown history.
 """
@@ -30,7 +30,7 @@ from ts_transformer.inference.forecast import Forecast, cut_rows
 
 def rolled_series(series: FlightSeries, anchor: int, flown: Forecast, until: int, dt_s: float) -> FlightSeries:
     """``series`` with every row after ``anchor`` replaced by the ``flown`` rows, sampled on
-    the series' own uniform grid up to index ``until`` — the history a chained re-ask at
+    the series' own uniform grid up to index ``until`` — the history a chained prediction at
     ``until`` is shown. The flown rows start one query step after the anchor, so the anchor's
     own observed row stands in before them. The supervision arrays are dropped (a rolled
     series has no truth): a caller whose checkpoint reads a CTA or a plan supplies them itself

@@ -12,11 +12,11 @@ codebook is the one exported from it (the codebook's ``source.checkpoint_sha256`
 executor's), an executor trained against a codebook carries its sha (`codebook_sha256`), and
 the prior carries the sha of the codebook it was trained on — a mismatch refuses. Protocol
 ``none`` (a `plan_conditioning = off` executor) takes no codebook. The cohort is the executor's
-val split (rebuilt, provenance verified); the first ask is the executor's fixed anchor L−1, or —
+val split (rebuilt, provenance verified); the first prediction is made at the executor's fixed anchor L−1, or —
 ``--anchor-remaining-km X`` (two-tier v3 §3.1's second reading, one of
 `anchor_strata.DEFAULT_ANCHOR_GRID_KM`) — the row where each flight has X km of path left to fly
 (`lockstep.from_remaining_path`; a flight that never has an admissible row there is counted,
-not flown; the row's ``first_ask_row`` is that row in the whole flight, while a record written
+not flown; the row's ``first_prediction_row`` is that row in the whole flight, while a record written
 under the bin reading carries the CUT flight's anchor, L−1, as its ``anchorIndex``). Writes
 ``manoeuvre_lockstep.json`` (per-flight rows included) and ``manoeuvre_lockstep.txt`` under
 ``--out`` (refused if it exists); ``--write-records`` adds the flown paths as a predict-shaped
@@ -49,8 +49,10 @@ from ts_transformer.manoeuvre.tokenizer import load_codebook
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.training.train import load_checkpoint
 
-#: v2 (2026-09-18, two-tier v3): `first_ask` names the first-ask rule, every row carries
-#: `first_ask_row`, a protocol-none row has no code columns and its codebook keys are null.
+#: v2 (2026-09-18, two-tier v3): `first_prediction` names where the closed loop starts, every row
+#: carries `first_prediction_row`, the per-round record is `rounds` (v1: `asks_e`) and the round
+#: counts `predictions` / `held_predictions` (v1: `asks` / `held_asks`), a protocol-none row has no
+#: code columns and its codebook keys are null.
 LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v2"
 #: The summary block a written record directory carries.
 LOCKSTEP_RECORDS_BLOCK = "manoeuvre_lockstep"
@@ -89,7 +91,7 @@ def stratum_table(rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "at_p50_m": {lead: _p50([r["at"][lead] for r in chosen]) for lead in chosen[0]["at"]},
             "at_n": {lead: sum(r["at"][lead] is not None for r in chosen) for lead in chosen[0]["at"]},
             "ended": dict(Counter(r["ended"] for r in chosen)),
-            "asks_p50": _p50([r["asks"] for r in chosen]),
+            "predictions_p50": _p50([r["predictions"] for r in chosen]),
             "e_track_by_round_p50_m": _by_round(chosen, "e_track_m"),
             "e_plan_by_round_p50_m": _by_round(chosen, "e_plan_m"),
         }
@@ -99,9 +101,9 @@ def stratum_table(rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
 def _by_round(rows, key) -> dict[str, float | None]:
     by_round: dict[int, list[float]] = {}
     for row in rows:
-        for ask in row["asks_e"]:
-            if ask.get(key) is not None:
-                by_round.setdefault(ask["round"], []).append(ask[key])
+        for record in row["rounds"]:
+            if record.get(key) is not None:
+                by_round.setdefault(record["round"], []).append(record[key])
     return {str(k): float(np.median(v)) for k, v in sorted(by_round.items())}
 
 
@@ -110,15 +112,15 @@ def _lead(value: float | None) -> str:
 
 
 def render(payload: dict[str, Any]) -> str:
-    first_ask = payload["first_ask"]
+    first = payload["first_prediction"]
     lines = [
         f"manoeuvre lockstep · {payload['protocol']} · {payload['executor_name']} · {payload['flights']} flights · "
-        f"segment {payload['segment_s']:g} s · first ask {first_ask['rule']}"
-        + (f" ({first_ask['flights_without_a_row']} flights without a row there)" if first_ask["remaining_km"] else "")
+        f"segment {payload['segment_s']:g} s · first prediction {first['rule']}"
+        + (f" ({first['flights_without_a_row']} flights without a row there)" if first["remaining_km"] else "")
         + (f" · prior {payload['prior']}" if payload.get("prior") else ""),
         "",
         f"{'stratum':<14}{'n':>6}{'ADE mean':>10}{'ADE p50':>9}{'FDE p50':>9}{'flyable':>9}{'estab':>8}"
-        f"{'e60':>7}{'e120':>7}{'e180':>7}{'e300':>7}{'asks':>6}  ended · n at each lead",
+        f"{'e60':>7}{'e120':>7}{'e180':>7}{'e300':>7}{'preds':>6}  ended · n at each lead",
         "  (the leads hold the forecast's last row past its end; a lead is absent only where the truth has ended)",
     ]
     for stratum in STRATA:
@@ -129,7 +131,7 @@ def render(payload: dict[str, Any]) -> str:
         lines.append(
             f"{STRATUM_SHORT[stratum]:<14}{cell['n']:>6}{cell['ade_mean_m']:>10.0f}{cell['ade_p50_m']:>9.0f}{cell['fde_p50_m']:>9.0f}"
             f"{cell['fully_flyable_share']:>9.3f}{cell['established_share']:>8.3f}"
-            f"{_lead(at['60'])}{_lead(at['120'])}{_lead(at['180'])}{_lead(at['300'])}{cell['asks_p50']:>6.0f}  "
+            f"{_lead(at['60'])}{_lead(at['120'])}{_lead(at['180'])}{_lead(at['300'])}{cell['predictions_p50']:>6.0f}  "
             + ", ".join(f"{k} {v}" for k, v in sorted(cell["ended"].items()))
             + f" · n {at_n['60']}/{at_n['120']}/{at_n['180']}/{at_n['300']}"
         )
@@ -148,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--protocol", required=True, choices=ls.PROTOCOLS)
     parser.add_argument("--prior", type=Path, default=None)
     parser.add_argument("--anchor-remaining-km", type=int, default=None, choices=DEFAULT_ANCHOR_GRID_KM,
-                        help="first ask where each flight has this much path left to fly, instead of at L-1")
+                        help="start the closed loop where each flight has this much path left to fly, instead of at L-1")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--split", default="val", choices=("train", "val"),
@@ -204,11 +206,11 @@ def main(argv: list[str] | None = None) -> int:
         series, first_rows = ls.from_remaining_path(series, config, args.anchor_remaining_km * 1000.0)
         if not series:
             parser.error(f"no flight of the cohort has an admissible row at {args.anchor_remaining_km} km of remaining path")
-    first_ask = {
+    first_prediction = {
         "rule": f"remaining path {args.anchor_remaining_km} km" if args.anchor_remaining_km else f"fixed L-1 (row {a0})",
         "remaining_km": args.anchor_remaining_km, "flights_without_a_row": len(wanted) - len(series),
     }
-    print(f"  {args.protocol}: {len(series)} flights, first ask {first_ask['rule']}, {run_display_name(config.to_dict())}", flush=True)
+    print(f"  {args.protocol}: {len(series)} flights, first prediction {first_prediction['rule']}, {run_display_name(config.to_dict())}", flush=True)
 
     runs = ls.fly(executor, codebook, series, args.protocol, prior=prior, device=device, batch_size=args.batch_size,
                   log=lambda line: print(line, flush=True))
@@ -218,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         if not run.legs:
             continue
         row, metrics = ls.flight_row(run, points=config.validation_common_grid_points)
-        row["first_ask_row"] = first_rows[run.series.dataset_id]
+        row["first_prediction_row"] = first_rows[run.series.dataset_id]
         rows[run.series.dataset_id] = row
         if args.write_records:
             forecast = ls.whole_forecast(run)
@@ -234,9 +236,9 @@ def main(argv: list[str] | None = None) -> int:
         "prior_continuous": None if prior is None else prior.model.config.continuous,
         "prior_executor_sha256": None if prior_payload is None else prior_payload["executor_sha256"],
         "prior_trained_on_this_executor": None if prior_payload is None else prior_payload["executor_sha256"] == executor_sha,
-        "segment_s": config.control_horizon_s, "anchor": a0, "first_ask": first_ask, "split": args.split, "limit": args.limit or None,
+        "segment_s": config.control_horizon_s, "anchor": a0, "first_prediction": first_prediction, "split": args.split, "limit": args.limit or None,
         "flights": len(rows), "flights_without_a_leg": flown_none,
-        "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first ask (a cap; under A the prior's landed decides)",
+        "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first prediction (a cap; under A the prior's landed decides)",
         "strata": stratum_table(rows), "rows": rows, "elapsed_s": time.perf_counter() - started,
     }
     out.mkdir(parents=True)

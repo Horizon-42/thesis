@@ -372,7 +372,7 @@ def fit(
 def one_step_rolled(batch: PriorBatch, own: torch.Tensor, t: int) -> PriorBatch:
     """The batch with ONLY position ``t + 1``'s code replaced by the prior's own top-1 for
     c_{t+1} (``own[:, t]``) — the truth history up to t, one greedy step, the truth's state at
-    t + 1. What the ask at t + 1 would read had the prior's answer at t been flown exactly."""
+    t + 1. What the prediction at t + 1 would read had the prior's answer at t been flown exactly."""
     rolled = batch.codes_in.clone()
     rolled[:, t + 1] = own[:, t]
     return PriorBatch(rolled, batch.states, batch.valid, batch.next_code, batch.landed, batch.landed_fraction,
@@ -382,7 +382,7 @@ def one_step_rolled(batch: PriorBatch, own: torch.Tensor, t: int) -> PriorBatch:
 @torch.no_grad()
 def flip_rate(model: ManoeuvrePrior, sequences: Sequence[CodeSequence], vocabulary: TypeVocabulary, *,
               batch_size: int, device: torch.device) -> dict[str, Any]:
-    """How often two ADJACENT asks disagree about the SAME future segment, on the truth history
+    """How often two ADJACENT predictions disagree about the SAME future segment, on the truth history
     (plan §2.5; the plan path's "fix walked 766 m"): the prior's top-1 for c_{t+2} read at
     position t + 1 with its OWN top-1 c_{t+1} in place (`one_step_rolled`: everything else the
     truth's), against its top-1 for c_{t+2} at position t + 1 with the TRUTH's c_{t+1}. A flip
