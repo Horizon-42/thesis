@@ -159,6 +159,14 @@ it by the effect (n_x = (T − D)/W, re-solved per RK4 stage on the lag model).
   open-loop (300 KRDU val flights): ADE 375 m against 2606 (n_x) and 2700 (δ). §12.6's condition is met: N6 is
   queued after `sf_n4` (`docs/experiments/sf_n6_arms.json`).
 - **Known difference, not a bug:** the specific-force speed has no drag feedback (design §2.1).
+## Runway intent — R1.2 PLANNED (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §19)
+
+The user: "加到计划里" (after asking why each airport has its own model). R1.2 trains `r11_lift`'s candidate-symmetric
+head on all five airports at once, airport-balanced weights, same settings, and pairs it against the per-airport
+`r11_lift` on the same samples. Pre-registered gates (§19.4): exact accuracy ≥ `r11_lift` − 1.0 point in every
+airport × partition cell, NLL ≤ 1.05×, ECE ≤ 0.05, the KSJC closure days and KMSY 07-21 ≥ 95 %, the KRDU / KSMF side lift
+within 2 points of `r11_lift`'s. Secondary readings: an airport one-hot arm, leave-one-airport-out. Not started;
+the user schedules it.
 
 ## Runway intent — R3.1 / R3.2 / R3.3 (2026-09-14, `docs/2026-09-13_runway_intent_plan.zh.md` §18)
 
@@ -177,7 +185,7 @@ both airports (what is flown after a fix is the head's later orders) — stopped
 flights; v3 on branch `wip-r32-leg-timing`; code-health §31, §32. Next (the user's call): a closure timed over
 the whole remaining route, developed off the evaluation roster. Artifacts `outputs/POOLED/experiments/
 runway_intent_r31{,_centered}_20260914/`, `runway_intent_r32_20260914/diagnosis/`.
-**R3.3 CODE DONE, RECORDS WRITTEN, PUBLICATION WAITS FOR THE MERGE** (`220138a` + `a6d921a`): split `dayval`, `runway_intent_r3 --write-records` (5195 records over five airports, identical to R3's formal flights; a record's prediction is the SCHEDULED time), publisher (reuse-only, experiment-only, both halves of held-out checked — outer-test hash and the checkpoint's own train/val — `--category-group`), frontend. Publish only after the ff-merge: the worktree's frontend data is the main tree's. KRDU `categories.json`, overwritten by a test at 16:13, was rebuilt and written back at 17:41 with the user's go-ahead (`check-publication`: 152 categories, 0 errors); evidence in `runway_intent_r3_20260914/incident_20260914_krdu_categories/`.
+**R3.3 PUBLISHED 2026-09-14** (`220138a` + `a6d921a`, merged at `d14e21d`; five `dayval` categories under `runway_intent_r3_20260914`, `check-publication` clean at every airport): split `dayval`, `runway_intent_r3 --write-records` (5195 records over five airports, identical to R3's formal flights; a record's prediction is the SCHEDULED time), publisher (reuse-only, experiment-only, both halves of held-out checked — outer-test hash and the checkpoint's own train/val — `--category-group`), frontend. KRDU `categories.json`, overwritten by a test at 16:13, was rebuilt and written back at 17:41 with the user's go-ahead (`check-publication`: 152 categories, 0 errors); evidence in `runway_intent_r3_20260914/incident_20260914_krdu_categories/`.
 
 ## Runway intent — R3 MEASURED 2026-09-14 (`docs/2026-09-13_runway_intent_plan.zh.md` §17)
 
