@@ -306,9 +306,59 @@ def gate_grid(cells: Mapping[tuple[float, float], Mapping[int, dict[str, Any]]],
     }
 
 
+#: The relative gate's metrics (§3.3 rows A3 and B): the two primaries and the vectored ADE.
+RELATIVE_METRICS = ("established_all", "established_vectored", "vectored_ade_mean_m")
+RELATIVE_PRIMARIES = ("established_all", "established_vectored")
+
+
+def gate_relative(baseline: Mapping[int, Mapping[str, float]], candidate: Mapping[int, Mapping[str, float]], *,
+                  seed_line: Mapping[str, float], flyable_floor: float = GRID_FLYABLE_FLOOR) -> dict[str, Any]:
+    """Two-tier v3's relative gate (§3.3 rows A3 and B; D45): a candidate reading against a
+    baseline reading of the SAME flights, per seed — ``{seed: cell_reading(...)}`` on both
+    sides, the caller having recomputed both over the common flights — judged against a seed
+    line the caller names (the grid's own, D39), never a number typed in here.
+
+    improvement = candidate − baseline for the established shares and baseline − candidate for
+    the vectored ADE (metres, so positive is better throughout); "not worse" = improvement ≥
+    −line, "beyond" = improvement > line. Row A3: on at least one primary both seeds improve and
+    one of them beyond the line, the other primary is not worse on both seeds, and the candidate
+    is fully flyable ≥ the floor on both seeds. Row B: every metric not worse on both seeds, at
+    least one metric beyond the line on both seeds, fully flyable ≥ the floor on both seeds."""
+    seeds = sorted(baseline)
+    if len(seeds) != 2 or sorted(candidate) != seeds:
+        raise ValueError(f"the relative gate reads two seeds on both sides; got baseline {sorted(baseline)} and candidate {sorted(candidate)}")
+    missing = [m for m in RELATIVE_METRICS if m not in seed_line]
+    if missing:
+        raise ValueError(f"the seed line names every metric of {RELATIVE_METRICS}; missing {missing}")
+    if any(seed_line[m] < 0 for m in RELATIVE_METRICS):
+        raise ValueError(f"a seed line is a non-negative width; got {dict(seed_line)}")
+    improvement = {m: {s: (baseline[s][m] - candidate[s][m]) if m == "vectored_ade_mean_m" else (candidate[s][m] - baseline[s][m])
+                       for s in seeds} for m in RELATIVE_METRICS}
+    not_worse = {m: {s: improvement[m][s] >= -seed_line[m] for s in seeds} for m in RELATIVE_METRICS}
+    beyond = {m: {s: improvement[m][s] > seed_line[m] for s in seeds} for m in RELATIVE_METRICS}
+    flyable_ok = all(candidate[s]["fully_flyable"] >= flyable_floor for s in seeds)
+    a3_on = [p for p in RELATIVE_PRIMARIES
+             if all(improvement[p][s] > 0 for s in seeds) and any(beyond[p][s] for s in seeds)
+             and all(not_worse[q][s] for q in RELATIVE_PRIMARIES if q != p for s in seeds)]
+    b_beyond = [m for m in RELATIVE_METRICS if all(beyond[m][s] for s in seeds)]
+    b_not_worse = all(not_worse[m][s] for m in RELATIVE_METRICS for s in seeds)
+    return {
+        "gate": "relative", "seeds": seeds, "seed_line": {m: float(seed_line[m]) for m in RELATIVE_METRICS}, "flyable_floor": flyable_floor,
+        "baseline": {s: dict(baseline[s]) for s in seeds}, "candidate": {s: dict(candidate[s]) for s in seeds},
+        "improvement": improvement, "not_worse": not_worse, "beyond": beyond, "fully_flyable_ok": flyable_ok,
+        "verdicts": {
+            "a3": {"pass": bool(a3_on) and flyable_ok, "on": a3_on,
+                   "rule": "on a primary both seeds improve and one beyond the seed line; the other primary not worse; fully flyable ≥ floor"},
+            "b": {"pass": b_not_worse and bool(b_beyond) and flyable_ok, "beyond_on": b_beyond, "not_worse": b_not_worse,
+                  "rule": "every metric not worse on both seeds; at least one beyond the seed line on both seeds; fully flyable ≥ floor"},
+        },
+    }
+
+
 __all__ = [
     "E_ESTABLISHED", "E_FLYABLE", "E_STRAIGHT_ADE_M", "E_VECTORED_ADE_M", "P_B61_STRAIGHT", "P_B61_VECTORED",
+    "RELATIVE_METRICS", "RELATIVE_PRIMARIES",
     "SEED_LINE_ADE_M", "SEED_LINE_ESTABLISHED", "X_ESTABLISHED_RATIO", "X_FLYABLE", "X_STRAIGHT_ADE_M",
     "X_VECTORED_ADE_M", "GRID_FLYABLE_FLOOR", "GRID_SEED_LINE_QUANTILE", "cell_name", "cell_reading", "gate_e", "gate_grid",
-    "gate_p_discrete_vs_continuous", "gate_p_open_loop", "gate_s", "gate_t", "gate_x",
+    "gate_p_discrete_vs_continuous", "gate_p_open_loop", "gate_relative", "gate_s", "gate_t", "gate_x",
 ]

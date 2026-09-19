@@ -299,7 +299,8 @@ own `development_cohort` wins over the file's; `frame_ablation --only` trains a 
 for every lookback — reading (a) from L−1 confounds lookback with starting point);
 `executor_failure_modes` classifies the non-crossing flights (six modes, course frame; not a gate);
 `executor_grid_gate` picks the cell (the seed line read off the grid's own seed pairs, p75; fully flyable
-≥ 0.95; ties → shorter Δ then shorter L); `two_tier_grid_queue` trains and reads one cell at a time (R8).
+≥ 0.95; ties → shorter Δ then shorter L); `two_tier_grid_queue` trains and reads one cell at a time; `executor_relative_gate` judges a candidate reading against its
+protocol-none baseline on the common flights (§3.3 rows A3 / B, the seed line named, never typed in) (R8).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 
