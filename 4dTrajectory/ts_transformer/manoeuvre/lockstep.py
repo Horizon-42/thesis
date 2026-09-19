@@ -157,6 +157,18 @@ def from_remaining_path(series: Sequence[FlightSeries], config: TSConfig, target
     return cut, {series[index].dataset_id: anchor for index, anchor in anchors.items()}
 
 
+def from_row(series: Sequence[FlightSeries], config: TSConfig, row: int) -> tuple[list[FlightSeries], dict[str, int]]:
+    """The cohort first seen at ONE common row ``row`` of every flight (two-tier v3's reading (c):
+    every cell flies the same segment of the approach and differs only in its lookback): each
+    flight cut (`series_from_row`) so that ``row`` becomes the executor's fixed anchor, by the
+    rule `anchor_grid.bin_anchor` applies to a bin's row — the executor's horizon of truth after
+    it; a flight that ends earlier is absent (the caller counts it). ``row`` is at or after the
+    executor's own first row (`default_anchor`), which the caller checks."""
+    kept = [item for item in series if item.n_samples > row and truth_duration_s(item, row) >= effective_min_future_s(config)]
+    cut = [series_from_row(item, row - default_anchor(config)) for item in kept]
+    return cut, {item.dataset_id: row for item in kept}
+
+
 def _polyline(run: FlightRun) -> tuple[np.ndarray, np.ndarray]:
     """The flown path on the flight's clock: the anchor's observed row, then every leg's rows."""
     a0 = run.anchor
@@ -475,5 +487,5 @@ __all__ = [
     "ENDED_CROSSED", "ENDED_HORIZON", "ENDED_LANDED", "ENDED_TRUTH_EXHAUSTED", "HORIZON_SLACK_FRACTION",
     "HORIZON_SLACK_S", "LANDED_THRESHOLD", "LEADS_S", "PROTOCOLS", "PROTOCOL_A", "PROTOCOL_A_TRUTH",
     "PROTOCOL_C", "PROTOCOL_NONE", "CODE_NONE", "Executor", "FlightRun", "Prior", "closing_horizon_s", "flight_row", "fly",
-    "from_remaining_path", "reference_verdicts", "required_positions", "whole_forecast",
+    "from_remaining_path", "from_row", "reference_verdicts", "required_positions", "whole_forecast",
 ]

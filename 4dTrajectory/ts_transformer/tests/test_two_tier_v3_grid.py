@@ -231,8 +231,10 @@ def test_the_queue_plans_one_cell_at_a_time_and_skips_written_readings(tmp_path,
     assert twelve[twelve.index("--anchor-remaining-km") + 1] == "12" and "--write-records" not in twelve
     assert steps[1][2] == campaign / "lockstep" / "L30_D20_s1337" / "L-1" / "manoeuvre_lockstep.json"
     assert "--anchor-remaining-km" not in steps[1][1] and steps[-1][2] == campaign / "gate" / "after_L30_D20" / "grid_gate.json"
-    with pytest.raises(ValueError, match="reading"):
-        queue.reading_flags("12")
+    assert queue.reading_flags("row59") == ["--first-prediction-row", "59"]
+    for bad in ("12", "rowx", "row"):
+        with pytest.raises(ValueError, match="reading"):
+            queue.reading_flags(bad)
     # a dry run lists the steps and marks a written reading done; a cell the declaration lacks is refused
     steps[1][2].parent.mkdir(parents=True)
     steps[1][2].write_text("{}", encoding="utf-8")

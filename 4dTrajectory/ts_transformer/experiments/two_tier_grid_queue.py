@@ -65,9 +65,11 @@ def live_pid(path: Path) -> int | None:
 def reading_flags(reading: str) -> list[str]:
     if reading == READING_L1:
         return []
-    if not reading.endswith("km"):
-        raise ValueError(f"a reading is {READING_L1!r} or '<X>km', got {reading!r}")
-    return ["--anchor-remaining-km", reading[:-2]]
+    if reading.endswith("km"):
+        return ["--anchor-remaining-km", reading[:-2]]
+    if reading.startswith("row") and reading[3:].isdigit():
+        return ["--first-prediction-row", reading[3:]]
+    raise ValueError(f"a reading is {READING_L1!r}, '<X>km' or 'row<N>', got {reading!r}")
 
 
 def cell_steps(cell: str, arms: list[str], *, declaration: Path, campaign: Path, airport: str, readings: list[str],
@@ -117,8 +119,6 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             parser.error(f"--cells names cells the declaration does not have: {', '.join(unknown)}")
         cells = {cell: arms for cell, arms in cells.items() if cell in set(args.cells)}
-    for reading in args.readings:
-        reading_flags(reading)
     plan = {cell: cell_steps(cell, arms, declaration=declaration, campaign=campaign, airport=args.airport.upper(),
                              readings=args.readings, device=args.device) for cell, arms in cells.items()}
     if args.dry_run:

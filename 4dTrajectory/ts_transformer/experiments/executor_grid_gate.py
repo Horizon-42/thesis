@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--campaign", type=Path, required=True)
     parser.add_argument("--arms", type=Path, required=True, help="the grid's arm declaration")
-    parser.add_argument("--reading", default=READING_L1, help="the reading directory under lockstep/<arm>/ (L-1, 12km, 8km, 6km)")
+    parser.add_argument("--reading", default=READING_L1, help="the reading directory under lockstep/<arm>/ (L-1, <X>km, row<N>)")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     campaign = args.campaign if args.campaign.is_absolute() else REPO_ROOT / args.campaign

@@ -217,6 +217,41 @@ def test_the_remaining_path_reading_cuts_each_flight_at_its_bin_row(world):
     assert empty == [] and rows == {}
 
 
+def test_the_common_row_reading_starts_every_flight_at_the_same_row(world):
+    """v3's reading (c): every flight cut so that ONE row of the whole flight becomes the
+    executor's L−1 — cells of different lookback then fly the same segment; a flight without the
+    executor's horizon of truth after that row is absent, not flown from elsewhere."""
+    from ts_transformer.data.dataset import effective_min_future_s
+
+    _codebook, _executor, series, _prior = world
+    twin = _no_token_executor(series)
+    config = twin.config
+    a0, horizon_s = ls.default_anchor(config), effective_min_future_s(config)
+
+    def truth_after(whole, row):                                # seconds of truth after a row of the whole flight
+        return float(whole.supervision_times[-1] - whole.times[row])
+
+    row = a0 + 2                                                # two rows after the executor's own first row
+    assert all(truth_after(whole, row) >= horizon_s for whole in series)
+    cut, first_rows = ls.from_row(series, config, row)
+    assert [item.dataset_id for item in cut] == [whole.dataset_id for whole in series] and set(first_rows.values()) == {row}
+    for item, whole in zip(cut, series, strict=True):
+        assert item.n_samples == whole.n_samples - (row - a0)
+        assert item.times[a0] == whole.times[row]               # the cut flight's fixed anchor IS the common row
+        assert truth_after(item, a0) == pytest.approx(truth_after(whole, row))
+    runs = ls.fly(twin, None, cut, ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=3)
+    _check_runs(runs, ls.PROTOCOL_NONE)
+    # a row the shortest flight has less than the horizon of truth after, the two others more: kept and dropped in one call
+    by_length = sorted(series, key=lambda whole: whole.n_samples)
+    row = by_length[0].n_samples - 1 - int(horizon_s / config.dt_s / 2)
+    assert truth_after(by_length[0], row) < horizon_s <= min(truth_after(whole, row) for whole in by_length[1:])
+    cut, first_rows = ls.from_row(series, config, row)
+    assert {item.dataset_id for item in cut} == set(first_rows) == {whole.dataset_id for whole in by_length[1:]}
+    # the longest flight's last row: no truth after it, and no other flight has that row — nobody is flown
+    empty, rows = ls.from_row(series, config, by_length[-1].n_samples - 1)
+    assert empty == [] and rows == {}
+
+
 def test_a_round_the_budget_leaves_no_row_for_flies_nothing_and_records_nothing(world):
     """`_fly_leg` returns None when the remaining budget is below the first query step: no leg,
     no code, no round record — the bookkeeping stays aligned (review 2026-09-18 M4)."""

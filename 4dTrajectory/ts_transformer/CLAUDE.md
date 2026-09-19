@@ -294,7 +294,9 @@ P4); `manoeuvre_prior_readout` (val NLL vs the bigram, the flip rate); `manoeuvr
 stage A** (2026-09-18): `plan_cohort --arms` writes one development cohort PER CELL from one load (an arm's
 own `development_cohort` wins over the file's; `frame_ablation --only` trains a subset); `manoeuvre_lockstep
 --protocol none` takes NO codebook and `--anchor-remaining-km X` starts the closed loop at the remaining-path bin
-(`lockstep.from_remaining_path` + `dataset.series_from_row`: the same flight first seen at the bin's row);
+(`lockstep.from_remaining_path` + `dataset.series_from_row`: the same flight first seen at the bin's row) and
+`--first-prediction-row N` at one common row of every flight (reading (c), `lockstep.from_row`: the same segment
+for every lookback — reading (a) from L−1 confounds lookback with starting point);
 `executor_failure_modes` classifies the non-crossing flights (six modes, course frame; not a gate);
 `executor_grid_gate` picks the cell (the seed line read off the grid's own seed pairs, p75; fully flyable
 ≥ 0.95; ties → shorter Δ then shorter L); `two_tier_grid_queue` trains and reads one cell at a time (R8).

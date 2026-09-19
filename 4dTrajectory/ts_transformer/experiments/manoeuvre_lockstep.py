@@ -6,6 +6,7 @@
     python run_ts.py manoeuvre_lockstep --executor … --codebook … --protocol A-truth --prior … --out …
     python run_ts.py manoeuvre_lockstep --executor <no-token arm>/checkpoint.pt --protocol none --out …
         [--anchor-remaining-km 12]           # the baseline: no code, no codebook, same rounds and budget
+        [--first-prediction-row 59]          # reading (c): every cell starts at the same row of the flight
 
 The coded protocols' three artefacts must be ONE vocabulary: a jointly trained executor's
 codebook is the one exported from it (the codebook's ``source.checkpoint_sha256`` is the
@@ -17,7 +18,11 @@ val split (rebuilt, provenance verified); the first prediction is made at the ex
 `anchor_strata.DEFAULT_ANCHOR_GRID_KM`) — the row where each flight has X km of path left to fly
 (`lockstep.from_remaining_path`; a flight that never has an admissible row there is counted,
 not flown; the row's ``first_prediction_row`` is that row in the whole flight, while a record written
-under the bin reading carries the CUT flight's anchor, L−1, as its ``anchorIndex``). Writes
+under the bin reading carries the CUT flight's anchor, L−1, as its ``anchorIndex``).
+``--first-prediction-row N`` (v3's reading (c)) starts every flight at row N of the whole flight
+instead, so cells of different lookback fly the SAME segment and differ only in what they saw
+(`lockstep.from_row`; N is at or after the executor's own first row, and a flight without the
+executor's horizon of truth after N is counted, not flown). Writes
 ``manoeuvre_lockstep.json`` (per-flight rows included) and ``manoeuvre_lockstep.txt`` under
 ``--out`` (refused if it exists); ``--write-records`` adds the flown paths as a predict-shaped
 record directory under ``<out>/records/``.
@@ -116,7 +121,7 @@ def render(payload: dict[str, Any]) -> str:
     lines = [
         f"manoeuvre lockstep · {payload['protocol']} · {payload['executor_name']} · {payload['flights']} flights · "
         f"segment {payload['segment_s']:g} s · first prediction {first['rule']}"
-        + (f" ({first['flights_without_a_row']} flights without a row there)" if first["remaining_km"] else "")
+        + (f" ({first['flights_without_a_row']} flights not flown: no admissible row)" if first["flights_without_a_row"] else "")
         + (f" · prior {payload['prior']}" if payload.get("prior") else ""),
         "",
         f"{'stratum':<14}{'n':>6}{'ADE mean':>10}{'ADE p50':>9}{'FDE p50':>9}{'flyable':>9}{'estab':>8}"
@@ -149,8 +154,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--codebook", type=Path, default=None, help="the coded protocols' vocabulary; none under protocol none")
     parser.add_argument("--protocol", required=True, choices=ls.PROTOCOLS)
     parser.add_argument("--prior", type=Path, default=None)
-    parser.add_argument("--anchor-remaining-km", type=int, default=None, choices=DEFAULT_ANCHOR_GRID_KM,
-                        help="start the closed loop where each flight has this much path left to fly, instead of at L-1")
+    start = parser.add_mutually_exclusive_group()
+    start.add_argument("--anchor-remaining-km", type=int, default=None, choices=DEFAULT_ANCHOR_GRID_KM,
+                       help="start the closed loop where each flight has this much path left to fly, instead of at L-1")
+    start.add_argument("--first-prediction-row", type=int, default=None,
+                       help="start the closed loop at this row of every flight (reading (c): the same segment for every lookback), instead of at L-1")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--split", default="val", choices=("train", "val"),
@@ -206,9 +214,18 @@ def main(argv: list[str] | None = None) -> int:
         series, first_rows = ls.from_remaining_path(series, config, args.anchor_remaining_km * 1000.0)
         if not series:
             parser.error(f"no flight of the cohort has an admissible row at {args.anchor_remaining_km} km of remaining path")
+    elif args.first_prediction_row is not None:
+        if args.first_prediction_row < a0:
+            parser.error(f"--first-prediction-row {args.first_prediction_row} is before this executor's first possible prediction (row {a0})")
+        series, first_rows = ls.from_row(series, config, args.first_prediction_row)
+        if not series:
+            parser.error(f"no flight of the cohort has the executor's horizon of truth after row {args.first_prediction_row}")
     first_prediction = {
-        "rule": f"remaining path {args.anchor_remaining_km} km" if args.anchor_remaining_km else f"fixed L-1 (row {a0})",
-        "remaining_km": args.anchor_remaining_km, "flights_without_a_row": len(wanted) - len(series),
+        "rule": (f"remaining path {args.anchor_remaining_km} km" if args.anchor_remaining_km
+                 else f"fixed row {args.first_prediction_row} (common start)" if args.first_prediction_row is not None
+                 else f"fixed L-1 (row {a0})"),
+        "remaining_km": args.anchor_remaining_km, "common_row": args.first_prediction_row,
+        "flights_without_a_row": len(wanted) - len(series),
     }
     print(f"  {args.protocol}: {len(series)} flights, first prediction {first_prediction['rule']}, {run_display_name(config.to_dict())}", flush=True)
 
