@@ -6,7 +6,7 @@
 ## 现状（2026-09-19 深夜更新；接手的 agent 先读这一节和 §7，再读计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2）
 
 **哪里停下**：阶段 A 全部完成（M-A0 … M-A3）。阶段 B：用户 2026-09-19 晚答复——指令词表对照臂做（12 臂）、B0 可以先跑、"最大程度利用时间，不干等实验"；
-B-dev0…7 全部写完、测试通过、三轮 opus review（见 §7.1），**代码待提交、未签字（M-B0′）、队列未跑**。
+B-dev0…7 全部写完、测试通过（全套 1288）、三轮 opus review（见 §7.1），**已提交 4cd11ea（M-B0 代码就绪）；未签字（M-B0′）、队列未跑**；runs worktree 已移到 4cd11ea，从它 dry-run 通过（GROUP baselines + 6 组，122 步全 todo）。
 提前跑的 B0（19:53Z，半成品代码，payload v2）已按用户指示删除；基线改由队列第 0 步自己飞（§7.2），门只认本版代码的 payload——用户由此立了"兼容是禁词、结构先敲定再实验"的原则（根 CLAUDE.md 编码约定、记忆 `no-compat-settle-structures-before-experiments`）。
 Q3（S60-held 的训练锚点契约）用户已按建议定（D48：≥ Δ = 20 s，token 段放不下时用上一段的码）。
 什么都没在跑：GPU 空闲；runs worktree `.claude/worktrees/manoeuvre-runs` 停在 5208707（launch 前 `checkout --detach` 到含阶段 B 代码的提交）。磁盘约 10.5 GB 空余（B0 用了 0.5 GB）。
@@ -186,13 +186,13 @@ seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
 
 | # | 开发 | 状态 | 提交 |
 |---|---|---|---|
-| B-dev0 | `manoeuvre_lockstep --cohort <development_cohort.json>`（`cohort_keys`：只飞该 cohort 在这个 split 里的航班，按 checkpoint 的顺序；cohort 里有 checkpoint 没有的航班就拒绝；payload 记 `cohort`） | 完成，B0 已用它跑完 | 待提交（review 中） |
-| B-dev1 | 字段 `manoeuvre_token_s`（S，0 = 视界）与 `manoeuvre_token_step_s`（闭环里每次飞多长，0 = 视界）；`token_span_s / token_step_s / token_hold`；校验（S ≥ 视界、步长 ≤ 视界、都是 dt 的整数倍、步长是积分步的整数倍、S 是步长的整数倍）；码本 `segment_s` = S；`plan_token`、码本导出、先验、lockstep、码图谱都改读 S；命名 `tok-s=` / `tok-step=` | 完成（S = 0 时与 09-18 行为逐位相同，测试钉住） | 待提交（review 中） |
-| B-dev2 | 训练时 token 段内位置 φ 的抽样（+ Q3 若采纳：段放不下时用上一段的码） | 未做，等 review 落地与 Q3 | — |
-| B-dev3 / 3′ / 5 | lockstep：同一 token 连用 S/步长 轮、带 token 读法下每轮只飞步长秒、先验落地只记时刻不停飞 | 未做，等 review 落地 | — |
-| B-dev4 | `executor_relative_gate`（已有）+ **门 B1 一行**（`verdicts.b1`：任一项两 seed 都超线 + fully flyable，不要求其余项不差） | 完成 | 待提交 |
-| B-dev6 | `two_tier_b_queue --arms --campaign --airport [--groups] [--dry-run]`：按组（配置 × 词表，两 seed）串行——train → 每臂码本导出、真值 token 读数（带记录）、失败方式、码图谱 → 门 B1 → 过则每臂先验、先验 token（带记录）/ 先验读真值历史读数、失败方式 → 门 B；先验步骤在运行时读 `gate/b1_<组>/relative_gate.json` 决定跑不跑；PID `<campaign>/two_tier_b_queue.pid` | 完成，真实臂文件 dry-run 通过 | 待提交 |
-| B-dev7 | 臂文件 `docs/experiments/two_tier_v3_b_arms.json`（12 臂：S20 / S60h60 / S60held × K16 / cv × 2 seed，`stage_b` 块给队列：各配置的基线读数模板、seed 线来源、码本目录模板）；intents：campaign `two_tier_v3_b_20260919` 12 run + 36 读法变体，网格加 `L60_D20_s*@lockstep-none-b` | 完成 | 待提交 |
+| B-dev0 | `manoeuvre_lockstep --cohort <development_cohort.json>`（`cohort_keys`：只飞该 cohort 在这个 split 里的航班，按 checkpoint 的顺序；cohort 里有 checkpoint 没有的航班就拒绝；payload 记 `cohort`） | 完成 | 4cd11ea |
+| B-dev1 | 字段 `manoeuvre_token_s`（S，0 = 视界）与 `manoeuvre_token_step_s`（闭环里每次飞多长，0 = 视界）；`token_span_s / token_step_s / token_hold`；校验（S ≥ 视界、步长 ≤ 视界、都是 dt 的整数倍、步长是积分步的整数倍、S 是步长的整数倍）；码本 `segment_s` = S；`plan_token`、码本导出、先验、lockstep、码图谱都改读 S；命名 `tok-s=` / `tok-step=` | 完成（S = 0 时与 09-18 行为逐位相同，测试钉住） | 4cd11ea |
+| B-dev2 | 训练时 token 段内位置 φ 的抽样（+ Q3 若采纳：段放不下时用上一段的码） | 完成（φ 抽样 + D48 的上一段规则；训练集建窗口时整体核一遍） | 4cd11ea |
+| B-dev3 / 3′ / 5 | lockstep：同一 token 连用 S/步长 轮、带 token 读法下每轮只飞步长秒、先验落地只记时刻不停飞 | 完成（`round_step_s`、连用、按段编码、`--prior-landing-ends-flight`） | 4cd11ea |
+| B-dev4 | `executor_relative_gate`（已有）+ **门 B1 一行**（`verdicts.b1`：任一项两 seed 都超线 + fully flyable，不要求其余项不差） | 完成 | 4cd11ea |
+| B-dev6 | `two_tier_b_queue --arms --campaign --airport [--groups] [--dry-run]`：按组（配置 × 词表，两 seed）串行——train → 每臂码本导出、真值 token 读数（带记录）、失败方式、码图谱 → 门 B1 → 过则每臂先验、先验 token（带记录）/ 先验读真值历史读数、失败方式 → 门 B；先验步骤在运行时读 `gate/b1_<组>/relative_gate.json` 决定跑不跑；PID `<campaign>/two_tier_b_queue.pid` | 完成（第 0 步自己飞基线；真实臂文件 dry-run 通过） | 4cd11ea |
+| B-dev7 | 臂文件 `docs/experiments/two_tier_v3_b_arms.json`（12 臂：S20 / S60h60 / S60held × K16 / cv × 2 seed，`stage_b` 块给队列：各配置的基线读数模板、seed 线来源、码本目录模板）；intents：campaign `two_tier_v3_b_20260919` 12 run + 36 读法变体，网格加 `L60_D20_s*@lockstep-none-b` | 完成 | 4cd11ea |
 | B0 | 基线重读 + 失败方式表 | 19:53Z 提前跑的那次用了没写完的代码（payload v2），已删；改为队列第 0 步（`baseline_steps`：L60_D20 与 L60_D60 只飞 20 s，各两 seed，带记录 + 失败方式） | — |
 
 ### 7.2 代码事实
