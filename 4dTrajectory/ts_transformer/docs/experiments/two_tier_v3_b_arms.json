@@ -1,0 +1,225 @@
+{
+ "_comment": "Two-tier plan v3 stage B (docs/2026-09-18_two_tier_plan_v3.zh.md §5.2, decisions §6.2 D30–D45): the second layer's relative gate — an intent token every S seconds on the stage A executor L60_D20 (D30: lookback 60 s, segment 20 s, the pa contract with the first-order lag, training anchors fully random remaining-path-uniform with l1 share 0, no anchor floor, 180 epochs without early stopping, lr 3e-5, batch 512, selection on the fixed-anchor common-grid ADE at L-1, split_seed 1337 — every field the grid's L60_D20 had), with plan_conditioning=manoeuvre-code (D32: the discrete code's vector z is one more fused token of the executor). The token span S is the ablation (D31): three configurations — S20 (S = the 20 s segment), S60-h60 (S = 60 s over a 60 s forecast flown 20 s at a time) and S60-held (S = 60 s held over three 20 s rounds) — each × the learned K16 codebook (D35) and the command vocabulary (D36, the user's 2026-09-19 choice: run it) × two seeds = 12 arms. ONE development cohort for every arm (D33): the grid's L60_D60 cohort, i.e. the L60_D20 split's flights whose record holds 60 s of lookback and 60 s of truth after it (records ≥ 120 s; train 6853 / val 1404, verified a subset of L60_D20's 6856 / 1405 differing by the 4 shorter flights), so S = 20 and S = 60 arms are compared on the same flights. File order = queue order (§8.2): K16 first — S20, S60-h60, S60-held — then the command-vocabulary arms, the two seeds together. No records ('predict': false): the readings are `manoeuvre_lockstep` from L-1 (row 29; D41) under the truth-token reading (protocol C, gate B1) and, past gate B1, the prior-token readings (protocols A and A-truth, gate B). The `stage_b` block is what `two_tier_b_queue` reads: the baselines it flies ITSELF as step 0 (the stage A checkpoints L60_D20 and L60_D60, read no-token from L-1 on this cohort under this code — B0 and A3-a; a gate never reads another campaign's payload), which baseline each configuration is judged against, the codebook directory, and the seed line's source (D39: the grid's own p75 lines). KRDU only, val split; the airport-balanced sampler is not exercised. Each arm's `configuration` names its row of `stage_b.configurations`; the arm's overrides restate that configuration's numbers so the file is the record (pinned by tests/test_two_tier_v3_b.py).",
+ "predict": false,
+ "development_cohort": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/cohorts/L60_D60/development_cohort.json",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "control_thrust_parameterization": "specific-force+path-angle",
+  "plan_conditioning": "manoeuvre-code",
+  "anchor_floor_index": 0,
+  "control_imitation_loss_weight": 0.0,
+  "control_heading_rate_loss_weight": 0.0,
+  "control_bank_tv_loss_weight": 0.0,
+  "final_time_loss_weight": 0.0,
+  "state_endpoint_loss_weight": 0.0,
+  "random_train_anchor": true,
+  "random_train_anchor_sampling": "remaining-path-uniform",
+  "random_train_anchor_l1_share": 0.0,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "lr_plateau_metric": "objective",
+  "epochs": 180,
+  "patience": 180,
+  "split_seed": 1337,
+  "manoeuvre_fsq_levels": [
+   4,
+   4
+  ],
+  "seq_len": 30
+ },
+ "stage_b": {
+  "seed_line_from": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/gate/after_L120_D120/grid_gate.json",
+  "codebook_dir": "4dTrajectory/outputs/codebooks/two_tier_v3_b_20260919_{arm}",
+  "baselines": {
+   "L60_D20": {
+    "what": "B0 (D33): the stage A executor L60_D20 — no token — from L-1 on the B cohort, with records; the baseline of S20 and S60-held",
+    "checkpoint": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/L60_D20_s{seed}/checkpoint.pt",
+    "execute_s": 0
+   },
+   "L60_D60_exec20": {
+    "what": "A3-a re-flown by the stage B code: L60_D60 (a 60 s horizon, no token) flown 20 s at a time from L-1 on the B cohort, with records; the baseline of S60-h60",
+    "checkpoint": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/L60_D60_s{seed}/checkpoint.pt",
+    "execute_s": 20.0
+   }
+  },
+  "configurations": {
+   "S20": {
+    "what": "one token per 20 s round: the token span equals the executed segment (D31: paired quantities equal); the closed loop is L60_D20's; judged against B0, this queue's re-read of L60_D20 on the B cohort",
+    "baseline": "L60_D20",
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0
+   },
+   "S60h60": {
+    "what": "a token as long as the 60 s forecast (manoeuvre_token_s 0 = the horizon) of which the first 20 s are flown each round (D31 second design, D43's receding executor with a token); the training anchor's position inside the span is drawn (B-dev2); judged against A3-a re-flown by this queue (L60_D60 flown 20 s at a time, no token)",
+    "baseline": "L60_D60_exec20",
+    "control_horizon_s": 60.0,
+    "n_segments": 6,
+    "random_train_anchor_min_future_s": 60.0,
+    "manoeuvre_token_step_s": 20.0
+   },
+   "S60held": {
+    "what": "a 60 s token held over three 20 s rounds (D38): the executor is L60_D20's with a token; the training anchor's position inside the span is drawn and a span the record cannot hold is the previous span's code, as the closed loop holds the last full span's (B-dev2; the anchor floor stays the horizon's 20 s, the baseline's — the notes' Q3, pending the user); judged against B0, this queue's re-read of L60_D20",
+    "baseline": "L60_D20",
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "manoeuvre_token_s": 60.0
+   }
+  }
+ },
+ "arms": [
+  {
+   "key": "S20_K16_s1337",
+   "configuration": "S20",
+   "label": "S20: one token per 20 s round; the learned K = 16 codebook; seed 1337",
+   "overrides": {
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "seed": 1337
+   }
+  },
+  {
+   "key": "S20_K16_s2024",
+   "configuration": "S20",
+   "label": "S20: one token per 20 s round; the learned K = 16 codebook; seed 2024",
+   "overrides": {
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "seed": 2024
+   }
+  },
+  {
+   "key": "S60h60_K16_s1337",
+   "configuration": "S60h60",
+   "label": "S60h60: a 60 s token over a 60 s forecast of which the first 20 s are flown each round; the learned K = 16 codebook; seed 1337",
+   "overrides": {
+    "control_horizon_s": 60.0,
+    "n_segments": 6,
+    "random_train_anchor_min_future_s": 60.0,
+    "manoeuvre_token_step_s": 20.0,
+    "seed": 1337
+   }
+  },
+  {
+   "key": "S60h60_K16_s2024",
+   "configuration": "S60h60",
+   "label": "S60h60: a 60 s token over a 60 s forecast of which the first 20 s are flown each round; the learned K = 16 codebook; seed 2024",
+   "overrides": {
+    "control_horizon_s": 60.0,
+    "n_segments": 6,
+    "random_train_anchor_min_future_s": 60.0,
+    "manoeuvre_token_step_s": 20.0,
+    "seed": 2024
+   }
+  },
+  {
+   "key": "S60held_K16_s1337",
+   "configuration": "S60held",
+   "label": "S60held: a 60 s token held over three 20 s rounds; the learned K = 16 codebook; seed 1337",
+   "overrides": {
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "manoeuvre_token_s": 60.0,
+    "seed": 1337
+   }
+  },
+  {
+   "key": "S60held_K16_s2024",
+   "configuration": "S60held",
+   "label": "S60held: a 60 s token held over three 20 s rounds; the learned K = 16 codebook; seed 2024",
+   "overrides": {
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "manoeuvre_token_s": 60.0,
+    "seed": 2024
+   }
+  },
+  {
+   "key": "S20_cv_s1337",
+   "configuration": "S20",
+   "label": "S20: one token per 20 s round; the command vocabulary; seed 1337",
+   "overrides": {
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "manoeuvre_tokenizer": "command-vocabulary",
+    "manoeuvre_fsq_levels": [],
+    "seed": 1337
+   }
+  },
+  {
+   "key": "S20_cv_s2024",
+   "configuration": "S20",
+   "label": "S20: one token per 20 s round; the command vocabulary; seed 2024",
+   "overrides": {
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "manoeuvre_tokenizer": "command-vocabulary",
+    "manoeuvre_fsq_levels": [],
+    "seed": 2024
+   }
+  },
+  {
+   "key": "S60h60_cv_s1337",
+   "configuration": "S60h60",
+   "label": "S60h60: a 60 s token over a 60 s forecast of which the first 20 s are flown each round; the command vocabulary; seed 1337",
+   "overrides": {
+    "control_horizon_s": 60.0,
+    "n_segments": 6,
+    "random_train_anchor_min_future_s": 60.0,
+    "manoeuvre_token_step_s": 20.0,
+    "manoeuvre_tokenizer": "command-vocabulary",
+    "manoeuvre_fsq_levels": [],
+    "seed": 1337
+   }
+  },
+  {
+   "key": "S60h60_cv_s2024",
+   "configuration": "S60h60",
+   "label": "S60h60: a 60 s token over a 60 s forecast of which the first 20 s are flown each round; the command vocabulary; seed 2024",
+   "overrides": {
+    "control_horizon_s": 60.0,
+    "n_segments": 6,
+    "random_train_anchor_min_future_s": 60.0,
+    "manoeuvre_token_step_s": 20.0,
+    "manoeuvre_tokenizer": "command-vocabulary",
+    "manoeuvre_fsq_levels": [],
+    "seed": 2024
+   }
+  },
+  {
+   "key": "S60held_cv_s1337",
+   "configuration": "S60held",
+   "label": "S60held: a 60 s token held over three 20 s rounds; the command vocabulary; seed 1337",
+   "overrides": {
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "manoeuvre_token_s": 60.0,
+    "manoeuvre_tokenizer": "command-vocabulary",
+    "manoeuvre_fsq_levels": [],
+    "seed": 1337
+   }
+  },
+  {
+   "key": "S60held_cv_s2024",
+   "configuration": "S60held",
+   "label": "S60held: a 60 s token held over three 20 s rounds; the command vocabulary; seed 2024",
+   "overrides": {
+    "control_horizon_s": 20.0,
+    "n_segments": 2,
+    "random_train_anchor_min_future_s": 20.0,
+    "manoeuvre_token_s": 60.0,
+    "manoeuvre_tokenizer": "command-vocabulary",
+    "manoeuvre_fsq_levels": [],
+    "seed": 2024
+   }
+  }
+ ]
+}

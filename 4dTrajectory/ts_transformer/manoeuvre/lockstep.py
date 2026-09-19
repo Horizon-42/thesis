@@ -5,10 +5,13 @@ three protocols that differ only in WHERE the code comes from.
              that starts when this round starts, `sequences.flight_sequences`) — the executor alone;
              gate X. Past the truth's last full segment the last code is HELD until the flight
              crosses or the budget ends (counted per flight, ``held_predictions``).
-    A        the prior's top-1 on the FLOWN history: every leg flown is tokenised back through the
-             codebook (the flown segment's rows and the flown state at its start), the prior reads
+    A        the prior's top-1 on the FLOWN history: every span flown is tokenised back through the
+             codebook (the flown span's rows and the flown state at its start), the prior reads
              that code sequence with the flown boundary states, and its answer is the next z — the
-             closed loop closed in code space; gate E. The prior's ``landed`` ends the flight.
+             closed loop closed in code space; gate E. The prior's ``landed`` RECORDS the time it
+             says the flight lands (``prior_landed_at_s``); it ends the flight only under
+             ``landed_ends_flight`` (two-tier v3 D37: off — the 09-18 rule judged 732 / 1392 flights
+             not established by the prior's clock).
     A-truth  the prior's top-1 on the TRUTH history (time-indexed prefix, truth codes and truth
              states) while the executor flies its own rows: what v2 §12.3 wanted — the prior's
              error alone, the coupling removed. Past the truth's last full segment there is no
@@ -27,18 +30,24 @@ starts from a REMAINING-PATH bin instead (`from_remaining_path`): each flight is
 row `anchor_grid.bin_anchor` places at the bin, so the same lockstep from L−1 of the cut flight
 IS the lockstep from that row of the whole flight.
 
-One round = ``segment_s`` = the executor's horizon: the forecast is exactly one segment and is
-flown whole (the one-shot variant, plan §2.6) — or, under protocol none with ``execute_s`` (v3
-A3-a), only its first ``execute_s`` before the next prediction — unless it crosses the threshold ON THE FINAL
-inside the segment (`inference.forecast.cut_at_threshold_crossing`: the flight ends,
-``crossed``) or the flight's budget runs out (``horizon``). The budget is
-`closing_horizon_s` of the truth's duration at the first prediction — T₀ + max(30 s, 0.1·T₀), the
-rule copied from the archived plan oracle so "established" is read over one budget in every
-campaign — and is a CAP only: under A the prior's ``landed`` is the decision, the cap is what
-stops a flight that never says so. Under A and A-truth every round ALSO flies the truth's code
-from the same flown state, and ``e_plan`` is the distance between the two legs' end points
-(plan §3.2) — the prior's error in the executor's currency, beside the step error ``e_track``
-(the leg's end against the truth at that time).
+One round = one prediction, flown for `round_step_s`: the executor's horizon (the one-shot
+variant, plan §2.6), or — under protocol none with ``execute_s`` (v3 A3-a), or under a coded
+protocol with ``manoeuvre_token_step_s`` (v3 S60-h60) — only the first step of each forecast
+before the next prediction; a round ends early when the forecast crosses the threshold ON THE
+FINAL (`inference.forecast.cut_at_threshold_crossing`: the flight ends, ``crossed``) or the
+flight's budget runs out (``horizon``). **One token = one SPAN of `token_span_s`** (two-tier v3
+D38): with S > the step the token is held for `token_hold` rounds — round k reads token
+``k // hold`` at phase ``k % hold`` — and the truth's code sequence (`sequences.flight_sequences`)
+is spaced S apart; protocol C past the truth's last full span holds its last code
+(``held_predictions`` counts those rounds), the prior is asked only at a refresh (phase 0), and a
+flown span is tokenised back once its last round is flown. Every round's record carries its
+``token_index`` and ``phase``; hold 1 (every 2026-09-18 arm) is the old one-token-per-round
+loop unchanged. The budget is `closing_horizon_s` of the truth's duration at the first
+prediction — T₀ + max(30 s, 0.1·T₀), the rule copied from the archived plan oracle so
+"established" is read over one budget in every campaign — and is a CAP. Under A and A-truth
+every round ALSO flies the truth's code from the same flown state, and ``e_plan`` is the
+distance between the two legs' end points (plan §3.2) — the prior's error in the executor's
+currency, beside the step error ``e_track`` (the leg's end against the truth at that time).
 
 The reference verdicts are the plan oracle's (`geometry.flyability`: fully flyable over the
 flown geodetic states; established = crossed the threshold on the final), and the row carries
@@ -53,7 +62,9 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 
-from ts_transformer.config import CONTROL_DURATION_UNIFORM, PLAN_CONDITIONING_OFF, TSConfig, default_anchor
+from ts_transformer.config import (
+    CONTROL_DURATION_UNIFORM, PLAN_CONDITIONING_OFF, TSConfig, default_anchor, token_hold, token_span_s, token_step_s,
+)
 from ts_transformer.data.anchor_grid import anchors_for_bin, remaining_path_profiles
 from ts_transformer.data.approach_difficulty import approach_difficulty
 from ts_transformer.data.channels import POSITION_IDX
@@ -100,12 +111,11 @@ def closing_horizon_s(T_s: float) -> float:
 
 
 def required_positions(max_truth_duration_s: float, segment_s: float, longest_truth_segments: int) -> int:
-    # rounds are whole segments here (round k starts at segment_s·k): execute_s is refused under the coded protocols
-    """How many positions a prior must hold to be queried at every round of a lockstep: the
-    BUDGET's rounds (`closing_horizon_s` of the longest truth, in segments, rounded up) plus
-    the BOS position and one spare — never fewer than the longest truth sequence needs. Sized
-    from the truth alone, a prior overflowed `collate` under protocol A on the long flights
-    (review 2026-09-18 B1: Δ = 20 s past T ≈ 400 s)."""
+    """How many positions a prior must hold to be queried at every refresh of a lockstep: the
+    BUDGET's spans (`closing_horizon_s` of the longest truth, in spans of ``segment_s`` — the
+    codebook's span, rounded up) plus the BOS position and one spare — never fewer than the
+    longest truth sequence needs. Sized from the truth alone, a prior overflowed `collate`
+    under protocol A on the long flights (review 2026-09-18 B1: Δ = 20 s past T ≈ 400 s)."""
     rounds = int(np.ceil(closing_horizon_s(max_truth_duration_s) / segment_s))
     return max(rounds + 2, longest_truth_segments + 2)
 
@@ -136,12 +146,16 @@ class FlightRun:
     predictions: int = 0                         # rounds flown
     held_predictions: int = 0                    # C: rounds past the truth's last full segment (the last code held)
     codes: list[int] = field(default_factory=list)            # the code flown each round
-    flown_codes: list[int] = field(default_factory=list)      # A: the flown legs tokenised back
-    flown_states: list[np.ndarray] = field(default_factory=list)   # A: the boundary states, x_0 first
-    rounds: list[dict[str, Any]] = field(default_factory=list)       # one record per round: lead, code, e_track, e_plan
+    flown_codes: list[int] = field(default_factory=list)      # A: the flown spans tokenised back
+    flown_states: list[np.ndarray] = field(default_factory=list)   # A: the span boundary states, x_0 first
+    rounds: list[dict[str, Any]] = field(default_factory=list)       # one record per round: lead, code, token index, phase, e_track, e_plan
+    token: tuple[int, np.ndarray] | None = None                # the code and z in force (a coded protocol), set at each refresh
+    token_refreshes: int = 0                                   # how many tokens the flight was handed
     landed_fraction: float | None = None                       # the prior's, when it ended the flight
-    landed_probabilities: list[float] = field(default_factory=list)
-    landing_this_round: float | None = None                    # A / A-truth: fly this fraction of a segment, then end
+    landed_probabilities: list[float] = field(default_factory=list)   # one per refresh (A / A-truth)
+    prior_landed_at_s: float | None = None                     # A / A-truth: when the prior first said "lands within this span" (s from the first prediction)
+    landing_fraction: float | None = None                      # A / A-truth under landed_ends_flight: the fraction of the span the prior lands at
+    landing_remaining_s: float | None = None                   # ...and how much of that is still to fly
 
 
 def from_remaining_path(series: Sequence[FlightSeries], config: TSConfig, target_m: float) -> tuple[list[FlightSeries], dict[str, int]]:
@@ -169,6 +183,19 @@ def from_row(series: Sequence[FlightSeries], config: TSConfig, row: int) -> tupl
     kept = [item for item in series if item.n_samples > row and truth_duration_s(item, row) >= effective_min_future_s(config)]
     cut = [series_from_row(item, row - default_anchor(config)) for item in kept]
     return cut, {item.dataset_id: row for item in kept}
+
+
+def round_step_s(config: TSConfig, protocol: str, execute_s: float | None) -> float:
+    """The seconds of each forecast one round flies: under protocol none the horizon or
+    ``execute_s`` (`executed_step_s`, v3 A3-a); under a coded protocol the config's token step
+    (`token_step_s`: the horizon, or ``manoeuvre_token_step_s`` — v3 S60-h60), so the closed loop
+    flies what training drew the token's phase on and a reading cannot choose another step."""
+    if protocol == PROTOCOL_NONE:
+        return executed_step_s(config, execute_s)
+    if execute_s is not None:
+        raise ValueError("executing a prefix of each forecast (execute_s) is a no-token reading: a coded protocol's "
+                         "step is the config's manoeuvre_token_step_s")
+    return token_step_s(config)
 
 
 def executed_step_s(config: TSConfig, execute_s: float | None) -> float:
@@ -256,12 +283,16 @@ def _prior_step(prior: Prior, codes: Sequence[Sequence[int]], states: Sequence[n
 def fly(
     executor: Executor, codebook: Codebook | None, series: Sequence[FlightSeries], protocol: str, *,
     prior: Prior | None, device: torch.device, batch_size: int, log=None, execute_s: float | None = None,
+    landed_ends_flight: bool = False,
 ) -> list[FlightRun]:
     """Every flight of ``series`` from the executor's fixed anchor, one round at a time for the
     whole cohort, under ``protocol``. The codebook is the coded protocols' vocabulary; protocol
     ``none`` takes none. ``execute_s`` (v3 A3-a, D43) flies only the first ``execute_s`` of each
     forecast and predicts again there — the executor still forecasts its whole horizon; a
-    no-token reading only, since the coded protocols' codes are per whole segment."""
+    no-token reading only, since a coded protocol's step is the config's (`round_step_s`).
+    ``landed_ends_flight`` (A / A-truth) lets the prior's landing end the flight (the 09-18 rule);
+    off (v3 D37) the landing is recorded (``prior_landed_at_s``) and the flight flies on to the
+    crossing or the budget."""
     if protocol not in PROTOCOLS:
         raise ValueError(f"protocol is one of {PROTOCOLS}, got {protocol!r}")
     if (protocol in (PROTOCOL_A, PROTOCOL_A_TRUTH)) != (prior is not None):
@@ -272,19 +303,21 @@ def fly(
     if (protocol == PROTOCOL_NONE) != (config.plan_conditioning == PLAN_CONDITIONING_OFF):
         raise ValueError(f"protocol none flies a no-token executor (plan_conditioning = off) and the coded protocols a "
                          f"manoeuvre-code one; got {protocol!r} with plan_conditioning {config.plan_conditioning!r}")
-    segment_s, dt_s = config.control_horizon_s, config.dt_s
-    if not segment_s:
+    dt_s = config.dt_s
+    if not config.control_horizon_s:
         raise ValueError("the lockstep flies one fixed segment per round: the executor needs control_horizon_s > 0")
-    if codebook is not None and (codebook.segment_s != segment_s or codebook.dt_s != dt_s):
-        raise ValueError(f"the executor's horizon {segment_s:g} s / {dt_s:g} s is not the codebook's {codebook.segment_s:g} s / {codebook.dt_s:g} s")
+    span_s = token_span_s(config)
+    if codebook is not None and (codebook.segment_s != span_s or codebook.dt_s != dt_s):
+        raise ValueError(f"the executor's token span {span_s:g} s / {dt_s:g} s is not the codebook's "
+                         f"{codebook.segment_s:g} s / {codebook.dt_s:g} s")
     if config.control_duration_parameterization != CONTROL_DURATION_UNIFORM:
         # e_plan cuts the truth-code leg at the flown leg's span (`cut_at_lead` needs a row
         # there): the two legs share their query grid only under uniform segment durations
         raise ValueError("the lockstep's e_plan reading needs uniform control segment durations (the P1.4 recipe's)")
-    if execute_s is not None and protocol != PROTOCOL_NONE:
-        raise ValueError("executing a prefix of each forecast (execute_s) is a no-token reading: "
-                         "the coded protocols' codes are per whole segment")
-    step_s = executed_step_s(config, execute_s)
+    if landed_ends_flight and protocol not in (PROTOCOL_A, PROTOCOL_A_TRUTH):
+        raise ValueError("only the prior lands a flight (protocols A and A-truth)")
+    step_s = round_step_s(config, protocol, execute_s)
+    hold = token_hold(config)          # 1 for a no-token executor: its token fields are refused off default
     a0 = default_anchor(config)
     step_rows = int(round(step_s / dt_s))
     truths = flight_sequences(series, codebook, a0) if codebook is not None else [None] * len(series)
@@ -296,29 +329,27 @@ def fly(
     while any(run.ended is None for run in runs):
         active = [run for run in runs if run.ended is None]
         anchor = a0 + round_index * step_rows
+        token_index, phase = divmod(round_index, hold)
+        refresh = phase == 0
         histories = [_history(run, anchor, dt_s) for run in active]
-        # WHERE the code comes from
-        z_rows: list[np.ndarray] = []
-        codes: list[int] = []
-        if protocol == PROTOCOL_NONE:
-            codes = [CODE_NONE] * len(active)
-        elif protocol == PROTOCOL_C:
+        # WHERE the code comes from: a token is set at a refresh and held for the span's rounds
+        if protocol == PROTOCOL_C:
             for run in active:
-                index = min(round_index, run.truth.length - 1)
-                run.held_predictions += int(round_index >= run.truth.length)
-                codes.append(int(run.truth.codes[index]))
-                z_rows.append(run.truth.z[index])
-        else:
+                run.held_predictions += int(token_index >= run.truth.length)
+                if refresh:
+                    index = min(token_index, run.truth.length - 1)
+                    _hand_token(run, int(run.truth.codes[index]), run.truth.z[index])
+        elif protocol != PROTOCOL_NONE and refresh:
             if protocol == PROTOCOL_A_TRUTH:
                 for run in active:
-                    if round_index > run.truth.length:
+                    if token_index > run.truth.length:
                         run.ended = ENDED_TRUTH_EXHAUSTED
                 active = [run for run in active if run.ended is None]
                 histories = [_history(run, anchor, dt_s) for run in active]
                 if not active:
                     break
-                prefix_codes = [run.truth.codes[:round_index].tolist() for run in active]
-                prefix_states = [run.truth.states[: round_index + 1] for run in active]
+                prefix_codes = [run.truth.codes[:token_index].tolist() for run in active]
+                prefix_states = [run.truth.states[: token_index + 1] for run in active]
             else:
                 prefix_codes = [run.flown_codes for run in active]
                 prefix_states = [np.stack(run.flown_states) for run in active]
@@ -330,39 +361,50 @@ def fly(
             step_z = None if step.z is None else step.z.cpu()
             for row, run in enumerate(active):
                 run.landed_probabilities.append(float(landed[row]))
-                # the prior says the flight lands inside this segment: the top-1 code is flown for
-                # that fraction of it (the last, partial segment), then the flight ends
-                run.landing_this_round = float(fraction[row]) if landed[row] > LANDED_THRESHOLD else None
+                if landed[row] > LANDED_THRESHOLD:
+                    # the prior says the flight lands inside this span, at this fraction of it:
+                    # recorded once (the first such refresh); under landed_ends_flight the top-1
+                    # code is flown for that fraction and the flight ends there (the 09-18 rule)
+                    if run.prior_landed_at_s is None:
+                        run.prior_landed_at_s = run.flown_s + float(fraction[row]) * span_s
+                    if landed_ends_flight and run.landing_remaining_s is None:
+                        run.landing_fraction = float(fraction[row])
+                        run.landing_remaining_s = float(fraction[row]) * span_s
                 if step_codes is not None:
-                    codes.append(int(step_codes[row]))
-                    z_rows.append(codebook.tokenizer.codes_to_z(step_codes[row : row + 1]).numpy()[0])
+                    _hand_token(run, int(step_codes[row]), codebook.tokenizer.codes_to_z(step_codes[row : row + 1]).numpy()[0])
                 else:
-                    z_rows.append(step_z[row].numpy())
-                    codes.append(int(codebook.tokenizer.z_to_codes(step_z[row : row + 1]).numpy()[0]))
-        z = np.stack(z_rows) if z_rows else None
+                    _hand_token(run, int(codebook.tokenizer.z_to_codes(step_z[row : row + 1]).numpy()[0]), step_z[row].numpy())
+        codes = [CODE_NONE if run.token is None else run.token[0] for run in active]
+        z = None if protocol == PROTOCOL_NONE else np.stack([run.token[1] for run in active])
         forecasts = _fly(executor, histories, anchor, z, device, batch_size)
         plan_legs: list[Forecast] | None = None
         if protocol in (PROTOCOL_A, PROTOCOL_A_TRUTH):
             # the truth's code from the SAME state: e_plan's other leg
-            truth_z = np.stack([run.truth.z[min(round_index, run.truth.length - 1)] for run in active])
+            truth_z = np.stack([run.truth.z[min(token_index, run.truth.length - 1)] for run in active])
             plan_legs = _fly(executor, histories, anchor, truth_z, device, batch_size)
         for row, (run, history, forecast) in enumerate(zip(active, histories, forecasts, strict=True)):
-            leg = _fly_leg(run, history, forecast, segment_s=step_s, round_index=round_index, code=codes[row])
+            leg = _fly_leg(run, history, forecast, step_s=step_s, round_index=round_index, code=codes[row],
+                           token_index=token_index, phase=phase)
             if leg is None:
                 continue   # the budget ended before this round's first row: nothing flown, nothing recorded
             if plan_legs is not None:
                 run.rounds[-1]["e_plan_m"] = _plan_error(leg, plan_legs[row], history)
-                run.rounds[-1]["truth_code"] = int(run.truth.codes[min(round_index, run.truth.length - 1)])
-            # every whole leg is tokenised back — protocol A reads the flown codes at the next
-            # round, and a protocol-C run on the TRAIN split is the closed-loop training's input
-            # (plan §2.7 step 1: the flown history's codes, the truth's as the labels)
-            if codebook is not None:
-                _tokenise_flown_leg(run, codebook, segment_s, dt_s, round_index)
+                run.rounds[-1]["truth_code"] = int(run.truth.codes[min(token_index, run.truth.length - 1)])
+            # a span whose last round is flown is tokenised back — protocol A reads the flown codes
+            # at the next refresh, and a protocol-C run on the TRAIN split is the closed-loop
+            # training's input (plan §2.7 step 1: the flown history's codes, the truth's as the labels)
+            if codebook is not None and phase == hold - 1:
+                _tokenise_flown_span(run, codebook, span_s, dt_s, token_index)
         if log is not None:
             log(f"    {protocol} round {round_index}: {len(active)} flights at anchor {anchor}, "
                 f"{sum(1 for run in runs if run.ended is None)} continue")
         round_index += 1
     return runs
+
+
+def _hand_token(run: FlightRun, code: int, z: np.ndarray) -> None:
+    run.token = (code, np.asarray(z, dtype=np.float32))
+    run.token_refreshes += 1
 
 
 def _plan_error(leg: Forecast, plan_leg: Forecast, history: FlightSeries) -> float:
@@ -375,51 +417,54 @@ def _plan_error(leg: Forecast, plan_leg: Forecast, history: FlightSeries) -> flo
     return float(np.linalg.norm(_end_point(leg) - _end_point(plan_cut)))
 
 
-def _fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, segment_s: float, round_index: int,
-             code: int) -> Forecast | None:
-    """Fly this round's segment whole; end at the crossing on the final, at the prior's landing
-    or at the budget. Returns the leg appended, or None when the budget left no row to fly."""
+def _fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, step_s: float, round_index: int,
+             code: int, token_index: int, phase: int) -> Forecast | None:
+    """Fly this round's step of the forecast; end at the crossing on the final, at the prior's
+    landing (under ``landed_ends_flight``) or at the budget. Returns the leg appended, or None
+    when the budget left no row to fly."""
     crossed = cut_at_threshold_crossing(forecast, history)
     remaining_s = run.horizon_s - run.flown_s
-    landing_s = None if run.landing_this_round is None else run.landing_this_round * segment_s
-    span_s = segment_s if landing_s is None else min(segment_s, landing_s)
+    landing_s = run.landing_remaining_s
+    span_s = step_s if landing_s is None else min(step_s, landing_s)
     offsets = np.cumsum(forecast.sample_durations_s)
     if crossed.truncated_at_threshold and crossed.final_time_s <= min(span_s, remaining_s) + ROW_TOLERANCE_S:
         leg, run.ended, run.truncated = crossed, ENDED_CROSSED, True
     elif remaining_s <= span_s + ROW_TOLERANCE_S:
         rows = int(np.searchsorted(offsets, remaining_s + ROW_TOLERANCE_S, side="right"))
         leg, run.ended = (cut_rows(forecast, rows) if rows else None), ENDED_HORIZON
-    elif landing_s is not None:
+    elif landing_s is not None and landing_s <= step_s + ROW_TOLERANCE_S:
         rows = max(int(np.searchsorted(offsets, landing_s + ROW_TOLERANCE_S, side="right")), 1)
-        leg, run.ended, run.landed_fraction = cut_rows(forecast, rows), ENDED_LANDED, run.landing_this_round
+        leg, run.ended, run.landed_fraction = cut_rows(forecast, rows), ENDED_LANDED, run.landing_fraction
     else:
-        leg = cut_at_lead(forecast, segment_s)
+        leg = cut_at_lead(forecast, step_s)
     if leg is None:
         return None
+    flown = float(np.sum(leg.sample_durations_s))
     run.legs.append(leg)
     run.codes.append(code)
     run.predictions += 1
-    run.flown_s += float(np.sum(leg.sample_durations_s))
+    run.flown_s += flown
+    if run.landing_remaining_s is not None:
+        run.landing_remaining_s -= flown
     run.rounds.append({
-        "round": round_index, "lead_s": run.flown_s, "code": code,
+        "round": round_index, "lead_s": run.flown_s, "code": code, "token_index": token_index, "phase": phase,
         "e_track_m": displacement_at(run.series, leg, run.anchor, float(leg.times[-1])),
     })
     return leg
 
 
-def _tokenise_flown_leg(run: FlightRun, codebook: Codebook, segment_s: float, dt_s: float, round_index: int) -> None:
-    # a flown leg is a whole segment here (round k starts at segment_s·k): execute_s is refused under the coded protocols
-    """The leg just flown, read back as the prior will read it: its rows from the flown polyline
-    in the start frame, through the codebook, and the flown state at its end."""
+def _tokenise_flown_span(run: FlightRun, codebook: Codebook, span_s: float, dt_s: float, token_index: int) -> None:
+    """The span just completed, read back as the prior will read it: its rows from the flown
+    polyline in the start frame, through the codebook, and the flown state at its end."""
     times, values = _polyline(run)
-    start = float(run.series.times[run.anchor]) + segment_s * round_index
-    if times[-1] < start + segment_s - ROW_TOLERANCE_S:
-        return   # the flight ended inside this segment; nothing whole to tokenise
-    rows = segment_rows(times, values, start, segment_s, dt_s)
+    start = float(run.series.times[run.anchor]) + span_s * token_index
+    if times[-1] < start + span_s - ROW_TOLERANCE_S:
+        return   # the flight ended inside this span; nothing whole to tokenise
+    rows = segment_rows(times, values, start, span_s, dt_s)
     state = np.array([np.interp(start, times, values[:, c]) for c in range(values.shape[1])])
     code, _z = codebook.encode(rows.astype(np.float32), state.astype(np.float32))
     run.flown_codes.append(int(code))
-    end_state = np.array([np.interp(start + segment_s, times, values[:, c]) for c in range(values.shape[1])])
+    end_state = np.array([np.interp(start + span_s, times, values[:, c]) for c in range(values.shape[1])])
     run.flown_states.append(state_token(end_state))
 
 
@@ -489,9 +534,13 @@ def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, A
         "flight_id": run.series.flight_id,
         "reference": reference_verdicts(run.series, forecast),
         "ended": run.ended, "truncated_at_threshold": run.truncated, "predictions": run.predictions, "held_predictions": run.held_predictions,
+        "token_refreshes": run.token_refreshes,
         "codes": list(run.codes), **_code_columns(run),
         "flown_states": [state.tolist() for state in run.flown_states],
         "landed_fraction": run.landed_fraction, "landed_probabilities": list(run.landed_probabilities),
+        # the prior's clock (A / A-truth): when it first said the flight lands, against the truth's arrival
+        "prior_landed_at_s": run.prior_landed_at_s,
+        "prior_landed_error_s": None if run.prior_landed_at_s is None else run.prior_landed_at_s - truth_duration_s(run.series, run.anchor),
         "ade_m": float(metrics["ade_m"]), "fde_m": float(metrics["fde_m"]),
         "final_time_error_s": float(metrics["final_time_error_s"]),
         "chamfer_m": float(geometry["chamfer_m"]), "frechet_m": float(geometry["frechet_m"]),
@@ -512,5 +561,6 @@ __all__ = [
     "ENDED_CROSSED", "ENDED_HORIZON", "ENDED_LANDED", "ENDED_TRUTH_EXHAUSTED", "HORIZON_SLACK_FRACTION",
     "HORIZON_SLACK_S", "LANDED_THRESHOLD", "LEADS_S", "PROTOCOLS", "PROTOCOL_A", "PROTOCOL_A_TRUTH",
     "PROTOCOL_C", "PROTOCOL_NONE", "CODE_NONE", "Executor", "FlightRun", "Prior", "closing_horizon_s", "flight_row", "fly",
-    "executed_step_s", "from_remaining_path", "from_row", "reference_verdicts", "required_positions", "whole_forecast",
+    "executed_step_s", "from_remaining_path", "from_row", "reference_verdicts", "required_positions", "round_step_s",
+    "whole_forecast",
 ]

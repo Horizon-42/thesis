@@ -27,6 +27,7 @@ from evaluation.records import load_record
 
 
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks
+from ts_transformer.experiments.manoeuvre_lockstep import LOCKSTEP_SCHEMA
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.inference.export import EVAL_SUFFIX, REFERENCE_EVAL_SUFFIX, REFERENCES_DIR, copy_record_subset
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
@@ -91,6 +92,9 @@ def main(argv: list[str] | None = None) -> int:
     if not (records / "summary.json").is_file():
         parser.error(f"{records} holds no records; fly the lockstep with --write-records")
     payload = json.loads(artefact.read_text(encoding="utf-8"))
+    if payload.get("schema") != LOCKSTEP_SCHEMA:
+        # this runner reads what this code writes, nothing older (the repo rule of 2026-09-19: no compatibility)
+        parser.error(f"{artefact}: lockstep schema {payload.get('schema')!r} is not {LOCKSTEP_SCHEMA!r}; fly the reading again with this code")
     keys, stratum_n = not_crossed_flights(payload, args.stratum)
     rows: dict[str, dict[str, Any]] = {}
     for key in keys:
@@ -105,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": FAILURE_MODES_SCHEMA, "written_utc": utc_now(),
         "lockstep": str(artefact), "lockstep_sha256": file_sha256(artefact), "protocol": payload["protocol"],
         "executor": payload["executor"], "first_prediction": payload["first_prediction"],
-        "segment_s": payload["segment_s"], "executed_s": payload.get("executed_s", payload["segment_s"]),
+        "segment_s": payload["segment_s"], "executed_s": payload["executed_s"],
         "stratum": args.stratum, "stratum_flights": stratum_n, "flights": len(rows),
         "modes": modes, "rows": rows,
     }

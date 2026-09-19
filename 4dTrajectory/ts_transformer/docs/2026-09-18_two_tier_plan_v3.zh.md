@@ -339,7 +339,7 @@ S = 20 的臂本来 80 s 就够，但要和 S = 60 的臂比就得用同一批�
 2. 失败方式对照表：对上面两份记录跑 A2 的失败方式脚本，得到雷达引导航班里三类失败（没转基边、转晚了、末段形状错）各占多少。后面看 token 改变了哪一类，要拿它对照。
 3. 执行器确认：A3 已读完（§5.1.3），两个改法都没过 A3 行，所以阶段 B 的执行器就是 L60_D20，不再变（D30）。
 
-**产出**：结果文档新一节，两张表（基线读数、失败方式对照表）。
+**产出**：结果文档新一节，两张表（基线读数、失败方式对照表）。**怎么跑（2026-09-19 深夜定）**：B0 是阶段 B 队列的第 0 步（`two_tier_b_queue`），队列自己飞它要比的每一份基线——L60_D20 两 seed，以及 S60-h60 的对照 L60_D60 只飞 20 s 两 seed——都用阶段 B 定稿的代码，门只认这版代码写的 payload。2026-09-19T19:53Z 那次提前跑的 B0 用的是没写完的代码（payload 还是 v2），已按用户指示删除，它的数不引用。
 
 #### 5.2.2 B1：token 如果是对的，执行器能好多少
 
@@ -393,14 +393,14 @@ B2 若显示"模型读真值历史时明显好于读飞出历史"，说明模型
 
 | # | 开发 | 现状 | 要做的 |
 |---|---|---|---|
-| B-dev1 | token 跨度 S 与执行段 Δ 解耦 | `plan_token.manoeuvre_tokenizer_for` 要求码本 `segment_s` = `control_horizon_s`；分词器读的真值段长 = 执行器时域 | 新 config 字段 `manoeuvre_token_s`（默认 = `control_horizon_s`，S 必须是 Δ 的整数倍）；码本记 S；`training_plan_context` 读 S 秒真值段；训练锚点要求锚点后 ≥ S 秒真值（`random_train_anchor_min_future_s = S`）；S = Δ 时行为与现在完全相同（测试钉住） |
-| B-dev2 | 训练时 token 段内的位置 | 训练样本的 token 永远是"从锚点开始的下一段" | S > Δ 时按 φ ∈ {0, …, S/Δ − 1} 均匀抽样（φ = 锚点落在 token 段内的第几个 Δ），token = 从锚点往前 φ·Δ 秒开始的 S 秒真值段的码（要求该段落在记录内），让训练与闭环里"同一个 token 连用 S/Δ 轮"一致；φ 写进每轮记录 |
-| B-dev3 | lockstep 里同一个 token 连用几轮 | 一轮 = 一段 = 一个码 | 三种带 token 的读法：token 每 S/Δ 轮换一次，中间几轮用同一个；C 取真值在该刷新时刻起的 S 秒段的码；A 在飞出历史凑满一个 S 段时让先验预测下一个；行记 `token_refreshes`；`none` 不变 |
-| B-dev3′ | 带码协议下只飞前 20 s | `--execute-s` 只允许无 token 读法（A3-a） | S60-h60 配置：三种带 token 的读法下每轮飞 20 s、token 按 60 s 段取并连用三轮（与 B-dev3 同一段机制），`e_plan` 与逐轮记录随之 |
-| B-dev4（先做，D45） | 相对门 runner | 门都是与固定数字比 | 新 runner `executor_relative_gate --baseline <none 产物> --candidate <协议产物> --seed-line <json>`：同 cohort 校验（航班键集合相同）、两 seed 的 established 全部 / 雷达、雷达 ADE 的差与 seed 线比，输出门 B1 / 门 B 的判定与表 |
-| B-dev5 | 先验的落地规则 | 先验 token 读法里先验说落地就停 | 加开关（D37 默认关）：落地只记时刻，不停飞 |
-| B-dev6 | 阶段 B 队列 | 09-18 的 `queue_p23.sh` 是手写 shell | 新 runner `two_tier_b_queue`：按 (S, 词表) 串行——两 seed 联合训练 → 导出码本 → 真值 token 读法的两种读数 → 门 B1 → 过则训先验两 seed → 先验 token 与先验读真值历史两种读法的读数 → 门 B；每步 artefact 存在即跳过；PID、时间戳、通知与 A 相同 |
-| B-dev7 | intents 与臂文件 | — | `two_tier_v3_b_arms.json`（4–8 臂）与 intents 登记（变体 `@lockstep-C`、`@lockstep-A`、`@lockstep-A-truth`、`@lockstep-none`） |
+| B-dev1（完成 2026-09-19；锚点契约按 D48：≥ Δ，段放不下时用上一段的码） | token 跨度 S 与执行段 Δ 解耦 | `plan_token.manoeuvre_tokenizer_for` 要求码本 `segment_s` = `control_horizon_s`；分词器读的真值段长 = 执行器时域 | 新 config 字段 `manoeuvre_token_s`（默认 = `control_horizon_s`，S 必须是 Δ 的整数倍）；码本记 S；`training_plan_context` 读 S 秒真值段；训练锚点仍只要求锚点后 ≥ Δ 秒真值（D48，改自本行原来的「≥ S」）；S = Δ 时行为与现在完全相同（测试钉住） |
+| B-dev2（完成 2026-09-19） | 训练时 token 段内的位置 | 训练样本的 token 永远是"从锚点开始的下一段" | S > Δ 时按 φ ∈ {0, …, S/Δ − 1} 均匀抽样（φ = 锚点落在 token 段内的第几个 Δ），token = 从锚点往前 φ·Δ 秒开始的 S 秒真值段的码，该段在记录里放不下时用再往前一段的码（D48：闭环里过了真值最后一个整段就把最后一个码连用到底，训练照同一规则），让训练与闭环里"同一个 token 连用 S/Δ 轮"一致；闭环每轮记录写 token 序号与 φ |
+| B-dev3（完成 2026-09-19） | lockstep 里同一个 token 连用几轮 | 一轮 = 一段 = 一个码 | 三种带 token 的读法：token 每 S/Δ 轮换一次，中间几轮用同一个；C 取真值在该刷新时刻起的 S 秒段的码；A 在飞出历史凑满一个 S 段时让先验预测下一个；行记 `token_refreshes`；`none` 不变 |
+| B-dev3′（完成 2026-09-19：步长是配置字段 `manoeuvre_token_step_s`，`--execute-s` 仍只给无 token 读法） | 带码协议下只飞前 20 s | `--execute-s` 只允许无 token 读法（A3-a） | S60-h60 配置：三种带 token 的读法下每轮飞 20 s、token 按 60 s 段取并连用三轮（与 B-dev3 同一段机制），`e_plan` 与逐轮记录随之 |
+| B-dev4（完成 2026-09-19；门 B1 一行同日加） | 相对门 runner | 门都是与固定数字比 | 新 runner `executor_relative_gate --baseline <none 产物> --candidate <协议产物> --seed-line <json>`：同 cohort 校验（航班键集合相同）、两 seed 的 established 全部 / 雷达、雷达 ADE 的差与 seed 线比，输出门 B1 / 门 B 的判定与表 |
+| B-dev5（完成 2026-09-19：`--prior-landing-ends-flight` 默认关） | 先验的落地规则 | 先验 token 读法里先验说落地就停 | 加开关（D37 默认关）：落地只记时刻，不停飞 |
+| B-dev6（完成 2026-09-19，真实臂文件 dry-run 通过） | 阶段 B 队列 | 09-18 的 `queue_p23.sh` 是手写 shell | 新 runner `two_tier_b_queue`：按 (S, 词表) 串行——两 seed 联合训练 → 导出码本 → 真值 token 读法的两种读数 → 门 B1 → 过则训先验两 seed → 先验 token 与先验读真值历史两种读法的读数 → 门 B；每步 artefact 存在即跳过；PID、时间戳、通知与 A 相同 |
+| B-dev7（完成 2026-09-19：12 臂，含指令词表对照，用户定） | intents 与臂文件 | — | `two_tier_v3_b_arms.json`（4–8 臂）与 intents 登记（变体 `@lockstep-C`、`@lockstep-A`、`@lockstep-A-truth`、`@lockstep-none`） |
 
 ### 5.3 阶段 C：单机历史里没有的信息（待 5.2 的结果后写；框架在 §4）
 
@@ -454,6 +454,9 @@ B2 若显示"模型读真值历史时明显好于读飞出历史"，说明模型
 - **D40 先验在飞出的历史上再训一遍，只在 B3 的条件下做一轮**，飞出序列与真值序列按 0.75 混合（09-18 的值）。为什么：先把读数分开。没解决：执行器不做同样的再训。
 - **D41 读数**：只从第 29 行起（执行器有了 60 s 历史就开始，部署口径）读，每种读法一份；三分组；n。为什么：阶段 B 的臂 lookback 都是 60 s，起点相同，阶段 A 的同起点补充读数 (c) 在这里没有用处（用户 2026-09-19 晚删）。没解决：(b) 本轮不读。
 - **D45 相对门 runner 先于其他开发写出**（B-dev4）：A3 的两个比较（结果文档 §8）也用它，不用临时脚本。为什么：同一 cohort 校验与 seed 线判定要一处定义。
+- **D46 先验的训练配置 = `manoeuvre_prior` 的默认**（2026-09-19 补）：因果 Transformer 宽 128、4 层、4 头、前馈 256、dropout 0.1；200 epoch、patience 20、lr 3e-4、batch 256；落地与落地位置两项损失权重各 1；seed = 该执行器臂的 seed；选模看 val 上"下一个码"的负对数似然。为什么：09-18 唯一跑过的配置，分钟级训练，不值得先消融。没解决：先验容量与 dropout 的消融。
+- **D48 S60-held 的训练锚点契约 = 锚点后 ≥ Δ（20 s），token 段放不下时用上一段的码**（用户 2026-09-19 晚定，取代 B-dev1 原文的「≥ S」）：训练样本按 φ 抽锚点在 token 段内的位置，段 [锚点 − φ·Δ, 锚点 − φ·Δ + S] 超出记录时读它前一段——正是闭环里过了真值最后一个整段后把最后一个码连用到底的规则（`plan_token.token_span_start_s`）。为什么：按原文最后 60 s 不出训练样本，而 established 正是在那里决定的，且与基线 L60_D20（要求 20 s）锚点分布不同，门 B1 的差里会混进「少训了末段」；S20 与 S60-h60 不受影响（S20 的段永远放得下；S60-h60 视界本身 60 s）。没解决：闭环里超过真值终点后仍连用的那几轮，训练里没有对应样本（没有真值）。
+- **D47 B0 与 B 的 cohort 文件 = 网格 L60_D60 的 `development_cohort.json`**（2026-09-19 定）：它的规则就是 D33（划分 1337、60 s 历史 + 60 s 真值），程序核过是 L60_D20 cohort 的子集、只少 4 架更短的航班（train 6853 / val 1404）；不另写文件，A3-a 的对照读数也正是这批航班。B0 的重读用 `manoeuvre_lockstep --cohort` 把 L60_D20 限制在这批航班上。
 - **D42 顺序与停止**：B0 → B1 → 门 B1 → B2 → 门 B → 条件 B3；任一门不过即停并写结论；不自动重跑。
 - **D43 A3-a 预测 60 s、只飞 20 s**（2026-09-19 用户说跑）：不重训，直接用网格里的 L60_D60 两臂（lookback 60 s、视界 60 s、N₁ = 6、cohort 记录 ≥ 120 s），闭环每 20 s 重新预测、每次只飞预测的前 20 s（`manoeuvre_lockstep --execute-s 20`），`none` 读 (a)（第 29 行起）与 (c)（第 59 行起）；与 L60_D20 的同一读数在两者共有的航班上比。为什么：H2；L60_D60 的训练配置就是"视界 60 s、其余同 L60_D20"（控制决策仍是每 10 s 一个）。没解决：视界的消融；执行长度的消融；它的 cohort 比 L60_D20 少约 4 架。
 - **D44 A3-b N₁ = 4**（未排期）：其余同 L60_D20，两 seed。为什么：H3。没解决：契约的消融。

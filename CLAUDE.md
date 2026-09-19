@@ -141,6 +141,11 @@ Full text, with the investigation behind each line: `docs/environment.md` (E1–
   a fixture restate it (a version pinned in a test is a version the test cannot check).
 - **A bound that can never bind is worse than no bound** — if it cannot change an answer on the
   real fleet, delete it, or the reader will assume it did.
+- **兼容 (compatibility) is a FORBIDDEN word** (user, 2026-09-19): no `.get(key, default)` fallbacks, no schema-version
+  branches, no "an older artefact reads as …" — refuse by name at the boundary. Every compatibility decision needs
+  the user's explicit permission, case by case. **A class / payload / schema an experiment reads or writes is
+  settled BEFORE that experiment runs**; a campaign's gate compares only inputs its own queue produced under one
+  code version. An artefact produced by unfinished code is superseded and deleted, never kept beside the real one.
 - **`get(key, DEFAULT)` returns `None` for a key present with a null value** — use
   `get(key) or DEFAULT` when a null must read as "unspecified"; and a check comparing two
   optional fields to each other passes when BOTH are missing.

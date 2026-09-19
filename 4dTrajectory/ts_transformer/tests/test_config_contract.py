@@ -190,3 +190,12 @@ def test_a_stored_two_tier_v2_plan_token_is_refused_as_retired_not_as_unknown():
         with pytest.raises(ValueError, match="retired") as info:
             TSConfig(prediction_output="control", plan_conditioning=value)
         assert "archive/two_tier_v2_2026_09" in str(info.value)
+
+
+def test_the_config_grid_tolerance_mirrors_the_row_tolerance():
+    """`config._GRID_TOLERANCE_S` is a mirror of `data/time_grids.ROW_TOLERANCE_S` (config is a leaf and
+    cannot import it): the horizon, token span and step are judged against the same grid the rows use."""
+    from ts_transformer import config
+    from ts_transformer.data.time_grids import ROW_TOLERANCE_S
+    assert config._GRID_TOLERANCE_S == ROW_TOLERANCE_S
+

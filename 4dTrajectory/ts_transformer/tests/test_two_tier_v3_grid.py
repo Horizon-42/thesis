@@ -197,7 +197,7 @@ def test_the_grid_gate_runner_groups_arms_by_cell_and_reports_pending_readings(t
     assert cell_name(30.0, 20.0) == "L30_D20"
     # a campaign with one cell's two readings written: the table has them, the verdict waits
     campaign = tmp_path / "campaign"
-    payload = {"protocol": "none", "segment_s": 20.0, "flights": 1400, "strata": {
+    payload = {"protocol": "none", "segment_s": 20.0, "executed_s": 20.0, "flights": 1400, "strata": {
         "all": {"n": 1400, "established_share": 0.7, "fully_flyable_share": 0.99, "fde_p50_m": 500.0},
         "vectored (tortuosity >= 1.05, not established)": {"n": 600, "established_share": 0.3, "ade_mean_m": 2000.0},
         "straight-in (tortuosity < 1.05)": {"n": 800, "established_share": 1.0}}}

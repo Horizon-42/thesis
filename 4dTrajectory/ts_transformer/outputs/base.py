@@ -106,7 +106,11 @@ class WindowContext:
     #: One line for the training log (the closure's label coverage), or None.
     summary: str | None = None
 
-    def row(self, i: int) -> dict[str, np.ndarray] | None:
+    def row(self, i: int, epoch_seed: int | None = None) -> dict[str, np.ndarray] | None:
+        """The context row of window ``i``. ``epoch_seed`` is given by the TRAINING iterator
+        only (`iter_batches(shuffle=True)`): a path whose row has a per-epoch draw (the
+        manoeuvre token's position inside its span, two-tier v3 B-dev2) reads it; a cached or
+        validation row is built without one."""
         return None
 
     def override(self, i: int, epoch_seed: int) -> tuple[np.ndarray, dict[str, np.ndarray]] | None:

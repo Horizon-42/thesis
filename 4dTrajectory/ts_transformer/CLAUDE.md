@@ -51,7 +51,8 @@ of the package, not a migration in progress.
   `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
 - **`manoeuvre` — IN DEVELOPMENT** (P1–P3 code landed 2026-09-18; the P1.4 token campaign was STOPPED
   the same day — its executor baseline was unsettled — and the plan was rewritten as **two-tier v3**,
-  `docs/2026-09-18_two_tier_plan_v3.zh.md`: stage A = the no-token executor's own (L, Δ) grid, R8): the
+  `docs/2026-09-18_two_tier_plan_v3.zh.md`: stage A = the no-token executor's own (L, Δ) grid, R8; stage B =
+  the token span S ∈ {20, 60} s on the L60_D20 executor, the token held over S / step rounds, D31 / R9): the
   intent-token plan — `manoeuvre/segments.py` (the segment-start frame), `tokenizer.py` (encoder +
   FSQ, the command vocabulary, the codebook artefact, C28), the executor under `plan_conditioning=
   manoeuvre-code` (D30), `sequences.py` + `context.py` + `prior.py` (the causal prior, discrete or
@@ -152,7 +153,8 @@ of the package, not a migration in progress.
 | `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′: the third column is a path-angle target flown by a 3 s loop. **Passes every pre-registered gate on both seeds** — fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %, straight-in FDE p50 543 / 559 vs 647 / 663, pooled ADE 1173 / 1182 vs 1325 / 1295. ONE regression: vectored FDE p50 +625 / +704 m, unexplained (not turn authority). **Adoption is the user's call** (D27) |
 | `control_condition_features` | `raw` | `ratios` carries the SAME information at the SAME width (so a ratios arm starts from its raw twin's weights); 4 of the 8 raw channels are constant on this fleet. Built, not yet measured (D28) |
 | `control_horizon_s` | `0` (whole approach) | two-tier L1: a FIXED rollout horizon Δ — ONE span definition (`dataset.target_horizon_s`), ONE floor rule (`dataset.effective_min_future_s`), and every duration-deciding axis (CTA, quantile head, `final_time_loss_weight`, latent, imitation teacher) refused. **An L1 arm's numbers are its readouts' [0, Δ], never the record summary's** whole-remainder ADE/FDE (D29) |
-| `plan_conditioning` | `off` | `manoeuvre-code` (P1.3, 2026-09-18): the token is the segment's code vector z from the tokenizer held as the executor's SUBMODULE — joint training, or a frozen `manoeuvre_codebook`; REQUIRES `control_horizon_s` (the segment IS the horizon); one z source per batch (the truth segment + anchor state, or a given z); `manoeuvre_tokenizer` / `manoeuvre_fsq_levels` refused off default under any other value; `plan_conditioning_dropout` RETIRED at 0 (0.5 taught the head to ignore the token); `truth-next` / `waypoints` archived and refused at load (D30) |
+| `plan_conditioning` | `off` | `manoeuvre-code` (P1.3, 2026-09-18): the token is the segment's code vector z from the tokenizer held as the executor's SUBMODULE — joint training, or a frozen `manoeuvre_codebook`; REQUIRES `control_horizon_s` (the token SPAN defaults to the horizon and may be longer, D31); one z source per batch (the truth span + its start state, or a given z); `manoeuvre_tokenizer` / `manoeuvre_fsq_levels` refused off default under any other value; `plan_conditioning_dropout` RETIRED at 0 (0.5 taught the head to ignore the token); `truth-next` / `waypoints` archived and refused at load (D30) |
+| `manoeuvre_token_s` / `manoeuvre_token_step_s` | `0` / `0` (= the horizon) | two-tier v3 stage B (2026-09-19): the token span S and the step the closed loop flies inside it — S > step holds one token for S / step rounds; training draws the anchor's position inside the span per flight and epoch and reads the PREVIOUS span when the record cannot hold the current one (the closed loop's own hold; the anchor floor stays Δ — the user's 2026-09-19 decision, plan D48); the prior's landing only records a time (`--prior-landing-ends-flight` restores the 09-18 rule); an explicit value equal to the horizon is refused (0 spells it); every 2026-09-18 checkpoint is hold 1, unchanged (D31) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag`: smoothness + 3.4 % ADE, τ = 2.0 s not CV-selected; a pipeline lag cell carries `_lag` (D4) |
 | procedure penalty | weights 0 | NOT adopted; hinge scales are module constants (D5) |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained through a hook beat it; `+` combinations are a lookup, their order the application order (D6) |
@@ -300,7 +302,13 @@ for every lookback — reading (a) from L−1 confounds lookback with starting p
 `executor_failure_modes` classifies the non-crossing flights (six modes, course frame; not a gate);
 `executor_grid_gate` picks the cell (the seed line read off the grid's own seed pairs, p75; fully flyable
 ≥ 0.95; ties → shorter Δ then shorter L); `two_tier_grid_queue` trains and reads one cell at a time; `executor_relative_gate` judges a candidate reading against its
-protocol-none baseline on the common flights (§3.3 rows A3 / B, the seed line named, never typed in) (R8).
+protocol-none baseline on the common flights (§3.3 rows A3 / B, the seed line named, never typed in) (R8). **Stage B**
+(2026-09-19): `manoeuvre_lockstep --cohort` (B0's re-read on the B cohort = the grid's L60_D60 cohort), the held token in
+`lockstep.fly` (`round_step_s`: a coded protocol's step is the config's), `executor_relative_gate`'s gate B1 row, and
+`two_tier_b_queue` (step 0 flies every baseline it compares — a gate never reads another campaign's payload;
+`executor_relative_gate`, `executor_failure_modes` and `gates.cell_reading` read this code's schema only, no
+compatibility; then per configuration × vocabulary: train → codebook → truth-token readings → gate B1 → prior →
+prior-token readings → gate B) (R9).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

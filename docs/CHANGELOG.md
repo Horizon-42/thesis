@@ -4,6 +4,29 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-19 — two-tier v3 stage B: the token span decoupled from the horizon, the held token, B0 read
+
+- Stage B code (plan v3 §5.2, decisions D30–D47; `ts_transformer/CLAUDE.md` D31 / R9): `manoeuvre_token_s` /
+  `manoeuvre_token_step_s` (the token span S and the closed loop's step, 0 = the horizon; `token_span_s` / `token_step_s` /
+  `token_hold`), the codebook's `segment_s` is the span; a training row draws the anchor's position inside the span per
+  flight and epoch (`plan_token.token_phase` — the epoch seed now reaches `WindowContext.row`) and reads the previous span
+  when the record cannot hold the current one (the closed loop's own hold; the random-anchor floor stays Δ — plan D48, the user's
+  decision, replacing B-dev1's "≥ S"); `lockstep.fly` holds one token for S / step rounds, flies the
+  config's step under the coded protocols, tokenises the flown history per span, records token index / phase, and the
+  prior's landing only records a time (D37; `--prior-landing-ends-flight` restores the 09-18 rule); `manoeuvre_lockstep
+  --cohort`; `executor_relative_gate` gains the gate B1 row; `two_tier_b_queue`; the 12-arm declaration
+  `two_tier_v3_b_arms.json` (S20 / S60-held / S60-h60 × K16 / command vocabulary × two seeds) with its intents. Hold 1 —
+  every stored 2026-09-18 checkpoint — is unchanged bit for bit (tests). Two opus review rounds.
+- B0 was run early (the user had allowed it before sign-off) at 19:53Z with the lockstep payload still at schema v2; the
+  next development item bumped it to v3 and the stage B gate could no longer read it. The user rejected a compatibility
+  path ("兼容是禁词"), the early outputs were deleted on their word, and the rule went into the repo root CLAUDE.md
+  conventions: a class / schema an experiment reads is settled before it runs; every compatibility decision needs the
+  user's permission. Consequence in code: `two_tier_b_queue` flies every baseline it compares as its own step 0 (the stage
+  A checkpoints L60_D20 and L60_D60-flown-20 s, no token, on the B cohort = the grid's L60_D60 cohort, 1404 flights; the
+  declaration's `stage_b.baselines`), and `executor_relative_gate` refuses any payload whose schema is not this code's.
+  The two picker categories published from the deleted records (`…lockstep-none-b_val`, 182 → 184) stay: the trajectories
+  are the same, only their source directory is gone.
+
 ### 2026-09-19 — two-tier v3 stage A ran; reading (c) from one common row
 
 - The 20-cell grid `two_tier_v3_grid_20260918` (L ∈ {30,60,90,120} s × Δ ∈ {20,30,60,90,120} s, two seeds) trained and was read

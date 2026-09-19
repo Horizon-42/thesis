@@ -1447,7 +1447,11 @@
     "L120_D20_s2024@fail-established-short": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「established-short」（曾对准中线、预算到期时仍在入口前）的前 3 架（该类共 39 架），`failure_modes/L120_D20_s2024/records_established-short/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
     "L120_D20_s2024@fail-overshoot": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「overshoot」（在入口前穿过中线、从未对准）的前 3 架（该类共 18 架），`failure_modes/L120_D20_s2024/records_overshoot/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
     "L120_D20_s2024@fail-passed-abeam": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「passed-abeam」（末尾已过入口横线（to-go ≤ 0）、仍在下风/另一侧）的前 3 架（该类共 111 架），`failure_modes/L120_D20_s2024/records_passed-abeam/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
-    "L120_D20_s2024@fail-parallel-offset": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「parallel-offset」（从未对准、末尾与中线平行偏置）的前 3 架（该类共 15 架），`failure_modes/L120_D20_s2024/records_parallel-offset/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。"
+    "L120_D20_s2024@fail-parallel-offset": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「parallel-offset」（从未对准、末尾与中线平行偏置）的前 3 架（该类共 15 架），`failure_modes/L120_D20_s2024/records_parallel-offset/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L60_D20_s1337@lockstep-none-b": "B0（阶段 B 队列第 0 步的基线重读，D33）：L60_D20 在 B cohort（记录 ≥ 120 s 的 1404 架，即网格 L60_D60 的 cohort）上从第 29 行起的无 token 闭环，带记录；阶段 B 里 S20 与 S60-held 两个配置的相对门都以它为基线；失败方式对照表在 two_tier_v3_b_20260919/failure_modes/L60_D20_s<seed>_none/。",
+    "L60_D20_s2024@lockstep-none-b": "B0（阶段 B 队列第 0 步的基线重读，D33）：L60_D20 在 B cohort（记录 ≥ 120 s 的 1404 架，即网格 L60_D60 的 cohort）上从第 29 行起的无 token 闭环，带记录；阶段 B 里 S20 与 S60-held 两个配置的相对门都以它为基线；失败方式对照表在 two_tier_v3_b_20260919/failure_modes/L60_D20_s<seed>_none/。",
+    "L60_D60_s1337@lockstep-none-exec20-b": "阶段 B 队列第 0 步重飞的 A3-a：L60_D60（视界 60 s，无 token）在 B cohort（记录 ≥ 120 s 的 1404 架）上从第 29 行起每轮只飞 20 s，带记录；S60-h60 配置的相对门以它为基线；失败方式表在 two_tier_v3_b_20260919/failure_modes/L60_D60_exec20_s<seed>_none/。",
+    "L60_D60_s2024@lockstep-none-exec20-b": "阶段 B 队列第 0 步重飞的 A3-a：L60_D60（视界 60 s，无 token）在 B cohort（记录 ≥ 120 s 的 1404 架）上从第 29 行起每轮只飞 20 s，带记录；S60-h60 配置的相对门以它为基线；失败方式表在 two_tier_v3_b_20260919/failure_modes/L60_D60_exec20_s<seed>_none/。"
    }
   },
   "two_tier_v3_a3b_20260919": {
@@ -1463,6 +1467,63 @@
     "L60_D20_N4_s1337@lockstep-none-row59": "闭环读数 (c)（协议 none，从第 59 行起，与网格的 row59 读数同起点），与 L60_D20 的同一读数比。",
     "L60_D20_N4_s2024@lockstep-none": "闭环读数 (a)（协议 none，从第 29 行起），与 L60_D20 的同一读数比：established 全部 / 雷达、fully flyable、FDE、三类失败方式的份额。",
     "L60_D20_N4_s2024@lockstep-none-row59": "闭环读数 (c)（协议 none，从第 59 行起，与网格的 row59 读数同起点），与 L60_D20 的同一读数比。"
+   }
+  },
+  "two_tier_v3_b_20260919": {
+   "title": "两层计划 v3 · 阶段 B：意图 token 的相对门（token 跨度 S ∈ {20, 60} s × 学习码本 K16 / 指令词表 × 2 种子）",
+   "intent": "阶段 A 定了执行器 L60_D20，A2 说雷达引导航班没穿过入口的主要原因是没转基边、转晚了、末段形状错——都是历史里没有的信息。阶段 B 问：每 S 秒一个的离散意图 token 能不能把这些信息交给执行器；S 取 20 s（等于每轮飞出的段长）还是 60 s（一条管制指令的量级，两种做法：执行器视界 20 s 连用三轮，或视界 60 s 每轮只飞 20 s）；以及先于一切——真值 token 装不装得下这些信息。先用真值 token 读一次（门 B1：任一项两 seed 都超过 seed 线 0.078 / 雷达 0.184 / 雷达 ADE 150 m，fully flyable ≥ 0.95），过了才训预测 token 的模型（先验），再读先验 token 读法对无 token 读法的相对门（门 B：三项都不差且至少一项两 seed 都超线）。对照：S20 与 S60-held 对 B0 在同一批航班上重读的 L60_D20；S60-h60 对 A3-a。",
+   "design": "docs/2026-09-18_two_tier_plan_v3.zh.md §5.2（B0–B3）、§6.2（D30–D45）、§7.2、§8.2、§9.2；臂文件 docs/experiments/two_tier_v3_b_arms.json；开发笔记 docs/2026-09-18_two_tier_v3_stage_a_notes.md 阶段 B 一节。12 臂 = 3 配置 × 2 词表 × 2 种子；同一 cohort（网格的 L60_D60 那份，记录 ≥ 120 s）。",
+   "runs": {
+    "S20_K16_s1337": "S20：一个 token 管 20 s，等于每轮飞出的段长（token 每次预测换一个）；词表 = 学习码本 K = 16（FSQ 4 × 4，与执行器联合训练）；种子 1337。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
+    "S20_K16_s2024": "S20：一个 token 管 20 s，等于每轮飞出的段长（token 每次预测换一个）；词表 = 学习码本 K = 16（FSQ 4 × 4，与执行器联合训练）；种子 2024。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
+    "S60h60_K16_s1337": "S60-h60：一个 token 管 60 s，执行器一次预测 60 s、每轮只飞出前 20 s，token 连用三轮（A3-a 的执行器加 token）；词表 = 学习码本 K = 16（FSQ 4 × 4，与执行器联合训练）；种子 1337。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = A3-a 的读数（网格的 L60_D60 只飞 20 s，无 token）。",
+    "S60h60_K16_s2024": "S60-h60：一个 token 管 60 s，执行器一次预测 60 s、每轮只飞出前 20 s，token 连用三轮（A3-a 的执行器加 token）；词表 = 学习码本 K = 16（FSQ 4 × 4，与执行器联合训练）；种子 2024。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = A3-a 的读数（网格的 L60_D60 只飞 20 s，无 token）。",
+    "S60held_K16_s1337": "S60-held：一个 token 管 60 s，执行器仍只预测 20 s，同一个 token 连用三轮；词表 = 学习码本 K = 16（FSQ 4 × 4，与执行器联合训练）；种子 1337。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
+    "S60held_K16_s2024": "S60-held：一个 token 管 60 s，执行器仍只预测 20 s，同一个 token 连用三轮；词表 = 学习码本 K = 16（FSQ 4 × 4，与执行器联合训练）；种子 2024。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
+    "S20_cv_s1337": "S20：一个 token 管 20 s，等于每轮飞出的段长（token 每次预测换一个）；词表 = 指令词表（63 类规则码，one-hot）；种子 1337。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
+    "S20_cv_s2024": "S20：一个 token 管 20 s，等于每轮飞出的段长（token 每次预测换一个）；词表 = 指令词表（63 类规则码，one-hot）；种子 2024。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
+    "S60h60_cv_s1337": "S60-h60：一个 token 管 60 s，执行器一次预测 60 s、每轮只飞出前 20 s，token 连用三轮（A3-a 的执行器加 token）；词表 = 指令词表（63 类规则码，one-hot）；种子 1337。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = A3-a 的读数（网格的 L60_D60 只飞 20 s，无 token）。",
+    "S60h60_cv_s2024": "S60-h60：一个 token 管 60 s，执行器一次预测 60 s、每轮只飞出前 20 s，token 连用三轮（A3-a 的执行器加 token）；词表 = 指令词表（63 类规则码，one-hot）；种子 2024。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = A3-a 的读数（网格的 L60_D60 只飞 20 s，无 token）。",
+    "S60held_cv_s1337": "S60-held：一个 token 管 60 s，执行器仍只预测 20 s，同一个 token 连用三轮；词表 = 指令词表（63 类规则码，one-hot）；种子 1337。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
+    "S60held_cv_s2024": "S60-held：一个 token 管 60 s，执行器仍只预测 20 s，同一个 token 连用三轮；词表 = 指令词表（63 类规则码，one-hot）；种子 2024。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。"
+   },
+   "variants": {
+    "S20_K16_s1337@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S20_K16_s1337@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S20_K16_s1337@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S20_K16_s2024@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S20_K16_s2024@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S20_K16_s2024@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S60h60_K16_s1337@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S60h60_K16_s1337@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S60h60_K16_s1337@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S60h60_K16_s2024@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S60h60_K16_s2024@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S60h60_K16_s2024@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S60held_K16_s1337@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S60held_K16_s1337@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S60held_K16_s1337@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S60held_K16_s2024@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S60held_K16_s2024@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S60held_K16_s2024@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S20_cv_s1337@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S20_cv_s1337@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S20_cv_s1337@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S20_cv_s2024@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S20_cv_s2024@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S20_cv_s2024@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S60h60_cv_s1337@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S60h60_cv_s1337@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S60h60_cv_s1337@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S60h60_cv_s2024@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S60h60_cv_s2024@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S60h60_cv_s2024@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S60held_cv_s1337@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S60held_cv_s1337@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S60held_cv_s1337@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。",
+    "S60held_cv_s2024@lockstep-C": "真值 token 读法（协议 C）：每 20 s 重新预测、token 每 S 秒换一次且中间几轮用同一个，token 直接由真值段算出——读的是 token 最多能带来多少（门 B1）；从第 29 行起，带记录。",
+    "S60held_cv_s2024@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
+    "S60held_cv_s2024@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。"
    }
   }
  }

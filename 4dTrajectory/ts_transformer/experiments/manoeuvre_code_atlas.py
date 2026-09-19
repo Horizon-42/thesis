@@ -67,6 +67,9 @@ def main(argv: list[str] | None = None) -> int:
         "schema": "ts-manoeuvre-code-atlas-v1", "written_utc": utc_now(), "executor": str(executor_path),
         "executor_sha256": executor_sha, "codebook": str(codebook.path), "codebook_sha256": codebook.sha256,
         "code_count": codebook.code_count, "segment_s": codebook.segment_s, "anchor": anchor, "path_stride_rows": ATLAS_PATH_STRIDE,
+        # under a held token (S > the horizon) every code's path is the executor's horizon long while the
+        # truth's segment and end are the token span's (`segment_s`): two lengths, both named here
+        "horizon_s": config.control_horizon_s, "truth_segment_s": codebook.segment_s,
         "frame": "each flight's segment-start frame at the anchor: x along its course, y left, z up, metres",
         "flights": atlas, "elapsed_s": time.perf_counter() - started,
     }

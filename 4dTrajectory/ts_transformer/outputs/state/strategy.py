@@ -38,7 +38,7 @@ class FinalApproachContext(WindowContext):
         self._rows = [final_approach_arrays(s) for s in windows.series]
         self._index = windows.index
 
-    def row(self, i: int) -> dict[str, np.ndarray]:
+    def row(self, i: int, epoch_seed: int | None = None) -> dict[str, np.ndarray]:
         return self._rows[self._index[i][0]]
 
 

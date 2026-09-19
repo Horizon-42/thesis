@@ -1,4 +1,4 @@
-"""Judge a candidate closed-loop reading against its no-token baseline on the same flights (two-tier v3 §3.3 rows A3 and B; D45).
+"""Judge a candidate closed-loop reading against its no-token baseline on the same flights (two-tier v3 §3.3 rows A3 and B, gate B1; D45).
 
     python run_ts.py executor_relative_gate --baseline 1337=<dir> 2024=<dir> --candidate 1337=<dir> 2024=<dir> \\
         --seed-line-from <grid_gate.json> --out <dir> [--flyable-floor 0.95]
@@ -8,8 +8,12 @@ Each <dir> holds a ``manoeuvre_lockstep.json``. Per seed the two payloads are in
 their flight keys and the strata recomputed over the common flights (`stratum_table`), so both
 sides are read over ONE cohort; the flights on each side and in common are stated, and the two
 sides must start their closed loops by the same rule (`first_prediction.rule`). The baseline is a
-protocol-none reading; the candidate is any protocol. The seed line is the grid gate's (its
+protocol-none reading; the candidate is any protocol; both are payloads of THIS code's schema (an
+older schema is refused by name — a stage's queue flies every input it compares). The seed line is the grid gate's (its
 verdict's p75 lines, D39) or three numbers given explicitly, and the output names its source.
+The verdicts are §3.3's rows A3 and B and stage B's gate B1 (§5.2.2: beyond the line on one
+metric on both seeds, fully flyable — the truth-token upper bound, read on a protocol-C
+candidate); which row applies is the caller's question, every row is written.
 Writes ``relative_gate.json`` / ``relative_gate.txt`` under ``--out`` (refused if it exists).
 """
 
@@ -20,7 +24,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ts_transformer.experiments.manoeuvre_lockstep import stratum_table
+from ts_transformer.experiments.manoeuvre_lockstep import LOCKSTEP_SCHEMA, stratum_table
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.manoeuvre.gates import GRID_FLYABLE_FLOOR, GRID_SEED_LINE_QUANTILE, RELATIVE_METRICS, cell_reading, gate_relative
@@ -38,6 +42,9 @@ def _side(specs: list[str], parser: argparse.ArgumentParser) -> dict[int, tuple[
         path = Path(dir_text)
         path = path if path.is_absolute() else REPO_ROOT / path
         payload = json.loads((path / "manoeuvre_lockstep.json").read_text(encoding="utf-8"))
+        if payload.get("schema") != LOCKSTEP_SCHEMA:
+            # the gate reads what this code writes, nothing older: a stage's queue flies every input it compares
+            parser.error(f"{path}: lockstep schema {payload.get('schema')!r} is not {LOCKSTEP_SCHEMA!r}; fly the reading again with this code")
         side[int(seed_text)] = (path, payload)
     return side
 
@@ -64,6 +71,7 @@ def render(result: dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"row A3: {'PASS' if v['a3']['pass'] else 'FAIL'} (on {', '.join(v['a3']['on']) or 'no primary'}) — {v['a3']['rule']}")
     lines.append(f"row B:  {'PASS' if v['b']['pass'] else 'FAIL'} (beyond on {', '.join(v['b']['beyond_on']) or 'nothing'}; not worse {v['b']['not_worse']}) — {v['b']['rule']}")
+    lines.append(f"gate B1: {'PASS' if v['b1']['pass'] else 'FAIL'} (beyond on {', '.join(v['b1']['beyond_on']) or 'nothing'}) — {v['b1']['rule']}")
     return "\n".join(lines) + "\n"
 
 

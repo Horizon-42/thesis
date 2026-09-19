@@ -18,6 +18,7 @@ from torch import nn
 from ts_transformer.data.batch_contract import LossComponents, anchor_state
 from ts_transformer.data.channels import IDX
 from ts_transformer.config import (
+    token_hold,
     CONTROL_THRUST_FRACTION,
     CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
@@ -36,7 +37,9 @@ from ts_transformer.config import (
     control_recipe,
 )
 from ts_transformer.data.dataset import target_horizon_s, truth_duration_s
-from ts_transformer.outputs.control.plan_token import manoeuvre_code_count, training_plan_context
+from ts_transformer.outputs.control.plan_token import (
+    manoeuvre_code_count, token_phase, token_span_start_s, training_plan_context,
+)
 from ts_transformer.manoeuvre.tokenizer import load_codebook
 from ts_transformer.data.fixed_dt_supervision import (
     FixedDTControlSupervision,
@@ -166,6 +169,14 @@ class ControlContext(WindowContext):
             )
         self._rows: list[dict[str, np.ndarray]] | None = None
         self._fixed_dt: tuple[FixedDTSupervisionRow, ...] | None = None
+        # A held token (two-tier v3 D48): every anchor of a TRAINING set is read at every phase
+        # during the run, so the population is checked once here — a cohort whose record cannot
+        # hold an anchor's previous span is refused by name before epoch 1, not mid-epoch. A cached
+        # set builds its rows at φ = 0 just below and needs no walk.
+        if not windows.cache_context_rows and token_hold(self.config) > 1:
+            for s_idx, anchor in windows.index:
+                for phase in range(token_hold(self.config)):
+                    token_span_start_s(windows.series[s_idx], anchor, self.config, phase)
         if windows.cache_context_rows:
             self._rows = [self._build_row(index) for index in range(len(windows.index))]
             if self.config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
@@ -173,10 +184,10 @@ class ControlContext(WindowContext):
                     windows.series, windows.encoded, windows.index, dt_s=self.config.dt_s
                 )
 
-    def row(self, i: int) -> dict[str, np.ndarray]:
-        return self._rows[i] if self._rows is not None else self._build_row(i)
+    def row(self, i: int, epoch_seed: int | None = None) -> dict[str, np.ndarray]:
+        return self._rows[i] if self._rows is not None else self._build_row(i, epoch_seed)
 
-    def _build_row(self, i: int) -> dict[str, np.ndarray]:
+    def _build_row(self, i: int, epoch_seed: int | None = None) -> dict[str, np.ndarray]:
         windows, config = self.windows, self.config
         s_idx, anchor = windows.index[i]
         series = windows.series[s_idx]
@@ -197,9 +208,11 @@ class ControlContext(WindowContext):
                 "source for the CTA token; only 'given' (the truth duration) is defined"
             )
         if config.plan_conditioning != PLAN_CONDITIONING_OFF:
-            # the truth's segment at this anchor and the anchor's chart row — the tokenizer's
-            # inputs (reads the future)
-            arrays.update(training_plan_context(series, anchor, config))
+            # the truth's token span at this anchor and the span's start row — the tokenizer's
+            # inputs (reads the future). A TRAINING draw (the epoch seed is given) also draws the
+            # anchor's position inside the span (B-dev2); a cached or validation row is at φ = 0
+            phase = 0 if epoch_seed is None else token_phase(series.dataset_id, anchor, epoch_seed, config)
+            arrays.update(training_plan_context(series, anchor, config, phase=phase))
         if not windows.control_supervision:
             return arrays
         anchor_time = float(series.times[anchor])

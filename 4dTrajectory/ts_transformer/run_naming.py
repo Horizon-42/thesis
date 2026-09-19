@@ -311,6 +311,8 @@ _ABBREV = {
     "manoeuvre_tokenizer": "tok",
     "manoeuvre_fsq_levels": "fsq",
     "manoeuvre_codebook": "codebook",
+    "manoeuvre_token_s": "tok-s",
+    "manoeuvre_token_step_s": "tok-step",
     "control_condition_features": "airframe",
     "control_fitted_teacher_path": "teacher",
     "state_position_reference": "pos-ref",

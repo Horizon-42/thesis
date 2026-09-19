@@ -16,6 +16,7 @@
 | 发布 | 2026-09-19T09:20Z 前后，11 类进 picker（Experiments，KRDU，split val）：`experiment_L120_D20_s<seed>_<token>_lockstep-none_val`（s1337 token 0197387f636a、s2024 e7820f8189ac，各 1404 架，4 份 CZML）和 9 个 `…_fail-<mode>_val` 子集（每类 3 架，s1337 的 other 2 架）；`categories.json` 171 → 182，23 份 CZML 都能解析。发布时 `4dTrajectory/outputs/KRDU/experiments/index.json` 早于本战役，用临时索引发布，没有重建它（重建会覆盖现有产物，等用户）。正在跑的 Vite dev server（2026-09-18 09:20 起）对新目录返回 SPA HTML，重启前端后 picker 才能加载这 11 项。 |
 | 读数 (c) | 2026-09-19T11:08–11:40Z，所有格从第 59 行开始预测（D28），40 份 `lockstep/<arm>/row59/`，门表 `gate/final_row59/`；结论见 §7：同一起点下 L ≥ 60 各格差在 seed 线内，L = 120 在 (a) 里的领先是起点效应；L ≤ 60 里最好的格是 L60_D20 |
 | 判定 M-A1 | **L120_D20 胜出（decisive）**，`gate/after_L120_D120/grid_gate.txt`，见 §3；解读与条件见 §5；A2 失败方式见 §6 |
+| 阶段 B · B0 | 由阶段 B 队列的第 0 步产出（`two_tier_v3_b_20260919/baseline/<基线>_s<seed>/L-1/` 与 `failure_modes/<基线>_s<seed>_none/`，基线 = L60_D20 与 L60_D60 只飞 20 s），见 §9。2026-09-19T19:53Z 那次提前跑的 B0 用的是没写完的代码（payload 还是 v2），按用户指示删除，不引用它的数 |
 
 ## 1. 读数 (a)：从 L−1 开始预测（`lockstep/<arm>/L-1/`，`gate/after_<cell>/`）
 
@@ -335,4 +336,36 @@ seed 1337 从第 29 行起时直线组 0.914 → 0.709。H3 的"控制分辨率�
 可写进论文的两点：(1) "预测长、执行短"对雷达引导段有一致的正作用，但同一执行器在直线段上更容易飞偏，需要分组报；(2) 控制分辨率 10 s → 5 s 没有收益。
 对阶段 B 的含义：S60-h60 配置（视界 60 s 的执行器、token 与视界同长、只飞 20 s）的无 token 对照就是 A3-a 这四份读数（`lockstep_exec20/`），不用再读。
 
+## 9. 阶段 B：基线（B0）与失败方式对照（由队列第 0 步产出；计划 §5.2.1、D33、D47）
 
+阶段 B 的每个相对门都是"带 token 的读数"对"无 token 的读数"，两边必须是同一批航班、同一起点、**同一版代码写出的 payload**：队列自己飞它要比的每一份基线（第 0 步），
+门读到别的 schema 就按名字拒绝，不做任何兼容。B cohort = 网格 L60_D60 的 development cohort（划分种子 1337，60 s 历史 + 60 s 真值 = 记录 ≥ 120 s；train 6853 / val 1404），
+程序核过它是 L60_D20 cohort（6856 / 1405）的子集、只少 4 架更短的航班，所以直接复用（D47）。
+
+两份基线（各两 seed，都从第 29 行起、协议 none、带记录，`manoeuvre_lockstep --cohort <L60_D60 cohort> --write-records`）：
+- `L60_D20`：阶段 A 的执行器，S20 与 S60-held 两个配置的对照；
+- `L60_D60_exec20`：L60_D60 每轮只飞 20 s（`--execute-s 20`，即 §8.1 的 A3-a 读法，由阶段 B 代码重飞），S60-h60 的对照。
+
+**2026-09-19T19:53Z 那次提前跑的 B0**（用户允许签字前先跑）用的是 B-dev3 之前的代码，payload 还是 v2；之后 payload 升到 v3，它就成了门读不了的旧文件。
+按用户 2026-09-19 深夜的指示删除（`baseline/`、`failure_modes/`、`b0.sh`、`b0.log`），它的数不引用；由此立的原则见根 CLAUDE.md 编码约定（实验用到的结构先敲定再跑；兼容是禁词）。
+它发布到 picker 的两类（`experiment_l60_d20_s<seed>_…_lockstep-none-b_val`，`categories.json` 182 → 184）保留：轨迹本身与 v3 重飞的相同，只是来源目录已删。
+
+### 9.1 基线读数（队列写出后填：`baseline/<基线>_s<seed>/L-1/manoeuvre_lockstep.txt`）
+
+| 基线 | seed | n | est 全部 | est 直线 | est 雷达 | fully flyable | 雷达 ADE 均值 (m) | FDE p50 (m) | crossed / horizon |
+|---|---|---|---|---|---|---|---|---|---|
+| L60_D20 | 1337 | | | | | | | | |
+| L60_D20 | 2024 | | | | | | | | |
+| L60_D60_exec20 | 1337 | | | | | | | | |
+| L60_D60_exec20 | 2024 | | | | | | | | |
+
+### 9.2 失败方式对照表（队列写出后填：`failure_modes/<基线>_s<seed>_none/failure_modes.txt`，雷达引导组没穿过入口的航班）
+
+| 基线 | seed | 没穿越 / 雷达组 | 没转基边（passed-abeam + no-turn） | 转晚了（established-short） | 末段形状错（overshoot + parallel-offset） | other |
+|---|---|---|---|---|---|---|
+| L60_D20 | 1337 | | | | | |
+| L60_D20 | 2024 | | | | | |
+| L60_D60_exec20 | 1337 | | | | | |
+| L60_D60_exec20 | 2024 | | | | | |
+
+读法：B1 的失败方式表按这三类对这张表看——没转基边、转晚要 token 里有"什么时候转"，末段形状错要"转到哪、朝哪"。

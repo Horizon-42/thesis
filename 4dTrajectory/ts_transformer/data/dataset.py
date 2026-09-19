@@ -1218,7 +1218,7 @@ class TrajectoryWindows(Dataset, ABC):
                 sample_x, sample_y, sample_weights, sample_time, flight_weight = (
                     self._sample_arrays(int(index))
                 )
-                context_row = self.context.row(int(index))
+                context_row = self.context.row(int(index), epoch_seed)
             else:
                 encoded, context_row = substitute
                 s_idx = self.index[int(index)][0]

@@ -33,7 +33,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from ts_transformer.config import PLAN_CONDITIONING_OFF, TSConfig, default_anchor
+from ts_transformer.config import PLAN_CONDITIONING_OFF, TSConfig, default_anchor, token_span_s
 from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
 from ts_transformer.data.approach_difficulty import (
     STRATUM_ALL,
@@ -338,7 +338,7 @@ def code_atlas(
         dynamics = {name: torch.from_numpy(np.stack([value] * codebook.code_count)).to(device) for name, value in rows.items()}
         dynamics[MANOEUVRE_Z_KEY] = torch.from_numpy(z.astype(np.float32)).to(device)
         forecasts = forecast_control_batch(model, [item] * codebook.code_count, config, normalizer, anchor, device, dynamics=dynamics)
-        truth_rows = truth_segment_rows(item, float(item.times[anchor]), config.control_horizon_s, config.dt_s)
+        truth_rows = truth_segment_rows(item, float(item.times[anchor]), token_span_s(config), config.dt_s)
         truth_code, _z = codebook.encode(truth_rows.astype(np.float32), np.asarray(item.values[anchor], dtype=np.float32))
         difficulty = approach_difficulty(item, anchor)
         entries = []
@@ -363,7 +363,7 @@ def records_block(reading: ArmReading, config: TSConfig, *, campaign: str, fligh
         "schema": READOUT_SCHEMA, "campaign": campaign, "arm": reading.key, "kind": reading.kind, "k": reading.k,
         "seed": reading.seed, "protocol": "C" if reading.kind != "no-token" else "no-token",
         "reads_the_future": reading.kind != "no-token",
-        "fixed_anchor": default_anchor(config), "horizon_s": float(config.control_horizon_s),
+        "fixed_anchor": default_anchor(config), "horizon_s": float(config.control_horizon_s), "token_span_s": token_span_s(config),
         "plan_conditioning": config.plan_conditioning, "split": "val", "limit": limit,
         "flights": flights, "records": records,
         "truth_shorter_than_horizon": reading.summary["truth_shorter_than_horizon"],

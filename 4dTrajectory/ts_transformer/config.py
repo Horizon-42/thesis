@@ -150,7 +150,14 @@ PLAN_CONDITIONING_FIELDS = ("plan_conditioning",)
 MANOEUVRE_TOKENIZER_LEARNED = "learned"
 MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY = "command-vocabulary"
 MANOEUVRE_TOKENIZERS = (MANOEUVRE_TOKENIZER_LEARNED, MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY)
-MANOEUVRE_FIELDS = ("manoeuvre_tokenizer", "manoeuvre_fsq_levels", "manoeuvre_codebook")
+# ``manoeuvre_token_s`` / ``manoeuvre_token_step_s`` (two-tier v3 stage B, B-dev1; plan D31 /
+# D38): the token SPAN S (how many seconds of the approach one code stands for) and the STEP
+# the closed loop flies between two predictions inside a span — 0 = the executor's horizon for
+# both, which is every 2026-09-18 arm (one token per forecast, never held). Resolved by
+# `token_span_s` / `token_step_s`; `token_hold` = S / step is the rounds one token is held for.
+MANOEUVRE_FIELDS = (
+    "manoeuvre_tokenizer", "manoeuvre_fsq_levels", "manoeuvre_codebook", "manoeuvre_token_s", "manoeuvre_token_step_s",
+)
 #: An FSQ dimension needs an interior level: at L = 2 the bound's half-step shift is
 #: atanh(1 / (1 - eps)) = NaN, so the smallest admissible level count is 3 (validated here,
 #: at the boundary, and again by `manoeuvre.tokenizer.FSQ`).
@@ -1813,6 +1820,8 @@ class ControlOutput(OutputSpec):
     manoeuvre_tokenizer: str
     manoeuvre_fsq_levels: tuple[int, ...]
     manoeuvre_codebook: str
+    manoeuvre_token_s: float
+    manoeuvre_token_step_s: float
     control_horizon_s: float
     control_condition_features: str
     duration: DurationSpec
@@ -1866,6 +1875,8 @@ class ControlOutput(OutputSpec):
                     ("manoeuvre_tokenizer", MANOEUVRE_TOKENIZER_LEARNED),
                     ("manoeuvre_fsq_levels", ()),
                     ("manoeuvre_codebook", ""),
+                    ("manoeuvre_token_s", 0.0),
+                    ("manoeuvre_token_step_s", 0.0),
                 ) if getattr(self, name) != default
             ]
             if moved:
@@ -2336,6 +2347,18 @@ class TSConfig:
     manoeuvre_tokenizer: str = MANOEUVRE_TOKENIZER_LEARNED
     manoeuvre_fsq_levels: tuple[int, ...] = ()
     manoeuvre_codebook: str = ""
+    # Two-tier v3 stage B (B-dev1; plan D31 / D38): the token SPAN S — the seconds of the
+    # approach one code stands for (the tokenizer reads S seconds of truth; the codebook records
+    # it) — and the token STEP — the seconds the closed loop flies before predicting again
+    # inside a span (the executor still forecasts its whole horizon), which is also the stride
+    # training draws the anchor's position inside the span on (B-dev2). 0 = the executor's
+    # horizon, which every 2026-09-18 arm had (one token per forecast, never held). S is at
+    # least the horizon and a whole number of steps; the step is at most the horizon and a whole
+    # number of rows and of integrator steps (the leg is cut on the dense rollout grid).
+    # `token_span_s` / `token_step_s` resolve the zeros; `token_hold` = S / step. Named
+    # `tok-s=` / `tok-step=` off their defaults; read only under `manoeuvre-code`.
+    manoeuvre_token_s: float = 0.0
+    manoeuvre_token_step_s: float = 0.0
     # Two-tier L1: the rollout's FIXED horizon in seconds; 0 = the whole remaining approach
     # (every stored run). Under Δ > 0 the schedule is rolled over exactly Δ, the targets cover
     # [0, Δ] (`dataset.target_horizon_s`), every anchor needs Δ of truth after it
@@ -2601,12 +2624,59 @@ class TSConfig:
         # ...and the horizon is cut into `dt_s` rows (the segment rows, the rollout's query grid):
         # a horizon that is not a whole number of steps would be refused at model build, past
         # the campaign runner's dry run.
-        if self.control_horizon_s:
-            steps = self.control_horizon_s / self.dt_s
-            if abs(steps - round(steps)) > 1e-6:
+        if self.control_horizon_s and not _whole_multiple(self.control_horizon_s, self.dt_s):
+            raise ValueError(
+                f"control_horizon_s={self.control_horizon_s:g} is not a whole number of "
+                f"dt_s={self.dt_s:g} steps"
+            )
+        # ...and the token span and step (two-tier v3 stage B) sit on the same grids: the span
+        # is cut into `dt_s` rows for the tokenizer, the step is where the closed loop cuts a
+        # leg (`dt_s` rows AND integrator steps, the rule `lockstep.executed_step_s` reads) and
+        # one token is held for a whole number of steps. The view above refuses both off their
+        # defaults without a plan token, so this runs only where they are read.
+        if self.plan_conditioning == PLAN_CONDITIONING_MANOEUVRE_CODE:
+            for name in ("manoeuvre_token_s", "manoeuvre_token_step_s"):
+                if getattr(self, name) < 0.0:
+                    raise ValueError(f"{name}={getattr(self, name):g}: seconds (0 = the horizon), never negative")
+                # one behaviour, one identity: the horizon is spelled 0, so an explicit equal value
+                # would name a second run for the same experiment (`tok-s=` / `control_recipe`)
+                if getattr(self, name) and abs(getattr(self, name) - self.control_horizon_s) <= _GRID_TOLERANCE_S:
+                    raise ValueError(f"{name}={getattr(self, name):g} equals the horizon: 0 is how the horizon is spelled")
+            span, step, horizon = token_span_s(self), token_step_s(self), self.control_horizon_s
+            if span < horizon - _GRID_TOLERANCE_S:
                 raise ValueError(
-                    f"control_horizon_s={self.control_horizon_s:g} is not a whole number of "
-                    f"dt_s={self.dt_s:g} steps"
+                    f"manoeuvre_token_s={span:g} is shorter than the horizon {horizon:g} s: a token stands for at "
+                    "least the forecast it conditions (0 = the horizon)"
+                )
+            if step > horizon + _GRID_TOLERANCE_S:
+                raise ValueError(
+                    f"manoeuvre_token_step_s={step:g} is longer than the horizon {horizon:g} s: the closed loop "
+                    "cannot fly more of a forecast than there is"
+                )
+            for name, value in (("manoeuvre_token_s", span), ("manoeuvre_token_step_s", step)):
+                if not _whole_multiple(value, self.dt_s):
+                    raise ValueError(f"{name}={value:g} is not a whole number of dt_s={self.dt_s:g} rows")
+            # the explicit step only: the default (the horizon) is judged where a closed loop cuts it
+            # (`lockstep.executed_step_s`), and this rule must not constrain the horizon under a
+            # field the run never set
+            if self.manoeuvre_token_step_s and not _whole_multiple(step, self.control_rollout_integrator_dt_s):
+                raise ValueError(
+                    f"manoeuvre_token_step_s={step:g} is not a whole number of integrator steps "
+                    f"({self.control_rollout_integrator_dt_s:g} s): the leg is cut on the dense rollout grid"
+                )
+            if not _whole_multiple(span, step):
+                raise ValueError(
+                    f"manoeuvre_token_s={span:g} is not a whole number of manoeuvre_token_step_s={step:g} steps: "
+                    "one token is held for S / step rounds"
+                )
+            # a held token is trained at every position inside its span (the phase drawn per flight
+            # and epoch, `plan_token.token_phase`); a fixed-anchor training set builds its context
+            # rows once, at φ = 0, and would train the executor at one position the closed loop
+            # holds the token over three of
+            if token_hold(self) > 1 and not self.random_train_anchor:
+                raise ValueError(
+                    f"a held token (span {span:g} s over {step:g} s steps) needs random training anchors: "
+                    "a fixed-anchor training set is built once, at phase 0"
                 )
         if (
             self.control_horizon_s
@@ -2942,6 +3012,39 @@ def default_anchor(config: TSConfig) -> int:
     return max(lookback_anchor(config), config.anchor_floor_index)
 
 
+#: The tolerance a horizon, span or step is judged against a time grid on (seconds) — the row
+#: tolerance every grid test in the package uses (`data/time_grids.ROW_TOLERANCE_S`, which this
+#: leaf cannot import; the two must stay equal).
+_GRID_TOLERANCE_S = 1e-6
+
+
+def _whole_multiple(value: float, unit: float) -> bool:
+    return abs(round(value / unit) * unit - value) <= _GRID_TOLERANCE_S
+
+
+def token_span_s(config: TSConfig) -> float:
+    """The token span S (two-tier v3 stage B, D31): what one manoeuvre code stands for, in
+    seconds — ``manoeuvre_token_s``, or the executor's horizon when that is 0 (every 2026-09-18
+    arm: one token per forecast). The tokenizer reads S seconds of truth from the token
+    segment's start; the codebook records S as its ``segment_s``."""
+    return float(config.manoeuvre_token_s or config.control_horizon_s)
+
+
+def token_step_s(config: TSConfig) -> float:
+    """The token step: the seconds the closed loop flies before predicting again inside a token
+    span (a coded protocol's executed step, `lockstep.fly`) and the stride training draws the
+    anchor's position inside the span on — ``manoeuvre_token_step_s``, or the horizon when 0."""
+    return float(config.manoeuvre_token_step_s or config.control_horizon_s)
+
+
+def token_hold(config: TSConfig) -> int:
+    """How many rounds one token is held for: S / step (D38) — 1 for every 2026-09-18 arm, and 1
+    for a whole-approach run (no horizon: no span, no step, nothing held)."""
+    if not config.control_horizon_s:
+        return 1
+    return int(round(token_span_s(config) / token_step_s(config)))
+
+
 def control_recipe(config: TSConfig) -> dict[str, Any]:
     """Serialize the complete recipe for a control-output strategy."""
     base: dict[str, Any] = {
@@ -2981,6 +3084,9 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
             "tokenizer": config.manoeuvre_tokenizer,
             "fsq_levels": list(config.manoeuvre_fsq_levels),
             "codebook": config.manoeuvre_codebook,
+            # present only off their defaults (the rule above): every 09-18 checkpoint predates them
+            **({"token_s": config.manoeuvre_token_s} if config.manoeuvre_token_s else {}),
+            **({"token_step_s": config.manoeuvre_token_step_s} if config.manoeuvre_token_step_s else {}),
         }
     if not uses_control_dynamics(config.prediction_output):
         raise ValueError("state output has no control recipe")

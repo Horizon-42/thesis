@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ts_transformer.config import PLAN_CONDITIONING_MANOEUVRE_CODE
+from ts_transformer.config import PLAN_CONDITIONING_MANOEUVRE_CODE, token_span_s
 from ts_transformer.data.data_provenance import provenance_eligible_set_digests
 from ts_transformer.io_utils import file_sha256, sha256_bytes
 from ts_transformer.manoeuvre.tokenizer import write_codebook
@@ -38,7 +38,7 @@ def export_codebook(checkpoint: Path, out: Path):
         )
     provenance = payload["data_provenance"]
     return write_codebook(
-        out, model.manoeuvre_tokenizer, segment_s=config.control_horizon_s, dt_s=config.dt_s,
+        out, model.manoeuvre_tokenizer, segment_s=token_span_s(config), dt_s=config.dt_s,
         data_identity={
             "schema_version": provenance.get("schema_version"),
             "eligible_set_sha256": provenance_eligible_set_digests(provenance),

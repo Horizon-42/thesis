@@ -18,6 +18,11 @@ from ts_transformer.config import (
     PLAN_CONDITIONING_MANOEUVRE_CODE,
     PREDICTION_CONTROL,
     TSConfig,
+    absent_field_defaults,
+    control_recipe,
+    token_hold,
+    token_span_s,
+    token_step_s,
     recipe_settings,
 )
 from ts_transformer.data.batch_contract import model_forward
@@ -37,6 +42,9 @@ from ts_transformer.outputs.control.plan_token import (
     manoeuvre_tokenizer_for,
     plan_token_width,
     probe_plan_context,
+    token_phase,
+    token_span_start_s,
+    training_plan_context,
 )
 from ts_transformer.outputs.control.supervision import probe_dynamics
 from ts_transformer.run_naming import run_display_name
@@ -92,11 +100,54 @@ def test_the_manoeuvre_code_token_needs_a_segment_and_a_tokenizer_and_nothing_el
     with pytest.raises(ValueError, match="unknown manoeuvre_tokenizer"):
         _config(manoeuvre_tokenizer="k-means")
     for moved in ({"manoeuvre_fsq_levels": (4, 4)}, {"manoeuvre_tokenizer": "command-vocabulary"},
-                  {"manoeuvre_codebook": "/cb"}):
+                  {"manoeuvre_codebook": "/cb"}, {"manoeuvre_token_s": 60.0}, {"manoeuvre_token_step_s": 20.0}):
         with pytest.raises(ValueError, match="belong"):
             _config(**{"plan_conditioning": "off", "manoeuvre_fsq_levels": (), **moved})
     with pytest.raises(ValueError, match="belongs to the control output"):
         TSConfig(prediction_output="state", manoeuvre_fsq_levels=(4, 4))
+
+
+def test_the_token_span_and_step_resolve_to_the_horizon_and_sit_on_the_grids():
+    """B-dev1 (v3 D31 / D38): S and the step default to the horizon (every 09-18 arm: one token
+    per forecast, hold 1); S60-held holds one 60 s token over three 20 s rounds; S60-h60 forecasts
+    60 s, flies 20 s; each is refused off the row / integrator / hold grids, and off the plan."""
+    default = _config()                                                        # horizon 20 s
+    assert (token_span_s(default), token_step_s(default), token_hold(default)) == (20.0, 20.0, 1)
+    assert token_hold(TSConfig()) == 1 and token_span_s(TSConfig()) == 0.0                       # no horizon: nothing held
+    held = _config(manoeuvre_token_s=60.0, random_train_anchor=True)           # S60-held (a held token needs random anchors)
+    assert (token_span_s(held), token_step_s(held), token_hold(held)) == (60.0, 20.0, 3)
+    h60 = _config(control_horizon_s=60.0, n_segments=6, manoeuvre_token_step_s=20.0, random_train_anchor=True)   # S60-h60: S = the horizon
+    assert (token_span_s(h60), token_step_s(h60), token_hold(h60)) == (60.0, 20.0, 3)
+    with pytest.raises(ValueError, match="shorter than the horizon"):
+        _config(control_horizon_s=60.0, n_segments=6, manoeuvre_token_s=20.0)
+    with pytest.raises(ValueError, match="longer than the horizon"):
+        _config(manoeuvre_token_step_s=40.0)
+    with pytest.raises(ValueError, match="whole number of manoeuvre_token_step_s"):
+        _config(manoeuvre_token_s=50.0)
+    with pytest.raises(ValueError, match="dt_s=2 rows"):
+        _config(manoeuvre_token_s=61.0)
+    with pytest.raises(ValueError, match="integrator steps"):
+        _config(manoeuvre_token_s=60.0, manoeuvre_token_step_s=6.0, control_rollout_integrator_dt_s=0.9)
+    _config(control_rollout_integrator_dt_s=0.3)          # the rule judges the explicit step, never the horizon
+    with pytest.raises(ValueError, match="never negative"):
+        _config(manoeuvre_token_s=-60.0)
+    for name in ("manoeuvre_token_s", "manoeuvre_token_step_s"):       # one behaviour, one identity
+        with pytest.raises(ValueError, match="0 is how the horizon is spelled"):
+            _config(**{name: 20.0})
+    with pytest.raises(ValueError, match="needs random training anchors"):   # a fixed-anchor set is built once, at phase 0
+        _config(manoeuvre_token_s=60.0, random_train_anchor=False)
+    # serialised, read back, and absent from a stored 09-18 config (0 = the horizon)
+    stored = json.loads(json.dumps(held.to_dict()))
+    assert stored["manoeuvre_token_s"] == 60.0 and TSConfig.from_dict(stored).manoeuvre_token_s == 60.0
+    stripped = {key: value for key, value in stored.items() if not key.startswith("manoeuvre_token")}
+    assert absent_field_defaults(stripped)["manoeuvre_token_s"] == 0.0 and token_hold(TSConfig.from_dict(stripped)) == 1
+    # the name and the recipe identity say so only off the defaults
+    assert "tok-s=60" in run_display_name(held.to_dict()) and "tok-step=" not in run_display_name(held.to_dict())
+    assert "tok-s=" not in run_display_name(h60.to_dict()) and "tok-step=20" in run_display_name(h60.to_dict())
+    assert "tok-s=" not in run_display_name(default.to_dict())
+    assert "token_s" not in control_recipe(h60)["manoeuvre"] and control_recipe(h60)["manoeuvre"]["token_step_s"] == 20.0
+    assert control_recipe(held)["manoeuvre"]["token_s"] == 60.0 and "token_step_s" not in control_recipe(held)["manoeuvre"]
+    assert "token_s" not in control_recipe(default)["manoeuvre"]
 
 
 def test_the_levels_are_one_form_and_round_trip_through_json():
@@ -130,6 +181,41 @@ def test_the_run_name_says_which_intent_space():
     assert "tok=" not in name                                              # the default is silent
     command = run_display_name(_config(manoeuvre_tokenizer="command-vocabulary", manoeuvre_fsq_levels=()).to_dict())
     assert "tok=command-vocabulary" in command and "fsq=" not in command
+
+
+def test_a_held_token_span_starts_phase_steps_before_the_anchor_and_holds_the_previous_span_at_the_end(cohort):
+    """B-dev2 (D38): under S60-held a training row's span started φ·20 s before its anchor; a span
+    the record cannot hold is the previous span's (the closed loop's hold); φ is drawn per flight
+    and epoch, uniform over {0, 1, 2}, and 0 whenever a token is not held; the start row is the
+    span's, so at φ = 0 it is the anchor's own row and the context is bit-identical to before."""
+    series = cohort
+    held = _config(manoeuvre_token_s=60.0, random_train_anchor=True)        # horizon 20, S 60, step 20, hold 3
+    item = series[0]
+    end = float(item.supervision_times[-1])
+    anchor = 20                                                             # 40 s in: plenty of truth after it
+    for phase in range(3):
+        start, was_held = token_span_start_s(item, anchor, held, phase)
+        assert start == pytest.approx(float(item.times[anchor]) - 20.0 * phase) and not was_held
+        context = training_plan_context(item, anchor, held, phase=phase)
+        assert context[MANOEUVRE_SEGMENT_KEY].shape == (31, 6)
+        assert context[MANOEUVRE_STATE_KEY] == pytest.approx(item.values[anchor - 10 * phase].astype(np.float32), abs=1e-3)   # 20 s = 10 rows
+    assert training_plan_context(item, anchor, held)[MANOEUVRE_STATE_KEY] is not None
+    assert (training_plan_context(item, anchor, held, phase=0)[MANOEUVRE_STATE_KEY] == item.values[anchor].astype(np.float32)).all()
+    # the last 60 s of the record: at φ = 0 the span from the anchor does not fit, the previous one is read
+    late = int(np.flatnonzero(end - item.times >= 45.0)[-1])               # the last row with ≥ 45 s of truth: 45–47 s left
+    start, was_held = token_span_start_s(item, late, held, 0)
+    assert was_held and start == pytest.approx(float(item.times[late]) - 60.0)
+    start, was_held = token_span_start_s(item, late, held, 2)               # 40 s before: [t−40, t+20] fits
+    assert not was_held and start == pytest.approx(float(item.times[late]) - 40.0)
+    with pytest.raises(ValueError, match="phase"):
+        token_span_start_s(item, anchor, held, 3)
+    # the draw: uniform over the hold, one digest per (flight, anchor, epoch); nothing drawn at hold 1
+    draws = [token_phase(item.dataset_id, anchor, epoch, held) for epoch in range(3000)]
+    assert set(draws) == {0, 1, 2} and all(abs(draws.count(k) / 3000 - 1 / 3) < 0.05 for k in range(3))
+    assert token_phase(item.dataset_id, anchor, 7, held) == token_phase(item.dataset_id, anchor, 7, held)
+    assert token_phase(item.dataset_id, anchor, 7, held) != token_phase(item.dataset_id, anchor + 1, 7, held) or \
+        token_phase(item.dataset_id, anchor, 8, held) != token_phase(item.dataset_id, anchor, 7, held)
+    assert all(token_phase(item.dataset_id, anchor, epoch, _config()) == 0 for epoch in range(20))
 
 
 # ── the context row ──────────────────────────────────────────────────────────

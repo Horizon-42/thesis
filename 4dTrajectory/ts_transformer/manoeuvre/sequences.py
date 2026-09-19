@@ -160,8 +160,8 @@ def flight_sequence(series: FlightSeries, codebook: Codebook, anchor: int) -> Co
 def rolled_sequence(truth: CodeSequence, flown_codes: Sequence[int], flown_states: Sequence[np.ndarray]) -> CodeSequence:
     """The rolled counterpart of ``truth``: the flown codes and boundary states as the input,
     the truth's codes as the time-indexed targets (plan §2.7, v2 §8's decision), the truth's
-    landing where its full segments end. ``flown_states`` holds x_0 and one state per flown
-    leg; a flight that flew more rounds than the truth has segments is cut to the truth's
+    landing where its full segments end. ``flown_states`` holds x_0 and one state per flown span (a flown
+    span is one leg unless the token is held; a flight that flew more rounds than the truth has segments is cut to the truth's
     length + 1 positions (past that, every target is the landing)."""
     codes = np.asarray(flown_codes, dtype=np.int64)
     states = np.asarray(flown_states, dtype=np.float32)

@@ -54,7 +54,8 @@ def discover_arms(campaign: Path, segment_s: float) -> tuple[list[Path], list[st
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--campaign", type=Path, required=True)
-    parser.add_argument("--segment-s", type=float, required=True)
+    parser.add_argument("--segment-s", type=float, required=True,
+                        help="the arms' horizon (control_horizon_s; the 09-18 arms' token span IS their horizon)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the val cohort (a smoke test)")

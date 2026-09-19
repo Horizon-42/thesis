@@ -3,11 +3,13 @@
 目的：压缩 context 后从这里接着做。计划本身在 `2026-09-18_two_tier_plan_v3.zh.md`（§5–§8 是阶段 A 的详细计划，用户已看过）。
 本文只放开发时要用的事实、状态和约定；结论和读数不在这里。
 
-## 现状（2026-09-19 21:20Z 写；接手的 agent 先读这一节，再读计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2）
+## 现状（2026-09-19 深夜更新；接手的 agent 先读这一节和 §7，再读计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2）
 
-**哪里停下**：阶段 A 全部完成（M-A0 … M-A3）。阶段 B 的计划已写进 v3（`2026-09-18_two_tier_plan_v3.zh.md` §5.2、§6.2、§7.2、§8.2、§9.2，决定 D30–D45），**未签字、未开发、未跑**；用户在审，
-审的过程中已按用户意见改过多轮（结构、用词、机制说明、B0–B3 的来龙去脉、删掉 B 里的第 59 行读数）。什么都没在跑：GPU 空闲，主树干净（HEAD 961025f），
-runs worktree `.claude/worktrees/manoeuvre-runs` 停在 5208707（比 HEAD 旧；任何新实验前先 `git -C .claude/worktrees/manoeuvre-runs checkout --detach <HEAD>`）。磁盘 11 GB 空余。
+**哪里停下**：阶段 A 全部完成（M-A0 … M-A3）。阶段 B：用户 2026-09-19 晚答复——指令词表对照臂做（12 臂）、B0 可以先跑、"最大程度利用时间，不干等实验"；
+B-dev0…7 全部写完、测试通过、三轮 opus review（见 §7.1），**代码待提交、未签字（M-B0′）、队列未跑**。
+提前跑的 B0（19:53Z，半成品代码，payload v2）已按用户指示删除；基线改由队列第 0 步自己飞（§7.2），门只认本版代码的 payload——用户由此立了"兼容是禁词、结构先敲定再实验"的原则（根 CLAUDE.md 编码约定、记忆 `no-compat-settle-structures-before-experiments`）。
+Q3（S60-held 的训练锚点契约）用户已按建议定（D48：≥ Δ = 20 s，token 段放不下时用上一段的码）。
+什么都没在跑：GPU 空闲；runs worktree `.claude/worktrees/manoeuvre-runs` 停在 5208707（launch 前 `checkout --detach` 到含阶段 B 代码的提交）。磁盘约 10.5 GB 空余（B0 用了 0.5 GB）。
 
 **阶段 A 的结论（细节与每个数在 `2026-09-18_two_tier_v3_results.zh.md`，节号见下）**
 - 网格 20 格 × 2 seed（L ∈ {30,60,90,120} s × Δ ∈ {20,30,60,90,120} s）跑完（§1 读数 (a) 从各自 L−1 起、§2 读数 (b) 从 12/8/6 km 起、§7 读数 (c) 从第 59 行起）。
@@ -177,3 +179,51 @@ seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
   相对门 runner `executor_relative_gate`（D45）已写并用于这两个比较（产物 `gate/relative_a3a_*`、`two_tier_v3_a3b_20260919/gate/relative_a3b_*`）。
 - 2026-09-19 晚（用户审阶段 B 时）：计划重排成每节一个大块、阶段为小节（6515cbf）；四种读法改用名字（真值 token / 先验 token / 先验读真值历史 / 无 token）；5.2.0 加了第二层两部分的说明、先验一段重写（4af760f）；B0–B3 按"为什么 → 做什么 → 怎么判 → 不过怎么办"重写、术语行逐词解释（55ae671）；B 里的第 59 行读数删掉（961025f）。
   相对门 runner review 修完提交（01f29dc）；A3 结果与 A3-a 代码提交（f89be15、d76ed64）。记忆新增 `plain-wording.md`、`doc-structure.md`。
+
+## 7. 阶段 B 开发（2026-09-19 晚起；用户答复：对照臂做、B0 先跑、Q3 待答；"最大程度利用时间，不干等实验"）
+
+### 7.1 开发项与状态
+
+| # | 开发 | 状态 | 提交 |
+|---|---|---|---|
+| B-dev0 | `manoeuvre_lockstep --cohort <development_cohort.json>`（`cohort_keys`：只飞该 cohort 在这个 split 里的航班，按 checkpoint 的顺序；cohort 里有 checkpoint 没有的航班就拒绝；payload 记 `cohort`） | 完成，B0 已用它跑完 | 待提交（review 中） |
+| B-dev1 | 字段 `manoeuvre_token_s`（S，0 = 视界）与 `manoeuvre_token_step_s`（闭环里每次飞多长，0 = 视界）；`token_span_s / token_step_s / token_hold`；校验（S ≥ 视界、步长 ≤ 视界、都是 dt 的整数倍、步长是积分步的整数倍、S 是步长的整数倍）；码本 `segment_s` = S；`plan_token`、码本导出、先验、lockstep、码图谱都改读 S；命名 `tok-s=` / `tok-step=` | 完成（S = 0 时与 09-18 行为逐位相同，测试钉住） | 待提交（review 中） |
+| B-dev2 | 训练时 token 段内位置 φ 的抽样（+ Q3 若采纳：段放不下时用上一段的码） | 未做，等 review 落地与 Q3 | — |
+| B-dev3 / 3′ / 5 | lockstep：同一 token 连用 S/步长 轮、带 token 读法下每轮只飞步长秒、先验落地只记时刻不停飞 | 未做，等 review 落地 | — |
+| B-dev4 | `executor_relative_gate`（已有）+ **门 B1 一行**（`verdicts.b1`：任一项两 seed 都超线 + fully flyable，不要求其余项不差） | 完成 | 待提交 |
+| B-dev6 | `two_tier_b_queue --arms --campaign --airport [--groups] [--dry-run]`：按组（配置 × 词表，两 seed）串行——train → 每臂码本导出、真值 token 读数（带记录）、失败方式、码图谱 → 门 B1 → 过则每臂先验、先验 token（带记录）/ 先验读真值历史读数、失败方式 → 门 B；先验步骤在运行时读 `gate/b1_<组>/relative_gate.json` 决定跑不跑；PID `<campaign>/two_tier_b_queue.pid` | 完成，真实臂文件 dry-run 通过 | 待提交 |
+| B-dev7 | 臂文件 `docs/experiments/two_tier_v3_b_arms.json`（12 臂：S20 / S60h60 / S60held × K16 / cv × 2 seed，`stage_b` 块给队列：各配置的基线读数模板、seed 线来源、码本目录模板）；intents：campaign `two_tier_v3_b_20260919` 12 run + 36 读法变体，网格加 `L60_D20_s*@lockstep-none-b` | 完成 | 待提交 |
+| B0 | 基线重读 + 失败方式表 | 19:53Z 提前跑的那次用了没写完的代码（payload v2），已删；改为队列第 0 步（`baseline_steps`：L60_D20 与 L60_D60 只飞 20 s，各两 seed，带记录 + 失败方式） | — |
+
+### 7.2 代码事实
+
+- 臂名 `<配置>_<词表>_s<seed>`；组 = 去掉 `_s<seed>`；配置名与 `stage_b.configurations` 的键对应，每臂的 `configuration` 字段写明；overrides 重述该配置的数字（测试 `test_two_tier_v3_b.py` 钉住 D30–D36、D38、D41、D43）。
+- 码本目录 `4dTrajectory/outputs/codebooks/two_tier_v3_b_20260919_<臂>/`（09-18 的位置约定）；读数 `<campaign>/lockstep/<臂>/{C,A,A-truth}/`；失败方式 `<campaign>/failure_modes/<臂>_{C,A}/`；码图谱 `<campaign>/atlas/<臂>/`；先验 `<campaign>/priors/<臂>/prior.pt`；门 `<campaign>/gate/{b1,b}_<组>/`。
+- 队列的基线由队列自己飞（第 0 步，臂文件 `stage_b.baselines`，只飞所选组要比的那些）：`L60_D20`（S20 与 S60held 的对照）→ `<campaign>/baseline/L60_D20_s{seed}/L-1`；`L60_D60_exec20`（`--execute-s 20`，S60h60 的对照）→ `<campaign>/baseline/L60_D60_exec20_s{seed}/L-1`；失败方式 `failure_modes/<基线>_s{seed}_none/`。seed 线 → 网格 `gate/after_L120_D120/grid_gate.json`（0.078 / 0.184 / 150 m，数值来源，D39）。启动前检查 checkpoint、cohort 文件、seed 线三项指标的 p75 都在。
+- 相对门 `executor_relative_gate` 与失败方式脚本只认本版代码的 `LOCKSTEP_SCHEMA`（v3），别的 schema 按名字拒绝；分层表与 `gates.cell_reading` 严格读 v3 的列（`executed_s` 早先的 `.get` 兼容一并去掉）。阶段 A 的门与失败方式产物是当时的代码写的，不重跑；`executor_grid_gate` 因此不能再在阶段 A 的 v2 读数上重跑（用户 2026-09-19 的原则）。
+- B cohort 文件 = 网格 `cohorts/L60_D60/development_cohort.json`（D47）；每臂不另写 `development_cohort`，文件级一条。
+- 一份基线读数约 1.5 min（1404 架，19:53Z 那次量的），记录约 250 MB / seed；四份基线 + 失败方式约 1 GB。
+- 相对门的 `_pb` / `_pc` 未用变量是 pyflakes 早先就有的提示，不是本轮引入。
+
+### 7.3 待用户定 / 待办
+
+- ~~Q3~~ 用户 2026-09-19 晚定：按建议（D48）——锚点后 ≥ Δ、token 段放不下时用上一段的码；臂文件 `random_train_anchor_min_future_s = 20`，代码 `plan_token.token_span_start_s`。
+- B-dev0/1 的 opus review 结果落地后修、提交；再做 B-dev2、B-dev3/3′/5；每项 review、提交；最后 worktree 移到该提交，dry-run，等用户说"跑"。
+- 19:53Z 那次 B0 的两份记录已发布到 picker（`experiment_l60_d20_s<seed>_…_lockstep-none-b_val`，182 → 184 类，来源目录已删，轨迹与重飞的相同）；队列重飞后的基线与失败方式子集等阶段 B 读数一起发（变体 `@lockstep-none-b`、`@lockstep-none-exec20-b` 已登记；子集发布时加 `@fail-<mode>`）。
+
+### 7.4 阶段 B 队列的启动清单（M-B0′ 之后）
+
+1. `git status --short` 为空；`git -C .claude/worktrees/manoeuvre-runs status --short` 为空且 `checkout --detach` 到含阶段 B 代码的最新提交。
+2. `nvidia-smi --query-compute-apps=pid --format=csv,noheader` 没有别的训练；`<campaign>/two_tier_b_queue.pid` 不存在；空余 ≥ 3 GB（12 臂约 0.6 GB + 记录约 2.5 GB）。
+3. dry-run：`conda run -n aeroviz --no-capture-output python .claude/worktrees/manoeuvre-runs/run_ts.py two_tier_b_queue --arms 4dTrajectory/ts_transformer/docs/experiments/two_tier_v3_b_arms.json --campaign 4dTrajectory/outputs/KRDU/experiments/two_tier_v3_b_20260919 --airport KRDU --dry-run`，应列 `GROUP baselines`（4 份 lockstep none + 4 份失败方式）再 6 个臂组、每组 1 train + 8 读数步 + 门 B1 + 9 个 `[if gate b1 passes]` 步，全是 todo。
+4. 启动（主树目录，程序来自 worktree）：
+```
+cd /home/supercomputing/studys/thesis
+W=.claude/worktrees/manoeuvre-runs
+C=4dTrajectory/outputs/KRDU/experiments/two_tier_v3_b_20260919
+nohup setsid conda run -n aeroviz --no-capture-output python $W/run_ts.py two_tier_b_queue \
+  --arms 4dTrajectory/ts_transformer/docs/experiments/two_tier_v3_b_arms.json \
+  --campaign $C --airport KRDU > $C/two_tier_b_queue.log 2>&1 &
+```
+5. Monitor 盯 `$C/two_tier_b_queue.log`，匹配 `GROUP .* complete|GATE B1|STOP:|queue done`；每组完成读 `gate/b1_<组>/relative_gate.txt`，写进结果文档 §10；`STOP:` 不重跑，按 E8 处理后等用户。
+6. 预计：第 0 步 4 份基线约 8 min；训练 12 臂 × 12–15 min ≈ 3 h；每臂真值 token 读数 + 失败方式 + 图谱约 3 min；过门的组再加先验 3–5 min + 两读数 4 min / 臂。

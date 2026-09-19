@@ -36,7 +36,7 @@ import time
 import torch
 
 from ts_transformer.backbone.adapters import resolve_device
-from ts_transformer.config import TSConfig, default_anchor
+from ts_transformer.config import TSConfig, default_anchor, token_span_s
 from ts_transformer.data.dataset import truth_duration_s
 from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, sha256_bytes, utc_now, write_json_atomic
@@ -122,8 +122,8 @@ def main(argv: list[str] | None = None) -> int:
     executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
     payload = load_checkpoint_payload(executor)
     config = TSConfig.from_dict(payload["config"])
-    if config.control_horizon_s != codebook.segment_s or config.dt_s != codebook.dt_s:
-        parser.error(f"the executor's horizon {config.control_horizon_s:g} s / {config.dt_s:g} s is not the codebook's "
+    if token_span_s(config) != codebook.segment_s or config.dt_s != codebook.dt_s:
+        parser.error(f"the executor's token span {token_span_s(config):g} s / {config.dt_s:g} s is not the codebook's "
                      f"{codebook.segment_s:g} s / {codebook.dt_s:g} s")
     if args.continuous and codebook.kind != "learned":
         parser.error("the continuous prior regresses a learned tokenizer's coordinates; the command vocabulary has none")

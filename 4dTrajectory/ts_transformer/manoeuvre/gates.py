@@ -233,7 +233,7 @@ def cell_reading(payload: dict[str, Any]) -> dict[str, float]:
         "established_straight": straight["established_share"], "fully_flyable": pooled["fully_flyable_share"],
         "vectored_ade_mean_m": vectored["ade_mean_m"], "fde_p50_m": pooled["fde_p50_m"],
         # a receding reading (A3-a) flies only the first executed_s of each segment_s forecast: carried, never silent
-        "segment_s": payload["segment_s"], "executed_s": payload.get("executed_s", payload["segment_s"]),
+        "segment_s": payload["segment_s"], "executed_s": payload["executed_s"],
     }
 
 
@@ -323,7 +323,11 @@ def gate_relative(baseline: Mapping[int, Mapping[str, float]], candidate: Mappin
     −line, "beyond" = improvement > line. Row A3: on at least one primary both seeds improve and
     one of them beyond the line, the other primary is not worse on both seeds, and the candidate
     is fully flyable ≥ the floor on both seeds. Row B: every metric not worse on both seeds, at
-    least one metric beyond the line on both seeds, fully flyable ≥ the floor on both seeds."""
+    least one metric beyond the line on both seeds, fully flyable ≥ the floor on both seeds.
+    Gate B1 (stage B's truth-token upper bound, §5.2.2): at least one metric beyond the line on
+    both seeds and fully flyable ≥ the floor — row B without the not-worse clause, because a
+    truth token that buys one thing at the price of another still carries information the
+    prior is worth training for; row B, read on the prior's token, is where the price counts."""
     seeds = sorted(baseline)
     if len(seeds) != 2 or sorted(candidate) != seeds:
         raise ValueError(f"the relative gate reads two seeds on both sides; got baseline {sorted(baseline)} and candidate {sorted(candidate)}")
@@ -351,6 +355,8 @@ def gate_relative(baseline: Mapping[int, Mapping[str, float]], candidate: Mappin
                    "rule": "on a primary both seeds improve and one beyond the seed line; the other primary not worse; fully flyable ≥ floor"},
             "b": {"pass": b_not_worse and bool(b_beyond) and flyable_ok, "beyond_on": b_beyond, "not_worse": b_not_worse,
                   "rule": "every metric not worse on both seeds; at least one beyond the seed line on both seeds; fully flyable ≥ floor"},
+            "b1": {"pass": bool(b_beyond) and flyable_ok, "beyond_on": b_beyond,
+                   "rule": "at least one metric beyond the seed line on both seeds; fully flyable ≥ floor (the truth-token upper bound)"},
         },
     }
 

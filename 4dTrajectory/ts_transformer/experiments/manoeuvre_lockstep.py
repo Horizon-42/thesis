@@ -8,6 +8,8 @@
         [--anchor-remaining-km 12]           # the baseline: no code, no codebook, same rounds and budget
         [--first-prediction-row 59]          # reading (c): every cell starts at the same row of the flight
         [--execute-s 20]                     # A3-a: forecast the whole horizon, fly only its first 20 s, predict again
+        [--cohort <development_cohort.json>] # v3 stage B0: only that cohort's flights of the split (a subset of the checkpoint's)
+        [--prior-landing-ends-flight]        # A / A-truth: the 09-18 rule (the prior's landing ends the flight); off = v3 D37
 
 The coded protocols' three artefacts must be ONE vocabulary: a jointly trained executor's
 codebook is the one exported from it (the codebook's ``source.checkpoint_sha256`` is the
@@ -26,7 +28,13 @@ instead, so cells of different lookback fly the SAME segment and differ only in 
 executor's horizon of truth after N is counted, not flown). Writes
 ``manoeuvre_lockstep.json`` (per-flight rows included) and ``manoeuvre_lockstep.txt`` under
 ``--out`` (refused if it exists); ``--write-records`` adds the flown paths as a predict-shaped
-record directory under ``<out>/records/``.
+record directory under ``<out>/records/``. ``--cohort`` (two-tier v3 stage B0, D33) restricts
+the split to a development cohort's roster of it, in the checkpoint's order — the baseline
+re-read on the flights every stage B arm shares; a cohort flight the checkpoint's split does
+not hold refuses (`cohort_keys`), so the reading is never a silent superset. Under a held token
+(two-tier v3 D38: the executor's `token_hold` > 1) one token is held for S / step rounds and a coded
+protocol's round flies the config's token step (`lockstep.round_step_s`); the payload carries
+``token_span_s`` / ``token_step_s`` / ``token_hold``, every round its ``token_index`` and ``phase``.
 """
 
 from __future__ import annotations
@@ -42,8 +50,10 @@ import torch
 
 from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.config import default_anchor as default_anchor_of
+from ts_transformer.config import token_hold, token_span_s, token_step_s
 from ts_transformer.data.anchor_strata import DEFAULT_ANCHOR_GRID_KM
 from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_SHORT, strata_masks
+from ts_transformer.data.development_cohorts import DevelopmentCohort, development_cohort_audit, load_development_cohort
 from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.inference.export import build_prediction_record, write_batch
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
@@ -61,7 +71,10 @@ from ts_transformer.training.train import load_checkpoint
 #: code columns and its codebook keys are null.
 #: `executed_s` (2026-09-19, A3-a): the seconds of each forecast flown before the next prediction — the
 #: horizon unless ``--execute-s``; `first_prediction.common_row` (2026-09-19, reading (c)).
-LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v2"
+#: v3 (2026-09-19, stage B): `token_span_s` / `token_step_s` / `token_hold` and `prior_landing_ends_flight` in
+#: the payload, `token_refreshes` / `prior_landed_at_s` / `prior_landed_error_s` per row, `token_index` / `phase`
+#: per round; a v2 payload is a v3 one at hold 1 with the prior's landing ending the flight.
+LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v3"
 #: The summary block a written record directory carries.
 LOCKSTEP_RECORDS_BLOCK = "manoeuvre_lockstep"
 
@@ -71,6 +84,19 @@ def load_prior(path: Path, device: torch.device) -> tuple[ls.Prior, dict[str, An
     model = ManoeuvrePrior(PriorConfig.from_dict(payload["prior_config"]))
     model.load_state_dict(payload["state_dict"])
     return ls.Prior(model=model.to(device).eval(), vocabulary=TypeVocabulary.from_dict(payload["vocabulary"])), payload
+
+
+def cohort_keys(payload: dict[str, Any], split: str, cohort: DevelopmentCohort) -> list[str]:
+    """The checkpoint's ``split`` flights that ``cohort``'s roster of that split holds, in the
+    checkpoint's order; a cohort flight the checkpoint does not hold refuses (the cohort is a
+    subset of the executor's own split, never another population)."""
+    roster = set(cohort.train_flight_ids if split == "train" else cohort.val_flight_ids)
+    held = list(payload["split"][split])
+    missing = roster - set(held)
+    if missing:
+        raise ValueError(f"{len(missing)} flight(s) of cohort {cohort.name!r} ({split}) are not in the executor's {split} split "
+                         f"(first: {sorted(missing)[0]!r}): a lockstep cohort is a subset of the executor's own split")
+    return [key for key in held if key in roster]
 
 
 def _p50(values) -> float | None:
@@ -100,6 +126,9 @@ def stratum_table(rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "at_n": {lead: sum(r["at"][lead] is not None for r in chosen) for lead in chosen[0]["at"]},
             "ended": dict(Counter(r["ended"] for r in chosen)),
             "predictions_p50": _p50([r["predictions"] for r in chosen]),
+            "token_refreshes_p50": _p50([r["token_refreshes"] for r in chosen]),
+            "prior_landed_share": float(np.mean([r["prior_landed_at_s"] is not None for r in chosen])),
+            "prior_landed_error_p50_s": _p50([r["prior_landed_error_s"] for r in chosen]),
             "e_track_by_round_p50_m": _by_round(chosen, "e_track_m"),
             "e_plan_by_round_p50_m": _by_round(chosen, "e_plan_m"),
         }
@@ -125,9 +154,10 @@ def render(payload: dict[str, Any]) -> str:
         f"manoeuvre lockstep · {payload['protocol']} · {payload['executor_name']} · {payload['flights']} flights · "
         f"segment {payload['segment_s']:g} s"
         + (f" (flies the first {payload['executed_s']:g} s of each)" if payload["executed_s"] != payload["segment_s"] else "")
+        + (f" · token {payload['token_span_s']:g} s held {payload['token_hold']} rounds" if payload["token_hold"] > 1 else "")
         + f" · first prediction {first['rule']}"
         + (f" ({first['flights_without_a_row']} flights not flown: no admissible row)" if first["flights_without_a_row"] else "")
-        + (f" · prior {payload['prior']}" if payload.get("prior") else ""),
+        + (f" · prior {payload['prior']}" if payload["prior"] else ""),
         "",
         f"{'stratum':<14}{'n':>6}{'ADE mean':>10}{'ADE p50':>9}{'FDE p50':>9}{'flyable':>9}{'estab':>8}"
         f"{'e60':>7}{'e120':>7}{'e180':>7}{'e300':>7}{'preds':>6}  ended · n at each lead",
@@ -171,11 +201,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--split", default="val", choices=("train", "val"),
                         help="val (every readout); train ONLY as the closed-loop training's input (protocol C, plan §2.7)")
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the cohort (a smoke test)")
+    parser.add_argument("--cohort", type=Path, default=None,
+                        help="a development cohort file: fly only its roster of --split (a subset of the checkpoint's split)")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--write-records", action="store_true")
+    parser.add_argument("--prior-landing-ends-flight", action="store_true",
+                        help="A / A-truth: the prior's landing ends the flight (the 09-18 rule); off, it is recorded only (v3 D37)")
     args = parser.parse_args(argv)
     if args.execute_s is not None and args.protocol != ls.PROTOCOL_NONE:
-        parser.error("--execute-s is a no-token reading (protocol none): the coded protocols' codes are per whole segment")
+        parser.error("--execute-s is a no-token reading (protocol none): a coded protocol's step is the config's manoeuvre_token_step_s")
+    if args.prior_landing_ends_flight and args.protocol not in (ls.PROTOCOL_A, ls.PROTOCOL_A_TRUTH):
+        parser.error("--prior-landing-ends-flight is the prior's rule: protocols A and A-truth")
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
         parser.error(f"{out} exists; a lockstep readout is never overwritten")
@@ -212,11 +248,21 @@ def main(argv: list[str] | None = None) -> int:
         if seen or not set(prior_payload["split"]["val"]) <= executor_val:
             parser.error(f"{args.prior} was trained on another split than this executor's ({len(seen)} of its train "
                          "flights are in this val set, or its val is not inside it): the prior may have seen these val flights")
-        if int(prior_payload["anchor"]) != default_anchor_of(config) or float(prior_payload["segment_s"]) != config.control_horizon_s:
+        if int(prior_payload["anchor"]) != default_anchor_of(config) or float(prior_payload["segment_s"]) != token_span_s(config):
             parser.error(f"{args.prior} was trained at anchor {prior_payload['anchor']} / segment {prior_payload['segment_s']:g} s, "
-                         f"not this executor's {default_anchor_of(config)} / {config.control_horizon_s:g} s")
-    executed_s = ls.executed_step_s(config, args.execute_s)      # a bad step is refused here, before the cohort is rebuilt
-    wanted = payload["split"][args.split][: args.limit] if args.limit else payload["split"][args.split]
+                         f"not this executor's {default_anchor_of(config)} / token span {token_span_s(config):g} s")
+    executed_s = ls.round_step_s(config, args.protocol, args.execute_s)      # a bad step is refused here, before the cohort is rebuilt
+    cohort = None
+    wanted = list(payload["split"][args.split])
+    if args.cohort is not None:
+        cohort_path = args.cohort if args.cohort.is_absolute() else REPO_ROOT / args.cohort
+        cohort = load_development_cohort(cohort_path)
+        try:
+            wanted = cohort_keys(payload, args.split, cohort)
+        except ValueError as exc:
+            parser.error(str(exc))
+    if args.limit:
+        wanted = wanted[: args.limit]
     series = rebuild_cohort(payload, config, wanted)
     a0 = default_anchor_of(config)
     first_rows = {item.dataset_id: a0 for item in series}
@@ -240,7 +286,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {args.protocol}: {len(series)} flights, first prediction {first_prediction['rule']}, {run_display_name(config.to_dict())}", flush=True)
 
     runs = ls.fly(executor, codebook, series, args.protocol, prior=prior, device=device, batch_size=args.batch_size,
-                  log=lambda line: print(line, flush=True), execute_s=args.execute_s)
+                  log=lambda line: print(line, flush=True), execute_s=args.execute_s,
+                  landed_ends_flight=args.prior_landing_ends_flight)
     rows: dict[str, dict[str, Any]] = {}
     pairs = []
     for index, run in enumerate(runs):
@@ -264,9 +311,14 @@ def main(argv: list[str] | None = None) -> int:
         "prior_executor_sha256": None if prior_payload is None else prior_payload["executor_sha256"],
         "prior_trained_on_this_executor": None if prior_payload is None else prior_payload["executor_sha256"] == executor_sha,
         "segment_s": config.control_horizon_s, "executed_s": executed_s,
+        "token_span_s": token_span_s(config), "token_step_s": token_step_s(config),
+        "token_hold": token_hold(config),
+        "prior_landing_ends_flight": args.prior_landing_ends_flight,
         "anchor": a0, "first_prediction": first_prediction, "split": args.split, "limit": args.limit or None,
+        "cohort": None if cohort is None else {**development_cohort_audit(cohort_path, cohort), "path": str(cohort_path), "flown": len(wanted)},
         "flights": len(rows), "flights_without_a_leg": flown_none,
-        "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first prediction (a cap; under A the prior's landed decides)",
+        "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first prediction (a cap; under A the prior's landing "
+                       "ends the flight only with --prior-landing-ends-flight)",
         "strata": stratum_table(rows), "rows": rows, "elapsed_s": time.perf_counter() - started,
     }
     out.mkdir(parents=True)

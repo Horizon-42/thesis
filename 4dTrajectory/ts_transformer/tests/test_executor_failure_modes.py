@@ -161,7 +161,8 @@ def test_the_runner_reads_the_stratum_s_non_crossing_flights_off_the_records(tmp
         "KRDU:C_05L": {"flight_id": "C_05L", "reference": {"established": True}, "ended": "crossed", "predictions": 3, **covariates},      # crossed: not read
         "KRDU:D_05L": {"flight_id": "D_05L", "reference": {"established": False}, "ended": "horizon", "predictions": 5, **covariates, "route_tortuosity": 1.0},  # straight-in
     }
-    (lockstep / "manoeuvre_lockstep.json").write_text(json.dumps({"protocol": "none", "segment_s": 20.0, "executor": "x", "first_prediction": {"rule": "fixed L-1 (row 7)"},
+    from ts_transformer.experiments.manoeuvre_lockstep import LOCKSTEP_SCHEMA
+    (lockstep / "manoeuvre_lockstep.json").write_text(json.dumps({"schema": LOCKSTEP_SCHEMA, "protocol": "none", "segment_s": 20.0, "executed_s": 20.0, "executor": "x", "first_prediction": {"rule": "fixed L-1 (row 7)"},
                                                                   "rows": rows}), encoding="utf-8")
     assert runner.main(["--lockstep", str(lockstep), "--out", str(tmp_path / "out"), "--per-mode", "1"]) == 0
     result = json.loads((tmp_path / "out" / "failure_modes.json").read_text(encoding="utf-8"))

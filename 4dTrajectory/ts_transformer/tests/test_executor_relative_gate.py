@@ -10,6 +10,7 @@ import json
 import pytest
 
 from ts_transformer.experiments import executor_relative_gate as runner
+from ts_transformer.experiments.manoeuvre_lockstep import LOCKSTEP_SCHEMA
 from ts_transformer.manoeuvre import gates
 
 LINE = {"established_all": 0.05, "established_vectored": 0.10, "vectored_ade_mean_m": 100.0}
@@ -33,18 +34,23 @@ def test_the_relative_gate_reads_improvements_against_the_seed_line_per_seed():
     candidate = {1337: _reading(0.78, 0.42, 2350.0), 2024: _reading(0.80, 0.44, 2320.0)}
     result = gates.gate_relative(baseline, candidate, seed_line=LINE)
     assert result["verdicts"]["b"]["pass"] is True and result["verdicts"]["b"]["beyond_on"] == ["established_all"]
-    # the vectored ADE worse beyond its line: row B fails (not worse on every metric), row A3 does not read the ADE
+    # the vectored ADE worse beyond its line: row B fails (not worse on every metric), row A3 does not read the ADE,
+    # and gate B1 (the truth-token upper bound: beyond on one metric on both seeds, no not-worse clause) still passes
     candidate = {1337: _reading(0.78, 0.42, 2550.0), 2024: _reading(0.80, 0.44, 2320.0)}
     result = gates.gate_relative(baseline, candidate, seed_line=LINE)
     assert result["verdicts"]["b"]["pass"] is False and result["verdicts"]["b"]["not_worse"] is False
     assert result["verdicts"]["a3"]["pass"] is True
+    assert result["verdicts"]["b1"]["pass"] is True and result["verdicts"]["b1"]["beyond_on"] == ["established_all"]
+    # beyond on ONE seed only: gate B1 fails like row B
+    candidate = {1337: _reading(0.78, 0.42, 2350.0), 2024: _reading(0.75, 0.44, 2320.0)}
+    assert gates.gate_relative(baseline, candidate, seed_line=LINE)["verdicts"]["b1"]["pass"] is False
     # the other primary worse beyond its line: row A3 fails on that primary
     candidate = {1337: _reading(0.78, 0.25, 2350.0), 2024: _reading(0.80, 0.44, 2320.0)}
     assert gates.gate_relative(baseline, candidate, seed_line=LINE)["verdicts"]["a3"]["pass"] is False
     # not fully flyable on one seed: nothing passes
     candidate = {1337: _reading(0.78, 0.42, 2350.0, flyable=0.9), 2024: _reading(0.80, 0.44, 2320.0)}
     verdicts = gates.gate_relative(baseline, candidate, seed_line=LINE)["verdicts"]
-    assert not verdicts["a3"]["pass"] and not verdicts["b"]["pass"]
+    assert not verdicts["a3"]["pass"] and not verdicts["b"]["pass"] and not verdicts["b1"]["pass"]
     with pytest.raises(ValueError, match="two seeds"):
         gates.gate_relative({1337: baseline[1337]}, candidate, seed_line=LINE)
     with pytest.raises(ValueError, match="missing"):
@@ -55,13 +61,15 @@ def test_the_relative_gate_reads_improvements_against_the_seed_line_per_seed():
 
 def _row(established: bool, vectored: bool, ade: float, flyable: bool = True) -> dict:
     return {"ade_m": ade, "fde_m": ade / 2, "chamfer_m": ade / 3, "final_time_error_s": 1.0, "ended": "crossed" if established else "horizon",
-            "predictions": 5, "rounds": [{"round": 0, "e_track_m": 50.0}], "at": {"60": 100.0},
+            "predictions": 5, "token_refreshes": 5, "prior_landed_at_s": None, "prior_landed_error_s": None,
+            "rounds": [{"round": 0, "token_index": 0, "phase": 0, "e_track_m": 50.0}], "at": {"60": 100.0},
             "reference": {"fully_flyable": flyable, "established": established},
             "route_tortuosity": 1.5 if vectored else 1.0, "established_at_anchor": not vectored, "remaining_path_m": 20_000.0}
 
 
 def _payload(rows: dict, protocol: str = "none", segment_s: float = 20.0, executed_s: float = 20.0) -> dict:
-    return {"protocol": protocol, "segment_s": segment_s, "executed_s": executed_s, "first_prediction": {"rule": "fixed L-1 (row 29)"},
+    return {"schema": LOCKSTEP_SCHEMA, "protocol": protocol, "segment_s": segment_s, "executed_s": executed_s,
+            "first_prediction": {"rule": "fixed L-1 (row 29)"},
             "executor": f"{protocol}-executor", "executor_sha256": "0" * 64, "executor_name": "twin", "flights": len(rows), "rows": rows}
 
 
@@ -93,6 +101,7 @@ def test_the_runner_intersects_the_flights_recomputes_both_readings_and_names_th
     assert result["candidate_sources"]["1337"] == {"dir": str(dirs[("candidate", 1337)]), "executor": "none-executor", "executor_sha256": "0" * 64}
     printed = capsys.readouterr().out
     assert "common 8" in printed and "executed s 20 / 20 vs 20 / 60" in printed and "row A3: PASS" in printed and "row B:  PASS" in printed
+    assert "gate B1: PASS" in printed and result["verdicts"]["b1"]["pass"] is True
     # the verdict is never overwritten
     with pytest.raises(SystemExit):
         runner.main(argv)
@@ -106,3 +115,10 @@ def test_the_runner_intersects_the_flights_recomputes_both_readings_and_names_th
     with pytest.raises(SystemExit):
         runner.main(mismatched)
     assert "different rules" in capsys.readouterr().err and not (tmp_path / "gate2").exists()
+    # a payload of another schema (a reading flown by older code) is refused by name, never read around
+    older = tmp_path / "older"
+    older.mkdir()
+    (older / "manoeuvre_lockstep.json").write_text(json.dumps({**_payload(candidate_rows), "schema": "ts-manoeuvre-lockstep-v2"}), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        runner.main(argv[:4] + [f"1337={older}", f"2024={dirs[('candidate', 2024)]}"] + argv[6:-1] + [str(tmp_path / "gate3")])
+    assert f"is not {LOCKSTEP_SCHEMA!r}" in capsys.readouterr().err
