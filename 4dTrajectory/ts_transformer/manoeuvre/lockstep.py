@@ -28,7 +28,8 @@ row `anchor_grid.bin_anchor` places at the bin, so the same lockstep from L−1 
 IS the lockstep from that row of the whole flight.
 
 One round = ``segment_s`` = the executor's horizon: the forecast is exactly one segment and is
-flown whole (the one-shot variant, plan §2.6) unless it crosses the threshold ON THE FINAL
+flown whole (the one-shot variant, plan §2.6) — or, under protocol none with ``execute_s`` (v3
+A3-a), only its first ``execute_s`` before the next prediction — unless it crosses the threshold ON THE FINAL
 inside the segment (`inference.forecast.cut_at_threshold_crossing`: the flight ends,
 ``crossed``) or the flight's budget runs out (``horizon``). The budget is
 `closing_horizon_s` of the truth's duration at the first prediction — T₀ + max(30 s, 0.1·T₀), the
@@ -99,6 +100,7 @@ def closing_horizon_s(T_s: float) -> float:
 
 
 def required_positions(max_truth_duration_s: float, segment_s: float, longest_truth_segments: int) -> int:
+    # rounds are whole segments here (round k starts at segment_s·k): execute_s is refused under the coded protocols
     """How many positions a prior must hold to be queried at every round of a lockstep: the
     BUDGET's rounds (`closing_horizon_s` of the longest truth, in segments, rounded up) plus
     the BOS position and one spare — never fewer than the longest truth sequence needs. Sized
@@ -169,6 +171,22 @@ def from_row(series: Sequence[FlightSeries], config: TSConfig, row: int) -> tupl
     return cut, {item.dataset_id: row for item in kept}
 
 
+def executed_step_s(config: TSConfig, execute_s: float | None) -> float:
+    """The seconds of each forecast the closed loop flies before predicting again: the whole
+    horizon, or ``execute_s`` (v3 A3-a) — which must be a whole number of series rows AND of
+    integrator steps inside the horizon, because the leg is cut on the dense rollout grid
+    (`cut_at_lead`: the integrator step plus the segment boundaries)."""
+    horizon_s = config.control_horizon_s
+    if execute_s is None:
+        return horizon_s
+    step_s = float(execute_s)
+    grids = (config.dt_s, config.control_rollout_integrator_dt_s)
+    if not (0 < step_s <= horizon_s) or any(abs(round(step_s / h) * h - step_s) > ROW_TOLERANCE_S for h in grids):
+        raise ValueError(f"execute_s must be a whole number of rows ({config.dt_s:g} s) and of integrator steps "
+                         f"({config.control_rollout_integrator_dt_s:g} s) inside the horizon {horizon_s:g} s: got {step_s:g} s")
+    return step_s
+
+
 def _polyline(run: FlightRun) -> tuple[np.ndarray, np.ndarray]:
     """The flown path on the flight's clock: the anchor's observed row, then every leg's rows."""
     a0 = run.anchor
@@ -237,11 +255,13 @@ def _prior_step(prior: Prior, codes: Sequence[Sequence[int]], states: Sequence[n
 
 def fly(
     executor: Executor, codebook: Codebook | None, series: Sequence[FlightSeries], protocol: str, *,
-    prior: Prior | None, device: torch.device, batch_size: int, log=None,
+    prior: Prior | None, device: torch.device, batch_size: int, log=None, execute_s: float | None = None,
 ) -> list[FlightRun]:
     """Every flight of ``series`` from the executor's fixed anchor, one round at a time for the
     whole cohort, under ``protocol``. The codebook is the coded protocols' vocabulary; protocol
-    ``none`` takes none."""
+    ``none`` takes none. ``execute_s`` (v3 A3-a, D43) flies only the first ``execute_s`` of each
+    forecast and predicts again there — the executor still forecasts its whole horizon; a
+    no-token reading only, since the coded protocols' codes are per whole segment."""
     if protocol not in PROTOCOLS:
         raise ValueError(f"protocol is one of {PROTOCOLS}, got {protocol!r}")
     if (protocol in (PROTOCOL_A, PROTOCOL_A_TRUTH)) != (prior is not None):
@@ -261,8 +281,12 @@ def fly(
         # e_plan cuts the truth-code leg at the flown leg's span (`cut_at_lead` needs a row
         # there): the two legs share their query grid only under uniform segment durations
         raise ValueError("the lockstep's e_plan reading needs uniform control segment durations (the P1.4 recipe's)")
+    if execute_s is not None and protocol != PROTOCOL_NONE:
+        raise ValueError("executing a prefix of each forecast (execute_s) is a no-token reading: "
+                         "the coded protocols' codes are per whole segment")
+    step_s = executed_step_s(config, execute_s)
     a0 = default_anchor(config)
-    step_rows = int(round(segment_s / dt_s))
+    step_rows = int(round(step_s / dt_s))
     truths = flight_sequences(series, codebook, a0) if codebook is not None else [None] * len(series)
     runs = [FlightRun(series=item, anchor=a0, truth=truth, horizon_s=closing_horizon_s(truth_duration_s(item, a0)))
             for item, truth in zip(series, truths, strict=True)]
@@ -323,7 +347,7 @@ def fly(
             truth_z = np.stack([run.truth.z[min(round_index, run.truth.length - 1)] for run in active])
             plan_legs = _fly(executor, histories, anchor, truth_z, device, batch_size)
         for row, (run, history, forecast) in enumerate(zip(active, histories, forecasts, strict=True)):
-            leg = _fly_leg(run, history, forecast, segment_s=segment_s, round_index=round_index, code=codes[row])
+            leg = _fly_leg(run, history, forecast, segment_s=step_s, round_index=round_index, code=codes[row])
             if leg is None:
                 continue   # the budget ended before this round's first row: nothing flown, nothing recorded
             if plan_legs is not None:
@@ -384,6 +408,7 @@ def _fly_leg(run: FlightRun, history: FlightSeries, forecast: Forecast, *, segme
 
 
 def _tokenise_flown_leg(run: FlightRun, codebook: Codebook, segment_s: float, dt_s: float, round_index: int) -> None:
+    # a flown leg is a whole segment here (round k starts at segment_s·k): execute_s is refused under the coded protocols
     """The leg just flown, read back as the prior will read it: its rows from the flown polyline
     in the start frame, through the codebook, and the flown state at its end."""
     times, values = _polyline(run)
@@ -487,5 +512,5 @@ __all__ = [
     "ENDED_CROSSED", "ENDED_HORIZON", "ENDED_LANDED", "ENDED_TRUTH_EXHAUSTED", "HORIZON_SLACK_FRACTION",
     "HORIZON_SLACK_S", "LANDED_THRESHOLD", "LEADS_S", "PROTOCOLS", "PROTOCOL_A", "PROTOCOL_A_TRUTH",
     "PROTOCOL_C", "PROTOCOL_NONE", "CODE_NONE", "Executor", "FlightRun", "Prior", "closing_horizon_s", "flight_row", "fly",
-    "from_remaining_path", "from_row", "reference_verdicts", "required_positions", "whole_forecast",
+    "executed_step_s", "from_remaining_path", "from_row", "reference_verdicts", "required_positions", "whole_forecast",
 ]

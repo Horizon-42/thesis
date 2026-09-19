@@ -7,6 +7,7 @@
     python run_ts.py manoeuvre_lockstep --executor <no-token arm>/checkpoint.pt --protocol none --out …
         [--anchor-remaining-km 12]           # the baseline: no code, no codebook, same rounds and budget
         [--first-prediction-row 59]          # reading (c): every cell starts at the same row of the flight
+        [--execute-s 20]                     # A3-a: forecast the whole horizon, fly only its first 20 s, predict again
 
 The coded protocols' three artefacts must be ONE vocabulary: a jointly trained executor's
 codebook is the one exported from it (the codebook's ``source.checkpoint_sha256`` is the
@@ -58,6 +59,8 @@ from ts_transformer.training.train import load_checkpoint
 #: carries `first_prediction_row`, the per-round record is `rounds` (v1: `asks_e`) and the round
 #: counts `predictions` / `held_predictions` (v1: `asks` / `held_asks`), a protocol-none row has no
 #: code columns and its codebook keys are null.
+#: `executed_s` (2026-09-19, A3-a): the seconds of each forecast flown before the next prediction — the
+#: horizon unless ``--execute-s``; `first_prediction.common_row` (2026-09-19, reading (c)).
 LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v2"
 #: The summary block a written record directory carries.
 LOCKSTEP_RECORDS_BLOCK = "manoeuvre_lockstep"
@@ -120,7 +123,9 @@ def render(payload: dict[str, Any]) -> str:
     first = payload["first_prediction"]
     lines = [
         f"manoeuvre lockstep · {payload['protocol']} · {payload['executor_name']} · {payload['flights']} flights · "
-        f"segment {payload['segment_s']:g} s · first prediction {first['rule']}"
+        f"segment {payload['segment_s']:g} s"
+        + (f" (flies the first {payload['executed_s']:g} s of each)" if payload["executed_s"] != payload["segment_s"] else "")
+        + f" · first prediction {first['rule']}"
         + (f" ({first['flights_without_a_row']} flights not flown: no admissible row)" if first["flights_without_a_row"] else "")
         + (f" · prior {payload['prior']}" if payload.get("prior") else ""),
         "",
@@ -159,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="start the closed loop where each flight has this much path left to fly, instead of at L-1")
     start.add_argument("--first-prediction-row", type=int, default=None,
                        help="start the closed loop at this row of every flight (reading (c): the same segment for every lookback), instead of at L-1")
+    parser.add_argument("--execute-s", type=float, default=None,
+                        help="fly only the first N seconds of each forecast and predict again there (A3-a; protocol none only)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--split", default="val", choices=("train", "val"),
@@ -167,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--write-records", action="store_true")
     args = parser.parse_args(argv)
+    if args.execute_s is not None and args.protocol != ls.PROTOCOL_NONE:
+        parser.error("--execute-s is a no-token reading (protocol none): the coded protocols' codes are per whole segment")
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
         parser.error(f"{out} exists; a lockstep readout is never overwritten")
@@ -206,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         if int(prior_payload["anchor"]) != default_anchor_of(config) or float(prior_payload["segment_s"]) != config.control_horizon_s:
             parser.error(f"{args.prior} was trained at anchor {prior_payload['anchor']} / segment {prior_payload['segment_s']:g} s, "
                          f"not this executor's {default_anchor_of(config)} / {config.control_horizon_s:g} s")
+    executed_s = ls.executed_step_s(config, args.execute_s)      # a bad step is refused here, before the cohort is rebuilt
     wanted = payload["split"][args.split][: args.limit] if args.limit else payload["split"][args.split]
     series = rebuild_cohort(payload, config, wanted)
     a0 = default_anchor_of(config)
@@ -230,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {args.protocol}: {len(series)} flights, first prediction {first_prediction['rule']}, {run_display_name(config.to_dict())}", flush=True)
 
     runs = ls.fly(executor, codebook, series, args.protocol, prior=prior, device=device, batch_size=args.batch_size,
-                  log=lambda line: print(line, flush=True))
+                  log=lambda line: print(line, flush=True), execute_s=args.execute_s)
     rows: dict[str, dict[str, Any]] = {}
     pairs = []
     for index, run in enumerate(runs):
@@ -253,7 +263,8 @@ def main(argv: list[str] | None = None) -> int:
         "prior_continuous": None if prior is None else prior.model.config.continuous,
         "prior_executor_sha256": None if prior_payload is None else prior_payload["executor_sha256"],
         "prior_trained_on_this_executor": None if prior_payload is None else prior_payload["executor_sha256"] == executor_sha,
-        "segment_s": config.control_horizon_s, "anchor": a0, "first_prediction": first_prediction, "split": args.split, "limit": args.limit or None,
+        "segment_s": config.control_horizon_s, "executed_s": executed_s,
+        "anchor": a0, "first_prediction": first_prediction, "split": args.split, "limit": args.limit or None,
         "flights": len(rows), "flights_without_a_leg": flown_none,
         "budget_rule": "T0 + max(30 s, 0.1·T0), T0 = the truth's duration at the first prediction (a cap; under A the prior's landed decides)",
         "strata": stratum_table(rows), "rows": rows, "elapsed_s": time.perf_counter() - started,

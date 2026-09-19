@@ -232,6 +232,8 @@ def cell_reading(payload: dict[str, Any]) -> dict[str, float]:
         "n": payload["flights"], "established_all": pooled["established_share"], "established_vectored": vectored["established_share"],
         "established_straight": straight["established_share"], "fully_flyable": pooled["fully_flyable_share"],
         "vectored_ade_mean_m": vectored["ade_mean_m"], "fde_p50_m": pooled["fde_p50_m"],
+        # a receding reading (A3-a) flies only the first executed_s of each segment_s forecast: carried, never silent
+        "segment_s": payload["segment_s"], "executed_s": payload.get("executed_s", payload["segment_s"]),
     }
 
 

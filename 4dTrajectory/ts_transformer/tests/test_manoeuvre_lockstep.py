@@ -189,6 +189,52 @@ def test_protocol_none_flies_the_no_token_twin_without_a_code_or_a_codebook(worl
         ls.fly(twin, None, series, ls.PROTOCOL_NONE, prior=prior, device=torch.device("cpu"), batch_size=2)
 
 
+def test_executing_a_prefix_of_each_forecast_is_a_shorter_round_of_the_no_token_reading(world, monkeypatch):
+    """A3-a (v3 §5.3, D43): the executor forecasts its whole horizon every round but only the
+    first ``execute_s`` is flown and the next prediction is made there — shorter rounds, the same
+    budget, more predictions. Refused under a coded protocol (its codes are per whole segment)
+    and for a step that is not a whole number of rows inside the horizon."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    codebook, executor, series, _prior = world
+    twin = _no_token_executor(series)
+    half = SEGMENT_S / 2
+    whole_runs = ls.fly(twin, None, series, ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=3)
+    same_runs = ls.fly(twin, None, series, ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=3, execute_s=SEGMENT_S)
+    runs = ls.fly(twin, None, series, ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=3, execute_s=half)
+    for run, whole, same in zip(runs, whole_runs, same_runs, strict=True):
+        # execute_s = the horizon IS the whole-segment reading (the grid's readings rest on this)
+        assert same.predictions == whole.predictions and same.ended == whole.ended
+        assert np.allclose(ls.whole_forecast(same).values, ls.whole_forecast(whole).values)
+        assert run.legs and run.predictions == len(run.legs) == len(run.rounds)
+        for leg in run.legs[:-1]:                                    # every leg but the last is exactly the executed prefix
+            assert float(np.sum(leg.sample_durations_s)) == pytest.approx(half)
+        assert float(np.sum(run.legs[-1].sample_durations_s)) <= half + 1e-6
+        assert [r["lead_s"] for r in run.rounds][:2] == pytest.approx([half, 2 * half])
+        assert run.horizon_s == whole.horizon_s and run.predictions >= 2 * whole.predictions - 1
+    for bad in (SEGMENT_S + DT_S, DT_S * 1.5, 0.0):
+        with pytest.raises(ValueError, match="whole number of rows"):
+            ls.fly(twin, None, series, ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=3, execute_s=bad)
+    # a step that is a whole number of rows but not of integrator steps: the leg could not be cut on the rollout grid
+    with pytest.raises(ValueError, match="integrator steps"):
+        ls.executed_step_s(SimpleNamespace(control_horizon_s=20.0, dt_s=2.0, control_rollout_integrator_dt_s=3.0), 4.0)
+    with pytest.raises(ValueError, match="no-token reading"):
+        ls.fly(executor, codebook, series, ls.PROTOCOL_C, prior=None, device=torch.device("cpu"), batch_size=3, execute_s=half)
+    # a crossing the forecast predicts AFTER the executed prefix is not flown: the flight goes on and predicts again
+    def crosses_at_15_s(forecast, history):
+        rows = int(np.searchsorted(np.cumsum(forecast.sample_durations_s), 15.0 + 1e-6, side="right"))
+        return replace(ls.cut_rows(forecast, rows), truncated_at_threshold=True, final_time_s=15.0)
+
+    monkeypatch.setattr(ls, "cut_at_threshold_crossing", crosses_at_15_s)
+    (whole_run,) = ls.fly(twin, None, series[:1], ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=1)
+    (prefix_run,) = ls.fly(twin, None, series[:1], ls.PROTOCOL_NONE, prior=None, device=torch.device("cpu"), batch_size=1, execute_s=half)
+    assert whole_run.ended == ls.ENDED_CROSSED and len(whole_run.legs) == 1
+    assert float(np.sum(whole_run.legs[0].sample_durations_s)) == pytest.approx(15.0)
+    assert prefix_run.ended == ls.ENDED_HORIZON and len(prefix_run.legs) > 1
+    assert all(float(np.sum(leg.sample_durations_s)) == pytest.approx(half) for leg in prefix_run.legs[:-1])
+
+
 def test_the_remaining_path_reading_cuts_each_flight_at_its_bin_row(world):
     """v3 §3.1's second reading (D3): the cohort first seen where each flight has X km of path
     left — the bin's row becomes the cut flight's L−1, the truth-side readings move with it, and

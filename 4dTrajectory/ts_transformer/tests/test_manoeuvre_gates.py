@@ -95,7 +95,7 @@ def _none_payload(*, established_all: float, established_vectored: float, flyabl
     def cell(established, ade):
         return {"n": 10, "ade_mean_m": ade, "ade_p50_m": ade * 0.8, "fde_p50_m": ade, "fully_flyable_share": flyable,
                 "established_share": established}
-    return {"executor_name": "twin", "protocol": "none", "flights": n, "strata": {
+    return {"executor_name": "twin", "protocol": "none", "segment_s": 20.0, "flights": n, "strata": {
         STRATUM_ALL: cell(established_all, vectored_ade * 0.6), STRATUM_VECTORED: cell(established_vectored, vectored_ade),
         STRATUM_STRAIGHT_IN: cell(1.0, 300.0), STRATUM_ESTABLISHED: {"n": 0},
     }}

@@ -60,6 +60,10 @@ def render(payload: dict[str, Any]) -> str:
                 continue
             lines.append(f"{cell:<10}{seed:>6}{row['n']:>6}{row['established_all']:>11.3f}{row['established_vectored']:>10.3f}"
                          f"{row['established_straight']:>10.3f}{row['fully_flyable']:>9.3f}{row['vectored_ade_mean_m']:>9.0f}{row['fde_p50_m']:>9.0f}")
+    partial = [f"{cell} s{seed}" for cell, seeds in payload["table"].items() for seed, row in seeds.items()
+               if row is not None and row["executed_s"] != row["segment_s"]]
+    if partial:
+        lines.append(f"note: these readings fly only the first executed_s of each forecast (A3-a receding): {', '.join(partial)}")
     verdict = payload["verdict"]
     lines.append("")
     if verdict is None:

@@ -105,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": FAILURE_MODES_SCHEMA, "written_utc": utc_now(),
         "lockstep": str(artefact), "lockstep_sha256": file_sha256(artefact), "protocol": payload["protocol"],
         "executor": payload["executor"], "first_prediction": payload["first_prediction"],
+        "segment_s": payload["segment_s"], "executed_s": payload.get("executed_s", payload["segment_s"]),
         "stratum": args.stratum, "stratum_flights": stratum_n, "flights": len(rows),
         "modes": modes, "rows": rows,
     }
@@ -118,7 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         if not chosen:
             continue
         block = {FAILURE_MODES_BLOCK: {"mode": mode, "stratum": args.stratum, "lockstep": str(artefact), "lockstep_sha256": result["lockstep_sha256"],
-                                       "mode_flights": modes[mode]["n"], "protocol": payload["protocol"], "first_prediction": payload["first_prediction"]}}
+                                       "mode_flights": modes[mode]["n"], "protocol": payload["protocol"], "first_prediction": payload["first_prediction"],
+                                       "segment_s": result["segment_s"], "executed_s": result["executed_s"]}}
         copy_record_subset(records, out / f"records_{mode}", [rows[key]["flight_id"] for key in chosen], extra_summary=block)
         print(f"  records_{mode}: {len(chosen)} of {modes[mode]['n']} flights")
     return 0
