@@ -213,6 +213,8 @@ seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
 
 ### 7.4 阶段 B 队列的启动清单（M-B0′ 之后）
 
+**已启动 2026-09-19T21:33:10Z、用户 2026-09-19T23:24:54Z 叫停**（`kill -TERM` 进程组，当时在 S60held_K16_s1337 的先验 token 读法第 1 轮，无残留目录；跑完的：基线、S20_K16 整组、S60h60_K16（门 B1 FAIL）、S60held_K16 的训练 / 真值 token 读数 / 门 B1（PASS）/ 先验 s1337；未跑：S60held 的先验 token 读法与门 B、三组指令词表）。停下的原因：用户要全面审计划——执行器只在真值历史上训练、从未见过自己飞出的历史（09-18 计划 §2.7 第四步(2) 有此步，v3 漏掉）。
+
 **已启动 2026-09-19T21:33:10Z**（用户："跑"）：PID 181477，程序来自 worktree @ 4cd11ea，日志 `<campaign>/two_tier_b_queue.log`，PID 文件 `<campaign>/two_tier_b_queue.pid`（退出即删）；7 个 GROUP（baselines + 6 臂组）。主树可继续改文档（队列不从主树跑）。
 
 1. `git status --short` 为空；`git -C .claude/worktrees/manoeuvre-runs status --short` 为空且 `checkout --detach` 到含阶段 B 代码的最新提交。
