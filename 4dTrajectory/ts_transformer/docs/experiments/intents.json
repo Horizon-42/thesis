@@ -1438,7 +1438,16 @@
     "L120_D120_s2024@lockstep-none": "闭环基线读数 (a)（`manoeuvre_lockstep --protocol none`，v3 §3.1）：从进圈后 L 秒（第 L/2−1 行）起，执行器每 Δ 秒在自己飞出的历史上再预测一次，不给任何第二层信息，直到在 final approach course 上穿过入口或用完预算 T₀ + max(30 s, 0.1·T₀)。验证集 = 该格 cohort 的 val（记录 ≥ L + Δ）。",
     "L120_D120_s2024@lockstep-none-12km": "闭环读数 (b)，从剩余路程 12 km 处开始预测（`--anchor-remaining-km 12`，v3 §3.1 第二种读法、D3）：每架在剩余路程最接近 12 km 且前面有 L 秒历史、后面有 Δ 秒真值的那一行开始闭环预测、飞到底；没有这样一行的航班计数不飞。分组在该行重读（12 km 处雷达引导组很薄）。",
     "L120_D120_s2024@lockstep-none-8km": "闭环读数 (b)，从剩余路程 8 km 处开始预测（`--anchor-remaining-km 8`）：同 12 km 读法，开始预测的行换成最接近 8 km 的行。",
-    "L120_D120_s2024@lockstep-none-6km": "闭环读数 (b)，从剩余路程 6 km 处开始预测（`--anchor-remaining-km 6`）：同 12 km 读法，开始预测的行换成最接近 6 km 的行。"
+    "L120_D120_s2024@lockstep-none-6km": "闭环读数 (b)，从剩余路程 6 km 处开始预测（`--anchor-remaining-km 6`）：同 12 km 读法，开始预测的行换成最接近 6 km 的行。",
+    "L120_D20_s1337@fail-established-short": "A2 失败方式子集：胜出格 L120_D20 种子 1337 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s1337/L-1`）的雷达引导航班中，未越过入口且判为「established-short」（曾对准中线、预算到期时仍在入口前）的前 3 架（该类共 73 架），`failure_modes/L120_D20_s1337/records_established-short/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L120_D20_s1337@fail-overshoot": "A2 失败方式子集：胜出格 L120_D20 种子 1337 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s1337/L-1`）的雷达引导航班中，未越过入口且判为「overshoot」（在入口前穿过中线、从未对准）的前 3 架（该类共 50 架），`failure_modes/L120_D20_s1337/records_overshoot/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L120_D20_s1337@fail-passed-abeam": "A2 失败方式子集：胜出格 L120_D20 种子 1337 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s1337/L-1`）的雷达引导航班中，未越过入口且判为「passed-abeam」（末尾已过入口横线（to-go ≤ 0）、仍在下风/另一侧）的前 3 架（该类共 99 架），`failure_modes/L120_D20_s1337/records_passed-abeam/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L120_D20_s1337@fail-parallel-offset": "A2 失败方式子集：胜出格 L120_D20 种子 1337 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s1337/L-1`）的雷达引导航班中，未越过入口且判为「parallel-offset」（从未对准、末尾与中线平行偏置）的前 3 架（该类共 54 架），`failure_modes/L120_D20_s1337/records_parallel-offset/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L120_D20_s1337@fail-other": "A2 失败方式子集：胜出格 L120_D20 种子 1337 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s1337/L-1`）的雷达引导航班中，未越过入口且判为「other」（以上都不是）的前 3 架（该类共 2 架），`failure_modes/L120_D20_s1337/records_other/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L120_D20_s2024@fail-established-short": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「established-short」（曾对准中线、预算到期时仍在入口前）的前 3 架（该类共 39 架），`failure_modes/L120_D20_s2024/records_established-short/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L120_D20_s2024@fail-overshoot": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「overshoot」（在入口前穿过中线、从未对准）的前 3 架（该类共 18 架），`failure_modes/L120_D20_s2024/records_overshoot/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L120_D20_s2024@fail-passed-abeam": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「passed-abeam」（末尾已过入口横线（to-go ≤ 0）、仍在下风/另一侧）的前 3 架（该类共 111 架），`failure_modes/L120_D20_s2024/records_passed-abeam/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
+    "L120_D20_s2024@fail-parallel-offset": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「parallel-offset」（从未对准、末尾与中线平行偏置）的前 3 架（该类共 15 架），`failure_modes/L120_D20_s2024/records_parallel-offset/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。"
    }
   }
  }
