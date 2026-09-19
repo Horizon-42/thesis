@@ -16,6 +16,7 @@
 | 发布 | 2026-09-19T09:20Z 前后，11 类进 picker（Experiments，KRDU，split val）：`experiment_L120_D20_s<seed>_<token>_lockstep-none_val`（s1337 token 0197387f636a、s2024 e7820f8189ac，各 1404 架，4 份 CZML）和 9 个 `…_fail-<mode>_val` 子集（每类 3 架，s1337 的 other 2 架）；`categories.json` 171 → 182，23 份 CZML 都能解析。发布时 `4dTrajectory/outputs/KRDU/experiments/index.json` 早于本战役，用临时索引发布，没有重建它（重建会覆盖现有产物，等用户）。正在跑的 Vite dev server（2026-09-18 09:20 起）对新目录返回 SPA HTML，重启前端后 picker 才能加载这 11 项。 |
 | 读数 (c) | 2026-09-19T11:08–11:40Z，所有格从第 59 行开始预测（D28），40 份 `lockstep/<arm>/row59/`，门表 `gate/final_row59/`；结论见 §7：同一起点下 L ≥ 60 各格差在 seed 线内，L = 120 在 (a) 里的领先是起点效应；L ≤ 60 里最好的格是 L60_D20 |
 | 判定 M-A1 | **L120_D20 胜出（decisive）**，`gate/after_L120_D120/grid_gate.txt`，见 §3；解读与条件见 §5；A2 失败方式见 §6 |
+| 阶段 B · 队列 | 2026-09-19T21:33Z 起（PID 181477，worktree @ 4cd11ea），用户 23:24Z 叫停：跑完基线、S20_K16 整组（门 B1 PASS 只靠雷达 ADE、门 B FAIL）、S60h60_K16（门 B1 FAIL）、S60held_K16 的训练 / 真值 token 读数（门 B1 与 B 行 PASS）/ 先验 seed 1337；未跑 S60held 的先验 token 读法与三组指令词表。停下的原因与审计：计划 v3 §10（执行器只在真值历史上训练，从未见过自己飞出的历史；09-18 计划要求的闭环训练 v3 漏掉）。§9–§11 的数都要按此读 |
 | 阶段 B · B0 | 由阶段 B 队列的第 0 步产出（`two_tier_v3_b_20260919/baseline/<基线>_s<seed>/L-1/` 与 `failure_modes/<基线>_s<seed>_none/`，基线 = L60_D20 与 L60_D60 只飞 20 s），见 §9。2026-09-19T19:53Z 那次提前跑的 B0 用的是没写完的代码（payload 还是 v2），按用户指示删除，不引用它的数 |
 
 ## 1. 读数 (a)：从 L−1 开始预测（`lockstep/<arm>/L-1/`，`gate/after_<cell>/`）

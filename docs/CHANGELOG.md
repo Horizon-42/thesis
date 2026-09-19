@@ -4,6 +4,27 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-20 — two-tier v3 stage B ran, was stopped, and the plan was audited
+
+- The stage B queue (`two_tier_v3_b_20260919`, from the runs worktree at 4cd11ea, 21:33Z) flew its own baselines
+  (L60_D20 and L60_D60-flown-20 s, no token, B cohort 1404 flights — the grid's numbers reproduced to 3 decimals) and
+  read three K16 groups under the truth token (results doc §9–§11): S20_K16 gate B1 PASS on the vectored ADE alone
+  (−480 / −661 m) with established halved and overshoot ×7, its prior-token reading gate B FAIL (established 0.610 /
+  0.643, vectored ADE worse than no token); S60h60_K16 gate B1 FAIL (seeds disagree); S60held_K16 gate B1 and row B PASS
+  (vectored ADE −447 / −475 m, established within the seed line). Per-round tracking error is the same with and without
+  the token (52 → 753 m over rounds 0–8 vs 47 → 941): the token changes how flights END, not how accurately each segment
+  is flown. The user stopped the queue at 23:24Z before S60held's prior-token reading and the command-vocabulary groups.
+- The audit (plan v3 §10): the executor is trained one-shot on TRUTH histories and iterated autoregressively only at
+  evaluation; the 09-18 plan's §2.7 step 4(2) — retraining the executor on its own flown histories ("rolled windows 不是
+  可选项") — was dropped when v3 was written, so every stage A / B executor never learned to recover from its own drift
+  and stage B's token result is read on that executor family. Also listed: the closed-loop ADE's definition, the truth
+  token indexed by the truth's time (why the prior's token crosses more often than the truth's), teacher forcing on the
+  token, and gate B1 admitting a collapsed primary. Decisions needed: D49 (executor closed-loop training), the
+  multi-hypothesis second layer (Q6, in the outline since 09-19 but never scheduled: candidates from the prior's
+  distribution, rollouts scored against the known runway, a beam) — pending a verified literature folder
+  `docs/literature/trajectory_as_language/` (closed-loop SFT of tokenised motion models, RL fine-tuning, goal-directed
+  decoding, aviation token models).
+
 ### 2026-09-19 — two-tier v3 stage B: the token span decoupled from the horizon, the held token, B0 read
 
 - Stage B code (plan v3 §5.2, decisions D30–D47; `ts_transformer/CLAUDE.md` D31 / R9): `manoeuvre_token_s` /
