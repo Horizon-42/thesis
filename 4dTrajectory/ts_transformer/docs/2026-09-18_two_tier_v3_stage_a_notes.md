@@ -3,6 +3,44 @@
 目的：压缩 context 后从这里接着做。计划本身在 `2026-09-18_two_tier_plan_v3.zh.md`（§5–§8 是阶段 A 的详细计划，用户已看过）。
 本文只放开发时要用的事实、状态和约定；结论和读数不在这里。
 
+## 现状（2026-09-19 21:20Z 写；接手的 agent 先读这一节，再读计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2）
+
+**哪里停下**：阶段 A 全部完成（M-A0 … M-A3）。阶段 B 的计划已写进 v3（`2026-09-18_two_tier_plan_v3.zh.md` §5.2、§6.2、§7.2、§8.2、§9.2，决定 D30–D45），**未签字、未开发、未跑**；用户在审，
+审的过程中已按用户意见改过多轮（结构、用词、机制说明、B0–B3 的来龙去脉、删掉 B 里的第 59 行读数）。什么都没在跑：GPU 空闲，主树干净（HEAD 961025f），
+runs worktree `.claude/worktrees/manoeuvre-runs` 停在 5208707（比 HEAD 旧；任何新实验前先 `git -C .claude/worktrees/manoeuvre-runs checkout --detach <HEAD>`）。磁盘 11 GB 空余。
+
+**阶段 A 的结论（细节与每个数在 `2026-09-18_two_tier_v3_results.zh.md`，节号见下）**
+- 网格 20 格 × 2 seed（L ∈ {30,60,90,120} s × Δ ∈ {20,30,60,90,120} s）跑完（§1 读数 (a) 从各自 L−1 起、§2 读数 (b) 从 12/8/6 km 起、§7 读数 (c) 从第 59 行起）。
+- 判定（§3，读数 (a)）：L120_D20 胜出，decisive；seed 线 p75：established 全部 0.078、雷达 0.184、雷达 ADE 150 m；读数 (c) 上 seed 线 0.080 / 0.195 / 124 m。
+- 读数 (c) 改写了 L 轴的解释：同一起点下 L ≥ 60 的格差在 seed 线内，L = 120 在 (a) 里的领先是起点效应（少飞 60 s）。**用户定阶段 B 的执行器 = L60_D20**（(a) 0.748 / 0.750，(c) 0.786 / 0.785）。
+- 条件（§5）：L = 30 在 Δ ≤ 30 选模落在第 1 epoch（固定 L−1 锚点的 ADE 在初始网络最好），读的是初始网络；八格（L ≥ 60、Δ ≥ 30）选模贴 180 epoch 预算；Δ = 20/30 好于 Δ ≥ 60。
+- A2（§6，胜出格 L120_D20）：雷达引导航班未越线的 278 / 183 架里 passed-abeam（没转基边）0.36 / 0.61、established-short（对准晚约 20 s、预算用完）0.26 / 0.21、overshoot + parallel-offset（末段形状错）0.37 / 0.18。假设 H1（转弯时机是意图信息 → 阶段 B）、H2（转晚 → A3-a）、H3（形状错 → A3-b）。
+- A3（§8）：A3-a = 网格的 L60_D60 两臂只飞前 20 s（`--execute-s 20`，不重训）——雷达组两读数两 seed 都好 +0.07–0.14、未超线，直线组变差（seed 2024 从第 29 行起 0.940 → 0.682）；A3-b = N₁ = 4 新训两臂——无收益，雷达 ADE 变差。两者 §3.3 A3 行都 FAIL；执行器不换。
+- 发布：L120_D20 两 seed 的闭环记录与 9 个失败方式子集共 11 类进了 picker（`categories.json` 171 → 182）；正在跑的 Vite dev server 对新目录返回 SPA HTML，重启前端才能加载；`experiments/index.json` 早于本战役，发布用了临时索引，未重建（重建会覆盖，等用户）。
+- 文献：`docs/literature/prediction_horizons/`（14 篇核过原文：终端区历史 11 s–3 min、视界 90 s–5 min，采样 1/6/10 s；没有人闭环飞到入口、没有人扫历史长度）。
+
+**产物（`4dTrajectory/outputs/KRDU/experiments/`）**
+- `two_tier_v3_grid_20260918/`：40 个臂目录；`cohorts/<cell>/development_cohort.json`；`lockstep/<arm>/{L-1,12km,8km,6km,row59}/`（Δ = 120 的格没有 6km）；`lockstep_exec20/L60_D60_s*/{L-1,row59}/`（A3-a）；
+  `lockstep_records/L120_D20_s*/L-1/`（带记录，218 / 213 MB）；`failure_modes/L120_D20_s*/`；`gate/after_<cell>/`、`gate/final_{12km,row59}/`、`gate/relative_a3a_{L-1,row59}/`；`two_tier_grid_queue.log`。
+- `two_tier_v3_a3b_20260919/`：`L60_D20_N4_s*/`、`lockstep/…/{L-1,row59}/`、`gate/after_L60_D20/`、`gate/relative_a3b_{L-1,row59}/`。
+- 没有码本、没有先验、没有任何带 token 的臂（阶段 B 一个都没建）。
+
+**今天加的代码（都已 review、测试、提交）**
+- `manoeuvre_lockstep --first-prediction-row N`（`lockstep.from_row`；队列读数名 `row<N>`；payload `first_prediction.common_row`）——读数 (c)。
+- `manoeuvre_lockstep --execute-s N`（`lockstep.fly(execute_s)`、`lockstep.executed_step_s`；payload `executed_s`；门表与失败方式脚本带出该字段）——只允许无 token 读法；N 要能被 dt 与积分步长 0.5 s 整除。
+- `executor_relative_gate --baseline SEED=DIR SEED=DIR --candidate … (--seed-line-from grid_gate.json | --seed-line a b c) --out DIR`（`gates.gate_relative`）——共有航班上重算三项、给 §3.3 A3 行与 B 行两个判定；就是计划里的 B-dev4（D45），已可用。
+- 未做的：`executor_grid_gate --reading 8km|6km`（`gates.cell_reading` 拒绝空的雷达层）；B-dev1/2/3/3′/5/6/7 全部未做。
+
+**用户今天定的规则（都已写进记忆文件，接手的 agent 照做）**
+- 说人话：不造词（"题 / 首问 / 上限 / 回灌 / 持有 / 相位 / 码图谱"都改掉了）；没解释过的概念第一次出现就说明（FSQ、直通估计、teacher forcing、top-1、cohort……）；代码里的代号不当名字用（协议 C / A / A-truth / none 写成真值 token 读法 / 先验 token 读法 / 先验读真值历史的读法 / 无 token 读法）。
+- 文档结构：§5 / §6 / §7 / §8 / §9 各一个大块，阶段是块内的小节（5.1 A、5.2 B …），不另起 §5B 这类平行节。
+- 每一步先写"为什么有这一步 → 做什么 → 怎么判 → 不过怎么办"，配置表要写清每个配置怎么来的；不把阶段 A 的做法按惯性搬到 B（第 59 行读数在 B 里没用处，已删）。
+- 用户说"代码就位就跑"时可以让实验跑；没说之前不建臂、不跑。计划的每个参数是编号决定，用户可能改。
+
+**等用户决定的**：签阶段 B（§5.2 等）；D36 要不要指令词表对照（+6 臂）；D35 的 K64 条件步骤；A4 采样间隔消融（§5.1.5 / D29，未排期）；L = 30 的选模锚点、Δ ≥ 30 的 epoch 预算要不要改；前端重启与 `index.json` 重建。
+
+**阶段 B 签字后的开发顺序（§5.2.5）**：B-dev4 已有 → B-dev7 臂文件与 intents（S20 两臂先）→ B-dev2 / B-dev3′（S60-h60）→ B-dev1 / B-dev3（S60-held）→ B-dev5（先验落地不停飞）→ B-dev6 队列；每项 opus review、测试、提交；B cohort（L60 划分、记录 ≥ 120 s）用 `plan_cohort --arms` 写出；worktree 移到该提交；dry-run；等用户说"跑"。
+
 ## 0. 硬约束（用户，2026-09-18）
 
 - **签字前不启动任何实验**（M-A0′）。代码写完、测试过、review 过之后停下，等用户说"跑"。
@@ -26,7 +64,7 @@
 
 顺序建议：dev2 → dev1 → dev3 → dev5（训练侧，一起冒烟）→ dev4 → dev7 → dev6 → dev8。
 
-**M-A0 达成（2026-09-18 晚）**：全部八项提交在主树（fa0426f 代码、4dd2082 文档、5079bb4 把 lockstep 里的 "ask" 改名为 prediction），全套 ts 测试 1273 通过，两轮 opus review 的发现都已修；runs worktree `.claude/worktrees/manoeuvre-runs` 已移到 5079bb4。**等用户说"跑"（M-A0′）再启动；启动清单在 §5。**
+**M-A0 达成（2026-09-18 晚）**：全部八项提交在主树（fa0426f 代码、4dd2082 文档、5079bb4 把 lockstep 里的 "ask" 改名为 prediction），全套 ts 测试 1273 通过，两轮 opus review 的发现都已修。**M-A0′ 用户 2026-09-19 说"开始实验"，队列按 §5 启动并跑完（见 §6 与开头的现状）。**
 
 ## 2. 代码事实（写开发项时查到的）
 
@@ -52,7 +90,7 @@
   雷达引导组会很薄——读数 (b) 主要看"全部"与 straight-in，8 / 6 km 更甚；写结果时要报每组 n。
 - `series_from_row(series, r)`（`data/dataset.py`）：航班从第 r 行起看，时钟不变、真值同样切；lockstep 的 bin 读数靠它把 bin 行变成固定锚点。
 - 发布：`publish_ts_experiment_trajectories.py --reuse-prediction-dir … --category-variant …`，intents 变体 key 大小写不敏感（57ae87e）；`VARIANT_RECORD_BLOCKS` 含 `manoeuvre_lockstep`。
-- readout 的臂发现按 `S<seg>_(K\\d+|cv|nt)_s<seed>` 形状（01e5286）；新网格的臂名要定（建议 `L<L>_D<Δ>_s<seed>`，并让发现规则认识它，或阶段 A 不用 `manoeuvre_readout`）。
+- readout 的臂发现按 `S<seg>_(K\\d+|cv|nt)_s<seed>` 形状（01e5286）；网格的臂名定为 `L<L>_D<Δ>_s<seed>`，阶段 A 没有用 `manoeuvre_readout`（已解决）。
 
 - **产物布局（dev7/dev8 定）**：`<campaign>/<arm>/`（训练）、`<campaign>/lockstep/<arm>/<reading>/manoeuvre_lockstep.json`（reading ∈ L-1、12km、8km、6km）、
   `<campaign>/gate/after_<cell>/grid_gate.json`（每格完成后的整表；40 臂齐后才有 verdict）、`<campaign>/cohorts/<cell>/development_cohort.json`。
@@ -77,9 +115,9 @@
 
 每完成一个开发项：更新 §1 状态与提交号；新查到的代码事实进 §2；待定项解决后从 §2 删掉并在 §1 注明。
 
-## 5. 启动清单（用户说"跑"之后照此做；之前一步都不做）
+## 5. 启动清单（阶段 A 的，已按此执行完；留作阶段 B 队列的样板——B 的命令、目录、读数名都不同，照 §5.2.5 / §8.2 另写）
 
-**状态**：主树干净，最新提交 5079bb4；runs worktree `.claude/worktrees/manoeuvre-runs` 在 5079bb4（launch 前 `git -C .claude/worktrees/manoeuvre-runs status --short` 必须为空，
+**状态（2026-09-18 晚写，已过时）**：主树干净，最新提交 5079bb4；runs worktree `.claude/worktrees/manoeuvre-runs` 在 5079bb4（launch 前 `git -C .claude/worktrees/manoeuvre-runs status --short` 必须为空，
 `git -C … log --oneline -1` 必须是主树上最新的、含阶段 A 代码的提交；不是就 `checkout --detach <sha>`）。20 份 cohort 已在
 `4dTrajectory/outputs/KRDU/experiments/two_tier_v3_grid_20260918/cohorts/`。intents 已登记。磁盘 2026-09-18 晚 13.5 GiB 空余（需 ≥ 3 GiB，40 臂约 2 GiB + 读数）。
 
@@ -137,3 +175,5 @@ seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
 - 2026-09-19：计划 v3 补了阶段 A 的结论与索引（§5.1 A1 判定与读数 (c) 的改写、§5.2 A2 答案与 H1–H3、§5.3 A3 = A3-a receding / A3-b N₁=4，未排期；§7 M-A0…M-A2 标完成），并写了阶段 B（§5.2、§6.2、§7.2、§8.2、§9.2：执行器 L60_D20，token 跨度 S ∈ {20, 60} s 消融，K16 学习码本主线、指令词表可选，先读真值 token 上限（门 B1）再端到端相对门（门 B），B-dev1…7，决定 D30–D44）。**未签字、未开发、未跑**：用户审 §5.2、§6.2、§7.2、§8.2、§9.2 后才进 M-B0。
 - A3 读完（2026-09-19 18:43Z，结果文档 §8）：A3-a（L60_D60 两臂只飞 20 s，`--execute-s 20`，提交 f89be15）雷达组一致变好但未超线、直线组变差；A3-b（N₁ = 4，campaign `two_tier_v3_a3b_20260919`）无收益。两者 A3 行都 FAIL，B 的执行器仍是 L60_D20。
   相对门 runner `executor_relative_gate`（D45）已写并用于这两个比较（产物 `gate/relative_a3a_*`、`two_tier_v3_a3b_20260919/gate/relative_a3b_*`）。
+- 2026-09-19 晚（用户审阶段 B 时）：计划重排成每节一个大块、阶段为小节（6515cbf）；四种读法改用名字（真值 token / 先验 token / 先验读真值历史 / 无 token）；5.2.0 加了第二层两部分的说明、先验一段重写（4af760f）；B0–B3 按"为什么 → 做什么 → 怎么判 → 不过怎么办"重写、术语行逐词解释（55ae671）；B 里的第 59 行读数删掉（961025f）。
+  相对门 runner review 修完提交（01f29dc）；A3 结果与 A3-a 代码提交（f89be15、d76ed64）。记忆新增 `plain-wording.md`、`doc-structure.md`。
