@@ -213,6 +213,8 @@ seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
 
 ### 7.4 阶段 B 队列的启动清单（M-B0′ 之后）
 
+**已启动 2026-09-19T21:33:10Z**（用户："跑"）：PID 181477，程序来自 worktree @ 4cd11ea，日志 `<campaign>/two_tier_b_queue.log`，PID 文件 `<campaign>/two_tier_b_queue.pid`（退出即删）；7 个 GROUP（baselines + 6 臂组）。主树可继续改文档（队列不从主树跑）。
+
 1. `git status --short` 为空；`git -C .claude/worktrees/manoeuvre-runs status --short` 为空且 `checkout --detach` 到含阶段 B 代码的最新提交。
 2. `nvidia-smi --query-compute-apps=pid --format=csv,noheader` 没有别的训练；`<campaign>/two_tier_b_queue.pid` 不存在；空余 ≥ 3 GB（12 臂约 0.6 GB + 记录约 2.5 GB）。
 3. dry-run：`conda run -n aeroviz --no-capture-output python .claude/worktrees/manoeuvre-runs/run_ts.py two_tier_b_queue --arms 4dTrajectory/ts_transformer/docs/experiments/two_tier_v3_b_arms.json --campaign 4dTrajectory/outputs/KRDU/experiments/two_tier_v3_b_20260919 --airport KRDU --dry-run`，应列 `GROUP baselines`（4 份 lockstep none + 4 份失败方式）再 6 个臂组、每组 1 train + 8 读数步 + 门 B1 + 9 个 `[if gate b1 passes]` 步，全是 todo。
