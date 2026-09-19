@@ -13,6 +13,7 @@
 | 臂 | `docs/experiments/two_tier_v3_grid_arms.json`：L ∈ {30,60,90,120} s × Δ ∈ {20,30,60,90,120} s × seed {1337, 2024} = 40 臂，每格自己的 development cohort（train 6798–6857 / val 1392–1405） |
 | 读数 | (a) 从 L−1 开始预测；(b) 从剩余路径 12 / 8 / 6 km 的行开始预测（该行前有 L 秒历史、后有 Δ 秒真值，覆盖数随 Δ 变，D3） |
 | 进度 | 20 / 20 格（队列 2026-09-19T08:44:21Z 结束） |
+| 发布 | 2026-09-19T09:20Z 前后，11 类进 picker（Experiments，KRDU，split val）：`experiment_L120_D20_s<seed>_<token>_lockstep-none_val`（s1337 token 0197387f636a、s2024 e7820f8189ac，各 1404 架，4 份 CZML）和 9 个 `…_fail-<mode>_val` 子集（每类 3 架，s1337 的 other 2 架）；`categories.json` 171 → 182，23 份 CZML 都能解析。发布时 `4dTrajectory/outputs/KRDU/experiments/index.json` 早于本战役，用临时索引发布，没有重建它（重建会覆盖现有产物，等用户）。正在跑的 Vite dev server（2026-09-18 09:20 起）对新目录返回 SPA HTML，重启前端后 picker 才能加载这 11 项。 |
 | 判定 M-A1 | **L120_D20 胜出（decisive）**，`gate/after_L120_D120/grid_gate.txt`，见 §3；解读与条件见 §5；A2 失败方式见 §6 |
 
 ## 1. 读数 (a)：从 L−1 开始预测（`lockstep/<arm>/L-1/`，`gate/after_<cell>/`）
@@ -155,6 +156,7 @@ L120_D20 两 seed（n = 1404）：established 全部 0.769 / 0.843，雷达 0.44
 | 2026-09-19T08:09:22Z | L90_D120 complete（选模 first 1126.008 @ 1 → best 363.528 @ epoch 177 → last 363.615；seed 2024 first 1109.580 → best 350.557 @ **epoch 180**（最后一个 epoch）→ last 350.557；均 180 epoch。**6 km 无覆盖（Δ = 120，D3）**；8 km n=275，12 km n=1399） |
 | 2026-09-19T08:44:21Z | L120_D120 complete（选模 first 640.482 @ 1 → best 327.625 @ epoch 148 → last 330.736；seed 2024 first 631.884 → best 369.426 @ **epoch 179** → last 381.649；均 180 epoch。**6 km 无覆盖（Δ = 120，D3）**；8 km n=275，12 km n=1095，L−1 的 n=1392（全网格最小）） |
 | 2026-09-19T08:44:21Z | queue done（20 / 20 格；含一次 STOP 与续跑） |
+| 2026-09-19T09:20Z | 胜出格 L120_D20 两 seed 带记录重飞、A2 失败方式算完、11 类发布到 picker（见 §0 发布行）；结果文档提交 00ec6e8 |
 
 ## 5. 解读与条件（每条带配置；不引用 09-18 token 战役的数当基线）
 

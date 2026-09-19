@@ -123,3 +123,10 @@ nohup setsid conda run -n aeroviz --no-capture-output python $W/run_ts.py two_ti
 
 **用户可能要改的两个参数**（改了要重新 review 并提交后再跑）：读数 (b) 要求开始行后有 Δ 秒真值（`lockstep.from_remaining_path` 里 `min_future_s=effective_min_future_s(config)`）；
 seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
+
+## 6. 阶段 A 跑完之后（2026-09-19）
+
+- 队列 2026-09-18T22:49:33Z 起、2026-09-19T08:44:21Z 止（9 h 55 min），中间在 L30_D120_s1337 的 6 km 读数处 STOP 一次（Δ = 120 s 时 6 km 行之后没有 120 s 真值，整个 cohort 无一行；D3 的结构性空覆盖），Δ = 120 的四格去掉 6 km 读数后续跑（`--readings L-1 12km 8km --cells …`），没有重跑任何一步。
+- 读数、判定、条件、A2 都在 `docs/2026-09-18_two_tier_v3_results.zh.md`（提交 00ec6e8）：**M-A1 判定 L120_D20 胜出（decisive）**；L = 30 在 Δ ≤ 30 的格选模落在第 1 epoch（初始网络），八格（L ≥ 60、Δ ≥ 30）选模贴 180 epoch 预算；胜出格两 seed 带记录重飞在 `<campaign>/lockstep_records/<arm>/L-1/`，A2 在 `<campaign>/failure_modes/<arm>/`。
+- 没做成的：`executor_grid_gate --reading 8km|6km`（`gates.cell_reading` 要求雷达引导层非空，这两个距离点上所有格都是空的）——若要这两张表，`cell_reading` 得允许雷达层为空（返回 None），改代码要 review。
+- 下一步由用户选 A3（v3 §8）。两个可能要改的计划参数在 §5 末尾；再加两个由结果引出的：L = 30 的选模锚点，Δ ≥ 30 各格的 epoch 预算。
