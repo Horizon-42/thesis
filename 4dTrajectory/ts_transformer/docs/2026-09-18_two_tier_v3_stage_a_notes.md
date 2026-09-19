@@ -135,3 +135,5 @@ seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
 - A4 采样间隔消融（2026-09-19 列入计划 §5.5 / D29，未排期，未建臂）：dt ∈ {2, 5, 10} s × 两 seed，其余同 L120_D20；每个 dt 一份声明与 cohort（GRID_AXES 不含 dt_s）；读数 (a) 与 (c)（t* = 120 s，行号 60 / 24 / 12）。用户说"跑"之后才建臂。
 
 - 2026-09-19：计划 v3 补了阶段 A 的结论与索引（§5.1 A1 判定与读数 (c) 的改写、§5.2 A2 答案与 H1–H3、§5.3 A3 = A3-a receding / A3-b N₁=4，未排期；§7 M-A0…M-A2 标完成），并写了阶段 B（§5B–§8B、§9：执行器 L60_D20，token 跨度 S ∈ {20, 60} s 消融，K16 学习码本主线、指令词表可选，先读真值 token 上限（门 B1）再端到端相对门（门 B），B-dev1…7，决定 D30–D44）。**未签字、未开发、未跑**：用户审 §5B–§9 后才进 M-B0。
+- A3 读完（2026-09-19 18:43Z，结果文档 §8）：A3-a（L60_D60 两臂只飞 20 s，`--execute-s 20`，提交 f89be15）雷达组一致变好但未超线、直线组变差；A3-b（N₁ = 4，campaign `two_tier_v3_a3b_20260919`）无收益。两者 A3 行都 FAIL，B 的执行器仍是 L60_D20。
+  相对门 runner `executor_relative_gate`（D45）已写并用于这两个比较（产物 `gate/relative_a3a_*`、`two_tier_v3_a3b_20260919/gate/relative_a3b_*`）。
