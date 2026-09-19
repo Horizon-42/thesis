@@ -4,6 +4,22 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-19 — two-tier v3 stage A ran; reading (c) from one common row
+
+- The 20-cell grid `two_tier_v3_grid_20260918` (L ∈ {30,60,90,120} s × Δ ∈ {20,30,60,90,120} s, two seeds) trained and was read
+  (a) from each cell's L−1 and (b) from the 12 / 8 / 6 km remaining-path rows; M-A1 verdict L120_D20 (decisive), full readings and
+  conditions in `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_v3_results.zh.md`. Conditions: L = 30 at Δ ≤ 30 selects
+  epoch 1 (the fixed-L−1 selection metric is best untrained and worsens with training); eight cells at L ≥ 60, Δ ≥ 30 select in
+  the last 10 % of the 180-epoch budget; 6 km has no coverage at Δ = 120 (the queue stopped there once and was relaunched
+  without that reading). The winner's records and its failure-mode subsets are in the picker (11 categories).
+- Reading (a) confounds lookback with starting point (a longer L starts later and flies a shorter segment). Reading (c)
+  (`manoeuvre_lockstep --first-prediction-row N`, `lockstep.from_row`, the queue's `row<N>` reading; plan D28) starts every
+  cell at row 59: at a common start the L ≥ 60 cells differ within the seed line (0.080) at every Δ, so L = 120's win was the
+  later start, and L60_D20 is the best cell at L ≤ 60 (established 0.786 / 0.785). At one Δ the four L cells keep identical
+  flight sets at row 59.
+- `executor_grid_gate` cannot build the 8 / 6 km tables: `gates.cell_reading` refuses an empty vectored stratum, and it is
+  empty there in every cell (follow-up if those tables are wanted).
+
 ### 2026-09-18 — two-tier v3 stage A: the (L, Δ) grid's cohorts, readings, failure modes, gate and queue
 
 **Why a v3.** The P1.4 token campaign (70 arms) was stopped at 15:29 on the user's instruction: its

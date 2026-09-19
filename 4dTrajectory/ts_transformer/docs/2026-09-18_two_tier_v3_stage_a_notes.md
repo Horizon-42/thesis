@@ -130,3 +130,5 @@ seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
 - 读数、判定、条件、A2 都在 `docs/2026-09-18_two_tier_v3_results.zh.md`（提交 00ec6e8）：**M-A1 判定 L120_D20 胜出（decisive）**；L = 30 在 Δ ≤ 30 的格选模落在第 1 epoch（初始网络），八格（L ≥ 60、Δ ≥ 30）选模贴 180 epoch 预算；胜出格两 seed 带记录重飞在 `<campaign>/lockstep_records/<arm>/L-1/`，A2 在 `<campaign>/failure_modes/<arm>/`。
 - 没做成的：`executor_grid_gate --reading 8km|6km`（`gates.cell_reading` 要求雷达引导层非空，这两个距离点上所有格都是空的）——若要这两张表，`cell_reading` 得允许雷达层为空（返回 None），改代码要 review。
 - 下一步由用户选 A3（v3 §8）。两个可能要改的计划参数在 §5 末尾；再加两个由结果引出的：L = 30 的选模锚点，Δ ≥ 30 各格的 epoch 预算。
+- 读数 (c)（2026-09-19 11:08–11:40Z，提交 1e0c6aa，D28）：所有格从第 59 行开始预测，40 份 `lockstep/<arm>/row59/`，门表 `gate/final_row59/`。结论（结果文档 §7）：同一起点下 L ≥ 60 各格差在 seed 线内，
+  L = 120 在 (a) 里的领先是起点效应；L ≤ 60 里最好的是 L60_D20（0.786 / 0.785）；各 Δ 行内四个 L 格的航班集合完全一致。论文里的 L 结论按 (c) 写。
