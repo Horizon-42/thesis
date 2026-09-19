@@ -1,0 +1,50 @@
+{
+ "_comment": "Two-tier plan v3 stage A1 (docs/2026-09-18_two_tier_plan_v3.zh.md §5.1, decisions §6 D1–D11): the NO-TOKEN executor's own axes — lookback L × segment Δ, the full grid, two seeds per cell, 40 arms. Every arm: plan_conditioning off (D10); seq_len = L / dt (D4); control_horizon_s = Δ and n_segments = Δ / 10 s (D6); the random-anchor future contract = Δ (one floor rule); NO anchor_floor_index, so the fixed anchor is L−1 = the first ask L seconds after entry (D2, D8's selection anchor); training anchors fully random, remaining-path-uniform, random_train_anchor_l1_share 0 (D7); executor recipe inherited from v2's L1c pa (D5: simple-v3 base, specific-force+path-angle + first-order-lag, imitation / heading-rate / bank-TV / final-time / endpoint terms off); 180 epochs without early stopping, lr 3e-5, batch 512, selection on the fixed-anchor common-grid ADE at L−1 (D8); split_seed 1337 pinned (D1: one by-flight split of all KRDU arrivals, shared by every cell and both seeds). ONE development cohort PER CELL (D1: a cell's usable set is the flights with L of lookback and Δ of truth after it, on both sides of the split; `run_ts.py plan_cohort --arms <this file>` writes all twenty from one load). File order = queue order (§8): Δ ascending, then L ascending, the two seeds together, so the short segments read first. No records (\"predict\": false): the readings are `manoeuvre_lockstep --protocol none` (§3.1: from L−1, and from the 12 / 8 / 6 km remaining-path bins, D3). The 09-18 campaign's three cells are NOT reused (§5.1). KRDU only, val split.",
+ "predict": false,
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "control_thrust_parameterization": "specific-force+path-angle",
+  "plan_conditioning": "off",
+  "anchor_floor_index": 0,
+  "control_imitation_loss_weight": 0.0,
+  "control_heading_rate_loss_weight": 0.0,
+  "control_bank_tv_loss_weight": 0.0,
+  "final_time_loss_weight": 0.0,
+  "state_endpoint_loss_weight": 0.0,
+  "random_train_anchor": true,
+  "random_train_anchor_sampling": "remaining-path-uniform",
+  "random_train_anchor_l1_share": 0.0,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "lr_plateau_metric": "objective",
+  "epochs": 180,
+  "patience": 180,
+  "split_seed": 1337
+ },
+ "arms": [
+  {
+   "key": "L60_D20_N4_s1337",
+   "label": "A3-b（N₁ = 4，每 5 s 一个控制决策）：no-token executor, lookback 60 s, segment 20 s, N1=4, seed 1337",
+   "development_cohort": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/cohorts/L60_D20/development_cohort.json",
+   "overrides": {
+    "seq_len": 30,
+    "control_horizon_s": 20.0,
+    "n_segments": 4,
+    "random_train_anchor_min_future_s": 20.0,
+    "seed": 1337
+   }
+  },
+  {
+   "key": "L60_D20_N4_s2024",
+   "label": "A3-b（N₁ = 4，每 5 s 一个控制决策）：no-token executor, lookback 60 s, segment 20 s, N1=4, seed 2024",
+   "development_cohort": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/cohorts/L60_D20/development_cohort.json",
+   "overrides": {
+    "seq_len": 30,
+    "control_horizon_s": 20.0,
+    "n_segments": 4,
+    "random_train_anchor_min_future_s": 20.0,
+    "seed": 2024
+   }
+  }
+ ]
+}

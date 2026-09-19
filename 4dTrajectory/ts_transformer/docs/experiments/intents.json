@@ -1449,6 +1449,21 @@
     "L120_D20_s2024@fail-passed-abeam": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「passed-abeam」（末尾已过入口横线（to-go ≤ 0）、仍在下风/另一侧）的前 3 架（该类共 111 架），`failure_modes/L120_D20_s2024/records_passed-abeam/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。",
     "L120_D20_s2024@fail-parallel-offset": "A2 失败方式子集：胜出格 L120_D20 种子 2024 从 L−1 起、协议 none 重飞（`lockstep_records/L120_D20_s2024/L-1`）的雷达引导航班中，未越过入口且判为「parallel-offset」（从未对准、末尾与中线平行偏置）的前 3 架（该类共 15 架），`failure_modes/L120_D20_s2024/records_parallel-offset/`；记录子集带自己重算的 accuracy 块。用来看这一类失败长什么样，不是一个新模型。"
    }
+  },
+  "two_tier_v3_a3b_20260919": {
+   "title": "两层计划 v3 · A3-b：控制分辨率（N₁ = 4）",
+   "intent": "A2 的假设 H3：L120_D20 / L60_D20 的雷达引导航班里 18–37% 的失败是末段转弯的横向几何错（overshoot、parallel-offset），且随 seed 变。猜测是每 10 s 一个控制决策太粗。把 N₁ 改成 4（每 5 s 一个）后，这两类是否减少、fully flyable 是否不掉、两 seed 的差是否变小。",
+   "design": "两臂（种子 1337 / 2024），其余全同网格的 L60_D20（同 cohort、同训练设置）；读数 (a) 从第 29 行、(c) 从第 59 行，协议 none；判定按 v3 §3.3 A3 行（established 两 seed 都好过 L60_D20、至少一个超过 seed 线 0.078 / 雷达 0.184、fully flyable 不掉）。",
+   "runs": {
+    "L60_D20_N4_s1337": "A3-b（v3 §5.3、D44）：执行器同 L60_D20（lookback 60 s、段长 20 s、种子 1337、训练锚点全随机、同一 development cohort），只把控制段数 N₁ 从 2 改为 4，即每 5 s 一个控制决策而不是每 10 s。检验假设 H3：末段转弯的形状错（overshoot、parallel-offset）是否因为控制分辨率太粗。",
+    "L60_D20_N4_s2024": "A3-b（v3 §5.3、D44）：执行器同 L60_D20（lookback 60 s、段长 20 s、种子 2024、训练锚点全随机、同一 development cohort），只把控制段数 N₁ 从 2 改为 4，即每 5 s 一个控制决策而不是每 10 s。检验假设 H3：末段转弯的形状错（overshoot、parallel-offset）是否因为控制分辨率太粗。"
+   },
+   "variants": {
+    "L60_D20_N4_s1337@lockstep-none": "闭环读数 (a)（协议 none，从第 29 行起），与 L60_D20 的同一读数比：established 全部 / 雷达、fully flyable、FDE、三类失败方式的份额。",
+    "L60_D20_N4_s1337@lockstep-none-row59": "闭环读数 (c)（协议 none，从第 59 行起，与网格的 row59 读数同起点），与 L60_D20 的同一读数比。",
+    "L60_D20_N4_s2024@lockstep-none": "闭环读数 (a)（协议 none，从第 29 行起），与 L60_D20 的同一读数比：established 全部 / 雷达、fully flyable、FDE、三类失败方式的份额。",
+    "L60_D20_N4_s2024@lockstep-none-row59": "闭环读数 (c)（协议 none，从第 59 行起，与网格的 row59 读数同起点），与 L60_D20 的同一读数比。"
+   }
   }
  }
 }
