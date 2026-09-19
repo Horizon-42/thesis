@@ -277,3 +277,27 @@ leaders on all flights: L60_D20, L120_D20, L90_D60, L60_D90
 leaders on the vectored group: L120_D20, L120_D30, L90_D60, L60_D90
 winners: L120_D20, L90_D60, L60_D90 → selected L120_D20 (decisive)
 ```
+
+## 8. A3：按 A2 的假设改执行器（2026-09-19 晚，用户说代码就位就跑；计划 §5.3、D43 / D44）
+
+基线 = 网格的 L60_D20 两 seed（阶段 B 的执行器）。判定按计划 §3.3 A3 行：established 两 seed 都好过基线、至少一个超过 seed 线（全部 0.078 / 雷达 0.184）、fully flyable 不掉。
+两个臂族的 cohort 都比 L60_D20 的略小（A3-a 用 L60_D60 的 cohort，记录 ≥ 120 s；A3-b 复用 L60_D20 的），比较在共有航班上做，n 写在表里。
+
+### 8.1 A3-a：预测 60 s、只飞 20 s（H2；`lockstep_exec20/<arm>/<reading>/`）
+
+用网格里已训好的 L60_D60 两臂，闭环每 20 s 重新预测、每次只飞预测的前 20 s（`manoeuvre_lockstep --execute-s 20`，提交见 §4），不重训。
+
+| 读数 | 臂 | seed | n（共有） | est 全部 | est 雷达 | est 直线 | fully flyable | 雷达 ADE (m) | FDE p50 (m) | 备注 |
+|---|---|---|---|---|---|---|---|---|---|---|
+
+### 8.2 A3-b：控制分辨率 N₁ = 4（H3；campaign `two_tier_v3_a3b_20260919`）
+
+其余同 L60_D20，每 5 s 一个控制决策而不是每 10 s；两 seed 新训。
+
+| 读数 | 臂 | seed | n（共有） | est 全部 | est 雷达 | est 直线 | fully flyable | 雷达 ADE (m) | FDE p50 (m) | 选模 epoch |
+|---|---|---|---|---|---|---|---|---|---|---|
+
+### 8.3 判定与失败方式的变化
+
+（读完后填：两臂族对基线的差、是否过 A3 行；带记录重飞后三类失败方式的份额对 L60_D20 的变化。）
+
