@@ -478,7 +478,7 @@ S20_K16：门 B FAIL（两 seed 的 established 全部、雷达 ADE 都变差超
 ## 12. 阶段 B′ · B0′：指令词表的反读与人工核（2026-09-20；计划 §5.2.1、D51 / D53；campaign `two_tier_v3_bprime_20260920`）
 
 读什么：B cohort（网格的 L60_D60 那份，记录 ≥ 120 s：train 6853 / val 1404 架）的每条航迹，用 `run_ts.py instruction_vocabulary` 反读成指令词，τ = 10 s。
-每一版的产物都留着：`vocabulary_tau10/`（当前版）与 `_superseded/vocabulary_tau10_v{0,1,2}_*/`（前几版，只供对照，不再引用它们的数）。人工核 = 300 架 train 航班（直线进近 / 雷达引导各 150，
+每一版的产物都留着：`vocabulary_tau10/`（当前版）与 `_superseded/vocabulary_tau10_v*/`（六份，每份约 74 MB、共 442 MB，只供对照，不再引用它们的数；磁盘只剩 5.7 GB，队列启动要 3 GB——要不要删，等用户一句话）。人工核 = 300 架 train 航班（直线进近 / 雷达引导各 150，
 按 `approach_difficulty` 的分层抽，seed 1337），三个 opus agent 各看 100 页图，记"一致 / 漏读 / 误读"；这不是用户亲手核的数，用户看图时可以推翻。
 
 ### 12.1 档位（D51）：先按起点档位读一遍，再按读出来的分布定
