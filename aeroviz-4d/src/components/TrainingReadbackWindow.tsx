@@ -79,11 +79,10 @@ const FLOWN_COLUMN: Record<ChartedKind, TrainingGeometricColumn> = {
 
 function unwrapDegrees(values: number[]): number[] {
   const out: number[] = [];
-  let previous = 0;
+  let previous = values[0];
   values.forEach((value, index) => {
     if (index === 0) {
       out.push(value);
-      previous = value;
       return;
     }
     const next = value + 360 * Math.round((previous - value) / 360);
@@ -101,19 +100,33 @@ export function flownTrace(flight: TrainingFlight, kind: ChartedKind): number[] 
   return column.map(metresPerSecondToKnots);
 }
 
+/** One column of a track, read at a time that falls between its rows. */
+function at(tS: number[], values: number[], seconds: number): number {
+  const row = rowAt(tS, seconds);
+  if (row + 1 >= tS.length) return values[row];
+  const span = tS[row + 1] - tS[row];
+  return values[row] + ((values[row + 1] - values[row]) * (seconds - tS[row])) / span;
+}
+
 /**
  * How far apart the two tracks are at one moment, horizontally in the runway
  * frame. `null` once the flown sentence has stopped: there is nothing to compare
  * against then, and a number there would be measuring the stopping rule.
+ *
+ * BOTH TRACKS ARE READ AT THE SAME INSTANT. They are on different clocks — the
+ * observation on 2 s rows, the flown sentence on 1 s steps — so flooring each to
+ * its own row put the two positions up to a second apart, which is ~70 m of
+ * flight (measured over the 40 exported flights: median 8.5 m of error, p95
+ * 108 m, max 191 m). `meanGapM`, printed two lines below this on screen,
+ * interpolates the flown track onto the observed times; this now agrees with it.
  */
 export function gapAtS(flight: TrainingFlight, seconds: number): number | null {
   const flown = flight.geometric;
   if (seconds > flown.tS[flown.tS.length - 1]) return null;
-  const step = rowAt(flown.tS, seconds);
-  const row = rowAt(flight.observed.tS, seconds);
+  const observed = flight.observed;
   return Math.hypot(
-    flown.toGoM[step] - flight.observed.toGoM[row],
-    flown.crossM[step] - flight.observed.crossM[row],
+    at(flown.tS, flown.toGoM, seconds) - at(observed.tS, observed.toGoM, seconds),
+    at(flown.tS, flown.crossM, seconds) - at(observed.tS, observed.crossM, seconds),
   );
 }
 
@@ -265,6 +278,7 @@ export default function TrainingReadbackWindow({
 
   const cursorRow = rowAt(tS, cursorS);
   const gapNow = gapAtS(flight, cursorS);
+  const endedPastThePlane = flight.geometric.toGoM[flight.geometric.toGoM.length - 1] < 0;
   const lastEventS = sentence.eventTimesS[sentence.eventTimesS.length - 1];
 
   const traces: Record<ChartedKind, { values: number[]; unit: string; digits: number }> = {
@@ -445,9 +459,14 @@ export default function TrainingReadbackWindow({
                   points={tS.map((t, row) => `${xFor(t)},${yFor(trace.values[row])}`).join(" ")}
                   className="training-readback-trace"
                 />
+                {/* Truncated at the axis rather than clamped onto its edge: 39
+                    of the 40 exported flights fly on past the observation, and a
+                    clamp stacks all those rows on the right-hand pixel — a
+                    spurious vertical line the moment one is still moving. */}
                 <polyline
                   points={flight.geometric.tS
-                    .map((t, step) => `${xFor(Math.min(t, endOfTrack))},${yFor(flown[step])}`)
+                    .map((t, step) => (t <= endOfTrack ? `${xFor(t)},${yFor(flown[step])}` : ""))
+                    .filter(Boolean)
                     .join(" ")}
                   className="training-readback-flown"
                 />
@@ -538,9 +557,15 @@ export default function TrainingReadbackWindow({
             diagnostic, never a model's answer. It starts at the aircraft's first
             row because the words say no starting point, so the two lines share a
             first point by construction: what grows between them is what the words
-            did not say. It ended {flight.geometric.endReason === "crossed-threshold"
+            did not say.{" "}
+            {/* `finalGapM` is `hypot(toGo, cross)` — a distance FROM the
+                threshold, never a shortfall. All 20 time-cap flights in KRDU's
+                export end PAST the plane (3.8–8.9 km beyond it), so "m short"
+                said the opposite of what happened. */}
+            It ended {flight.geometric.endReason === "crossed-threshold"
               ? `across the threshold plane, ${format(flight.geometric.finalGapM)} m from the threshold`
-              : `on the time cap, ${format(flight.geometric.finalGapM)} m short`}
+              : `on the time cap, ${format(flight.geometric.finalGapM)} m from the threshold` +
+                (endedPastThePlane ? ", having flown past the plane" : "")}
             , and the two were compared over {format(flight.geometric.comparedFraction * 100)}% of
             the approach (mean {format(flight.geometric.meanGapM)} m, p95{" "}
             {format(flight.geometric.gapP95M)} m).
@@ -549,7 +574,7 @@ export default function TrainingReadbackWindow({
             <b style={{ color: TRAINING_TRACE_COLOR }}>——</b> measured ·{" "}
             <b style={{ color: TRAINING_FLOWN_COLOR }}>——</b> flown by rule ·{" "}
             <b style={{ color: TRAINING_WORD_COLOR }}>——</b> the word in force · dotted =
-            issued (orange) and settled (green) · hatched = read but not worded ·
+            issued (yellow) and settled (green) · hatched = read but not worded ·
             dashed = where the sentence lands.
           </span>
           <span>

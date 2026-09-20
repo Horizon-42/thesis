@@ -183,16 +183,17 @@ export interface TrainingInstruction {
  * the words against anything else (a geodetic track, say) would let the charts
  * and the words disagree about where the aircraft was.
  *
- * Every column has one value per row of `tS`, and the geodetic columns are
- * deliberately absent until T5/T6 puts the tracks in the 3D scene.
+ * Every column has one value per row of `tS`. The geodetic columns are carried
+ * beside these, as `TRAINING_GEODETIC_COLUMNS`.
  */
 /**
  * The geodetic columns BOTH tracks carry, for the 3D layer.
  *
  * THE ALTITUDE IS HAE, and the name says so. A record is MSL; Cesium reads
  * `cartographicDegrees` altitude as metres above the WGS84 ellipsoid, so the
- * exporter converts on the way out exactly as the CZML path does. A line that
- * skipped it renders |N| — 33.5 m at KRDU — below its own terrain.
+ * exporter converts on the way out exactly as the CZML path does. Since
+ * h = H + N and N is negative here (-33.5 m at KRDU), a line handed the MSL
+ * number renders |N| too HIGH, floating above its own terrain.
  */
 export const TRAINING_GEODETIC_COLUMNS = ["lon", "lat", "altHaeM"] as const;
 export type TrainingGeodeticColumn = (typeof TRAINING_GEODETIC_COLUMNS)[number];
@@ -285,10 +286,33 @@ export interface TrainingSelection {
   flight: TrainingFlight;
 }
 
+/**
+ * MIRROR of `instruction_kinematics.assumptions()`: what the flown sentences were
+ * drawn under. It is REQUIRED and it is SHOWN — an approximation nobody can see
+ * stated is worse than none, and the block claims in its own docstring that the
+ * view shows it.
+ */
+export interface TrainingGeometry {
+  method: string;
+  dtS: number;
+  bankDeg: number;
+  gravityMps2: number;
+  heightGainS: number;
+  descentMaxDeg: number;
+  climbMaxDeg: number;
+  accelMaxMps2: number;
+  startsAt: string;
+  stopRule: string;
+  windModelled: boolean;
+  aircraftTypeModelled: boolean;
+  constantsFrom: string[];
+}
+
 export interface TrainingSample {
   setId: string;
   airport: string;
   vocabulary: TrainingVocabulary;
+  geometry: TrainingGeometry;
   flights: TrainingFlight[];
 }
 
@@ -713,6 +737,17 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
   if (tS === null || tS.length < 2) {
     return { ok: false, problem: `${where}.geometric.tS is missing or shorter than two steps` };
   }
+  // `rowAt`, the x axis and the gap readout all assume this clock runs forward
+  // from 0, exactly as the observed one does.
+  if (tS[0] !== 0) {
+    return { ok: false, problem: `${where}.geometric.tS starts at ${tS[0]} s, not 0` };
+  }
+  for (let i = 1; i < tS.length; i += 1) {
+    if (!(tS[i] > tS[i - 1])) {
+      return { ok: false, problem: `${where}.geometric.tS is not increasing at step ${i}` };
+    }
+  }
+
   const columns: Record<string, number[]> = { tS };
   for (const column of [...TRAINING_GEOMETRIC_COLUMNS, ...TRAINING_GEODETIC_COLUMNS]) {
     const values = numberArray(raw[column]);
@@ -740,13 +775,6 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
     }
     numbers[field] = value;
   }
-  // The gap is a mean over the window both tracks were flying, and the fraction
-  // is what says how much of the approach that was. A fraction over 1 would mean
-  // the comparison outran the observation it is a fraction OF.
-  if (numbers.comparedFraction > 1) {
-    return { ok: false, problem: `${where}.geometric.comparedFraction is ${numbers.comparedFraction}, over the whole approach` };
-  }
-
   return {
     ok: true,
     value: {
@@ -759,6 +787,51 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
       gapP95M: numbers.gapP95M,
       comparedS: numbers.comparedS,
       comparedFraction: numbers.comparedFraction,
+    },
+  };
+}
+
+function parseGeometry(raw: unknown): Parsed<TrainingGeometry> {
+  if (!isRecord(raw)) return { ok: false, problem: "geometry is missing: the flown tracks state what they were drawn under" };
+  const numbers: Record<string, number> = {};
+  for (const field of ["dtS", "bankDeg", "gravityMps2", "heightGainS", "descentMaxDeg",
+                       "climbMaxDeg", "accelMaxMps2"]) {
+    const value = finite(raw, field);
+    if (value === null) return { ok: false, problem: `geometry.${field} is missing or not a number` };
+    numbers[field] = value;
+  }
+  const strings: Record<string, string> = {};
+  for (const field of ["method", "startsAt", "stopRule"]) {
+    const value = str(raw, field);
+    if (value === null) return { ok: false, problem: `geometry.${field} is missing or not a non-empty string` };
+    strings[field] = value;
+  }
+  for (const field of ["windModelled", "aircraftTypeModelled"]) {
+    if (typeof raw[field] !== "boolean") {
+      return { ok: false, problem: `geometry.${field} is ${JSON.stringify(raw[field])}, expected a boolean` };
+    }
+  }
+  const sources = raw.constantsFrom;
+  if (!Array.isArray(sources) || !sources.every((item) => typeof item === "string")) {
+    return { ok: false, problem: "geometry.constantsFrom is missing or not a list of files" };
+  }
+
+  return {
+    ok: true,
+    value: {
+      method: strings.method,
+      startsAt: strings.startsAt,
+      stopRule: strings.stopRule,
+      dtS: numbers.dtS,
+      bankDeg: numbers.bankDeg,
+      gravityMps2: numbers.gravityMps2,
+      heightGainS: numbers.heightGainS,
+      descentMaxDeg: numbers.descentMaxDeg,
+      climbMaxDeg: numbers.climbMaxDeg,
+      accelMaxMps2: numbers.accelMaxMps2,
+      windModelled: raw.windModelled as boolean,
+      aircraftTypeModelled: raw.aircraftTypeModelled as boolean,
+      constantsFrom: sources as string[],
     },
   };
 }
@@ -856,6 +929,8 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
 
   const vocabulary = parseVocabulary(raw.vocabulary);
   if (!vocabulary.ok) return vocabulary;
+  const geometry = parseGeometry(raw.geometry);
+  if (!geometry.ok) return geometry;
 
   // `kinds` is the exporter restating the column order, and it must agree with
   // ours exactly — a disagreement means the columns moved. Every export writes
@@ -969,7 +1044,10 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
     });
   }
 
-  return { ok: true, value: { setId, airport, vocabulary: vocabulary.value, flights } };
+  return {
+    ok: true,
+    value: { setId, airport, vocabulary: vocabulary.value, geometry: geometry.value, flights },
+  };
 }
 
 // ── where the files live ─────────────────────────────────────────────────────

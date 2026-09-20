@@ -12,9 +12,10 @@
  * moment reading is the read-back window's job.
  *
  * The altitudes are already HAE (`altHaeM`, converted at the exporter), which is
- * what `Cartesian3.fromDegreesArrayHeights` wants. Feeding it MSL would sink both
- * lines ~33.5 m into KRDU's terrain — together, so the error would be invisible in
- * the comparison and visible only against the ground.
+ * what `Cartesian3.fromDegreesArrayHeights` wants. Feeding it MSL would float both
+ * lines ~33.5 m ABOVE where they belong (h = H + N, and N is negative here) —
+ * together, so the error would be invisible in the comparison and visible only
+ * against the terrain.
  */
 
 import { useEffect } from "react";
@@ -54,7 +55,7 @@ export default function useTrainingTrackLayer(): void {
   const { viewer, mode, trainingSelection } = useApp();
 
   useEffect(() => {
-    if (!isCesiumViewerUsable(viewer) || !viewer) return;
+    if (!isCesiumViewerUsable(viewer)) return;
     const flight = mode === "training" ? trainingSelection?.flight : undefined;
     if (!flight) return;
 
@@ -67,10 +68,13 @@ export default function useTrainingTrackLayer(): void {
           width,
           material: Cesium.Color.fromCssColorString(colour),
           // The comparison is between the two lines, so neither may be hidden by
-          // terrain: a rule-flown track that ends up inside a hill is a reading,
-          // not a rendering accident.
-          arcType: Cesium.ArcType.GEODESIC,
-          clampToGround: false,
+          // terrain: a rule-flown sentence that descends into a hill is a
+          // reading, not a rendering accident. `depthFailMaterial` is what says
+          // so — an unclamped polyline still loses the depth test, and the
+          // defaults alone would silently swallow exactly that case.
+          depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
+            color: Cesium.Color.fromCssColorString(colour).withAlpha(0.55),
+          }),
         },
       });
 

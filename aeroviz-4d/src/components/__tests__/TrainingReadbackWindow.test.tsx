@@ -215,16 +215,20 @@ describe("TrainingReadbackWindow", () => {
 // ── the sentence flown by rule, beside the aircraft (T6) ─────────────────────
 
 describe("the flown sentence on the charts", () => {
-  it("converts the flown track into each chart's own unit", () => {
+  // Every row, not just the first: an implementation that repeated element 0
+  // would have passed the version of this test that only looked at [0].
+  it("converts every row of the flown track into each chart's own unit", () => {
     const { flight } = selection();
-    expect(flownTrace(flight, "altitude")[0]).toBeCloseTo(
-      flight.geometric.heightM[0] / FEET_TO_METERS,
-      6,
-    );
-    expect(flownTrace(flight, "speed")[0]).toBeCloseTo(
-      metresPerSecondToKnots(flight.geometric.groundSpeedMps[0]),
-      6,
-    );
+    const feet = flownTrace(flight, "altitude");
+    const knots = flownTrace(flight, "speed");
+    expect(feet).toHaveLength(flight.geometric.heightM.length);
+    flight.geometric.heightM.forEach((metres, row) => {
+      expect(feet[row]).toBeCloseTo(metres / FEET_TO_METERS, 6);
+    });
+    flight.geometric.groundSpeedMps.forEach((mps, row) => {
+      expect(knots[row]).toBeCloseTo(metresPerSecondToKnots(mps), 6);
+    });
+    expect(new Set(feet).size).toBeGreaterThan(1);
   });
 
   // The observed heading chart plots the UNWRAPPED course and the flown track
@@ -240,10 +244,29 @@ describe("the flown sentence on the charts", () => {
     expect(vocabulary.readingRule).toBe("plateau-v11");
   });
 
-  it("reads out how far apart the two tracks are at the cursor", () => {
+  // The two tracks are on DIFFERENT clocks — 2 s rows against 1 s steps — so this
+  // is pinned by VALUE at a time only one of them has a row at. Flooring each to
+  // its own row instead put the positions up to a second apart, ~70 m of flight
+  // (measured on the real export: p95 108 m, max 191 m), while the mean printed
+  // beside it on screen interpolates. The three loose assertions this replaces
+  // all passed with the wrong track indexed.
+  it("reads both tracks at the SAME instant, between their rows", () => {
     const { flight } = selection();
     expect(gapAtS(flight, 0)).toBeCloseTo(0, 6);   // they share a first point by construction
-    expect(gapAtS(flight, 200)).toBeGreaterThan(0);
+
+    const seconds = 141;                            // odd: the observed rows are even
+    const lerp = (tS: number[], v: number[]) => {
+      let row = 0;
+      while (row + 1 < tS.length && tS[row + 1] <= seconds) row += 1;
+      const span = tS[row + 1] - tS[row];
+      return v[row] + ((v[row + 1] - v[row]) * (seconds - tS[row])) / span;
+    };
+    const expected = Math.hypot(
+      lerp(flight.geometric.tS, flight.geometric.toGoM) - lerp(flight.observed.tS, flight.observed.toGoM),
+      lerp(flight.geometric.tS, flight.geometric.crossM) - lerp(flight.observed.tS, flight.observed.crossM),
+    );
+    expect(gapAtS(flight, seconds)).toBeCloseTo(expected, 6);
+    expect(expected).toBeGreaterThan(0);
   });
 
   // After the flown sentence stops there is nothing to compare against, and a

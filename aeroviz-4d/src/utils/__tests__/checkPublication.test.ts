@@ -208,6 +208,33 @@ describe("the Training export's checks", () => {
     expect(findings[0].message).toContain("vocabularySha256");
   });
 
+  // Every row of the agreement loop, not just the sha: deleting the runway-sha or
+  // the reading-rule row passed the whole suite before this.
+  it("catches each field the two files must agree on", () => {
+    const index = parseTrainingIndex(mockIndex());
+    const sample = parseTrainingSample(mockSample());
+    if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
+
+    for (const [field, value] of [
+      ["runwaySha256", "0000"],
+      ["readingRule", "plateau-v9"],
+    ] as const) {
+      const findings = checkTrainingSetAgrees(
+        { ...index.value.sets[0], [field]: value },
+        sample.value,
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain(field);
+    }
+
+    // and the sample calling itself by another name
+    const renamed = checkTrainingSetAgrees(index.value.sets[0], {
+      ...sample.value,
+      setId: "another_set",
+    });
+    expect(renamed[0].message).toContain("another_set");
+  });
+
   it("catches a manifest that promises more flights than the sample holds", () => {
     const index = parseTrainingIndex(mockIndex());
     const sample = parseTrainingSample(mockSample());

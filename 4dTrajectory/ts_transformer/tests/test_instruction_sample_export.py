@@ -229,14 +229,52 @@ class _StubSeries:
     chart frame, and the target's place in it."""
 
     def __init__(self, lat: float, lon: float, alt_m: float, psi_rad: float,
-                 threshold_above_anchor_m: float = 0.0):
-        from ts_transformer.data.coordinate_frames import AirportENUFrame
+                 threshold_above_anchor_m: float = 0.0, rotated: bool = False):
+        from ts_transformer.data.coordinate_frames import AirportENUFrame, RunwayAlignedFrame
 
         # `alt_m` is the AIRPORT reference elevation (the chart's vertical anchor); the
         # threshold sits a little above or below it, and the chart's z counts from the anchor.
-        self.frame = AirportENUFrame(lat0=lat, lon0=lon, alt0=alt_m, code="TEST")
+        # A ROTATED frame is the one that tells `from_world_horizontal` apart from its
+        # opposite: on the unrotated default the rotation is the identity and both agree.
+        self.frame = (
+            RunwayAlignedFrame(lat0=lat, lon0=lon, alt0=alt_m, heading_rad=psi_rad)
+            if rotated
+            else AirportENUFrame(lat0=lat, lon0=lon, alt0=alt_m, code="TEST")
+        )
         self.target_chart = (0.0, 0.0, threshold_above_anchor_m)
         self.scenario = type("S", (), {"target": type("T", (), {"psi": psi_rad})()})()
+
+
+@pytest.mark.parametrize("psi_deg", [52.0, -131.0, 17.0])
+@pytest.mark.parametrize("rotated", [False, True])
+def test_the_geodetic_inverse_is_course_frame_rows_run_backwards(psi_deg: float, rotated: bool):
+    """A ROUND TRIP, which is the only shape that pins all four terms of the inverse.
+
+    Push an arbitrary offset from the threshold forward through `course_frame_rows`, feed the
+    `to_go / cross` it produces back through `geodetic_columns`, and require the latitude and
+    longitude to come back. The angles have both sin and cos non-zero, because at ψ = 0 two of
+    the four terms vanish and a sign error in either survives; and it runs under the rotated
+    frame as well, because on an unrotated one `from_world_horizontal` and its opposite agree
+    and the wrong one would pass.
+    """
+    from ts_transformer.data.approach_difficulty import course_frame_rows
+
+    psi = math.radians(psi_deg)
+    series = _StubSeries(35.8776, -78.7875, 132.0, psi, rotated=rotated)
+    offsets = [(4000.0, -2500.0), (-1200.0, 800.0), (25000.0, 6400.0)]
+
+    east = np.array([e for e, _ in offsets])
+    north = np.array([n for _, n in offsets])
+    frame = course_frame_rows(east, north, np.ones(len(offsets)), np.zeros(len(offsets)), psi)
+
+    columns = geodetic_columns(series, frame["to_go_m"], frame["cross_m"], np.zeros(len(offsets)))
+    for index, (east_m, north_m) in enumerate(offsets):
+        first, second = series.frame.from_world_horizontal(east_m, north_m)
+        lat, lon = series.frame.latlon_from_horizontal(
+            series.target_chart[0] + first, series.target_chart[1] + second
+        )
+        assert columns["lat"][index] == pytest.approx(lat, abs=1e-6)
+        assert columns["lon"][index] == pytest.approx(lon, abs=1e-6)
 
 
 def test_the_geodetic_inverse_puts_the_threshold_back_where_it_is():
@@ -262,8 +300,9 @@ def test_a_point_down_the_course_lands_up_the_inbound_bearing():
 
 
 def test_the_altitude_leaves_as_hae_not_msl():
-    """A record is MSL and Cesium reads the ellipsoid; at KRDU N = -33.5 m, so a line that
-    skipped this renders 33.5 m below its own terrain."""
+    """A record is MSL and Cesium reads the ellipsoid. At KRDU N = -33.5 m and h = H + N, so
+    a line handed MSL where HAE was wanted renders 33.5 m too HIGH — above its own terrain and
+    above the observed CZML it is read against."""
     from flight_scenarios.datum import geoid_undulation_m
 
     series = _StubSeries(35.8776, -78.7875, 132.0, math.radians(52.0), threshold_above_anchor_m=3.0)

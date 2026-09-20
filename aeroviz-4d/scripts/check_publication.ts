@@ -145,7 +145,16 @@ async function checkTraining(airport: string, server: string | null): Promise<Ai
   if (!existsSync(manifestFile)) return { listed: 0, trainingSets: 0, findings: [] };
 
   const findings: PublicationFinding[] = [];
-  const manifest = readJson(manifestFile);
+  let manifest: unknown;
+  try {
+    manifest = readJson(manifestFile);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      listed: 0, trainingSets: 0,
+      findings: [{ level: "error", message: `training/index.json is not readable JSON: ${detail}` }],
+    };
+  }
   findings.push(...checkTrainingIndex(manifest));
   const parsed = parseTrainingIndex(manifest);
   if (!parsed.ok) return { listed: 0, trainingSets: 0, findings };
@@ -162,7 +171,19 @@ async function checkTraining(airport: string, server: string | null): Promise<Ai
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is listed but missing on disk` });
       continue;
     }
-    const sample = readJson(sampleFile);
+    // A half-written export is the failure this check EXISTS for, and a truncated
+    // file is the commonest shape of it. Left to `readJson` it threw out of the
+    // sweep with a bare "Unexpected end of JSON input", no filename, no set, and
+    // the remaining sets unchecked — the "invalid manifest" message this module
+    // was written to replace.
+    let sample: unknown;
+    try {
+      sample = readJson(sampleFile);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${detail}` });
+      continue;
+    }
     findings.push(...checkTrainingSample(entry.id, sample));
     const read = parseTrainingSample(sample);
     if (read.ok) findings.push(...checkTrainingSetAgrees(entry, read.value));

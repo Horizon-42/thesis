@@ -28,9 +28,9 @@ describe("trainingTrackPositions", () => {
   });
 
   // The altitude handed to Cesium is HAE, because that is what
-  // `cartographicDegrees` means. Passing the MSL a record carries would sink both
-  // lines ~33.5 m into KRDU's terrain — together, so the mistake would be
-  // invisible in the comparison and visible only against the ground.
+  // `cartographicDegrees` means. Passing the MSL a record carries would float both
+  // lines ~33.5 m above where they belong — together, so the mistake would be
+  // invisible in the comparison and visible only against the terrain.
   it("takes the HAE column, not a height above the threshold", () => {
     const item = flight();
     const { observed } = trainingTrackPositions(item);

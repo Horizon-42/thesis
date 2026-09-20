@@ -107,8 +107,15 @@ def geodetic_columns(series, to_go_m, cross_m, height_m) -> dict[str, list[float
     THE VERTICAL DATUM IS CONVERTED HERE, on the way out, exactly as the CZML exporter does
     it: a record's altitude is MSL (observed ADS-B is ellipsoidal and is converted once at the
     `flight_scenarios` seam), while Cesium reads `cartographicDegrees` as metres above the
-    WGS84 ELLIPSOID. Skip it and every line renders |N| — 33.5 m at KRDU — below its own
-    terrain. The field is named `altHaeM` so nothing downstream has to remember which it got.
+    WGS84 ELLIPSOID. Since h = H + N and N is NEGATIVE here (-33.5 m at KRDU), a line handed
+    the MSL number renders |N| too HIGH — above its own terrain and above the observed CZML it
+    is read against. The field is named `altHaeM` so nothing downstream has to remember which
+    it got.
+
+    The undulation comes from `flight_scenarios.datum.geoid_undulation_m` and is added by hand
+    because the production MSL->HAE function lives in `aeroviz-4d/python/vertical_datum.py`,
+    which the modeling tree must not import (and vice versa). Adding one to `flight_scenarios`
+    is a change to a shared package, which is not this module's to make.
 
     The horizontal inverse is `course_frame_rows`' own algebra read backwards: with
     ``to_go = -(e·cosψ + n·sinψ)`` and ``cross = e·sinψ - n·cosψ``, the offsets from the

@@ -299,14 +299,40 @@ describe("the flown sentence", () => {
 
   // The flown track runs on its own clock and may outlast or fall short of the
   // observation, so it is NOT checked against `durationS` the way the observed
-  // track is — what is checked is that the comparison states its own window.
-  it("refuses a comparison that claims more than the whole approach", () => {
+  // track is. Its own clock IS checked, because `rowAt`, the x axis and the gap
+  // readout all assume it runs forward from 0.
+  it("refuses a flown clock that does not run forward from 0", () => {
+    const late = sampleWith((sample) => {
+      sample.flights[0].geometric.tS[0] = 1;
+    });
+    expect(late.ok).toBe(false);
+    if (late.ok) return;
+    expect(late.problem).toContain("starts at 1 s, not 0");
+
+    const backwards = sampleWith((sample) => {
+      sample.flights[0].geometric.tS[5] = sample.flights[0].geometric.tS[4];
+    });
+    expect(backwards.ok).toBe(false);
+    if (backwards.ok) return;
+    expect(backwards.problem).toContain("not increasing");
+  });
+
+  // The assumptions the line was drawn under travel WITH it and are shown, so a
+  // sample that does not state them is not a sample this view can draw.
+  it("refuses a sample that does not say what its flown tracks assume", () => {
     const parsed = sampleWith((sample) => {
-      sample.flights[0].geometric.comparedFraction = 1.4;
+      delete sample.geometry;
     });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.problem).toContain("over the whole approach");
+    expect(parsed.problem).toContain("geometry is missing");
+
+    const partial = sampleWith((sample) => {
+      delete sample.geometry.windModelled;
+    });
+    expect(partial.ok).toBe(false);
+    if (partial.ok) return;
+    expect(partial.problem).toContain("geometry.windModelled");
   });
 
   it("refuses an ending it does not know", () => {

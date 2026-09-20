@@ -282,6 +282,37 @@ export default function TrainingPanel() {
                   <dt>Words per kind</dt>
                   <dd>{TRAINING_KINDS.map((kind) => `${kind} ${counts[kind]}`).join(" · ")}</dd>
                 </div>
+                {/* The flown tracks' assumptions. The exporter writes them BECAUSE
+                    a view shows them: an approximation nobody can see stated is
+                    worse than none, and "flown by rule" means nothing until the
+                    rule's numbers are on screen. */}
+                <div>
+                  <dt>Flown by</dt>
+                  <dd>{sample.geometry.method}, {sample.geometry.dtS} s steps</dd>
+                </div>
+                <div>
+                  <dt>Bank · height · accel</dt>
+                  <dd>
+                    {sample.geometry.bankDeg}° · {sample.geometry.heightGainS} s,{" "}
+                    −{sample.geometry.descentMaxDeg}°/+{sample.geometry.climbMaxDeg}° ·{" "}
+                    {sample.geometry.accelMaxMps2} m/s²
+                  </dd>
+                </div>
+                <div>
+                  <dt>Not modelled</dt>
+                  <dd>
+                    {[
+                      sample.geometry.windModelled ? null : "wind",
+                      sample.geometry.aircraftTypeModelled ? null : "aircraft type",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Starts / stops</dt>
+                  <dd>{sample.geometry.startsAt}; {sample.geometry.stopRule}</dd>
+                </div>
               </dl>
               ) : null}
 

@@ -22,9 +22,16 @@ export const TRAINING_KIND_COLOR: Record<TrainingKind, string> = {
   terminal: "#f472b6",
 };
 
-/** The word in force, drawn in ONE colour across every chart: it is one sentence,
- *  and the eye should be able to follow it down the page. */
-export const TRAINING_WORD_COLOR = "#fb923c";
+/**
+ * The word in force, drawn in ONE colour across every chart: it is one sentence,
+ * and the eye should be able to follow it down the page.
+ *
+ * YELLOW, not the orange the hand-check pages use. Those pages have no flown
+ * track on them; this window draws one, the design fixes it as orange (§5.5,
+ * "真实白、规则橙、模型紫"), and two orange lines on one chart are one line as far
+ * as a reader is concerned.
+ */
+export const TRAINING_WORD_COLOR = "#facc15";
 
 /** The measured signal, against which the words are read. */
 export const TRAINING_TRACE_COLOR = "#cbd5e1";

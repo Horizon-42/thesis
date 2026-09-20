@@ -234,12 +234,30 @@ export const MOCK_FLIGHT = {
   geometric: MOCK_GEOMETRIC,
 };
 
+/** MIRROR of `instruction_kinematics.assumptions()` — the real defaults. */
+export const MOCK_GEOMETRY = {
+  method: "instruction-kinematics-v1",
+  dtS: 1,
+  bankDeg: 20,
+  gravityMps2: 9.81,
+  heightGainS: 12,
+  descentMaxDeg: 6,
+  climbMaxDeg: 2,
+  accelMaxMps2: 1,
+  startsAt: "observed-first-row",
+  stopRule: "crossed-threshold or time-cap at the observed duration + 120 s",
+  windModelled: false,
+  aircraftTypeModelled: false,
+  constantsFrom: ["outputs/guidance/route.py", "outputs/guidance/controller.py"],
+};
+
 export const MOCK_SAMPLE = {
   schema: TRAINING_SAMPLE_SCHEMA,
   setId: "vocabulary_tau10",
   airport: "KRDU",
   kinds: [...TRAINING_KINDS],
   vocabulary: MOCK_VOCABULARY,
+  geometry: MOCK_GEOMETRY,
   flights: [MOCK_FLIGHT],
 };
 
