@@ -130,6 +130,7 @@ describe("TrainingSentenceBar", () => {
   // row's last band runs to durationS, and the gap row says so in words.
   it("runs the last band to the end of the track and names the unworded tail", () => {
     render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More notes" }));
     const lastEventS = MOCK_EVENT_TIMES_S[MOCK_EVENT_TIMES_S.length - 1];
     const landed = bandRect(/terminal landed/);
     const gapTail = bandRect(/no gap word/);
@@ -231,12 +232,14 @@ describe("TrainingSentenceBar", () => {
   // 977 m carrying the single altitude word "0 ft" for the whole approach.
   it("says a band is the target in force, not the measured state", () => {
     render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More notes" }));
     expect(screen.getByText(/TARGET in force/)).toBeTruthy();
     expect(screen.getByLabelText(/altitude target 10000 ft/)).toBeTruthy();
   });
 
   it("lists go-around and says it is never observed in this data", () => {
     render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More notes" }));
     expect(screen.getByText(/continue \/ landed \/ go-around/)).toBeTruthy();
     expect(screen.getByText(/go-around is never observed in this data/)).toBeTruthy();
   });
@@ -249,12 +252,14 @@ describe("TrainingSentenceBar", () => {
       flight: { ...flight, sentence: { ...flight.sentence, durationClamped: 1 } },
     };
     render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More notes" }));
     expect(screen.getByText(/1 gap hit the 300 s duration ceiling/)).toBeTruthy();
   });
 
   // V17: KRDU's vocabulary covers four runways, the airport has six thresholds.
   it("takes the runway classes from the vocabulary, and says what they are", () => {
     render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: "More notes" }));
     expect(screen.getByText(/05L, 05R, 23L, 23R/)).toBeTruthy();
     expect(screen.getByText(/not the airport's full runway list/)).toBeTruthy();
   });

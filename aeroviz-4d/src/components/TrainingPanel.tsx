@@ -80,6 +80,7 @@ export default function TrainingPanel() {
   const [setId, setSetId] = useState<string | null>(null);
   const [sampleState, setSampleState] = useState<SampleState>({ status: "idle" });
   const [flightKey, setFlightKey] = useState<string | null>(null);
+  const [aboutOpen, setAboutOpen] = useState<boolean>(false);
 
   // ── the manifest ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -170,11 +171,27 @@ export default function TrainingPanel() {
     <section className="training-panel" aria-label="Training">
       <header className="training-panel-header">
         <h2>Training</h2>
+        {/* The prose folds away by default. The sentence bar is docked across the
+            bottom and the flight list is what it would cover, so everything that
+            is read ONCE — what the module is, which vocabulary, which shas — sits
+            behind this, and the list keeps the height. */}
+        <button
+          type="button"
+          className="training-about-toggle"
+          aria-expanded={aboutOpen}
+          aria-label={aboutOpen ? "Hide what this panel shows" : "What does this panel show?"}
+          onClick={() => setAboutOpen((open) => !open)}
+        >
+          {aboutOpen ? "\u00d7" : "\u24d8"}
+        </button>
+      </header>
+
+      {aboutOpen ? (
         <p className="training-panel-lede">
           The instruction words read off each arrival, the track those words alone
           describe, and — once the second layer is trained — the sentence it says.
         </p>
-      </header>
+      ) : null}
 
       {indexState.status === "loading" ? (
         <p className="training-note" role="status">
@@ -218,7 +235,7 @@ export default function TrainingPanel() {
           ))}
 
           {/* ② the second layer has no artefact yet */}
-          {!hasPrior ? (
+          {!hasPrior && aboutOpen ? (
             <p className="training-note">
               No prior-generated set for {airport}: the second layer's own
               sentences arrive with stage B3′. The read-back set below is what the
@@ -240,6 +257,7 @@ export default function TrainingPanel() {
 
           {sample && counts ? (
             <>
+              {aboutOpen ? (
               <dl className="training-vocabulary">
                 <div>
                   <dt>Reading rule</dt>
@@ -265,6 +283,7 @@ export default function TrainingPanel() {
                   <dd>{TRAINING_KINDS.map((kind) => `${kind} ${counts[kind]}`).join(" · ")}</dd>
                 </div>
               </dl>
+              ) : null}
 
               <p className="training-note">
                 {sample.flights.length} flights, drawn from the hand check's own

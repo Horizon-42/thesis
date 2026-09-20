@@ -584,11 +584,35 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 13px;
 }
 
+.training-panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .training-panel-header h2 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* The disclosure for everything read once. It stays in the header rather than
+   above the list, so the list's top edge does not move when it is opened. */
+.training-about-toggle {
+  margin-left: auto;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: rgba(103, 232, 249, 0.85);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.training-about-toggle:hover {
+  background: rgba(103, 232, 249, 0.12);
 }
 
 .training-panel-lede {
@@ -726,7 +750,8 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 22vh;
+  /* The prose folds away, so the list gets the height back. */
+  max-height: 40vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -785,7 +810,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   z-index: 109;
   pointer-events: auto;
   box-sizing: border-box;
-  padding: 8px 12px 6px;
+  padding: 6px 12px 5px;
   border: 1px solid rgba(103, 232, 249, 0.24);
   border-radius: 8px;
   background: rgba(15, 19, 30, 0.94);
@@ -888,11 +913,26 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-sentence-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
-  margin-top: 4px;
+  gap: 2px 16px;
+  margin-top: 3px;
   font-size: 10.5px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: rgba(224, 230, 240, 0.55);
+}
+
+.training-sentence-notes-toggle {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid rgba(103, 232, 249, 0.25);
+  border-radius: 3px;
+  background: none;
+  color: rgba(103, 232, 249, 0.8);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.training-sentence-notes-toggle:hover {
+  background: rgba(103, 232, 249, 0.12);
 }
 
 .workbench--presentation .training-sentence-bar {

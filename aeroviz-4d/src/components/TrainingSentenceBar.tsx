@@ -51,9 +51,9 @@ import {
 // and would scale the type with it.
 const GUTTER = 104; // the row labels
 const PAD_R = 22;
-const HEAD_H = 24; // event numbers + cursor read-out
-const ROW_H = 24;
-const AXIS_H = 26;
+const HEAD_H = 20; // event numbers + cursor read-out
+const ROW_H = 20;
+const AXIS_H = 22;
 const VIEW_H = HEAD_H + TRAINING_KINDS.length * ROW_H + AXIS_H;
 /** Used until the element has been measured, and in jsdom, which has no layout. */
 const DEFAULT_PLOT_W = 1074;
@@ -176,6 +176,7 @@ export default function TrainingSentenceBar() {
   const frameRef = useRef<HTMLDivElement>(null);
   const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
   const [readbackOpen, setReadbackOpen] = useState<boolean>(false);
+  const [notesOpen, setNotesOpen] = useState<boolean>(false);
   const [cursor, setCursor] = useState<{ flightKey: string | null; atS: number }>({
     flightKey: null,
     atS: 0,
@@ -413,28 +414,21 @@ export default function TrainingSentenceBar() {
           y2={HEAD_H + TRAINING_KINDS.length * ROW_H}
           className="training-sentence-axis"
         />
+        {/* The last tick carries the unit, so the axis needs no caption beside it —
+            a caption anchored to the same end simply overprinted it. */}
         {tickTimesS.map((time, index) =>
           tickShown[index] ? (
             <text
               key={`tick-${index}`}
               x={xFor(time)}
               y={HEAD_H + TRAINING_KINDS.length * ROW_H + 15}
-              textAnchor="middle"
+              textAnchor={index === tickTimesS.length - 1 ? "end" : "middle"}
               className="training-sentence-tick"
             >
-              {formatSeconds(time)}
+              {index === tickTimesS.length - 1 ? `${formatSeconds(time)} s` : formatSeconds(time)}
             </text>
           ) : null,
         )}
-        <text
-          x={GUTTER + plotW}
-          y={VIEW_H - 3}
-          textAnchor="end"
-          className="training-sentence-tick"
-        >
-          seconds from the start of the track
-        </text>
-
         <line
           x1={xFor(cursorS)}
           x2={xFor(cursorS)}
@@ -446,12 +440,28 @@ export default function TrainingSentenceBar() {
       </div>
 
       <footer className="training-sentence-legend">
+        {/* This line stays out: without it the rows read as the measured state,
+            and a straight-in carrying one altitude word "0 ft" for the whole
+            approach reads as a track on the ground. The rest folds away — the
+            bar is docked over the flight list, and height is what it costs. */}
         <span>
           A band is the TARGET in force — what the words send the aircraft
-          towards, as a clearance does — not the measured state. Heading is
-          relative to the final approach course, altitude is above the threshold,
-          speed is ground speed. The measured signals beside them are the
-          read-back window's job (T4b).
+          towards, as a clearance does — not the measured state.
+          <button
+            type="button"
+            className="training-sentence-notes-toggle"
+            aria-expanded={notesOpen}
+            onClick={() => setNotesOpen((open) => !open)}
+          >
+            {notesOpen ? "Fewer notes" : "More notes"}
+          </button>
+        </span>
+        {notesOpen ? (
+          <>
+        <span>
+          Heading is relative to the final approach course, altitude is above the
+          threshold, speed is ground speed. The measured signals beside them are
+          the read-back window's job.
         </span>
         <span>
           Runway words: {vocabulary.runwayIdents.join(", ")} — the runways the
@@ -484,6 +494,8 @@ export default function TrainingSentenceBar() {
           Hatched = a manoeuvre read but not worded (same word / small change /
           short tail).
         </span>
+          </>
+        ) : null}
       </footer>
 
       {readbackOpen ? (

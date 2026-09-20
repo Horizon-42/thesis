@@ -108,9 +108,19 @@ describe("TrainingPanel", () => {
   describe("with an export", () => {
     beforeEach(() => serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample() }));
 
-    it("lists the flights and the vocabulary the words were read under", async () => {
+    // The flight list and the set's title are always out; everything read ONCE —
+    // what the module is, the shas, the word counts — folds behind the ⓘ so the
+    // list keeps the height the sentence bar would otherwise take.
+    it("lists the flights without making the reader open anything", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
+      expect(screen.queryByText("plateau-v11")).toBeNull();
+    });
+
+    it("shows the vocabulary the words were read under, behind the ⓘ", async () => {
+      render(<TrainingPanel />);
+      expect(await screen.findByText("DAL123")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
       expect(screen.getByText("plateau-v11")).toBeTruthy();
       // the runway classes come from the file, never from the airport's runways
       expect(screen.getByText("05L 05R 23L 23R")).toBeTruthy();
@@ -121,7 +131,9 @@ describe("TrainingPanel", () => {
     // artefacts with the same spec can carry different runway lists (§4.4-2).
     it("shows the vocabulary sha and the runway sha apart", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText("c7a4f4239f52…")).toBeTruthy();
+      expect(await screen.findByText("DAL123")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
+      expect(screen.getByText("c7a4f4239f52…")).toBeTruthy();
       expect(screen.getByText("aa11bb22cc33…")).toBeTruthy();
     });
 
@@ -137,7 +149,9 @@ describe("TrainingPanel", () => {
     // ② the second layer has no artefact until stage B3′
     it("says why there is no prior-generated set rather than leaving a blank", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText(/No prior-generated set for KRDU/)).toBeTruthy();
+      expect(await screen.findByText("DAL123")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
+      expect(screen.getByText(/No prior-generated set for KRDU/)).toBeTruthy();
       expect(screen.getByText(/stage B3′/)).toBeTruthy();
     });
   });
