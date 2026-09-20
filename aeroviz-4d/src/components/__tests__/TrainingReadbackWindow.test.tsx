@@ -7,7 +7,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import TrainingReadbackWindow, { chartLevels, rowAt } from "../TrainingReadbackWindow";
+import TrainingReadbackWindow, {
+  chartLevels,
+  flownTrace,
+  gapAtS,
+  rowAt,
+} from "../TrainingReadbackWindow";
 import { parseTrainingSample } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { FEET_TO_METERS, metresPerSecondToKnots } from "../../utils/procedureGeoMath";
@@ -204,5 +209,61 @@ describe("TrainingReadbackWindow", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── the sentence flown by rule, beside the aircraft (T6) ─────────────────────
+
+describe("the flown sentence on the charts", () => {
+  it("converts the flown track into each chart's own unit", () => {
+    const { flight } = selection();
+    expect(flownTrace(flight, "altitude")[0]).toBeCloseTo(
+      flight.geometric.heightM[0] / FEET_TO_METERS,
+      6,
+    );
+    expect(flownTrace(flight, "speed")[0]).toBeCloseTo(
+      metresPerSecondToKnots(flight.geometric.groundSpeedMps[0]),
+      6,
+    );
+  });
+
+  // The observed heading chart plots the UNWRAPPED course and the flown track
+  // carries the wrapped one, so the flown line has to be unwrapped against itself
+  // or it drops 360° the moment the rule-follower passes the cut.
+  it("unwraps the flown heading so it does not jump at the cut", () => {
+    const { vocabulary, flight } = selection();
+    const wrapping = {
+      ...flight,
+      geometric: { ...flight.geometric, relCourseDeg: [170, 175, -179, -174, -170] },
+    };
+    expect(flownTrace(wrapping, "heading")).toEqual([170, 175, 181, 186, 190]);
+    expect(vocabulary.readingRule).toBe("plateau-v11");
+  });
+
+  it("reads out how far apart the two tracks are at the cursor", () => {
+    const { flight } = selection();
+    expect(gapAtS(flight, 0)).toBeCloseTo(0, 6);   // they share a first point by construction
+    expect(gapAtS(flight, 200)).toBeGreaterThan(0);
+  });
+
+  // After the flown sentence stops there is nothing to compare against, and a
+  // number there would be measuring the stopping rule instead of the words.
+  it("has no gap to report once the words have stopped", () => {
+    const { flight } = selection();
+    const stopped = flight.geometric.tS[flight.geometric.tS.length - 1];
+    expect(gapAtS(flight, stopped + 1)).toBeNull();
+  });
+
+  it("says where the flown sentence ended and over how much it was compared", () => {
+    renderWindow();
+    expect(screen.getAllByText(/flown by rule/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/across the threshold plane, 1481 m from the threshold/)).toBeTruthy();
+    expect(screen.getByText(/compared over 100% of/)).toBeTruthy();
+  });
+
+  it("tells the reader the second line is a baseline, not a model's answer", () => {
+    renderWindow();
+    expect(screen.getByText(/never a model's answer/)).toBeTruthy();
+    expect(screen.getByText(/what the words did not say/)).toBeTruthy();
   });
 });

@@ -32,9 +32,13 @@ import {
 import {
   checkCategoriesManifest,
   checkComparisonIndex,
+  checkTrainingIndex,
+  checkTrainingSample,
+  checkTrainingSetAgrees,
   indexCzmlFiles,
   type PublicationFinding,
 } from "../src/utils/checkPublication";
+import { parseTrainingIndex, parseTrainingSample } from "../src/data/trainingSample";
 
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const AIRPORTS_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
@@ -73,7 +77,10 @@ function parseArgs(argv: string[]): Options {
   }
   if (options.airports.length === 0) {
     options.airports = readdirSync(AIRPORTS_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && existsSync(path.join(AIRPORTS_ROOT, entry.name, "comparison", "categories.json")))
+      .filter((entry) => entry.isDirectory() && (
+        existsSync(path.join(AIRPORTS_ROOT, entry.name, "comparison", "categories.json"))
+        || existsSync(path.join(AIRPORTS_ROOT, entry.name, "training", "index.json"))
+      ))
       .map((entry) => entry.name)
       .sort();
   }
@@ -122,7 +129,49 @@ async function served(url: string, kind: "json" | "czml"): Promise<string | null
 
 interface AirportReport {
   listed: number;
+  trainingSets: number;
   findings: PublicationFinding[];
+}
+
+/**
+ * The Training export (design §7, T8). It is OPTIONAL — `public/data` is git-ignored and most
+ * airports have none — so its absence is a count of zero, never a finding. What is a finding is
+ * an export that exists and is half-written: the panel greys a bad set out and carries on
+ * (§4.5 ③), so nothing on screen shouts, and this is what shouts.
+ */
+async function checkTraining(airport: string, server: string | null): Promise<AirportReport> {
+  const trainingDir = path.join(AIRPORTS_ROOT, airport, "training");
+  const manifestFile = path.join(trainingDir, "index.json");
+  if (!existsSync(manifestFile)) return { listed: 0, trainingSets: 0, findings: [] };
+
+  const findings: PublicationFinding[] = [];
+  const manifest = readJson(manifestFile);
+  findings.push(...checkTrainingIndex(manifest));
+  const parsed = parseTrainingIndex(manifest);
+  if (!parsed.ok) return { listed: 0, trainingSets: 0, findings };
+
+  const serverRoot = server ? `${server}/data/airports/${airport}/training` : null;
+  if (serverRoot) {
+    const problem = await served(`${serverRoot}/index.json`, "json");
+    if (problem) findings.push({ level: "error", message: `server: training/index.json ${problem}` });
+  }
+
+  for (const entry of parsed.value.sets) {
+    const sampleFile = path.join(trainingDir, entry.file);
+    if (!existsSync(sampleFile)) {
+      findings.push({ level: "error", category: entry.id, message: `${entry.file} is listed but missing on disk` });
+      continue;
+    }
+    const sample = readJson(sampleFile);
+    findings.push(...checkTrainingSample(entry.id, sample));
+    const read = parseTrainingSample(sample);
+    if (read.ok) findings.push(...checkTrainingSetAgrees(entry, read.value));
+    if (serverRoot) {
+      const problem = await served(`${serverRoot}/${entry.file}`, "json");
+      if (problem) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file} ${problem}` });
+    }
+  }
+  return { listed: 0, trainingSets: parsed.value.sets.length, findings };
 }
 
 async function checkAirport(airport: string, server: string | null): Promise<AirportReport> {
@@ -130,11 +179,14 @@ async function checkAirport(airport: string, server: string | null): Promise<Air
   const comparisonDir = path.join(AIRPORTS_ROOT, airport, "comparison");
   const manifestFile = path.join(comparisonDir, "categories.json");
   if (!existsSync(manifestFile)) {
-    return { listed: 0, findings: [{ level: "error", message: `${manifestFile} does not exist` }] };
+    // An airport can be published with a Training export and no comparison at all; only an
+    // airport asked for BY NAME with neither is a mistake, and `checkTraining` says so.
+    const level = existsSync(path.join(AIRPORTS_ROOT, airport, "training", "index.json")) ? "warn" : "error";
+    return { listed: 0, trainingSets: 0, findings: [{ level, message: `${manifestFile} does not exist` }] };
   }
   const manifest = readJson(manifestFile);
   findings.push(...checkCategoriesManifest(manifest));
-  if (!isComparisonCategoriesManifest(manifest)) return { listed: 0, findings };
+  if (!isComparisonCategoriesManifest(manifest)) return { listed: 0, trainingSets: 0, findings };
 
   const serverRoot = server ? `${server}/data/airports/${airport}/comparison` : null;
   if (serverRoot) {
@@ -177,19 +229,23 @@ async function checkAirport(airport: string, server: string | null): Promise<Air
       }
     }
   }
-  return { listed: manifest.categories.length, findings };
+  return { listed: manifest.categories.length, trainingSets: 0, findings };
 }
 
 async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
   let errors = 0;
   for (const airport of options.airports) {
-    const { listed, findings } = await checkAirport(airport, options.server);
+    const comparison = await checkAirport(airport, options.server);
+    const training = await checkTraining(airport, options.server);
+    const findings = [...comparison.findings, ...training.findings];
     const errorCount = findings.filter((finding) => finding.level === "error").length;
     errors += errorCount;
     const verdict = errorCount === 0 ? "picker loads" : "picker BROKEN";
     const scope = options.server ? " (disk + server)" : " (disk only)";
-    console.log(`${airport}: ${listed} categories listed, ${errorCount} errors, ${findings.length - errorCount} warnings — ${verdict}${scope}`);
+    const listed = comparison.listed;
+    const trained = training.trainingSets ? `, ${training.trainingSets} Training sets` : "";
+    console.log(`${airport}: ${listed} categories listed${trained}, ${errorCount} errors, ${findings.length - errorCount} warnings — ${verdict}${scope}`);
     for (const finding of findings) {
       console.log(`  ${finding.level.toUpperCase().padEnd(5)} ${finding.category ? `[${finding.category}] ` : ""}${finding.message}`);
     }

@@ -28,3 +28,8 @@ export const TRAINING_WORD_COLOR = "#fb923c";
 
 /** The measured signal, against which the words are read. */
 export const TRAINING_TRACE_COLOR = "#cbd5e1";
+
+/** The sentence flown by rule. Orange, and never the same style as a model's
+ *  output: it is a baseline and a diagnostic (design V9 / §5.5), and drawing it
+ *  like a prediction is how it would come to be read as one. */
+export const TRAINING_FLOWN_COLOR = "#fb923c";

@@ -10,7 +10,12 @@ import {
   checkComparisonIndex,
   explainCategoryRejection,
   indexCzmlFiles,
+  checkTrainingIndex,
+  checkTrainingSample,
+  checkTrainingSetAgrees,
 } from "../checkPublication";
+import { parseTrainingIndex, parseTrainingSample } from "../../data/trainingSample";
+import { mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 
 const observed: ComparisonCategory = {
   key: "observed",
@@ -152,5 +157,64 @@ describe("checkComparisonIndex", () => {
   it("lists each CZML file once", () => {
     const value = index([{ czml: "a.czml" }, { czml: "a.czml" }, { czml: "b.czml" }]);
     expect(indexCzmlFiles(value as never)).toEqual(["a.czml", "b.czml"]);
+  });
+});
+
+// ── the Training export (T8) ─────────────────────────────────────────────────
+
+describe("the Training export's checks", () => {
+  it("passes a manifest and a sample that agree", () => {
+    expect(checkTrainingIndex(mockIndex())).toEqual([]);
+    expect(checkTrainingSample("vocabulary_tau10", mockSample())).toEqual([]);
+
+    const index = parseTrainingIndex(mockIndex());
+    const sample = parseTrainingSample(mockSample());
+    if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
+    expect(checkTrainingSetAgrees(index.value.sets[0], sample.value)).toEqual([]);
+  });
+
+  // The acceptance test of T8: break one field, get the set id and the field back.
+  it("names the set and the field when the panel would grey a set out", () => {
+    const index = mockIndex() as any;
+    index.sets.push({ ...index.sets[0], id: "half_written", kind: "not-a-kind" });
+
+    const findings = checkTrainingIndex(index);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].category).toBe("half_written");
+    expect(findings[0].message).toContain("kind");
+    expect(findings[0].message).toContain("not-a-kind");
+  });
+
+  it("names the field when a sample is wrong", () => {
+    const sample = mockSample() as any;
+    sample.flights[0].sentence.words[0] = [0, 0, 0, 0, 0, 0, 0];
+    const findings = checkTrainingSample("vocabulary_tau10", sample);
+    expect(findings[0].category).toBe("vocabulary_tau10");
+    expect(findings[0].message).toContain("7 columns, expected 6");
+  });
+
+  // The two files come out of ONE run of the exporter. A disagreement means they did not,
+  // and averaging over it would show a sample from a vocabulary nobody asked about.
+  it("catches a manifest and a sample from different exports", () => {
+    const index = parseTrainingIndex(mockIndex());
+    const raw = mockSample() as any;
+    raw.vocabulary.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+    const sample = parseTrainingSample(raw);
+    if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
+
+    const findings = checkTrainingSetAgrees(index.value.sets[0], sample.value);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].category).toBe("vocabulary_tau10");
+    expect(findings[0].message).toContain("vocabularySha256");
+  });
+
+  it("catches a manifest that promises more flights than the sample holds", () => {
+    const index = parseTrainingIndex(mockIndex());
+    const sample = parseTrainingSample(mockSample());
+    if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
+
+    const findings = checkTrainingSetAgrees({ ...index.value.sets[0], flights: 40 }, sample.value);
+    expect(findings[0].message).toContain("lists 40 flights");
+    expect(findings[0].message).toContain("holds 1");
   });
 });

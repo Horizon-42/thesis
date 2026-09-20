@@ -200,6 +200,37 @@ export type TrainingObservedColumn = (typeof TRAINING_OBSERVED_COLUMNS)[number];
 
 export type TrainingObserved = { tS: number[] } & Record<TrainingObservedColumn, number[]>;
 
+/**
+ * The columns of the track flown FROM THE WORDS (`manoeuvre/instruction_kinematics.py`),
+ * in the same runway frame as the observed one. Geodetic columns are not here:
+ * the plan view and the "how far apart now" readout are frame quantities, and
+ * the 3D layer's input arrives with its own vertical datum (design V27).
+ */
+export const TRAINING_GEOMETRIC_COLUMNS = [
+  "toGoM", "crossM", "heightM", "groundSpeedMps", "relCourseDeg",
+] as const;
+
+export type TrainingGeometricColumn = (typeof TRAINING_GEOMETRIC_COLUMNS)[number];
+
+/** MIRROR of `instruction_kinematics.END_CROSSED / END_TIME_CAP`. */
+export const TRAINING_END_REASONS = ["crossed-threshold", "time-cap"] as const;
+export type TrainingEndReason = (typeof TRAINING_END_REASONS)[number];
+
+export type TrainingGeometric = { tS: number[] } & Record<TrainingGeometricColumn, number[]> & {
+  endReason: TrainingEndReason;
+  /** The horizontal distance from the threshold where it stopped — `hypot(toGo,
+   *  cross)`, so a track that crosses the plane two kilometres to the side
+   *  reports two kilometres. The words are never extended to reach the runway. */
+  finalGapM: number;
+  /** The distance between the two tracks, over the time BOTH were flying. */
+  meanGapM: number;
+  gapP95M: number;
+  /** How much of the approach that comparison covered. A mean gap read without
+   *  it is a mean over an unstated window. */
+  comparedS: number;
+  comparedFraction: number;
+};
+
 /** A manoeuvre the labeller read but did not word, and why. Drawn on its kind's
  *  row so "the words miss this turn" is visible rather than argued about. */
 export interface TrainingAbsorbed {
@@ -229,6 +260,7 @@ export interface TrainingFlight {
   instructions: TrainingInstruction[];
   absorbed: TrainingAbsorbed[];
   observed: TrainingObserved;
+  geometric: TrainingGeometric;
 }
 
 /** What the panel publishes for the full-width sentence bar to draw: one flight
@@ -660,6 +692,60 @@ function parseObserved(raw: unknown, durationS: number, where: string): Parsed<T
   return { ok: true, value: columns as TrainingObserved };
 }
 
+function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> {
+  if (!isRecord(raw)) return { ok: false, problem: `${where}.geometric is not an object` };
+  const tS = numberArray(raw.tS);
+  if (tS === null || tS.length < 2) {
+    return { ok: false, problem: `${where}.geometric.tS is missing or shorter than two steps` };
+  }
+  const columns: Record<string, number[]> = { tS };
+  for (const column of TRAINING_GEOMETRIC_COLUMNS) {
+    const values = numberArray(raw[column]);
+    if (values === null || values.length !== tS.length) {
+      return {
+        ok: false,
+        problem: `${where}.geometric.${column} is missing or does not have ${tS.length} rows`,
+      };
+    }
+    columns[column] = values;
+  }
+
+  const endReason = str(raw, "endReason");
+  if (endReason === null || !(TRAINING_END_REASONS as readonly string[]).includes(endReason)) {
+    return {
+      ok: false,
+      problem: `${where}.geometric.endReason is ${JSON.stringify(raw.endReason)}, expected one of ${TRAINING_END_REASONS.join(", ")}`,
+    };
+  }
+  const numbers: Record<string, number> = {};
+  for (const field of ["finalGapM", "meanGapM", "gapP95M", "comparedS", "comparedFraction"]) {
+    const value = finite(raw, field);
+    if (value === null || value < 0) {
+      return { ok: false, problem: `${where}.geometric.${field} is missing or not a distance` };
+    }
+    numbers[field] = value;
+  }
+  // The gap is a mean over the window both tracks were flying, and the fraction
+  // is what says how much of the approach that was. A fraction over 1 would mean
+  // the comparison outran the observation it is a fraction OF.
+  if (numbers.comparedFraction > 1) {
+    return { ok: false, problem: `${where}.geometric.comparedFraction is ${numbers.comparedFraction}, over the whole approach` };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...(columns as { tS: number[] } & Record<TrainingGeometricColumn, number[]>),
+      endReason: endReason as TrainingEndReason,
+      finalGapM: numbers.finalGapM,
+      meanGapM: numbers.meanGapM,
+      gapP95M: numbers.gapP95M,
+      comparedS: numbers.comparedS,
+      comparedFraction: numbers.comparedFraction,
+    },
+  };
+}
+
 function parseKind(raw: Record<string, unknown>, where: string): Parsed<TrainingKind> {
   const kind = str(raw, "kind");
   if (kind === null || !(TRAINING_KINDS as readonly string[]).includes(kind)) {
@@ -848,6 +934,8 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
 
     const observed = parseObserved(entry.observed, durationS, where);
     if (!observed.ok) return observed;
+    const geometric = parseGeometric(entry.geometric, where);
+    if (!geometric.ok) return geometric;
 
     flights.push({
       flightKey,
@@ -860,6 +948,7 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
       instructions,
       absorbed,
       observed: observed.value,
+      geometric: geometric.value,
     });
   }
 

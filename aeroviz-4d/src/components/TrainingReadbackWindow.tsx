@@ -28,6 +28,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FEET_TO_METERS, metresPerSecondToKnots } from "../utils/procedureGeoMath";
 import {
+  TRAINING_FLOWN_COLOR,
   TRAINING_KIND_COLOR,
   TRAINING_TRACE_COLOR,
   TRAINING_WORD_COLOR,
@@ -40,6 +41,7 @@ import {
   trainingWordLabel,
   type TrainingAbsorbed,
   type TrainingFlight,
+  type TrainingGeometricColumn,
   type TrainingInstruction,
   type TrainingVocabulary,
 } from "../data/trainingSample";
@@ -62,6 +64,58 @@ const ABSORBED_PAD_S = 1;
  *  signals at all, so neither gets a chart — they are the sentence bar's rows. */
 const CHARTED_KINDS = ["heading", "altitude", "speed"] as const;
 type ChartedKind = (typeof CHARTED_KINDS)[number];
+
+/**
+ * The flown sentence's own column per chart. The heading chart plots the
+ * UNWRAPPED course for the observation, and the flown track carries the wrapped
+ * one — so it is unwrapped here against its own previous value, or the line jumps
+ * 360° every time the rule-follower passes the cut.
+ */
+const FLOWN_COLUMN: Record<ChartedKind, TrainingGeometricColumn> = {
+  heading: "relCourseDeg",
+  altitude: "heightM",
+  speed: "groundSpeedMps",
+};
+
+function unwrapDegrees(values: number[]): number[] {
+  const out: number[] = [];
+  let previous = 0;
+  values.forEach((value, index) => {
+    if (index === 0) {
+      out.push(value);
+      previous = value;
+      return;
+    }
+    const next = value + 360 * Math.round((previous - value) / 360);
+    out.push(next);
+    previous = next;
+  });
+  return out;
+}
+
+/** The flown track on a chart's axis, in that chart's display unit. */
+export function flownTrace(flight: TrainingFlight, kind: ChartedKind): number[] {
+  const column = flight.geometric[FLOWN_COLUMN[kind]];
+  if (kind === "heading") return unwrapDegrees(column);
+  if (kind === "altitude") return column.map((metres) => metres / FEET_TO_METERS);
+  return column.map(metresPerSecondToKnots);
+}
+
+/**
+ * How far apart the two tracks are at one moment, horizontally in the runway
+ * frame. `null` once the flown sentence has stopped: there is nothing to compare
+ * against then, and a number there would be measuring the stopping rule.
+ */
+export function gapAtS(flight: TrainingFlight, seconds: number): number | null {
+  const flown = flight.geometric;
+  if (seconds > flown.tS[flown.tS.length - 1]) return null;
+  const step = rowAt(flown.tS, seconds);
+  const row = rowAt(flight.observed.tS, seconds);
+  return Math.hypot(
+    flown.toGoM[step] - flight.observed.toGoM[row],
+    flown.crossM[step] - flight.observed.crossM[row],
+  );
+}
 
 export interface ChartLevel {
   instruction: TrainingInstruction;
@@ -210,6 +264,7 @@ export default function TrainingReadbackWindow({
     Math.min(Math.max(((x - GUTTER) / plotW) * endOfTrack, 0), endOfTrack);
 
   const cursorRow = rowAt(tS, cursorS);
+  const gapNow = gapAtS(flight, cursorS);
   const lastEventS = sentence.eventTimesS[sentence.eventTimesS.length - 1];
 
   const traces: Record<ChartedKind, { values: number[]; unit: string; digits: number }> = {
@@ -224,8 +279,12 @@ export default function TrainingReadbackWindow({
   // ── the plan view, at one scale on both axes so a turn looks like a turn ──
   const planX = observed.toGoM.map((metres) => -metres / 1000);
   const planY = observed.crossM.map((metres) => metres / 1000);
-  const [planXLow, planXHigh] = extent([...planX, 0]);
-  const [planYLow, planYHigh] = extent([...planY, 0]);
+  const flownX = flight.geometric.toGoM.map((metres) => -metres / 1000);
+  const flownY = flight.geometric.crossM.map((metres) => metres / 1000);
+  // Both tracks decide the frame, or the flown one is drawn off the edge exactly
+  // when it has gone somewhere the aircraft did not — which is what to look at.
+  const [planXLow, planXHigh] = extent([...planX, ...flownX, 0]);
+  const [planYLow, planYHigh] = extent([...planY, ...flownY, 0]);
   const planScale = Math.min(
     (plotW - 12) / (planXHigh - planXLow),
     (PLAN_H - 28) / (planYHigh - planYLow),
@@ -260,7 +319,12 @@ export default function TrainingReadbackWindow({
           <span>
             {flight.instructions.length} instructions · {flight.absorbed.length} absorbed
           </span>
-          <span className="training-readback-cursor">t = {formatSeconds(cursorS)} s</span>
+          <span className="training-readback-cursor">
+            t = {formatSeconds(cursorS)} s
+            {gapNow === null
+              ? " · the words have stopped"
+              : ` · ${format(gapNow)} m apart`}
+          </span>
           <button type="button" onClick={onClose} aria-label="Close the read-back check">
             ×
           </button>
@@ -303,6 +367,10 @@ export default function TrainingReadbackWindow({
             points={planX.map((km, index) => `${planPx(km)},${planPy(planY[index])}`).join(" ")}
             className="training-readback-trace"
           />
+          <polyline
+            points={flownX.map((km, index) => `${planPx(km)},${planPy(flownY[index])}`).join(" ")}
+            className="training-readback-flown"
+          />
           {/* Where each instruction was issued. The runway word is not a point on
               the track — it is the frame the others are measured in. */}
           {flight.instructions
@@ -336,7 +404,8 @@ export default function TrainingReadbackWindow({
             const top = chartTop(index);
             const plotTop = top + 14;
             const plotH = CHART_H - 22;
-            const [low, high] = extent([...trace.values, ...levels.map((item) => item.level)]);
+            const flown = flownTrace(flight, kind);
+            const [low, high] = extent([...trace.values, ...flown, ...levels.map((item) => item.level)]);
             const yFor = (value: number) => plotTop + ((high - value) / (high - low)) * plotH;
 
             return (
@@ -375,6 +444,12 @@ export default function TrainingReadbackWindow({
                 <polyline
                   points={tS.map((t, row) => `${xFor(t)},${yFor(trace.values[row])}`).join(" ")}
                   className="training-readback-trace"
+                />
+                <polyline
+                  points={flight.geometric.tS
+                    .map((t, step) => `${xFor(Math.min(t, endOfTrack))},${yFor(flown[step])}`)
+                    .join(" ")}
+                  className="training-readback-flown"
                 />
 
                 {levels.map((item, position) => (
@@ -459,7 +534,20 @@ export default function TrainingReadbackWindow({
             the sentence bar follow the same cursor.
           </span>
           <span>
+            The second line is the sentence FLOWN BY RULE — a baseline and a
+            diagnostic, never a model's answer. It starts at the aircraft's first
+            row because the words say no starting point, so the two lines share a
+            first point by construction: what grows between them is what the words
+            did not say. It ended {flight.geometric.endReason === "crossed-threshold"
+              ? `across the threshold plane, ${format(flight.geometric.finalGapM)} m from the threshold`
+              : `on the time cap, ${format(flight.geometric.finalGapM)} m short`}
+            , and the two were compared over {format(flight.geometric.comparedFraction * 100)}% of
+            the approach (mean {format(flight.geometric.meanGapM)} m, p95{" "}
+            {format(flight.geometric.gapP95M)} m).
+          </span>
+          <span>
             <b style={{ color: TRAINING_TRACE_COLOR }}>——</b> measured ·{" "}
+            <b style={{ color: TRAINING_FLOWN_COLOR }}>——</b> flown by rule ·{" "}
             <b style={{ color: TRAINING_WORD_COLOR }}>——</b> the word in force · dotted =
             issued (orange) and settled (green) · hatched = read but not worded ·
             dashed = where the sentence lands.

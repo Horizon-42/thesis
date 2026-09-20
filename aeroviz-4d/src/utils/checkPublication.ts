@@ -28,6 +28,12 @@ import {
   type ComparisonCategory,
   type ComparisonIndex,
 } from "../data/airportData";
+import {
+  parseTrainingIndex,
+  parseTrainingSample,
+  type TrainingSample,
+  type TrainingSetEntry,
+} from "../data/trainingSample";
 
 export interface PublicationFinding {
   level: "error" | "warn";
@@ -203,6 +209,75 @@ export function checkComparisonIndex(
       category: category.key,
       message: `the manifest says split ${describe(category.datasetSplit)}, the index ${describe(index.datasetSplit)}`,
     });
+  }
+  return findings;
+}
+
+// ── the Training export (design §7, T8) ──────────────────────────────────────
+
+/**
+ * The Training manifest as the panel would read it, plus what the panel cannot see:
+ * that every set it lists has a sample file on disk.
+ *
+ * Training is checked on the OPPOSITE rule to the comparison picker above. There a bad
+ * category empties the airport, so the check exists to stop that; here a bad set is greyed
+ * on its own by design (§4.5 ③), which means a half-written export is easy to publish and
+ * never notice. The check is what notices — and it names the set and the field, because
+ * "the manifest is invalid" is what wasted the two sessions this module's rule came from.
+ */
+export function checkTrainingIndex(manifest: unknown): PublicationFinding[] {
+  const parsed = parseTrainingIndex(manifest);
+  if (!parsed.ok) {
+    return [{ level: "error", message: `training/index.json is not a manifest: ${parsed.problem}` }];
+  }
+  return parsed.value.rejected.map((item) => ({
+    level: "error" as const,
+    category: item.id,
+    message: `the panel would grey this set out: ${item.problem}`,
+  }));
+}
+
+/** One set's sample file, through the panel's own reader. */
+export function checkTrainingSample(setId: string, sample: unknown): PublicationFinding[] {
+  const parsed = parseTrainingSample(sample);
+  if (!parsed.ok) {
+    return [{ level: "error", category: setId, message: `sample.json: ${parsed.problem}` }];
+  }
+  return [];
+}
+
+/**
+ * What the manifest promises against what the sample holds. The two files are written by one
+ * run of the exporter, so a disagreement means they came from different runs — which the
+ * panel says on screen and the check says here, rather than either of them averaging over it.
+ */
+export function checkTrainingSetAgrees(
+  entry: TrainingSetEntry,
+  sample: TrainingSample,
+): PublicationFinding[] {
+  const findings: PublicationFinding[] = [];
+  if (sample.setId !== entry.id) {
+    findings.push({ level: "error", category: entry.id, message: `sample.json calls itself ${sample.setId}` });
+  }
+  if (sample.flights.length !== entry.flights) {
+    findings.push({
+      level: "error",
+      category: entry.id,
+      message: `the manifest lists ${entry.flights} flights, sample.json holds ${sample.flights.length}`,
+    });
+  }
+  for (const [what, listed, held] of [
+    ["vocabularySha256", entry.vocabularySha256, sample.vocabulary.sha256],
+    ["runwaySha256", entry.runwaySha256, sample.vocabulary.runwaySha256],
+    ["readingRule", entry.readingRule, sample.vocabulary.readingRule],
+  ] as const) {
+    if (listed !== held) {
+      findings.push({
+        level: "error",
+        category: entry.id,
+        message: `${what}: the manifest says ${listed}, sample.json says ${held}`,
+      });
+    }
   }
   return findings;
 }

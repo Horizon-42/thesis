@@ -151,6 +151,33 @@ export const MOCK_OBSERVED = (() => {
   };
 })();
 
+/**
+ * The same sentence flown by `instruction_kinematics`, on its own 1 s steps. Like
+ * the observed track it is GENERATED, and it is deliberately NOT the observed one:
+ * it starts at the same point (the rules say so) and ends off the centreline,
+ * which is what the real export does — a heading word says "fly this angle",
+ * never "intercept the centreline".
+ */
+export const MOCK_GEOMETRIC = (() => {
+  const tS: number[] = [];
+  for (let t = 0; t <= 300; t += 1) tS.push(t);
+  const course = tS.map((t) => ramp([[0, 90], [70, 90], [102, 50], [130, 50], [156, 20], [188, 20], [210, 0]], t));
+  return {
+    tS,
+    toGoM: tS.map((t) => ramp([[0, 25000], [300, 400]], t)),
+    crossM: tS.map((t) => ramp([[0, 6400], [102, 4600], [156, 2600], [210, 1500], [300, 1480]], t)),
+    heightM: tS.map((t) => ramp([[0, 3050], [110, 2120], [180, 1210], [300, 0]], t)),
+    groundSpeedMps: tS.map((t) => ramp([[0, 159], [60, 139], [130, 118], [220, 98], [300, 72]], t)),
+    relCourseDeg: course,
+    endReason: "crossed-threshold",
+    finalGapM: 1480.5,
+    meanGapM: 980.2,
+    gapP95M: 1620.4,
+    comparedS: 262,
+    comparedFraction: 1,
+  };
+})();
+
 export const MOCK_FLIGHT = {
   flightKey: "DAL123_05L_a1b2c3_1699999999",
   callsign: "DAL123",
@@ -170,6 +197,7 @@ export const MOCK_FLIGHT = {
   instructions: MOCK_INSTRUCTIONS,
   absorbed: MOCK_ABSORBED,
   observed: MOCK_OBSERVED,
+  geometric: MOCK_GEOMETRIC,
 };
 
 export const MOCK_SAMPLE = {

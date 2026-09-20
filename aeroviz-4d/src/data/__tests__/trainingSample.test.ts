@@ -6,6 +6,7 @@ import {
   TERMINAL_NEVER_OBSERVED,
   TRAINING_KINDS,
   TRAINING_KIND_COLUMN,
+  TRAINING_GEOMETRIC_COLUMNS,
   TRAINING_OBSERVED_COLUMNS,
   TRAINING_WORD_COLUMNS,
   formatSeconds,
@@ -280,6 +281,51 @@ describe("the observed track", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.problem).toContain("established");
+  });
+});
+
+describe("the flown sentence", () => {
+  it("reads its columns, its ending and how much of the approach was compared", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const flown = parsed.value.flights[0].geometric;
+    for (const column of TRAINING_GEOMETRIC_COLUMNS) {
+      expect(flown[column]).toHaveLength(flown.tS.length);
+    }
+    expect(flown.endReason).toBe("crossed-threshold");
+    expect(flown.comparedFraction).toBeLessThanOrEqual(1);
+  });
+
+  // The flown track runs on its own clock and may outlast or fall short of the
+  // observation, so it is NOT checked against `durationS` the way the observed
+  // track is — what is checked is that the comparison states its own window.
+  it("refuses a comparison that claims more than the whole approach", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].geometric.comparedFraction = 1.4;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("over the whole approach");
+  });
+
+  it("refuses an ending it does not know", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].geometric.endReason = "ran-out-of-fuel";
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("endReason");
+    expect(parsed.problem).toContain("crossed-threshold");
+  });
+
+  it("refuses a column that does not match its own clock", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].geometric.crossM.pop();
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("geometric.crossM");
   });
 });
 
