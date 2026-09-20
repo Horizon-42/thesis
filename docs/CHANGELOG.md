@@ -4,6 +4,40 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-20 — stage B′ built: the instruction vocabulary labeller (B0′, three hand checks), the instruction executor, the instruction prior, gate B1 (D57), the B′ queue
+
+Branch `dev-instruction-vocab` (worktree `.claude/worktrees/instruction-vocab`; commits 87fff1cb, 7e711f75, f043f90e,
+426aaee5, f3eed83f — not merged). What is new, all reviewed by opus and tested (full ts suite 1257):
+
+- **`manoeuvre/instructions.py`** — the vocabulary (heading 10° × 36 relative to the final approach course; height above
+  the threshold 1000 ft × 11 to 10 000 ft; ground speed 10 kt × 21, 120–320 kt; intercept ≤ 30 / 30–45 / > 45°) and the
+  labeller. The reading rule went through four versions under 300-page hand checks (results doc §12): rate thresholds
+  (0.903 but systematically late on gentle ramps and blind to turns under 1°/s) → plateaus (0.793: the intercept landed
+  on post-capture wiggles, a 3 m/s descent read as a plateau every 305 m) → **plateau-v4**: a target is a plateau
+  (tolerance under half a bin, ≥ 20 s, end-to-end drift ≤ half the tolerance), issued where the signal departs the
+  previous plateau, changes under a kind's minimum (5°, 500 ft, 10 kt) absorbed and recorded, the intercept the last
+  heading INSTRUCTION after which the aircraft is established. The rule's version is in the vocabulary's spec and sha.
+  Bins settled on the cohort's own distribution (the 8000 ft / 230 kt starting ceilings clamped 6 % / 28 % of the words).
+  `run_ts.py instruction_vocabulary` writes the artefact, the sentences, a summary (clamps, absorbed, tails stated) and
+  the 300 hand-check pages (150 per stratum of the package's strata). `data/approach_difficulty.course_frame_rows` is now
+  the ONE course-frame definition (the anchor covariates, the failure modes and the labeller read it).
+- **`plan_conditioning = instruction`** (`outputs/control/instruction_token.py`): the executor is handed the words in force
+  at the Δ/τ positions of its segment as bin centres, fused beside the condition like the CTA; one source for a training
+  row, `predict` and the closed loop (lockstep protocol `truth-instruction`: the truth's words at the truth row nearest
+  the FLOWN position, read on the whole record before any cohort cut, the truth time / distance recorded per round;
+  payload `ts-manoeuvre-lockstep-v5`). Config field `instruction_vocabulary` (control view, `vocab=` in the name); the
+  head opens the artefact once and the checkpoint stores THAT sha; load refuses a moved or missing artefact by name.
+  An `off` run is byte-identical to before (both checkpoint canaries load).
+- **`manoeuvre/instruction_sequences.py` + `instruction_prior.py`** — the sentence with threshold-relative state tokens,
+  `ends_at_landing` (a rolled prefix's last position has a next word), the causal Transformer with four factorised
+  heads + landed, readings with their denominators stated (undefined rates read as None), joint top-K coverage,
+  hold / bigram baselines; `run_ts.py instruction_prior`.
+- **Gate B1 per D57**; `run_ts.py two_tier_bprime_queue` (baselines flown by the queue → train two seeds → truth-instruction
+  readings → gate b1 → the prior past the gate); `docs/experiments/two_tier_v3_bprime_arms.json` (I20 × 2 seeds) and the
+  campaign's intent. B2′ (closed-loop fine-tuning) and B3′'s decoding are designed (plan §5.2.2), not built.
+- Config: the archived plan token's five fields are retired as UNREAD serialized fields (`PLAN_TOKEN_RETIRED_FIELDS`) —
+  stage A checkpoints store them inert beside `plan_conditioning='off'` and had stopped loading after the archive.
+
 ### 2026-09-20 — the intent-code second layer is ARCHIVED; `plan_conditioning` keeps only `off`
 
 Follow-up to the audit below. Plan v3 §10 found that both layers trained on truth and were only ever evaluated
