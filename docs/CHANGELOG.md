@@ -13,12 +13,17 @@ Branch `dev-instruction-vocab` (worktree `.claude/worktrees/instruction-vocab`; 
   the threshold 1000 ft × 11 to 10 000 ft; ground speed 10 kt × 21, 120–320 kt; intercept ≤ 30 / 30–45 / > 45°) and the
   labeller. The reading rule went through four versions under 300-page hand checks (results doc §12): rate thresholds
   (0.903 but systematically late on gentle ramps and blind to turns under 1°/s) → plateaus (0.793: the intercept landed
-  on post-capture wiggles, a 3 m/s descent read as a plateau every 305 m) → plateau v4 (0.967) → **plateau-v6**: a
-  target is a plateau (tolerance under half a bin, ≥ 20 s, the window's fitted slope moving it ≤ half the tolerance),
-  issued where the signal departs the plateau of the word IN FORCE (an absorbed pause is part of the manoeuvre),
-  changes under a kind's minimum (5°, 500 ft, 10 kt) absorbed and recorded, the intercept the last heading
-  INSTRUCTION before which the aircraft was not established and after which it is (a straight-in carries none — the
-  second review's blocker). The rule's version is in the vocabulary's spec and sha (current 7e903e67d8a9).
+  on post-capture wiggles, a 3 m/s descent read as a plateau every 305 m) → v4 (0.967) → v6, which moved the issue
+  time to the departure from the word in force's plateau and was WRONG (0.847: words drawn 100–200 s before the
+  manoeuvre) → **plateau-v8**: a target is a plateau (tolerance under half a bin, ≥ 20 s, the window's fitted slope
+  moving it ≤ half the tolerance), issued where the signal departs the plateau held just before it, a change under a
+  kind's minimum (5°, 500 ft, 10 kt) absorbed ONLY if the level was not held 40 s (the minimum suppresses a transient,
+  not a level that was flown), the intercept the last heading INSTRUCTION before which the aircraft was not
+  established and after which it is (a straight-in carries none — the second review's blocker). Speed floor 100 kt.
+  Two measurements over the whole train split decided v8, not the hand checks: heading and altitude issue times are
+  exact under every rule (p95 ≤ 6 s) and all the error is speed; and 7 598 speed levels were being suppressed by the
+  minimum change, median held 42 s, 4 032 in a different bin — 0.6 real speed steps a flight the sentence never said.
+  The rule's version is in the vocabulary's spec and sha (current f8eb7968a250).
   Bins settled on the cohort's own distribution (the 8000 ft / 230 kt starting ceilings clamped 6 % / 28 % of the words).
   `run_ts.py instruction_vocabulary` writes the artefact, the sentences, a summary (clamps, absorbed, tails stated) and
   the 300 hand-check pages (150 per stratum of the package's strata). `data/approach_difficulty.course_frame_rows` is now
