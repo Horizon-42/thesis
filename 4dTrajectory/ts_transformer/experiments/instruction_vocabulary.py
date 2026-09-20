@@ -39,11 +39,11 @@ from ts_transformer.data.approach_difficulty import (
 )
 from ts_transformer.data.data_provenance import provenance_eligible_set_digests
 from ts_transformer.data.development_cohorts import development_cohort_audit, load_development_cohort
-from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
+from ts_transformer.experiments.support import REPO_ROOT, cohort_splits, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.instructions import (
-    INSTRUCTION_KINDS, MANDATORY_KINDS, NO_INTERCEPT, Reading, Vocabulary, course_frame, read_instructions, wrap_deg,
-    write_vocabulary,
+    ABSORBED_SHORT_TAIL, INSTRUCTION_KINDS, MANDATORY_KINDS, NO_INTERCEPT, Reading, Vocabulary, course_frame,
+    read_instructions, wrap_deg, write_vocabulary,
 )
 from ts_transformer.training.train import load_checkpoint_payload
 
@@ -73,6 +73,7 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
     positions = sum(len(r.positions_s) for r in readings)
     changes = sum(int((np.diff(r.words[:, : len(MANDATORY_KINDS)], axis=0) != 0).any(axis=1).sum()) for r in readings)
     absorbed = {kind: sum(1 for r in readings for a in r.absorbed if a.kind == kind) for kind in MANDATORY_KINDS}
+    short_tails = {kind: sum(1 for r in readings for a in r.absorbed if a.kind == kind and a.reason == ABSORBED_SHORT_TAIL) for kind in MANDATORY_KINDS}
     orbits = sum(1 for r in readings for a in r.absorbed if a.kind == "heading" and abs(a.change) >= 180.0)
     return {
         "flights": len(readings),
@@ -83,7 +84,7 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
         "clamped": {kind: sum(1 for r in readings for i in r.instructions if i.kind == kind and i.clamped) for kind in ("altitude", "speed")},
         "target_to_bin_centre_p50": {k: _p50(v) for k, v in residuals.items()},
         "target_to_bin_centre_p95": {k: _p95(v) for k, v in residuals.items()},
-        "absorbed": absorbed, "absorbed_heading_orbits": orbits,
+        "absorbed": absorbed, "absorbed_short_tails": short_tails, "absorbed_heading_orbits": orbits,
         "intercept_share": float(np.mean([any(i.kind == "intercept" for i in r.instructions) for r in readings])) if readings else 0.0,
         "established_from_start_share": float(np.mean([r.established_from_start for r in readings])) if readings else 0.0,
         "positions": positions, "positions_with_a_change": changes,
@@ -104,8 +105,9 @@ def render(summary: dict[str, dict[str, Any]], vocabulary: Vocabulary) -> str:
         lines.append("  target − bin centre p50 (p95): " + ", ".join(
             f"{k} {s['target_to_bin_centre_p50'][k]:.1f} ({s['target_to_bin_centre_p95'][k]:.1f})"
             for k in s["target_to_bin_centre_p50"] if s["target_to_bin_centre_p50"][k] is not None))
-        lines.append("  absorbed manoeuvres (plateau = the word in force): " + ", ".join(f"{k} {v}" for k, v in s["absorbed"].items())
-                     + f" · heading orbits (≥ 180° swept) {s['absorbed_heading_orbits']}")
+        lines.append("  absorbed manoeuvres (same word, or a tail too short to read): "
+                     + ", ".join(f"{k} {v} ({s['absorbed_short_tails'][k]} tails)" for k, v in s["absorbed"].items())
+                     + f" · heading orbits (≥ 180°) {s['absorbed_heading_orbits']}")
         for kind in INSTRUCTION_KINDS:
             counts = s["word_counts"][kind]
             total = sum(counts.values()) or 1
@@ -198,14 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     config = TSConfig.from_dict(payload["config"])
     cohort_path = args.cohort if args.cohort.is_absolute() else REPO_ROOT / args.cohort
     cohort = load_development_cohort(cohort_path)
-    splits = {"train": list(cohort.train_flight_ids), "val": list(cohort.val_flight_ids)}
-    if args.limit:
-        splits = {name: keys[: args.limit] for name, keys in splits.items()}
-    for name, keys in splits.items():
-        held = set(payload["split"][name])
-        missing = [key for key in keys if key not in held]
-        if missing:
-            parser.error(f"{len(missing)} {name} flight(s) of the cohort are not in the executor's {name} split (first {missing[0]!r})")
+    splits = cohort_splits(payload, cohort, args.limit)
     series = rebuild_cohort(payload, config, [*splits["train"], *splits["val"]])
     by_split = {"train": series[: len(splits["train"])], "val": series[len(splits["train"]) :]}
     print(f"  {len(series)} flights rebuilt; reading instructions at τ = {vocabulary.token_step_s:g} s", flush=True)

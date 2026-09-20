@@ -67,6 +67,21 @@ def checkpoint_manifests(payload: dict[str, Any]) -> list[Path]:
     return [arrival_manifest_path(entry["airport"]) for entry in payload["data_provenance"]["manifests"]]
 
 
+def cohort_splits(payload: dict[str, Any], cohort, limit: int = 0) -> dict[str, list[str]]:
+    """The development cohort's train and val rosters (`--limit`: a PREFIX of each, a smoke
+    test), each refused unless the executor checkpoint's SAME split holds every flight of it —
+    the cohort is a subset of the executor's own population, never another one."""
+    splits = {"train": list(cohort.train_flight_ids), "val": list(cohort.val_flight_ids)}
+    if limit:
+        splits = {name: keys[:limit] for name, keys in splits.items()}
+    for name, keys in splits.items():
+        held = set(payload["split"][name])
+        missing = [key for key in keys if key not in held]
+        if missing:
+            raise ValueError(f"{len(missing)} {name} flight(s) of the cohort are not in the executor's {name} split (first {missing[0]!r})")
+    return splits
+
+
 def rebuild_cohort(payload: dict[str, Any], config: TSConfig, keys: Sequence[str]) -> list[FlightSeries]:
     """The checkpoint's flights ``keys`` rebuilt under ``config`` in the given order, the
     provenance verified against today's manifests first (C25: through

@@ -16,35 +16,35 @@ because entry heights reach 8 000 ft above the threshold and entry ground speeds
                carries no airspeed: a ground-speed word is what the data can say — the wind is in it)
     intercept  the turn that captures the course, by its intercept angle (`INTERCEPT_ANGLE_BINS_DEG`)
 
-**Reading them off the track** (D53): the track's relative course, height and ground speed are
-smoothed (`COURSE_SMOOTHING_S` for the course, `SMOOTHING_S` for the other two — ADS-B altitude
-is quantised at 25 ft, so a 2 s vertical rate is noise and needs the longer window; a 10°
-heading correction lasts 3–5 s and the longer window would erase it), the manoeuvre stretches
-are rate thresholds held for a minimum duration (a run of ``round(min_s / dt) + 1`` rows, so it
-spans AT LEAST the declared seconds), a turn must also SWEEP at least `TURN_MIN_SWEEP_DEG` (a turn
-is a manoeuvre that can change the heading word; the smoothing attenuates anything shorter than
-its window, so the rate threshold alone is not the binding rule and the sweep is stated), and
-every manoeuvre's TARGET is the plateau value after it — the course the aircraft settles on
-after the turn, the height it levels at, the speed it holds — rounded to a bin; a manoeuvre that
-runs to the end of the record targets the final value (the last descent targets the threshold,
-bin 0). The instruction is ISSUED at the manoeuvre's start (the controller spoke a few seconds
-earlier; that gap is not recoverable and is stated). A manoeuvre whose plateau reads as the word
-already in force is NOT an instruction — the previous one is still being executed (a
-deceleration the rate threshold splits in two, a step-down inside one altitude bin, an orbit
-back onto the same heading); it is recorded as `Absorbed` so the hand check can see it and the
-summary count it, and the instruction keeps the FIRST plateau's target and ``settled_s``. Before
-the first manoeuvre of a kind the word in force is the plateau the record starts on, issued at
-t = 0. The intercept is the LAST turn after which the aircraft is established under the
+**Reading them off the track** (D53, settled after the first hand check of 2026-09-20 — the
+rate-threshold reading it replaced started gentle manoeuvres late, sliced long ramps into
+rolling targets and missed heading changes slower than 1°/s; 300 pages, 88 % agreement): a
+TARGET is a PLATEAU — a stretch where the smoothed signal (`COURSE_SMOOTHING_S` for the course,
+`SMOOTHING_S` for height and speed: ADS-B altitude is quantised at 25 ft) stays within the
+kind's tolerance (`COURSE_TOLERANCE_DEG`, `HEIGHT_TOLERANCE_M`, `SPEED_TOLERANCE_MPS`) of the
+value it settled at, for at least `PLATEAU_MIN_S` (two sentence positions: a target in force for
+less is not a word of its own). Everything between two plateaus is the manoeuvre that takes
+the aircraft from one to the next, whatever its rate: the instruction's TARGET is the plateau
+reached (its median), it is ISSUED where the previous plateau ends (the controller spoke a few
+seconds earlier; that gap is not recoverable and is stated) and ``settled_s`` is where the new
+plateau begins. A record that opens mid-manoeuvre carries that manoeuvre's target as its word
+at t = 0; a manoeuvre that runs to the end of the record targets the final value (the last
+descent targets the threshold, bin 0); a record with no plateau at all is one manoeuvre to its
+end. A manoeuvre whose plateau reads as the word already in force is NOT an instruction — the
+previous one is still being executed (a step inside one bin, an orbit back onto the same
+heading); it is recorded as `Absorbed` so the hand check can see it and the summary count it.
+The intercept is the LAST heading manoeuvre after which the aircraft is established under the
 package's one rule (`approach_difficulty.course_frame_rows`: within `ESTABLISHED_CROSS_TRACK_M` of
 the course, ahead of the threshold, heading within `ESTABLISHED_TRACK_TOLERANCE_DEG`); its angle
-is the relative course held before the turn (a turn's sweep is likewise the change between the
-plateaus around it — a turn already under way at the record's first row reads from that row).
+is the relative course of the plateau before it (the first row's course when the record opens
+inside the capture).
 
 **The sentence** (D52): one position every `TOKEN_STEP_S` from the record's start, each position
 the four words IN FORCE (the latest issued instruction of each kind); an instruction is the
-position where a word changes, "hold" is a position where none does. Fixed positions keep the
-executor's segments and the prior's positions aligned, and "when" is expressed by the position a
-word changes at, not by a duration word.
+position where a word changes, "hold" is a position where none does. The fixed positions are the
+prior's grid; the executor reads the words in force at its own anchor + k·τ (`Reading.words_at`),
+so its segment need not sit on the grid; "when" is expressed by the position a word changes at,
+not by a duration word.
 
 Leaf module (`tests/test_architecture.py` `MANOEUVRE_LEAVES`): the data plane, geokit and numpy
 only — the executor reads these words as its condition, the prior predicts them.
@@ -95,16 +95,15 @@ SPEED_MIN_MPS = 120.0 * KT
 SPEED_MAX_MPS = 320.0 * KT
 INTERCEPT_ANGLE_BINS_DEG = (30.0, 45.0)
 
-#: D53 thresholds (the module docstring says how they bind together).
+#: D53 thresholds (the module docstring says how they bind together): the smoothing, the
+#: plateau tolerances (each under half a bin, so a plateau cannot straddle two words), and the
+#: least a plateau holds to be a target.
 SMOOTHING_S = 10.0
 COURSE_SMOOTHING_S = 6.0
-TURN_RATE_DEG_S = 1.0
-TURN_MIN_S = 4.0
-TURN_MIN_SWEEP_DEG = 10.0
-DESCENT_RATE_MPS = -1.5
-DESCENT_MIN_S = 10.0
-DECEL_MPS2 = -0.15
-DECEL_MIN_S = 10.0
+COURSE_TOLERANCE_DEG = 4.0
+HEIGHT_TOLERANCE_M = 30.0
+SPEED_TOLERANCE_MPS = 2.5
+PLATEAU_MIN_S = 20.0
 #: D54: the sentence's position interval (τ); 5 s is the ablation.
 TOKEN_STEP_S = 10.0
 
@@ -130,13 +129,10 @@ class Vocabulary:
     established_track_tolerance_deg: float = ESTABLISHED_TRACK_TOLERANCE_DEG
     smoothing_s: float = SMOOTHING_S
     course_smoothing_s: float = COURSE_SMOOTHING_S
-    turn_rate_deg_s: float = TURN_RATE_DEG_S
-    turn_min_s: float = TURN_MIN_S
-    turn_min_sweep_deg: float = TURN_MIN_SWEEP_DEG
-    descent_rate_mps: float = DESCENT_RATE_MPS
-    descent_min_s: float = DESCENT_MIN_S
-    decel_mps2: float = DECEL_MPS2
-    decel_min_s: float = DECEL_MIN_S
+    course_tolerance_deg: float = COURSE_TOLERANCE_DEG
+    height_tolerance_m: float = HEIGHT_TOLERANCE_M
+    speed_tolerance_mps: float = SPEED_TOLERANCE_MPS
+    plateau_min_s: float = PLATEAU_MIN_S
     token_step_s: float = TOKEN_STEP_S
 
     def __post_init__(self) -> None:
@@ -158,11 +154,13 @@ class Vocabulary:
                 "the established rule is the package's one (approach_difficulty); it is recorded in the spec "
                 "so the sha moves with it, not to be set here"
             )
-        for name in ("smoothing_s", "course_smoothing_s", "turn_min_s", "descent_min_s", "decel_min_s", "token_step_s"):
+        for name in ("smoothing_s", "course_smoothing_s", "plateau_min_s", "token_step_s"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} is positive seconds")
-        if self.turn_min_sweep_deg <= 0 or self.turn_rate_deg_s <= 0:
-            raise ValueError("a turn's sweep and rate thresholds are positive")
+        for name, half_bin in (("course_tolerance_deg", self.heading_bin_deg / 2), ("height_tolerance_m", self.altitude_bin_m / 2),
+                               ("speed_tolerance_mps", self.speed_bin_mps / 2)):
+            if not 0 < getattr(self, name) < half_bin:
+                raise ValueError(f"{name} is positive and under half a bin ({half_bin:g}), so a plateau cannot straddle two words")
 
     # ── word counts ──────────────────────────────────────────────────────
     @property
@@ -263,8 +261,8 @@ class Vocabulary:
 class Instruction:
     """One word issued at one time: ``kind`` ∈ `INSTRUCTION_KINDS`, ``word`` its index, ``target``
     the plateau value it was read from (deg relative to the course / m above the threshold / m/s /
-    deg of intercept angle), ``issued_s`` the manoeuvre's start, ``settled_s`` where the FIRST
-    plateau at this word begins (the manoeuvre's end; None for a manoeuvre running to the end of
+    deg of intercept angle), ``issued_s`` the manoeuvre's start (the previous plateau's end),
+    ``settled_s`` where the target plateau begins (None for a manoeuvre running to the end of
     the record), ``clamped`` when the target fell outside the vocabulary's range."""
 
     kind: str
@@ -278,18 +276,25 @@ class Instruction:
         return asdict(self)
 
 
+#: Why a manoeuvre the reading found carries no word of its own.
+ABSORBED_SAME_WORD = "same word"        # its plateau reads as the word already in force
+ABSORBED_SHORT_TAIL = "short tail"      # it leaves the last plateau less than a plateau's length before the record ends
+
+
 @dataclass(frozen=True)
 class Absorbed:
-    """A manoeuvre the reading found but did not word: its plateau is the word already in force
-    (a split deceleration, a step-down inside one altitude bin, an orbit back onto the same
-    heading). Recorded so nothing vanishes silently — the hand check draws it, the summary
-    counts it. ``change`` is what the manoeuvre moved the signal by (deg swept / m / m/s)."""
+    """A manoeuvre the reading found but did not word — its plateau is the word already in force
+    (a step inside one bin, an orbit back onto the same heading), or it starts too close to the
+    record's end to be read (`ABSORBED_SHORT_TAIL`: the last rows before the threshold swing and
+    settle nowhere). Recorded so nothing vanishes silently — the hand check draws it, the
+    summary counts it. ``change`` is what the manoeuvre moved the signal by (deg / m / m/s)."""
 
     kind: str
     start_s: float
     end_s: float
     word: int
     change: float
+    reason: str = ABSORBED_SAME_WORD
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -381,23 +386,35 @@ def smooth(signal: np.ndarray, window_rows: int) -> np.ndarray:
     return np.convolve(padded, np.full(window_rows, 1.0 / window_rows), mode="valid")
 
 
-def runs_where(mask: np.ndarray, min_rows: int) -> list[tuple[int, int]]:
-    """``[(start, end)]`` (end exclusive) of every contiguous True run of at least ``min_rows``."""
-    runs: list[tuple[int, int]] = []
-    start = None
-    for index, flag in enumerate(np.concatenate((mask, [False]))):
-        if flag and start is None:
-            start = index
-        elif not flag and start is not None:
-            if index - start >= min_rows:
-                runs.append((start, index))
-            start = None
-    return runs
-
-
 def min_rows(seconds: float, dt_s: float) -> int:
-    """The rows a run must hold to span AT LEAST ``seconds`` (``k`` rows span ``(k − 1) · dt``)."""
+    """The rows a stretch must hold to span AT LEAST ``seconds`` (``k`` rows span ``(k − 1) · dt``)."""
     return int(round(seconds / dt_s)) + 1
+
+
+def plateaus(signal: np.ndarray, tolerance: float, rows: int) -> list[tuple[int, int]]:
+    """``[(start, end)]`` (end exclusive) of the signal's plateaus: a plateau opens where the
+    next ``rows`` rows all lie within ``tolerance`` of their median and holds while the signal
+    stays within ``tolerance`` of that value; it is at least ``rows`` long. Everything outside a
+    plateau is a manoeuvre. The edges sit INSIDE the band: a plateau ends where the signal has
+    left its value by the tolerance (so an instruction is issued up to tolerance / rate after
+    the aircraft began to move), and the next opens as soon as the signal is within the
+    tolerance of where it will settle."""
+    signal = np.asarray(signal, dtype=np.float64)
+    n = len(signal)
+    out: list[tuple[int, int]] = []
+    i = 0
+    while i + rows <= n:
+        window = signal[i : i + rows]
+        reference = float(np.median(window))
+        if np.abs(window - reference).max() > tolerance:
+            i += 1
+            continue
+        j = i + rows
+        while j < n and abs(signal[j] - reference) <= tolerance:
+            j += 1
+        out.append((i, j))
+        i = j
+    return out
 
 
 def _plateau_value(signal: np.ndarray, start: int, end: int) -> float:
@@ -407,29 +424,43 @@ def _plateau_value(signal: np.ndarray, start: int, end: int) -> float:
     return float(np.median(signal[start:end]))
 
 
-def _manoeuvre_words(kind: str, times: np.ndarray, signal: np.ndarray, runs: list[tuple[int, int]],
+def _manoeuvre_words(kind: str, times: np.ndarray, signal: np.ndarray, flats: list[tuple[int, int]], rows: int,
                      to_word: Callable[[float], tuple[int, float, bool]]) -> tuple[list[Instruction], list[Absorbed]]:
-    """The instructions of one kind: the plateau the record starts on (issued at t = 0), then one
-    per manoeuvre run — target = the plateau after it (until the next run, or the final value) —
-    unless that plateau is the word already in force, which is recorded as `Absorbed`."""
+    """The instructions of one kind from its plateaus: the first plateau's value is the word at
+    t = 0 (the record starts on it, or is already manoeuvring towards it); every later plateau
+    is a target issued where the plateau before it ends; a signal that leaves its last plateau
+    for good at least ``rows`` before the end targets the final value (a shorter tail is
+    unreadable and recorded), and a signal with no plateau is one manoeuvre to its end. A
+    target that reads as the word already in force is recorded as `Absorbed`."""
     n = len(times)
     out: list[Instruction] = []
     absorbed: list[Absorbed] = []
-    first_start = runs[0][0] if runs else n
-    if first_start > 0:
-        word, target, clamped = to_word(_plateau_value(signal, 0, first_start))
-        out.append(Instruction(kind, word, target, float(times[0]), float(times[0]), clamped))
-    for index, (start, end) in enumerate(runs):
-        plateau_end = runs[index + 1][0] if index + 1 < len(runs) else n
-        if end >= n:                       # the manoeuvre runs to the end of the record
-            value, settled = float(signal[-1]), None
-        else:
-            value, settled = _plateau_value(signal, end, plateau_end), float(times[end])
+    if not flats:
+        word, target, clamped = to_word(float(signal[-1]))
+        return [Instruction(kind, word, target, float(times[0]), None, clamped)], absorbed
+    first_start, first_end = flats[0]
+    word, target, clamped = to_word(_plateau_value(signal, first_start, first_end))
+    out.append(Instruction(kind, word, target, float(times[0]), float(times[first_start]), clamped))
+    previous_value = target
+    for index in range(1, len(flats)):
+        issued, (start, end) = flats[index - 1][1], flats[index]
+        value = _plateau_value(signal, start, end)
         word, target, clamped = to_word(value)
-        if out and out[-1].word == word:    # the word in force already: the earlier instruction continues
-            absorbed.append(Absorbed(kind, float(times[start]), float(times[min(end, n - 1)]), word, float(value - signal[start])))
-            continue
-        out.append(Instruction(kind, word, target, float(times[start]), settled, clamped))
+        if out[-1].word == word:            # the word in force already: the earlier instruction continues
+            absorbed.append(Absorbed(kind, float(times[issued]), float(times[start]), word, float(value - previous_value)))
+        else:
+            out.append(Instruction(kind, word, target, float(times[issued]), float(times[start]), clamped))
+        previous_value = value
+    last_end = flats[-1][1]
+    if last_end < n:                        # the signal leaves its last plateau and never settles again
+        value = float(signal[-1])
+        word, target, clamped = to_word(value)
+        if n - last_end < rows:
+            absorbed.append(Absorbed(kind, float(times[last_end]), float(times[-1]), out[-1].word, float(value - previous_value), ABSORBED_SHORT_TAIL))
+        elif out[-1].word == word:
+            absorbed.append(Absorbed(kind, float(times[last_end]), float(times[-1]), word, float(value - previous_value)))
+        else:
+            out.append(Instruction(kind, word, target, float(times[last_end]), None, clamped))
     return out, absorbed
 
 
@@ -445,26 +476,12 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary) -> Reading:
     window = max(int(round(vocabulary.smoothing_s / dt)), 1)
     height = smooth(frame["height_m"], window)
     speed = smooth(frame["ground_speed_mps"], window)
-    course_rate = np.gradient(course, times)
-    vertical_rate = np.gradient(height, times)
-    acceleration = np.gradient(speed, times)
-
-    # a turn's sweep is the change between the plateaus around it (the run's own edges sit
-    # inside the smoothed ramp and understate it); the plateau before is also the intercept angle
-    candidates = runs_where(np.abs(course_rate) > vocabulary.turn_rate_deg_s, min_rows(vocabulary.turn_min_s, dt))
-    turns: list[tuple[int, int]] = []
-    course_before: dict[tuple[int, int], float] = {}
-    for index, (start, end) in enumerate(candidates):
-        previous_end = candidates[index - 1][1] if index else 0
-        next_start = candidates[index + 1][0] if index + 1 < len(candidates) else n
-        # a turn already under way at the record's start has no plateau before it: its first row stands in
-        before = _plateau_value(course, previous_end, start) if start > previous_end else float(course[start])
-        after = _plateau_value(course, end, next_start) if end < next_start else float(course[-1])
-        if abs(after - before) >= vocabulary.turn_min_sweep_deg:
-            turns.append((start, end))
-            course_before[(start, end)] = before
-    descents = runs_where(vertical_rate < vocabulary.descent_rate_mps, min_rows(vocabulary.descent_min_s, dt))
-    decels = runs_where(acceleration < vocabulary.decel_mps2, min_rows(vocabulary.decel_min_s, dt))
+    rows = min_rows(vocabulary.plateau_min_s, dt)
+    flats = {
+        "heading": plateaus(course, vocabulary.course_tolerance_deg, rows),
+        "altitude": plateaus(height, vocabulary.height_tolerance_m, rows),
+        "speed": plateaus(speed, vocabulary.speed_tolerance_mps, rows),
+    }
 
     def heading_word(value: float) -> tuple[int, float, bool]:
         return vocabulary.heading_bin(value), wrap_deg(value), False
@@ -479,23 +496,32 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary) -> Reading:
 
     instructions: list[Instruction] = []
     absorbed: list[Absorbed] = []
-    for kind, signal, runs, to_word in (("heading", course, turns, heading_word), ("altitude", height, descents, altitude_word),
-                                        ("speed", speed, decels, speed_word)):
-        words, dropped = _manoeuvre_words(kind, times, signal, runs, to_word)
+    for kind, signal, to_word in (("heading", course, heading_word), ("altitude", height, altitude_word), ("speed", speed, speed_word)):
+        words, dropped = _manoeuvre_words(kind, times, signal, flats[kind], rows, to_word)
         instructions.extend(words)
         absorbed.extend(dropped)
-    # the intercept: the last turn after which the aircraft is established (the rule per row over
-    # the plateau that follows the turn — the last row when the turn runs to the end), by the
-    # relative course held before the turn
+    # the intercept: the last heading manoeuvre after which the aircraft is established (the rule
+    # per row over the plateau that follows it — the last row when it runs to the end), by the
+    # relative course of the plateau before it (the first row's when the record opens inside it)
     established = frame["established"]
     intercept: Instruction | None = None
-    for index, (start, end) in enumerate(turns):
-        plateau_end = turns[index + 1][0] if index + 1 < len(turns) else n
-        after = established[end:plateau_end] if end < n else established[n - 1:]
+    turns = flats["heading"]
+    manoeuvres: list[tuple[float, int, int, int | None]] = []       # (course before, start row, end row, plateau end)
+    if turns and turns[0][0] > 0:
+        manoeuvres.append((float(course[0]), 0, turns[0][0], turns[0][1]))
+    for index in range(1, len(turns)):
+        before = _plateau_value(course, *turns[index - 1])
+        manoeuvres.append((before, turns[index - 1][1], turns[index][0], turns[index][1]))
+    if turns and n - turns[-1][1] >= rows:
+        manoeuvres.append((_plateau_value(course, *turns[-1]), turns[-1][1], n, None))
+    if not turns:
+        manoeuvres.append((float(course[0]), 0, n, None))
+    for before, start, end, plateau_end in manoeuvres:
+        after = established[end:plateau_end] if plateau_end is not None else established[n - 1:]
         if after.any():
-            angle = wrap_deg(course_before[(start, end)])
+            angle = wrap_deg(before)
             intercept = Instruction("intercept", vocabulary.intercept_bin(angle), abs(angle), float(times[start]),
-                                    float(times[end]) if end < n else None)
+                                    float(times[end]) if plateau_end is not None else None)
     if intercept is not None:
         instructions.append(intercept)
     instructions.sort(key=lambda item: (item.issued_s, INSTRUCTION_KINDS.index(item.kind)))
@@ -551,10 +577,10 @@ def load_vocabulary(path: str | Path) -> tuple[Vocabulary, dict[str, Any]]:
 
 
 __all__ = [
-    "ALTITUDE_BIN_M", "ALTITUDE_MAX_M", "COURSE_SMOOTHING_S", "DECEL_MIN_S", "DECEL_MPS2", "DESCENT_MIN_S", "DESCENT_RATE_MPS",
-    "HEADING_BIN_DEG", "INSTRUCTION_KINDS", "INTERCEPT_ANGLE_BINS_DEG", "MANDATORY_KINDS", "NO_INTERCEPT", "SMOOTHING_S",
-    "SPEED_BIN_MPS", "SPEED_MAX_MPS", "SPEED_MIN_MPS", "TOKEN_STEP_S", "TURN_MIN_S", "TURN_MIN_SWEEP_DEG", "TURN_RATE_DEG_S",
-    "VOCABULARY_FILE", "VOCABULARY_SCHEMA", "Absorbed", "Instruction", "Reading", "Vocabulary", "course_frame",
-    "load_vocabulary", "min_rows", "read_instructions", "runs_where", "segment_positions_s", "sentence", "smooth",
-    "write_vocabulary",
+    "ALTITUDE_BIN_M", "ALTITUDE_MAX_M", "COURSE_SMOOTHING_S", "COURSE_TOLERANCE_DEG", "HEADING_BIN_DEG", "HEIGHT_TOLERANCE_M",
+    "INSTRUCTION_KINDS", "INTERCEPT_ANGLE_BINS_DEG", "MANDATORY_KINDS", "NO_INTERCEPT", "PLATEAU_MIN_S", "SMOOTHING_S",
+    "SPEED_BIN_MPS", "SPEED_MAX_MPS", "SPEED_MIN_MPS", "SPEED_TOLERANCE_MPS", "TOKEN_STEP_S", "VOCABULARY_FILE",
+    "VOCABULARY_SCHEMA", "ABSORBED_SAME_WORD", "ABSORBED_SHORT_TAIL", "Absorbed", "Instruction", "Reading", "Vocabulary",
+    "course_frame", "load_vocabulary", "min_rows",
+    "plateaus", "read_instructions", "segment_positions_s", "sentence", "smooth", "write_vocabulary",
 ]

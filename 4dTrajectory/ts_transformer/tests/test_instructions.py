@@ -60,28 +60,44 @@ def test_the_bins_are_the_vocabulary_and_round_trip_through_the_artefact(tmp_pat
     assert ins.Vocabulary(token_step_s=5.0).sha256 != v.sha256          # τ is part of the identity
 
 
-def test_runs_and_smoothing():
-    mask = np.array([0, 1, 1, 0, 1, 1, 1, 1, 0, 1], dtype=bool)
-    assert ins.runs_where(mask, 2) == [(1, 3), (4, 8)] and ins.runs_where(mask, 3) == [(4, 8)] and ins.runs_where(mask, 1)[-1] == (9, 10)
+def test_plateaus_and_smoothing():
+    """A plateau opens where `rows` rows fit in the band and holds while the signal stays within the
+    tolerance of the value it opened at; a ramp between two levels is no plateau; a slow drift
+    ends one plateau and opens the next."""
+    signal = np.concatenate((np.full(10, 80.0), np.linspace(80.0, 70.0, 6), np.full(12, 70.0), [66.0, 62.0]))
+    assert ins.plateaus(signal, 2.5, 5) == [(0, 12), (14, 28)]                          # the edges sit inside the band
+    assert ins.plateaus(np.linspace(0.0, 100.0, 30), 2.5, 5) == []                      # never flat
+    assert ins.plateaus(np.linspace(0.0, 10.0, 41), 2.5, 5) == [(0, 13), (13, 26), (26, 39)]   # a drift: plateaus back to back
+    assert ins.min_rows(20.0, 2.0) == 11 and ins.min_rows(4.0, 2.0) == 3               # k rows span (k − 1) · dt ≥ the seconds
     signal = np.array([0.0, 0.0, 10.0, 0.0, 0.0])
     assert ins.smooth(signal, 1).tolist() == signal.tolist()
     smoothed = ins.smooth(signal, 3)
     assert smoothed.shape == signal.shape and smoothed[2] == pytest.approx(10.0 / 3) and smoothed[0] == pytest.approx(0.0)
 
 
-def test_a_manoeuvre_that_lands_on_the_word_in_force_is_absorbed_not_an_instruction():
-    """Two deceleration runs whose plateaus fall in one bin read as ONE speed instruction: the
-    second run continues the first (a split deceleration is not two calls) and is recorded as
-    absorbed, with what it changed."""
+def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instruction():
+    """Three plateaus, the last two in one bin: two speed instructions (the start's, then
+    "reduce to 161 kt" issued where the first plateau ends), the third plateau absorbed with
+    what it changed; a signal that never settles is one manoeuvre to its end."""
     v = ins.Vocabulary()
     times = np.arange(60, dtype=float)
-    speed = np.concatenate((np.full(10, 90.0), np.full(20, 83.0), np.full(30, 81.0)))       # 175 → 161 → 157 kt
-    words, absorbed = ins._manoeuvre_words("speed", times, speed, [(8, 12), (28, 32)], lambda x: (v.speed_bin(x)[0], x, False))
-    assert v.speed_bin(83.0)[0] == v.speed_bin(81.0)[0] != v.speed_bin(90.0)[0]          # one bin (161 and 157 kt)
-    assert [(w.word, w.issued_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0), (v.speed_bin(83.0)[0], 8.0)]
-    assert words[1].target == 83.0 and words[1].settled_s == 12.0                      # the FIRST plateau's target and settle
-    assert absorbed == [ins.Absorbed("speed", 28.0, 32.0, words[1].word, 81.0 - 83.0)]
-    assert ins.min_rows(10.0, 2.0) == 6 and ins.min_rows(4.0, 2.0) == 3                  # k rows span (k − 1) · dt ≥ the seconds
+    speed = np.concatenate((np.full(10, 90.0), np.full(20, 84.0), np.full(30, 80.0)))       # 175 → 163 → 156 kt
+    flats = ins.plateaus(speed, v.speed_tolerance_mps, 6)
+    assert flats == [(0, 10), (10, 30), (30, 60)]
+    to_word = lambda x: (v.speed_bin(x)[0], x, False)                                  # noqa: E731
+    words, absorbed = ins._manoeuvre_words("speed", times, speed, flats, 6, to_word)
+    assert v.speed_bin(84.0)[0] == v.speed_bin(80.0)[0] != v.speed_bin(90.0)[0]          # one bin (163 and 156 kt)
+    assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0, 0.0), (v.speed_bin(84.0)[0], 10.0, 10.0)]
+    assert absorbed == [ins.Absorbed("speed", 30.0, 30.0, words[1].word, 80.0 - 84.0, ins.ABSORBED_SAME_WORD)]
+    ramp, dropped = ins._manoeuvre_words("speed", times, np.linspace(100.0, 70.0, 60), [], 6, to_word)
+    assert [(w.word, w.issued_s, w.settled_s) for w in ramp] == [(v.speed_bin(70.0)[0], 0.0, None)] and not dropped
+    # a tail shorter than a plateau is unreadable: recorded, never a word
+    tail = np.concatenate((np.full(56, 90.0), [85.0, 80.0, 75.0, 70.0]))
+    words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, to_word)
+    assert [w.word for w in words] == [v.speed_bin(90.0)[0]] and absorbed == [ins.Absorbed("speed", 56.0, 59.0, words[0].word, 70.0 - 90.0, ins.ABSORBED_SHORT_TAIL)]
+    long_tail = np.concatenate((np.full(50, 90.0), np.linspace(90.0, 70.0, 10)))
+    words, absorbed = ins._manoeuvre_words("speed", times, long_tail, ins.plateaus(long_tail, v.speed_tolerance_mps, 6), 6, to_word)
+    assert [(w.word, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0), (v.speed_bin(70.0)[0], None)] and not absorbed
     with pytest.raises(ValueError, match="plateau needs rows"):
         ins._plateau_value(speed, 5, 5)
 
@@ -103,21 +119,26 @@ def _track(item, t: np.ndarray, relative_deg: np.ndarray, height_m: np.ndarray, 
                    supervision_weights=np.full(values.shape, 1.0 / values.shape[1]))
 
 
-def test_a_turn_is_read_by_its_sweep_and_its_declared_seconds(flights):
-    """A 12° correction over 8 s is a heading instruction (issued at the turn's start, target the
-    new course); a 6° wobble over 4 s is not (its sweep is under one bin) — the thresholds bind in
-    seconds and degrees, not in rows."""
+def test_a_heading_change_is_read_when_it_lands_on_a_new_plateau_whatever_its_rate(flights):
+    """A 12° change over 40 s (0.3°/s — no rate rule would see it) is a heading instruction issued
+    where the old plateau ends, settled where the new one begins; a 3° wobble stays inside the
+    tolerance and is nothing."""
     v = ins.Vocabulary()
     item = flights[0]
-    t = np.arange(0.0, 120.0, 2.0)
+    t = np.arange(0.0, 160.0, 2.0)
     level, speed = np.full(len(t), 800.0), np.full(len(t), 80.0)
-    twelve = np.interp(t, [0.0, 40.0, 48.0, 120.0], [0.0, 0.0, 12.0, 12.0])
-    reading = ins.read_instructions(_track(item, t, twelve, level, speed), v)
+    slow = np.interp(t, [0.0, 40.0, 60.0, 160.0], [0.0, 0.0, 12.0, 12.0])                # 0.6°/s: the band's lag is ~7 s
+    reading = ins.read_instructions(_track(item, t, slow, level, speed), v)
+    headings = [i for i in reading.instructions if i.kind == "heading"]
+    assert [i.word for i in headings] == [0, v.heading_bin(12.0)] and 40.0 <= headings[1].issued_s <= 40.0 + 10.0
+    assert headings[1].settled_s is not None and 60.0 - 10.0 <= headings[1].settled_s <= 60.0 + 2.0 and headings[1].target == pytest.approx(12.0, abs=1.0)
+    fast = np.interp(t, [0.0, 40.0, 44.0, 160.0], [0.0, 0.0, 12.0, 12.0])                # 3°/s: within a smoothing window
+    reading = ins.read_instructions(_track(item, t, fast, level, speed), v)
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert [i.word for i in headings] == [0, v.heading_bin(12.0)] and abs(headings[1].issued_s - 40.0) <= 4.0
-    assert headings[1].settled_s is not None and abs(headings[1].settled_s - 48.0) <= 6.0 and headings[1].target == pytest.approx(12.0, abs=1.0)
-    six = np.interp(t, [0.0, 40.0, 44.0, 120.0], [0.0, 0.0, 6.0, 6.0])
-    reading = ins.read_instructions(_track(item, t, six, level, speed), v)
+    assert abs(headings[1].settled_s - 44.0) <= 6.0
+    three = np.interp(t, [0.0, 40.0, 44.0, 160.0], [0.0, 0.0, 3.0, 3.0])
+    reading = ins.read_instructions(_track(item, t, three, level, speed), v)
     assert [i.kind for i in reading.instructions] == ["heading", "altitude", "speed"] and not reading.absorbed
 
 
@@ -132,9 +153,9 @@ def test_a_level_off_is_the_descent_s_target_and_the_last_descent_targets_the_en
     reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), height, np.full(len(t), 80.0)), v)
     altitudes = [i for i in reading.instructions if i.kind == "altitude"]
     assert [i.word for i in altitudes] == [5, 3, 1] and altitudes[0].issued_s == 0.0
-    assert abs(altitudes[1].issued_s - 20.0) <= 6.0 and abs(altitudes[1].settled_s - 142.0) <= 8.0
+    assert 20.0 <= altitudes[1].issued_s <= 20.0 + 12.0 and 142.0 - 12.0 <= altitudes[1].settled_s <= 142.0 + 2.0
     assert altitudes[1].target == pytest.approx(3000 * ins.FT, abs=30.0) and not altitudes[1].clamped
-    assert abs(altitudes[2].issued_s - 182.0) <= 6.0 and altitudes[2].settled_s is None
+    assert 182.0 <= altitudes[2].issued_s <= 182.0 + 12.0 and altitudes[2].settled_s is None
 
 
 def test_a_clamped_target_reaches_the_instruction_and_an_orbit_is_absorbed(flights):
@@ -168,7 +189,9 @@ def test_the_established_rule_is_in_the_spec_but_not_settable():
     assert v.to_dict()["established_cross_track_m"] == ins.ESTABLISHED_CROSS_TRACK_M
     with pytest.raises(ValueError, match="package's one"):
         ins.Vocabulary(established_cross_track_m=1000.0)
-    assert ins.Vocabulary(turn_min_sweep_deg=15.0).sha256 != v.sha256
+    assert ins.Vocabulary(plateau_min_s=30.0).sha256 != v.sha256
+    with pytest.raises(ValueError, match="half a bin"):
+        ins.Vocabulary(course_tolerance_deg=6.0)
 
 
 def test_the_synthetic_arrival_reads_as_one_intercept_turn_a_descent_to_the_threshold_and_a_deceleration(flights):
@@ -182,18 +205,21 @@ def test_the_synthetic_arrival_reads_as_one_intercept_turn_a_descent_to_the_thre
         headings = [i for i in reading.instructions if i.kind == "heading"]
         assert headings[0].issued_s == item.times[0] and headings[0].word == v.heading_bin(headings[0].target)
         intercept = [i for i in reading.instructions if i.kind == "intercept"]
-        if abs(headings[0].target) >= 15.0:        # a corner the 1°/s rule sees over the 10 s smoothing window
+        if headings[0].word != 0:                   # the entry leg reads as another word: the capture is a turn onto the course
             assert len(headings) == 2 and headings[-1].word == 0                          # settles on the course
             assert len(intercept) == 1 and intercept[0].target == pytest.approx(abs(headings[0].target), abs=1.0)
             assert intercept[0].word == v.intercept_bin(intercept[0].target) and intercept[0].issued_s == headings[1].issued_s
-        else:                                       # too small a corner to be a turn: one word, the entry course's bin
-            assert len(headings) == 1 and not intercept and abs(headings[0].target) < 15.0
+        else:                                       # the entry leg already reads as the course: one word, no capture to speak of
+            assert len(headings) == 1 and not intercept and abs(headings[0].target) < v.heading_bin_deg / 2
         altitudes = [i for i in reading.instructions if i.kind == "altitude"]
         assert altitudes[-1].word == 0 and altitudes[-1].settled_s is None                # descending to the end
         assert all(a.kind in ins.MANDATORY_KINDS for a in reading.absorbed)
         speeds = [i for i in reading.instructions if i.kind == "speed"]
-        assert speeds[-1].word == v.speed_bin(speeds[-1].target)[0]                     # the last word is the final speed's bin
-        assert abs(speeds[-1].target - float(ins.course_frame(item)["ground_speed_mps"][-1])) < 10.0
+        assert speeds[-1].word == v.speed_bin(speeds[-1].target)[0]
+        frame = ins.course_frame(item)
+        # the last word targets the plateau it settled on, or the final value when it never settled
+        at = float(frame["ground_speed_mps"][-1]) if speeds[-1].settled_s is None else float(np.interp(speeds[-1].settled_s, frame["t"], frame["ground_speed_mps"]))
+        assert abs(speeds[-1].target - at) < 2 * v.speed_tolerance_mps + 1.0
         assert reading.positions_s[0] == item.times[0] and np.all(np.diff(reading.positions_s) == v.token_step_s)
         assert reading.words.shape == (len(reading.positions_s), 4) and (reading.words[:, :3] >= 0).all()
         # the words in force: the intercept is absent before its turn, present from it on
