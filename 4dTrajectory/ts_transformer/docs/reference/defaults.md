@@ -393,3 +393,59 @@ on 13,043 altitude instructions / 7,486 flights (first 1,500 per airport; covera
    is refused by measurement, and with it the cost of a word whose unit changes by segment
    (`altitude_centre_m` stays one conversion; the gate, `plan_conditioning=instruction`, the
    frontend colouring and the conditioning scaling are all untouched).
+
+### H7 · what the altitude word is FOR: an anchor against drift, not a carrier of precision (2026-09-21)
+
+Three measurements, in the order the user pushed for them. Together they change what the bin
+width is chosen to do, so they belong with H5 rather than inside it.
+
+**(a) Non-uniform bins win, once the gradient points at the levels.** The user asked twice for
+non-uniform bins; my first two attempts measured the wrong shapes (a hand ladder whose coarse
+segment's centres drifted off the round numbers, then one that was uniform-250 with a coarse tail)
+and I twice reported that non-uniform buys nothing. Fitting the centres to the data instead
+(Lloyd-Max on the fleet's real levels, one bin reserved for the degenerate final-descent event):
+
+| bins | uniform | fitted |
+|---|---|---|
+| 11 | 235.3 ft | **134.4** |
+| 21 | 112.4 | **72.7** |
+| 26 | — | **53.3** |
+| 41 | 62.4 | **35.5** |
+
+So **26 fitted bins beat 41 uniform ones** (53.3 vs 62.4 ft) with the median class holding 1,275
+examples instead of 242. The fitted centres are dense over 1500–3200 ft and sparse elsewhere —
+exactly the shape the user described, pointed at the band the levels actually occupy (1600–3700 ft),
+not at the ground. Cost: the centres become part of the data, so they freeze with the sha and a
+cohort change (a v6 rebuild) would want refitting; `altitude_centre_m` becomes a 26-entry lookup.
+
+**(b) The descent angle DOES hold, and is bimodal.** I had dismissed it as noise; that was wrong.
+Read with the labeller's own plateau rule (10 s smoothing, ≥ 20 s, ±0.5°) over ~2,000 flights, the
+flight path angle holds **11,199 plateaus, median 32 s** — the same order as the height plateaus.
+But 13.0 % of them are level, and the 9,723 genuinely descending ones have an interquartile of only
+**2.70–3.22°** (p50 3.01). So the aircraft does two things — level, or descend at ~3° — across the
+WHOLE approach, not just the final segment. As a word that is one bit, and the height word already
+carries it (a lower target means descend, the same target means level). D77's conclusion stands;
+its stated reason ("散且带噪") does not and was replaced.
+
+**(c) Removing the altitude word entirely is refused by its tail, not its centre.** The user
+proposed dropping it: with descent pinned at 3° the altitude follows from the duration word, and
+the model learns it implicitly. Reconstructing every flight's vertical profile from
+`level/descend + duration + TRUE ground speed`:
+
+- per segment: median descent 473 ft, median error **−2.1 ft**, median |error| **43.5 ft** — the
+  3° constant is genuinely good, better than expected;
+- per approach, accumulated: median |error| **153.4 ft** (which passes the pre-stated "hundreds of
+  feet fails" line), but **p75 299 ft and p95 1,189 ft**.
+
+The centre passes and the tail fails, for a structural reason: an absolute target's error is
+bounded by half a bin, a rate's is unbounded and compounds over segments. The median flatters
+itself because the signed errors cancel (median +4.7 ft). And this is a LOWER bound — it used the
+true ground speed, while in closed loop the speed is a predicted word too, so the two errors
+multiply.
+
+**What this changes:** the altitude word's job is to bound drift, not to carry precision, because
+the segment shape is already accurate to 43 ft without it. A bin chosen as an anchor can be
+coarser than one chosen as a measurement — which also relieves H5's class-count problem
+(200 ft leaves a median of 9 examples per class on KRDU alone). Pending numbers to settle
+together: bin width under the anchor reading, uniform vs fitted, and the cohort (KRDU alone vs
+five airports, which moves the per-class counts by an order of magnitude).
