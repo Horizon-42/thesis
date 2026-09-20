@@ -239,6 +239,10 @@ Only the hazards that must fire unprompted are repeated here.
   route mix** (KSJC 483 → 1526 m reweighted, best of five to worst); published tables predate the
   covariates, and the gate-pass conclusion still needs re-deriving after the datum fix. →
   `4dTrajectory/ts_transformer/CLAUDE.md` "How to read results"
+- **`clean_pipeline_data.py` would DELETE the 70,267 records the next item says to regenerate
+  FROM** (verified 2026-09-20; KRDU's dry run alone lists 2.2 GB of "optimizer + standalone
+  predictions (allow-listed)", ~7.0 GB over five airports). Do not run it unattended; exclude
+  those directories by hand. → `docs/open-items.md`
 - **No optimizer pass rate on disk is quotable.** `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}`
   hold 15 batches, **70,267 records**, whose v6 reports grade speed indeterminate on every row;
   every record carries `source.dynamics_typecode`, so regenerate the 15 reports

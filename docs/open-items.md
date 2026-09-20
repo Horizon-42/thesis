@@ -9,6 +9,19 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
+- **`clean_pipeline_data.py` DELETES the 70,267 optimizer records the next item says to
+  regenerate from** (verified 2026-09-20). Root `CLAUDE.md` carries both halves of the
+  contradiction: the Build & Dev block tells you to run the cleaner to clear "allow-listed
+  regenerable outputs", and the Open Items block says
+  `4dTrajectory/outputs/<ICAO>/{runway,fitted_adsb,runway_cons}` hold 15 batches / **70,267
+  records** whose v6 reports must be **regenerated from them**, a re-solve costing ~30 h at
+  `--jobs 24` and 12.3 GiB that does not fit on this disk. `clean_pipeline_data.py --airport
+  KRDU --dry-run` prints `optimizer + standalone predictions (allow-listed)  77862 files
+  2.2 GB` and would take them; ~7.0 GB over the five airports. **Do not run the cleaner
+  unattended; exclude those directories by hand.** The durable fix is either to teach the
+  cleaner to protect them while the regeneration is pending, or to do the regeneration and then
+  release them — the user's call, because it decides whether those records are still needed.
+
 - **Two-tier — PAUSED 2026-09-18 01:00 by the user; the handover is
   `4dTrajectory/ts_transformer/docs/2026-09-17_two_tier_plan_v2.zh.md` §13** (state, how to resume, the
   decision list). Results: gate L1 FAIL (all contracts, with and without the token-using recipe), gate L2
