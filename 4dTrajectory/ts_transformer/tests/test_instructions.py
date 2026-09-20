@@ -104,6 +104,13 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
     tail = np.concatenate((np.full(56, 90.0), [85.0, 80.0, 75.0, 70.0]))
     words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
     assert [w.word for w in words] == [v.speed_bin(90.0)[0]] and absorbed == [ins.Absorbed("speed", 56.0, 59.0, words[0].word, 70.0 - 90.0, ins.ABSORBED_SHORT_TAIL)]
+    # a pause on the way is part of the manoeuvre: 98 → 95 (absorbed) → 91 issues "91" where the aircraft LEFT 98
+    staircase = np.concatenate((np.full(20, 98.0), np.full(20, 95.0), np.full(20, 91.0)))
+    assert abs(91.0 - 98.0) >= v.speed_min_change_mps > abs(95.0 - 98.0) and abs(91.0 - 95.0) > v.speed_tolerance_mps
+    words, absorbed = ins._manoeuvre_words("speed", times, staircase, ins.plateaus(staircase, v.speed_tolerance_mps, 6), 6,
+                                           v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
+    assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(98.0)[0], 0.0, 0.0), (v.speed_bin(91.0)[0], 20.0, 40.0)]
+    assert [(a.reason, a.start_s, a.end_s) for a in absorbed] == [(ins.ABSORBED_SMALL_CHANGE, 20.0, 20.0)]
     # a long tail settling back inside the word in force's bin (altitude: 1000 → 840 m, both bin 3, change ≥ half a bin): absorbed "same word"
     tail_back = np.concatenate((np.full(50, 1000.0), np.linspace(1000.0, 840.0, 10)))
     words, absorbed = ins._manoeuvre_words("altitude", times, tail_back, ins.plateaus(tail_back, v.height_tolerance_m, 6), 6,

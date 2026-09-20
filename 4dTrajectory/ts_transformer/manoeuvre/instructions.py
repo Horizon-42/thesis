@@ -29,9 +29,10 @@ tolerance — so the rate a "level" stretch may still drift at is (tolerance / 2
 longer plateau (a slow descent, or a pause inside one, is not a plateau). Everything between two
 plateaus is the manoeuvre that takes the aircraft from one to the next, whatever its rate: the
 instruction's TARGET is the plateau
-reached (its median), it is ISSUED where the signal departs the previous plateau — the last row
-within half the tolerance of its value (the controller spoke a few seconds earlier; that gap is
-not recoverable and is stated) — and ``settled_s`` is where the new plateau begins. A plateau
+reached (its median), it is ISSUED where the signal departs the plateau of the word IN FORCE —
+the last row within half the tolerance of its value; an absorbed pause on the way is part of the
+same manoeuvre (the controller spoke a few seconds earlier; that gap is not recoverable and is
+stated) — and ``settled_s`` is where the new plateau begins. A plateau
 that moves the signal by less than the kind's minimum change (`HEADING_MIN_CHANGE_DEG`,
 `HEIGHT_MIN_CHANGE_M`, `SPEED_MIN_CHANGE_MPS`) from the word in force's value is not a new
 target (a wobble, whatever bin edge it crosses): absorbed, like a plateau that reads as the
@@ -136,8 +137,11 @@ TOKEN_STEP_S = 10.0
 #: kind's minimum change from the word in force is absorbed (a wobble is not an instruction,
 #: whatever bin edge it crosses).
 #: v5: the drift over a plateau's opening window is its fitted slope × span; the intercept needs the
-#: aircraft NOT established before the manoeuvre (a straight-in never carries one).
-READING_RULE = "plateau-v5"
+#: aircraft NOT established before the manoeuvre (a straight-in never carries one). v6: a word is
+#: issued where the signal departs the plateau of the word IN FORCE — an absorbed pause on the way
+#: is part of the same manoeuvre (the third hand check: a word issued 35–60 s after the aircraft
+#: had left the value the word in force named).
+READING_RULE = "plateau-v6"
 
 VOCABULARY_SCHEMA = "ts-instruction-vocabulary-v1"
 VOCABULARY_FILE = "instruction_vocabulary.json"
@@ -504,32 +508,40 @@ def _manoeuvre_words(kind: str, times: np.ndarray, signal: np.ndarray, flats: li
     values = [_plateau_value(signal, start, end) for start, end in flats]
     word, target, clamped = to_word(values[0])
     out.append(Instruction(kind, word, target, float(times[0]), float(times[flats[0][0]]), clamped))
-    in_force = values[0]                    # the word in force's plateau value (an absorbed plateau does not move it)
+    in_force = 0                            # the plateau of the word in force (an absorbed pause does not move it)
+
+    def left_in_force() -> int:
+        """Where the signal departed the word in force's plateau: the manoeuvre's issue row."""
+        return departure_row(signal, *flats[in_force], values[in_force], tolerance)
+
     for index in range(1, len(flats)):
-        (previous_start, previous_end), start = flats[index - 1], flats[index][0]
-        issued = departure_row(signal, previous_start, previous_end, values[index - 1], tolerance)
+        start = flats[index][0]
         word, target, clamped = to_word(values[index])
-        if abs(values[index] - in_force) < min_change:
-            absorbed.append(Absorbed(kind, float(times[issued]), float(times[start]), out[-1].word, float(values[index] - in_force), ABSORBED_SMALL_CHANGE))
+        change = float(values[index] - values[in_force])
+        if abs(change) < min_change:        # a pause on the way, or a wobble: the word in force continues
+            left = departure_row(signal, *flats[index - 1], values[index - 1], tolerance)
+            absorbed.append(Absorbed(kind, float(times[left]), float(times[start]), out[-1].word, change, ABSORBED_SMALL_CHANGE))
         elif out[-1].word == word:          # the word in force already: the earlier instruction continues
-            absorbed.append(Absorbed(kind, float(times[issued]), float(times[start]), word, float(values[index] - in_force)))
-            in_force = values[index]
+            absorbed.append(Absorbed(kind, float(times[left_in_force()]), float(times[start]), word, change))
+            in_force = index
         else:
-            out.append(Instruction(kind, word, target, float(times[issued]), float(times[start]), clamped))
-            in_force = values[index]
+            out.append(Instruction(kind, word, target, float(times[left_in_force()]), float(times[start]), clamped))
+            in_force = index
     last_start, last_end = flats[-1]
     if last_end < n:                        # the signal leaves its last plateau and never settles again
-        issued = departure_row(signal, last_start, last_end, values[-1], tolerance)
         value = float(signal[-1])
         word, target, clamped = to_word(value)
+        change = float(value - values[in_force])
         if n - last_end < rows:
-            absorbed.append(Absorbed(kind, float(times[issued]), float(times[-1]), out[-1].word, float(value - in_force), ABSORBED_SHORT_TAIL))
-        elif abs(value - in_force) < min_change:
-            absorbed.append(Absorbed(kind, float(times[issued]), float(times[-1]), out[-1].word, float(value - in_force), ABSORBED_SMALL_CHANGE))
+            left = departure_row(signal, last_start, last_end, values[-1], tolerance)
+            absorbed.append(Absorbed(kind, float(times[left]), float(times[-1]), out[-1].word, change, ABSORBED_SHORT_TAIL))
+        elif abs(change) < min_change:
+            left = departure_row(signal, last_start, last_end, values[-1], tolerance)
+            absorbed.append(Absorbed(kind, float(times[left]), float(times[-1]), out[-1].word, change, ABSORBED_SMALL_CHANGE))
         elif out[-1].word == word:
-            absorbed.append(Absorbed(kind, float(times[issued]), float(times[-1]), word, float(value - in_force)))
+            absorbed.append(Absorbed(kind, float(times[left_in_force()]), float(times[-1]), word, change))
         else:
-            out.append(Instruction(kind, word, target, float(times[issued]), None, clamped))
+            out.append(Instruction(kind, word, target, float(times[left_in_force()]), None, clamped))
     return out, absorbed
 
 
