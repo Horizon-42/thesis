@@ -6,8 +6,8 @@
 
 | 项 | 值 |
 |---|---|
-| 词表文件 | `4dTrajectory/outputs/KRDU/experiments/two_tier_v3_bprime_20260920/vocabulary_tau10/instruction_vocabulary.json` |
-| 身份 | sha `1586172a6ec6…`，读法版本 `plateau-v9`，写于 2026-09-20T12:18Z |
+| 词表文件 | 目标路径 `…/two_tier_v3_bprime_20260920/vocabulary_tau10/`（**当前为空**：四词产物已删，五词产物待 B0′′ 生成） |
+| 身份 | 本文描述的是**四词的 v9**（sha `1586172a6ec6`，`plateau-v9`，2026-09-20T12:18Z）。**四词的 v9 产物已按用户指示删除（2026-09-20）**，五词的还没建；随它一起没的还有 300 页 B0′ 人工核底图，那些在 v10 的读法下不可再生。 五词设计见计划 §5.2.1 |
 | 词数 | 73 个（航向 36 + 高度 11 + 地速 23 + 切入 3），外加一个"保持" |
 | 读的是哪些飞机 | B cohort = 网格 `two_tier_v3_grid_20260918/cohorts/L60_D60`（KRDU，记录长度 ≥ 120 s：train 6853 架 / val 1404 架） |
 | 代码 | `manoeuvre/instructions.py`（词表和标注器，叶模块）、`outputs/control/instruction_token.py`（执行器怎么吃）、`manoeuvre/instruction_prior.py`（先验）；runner 是 `run_ts.py instruction_vocabulary` |
@@ -225,4 +225,4 @@ v6 看着"早"，两边都是在给同一个缺口找补。所以 v8 改的是�
 1. 看计划 §5.2 的设计和 §6.2 的十二个决定 D49–D60，认可了或指出要改哪几条；认可之后说"跑"，队列
    `two_tier_bprime_queue` 才启动（dry-run 已经过了）。计划里的里程碑 M-B1′′ 说的就是这一件事，在这之前不训任何模型。
 2. **D59 的切入角门槛**（§6.4：55 % 的真值切入大于 45°）。
-3. `_superseded/` 里六份旧读数占 442 MB，磁盘只剩 5.7 GB，队列启动要 3 GB——删不删。
+3. `_superseded/` 里六份旧读数占 **515 MB**，磁盘只剩 5.6 GB，队列启动要 3 GB——删不删。
