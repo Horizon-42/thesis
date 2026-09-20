@@ -135,6 +135,16 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
                                            v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
     assert [w.word for w in words] == [v.speed_bin(88.5)[0], v.speed_bin(92.5)[0]] and not absorbed
     assert 4.0 < v.speed_min_change_mps and v.hold_min_s == 40.0                     # under the minimum, but held 40 s
+    # one steady stretch split by a brief excursion is ONE level, however long the second half is
+    # held: its median moved 1.4 m/s, under the tolerance, even though it crossed a bin edge
+    edge = np.concatenate((np.full(20, 73.8), np.full(5, 79.0), np.full(42, 75.2)))
+    clock = np.arange(len(edge), dtype=float)
+    flats = ins.plateaus(edge, v.speed_tolerance_mps, 6)
+    assert flats == [(0, 20), (25, 67)] and v.speed_bin(73.8)[0] != v.speed_bin(75.2)[0]
+    assert abs(75.2 - 73.8) < v.speed_tolerance_mps and clock[66] - clock[25] >= v.hold_min_s    # held past the hold, still one level
+    words, absorbed = ins._manoeuvre_words("speed", clock, edge, flats, 6, v.speed_tolerance_mps,
+                                           v.speed_min_change_mps, v.hold_min_s, to_word)
+    assert [w.word for w in words] == [v.speed_bin(73.8)[0]] and [a.reason for a in absorbed] == [ins.ABSORBED_SMALL_CHANGE]
     with pytest.raises(ValueError, match="at least the kind's tolerance"):
         ins.Vocabulary(speed_min_change_mps=1.0)
     with pytest.raises(ValueError, match="at least plateau_min_s"):

@@ -37,9 +37,10 @@ the new plateau begins. A plateau
 that moves the signal by less than the kind's minimum change (`HEADING_MIN_CHANGE_DEG`,
 `HEIGHT_MIN_CHANGE_M`, `SPEED_MIN_CHANGE_MPS`) from the word in force's value is not a new
 target (a wobble, whatever bin edge it crosses): absorbed, like a plateau that reads as the word
-already in force — UNLESS the aircraft held it for `HOLD_MIN_S` or longer, which makes it an
-instruction whatever its size (the minimum change suppresses a transient, not a level that was
-flown). A record that opens mid-manoeuvre carries that manoeuvre's target as its word
+already in force — UNLESS the aircraft held it for `HOLD_MIN_S` or longer AND its value moved by
+at least the tolerance, which makes it an instruction whatever its size (the minimum change
+suppresses a transient, not a level that was flown; the tolerance clause stops one steady stretch
+whose median sits on a bin edge from being read as two). A record that opens mid-manoeuvre carries that manoeuvre's target as its word
 at t = 0; a manoeuvre that runs to the end of the record targets the final value (the last
 descent targets the threshold, bin 0); a record with no plateau at all is one manoeuvre to its
 end. A manoeuvre whose plateau reads as the word already in force is NOT an instruction — the
@@ -154,8 +155,11 @@ TOKEN_STEP_S = 10.0
 #: `HOLD_MIN_S` or longer whose word differs is an instruction whatever its size (measured on the
 #: B cohort: 7 598 speed manoeuvres were being absorbed, median held 42 s, 4 032 of them in a
 #: different bin from the word in force — 0.6 real speed steps a flight the sentence never said,
-#: which is what made every earlier rule read as early or late around them).
-READING_RULE = "plateau-v8"
+#: which is what made every earlier rule read as early or late around them). v9: that hold also
+#: needs the level to be at least one TOLERANCE from the word in force's — two levels closer than
+#: the tolerance are the same level measured twice, and wording the second one split a steady
+#: stretch in two whenever its median sat on a bin edge (the fifth hand check: 6 of 50 pages).
+READING_RULE = "plateau-v9"
 
 VOCABULARY_SCHEMA = "ts-instruction-vocabulary-v1"
 VOCABULARY_FILE = "instruction_vocabulary.json"
@@ -536,7 +540,9 @@ def _manoeuvre_words(kind: str, times: np.ndarray, signal: np.ndarray, flats: li
         if out[-1].word == word:            # the word in force already: the earlier instruction continues
             absorbed.append(Absorbed(kind, float(times[left]), float(times[start]), word, change))
             in_force = index
-        elif abs(change) < min_change and held_s < hold_min_s:      # a transient under the minimum: the word in force continues
+        elif abs(change) < min_change and not (held_s >= hold_min_s and abs(change) >= tolerance):
+            # under the minimum, and either a transient or the same level measured twice (a median
+            # that moved less than the tolerance is not a level the aircraft changed to)
             absorbed.append(Absorbed(kind, float(times[left]), float(times[start]), out[-1].word, change, ABSORBED_SMALL_CHANGE))
         else:                               # a decisive change, or a level the aircraft held: its own word
             out.append(Instruction(kind, word, target, float(times[left]), float(times[start]), clamped))
