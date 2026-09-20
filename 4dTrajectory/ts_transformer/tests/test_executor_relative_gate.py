@@ -35,15 +35,23 @@ def test_the_relative_gate_reads_improvements_against_the_seed_line_per_seed():
     result = gates.gate_relative(baseline, candidate, seed_line=LINE)
     assert result["verdicts"]["b"]["pass"] is True and result["verdicts"]["b"]["beyond_on"] == ["established_all"]
     # the vectored ADE worse beyond its line: row B fails (not worse on every metric), row A3 does not read the ADE,
-    # and gate B1 (the truth-token upper bound: beyond on one metric on both seeds, no not-worse clause) still passes
+    # and gate B1 (the truth-instruction upper bound, D57: both established not worse, beyond on one metric on
+    # both seeds — the ADE may be worse) still passes
     candidate = {1337: _reading(0.78, 0.42, 2550.0), 2024: _reading(0.80, 0.44, 2320.0)}
     result = gates.gate_relative(baseline, candidate, seed_line=LINE)
     assert result["verdicts"]["b"]["pass"] is False and result["verdicts"]["b"]["not_worse"] is False
     assert result["verdicts"]["a3"]["pass"] is True
     assert result["verdicts"]["b1"]["pass"] is True and result["verdicts"]["b1"]["beyond_on"] == ["established_all"]
+    assert result["verdicts"]["b1"]["primaries_not_worse"] is True
     # beyond on ONE seed only: gate B1 fails like row B
     candidate = {1337: _reading(0.78, 0.42, 2350.0), 2024: _reading(0.75, 0.44, 2320.0)}
     assert gates.gate_relative(baseline, candidate, seed_line=LINE)["verdicts"]["b1"]["pass"] is False
+    # the vectored established share worse beyond its line while all-flights established is far beyond: gate B1 fails
+    # (D57: a truth feed that loses established on either group is not an upper bound of anything)
+    candidate = {1337: _reading(0.85, 0.25, 2350.0), 2024: _reading(0.85, 0.30, 2320.0)}
+    result = gates.gate_relative(baseline, candidate, seed_line=LINE)
+    assert result["verdicts"]["b1"]["pass"] is False and result["verdicts"]["b1"]["primaries_not_worse"] is False
+    assert result["verdicts"]["b1"]["beyond_on"] == ["established_all"]
     # the other primary worse beyond its line: row A3 fails on that primary
     candidate = {1337: _reading(0.78, 0.25, 2350.0), 2024: _reading(0.80, 0.44, 2320.0)}
     assert gates.gate_relative(baseline, candidate, seed_line=LINE)["verdicts"]["a3"]["pass"] is False
@@ -68,7 +76,7 @@ def _row(established: bool, vectored: bool, ade: float, flyable: bool = True) ->
 
 
 def _payload(rows: dict, protocol: str = "none", segment_s: float = 20.0, executed_s: float = 20.0) -> dict:
-    return {"schema": LOCKSTEP_SCHEMA, "protocol": protocol, "segment_s": segment_s, "executed_s": executed_s,
+    return {"schema": LOCKSTEP_SCHEMA, "protocol": protocol, "instruction_vocabulary": None, "segment_s": segment_s, "executed_s": executed_s,
             "first_prediction": {"rule": "fixed L-1 (row 29)"},
             "executor": f"{protocol}-executor", "executor_sha256": "0" * 64, "executor_name": "twin", "flights": len(rows), "rows": rows}
 

@@ -65,7 +65,9 @@ def test_plateaus_and_smoothing():
     tolerance of the value it opened at; a ramp between two levels is no plateau; a slow drift
     ends one plateau and opens the next."""
     signal = np.concatenate((np.full(10, 80.0), np.linspace(80.0, 70.0, 6), np.full(12, 70.0), [66.0, 62.0]))
-    assert ins.plateaus(signal, 2.5, 5) == [(0, 12), (14, 28)]                          # the edges sit inside the band
+    assert ins.plateaus(signal, 2.5, 5) == [(0, 12), (15, 28)]                          # the edges sit inside the band
+    # a slow transit crossing the band is not a plateau: 1 unit per row over 5 rows drifts 4 > 1.25
+    assert ins.plateaus(np.concatenate((np.full(6, 50.0), np.arange(50.0, 30.0, -1.0), np.full(6, 30.0))), 2.5, 5) == [(0, 9), (25, 32)]
     assert ins.plateaus(np.linspace(0.0, 100.0, 30), 2.5, 5) == []                      # never flat
     assert ins.plateaus(np.linspace(0.0, 10.0, 41), 2.5, 5) == [(0, 13), (13, 26), (26, 39)]   # a drift: plateaus back to back
     assert ins.min_rows(20.0, 2.0) == 11 and ins.min_rows(4.0, 2.0) == 3               # k rows span (k − 1) · dt ≥ the seconds
@@ -192,6 +194,45 @@ def test_the_established_rule_is_in_the_spec_but_not_settable():
     assert ins.Vocabulary(plateau_min_s=30.0).sha256 != v.sha256
     with pytest.raises(ValueError, match="half a bin"):
         ins.Vocabulary(course_tolerance_deg=6.0)
+    assert v.to_dict()["reading_rule"] == ins.READING_RULE                              # the rule is part of the identity
+    with pytest.raises(ValueError, match="another rule"):
+        ins.Vocabulary(reading_rule="rate-v1")
+
+
+def test_the_intercept_is_the_last_heading_instruction_not_a_wiggle_after_the_capture(flights):
+    """A base leg at −90°, a capture onto the course, then a 4.6° wobble on the final (past the
+    tolerance, inside bin 0: absorbed) that settles back: the intercept sits on the capture, with
+    the base leg's angle, not on the wobble; a track that never leaves the course carries no
+    intercept at all."""
+    v = ins.Vocabulary()
+    item = flights[0]
+    t = np.arange(0.0, 300.0, 2.0)
+    level, speed = np.full(len(t), 600.0), np.full(len(t), 75.0)
+    course = np.interp(t, [0.0, 60.0, 90.0, 200.0, 206.0, 240.0, 246.0, 300.0], [-90.0, -90.0, 0.0, 0.0, 4.6, 4.6, 0.0, 0.0])
+    reading = ins.read_instructions(_capture(item, t, course, level, speed), v)
+    intercept = [i for i in reading.instructions if i.kind == "intercept"]
+    headings = [i for i in reading.instructions if i.kind == "heading"]
+    assert [i.word for i in headings] == [27, 0] and len(intercept) == 1
+    assert intercept[0].issued_s == headings[1].issued_s and intercept[0].target == pytest.approx(90.0, abs=2.0) and intercept[0].word == 2
+    assert any(a.kind == "heading" and a.reason == ins.ABSORBED_SAME_WORD for a in reading.absorbed)
+    straight = ins.read_instructions(_capture(item, t, np.zeros(len(t)), level, speed), v)
+    assert not [i for i in straight.instructions if i.kind == "intercept"] and straight.established_from_start
+
+
+def _capture(item, t: np.ndarray, relative_deg: np.ndarray, height_m: np.ndarray, speed_mps: np.ndarray):
+    """Like `_track`, but ending ON the course at the threshold: the path is integrated backwards
+    from the threshold, so the last rows are established whatever the course before."""
+    from dataclasses import replace
+    course = float(item.scenario.target.psi)
+    psi = course + np.radians(relative_deg)
+    ve, vn = speed_mps * np.cos(psi), speed_mps * np.sin(psi)
+    dt = np.diff(t, append=t[-1] + (t[-1] - t[-2]))
+    e = item.target_chart[0] - 500.0 * math.cos(course) - (np.cumsum((ve * dt)[::-1])[::-1] - ve * dt)
+    n = item.target_chart[1] - 500.0 * math.sin(course) - (np.cumsum((vn * dt)[::-1])[::-1] - vn * dt)
+    u = item.target_chart[2] + height_m
+    values = np.column_stack((e, n, u, ve, vn, np.gradient(u, t)))
+    return replace(item, times=t, values=values, supervision_times=t, supervision_values=values,
+                   supervision_weights=np.full(values.shape, 1.0 / values.shape[1]))
 
 
 def test_the_synthetic_arrival_reads_as_one_intercept_turn_a_descent_to_the_threshold_and_a_deceleration(flights):

@@ -1,0 +1,70 @@
+{
+ "_comment": "Two-tier plan v3 stage B′ (docs/2026-09-18_two_tier_plan_v3.zh.md §5.2, rewritten 2026-09-20; decisions §6.2 D49–D60): the INSTRUCTION-vocabulary executor. Every arm is the stage A executor L60_D20 (D30: lookback 60 s = seq_len 30 at dt 2 s, segment Δ = 20 s = control_horizon_s, N1 = 2 segments, specific-force+path-angle + first-order lag, random remaining-path-uniform training anchors with the Δ future floor, 180 epochs, selection on the fixed-anchor common-grid ADE at L−1, split_seed 1337) with plan_conditioning = instruction: the executor is handed the four instruction words in force at the Δ/τ = 2 positions of its segment (the vocabulary artefact B0′ wrote — bins and thresholds under its sha; τ = 10 s, D54). ONE development cohort for every arm (D33 / D47: the grid's L60_D60 cohort, records ≥ 120 s: train 6853 / val 1404). The queue (`run_ts.py two_tier_bprime_queue`) flies the baseline itself — the grid's L60_D20 checkpoints, protocol none, from L−1 on this cohort — then per configuration: train both seeds, fly each `--protocol truth-instruction` (the truth's words by flown position: the B1′ upper bound), gate B1 (D57: both established shares not worse on both seeds, at least one metric beyond the grid's p75 seed line on both seeds, fully flyable ≥ 0.95), and past that gate the instruction prior per seed (B3′'s first line). No records at train time (\"predict\": false): the readings are the closed loop's. B2′ (closed-loop fine-tuning) and B3′'s decoding protocols are not built yet and are not declared here. Arm keys: <configuration>_s<seed>.",
+ "predict": false,
+ "development_cohort": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/cohorts/L60_D60/development_cohort.json",
+ "base_recipe": "simple-v3",
+ "base": {
+  "control_recipe_name": "custom",
+  "control_thrust_parameterization": "specific-force+path-angle",
+  "plan_conditioning": "instruction",
+  "instruction_vocabulary": "4dTrajectory/outputs/KRDU/experiments/two_tier_v3_bprime_20260920/vocabulary_tau10/instruction_vocabulary.json",
+  "anchor_floor_index": 0,
+  "control_imitation_loss_weight": 0.0,
+  "control_heading_rate_loss_weight": 0.0,
+  "control_bank_tv_loss_weight": 0.0,
+  "final_time_loss_weight": 0.0,
+  "state_endpoint_loss_weight": 0.0,
+  "random_train_anchor": true,
+  "random_train_anchor_sampling": "remaining-path-uniform",
+  "random_train_anchor_l1_share": 0.0,
+  "checkpoint_selection_metric": "fixed-anchor-common-grid-ade",
+  "lr_plateau_metric": "objective",
+  "epochs": 180,
+  "patience": 180,
+  "split_seed": 1337,
+  "seq_len": 30,
+  "control_horizon_s": 20.0,
+  "n_segments": 2,
+  "random_train_anchor_min_future_s": 20.0
+ },
+ "stage_b": {
+  "seed_line_from": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/gate/after_L120_D120/grid_gate.json",
+  "baselines": {
+   "L60_D20": {
+    "what": "the stage A executor L60_D20 — no token — flown protocol none from L−1 on the B cohort by this queue, with records; the baseline every configuration is judged against",
+    "checkpoint": "4dTrajectory/outputs/{airport}/experiments/two_tier_v3_grid_20260918/L60_D20_s{seed}/checkpoint.pt"
+   }
+  },
+  "configurations": {
+   "I20": {
+    "what": "the instruction executor: L60_D20 with plan_conditioning = instruction on the τ = 10 s vocabulary (two positions per 20 s segment); read against the baseline's protocol-none reading on the same flights",
+    "baseline": "L60_D20"
+   }
+  },
+  "prior": {
+   "epochs": 200,
+   "patience": 20,
+   "batch_size": 128,
+   "learning_rate": 0.0003,
+   "d_model": 128,
+   "n_layers": 4,
+   "n_heads": 4,
+   "d_ff": 256,
+   "dropout": 0.1
+  }
+ },
+ "arms": [
+  {
+   "key": "I20_s1337",
+   "configuration": "I20",
+   "label": "I20: instruction executor (L60_D20 + the τ = 10 s instruction words over its 20 s segment), seed 1337",
+   "overrides": {"seed": 1337}
+  },
+  {
+   "key": "I20_s2024",
+   "configuration": "I20",
+   "label": "I20: instruction executor (L60_D20 + the τ = 10 s instruction words over its 20 s segment), seed 2024",
+   "overrides": {"seed": 2024}
+  }
+ ]
+}

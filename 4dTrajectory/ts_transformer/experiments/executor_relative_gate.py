@@ -97,6 +97,11 @@ def main(argv: list[str] | None = None) -> int:
     protocols = {payload["protocol"] for _path, payload in candidate.values()}
     if len(protocols) != 1:
         parser.error(f"the candidate's two seeds are one protocol; got {sorted(protocols)}")
+    # the vocabulary an instruction reading was flown under (None under `none`): one per candidate
+    vocabularies = {json.dumps(payload["instruction_vocabulary"], sort_keys=True) for _path, payload in candidate.values()}
+    if len(vocabularies) != 1:
+        parser.error(f"the candidate's two seeds were flown under different instruction vocabularies: {sorted(vocabularies)}")
+    candidate_vocabulary = json.loads(next(iter(vocabularies)))
     if args.seed_line_from is not None:
         source = args.seed_line_from if args.seed_line_from.is_absolute() else REPO_ROOT / args.seed_line_from
         verdict = json.loads(source.read_text(encoding="utf-8"))["verdict"]
@@ -130,7 +135,8 @@ def main(argv: list[str] | None = None) -> int:
     result = {
         "schema": RELATIVE_GATE_SCHEMA, "written_utc": utc_now(),
         "baseline_sources": provenance(baseline), "candidate_sources": provenance(candidate),
-        "candidate_protocol": next(iter(protocols)), "first_prediction": next(iter(rules)),
+        "candidate_protocol": next(iter(protocols)), "candidate_instruction_vocabulary": candidate_vocabulary,
+        "first_prediction": next(iter(rules)),
         "flights": flights, "seed_line_source": seed_line_source,
         "gate": gate["gate"], "seeds": gate["seeds"], "seed_line": gate["seed_line"], "flyable_floor": gate["flyable_floor"],
         "baseline": {str(s): r for s, r in gate["baseline"].items()}, "candidate": {str(s): r for s, r in gate["candidate"].items()},

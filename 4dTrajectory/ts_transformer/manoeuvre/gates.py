@@ -158,13 +158,13 @@ def gate_relative(baseline: Mapping[int, Mapping[str, float]], candidate: Mappin
     one of them beyond the line, the other primary is not worse on both seeds, and the candidate
     is fully flyable ≥ the floor on both seeds. Row B: every metric not worse on both seeds, at
     least one metric beyond the line on both seeds, fully flyable ≥ the floor on both seeds.
-    Row B1 (an UPPER-BOUND reading: the second layer fed the truth): at least one metric beyond
-    the line on both seeds and fully flyable ≥ the floor — row B without the not-worse clause,
-    because an upper bound that buys one thing at the price of another still says the
-    information is there; row B, read on what the layer itself says, is where the price counts.
-    (Stage B's intent-code version of this row is archived with its layer, 2026-09-20; the
-    rewritten stage B tightened the rule to "both established not worse", plan v3 D57, which
-    is row B's clause — not yet built.)"""
+    Row B1 (an UPPER-BOUND reading: the second layer fed the truth; plan v3 D57, 2026-09-20):
+    BOTH established shares not worse on both seeds, at least one metric beyond the line on both
+    seeds, and fully flyable ≥ the floor — the vectored ADE may be worse (an upper bound that
+    buys established at the price of ADE still says the information is there), but a truth
+    feed that loses established on either group is not an upper bound of anything. (The
+    intent-code stage B's looser row — beyond on one metric, no not-worse clause — let a
+    configuration through whose main share had halved; that row is archived with its layer.)"""
     seeds = sorted(baseline)
     if len(seeds) != 2 or sorted(candidate) != seeds:
         raise ValueError(f"the relative gate reads two seeds on both sides; got baseline {sorted(baseline)} and candidate {sorted(candidate)}")
@@ -183,6 +183,7 @@ def gate_relative(baseline: Mapping[int, Mapping[str, float]], candidate: Mappin
              and all(not_worse[q][s] for q in RELATIVE_PRIMARIES if q != p for s in seeds)]
     b_beyond = [m for m in RELATIVE_METRICS if all(beyond[m][s] for s in seeds)]
     b_not_worse = all(not_worse[m][s] for m in RELATIVE_METRICS for s in seeds)
+    b1_not_worse = all(not_worse[p][s] for p in RELATIVE_PRIMARIES for s in seeds)
     return {
         "gate": "relative", "seeds": seeds, "seed_line": {m: float(seed_line[m]) for m in RELATIVE_METRICS}, "flyable_floor": flyable_floor,
         "baseline": {s: dict(baseline[s]) for s in seeds}, "candidate": {s: dict(candidate[s]) for s in seeds},
@@ -192,8 +193,9 @@ def gate_relative(baseline: Mapping[int, Mapping[str, float]], candidate: Mappin
                    "rule": "on a primary both seeds improve and one beyond the seed line; the other primary not worse; fully flyable ≥ floor"},
             "b": {"pass": b_not_worse and bool(b_beyond) and flyable_ok, "beyond_on": b_beyond, "not_worse": b_not_worse,
                   "rule": "every metric not worse on both seeds; at least one beyond the seed line on both seeds; fully flyable ≥ floor"},
-            "b1": {"pass": bool(b_beyond) and flyable_ok, "beyond_on": b_beyond,
-                   "rule": "at least one metric beyond the seed line on both seeds; fully flyable ≥ floor (the truth-token upper bound)"},
+            "b1": {"pass": b1_not_worse and bool(b_beyond) and flyable_ok, "beyond_on": b_beyond, "primaries_not_worse": b1_not_worse,
+                   "rule": "both established shares not worse on both seeds; at least one metric beyond the seed line on both seeds; "
+                           "fully flyable ≥ floor (the truth-instruction upper bound, D57)"},
         },
     }
 

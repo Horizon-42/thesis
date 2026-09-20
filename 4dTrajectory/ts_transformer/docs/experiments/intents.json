@@ -1525,6 +1525,15 @@
     "S60held_cv_s2024@lockstep-A": "先验 token 读法（协议 A）：token 由先验从执行器自己飞出的历史里预测，部署时的样子（门 B）；先验的落地判断只记时刻、不停飞（D37）；从第 29 行起，带记录。",
     "S60held_cv_s2024@lockstep-A-truth": "先验读真值历史的读法（协议 A-truth）：先验看真值历史、执行器飞自己的；与先验 token 读法的差说明误差是先验本身的还是闭环耦合的；从第 29 行起。"
    }
+  },
+  "two_tier_v3_bprime_20260920": {
+   "title": "两层计划 v3 · 阶段 B′：指令词表的执行器（真值指令上限 B1′ 与指令先验）",
+   "intent": "阶段 B 重写（2026-09-20）：把一次进近看成一句管制指令——每 10 s 一个位置，每个位置写此刻生效的四个目标（相对最后进近航道的航向、跑道入口以上的高度、地速、切入航道的角度档），词由航迹反读（B0′：平台 = 目标，两轮 300 架人工核）。先问最便宜的问题（B1′）：把真值的指令按执行器所在位置喂给执行器（L60_D20 + 指令条件，两 seed），闭环从 L−1 飞完整个进近，established 与雷达引导 ADE 相对无指令的同一批航班好多少——门 B1（D57：两项 established 不差、任一项两 seed 超过网格 seed 线、fully flyable ≥ 0.95）。过了门才训指令先验（因果 Transformer，四个因式头 + 落地），先读它的困惑度、top-1、翻转率、top-K 覆盖；先验说话的闭环读法（B3′）与执行器闭环再训（B2′）在后续队列里。",
+   "design": "docs/2026-09-18_two_tier_plan_v3.zh.md §5.2（5.2.1 词表、5.2.2 训练、5.2.5 步骤、5.2.6 开发项）、§6.2（D49–D60）；臂文件 docs/experiments/two_tier_v3_bprime_arms.json；词表产物 4dTrajectory/outputs/KRDU/experiments/two_tier_v3_bprime_20260920/vocabulary_tau10/instruction_vocabulary.json；队列 run_ts.py two_tier_bprime_queue。2 臂 = 1 配置 × 2 种子；cohort = 网格的 L60_D60 那份（记录 ≥ 120 s：train 6853 / val 1404）；基线 = 网格的 L60_D20 两 seed 由队列在同一 cohort 上以 protocol none 重飞。",
+   "runs": {
+    "I20_s1337": "I20：指令执行器——网格的 L60_D20（lookback 60 s、段 20 s、pa 契约、训练锚点全随机）加 plan_conditioning = instruction：每段两个位置（τ = 10 s）的四个生效目标按档位中心值并入条件向量；词表 = B0′ 在 B cohort 上读出的 τ = 10 s 词表（航向 10° × 36、高度 1000 ft × 11、地速 10 kt × 21、切入 3 档）；种子 1337。读法：真值指令按执行器所在位置喂（B1′ 上限）；对照 = 同一 cohort 上 protocol none 重飞的 L60_D20。",
+    "I20_s2024": "I20：指令执行器——网格的 L60_D20（lookback 60 s、段 20 s、pa 契约、训练锚点全随机）加 plan_conditioning = instruction：每段两个位置（τ = 10 s）的四个生效目标按档位中心值并入条件向量；词表 = B0′ 在 B cohort 上读出的 τ = 10 s 词表（航向 10° × 36、高度 1000 ft × 11、地速 10 kt × 21、切入 3 档）；种子 2024。读法：真值指令按执行器所在位置喂（B1′ 上限）；对照 = 同一 cohort 上 protocol none 重飞的 L60_D20。"
+   }
   }
  }
 }
