@@ -13,6 +13,7 @@
 
 import CesiumViewerComponent from "./components/CesiumViewer";
 import WorkbenchShell from "./components/WorkbenchShell";
+import TrainingSentenceBar from "./components/TrainingSentenceBar";
 import WorkbenchLeftDock from "./components/WorkbenchLeftDock";
 import AirportLocalTerrainDemoPage from "./components/AirportLocalTerrainDemoPage";
 import ChartAnnotatedPage from "./components/ChartAnnotatedPage";
@@ -97,7 +98,14 @@ function FlightApp() {
             <HUD />
           </WorkbenchRightInspector>
         }
-        bottom={<WorkbenchBottomBar />}
+        bottom={
+          <>
+            {/* The sentence bar spans the full width above the transport, and
+                draws itself only when Training has published a flight. */}
+            <TrainingSentenceBar />
+            <WorkbenchBottomBar />
+          </>
+        }
       >
         <AirportLocalTerrainAlert />
         <ProcedureAnnotationPopup />

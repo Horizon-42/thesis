@@ -13,7 +13,7 @@
 | 项 | 值 |
 |---|---|
 | 文档 | `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`（本文） |
-| 状态 | **T1 已提交（`b24630b3`，别的会话提的）；T2 / T3 已落地未提交**；下一步 T4a（句子条）。进度看 §7 的表 |
+| 状态 | **T1 / T2 / T3 / T4a 全部落地**（T1 `b24630b3`、T2+T3 `135ab580`、T4a 本次）；**导出已经跑过，界面上能看见真数据了**。下一步 T4b（读数核对窗口）。进度看 §7 的表 |
 | 分支 | `dev-two-tier-feasibility`（最新提交 `30a45cab`） |
 | 它要展示的实验 | 两层计划 v3 阶段 B（`4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` §5.2） |
 | 词表设计 | 同上 §5.2.1；单独一篇 `4dTrajectory/ts_transformer/docs/2026-09-20_instruction_vocabulary.zh.md` |
@@ -23,6 +23,7 @@
 | 词表身份 | 读法 `plateau-v11`，默认 spec 的 sha `c7a4f4239f52`（我在 `aeroviz` 环境里 import 出来核过）。**句子不再是等间隔网格，是事件序列**，见 §4.4 第一条 |
 | 词有几类 | **六类**，顺序写死：航向、高度、速度、跑道、时长、终止（`INSTRUCTION_KINDS`，我 import 出来核过）。**切入词已删**（D73） |
 | 跑道词的类别 | **KRDU 只有 4 类：05L / 05R / 23L / 23R**（不是机场的 6 条跑道，见 §4.4 第四条） |
+| **抽样产物** | **有了**（2026-09-20 22:44 导出）：`aeroviz-4d/public/data/airports/KRDU/training/vocabulary_tau10/sample.json`（1.26 MB，40 架）+ `training/index.json`。命令见 §4.1，**executor 用的是词表产物自己记的那一个**（`instruction_vocabulary.json` 的 `source.executor`，`L60_D60_s1337`，sha `4470acbd642d`），所以导出的 `executorSha256` 和产物对得上 |
 | 前端怎么开发 | T1、T2、T4 用 **mock 数据**（假数据），放测试目录，**不进 `public/`**；T3 起读上面这份真产物。**不从 `_superseded/` 导出任何东西**（用户 2026-09-20 明确否掉） |
 | 前端现有任务页 | Observe / Fly / Optimize / Compare（`src/components/WorkbenchTopBar.tsx` 的 `TASK_TABS`），Procedures 是一个独立开关不是任务 |
 | 前端惯例 | 全局状态在 `src/context/AppContext.tsx`；二维图自己画 SVG（没有图表库，见 `package.json`）；`public/data` 不进 git |
@@ -220,13 +221,22 @@ aeroviz-4d/public/data/airports/<ICAO>/training/
 
 ```
 4dTrajectory/ts_transformer/experiments/instruction_sample_export.py
-→ python run_ts.py instruction_sample_export \
-      --vocabulary <…/vocabulary_tau10/instruction_vocabulary.json> \
-      --executor   <…/two_tier_v3_grid_20260918/L60_D20_s1337/checkpoint.pt> \
-      --cohort     <…/two_tier_v3_grid_20260918/cohorts/L60_D60/development_cohort.json> \
+→ conda run -n aeroviz --no-capture-output python run_ts.py instruction_sample_export \
+      --vocabulary 4dTrajectory/outputs/KRDU/experiments/two_tier_v3_bprime_20260920/vocabulary_tau10/instruction_vocabulary.json \
+      --executor   4dTrajectory/outputs/KRDU/experiments/two_tier_v3_grid_20260918/L60_D60_s1337/checkpoint.pt \
       --out        aeroviz-4d/public/data/airports/KRDU/training/vocabulary_tau10 \
-      --flights 40 --seed 1337 [--split train]
+      --flights 40 [--split train]
 ```
+
+**这就是 2026-09-20 22:44 实际跑的那条命令**（1.5 s，40/40 架重建）。跟原设计差两个参数，
+都是 T3 落地时去掉的：**没有 `--cohort`**（checkpoint 自己带 data provenance，再给一个
+cohort 文件就是第二处真相），**也没有 `--seed`**（抽样直接取 `hand_check/index.csv` 的前缀，
+不复刻随机数，见 V20）。**`--executor` 填哪一个不要猜**：词表产物的
+`instruction_vocabulary.json` 里 `source.executor` 写着它自己用的那一个，照抄。
+
+**跑完必须重启前端**（`AV5`）。开着的 vite 看不到新建的目录，`index.json` 会按 SPA 兜底
+返回 HTML，前端报的是"收到 HTML 不是 JSON"。这台机器上前端挂在
+`start_aeroviz_fullstack.sh` 下面，杀掉 vite 那个进程组、让 supervisor 重起一个即可。
 
 checkpoint 在这里只是"进数据的门"（C25：通过它的 data provenance 重建同一批飞机），不读它的权重。
 抽样分层与 B0′ 的人工核同一套：一半直线进近、一半雷达引导，种子给定，短了就报错不偷偷补。
@@ -597,14 +607,16 @@ counts / source` —— 我开文件核过）。它是一个**函数**，导出�
 | 步 | 做什么 | 落在哪 | 怎么算做完 | 依赖 |
 |---|---|---|---|---|
 | **T1 ✅完成，已提交 `b24630b3`** | 前端骨架：`WorkbenchMode` 加 `"training"`；`TASK_TABS` 在 Observe 右边加一项；`WorkbenchLeftDock` 加分支；`TrainingPanel` 显示 §4.5 状态 ①（没有数据 + 路径 + 命令 + 重启前端的提醒）。**T1 不发任何请求**：状态 ② ③ 要先有解析好的清单，和 T2 一起来；在 T3 之前"没有导出"在每台机器上都是实话，所以这个阶段它不会说谎 | `context/AppContext.tsx`（联合类型 +1）、`components/WorkbenchTopBar.tsx`（标签 +1）、`WorkbenchLeftDock.tsx`（分支 +1）、新 `components/TrainingPanel.tsx`、`index.css`（一段样式）、新 `__tests__/TrainingPanel.test.tsx` + 另两个测试各加一条 | **已达成**：三个测试文件 17 条全过；`npx tsc --noEmit` 干净；全套 83 文件 569 条全过 | 无 |
-| **T2 ✅完成（未提交）** | 数据契约（纯前端）：类型 + 逐字段校验 + fetch；坏一个集合只坏这一个；mock 数据在 `__tests__/` 下（常数全部 import，不重抄），供 T4 用 | 新 `src/data/trainingSample.ts`、`data/__tests__/trainingSample.test.ts`、`data/__tests__/trainingSample.fixture.ts`；`trainingIndexPath` 从 `TrainingPanel` 挪到这里成为单一定义 | **已达成**：19 条全过。覆盖 schema 拒绝、`words` 列数不是 6、`eventTimesS` 与行数不符、**`eventTimesS` 不严格递增**、**列序调换被当成越界词抓出来**、航班跑道不在词表类别里、缺 `runwaySha256`、缺 `durationClamped`、坏集合只标灰自己 | T1 |
-| **T3 ✅完成（未提交）** | 导出器（Python）。**两处比原设计更好，见 V19 / V20**：句子直接抄产物的 `sentences_<split>.json`（不重跑标注器），抽样直接取 `hand_check/index.csv` 的前缀（不复刻随机数）。只重建**航迹**（经 checkpoint 的 data provenance）。`runwaySha256` 自己算（§4.4 的坑） | 新 `4dTrajectory/ts_transformer/experiments/instruction_sample_export.py` + `tests/test_instruction_sample_export.py`。**`run_ts.py` 不用改**：runner 靠 `pkgutil` 自动发现，放个文件就注册（已在 `--list` 里看到） | **已达成**：11 条全过 + `test_architecture.py` 20 条全过。钉住了：六列顺序与前端读者一致、抽样是人工核的前缀且加大抽样仍以它为前缀、分层不够直接拒绝、跨词表 sha 的句子拒绝、清单保留别的集合 / 重导只替换一条 / 别的机场和别的 schema 拒绝 | 产物在 `…/vocabulary_tau10/`（§1） |
-| **T4a ← 下一步** | 底部句子条：**六行**、事件竖线、词在两事件之间画成横带、每个事件标它的时长词、absorbed 灰底、时间游标接 Cesium 时钟。**横轴是真实时间**（§3.1）。中位只有 4 个事件，所以列可以画宽、词直接写在带子上 | 新 `components/TrainingSentenceBar.tsx`；`TrainingPanel` 接 T2 的 fetch，补上 §4.5 的状态 ② ③ | 用 T2 的 fixture 渲染；不均匀间隔按真实时间画（26 s 与 58 s 两段的像素比要对得上）；点第 3 个事件，时钟跳到它的 `eventTimesS` | T2 |
-| **T4b** | 读数核对窗口：平面图 + 三张时间图，portal 到 `document.body`（`AV7`），悬停出数、点击跳转 | 新 `components/TrainingReadbackWindow.tsx` | 四张图共一个游标；悬停 absorbed 说出原因 | T4a |
+| **T2 ✅完成（`135ab580`）** | 数据契约（纯前端）：类型 + 逐字段校验 + fetch；坏一个集合只坏这一个；mock 数据在 `__tests__/` 下（常数全部 import，不重抄），供 T4 用 | 新 `src/data/trainingSample.ts`、`data/__tests__/trainingSample.test.ts`、`data/__tests__/trainingSample.fixture.ts`；`trainingIndexPath` 从 `TrainingPanel` 挪到这里成为单一定义 | **已达成**：19 条全过。覆盖 schema 拒绝、`words` 列数不是 6、`eventTimesS` 与行数不符、**`eventTimesS` 不严格递增**、**列序调换被当成越界词抓出来**、航班跑道不在词表类别里、缺 `runwaySha256`、缺 `durationClamped`、坏集合只标灰自己 | T1 |
+| **T3 ✅完成（`135ab580`），并且已经跑过一次** | 导出器（Python）。**两处比原设计更好，见 V19 / V20**：句子直接抄产物的 `sentences_<split>.json`（不重跑标注器），抽样直接取 `hand_check/index.csv` 的前缀（不复刻随机数）。只重建**航迹**（经 checkpoint 的 data provenance）。`runwaySha256` 自己算（§4.4 的坑） | 新 `4dTrajectory/ts_transformer/experiments/instruction_sample_export.py` + `tests/test_instruction_sample_export.py`。**`run_ts.py` 不用改**：runner 靠 `pkgutil` 自动发现，放个文件就注册（已在 `--list` 里看到） | **已达成**：11 条全过 + `test_architecture.py` 20 条全过。钉住了：六列顺序与前端读者一致、抽样是人工核的前缀且加大抽样仍以它为前缀、分层不够直接拒绝、跨词表 sha 的句子拒绝、清单保留别的集合 / 重导只替换一条 / 别的机场和别的 schema 拒绝 | 产物在 `…/vocabulary_tau10/`（§1） |
+| **T4a ✅完成** | 底部句子条：**六行**、事件竖线、词在两事件之间画成横带、每个事件标它的时长词、absorbed 画成斜纹、时间游标（**按 V22 只走航迹时间，不驱动 Cesium 时钟**）。**横轴是真实时间**（§3.1）。带子按「同一个词连成一条」合并；最后一条带子画到**航迹末端**而不是最后一个事件；时长行在最后一个事件之后画「没有词」。`TrainingPanel` 接 T2 的 fetch，并把选中的航班发布到 `trainingSelection`（条是坞的兄弟节点，不是子节点） | 新 `components/TrainingSentenceBar.tsx`；`TrainingPanel` 接 T2 的 fetch，补上 §4.5 的状态 ② ③ | **已达成**（含一轮 opus review 的修改）：句子条 18 条 + 面板 14 条 + 读者 37 条全过；`npx tsc --noEmit` 干净；全套 85 文件 632 条全过。真产物也过了一遍读者（40 架全部解析，每一行的带子都没有越过航迹末端）。浏览器里核过：KRDU 的 UAL2269 四个事件 0/22/72/188 s，航向 +50°→0°、速度 250→140→150 kt、时长词 22/50/116 s，点第 3 个事件游标读 **t = 72 s**（产物自己的数，不是像素反算的）；密集句子也核过：SWA3429 两个事件只隔 2 s（屏幕上 4 px），两个都能分别点中 | T2 |
+| **T4b ← 下一步** | 读数核对窗口：平面图 + 三张时间图，portal 到 `document.body`（`AV7`），悬停出数、点击跳转 | 新 `components/TrainingReadbackWindow.tsx` | 四张图共一个游标；悬停 absorbed 说出原因 | T4a |
 | **T5** | 几何航迹（Python）：§5.3 的运动学，写进 `sample.json` 的 `geometric`；常数全部 import，不抄 | 导出器里一个独立模块 + 单元测试 | 三个手算用例：保持航向直飞、转 90° 的半径对得上 `route_turn_radius_m`、从 1000 m 降到 0 的时间对得上 12 s 收敛 + 6° 上限 | T3 |
 | **T6** | 面板二：两条航迹进三维（白 / 橙）+ 平面图加第二条线 + 右侧"这一刻差多少" | `TrainingPanel` + 新 hook `useTrainingTrackLayer` | 切换显示开关，两条线能单独开关；差值读数对得上 `geometric.meanGapM` | T5、T4b |
 | **T7** | 面板三：导出器加 `kind: "prior-generated"`（模型说的句子 + 同一套运动学画的航迹）；界面用同一套组件画第三条线 | 导出器 + `TrainingPanel` | 三条线同屏；模型那条的图例写明是模型说的词 | 阶段 B3′ 有产物 |
 | **T8** | 发布检查：`npm run check-publication` 学会 `training/index.json`（或加一个 `check-training`），把 `AV6` 的教训写进去 | `scripts/check_publication.ts` | 故意写坏一个字段，脚本报出集合 id 和字段名 | T3 |
+
+**进度（2026-09-20 晚）**：T1 / T2 / T3 / T4a 已完成，导出已跑，界面上是真数据。下一步 T4b。
 
 **优先级**：T1 → T2 → T4a → T4b 先把界面做出来（用 mock 数据，只放测试目录，**不进 `public/`**）；
 T3 → T5 → T6 等词表产物；T7、T8 最后。
@@ -642,6 +654,10 @@ B0″ 上。先做界面，产物一到就能接上看。
 | V19 | **导出器不重跑标注器**：句子、指令、absorbed 全部**原样抄**产物的 `sentences_<split>.json`，只有**航迹**是重建的 | 发布出去的对象是那份产物；界面该显示的是产物本身，不是一次重新推导。重新读一遍，代码一动界面就和产物对不上了，而且**看不出来** —— 两边都"对"，只是不是同一份。导出器只在 sha 对不上时拒绝 | 我定（T3 落地时，看到产物里已有 `sentences_*.json` 才想到） |
 | V20 | **抽样直接取 `hand_check/index.csv` 的前缀**，不复刻随机数 | 原来的 V13 靠"同一个种子、同样的建法 ⇒ 同样的排列"来论证两个视图看同一批飞机 —— 成立，但**脆**：池子的建法一改就断。产物里那份 index.csv 就是人工核实际画过的 300 架、按抽取顺序排好的，取前 20/层**就是**它的子集，**按构造成立，不靠推理**。V13 的性质仍然记在那儿作为背景 | 我定（T3 落地时改的） |
 | V21 | 导出的航迹**只有跑道坐标系那几路**（沿航道、横向、入口以上高度、相对航道航向、地速、established），**经纬高留到 T6** | T4a/T4b 是二维图，要的就是这几路；经纬高是三维图层的输入，和几何航迹一起在 T5/T6 出现。现在就导会让文件大一截，而且 T4 一行都用不上 | 我定（T3 落地时收窄的） |
+| V22 | **游标是"航迹时间"，暂时不驱动 Cesium 时钟**；等 T6 一起接 | 两个原因，缺一条都不能接：Training 按 V2 不加载任何 CZML，**场景里没有东西可以被时钟推动**；而且导出文件里**没有绝对时刻**（`observed.tS` 是相对航迹起点的），没有锚点就只能去 `flight_key` 里那个落地时刻反推——那正是仓库里"两个时间窗"那条教训。T6 把航迹送进三维时，这两件事一起解决（届时导出要加一个绝对起点，比如 `flight_scenarios` 的 `entry_time_utc`）。**本设计里"一个永远不会亮的东西就别建"同样适用于时钟** | 我定（T4a 落地时） |
+| V23 | 句子条的六行**按契约的列序**画（航向、高度、速度、跑道、时长、终止），不按 §3.1 草图里"跑道排第一"的顺序 | 这个视图是用来**核对产物**的：行 i 就是 `words` 的第 i 列，顺序一改就看得出来。跑道"别的类都相对它量"这一点改在**条的标题里**写出来（`UAL2269 runway 23R …`），§3.1 右侧读数仍然按原设计把跑道排第一 | 我定（T4a 落地时；§3.1 的草图相应作废这一处） |
+| V25 | 事件多而密时，**丢掉的是标签，不是事件**：事件号和坐标轴刻度按最小间距贪心取舍，事件线、点击区、悬停提示一个不少 | 40 架里有 5 架的相邻事件只隔 2 s（默认宽度下 3.7 px），号码和刻度会糊成一团。这跟带子太窄时不写字（`LABEL_MIN_W`）是同一条规矩。**点击区按相邻事件的中点划分**，所以再密也不会把点在前一个事件上的点击交给后一个 | 我定（review 指出来的，2026-09-20） |
+| V24 | 带子上的词是**目标**，不是实测；条上明写这一句 | 真产物逼出来的：KRDU 有直线进近在 23 km 外以 977 m 进圈，**整条进近只有一个高度词 `0 ft`**（"下降到跑道入口"）。行名叫"Altitude (ft)"而不说明是目标，读起来就是"这架飞机全程贴地飞"。实测信号是 T4b 读数窗口的事 | 我定（T4a 落地时，看真数据才发现的） |
 | V18 | **界面上的字用英文**，和这个应用其余部分一致（顶栏是 `Observe` / `Active Airport` / `All runways`）；中文只出现在这份设计文档和代码注释里 | 全前端 `src/**` 只有一个文件带中文，而且是注释（`WorkbenchBottomBar.tsx` 里的"联动"）。新模块跟着现状走，不在一个界面里混两种语言 | 我定（T1 落地时核过） |
 
 ---

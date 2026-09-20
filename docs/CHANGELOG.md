@@ -1,8 +1,142 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-20 — Training 模块 T4a：前端真的能看见反算出来的句子了
+
+**为什么之前是空的**：两件事各自独立成立。① `TrainingPanel` 还是 T1 那个写死的空状态，
+只从 `trainingSample` 里取了一个 `trainingIndexPath` 印在屏幕上，T2 写好并测过的
+`fetchTrainingIndex` / `fetchTrainingSample` 全仓库没有一处调用。② 就算它去取也没有东西：
+`instruction_sample_export`（T3，`135ab580` 已提交）一次都没跑过，
+`public/data/airports/*/training/` 在五个机场下全都不存在。
+
+**这次做了两件事。**
+
+**一、跑了第一次导出**（22:44，1.5 s，40/40 架重建）：
+`aeroviz-4d/public/data/airports/KRDU/training/{index.json, vocabulary_tau10/sample.json}`
+（1.26 MB，40 架，直线 20 / 引导 20）。词表产物是 `two_tier_v3_bprime_20260920/vocabulary_tau10`
+（`plateau-v11`，sha `c7a4f4239f52`）。**executor 不要猜**：产物的 `instruction_vocabulary.json`
+里 `source.executor` 写着它自己用的那一个（`L60_D60_s1337`，sha `4470acbd642d`），照抄，
+导出的 `executorSha256` 就与产物对得上。跑完按 `AV5` 重启了前端（vite 不 watch `public/data`，
+开着的服务器会把新目录按 SPA 兜底成 HTML）。
+
+**二、T4a**：`TrainingSentenceBar`（新）+ `TrainingPanel` 接上 fetch + 读者补齐它要的字段。
+设计文档 `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` 的 §1 / §4.1 / §7 / §8 同步更新。
+
+三条在真数据上才看出来的事，都已经写进设计文档的决定表：
+
+- **V24 带子上的词是目标，不是实测。** KRDU 有直线进近在 23 km 外以 977 m 进圈，
+  **整条进近只有一个高度词 `0 ft`**——它的意思是"下降到跑道入口"。行名只写
+  "Altitude (ft)" 会被读成"这架飞机全程贴地飞"，所以条上明写这一句。
+- **航迹比句子长。** 最后一个事件之后还有中位 145 s（326 s 的进近）没有任何事件，
+  因为那时生效的词一直保持到入口。所以每一行的最后一条带子画到 `durationS`，
+  时长行在那一段画"没有词"；读者也拿 `durationS >= 最后一个事件` 当硬约束。
+- **V22 游标暂时不驱动 Cesium 时钟。** Training 按 V2 不加载 CZML，场景里没有东西可推；
+  导出里也没有绝对时刻可作锚点（`observed.tS` 是相对的）。两件事一起放到 T6 解决，
+  届时导出要带一个绝对起点（`entry_time_utc`）。
+
+**一轮 opus review，改了这些**（评审自己把 `rowBands` 转写成 node 跑了全部 40 架 693 条带子，
+确认每一行都严丝合缝地铺满 `[第一个事件, durationS]`，且每条带子的词与 Python 的
+`words_at(中点)` 一致）：
+
+- **相邻事件只隔 2 s 时点不中前一个**（40 架里有 5 架这样，如 SWA3429 的 52 s / 54 s）。
+  原来事件的点击区是固定 18 px，会互相盖住。改成**按相邻事件的中点划分**，再密也不会错位；
+  事件号和坐标轴刻度按最小间距取舍，**丢的是标签不是事件**（线、点击区、悬停提示都在），
+  和带子太窄不写字是同一条规矩。浏览器里核过：52 s 和 54 s 能分别点中。
+- **`wrapDeg` 对负角不是忠实镜像**：JS 的 `%` 截断、Python 的取整向下，
+  `((d+180) % 360) - 180` 对 −190 返回 −190（Python 给 170）。今天唯一的调用方只传 0…350
+  所以屏幕上没错，但它是导出的、文档写着"镜像"的函数，T4b 要画的 `relCourseDeg` 就是带符号的。
+- **`callsign` / `stratum` 原来有默认值**（`?? flightKey` / `?? "unknown"`）——就是被禁的
+  `.get(key, DEFAULT)`。导出器永远写这两个字段，所以默认只可能在坏产物上生效，
+  而且会把 "unknown" 画在真分层旁边。改成按名字拒绝。
+- **`kinds` 从"有就查"改成必填**；新增**产物自报的 `vocabulary.words` 与我们按档位推出来的
+  类数对不上就拒绝**——这才让"推导"成为受检的镜像而不是第二种说法。
+- 指令与 absorbed 的时刻也加了"必须落在航迹内"的边界检查（和"最后一个事件 ≤ durationS"同一个理由）。
+- **游标改在渲染期复位**（原来在 effect 里），否则换航班那一帧会用旧航班的游标画新航班的带子；
+  宽度改 `useLayoutEffect` 先量一次，首帧不再用默认宽度。
+- **时长行补了逐值断言**：把 `words[i+1]` 写成 `words[i]`（这个特例存在的唯一理由）
+  原来 11 条测试全过。删掉了没有消费者的 `NO_TARGET`，`TERMINAL_NEVER_OBSERVED` 改为图例真正读它。
+
+评审提的第一条（句子条被 transport bar 盖住）不成立：`WorkbenchBottomBar` 在 training 模式
+直接 `return null`（`TIME_MODES` 不含 training），两条永远不同时存在。
+
+**核过的**：句子条 18 条 + 面板 14 条 + 读者 37 条；`npx tsc --noEmit` 干净；
+全套 85 文件 632 条全过。真产物走了一遍读者（40 架全解析，693 条带子逐行铺满）。浏览器里核了 UAL2269：
+四个事件 0/22/72/188 s、航向 +50°→0°、速度 250→140→150 kt、时长词 22/50/116 s，
+点第 3 个事件游标读 `t = 72 s`——产物自己的数，因为条里没有任何像素反算时间的算术。
+
 Dated log of significant changes, root causes, and decisions, referenced from `CLAUDE.md`. This file is deliberately NOT loaded into every session — read it when investigating history: why a design is the way it is, when/why a default changed, what a past bug or postmortem looked like, or which outputs a change made stale. Append new entries at the top (`### YYYY-MM-DD — title`); when a change produces a durable fact (gotcha, default, contract), also update the corresponding section in `CLAUDE.md`.
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
+
+### 2026-09-20 — the published decision altitude, per runway, out of the plates and into the airport config (`runway-thresholds-v3`)
+
+D61 needed a per-runway decision altitude: a go-around has to be decided at or above it, because
+AIM 5-4-5 f 5 puts the missed approach point of a vertically guided approach AT the decision
+altitude, which is why the extracted procedures have `missed_approach_point` 0 times. The ask was
+"extract it from the CIFP if it is there, and write it into the airport config so it is not
+re-extracted every time".
+
+**It is not in the CIFP, and this is now settled rather than assumed.** Three checks on the
+2026-08-06 cycle: the CIFP Readme's own record-type list has no minima record; the whole file's
+approach section carries exactly one kind of continuation record, application type `W` (Level of
+Service, 6,741 of them), which says WHICH service is authorised — LNAV / LP / LNAV-VNAV / LPV —
+and never at what height; the Path Point record is geometry only. A decision altitude is a
+charting product.
+
+**It came off the plates already on disk.** `data/RNAV_CHARTS/<ICAO>/*.PDF` holds the d-TPP RNAV
+approaches for all five airports. New `trajectory_data_process/extract_approach_minima.py` reads
+the RNAV (GPS) ones once (the RNAV (RNP) Z plates are a different service and are skipped) and
+writes `published_minima` onto every threshold in `trajectory_data_process/config/runway_thresholds.json`
+(`runway-thresholds-v3`). Nothing parses a PDF at harvest or training time; `load_airport` reads
+config and refuses an older schema by name.
+
+**25 of 26 thresholds publish a vertically guided minimum.** 23 LPV; **KRDU 32 (820 ft MSL /
+391 ft above touchdown)** and **KSMF 35R (311 / 287)** publish Baro-VNAV minima and no LPV — the
+same two runways TD9 already singles out. Neither is in the CURRENT cohort — the five manifests on
+disk are v5, and KRDU 32 / KSMF 35R are exactly the +1,876 arrivals a v6 rebuild would add — so
+their minima are stored and tested but cannot be exercised by today's data; **KRDU 14** has no
+instrument approach at all, in the plates or in the CIFP, and
+gets an explicit `"none"` with the reason. A plate that publishes only an LNAV **MDA** is not
+vertically guided and gets no decision altitude: its missed approach point is a fix, not a height.
+
+**The parse refuses rather than falls through.** `DA − height above touchdown` must equal the
+TDZE printed for that runway (a sidestep sheet prints two; the labelled one wins, and a sheet
+labelling neither must print exactly one or the parse raises). That check alone cannot catch a
+wrong ROW — every row on a plate satisfies it (KRDU 05L: 598−214, 748−364, 840−456 all give 384)
+— so the wrong-row paths are closed directly: a table naming LPV without an LPV row parsing
+RAISES instead of storing the LNAV/VNAV row 150 ft above it, and "no vertical guidance" must be
+proved by an LNAV MDA row on the sheet. Six plates, one per shape, are pinned against figures
+read by eye; the fleet's service split (23 LPV + 2 Baro-VNAV) is pinned as a whole. All of this
+came out of the review: the first cut had the fall-through, read a TDZE across a line break
+(KRDU 32 picked up a spurious `0` from the airport diagram), accepted either runway's TDZE on a
+sidestep sheet, and stored `DA − HAT` as "the plate's TDZE", which made its own check a tautology.
+
+**The plate's height is above the TOUCHDOWN ZONE, not the threshold**, and the two differ by
+0.0–23.9 ft across the fleet (largest KSTL 29; KRDU 05L: TDZE 384 ft, landing threshold 367 ft) —
+7.3 m for a consumer that grabs the wrong one, so the field is called
+`decision_height_above_touchdown_ft`. Only what the plate prints is stored, plus its 28-day
+validity band so a verdict can name the plate it was graded against;
+`Runway.decision_height_above_threshold_m` derives the height a trajectory is judged in, against
+the same threshold elevation the frame uses (the Path Point LTP on an LPV runway). It RAISES on a
+runway with no vertically guided minima — there is no height to fall back to.
+
+**The number that matters for D61/D75**: above the landing threshold the fleet's decision
+altitudes run **200.0–423.4 ft** (highest KSTL 12L, lowest KSJC 30L/30R). Altitude word 0 of the
+instruction vocabulary spans the threshold ±500 ft, so **every one of them is inside a single
+word** — a go-around's timing cannot be judged from the altitude word and needs the real height.
+
+Also: `build_runway_config.py` now REFUSES to overwrite an existing configuration. It writes
+four keys per runway; the file also carries `width_ft`, `runway_width_effective_date` and now
+`published_minima`, none of which it can produce — regenerating would have dropped the first two
+silently since they were added. Recorded in `docs/code-health-followups.md` with the fix.
+
+`Runway` gained one required field, so `runway_data_fingerprint` moves on all 26 thresholds. That
+digest is provenance written into reclassify/rebuild manifests and is checked by nothing in
+production; `threshold_frame_fingerprint` and `evaluation_context_fingerprint` are built from
+named fields and do NOT move, so **every stored threshold event and every evaluation record stays
+valid and no rebuild is needed**. Tests: 13 new in
+`trajectory_data_process/harvest/tests/test_approach_minima.py`; the 11 synthetic `Runway`
+fixtures across three packages now state `published_minima` explicitly rather than inheriting a
+default. Reference: TD20.
 
 ### 2026-09-20 — stage B′ merged; the reading rule's fifth hand check (136/150) and its two fixes — the held-level rule gains a tolerance condition (plateau-v9)
 

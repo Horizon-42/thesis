@@ -25,16 +25,15 @@ import {
   TRAINING_INDEX_SCHEMA,
   TRAINING_KINDS,
   TRAINING_SAMPLE_SCHEMA,
+  trainingWordCounts,
 } from "../trainingSample";
 
 /** KRDU's four vocabulary classes — the ARRIVAL manifest's coverage, not the
  *  airport's six thresholds (14 and 32 are excluded upstream). */
 export const MOCK_RUNWAY_IDENTS = ["05L", "05R", "23L", "23R"];
 
-export const MOCK_VOCABULARY = {
-  sha256: "c7a4f4239f52000000000000000000000000000000000000000000000000mock",
-  runwaySha256: "aa11bb22cc33000000000000000000000000000000000000000000000000mock",
-  readingRule: "plateau-v11",
+/** The bins this vocabulary is read under — the real artefact's own defaults. */
+export const MOCK_BINS = {
   headingBinDeg: 10,
   altitudeBinM: 304.8,
   altitudeMaxM: 3048,
@@ -44,6 +43,17 @@ export const MOCK_VOCABULARY = {
   durationBinS: 2,
   durationMaxS: 300,
   runwayIdents: MOCK_RUNWAY_IDENTS,
+};
+
+export const MOCK_VOCABULARY = {
+  sha256: "c7a4f4239f52000000000000000000000000000000000000000000000000mock",
+  runwaySha256: "aa11bb22cc33000000000000000000000000000000000000000000000000mock",
+  readingRule: "plateau-v11",
+  ...MOCK_BINS,
+  // The artefact states its counts beside its bins and the reader refuses a file
+  // where the two disagree — so the fixture DERIVES them rather than typing
+  // 36/11/23/4/151/3, which would be a third copy of `Vocabulary.words`.
+  words: trainingWordCounts(MOCK_BINS),
 };
 
 /**
@@ -68,16 +78,52 @@ export const MOCK_WORDS = [
   [0, 0, 9, 0, 17, TERMINAL_LANDED], // at the threshold
 ];
 
+/**
+ * The instructions behind the sentence above: one per word change, in issue order.
+ * Only the three geometric kinds and the runway are issued — the duration and
+ * terminal words are read off the EVENT SEQUENCE, never off this list.
+ */
+export const MOCK_INSTRUCTIONS = [
+  { kind: "heading", word: 9, target: 88.4, issuedS: 0, settledS: 0, clamped: false },
+  { kind: "altitude", word: 10, target: 3021.1, issuedS: 0, settledS: 0, clamped: false },
+  { kind: "speed", word: 21, target: 159.1, issuedS: 0, settledS: 0, clamped: false },
+  { kind: "runway", word: 0, target: 0, issuedS: 0, settledS: 0, clamped: false },
+  { kind: "speed", word: 17, target: 138.7, issuedS: 26, settledS: 58, clamped: false },
+  { kind: "heading", word: 5, target: 51.7, issuedS: 70, settledS: 94, clamped: false },
+  { kind: "altitude", word: 7, target: 2119.6, issuedS: 70, settledS: 102, clamped: false },
+  { kind: "speed", word: 13, target: 118.2, issuedS: 108, settledS: 126, clamped: false },
+  { kind: "heading", word: 2, target: 21.3, issuedS: 130, settledS: 148, clamped: false },
+  { kind: "altitude", word: 4, target: 1211.8, issuedS: 130, settledS: 162, clamped: false },
+  { kind: "heading", word: 0, target: -1.2, issuedS: 188, settledS: 202, clamped: false },
+  { kind: "speed", word: 9, target: 97.8, issuedS: 188, settledS: 214, clamped: false },
+  // The last descent never settles inside the track: it runs to the threshold.
+  { kind: "altitude", word: 0, target: 18.4, issuedS: 222, settledS: null, clamped: false },
+];
+
+/** Two manoeuvres the labeller read but did not word, one of each of two reasons. */
+export const MOCK_ABSORBED = [
+  { kind: "heading", startS: 40, endS: 48, word: 9, change: 4.2, reason: "short tail" },
+  { kind: "speed", startS: 150, endS: 168, word: 13, change: -2.4, reason: "small change" },
+];
+
 export const MOCK_FLIGHT = {
   flightKey: "DAL123_05L_a1b2c3_1699999999",
   callsign: "DAL123",
   runway: "05L",
   stratum: "vectored",
+  // The track outlives the sentence: the last event is at 222 s and the words in
+  // force there are held to the threshold at 262 s. In KRDU's real export that
+  // tail is a median 145 s of a 326 s arrival, so a fixture without one would let
+  // a bar that stops at the last event pass.
+  durationS: 262,
+  establishedFromStart: false,
   sentence: {
     eventTimesS: MOCK_EVENT_TIMES_S,
     words: MOCK_WORDS,
     durationClamped: 0,
   },
+  instructions: MOCK_INSTRUCTIONS,
+  absorbed: MOCK_ABSORBED,
 };
 
 export const MOCK_SAMPLE = {

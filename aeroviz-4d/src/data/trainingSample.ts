@@ -22,6 +22,10 @@
  */
 
 import { fetchJson } from "../utils/fetchJson";
+// The unit constants are the GENERATED mirror of geokit (the one exception the
+// repo allows the frontend). A feet or knots factor typed here would be a second
+// definition of a geodetic constant.
+import { FEET_TO_METERS, metresPerSecondToKnots } from "../utils/procedureGeoMath";
 
 /** MIRROR of the exporter's schema strings. A file that does not carry these is
  *  refused by name rather than read leniently. */
@@ -128,6 +132,11 @@ export interface TrainingVocabulary {
   speedMaxMps: number;
   durationBinS: number;
   durationMaxS: number;
+  /** The class count the ARTEFACT states per kind (`word_counts` on the Python
+   *  side). `trainingWordCounts` derives the same numbers from the bins, and
+   *  `parseVocabulary` refuses a file where the two disagree — that is what makes
+   *  the derivation a checked mirror rather than a second opinion. */
+  words: Record<TrainingKind, number>;
   /** The vocabulary's OWN runway classes. NEVER the airport's runway list: at
    *  KRDU the airport has six thresholds and the vocabulary four (05L 05R 23L
    *  23R), because the arrival manifest this line is built on carries only those
@@ -144,12 +153,65 @@ export interface TrainingSentence {
   durationClamped: number;
 }
 
+/**
+ * One instruction as the labeller issued it. Only the three geometric kinds and
+ * the runway are ever issued: the duration and terminal words are read off the
+ * EVENT SEQUENCE, not off this list, so they never appear here (that is why a
+ * view must count words on `sentence`, never on `instructions`).
+ */
+export interface TrainingInstruction {
+  kind: TrainingKind;
+  word: number;
+  /** The value the plateau settled at, unbinned, in the kind's own unit: degrees
+   *  relative to the final approach course, metres above the threshold, m/s
+   *  ground speed. The runway instruction has no target at all (its WORD is the
+   *  answer) and the exporter writes `instructions.NO_TARGET`, 0.0, there — so
+   *  nothing may print a target for a runway word. */
+  target: number;
+  issuedS: number;
+  /** When the manoeuvre finished, or `null` when it never settled inside the
+   *  track — the last altitude instruction usually runs to the threshold. Null is
+   *  a real answer here, not a missing field. */
+  settledS: number | null;
+  /** Whether the target fell outside the vocabulary's range and was clamped. */
+  clamped: boolean;
+}
+
+/** A manoeuvre the labeller read but did not word, and why. Drawn on its kind's
+ *  row so "the words miss this turn" is visible rather than argued about. */
+export interface TrainingAbsorbed {
+  kind: TrainingKind;
+  startS: number;
+  endS: number;
+  word: number;
+  change: number;
+  reason: AbsorbedReason;
+}
+
 export interface TrainingFlight {
   flightKey: string;
   callsign: string;
   runway: string;
   stratum: string;
+  /**
+   * The TRACK's length — not the sentence's. The last event sits well before it
+   * (median 145 s of a 326 s arrival in KRDU's export): the words in force at the
+   * last event are held to the threshold. Every row's last band therefore runs to
+   * `durationS`, and a bar that stopped at the last event would draw 44 % of the
+   * approach as if nothing were being flown.
+   */
+  durationS: number;
+  establishedFromStart: boolean;
   sentence: TrainingSentence;
+  instructions: TrainingInstruction[];
+  absorbed: TrainingAbsorbed[];
+}
+
+/** What the panel publishes for the full-width sentence bar to draw: one flight
+ *  and the vocabulary its words are read under. */
+export interface TrainingSelection {
+  vocabulary: TrainingVocabulary;
+  flight: TrainingFlight;
 }
 
 export interface TrainingSample {
@@ -158,6 +220,16 @@ export interface TrainingSample {
   vocabulary: TrainingVocabulary;
   flights: TrainingFlight[];
 }
+
+/** The part of a vocabulary that decides what a word MEANS: the bins and the
+ *  runway classes. Everything that reads words takes this, so `parseVocabulary`
+ *  can derive the class counts while it is still building the vocabulary. */
+export type TrainingWordSpec = Pick<
+  TrainingVocabulary,
+  | "headingBinDeg" | "altitudeBinM" | "altitudeMaxM"
+  | "speedBinMps" | "speedMinMps" | "speedMaxMps"
+  | "durationBinS" | "durationMaxS" | "runwayIdents"
+>;
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
 
@@ -177,7 +249,7 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
  * instead of drawing the wrong runway for the whole flight.
  */
 export function trainingWordCounts(
-  vocabulary: TrainingVocabulary,
+  vocabulary: TrainingWordSpec,
 ): Record<TrainingKind, number> {
   return {
     heading: Math.round(360 / vocabulary.headingBinDeg),
@@ -190,6 +262,77 @@ export function trainingWordCounts(
     duration: Math.round(vocabulary.durationMaxS / vocabulary.durationBinS) + 1,
     terminal: TERMINAL_WORDS,
   };
+}
+
+// ── what a word means ────────────────────────────────────────────────────────
+
+/**
+ * MIRROR of `ts_transformer.data.runway_context.wrap_deg` — the SAME half-open
+ * range [-180, 180), so heading word 18 reads -180°, exactly as the labeller
+ * wrote it. A wrap of the other convention would flip that one word's sign.
+ */
+export function wrapDeg(degrees: number): number {
+  // The doubled modulo is not decoration: JS `%` truncates where Python's floors,
+  // so the single-modulo spelling returns -190 for -190 and 0 stays 0 only by luck.
+  // Today's one caller passes 0…350, but the signed relative course the artefact
+  // carries is the obvious next caller.
+  return (((degrees + 180) % 360) + 360) % 360 - 180;
+}
+
+/** MIRROR of `Vocabulary.heading_centre_deg`: degrees relative to the final
+ *  approach course, 0 = on the course. */
+export function headingCentreDeg(vocabulary: TrainingWordSpec, word: number): number {
+  return wrapDeg(word * vocabulary.headingBinDeg);
+}
+
+/** MIRROR of `Vocabulary.altitude_centre_m`: metres ABOVE THE THRESHOLD. */
+export function altitudeCentreM(vocabulary: TrainingWordSpec, word: number): number {
+  return word * vocabulary.altitudeBinM;
+}
+
+/** MIRROR of `Vocabulary.speed_centre_mps`: ground speed. */
+export function speedCentreMps(vocabulary: TrainingWordSpec, word: number): number {
+  return vocabulary.speedMinMps + word * vocabulary.speedBinMps;
+}
+
+/** MIRROR of `Vocabulary.duration_centre_s`: the gap to the PREVIOUS event. */
+export function durationCentreS(vocabulary: TrainingWordSpec, word: number): number {
+  return word * vocabulary.durationBinS;
+}
+
+/** The terminal words, by index (`TERMINAL_CONTINUE / _LANDED / _GO_AROUND`). */
+export const TERMINAL_LABELS = ["continue", "landed", "go-around"] as const;
+
+/**
+ * A word as a person reads it.
+ *
+ * The bins are DEFINED in feet and knots (1000 ft, 10 kt) and stored in SI, so
+ * printing the stored metres would label every altitude 304.8 m and every speed
+ * 5.14 m/s apart — arithmetic the reader would have to undo to recognise the
+ * vocabulary. The conversion uses the generated geokit constants, never a factor
+ * typed here.
+ */
+export function trainingWordLabel(
+  vocabulary: TrainingWordSpec,
+  kind: TrainingKind,
+  word: number,
+): string {
+  switch (kind) {
+    case "heading": {
+      const degrees = Math.round(headingCentreDeg(vocabulary, word));
+      return `${degrees > 0 ? "+" : ""}${degrees}\u00b0`;
+    }
+    case "altitude":
+      return `${Math.round(altitudeCentreM(vocabulary, word) / FEET_TO_METERS)} ft`;
+    case "speed":
+      return `${Math.round(metresPerSecondToKnots(speedCentreMps(vocabulary, word)))} kt`;
+    case "runway":
+      return vocabulary.runwayIdents[word];
+    case "duration":
+      return `${durationCentreS(vocabulary, word)} s`;
+    case "terminal":
+      return TERMINAL_LABELS[word];
+  }
 }
 
 // ── small checkers ───────────────────────────────────────────────────────────
@@ -312,21 +455,51 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
     return { ok: false, problem: "vocabulary.runwayIdents is missing or not a non-empty list of runway names" };
   }
 
+  const stated = raw.words;
+  if (!isRecord(stated)) {
+    return { ok: false, problem: "vocabulary.words is missing: the artefact states its own class counts" };
+  }
+  const spec: TrainingWordSpec = {
+    headingBinDeg: values.headingBinDeg,
+    altitudeBinM: values.altitudeBinM,
+    altitudeMaxM: values.altitudeMaxM,
+    speedBinMps: values.speedBinMps,
+    speedMinMps: values.speedMinMps,
+    speedMaxMps: values.speedMaxMps,
+    durationBinS: values.durationBinS,
+    durationMaxS: values.durationMaxS,
+    runwayIdents: idents as string[],
+  };
+  const words = {} as Record<TrainingKind, number>;
+  const derived = trainingWordCounts(spec);
+  for (const kind of TRAINING_KINDS) {
+    const count = finite(stated, kind);
+    if (count === null || !Number.isInteger(count) || count <= 0) {
+      return { ok: false, problem: `vocabulary.words.${kind} is ${JSON.stringify(stated[kind])}, expected a class count` };
+    }
+    // The counts we derive from the bins and the counts the file states are two
+    // spellings of `Vocabulary.words`. They agreeing is the whole value of the
+    // derivation; disagreeing means one of the two mirrors has drifted, and
+    // guessing which would put every word in the wrong legend.
+    if (count !== derived[kind]) {
+      return {
+        ok: false,
+        problem:
+          `vocabulary.words.${kind} is ${count}, but this file's own bins give ${derived[kind]} — ` +
+          `the stated counts and the spec disagree`,
+      };
+    }
+    words[kind] = count;
+  }
+
   return {
     ok: true,
     value: {
       sha256: str(raw, "sha256") as string,
       runwaySha256: str(raw, "runwaySha256") as string,
       readingRule: str(raw, "readingRule") as string,
-      headingBinDeg: values.headingBinDeg,
-      altitudeBinM: values.altitudeBinM,
-      altitudeMaxM: values.altitudeMaxM,
-      speedBinMps: values.speedBinMps,
-      speedMinMps: values.speedMinMps,
-      speedMaxMps: values.speedMaxMps,
-      durationBinS: values.durationBinS,
-      durationMaxS: values.durationMaxS,
-      runwayIdents: idents as string[],
+      ...spec,
+      words,
     },
   };
 }
@@ -404,6 +577,82 @@ function parseSentence(
   return { ok: true, value: { eventTimesS, words, durationClamped } };
 }
 
+function parseKind(raw: Record<string, unknown>, where: string): Parsed<TrainingKind> {
+  const kind = str(raw, "kind");
+  if (kind === null || !(TRAINING_KINDS as readonly string[]).includes(kind)) {
+    return { ok: false, problem: `${where}.kind is ${JSON.stringify(raw.kind)}, expected one of ${TRAINING_KINDS.join(", ")}` };
+  }
+  return { ok: true, value: kind as TrainingKind };
+}
+
+function parseInstruction(
+  raw: unknown,
+  counts: Record<TrainingKind, number>,
+  where: string,
+): Parsed<TrainingInstruction> {
+  if (!isRecord(raw)) return { ok: false, problem: `${where} is not an object` };
+  const kind = parseKind(raw, where);
+  if (!kind.ok) return kind;
+
+  const word = finite(raw, "word");
+  if (word === null || !Number.isInteger(word) || word < 0 || word >= counts[kind.value]) {
+    return { ok: false, problem: `${where}.word is ${JSON.stringify(raw.word)}, outside this vocabulary's 0…${counts[kind.value] - 1} for ${kind.value}` };
+  }
+  const target = finite(raw, "target");
+  if (target === null) return { ok: false, problem: `${where}.target is missing or not a number` };
+  const issuedS = finite(raw, "issuedS");
+  if (issuedS === null) return { ok: false, problem: `${where}.issuedS is missing or not a number` };
+  // `settledS` is `number | null` and the null is MEANINGFUL (it never settled
+  // inside the track). A missing key is a different thing and is refused.
+  if (!("settledS" in raw)) return { ok: false, problem: `${where}.settledS is missing (null means it never settled; absent means the field moved)` };
+  const settled = raw.settledS;
+  if (settled !== null && (typeof settled !== "number" || !Number.isFinite(settled))) {
+    return { ok: false, problem: `${where}.settledS is ${JSON.stringify(settled)}, expected a number or null` };
+  }
+  if (typeof raw.clamped !== "boolean") {
+    return { ok: false, problem: `${where}.clamped is ${JSON.stringify(raw.clamped)}, expected a boolean` };
+  }
+
+  return {
+    ok: true,
+    value: { kind: kind.value, word, target, issuedS, settledS: settled as number | null, clamped: raw.clamped },
+  };
+}
+
+function parseAbsorbed(
+  raw: unknown,
+  counts: Record<TrainingKind, number>,
+  where: string,
+): Parsed<TrainingAbsorbed> {
+  if (!isRecord(raw)) return { ok: false, problem: `${where} is not an object` };
+  const kind = parseKind(raw, where);
+  if (!kind.ok) return kind;
+
+  const word = finite(raw, "word");
+  if (word === null || !Number.isInteger(word) || word < 0 || word >= counts[kind.value]) {
+    return { ok: false, problem: `${where}.word is ${JSON.stringify(raw.word)}, outside this vocabulary's 0…${counts[kind.value] - 1} for ${kind.value}` };
+  }
+  const startS = finite(raw, "startS");
+  const endS = finite(raw, "endS");
+  if (startS === null || endS === null) {
+    return { ok: false, problem: `${where} needs numeric startS and endS` };
+  }
+  if (endS < startS) {
+    return { ok: false, problem: `${where} ends at ${endS} s before it starts at ${startS} s` };
+  }
+  const change = finite(raw, "change");
+  if (change === null) return { ok: false, problem: `${where}.change is missing or not a number` };
+  const reason = str(raw, "reason");
+  if (reason === null || !(ABSORBED_REASONS as readonly string[]).includes(reason)) {
+    return { ok: false, problem: `${where}.reason is ${JSON.stringify(raw.reason)}, expected one of ${ABSORBED_REASONS.join(", ")}` };
+  }
+
+  return {
+    ok: true,
+    value: { kind: kind.value, word, startS, endS, change, reason: reason as AbsorbedReason },
+  };
+}
+
 /** Parse one sample set. Unlike the manifest this is all-or-nothing: a flight the
  *  reader cannot trust would be drawn beside real ones with no way to tell. */
 export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
@@ -422,16 +671,16 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
   const vocabulary = parseVocabulary(raw.vocabulary);
   if (!vocabulary.ok) return vocabulary;
 
-  // `kinds`, when present, is the exporter restating the column order. It must
-  // agree with ours exactly — a disagreement means the columns moved.
-  if (raw.kinds !== undefined) {
-    const kinds = Array.isArray(raw.kinds) ? raw.kinds.join(",") : String(raw.kinds);
-    if (kinds !== TRAINING_KINDS.join(",")) {
-      return {
-        ok: false,
-        problem: `kinds is [${kinds}], expected [${TRAINING_KINDS.join(",")}] in that order`,
-      };
-    }
+  // `kinds` is the exporter restating the column order, and it must agree with
+  // ours exactly — a disagreement means the columns moved. Every export writes
+  // it, so an absent one is a file from something else, not an older file to be
+  // read leniently.
+  const kinds = Array.isArray(raw.kinds) ? raw.kinds.join(",") : String(raw.kinds);
+  if (kinds !== TRAINING_KINDS.join(",")) {
+    return {
+      ok: false,
+      problem: `kinds is [${kinds}], expected [${TRAINING_KINDS.join(",")}] in that order`,
+    };
   }
 
   if (!Array.isArray(raw.flights)) return { ok: false, problem: "flights is not an array" };
@@ -443,6 +692,10 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
     const flightKey = str(entry, "flightKey");
     const where = flightKey ? `flight ${flightKey}` : `flights[${i}]`;
     if (flightKey === null) return { ok: false, problem: `${where}: flightKey is missing` };
+    const callsign = str(entry, "callsign");
+    if (callsign === null) return { ok: false, problem: `${where}: callsign is missing` };
+    const stratum = str(entry, "stratum");
+    if (stratum === null) return { ok: false, problem: `${where}: stratum is missing` };
     const runway = str(entry, "runway");
     if (runway === null) return { ok: false, problem: `${where}: runway is missing` };
     if (!vocabulary.value.runwayIdents.includes(runway)) {
@@ -455,12 +708,71 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
     }
     const sentence = parseSentence(entry.sentence, counts, where);
     if (!sentence.ok) return sentence;
+
+    const durationS = finite(entry, "durationS");
+    if (durationS === null || durationS <= 0) {
+      return { ok: false, problem: `${where}: durationS is missing or not a positive length` };
+    }
+    // The bands run to the end of the TRACK, so a sentence whose last event is
+    // past it would draw off the axis. This also catches a sample whose sentence
+    // and track came from different flights.
+    const lastEventS = sentence.value.eventTimesS[sentence.value.eventTimesS.length - 1];
+    if (lastEventS > durationS) {
+      return {
+        ok: false,
+        problem: `${where}: the last event is at ${lastEventS} s but the track is ${durationS} s long — the sentence and the track are not the same flight`,
+      };
+    }
+    if (typeof entry.establishedFromStart !== "boolean") {
+      return { ok: false, problem: `${where}: establishedFromStart is ${JSON.stringify(entry.establishedFromStart)}, expected a boolean` };
+    }
+
+    if (!Array.isArray(entry.instructions)) {
+      return { ok: false, problem: `${where}: instructions is not an array` };
+    }
+    const instructions: TrainingInstruction[] = [];
+    for (let k = 0; k < entry.instructions.length; k += 1) {
+      const parsed = parseInstruction(entry.instructions[k], counts, `${where}: instructions[${k}]`);
+      if (!parsed.ok) return parsed;
+      // Same reason as the last event's check: a time outside the track is a
+      // different flight's, and it draws off the plot rather than failing.
+      const outside = [parsed.value.issuedS, parsed.value.settledS].find(
+        (time) => time !== null && (time < 0 || time > durationS),
+      );
+      if (outside !== undefined) {
+        return { ok: false, problem: `${where}: instructions[${k}] is at ${outside} s, outside the ${durationS} s track` };
+      }
+      instructions.push(parsed.value);
+    }
+
+    if (!Array.isArray(entry.absorbed)) {
+      return { ok: false, problem: `${where}: absorbed is not an array` };
+    }
+    const absorbed: TrainingAbsorbed[] = [];
+    for (let k = 0; k < entry.absorbed.length; k += 1) {
+      const parsed = parseAbsorbed(entry.absorbed[k], counts, `${where}: absorbed[${k}]`);
+      if (!parsed.ok) return parsed;
+      if (parsed.value.startS < 0 || parsed.value.endS > durationS) {
+        return {
+          ok: false,
+          problem:
+            `${where}: absorbed[${k}] spans ${parsed.value.startS}–${parsed.value.endS} s, ` +
+            `outside the ${durationS} s track`,
+        };
+      }
+      absorbed.push(parsed.value);
+    }
+
     flights.push({
       flightKey,
-      callsign: str(entry, "callsign") ?? flightKey,
+      callsign,
       runway,
-      stratum: str(entry, "stratum") ?? "unknown",
+      stratum,
+      durationS,
+      establishedFromStart: entry.establishedFromStart,
       sentence: sentence.value,
+      instructions,
+      absorbed,
     });
   }
 

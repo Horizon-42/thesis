@@ -45,6 +45,7 @@ import { fetchJson } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerrain";
 import type { ObservedVerdictFilter } from "../data/observedTracks";
+import type { TrainingSelection } from "../data/trainingSample";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -232,6 +233,16 @@ interface ApproachViewSessionState {
 }
 
 /**
+ * Training's shared selection. TrainingPanel owns the fetch and publishes the
+ * flight it is showing; the full-width sentence bar (a sibling of the left dock,
+ * not a child) draws it. One fetch, one selection, no second copy of the sample.
+ */
+interface TrainingSessionState {
+  trainingSelection: TrainingSelection | null;
+  setTrainingSelection: (selection: TrainingSelection | null) => void;
+}
+
+/**
  * The active top-level task. These four are mutually exclusive — one drives the
  * left dock at a time. `fly`/`optimize`/`compare` map onto the PilotPanel's
  * pilot/trajectory/comparison sub-modes. Procedures is intentionally NOT a mode:
@@ -295,6 +306,7 @@ interface AppState extends
   ProcedureSessionState,
   PlaybackState,
   ApproachViewSessionState,
+  TrainingSessionState,
   WorkbenchUiState {}
 
 // The defaults are `null`; useApp asserts all providers are present so consumers
@@ -305,6 +317,7 @@ const FlightSessionContext = createContext<FlightSessionState | null>(null);
 const ProcedureSessionContext = createContext<ProcedureSessionState | null>(null);
 const PlaybackContext = createContext<PlaybackState | null>(null);
 const ApproachViewSessionContext = createContext<ApproachViewSessionState | null>(null);
+const TrainingSessionContext = createContext<TrainingSessionState | null>(null);
 const WorkbenchUiContext = createContext<WorkbenchUiState | null>(null);
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -314,6 +327,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeAirportCode, setActiveAirportCodeState] = useState<string>("");
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
+  const [trainingSelection, setTrainingSelection] = useState<TrainingSelection | null>(null);
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
@@ -540,6 +554,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     approachViewMode,
     setApproachViewMode,
   }), [isApproachViewOpen, approachViewMode]);
+  const trainingSessionState: TrainingSessionState = useMemo(() => ({
+    trainingSelection,
+    setTrainingSelection,
+  }), [trainingSelection]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,
@@ -562,9 +580,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           <ProcedureSessionContext.Provider value={procedureSessionState}>
             <PlaybackContext.Provider value={playbackState}>
               <ApproachViewSessionContext.Provider value={approachViewSessionState}>
-                <WorkbenchUiContext.Provider value={workbenchUiState}>
-                  {children}
-                </WorkbenchUiContext.Provider>
+                <TrainingSessionContext.Provider value={trainingSessionState}>
+                  <WorkbenchUiContext.Provider value={workbenchUiState}>
+                    {children}
+                  </WorkbenchUiContext.Provider>
+                </TrainingSessionContext.Provider>
               </ApproachViewSessionContext.Provider>
             </PlaybackContext.Provider>
           </ProcedureSessionContext.Provider>
@@ -588,6 +608,7 @@ export function useApp(): AppState {
   const procedureSessionState = useContext(ProcedureSessionContext);
   const playbackState = useContext(PlaybackContext);
   const approachViewSessionState = useContext(ApproachViewSessionContext);
+  const trainingSessionState = useContext(TrainingSessionContext);
   const workbenchUiState = useContext(WorkbenchUiContext);
   if (
     !sceneState ||
@@ -596,6 +617,7 @@ export function useApp(): AppState {
     !procedureSessionState ||
     !playbackState ||
     !approachViewSessionState ||
+    !trainingSessionState ||
     !workbenchUiState
   ) {
     throw new Error(
@@ -610,6 +632,7 @@ export function useApp(): AppState {
     ...procedureSessionState,
     ...playbackState,
     ...approachViewSessionState,
+    ...trainingSessionState,
     ...workbenchUiState,
   };
 }

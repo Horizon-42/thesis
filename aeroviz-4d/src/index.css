@@ -650,6 +650,255 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 10.5px;
 }
 
+/* T4a: the panel's loaded states, and the full-width sentence bar. */
+.training-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(224, 230, 240, 0.65);
+}
+
+.training-problem {
+  padding: 8px 10px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: rgba(248, 113, 113, 0.08);
+}
+
+/* The field that failed is the whole point of the message (AV6 in reverse), so it
+   wraps rather than being clipped, and stays selectable for a bug report. */
+.training-problem-detail {
+  margin: 4px 0 0;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: #fecaca;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.training-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: rgba(224, 230, 240, 0.65);
+}
+
+.training-field select {
+  background: #17203a;
+  border: 1px solid #2f3f63;
+  border-radius: 4px;
+  color: #e0e6f0;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.training-vocabulary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.training-vocabulary > div {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.training-vocabulary dt {
+  color: rgba(224, 230, 240, 0.55);
+  white-space: nowrap;
+}
+
+.training-vocabulary dd {
+  margin: 0;
+  text-align: right;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.training-flight-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 22vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.training-flight-list button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: baseline;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: rgba(23, 32, 58, 0.55);
+  color: #c8d8ec;
+  cursor: pointer;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.training-flight-list button:hover {
+  background: #2a3550;
+}
+
+.training-flight-list button.active {
+  border-color: #4a8fe8;
+  background: #1a5fb4;
+  color: #fff;
+}
+
+.training-flight-callsign {
+  font-weight: 600;
+}
+
+.training-flight-stratum,
+.training-flight-events {
+  font-size: 10.5px;
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-flight-list button.active .training-flight-stratum,
+.training-flight-list button.active .training-flight-events {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* The bar spans the whole width above the transport: the sentence is read left to
+   right against real time, so a narrow dock would compress the long gaps that are
+   the most informative thing in it. */
+.training-sentence-bar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 36px;
+  z-index: 109;
+  pointer-events: auto;
+  box-sizing: border-box;
+  padding: 8px 12px 6px;
+  border: 1px solid rgba(103, 232, 249, 0.24);
+  border-radius: 8px;
+  background: rgba(15, 19, 30, 0.94);
+  backdrop-filter: blur(8px);
+  color: #e0e6f0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  box-shadow: 0 12px 30px rgba(2, 8, 23, 0.34);
+}
+
+.training-sentence-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 11.5px;
+  color: rgba(224, 230, 240, 0.7);
+}
+
+.training-sentence-head strong {
+  font-size: 13px;
+  color: #e0e6f0;
+}
+
+.training-sentence-cursor-readout {
+  margin-left: auto;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  color: #67e8f9;
+}
+
+/* One SVG unit is one pixel, so a narrow dock scrolls the bar rather than
+   squeezing the words into an unreadable strip. */
+.training-sentence-frame {
+  margin-top: 4px;
+  overflow-x: auto;
+}
+
+.training-sentence-svg {
+  display: block;
+}
+
+.training-sentence-row-bg {
+  fill: rgba(255, 255, 255, 0.02);
+}
+
+.training-sentence-row-bg.odd {
+  fill: rgba(255, 255, 255, 0.045);
+}
+
+.training-sentence-row-label {
+  fill: rgba(224, 230, 240, 0.6);
+  font-size: 11px;
+}
+
+.training-sentence-word {
+  font-size: 11px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  pointer-events: none;
+}
+
+.training-sentence-band,
+.training-sentence-event {
+  cursor: pointer;
+}
+
+.training-sentence-band:hover rect,
+.training-sentence-event:hover text {
+  fill-opacity: 0.34;
+}
+
+.training-sentence-event-line {
+  stroke: rgba(103, 232, 249, 0.28);
+  stroke-width: 1;
+}
+
+.training-sentence-event-number {
+  fill: rgba(103, 232, 249, 0.8);
+  font-size: 10px;
+}
+
+.training-sentence-axis {
+  stroke: rgba(224, 230, 240, 0.25);
+  stroke-width: 1;
+}
+
+.training-sentence-tick {
+  fill: rgba(224, 230, 240, 0.5);
+  font-size: 10px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.training-sentence-cursor {
+  stroke: #67e8f9;
+  stroke-width: 1.5;
+}
+
+.training-sentence-absorbed {
+  pointer-events: auto;
+}
+
+.training-sentence-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: rgba(224, 230, 240, 0.55);
+}
+
+.workbench--presentation .training-sentence-bar {
+  display: none;
+}
+
 .czml-status {
   position: absolute;
   top: 16px;

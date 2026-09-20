@@ -12,6 +12,12 @@ import {
   trainingIndexPath,
   trainingSamplePath,
   trainingWordCounts,
+  trainingWordLabel,
+  altitudeCentreM,
+  durationCentreS,
+  headingCentreDeg,
+  speedCentreMps,
+  wrapDeg,
 } from "../trainingSample";
 import { MOCK_VOCABULARY, mockIndex, mockSample } from "./trainingSample.fixture";
 
@@ -226,5 +232,208 @@ describe("paths", () => {
     expect(trainingSamplePath("KRDU", "vocabulary_tau10/sample.json")).toBe(
       "data/airports/KRDU/training/vocabulary_tau10/sample.json",
     );
+  });
+});
+
+// ── T4a: the fields the sentence bar draws beside the words ──────────────────
+
+describe("the track length, the instructions and the absorbed manoeuvres", () => {
+  it("reads all three off a good sample", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const flight = parsed.value.flights[0];
+    expect(flight.durationS).toBe(262);
+    expect(flight.establishedFromStart).toBe(false);
+    expect(flight.instructions).toHaveLength(13);
+    expect(flight.absorbed.map((item) => item.reason)).toEqual(["short tail", "small change"]);
+  });
+
+  // The track outlives the sentence by a median 145 s in the real export, so a
+  // view that stopped at the last event would leave 44 % of the approach blank.
+  it("keeps a track that runs on past the last event", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const flight = parsed.value.flights[0];
+    const lastEventS = flight.sentence.eventTimesS[flight.sentence.eventTimesS.length - 1];
+    expect(lastEventS).toBeLessThan(flight.durationS);
+  });
+
+  // The other way round is a different flight's sentence stapled to this track.
+  it("refuses a sentence whose last event is past the end of the track", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].durationS = 100;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("not the same flight");
+  });
+
+  it("refuses a missing durationS by name", () => {
+    const parsed = sampleWith((sample) => {
+      delete sample.flights[0].durationS;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("durationS");
+  });
+
+  // null means "it never settled inside the track" — a real answer. An absent key
+  // means the field moved, and reading that as null would invent the answer.
+  it("keeps a null settledS but refuses an absent one", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const instructions = parsed.value.flights[0].instructions;
+    expect(instructions[instructions.length - 1].settledS).toBeNull();
+
+    const absent = sampleWith((sample) => {
+      delete sample.flights[0].instructions[0].settledS;
+    });
+    expect(absent.ok).toBe(false);
+    if (absent.ok) return;
+    expect(absent.problem).toContain("settledS");
+  });
+
+  it("refuses an instruction word outside its kind's range", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].instructions[0].word = 36; // heading has 36 classes: 0…35
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("heading");
+  });
+
+  it("refuses an absorbed manoeuvre with an unlisted reason", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].absorbed[0].reason = "because";
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("reason");
+    expect(parsed.problem).toContain("same word");
+  });
+
+  it("refuses an absorbed span that ends before it starts", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].absorbed[0].endS = 1;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("before it starts");
+  });
+});
+
+describe("the fields a lenient reader would have defaulted", () => {
+  // These two used to read `str(entry, "callsign") ?? flightKey`. The exporter
+  // always writes both, so the default could only ever fire on a broken export —
+  // and would have printed "unknown" beside the real strata as though the file
+  // said so.
+  it("refuses a flight with no callsign or no stratum, by name", () => {
+    for (const field of ["callsign", "stratum", "runway"]) {
+      const parsed = sampleWith((sample) => {
+        delete sample.flights[0][field];
+      });
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.problem).toContain(field);
+    }
+  });
+
+  // Every export writes `kinds`. A file without it is a file from something else.
+  it("refuses a sample with no kinds at all", () => {
+    const parsed = sampleWith((sample) => {
+      delete sample.kinds;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("kinds");
+  });
+
+  // The artefact states its class counts; we derive them from the bins. The
+  // check is what makes the derivation a mirror instead of a second opinion.
+  it("refuses a vocabulary whose stated counts disagree with its own bins", () => {
+    const parsed = sampleWith((sample) => {
+      sample.vocabulary.words.speed = 22; // the bins give 23
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("words.speed is 22");
+    expect(parsed.problem).toContain("23");
+  });
+
+  it("refuses a vocabulary that states no counts", () => {
+    const parsed = sampleWith((sample) => {
+      delete sample.vocabulary.words;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("vocabulary.words");
+  });
+
+  // Same reason as the last-event check: a time outside the track belongs to
+  // another flight, and it would draw its mark off the plot instead of failing.
+  it("refuses an instruction or an absorbed span outside the track", () => {
+    const late = sampleWith((sample) => {
+      sample.flights[0].instructions[0].issuedS = 400; // the track is 262 s
+    });
+    expect(late.ok).toBe(false);
+    if (late.ok) return;
+    expect(late.problem).toContain("outside the 262 s track");
+
+    const spill = sampleWith((sample) => {
+      sample.flights[0].absorbed[1].endS = 400;
+    });
+    expect(spill.ok).toBe(false);
+    if (spill.ok) return;
+    expect(spill.problem).toContain("outside the 262 s track");
+  });
+});
+
+describe("what a word means", () => {
+  // MIRRORS of Vocabulary.*_centre_*: the same arithmetic, so a re-binned
+  // vocabulary reads correctly without a second table anywhere.
+  it("reads the bin centres the labeller wrote", () => {
+    expect(headingCentreDeg(MOCK_VOCABULARY, 5)).toBeCloseTo(50, 9);
+    expect(altitudeCentreM(MOCK_VOCABULARY, 10)).toBeCloseTo(3048, 9);
+    expect(speedCentreMps(MOCK_VOCABULARY, 0)).toBeCloseTo(MOCK_VOCABULARY.speedMinMps, 9);
+    expect(durationCentreS(MOCK_VOCABULARY, 13)).toBe(26);
+  });
+
+  // wrap_deg is half-open [-180, 180), so the one word at the wrap reads -180.
+  // The NEGATIVE cases are the ones that catch the single-modulo spelling: JS `%`
+  // truncates where Python's floors, so `((d+180) % 360) - 180` returns -190 for
+  // -190. No word reaches it today; the artefact's signed relative course does.
+  it("wraps the same way the labeller does, negatives included", () => {
+    expect(headingCentreDeg(MOCK_VOCABULARY, 18)).toBe(-180);
+    expect(headingCentreDeg(MOCK_VOCABULARY, 30)).toBeCloseTo(-60, 9);
+    expect(wrapDeg(190)).toBe(-170);
+    expect(wrapDeg(-190)).toBe(170);
+    expect(wrapDeg(-360)).toBe(0);
+    expect(wrapDeg(-180)).toBe(-180);
+    expect(wrapDeg(540)).toBe(-180);
+  });
+
+  // The bins are DEFINED in feet and knots; printing the stored SI would make a
+  // 1000 ft step read as 304.8 m and hide the vocabulary's own grid.
+  it("labels altitude in feet and speed in knots, off the generated constants", () => {
+    expect(trainingWordLabel(MOCK_VOCABULARY, "altitude", 10)).toBe("10000 ft");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "altitude", 3)).toBe("3000 ft");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "speed", 21)).toBe("310 kt");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "heading", 5)).toBe("+50°");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "heading", 0)).toBe("0°");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "duration", 13)).toBe("26 s");
+  });
+
+  // The runway classes come from the file, never from the airport's runway list.
+  it("labels a runway word from the vocabulary's own classes", () => {
+    expect(trainingWordLabel(MOCK_VOCABULARY, "runway", 0)).toBe("05L");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "runway", 3)).toBe("23R");
+  });
+
+  it("names the terminal classes, go-around included", () => {
+    expect(trainingWordLabel(MOCK_VOCABULARY, "terminal", TERMINAL_LANDED)).toBe("landed");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "terminal", TERMINAL_GO_AROUND)).toBe("go-around");
   });
 });
