@@ -48,7 +48,8 @@ Branch `dev-instruction-vocab` (worktree `.claude/worktrees/instruction-vocab`; 
   Two measurements over the whole train split decided v8, not the hand checks: heading and altitude issue times are
   exact under every rule (p95 ≤ 6 s) and all the error is speed; and 7 598 speed levels were being suppressed by the
   minimum change, median held 42 s, 4 032 in a different bin — 0.6 real speed steps a flight the sentence never said.
-  The rule's version is in the vocabulary's spec and sha (current f8eb7968a250).
+  The rule's version is in the vocabulary's spec and sha (f8eb7968a250 at the time of this entry; superseded by
+  plateau-v9 / 1586172a6ec6 the same day, see the entry above).
   Bins settled on the cohort's own distribution (the 8000 ft / 230 kt starting ceilings clamped 6 % / 28 % of the words).
   `run_ts.py instruction_vocabulary` writes the artefact, the sentences, a summary (clamps, absorbed, tails stated) and
   the 300 hand-check pages (150 per stratum of the package's strata). `data/approach_difficulty.course_frame_rows` is now
