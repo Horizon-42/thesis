@@ -5,6 +5,7 @@ mechanics are pinned on synthetic and hand-built tracks, never a number from dat
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import math
 
 import numpy as np
@@ -15,6 +16,11 @@ from ts_transformer.data.dataset import build_series
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.manoeuvre import instructions as ins
 from ts_transformer.tests.support import AIRPORT, RUNWAY
+
+#: The runway word's classes for these fixtures (D62): every synthetic flight lands on RUNWAY,
+#: and a second ident is carried so the word is not degenerate — `read_instructions` must pick
+#: the flight's own class out of a set, never the only one there is.
+RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY, "23R"])
 
 
 def _config() -> TSConfig:
@@ -33,6 +39,7 @@ def flights():
 
 def test_the_bins_are_the_vocabulary_and_round_trip_through_the_artefact(tmp_path):
     v = ins.Vocabulary()
+    # the SPEC counts four kinds; the runway's classes are the cohort's (see word_counts below)
     assert v.words == {"heading": 36, "altitude": 11, "speed": 23, "intercept": 3}
     assert v.heading_bin(0.0) == 0 and v.heading_bin(-4.9) == 0 and v.heading_bin(5.1) == 1 and v.heading_bin(180.0) == 18
     assert v.heading_bin(-90.0) == 27 and v.heading_bin(365.0) == 1 and v.heading_centre_deg(27) == pytest.approx(-90.0)
@@ -42,16 +49,21 @@ def test_the_bins_are_the_vocabulary_and_round_trip_through_the_artefact(tmp_pat
     assert v.speed_bin(330.0 * ins.KT) == (22, True)
     assert v.speed_bin(90.0 * ins.KT) == (0, True) and v.speed_centre_mps(7) == pytest.approx(170.0 * ins.KT)
     assert v.intercept_bin(-25.0) == 0 and v.intercept_bin(40.0) == 1 and v.intercept_bin(70.0) == 2
-    path = ins.write_vocabulary(tmp_path, v, cohort_identity={"name": "x"}, counts={}, source={})
-    loaded, payload = ins.load_vocabulary(path)
+    path = ins.write_vocabulary(tmp_path, v, runway_vocabulary=RUNWAYS, cohort_identity={"name": "x"}, counts={}, source={})
+    loaded, runways, payload = ins.load_vocabulary(path)
     assert loaded == v and payload["sha256"] == v.sha256 and payload["words"] == v.words
+    # the runway classes ride BESIDE the spec: in it they would give every airport its own sha
+    assert runways == RUNWAYS and payload["runway_idents"] == list(RUNWAYS.idents)
+    assert "runway" not in payload["spec"] and ins.Vocabulary().sha256 == v.sha256
     with pytest.raises(FileExistsError):
-        ins.write_vocabulary(tmp_path, v, cohort_identity={"name": "x"}, counts={}, source={})
+        ins.write_vocabulary(tmp_path, v, runway_vocabulary=RUNWAYS, cohort_identity={"name": "x"}, counts={}, source={})
     bad = json.loads(path.read_text(encoding="utf-8"))
     bad["spec"]["heading_bin_deg"] = 15.0
     (tmp_path / "bad.json").write_text(json.dumps(bad), encoding="utf-8")
     with pytest.raises(ValueError, match="sha"):
         ins.load_vocabulary(tmp_path / "bad.json")
+    assert ins.word_counts(v, RUNWAYS) == {**v.words, "runway": 2}                   # the fifth count is the COHORT's
+    assert tuple(ins.word_counts(v, RUNWAYS)) == ins.INSTRUCTION_KINDS
     with pytest.raises(ValueError, match="divide"):
         ins.Vocabulary(heading_bin_deg=7.0)
     with pytest.raises(ValueError, match="divide"):
@@ -152,6 +164,23 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
     assert ins.departure_row(np.array([5.0, 5.0, 5.4, 6.0, 6.8, 8.0]), 0, 5, 5.0, 2.0) == 4          # 6.8 is the first row past ±1
 
 
+def test_the_runway_vocabulary_is_the_cohort_s_thresholds_and_refuses_a_stranger():
+    """The runway word's classes are one airport's thresholds, sorted and unique. An ident the
+    cohort never carried is a DIFFERENT airport, so `index` raises — there is no fallback class
+    a stranger could be quietly filed under."""
+    v = ins.RunwayVocabulary.from_idents(["23R", "05L", "05L"])
+    assert v.idents == ("05L", "23R") and len(v) == 2
+    assert v.index("05L") == 0 and v.index("23R") == 1 and v.ident(1) == "23R"
+    with pytest.raises(ValueError, match="not in this vocabulary"):
+        v.index("18")
+    with pytest.raises(ValueError, match="stored sorted"):
+        ins.RunwayVocabulary(("23R", "05L"))
+    with pytest.raises(ValueError, match="unique"):
+        ins.RunwayVocabulary(("05L", "05L"))
+    with pytest.raises(ValueError, match="at least one"):
+        ins.RunwayVocabulary(())
+
+
 def _track(item, t: np.ndarray, relative_deg: np.ndarray, height_m: np.ndarray, speed_mps: np.ndarray):
     """A hand-built series from profiles against time: the ground track integrated from the
     relative course, starting 20 km before the threshold and 3 km right of the course (so the
@@ -178,18 +207,18 @@ def test_a_heading_change_is_read_when_it_lands_on_a_new_plateau_whatever_its_ra
     t = np.arange(0.0, 160.0, 2.0)
     level, speed = np.full(len(t), 800.0), np.full(len(t), 80.0)
     slow = np.interp(t, [0.0, 40.0, 60.0, 160.0], [0.0, 0.0, 12.0, 12.0])                # 0.6°/s: the band's lag is ~7 s
-    reading = ins.read_instructions(_track(item, t, slow, level, speed), v)
+    reading = ins.read_instructions(_track(item, t, slow, level, speed), v, RUNWAYS)
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert [i.word for i in headings] == [0, v.heading_bin(12.0)] and 40.0 <= headings[1].issued_s <= 40.0 + 10.0
     assert headings[1].settled_s is not None and 60.0 - 10.0 <= headings[1].settled_s <= 60.0 + 2.0 and headings[1].target == pytest.approx(12.0, abs=1.0)
     fast = np.interp(t, [0.0, 40.0, 44.0, 160.0], [0.0, 0.0, 12.0, 12.0])                # 3°/s: within a smoothing window
-    reading = ins.read_instructions(_track(item, t, fast, level, speed), v)
+    reading = ins.read_instructions(_track(item, t, fast, level, speed), v, RUNWAYS)
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert [i.word for i in headings] == [0, v.heading_bin(12.0)] and abs(headings[1].issued_s - 40.0) <= 4.0
     assert abs(headings[1].settled_s - 44.0) <= 6.0
     three = np.interp(t, [0.0, 40.0, 44.0, 160.0], [0.0, 0.0, 3.0, 3.0])
-    reading = ins.read_instructions(_track(item, t, three, level, speed), v)
-    assert [i.kind for i in reading.instructions] == ["heading", "altitude", "speed"] and not reading.absorbed
+    reading = ins.read_instructions(_track(item, t, three, level, speed), v, RUNWAYS)
+    assert [i.kind for i in reading.instructions] == ["heading", "altitude", "speed", "runway"] and not reading.absorbed
 
 
 def test_a_level_off_is_the_descent_s_target_and_the_last_descent_targets_the_end(flights):
@@ -200,7 +229,7 @@ def test_a_level_off_is_the_descent_s_target_and_the_last_descent_targets_the_en
     item = flights[0]
     t = np.arange(0.0, 300.0, 2.0)
     height = np.interp(t, [0.0, 20.0, 142.0, 182.0, 298.0], [5000 * ins.FT, 5000 * ins.FT, 3000 * ins.FT, 3000 * ins.FT, 1100 * ins.FT])
-    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), height, np.full(len(t), 80.0)), v)
+    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), height, np.full(len(t), 80.0)), v, RUNWAYS)
     altitudes = [i for i in reading.instructions if i.kind == "altitude"]
     assert [i.word for i in altitudes] == [5, 3, 1] and altitudes[0].issued_s == 0.0
     assert 20.0 <= altitudes[1].issued_s <= 20.0 + 12.0 and 142.0 - 12.0 <= altitudes[1].settled_s <= 142.0 + 2.0
@@ -215,11 +244,11 @@ def test_a_clamped_target_reaches_the_instruction_and_an_orbit_is_absorbed(fligh
     item = flights[0]
     t = np.arange(0.0, 200.0, 2.0)
     high = np.full(len(t), 11_000 * ins.FT)
-    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), high, np.full(len(t), 80.0)), v)
+    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), high, np.full(len(t), 80.0)), v, RUNWAYS)
     altitude = next(i for i in reading.instructions if i.kind == "altitude")
     assert altitude.word == v.altitude_words - 1 and altitude.clamped
     orbit = np.interp(t, [0.0, 30.0, 150.0, 200.0], [0.0, 0.0, 360.0, 360.0])
-    reading = ins.read_instructions(_track(item, t, orbit, np.full(len(t), 800.0), np.full(len(t), 80.0)), v)
+    reading = ins.read_instructions(_track(item, t, orbit, np.full(len(t), 800.0), np.full(len(t), 80.0)), v, RUNWAYS)
     assert [i.word for i in reading.instructions if i.kind == "heading"] == [0]
     assert len(reading.absorbed) == 1 and reading.absorbed[0].kind == "heading" and abs(reading.absorbed[0].change) >= 180.0
     assert (reading.words[:, 0] == 0).all() and reading.to_dict()["absorbed"][0]["kind"] == "heading"
@@ -257,13 +286,13 @@ def test_the_intercept_is_the_last_heading_instruction_not_a_wiggle_after_the_ca
     t = np.arange(0.0, 300.0, 2.0)
     level, speed = np.full(len(t), 600.0), np.full(len(t), 75.0)
     course = np.interp(t, [0.0, 60.0, 90.0, 200.0, 206.0, 240.0, 246.0, 300.0], [-90.0, -90.0, 0.0, 0.0, 4.6, 4.6, 0.0, 0.0])
-    reading = ins.read_instructions(_capture(item, t, course, level, speed), v)
+    reading = ins.read_instructions(_capture(item, t, course, level, speed), v, RUNWAYS)
     intercept = [i for i in reading.instructions if i.kind == "intercept"]
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert [i.word for i in headings] == [27, 0] and len(intercept) == 1
     assert intercept[0].issued_s == headings[1].issued_s and intercept[0].target == pytest.approx(90.0, abs=2.0) and intercept[0].word == 2
     assert any(a.kind == "heading" and a.reason == ins.ABSORBED_SAME_WORD for a in reading.absorbed)      # the wobble stays in bin 0
-    straight = ins.read_instructions(_capture(item, t, np.zeros(len(t)), level, speed), v)
+    straight = ins.read_instructions(_capture(item, t, np.zeros(len(t)), level, speed), v, RUNWAYS)
     assert not [i for i in straight.instructions if i.kind == "intercept"] and straight.established_from_start
 
 
@@ -277,11 +306,11 @@ def test_a_straight_in_never_carries_an_intercept_and_a_record_opening_inside_th
     t = np.arange(0.0, 200.0, 2.0)
     level, speed = np.full(len(t), 500.0), np.full(len(t), 75.0)
     wobble = np.interp(t, [0.0, 6.0, 12.0, 200.0], [5.0, -5.0, 0.0, 0.0])
-    reading = ins.read_instructions(_capture(item, t, wobble, level, speed), v)
+    reading = ins.read_instructions(_capture(item, t, wobble, level, speed), v, RUNWAYS)
     assert reading.established_from_start and not [i for i in reading.instructions if i.kind == "intercept"]
     assert (reading.words[:, 3] == ins.NO_INTERCEPT).all()
     opening = np.interp(t, [0.0, 30.0, 200.0], [-40.0, 0.0, 0.0])
-    reading = ins.read_instructions(_capture(item, t, opening, level, speed), v)
+    reading = ins.read_instructions(_capture(item, t, opening, level, speed), v, RUNWAYS)
     intercept = [i for i in reading.instructions if i.kind == "intercept"]
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert not reading.established_from_start and len(intercept) == 1 and len(headings) == 1
@@ -298,11 +327,11 @@ def test_a_pause_inside_a_descent_and_a_drift_with_no_plateau_produce_no_word(fl
     t = np.arange(0.0, 300.0, 2.0)
     speed = np.full(len(t), 75.0)
     height = np.interp(t, [0.0, 40.0, 206.0, 210.0, 300.0], [1500.0, 1500.0, 1000.0, 1000.0, 730.0])
-    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), height, speed), v)
+    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), height, speed), v, RUNWAYS)
     altitudes = [i for i in reading.instructions if i.kind == "altitude"]
     assert [i.word for i in altitudes] == [v.altitude_bin(1500.0)[0], v.altitude_bin(730.0)[0]] and altitudes[1].settled_s is None
     drift = t * 0.3
-    reading = ins.read_instructions(_track(item, t, drift, np.full(len(t), 800.0), speed), v)
+    reading = ins.read_instructions(_track(item, t, drift, np.full(len(t), 800.0), speed), v, RUNWAYS)
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert len(headings) == 1 and headings[0].settled_s is None and headings[0].word == v.heading_bin(float(drift[-1]))
     assert not [i for i in reading.instructions if i.kind == "intercept"]
@@ -316,7 +345,7 @@ def test_refusals_at_the_boundary(flights):
     with pytest.raises(ValueError, match="non-finite"):
         ins.course_frame(replace(item, values=values))
     with pytest.raises(ValueError, match="has no manoeuvre to read"):
-        ins.read_instructions(replace(item, times=item.times[:1], values=item.values[:1]), ins.Vocabulary())
+        ins.read_instructions(replace(item, times=item.times[:1], values=item.values[:1]), ins.Vocabulary(), RUNWAYS)
     with pytest.raises(ValueError, match="at least 3 rows"):
         ins.plateaus(np.zeros(10), 1.0, 2)
     with pytest.raises(ValueError, match="at most plateau_min_s"):
@@ -346,7 +375,7 @@ def test_the_synthetic_arrival_reads_as_one_intercept_turn_a_descent_to_the_thre
     threshold speed's bin, every position carries the three words in force."""
     v = ins.Vocabulary()
     for item in flights:
-        reading = ins.read_instructions(item, v)
+        reading = ins.read_instructions(item, v, RUNWAYS)
         headings = [i for i in reading.instructions if i.kind == "heading"]
         assert headings[0].issued_s == item.times[0] and headings[0].word == v.heading_bin(headings[0].target)
         intercept = [i for i in reading.instructions if i.kind == "intercept"]
@@ -366,7 +395,16 @@ def test_the_synthetic_arrival_reads_as_one_intercept_turn_a_descent_to_the_thre
         at = float(frame["ground_speed_mps"][-1]) if speeds[-1].settled_s is None else float(np.interp(speeds[-1].settled_s, frame["t"], frame["ground_speed_mps"]))
         assert abs(speeds[-1].target - at) < 2 * v.speed_tolerance_mps + 1.0
         assert reading.positions_s[0] == item.times[0] and np.all(np.diff(reading.positions_s) == v.token_step_s)
-        assert reading.words.shape == (len(reading.positions_s), 4) and (reading.words[:, :3] >= 0).all()
+        # FIVE columns since D62: heading / altitude / speed / intercept / runway
+        assert reading.words.shape == (len(reading.positions_s), 5) and (reading.words[:, :3] >= 0).all()
+        # the runway is said at the first position and stands for the whole sentence
+        assert reading.runway == RUNWAY and (reading.words[:, 4] == RUNWAYS.index(RUNWAY)).all()
+        runways = [i for i in reading.instructions if i.kind == "runway"]
+        assert len(runways) == 1 and runways[0].issued_s == item.times[0]
+        # a threshold has a NAME, not a number, so there is no continuous value it was binned from.
+        # It is NOT NaN: `write_json_atomic` allows NaN, which Python reads back and strict JSON
+        # readers (jq, JSON.parse) refuse — and the sentences files are read by both.
+        assert runways[0].target == ins.NO_TARGET and not math.isnan(runways[0].target)
         # the words in force: the intercept is absent before its turn, present from it on
         if intercept:
             first_intercept = np.searchsorted(reading.positions_s, intercept[0].issued_s)
@@ -391,10 +429,10 @@ def test_a_track_that_is_already_on_the_course_and_level_carries_only_its_starti
     values = np.column_stack((e, nn, np.full(n, u), np.full(n, speed * math.cos(course)), np.full(n, speed * math.sin(course)), np.zeros(n)))
     straight = replace(item, times=t, values=values, supervision_times=t, supervision_values=values,
                        supervision_weights=np.full(values.shape, 1.0 / values.shape[1]))
-    reading = ins.read_instructions(straight, ins.Vocabulary())
-    assert [i.kind for i in reading.instructions] == ["heading", "altitude", "speed"] and all(i.issued_s == 0.0 for i in reading.instructions)
+    reading = ins.read_instructions(straight, ins.Vocabulary(), RUNWAYS)
+    assert [i.kind for i in reading.instructions] == ["heading", "altitude", "speed", "runway"] and all(i.issued_s == 0.0 for i in reading.instructions)
     words = {i.kind: i.word for i in reading.instructions}
-    assert words == {"heading": 0, "altitude": 2, "speed": 5} and reading.established_from_start          # 150 kt: (150 − 100) / 10
+    assert words == {"heading": 0, "altitude": 2, "speed": 5, "runway": RUNWAYS.index(RUNWAY)} and reading.established_from_start   # 150 kt: (150 − 100) / 10
     assert (reading.words[:, 3] == ins.NO_INTERCEPT).all() and len(reading.positions_s) == 8      # 78 s at τ = 10 s
 
 
@@ -405,8 +443,10 @@ def test_the_words_in_force_at_a_time_and_the_executor_s_view_of_them():
     intercept flag) and the segment positions are Δ / τ of them."""
     v = ins.Vocabulary()
     positions = np.array([0.0, 10.0, 20.0, 30.0])
-    words = np.array([[18, 3, 4, ins.NO_INTERCEPT], [18, 3, 4, ins.NO_INTERCEPT], [18, 3, 4, ins.NO_INTERCEPT], [27, 3, 4, 1]])
-    reading = ins.Reading("d", "f", (), positions, words, False, 35.0)
+    rwy = RUNWAYS.index(RUNWAY)
+    words = np.array([[18, 3, 4, ins.NO_INTERCEPT, rwy], [18, 3, 4, ins.NO_INTERCEPT, rwy],
+                      [18, 3, 4, ins.NO_INTERCEPT, rwy], [27, 3, 4, 1, rwy]])
+    reading = ins.Reading("d", "f", (), positions, words, RUNWAY, False, 35.0)
     assert reading.words_at(np.array([0.0, 9.9, 27.0, 30.0, 95.0])).tolist() == [words[0].tolist(), words[0].tolist(), words[2].tolist(), words[3].tolist(), words[3].tolist()]
     with pytest.raises(ValueError, match="before the record's start"):
         reading.words_at(np.array([-1.0]))
@@ -419,17 +459,81 @@ def test_the_words_in_force_at_a_time_and_the_executor_s_view_of_them():
     assert cond[0, 0] == pytest.approx(-1.0) and abs(cond[0, 1]) < 1e-6 and cond[0, 4] == 0.0          # downwind, no intercept
     assert cond[1, 0] == pytest.approx(0.0, abs=1e-6) and cond[1, 1] == pytest.approx(-1.0) and cond[1, 4] == pytest.approx(2 / 3)  # −90° base, bin 1
     assert cond[0, 2] == pytest.approx(3 * v.altitude_bin_m / v.altitude_max_m) and cond[0, 3] == pytest.approx(v.speed_centre_mps(4) / v.speed_max_mps)
+    # the RUNWAY column is read in (the words are [P, 5]) but never conditioned on: the executor
+    # already works in that runway's frame, so a second runway word changes no feature (D62)
+    other = words.copy()
+    other[:, 4] = 1
+    assert np.array_equal(v.conditioning(other), v.conditioning(words)) and v.CONDITIONED_KINDS == ins.MANDATORY_KINDS + ("intercept",)
     with pytest.raises(ValueError, match="words are"):
         v.conditioning(np.zeros((2, 3)))
+    with pytest.raises(ValueError, match="words are"):
+        v.conditioning(np.zeros((2, 4)))                                 # four columns is the PRE-D62 sentence
 
 
 def test_the_sentence_holds_the_latest_word_of_each_kind_and_refuses_a_kind_with_no_word_at_the_start():
     words = [ins.Instruction("heading", 18, 180.0, 0.0, 0.0), ins.Instruction("altitude", 3, 900.0, 0.0, 0.0),
-             ins.Instruction("speed", 4, 80.0, 0.0, 0.0), ins.Instruction("heading", 27, -90.0, 25.0, 40.0),
+             ins.Instruction("speed", 4, 80.0, 0.0, 0.0), ins.Instruction("runway", 1, float("nan"), 0.0, 0.0),
+             ins.Instruction("heading", 27, -90.0, 25.0, 40.0),
              ins.Instruction("heading", 0, 0.0, 61.0, 90.0), ins.Instruction("intercept", 1, 40.0, 61.0, 90.0)]
     positions, table = ins.sentence(words, 0.0, 100.0, 10.0)
     assert positions.tolist() == [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
+    assert table.shape == (11, 5)                                                        # five columns since D62
     assert table[:, 0].tolist() == [18, 18, 18, 27, 27, 27, 27, 0, 0, 0, 0]              # issued at 25 s → in force from the 30 s position
     assert table[:, 3].tolist() == [-1] * 7 + [1] * 4 and (table[:, 1] == 3).all() and (table[:, 2] == 4).all()
+    assert (table[:, 4] == 1).all()                                                      # the runway word holds the whole sentence
     with pytest.raises(ValueError, match="no word in force"):
         ins.sentence(words[:2], 0.0, 100.0, 10.0)
+
+
+def test_a_sentence_without_a_runway_word_is_refused_rather_than_indexing_an_embedding_at_minus_one():
+    """The intercept may be absent; the runway may NOT.
+
+    Its column feeds `nn.Embedding`, where −1 silently reads the LAST runway instead of raising —
+    a wrong answer with no symptom. The agent that propagated D62 flagged this and left it; the
+    guard now covers every kind but the intercept.
+    """
+    v = ins.Vocabulary()
+    heading = ins.Instruction("heading", 0, 0.0, 0.0, 0.0, False)
+    altitude = ins.Instruction("altitude", 0, 0.0, 0.0, 0.0, False)
+    speed = ins.Instruction("speed", 5, 0.0, 0.0, 0.0, False)
+    runway = ins.Instruction("runway", 2, float("nan"), 0.0, 0.0, False)
+    positions, words = ins.sentence([heading, altitude, speed, runway], 0.0, 30.0, v.token_step_s)
+    assert words.shape == (len(positions), len(ins.INSTRUCTION_KINDS))
+    assert (words[:, ins.INSTRUCTION_KINDS.index("runway")] == 2).all()
+    assert (words[:, ins.INSTRUCTION_KINDS.index("intercept")] == ins.NO_INTERCEPT).all()   # allowed
+    with pytest.raises(ValueError, match="runway"):
+        ins.sentence([heading, altitude, speed], 0.0, 30.0, v.token_step_s)
+
+
+def _on_runway(flights, ident: str):
+    """The first fixture flight, relabelled onto another threshold.
+
+    Only the SOURCE's `runway` moves: the word is read from the manifest's ident, not from the
+    geometry, so this is exactly the input `read_instructions` looks at.
+    """
+    item = flights[0]
+    scenario = replace(item.scenario, source={**item.scenario.source, "runway": ident})
+    return replace(item, scenario=scenario)
+
+
+def test_the_runway_word_is_the_FLIGHT_S_own_class_not_a_constant(flights):
+    """The fixtures' own runway sorts FIRST, so every other assertion compares the word to 0.
+
+    A labeller that wrote a constant 0 — or another flight's runway — would pass the rest of this
+    file. Pin a flight whose runway is NOT index 0 (review finding, 2026-09-20).
+    """
+    v = ins.Vocabulary()
+    other = RUNWAYS.idents[-1]
+    assert other != RUNWAY and RUNWAYS.index(other) != 0, "the fixture must exercise a non-zero class"
+    item = _on_runway(flights, other)
+    reading = ins.read_instructions(item, v, RUNWAYS)
+    assert ins.flight_runway(item) == other
+    assert reading.runway == other
+    assert (reading.words[:, ins.INSTRUCTION_KINDS.index("runway")] == RUNWAYS.index(other)).all()
+
+
+def test_a_runway_the_vocabulary_was_not_built_on_raises_rather_than_falling_back(flights):
+    v = ins.Vocabulary()
+    item = _on_runway(flights, "99Z")
+    with pytest.raises(ValueError, match="99Z"):
+        ins.read_instructions(item, v, RUNWAYS)

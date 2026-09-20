@@ -91,9 +91,10 @@ def _dynamics_batch(
     if config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION:
         # `predict`'s one-shot forecast: the truth's words in force over the segment at the
         # anchor's own time (the closed loop feeds its own, by flown position — lockstep.py)
-        vocabulary = load_vocabulary_for(config)
+        vocabulary, runway_vocabulary = load_vocabulary_for(config)
         for item, row in zip(series, rows, strict=True):
-            row.update(instruction_context(read_instructions(item, vocabulary), float(item.times[anchor]), config, vocabulary))
+            reading = read_instructions(item, vocabulary, runway_vocabulary)
+            row.update(instruction_context(reading, float(item.times[anchor]), config, vocabulary))
     if config.cta_conditioning != CTA_CONDITIONING_OFF:
         given = (
             np.asarray(cta_s, dtype=np.float64) if cta_s is not None

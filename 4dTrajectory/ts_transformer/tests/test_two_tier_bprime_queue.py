@@ -47,7 +47,8 @@ def _declaration(tmp_path: Path, vocabulary: Path) -> dict:
 
 @pytest.fixture
 def declared(tmp_path):
-    vocabulary = ins.write_vocabulary(tmp_path, ins.Vocabulary(), cohort_identity={}, counts={}, source={})
+    vocabulary = ins.write_vocabulary(tmp_path, ins.Vocabulary(), runway_vocabulary=ins.RunwayVocabulary.from_idents(["05L", "23R"]),
+                                      cohort_identity={}, counts={}, source={})
     declaration = _declaration(tmp_path, vocabulary)
     path = tmp_path / "arms.json"
     path.write_text(json.dumps(declaration), encoding="utf-8")

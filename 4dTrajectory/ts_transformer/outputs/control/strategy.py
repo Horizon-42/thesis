@@ -169,12 +169,15 @@ class ControlContext(WindowContext):
         # The instruction token's source (plan_conditioning='instruction'): every eligible
         # flight's words, read ONCE here from the artefact the config names; a row takes the
         # words in force over the segment at its anchor (`instruction_context`).
-        self.vocabulary = load_vocabulary_for(self.config) if self.config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION else None
-        self.readings = (
-            {} if self.vocabulary is None
-            else {windows.series[int(index)].dataset_id: read_instructions(windows.series[int(index)], self.vocabulary)
-                  for index in windows.eligible_series}
-        )
+        if self.config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION:
+            self.vocabulary, self.runway_vocabulary = load_vocabulary_for(self.config)
+            self.readings = {
+                windows.series[int(index)].dataset_id:
+                    read_instructions(windows.series[int(index)], self.vocabulary, self.runway_vocabulary)
+                for index in windows.eligible_series
+            }
+        else:
+            self.vocabulary, self.runway_vocabulary, self.readings = None, None, {}
         self._rows: list[dict[str, np.ndarray]] | None = None
         self._fixed_dt: tuple[FixedDTSupervisionRow, ...] | None = None
         if windows.cache_context_rows:
@@ -423,7 +426,7 @@ class ControlStrategy(OutputStrategy):
     ) -> dict[str, torch.Tensor] | None:
         dynamics = probe_dynamics(batch_size, device, config)
         if config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION:
-            dynamics.update(probe_instruction_context(config, load_vocabulary_for(config), batch_size, device))
+            dynamics.update(probe_instruction_context(config, load_vocabulary_for(config)[0], batch_size, device))
         return dynamics
 
     def probe_dense_supervision(
@@ -530,7 +533,7 @@ class ControlStrategy(OutputStrategy):
         config's path must still carry the sha the checkpoint stored."""
         if config.plan_conditioning != PLAN_CONDITIONING_INSTRUCTION:
             return
-        stored, current = payload["instruction_vocabulary_sha256"], load_vocabulary_for(config).sha256
+        stored, current = payload["instruction_vocabulary_sha256"], load_vocabulary_for(config)[0].sha256
         if stored != current:
             raise ValueError(
                 f"{config.instruction_vocabulary}: the vocabulary's sha {current[:12]}… is not the one this "

@@ -32,6 +32,8 @@ from ts_transformer.tests.support import AIRPORT, RUNWAY, fake_data_provenance
 from ts_transformer.training.train import load_checkpoint, train
 
 SEGMENT_S = 20.0
+#: The runway word's classes the artefact carries beside the spec (D62); these flights land on RUNWAY.
+RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY, "23R"])
 
 
 def _settings(**overrides) -> dict:
@@ -48,7 +50,8 @@ def _settings(**overrides) -> dict:
 @pytest.fixture(scope="module")
 def vocabulary_path(tmp_path_factory) -> str:
     folder = tmp_path_factory.mktemp("vocabulary")
-    path = ins.write_vocabulary(folder, ins.Vocabulary(), cohort_identity={"name": "synthetic"}, counts={}, source={})
+    path = ins.write_vocabulary(folder, ins.Vocabulary(), runway_vocabulary=RUNWAYS,
+                                cohort_identity={"name": "synthetic"}, counts={}, source={})
     return str(path)
 
 
@@ -79,8 +82,9 @@ def test_the_config_binds_the_vocabulary_path_to_the_instruction_plan(vocabulary
 
 def test_the_artefact_is_read_for_the_instruction_plan_only_and_the_segment_must_be_whole_steps(vocabulary_path):
     config = TSConfig(**_settings(plan_conditioning=PLAN_CONDITIONING_INSTRUCTION, instruction_vocabulary=vocabulary_path))
-    vocabulary = tok.load_vocabulary_for(config)
-    assert vocabulary == ins.Vocabulary() and tok.instruction_positions(config, vocabulary) == 2
+    vocabulary, runways = tok.load_vocabulary_for(config)
+    # the artefact hands back the spec AND the cohort's runway classes; only the spec is hashed
+    assert vocabulary == ins.Vocabulary() and runways == RUNWAYS and tok.instruction_positions(config, vocabulary) == 2
     assert tok.instruction_token_width(config, vocabulary) == 2 * ins.Vocabulary.CONDITIONING_WIDTH
     with pytest.raises(ValueError, match="reads no instruction vocabulary"):
         tok.load_vocabulary_for(TSConfig(**_settings()))
@@ -90,9 +94,9 @@ def test_the_artefact_is_read_for_the_instruction_plan_only_and_the_segment_must
 
 def test_the_token_is_the_words_in_force_over_the_segment_at_the_bin_centres(world):
     config, series, _executor = world
-    vocabulary = tok.load_vocabulary_for(config)
+    vocabulary, runways = tok.load_vocabulary_for(config)
     item = series[0]
-    reading = ins.read_instructions(item, vocabulary)
+    reading = ins.read_instructions(item, vocabulary, runways)
     start = float(item.times[10])
     token = tok.instruction_context(reading, start, config, vocabulary)[tok.INSTRUCTION_KEY]
     assert token.shape == (2, ins.Vocabulary.CONDITIONING_WIDTH) and token.dtype == np.float32
@@ -140,7 +144,7 @@ def test_the_checkpoint_binds_to_the_vocabulary_s_sha(world, tmp_path):
     strategy.verify_checkpoint_payload(config, extras)                                   # the artefact still matches
     with pytest.raises(ValueError, match="is not the one this executor trained against"):
         strategy.verify_checkpoint_payload(config, {"instruction_vocabulary_sha256": "0" * 64})
-    other = ins.write_vocabulary(tmp_path, ins.Vocabulary(token_step_s=5.0), cohort_identity={}, counts={}, source={})
+    other = ins.write_vocabulary(tmp_path, ins.Vocabulary(token_step_s=5.0), runway_vocabulary=RUNWAYS, cohort_identity={}, counts={}, source={})
     moved = replace(config, instruction_vocabulary=str(other))
     with pytest.raises(ValueError, match="is not the one this executor trained against"):
         strategy.verify_checkpoint_payload(moved, extras)
@@ -160,7 +164,7 @@ def test_a_trained_instruction_executor_round_trips_through_the_checkpoint(tmp_p
     # the artefact rewritten under other bins: refused by sha; gone: refused by name
     moved = tmp_path / "moved"
     moved.mkdir()
-    other = ins.write_vocabulary(moved, ins.Vocabulary(token_step_s=5.0), cohort_identity={}, counts={}, source={})
+    other = ins.write_vocabulary(moved, ins.Vocabulary(token_step_s=5.0), runway_vocabulary=RUNWAYS, cohort_identity={}, counts={}, source={})
     stored = dict(payload)
     stored["config"] = {**payload["config"], "instruction_vocabulary": str(other)}
     torch.save(stored, tmp_path / "other.pt")
@@ -177,8 +181,8 @@ def test_the_closed_loop_feeds_the_truth_s_words_by_flown_position_and_the_proto
     the token `predict` builds at the same anchor (the ONE source), every round records where its
     words came from, and the executor, the protocol and the feed must agree."""
     config, series, executor = world
-    vocabulary = tok.load_vocabulary_for(config)
-    feed = ls.InstructionFeed.read(vocabulary, series)
+    vocabulary, runways = tok.load_vocabulary_for(config)
+    feed = ls.InstructionFeed.read(vocabulary, runways, series)
     cpu = torch.device("cpu")
     a0 = int(config.seq_len) - 1
     # round 0 == predict: the same reading, the anchor's own row, distance 0
@@ -212,10 +216,14 @@ def test_the_closed_loop_feeds_the_truth_s_words_by_flown_position_and_the_proto
     with pytest.raises(ValueError, match="needs instruction feed"):
         ls.fly(executor, series, device=cpu, batch_size=2, protocol=ls.PROTOCOL_TRUTH_INSTRUCTION)
     with pytest.raises(ValueError, match="holds no reading"):
-        ls.fly(executor, series, device=cpu, batch_size=2, protocol=ls.PROTOCOL_TRUTH_INSTRUCTION, feed=ls.InstructionFeed.read(vocabulary, series[:1]))
+        ls.fly(executor, series, device=cpu, batch_size=2, protocol=ls.PROTOCOL_TRUTH_INSTRUCTION, feed=ls.InstructionFeed.read(vocabulary, runways, series[:1]))
     with pytest.raises(ValueError, match="another vocabulary"):
         ls.fly(executor, series, device=cpu, batch_size=2, protocol=ls.PROTOCOL_TRUTH_INSTRUCTION,
-               feed=ls.InstructionFeed(ins.Vocabulary(token_step_s=5.0), feed.readings))
+               feed=ls.InstructionFeed(ins.Vocabulary(token_step_s=5.0), runways, feed.readings))
+    # other runway CLASSES are another vocabulary too: the same word index would mean another threshold
+    with pytest.raises(ValueError, match="another vocabulary"):
+        ls.fly(executor, series, device=cpu, batch_size=2, protocol=ls.PROTOCOL_TRUTH_INSTRUCTION,
+               feed=ls.InstructionFeed(vocabulary, ins.RunwayVocabulary.from_idents([RUNWAY]), feed.readings))
     plain = TSConfig(**_settings())
     torch.manual_seed(1)
     no_token = ls.Executor(model=build_model(plain).eval(), config=plain, normalizer=executor.normalizer)

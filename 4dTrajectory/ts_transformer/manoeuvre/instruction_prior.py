@@ -1,13 +1,16 @@
 """The instruction prior (two-tier v3 stage B, plan §5.2.2 "预训练"; B′-dev3): a causal
-Transformer over one flight's sentence that says, at every position, the four words in force at
+Transformer over one flight's sentence that says, at every position, the five words in force at
 the NEXT position — one softmax per kind (factorised heads) — and whether the flight has landed
 instead.
 
     [TYPE] [RWY]  [w_0, x_0] [w_1, x_1] … [w_T, x_T]
-        →  at t: p(heading_{t+1}), p(altitude_{t+1}), p(speed_{t+1}), p(intercept_{t+1}), p(landed after t)
+        →  at t: p(heading_{t+1}), p(altitude_{t+1}), p(speed_{t+1}), p(intercept_{t+1}),
+                 p(runway_{t+1}), p(landed after t)
 
-Tokens: the sum of the four word embeddings (the intercept's table has one extra row for "no
-capture yet"), the state token (`instruction_sequences.state_token`, six features through a
+Tokens: the sum of the five word embeddings (the intercept's table has one extra row for "no
+capture yet"; the runway's classes are the cohort's thresholds, `instructions.RunwayVocabulary`,
+which is why `PriorConfig.words` carries their count rather than reading it off the spec), the
+state token (`instruction_sequences.state_token`, six features through a
 linear layer) and the position; two context tokens (aircraft type, runway) sit in front and
 every position reads them and its past. Teacher forcing on the truth's sentence; the closed-loop
 fine-tuning (D55) feeds `InstructionSequence`s whose states were flown and whose targets are the
@@ -15,8 +18,8 @@ truth's words at the same absolute time — the same batch, the same loss.
 
 Readings (`evaluate`): per kind the next-word NLL and top-1; the FLIP rate (the prior changes a
 word the truth holds — an unforced instruction), the MISS rate (the truth changes and the prior
-holds) and the change recall; top-k coverage per kind and JOINT top-K coverage over the four
-kinds (the truth's 4-tuple among the K best product-of-marginals candidates, searched inside
+holds) and the change recall; top-k coverage per kind and JOINT top-K coverage over the five
+kinds (the truth's 5-tuple among the K best product-of-marginals candidates, searched inside
 each kind's top-8 — what a K-candidate decoder can reach, D55 / D56); the landing decision.
 `hold_baseline` is the reading a prior must beat: "the words stay", and a per-kind Laplace
 bigram P(next | current).
@@ -46,7 +49,9 @@ IGNORE = -100
 TOP_K = (1, 2, 4, 8)
 JOINT_TOP_K = (2, 4, 8)
 JOINT_SEARCH = 8
-#: Positions `_joint_ranks` scores at once (its candidate tensor is [rows, JOINT_SEARCH ** 4]).
+#: Positions `_joint_ranks` scores at once (its candidate tensor is [rows, Π_kind min(JOINT_SEARCH,
+#: classes)] — at most JOINT_SEARCH ** len(INSTRUCTION_KINDS), in practice far less: the intercept
+#: has 4 classes and the runway one per threshold).
 JOINT_CHUNK = 2048
 if max(JOINT_TOP_K) > JOINT_SEARCH:
     raise RuntimeError("the joint top-K is searched inside each kind's top-JOINT_SEARCH: K cannot exceed it")
@@ -56,8 +61,10 @@ if NO_INTERCEPT != -1:
 
 @dataclass(frozen=True)
 class PriorConfig:
-    """The prior's shape. ``words`` are the vocabulary's word counts per kind (the intercept head
-    gets one more class, "none"); ``vocabulary_sha256`` binds the checkpoint to the artefact."""
+    """The prior's shape. ``words`` are the word counts per kind (the intercept head gets one
+    more class, "none") — `Vocabulary.words` for the four spec'd kinds plus the RUNWAY's class
+    count, which is the cohort's (`instructions.RunwayVocabulary`), not the spec's;
+    ``vocabulary_sha256`` binds the checkpoint to the artefact."""
 
     words: dict[str, int]
     type_count: int
@@ -92,7 +99,8 @@ class PriorConfig:
 
 def shift_words(words: np.ndarray) -> np.ndarray:
     """Word indices as the embedding tables index them: the intercept column moved up by one so
-    `NO_INTERCEPT` is row 0."""
+    `NO_INTERCEPT` is row 0. The INTERCEPT is the only shifted column — every other kind's word,
+    the runway's included, is already ≥ 0 and indexes its table directly."""
     shifted = np.asarray(words, dtype=np.int64).copy()
     shifted[..., INSTRUCTION_KINDS.index("intercept")] += 1
     return shifted
@@ -106,8 +114,8 @@ def unshift_words(indices: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True)
 class PriorBatch:
-    """Padded to the longest flight: ``words`` ``[B, L, 4]`` (the inputs, shifted), ``states``
-    ``[B, L, 6]``, ``valid`` ``[B, L]``, ``targets`` ``[B, L, 4]`` (the next position's words,
+    """Padded to the longest flight: ``words`` ``[B, L, 5]`` (the inputs, shifted), ``states``
+    ``[B, L, 6]``, ``valid`` ``[B, L]``, ``targets`` ``[B, L, 5]`` (the next position’s words,
     shifted; IGNORE where none — the last position of a sequence that ends at the landing),
     ``landed`` ``[B, L]`` (1.0 at that position), ``type_index`` ``[B]``, ``runway`` ``[B, 2]``."""
 
@@ -241,10 +249,10 @@ def _batches(sequences: Sequence[InstructionSequence], config: PriorConfig, type
 
 
 def _joint_ranks(logits: dict[str, torch.Tensor], targets: torch.Tensor, has_next: torch.Tensor) -> torch.Tensor:
-    """The truth 4-tuple's rank (0 = best; a tie counts as beaten) among the product-of-marginals
+    """The truth 5-tuple’s rank (0 = best; a tie counts as beaten) among the product-of-marginals
     candidates built from each kind's top-`JOINT_SEARCH` words, at every position with a next;
     a truth word outside a kind's top-`JOINT_SEARCH` ranks past every candidate
-    (`JOINT_SEARCH ** 4`). Scored `JOINT_CHUNK` positions at a time."""
+    (`JOINT_SEARCH ** len(INSTRUCTION_KINDS)`). Scored `JOINT_CHUNK` positions at a time."""
     rows = has_next.flatten()
     logp = {kind: F.log_softmax(logits[kind].flatten(0, 1)[rows].float(), dim=-1) for kind in INSTRUCTION_KINDS}
     target = {column: targets[..., column].flatten()[rows] for column in range(len(INSTRUCTION_KINDS))}
@@ -277,7 +285,13 @@ def _rate(numerator: int, denominator: int) -> float | None:
 @torch.no_grad()
 def evaluate(model: InstructionPrior, sequences: Sequence[InstructionSequence], types: TypeVocabulary, *,
              batch_size: int, device: torch.device, joint: bool = True) -> dict[str, Any]:
-    """The loss parts (token-weighted over the set) and the readings the module docstring names.
+    """
+    CAVEAT while D66 is unimplemented: the labeller writes the runway word CONSTANT for a flight,
+    and the same word is an input column, so ``top1["runway"]`` is ~1.0, ``change_share`` is 0 and
+    the joint top-K scores a tuple whose runway element is free. ``next`` is now the sum of FIVE
+    cross-entropies and is not comparable with any number from before D62. Any readout that quotes
+    these must say so, or the runway column reads as skill.
+The loss parts (token-weighted over the set) and the readings the module docstring names.
     Denominators: the per-kind NLL, top-1 / top-k and `change_share` are over the positions with a
     next word; `flip_rate` over the positions where the truth HOLDS the kind's word; `miss_rate`
     and `change_recall` over the positions where it CHANGES; the landing figures over every

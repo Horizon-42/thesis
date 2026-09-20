@@ -1,10 +1,10 @@
 """One flight's sentence as the prior reads it (two-tier v3 stage B, plan §5.2.2): at every
-position of the sentence (`instructions.Reading`, one every τ) the four words IN FORCE, the
+position of the sentence (`instructions.Reading`, one every τ) the five words IN FORCE, the
 aircraft's state there, and what the position has to predict — the words at the next position
 and whether the flight has landed instead.
 
-    position t:  input  = words[t] (heading, altitude, speed, intercept) + state[t]
-                 target = words[t + 1]                            (four factorised heads)
+    position t:  input  = words[t] (heading, altitude, speed, intercept, runway) + state[t]
+                 target = words[t + 1]                            (five factorised heads)
                           landed[t] = 1 at the last position      (no next position: the aircraft is down)
 
 A TRUTH sequence carries the truth's own next words as targets. A ROLLED sequence (CAT-K-style
@@ -60,8 +60,8 @@ def state_tokens(times: np.ndarray, values: np.ndarray, query_times: np.ndarray,
 
 @dataclass(frozen=True)
 class InstructionSequence:
-    """``positions_s`` ``[P]``, ``words`` ``[P, 4]`` (in force at each position — the input),
-    ``states`` ``[P, 6]``, ``targets`` ``[P, 4]`` (the words the position predicts: the next
+    """``positions_s`` ``[P]``, ``words`` ``[P, 5]`` (in force at each position — the input),
+    ``states`` ``[P, 6]``, ``targets`` ``[P, 5]`` (the words the position predicts: the next
     position's), the context, and ``ends_at_landing`` — whether the last position is the flight's
     end (its target is then the landing, and its ``targets`` row is unused)."""
 
@@ -109,7 +109,7 @@ def flight_sequence(series: FlightSeries, reading: Reading) -> InstructionSequen
 def rolled_sequence(truth: InstructionSequence, reading: Reading, flown_times: np.ndarray, flown_values: np.ndarray,
                     said_words: np.ndarray, origin: np.ndarray) -> InstructionSequence:
     """A closed-loop sequence (D55): the positions the flown history covers (a prefix of the
-    truth's), the words the loop SAID in force at each (``said_words`` ``[P', 4]``, in the
+    truth's), the words the loop SAID in force at each (``said_words`` ``[P', 5]``, in the
     reading's word space — NOT the prior's shifted classes), the state read off the FLOWN
     polyline (``origin`` = the threshold's chart row), and as targets the TRUTH's words at the
     next position (`Reading.words_at`, by absolute time — what the controller would say to an

@@ -220,7 +220,9 @@ class ControlFeatureModel(nn.Module):
         # the encoder's width is the artefact's and the checkpoint binds to its sha. (The
         # intent-code token that sat here is ARCHIVED 2026-09-20, archive/manoeuvre_codes_2026_09/.)
         self.instruction_given = config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION
-        vocabulary = load_vocabulary_for(config) if self.instruction_given else None
+        # only the SPEC sizes the encoder and binds the checkpoint; the runway classes are the
+        # cohort's and are not part of the executor's conditioning (D62)
+        vocabulary = load_vocabulary_for(config)[0] if self.instruction_given else None
         self.instruction_vocabulary_sha256 = None if vocabulary is None else vocabulary.sha256
         self.instruction_encoder = (
             nn.Sequential(nn.Linear(instruction_token_width(config, vocabulary), config.d_model), nn.GELU())

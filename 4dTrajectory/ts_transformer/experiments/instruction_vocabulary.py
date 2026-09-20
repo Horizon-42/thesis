@@ -1,7 +1,7 @@
 """Read the instruction words of a cohort's tracks and write the vocabulary artefact, the sentences and the hand-check sample (two-tier v3 stage B, step B0′; plan §5.2.1, §5.2.5).
 
     python run_ts.py instruction_vocabulary --executor <ckpt> --cohort <development_cohort.json> --out <dir> \\
-        [--token-step-s 10] [--set FIELD=VALUE ...] [--hand-check 300] [--seed 1337] [--limit N]
+        [--token-step-s 10] [--set FIELD=VALUE ...] [--hand-check 300] [--seed 1337]
 
 The cohort is a development cohort file (D33 / D47: the grid's L60_D60 cohort); its flights are
 rebuilt through the checkpoint's data provenance (`support.rebuild_cohort`, C25) under the
@@ -9,8 +9,10 @@ checkpoint's config — the checkpoint is the door to the data, nothing of it is
 of both splits is read (`instructions.read_instructions`) under the module's starting bins and
 thresholds (D51 / D53) at ``--token-step-s`` (D54). Written under ``--out`` (refused if it exists):
 
-    instruction_vocabulary.json    the spec under its sha, the cohort identity, per-word counts over
-                                   the TRAIN split (the val counts beside them)
+    instruction_vocabulary.json    the spec under its sha, the cohort's runway classes BESIDE it
+                                   (`runway_idents`, D62: per airport, so never in the sha), the
+                                   cohort identity, per-word counts over the TRAIN split (the val
+                                   counts beside them)
     sentences_train.json / sentences_val.json   every flight's instructions and positions
     summary.json / summary.txt     instructions per flight, word shares, plateau residuals,
                                    clamps (stated, never silent), intercept coverage
@@ -44,7 +46,7 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.data.runway_context import wrap_deg
 from ts_transformer.manoeuvre.instructions import (
     ABSORBED_SAME_WORD, ABSORBED_SHORT_TAIL, ABSORBED_SMALL_CHANGE, INSTRUCTION_KINDS, MANDATORY_KINDS, NO_INTERCEPT,
-    Reading, Vocabulary, course_frame, read_instructions, write_vocabulary,
+    Reading, RunwayVocabulary, Vocabulary, course_frame, flight_runway, read_instructions, word_counts, write_vocabulary,
 )
 from ts_transformer.training.train import load_checkpoint_payload
 
@@ -96,8 +98,12 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
     }
 
 
-def render(summary: dict[str, dict[str, Any]], vocabulary: Vocabulary) -> str:
-    lines = [f"instruction vocabulary · words {vocabulary.words} · τ {vocabulary.token_step_s:g} s · sha {vocabulary.sha256[:12]}…", ""]
+def render(summary: dict[str, dict[str, Any]], vocabulary: Vocabulary, runway_vocabulary: RunwayVocabulary) -> str:
+    # the runway's classes are the cohort's, not the spec's (D62): its count comes from the
+    # runway vocabulary, everything else from the hashed spec
+    words = word_counts(vocabulary, runway_vocabulary)
+    lines = [f"instruction vocabulary · words {words} · τ {vocabulary.token_step_s:g} s · sha {vocabulary.sha256[:12]}… "
+             f"· runways {', '.join(runway_vocabulary.idents)}", ""]
     for split, s in summary.items():
         lines.append(f"{split}: {s['flights']} flights, duration p50 {s['duration_s_p50']:.0f} s, positions {s['positions']} "
                      f"({s['positions_with_a_change']} with a change), intercept on {s['intercept_share']:.2f} (a capture from under "
@@ -105,7 +111,7 @@ def render(summary: dict[str, dict[str, Any]], vocabulary: Vocabulary) -> str:
                      f"established from the start {s['established_from_start_share']:.2f}")
         lines.append("  instructions / flight p50 (p95): " + ", ".join(
             f"{k} {s['instructions_per_flight_p50'][k]:.0f} ({s['instructions_per_flight_p95'][k]:.0f})" for k in INSTRUCTION_KINDS))
-        lines.append("  words used: " + ", ".join(f"{k} {s['words_used'][k]}/{vocabulary.words[k]}" for k in INSTRUCTION_KINDS)
+        lines.append("  words used: " + ", ".join(f"{k} {s['words_used'][k]}/{words[k]}" for k in INSTRUCTION_KINDS)
                      + f" · clamped altitude {s['clamped']['altitude']}, speed {s['clamped']['speed']}")
         lines.append("  unclamped target − bin centre p50 (p95): " + ", ".join(
             f"{k} {s['target_to_bin_centre_p50'][k]:.1f} ({s['target_to_bin_centre_p95'][k]:.1f})" for k in s["target_to_bin_centre_p50"]))
@@ -137,12 +143,14 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
     ax.axhline(0.0, color="k", lw=0.6)
     ax.axvline(0.0, color="r", lw=0.8)
     for item in reading.instructions:
+        if item.kind == "runway":
+            continue                    # not a point on the track: it is the frame every other word is read in
         k = int(np.searchsorted(t, item.issued_s))
         ax.plot(-frame["to_go_m"][k] / 1000.0, frame["cross_m"][k] / 1000.0, "o", ms=4,
                 color={"heading": "C1", "altitude": "C2", "speed": "C3", "intercept": "C4"}[item.kind])
     ax.set_xlabel("along the final approach course, km (threshold at 0)")
     ax.set_ylabel("cross-track, km (right +)")
-    ax.set_title(f"{reading.flight_id} · plan view")
+    ax.set_title(f"{reading.flight_id} · runway {reading.runway} · plan view")
     ax.set_aspect("equal", adjustable="datalim")
 
     def steps(ax, signal, kind, centre, unit, period=None):
@@ -187,7 +195,6 @@ def main(argv: list[str] | None = None) -> int:
                         help="override one Vocabulary field (a bin or threshold; not the reading rule or the established rule) for a re-read; repeatable")
     parser.add_argument("--hand-check", type=int, default=300, help="train flights drawn for the human check (0: none)")
     parser.add_argument("--seed", type=int, default=1337)
-    parser.add_argument("--limit", type=int, default=0, help="a PREFIX of each split (a smoke test)")
     args = parser.parse_args(argv)
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
@@ -209,25 +216,33 @@ def main(argv: list[str] | None = None) -> int:
     config = TSConfig.from_dict(payload["config"])
     cohort_path = args.cohort if args.cohort.is_absolute() else REPO_ROOT / args.cohort
     cohort = load_development_cohort(cohort_path)
-    splits = cohort_splits(payload, cohort, args.limit)
+    # NO --limit here, deliberately (removed 2026-09-20 with D62): the runway CLASSES are read off
+    # these flights and they sit OUTSIDE the sha, so a limited run would write a fully valid,
+    # sha-identical artefact whose class set is only a prefix's, and nothing downstream could tell
+    # the difference. This runner reads the whole cohort or it does not write.
+    splits = cohort_splits(payload, cohort, 0)
     series = rebuild_cohort(payload, config, [*splits["train"], *splits["val"]])
     by_split = {"train": series[: len(splits["train"])], "val": series[len(splits["train"]) :]}
     print(f"  {len(series)} flights rebuilt; reading instructions at τ = {vocabulary.token_step_s:g} s", flush=True)
 
-    readings = {name: [read_instructions(item, vocabulary) for item in items] for name, items in by_split.items()}
+    # the runway word's classes: the thresholds BOTH splits land on, sorted (D62) — a per-airport
+    # set, carried beside the spec so the sha stays one vocabulary's across airports
+    runway_vocabulary = RunwayVocabulary.from_idents(flight_runway(item) for item in series)
+    readings = {name: [read_instructions(item, vocabulary, runway_vocabulary) for item in items] for name, items in by_split.items()}
     summary = {name: summarise(items, vocabulary) for name, items in readings.items()}
     out.mkdir(parents=True)
     write_vocabulary(
-        out, vocabulary,
+        out, vocabulary, runway_vocabulary=runway_vocabulary,
         cohort_identity={**development_cohort_audit(cohort_path, cohort), "path": str(cohort_path),
                          "eligible_set_sha256": provenance_eligible_set_digests(payload["data_provenance"])},
         counts={name: summary[name]["word_counts"] for name in summary},
-        source={"executor": str(executor), "executor_sha256": file_sha256(executor), "limit": args.limit or None},
+        source={"executor": str(executor), "executor_sha256": file_sha256(executor)},
     )
     for name, items in readings.items():
         write_json_atomic(out / f"sentences_{name}.json", {"schema": SUMMARY_SCHEMA, "split": name, "vocabulary_sha256": vocabulary.sha256,
+                                                          "runway_idents": list(runway_vocabulary.idents),
                                                           "token_step_s": vocabulary.token_step_s, "flights": [r.to_dict() for r in items]})
-    table = render(summary, vocabulary)
+    table = render(summary, vocabulary, runway_vocabulary)
     (out / "summary.txt").write_text(table, encoding="utf-8")
     print(table)
 
@@ -255,8 +270,8 @@ def main(argv: list[str] | None = None) -> int:
         with (folder / "index.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["file", "flight_id", "stratum", "tortuosity", "established_at_anchor",
-                             *(f"n_{kind}" for kind in MANDATORY_KINDS), "intercept_word", "n_absorbed",
-                             "sentence (heading/altitude/speed/intercept per position)", "verdict (一致 / 漏读 / 误读)", "note"])
+                             *(f"n_{kind}" for kind in MANDATORY_KINDS), "intercept_word", "runway", "n_absorbed",
+                             "sentence (heading/altitude/speed/intercept/runway per position)", "verdict (一致 / 漏读 / 误读)", "note"])
             for k, (stratum, index) in enumerate(chosen):
                 item, reading, d = train[index], readings["train"][index], difficulty[index]
                 name = f"{k:03d}_{reading.flight_id}.png"
@@ -264,14 +279,16 @@ def main(argv: list[str] | None = None) -> int:
                 intercept = next((i.word for i in reading.instructions if i.kind == "intercept"), NO_INTERCEPT)
                 writer.writerow([name, reading.flight_id, STRATUM_SHORT[stratum], f"{d.route_tortuosity:.2f}", d.established_at_anchor,
                                  *(sum(1 for i in reading.instructions if i.kind == kind) for kind in MANDATORY_KINDS),
-                                 intercept, len(reading.absorbed), " ".join("/".join(str(w) for w in row) for row in reading.words), "", ""])
+                                 intercept, reading.runway, len(reading.absorbed),
+                                 " ".join("/".join(str(w) for w in row) for row in reading.words), "", ""])
         draw = {"pages": len(chosen), "per_stratum": half, "seed": args.seed, "anchor": anchor, "split": "train",
                 "pools": {STRATUM_SHORT[name]: len(pool) for name, pool in pools.items()},
                 "in_neither_stratum": len(train) - sum(len(pool) for pool in pools.values())}
         print(f"  hand check: {len(chosen)} flights ({half} per stratum; pools straight-in {len(pools[STRATUM_STRAIGHT_IN])}, "
               f"vectored {len(pools[STRATUM_VECTORED])} of {len(train)} train flights, {draw['in_neither_stratum']} in neither) in {folder}", flush=True)
     write_json_atomic(out / "summary.json", {"schema": SUMMARY_SCHEMA, "written_utc": utc_now(), "vocabulary_sha256": vocabulary.sha256,
-                                            "spec": vocabulary.to_dict(), "splits": summary, "hand_check": draw,
+                                            "spec": vocabulary.to_dict(), "runway_idents": list(runway_vocabulary.idents),
+                                            "splits": summary, "hand_check": draw,
                                             "elapsed_s": time.perf_counter() - started})
     return 0
 

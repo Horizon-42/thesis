@@ -212,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         wanted = wanted[: args.limit]
     series = rebuild_cohort(payload, config, wanted)
     # the instruction feed is read on the WHOLE record of every flight, before any cut below
-    feed = ls.InstructionFeed.read(load_vocabulary_for(config), series) if args.protocol == ls.PROTOCOL_TRUTH_INSTRUCTION else None
+    feed = ls.InstructionFeed.read(*load_vocabulary_for(config), series) if args.protocol == ls.PROTOCOL_TRUTH_INSTRUCTION else None
     a0 = default_anchor_of(config)
     first_rows = {item.dataset_id: a0 for item in series}
     if args.anchor_remaining_km:

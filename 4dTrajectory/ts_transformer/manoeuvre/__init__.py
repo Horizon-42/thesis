@@ -18,7 +18,7 @@ What is here, one module each:
     instructions the instruction vocabulary and the labeller (stage B, 2026-09-20): a track read
                  back as the controller's words — a LEAF the control path reads for its token
     instruction_sequences / instruction_prior   the sentence with states, and the causal prior
-                 over it (four factorised heads + landed)
+                 over it (five factorised heads — the runway among them, D62 — + landed)
     lockstep     the closed loop: one round = `executed_step_s`; protocol ``none`` (a no-token
                  executor) or ``truth-instruction`` (an instruction executor, the truth's words
                  by flown position)

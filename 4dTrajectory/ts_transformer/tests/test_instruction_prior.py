@@ -28,14 +28,23 @@ def _config() -> TSConfig:
     return TSConfig(**settings)
 
 
+#: The cohort lands on TWO thresholds: the runway word (D62) is a real column here, not a
+#: constant every flight shares, so the head's classes and `shift_words` are exercised.
+OTHER_RUNWAY = "23R"
+RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY, OTHER_RUNWAY])
+
+
 @pytest.fixture(scope="module")
 def world():
     vocabulary = ins.Vocabulary()
-    series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=4, seed=5), _config(), airport=AIRPORT)
-    readings = [ins.read_instructions(item, vocabulary) for item in series]
+    config_ts = _config()
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=5) + synthetic_arrivals(AIRPORT, OTHER_RUNWAY, n_flights=2, seed=5)
+    series, _report = build_series(flights, config_ts, airport=AIRPORT)
+    assert {ins.flight_runway(item) for item in series} == set(RUNWAYS.idents)
+    readings = [ins.read_instructions(item, vocabulary, RUNWAYS) for item in series]
     sequences = [sq.flight_sequence(item, reading) for item, reading in zip(series, readings, strict=True)]
     types = TypeVocabulary.from_typecodes(item.typecode for item in sequences)
-    config = pr.PriorConfig(words=vocabulary.words, type_count=types.size, vocabulary_sha256=vocabulary.sha256,
+    config = pr.PriorConfig(words=ins.word_counts(vocabulary, RUNWAYS), type_count=types.size, vocabulary_sha256=vocabulary.sha256,
                             d_model=16, n_heads=2, n_layers=1, d_ff=32, dropout=0.0, max_positions=64)
     return vocabulary, series, readings, sequences, types, config
 
@@ -43,7 +52,7 @@ def world():
 def test_the_truth_sequence_carries_the_words_the_states_and_the_next_words(world):
     _vocabulary, series, readings, sequences, _types, _config = world
     item, reading, sequence = series[0], readings[0], sequences[0]
-    assert sequence.length == len(reading.positions_s) and sequence.words.shape == (sequence.length, 4)
+    assert sequence.length == len(reading.positions_s) and sequence.words.shape == (sequence.length, 5)   # five kinds since D62
     assert np.array_equal(sequence.targets[:-1], reading.words[1:]) and np.array_equal(sequence.targets[-1], reading.words[-1])
     assert sequence.states.shape == (sequence.length, len(sq.STATE_TOKEN_FEATURES))
     first = sq.state_token(item.values[0], item.target_chart)
@@ -72,7 +81,7 @@ def test_a_rolled_sequence_reads_flown_states_and_targets_the_truth_s_next_words
     whole = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, truth.words, item.target_chart)
     assert whole.ends_at_landing
     with pytest.raises(ValueError, match="a rolled prefix covers"):
-        sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, np.zeros((truth.length + 1, 4), dtype=np.int64), item.target_chart)
+        sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, np.zeros((truth.length + 1, 5), dtype=np.int64), item.target_chart)
     with pytest.raises(ValueError, match="is not sequence"):
         sq.rolled_sequence(truth, readings[1], item.supervision_times, item.supervision_values, said, item.target_chart)
 
@@ -81,13 +90,16 @@ def test_the_batch_shifts_the_intercept_and_marks_the_next_and_the_landing(world
     _vocabulary, _series, _readings, sequences, types, config = world
     batch = pr.collate(sequences[:2], config, types)
     longest = max(item.length for item in sequences[:2])
-    assert batch.words.shape == (2, longest, 4) and batch.targets.shape == (2, longest, 4) and batch.states.shape == (2, longest, 6)
+    assert batch.words.shape == (2, longest, 5) and batch.targets.shape == (2, longest, 5) and batch.states.shape == (2, longest, 6)
     for row, item in enumerate(sequences[:2]):
         n = item.length
         assert bool(batch.valid[row, :n].all()) and not bool(batch.valid[row, n:].any())
         assert batch.words[row, :n, 3].min() >= 0                                     # NO_INTERCEPT → row 0
         assert np.array_equal(batch.words[row, :n].numpy(), pr.shift_words(item.words))
         assert np.array_equal(pr.unshift_words(batch.words[row, :n].numpy()), item.words)
+        # the RUNWAY column is never shifted: its word is already ≥ 0 and indexes its table
+        assert np.array_equal(batch.words[row, :n, 4].numpy(), item.words[:, 4])
+        assert batch.words[row, :n, 4].max() < config.classes("runway")
         assert bool((batch.targets[row, n - 1] == pr.IGNORE).all()) and batch.landed[row, n - 1] == 1.0 and batch.landed[row, : n - 1].sum() == 0
         assert bool(batch.has_next[row, : n - 1].all()) and not bool(batch.has_next[row, n - 1 :].any())
     assert batch.runway.shape == (2, 2) and batch.type_index.shape == (2,)
@@ -123,7 +135,7 @@ def test_the_model_is_causal_and_factorised_and_the_loss_has_one_term_per_kind(w
 def test_the_joint_rank_is_the_truth_tuple_s_place_among_the_product_candidates(world):
     kinds = ins.INSTRUCTION_KINDS
     classes = {kind: world[5].classes(kind) for kind in kinds}
-    targets = torch.tensor([[[3, 2, 5, 0], [pr.IGNORE] * 4]])                          # one position with a next
+    targets = torch.tensor([[[3, 2, 5, 0, 1], [pr.IGNORE] * 5]])                       # one position with a next
     has_next = targets[..., 0] != pr.IGNORE
     logits = {kind: torch.zeros(1, 2, classes[kind]) for kind in kinds}
     for column, kind in enumerate(kinds):
@@ -132,10 +144,10 @@ def test_the_joint_rank_is_the_truth_tuple_s_place_among_the_product_candidates(
     logits["speed"][0, 0, 7] = 6.0                                                    # one better speed word: rank 1
     assert pr._joint_ranks(logits, targets, has_next).tolist() == [1]
     logits["altitude"][0, 0] = torch.arange(11.0) * 10.0                              # the truth (2) falls out of altitude's top-8
-    assert pr._joint_ranks(logits, targets, has_next).tolist() == [pr.JOINT_SEARCH ** 4]
+    assert pr._joint_ranks(logits, targets, has_next).tolist() == [pr.JOINT_SEARCH ** len(kinds)]
     # a tie with the truth counts as beaten (never an optimistic rank)
     logits = {kind: torch.zeros(1, 2, classes[kind]) for kind in kinds}
-    assert pr._joint_ranks(logits, targets, has_next).tolist() == [pr.JOINT_SEARCH ** 4] or pr._joint_ranks(logits, targets, has_next).tolist()[0] > 0
+    assert pr._joint_ranks(logits, targets, has_next).tolist() == [pr.JOINT_SEARCH ** len(kinds)] or pr._joint_ranks(logits, targets, has_next).tolist()[0] > 0
 
 
 def test_fit_keeps_the_best_val_epoch_and_evaluate_reads_every_rate(world):
@@ -150,8 +162,13 @@ def test_fit_keeps_the_best_val_epoch_and_evaluate_reads_every_rate(world):
     reading = pr.evaluate(model, sequences[3:], types, batch_size=2, device=torch.device("cpu"))
     assert reading["positions_with_next"] == sequences[3].length - 1
     for kind in ins.INSTRUCTION_KINDS:
-        assert 0.0 <= reading["top1"][kind] <= reading["top_k"][kind]["2"] <= 1.0
-        assert reading["top_k"][kind]["8"] is None if config.classes(kind) <= 8 else reading["top_k"][kind]["2"] <= reading["top_k"][kind]["8"] <= 1.0
+        assert 0.0 <= reading["top1"][kind] <= 1.0
+        # a top-k at or past the kind's class count is 1 by construction and reads as ABSENT;
+        # the runway's classes are the cohort's thresholds, so even its top-2 can be absent
+        for k in ("2", "4", "8"):
+            assert (reading["top_k"][kind][k] is None) == (config.classes(kind) <= int(k))
+        available = [reading["top_k"][kind][k] for k in ("2", "4", "8") if reading["top_k"][kind][k] is not None]
+        assert available == sorted(available) and all(reading["top1"][kind] <= v <= 1.0 for v in available)
         for name in ("flip_rate", "miss_rate", "change_recall"):
             assert reading[name][kind] is None or 0.0 <= reading[name][kind] <= 1.0
     assert reading["joint_top_k"]["2"] <= reading["joint_top_k"]["4"] <= reading["joint_top_k"]["8"] <= 1.0
@@ -184,8 +201,8 @@ def test_the_hold_baseline_scores_a_sentence_that_never_changes_as_perfectly_hel
     _vocabulary, _series, _readings, sequences, _types, config = world
     still = sq.InstructionSequence(
         dataset_id="d", flight_id="f", positions_s=np.arange(6) * 10.0,
-        words=np.tile(np.array([[18, 3, 6, -1]]), (6, 1)), states=np.zeros((6, 6), dtype=np.float32),
-        targets=np.tile(np.array([[18, 3, 6, -1]]), (6, 1)), typecode="B738", runway_course_rad=0.0, ends_at_landing=True,
+        words=np.tile(np.array([[18, 3, 6, -1, 1]]), (6, 1)), states=np.zeros((6, 6), dtype=np.float32),
+        targets=np.tile(np.array([[18, 3, 6, -1, 1]]), (6, 1)), typecode="B738", runway_course_rad=0.0, ends_at_landing=True,
     )
     baseline = pr.hold_baseline(sequences, [still], config)
     assert all(baseline["hold_accuracy"][kind] == 1.0 for kind in ins.INSTRUCTION_KINDS) and baseline["positions_with_next"] == 5
@@ -196,7 +213,7 @@ def test_the_hold_baseline_scores_a_sentence_that_never_changes_as_perfectly_hel
     with pytest.raises(ValueError, match="words are the counts"):
         pr.PriorConfig(words={"heading": 36}, type_count=1, vocabulary_sha256="x")
     with pytest.raises(ValueError, match="words are the counts"):                    # the kinds' ORDER is the contract
-        pr.PriorConfig(words={"altitude": 11, "heading": 36, "speed": 23, "intercept": 3}, type_count=1, vocabulary_sha256="x")
+        pr.PriorConfig(words={"altitude": 11, "heading": 36, "speed": 23, "intercept": 3, "runway": 2}, type_count=1, vocabulary_sha256="x")
     assert pr.PriorConfig.from_dict(config.to_dict()) == config
 
 

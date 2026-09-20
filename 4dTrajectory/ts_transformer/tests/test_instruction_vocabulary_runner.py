@@ -15,6 +15,9 @@ from ts_transformer.experiments import instruction_vocabulary as runner
 from ts_transformer.manoeuvre import instructions as ins
 from ts_transformer.tests.support import AIRPORT, RUNWAY
 
+#: The cohort the runner would build the runway word's classes from (D62).
+RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY, "23R"])
+
 
 def _config() -> TSConfig:
     settings = recipe_settings(CONTROL_RECIPE_SIMPLE_V3, keep_name=False)
@@ -28,7 +31,7 @@ def _config() -> TSConfig:
 def readings():
     vocabulary = ins.Vocabulary()
     series, _report = build_series(synthetic_arrivals(AIRPORT, RUNWAY, n_flights=4, seed=5), _config(), airport=AIRPORT)
-    return vocabulary, series, [ins.read_instructions(item, vocabulary) for item in series]
+    return vocabulary, series, [ins.read_instructions(item, vocabulary, RUNWAYS) for item in series]
 
 
 def test_the_summary_counts_what_the_hand_check_and_the_bin_decision_read(readings):
@@ -39,19 +42,25 @@ def test_the_summary_counts_what_the_hand_check_and_the_bin_decision_read(readin
     assert all(set(v) == {ins.ABSORBED_SAME_WORD, ins.ABSORBED_SMALL_CHANGE, ins.ABSORBED_SHORT_TAIL} for v in summary["absorbed"].values())
     assert sum(sum(v.values()) for v in summary["absorbed"].values()) == sum(len(r.absorbed) for r in items)
     assert set(summary["clamped"]) == {"altitude", "speed"} and 0.0 <= summary["intercept_share"] <= 1.0
+    # the runway is a kind of its own (D62): one word per flight, one class used by this cohort
+    assert set(summary["words_used"]) == set(ins.INSTRUCTION_KINDS) and summary["words_used"]["runway"] == 1
+    assert summary["instructions_per_flight_p50"]["runway"] == 1.0
     for kind, half_bin in (("heading_deg", vocabulary.heading_bin_deg / 2), ("altitude_m", vocabulary.altitude_bin_m / 2),
                            ("speed_mps", vocabulary.speed_bin_mps / 2)):
         assert 0.0 <= summary["target_to_bin_centre_p50"][kind] <= summary["target_to_bin_centre_p95"][kind] <= half_bin + 1e-9
     # a clamped word never enters the residuals: an 11 000 ft start reads as the top word, 1000 ft off its centre
     clamped = ins.Instruction("altitude", vocabulary.altitude_words - 1, 11_000 * ins.FT, 0.0, 0.0, clamped=True)
-    with_clamp = ins.Reading("d", "f", (clamped,), np.array([0.0]), np.array([[0, vocabulary.altitude_words - 1, 0, -1]]), True, 0.0)
+    with_clamp = ins.Reading("d", "f", (clamped,), np.array([0.0]),
+                             np.array([[0, vocabulary.altitude_words - 1, 0, -1, 0]]), RUNWAY, True, 0.0)
     summary = runner.summarise([*items, with_clamp], vocabulary)
     assert summary["clamped"]["altitude"] == 1 and summary["target_to_bin_centre_p95"]["altitude_m"] <= vocabulary.altitude_bin_m / 2 + 1e-9
     with pytest.raises(ValueError, match="no flights"):
         runner.summarise([], vocabulary)
-    table = runner.render({"train": runner.summarise(items, vocabulary)}, vocabulary)
+    table = runner.render({"train": runner.summarise(items, vocabulary)}, vocabulary, RUNWAYS)
     assert "train: 4 flights" in table and "absorbed manoeuvres (same word / small change / short tail)" in table
     assert f"a capture from under {vocabulary.heading_min_change_deg:g}°" in table and "unclamped target − bin centre" in table
+    # the runway count printed is the COHORT's, not the spec's (the spec has no runway word)
+    assert f"runways {', '.join(RUNWAYS.idents)}" in table and f"runway 1/{len(RUNWAYS)}" in table
 
 
 def test_the_hand_check_page_is_written(readings, tmp_path):

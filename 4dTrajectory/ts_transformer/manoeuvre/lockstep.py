@@ -51,7 +51,7 @@ from ts_transformer.inference.forecast import Forecast, concatenate, cut_at_thre
 from ts_transformer.inference.receding import cut_at_lead, displacement_at, rolled_series
 from ts_transformer.outputs.control.forecast import forecast_control_batch
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
-from ts_transformer.manoeuvre.instructions import Reading, Vocabulary, read_instructions
+from ts_transformer.manoeuvre.instructions import Reading, RunwayVocabulary, Vocabulary, read_instructions
 from ts_transformer.outputs.control.instruction_token import instruction_context, load_vocabulary_for, nearest_truth_time_s
 
 #: No second layer: a no-token executor on its own rows. Every payload carries its protocol.
@@ -158,17 +158,21 @@ def _history(run: FlightRun, anchor: int, dt_s: float) -> FlightSeries:
 
 @dataclass(frozen=True)
 class InstructionFeed:
-    """What the truth-instruction protocol hands the executor: the vocabulary and every
+    """What the truth-instruction protocol hands the executor: the two vocabularies (the spec's
+    and the cohort's runway classes) and every
     flight's reading, keyed by ``dataset_id`` — read ONCE, on the WHOLE record of each flight
     (`read`), never on a cohort cut at its first prediction row: a cut record starts on
     another plateau and opens another sentence, and the executor was trained on the whole one."""
 
     vocabulary: Vocabulary
+    runway_vocabulary: RunwayVocabulary
     readings: dict[str, Reading]
 
     @classmethod
-    def read(cls, vocabulary: Vocabulary, series: Sequence[FlightSeries]) -> InstructionFeed:
-        return cls(vocabulary, {item.dataset_id: read_instructions(item, vocabulary) for item in series})
+    def read(cls, vocabulary: Vocabulary, runway_vocabulary: RunwayVocabulary,
+             series: Sequence[FlightSeries]) -> InstructionFeed:
+        return cls(vocabulary, runway_vocabulary,
+                   {item.dataset_id: read_instructions(item, vocabulary, runway_vocabulary) for item in series})
 
 
 def _dynamics(executor: Executor, runs: Sequence[FlightRun], histories: Sequence[FlightSeries], anchor: int,
@@ -230,8 +234,8 @@ def fly(
     if instruction_executor != (feed is not None):
         raise ValueError(f"protocol {protocol!r} {'needs' if instruction_executor else 'takes no'} instruction feed")
     if feed is not None:
-        vocabulary = load_vocabulary_for(config)
-        if feed.vocabulary != vocabulary:
+        vocabulary, runway_vocabulary = load_vocabulary_for(config)
+        if (feed.vocabulary, feed.runway_vocabulary) != (vocabulary, runway_vocabulary):
             raise ValueError("the feed was read under another vocabulary than the executor's")
         missing = [item.dataset_id for item in series if item.dataset_id not in feed.readings]
         if missing:

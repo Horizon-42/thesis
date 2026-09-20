@@ -59,7 +59,7 @@ either — the summary states that share. The reading rule's version
 (`READING_RULE`) is part of the vocabulary's spec and sha.
 
 **The sentence** (D52): one position every `TOKEN_STEP_S` from the record's start, each position
-the four words IN FORCE (the latest issued instruction of each kind); an instruction is the
+the five words IN FORCE (the latest issued instruction of each kind); an instruction is the
 position where a word changes, "hold" is a position where none does. The fixed positions are the
 prior's grid; the executor reads the words in force at its own anchor + k·τ (`Reading.words_at`),
 so its segment need not sit on the grid; "when" is expressed by the position a word changes at,
@@ -76,7 +76,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
 
 import numpy as np
 
@@ -96,9 +96,21 @@ if TYPE_CHECKING:
 
 #: The three kinds every position carries a word of, then the intercept (absent before a capture).
 MANDATORY_KINDS = ("heading", "altitude", "speed")
-INSTRUCTION_KINDS = MANDATORY_KINDS + ("intercept",)
+#: The RUNWAY is the fifth word (D62): the other four are angles and heights measured against a
+#: runway, so a sentence without it cannot say WHICH runway — and in real control the runway is
+#: something the controller says out loud. It is a word of a different kind: its classes are the
+#: airport's thresholds (`RunwayVocabulary`, bound to the cohort like the aircraft types), so it
+#: is NOT part of the spec and does not move the sha — otherwise one vocabulary could not serve
+#: five airports. It is a per-position column, so the sentence CAN say a change mid-approach
+#: (D64, which the FAA order allows); this data's labeller writes it constant, because a late
+#: change is 1 flight in 44 622 and an early one is not resolvable (results §13).
+INSTRUCTION_KINDS = MANDATORY_KINDS + ("intercept", "runway")
 #: An empty intercept word (no capture turn in force).
 NO_INTERCEPT = -1
+#: The runway word has no continuous value it was binned from — a threshold has a NAME, not a
+#: number. `float("nan")` would serialise as `NaN`, which Python reads back and strict JSON
+#: readers (jq, JSON.parse) refuse, and the sentences files are read by both.
+NO_TARGET = 0.0
 
 #: D51 bins (settled 2026-09-20, module docstring). Heading: 10° over a full circle (36 words;
 #: bin 0 = the final approach course). Altitude: 1000 ft above the threshold, 0 … 10 000 ft
@@ -159,7 +171,7 @@ TOKEN_STEP_S = 10.0
 #: needs the level to be at least one TOLERANCE from the word in force's — two levels closer than
 #: the tolerance are the same level measured twice, and wording the second one split a steady
 #: stretch in two whenever its median sat on a bin edge (the fifth hand check: 6 of 50 pages).
-READING_RULE = "plateau-v9"
+READING_RULE = "plateau-v10"    # v10: the sentence gained the runway column (D62)
 
 VOCABULARY_SCHEMA = "ts-instruction-vocabulary-v1"
 VOCABULARY_FILE = "instruction_vocabulary.json"
@@ -290,7 +302,15 @@ class Vocabulary:
     # ── the executor's view of the words ──────────────────────────────────
     #: one position's conditioning: cos, sin of the heading centre; the altitude and speed
     #: centres as fractions of their ceilings; the intercept as (bin + 1) / bins, 0 for none
+    #: The runway is NOT here: the executor already works in the runway's own frame, so the
+    #: runway is implicit in its coordinates, and handing it an index as well would be redundant
+    #: AND would make the executor per-airport. The runway is a word the PRIOR says, not a number
+    #: the executor listens to (D62).
     CONDITIONING_WIDTH = 5
+    CONDITIONED_KINDS = MANDATORY_KINDS + ("intercept",)
+    if CONDITIONED_KINDS != INSTRUCTION_KINDS[:len(CONDITIONED_KINDS)]:      # the slice below is a PREFIX slice
+        raise RuntimeError("the conditioned kinds must be the first kinds: a kind inserted before the "
+                           "runway would silently condition the executor on the wrong columns")
 
     def conditioning(self, words: np.ndarray) -> np.ndarray:
         """The bin CENTRES the executor conditions on, ``[..., CONDITIONING_WIDTH]`` float32 for
@@ -300,6 +320,7 @@ class Vocabulary:
         words = np.asarray(words)
         if words.shape[-1] != len(INSTRUCTION_KINDS):
             raise ValueError(f"words are [..., {len(INSTRUCTION_KINDS)}], got {words.shape}")
+        words = words[..., :len(self.CONDITIONED_KINDS)]      # the runway column is not conditioning
         heading = np.radians(words[..., 0] * self.heading_bin_deg)
         out = np.stack((
             np.cos(heading), np.sin(heading),
@@ -324,6 +345,70 @@ class Vocabulary:
     @property
     def sha256(self) -> str:
         return hashlib.sha256(json.dumps(self.to_dict(), sort_keys=True).encode()).hexdigest()
+
+
+def runway_sha256(runway_vocabulary: RunwayVocabulary) -> str:
+    """A digest of the runway CLASSES, to be carried and checked wherever `Vocabulary.sha256` is.
+
+    The classes are deliberately outside the spec so one vocabulary serves five airports — but
+    that also means two artefacts with the SAME spec sha can disagree about what word 1 means.
+    Without this, a prior trained on ``("05L", "23R")`` and decoded against ``("05L", "14",
+    "23R")`` reads word 1 as "14" instead of "23R": both indices are in range, so nothing raises
+    and every runway is silently relabelled."""
+    return hashlib.sha256(json.dumps(list(runway_vocabulary.idents), sort_keys=True).encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class RunwayVocabulary:
+    """The runway word's classes: one airport's thresholds, sorted.
+
+    Deliberately NOT a field of `Vocabulary`: the class set is per airport, and putting it in the
+    spec would give every airport a different sha and end the property that ONE vocabulary reads
+    every runway. It is bound to the cohort and carried beside the spec, exactly as the aircraft
+    type vocabulary is (`manoeuvre.context.TypeVocabulary`)."""
+
+    idents: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(set(self.idents)) != len(self.idents) or not self.idents:
+            raise ValueError("runway idents are unique and there is at least one")
+        if list(self.idents) != sorted(self.idents):
+            raise ValueError(f"runway idents are stored sorted, got {self.idents}")
+
+    @classmethod
+    def from_idents(cls, idents: Iterable[str]) -> RunwayVocabulary:
+        return cls(tuple(sorted(set(idents))))
+
+    def __len__(self) -> int:
+        return len(self.idents)
+
+    def index(self, ident: str) -> int:
+        """The word for this threshold. An unknown one RAISES: a runway the vocabulary was not
+        built on is a different airport, not a fallback."""
+        try:
+            return self.idents.index(ident)
+        except ValueError:
+            raise ValueError(f"runway {ident!r} is not in this vocabulary ({', '.join(self.idents)})") from None
+
+    def ident(self, word: int) -> str:
+        return self.idents[word]
+
+
+def word_counts(vocabulary: Vocabulary, runway_vocabulary: RunwayVocabulary) -> dict[str, int]:
+    """The word count of EVERY kind, in `INSTRUCTION_KINDS` order: the spec's four
+    (`Vocabulary.words`) and then the cohort's runway classes. One definition — the prior's head
+    sizes (`PriorConfig.words`) and the readouts that print "words used" read this, never a
+    dict built beside it."""
+    return {**vocabulary.words, "runway": len(runway_vocabulary)}
+
+
+def flight_runway(series: FlightSeries) -> str:
+    """The threshold ident this flight landed on — the runway word's value. It lives in the
+    scenario's SOURCE (the manifest's `runway`): `GeodeticState` carries the threshold's
+    geometry, not its name. One definition WITHIN the instruction path, so the labeller and the
+    cohort that sizes the runway vocabulary read the same field; `approach_clustering/cli.py` and
+    `outputs/guidance/skeleton.py` read the same key directly and predate this."""
+    return str(series.scenario.source["runway"])
 
 
 @dataclass(frozen=True)
@@ -379,7 +464,8 @@ class Reading:
     flight_id: str
     instructions: tuple[Instruction, ...]
     positions_s: np.ndarray            # [P]
-    words: np.ndarray                  # [P, 4] heading / altitude / speed / intercept word per position
+    words: np.ndarray                  # [P, 5] heading / altitude / speed / intercept / runway per position
+    runway: str                        # the threshold the four geometric kinds are measured against
     established_from_start: bool
     duration_s: float
     absorbed: tuple[Absorbed, ...] = ()
@@ -388,13 +474,13 @@ class Reading:
         return {
             "dataset_id": self.dataset_id, "flight_id": self.flight_id,
             "instructions": [item.to_dict() for item in self.instructions],
-            "positions_s": self.positions_s.tolist(), "words": self.words.tolist(),
+            "positions_s": self.positions_s.tolist(), "words": self.words.tolist(), "runway": self.runway,
             "established_from_start": self.established_from_start, "duration_s": self.duration_s,
             "absorbed": [item.to_dict() for item in self.absorbed],
         }
 
     def words_at(self, times_s: np.ndarray) -> np.ndarray:
-        """The four words in force at each time, ``[len(times), 4]``: the latest position at or
+        """The words in force at each time, ``[len(times), 5]``: the latest position at or
         before it (an instruction issued between two positions is in force from the NEXT one,
         as the sentence says it); after the last position the last words stay in force (the
         aircraft lands on them); before the first there is nothing — that is an error."""
@@ -564,7 +650,8 @@ def _manoeuvre_words(kind: str, times: np.ndarray, signal: np.ndarray, flats: li
     return out, absorbed
 
 
-def read_instructions(series: FlightSeries, vocabulary: Vocabulary) -> Reading:
+def read_instructions(series: FlightSeries, vocabulary: Vocabulary,
+                      runway_vocabulary: RunwayVocabulary) -> Reading:
     """Every instruction of one flight, and its sentence (`Reading`)."""
     frame = course_frame(series)
     times = frame["t"]
@@ -627,56 +714,70 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary) -> Reading:
             intercept = Instruction("intercept", vocabulary.intercept_bin(before), abs(wrap_deg(before)), word.issued_s, word.settled_s)
     if intercept is not None:
         instructions.append(intercept)
+    # the runway word (D62): said at the first position, because the controller assigns it before
+    # the arrival. It is a CONSTANT here — the sentence can carry a change (the column exists) but
+    # this data cannot resolve one (results §13: a late change is 1 flight in 44 622).
+    runway_ident = flight_runway(series)
+    instructions.append(Instruction("runway", runway_vocabulary.index(runway_ident), NO_TARGET,
+                                    float(times[0]), float(times[0]), False))
     instructions.sort(key=lambda item: (item.issued_s, INSTRUCTION_KINDS.index(item.kind)))
     positions, words = sentence(instructions, float(times[0]), float(times[-1]), vocabulary.token_step_s)
     return Reading(
         dataset_id=series.dataset_id, flight_id=series.flight_id, instructions=tuple(instructions),
-        positions_s=positions, words=words, established_from_start=bool(established[0]),
+        positions_s=positions, words=words, runway=runway_ident, established_from_start=bool(established[0]),
         duration_s=float(times[-1] - times[0]), absorbed=tuple(sorted(absorbed, key=lambda item: item.start_s)),
     )
 
 
 def sentence(instructions: Sequence[Instruction], start_s: float, end_s: float, step_s: float) -> tuple[np.ndarray, np.ndarray]:
     """The positions every ``step_s`` from ``start_s`` to ``end_s`` and the words in force at each
-    (``[P, 4]``: heading, altitude, speed, intercept — `NO_INTERCEPT` before a capture turn)."""
+    (``[P, 5]``: heading, altitude, speed, intercept, runway — `NO_INTERCEPT` before a capture)."""
     positions = start_s + step_s * np.arange(int(math.floor((end_s - start_s) / step_s + 1e-9)) + 1, dtype=np.float64)
     words = np.full((len(positions), len(INSTRUCTION_KINDS)), NO_INTERCEPT, dtype=np.int64)
     for column, kind in enumerate(INSTRUCTION_KINDS):
         issued = sorted((item for item in instructions if item.kind == kind), key=lambda item: item.issued_s)
         for item in issued:
             words[positions >= item.issued_s - 1e-9, column] = item.word
-    missing = [kind for column, kind in enumerate(MANDATORY_KINDS) if (words[:, column] == NO_INTERCEPT).any()]
+    # the intercept is the ONE kind that may have no word (before the capture turn); every other
+    # kind must be in force from t = 0. The runway matters most: its column indexes an embedding,
+    # and a −1 there would be read as the LAST runway instead of raising.
+    always = MANDATORY_KINDS + ("runway",)
+    missing = [kind for kind in always if (words[:, INSTRUCTION_KINDS.index(kind)] == NO_INTERCEPT).any()]
     if missing:
-        raise ValueError(f"no word in force for {missing} at some position: every kind but the intercept starts at t = 0")
+        raise ValueError(f"no word in force for {missing} at some position: only the intercept may be absent")
     return positions, words
 
 
 # ── the vocabulary artefact ───────────────────────────────────────────────
 
-def write_vocabulary(directory: str | Path, vocabulary: Vocabulary, *, cohort_identity: dict[str, Any],
-                     counts: dict[str, Any], source: dict[str, Any]) -> Path:
+def write_vocabulary(directory: str | Path, vocabulary: Vocabulary, *, runway_vocabulary: RunwayVocabulary,
+                     cohort_identity: dict[str, Any], counts: dict[str, Any], source: dict[str, Any]) -> Path:
     """Write ``instruction_vocabulary.json`` (refused if it exists): the spec (under its sha), the
-    cohort the counts were read on, the per-word counts, and where it came from."""
+    cohort's runway classes BESIDE it (``runway_idents`` — in the spec they would give every
+    airport a different sha), the cohort the counts were read on, the per-word counts, and where
+    it came from."""
     directory = Path(directory)
     path = directory / VOCABULARY_FILE
     if path.exists():
         raise FileExistsError(f"{path} exists; a vocabulary is never overwritten")
     write_json_atomic(path, {
         "schema": VOCABULARY_SCHEMA, "written_utc": utc_now(), "spec": vocabulary.to_dict(), "sha256": vocabulary.sha256,
-        "words": vocabulary.words, "cohort_identity": dict(cohort_identity), "counts": dict(counts), "source": dict(source),
+        "runway_idents": list(runway_vocabulary.idents), "words": vocabulary.words,
+        "cohort_identity": dict(cohort_identity), "counts": dict(counts), "source": dict(source),
     })
     return path
 
 
-def load_vocabulary(path: str | Path) -> tuple[Vocabulary, dict[str, Any]]:
-    """``(vocabulary, the file's payload)``; refuses a payload whose sha is not its spec's."""
+def load_vocabulary(path: str | Path) -> tuple[Vocabulary, RunwayVocabulary, dict[str, Any]]:
+    """``(vocabulary, runway vocabulary, the file's payload)``; refuses a payload whose sha is not
+    its spec's. The runway classes are the file's own (`write_vocabulary`), not the spec's."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if payload["schema"] != VOCABULARY_SCHEMA:
         raise ValueError(f"{path}: schema {payload['schema']!r} is not {VOCABULARY_SCHEMA!r}")
     vocabulary = Vocabulary.from_dict(payload["spec"])
     if vocabulary.sha256 != payload["sha256"]:
         raise ValueError(f"{path}: the spec's sha {vocabulary.sha256[:12]}… is not the file's {payload['sha256'][:12]}…")
-    return vocabulary, payload
+    return vocabulary, RunwayVocabulary(tuple(payload["runway_idents"])), payload
 
 
 __all__ = [
@@ -685,6 +786,6 @@ __all__ = [
     "READING_RULE", "SMOOTHING_S",
     "SPEED_BIN_MPS", "SPEED_MAX_MPS", "SPEED_MIN_MPS", "SPEED_TOLERANCE_MPS", "TOKEN_STEP_S", "VOCABULARY_FILE",
     "VOCABULARY_SCHEMA", "ABSORBED_SAME_WORD", "ABSORBED_SHORT_TAIL", "ABSORBED_SMALL_CHANGE", "Absorbed", "Instruction",
-    "Reading", "Vocabulary", "course_frame", "departure_row", "load_vocabulary", "min_rows",
-    "plateaus", "read_instructions", "segment_positions_s", "sentence", "smooth", "write_vocabulary",
+    "Reading", "RunwayVocabulary", "Vocabulary", "course_frame", "departure_row", "flight_runway", "load_vocabulary", "min_rows",
+    "plateaus", "read_instructions", "segment_positions_s", "sentence", "smooth", "word_counts", "write_vocabulary",
 ]

@@ -14,7 +14,8 @@ D46's starting shape) is fitted with teacher forcing, the epoch kept on the val 
 term. Written under ``--out`` (refused if it exists):
 
     prior.pt          the prior (config, weights, the aircraft-type vocabulary, the instruction
-                      vocabulary's sha, the split keys, the executor's sha)
+                      vocabulary's sha and the artefact's runway classes — the runway head's
+                      size is the cohort's, not the spec's — the split keys, the executor's sha)
     history.json      every epoch's train / val terms
     readings.json     `evaluate` on val (and on train, as a reference) and `hold_baseline`
     summary.txt       the readings, one screen
@@ -40,7 +41,7 @@ from ts_transformer.manoeuvre.instruction_prior import (
     PRIOR_SCHEMA, InstructionPrior, PriorConfig, evaluate, fit, hold_baseline,
 )
 from ts_transformer.manoeuvre.instruction_sequences import InstructionSequence, flight_sequence
-from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, load_vocabulary, read_instructions
+from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, runway_sha256, load_vocabulary, read_instructions, word_counts
 from ts_transformer.training.train import load_checkpoint_payload
 
 PRIOR_FILE = "prior.pt"
@@ -70,7 +71,7 @@ def render(readings: dict[str, Any], baseline: dict[str, Any], *, limit: int | N
             f"{_f(readings['top_k'][kind]['8'])}  {_f(readings['flip_rate'][kind])}  {_f(readings['miss_rate'][kind])}  "
             f"{_f(readings['change_recall'][kind])}  {_f(readings['change_share'][kind])}"
         )
-    lines.append("  joint top-K coverage (truth 4-tuple among the K best product candidates): "
+    lines.append("  joint top-K coverage (truth 5-tuple among the K best product candidates): "
                  + ", ".join(f"K={k} {_f(v)}" for k, v in readings["joint_top_k"].items()))
     return "\n".join(lines) + "\n"
 
@@ -103,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     torch.manual_seed(args.seed)
 
     vocabulary_path = args.vocabulary if args.vocabulary.is_absolute() else REPO_ROOT / args.vocabulary
-    vocabulary, _payload = load_vocabulary(vocabulary_path)
+    vocabulary, runway_vocabulary, _payload = load_vocabulary(vocabulary_path)
     executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
     payload = load_checkpoint_payload(executor)
     config = TSConfig.from_dict(payload["config"])
@@ -113,19 +114,21 @@ def main(argv: list[str] | None = None) -> int:
     series = rebuild_cohort(payload, config, [*splits["train"], *splits["val"]])
     by_split = {"train": series[: len(splits["train"])], "val": series[len(splits["train"]) :]}
     sequences: dict[str, list[InstructionSequence]] = {
-        name: [flight_sequence(item, read_instructions(item, vocabulary)) for item in items] for name, items in by_split.items()
+        name: [flight_sequence(item, read_instructions(item, vocabulary, runway_vocabulary)) for item in items]
+        for name, items in by_split.items()
     }
     types = TypeVocabulary.from_typecodes(item.typecode for item in sequences["train"])
     # the prior holds exactly the positions this cohort has: a longer sentence is refused at
     # `collate`, never read through an untrained position row
     longest = max(item.length for items in sequences.values() for item in items)
     prior_config = PriorConfig(
-        words=vocabulary.words, type_count=types.size, vocabulary_sha256=vocabulary.sha256, d_model=args.d_model,
+        words=word_counts(vocabulary, runway_vocabulary), type_count=types.size, vocabulary_sha256=vocabulary.sha256, d_model=args.d_model,
         n_heads=args.n_heads, n_layers=args.n_layers, d_ff=args.d_ff, dropout=args.dropout,
         max_positions=longest, landed_loss_weight=args.landed_loss_weight,
     )
     print(f"  {len(series)} flights rebuilt: train {len(sequences['train'])}, val {len(sequences['val'])}; "
           f"longest sentence {longest} positions at τ = {vocabulary.token_step_s:g} s; {types.size - 1} aircraft types; "
+          f"{len(runway_vocabulary)} runways ({', '.join(runway_vocabulary.idents)}); "
           f"vocabulary {vocabulary.sha256[:12]}…", flush=True)
 
     model = InstructionPrior(prior_config)
@@ -135,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     def log(row: dict[str, Any]) -> None:
         val = row["val"]
         print(f"  epoch {row['epoch']:3d}: train next {row['train']['next']:.3f} · val next {val['next']:.3f} "
-              f"(h {val['heading']:.3f} a {val['altitude']:.3f} s {val['speed']:.3f} i {val['intercept']:.3f}) "
+              f"(h {val['heading']:.3f} a {val['altitude']:.3f} s {val['speed']:.3f} i {val['intercept']:.3f} r {val['runway']:.3f}) "
               f"top-1 h {val['top1']['heading']:.3f} a {val['top1']['altitude']:.3f} s {val['top1']['speed']:.3f} "
               f"· landed {val['landed_accuracy']:.3f}", flush=True)
 
@@ -150,7 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     torch.save({
         "schema": PRIOR_SCHEMA, "prior_config": prior_config.to_dict(), "state_dict": result.state_dict,
         "types": types.to_dict(), "vocabulary_sha256": vocabulary.sha256, "vocabulary_path": str(vocabulary_path),
-        "vocabulary_spec": vocabulary.to_dict(),
+        "vocabulary_spec": vocabulary.to_dict(), "runway_idents": list(runway_vocabulary.idents),
+        "runway_sha256": runway_sha256(runway_vocabulary),
         "split": {name: [item.dataset_id for item in items] for name, items in by_split.items()},
         "executor": str(executor), "executor_sha256": file_sha256(executor),
         "best_epoch": result.best_epoch, "best_val_next": result.best_val_next, "stopped_early": result.stopped_early,
@@ -159,7 +163,8 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(out / "history.json", {"schema": PRIOR_SCHEMA, "history": result.history})
     write_json_atomic(out / "readings.json", {
         "schema": PRIOR_SCHEMA, "written_utc": utc_now(), "prior_sha256": file_sha256(out / PRIOR_FILE),
-        "vocabulary_sha256": vocabulary.sha256, "prior_config": prior_config.to_dict(),
+        "vocabulary_sha256": vocabulary.sha256, "runway_idents": list(runway_vocabulary.idents),
+        "runway_sha256": runway_sha256(runway_vocabulary), "prior_config": prior_config.to_dict(),
         "cohort_identity": {**development_cohort_audit(cohort_path, cohort), "path": str(cohort_path),
                             "eligible_set_sha256": provenance_eligible_set_digests(payload["data_provenance"])},
         "flights": {name: len(items) for name, items in sequences.items()}, "settings": settings,

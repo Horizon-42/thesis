@@ -30,7 +30,9 @@ import torch
 
 from ts_transformer.config import PLAN_CONDITIONING_INSTRUCTION, TSConfig
 from ts_transformer.data.channels import POSITION_IDX
-from ts_transformer.manoeuvre.instructions import FT, KT, NO_INTERCEPT, Reading, Vocabulary, load_vocabulary, segment_positions_s
+from ts_transformer.manoeuvre.instructions import (
+    FT, KT, NO_INTERCEPT, Reading, RunwayVocabulary, Vocabulary, load_vocabulary, segment_positions_s,
+)
 
 if TYPE_CHECKING:
     from ts_transformer.data.dataset import FlightSeries
@@ -38,9 +40,11 @@ if TYPE_CHECKING:
 INSTRUCTION_KEY = "instructions"
 
 
-def load_vocabulary_for(config: TSConfig) -> Vocabulary:
-    """The artefact `config.instruction_vocabulary` names (refused unless the run conditions on
-    instructions), checked against the executor's segment: Δ must be a whole number of τ."""
+def load_vocabulary_for(config: TSConfig) -> tuple[Vocabulary, RunwayVocabulary]:
+    """The artefact `config.instruction_vocabulary` names — ``(the spec, the cohort's runway
+    classes)``, refused unless the run conditions on instructions — checked against the
+    executor's segment: Δ must be a whole number of τ. Only the SPEC is hashed into the
+    checkpoint: the runway classes are per airport (D62) and never move the sha."""
     if config.plan_conditioning != PLAN_CONDITIONING_INSTRUCTION:
         raise ValueError(f"plan_conditioning={config.plan_conditioning!r} reads no instruction vocabulary")
     path = Path(config.instruction_vocabulary)
@@ -49,9 +53,9 @@ def load_vocabulary_for(config: TSConfig) -> Vocabulary:
             f"{path}: the instruction vocabulary this run names (instruction_vocabulary) is not there — an "
             "instruction executor reads its words through that artefact, at training, at predict and at load"
         )
-    vocabulary, _payload = load_vocabulary(path)
+    vocabulary, runway_vocabulary, _payload = load_vocabulary(path)
     segment_positions_s(0.0, config.control_horizon_s, vocabulary.token_step_s)     # raises when Δ / τ is not whole
-    return vocabulary
+    return vocabulary, runway_vocabulary
 
 
 def instruction_positions(config: TSConfig, vocabulary: Vocabulary) -> int:
@@ -83,9 +87,12 @@ def nearest_truth_time_s(series: FlightSeries, flown_row: np.ndarray) -> tuple[f
 
 
 def probe_instruction_context(config: TSConfig, vocabulary: Vocabulary, batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
-    """The batch-size probe's token: every position "on the course, 3 000 ft, 180 kt, no intercept",
-    in the vocabulary's own bins."""
-    one = [vocabulary.heading_bin(0.0), vocabulary.altitude_bin(3000.0 * FT)[0], vocabulary.speed_bin(180.0 * KT)[0], NO_INTERCEPT]
+    """The batch-size probe's token: every position "on the course, 3 000 ft, 180 kt, no
+    intercept, the first runway", in the vocabulary's own bins. The runway word is the first
+    class because the probe only has to be a LEGAL sentence row — `Vocabulary.conditioning`
+    drops that column (the executor is already in the runway's frame)."""
+    one = [vocabulary.heading_bin(0.0), vocabulary.altitude_bin(3000.0 * FT)[0], vocabulary.speed_bin(180.0 * KT)[0],
+           NO_INTERCEPT, 0]
     words = np.tile(np.array([one], dtype=np.int64), (instruction_positions(config, vocabulary), 1))
     token = torch.from_numpy(vocabulary.conditioning(words)).to(device)
     return {INSTRUCTION_KEY: token.unsqueeze(0).expand(batch_size, -1, -1).contiguous()}
