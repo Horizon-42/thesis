@@ -336,3 +336,60 @@ epoch record reports. `source.commandHookDiagnostics` on a prediction record is 
 `steps` plus every other count as a share of it — `commandHook` alone cannot separate a flight
 the hook never touched from one it rewrote at every step. The key is ABSENT without a hook,
 never zero.
+
+### H5 · the altitude word's 1000 ft bin is indistinguishable from random rounding (2026-09-21)
+
+Measured after the user challenged the bin ("不会太粗吗?"). Every number below is off the five
+airports' full arrival manifests — **42,604 flights, 75,534 altitude instructions** (the labeller
+refused 1 track, a KRDU record holding a stopped row; counted, not dropped). Wider than stage B's
+8,257-flight cohort, which is stated because the cohort's own numbers differ.
+
+- **D51's stated justification does not hold.** It reads "目标离档中心 p95 都在半档以内 (128 m)".
+  `altitude_bin` rounds to nearest, so the distance from any value to its assigned centre is ≤ half
+  a bin **by construction**. The check cannot fail; it measured nothing. (Repo rule: a bound that
+  can never bind is worse than no bound.)
+- **56 % of "altitude instructions" are not instructions.** The labeller reads the threshold
+  crossing as a plateau and emits an altitude target for it: on the KRDU cohort, **8,212 of 8,257
+  flights have exactly one** such event below 200 ft, 45 have none, and **none has two** — so it is
+  structural, not an averaging artefact. Fleet-wide it is 42,621 events with p25/p50/p75 =
+  **42 / 62 / 94 ft** above the threshold. That is the landing, which the terminal word (D72)
+  already states.
+- **On the real levels that remain (33,124 events), the current bin is random rounding**:
+  mean 235.3 / p50 240.9 / p95 472.0 ft, against a uniform-random reference of 250 / 250 / 475.
+  500 ft → 112.4, 250 ft → 62.4, **200 ft → 50.9 (51 words)**, 100 ft → 26.3 (101 words). The real
+  levels sit at 1600–3700 ft above the threshold with only 24.7 % on a round 500 ft and 15.3 % on
+  a round 1000 ft, because the bins are anchored at the threshold while the assignments are MSL.
+- **Anchoring the bins on MSL is NOT the fix** (measured, since it was proposed): fleet-wide it is
+  a wash (87.6 → 83.2 ft at a 500 ft bin). It rescues KRDU (205.6 → 63.2) and KSTL and damages
+  KSJC (73.8 → 93.7) and KSMF. Per-airport the current bin runs 73.8 (KSJC) to 205.6 (KRDU), and
+  the spread tracks threshold elevation.
+
+### H6 · the vertical angle is a criterion, not a word — and the two angles are different (2026-09-21)
+
+The user proposed a vertical-angle word mirroring the heading word ("就像 LPV 规定一样"). Measured
+on 13,043 altitude instructions / 7,486 flights (first 1,500 per airport; coverage stated).
+**Two distinct quantities, kept apart because an earlier readout of mine conflated them:**
+
+- **Position angle** = `atan(height above threshold / along-track distance to it)` — "am I on the
+  published path". On the final segment (course ±30°, cross-track < 1 NM, before the threshold):
+  p5 2.29 / p25 2.96 / **p50 3.05** / p75 3.13 / p95 3.35°; minus that runway's published
+  glidepath, p50 **+0.04°**, and **88.5 % within ±0.5°**.
+- **Flight path angle** = the aircraft's own descent gradient. Same instants: p5 −0.00 / p25 1.75 /
+  **p50 2.52** / p75 3.47 / p95 4.73°, with **9.4 % level** and 89.9 % descending. Real descents are
+  built from level and steep segments alternating around the path (a sample: 4131 ft at 12.8 NM
+  descending 5.53° to regain it; 3043 ft at 12.8 NM level at 0.00° waiting for it).
+
+**Conclusions, both from the same numbers:**
+1. The position angle is an excellent **criterion** for D61's vertical check: tight, per runway,
+   and referenced to a published value (KRDU 32 is **3.50°**, so it must be read per runway and
+   never hard-coded to 3°). The flight path angle is not — it is broad and noisy.
+2. The position angle is a **bad word**: 88.5 % of its mass lands in three 0.1° bins, so a model
+   learns to always emit bin 0 — the identical pathology to always emitting altitude word 0, in
+   different units.
+3. **One angular scale cannot serve the whole approach.** Off the final course (40.1 % of altitude
+   instructions) the same 0.1° resolution needs **598 words** to cover p1–p99 (p95 is +14.69° above
+   the published path), because on downwind and base the straight line to the threshold is not the
+   path the aircraft will fly. So the "angular everywhere, far field reads as large angles" variant
+   is refused by measurement, and with it the cost of a word whose unit changes by segment
+   (`altitude_centre_m` stays one conversion; the gate, `plan_conditioning=instruction`, the
+   frontend colouring and the conditioning scaling are all untouched).

@@ -200,6 +200,16 @@ of the package, not a migration in progress.
   `trombone_surplus_reference` `beeline` (default, bit-identical to L3.e) vs `reference-rollout` —
   sizing against `L_ref` itself is the trap (H3.8). Hook diagnostics are per-FLIGHT and ABSENT
   without a hook, never zero (H4).
+- **The instruction vocabulary's 1000 ft altitude bin is random rounding on the real levels**
+  (mean 235 / p95 472 ft against a random 250 / 475), and 56 % of its "instructions" are the
+  threshold crossing — exactly one per flight, median 62 ft, which the terminal word already
+  says. D51's justification for the bin cannot fail by construction. MSL anchoring is a wash
+  fleet-wide. 200 ft → mean 51 ft at 51 words (H5).
+- **A vertical angle is a CRITERION, not a word**: the position angle to the threshold sits at
+  p50 +0.04° from the runway's published glidepath with 88.5 % inside ±0.5° (so 88.5 % of its
+  mass is three bins — a word the model would always emit), while the flight path angle is broad
+  (p50 2.52°, 9.4 % level). Off the final course one 0.1° scale needs 598 words. Read the
+  published glidepath PER RUNWAY — KRDU 32 is 3.50° (H6).
 
 ## How to read results here (conventions that prevent wrong conclusions)
 
