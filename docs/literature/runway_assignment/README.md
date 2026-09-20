@@ -155,6 +155,33 @@ the separation regimes), NASA 1995 closely-spaced-parallel paper (automation eff
 | 5 | Ramanujam 2015; Avery 2015 | 1.5 h |
 | 6 | ATD-1 ConOps §2–3 + App. G; AMAN guidelines; E-AMAN spec (runway allocation) | 2 h |
 
+## Can the assigned runway change after it is given? (read 2026-09-20, for the instruction vocabulary's D64)
+
+The question was the user's: in real tower/approach practice, is a runway assigned once and then flown to, with a
+go-around as the only escape, or can the runway be switched mid-approach? **Quoted from the local PDF**
+`official/FAA_Order_JO_7110.65BB_Air_Traffic_Control_w_Chg1-3_2026-07-09.pdf` and
+`official/FAA_AIM_Aeronautical_Information_Manual_w_Chg1-3_2026-07-09.pdf` (both Change 3, effective 2026-07-09).
+**The answer is that a change is normal and codified at three separate points**, so a go-around is not the only escape.
+
+| where | paragraph | what it says, quoted |
+|---|---|---|
+| the assignment and any later change | **JO 7110.65BB 4-7-1 b**, CLEARANCE INFORMATION | "TERMINAL: When the STAR/RNAV STAR transition is designed to provide course guidance to multiple runways, the facility must state intended runway number on initial contact, or as soon as practical. If the runway assignment, **or any subsequent runway change**, is not issued prior to 10 NM from the runway transition waypoint, radar vectors to final must be provided." |
+| a change carried by the landing clearance | **JO 7110.65BB 3-10-5 c**, LANDING CLEARANCE | "If the landing runway is changed, preface the landing clearance with 'change to runway' followed by the [runway number]." Phraseology: "CHANGE TO RUNWAY (number), RUNWAY (number) CLEARED TO LAND." NOTE: "The purpose of the 'change to runway' phraseology and restating the runway number is to emphasize to the pilot that they [have been given a different runway]." |
+| a change to the adjacent parallel, late and published | **JO 7110.65BB 4-8-7**, SIDE-STEP MANEUVER | "When authorized by an instrument approach procedure, you may clear an aircraft for an approach to one runway and inform the aircraft that landing will be made on a parallel runway." Example: "Cleared I-L-S Runway seven left approach. Side-step to runway seven right." NOTE: side-step requires higher weather minima/MDA, published on the charts |
+| the same, pilot side | **AIM 5-4-19 a, b** | "ATC may authorize a standard instrument approach procedure which serves either one of parallel runways that are **separated by 1,200 feet or less** followed by a straight-in landing on the adjacent runway." … "Pilots are expected to commence the side-step maneuver as soon as possible after the runway or runway environment is in sight." Landing minima to the adjacent runway are nonprecision criteria |
+
+**(reading, not quoted)** Three consequences for the instruction vocabulary:
+
+1. A runway word that can never change would contradict the documents. D64's answer is yes on domain grounds, whatever
+   this cohort turns out to contain.
+2. **4-7-1 b gives the change a geometry**: past 10 NM from the runway transition waypoint the aircraft must be
+   radar-vectored to final. So a late runway change is not a quiet relabel; it forces vectoring, which is exactly what
+   the other four word kinds already describe.
+3. The side-step is a change to the **parallel** runway, i.e. the left/right layer — which is the layer the repo's own
+   runway-intent work found hard (R0, `../../4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md` §11:
+   direction 96–99 %, KRDU left/right 73–75 %). KRDU 05L/05R and 23L/23R, KSJC 30L/30R and KSMF 17L/17R are exactly
+   such pairs, so a late left/right change is the case to look for in B0′′-a.
+
 ## Related thesis documents
 
 - `4dTrajectory/ts_transformer/docs/2026-09-03_airport_frame_ablation_results.md`
