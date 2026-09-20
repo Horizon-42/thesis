@@ -5,7 +5,7 @@
 
 ## 现状（2026-09-19 深夜更新；接手的 agent 先读这一节和 §7，再读计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2）
 
-**2026-09-20 更新**：意图码版本的阶段 B 作废（读数留在结果文档 §9–§11）；计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2 已按指令词表重写（提交 1fe0660）：词 = 绝对目标的管制指令（航向相对最后进近航道、入口以上高度、地速、切入、保持，约 58 词，τ = 5–10 s），执行器吃生效指令，两层 CAT-K 式闭环再训（D49、D55），K 候选滚出按目标打分（D56），程序作解码掩码（D59），RL 本阶段不做（D58），多机层在阶段 C 之后（D60）；文献 `docs/literature/trajectory_as_language/`。**未签字、未开发**；下一步是用户审 §5.2 / §6.2，然后 B0′（标注器 + 300 架人工核）。§7 以下是意图码版本的开发记录。
+**2026-09-20 更新**：意图码版本的阶段 B 作废（读数留在结果文档 §9–§11）；计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2 已按指令词表重写（提交 1fe0660）：词 = 绝对目标的管制指令（航向相对最后进近航道、跑道入口以上高度、地速、切入、保持，约 58 词，τ = 5–10 s），执行器吃生效指令，两层 CAT-K 式闭环再训（D49、D55），K 候选滚出按目标打分（D56），程序作解码掩码（D59），RL 本阶段不做（D58），多机层在阶段 C 之后（D60）；文献 `docs/literature/trajectory_as_language/`。**未签字、未开发**；下一步是用户审 §5.2 / §6.2，然后 B0′（标注器 + 300 架人工核）。§7 以下是意图码版本的开发记录。
 
 **哪里停下**：阶段 A 全部完成（M-A0 … M-A3）。阶段 B：用户 2026-09-19 晚答复——指令词表对照臂做（12 臂）、B0 可以先跑、"最大程度利用时间，不干等实验"；
 B-dev0…7 全部写完、测试通过（全套 1288）、三轮 opus review（见 §7.1），**已提交 4cd11ea（M-B0 代码就绪）；未签字（M-B0′）、队列未跑**；runs worktree 已移到 4cd11ea，从它 dry-run 通过（GROUP baselines + 6 组，122 步全 todo）。
@@ -21,7 +21,7 @@ Q3（S60-held 的训练锚点契约）用户已按建议定（D48：≥ Δ = 20 
 - A2（§6，胜出格 L120_D20）：雷达引导航班未越线的 278 / 183 架里 passed-abeam（没转基边）0.36 / 0.61、established-short（对准晚约 20 s、预算用完）0.26 / 0.21、overshoot + parallel-offset（末段形状错）0.37 / 0.18。假设 H1（转弯时机是意图信息 → 阶段 B）、H2（转晚 → A3-a）、H3（形状错 → A3-b）。
 - A3（§8）：A3-a = 网格的 L60_D60 两臂只飞前 20 s（`--execute-s 20`，不重训）——雷达组两读数两 seed 都好 +0.07–0.14、未超线，直线组变差（seed 2024 从第 29 行起 0.940 → 0.682）；A3-b = N₁ = 4 新训两臂——无收益，雷达 ADE 变差。两者 §3.3 A3 行都 FAIL；执行器不换。
 - 发布：L120_D20 两 seed 的闭环记录与 9 个失败方式子集共 11 类进了 picker（`categories.json` 171 → 182）；正在跑的 Vite dev server 对新目录返回 SPA HTML，重启前端才能加载；`experiments/index.json` 早于本战役，发布用了临时索引，未重建（重建会覆盖，等用户）。
-- 文献：`docs/literature/prediction_horizons/`（14 篇核过原文：终端区历史 11 s–3 min、视界 90 s–5 min，采样 1/6/10 s；没有人闭环飞到入口、没有人扫历史长度）。
+- 文献：`docs/literature/prediction_horizons/`（14 篇核过原文：终端区历史 11 s–3 min、视界 90 s–5 min，采样 1/6/10 s；没有人闭环飞到跑道入口、没有人扫历史长度）。
 
 **产物（`4dTrajectory/outputs/KRDU/experiments/`）**
 - `two_tier_v3_grid_20260918/`：40 个臂目录；`cohorts/<cell>/development_cohort.json`；`lockstep/<arm>/{L-1,12km,8km,6km,row59}/`（Δ = 120 的格没有 6km）；`lockstep_exec20/L60_D60_s*/{L-1,row59}/`（A3-a）；
@@ -104,7 +104,7 @@ Q3（S60-held 的训练锚点契约）用户已按建议定（D48：≥ Δ = 20 
   未改的提醒：距离读数 (b) 的覆盖随 Δ 变（写进 D3）。
 - opus review 2（dev6–8）已做完并修：记录子集自带重算的 `accuracy`（`export.metrics_from_row`；`write_batch` 的行多了 `cross_track_p95_m` / `altitude_p95_m`
   两列，旧记录目录做不了子集）；`gate_grid` 的 decisive 看两项主指标、只认恰好两 seed；`cell_reading` 单独成函数；队列的格名来自配置（与 gate 表一致）、PID 文件退出即删、
-  有活着的 PID 拒绝再起；失败方式：航向用 chart track、只数入口前的中线穿越、加 `first_aligned_s` 与开始预测时的 to-go、`FAILURE_MODES_BLOCK` 登记进 publisher。
+  有活着的 PID 拒绝再起；失败方式：航向用 chart track、只数跑道入口前的中线穿越、加 `first_aligned_s` 与开始预测时的 to-go、`FAILURE_MODES_BLOCK` 登记进 publisher。
 - 冒烟（09-18 S60_nt 臂 24 架、从第 59 行起）：10 架雷达引导没穿越 → established-short 1、overshoot 1、passed-abeam 8；子集 summary 能过 picker 的 accuracy 读取。
 - intents 登记：`two_tier_v3_grid_20260918`（40 runs + 每 run 4 个 reading 变体 `@lockstep-none[-12km|-8km|-6km]`）；失败方式子集发布时再加 `@failure-<mode>` 变体。
 
