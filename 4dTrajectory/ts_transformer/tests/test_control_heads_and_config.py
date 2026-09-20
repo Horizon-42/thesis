@@ -341,7 +341,6 @@ def test_control_gradient_clip_records_preclip_module_norms_and_caps_global_norm
             "backbone": 3.0,
             "control_head": 4.0,
             "final_time_head": 0.0,
-            "manoeuvre_tokenizer": 0.0,
             "total": 5.0,
         }
     )

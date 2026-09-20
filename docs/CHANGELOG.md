@@ -4,6 +4,52 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-20 — the intent-code second layer is ARCHIVED; `plan_conditioning` keeps only `off`
+
+Follow-up to the audit below. Plan v3 §10 found that both layers trained on truth and were only ever evaluated
+closed-loop, and that the truth codes were read by TIME rather than by where the executor actually was; stage B was
+rewritten the same day (`4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` §5.2 / §6.2) around an
+**instruction vocabulary** — absolute control instructions read back off the track, one position every τ seconds, with
+CAT-K-style closed-loop post-training of both layers and goal-directed decoding. The intent-CODE code is therefore
+archived rather than kept: the repo's no-compatibility rule means a retired value is refused at load by name, never
+carried by a fallback branch.
+
+- **Moved** (`git mv`, byte for byte) to `4dTrajectory/ts_transformer/archive/manoeuvre_codes_2026_09/` with a README:
+  `manoeuvre/{tokenizer,sequences,prior,readout}.py`, `outputs/control/plan_token.py`, the runners
+  `manoeuvre_{codebook,readout,prior,prior_readout,gates,code_atlas}.py` and `two_tier_b_queue.py`, and their eight
+  tests. Gates **T / X / P / E / S** were COPIED verbatim into `archive/…/gates_manoeuvre.py` and deleted from
+  `manoeuvre/gates.py`, which stays live for `gate_grid` (stage A1) and `gate_relative` (rows A3 / B / B1).
+- **Stripped**: `manoeuvre/lockstep.py` is the no-token closed loop only (protocol `none`; protocols C / A / A-truth,
+  the codebook, the prior, the held token, the landing machinery and every code column are gone), and
+  `experiments/manoeuvre_lockstep.py` lost `--codebook`, `--protocol`, `--prior`, `--prior-landing-ends-flight`. Its
+  payload schema is now **`ts-manoeuvre-lockstep-v4`** (v3 minus the token / prior keys and `e_plan`); an older schema
+  is refused by name. `executor_relative_gate`, `executor_failure_modes`, `executor_grid_gate` and
+  `two_tier_grid_queue` read v4 unchanged.
+- **Config**: `manoeuvre-code` joins `PLAN_CONDITIONINGS_RETIRED`, which is now a MAP from the retired value to its own
+  archive directory, so a stored checkpoint is refused with the right pointer (21 v2 checkpoints →
+  `two_tier_v2_2026_09/`, the 09-19/20 stage B executors → `manoeuvre_codes_2026_09/`). `plan_conditioning` keeps
+  `off` alone; `manoeuvre_tokenizer` / `manoeuvre_fsq_levels` / `manoeuvre_codebook` / `manoeuvre_token_s` /
+  `manoeuvre_token_step_s`, `MANOEUVRE_FIELDS`, `FSQ_MINIMUM_LEVELS`, `token_span_s` / `token_step_s` / `token_hold`
+  and the `control_recipe` identity's `manoeuvre` block are gone, with their `run_naming` abbreviations
+  (`tok`, `fsq`, `codebook`, `tok-s`, `tok-step`). The rewritten plan's `instruction` value is NOT added yet.
+- **Control path**: the plan token's fused input, the tokenizer submodule, `plan_z`, `training_plan_context`,
+  `token_phase`, the batch-probe context, `ControlPrediction.manoeuvre_code`, `Forecast.manoeuvre_code(_source)`, the
+  `manoeuvreCode` record fields, the `manoeuvre_tokenizer` gradient group and the `manoeuvre_codes` epoch diagnostic
+  are removed. `WindowContext.row(i, epoch_seed)` and `TrajectoryWindows.batch`'s `epoch_seed` pass-through are KEPT:
+  generic, and the closed-loop retraining (plan D49) will use them.
+- **Layering**: nothing under `outputs/` imports `manoeuvre` any more — `manoeuvre.segments` is the one leaf and only
+  the runners consume the package (`tests/test_architecture.py::test_only_the_runners_reach_the_manoeuvre_package`).
+  `manoeuvre/{segments,context,failure_modes}.py` stay live: the segment-start frame is what the instruction labeller
+  will read, and the type vocabulary is the instruction prior's context.
+- **Untouched**: every artefact. `4dTrajectory/outputs/KRDU/experiments/{two_tier_v3_b_20260919,manoeuvre_tok_20260918}`,
+  `4dTrajectory/outputs/codebooks/`, the arm declarations, `docs/experiments/intents.json` and the published picker
+  categories all stay as they were; `publish_ts_experiment_trajectories.VARIANT_RECORD_BLOCKS` keeps
+  `manoeuvre_readout` / `manoeuvre_lockstep` (the first is now a commented MIRROR of the archived constant). The
+  readouts stay citable in `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 — with their configuration, and read
+  through §10 item 1 (open-loop-trained executors). Both 09-18 documents gained one status line saying so.
+- Reference entries D30, D31, C28, R7, R9 and L29 are prefixed **ARCHIVED 2026-09-20** rather than deleted (they
+  document the archived code); L29 and R9 also state what the live rule and the live runner are now.
+
 ### 2026-09-20 — two-tier v3 stage B ran, was stopped, and the plan was audited
 
 - The stage B queue (`two_tier_v3_b_20260919`, from the runs worktree at 4cd11ea, 21:33Z) flew its own baselines

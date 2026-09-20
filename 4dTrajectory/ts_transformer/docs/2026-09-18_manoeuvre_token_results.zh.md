@@ -1,5 +1,7 @@
 # 机动 token 方案：读数记录（2026-09-18 起）
 
+> **状态（2026-09-20）**：意图码版本的**代码已归档**到 `4dTrajectory/ts_transformer/archive/manoeuvre_codes_2026_09/`（README 在该目录）。本文 §9–§11 的读数留作证据，引用时必须带配置——它们是在**开环训练**的执行器上读的（`2026-09-18_two_tier_plan_v3.zh.md` §10 第 1 条）。产物仍在原处：`4dTrajectory/outputs/KRDU/experiments/{two_tier_v3_b_20260919,manoeuvre_tok_20260918}`、`4dTrajectory/outputs/codebooks/`。
+
 设计与计划在 `2026-09-18_manoeuvre_token_plan.zh.md`；本文只放 campaign 的读数，**每个 campaign 一节，最新在前**，
 每节固定四段：配置（臂文件、intents、commit、cohort）→ 表 → 读法（只读数字，不超出门）→ 门的判定与对状态表的一行结论。
 门的判据不在这里重述，引用计划 §3.3。

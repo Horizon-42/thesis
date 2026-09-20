@@ -122,46 +122,25 @@ CTA_CONDITIONINGS = (
 CTA_CONDITIONINGS_AVAILABLE = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
 CTA_FIELDS = ("cta_conditioning",)
 
-# The plan token: one fused decoder input beside the aircraft condition and the CTA
-# (`outputs/control/plan_token.py`). The two-tier v2 tokens (``truth-next``, ``waypoints``)
-# are archived (`archive/two_tier_v2_2026_09/`). ``manoeuvre-code`` is the manoeuvre-token
-# plan's executor conditioning (`docs/2026-09-18_manoeuvre_token_plan.zh.md` §2.6): the token
-# is the segment's code vector z — the TRUTH segment's, through the tokenizer, in training,
-# `predict` and protocol C (reads the future); the prior's in protocol A. The masking share
-# that used to sit beside the token (``plan_conditioning_dropout``) is RETIRED at its
-# constant 0 (`RETIRED_CONSTANT_FIELDS`): 0.5 taught the head to ignore the token (v2 §10.8).
+# The plan token: one fused decoder input beside the aircraft condition and the CTA. Nothing
+# builds one today — the axis is ``off`` alone, kept because the rewritten two-tier v3 stage B
+# (2026-09-20) will add an INSTRUCTION value. The masking share that used to sit beside the
+# token (``plan_conditioning_dropout``) is RETIRED at its constant 0
+# (`RETIRED_CONSTANT_FIELDS`): 0.5 taught the head to ignore the token (v2 §10.8).
 PLAN_CONDITIONING_OFF = "off"
-PLAN_CONDITIONING_MANOEUVRE_CODE = "manoeuvre-code"
-PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF, PLAN_CONDITIONING_MANOEUVRE_CODE)
-#: The two values a stored two-tier v2 control config may carry that no longer build a token.
-#: Named separately from the vocabulary so the refusal reads as a RETIREMENT with a pointer
-#: rather than as a corrupt value (21 stored L1 control checkpoints carry one).
-PLAN_CONDITIONINGS_RETIRED = ("truth-next", "waypoints")
+PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF,)
+#: The values a stored control config may carry that no longer build a token, each with the
+#: archive its builder moved to. Named separately from the vocabulary so the refusal reads as a
+#: RETIREMENT with a pointer rather than as a corrupt value: ``truth-next`` / ``waypoints`` are
+#: the two-tier v2 tokens (2026-09-18; 21 stored L1 control checkpoints carry one) and
+#: ``manoeuvre-code`` the intent-code second layer (2026-09-20, plan v3 §10 audit — the stage A
+#: and stage B executors that carry it no longer load).
+PLAN_CONDITIONINGS_RETIRED = {
+    "truth-next": "archive/two_tier_v2_2026_09/",
+    "waypoints": "archive/two_tier_v2_2026_09/",
+    "manoeuvre-code": "archive/manoeuvre_codes_2026_09/",
+}
 PLAN_CONDITIONING_FIELDS = ("plan_conditioning",)
-
-# The tokenizer behind the manoeuvre-code token (plan §2.4): WHICH intent space the code
-# comes from — the learned encoder + FSQ (`manoeuvre/tokenizer.py`; ``manoeuvre_fsq_levels``
-# are its per-dimension level counts, K = their product) or the rule-read command vocabulary
-# (baseline B: 7 heading × 3 vertical × 3 speed = 63 codes, no levels). ``manoeuvre_codebook``
-# names a FROZEN codebook directory
-# an executor is trained against (P3.3; the checkpoint binds to its sha); empty = the
-# tokenizer trains jointly with the executor (P1.3) and is exported afterwards
-# (`run_ts.py manoeuvre_codebook`). All three are read only under ``manoeuvre-code``.
-MANOEUVRE_TOKENIZER_LEARNED = "learned"
-MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY = "command-vocabulary"
-MANOEUVRE_TOKENIZERS = (MANOEUVRE_TOKENIZER_LEARNED, MANOEUVRE_TOKENIZER_COMMAND_VOCABULARY)
-# ``manoeuvre_token_s`` / ``manoeuvre_token_step_s`` (two-tier v3 stage B, B-dev1; plan D31 /
-# D38): the token SPAN S (how many seconds of the approach one code stands for) and the STEP
-# the closed loop flies between two predictions inside a span — 0 = the executor's horizon for
-# both, which is every 2026-09-18 arm (one token per forecast, never held). Resolved by
-# `token_span_s` / `token_step_s`; `token_hold` = S / step is the rounds one token is held for.
-MANOEUVRE_FIELDS = (
-    "manoeuvre_tokenizer", "manoeuvre_fsq_levels", "manoeuvre_codebook", "manoeuvre_token_s", "manoeuvre_token_step_s",
-)
-#: An FSQ dimension needs an interior level: at L = 2 the bound's half-step shift is
-#: atanh(1 / (1 - eps)) = NaN, so the smallest admissible level count is 3 (validated here,
-#: at the boundary, and again by `manoeuvre.tokenizer.FSQ`).
-FSQ_MINIMUM_LEVELS = 3
 
 # The duration head (B1, §三 3.1; B1.b, §三 3.1b). ``point`` is the package's original
 # scalar ``FinalTimeHead``; ``quantile`` is ``outputs.duration_heads.QuantileFinalTimeHead`` —
@@ -836,9 +815,9 @@ RETIRED_CONSTANT_FIELDS: dict[str, Any] = {
     "procedure_loss_vertical_scale_m": PROCEDURE_VERTICAL_SCALE_M,
     "closure_timing_scale_s": CLOSURE_TIMING_SCALE_S,
     # The plan token's training-time masking share (two-tier v2, 2026-09-16 … 09-18): 0.5
-    # taught the head to ignore its token (v2 §10.8) and the manoeuvre-code token pins it at
-    # 0, so the field is a constant. The stored 0.5 configs are the archived L1 / L1b arms,
-    # whose plan value is refused anyway; every other stored control config carries 0.0.
+    # taught the head to ignore its token (v2 §10.8), so the field is a constant. The stored
+    # 0.5 configs are the archived L1 / L1b arms, whose plan value is refused anyway; every
+    # other stored control config carries 0.0.
     "plan_conditioning_dropout": 0.0,
 }
 
@@ -925,7 +904,7 @@ RK4_REAL_AXIS_STABILITY_LIMIT = 2.785
 # Tuple-valued fields. JSON (``--config-overrides``, ``from_dict``, a campaign's arm file)
 # hands them back as lists; every reader that compares them against recipe content must
 # coerce them first, through this one function, or ``[] != ()`` refuses a faithful copy.
-SEQUENCE_FIELDS = ("channels", "manoeuvre_fsq_levels")
+SEQUENCE_FIELDS = ("channels",)
 
 
 def coerce_sequence_fields(settings: dict[str, Any]) -> dict[str, Any]:
@@ -1076,9 +1055,7 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "latent_posterior_init_std": 1.0,
         "latent_beta_warmup_epochs": 0,
         "latent_aux_duration_weight": 0.0,
-        # ...and so is the plan token (which reads the truth's segment): a recipe run is told
-        # no plan. The manoeuvre fields are not pinned beside it — with the token off they are
-        # refused off their defaults (`ControlOutput`).
+        # ...and so is the plan token: a recipe run is told no plan.
         "plan_conditioning": PLAN_CONDITIONING_OFF,
         # ...and the rollout horizon (two-tier L1): a recipe run predicts the whole remaining
         # approach. Every stored recipe config predates the field and reads as 0, so pinning
@@ -1817,11 +1794,6 @@ class ControlOutput(OutputSpec):
     control_recipe_name: str
     cta_conditioning: str
     plan_conditioning: str
-    manoeuvre_tokenizer: str
-    manoeuvre_fsq_levels: tuple[int, ...]
-    manoeuvre_codebook: str
-    manoeuvre_token_s: float
-    manoeuvre_token_step_s: float
     control_horizon_s: float
     control_condition_features: str
     duration: DurationSpec
@@ -1836,54 +1808,11 @@ class ControlOutput(OutputSpec):
         _require_member("cta_conditioning", self.cta_conditioning, CTA_CONDITIONINGS)
         if self.plan_conditioning in PLAN_CONDITIONINGS_RETIRED:
             raise ValueError(
-                f"plan_conditioning={self.plan_conditioning!r} is retired (2026-09-18): the "
-                "two-tier v2 plan tokens are under archive/two_tier_v2_2026_09/ and the "
-                "checkpoints that carry them no longer load "
-                "(docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
+                f"plan_conditioning={self.plan_conditioning!r} is retired: its token builder is "
+                f"under {PLAN_CONDITIONINGS_RETIRED[self.plan_conditioning]} and the checkpoints "
+                "that carry it no longer load"
             )
         _require_member("plan_conditioning", self.plan_conditioning, PLAN_CONDITIONINGS)
-        _require_member("manoeuvre_tokenizer", self.manoeuvre_tokenizer, MANOEUVRE_TOKENIZERS)
-        # The manoeuvre-code token (plan §2.6): the executor is conditioned on ONE segment's
-        # code and flies exactly that segment, so the segment length IS the fixed horizon —
-        # `control_horizon_s` is required — and the tokenizer's fields are read only here.
-        if self.plan_conditioning == PLAN_CONDITIONING_MANOEUVRE_CODE:
-            if not self.control_horizon_s:
-                raise ValueError(
-                    "plan_conditioning='manoeuvre-code' conditions the executor on one segment's "
-                    "code and the segment is the fixed rollout horizon: set control_horizon_s to "
-                    "the segment length"
-                )
-            learned = self.manoeuvre_tokenizer == MANOEUVRE_TOKENIZER_LEARNED
-            if learned and (
-                not self.manoeuvre_fsq_levels
-                or any(not isinstance(level, int) or level < FSQ_MINIMUM_LEVELS
-                       for level in self.manoeuvre_fsq_levels)
-            ):
-                raise ValueError(
-                    "a learned tokenizer needs its FSQ levels: manoeuvre_fsq_levels, one integer "
-                    f"level count ≥ {FSQ_MINIMUM_LEVELS} per dimension, K = their product; got "
-                    f"{self.manoeuvre_fsq_levels!r}"
-                )
-            if not learned and self.manoeuvre_fsq_levels:
-                raise ValueError(
-                    f"manoeuvre_tokenizer={self.manoeuvre_tokenizer!r} has no FSQ levels; "
-                    "manoeuvre_fsq_levels must be empty"
-                )
-        else:
-            moved = [
-                name for name, default in (
-                    ("manoeuvre_tokenizer", MANOEUVRE_TOKENIZER_LEARNED),
-                    ("manoeuvre_fsq_levels", ()),
-                    ("manoeuvre_codebook", ""),
-                    ("manoeuvre_token_s", 0.0),
-                    ("manoeuvre_token_step_s", 0.0),
-                ) if getattr(self, name) != default
-            ]
-            if moved:
-                raise ValueError(
-                    f"{', '.join(moved)} belong(s) to plan_conditioning='manoeuvre-code'; "
-                    f"plan_conditioning={self.plan_conditioning!r} builds no tokenizer"
-                )
         if self.plan_conditioning != PLAN_CONDITIONING_OFF and self.latent.active:
             raise ValueError(
                 "a plan token beside a latent intent is two answers to one question (what the "
@@ -2337,28 +2266,10 @@ class TSConfig:
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
-    # The plan as a decoder input (PLAN_CONDITIONINGS): under `manoeuvre-code` the token is the
-    # segment's code vector z from the tokenizer below (plan §2.6).
+    # The plan as a decoder input (PLAN_CONDITIONINGS): `off` is the only value a run may
+    # carry — the intent-code token is archived (PLAN_CONDITIONINGS_RETIRED) and the rewritten
+    # stage B's instruction vocabulary is not built yet.
     plan_conditioning: str = PLAN_CONDITIONING_OFF
-    # The tokenizer (MANOEUVRE_TOKENIZERS), its FSQ levels (K = the product; empty for the
-    # command vocabulary) and the FROZEN codebook directory an executor is trained against
-    # (empty = the tokenizer trains jointly and is exported afterwards). Read only under
-    # `manoeuvre-code`; refused off their defaults otherwise.
-    manoeuvre_tokenizer: str = MANOEUVRE_TOKENIZER_LEARNED
-    manoeuvre_fsq_levels: tuple[int, ...] = ()
-    manoeuvre_codebook: str = ""
-    # Two-tier v3 stage B (B-dev1; plan D31 / D38): the token SPAN S — the seconds of the
-    # approach one code stands for (the tokenizer reads S seconds of truth; the codebook records
-    # it) — and the token STEP — the seconds the closed loop flies before predicting again
-    # inside a span (the executor still forecasts its whole horizon), which is also the stride
-    # training draws the anchor's position inside the span on (B-dev2). 0 = the executor's
-    # horizon, which every 2026-09-18 arm had (one token per forecast, never held). S is at
-    # least the horizon and a whole number of steps; the step is at most the horizon and a whole
-    # number of rows and of integrator steps (the leg is cut on the dense rollout grid).
-    # `token_span_s` / `token_step_s` resolve the zeros; `token_hold` = S / step. Named
-    # `tok-s=` / `tok-step=` off their defaults; read only under `manoeuvre-code`.
-    manoeuvre_token_s: float = 0.0
-    manoeuvre_token_step_s: float = 0.0
     # Two-tier L1: the rollout's FIXED horizon in seconds; 0 = the whole remaining approach
     # (every stored run). Under Δ > 0 the schedule is rolled over exactly Δ, the targets cover
     # [0, Δ] (`dataset.target_horizon_s`), every anchor needs Δ of truth after it
@@ -2629,55 +2540,6 @@ class TSConfig:
                 f"control_horizon_s={self.control_horizon_s:g} is not a whole number of "
                 f"dt_s={self.dt_s:g} steps"
             )
-        # ...and the token span and step (two-tier v3 stage B) sit on the same grids: the span
-        # is cut into `dt_s` rows for the tokenizer, the step is where the closed loop cuts a
-        # leg (`dt_s` rows AND integrator steps, the rule `lockstep.executed_step_s` reads) and
-        # one token is held for a whole number of steps. The view above refuses both off their
-        # defaults without a plan token, so this runs only where they are read.
-        if self.plan_conditioning == PLAN_CONDITIONING_MANOEUVRE_CODE:
-            for name in ("manoeuvre_token_s", "manoeuvre_token_step_s"):
-                if getattr(self, name) < 0.0:
-                    raise ValueError(f"{name}={getattr(self, name):g}: seconds (0 = the horizon), never negative")
-                # one behaviour, one identity: the horizon is spelled 0, so an explicit equal value
-                # would name a second run for the same experiment (`tok-s=` / `control_recipe`)
-                if getattr(self, name) and abs(getattr(self, name) - self.control_horizon_s) <= _GRID_TOLERANCE_S:
-                    raise ValueError(f"{name}={getattr(self, name):g} equals the horizon: 0 is how the horizon is spelled")
-            span, step, horizon = token_span_s(self), token_step_s(self), self.control_horizon_s
-            if span < horizon - _GRID_TOLERANCE_S:
-                raise ValueError(
-                    f"manoeuvre_token_s={span:g} is shorter than the horizon {horizon:g} s: a token stands for at "
-                    "least the forecast it conditions (0 = the horizon)"
-                )
-            if step > horizon + _GRID_TOLERANCE_S:
-                raise ValueError(
-                    f"manoeuvre_token_step_s={step:g} is longer than the horizon {horizon:g} s: the closed loop "
-                    "cannot fly more of a forecast than there is"
-                )
-            for name, value in (("manoeuvre_token_s", span), ("manoeuvre_token_step_s", step)):
-                if not _whole_multiple(value, self.dt_s):
-                    raise ValueError(f"{name}={value:g} is not a whole number of dt_s={self.dt_s:g} rows")
-            # the explicit step only: the default (the horizon) is judged where a closed loop cuts it
-            # (`lockstep.executed_step_s`), and this rule must not constrain the horizon under a
-            # field the run never set
-            if self.manoeuvre_token_step_s and not _whole_multiple(step, self.control_rollout_integrator_dt_s):
-                raise ValueError(
-                    f"manoeuvre_token_step_s={step:g} is not a whole number of integrator steps "
-                    f"({self.control_rollout_integrator_dt_s:g} s): the leg is cut on the dense rollout grid"
-                )
-            if not _whole_multiple(span, step):
-                raise ValueError(
-                    f"manoeuvre_token_s={span:g} is not a whole number of manoeuvre_token_step_s={step:g} steps: "
-                    "one token is held for S / step rounds"
-                )
-            # a held token is trained at every position inside its span (the phase drawn per flight
-            # and epoch, `plan_token.token_phase`); a fixed-anchor training set builds its context
-            # rows once, at φ = 0, and would train the executor at one position the closed loop
-            # holds the token over three of
-            if token_hold(self) > 1 and not self.random_train_anchor:
-                raise ValueError(
-                    f"a held token (span {span:g} s over {step:g} s steps) needs random training anchors: "
-                    "a fixed-anchor training set is built once, at phase 0"
-                )
         if (
             self.control_horizon_s
             and self.random_train_anchor
@@ -2843,10 +2705,9 @@ class TSConfig:
         # refusal would otherwise fire first and point nowhere.
         if data.get("plan_conditioning") in PLAN_CONDITIONINGS_RETIRED:
             raise ValueError(
-                f"plan_conditioning={data['plan_conditioning']!r} is retired (2026-09-18): the "
-                "two-tier v2 plan tokens are under archive/two_tier_v2_2026_09/ and the "
-                "checkpoints that carry them no longer load "
-                "(docs/2026-09-18_manoeuvre_token_plan.zh.md §5)"
+                f"plan_conditioning={data['plan_conditioning']!r} is retired: its token builder is "
+                f"under {PLAN_CONDITIONINGS_RETIRED[data['plan_conditioning']]} and the checkpoints "
+                "that carry it no longer load"
             )
         # An UNREAD retired field is dropped by name: nothing read it, so the stored value
         # could not have changed the run, and refusing the artifact would be a contract
@@ -3022,29 +2883,6 @@ def _whole_multiple(value: float, unit: float) -> bool:
     return abs(round(value / unit) * unit - value) <= _GRID_TOLERANCE_S
 
 
-def token_span_s(config: TSConfig) -> float:
-    """The token span S (two-tier v3 stage B, D31): what one manoeuvre code stands for, in
-    seconds — ``manoeuvre_token_s``, or the executor's horizon when that is 0 (every 2026-09-18
-    arm: one token per forecast). The tokenizer reads S seconds of truth from the token
-    segment's start; the codebook records S as its ``segment_s``."""
-    return float(config.manoeuvre_token_s or config.control_horizon_s)
-
-
-def token_step_s(config: TSConfig) -> float:
-    """The token step: the seconds the closed loop flies before predicting again inside a token
-    span (a coded protocol's executed step, `lockstep.fly`) and the stride training draws the
-    anchor's position inside the span on — ``manoeuvre_token_step_s``, or the horizon when 0."""
-    return float(config.manoeuvre_token_step_s or config.control_horizon_s)
-
-
-def token_hold(config: TSConfig) -> int:
-    """How many rounds one token is held for: S / step (D38) — 1 for every 2026-09-18 arm, and 1
-    for a whole-approach run (no horizon: no span, no step, nothing held)."""
-    if not config.control_horizon_s:
-        return 1
-    return int(round(token_span_s(config) / token_step_s(config)))
-
-
 def control_recipe(config: TSConfig) -> dict[str, Any]:
     """Serialize the complete recipe for a control-output strategy."""
     base: dict[str, Any] = {
@@ -3080,14 +2918,6 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         base["horizon_s"] = config.control_horizon_s
     if config.plan_conditioning != PLAN_CONDITIONING_OFF:
         base["plan"] = config.plan_conditioning
-        base["manoeuvre"] = {
-            "tokenizer": config.manoeuvre_tokenizer,
-            "fsq_levels": list(config.manoeuvre_fsq_levels),
-            "codebook": config.manoeuvre_codebook,
-            # present only off their defaults (the rule above): every 09-18 checkpoint predates them
-            **({"token_s": config.manoeuvre_token_s} if config.manoeuvre_token_s else {}),
-            **({"token_step_s": config.manoeuvre_token_step_s} if config.manoeuvre_token_step_s else {}),
-        }
     if not uses_control_dynamics(config.prediction_output):
         raise ValueError("state output has no control recipe")
     return base

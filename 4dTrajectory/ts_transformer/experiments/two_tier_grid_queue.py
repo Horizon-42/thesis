@@ -7,7 +7,7 @@
 One cell = the declaration's arms of one (lookback, segment) (`executor_grid_gate.grid_cells`, named
 `gates.cell_name`: its two seeds). Per cell, in the declaration's order (Δ ascending, then L
 ascending): `frame_ablation --only <its arms>` (an arm whose ``history.json`` exists is skipped by
-the runner itself), then for every arm and reading `manoeuvre_lockstep --protocol none` into
+the runner itself), then for every arm and reading `manoeuvre_lockstep` (the no-token closed loop) into
 ``<campaign>/lockstep/<arm>/<reading>/`` (``L-1`` = the first prediction at the fixed anchor; ``<X>km`` =
 ``--anchor-remaining-km X``; a reading whose artefact exists is skipped), then `executor_grid_gate`
 into ``<campaign>/gate/after_<cell>/`` — the running table. No records are written here (40 arms ×
@@ -87,7 +87,7 @@ def cell_steps(cell: str, arms: list[str], *, declaration: Path, campaign: Path,
             artefact = reading_path(campaign, arm, reading)
             steps.append((
                 f"{arm}: lockstep none, {reading}",
-                [py, str(RUN_TS), "manoeuvre_lockstep", "--executor", str(campaign / arm / "checkpoint.pt"), "--protocol", "none",
+                [py, str(RUN_TS), "manoeuvre_lockstep", "--executor", str(campaign / arm / "checkpoint.pt"),
                  *reading_flags(reading), "--device", device, "--out", str(artefact.parent)],
                 artefact,
             ))

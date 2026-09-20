@@ -18,11 +18,11 @@ from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.envelope import control_contract
 
 
-# `manoeuvre_tokenizer` (2026-09-18): the tokenizer trained jointly with the executor. Its
-# gradient norm is the one number that says whether joint training reaches the encoder at
-# all (plan §6.1's first fallback check), so it is a group of its own — a stated zero on
-# every run without one, which is the cost of the key.
-GRADIENT_GROUPS = ("backbone", "control_head", "final_time_head", "manoeuvre_tokenizer")
+# (`manoeuvre_tokenizer` was a fourth group here — the intent-code tokenizer trained jointly
+# with the executor. ARCHIVED 2026-09-20 with the rest of that layer,
+# archive/manoeuvre_codes_2026_09/; the key stays in the stored runs' histories, and no live
+# model has a parameter under that prefix.)
+GRADIENT_GROUPS = ("backbone", "control_head", "final_time_head")
 SATURATION_THRESHOLD_FRACTION = 0.01
 
 
@@ -44,8 +44,6 @@ def _gradient_group(parameter_name: str) -> str:
     # tree, `archive/` included.)
     if parameter_name.startswith(("final_time_head.", "duration_quantile_head.")):
         return "final_time_head"
-    if parameter_name.startswith("manoeuvre_tokenizer."):
-        return "manoeuvre_tokenizer"
     return "backbone"
 
 
@@ -113,15 +111,9 @@ class ControlTrainingDiagnosticsAccumulator:
     coefficient_min: float = 1.0
     saturated_by_control: list[int] = field(init=False)
     controls_by_control: int = 0
-    #: The manoeuvre-code vocabulary size (0 = no code on this run): the epoch's code usage
-    #: — how many of K are used, the largest share, the entropy — is gate T(iii)'s reading
-    #: and the joint-training collapse signal (plan §3.3, §6.1).
-    manoeuvre_code_count: int = 0
-    code_counts: list[int] = field(init=False)
 
     def __post_init__(self) -> None:
         self.saturated_by_control = [0 for _name in self.control_names]
-        self.code_counts = [0] * int(self.manoeuvre_code_count)
 
     def record_prediction(
         self,
@@ -140,11 +132,6 @@ class ControlTrainingDiagnosticsAccumulator:
             for old, new in zip(self.saturated_by_control, counts)
         ]
         self.controls_by_control += prediction.controls.shape[0] * prediction.controls.shape[1]
-        if prediction.manoeuvre_code is not None:
-            counts = torch.bincount(
-                prediction.manoeuvre_code.detach().cpu(), minlength=self.manoeuvre_code_count
-            ).tolist()
-            self.code_counts = [old + int(new) for old, new in zip(self.code_counts, counts, strict=True)]
 
     def record_gradients_and_clip(self, model: nn.Module) -> None:
         norms, coefficient = clip_gradients_by_global_norm(model, self.max_norm)
@@ -160,20 +147,7 @@ class ControlTrainingDiagnosticsAccumulator:
         if self.batch_count <= 0 or self.controls_by_control <= 0:
             raise RuntimeError("control training diagnostics contain no batches")
         total_controls = self.controls_by_control * len(self.control_names)
-        code_usage = {}
-        if self.manoeuvre_code_count:
-            total = sum(self.code_counts)
-            shares = [count / total for count in self.code_counts if count]
-            code_usage = {"manoeuvre_codes": {
-                "count": self.manoeuvre_code_count,
-                "used": sum(1 for count in self.code_counts if count),
-                "unused": sum(1 for count in self.code_counts if not count),
-                "max_share": max(shares, default=0.0),
-                "entropy_bits": -sum(share * math.log2(share) for share in shares),
-                "counts": list(self.code_counts),
-            }}
         return {
-            **code_usage,
             "gradient_norm_pre_clip": {
                 "mean": {
                     name: self.gradient_sum[name] / self.batch_count

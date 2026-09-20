@@ -12,7 +12,6 @@ import torch.nn as nn
 from ts_transformer.config import TSConfig
 from ts_transformer.outputs.envelope import CONTROL_NAMES, ControlContract, control_contract
 from ts_transformer.outputs.conditioning import condition_names
-from ts_transformer.outputs.control.plan_token import manoeuvre_tokenizer_for, plan_token_width, plan_z
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
@@ -23,7 +22,6 @@ from ts_transformer.config import (
     DURATION_HEADS_WITH_POINT,
     DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
-    PLAN_CONDITIONING_OFF,
 )
 from ts_transformer.outputs.duration_heads import FinalTimeHead, QuantileFinalTimeHead
 
@@ -41,9 +39,6 @@ class ControlPrediction:
     # calibration is built on. `kw_only` because `LatentControlPrediction` extends this
     # dataclass with required fields, and a defaulted one before them would not compile.
     duration_quantiles_s: torch.Tensor | None = field(default=None, kw_only=True)
-    # Manoeuvre-code output (plan §2.6): the code `[B]` this schedule was decoded under (read
-    # once, with the z it conditions on), or None on every other run.
-    manoeuvre_code: torch.Tensor | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -217,22 +212,13 @@ class ControlFeatureModel(nn.Module):
         self.cta_encoder = (
             nn.Sequential(nn.Linear(1, config.d_model), nn.GELU()) if self.cta_given else None
         )
-        # The plan as one more fused token (`outputs/control/plan_token.py`): under
-        # `manoeuvre-code` the segment's code vector z, from the tokenizer held HERE as a
-        # submodule — trained jointly (the control objective's gradient reaches its encoder
-        # through z) or the frozen codebook's, whose sha the checkpoint then binds to. Built
-        # only under a plan so every plan-free run draws the initialization it always drew.
-        self.plan_given = config.plan_conditioning != PLAN_CONDITIONING_OFF
-        self.manoeuvre_tokenizer, self.codebook_sha256 = (
-            manoeuvre_tokenizer_for(config) if self.plan_given else (None, None)
-        )
-        self.plan_encoder = (
-            nn.Sequential(nn.Linear(plan_token_width(config), config.d_model), nn.GELU())
-            if self.plan_given else None
-        )
+        # The plan token was one more fused input here (`plan_conditioning`): the intent-code
+        # token is ARCHIVED 2026-09-20 (archive/manoeuvre_codes_2026_09/) and the rewritten
+        # stage B's instruction vocabulary is not built yet, so nothing is fused beside the
+        # condition and the CTA.
         self.feature_fusion = nn.Sequential(
             nn.Linear(
-                (config.enc_in + 1 + int(self.cta_given) + int(self.plan_given)) * config.d_model,
+                (config.enc_in + 1 + int(self.cta_given)) * config.d_model,
                 config.d_model,
             ),
             nn.GELU(),
@@ -249,27 +235,16 @@ class ControlFeatureModel(nn.Module):
         # it against, single-seed, inside a 30 m band.
         self.duration_quantile_head = None
 
-    def fused_features_and_code(
+    def fused_features(
         self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """``(features, the manoeuvre code [B] or None)``: the code is read ONCE here, with the
-        z it conditions on, so a record or a diagnostic cannot re-encode and disagree."""
+    ) -> torch.Tensor:
         encoded = self.feature_encoder.encode_features(history)
         condition = self.condition_encoder(dynamics["condition"])
         parts = [encoded, condition]
         if self.cta_given:
             cta = (dynamics["cta_s"] / self.cta_scale_s).to(encoded.dtype).unsqueeze(-1)
             parts.append(self.cta_encoder(cta))
-        code = None
-        if self.plan_given:
-            z, code = plan_z(self.manoeuvre_tokenizer, dynamics)
-            parts.append(self.plan_encoder(z.to(encoded.dtype)))
-        return self.feature_fusion(torch.cat(parts, dim=-1)), code
-
-    def fused_features(
-        self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]
-    ) -> torch.Tensor:
-        return self.fused_features_and_code(history, dynamics)[0]
+        return self.feature_fusion(torch.cat(parts, dim=-1))
 
     def quantile_head(self) -> QuantileFinalTimeHead | None:
         """WHICH module holds the quantiles, or None under ``point``.
@@ -468,7 +443,7 @@ class ControlOutputModel(ControlFeatureModel):
         self.duration_quantile_head = quantile_duration_head_for(config)
 
     def forward(self, history: torch.Tensor, dynamics: dict[str, torch.Tensor]):
-        features, code = self.fused_features_and_code(history, dynamics)
+        features = self.fused_features(history, dynamics)
         final_time_s, quantiles = self.duration(history, dynamics)
         prediction = self.control_head(
             features,
@@ -476,6 +451,6 @@ class ControlOutputModel(ControlFeatureModel):
             lower=dynamics["control_lower"],
             upper=dynamics["control_upper"],
         )
-        # The control head knows nothing about quantiles or codes — it partitions ONE
-        # duration — so both are attached here rather than threaded through its signature.
-        return replace(prediction, duration_quantiles_s=quantiles, manoeuvre_code=code)
+        # The control head knows nothing about quantiles — it partitions ONE duration — so
+        # they are attached here rather than threaded through its signature.
+        return replace(prediction, duration_quantiles_s=quantiles)

@@ -1,5 +1,9 @@
 """Segments (plan §2.3): how an approach is cut into `segment_s` pieces from an anchor, the
-segment-start frame every piece is read in, and the rows the tokenizer's encoder sees.
+segment-start frame every piece is read in, and the rows an encoder sees.
+
+KEPT when the intent-code layer was archived (2026-09-20,
+`archive/manoeuvre_codes_2026_09/`): the tokenizer that read these rows is gone, the FRAME is
+not — the rewritten stage B's instruction labeller reads a manoeuvre in the same start frame.
 
 A segment is `segment_s` seconds of a six-channel chart polyline (`data/channels.py`: e, n, u
 and their exact chart derivatives) sampled every `dt_s` from its first row, so it has

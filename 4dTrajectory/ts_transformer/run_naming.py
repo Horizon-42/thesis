@@ -48,7 +48,6 @@ from ts_transformer.config import (
     CONTROL_HOOK_FIELDS,
     CTA_FIELDS,
     PLAN_CONDITIONING_FIELDS,
-    MANOEUVRE_FIELDS,
     DURATION_HEAD_QUANTILE,
     DURATION_HEAD_TWO_HEAD,
     DURATION_QUANTILES,
@@ -137,7 +136,7 @@ CONTROL_LOSS_FIELDS = (
 )
 # Fields whose value is a path: rendered as the file's parent/name (two label generations
 # in different directories must not read as one).
-_PATH_FIELDS = frozenset({"control_fitted_teacher_path", "manoeuvre_codebook"})
+_PATH_FIELDS = frozenset({"control_fitted_teacher_path"})
 STATE_LOSS_FIELDS = (
     "fitted_tail_position_weight",
     "fitted_terminal_position_weight",
@@ -163,12 +162,10 @@ META_FIELDS = (
     *INTENT_FIELDS,
     # The CTA axis reads the future the same way: a given-CTA run must wear it.
     *CTA_FIELDS,
-    # ...and the plan token: which plan the control head is handed — and, under the
-    # manoeuvre-code token, WHICH intent space (the learned K = Π levels, or the command
-    # vocabulary) and which frozen codebook: two runs differing only there are conditioned on
-    # different codes. Every stored config predates the three at their defaults.
+    # ...and the plan token: which plan the control head is handed. The intent-code token's
+    # own fields (tokenizer, FSQ levels, codebook, token span and step) are ARCHIVED
+    # 2026-09-20 (archive/manoeuvre_codes_2026_09/); the axis itself stays named.
     *PLAN_CONDITIONING_FIELDS,
-    *MANOEUVRE_FIELDS,
     # Two-tier L1: a fixed rollout horizon predicts a different thing (Δ seconds of the
     # approach, no duration head), so it is spelled out ahead of the backbone knobs that fold.
     # Every stored config predates it and carries 0, so adding it renames nothing.
@@ -308,11 +305,6 @@ _ABBREV = {
     "intent_conditioning": "intent",
     "cta_conditioning": "cta",
     "plan_conditioning": "plan",
-    "manoeuvre_tokenizer": "tok",
-    "manoeuvre_fsq_levels": "fsq",
-    "manoeuvre_codebook": "codebook",
-    "manoeuvre_token_s": "tok-s",
-    "manoeuvre_token_step_s": "tok-step",
     "control_condition_features": "airframe",
     "control_fitted_teacher_path": "teacher",
     "state_position_reference": "pos-ref",
@@ -447,7 +439,7 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Supervision sources", ("control_fitted_teacher_path",)),
     ("Conditioning", (
         "target_conditioning", *INTENT_FIELDS, *CTA_FIELDS, *PLAN_CONDITIONING_FIELDS,
-        *MANOEUVRE_FIELDS, "control_condition_features",
+        "control_condition_features",
     )),
     ("Control rollout", (
         "control_duration_parameterization", "control_duration_uniform_floor",

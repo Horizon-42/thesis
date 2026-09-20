@@ -116,12 +116,6 @@ class Forecast:
     cta_from_quantiles: bool = False
     cta_quantile: float | None = None
     cta_interval: dict[str, object] | None = None
-    # Manoeuvre-code control output only (plan §2.6): the code the executor flew this segment
-    # under, and where it came from — `truth` (the truth segment through the tokenizer:
-    # training, `predict`, protocol C; reads the future) or `given` (a z handed in: the
-    # prior's, protocol A).
-    manoeuvre_code: int | None = None
-    manoeuvre_code_source: str | None = None
 
     def __post_init__(self) -> None:
         if not (self.controls is None) == (self.commands is None) == (self.control_parameterization is None):

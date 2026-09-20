@@ -49,17 +49,23 @@ of the package, not a migration in progress.
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
   `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
-- **`manoeuvre` — IN DEVELOPMENT** (P1–P3 code landed 2026-09-18; the P1.4 token campaign was STOPPED
-  the same day — its executor baseline was unsettled — and the plan was rewritten as **two-tier v3**,
-  `docs/2026-09-18_two_tier_plan_v3.zh.md`: stage A = the no-token executor's own (L, Δ) grid, R8; stage B =
-  the token span S ∈ {20, 60} s on the L60_D20 executor, the token held over S / step rounds, D31 / R9): the
-  intent-token plan — `manoeuvre/segments.py` (the segment-start frame), `tokenizer.py` (encoder +
-  FSQ, the command vocabulary, the codebook artefact, C28), the executor under `plan_conditioning=
-  manoeuvre-code` (D30), `sequences.py` + `context.py` + `prior.py` (the causal prior, discrete or
-  continuous), `lockstep.py` (protocols C / A / A-truth), `readout.py` + `gates.py` (T / X / P / E / S);
-  runners `manoeuvre_codebook`, `manoeuvre_readout`, `manoeuvre_prior`, `manoeuvre_prior_readout`,
-  `manoeuvre_lockstep`, `manoeuvre_gates`, `manoeuvre_code_atlas` (R7). Plan: `docs/2026-09-18_manoeuvre_token_plan.zh.md`;
-  readouts: `docs/2026-09-18_manoeuvre_token_results.zh.md` (P10).
+- **`manoeuvre` — the SECOND LAYER's line, being rewritten.** The **intent-code** layer (a learned
+  FSQ code per segment, the executor conditioned on it, a causal prior over codes) is **ARCHIVED
+  2026-09-20**: `archive/manoeuvre_codes_2026_09/` (README there; tokenizer, sequences, prior,
+  readout, `plan_token.py`, gates T/X/P/E/S copied to `gates_manoeuvre.py`, the `manoeuvre_*`
+  runners and `two_tier_b_queue`). Why: plan v3 §10's audit — both layers trained on truth and
+  only ever evaluated closed-loop, and the truth codes were indexed by time, not by where the
+  executor was — so stage B was rewritten (2026-09-20, `docs/2026-09-18_two_tier_plan_v3.zh.md`
+  §5.2 / §6.2) around an INSTRUCTION vocabulary with closed-loop post-training of both layers.
+  Numbers: `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
+  `4dTrajectory/outputs/KRDU/experiments/{two_tier_v3_b_20260919,manoeuvre_tok_20260918}` +
+  `outputs/codebooks/` — read them through §10 item 1 (open-loop-trained executors). `plan_conditioning`
+  keeps ONLY `off`; `manoeuvre-code` is refused at load by name (`PLAN_CONDITIONINGS_RETIRED`).
+  **Live**: the no-token closed loop — `lockstep.py` (protocol `none`, payload schema
+  `ts-manoeuvre-lockstep-v4`), `gates.py` (grid + relative), `segments.py` (the start frame, kept
+  for the instruction labeller), `context.py` (the type vocabulary), `failure_modes.py`, runners
+  `manoeuvre_lockstep`, `executor_*`, `two_tier_grid_queue` (R8) — i.e. two-tier v3 stage A
+  (P10, D30 / D31 / C28 / R7 / R9 are the archived layer's records).
 - **Control-path axes**: `latent_dim > 0` (latent intent z) and `cta_conditioning=given` (the
   given arrival time IS the duration) — their oracle forms READ THE FUTURE and the run name says so
   (`control+z8`, `z=posterior`, `cta=given`), never a prediction result (P5). The duration head:
@@ -94,11 +100,8 @@ of the package, not a migration in progress.
   RANGE is not the same dynamics (with drag cancelled the speed has no drag feedback). Across the
   2026-09-16 refactor every stored checkpoint replays bit-identically on CPU, ≤ 2e-13 relative on
   CUDA (C27).
-- **A codebook is a hashed artefact** (`manoeuvre/tokenizer.py`: kind, levels, segment, the SCALE
-  constants, the cohort identity, the source checkpoint and the weights under one sha; never
-  overwritten, refused when this build's scales differ) **and an executor trained against one
-  binds to `codebook_sha256`** — `load_checkpoint` refuses it once the directory's tokenizer
-  weights differ from the checkpoint's (C28).
+- **ARCHIVED 2026-09-20** (`archive/manoeuvre_codes_2026_09/`): the codebook as a hashed artefact
+  and the executor binding to its `codebook_sha256` (C28).
 - Controls are DIMENSIONLESS (`outputs/envelope.py`); the thrust floor is negative on purpose; the
   head's n ≥ 0.2 and `flyability`'s n ≥ 0.5 differ on purpose and neither moves; a guidance layer
   commanding n reads `flyability`'s envelope (C4).
@@ -153,8 +156,7 @@ of the package, not a migration in progress.
 | `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′: the third column is a path-angle target flown by a 3 s loop. **Passes every pre-registered gate on both seeds** — fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %, straight-in FDE p50 543 / 559 vs 647 / 663, pooled ADE 1173 / 1182 vs 1325 / 1295. ONE regression: vectored FDE p50 +625 / +704 m, unexplained (not turn authority). **Adoption is the user's call** (D27) |
 | `control_condition_features` | `raw` | `ratios` carries the SAME information at the SAME width (so a ratios arm starts from its raw twin's weights); 4 of the 8 raw channels are constant on this fleet. Built, not yet measured (D28) |
 | `control_horizon_s` | `0` (whole approach) | two-tier L1: a FIXED rollout horizon Δ — ONE span definition (`dataset.target_horizon_s`), ONE floor rule (`dataset.effective_min_future_s`), and every duration-deciding axis (CTA, quantile head, `final_time_loss_weight`, latent, imitation teacher) refused. **An L1 arm's numbers are its readouts' [0, Δ], never the record summary's** whole-remainder ADE/FDE (D29) |
-| `plan_conditioning` | `off` | `manoeuvre-code` (P1.3, 2026-09-18): the token is the segment's code vector z from the tokenizer held as the executor's SUBMODULE — joint training, or a frozen `manoeuvre_codebook`; REQUIRES `control_horizon_s` (the token SPAN defaults to the horizon and may be longer, D31); one z source per batch (the truth span + its start state, or a given z); `manoeuvre_tokenizer` / `manoeuvre_fsq_levels` refused off default under any other value; `plan_conditioning_dropout` RETIRED at 0 (0.5 taught the head to ignore the token); `truth-next` / `waypoints` archived and refused at load (D30) |
-| `manoeuvre_token_s` / `manoeuvre_token_step_s` | `0` / `0` (= the horizon) | two-tier v3 stage B (2026-09-19): the token span S and the step the closed loop flies inside it — S > step holds one token for S / step rounds; training draws the anchor's position inside the span per flight and epoch and reads the PREVIOUS span when the record cannot hold the current one (the closed loop's own hold; the anchor floor stays Δ — the user's 2026-09-19 decision, plan D48); the prior's landing only records a time (`--prior-landing-ends-flight` restores the 09-18 rule); an explicit value equal to the horizon is refused (0 spells it); every 2026-09-18 checkpoint is hold 1, unchanged (D31) |
+| `plan_conditioning` | `off` | **`off` is the only value**: `manoeuvre-code` ARCHIVED 2026-09-20 (D30 / D31 are its record) and `truth-next` / `waypoints` 2026-09-18 — all three refused at load by name, each pointing at its own archive (`PLAN_CONDITIONINGS_RETIRED`). The rewritten stage B's `instruction` value is not built yet |
 | `control_dynamics_model` | `point-mass` | `first-order-lag`: smoothness + 3.4 % ADE, τ = 2.0 s not CV-selected; a pipeline lag cell carries `_lag` (D4) |
 | procedure penalty | weights 0 | NOT adopted; hinge scales are module constants (D5) |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained through a hook beat it; `+` combinations are a lookup, their order the application order (D6) |
@@ -253,7 +255,8 @@ of the package, not a migration in progress.
   path (L6).
 - `outputs/guidance/` (was `outputs/plan/guidance` + `skeleton`, lifted 2026-09-18): the rule
   guidance — `route` and its six measured route rules (L8), `controller.PlanGuidance`, hold ≤ ~3 s
-  (L9), `timing`, `skeleton` (the CIFP reader); the manoeuvre-token plan's second executor. The
+  (L9), `timing`, `skeleton` (the CIFP reader); a BASELINE and diagnostic beside the learned
+  second layer, never the model's fix (the user's rule). The
   plan head, its extractors and oracle runner are archived — L7, L10–L15 describe archived code.
 - `constraints/saturation` is the ONE soft-saturation definition; `composite` refuses duplicate
   diagnostics; barrier and trombone gates are complementary by construction (L16).
@@ -266,10 +269,11 @@ of the package, not a migration in progress.
 - `tests/` is one file per topic; shared fixtures in `tests/support.py` (L21).
 - A module belongs under `outputs/control/` only if EVERY consumer is control-specific (L23);
   import direction rules, all enforced by `tests/test_architecture.py` (L24). **Between paths**: the
-  guidance layer never imports the control path (L28). **`manoeuvre/`**: `segments` and
-  `tokenizer` are LEAVES below the control path (data plane, `config`, `io_utils`, torch only — an
-  allow-list) because the executor holds the tokenizer as a submodule; every other manoeuvre
-  module imports the control path, and only `outputs/control/*` and runners import `manoeuvre` (L29).
+  guidance layer never imports the control path (L28). **`manoeuvre/`**: `segments` is the one LEAF
+  (data plane, `config`, `io_utils`, torch only — an allow-list) and **nothing under `outputs/`
+  imports `manoeuvre` any more**; only the runners do. The two-leaf rule and its reverse edge (the
+  executor holding the tokenizer as a submodule) were ARCHIVED 2026-09-20 with that layer — L29 is
+  their record, and a new edge from `outputs/` amends `MANOEUVRE_LEAVES` and the rule together.
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;
@@ -286,29 +290,22 @@ noise (sd ≈ 0.05, sign flips), the table is a sidecar never in `data_provenanc
 `cal.hit*` is in-sample on val (R3). `eta_error_readout` — B0; |Δt| p80 is 65.8–72.5 s vectored against
 12.0–20.3 s straight-in (KRDU val), so one pooled ETA interval cannot serve both (R4). `latent_probe` — L2.f;
 `--limit N` is a prefix (a smoke test); the posterior reads the future (R5). `latent_fan_readout`
-— 4(a); the RANDOM fan is the reading, not a footnote (R6). **`manoeuvre_*`** — the intent-token
-chain: `manoeuvre_codebook` exports a joint executor's tokenizer; `manoeuvre_readout` reads gate T
-(protocol C at the fixed anchor, paired with the SAME seed's no-token twin, `--write-records`);
-`manoeuvre_prior` trains the prior on the executor's own split (never an operating-day split before
-P4); `manoeuvre_prior_readout` (val NLL vs the bigram, the flip rate); `manoeuvre_lockstep`
-(`--protocol C|A|A-truth`, one round = the segment, the three artefacts must be ONE vocabulary);
-`manoeuvre_gates` judges over written artefacts, two seeds, never a typed number (R7). **Two-tier v3
+— 4(a); the RANDOM fan is the reading, not a footnote (R6). **`manoeuvre_codebook` / `manoeuvre_readout` /
+`manoeuvre_prior` / `manoeuvre_prior_readout` / `manoeuvre_gates` / `manoeuvre_code_atlas`** —
+ARCHIVED 2026-09-20 (`archive/manoeuvre_codes_2026_09/`; R7 is their record). **Two-tier v3
 stage A** (2026-09-18): `plan_cohort --arms` writes one development cohort PER CELL from one load (an arm's
-own `development_cohort` wins over the file's; `frame_ablation --only` trains a subset); `manoeuvre_lockstep
---protocol none` takes NO codebook and `--anchor-remaining-km X` starts the closed loop at the remaining-path bin
+own `development_cohort` wins over the file's; `frame_ablation --only` trains a subset); `manoeuvre_lockstep`
+flies the no-token closed loop (schema `ts-manoeuvre-lockstep-v4`) and `--anchor-remaining-km X` starts it at the remaining-path bin
 (`lockstep.from_remaining_path` + `dataset.series_from_row`: the same flight first seen at the bin's row) and
 `--first-prediction-row N` at one common row of every flight (reading (c), `lockstep.from_row`: the same segment
 for every lookback — reading (a) from L−1 confounds lookback with starting point);
 `executor_failure_modes` classifies the non-crossing flights (six modes, course frame; not a gate);
 `executor_grid_gate` picks the cell (the seed line read off the grid's own seed pairs, p75; fully flyable
 ≥ 0.95; ties → shorter Δ then shorter L); `two_tier_grid_queue` trains and reads one cell at a time; `executor_relative_gate` judges a candidate reading against its
-protocol-none baseline on the common flights (§3.3 rows A3 / B, the seed line named, never typed in) (R8). **Stage B**
-(2026-09-19): `manoeuvre_lockstep --cohort` (B0's re-read on the B cohort = the grid's L60_D60 cohort), the held token in
-`lockstep.fly` (`round_step_s`: a coded protocol's step is the config's), `executor_relative_gate`'s gate B1 row, and
-`two_tier_b_queue` (step 0 flies every baseline it compares — a gate never reads another campaign's payload;
-`executor_relative_gate`, `executor_failure_modes` and `gates.cell_reading` read this code's schema only, no
-compatibility; then per configuration × vocabulary: train → codebook → truth-token readings → gate B1 → prior →
-prior-token readings → gate B) (R9).
+protocol-none baseline on the common flights (§3.3 rows A3 / B / B1, the seed line named, never typed in; it reads
+THIS code's schema only, no compatibility) (R8). **Stage B's intent-code queue** (`two_tier_b_queue`, 2026-09-19):
+ARCHIVED 2026-09-20 (R9 is its record); `manoeuvre_lockstep --cohort` stayed (B0's re-read on the B cohort = the
+grid's L60_D60 cohort).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 
@@ -362,6 +359,6 @@ prior-token readings → gate B) (R9).
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **intent-token** model (a small discrete intent space per segment whose decoder IS the control-path executor, a causal prior over intent sequences, a multi-aircraft graph with separation masks) | **`docs/2026-09-18_manoeuvre_token_plan.zh.md`** — the current plan (the purpose: make L1 short and unimodal; design, pre-registered gates T/P/S/X/E/R/G incl. the discrete-vs-continuous control, the archive list, the decisions); readouts go to `docs/2026-09-18_manoeuvre_token_results.zh.md`. The two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12): W2 |
+| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/2026-09-18_two_tier_plan_v3.zh.md`** — the current plan: §5.1 stage A (the no-token executor's (L, Δ) grid, run), §10 the 2026-09-20 audit, §5.2 / §6.2 the rewritten stage B (an INSTRUCTION vocabulary, closed-loop post-training of both layers, goal-directed decoding — not built). The intent-CODE version (`2026-09-18_manoeuvre_token_plan.zh.md` + its readouts `…_results.zh.md`), the two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12; the code readouts §9–§11, read through v3 §10 item 1): W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

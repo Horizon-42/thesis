@@ -2,8 +2,8 @@
 displacement of a forecast from its truth at a lead.
 
 Shared by `experiments/chain_sensitivity.py` (a checkpoint chained on its own rollout) and the
-manoeuvre-token lockstep (`manoeuvre/lockstep.py`, plan §2.7; the archived two-tier tracker
-read it the same way).
+no-token lockstep (`manoeuvre/lockstep.py`, two-tier v3 §3.1; the archived two-tier tracker and
+the archived intent-code protocols read it the same way).
 A prediction on `rolled_series` IS the model's ordinary predict path on that history — the window,
 the anchor state and the lagged actuators' initial condition inverted from the rolled lookback —
 which `tests/test_chain_sensitivity.py` pins with a displaced flown history.

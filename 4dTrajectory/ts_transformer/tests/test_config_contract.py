@@ -179,17 +179,28 @@ def test_a_config_of_a_retired_output_is_refused_by_its_output_not_by_its_fields
             TSConfig.from_dict({**stored, **moved, "prediction_output": output})
 
 
-def test_a_stored_two_tier_v2_plan_token_is_refused_as_retired_not_as_unknown():
-    """21 stored L1 CONTROL checkpoints carry `plan_conditioning='waypoints'` / `'truth-next'`.
-    Their token builder is archived, so they cannot load — but the refusal must say retired
-    and point at the archive, or the reader reads a live vocabulary value as corruption."""
+def test_a_stored_retired_plan_token_is_refused_by_name_with_its_own_archive():
+    """21 stored L1 CONTROL checkpoints carry `plan_conditioning='waypoints'` / `'truth-next'`,
+    and the 2026-09-19/20 stage B executors carry `'manoeuvre-code'`. Their token builders are
+    archived, so they cannot load — but the refusal must say retired and point at THAT value's
+    archive, or the reader reads a live vocabulary value as corruption."""
+    from pathlib import Path
+
+    from ts_transformer import config as config_module
     from ts_transformer.config import PLAN_CONDITIONINGS, PLAN_CONDITIONINGS_RETIRED
 
+    ts_dir = Path(config_module.__file__).resolve().parent
     assert not set(PLAN_CONDITIONINGS_RETIRED) & set(PLAN_CONDITIONINGS)
-    for value in PLAN_CONDITIONINGS_RETIRED:
+    assert set(PLAN_CONDITIONINGS_RETIRED) == {"truth-next", "waypoints", "manoeuvre-code"}
+    for value, archive in PLAN_CONDITIONINGS_RETIRED.items():
+        assert (ts_dir / archive).is_dir(), f"{value} points at {archive}, which is not there"
         with pytest.raises(ValueError, match="retired") as info:
             TSConfig(prediction_output="control", plan_conditioning=value)
-        assert "archive/two_tier_v2_2026_09" in str(info.value)
+        assert archive in str(info.value)
+        # ...and through `from_dict`, which is the door a stored checkpoint comes in by
+        with pytest.raises(ValueError, match="retired") as info:
+            TSConfig.from_dict({**TSConfig(prediction_output="control").to_dict(), "plan_conditioning": value})
+        assert archive in str(info.value)
 
 
 def test_the_config_grid_tolerance_mirrors_the_row_tolerance():

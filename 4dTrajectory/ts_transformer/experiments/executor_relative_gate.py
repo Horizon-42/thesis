@@ -7,13 +7,13 @@
 Each <dir> holds a ``manoeuvre_lockstep.json``. Per seed the two payloads are intersected on
 their flight keys and the strata recomputed over the common flights (`stratum_table`), so both
 sides are read over ONE cohort; the flights on each side and in common are stated, and the two
-sides must start their closed loops by the same rule (`first_prediction.rule`). The baseline is a
-protocol-none reading; the candidate is any protocol; both are payloads of THIS code's schema (an
-older schema is refused by name — a stage's queue flies every input it compares). The seed line is the grid gate's (its
-verdict's p75 lines, D39) or three numbers given explicitly, and the output names its source.
-The verdicts are §3.3's rows A3 and B and stage B's gate B1 (§5.2.2: beyond the line on one
-metric on both seeds, fully flyable — the truth-token upper bound, read on a protocol-C
-candidate); which row applies is the caller's question, every row is written.
+sides must start their closed loops by the same rule (`first_prediction.rule`). Both are
+protocol-none readings (the intent-code protocols are archived, 2026-09-20) and both are payloads
+of THIS code's schema (an older schema is refused by name — a stage's queue flies every input it
+compares). The seed line is the grid gate's (its verdict's p75 lines, D39) or three numbers given
+explicitly, and the output names its source. The verdicts are §3.3's rows A3 and B and the
+upper-bound row B1 (beyond the line on one metric on both seeds, fully flyable, without the
+not-worse clause); which row applies is the caller's question, every row is written.
 Writes ``relative_gate.json`` / ``relative_gate.txt`` under ``--out`` (refused if it exists).
 """
 

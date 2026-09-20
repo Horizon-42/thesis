@@ -1,25 +1,27 @@
-"""The intent-token model (`docs/2026-09-18_manoeuvre_token_plan.zh.md`): a small discrete
-intent space per segment whose decoder IS the control-path executor, a causal prior over the
-code sequence, and (later) the multi-aircraft graph.
+"""The second layer's live modules, and the no-token closed loop everything is read against
+(`docs/2026-09-18_two_tier_plan_v3.zh.md`).
 
-Grouped by role, one module each (plan §5.3):
+The INTENT-CODE layer this package was built for — the learned FSQ tokenizer and its codebook,
+the code sequences, the causal prior over codes, the gate-T readout and the code atlas, and the
+executor conditioned on a code — is **ARCHIVED 2026-09-20**
+(`archive/manoeuvre_codes_2026_09/`, README there): plan v3 §10's audit found both layers
+trained on truth and evaluated closed-loop, and stage B was rewritten (2026-09-20) around an
+INSTRUCTION vocabulary instead. Its readings stay citable in
+`docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11.
 
-    segments     how an approach is cut into `segment_s` pieces from an anchor, the
-                 segment-start frame every piece is read in, the rows the encoder sees (P1.1)
-    tokenizer    the encoder + FSQ, the codebook artefact, the command-vocabulary baseline (P1.2)
-    sequences    a flight as its [code, state] sequence; the operating-day split (P2.1)
-    context      the runway-end, procedure-fix and aircraft-type context tokens (P2.1 / P4.1)
-    prior        the causal transformer over codes, its loss and decoding (P2.1)
-    lockstep     protocols C / A / A-truth, one round = `segment_s` (P3.1)
-    readout      the L1 gain, code usage, open-loop displacement, flip rate, Markov baseline (P1.4 …)
-    gates        gates T / P / S / X / E / R / G (P3.1)
-    scene, graph, decode   the multi-aircraft layer (P5)
+What is here, one module each:
 
-**Layering** (`tests/test_architecture.py`): `segments` and `tokenizer` are LEAVES — they import
-the data plane, `config`, `io_utils` and torch only — because the control path builds the
-truth segment rows into its context rows and holds the tokenizer as a submodule of the executor
-(`outputs/control/plan_token.py`, `outputs/control/heads.py`). Every other module here imports
-the control path, the guidance layer, the data plane and the inference helpers, never the
-reverse; runners under `experiments/` are consumers of this package. Nothing is re-exported
-here on purpose (layout rule L2).
+    segments     how an approach is cut into pieces from an anchor, the segment-start frame
+                 every piece is read in, the rows an encoder sees — kept for the instruction
+                 labeller, which reads the same frame
+    context      the runway-end and aircraft-type context tokens — the instruction prior's
+    lockstep     the no-token closed loop: one round = `executed_step_s`, protocol ``none``
+    gates        the grid gate (stage A1) and the relative gate (stage A3 / B)
+    failure_modes  A2's six non-crossing modes, in the course frame
+
+**Layering** (`tests/test_architecture.py`): `segments` is a LEAF — it imports the data plane,
+`config`, `io_utils` and torch only. Every other module here imports the control path, the
+guidance layer, the data plane and the inference helpers, never the reverse; runners under
+`experiments/` are consumers of this package. Nothing is re-exported here on purpose (layout
+rule L2).
 """

@@ -11,13 +11,12 @@ import torch
 
 from aircraft.aero_params import AeroParams
 from ts_transformer.data.channels import states_from_channels
-from ts_transformer.config import CTA_CONDITIONING_GIVEN, PLAN_CONDITIONING_OFF, TSConfig
+from ts_transformer.config import CTA_CONDITIONING_GIVEN, TSConfig
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.geometry.final_approach_geometry import final_approach_arrays, probe_final_approach
 from ts_transformer.outputs.conditioning import condition_vector
 from ts_transformer.outputs.dynamics.inverse import MINIMUM_INVERSE_STATES, segment_controls
 from ts_transformer.outputs.envelope import control_contract
-from ts_transformer.outputs.control.plan_token import probe_plan_context
 
 
 def reference_control_supervision(
@@ -273,9 +272,6 @@ def probe_dynamics(
         dynamics["cta_s"] = torch.full(
             (batch_size,), config.final_time_scale_s, dtype=torch.float64, device=device
         )
-    if config.plan_conditioning != PLAN_CONDITIONING_OFF:
-        # a segment and a state with nothing in them but a forward speed, of this run's shape
-        dynamics.update(probe_plan_context(config, batch_size, device))
     if config.control_imitation_loss_weight:
         dynamics["reference_controls"] = torch.tensor(
             [[list(contract.neutral)]], dtype=torch.float64, device=device

@@ -18,7 +18,6 @@ from torch import nn
 from ts_transformer.data.batch_contract import LossComponents, anchor_state
 from ts_transformer.data.channels import IDX
 from ts_transformer.config import (
-    token_hold,
     CONTROL_THRUST_FRACTION,
     CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
@@ -29,7 +28,6 @@ from ts_transformer.config import (
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_OFF,
     DURATION_HEAD_TWO_HEAD,
-    PLAN_CONDITIONING_OFF,
     HOOK_SATURATION_HARD,
     PREDICTION_CONTROL,
     ControlOutput,
@@ -37,10 +35,6 @@ from ts_transformer.config import (
     control_recipe,
 )
 from ts_transformer.data.dataset import target_horizon_s, truth_duration_s
-from ts_transformer.outputs.control.plan_token import (
-    manoeuvre_code_count, token_phase, token_span_start_s, training_plan_context,
-)
-from ts_transformer.manoeuvre.tokenizer import load_codebook
 from ts_transformer.data.fixed_dt_supervision import (
     FixedDTControlSupervision,
     FixedDTSupervisionRow,
@@ -169,14 +163,6 @@ class ControlContext(WindowContext):
             )
         self._rows: list[dict[str, np.ndarray]] | None = None
         self._fixed_dt: tuple[FixedDTSupervisionRow, ...] | None = None
-        # A held token (two-tier v3 D48): every anchor of a TRAINING set is read at every phase
-        # during the run, so the population is checked once here — a cohort whose record cannot
-        # hold an anchor's previous span is refused by name before epoch 1, not mid-epoch. A cached
-        # set builds its rows at φ = 0 just below and needs no walk.
-        if not windows.cache_context_rows and token_hold(self.config) > 1:
-            for s_idx, anchor in windows.index:
-                for phase in range(token_hold(self.config)):
-                    token_span_start_s(windows.series[s_idx], anchor, self.config, phase)
         if windows.cache_context_rows:
             self._rows = [self._build_row(index) for index in range(len(windows.index))]
             if self.config.control_state_loss_grid == CONTROL_STATE_LOSS_GRID_FIXED_DT:
@@ -185,9 +171,12 @@ class ControlContext(WindowContext):
                 )
 
     def row(self, i: int, epoch_seed: int | None = None) -> dict[str, np.ndarray]:
-        return self._rows[i] if self._rows is not None else self._build_row(i, epoch_seed)
+        """The window's context row. ``epoch_seed`` is the TRAINING iterator's per-epoch seed
+        (`dataset.TrajectoryWindows.batch`) — a per-flight, per-epoch draw this path may make
+        inside a row; nothing draws on it today, and the closed-loop retraining will."""
+        return self._rows[i] if self._rows is not None else self._build_row(i)
 
-    def _build_row(self, i: int, epoch_seed: int | None = None) -> dict[str, np.ndarray]:
+    def _build_row(self, i: int) -> dict[str, np.ndarray]:
         windows, config = self.windows, self.config
         s_idx, anchor = windows.index[i]
         series = windows.series[s_idx]
@@ -207,12 +196,6 @@ class ControlContext(WindowContext):
                 f"cta_conditioning={config.cta_conditioning!r} names no training-time "
                 "source for the CTA token; only 'given' (the truth duration) is defined"
             )
-        if config.plan_conditioning != PLAN_CONDITIONING_OFF:
-            # the truth's token span at this anchor and the span's start row — the tokenizer's
-            # inputs (reads the future). A TRAINING draw (the epoch seed is given) also draws the
-            # anchor's position inside the span (B-dev2); a cached or validation row is at φ = 0
-            phase = 0 if epoch_seed is None else token_phase(series.dataset_id, anchor, epoch_seed, config)
-            arrays.update(training_plan_context(series, anchor, config, phase=phase))
         if not windows.control_supervision:
             return arrays
         anchor_time = float(series.times[anchor])
@@ -478,7 +461,6 @@ class ControlStrategy(OutputStrategy):
             return ControlTrainingDiagnosticsAccumulator(
                 config.control_gradient_clip_norm,
                 saturation_labels(config.control_thrust_parameterization),
-                manoeuvre_code_count=manoeuvre_code_count(config),
             )
         return None
 
@@ -514,29 +496,7 @@ class ControlStrategy(OutputStrategy):
         }
 
     def checkpoint_metadata(self, config: TSConfig) -> dict[str, Any]:
-        return {
-            "control_recipe": control_recipe(config),
-            # The frozen codebook this executor was trained against (plan §2.4): the sha the
-            # tokenizer weights inside the checkpoint are bound to (`verify_checkpoint_payload`).
-            **({"codebook_sha256": load_codebook(config.manoeuvre_codebook).sha256}
-               if config.manoeuvre_codebook else {}),
-        }
-
-    def verify_checkpoint_payload(self, config: TSConfig, payload: dict[str, Any]) -> None:
-        """An executor trained against a frozen codebook carries that codebook's tokenizer
-        weights; the directory the config names must still hold the SAME weights, or the
-        prior's codes and this executor's z would be two different vocabularies."""
-        if not config.manoeuvre_codebook:
-            return
-        expected = load_codebook(config.manoeuvre_codebook).tokenizer.state_dict()
-        stored = payload["model_state"]
-        for key, value in expected.items():
-            if not torch.equal(stored[f"manoeuvre_tokenizer.{key}"].cpu(), value):
-                raise ValueError(
-                    f"checkpoint tokenizer weights differ from the codebook at "
-                    f"{config.manoeuvre_codebook} ({key}): the executor was trained against "
-                    "another codebook, and its z and this codebook's codes are two vocabularies"
-                )
+        return {"control_recipe": control_recipe(config)}
 
     # ── inference ────────────────────────────────────────────────────────────
 
@@ -606,12 +566,6 @@ class ControlStrategy(OutputStrategy):
 
     def record_fields(self, forecast: Forecast) -> dict[str, Any]:
         return {
-            # Manoeuvre-code output: the code the executor flew this segment under and where it
-            # came from — `truth` (the truth segment through the tokenizer; reads the future) or
-            # `given` (a z handed in: the prior's, protocol A).
-            **({"manoeuvreCode": forecast.manoeuvre_code,
-                "manoeuvreCodeSource": forecast.manoeuvre_code_source}
-               if forecast.manoeuvre_code is not None else {}),
             # The contract the schedule was predicted in, off the default; absent means
             # thrust-fraction, so every such record reproduces to the bit.
             **({"controlThrustParameterization": forecast.control_parameterization}
