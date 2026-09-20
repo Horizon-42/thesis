@@ -6,6 +6,8 @@ only, never a number."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 import torch
@@ -55,17 +57,18 @@ def test_the_truth_sequence_carries_the_words_the_states_and_the_next_words(worl
     assert sequence.length == len(reading.positions_s) and sequence.words.shape == (sequence.length, 5)   # five kinds since D62
     assert np.array_equal(sequence.targets[:-1], reading.words[1:]) and np.array_equal(sequence.targets[-1], reading.words[-1])
     assert sequence.states.shape == (sequence.length, len(sq.STATE_TOKEN_FEATURES))
-    first = sq.state_token(item.values[0], item.target_chart)
+    origin = sq.airport_origin(item)          # D66: the AIRPORT reference, not the threshold
+    first = sq.state_token(item.values[0], origin)
     assert np.allclose(sequence.states[0], first, atol=1e-6) and abs(first[4] ** 2 + first[5] ** 2 - 1.0) < 1e-5
     assert sequence.typecode == str(item.scenario.aircraft.code) and sequence.ends_at_landing
     # the position is relative to the threshold, whatever the chart's origin
     shifted = np.array(item.values[0], dtype=np.float64)
     shifted[:3] += 5000.0
-    assert np.allclose(sq.state_token(shifted, np.asarray(item.target_chart) + 5000.0), first, atol=1e-6)
+    assert np.allclose(sq.state_token(shifted, np.asarray(origin) + 5000.0), first, atol=1e-6)
     still = np.array(item.values[0], dtype=np.float64)
     still[3:5] = 0.0
     with pytest.raises(ValueError, match="has no course"):
-        sq.state_token(still, item.target_chart)
+        sq.state_token(still, origin)
     with pytest.raises(ValueError, match="is not series"):
         sq.flight_sequence(series[1], reading)
 
@@ -74,16 +77,16 @@ def test_a_rolled_sequence_reads_flown_states_and_targets_the_truth_s_next_words
     _vocabulary, series, readings, sequences, _types, _config = world
     item, reading, truth = series[0], readings[0], sequences[0]
     said = truth.words[:5]
-    rolled = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, said, item.target_chart)
+    rolled = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, said, sq.airport_origin(item))
     assert rolled.length == 5 and np.array_equal(rolled.words, said) and np.allclose(rolled.states, truth.states[:5])
     assert np.array_equal(rolled.targets, truth.targets[:5])                    # on the truth's own path the targets agree
     assert not rolled.ends_at_landing                                           # a prefix: its last position has a next
-    whole = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, truth.words, item.target_chart)
+    whole = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, truth.words, sq.airport_origin(item))
     assert whole.ends_at_landing
     with pytest.raises(ValueError, match="a rolled prefix covers"):
         sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, np.zeros((truth.length + 1, 5), dtype=np.int64), item.target_chart)
     with pytest.raises(ValueError, match="is not sequence"):
-        sq.rolled_sequence(truth, readings[1], item.supervision_times, item.supervision_values, said, item.target_chart)
+        sq.rolled_sequence(truth, readings[1], item.supervision_times, item.supervision_values, said, sq.airport_origin(item))
 
 
 def test_the_batch_shifts_the_intercept_and_marks_the_next_and_the_landing(world):
@@ -102,7 +105,8 @@ def test_the_batch_shifts_the_intercept_and_marks_the_next_and_the_landing(world
         assert batch.words[row, :n, 4].max() < config.classes("runway")
         assert bool((batch.targets[row, n - 1] == pr.IGNORE).all()) and batch.landed[row, n - 1] == 1.0 and batch.landed[row, : n - 1].sum() == 0
         assert bool(batch.has_next[row, : n - 1].all()) and not bool(batch.has_next[row, n - 1 :].any())
-    assert batch.runway.shape == (2, 2) and batch.type_index.shape == (2,)
+    assert batch.type_index.shape == (2,)      # D66: no runway-course context token any more
+    assert not hasattr(batch, "runway"), "the runway course must not come back as context"
     # a rolled PREFIX: its last position has a next word and no landing
     prefix = sq.InstructionSequence(**{**sequences[0].__dict__, "positions_s": sequences[0].positions_s[:4], "words": sequences[0].words[:4],
                                        "states": sequences[0].states[:4], "targets": sequences[0].targets[:4], "ends_at_landing": False})
@@ -127,7 +131,7 @@ def test_the_model_is_causal_and_factorised_and_the_loss_has_one_term_per_kind(w
     # causality: perturbing the input at position 4 leaves every logit before it unchanged
     words = batch.words.clone()
     words[:, 4, 0] = (words[:, 4, 0] + 1) % config.classes("heading")
-    later = model(pr.PriorBatch(words, batch.states, batch.valid, batch.targets, batch.landed, batch.type_index, batch.runway))
+    later = model(pr.PriorBatch(words, batch.states, batch.valid, batch.targets, batch.landed, batch.type_index))
     assert torch.allclose(later.logits["speed"][:, :4], output.logits["speed"][:, :4], atol=1e-5)
     assert not torch.allclose(later.logits["speed"][:, 4:6], output.logits["speed"][:, 4:6], atol=1e-5)
 
@@ -202,7 +206,7 @@ def test_the_hold_baseline_scores_a_sentence_that_never_changes_as_perfectly_hel
     still = sq.InstructionSequence(
         dataset_id="d", flight_id="f", positions_s=np.arange(6) * 10.0,
         words=np.tile(np.array([[18, 3, 6, -1, 1]]), (6, 1)), states=np.zeros((6, 6), dtype=np.float32),
-        targets=np.tile(np.array([[18, 3, 6, -1, 1]]), (6, 1)), typecode="B738", runway_course_rad=0.0, ends_at_landing=True,
+        targets=np.tile(np.array([[18, 3, 6, -1, 1]]), (6, 1)), typecode="B738", ends_at_landing=True,
     )
     baseline = pr.hold_baseline(sequences, [still], config)
     assert all(baseline["hold_accuracy"][kind] == 1.0 for kind in ins.INSTRUCTION_KINDS) and baseline["positions_with_next"] == 5
@@ -234,3 +238,26 @@ def test_the_runner_s_table_and_cohort_door(world):
     assert cohort_splits(payload, cohort, limit=1) == {"train": ["b"], "val": ["e"]}
     with pytest.raises(ValueError, match="not in the executor's val split"):
         cohort_splits(payload, SimpleNamespace(train_flight_ids=["a"], val_flight_ids=["a"]))
+
+
+def test_the_state_tokens_are_anchored_at_the_AIRPORT_not_at_the_landing_threshold(world):
+    """D66's whole point, and the one thing that makes the runway head a prediction.
+
+    Threshold-anchored coordinates are centred on the very runway the prior is asked to name, so
+    its runway head would score ~1.0 while predicting nothing. The origin must sit somewhere the
+    runway does NOT determine, and the shift must be bounded by the airport's own extent.
+    """
+    _vocabulary, series, _readings, _sequences, _types, _config = world
+    item = series[0]
+    origin = sq.airport_origin(item)
+    threshold = np.asarray(item.target_chart)
+    offset = float(np.hypot(*(origin[:2] - threshold[:2])))
+    assert offset > 100.0, "the origin still sits on the threshold: the runway head reads its own answer"
+    assert offset < 10_000.0, f"the origin is {offset:.0f} m from the threshold, beyond any airport's extent"
+    # and it does not MOVE with the runway: each flight has its own chart, so the numbers differ
+    # between flights, but within one chart the origin must ignore where the threshold is
+    moved = replace(item, scenario=replace(item.scenario,
+                                           target=replace(item.scenario.target,
+                                                          latitude=item.scenario.target.latitude + 0.01)))
+    assert np.allclose(sq.airport_origin(moved), origin), "the origin followed the threshold"
+    assert not np.allclose(np.asarray(moved.target_chart), threshold), "the fixture did not move the threshold"

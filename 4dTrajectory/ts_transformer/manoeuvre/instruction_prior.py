@@ -36,7 +36,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from ts_transformer.manoeuvre.context import RUNWAY_TOKEN_WIDTH, TypeVocabulary, runway_token
+from ts_transformer.manoeuvre.context import TypeVocabulary
 from ts_transformer.manoeuvre.instruction_sequences import STATE_TOKEN_FEATURES, InstructionSequence
 from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, NO_INTERCEPT
 
@@ -117,7 +117,7 @@ class PriorBatch:
     """Padded to the longest flight: ``words`` ``[B, L, 5]`` (the inputs, shifted), ``states``
     ``[B, L, 6]``, ``valid`` ``[B, L]``, ``targets`` ``[B, L, 5]`` (the next position’s words,
     shifted; IGNORE where none — the last position of a sequence that ends at the landing),
-    ``landed`` ``[B, L]`` (1.0 at that position), ``type_index`` ``[B]``, ``runway`` ``[B, 2]``."""
+    ``landed`` ``[B, L]`` (1.0 at that position), ``type_index`` ``[B]``."""
 
     words: torch.Tensor
     states: torch.Tensor
@@ -125,7 +125,6 @@ class PriorBatch:
     targets: torch.Tensor
     landed: torch.Tensor
     type_index: torch.Tensor
-    runway: torch.Tensor
 
     def to(self, device: torch.device) -> PriorBatch:
         return PriorBatch(**{name: getattr(self, name).to(device) for name in self.__dataclass_fields__})
@@ -148,7 +147,6 @@ def collate(sequences: Sequence[InstructionSequence], config: PriorConfig, types
     targets = torch.full((batch, length, kinds), IGNORE, dtype=torch.long)
     landed = torch.zeros(batch, length)
     type_index = torch.zeros(batch, dtype=torch.long)
-    runway = torch.zeros(batch, RUNWAY_TOKEN_WIDTH)
     for row, item in enumerate(sequences):
         count = item.length
         words[row, :count] = torch.from_numpy(shift_words(item.words))
@@ -161,8 +159,7 @@ def collate(sequences: Sequence[InstructionSequence], config: PriorConfig, types
         if item.ends_at_landing:
             landed[row, count - 1] = 1.0
         type_index[row] = types.index(item.typecode)
-        runway[row] = torch.from_numpy(runway_token(item.runway_course_rad))
-    return PriorBatch(words, states, valid, targets, landed, type_index, runway)
+    return PriorBatch(words, states, valid, targets, landed, type_index)
 
 
 @dataclass(frozen=True)
@@ -174,7 +171,11 @@ class PriorOutput:
 
 
 class InstructionPrior(nn.Module):
-    CONTEXT_TOKENS = 2   # type, runway
+    #: ONE context token, the aircraft type. The runway's COURSE used to sit here and was
+    #: removed with D66: the state's course is absolute while the heading word is relative, so a
+    #: course in the context is the runway's identity handed to a model that must SAY the runway.
+    #: The frame now comes from the runway WORD, which is where the sentence puts it.
+    CONTEXT_TOKENS = 1   # type
 
     def __init__(self, config: PriorConfig):
         super().__init__()
@@ -184,7 +185,6 @@ class InstructionPrior(nn.Module):
         self.state_embedding = nn.Linear(len(STATE_TOKEN_FEATURES), d)
         self.position_embedding = nn.Embedding(config.max_positions, d)
         self.type_embedding = nn.Embedding(config.type_count, d)
-        self.runway_embedding = nn.Linear(RUNWAY_TOKEN_WIDTH, d)
         self.context_position = nn.Parameter(torch.zeros(self.CONTEXT_TOKENS, d))
         layer = nn.TransformerEncoderLayer(d, config.n_heads, dim_feedforward=config.d_ff, dropout=config.dropout,
                                            activation="gelu", batch_first=True, norm_first=True)
@@ -199,7 +199,7 @@ class InstructionPrior(nn.Module):
         positions = torch.arange(length, device=batch.words.device)
         tokens = sum(self.word_embeddings[kind](batch.words[..., column]) for column, kind in enumerate(INSTRUCTION_KINDS))
         tokens = tokens + self.state_embedding(batch.states) + self.position_embedding(positions)
-        context = torch.stack((self.type_embedding(batch.type_index), self.runway_embedding(batch.runway)), dim=1) + self.context_position
+        context = self.type_embedding(batch.type_index).unsqueeze(1) + self.context_position
         sequence = torch.cat((context, tokens), dim=1)
         total = self.CONTEXT_TOKENS + length
         # causal over the sequence positions; the context tokens are visible to every position
