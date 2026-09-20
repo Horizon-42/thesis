@@ -65,6 +65,9 @@ def _series(n_flights=8, **config_overrides):
 
 
 L1_NATIVE32_CHECKPOINT = _REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/l1_lowdim_20260907/L1_native32/checkpoint.pt"
+#: A stage A executor (two-tier v3 grid, 2026-09-18): written with the plan token's fields at
+#: their inert defaults beside `plan_conditioning='off'` — the canary for that retirement.
+STAGE_A_CHECKPOINT = _REPO_ROOT / "4dTrajectory/outputs/KRDU/experiments/two_tier_v3_grid_20260918/L60_D20_s1337/checkpoint.pt"
 
 
 # ── End to end ───────────────────────────────────────────────────────────────
@@ -430,10 +433,26 @@ def test_the_l1_native32_checkpoint_written_with_the_retired_fields_still_loads(
     """The canary against the serialized contract: a REAL artifact from before a field was
     retired (the synthetic test above pins the rule, not an artifact) — its class, its
     strict state dict, and a config that round-trips without the retired keys."""
-    from ts_transformer.config import RETIRED_SERIALIZED_FIELDS
+    from ts_transformer.config import PLAN_TOKEN_RETIRED_FIELDS, RETIRED_SERIALIZED_FIELDS
     from ts_transformer.outputs.control.heads import ControlOutputModel
     model, config, _normalizer, payload = load_checkpoint(L1_NATIVE32_CHECKPOINT)
     assert isinstance(model, ControlOutputModel) and config.n_segments == 32
-    assert set(RETIRED_SERIALIZED_FIELDS) <= set(payload["config"]), "the canary lost its point: pick an older artifact"
+    # the plan token's fields postdate this artifact; the stage A canary below covers them
+    assert set(RETIRED_SERIALIZED_FIELDS) - set(PLAN_TOKEN_RETIRED_FIELDS) <= set(payload["config"]), "the canary lost its point: pick an older artifact"
     assert not set(RETIRED_SERIALIZED_FIELDS) & set(config.to_dict())
+    assert TSConfig.from_dict(config.to_dict()) == config
+
+
+@pytest.mark.skipif(not STAGE_A_CHECKPOINT.is_file(), reason="the stage A grid checkpoint is not on this machine")
+def test_a_stage_a_executor_written_with_the_plan_token_fields_still_loads():
+    """The canary for the archived plan token (2026-09-20): a stage A checkpoint stores the
+    token's fields at their inert defaults beside `plan_conditioning='off'` and must keep
+    loading; its round-tripped config carries none of them."""
+    from ts_transformer.config import PLAN_TOKEN_RETIRED_FIELDS, PLAN_CONDITIONING_OFF
+    from ts_transformer.outputs.control.heads import ControlOutputModel
+    model, config, _normalizer, payload = load_checkpoint(STAGE_A_CHECKPOINT)
+    assert isinstance(model, ControlOutputModel) and payload["config"]["plan_conditioning"] == PLAN_CONDITIONING_OFF
+    stored = {name for name in PLAN_TOKEN_RETIRED_FIELDS if name in payload["config"]}
+    assert stored, "the canary lost its point: pick an artifact written with the plan token's fields"
+    assert not set(PLAN_TOKEN_RETIRED_FIELDS) & set(config.to_dict())
     assert TSConfig.from_dict(config.to_dict()) == config

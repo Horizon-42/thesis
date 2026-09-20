@@ -185,40 +185,50 @@ def approach_difficulty(series: "FlightSeries", anchor: int) -> ApproachDifficul
     # runway); world EN is the one both frames agree on, so the course rotation happens
     # there and this stays correct under either coordinate_frame setting.
     east, north = series.frame.to_world_horizontal(float(offset[0]), float(offset[1]))
-    course = float(target.psi)
-    cosine, sine = math.cos(course), math.sin(course)
-    # Inbound direction is (cos, sin); its right-hand normal is (sin, -cos). The anchor
-    # lies BEFORE the threshold when its projection on the inbound direction is negative.
-    anchor_cross_track_m = east * sine - north * cosine
-    distance_to_go_m = -(east * cosine + north * sine)
-
     velocity = anchor_state[list(VELOCITY_IDX)]
     track_east, track_north = series.frame.to_world_horizontal(
         float(velocity[0]), float(velocity[1])
     )
-    track_error_deg = abs(
-        math.degrees(
-            _wrapped(math.atan2(track_north, track_east) - course)
-        )
+    frame = course_frame_rows(
+        np.array([east]), np.array([north]), np.array([track_east]), np.array([track_north]), float(target.psi)
     )
-    established = bool(
-        abs(anchor_cross_track_m) < ESTABLISHED_CROSS_TRACK_M
-        and distance_to_go_m > 0.0
-        and track_error_deg <= ESTABLISHED_TRACK_TOLERANCE_DEG
-    )
-
     return ApproachDifficulty(
         anchor_range_m=anchor_range_m,
         remaining_path_m=remaining_path_m,
         route_tortuosity=remaining_path_m / anchor_range_m,
-        anchor_cross_track_m=float(anchor_cross_track_m),
-        established_at_anchor=established,
+        anchor_cross_track_m=float(frame["cross_m"][0]),
+        established_at_anchor=bool(frame["established"][0]),
     )
 
 
-def _wrapped(radians: float) -> float:
-    """Angle difference folded onto (-pi, pi] — a course test must not wrap at the cut."""
-    return (radians + math.pi) % (2.0 * math.pi) - math.pi
+def course_frame_rows(
+    east: np.ndarray, north: np.ndarray, track_east: np.ndarray, track_north: np.ndarray, course_rad: float
+) -> dict[str, np.ndarray]:
+    """The final approach course's frame, per row — the ONE definition every reader of "where
+    is the aircraft against the course" uses (this module's anchor covariates, the executor's
+    failure modes, the instruction labeller). Inputs are WORLD east / north offsets from the
+    threshold and world track components; ``course_rad`` is the inbound course (math-ENU).
+
+    ``to_go_m``      distance still to fly along the course, positive BEFORE the threshold
+                     (the inbound direction is (cos, sin); a point ahead of the threshold
+                     projects negatively on it)
+    ``cross_m``      offset from the extended centreline, positive to the RIGHT of the inbound
+                     course (the right-hand normal is (sin, −cos))
+    ``relative_course_deg``  the track against the course, folded onto [−180, 180) — a
+                     course test must not wrap at the cut
+    ``established``  within `ESTABLISHED_CROSS_TRACK_M` of the centreline, ahead of the
+                     threshold, tracking within `ESTABLISHED_TRACK_TOLERANCE_DEG` of inbound
+    """
+    cosine, sine = math.cos(course_rad), math.sin(course_rad)
+    east, north = np.asarray(east, dtype=np.float64), np.asarray(north, dtype=np.float64)
+    to_go = -(east * cosine + north * sine)
+    cross = east * sine - north * cosine
+    relative = np.degrees(
+        (np.arctan2(np.asarray(track_north, dtype=np.float64), np.asarray(track_east, dtype=np.float64)) - course_rad + math.pi)
+        % (2.0 * math.pi) - math.pi
+    )
+    established = (np.abs(cross) < ESTABLISHED_CROSS_TRACK_M) & (to_go > 0.0) & (np.abs(relative) <= ESTABLISHED_TRACK_TOLERANCE_DEG)
+    return {"to_go_m": to_go, "cross_m": cross, "relative_course_deg": relative, "established": established}
 
 
 def difficulty_block(rows: list[dict[str, Any]]) -> dict[str, Any]:

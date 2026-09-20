@@ -37,13 +37,12 @@ and height error at the end), so a class can be re-read without re-flying anythi
 
 from __future__ import annotations
 
-import math
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 
 from aerodynamic_model.common import GeodeticState
-from ts_transformer.data.approach_difficulty import ESTABLISHED_CROSS_TRACK_M, ESTABLISHED_TRACK_TOLERANCE_DEG
+from ts_transformer.data.approach_difficulty import ESTABLISHED_CROSS_TRACK_M, ESTABLISHED_TRACK_TOLERANCE_DEG, course_frame_rows
 from ts_transformer.data.channels import channels_from_states
 from ts_transformer.data.coordinate_frames import ENUFrame
 
@@ -63,16 +62,10 @@ def course_geometry(states: Sequence[Mapping[str, float]], target: Mapping[str, 
                                              V=float(s["V"]), psi=float(s["psi"]), gamma=float(s["gamma"]), m=float(s["m"])))
                for s in states]
     times, rows = channels_from_states(samples, frame)
-    course = float(target["psi"])
-    cosine, sine = math.cos(course), math.sin(course)
-    east, north = rows[:, 0], rows[:, 1]
-    to_go = -(east * cosine + north * sine)
-    cross = east * sine - north * cosine
-    heading = np.arctan2(rows[:, 4], rows[:, 3])
-    error = np.degrees(np.abs((heading - course + math.pi) % (2.0 * math.pi) - math.pi))
-    established = (np.abs(cross) < ESTABLISHED_CROSS_TRACK_M) & (to_go > 0.0) & (error <= ESTABLISHED_TRACK_TOLERANCE_DEG)
+    frame = course_frame_rows(rows[:, 0], rows[:, 1], rows[:, 3], rows[:, 4], float(target["psi"]))
     return {
-        "t": times, "to_go_m": to_go, "cross_m": cross, "heading_error_deg": error, "established": established,
+        "t": times, "to_go_m": frame["to_go_m"], "cross_m": frame["cross_m"],
+        "heading_error_deg": np.abs(frame["relative_course_deg"]), "established": frame["established"],
         "V": np.array([float(s["V"]) for s in states]), "alt": np.array([float(s["alt"]) for s in states]),
     }
 

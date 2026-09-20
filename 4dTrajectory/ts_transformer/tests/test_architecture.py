@@ -296,7 +296,7 @@ def test_the_guidance_layer_never_imports_the_control_path():
 #: `manoeuvre` any more — the leaf rule below keeps `segments` importable from below if the
 #: rewritten stage B's labeller needs it there again.
 MANOEUVRE = TS_DIR / "manoeuvre"
-MANOEUVRE_LEAVES = {"manoeuvre.segments"}
+MANOEUVRE_LEAVES = {"manoeuvre.segments", "manoeuvre.instructions"}
 #: What a leaf may import from the package — an ALLOW-list, so a new spine module cannot
 #: slip in unnamed: the data plane, the config, the io helpers, and the other leaf.
 MANOEUVRE_LEAF_IMPORTS = {"data", "config", "io_utils"}

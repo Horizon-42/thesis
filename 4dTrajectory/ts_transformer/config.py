@@ -742,7 +742,19 @@ HOOK_SATURATIONS = (HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD)
 # 2026-07-29 POOLED sweeps (`stage_c_effort`, `stage_c_smoothness`) DID — those ten
 # first-generation runs lose the `custom(effort=…)` / `custom(smooth=…)` item from their
 # recomputed name.
-RETIRED_SERIALIZED_FIELDS = (
+#: The intent-code plan token's fields (archived 2026-09-20, `archive/manoeuvre_codes_2026_09/`).
+#: Under `plan_conditioning='off'` — the only value a config reaching the sweep can carry, the
+#: retired plan values being refused by name before it — the tokenizer was never built and
+#: nothing read these; every stage A checkpoint stores them at their defaults (`'learned'`,
+#: `[]`, `''`) beside `off`. Named apart so the canary test can pick an artifact of their era.
+PLAN_TOKEN_RETIRED_FIELDS = (
+    "manoeuvre_tokenizer",
+    "manoeuvre_fsq_levels",
+    "manoeuvre_codebook",
+    "manoeuvre_token_s",
+    "manoeuvre_token_step_s",
+)
+RETIRED_SERIALIZED_FIELDS = PLAN_TOKEN_RETIRED_FIELDS + (
     "control_hook_gate",
     "control_dense_state_loss_weight",
     "control_effort_loss_weight",
