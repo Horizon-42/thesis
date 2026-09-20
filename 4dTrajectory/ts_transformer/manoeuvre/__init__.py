@@ -15,13 +15,20 @@ What is here, one module each:
                  every piece is read in, the rows an encoder sees — kept for the instruction
                  labeller, which reads the same frame
     context      the runway-end and aircraft-type context tokens — the instruction prior's
-    lockstep     the no-token closed loop: one round = `executed_step_s`, protocol ``none``
+    instructions the instruction vocabulary and the labeller (stage B, 2026-09-20): a track read
+                 back as the controller's words — a LEAF the control path reads for its token
+    instruction_sequences / instruction_prior   the sentence with states, and the causal prior
+                 over it (four factorised heads + landed)
+    lockstep     the closed loop: one round = `executed_step_s`; protocol ``none`` (a no-token
+                 executor) or ``truth-instruction`` (an instruction executor, the truth's words
+                 by flown position)
     gates        the grid gate (stage A1) and the relative gate (stage A3 / B)
     failure_modes  A2's six non-crossing modes, in the course frame
 
-**Layering** (`tests/test_architecture.py`): `segments` is a LEAF — it imports the data plane,
-`config`, `io_utils` and torch only. Every other module here imports the control path, the
-guidance layer, the data plane and the inference helpers, never the reverse; runners under
-`experiments/` are consumers of this package. Nothing is re-exported here on purpose (layout
-rule L2).
+**Layering** (`tests/test_architecture.py`): `segments` and `instructions` are LEAVES — they
+import the data plane, `config`, `io_utils`, geokit and torch only, and the control path may
+import THEM (`outputs/control/instruction_token.py` reads the vocabulary for the executor's
+token). Every other module here imports the control path, the guidance layer, the data plane
+and the inference helpers, never the reverse; runners under `experiments/` are consumers of this
+package. Nothing is re-exported here on purpose (layout rule L2).
 """

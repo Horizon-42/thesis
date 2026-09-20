@@ -122,13 +122,17 @@ CTA_CONDITIONINGS = (
 CTA_CONDITIONINGS_AVAILABLE = (CTA_CONDITIONING_OFF, CTA_CONDITIONING_GIVEN)
 CTA_FIELDS = ("cta_conditioning",)
 
-# The plan token: one fused decoder input beside the aircraft condition and the CTA. Nothing
-# builds one today — the axis is ``off`` alone, kept because the rewritten two-tier v3 stage B
-# (2026-09-20) will add an INSTRUCTION value. The masking share that used to sit beside the
-# token (``plan_conditioning_dropout``) is RETIRED at its constant 0
-# (`RETIRED_CONSTANT_FIELDS`): 0.5 taught the head to ignore the token (v2 §10.8).
+# The plan token: one fused decoder input beside the aircraft condition and the CTA.
+# ``instruction`` (two-tier v3 stage B, 2026-09-20, plan §5.2.1; `outputs/control/instruction_token.py`)
+# hands the executor the instruction words IN FORCE over its segment — Δ / τ positions of the
+# vocabulary's bin centres, read from the artefact ``instruction_vocabulary`` names; the truth's
+# words in training and `predict`, the truth's by flown position or the prior's in the closed
+# loop. The masking share that used to sit beside the token (``plan_conditioning_dropout``) is
+# RETIRED at its constant 0 (`RETIRED_CONSTANT_FIELDS`): 0.5 taught the head to ignore the token
+# (v2 §10.8).
 PLAN_CONDITIONING_OFF = "off"
-PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF,)
+PLAN_CONDITIONING_INSTRUCTION = "instruction"
+PLAN_CONDITIONINGS = (PLAN_CONDITIONING_OFF, PLAN_CONDITIONING_INSTRUCTION)
 #: The values a stored control config may carry that no longer build a token, each with the
 #: archive its builder moved to. Named separately from the vocabulary so the refusal reads as a
 #: RETIREMENT with a pointer rather than as a corrupt value: ``truth-next`` / ``waypoints`` are
@@ -141,6 +145,8 @@ PLAN_CONDITIONINGS_RETIRED = {
     "manoeuvre-code": "archive/manoeuvre_codes_2026_09/",
 }
 PLAN_CONDITIONING_FIELDS = ("plan_conditioning",)
+#: The instruction token's own field: the vocabulary artefact an `instruction` run reads.
+INSTRUCTION_FIELDS = ("instruction_vocabulary",)
 
 # The duration head (B1, §三 3.1; B1.b, §三 3.1b). ``point`` is the package's original
 # scalar ``FinalTimeHead``; ``quantile`` is ``outputs.duration_heads.QuantileFinalTimeHead`` —
@@ -1069,6 +1075,7 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "latent_aux_duration_weight": 0.0,
         # ...and so is the plan token: a recipe run is told no plan.
         "plan_conditioning": PLAN_CONDITIONING_OFF,
+        "instruction_vocabulary": "",
         # ...and the rollout horizon (two-tier L1): a recipe run predicts the whole remaining
         # approach. Every stored recipe config predates the field and reads as 0, so pinning
         # it renames nothing.
@@ -1806,6 +1813,7 @@ class ControlOutput(OutputSpec):
     control_recipe_name: str
     cta_conditioning: str
     plan_conditioning: str
+    instruction_vocabulary: str
     control_horizon_s: float
     control_condition_features: str
     duration: DurationSpec
@@ -1825,6 +1833,23 @@ class ControlOutput(OutputSpec):
                 "that carry it no longer load"
             )
         _require_member("plan_conditioning", self.plan_conditioning, PLAN_CONDITIONINGS)
+        if self.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION:
+            if not self.instruction_vocabulary:
+                raise ValueError(
+                    "plan_conditioning='instruction' conditions the executor on the words in force over "
+                    "its segment: set instruction_vocabulary to the instruction_vocabulary.json written by "
+                    "run_ts.py instruction_vocabulary"
+                )
+            if not self.control_horizon_s:
+                raise ValueError(
+                    "the instruction token spans the executor's FIXED segment (Δ / τ positions): "
+                    "plan_conditioning='instruction' needs control_horizon_s > 0"
+                )
+        elif self.instruction_vocabulary:
+            raise ValueError(
+                f"instruction_vocabulary belongs to plan_conditioning={PLAN_CONDITIONING_INSTRUCTION!r}; "
+                f"this run carries {self.plan_conditioning!r}"
+            )
         if self.plan_conditioning != PLAN_CONDITIONING_OFF and self.latent.active:
             raise ValueError(
                 "a plan token beside a latent intent is two answers to one question (what the "
@@ -2278,10 +2303,14 @@ class TSConfig:
     # The CTA as a decoder input (CTA_CONDITIONINGS); the given arrival time replaces the
     # duration head's output outright.
     cta_conditioning: str = CTA_CONDITIONING_OFF
-    # The plan as a decoder input (PLAN_CONDITIONINGS): `off` is the only value a run may
-    # carry — the intent-code token is archived (PLAN_CONDITIONINGS_RETIRED) and the rewritten
-    # stage B's instruction vocabulary is not built yet.
+    # The plan as a decoder input (PLAN_CONDITIONINGS): `off`, or `instruction` — the words in
+    # force over the executor's segment, read from the vocabulary artefact below (the intent-code
+    # token is archived, PLAN_CONDITIONINGS_RETIRED).
     plan_conditioning: str = PLAN_CONDITIONING_OFF
+    # The instruction vocabulary artefact (`instruction_vocabulary.json`, written by
+    # `run_ts.py instruction_vocabulary`; its sha is stored in the checkpoint and verified at
+    # load). Carried, never opened, here — like the fitted teacher's path. Named `vocab=`.
+    instruction_vocabulary: str = ""
     # Two-tier L1: the rollout's FIXED horizon in seconds; 0 = the whole remaining approach
     # (every stored run). Under Δ > 0 the schedule is rolled over exactly Δ, the targets cover
     # [0, Δ] (`dataset.target_horizon_s`), every anchor needs Δ of truth after it
@@ -2930,6 +2959,7 @@ def control_recipe(config: TSConfig) -> dict[str, Any]:
         base["horizon_s"] = config.control_horizon_s
     if config.plan_conditioning != PLAN_CONDITIONING_OFF:
         base["plan"] = config.plan_conditioning
+        base["instruction_vocabulary"] = config.instruction_vocabulary     # two vocabularies are two runs
     if not uses_control_dynamics(config.prediction_output):
         raise ValueError("state output has no control recipe")
     return base

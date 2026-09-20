@@ -1204,6 +1204,7 @@ def train(
         "data_provenance": data_provenance,
         "data_selection": data_selection,
     }
+    checkpoint_payload.update(strategy(config).checkpoint_payload_extras(config, model))
     if training_input is not None:
         checkpoint_payload[training_input.metadata_key] = training_input.provenance
     if fit.procedure_multipliers is not None:

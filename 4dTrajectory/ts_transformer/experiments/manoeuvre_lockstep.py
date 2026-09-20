@@ -1,17 +1,21 @@
-"""Fly the no-token closed loop (two-tier v3 §3.1) over the executor's val cohort and write the readout.
+"""Fly the closed loop (two-tier v3 §3.1) over the executor's val cohort and write the readout.
 
     python run_ts.py manoeuvre_lockstep --executor <arm>/checkpoint.pt --out <dir> \\
+        [--protocol none | truth-instruction]  # what the executor is handed each round (must fit its plan_conditioning)
         [--batch-size 64] [--limit N] [--device auto] [--write-records]
         [--anchor-remaining-km 12]           # reading (b): each flight first seen at that remaining path
         [--first-prediction-row 59]          # reading (c): every cell starts at the same row of the flight
         [--execute-s 20]                     # A3-a: forecast the whole horizon, fly only its first 20 s, predict again
         [--cohort <development_cohort.json>] # v3 stage B0: only that cohort's flights of the split (a subset of the checkpoint's)
 
-The intent-code protocols (``--protocol C | A | A-truth``, ``--codebook``, ``--prior``,
-``--prior-landing-ends-flight``) are ARCHIVED 2026-09-20 (`archive/manoeuvre_codes_2026_09/`):
-there is ONE protocol now, ``none`` — a `plan_conditioning = off` executor predicting again every
-round on its own flown rows — and the payload still carries its name, because the gates refuse a
-payload flown under anything else.
+Two protocols (`lockstep.PROTOCOLS`): ``none`` — a `plan_conditioning = off` executor predicting
+again every round on its own flown rows — and ``truth-instruction`` (stage B's B1′) — an
+instruction executor handed the truth's words by flown position, read on the WHOLE record of
+every flight BEFORE any cut (`--first-prediction-row` / `--anchor-remaining-km` cut the cohort;
+the words must not change with the cut). The payload carries the protocol and, under
+``truth-instruction``, the vocabulary's path and sha. The intent-code protocols (``C | A |
+A-truth``, ``--codebook``, ``--prior``, ``--prior-landing-ends-flight``) are ARCHIVED 2026-09-20
+(`archive/manoeuvre_codes_2026_09/`).
 
 The cohort is the executor's val split (rebuilt, provenance verified); the first prediction is made
 at the executor's fixed anchor L−1, or — ``--anchor-remaining-km X`` (one of
@@ -54,6 +58,7 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre import lockstep as ls
 from ts_transformer.run_naming import run_display_name
 from ts_transformer.training.train import load_checkpoint
+from ts_transformer.outputs.control.instruction_token import load_vocabulary_for
 
 #: The strata every row is read in (the readout's order; `data/approach_difficulty` owns the names).
 STRATA = (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, STRATUM_ESTABLISHED)
@@ -67,7 +72,7 @@ STRATA = (STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, STRATUM_ESTABLISHE
 #: same payload with the intent-code layer ARCHIVED — no codebook / prior / token / landing keys, no
 #: code columns per row, no `e_plan` per round. A v3 payload is not read by this code (the gates
 #: refuse it by schema): there is no compatibility path.
-LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v4"
+LOCKSTEP_SCHEMA = "ts-manoeuvre-lockstep-v5"
 #: The summary block a written record directory carries.
 LOCKSTEP_RECORDS_BLOCK = "manoeuvre_lockstep"
 
@@ -171,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="start the closed loop at this row of every flight (reading (c): the same segment for every lookback), instead of at L-1")
     parser.add_argument("--execute-s", type=float, default=None,
                         help="fly only the first N seconds of each forecast and predict again there (A3-a)")
+    parser.add_argument("--protocol", default=ls.PROTOCOL_NONE, choices=ls.PROTOCOLS,
+                        help="what the executor is handed each round: nothing, or the truth's instructions by flown position")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--split", default="val", choices=("train", "val"),
@@ -204,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit:
         wanted = wanted[: args.limit]
     series = rebuild_cohort(payload, config, wanted)
+    # the instruction feed is read on the WHOLE record of every flight, before any cut below
+    feed = ls.InstructionFeed.read(load_vocabulary_for(config), series) if args.protocol == ls.PROTOCOL_TRUTH_INSTRUCTION else None
     a0 = default_anchor_of(config)
     first_rows = {item.dataset_id: a0 for item in series}
     if args.anchor_remaining_km:
@@ -223,10 +232,10 @@ def main(argv: list[str] | None = None) -> int:
         "remaining_km": args.anchor_remaining_km, "common_row": args.first_prediction_row,
         "flights_without_a_row": len(wanted) - len(series),
     }
-    print(f"  {ls.PROTOCOL_NONE}: {len(series)} flights, first prediction {first_prediction['rule']}, {run_display_name(config.to_dict())}", flush=True)
+    print(f"  {args.protocol}: {len(series)} flights, first prediction {first_prediction['rule']}, {run_display_name(config.to_dict())}", flush=True)
 
     runs = ls.fly(executor, series, device=device, batch_size=args.batch_size,
-                  log=lambda line: print(line, flush=True), execute_s=args.execute_s)
+                  log=lambda line: print(line, flush=True), execute_s=args.execute_s, protocol=args.protocol, feed=feed)
     rows: dict[str, dict[str, Any]] = {}
     pairs = []
     for index, run in enumerate(runs):
@@ -241,7 +250,8 @@ def main(argv: list[str] | None = None) -> int:
                                                   horizon_mode=config.horizon_mode, split=args.split), metrics))
     flown_none = len(runs) - len(rows)
     payload_out = {
-        "schema": LOCKSTEP_SCHEMA, "written_utc": utc_now(), "protocol": ls.PROTOCOL_NONE,
+        "schema": LOCKSTEP_SCHEMA, "written_utc": utc_now(), "protocol": args.protocol,
+        "instruction_vocabulary": None if feed is None else {"path": config.instruction_vocabulary, "sha256": feed.vocabulary.sha256},
         "executor": str(executor_path), "executor_sha256": executor_sha, "executor_name": run_display_name(config.to_dict()),
         "segment_s": config.control_horizon_s, "executed_s": executed_s,
         "anchor": a0, "first_prediction": first_prediction, "split": args.split, "limit": args.limit or None,

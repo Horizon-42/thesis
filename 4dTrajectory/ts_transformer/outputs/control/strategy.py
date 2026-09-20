@@ -18,19 +18,20 @@ from torch import nn
 from ts_transformer.data.batch_contract import LossComponents, anchor_state
 from ts_transformer.data.channels import IDX
 from ts_transformer.config import (
-    CONTROL_THRUST_FRACTION,
     CONTROL_DURATION_UNIFORM,
     CONTROL_DYNAMICS_REANCHORED_RK4,
     CONTROL_HOOK_OFF,
     CONTROL_STATE_LOSS_GRID_FIXED_DT,
     CONTROL_STATE_OBJECTIVE_NORMALIZED_MSE,
     CONTROL_STATE_OBJECTIVE_TRUE_TIME_POSITION,
+    CONTROL_THRUST_FRACTION,
     CTA_CONDITIONING_GIVEN,
     CTA_CONDITIONING_OFF,
+    ControlOutput,
     DURATION_HEAD_TWO_HEAD,
     HOOK_SATURATION_HARD,
+    PLAN_CONDITIONING_INSTRUCTION,
     PREDICTION_CONTROL,
-    ControlOutput,
     TSConfig,
     control_recipe,
 )
@@ -45,7 +46,11 @@ from ts_transformer.data.fixed_dt_supervision import (
 from ts_transformer.geometry.flyability import G as GRAVITY_MPS2
 from ts_transformer.backbone.adapters import build_state_forecaster
 from ts_transformer.outputs.base import ForecastOptions, OutputStrategy, Replay, WindowContext
+from ts_transformer.manoeuvre.instructions import read_instructions
 from ts_transformer.outputs.control.basis_fit import FittedTeacherTable, load_fitted_teacher
+from ts_transformer.outputs.control.instruction_token import (
+    instruction_context, load_vocabulary_for, probe_instruction_context,
+)
 from ts_transformer.outputs.constraints import build_command_hook
 from ts_transformer.outputs.dynamics import rollout as control_rollout
 from ts_transformer.outputs.dynamics.hooks import HOOK_DIAGNOSTIC_PREFIX, HOOK_STEPS_KEY
@@ -161,6 +166,15 @@ class ControlContext(WindowContext):
                 anchor_indices={int(anchor) for _item, anchor in covered},
                 n_segments=int(self.config.n_segments),
             )
+        # The instruction token's source (plan_conditioning='instruction'): every eligible
+        # flight's words, read ONCE here from the artefact the config names; a row takes the
+        # words in force over the segment at its anchor (`instruction_context`).
+        self.vocabulary = load_vocabulary_for(self.config) if self.config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION else None
+        self.readings = (
+            {} if self.vocabulary is None
+            else {windows.series[int(index)].dataset_id: read_instructions(windows.series[int(index)], self.vocabulary)
+                  for index in windows.eligible_series}
+        )
         self._rows: list[dict[str, np.ndarray]] | None = None
         self._fixed_dt: tuple[FixedDTSupervisionRow, ...] | None = None
         if windows.cache_context_rows:
@@ -196,6 +210,9 @@ class ControlContext(WindowContext):
                 f"cta_conditioning={config.cta_conditioning!r} names no training-time "
                 "source for the CTA token; only 'given' (the truth duration) is defined"
             )
+        if self.vocabulary is not None:
+            # the truth's words in force over the segment starting at the anchor's own time
+            arrays.update(instruction_context(self.readings[series.dataset_id], float(series.times[anchor]), config, self.vocabulary))
         if not windows.control_supervision:
             return arrays
         anchor_time = float(series.times[anchor])
@@ -404,7 +421,10 @@ class ControlStrategy(OutputStrategy):
     def probe_context(
         self, batch_size: int, device: torch.device, config: TSConfig
     ) -> dict[str, torch.Tensor] | None:
-        return probe_dynamics(batch_size, device, config)
+        dynamics = probe_dynamics(batch_size, device, config)
+        if config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION:
+            dynamics.update(probe_instruction_context(config, load_vocabulary_for(config), batch_size, device))
+        return dynamics
 
     def probe_dense_supervision(
         self, batch_size: int, device: torch.device, config: TSConfig
@@ -497,6 +517,25 @@ class ControlStrategy(OutputStrategy):
 
     def checkpoint_metadata(self, config: TSConfig) -> dict[str, Any]:
         return {"control_recipe": control_recipe(config)}
+
+    def checkpoint_payload_extras(self, config: TSConfig, model: nn.Module) -> dict[str, Any]:
+        # the vocabulary the model's encoder was SIZED against (the head opened it once, at build)
+        # — the sha `verify_checkpoint_payload` reads back at load
+        if config.plan_conditioning != PLAN_CONDITIONING_INSTRUCTION:
+            return {}
+        return {"instruction_vocabulary_sha256": model.instruction_vocabulary_sha256}
+
+    def verify_checkpoint_payload(self, config: TSConfig, payload: dict[str, Any]) -> None:
+        """An instruction-conditioned executor binds to ONE vocabulary: the artefact at the
+        config's path must still carry the sha the checkpoint stored."""
+        if config.plan_conditioning != PLAN_CONDITIONING_INSTRUCTION:
+            return
+        stored, current = payload["instruction_vocabulary_sha256"], load_vocabulary_for(config).sha256
+        if stored != current:
+            raise ValueError(
+                f"{config.instruction_vocabulary}: the vocabulary's sha {current[:12]}… is not the one this "
+                f"executor trained against ({stored[:12]}…); the words it reads would mean something else"
+            )
 
     # ── inference ────────────────────────────────────────────────────────────
 

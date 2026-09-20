@@ -60,10 +60,12 @@ of the package, not a migration in progress.
   Numbers: `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
   `4dTrajectory/outputs/KRDU/experiments/{two_tier_v3_b_20260919,manoeuvre_tok_20260918}` +
   `outputs/codebooks/` — read them through §10 item 1 (open-loop-trained executors). `plan_conditioning`
-  keeps ONLY `off`; `manoeuvre-code` is refused at load by name (`PLAN_CONDITIONINGS_RETIRED`).
-  **Live**: the no-token closed loop — `lockstep.py` (protocol `none`, payload schema
-  `ts-manoeuvre-lockstep-v4`), `gates.py` (grid + relative), `segments.py` (the start frame, kept
-  for the instruction labeller), `context.py` (the type vocabulary), `failure_modes.py`, runners
+  is `off` or `instruction` (the words in force over the segment, `outputs/control/instruction_token.py`);
+  `manoeuvre-code` is refused at load by name (`PLAN_CONDITIONINGS_RETIRED`).
+  **Live**: the closed loop — `lockstep.py` (protocols `none` / `truth-instruction`, payload schema
+  `ts-manoeuvre-lockstep-v5`), `gates.py` (grid + relative), `segments.py` (the start frame),
+  `instructions.py` (the vocabulary + labeller, a leaf), `instruction_sequences.py` /
+  `instruction_prior.py` (the sentence prior), `context.py` (the type vocabulary), `failure_modes.py`, runners
   `manoeuvre_lockstep`, `executor_*`, `two_tier_grid_queue` (R8) — i.e. two-tier v3 stage A
   (P10, D30 / D31 / C28 / R7 / R9 are the archived layer's records).
 - **Control-path axes**: `latent_dim > 0` (latent intent z) and `cta_conditioning=given` (the
@@ -156,7 +158,7 @@ of the package, not a migration in progress.
 | `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′: the third column is a path-angle target flown by a 3 s loop. **Passes every pre-registered gate on both seeds** — fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %, straight-in FDE p50 543 / 559 vs 647 / 663, pooled ADE 1173 / 1182 vs 1325 / 1295. ONE regression: vectored FDE p50 +625 / +704 m, unexplained (not turn authority). **Adoption is the user's call** (D27) |
 | `control_condition_features` | `raw` | `ratios` carries the SAME information at the SAME width (so a ratios arm starts from its raw twin's weights); 4 of the 8 raw channels are constant on this fleet. Built, not yet measured (D28) |
 | `control_horizon_s` | `0` (whole approach) | two-tier L1: a FIXED rollout horizon Δ — ONE span definition (`dataset.target_horizon_s`), ONE floor rule (`dataset.effective_min_future_s`), and every duration-deciding axis (CTA, quantile head, `final_time_loss_weight`, latent, imitation teacher) refused. **An L1 arm's numbers are its readouts' [0, Δ], never the record summary's** whole-remainder ADE/FDE (D29) |
-| `plan_conditioning` | `off` | **`off` is the only value**: `manoeuvre-code` ARCHIVED 2026-09-20 (D30 / D31 are its record) and `truth-next` / `waypoints` 2026-09-18 — all three refused at load by name, each pointing at its own archive (`PLAN_CONDITIONINGS_RETIRED`). The rewritten stage B's `instruction` value is not built yet |
+| `plan_conditioning` | `off` | `instruction` (2026-09-20, plan v3 §5.2.1): the executor is handed the instruction words IN FORCE at the Δ/τ positions of its segment (bin centres, `Vocabulary.conditioning`) from the artefact `instruction_vocabulary` names — the truth's words in training / `predict`, by flown position in the closed loop; the checkpoint stores the vocabulary's sha and refuses an artefact whose sha moved. `manoeuvre-code` ARCHIVED 2026-09-20 (D30 / D31 are its record) and `truth-next` / `waypoints` 2026-09-18 — all three refused at load by name, each pointing at its own archive (`PLAN_CONDITIONINGS_RETIRED`) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag`: smoothness + 3.4 % ADE, τ = 2.0 s not CV-selected; a pipeline lag cell carries `_lag` (D4) |
 | procedure penalty | weights 0 | NOT adopted; hinge scales are module constants (D5) |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained through a hook beat it; `+` combinations are a lookup, their order the application order (D6) |

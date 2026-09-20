@@ -289,12 +289,11 @@ def test_the_guidance_layer_never_imports_the_control_path():
         )
 
 
-#: The manoeuvre package's LEAF (`manoeuvre/__init__.py`): `segments` reads a manoeuvre in its
-#: start frame and imports the data plane and torch only. It was a leaf because the control path
-#: held the intent-code tokenizer as a submodule of the executor; that layer is ARCHIVED
-#: 2026-09-20 (`archive/manoeuvre_codes_2026_09/`) and NOTHING under `outputs/` reaches
-#: `manoeuvre` any more — the leaf rule below keeps `segments` importable from below if the
-#: rewritten stage B's labeller needs it there again.
+#: The manoeuvre package's LEAVES (`manoeuvre/__init__.py`): `segments` reads a manoeuvre in its
+#: start frame, `instructions` reads a track back as instruction words; both import the data
+#: plane (and geokit / torch) only, and the control path imports THEM — today
+#: `outputs/control/instruction_token.py` reads the vocabulary for the executor's token (the
+#: intent-code tokenizer that used to sit there is ARCHIVED 2026-09-20).
 MANOEUVRE = TS_DIR / "manoeuvre"
 MANOEUVRE_LEAVES = {"manoeuvre.segments", "manoeuvre.instructions"}
 #: What a leaf may import from the package — an ALLOW-list, so a new spine module cannot
@@ -328,13 +327,14 @@ def test_the_manoeuvre_leaves_import_no_layer_above_the_data_plane():
         )
 
 
-def test_only_the_runners_reach_the_manoeuvre_package():
+def test_only_the_runners_reach_the_manoeuvre_package_beyond_its_leaves():
     """Every `manoeuvre` module imports the control path, the guidance layer, the data plane and
-    the inference helpers (plan §4.2), and nothing imports it back: the one reverse edge — the
-    control path holding the intent-code tokenizer as a submodule — went with that layer's
-    archive (2026-09-20), so only the runners under `experiments/` consume this package now. A
-    new edge from `outputs/` is a layering decision, not an import: amend `MANOEUVRE_LEAVES` and
-    this rule together."""
+    the inference helpers (plan §4.2), and nothing imports it back EXCEPT a leaf
+    (`MANOEUVRE_LEAVES`): the control path reads `manoeuvre.instructions` for the instruction
+    token (two-tier v3 stage B, 2026-09-20) the way it read `manoeuvre.segments`, and the leaf
+    test above keeps a leaf below the control path. Everything else in the package is consumed
+    by the runners under `experiments/` only. A new edge from `outputs/` is a layering
+    decision, not an import: amend `MANOEUVRE_LEAVES` and this rule together."""
     for path in _module_files():
         if path.is_relative_to(MANOEUVRE):
             continue
@@ -343,6 +343,7 @@ def test_only_the_runners_reach_the_manoeuvre_package():
             for name in _imported_names(path) if name.split(".")[0] == "manoeuvre"
         }
         imported.discard("manoeuvre")       # `from ts_transformer.manoeuvre import segments`
+        imported -= MANOEUVRE_LEAVES
         if not imported:
             continue
         rel = path.relative_to(TS_DIR).as_posix()
