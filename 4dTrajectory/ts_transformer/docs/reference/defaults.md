@@ -434,8 +434,25 @@ the model learns it implicitly. Reconstructing every flight's vertical profile f
 
 - per segment: median descent 473 ft, median error **−2.1 ft**, median |error| **43.5 ft** — the
   3° constant is genuinely good, better than expected;
-- per approach, accumulated: median |error| **153.4 ft** (which passes the pre-stated "hundreds of
-  feet fails" line), but **p75 299 ft and p95 1,189 ft**.
+- per approach, accumulated: median |error| **153.4 ft**, p75 299, p95 1,189.
+
+**Correction (2026-09-21, same day): those three per-approach figures were mislabelled.** They are
+the sum of the errors made INSIDE each plateau; the transitions between plateaus were not counted
+at all, so they are not the end-to-end profile error they were called. Re-measured with the
+instructions tiling the track — each one in force from its own event until the next, so the
+transitions belong to the preceding instruction, which is what a closed loop actually does — the
+end-to-end height error at the runway with no altitude word is **median 218.1 ft, p95 1,442.6,
+p99 2,327.7**. The direction of the finding is unchanged and slightly strengthened; the three
+numbers above are not. Also visible only end-to-end: the worst case does not depend on any of
+these choices, because **a flight that never levels off never triggers an anchor at all**.
+
+**Method note, because this was the third instance in one day.** Three readouts were wrong in the
+same way — a local quantity used as if it were a global one: an angle computed from a future
+TARGET height against the present distance; a flight path angle taken as `arctan2(-dh, -ds)`,
+which wraps to ±180° on downwind where the along-track distance grows; and this one, segments that
+do not tile what they claim to summarise. Each was caught by the numbers being implausible, not by
+reading the code. Before quoting a per-flight or per-approach aggregate built from segments, check
+that the segments cover the flight.
 
 The centre passes and the tail fails, for a structural reason: an absolute target's error is
 bounded by half a bin, a rate's is unbounded and compounds over segments. The median flatters
