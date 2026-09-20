@@ -9,6 +9,13 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
+- **到达清单不重建，两层 B′ 接受当前的跑道覆盖**（用户 2026-09-20）。
+  `harvest-arrivals-v5-takeoff-excluded` 的跑道覆盖就是指令词表里跑道词的类别集合：KRDU 4 条（缺 14、32）、
+  KSMF 3 条（缺 35R）、KSJC 4 / KSTL 8 / KMSY 4。重建成 v6 会加回 KRDU 32 与 KSMF 35R（+1876 架），而自 D62
+  起那不只是改数据集划分——它改变跑道词的**类别集合**，`runway_sha256` 变，此前训的每个先验作废。
+  **用户决定不重建、不动训练数据**，所以本阶段一切关于「模型能说出去哪条跑道」的结论都带着这个范围，
+  必须在结论里写明。
+
 - **`clean_pipeline_data.py` DELETES the 70,267 optimizer records the next item says to
   regenerate from** (verified 2026-09-20). Root `CLAUDE.md` carries both halves of the
   contradiction: the Build & Dev block tells you to run the cleaner to clear "allow-listed
