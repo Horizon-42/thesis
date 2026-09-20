@@ -103,13 +103,21 @@ def read_track(path: Path) -> tuple[list[TrackPoint], int, int]:
             int(data["landing_sample_index"]), len(repaired.outliers))
 
 
-def measure(airport_code: str, out: Path, config_file: Path, cifp_file: Path, limit: int) -> dict:
+def measure(airport_code: str, out: Path, config_file: Path, cifp_file: Path, limit: int,
+            cohort: Path | None = None) -> dict:
     airport = load_airport(airport_code, config_file=config_file, cifp_file=cifp_file)
     frames = airport.frames("hae")
     idents = [f.ident for f in frames]
     store = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest" / airport_code / "tracks"
     manifest = json.loads((store / "manifest.json").read_text(encoding="utf-8"))
     records = [r for r in manifest["records"] if r["outcome"] == "assigned"]
+    if cohort is not None:
+        # B0′′: the runway word's check runs on the MODELLING cohort, not the fleet — the word is
+        # only ever read for these flights, and the fleet's rate says nothing about them.
+        roster = json.loads(cohort.read_text(encoding="utf-8"))["splits"]
+        keys = {k.split(":", 1)[1] for part in roster.values() for k in part}
+        records = [r for r in records if r["flight_key"] in keys]
+        print(f"  restricted to the cohort: {len(records)} of {len(keys)} rostered flights", flush=True)
     if limit:
         records = records[:limit]
     print(f"  {airport_code}: {len(records)} landed tracks, {len(idents)} thresholds {idents}", flush=True)
@@ -222,7 +230,7 @@ def measure(airport_code: str, out: Path, config_file: Path, cifp_file: Path, li
     result = {
         "schema": "ts-approach-events-v1",
         "airport": airport_code,
-        "landed_tracks": len(records),
+        "landed_tracks": len(records), "cohort": str(cohort) if cohort else None,
         "thresholds": idents,
         "parallel_separation_m": separation,
         "established_cross_track_m": ESTABLISHED_CROSS_M,
@@ -278,8 +286,11 @@ def main(argv: list[str] | None = None) -> int:
                         default=REPO_ROOT / "trajectory_data_process" / "config" / "runway_thresholds.json")
     parser.add_argument("--cifp-file", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of the roster (a smoke test)")
+    parser.add_argument("--cohort", type=Path, default=None,
+                        help="a development cohort: measure only its flights (B0′′ reads the runway "
+                             "word's agreement on the flights the word is actually read for)")
     args = parser.parse_args(argv)
-    measure(args.airport.upper(), args.out, args.config_file, args.cifp_file, args.limit)
+    measure(args.airport.upper(), args.out, args.config_file, args.cifp_file, args.limit, args.cohort)
     return 0
 
 
