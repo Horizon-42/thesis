@@ -202,6 +202,21 @@ describe("TrainingSentenceBar", () => {
     expect(screen.getByText("t = 0 s")).toBeTruthy();
   });
 
+  // One flight, one moment, one number: the window is handed the bar's cursor
+  // rather than keeping its own, so the two can never disagree about "now".
+  it("opens the read-back check on the same cursor", () => {
+    render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: /Event 3 at 70 s/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Read-back check" }));
+
+    const window_ = screen.getByRole("dialog", { name: "Read-back check" });
+    expect(window_.textContent).toContain("t = 70 s");
+    expect(screen.getAllByText("t = 70 s").length).toBe(2); // the bar and the window
+
+    fireEvent.click(screen.getByRole("button", { name: "Close read-back check" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   // A manoeuvre the words do not carry is drawn ON its kind's row with its
   // reason, so "the sentence misses this turn" is visible rather than argued.
   it("draws the absorbed manoeuvres with their reason", () => {

@@ -106,6 +106,51 @@ export const MOCK_ABSORBED = [
   { kind: "speed", startS: 150, endS: 168, word: 13, change: -2.4, reason: "small change" },
 ];
 
+/**
+ * The observed track, on the artefact's own 2 s rows and in the course's frame.
+ * It is GENERATED from a handful of anchors rather than typed out: 132 rows of
+ * eight columns would bury the fixture, and every value here only has to be
+ * plausible and consistent with the sentence above — a vectored arrival turning
+ * from +90° onto the course, descending and slowing all the way in.
+ *
+ * `tS` starts at 0 and ends at `durationS`, because the reader requires it: both
+ * come from the same rows in the export, so a disagreement means the track and
+ * the sentence are not one flight.
+ */
+const ROW_STEP_S = 2;
+
+function ramp(anchors: Array<[number, number]>, t: number): number {
+  const last = anchors.length - 1;
+  if (t <= anchors[0][0]) return anchors[0][1];
+  if (t >= anchors[last][0]) return anchors[last][1];
+  const index = anchors.findIndex(([at]) => at > t);
+  const [t0, v0] = anchors[index - 1];
+  const [t1, v1] = anchors[index];
+  return v0 + ((v1 - v0) * (t - t0)) / (t1 - t0);
+}
+
+function wrap180(degrees: number): number {
+  return (((degrees + 180) % 360) + 360) % 360 - 180;
+}
+
+export const MOCK_TRACK_S = 262;
+
+export const MOCK_OBSERVED = (() => {
+  const tS: number[] = [];
+  for (let t = 0; t <= MOCK_TRACK_S; t += ROW_STEP_S) tS.push(t);
+  const unwrapped = tS.map((t) => ramp([[0, 90], [70, 90], [94, 50], [130, 50], [148, 20], [188, 20], [202, 0]], t));
+  return {
+    tS,
+    toGoM: tS.map((t) => ramp([[0, 25000], [MOCK_TRACK_S, 0]], t)),
+    crossM: tS.map((t) => ramp([[0, 6400], [94, 4200], [148, 1500], [202, 0], [MOCK_TRACK_S, 0]], t)),
+    heightM: tS.map((t) => ramp([[0, 3050], [102, 2120], [162, 1210], [MOCK_TRACK_S, 0]], t)),
+    relCourseDeg: unwrapped.map(wrap180),
+    courseUnwrappedDeg: unwrapped,
+    groundSpeedMps: tS.map((t) => ramp([[0, 159], [58, 139], [126, 118], [214, 98], [MOCK_TRACK_S, 70]], t)),
+    established: tS.map((t) => (t >= 202 ? 1 : 0)),
+  };
+})();
+
 export const MOCK_FLIGHT = {
   flightKey: "DAL123_05L_a1b2c3_1699999999",
   callsign: "DAL123",
@@ -115,7 +160,7 @@ export const MOCK_FLIGHT = {
   // force there are held to the threshold at 262 s. In KRDU's real export that
   // tail is a median 145 s of a 326 s arrival, so a fixture without one would let
   // a bar that stops at the last event pass.
-  durationS: 262,
+  durationS: MOCK_TRACK_S,
   establishedFromStart: false,
   sentence: {
     eventTimesS: MOCK_EVENT_TIMES_S,
@@ -124,6 +169,7 @@ export const MOCK_FLIGHT = {
   },
   instructions: MOCK_INSTRUCTIONS,
   absorbed: MOCK_ABSORBED,
+  observed: MOCK_OBSERVED,
 };
 
 export const MOCK_SAMPLE = {

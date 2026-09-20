@@ -30,7 +30,10 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
+import TrainingReadbackWindow from "./TrainingReadbackWindow";
+import { TRAINING_KIND_COLOR } from "../utils/trainingWordColors";
 import {
+  formatSeconds,
   TERMINAL_NEVER_OBSERVED,
   TERMINAL_WORDS,
   TRAINING_KINDS,
@@ -80,15 +83,6 @@ const ROW_LABEL: Record<TrainingKind, string> = {
   runway: "Runway",
   duration: "Gap (s)",
   terminal: "Terminal",
-};
-
-const ROW_COLOUR: Record<TrainingKind, string> = {
-  heading: "#7dd3fc",
-  altitude: "#a5b4fc",
-  speed: "#fbbf24",
-  runway: "#86efac",
-  duration: "#94a3b8",
-  terminal: "#f472b6",
 };
 
 interface Band {
@@ -177,14 +171,11 @@ function absorbedLabel(item: TrainingAbsorbed): string {
   return `absorbed ${item.kind}: ${change} over ${formatSeconds(item.startS)}–${formatSeconds(item.endS)} s, not worded (${item.reason})`;
 }
 
-function formatSeconds(seconds: number): string {
-  return Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(1);
-}
-
 export default function TrainingSentenceBar() {
   const { trainingSelection } = useApp();
   const frameRef = useRef<HTMLDivElement>(null);
   const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
+  const [readbackOpen, setReadbackOpen] = useState<boolean>(false);
   const [cursor, setCursor] = useState<{ flightKey: string | null; atS: number }>({
     flightKey: null,
     atS: 0,
@@ -245,6 +236,15 @@ export default function TrainingSentenceBar() {
         </span>
         <span>{formatSeconds(flight.durationS)} s of track</span>
         <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s</span>
+        {/* The window shares THIS cursor — it is the same moment of the same
+            flight, so it is one number, held here and passed down. */}
+        <button
+          type="button"
+          className="training-sentence-readback-button"
+          onClick={() => setReadbackOpen((open) => !open)}
+        >
+          {readbackOpen ? "Close read-back check" : "Read-back check"}
+        </button>
       </header>
 
       <div className="training-sentence-frame" ref={frameRef}>
@@ -360,9 +360,9 @@ export default function TrainingSentenceBar() {
                       width={Math.max(width - 2, 1)}
                       height={ROW_H - 8}
                       rx={3}
-                      fill={ROW_COLOUR[kind]}
+                      fill={TRAINING_KIND_COLOR[kind]}
                       fillOpacity={band.word === null ? 0.06 : 0.18}
-                      stroke={ROW_COLOUR[kind]}
+                      stroke={TRAINING_KIND_COLOR[kind]}
                       strokeOpacity={band.word === null ? 0.3 : 0.6}
                       strokeDasharray={band.word === null ? "3 3" : undefined}
                     />
@@ -372,7 +372,7 @@ export default function TrainingSentenceBar() {
                         y={y + ROW_H / 2 + 4}
                         textAnchor="middle"
                         className="training-sentence-word"
-                        fill={ROW_COLOUR[kind]}
+                        fill={TRAINING_KIND_COLOR[kind]}
                       >
                         {text}
                       </text>
@@ -485,6 +485,16 @@ export default function TrainingSentenceBar() {
           short tail).
         </span>
       </footer>
+
+      {readbackOpen ? (
+        <TrainingReadbackWindow
+          flight={flight}
+          vocabulary={vocabulary}
+          cursorS={cursorS}
+          onCursorChange={setCursorS}
+          onClose={() => setReadbackOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }

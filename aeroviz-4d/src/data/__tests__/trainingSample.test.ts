@@ -6,7 +6,9 @@ import {
   TERMINAL_NEVER_OBSERVED,
   TRAINING_KINDS,
   TRAINING_KIND_COLUMN,
+  TRAINING_OBSERVED_COLUMNS,
   TRAINING_WORD_COLUMNS,
+  formatSeconds,
   parseTrainingIndex,
   parseTrainingSample,
   trainingIndexPath,
@@ -223,6 +225,61 @@ describe("parseTrainingIndex", () => {
     expect(parseTrainingIndex({ schema: "something-else", sets: [] }).ok).toBe(false);
     expect(parseTrainingIndex([]).ok).toBe(false);
     expect(parseTrainingIndex(null).ok).toBe(false);
+  });
+});
+
+describe("how a time is written", () => {
+  // The sentence bar and the read-back window show the SAME cursor. When each
+  // had its own formatter they printed 201.9 s and 202 s for one moment, which
+  // reads as two cursors.
+  it("is one definition for every Training view", () => {
+    expect(formatSeconds(70)).toBe("70");
+    expect(formatSeconds(201.9)).toBe("201.9");
+    expect(formatSeconds(201.94)).toBe("201.9");
+    expect(formatSeconds(0)).toBe("0");
+  });
+});
+
+describe("the observed track", () => {
+  it("reads every column the charts plot, one value per row", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const observed = parsed.value.flights[0].observed;
+    for (const column of TRAINING_OBSERVED_COLUMNS) {
+      expect(observed[column]).toHaveLength(observed.tS.length);
+    }
+    expect(observed.tS[0]).toBe(0);
+    expect(observed.tS[observed.tS.length - 1]).toBe(parsed.value.flights[0].durationS);
+  });
+
+  // The track's clock and the flight's length come from the same rows in the
+  // export, so a disagreement means they are not the same flight.
+  it("refuses a track that does not run the length of the flight", () => {
+    const short = sampleWith((sample) => {
+      sample.flights[0].observed.tS = sample.flights[0].observed.tS.slice(0, -1);
+    });
+    expect(short.ok).toBe(false);
+    if (short.ok) return;
+    expect(short.problem).toContain("but the flight is 262 s long");
+  });
+
+  it("refuses a column that is short a row, by name", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].observed.heightM = sample.flights[0].observed.heightM.slice(0, -1);
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("observed.heightM");
+  });
+
+  it("refuses an established column that is not 0/1", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].observed.established[3] = 2;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("established");
   });
 });
 

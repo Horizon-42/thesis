@@ -177,6 +177,29 @@ export interface TrainingInstruction {
   clamped: boolean;
 }
 
+/**
+ * MIRROR of `instructions.course_frame` — the observed track in the FINAL
+ * APPROACH COURSE's frame, which is the frame the words were read in. Reading
+ * the words against anything else (a geodetic track, say) would let the charts
+ * and the words disagree about where the aircraft was.
+ *
+ * Every column has one value per row of `tS`, and the geodetic columns are
+ * deliberately absent until T5/T6 puts the tracks in the 3D scene.
+ */
+export const TRAINING_OBSERVED_COLUMNS = [
+  "toGoM",              // along the course, positive BEFORE the threshold
+  "crossM",             // right of the course, positive
+  "heightM",            // above the threshold
+  "relCourseDeg",       // ground track against the course, wrapped
+  "courseUnwrappedDeg", // the same, unwrapped along the rows
+  "groundSpeedMps",
+  "established",        // 0 / 1 per row
+] as const;
+
+export type TrainingObservedColumn = (typeof TRAINING_OBSERVED_COLUMNS)[number];
+
+export type TrainingObserved = { tS: number[] } & Record<TrainingObservedColumn, number[]>;
+
 /** A manoeuvre the labeller read but did not word, and why. Drawn on its kind's
  *  row so "the words miss this turn" is visible rather than argued about. */
 export interface TrainingAbsorbed {
@@ -205,6 +228,7 @@ export interface TrainingFlight {
   sentence: TrainingSentence;
   instructions: TrainingInstruction[];
   absorbed: TrainingAbsorbed[];
+  observed: TrainingObserved;
 }
 
 /** What the panel publishes for the full-width sentence bar to draw: one flight
@@ -298,6 +322,15 @@ export function speedCentreMps(vocabulary: TrainingWordSpec, word: number): numb
 /** MIRROR of `Vocabulary.duration_centre_s`: the gap to the PREVIOUS event. */
 export function durationCentreS(vocabulary: TrainingWordSpec, word: number): number {
   return word * vocabulary.durationBinS;
+}
+
+/**
+ * A time from this artefact, as every Training view writes it. The rows are on a
+ * 2 s grid so most times are whole seconds; a scrubbed cursor is not, and the
+ * views must not disagree about whether the same moment is 201.9 s or 202 s.
+ */
+export function formatSeconds(seconds: number): string {
+  return Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(1);
 }
 
 /** The terminal words, by index (`TERMINAL_CONTINUE / _LANDED / _GO_AROUND`). */
@@ -577,6 +610,56 @@ function parseSentence(
   return { ok: true, value: { eventTimesS, words, durationClamped } };
 }
 
+function parseObserved(raw: unknown, durationS: number, where: string): Parsed<TrainingObserved> {
+  if (!isRecord(raw)) return { ok: false, problem: `${where}.observed is not an object` };
+  const tS = numberArray(raw.tS);
+  if (tS === null || tS.length < 2) {
+    return { ok: false, problem: `${where}.observed.tS is missing or shorter than two rows` };
+  }
+  // The track's clock is the flight's clock: it starts at 0 and it ends where
+  // `durationS` says the flight ends, because both come from the same rows. A
+  // disagreement means the track and the sentence are not the same flight — the
+  // same check the last event already gets.
+  if (tS[0] !== 0) {
+    return { ok: false, problem: `${where}.observed.tS starts at ${tS[0]} s, not 0` };
+  }
+  // Compared at the export's own precision: `tS` is written rounded to 0.1 s and
+  // `durationS` is not, so an exact test would one day refuse a whole file over a
+  // rounding difference while blaming it on the track and the sentence being
+  // different flights.
+  if (Math.abs(tS[tS.length - 1] - durationS) > 0.05) {
+    return {
+      ok: false,
+      problem: `${where}.observed.tS ends at ${tS[tS.length - 1]} s but the flight is ${durationS} s long`,
+    };
+  }
+  for (let i = 1; i < tS.length; i += 1) {
+    if (!(tS[i] > tS[i - 1])) {
+      return { ok: false, problem: `${where}.observed.tS is not increasing at row ${i}` };
+    }
+  }
+
+  const columns: Record<string, number[]> = { tS };
+  for (const column of TRAINING_OBSERVED_COLUMNS) {
+    const values = numberArray(raw[column]);
+    if (values === null) {
+      return { ok: false, problem: `${where}.observed.${column} is missing or not a list of numbers` };
+    }
+    if (values.length !== tS.length) {
+      return {
+        ok: false,
+        problem: `${where}.observed.${column} has ${values.length} rows, but tS has ${tS.length}`,
+      };
+    }
+    columns[column] = values;
+  }
+  if (!columns.established.every((value) => value === 0 || value === 1)) {
+    return { ok: false, problem: `${where}.observed.established is not 0/1 per row` };
+  }
+
+  return { ok: true, value: columns as TrainingObserved };
+}
+
 function parseKind(raw: Record<string, unknown>, where: string): Parsed<TrainingKind> {
   const kind = str(raw, "kind");
   if (kind === null || !(TRAINING_KINDS as readonly string[]).includes(kind)) {
@@ -763,6 +846,9 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
       absorbed.push(parsed.value);
     }
 
+    const observed = parseObserved(entry.observed, durationS, where);
+    if (!observed.ok) return observed;
+
     flights.push({
       flightKey,
       callsign,
@@ -773,6 +859,7 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
       sentence: sentence.value,
       instructions,
       absorbed,
+      observed: observed.value,
     });
   }
 
