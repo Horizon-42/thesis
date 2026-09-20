@@ -11,9 +11,9 @@
 | 词数 | 73 个（航向 36 + 高度 11 + 地速 23 + 切入 3），外加一个"保持" |
 | 读的是哪些飞机 | B cohort = 网格 `two_tier_v3_grid_20260918/cohorts/L60_D60`（KRDU，记录长度 ≥ 120 s：train 6853 架 / val 1404 架） |
 | 代码 | `manoeuvre/instructions.py`（词表和标注器，叶模块）、`outputs/control/instruction_token.py`（执行器怎么吃）、`manoeuvre/instruction_prior.py`（先验）；runner 是 `run_ts.py instruction_vocabulary` |
-| 分支 | `dev-instruction-vocab`（worktree 已合回来）；全套 ts 测试 1263 通过 |
-| 状态 | 词表是定稿候选；**一个模型都没训过**，两层模型还没有任何结论 |
-| 等用户定 | 签计划 §5.2 / §6.2；D59 的切入角门槛（见 §6.4）；说"跑"；旧读数删不删 |
+| 代码在哪 | 已并入 `dev-two-tier-feasibility`（6a3a7674 v9、e74d5644 本文、3db25774 读数）；`dev-instruction-vocab` 和它的 worktree 已删；全套 ts 测试 1263 通过 |
+| 状态 | **词表定稿**（第 5 轮人工核 136/150 = 0.907，过 0.9 门槛，判定 M-B0′ 见 §6.1）；**一个模型都没训过**，两层模型还没有任何结论 |
+| 等用户定 | 签计划 §5.2 / §6.2；D59 的切入角门槛（见 §6.4）；说"跑"；`_superseded/` 里那 442 MB 旧读数删不删 |
 
 ## 1. 为什么词是"目标"，不是"变化率"
 
