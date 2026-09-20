@@ -9,7 +9,8 @@ vi.mock("../../context/AppContext", () => ({
   useApp: () => ({ ...appState }),
 }));
 
-import TrainingPanel, { trainingIndexPath } from "../TrainingPanel";
+import TrainingPanel from "../TrainingPanel";
+import { trainingIndexPath } from "../../data/trainingSample";
 
 describe("TrainingPanel (T1: the empty state)", () => {
   beforeEach(() => {

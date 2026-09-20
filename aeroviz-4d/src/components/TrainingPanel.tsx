@@ -19,12 +19,9 @@
  */
 
 import { useApp } from "../context/AppContext";
-
-/** Where the reader will look, relative to the site root. One definition, shown to
- *  the user and (from T2) used by the fetch. */
-export function trainingIndexPath(airportCode: string): string {
-  return `data/airports/${airportCode}/training/index.json`;
-}
+// The path shown here and the path the reader fetches are ONE definition, in the
+// data module — a second copy here would drift the moment the layout moves.
+import { trainingIndexPath } from "../data/trainingSample";
 
 export default function TrainingPanel() {
   const { activeAirportCode } = useApp();

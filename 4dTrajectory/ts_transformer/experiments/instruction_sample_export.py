@@ -1,0 +1,246 @@
+"""Export a few flights' sentences from a vocabulary artefact for the frontend's Training view (design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`).
+
+    python run_ts.py instruction_sample_export --vocabulary <…/vocabulary_tau10> \\
+        --executor <ckpt> --out aeroviz-4d/public/data/airports/KRDU/training/vocabulary_tau10 \\
+        [--flights 40] [--split train] [--set-id vocabulary_tau10] [--title "…"]
+
+**It re-reads nothing.** The sentences come from the artefact's own ``sentences_<split>.json``
+and the drawn flights from its ``hand_check/index.csv``; only the TRACK is rebuilt (through the
+executor checkpoint's data provenance, C25 — the checkpoint is the door to the data). Re-running
+the labeller here would let the view drift from the artefact it claims to show: the published
+object is the artefact, so the view shows the artefact.
+
+**The draw is the hand check's own prefix.** ``hand_check/index.csv`` is written in draw order,
+half straight-in and half vectored, so taking the first ``--flights / 2`` of each stratum yields a
+SUBSET of the pages a human already checked — by construction, not by reproducing a random draw.
+The two views therefore show the same aircraft, which is the whole point of matching them.
+
+Written under ``--out`` (refused if it exists), plus an entry in the parent's ``index.json``:
+
+    <out>/sample.json    the vocabulary's spec, its runway classes, and per flight the sentence
+                         (events × 6 words), the instructions, the absorbed manoeuvres and the
+                         observed track IN THE RUNWAY FRAME (what the read-back charts plot)
+    ../index.json        the manifest the frontend lists; this set added or replaced in place
+
+The track's geodetic columns (lon/lat/alt) and the geometric "what the words alone say" track are
+NOT here: they belong to the 3D layer, which is a later step of the design (T5/T6).
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from pathlib import Path
+import time
+from typing import Any
+
+import numpy as np
+
+from ts_transformer.config import TSConfig
+from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
+from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.manoeuvre.instructions import (
+    INSTRUCTION_KINDS, VOCABULARY_FILE, course_frame, load_vocabulary, runway_sha256, word_counts,
+)
+from ts_transformer.training.train import load_checkpoint_payload
+
+#: MIRROR of `src/data/trainingSample.ts` (`TRAINING_INDEX_SCHEMA` / `TRAINING_SAMPLE_SCHEMA`).
+#: The reader refuses anything else by name, so these two move together or not at all.
+INDEX_SCHEMA = "aeroviz-training-index-v1"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v1"
+#: The set kinds the frontend knows (`TRAINING_SET_KINDS` there).
+KIND_READBACK = "vocabulary-readback"
+
+INDEX_FILE = "index.json"
+SAMPLE_FILE = "sample.json"
+
+
+def drawn_flights(artefact: Path, per_stratum: int) -> list[tuple[str, str]]:
+    """``[(flight_id, stratum)]``: the first ``per_stratum`` of each stratum in the hand check's
+    draw order — a PREFIX of the pages a human checked, so the two views show the same aircraft.
+    A stratum with fewer pages than asked is refused, never quietly short-changed."""
+    path = artefact / "hand_check" / "index.csv"
+    if not path.exists():
+        raise SystemExit(f"{path} is missing: the draw comes from the hand check, so the artefact must carry one")
+    taken: dict[str, list[str]] = {}
+    with path.open(encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            taken.setdefault(row["stratum"], []).append(row["flight_id"])
+    short = {name: len(ids) for name, ids in taken.items() if len(ids) < per_stratum}
+    if short:
+        raise SystemExit(f"the hand check holds {short}, fewer than the {per_stratum} per stratum asked for")
+    return [(flight_id, stratum) for stratum, ids in sorted(taken.items()) for flight_id in ids[:per_stratum]]
+
+
+def readings_by_flight(artefact: Path, split: str, sha256: str) -> dict[str, dict[str, Any]]:
+    """The artefact's sentences for one split, keyed by ``flight_id``; refused if they were read
+    under a different vocabulary than the spec beside them."""
+    path = artefact / f"sentences_{split}.json"
+    if not path.exists():
+        raise SystemExit(f"{path} is missing: --split {split} is not in this artefact")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload["vocabulary_sha256"] != sha256:
+        raise SystemExit(
+            f"{path} was read under vocabulary {payload['vocabulary_sha256'][:12]}…, "
+            f"but the artefact's spec is {sha256[:12]}… — these are not one vocabulary"
+        )
+    return {item["flight_id"]: item for item in payload["flights"]}
+
+
+def _round(values: np.ndarray, digits: int) -> list[float]:
+    """A column at display precision — the view plots kilometres and degrees, and full float64
+    would triple the file for digits nothing draws."""
+    return [round(float(value), digits) for value in values]
+
+
+def observed_track(series) -> dict[str, Any]:
+    """The flight in the FINAL APPROACH COURSE's frame — the same `course_frame` the labeller
+    read the words from, so the charts and the words cannot disagree about where the aircraft
+    was. Geodetic columns are deliberately absent (see the module docstring)."""
+    frame = course_frame(series)
+    return {
+        "tS": _round(frame["t"] - frame["t"][0], 1),
+        "toGoM": _round(frame["to_go_m"], 1),
+        "crossM": _round(frame["cross_m"], 1),
+        "heightM": _round(frame["height_m"], 1),
+        "relCourseDeg": _round(frame["relative_course_deg"], 2),
+        "courseUnwrappedDeg": _round(frame["course_unwrapped_deg"], 2),
+        "groundSpeedMps": _round(frame["ground_speed_mps"], 2),
+        "established": [int(value) for value in frame["established"]],
+    }
+
+
+def _camel(instruction: dict[str, Any]) -> dict[str, Any]:
+    """`Instruction.to_dict()` with the frontend's key spelling. The VALUES are untouched: a
+    target is the plateau's own value, not a rounded one."""
+    return {
+        "kind": instruction["kind"], "word": instruction["word"], "target": instruction["target"],
+        "issuedS": instruction["issued_s"], "settledS": instruction["settled_s"],
+        "clamped": instruction["clamped"],
+    }
+
+
+def _absorbed(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": item["kind"], "startS": item["start_s"], "endS": item["end_s"],
+        "word": item["word"], "change": item["change"], "reason": item["reason"],
+    }
+
+
+def flight_payload(reading: dict[str, Any], series, stratum: str) -> dict[str, Any]:
+    """One flight as the frontend reads it. ``words`` is copied from the artefact UNCHANGED —
+    six columns in `INSTRUCTION_KINDS` order, which the reader checks positionally."""
+    return {
+        "flightKey": reading["flight_id"],
+        "callsign": reading["flight_id"].split("_", 1)[0],
+        "runway": reading["runway"],
+        "stratum": stratum,
+        "durationS": reading["duration_s"],
+        "establishedFromStart": reading["established_from_start"],
+        "sentence": {
+            "eventTimesS": reading["event_times_s"],
+            "words": reading["words"],
+            "durationClamped": reading["duration_clamped"],
+        },
+        "instructions": [_camel(item) for item in reading["instructions"]],
+        "absorbed": [_absorbed(item) for item in reading["absorbed"]],
+        "observed": observed_track(series),
+    }
+
+
+def update_index(directory: Path, airport: str, entry: dict[str, Any]) -> Path:
+    """Add or replace this set in the parent's manifest, keeping every other set. A manifest of
+    another schema is refused rather than rewritten — it is not ours to reinterpret."""
+    path = directory / INDEX_FILE
+    sets: list[dict[str, Any]] = []
+    if path.exists():
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("schema") != INDEX_SCHEMA:
+            raise SystemExit(f"{path} has schema {payload.get('schema')!r}, not {INDEX_SCHEMA!r}")
+        if payload.get("airport") != airport:
+            raise SystemExit(f"{path} is {payload.get('airport')!r}'s manifest, not {airport}'s")
+        sets = [item for item in payload["sets"] if item.get("id") != entry["id"]]
+    sets.append(entry)
+    sets.sort(key=lambda item: item["id"])
+    write_json_atomic(path, {"schema": INDEX_SCHEMA, "writtenUtc": utc_now(), "airport": airport, "sets": sets})
+    return path
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
+    parser.add_argument("--vocabulary", type=Path, required=True,
+                        help="the artefact DIRECTORY (or its instruction_vocabulary.json)")
+    parser.add_argument("--executor", type=Path, required=True, help="a checkpoint.pt: the door to the track data")
+    parser.add_argument("--out", type=Path, required=True, help="…/airports/<ICAO>/training/<set id>")
+    parser.add_argument("--flights", type=int, default=40, help="drawn half per stratum (default 40)")
+    parser.add_argument("--split", default="train", choices=("train", "val"))
+    parser.add_argument("--set-id", default=None, help="defaults to the output directory's name")
+    parser.add_argument("--title", default=None)
+    args = parser.parse_args(argv)
+
+    if args.flights % 2:
+        parser.error(f"--flights draws half per stratum: {args.flights} is odd")
+    artefact = args.vocabulary if args.vocabulary.is_absolute() else REPO_ROOT / args.vocabulary
+    if artefact.name == VOCABULARY_FILE:
+        artefact = artefact.parent
+    out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
+    if out.exists():
+        parser.error(f"{out} exists; a sample export is never overwritten")
+    training = out.parent                          # …/airports/<ICAO>/training/<set> → training
+    airport = training.parent.name                 # → <ICAO>
+    set_id = args.set_id or out.name
+    started = time.perf_counter()
+
+    vocabulary, runways, payload = load_vocabulary(artefact / VOCABULARY_FILE)
+    readings = readings_by_flight(artefact, args.split, vocabulary.sha256)
+    draw = drawn_flights(artefact, args.flights // 2)
+    missing = [flight_id for flight_id, _ in draw if flight_id not in readings]
+    if missing:
+        raise SystemExit(f"{len(missing)} drawn flight(s) are not in sentences_{args.split}.json (first {missing[0]!r})")
+
+    executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
+    checkpoint = load_checkpoint_payload(executor)
+    config = TSConfig.from_dict(checkpoint["config"])
+    print(f"  {len(draw)} flights drawn from the hand check ({args.flights // 2} per stratum); rebuilding their tracks", flush=True)
+    series = rebuild_cohort(checkpoint, config, [readings[flight_id]["dataset_id"] for flight_id, _ in draw])
+
+    flights = [flight_payload(readings[flight_id], item, stratum)
+               for (flight_id, stratum), item in zip(draw, series, strict=True)]
+    spec = payload["spec"]
+    out.mkdir(parents=True)
+    write_json_atomic(out / SAMPLE_FILE, {
+        "schema": SAMPLE_SCHEMA, "setId": set_id, "airport": airport, "writtenUtc": utc_now(),
+        "kinds": list(INSTRUCTION_KINDS),
+        "vocabulary": {
+            "sha256": vocabulary.sha256, "runwaySha256": runway_sha256(runways),
+            "readingRule": spec["reading_rule"], "tokenStepS": spec["token_step_s"],
+            "headingBinDeg": spec["heading_bin_deg"],
+            "altitudeBinM": spec["altitude_bin_m"], "altitudeMaxM": spec["altitude_max_m"],
+            "speedBinMps": spec["speed_bin_mps"], "speedMinMps": spec["speed_min_mps"],
+            "speedMaxMps": spec["speed_max_mps"],
+            "durationBinS": spec["duration_bin_s"], "durationMaxS": spec["duration_max_s"],
+            "runwayIdents": list(runways.idents),
+            "words": word_counts(vocabulary, runways),
+        },
+        "flights": flights,
+    })
+
+    entry = {
+        "id": set_id, "kind": KIND_READBACK,
+        "title": args.title or f"Instruction vocabulary · {spec['reading_rule']} · {args.split}",
+        "file": f"{out.name}/{SAMPLE_FILE}",
+        "vocabularySha256": vocabulary.sha256, "runwaySha256": runway_sha256(runways),
+        "readingRule": spec["reading_rule"], "flights": len(flights),
+        # the draw is stated, never implied: these ARE hand-check pages, and which ones
+        "cohort": {"split": args.split, "perStratum": args.flights // 2,
+                   "drawnFrom": "hand_check/index.csv (a prefix of the checked pages)"},
+        "source": {"artefact": str(artefact), "executorSha256": file_sha256(executor)},
+    }
+    index = update_index(training, airport, entry)
+    print(f"  wrote {out / SAMPLE_FILE} and {index} in {time.perf_counter() - started:.1f} s", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
