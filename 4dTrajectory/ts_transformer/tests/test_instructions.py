@@ -33,14 +33,14 @@ def flights():
 
 def test_the_bins_are_the_vocabulary_and_round_trip_through_the_artefact(tmp_path):
     v = ins.Vocabulary()
-    assert v.words == {"heading": 36, "altitude": 11, "speed": 21, "intercept": 3}
+    assert v.words == {"heading": 36, "altitude": 11, "speed": 23, "intercept": 3}
     assert v.heading_bin(0.0) == 0 and v.heading_bin(-4.9) == 0 and v.heading_bin(5.1) == 1 and v.heading_bin(180.0) == 18
     assert v.heading_bin(-90.0) == 27 and v.heading_bin(365.0) == 1 and v.heading_centre_deg(27) == pytest.approx(-90.0)
     assert v.altitude_bin(0.0) == (0, False) and v.altitude_bin(1100.0 * ins.FT) == (1, False)
     assert v.altitude_bin(-30.0) == (0, False) and v.altitude_bin(9000.0 * ins.FT) == (9, False) and v.altitude_bin(11000.0 * ins.FT) == (10, True)
-    assert v.speed_bin(120.0 * ins.KT) == (0, False) and v.speed_bin(174.0 * ins.KT) == (5, False) and v.speed_bin(300.0 * ins.KT) == (18, False)
-    assert v.speed_bin(330.0 * ins.KT) == (20, True)
-    assert v.speed_bin(100.0 * ins.KT) == (0, True) and v.speed_centre_mps(5) == pytest.approx(170.0 * ins.KT)
+    assert v.speed_bin(100.0 * ins.KT) == (0, False) and v.speed_bin(174.0 * ins.KT) == (7, False) and v.speed_bin(300.0 * ins.KT) == (20, False)
+    assert v.speed_bin(330.0 * ins.KT) == (22, True)
+    assert v.speed_bin(90.0 * ins.KT) == (0, True) and v.speed_centre_mps(7) == pytest.approx(170.0 * ins.KT)
     assert v.intercept_bin(-25.0) == 0 and v.intercept_bin(40.0) == 1 and v.intercept_bin(70.0) == 2
     path = ins.write_vocabulary(tmp_path, v, cohort_identity={"name": "x"}, counts={}, source={})
     loaded, payload = ins.load_vocabulary(path)
@@ -87,47 +87,58 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
     flats = ins.plateaus(speed, v.speed_tolerance_mps, 6)
     assert flats == [(0, 10), (10, 30), (30, 60)]
     to_word = lambda x: (v.speed_bin(x)[0], x, False)                                  # noqa: E731
-    words, absorbed = ins._manoeuvre_words("speed", times, speed, flats, 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, speed, flats, 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
     assert v.speed_bin(84.0)[0] == v.speed_bin(80.0)[0] != v.speed_bin(90.0)[0]          # one bin (163 and 156 kt)
     assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0, 0.0), (v.speed_bin(84.0)[0], 10.0, 10.0)]
-    assert absorbed == [ins.Absorbed("speed", 30.0, 30.0, words[1].word, 80.0 - 84.0, ins.ABSORBED_SMALL_CHANGE)]   # 4 m/s: under a bin
+    assert absorbed == [ins.Absorbed("speed", 30.0, 30.0, words[1].word, 80.0 - 84.0, ins.ABSORBED_SAME_WORD)]      # 4 m/s, same bin
     # the altitude's minimum change is half a bin: a 160 m step inside one bin is "same word", the next step a new word
     height = np.concatenate((np.full(20, 800.0), np.full(20, 960.0), np.full(20, 700.0)))
     to_height = lambda x: (v.altitude_bin(x)[0], x, False)                              # noqa: E731
     words, absorbed = ins._manoeuvre_words("altitude", times, height, ins.plateaus(height, v.height_tolerance_m, 6), 6,
-                                           v.height_tolerance_m, v.height_min_change_m, to_height)
+                                           v.height_tolerance_m, v.height_min_change_m, v.hold_min_s, to_height)
     assert [w.word for w in words] == [v.altitude_bin(800.0)[0], v.altitude_bin(700.0)[0]] and v.altitude_bin(960.0)[0] == words[0].word
     assert [(a.reason, a.change) for a in absorbed] == [(ins.ABSORBED_SAME_WORD, 160.0)]
-    ramp, dropped = ins._manoeuvre_words("speed", times, np.linspace(100.0, 70.0, 60), [], 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
+    ramp, dropped = ins._manoeuvre_words("speed", times, np.linspace(100.0, 70.0, 60), [], 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
     assert [(w.word, w.issued_s, w.settled_s) for w in ramp] == [(v.speed_bin(70.0)[0], 0.0, None)] and not dropped
     # a tail shorter than a plateau is unreadable: recorded, never a word
     tail = np.concatenate((np.full(56, 90.0), [85.0, 80.0, 75.0, 70.0]))
-    words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
     assert [w.word for w in words] == [v.speed_bin(90.0)[0]] and absorbed == [ins.Absorbed("speed", 56.0, 59.0, words[0].word, 70.0 - 90.0, ins.ABSORBED_SHORT_TAIL)]
-    # a pause on the way is part of the manoeuvre: 98 → 95 (absorbed) → 91 issues "91" where the aircraft LEFT 98
+    # an intermediate level that was held is where the next instruction was given: 98 → 95 (absorbed, held 20 rows)
+    # → 91 issues "91" where the aircraft left 95, not where it left 98 (v6 did that and put words 100–200 s early)
     staircase = np.concatenate((np.full(20, 98.0), np.full(20, 95.0), np.full(20, 91.0)))
     assert abs(91.0 - 98.0) >= v.speed_min_change_mps > abs(95.0 - 98.0) and abs(91.0 - 95.0) > v.speed_tolerance_mps
     words, absorbed = ins._manoeuvre_words("speed", times, staircase, ins.plateaus(staircase, v.speed_tolerance_mps, 6), 6,
-                                           v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
-    assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(98.0)[0], 0.0, 0.0), (v.speed_bin(91.0)[0], 20.0, 40.0)]
+                                           v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
+    assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(98.0)[0], 0.0, 0.0), (v.speed_bin(91.0)[0], 40.0, 40.0)]
     assert [(a.reason, a.start_s, a.end_s) for a in absorbed] == [(ins.ABSORBED_SMALL_CHANGE, 20.0, 20.0)]
     # a long tail settling back inside the word in force's bin (altitude: 1000 → 840 m, both bin 3, change ≥ half a bin): absorbed "same word"
     tail_back = np.concatenate((np.full(50, 1000.0), np.linspace(1000.0, 840.0, 10)))
     words, absorbed = ins._manoeuvre_words("altitude", times, tail_back, ins.plateaus(tail_back, v.height_tolerance_m, 6), 6,
-                                           v.height_tolerance_m, v.height_min_change_m, lambda x: (v.altitude_bin(x)[0], x, False))
+                                           v.height_tolerance_m, v.height_min_change_m, v.hold_min_s, lambda x: (v.altitude_bin(x)[0], x, False))
     assert [w.word for w in words] == [v.altitude_bin(1000.0)[0]] and v.altitude_bin(840.0)[0] == words[0].word
     assert [(a.reason, a.end_s) for a in absorbed] == [(ins.ABSORBED_SAME_WORD, 59.0)]
     long_tail = np.concatenate((np.full(50, 90.0), np.linspace(90.0, 70.0, 10)))
-    words, absorbed = ins._manoeuvre_words("speed", times, long_tail, ins.plateaus(long_tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, long_tail, ins.plateaus(long_tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
     assert [(w.word, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0), (v.speed_bin(70.0)[0], None)] and not absorbed
     # a wobble under one bin is absorbed even across a bin edge (a 4 m/s = 8 kt change is no speed call)
     wobble = np.concatenate((np.full(20, 88.5), np.full(20, 92.5), np.full(20, 88.5)))          # 172 / 180 kt: bins 5 and 6
     assert v.speed_bin(88.5)[0] != v.speed_bin(92.5)[0] and 4.0 < v.speed_min_change_mps
-    words, absorbed = ins._manoeuvre_words("speed", times, wobble, ins.plateaus(wobble, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
-    assert [w.word for w in words] == [v.speed_bin(88.5)[0]] and [a.reason for a in absorbed] == [ins.ABSORBED_SMALL_CHANGE] * 2
+    words, absorbed = ins._manoeuvre_words("speed", times, wobble, ins.plateaus(wobble, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
+    # out: the excursion is a transient under the minimum; the return reads as the word in force again
+    assert [w.word for w in words] == [v.speed_bin(88.5)[0]]
+    assert [a.reason for a in absorbed] == [ins.ABSORBED_SMALL_CHANGE, ins.ABSORBED_SAME_WORD]
     assert absorbed[0].start_s == 20.0 and absorbed[0].end_s == 20.0
+    # the SAME 4 m/s step, held past hold_min_s: a level the aircraft flew is an instruction whatever its size
+    step = np.concatenate((np.full(20, 88.5), np.full(41, 92.5)))
+    words, absorbed = ins._manoeuvre_words("speed", np.arange(61, dtype=float), step, ins.plateaus(step, v.speed_tolerance_mps, 6), 6,
+                                           v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
+    assert [w.word for w in words] == [v.speed_bin(88.5)[0], v.speed_bin(92.5)[0]] and not absorbed
+    assert 4.0 < v.speed_min_change_mps and v.hold_min_s == 40.0                     # under the minimum, but held 40 s
     with pytest.raises(ValueError, match="at least the kind's tolerance"):
         ins.Vocabulary(speed_min_change_mps=1.0)
+    with pytest.raises(ValueError, match="at least plateau_min_s"):
+        ins.Vocabulary(hold_min_s=10.0)
     assert ins.departure_row(np.array([5.0, 5.0, 5.4, 6.0, 6.8, 8.0]), 0, 5, 5.0, 2.0) == 4          # 6.8 is the first row past ±1
 
 
@@ -241,7 +252,7 @@ def test_the_intercept_is_the_last_heading_instruction_not_a_wiggle_after_the_ca
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert [i.word for i in headings] == [27, 0] and len(intercept) == 1
     assert intercept[0].issued_s == headings[1].issued_s and intercept[0].target == pytest.approx(90.0, abs=2.0) and intercept[0].word == 2
-    assert any(a.kind == "heading" and a.reason == ins.ABSORBED_SMALL_CHANGE for a in reading.absorbed)
+    assert any(a.kind == "heading" and a.reason == ins.ABSORBED_SAME_WORD for a in reading.absorbed)      # the wobble stays in bin 0
     straight = ins.read_instructions(_capture(item, t, np.zeros(len(t)), level, speed), v)
     assert not [i for i in straight.instructions if i.kind == "intercept"] and straight.established_from_start
 
@@ -373,7 +384,7 @@ def test_a_track_that_is_already_on_the_course_and_level_carries_only_its_starti
     reading = ins.read_instructions(straight, ins.Vocabulary())
     assert [i.kind for i in reading.instructions] == ["heading", "altitude", "speed"] and all(i.issued_s == 0.0 for i in reading.instructions)
     words = {i.kind: i.word for i in reading.instructions}
-    assert words == {"heading": 0, "altitude": 2, "speed": 3} and reading.established_from_start
+    assert words == {"heading": 0, "altitude": 2, "speed": 5} and reading.established_from_start          # 150 kt: (150 − 100) / 10
     assert (reading.words[:, 3] == ins.NO_INTERCEPT).all() and len(reading.positions_s) == 8      # 78 s at τ = 10 s
 
 

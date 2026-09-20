@@ -196,7 +196,7 @@ def test_the_hold_baseline_scores_a_sentence_that_never_changes_as_perfectly_hel
     with pytest.raises(ValueError, match="words are the counts"):
         pr.PriorConfig(words={"heading": 36}, type_count=1, vocabulary_sha256="x")
     with pytest.raises(ValueError, match="words are the counts"):                    # the kinds' ORDER is the contract
-        pr.PriorConfig(words={"altitude": 11, "heading": 36, "speed": 21, "intercept": 3}, type_count=1, vocabulary_sha256="x")
+        pr.PriorConfig(words={"altitude": 11, "heading": 36, "speed": 23, "intercept": 3}, type_count=1, vocabulary_sha256="x")
     assert pr.PriorConfig.from_dict(config.to_dict()) == config
 
 

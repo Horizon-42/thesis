@@ -29,14 +29,17 @@ tolerance — so the rate a "level" stretch may still drift at is (tolerance / 2
 longer plateau (a slow descent, or a pause inside one, is not a plateau). Everything between two
 plateaus is the manoeuvre that takes the aircraft from one to the next, whatever its rate: the
 instruction's TARGET is the plateau
-reached (its median), it is ISSUED where the signal departs the plateau of the word IN FORCE —
-the last row within half the tolerance of its value; an absorbed pause on the way is part of the
-same manoeuvre (the controller spoke a few seconds earlier; that gap is not recoverable and is
-stated) — and ``settled_s`` is where the new plateau begins. A plateau
+reached (its median), it is ISSUED where the signal departs the plateau it held just before the
+change — absorbed or not: an aircraft that held an intermediate level got its instruction when
+it left it — the last row within half the tolerance of that plateau's value (the controller spoke
+a few seconds earlier; that gap is not recoverable and is stated), and ``settled_s`` is where
+the new plateau begins. A plateau
 that moves the signal by less than the kind's minimum change (`HEADING_MIN_CHANGE_DEG`,
 `HEIGHT_MIN_CHANGE_M`, `SPEED_MIN_CHANGE_MPS`) from the word in force's value is not a new
-target (a wobble, whatever bin edge it crosses): absorbed, like a plateau that reads as the
-word already in force. A record that opens mid-manoeuvre carries that manoeuvre's target as its word
+target (a wobble, whatever bin edge it crosses): absorbed, like a plateau that reads as the word
+already in force — UNLESS the aircraft held it for `HOLD_MIN_S` or longer, which makes it an
+instruction whatever its size (the minimum change suppresses a transient, not a level that was
+flown). A record that opens mid-manoeuvre carries that manoeuvre's target as its word
 at t = 0; a manoeuvre that runs to the end of the record targets the final value (the last
 descent targets the threshold, bin 0); a record with no plateau at all is one manoeuvre to its
 end. A manoeuvre whose plateau reads as the word already in force is NOT an instruction — the
@@ -98,7 +101,7 @@ NO_INTERCEPT = -1
 
 #: D51 bins (settled 2026-09-20, module docstring). Heading: 10° over a full circle (36 words;
 #: bin 0 = the final approach course). Altitude: 1000 ft above the threshold, 0 … 10 000 ft
-#: (11 words). Speed: 10 kt of ground speed, 120 … 320 kt (21 words). A value outside a range is
+#: (11 words). Speed: 10 kt of ground speed, 100 … 320 kt (23 words). A value outside a range is
 #: clamped to the edge word and COUNTED. Intercept: ≤ 30° / 30–45° / beyond (3 words; the third
 #: holds what a procedure would not clear — 42 % of the cohort's captures read there).
 HEADING_BIN_DEG = 10.0
@@ -106,7 +109,7 @@ FT, KT = FT_M, KT_MS                      # geokit's exact definitions; every bi
 ALTITUDE_BIN_M = 1000.0 * FT
 ALTITUDE_MAX_M = 10000.0 * FT
 SPEED_BIN_MPS = 10.0 * KT
-SPEED_MIN_MPS = 120.0 * KT
+SPEED_MIN_MPS = 100.0 * KT
 SPEED_MAX_MPS = 320.0 * KT
 INTERCEPT_ANGLE_BINS_DEG = (30.0, 45.0)
 
@@ -124,6 +127,10 @@ PLATEAU_MIN_S = 20.0
 HEADING_MIN_CHANGE_DEG = HEADING_BIN_DEG / 2
 HEIGHT_MIN_CHANGE_M = ALTITUDE_BIN_M / 2
 SPEED_MIN_CHANGE_MPS = SPEED_BIN_MPS
+#: How long a plateau must be held for its own word to stand although the change is under the
+#: minimum: two plateaus, four sentence positions. Below it a level is a transient (bin-edge
+#: wander: a ±3 m/s oscillation straddling a boundary holds each leg ~20 s).
+HOLD_MIN_S = 2 * PLATEAU_MIN_S
 #: D54: the sentence's position interval (τ); 5 s is the ablation.
 TOKEN_STEP_S = 10.0
 #: The reading rule's version — part of the vocabulary's identity, because the words an executor
@@ -137,11 +144,18 @@ TOKEN_STEP_S = 10.0
 #: kind's minimum change from the word in force is absorbed (a wobble is not an instruction,
 #: whatever bin edge it crosses).
 #: v5: the drift over a plateau's opening window is its fitted slope × span; the intercept needs the
-#: aircraft NOT established before the manoeuvre (a straight-in never carries one). v6: a word is
-#: issued where the signal departs the plateau of the word IN FORCE — an absorbed pause on the way
-#: is part of the same manoeuvre (the third hand check: a word issued 35–60 s after the aircraft
-#: had left the value the word in force named).
-READING_RULE = "plateau-v6"
+#: aircraft NOT established before the manoeuvre (a straight-in never carries one). v6 (retired the
+#: same day): a word issued where the signal left the plateau of the word IN FORCE — wrong when the
+#: absorbed step was a long level (the fourth hand check: words 100–200 s before the manoeuvre).
+#: v7: a word is issued where the signal departs the plateau it held just before the change,
+#: absorbed or not — an aircraft that held an intermediate level got its instruction when it left
+#: it; and the speed floor is 100 kt (a 105 kt final clamped to the 120 kt edge word read as a
+#: full bin high). v8: the minimum change suppresses a TRANSIENT only — a plateau held
+#: `HOLD_MIN_S` or longer whose word differs is an instruction whatever its size (measured on the
+#: B cohort: 7 598 speed manoeuvres were being absorbed, median held 42 s, 4 032 of them in a
+#: different bin from the word in force — 0.6 real speed steps a flight the sentence never said,
+#: which is what made every earlier rule read as early or late around them).
+READING_RULE = "plateau-v8"
 
 VOCABULARY_SCHEMA = "ts-instruction-vocabulary-v1"
 VOCABULARY_FILE = "instruction_vocabulary.json"
@@ -172,6 +186,7 @@ class Vocabulary:
     heading_min_change_deg: float = HEADING_MIN_CHANGE_DEG
     height_min_change_m: float = HEIGHT_MIN_CHANGE_M
     speed_min_change_mps: float = SPEED_MIN_CHANGE_MPS
+    hold_min_s: float = HOLD_MIN_S
     token_step_s: float = TOKEN_STEP_S
     reading_rule: str = READING_RULE
 
@@ -207,6 +222,8 @@ class Vocabulary:
                                 ("speed_min_change_mps", self.speed_tolerance_mps)):
             if getattr(self, name) < tolerance:
                 raise ValueError(f"{name} is at least the kind's tolerance ({tolerance:g}): two plateaus closer than that are one")
+        if self.hold_min_s < self.plateau_min_s:
+            raise ValueError(f"hold_min_s ({self.hold_min_s:g}) is at least plateau_min_s ({self.plateau_min_s:g}): a shorter level is not a plateau")
         if self.token_step_s > self.plateau_min_s:
             raise ValueError("token_step_s is at most plateau_min_s: an instruction issued after the last position would fall out of the sentence")
 
@@ -489,16 +506,17 @@ def departure_row(signal: np.ndarray, start: int, end: int, value: float, tolera
 
 
 def _manoeuvre_words(kind: str, times: np.ndarray, signal: np.ndarray, flats: list[tuple[int, int]], rows: int,
-                     tolerance: float, min_change: float,
+                     tolerance: float, min_change: float, hold_min_s: float,
                      to_word: Callable[[float], tuple[int, float, bool]]) -> tuple[list[Instruction], list[Absorbed]]:
     """The instructions of one kind from its plateaus: the first plateau's value is the word at
     t = 0 (the record starts on it, or is already manoeuvring towards it); every later plateau
-    is a target issued where the signal departs the plateau before it (`departure_row`, with
-    ``tolerance``); a signal that leaves its last plateau for good at least ``rows`` before the
-    end targets the final value (a shorter tail is unreadable and recorded), and a signal with
-    no plateau is one manoeuvre to its end. A target moving the signal by less than
-    ``min_change`` from the word in force's value, or reading as the word already in force, is
-    recorded as `Absorbed`."""
+    is a target issued where the signal departs the plateau it held just before (`departure_row`,
+    with ``tolerance``); a signal that leaves its last plateau for good at least ``rows`` before
+    the end targets the final value (a shorter tail is unreadable and recorded), and a signal
+    with no plateau is one manoeuvre to its end. A target reading as the word already in force
+    is recorded as `Absorbed`, and so is one moving the signal by less than ``min_change`` —
+    unless the aircraft held it for ``hold_min_s`` or longer, which makes it an instruction
+    whatever its size."""
     n = len(times)
     out: list[Instruction] = []
     absorbed: list[Absorbed] = []
@@ -509,39 +527,34 @@ def _manoeuvre_words(kind: str, times: np.ndarray, signal: np.ndarray, flats: li
     word, target, clamped = to_word(values[0])
     out.append(Instruction(kind, word, target, float(times[0]), float(times[flats[0][0]]), clamped))
     in_force = 0                            # the plateau of the word in force (an absorbed pause does not move it)
-
-    def left_in_force() -> int:
-        """Where the signal departed the word in force's plateau: the manoeuvre's issue row."""
-        return departure_row(signal, *flats[in_force], values[in_force], tolerance)
-
     for index in range(1, len(flats)):
-        start = flats[index][0]
+        start, end = flats[index]
+        left = departure_row(signal, *flats[index - 1], values[index - 1], tolerance)   # the level it held just before
         word, target, clamped = to_word(values[index])
         change = float(values[index] - values[in_force])
-        if abs(change) < min_change:        # a pause on the way, or a wobble: the word in force continues
-            left = departure_row(signal, *flats[index - 1], values[index - 1], tolerance)
-            absorbed.append(Absorbed(kind, float(times[left]), float(times[start]), out[-1].word, change, ABSORBED_SMALL_CHANGE))
-        elif out[-1].word == word:          # the word in force already: the earlier instruction continues
-            absorbed.append(Absorbed(kind, float(times[left_in_force()]), float(times[start]), word, change))
+        held_s = float(times[min(end, n - 1)] - times[start])
+        if out[-1].word == word:            # the word in force already: the earlier instruction continues
+            absorbed.append(Absorbed(kind, float(times[left]), float(times[start]), word, change))
             in_force = index
-        else:
-            out.append(Instruction(kind, word, target, float(times[left_in_force()]), float(times[start]), clamped))
+        elif abs(change) < min_change and held_s < hold_min_s:      # a transient under the minimum: the word in force continues
+            absorbed.append(Absorbed(kind, float(times[left]), float(times[start]), out[-1].word, change, ABSORBED_SMALL_CHANGE))
+        else:                               # a decisive change, or a level the aircraft held: its own word
+            out.append(Instruction(kind, word, target, float(times[left]), float(times[start]), clamped))
             in_force = index
     last_start, last_end = flats[-1]
     if last_end < n:                        # the signal leaves its last plateau and never settles again
+        left = departure_row(signal, last_start, last_end, values[-1], tolerance)
         value = float(signal[-1])
         word, target, clamped = to_word(value)
         change = float(value - values[in_force])
         if n - last_end < rows:
-            left = departure_row(signal, last_start, last_end, values[-1], tolerance)
             absorbed.append(Absorbed(kind, float(times[left]), float(times[-1]), out[-1].word, change, ABSORBED_SHORT_TAIL))
         elif abs(change) < min_change:
-            left = departure_row(signal, last_start, last_end, values[-1], tolerance)
             absorbed.append(Absorbed(kind, float(times[left]), float(times[-1]), out[-1].word, change, ABSORBED_SMALL_CHANGE))
         elif out[-1].word == word:
-            absorbed.append(Absorbed(kind, float(times[left_in_force()]), float(times[-1]), word, change))
+            absorbed.append(Absorbed(kind, float(times[left]), float(times[-1]), word, change))
         else:
-            out.append(Instruction(kind, word, target, float(times[left_in_force()]), None, clamped))
+            out.append(Instruction(kind, word, target, float(times[left]), None, clamped))
     return out, absorbed
 
 
@@ -580,7 +593,8 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary) -> Reading:
     tolerances = {"heading": vocabulary.course_tolerance_deg, "altitude": vocabulary.height_tolerance_m, "speed": vocabulary.speed_tolerance_mps}
     min_changes = {"heading": vocabulary.heading_min_change_deg, "altitude": vocabulary.height_min_change_m, "speed": vocabulary.speed_min_change_mps}
     for kind, signal, to_word in (("heading", course, heading_word), ("altitude", height, altitude_word), ("speed", speed, speed_word)):
-        words, dropped = _manoeuvre_words(kind, times, signal, flats[kind], rows, tolerances[kind], min_changes[kind], to_word)
+        words, dropped = _manoeuvre_words(kind, times, signal, flats[kind], rows, tolerances[kind], min_changes[kind],
+                                          vocabulary.hold_min_s, to_word)
         instructions.extend(words)
         absorbed.extend(dropped)
     # the intercept: the last heading INSTRUCTION (a manoeuvre that changed the word — never an
@@ -661,7 +675,8 @@ def load_vocabulary(path: str | Path) -> tuple[Vocabulary, dict[str, Any]]:
 
 __all__ = [
     "ALTITUDE_BIN_M", "ALTITUDE_MAX_M", "COURSE_SMOOTHING_S", "COURSE_TOLERANCE_DEG", "HEADING_BIN_DEG", "HEIGHT_TOLERANCE_M",
-    "INSTRUCTION_KINDS", "INTERCEPT_ANGLE_BINS_DEG", "MANDATORY_KINDS", "NO_INTERCEPT", "PLATEAU_MIN_S", "READING_RULE", "SMOOTHING_S",
+    "HOLD_MIN_S", "INSTRUCTION_KINDS", "INTERCEPT_ANGLE_BINS_DEG", "MANDATORY_KINDS", "NO_INTERCEPT", "PLATEAU_MIN_S",
+    "READING_RULE", "SMOOTHING_S",
     "SPEED_BIN_MPS", "SPEED_MAX_MPS", "SPEED_MIN_MPS", "SPEED_TOLERANCE_MPS", "TOKEN_STEP_S", "VOCABULARY_FILE",
     "VOCABULARY_SCHEMA", "ABSORBED_SAME_WORD", "ABSORBED_SHORT_TAIL", "ABSORBED_SMALL_CHANGE", "Absorbed", "Instruction",
     "Reading", "Vocabulary", "course_frame", "departure_row", "load_vocabulary", "min_rows",
