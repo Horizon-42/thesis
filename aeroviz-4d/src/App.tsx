@@ -14,6 +14,7 @@
 import CesiumViewerComponent from "./components/CesiumViewer";
 import WorkbenchShell from "./components/WorkbenchShell";
 import TrainingSentenceBar from "./components/TrainingSentenceBar";
+import useTrainingTrackLayer from "./hooks/useTrainingTrackLayer";
 import WorkbenchLeftDock from "./components/WorkbenchLeftDock";
 import AirportLocalTerrainDemoPage from "./components/AirportLocalTerrainDemoPage";
 import ChartAnnotatedPage from "./components/ChartAnnotatedPage";
@@ -69,6 +70,7 @@ function FlightApp() {
     observedVisible,
   );
   const comparisonLayer = useComparisonTrajectoryLayer();
+  useTrainingTrackLayer();
   const activeTrajectoryLayer = trajectoryComparison ? comparisonLayer : observedLayer;
   const {
     observedVerdicts,

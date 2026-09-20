@@ -19,7 +19,9 @@ from ts_transformer.experiments.instruction_sample_export import (
 )
 import numpy as np
 
-from ts_transformer.experiments.instruction_sample_export import geometric_track
+from ts_transformer.experiments.instruction_sample_export import (
+    flown_sentence, geodetic_columns,
+)
 from ts_transformer.manoeuvre import instruction_kinematics
 from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, Vocabulary
 
@@ -164,7 +166,7 @@ def test_the_flown_sentence_is_the_artefacts_own_sentence_not_a_re_reading():
     words[1][columns["heading"]] = 9                     # +90° from 100 s
     words[0][columns["speed"]] = words[1][columns["speed"]] = 4
     words[1][columns["terminal"]] = 1
-    flown = geometric_track(_reading([0.0, 100.0], words), Vocabulary(), _frame())
+    _, flown = flown_sentence(_reading([0.0, 100.0], words), Vocabulary(), _frame())
 
     assert flown["tS"][0] == 0.0
     # it flies the course until the second event, then turns
@@ -212,9 +214,62 @@ def test_the_gap_is_reported_with_the_fraction_of_the_approach_it_covers():
     # threshold long before the observation ends and the comparison covers only part of it.
     frame = _frame()
     frame["to_go_m"] = 3000.0 - 70.0 * frame["t"]
-    flown = geometric_track(_reading([0.0], words), Vocabulary(), frame)
+    _, flown = flown_sentence(_reading([0.0], words), Vocabulary(), frame)
 
     assert flown["endReason"] == "crossed-threshold"
     assert flown["comparedS"] == pytest.approx(flown["tS"][-1], abs=2.0)
     assert flown["comparedFraction"] < 0.5          # a PARTIAL cover, which is the point
     assert flown["comparedFraction"] == pytest.approx(flown["comparedS"] / frame["t"][-1], abs=0.01)
+
+
+# ── the geodetic columns the 3D layer draws from (T6) ───────────────────────
+
+class _StubSeries:
+    """A series carrying only what `geodetic_columns` reads: the runway's inbound course, the
+    chart frame, and the target's place in it."""
+
+    def __init__(self, lat: float, lon: float, alt_m: float, psi_rad: float,
+                 threshold_above_anchor_m: float = 0.0):
+        from ts_transformer.data.coordinate_frames import AirportENUFrame
+
+        # `alt_m` is the AIRPORT reference elevation (the chart's vertical anchor); the
+        # threshold sits a little above or below it, and the chart's z counts from the anchor.
+        self.frame = AirportENUFrame(lat0=lat, lon0=lon, alt0=alt_m, code="TEST")
+        self.target_chart = (0.0, 0.0, threshold_above_anchor_m)
+        self.scenario = type("S", (), {"target": type("T", (), {"psi": psi_rad})()})()
+
+
+def test_the_geodetic_inverse_puts_the_threshold_back_where_it_is():
+    """`to_go = cross = 0` is the threshold, so it must invert to the frame's own anchor —
+    whatever the inbound course is."""
+    for psi in (0.0, math.radians(52.0), math.radians(-131.0), math.pi):
+        series = _StubSeries(35.8776, -78.7875, 132.0, psi)
+        columns = geodetic_columns(series, [0.0], [0.0], [0.0])
+        assert columns["lat"][0] == pytest.approx(35.8776, abs=1e-6)
+        assert columns["lon"][0] == pytest.approx(-78.7875, abs=1e-6)
+
+
+def test_a_point_down_the_course_lands_up_the_inbound_bearing():
+    """10 km still to fly on a due-EAST inbound course (math-ENU 0) is 10 km WEST of the
+    threshold: `to_go` counts what is left to fly, so the aircraft is behind it."""
+    series = _StubSeries(35.8776, -78.7875, 132.0, 0.0)
+    columns = geodetic_columns(series, [10000.0], [0.0], [0.0])
+    assert columns["lat"][0] == pytest.approx(35.8776, abs=1e-5)
+    assert columns["lon"][0] < -78.7875                       # west
+    # and 1 km right of the course is 1 km SOUTH of it
+    right = geodetic_columns(series, [0.0], [1000.0], [0.0])
+    assert right["lat"][0] < 35.8776
+
+
+def test_the_altitude_leaves_as_hae_not_msl():
+    """A record is MSL and Cesium reads the ellipsoid; at KRDU N = -33.5 m, so a line that
+    skipped this renders 33.5 m below its own terrain."""
+    from flight_scenarios.datum import geoid_undulation_m
+
+    series = _StubSeries(35.8776, -78.7875, 132.0, math.radians(52.0), threshold_above_anchor_m=3.0)
+    columns = geodetic_columns(series, [0.0], [0.0], [500.0])
+    undulation = geoid_undulation_m([35.8776], [-78.7875])[0]
+    assert undulation == pytest.approx(-33.5, abs=0.5)
+    # the anchor's elevation + the threshold above it + the height above the threshold, then
+    # the geoid — an altitude that forgot the anchor put touchdown below the ellipsoid
+    assert columns["altHaeM"][0] == pytest.approx(132.0 + 3.0 + 500.0 + undulation, abs=0.1)

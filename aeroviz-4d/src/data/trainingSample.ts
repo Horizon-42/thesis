@@ -186,6 +186,17 @@ export interface TrainingInstruction {
  * Every column has one value per row of `tS`, and the geodetic columns are
  * deliberately absent until T5/T6 puts the tracks in the 3D scene.
  */
+/**
+ * The geodetic columns BOTH tracks carry, for the 3D layer.
+ *
+ * THE ALTITUDE IS HAE, and the name says so. A record is MSL; Cesium reads
+ * `cartographicDegrees` altitude as metres above the WGS84 ellipsoid, so the
+ * exporter converts on the way out exactly as the CZML path does. A line that
+ * skipped it renders |N| — 33.5 m at KRDU — below its own terrain.
+ */
+export const TRAINING_GEODETIC_COLUMNS = ["lon", "lat", "altHaeM"] as const;
+export type TrainingGeodeticColumn = (typeof TRAINING_GEODETIC_COLUMNS)[number];
+
 export const TRAINING_OBSERVED_COLUMNS = [
   "toGoM",              // along the course, positive BEFORE the threshold
   "crossM",             // right of the course, positive
@@ -198,7 +209,9 @@ export const TRAINING_OBSERVED_COLUMNS = [
 
 export type TrainingObservedColumn = (typeof TRAINING_OBSERVED_COLUMNS)[number];
 
-export type TrainingObserved = { tS: number[] } & Record<TrainingObservedColumn, number[]>;
+export type TrainingObserved = { tS: number[] }
+  & Record<TrainingObservedColumn, number[]>
+  & Record<TrainingGeodeticColumn, number[]>;
 
 /**
  * The columns of the track flown FROM THE WORDS (`manoeuvre/instruction_kinematics.py`),
@@ -216,7 +229,9 @@ export type TrainingGeometricColumn = (typeof TRAINING_GEOMETRIC_COLUMNS)[number
 export const TRAINING_END_REASONS = ["crossed-threshold", "time-cap"] as const;
 export type TrainingEndReason = (typeof TRAINING_END_REASONS)[number];
 
-export type TrainingGeometric = { tS: number[] } & Record<TrainingGeometricColumn, number[]> & {
+export type TrainingGeometric = { tS: number[] }
+  & Record<TrainingGeometricColumn, number[]>
+  & Record<TrainingGeodeticColumn, number[]> & {
   endReason: TrainingEndReason;
   /** The horizontal distance from the threshold where it stopped — `hypot(toGo,
    *  cross)`, so a track that crosses the plane two kilometres to the side
@@ -672,7 +687,7 @@ function parseObserved(raw: unknown, durationS: number, where: string): Parsed<T
   }
 
   const columns: Record<string, number[]> = { tS };
-  for (const column of TRAINING_OBSERVED_COLUMNS) {
+  for (const column of [...TRAINING_OBSERVED_COLUMNS, ...TRAINING_GEODETIC_COLUMNS]) {
     const values = numberArray(raw[column]);
     if (values === null) {
       return { ok: false, problem: `${where}.observed.${column} is missing or not a list of numbers` };
@@ -699,7 +714,7 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
     return { ok: false, problem: `${where}.geometric.tS is missing or shorter than two steps` };
   }
   const columns: Record<string, number[]> = { tS };
-  for (const column of TRAINING_GEOMETRIC_COLUMNS) {
+  for (const column of [...TRAINING_GEOMETRIC_COLUMNS, ...TRAINING_GEODETIC_COLUMNS]) {
     const values = numberArray(raw[column]);
     if (values === null || values.length !== tS.length) {
       return {
@@ -735,7 +750,9 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
   return {
     ok: true,
     value: {
-      ...(columns as { tS: number[] } & Record<TrainingGeometricColumn, number[]>),
+      ...(columns as { tS: number[] }
+        & Record<TrainingGeometricColumn, number[]>
+        & Record<TrainingGeodeticColumn, number[]>),
       endReason: endReason as TrainingEndReason,
       finalGapM: numbers.finalGapM,
       meanGapM: numbers.meanGapM,

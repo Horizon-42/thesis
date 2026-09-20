@@ -24,9 +24,8 @@ Written under ``--out`` (refused if it exists), plus an entry in the parent's ``
                          and the `geometric` track flown from the words alone
     ../index.json        the manifest the frontend lists; this set added or replaced in place
 
-The tracks' geodetic columns (lon/lat/alt) are NOT here: they belong to the 3D layer, which is a
-later step of the design (T6), and they arrive with a vertical-datum conversion of their own —
-records are MSL and Cesium reads the ellipsoid.
+Both tracks carry geodetic columns for the 3D layer, and their altitude is HAE: a record is MSL,
+Cesium reads the ellipsoid, and the conversion belongs at this boundary (`geodetic_columns`).
 """
 
 from __future__ import annotations
@@ -34,11 +33,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 import time
 from typing import Any
 
 import numpy as np
+
+from flight_scenarios.datum import geoid_undulation_m
 
 from ts_transformer.config import TSConfig
 from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
@@ -99,11 +101,59 @@ def _round(values: np.ndarray, digits: int) -> list[float]:
     return [round(float(value), digits) for value in values]
 
 
-def observed_track(frame: dict[str, Any]) -> dict[str, Any]:
+def geodetic_columns(series, to_go_m, cross_m, height_m) -> dict[str, list[float]]:
+    """A course-frame track as ``(lon, lat, altHaeM)`` — the 3D layer's input.
+
+    THE VERTICAL DATUM IS CONVERTED HERE, on the way out, exactly as the CZML exporter does
+    it: a record's altitude is MSL (observed ADS-B is ellipsoidal and is converted once at the
+    `flight_scenarios` seam), while Cesium reads `cartographicDegrees` as metres above the
+    WGS84 ELLIPSOID. Skip it and every line renders |N| — 33.5 m at KRDU — below its own
+    terrain. The field is named `altHaeM` so nothing downstream has to remember which it got.
+
+    The horizontal inverse is `course_frame_rows`' own algebra read backwards: with
+    ``to_go = -(e·cosψ + n·sinψ)`` and ``cross = e·sinψ - n·cosψ``, the offsets from the
+    threshold are ``e = -to_go·cosψ + cross·sinψ`` and ``n = -to_go·sinψ - cross·cosψ``.
+    """
+    psi = float(series.scenario.target.psi)
+    cosine, sine = math.cos(psi), math.sin(psi)
+    to_go = np.asarray(to_go_m, dtype=np.float64)
+    cross = np.asarray(cross_m, dtype=np.float64)
+    east = -to_go * cosine + cross * sine
+    north = -to_go * sine - cross * cosine
+
+    lons: list[float] = []
+    lats: list[float] = []
+    for east_m, north_m in zip(east, north):
+        first, second = series.frame.from_world_horizontal(float(east_m), float(north_m))
+        lat, lon = series.frame.latlon_from_horizontal(
+            series.target_chart[0] + first, series.target_chart[1] + second
+        )
+        lons.append(lon)
+        lats.append(lat)
+
+    # The chart's vertical axis is measured from the FRAME's anchor, not from sea level
+    # (`channels.py`: u = altitude - frame.alt0, and its inverse adds alt0 back). So an
+    # absolute MSL altitude is the anchor's elevation, plus the threshold's height above it,
+    # plus the height above the threshold. Leaving the anchor out put touchdown at HAE -4 m.
+    msl = (
+        float(series.frame.alt0)
+        + float(series.target_chart[2])
+        + np.asarray(height_m, dtype=np.float64)
+    )
+    hae = msl + np.asarray(geoid_undulation_m(lats, lons), dtype=np.float64)
+    return {
+        "lon": [round(value, 7) for value in lons],
+        "lat": [round(value, 7) for value in lats],
+        "altHaeM": [round(float(value), 1) for value in hae],
+    }
+
+
+def observed_track(frame: dict[str, Any], series) -> dict[str, Any]:
     """The flight in the FINAL APPROACH COURSE's frame — the same `course_frame` the labeller
     read the words from, so the charts and the words cannot disagree about where the aircraft
-    was. Geodetic columns are deliberately absent (see the module docstring)."""
+    was — plus the geodetic columns the 3D layer needs."""
     return {
+        **geodetic_columns(series, frame["to_go_m"], frame["cross_m"], frame["height_m"]),
         "tS": _round(frame["t"] - frame["t"][0], 1),
         "toGoM": _round(frame["to_go_m"], 1),
         "crossM": _round(frame["cross_m"], 1),
@@ -132,9 +182,9 @@ def _absorbed(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def geometric_track(
+def flown_sentence(
     reading: dict[str, Any], vocabulary: Vocabulary, frame: dict[str, Any],
-) -> dict[str, Any]:
+) -> tuple[kinematics.GeometricTrack, dict[str, Any]]:
     """What the words alone say, flown by `instruction_kinematics` and measured against the
     aircraft that was actually there.
 
@@ -161,7 +211,15 @@ def geometric_track(
     track = kinematics.fly(
         rebuilt, vocabulary, kinematics.Start.from_course_frame(frame), observed_s=rebuilt_s,
     )
-    return {**track.to_dict(), **kinematics.gap_to_observed(track, frame)}
+    return track, {**track.to_dict(), **kinematics.gap_to_observed(track, frame)}
+
+
+def geometric_track(
+    reading: dict[str, Any], vocabulary: Vocabulary, frame: dict[str, Any], series,
+) -> dict[str, Any]:
+    """The flown sentence with the geodetic columns the 3D layer draws it from."""
+    track, payload = flown_sentence(reading, vocabulary, frame)
+    return {**payload, **geodetic_columns(series, track.to_go_m, track.cross_m, track.height_m)}
 
 
 def flight_payload(
@@ -184,8 +242,8 @@ def flight_payload(
         },
         "instructions": [_camel(item) for item in reading["instructions"]],
         "absorbed": [_absorbed(item) for item in reading["absorbed"]],
-        "observed": observed_track(frame),
-        "geometric": geometric_track(reading, vocabulary, frame),
+        "observed": observed_track(frame, series),
+        "geometric": geometric_track(reading, vocabulary, frame, series),
     }
 
 

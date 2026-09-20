@@ -135,6 +135,38 @@ function wrap180(degrees: number): number {
 
 export const MOCK_TRACK_S = 262;
 
+/** KRDU's own numbers, so the mock lands where the real export does. */
+const THRESHOLD_LON = -78.7875;
+const THRESHOLD_LAT = 35.8776;
+const THRESHOLD_HAE_M = 100.0;
+const COURSE_RAD = (52 * Math.PI) / 180;
+
+/**
+ * The geodetic columns, derived from the same anchors as the frame columns rather
+ * than typed out: a flat-earth inverse of `course_frame_rows` at KRDU's latitude,
+ * which is all a fixture needs to be the right SHAPE and roughly the right place.
+ */
+function geodetic(
+  tS: number[],
+  toGo: Array<[number, number]>,
+  cross: Array<[number, number]>,
+  height: Array<[number, number]>,
+) {
+  const lon: number[] = [];
+  const lat: number[] = [];
+  const altHaeM: number[] = [];
+  for (const t of tS) {
+    const d = ramp(toGo, t);
+    const x = ramp(cross, t);
+    const east = -d * Math.cos(COURSE_RAD) + x * Math.sin(COURSE_RAD);
+    const north = -d * Math.sin(COURSE_RAD) - x * Math.cos(COURSE_RAD);
+    lat.push(THRESHOLD_LAT + north / 111320);
+    lon.push(THRESHOLD_LON + east / (111320 * Math.cos((THRESHOLD_LAT * Math.PI) / 180)));
+    altHaeM.push(THRESHOLD_HAE_M + ramp(height, t));
+  }
+  return { lon, lat, altHaeM };
+}
+
 export const MOCK_OBSERVED = (() => {
   const tS: number[] = [];
   for (let t = 0; t <= MOCK_TRACK_S; t += ROW_STEP_S) tS.push(t);
@@ -148,6 +180,7 @@ export const MOCK_OBSERVED = (() => {
     courseUnwrappedDeg: unwrapped,
     groundSpeedMps: tS.map((t) => ramp([[0, 159], [58, 139], [126, 118], [214, 98], [MOCK_TRACK_S, 70]], t)),
     established: tS.map((t) => (t >= 202 ? 1 : 0)),
+    ...geodetic(tS, [[0, 25000], [MOCK_TRACK_S, 0]], [[0, 6400], [94, 4200], [148, 1500], [202, 0], [MOCK_TRACK_S, 0]], [[0, 3050], [102, 2120], [162, 1210], [MOCK_TRACK_S, 0]]),
   };
 })();
 
@@ -169,6 +202,7 @@ export const MOCK_GEOMETRIC = (() => {
     heightM: tS.map((t) => ramp([[0, 3050], [110, 2120], [180, 1210], [300, 0]], t)),
     groundSpeedMps: tS.map((t) => ramp([[0, 159], [60, 139], [130, 118], [220, 98], [300, 72]], t)),
     relCourseDeg: course,
+    ...geodetic(tS, [[0, 25000], [300, 400]], [[0, 6400], [102, 4600], [156, 2600], [210, 1500], [300, 1480]], [[0, 3050], [110, 2120], [180, 1210], [300, 0]]),
     endReason: "crossed-threshold",
     finalGapM: 1480.5,
     meanGapM: 980.2,
