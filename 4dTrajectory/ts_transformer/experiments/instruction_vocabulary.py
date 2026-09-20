@@ -75,8 +75,10 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
         "altitude_m": [abs(i.target - vocabulary.altitude_centre_m(i.word)) for i in unclamped if i.kind == "altitude"],
         "speed_mps": [abs(i.target - vocabulary.speed_centre_mps(i.word)) for i in unclamped if i.kind == "speed"],
     }
-    positions = sum(len(r.positions_s) for r in readings)
-    changes = sum(int((np.diff(r.words[:, : len(MANDATORY_KINDS)], axis=0) != 0).any(axis=1).sum()) for r in readings)
+    events = sum(len(r.event_times_s) for r in readings)
+    # every event IS a change now (D52) — what is worth counting is how many, and the gaps
+    gaps = [float(g) for r in readings for g in np.diff(r.event_times_s)]
+    duration_clamped = sum(r.duration_clamped for r in readings)
     reasons = (ABSORBED_SAME_WORD, ABSORBED_SMALL_CHANGE, ABSORBED_SHORT_TAIL)
     absorbed = {kind: {reason: sum(1 for r in readings for a in r.absorbed if a.kind == kind and a.reason == reason) for reason in reasons}
                 for kind in MANDATORY_KINDS}
@@ -91,9 +93,9 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
         "target_to_bin_centre_p50": {k: _p50(v) for k, v in residuals.items()},
         "target_to_bin_centre_p95": {k: _p95(v) for k, v in residuals.items()},
         "absorbed": absorbed, "absorbed_heading_orbits": orbits,
-        "intercept_share": float(np.mean([any(i.kind == "intercept" for i in r.instructions) for r in readings])),
         "established_from_start_share": float(np.mean([r.established_from_start for r in readings])),
-        "positions": positions, "positions_with_a_change": changes,
+        "events": events, "events_per_flight_p50": _p50([len(r.event_times_s) for r in readings]),
+        "gap_s_p50": _p50(gaps), "gap_s_p95": _p95(gaps), "duration_clamped": duration_clamped,
         "duration_s_p50": _p50([r.duration_s for r in readings]),
     }
 
@@ -102,12 +104,13 @@ def render(summary: dict[str, dict[str, Any]], vocabulary: Vocabulary, runway_vo
     # the runway's classes are the cohort's, not the spec's (D62): its count comes from the
     # runway vocabulary, everything else from the hashed spec
     words = word_counts(vocabulary, runway_vocabulary)
-    lines = [f"instruction vocabulary · words {words} · τ {vocabulary.token_step_s:g} s · sha {vocabulary.sha256[:12]}… "
+    lines = [f"instruction vocabulary · words {words} · event sequence (D52) · sha {vocabulary.sha256[:12]}… "
              f"· runways {', '.join(runway_vocabulary.idents)}", ""]
     for split, s in summary.items():
-        lines.append(f"{split}: {s['flights']} flights, duration p50 {s['duration_s_p50']:.0f} s, positions {s['positions']} "
-                     f"({s['positions_with_a_change']} with a change), intercept on {s['intercept_share']:.2f} (a capture from under "
-                     f"{vocabulary.heading_min_change_deg:g}° carries none by construction), "
+        lines.append(f"{split}: {s['flights']} flights, duration p50 {s['duration_s_p50']:.0f} s, "
+                     f"{s['events']} events (p50 {s['events_per_flight_p50']:.0f} a flight; gap p50 "
+                     f"{s['gap_s_p50']:.0f} s, p95 {s['gap_s_p95']:.0f} s, {s['duration_clamped']} gaps clamped "
+                     f"at the {vocabulary.duration_max_s:.0f} s ceiling), "
                      f"established from the start {s['established_from_start_share']:.2f}")
         lines.append("  instructions / flight p50 (p95): " + ", ".join(
             f"{k} {s['instructions_per_flight_p50'][k]:.0f} ({s['instructions_per_flight_p95'][k]:.0f})" for k in INSTRUCTION_KINDS))
@@ -174,10 +177,10 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
     steps(axes[0, 1], frame["course_unwrapped_deg"], "heading", vocabulary.heading_centre_deg, "deg rel. course, unwrapped", period=360.0)
     steps(axes[1, 0], frame["height_m"], "altitude", vocabulary.altitude_centre_m, "m above threshold")
     steps(axes[1, 1], frame["ground_speed_mps"], "speed", vocabulary.speed_centre_mps, "m/s ground")
-    for item in reading.instructions:
-        if item.kind == "intercept":
-            axes[0, 1].axvline(item.issued_s, color="C4", lw=1.5, ls="--", label=f"intercept w{item.word} ({item.target:.0f}°)")
-            axes[0, 1].legend(loc="best", fontsize=8)
+    # D72: mark where the sentence says it lands — the terminal word, on every panel's clock
+    for ax in (axes[0, 1], axes[1, 0], axes[1, 1]):
+        ax.axvline(reading.event_times_s[-1], color="C4", lw=1.2, ls="--", label="landed")
+    axes[0, 1].legend(loc="best", fontsize=8)
     for ax in (axes[0, 1], axes[1, 0], axes[1, 1]):
         ax.set_xlabel("s from the record's start")
     fig.tight_layout()
@@ -201,12 +204,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{out} exists; a vocabulary readout is never overwritten")
     started = time.perf_counter()
     overrides: dict[str, Any] = {"token_step_s": args.token_step_s}
-    settable = [f.name for f in fields(Vocabulary) if f.name not in ("reading_rule", "established_cross_track_m", "established_track_tolerance_deg")]
+    settable = [f.name for f in fields(Vocabulary) if f.name != "reading_rule"]
     for item in args.set:
         name, _, value = item.partition("=")
         if name not in settable or not value:
             parser.error(f"--set {item!r}: not a settable Vocabulary field (one of {settable})")
-        overrides[name] = tuple(float(v) for v in value.split(",")) if name == "intercept_angle_bins_deg" else float(value)
+        overrides[name] = float(value)
     vocabulary = Vocabulary(**overrides)
     if args.hand_check % 2:
         parser.error(f"--hand-check draws half per stratum: {args.hand_check} is odd")
@@ -270,16 +273,15 @@ def main(argv: list[str] | None = None) -> int:
         with (folder / "index.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["file", "flight_id", "stratum", "tortuosity", "established_at_anchor",
-                             *(f"n_{kind}" for kind in MANDATORY_KINDS), "intercept_word", "runway", "n_absorbed",
-                             "sentence (heading/altitude/speed/intercept/runway per position)", "verdict (一致 / 漏读 / 误读)", "note"])
+                             *(f"n_{kind}" for kind in MANDATORY_KINDS), "runway", "n_events", "n_absorbed",
+                             "sentence (heading/altitude/speed/runway/duration/terminal per event)", "verdict (一致 / 漏读 / 误读)", "note"])
             for k, (stratum, index) in enumerate(chosen):
                 item, reading, d = train[index], readings["train"][index], difficulty[index]
                 name = f"{k:03d}_{reading.flight_id}.png"
                 hand_check_figure(item, reading, vocabulary, folder / name)
-                intercept = next((i.word for i in reading.instructions if i.kind == "intercept"), NO_INTERCEPT)
                 writer.writerow([name, reading.flight_id, STRATUM_SHORT[stratum], f"{d.route_tortuosity:.2f}", d.established_at_anchor,
                                  *(sum(1 for i in reading.instructions if i.kind == kind) for kind in MANDATORY_KINDS),
-                                 intercept, reading.runway, len(reading.absorbed),
+                                 reading.runway, len(reading.event_times_s), len(reading.absorbed),
                                  " ".join("/".join(str(w) for w in row) for row in reading.words), "", ""])
         draw = {"pages": len(chosen), "per_stratum": half, "seed": args.seed, "anchor": anchor, "split": "train",
                 "pools": {STRATUM_SHORT[name]: len(pool) for name, pool in pools.items()},

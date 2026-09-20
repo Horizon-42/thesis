@@ -51,10 +51,24 @@ def world():
     return vocabulary, series, readings, sequences, types, config
 
 
+def _prefix(sequence, count: int):
+    """The first ``count`` events of a sentence, as a legal prefix.
+
+    Slicing alone is illegal since D72: the sliced last event would still say `landed` while the
+    prefix does not end the flight. A real caller has to set both, so the helper does.
+    """
+    terminal = ins.INSTRUCTION_KINDS.index("terminal")
+    words = sequence.words[:count].copy()
+    words[-1, terminal] = ins.TERMINAL_CONTINUE
+    return sq.InstructionSequence(**{**sequence.__dict__, "positions_s": sequence.positions_s[:count],
+                                     "words": words, "states": sequence.states[:count],
+                                     "targets": sequence.targets[:count], "ends_at_landing": False})
+
+
 def test_the_truth_sequence_carries_the_words_the_states_and_the_next_words(world):
     _vocabulary, series, readings, sequences, _types, _config = world
     item, reading, sequence = series[0], readings[0], sequences[0]
-    assert sequence.length == len(reading.positions_s) and sequence.words.shape == (sequence.length, 5)   # five kinds since D62
+    assert sequence.length == len(reading.event_times_s) and sequence.words.shape == (sequence.length, 6)   # five kinds since D62
     assert np.array_equal(sequence.targets[:-1], reading.words[1:]) and np.array_equal(sequence.targets[-1], reading.words[-1])
     assert sequence.states.shape == (sequence.length, len(sq.STATE_TOKEN_FEATURES))
     origin = sq.airport_origin(item)          # D66: the AIRPORT reference, not the threshold
@@ -73,45 +87,79 @@ def test_the_truth_sequence_carries_the_words_the_states_and_the_next_words(worl
         sq.flight_sequence(series[1], reading)
 
 
-def test_a_rolled_sequence_reads_flown_states_and_targets_the_truth_s_next_words(world):
+def test_a_rolled_sequence_is_matched_by_TIME_and_takes_its_ending_from_its_own_terminal_word(world):
+    """D55's shape, and the two defects a review found in its first version.
+
+    The loop chooses its own gaps — that is what the duration word is for — so its events are NOT
+    at the truth's instants and matching targets by INDEX would be wrong. And its ending is its own
+    terminal word, not how many events it happened to say.
+    """
     _vocabulary, series, readings, sequences, _types, _config = world
     item, reading, truth = series[0], readings[0], sequences[0]
-    said = truth.words[:5]
-    rolled = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, said, sq.airport_origin(item))
-    assert rolled.length == 5 and np.array_equal(rolled.words, said) and np.allclose(rolled.states, truth.states[:5])
-    assert np.array_equal(rolled.targets, truth.targets[:5])                    # on the truth's own path the targets agree
-    assert not rolled.ends_at_landing                                           # a prefix: its last position has a next
-    whole = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, truth.words, sq.airport_origin(item))
-    assert whole.ends_at_landing
-    with pytest.raises(ValueError, match="a rolled prefix covers"):
-        sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, np.zeros((truth.length + 1, 5), dtype=np.int64), item.target_chart)
+    origin = sq.airport_origin(item)
+    terminal = ins.INSTRUCTION_KINDS.index("terminal")
+    half = max(1, truth.length // 2)
+
+    # flown at the truth's own instants and stopping short: the prefix continues, and each target
+    # is the truth's NEXT event
+    said = truth.words[:half].copy()
+    said[-1, terminal] = ins.TERMINAL_CONTINUE
+    times = truth.positions_s[:half]
+    rolled = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, said, times, origin)
+    assert rolled.length == half and not rolled.ends_at_landing
+    assert np.array_equal(rolled.targets, reading.words[1 : half + 1])
+
+    # the same words said LATER than the truth said them: the targets must follow the TIME, so a
+    # said event after the truth's k-th event targets the (k+1)-th, not the index-matched one
+    if truth.length > 2:                     # needs a next event to move past
+        shifted = times + float(np.diff(reading.event_times_s).max())
+        shifted = np.minimum(shifted, reading.event_times_s[-1])
+        late = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values, said, shifted, origin)
+        assert not np.array_equal(late.targets, rolled.targets)
+
+    # the whole sentence, ending on its own terminal word
+    whole = sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values,
+                               truth.words, truth.positions_s, origin)
+    assert whole.ends_at_landing and int(truth.words[-1, terminal]) == ins.TERMINAL_LANDED
+
+    # `rolled_sequence` DERIVES the ending from the terminal word, so it cannot disagree; the
+    # guard is on the type itself, for anyone building one directly (D72: ONE answer)
+    lying = truth.words.copy()
+    lying[-1, terminal] = ins.TERMINAL_CONTINUE
+    with pytest.raises(ValueError, match="D72 made these ONE answer"):
+        sq.InstructionSequence(**{**truth.__dict__, "words": lying})
+    with pytest.raises(ValueError, match="strictly increasing"):
+        sq.rolled_sequence(truth, reading, item.supervision_times, item.supervision_values,
+                           truth.words[:2], np.array([5.0, 5.0]), origin)
     with pytest.raises(ValueError, match="is not sequence"):
-        sq.rolled_sequence(truth, readings[1], item.supervision_times, item.supervision_values, said, sq.airport_origin(item))
+        sq.rolled_sequence(truth, readings[1], item.supervision_times, item.supervision_values, said, times, origin)
 
 
-def test_the_batch_shifts_the_intercept_and_marks_the_next_and_the_landing(world):
+def test_the_batch_marks_which_events_have_a_next_and_where_the_sentence_lands(world):
     _vocabulary, _series, _readings, sequences, types, config = world
     batch = pr.collate(sequences[:2], config, types)
     longest = max(item.length for item in sequences[:2])
-    assert batch.words.shape == (2, longest, 5) and batch.targets.shape == (2, longest, 5) and batch.states.shape == (2, longest, 6)
+    assert batch.words.shape == (2, longest, 6) and batch.targets.shape == (2, longest, 6) and batch.states.shape == (2, longest, 6)
     for row, item in enumerate(sequences[:2]):
         n = item.length
         assert bool(batch.valid[row, :n].all()) and not bool(batch.valid[row, n:].any())
-        assert batch.words[row, :n, 3].min() >= 0                                     # NO_INTERCEPT → row 0
+        assert batch.words[row, :n].min() >= 0        # D73: no column carries a 'nothing said' value
         assert np.array_equal(batch.words[row, :n].numpy(), pr.shift_words(item.words))
         assert np.array_equal(pr.unshift_words(batch.words[row, :n].numpy()), item.words)
         # the RUNWAY column is never shifted: its word is already ≥ 0 and indexes its table
-        assert np.array_equal(batch.words[row, :n, 4].numpy(), item.words[:, 4])
-        assert batch.words[row, :n, 4].max() < config.classes("runway")
-        assert bool((batch.targets[row, n - 1] == pr.IGNORE).all()) and batch.landed[row, n - 1] == 1.0 and batch.landed[row, : n - 1].sum() == 0
+        assert np.array_equal(batch.words[row, :n, 3].numpy(), item.words[:, 3])
+        assert batch.words[row, :n, 3].max() < config.classes("runway")
+        # D72: the last event of a landing sentence has no target — its own terminal word says it lands
+        assert bool((batch.targets[row, n - 1] == pr.IGNORE).all())
+        # D72: the landing is the last event's own terminal word, not a separate label
+        assert int(item.words[-1, ins.INSTRUCTION_KINDS.index("terminal")]) == ins.TERMINAL_LANDED
         assert bool(batch.has_next[row, : n - 1].all()) and not bool(batch.has_next[row, n - 1 :].any())
     assert batch.type_index.shape == (2,)      # D66: no runway-course context token any more
     assert not hasattr(batch, "runway"), "the runway course must not come back as context"
     # a rolled PREFIX: its last position has a next word and no landing
-    prefix = sq.InstructionSequence(**{**sequences[0].__dict__, "positions_s": sequences[0].positions_s[:4], "words": sequences[0].words[:4],
-                                       "states": sequences[0].states[:4], "targets": sequences[0].targets[:4], "ends_at_landing": False})
+    prefix = _prefix(sequences[0], min(4, sequences[0].length))
     batch = pr.collate([prefix], config, types)
-    assert bool(batch.has_next[0].all()) and batch.landed.sum() == 0 and np.array_equal(batch.targets[0].numpy(), pr.shift_words(prefix.targets))
+    assert bool(batch.has_next[0].all()) and np.array_equal(batch.targets[0].numpy(), pr.shift_words(prefix.targets))
     with pytest.raises(ValueError, match="the prior holds"):
         pr.collate(sequences[:1], pr.PriorConfig(**{**config.to_dict(), "max_positions": 3}), types)
 
@@ -124,28 +172,28 @@ def test_the_model_is_causal_and_factorised_and_the_loss_has_one_term_per_kind(w
     output = model(batch)
     for kind in ins.INSTRUCTION_KINDS:
         assert output.logits[kind].shape == (2, batch.words.shape[1], config.classes(kind))
-    assert output.landed_logit.shape == (2, batch.words.shape[1])
     terms = model.loss(output, batch)
-    assert set(terms) == {*ins.INSTRUCTION_KINDS, "landed", "next", "total"} and torch.isfinite(terms["total"])
+    assert set(terms) == {*ins.INSTRUCTION_KINDS, "next", "total"} and torch.isfinite(terms["total"])
     assert torch.isclose(terms["next"], sum(terms[k] for k in ins.INSTRUCTION_KINDS))
-    # causality: perturbing the input at position 4 leaves every logit before it unchanged
+    # causality: perturbing the input at the LAST event leaves every logit before it unchanged
     words = batch.words.clone()
-    words[:, 4, 0] = (words[:, 4, 0] + 1) % config.classes("heading")
-    later = model(pr.PriorBatch(words, batch.states, batch.valid, batch.targets, batch.landed, batch.type_index))
-    assert torch.allclose(later.logits["speed"][:, :4], output.logits["speed"][:, :4], atol=1e-5)
-    assert not torch.allclose(later.logits["speed"][:, 4:6], output.logits["speed"][:, 4:6], atol=1e-5)
+    last = words.shape[1] - 1
+    words[:, last, 0] = (words[:, last, 0] + 1) % config.classes("heading")
+    later = model(pr.PriorBatch(words, batch.states, batch.valid, batch.targets, batch.type_index))
+    assert torch.allclose(later.logits["speed"][:, :last], output.logits["speed"][:, :last], atol=1e-5)
+    assert not torch.allclose(later.logits["speed"][:, last:], output.logits["speed"][:, last:], atol=1e-5)
 
 
 def test_the_joint_rank_is_the_truth_tuple_s_place_among_the_product_candidates(world):
     kinds = ins.INSTRUCTION_KINDS
     classes = {kind: world[5].classes(kind) for kind in kinds}
-    targets = torch.tensor([[[3, 2, 5, 0, 1], [pr.IGNORE] * 5]])                       # one position with a next
+    targets = torch.tensor([[[3, 2, 5, 0, 1, 0], [pr.IGNORE] * 6]])                    # one event with a next
     has_next = targets[..., 0] != pr.IGNORE
     logits = {kind: torch.zeros(1, 2, classes[kind]) for kind in kinds}
     for column, kind in enumerate(kinds):
         logits[kind][0, 0, targets[0, 0, column]] = 5.0                              # the truth is every kind's argmax
     assert pr._joint_ranks(logits, targets, has_next).tolist() == [0]
-    logits["speed"][0, 0, 7] = 6.0                                                    # one better speed word: rank 1
+    logits["speed"][0, 0, min(7, classes["speed"] - 1)] = 6.0                                                    # one better speed word: rank 1
     assert pr._joint_ranks(logits, targets, has_next).tolist() == [1]
     logits["altitude"][0, 0] = torch.arange(11.0) * 10.0                              # the truth (2) falls out of altitude's top-8
     assert pr._joint_ranks(logits, targets, has_next).tolist() == [pr.JOINT_SEARCH ** len(kinds)]
@@ -176,12 +224,12 @@ def test_fit_keeps_the_best_val_epoch_and_evaluate_reads_every_rate(world):
         for name in ("flip_rate", "miss_rate", "change_recall"):
             assert reading[name][kind] is None or 0.0 <= reading[name][kind] <= 1.0
     assert reading["joint_top_k"]["2"] <= reading["joint_top_k"]["4"] <= reading["joint_top_k"]["8"] <= 1.0
-    assert 0.0 <= reading["landed_accuracy"] <= 1.0 and reading["total"] == pytest.approx(reading["next"] + reading["landed"])
-    assert reading["landed_share"] == pytest.approx(1 / sequences[3].length) and reading["landed_recall"] in (0.0, 1.0)
+    assert reading["total"] == pytest.approx(reading["next"])   # D72: no separate landing term any more
+    assert reading["top1"]["terminal"] is None or 0.0 <= reading["top1"]["terminal"] <= 1.0
     # the readings are batch-size invariant over flights of different lengths (the padding masks)
     together = pr.evaluate(model, sequences, types, batch_size=4, device=torch.device("cpu"))
     alone = pr.evaluate(model, sequences, types, batch_size=1, device=torch.device("cpu"))
-    for name in ("next", "landed", "positions_with_next", "landed_accuracy"):
+    for name in ("next", "positions_with_next"):
         assert together[name] == pytest.approx(alone[name], rel=1e-5)
     for name in ("top1", "flip_rate", "miss_rate", "change_recall", "change_share"):
         assert together[name] == alone[name]
@@ -194,19 +242,24 @@ def test_fit_keeps_the_best_val_epoch_and_evaluate_reads_every_rate(world):
     with pytest.raises(ValueError, match="no epoch improved"):
         pr.fit(pr.InstructionPrior(config), sequences[:3], sequences[3:], types, epochs=0, patience=1, batch_size=2,
                learning_rate=1e-3, seed=0, device=torch.device("cpu"))
-    # a one-position sequence: no next word, the landing only; nothing divides by zero, the rates read as absent
-    one = sq.InstructionSequence(**{**sequences[0].__dict__, "positions_s": sequences[0].positions_s[:1], "words": sequences[0].words[:1],
-                                    "states": sequences[0].states[:1], "targets": sequences[0].targets[:1]})
+    # a one-EVENT sentence that lands: no next word at all, so nothing divides by zero and every
+    # rate reads as absent. (A one-event PREFIX would still have a next — it continues.)
+    terminal = ins.INSTRUCTION_KINDS.index("terminal")
+    words = sequences[0].words[:1].copy()
+    words[0, terminal] = ins.TERMINAL_LANDED
+    one = sq.InstructionSequence(**{**sequences[0].__dict__, "positions_s": sequences[0].positions_s[:1],
+                                    "words": words, "states": sequences[0].states[:1],
+                                    "targets": sequences[0].targets[:1], "ends_at_landing": True})
     only = pr.evaluate(model, [one], types, batch_size=1, device=torch.device("cpu"))
-    assert only["positions_with_next"] == 0 and only["next"] is None and only["top1"]["heading"] is None and only["landed_share"] == 1.0
+    assert only["positions_with_next"] == 0 and only["next"] is None and only["top1"]["heading"] is None
 
 
 def test_the_hold_baseline_scores_a_sentence_that_never_changes_as_perfectly_held(world):
     _vocabulary, _series, _readings, sequences, _types, config = world
     still = sq.InstructionSequence(
         dataset_id="d", flight_id="f", positions_s=np.arange(6) * 10.0,
-        words=np.tile(np.array([[18, 3, 6, -1, 1]]), (6, 1)), states=np.zeros((6, 6), dtype=np.float32),
-        targets=np.tile(np.array([[18, 3, 6, -1, 1]]), (6, 1)), typecode="B738", ends_at_landing=True,
+        words=np.tile(np.array([[18, 3, 6, 1, 5, ins.TERMINAL_CONTINUE]]), (6, 1)), states=np.zeros((6, 6), dtype=np.float32),
+        targets=np.tile(np.array([[18, 3, 6, 1, 5, ins.TERMINAL_CONTINUE]]), (6, 1)), typecode="B738", ends_at_landing=False,
     )
     baseline = pr.hold_baseline(sequences, [still], config)
     assert all(baseline["hold_accuracy"][kind] == 1.0 for kind in ins.INSTRUCTION_KINDS) and baseline["positions_with_next"] == 5

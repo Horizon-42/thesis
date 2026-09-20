@@ -1,72 +1,26 @@
-"""Instruction words read from an arrival's track (two-tier v3 stage B, plan §5.2.1; decisions D50–D54).
+"""Instruction words read from an arrival's track (two-tier v3 stage B, plan §5.2.1).
 
-The second layer's vocabulary is the controller's: an instruction changes ONE target and the
-target is an absolute value — a heading, an altitude, a speed, or "intercept the final approach
-course" — never a rate (D50: rates are the executor's business; a rate read off a 2 s ADS-B slope
-is not reliable; the 09-18 "change class" vocabulary carried no anchor and the executor ignored
-it). The words (D51; the bins were settled on the 2026-09-20 read-back of the B cohort — the
-starting ceilings of 8 000 ft and 230 kt clamped 7 % of the altitude and 30 % of the speed words,
-because entry heights reach 8 000 ft above the threshold and entry ground speeds 300 kt):
+An arrival is a SENTENCE: a sequence of EVENTS, one per moment something changed, each carrying
+six words — heading, altitude and speed as absolute targets, the runway they are measured against,
+the gap since the previous event, and whether the approach ends here.
 
-    heading    the ground-track course RELATIVE TO THE FINAL APPROACH COURSE, `HEADING_BIN_DEG`
-               bins over (−180°, 180°] — bin 0 is the course itself, +180° the downwind, ±90° a base
-    altitude   height ABOVE THE THRESHOLD in `ALTITUDE_BIN_M` bins up to `ALTITUDE_MAX_M` (the
-               ceiling is the top word's centre)
-    speed      ground speed in `SPEED_BIN_MPS` bins over [`SPEED_MIN_MPS`, `SPEED_MAX_MPS`] (ADS-B
-               carries no airspeed: a ground-speed word is what the data can say — the wind is in it)
-    intercept  the turn that captures the course, by its intercept angle (`INTERCEPT_ANGLE_BINS_DEG`)
+    heading    the ground track against the final approach course, 10° a bin, the whole circle
+    altitude   height above the landing threshold, 1000 ft a bin, 0 … 10 000 ft
+    speed      ground speed (ADS-B carries no airspeed; the wind is inside this number)
+    runway     which threshold the three above are measured against — a per-airport class set,
+               carried BESIDE the spec so one vocabulary still serves five airports (D62)
+    duration   the gap to the previous event, 2 s a bin (D71): the ADS-B row grid's own resolution
+    terminal   continue / landed / go-around (D72) — one question, one answer, no separate head
 
-**Reading them off the track** (D53, settled after the hand checks of 2026-09-20 — the
-rate-threshold reading it replaced started gentle manoeuvres late, sliced long ramps into
-rolling targets and missed heading changes slower than 1°/s): a TARGET is a PLATEAU — a stretch
-where the smoothed signal (`COURSE_SMOOTHING_S` for the course, `SMOOTHING_S` for height and
-speed: ADS-B altitude is quantised at 25 ft) stays within the kind's tolerance
-(`COURSE_TOLERANCE_DEG`, `HEIGHT_TOLERANCE_M`, `SPEED_TOLERANCE_MPS`) of the value it settled at,
-for at least `PLATEAU_MIN_S` (two sentence positions: a target in force for less is not a word
-of its own), AND whose fitted slope over that opening window moves it by no more than half the
-tolerance — so the rate a "level" stretch may still drift at is (tolerance / 2) / `PLATEAU_MIN_S`:
-0.75 m/s of height, 0.1°/s of course, 0.0625 m/s² of speed at the defaults, tightening with a
-longer plateau (a slow descent, or a pause inside one, is not a plateau). Everything between two
-plateaus is the manoeuvre that takes the aircraft from one to the next, whatever its rate: the
-instruction's TARGET is the plateau
-reached (its median), it is ISSUED where the signal departs the plateau it held just before the
-change — absorbed or not: an aircraft that held an intermediate level got its instruction when
-it left it — the last row within half the tolerance of that plateau's value (the controller spoke
-a few seconds earlier; that gap is not recoverable and is stated), and ``settled_s`` is where
-the new plateau begins. A plateau
-that moves the signal by less than the kind's minimum change (`HEADING_MIN_CHANGE_DEG`,
-`HEIGHT_MIN_CHANGE_M`, `SPEED_MIN_CHANGE_MPS`) from the word in force's value is not a new
-target (a wobble, whatever bin edge it crosses): absorbed, like a plateau that reads as the word
-already in force — UNLESS the aircraft held it for `HOLD_MIN_S` or longer AND its value moved by
-at least the tolerance, which makes it an instruction whatever its size (the minimum change
-suppresses a transient, not a level that was flown; the tolerance clause stops one steady stretch
-whose median sits on a bin edge from being read as two). A record that opens mid-manoeuvre carries that manoeuvre's target as its word
-at t = 0; a manoeuvre that runs to the end of the record targets the final value (the last
-descent targets the threshold, bin 0); a record with no plateau at all is one manoeuvre to its
-end. A manoeuvre whose plateau reads as the word already in force is NOT an instruction — the
-previous one is still being executed (a step inside one bin, an orbit back onto the same
-heading); it is recorded as `Absorbed` so the hand check can see it and the summary count it.
-The intercept is the LAST heading instruction (a manoeuvre that changed the word — an absorbed
-wiggle after the capture is no turn) BEFORE which the aircraft was not established and after
-which it is, under the package's one rule (`approach_difficulty.course_frame_rows`: within
-`ESTABLISHED_CROSS_TRACK_M` of the course, ahead of the threshold, heading within
-`ESTABLISHED_TRACK_TOLERANCE_DEG`); its angle is the relative course held before it — the
-previous heading word's target, or the first row's course when the record opens inside the
-capture (not established at its first row). A flight established from its first row carries no
-intercept, a heading change flown while already on the course is a correction, not a capture,
-and a capture from under half a heading bin (5°) is absorbed as a small change and carries none
-either — the summary states that share. The reading rule's version
-(`READING_RULE`) is part of the vocabulary's spec and sha.
+There is no "hold" word: a moment at which nothing changed is not an event and costs no token.
+There is no intercept word (D73): it was the heading word's shadow — every one of them was issued
+at the same instant as a heading word — and an intercept ANGLE is a consequence of the heading a
+controller assigns, not a target he states.
 
-**The sentence** (D52): one position every `TOKEN_STEP_S` from the record's start, each position
-the five words IN FORCE (the latest issued instruction of each kind); an instruction is the
-position where a word changes, "hold" is a position where none does. The fixed positions are the
-prior's grid; the executor reads the words in force at its own anchor + k·τ (`Reading.words_at`),
-so its segment need not sit on the grid; "when" is expressed by the position a word changes at,
-not by a duration word.
-
-Leaf module (`tests/test_architecture.py` `MANOEUVRE_LEAVES`): the data plane, geokit and numpy
-only — the executor reads these words as its condition, the prior predicts them.
+A level is a stretch that holds within a tolerance for `PLATEAU_MIN_S`, whose fitted slope moves it
+by no more than half that tolerance; everything between two levels is a manoeuvre, whatever its
+rate, and the instruction's target is the level it reaches, issued where the signal departs the
+level held just before it.
 """
 
 from __future__ import annotations
@@ -82,8 +36,6 @@ import numpy as np
 
 from geokit.constants import FT_M, KT_MS
 from ts_transformer.data.approach_difficulty import (
-    ESTABLISHED_CROSS_TRACK_M,
-    ESTABLISHED_TRACK_TOLERANCE_DEG,
     course_frame_rows,
 )
 from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
@@ -94,7 +46,8 @@ from ts_transformer.manoeuvre.segments import MINIMUM_GROUND_SPEED_MPS
 if TYPE_CHECKING:
     from ts_transformer.data.dataset import FlightSeries
 
-#: The three kinds every position carries a word of, then the intercept (absent before a capture).
+#: The three kinds read from the track by the plateau rule. `INSTRUCTION_KINDS` adds the runway,
+#: the duration and the terminal word; MANDATORY_KINDS stays a PREFIX of it.
 MANDATORY_KINDS = ("heading", "altitude", "speed")
 #: The RUNWAY is the fifth word (D62): the other four are angles and heights measured against a
 #: runway, so a sentence without it cannot say WHICH runway — and in real control the runway is
@@ -104,8 +57,26 @@ MANDATORY_KINDS = ("heading", "altitude", "speed")
 #: five airports. It is a per-position column, so the sentence CAN say a change mid-approach
 #: (D64, which the FAA order allows); this data's labeller writes it constant, because a late
 #: change is 1 flight in 44 622 and an early one is not resolvable (results §13).
-INSTRUCTION_KINDS = MANDATORY_KINDS + ("intercept", "runway")
-#: An empty intercept word (no capture turn in force).
+#: The DURATION is the sixth word (D71): the sentence is an EVENT SEQUENCE, so each event has to
+#: say how long since the previous one. It is a word, not a regression output, because generation
+#: needs a distribution — D61's free running and D56's decoding both take K candidates a step, and
+#: a point estimate gives none; and because the gaps are spread (p5 4 s, p50 44 s, p95 128 s), so a
+#: squared error would collapse to the mean and never speak the tail.
+#: It must stay LAST: `Vocabulary.CONDITIONED_KINDS` is a PREFIX slice of this tuple.
+#: The TERMINAL word (D72, user 2026-09-20) says whether this approach ends at the runway:
+#: ``continue`` / ``landed`` / ``go-around``. It replaces the prior's separate ``landed`` BCE head
+#: — "does the sentence stop here" is one question with three answers, and a separate head made it
+#: two mechanisms. Three consequences, all measured: D61's criterion becomes native (free-run until
+#: the model itself says ``landed``); the marker is 17 % of events instead of 2.5 % of grid
+#: positions, so it is learnable; and ``go-around`` shares a head that IS well trained on
+#: continue-vs-landed, so RL meets a meaningful representation rather than a noise head.
+#: ``go-around`` is NEVER emitted by the labeller — the 25 km arrival slice keeps only the final
+#: approach (results §13.5) — so it must stay out of every gate.
+INSTRUCTION_KINDS = MANDATORY_KINDS + ("runway", "duration", "terminal")
+
+TERMINAL_CONTINUE, TERMINAL_LANDED, TERMINAL_GO_AROUND = 0, 1, 2
+TERMINAL_WORDS = 3
+#: The fill value while a sentence row is being built; no kind may keep it (see `sentence`).
 NO_INTERCEPT = -1
 #: The runway word has no continuous value it was binned from — a threshold has a NAME, not a
 #: number. `float("nan")` would serialise as `NaN`, which Python reads back and strict JSON
@@ -124,7 +95,6 @@ ALTITUDE_MAX_M = 10000.0 * FT
 SPEED_BIN_MPS = 10.0 * KT
 SPEED_MIN_MPS = 100.0 * KT
 SPEED_MAX_MPS = 320.0 * KT
-INTERCEPT_ANGLE_BINS_DEG = (30.0, 45.0)
 
 #: D53 thresholds (the module docstring says how they bind together): the smoothing, the
 #: plateau tolerances (each under half a bin, so a plateau cannot straddle two words), the least
@@ -145,6 +115,12 @@ SPEED_MIN_CHANGE_MPS = SPEED_BIN_MPS
 #: wander: a ±3 m/s oscillation straddling a boundary holds each leg ~20 s).
 HOLD_MIN_S = 2 * PLATEAU_MIN_S
 #: D54: the sentence's position interval (τ); 5 s is the ablation.
+#: The duration word's bins: the issue times come off the ADS-B row grid, so 2 s is the data's own
+#: resolution and a 2 s bin is lossless (user, 2026-09-20 — deliberately NOT fitted to the observed
+#: distribution). The ceiling exists because the class set must be finite; a longer gap clamps to it
+#: and is COUNTED, like every other clamp.
+DURATION_BIN_S = 2.0
+DURATION_MAX_S = 300.0
 TOKEN_STEP_S = 10.0
 #: The reading rule's version — part of the vocabulary's identity, because the words an executor
 #: trained on depend on HOW the track was read, not only on the bins. v1 (retired 2026-09-20): rate
@@ -171,7 +147,11 @@ TOKEN_STEP_S = 10.0
 #: needs the level to be at least one TOLERANCE from the word in force's — two levels closer than
 #: the tolerance are the same level measured twice, and wording the second one split a steady
 #: stretch in two whenever its median sat on a bin edge (the fifth hand check: 6 of 50 pages).
-READING_RULE = "plateau-v10"    # v10: the sentence gained the runway column (D62)
+#: v11 (2026-09-20): the sentence became an EVENT SEQUENCE and gained the duration and terminal
+#: words (D52 / D70 / D71 / D72). v10 was the grid with the runway column (D62); v9 the four-kind
+#: grid. The version is part of the spec and therefore of the sha, so an artefact read under an
+#: older rule is refused by name rather than reinterpreted.
+READING_RULE = "plateau-v11"
 
 VOCABULARY_SCHEMA = "ts-instruction-vocabulary-v1"
 VOCABULARY_FILE = "instruction_vocabulary.json"
@@ -190,9 +170,6 @@ class Vocabulary:
     speed_bin_mps: float = SPEED_BIN_MPS
     speed_min_mps: float = SPEED_MIN_MPS
     speed_max_mps: float = SPEED_MAX_MPS
-    intercept_angle_bins_deg: tuple[float, ...] = INTERCEPT_ANGLE_BINS_DEG
-    established_cross_track_m: float = ESTABLISHED_CROSS_TRACK_M
-    established_track_tolerance_deg: float = ESTABLISHED_TRACK_TOLERANCE_DEG
     smoothing_s: float = SMOOTHING_S
     course_smoothing_s: float = COURSE_SMOOTHING_S
     course_tolerance_deg: float = COURSE_TOLERANCE_DEG
@@ -203,6 +180,8 @@ class Vocabulary:
     height_min_change_m: float = HEIGHT_MIN_CHANGE_M
     speed_min_change_mps: float = SPEED_MIN_CHANGE_MPS
     hold_min_s: float = HOLD_MIN_S
+    duration_bin_s: float = DURATION_BIN_S
+    duration_max_s: float = DURATION_MAX_S
     token_step_s: float = TOKEN_STEP_S
     reading_rule: str = READING_RULE
 
@@ -220,13 +199,6 @@ class Vocabulary:
                                  ("speed", self.speed_max_mps - self.speed_min_mps, self.speed_bin_mps)):
             if abs(span / bin_ - round(span / bin_)) > 1e-9:
                 raise ValueError(f"the {name} bin does not divide its range ({span:g} / {bin_:g})")
-        if list(self.intercept_angle_bins_deg) != sorted(self.intercept_angle_bins_deg) or not self.intercept_angle_bins_deg:
-            raise ValueError("intercept angle bins are ascending edges")
-        if (self.established_cross_track_m, self.established_track_tolerance_deg) != (ESTABLISHED_CROSS_TRACK_M, ESTABLISHED_TRACK_TOLERANCE_DEG):
-            raise ValueError(
-                "the established rule is the package's one (approach_difficulty); it is recorded in the spec "
-                "so the sha moves with it, not to be set here"
-            )
         for name in ("smoothing_s", "course_smoothing_s", "plateau_min_s", "token_step_s"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} is positive seconds")
@@ -256,14 +228,14 @@ class Vocabulary:
     def speed_words(self) -> int:
         return int(round((self.speed_max_mps - self.speed_min_mps) / self.speed_bin_mps)) + 1
 
-    @property
-    def intercept_words(self) -> int:
-        return len(self.intercept_angle_bins_deg) + 1
 
     @property
     def words(self) -> dict[str, int]:
-        return {"heading": self.heading_words, "altitude": self.altitude_words, "speed": self.speed_words,
-                "intercept": self.intercept_words}
+        """The class count of every kind the SPEC fixes. The runway's is per airport and lives in
+        `RunwayVocabulary`, so it is not here — `word_counts` composes the two."""
+        return {"heading": self.heading_words, "altitude": self.altitude_words,
+                "speed": self.speed_words,
+                "duration": self.duration_words, "terminal": TERMINAL_WORDS}
 
     # ── binning (each returns the word index; the caller counts clamps) ───
     def heading_bin(self, relative_deg: float) -> int:
@@ -292,31 +264,38 @@ class Vocabulary:
     def speed_centre_mps(self, word: int) -> float:
         return self.speed_min_mps + word * self.speed_bin_mps
 
-    def intercept_bin(self, angle_deg: float) -> int:
-        angle = abs(angle_deg)
-        for word, edge in enumerate(self.intercept_angle_bins_deg):
-            if angle <= edge:
-                return word
-        return len(self.intercept_angle_bins_deg)
+    @property
+    def duration_words(self) -> int:
+        return int(round(self.duration_max_s / self.duration_bin_s)) + 1
+
+    def duration_bin(self, seconds: float) -> tuple[int, bool]:
+        """The word for a gap, and whether it clamped. Exact for a gap on the ADS-B row grid."""
+        word = int(math.floor(seconds / self.duration_bin_s + 0.5))
+        clamped = not 0 <= word < self.duration_words
+        return min(max(word, 0), self.duration_words - 1), clamped
+
+    def duration_centre_s(self, word: int) -> float:
+        return word * self.duration_bin_s
+
+
 
     # ── the executor's view of the words ──────────────────────────────────
-    #: one position's conditioning: cos, sin of the heading centre; the altitude and speed
-    #: centres as fractions of their ceilings; the intercept as (bin + 1) / bins, 0 for none
+    #: one event's conditioning: cos, sin of the heading centre, then the altitude and speed
+    #: centres as fractions of their ceilings. The intercept column went with D73.
     #: The runway is NOT here: the executor already works in the runway's own frame, so the
     #: runway is implicit in its coordinates, and handing it an index as well would be redundant
     #: AND would make the executor per-airport. The runway is a word the PRIOR says, not a number
     #: the executor listens to (D62).
-    CONDITIONING_WIDTH = 5
-    CONDITIONED_KINDS = MANDATORY_KINDS + ("intercept",)
+    CONDITIONING_WIDTH = 4
+    CONDITIONED_KINDS = MANDATORY_KINDS
     if CONDITIONED_KINDS != INSTRUCTION_KINDS[:len(CONDITIONED_KINDS)]:      # the slice below is a PREFIX slice
         raise RuntimeError("the conditioned kinds must be the first kinds: a kind inserted before the "
                            "runway would silently condition the executor on the wrong columns")
 
     def conditioning(self, words: np.ndarray) -> np.ndarray:
         """The bin CENTRES the executor conditions on, ``[..., CONDITIONING_WIDTH]`` float32 for
-        words ``[..., 4]`` (plan §5.2.1 "执行器怎么吃"): the heading as cos / sin so the wrap at
-        ±180° is continuous, the altitude and speed as fractions of the vocabulary's ceilings,
-        the intercept as a graded flag."""
+        the sentence's words (plan §5.2.1 "执行器怎么吃"): the heading as cos / sin so the wrap at
+        ±180° is continuous, the altitude and speed as fractions of the vocabulary's ceilings."""
         words = np.asarray(words)
         if words.shape[-1] != len(INSTRUCTION_KINDS):
             raise ValueError(f"words are [..., {len(INSTRUCTION_KINDS)}], got {words.shape}")
@@ -326,20 +305,17 @@ class Vocabulary:
             np.cos(heading), np.sin(heading),
             words[..., 1] * self.altitude_bin_m / self.altitude_max_m,
             (self.speed_min_mps + words[..., 2] * self.speed_bin_mps) / self.speed_max_mps,
-            np.where(words[..., 3] == NO_INTERCEPT, 0.0, (words[..., 3] + 1) / self.intercept_words),
         ), axis=-1)
         return out.astype(np.float32)
 
     # ── the artefact's identity ───────────────────────────────────────────
     def to_dict(self) -> dict[str, Any]:
         spec = asdict(self)
-        spec["intercept_angle_bins_deg"] = list(self.intercept_angle_bins_deg)
         return spec
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Vocabulary:
         data = dict(data)
-        data["intercept_angle_bins_deg"] = tuple(float(v) for v in data["intercept_angle_bins_deg"])
         return cls(**data)
 
     @property
@@ -395,11 +371,13 @@ class RunwayVocabulary:
 
 
 def word_counts(vocabulary: Vocabulary, runway_vocabulary: RunwayVocabulary) -> dict[str, int]:
-    """The word count of EVERY kind, in `INSTRUCTION_KINDS` order: the spec's four
-    (`Vocabulary.words`) and then the cohort's runway classes. One definition — the prior's head
-    sizes (`PriorConfig.words`) and the readouts that print "words used" read this, never a
-    dict built beside it."""
-    return {**vocabulary.words, "runway": len(runway_vocabulary)}
+    """The word count of EVERY kind, **in `INSTRUCTION_KINDS` order**: the spec's five
+    (`Vocabulary.words`) with the cohort's runway classes in their place. One definition — the
+    prior's head sizes (`PriorConfig.words`) and the readouts that print "words used" read this,
+    never a dict built beside it. The ORDER is load-bearing: the prior embeds and scores by column
+    index, so a dict in a different order would silently size the wrong head."""
+    counts = {**vocabulary.words, "runway": len(runway_vocabulary)}
+    return {kind: counts[kind] for kind in INSTRUCTION_KINDS}
 
 
 def flight_runway(series: FlightSeries) -> str:
@@ -463,31 +441,36 @@ class Reading:
     dataset_id: str
     flight_id: str
     instructions: tuple[Instruction, ...]
-    positions_s: np.ndarray            # [P]
-    words: np.ndarray                  # [P, 5] heading / altitude / speed / intercept / runway per position
+    event_times_s: np.ndarray          # [E] the moments something changed
+    words: np.ndarray                  # [E, 6] heading / altitude / speed / intercept / runway / duration
     runway: str                        # the threshold the four geometric kinds are measured against
     established_from_start: bool
     duration_s: float
+    duration_clamped: int = 0
     absorbed: tuple[Absorbed, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "dataset_id": self.dataset_id, "flight_id": self.flight_id,
             "instructions": [item.to_dict() for item in self.instructions],
-            "positions_s": self.positions_s.tolist(), "words": self.words.tolist(), "runway": self.runway,
+            "event_times_s": self.event_times_s.tolist(), "words": self.words.tolist(),
+            "runway": self.runway, "duration_clamped": self.duration_clamped,
             "established_from_start": self.established_from_start, "duration_s": self.duration_s,
             "absorbed": [item.to_dict() for item in self.absorbed],
         }
 
     def words_at(self, times_s: np.ndarray) -> np.ndarray:
-        """The words in force at each time, ``[len(times), 5]``: the latest position at or
-        before it (an instruction issued between two positions is in force from the NEXT one,
-        as the sentence says it); after the last position the last words stay in force (the
-        aircraft lands on them); before the first there is nothing — that is an error."""
+        """The words in force at each time, ``[len(times), 6]``: the latest EVENT at or before it.
+
+        This is the one query every consumer outside the prior uses — the executor asks it for the
+        words over its segment — and it works over the event sequence exactly as it worked over the
+        old grid, which is why nothing under `outputs/control/` changed when D52 replaced one with
+        the other. Before the first event there is nothing, and that is an error.
+        """
         times = np.asarray(times_s, dtype=np.float64)
-        if times.min() < self.positions_s[0]:
-            raise ValueError(f"{self.flight_id}: no word in force before the record's start ({times.min():g} s)")
-        index = np.searchsorted(self.positions_s, times, side="right") - 1
+        if times.min() < self.event_times_s[0]:
+            raise ValueError(f"{self.flight_id}: no word in force before the first event ({times.min():g} s)")
+        index = np.searchsorted(self.event_times_s, times, side="right") - 1
         return self.words[index]
 
 
@@ -690,30 +673,9 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary,
                                           vocabulary.hold_min_s, to_word)
         instructions.extend(words)
         absorbed.extend(dropped)
-    # the intercept: the last heading INSTRUCTION (a manoeuvre that changed the word — never an
-    # absorbed wiggle) BEFORE which the aircraft was not established — somewhere on the plateau
-    # it left (a shallow convergence can cross the 500 m line a few rows before the final turn)
-    # — and after which it is (the rule per row over the plateau that follows it, until the next
-    # heading word; the last row when it runs to the end), by the relative course held before it:
-    # the previous heading word's target, or the first row's course when the record opens inside
-    # the capture (not established at its first row)
+    # `established` decides no WORD any more (the intercept went with D73) but it is still the
+    # reading's own diagnostic: whether the record opens already on the final approach course.
     established = frame["established"]
-    intercept: Instruction | None = None
-    headings = [item for item in instructions if item.kind == "heading"]
-    for index, word in enumerate(headings):
-        if word.issued_s == float(times[0]) and word.settled_s == float(times[0]):
-            continue                                                    # the record starts on this plateau: no manoeuvre
-        issued_row = int(np.searchsorted(times, word.issued_s))
-        before_start = 0 if index == 0 else int(np.searchsorted(times, headings[index - 1].settled_s))
-        if established[before_start : max(issued_row, before_start + 1)].all():
-            continue                                                    # on the course throughout: a correction, not a capture
-        plateau_end = int(np.searchsorted(times, headings[index + 1].issued_s)) if index + 1 < len(headings) else n
-        after = established[int(np.searchsorted(times, word.settled_s)):plateau_end] if word.settled_s is not None else established[n - 1:]
-        if after.any():
-            before = float(course[0]) if index == 0 else headings[index - 1].target
-            intercept = Instruction("intercept", vocabulary.intercept_bin(before), abs(wrap_deg(before)), word.issued_s, word.settled_s)
-    if intercept is not None:
-        instructions.append(intercept)
     # the runway word (D62): said at the first position, because the controller assigns it before
     # the arrival. It is a CONSTANT here — the sentence can carry a change (the column exists) but
     # this data cannot resolve one (results §13: a late change is 1 flight in 44 622).
@@ -721,31 +683,60 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary,
     instructions.append(Instruction("runway", runway_vocabulary.index(runway_ident), NO_TARGET,
                                     float(times[0]), float(times[0]), False))
     instructions.sort(key=lambda item: (item.issued_s, INSTRUCTION_KINDS.index(item.kind)))
-    positions, words = sentence(instructions, float(times[0]), float(times[-1]), vocabulary.token_step_s)
+    events_s, words, duration_clamped = sentence(instructions, vocabulary)
     return Reading(
         dataset_id=series.dataset_id, flight_id=series.flight_id, instructions=tuple(instructions),
-        positions_s=positions, words=words, runway=runway_ident, established_from_start=bool(established[0]),
-        duration_s=float(times[-1] - times[0]), absorbed=tuple(sorted(absorbed, key=lambda item: item.start_s)),
+        event_times_s=events_s, words=words, runway=runway_ident, duration_clamped=duration_clamped,
+        established_from_start=bool(established[0]), duration_s=float(times[-1] - times[0]),
+        absorbed=tuple(sorted(absorbed, key=lambda item: item.start_s)),
     )
 
 
-def sentence(instructions: Sequence[Instruction], start_s: float, end_s: float, step_s: float) -> tuple[np.ndarray, np.ndarray]:
-    """The positions every ``step_s`` from ``start_s`` to ``end_s`` and the words in force at each
-    (``[P, 5]``: heading, altitude, speed, intercept, runway — `NO_INTERCEPT` before a capture)."""
-    positions = start_s + step_s * np.arange(int(math.floor((end_s - start_s) / step_s + 1e-9)) + 1, dtype=np.float64)
-    words = np.full((len(positions), len(INSTRUCTION_KINDS)), NO_INTERCEPT, dtype=np.int64)
+def sentence(instructions: Sequence[Instruction], vocabulary: Vocabulary) -> tuple[np.ndarray, np.ndarray, int]:
+    """The EVENT SEQUENCE: ``(times, words, clamped)`` (D52, 2026-09-20).
+
+    One row per moment at which something changed — never a row that repeats the one before, and
+    no "hold" word. ``words`` is ``[E, 6]``: heading, altitude, speed, intercept, runway, duration,
+    the last being the gap to the PREVIOUS event as a word (the first event's is 0).
+
+    This replaced an even grid of one position every τ. The grid did not lose an instruction — two
+    of a kind are never closer than the 20 s a level must be held — but it snapped every issue time
+    FORWARD by 0–8 s, mean 4 s, and only ever late: 557 m of extra track at 270 kt on average, and
+    a bias that accumulates round by round in a closed loop and reads as model error. The event
+    time here is the row the labeller read, at the ADS-B grid's own 2 s.
+    """
+    moments = sorted({item.issued_s for item in instructions})
+    if not moments:
+        raise ValueError("a sentence needs at least one instruction")
+    columns = len(INSTRUCTION_KINDS)
+    duration_column = INSTRUCTION_KINDS.index("duration")
+    words = np.full((len(moments), columns), NO_INTERCEPT, dtype=np.int64)
     for column, kind in enumerate(INSTRUCTION_KINDS):
+        if kind == "duration":
+            continue
         issued = sorted((item for item in instructions if item.kind == kind), key=lambda item: item.issued_s)
-        for item in issued:
-            words[positions >= item.issued_s - 1e-9, column] = item.word
+        for item in issued:                                    # hold each word forward over the events
+            words[np.asarray(moments) >= item.issued_s - 1e-9, column] = item.word
+    times = np.asarray(moments, dtype=np.float64)
+    clamped = 0
+    for row, gap in enumerate(np.concatenate(([0.0], np.diff(times)))):
+        word, hit = vocabulary.duration_bin(float(gap))
+        words[row, duration_column] = word
+        clamped += int(hit)
     # the intercept is the ONE kind that may have no word (before the capture turn); every other
-    # kind must be in force from t = 0. The runway matters most: its column indexes an embedding,
-    # and a −1 there would be read as the LAST runway instead of raising.
-    always = MANDATORY_KINDS + ("runway",)
+    # kind must be in force from the first event. The runway matters most: its column indexes an
+    # embedding, and a −1 there would be read as the LAST runway instead of raising.
+    terminal_column = INSTRUCTION_KINDS.index("terminal")
+    words[:, terminal_column] = TERMINAL_CONTINUE
+    words[-1, terminal_column] = TERMINAL_LANDED         # every cohort flight lands; go-around never fires here
+    always = MANDATORY_KINDS + ("runway", "duration", "terminal")
     missing = [kind for kind in always if (words[:, INSTRUCTION_KINDS.index(kind)] == NO_INTERCEPT).any()]
     if missing:
-        raise ValueError(f"no word in force for {missing} at some position: only the intercept may be absent")
-    return positions, words
+        raise ValueError(f"no word in force for {missing} at some event: only the intercept may be absent")
+    free = [c for c in range(columns) if c not in (duration_column, terminal_column)]
+    if len(moments) > 1 and (np.diff(words, axis=0)[:, free] == 0).all(axis=1).any():
+        raise ValueError("an event repeats the one before it: the sequence keeps only moments that changed")
+    return times, words, clamped
 
 
 # ── the vocabulary artefact ───────────────────────────────────────────────
@@ -782,8 +773,9 @@ def load_vocabulary(path: str | Path) -> tuple[Vocabulary, RunwayVocabulary, dic
 
 __all__ = [
     "ALTITUDE_BIN_M", "ALTITUDE_MAX_M", "COURSE_SMOOTHING_S", "COURSE_TOLERANCE_DEG", "HEADING_BIN_DEG", "HEIGHT_TOLERANCE_M",
-    "HOLD_MIN_S", "INSTRUCTION_KINDS", "INTERCEPT_ANGLE_BINS_DEG", "MANDATORY_KINDS", "NO_INTERCEPT", "PLATEAU_MIN_S",
-    "READING_RULE", "SMOOTHING_S",
+    "DURATION_BIN_S", "DURATION_MAX_S", "HOLD_MIN_S", "INSTRUCTION_KINDS", "MANDATORY_KINDS", "NO_INTERCEPT", "PLATEAU_MIN_S",
+    "READING_RULE", "SMOOTHING_S", "TERMINAL_CONTINUE", "TERMINAL_GO_AROUND", "TERMINAL_LANDED",
+    "TERMINAL_WORDS", "NO_TARGET",
     "SPEED_BIN_MPS", "SPEED_MAX_MPS", "SPEED_MIN_MPS", "SPEED_TOLERANCE_MPS", "TOKEN_STEP_S", "VOCABULARY_FILE",
     "VOCABULARY_SCHEMA", "ABSORBED_SAME_WORD", "ABSORBED_SHORT_TAIL", "ABSORBED_SMALL_CHANGE", "Absorbed", "Instruction",
     "Reading", "RunwayVocabulary", "Vocabulary", "course_frame", "departure_row", "flight_runway", "load_vocabulary", "min_rows",

@@ -37,11 +37,13 @@ def readings():
 def test_the_summary_counts_what_the_hand_check_and_the_bin_decision_read(readings):
     vocabulary, _series, items = readings
     summary = runner.summarise(items, vocabulary)
-    assert summary["flights"] == 4 and summary["positions"] == sum(len(r.positions_s) for r in items)
+    assert summary["flights"] == 4 and summary["events"] == sum(len(r.event_times_s) for r in items)
+    # D52: every event IS a change, so what the summary reports is how many and how far apart
+    assert summary["gap_s_p50"] <= summary["gap_s_p95"] and summary["duration_clamped"] >= 0
     assert set(summary["absorbed"]) == set(ins.MANDATORY_KINDS)
     assert all(set(v) == {ins.ABSORBED_SAME_WORD, ins.ABSORBED_SMALL_CHANGE, ins.ABSORBED_SHORT_TAIL} for v in summary["absorbed"].values())
     assert sum(sum(v.values()) for v in summary["absorbed"].values()) == sum(len(r.absorbed) for r in items)
-    assert set(summary["clamped"]) == {"altitude", "speed"} and 0.0 <= summary["intercept_share"] <= 1.0
+    assert set(summary["clamped"]) == {"altitude", "speed"}
     # the runway is a kind of its own (D62): one word per flight, one class used by this cohort
     assert set(summary["words_used"]) == set(ins.INSTRUCTION_KINDS) and summary["words_used"]["runway"] == 1
     assert summary["instructions_per_flight_p50"]["runway"] == 1.0
@@ -58,7 +60,7 @@ def test_the_summary_counts_what_the_hand_check_and_the_bin_decision_read(readin
         runner.summarise([], vocabulary)
     table = runner.render({"train": runner.summarise(items, vocabulary)}, vocabulary, RUNWAYS)
     assert "train: 4 flights" in table and "absorbed manoeuvres (same word / small change / short tail)" in table
-    assert f"a capture from under {vocabulary.heading_min_change_deg:g}°" in table and "unclamped target − bin centre" in table
+    assert "event sequence (D52)" in table and "gap p50" in table   # D52 / D71: events and their gaps, not grid positions
     # the runway count printed is the COHORT's, not the spec's (the spec has no runway word)
     assert f"runways {', '.join(RUNWAYS.idents)}" in table and f"runway 1/{len(RUNWAYS)}" in table
 

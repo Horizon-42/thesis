@@ -1,23 +1,15 @@
-"""One flight's sentence as the prior reads it (two-tier v3 stage B, plan §5.2.2): at every
-position of the sentence (`instructions.Reading`, one every τ) the five words IN FORCE, the
-aircraft's state there, and what the position has to predict — the words at the next position
-and whether the flight has landed instead.
+"""One flight's sentence as the prior consumes it (plan §5.2.2).
 
-    position t:  input  = words[t] (heading, altitude, speed, intercept, runway) + state[t]
-                 target = words[t + 1]                            (five factorised heads)
-                          landed[t] = 1 at the last position      (no next position: the aircraft is down)
+    event k:  input  = words[k] (heading, altitude, speed, runway, duration, terminal)
+                     + the state token at that event's time + the event's index
+              target = words[k + 1]
 
-A TRUTH sequence carries the truth's own next words as targets. A ROLLED sequence (CAT-K-style
-closed-loop fine-tuning, D55) carries states from a history the executor flew and, as targets,
-the truth's words at the same absolute time — the sentence the controller would have said had
-the aircraft been where it actually is; the two differ only in ``states`` and ``targets``.
+The last event of a sentence that LANDS has no target: its own terminal word says the flight ends
+there (D72), so there is no separate landing label. A rolled prefix's last event does have one —
+the truth continues past where the loop stopped.
 
-The state token is six scaled features — the position RELATIVE TO THE THRESHOLD (the chart's
-origin is the threshold only under the threshold-anchored frames, so the target's chart row is
-subtracted), the ground speed, cos / sin of the course; its scale is the one definition here
-(the intent-code prior's copy is archived). ``ends_at_landing`` says whether a sequence's last
-position is the flight's end (a truth sentence, or a rolled prefix that flew the whole flight)
-— the batch labels the landing from it, never from a sequence's length.
+The state token's position is taken from the AIRPORT reference, not the landing threshold (D66):
+threshold-relative coordinates would hand the runway head the answer to its own question.
 """
 
 from __future__ import annotations
@@ -29,7 +21,7 @@ import numpy as np
 
 from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
 from ts_transformer.data.dataset import FlightSeries
-from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, Reading
+from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, TERMINAL_LANDED, Reading
 from flight_scenarios.runway_target import airport_reference_point
 from ts_transformer.data.channels import target_chart_position
 from ts_transformer.manoeuvre.segments import MINIMUM_GROUND_SPEED_MPS, interpolate_rows
@@ -85,10 +77,15 @@ def state_tokens(times: np.ndarray, values: np.ndarray, query_times: np.ndarray,
 
 @dataclass(frozen=True)
 class InstructionSequence:
-    """``positions_s`` ``[P]``, ``words`` ``[P, 5]`` (in force at each position — the input),
-    ``states`` ``[P, 6]``, ``targets`` ``[P, 5]`` (the words the position predicts: the next
-    position's), the context, and ``ends_at_landing`` — whether the last position is the flight's
-    end (its target is then the landing, and its ``targets`` row is unused)."""
+    """One flight's EVENT sequence: ``positions_s`` ``[E]`` the event times, ``words`` ``[E, 6]``
+    the event's own words (the input), ``states`` ``[E, 6]``, ``targets`` ``[E, 6]`` the words the
+    event predicts (the NEXT event's), the context, and ``ends_at_landing``.
+
+    ``ends_at_landing`` is NOT independent: D72 made "does the sentence stop here" one question
+    with one answer, the terminal word. It is validated against ``words[-1, terminal]`` below, so
+    the two cannot disagree — a decode that stopped because the prior said ``landed`` cannot then
+    be supervised toward ``continue`` at exactly the stop it predicted.
+    """
 
     dataset_id: str
     flight_id: str
@@ -101,6 +98,14 @@ class InstructionSequence:
 
     def __post_init__(self) -> None:
         count = len(self.positions_s)
+        terminal = int(self.words[-1, INSTRUCTION_KINDS.index("terminal")])
+        landed = terminal == TERMINAL_LANDED
+        if landed != self.ends_at_landing:
+            raise ValueError(
+                f"{self.dataset_id}: ends_at_landing={self.ends_at_landing} but the last event's terminal "
+                f"word is {terminal} — D72 made these ONE answer; supervising a predicted stop toward "
+                f"'continue' is exactly the contradiction that check exists to stop"
+            )
         kinds = len(INSTRUCTION_KINDS)
         if count < 1 or self.words.shape != (count, kinds) or self.targets.shape != (count, kinds) \
                 or self.states.shape != (count, len(STATE_TOKEN_FEATURES)):
@@ -121,37 +126,46 @@ def flight_sequence(series: FlightSeries, reading: Reading) -> InstructionSequen
     the target there)."""
     if reading.flight_id != series.flight_id:
         raise ValueError(f"reading {reading.flight_id} is not series {series.flight_id}")
-    states = state_tokens(series.supervision_times, series.supervision_values, reading.positions_s, airport_origin(series))
+    states = state_tokens(series.supervision_times, series.supervision_values, reading.event_times_s, airport_origin(series))
     targets = np.vstack((reading.words[1:], reading.words[-1:]))
     return InstructionSequence(
-        dataset_id=series.dataset_id, flight_id=series.flight_id, positions_s=reading.positions_s.copy(),
+        dataset_id=series.dataset_id, flight_id=series.flight_id, positions_s=reading.event_times_s.copy(),
         words=reading.words.copy(), states=states, targets=targets,
         typecode=str(series.scenario.aircraft.code), ends_at_landing=True,
     )
 
 
 def rolled_sequence(truth: InstructionSequence, reading: Reading, flown_times: np.ndarray, flown_values: np.ndarray,
-                    said_words: np.ndarray, origin: np.ndarray) -> InstructionSequence:
-    """A closed-loop sequence (D55): the positions the flown history covers (a prefix of the
-    truth's), the words the loop SAID in force at each (``said_words`` ``[P', 5]``, in the
-    reading's word space — NOT the prior's shifted classes), the state read off the FLOWN
-    polyline (``origin`` = the threshold's chart row), and as targets the TRUTH's words at the
-    next position (`Reading.words_at`, by absolute time — what the controller would say to an
-    aircraft that is where this one is). It ends at the landing only when it flew every position."""
+                    said_words: np.ndarray, said_times_s: np.ndarray, origin: np.ndarray) -> InstructionSequence:
+    """A closed-loop sequence (D55): the events the LOOP said, at the times the LOOP said them.
+
+    ``said_words`` ``[E', 6]`` are the words in the reading's own space and ``said_times_s`` the
+    absolute times it emitted them — which are NOT the truth's event times, because the loop
+    chooses its own gaps (that is what the duration word is for). Matching by index would only be
+    right if the loop reproduced the truth's instants; it is matched by TIME instead.
+
+    The target of a said event at ``t`` is the truth's NEXT event after ``t`` — what the controller
+    would say next to an aircraft that is where this one is. After the truth's last event there is
+    no next, so the target is that last event, which carries ``landed``.
+
+    ``ends_at_landing`` comes from the loop's own terminal word, not from how many events it said.
+    """
     if reading.flight_id != truth.flight_id:
         raise ValueError(f"reading {reading.flight_id} is not sequence {truth.flight_id}")
     said = np.asarray(said_words, dtype=np.int64)
-    if not 1 <= len(said) <= len(truth.positions_s):
-        raise ValueError(f"{truth.flight_id}: {len(said)} said positions; a rolled prefix covers 1 … {len(truth.positions_s)}")
-    if len(reading.positions_s) < 2:
-        raise ValueError(f"{truth.flight_id}: a one-position reading has no next position to target")
-    positions = truth.positions_s[: len(said)]
-    states = state_tokens(flown_times, flown_values, positions, origin)
-    targets = reading.words_at(positions + (reading.positions_s[1] - reading.positions_s[0]))     # the next position's truth
+    times = np.asarray(said_times_s, dtype=np.float64)
+    if len(said) != len(times) or not len(said):
+        raise ValueError(f"{truth.flight_id}: {len(said)} said events but {len(times)} times")
+    if (np.diff(times) <= 0).any():
+        raise ValueError(f"{truth.flight_id}: the said event times are not strictly increasing")
+    after = np.searchsorted(reading.event_times_s, times, side="right")
+    after = np.minimum(after, len(reading.event_times_s) - 1)
+    targets = reading.words[after]
+    states = state_tokens(flown_times, flown_values, times, origin)
     return InstructionSequence(
-        dataset_id=truth.dataset_id, flight_id=truth.flight_id, positions_s=positions.copy(),
-        words=said, states=states, targets=targets,
-        typecode=truth.typecode, ends_at_landing=len(said) == truth.length,
+        dataset_id=truth.dataset_id, flight_id=truth.flight_id, positions_s=times.copy(),
+        words=said, states=states, targets=targets, typecode=truth.typecode,
+        ends_at_landing=bool(said[-1, INSTRUCTION_KINDS.index("terminal")] == TERMINAL_LANDED),
     )
 
 

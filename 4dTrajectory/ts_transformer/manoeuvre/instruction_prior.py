@@ -1,13 +1,13 @@
 """The instruction prior (two-tier v3 stage B, plan §5.2.2 "预训练"; B′-dev3): a causal
 Transformer over one flight's sentence that says, at every position, the five words in force at
-the NEXT position — one softmax per kind (factorised heads) — and whether the flight has landed
+the NEXT event — one softmax per kind (factorised heads), the terminal kind among them
 instead.
 
     [TYPE] [RWY]  [w_0, x_0] [w_1, x_1] … [w_T, x_T]
         →  at t: p(heading_{t+1}), p(altitude_{t+1}), p(speed_{t+1}), p(intercept_{t+1}),
-                 p(runway_{t+1}), p(landed after t)
+                 p(runway_{t+1}), p(duration_{t+1}), p(terminal_{t+1})
 
-Tokens: the sum of the five word embeddings (the intercept's table has one extra row for "no
+Tokens: the sum of the five word embeddings (the intercept's table has no extra row for "no
 capture yet"; the runway's classes are the cohort's thresholds, `instructions.RunwayVocabulary`,
 which is why `PriorConfig.words` carries their count rather than reading it off the spec), the
 state token (`instruction_sequences.state_token`, six features through a
@@ -19,7 +19,7 @@ truth's words at the same absolute time — the same batch, the same loss.
 Readings (`evaluate`): per kind the next-word NLL and top-1; the FLIP rate (the prior changes a
 word the truth holds — an unforced instruction), the MISS rate (the truth changes and the prior
 holds) and the change recall; top-k coverage per kind and JOINT top-K coverage over the five
-kinds (the truth's 5-tuple among the K best product-of-marginals candidates, searched inside
+kinds (the truth's 6-tuple among the K best product-of-marginals candidates, searched inside
 each kind's top-8 — what a K-candidate decoder can reach, D55 / D56); the landing decision.
 `hold_baseline` is the reading a prior must beat: "the words stay", and a per-kind Laplace
 bigram P(next | current).
@@ -75,7 +75,6 @@ class PriorConfig:
     d_ff: int = 256
     dropout: float = 0.1
     max_positions: int = 128
-    landed_loss_weight: float = 1.0
 
     def __post_init__(self) -> None:
         if tuple(self.words) != INSTRUCTION_KINDS or any(count < 2 for count in self.words.values()):
@@ -86,8 +85,10 @@ class PriorConfig:
             raise ValueError("d_model must be a multiple of n_heads")
 
     def classes(self, kind: str) -> int:
-        """The head's classes: the kind's words, plus "none" for the intercept."""
-        return self.words[kind] + (1 if kind == "intercept" else 0)
+        """The head's classes: the kind's own words. Nothing is shifted — since D73 took the
+        intercept out, every kind is in force from the first event and no column holds a
+        "nothing said" value."""
+        return self.words[kind]
 
     def to_dict(self) -> dict[str, Any]:
         return {name: (dict(getattr(self, name)) if name == "words" else getattr(self, name)) for name in self.__dataclass_fields__}
@@ -98,18 +99,18 @@ class PriorConfig:
 
 
 def shift_words(words: np.ndarray) -> np.ndarray:
-    """Word indices as the embedding tables index them: the intercept column moved up by one so
-    `NO_INTERCEPT` is row 0. The INTERCEPT is the only shifted column — every other kind's word,
-    the runway's included, is already ≥ 0 and indexes its table directly."""
-    shifted = np.asarray(words, dtype=np.int64).copy()
-    shifted[..., INSTRUCTION_KINDS.index("intercept")] += 1
-    return shifted
+    """Word indices as the embedding tables index them.
+
+    A no-op since D73: every kind is in force from the first event, so no column carries a
+    "nothing said" value and none needs shifting. Kept as the ONE place that would change if a
+    kind ever became optional again — the callers stay honest about where that would go."""
+    return np.asarray(words, dtype=np.int64)
 
 
 def unshift_words(indices: np.ndarray) -> np.ndarray:
-    unshifted = np.asarray(indices, dtype=np.int64).copy()
-    unshifted[..., INSTRUCTION_KINDS.index("intercept")] -= 1
-    return unshifted
+    """The inverse of `shift_words` — a no-op, for the same reason."""
+    return np.asarray(indices, dtype=np.int64)
+
 
 
 @dataclass(frozen=True)
@@ -117,13 +118,12 @@ class PriorBatch:
     """Padded to the longest flight: ``words`` ``[B, L, 5]`` (the inputs, shifted), ``states``
     ``[B, L, 6]``, ``valid`` ``[B, L]``, ``targets`` ``[B, L, 5]`` (the next position’s words,
     shifted; IGNORE where none — the last position of a sequence that ends at the landing),
-    ``landed`` ``[B, L]`` (1.0 at that position), ``type_index`` ``[B]``."""
+    ``type_index`` ``[B]``."""
 
     words: torch.Tensor
     states: torch.Tensor
     valid: torch.Tensor
     targets: torch.Tensor
-    landed: torch.Tensor
     type_index: torch.Tensor
 
     def to(self, device: torch.device) -> PriorBatch:
@@ -145,29 +145,27 @@ def collate(sequences: Sequence[InstructionSequence], config: PriorConfig, types
     states = torch.zeros(batch, length, len(STATE_TOKEN_FEATURES))
     valid = torch.zeros(batch, length, dtype=torch.bool)
     targets = torch.full((batch, length, kinds), IGNORE, dtype=torch.long)
-    landed = torch.zeros(batch, length)
     type_index = torch.zeros(batch, dtype=torch.long)
     for row, item in enumerate(sequences):
         count = item.length
         words[row, :count] = torch.from_numpy(shift_words(item.words))
         states[row, :count] = torch.from_numpy(np.asarray(item.states, dtype=np.float32))
         valid[row, :count] = True
-        # position t predicts the words at t + 1; the last position of a sequence that ends at
-        # the landing predicts the landing instead — a rolled prefix's last position has a next
+        # event k predicts the words at event k + 1. A sequence that ends at the landing has no
+        # k + 1 for its last event — the LANDING is said by that event's own terminal word (D72),
+        # not by a separate head — so its last event carries no target. A rolled prefix's last
+        # event does have a next: the truth continues past where the loop stopped.
         with_next = count - 1 if item.ends_at_landing else count
         targets[row, :with_next] = torch.from_numpy(shift_words(item.targets[:with_next]))
-        if item.ends_at_landing:
-            landed[row, count - 1] = 1.0
         type_index[row] = types.index(item.typecode)
-    return PriorBatch(words, states, valid, targets, landed, type_index)
+    return PriorBatch(words, states, valid, targets, type_index)
 
 
 @dataclass(frozen=True)
 class PriorOutput:
-    """``logits[kind]`` ``[B, L, classes]`` for each kind; ``landed_logit`` ``[B, L]``."""
+    """``logits[kind]`` ``[B, L, classes]`` for each kind, the terminal kind among them."""
 
     logits: dict[str, torch.Tensor]
-    landed_logit: torch.Tensor
 
 
 class InstructionPrior(nn.Module):
@@ -191,7 +189,6 @@ class InstructionPrior(nn.Module):
         self.transformer = nn.TransformerEncoder(layer, config.n_layers, enable_nested_tensor=False)
         self.norm = nn.LayerNorm(d)
         self.heads = nn.ModuleDict({kind: nn.Linear(d, config.classes(kind)) for kind in INSTRUCTION_KINDS})
-        self.landed_head = nn.Linear(d, 1)
         nn.init.normal_(self.context_position, std=0.02)
 
     def forward(self, batch: PriorBatch) -> PriorOutput:
@@ -210,12 +207,12 @@ class InstructionPrior(nn.Module):
         encoded = self.norm(self.transformer(sequence, mask=mask, src_key_padding_mask=padding))[:, self.CONTEXT_TOKENS :]
         return PriorOutput(
             logits={kind: head(encoded) for kind, head in self.heads.items()},
-            landed_logit=self.landed_head(encoded).squeeze(-1),
         )
 
     def loss(self, output: PriorOutput, batch: PriorBatch) -> dict[str, torch.Tensor]:
         """``total`` and its parts: one cross-entropy per kind (nats per position with a next
-        word), ``landed`` (BCE per valid position)."""
+        word). The terminal kind is one of them, so there is no separate landing term any more
+        (D72): "does the sentence stop here" is one question with three answers."""
         has_next = batch.has_next
         count = has_next.sum().clamp(min=1)
         terms: dict[str, torch.Tensor] = {}
@@ -223,10 +220,8 @@ class InstructionPrior(nn.Module):
             terms[kind] = F.cross_entropy(
                 output.logits[kind].flatten(0, 1), batch.targets[..., column].flatten(), ignore_index=IGNORE, reduction="sum"
             ) / count
-        landed = F.binary_cross_entropy_with_logits(output.landed_logit, batch.landed, reduction="none")
-        terms["landed"] = (landed * batch.valid).sum() / batch.valid.sum()
         terms["next"] = sum(terms[kind] for kind in INSTRUCTION_KINDS)
-        terms["total"] = terms["next"] + self.config.landed_loss_weight * terms["landed"]
+        terms["total"] = terms["next"]
         return terms
 
 
@@ -249,7 +244,7 @@ def _batches(sequences: Sequence[InstructionSequence], config: PriorConfig, type
 
 
 def _joint_ranks(logits: dict[str, torch.Tensor], targets: torch.Tensor, has_next: torch.Tensor) -> torch.Tensor:
-    """The truth 5-tuple’s rank (0 = best; a tie counts as beaten) among the product-of-marginals
+    """The truth 6-tuple’s rank (0 = best; a tie counts as beaten) among the product-of-marginals
     candidates built from each kind's top-`JOINT_SEARCH` words, at every position with a next;
     a truth word outside a kind's top-`JOINT_SEARCH` ranks past every candidate
     (`JOINT_SEARCH ** len(INSTRUCTION_KINDS)`). Scored `JOINT_CHUNK` positions at a time."""
@@ -310,7 +305,7 @@ The loss parts (token-weighted over the set) and the readings the module docstri
     held = {kind: 0 for kind in INSTRUCTION_KINDS}
     changed = {kind: 0 for kind in INSTRUCTION_KINDS}
     joint_hits = {k: 0 for k in JOINT_TOP_K}
-    landed_hits = landed_true = landed_said = landed_both = 0
+
     for batch in _batches(sequences, model.config, types, batch_size=batch_size, order=np.arange(len(sequences)), device=device):
         output = model(batch)
         terms = model.loss(output, batch)
@@ -318,7 +313,6 @@ The loss parts (token-weighted over the set) and the readings the module docstri
         n_next, n_valid = int(has_next.sum()), int(batch.valid.sum())
         for kind in (*INSTRUCTION_KINDS, "next"):
             sums[kind] = sums.get(kind, 0.0) + float(terms[kind]) * n_next
-        sums["landed"] = sums.get("landed", 0.0) + float(terms["landed"]) * n_valid
         count_next += n_next
         count_valid += n_valid
         for column, kind in enumerate(INSTRUCTION_KINDS):
@@ -341,15 +335,9 @@ The loss parts (token-weighted over the set) and the readings the module docstri
             ranks = _joint_ranks(output.logits, batch.targets, has_next)
             for k in JOINT_TOP_K:
                 joint_hits[k] += int((ranks < k).sum())
-        said = (output.landed_logit > 0.0) & batch.valid
-        truth = (batch.landed > 0.5) & batch.valid
-        landed_hits += int(((said == truth) & batch.valid).sum())
-        landed_true += int(truth.sum())
-        landed_said += int(said.sum())
-        landed_both += int((said & truth).sum())
+
     out: dict[str, Any] = {name: _rate(sums[name], count_next) for name in (*INSTRUCTION_KINDS, "next")}
-    out["landed"] = _rate(sums["landed"], count_valid)
-    out["total"] = None if out["next"] is None else out["next"] + model.config.landed_loss_weight * out["landed"]
+    out["total"] = out["next"]                      # D72: the terminal kind is one of the five
     out["positions_with_next"] = count_next
     out["valid_positions"] = count_valid
     out["top1"] = {kind: _rate(hits[kind], count_next) for kind in INSTRUCTION_KINDS}
@@ -361,10 +349,6 @@ The loss parts (token-weighted over the set) and the readings the module docstri
     out["change_share"] = {kind: _rate(changed[kind], count_next) for kind in INSTRUCTION_KINDS}
     out["joint_top_k"] = {str(k): _rate(joint_hits[k], count_next) for k in JOINT_TOP_K} if joint else None
     # the landing: its base rate (one positive per flight) beside the accuracy, so the accuracy is not read as skill
-    out["landed_accuracy"] = _rate(landed_hits, count_valid)
-    out["landed_share"] = _rate(landed_true, count_valid)
-    out["landed_precision"] = _rate(landed_both, landed_said)
-    out["landed_recall"] = _rate(landed_both, landed_true)
     return out
 
 

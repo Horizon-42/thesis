@@ -58,10 +58,11 @@ def render(readings: dict[str, Any], baseline: dict[str, Any], *, limit: int | N
     count, 1 by construction)."""
     lines = ["instruction prior · val readings (positions with a next word: "
              f"{readings['positions_with_next']}" + (f"; a PREFIX of {limit} flights per split" if limit else "") + ")"]
-    lines.append(f"  next-word NLL (nats): total {_f(readings['next'])} vs bigram {_f(baseline['bigram_nll']['next'])}"
-                 f" · landed BCE {_f(readings['landed'])}; landing: accuracy {_f(readings['landed_accuracy'])} "
-                 f"(base rate {_f(readings['landed_share'])}), precision {_f(readings['landed_precision'])}, "
-                 f"recall {_f(readings['landed_recall'])}")
+    lines.append(f"  next-word NLL (nats): total {_f(readings['next'])} vs bigram "
+                 f"{_f(baseline['bigram_nll']['next'])} · terminal (continue / landed / go-around) "
+                 f"top-1 {_f(readings['top1']['terminal'])}, NLL {_f(readings['terminal'])}; "
+                 f"go-around is NEVER in the truth here (results §13.5) — the kind measures "
+                 f"continue-vs-landed only")
     lines.append("  kind       NLL    bigram   top-1   hold    top-2   top-4   top-8   flip    miss    recall  change")
     lines.append("             ·· over positions with a next ··          ·· held ·· ·· changed ··  share")
     for kind in INSTRUCTION_KINDS:
@@ -92,7 +93,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--n-heads", type=int, default=4)
     parser.add_argument("--d-ff", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--landed-loss-weight", type=float, default=1.0)
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of each split (a smoke test)")
     parser.add_argument("--device", default="auto")
     args = parser.parse_args(argv)
@@ -124,10 +124,10 @@ def main(argv: list[str] | None = None) -> int:
     prior_config = PriorConfig(
         words=word_counts(vocabulary, runway_vocabulary), type_count=types.size, vocabulary_sha256=vocabulary.sha256, d_model=args.d_model,
         n_heads=args.n_heads, n_layers=args.n_layers, d_ff=args.d_ff, dropout=args.dropout,
-        max_positions=longest, landed_loss_weight=args.landed_loss_weight,
+        max_positions=longest,
     )
     print(f"  {len(series)} flights rebuilt: train {len(sequences['train'])}, val {len(sequences['val'])}; "
-          f"longest sentence {longest} positions at τ = {vocabulary.token_step_s:g} s; {types.size - 1} aircraft types; "
+          f"longest sentence {longest} events; {types.size - 1} aircraft types; "
           f"{len(runway_vocabulary)} runways ({', '.join(runway_vocabulary.idents)}); "
           f"vocabulary {vocabulary.sha256[:12]}…", flush=True)
 
@@ -138,9 +138,10 @@ def main(argv: list[str] | None = None) -> int:
     def log(row: dict[str, Any]) -> None:
         val = row["val"]
         print(f"  epoch {row['epoch']:3d}: train next {row['train']['next']:.3f} · val next {val['next']:.3f} "
-              f"(h {val['heading']:.3f} a {val['altitude']:.3f} s {val['speed']:.3f} i {val['intercept']:.3f} r {val['runway']:.3f}) "
-              f"top-1 h {val['top1']['heading']:.3f} a {val['top1']['altitude']:.3f} s {val['top1']['speed']:.3f} "
-              f"· landed {val['landed_accuracy']:.3f}", flush=True)
+              f"(h {val['heading']:.3f} a {val['altitude']:.3f} s {val['speed']:.3f} "
+              f"r {val['runway']:.3f} d {val['duration']:.3f} t {val['terminal']:.3f}) "
+              f"top-1 h {val['top1']['heading']:.3f} a {val['top1']['altitude']:.3f} "
+              f"s {val['top1']['speed']:.3f} t {val['top1']['terminal']:.3f}", flush=True)
 
     result = fit(model, sequences["train"], sequences["val"], types, epochs=args.epochs, patience=args.patience,
                  batch_size=args.batch_size, learning_rate=args.learning_rate, seed=args.seed, device=device, log=log)
