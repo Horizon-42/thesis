@@ -37,8 +37,11 @@ import time
 from collections import Counter
 from pathlib import Path
 
+import math
+
 from final_approach.frame import TrackPoint
 from trajectory_data_process.harvest.airports import load_airport
+from trajectory_data_process.harvest.altitude_filter import filter_altitude_outliers
 from ts_transformer.repo_layout import REPO_ROOT
 
 #: Rows this far along the approach, and no higher, are the ones a runway choice is read from.
@@ -58,6 +61,17 @@ ESTABLISHED_CROSS_M = 500.0
 SEPARABLE_M = 2 * ESTABLISHED_CROSS_M
 #: AIM 5-4-19 a: a side-step is authorised for parallels "separated by 1,200 feet or less".
 SIDE_STEP_MAX_M = 1200.0 * 0.3048
+#: What the PUBLISHED final approach course actually is, on the final — the 500 m above is ours,
+#: an analysis threshold for "on the extended centreline versus on a downwind", and it is 5x too
+#: wide to tell two parallels apart. AIM 1-1-18 d 4: "The width of the final approach course is
+#: tailored so that the total width is usually 700 feet at the runway threshold" -> +/-350 ft.
+#: (The same paragraph: lateral integrity is 0.3 NM = 556 m for LNAV, and 40 m for LPV.)
+FINAL_HALF_M = 350.0 * 0.3048
+FINAL_RANGE_M = 3_000.0
+#: The established rule's THIRD condition, which the first reading left out: the track must lie
+#: along the course. Without it a crossing runway (KRDU 14 against 05) wins the arg-min near the
+#: airport although the aircraft is 90 degrees off it.
+TRACK_TOLERANCE_DEG = 30.0
 #: A go-around is low AND NEAR, then a climb. 460 m at 11 km is an ordinary approach, not an abort.
 NEAR_M = 5_000.0
 LOW_M = 300.0
@@ -75,12 +89,18 @@ def parallel_partner(ident: str, idents: list[str]) -> str | None:
     return None
 
 
-def read_track(path: Path) -> tuple[list[TrackPoint], int]:
-    """The stored samples as ``[t, lon, lat, alt]`` and the landing row."""
+def read_track(path: Path) -> tuple[list[TrackPoint], int, int]:
+    """The stored samples as ``[t, lon, lat, alt]``, the landing row, and how many altitudes
+    the read-time repair fixed.
+
+    The altitude-outlier repair is READ-TIME in this repository and `tracks/` is never edited,
+    so every reader has to apply it. Reading the store raw put a 9125 m sample in the middle of
+    a 3.9 km final and made this runner call an ordinary approach a go-around.
+    """
     data = json.loads(path.read_text(encoding="utf-8"))
-    samples = data["samples"]
-    landing = data["landing_sample_index"]
-    return [TrackPoint(lat=s[2], lon=s[1], alt_m=s[3]) for s in samples], int(landing)
+    repaired = filter_altitude_outliers(data["samples"])
+    return ([TrackPoint(lat=s[2], lon=s[1], alt_m=s[3]) for s in repaired.samples],
+            int(data["landing_sample_index"]), len(repaired.outliers))
 
 
 def measure(airport_code: str, out: Path, config_file: Path, cifp_file: Path, limit: int) -> dict:
@@ -106,57 +126,94 @@ def measure(airport_code: str, out: Path, config_file: Path, cifp_file: Path, li
 
     changed, changed_to_partner, switch_km, goarounds, goaround_km = [], [], [], [], []
     other_runway_seen = Counter()
+    on_final, final_mismatch, no_final_course = Counter(), [], 0
+    outliers_repaired = 0
     started = time.time()
     for n, record in enumerate(records, 1):
         if n % 1000 == 0:
             print(f"  {n}/{len(records)} ({time.time() - started:.0f} s)", flush=True)
         landed = record["runway"]
-        points, landing_row = read_track(store / record["file"])
+        points, landing_row, repaired = read_track(store / record["file"])
+        outliers_repaired += repaired
         landed_frame = frames[idents.index(landed)]
 
-        # one pass per threshold, strided
+        # one pass per threshold, strided.
+        # SIGN: RunwayFrame's along axis points ALONG THE LANDING DIRECTION, so an aircraft short
+        # of the threshold projects NEGATIVE and `-along_m` is its distance to go. Reading it the
+        # other way silently measures the rows PAST the threshold (and the reciprocal end of the
+        # same pavement, whose along is large and positive) — which is what the first two readings
+        # of this runner did, and why they were thrown away.
         rows = list(range(0, len(points), STRIDE))
         projected = {i: [f.project(points[k]) for k in rows] for i, f in zip(idents, frames)}
-        landed_proj = projected[landed]
 
-        # --- runway choice over the approach
-        choice: list[tuple[float, str]] = []
-        for index, k in enumerate(rows):
-            if k > landing_row:
-                break
-            here = landed_proj[index]
-            if not (INNER_M < here.along_m <= RANGE_M and here.height_m <= CEILING_M):
-                continue
+        def to_go(ident: str, index: int) -> float:
+            return -projected[ident][index].along_m
+
+        def aligned(ident: str, index: int) -> bool:
+            """The track lies along this course: the established rule's third condition."""
+            j = min(index + 1, len(rows) - 1)
+            here, nxt = projected[ident][index], projected[ident][j]
+            closing, drift = nxt.along_m - here.along_m, nxt.cross_m - here.cross_m
+            if closing <= 0.0 or math.hypot(closing, drift) < 1.0:
+                return False                                    # going away, or not moving
+            return abs(math.degrees(math.atan2(drift, closing))) <= TRACK_TOLERANCE_DEG
+
+        def chosen(index: int, half_m: float, near_m: float, far_m: float) -> str | None:
+            """The course this row expresses: nearest centreline the aircraft is ON and tracking."""
             on = [(abs(projected[i][index].cross_m), i) for i in idents
-                  if projected[i][index].along_m > INNER_M
-                  and abs(projected[i][index].cross_m) <= ESTABLISHED_CROSS_M]
-            if on:
-                choice.append((here.along_m, min(on)[1]))
-        # compress to runs of (runway, along at its start, along at its end); along DECREASES
+                  if near_m < to_go(i, index) <= far_m
+                  and abs(projected[i][index].cross_m) <= half_m
+                  and aligned(i, index)]
+            return min(on)[1] if on else None
+
+        usable = [index for index, k in enumerate(rows) if k <= landing_row]
+
+        # --- which runway was it being vectored to (wide corridor, outside the crossing zone)
+        choice: list[tuple[float, str]] = []
+        for index in usable:
+            d = to_go(landed, index)
+            if not (INNER_M < d <= RANGE_M and projected[landed][index].height_m <= CEILING_M):
+                continue
+            c = chosen(index, ESTABLISHED_CROSS_M, INNER_M, RANGE_M)
+            if c:
+                choice.append((d, c))
         runs: list[list] = []
-        for along, c in choice:
+        for d, c in choice:
             if runs and runs[-1][0] == c:
-                runs[-1][2] = along
+                runs[-1][2] = d
             else:
-                runs.append([c, along, along])
+                runs.append([c, d, d])
         runs = [r for r in runs if abs(r[1] - r[2]) >= MIN_RUN_M]
         if len(runs) > 1 and runs[-1][0] == landed:
             previous = runs[-2][0]
             other_runway_seen[previous] += 1
             changed.append(record["flight_key"])
-            switch_km.append(round(runs[-2][2] / 1000.0, 2))       # where the other one was left
+            switch_km.append(round(runs[-2][2] / 1000.0, 2))
             if partners[landed] == previous:
                 changed_to_partner.append(record["flight_key"])
 
-        # --- go-around: low and near, then high again, then landing
+        # --- which PUBLISHED course did it actually line up on, on the final
+        final_course = None
+        for index in usable:
+            if 0.0 < to_go(landed, index) <= FINAL_RANGE_M:
+                c = chosen(index, FINAL_HALF_M, 0.0, FINAL_RANGE_M)
+                if c:
+                    final_course = c
+        if final_course is None:
+            no_final_course += 1
+        else:
+            on_final[final_course == landed] += 1
+            if final_course != landed:
+                final_mismatch.append((record["flight_key"], final_course, landed))
+
+        # --- go-around: low AND near, then a climb, then the landing
         low_at = None
-        for index, k in enumerate(rows):
-            if k > landing_row:
-                break
-            here = landed_proj[index]
+        for index in usable:
+            here = projected[landed][index]
+            d = to_go(landed, index)
             if low_at is None:
-                if here.height_m <= LOW_M and 0.0 < here.along_m <= NEAR_M:
-                    low_at = here.along_m
+                if here.height_m <= LOW_M and 0.0 < d <= NEAR_M:
+                    low_at = d
             elif here.height_m >= LOW_M + CLIMB_M:
                 goarounds.append(record["flight_key"])
                 goaround_km.append(round(low_at / 1000.0, 2))
@@ -182,11 +239,20 @@ def measure(airport_code: str, out: Path, config_file: Path, cifp_file: Path, li
             "previous_runway": dict(other_runway_seen),
             "examples": changed[:20],
         },
+        "final_course": {
+            "matched_landed_runway": on_final[True],
+            "other_course": on_final[False],
+            "no_course_held": no_final_course,
+            "half_width_m": round(FINAL_HALF_M, 1),
+            "range_m": FINAL_RANGE_M,
+            "examples": [{"flight": f, "lined_up_on": c, "landed_on": l} for f, c, l in final_mismatch[:20]],
+        },
         "go_around": {
             "flights": len(goarounds), "share": round(len(goarounds) / len(records), 4),
             "low_km_p50": sorted(goaround_km)[len(goaround_km) // 2] if goaround_km else None,
             "examples": goarounds[:20],
         },
+        "altitudes_repaired": outliers_repaired,
         "elapsed_s": round(time.time() - started, 1),
     }
     out.mkdir(parents=True, exist_ok=True)
@@ -194,8 +260,11 @@ def measure(airport_code: str, out: Path, config_file: Path, cifp_file: Path, li
     print(f"\nRUNWAY CHANGE {len(changed)}/{len(records)} ({result['runway_change']['share']:.3%}), "
           f"of which to the parallel {len(changed_to_partner)}; switch p50 "
           f"{result['runway_change']['switch_km_p50']} km", flush=True)
+    print(f"FINAL COURSE (+/-{FINAL_HALF_M:.0f} m, the published 700 ft width) matched {on_final[True]}, "
+          f"other {on_final[False]}, none held {no_final_course}", flush=True)
     print(f"GO-AROUND {len(goarounds)}/{len(records)} ({result['go_around']['share']:.3%}); "
           f"low at p50 {result['go_around']['low_km_p50']} km", flush=True)
+    print(f"altitudes repaired at read: {outliers_repaired}", flush=True)
     print(f"written {out / 'approach_events.json'} in {result['elapsed_s']:.0f} s", flush=True)
     return result
 
