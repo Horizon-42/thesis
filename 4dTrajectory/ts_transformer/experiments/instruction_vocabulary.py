@@ -67,8 +67,17 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
     measures the range, not the bin), how many were clamped, what was absorbed and why."""
     if not readings:
         raise ValueError("a split with no flights has nothing to summarise")
-    per_kind = {kind: [sum(1 for i in r.instructions if i.kind == kind) for r in readings] for kind in INSTRUCTION_KINDS}
-    counts = {kind: Counter(i.word for r in readings for i in r.instructions if i.kind == kind) for kind in INSTRUCTION_KINDS}
+    # The duration and terminal words are COLUMNS computed by `sentence()`, not `Instruction`
+    # objects, so counting them off the instruction list reads 0 for both — which is what the
+    # first six-kind run printed ("duration 0/151, terminal 0/3") although every event carries
+    # one. Both counts come off the word matrix, which is the sentence itself.
+    columns = {kind: INSTRUCTION_KINDS.index(kind) for kind in INSTRUCTION_KINDS}
+    spoken = ("heading", "altitude", "speed", "runway")     # the kinds an Instruction is issued for
+    per_kind = {kind: ([sum(1 for i in r.instructions if i.kind == kind) for r in readings] if kind in spoken
+                       else [len(r.words) for r in readings])
+                for kind in INSTRUCTION_KINDS}
+    counts = {kind: Counter(int(w) for r in readings for w in r.words[:, columns[kind]])
+              for kind in INSTRUCTION_KINDS}
     unclamped = [i for r in readings for i in r.instructions if not i.clamped]
     residuals = {
         "heading_deg": [abs(wrap_deg(i.target - vocabulary.heading_centre_deg(i.word))) for i in unclamped if i.kind == "heading"],

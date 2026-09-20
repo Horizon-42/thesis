@@ -53,7 +53,8 @@ def test_the_summary_counts_what_the_hand_check_and_the_bin_decision_read(readin
     # a clamped word never enters the residuals: an 11 000 ft start reads as the top word, 1000 ft off its centre
     clamped = ins.Instruction("altitude", vocabulary.altitude_words - 1, 11_000 * ins.FT, 0.0, 0.0, clamped=True)
     with_clamp = ins.Reading("d", "f", (clamped,), np.array([0.0]),
-                             np.array([[0, vocabulary.altitude_words - 1, 0, -1, 0]]), RUNWAY, True, 0.0)
+                             np.array([[0, vocabulary.altitude_words - 1, 0, 0, 0, ins.TERMINAL_LANDED]]),
+                             RUNWAY, True, 0.0)
     summary = runner.summarise([*items, with_clamp], vocabulary)
     assert summary["clamped"]["altitude"] == 1 and summary["target_to_bin_centre_p95"]["altitude_m"] <= vocabulary.altitude_bin_m / 2 + 1e-9
     with pytest.raises(ValueError, match="no flights"):
