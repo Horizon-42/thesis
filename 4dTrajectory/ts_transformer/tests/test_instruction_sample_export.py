@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,11 @@ import pytest
 from ts_transformer.experiments.instruction_sample_export import (
     INDEX_SCHEMA, drawn_flights, readings_by_flight, update_index,
 )
-from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS
+import numpy as np
+
+from ts_transformer.experiments.instruction_sample_export import geometric_track
+from ts_transformer.manoeuvre import instruction_kinematics
+from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, Vocabulary
 
 # The frontend reader's own constants (`src/data/trainingSample.ts`). Declared MIRRORS: the two
 # sides are one contract, and a fixture that restated them could not catch it moving.
@@ -125,3 +130,91 @@ def test_a_foreign_schema_is_refused_rather_than_rewritten(tmp_path: Path):
     (tmp_path / "index.json").write_text(json.dumps({"schema": "something-else", "sets": []}), encoding="utf-8")
     with pytest.raises(SystemExit, match="something-else"):
         update_index(tmp_path, "KRDU", _entry("vocabulary_tau10"))
+
+
+# ── the flown sentence in the payload (T5) ───────────────────────────────────
+
+def _reading(events: list[float], words: list[list[int]]) -> dict:
+    return {
+        "dataset_id": "KRDU:TEST", "flight_id": "TEST", "runway": "05L",
+        "event_times_s": events, "words": words,
+        "established_from_start": True, "duration_s": 200.0,
+    }
+
+
+def _frame(rows: int = 101) -> dict:
+    times = np.arange(rows, dtype=np.float64) * 2.0
+    return {
+        "t": times,
+        "to_go_m": 20000.0 - 70.0 * times,
+        "cross_m": np.zeros(rows),
+        "height_m": np.full(rows, 600.0),
+        "ground_speed_mps": np.full(rows, 70.0),
+        "relative_course_deg": np.zeros(rows),
+        "course_unwrapped_deg": np.zeros(rows),
+        "established": np.ones(rows, dtype=bool),
+    }
+
+
+def test_the_flown_sentence_is_the_artefacts_own_sentence_not_a_re_reading():
+    """V19 for the geometric track too: the reading handed to the kinematics is rebuilt from the
+    artefact's event times and words, so the line drawn is the sentence the view shows."""
+    columns = {kind: index for index, kind in enumerate(INSTRUCTION_KINDS)}
+    words = [[0] * len(INSTRUCTION_KINDS), [0] * len(INSTRUCTION_KINDS)]
+    words[1][columns["heading"]] = 9                     # +90° from 100 s
+    words[0][columns["speed"]] = words[1][columns["speed"]] = 4
+    words[1][columns["terminal"]] = 1
+    flown = geometric_track(_reading([0.0, 100.0], words), Vocabulary(), _frame())
+
+    assert flown["tS"][0] == 0.0
+    # it flies the course until the second event, then turns
+    assert abs(flown["relCourseDeg"][50]) < 1e-9
+    assert flown["relCourseDeg"][-1] > 45.0
+    # having turned 90° off the course it never reaches the runway, and says so
+    assert flown["endReason"] == "time-cap"
+    assert flown["finalGapM"] > 1000.0
+
+
+def test_the_geometry_block_states_every_assumption_the_line_was_drawn_under():
+    """An approximation nobody can see stated is worse than none (design §5.4), so the block
+    travels with the export and names the files its constants came from."""
+    from ts_transformer.outputs.guidance.controller import (
+        ACCEL_MAX_MPS2, CLIMB_MAX_RAD, DESCENT_MAX_RAD, HEIGHT_GAIN_S,
+    )
+    from ts_transformer.geometry.flyability import G
+
+    block = instruction_kinematics.assumptions()
+    for field in ("method", "dtS", "bankDeg", "gravityMps2", "heightGainS", "descentMaxDeg",
+                  "climbMaxDeg", "accelMaxMps2", "startsAt", "stopRule", "windModelled",
+                  "aircraftTypeModelled", "constantsFrom"):
+        assert field in block, field
+    # the stated numbers ARE the imported ones — a block that drifted from the code it
+    # describes is worse than no block
+    assert block["gravityMps2"] == G
+    assert block["heightGainS"] == HEIGHT_GAIN_S
+    assert block["accelMaxMps2"] == ACCEL_MAX_MPS2
+    assert block["descentMaxDeg"] == pytest.approx(math.degrees(DESCENT_MAX_RAD))
+    assert block["climbMaxDeg"] == pytest.approx(math.degrees(CLIMB_MAX_RAD))
+    assert block["dtS"] == instruction_kinematics.STEP_S
+    assert str(int(instruction_kinematics.OVERRUN_S)) in block["stopRule"]
+    assert block["windModelled"] is False
+    assert block["aircraftTypeModelled"] is False
+
+
+def test_the_gap_is_reported_with_the_fraction_of_the_approach_it_covers():
+    """A mean gap over a flown track that stopped early would otherwise read as if it spanned
+    the whole approach."""
+    columns = {kind: index for index, kind in enumerate(INSTRUCTION_KINDS)}
+    words = [[0] * len(INSTRUCTION_KINDS)]
+    words[0][columns["speed"]] = 4
+    words[0][columns["terminal"]] = 1
+    # A frame that outlives the flown sentence: it starts 3 km out, so the words cross the
+    # threshold long before the observation ends and the comparison covers only part of it.
+    frame = _frame()
+    frame["to_go_m"] = 3000.0 - 70.0 * frame["t"]
+    flown = geometric_track(_reading([0.0], words), Vocabulary(), frame)
+
+    assert flown["endReason"] == "crossed-threshold"
+    assert flown["comparedS"] == pytest.approx(flown["tS"][-1], abs=2.0)
+    assert flown["comparedFraction"] < 0.5          # a PARTIAL cover, which is the point
+    assert flown["comparedFraction"] == pytest.approx(flown["comparedS"] / frame["t"][-1], abs=0.01)

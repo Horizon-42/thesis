@@ -17,13 +17,16 @@ The two views therefore show the same aircraft, which is the whole point of matc
 
 Written under ``--out`` (refused if it exists), plus an entry in the parent's ``index.json``:
 
-    <out>/sample.json    the vocabulary's spec, its runway classes, and per flight the sentence
-                         (events × 6 words), the instructions, the absorbed manoeuvres and the
-                         observed track IN THE RUNWAY FRAME (what the read-back charts plot)
+    <out>/sample.json    the vocabulary's spec, its runway classes, the `geometry` block of
+                         assumptions the flown sentences are drawn under, and per flight the
+                         sentence (events × 6 words), the instructions, the absorbed manoeuvres,
+                         the observed track IN THE RUNWAY FRAME (what the read-back charts plot)
+                         and the `geometric` track flown from the words alone
     ../index.json        the manifest the frontend lists; this set added or replaced in place
 
-The track's geodetic columns (lon/lat/alt) and the geometric "what the words alone say" track are
-NOT here: they belong to the 3D layer, which is a later step of the design (T5/T6).
+The tracks' geodetic columns (lon/lat/alt) are NOT here: they belong to the 3D layer, which is a
+later step of the design (T6), and they arrive with a vertical-datum conversion of their own —
+records are MSL and Cesium reads the ellipsoid.
 """
 
 from __future__ import annotations
@@ -40,8 +43,10 @@ import numpy as np
 from ts_transformer.config import TSConfig
 from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.manoeuvre import instruction_kinematics as kinematics
 from ts_transformer.manoeuvre.instructions import (
-    INSTRUCTION_KINDS, VOCABULARY_FILE, course_frame, load_vocabulary, runway_sha256, word_counts,
+    INSTRUCTION_KINDS, VOCABULARY_FILE, Reading, Vocabulary, course_frame, load_vocabulary,
+    runway_sha256, word_counts,
 )
 from ts_transformer.training.train import load_checkpoint_payload
 
@@ -94,11 +99,10 @@ def _round(values: np.ndarray, digits: int) -> list[float]:
     return [round(float(value), digits) for value in values]
 
 
-def observed_track(series) -> dict[str, Any]:
+def observed_track(frame: dict[str, Any]) -> dict[str, Any]:
     """The flight in the FINAL APPROACH COURSE's frame — the same `course_frame` the labeller
     read the words from, so the charts and the words cannot disagree about where the aircraft
     was. Geodetic columns are deliberately absent (see the module docstring)."""
-    frame = course_frame(series)
     return {
         "tS": _round(frame["t"] - frame["t"][0], 1),
         "toGoM": _round(frame["to_go_m"], 1),
@@ -128,9 +132,44 @@ def _absorbed(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def flight_payload(reading: dict[str, Any], series, stratum: str) -> dict[str, Any]:
+def geometric_track(
+    reading: dict[str, Any], vocabulary: Vocabulary, frame: dict[str, Any],
+) -> dict[str, Any]:
+    """What the words alone say, flown by `instruction_kinematics` and measured against the
+    aircraft that was actually there.
+
+    The reading is rebuilt from the artefact's own event times and words — the sentence is NOT
+    re-read from the track (V19), so this flies exactly the sentence the view shows.
+    """
+    words = np.asarray(reading["words"], dtype=np.int64)
+    rebuilt = Reading(
+        dataset_id=reading["dataset_id"], flight_id=reading["flight_id"], instructions=(),
+        event_times_s=np.asarray(reading["event_times_s"], dtype=np.float64), words=words,
+        runway=reading["runway"], established_from_start=reading["established_from_start"],
+        duration_s=reading["duration_s"],
+    )
+    # THE seam V19 opens: the sentence is copied from the artefact while the track is rebuilt
+    # here, so nothing but this line says they are the same flight's. They agree on all 40
+    # today; a rebuild that ever drifts would draw one flight's words over another's track and
+    # look entirely reasonable.
+    rebuilt_s = float(frame["t"][-1] - frame["t"][0])
+    if abs(rebuilt_s - reading["duration_s"]) > 0.05:
+        raise SystemExit(
+            f"{reading['flight_id']}: the artefact's sentence spans {reading['duration_s']:g} s but the "
+            f"rebuilt track spans {rebuilt_s:g} s — these are not the same flight"
+        )
+    track = kinematics.fly(
+        rebuilt, vocabulary, kinematics.Start.from_course_frame(frame), observed_s=rebuilt_s,
+    )
+    return {**track.to_dict(), **kinematics.gap_to_observed(track, frame)}
+
+
+def flight_payload(
+    reading: dict[str, Any], series, stratum: str, vocabulary: Vocabulary,
+) -> dict[str, Any]:
     """One flight as the frontend reads it. ``words`` is copied from the artefact UNCHANGED —
     six columns in `INSTRUCTION_KINDS` order, which the reader checks positionally."""
+    frame = course_frame(series)
     return {
         "flightKey": reading["flight_id"],
         "callsign": reading["flight_id"].split("_", 1)[0],
@@ -145,7 +184,8 @@ def flight_payload(reading: dict[str, Any], series, stratum: str) -> dict[str, A
         },
         "instructions": [_camel(item) for item in reading["instructions"]],
         "absorbed": [_absorbed(item) for item in reading["absorbed"]],
-        "observed": observed_track(series),
+        "observed": observed_track(frame),
+        "geometric": geometric_track(reading, vocabulary, frame),
     }
 
 
@@ -205,13 +245,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {len(draw)} flights drawn from the hand check ({args.flights // 2} per stratum); rebuilding their tracks", flush=True)
     series = rebuild_cohort(checkpoint, config, [readings[flight_id]["dataset_id"] for flight_id, _ in draw])
 
-    flights = [flight_payload(readings[flight_id], item, stratum)
+    flights = [flight_payload(readings[flight_id], item, stratum, vocabulary)
                for (flight_id, stratum), item in zip(draw, series, strict=True)]
     spec = payload["spec"]
     out.mkdir(parents=True)
     write_json_atomic(out / SAMPLE_FILE, {
         "schema": SAMPLE_SCHEMA, "setId": set_id, "airport": airport, "writtenUtc": utc_now(),
         "kinds": list(INSTRUCTION_KINDS),
+        "geometry": kinematics.assumptions(),
         "vocabulary": {
             "sha256": vocabulary.sha256, "runwaySha256": runway_sha256(runways),
             "readingRule": spec["reading_rule"], "tokenStepS": spec["token_step_s"],
