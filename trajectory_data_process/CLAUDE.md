@@ -46,12 +46,18 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
 ## Runway thresholds & TCH (static data feeding the harvest)
 
 - `runway_thresholds.json` holds LANDING (displaced) thresholds, not pavement ends
-  (`runway-thresholds-v2`). **Fix the GENERATOR, never the JSON** —
+  (`runway-thresholds-v3`). **Fix the GENERATOR, never the JSON** —
   `acquisition/runways.landing_thresholds_from_row` is the one computation (TD8).
 - **Per-runway TCH is published in the CIFP and is NOT 15 m** (15.27–18.11 m): LPV Path Point
   records, else the RNAV approach's runway leg where LNAV/VNAV minima are published (KRDU 32,
   KSMF 35R; `tch_source == "faa_cifp_approach_leg"`); only a runway with no RNAV procedure keeps
   `None` (KRDU 14). The PG runway record's TCH is the ILS/VGSI figure — not read (TD9).
+- **The CIFP publishes NO minima — the decision altitude comes off the plates** in
+  `data/RNAV_CHARTS/`, read once by `extract_approach_minima.py` into `published_minima` on every
+  threshold (`runway-thresholds-v3`); 25 of 26 are vertically guided (KRDU 14 is not), and the
+  plate's height is above TOUCHDOWN, so use `Runway.decision_height_above_threshold_m`. Nothing
+  parses a PDF at harvest or training time, and `build_runway_config.py` now REFUSES to overwrite
+  the config it can no longer produce (TD20).
 
 ## Altitude outlier repair
 

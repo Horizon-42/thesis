@@ -6,6 +6,30 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## `build_runway_config.py` can no longer rebuild `runway_thresholds.json` (2026-09-20)
+
+**Verified** — the generator writes `name` / `length_ft` / `surface` / `thresholds` per runway.
+The configuration on disk also carries `width_ft` and `runway_width_effective_date` (which
+`load_airport` REQUIRES, and which come from FAA NASR, not from the OurAirports CSVs the
+generator reads) and, since TD20, `published_minima`. Regenerating would have dropped the first
+two silently long before this change; it would now drop three. The generator therefore refuses
+outright when its output already exists, rather than writing a file the loader will reject.
+
+**Judgement**: the fix is to give the generator the two sources it is missing — the NASR runway
+widths and the plate minima (`extract_approach_minima.py` already produces the second) — so that
+one command rebuilds the whole file. Until then the file is maintained by
+`extract_approach_minima.py` for the minima and by hand for the widths, which is exactly the
+"fix the GENERATOR, never the JSON" rule (TD8) being broken by necessity. Not urgent: the airport
+set has not changed since the widths were added.
+
+## `trajectory_data_process/harvest/cifp.py` restates `FT_M` (2026-09-20)
+
+**Verified** — `cifp.py:37` defines `FT_M = 0.3048` locally while `geokit.constants` defines the
+same constant and eight other modules in the tree import it from there. Noticed while adding
+`approach_minima.py` next to it (which imports from geokit). Harmless today — the two values
+agree — but it is the single-source-of-truth rule the repo states for exactly this kind of
+conversion, and a local copy is a copy that cannot be corrected centrally.
+
 ## Two suites fail at HEAD, outside the ts tree (2026-09-20)
 
 **Verified** — `./run_all_tests.sh` on `dev-two-tier-feasibility` at `e74d5644`, with the working

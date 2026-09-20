@@ -13,6 +13,7 @@ from evaluation.tests.factories import (
     observed_payload,
     trajectory_payload,
 )
+from trajectory_data_process.harvest.approach_minima import no_vertical_minima
 from trajectory_data_process.harvest.airports import Runway
 
 
@@ -222,6 +223,7 @@ def test_a_runway_with_no_published_vertical_path_keeps_its_lateral_verdict():
         lpv_course_width_m=None,
         runway_source_cycle="2026-08-06",
         procedure_source_cycle="2026-08-06",
+        published_minima=no_vertical_minima("synthetic runway: this test does not exercise published minima"),
     )
     context = assessment_for_runway(runway)
     assert not context.baro_vnav_approved

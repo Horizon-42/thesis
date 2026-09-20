@@ -11,6 +11,7 @@ from final_approach import Projected
 
 from trajectory_data_process.harvest.__main__ import build_parser
 from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
+from trajectory_data_process.harvest.approach_minima import no_vertical_minima
 from trajectory_data_process.harvest.airports import (
     PATH_POINT_TCH_SOURCE,
     Airport,
@@ -43,6 +44,7 @@ def _airport() -> Airport:
         width_m=45.72, lpv_course_width_m=106.75,
         runway_source_cycle="2026-08-06",
         procedure_source_cycle="2026-08-06",
+        published_minima=no_vertical_minima("synthetic runway: this test does not exercise published minima"),
     )
     return Airport("KAAA", 35.0, -78.0, 100.0, (runway,))
 

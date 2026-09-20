@@ -11,6 +11,7 @@ import pytest
 from trajectory_data_process.harvest import freshness_rebuild as rebuild_module
 from trajectory_data_process.harvest.__main__ import build_parser
 from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
+from trajectory_data_process.harvest.approach_minima import no_vertical_minima
 from trajectory_data_process.harvest.airports import PATH_POINT_TCH_SOURCE, Airport, Runway
 from trajectory_data_process.harvest.freshness_rebuild import rebuild_fresh_tracks
 from trajectory_data_process.harvest.store import (
@@ -43,6 +44,7 @@ def _airport() -> Airport:
                 lpv_course_width_m=106.75,
                 runway_source_cycle="2026-08-06",
                 procedure_source_cycle="2026-08-06",
+                published_minima=no_vertical_minima("synthetic runway: this test does not exercise published minima"),
             ),
         ),
     )

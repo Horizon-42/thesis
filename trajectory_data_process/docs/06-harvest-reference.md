@@ -250,3 +250,64 @@ gets a new ID here and ONE new line in the index.**
   directory again, and overwrote a manifest a training job was already reading — the arm had
   to be discarded. Confirm the process is actually gone (`kill -0`) before rebuilding
   anything downstream of it.
+
+### TD20 · the published decision altitude comes from the approach plates, NOT the CIFP
+
+- **The CIFP publishes no approach minima at all**, so a per-runway decision altitude cannot be
+  read out of `FAACIFP18`. Checked three ways on the 2026-08-06 cycle: (1) the *CIFP Readme*'s
+  own list of record types is airports/heliports, runways, VHF and NDB navaids, terminal navaids,
+  localizer/glideslope, Path Points, MSA, en-route and terminal waypoints, SIDs, STARs,
+  approaches, airways, Class B/C/D and special-use airspace, Grid MORA — there is no minima
+  record; (2) the whole file's approach section (`P`/`F`) has exactly **one** kind of
+  continuation record, application type `W` (Level of Service, 6,741 of them), and it carries
+  service *letters* (whether LNAV / LP / LNAV-VNAV / LPV is authorised), never a value; (3) the
+  Path Point record (TD9) carries geometry only — LTP/FTP, glidepath, course width, TCH and the
+  two orthometric heights. The DA is a charting product, published on the plate.
+- **The plates are already on disk**: `data/RNAV_CHARTS/<ICAO>/*.PDF`, the FAA d-TPP RNAV (GPS)
+  and RNAV (RNP) approaches for all five airports. Only the **RNAV (GPS)** plates are read — the
+  RNAV (RNP) Z plates publish RNP AR minima, a different service the fleet is not flying.
+- **`extract_approach_minima.py` reads them once and writes the numbers into
+  `config/runway_thresholds.json`** (`published_minima` on every threshold, schema
+  `runway-thresholds-v3`). `load_airport` then reads config; nothing re-parses a PDF at harvest
+  or training time. Re-run it only when the chart cycle changes.
+- **What is stored is what the plate prints**: the decision altitude in feet MSL, the height
+  above touchdown it is published against (`decision_height_above_touchdown_ft` — named in full
+  because it is NOT the height above the threshold), and that runway's printed TDZE, plus the
+  plate's file name, procedure title, amendment and 28-day validity band (`chart_effective`, so a
+  verdict can name the plate it was graded against). No derived height is stored, because the
+  height above the *landing threshold* depends on which threshold elevation the reader uses, and
+  for an LPV runway `load_airport` replaces the configured elevation with the Path Point's LTP
+  (TD9). `Runway` derives it at read time:
+  `decision_height_above_threshold_m = DA(MSL) − elevation("msl")`, and RAISES on a runway with
+  no vertically guided minima. Across the fleet the landing threshold is **0.0–23.9 ft below the
+  touchdown zone** (largest KSTL 29), so reaching for the wrong one is a 7.3 m error.
+- **Every parse is checked against the same plate**: `DA − height above touchdown` must equal the
+  TDZE printed for THAT runway (a sidestep sheet prints two — KSJC 30L's prints `TDZE 30L 57` and
+  `TDZE 30R 55` — and the labelled one is used; a sheet that labels neither must print exactly
+  one, or the parse raises rather than choosing). All 25 published rows pass, including the one
+  below sea level (KMSY 20, TDZE −1 ft). **This check cannot catch a wrong ROW**, because every
+  row on a plate satisfies it (KRDU 05L: 598−214, 748−364 and 840−456 all give 384) — what
+  catches a wrong row is that the parse refuses to fall through: a table that names LPV without
+  an LPV row parsing RAISES instead of taking the LNAV/VNAV row 150 ft above it, and a plate
+  claimed to have no vertical guidance must show an LNAV MDA row to prove it. Six sheets, one
+  per shape, are pinned against figures read by eye.
+- **Three statuses, no silence.** `lpv` where the plate publishes LPV (23 thresholds), `lnav_vnav`
+  where it publishes Baro-VNAV minima but no LPV (**KRDU 32 = 820 ft / 391 ft HAT**, **KSMF 35R =
+  311 ft / 287 ft**, the same two runways TD9 already singles out), and `none` where the airport
+  publishes no instrument approach to that end at all (**KRDU 14**, which has no approach in the
+  CIFP either). A runway whose plate publishes only an LNAV **MDA** is not vertically guided, so
+  it gets no decision altitude — its missed approach point is a fix, not a height.
+- **The fleet's published DAs, height above touchdown** (feet): KRDU 05L 214, 05R 200, 23L 200,
+  23R 200, **32 391**; KSJC 12L 250, 12R 200, 30L 200, 30R 200; KSTL 06 359, 11 250, 12L 410,
+  12R 200, 24 200, 29 363, 30L 200, 30R 200; KSMF 17L 200, 17R 200, 35L 200, **35R 287**;
+  KMSY 02 396, 11 200, 20 250, 29 200. The spread is **200–410 ft above touchdown**.
+- **Above the LANDING THRESHOLD, which is the frame a trajectory is judged in, the same set runs
+  200.0–423.4 ft** (highest: KSTL 12L; lowest: KSJC 30L/30R at 199.9 ft). That whole range sits
+  inside altitude word 0 of the instruction vocabulary, which spans the threshold ±500 ft — so no
+  decision altitude in this fleet can be told from the altitude WORD, and a go-around's timing has
+  to be judged on the real height. That is the measurement behind the two-tier plan's D75.
+- **`build_runway_config.py` can no longer rebuild this file** and could not before this change
+  either: the generator writes `name`/`length_ft`/`surface`/`thresholds` only, while the config on
+  disk also carries `width_ft`, `runway_width_effective_date` and now `published_minima`. Running
+  it would drop all three. Recorded in `docs/code-health-followups.md`; until it is fixed, edit
+  the JSON through `extract_approach_minima.py`, never by regenerating.

@@ -5,6 +5,7 @@ import pytest
 
 from aeroviz_backend.observed_trajectories import ObservedTrajectoryBackend
 from flight_scenarios.identity import flight_key
+from trajectory_data_process.harvest.approach_minima import no_vertical_minima
 from trajectory_data_process.harvest.airports import (
     PATH_POINT_TCH_SOURCE,
     Airport,
@@ -126,6 +127,7 @@ def _arrival_runway(ident: str = "18") -> Runway:
         lpv_course_width_m=106.75,
         runway_source_cycle="2026-08-06",
         procedure_source_cycle="2026-08-06",
+        published_minima=no_vertical_minima("synthetic runway: this test does not exercise published minima"),
         position_source="faa_cifp_path_point",
         vertical_source="faa_cifp_path_point",
     )

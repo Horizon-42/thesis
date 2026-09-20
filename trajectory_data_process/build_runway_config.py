@@ -22,6 +22,7 @@ if __package__ is None or __package__ == "":  # pragma: no cover - direct execut
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from trajectory_data_process.acquisition.airports import FT_TO_M, airports_csv_path
+from trajectory_data_process.harvest.approach_minima import RUNWAY_THRESHOLDS_SCHEMA
 from trajectory_data_process.acquisition.runways import landing_thresholds_from_row, runways_csv_path
 
 DEFAULT_AIRPORTS = ["KRDU", "KMSY", "KSJC", "KSMF", "KSTL"]
@@ -43,7 +44,10 @@ def build_config(airports: list[str], aeroviz_root: Path) -> dict[str, Any]:
 
     # v2: ``thresholds[].lat/lon/elevation_m`` are the LANDING threshold (displaced where the
     # source data says so), not the pavement end; ``displaced_threshold_m`` records the shift.
-    out: dict[str, Any] = {"schema_version": "runway-thresholds-v2", "airports": {}}
+    # v3: every threshold also carries ``published_minima``, which this generator cannot
+    # produce -- ``extract_approach_minima.py`` fills it in a second pass, and until it has
+    # run ``load_airport`` refuses the file for the missing key.
+    out: dict[str, Any] = {"schema_version": RUNWAY_THRESHOLDS_SCHEMA, "airports": {}}
     runways_by_airport: dict[str, list[dict[str, Any]]] = {code: [] for code in codes}
 
     with runways_csv_path(aeroviz_root).open("r", encoding="utf-8", newline="") as f:
@@ -91,6 +95,20 @@ def main() -> None:
     aeroviz_root = Path(args.aeroviz_root) if args.aeroviz_root else script_path.parents[1] / "aeroviz-4d"
     output = Path(args.output) if args.output else script_path.parent / "config" / "runway_thresholds.json"
 
+    # This generator has fallen behind the file it generates. It writes name /
+    # length_ft / surface / thresholds; the configuration on disk also carries
+    # ``width_ft``, ``runway_width_effective_date`` and ``published_minima``, none of
+    # which come from the OurAirports CSVs. Overwriting would drop all three silently,
+    # so an existing configuration is refused outright rather than half rebuilt. See
+    # docs/code-health-followups.md.
+    if output.exists():
+        raise SystemExit(
+            f"{output} already exists and carries runway widths and published minima "
+            "that this generator cannot produce; it would drop them. Rebuild the "
+            "threshold geometry only by hand, or run extract_approach_minima.py to "
+            "refresh the minima."
+        )
+
     config = build_config(args.airports, aeroviz_root)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -98,6 +116,9 @@ def main() -> None:
     thresholds = sum(len(rw["thresholds"]) for a in config["airports"].values() for rw in a["runways"])
     print(f"[config] airports: {len(config['airports'])}  thresholds: {thresholds}")
     print(f"[config] output: {output}")
+    print("[config] incomplete: run extract_approach_minima.py to add published_minima, "
+          "and restore width_ft / runway_width_effective_date, which this generator "
+          "cannot produce (docs/code-health-followups.md)")
 
 
 if __name__ == "__main__":

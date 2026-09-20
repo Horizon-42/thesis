@@ -1,5 +1,5 @@
 {
-  "schema_version": "runway-thresholds-v2",
+  "schema_version": "runway-thresholds-v3",
   "airports": {
     "KRDU": {
       "name": "Raleigh-Durham International Airport",
@@ -21,7 +21,18 @@
               "elevation_m": 111.86,
               "elevation_source": "runway_end",
               "heading_deg": 45.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 598.0,
+                "decision_height_above_touchdown_ft": 214.0,
+                "touchdown_zone_elevation_ft": 384.0,
+                "chart": "00516RY5L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 5L",
+                "amendment": "Amdt 2 25FEB21",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             },
             {
               "ident": "23R",
@@ -30,7 +41,18 @@
               "elevation_m": 124.66,
               "elevation_source": "runway_end",
               "heading_deg": 225.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 609.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 409.0,
+                "chart": "00516RY23R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 23R",
+                "amendment": "Amdt 2A 26DEC24",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             }
           ]
         },
@@ -47,7 +69,18 @@
               "elevation_m": 121.01,
               "elevation_source": "runway_end",
               "heading_deg": 45.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 620.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 420.0,
+                "chart": "00516RY5R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 5R",
+                "amendment": "Amdt 4 25FEB21",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             },
             {
               "ident": "23L",
@@ -56,7 +89,18 @@
               "elevation_m": 131.37,
               "elevation_source": "runway_end",
               "heading_deg": 225.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 635.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 435.0,
+                "chart": "00516RY23L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 23L",
+                "amendment": "Amdt 3 25FEB21",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             }
           ]
         },
@@ -73,7 +117,18 @@
               "elevation_m": 131.67,
               "elevation_source": "runway_end",
               "heading_deg": 135.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "none",
+                "decision_altitude_ft_msl": null,
+                "decision_height_above_touchdown_ft": null,
+                "touchdown_zone_elevation_ft": null,
+                "chart": null,
+                "procedure": null,
+                "amendment": null,
+                "chart_effective": null,
+                "note": "KRDU publishes no RNAV (GPS) approach to RWY 14, so there is no decision altitude to be late for"
+              }
             },
             {
               "ident": "32",
@@ -82,7 +137,18 @@
               "elevation_m": 129.54,
               "elevation_source": "runway_end",
               "heading_deg": 315.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lnav_vnav",
+                "decision_altitude_ft_msl": 820.0,
+                "decision_height_above_touchdown_ft": 391.0,
+                "touchdown_zone_elevation_ft": 429.0,
+                "chart": "00516R32.PDF",
+                "procedure": "RNAV (GPS) RWY 32",
+                "amendment": "Orig-A 24MAY18",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             }
           ]
         }
@@ -108,7 +174,18 @@
               "elevation_m": 0.91,
               "elevation_source": "runway_end",
               "heading_deg": 15.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 398.0,
+                "decision_height_above_touchdown_ft": 396.0,
+                "touchdown_zone_elevation_ft": 2.0,
+                "chart": "00609R2.PDF",
+                "procedure": "RNAV (GPS) RWY 2",
+                "amendment": "Amdt 3A 30OCT25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             },
             {
               "ident": "20",
@@ -117,7 +194,18 @@
               "elevation_m": 0.91,
               "elevation_source": "opposite_end",
               "heading_deg": 195.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 249.0,
+                "decision_height_above_touchdown_ft": 250.0,
+                "touchdown_zone_elevation_ft": -1.0,
+                "chart": "00609RY20.PDF",
+                "procedure": "RNAV (GPS) Y RWY 20",
+                "amendment": "Amdt 3B 30OCT25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             }
           ]
         },
@@ -134,7 +222,18 @@
               "elevation_m": 1.22,
               "elevation_source": "runway_end",
               "heading_deg": 106.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 203.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 3.0,
+                "chart": "00609RY11.PDF",
+                "procedure": "RNAV (GPS) Y RWY 11",
+                "amendment": "Amdt 2D 30OCT25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             },
             {
               "ident": "29",
@@ -143,7 +242,18 @@
               "elevation_m": 0.63,
               "elevation_source": "runway_end",
               "heading_deg": 286.0,
-              "displaced_threshold_m": 92.7
+              "displaced_threshold_m": 92.7,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 202.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 2.0,
+                "chart": "00609RY29.PDF",
+                "procedure": "RNAV (GPS) Y RWY 29",
+                "amendment": "Amdt 4B 30OCT25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             }
           ]
         }
@@ -169,7 +279,18 @@
               "elevation_m": 12.2,
               "elevation_source": "runway_end",
               "heading_deg": 139.0,
-              "displaced_threshold_m": 398.4
+              "displaced_threshold_m": 398.4,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 294.0,
+                "decision_height_above_touchdown_ft": 250.0,
+                "touchdown_zone_elevation_ft": 44.0,
+                "chart": "00693RY12L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 12L",
+                "amendment": "Amdt 3A 21JUL16",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             },
             {
               "ident": "30R",
@@ -178,7 +299,18 @@
               "elevation_m": 15.57,
               "elevation_source": "runway_end",
               "heading_deg": 319.0,
-              "displaced_threshold_m": 773.3
+              "displaced_threshold_m": 773.3,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 255.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 55.0,
+                "chart": "00693RY30R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 30R",
+                "amendment": "Amdt 4B 23FEB23",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             }
           ]
         },
@@ -195,7 +327,18 @@
               "elevation_m": 12.27,
               "elevation_source": "runway_end",
               "heading_deg": 138.8,
-              "displaced_threshold_m": 396.8
+              "displaced_threshold_m": 396.8,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 246.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 46.0,
+                "chart": "00693RY12R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 12R",
+                "amendment": "Amdt 3A 21JUL16",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             },
             {
               "ident": "30L",
@@ -204,7 +347,18 @@
               "elevation_m": 16.04,
               "elevation_source": "runway_end",
               "heading_deg": 318.8,
-              "displaced_threshold_m": 774.8
+              "displaced_threshold_m": 774.8,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 257.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 57.0,
+                "chart": "00693RY30L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 30L",
+                "amendment": "Amdt 4A 23FEB23",
+                "chart_effective": "16 APR 2026 to 14 MAY 2026",
+                "note": null
+              }
             }
           ]
         }
@@ -230,7 +384,18 @@
               "elevation_m": 8.23,
               "elevation_source": "runway_end",
               "heading_deg": 181.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 227.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 27.0,
+                "chart": "05490RY17L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 17L",
+                "amendment": "Amdt 3B 23FEB23",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             },
             {
               "ident": "35R",
@@ -239,7 +404,18 @@
               "elevation_m": 6.71,
               "elevation_source": "runway_end",
               "heading_deg": 1.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lnav_vnav",
+                "decision_altitude_ft_msl": 311.0,
+                "decision_height_above_touchdown_ft": 287.0,
+                "touchdown_zone_elevation_ft": 24.0,
+                "chart": "05490RY35R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 35R",
+                "amendment": "Amdt 2A 23FEB23",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             }
           ]
         },
@@ -256,7 +432,18 @@
               "elevation_m": 7.62,
               "elevation_source": "runway_end",
               "heading_deg": 181.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 225.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 25.0,
+                "chart": "05490RY17R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 17R",
+                "amendment": "Amdt 2D 23FEB23",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             },
             {
               "ident": "35L",
@@ -265,7 +452,18 @@
               "elevation_m": 6.71,
               "elevation_source": "runway_end",
               "heading_deg": 1.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 224.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 24.0,
+                "chart": "05490RY35L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 35L",
+                "amendment": "Amdt 3A 23FEB23",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             }
           ]
         }
@@ -291,7 +489,18 @@
               "elevation_m": 167.94,
               "elevation_source": "runway_end",
               "heading_deg": 63.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 910.0,
+                "decision_height_above_touchdown_ft": 359.0,
+                "touchdown_zone_elevation_ft": 551.0,
+                "chart": "00360R6.PDF",
+                "procedure": "RNAV (GPS) RWY 6",
+                "amendment": "Amdt 3 07AUG25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             },
             {
               "ident": "24",
@@ -300,7 +509,18 @@
               "elevation_m": 162.46,
               "elevation_source": "runway_end",
               "heading_deg": 243.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 734.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 534.0,
+                "chart": "00360R24.PDF",
+                "procedure": "RNAV (GPS) RWY 24",
+                "amendment": "Amdt 1D 17APR25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             }
           ]
         },
@@ -317,7 +537,18 @@
               "elevation_m": 188.06,
               "elevation_source": "runway_end",
               "heading_deg": 122.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 868.0,
+                "decision_height_above_touchdown_ft": 250.0,
+                "touchdown_zone_elevation_ft": 618.0,
+                "chart": "00360RY11.PDF",
+                "procedure": "RNAV (GPS) Y RWY 11",
+                "amendment": "Orig-E 30JAN20",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             },
             {
               "ident": "29",
@@ -326,7 +557,18 @@
               "elevation_m": 169.16,
               "elevation_source": "runway_end",
               "heading_deg": 302.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 943.0,
+                "decision_height_above_touchdown_ft": 363.0,
+                "touchdown_zone_elevation_ft": 580.0,
+                "chart": "00360RY29.PDF",
+                "procedure": "RNAV (GPS) Y RWY 29",
+                "amendment": "Orig-D 17AUG17",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             }
           ]
         },
@@ -343,7 +585,18 @@
               "elevation_m": 160.93,
               "elevation_source": "runway_end",
               "heading_deg": 122.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 951.0,
+                "decision_height_above_touchdown_ft": 410.0,
+                "touchdown_zone_elevation_ft": 541.0,
+                "chart": "00360RY12L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 12L",
+                "amendment": "Amdt 2E 17APR25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             },
             {
               "ident": "30R",
@@ -352,7 +605,18 @@
               "elevation_m": 184.4,
               "elevation_source": "runway_end",
               "heading_deg": 302.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 805.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 605.0,
+                "chart": "00360RY30R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 30R",
+                "amendment": "Amdt 2B 17APR25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             }
           ]
         },
@@ -369,7 +633,18 @@
               "elevation_m": 165.18,
               "elevation_source": "runway_end",
               "heading_deg": 122.0,
-              "displaced_threshold_m": 143.3
+              "displaced_threshold_m": 143.3,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 740.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 540.0,
+                "chart": "00360RY12R.PDF",
+                "procedure": "RNAV (GPS) Y RWY 12R",
+                "amendment": "Amdt 1E 17APR25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             },
             {
               "ident": "30L",
@@ -378,7 +653,18 @@
               "elevation_m": 178.31,
               "elevation_source": "runway_end",
               "heading_deg": 302.0,
-              "displaced_threshold_m": 0.0
+              "displaced_threshold_m": 0.0,
+              "published_minima": {
+                "service": "lpv",
+                "decision_altitude_ft_msl": 783.0,
+                "decision_height_above_touchdown_ft": 200.0,
+                "touchdown_zone_elevation_ft": 583.0,
+                "chart": "00360RY30L.PDF",
+                "procedure": "RNAV (GPS) Y RWY 30L",
+                "amendment": "Amdt 2A 17APR25",
+                "chart_effective": "14 MAY 2026 to 11 JUN 2026",
+                "note": null
+              }
             }
           ]
         }

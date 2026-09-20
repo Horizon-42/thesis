@@ -34,8 +34,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, Sequence
 
+from geokit import FT_M
+
 from final_approach import RunwayFrame
 
+from trajectory_data_process.harvest.approach_minima import (
+    PublishedMinima,
+    RUNWAY_THRESHOLDS_SCHEMA,
+)
 from trajectory_data_process.harvest.cifp import (
     ApproachVertical,
     PathPoint,
@@ -88,6 +94,11 @@ class Runway:
     lpv_course_width_m: float | None
     runway_source_cycle: str
     procedure_source_cycle: str
+    # What the approach PLATE publishes -- the decision altitude and the service that
+    # earns it. Not in the CIFP at any price (``approach_minima``), so it is configured,
+    # not decoded. It changes neither assignment nor how a threshold event is measured;
+    # it is the height a go-around has to be decided at or above.
+    published_minima: PublishedMinima
     # Provenance is carried because CIFP and runway geometry can differ by tens of
     # metres and that difference lands directly in the measured deviations.
     position_source: str = "faa_cifp_path_point"
@@ -133,6 +144,26 @@ class Runway:
         if self.threshold_crossing_height_m is None:
             return None
         return self.elevation(datum) + self.threshold_crossing_height_m
+
+    @property
+    def decision_height_above_threshold_m(self) -> float:
+        """How high the published decision altitude sits above THIS landing threshold.
+
+        Not the plate's own height, which is published above the TOUCHDOWN ZONE and is
+        a different point -- 17 ft lower at KRDU 05L. Both sides of this subtraction are
+        MSL, so the result is datum-free: it is a height above the threshold, the frame
+        a trajectory is judged in.
+
+        Raises on a runway with no vertically guided minima. There is no default to fall
+        back to: without a published decision altitude the missed approach point is a
+        fix rather than a height, and no altitude answers "was the go-around in time".
+        """
+        if not self.published_minima.vertically_guided:
+            raise ValueError(
+                f"{self.airport} {self.ident} publishes no vertically guided minima "
+                f"({self.published_minima.note})"
+            )
+        return self.published_minima.decision_altitude_ft_msl * FT_M - self.elevation("msl")
 
     def frame(self, datum: Datum) -> RunwayFrame:
         """The runway-aligned frame, in the requested datum.
@@ -268,6 +299,11 @@ def load_airport(
     a heading. A non-LPV threshold also requires its configured MSL elevation.
     """
     config = json.loads(config_file.read_text(encoding="utf-8"))
+    if config["schema_version"] != RUNWAY_THRESHOLDS_SCHEMA:
+        raise ValueError(
+            f"{config_file} is {config['schema_version']}, this reader is "
+            f"{RUNWAY_THRESHOLDS_SCHEMA}; run extract_approach_minima.py"
+        )
     entry = config["airports"][code]
     if cifp_file is None:
         raise ValueError(f"{code}: CIFP file is required for runway vertical datum facts")
@@ -304,6 +340,7 @@ def load_airport(
             published.get((code, threshold["ident"])),
             verticals.get((code, threshold["ident"])),
             airport_path_points,
+            PublishedMinima.from_config(threshold["published_minima"]),
             runway_source_cycle=width_cycle,
             procedure_source_cycle=procedure_cycle,
         )
@@ -326,6 +363,7 @@ def _build_runway(
     point: PathPoint | None,
     vertical: ApproachVertical | None,
     airport_path_points: Sequence[PathPoint],
+    minima: PublishedMinima,
     *,
     runway_source_cycle: str,
     procedure_source_cycle: str,
@@ -346,6 +384,7 @@ def _build_runway(
             published_glidepath_deg=point.glidepath_deg,
             width_m=width_m,
             lpv_course_width_m=point.course_width_m,
+            published_minima=minima,
             runway_source_cycle=runway_source_cycle,
             procedure_source_cycle=procedure_source_cycle,
             position_source="faa_cifp_path_point",
@@ -413,6 +452,7 @@ def _build_runway(
         published_glidepath_deg=glidepath,
         width_m=width_m,
         lpv_course_width_m=None,
+        published_minima=minima,
         runway_source_cycle=runway_source_cycle,
         procedure_source_cycle=procedure_source_cycle,
         position_source="runway_geometry",
@@ -443,6 +483,8 @@ def _require_complete(code: str, thresholds: Sequence[dict]) -> None:
     if incomplete:
         raise ValueError(
             f"{code}: {len(incomplete)} threshold(s) are unusable — {'; '.join(incomplete)}. "
-            "Regenerate runway_thresholds.json with build_runway_config.py; do not fill "
-            "these in by hand or substitute the field elevation."
+            "Fix them in acquisition/runways.landing_thresholds_from_row and rebuild the "
+            "threshold block; do not fill these in by hand or substitute the field "
+            "elevation. build_runway_config.py cannot rebuild this file any more — see "
+            "docs/code-health-followups.md."
         )
