@@ -104,6 +104,12 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
     tail = np.concatenate((np.full(56, 90.0), [85.0, 80.0, 75.0, 70.0]))
     words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
     assert [w.word for w in words] == [v.speed_bin(90.0)[0]] and absorbed == [ins.Absorbed("speed", 56.0, 59.0, words[0].word, 70.0 - 90.0, ins.ABSORBED_SHORT_TAIL)]
+    # a long tail settling back inside the word in force's bin (altitude: 1000 → 840 m, both bin 3, change ≥ half a bin): absorbed "same word"
+    tail_back = np.concatenate((np.full(50, 1000.0), np.linspace(1000.0, 840.0, 10)))
+    words, absorbed = ins._manoeuvre_words("altitude", times, tail_back, ins.plateaus(tail_back, v.height_tolerance_m, 6), 6,
+                                           v.height_tolerance_m, v.height_min_change_m, lambda x: (v.altitude_bin(x)[0], x, False))
+    assert [w.word for w in words] == [v.altitude_bin(1000.0)[0]] and v.altitude_bin(840.0)[0] == words[0].word
+    assert [(a.reason, a.end_s) for a in absorbed] == [(ins.ABSORBED_SAME_WORD, 59.0)]
     long_tail = np.concatenate((np.full(50, 90.0), np.linspace(90.0, 70.0, 10)))
     words, absorbed = ins._manoeuvre_words("speed", times, long_tail, ins.plateaus(long_tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
     assert [(w.word, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0), (v.speed_bin(70.0)[0], None)] and not absorbed
@@ -116,8 +122,6 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
     with pytest.raises(ValueError, match="at least the kind's tolerance"):
         ins.Vocabulary(speed_min_change_mps=1.0)
     assert ins.departure_row(np.array([5.0, 5.0, 5.4, 6.0, 6.8, 8.0]), 0, 5, 5.0, 2.0) == 4          # 6.8 is the first row past ±1
-    with pytest.raises(ValueError, match="plateau needs rows"):
-        ins._plateau_value(speed, 5, 5)
 
 
 def _track(item, t: np.ndarray, relative_deg: np.ndarray, height_m: np.ndarray, speed_mps: np.ndarray):
@@ -233,6 +237,62 @@ def test_the_intercept_is_the_last_heading_instruction_not_a_wiggle_after_the_ca
     assert any(a.kind == "heading" and a.reason == ins.ABSORBED_SMALL_CHANGE for a in reading.absorbed)
     straight = ins.read_instructions(_capture(item, t, np.zeros(len(t)), level, speed), v)
     assert not [i for i in straight.instructions if i.kind == "intercept"] and straight.established_from_start
+
+
+def test_a_straight_in_never_carries_an_intercept_and_a_record_opening_inside_the_capture_does(flights):
+    """A flight established from its first row — even one whose first 20 s wobble so no plateau
+    opens at t = 0 — carries no intercept (the review's blocker: the t = 0 word read as "opening
+    inside the capture"); a record that opens mid-turn onto the course, not established at its
+    first row, carries one, with the first row's course as its angle."""
+    v = ins.Vocabulary()
+    item = flights[0]
+    t = np.arange(0.0, 200.0, 2.0)
+    level, speed = np.full(len(t), 500.0), np.full(len(t), 75.0)
+    wobble = np.interp(t, [0.0, 6.0, 12.0, 200.0], [5.0, -5.0, 0.0, 0.0])
+    reading = ins.read_instructions(_capture(item, t, wobble, level, speed), v)
+    assert reading.established_from_start and not [i for i in reading.instructions if i.kind == "intercept"]
+    assert (reading.words[:, 3] == ins.NO_INTERCEPT).all()
+    opening = np.interp(t, [0.0, 30.0, 200.0], [-40.0, 0.0, 0.0])
+    reading = ins.read_instructions(_capture(item, t, opening, level, speed), v)
+    intercept = [i for i in reading.instructions if i.kind == "intercept"]
+    headings = [i for i in reading.instructions if i.kind == "heading"]
+    assert not reading.established_from_start and len(intercept) == 1 and len(headings) == 1
+    assert intercept[0].issued_s == 0.0 and intercept[0].settled_s == headings[0].settled_s and headings[0].settled_s > 0.0
+    assert intercept[0].target == pytest.approx(40.0, abs=4.0) and intercept[0].word == v.intercept_bin(-40.0)
+
+
+def test_a_pause_inside_a_descent_and_a_drift_with_no_plateau_produce_no_word(flights):
+    """A 4 s pause at 1000 m inside a 3 m/s descent is not a level-off (the opening window's
+    fitted slope says the aircraft is still descending); a course drifting 0.3°/s the whole
+    record has no plateau at all and reads as one manoeuvre to its end."""
+    v = ins.Vocabulary()
+    item = flights[0]
+    t = np.arange(0.0, 300.0, 2.0)
+    speed = np.full(len(t), 75.0)
+    height = np.interp(t, [0.0, 40.0, 206.0, 210.0, 300.0], [1500.0, 1500.0, 1000.0, 1000.0, 730.0])
+    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), height, speed), v)
+    altitudes = [i for i in reading.instructions if i.kind == "altitude"]
+    assert [i.word for i in altitudes] == [v.altitude_bin(1500.0)[0], v.altitude_bin(730.0)[0]] and altitudes[1].settled_s is None
+    drift = t * 0.3
+    reading = ins.read_instructions(_track(item, t, drift, np.full(len(t), 800.0), speed), v)
+    headings = [i for i in reading.instructions if i.kind == "heading"]
+    assert len(headings) == 1 and headings[0].settled_s is None and headings[0].word == v.heading_bin(float(drift[-1]))
+    assert not [i for i in reading.instructions if i.kind == "intercept"]
+
+
+def test_refusals_at_the_boundary(flights):
+    from dataclasses import replace
+    item = flights[0]
+    values = np.array(item.values, dtype=np.float64)
+    values[5, 2] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        ins.course_frame(replace(item, values=values))
+    with pytest.raises(ValueError, match="has no manoeuvre to read"):
+        ins.read_instructions(replace(item, times=item.times[:1], values=item.values[:1]), ins.Vocabulary())
+    with pytest.raises(ValueError, match="at least 3 rows"):
+        ins.plateaus(np.zeros(10), 1.0, 2)
+    with pytest.raises(ValueError, match="at most plateau_min_s"):
+        ins.Vocabulary(token_step_s=30.0)
 
 
 def _capture(item, t: np.ndarray, relative_deg: np.ndarray, height_m: np.ndarray, speed_mps: np.ndarray):

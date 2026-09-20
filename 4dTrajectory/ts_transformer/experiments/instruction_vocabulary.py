@@ -41,39 +41,43 @@ from ts_transformer.data.data_provenance import provenance_eligible_set_digests
 from ts_transformer.data.development_cohorts import development_cohort_audit, load_development_cohort
 from ts_transformer.experiments.support import REPO_ROOT, cohort_splits, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
+from ts_transformer.data.runway_context import wrap_deg
 from ts_transformer.manoeuvre.instructions import (
-    ABSORBED_SHORT_TAIL, INSTRUCTION_KINDS, MANDATORY_KINDS, NO_INTERCEPT, Reading, Vocabulary, course_frame,
-    read_instructions, wrap_deg, write_vocabulary,
+    ABSORBED_SAME_WORD, ABSORBED_SHORT_TAIL, ABSORBED_SMALL_CHANGE, INSTRUCTION_KINDS, MANDATORY_KINDS, NO_INTERCEPT,
+    Reading, Vocabulary, course_frame, read_instructions, write_vocabulary,
 )
 from ts_transformer.training.train import load_checkpoint_payload
 
 SUMMARY_SCHEMA = "ts-instruction-vocabulary-summary-v1"
 
 
-def _p50(values) -> float | None:
-    values = list(values)
-    return float(np.median(values)) if values else None
+def _p50(values) -> float:
+    return float(np.median(list(values)))
 
 
-def _p95(values) -> float | None:
-    values = list(values)
-    return float(np.percentile(values, 95)) if values else None
+def _p95(values) -> float:
+    return float(np.percentile(list(values), 95))
 
 
 def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]:
     """What the hand check and the bin decision read: how many words a flight carries, how the
-    words are used, how far the read targets sit from their bin centres, how many were clamped."""
+    words are used, how far the UNCLAMPED targets sit from their bin centres (a clamped one
+    measures the range, not the bin), how many were clamped, what was absorbed and why."""
+    if not readings:
+        raise ValueError("a split with no flights has nothing to summarise")
     per_kind = {kind: [sum(1 for i in r.instructions if i.kind == kind) for r in readings] for kind in INSTRUCTION_KINDS}
     counts = {kind: Counter(i.word for r in readings for i in r.instructions if i.kind == kind) for kind in INSTRUCTION_KINDS}
+    unclamped = [i for r in readings for i in r.instructions if not i.clamped]
     residuals = {
-        "heading_deg": [abs(wrap_deg(i.target - vocabulary.heading_centre_deg(i.word))) for r in readings for i in r.instructions if i.kind == "heading"],
-        "altitude_m": [abs(i.target - vocabulary.altitude_centre_m(i.word)) for r in readings for i in r.instructions if i.kind == "altitude"],
-        "speed_mps": [abs(i.target - vocabulary.speed_centre_mps(i.word)) for r in readings for i in r.instructions if i.kind == "speed"],
+        "heading_deg": [abs(wrap_deg(i.target - vocabulary.heading_centre_deg(i.word))) for i in unclamped if i.kind == "heading"],
+        "altitude_m": [abs(i.target - vocabulary.altitude_centre_m(i.word)) for i in unclamped if i.kind == "altitude"],
+        "speed_mps": [abs(i.target - vocabulary.speed_centre_mps(i.word)) for i in unclamped if i.kind == "speed"],
     }
     positions = sum(len(r.positions_s) for r in readings)
     changes = sum(int((np.diff(r.words[:, : len(MANDATORY_KINDS)], axis=0) != 0).any(axis=1).sum()) for r in readings)
-    absorbed = {kind: sum(1 for r in readings for a in r.absorbed if a.kind == kind) for kind in MANDATORY_KINDS}
-    short_tails = {kind: sum(1 for r in readings for a in r.absorbed if a.kind == kind and a.reason == ABSORBED_SHORT_TAIL) for kind in MANDATORY_KINDS}
+    reasons = (ABSORBED_SAME_WORD, ABSORBED_SMALL_CHANGE, ABSORBED_SHORT_TAIL)
+    absorbed = {kind: {reason: sum(1 for r in readings for a in r.absorbed if a.kind == kind and a.reason == reason) for reason in reasons}
+                for kind in MANDATORY_KINDS}
     orbits = sum(1 for r in readings for a in r.absorbed if a.kind == "heading" and abs(a.change) >= 180.0)
     return {
         "flights": len(readings),
@@ -84,9 +88,9 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
         "clamped": {kind: sum(1 for r in readings for i in r.instructions if i.kind == kind and i.clamped) for kind in ("altitude", "speed")},
         "target_to_bin_centre_p50": {k: _p50(v) for k, v in residuals.items()},
         "target_to_bin_centre_p95": {k: _p95(v) for k, v in residuals.items()},
-        "absorbed": absorbed, "absorbed_short_tails": short_tails, "absorbed_heading_orbits": orbits,
-        "intercept_share": float(np.mean([any(i.kind == "intercept" for i in r.instructions) for r in readings])) if readings else 0.0,
-        "established_from_start_share": float(np.mean([r.established_from_start for r in readings])) if readings else 0.0,
+        "absorbed": absorbed, "absorbed_heading_orbits": orbits,
+        "intercept_share": float(np.mean([any(i.kind == "intercept" for i in r.instructions) for r in readings])),
+        "established_from_start_share": float(np.mean([r.established_from_start for r in readings])),
         "positions": positions, "positions_with_a_change": changes,
         "duration_s_p50": _p50([r.duration_s for r in readings]),
     }
@@ -96,23 +100,25 @@ def render(summary: dict[str, dict[str, Any]], vocabulary: Vocabulary) -> str:
     lines = [f"instruction vocabulary · words {vocabulary.words} · τ {vocabulary.token_step_s:g} s · sha {vocabulary.sha256[:12]}…", ""]
     for split, s in summary.items():
         lines.append(f"{split}: {s['flights']} flights, duration p50 {s['duration_s_p50']:.0f} s, positions {s['positions']} "
-                     f"({s['positions_with_a_change']} with a change), intercept on {s['intercept_share']:.2f}, "
+                     f"({s['positions_with_a_change']} with a change), intercept on {s['intercept_share']:.2f} (a capture from under "
+                     f"{vocabulary.heading_min_change_deg:g}° carries none by construction), "
                      f"established from the start {s['established_from_start_share']:.2f}")
         lines.append("  instructions / flight p50 (p95): " + ", ".join(
             f"{k} {s['instructions_per_flight_p50'][k]:.0f} ({s['instructions_per_flight_p95'][k]:.0f})" for k in INSTRUCTION_KINDS))
         lines.append("  words used: " + ", ".join(f"{k} {s['words_used'][k]}/{vocabulary.words[k]}" for k in INSTRUCTION_KINDS)
                      + f" · clamped altitude {s['clamped']['altitude']}, speed {s['clamped']['speed']}")
-        lines.append("  target − bin centre p50 (p95): " + ", ".join(
-            f"{k} {s['target_to_bin_centre_p50'][k]:.1f} ({s['target_to_bin_centre_p95'][k]:.1f})"
-            for k in s["target_to_bin_centre_p50"] if s["target_to_bin_centre_p50"][k] is not None))
-        lines.append("  absorbed manoeuvres (same word, or a tail too short to read): "
-                     + ", ".join(f"{k} {v} ({s['absorbed_short_tails'][k]} tails)" for k, v in s["absorbed"].items())
+        lines.append("  unclamped target − bin centre p50 (p95): " + ", ".join(
+            f"{k} {s['target_to_bin_centre_p50'][k]:.1f} ({s['target_to_bin_centre_p95'][k]:.1f})" for k in s["target_to_bin_centre_p50"]))
+        lines.append("  absorbed manoeuvres (same word / small change / short tail): "
+                     + ", ".join(f"{k} " + "/".join(str(v[reason]) for reason in (ABSORBED_SAME_WORD, ABSORBED_SMALL_CHANGE, ABSORBED_SHORT_TAIL))
+                                 for k, v in s["absorbed"].items())
                      + f" · heading orbits (≥ 180°) {s['absorbed_heading_orbits']}")
         for kind in INSTRUCTION_KINDS:
             counts = s["word_counts"][kind]
             total = sum(counts.values()) or 1
             top = sorted(counts.items(), key=lambda kv: -kv[1])[:8]
-            lines.append(f"  {kind:<10}" + "  ".join(f"w{w}:{c / total:.2f}" for w, c in top))
+            lines.append(f"  {kind:<10}" + "  ".join(f"w{w}:{c / total:.2f}" for w, c in top)
+                         + (f"   (top 8 of {len(counts)} words)" if len(counts) > 8 else ""))
     return "\n".join(lines) + "\n"
 
 
@@ -132,9 +138,8 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
     ax.axvline(0.0, color="r", lw=0.8)
     for item in reading.instructions:
         k = int(np.searchsorted(t, item.issued_s))
-        if k < len(t):
-            ax.plot(-frame["to_go_m"][k] / 1000.0, frame["cross_m"][k] / 1000.0, "o", ms=4,
-                    color={"heading": "C1", "altitude": "C2", "speed": "C3", "intercept": "C4"}[item.kind])
+        ax.plot(-frame["to_go_m"][k] / 1000.0, frame["cross_m"][k] / 1000.0, "o", ms=4,
+                color={"heading": "C1", "altitude": "C2", "speed": "C3", "intercept": "C4"}[item.kind])
     ax.set_xlabel("along the final approach course, km (threshold at 0)")
     ax.set_ylabel("cross-track, km (right +)")
     ax.set_title(f"{reading.flight_id} · plan view")
@@ -147,13 +152,15 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
             end = issued[j + 1].issued_s if j + 1 < len(issued) else t[-1]
             level = centre(item.word)
             if period is not None:      # an unwrapped trace: draw the centre on the turn of the circle the plateau sits on
-                k = min(int(np.searchsorted(t, t[-1] if item.settled_s is None else item.settled_s)), len(t) - 1)
+                k = int(np.searchsorted(t, t[-1] if item.settled_s is None else item.settled_s))
                 level += period * round((signal[k] - level) / period)
             ax.hlines(level, item.issued_s, end, colors="C1", lw=2.0)
-            ax.axvline(item.issued_s, color="C1", lw=0.6, ls=":")
+            ax.axvline(item.issued_s, color="C1", lw=0.6, ls=":")                    # issued (orange)
+            if item.settled_s is not None:
+                ax.axvline(item.settled_s, color="C2", lw=0.6, ls=":")               # settled (green)
         absorbed = [a for a in reading.absorbed if a.kind == kind]
-        for item in absorbed:
-            ax.axvspan(item.start_s, item.end_s, color="0.85")
+        for item in absorbed:           # at least a row wide, so a zero-length one still shows
+            ax.axvspan(item.start_s - 1.0, item.end_s + 1.0, color="0.85")
         ax.set_ylabel(f"{kind} ({unit})" + ("; grey = absorbed" if absorbed else ""))
 
     steps(axes[0, 1], frame["course_unwrapped_deg"], "heading", vocabulary.heading_centre_deg, "deg rel. course, unwrapped", period=360.0)
@@ -177,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--token-step-s", type=float, default=Vocabulary().token_step_s)
     parser.add_argument("--set", action="append", default=[], metavar="FIELD=VALUE",
-                        help="override one Vocabulary field (a bin or threshold) for a re-read; repeatable")
+                        help="override one Vocabulary field (a bin or threshold; not the reading rule or the established rule) for a re-read; repeatable")
     parser.add_argument("--hand-check", type=int, default=300, help="train flights drawn for the human check (0: none)")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of each split (a smoke test)")
@@ -187,13 +194,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{out} exists; a vocabulary readout is never overwritten")
     started = time.perf_counter()
     overrides: dict[str, Any] = {"token_step_s": args.token_step_s}
-    names = [f.name for f in fields(Vocabulary)]
+    settable = [f.name for f in fields(Vocabulary) if f.name not in ("reading_rule", "established_cross_track_m", "established_track_tolerance_deg")]
     for item in args.set:
         name, _, value = item.partition("=")
-        if name not in names or not value:
-            parser.error(f"--set {item!r}: not a Vocabulary field (one of {names})")
+        if name not in settable or not value:
+            parser.error(f"--set {item!r}: not a settable Vocabulary field (one of {settable})")
         overrides[name] = tuple(float(v) for v in value.split(",")) if name == "intercept_angle_bins_deg" else float(value)
     vocabulary = Vocabulary(**overrides)
+    if args.hand_check % 2:
+        parser.error(f"--hand-check draws half per stratum: {args.hand_check} is odd")
 
     executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
     payload = load_checkpoint_payload(executor)
@@ -219,11 +228,10 @@ def main(argv: list[str] | None = None) -> int:
         write_json_atomic(out / f"sentences_{name}.json", {"schema": SUMMARY_SCHEMA, "split": name, "vocabulary_sha256": vocabulary.sha256,
                                                           "token_step_s": vocabulary.token_step_s, "flights": [r.to_dict() for r in items]})
     table = render(summary, vocabulary)
-    write_json_atomic(out / "summary.json", {"schema": SUMMARY_SCHEMA, "written_utc": utc_now(), "vocabulary_sha256": vocabulary.sha256,
-                                            "spec": vocabulary.to_dict(), "splits": summary, "elapsed_s": time.perf_counter() - started})
     (out / "summary.txt").write_text(table, encoding="utf-8")
     print(table)
 
+    draw: dict[str, Any] | None = None
     if args.hand_check:
         # the draw: seeded; half straight-in, half vectored — the package's strata at the executor's
         # anchor (`approach_difficulty`: straight-in = tortuosity below the fleet's cut; vectored =
@@ -257,8 +265,14 @@ def main(argv: list[str] | None = None) -> int:
                 writer.writerow([name, reading.flight_id, STRATUM_SHORT[stratum], f"{d.route_tortuosity:.2f}", d.established_at_anchor,
                                  *(sum(1 for i in reading.instructions if i.kind == kind) for kind in MANDATORY_KINDS),
                                  intercept, len(reading.absorbed), " ".join("/".join(str(w) for w in row) for row in reading.words), "", ""])
+        draw = {"pages": len(chosen), "per_stratum": half, "seed": args.seed, "anchor": anchor, "split": "train",
+                "pools": {STRATUM_SHORT[name]: len(pool) for name, pool in pools.items()},
+                "in_neither_stratum": len(train) - sum(len(pool) for pool in pools.values())}
         print(f"  hand check: {len(chosen)} flights ({half} per stratum; pools straight-in {len(pools[STRATUM_STRAIGHT_IN])}, "
-              f"vectored {len(pools[STRATUM_VECTORED])} of {len(train)} train flights) in {folder}", flush=True)
+              f"vectored {len(pools[STRATUM_VECTORED])} of {len(train)} train flights, {draw['in_neither_stratum']} in neither) in {folder}", flush=True)
+    write_json_atomic(out / "summary.json", {"schema": SUMMARY_SCHEMA, "written_utc": utc_now(), "vocabulary_sha256": vocabulary.sha256,
+                                            "spec": vocabulary.to_dict(), "splits": summary, "hand_check": draw,
+                                            "elapsed_s": time.perf_counter() - started})
     return 0
 
 
