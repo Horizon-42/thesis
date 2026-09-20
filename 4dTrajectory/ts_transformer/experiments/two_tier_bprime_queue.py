@@ -12,14 +12,17 @@ the B cohort), the configurations and the prior's settings — and the arms, ``<
 The steps, serial, each skipped when its last artefact exists (a crash is cheap: rerun the same
 command), and each STOPPING the queue when it fails (D11):
 
-    step 0    baselines: every baseline the selected groups are judged against × seed — the
+    prior     per seed, FIRST and ungated: `instruction_prior` on the declaration's vocabulary and
+              the BASELINE checkpoint (only the door to the split) — stage B3′'s first line
+    step 1    baselines: every baseline the selected groups are judged against × seed — the
               no-token executor flown ``protocol none`` from L−1 on the B cohort with records
               (`manoeuvre_lockstep`), and its failure-mode table
     B1′       per group: train the two arms (`frame_ablation --only`), fly each ``protocol
               truth-instruction`` with records (the truth's words by flown position — the upper
               bound), its failure modes, then gate B1 against the baseline (D57)
-    prior     per seed, only past gate B1: `instruction_prior` on the group's vocabulary and that
-              seed's executor (its readings are stage B3′'s first line)
+Since 2026-09-20 the PRIOR runs FIRST (the user's order, plan §5.2.5): the second layer is the
+claim, the executor can in principle be a conventional autopilot, so the second layer trains and is
+read before any executor arm. The prior needs no trained executor and carries no gate.
 
 B2′ (the executor's closed-loop fine-tuning, D49), B3′'s decoding protocols (D56) and B4′ (τ = 5 s)
 are not built: the queue refuses a declaration that names them. Every line is stamped; ``CELL
@@ -127,7 +130,8 @@ def baseline_steps(*, declaration: dict[str, Any], campaign: Path, airport: str,
 
 def group_steps(group: str, arms: dict[int, str], *, declaration: dict[str, Any], declaration_path: Path, campaign: Path,
                 airport: str, device: str) -> list[Step]:
-    """The steps of one group (module docstring); the prior steps carry the gate B1 verdict they need."""
+    """The steps of one group (module docstring). The prior is NOT here any more — it runs first, on
+    its own, in `prior_steps`."""
     py = sys.executable
     stage_b = declaration["stage_b"]
     configuration = stage_b["configurations"][group]
@@ -169,17 +173,31 @@ def group_steps(group: str, arms: dict[int, str], *, declaration: dict[str, Any]
                "--seed-line-from", str(seed_line), "--out", str(gate_out)],
               gate_out / GATE_JSON)
     steps.append(b1)
-    needs_b1 = (b1.artefact, "b1")
-    prior_settings = stage_b["prior"]
-    for seed in sorted(arms):
-        arm = arms[seed]
-        prior = campaign / "priors" / arm
-        steps.append(Step(f"{arm}: instruction prior (seed {seed})",
-                          [py, str(RUN_TS), "instruction_prior", "--vocabulary", str(vocabulary), "--executor", str(checkpoint(arm)),
+    return steps
+
+
+def prior_steps(*, declaration: dict[str, Any], campaign: Path, airport: str, device: str, seeds: list[int],
+                names: list[str]) -> list[Step]:
+    """The FIRST step set (the user's order, 2026-09-20; plan §5.2.5): the second layer trains and
+    reads on its own, before any executor arm exists. It needs no trained executor and no gate — the
+    `--executor` argument is only the door to the cohort's train/val split, so it reads the DECLARED
+    BASELINE's stage A checkpoint (which exists before this queue runs anything). One prior per seed,
+    keyed by seed rather than by arm, because it belongs to no configuration."""
+    py = sys.executable
+    cohort = REPO_ROOT / declaration["development_cohort"].format(airport=airport)
+    vocabulary = REPO_ROOT / declaration_base(declaration)["instruction_vocabulary"]
+    prior_settings = declaration["stage_b"]["prior"]
+    spec = declaration["stage_b"]["baselines"][names[0]]
+    steps: list[Step] = []
+    for seed in seeds:
+        prior = campaign / "priors" / f"s{seed}"
+        steps.append(Step(f"instruction prior (seed {seed})",
+                          [py, str(RUN_TS), "instruction_prior", "--vocabulary", str(vocabulary),
+                           "--executor", str(_seeded(spec["checkpoint"], airport=airport, seed=seed)),
                            "--cohort", str(cohort), "--seed", str(seed), "--device", device, "--out", str(prior),
                            *[flag for name in PRIOR_SETTINGS if name in prior_settings
                              for flag in (f"--{name.replace('_', '-')}", f"{prior_settings[name]}")]],
-                          prior / PRIOR_FILE, gate=needs_b1))
+                          prior / PRIOR_FILE))
     return steps
 
 
@@ -217,7 +235,9 @@ def plan_of(declaration: dict[str, Any], *, declaration_path: Path, campaign: Pa
         all_groups = {g: arms for g, arms in all_groups.items() if g in set(groups)}
     seeds = sorted({seed for arms in all_groups.values() for seed in arms})
     names = sorted({declaration["stage_b"]["configurations"][g]["baseline"] for g in all_groups})
-    plan = {"baselines": baseline_steps(declaration=declaration, campaign=campaign, airport=airport, device=device, seeds=seeds, names=names)}
+    plan = {"prior": prior_steps(declaration=declaration, campaign=campaign, airport=airport,
+                                 device=device, seeds=seeds, names=names),
+            "baselines": baseline_steps(declaration=declaration, campaign=campaign, airport=airport, device=device, seeds=seeds, names=names)}
     for group, arms in all_groups.items():
         plan[group] = group_steps(group, arms, declaration=declaration, declaration_path=declaration_path, campaign=campaign,
                                   airport=airport, device=device)

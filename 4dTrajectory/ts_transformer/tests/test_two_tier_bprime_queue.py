@@ -70,10 +70,21 @@ def test_the_groups_follow_the_naming_rule_and_need_two_seeds(declared):
         q.groups_of({**declaration, "stage_b": {**declaration["stage_b"], "closed_loop": {}}})
 
 
-def test_the_plan_runs_the_baselines_then_each_group_with_the_priors_behind_gate_b1(declared):
+def test_the_plan_runs_the_prior_first_then_the_baselines_then_each_group(declared):
     declaration, path, campaign = declared
     plan = q.plan_of(declaration, declaration_path=path, campaign=campaign, airport="KRDU", device="cpu", groups=None)
-    assert list(plan) == ["baselines", "I20"]
+    assert list(plan) == ["prior", "baselines", "I20"]                 # the second layer first (user, 2026-09-20)
+    priors = plan["prior"]
+    assert [step.label for step in priors] == ["instruction prior (seed 1337)", "instruction prior (seed 2024)"]
+    prior = priors[0]
+    assert prior.gate is None                                          # ungated: it needs no trained executor
+    assert prior.artefact == campaign / "priors" / "s1337" / "prior.pt"
+    assert prior.command[2] == "instruction_prior"
+    # the --executor is only the door to the split, so it is the DECLARED BASELINE's stage A checkpoint
+    assert prior.command[prior.command.index("--executor") + 1].endswith("L60_D20_s1337/checkpoint.pt")
+    assert prior.command[prior.command.index("--seed") + 1] == "1337"
+    assert prior.command[prior.command.index("--epochs") + 1] == "3" and prior.command[prior.command.index("--d-model") + 1] == "32"
+    assert "--n-layers" not in prior.command                           # only the declared settings are passed
     labels = [step.label for step in plan["baselines"]]
     assert labels == ["baseline L60_D20 seed 1337: lockstep none", "baseline L60_D20 seed 1337: failure modes",
                       "baseline L60_D20 seed 2024: lockstep none", "baseline L60_D20 seed 2024: failure modes"]
@@ -86,7 +97,6 @@ def test_the_plan_runs_the_baselines_then_each_group_with_the_priors_behind_gate
         "I20_s1337: lockstep truth-instruction", "I20_s1337: failure modes truth-instruction",
         "I20_s2024: lockstep truth-instruction", "I20_s2024: failure modes truth-instruction",
         "I20: gate b1 (truth-instruction vs none)",
-        "I20_s1337: instruction prior (seed 1337)", "I20_s2024: instruction prior (seed 2024)",
     ]
     train = group[0]
     assert train.artefact is None and train.command[2] == "frame_ablation" and train.command[-2:] == ["I20_s1337", "I20_s2024"]
@@ -96,11 +106,7 @@ def test_the_plan_runs_the_baselines_then_each_group_with_the_priors_behind_gate
     gate = group[5]
     assert gate.artefact == campaign / "gate" / "b1_I20" / "relative_gate.json" and "--seed-line-from" in gate.command
     assert gate.command[gate.command.index("--baseline") + 1] == f"1337={campaign / 'baseline' / 'L60_D20_s1337' / 'L-1'}"
-    prior = group[6]
-    assert prior.gate == (gate.artefact, "b1") and prior.artefact == campaign / "priors" / "I20_s1337" / "prior.pt"
-    assert prior.command[prior.command.index("--seed") + 1] == "1337"
-    assert prior.command[prior.command.index("--epochs") + 1] == "3" and prior.command[prior.command.index("--d-model") + 1] == "32"
-    assert "--n-layers" not in prior.command                                          # only the declared settings are passed
+    assert gate is group[-1]                                           # the gate is the group's last step now
     with pytest.raises(ValueError, match="does not have"):
         q.plan_of(declaration, declaration_path=path, campaign=campaign, airport="KRDU", device="cpu", groups=["X"])
 
@@ -149,5 +155,7 @@ def test_the_dry_run_prints_the_plan_and_refuses_a_missing_seed_line_or_vocabula
         m: {"p75": 0.1} for m in ("established_all", "established_vectored", "vectored_ade_mean_m")}}}), encoding="utf-8")
     assert q.main(["--arms", str(path), "--campaign", str(campaign), "--airport", "krdu", "--dry-run"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("CELL baselines") and "CELL I20" in out and "[needs gate b1 of b1_I20]" in out and "todo I20: train" in out
+    assert out.startswith("CELL prior") and "CELL baselines" in out and "CELL I20" in out and "todo I20: train" in out
+    assert out.index("CELL prior") < out.index("CELL baselines") < out.index("CELL I20")
+    assert "[needs gate" not in out                                    # nothing is gated on b1 any more
     assert not campaign.exists()                                                     # a dry run writes nothing
