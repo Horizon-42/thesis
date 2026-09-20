@@ -64,15 +64,37 @@ describe("WorkbenchTopBar", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the four exclusive task tabs and switches mode on click", () => {
+  it("renders the five exclusive task tabs and switches mode on click", () => {
     render(<WorkbenchTopBar />);
 
-    for (const label of ["Observe", "Fly", "Optimize", "Compare"]) {
+    for (const label of ["Observe", "Training", "Fly", "Optimize", "Compare"]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy();
     }
 
     fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
     expect(setMode).toHaveBeenCalledWith("optimize");
+  });
+
+  // Training reads the same observed arrivals as Observe (what the track was read
+  // as, rather than how it was flown), so it sits immediately right of it — not at
+  // the end of the row next to the solver tasks.
+  it("places Training immediately right of Observe and switches to it", () => {
+    render(<WorkbenchTopBar />);
+
+    const labels = Array.from(
+      document.querySelectorAll(".workbench-task-switcher .workbench-task-tab"),
+    ).map((node) => node.textContent);
+    expect(labels).toEqual([
+      "Observe",
+      "Training",
+      "Fly",
+      "Optimize",
+      "Compare",
+      "Procedures",
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Training" }));
+    expect(setMode).toHaveBeenCalledWith("training");
   });
 
   it("toggles the procedures panel independently of the active task", () => {

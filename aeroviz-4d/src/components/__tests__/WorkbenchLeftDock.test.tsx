@@ -19,6 +19,7 @@ vi.mock("../EvaluationSummary", () => ({ default: () => <div>EVAL_SUMMARY</div> 
 vi.mock("../PilotPanel", () => ({
   default: ({ mode }: { mode: string }) => <div>PILOT:{mode}</div>,
 }));
+vi.mock("../TrainingPanel", () => ({ default: () => <div>TRAINING_PANEL</div> }));
 
 import WorkbenchLeftDock from "../WorkbenchLeftDock";
 
@@ -36,6 +37,18 @@ describe("WorkbenchLeftDock", () => {
     renderDock();
     expect(screen.getByText("CONTROL_PANEL")).toBeTruthy();
     expect(screen.getByText("FLIGHTS:3")).toBeTruthy();
+    expect(screen.queryByText(/PILOT:/)).toBeNull();
+  });
+
+  // Training must NOT pull in Observe's panels: the observed CZML is loaded only in
+  // Observe (it drives the shared Cesium clock), and Training reads its own sample
+  // file instead. A dock that rendered ControlPanel here would reintroduce that load.
+  it("shows only the TrainingPanel in training mode", () => {
+    appState.mode = "training";
+    renderDock();
+    expect(screen.getByText("TRAINING_PANEL")).toBeTruthy();
+    expect(screen.queryByText("CONTROL_PANEL")).toBeNull();
+    expect(screen.queryByText(/FLIGHTS:/)).toBeNull();
     expect(screen.queryByText(/PILOT:/)).toBeNull();
   });
 

@@ -571,6 +571,85 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   backdrop-filter: none;
 }
 
+/* Training task (docs/36-2026-09-20-training-module.zh.md). T1 styles the panel
+   shell and its empty state; the sentence bar and the read-back window get their
+   own blocks when they land (T4a / T4b). Renders flat inside the dock card, like
+   ControlPanel above. */
+.training-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #e0e6f0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+.training-panel-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.training-panel-lede {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(224, 230, 240, 0.7);
+}
+
+.training-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(103, 232, 249, 0.22);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: rgba(103, 232, 249, 0.05);
+}
+
+.training-empty-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.training-empty-label {
+  margin: 6px 0 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(224, 230, 240, 0.55);
+}
+
+/* The path and the command must stay readable and selectable — they are meant to
+   be copied — so they wrap instead of being clipped. */
+.training-empty-path {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(8, 12, 20, 0.7);
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.training-empty-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(224, 230, 240, 0.65);
+}
+
+.training-empty-note code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(8, 12, 20, 0.6);
+  font-size: 10.5px;
+}
+
 .czml-status {
   position: absolute;
   top: 16px;

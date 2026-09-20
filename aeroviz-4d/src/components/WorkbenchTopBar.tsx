@@ -15,6 +15,9 @@ import { useLandingsManifest } from "../hooks/useLandingsManifest";
 
 const TASK_TABS: Array<{ mode: WorkbenchMode; label: string }> = [
   { mode: "observe", label: "Observe" },
+  // Training sits next to Observe on purpose: both read the same observed arrivals,
+  // Observe asking how the aircraft flew and Training what that track was read as.
+  { mode: "training", label: "Training" },
   { mode: "fly", label: "Fly" },
   { mode: "optimize", label: "Optimize" },
   { mode: "compare", label: "Compare" },

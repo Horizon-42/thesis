@@ -4,6 +4,7 @@
  * The left working dock. It shows only the controls for the active task, switching
  * on the global workbench `mode` (the four mutually-exclusive tasks):
  *   • observe                  → trajectory playback/options + the flight list
+ *   • training                 → the TrainingPanel (stage B's intermediate results)
  *   • fly / optimize / compare → the PilotPanel, driven in the matching sub-mode
  *
  * Procedures is NOT a task — the procedure panel is rendered separately (gated on
@@ -19,6 +20,7 @@ import type {
 import FlightTable from "./FlightTable";
 import EvaluationSummary from "./EvaluationSummary";
 import PilotPanel from "./PilotPanel";
+import TrainingPanel from "./TrainingPanel";
 import type { ObservedFlightSummary } from "../utils/observedFlightSummary";
 
 type PilotPanelMode = "pilot" | "trajectory" | "comparison";
@@ -61,6 +63,14 @@ export default function WorkbenchLeftDock({
           mode={MODE_TO_PILOT[mode]}
           onRequestMode={(next) => setMode(PILOT_TO_MODE[next])}
         />
+      </div>
+    );
+  }
+
+  if (mode === "training") {
+    return (
+      <div className="workbench-left-dock">
+        <TrainingPanel />
       </div>
     );
   }

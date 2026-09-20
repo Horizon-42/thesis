@@ -237,7 +237,7 @@ interface ApproachViewSessionState {
  * pilot/trajectory/comparison sub-modes. Procedures is intentionally NOT a mode:
  * it is an independent panel (`proceduresOpen`) that coexists with any task.
  */
-export type WorkbenchMode = "observe" | "fly" | "optimize" | "compare";
+export type WorkbenchMode = "observe" | "training" | "fly" | "optimize" | "compare";
 
 /**
  * Fly (pilot) mode's transport, published by PilotPanel so the shared bottom bar
