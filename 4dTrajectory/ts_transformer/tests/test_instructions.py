@@ -87,19 +87,35 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
     flats = ins.plateaus(speed, v.speed_tolerance_mps, 6)
     assert flats == [(0, 10), (10, 30), (30, 60)]
     to_word = lambda x: (v.speed_bin(x)[0], x, False)                                  # noqa: E731
-    words, absorbed = ins._manoeuvre_words("speed", times, speed, flats, 6, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, speed, flats, 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
     assert v.speed_bin(84.0)[0] == v.speed_bin(80.0)[0] != v.speed_bin(90.0)[0]          # one bin (163 and 156 kt)
     assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0, 0.0), (v.speed_bin(84.0)[0], 10.0, 10.0)]
-    assert absorbed == [ins.Absorbed("speed", 30.0, 30.0, words[1].word, 80.0 - 84.0, ins.ABSORBED_SAME_WORD)]
-    ramp, dropped = ins._manoeuvre_words("speed", times, np.linspace(100.0, 70.0, 60), [], 6, to_word)
+    assert absorbed == [ins.Absorbed("speed", 30.0, 30.0, words[1].word, 80.0 - 84.0, ins.ABSORBED_SMALL_CHANGE)]   # 4 m/s: under a bin
+    # the altitude's minimum change is half a bin: a 160 m step inside one bin is "same word", the next step a new word
+    height = np.concatenate((np.full(20, 800.0), np.full(20, 960.0), np.full(20, 700.0)))
+    to_height = lambda x: (v.altitude_bin(x)[0], x, False)                              # noqa: E731
+    words, absorbed = ins._manoeuvre_words("altitude", times, height, ins.plateaus(height, v.height_tolerance_m, 6), 6,
+                                           v.height_tolerance_m, v.height_min_change_m, to_height)
+    assert [w.word for w in words] == [v.altitude_bin(800.0)[0], v.altitude_bin(700.0)[0]] and v.altitude_bin(960.0)[0] == words[0].word
+    assert [(a.reason, a.change) for a in absorbed] == [(ins.ABSORBED_SAME_WORD, 160.0)]
+    ramp, dropped = ins._manoeuvre_words("speed", times, np.linspace(100.0, 70.0, 60), [], 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
     assert [(w.word, w.issued_s, w.settled_s) for w in ramp] == [(v.speed_bin(70.0)[0], 0.0, None)] and not dropped
     # a tail shorter than a plateau is unreadable: recorded, never a word
     tail = np.concatenate((np.full(56, 90.0), [85.0, 80.0, 75.0, 70.0]))
-    words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
     assert [w.word for w in words] == [v.speed_bin(90.0)[0]] and absorbed == [ins.Absorbed("speed", 56.0, 59.0, words[0].word, 70.0 - 90.0, ins.ABSORBED_SHORT_TAIL)]
     long_tail = np.concatenate((np.full(50, 90.0), np.linspace(90.0, 70.0, 10)))
-    words, absorbed = ins._manoeuvre_words("speed", times, long_tail, ins.plateaus(long_tail, v.speed_tolerance_mps, 6), 6, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, long_tail, ins.plateaus(long_tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
     assert [(w.word, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0), (v.speed_bin(70.0)[0], None)] and not absorbed
+    # a wobble under one bin is absorbed even across a bin edge (a 4 m/s = 8 kt change is no speed call)
+    wobble = np.concatenate((np.full(20, 88.5), np.full(20, 92.5), np.full(20, 88.5)))          # 172 / 180 kt: bins 5 and 6
+    assert v.speed_bin(88.5)[0] != v.speed_bin(92.5)[0] and 4.0 < v.speed_min_change_mps
+    words, absorbed = ins._manoeuvre_words("speed", times, wobble, ins.plateaus(wobble, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, to_word)
+    assert [w.word for w in words] == [v.speed_bin(88.5)[0]] and [a.reason for a in absorbed] == [ins.ABSORBED_SMALL_CHANGE] * 2
+    assert absorbed[0].start_s == 20.0 and absorbed[0].end_s == 20.0
+    with pytest.raises(ValueError, match="at least the kind's tolerance"):
+        ins.Vocabulary(speed_min_change_mps=1.0)
+    assert ins.departure_row(np.array([5.0, 5.0, 5.4, 6.0, 6.8, 8.0]), 0, 5, 5.0, 2.0) == 4          # 6.8 is the first row past ±1
     with pytest.raises(ValueError, match="plateau needs rows"):
         ins._plateau_value(speed, 5, 5)
 
@@ -214,7 +230,7 @@ def test_the_intercept_is_the_last_heading_instruction_not_a_wiggle_after_the_ca
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert [i.word for i in headings] == [27, 0] and len(intercept) == 1
     assert intercept[0].issued_s == headings[1].issued_s and intercept[0].target == pytest.approx(90.0, abs=2.0) and intercept[0].word == 2
-    assert any(a.kind == "heading" and a.reason == ins.ABSORBED_SAME_WORD for a in reading.absorbed)
+    assert any(a.kind == "heading" and a.reason == ins.ABSORBED_SMALL_CHANGE for a in reading.absorbed)
     straight = ins.read_instructions(_capture(item, t, np.zeros(len(t)), level, speed), v)
     assert not [i for i in straight.instructions if i.kind == "intercept"] and straight.established_from_start
 
