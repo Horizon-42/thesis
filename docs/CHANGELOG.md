@@ -4,6 +4,31 @@ Dated log of significant changes, root causes, and decisions, referenced from `C
 
 Entries verified via full test suites + tsc + vite build at the time; "verified in-browser" noted only where done. Merged same-day, same-topic entries.
 
+### 2026-09-20 — stage B′ merged; the reading rule's fifth hand check (136/150) and its two fixes — the held-level rule gains a tolerance condition (plateau-v9)
+
+`dev-instruction-vocab` fast-forwarded into the main tree (39 files, +4087/−161; full suite 1263 ts tests pass).
+Two things changed after the entry below, and every number in the docs was re-read off the new artefact
+(**sha 1586172a6ec6, `plateau-v9`**, superseding f8eb7968a250):
+
+- **Round 5 of the hand check ran on v8** — 150 freshly drawn pages, three opus agents, the "how many seconds
+  late counts as wrong" threshold written into the brief as a number (20 s = two sentence positions) so the three
+  shares are comparable for the first time. Result **136/150 = 0.907**, past the plan's 0.9 gate; 8 of the 14
+  misreads were ground speed, 6 heading, none altitude or intercept. **Verdict M-B0′: the vocabulary is settled.**
+- **Round 5 found a real bug, fixed as v9.** The hold rule released any level held ≥ 40 s from the minimum-change
+  absorption, which also released a level that had not moved: one steady stretch split by a brief excursion, whose
+  two halves' medians differ by less than the tolerance but straddle a bin edge, was read as two instructions
+  (6 of 50 pages; one flight steady at 74.5 m/s for 109 s drawn as "down to 77" then "down to 72"). v9 adds the
+  condition the rule was missing — the held level must ALSO differ from the word in force by at least one tolerance.
+  Speed words 23 776 → 23 242, small-change absorbed 2086 → 2609 (the 523 bin-edge splits), speed words returning to
+  the previous one 301 (266 flights) → 237 (213 flights, 3.1 %); heading and altitude untouched; issue-time p95 unmoved.
+- **The design document was rewritten in plain Chinese** (`docs/2026-09-20_instruction_vocabulary.zh.md`) — the user's
+  third reminder not to coin Chinese terms. Where Chinese would be forced the English word stands with a one-sentence
+  explanation. The results doc's §12 was restructured at the same time: the parallel `## 12.5` section appended
+  earlier is folded back in as `### 12.3`, so §12 is one block with six subsections.
+- Net word counts, train (6853 flights): 59 316 instructions (heading 17 354 / altitude 13 823 / speed 23 242 /
+  intercept 4 897), p50 7 a flight, 11.5 % of the 274 230 positions carry a change. Intercept angles ≤ 30° 24.2 %,
+  30–45° 20.6 %, > 45° **55.2 %** — still contradicting plan D59's "mask > 45°", still the user's call.
+
 ### 2026-09-20 — stage B′ built: the instruction vocabulary labeller (B0′, three hand checks), the instruction executor, the instruction prior, gate B1 (D57), the B′ queue
 
 Branch `dev-instruction-vocab` (worktree `.claude/worktrees/instruction-vocab`; commits 87fff1cb, 7e711f75, f043f90e,

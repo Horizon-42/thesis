@@ -6,6 +6,28 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## Two suites fail at HEAD, outside the ts tree (2026-09-20)
+
+**Verified** — `./run_all_tests.sh` on `dev-two-tier-feasibility` at `e74d5644`, with the working
+tree touching only `4dTrajectory/ts_transformer/`, so neither failure comes from the instruction
+vocabulary. Three modeling+backend tests fail, one of which the runner's own header already
+documents as known and unrelated (the numpy scalar-conversion deprecation in
+`test_fixed_time_objective_weights_control_effort_at_one`). The other two are NOT documented:
+
+- `4dTrajectory/optimization/tests/test_scenario_optimization.py::test_write_reference_records_from_observed_tracks`
+  — `ValueError: …_reference_eval.json: source.arr_airport must be a non-empty string`, raised by
+  `evaluation/records.py:108`. The evaluation record contract gained a required `source.arr_airport`
+  (report v7–v9 line, commits bb643d58 / 8bf9f5cc / 53ae8e80); the optimizer's reference-record
+  writer does not fill it, so the test's fixture cannot be written any more.
+- `trajectory_data_process/tests/test_download_landings.py::test_download_reuses_interrupted_checkpoint_start_for_cache_keys`
+  — the interrupted-checkpoint start reads back as `None` instead of the stored timestamp.
+
+**Judgement**: both look like a contract that moved without its writer, not flakes — the first one
+names the missing field outright. Neither blocks the B′ queue (nothing in the instruction path
+writes an evaluation record), which is why they are recorded here rather than fixed inside the
+vocabulary change. Whoever owns the report-v9 record contract should decide whether the optimizer's
+reference writer must carry `arr_airport` or the contract should not require it on a reference row.
+
 ## ts_transformer: the closed-loop training's EXECUTOR side is not written (2026-09-18)
 
 **Judgement** (manoeuvre-token plan §2.7 step 2): retraining the executor on its own flown legs
