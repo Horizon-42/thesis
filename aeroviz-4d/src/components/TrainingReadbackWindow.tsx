@@ -333,9 +333,12 @@ export default function TrainingReadbackWindow({
   const planPx = (km: number) => GUTTER + 6 + (km - planXLow) * planScale;
   const planPy = (km: number) => 18 + (planYHigh - km) * planScale;
 
+  // The sector's outline, in the plan's own axes. The FIRST point is the apex —
+  // the aircraft's position when that word opened — so the shape fans out from
+  // the track rather than sitting beside it.
   const boxPolygon = (box: TrainingEnvelope["events"][number]) =>
     box.toGoM
-      .map((metres, corner) => `${planPx(-metres / 1000)},${planPy(box.crossM[corner] / 1000)}`)
+      .map((metres, point) => `${planPx(-metres / 1000)},${planPy(box.crossM[point] / 1000)}`)
       .join(" ");
 
   return createPortal(
@@ -390,18 +393,23 @@ export default function TrainingReadbackWindow({
             x1={planPx(0)} x2={planPx(0)} y1={planPy(planYHigh)} y2={planPy(planYLow)}
             className="training-readback-threshold"
           />
-          {/* THE CHAIN OF BOXES, under the track: one footprint per word, the
+          {/* THE CHAIN OF SECTORS, under the track: one footprint per word, the
               ground the heading and speed words allow while that word stands.
-              They are thin — over a median 4 s hold a 2° heading box opens about
-              10 m of cross-track — and that thinness is the finding, not a
-              drawing fault: horizontally one word says almost nothing, and it is
-              the accumulation over a sentence that opens the funnel. */}
+              Each one FANS OUT FROM THE AIRCRAFT — a pie slice of radius
+              `hold × the speed box's upper edge`, spanning the heading box — and
+              not a rectangle: the corners beside the apex are ground no heading
+              inside the box can reach. They are thin (over a median 4 s hold a 2°
+              box opens about 17 m at its far edge), and that thinness is the
+              finding, not a drawing fault: horizontally one word says almost
+              nothing, and it is the accumulation over a sentence that opens the
+              funnel. */}
           {(layers.flown ? envelope.events : []).map((box, index) => {
             const name =
               `box ${index + 1} at ${formatSeconds(box.eventS)} s, held ${formatSeconds(box.holdS)} s: ` +
               `heading ${format(box.headingLoDeg, 1)}…${format(box.headingHiDeg, 1)}°, ` +
               `speed ${format(box.speedLoMps, 1)}…${format(box.speedHiMps, 1)} m/s, ` +
-              `${format(box.altLoM)}…${format(box.altHiM)} m`;
+              `${format(box.altLoM)}…${format(box.altHiM)} m — the ground it reaches is a sector ` +
+              `${format(box.holdS * box.speedHiMps)} m deep, fanning out from the aircraft`;
             return (
               <polygon
                 key={`plan-box-${index}`}
@@ -703,6 +711,16 @@ export default function TrainingReadbackWindow({
             height-tracking executor — the replay gate, which is not built — so
             what is drawn is the region the words allow rather than one line
             through it.
+          </span>
+          <span>
+            A word is a box in STATE space (heading × speed × altitude), and that
+            is what the vocabulary calls a bounding box. The ground it reaches is
+            NOT a box: it is a sector fanning out from the aircraft, as deep as
+            the hold times the speed box's upper edge and as wide as the heading
+            box. The speed box's LOWER edge does not bound it — at any instant
+            before the hold is up the aircraft is nearer than that. Nothing in it
+            limits how fast the heading may swing inside its box, because the word
+            does not: that would be an executor's rule, and there is none here.
           </span>
           {flight.prior && prior ? (
             <span>

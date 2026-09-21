@@ -25,9 +25,11 @@
  *    altitude word covers a long segment and the wedge is drawn three times
  *    rather than twenty-six. A real 3° approach cuts far shorter segments — that
  *    arithmetic is tested directly, against the real angles, rather than here.
- *  • the box FOOTPRINTS are a plain rectangle around each event's position. The
- *    exporter derives the real ones from the words' reachable set; nothing in the
- *    reader recomputes them, so the fixture only has to be the right shape.
+ *  • the box FOOTPRINTS are a coarse sector — apex at the event's own position,
+ *    three points on the arc. The exporter derives the real ones from the words'
+ *    reachable set at one point per degree of opening; nothing in the reader
+ *    recomputes them, so the fixture only has to be the right SHAPE (an outline
+ *    whose first point is the apex, of the same length in all four arrays).
  *
  * The raw columns are the read ones plus a small wiggle, so a chart that plotted
  * the raw signal where it should plot the smoothed one is visibly wrong instead
@@ -230,11 +232,17 @@ export function mockEnvelope(words: number[][]) {
     const [speedLoMps, speedHiMps] = speedBoxMps(MOCK_SPEC, words[event][2]);
     const low = Math.min(...rows.map((index) => altLoM[index]));
     const high = Math.max(...rows.map((index) => altHiM[index]));
-    // An indicative footprint: a rectangle around the event's own position. The
-    // real one is the words' reachable set, computed at the exporter.
-    const spread = (speedHiMps * MOCK_HOLDS_S[event]) / 2;
+    // The footprint, the same SHAPE the exporter draws: apex at the event's own
+    // position, then an arc at radius `hold × the speed box's upper edge` across
+    // the heading box. The exporter puts one point per degree of opening; three
+    // is its floor and all a fixture needs. A displacement at relative course ψ
+    // over a distance d is `(-d·cos ψ, -d·sin ψ)` in this frame.
+    const depth = speedHiMps * MOCK_HOLDS_S[event];
     const toGo = TO_GO_M[first];
     const cross = CROSS_M[first];
+    const arc = [headingLoDeg, (headingLoDeg + headingHiDeg) / 2, headingHiDeg].map(
+      (degrees) => (degrees * Math.PI) / 180,
+    );
     return {
       eventS,
       holdS: MOCK_HOLDS_S[event],
@@ -247,10 +255,12 @@ export function mockEnvelope(words: number[][]) {
       altHiM: high,
       altHaeLoM: THRESHOLD_HAE_M + low,
       altHaeHiM: THRESHOLD_HAE_M + high,
-      toGoM: [toGo, toGo - 2 * spread, toGo - 2 * spread, toGo],
-      crossM: [cross - spread / 8, cross - spread / 8, cross + spread / 8, cross + spread / 8],
-      lon: [LON[first], LON[first] + 0.004, LON[first] + 0.004, LON[first]],
-      lat: [LAT[first], LAT[first] + 0.003, LAT[first] + 0.004, LAT[first] + 0.001],
+      toGoM: [toGo, ...arc.map((angle) => toGo - depth * Math.cos(angle))],
+      crossM: [cross, ...arc.map((angle) => cross - depth * Math.sin(angle))],
+      // indicative geodetic corners: the reader only requires that the four
+      // arrays are one outline, of the same length, with at least three points
+      lon: [LON[first], ...arc.map((_, point) => LON[first] + 0.004 - 0.0002 * point)],
+      lat: [LAT[first], ...arc.map((_, point) => LAT[first] + 0.003 + 0.0002 * point)],
     };
   });
   const inside = (values: number[], low: (row: number) => number, high: (row: number) => number) => {

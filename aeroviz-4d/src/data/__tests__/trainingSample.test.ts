@@ -281,10 +281,36 @@ describe("what the reader refuses", () => {
     expect(problem(raw)).toMatch(/the exporter's boxes and this reader's reading of them disagree/);
   });
 
-  it("a box whose footprint is not four corners", () => {
+  it("a footprint too short to be an outline", () => {
     const raw = mockSample() as any;
-    raw.flights[0].envelope.events[0].toGoM = [0, 1, 2];
-    expect(problem(raw)).toContain("is not four corners");
+    raw.flights[0].envelope.events[0].toGoM = [0, 1];
+    expect(problem(raw)).toContain("shorter than three points");
+  });
+
+  it("a footprint whose two coordinate systems are different lengths", () => {
+    // The four arrays are ONE outline twice over. A length that differs between
+    // them is two shapes drawn as though they were one — the plan view would show
+    // a sector the 3D scene does not have.
+    const raw = mockSample() as any;
+    raw.flights[0].envelope.events[0].toGoM = [0, 1, 2, 3, 4];
+    expect(problem(raw)).toContain("one outline in two coordinate systems");
+  });
+
+  it("the footprint is a SECTOR, and its first point is the aircraft", () => {
+    const flight = parsed().flights[0];
+    flight.envelope.events.forEach((box, event) => {
+      // the apex sits on the track, at the row where this word opened
+      const row = flight.observed.tS.findIndex((t) => t >= box.eventS);
+      expect(box.toGoM[0]).toBeCloseTo(flight.observed.toGoM[row], 6);
+      expect(box.crossM[0]).toBeCloseTo(flight.observed.crossM[row], 6);
+      // and it reaches no further than the hold times the speed box's UPPER edge
+      const depth = box.holdS * box.speedHiMps;
+      for (let point = 1; point < box.toGoM.length; point += 1) {
+        const reach = Math.hypot(box.toGoM[point] - box.toGoM[0], box.crossM[point] - box.crossM[0]);
+        expect(reach).toBeLessThanOrEqual(depth + 1e-6);
+      }
+      void event;
+    });
   });
 
   it("a path column that falls", () => {

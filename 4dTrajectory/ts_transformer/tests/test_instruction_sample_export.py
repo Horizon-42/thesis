@@ -22,9 +22,9 @@ import pytest
 
 from ts_transformer.experiments.instruction_sample_export import (
     BOX_SCHEMA, INDEX_SCHEMA, INSIDE_EPSILON, KINDS, POOL_FACTOR, READING_RULE, SAMPLE_SCHEMA,
-    altitude_envelope, containment, cumulative_path_m, displacement_box, drawn_flights,
-    hae_offset_m, load_box_vocabulary, lonlat_from_frame, read_signals, reading_block,
-    runway_sha256, sentences_by_flight, update_index, word_runs,
+    SECTOR_ARC_MAX, SECTOR_ARC_MIN, altitude_envelope, containment, cumulative_path_m,
+    drawn_flights, hae_offset_m, load_box_vocabulary, lonlat_from_frame, read_signals,
+    reachable_sector, reading_block, runway_sha256, sentences_by_flight, update_index, word_runs,
 )
 
 # The frontend reader's own constants (`src/data/trainingSample.ts`). Declared MIRRORS: the two
@@ -352,31 +352,62 @@ def test_a_row_in_no_segment_is_refused():
         altitude_envelope(np.array([10.0]), words, times, times * 50.0, spec, targets)
 
 
-def test_the_displacement_box_is_the_words_own_reachable_set():
-    """A word bounds the direction of travel and its rate, so over its hold the displacement is
-    bounded. `to_go` counts DOWN toward the threshold, which is why the box is negative there."""
-    # straight ahead, 80–100 m/s, held 10 s: 800–1000 m closer, and no cross-track at all
-    to_go_min, to_go_max, cross_min, cross_max = displacement_box(0.0, 0.0, 80.0, 100.0, 10.0)
-    assert to_go_min == pytest.approx(-1000.0)
-    assert to_go_max == pytest.approx(0.0)              # τ = 0 is reachable: the set is a cone
-    assert cross_min == pytest.approx(0.0) and cross_max == pytest.approx(0.0)
-
-    # a 2° box about the course opens a little each way, and it is tiny: this thinness is the
-    # finding, not a drawing fault — horizontally one word says almost nothing
-    _, _, cross_min, cross_max = displacement_box(-1.0, 1.0, 80.0, 100.0, 4.0)
-    assert cross_max == pytest.approx(400.0 * math.sin(math.radians(1.0)), rel=1e-6)
-    assert cross_min == pytest.approx(-cross_max, rel=1e-6)
-    assert cross_max < 10.0
-
-    # a box that contains the beam (90°) reaches its full extent sideways
-    _, _, _, cross_max = displacement_box(85.0, 95.0, 80.0, 100.0, 10.0)
-    assert cross_max == pytest.approx(0.0)             # sin is NEGATIVE in this frame's cross
-    _, _, cross_min, _ = displacement_box(85.0, 95.0, 80.0, 100.0, 10.0)
-    assert cross_min == pytest.approx(-1000.0)
+def _reach(to_go: list[float], cross: list[float]) -> list[float]:
+    """How far each outline point sits from the apex."""
+    return [math.hypot(to_go[i] - to_go[0], cross[i] - cross[0]) for i in range(1, len(to_go))]
 
 
-def test_a_zero_hold_box_has_no_extent():
-    assert displacement_box(-10.0, 10.0, 80.0, 100.0, 0.0) == (0.0, 0.0, 0.0, 0.0)
+def test_the_footprint_is_a_SECTOR_from_the_aircraft_not_a_box_around_it():
+    """The words bound the STATE, and the positions that follow over a hold are a pie slice with
+    its apex at the aircraft — every point of it at a bearing inside the heading box.
+
+    Drawing the bounding box of this instead (which the first version did) puts flyable-looking
+    ground beside the apex that no heading in the box can reach.
+    """
+    to_go, cross = reachable_sector(-1.0, 1.0, 100.0, 10.0)
+    assert (to_go[0], cross[0]) == (0.0, 0.0)          # the apex IS the aircraft
+    # every other point sits on the arc, at the hold times the speed box's upper edge
+    assert _reach(to_go, cross) == pytest.approx([1000.0] * (len(to_go) - 1))
+    # and at a bearing inside the heading box — `to_go` counts DOWN toward the threshold, so a
+    # displacement along the course is negative there
+    for index in range(1, len(to_go)):
+        bearing = math.degrees(math.atan2(-cross[index], -to_go[index]))
+        assert -1.0 - 1e-9 <= bearing <= 1.0 + 1e-9
+
+    # the corner of the bounding box that the rectangle would have added is NOT in the sector:
+    # it sits beside the apex, at 90° to the course, which no heading in a 2° box can produce
+    assert max(abs(value) for value in cross) < 20.0
+    assert min(to_go) == pytest.approx(-1000.0, rel=1e-3)
+
+
+def test_the_speed_words_LOWER_edge_does_not_bound_the_footprint():
+    """It says where the aircraft is at the END of the hold; at every earlier instant it is
+    nearer, so the swept region runs all the way back to the apex. Only `v_hi` sets the radius —
+    which is why `reachable_sector` does not take `v_lo` at all."""
+    slow = reachable_sector(-1.0, 1.0, 100.0, 10.0)
+    assert max(_reach(*slow)) == pytest.approx(1000.0)
+    faster = reachable_sector(-1.0, 1.0, 120.0, 10.0)
+    assert max(_reach(*faster)) == pytest.approx(1200.0)
+
+
+def test_a_wide_box_fans_and_a_narrow_one_is_a_sliver():
+    """The arc is drawn at one point per degree of its own opening, between a floor and a cap: a
+    constant would either facet the wide boxes or spend sixteen points on a sliver."""
+    narrow_to_go, narrow_cross = reachable_sector(-1.0, 1.0, 122.0, 4.0)
+    assert len(narrow_to_go) == 1 + SECTOR_ARC_MIN
+    width = math.hypot(narrow_to_go[-1] - narrow_to_go[1], narrow_cross[-1] - narrow_cross[1])
+    # 488 m deep and 17 m across at its far edge: horizontally one word says almost nothing,
+    # and that is the reading, not a drawing fault
+    assert max(_reach(narrow_to_go, narrow_cross)) == pytest.approx(488.0)
+    assert width < 20.0
+
+    wide_to_go, _ = reachable_sector(-90.0, 90.0, 100.0, 20.0)
+    assert len(wide_to_go) == 1 + SECTOR_ARC_MAX
+
+
+def test_a_zero_hold_sector_collapses_onto_the_aircraft():
+    to_go, cross = reachable_sector(-10.0, 10.0, 100.0, 0.0)
+    assert _reach(to_go, cross) == pytest.approx([0.0] * (len(to_go) - 1))
 
 
 def test_containment_counts_rows_and_forgives_only_the_edge():

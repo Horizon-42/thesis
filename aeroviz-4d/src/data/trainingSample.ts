@@ -324,24 +324,36 @@ export type TrainingObserved = { tS: number[] }
   & Record<TrainingGeodeticColumn, number[]>;
 
 /**
- * ONE WORD AS A BOX IN SPACE — the three intervals it names, and where those
- * intervals let the aircraft be while it is in force.
+ * ONE WORD, AS THE REGION IT ALLOWS — the three intervals it names, and where
+ * those intervals let the aircraft be while it stands.
  *
- * `lon` / `lat` are FOUR corners: the ground footprint of the box, anchored at
- * the aircraft's position when the box opened, and `toGoM` / `crossM` are the
- * same four corners in the COURSE FRAME, which is the plan view's own axes.
- * Both spellings come from one computation at the exporter, because the frame's
- * transform lives on that side of the wire and a second inverse here could
- * drift from it. It is the
- * words' own reachable set — the heading word bounds the direction of travel and
- * the speed word its rate, so over a hold of `holdS` the displacement is bounded
- * — and it is DERIVED, not the word itself: a word constrains the state at every
- * instant, and where that lets the aircraft go is this. The view has to say which
- * of the two it is drawing.
+ * A WORD IS A BOX IN STATE SPACE, NOT IN POSITION SPACE. What the vocabulary
+ * calls a bounding box is the product of three intervals: heading × speed ×
+ * altitude. The set of PLACES that follows is not a box — it is a pie slice
+ * fanning out from the aircraft, of radius `holdS × speedHiMps`, spanning the
+ * heading interval. `lon` / `lat` are that sector's outline and `toGoM` /
+ * `crossM` the same outline in the COURSE FRAME, which is the plan view's own
+ * axes; **the first point is the apex**, the aircraft's own position when the
+ * word opened. Both spellings come from one computation at the exporter, because
+ * the frame's transform lives on that side of the wire and a second inverse here
+ * could drift from it.
  *
- * `altLoM` / `altHiM` are the wedge's extremes over this box's own rows, which is
- * what gives the box its height. They are not the target's ±5 %: the wedge is
- * wide at the start of a segment and narrow at its end.
+ * The number of points VARIES — one per degree of the sector's own opening,
+ * between 3 and 16 — so nothing here may assume four. An earlier version drew
+ * the sector's axis-aligned bounding box instead, which is wrong in the way that
+ * matters: it shows flyable-looking ground beside the apex that no heading inside
+ * the box can reach.
+ *
+ * It is DERIVED, not the word itself: a word constrains the STATE at every
+ * instant, and where that lets the aircraft go is this. Nothing bounds how fast
+ * the heading may swing inside its box, because the word does not — a turn rate
+ * belongs to an executor, and there is none here. The view has to say which of
+ * the two it is drawing.
+ *
+ * `altLoM` / `altHiM` are the wedge at the instant the word OPENS, which is the
+ * widest it gets while that word stands — so the prism's height is an outer bound
+ * over the hold. They are not the target's ±5 %: that is what the wedge closes
+ * onto at its segment's end.
  */
 export interface TrainingEventBox {
   eventS: number;
@@ -1245,15 +1257,27 @@ function parseEventBox(raw: unknown, index: number, where: string): Parsed<Train
   const corners: Record<string, number[]> = {};
   for (const field of ["lon", "lat", "toGoM", "crossM"]) {
     const values = numberArray(raw[field]);
-    if (values === null || values.length !== 4) {
+    if (values === null || values.length < 3) {
       return {
         ok: false,
         problem:
-          `${where}.events[${index}].${field} is not four corners — the ground footprint is a quad, ` +
-          `in geodetic and in course-frame coordinates`,
+          `${where}.events[${index}].${field} is missing or shorter than three points — the ground ` +
+          `footprint is a sector's outline, in geodetic and in course-frame coordinates`,
       };
     }
     corners[field] = values;
+  }
+  // The four arrays are ONE outline in two coordinate systems, so a length that
+  // differs between them is two different shapes drawn as though they were one:
+  // the plan view would draw a sector the 3D scene does not have.
+  if (new Set(Object.values(corners).map((values) => values.length)).size !== 1) {
+    return {
+      ok: false,
+      problem:
+        `${where}.events[${index}]: lon/lat/toGoM/crossM have different lengths ` +
+        `(${Object.entries(corners).map(([field, values]) => `${field} ${values.length}`).join(", ")}) — ` +
+        `they are one outline in two coordinate systems`,
+    };
   }
   return {
     ok: true,

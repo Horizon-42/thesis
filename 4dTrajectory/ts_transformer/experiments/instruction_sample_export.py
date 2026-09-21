@@ -413,60 +413,72 @@ def altitude_envelope(event_times_s: np.ndarray, words: np.ndarray, t_s: np.ndar
     return low, high
 
 
-def _cos_extremes(low_rad: float, high_rad: float) -> tuple[float, float]:
-    """min and max of cos over ``[low, high]`` — exact, not sampled. The heading box always lies
-    inside [-180°, 180°], so an extremum is either an endpoint or the one turning point the
-    interval happens to contain."""
-    values = [math.cos(low_rad), math.cos(high_rad)]
-    top = 1.0 if low_rad <= 0.0 <= high_rad else max(values)
-    bottom = -1.0 if low_rad <= -math.pi <= high_rad or low_rad <= math.pi <= high_rad else min(values)
-    return bottom, top
+#: How finely the sector's arc is drawn: one point per degree of its own opening, between these
+#: two. A 2° box at the course needs 3 points and an 18° one at the reciprocal needs 16 — a
+#: constant would either facet the wide ones or spend sixteen points on a sliver.
+SECTOR_ARC_MIN = 3
+SECTOR_ARC_MAX = 16
 
 
-def _sin_extremes(low_rad: float, high_rad: float) -> tuple[float, float]:
-    """min and max of sin over ``[low, high]``, the same way."""
-    values = [math.sin(low_rad), math.sin(high_rad)]
-    top = 1.0 if low_rad <= math.pi / 2 <= high_rad else max(values)
-    bottom = -1.0 if low_rad <= -math.pi / 2 <= high_rad else min(values)
-    return bottom, top
+def reachable_sector(heading_lo_deg: float, heading_hi_deg: float, speed_hi: float,
+                     hold_s: float) -> tuple[list[float], list[float]]:
+    """``(to_go_offsets, cross_offsets)``: where ONE word lets the aircraft be, relative to where
+    it was when that word opened — **a circular sector, not a box**.
 
+    The words bound the STATE: the heading word holds the ground track's angle inside
+    ``[ψ_lo, ψ_hi]`` and the speed word holds its rate inside ``[v_lo, v_hi]``, at every instant.
+    The positions that follow over a hold of T seconds are
 
-def displacement_box(heading_lo_deg: float, heading_hi_deg: float, speed_lo: float,
-                     speed_hi: float, hold_s: float) -> tuple[float, float, float, float]:
-    """``(to_go_min, to_go_max, cross_min, cross_max)``: how far the aircraft can move, in the
-    course frame, while ONE box is in force.
+        { ∫₀^τ v(s)·(cos ψ(s), sin ψ(s)) ds : τ ∈ [0,T], v(s) ∈ [v_lo, v_hi], ψ(s) ∈ [ψ_lo, ψ_hi] }
 
-    This is the words' own reachable set, not a rendering choice. The heading word bounds the
-    ground track's angle and the speed word bounds its length, so over a hold of T seconds the
-    displacement is ``-∫ v·(cos ψ, sin ψ)`` with ψ inside the heading box and v inside the speed
-    box — the frame's signs are `course_frame_rows`' (``to_go`` counts DOWN toward the threshold).
-    The reachable set is the cone from the event's own position out to T, and its bounding box is
-    the eight corner products of ``[0, T] × [v_lo, v_hi] × [min, max]`` of cos and of sin.
+    and that set is the **pie slice** of radius ``T · v_hi`` spanning the heading box, apex at the
+    aircraft: the integral of a set-valued map over [0, τ] is ``τ · conv(V)``, and sweeping τ from
+    0 to T scales that hull all the way down to the apex.
 
-    IT IS A DERIVED SET, NOT THE WORD. A word constrains the STATE at every instant (§2.1); where
-    that lets the aircraft GO is this, and the view has to say which of the two it is drawing.
+    **The speed word's LOWER edge does not bound it at all.** It says where the aircraft is at the
+    END of the hold (no nearer than ``T · v_lo``), but at every earlier instant it is nearer
+    still, so the swept region runs back to the apex. Only ``v_hi`` sets the radius.
+
+    THE BOUNDING BOX OF THIS IS NOT IT, and drawing one was wrong (2026-09-21, caught by the
+    user): a rectangle puts flyable-looking volume where the words allow none — the corners beside
+    the apex, which the aircraft cannot reach without having turned outside its heading box. At a
+    2° box the rectangle is about twice the slice's area, at a 9° one worse, and it hides the one
+    thing the shape exists to show: that the region FANS OUT FROM THE AIRCRAFT.
+
+    The frame's signs are `course_frame_rows`' own: ``to_go`` counts DOWN toward the threshold and
+    ``cross`` is positive to the right, so a displacement at relative course ψ over a distance d
+    is ``(-d·cos ψ, -d·sin ψ)``.
+
+    IT IS A DERIVED SET, NOT THE WORD, and it carries no aircraft in it: nothing here limits how
+    fast the heading may swing inside its box, because the word does not. A turn rate belongs to
+    an executor, and there is no executor in this file.
     """
-    cos_lo, cos_hi = _cos_extremes(math.radians(heading_lo_deg), math.radians(heading_hi_deg))
-    sin_lo, sin_hi = _sin_extremes(math.radians(heading_lo_deg), math.radians(heading_hi_deg))
-
-    def span(low: float, high: float) -> tuple[float, float]:
-        products = [-tau * speed * value
-                    for tau in (0.0, hold_s) for speed in (speed_lo, speed_hi) for value in (low, high)]
-        return min(products), max(products)
-
-    to_go = span(cos_lo, cos_hi)
-    cross = span(sin_lo, sin_hi)
-    return to_go[0], to_go[1], cross[0], cross[1]
+    radius = max(hold_s, 0.0) * speed_hi
+    low = math.radians(heading_lo_deg)
+    high = math.radians(heading_hi_deg)
+    arc = min(max(int(math.ceil(heading_hi_deg - heading_lo_deg)), SECTOR_ARC_MIN), SECTOR_ARC_MAX)
+    to_go = [0.0]
+    cross = [0.0]
+    for index in range(arc):
+        angle = low + (high - low) * index / (arc - 1)
+        to_go.append(-radius * math.cos(angle))
+        cross.append(-radius * math.sin(angle))
+    return to_go, cross
 
 
 def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m: np.ndarray,
                 high_m: np.ndarray, vocabulary: dict[str, Any], series) -> list[dict[str, Any]]:
-    """One box per event: the three intervals, the wedge's extremes over the event's own span, and
-    the ground QUAD the words allow the aircraft to be in while the box is in force.
+    """One box per event: the three intervals, the wedge over the event's own span, and the ground
+    SECTOR the words allow the aircraft to be in while that word stands.
 
-    The quad is in the course frame and comes out as four (lon, lat) corners, because the frame's
-    transform lives on this side of the wire — the frontend has lon/lat columns and no way to
-    place a point at an arbitrary (to_go, cross).
+    A word is a box in STATE space — an interval of heading, one of speed, one of altitude — and
+    that is what the vocabulary means by a bounding box. What it makes in POSITION space is not a
+    box: it is a pie slice fanning out from the aircraft (`reachable_sector`). The two are named
+    and drawn differently for that reason.
+
+    The sector is built in the course frame and comes out as (lon, lat) as well, because the
+    frame's transform lives on this side of the wire — the frontend has lon/lat columns and no way
+    to place a point at an arbitrary (to_go, cross).
     """
     edges = vocabulary["edges"]
     heading_edges = np.asarray(edges["heading_deg"], dtype=np.float64)
@@ -481,6 +493,7 @@ def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m
 
     corners_to_go: list[float] = []
     corners_cross: list[float] = []
+    spans: list[int] = []                  # how many points each sector drew
     rows_of: list[np.ndarray] = []
     boxes: list[dict[str, Any]] = []
     for index in range(len(event_times)):
@@ -494,35 +507,40 @@ def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m
         speed_word = int(words[index, columns["speed"]])
         heading_lo, heading_hi = heading_edges[heading_word], heading_edges[heading_word + 1]
         speed_lo, speed_hi = speed_edges[speed_word], speed_edges[speed_word + 1]
-        to_go_min, to_go_max, cross_min, cross_max = displacement_box(
-            heading_lo, heading_hi, speed_lo, speed_hi, float(holds[index]))
+        offsets_to_go, offsets_cross = reachable_sector(
+            heading_lo, heading_hi, speed_hi, float(holds[index]))
         anchor_to_go = float(observed["to_go_m"][rows[0]])
         anchor_cross = float(observed["cross_m"][rows[0]])
-        quad_to_go = [anchor_to_go + to_go_min, anchor_to_go + to_go_max,
-                      anchor_to_go + to_go_max, anchor_to_go + to_go_min]
-        quad_cross = [anchor_cross + cross_min, anchor_cross + cross_min,
-                      anchor_cross + cross_max, anchor_cross + cross_max]
-        corners_to_go.extend(quad_to_go)
-        corners_cross.extend(quad_cross)
+        sector_to_go = [anchor_to_go + value for value in offsets_to_go]
+        sector_cross = [anchor_cross + value for value in offsets_cross]
+        spans.append(len(sector_to_go))
+        corners_to_go.extend(sector_to_go)
+        corners_cross.extend(sector_cross)
         boxes.append({
             "eventS": round(opens_s, 1),
             "holdS": round(float(holds[index]), 1),
-            # the same quad in the COURSE FRAME, which is the plan view's own axes.
-            "toGoM": [round(float(v), 1) for v in quad_to_go],
-            "crossM": [round(float(v), 1) for v in quad_cross],
+            # the same sector in the COURSE FRAME, which is the plan view's own axes. The FIRST
+            # point is the apex — the aircraft's own position when this word opened.
+            "toGoM": [round(float(v), 1) for v in sector_to_go],
+            "crossM": [round(float(v), 1) for v in sector_cross],
             "headingLoDeg": round(float(heading_lo), 4),
             "headingHiDeg": round(float(heading_hi), 4),
             "speedLoMps": round(float(speed_lo), 4),
             "speedHiMps": round(float(speed_hi), 4),
             "altitudeTargetM": round(float(targets[int(words[index, columns["altitude"]])]), 2),
+            # The wedge at the instant the box OPENS, which is the widest it gets while this word
+            # stands (`r` only shrinks along a segment). So the prism's height is an OUTER BOUND
+            # over the hold rather than the wedge at any one moment inside it.
             "altLoM": round(float(low_m[rows].min()), 4),
             "altHiM": round(float(high_m[rows].max()), 4),
         })
 
     lons, lats = lonlat_from_frame(series, corners_to_go, corners_cross)
     offset = hae_offset_m(series, lats, lons)
+    cursor = 0
     for index, box in enumerate(boxes):
-        window = slice(index * 4, index * 4 + 4)
+        window = slice(cursor, cursor + spans[index])
+        cursor += spans[index]
         # the box's own corners sit metres from the track, so the geoid offset at the corners is
         # the offset at the rows; taking it here rather than at the rows keeps one conversion.
         base = float(offset[window].mean())

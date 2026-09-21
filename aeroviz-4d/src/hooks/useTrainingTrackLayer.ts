@@ -18,17 +18,22 @@
  *    track: an ABSOLUTE bound on height, wide where a segment begins and closing
  *    onto ±5 % of its target where it ends. It is the one bound in this
  *    vocabulary that pins a position rather than a rate.
- *  • The BOXES are one prism per word: the ground its heading and speed words
- *    allow while it stands, extruded over the wedge's own range there. They are
- *    thin horizontally — a 2° heading box over a 4 s hold is about ten metres of
- *    cross-track — and that thinness is the finding: horizontally one word says
- *    almost nothing, and it is the accumulation over a whole sentence that opens
- *    the funnel (design §5.1, still open).
+ *  • The SECTORS are one prism per word: the ground its heading and speed words
+ *    allow while it stands, extruded over the wedge's range there. Each footprint
+ *    FANS OUT FROM THE AIRCRAFT — a pie slice as deep as the hold times the speed
+ *    box's upper edge, as wide as the heading box — and is deliberately NOT the
+ *    rectangle around it, which would show flyable-looking ground beside the apex
+ *    that no heading inside the box can reach. They are thin (a 2° box over a 4 s
+ *    hold is 488 m deep and 17 m wide at its far edge), and that thinness is the
+ *    finding: horizontally one word says almost nothing, and it is the
+ *    accumulation over a whole sentence that opens the funnel (design §5.1).
  *
- * The box footprint is a DERIVED reachable set, not the word: a word constrains
- * the state at every instant, and where that lets the aircraft go over its hold
- * is this. The corners are computed at the exporter, in the course frame, because
- * the frame's transform lives on that side of the wire.
+ * A word is a box in STATE space — heading × speed × altitude — which is what the
+ * vocabulary means by a bounding box. In POSITION space it is this sector, and it
+ * is DERIVED: a word constrains the state at every instant, and where that lets
+ * the aircraft go over its hold is this. Nothing bounds how fast the heading may
+ * swing inside its box, because the word does not. The outline is computed at the
+ * exporter, in the course frame, because the frame's transform lives there.
  *
  * STATIC GEOMETRY, NOT TIME-SAMPLED ENTITIES. Training loads no CZML on purpose
  * (design V2): a time-dynamic entity would drive the shared `viewer.clock`, and
@@ -150,15 +155,17 @@ export default function useTrainingTrackLayer(): void {
     // checked against it.
     if (trainingLayers.flown) {
       drawWall(WALL_ID, flight.envelope, TRAINING_FLOWN_COLOR, 0.16);
-      // ONE PRISM PER WORD. `perPositionHeight` is deliberately not used: the
-      // footprint is flat and the two heights are the wedge's range over that
-      // word's own rows, so `height` / `extrudedHeight` say exactly that.
+      // ONE PRISM PER WORD, over the sector's own outline — however many points
+      // that has (one per degree of its opening, 3 to 16). `perPositionHeight` is
+      // deliberately not used: the footprint is flat and the two heights are the
+      // wedge at the instant the word opens, so `height` / `extrudedHeight` say
+      // exactly that — an OUTER bound over the hold, since the wedge only narrows.
       flight.envelope.events.forEach((box, index) => {
         const id = `${BOX_ID}-${index}`;
         added.push(id);
         const corners: number[] = [];
-        for (let corner = 0; corner < box.lon.length; corner += 1) {
-          corners.push(box.lon[corner], box.lat[corner]);
+        for (let point = 0; point < box.lon.length; point += 1) {
+          corners.push(box.lon[point], box.lat[point]);
         }
         viewer.entities.add({
           id,
