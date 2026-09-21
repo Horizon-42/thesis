@@ -50,13 +50,20 @@ STEP_S = 1.0
 #: planner (which draws routes at 20° — a different question: how tight may a drawn arc be, not
 #: how fast does an arrival actually turn).
 #:
-#: Turn: plateau to plateau, the real turn rate is 0.67 of what 20° gives (p50 over 280 turns of
-#: more than 20° at KRDU), which is a 14° bank; per sample the implied bank is p50 11.5° / p90
-#: 23.9° over three airports. A preview that turns half again too fast finishes each turn early
-#: and then flies straight while the aircraft is still turning, displacing everything after it.
+#: Turn: this is a LIMIT, so it belongs at the top of the fleet's distribution and not in its
+#: middle. Per sample the implied bank is p50 11.5° / p90 23.9° / p99 30.3° over three airports,
+#: so 25° is about its p90–p95 and is also the maximum an approach controller assigns.
+#:
+#: It was 14° for part of 2026-09-21 — the plateau-to-plateau MEAN (the fleet turns at 0.67 of
+#: what 20° gives) used as a maximum. The consequence was silent and large: replaying each
+#: flight's OWN course second by second, a 14° limiter landed **76.0 %** of 150 KRDU arrivals
+#: (median 164 m off the centreline at the threshold) where 25° lands **99.3 %** (26 m). That
+#: ceiling was then mistaken for the vocabulary's: heading words looked unable to navigate to a
+#: runway, when it was the limiter that could not follow them. Any landing rate read under a
+#: limiter is at most what that limiter can achieve given PERFECT words — measure that first.
 #: Acceleration: |dV/dt| where the speed is actually changing is p50 0.19 / p90 0.54 / p99 0.99
 #: m/s² (62,383 samples, three airports), so the old 1.0 cap was the p99 and 0.5 is the p90.
-TURN_BANK_RAD = math.radians(14.0)
+TURN_BANK_RAD = math.radians(25.0)
 ACCEL_MAX_MPS2 = 0.5
 #: The most the aircraft will angle off the final approach course to regain the centreline.
 #: See `target_course_deg`: the heading word 0 names the course, and on an approach FLYING that
@@ -188,7 +195,7 @@ def target_course_deg(word: int, vocabulary: Vocabulary, to_go_m: float, cross_m
     never said to join. It also meant the reading and the flying disagreed about what one word
     meant. Now the sentence says which it is.
     """
-    if word != vocabulary.heading_established_word:
+    if not (vocabulary.use_established_word and word == vocabulary.heading_direction_words):
         return vocabulary.heading_centre_deg(word)
     # aim at a point on the centreline ahead; far out that is a gentle correction, close in it
     # saturates at the alignment window. `cross` is eaten by a POSITIVE relative course

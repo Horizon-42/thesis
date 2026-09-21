@@ -85,7 +85,8 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
         # the established word names a line, not a bearing, so it has no distance-to-centre to
         # report — like the runway word, it is excluded rather than given a fake 0
         "heading_deg": [abs(wrap_deg(i.target - vocabulary.heading_centre_deg(i.word)))
-                        for i in unclamped if i.kind == "heading" and i.word != vocabulary.heading_established_word],
+                        for i in unclamped if i.kind == "heading"
+                        and not (vocabulary.use_established_word and i.word == vocabulary.heading_direction_words)],
         "vertical_deg": [abs(i.target - vocabulary.vertical_centre_deg(i.word)) for i in unclamped if i.kind == "vertical"],
         "speed_mps": [abs(i.target - vocabulary.speed_centre_mps(i.word)) for i in unclamped if i.kind == "speed"],
     }
@@ -218,7 +219,7 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
         issued = sorted((i for i in reading.instructions if i.kind == kind), key=lambda i: i.issued_s)
         for j, item in enumerate(issued):
             end = issued[j + 1].issued_s if j + 1 < len(issued) else t[-1]
-            if kind == "heading" and item.word == vocabulary.heading_established_word:
+            if kind == "heading" and vocabulary.use_established_word and item.word == vocabulary.heading_direction_words:
                 ax.axvspan(item.issued_s, end, color="C2", alpha=0.12)    # holding the line, not a bearing
                 continue
             level = centre(item.word)
@@ -280,7 +281,8 @@ def main(argv: list[str] | None = None) -> int:
         # TypeError about integers
         wanted = {f.name: f.type for f in fields(Vocabulary)}[name]
         try:
-            overrides[name] = int(value) if wanted in ("int", int) else float(value)
+            overrides[name] = (value not in ("0", "false", "False") if wanted in ("bool", bool)
+                               else int(value) if wanted in ("int", int) else float(value))
         except ValueError:
             parser.error(f"--set {item!r}: {value!r} is not a {wanted}")
     vocabulary = Vocabulary(**overrides)

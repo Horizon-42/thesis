@@ -169,11 +169,15 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
     words, absorbed = ins._manoeuvre_words("speed", clock, edge, flats, 6, v.speed_tolerance_mps,
                                            SPEED_MIN_CHANGE, v.hold_min_s, to_word)
     assert [w.word for w in words] == [v.speed_bin(75.9)[0]] and [a.reason for a in absorbed] == [ins.ABSORBED_SMALL_CHANGE]
-    # The speed's minimum change is a FRACTION now, so it has no fixed value to compare against a
-    # tolerance at construction — the reader computes it from the track. The heading's is absolute
-    # and still carries the check: two plateaus closer than the tolerance are one plateau.
-    with pytest.raises(ValueError, match="at least the kind's tolerance"):
-        ins.Vocabulary(heading_min_change_deg=0.5)
+    # The minimum change no longer has to reach the kind's tolerance. That rule existed for the
+    # PLATEAU reader, where two plateaus closer than a tolerance were one plateau measured twice;
+    # a TILING has no such pairs — a segment exists because the signal left the band — so the only
+    # thing left to say is that it cannot be negative. 0 is the ablation the v15 artefact used:
+    # word every segment whose word differs.
+    assert ins.Vocabulary(heading_min_change_deg=0.5).heading_min_change_deg == 0.5
+    assert ins.Vocabulary(heading_min_change_deg=0.0).heading_min_change_deg == 0.0
+    with pytest.raises(ValueError, match="heading_min_change_deg is 0"):
+        ins.Vocabulary(heading_min_change_deg=-1.0)
     with pytest.raises(ValueError, match="at least plateau_min_s"):
         ins.Vocabulary(hold_min_s=10.0)
     assert ins.departure_row(np.array([5.0, 5.0, 5.4, 6.0, 6.8, 8.0]), 0, 5, 5.0, 2.0) == 4          # 6.8 is the first row past ±1

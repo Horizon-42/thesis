@@ -254,7 +254,24 @@ class Vocabulary:
     course_tolerance_deg: float = COURSE_TOLERANCE_DEG
     speed_tolerance_mps: float = SPEED_TOLERANCE_MPS
     turn_split_deg: float = TURN_SPLIT_DEG
+    #: Whether the heading kind carries its POSITION word at all. `False` is the ablation that
+    #: isolates the tiling reader from the position word: the reading emits only directions, the
+    #: class disappears from the head, and nothing tracks a centreline. It is a spec field, so
+    #: the two vocabularies have different shas and their artefacts cannot be mistaken for each
+    #: other.
+    use_established_word: bool = True
     plateau_min_s: float = PLATEAU_MIN_S
+    #: How long a segment of an ABSOLUTE kind must last to be an instruction of its own; anything
+    #: shorter is folded into the neighbour its value is closer to. **0 turns the absorption off**,
+    #: which is the sentence the merge alone produces.
+    #:
+    #: It is separate from `plateau_min_s` (which the vertical's own merge uses) because the two
+    #: answer different questions, and because this one is the main lever on what a sentence can
+    #: say laterally: measured on KRDU, replaying each flight's own course second by second lands
+    #: 99.3 % and quantising it to 5° still lands 98.7 %, while the SEGMENTED word sequence lands
+    #: 68.0 % — the loss is here, not in the bin. At 20 s the merge's 37 segments a flight become
+    #: 6.
+    min_instruction_s: float = PLATEAU_MIN_S
     heading_min_change_deg: float = HEADING_MIN_CHANGE_DEG
     speed_min_change_fraction: float = SPEED_MIN_CHANGE_FRACTION
     hold_min_s: float = HOLD_MIN_S
@@ -297,8 +314,15 @@ class Vocabulary:
         if not self.heading_bin_deg < self.turn_split_deg < 180.0:
             raise ValueError("turn_split_deg is between one heading bin and a half circle: at 180° the "
                              "shortest way is a coin toss, and under a bin every change would split")
-        if self.heading_min_change_deg < self.course_tolerance_deg:
-            raise ValueError("heading_min_change_deg is at least the kind's tolerance: two plateaus closer than that are one")
+        if self.heading_min_change_deg < 0.0:
+            # The old rule demanded it be at least the tolerance, because under the PLATEAU reader
+            # two plateaus closer than a tolerance were the same plateau measured twice. A tiling
+            # has no such pairs — a segment exists because the signal left the band — so the only
+            # thing left to say is that a minimum change cannot be negative. 0 means "word every
+            # segment whose word differs".
+            raise ValueError("heading_min_change_deg is 0 (no suppression) or positive")
+        if self.min_instruction_s < 0.0:
+            raise ValueError("min_instruction_s is 0 (no absorption) or positive")
         if self.hold_min_s < self.plateau_min_s:
             raise ValueError(f"hold_min_s ({self.hold_min_s:g}) is at least plateau_min_s ({self.plateau_min_s:g}): a shorter level is not a plateau")
         if self.token_step_s > self.plateau_min_s:
@@ -336,11 +360,13 @@ class Vocabulary:
         and 4.1 % were beyond 2 km, and at the moment that word was first issued the median
         displacement was 535 m (p90 5,019 m).
         """
+        if not self.use_established_word:
+            raise ValueError("this vocabulary has no established word (use_established_word=False)")
         return self.heading_direction_words
 
     @property
     def heading_words(self) -> int:
-        return self.heading_direction_words + 1
+        return self.heading_direction_words + (1 if self.use_established_word else 0)
 
     @property
     def vertical_words(self) -> int:
@@ -372,7 +398,7 @@ class Vocabulary:
         """The bearing a DIRECTION word names. The established word has no bearing — it names a
         line — so it RAISES here rather than answering 0°, which would read as "fly the course's
         direction" and silently be the open-loop behaviour it exists to replace."""
-        if word == self.heading_established_word:
+        if self.use_established_word and word == self.heading_direction_words:
             raise ValueError("the established word names the centreline, not a bearing: ask "
                              "`instruction_kinematics.target_course_deg`, which knows where the aircraft is")
         return wrap_deg(word * self.heading_bin_deg)
@@ -478,7 +504,7 @@ class Vocabulary:
             # read back as "descend 4.4°, 157 m/s" — a silent wrong answer for the one value the
             # module defines as "nothing said yet"
             raise ValueError("a word column holds the fill value: every conditioned kind is in force from the first event")
-        established = words[..., 0] == self.heading_established_word
+        established = self.use_established_word & (words[..., 0] == self.heading_direction_words)
         # the established word has no bearing; its cos/sin are those of the course it holds, and
         # the flag beside them is what separates it from direction word 0
         heading = np.radians(np.where(established, 0, words[..., 0]) * self.heading_bin_deg)
@@ -1236,6 +1262,8 @@ def _established_instruction(headings: list[Instruction], times: np.ndarray, est
     join. A flight that never establishes gets no such word, and a replay of its sentence will not
     reach the runway, which is the truth about that flight rather than a hole in the reading.
     """
+    if not vocabulary.use_established_word:
+        return headings                            # the ablation: directions only, nothing joins
     if not established.any() or not established[-1]:
         return headings
     breaks = np.flatnonzero(~established)
@@ -1264,8 +1292,8 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary,
     # stretch of the approach is left without a word responsible for it — the plateau reader left
     # half of every speed profile unowned
     segments = {
-        "heading": tile_segments(times, course, vocabulary.course_tolerance_deg, vocabulary.plateau_min_s),
-        "speed": tile_segments(times, speed, vocabulary.speed_tolerance_mps, vocabulary.plateau_min_s),
+        "heading": tile_segments(times, course, vocabulary.course_tolerance_deg, vocabulary.min_instruction_s),
+        "speed": tile_segments(times, speed, vocabulary.speed_tolerance_mps, vocabulary.min_instruction_s),
     }
 
     def heading_word(value: float) -> tuple[int, float, bool]:
