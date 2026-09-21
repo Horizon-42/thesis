@@ -406,7 +406,7 @@ describe("the flown sentence on the charts", () => {
       geometric: { ...flight.geometric, relCourseDeg: [170, 175, -179, -174, -170] },
     };
     expect(flownTrace(wrapping, "heading")).toEqual([170, 175, 181, 186, 190]);
-    expect(vocabulary.readingRule).toBe("segment-v12");
+    expect(vocabulary.readingRule).toBe("segment-v13");
   });
 
   // The two tracks are on DIFFERENT clocks — 2 s rows against 1 s steps — so this

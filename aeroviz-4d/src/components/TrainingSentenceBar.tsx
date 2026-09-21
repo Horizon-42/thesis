@@ -5,7 +5,7 @@
  * TIME. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §3.1 (T4a).
  *
  * THE HORIZONTAL AXIS IS TIME, NOT EVENT NUMBER. The sentence is an event
- * sequence (reading rule `segment-v12`): the gaps are irregular — 26 s and 58 s
+ * sequence (reading rule `segment-v13`): the gaps are irregular — 26 s and 58 s
  * in the fixture, a median 44 s and a p95 of 128 s in the artefact — so evenly
  * spaced columns would draw a wrong picture of when anything was said. That is
  * the same bias the even 10 s grid was deleted for.

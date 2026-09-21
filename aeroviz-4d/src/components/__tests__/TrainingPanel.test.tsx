@@ -114,14 +114,14 @@ describe("TrainingPanel", () => {
     it("lists the flights without making the reader open anything", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
-      expect(screen.queryByText("segment-v12")).toBeNull();
+      expect(screen.queryByText("segment-v13")).toBeNull();
     });
 
     it("shows the vocabulary the words were read under, behind the ⓘ", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText("segment-v12")).toBeTruthy();
+      expect(screen.getByText("segment-v13")).toBeTruthy();
       // the runway classes come from the file, never from the airport's runways
       expect(screen.getByText("05L 05R 23L 23R")).toBeTruthy();
       expect(screen.getByText(/heading 72 · vertical 6 · speed 16 · runway 4/)).toBeTruthy();
@@ -154,7 +154,7 @@ describe("TrainingPanel", () => {
       await waitFor(() => {
         const published = lastPublished();
         expect(published?.flight?.flightKey).toBe("DAL123_05L_a1b2c3_1699999999");
-        expect(published?.vocabulary?.readingRule).toBe("segment-v12");
+        expect(published?.vocabulary?.readingRule).toBe("segment-v13");
         // the views that draw the corridor need the rule it was drawn under
         expect(published?.geometry?.bandsAreJoint).toBe(false);
       });

@@ -5,7 +5,7 @@
  * set's flights (track + sentence + instructions, and later the geometric track).
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.
  *
- * A WORD IS A BAND, NOT A POINT (reading rule `segment-v12`, 2026-09-21). The
+ * A WORD IS A BAND, NOT A POINT (reading rule `segment-v13`, 2026-09-21). The
  * vertical and speed words each carry a tolerance: an executor that stays inside
  * it has obeyed the word. So a sentence does not name one track, it names a
  * family, and this module exposes the tolerances (`verticalToleranceDeg`,
@@ -53,7 +53,7 @@ export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v1";
  * The cost of the pin is a one-line edit when the rule bumps; the cost of not
  * pinning it is a chart that looks right and means something else.
  */
-export const TRAINING_READING_RULE = "segment-v12";
+export const TRAINING_READING_RULE = "segment-v13";
 
 /**
  * MIRROR of `ts_transformer.manoeuvre.instructions.INSTRUCTION_KINDS` — the six
@@ -115,11 +115,21 @@ export const TERMINAL_WORDS = 3;
  */
 export const TERMINAL_NEVER_OBSERVED: readonly number[] = [TERMINAL_GO_AROUND];
 
-/** MIRROR of `instructions.ABSORBED_*`: why a manoeuvre was read but not worded. */
+/**
+ * MIRROR of `instructions.ABSORBED_*`: why a manoeuvre was read but not worded.
+ *
+ * `short segment` is the VERTICAL kind's own (segment-v13): its segments tile the
+ * track rather than sitting on plateaus, so it never has a plateau to call a
+ * small change or a short tail — what it can have is a sliver the fit cut that
+ * read as a different mode and was folded into its neighbour. A fold onto the
+ * SAME word is not here at all: that is the fit's own bookkeeping, counted as
+ * `verticalPiecesMerged` rather than drawn as a manoeuvre the rule refused.
+ */
 export const ABSORBED_REASONS = [
   "same word",
   "small change",
   "short tail",
+  "short segment",
 ] as const;
 export type AbsorbedReason = (typeof ABSORBED_REASONS)[number];
 
@@ -152,7 +162,7 @@ export interface TrainingSetEntry {
    * the 40 is on screen beside it.
    *
    * The draw used to be the hand check's own pages, so the panel could say the
-   * screen showed the aircraft a human had marked. The `segment-v12` artefacts
+   * screen showed the aircraft a human had marked. The first `segment-v12` artefacts
    * carry no pages; the exporter draws and stratifies for itself and states the
    * rule here, so the claim on screen is the file's, not the reader's memory of
    * how it used to work.
@@ -1219,21 +1229,19 @@ function parseSpeedBand(raw: unknown, where: string): Parsed<TrainingSpeedBand> 
   // VALUES rather than just their order is what makes the field a mirror of the
   // edges instead of a second opinion about them — and it is what catches a file
   // whose `low` and `high` are the wrong way round, which nothing else would.
-  if (pair[0] !== high.value.endS || pair[1] !== low.value.endS) {
+  // The window is the two crossings IN TIME ORDER, not [fast, slow]. The faster edge does not
+  // always arrive first: turn radius is V²/(g·tanφ), so 3 % more speed is 6 % more radius, and on
+  // a vectored pattern the extra path around the turns and the intercept outweighs the extra
+  // speed — measured, 17 of the published 40 flights, every one of them vectored, by up to 42 s.
+  // Which edge is which is not lost: `low` and `high` are their own keys.
+  const edges = [high.value.endS, low.value.endS].sort((a, b) => a - b);
+  if (pair[0] !== edges[0] || pair[1] !== edges[1]) {
     return {
       ok: false,
       problem:
         `${where}.geometric.speedBand.arrivalWindowS is [${pair[0]}, ${pair[1]}], but its edges ` +
-        `cross at ${high.value.endS} s (high) and ${low.value.endS} s (low) — the window is the two ` +
-        `crossings, fast first`,
-    };
-  }
-  if (!(pair[0] <= pair[1])) {
-    return {
-      ok: false,
-      problem:
-        `${where}.geometric.speedBand.arrivalWindowS is [${pair[0]}, ${pair[1]}]: the HIGH edge is ` +
-        `the faster one and arrives first, so these two edges are swapped`,
+        `cross at ${high.value.endS} s (high) and ${low.value.endS} s (low) — the window is the ` +
+        `two crossings, earliest first`,
     };
   }
   return { ok: true, value: { low: low.value, high: high.value, arrivalWindowS: [pair[0], pair[1]] } };

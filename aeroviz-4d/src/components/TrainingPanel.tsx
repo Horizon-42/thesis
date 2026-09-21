@@ -380,7 +380,7 @@ export default function TrainingPanel() {
               <p className="training-note">
                 {/* WHERE THE DRAW CAME FROM, in the file's own words. It used to be
                     the hand check's pages (so the screen showed the aircraft a human
-                    had marked); the `segment-v12` artefacts carry no pages, so the
+                    had marked); the first `segment-v12` artefacts carried no pages, so the
                     exporter draws and stratifies for itself and records the rule
                     here. A view that kept claiming the old provenance would be
                     citing a document that does not exist. */}

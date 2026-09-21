@@ -469,7 +469,7 @@ describe("the corridor a sentence draws", () => {
       }
       expect(edge.endS).toBeCloseTo(edge.tS[edge.tS.length - 1], 6);
     }
-    // The fast edge covers the same ground sooner, so it arrives first.
+    // The window is the two crossings in time order (the fast edge is not always first).
     expect(band.high.endS).toBeLessThan(band.low.endS);
     expect(band.arrivalWindowS).toEqual([band.high.endS, band.low.endS]);
   });
@@ -868,18 +868,31 @@ describe("the arrival window against its own edges", () => {
     });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.problem).toContain("the window is the two crossings, fast first");
+    expect(parsed.problem).toContain("the window is the two crossings, earliest first");
   });
 
-  it("refuses edges whose fast one is not the faster", () => {
+  it("refuses the two crossings listed in the wrong time order", () => {
     const parsed = sampleWith((sample) => {
       const band = sample.flights[0].geometric.speedBand;
-      [band.low, band.high] = [band.high, band.low];
-      band.arrivalWindowS = [band.high.endS, band.low.endS];
+      band.arrivalWindowS = [band.arrivalWindowS[1], band.arrivalWindowS[0]];
     });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.problem).toContain("these two edges are swapped");
+    expect(parsed.problem).toContain("earliest first");
+  });
+
+  // What this reader can NO LONGER catch, stated so nobody assumes it does: `low` and `high`
+  // SWAPPED. The window used to be [fast, slow] by position, so a swap inverted it and was
+  // caught — but the faster edge is not always the earlier one (turn radius is V²/(g·tanφ), so
+  // 3 % more speed is 6 % more radius, and on a vectored pattern the extra path wins: 17 of the
+  // published 40 flights, all vectored, by up to 42 s). The window is now ordered in TIME, and a
+  // swap leaves the same two crossings, so it is invisible here.
+  it("cannot see low and high swapped, because the window is a time order now", () => {
+    const parsed = sampleWith((sample) => {
+      const band = sample.flights[0].geometric.speedBand;
+      [band.low, band.high] = [band.high, band.low];
+    });
+    expect(parsed.ok).toBe(true);
   });
 });
 
@@ -936,12 +949,14 @@ describe("the reading rule this reader is written for", () => {
   // bound to the rule, and refuses another one by name rather than reading an
   // older artefact into today's meanings.
   it("refuses an artefact read under another rule, naming both", () => {
+    // the rule this reader was written for BEFORE the current one: a real artefact of it exists
+    // on disk, and reading it into today's meanings is exactly the mistake being refused
     const parsed = sampleWith((sample) => {
-      sample.vocabulary.readingRule = "segment-v13";
+      sample.vocabulary.readingRule = "segment-v12";
     });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.problem).toContain("segment-v13");
+    expect(parsed.problem).toContain("segment-v12");
     expect(parsed.problem).toContain(TRAINING_READING_RULE);
   });
 
