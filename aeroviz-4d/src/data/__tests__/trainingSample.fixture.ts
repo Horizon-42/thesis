@@ -10,7 +10,7 @@
  * cannot catch the contract moving (repo rule: a schema literal in a consumer is
  * a mirror; import it).
  *
- * THE FLIGHT IS BUILT FROM ITS WORDS, NOT BESIDE THEM. Under `box-v2-wedge` a
+ * THE FLIGHT IS BUILT FROM ITS WORDS, NOT BESIDE THEM. Under `box-v3` a
  * file is only valid if the track is inside the boxes its sentence makes, so a
  * fixture with hand-typed columns would be refused by its own reader. The three
  * signals here are therefore generated from the word sequence: at every event
@@ -81,8 +81,6 @@ export const MOCK_VOCABULARY = {
   sha256: "8695be0c64e0000000000000000000000000000000000000000000000000mock",
   runwaySha256: "aa11bb22cc33000000000000000000000000000000000000000000000000mock",
   readingRule: TRAINING_READING_RULE,
-  altitudeForm: "target + backward-reachable wedge, on remaining path length",
-  altitudeReading: "greedy longest reach, read BACKWARDS (the target anchors the segment's end)",
   courseSmoothingS: 6,
   smoothingS: 10,
   ...MOCK_SPEC,
@@ -350,7 +348,9 @@ export const MOCK_FLIGHT = {
  *  would disagree on exactly the rows that sit on an edge. */
 export const MOCK_READING = {
   rule: TRAINING_READING_RULE,
-  courseSignal: "wrap(moving average of the wrapped relative ground track over courseSmoothingS)",
+  altitudeForm: "target + backward-reachable wedge, on remaining path length",
+  altitudeReading: "greedy longest reach, read BACKWARDS (the target anchors the segment's end)",
+  courseSignal: "wrap(moving average of the UNWRAPPED relative ground track over courseSmoothingS)",
   speedSignal: "moving average of the ground speed over smoothingS",
   heightSignal: "moving average of the height above the threshold over smoothingS",
   pathSignal: "the smoothed ground speed integrated, floored at MINIMUM_GROUND_SPEED_MPS",

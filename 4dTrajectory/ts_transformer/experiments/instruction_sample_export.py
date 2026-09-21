@@ -5,7 +5,7 @@
         --out aeroviz-4d/public/data/airports/KRDU/training/<set> [--prior <…/prior_s1337>] \\
         [--flights 40] [--split val] [--set-id box_v3] [--title "…"]
 
-**A WORD IS AN INTERVAL** (`box-v2-wedge`, 2026-09-21): a sentence is a chain of bounding boxes
+**A WORD IS AN INTERVAL** (`box-v3`, 2026-09-21): a sentence is a chain of bounding boxes
 and the criterion is CONTAINMENT — every row of the track has to lie inside the boxes in force at
 its moment. There is no flown track in this file and there cannot be one yet: flying a box
 sentence needs a height-tracking executor (the design's replay gate, not built). So what this
@@ -85,7 +85,7 @@ SAMPLE_FILE = "sample.json"
 
 #: The artefact this module reads, refused by name. Its producer is outside the tree.
 BOX_SCHEMA = "ts-box-vocabulary-v1"
-READING_RULE = "box-v2-wedge"
+READING_RULE = "box-v3"
 #: MIRROR of the artefact's `spec.kinds`, checked against it on load. The `words` columns are
 #: POSITIONAL, so this order is load-bearing — and the second kind is an ALTITUDE (a target
 #: height), not the retired vertical angle.
@@ -93,6 +93,9 @@ KINDS = ("heading", "altitude", "speed", "runway", "duration", "terminal")
 #: The three kinds that are intervals. Runway is the frame, duration is the hold, terminal is a
 #: label; none of the three bounds a signal, so none of them has a box.
 BOX_KINDS = ("heading", "altitude", "speed")
+#: MIRROR of the terminal classes. `check_columns` reads them to pin that column positionally.
+TERMINAL_CONTINUE = 0
+TERMINAL_LANDED = 1
 
 #: How close to a box edge still counts as inside, in each kind's own unit. It exists because the
 #: columns are written at display precision and the edge tables at full precision: without it a
@@ -125,19 +128,54 @@ def load_box_vocabulary(path: Path) -> dict[str, Any]:
             f"{path} was read under {spec['reading_rule']!r}, and this exporter is written for "
             f"{READING_RULE!r} — the rule decides what a word MEANS"
         )
-    if tuple(spec["kinds"]) != KINDS:
-        raise SystemExit(f"{path} names kinds {tuple(spec['kinds'])}, not {KINDS} — the columns are positional")
     words = payload["words"]
-    edges = payload["edges"]
-    for kind, table, wanted in (("heading", "heading_deg", words["heading"] + 1),
-                                ("speed", "speed_mps", words["speed"] + 1),
-                                ("altitude", "altitude_m", words["altitude"])):
-        if len(edges[table]) != wanted:
+    boxes = payload["boxes"]
+    for kind, table, wanted in (("heading", "heading_edges_deg", words["heading"] + 1),
+                                ("speed", "speed_edges_mps", words["speed"] + 1),
+                                ("altitude", "altitude_targets_m", words["altitude"])):
+        if len(boxes[table]) != wanted:
             raise SystemExit(
-                f"{path}: edges.{table} holds {len(edges[table])} values, but {words[kind]} "
+                f"{path}: boxes.{table} holds {len(boxes[table])} values, but {words[kind]} "
                 f"{kind} words need {wanted} — an edge table tiles its words, a target ladder does not"
             )
     return payload
+
+
+def check_columns(sentences: dict[str, dict[str, Any]], runway_idents: list[str],
+                  spec: dict[str, Any]) -> None:
+    """The six columns are POSITIONAL, and under `box-v3` the artefact no longer says which is
+    which — `spec.kinds` went away with the rename. So this checks the order against the file's
+    own DATA instead of against a string, which is the better check anyway:
+
+      * the RUNWAY column must hold this flight's own runway, as an index into `runway_idents`;
+      * the DURATION column times the bin must be the hold beside it;
+      * the TERMINAL column must be `continue` everywhere but the last event, which says `landed`.
+
+    That pins three of the six. The other three are pinned by the containment verdict: heading,
+    altitude and speed are read back against boxes built from their own tables, and a swapped pair
+    would put nearly every row outside.
+    """
+    heading, altitude, speed, runway, duration, terminal = range(len(KINDS))
+    del heading, altitude, speed                          # pinned by containment, not here
+    for flight_id, row in sentences.items():
+        words = np.asarray(row["words"], dtype=np.int64)
+        holds = np.asarray(row["hold_s"], dtype=np.float64)
+        wanted = runway_idents.index(row["runway"])
+        if not (words[:, runway] == wanted).all():
+            raise SystemExit(
+                f"{flight_id}: the runway column does not hold {row['runway']} (class {wanted}) at "
+                f"every event — the six columns are positional, so check their ORDER first"
+            )
+        if not np.allclose(words[:, duration] * spec["duration_bin_s"], holds):
+            raise SystemExit(
+                f"{flight_id}: the duration column times {spec['duration_bin_s']} s is not the hold "
+                f"beside it — the columns are positional, or the hold is not the duration word"
+            )
+        if not (words[:-1, terminal] == TERMINAL_CONTINUE).all() or words[-1, terminal] != TERMINAL_LANDED:
+            raise SystemExit(
+                f"{flight_id}: the terminal column is not 'continue' up to a single 'landed' at the "
+                f"last event — the columns are positional, so check their ORDER first"
+            )
 
 
 def runway_sha256(idents: list[str]) -> str:
@@ -260,11 +298,15 @@ def read_signals(frame: dict[str, np.ndarray], spec: dict[str, Any]) -> dict[str
     course instead of the smoothed one puts 7 % of the rows outside a box the artefact accepted.
     Measured over 75 flights at five airports, these four lines put 13,922 of 13,922 rows inside:
 
-      * the course is the WRAPPED relative ground track, smoothed over `course_smoothing_s` and
-        wrapped again — smoothed wrapped, not smoothed unwrapped. The difference is only visible
-        near ±180°, where a moving average across the cut averages +179° and −179° to 0°; that is
-        the labeller's own arithmetic and this reproduces it rather than improving on it, because
-        a view that disagreed with the artefact would be showing a different reading.
+      * the course is the UNWRAPPED relative ground track, smoothed over `course_smoothing_s` and
+        wrapped afterwards. **This changed with `box-v3`.** Under `box-v2-wedge` the average was
+        taken on the WRAPPED signal, which near ±180° averages +179° and −179° to 0°; reproducing
+        that was what put 100 % of the rows inside then, and it now puts 98.6 % inside — the 1.4 %
+        are all at the wrap, which is the bug the rule fixed. The circular mean (average the unit
+        vectors, take the angle) is indistinguishable from this on all 13,922 rows measured, and
+        the two can only differ where an unwrap accumulates a whole turn; this one reuses the
+        column `course_frame` already carries, and the containment verdict is what would catch it
+        if a flight ever told them apart.
       * speed and height are smoothed over `smoothing_s`.
       * the path axis is integrated from the SMOOTHED ground speed.
     """
@@ -276,7 +318,7 @@ def read_signals(frame: dict[str, np.ndarray], spec: dict[str, Any]) -> dict[str
         "dt_s": dt,
         "course_window_rows": course_rows,
         "signal_window_rows": signal_rows,
-        "course_deg": wrap_deg(smooth(frame["relative_course_deg"], course_rows)),
+        "course_deg": wrap_deg(smooth(frame["course_unwrapped_deg"], course_rows)),
         "speed_mps": smooth(frame["ground_speed_mps"], signal_rows),
         "height_m": smooth(frame["height_m"], signal_rows),
         "path_m": cumulative_path_m(times, smooth(frame["ground_speed_mps"], signal_rows)),
@@ -480,10 +522,10 @@ def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m
     frame's transform lives on this side of the wire — the frontend has lon/lat columns and no way
     to place a point at an arbitrary (to_go, cross).
     """
-    edges = vocabulary["edges"]
-    heading_edges = np.asarray(edges["heading_deg"], dtype=np.float64)
-    speed_edges = np.asarray(edges["speed_mps"], dtype=np.float64)
-    targets = np.asarray(edges["altitude_m"], dtype=np.float64)
+    boxes = vocabulary["boxes"]
+    heading_edges = np.asarray(boxes["heading_edges_deg"], dtype=np.float64)
+    speed_edges = np.asarray(boxes["speed_edges_mps"], dtype=np.float64)
+    targets = np.asarray(boxes["altitude_targets_m"], dtype=np.float64)
     columns = {kind: KINDS.index(kind) for kind in KINDS}
 
     times = observed["t_s"]
@@ -567,9 +609,9 @@ def envelope_block(sentence: dict[str, Any], observed_columns: dict[str, np.ndar
     recomputing it gets the same answer to the row.
     """
     spec = vocabulary["spec"]
-    targets = np.asarray(vocabulary["edges"]["altitude_m"], dtype=np.float64)
-    heading_edges = np.asarray(vocabulary["edges"]["heading_deg"], dtype=np.float64)
-    speed_edges = np.asarray(vocabulary["edges"]["speed_mps"], dtype=np.float64)
+    targets = np.asarray(vocabulary["boxes"]["altitude_targets_m"], dtype=np.float64)
+    heading_edges = np.asarray(vocabulary["boxes"]["heading_edges_deg"], dtype=np.float64)
+    speed_edges = np.asarray(vocabulary["boxes"]["speed_edges_mps"], dtype=np.float64)
     times = observed_columns["t_s"]
     words = np.asarray(sentence["words"], dtype=np.int64)
     event_times = np.asarray(sentence["event_times_s"], dtype=np.float64)
@@ -611,7 +653,6 @@ PRIOR_SCHEMA = "ts-instruction-prior-v1"
 #: the model saw the TRUTH's words and the TRUTH's state up to that point and said what the next
 #: event would be. It did not generate the sentence.
 PRIOR_METHOD = "teacher-forced-next-word"
-TERMINAL_LANDED = 1
 
 
 def load_prior(directory: Path, vocabulary_sha256: str):
@@ -771,7 +812,12 @@ def reading_block() -> dict[str, Any]:
     """
     return {
         "rule": READING_RULE,
-        "courseSignal": "wrap(moving average of the wrapped relative ground track over courseSmoothingS)",
+        # The artefact carried these two as prose until `box-v3` dropped them. They are the
+        # RECONSTRUCTION's description now, not a mirror of the producer's — which is exactly
+        # what they always were, and this says so.
+        "altitudeForm": "target + backward-reachable wedge, on remaining path length",
+        "altitudeReading": "greedy longest reach, read BACKWARDS (the target anchors the segment's end)",
+        "courseSignal": "wrap(moving average of the UNWRAPPED relative ground track over courseSmoothingS)",
         "speedSignal": "moving average of the ground speed over smoothingS",
         "heightSignal": "moving average of the height above the threshold over smoothingS",
         "pathSignal": "the smoothed ground speed integrated, floored at MINIMUM_GROUND_SPEED_MPS",
@@ -789,21 +835,19 @@ def reading_block() -> dict[str, Any]:
 
 def vocabulary_block(payload: dict[str, Any]) -> dict[str, Any]:
     spec = payload["spec"]
-    edges = payload["edges"]
+    boxes = payload["boxes"]
     return {
         "sha256": payload["sha256"],
         "runwaySha256": runway_sha256(payload["runway_idents"]),
         "readingRule": spec["reading_rule"],
         "redundancyFraction": spec["redundancy_fraction"],
-        "headingEdgesDeg": list(edges["heading_deg"]),
+        "headingEdgesDeg": list(boxes["heading_edges_deg"]),
         "headingFloorDeg": spec["heading_floor_deg"],
-        "speedEdgesMps": list(edges["speed_mps"]),
-        "altitudeTargetsM": list(edges["altitude_m"]),
+        "speedEdgesMps": list(boxes["speed_edges_mps"]),
+        "altitudeTargetsM": list(boxes["altitude_targets_m"]),
         "altitudeH0M": spec["altitude_h0_m"],
         "altitudeDownDeg": spec["altitude_down_deg"],
         "altitudeUpDeg": spec["altitude_up_deg"],
-        "altitudeForm": spec["altitude_form"],
-        "altitudeReading": spec["altitude_reading"],
         "durationBinS": spec["duration_bin_s"],
         "durationMaxS": spec["duration_max_s"],
         "courseSmoothingS": spec["course_smoothing_s"],
@@ -848,6 +892,9 @@ def main(argv: list[str] | None = None) -> int:
     sentences = {key: row for key, row in sentences.items() if row["runway"].split(":")[0] == airport}
     if not sentences:
         raise SystemExit(f"no flight in sentences_{args.split}.json lands at {airport}")
+    # The columns are positional and `box-v3` stopped stating which is which, so they are checked
+    # against the file's own data before anything is drawn from them.
+    check_columns(sentences, list(vocabulary["runway_idents"]), vocabulary["spec"])
     per_stratum = args.flights // 2
     candidates = drawn_flights(sentences, per_stratum, args.seed)
 

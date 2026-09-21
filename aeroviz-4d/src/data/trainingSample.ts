@@ -6,7 +6,7 @@
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.
  *
  * A WORD IS AN INTERVAL, AND A SENTENCE IS A CHAIN OF BOUNDING BOXES (reading
- * rule `box-v2-wedge`, 2026-09-21). The criterion is CONTAINMENT: every row of
+ * rule `box-v3`, 2026-09-21). The criterion is CONTAINMENT: every row of
  * the track has to lie inside the boxes in force at its moment. That replaces
  * the retired reading, where a word was a centre and the question was how far
  * the track sat from it — there is no centre here and no quantisation error, so
@@ -68,7 +68,7 @@ export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v2";
  * The cost of the pin is a one-line edit when the rule bumps; the cost of not
  * pinning it is a chart that looks right and means something else.
  */
-export const TRAINING_READING_RULE = "box-v2-wedge";
+export const TRAINING_READING_RULE = "box-v3";
 
 /**
  * MIRROR of the artefact's `spec.kinds` — the six word kinds IN ORDER. The
@@ -225,9 +225,6 @@ export interface TrainingVocabulary {
    *  the manoeuvre with the most room. */
   altitudeDownDeg: number;
   altitudeUpDeg: number;
-  /** The artefact's own prose for the two above — shown, not parsed. */
-  altitudeForm: string;
-  altitudeReading: string;
   durationBinS: number;
   durationMaxS: number;
   /** The two smoothing windows the read signals were made with. Shown, because
@@ -250,6 +247,12 @@ export interface TrainingVocabulary {
  */
 export interface TrainingReadingRule {
   rule: string;
+  /** How the altitude box is SHAPED, and how the segments were cut. They sit
+   *  here rather than on the vocabulary because `box-v3` stopped carrying them:
+   *  they describe the exporter's RECONSTRUCTION, which is what they always
+   *  described, and the block that says "produced by" is where that belongs. */
+  altitudeForm: string;
+  altitudeReading: string;
   courseSignal: string;
   speedSignal: string;
   heightSignal: string;
@@ -585,7 +588,7 @@ export function altitudeFloorM(vocabulary: TrainingWordSpec, word: number): numb
  * segment's end: `T - r·tan(up) - f ≤ h ≤ T + r·tan(down) + f`.
  *
  * MIRROR of `instruction_sample_export.altitude_envelope`, and of the artefact's
- * own `altitudeForm`. The exporter is what writes the envelope columns; this is
+ * own `reading.altitudeForm`. The exporter is what writes the envelope columns; this is
  * here so a view can draw the wedge for a word the file carries no column for —
  * the MODEL's words at a row, say — without a second definition of the shape.
  */
@@ -947,7 +950,7 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
     };
   }
 
-  for (const field of ["sha256", "runwaySha256", "readingRule", "altitudeForm", "altitudeReading"]) {
+  for (const field of ["sha256", "runwaySha256", "readingRule"]) {
     if (str(raw, field) === null) {
       return { ok: false, problem: `vocabulary.${field} is missing or not a non-empty string` };
     }
@@ -1012,8 +1015,6 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
       sha256: str(raw, "sha256") as string,
       runwaySha256: str(raw, "runwaySha256") as string,
       readingRule: str(raw, "readingRule") as string,
-      altitudeForm: str(raw, "altitudeForm") as string,
-      altitudeReading: str(raw, "altitudeReading") as string,
       courseSmoothingS: values.courseSmoothingS,
       smoothingS: values.smoothingS,
       ...spec,
@@ -1027,8 +1028,8 @@ function parseReadingRule(raw: unknown): Parsed<TrainingReadingRule> {
     return { ok: false, problem: "reading is missing: a verdict whose signal is not stated is a number with no meaning" };
   }
   const strings: Record<string, string> = {};
-  for (const field of ["rule", "courseSignal", "speedSignal", "heightSignal", "pathSignal",
-                       "remainingPathTo", "windowRows", "producedBy"]) {
+  for (const field of ["rule", "altitudeForm", "altitudeReading", "courseSignal", "speedSignal",
+                       "heightSignal", "pathSignal", "remainingPathTo", "windowRows", "producedBy"]) {
     const value = str(raw, field);
     if (value === null) return { ok: false, problem: `reading.${field} is missing or not a non-empty string` };
     strings[field] = value;
@@ -1060,6 +1061,8 @@ function parseReadingRule(raw: unknown): Parsed<TrainingReadingRule> {
     ok: true,
     value: {
       rule: strings.rule,
+      altitudeForm: strings.altitudeForm,
+      altitudeReading: strings.altitudeReading,
       courseSignal: strings.courseSignal,
       speedSignal: strings.speedSignal,
       heightSignal: strings.heightSignal,

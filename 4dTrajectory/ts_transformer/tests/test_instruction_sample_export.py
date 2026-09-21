@@ -1,4 +1,4 @@
-"""The Training view's sample exporter, under the BOX vocabulary (`box-v2-wedge`).
+"""The Training view's sample exporter, under the BOX vocabulary (`box-v3`).
 
 The track rebuild needs the arrival store, so it is exercised by the runner itself; what is
 pinned here is everything that decides WHICH flights, WHAT A BOX IS, and WHAT SHAPE the file has
@@ -22,16 +22,17 @@ import pytest
 
 from ts_transformer.experiments.instruction_sample_export import (
     BOX_SCHEMA, INDEX_SCHEMA, INSIDE_EPSILON, KINDS, POOL_FACTOR, READING_RULE, SAMPLE_SCHEMA,
-    SECTOR_ARC_MAX, SECTOR_ARC_MIN, altitude_envelope, containment, cumulative_path_m,
-    drawn_flights, hae_offset_m, load_box_vocabulary, lonlat_from_frame, read_signals,
-    reachable_sector, reading_block, runway_sha256, sentences_by_flight, update_index, word_runs,
+    SECTOR_ARC_MAX, SECTOR_ARC_MIN, altitude_envelope, check_columns, containment,
+    cumulative_path_m, drawn_flights, hae_offset_m, load_box_vocabulary, lonlat_from_frame,
+    read_signals, reachable_sector, reading_block, runway_sha256, sentences_by_flight,
+    update_index, word_runs,
 )
 
 # The frontend reader's own constants (`src/data/trainingSample.ts`). Declared MIRRORS: the two
 # sides are one contract, and a fixture that restated them could not catch it moving.
 FRONTEND_INDEX_SCHEMA = "aeroviz-training-index-v1"
 FRONTEND_SAMPLE_SCHEMA = "aeroviz-training-sample-v2"
-FRONTEND_READING_RULE = "box-v2-wedge"
+FRONTEND_READING_RULE = "box-v3"
 FRONTEND_KINDS = ("heading", "altitude", "speed", "runway", "duration", "terminal")
 FRONTEND_INSIDE_EPSILON = 1e-3
 
@@ -47,9 +48,14 @@ def test_the_contract_is_the_frontend_reader_s():
     # the verdict is computed on BOTH sides and the two are compared, so the tolerance that
     # decides a row sitting on a box's edge has to be the same number
     assert INSIDE_EPSILON == FRONTEND_INSIDE_EPSILON
-    assert reading_block()["insideEpsilon"] == INSIDE_EPSILON
+    block = reading_block()
+    assert block["insideEpsilon"] == INSIDE_EPSILON
     # and the block says, in the file, that the artefact's producer is not in this tree
-    assert "NOT in this repository" in reading_block()["producedBy"]
+    assert "NOT in this repository" in block["producedBy"]
+    # `box-v3` stopped carrying the wedge's prose, so it moved here — to the block that says who
+    # rebuilt the boxes, which is what it was describing all along. The reader requires it HERE.
+    for field in ("altitudeForm", "altitudeReading"):
+        assert field in block, field
 
 
 # ── the artefact ─────────────────────────────────────────────────────────────
@@ -61,14 +67,10 @@ def _spec() -> dict:
         "redundancy_fraction": 0.05,
         "heading_floor_deg": 1.0,
         "speed_low_mps": 30.0, "speed_high_mps": 250.0,
-        "altitude_form": "target + backward-reachable wedge, on remaining path length",
         "altitude_h0_m": 50.0, "altitude_top_m": 6000.0, "altitude_bottom_m": -150.0,
         "altitude_down_deg": 1.5, "altitude_up_deg": 1.0,
-        "altitude_reading": "greedy longest reach, read BACKWARDS",
         "duration_bin_s": 2.0, "duration_max_s": 600.0,
         "course_smoothing_s": 6.0, "smoothing_s": 10.0,
-        "kinds": list(KINDS),
-        "duration_placement": "on the row it describes",
     }
 
 
@@ -77,9 +79,9 @@ def _artefact(tmp_path: Path, **overrides) -> Path:
         "schema": BOX_SCHEMA, "spec": _spec(), "sha256": "a" * 64,
         "words": {"heading": 3, "altitude": 4, "speed": 2, "runway": 1, "duration": 301, "terminal": 3},
         "runway_idents": ["KRDU:05L"],
-        "edges": {"heading_deg": [-180.0, -10.0, 10.0, 180.0],
-                  "speed_mps": [60.0, 90.0, 125.0],
-                  "altitude_m": [-20.0, 0.0, 100.0, 400.0]},
+        "boxes": {"heading_edges_deg": [-180.0, -10.0, 10.0, 180.0],
+                  "speed_edges_mps": [60.0, 90.0, 125.0],
+                  "altitude_targets_m": [-20.0, 0.0, 100.0, 400.0]},
     }
     payload.update(overrides)
     path = tmp_path / "instruction_vocabulary.json"
@@ -95,14 +97,7 @@ def test_an_artefact_of_another_schema_is_refused_by_name(tmp_path: Path):
 def test_a_reading_rule_this_exporter_is_not_written_for_is_refused(tmp_path: Path):
     spec = _spec()
     spec["reading_rule"] = "segment-v14"
-    with pytest.raises(SystemExit, match="written for 'box-v2-wedge'"):
-        load_box_vocabulary(_artefact(tmp_path, spec=spec))
-
-
-def test_the_kinds_in_another_order_are_refused(tmp_path: Path):
-    spec = _spec()
-    spec["kinds"] = ["altitude", "heading", "speed", "runway", "duration", "terminal"]
-    with pytest.raises(SystemExit, match="the columns are positional"):
+    with pytest.raises(SystemExit, match="written for 'box-v3'"):
         load_box_vocabulary(_artefact(tmp_path, spec=spec))
 
 
@@ -110,26 +105,66 @@ def test_an_edge_table_that_does_not_tile_its_words_is_refused(tmp_path: Path):
     """The heading and speed tables TILE their words, so they hold one more value than there are
     words; the altitude table is a LADDER OF TARGETS, one per word. Reading one as the other
     shifts every word by half a box and still draws."""
-    with pytest.raises(SystemExit, match="edges.heading_deg holds"):
+    with pytest.raises(SystemExit, match="boxes.heading_edges_deg holds"):
         load_box_vocabulary(_artefact(
-            tmp_path, edges={"heading_deg": [-180.0, 0.0, 180.0],      # 3 edges, 3 words claimed
-                             "speed_mps": [60.0, 90.0, 125.0],
-                             "altitude_m": [-20.0, 0.0, 100.0, 400.0]}))
+            tmp_path, boxes={"heading_edges_deg": [-180.0, 0.0, 180.0],   # 3 edges, 3 words claimed
+                             "speed_edges_mps": [60.0, 90.0, 125.0],
+                             "altitude_targets_m": [-20.0, 0.0, 100.0, 400.0]}))
 
 
 def test_the_altitude_table_is_one_target_per_word(tmp_path: Path):
-    with pytest.raises(SystemExit, match="edges.altitude_m holds"):
+    with pytest.raises(SystemExit, match="boxes.altitude_targets_m holds"):
         load_box_vocabulary(_artefact(
-            tmp_path, edges={"heading_deg": [-180.0, -10.0, 10.0, 180.0],
-                             "speed_mps": [60.0, 90.0, 125.0],
-                             "altitude_m": [-20.0, 0.0, 100.0, 400.0, 900.0]}))
+            tmp_path, boxes={"heading_edges_deg": [-180.0, -10.0, 10.0, 180.0],
+                             "speed_edges_mps": [60.0, 90.0, 125.0],
+                             "altitude_targets_m": [-20.0, 0.0, 100.0, 400.0, 900.0]}))
 
 
 def test_a_good_artefact_loads_whole(tmp_path: Path):
     payload = load_box_vocabulary(_artefact(tmp_path))
     assert payload["spec"]["reading_rule"] == READING_RULE
-    assert len(payload["edges"]["heading_deg"]) == payload["words"]["heading"] + 1
-    assert len(payload["edges"]["altitude_m"]) == payload["words"]["altitude"]
+    assert len(payload["boxes"]["heading_edges_deg"]) == payload["words"]["heading"] + 1
+    assert len(payload["boxes"]["altitude_targets_m"]) == payload["words"]["altitude"]
+
+
+def _sentence(words: list[list[int]], holds: list[float], runway: str = "KRDU:05L") -> dict:
+    return {"F": {"dataset_id": "KRDU:F", "flight_id": "F", "runway": runway,
+                  "event_times_s": [0.0, holds[0]], "hold_s": holds, "words": words}}
+
+
+def test_the_columns_are_pinned_against_the_files_own_data():
+    """`box-v3` stopped stating which column is which (`spec.kinds` went with the rename), so the
+    order is checked against the DATA — which is the better check anyway.
+
+    Three of the six are pinned here; heading, altitude and speed are pinned by the containment
+    verdict, because a swapped pair would put nearly every row outside its box.
+    """
+    good = [[1, 2, 1, 0, 5, 0], [1, 2, 1, 0, 3, 1]]
+    check_columns(_sentence(good, [10.0, 6.0]), ["KRDU:05L"], _spec())          # no raise
+
+    # the runway column must hold THIS flight's runway, as an index into the class list
+    with pytest.raises(SystemExit, match="the runway column does not hold"):
+        check_columns(_sentence(good, [10.0, 6.0]), ["KRDU:23R", "KRDU:05L"], _spec())
+
+    # the duration column times the bin must be the hold beside it
+    with pytest.raises(SystemExit, match="is not the hold"):
+        check_columns(_sentence(good, [12.0, 6.0]), ["KRDU:05L"], _spec())
+
+    # the terminal column is `continue` up to a single `landed` at the last event
+    with pytest.raises(SystemExit, match="not 'continue' up to a single 'landed'"):
+        check_columns(_sentence([[1, 2, 1, 0, 5, 1], [1, 2, 1, 0, 3, 1]], [10.0, 6.0]),
+                      ["KRDU:05L"], _spec())
+    with pytest.raises(SystemExit, match="not 'continue' up to a single 'landed'"):
+        check_columns(_sentence([[1, 2, 1, 0, 5, 0], [1, 2, 1, 0, 3, 0]], [10.0, 6.0]),
+                      ["KRDU:05L"], _spec())
+
+
+def test_swapping_two_columns_is_caught_rather_than_drawn():
+    """The failure this exists for: the runway and terminal columns both hold small integers, so
+    a swap is in range everywhere and would draw a whole flight against the wrong runway."""
+    swapped = [[1, 2, 1, 0, 5, 0], [1, 2, 1, 1, 3, 0]]     # runway changes, terminal never lands
+    with pytest.raises(SystemExit, match="check their ORDER first"):
+        check_columns(_sentence(swapped, [10.0, 6.0]), ["KRDU:05L", "KRDU:23R"], _spec())
 
 
 def test_the_runway_classes_have_a_sha_of_their_own():
@@ -270,6 +305,7 @@ def _flat_frame(rows: int = 61, speed: float = 80.0) -> dict:
         "height_m": np.full(rows, 600.0),
         "ground_speed_mps": np.full(rows, speed),
         "relative_course_deg": np.zeros(rows),
+        "course_unwrapped_deg": np.zeros(rows),
         "established": np.ones(rows, dtype=bool),
     }
 

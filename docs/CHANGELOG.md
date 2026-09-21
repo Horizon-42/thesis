@@ -1,5 +1,43 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-21（晚）— `box-v3`:航道角改成 unwrapped 上平滑,产物不再说列序
+
+新产物 `vocabulary_box_five_airports`(sha `a2a2f0924ad6`,读法 `box-v3`)。表面上是改名,实际上有
+一条**实质的读法变化**,不量就发现不了。
+
+**改了三处**:顶层 `edges` 改名 `boxes`(三个键跟着改)、`spec` 不再写 `kinds` / `altitude_form` /
+`altitude_reading`、**航道角改成在 unwrapped 上平滑**。
+
+**第三条是真的**。照 `box-v2-wedge` 的写法重建,五机场 **1.4 % 的行落在盒外,而且全在 ±180 附近**
+(最远的一行:航向盒 `[-180, -171.79]`,重建值 `0.63°`)——那正是上一版的毛病:在 wrapped 信号上做滑动
+平均,跨过断口会把 +179° 和 −179° 平均成 0°。这一版把它修了。四种写法量下来:
+
+| 写法 | box-v2-wedge | box-v3 |
+|---|---|---|
+| `wrap(smooth(wrapped))` | **100 %** | 98.6 % |
+| `wrap(smooth(unwrapped))` | 97.5 % | **100 %** |
+| 圆周平均 | — | **100 %** |
+| 原始 wrapped | 93.9 % | 93.9 % |
+
+圆周平均和 unwrapped 在这批数据上分不开(13 922 行全对),取后者因为 `course_frame` 本来就带那一列;
+两者只在 unwrap 累积整整一圈的航迹上才分家,真有那样一架,包含率就是发现它的人。
+
+**产物不再说列序**,所以导出器改成拿**文件自己的数据**去钉(`check_columns`):跑道列必须是这架飞机
+自己的跑道、时长列乘格宽必须等于旁边的 hold、终止列必须一路继续到最后一个落地。三条钉住三列,另外
+三列由包含率钉住——两列对调的话几乎每一行都会掉到盒外。比对一个字符串本来就更实在。
+
+产物那两句散文(`altitude_form` / `altitude_reading`)搬到了 `reading` 块:它们描述的本来就是**重建**
+的形状,不是产物的镜像。
+
+**发布**:五个机场各 40 架(val),`…/training/box/`,包含率 **39 670 / 39 670 行**。
+前端 **674** 条、Python **60** 条全过,两个 tsc 干净,浏览器里核过。
+
+**盘上的残留**:16 份被取代的集合,152 MB——五份 `box_v3`(`box-v2-wedge`)、十份
+`prior_s{1337,2024}_val`(`segment-v13`)、一份 `v15_nomerge_noposition`(`segment-v14`)。
+`box_v3` 的源产物 `vocabulary_box_v3_five_airports` **已经不在盘上**(词表那条线删了 v1/v2/v3),
+所以那五份不可重建。删不删等用户的话。
+
+
 ### 2026-09-21 — 前端 Training 换成包围盒版:画的是词允许的那片区域,不是一条线
 
 用户拿来新的词表产物(`vocabulary_box_v3_five_airports`,读法 `box-v2-wedge`)和它的设计文档,要求

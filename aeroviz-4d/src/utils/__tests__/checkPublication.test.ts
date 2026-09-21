@@ -202,7 +202,7 @@ describe("the Training export's checks", () => {
     stale.vocabulary.readingRule = "segment-v14";
     const findings = checkTrainingSample("box_v3", stale, "segment-v14", "vocabulary-readback");
     expect(findings[0].message).toContain("read under segment-v14");
-    expect(findings[0].message).toContain("box-v2-wedge");
+    expect(findings[0].message).toContain("box-v3");
   });
 
   // The two files come out of ONE run of the exporter. A disagreement means they did not,

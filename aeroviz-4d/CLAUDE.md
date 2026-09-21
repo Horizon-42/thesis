@@ -107,7 +107,8 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   greyed-out set after a vocabulary change is the reader working — the panel opens on one it CAN
   read; and the Training views draw a CHAIN OF BOXES, not a line: the altitude word's wedge as a
   Cesium wall in HAE, one prism per word, and the verdict computed on the SMOOTHED signals the
-  boxes were read from (AV19).
+  boxes were read from — and WHICH signal that is changed with `box-v3`, so a rule bump means
+  re-measuring every one of them, not assuming they carried over (AV19).
 
 ## Comparison CZML colour contract
 

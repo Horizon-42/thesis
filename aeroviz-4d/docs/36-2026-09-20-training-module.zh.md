@@ -13,15 +13,17 @@
 | 项 | 值 |
 |---|---|
 | 文档 | `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`（本文） |
-| 状态 | **T1–T15 全部落地**（前端 **672** 条全过，两个 tsc 干净）。**词表换成了包围盒版**（读法 `box-v2-wedge`，2026-09-21 傍晚），整个模块跟着改：没有"按规则飞出来的那条线"了，画的是**词允许的那片区域**。**五个机场全部发布**，各 40 架（val，直线 20 / 引导 20）；浏览器里核过，控制台无错 |
+| 状态 | **T1–T16 全部落地**（前端 **674** 条全过，两个 tsc 干净）。**词表换成了包围盒版**，整个模块跟着改：没有"按规则飞出来的那条线"了，画的是**词允许的那片区域**。**五个机场全部发布**，各 40 架（val，直线 20 / 引导 20）；浏览器里核过，控制台无错 |
 | 分支 | `dev-two-tier-feasibility` |
 | 它要展示的实验 | 两层计划 v3 阶段 B（`4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` §5.2） |
 | **词表设计** | **`4dTrajectory/ts_transformer/docs/2026-09-21_box_vocabulary_design.zh.md`**（2026-09-21 起的单一去处）。本文 §4.3 / §5 是它在前端这一侧的落点。旧的 `2026-09-21-instruction_vocabulary_plan.zh.md` 保留为量测记录，**取值作废** |
-| 词表身份 | 读法 **`box-v2-wedge`**，sha `8695be0c64e0`。**一个词是一个区间，一句话是一串包围盒，判据是"航迹被它装下"**。没有格心，也没有量化误差这个量 |
+| 词表身份 | 读法 **`box-v3`**，sha `a2a2f0924ad6`。**一个词是一个区间，一句话是一串包围盒，判据是"航迹被它装下"**。没有格心，也没有量化误差这个量 |
+| 读法换过一次 | `box-v2-wedge` → **`box-v3`**（2026-09-21 18:43）。产物那边改了三处：顶层 `edges` 改名 **`boxes`**（三个键也跟着改名）、`spec` 不再写 `kinds` / `altitude_form` / `altitude_reading`、**航道角改成在 unwrapped 上平滑**。第三条是实打实的读法变化（§5.4）：照旧写法重建，五机场 **1.4 % 的行落在盒外，而且全在 ±180 附近** —— 那正是旧读法的毛病，这一版把它修了 |
+| **产物不再说列序** | `spec.kinds` 随这次改名一起没了，所以"哪一列是哪一类"在文件里**没有任何一处写着**。导出器改成拿**文件自己的数据**去钉（`check_columns`，§5.5）：跑道列必须是这架飞机自己的跑道、时长列乘格宽必须等于旁边的 hold、终止列必须是一路继续到最后一个落地。这三条钉住三列，另外三列由包含率钉住 |
 | 词有几类 | **六类**，顺序写死：航向、**高度**、速度、跑道、时长、终止。2026-09-21 傍晚：第二类从"垂直（航迹倾角）"换回**高度**，但含义完全不同 —— 它是一个**目标高度**加上"这个目标能倒着飞到的那片楔形"，不是一个值 |
 | 各类几个词 | 航向 **65**（铺满 −180…180，航道处 2° 宽）、高度 **61**（有符号梯子 −133…5469 m）、速度 **22**（铺满 30…271 m/s）、跑道 **22**（五机场）、时长 **301**（2 s 一格到 600 s）、终止 3 |
 | **产物代码不在本仓库** | 标注器是在树外跑的，**盘上这份产物没有对应的源码**。因此导出器这一侧的盒子是**照产物自己的 spec 重建的**，而不是 import 来的。顶替"和原件对一遍"的是**包含率**：重建的盒子拿去量产物自己接受的那些行，五机场 200 架 **39 670 / 39 670 行全在盒子里**。这条要在词表那边的代码进仓库之后换成真正的单一来源 |
-| **抽样产物（已发布）** | 五个机场各一份 `…/airports/<ICAO>/training/box_v3/`（KRDU 4.9 MB，40 架），源产物 `4dTrajectory/outputs/POOLED/experiments/two_tier_v3_bprime_20260921/vocabulary_box_v3_five_airports`。`check-publication` 对这五份 0 errors |
+| **抽样产物（已发布）** | 五个机场各一份 `…/airports/<ICAO>/training/box/`（KRDU 5.9 MB，40 架），源产物 `4dTrajectory/outputs/POOLED/experiments/two_tier_v3_bprime_20260921/vocabulary_box_five_airports`。`check-publication` 对这五份 0 errors |
 | ~~抽样产物（被取代）~~ | 盘上还有 `v15_nomerge_noposition`（`segment-v14`）和十份 `prior_s{1337,2024}_val`（`segment-v13`）。前端按 schema 和读法当场拒掉，选择器里标着 `superseded`，`check-publication` 报 11 errors。**这是对的，不要去兼容**（V38）。删不删是用户的决定 |
 | 模型（先验） | **还没有在这份词表上训练的先验。** 契约（`prior-generated` 那一类、逐事件的词 + 置信度 + 它自己那份包围盒）已经定下来并有测试，导出器的 `--prior` 那条路**写了但从未跑过** |
 | 前端怎么开发 | 测试用 mock 数据（在 `src/**/__tests__/` 下，**不进 `public/`**）；`public/data/.../training/` 下**永远只放真导出** |
@@ -98,8 +100,8 @@ Observe │ Training │ Fly │ Optimize │ Compare ‖ Procedures
 └───────────────────────────────────────────────────────────────────────────────┘
 ┌─ 左坞（Training）──────┐                                  ┌─ 右侧读数 ────────┐
 │ 实验                   │            Cesium 三维            │ 这一句话           │
-│ [box_v3 · 词本身 ▾]     │                                  │ 跑道 KRDU:05R ←另 │
-│ 读法 box-v2-wedge      │      ━━━ 真实航迹（白）           │   三类都相对它量  │
+│ [box · 词本身 ▾]        │                                  │ 跑道 KRDU:05R ←另 │
+│ 读法 box-v3            │      ━━━ 真实航迹（白）           │   三类都相对它量  │
 │ sha 8695be0c64e0       │      ▨▨▨ 高度楔形的墙（橙）       │ 航向 −1…+1°       │
 │ 40 架（直线20/引导20）  │      ◺◺◺ 一个词一个扇形（橙）     │ 高度 1309 m±68    │
 │                        │      ▨▨▨ 模型说的那面墙（紫）     │ 速度 110–122 m/s  │
@@ -263,17 +265,17 @@ checkpoint 在这里只是"进数据的门"（C25：通过它的 data provenance
   "airport": "KRDU",
   "sets": [
     {
-      "id": "box_v3",
+      "id": "box",
       "kind": "vocabulary-readback",
-      "title": "Box vocabulary · box-v2-wedge · wedge 1.5° · val",
-      "file": "box_v3/sample.json",
+      "title": "Box vocabulary · box-v3 · wedge 1.5° · val",
+      "file": "box/sample.json",
       "vocabularySha256": "8695be0c64e0…",
       "runwaySha256": "<跑道词类别集合的 sha256，与上面那个各管各的>",
-      "readingRule": "box-v2-wedge",
+      "readingRule": "box-v3",
       "flights": 40,
       "cohort": { "split": "val", "perStratum": 20, "seed": 1337,
                   "drawnFrom": "a seeded permutation of the val split at KRDU, stratified by …" },
-      "source": { "artefact": "…/vocabulary_box_v3_five_airports",
+      "source": { "artefact": "…/vocabulary_box_five_airports",
                   "manifest": "…/KRDU/arrivals/manifest.json", "manifestSha256": "…" }
     }
   ]
@@ -296,30 +298,31 @@ checkpoint 在这里只是"进数据的门"（C25：通过它的 data provenance
 ```json
 {
   "schema": "aeroviz-training-sample-v2",
-  "setId": "box_v3",
+  "setId": "box",
   "airport": "KRDU",
   "kinds": ["heading", "altitude", "speed", "runway", "duration", "terminal"],
   "vocabulary": {
-    "sha256": "8695be0c64e0…",
+    "sha256": "a2a2f0924ad6…",
     "runwaySha256": "<跑道类别集合自己的 sha256；不在上面那个里，见 §4.4>",
-    "readingRule": "box-v2-wedge",
+    "readingRule": "box-v3",
     "redundancyFraction": 0.05,
     "headingEdgesDeg": [-180, -171.79, …, 171.79, 180],   // 66 个边界 → 65 个词
     "headingFloorDeg": 1.0,
     "speedEdgesMps": [30, 33.16, …, 271.25],              // 23 个边界 → 22 个词
     "altitudeTargetsM": [-133.66, …, 5469.0],             // 61 个**目标**，一个词一个
     "altitudeH0M": 50.0, "altitudeDownDeg": 1.5, "altitudeUpDeg": 1.0,
-    "altitudeForm": "target + backward-reachable wedge, on remaining path length",
-    "altitudeReading": "greedy longest reach, read BACKWARDS …",
     "durationBinS": 2.0, "durationMaxS": 600.0,
     "courseSmoothingS": 6.0, "smoothingS": 10.0,
     "runwayIdents": ["KMSY:02", …, "KSTL:30R"],
     "words": {"heading": 65, "altitude": 61, "speed": 22,
               "runway": 22, "duration": 301, "terminal": 3}
   },
-  "reading": {                       // 一条航迹怎么变成盒子判的那三路信号
-    "rule": "box-v2-wedge",
-    "courseSignal": "wrap(moving average of the wrapped relative ground track over courseSmoothingS)",
+  "reading": {          // 一条航迹怎么变成盒子判的那三路信号；前两句散文产物从 box-v3 起不写了,
+                        // 搬到这里 —— 它们描述的本来就是**重建**的形状
+    "rule": "box-v3",
+    "altitudeForm": "target + backward-reachable wedge, on remaining path length",
+    "altitudeReading": "greedy longest reach, read BACKWARDS …",
+    "courseSignal": "wrap(moving average of the UNWRAPPED relative ground track over courseSmoothingS)",
     "speedSignal":  "moving average of the ground speed over smoothingS",
     "heightSignal": "moving average of the height above the threshold over smoothingS",
     "pathSignal":   "the smoothed ground speed integrated, floored at MINIMUM_GROUND_SPEED_MPS",
@@ -394,7 +397,7 @@ checkpoint 在这里只是"进数据的门"（C25：通过它的 data provenance
 这四条是 2026-09-20 当天定下来的，写在这里是因为它们直接决定界面画什么、不画什么。
 第四条是**最容易画错的一条**。
 
-**一、句子是一串包围盒，在时间上铺满；词是六类。**（当前读法 **`box-v2-wedge`**。
+**一、句子是一串包围盒，在时间上铺满；词是六类。**（当前读法 **`box-v3`**。
 2026-09-20 第一次改：从等间隔网格改成事件序列；2026-09-21 傍晚第二次改：一个词从一个**格心**
 变成一个**区间**。）
 
@@ -611,15 +614,29 @@ counts / source` —— 我开文件核过）。它是一个**函数**，导出�
 
 | 量 | 盒子判的那条 | 窗口 |
 |---|---|---|
-| 航向 | `wrap(相对航道角的滑动平均)` —— **wrapped 上平滑，不是 unwrapped 上平滑** | `course_smoothing_s` = 6 s |
+| 航向 | `wrap(**unwrapped** 相对航道角的滑动平均)` —— **box-v3 改的就是这一条** | `course_smoothing_s` = 6 s |
 | 速度 | 地速的滑动平均 | `smoothing_s` = 10 s |
 | 高度 | 入口以上高度的滑动平均 | `smoothing_s` = 10 s |
 | 楔形的剩余航迹 | **平滑后**的地速积分 | 同上 |
 
 这四行**不是猜的，是量出来的**：每一行都试过两三种写法，取那个把产物自己接受的航迹 100 % 装进盒子
-的那一种（比如航向若在 unwrapped 上平滑，75 架里有 67 行落在盒外；剩余航迹若用原始地速积分，
-最大越界 0.3 mm，用平滑地速是 0.005 mm）。**wrapped 上平滑在 ±180 附近会把 +179° 和 −179° 平均成
-0°** —— 那是标注器自己的算术，这里照抄不改：一个和产物不一致的视图画的是另一份读数（V57）。
+的那一种。剩余航迹若用原始地速积分，最大越界 0.3 mm，用平滑地速是 0.005 mm。
+
+**航向这一条在 box-v3 翻了过来，这是两版之间唯一实质的读法差别。**
+
+| 写法 | box-v2-wedge | **box-v3** |
+|---|---|---|
+| `wrap(smooth(wrapped))` | **100 %** | 98.6 % |
+| `wrap(smooth(unwrapped))` | 97.5 % | **100 %** |
+| 圆周平均（把单位向量平均再取角） | — | **100 %** |
+| 原始 wrapped，不平滑 | 93.9 % | 93.9 % |
+
+旧写法在 ±180 附近会把 +179° 和 −179° **平均成 0°**；按它重建，落在盒外的那 1.4 % 行**全部**在那个
+断口附近（实测最远的一行：航向盒 `[-180, -171.79]`，重建出来的值是 `0.63°`）。新读法修的就是它。
+
+**圆周平均和 unwrapped 在这批数据上分不开**（13 922 行全对）。两者只在"unwrap 累积了整整一圈"
+的航迹上才会分家；这里取 unwrapped，因为 `course_frame` 本来就带着这一列。真要有一架把两者
+分开的飞机，**包含率就是那个发现它的人**（V60）。
 
 原始行照样导出、照样画（淡线在后面）。只画平滑线等于画了一条没人飞过的信号（V55）。
 
@@ -629,6 +646,16 @@ counts / source` —— 我开文件核过）。它是一个**函数**，导出�
 
 - 导出器按产物自己的 `spec` **重建**盒子，并算一遍包含率写进文件；
 - 前端拿着它送来的那些列**再算一遍**，两个数对不上就**拒掉整份文件**。
+
+**列序也得自己钉。** `box-v3` 把 `spec.kinds` 去掉了，于是"哪一列是哪一类"在文件里没有任何一处
+写着。导出器改成拿**文件自己的数据**去对（`check_columns`），这比对一个字符串本来就更实在：
+
+- **跑道列**必须每一个事件都等于这架飞机自己那条跑道在类别表里的下标；
+- **时长列**乘上格宽必须等于旁边的 `hold_s`；
+- **终止列**必须是一路"继续"到最后一个事件的"落地"。
+
+这三条钉住三列。另外三列（航向、高度、速度）由**包含率本身**钉住 —— 两列对调的话，几乎每一行都会
+掉到盒子外面。
 
 这是两份独立实现的同一个比较，顶替"和原件对一遍"。一份通过的文件是被判过两次的。
 两边用同一个 `insideEpsilon`（0.001）：标注器的贪心读法**按构造**会把一些行留在盒子的边上，
@@ -691,11 +718,15 @@ counts / source` —— 我开文件核过）。它是一个**函数**，导出�
 
 | **T15 ✅完成** | **整个模块改成包围盒版**（`box-v2-wedge`）：契约换成 `aeroviz-training-sample-v2`（没有 `geometric` / `geometry`，改成 `envelope` + `reading`）；导出器改成读包围盒产物、按它的 spec 重建盒子并算包含率；句子条改成写区间、时长不并带、表头读出包含率；读数窗口改成画盒子和楔形、两条线（平滑 + 原始）、红色段；三维改成一面墙 + 一串长方体；面板列出盒子是用哪些数造出来的 | `data/trainingSample.ts`、`components/TrainingSentenceBar.tsx`、`components/TrainingReadbackWindow.tsx`、`components/TrainingPanel.tsx`、`hooks/useTrainingTrackLayer.ts`、`utils/trainingWordColors.ts`、`experiments/instruction_sample_export.py`、四个测试文件 + fixture | **已达成**：前端 **672 条**全过，两个 tsc 干净。契约 **38 条**钉住：边界表和目标梯子长度不同、楔形两个角反了、盒子在时间上留缺口、hold 和时长词对不上、文件自己的包含率和前端算的对不上 —— 都拒。五机场发布，`check-publication` 对这五份 0 errors；浏览器里核过（DAL1337 29 个盒子、`inside: heading 131/131 · altitude 131/131 · speed 131/131`、高度图上一串收口到目标的楔形、三维里的墙和盒子、控制台无错） | 包围盒产物 `vocabulary_box_v3_five_airports` |
 
-**进度（2026-09-21 傍晚）**：**T1–T15 全部完成**，没有待办步骤。
+| **T16 ✅完成** | **跟上 `box-v3`**：产物改名（`edges` → `boxes`）、`spec` 不再写 `kinds` / 两句散文、**航道角改成 unwrapped 上平滑**。导出器与契约跟着改；列序改成拿文件自己的数据钉（`check_columns`）；两句散文搬到 `reading` 块 —— 它们描述的本来就是重建 | `experiments/instruction_sample_export.py`、`data/trainingSample.ts`、`TrainingPanel.tsx`、`TrainingReadbackWindow.tsx`、`AppContext.tsx`、四个测试文件 + fixture | **已达成**：前端 **674 条**、Python **60 条**全过，两个 tsc 干净。新加的测试钉住三列的位置检查（跑道 / 时长 / 终止各一条，外加"两列对调"一条）。五机场重发，包含率 **39 670 / 39 670 行**；浏览器里核过（选择器开在 `box`，旧的三个标着 superseded）| 包围盒产物 `vocabulary_box_five_airports` |
+
+**进度（2026-09-21 晚）**：**T1–T16 全部完成**，没有待办步骤。
 
 **这一版和上一版的关系**：T9–T14 是"词是格心 + 容差"那一版（`segment-v12` → `segment-v14`），
-T15 把它整个换成"词是区间"（`box-v2-wedge`）。**不是叠加，是替换** —— 旧读法的产物前端当场拒掉，
-选择器里标成 `superseded`。盘上那十一份旧集合删不删是用户的决定，本模块不自己动数据。
+T15 把它整个换成"词是区间"（`box-v2-wedge`），T16 跟上 `box-v3`。**不是叠加，是替换** ——
+旧读法的产物前端当场拒掉，选择器里标成 `superseded`。**盘上现在有 16 份被取代的集合（152 MB）**，
+其中五份（`box_v3`）的源产物**已经不在盘上了**（被词表那条线删掉），所以它们不可重建。
+删不删是用户的决定，本模块不自己动数据。
 
 **下一步不在这个模块里**：链条条件、最短保持、位置维度、回放门 —— 四件都在词表那条线上
 （词表设计 §5.3 的优先级）。回放门做出来之后，这个模块才可能再有一条"按词飞出来"的线，
@@ -762,6 +793,7 @@ T15 把它整个换成"词是区间"（`box-v2-wedge`）。**不是叠加，是�
 
 | **V53** | **没有"按规则飞出来的那条线"了** | 飞一句包围盒需要跟高度的执行器（回放门，未做）。取楔形中线硬飞出来的那条线，形状取决于我们自己的选择而不是取决于词 —— 一条唯一来源是画图代码的线比不画更糟 | 我，2026-09-21 |
 | **V54** | **地面脚印标成"推出来的可达集"，不是词本身** | 词约束的是每一时刻的**状态**，不是路径（词表设计 §2.1）。"这让飞机能走到哪"是从词推出来的第二件事，界面把两者混起来说就是在替词表多说一句它没说的话 | 我，2026-09-21 |
+| **V60** | **航道角改成在 unwrapped 上平滑，列序改成拿数据钉** | `box-v3` 修了旧读法在 ±180 处把 +179° 和 −179° 平均成 0° 的毛病，所以重建也得跟着改（照旧写法有 1.4 % 的行落在盒外，全在断口附近）。圆周平均在这批数据上和 unwrapped 分不开，取后者因为 `course_frame` 已经带着那一列。同一次改名还去掉了 `spec.kinds`，于是列序改成拿文件自己的数据钉（跑道 / 时长 / 终止各一条），比对字符串更实在 | 我，2026-09-21 |
 | **V59** | **地面脚印画成扇形，不画它的外接长方体** | 第一版画了外接长方体，用户问"难道这个 box 都是可飞空间吗、我们设计里不是更接近锥体吗"——他是对的。可达集是顶点在飞机、半径 `T·v_hi`、张角等于航向盒的扇形；长方体在顶点旁边多出一块**航向盒里任何方向都到不了**的地，看着像可飞空间。2° 的盒子长方体面积约两倍，而且盖掉了这个形状唯一要表达的事：区域是从飞机那一点张开的。顺带一条：**速度盒的下界不约束这块地**，只有上界定半径 | 用户，2026-09-21 |
 | **V55** | **平滑线和原始行都画，判决算在平滑线上** | 盒子是从平滑信号上读出来的，所以判决必须算在同一条信号上（100 % 对 93 %）。但只画平滑线等于画了一条没人飞过的信号，所以原始行画在后面 | 我，2026-09-21 |
 | **V56** | **包含率算两遍，对不上就拒整份文件** | 产物的标注器不在本仓库，导出器那一侧的盒子是重建的，没有原件可对。两份独立实现的同一个比较是唯一能做的检查；两边共用一个 `insideEpsilon`，因为贪心读法按构造会把行留在盒边上 | 我，2026-09-21 |

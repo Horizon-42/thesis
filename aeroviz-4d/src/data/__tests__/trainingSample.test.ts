@@ -1,5 +1,5 @@
 /**
- * The Training contract, under `box-v2-wedge`.
+ * The Training contract, under `box-v3`.
  *
  * Three groups of test, and they are not the same question:
  *  • WHAT A WORD MEANS — the edge tables, the ladder, the wedge. These are the
@@ -200,7 +200,7 @@ describe("what the reader refuses", () => {
   it("a file of another reading rule, by name", () => {
     const raw = mockSample() as any;
     raw.vocabulary.readingRule = "segment-v14";
-    expect(problem(raw)).toMatch(/readingRule is "segment-v14".*written for box-v2-wedge/s);
+    expect(problem(raw)).toMatch(/readingRule is "segment-v14".*written for box-v3/s);
   });
 
   it("a sample of the retired schema", () => {

@@ -395,12 +395,12 @@ export default function TrainingPanel() {
                   <dt>Altitude wedge</dt>
                   <dd>
                     {sample.vocabulary.altitudeDownDeg}° above / {sample.vocabulary.altitudeUpDeg}° below,
-                    {" "}on the remaining path — {sample.vocabulary.altitudeForm}
+                    {" "}on the remaining path — {sample.reading.altitudeForm}
                   </dd>
                 </div>
                 <div>
                   <dt>Read</dt>
-                  <dd>{sample.vocabulary.altitudeReading}</dd>
+                  <dd>{sample.reading.altitudeReading}</dd>
                 </div>
                 <div>
                   <dt>Hold</dt>

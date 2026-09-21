@@ -19,12 +19,14 @@
  * that is the bright line; the raw rows are behind it, because a chart showing
  * only the smoothed line would be showing a signal nobody flew.
  *
- * THE HEADING CHART IS WRAPPED, not unwrapped as the retired one was. The
- * heading box is an interval of the WRAPPED relative course, so the chart has to
- * be in the same coordinate the box is — an unwrapped trace would leave a box at
- * +170° looking nowhere near a trace at +190°. A flight that turns through the
- * cut jumps, and that jump is the labeller's own arithmetic (a moving average
- * across ±180 averages +179 and -179 to 0), not a drawing error.
+ * THE HEADING CHART IS WRAPPED. The heading box is an interval of the wrapped
+ * relative course, so the chart has to be in the same coordinate the box is — an
+ * unwrapped trace would leave a box at +170° looking nowhere near a trace at
+ * +190°. A flight that turns through the cut therefore jumps on this chart. The
+ * SMOOTHING behind it is done on the unwrapped signal (`box-v3` changed that;
+ * `box-v2-wedge` averaged the wrapped one and turned +179° and −179° into 0°),
+ * so the line no longer dives to zero at the wrap — only the plot does, and only
+ * by one row.
  *
  * It renders through a PORTAL into `document.body` (AV7): `.flight-ops-panel`
  * carries a `backdrop-filter`, which makes a descendant with `position: fixed`
@@ -758,11 +760,11 @@ export default function TrainingReadbackWindow({
           </span>
           <span>
             Heading is plotted WRAPPED, because the box is an interval of the
-            wrapped course. A flight that turns through ±180° jumps on this chart,
-            and a moving average across that cut averages +179° and −179° to 0° —
-            the labeller's own arithmetic, reproduced here rather than corrected,
-            since a view that disagreed with the artefact would be showing a
-            different reading.
+            wrapped course, so a flight that turns through ±180° jumps on this
+            chart. The average behind it is taken on the UNWRAPPED signal and
+            wrapped afterwards — {reading.courseSignal} — which is what{" "}
+            <b>box-v3</b> changed: the rule before it averaged the wrapped course
+            and turned +179° and −179° into 0° at the cut.
           </span>
           <span>
             Everything here is SI, because this vocabulary is: the edges were

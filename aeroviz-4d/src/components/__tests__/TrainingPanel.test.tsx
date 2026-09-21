@@ -118,14 +118,14 @@ describe("TrainingPanel", () => {
     it("lists the flights without making the reader open anything", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
-      expect(screen.queryByText("box-v2-wedge")).toBeNull();
+      expect(screen.queryByText("box-v3")).toBeNull();
     });
 
     it("shows the vocabulary the words were read under, behind the ⓘ", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText("box-v2-wedge")).toBeTruthy();
+      expect(screen.getByText("box-v3")).toBeTruthy();
       // the runway classes come from the file, never from the airport's runways
       expect(screen.getByText("KRDU:05L KRDU:05R KRDU:23L KRDU:23R")).toBeTruthy();
       expect(screen.getByText(/heading 11 · altitude 8 · speed 6 · runway 4/)).toBeTruthy();
@@ -172,10 +172,10 @@ describe("TrainingPanel", () => {
       await waitFor(() => {
         const published = lastPublished();
         expect(published?.flight?.flightKey).toBe("DAL123_05L_a1b2c3_1699999999");
-        expect(published?.vocabulary?.readingRule).toBe("box-v2-wedge");
+        expect(published?.vocabulary?.readingRule).toBe("box-v3");
         // the views that draw a verdict need to be able to say what it was
         // computed on, so the reading rule travels with the selection
-        expect(published?.reading?.rule).toBe("box-v2-wedge");
+        expect(published?.reading?.rule).toBe("box-v3");
       });
     });
 
