@@ -19,10 +19,15 @@ vi.mock("../../context/AppContext", () => ({
 
 import TrainingSentenceBar, { rowBands, spacedLabels } from "../TrainingSentenceBar";
 import { parseTrainingSample, TRAINING_KINDS } from "../../data/trainingSample";
-import { MOCK_EVENT_TIMES_S, MOCK_FLIGHT, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import {
+  MOCK_EVENT_TIMES_S,
+  MOCK_FLIGHT,
+  mockPriorSample,
+  mockSample,
+} from "../../data/__tests__/trainingSample.fixture";
 
 function selection() {
-  const parsed = parseTrainingSample(mockSample());
+  const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
   if (!parsed.ok) throw new Error(parsed.problem);
   return {
     vocabulary: parsed.value.vocabulary,
@@ -319,5 +324,47 @@ describe("what a band actually prints", () => {
     expect(screen.getByText("↓3.1°±0.22")).toBeTruthy();
     // and the kinds without a tolerance print the bare word
     expect(screen.getByText("+90°")).toBeTruthy();
+  });
+});
+
+// ── what the model said, on the bar (T16) ────────────────────────────────────
+
+describe("the model's words on the bar", () => {
+  function priorSelection() {
+    const parsed = parseTrainingSample(mockPriorSample(), "prior-generated");
+    if (!parsed.ok) throw new Error(parsed.problem);
+    return {
+      vocabulary: parsed.value.vocabulary,
+      flight: parsed.value.flights[0],
+      geometry: parsed.value.geometry,
+      prior: parsed.value.prior,
+    };
+  }
+
+  // Agreement is the common case (the real prior gets the heading right 86 % of
+  // the time), so drawing every said word would paint the bar and hide the
+  // answer. Only the disagreements are drawn, and the header counts both.
+  it("marks only where the model differs, and says how often it did not", () => {
+    appState.trainingSelection = priorSelection();
+    render(<TrainingSentenceBar />);
+    // the fixture disagrees on five durations and one vertical word, out of
+    // six events × six kinds after the given opening
+    expect(screen.getByText(/model: 30\/36 words/)).toBeTruthy();
+    expect(screen.getByLabelText(/the model said ↓3\.1° here \(p 0\.84\); the words say ↓2\.4°/))
+      .toBeTruthy();
+  });
+
+  // The model stopping early is a real answer, not an error to hide.
+  it("says when the model called the landing early", () => {
+    appState.trainingSelection = priorSelection();
+    render(<TrainingSentenceBar />);
+    expect(screen.getByText(/said landed at 188 s/)).toBeTruthy();
+  });
+
+  // A set without a model must not sprout an empty readout.
+  it("says nothing about a model when the set carries none", () => {
+    appState.trainingSelection = selection();
+    render(<TrainingSentenceBar />);
+    expect(screen.queryByText(/model:/)).toBeNull();
   });
 });

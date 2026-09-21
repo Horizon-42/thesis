@@ -35,12 +35,17 @@ import { useEffect } from "react";
 import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
-import { TRAINING_FLOWN_COLOR, TRAINING_TRACE_COLOR } from "../utils/trainingWordColors";
+import {
+  TRAINING_FLOWN_COLOR,
+  TRAINING_MODEL_COLOR,
+  TRAINING_TRACE_COLOR,
+} from "../utils/trainingWordColors";
 import type { TrainingFlight } from "../data/trainingSample";
 
 const OBSERVED_ID = "training-observed-track";
 const FLOWN_ID = "training-flown-track";
 const BAND_ID = "training-vertical-band";
+const MODEL_ID = "training-model-track";
 
 /** Cesium wants [lon, lat, height, …]; both tracks carry the three as columns. */
 function degreesArrayHeights(track: {
@@ -131,12 +136,19 @@ export default function useTrainingTrackLayer(): void {
     });
     draw(OBSERVED_ID, observed, TRAINING_TRACE_COLOR, 3);
     draw(FLOWN_ID, flown, TRAINING_FLOWN_COLOR, 2);
+    // WHAT THE MODEL SAID, when the set carries it: the same rules, the same
+    // event times, purple — never the rule-follower's orange, because one is a
+    // baseline and the other is the thing being judged.
+    if (flight.prior) {
+      draw(MODEL_ID, degreesArrayHeights(flight.prior.geometric), TRAINING_MODEL_COLOR, 2);
+    }
 
     return () => {
       if (!isCesiumViewerUsable(viewer)) return;
       viewer.entities.removeById(OBSERVED_ID);
       viewer.entities.removeById(FLOWN_ID);
       viewer.entities.removeById(BAND_ID);
+      viewer.entities.removeById(MODEL_ID);
     };
   }, [viewer, mode, trainingSelection]);
 }

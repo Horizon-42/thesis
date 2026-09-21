@@ -184,8 +184,8 @@ async function checkTraining(airport: string, server: string | null): Promise<Ai
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${detail}` });
       continue;
     }
-    findings.push(...checkTrainingSample(entry.id, sample, entry.readingRule));
-    const read = parseTrainingSample(sample);
+    findings.push(...checkTrainingSample(entry.id, sample, entry.readingRule, entry.kind));
+    const read = parseTrainingSample(sample, entry.kind);
     if (read.ok) findings.push(...checkTrainingSetAgrees(entry, read.value));
     if (serverRoot) {
       const problem = await served(`${serverRoot}/${entry.file}`, "json");

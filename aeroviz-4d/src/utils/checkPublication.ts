@@ -31,6 +31,7 @@ import {
 import {
   parseTrainingIndex,
   parseTrainingSample,
+  type TrainingSetKind,
   type TrainingSample,
   type TrainingSetEntry,
 } from "../data/trainingSample";
@@ -254,8 +255,9 @@ export function checkTrainingSample(
   setId: string,
   sample: unknown,
   readUnder: string,
+  kind: TrainingSetKind,
 ): PublicationFinding[] {
-  const parsed = parseTrainingSample(sample);
+  const parsed = parseTrainingSample(sample, kind);
   if (!parsed.ok) {
     return [{
       level: "error",

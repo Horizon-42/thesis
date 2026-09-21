@@ -8,6 +8,7 @@ import {
   TRAINING_KIND_COLUMN,
   TRAINING_GEOMETRIC_COLUMNS,
   TRAINING_OBSERVED_COLUMNS,
+  TRAINING_PRIOR_METHOD,
   TRAINING_READING_RULE,
   TRAINING_SPEED_EDGE_COLUMNS,
   TRAINING_VERTICAL_BAND_COLUMNS,
@@ -34,13 +35,14 @@ import {
   LEVEL,
   MOCK_VOCABULARY,
   mockIndex,
+  mockPriorSample,
   mockSample,
 } from "./trainingSample.fixture";
 
 function sampleWith(mutate: (sample: any) => void) {
   const sample = mockSample();
   mutate(sample);
-  return parseTrainingSample(sample);
+  return parseTrainingSample(sample, "vocabulary-readback");
 }
 
 describe("the six word kinds", () => {
@@ -97,7 +99,7 @@ describe("the six word kinds", () => {
 
 describe("parseTrainingSample", () => {
   it("accepts the mock sample and keeps the event sequence intact", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
 
@@ -108,7 +110,7 @@ describe("parseTrainingSample", () => {
   });
 
   it("reads the last event as landed", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     if (!parsed.ok) throw new Error(parsed.problem);
     const words = parsed.value.flights[0].sentence.words;
     expect(words[words.length - 1][TRAINING_KIND_COLUMN.terminal]).toBe(TERMINAL_LANDED);
@@ -277,7 +279,7 @@ describe("the observed track", () => {
   // against this, so a chart that plotted it against anything else would be
   // judging the word in coordinates it was never fitted in.
   it("carries the cumulative horizontal distance, non-decreasing from 0", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const observed = parsed.value.flights[0].observed;
@@ -289,7 +291,7 @@ describe("the observed track", () => {
   });
 
   it("reads every column the charts plot, one value per row", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const observed = parsed.value.flights[0].observed;
@@ -332,7 +334,7 @@ describe("the observed track", () => {
 
 describe("the flown sentence", () => {
   it("reads its columns, its ending and how much of the approach was compared", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const flown = parsed.value.flights[0].geometric;
@@ -407,7 +409,7 @@ describe("the corridor a sentence draws", () => {
   // step. If it ever stops being aligned, the fan gets drawn against the wrong x
   // values — a corridor somewhere else entirely — so the length is checked.
   it("reads the vertical band on the nominal track's own rows", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const flown = parsed.value.flights[0].geometric;
@@ -459,7 +461,7 @@ describe("the corridor a sentence draws", () => {
   // horizontal step, the turn radius and the moment of crossing — so they have
   // their own clocks and their own endings.
   it("reads each speed edge as its own track, and the window it opens", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const band = parsed.value.flights[0].geometric.speedBand;
@@ -510,7 +512,7 @@ describe("the corridor a sentence draws", () => {
   // The `geometry` block is what lets a reader say WHERE the corridor came from.
   // `bandsAreJoint` is the one that stops it being read as the whole envelope.
   it("carries what each band was flown from, and that they are not joint", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.value.geometry.verticalBandFrom).toContain("vertical");
@@ -585,7 +587,7 @@ describe("paths", () => {
 
 describe("the track length, the instructions and the absorbed manoeuvres", () => {
   it("reads all three off a good sample", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const flight = parsed.value.flights[0];
@@ -598,7 +600,7 @@ describe("the track length, the instructions and the absorbed manoeuvres", () =>
   // The track outlives the sentence by a median 145 s in the real export, so a
   // view that stopped at the last event would leave 44 % of the approach blank.
   it("keeps a track that runs on past the last event", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const flight = parsed.value.flights[0];
@@ -628,7 +630,7 @@ describe("the track length, the instructions and the absorbed manoeuvres", () =>
   // null means "it never settled inside the track" — a real answer. An absent key
   // means the field moved, and reading that as null would invent the answer.
   it("keeps a null settledS but refuses an absent one", () => {
-    const parsed = parseTrainingSample(mockSample());
+    const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     const instructions = parsed.value.flights[0].instructions;
@@ -998,5 +1000,90 @@ describe("a set says how its flights were drawn", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.value.rejected[0].problem).toContain("seed");
+  });
+});
+
+// ── what the model said (T16) ────────────────────────────────────────────────
+
+describe("a prior-generated set", () => {
+  it("reads the model, its words and the track they fly", () => {
+    const parsed = parseTrainingSample(mockPriorSample(), "prior-generated");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.prior?.method).toBe(TRAINING_PRIOR_METHOD);
+    expect(parsed.value.prior?.trainedOnTheseFlights).toBe(0);
+    const said = parsed.value.flights[0].prior;
+    expect(said?.words).toHaveLength(parsed.value.flights[0].sentence.eventTimesS.length);
+    expect(said?.givenEvents).toBe(1);
+    expect(said?.landedAtS).toBe(188);
+    expect(said?.geometric.tS.length).toBeGreaterThan(1);
+  });
+
+  // The corridor belongs to the truth's sentence; a second one on the same chart
+  // is two overlapping bands. The model's track carries none, and the type says
+  // so — a view reaching for `prior.geometric.verticalBand` will not compile.
+  it("gives the model's track no corridor", () => {
+    const parsed = parseTrainingSample(mockPriorSample(), "prior-generated");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect((parsed.value.flights[0].prior?.geometric as Record<string, unknown>).verticalBand)
+      .toBeUndefined();
+  });
+
+  // THE check that keeps the two kinds of set apart. Keying on the manifest's
+  // kind rather than on whether the field is there makes a half-written export
+  // loud in both directions.
+  it("requires the model's words when the kind says so, and refuses them when it does not", () => {
+    const missing = parseTrainingSample(mockSample(), "prior-generated");
+    expect(missing.ok).toBe(false);
+    if (missing.ok) return;
+    expect(missing.problem).toContain("prior");
+
+    const unexpected = parseTrainingSample(mockPriorSample(), "vocabulary-readback");
+    expect(unexpected.ok).toBe(false);
+    if (unexpected.ok) return;
+    expect(unexpected.problem).toContain("kind is wrong");
+  });
+
+  // The model was asked at EVERY event of this flight, so its sentence is as long
+  // as the truth's. A shorter one lines up silently — every row still plots, just
+  // against the wrong event — and the whole view is a row-by-row comparison.
+  it("refuses a said sentence that is not the length of the one it answers", () => {
+    const sample = mockPriorSample() as any;
+    sample.flights[0].prior.words.pop();
+    const parsed = parseTrainingSample(sample, "prior-generated");
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("rows, but the sentence has 7 events");
+  });
+
+  // Every label in this view says the model answered from the truth's history.
+  // A free run is a different experiment and would need its own wording, so it
+  // is refused rather than drawn under this one.
+  it("refuses a method this view's wording does not describe", () => {
+    const sample = mockPriorSample() as any;
+    sample.prior.method = "free-run";
+    const parsed = parseTrainingSample(sample, "prior-generated");
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("free run is a different experiment");
+  });
+
+  it("refuses a confidence that is not a probability", () => {
+    const sample = mockPriorSample() as any;
+    sample.flights[0].prior.confidence[2][0] = 1.4;
+    const parsed = parseTrainingSample(sample, "prior-generated");
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("not a probability");
+  });
+
+  it("refuses a said word outside the vocabulary it is read against", () => {
+    const sample = mockPriorSample() as any;
+    sample.flights[0].prior.words[1][TRAINING_KIND_COLUMN.vertical] = 6; // six modes: 0…5
+    const parsed = parseTrainingSample(sample, "prior-generated");
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("outside this vocabulary's 0…5");
   });
 });

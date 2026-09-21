@@ -1,19 +1,25 @@
 """Export a few flights' sentences from a vocabulary artefact for the frontend's Training view (design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`).
 
     python run_ts.py instruction_sample_export --vocabulary <…/vocabulary_tau10> \\
-        --executor <ckpt> --out aeroviz-4d/public/data/airports/KRDU/training/vocabulary_tau10 \\
+        --out aeroviz-4d/public/data/airports/KRDU/training/<set> [--prior <…/prior_s1337>] \\
         [--flights 40] [--split train] [--set-id vocabulary_tau10] [--title "…"]
 
 **It re-reads nothing.** The sentences come from the artefact's own ``sentences_<split>.json``
-and the drawn flights from its ``hand_check/index.csv``; only the TRACK is rebuilt (through the
-executor checkpoint's data provenance, C25 — the checkpoint is the door to the data). Re-running
-the labeller here would let the view drift from the artefact it claims to show: the published
-object is the artefact, so the view shows the artefact.
+only the TRACK is rebuilt, straight from the airport's arrival manifest. Re-running the labeller
+here would let the view drift from the artefact it claims to show: the published object is the
+artefact, so the view shows the artefact.
 
-**The draw is the hand check's own prefix.** ``hand_check/index.csv`` is written in draw order,
-half straight-in and half vectored, so taking the first ``--flights / 2`` of each stratum yields a
-SUBSET of the pages a human already checked — by construction, not by reproducing a random draw.
-The two views therefore show the same aircraft, which is the whole point of matching them.
+With ``--prior`` the set also carries what the MODEL says: at every event of every drawn flight,
+the prior's top-1 next words and how sure it was, plus that sentence flown by the same kinematics.
+It is teacher-forced (`PRIOR_METHOD`) — at each event the model saw the truth's history and the
+truth's state — and the file says so, because a reader who assumed free generation would be
+reading a different experiment.
+
+**The draw is the exporter's own** (2026-09-21): a seeded permutation of the split, rebuilt and
+then stratified by `approach_difficulty`, because the stratum is a property of the track. The rule
+and the seed go into the manifest. It used to be the prefix of ``hand_check/index.csv`` so the
+screen showed the pages a human had marked; a pooled artefact's pages span five airports, so that
+prefix cannot fill one airport's strata.
 
 Written under ``--out`` (refused if it exists), plus an entry in the parent's ``index.json``:
 
@@ -43,18 +49,20 @@ import numpy as np
 from flight_scenarios.datum import geoid_undulation_m
 
 from ts_transformer.config import TSConfig, default_anchor
+from ts_transformer.data.dataset import build_series, load_flight_dicts
+from ts_transformer.repo_layout import arrival_manifest_path
 from ts_transformer.data.approach_difficulty import (
     STRAIGHT_TORTUOSITY, STRATUM_SHORT, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, approach_difficulty,
 )
-from ts_transformer.experiments.support import REPO_ROOT, rebuild_cohort
+from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre import instruction_kinematics as kinematics
 from ts_transformer.manoeuvre.instructions import (
-    INSTRUCTION_KINDS, VOCABULARY_FILE, Reading, Vocabulary, course_frame, load_vocabulary,
-    runway_sha256, word_counts,
+    INSTRUCTION_KINDS, TERMINAL_LANDED, VOCABULARY_FILE, Reading, Vocabulary, course_frame,
+    load_vocabulary, runway_sha256, word_counts,
 )
 from ts_transformer.manoeuvre.segments import MINIMUM_GROUND_SPEED_MPS
-from ts_transformer.training.train import load_checkpoint_payload
+
 
 #: MIRROR of `src/data/trainingSample.ts` (`TRAINING_INDEX_SCHEMA` / `TRAINING_SAMPLE_SCHEMA`).
 #: The reader refuses anything else by name, so these two move together or not at all.
@@ -62,6 +70,10 @@ INDEX_SCHEMA = "aeroviz-training-index-v1"
 SAMPLE_SCHEMA = "aeroviz-training-sample-v1"
 #: The set kinds the frontend knows (`TRAINING_SET_KINDS` there).
 KIND_READBACK = "vocabulary-readback"
+#: A set that also carries what the PRIOR said at every event. The kind is what the reader keys
+#: the prior block's presence on: a `vocabulary-readback` set must not have one and a
+#: `prior-generated` set must, so neither is read leniently.
+KIND_PRIOR = "prior-generated"
 
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"
@@ -129,6 +141,36 @@ def stratify(candidates: list[str], series: list[Any], config: TSConfig,
             f"{len(candidates)} rebuilt candidates — raise --flights' pool or lower --flights"
         )
     return [row for name in sorted(taken) for row in taken[name]]
+
+
+def series_by_dataset_id(airport: str, dataset_ids: list[str], config: TSConfig):
+    """The drawn flights' tracks, rebuilt STRAIGHT FROM the airport's arrival manifest.
+
+    The sibling door is `support.cohort_from_manifests`, which the vocabulary runner and the
+    prior use; this is the same door for a handful of named flights instead of a whole cohort.
+    It replaced a checkpoint (`rebuild_cohort`) on 2026-09-21: the checkpoint was only ever "the
+    door to the data" here — nothing of the model was used — and the per-airport checkpoints that
+    could open the other four airports are `prediction_output='plan'`, retired 2026-09-18, so
+    `TSConfig.from_dict` refuses them. The manifest is the thing the sentences were read from
+    anyway, and its digest is what the export records.
+
+    `TSConfig()` is the config the sentences were read under (the vocabulary runner's own
+    `--airports` branch uses it), so the course frame here is the one the words were fitted in.
+    """
+    manifest = arrival_manifest_path(airport)
+    built, report = build_series(
+        load_flight_dicts([manifest], include_flight_keys=set(dataset_ids), verbose=False),
+        config, aircraft_type=config.aircraft_type,
+    )
+    print(f"  {report.format()}", flush=True)
+    by_id = {item.dataset_id: item for item in built}
+    missing = [key for key in dataset_ids if key not in by_id]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} of {len(dataset_ids)} drawn flights could not be rebuilt from "
+            f"{manifest} (first {missing[0]!r}) — a readout over a silent subset is a different draw"
+        )
+    return [by_id[key] for key in dataset_ids], manifest
 
 
 def readings_by_flight(artefact: Path, split: str, sha256: str) -> dict[str, dict[str, Any]]:
@@ -307,6 +349,7 @@ def flown_sentence(
 
 def geometric_track(
     reading: dict[str, Any], vocabulary: Vocabulary, frame: dict[str, Any], series,
+    bands: bool = True,
 ) -> dict[str, Any]:
     """The flown sentence, the corridor its words allow, and the geodetic columns the 3D layer
     draws both from.
@@ -314,6 +357,11 @@ def geometric_track(
     The vertical band rides THIS track's own ground positions — the commanded angle never touches
     the horizontal step — so its two heights are converted with the offset `geodetic_columns`
     just computed rather than by inverting the same rows twice.
+
+    ``bands=False`` for the PRIOR's sentence. The corridor says what the vocabulary's tolerance
+    allows around a sentence; a second corridor on the same chart is two of them overlapping, and
+    the question the model's line answers is which WORDS it said, not how much slack those words
+    would have had. It is also half the bytes of the block.
     """
     track, payload = flown_sentence(reading, vocabulary, frame)
     geodetic = geodetic_columns(series, track.to_go_m, track.cross_m, track.height_m)
@@ -321,6 +369,8 @@ def geometric_track(
     rebuilt = _rebuilt_reading(reading)
     start = kinematics.Start.from_course_frame(frame)
     observed_s = float(frame["t"][-1] - frame["t"][0])
+    if not bands:
+        return {**payload, **geodetic}
     return {
         **payload,
         **geodetic,
@@ -334,12 +384,106 @@ def geometric_track(
     }
 
 
+PRIOR_FILE = "prior.pt"
+#: MIRROR of `instruction_prior.PRIOR_SCHEMA`.
+PRIOR_SCHEMA = "ts-instruction-prior-v1"
+#: What the prior was asked, in the file, because it is NOT what a reader assumes. At every event
+#: the model saw the TRUTH's words and the TRUTH's state up to that point and said what the next
+#: event would be. It did not generate the sentence: a free run feeds the model its own words and
+#: an executor's state, which is the closed loop (design §4 gate 3) and is not this.
+PRIOR_METHOD = "teacher-forced-next-word"
+
+
+def load_prior(directory: Path, vocabulary_sha256: str):
+    """The trained prior, refused unless it was trained on THIS vocabulary.
+
+    The sha is the whole point of the check: the model's heads are one per kind and sized by the
+    class counts, so a prior from another vocabulary would still load, still run, and still emit
+    word indices — into a different vocabulary's classes.
+    """
+    import torch
+    from ts_transformer.manoeuvre.context import TypeVocabulary
+    from ts_transformer.manoeuvre.instruction_prior import InstructionPrior, PriorConfig
+
+    path = directory / PRIOR_FILE
+    if not path.exists():
+        raise SystemExit(f"{path} is missing: --prior takes the directory a prior run wrote")
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    if payload.get("schema") != PRIOR_SCHEMA:
+        raise SystemExit(f"{path} has schema {payload.get('schema')!r}, not {PRIOR_SCHEMA!r}")
+    if payload["vocabulary_sha256"] != vocabulary_sha256:
+        raise SystemExit(
+            f"{path} was trained on vocabulary {payload['vocabulary_sha256'][:12]}…, the artefact is "
+            f"{vocabulary_sha256[:12]}… — the heads are sized by THAT vocabulary's classes"
+        )
+    config = PriorConfig.from_dict(payload["prior_config"])
+    model = InstructionPrior(config)
+    model.load_state_dict(payload["state_dict"])
+    model.eval()
+    return model, config, TypeVocabulary.from_dict(payload["types"]), payload
+
+
+def prior_sentences(model, config, types, readings: list[dict[str, Any]], series: list[Any]) -> list[dict[str, Any]]:
+    """What the prior says at every event of each drawn flight, and how sure it was.
+
+    One batch, because the drawn set is forty flights. Position k's logits are the model's answer
+    for event k + 1, so the said sentence is the truth's OPENING EVENT followed by the model's
+    answers at positions 0 … E-2: the first event is given (it is what the model is asked from),
+    and `givenEvents` says so in the file.
+
+    The event TIMES stay the truth's. The duration word is predicted like every other kind and is
+    carried here, but it is not used to place the events: each prediction was conditioned on the
+    truth's state at the truth's instant, so re-timing the sentence by the model's own gaps would
+    put its words at moments its conditioning never saw. What the model says about timing is
+    therefore READ on the duration row, not flown.
+    """
+    import torch
+    from ts_transformer.manoeuvre.instruction_prior import collate
+    from ts_transformer.manoeuvre.instruction_sequences import flight_sequence
+
+    sequences = [flight_sequence(item, _rebuilt_reading(reading))
+                 for reading, item in zip(readings, series, strict=True)]
+    with torch.no_grad():
+        output = model(collate(sequences, config, types))
+
+    said: list[dict[str, Any]] = []
+    terminal_column = INSTRUCTION_KINDS.index("terminal")
+    for index, sequence in enumerate(sequences):
+        length = sequence.length
+        words = [[int(v) for v in sequence.words[0]]]
+        confidence = [[1.0] * len(INSTRUCTION_KINDS)]       # the opening event is given, not said
+        for position in range(length - 1):
+            row, sure = [], []
+            for kind in INSTRUCTION_KINDS:
+                probabilities = torch.softmax(output.logits[kind][index, position], dim=-1)
+                word = int(probabilities.argmax())
+                row.append(word)
+                sure.append(round(float(probabilities[word]), 4))
+            words.append(row)
+            confidence.append(sure)
+        landed = next((float(sequence.positions_s[k]) for k in range(1, length)
+                       if words[k][terminal_column] == TERMINAL_LANDED), None)
+        said.append({"words": words, "confidence": confidence, "givenEvents": 1, "landedAtS": landed})
+    return said
+
+
 def flight_payload(
     reading: dict[str, Any], series, stratum: str, vocabulary: Vocabulary,
+    said: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One flight as the frontend reads it. ``words`` is copied from the artefact UNCHANGED —
-    six columns in `INSTRUCTION_KINDS` order, which the reader checks positionally."""
+    six columns in `INSTRUCTION_KINDS` order, which the reader checks positionally.
+
+    ``said`` is what the prior said at each of this flight's events (`prior_sentences`). Its
+    sentence is flown by the SAME kinematics as the truth's, on the truth's event times, so the
+    two tracks differ only in the words — which is the comparison the view exists to draw.
+    """
     frame = course_frame(series)
+    prior = None
+    if said is not None:
+        prior = {**said,
+                 "geometric": geometric_track({**reading, "words": said["words"]}, vocabulary,
+                                              frame, series, bands=False)}
     return {
         "flightKey": reading["flight_id"],
         "callsign": reading["flight_id"].split("_", 1)[0],
@@ -356,6 +500,7 @@ def flight_payload(
         "absorbed": [_absorbed(item) for item in reading["absorbed"]],
         "observed": observed_track(frame, series),
         "geometric": geometric_track(reading, vocabulary, frame, series),
+        **({"prior": prior} if prior is not None else {}),
     }
 
 
@@ -381,12 +526,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--vocabulary", type=Path, required=True,
                         help="the artefact DIRECTORY (or its instruction_vocabulary.json)")
-    parser.add_argument("--executor", type=Path, required=True, help="a checkpoint.pt: the door to the track data")
+    parser.add_argument("--prior", type=Path, default=None,
+                        help="a prior run's directory: adds what the model says at every event, and its track")
     parser.add_argument("--out", type=Path, required=True, help="…/airports/<ICAO>/training/<set id>")
     parser.add_argument("--flights", type=int, default=40, help="drawn half per stratum (default 40)")
     parser.add_argument("--split", default="train", choices=("train", "val"))
-    parser.add_argument("--airport", default=None,
-                        help="keep only this airport's flights (a pooled artefact holds five)")
     parser.add_argument("--seed", type=int, default=1337, help="the draw's seed; it is written into the manifest")
     parser.add_argument("--set-id", default=None, help="defaults to the output directory's name")
     parser.add_argument("--title", default=None)
@@ -407,33 +551,56 @@ def main(argv: list[str] | None = None) -> int:
 
     vocabulary, runways, payload = load_vocabulary(artefact / VOCABULARY_FILE)
     readings = readings_by_flight(artefact, args.split, vocabulary.sha256)
-    if args.airport:
-        # A pooled artefact holds five airports' sentences; one Training set is one airport's.
-        # The runway word carries the prefix, so this is the artefact's own answer to "whose
-        # flight is this", not a guess from the flight id.
+    if True:
+        # A pooled artefact holds five airports' sentences; ONE TRAINING SET IS ONE AIRPORT'S, and
+        # the airport is the one the --out path names. The runway word carries the prefix, so this
+        # is the artefact's own answer to "whose flight is this", not a guess from the flight id.
         readings = {key: row for key, row in readings.items()
-                    if row["runway"].split(":")[0] == args.airport.upper()}
+                    if row["runway"].split(":")[0] == airport}
         if not readings:
-            raise SystemExit(f"no flight in sentences_{args.split}.json lands at {args.airport.upper()}")
+            raise SystemExit(f"no flight in sentences_{args.split}.json lands at {airport}")
     per_stratum = args.flights // 2
     candidates = drawn_flights(readings, per_stratum, args.seed)
 
-    executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
-    checkpoint = load_checkpoint_payload(executor)
-    config = TSConfig.from_dict(checkpoint["config"])
+    config = TSConfig()
     print(f"  {len(candidates)} candidates drawn (seed {args.seed}); rebuilding their tracks to stratify", flush=True)
-    rebuilt = rebuild_cohort(checkpoint, config, [readings[flight_id]["dataset_id"] for flight_id in candidates])
+    rebuilt, manifest = series_by_dataset_id(
+        airport, [readings[flight_id]["dataset_id"] for flight_id in candidates], config)
     draw = stratify(candidates, rebuilt, config, per_stratum)
     print(f"  {len(draw)} flights drawn ({per_stratum} per stratum)", flush=True)
 
-    flights = [flight_payload(readings[flight_id], item, stratum, vocabulary)
-               for flight_id, stratum, item in draw]
+    said_by_flight: list[dict[str, Any] | None] = [None] * len(draw)
+    prior_block = None
+    if args.prior:
+        prior_dir = args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior
+        model, prior_config, types, prior_payload = load_prior(prior_dir, vocabulary.sha256)
+        said_by_flight = prior_sentences(
+            model, prior_config, types,
+            [readings[flight_id] for flight_id, _, _ in draw], [item for _, _, item in draw])
+        print(f"  the prior said {sum(len(s['words']) for s in said_by_flight)} events over {len(draw)} flights", flush=True)
+        # WHICH flights the model has seen. The draw is one split; a set drawn from `train` shows
+        # the model reciting what it was fitted on, and the difference matters enough to be in
+        # the file rather than in whoever remembers the command.
+        trained_on = set(prior_payload["split"]["train"])
+        drawn_ids = {readings[flight_id]["dataset_id"] for flight_id, _, _ in draw}
+        prior_block = {
+            "sha256": file_sha256(prior_dir / PRIOR_FILE),
+            "method": PRIOR_METHOD,
+            "seed": prior_payload["settings"]["seed"],
+            "bestEpoch": prior_payload["best_epoch"],
+            "trainedOnTheseFlights": len(drawn_ids & trained_on),
+            "readout": json.loads((prior_dir / "readings.json").read_text(encoding="utf-8"))["readings"],
+        }
+
+    flights = [flight_payload(readings[flight_id], item, stratum, vocabulary, said)
+               for (flight_id, stratum, item), said in zip(draw, said_by_flight, strict=True)]
     spec = payload["spec"]
     out.mkdir(parents=True)
     write_json_atomic(out / SAMPLE_FILE, {
         "schema": SAMPLE_SCHEMA, "setId": set_id, "airport": airport, "writtenUtc": utc_now(),
         "kinds": list(INSTRUCTION_KINDS),
         "geometry": kinematics.assumptions(),
+        **({"prior": prior_block} if prior_block is not None else {}),
         "vocabulary": {
             "sha256": vocabulary.sha256, "runwaySha256": runway_sha256(runways),
             "readingRule": spec["reading_rule"], "tokenStepS": spec["token_step_s"],
@@ -452,7 +619,7 @@ def main(argv: list[str] | None = None) -> int:
     })
 
     entry = {
-        "id": set_id, "kind": KIND_READBACK,
+        "id": set_id, "kind": KIND_PRIOR if prior_block is not None else KIND_READBACK,
         "title": args.title or f"Instruction vocabulary · {spec['reading_rule']} · {args.split}",
         "file": f"{out.name}/{SAMPLE_FILE}",
         "vocabularySha256": vocabulary.sha256, "runwaySha256": runway_sha256(runways),
@@ -460,10 +627,11 @@ def main(argv: list[str] | None = None) -> int:
         # the draw is stated, never implied: these ARE hand-check pages, and which ones
         "cohort": {"split": args.split, "perStratum": per_stratum, "seed": args.seed,
                    "drawnFrom": (f"a seeded permutation of the {args.split} split"
-                                 + (f" at {args.airport.upper()}" if args.airport else "")
+                                 + f" at {airport}"
                                  + f", stratified by approach_difficulty at the executor's anchor "
                                    f"(pool {len(candidates)})")},
-        "source": {"artefact": str(artefact), "executorSha256": file_sha256(executor)},
+        "source": {"artefact": str(artefact), "manifest": str(manifest),
+                   "manifestSha256": file_sha256(manifest)},
     }
     index = update_index(training, airport, entry)
     print(f"  wrote {out / SAMPLE_FILE} and {index} in {time.perf_counter() - started:.1f} s", flush=True)

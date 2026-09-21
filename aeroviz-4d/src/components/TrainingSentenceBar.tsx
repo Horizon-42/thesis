@@ -31,7 +31,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
-import { TRAINING_KIND_COLOR } from "../utils/trainingWordColors";
+import { TRAINING_KIND_COLOR, TRAINING_MODEL_COLOR } from "../utils/trainingWordColors";
 import {
   formatSeconds,
   TERMINAL_NEVER_OBSERVED,
@@ -219,6 +219,36 @@ export default function TrainingSentenceBar() {
 
   const xFor = (seconds: number) => GUTTER + (seconds / flight.durationS) * plotW;
   const label = (kind: TrainingKind, word: number) => trainingWordLabel(vocabulary, kind, word);
+
+  /**
+   * WHAT THE MODEL SAID, drawn only where it DIFFERS from the truth.
+   *
+   * Agreement is the common case (the heading word matches 86 % of the time), so
+   * drawing every said word would paint the whole bar and hide the answer. The
+   * purple strips are the disagreements; their absence is agreement, and the
+   * header counts both so the eye is not left to estimate it.
+   */
+  const said = flight.prior;
+  const disagreements = said
+    ? TRAINING_KINDS.flatMap((kind) => {
+        const column = TRAINING_KIND_COLUMN[kind];
+        return eventTimesS.flatMap((startS, event) => {
+          if (event < said.givenEvents) return [];
+          if (said.words[event][column] === flight.sentence.words[event][column]) return [];
+          return [{
+            kind,
+            startS,
+            endS: event + 1 < eventTimesS.length ? eventTimesS[event + 1] : flight.durationS,
+            word: said.words[event][column],
+            truth: flight.sentence.words[event][column],
+            confidence: said.confidence[event][column],
+          }];
+        });
+      })
+    : [];
+  const saidWords = said
+    ? (eventTimesS.length - said.givenEvents) * TRAINING_KINDS.length
+    : 0;
   const bandLabel = (kind: TrainingKind, word: number) =>
     trainingWordBandLabel(vocabulary, kind, word);
 
@@ -274,6 +304,22 @@ export default function TrainingSentenceBar() {
         >
           {arrivalReadout}
         </span>
+        {said ? (
+          <span
+            className="training-sentence-model-readout"
+            style={{ color: TRAINING_MODEL_COLOR }}
+            title={
+              "What the model said at each of this flight's events, asked from the truth's own " +
+              "history and state (teacher-forced). Purple marks a word it got wrong; the model " +
+              "did not generate this sentence."
+            }
+          >
+            model: {saidWords - disagreements.length}/{saidWords} words
+            {said.landedAtS === null
+              ? ""
+              : `, said landed at ${formatSeconds(said.landedAtS)} s`}
+          </span>
+        ) : null}
         <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s</span>
         {/* The window shares THIS cursor — it is the same moment of the same
             flight, so it is one number, held here and passed down. */}
@@ -426,6 +472,29 @@ export default function TrainingSentenceBar() {
                 );
               })}
 
+              {/* WHERE THE MODEL SAID SOMETHING ELSE. A strip along the band's
+                  bottom edge rather than a row of its own: the bar is docked
+                  over the flight list and its height is what that costs. */}
+              {disagreements
+                .filter((item) => item.kind === kind)
+                .map((item, index) => {
+                  const name =
+                    `the model said ${trainingWordLabel(vocabulary, kind, item.word)} here ` +
+                    `(p ${item.confidence.toFixed(2)}); the words say ${trainingWordLabel(vocabulary, kind, item.truth)}`;
+                  return (
+                    <g key={`said-${kind}-${index}`} aria-label={name}>
+                      <title>{name}</title>
+                      <rect
+                        x={xFor(item.startS) + 1}
+                        y={y + ROW_H - 7}
+                        width={Math.max(xFor(item.endS) - xFor(item.startS) - 2, 1)}
+                        height={3}
+                        fill={TRAINING_MODEL_COLOR}
+                      />
+                    </g>
+                  );
+                })}
+
               {/* the manoeuvres this kind's words did not carry */}
               {flight.absorbed
                 .filter((item) => item.kind === kind)
@@ -549,6 +618,7 @@ export default function TrainingSentenceBar() {
         <TrainingReadbackWindow
           flight={flight}
           vocabulary={vocabulary}
+          prior={trainingSelection.prior}
           geometry={geometry}
           cursorS={cursorS}
           onCursorChange={setCursorS}

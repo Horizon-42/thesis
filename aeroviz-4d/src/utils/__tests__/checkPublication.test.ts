@@ -165,10 +165,10 @@ describe("checkComparisonIndex", () => {
 describe("the Training export's checks", () => {
   it("passes a manifest and a sample that agree", () => {
     expect(checkTrainingIndex(mockIndex())).toEqual([]);
-    expect(checkTrainingSample("vocabulary_tau10", mockSample(), "segment-v13")).toEqual([]);
+    expect(checkTrainingSample("vocabulary_tau10", mockSample(), "segment-v13", "vocabulary-readback")).toEqual([]);
 
     const index = parseTrainingIndex(mockIndex());
-    const sample = parseTrainingSample(mockSample());
+    const sample = parseTrainingSample(mockSample(), "vocabulary-readback");
     if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
     expect(checkTrainingSetAgrees(index.value.sets[0], sample.value)).toEqual([]);
   });
@@ -188,7 +188,7 @@ describe("the Training export's checks", () => {
   it("names the field when a sample is wrong", () => {
     const sample = mockSample() as any;
     sample.flights[0].sentence.words[0] = [0, 0, 0, 0, 0, 0, 0];
-    const findings = checkTrainingSample("vocabulary_tau10", sample, "segment-v13");
+    const findings = checkTrainingSample("vocabulary_tau10", sample, "segment-v13", "vocabulary-readback");
     expect(findings[0].category).toBe("vocabulary_tau10");
     expect(findings[0].message).toContain("7 columns, expected 6");
   });
@@ -200,7 +200,7 @@ describe("the Training export's checks", () => {
   it("names the reading rule a refused sample was written under", () => {
     const stale = mockSample() as any;
     stale.kinds = ["heading", "altitude", "speed", "runway", "duration", "terminal"];
-    const findings = checkTrainingSample("vocabulary_tau10", stale, "plateau-v11");
+    const findings = checkTrainingSample("vocabulary_tau10", stale, "plateau-v11", "vocabulary-readback");
     expect(findings[0].message).toContain("read under plateau-v11");
     expect(findings[0].message).toContain("altitude");
     expect(findings[0].message).toContain("vertical");
@@ -212,7 +212,7 @@ describe("the Training export's checks", () => {
     const index = parseTrainingIndex(mockIndex());
     const raw = mockSample() as any;
     raw.vocabulary.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
-    const sample = parseTrainingSample(raw);
+    const sample = parseTrainingSample(raw, "vocabulary-readback");
     if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
 
     const findings = checkTrainingSetAgrees(index.value.sets[0], sample.value);
@@ -225,7 +225,7 @@ describe("the Training export's checks", () => {
   // the reading-rule row passed the whole suite before this.
   it("catches each field the two files must agree on", () => {
     const index = parseTrainingIndex(mockIndex());
-    const sample = parseTrainingSample(mockSample());
+    const sample = parseTrainingSample(mockSample(), "vocabulary-readback");
     if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
 
     for (const [field, value] of [
@@ -250,7 +250,7 @@ describe("the Training export's checks", () => {
 
   it("catches a manifest that promises more flights than the sample holds", () => {
     const index = parseTrainingIndex(mockIndex());
-    const sample = parseTrainingSample(mockSample());
+    const sample = parseTrainingSample(mockSample(), "vocabulary-readback");
     if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
 
     const findings = checkTrainingSetAgrees({ ...index.value.sets[0], flights: 40 }, sample.value);

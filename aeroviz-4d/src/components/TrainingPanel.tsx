@@ -124,7 +124,9 @@ export default function TrainingPanel() {
     }
     let live = true;
     setSampleState({ status: "loading" });
-    fetchTrainingSample(activeAirportCode, entry.file)
+    // The manifest's kind decides what the sample must carry; the reader keys the
+    // model's words on it rather than on whether the field happens to be there.
+    fetchTrainingSample(activeAirportCode, entry.file, entry.kind)
       .then((parsed) => {
         if (!live) return;
         if (parsed.ok) setSampleState({ status: "ready", sample: parsed.value });
@@ -160,7 +162,12 @@ export default function TrainingPanel() {
     const flight = sample?.flights.find((item) => item.flightKey === flightKey) ?? null;
     setTrainingSelection(
       flight && sample
-        ? { vocabulary: sample.vocabulary, flight, geometry: sample.geometry }
+        ? {
+            vocabulary: sample.vocabulary,
+            flight,
+            geometry: sample.geometry,
+            ...(sample.prior ? { prior: sample.prior } : {}),
+          }
         : null,
     );
   }, [sample, flightKey, setTrainingSelection]);
@@ -370,6 +377,37 @@ export default function TrainingPanel() {
                 {/* Every constant above is imported from these files rather than
                     typed into the kinematics — which is only worth saying if the
                     files are named where the numbers are shown. */}
+                {sample.prior ? (
+                  <>
+                    <div>
+                      {/* WHICH model, and HOW it was asked. The method is the line
+                          that stops the whole panel being read as free generation. */}
+                      <dt>Model</dt>
+                      <dd>
+                        prior {sample.prior.sha256.slice(0, SHA_SHOWN)}… · seed {sample.prior.seed} ·
+                        best epoch {sample.prior.bestEpoch} · {sample.prior.method}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Seen these flights</dt>
+                      <dd>
+                        {sample.prior.trainedOnTheseFlights === 0
+                          ? "never — none of the drawn flights was in its training split"
+                          : `${sample.prior.trainedOnTheseFlights} of the drawn flights were in its training split`}
+                      </dd>
+                    </div>
+                    {Object.entries(sample.prior.readout).map(([split, table]) => (
+                      <div key={`readout-${split}`}>
+                        <dt>Next-word NLL ({split})</dt>
+                        <dd>
+                          {TRAINING_KINDS.filter((kind) => kind in table)
+                            .map((kind) => `${kind} ${table[kind].toFixed(2)}`)
+                            .join(" · ")}
+                        </dd>
+                      </div>
+                    ))}
+                  </>
+                ) : null}
                 <div>
                   <dt>Constants from</dt>
                   <dd>{sample.geometry.constantsFrom.join(" · ")}</dd>

@@ -368,7 +368,14 @@ export interface TrainingSpeedBand {
   arrivalWindowS: [number, number] | null;
 }
 
-export type TrainingGeometric = { tS: number[] }
+/**
+ * A sentence flown by the rules — the columns every flown track has, whatever
+ * words it came from. The truth's carries the corridor its words allow on top of
+ * this (`TrainingGeometric`); the PRIOR's does not, because two corridors on one
+ * chart are two overlapping bands, and what the model's line answers is which
+ * WORDS it said rather than how much slack they would have had.
+ */
+export type TrainingFlownTrack = { tS: number[] }
   & Record<TrainingGeometricColumn, number[]>
   & Record<TrainingGeodeticColumn, number[]> & {
   endReason: TrainingEndReason;
@@ -383,11 +390,69 @@ export type TrainingGeometric = { tS: number[] }
    *  it is a mean over an unstated window. */
   comparedS: number;
   comparedFraction: number;
+};
+
+export type TrainingGeometric = TrainingFlownTrack & {
   /** One kind's slack at a time — NOT the joint 2×2 envelope (V32). The
    *  `geometry` block states that in the file, as `bandsAreJoint: false`. */
   verticalBand: TrainingVerticalBand;
   speedBand: TrainingSpeedBand;
 };
+
+/**
+ * WHAT THE MODEL SAID, per flight — and it is not a sentence the model made up.
+ *
+ * At every event the prior saw the TRUTH's words and the TRUTH's state up to
+ * that point and was asked what the next event would be; `words[k]` for k ≥ 1 is
+ * that answer, and `words[0]` is the truth's opening event, which is given
+ * (`givenEvents`). A free run — the model fed its own words and an executor's
+ * state — is a different experiment (the closed loop), and the file says which
+ * one this is in `TrainingPrior.method`. Nothing here may be labelled
+ * "generated".
+ *
+ * The event TIMES are the truth's. The duration word is predicted like every
+ * other kind and is carried, but it does not place the events: each prediction
+ * was conditioned on the truth's state at the truth's instant, so re-timing the
+ * sentence by the model's own gaps would put its words at moments its
+ * conditioning never saw. What the model says about timing is READ on the
+ * duration row, not flown.
+ */
+export interface TrainingFlightPrior {
+  /** [E][6], the same shape and column order as the truth's sentence. */
+  words: number[][];
+  /** [E][6]: how much probability the model put on the word it said. The opening
+   *  event is given, so its row is all 1. */
+  confidence: number[][];
+  givenEvents: number;
+  /** When the model first said `landed`, or null if it never did — the model
+   *  stopping early is a real answer and the bar marks it. The sentence is NOT
+   *  truncated there: the model was asked at every event, so every answer is
+   *  carried. */
+  landedAtS: number | null;
+  /** Its sentence flown by the SAME kinematics as the truth's, on the truth's
+   *  event times — so the two tracks differ only in the words. No corridor. */
+  geometric: TrainingFlownTrack;
+}
+
+/** MIRROR of `instruction_sample_export.PRIOR_METHOD`. */
+export const TRAINING_PRIOR_METHOD = "teacher-forced-next-word";
+
+/**
+ * The model that said them, and what it scored. `readout` is the prior run's own
+ * `readings.json` table, carried rather than recomputed: the NLL and top-1 the
+ * view prints must be the ones the run reported.
+ */
+export interface TrainingPrior {
+  sha256: string;
+  method: string;
+  seed: number;
+  bestEpoch: number;
+  /** How many of the DRAWN flights the model was fitted on. It is 0 for a val
+   *  draw and it is shown, because a set drawn from `train` shows the model
+   *  reciting what it was trained on and that is a different claim. */
+  trainedOnTheseFlights: number;
+  readout: Record<string, Record<string, number>>;
+}
 
 /** A manoeuvre the labeller read but did not word, and why. Drawn on its kind's
  *  row so "the words miss this turn" is visible rather than argued about. */
@@ -419,6 +484,10 @@ export interface TrainingFlight {
   absorbed: TrainingAbsorbed[];
   observed: TrainingObserved;
   geometric: TrainingGeometric;
+  /** Present exactly when the set's kind is `prior-generated` — see
+   *  `parseTrainingSample`, which keys it on the kind rather than on whether the
+   *  field happens to be there. */
+  prior?: TrainingFlightPrior;
 }
 
 /** What the panel publishes for the full-width sentence bar to draw: one flight
@@ -426,6 +495,10 @@ export interface TrainingFlight {
 export interface TrainingSelection {
   vocabulary: TrainingVocabulary;
   flight: TrainingFlight;
+  /** The model that said `flight.prior`, when there is one. The two travel
+   *  together: a view drawing the model's line has to be able to say which model
+   *  and how it was asked. */
+  prior?: TrainingPrior;
   /** What the flown tracks and their bands were drawn under. It travels with the
    *  selection because the views that draw the corridor are the ones that have
    *  to say where it came from — a band on screen whose rule is two components
@@ -483,6 +556,8 @@ export interface TrainingSample {
   airport: string;
   vocabulary: TrainingVocabulary;
   geometry: TrainingGeometry;
+  /** The model whose words every flight carries, when this is a prior set. */
+  prior?: TrainingPrior;
   flights: TrainingFlight[];
 }
 
@@ -1033,20 +1108,20 @@ function parseObserved(raw: unknown, durationS: number, where: string): Parsed<T
   return { ok: true, value: columns as TrainingObserved };
 }
 
-function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> {
-  if (!isRecord(raw)) return { ok: false, problem: `${where}.geometric is not an object` };
+function parseFlownTrack(raw: unknown, where: string, what: string): Parsed<TrainingFlownTrack> {
+  if (!isRecord(raw)) return { ok: false, problem: `${where}.${what} is not an object` };
   const tS = numberArray(raw.tS);
   if (tS === null || tS.length < 2) {
-    return { ok: false, problem: `${where}.geometric.tS is missing or shorter than two steps` };
+    return { ok: false, problem: `${where}.${what}.tS is missing or shorter than two steps` };
   }
   // `rowAt`, the x axis and the gap readout all assume this clock runs forward
   // from 0, exactly as the observed one does.
   if (tS[0] !== 0) {
-    return { ok: false, problem: `${where}.geometric.tS starts at ${tS[0]} s, not 0` };
+    return { ok: false, problem: `${where}.${what}.tS starts at ${tS[0]} s, not 0` };
   }
   for (let i = 1; i < tS.length; i += 1) {
     if (!(tS[i] > tS[i - 1])) {
-      return { ok: false, problem: `${where}.geometric.tS is not increasing at step ${i}` };
+      return { ok: false, problem: `${where}.${what}.tS is not increasing at step ${i}` };
     }
   }
 
@@ -1056,7 +1131,7 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
     if (values === null || values.length !== tS.length) {
       return {
         ok: false,
-        problem: `${where}.geometric.${column} is missing or does not have ${tS.length} rows`,
+        problem: `${where}.${what}.${column} is missing or does not have ${tS.length} rows`,
       };
     }
     columns[column] = values;
@@ -1066,22 +1141,17 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
   if (endReason === null || !(TRAINING_END_REASONS as readonly string[]).includes(endReason)) {
     return {
       ok: false,
-      problem: `${where}.geometric.endReason is ${JSON.stringify(raw.endReason)}, expected one of ${TRAINING_END_REASONS.join(", ")}`,
+      problem: `${where}.${what}.endReason is ${JSON.stringify(raw.endReason)}, expected one of ${TRAINING_END_REASONS.join(", ")}`,
     };
   }
   const numbers: Record<string, number> = {};
   for (const field of ["finalGapM", "meanGapM", "gapP95M", "comparedS", "comparedFraction"]) {
     const value = finite(raw, field);
     if (value === null || value < 0) {
-      return { ok: false, problem: `${where}.geometric.${field} is missing or not a distance` };
+      return { ok: false, problem: `${where}.${what}.${field} is missing or not a distance` };
     }
     numbers[field] = value;
   }
-
-  const verticalBand = parseVerticalBand(raw.verticalBand, tS.length, where);
-  if (!verticalBand.ok) return verticalBand;
-  const speedBand = parseSpeedBand(raw.speedBand, where);
-  if (!speedBand.ok) return speedBand;
 
   return {
     ok: true,
@@ -1095,9 +1165,138 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
       gapP95M: numbers.gapP95M,
       comparedS: numbers.comparedS,
       comparedFraction: numbers.comparedFraction,
-      verticalBand: verticalBand.value,
-      speedBand: speedBand.value,
     },
+  };
+}
+
+/**
+ * What the model said on one flight, checked against the sentence it answers.
+ *
+ * The row count is the check that matters: the prior was asked at every event of
+ * THIS flight, so its sentence has exactly as many rows as the truth's. A shorter
+ * one would line up silently — every row would still plot, just against the wrong
+ * event — and the whole view is a comparison of the two row by row.
+ */
+function parseFlightPrior(
+  raw: unknown,
+  events: number,
+  counts: Record<TrainingKind, number>,
+  durationS: number,
+  where: string,
+): Parsed<TrainingFlightPrior> {
+  if (!isRecord(raw)) {
+    return { ok: false, problem: `${where}.prior is missing: this set's kind says every flight carries what the model said` };
+  }
+  for (const field of ["words", "confidence"] as const) {
+    if (!Array.isArray(raw[field]) || (raw[field] as unknown[]).length !== events) {
+      return {
+        ok: false,
+        problem: `${where}.prior.${field} has ${Array.isArray(raw[field]) ? (raw[field] as unknown[]).length : "no"} rows, but the sentence has ${events} events`,
+      };
+    }
+  }
+  const words: number[][] = [];
+  const confidence: number[][] = [];
+  for (let row = 0; row < events; row += 1) {
+    const said = numberArray((raw.words as unknown[])[row]);
+    const sure = numberArray((raw.confidence as unknown[])[row]);
+    if (said === null || said.length !== TRAINING_WORD_COLUMNS) {
+      return { ok: false, problem: `${where}.prior.words[${row}] is not ${TRAINING_WORD_COLUMNS} words` };
+    }
+    if (sure === null || sure.length !== TRAINING_WORD_COLUMNS) {
+      return { ok: false, problem: `${where}.prior.confidence[${row}] is not ${TRAINING_WORD_COLUMNS} numbers` };
+    }
+    for (const kind of TRAINING_KINDS) {
+      const value = said[TRAINING_KIND_COLUMN[kind]];
+      if (!Number.isInteger(value) || value < 0 || value >= counts[kind]) {
+        return {
+          ok: false,
+          problem: `${where}.prior.words[${row}].${kind} is ${value}, outside this vocabulary's 0…${counts[kind] - 1}`,
+        };
+      }
+      const probability = sure[TRAINING_KIND_COLUMN[kind]];
+      if (!(probability >= 0 && probability <= 1)) {
+        return { ok: false, problem: `${where}.prior.confidence[${row}].${kind} is ${probability}, not a probability` };
+      }
+    }
+    words.push(said);
+    confidence.push(sure);
+  }
+  const givenEvents = finite(raw, "givenEvents");
+  if (givenEvents === null || !Number.isInteger(givenEvents) || givenEvents < 1 || givenEvents >= events) {
+    return {
+      ok: false,
+      problem: `${where}.prior.givenEvents is ${JSON.stringify(raw.givenEvents)}: at least the opening event is given, and not the whole sentence`,
+    };
+  }
+  const landed = raw.landedAtS;
+  if (landed !== null && (typeof landed !== "number" || !Number.isFinite(landed) || landed < 0 || landed > durationS)) {
+    return { ok: false, problem: `${where}.prior.landedAtS is ${JSON.stringify(landed)}, expected a time inside the track or null` };
+  }
+  const flown = parseFlownTrack(raw.geometric, where, "prior.geometric");
+  if (!flown.ok) return flown;
+  return {
+    ok: true,
+    value: { words, confidence, givenEvents, landedAtS: landed as number | null, geometric: flown.value },
+  };
+}
+
+/** The model itself: which one, how it was asked, and what the run scored. */
+function parsePrior(raw: unknown): Parsed<TrainingPrior> {
+  if (!isRecord(raw)) {
+    return { ok: false, problem: "prior is missing: this set's kind says it carries a model's words" };
+  }
+  const sha256 = str(raw, "sha256");
+  const method = str(raw, "method");
+  if (sha256 === null || method === null) {
+    return { ok: false, problem: "prior must name the model (sha256) and how it was asked (method)" };
+  }
+  // The method is REFUSED unless it is the one this view's wording describes.
+  // Every label here says the model answered from the truth's history; a free run
+  // is a different experiment, and reading one under this wording would publish
+  // a claim nobody made.
+  if (method !== TRAINING_PRIOR_METHOD) {
+    return {
+      ok: false,
+      problem: `prior.method is ${JSON.stringify(method)}, and this view is written for ${TRAINING_PRIOR_METHOD} — a free run is a different experiment and would need its own wording`,
+    };
+  }
+  const seed = finite(raw, "seed");
+  const bestEpoch = finite(raw, "bestEpoch");
+  const trainedOn = finite(raw, "trainedOnTheseFlights");
+  if (seed === null || bestEpoch === null || trainedOn === null || trainedOn < 0) {
+    return { ok: false, problem: "prior must carry its seed, its best epoch and how many of these flights it was trained on" };
+  }
+  if (!isRecord(raw.readout)) {
+    return { ok: false, problem: "prior.readout is missing: the view prints the run's own numbers, never its own" };
+  }
+  const readout: Record<string, Record<string, number>> = {};
+  for (const [split, table] of Object.entries(raw.readout)) {
+    if (!isRecord(table)) return { ok: false, problem: `prior.readout.${split} is not a table` };
+    const row: Record<string, number> = {};
+    for (const [key, value] of Object.entries(table)) {
+      if (typeof value === "number" && Number.isFinite(value)) row[key] = value;
+    }
+    readout[split] = row;
+  }
+  return {
+    ok: true,
+    value: { sha256, method, seed, bestEpoch, trainedOnTheseFlights: trainedOn, readout },
+  };
+}
+
+/** The TRUTH's flown sentence: a flown track plus the corridor its words allow. */
+function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> {
+  const track = parseFlownTrack(raw, where, "geometric");
+  if (!track.ok) return track;
+  const record = raw as Record<string, unknown>;
+  const verticalBand = parseVerticalBand(record.verticalBand, track.value.tS.length, where);
+  if (!verticalBand.ok) return verticalBand;
+  const speedBand = parseSpeedBand(record.speedBand, where);
+  if (!speedBand.ok) return speedBand;
+  return {
+    ok: true,
+    value: { ...track.value, verticalBand: verticalBand.value, speedBand: speedBand.value },
   };
 }
 
@@ -1385,7 +1584,14 @@ function parseAbsorbed(
 
 /** Parse one sample set. Unlike the manifest this is all-or-nothing: a flight the
  *  reader cannot trust would be drawn beside real ones with no way to tell. */
-export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
+/**
+ * One set's sample file. ``kind`` comes from the MANIFEST ENTRY, and it decides
+ * whether the model's words are required or forbidden — a `prior-generated` set
+ * without them is half-written, and a `vocabulary-readback` set with them is a
+ * set whose kind is wrong. Keying on the kind rather than on whether the field
+ * happens to be present is what makes both of those loud.
+ */
+export function parseTrainingSample(raw: unknown, kind: TrainingSetKind): Parsed<TrainingSample> {
   if (!isRecord(raw)) return { ok: false, problem: "the sample is not an object" };
   if (raw.schema !== TRAINING_SAMPLE_SCHEMA) {
     return {
@@ -1500,6 +1706,19 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
     const geometric = parseGeometric(entry.geometric, where);
     if (!geometric.ok) return geometric;
 
+    let prior: TrainingFlightPrior | undefined;
+    if (kind === "prior-generated") {
+      const parsed = parseFlightPrior(
+        entry.prior, sentence.value.eventTimesS.length, counts, durationS, where);
+      if (!parsed.ok) return parsed;
+      prior = parsed.value;
+    } else if (entry.prior !== undefined) {
+      return {
+        ok: false,
+        problem: `${where} carries a prior block, but this set's kind is ${kind} — a model's words in a read-back set means the kind is wrong`,
+      };
+    }
+
     flights.push({
       flightKey,
       callsign,
@@ -1512,12 +1731,29 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
       absorbed,
       observed: observed.value,
       geometric: geometric.value,
+      ...(prior ? { prior } : {}),
     });
+  }
+
+  let prior: TrainingPrior | undefined;
+  if (kind === "prior-generated") {
+    const parsed = parsePrior(raw.prior);
+    if (!parsed.ok) return parsed;
+    prior = parsed.value;
+  } else if (raw.prior !== undefined) {
+    return {
+      ok: false,
+      problem: `this sample carries a prior block, but its kind is ${kind} — one of the two is wrong`,
+    };
   }
 
   return {
     ok: true,
-    value: { setId, airport, vocabulary: vocabulary.value, geometry: geometry.value, flights },
+    value: {
+      setId, airport, vocabulary: vocabulary.value, geometry: geometry.value,
+      ...(prior ? { prior } : {}),
+      flights,
+    },
   };
 }
 
@@ -1547,7 +1783,8 @@ export async function fetchTrainingIndex(airportCode: string): Promise<Parsed<Tr
 export async function fetchTrainingSample(
   airportCode: string,
   file: string,
+  kind: TrainingSetKind,
 ): Promise<Parsed<TrainingSample>> {
   const raw = await fetchJson<unknown>(trainingSamplePath(airportCode, file));
-  return parseTrainingSample(raw);
+  return parseTrainingSample(raw, kind);
 }

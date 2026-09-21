@@ -28,6 +28,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   TRAINING_BAND_EDGE,
+  TRAINING_MODEL_COLOR,
   TRAINING_BAND_FILL,
   TRAINING_FLOWN_COLOR,
   TRAINING_KIND_COLOR,
@@ -48,6 +49,7 @@ import {
   type TrainingFlight,
   type TrainingGeometricColumn,
   type TrainingGeometry,
+  type TrainingPrior,
   type TrainingInstruction,
   type TrainingVocabulary,
 } from "../data/trainingSample";
@@ -109,6 +111,14 @@ function unwrapDegrees(values: number[]): number[] {
     previous = next;
   });
   return out;
+}
+
+/** The MODEL's sentence on the same axis, when this set carries one. */
+export function priorTrace(flight: TrainingFlight, kind: ChartedKind): number[] | null {
+  const said = flight.prior;
+  if (!said) return null;
+  const column = said.geometric[FLOWN_COLUMN[kind]];
+  return kind === "heading" ? unwrapDegrees(column) : column;
 }
 
 /** The flown track on a chart's axis. Every chart is in SI, so only the heading
@@ -435,6 +445,8 @@ function format(value: number, digits = 0): string {
 export interface TrainingReadbackWindowProps {
   flight: TrainingFlight;
   vocabulary: TrainingVocabulary;
+  /** The model that said `flight.prior`, when this set carries one. */
+  prior?: TrainingPrior;
   /** The assumptions the flown line and its bands were drawn under. The legend
    *  quotes two of them: the height floor the fan closes on, and whether the two
    *  bands are the joint envelope (they are not). */
@@ -447,6 +459,7 @@ export interface TrainingReadbackWindowProps {
 export default function TrainingReadbackWindow({
   flight,
   vocabulary,
+  prior,
   geometry,
   cursorS,
   onCursorChange,
@@ -509,8 +522,10 @@ export default function TrainingReadbackWindow({
   // The plan has no clip, so a line outside the frame draws over the charts.
   const edgeX = speedEdges.flatMap((edge) => edge.toGoM.map((metres) => -metres / 1000));
   const edgeY = speedEdges.flatMap((edge) => edge.crossM.map((metres) => metres / 1000));
-  const [planXLow, planXHigh] = extent([...planX, ...flownX, ...edgeX, 0]);
-  const [planYLow, planYHigh] = extent([...planY, ...flownY, ...edgeY, 0]);
+  const modelX = flight.prior ? flight.prior.geometric.toGoM.map((metres) => -metres / 1000) : [];
+  const modelY = flight.prior ? flight.prior.geometric.crossM.map((metres) => metres / 1000) : [];
+  const [planXLow, planXHigh] = extent([...planX, ...flownX, ...edgeX, ...modelX, 0]);
+  const [planYLow, planYHigh] = extent([...planY, ...flownY, ...edgeY, ...modelY, 0]);
   const planScale = Math.min(
     (plotW - 12) / (planXHigh - planXLow),
     (PLAN_H - 28) / (planYHigh - planYLow),
@@ -626,6 +641,20 @@ export default function TrainingReadbackWindow({
             points={flownX.map((km, index) => `${planPx(km)},${planPy(flownY[index])}`).join(" ")}
             className="training-readback-flown"
           />
+          {/* WHAT THE MODEL SAID, flown by the same rules on the same event
+              times — so the distance between this line and the orange one is the
+              WORDS and nothing else. */}
+          {flight.prior ? (
+            <polyline
+              className="training-readback-model"
+              points={flight.prior.geometric.toGoM
+                .map((metres, row) => `${planPx(-metres / 1000)},${planPy(flight.prior!.geometric.crossM[row] / 1000)}`)
+                .join(" ")}
+              fill="none"
+              stroke={TRAINING_MODEL_COLOR}
+              strokeWidth={1.8}
+            />
+          ) : null}
           {/* Where each instruction was issued. The runway word is not a point on
               the track — it is the frame the others are measured in. */}
           {flight.instructions
@@ -660,9 +689,11 @@ export default function TrainingReadbackWindow({
             const plotTop = top + 14;
             const plotH = CHART_H - 22;
             const flown = flownTrace(flight, kind);
+            const model = priorTrace(flight, kind);
             const [low, high] = extent([
               ...trace.values,
               ...flown,
+              ...(model ?? []),
               ...levels.map((item) => item.level),
               ...ramps.flatMap((ramp) => [...ramp.lo, ...ramp.hi]),
             ]);
@@ -815,6 +846,19 @@ export default function TrainingReadbackWindow({
                   </g>
                 ))}
 
+                {model ? (
+                  <polyline
+                    className="training-readback-model"
+                    points={flight.prior!.geometric.tS
+                      .map((t, step) => (t <= endOfTrack ? `${xFor(t)},${yFor(model[step])}` : ""))
+                      .filter(Boolean)
+                      .join(" ")}
+                    fill="none"
+                    stroke={TRAINING_MODEL_COLOR}
+                    strokeWidth={1.6}
+                  />
+                ) : null}
+
                 {levels.map((item, position) => (
                   <g key={`level-${position}`}>
                     <line
@@ -914,6 +958,21 @@ export default function TrainingReadbackWindow({
             {format(flight.geometric.comparedFraction * 100)}% of the approach (mean{" "}
             {format(flight.geometric.meanGapM)} m, p95 {format(flight.geometric.gapP95M)} m).
           </span>
+          {flight.prior && prior ? (
+            <span>
+              <b style={{ color: TRAINING_MODEL_COLOR }}>——</b> WHAT THE MODEL SAID, flown by the
+              same rules on the same event times, so the distance to the orange line is the words
+              and nothing else. It is <b>{prior.method}</b>: at every event the model saw the
+              truth's own words and state up to that point and was asked for the next one — it did
+              not generate this sentence, and a free run is a different experiment.{" "}
+              {prior.trainedOnTheseFlights === 0
+                ? "It was never fitted on any of these flights."
+                : `It WAS fitted on ${prior.trainedOnTheseFlights} of these flights.`}
+              {flight.prior.landedAtS === null
+                ? ""
+                : ` It first said "landed" at ${formatSeconds(flight.prior.landedAtS)} s.`}
+            </span>
+          ) : null}
           <span>
             <b style={{ color: TRAINING_TRACE_COLOR }}>——</b> measured ·{" "}
             <b style={{ color: TRAINING_FLOWN_COLOR }}>——</b> flown by rule ·{" "}

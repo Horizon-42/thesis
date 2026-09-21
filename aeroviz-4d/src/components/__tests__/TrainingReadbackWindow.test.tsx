@@ -23,10 +23,14 @@ import {
   speedCentreMps,
   speedToleranceMps,
 } from "../../data/trainingSample";
-import { DESCEND_24, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import {
+  DESCEND_24,
+  mockPriorSample,
+  mockSample,
+} from "../../data/__tests__/trainingSample.fixture";
 
 function selection() {
-  const parsed = parseTrainingSample(mockSample());
+  const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
   if (!parsed.ok) throw new Error(parsed.problem);
   return {
     vocabulary: parsed.value.vocabulary,
@@ -630,5 +634,43 @@ describe("gapAtS at the moment the words stop", () => {
     const stopped = flight.geometric.tS[flight.geometric.tS.length - 1];
     expect(gapAtS(flight, stopped)).not.toBeNull();
     expect(gapAtS(flight, stopped + 0.5)).toBeNull();
+  });
+});
+
+describe("the model's line in the read-back window", () => {
+  function priorProps() {
+    const parsed = parseTrainingSample(mockPriorSample(), "prior-generated");
+    if (!parsed.ok) throw new Error(parsed.problem);
+    return {
+      flight: parsed.value.flights[0],
+      vocabulary: parsed.value.vocabulary,
+      geometry: parsed.value.geometry,
+      prior: parsed.value.prior,
+      cursorS: 0,
+      onCursorChange: vi.fn(),
+      onClose: vi.fn(),
+    };
+  }
+
+  // One line in the plan view and one on each of the three charts — the same
+  // rules and the same event times as the orange line, so the distance between
+  // them is the WORDS.
+  it("draws the model's sentence on the plan view and every chart", () => {
+    render(<TrainingReadbackWindow {...priorProps()} />);
+    expect(document.body.querySelectorAll(".training-readback-model")).toHaveLength(4);
+  });
+
+  it("draws none of it when the set carries no model", () => {
+    renderWindow();
+    expect(document.body.querySelectorAll(".training-readback-model")).toHaveLength(0);
+  });
+
+  // THE sentence that stops the whole window being read as free generation.
+  it("says how the model was asked, and whether it had seen these flights", () => {
+    render(<TrainingReadbackWindow {...priorProps()} />);
+    expect(screen.getByText(/teacher-forced-next-word/)).toBeTruthy();
+    expect(screen.getByText(/did not generate this sentence/)).toBeTruthy();
+    expect(screen.getByText(/never fitted on any of these flights/)).toBeTruthy();
+    expect(screen.getByText(/first said "landed" at 188 s/)).toBeTruthy();
   });
 });

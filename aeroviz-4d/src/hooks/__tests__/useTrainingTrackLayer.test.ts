@@ -9,7 +9,7 @@ import { parseTrainingSample } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 
 function flight() {
-  const parsed = parseTrainingSample(mockSample());
+  const parsed = parseTrainingSample(mockSample(), "vocabulary-readback");
   if (!parsed.ok) throw new Error(parsed.problem);
   return parsed.value.flights[0];
 }

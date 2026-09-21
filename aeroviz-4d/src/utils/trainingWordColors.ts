@@ -54,6 +54,14 @@ export const TRAINING_FLOWN_COLOR = "#fb923c";
 export const TRAINING_BAND_FILL = "rgba(251, 146, 60, 0.16)";
 export const TRAINING_BAND_EDGE = "rgba(251, 146, 60, 0.55)";
 
+/**
+ * WHAT THE MODEL SAID. Purple, because the design fixed the three lines as white
+ * (the aircraft), orange (the words flown by rule) and purple (the model) — and
+ * because it must never be drawn in the rule-follower's colour: one is a
+ * baseline, the other is the thing being judged.
+ */
+export const TRAINING_MODEL_COLOR = "#c084fc";
+
 /** The observed signal where it sits OUTSIDE the band of the word in force —
  *  the one thing on these charts that is a disagreement rather than a drawing. */
 export const TRAINING_OUTSIDE_COLOR = "#f87171";

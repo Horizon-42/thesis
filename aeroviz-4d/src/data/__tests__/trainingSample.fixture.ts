@@ -414,3 +414,74 @@ export function mockSample(): Record<string, unknown> {
 export function mockIndex(): Record<string, unknown> {
   return structuredClone(MOCK_INDEX);
 }
+
+/**
+ * The same flight with WHAT THE MODEL SAID beside it — a `prior-generated` set.
+ *
+ * The said words are deliberately a MIXTURE: the opening event is the truth's
+ * (it is given), one event matches the truth exactly, one differs in a single
+ * kind, and one differs in two — so a view that drew "differs" per row, per
+ * event or per kind can be told apart. The duration column differs almost
+ * everywhere, which is what the real prior does (top-1 0.06).
+ */
+export const MOCK_PRIOR_WORDS = [
+  [18, LEVEL, 11, 0, 0, TERMINAL_CONTINUE],        // given: the truth's opening event
+  [18, LEVEL, 9, 0, 7, TERMINAL_CONTINUE],         // duration differs
+  [10, DESCEND_24, 9, 0, 11, TERMINAL_CONTINUE],   // duration differs
+  [10, DESCEND_31, 7, 0, 9, TERMINAL_CONTINUE],    // vertical AND duration differ
+  [4, DESCEND_31, 7, 0, 11, TERMINAL_CONTINUE],    // exactly the truth
+  [0, DESCEND_31, 5, 0, 14, TERMINAL_LANDED],      // says landed early, and the duration differs
+  [0, DESCEND_31, 5, 0, 17, TERMINAL_LANDED],      // the truth's last event, matched
+];
+
+const MOCK_PRIOR_CONFIDENCE = MOCK_PRIOR_WORDS.map((row, event) =>
+  row.map((_, column) => (event === 0 ? 1 : column === 4 ? 0.06 : 0.84)),
+);
+
+export const MOCK_PRIOR = {
+  sha256: "e7a9657afdc7000000000000000000000000000000000000000000000000mock",
+  method: "teacher-forced-next-word",
+  seed: 1337,
+  bestEpoch: 35,
+  trainedOnTheseFlights: 0,
+  readout: {
+    val: { heading: 0.4728, vertical: 0.6894, speed: 0.8554, runway: 0.0013, duration: 3.6703, terminal: 0.1105, next: 5.7996 },
+  },
+};
+
+/** The model's sentence flown by the same rules, on the truth's event times. */
+const MOCK_PRIOR_GEOMETRIC = (() => {
+  const { verticalBand, speedBand, ...rest } = MOCK_GEOMETRIC;
+  void verticalBand;
+  void speedBand;
+  // a track of its own: it descends a touch steeper and lands a little shorter
+  return { ...rest, heightM: rest.heightM.map((metres) => metres * 0.97), finalGapM: 1290.4 };
+})();
+
+export function mockPriorSample(): Record<string, unknown> {
+  const sample = structuredClone(MOCK_SAMPLE) as any;
+  sample.setId = "prior_s1337_val";
+  sample.prior = structuredClone(MOCK_PRIOR);
+  sample.flights[0].prior = {
+    words: structuredClone(MOCK_PRIOR_WORDS),
+    confidence: structuredClone(MOCK_PRIOR_CONFIDENCE),
+    givenEvents: 1,
+    landedAtS: MOCK_EVENT_TIMES_S[5],
+    geometric: structuredClone(MOCK_PRIOR_GEOMETRIC),
+  };
+  return sample;
+}
+
+/** The manifest entry that set would have: the kind is what makes the reader
+ *  require the model's words. */
+export function mockPriorIndex(): Record<string, unknown> {
+  const index = structuredClone(MOCK_INDEX) as any;
+  index.sets[0] = {
+    ...index.sets[0],
+    id: "prior_s1337_val",
+    kind: "prior-generated",
+    file: "prior_s1337_val/sample.json",
+    cohort: { ...index.sets[0].cohort, split: "val" },
+  };
+  return index;
+}
