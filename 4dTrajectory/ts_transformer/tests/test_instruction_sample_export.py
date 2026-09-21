@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from ts_transformer.experiments.instruction_sample_export import (
-    INDEX_SCHEMA, drawn_flights, readings_by_flight, update_index,
+    INDEX_SCHEMA, POOL_FACTOR, cumulative_path_m, drawn_flights, readings_by_flight, update_index,
 )
 import numpy as np
 
@@ -28,17 +28,7 @@ from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, Vocabulary
 # The frontend reader's own constants (`src/data/trainingSample.ts`). Declared MIRRORS: the two
 # sides are one contract, and a fixture that restated them could not catch it moving.
 FRONTEND_INDEX_SCHEMA = "aeroviz-training-index-v1"
-FRONTEND_KINDS = ("heading", "altitude", "speed", "runway", "duration", "terminal")
-
-
-def _hand_check(directory: Path, rows: list[tuple[str, str]]) -> None:
-    folder = directory / "hand_check"
-    folder.mkdir(parents=True)
-    with (folder / "index.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["file", "flight_id", "stratum"])
-        for flight_id, stratum in rows:
-            writer.writerow([f"{flight_id}.png", flight_id, stratum])
+FRONTEND_KINDS = ("heading", "vertical", "speed", "runway", "duration", "terminal")
 
 
 def test_the_column_order_is_the_frontend_reader_s():
@@ -48,31 +38,62 @@ def test_the_column_order_is_the_frontend_reader_s():
     assert "intercept" not in INSTRUCTION_KINDS       # deleted 2026-09-20 (D73)
 
 
-def test_the_draw_is_a_prefix_of_the_hand_check(tmp_path: Path):
-    """Taking the first N per stratum must give the pages a human already checked — that is the
-    whole reason the two views match, so it is pinned rather than reasoned about."""
-    rows = [(f"S{i}", "straight-in") for i in range(10)] + [(f"V{i}", "vectored") for i in range(10)]
-    _hand_check(tmp_path, rows)
-
-    four = drawn_flights(tmp_path, 2)
-    assert four == [("S0", "straight-in"), ("S1", "straight-in"), ("V0", "vectored"), ("V1", "vectored")]
-
-    # and a bigger draw EXTENDS it rather than reshuffling: the small draw stays a prefix
-    eight = drawn_flights(tmp_path, 4)
-    by_stratum = {name: [f for f, s in eight if s == name] for name in ("straight-in", "vectored")}
-    assert by_stratum["straight-in"][:2] == ["S0", "S1"]
-    assert by_stratum["vectored"][:2] == ["V0", "V1"]
-
-
-def test_a_short_stratum_is_refused_not_topped_up(tmp_path: Path):
-    _hand_check(tmp_path, [("S0", "straight-in"), ("V0", "vectored"), ("V1", "vectored")])
-    with pytest.raises(SystemExit, match="fewer than the 2 per stratum"):
-        drawn_flights(tmp_path, 2)
+def test_the_draw_is_reproducible_from_the_artefact_alone():
+    """The draw moved off the hand check (2026-09-21: the `segment-v12` artefacts were written
+    with `--hand-check 0`, so there are no pages to be a prefix of). What replaced it has to be
+    reproducible from the artefact and the seed the manifest records — otherwise nobody can say
+    which flights a published set holds, or get them back."""
+    readings = {f"F{i:03d}": {} for i in range(200)}
+    first = drawn_flights(readings, 20, seed=1337)
+    assert first == drawn_flights(readings, 20, seed=1337)
+    assert first != drawn_flights(readings, 20, seed=2024)
+    # it is a POOL to stratify from, not the final draw: the stratum is a property of the
+    # rebuilt track, so the draw has to rebuild before it can pick
+    assert len(first) == min(len(readings), 20 * 2 * POOL_FACTOR)
+    assert len(set(first)) == len(first)
+    assert set(first) <= set(readings)
 
 
-def test_a_missing_hand_check_is_refused_by_path(tmp_path: Path):
-    with pytest.raises(SystemExit, match="hand_check"):
-        drawn_flights(tmp_path, 1)
+def test_a_split_smaller_than_the_draw_is_refused():
+    with pytest.raises(SystemExit, match="fewer than the 4 asked for"):
+        drawn_flights({f"F{i}": {} for i in range(3)}, 2, seed=1337)
+
+
+class _Difficulty:
+    def __init__(self, tortuosity: float, established: bool):
+        self.route_tortuosity = tortuosity
+        self.established_at_anchor = established
+
+
+def test_stratify_takes_the_first_of_each_stratum_and_drops_neither(monkeypatch):
+    """Half straight-in, half vectored, in the draw's own order — and a flight in NEITHER
+    stratum (tortuous but already established at the anchor) is not drawn, which is the same
+    rule the vocabulary runner's hand-check draw applies."""
+    import ts_transformer.experiments.instruction_sample_export as module
+
+    table = {
+        "a": _Difficulty(1.01, False), "b": _Difficulty(1.50, False), "c": _Difficulty(1.60, True),
+        "d": _Difficulty(1.02, False), "e": _Difficulty(1.70, False), "f": _Difficulty(1.03, False),
+    }
+    monkeypatch.setattr(module, "approach_difficulty", lambda item, anchor: table[item])
+    monkeypatch.setattr(module, "default_anchor", lambda config: 0)
+    drawn = module.stratify(list(table), list(table), Vocabulary(), per_stratum=2)
+
+    assert [flight for flight, _, _ in drawn] == ["a", "d", "b", "e"]
+    assert [stratum for _, stratum, _ in drawn] == ["straight-in", "straight-in", "vectored", "vectored"]
+    assert "c" not in [flight for flight, _, _ in drawn]       # tortuous but established
+
+
+def test_a_stratum_the_pool_cannot_fill_is_refused(monkeypatch):
+    """Publishing 3 straight-in and 1 vectored under a `perStratum: 2` manifest would make the
+    stratum column say something the draw did not do."""
+    import ts_transformer.experiments.instruction_sample_export as module
+
+    table = {"a": _Difficulty(1.01, False), "b": _Difficulty(1.02, False), "c": _Difficulty(1.03, False)}
+    monkeypatch.setattr(module, "approach_difficulty", lambda item, anchor: table[item])
+    monkeypatch.setattr(module, "default_anchor", lambda config: 0)
+    with pytest.raises(SystemExit, match="filled"):
+        module.stratify(list(table), list(table), Vocabulary(), per_stratum=2)
 
 
 def test_sentences_read_under_another_vocabulary_are_refused(tmp_path: Path):
@@ -162,8 +183,10 @@ def test_the_flown_sentence_is_the_artefacts_own_sentence_not_a_re_reading():
     """V19 for the geometric track too: the reading handed to the kinematics is rebuilt from the
     artefact's event times and words, so the line drawn is the sentence the view shows."""
     columns = {kind: index for index, kind in enumerate(INSTRUCTION_KINDS)}
+    level = Vocabulary().vertical_modes_deg.index(0.0)   # word 0 is the CLIMB mode, not level
     words = [[0] * len(INSTRUCTION_KINDS), [0] * len(INSTRUCTION_KINDS)]
-    words[1][columns["heading"]] = 9                     # +90° from 100 s
+    words[1][columns["heading"]] = 18                    # +90° from 100 s (5° a bin)
+    words[0][columns["vertical"]] = words[1][columns["vertical"]] = level
     words[0][columns["speed"]] = words[1][columns["speed"]] = 4
     words[1][columns["terminal"]] = 1
     _, flown = flown_sentence(_reading([0.0, 100.0], words), Vocabulary(), _frame())
@@ -181,22 +204,24 @@ def test_the_geometry_block_states_every_assumption_the_line_was_drawn_under():
     """An approximation nobody can see stated is worse than none (design §5.4), so the block
     travels with the export and names the files its constants came from."""
     from ts_transformer.outputs.guidance.controller import (
-        ACCEL_MAX_MPS2, CLIMB_MAX_RAD, DESCENT_MAX_RAD, HEIGHT_GAIN_S,
+        ACCEL_MAX_MPS2, CLIMB_MAX_RAD, DESCENT_MAX_RAD,
     )
     from ts_transformer.geometry.flyability import G
 
     block = instruction_kinematics.assumptions()
-    for field in ("method", "dtS", "bankDeg", "gravityMps2", "heightGainS", "descentMaxDeg",
+    for field in ("method", "dtS", "bankDeg", "gravityMps2", "descentMaxDeg",
                   "climbMaxDeg", "accelMaxMps2", "startsAt", "stopRule", "windModelled",
                   "aircraftTypeModelled", "constantsFrom"):
         assert field in block, field
     # the stated numbers ARE the imported ones — a block that drifted from the code it
     # describes is worse than no block
     assert block["gravityMps2"] == G
-    assert block["heightGainS"] == HEIGHT_GAIN_S
     assert block["accelMaxMps2"] == ACCEL_MAX_MPS2
     assert block["descentMaxDeg"] == pytest.approx(math.degrees(DESCENT_MAX_RAD))
     assert block["climbMaxDeg"] == pytest.approx(math.degrees(CLIMB_MAX_RAD))
+    # The vertical word IS the commanded angle now, so the block says so and no longer carries a
+    # height gain — there is no height error for a time constant to close.
+    assert block["verticalIsCommandedAngle"] is True and "heightGainS" not in block
     assert block["dtS"] == instruction_kinematics.STEP_S
     assert str(int(instruction_kinematics.OVERRUN_S)) in block["stopRule"]
     assert block["windModelled"] is False

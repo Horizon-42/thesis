@@ -378,8 +378,14 @@ export default function TrainingPanel() {
               ) : null}
 
               <p className="training-note">
-                {sample.flights.length} flights, drawn from the hand check's own
-                pages so the two views show the same aircraft.
+                {/* WHERE THE DRAW CAME FROM, in the file's own words. It used to be
+                    the hand check's pages (so the screen showed the aircraft a human
+                    had marked); the `segment-v12` artefacts carry no pages, so the
+                    exporter draws and stratifies for itself and records the rule
+                    here. A view that kept claiming the old provenance would be
+                    citing a document that does not exist. */}
+                {sample.flights.length} flights ·{" "}
+                {entry ? entry.cohort.drawnFrom : "no manifest entry"}.
                 {/* The manifest states a count too. They are written by one run of
                     the exporter, so a disagreement means the two files came from
                     different runs — which is worth saying, not smoothing over. */}

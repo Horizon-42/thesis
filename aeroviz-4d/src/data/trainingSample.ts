@@ -146,6 +146,25 @@ export interface TrainingSetEntry {
   runwaySha256: string;
   readingRule: string;
   flights: number;
+  /**
+   * WHICH flights this set holds and how they were chosen. It is required and it
+   * is SHOWN, because "40 of 6,853" is not a statement until the rule that picked
+   * the 40 is on screen beside it.
+   *
+   * The draw used to be the hand check's own pages, so the panel could say the
+   * screen showed the aircraft a human had marked. The `segment-v12` artefacts
+   * carry no pages; the exporter draws and stratifies for itself and states the
+   * rule here, so the claim on screen is the file's, not the reader's memory of
+   * how it used to work.
+   */
+  cohort: TrainingCohort;
+}
+
+export interface TrainingCohort {
+  split: string;
+  perStratum: number;
+  seed: number;
+  drawnFrom: string;
 }
 
 export interface TrainingIndex {
@@ -694,6 +713,20 @@ function parseSetEntry(raw: unknown, position: number): Parsed<TrainingSetEntry>
   if (flights === null || flights < 0) {
     return { ok: false, problem: `${where("flights")} is missing or not a count` };
   }
+  const cohort = raw.cohort;
+  if (!isRecord(cohort)) {
+    return { ok: false, problem: `${where("cohort")} is missing: a set that cannot say how its flights were drawn is a set nobody can reproduce` };
+  }
+  const split = str(cohort, "split");
+  const drawnFrom = str(cohort, "drawnFrom");
+  const perStratum = finite(cohort, "perStratum");
+  const seed = finite(cohort, "seed");
+  if (split === null || drawnFrom === null) {
+    return { ok: false, problem: `${where("cohort")} must name its split and where the draw came from` };
+  }
+  if (perStratum === null || perStratum <= 0 || seed === null) {
+    return { ok: false, problem: `${where("cohort")} must carry the per-stratum count and the seed that reproduces it` };
+  }
 
   return {
     ok: true,
@@ -706,6 +739,7 @@ function parseSetEntry(raw: unknown, position: number): Parsed<TrainingSetEntry>
       runwaySha256: str(raw, "runwaySha256") as string,
       readingRule: str(raw, "readingRule") as string,
       flights,
+      cohort: { split, perStratum, seed, drawnFrom },
     },
   };
 }

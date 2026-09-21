@@ -25,14 +25,18 @@ COLUMN = {kind: index for index, kind in enumerate(INSTRUCTION_KINDS)}
 #: A speed word's own centre, so a case that is not about acceleration has none.
 STEADY_WORD = 4
 STEADY_MPS = VOCABULARY.speed_centre_mps(STEADY_WORD)
+#: The LEVEL mode's word. It is not 0 — word 0 is the climb the go-around uses — so a case that
+#: is not about the vertical has to name it, or every flight in this file would climb away.
+LEVEL_WORD = VOCABULARY.vertical_modes_deg.index(0.0)
+GLIDEPATH_WORD = VOCABULARY.vertical_modes_deg.index(3.1)
 
 
-def sentence(heading: int = 0, altitude: int = 0, speed: int = STEADY_WORD,
+def sentence(heading: int = 0, vertical: int = LEVEL_WORD, speed: int = STEADY_WORD,
              runway: int = 0, duration: int = 0) -> Reading:
     """A one-event sentence: the words below, in force from the start to the end."""
     words = np.zeros((1, len(INSTRUCTION_KINDS)), dtype=np.int64)
     words[0, COLUMN["heading"]] = heading
-    words[0, COLUMN["altitude"]] = altitude
+    words[0, COLUMN["vertical"]] = vertical
     words[0, COLUMN["speed"]] = speed
     words[0, COLUMN["runway"]] = runway
     words[0, COLUMN["duration"]] = duration
@@ -91,18 +95,24 @@ def test_a_turn_onto_the_course_flies_the_route_builders_radius():
     )
 
 
-def test_the_descent_is_held_at_the_limit_then_converges_on_the_time_constant():
-    """From 1000 m with the threshold as the target: far out the height error is huge, so the
-    flight-path angle saturates at `DESCENT_MAX_RAD`; inside `V·HEIGHT_GAIN_S·tan(6°)` of the
-    target it comes off the limit and closes exponentially with `HEIGHT_GAIN_S`."""
-    track = kinematics.fly(sentence(altitude=0), VOCABULARY, start(height_m=1000.0), observed_s=280)
+def test_the_commanded_angle_is_flown_outright_with_no_error_to_close():
+    """The vertical word IS the flight path angle, so the descent is that angle from the first
+    step — there is no height error and no time constant. It holds until the floor."""
+    word = GLIDEPATH_WORD
+    track = kinematics.fly(sentence(vertical=word), VOCABULARY, start(height_m=1000.0), observed_s=280)
     rate = np.diff(track.height_m) / kinematics.STEP_S
-    assert rate[0] == pytest.approx(-STEADY_MPS * math.tan(DESCENT_MAX_RAD), abs=1e-9)
+    expected = -STEADY_MPS * math.tan(math.radians(VOCABULARY.vertical_centre_deg(word)))
+    assert rate[0] == pytest.approx(expected, abs=1e-9)
+    assert rate[5] == pytest.approx(expected, abs=1e-9)         # constant, not converging
 
-    knee_m = STEADY_MPS * HEIGHT_GAIN_S * math.tan(DESCENT_MAX_RAD)
-    knee = int(np.flatnonzero(track.height_m < knee_m)[0])
-    after = int(knee + HEIGHT_GAIN_S / kinematics.STEP_S)
-    assert track.height_m[after] / track.height_m[knee] == pytest.approx(1 / math.e, rel=0.08)
+
+def test_the_descent_levels_at_the_threshold_instead_of_flying_through_it():
+    """An angle command does not stop on its own. Without a floor the aircraft would keep
+    descending below the runway; it levels at the threshold and waits for the sentence to end."""
+    track = kinematics.fly(sentence(vertical=GLIDEPATH_WORD), VOCABULARY,
+                           start(height_m=60.0, to_go_m=20000.0), observed_s=600)
+    assert track.height_m.min() >= -1e-9
+    assert track.height_m[-1] == pytest.approx(0.0, abs=1e-9)
 
 
 def test_acceleration_is_capped_at_the_controllers_limit():
@@ -194,7 +204,7 @@ def test_being_past_the_plane_already_is_not_crossing_it():
 def test_leaving_through_the_plane_outbound_is_not_a_crossing():
     """Flying the other way through the plane is not an arrival either."""
     track = kinematics.fly(
-        sentence(heading=18), VOCABULARY,                  # 180°: straight back out
+        sentence(heading=36), VOCABULARY,                  # 180°: straight back out
         start(to_go_m=-2000.0, cross_m=0.0, relative_course_deg=180.0), observed_s=180,
     )
     assert max(track.to_go_m) > 0.0                        # it did pass the plane
@@ -205,18 +215,31 @@ def test_a_sentence_that_does_not_reach_the_runway_says_how_far_short_it_stopped
     """The words are never extended to reach the threshold: flying 90° off the course for the
     whole budget gets nowhere, and the gap is the readout that says so."""
     track = kinematics.fly(
-        sentence(heading=9), VOCABULARY, start(to_go_m=20000.0), observed_s=60,
+        sentence(heading=18), VOCABULARY, start(to_go_m=20000.0), observed_s=60,
     )
     assert track.end_reason == kinematics.END_TIME_CAP
     assert track.final_gap_m > 15000.0
 
 
-def test_the_climb_limit_binds_when_the_word_is_above_the_aircraft():
-    """9 of KRDU's 40 flown sentences climb at the start, because the first altitude word is
-    read off the first plateau and back-dated to t = 0. The climb cap is what they climb at."""
-    track = kinematics.fly(sentence(altitude=4), VOCABULARY, start(height_m=0.0), observed_s=60)
+def test_every_vertical_word_is_inside_the_executors_limits():
+    """The invariant that keeps a legal sentence flyable: the controller's limits must cover
+    every angle the vocabulary can command, tolerance band included. The climb cap was 2° while
+    the vertical instruction was a height; the go-around mode is a 3° climb whose band reaches
+    3.21°, so the cap moved to 4°. Without this test the two drift apart silently and a flown
+    go-around climbs shallower than the sentence says."""
+    for word in range(VOCABULARY.vertical_words):
+        commanded = math.radians(-VOCABULARY.vertical_centre_deg(word))        # climb positive
+        band = math.radians(VOCABULARY.vertical_tolerance_deg(word))
+        assert -DESCENT_MAX_RAD <= commanded - band, VOCABULARY.vertical_centre_deg(word)
+        assert commanded + band <= CLIMB_MAX_RAD, VOCABULARY.vertical_centre_deg(word)
+
+
+def test_the_go_around_climb_word_climbs_at_its_own_angle():
+    """And now it is actually flown: word 0 is the 3° climb, inside the cap."""
+    climb = VOCABULARY.vertical_modes_deg.index(-3.0)
+    track = kinematics.fly(sentence(vertical=climb), VOCABULARY, start(height_m=0.0), observed_s=60)
     rate = np.diff(track.height_m) / kinematics.STEP_S
-    assert rate[0] == pytest.approx(STEADY_MPS * math.tan(CLIMB_MAX_RAD), abs=1e-9)
+    assert rate[0] == pytest.approx(STEADY_MPS * math.tan(math.radians(3.0)), abs=1e-9)
 
 
 def test_the_runway_duration_and_terminal_words_take_no_part_in_the_flying():
@@ -237,7 +260,8 @@ def test_the_words_change_at_their_event_and_not_before():
     """Two events: the turn only begins when the second event's word comes into force."""
     words = np.zeros((2, len(INSTRUCTION_KINDS)), dtype=np.int64)
     words[:, COLUMN["speed"]] = STEADY_WORD
-    words[1, COLUMN["heading"]] = 9                       # +90° at t = 60 s
+    words[:, COLUMN["vertical"]] = LEVEL_WORD
+    words[1, COLUMN["heading"]] = 18                      # +90° at t = 60 s
     words[:, COLUMN["terminal"]] = [TERMINAL_CONTINUE, TERMINAL_LANDED]
     reading = Reading(
         dataset_id="KRDU:TEST", flight_id="TEST", instructions=(),
@@ -275,3 +299,93 @@ def test_the_gap_is_measured_only_where_both_tracks_were_flying():
     assert gap["meanGapM"] == pytest.approx(0.0, abs=1e-6)   # same rule, same line
     assert gap["comparedS"] == pytest.approx(flown_s)
     assert gap["comparedFraction"] == pytest.approx(0.5, abs=0.01)
+
+
+# ── the corridor a sentence allows (T10) ─────────────────────────────────────
+
+
+def test_the_vertical_edges_share_every_horizontal_column_with_the_centre():
+    """The claim that lets the band be two HEIGHT columns instead of two tracks: the commanded
+    angle enters only the height step, so the edges are the same flight at a different height.
+    If this ever stops holding, the frontend draws the fan against the wrong x values — a
+    corridor somewhere else entirely — and nothing on screen would look wrong."""
+    track = kinematics.fly(sentence(vertical=GLIDEPATH_WORD), VOCABULARY,
+                           start(height_m=1500.0), observed_s=300.0)
+    for name in ("to_go_m", "cross_m", "ground_speed_mps", "relative_course_deg"):
+        assert getattr(track, name).shape == track.height_lo_m.shape
+    assert track.height_lo_m.shape == track.height_m.shape == track.height_hi_m.shape
+
+
+def test_the_shallower_edge_stays_above_including_the_climb_mode():
+    """`lo` is the smaller descent angle, which loses less height. For the CLIMB mode the same
+    rule reads as the steeper climb, and it still stays above — a reader that took the names for
+    heights would turn the corridor inside out while leaving it exactly as thick."""
+    for word in range(len(VOCABULARY.vertical_modes_deg)):
+        track = kinematics.fly(sentence(vertical=word), VOCABULARY,
+                               start(height_m=1500.0), observed_s=200.0)
+        assert np.all(track.height_lo_m >= track.height_hi_m - 1e-9), VOCABULARY.vertical_centre_deg(word)
+
+
+def test_the_fan_opens_with_distance_and_closes_on_the_floor():
+    """Its widest point is BEFORE the threshold, not at it: the executor levels at the floor, so
+    both edges arrive at 0. That is the executor's rule, not the vocabulary's slack shrinking —
+    the legend has to say so, which is only true if the numbers do this."""
+    track = kinematics.fly(sentence(vertical=GLIDEPATH_WORD), VOCABULARY,
+                           start(height_m=900.0), observed_s=600.0)
+    width = track.height_lo_m - track.height_hi_m
+    assert width[0] == 0.0                                   # all three share a first point
+    assert width[20] > width[5] > 0.0                        # and it opens with the ground covered
+    assert track.height_m[-1] == 0.0 and width[-1] == 0.0     # then closes on the floor
+
+
+def test_the_band_is_the_words_own_tolerance_not_a_fixed_angle():
+    """The level mode's tolerance is ABSOLUTE and every other mode's is a fraction of itself, so
+    the corridor a level word opens is not the one a 4.4° word opens."""
+    level = kinematics.fly(sentence(vertical=LEVEL_WORD), VOCABULARY, start(height_m=900.0), observed_s=200.0)
+    steep = kinematics.fly(sentence(vertical=VOCABULARY.vertical_modes_deg.index(4.4)), VOCABULARY,
+                           start(height_m=900.0), observed_s=200.0)
+    level_width = level.height_lo_m[100] - level.height_hi_m[100]
+    steep_width = steep.height_lo_m[100] - steep.height_hi_m[100]
+    assert steep_width > level_width > 0.0
+    # and each matches the angle its own word allows, over the ground it covered
+    run = 100 * STEADY_MPS * kinematics.STEP_S
+    tolerance = VOCABULARY.vertical_tolerance_deg(LEVEL_WORD)
+    assert level_width == pytest.approx(2 * run * math.tan(math.radians(tolerance)), rel=1e-6)
+
+
+def test_the_speed_scale_moves_the_target_not_the_start():
+    """The three runs share a first point by construction — the start is the observation's own
+    first row (`Start`), the same rule that makes the centre and the observed track share one."""
+    slow = kinematics.fly(sentence(), VOCABULARY, start(), observed_s=200.0, speed_scale=0.97)
+    assert slow.ground_speed_mps[0] == STEADY_MPS
+    # …and it converges on the scaled word instead of the word
+    assert slow.ground_speed_mps[-1] == pytest.approx(STEADY_MPS * 0.97, rel=1e-9)
+
+
+def test_the_arrival_window_is_the_two_edges_own_crossings():
+    """The speed tolerance's cost is arrival TIME, so the window is what it is for. The FAST
+    edge covers the same ground sooner, so it lands first and the window reads [fast, slow]."""
+    reading = sentence(vertical=GLIDEPATH_WORD)
+    band = kinematics.speed_band(reading, VOCABULARY, start(to_go_m=8000.0, height_m=400.0), observed_s=300.0)
+    assert band["low"]["endReason"] == band["high"]["endReason"] == kinematics.END_CROSSED
+    assert band["high"]["endS"] < band["low"]["endS"]
+    assert band["arrivalWindowS"] == [band["high"]["endS"], band["low"]["endS"]]
+
+
+def test_no_window_when_an_edge_never_reached_the_runway():
+    """A window whose far end is the integration budget is not an arrival time, it is the
+    stopping rule — and printing it as one would measure this module, not the vocabulary."""
+    # heading 90° off the course: neither edge ever crosses the threshold on the final
+    band = kinematics.speed_band(sentence(heading=18), VOCABULARY, start(), observed_s=60.0)
+    assert band["low"]["endReason"] == kinematics.END_TIME_CAP
+    assert band["arrivalWindowS"] is None
+
+
+def test_the_assumptions_say_where_each_band_came_from():
+    """A corridor on screen that cannot be traced back to the number that drew it is an
+    approximation nobody can see stated — and `bandsAreJoint` is the one a reader would
+    otherwise assume wrongly."""
+    assumptions = kinematics.assumptions()
+    assert "vertical" in assumptions["verticalBandFrom"]
+    assert "speed" in assumptions["speedBandFrom"]
+    assert assumptions["bandsAreJoint"] is False

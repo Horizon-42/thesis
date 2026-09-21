@@ -395,6 +395,12 @@ export const MOCK_INDEX = {
       runwaySha256: MOCK_VOCABULARY.runwaySha256,
       readingRule: MOCK_VOCABULARY.readingRule,
       flights: 1,
+      cohort: {
+        split: "train",
+        perStratum: 20,
+        seed: 1337,
+        drawnFrom: "a seeded permutation of the train split, stratified by approach_difficulty at the executor's anchor (pool 200)",
+      },
     },
   ],
 };

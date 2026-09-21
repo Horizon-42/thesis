@@ -38,7 +38,7 @@ from ts_transformer.data.runway_context import wrap_deg
 from ts_transformer.geometry.flyability import G
 from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, Reading, Vocabulary
 from ts_transformer.outputs.guidance.controller import (
-    ACCEL_MAX_MPS2, CLIMB_MAX_RAD, DESCENT_MAX_RAD, HEIGHT_GAIN_S,
+    ACCEL_MAX_MPS2, CLIMB_MAX_RAD, DESCENT_MAX_RAD,
 )
 from ts_transformer.outputs.guidance.route import ROUTE_BANK_RAD
 
@@ -84,12 +84,28 @@ class Start:
 
 @dataclass(frozen=True)
 class GeometricTrack:
-    """The flown sentence, in the same runway frame the words were read in."""
+    """The flown sentence, in the same runway frame the words were read in.
+
+    A word is a BAND, not a point: the vertical and speed words each carry a tolerance and an
+    executor inside it has obeyed. So a sentence names a family of tracks, and this carries the
+    family's edges as well as its centre — `height_lo_m` / `height_hi_m` for the vertical one
+    (see below), and, for the speed one, two whole tracks of this type flown at
+    `speed_scale = 1 ∓ tolerance` (a fraction of each centre IS that word's tolerance, so the
+    scale reproduces every speed word at its own band edge exactly).
+    """
 
     t_s: np.ndarray
     to_go_m: np.ndarray
     cross_m: np.ndarray
     height_m: np.ndarray
+    #: The same track flown at the SHALLOWEST and STEEPEST angle each vertical word allows. They
+    #: are two height columns rather than two tracks because the commanded angle enters only the
+    #: height step: `step_m` is the ground speed, the turn rate reads the speed, and the stopping
+    #: test reads `to_go` / `cross` / the course — so the edges share every horizontal column and
+    #: the stopping time with the centre, row for row. `lo` is the SHALLOWER descent, which loses
+    #: less height and therefore stays ABOVE (the climb mode included: its `lo` climbs steeper).
+    height_lo_m: np.ndarray
+    height_hi_m: np.ndarray
     ground_speed_mps: np.ndarray
     relative_course_deg: np.ndarray
     end_reason: str
@@ -110,6 +126,20 @@ class GeometricTrack:
             "relCourseDeg": [round(float(v), 2) for v in self.relative_course_deg],
             "endReason": self.end_reason,
             "finalGapM": round(self.final_gap_m, 1),
+        }
+
+    def edge_dict(self) -> dict[str, Any]:
+        """One EDGE of the speed band, as the frontend reads it: the plan view draws it and
+        nothing else does, so it carries neither the geodetic columns (it runs within ~100 m of
+        the centre, and a third line in the 3D scene is a thicker line, not a fact) nor a height
+        (the height chart draws the VERTICAL band). `endS` is what the arrival window is made of
+        and is checked against it."""
+        return {
+            "tS": [round(float(v), 1) for v in self.t_s],
+            "toGoM": [round(float(v), 1) for v in self.to_go_m],
+            "crossM": [round(float(v), 1) for v in self.cross_m],
+            "endReason": self.end_reason,
+            "endS": round(float(self.t_s[-1]), 1),
         }
 
 
@@ -140,7 +170,8 @@ def turn_rate_rad_s(speed_mps: float) -> float:
     return G * math.tan(ROUTE_BANK_RAD) / speed_mps
 
 
-def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: float) -> GeometricTrack:
+def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: float,
+        speed_scale: float = 1.0) -> GeometricTrack:
     """Integrate the sentence from ``start`` at `STEP_S`, until it lands or runs out of budget.
 
     The budget is ``observed_s + OVERRUN_S`` and is applied HERE, because `assumptions` states
@@ -151,9 +182,21 @@ def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: floa
     uses too, so the flown words and the fed words cannot come apart. The runway and duration
     words take no part: the runway names the frame this is already in, and the duration word says
     how far apart two events were, which the real clock here already knows.
+
+    THREE HEIGHTS COME OUT OF ONE PASS: the commanded angle, and the shallowest and steepest each
+    vertical word's tolerance allows. They can share a pass because the angle enters only the
+    height step — every horizontal column, and therefore the stopping test and the stopping time,
+    is the same for all three. Integrating the edges separately would produce the same numbers at
+    three times the cost, and would let them drift apart if this loop ever changed.
+
+    ``speed_scale`` multiplies every speed TARGET, which is how the speed word's own band is
+    flown: its tolerance is a fraction of each centre, so ``1 ± fraction`` puts every word of the
+    sentence on the same edge of its band at once. It does NOT touch the start speed — that is
+    borrowed from the observation (`Start`), so the centre and both edges share a first point by
+    construction, exactly as the centre and the observed track do.
     """
     heading_column = INSTRUCTION_KINDS.index("heading")
-    altitude_column = INSTRUCTION_KINDS.index("altitude")
+    vertical_column = INSTRUCTION_KINDS.index("vertical")
     speed_column = INSTRUCTION_KINDS.index("speed")
 
     t = float(reading.event_times_s[0])
@@ -163,25 +206,35 @@ def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: floa
 
     to_go, cross = start.to_go_m, start.cross_m
     height, speed, course = start.height_m, start.ground_speed_mps, start.relative_course_deg
-    rows = [(t, to_go, cross, height, speed, course)]
+    # The band's two edges start where the centre does: the sentence says no starting point, so
+    # all three borrow the observation's first row and the corridor opens from zero width.
+    height_lo = height_hi = height
+    rows = [(t, to_go, cross, height, height_lo, height_hi, speed, course)]
     end_reason = END_TIME_CAP
 
     while t < limit_s:
         was_ahead = to_go > 0.0
         words = reading.words_at(np.array([t]))[0]
         target_course = vocabulary.heading_centre_deg(int(words[heading_column]))
-        target_height = vocabulary.altitude_centre_m(int(words[altitude_column]))
-        target_speed = vocabulary.speed_centre_mps(int(words[speed_column]))
+        vertical_word = int(words[vertical_column])
+        target_gamma_deg = vocabulary.vertical_centre_deg(vertical_word)
+        # The word's own band. `lo` is the SHALLOWER descent (the smaller angle, descent being
+        # positive), which loses less height and so stays above; for the climb mode it is the
+        # steeper climb, and stays above for the same reason.
+        tolerance_deg = vocabulary.vertical_tolerance_deg(vertical_word)
+        target_speed = vocabulary.speed_centre_mps(int(words[speed_column])) * speed_scale
 
         # turn: towards the target angle, at most as fast as the bank angle allows
         error_deg = wrap_deg(target_course - course)
         most_deg = math.degrees(turn_rate_rad_s(speed)) * STEP_S
         course = wrap_deg(course + math.copysign(min(abs(error_deg), most_deg), error_deg))
 
-        # descend or climb: close the height error on the controller's time constant, inside
-        # its flight-path-angle limits
-        gamma = math.atan2(target_height - height, speed * HEIGHT_GAIN_S)
-        gamma = min(max(gamma, -DESCENT_MAX_RAD), CLIMB_MAX_RAD)
+        # descend or climb: the word IS the flight path angle, so there is no error to close —
+        # only the airframe's own limits, and a floor. The word counts descent POSITIVE, gamma
+        # counts climb positive, hence the sign.
+        gamma = min(max(math.radians(-target_gamma_deg), -DESCENT_MAX_RAD), CLIMB_MAX_RAD)
+        gamma_lo = min(max(math.radians(-(target_gamma_deg - tolerance_deg)), -DESCENT_MAX_RAD), CLIMB_MAX_RAD)
+        gamma_hi = min(max(math.radians(-(target_gamma_deg + tolerance_deg)), -DESCENT_MAX_RAD), CLIMB_MAX_RAD)
 
         # The state speed is a GROUND speed at both ends — `course_frame`'s
         # `ground_speed_mps` is the horizontal rate (measured: |Δposition| / (V·Δt) has median
@@ -189,7 +242,17 @@ def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: floa
         # So the horizontal step is V·dt outright and the climb is V·tan γ·dt. Treating V as a
         # path speed (V·cos γ, V·sin γ) under-advances by 1/cos γ, up to 0.55 % at the 6° cap.
         step_m = speed * STEP_S
-        height += step_m * math.tan(gamma)
+        # The floor the height word used to provide implicitly: an angle command does not stop on
+        # its own, so without this the aircraft flies through the runway and keeps descending.
+        # It levels at the threshold instead, and the sentence has to say "landed" to end.
+        # Each of the three levels at the threshold on its OWN height, so the corridor closes
+        # onto the floor rather than being clipped against the centre's.
+        def floored(angle: float, above: float) -> float:
+            return max(angle, math.atan2(-above, step_m) if above > 0.0 else 0.0)
+
+        height += step_m * math.tan(floored(gamma, height))
+        height_lo += step_m * math.tan(floored(gamma_lo, height_lo))
+        height_hi += step_m * math.tan(floored(gamma_hi, height_hi))
 
         # advance along the NEW course. The signs are the course frame's own algebra
         # (`approach_difficulty.course_frame_rows`): with `to_go = -(e·cosψ + n·sinψ)` and
@@ -203,7 +266,7 @@ def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: floa
         # vertically and the new one horizontally.
         speed += min(max(target_speed - speed, -ACCEL_MAX_MPS2 * STEP_S), ACCEL_MAX_MPS2 * STEP_S)
         t += STEP_S
-        rows.append((t, to_go, cross, height, speed, course))
+        rows.append((t, to_go, cross, height, height_lo, height_hi, speed, course))
 
         # "It crossed the threshold" is `to_go ≤ 0` AND ON THE FINAL — never the plane alone.
         # A vectored flight's downwind runs parallel to the course and several km abeam, and
@@ -217,9 +280,36 @@ def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: floa
     columns = np.asarray(rows, dtype=np.float64)
     return GeometricTrack(
         t_s=columns[:, 0], to_go_m=columns[:, 1], cross_m=columns[:, 2], height_m=columns[:, 3],
-        ground_speed_mps=columns[:, 4], relative_course_deg=columns[:, 5],
+        height_lo_m=columns[:, 4], height_hi_m=columns[:, 5],
+        ground_speed_mps=columns[:, 6], relative_course_deg=columns[:, 7],
         end_reason=end_reason, final_gap_m=float(math.hypot(columns[-1, 1], columns[-1, 2])),
     )
+
+
+def speed_band(reading: Reading, vocabulary: Vocabulary, start: Start,
+               observed_s: float) -> dict[str, Any]:
+    """The speed word's tolerance, flown: the same sentence with every speed word at the bottom
+    of its band and again at the top, and the arrival window that opens between them.
+
+    This one cannot be a pair of columns the way the vertical band is. A speed change moves the
+    horizontal step, the turn radius (``g·tanφ/V``) and therefore the moment the track crosses
+    the threshold — so each edge is a track of its own, with its own clock and its own ending.
+
+    ``arrivalWindowS`` is ``[the fast edge's crossing, the slow edge's crossing]`` and is ``None``
+    unless BOTH edges reached the runway: a window whose far end is the integration budget is not
+    an arrival time, it is the stopping rule, and printing it as one would measure this module
+    instead of the vocabulary.
+    """
+    fraction = vocabulary.speed_tolerance_fraction
+    low = fly(reading, vocabulary, start, observed_s, speed_scale=1.0 - fraction)
+    high = fly(reading, vocabulary, start, observed_s, speed_scale=1.0 + fraction)
+    both_crossed = low.end_reason == END_CROSSED and high.end_reason == END_CROSSED
+    return {
+        "low": low.edge_dict(),
+        "high": high.edge_dict(),
+        "arrivalWindowS": ([round(float(high.t_s[-1]), 1), round(float(low.t_s[-1]), 1)]
+                           if both_crossed else None),
+    }
 
 
 def gap_to_observed(track: GeometricTrack, frame: dict[str, np.ndarray]) -> dict[str, float]:
@@ -254,7 +344,8 @@ def assumptions() -> dict[str, Any]:
         "dtS": STEP_S,
         "bankDeg": round(math.degrees(ROUTE_BANK_RAD), 1),
         "gravityMps2": G,
-        "heightGainS": HEIGHT_GAIN_S,
+        "verticalIsCommandedAngle": True,   # the word IS gamma; there is no height error to close
+        "heightFloorM": 0.0,                # it levels at the threshold rather than flying through it
         "descentMaxDeg": round(math.degrees(DESCENT_MAX_RAD), 1),
         "climbMaxDeg": round(math.degrees(CLIMB_MAX_RAD), 1),
         "accelMaxMps2": ACCEL_MAX_MPS2,
@@ -262,6 +353,13 @@ def assumptions() -> dict[str, Any]:
         "stopRule": f"{END_CROSSED} or {END_TIME_CAP} at the observed duration + {OVERRUN_S:g} s",
         "windModelled": False,
         "aircraftTypeModelled": False,
+        # Where the corridor on screen comes from, and the one thing a reader would otherwise
+        # assume: the two bands are flown ONE KIND AT A TIME, the other word at its centre. The
+        # joint 2×2 envelope would be wider and would answer a different question — how much of
+        # the corridor is THIS kind's slack is the one worth attributing.
+        "verticalBandFrom": "vocabulary.verticalTolerance",
+        "speedBandFrom": "vocabulary.speedTolerance",
+        "bandsAreJoint": False,
         "constantsFrom": [
             "outputs/guidance/route.py", "outputs/guidance/controller.py", "geometry/flyability.py",
         ],

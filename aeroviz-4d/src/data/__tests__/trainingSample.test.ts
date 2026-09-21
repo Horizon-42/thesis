@@ -949,3 +949,39 @@ describe("the reading rule this reader is written for", () => {
     expect(TRAINING_READING_RULE).toBe(MOCK_VOCABULARY.readingRule);
   });
 });
+
+describe("a set says how its flights were drawn", () => {
+  // "40 of 6,853" is not a statement until the rule that picked the 40 is beside
+  // it. The draw used to be the hand check's pages and no longer is, so the
+  // manifest carries the rule and the panel quotes it — rather than the reader
+  // remembering how it used to work.
+  it("reads the cohort block and keeps it whole", () => {
+    const parsed = parseTrainingIndex(mockIndex());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const cohort = parsed.value.sets[0].cohort;
+    expect(cohort.split).toBe("train");
+    expect(cohort.perStratum).toBe(20);
+    expect(cohort.seed).toBe(1337);
+    expect(cohort.drawnFrom).toContain("stratified");
+  });
+
+  it("rejects a set that cannot say how it was drawn", () => {
+    const index = mockIndex() as any;
+    delete index.sets[0].cohort;
+    const parsed = parseTrainingIndex(index);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.sets).toHaveLength(0);
+    expect(parsed.value.rejected[0].problem).toContain("cohort");
+  });
+
+  it("rejects a draw that cannot be reproduced", () => {
+    const index = mockIndex() as any;
+    delete index.sets[0].cohort.seed;
+    const parsed = parseTrainingIndex(index);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.rejected[0].problem).toContain("seed");
+  });
+});
