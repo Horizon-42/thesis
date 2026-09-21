@@ -22,11 +22,12 @@ import pytest
 
 from ts_transformer.experiments.instruction_sample_export import (
     BOX_SCHEMA, INDEX_SCHEMA, INSIDE_EPSILON, KINDS, POOL_FACTOR, READING_RULE, SAMPLE_SCHEMA,
-    SECTOR_ARC_MAX, SECTOR_ARC_MIN, altitude_envelope, check_columns, containment,
-    cumulative_path_m, drawn_flights, hae_offset_m, load_box_vocabulary, lonlat_from_frame,
-    read_signals, reachable_sector, reading_block, runway_sha256, sentences_by_flight,
-    update_index, word_runs,
+    BOX_SCHEMA, KINDS, READING_RULE, SECTOR_ARC_MAX, SECTOR_ARC_MIN, altitude_envelope,
+    check_columns, containment, cumulative_path_m, drawn_flights, hae_offset_m,
+    load_box_vocabulary, lonlat_from_frame, read_signals, reachable_sector, reading_block,
+    runway_sha256, sentences_by_flight, update_index, word_runs,
 )
+from ts_transformer.manoeuvre.box_vocabulary import BoxVocabulary
 
 # The frontend reader's own constants (`src/data/trainingSample.ts`). Declared MIRRORS: the two
 # sides are one contract, and a fixture that restated them could not catch it moving.
@@ -50,8 +51,9 @@ def test_the_contract_is_the_frontend_reader_s():
     assert INSIDE_EPSILON == FRONTEND_INSIDE_EPSILON
     block = reading_block()
     assert block["insideEpsilon"] == INSIDE_EPSILON
-    # and the block says, in the file, that the artefact's producer is not in this tree
-    assert "NOT in this repository" in block["producedBy"]
+    # and the block names the labeller it was built over — which is in the tree since
+    # 2026-09-21, so the boxes are no longer a reconstruction of a program nobody can read
+    assert "box_vocabulary" in block["producedBy"]
     # `box-v3` stopped carrying the wedge's prose, so it moved here — to the block that says who
     # rebuilt the boxes, which is what it was describing all along. The reader requires it HERE.
     for field in ("altitudeForm", "altitudeReading"):
@@ -60,28 +62,25 @@ def test_the_contract_is_the_frontend_reader_s():
 
 # ── the artefact ─────────────────────────────────────────────────────────────
 
-def _spec() -> dict:
-    return {
-        "schema": BOX_SCHEMA,
-        "reading_rule": READING_RULE,
-        "redundancy_fraction": 0.05,
-        "heading_floor_deg": 1.0,
-        "speed_low_mps": 30.0, "speed_high_mps": 250.0,
-        "altitude_h0_m": 50.0, "altitude_top_m": 6000.0, "altitude_bottom_m": -150.0,
-        "altitude_down_deg": 1.5, "altitude_up_deg": 1.0,
-        "duration_bin_s": 2.0, "duration_max_s": 600.0,
-        "course_smoothing_s": 6.0, "smoothing_s": 10.0,
-    }
+def _vocabulary() -> BoxVocabulary:
+    """A SMALL but REAL vocabulary: the labeller's own object with its bounds pulled in, so the
+    tables it derives are short enough to read in a test and every one of them is derived by the
+    code under test rather than typed here."""
+    return BoxVocabulary(heading_range_deg=30.0, speed_low_mps=60.0, speed_high_mps=125.0,
+                         altitude_top_m=400.0, altitude_bottom_m=-50.0)
 
 
-def _artefact(tmp_path: Path, **overrides) -> Path:
+def _artefact(tmp_path: Path, vocabulary: BoxVocabulary | None = None, **overrides) -> Path:
+    """An artefact file as the labeller writes one: the spec, the sha OVER that spec, the class
+    counts and the tables the vocabulary derives."""
+    vocabulary = vocabulary or _vocabulary()
     payload = {
-        "schema": BOX_SCHEMA, "spec": _spec(), "sha256": "a" * 64,
-        "words": {"heading": 3, "altitude": 4, "speed": 2, "runway": 1, "duration": 301, "terminal": 3},
+        "schema": BOX_SCHEMA, "spec": vocabulary.spec, "sha256": vocabulary.sha256,
+        "words": {**vocabulary.words, "runway": 1},
         "runway_idents": ["KRDU:05L"],
-        "boxes": {"heading_edges_deg": [-180.0, -10.0, 10.0, 180.0],
-                  "speed_edges_mps": [60.0, 90.0, 125.0],
-                  "altitude_targets_m": [-20.0, 0.0, 100.0, 400.0]},
+        "boxes": {"heading_edges_deg": list(vocabulary.heading_edges),
+                  "speed_edges_mps": list(vocabulary.speed_edges),
+                  "altitude_targets_m": list(vocabulary.altitude_targets)},
     }
     payload.update(overrides)
     path = tmp_path / "instruction_vocabulary.json"
@@ -94,37 +93,54 @@ def test_an_artefact_of_another_schema_is_refused_by_name(tmp_path: Path):
         load_box_vocabulary(_artefact(tmp_path, schema="something-else"))
 
 
-def test_a_reading_rule_this_exporter_is_not_written_for_is_refused(tmp_path: Path):
-    spec = _spec()
-    spec["reading_rule"] = "segment-v14"
+def test_a_spec_this_code_cannot_build_a_vocabulary_from_is_refused(tmp_path: Path):
+    """`BoxVocabulary.__post_init__` refuses a reading rule this code does not implement, and the
+    constructor refuses a field it does not know — so the rule is checked by construction rather
+    than by a string compare that would pass on a spec with an extra knob in it."""
+    spec = {**_vocabulary().spec, "reading_rule": "box-v2-wedge"}
     with pytest.raises(SystemExit, match="written for 'box-v3'"):
         load_box_vocabulary(_artefact(tmp_path, spec=spec))
 
 
-def test_an_edge_table_that_does_not_tile_its_words_is_refused(tmp_path: Path):
-    """The heading and speed tables TILE their words, so they hold one more value than there are
-    words; the altitude table is a LADDER OF TARGETS, one per word. Reading one as the other
-    shifts every word by half a box and still draws."""
-    with pytest.raises(SystemExit, match="boxes.heading_edges_deg holds"):
-        load_box_vocabulary(_artefact(
-            tmp_path, boxes={"heading_edges_deg": [-180.0, 0.0, 180.0],   # 3 edges, 3 words claimed
-                             "speed_edges_mps": [60.0, 90.0, 125.0],
-                             "altitude_targets_m": [-20.0, 0.0, 100.0, 400.0]}))
+def test_a_spec_that_does_not_rebuild_to_the_stated_sha_is_refused(tmp_path: Path):
+    """The sha is over the spec and nothing else, so this fails exactly when the artefact and this
+    code do not read the same spec the same way — which is the failure a string compare of the
+    rule name cannot see."""
+    with pytest.raises(SystemExit, match="do not read the spec the same way"):
+        load_box_vocabulary(_artefact(tmp_path, sha256="0" * 64))
 
 
-def test_the_altitude_table_is_one_target_per_word(tmp_path: Path):
-    with pytest.raises(SystemExit, match="boxes.altitude_targets_m holds"):
-        load_box_vocabulary(_artefact(
-            tmp_path, boxes={"heading_edges_deg": [-180.0, -10.0, 10.0, 180.0],
-                             "speed_edges_mps": [60.0, 90.0, 125.0],
-                             "altitude_targets_m": [-20.0, 0.0, 100.0, 400.0, 900.0]}))
+def test_tables_that_disagree_with_the_ones_this_vocabulary_derives_are_refused(tmp_path: Path):
+    """The artefact carries its tables AND this code derives them; them agreeing is what makes the
+    artefact's copy a check rather than a second opinion. The heading edges TILE their words (one
+    more value than words) while the altitude ladder holds one target PER word — reading either as
+    the other shifts every word by half a box and still draws."""
+    vocabulary = _vocabulary()
+    for key, broken in (
+        ("heading_edges_deg", list(vocabulary.heading_edges)[:-1]),
+        ("altitude_targets_m", [*vocabulary.altitude_targets, 9000.0]),
+        ("speed_edges_mps", [value * 1.01 for value in vocabulary.speed_edges]),
+    ):
+        boxes = {"heading_edges_deg": list(vocabulary.heading_edges),
+                 "speed_edges_mps": list(vocabulary.speed_edges),
+                 "altitude_targets_m": list(vocabulary.altitude_targets)}
+        boxes[key] = broken
+        with pytest.raises(SystemExit, match=f"boxes.{key}"):
+            load_box_vocabulary(_artefact(tmp_path, boxes=boxes))
 
 
 def test_a_good_artefact_loads_whole(tmp_path: Path):
-    payload = load_box_vocabulary(_artefact(tmp_path))
-    assert payload["spec"]["reading_rule"] == READING_RULE
-    assert len(payload["boxes"]["heading_edges_deg"]) == payload["words"]["heading"] + 1
-    assert len(payload["boxes"]["altitude_targets_m"]) == payload["words"]["altitude"]
+    payload, vocabulary = load_box_vocabulary(_artefact(tmp_path))
+    assert vocabulary.reading_rule == READING_RULE
+    assert vocabulary.sha256 == payload["sha256"]
+    assert len(vocabulary.heading_edges) == payload["words"]["heading"] + 1
+    assert len(vocabulary.altitude_targets) == payload["words"]["altitude"]
+
+
+def _spec() -> dict:
+    """The spec as a plain dict, for the callers that only need its numbers."""
+    return dict(_vocabulary().spec)
+
 
 
 def _sentence(words: list[list[int]], holds: list[float], runway: str = "KRDU:05L") -> dict:
@@ -310,10 +326,10 @@ def _flat_frame(rows: int = 61, speed: float = 80.0) -> dict:
     }
 
 
-def test_the_read_signals_are_smoothed_with_the_artefacts_own_windows():
+def test_the_read_signals_are_smoothed_with_the_vocabularys_own_windows():
     """WHICH signal is the whole game: the same track against the same boxes is 100 % inside on
     these and 93 % on the raw rows. The windows come from the artefact, never from here."""
-    signals = read_signals(_flat_frame(), _spec())
+    signals = read_signals(_flat_frame(), _vocabulary())
     assert signals["dt_s"] == 2.0
     assert signals["course_window_rows"] == 4          # round(6 / 2) + 1
     assert signals["signal_window_rows"] == 6          # round(10 / 2) + 1
@@ -324,68 +340,78 @@ def test_the_read_signals_are_smoothed_with_the_artefacts_own_windows():
     assert (np.diff(signals["path_m"]) > 0).all()
 
 
-def test_the_path_axis_is_floored_so_a_stopped_row_cannot_pull_it_back():
-    from ts_transformer.manoeuvre.segments import MINIMUM_GROUND_SPEED_MPS
+def test_the_path_axis_is_the_speed_integrated_with_NO_floor():
+    """`box_vocabulary.read_boxes` applies no floor, so neither does this: one here would move the
+    wedge on any row slower than it. The floor never binds on this fleet — which is why the
+    floored version reproduced the artefact to 5e-6 m — and that is not a reason to keep a
+    difference from the code that wrote the file."""
     times = np.array([0.0, 2.0, 4.0])
     path = cumulative_path_m(times, np.array([80.0, 0.0, 80.0]))
-    assert path[1] - path[0] == pytest.approx(2.0 * MINIMUM_GROUND_SPEED_MPS)
-    assert (np.diff(path) > 0).all()
+    assert path[1] - path[0] == pytest.approx(0.0)
+    assert path[2] - path[1] == pytest.approx(160.0)
 
 
 def test_the_wedge_closes_onto_its_target_and_opens_asymmetrically_going_back():
-    """`T - r·tan(up) - f ≤ h ≤ T + r·tan(down) + f`, with f = redundancy · (T + h0).
+    """``T − r·tan(up) − f(T) ≤ h ≤ T + r·tan(down) + f(T)``, with ``f`` the vocabulary's own
+    `altitude_half_width`.
 
     Down is the WIDER side and it opens ABOVE the target: the wedge is the set the target is
     backward-reachable from, and losing height is the manoeuvre with the most room. Swapping the
-    two draws a corridor of exactly the same width with the slack on the wrong side."""
-    spec = _spec()
-    targets = np.array([-20.0, 0.0, 100.0, 400.0])
-    times = np.array([0.0, 2.0, 4.0, 6.0])
+    two draws a corridor of exactly the same width with the slack on the wrong side.
+    """
+    vocabulary = _vocabulary()
+    word = int(np.argmin(np.abs(vocabulary.altitude_targets - 100.0)))
+    target = float(vocabulary.altitude_targets[word])
+    half = float(vocabulary.altitude_half_width(target))
+    # one segment of four rows, 300 m of path, the last row being its end
+    row_words = np.full(4, word, dtype=np.int64)
     path = np.array([0.0, 100.0, 200.0, 300.0])
-    words = np.zeros((1, len(KINDS)), dtype=np.int64)
-    words[0, KINDS.index("altitude")] = 3                      # target 400 m
-    low, high = altitude_envelope(np.array([0.0]), words, times, path, spec, targets)
+    low, high = altitude_envelope(row_words, path, vocabulary)
 
-    floor = 0.05 * (400.0 + 50.0)
     # the LAST row is the segment's end: r = 0, so the box is the target's own tolerance
-    assert high[-1] == pytest.approx(400.0 + floor)
-    assert low[-1] == pytest.approx(400.0 - floor)
+    assert high[-1] == pytest.approx(target + half)
+    assert low[-1] == pytest.approx(target - half)
     # and going back it opens, more above than below
     remaining = path[-1] - path[0]
-    assert high[0] == pytest.approx(400.0 + remaining * math.tan(math.radians(1.5)) + floor)
-    assert low[0] == pytest.approx(400.0 - remaining * math.tan(math.radians(1.0)) - floor)
-    assert high[0] - 400.0 > 400.0 - low[0]
+    assert high[0] == pytest.approx(target + remaining * math.tan(math.radians(1.5)) + half)
+    assert low[0] == pytest.approx(target - remaining * math.tan(math.radians(1.0)) - half)
+    assert high[0] - target > target - low[0]
 
 
-def test_a_segment_ends_at_the_next_altitude_events_instant():
-    """Not at the last row before it. Taking the last row instead leaves rows outside a box the
-    artefact accepted (measured: 3 in 2 670)."""
-    spec = _spec()
-    targets = np.array([-20.0, 0.0, 100.0, 400.0])
-    times = np.arange(5, dtype=np.float64) * 2.0               # 0 2 4 6 8
-    path = times * 50.0
-    words = np.zeros((2, len(KINDS)), dtype=np.int64)
-    words[0, KINDS.index("altitude")] = 3
-    words[1, KINDS.index("altitude")] = 2
-    low, high = altitude_envelope(np.array([0.0, 4.0]), words, times, path, spec, targets)
-
-    # rows 0 and 1 belong to the first segment, and its `r` runs to t = 4 s (the instant the word
-    # changes), not to t = 2 s (its own last row)
-    floor = 0.05 * (400.0 + 50.0)
-    assert high[1] == pytest.approx(400.0 + (path[2] - path[1]) * math.tan(math.radians(1.5)) + floor)
-    # the last segment runs to the track's last row
-    assert high[-1] == pytest.approx(100.0 + 0.05 * 150.0)
+def test_a_NEGATIVE_target_still_has_a_box_and_it_is_not_inverted():
+    """The ladder SPANS THE THRESHOLD, because an arrival passing below the threshold elevation is
+    an ordinary one and a ladder floored at zero refused it. The half width takes the target's
+    ABSOLUTE value; `redundancy × (T + h0)` reaches zero at T = −h0 and goes negative below it,
+    which is a box nothing can be inside. This is the check that catches taking the envelope's
+    formula from prose instead of from the vocabulary."""
+    vocabulary = BoxVocabulary(altitude_bottom_m=-150.0)
+    below = np.flatnonzero(vocabulary.altitude_targets < 0)
+    assert len(below) >= 1, "the ladder is supposed to span the threshold"
+    for word in (int(below[0]), int(below[-1])):
+        target = float(vocabulary.altitude_targets[word])
+        assert vocabulary.altitude_half_width(target) > 0.0
+        low, high = altitude_envelope(np.full(2, word, dtype=np.int64), np.array([0.0, 50.0]), vocabulary)
+        assert (high > low).all(), f"the box for target {target:g} m is inverted"
 
 
-def test_a_row_in_no_segment_is_refused():
-    """The events tile the track, so a row with no box in force means the sentence and the track
-    are not the same flight — which would otherwise draw as a gap nobody notices."""
-    spec = _spec()
-    targets = np.array([-20.0, 0.0, 100.0, 400.0])
-    times = np.array([0.0, 2.0, 4.0])
-    words = np.zeros((1, len(KINDS)), dtype=np.int64)
-    with pytest.raises(SystemExit, match="fall in no altitude segment"):
-        altitude_envelope(np.array([10.0]), words, times, times * 50.0, spec, targets)
+def test_a_segment_ends_at_its_own_LAST_ROW():
+    """Not at the next altitude event's instant — `box_vocabulary.contains` anchors the wedge on
+    ``remaining[ends - 1]``, the segment's last row. The two differ by one row of path, which is
+    4 m of wedge at 80 m/s: small, and a difference from the code that wrote the file."""
+    vocabulary = _vocabulary()
+    first, second = 1, 2
+    row_words = np.array([first, first, second, second], dtype=np.int64)
+    path = np.array([0.0, 100.0, 200.0, 300.0])
+    low, high = altitude_envelope(row_words, path, vocabulary)
+
+    for word, rows, end in ((first, (0, 1), 100.0), (second, (2, 3), 300.0)):
+        target = float(vocabulary.altitude_targets[word])
+        half = float(vocabulary.altitude_half_width(target))
+        # the segment's own last row has r = 0
+        assert high[rows[1]] == pytest.approx(target + half)
+        # and its first row has the path still to run to THAT row
+        remaining = end - path[rows[0]]
+        assert high[rows[0]] == pytest.approx(target + remaining * math.tan(math.radians(1.5)) + half)
 
 
 def _reach(to_go: list[float], cross: list[float]) -> list[float]:

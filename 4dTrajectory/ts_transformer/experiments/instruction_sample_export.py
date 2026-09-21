@@ -65,7 +65,10 @@ from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.instructions import (
     VOCABULARY_FILE, course_frame, min_rows, smooth, wrap_deg,
 )
-from ts_transformer.manoeuvre.segments import MINIMUM_GROUND_SPEED_MPS
+from ts_transformer.manoeuvre.box_vocabulary import (
+    KINDS, READING_RULE, SCHEMA as BOX_SCHEMA, TERMINAL_CONTINUE, TERMINAL_LANDED,
+    BoxVocabulary, read_boxes,
+)
 
 
 #: MIRROR of `src/data/trainingSample.ts` (`TRAINING_INDEX_SCHEMA` / `TRAINING_SAMPLE_SCHEMA`).
@@ -83,19 +86,13 @@ KIND_PRIOR = "prior-generated"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"
 
-#: The artefact this module reads, refused by name. Its producer is outside the tree.
-BOX_SCHEMA = "ts-box-vocabulary-v1"
-READING_RULE = "box-v3"
-#: MIRROR of the artefact's `spec.kinds`, checked against it on load. The `words` columns are
-#: POSITIONAL, so this order is load-bearing — and the second kind is an ALTITUDE (a target
-#: height), not the retired vertical angle.
-KINDS = ("heading", "altitude", "speed", "runway", "duration", "terminal")
 #: The three kinds that are intervals. Runway is the frame, duration is the hold, terminal is a
 #: label; none of the three bounds a signal, so none of them has a box.
+#:
+#: THE SCHEMA, THE RULE, THE COLUMN ORDER AND THE TERMINAL CLASSES ARE IMPORTED, not restated:
+#: `manoeuvre/box_vocabulary.py` is the labeller, and it entered the tree on 2026-09-21. Until it
+#: did, every one of these was a mirror of a program nobody here could read.
 BOX_KINDS = ("heading", "altitude", "speed")
-#: MIRROR of the terminal classes. `check_columns` reads them to pin that column positionally.
-TERMINAL_CONTINUE = 0
-TERMINAL_LANDED = 1
 
 #: How close to a box edge still counts as inside, in each kind's own unit. It exists because the
 #: columns are written at display precision and the edge tables at full precision: without it a
@@ -112,33 +109,48 @@ POOL_FACTOR = 5
 
 # ── the artefact ─────────────────────────────────────────────────────────────
 
-def load_box_vocabulary(path: Path) -> dict[str, Any]:
-    """The box vocabulary, refused by schema, by reading rule and by its own table lengths.
+def load_box_vocabulary(path: Path) -> tuple[dict[str, Any], BoxVocabulary]:
+    """The artefact, and the LABELLER'S OWN vocabulary object rebuilt from its spec.
 
-    The lengths are the check that matters: `heading_deg` tiles the 65 heading words, so it holds
-    66 edges, while `altitude_m` is a ladder of 61 TARGETS and holds exactly 61. Reading one as
-    the other would silently shift every word by half a box.
+    THIS USED TO BE A RECONSTRUCTION. Until `manoeuvre/box_vocabulary.py` entered the tree
+    (2026-09-21) the artefact's producer was a throwaway script, so the tables and the wedge were
+    rebuilt here from the spec's numbers and there was no original to check them against. Now
+    there is, and the check is exact:
+
+      * the spec round-trips: `BoxVocabulary(**spec).sha256` must be the artefact's own `sha256`,
+        so a spec this code reads differently from the one that wrote it cannot pass;
+      * the TABLES the artefact carries must be the ones this vocabulary derives. They are two
+        spellings of one thing, and them agreeing is what makes the artefact's copy a check rather
+        than a second opinion.
+
+    `BoxVocabulary.__post_init__` refuses a reading rule this code does not implement, so the rule
+    is checked by construction rather than by a string compare here.
     """
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema") != BOX_SCHEMA:
         raise SystemExit(f"{path} has schema {payload.get('schema')!r}, not {BOX_SCHEMA!r}")
-    spec = payload["spec"]
-    if spec["reading_rule"] != READING_RULE:
+    try:
+        vocabulary = BoxVocabulary(**payload["spec"])
+    except (TypeError, ValueError) as error:
         raise SystemExit(
-            f"{path} was read under {spec['reading_rule']!r}, and this exporter is written for "
-            f"{READING_RULE!r} — the rule decides what a word MEANS"
+            f"{path} carries a spec this code cannot build a vocabulary from ({error}) — the rule "
+            f"decides what a word MEANS, and this exporter is written for {READING_RULE!r}"
+        ) from error
+    if vocabulary.sha256 != payload["sha256"]:
+        raise SystemExit(
+            f"{path} states sha {payload['sha256'][:12]}…, but its own spec rebuilds to "
+            f"{vocabulary.sha256[:12]}… — the artefact and this code do not read the spec the same way"
         )
-    words = payload["words"]
-    boxes = payload["boxes"]
-    for kind, table, wanted in (("heading", "heading_edges_deg", words["heading"] + 1),
-                                ("speed", "speed_edges_mps", words["speed"] + 1),
-                                ("altitude", "altitude_targets_m", words["altitude"])):
-        if len(boxes[table]) != wanted:
+    stated = payload["boxes"]
+    for key, derived in (("heading_edges_deg", vocabulary.heading_edges),
+                         ("speed_edges_mps", vocabulary.speed_edges),
+                         ("altitude_targets_m", vocabulary.altitude_targets)):
+        if len(stated[key]) != len(derived) or not np.allclose(stated[key], derived):
             raise SystemExit(
-                f"{path}: boxes.{table} holds {len(boxes[table])} values, but {words[kind]} "
-                f"{kind} words need {wanted} — an edge table tiles its words, a target ladder does not"
+                f"{path}: boxes.{key} holds {len(stated[key])} values and this vocabulary derives "
+                f"{len(derived)} — the artefact's tables and the labeller's disagree"
             )
-    return payload
+    return payload, vocabulary
 
 
 def check_columns(sentences: dict[str, dict[str, Any]], runway_idents: list[str],
@@ -280,40 +292,37 @@ def cumulative_path_m(times: np.ndarray, ground_speed_mps: np.ndarray) -> np.nda
     on (§2.4: ``r`` is remaining path length, NOT the projection on the course; the projection
     grows on a downwind leg and would read the remaining distance as negative).
 
-    Each step is the row's own speed times the gap before it, floored at
-    `MINIMUM_GROUND_SPEED_MPS`. The speed handed in is the SMOOTHED one, and which of the two it
-    is was measured rather than assumed: over 75 flights the smoothed axis reproduces the
-    artefact's segments to 5e-6 m, the raw one to 3e-4 m. Neither is a visible difference, but
-    only one of them is what the labeller did, and the wedge is the one place a reconstruction
-    can drift without looking wrong.
+    MIRROR of the accumulation in `box_vocabulary.read_boxes`: each step is the row's own
+    SMOOTHED speed times the gap before it, and **no floor** — the labeller applies none, and one
+    here would move the wedge on any row slower than it. (It never binds on this fleet, which is
+    why the floored version reproduced the artefact to 5e-6 m; that is not a reason to keep a
+    difference.)
     """
-    step = np.maximum(np.asarray(ground_speed_mps)[1:], MINIMUM_GROUND_SPEED_MPS) * np.diff(times)
+    step = np.asarray(ground_speed_mps)[1:] * np.diff(times)
     return np.concatenate([[0.0], np.cumsum(step)])
 
 
-def read_signals(frame: dict[str, np.ndarray], spec: dict[str, Any]) -> dict[str, Any]:
+def read_signals(frame: dict[str, np.ndarray], vocabulary: BoxVocabulary) -> dict[str, Any]:
     """The three signals the boxes are checked against, and the path axis the wedge rides on.
 
     WHICH SIGNAL, EXACTLY, is the whole game — a box is 2° wide at the course, so reading the raw
-    course instead of the smoothed one puts 7 % of the rows outside a box the artefact accepted.
-    Measured over 75 flights at five airports, these four lines put 13,922 of 13,922 rows inside:
+    course instead of the smoothed one puts 6 % of the rows outside a box the artefact accepted.
 
-      * the course is the UNWRAPPED relative ground track, smoothed over `course_smoothing_s` and
-        wrapped afterwards. **This changed with `box-v3`.** Under `box-v2-wedge` the average was
-        taken on the WRAPPED signal, which near ±180° averages +179° and −179° to 0°; reproducing
-        that was what put 100 % of the rows inside then, and it now puts 98.6 % inside — the 1.4 %
-        are all at the wrap, which is the bug the rule fixed. The circular mean (average the unit
-        vectors, take the angle) is indistinguishable from this on all 13,922 rows measured, and
-        the two can only differ where an unwrap accumulates a whole turn; this one reuses the
-        column `course_frame` already carries, and the containment verdict is what would catch it
-        if a flight ever told them apart.
-      * speed and height are smoothed over `smoothing_s`.
-      * the path axis is integrated from the SMOOTHED ground speed.
+    These four lines MIRROR `box_vocabulary.read_boxes`, which is now in the tree; they are here
+    rather than imported because that function returns words and keeps the signals to itself, and
+    the view has to draw the very columns the verdict was computed on. The mirror is checked per
+    flight by calling the labeller's own `contains` (see `envelope_block`).
+
+    The course is the UNWRAPPED relative ground track, smoothed and wrapped afterwards. **That
+    changed with `box-v3`**: the rule before it averaged the WRAPPED signal, which near ±180°
+    averages +179° and −179° to 0° — the final approach course itself. Reproducing that bug is
+    what put 100 % of the rows inside under `box-v2-wedge`; against this artefact the same lines
+    leave 1.4 % outside, every one of them at the wrap.
     """
     times = frame["t"]
     dt = float(np.median(np.diff(times)))
-    course_rows = min_rows(spec["course_smoothing_s"], dt)
-    signal_rows = min_rows(spec["smoothing_s"], dt)
+    course_rows = min_rows(vocabulary.course_smoothing_s, dt)
+    signal_rows = min_rows(vocabulary.smoothing_s, dt)
     return {
         "dt_s": dt,
         "course_window_rows": course_rows,
@@ -410,49 +419,37 @@ def word_runs(column: list[int]) -> list[tuple[int, int]]:
     return runs
 
 
-def altitude_envelope(event_times_s: np.ndarray, words: np.ndarray, t_s: np.ndarray,
-                      path_m: np.ndarray, spec: dict[str, Any], targets: np.ndarray,
+def altitude_envelope(row_words: np.ndarray, path_m: np.ndarray, vocabulary: BoxVocabulary,
                       ) -> tuple[np.ndarray, np.ndarray]:
-    """The wedge, per row: ``T − r·tan(γ_up) − f(T) ≤ h ≤ T + r·tan(γ_down) + f(T)`` with
-    ``f(T) = redundancy · (T + h0)`` and ``r`` the REMAINING PATH to the segment's end (§2.4).
+    """The wedge, per row: ``T − r·tan(γ_up) − f(T) ≤ h ≤ T + r·tan(γ_down) + f(T)``.
 
-    Three details are load-bearing, and each one was measured against the artefact:
+    MIRROR of `box_vocabulary.contains`, line for line, including three details that each moved
+    the box when this was a reconstruction:
 
-      * the segment's end is the NEXT ALTITUDE EVENT'S INSTANT, not the last row before it. Taking
-        the last row instead leaves three rows in 2,670 outside a box the artefact accepted.
-      * ``r`` is path length, not the projection on the course.
-      * the last segment ends at the track's last row: there is no event after it, and the words
-        in force run to the threshold.
+      * ``f(T)`` is `vocabulary.altitude_half_width`, which takes the target's **absolute value**.
+        Thirteen of the sixty-one ladder targets are NEGATIVE (the ladder spans the threshold,
+        because an arrival passing below the threshold elevation is ordinary), and
+        ``redundancy · (T + h0)`` goes to zero at T = −h0 and negative below it — an INVERTED box.
+      * the segment ends at its own LAST ROW, not at the next altitude event's instant. The two
+        differ by one row of path, which is 4 m of wedge at 80 m/s.
+      * ``r`` is remaining PATH LENGTH, never the along-course projection: the projection grows on
+        a downwind leg, so a vectored approach would read as unreachable.
+
+    ``row_words`` is the altitude word in force at each ROW (not each event): one altitude word
+    spans several events, and the wedge is anchored on the altitude segment's end.
 
     The wedge is ASYMMETRIC by design (γ_down 1.5° above, γ_up 1.0° below): it is the set the
     target is backward-reachable from, and low is the dangerous side.
     """
-    column = words[:, KINDS.index("altitude")]
-    frac, h0 = spec["redundancy_fraction"], spec["altitude_h0_m"]
-    tan_down = math.tan(math.radians(spec["altitude_down_deg"]))
-    tan_up = math.tan(math.radians(spec["altitude_up_deg"]))
-    low = np.full(len(t_s), np.nan)
-    high = np.full(len(t_s), np.nan)
-    runs = word_runs([int(v) for v in column])
-    for position, (first, last) in enumerate(runs):
-        opens_s = float(event_times_s[first])
-        final = position == len(runs) - 1
-        closes_s = float(t_s[-1]) if final else float(event_times_s[last + 1])
-        rows = np.where((t_s >= opens_s - 1e-9) & ((t_s <= closes_s + 1e-9) if final else (t_s < closes_s)))[0]
-        if not len(rows):
-            continue
-        target = float(targets[int(column[first])])
-        floor = frac * (target + h0)
-        remaining = np.maximum(float(np.interp(closes_s, t_s, path_m)) - path_m[rows], 0.0)
-        low[rows] = target - remaining * tan_up - floor
-        high[rows] = target + remaining * tan_down + floor
-    if np.isnan(low).any():
-        missed = int(np.isnan(low).sum())
-        raise SystemExit(
-            f"{missed} of {len(t_s)} rows fall in no altitude segment — the events are supposed to "
-            f"tile the track, so a row with no box in force means the sentence and the track disagree"
-        )
-    return low, high
+    targets = vocabulary.altitude_targets[row_words]
+    half = vocabulary.altitude_half_width(targets)
+    tan_down = math.tan(math.radians(vocabulary.altitude_down_deg))
+    tan_up = math.tan(math.radians(vocabulary.altitude_up_deg))
+    # the path still to run inside this row's own altitude segment
+    ends = np.concatenate([np.flatnonzero(np.diff(row_words)) + 1, [len(row_words)]])
+    segment_end = np.repeat(path_m[ends - 1], np.diff(np.concatenate([[0], ends])))
+    remaining = np.maximum(segment_end - path_m, 0.0)
+    return (targets - remaining * tan_up - half, targets + remaining * tan_down + half)
 
 
 #: How finely the sector's arc is drawn: one point per degree of its own opening, between these
@@ -509,7 +506,7 @@ def reachable_sector(heading_lo_deg: float, heading_hi_deg: float, speed_hi: flo
 
 
 def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m: np.ndarray,
-                high_m: np.ndarray, vocabulary: dict[str, Any], series) -> list[dict[str, Any]]:
+                high_m: np.ndarray, vocabulary: BoxVocabulary, series) -> list[dict[str, Any]]:
     """One box per event: the three intervals, the wedge over the event's own span, and the ground
     SECTOR the words allow the aircraft to be in while that word stands.
 
@@ -522,10 +519,9 @@ def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m
     frame's transform lives on this side of the wire — the frontend has lon/lat columns and no way
     to place a point at an arbitrary (to_go, cross).
     """
-    boxes = vocabulary["boxes"]
-    heading_edges = np.asarray(boxes["heading_edges_deg"], dtype=np.float64)
-    speed_edges = np.asarray(boxes["speed_edges_mps"], dtype=np.float64)
-    targets = np.asarray(boxes["altitude_targets_m"], dtype=np.float64)
+    heading_edges = vocabulary.heading_edges
+    speed_edges = vocabulary.speed_edges
+    targets = vocabulary.altitude_targets
     columns = {kind: KINDS.index(kind) for kind in KINDS}
 
     times = observed["t_s"]
@@ -601,29 +597,27 @@ def containment(read: np.ndarray, low: np.ndarray, high: np.ndarray) -> dict[str
 
 
 def envelope_block(sentence: dict[str, Any], observed_columns: dict[str, np.ndarray],
-                   signals: dict[str, Any], vocabulary: dict[str, Any], series) -> dict[str, Any]:
+                   signals: dict[str, Any], vocabulary: BoxVocabulary, series) -> dict[str, Any]:
     """The boxes one sentence makes over one track, and the verdict on every row.
 
-    `inside` is the CRITERION of this vocabulary (§1: a sentence holds if the track is inside its
-    boxes), and it is computed here on the rounded columns the file carries so that the reader
-    recomputing it gets the same answer to the row.
+    `inside` is the CRITERION of this vocabulary (a sentence holds if the track is inside its
+    boxes), and it is computed here on the ROUNDED columns the file carries, so that the reader
+    recomputing it from those columns gets the same answer to the row.
     """
-    spec = vocabulary["spec"]
-    targets = np.asarray(vocabulary["boxes"]["altitude_targets_m"], dtype=np.float64)
-    heading_edges = np.asarray(vocabulary["boxes"]["heading_edges_deg"], dtype=np.float64)
-    speed_edges = np.asarray(vocabulary["boxes"]["speed_edges_mps"], dtype=np.float64)
+    heading_edges = vocabulary.heading_edges
+    speed_edges = vocabulary.speed_edges
     times = observed_columns["t_s"]
     words = np.asarray(sentence["words"], dtype=np.int64)
     event_times = np.asarray(sentence["event_times_s"], dtype=np.float64)
 
-    low, high = altitude_envelope(event_times, words, times, signals["path_m"], spec, targets)
+    # the event in force at each row: the last one that has opened. The events tile the track, so
+    # every row has exactly one.
+    in_force = np.clip(np.searchsorted(event_times, times, side="right") - 1, 0, len(event_times) - 1)
+    low, high = altitude_envelope(words[in_force, KINDS.index("altitude")], signals["path_m"], vocabulary)
     low = np.round(low, 4)
     high = np.round(high, 4)
     boxes = event_boxes(sentence, observed_columns, low, high, vocabulary, series)
 
-    # the event in force at each row: the last one that has opened. The events tile the track, so
-    # every row has exactly one.
-    in_force = np.clip(np.searchsorted(event_times, times, side="right") - 1, 0, len(event_times) - 1)
     heading_word = words[in_force, KINDS.index("heading")]
     speed_word = words[in_force, KINDS.index("speed")]
     verdict = {
@@ -732,23 +726,32 @@ def prior_sentences(model, config, types, sentences: list[dict[str, Any]], serie
 
 # ── one flight ───────────────────────────────────────────────────────────────
 
-def flight_payload(sentence: dict[str, Any], series, stratum: str, vocabulary: dict[str, Any],
-                   said: dict[str, Any] | None = None) -> dict[str, Any]:
+def flight_payload(sentence: dict[str, Any], series, stratum: str, vocabulary: BoxVocabulary,
+                   runway_word: int, said: dict[str, Any] | None = None) -> dict[str, Any]:
     """One flight as the frontend reads it: the sentence copied UNCHANGED from the artefact, the
-    track rebuilt from the manifest, and the envelope those two make together."""
+    track rebuilt from the manifest, and the envelope those two make together.
+
+    THE SEAM IS CHECKED BY RE-READING. The sentence is the artefact's and the track is rebuilt
+    here, so nothing but this says they are the same flight. Since the labeller entered the tree
+    it can simply be asked: `read_boxes` on the rebuilt track must return the artefact's own
+    sentence, word for word and instant for instant. That is stronger than the duration compare it
+    replaced — it fails on a track that is the right LENGTH but not the right track — and it
+    implies the labeller's own `contains`, because a sentence it emits is one it accepts.
+    """
     frame = course_frame(series)
-    signals = read_signals(frame, vocabulary["spec"])
+    signals = read_signals(frame, vocabulary)
     times = frame["t"] - frame["t"][0]
     duration_s = float(times[-1])
 
-    # The sentence's events TILE the track (§2.5: the hold is written on the row it describes), so
-    # the last event plus its hold is the flight's length. This is the seam between a sentence
-    # copied from the artefact and a track rebuilt here: nothing else says they are one flight.
-    spoken_s = float(sentence["event_times_s"][-1] + sentence["hold_s"][-1])
-    if abs(spoken_s - duration_s) > 2.0 * float(vocabulary["spec"]["duration_bin_s"]):
+    moments, words, holds = read_boxes(series, vocabulary, runway_word)
+    artefact_words = np.asarray(sentence["words"], dtype=np.int64)
+    if (len(moments) != len(artefact_words) or not np.array_equal(words, artefact_words)
+            or not np.allclose(moments - moments[0], sentence["event_times_s"], atol=1e-6)
+            or not np.allclose(holds, sentence["hold_s"], atol=1e-6)):
         raise SystemExit(
-            f"{sentence['flight_id']}: the artefact's sentence covers {spoken_s:g} s but the rebuilt "
-            f"track spans {duration_s:g} s — these are not the same flight"
+            f"{sentence['flight_id']}: re-reading the rebuilt track gives {len(moments)} events and "
+            f"the artefact carries {len(artefact_words)} — the sentence and the track this export "
+            f"pairs are not the same flight's"
         )
 
     observed = observed_track(frame, signals, series)
@@ -758,7 +761,7 @@ def flight_payload(sentence: dict[str, Any], series, stratum: str, vocabulary: d
     }
     own = {"event_times_s": sentence["event_times_s"], "hold_s": sentence["hold_s"],
            "words": sentence["words"]}
-    payload = {
+    flight = {
         "flightKey": sentence["flight_id"],
         "callsign": sentence["flight_id"].split("_", 1)[0],
         "runway": sentence["runway"],
@@ -778,11 +781,11 @@ def flight_payload(sentence: dict[str, Any], series, stratum: str, vocabulary: d
     if said is not None:
         model = {"event_times_s": sentence["event_times_s"], "hold_s": sentence["hold_s"],
                  "words": said["words"]}
-        payload["prior"] = {
+        flight["prior"] = {
             **{key: said[key] for key in ("words", "confidence", "givenEvents", "landedAtS")},
             "envelope": envelope_block(model, columns, signals, vocabulary, series),
         }
-    return payload
+    return flight
 
 
 def update_index(directory: Path, airport: str, entry: dict[str, Any]) -> Path:
@@ -820,39 +823,41 @@ def reading_block() -> dict[str, Any]:
         "courseSignal": "wrap(moving average of the UNWRAPPED relative ground track over courseSmoothingS)",
         "speedSignal": "moving average of the ground speed over smoothingS",
         "heightSignal": "moving average of the height above the threshold over smoothingS",
-        "pathSignal": "the smoothed ground speed integrated, floored at MINIMUM_GROUND_SPEED_MPS",
+        "pathSignal": "the smoothed ground speed integrated, as box_vocabulary.read_boxes does it",
         "remainingPathTo": "the next altitude event's instant; the track's last row for the final segment",
         "windowRows": "round(seconds / median dt) + 1, centred, edges padded with the edge value",
         "insideEpsilon": INSIDE_EPSILON,
-        "producedBy": "ts_transformer.experiments.instruction_sample_export (the artefact's own labeller is NOT in this repository)",
+        "producedBy": "ts_transformer.experiments.instruction_sample_export, over ts_transformer.manoeuvre.box_vocabulary (the labeller itself)",
         "constantsFrom": [
-            "the artefact's spec block (redundancy, the wedge's angles, the ladder, the smoothing)",
+            "ts_transformer/manoeuvre/box_vocabulary.py (the tables, the wedge, the reading)",
             "ts_transformer/manoeuvre/instructions.py (course_frame, smooth, min_rows, wrap_deg)",
-            "ts_transformer/manoeuvre/segments.py (MINIMUM_GROUND_SPEED_MPS)",
         ],
     }
 
 
-def vocabulary_block(payload: dict[str, Any]) -> dict[str, Any]:
-    spec = payload["spec"]
-    boxes = payload["boxes"]
+def vocabulary_block(payload: dict[str, Any], vocabulary: BoxVocabulary) -> dict[str, Any]:
+    """What the frontend needs to know a word's meaning. The TABLES come from the vocabulary
+    OBJECT, not from the artefact's copy of them — `load_box_vocabulary` has already required the
+    two to agree, so taking the derived one means the file carries the labeller's own numbers."""
     return {
         "sha256": payload["sha256"],
         "runwaySha256": runway_sha256(payload["runway_idents"]),
-        "readingRule": spec["reading_rule"],
-        "redundancyFraction": spec["redundancy_fraction"],
-        "headingEdgesDeg": list(boxes["heading_edges_deg"]),
-        "headingFloorDeg": spec["heading_floor_deg"],
-        "speedEdgesMps": list(boxes["speed_edges_mps"]),
-        "altitudeTargetsM": list(boxes["altitude_targets_m"]),
-        "altitudeH0M": spec["altitude_h0_m"],
-        "altitudeDownDeg": spec["altitude_down_deg"],
-        "altitudeUpDeg": spec["altitude_up_deg"],
-        "durationBinS": spec["duration_bin_s"],
-        "durationMaxS": spec["duration_max_s"],
-        "courseSmoothingS": spec["course_smoothing_s"],
-        "smoothingS": spec["smoothing_s"],
+        "readingRule": vocabulary.reading_rule,
+        "redundancyFraction": vocabulary.redundancy_fraction,
+        "headingEdgesDeg": [float(v) for v in vocabulary.heading_edges],
+        "headingFloorDeg": vocabulary.heading_floor_deg,
+        "speedEdgesMps": [float(v) for v in vocabulary.speed_edges],
+        "altitudeTargetsM": [float(v) for v in vocabulary.altitude_targets],
+        "altitudeH0M": vocabulary.altitude_h0_m,
+        "altitudeDownDeg": vocabulary.altitude_down_deg,
+        "altitudeUpDeg": vocabulary.altitude_up_deg,
+        "durationBinS": vocabulary.duration_bin_s,
+        "durationMaxS": vocabulary.duration_max_s,
+        "courseSmoothingS": vocabulary.course_smoothing_s,
+        "smoothingS": vocabulary.smoothing_s,
         "runwayIdents": list(payload["runway_idents"]),
+        # the runway's class count is the cohort's, so it comes from the file; the other five are
+        # the spec's own and the vocabulary derives them
         "words": {kind: int(payload["words"][kind]) for kind in KINDS},
     }
 
@@ -884,8 +889,8 @@ def main(argv: list[str] | None = None) -> int:
     set_id = args.set_id or out.name
     started = time.perf_counter()
 
-    vocabulary = load_box_vocabulary(artefact / VOCABULARY_FILE)
-    sentences = sentences_by_flight(artefact, args.split, vocabulary["sha256"])
+    payload, vocabulary = load_box_vocabulary(artefact / VOCABULARY_FILE)
+    sentences = sentences_by_flight(artefact, args.split, payload["sha256"])
     # A pooled artefact holds five airports' sentences; ONE TRAINING SET IS ONE AIRPORT'S, and the
     # airport is the one the --out path names. The runway word carries the prefix, so this is the
     # artefact's own answer to "whose flight is this", not a guess from the flight id.
@@ -894,7 +899,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"no flight in sentences_{args.split}.json lands at {airport}")
     # The columns are positional and `box-v3` stopped stating which is which, so they are checked
     # against the file's own data before anything is drawn from them.
-    check_columns(sentences, list(vocabulary["runway_idents"]), vocabulary["spec"])
+    runway_idents = list(payload["runway_idents"])
+    check_columns(sentences, runway_idents, payload["spec"])
     per_stratum = args.flights // 2
     candidates = drawn_flights(sentences, per_stratum, args.seed)
 
@@ -909,7 +915,7 @@ def main(argv: list[str] | None = None) -> int:
     prior_block = None
     if args.prior:
         prior_dir = args.prior if args.prior.is_absolute() else REPO_ROOT / args.prior
-        model, prior_config, types, prior_payload = load_prior(prior_dir, vocabulary["sha256"])
+        model, prior_config, types, prior_payload = load_prior(prior_dir, payload["sha256"])
         said_by_flight = prior_sentences(
             model, prior_config, types,
             [sentences[flight_id] for flight_id, _, _ in draw], [item for _, _, item in draw])
@@ -925,7 +931,8 @@ def main(argv: list[str] | None = None) -> int:
             "readout": json.loads((prior_dir / "readings.json").read_text(encoding="utf-8"))["readings"],
         }
 
-    flights = [flight_payload(sentences[flight_id], item, stratum, vocabulary, said)
+    flights = [flight_payload(sentences[flight_id], item, stratum, vocabulary,
+                              runway_idents.index(sentences[flight_id]["runway"]), said)
                for (flight_id, stratum, item), said in zip(draw, said_by_flight, strict=True)]
     out.mkdir(parents=True)
     write_json_atomic(out / SAMPLE_FILE, {
@@ -933,7 +940,7 @@ def main(argv: list[str] | None = None) -> int:
         "kinds": list(KINDS),
         "reading": reading_block(),
         **({"prior": prior_block} if prior_block is not None else {}),
-        "vocabulary": vocabulary_block(vocabulary),
+        "vocabulary": vocabulary_block(payload, vocabulary),
         "flights": flights,
     })
 
@@ -947,8 +954,8 @@ def main(argv: list[str] | None = None) -> int:
         "id": set_id, "kind": KIND_PRIOR if prior_block is not None else KIND_READBACK,
         "title": args.title or f"Box vocabulary · {READING_RULE} · {args.split}",
         "file": f"{out.name}/{SAMPLE_FILE}",
-        "vocabularySha256": vocabulary["sha256"],
-        "runwaySha256": runway_sha256(vocabulary["runway_idents"]),
+        "vocabularySha256": payload["sha256"],
+        "runwaySha256": runway_sha256(runway_idents),
         "readingRule": READING_RULE, "flights": len(flights),
         "cohort": {"split": args.split, "perStratum": per_stratum, "seed": args.seed,
                    "drawnFrom": (f"a seeded permutation of the {args.split} split at {airport}, "

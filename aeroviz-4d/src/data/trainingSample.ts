@@ -575,22 +575,32 @@ export function altitudeTargetM(vocabulary: TrainingWordSpec, word: number): num
 }
 
 /**
- * The target's own tolerance, `redundancy × (T + h0)` — the half-width the wedge
- * closes onto at the END of its segment, and the spacing of the ladder itself.
- * The `+ h0` is what gives a target of 0 m a box at all.
+ * The target's own tolerance, `redundancy × (|T| + h0)` — the half-width the
+ * wedge closes onto at the END of its segment, and the spacing of the ladder
+ * itself. The `+ h0` is what gives a target of 0 m a box at all.
+ *
+ * MIRROR of `box_vocabulary.BoxVocabulary.altitude_half_width`, **including the
+ * absolute value**. THIRTEEN OF THE SIXTY-ONE LADDER TARGETS ARE NEGATIVE: the
+ * ladder spans the threshold, because an arrival passing below the threshold
+ * elevation is an ordinary one and a ladder floored at zero refused it. Without
+ * the `abs`, `redundancy × (T + h0)` reaches zero at T = −h0 and goes NEGATIVE
+ * below it — an inverted box, which draws as a corridor nothing can be inside.
+ * It read correctly on every published flight only because none of them was low
+ * enough for long enough, which is exactly the kind of bug that waits.
  */
 export function altitudeFloorM(vocabulary: TrainingWordSpec, word: number): number {
-  return vocabulary.redundancyFraction * (altitudeTargetM(vocabulary, word) + vocabulary.altitudeH0M);
+  return vocabulary.redundancyFraction * (Math.abs(altitudeTargetM(vocabulary, word)) + vocabulary.altitudeH0M);
 }
 
 /**
  * The wedge at a row that has `remainingPathM` of track left before its
  * segment's end: `T - r·tan(up) - f ≤ h ≤ T + r·tan(down) + f`.
  *
- * MIRROR of `instruction_sample_export.altitude_envelope`, and of the artefact's
- * own `reading.altitudeForm`. The exporter is what writes the envelope columns; this is
- * here so a view can draw the wedge for a word the file carries no column for —
- * the MODEL's words at a row, say — without a second definition of the shape.
+ * MIRROR of `box_vocabulary.contains` — by way of
+ * `instruction_sample_export.altitude_envelope`, which mirrors it line for line.
+ * The exporter is what writes the envelope columns; this is here so a view can
+ * draw the wedge for a word the file carries no column for — the MODEL's words
+ * at a row, say — without a second definition of the shape.
  */
 export function altitudeWedgeM(
   vocabulary: TrainingWordSpec,

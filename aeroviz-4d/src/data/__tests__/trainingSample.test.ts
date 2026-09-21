@@ -103,6 +103,25 @@ describe("what a word means", () => {
     expect(altitudeFloorM(MOCK_SPEC, atZero)).toBeGreaterThan(0);
   });
 
+  it("a NEGATIVE target still has a box, and it is not inverted", () => {
+    // Thirteen of the artefact's sixty-one targets are negative: the ladder spans the threshold,
+    // because an arrival passing below the threshold elevation is an ordinary one. The half width
+    // takes the target's ABSOLUTE value — without that, `redundancy × (T + h0)` reaches zero at
+    // T = −h0 and goes negative below it, which draws a corridor nothing can be inside.
+    const below = MOCK_SPEC.altitudeTargetsM.findIndex((metres) => metres < 0);
+    expect(below).toBeGreaterThanOrEqual(0);
+    const target = altitudeTargetM(MOCK_SPEC, below);
+    expect(altitudeFloorM(MOCK_SPEC, below)).toBeCloseTo(
+      MOCK_SPEC.redundancyFraction * (Math.abs(target) + MOCK_SPEC.altitudeH0M), 9);
+    expect(altitudeFloorM(MOCK_SPEC, below)).toBeGreaterThan(0);
+    const [low, high] = altitudeWedgeM(MOCK_SPEC, below, 0);
+    expect(high).toBeGreaterThan(low);
+    // and a target far below the threshold, where the un-absolute form would be worst
+    const deep: typeof MOCK_SPEC = { ...MOCK_SPEC, altitudeTargetsM: [-400, -100, 0, 100] };
+    expect(altitudeFloorM(deep, 0)).toBeCloseTo(0.05 * (400 + 50), 9);
+    expect(altitudeWedgeM(deep, 0, 0)[1]).toBeGreaterThan(altitudeWedgeM(deep, 0, 0)[0]);
+  });
+
   it("the wedge closes onto the target's own box, and opens ASYMMETRICALLY going back", () => {
     const word = 5;
     const target = altitudeTargetM(MOCK_SPEC, word);
