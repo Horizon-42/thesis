@@ -39,6 +39,9 @@ export const TRAINING_TRACE_COLOR = "#cbd5e1";
  *  is not built). */
 export const TRAINING_FLOWN_COLOR = "#fb923c";
 
+/** The target altitude reference plane inside each 3D envelope box. */
+export const TRAINING_TARGET_COLOR = "#67e8f9";
+
 /**
  * THE BOX ITSELF — the interval a word names, drawn as a filled band with its two
  * edges. Under `box-v2-wedge` the box IS the word, so this is not a decoration

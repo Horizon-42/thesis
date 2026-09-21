@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { isMissingJsonAsset } from "../utils/fetchJson";
-import { TRAINING_FLOWN_COLOR, TRAINING_MODEL_COLOR } from "../utils/trainingWordColors";
+import { TRAINING_FLOWN_COLOR, TRAINING_MODEL_COLOR, TRAINING_TARGET_COLOR } from "../utils/trainingWordColors";
 import {
   fetchTrainingIndex,
   fetchTrainingSample,
@@ -299,6 +299,11 @@ export default function TrainingPanel() {
               the envelope the model said
             </label>
           </fieldset>
+          {trainingLayers.flown ? (
+            <p className="training-note" style={{ color: TRAINING_TARGET_COLOR }}>
+              Cyan planes mark target altitudes above the runway threshold.
+            </p>
+          ) : null}
 
           {/* AV6 in reverse: a rejected entry names itself and its field, and the
               sets beside it still load. */}

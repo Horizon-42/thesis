@@ -241,3 +241,22 @@ that divergence is a known open item (see the README's "Future Improvements").
 一行、路径积分不加地速下限。
 
 设计与决定表：`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §5、V53–V58。
+
+### AV20 · Training 选段与三维盒子高亮联动
+
+`AppContext` 保存航班相对时间 `trainingCursorS`，底部句子条、读数核对窗口和三维图层共用。
+点击事件编号或词带（键盘 Enter / 空格同样有效）沿用原来的选时规则：事件自己的时间或词带起点。
+`useTrainingTrackLayer` 用 `eventInForce` 找到该时刻生效的盒子，将侧面、顶盖和起点标记改为
+`TRAINING_WORD_COLOR` 黄色，并增强填充、放大标记；前一个盒子恢复原来的橙色和透明度。
+时间恰好落在新事件上时选新盒子，航迹终点仍选最后一个盒子。
+
+换航班时游标在渲染前归零；关闭再打开区域图层会重新应用当前高亮。选段只改 Cesium 实体样式并
+请求重绘，不重建几何，不改相机或共享的 `viewer.clock`。盒子仍遵守 `trainingLayers.flown` 开关。
+
+### AV21 · Training 目标高度参考面
+
+每个事件盒内增加青色半透明目标高度面，平面范围沿用盒子的扇形轮廓，高度固定为
+`altitudeTargetM + altHaeLoM[0] - altLoM[0]`：后两项恢复导出器给该盒使用的入口相对高度到 HAE
+的偏移。因此参考面落在目标高度上，不取非对称楔形的中点，也不跟随飞机高度。
+它随 `trainingLayers.flown` 显隐；选中段时增强青色填充并加黄色边框，与橙色盒体／黄色高亮区分。
+左侧 Draw 下说明青色代表相对跑道入口的目标高度。

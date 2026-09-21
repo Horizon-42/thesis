@@ -19,9 +19,15 @@ const { appState } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../../context/AppContext", () => ({
-  useApp: () => ({ ...appState }),
-}));
+vi.mock("../../context/AppContext", async () => {
+  const { useState } = await import("react");
+  return {
+    useApp: () => {
+      const [trainingCursorS, setTrainingCursorS] = useState(0);
+      return { ...appState, trainingCursorS, setTrainingCursorS };
+    },
+  };
+});
 
 import TrainingSentenceBar, { rowBands, spacedLabels } from "../TrainingSentenceBar";
 import { parseTrainingSample, TRAINING_KINDS } from "../../data/trainingSample";

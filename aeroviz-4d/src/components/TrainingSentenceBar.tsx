@@ -152,25 +152,15 @@ export function spacedLabels(xs: number[], minGap: number, keepLast = false): bo
 }
 
 export default function TrainingSentenceBar() {
-  const { trainingSelection, trainingLayers } = useApp();
+  const {
+    trainingSelection, trainingLayers,
+    trainingCursorS: cursorS, setTrainingCursorS: setCursorS,
+  } = useApp();
   const frameRef = useRef<HTMLDivElement>(null);
   const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
   const [readbackOpen, setReadbackOpen] = useState<boolean>(false);
   const [notesOpen, setNotesOpen] = useState<boolean>(false);
-  const [cursor, setCursor] = useState<{ flightKey: string | null; atS: number }>({
-    flightKey: null,
-    atS: 0,
-  });
-
   const flightKey = trainingSelection?.flight.flightKey ?? null;
-
-  // A new flight starts at its own beginning, and the reset happens DURING the
-  // render that changes flight — in an effect it would happen after it, letting
-  // one frame paint the new flight's bands under the old flight's cursor and read
-  // out a time the new flight may not even have.
-  if (cursor.flightKey !== flightKey) setCursor({ flightKey, atS: 0 });
-  const cursorS = cursor.flightKey === flightKey ? cursor.atS : 0;
-  const setCursorS = (atS: number) => setCursor({ flightKey, atS });
 
   // Measured before paint, so the frame in which the bar appears is already drawn
   // at the real width instead of at DEFAULT_PLOT_W.
@@ -292,8 +282,7 @@ export default function TrainingSentenceBar() {
           </span>
         ) : null}
         <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s</span>
-        {/* The window shares THIS cursor — it is the same moment of the same
-            flight, so it is one number, held here and passed down. */}
+        {/* The window and 3D boxes share the sentence bar's flight-relative cursor. */}
         <button
           type="button"
           className="training-sentence-readback-button"

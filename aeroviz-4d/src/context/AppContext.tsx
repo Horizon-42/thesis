@@ -240,6 +240,9 @@ interface ApproachViewSessionState {
 interface TrainingSessionState {
   trainingSelection: TrainingSelection | null;
   setTrainingSelection: (selection: TrainingSelection | null) => void;
+  /** Flight-relative time shared by the sentence bar, read-back and 3D boxes. */
+  trainingCursorS: number;
+  setTrainingCursorS: (atS: number) => void;
   /**
    * WHICH OF THE THREE LINES ARE DRAWN. The observed track is not one of them:
    * it is the aircraft that was actually there, and every other line is read
@@ -350,6 +353,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
   const [trainingSelection, setTrainingSelection] = useState<TrainingSelection | null>(null);
+  const [trainingCursor, setTrainingCursor] = useState<{ flightKey: string | null; atS: number }>({
+    flightKey: null, atS: 0,
+  });
+  const trainingFlightKey = trainingSelection?.flight.flightKey ?? null;
+  // Reset before consumers paint a new flight with the previous flight's time.
+  if (trainingCursor.flightKey !== trainingFlightKey) {
+    setTrainingCursor({ flightKey: trainingFlightKey, atS: 0 });
+  }
+  const trainingCursorS = trainingCursor.flightKey === trainingFlightKey ? trainingCursor.atS : 0;
+  const setTrainingCursorS = useCallback((atS: number) => {
+    setTrainingCursor({ flightKey: trainingFlightKey, atS });
+  }, [trainingFlightKey]);
   const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({ flown: true, model: true });
   const setTrainingLayer = useCallback((layer: keyof TrainingLayers, on: boolean) => {
     setTrainingLayers((current) => ({ ...current, [layer]: on }));
@@ -583,9 +598,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const trainingSessionState: TrainingSessionState = useMemo(() => ({
     trainingSelection,
     setTrainingSelection,
+    trainingCursorS,
+    setTrainingCursorS,
     trainingLayers,
     setTrainingLayer,
-  }), [trainingSelection, trainingLayers, setTrainingLayer]);
+  }), [trainingSelection, trainingCursorS, setTrainingCursorS, trainingLayers, setTrainingLayer]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,

@@ -109,6 +109,8 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   Cesium wall in HAE, one prism per word, and the verdict computed on the SMOOTHED signals the
   boxes were read from — and WHICH signal that is changed with `box-v3`, so a rule bump means
   re-measuring every one of them, not assuming they carried over (AV19).
+- Training's sentence cursor is shared with read-back and 3D: the box in force is highlighted yellow, with selection changes updating styles only (AV20).
+- Training boxes include cyan target-altitude planes using the box's own HAE offset; they share envelope visibility and segment selection (AV21).
 
 ## Comparison CZML colour contract
 

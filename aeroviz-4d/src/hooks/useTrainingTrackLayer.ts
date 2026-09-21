@@ -65,6 +65,8 @@ import {
   TRAINING_FLOWN_COLOR,
   TRAINING_MODEL_COLOR,
   TRAINING_TRACE_COLOR,
+  TRAINING_TARGET_COLOR,
+  TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import {
   TRAINING_KIND_COLUMN,
@@ -197,7 +199,7 @@ export function trainingSegmentNodes(
 }
 
 export default function useTrainingTrackLayer(): void {
-  const { viewer, mode, trainingSelection, trainingLayers } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers, trainingCursorS } = useApp();
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer)) return;
@@ -264,6 +266,25 @@ export default function useTrainingTrackLayer(): void {
             material: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.07),
           },
         });
+
+        // The target is relative to the runway threshold. Recover the box's
+        // exported datum offset so the reference plane aligns with its walls.
+        // It is a constant target height, independent of the asymmetric wedge.
+        const target = `${BOX_ID}-target-${index}`;
+        added.push(target);
+        viewer.entities.add({
+          id: target,
+          name: `Target altitude: ${box.altitudeTargetM.toFixed(1)} m above runway threshold`,
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(
+              box.lon.flatMap((lon, point) => [lon, box.lat[point]]),
+            )),
+            height: box.altitudeTargetM + box.altHaeLoM[0] - box.altLoM[0],
+            material: Cesium.Color.fromCssColorString(TRAINING_TARGET_COLOR).withAlpha(0.22),
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString(TRAINING_TARGET_COLOR).withAlpha(0.8),
+          },
+        });
       });
     }
 
@@ -319,4 +340,50 @@ export default function useTrainingTrackLayer(): void {
       for (const id of added) viewer.entities.removeById(id);
     };
   }, [viewer, mode, trainingSelection, trainingLayers]);
+
+  // Selection only changes appearance; retain the flight's geometry and camera.
+  // The same event lookup drives the read-back charts, including exact boundaries.
+  useEffect(() => {
+    if (!isCesiumViewerUsable(viewer) || mode !== "training" || !trainingSelection) return;
+    const [index] = eventInForce(trainingSelection.flight.sentence.eventTimesS, [trainingCursorS]);
+    const wall = viewer.entities.getById(`${BOX_ID}-${index}`)?.wall;
+    const lid = viewer.entities.getById(`${BOX_ID}-lid-${index}`)?.polygon;
+    const target = viewer.entities.getById(`${BOX_ID}-target-${index}`)?.polygon;
+    const node = viewer.entities.getById(`${NODE_ID}-${index}`)?.point;
+    const selected = Cesium.Color.fromCssColorString(TRAINING_WORD_COLOR);
+    const base = Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR);
+    const targetColour = Cesium.Color.fromCssColorString(TRAINING_TARGET_COLOR);
+    if (wall) {
+      wall.material = new Cesium.ColorMaterialProperty(selected.withAlpha(0.4));
+      wall.outlineColor = new Cesium.ConstantProperty(selected);
+    }
+    if (lid) lid.material = new Cesium.ColorMaterialProperty(selected.withAlpha(0.3));
+    if (target) {
+      target.material = new Cesium.ColorMaterialProperty(targetColour.withAlpha(0.6));
+      target.outlineColor = new Cesium.ConstantProperty(selected);
+    }
+    if (node) {
+      node.color = new Cesium.ConstantProperty(selected);
+      node.pixelSize = new Cesium.ConstantProperty(14);
+    }
+    viewer.scene.requestRender();
+
+    return () => {
+      if (!isCesiumViewerUsable(viewer)) return;
+      if (wall) {
+        wall.material = new Cesium.ColorMaterialProperty(base.withAlpha(0.1));
+        wall.outlineColor = new Cesium.ConstantProperty(base.withAlpha(0.45));
+      }
+      if (lid) lid.material = new Cesium.ColorMaterialProperty(base.withAlpha(0.07));
+      if (target) {
+        target.material = new Cesium.ColorMaterialProperty(targetColour.withAlpha(0.22));
+        target.outlineColor = new Cesium.ConstantProperty(targetColour.withAlpha(0.8));
+      }
+      if (node) {
+        node.color = new Cesium.ConstantProperty(base);
+        node.pixelSize = new Cesium.ConstantProperty(9);
+      }
+      viewer.scene.requestRender();
+    };
+  }, [viewer, mode, trainingSelection, trainingLayers, trainingCursorS]);
 }
