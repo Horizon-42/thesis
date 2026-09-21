@@ -630,3 +630,52 @@ the pair identifies it, by inference. Every prior reading taken before this scor
 **The conditioning gains a fifth column**, because `72 × 5° = 360°` has the same cosine and sine as
 direction word 0: without it an executor would be told to fly a bearing where the sentence said to
 hold a line.
+
+### H12 · if the vertical word were an ALTITUDE, how it would have to be divided (2026-09-21, KRDU only)
+
+A design check, not a decision — the full measurement is `docs/2026-09-21_vertical_word_method.zh.md`
+§4e (KRDU train, 6,851 flights, `tile_segments` with `min_instruction_s = 0`).
+
+- **Under the tiling reader an altitude word has ONE design lever, the bin width.** The tolerance
+  is nearly free (0.45 → 0.03 of a bin moves instructions a flight 5.7 → 6.5 and the level error
+  not at all), because two neighbouring segments reading as one word emit one instruction: a
+  flight's altitude instructions are its BIN CROSSINGS. Uniform bins therefore sit on a hyperbola —
+  error p50 ≈ 0.3 × bin, instructions ≈ total descent / bin, so error × instructions ≈ 0.3 × the
+  descent ≈ 360 m. Matching the angle word's 12 m profile RMS costs a 50 m bin and 32 instructions
+  a flight against the angle's 4.
+- **The right grading is GEOMETRIC** — bins uniform in `ln(1 + h/h0)`, the third appearance of the
+  reason behind H-percentage tolerances — and it needs no change to the merge: `tile_segments`
+  takes one SCALAR tolerance, which a graded grid in metres cannot express (the "tolerance under
+  half the narrowest gap" invariant would force the ground's bin on the whole climb), while tiling
+  the WARPED signal makes the tolerance constant there and metric-growing in height.
+- **The only altitudes that are instructions are the LEVEL-OFFS** (0.97 a flight, 16.4 % of the
+  time, p50 816 m over the threshold) and they sit on the 1000 ft **MSL** grid: 55.9 % within
+  100 ft against a 20 % null. **Height above the THRESHOLD destroys that structure** (7.5 %, below
+  the null): the threshold elevation shifts the grid by about a third of a bin, differently per
+  airport. So an altitude word would have to live in MSL — the only word here not measured against
+  the runway.
+- **The offset from the round grid is a COMPUTABLE term, not noise** (corrected later the same
+  day; the first reading quoted a pooled "+97 ft" and called it weather). It grows in proportion to
+  height — 50 ft at 600–900 m, 74 at 900–1,200, 101 at 1,200–1,500, 163 at 1,500–2,000, 300 at
+  2,000–3,000 — while the implied ISA deviation stays at 6.4–9.9 °C: control assigns a BAROMETRIC
+  altitude and this data carries a GEOMETRIC one, which differ by about `height × ΔT/273`.
+  **Removing one number a day takes the offset from a median 86 ft to 29 ft** (6,458 level
+  stretches, 57 days, 69.7 % inside 50 ft). So the ladder is NOT limited to 500 ft — the limit is
+  of order 100 ft — and no re-harvest is called for: the correction is a read-time scalar from the
+  field's surface temperature. The vertical datum itself is correct and was verified
+  (`flight_scenarios/datum.py` converts HAE→MSL once per flight on the CIFP threshold elevation;
+  KRDU's four CIFP thresholds match the published values to within 0.6 ft).
+- **The division the three regimes argue for**: geometric below 300 m (h0 = 50 m, step 0.30 → 0 /
+  17.5 / 41 / 73 / 116 / 174 / 252 m, threshold-relative) plus the 1000 ft MSL ladder above it —
+  17 words, 9.7 instructions a flight, level 21.8 / 76.2 m, under 300 m 14.2 / 38.8, end
+  7.7 / 20.3, profile RMS 34.4 / 70.7. Against the angle word (6 words, 4 instructions, RMS
+  12.0 / 41.4, terminal error that ACCUMULATES to 34.7 / 194.6 / 844 m): **the angle says the shape
+  and pays at the end, the altitude pins the end and cannot say the shape, at 2.4× the words** —
+  and about 8 of its 9.7 words a flight are staircase bookkeeping on a continuous descent that no
+  controller ever spoke.
+- **Reconciles with H5 rather than contradicting it**: H5 measured UNCORRECTED MSL anchoring over
+  five airports and found a wash (it rescued KRDU 205.6 → 63.2 ft, damaged KSJC and KSMF). What
+  decides it is the per-airport, per-season offset above, which H5 did not remove. **Only KRDU was
+  read here**, and no altitude sentence has been flown through `instruction_replay` — the landing
+  gate (H9) is unmeasured for this word, as is the executor contract it would need (an altitude
+  target does not say a rate).

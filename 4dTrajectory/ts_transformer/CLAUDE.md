@@ -230,6 +230,14 @@ of the package, not a migration in progress.
   tracks are 13 m), and the LANDING was in no word at all (the terminal word sat on the last
   change, a median 136 s early). 36.7 % → **99.6 %** landed. A word's resolution is NOT the gap:
   un-quantising the speed word buys 18 %, the observed speed 55 % (H9).
+- **If the vertical word were an ALTITUDE, how it would have to be divided** (2026-09-21, KRDU
+  only, a design check): under the tiling reader the bin width is the only lever (tolerance is
+  free, instructions = bin crossings, error × instructions ≈ 0.3 × the descent); the grading has to
+  be GEOMETRIC and the merge takes it unchanged by tiling `ln(1 + h/h0)`; the only altitudes that
+  are instructions are the level-offs and they sit on the 1000 ft **MSL** grid, which
+  height-above-threshold destroys — plus a +97 ft, season-walking, per-day offset no bin absorbs.
+  Best division measured: geometric under 300 m + the 1000 ft MSL ladder above, 17 words and 9.7
+  instructions a flight. **Never flown through the replay gate** (H12).
 - **Its three superseded measurements, kept because they are what decided it**: the 1000 ft
   altitude bin was indistinguishable from random rounding and 56 % of its "instructions" were the
   threshold crossing (H5); the POSITION angle to the threshold is a criterion, not a word (p50
