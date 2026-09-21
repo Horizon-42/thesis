@@ -1,14 +1,14 @@
 """The instruction prior (two-tier v3 stage B, plan §5.2.2 "预训练"; B′-dev3): a causal
-Transformer over one flight's sentence that says, at every position, the five words in force at
+Transformer over one flight's sentence that says, at every position, the six words in force at
 the NEXT event — one softmax per kind (factorised heads), the terminal kind among them
 instead.
 
     [TYPE] [RWY]  [w_0, x_0] [w_1, x_1] … [w_T, x_T]
-        →  at t: p(heading_{t+1}), p(altitude_{t+1}), p(speed_{t+1}), p(intercept_{t+1}),
+        →  at t: p(heading_{t+1}), p(vertical_{t+1}), p(speed_{t+1}),
                  p(runway_{t+1}), p(duration_{t+1}), p(terminal_{t+1})
 
-Tokens: the sum of the five word embeddings (the intercept's table has no extra row for "no
-capture yet"; the runway's classes are the cohort's thresholds, `instructions.RunwayVocabulary`,
+Tokens: the sum of the six word embeddings (the runway's classes are the cohort's thresholds,
+`instructions.RunwayVocabulary`,
 which is why `PriorConfig.words` carries their count rather than reading it off the spec), the
 state token (`instruction_sequences.state_token`, six features through a
 linear layer) and the position; two context tokens (aircraft type, runway) sit in front and
@@ -50,8 +50,8 @@ TOP_K = (1, 2, 4, 8)
 JOINT_TOP_K = (2, 4, 8)
 JOINT_SEARCH = 8
 #: Positions `_joint_ranks` scores at once (its candidate tensor is [rows, Π_kind min(JOINT_SEARCH,
-#: classes)] — at most JOINT_SEARCH ** len(INSTRUCTION_KINDS), in practice far less: the intercept
-#: has 4 classes and the runway one per threshold).
+#: classes)] — at most JOINT_SEARCH ** len(INSTRUCTION_KINDS), in practice far less: the vertical
+#: has 6 classes and the runway one per threshold).
 JOINT_CHUNK = 2048
 if max(JOINT_TOP_K) > JOINT_SEARCH:
     raise RuntimeError("the joint top-K is searched inside each kind's top-JOINT_SEARCH: K cannot exceed it")

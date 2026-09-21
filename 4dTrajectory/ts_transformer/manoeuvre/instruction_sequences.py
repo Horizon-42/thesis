@@ -1,6 +1,6 @@
 """One flight's sentence as the prior consumes it (plan §5.2.2).
 
-    event k:  input  = words[k] (heading, altitude, speed, runway, duration, terminal)
+    event k:  input  = words[k] (heading, vertical, speed, runway, duration, terminal)
                      + the state token at that event's time + the event's index
               target = words[k + 1]
 

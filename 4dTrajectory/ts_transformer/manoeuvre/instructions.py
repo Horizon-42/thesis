@@ -1,14 +1,17 @@
 """Instruction words read from an arrival's track (two-tier v3 stage B, plan §5.2.1).
 
-An arrival is a SENTENCE: a sequence of EVENTS, one per moment something changed, each carrying
-six words — heading, altitude and speed as absolute targets, the runway they are measured against,
-the gap since the previous event, and whether the approach ends here.
+An arrival is a SENTENCE: a sequence of EVENTS, one per moment something changed plus one for the
+landing, each carrying six words — heading, vertical and speed as targets, the runway they are
+measured against, the gap since the previous event, and whether the approach ends here.
 
-    heading    the ground track against the final approach course, 10° a bin, the whole circle
-    altitude   height above the landing threshold, 1000 ft a bin, 0 … 10 000 ft
-    speed      ground speed (ADS-B carries no airspeed; the wind is inside this number)
-    runway     which threshold the three above are measured against — a per-airport class set,
-               carried BESIDE the spec so one vocabulary still serves five airports (D62)
+    heading    the ground track against the final approach course, 5° a bin, the whole circle;
+               word 0 names the COURSE, and flying it means tracking the centreline
+    vertical   the FLIGHT PATH ANGLE, six modes, DESCENT POSITIVE — a rate, read by fitting the
+               height profile, not a height to hold
+    speed      ground speed, 16 fitted centres (ADS-B carries no airspeed; the wind is inside it)
+    runway     which threshold the three above are measured against — `AIRPORT:ident`, a
+               per-cohort class set carried BESIDE the spec so one vocabulary serves five
+               airports (D62)
     duration   the gap to the previous event, 2 s a bin (D71): the ADS-B row grid's own resolution
     terminal   continue / landed / go-around (D72) — one question, one answer, no separate head
 
@@ -17,10 +20,20 @@ There is no intercept word (D73): it was the heading word's shadow — every one
 at the same instant as a heading word — and an intercept ANGLE is a consequence of the heading a
 controller assigns, not a target he states.
 
-A level is a stretch that holds within a tolerance for `PLATEAU_MIN_S`, whose fitted slope moves it
-by no more than half that tolerance; everything between two levels is a manoeuvre, whatever its
-rate, and the instruction's target is the level it reaches, issued where the signal departs the
-level held just before it.
+TWO KINDS OF QUANTITY, READ TWO WAYS. The heading and the speed are ABSOLUTE TARGETS, so a level —
+a stretch that holds within a tolerance for `PLATEAU_MIN_S`, whose fitted slope moves it by no more
+than half that tolerance — is what an instruction looks like; everything between two levels is a
+manoeuvre, whatever its rate, and the target is the level it reaches, issued where the signal
+departs the level held just before it. The vertical is a RATE, which describes the shape of the
+whole curve, so its segments must TILE the track: they come from an optimal piecewise-linear fit of
+height against cumulative horizontal distance (`_vertical_instructions`).
+
+WHAT AN ABSOLUTE TARGET CANNOT SAY, and how the reading pays for it: a direction cannot say which
+way ROUND to turn, so a turn wider than `turn_split_deg` is split into intermediate targets the
+aircraft passed through; and a direction cannot hold a LINE, so flying word 0 means tracking the
+centreline rather than its bearing (`instruction_kinematics.target_course_deg`). Both were found by
+flying the sentences back (`run_ts.py instruction_replay`), where they cost 63 points of landing
+rate between them.
 """
 
 from __future__ import annotations
@@ -83,11 +96,10 @@ NO_INTERCEPT = -1
 #: readers (jq, JSON.parse) refuse, and the sentences files are read by both.
 NO_TARGET = 0.0
 
-#: D51 bins (settled 2026-09-20, module docstring). Heading: 10° over a full circle (36 words;
-#: bin 0 = the final approach course). Altitude: 1000 ft above the threshold, 0 … 10 000 ft
-#: (11 words). Speed: 10 kt of ground speed, 100 … 320 kt (23 words). A value outside a range is
-#: clamped to the edge word and COUNTED. Intercept: ≤ 30° / 30–45° / beyond (3 words; the third
-#: holds what a procedure would not clear — 42 % of the cohort's captures read there).
+#: The heading bin (2026-09-21): 5° over a full circle, 72 words, bin 0 = the final approach
+#: course. It halved from 10° when the vocabulary was re-measured; each class still carries a
+#: median 497 samples on the five-airport cohort. A value outside a kind's range is clamped to the
+#: edge word and COUNTED, never silently.
 HEADING_BIN_DEG = 5.0
 FT, KT = FT_M, KT_MS                      # geokit's exact definitions, kept for the readouts
 #: The VERTICAL word is a flight path angle, not a height: on an approach an aircraft does two
@@ -380,7 +392,7 @@ class Vocabulary:
 
 
     # ── the executor's view of the words ──────────────────────────────────
-    #: one event's conditioning: cos, sin of the heading centre, then the altitude and speed
+    #: one event's conditioning: cos, sin of the heading centre, then the vertical and speed
     #: centres as fractions of their ceilings. The intercept column went with D73.
     #: The runway is NOT here: the executor already works in the runway's own frame, so the
     #: runway is implicit in its coordinates, and handing it an index as well would be redundant
@@ -395,7 +407,7 @@ class Vocabulary:
     def conditioning(self, words: np.ndarray) -> np.ndarray:
         """The bin CENTRES the executor conditions on, ``[..., CONDITIONING_WIDTH]`` float32 for
         the sentence's words (plan §5.2.1 "执行器怎么吃"): the heading as cos / sin so the wrap at
-        ±180° is continuous, the altitude and speed as fractions of the vocabulary's ceilings."""
+        ±180° is continuous, the vertical and speed as fractions of the vocabulary's ceilings."""
         words = np.asarray(words)
         if words.shape[-1] != len(INSTRUCTION_KINDS):
             raise ValueError(f"words are [..., {len(INSTRUCTION_KINDS)}], got {words.shape}")
@@ -540,8 +552,9 @@ def flight_runway(series: FlightSeries) -> str:
 @dataclass(frozen=True)
 class Instruction:
     """One word issued at one time: ``kind`` ∈ `INSTRUCTION_KINDS`, ``word`` its index, ``target``
-    the plateau value it was read from (deg relative to the course / m above the threshold / m/s /
-    deg of intercept angle), ``issued_s`` the manoeuvre's start (the previous plateau's end),
+    the value it was read from (deg relative to the course / deg of flight path angle, descent
+    positive / m/s; `NO_TARGET` for the runway, which has a name rather than a number),
+    ``issued_s`` the manoeuvre's start (the previous plateau's end),
     ``settled_s`` where the target plateau begins (None for a manoeuvre running to the end of
     the record), ``clamped`` when the target fell outside the vocabulary's range."""
 

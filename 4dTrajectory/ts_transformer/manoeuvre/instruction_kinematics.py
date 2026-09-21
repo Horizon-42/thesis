@@ -1,20 +1,23 @@
 """Fly a sentence: the simplest kinematics that can turn, descend and slow towards the words.
 
-A sentence says only WHERE to go — turn to this angle off the course, come down to this height
-above the threshold, slow to this ground speed — and never how fast to get there; that is the
-executor's business and the aircraft's (two-tier plan v3, D50). Drawing "what the words alone
-say" therefore needs a rule for the how, and this is the smallest one that is still an aircraft:
-turn at the route's bank angle, close a height error on the controller's time constant inside its
-flight-path-angle limits, and accelerate at its limit.
+A sentence says only WHERE to go — turn to this angle off the course, hold this flight path
+angle, slow to this ground speed — and never how fast to get there; that is the executor's
+business and the aircraft's (two-tier plan v3, D50). Drawing "what the words alone say" therefore
+needs a rule for the how, and this is the smallest one that is still an aircraft: turn at a fixed
+bank, fly the commanded angle inside the airframe's limits, and accelerate at a fixed rate.
 
 IT IS A DIAGNOSTIC AND A BASELINE, NEVER THE MODEL'S ANSWER (design §5.5, and the user's standing
 rule): the line it draws is what a rule-follower would fly given the words, which is exactly what
 makes the distance between it and the observed track readable as "what the words did not say".
+It is ALSO the vocabulary's acceptance gate (`run_ts.py instruction_replay`): a sentence nothing
+can fly to the runway is not a sentence worth training on.
 
-EVERY CONSTANT IS IMPORTED. The bank angle and the turn radius come from the route builder, the
-height time constant, the flight-path-angle limits and the acceleration limit from the guidance
-controller, gravity from the flyability geometry. Retyping any of them here would be a second
-definition of a number the executor already flies by, and the two would drift apart silently.
+WHERE THE CONSTANTS COME FROM. The flight-path-angle limits come from the guidance controller and
+gravity from the flyability geometry — retyping either would be a second definition of a number
+the executor already flies by. The BANK and the ACCELERATION are this module's own and are
+MEASURED on the arrival fleet (`TURN_BANK_RAD`, `ACCEL_MAX_MPS2`): the route builder's 20° answers
+a different question — how tight an arc may be DRAWN, not how fast an arrival actually turns — and
+a preview that turns half again too fast finishes every turn early.
 
 WHAT IS NOT MODELLED, because it cannot be read out of a sentence (design §5.4): no wind (the
 words are GROUND speeds, so the wind is already inside the number), no aircraft type (one bank
