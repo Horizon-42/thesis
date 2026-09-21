@@ -5,27 +5,32 @@
  * TIME. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §3.1 (T4a).
  *
  * THE HORIZONTAL AXIS IS TIME, NOT EVENT NUMBER. The sentence is an event
- * sequence (reading rule `segment-v13`): the gaps are irregular — 26 s and 58 s
- * in the fixture, a median 44 s and a p95 of 128 s in the artefact — so evenly
- * spaced columns would draw a wrong picture of when anything was said. That is
- * the same bias the even 10 s grid was deleted for.
+ * sequence: the gaps are irregular — a median hold of 4 s and a p95 of 20 s in
+ * the artefact — so evenly spaced columns would draw a wrong picture of when
+ * anything was said.
  *
- * TWO THINGS THE PICTURE MUST NOT HIDE, both measured on KRDU's export:
- *  • The track OUTLIVES the sentence. The last event sits a median 145 s before
- *    the end of a 326 s arrival, because the words in force there are held to the
- *    threshold. Every row's last band therefore runs to `durationS`, and the
- *    unworded tail is drawn as such on the gap row instead of being left blank.
- *  • `go-around` is a terminal class that EXISTS and is never observed here (the
- *    25 km arrival slice keeps only the final successful approach). The legend
- *    says so in those words — a reader must not take it for a word the model
- *    declines to use.
+ * THE BOXES TILE THE TRACK. Under `box-v2-wedge` each box carries its own hold
+ * (the duration word describes the row it sits on), and the next box opens where
+ * it closes — so every row of the track has exactly one box in force and there is
+ * no unworded tail. That is a change from the retired rule, where the gap word
+ * measured the interval BEHIND its event and the last 145 s of a median arrival
+ * carried no word at all.
+ *
+ * WHAT THE HEADER READS OUT IS CONTAINMENT, because that is this vocabulary's
+ * criterion: a sentence holds if every row of the track is inside the boxes in
+ * force at its moment. It is recomputed here from the columns rather than read
+ * off the file — the parser has already refused a file whose own verdict differs.
+ *
+ * `go-around` is a terminal class that EXISTS and is never observed here (the
+ * 25 km arrival slice keeps only the final successful approach). The legend says
+ * so in those words — a reader must not take it for a word the model declines to
+ * use.
  *
  * The cursor is in FLIGHT TIME and is moved by clicking a band or an event: no
  * pixel→time arithmetic anywhere, so what it reports is the artefact's own number
- * rather than a rounded screen position. It does NOT drive `viewer.clock` yet —
- * Training loads no CZML (design V2), so there is nothing in the scene for a
- * clock to move, and the export carries no absolute epoch to anchor one to. Both
- * arrive together in T6, with the 3D tracks (V22).
+ * rather than a rounded screen position. It does NOT drive `viewer.clock`:
+ * Training loads no CZML (design V2), and the export carries no absolute epoch to
+ * anchor one to.
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
@@ -36,11 +41,13 @@ import {
   formatSeconds,
   TERMINAL_NEVER_OBSERVED,
   TERMINAL_WORDS,
+  TRAINING_BOX_KINDS,
   TRAINING_KINDS,
   TRAINING_KIND_COLUMN,
+  isTrainingBoxKind,
+  trainingContainment,
   trainingWordBandLabel,
   trainingWordLabel,
-  type TrainingAbsorbed,
   type TrainingFlight,
   type TrainingKind,
 } from "../data/trainingSample";
@@ -64,72 +71,47 @@ const MIN_PLOT_W = 320;
 /** A band is wide enough for its word only above this many pixels; below it the
  *  word stays in the band's tooltip, which every band carries. */
 const LABEL_MIN_W = 34;
-/** And wide enough for the word AND its tolerance only above this many. The
- *  tolerance is dropped first because the centre is the part a reader cannot
- *  reconstruct; the tooltip carries both whatever the width. */
+/** And wide enough for the word AND its box only above this many. */
 const BAND_LABEL_MIN_W = 64;
 /** Minimum spacing for an event number and for an axis tick label. */
 const EVENT_LABEL_GAP = 13;
 const TICK_LABEL_GAP = 32;
 
-/**
- * The three kinds whose word is a TARGET the aircraft flies towards, the way a
- * clearance is — and, for two of them, a target BAND rather than a value: the
- * word says "hold this angle to within ±7 %", so the band's label carries the
- * tolerance and the row is not read as a measurement (V24, §5.6).
- */
-const TARGET_KINDS: readonly TrainingKind[] = ["heading", "vertical", "speed"];
-
 const ROW_LABEL: Record<TrainingKind, string> = {
   heading: "Heading (°)",
-  // The angle, not a height: a word here says how steeply to fly, and the arrow
-  // in every label says which way (descent is positive in the vocabulary).
-  vertical: "Vertical (°)",
+  // A target HEIGHT above the threshold, with a wedge around it — not the
+  // retired vertical word, which was a flight path angle.
+  altitude: "Altitude (m)",
   speed: "Speed (m/s)",
   runway: "Runway",
-  duration: "Gap (s)",
+  duration: "Hold (s)",
   terminal: "Terminal",
 };
 
 interface Band {
   startS: number;
   endS: number;
-  /** null on the gap row's unworded tail: after the last event the sentence says
-   *  nothing more, and drawing a word there would invent one. */
-  word: number | null;
+  word: number;
 }
 
 /**
  * The bands of one row. Consecutive events carrying the SAME word are one band —
  * only one column changes at most events, so an unmerged row would be chopped
  * into identical pieces and read as repeated instructions.
+ *
+ * THE DURATION ROW IS NOT MERGED. Its word describes the row it sits on ("this
+ * box is held for T"), so two consecutive 4 s holds are two boxes, not one 8 s
+ * one, and merging them would draw a hold the sentence never says.
  */
 export function rowBands(flight: TrainingFlight, kind: TrainingKind): Band[] {
-  const { eventTimesS, words } = flight.sentence;
+  const { eventTimesS, holdS, words } = flight.sentence;
   const column = TRAINING_KIND_COLUMN[kind];
-
-  if (kind === "duration") {
-    // The gap word measures the interval BEFORE its event, so it is drawn over
-    // that interval. The first event has nothing before it, and the stretch after
-    // the last event has no gap word at all.
-    const bands: Band[] = eventTimesS.slice(1).map((time, index) => ({
-      startS: eventTimesS[index],
-      endS: time,
-      word: words[index + 1][column],
-    }));
-    const lastEventS = eventTimesS[eventTimesS.length - 1];
-    if (flight.durationS > lastEventS) {
-      bands.push({ startS: lastEventS, endS: flight.durationS, word: null });
-    }
-    return bands;
-  }
-
   const bands: Band[] = [];
   eventTimesS.forEach((time, index) => {
     const word = words[index][column];
-    const endS = index + 1 < eventTimesS.length ? eventTimesS[index + 1] : flight.durationS;
+    const endS = index + 1 < eventTimesS.length ? eventTimesS[index + 1] : time + holdS[index];
     const open = bands[bands.length - 1];
-    if (open && open.word === word) open.endS = endS;
+    if (kind !== "duration" && open && open.word === word) open.endS = endS;
     else bands.push({ startS: time, endS, word });
   });
   return bands;
@@ -141,11 +123,10 @@ export function rowBands(flight: TrainingFlight, kind: TrainingKind): Band[] {
  * position is always kept (it is the end of the axis), evicting the previous
  * keeper if they would collide.
  *
- * This earns its keep on real data: five of the forty flights in KRDU's export
- * have events 2 s apart — 3.7 px at the default width — so their numbers and
- * tick labels would print on top of each other into a smudge. The label is
- * dropped, never the event: its hit area and its tooltip are untouched, exactly
- * as `LABEL_MIN_W` does for a band too narrow to write in.
+ * This earns its keep on real data: a median hold is 4 s — a few pixels at the
+ * default width — so the numbers and tick labels would print on top of each
+ * other into a smudge. The label is dropped, never the event: its hit area and
+ * its tooltip are untouched, exactly as `LABEL_MIN_W` does for a narrow band.
  */
 export function spacedLabels(xs: number[], minGap: number, keepLast = false): boolean[] {
   const keep = xs.map(() => false);
@@ -168,13 +149,6 @@ export function spacedLabels(xs: number[], minGap: number, keepLast = false): bo
     }
   }
   return keep;
-}
-
-/** What an absorbed manoeuvre says, for the tooltip and the accessible name:
- *  the change the labeller measured and the rule that kept it out of the words. */
-function absorbedLabel(item: TrainingAbsorbed): string {
-  const change = `${item.change > 0 ? "+" : ""}${item.change.toFixed(1)}`;
-  return `absorbed ${item.kind}: ${change} over ${formatSeconds(item.startS)}–${formatSeconds(item.endS)} s, not worded (${item.reason})`;
 }
 
 export default function TrainingSentenceBar() {
@@ -212,21 +186,21 @@ export default function TrainingSentenceBar() {
   }, [flightKey]);
 
   if (!trainingSelection) return null;
-  const { flight, vocabulary, geometry } = trainingSelection;
+  const { flight, vocabulary, reading } = trainingSelection;
   const { eventTimesS } = flight.sentence;
-  const lastEventS = eventTimesS[eventTimesS.length - 1];
-  const tailS = flight.durationS - lastEventS;
 
   const xFor = (seconds: number) => GUTTER + (seconds / flight.durationS) * plotW;
   const label = (kind: TrainingKind, word: number) => trainingWordLabel(vocabulary, kind, word);
+  const bandLabel = (kind: TrainingKind, word: number) =>
+    trainingWordBandLabel(vocabulary, kind, word);
 
   /**
    * WHAT THE MODEL SAID, drawn only where it DIFFERS from the truth.
    *
-   * Agreement is the common case (the heading word matches 86 % of the time), so
-   * drawing every said word would paint the whole bar and hide the answer. The
-   * purple strips are the disagreements; their absence is agreement, and the
-   * header counts both so the eye is not left to estimate it.
+   * Agreement is the common case, so drawing every said word would paint the
+   * whole bar and hide the answer. The purple strips are the disagreements; their
+   * absence is agreement, and the header counts both so the eye is not left to
+   * estimate it.
    */
   const said = trainingLayers.model ? flight.prior : undefined;
   const disagreements = said
@@ -238,7 +212,9 @@ export default function TrainingSentenceBar() {
           return [{
             kind,
             startS,
-            endS: event + 1 < eventTimesS.length ? eventTimesS[event + 1] : flight.durationS,
+            endS: event + 1 < eventTimesS.length
+              ? eventTimesS[event + 1]
+              : startS + flight.sentence.holdS[event],
             word: said.words[event][column],
             truth: flight.sentence.words[event][column],
             confidence: said.confidence[event][column],
@@ -249,28 +225,21 @@ export default function TrainingSentenceBar() {
   const saidWords = said
     ? (eventTimesS.length - said.givenEvents) * TRAINING_KINDS.length
     : 0;
-  const bandLabel = (kind: TrainingKind, word: number) =>
-    trainingWordBandLabel(vocabulary, kind, word);
 
   /**
-   * What the speed tolerance costs, in the one unit it is legible in: when this
-   * sentence puts the aircraft over the threshold, flown at each end of every
-   * speed word's ±3 %.
+   * THE VERDICT: how many of the track's rows sit inside the boxes in force.
    *
-   * It is a HEADER readout rather than a bracket on the terminal row, as the
-   * design first had it: the flown sentence runs to the observed duration plus
-   * 120 s, so the window usually falls past the right-hand edge of this bar and
-   * a bracket there would be clipped away exactly when it had something to say
-   * (V39). The clock is the track's own, shared with every other time here.
+   * It is the criterion of this vocabulary, so it is in the header rather than
+   * behind a toggle — and it is recomputed from the columns, not read off the
+   * file, so what is on screen is what this code measures.
    */
-  const arrival = flight.geometric.speedBand.arrivalWindowS;
-  const arrivalReadout = arrival
-    ? `arrives ${formatSeconds(arrival[0])}–${formatSeconds(arrival[1])} s`
-    : `no arrival window: an edge ended on ${
-        flight.geometric.speedBand.low.endReason === "crossed-threshold"
-          ? flight.geometric.speedBand.high.endReason
-          : flight.geometric.speedBand.low.endReason
-      }`;
+  const inside = trainingContainment(flight, flight.envelope, vocabulary, flight.sentence.words);
+  const modelInside = said
+    ? trainingContainment(flight, said.envelope, vocabulary, said.words)
+    : undefined;
+  const insideReadout = TRAINING_BOX_KINDS
+    .map((kind) => `${kind} ${inside[kind].rows - inside[kind].outside}/${inside[kind].rows}`)
+    .join(" · ");
 
   const terminalWords = Array.from({ length: TERMINAL_WORDS }, (_, word) =>
     label("terminal", word),
@@ -289,20 +258,17 @@ export default function TrainingSentenceBar() {
         <strong>{flight.callsign}</strong>
         <span>runway {flight.runway}</span>
         <span>{flight.stratum}</span>
-        <span>
-          {eventTimesS.length} events · {flight.instructions.length} instructions ·{" "}
-          {flight.absorbed.length} absorbed
-        </span>
+        <span>{eventTimesS.length} boxes</span>
         <span>{formatSeconds(flight.durationS)} s of track</span>
         <span
           className="training-sentence-arrival"
           title={
-            arrival
-              ? "When the words put it over the threshold, flown at each end of every speed word's tolerance. The speed tolerance's cost is arrival TIME, so this is where it is legible."
-              : "The speed tolerance's cost is arrival time, and it cannot be read when an edge never reached the runway."
+            "Containment is this vocabulary's criterion: a sentence holds if every row of the " +
+            "track is inside the boxes in force at its moment. Measured on the smoothed signals " +
+            `the boxes were read from — ${reading.courseSignal}.`
           }
         >
-          {arrivalReadout}
+          inside: {insideReadout}
         </span>
         {said ? (
           <span
@@ -315,6 +281,11 @@ export default function TrainingSentenceBar() {
             }
           >
             model: {saidWords - disagreements.length}/{saidWords} words
+            {modelInside
+              ? `, its boxes hold ${TRAINING_BOX_KINDS.map(
+                  (kind) => `${modelInside[kind].rows - modelInside[kind].outside}/${modelInside[kind].rows}`,
+                ).join("/")}`
+              : ""}
             {said.landedAtS === null
               ? ""
               : `, said landed at ${formatSeconds(said.landedAtS)} s`}
@@ -341,21 +312,6 @@ export default function TrainingSentenceBar() {
         role="img"
         aria-label={`The sentence of ${flight.callsign} on runway ${flight.runway}`}
       >
-        <defs>
-          {/* An absorbed manoeuvre is a real thing the words do not carry, so it
-              is drawn ON its kind's row rather than in a separate legend. */}
-          <pattern
-            id="training-absorbed-hatch"
-            width={6}
-            height={6}
-            patternUnits="userSpaceOnUse"
-            patternTransform="rotate(45)"
-          >
-            <rect width={6} height={6} fill="rgba(226, 232, 240, 0.05)" />
-            <line x1={0} y1={0} x2={0} y2={6} stroke="rgba(226, 232, 240, 0.45)" strokeWidth={1.5} />
-          </pattern>
-        </defs>
-
         {/* the event lines, behind everything */}
         {eventTimesS.map((time, index) => (
           <line
@@ -420,25 +376,20 @@ export default function TrainingSentenceBar() {
               {rowBands(flight, kind).map((band, index) => {
                 const x = xFor(band.startS);
                 const width = xFor(band.endS) - x;
-                // The tooltip always carries the band; the drawn label drops it
-                // when the band is too narrow, and drops the word after that.
+                // The tooltip always carries the box; the drawn label drops the
+                // tolerance when the band is too narrow, and the word after that.
                 const text =
-                  band.word === null
-                    ? "no word"
-                    : width >= BAND_LABEL_MIN_W
-                      ? bandLabel(kind, band.word)
-                      : label(kind, band.word);
+                  width >= BAND_LABEL_MIN_W ? bandLabel(kind, band.word) : label(kind, band.word);
                 const title =
-                  band.word === null
-                    ? `${formatSeconds(band.startS)}–${formatSeconds(band.endS)} s: no gap word — the sentence ends at its last event and these words are held to the threshold`
-                    : `${kind}${TARGET_KINDS.includes(kind) ? " target" : ""} ${bandLabel(kind, band.word)} (word ${band.word}), ${formatSeconds(band.startS)}–${formatSeconds(band.endS)} s`;
+                  `${kind}${isTrainingBoxKind(kind) ? " box" : ""} ${bandLabel(kind, band.word)} ` +
+                  `(word ${band.word}), ${formatSeconds(band.startS)}–${formatSeconds(band.endS)} s`;
                 return (
                   <g
                     key={`${kind}-${index}`}
                     role="button"
                     tabIndex={0}
                     aria-label={title}
-                    className={`training-sentence-band${band.word === null ? " unworded" : ""}`}
+                    className="training-sentence-band"
                     onClick={() => setCursorS(band.startS)}
                     onKeyDown={(keyEvent) => {
                       if (keyEvent.key === "Enter" || keyEvent.key === " ") setCursorS(band.startS);
@@ -452,10 +403,9 @@ export default function TrainingSentenceBar() {
                       height={ROW_H - 8}
                       rx={3}
                       fill={TRAINING_KIND_COLOR[kind]}
-                      fillOpacity={band.word === null ? 0.06 : 0.18}
+                      fillOpacity={0.18}
                       stroke={TRAINING_KIND_COLOR[kind]}
-                      strokeOpacity={band.word === null ? 0.3 : 0.6}
-                      strokeDasharray={band.word === null ? "3 3" : undefined}
+                      strokeOpacity={0.6}
                     />
                     {width >= LABEL_MIN_W ? (
                       <text
@@ -494,32 +444,12 @@ export default function TrainingSentenceBar() {
                     </g>
                   );
                 })}
-
-              {/* the manoeuvres this kind's words did not carry */}
-              {flight.absorbed
-                .filter((item) => item.kind === kind)
-                .map((item, index) => (
-                  <g
-                    key={`absorbed-${kind}-${index}`}
-                    className="training-sentence-absorbed"
-                    aria-label={absorbedLabel(item)}
-                  >
-                    <title>{absorbedLabel(item)}</title>
-                    <rect
-                      x={xFor(item.startS)}
-                      y={y + 4}
-                      width={Math.max(xFor(item.endS) - xFor(item.startS), 2)}
-                      height={ROW_H - 8}
-                      fill="url(#training-absorbed-hatch)"
-                    />
-                  </g>
-                ))}
             </g>
           );
         })}
 
         {/* the axis: every event time, which is what the reader needs to line the
-            bands up against the gap words */}
+            bands up against the holds */}
         <line
           x1={GUTTER}
           x2={GUTTER + plotW}
@@ -554,13 +484,12 @@ export default function TrainingSentenceBar() {
 
       <footer className="training-sentence-legend">
         {/* This line stays out: without it the rows read as the measured state
-            rather than as what the aircraft was told to hold — and for the two
-            kinds that carry a tolerance, what it was told is a BAND, which is
-            why the labels print one. The rest folds away: the bar is docked over
-            the flight list, and height is what it costs. */}
+            rather than as the interval the aircraft was told to stay inside. The
+            rest folds away: the bar is docked over the flight list, and height is
+            what it costs. */}
         <span>
-          A band is the TARGET in force — what the words send the aircraft
-          towards, as a clearance does — not the measured state.
+          A band is the BOX in force — the interval the words allow, not the
+          measured state.
           <button
             type="button"
             className="training-sentence-notes-toggle"
@@ -573,11 +502,19 @@ export default function TrainingSentenceBar() {
         {notesOpen ? (
           <>
         <span>
-          Heading is relative to the final approach course; the vertical word is a
-          flight path angle, with DESCENT POSITIVE — the arrow says which way, never
-          the sign; speed is ground speed. The vertical and speed words carry a
-          tolerance and their labels print it; the other four have none. The
-          measured signals beside them are the read-back window's job.
+          Heading is a range of ground track relative to the final approach
+          course; speed a range of ground speed; the altitude word is a TARGET
+          height above the threshold, and its box is the wedge that target is
+          reachable from — wide at the start of a segment, closing onto
+          ±{(vocabulary.redundancyFraction * 100).toFixed(0)} % at its end. The
+          runway word is the frame the other three are measured in, the hold is
+          how long this box stands, and the terminal word says whether the
+          sentence ends here.
+        </span>
+        <span>
+          The boxes TILE the track: each one is held for exactly its hold and the
+          next opens where it closes, so every row has one box in force and there
+          is no unworded tail.
         </span>
         <span>
           Runway words: {vocabulary.runwayIdents.join(", ")} — the runways the
@@ -593,22 +530,9 @@ export default function TrainingSentenceBar() {
           the 25 km arrival slice keeps only the final successful approach.
         </span>
         <span>
-          The sentence's last event is at {formatSeconds(lastEventS)} s; the
-          remaining {formatSeconds(tailS)} s carry no further word, the words in
-          force being held to the threshold.
-        </span>
-        {flight.sentence.durationClamped > 0 ? (
-          <span>
-            {flight.sentence.durationClamped === 1
-              ? "1 gap hit"
-              : `${flight.sentence.durationClamped} gaps hit`}{" "}
-            the {vocabulary.durationMaxS} s duration ceiling and was clamped: the
-            gap word understates it.
-          </span>
-        ) : null}
-        <span className="training-sentence-absorbed-key">
-          Hatched = a manoeuvre read but not worded (same word / small change /
-          short tail).
+          The verdict is measured on the smoothed signals the boxes were read
+          from ({vocabulary.courseSmoothingS} s on the course,{" "}
+          {vocabulary.smoothingS} s on speed and height): {reading.heightSignal}.
         </span>
           </>
         ) : null}
@@ -620,7 +544,7 @@ export default function TrainingSentenceBar() {
           vocabulary={vocabulary}
           prior={trainingSelection.prior}
           layers={trainingLayers}
-          geometry={geometry}
+          reading={reading}
           cursorS={cursorS}
           onCursorChange={setCursorS}
           onClose={() => setReadbackOpen(false)}

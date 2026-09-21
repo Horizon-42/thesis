@@ -1,57 +1,156 @@
-"""The Training view's sample exporter: the draw, the artefact join and the manifest.
+"""The Training view's sample exporter, under the BOX vocabulary (`box-v2-wedge`).
 
-The track rebuild needs a checkpoint and the arrival store, so it is exercised by the runner
-itself; what is pinned here is everything that decides WHICH flights and WHAT SHAPE — the parts
-that can silently disagree with the artefact or with the frontend reader.
+The track rebuild needs the arrival store, so it is exercised by the runner itself; what is
+pinned here is everything that decides WHICH flights, WHAT A BOX IS, and WHAT SHAPE the file has
+— the parts that can silently disagree with the artefact or with the frontend reader.
+
+THE ARTEFACT'S LABELLER IS NOT IN THIS REPOSITORY, so the boxes the exporter draws are rebuilt
+from the artefact's own spec. There is no original to compare them against; what stands in for one
+is the containment verdict, measured on the real artefact (39 670 of 39 670 rows at five
+airports). These tests pin the SHAPE of that rebuild, so a change to it is a change somebody made
+on purpose.
 """
 
 from __future__ import annotations
 
-import csv
 import json
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from ts_transformer.experiments.instruction_sample_export import (
-    INDEX_SCHEMA, POOL_FACTOR, cumulative_path_m, drawn_flights, readings_by_flight, update_index,
+    BOX_SCHEMA, INDEX_SCHEMA, INSIDE_EPSILON, KINDS, POOL_FACTOR, READING_RULE, SAMPLE_SCHEMA,
+    altitude_envelope, containment, cumulative_path_m, displacement_box, drawn_flights,
+    hae_offset_m, load_box_vocabulary, lonlat_from_frame, read_signals, reading_block,
+    runway_sha256, sentences_by_flight, update_index, word_runs,
 )
-import numpy as np
-
-from ts_transformer.experiments.instruction_sample_export import (
-    flown_sentence, geodetic_columns,
-)
-from ts_transformer.manoeuvre import instruction_kinematics
-from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, Vocabulary
 
 # The frontend reader's own constants (`src/data/trainingSample.ts`). Declared MIRRORS: the two
 # sides are one contract, and a fixture that restated them could not catch it moving.
 FRONTEND_INDEX_SCHEMA = "aeroviz-training-index-v1"
-FRONTEND_KINDS = ("heading", "vertical", "speed", "runway", "duration", "terminal")
+FRONTEND_SAMPLE_SCHEMA = "aeroviz-training-sample-v2"
+FRONTEND_READING_RULE = "box-v2-wedge"
+FRONTEND_KINDS = ("heading", "altitude", "speed", "runway", "duration", "terminal")
+FRONTEND_INSIDE_EPSILON = 1e-3
 
 
-def test_the_column_order_is_the_frontend_reader_s():
-    """The six columns are positional on both sides; if this fails, one of them moved."""
-    assert INSTRUCTION_KINDS == FRONTEND_KINDS
+def test_the_contract_is_the_frontend_reader_s():
+    """Six positional columns, two schema names, one reading rule and one epsilon. If any of
+    these fails, one side moved without the other — and every one of them is a silent failure:
+    the file still parses, it just means something else."""
+    assert KINDS == FRONTEND_KINDS
     assert INDEX_SCHEMA == FRONTEND_INDEX_SCHEMA
-    assert "intercept" not in INSTRUCTION_KINDS       # deleted 2026-09-20 (D73)
+    assert SAMPLE_SCHEMA == FRONTEND_SAMPLE_SCHEMA
+    assert READING_RULE == FRONTEND_READING_RULE
+    # the verdict is computed on BOTH sides and the two are compared, so the tolerance that
+    # decides a row sitting on a box's edge has to be the same number
+    assert INSIDE_EPSILON == FRONTEND_INSIDE_EPSILON
+    assert reading_block()["insideEpsilon"] == INSIDE_EPSILON
+    # and the block says, in the file, that the artefact's producer is not in this tree
+    assert "NOT in this repository" in reading_block()["producedBy"]
 
+
+# ── the artefact ─────────────────────────────────────────────────────────────
+
+def _spec() -> dict:
+    return {
+        "schema": BOX_SCHEMA,
+        "reading_rule": READING_RULE,
+        "redundancy_fraction": 0.05,
+        "heading_floor_deg": 1.0,
+        "speed_low_mps": 30.0, "speed_high_mps": 250.0,
+        "altitude_form": "target + backward-reachable wedge, on remaining path length",
+        "altitude_h0_m": 50.0, "altitude_top_m": 6000.0, "altitude_bottom_m": -150.0,
+        "altitude_down_deg": 1.5, "altitude_up_deg": 1.0,
+        "altitude_reading": "greedy longest reach, read BACKWARDS",
+        "duration_bin_s": 2.0, "duration_max_s": 600.0,
+        "course_smoothing_s": 6.0, "smoothing_s": 10.0,
+        "kinds": list(KINDS),
+        "duration_placement": "on the row it describes",
+    }
+
+
+def _artefact(tmp_path: Path, **overrides) -> Path:
+    payload = {
+        "schema": BOX_SCHEMA, "spec": _spec(), "sha256": "a" * 64,
+        "words": {"heading": 3, "altitude": 4, "speed": 2, "runway": 1, "duration": 301, "terminal": 3},
+        "runway_idents": ["KRDU:05L"],
+        "edges": {"heading_deg": [-180.0, -10.0, 10.0, 180.0],
+                  "speed_mps": [60.0, 90.0, 125.0],
+                  "altitude_m": [-20.0, 0.0, 100.0, 400.0]},
+    }
+    payload.update(overrides)
+    path = tmp_path / "instruction_vocabulary.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_an_artefact_of_another_schema_is_refused_by_name(tmp_path: Path):
+    with pytest.raises(SystemExit, match="has schema"):
+        load_box_vocabulary(_artefact(tmp_path, schema="something-else"))
+
+
+def test_a_reading_rule_this_exporter_is_not_written_for_is_refused(tmp_path: Path):
+    spec = _spec()
+    spec["reading_rule"] = "segment-v14"
+    with pytest.raises(SystemExit, match="written for 'box-v2-wedge'"):
+        load_box_vocabulary(_artefact(tmp_path, spec=spec))
+
+
+def test_the_kinds_in_another_order_are_refused(tmp_path: Path):
+    spec = _spec()
+    spec["kinds"] = ["altitude", "heading", "speed", "runway", "duration", "terminal"]
+    with pytest.raises(SystemExit, match="the columns are positional"):
+        load_box_vocabulary(_artefact(tmp_path, spec=spec))
+
+
+def test_an_edge_table_that_does_not_tile_its_words_is_refused(tmp_path: Path):
+    """The heading and speed tables TILE their words, so they hold one more value than there are
+    words; the altitude table is a LADDER OF TARGETS, one per word. Reading one as the other
+    shifts every word by half a box and still draws."""
+    with pytest.raises(SystemExit, match="edges.heading_deg holds"):
+        load_box_vocabulary(_artefact(
+            tmp_path, edges={"heading_deg": [-180.0, 0.0, 180.0],      # 3 edges, 3 words claimed
+                             "speed_mps": [60.0, 90.0, 125.0],
+                             "altitude_m": [-20.0, 0.0, 100.0, 400.0]}))
+
+
+def test_the_altitude_table_is_one_target_per_word(tmp_path: Path):
+    with pytest.raises(SystemExit, match="edges.altitude_m holds"):
+        load_box_vocabulary(_artefact(
+            tmp_path, edges={"heading_deg": [-180.0, -10.0, 10.0, 180.0],
+                             "speed_mps": [60.0, 90.0, 125.0],
+                             "altitude_m": [-20.0, 0.0, 100.0, 400.0, 900.0]}))
+
+
+def test_a_good_artefact_loads_whole(tmp_path: Path):
+    payload = load_box_vocabulary(_artefact(tmp_path))
+    assert payload["spec"]["reading_rule"] == READING_RULE
+    assert len(payload["edges"]["heading_deg"]) == payload["words"]["heading"] + 1
+    assert len(payload["edges"]["altitude_m"]) == payload["words"]["altitude"]
+
+
+def test_the_runway_classes_have_a_sha_of_their_own():
+    """The classes sit OUTSIDE the spec so one vocabulary serves five airports — which also means
+    two artefacts with the same spec sha can disagree about what word 1 means."""
+    assert runway_sha256(["KRDU:05L", "KRDU:23R"]) != runway_sha256(["KRDU:05L", "KSTL:23R"])
+    assert runway_sha256(["b", "a"]) == runway_sha256(["b", "a"])
+
+
+# ── the draw ─────────────────────────────────────────────────────────────────
 
 def test_the_draw_is_reproducible_from_the_artefact_alone():
-    """The draw moved off the hand check (2026-09-21: the `segment-v12` artefacts were written
-    with `--hand-check 0`, so there are no pages to be a prefix of). What replaced it has to be
-    reproducible from the artefact and the seed the manifest records — otherwise nobody can say
-    which flights a published set holds, or get them back."""
-    readings = {f"F{i:03d}": {} for i in range(200)}
-    first = drawn_flights(readings, 20, seed=1337)
-    assert first == drawn_flights(readings, 20, seed=1337)
-    assert first != drawn_flights(readings, 20, seed=2024)
+    sentences = {f"F{i:03d}": {} for i in range(200)}
+    first = drawn_flights(sentences, 20, seed=1337)
+    assert first == drawn_flights(sentences, 20, seed=1337)
+    assert first != drawn_flights(sentences, 20, seed=2024)
     # it is a POOL to stratify from, not the final draw: the stratum is a property of the
     # rebuilt track, so the draw has to rebuild before it can pick
-    assert len(first) == min(len(readings), 20 * 2 * POOL_FACTOR)
+    assert len(first) == min(len(sentences), 20 * 2 * POOL_FACTOR)
     assert len(set(first)) == len(first)
-    assert set(first) <= set(readings)
+    assert set(first) <= set(sentences)
 
 
 def test_a_split_smaller_than_the_draw_is_refused():
@@ -66,9 +165,6 @@ class _Difficulty:
 
 
 def test_stratify_takes_the_first_of_each_stratum_and_drops_neither(monkeypatch):
-    """Half straight-in, half vectored, in the draw's own order — and a flight in NEITHER
-    stratum (tortuous but already established at the anchor) is not drawn, which is the same
-    rule the vocabulary runner's hand-check draw applies."""
     import ts_transformer.experiments.instruction_sample_export as module
 
     table = {
@@ -77,7 +173,7 @@ def test_stratify_takes_the_first_of_each_stratum_and_drops_neither(monkeypatch)
     }
     monkeypatch.setattr(module, "approach_difficulty", lambda item, anchor: table[item])
     monkeypatch.setattr(module, "default_anchor", lambda config: 0)
-    drawn = module.stratify(list(table), list(table), Vocabulary(), per_stratum=2)
+    drawn = module.stratify(list(table), list(table), None, per_stratum=2)
 
     assert [flight for flight, _, _ in drawn] == ["a", "d", "b", "e"]
     assert [stratum for _, stratum, _ in drawn] == ["straight-in", "straight-in", "vectored", "vectored"]
@@ -85,24 +181,21 @@ def test_stratify_takes_the_first_of_each_stratum_and_drops_neither(monkeypatch)
 
 
 def test_a_stratum_the_pool_cannot_fill_is_refused(monkeypatch):
-    """Publishing 3 straight-in and 1 vectored under a `perStratum: 2` manifest would make the
-    stratum column say something the draw did not do."""
     import ts_transformer.experiments.instruction_sample_export as module
 
     table = {"a": _Difficulty(1.01, False), "b": _Difficulty(1.02, False), "c": _Difficulty(1.03, False)}
     monkeypatch.setattr(module, "approach_difficulty", lambda item, anchor: table[item])
     monkeypatch.setattr(module, "default_anchor", lambda config: 0)
     with pytest.raises(SystemExit, match="filled"):
-        module.stratify(list(table), list(table), Vocabulary(), per_stratum=2)
+        module.stratify(list(table), list(table), None, per_stratum=2)
 
 
 def test_sentences_read_under_another_vocabulary_are_refused(tmp_path: Path):
-    """The view claims to show ONE artefact; sentences from another sha are not it."""
     (tmp_path / "sentences_train.json").write_text(json.dumps({
         "vocabulary_sha256": "b" * 64, "flights": [],
     }), encoding="utf-8")
     with pytest.raises(SystemExit, match="not one vocabulary"):
-        readings_by_flight(tmp_path, "train", "a" * 64)
+        sentences_by_flight(tmp_path, "train", "a" * 64)
 
 
 def test_sentences_are_keyed_by_flight_id(tmp_path: Path):
@@ -110,162 +203,203 @@ def test_sentences_are_keyed_by_flight_id(tmp_path: Path):
         "vocabulary_sha256": "a" * 64,
         "flights": [{"flight_id": "AAL1_05L_x_t", "dataset_id": "KRDU:AAL1_05L_x_t"}],
     }), encoding="utf-8")
-    readings = readings_by_flight(tmp_path, "train", "a" * 64)
-    # the hand check names flights by flight_id, the rebuild wants dataset_id: the join is here
-    assert readings["AAL1_05L_x_t"]["dataset_id"] == "KRDU:AAL1_05L_x_t"
+    sentences = sentences_by_flight(tmp_path, "train", "a" * 64)
+    # the sentences name flights by flight_id, the rebuild wants dataset_id: the join is here
+    assert sentences["AAL1_05L_x_t"]["dataset_id"] == "KRDU:AAL1_05L_x_t"
 
 
 def test_a_missing_split_is_refused_by_path(tmp_path: Path):
     with pytest.raises(SystemExit, match="sentences_val.json"):
-        readings_by_flight(tmp_path, "val", "a" * 64)
+        sentences_by_flight(tmp_path, "val", "a" * 64)
 
+
+# ── the manifest ─────────────────────────────────────────────────────────────
 
 def _entry(set_id: str) -> dict:
     return {"id": set_id, "kind": "vocabulary-readback", "title": set_id, "file": f"{set_id}/sample.json",
-            "vocabularySha256": "a" * 64, "runwaySha256": "b" * 64, "readingRule": "plateau-v11", "flights": 40}
+            "vocabularySha256": "a" * 64, "runwaySha256": "b" * 64, "readingRule": READING_RULE,
+            "flights": 40}
 
 
 def test_the_manifest_keeps_the_other_sets(tmp_path: Path):
-    """A second export must not erase the first — the frontend lists them side by side."""
-    update_index(tmp_path, "KRDU", _entry("vocabulary_tau10"))
-    update_index(tmp_path, "KRDU", _entry("vocabulary_tau5"))
+    """A second export must not erase the first — the frontend lists them side by side, and a
+    superseded set stays listed (marked) rather than disappearing."""
+    update_index(tmp_path, "KRDU", _entry("box_v3"))
+    update_index(tmp_path, "KRDU", _entry("box_v4"))
     payload = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert payload["schema"] == INDEX_SCHEMA
-    assert [item["id"] for item in payload["sets"]] == ["vocabulary_tau10", "vocabulary_tau5"]
+    assert [item["id"] for item in payload["sets"]] == ["box_v3", "box_v4"]
 
 
 def test_re_exporting_a_set_replaces_its_entry_once(tmp_path: Path):
-    update_index(tmp_path, "KRDU", _entry("vocabulary_tau10"))
-    replacement = {**_entry("vocabulary_tau10"), "flights": 100}
-    update_index(tmp_path, "KRDU", replacement)
+    update_index(tmp_path, "KRDU", _entry("box_v3"))
+    update_index(tmp_path, "KRDU", {**_entry("box_v3"), "flights": 100})
     payload = json.loads((tmp_path / "index.json").read_text(encoding="utf-8"))
     assert len(payload["sets"]) == 1
     assert payload["sets"][0]["flights"] == 100
 
 
 def test_another_airports_manifest_is_refused(tmp_path: Path):
-    update_index(tmp_path, "KRDU", _entry("vocabulary_tau10"))
+    update_index(tmp_path, "KRDU", _entry("box_v3"))
     with pytest.raises(SystemExit, match="not KSJC's"):
-        update_index(tmp_path, "KSJC", _entry("vocabulary_tau10"))
+        update_index(tmp_path, "KSJC", _entry("box_v3"))
 
 
 def test_a_foreign_schema_is_refused_rather_than_rewritten(tmp_path: Path):
     (tmp_path / "index.json").write_text(json.dumps({"schema": "something-else", "sets": []}), encoding="utf-8")
     with pytest.raises(SystemExit, match="something-else"):
-        update_index(tmp_path, "KRDU", _entry("vocabulary_tau10"))
+        update_index(tmp_path, "KRDU", _entry("box_v3"))
 
 
-# ── the flown sentence in the payload (T5) ───────────────────────────────────
+# ── what a box is ────────────────────────────────────────────────────────────
 
-def _reading(events: list[float], words: list[list[int]]) -> dict:
-    return {
-        "dataset_id": "KRDU:TEST", "flight_id": "TEST", "runway": "05L",
-        "event_times_s": events, "words": words,
-        "established_from_start": True, "duration_s": 200.0,
-    }
+def test_word_runs_recovers_the_segments_by_run_length():
+    """The altitude segment the wedge is anchored to is recovered by run-length, not by
+    re-reading the profile: every event inside one segment repeats its word."""
+    assert word_runs([5, 5, 4, 4, 4, 1]) == [(0, 1), (2, 4), (5, 5)]
+    assert word_runs([3]) == [(0, 0)]
+    assert word_runs([]) == []
 
 
-def _frame(rows: int = 101) -> dict:
+def _flat_frame(rows: int = 61, speed: float = 80.0) -> dict:
     times = np.arange(rows, dtype=np.float64) * 2.0
     return {
         "t": times,
-        "to_go_m": 20000.0 - 70.0 * times,
+        "to_go_m": 20000.0 - speed * times,
         "cross_m": np.zeros(rows),
         "height_m": np.full(rows, 600.0),
-        "ground_speed_mps": np.full(rows, 70.0),
+        "ground_speed_mps": np.full(rows, speed),
         "relative_course_deg": np.zeros(rows),
-        "course_unwrapped_deg": np.zeros(rows),
         "established": np.ones(rows, dtype=bool),
     }
 
 
-def test_the_flown_sentence_is_the_artefacts_own_sentence_not_a_re_reading():
-    """V19 for the geometric track too: the reading handed to the kinematics is rebuilt from the
-    artefact's event times and words, so the line drawn is the sentence the view shows."""
-    columns = {kind: index for index, kind in enumerate(INSTRUCTION_KINDS)}
-    level = Vocabulary().vertical_modes_deg.index(0.0)   # word 0 is the CLIMB mode, not level
-    words = [[0] * len(INSTRUCTION_KINDS), [0] * len(INSTRUCTION_KINDS)]
-    words[1][columns["heading"]] = 18                    # +90° from 100 s (5° a bin)
-    words[0][columns["vertical"]] = words[1][columns["vertical"]] = level
-    words[0][columns["speed"]] = words[1][columns["speed"]] = 4
-    words[1][columns["terminal"]] = 1
-    _, flown = flown_sentence(_reading([0.0, 100.0], words), Vocabulary(), _frame())
-
-    assert flown["tS"][0] == 0.0
-    # it flies the course until the second event, then turns
-    assert abs(flown["relCourseDeg"][50]) < 1e-9
-    assert flown["relCourseDeg"][-1] > 45.0
-    # having turned 90° off the course it never reaches the runway, and says so
-    assert flown["endReason"] == "time-cap"
-    assert flown["finalGapM"] > 1000.0
+def test_the_read_signals_are_smoothed_with_the_artefacts_own_windows():
+    """WHICH signal is the whole game: the same track against the same boxes is 100 % inside on
+    these and 93 % on the raw rows. The windows come from the artefact, never from here."""
+    signals = read_signals(_flat_frame(), _spec())
+    assert signals["dt_s"] == 2.0
+    assert signals["course_window_rows"] == 4          # round(6 / 2) + 1
+    assert signals["signal_window_rows"] == 6          # round(10 / 2) + 1
+    # a constant track smooths to itself, so the shape is checked rather than the values
+    assert len(signals["height_m"]) == len(_flat_frame()["t"])
+    # the path axis is the SMOOTHED speed integrated: 80 m/s over 120 s
+    assert signals["path_m"][-1] == pytest.approx(80.0 * 120.0, rel=1e-6)
+    assert (np.diff(signals["path_m"]) > 0).all()
 
 
-def test_the_geometry_block_states_every_assumption_the_line_was_drawn_under():
-    """An approximation nobody can see stated is worse than none (design §5.4), so the block
-    travels with the export and names the files its constants came from."""
-    from ts_transformer.outputs.guidance.controller import CLIMB_MAX_RAD, DESCENT_MAX_RAD
-    from ts_transformer.geometry.flyability import G
-
-    block = instruction_kinematics.assumptions()
-    for field in ("method", "dtS", "bankDeg", "gravityMps2", "descentMaxDeg",
-                  "climbMaxDeg", "accelMaxMps2", "startsAt", "stopRule", "windModelled",
-                  "aircraftTypeModelled", "constantsFrom",
-                  # word 0 is not flown as a direction (2026-09-21): a reader told only the bank
-                  # and the step would still not know why the track curves back to the centreline
-                  "establishedWordTracksTheCentreline", "interceptMaxDeg", "bankAndAccelFrom"):
-        assert field in block, field
-    # the stated numbers ARE the imported ones — a block that drifted from the code it
-    # describes is worse than no block
-    assert block["gravityMps2"] == G
-    # the bank and the acceleration are the kinematics module's OWN measured values, not the
-    # guidance controller's: the block must state what was flown, and they are different numbers
-    assert block["accelMaxMps2"] == instruction_kinematics.ACCEL_MAX_MPS2
-    assert block["bankDeg"] == pytest.approx(math.degrees(instruction_kinematics.TURN_BANK_RAD))
-    assert block["interceptMaxDeg"] == instruction_kinematics.INTERCEPT_MAX_DEG
-    assert block["descentMaxDeg"] == pytest.approx(math.degrees(DESCENT_MAX_RAD))
-    assert block["climbMaxDeg"] == pytest.approx(math.degrees(CLIMB_MAX_RAD))
-    # The vertical word IS the commanded angle now, so the block says so and no longer carries a
-    # height gain — there is no height error for a time constant to close.
-    assert block["verticalIsCommandedAngle"] is True and "heightGainS" not in block
-    assert block["dtS"] == instruction_kinematics.STEP_S
-    assert str(int(instruction_kinematics.OVERRUN_S)) in block["stopRule"]
-    assert block["windModelled"] is False
-    assert block["aircraftTypeModelled"] is False
+def test_the_path_axis_is_floored_so_a_stopped_row_cannot_pull_it_back():
+    from ts_transformer.manoeuvre.segments import MINIMUM_GROUND_SPEED_MPS
+    times = np.array([0.0, 2.0, 4.0])
+    path = cumulative_path_m(times, np.array([80.0, 0.0, 80.0]))
+    assert path[1] - path[0] == pytest.approx(2.0 * MINIMUM_GROUND_SPEED_MPS)
+    assert (np.diff(path) > 0).all()
 
 
-def test_the_gap_is_reported_with_the_fraction_of_the_approach_it_covers():
-    """A mean gap over a flown track that stopped early would otherwise read as if it spanned
-    the whole approach."""
-    columns = {kind: index for index, kind in enumerate(INSTRUCTION_KINDS)}
-    words = [[0] * len(INSTRUCTION_KINDS)]
-    words[0][columns["speed"]] = 4
-    words[0][columns["terminal"]] = 1
-    # A frame that outlives the flown sentence: it starts 3 km out, so the words cross the
-    # threshold long before the observation ends and the comparison covers only part of it.
-    frame = _frame()
-    frame["to_go_m"] = 3000.0 - 70.0 * frame["t"]
-    _, flown = flown_sentence(_reading([0.0], words), Vocabulary(), frame)
+def test_the_wedge_closes_onto_its_target_and_opens_asymmetrically_going_back():
+    """`T - r·tan(up) - f ≤ h ≤ T + r·tan(down) + f`, with f = redundancy · (T + h0).
 
-    assert flown["endReason"] == "crossed-threshold"
-    assert flown["comparedS"] == pytest.approx(flown["tS"][-1], abs=2.0)
-    assert flown["comparedFraction"] < 0.5          # a PARTIAL cover, which is the point
-    assert flown["comparedFraction"] == pytest.approx(flown["comparedS"] / frame["t"][-1], abs=0.01)
+    Down is the WIDER side and it opens ABOVE the target: the wedge is the set the target is
+    backward-reachable from, and losing height is the manoeuvre with the most room. Swapping the
+    two draws a corridor of exactly the same width with the slack on the wrong side."""
+    spec = _spec()
+    targets = np.array([-20.0, 0.0, 100.0, 400.0])
+    times = np.array([0.0, 2.0, 4.0, 6.0])
+    path = np.array([0.0, 100.0, 200.0, 300.0])
+    words = np.zeros((1, len(KINDS)), dtype=np.int64)
+    words[0, KINDS.index("altitude")] = 3                      # target 400 m
+    low, high = altitude_envelope(np.array([0.0]), words, times, path, spec, targets)
+
+    floor = 0.05 * (400.0 + 50.0)
+    # the LAST row is the segment's end: r = 0, so the box is the target's own tolerance
+    assert high[-1] == pytest.approx(400.0 + floor)
+    assert low[-1] == pytest.approx(400.0 - floor)
+    # and going back it opens, more above than below
+    remaining = path[-1] - path[0]
+    assert high[0] == pytest.approx(400.0 + remaining * math.tan(math.radians(1.5)) + floor)
+    assert low[0] == pytest.approx(400.0 - remaining * math.tan(math.radians(1.0)) - floor)
+    assert high[0] - 400.0 > 400.0 - low[0]
 
 
-# ── the geodetic columns the 3D layer draws from (T6) ───────────────────────
+def test_a_segment_ends_at_the_next_altitude_events_instant():
+    """Not at the last row before it. Taking the last row instead leaves rows outside a box the
+    artefact accepted (measured: 3 in 2 670)."""
+    spec = _spec()
+    targets = np.array([-20.0, 0.0, 100.0, 400.0])
+    times = np.arange(5, dtype=np.float64) * 2.0               # 0 2 4 6 8
+    path = times * 50.0
+    words = np.zeros((2, len(KINDS)), dtype=np.int64)
+    words[0, KINDS.index("altitude")] = 3
+    words[1, KINDS.index("altitude")] = 2
+    low, high = altitude_envelope(np.array([0.0, 4.0]), words, times, path, spec, targets)
+
+    # rows 0 and 1 belong to the first segment, and its `r` runs to t = 4 s (the instant the word
+    # changes), not to t = 2 s (its own last row)
+    floor = 0.05 * (400.0 + 50.0)
+    assert high[1] == pytest.approx(400.0 + (path[2] - path[1]) * math.tan(math.radians(1.5)) + floor)
+    # the last segment runs to the track's last row
+    assert high[-1] == pytest.approx(100.0 + 0.05 * 150.0)
+
+
+def test_a_row_in_no_segment_is_refused():
+    """The events tile the track, so a row with no box in force means the sentence and the track
+    are not the same flight — which would otherwise draw as a gap nobody notices."""
+    spec = _spec()
+    targets = np.array([-20.0, 0.0, 100.0, 400.0])
+    times = np.array([0.0, 2.0, 4.0])
+    words = np.zeros((1, len(KINDS)), dtype=np.int64)
+    with pytest.raises(SystemExit, match="fall in no altitude segment"):
+        altitude_envelope(np.array([10.0]), words, times, times * 50.0, spec, targets)
+
+
+def test_the_displacement_box_is_the_words_own_reachable_set():
+    """A word bounds the direction of travel and its rate, so over its hold the displacement is
+    bounded. `to_go` counts DOWN toward the threshold, which is why the box is negative there."""
+    # straight ahead, 80–100 m/s, held 10 s: 800–1000 m closer, and no cross-track at all
+    to_go_min, to_go_max, cross_min, cross_max = displacement_box(0.0, 0.0, 80.0, 100.0, 10.0)
+    assert to_go_min == pytest.approx(-1000.0)
+    assert to_go_max == pytest.approx(0.0)              # τ = 0 is reachable: the set is a cone
+    assert cross_min == pytest.approx(0.0) and cross_max == pytest.approx(0.0)
+
+    # a 2° box about the course opens a little each way, and it is tiny: this thinness is the
+    # finding, not a drawing fault — horizontally one word says almost nothing
+    _, _, cross_min, cross_max = displacement_box(-1.0, 1.0, 80.0, 100.0, 4.0)
+    assert cross_max == pytest.approx(400.0 * math.sin(math.radians(1.0)), rel=1e-6)
+    assert cross_min == pytest.approx(-cross_max, rel=1e-6)
+    assert cross_max < 10.0
+
+    # a box that contains the beam (90°) reaches its full extent sideways
+    _, _, _, cross_max = displacement_box(85.0, 95.0, 80.0, 100.0, 10.0)
+    assert cross_max == pytest.approx(0.0)             # sin is NEGATIVE in this frame's cross
+    _, _, cross_min, _ = displacement_box(85.0, 95.0, 80.0, 100.0, 10.0)
+    assert cross_min == pytest.approx(-1000.0)
+
+
+def test_a_zero_hold_box_has_no_extent():
+    assert displacement_box(-10.0, 10.0, 80.0, 100.0, 0.0) == (0.0, 0.0, 0.0, 0.0)
+
+
+def test_containment_counts_rows_and_forgives_only_the_edge():
+    read = np.array([10.0, 20.0, 30.0])
+    low = np.array([10.0, 10.0, 10.0])
+    high = np.array([25.0, 25.0, 25.0])
+    # a row exactly ON an edge is inside — the labeller's greedy reader leaves rows there by
+    # construction, and without the epsilon they read as violations of a millionth of a metre
+    assert containment(read, low, high) == {"rows": 3, "outside": 1}
+    assert containment(np.array([25.0 + INSIDE_EPSILON / 2]), np.array([10.0]), np.array([25.0]))["outside"] == 0
+    assert containment(np.array([25.0 + INSIDE_EPSILON * 10]), np.array([10.0]), np.array([25.0]))["outside"] == 1
+
+
+# ── the geodetic columns the 3D layer draws from ────────────────────────────
 
 class _StubSeries:
-    """A series carrying only what `geodetic_columns` reads: the runway's inbound course, the
-    chart frame, and the target's place in it."""
+    """A series carrying only what the geodesy reads: the runway's inbound course, the chart
+    frame, and the target's place in it."""
 
     def __init__(self, lat: float, lon: float, alt_m: float, psi_rad: float,
                  threshold_above_anchor_m: float = 0.0, rotated: bool = False):
         from ts_transformer.data.coordinate_frames import AirportENUFrame, RunwayAlignedFrame
 
-        # `alt_m` is the AIRPORT reference elevation (the chart's vertical anchor); the
-        # threshold sits a little above or below it, and the chart's z counts from the anchor.
-        # A ROTATED frame is the one that tells `from_world_horizontal` apart from its
-        # opposite: on the unrotated default the rotation is the identity and both agree.
         self.frame = (
             RunwayAlignedFrame(lat0=lat, lon0=lon, alt0=alt_m, heading_rad=psi_rad)
             if rotated
@@ -280,12 +414,9 @@ class _StubSeries:
 def test_the_geodetic_inverse_is_course_frame_rows_run_backwards(psi_deg: float, rotated: bool):
     """A ROUND TRIP, which is the only shape that pins all four terms of the inverse.
 
-    Push an arbitrary offset from the threshold forward through `course_frame_rows`, feed the
-    `to_go / cross` it produces back through `geodetic_columns`, and require the latitude and
-    longitude to come back. The angles have both sin and cos non-zero, because at ψ = 0 two of
-    the four terms vanish and a sign error in either survives; and it runs under the rotated
-    frame as well, because on an unrotated one `from_world_horizontal` and its opposite agree
-    and the wrong one would pass.
+    The angles have both sin and cos non-zero, because at ψ = 0 two of the four terms vanish and
+    a sign error in either survives; and it runs under the rotated frame as well, because on an
+    unrotated one `from_world_horizontal` and its opposite agree and the wrong one would pass.
     """
     from ts_transformer.data.approach_difficulty import course_frame_rows
 
@@ -297,48 +428,50 @@ def test_the_geodetic_inverse_is_course_frame_rows_run_backwards(psi_deg: float,
     north = np.array([n for _, n in offsets])
     frame = course_frame_rows(east, north, np.ones(len(offsets)), np.zeros(len(offsets)), psi)
 
-    columns = geodetic_columns(series, frame["to_go_m"], frame["cross_m"], np.zeros(len(offsets)))
+    lons, lats = lonlat_from_frame(series, frame["to_go_m"], frame["cross_m"])
     for index, (east_m, north_m) in enumerate(offsets):
         first, second = series.frame.from_world_horizontal(east_m, north_m)
         lat, lon = series.frame.latlon_from_horizontal(
             series.target_chart[0] + first, series.target_chart[1] + second
         )
-        assert columns["lat"][index] == pytest.approx(lat, abs=1e-6)
-        assert columns["lon"][index] == pytest.approx(lon, abs=1e-6)
+        assert lats[index] == pytest.approx(lat, abs=1e-6)
+        assert lons[index] == pytest.approx(lon, abs=1e-6)
 
 
 def test_the_geodetic_inverse_puts_the_threshold_back_where_it_is():
-    """`to_go = cross = 0` is the threshold, so it must invert to the frame's own anchor —
-    whatever the inbound course is."""
     for psi in (0.0, math.radians(52.0), math.radians(-131.0), math.pi):
         series = _StubSeries(35.8776, -78.7875, 132.0, psi)
-        columns = geodetic_columns(series, [0.0], [0.0], [0.0])
-        assert columns["lat"][0] == pytest.approx(35.8776, abs=1e-6)
-        assert columns["lon"][0] == pytest.approx(-78.7875, abs=1e-6)
+        lons, lats = lonlat_from_frame(series, [0.0], [0.0])
+        assert lats[0] == pytest.approx(35.8776, abs=1e-6)
+        assert lons[0] == pytest.approx(-78.7875, abs=1e-6)
 
 
 def test_a_point_down_the_course_lands_up_the_inbound_bearing():
     """10 km still to fly on a due-EAST inbound course (math-ENU 0) is 10 km WEST of the
     threshold: `to_go` counts what is left to fly, so the aircraft is behind it."""
     series = _StubSeries(35.8776, -78.7875, 132.0, 0.0)
-    columns = geodetic_columns(series, [10000.0], [0.0], [0.0])
-    assert columns["lat"][0] == pytest.approx(35.8776, abs=1e-5)
-    assert columns["lon"][0] < -78.7875                       # west
-    # and 1 km right of the course is 1 km SOUTH of it
-    right = geodetic_columns(series, [0.0], [1000.0], [0.0])
-    assert right["lat"][0] < 35.8776
+    lons, lats = lonlat_from_frame(series, [10000.0], [0.0])
+    assert lats[0] == pytest.approx(35.8776, abs=1e-5)
+    assert lons[0] < -78.7875                                   # west
+    _, right_lats = lonlat_from_frame(series, [0.0], [1000.0])  # 1 km right of the course
+    assert right_lats[0] < 35.8776                              # is 1 km SOUTH of it
 
 
 def test_the_altitude_leaves_as_hae_not_msl():
-    """A record is MSL and Cesium reads the ellipsoid. At KRDU N = -33.5 m and h = H + N, so
-    a line handed MSL where HAE was wanted renders 33.5 m too HIGH — above its own terrain and
-    above the observed CZML it is read against."""
+    """A record is MSL and Cesium reads the ellipsoid. At KRDU N = -33.5 m and h = H + N, so a
+    line handed MSL where HAE was wanted renders 33.5 m too HIGH — above its own terrain.
+
+    It is an OFFSET rather than a converted column because the envelope has four more height
+    columns over the same ground track; recomputing the geodesy per column would be the same
+    inverse five times, and the five could drift."""
     from flight_scenarios.datum import geoid_undulation_m
 
     series = _StubSeries(35.8776, -78.7875, 132.0, math.radians(52.0), threshold_above_anchor_m=3.0)
-    columns = geodetic_columns(series, [0.0], [0.0], [500.0])
+    lons, lats = lonlat_from_frame(series, [0.0], [0.0])
+    offset = hae_offset_m(series, lats, lons)
     undulation = geoid_undulation_m([35.8776], [-78.7875])[0]
     assert undulation == pytest.approx(-33.5, abs=0.5)
-    # the anchor's elevation + the threshold above it + the height above the threshold, then
-    # the geoid — an altitude that forgot the anchor put touchdown below the ellipsoid
-    assert columns["altHaeM"][0] == pytest.approx(132.0 + 3.0 + 500.0 + undulation, abs=0.1)
+    # the anchor's elevation + the threshold above it + the geoid — an altitude that forgot the
+    # anchor put touchdown below the ellipsoid
+    assert offset[0] == pytest.approx(132.0 + 3.0 + undulation, abs=0.1)
+    assert offset[0] + 500.0 == pytest.approx(132.0 + 3.0 + 500.0 + undulation, abs=0.1)

@@ -255,9 +255,12 @@ interface TrainingSessionState {
 }
 
 export interface TrainingLayers {
-  /** The sentence flown by rule — the orange line (design V9: a baseline). */
+  /** THE ENVELOPE the sentence allows: the altitude wedge's wall and the chain
+   *  of boxes, in orange. The key is still `flown` because it is the same
+   *  switch — what the WORDS say, as opposed to what the aircraft did — and
+   *  under `box-v2-wedge` what they say is a region rather than a line. */
   flown: boolean;
-  /** What the model said, flown the same way — the purple line. */
+  /** The same, from the words the MODEL said — the purple wall. */
   model: boolean;
 }
 

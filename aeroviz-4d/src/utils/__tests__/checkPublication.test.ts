@@ -165,7 +165,7 @@ describe("checkComparisonIndex", () => {
 describe("the Training export's checks", () => {
   it("passes a manifest and a sample that agree", () => {
     expect(checkTrainingIndex(mockIndex())).toEqual([]);
-    expect(checkTrainingSample("vocabulary_tau10", mockSample(), "segment-v14", "vocabulary-readback")).toEqual([]);
+    expect(checkTrainingSample("box_v3", mockSample(), "box-v2-wedge", "vocabulary-readback")).toEqual([]);
 
     const index = parseTrainingIndex(mockIndex());
     const sample = parseTrainingSample(mockSample(), "vocabulary-readback");
@@ -188,22 +188,21 @@ describe("the Training export's checks", () => {
   it("names the field when a sample is wrong", () => {
     const sample = mockSample() as any;
     sample.flights[0].sentence.words[0] = [0, 0, 0, 0, 0, 0, 0];
-    const findings = checkTrainingSample("vocabulary_tau10", sample, "segment-v14", "vocabulary-readback");
-    expect(findings[0].category).toBe("vocabulary_tau10");
+    const findings = checkTrainingSample("box_v3", sample, "box-v2-wedge", "vocabulary-readback");
+    expect(findings[0].category).toBe("box_v3");
     expect(findings[0].message).toContain("7 columns, expected 6");
   });
 
-  // The commonest failure now: an export read under the retired rule. Its rows
-  // all still parse — six columns, every word in range — and only `kinds` says
-  // the second column changed meaning, so the message has to carry the rule that
-  // produced the file or the reader looks broken rather than the file stale.
+  // The commonest failure now: an export read under a retired rule. Its rows can
+  // all still parse — six columns, every word in range — so the message has to
+  // carry the rule that produced the file, or the reader looks broken rather than
+  // the file stale.
   it("names the reading rule a refused sample was written under", () => {
     const stale = mockSample() as any;
-    stale.kinds = ["heading", "altitude", "speed", "runway", "duration", "terminal"];
-    const findings = checkTrainingSample("vocabulary_tau10", stale, "plateau-v11", "vocabulary-readback");
-    expect(findings[0].message).toContain("read under plateau-v11");
-    expect(findings[0].message).toContain("altitude");
-    expect(findings[0].message).toContain("vertical");
+    stale.vocabulary.readingRule = "segment-v14";
+    const findings = checkTrainingSample("box_v3", stale, "segment-v14", "vocabulary-readback");
+    expect(findings[0].message).toContain("read under segment-v14");
+    expect(findings[0].message).toContain("box-v2-wedge");
   });
 
   // The two files come out of ONE run of the exporter. A disagreement means they did not,
@@ -217,7 +216,7 @@ describe("the Training export's checks", () => {
 
     const findings = checkTrainingSetAgrees(index.value.sets[0], sample.value);
     expect(findings).toHaveLength(1);
-    expect(findings[0].category).toBe("vocabulary_tau10");
+    expect(findings[0].category).toBe("box_v3");
     expect(findings[0].message).toContain("vocabularySha256");
   });
 

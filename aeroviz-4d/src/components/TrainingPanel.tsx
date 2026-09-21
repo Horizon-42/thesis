@@ -28,6 +28,7 @@ import { TRAINING_FLOWN_COLOR, TRAINING_MODEL_COLOR } from "../utils/trainingWor
 import {
   fetchTrainingIndex,
   fetchTrainingSample,
+  headingWordAt,
   trainingIndexPath,
   trainingWordBandLabel,
   trainingWordCounts,
@@ -62,7 +63,7 @@ function EmptyState({ airport }: { airport: string }) {
 
       <p className="training-empty-label">Written by</p>
       <code className="training-empty-path">
-        python run_ts.py instruction_sample_export --vocabulary &lt;…/vocabulary_tau10/instruction_vocabulary.json&gt; --executor &lt;…/checkpoint.pt&gt; --out aeroviz-4d/public/data/airports/{airport}/training/…
+        python run_ts.py instruction_sample_export --vocabulary &lt;…/vocabulary_box_v3_five_airports&gt; --out aeroviz-4d/public/data/airports/{airport}/training/…
       </code>
 
       <p className="training-empty-note">
@@ -174,7 +175,7 @@ export default function TrainingPanel() {
         ? {
             vocabulary: sample.vocabulary,
             flight,
-            geometry: sample.geometry,
+            reading: sample.reading,
             ...(sample.prior ? { prior: sample.prior } : {}),
           }
         : null,
@@ -270,10 +271,11 @@ export default function TrainingPanel() {
             </p>
           ) : null}
 
-          {/* WHICH LINES ARE DRAWN. The observed track has no switch: it is the
-              aircraft that was actually there and everything else is read
-              against it. These two are the lines a SENTENCE produced, and each
-              switch reaches every view at once. */}
+          {/* WHAT IS DRAWN BESIDE THE TRACK. The observed track has no switch:
+              it is the aircraft that was actually there and everything else is
+              read against it. These two are the REGIONS a sentence allows — the
+              wedge wall and the chain of boxes — and each switch reaches every
+              view at once. */}
           <fieldset className="training-layers">
             <legend>Draw</legend>
             <label style={{ color: TRAINING_FLOWN_COLOR }}>
@@ -282,7 +284,7 @@ export default function TrainingPanel() {
                 checked={trainingLayers.flown}
                 onChange={(event) => setTrainingLayer("flown", event.target.checked)}
               />
-              the words flown by rule
+              the envelope the words allow
             </label>
             <label
               style={{ color: openSetHasPrior ? TRAINING_MODEL_COLOR : undefined }}
@@ -294,7 +296,7 @@ export default function TrainingPanel() {
                 disabled={!openSetHasPrior}
                 onChange={(event) => setTrainingLayer("model", event.target.checked)}
               />
-              what the model said
+              the envelope the model said
             </label>
           </fieldset>
 
@@ -351,93 +353,88 @@ export default function TrainingPanel() {
                   <dt>Runway words</dt>
                   <dd>{sample.vocabulary.runwayIdents.join(" ")}</dd>
                 </div>
-                {/* The two kinds that carry a tolerance. A word here means "stay
-                    inside this band", so a panel that listed only the centres
-                    would be stating half of what the vocabulary says. */}
+                {/* WHAT A WORD IS. Every one of these numbers is inside the
+                    vocabulary's sha, because the tolerance IS the word here
+                    (§2.6) — a panel that listed only the class counts would be
+                    stating the shape of the vocabulary and none of its meaning. */}
                 <div>
-                  {/* How the labeller cut the profile, not a word count — the
-                      vertical words are the slopes of these segments. */}
-                  <dt>Vertical segments</dt>
-                  <dd>{sample.vocabulary.verticalSegments} per approach</dd>
-                </div>
-                <div>
-                  <dt>Vertical words</dt>
+                  <dt>Redundancy</dt>
                   <dd>
-                    {sample.vocabulary.verticalModesDeg
-                      .map((_, word) => trainingWordBandLabel(sample.vocabulary, "vertical", word))
-                      .join(" · ")}
+                    ±{(sample.vocabulary.redundancyFraction * 100).toFixed(0)} %, with a
+                    {" "}{sample.vocabulary.headingFloorDeg}° floor on the heading box
                   </dd>
                 </div>
                 <div>
-                  <dt>Speed words</dt>
+                  <dt>Heading boxes</dt>
                   <dd>
-                    {sample.vocabulary.speedCentresMps[0]}…
-                    {sample.vocabulary.speedCentresMps[sample.vocabulary.speedCentresMps.length - 1]} m/s,
-                    {" "}±{(sample.vocabulary.speedToleranceFraction * 100).toFixed(0)} %
+                    {counts.heading} tiling{" "}
+                    {sample.vocabulary.headingEdgesDeg[0]}…
+                    {sample.vocabulary.headingEdgesDeg[sample.vocabulary.headingEdgesDeg.length - 1]}°
+                    {" "}· on the course {trainingWordBandLabel(sample.vocabulary, "heading", headingWordAt(sample.vocabulary, 0))}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Speed boxes</dt>
+                  <dd>
+                    {counts.speed} tiling {sample.vocabulary.speedEdgesMps[0]}…
+                    {sample.vocabulary.speedEdgesMps[sample.vocabulary.speedEdgesMps.length - 1]} m/s
+                  </dd>
+                </div>
+                <div>
+                  {/* The one kind whose box is not an interval on a table: it is
+                      a target plus the set that target is reachable from, so the
+                      two angles and the ladder's ends are what say what it means. */}
+                  <dt>Altitude ladder</dt>
+                  <dd>
+                    {counts.altitude} targets, {Math.round(sample.vocabulary.altitudeTargetsM[0])}…
+                    {Math.round(sample.vocabulary.altitudeTargetsM[sample.vocabulary.altitudeTargetsM.length - 1])} m
+                    {" "}above the threshold (h₀ {sample.vocabulary.altitudeH0M} m)
+                  </dd>
+                </div>
+                <div>
+                  <dt>Altitude wedge</dt>
+                  <dd>
+                    {sample.vocabulary.altitudeDownDeg}° above / {sample.vocabulary.altitudeUpDeg}° below,
+                    {" "}on the remaining path — {sample.vocabulary.altitudeForm}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Read</dt>
+                  <dd>{sample.vocabulary.altitudeReading}</dd>
+                </div>
+                <div>
+                  <dt>Hold</dt>
+                  <dd>
+                    {sample.vocabulary.durationBinS} s bins to {sample.vocabulary.durationMaxS} s,
+                    {" "}written on the box it describes
                   </dd>
                 </div>
                 <div>
                   <dt>Words per kind</dt>
                   <dd>{TRAINING_KINDS.map((kind) => `${kind} ${counts[kind]}`).join(" · ")}</dd>
                 </div>
-                {/* The flown tracks' assumptions. The exporter writes them BECAUSE
-                    a view shows them: an approximation nobody can see stated is
-                    worse than none, and "flown by rule" means nothing until the
-                    rule's numbers are on screen. */}
+                {/* HOW THE VERDICT WAS COMPUTED. The same track against the same
+                    boxes is 100 % inside on the smoothed signals and 93 % on the
+                    raw ones, so the signal is not a detail — it is the number. */}
                 <div>
-                  <dt>Flown by</dt>
-                  <dd>{sample.geometry.method}, {sample.geometry.dtS} s steps</dd>
-                </div>
-                <div>
-                  <dt>Bank · angle limits · accel</dt>
+                  <dt>Signals judged</dt>
                   <dd>
-                    {sample.geometry.bankDeg}° ·{" "}
-                    −{sample.geometry.descentMaxDeg}°/+{sample.geometry.climbMaxDeg}° ·{" "}
-                    {sample.geometry.accelMaxMps2} m/s²
-                  </dd>
-                </div>
-                {/* Where the corridor on screen comes from, and the one thing a
-                    reader would otherwise assume wrongly: the two bands are
-                    separate, not the joint envelope (V32). */}
-                <div>
-                  <dt>Bands</dt>
-                  <dd>
-                    {sample.geometry.verticalBandFrom} · {sample.geometry.speedBandFrom} ·{" "}
-                    {sample.geometry.bandsAreJoint
-                      ? "drawn jointly"
-                      : "one kind at a time, not the joint envelope"}
-                  </dd>
-                </div>
-                {/* The fan closes onto this floor, so its widest point is before
-                    the threshold rather than at it — the executor's doing, not
-                    the vocabulary's (V34). */}
-                <div>
-                  <dt>Levels at</dt>
-                  <dd>
-                    {sample.geometry.heightFloorM} m above the threshold
-                    {sample.geometry.verticalIsCommandedAngle
-                      ? "; the vertical word is the commanded angle, so nothing stops it on its own"
-                      : ""}
+                    course {sample.vocabulary.courseSmoothingS} s · speed and height{" "}
+                    {sample.vocabulary.smoothingS} s · {sample.reading.windowRows}
                   </dd>
                 </div>
                 <div>
-                  <dt>Not modelled</dt>
-                  <dd>
-                    {[
-                      sample.geometry.windModelled ? null : "wind",
-                      sample.geometry.aircraftTypeModelled ? null : "aircraft type",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "—"}
-                  </dd>
+                  <dt>Remaining path to</dt>
+                  <dd>{sample.reading.remainingPathTo}</dd>
                 </div>
                 <div>
-                  <dt>Starts / stops</dt>
-                  <dd>{sample.geometry.startsAt}; {sample.geometry.stopRule}</dd>
+                  {/* THE PRODUCER IS NOT IN THIS REPOSITORY. The box labeller ran
+                      outside the tree, so the boxes here are a reconstruction
+                      from the artefact's spec — which is why the containment
+                      verdict is computed twice and compared. */}
+                  <dt>Boxes rebuilt by</dt>
+                  <dd>{sample.reading.producedBy}</dd>
                 </div>
-                {/* Every constant above is imported from these files rather than
-                    typed into the kinematics — which is only worth saying if the
-                    files are named where the numbers are shown. */}
                 {sample.prior ? (
                   <>
                     <div>
@@ -471,7 +468,7 @@ export default function TrainingPanel() {
                 ) : null}
                 <div>
                   <dt>Constants from</dt>
-                  <dd>{sample.geometry.constantsFrom.join(" · ")}</dd>
+                  <dd>{sample.reading.constantsFrom.join(" · ")}</dd>
                 </div>
               </dl>
               ) : null}
@@ -505,7 +502,7 @@ export default function TrainingPanel() {
                       <span className="training-flight-runway">{flight.runway}</span>
                       <span className="training-flight-stratum">{flight.stratum}</span>
                       <span className="training-flight-events">
-                        {flight.sentence.eventTimesS.length} events
+                        {flight.sentence.eventTimesS.length} boxes
                       </span>
                     </button>
                   </li>

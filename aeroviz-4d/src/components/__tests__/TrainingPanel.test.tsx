@@ -54,7 +54,7 @@ function lastPublished(): any {
 }
 
 const INDEX_PATH = "data/airports/KRDU/training/index.json";
-const SAMPLE_PATH = "data/airports/KRDU/training/vocabulary_tau10/sample.json";
+const SAMPLE_PATH = "data/airports/KRDU/training/box_v3/sample.json";
 
 describe("TrainingPanel", () => {
   beforeEach(() => {
@@ -118,29 +118,43 @@ describe("TrainingPanel", () => {
     it("lists the flights without making the reader open anything", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
-      expect(screen.queryByText("segment-v14")).toBeNull();
+      expect(screen.queryByText("box-v2-wedge")).toBeNull();
     });
 
     it("shows the vocabulary the words were read under, behind the ⓘ", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText("segment-v14")).toBeTruthy();
+      expect(screen.getByText("box-v2-wedge")).toBeTruthy();
       // the runway classes come from the file, never from the airport's runways
-      expect(screen.getByText("05L 05R 23L 23R")).toBeTruthy();
-      expect(screen.getByText(/heading 72 · vertical 6 · speed 16 · runway 4/)).toBeTruthy();
+      expect(screen.getByText("KRDU:05L KRDU:05R KRDU:23L KRDU:23R")).toBeTruthy();
+      expect(screen.getByText(/heading 11 · altitude 8 · speed 6 · runway 4/)).toBeTruthy();
     });
 
-    // A word is a BAND: the panel lists the vertical words with their tolerances
-    // and the speed range with its percentage, because a panel that gave only
-    // the centres would be stating half of what the vocabulary says (§5.6).
-    it("states the tolerance each word carries, not only its centre", async () => {
+    // A WORD IS AN INTERVAL, so the panel states the numbers a box is built from
+    // — the redundancy, the two edge tables, the ladder and the wedge's angles.
+    // Every one of them is inside the vocabulary's sha: the tolerance IS the word
+    // here, and a panel giving only the class counts would state the shape of the
+    // vocabulary and none of its meaning.
+    it("states what a box is built from, not only how many there are", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText(/↑3\.0°±0\.21 · level±0\.10 · ↓1\.4°±0\.10/)).toBeTruthy();
-      expect(screen.getByText(/44…157 m\/s, ±3 %/)).toBeTruthy();
-      expect(screen.getByText(/not the joint envelope/)).toBeTruthy();
+      expect(screen.getByText(/±5 %, with a\s*1° floor on the heading box/)).toBeTruthy();
+      expect(screen.getByText(/11 tiling\s*-180…180°/)).toBeTruthy();
+      expect(screen.getByText(/6 tiling 60…125 m\/s/)).toBeTruthy();
+      expect(screen.getByText(/1\.5° above \/ 1° below/)).toBeTruthy();
+    });
+
+    // The producer of the artefact is NOT in this repository, so the boxes here
+    // are a reconstruction — which is exactly why the panel names what rebuilt
+    // them and the reader measures the verdict twice.
+    it("names what rebuilt the boxes, and what the verdict was computed on", async () => {
+      render(<TrainingPanel />);
+      expect(await screen.findByText("DAL123")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
+      expect(screen.getByText(/the artefact's own labeller is NOT in this repository/)).toBeTruthy();
+      expect(screen.getByText(/course 6 s · speed and height 10 s/)).toBeTruthy();
     });
 
     // The spec's sha and the runway classes' sha are separate fields: two
@@ -149,7 +163,7 @@ describe("TrainingPanel", () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText("c7a4f4239f52…")).toBeTruthy();
+      expect(screen.getByText("8695be0c64e0…")).toBeTruthy();
       expect(screen.getByText("aa11bb22cc33…")).toBeTruthy();
     });
 
@@ -158,9 +172,10 @@ describe("TrainingPanel", () => {
       await waitFor(() => {
         const published = lastPublished();
         expect(published?.flight?.flightKey).toBe("DAL123_05L_a1b2c3_1699999999");
-        expect(published?.vocabulary?.readingRule).toBe("segment-v14");
-        // the views that draw the corridor need the rule it was drawn under
-        expect(published?.geometry?.bandsAreJoint).toBe(false);
+        expect(published?.vocabulary?.readingRule).toBe("box-v2-wedge");
+        // the views that draw a verdict need to be able to say what it was
+        // computed on, so the reading rule travels with the selection
+        expect(published?.reading?.rule).toBe("box-v2-wedge");
       });
     });
 
@@ -178,11 +193,11 @@ describe("TrainingPanel", () => {
   it("names the field when a set's sample is wrong, and keeps the panel up", async () => {
     const broken = mockSample() as any;
     // one row per event still, but two events at the same instant
-    broken.flights[0].sentence.eventTimesS = [0, 26, 26, 108, 130, 188, 222];
+    broken.flights[0].sentence.eventTimesS = [0, 10, 10, 46, 60, 84, 104];
     serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: broken });
 
     render(<TrainingPanel />);
-    expect(await screen.findByText(/Set vocabulary_tau10 cannot be read/)).toBeTruthy();
+    expect(await screen.findByText(/Set box_v3 cannot be read/)).toBeTruthy();
     expect(screen.getByText(/strictly increasing/)).toBeTruthy();
     // the panel itself is still there, with its heading
     expect(screen.getByRole("heading", { name: "Training" })).toBeTruthy();
@@ -212,7 +227,7 @@ describe("TrainingPanel", () => {
     const second = structuredClone(sample.flights[0]);
     second.flightKey = "AAL456_23R_b2c3d4_1700000000";
     second.callsign = "AAL456";
-    second.runway = "23R";
+    second.runway = "KRDU:23R";
     second.stratum = "straight-in";
     sample.flights.push(second);
     serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: sample });
@@ -242,15 +257,15 @@ describe("TrainingPanel's switches", () => {
   it("offers a switch for each line a sentence draws, and none for the measured one", async () => {
     render(<TrainingPanel />);
     expect(await screen.findByText("DAL123")).toBeTruthy();
-    expect(screen.getByLabelText(/the words flown by rule/)).toBeTruthy();
-    expect(screen.getByLabelText(/what the model said/)).toBeTruthy();
+    expect(screen.getByLabelText(/the envelope the words allow/)).toBeTruthy();
+    expect(screen.getByLabelText(/the envelope the model said/)).toBeTruthy();
     expect(screen.queryByLabelText(/measured/)).toBeNull();
   });
 
   it("switches a line off through the shared state, not its own", async () => {
     render(<TrainingPanel />);
     expect(await screen.findByText("DAL123")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText(/the words flown by rule/));
+    fireEvent.click(screen.getByLabelText(/the envelope the words allow/));
     expect(setTrainingLayer).toHaveBeenCalledWith("flown", false);
   });
 
@@ -267,7 +282,7 @@ describe("TrainingPanel's switches", () => {
     render(<TrainingPanel />);
     expect(await screen.findByText("DAL123")).toBeTruthy();
     // the open set is the read-back one, even though the manifest holds a prior set
-    expect(screen.getByLabelText(/what the model said/)).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText(/the envelope the model said/)).toHaveProperty("disabled", true);
   });
 });
 
@@ -285,7 +300,7 @@ describe("a manifest holding a superseded set", () => {
   // current is known before any sample is fetched.
   it("opens on a set this reader can read, not on the first by id", async () => {
     const index = mockIndex() as any;
-    const stale = { ...index.sets[0], id: "aaa_older", readingRule: "segment-v13" };
+    const stale = { ...index.sets[0], id: "aaa_older", readingRule: "segment-v14" };
     index.sets = [stale, index.sets[0]];
     serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
 
@@ -296,11 +311,11 @@ describe("a manifest holding a superseded set", () => {
 
   it("says which sets are superseded, in the picker itself", async () => {
     const index = mockIndex() as any;
-    index.sets = [{ ...index.sets[0], id: "aaa_older", readingRule: "segment-v13" }, index.sets[0]];
+    index.sets = [{ ...index.sets[0], id: "aaa_older", readingRule: "segment-v14" }, index.sets[0]];
     serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
 
     render(<TrainingPanel />);
     expect(await screen.findByText("DAL123")).toBeTruthy();
-    expect(screen.getByRole("option", { name: /aaa_older.*segment-v13, superseded/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /aaa_older.*segment-v14, superseded/ })).toBeTruthy();
   });
 });

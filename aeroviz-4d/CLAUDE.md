@@ -103,10 +103,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - The comparison reference must be requested on the `arrival` track window — see
   `aeroviz_backend/CLAUDE.md` (AV12).
 
-- **A Training sample read under an older vocabulary is REFUSED on `kinds` alone** (every row still
-  parses), so an empty Training tab after a vocabulary change is the reader working; and the
-  Training views draw a CORRIDOR — each word's tolerance on the axis it accumulates into, vertical
-  into height (a fan, and a Cesium wall in HAE), speed into arrival time (AV19).
+- **A Training set of a superseded vocabulary is REFUSED by name** (reading rule + schema), so a
+  greyed-out set after a vocabulary change is the reader working — the panel opens on one it CAN
+  read; and the Training views draw a CHAIN OF BOXES, not a line: the altitude word's wedge as a
+  Cesium wall in HAE, one prism per word, and the verdict computed on the SMOOTHED signals the
+  boxes were read from (AV19).
 
 ## Comparison CZML colour contract
 

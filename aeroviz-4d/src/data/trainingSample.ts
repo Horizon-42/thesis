@@ -1,24 +1,40 @@
 /**
  * trainingSample.ts
  * -----------------
- * The Training task's data contract: the manifest of exported sample sets and one
- * set's flights (track + sentence + instructions, and later the geometric track).
+ * The Training task's data contract: the manifest of exported sample sets, and
+ * one set's flights — the track, the sentence, and the BOXES that sentence makes.
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.
  *
- * A WORD IS A BAND, NOT A POINT (reading rule `segment-v14`, 2026-09-21). The
- * vertical and speed words each carry a tolerance: an executor that stays inside
- * it has obeyed the word. So a sentence does not name one track, it names a
- * family, and this module exposes the tolerances (`verticalToleranceDeg`,
- * `speedToleranceMps`) beside the centres. The kinds that have no tolerance
- * return `null` from `trainingWordTolerance` — a band drawn on them would be an
- * invented number (design §5.6, V36).
+ * A WORD IS AN INTERVAL, AND A SENTENCE IS A CHAIN OF BOUNDING BOXES (reading
+ * rule `box-v2-wedge`, 2026-09-21). The criterion is CONTAINMENT: every row of
+ * the track has to lie inside the boxes in force at its moment. That replaces
+ * the retired reading, where a word was a centre and the question was how far
+ * the track sat from it — there is no centre here and no quantisation error, so
+ * nothing in this file computes a distance to one.
  *
- * THE SENTENCE IS AN EVENT SEQUENCE, NOT AN EVEN GRID (2026-09-20). One row per moment something changed; the gaps between rows are
- * irregular. The even 10 s grid it replaced snapped every instruction forward by
- * 0–8 s, mean 4 s, always late. Two invariants follow and are checked here:
- * `eventTimesS` and `words` have the same length, and `eventTimesS` strictly
- * increases. Neither existed under the grid, and a reader that assumes a fixed
- * step will silently mis-time every instruction it draws.
+ * THREE KINDS ARE BOXES, THREE ARE NOT. Heading, altitude and speed each name an
+ * interval; the runway word is the FRAME the other three are measured in, the
+ * duration word is how long this box is held, and the terminal word is a label.
+ * `trainingWordBox` returns null for those three, and a view that drew a band on
+ * them would be inventing a number.
+ *
+ * THE ALTITUDE BOX IS NOT CONSTANT. A heading or speed word is the same interval
+ * for as long as it is in force; an altitude word is a TARGET plus the wedge the
+ * target is backward-reachable from, so its box narrows as the aircraft runs out
+ * of path to the segment's end, closing onto ±5 % of the target. That is why the
+ * envelope arrives as two columns per row rather than as one interval per word.
+ *
+ * THERE IS NO FLOWN TRACK IN THIS FILE, and its absence is a fact about the
+ * vocabulary rather than a gap in the export: flying a box sentence needs a
+ * height-tracking executor (the design's replay gate), which is not built. What
+ * a box sentence can be checked by is containment, and that is what is here.
+ *
+ * THE SIGNALS THE BOXES JUDGE ARE SMOOTHED, and both versions are carried. The
+ * boxes were read from a moving average (6 s on the course, 10 s on speed and
+ * height), so that is what `readCourseDeg` / `readSpeedMps` / `readHeightM` are
+ * and what every verdict here is computed on. The raw columns are beside them so
+ * the smoothing is visible rather than hidden — a chart showing only the smoothed
+ * line would be showing a signal nobody flew.
  *
  * VALIDATION IS PER SET, AND A BAD SET IS REJECTED ALONE. This is a deliberate
  * divergence from the comparison manifest's `.every(isComparisonCategory)`, which
@@ -29,44 +45,39 @@
  */
 
 import { fetchJson } from "../utils/fetchJson";
-// No unit conversion is imported here any more: this vocabulary is DEFINED in
-// SI (metres, m/s, degrees), so the labels print the stored numbers. The feet
-// and knots the retired bins were defined in were the reason for the conversion,
-// and they went with them (V30).
+// No unit conversion is imported here: this vocabulary is DEFINED in SI (metres,
+// m/s, degrees), so the labels print the stored numbers.
 
 /** MIRROR of the exporter's schema strings. A file that does not carry these is
  *  refused by name rather than read leniently. */
 export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v1";
+/** v2: the sample file is a different object — an envelope instead of a flown track. */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v2";
 
 /**
- * MIRROR of `instructions.READING_RULE`, and REFUSED on mismatch.
+ * MIRROR of the artefact's `spec.reading_rule`, and REFUSED on mismatch.
  *
- * The file carries its own spec — bins, centres, tolerances — so most of what a
- * word means is read from it. What is NOT in the file is the rule's semantics:
- * that the second column is an angle, that DESCENT IS POSITIVE, that a vertical
- * instruction's `settledS` is its segment's end rather than a plateau's. This
- * reader hardcodes all three. So it is bound to the rule that produced the file,
- * and says so by name rather than reading an older artefact into today's
- * meanings (the Python side refuses across rules for the same reason).
+ * The file carries its own spec — the edge tables, the ladder, the wedge's two
+ * angles — so most of what a word means is read from it. What is NOT in the file
+ * is the rule's semantics: that a word is an interval rather than a centre, that
+ * the second column is a target HEIGHT (the retired vertical word was an angle),
+ * that the duration word describes the row it sits on rather than the gap behind
+ * it. This reader hardcodes all three, so it is bound to the rule that produced
+ * the file and says so by name.
  *
  * The cost of the pin is a one-line edit when the rule bumps; the cost of not
  * pinning it is a chart that looks right and means something else.
  */
-export const TRAINING_READING_RULE = "segment-v14";
+export const TRAINING_READING_RULE = "box-v2-wedge";
 
 /**
- * MIRROR of `ts_transformer.manoeuvre.instructions.INSTRUCTION_KINDS` — the six
- * word kinds IN ORDER. The columns of `words` are positional, so this order is
- * load-bearing: reorder it and every word is read as another kind's.
- * (The intercept word was deleted on 2026-09-20, D73: it was the heading word's
- * shadow — all 4,897 were issued at the same instant as a heading word. The
- * altitude word became the VERTICAL word on 2026-09-21: a flight path angle
- * instead of a height, read off a piecewise fit of the profile.)
+ * MIRROR of the artefact's `spec.kinds` — the six word kinds IN ORDER. The
+ * columns of `words` are positional, so this order is load-bearing: reorder it
+ * and every word is read as another kind's.
  */
 export const TRAINING_KINDS = [
   "heading",
-  "vertical",
+  "altitude",
   "speed",
   "runway",
   "duration",
@@ -75,13 +86,22 @@ export const TRAINING_KINDS = [
 
 export type TrainingKind = (typeof TRAINING_KINDS)[number];
 
+/** The three kinds that ARE boxes. The other three name the frame, the hold and
+ *  the ending, and none of them bounds a signal. */
+export const TRAINING_BOX_KINDS = ["heading", "altitude", "speed"] as const;
+export type TrainingBoxKind = (typeof TRAINING_BOX_KINDS)[number];
+
+export function isTrainingBoxKind(kind: TrainingKind): kind is TrainingBoxKind {
+  return (TRAINING_BOX_KINDS as readonly string[]).includes(kind);
+}
+
 /** How many columns a `words` row carries. Derived, never typed as 6. */
 export const TRAINING_WORD_COLUMNS = TRAINING_KINDS.length;
 
 /** Column index per kind, so callers never count positions by hand. */
 export const TRAINING_KIND_COLUMN: Record<TrainingKind, number> = {
   heading: 0,
-  vertical: 1,
+  altitude: 1,
   speed: 2,
   runway: 3,
   duration: 4,
@@ -89,21 +109,22 @@ export const TRAINING_KIND_COLUMN: Record<TrainingKind, number> = {
 };
 
 /**
- * MIRROR of `instructions.LEVEL_MODE_DEG`: the vertical mode that means level
- * flight. It is named rather than spotted, because it is the one mode whose
- * tolerance is absolute — a percentage of zero is no tolerance at all.
+ * MIRROR of `instruction_sample_export.INSIDE_EPSILON`: how close to an edge
+ * still counts as inside, in each kind's own unit.
  *
- * DESCENT IS POSITIVE in this vocabulary, so the go-around mode is the NEGATIVE
- * one. Nothing may print a bare signed angle: a reader seeing "-3.0°" reads a
- * descent, which is exactly backwards (V37).
+ * It is not slack in the vocabulary. The columns are written at display
+ * precision while the edge tables are full precision, and the labeller's greedy
+ * reader extends a segment until the wedge binds — so rows sitting EXACTLY on an
+ * edge are produced by construction (measured: one row in 13,922). Without this
+ * they read as violations of a thousandth of a millimetre. The exporter computes
+ * its verdict with the same number, and the two verdicts are compared.
  */
-export const TRAINING_LEVEL_MODE_DEG = 0;
+export const TRAINING_INSIDE_EPSILON = 1e-3;
 
-/** MIRROR of `instructions.TERMINAL_CONTINUE / _LANDED / _GO_AROUND`. */
+/** MIRROR of the artefact's terminal classes. */
 export const TERMINAL_CONTINUE = 0;
 export const TERMINAL_LANDED = 1;
 export const TERMINAL_GO_AROUND = 2;
-/** MIRROR of `instructions.TERMINAL_WORDS`. */
 export const TERMINAL_WORDS = 3;
 
 /**
@@ -114,24 +135,6 @@ export const TERMINAL_WORDS = 3;
  * class is never observed rather than implying the model declines to use it.
  */
 export const TERMINAL_NEVER_OBSERVED: readonly number[] = [TERMINAL_GO_AROUND];
-
-/**
- * MIRROR of `instructions.ABSORBED_*`: why a manoeuvre was read but not worded.
- *
- * `short segment` is the VERTICAL kind's own (segment-v13): its segments tile the
- * track rather than sitting on plateaus, so it never has a plateau to call a
- * small change or a short tail — what it can have is a sliver the fit cut that
- * read as a different mode and was folded into its neighbour. A fold onto the
- * SAME word is not here at all: that is the fit's own bookkeeping, counted as
- * `verticalPiecesMerged` rather than drawn as a manoeuvre the rule refused.
- */
-export const ABSORBED_REASONS = [
-  "same word",
-  "small change",
-  "short tail",
-  "short segment",
-] as const;
-export type AbsorbedReason = (typeof ABSORBED_REASONS)[number];
 
 /** The two kinds of sample set the exporter writes. */
 export const TRAINING_SET_KINDS = ["vocabulary-readback", "prior-generated"] as const;
@@ -148,10 +151,10 @@ export interface TrainingSetEntry {
   /** The vocabulary SPEC's sha. Not the runway classes' — see `runwaySha256`. */
   vocabularySha256: string;
   /**
-   * The runway classes' OWN sha. The class set is per airport and is carried
-   * BESIDE the spec (`runway_idents`), so it does not move `vocabularySha256`:
-   * two artefacts with the same spec sha can carry different runway lists.
-   * Comparing only one of the two and calling it "the same vocabulary" is wrong.
+   * The runway classes' OWN sha. The class set is carried BESIDE the spec
+   * (`runway_idents`), so it does not move `vocabularySha256`: two artefacts with
+   * the same spec sha can carry different runway lists, and comparing only one of
+   * the two and calling it "the same vocabulary" is wrong.
    */
   runwaySha256: string;
   readingRule: string;
@@ -159,20 +162,13 @@ export interface TrainingSetEntry {
   /**
    * WHICH MODEL this set carries, when its kind says it carries one. It is in
    * the manifest as well as in the sample because the picker has to name the
-   * model before anyone downloads ten megabytes of it — switching between two
-   * experiments should not mean loading both to find out which is which.
+   * model before anyone downloads several megabytes of it.
    */
   prior?: TrainingSetPrior;
   /**
    * WHICH flights this set holds and how they were chosen. It is required and it
-   * is SHOWN, because "40 of 6,853" is not a statement until the rule that picked
+   * is SHOWN, because "40 of 4,486" is not a statement until the rule that picked
    * the 40 is on screen beside it.
-   *
-   * The draw used to be the hand check's own pages, so the panel could say the
-   * screen showed the aircraft a human had marked. The first `segment-v12` artefacts
-   * carry no pages; the exporter draws and stratifies for itself and states the
-   * rule here, so the claim on screen is the file's, not the reader's memory of
-   * how it used to work.
    */
   cohort: TrainingCohort;
 }
@@ -198,119 +194,127 @@ export interface TrainingIndex {
   rejected: Array<{ id: string; problem: string }>;
 }
 
+/**
+ * The vocabulary, as the artefact states it. Every number a box is built from is
+ * here: the two edge TABLES tile their words, and the altitude table is a LADDER
+ * OF TARGETS, one per word, not edges.
+ */
 export interface TrainingVocabulary {
   sha256: string;
   runwaySha256: string;
   readingRule: string;
-  headingBinDeg: number;
-  /**
-   * The flight path angles the vertical word can name, DESCENT POSITIVE — a
-   * TABLE, not a bin width. The descent modes were fitted to the data and
-   * rounded to one decimal, so there is no formula to derive them from, and the
-   * class count is the table's length.
-   */
-  verticalModesDeg: number[];
-  /** How many straight segments one approach's profile is cut into. Not a word
-   *  count — it is how the labeller read the profile, and the panel states it
-   *  beside the vocabulary's other properties. */
-  verticalSegments: number;
-  /** Ground speed centres in m/s — again a fitted TABLE, not min + k × step.
-   *  Control assigns indicated airspeed and the wind is inside this number, so
-   *  ground speed carries no whole-knot structure to align to. */
-  speedCentresMps: number[];
-  /** The level mode's tolerance, in degrees and ABSOLUTE. */
-  verticalLevelToleranceDeg: number;
-  /** Every other vertical mode's tolerance, as a fraction of its own angle. */
-  verticalToleranceFraction: number;
-  /** The speed word's tolerance, as a fraction of its own centre. */
-  speedToleranceFraction: number;
+  /** The one redundancy the whole vocabulary is built from: ±5 %. */
+  redundancyFraction: number;
+  /** [heading words + 1] the edges that tile -180…180. Word k is [k, k+1]. */
+  headingEdgesDeg: number[];
+  /** The absolute floor under the percentage, so the box at the course is 2°
+   *  wide rather than nothing. */
+  headingFloorDeg: number;
+  /** [speed words + 1] the edges that tile the speed range. */
+  speedEdgesMps: number[];
+  /** [altitude words] the TARGETS, signed: the ladder runs below the threshold
+   *  as well as above it, because a track that passes under the threshold's
+   *  elevation is normal and was the commonest refusal before the ladder was
+   *  signed. */
+  altitudeTargetsM: number[];
+  /** The offset inside the target's own tolerance, `redundancy × (T + h0)`, so a
+   *  target of 0 m still has a box. */
+  altitudeH0M: number;
+  /** The wedge's two angles. DOWN is the wider side and opens ABOVE the target:
+   *  it is the set the target is backward-reachable from, and losing height is
+   *  the manoeuvre with the most room. */
+  altitudeDownDeg: number;
+  altitudeUpDeg: number;
+  /** The artefact's own prose for the two above — shown, not parsed. */
+  altitudeForm: string;
+  altitudeReading: string;
   durationBinS: number;
   durationMaxS: number;
-  /** The class count the ARTEFACT states per kind (`word_counts` on the Python
-   *  side). `trainingWordCounts` derives the same numbers from the bins, and
-   *  `parseVocabulary` refuses a file where the two disagree — that is what makes
-   *  the derivation a checked mirror rather than a second opinion. */
-  words: Record<TrainingKind, number>;
-  /** The vocabulary's OWN runway classes. NEVER the airport's runway list: at
-   *  KRDU the airport has six thresholds and the vocabulary four (05L 05R 23L
-   *  23R), because the arrival manifest this line is built on carries only those
-   *  four. Drawing six would say the model can name a runway it cannot. */
+  /** The two smoothing windows the read signals were made with. Shown, because
+   *  which signal a verdict was computed on decides the verdict. */
+  courseSmoothingS: number;
+  smoothingS: number;
+  /** The vocabulary's OWN runway classes, never the airport's runway list. */
   runwayIdents: string[];
+  /** The class count the ARTEFACT states per kind. `trainingWordCounts` derives
+   *  the same numbers from the tables, and `parseVocabulary` refuses a file where
+   *  the two disagree — that is what makes the derivation a checked mirror. */
+  words: Record<TrainingKind, number>;
+}
+
+/**
+ * How a track became the three signals the boxes judge. It is REQUIRED and it is
+ * SHOWN: the same track against the same boxes is 100 % inside on the smoothed
+ * signals and 93 % inside on the raw ones, so a verdict whose signal is not
+ * stated is a number with no meaning.
+ */
+export interface TrainingReadingRule {
+  rule: string;
+  courseSignal: string;
+  speedSignal: string;
+  heightSignal: string;
+  pathSignal: string;
+  remainingPathTo: string;
+  windowRows: string;
+  insideEpsilon: number;
+  /** Which program wrote this file — and it says, in the file, that the
+   *  artefact's own labeller is NOT in this repository. */
+  producedBy: string;
+  constantsFrom: string[];
 }
 
 export interface TrainingSentence {
-  /** [E] the moments something changed — strictly increasing, irregular gaps. */
+  /** [E] the moments a box opens — strictly increasing, irregular gaps. */
   eventTimesS: number[];
+  /** [E] how long each box is held. It is the duration WORD decoded, and the
+   *  parser checks it against that word: the two are one answer (§2.5, the hold
+   *  is written on the row it describes) and a file where they disagree has its
+   *  duration column pointing at the wrong row. */
+  holdS: number[];
   /** [E][6] the words in force at each event, in `TRAINING_KINDS` order. */
   words: number[][];
-  /** How many gaps were clamped at the duration ceiling. Stated, never silent. */
-  durationClamped: number;
 }
 
 /**
- * One instruction as the labeller issued it. Only the three geometric kinds and
- * the runway are ever issued: the duration and terminal words are read off the
- * EVENT SEQUENCE, not off this list, so they never appear here (that is why a
- * view must count words on `sentence`, never on `instructions`).
- */
-export interface TrainingInstruction {
-  kind: TrainingKind;
-  word: number;
-  /** The value this word was read from, unbinned, in the kind's own unit:
-   *  degrees relative to the final approach course (heading), degrees of flight
-   *  path angle with DESCENT POSITIVE (vertical — an angle, not a height), m/s
-   *  ground speed. The runway instruction has no target at all (its WORD is the
-   *  answer) and the exporter writes `instructions.NO_TARGET`, 0.0, there — so
-   *  nothing may print a target for a runway word. */
-  target: number;
-  issuedS: number;
-  /** When the manoeuvre finished, or `null` when it never settled inside the
-   *  track — a deceleration still slowing at the threshold has none. Null is a
-   *  real answer here, not a missing field.
-   *
-   *  For a VERTICAL instruction this is the segment's end rather than a
-   *  plateau's: the segments tile the profile, so each one's `settledS` is the
-   *  next one's `issuedS` and the last runs to the end of the record. */
-  settledS: number | null;
-  /** Whether the target fell outside the vocabulary's range and was clamped. */
-  clamped: boolean;
-}
-
-/**
- * The geodetic columns BOTH tracks carry, for the 3D layer.
+ * The geodetic columns the 3D layer draws from.
  *
  * THE ALTITUDE IS HAE, and the name says so. A record is MSL; Cesium reads
  * `cartographicDegrees` altitude as metres above the WGS84 ellipsoid, so the
  * exporter converts on the way out exactly as the CZML path does. Since
  * h = H + N and N is negative here (-33.5 m at KRDU), a line handed the MSL
  * number renders |N| too HIGH, floating above its own terrain.
+ *
+ * `haeOffsetM` is that conversion as an OFFSET, per row: add it to any height
+ * above the threshold to get HAE. The envelope has four more height columns over
+ * the same ground track, and recomputing the geodesy per column would be the same
+ * inverse five times.
  */
-export const TRAINING_GEODETIC_COLUMNS = ["lon", "lat", "altHaeM"] as const;
+export const TRAINING_GEODETIC_COLUMNS = ["lon", "lat", "altHaeM", "haeOffsetM"] as const;
 export type TrainingGeodeticColumn = (typeof TRAINING_GEODETIC_COLUMNS)[number];
 
 /**
  * MIRROR of `instructions.course_frame` — the observed track in the FINAL
  * APPROACH COURSE's frame, which is the frame the words were read in. Reading
- * the words against anything else (a geodetic track, say) would let the charts
- * and the words disagree about where the aircraft was.
+ * the words against anything else would let the charts and the words disagree
+ * about where the aircraft was.
  *
- * Every column has one value per row of `tS`. The geodetic columns are carried
- * beside these, as `TRAINING_GEODETIC_COLUMNS`.
+ * Every column has one value per row of `tS`. The three `read*` columns are the
+ * SMOOTHED signals the boxes are measured against; the raw ones beside them are
+ * what the aircraft actually did.
  */
 export const TRAINING_OBSERVED_COLUMNS = [
   "toGoM",              // along the course, positive BEFORE the threshold
   "crossM",             // right of the course, positive
   "heightM",            // above the threshold
-  // Cumulative HORIZONTAL distance from the first row — the axis the vertical
-  // word was read on (`instructions._profile`: the profile is fitted as height
-  // against this, so the word IS this curve's slope). It is exported rather
-  // than integrated here so the frontend does not need a second copy of
-  // `MINIMUM_GROUND_SPEED_MPS`.
+  // Cumulative HORIZONTAL path from the first row — the axis the altitude wedge
+  // is measured on (`r` is remaining PATH, never the projection on the course).
   "pathM",
   "relCourseDeg",       // ground track against the course, wrapped
-  "courseUnwrappedDeg", // the same, unwrapped along the rows
   "groundSpeedMps",
   "established",        // 0 / 1 per row
+  "readCourseDeg",      // the three the boxes judge, smoothed as the labeller did
+  "readSpeedMps",
+  "readHeightM",
 ] as const;
 
 export type TrainingObservedColumn = (typeof TRAINING_OBSERVED_COLUMNS)[number];
@@ -320,97 +324,65 @@ export type TrainingObserved = { tS: number[] }
   & Record<TrainingGeodeticColumn, number[]>;
 
 /**
- * The columns of the track flown FROM THE WORDS (`manoeuvre/instruction_kinematics.py`),
- * in the same runway frame as the observed one. Geodetic columns are not here:
- * the plan view and the "how far apart now" readout are frame quantities, and
- * the 3D layer's input arrives with its own vertical datum (design V27).
+ * ONE WORD AS A BOX IN SPACE — the three intervals it names, and where those
+ * intervals let the aircraft be while it is in force.
+ *
+ * `lon` / `lat` are FOUR corners: the ground footprint of the box, anchored at
+ * the aircraft's position when the box opened, and `toGoM` / `crossM` are the
+ * same four corners in the COURSE FRAME, which is the plan view's own axes.
+ * Both spellings come from one computation at the exporter, because the frame's
+ * transform lives on that side of the wire and a second inverse here could
+ * drift from it. It is the
+ * words' own reachable set — the heading word bounds the direction of travel and
+ * the speed word its rate, so over a hold of `holdS` the displacement is bounded
+ * — and it is DERIVED, not the word itself: a word constrains the state at every
+ * instant, and where that lets the aircraft go is this. The view has to say which
+ * of the two it is drawing.
+ *
+ * `altLoM` / `altHiM` are the wedge's extremes over this box's own rows, which is
+ * what gives the box its height. They are not the target's ±5 %: the wedge is
+ * wide at the start of a segment and narrow at its end.
  */
-export const TRAINING_GEOMETRIC_COLUMNS = [
-  "toGoM", "crossM", "heightM", "groundSpeedMps", "relCourseDeg",
-] as const;
+export interface TrainingEventBox {
+  eventS: number;
+  holdS: number;
+  headingLoDeg: number;
+  headingHiDeg: number;
+  speedLoMps: number;
+  speedHiMps: number;
+  altitudeTargetM: number;
+  altLoM: number;
+  altHiM: number;
+  altHaeLoM: number;
+  altHaeHiM: number;
+  lon: number[];
+  lat: number[];
+  toGoM: number[];
+  crossM: number[];
+}
 
-export type TrainingGeometricColumn = (typeof TRAINING_GEOMETRIC_COLUMNS)[number];
-
-/** MIRROR of `instruction_kinematics.END_CROSSED / END_TIME_CAP`. */
-export const TRAINING_END_REASONS = ["crossed-threshold", "time-cap"] as const;
-export type TrainingEndReason = (typeof TRAINING_END_REASONS)[number];
-
-/**
- * The vertical word's tolerance, flown (design §5.6). It is TWO HEIGHT COLUMNS,
- * not two tracks, and that is a property of the kinematics rather than a saving:
- * the commanded angle enters only the height step, so the horizontal columns and
- * the stopping time of the edges are identical to the nominal track's, row for
- * row. `altHaeLoM` / `altHaeHiM` are the same two heights as HAE, for the wall
- * the 3D layer draws between them.
- */
-export const TRAINING_VERTICAL_BAND_COLUMNS = [
-  "heightLoM", "heightHiM", "altHaeLoM", "altHaeHiM",
-] as const;
-export type TrainingVerticalBandColumn = (typeof TRAINING_VERTICAL_BAND_COLUMNS)[number];
-export type TrainingVerticalBand = Record<TrainingVerticalBandColumn, number[]>;
-
-/**
- * The speed word's tolerance, flown. This one IS two tracks: a speed change
- * moves the horizontal step, the turn radius and the moment of crossing. They
- * carry no geodetic columns — they run within ~100 m of the nominal line, so the
- * 3D layer does not draw them (design §5.6).
- */
-export const TRAINING_SPEED_EDGE_COLUMNS = ["toGoM", "crossM"] as const;
-export type TrainingSpeedEdgeColumn = (typeof TRAINING_SPEED_EDGE_COLUMNS)[number];
-
-export type TrainingSpeedEdge = { tS: number[] }
-  & Record<TrainingSpeedEdgeColumn, number[]> & {
-  endReason: TrainingEndReason;
-  /** When this edge stopped, on the track's own clock. It is what
-   *  `arrivalWindowS` is made of, and it is checked against it. */
-  endS: number;
-};
-
-export interface TrainingSpeedBand {
-  /** Every speed word at the BOTTOM of its band, and at the top. Only the target
-   *  moves: the start speed is the observation's first row for all three runs,
-   *  so they share a first point by construction (design §5.4-1). */
-  low: TrainingSpeedEdge;
-  high: TrainingSpeedEdge;
-  /**
-   * `[the fast edge's crossing, the slow edge's crossing]` — the window the
-   * speed tolerance alone opens on the arrival time, which is the one place that
-   * tolerance is legible. `null` when either edge never reached the runway; then
-   * the edge's own `endReason` says why, and nothing may print a window.
-   */
-  arrivalWindowS: [number, number] | null;
+/** How many rows one kind's boxes hold, and how many they do not. */
+export interface TrainingInsideCount {
+  rows: number;
+  outside: number;
 }
 
 /**
- * A sentence flown by the rules — the columns every flown track has, whatever
- * words it came from. The truth's carries the corridor its words allow on top of
- * this (`TrainingGeometric`); the PRIOR's does not, because two corridors on one
- * chart are two overlapping bands, and what the model's line answers is which
- * WORDS it said rather than how much slack they would have had.
+ * THE ENVELOPE: the boxes a sentence makes over one track.
+ *
+ * The four `alt*` columns are per ROW, because the altitude box narrows along
+ * its segment; the heading and speed boxes are constant while their word is in
+ * force and live on `events`. `inside` is this vocabulary's own criterion, and
+ * the reader recomputes it and refuses a file whose verdict differs.
  */
-export type TrainingFlownTrack = { tS: number[] }
-  & Record<TrainingGeometricColumn, number[]>
-  & Record<TrainingGeodeticColumn, number[]> & {
-  endReason: TrainingEndReason;
-  /** The horizontal distance from the threshold where it stopped — `hypot(toGo,
-   *  cross)`, so a track that crosses the plane two kilometres to the side
-   *  reports two kilometres. The words are never extended to reach the runway. */
-  finalGapM: number;
-  /** The distance between the two tracks, over the time BOTH were flying. */
-  meanGapM: number;
-  gapP95M: number;
-  /** How much of the approach that comparison covered. A mean gap read without
-   *  it is a mean over an unstated window. */
-  comparedS: number;
-  comparedFraction: number;
-};
-
-export type TrainingGeometric = TrainingFlownTrack & {
-  /** One kind's slack at a time — NOT the joint 2×2 envelope (V32). The
-   *  `geometry` block states that in the file, as `bandsAreJoint: false`. */
-  verticalBand: TrainingVerticalBand;
-  speedBand: TrainingSpeedBand;
-};
+export interface TrainingEnvelope {
+  altLoM: number[];
+  altHiM: number[];
+  altHaeLoM: number[];
+  altHaeHiM: number[];
+  events: TrainingEventBox[];
+  inside: Record<TrainingBoxKind, TrainingInsideCount>;
+}
 
 /**
  * WHAT THE MODEL SAID, per flight — and it is not a sentence the model made up.
@@ -418,17 +390,19 @@ export type TrainingGeometric = TrainingFlownTrack & {
  * At every event the prior saw the TRUTH's words and the TRUTH's state up to
  * that point and was asked what the next event would be; `words[k]` for k ≥ 1 is
  * that answer, and `words[0]` is the truth's opening event, which is given
- * (`givenEvents`). A free run — the model fed its own words and an executor's
- * state — is a different experiment (the closed loop), and the file says which
- * one this is in `TrainingPrior.method`. Nothing here may be labelled
- * "generated".
+ * (`givenEvents`). A free run is a different experiment (the closed loop), and
+ * the file says which one this is in `TrainingPrior.method`. Nothing here may be
+ * labelled "generated".
  *
- * The event TIMES are the truth's. The duration word is predicted like every
- * other kind and is carried, but it does not place the events: each prediction
- * was conditioned on the truth's state at the truth's instant, so re-timing the
- * sentence by the model's own gaps would put its words at moments its
- * conditioning never saw. What the model says about timing is READ on the
- * duration row, not flown.
+ * The event TIMES and the HOLDS stay the truth's. The duration word is predicted
+ * like every other kind and is carried, but it does not place the events: each
+ * prediction was conditioned on the truth's state at the truth's instant, so
+ * re-timing the sentence by the model's own gaps would put its words at moments
+ * its conditioning never saw.
+ *
+ * Its `envelope` is the boxes ITS words make over the SAME track — so `inside`
+ * answers the question the model is actually being asked: would the sentence it
+ * said have contained the aircraft that flew.
  */
 export interface TrainingFlightPrior {
   /** [E][6], the same shape and column order as the truth's sentence. */
@@ -442,9 +416,7 @@ export interface TrainingFlightPrior {
    *  truncated there: the model was asked at every event, so every answer is
    *  carried. */
   landedAtS: number | null;
-  /** Its sentence flown by the SAME kinematics as the truth's, on the truth's
-   *  event times — so the two tracks differ only in the words. No corridor. */
-  geometric: TrainingFlownTrack;
+  envelope: TrainingEnvelope;
 }
 
 /** MIRROR of `instruction_sample_export.PRIOR_METHOD`. */
@@ -467,36 +439,26 @@ export interface TrainingPrior {
   readout: Record<string, Record<string, number>>;
 }
 
-/** A manoeuvre the labeller read but did not word, and why. Drawn on its kind's
- *  row so "the words miss this turn" is visible rather than argued about. */
-export interface TrainingAbsorbed {
-  kind: TrainingKind;
-  startS: number;
-  endS: number;
-  word: number;
-  change: number;
-  reason: AbsorbedReason;
-}
-
 export interface TrainingFlight {
   flightKey: string;
   callsign: string;
   runway: string;
   stratum: string;
   /**
-   * The TRACK's length — not the sentence's. The last event sits well before it
-   * (median 145 s of a 326 s arrival in KRDU's export): the words in force at the
-   * last event are held to the threshold. Every row's last band therefore runs to
-   * `durationS`, and a bar that stopped at the last event would draw 44 % of the
-   * approach as if nothing were being flown.
+   * The TRACK's length. Under this rule the sentence covers all of it — the
+   * events tile the track and the last box carries its own hold — so the parser
+   * checks that the last event plus its hold lands on this number.
    */
   durationS: number;
-  establishedFromStart: boolean;
+  /** The track's own sampling step, and the two smoothing windows in ROWS that
+   *  the read signals were made with. Shown, because the window is what decides
+   *  how far the smoothed line can sit from the raw one. */
+  dtS: number;
+  courseWindowRows: number;
+  signalWindowRows: number;
   sentence: TrainingSentence;
-  instructions: TrainingInstruction[];
-  absorbed: TrainingAbsorbed[];
   observed: TrainingObserved;
-  geometric: TrainingGeometric;
+  envelope: TrainingEnvelope;
   /** Present exactly when the set's kind is `prior-generated` — see
    *  `parseTrainingSample`, which keys it on the kind rather than on whether the
    *  field happens to be there. */
@@ -508,79 +470,31 @@ export interface TrainingFlight {
 export interface TrainingSelection {
   vocabulary: TrainingVocabulary;
   flight: TrainingFlight;
-  /** The model that said `flight.prior`, when there is one. The two travel
-   *  together: a view drawing the model's line has to be able to say which model
-   *  and how it was asked. */
+  /** The model that said `flight.prior`, when there is one. */
   prior?: TrainingPrior;
-  /** What the flown tracks and their bands were drawn under. It travels with the
-   *  selection because the views that draw the corridor are the ones that have
-   *  to say where it came from — a band on screen whose rule is two components
-   *  away is an approximation nobody can see stated (design §5.4). */
-  geometry: TrainingGeometry;
-}
-
-/**
- * MIRROR of `instruction_kinematics.assumptions()`: what the flown sentences were
- * drawn under. It is REQUIRED and every field of it is SHOWN, in the panel's ⓘ
- * or in the read-back window's legend — an approximation nobody can see stated
- * is worse than none, and the block claims in its own docstring that the view
- * shows it.
- *
- * THREE OF THESE FIELDS HAVE NO PRODUCER YET: `verticalBandFrom`,
- * `speedBandFrom` and `bandsAreJoint` are written by the exporter step that also
- * writes the two bands (design §7, T10), which is not built. They are required
- * here rather than optional because the repo settles a schema BEFORE the
- * experiment that writes it runs — an export missing them is an export from
- * unfinished code, and it is refused by name rather than read half-way.
- */
-export interface TrainingGeometry {
-  method: string;
-  dtS: number;
-  bankDeg: number;
-  gravityMps2: number;
-  /** The vertical word IS the commanded angle, so there is no height error to
-   *  close — which is why the height time constant is gone from this block. */
-  verticalIsCommandedAngle: boolean;
-  /** Where the executor levels off rather than flying through the runway. The
-   *  vertical band closes onto this floor, so the widest part of the fan is
-   *  BEFORE the threshold: that is the floor's doing, not the vocabulary's,
-   *  and the legend has to say so (V34). */
-  heightFloorM: number;
-  descentMaxDeg: number;
-  climbMaxDeg: number;
-  accelMaxMps2: number;
-  startsAt: string;
-  stopRule: string;
-  windModelled: boolean;
-  aircraftTypeModelled: boolean;
-  /** Which tolerance each band was flown from. A corridor on screen that cannot
-   *  be traced back to the number that drew it is an approximation nobody can
-   *  see stated. */
-  verticalBandFrom: string;
-  speedBandFrom: string;
-  /** Whether the two bands are the joint envelope. It is `false` and it is
-   *  stated, because the drawn corridor is one kind at a time (V32). */
-  bandsAreJoint: boolean;
-  constantsFrom: string[];
+  /** How the signals the boxes judge were made. It travels with the selection
+   *  because the views that draw a verdict are the ones that have to say what
+   *  the verdict was computed on. */
+  reading: TrainingReadingRule;
 }
 
 export interface TrainingSample {
   setId: string;
   airport: string;
   vocabulary: TrainingVocabulary;
-  geometry: TrainingGeometry;
+  reading: TrainingReadingRule;
   /** The model whose words every flight carries, when this is a prior set. */
   prior?: TrainingPrior;
   flights: TrainingFlight[];
 }
 
-/** The part of a vocabulary that decides what a word MEANS: the bins and the
- *  runway classes. Everything that reads words takes this, so `parseVocabulary`
- *  can derive the class counts while it is still building the vocabulary. */
+/** The part of a vocabulary that decides what a word MEANS. Everything that
+ *  reads words takes this, so `parseVocabulary` can derive the class counts while
+ *  it is still building the vocabulary. */
 export type TrainingWordSpec = Pick<
   TrainingVocabulary,
-  | "headingBinDeg" | "verticalModesDeg" | "verticalSegments" | "speedCentresMps"
-  | "verticalLevelToleranceDeg" | "verticalToleranceFraction" | "speedToleranceFraction"
+  | "redundancyFraction" | "headingEdgesDeg" | "headingFloorDeg" | "speedEdgesMps"
+  | "altitudeTargetsM" | "altitudeH0M" | "altitudeDownDeg" | "altitudeUpDeg"
   | "durationBinS" | "durationMaxS" | "runwayIdents"
 >;
 
@@ -591,26 +505,22 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
 /**
  * How many classes each kind has, under this file's own spec.
  *
- * MIRROR of `Vocabulary.heading_words / vertical_words / speed_words /
- * duration_words` and `word_counts()`: the same formulas, so a word index out of
- * range is caught here instead of indexing a legend off its end. Computing them
- * from the file's spec (rather than hardcoding 72/6/16/151) is what lets one
- * reader serve a re-binned vocabulary and every airport's runway list.
- *
- * Two of them are TABLE LENGTHS now, not divisions: the vertical modes and the
- * speed centres are fitted values with no step to divide by.
+ * The two edge tables TILE their words, so they hold one more value than there
+ * are words; the altitude ladder holds one target PER word. Getting that
+ * backwards is the mistake this derivation exists to catch — it shifts every
+ * altitude word by half a box and still plots.
  *
  * The range check earns its keep on the POSITIONAL columns: swap two and a
- * duration word (0–150) lands in the runway column (0–3) and fails loudly,
+ * duration word (0–300) lands in the runway column (0–21) and fails loudly,
  * instead of drawing the wrong runway for the whole flight.
  */
 export function trainingWordCounts(
   vocabulary: TrainingWordSpec,
 ): Record<TrainingKind, number> {
   return {
-    heading: Math.round(360 / vocabulary.headingBinDeg),
-    vertical: vocabulary.verticalModesDeg.length,
-    speed: vocabulary.speedCentresMps.length,
+    heading: vocabulary.headingEdgesDeg.length - 1,
+    altitude: vocabulary.altitudeTargetsM.length,
+    speed: vocabulary.speedEdgesMps.length - 1,
     runway: vocabulary.runwayIdents.length,
     duration: Math.round(vocabulary.durationMaxS / vocabulary.durationBinS) + 1,
     terminal: TERMINAL_WORDS,
@@ -619,78 +529,96 @@ export function trainingWordCounts(
 
 // ── what a word means ────────────────────────────────────────────────────────
 
+/** The heading word's interval, in degrees relative to the final approach
+ *  course. The edges tile -180…180, so word k is [edge k, edge k+1]. */
+export function headingBoxDeg(vocabulary: TrainingWordSpec, word: number): [number, number] {
+  return [vocabulary.headingEdgesDeg[word], vocabulary.headingEdgesDeg[word + 1]];
+}
+
 /**
- * MIRROR of `ts_transformer.data.runway_context.wrap_deg` — the SAME half-open
- * range [-180, 180), so heading word 18 reads -180°, exactly as the labeller
- * wrote it. A wrap of the other convention would flip that one word's sign.
+ * Which heading word holds a relative course — the edges tile, so it is the last
+ * edge at or below the value. Used to name the box ON the course, which is the
+ * one number that says how fine this vocabulary is where it matters (2° at the
+ * course, 18° at the reciprocal).
  */
-export function wrapDeg(degrees: number): number {
-  // The doubled modulo is not decoration: JS `%` truncates where Python's floors,
-  // so the single-modulo spelling returns -190 for -190 and 0 stays 0 only by luck.
-  // Today's one caller passes 0…350, but the signed relative course the artefact
-  // carries is the obvious next caller.
-  return (((degrees + 180) % 360) + 360) % 360 - 180;
+export function headingWordAt(vocabulary: TrainingWordSpec, degrees: number): number {
+  const edges = vocabulary.headingEdgesDeg;
+  for (let word = edges.length - 2; word > 0; word -= 1) {
+    if (degrees >= edges[word]) return word;
+  }
+  return 0;
 }
 
-/** MIRROR of `Vocabulary.heading_centre_deg`: degrees relative to the final
- *  approach course, 0 = on the course. */
-export function headingCentreDeg(vocabulary: TrainingWordSpec, word: number): number {
-  return wrapDeg(word * vocabulary.headingBinDeg);
+/** The speed word's interval, in m/s of ground speed. */
+export function speedBoxMps(vocabulary: TrainingWordSpec, word: number): [number, number] {
+  return [vocabulary.speedEdgesMps[word], vocabulary.speedEdgesMps[word + 1]];
+}
+
+/** The altitude word's TARGET — a height above the threshold, signed. */
+export function altitudeTargetM(vocabulary: TrainingWordSpec, word: number): number {
+  return vocabulary.altitudeTargetsM[word];
 }
 
 /**
- * MIRROR of `Vocabulary.vertical_centre_deg`: the commanded flight path angle in
- * degrees, DESCENT POSITIVE. It is a rate, not a place — there is no height to
- * converge on, which is why the flown track integrates it directly.
+ * The target's own tolerance, `redundancy × (T + h0)` — the half-width the wedge
+ * closes onto at the END of its segment, and the spacing of the ladder itself.
+ * The `+ h0` is what gives a target of 0 m a box at all.
  */
-export function verticalCentreDeg(vocabulary: TrainingWordSpec, word: number): number {
-  return vocabulary.verticalModesDeg[word];
-}
-
-/** MIRROR of `Vocabulary.speed_centre_mps`: ground speed, from the table. */
-export function speedCentreMps(vocabulary: TrainingWordSpec, word: number): number {
-  return vocabulary.speedCentresMps[word];
+export function altitudeFloorM(vocabulary: TrainingWordSpec, word: number): number {
+  return vocabulary.redundancyFraction * (altitudeTargetM(vocabulary, word) + vocabulary.altitudeH0M);
 }
 
 /**
- * MIRROR of `Vocabulary.vertical_tolerance_deg` — INCLUDING the level mode's
- * branch. The level mode gets an absolute tolerance because a fraction of zero
- * is no tolerance at all, and level flight is 12 % of the segments; every other
- * mode gets a fraction of its own angle.
- */
-export function verticalToleranceDeg(vocabulary: TrainingWordSpec, word: number): number {
-  const centre = verticalCentreDeg(vocabulary, word);
-  if (centre === TRAINING_LEVEL_MODE_DEG) return vocabulary.verticalLevelToleranceDeg;
-  return Math.abs(centre) * vocabulary.verticalToleranceFraction;
-}
-
-/** MIRROR of `Vocabulary.speed_tolerance`: a fraction of the commanded speed. */
-export function speedToleranceMps(vocabulary: TrainingWordSpec, word: number): number {
-  return speedCentreMps(vocabulary, word) * vocabulary.speedToleranceFraction;
-}
-
-/**
- * How far a word lets the executor sit from its centre, in the kind's own unit,
- * or `null` for the kinds that carry NO tolerance (design §5.6, V36).
+ * The wedge at a row that has `remainingPathM` of track left before its
+ * segment's end: `T - r·tan(up) - f ≤ h ≤ T + r·tan(down) + f`.
  *
- * The null is the point of this function: the heading, runway, duration and
- * terminal words have no redundancy, so a view that drew a band on them would be
- * inventing a number. The plateau tolerances the LABELLER used
- * (`course_tolerance_deg`, `speed_tolerance_mps`) are a different quantity for a
- * different purpose and are not these.
+ * MIRROR of `instruction_sample_export.altitude_envelope`, and of the artefact's
+ * own `altitudeForm`. The exporter is what writes the envelope columns; this is
+ * here so a view can draw the wedge for a word the file carries no column for —
+ * the MODEL's words at a row, say — without a second definition of the shape.
  */
-export function trainingWordTolerance(
+export function altitudeWedgeM(
+  vocabulary: TrainingWordSpec,
+  word: number,
+  remainingPathM: number,
+): [number, number] {
+  const target = altitudeTargetM(vocabulary, word);
+  const floor = altitudeFloorM(vocabulary, word);
+  const remaining = Math.max(remainingPathM, 0);
+  return [
+    target - remaining * Math.tan((vocabulary.altitudeUpDeg * Math.PI) / 180) - floor,
+    target + remaining * Math.tan((vocabulary.altitudeDownDeg * Math.PI) / 180) + floor,
+  ];
+}
+
+/**
+ * The interval a word names, or `null` for the three kinds that name no interval.
+ *
+ * The null is the point of this function: the runway word is the FRAME, the
+ * duration word is the hold and the terminal word is a label, so a view that drew
+ * a band on any of them would be inventing a number.
+ *
+ * For an ALTITUDE word this is the box at the segment's END — the target's own
+ * ±5 %, which is the tightest the wedge ever gets. The wedge at a particular row
+ * is `altitudeWedgeM`, or the envelope's own columns.
+ */
+export function trainingWordBox(
   vocabulary: TrainingWordSpec,
   kind: TrainingKind,
   word: number,
-): number | null {
-  if (kind === "vertical") return verticalToleranceDeg(vocabulary, word);
-  if (kind === "speed") return speedToleranceMps(vocabulary, word);
+): [number, number] | null {
+  if (kind === "heading") return headingBoxDeg(vocabulary, word);
+  if (kind === "speed") return speedBoxMps(vocabulary, word);
+  if (kind === "altitude") {
+    const target = altitudeTargetM(vocabulary, word);
+    const floor = altitudeFloorM(vocabulary, word);
+    return [target - floor, target + floor];
+  }
   return null;
 }
 
-/** MIRROR of `Vocabulary.duration_centre_s`: the gap to the PREVIOUS event. */
-export function durationCentreS(vocabulary: TrainingWordSpec, word: number): number {
+/** MIRROR of the duration word's decoding: the hold this box is kept for. */
+export function durationHoldS(vocabulary: TrainingWordSpec, word: number): number {
   return word * vocabulary.durationBinS;
 }
 
@@ -703,18 +631,19 @@ export function formatSeconds(seconds: number): string {
   return Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(1);
 }
 
-/** The terminal words, by index (`TERMINAL_CONTINUE / _LANDED / _GO_AROUND`). */
+/** The terminal words, by index. */
 export const TERMINAL_LABELS = ["continue", "landed", "go-around"] as const;
 
 /**
  * A word as a person reads it.
  *
- * THE UNITS ARE SI, because this vocabulary is defined in SI: the speed centres
- * were fitted in m/s and rounded to 1 m/s (44, 56, 63 …), so printing knots
- * would label them 85.6 kt and 108.8 kt — arithmetic the reader would have to
- * undo to recognise the vocabulary. That is the same argument the retired feet
- * and knots labels rested on, pointing the other way now that the bins moved
- * (V30).
+ * THE UNITS ARE SI, because this vocabulary is defined in SI: the edges were
+ * fitted in metres and m/s, so printing knots would label a box 130.0–143.5 kt —
+ * arithmetic the reader would have to undo to recognise the vocabulary.
+ *
+ * The ALTITUDE word prints its target, not its box, because the target is what
+ * the word names; the box depends on where in the segment you are, and the two
+ * are shown together by `trainingWordBandLabel`.
  */
 export function trainingWordLabel(
   vocabulary: TrainingWordSpec,
@@ -723,33 +652,30 @@ export function trainingWordLabel(
 ): string {
   switch (kind) {
     case "heading": {
-      const degrees = Math.round(headingCentreDeg(vocabulary, word));
-      return `${degrees > 0 ? "+" : ""}${degrees}\u00b0`;
+      const [low, high] = headingBoxDeg(vocabulary, word);
+      const sign = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(value === Math.round(value) ? 0 : 1)}`;
+      return `${sign(low)}…${sign(high)}°`;
     }
-    case "vertical": {
-      const centre = verticalCentreDeg(vocabulary, word);
-      if (centre === TRAINING_LEVEL_MODE_DEG) return "level";
-      // The ARROW says which way, never the sign: descent is positive here, so
-      // a bare "-3.0°" reads as a descent to everyone who has not read the
-      // vocabulary (V37).
-      return `${centre > 0 ? "\u2193" : "\u2191"}${Math.abs(centre).toFixed(1)}\u00b0`;
+    case "altitude":
+      return `${Math.round(altitudeTargetM(vocabulary, word))} m`;
+    case "speed": {
+      const [low, high] = speedBoxMps(vocabulary, word);
+      return `${low.toFixed(0)}–${high.toFixed(0)} m/s`;
     }
-    case "speed":
-      return `${speedCentreMps(vocabulary, word)} m/s`;
     case "runway":
       return vocabulary.runwayIdents[word];
     case "duration":
-      return `${durationCentreS(vocabulary, word)} s`;
+      return `${durationHoldS(vocabulary, word)} s`;
     case "terminal":
       return TERMINAL_LABELS[word];
   }
 }
 
 /**
- * The same word WITH the band it allows — `↓3.1°±0.22`, `93 m/s±2.8` — which is
- * what the sentence bar writes on a band, because the tolerance is half of what
- * the word says (design §3.1). A kind without a tolerance reads exactly as
- * `trainingWordLabel`.
+ * The same word WITH the interval it names — what the sentence bar writes on a
+ * box. For heading and speed the label already IS the interval, so this adds
+ * nothing; for altitude it adds the target's own ±, which is the box the wedge
+ * closes onto at the end of its segment.
  */
 export function trainingWordBandLabel(
   vocabulary: TrainingWordSpec,
@@ -757,9 +683,60 @@ export function trainingWordBandLabel(
   word: number,
 ): string {
   const label = trainingWordLabel(vocabulary, kind, word);
-  const tolerance = trainingWordTolerance(vocabulary, kind, word);
-  if (tolerance === null) return label;
-  return `${label}\u00b1${tolerance.toFixed(kind === "vertical" ? 2 : 1)}`;
+  if (kind !== "altitude") return label;
+  return `${label}±${altitudeFloorM(vocabulary, word).toFixed(1)}`;
+}
+
+// ── the verdict ──────────────────────────────────────────────────────────────
+
+/** Which event is in force at each row: the last one that has opened. The events
+ *  tile the track, so every row has exactly one. */
+export function eventInForce(eventTimesS: number[], tS: number[]): number[] {
+  const rows: number[] = [];
+  let event = 0;
+  for (const time of tS) {
+    while (event + 1 < eventTimesS.length && eventTimesS[event + 1] <= time) event += 1;
+    rows.push(event);
+  }
+  return rows;
+}
+
+/**
+ * Row by row: is the signal inside the box in force. ONE VERDICT PER ROW, which
+ * is what makes the counts add up — an earlier reading of this view walked spans
+ * and counted the shared boundary row of two consecutive spans twice, so 132 rows
+ * produced 134 judgements.
+ *
+ * It is recomputed here rather than read off the file, and `parseTrainingSample`
+ * refuses a file whose own counts disagree. The exporter derives the boxes from
+ * the artefact's spec and this side checks them against the columns beside them:
+ * two implementations of the same comparison, which is the only check available
+ * for a rule whose labeller is not in this repository.
+ */
+export function trainingContainment(
+  flight: Pick<TrainingFlight, "observed" | "sentence">,
+  envelope: TrainingEnvelope,
+  vocabulary: TrainingWordSpec,
+  words: number[][],
+): Record<TrainingBoxKind, { rows: number; outside: number; inside: boolean[] }> {
+  const { observed } = flight;
+  const forced = eventInForce(flight.sentence.eventTimesS, observed.tS);
+  const judge = (values: number[], low: (row: number) => number, high: (row: number) => number) => {
+    const inside = values.map(
+      (value, row) =>
+        value >= low(row) - TRAINING_INSIDE_EPSILON && value <= high(row) + TRAINING_INSIDE_EPSILON,
+    );
+    return { rows: inside.length, outside: inside.filter((ok) => !ok).length, inside };
+  };
+  const headingBox = (row: number) =>
+    headingBoxDeg(vocabulary, words[forced[row]][TRAINING_KIND_COLUMN.heading]);
+  const speedBox = (row: number) =>
+    speedBoxMps(vocabulary, words[forced[row]][TRAINING_KIND_COLUMN.speed]);
+  return {
+    heading: judge(observed.readCourseDeg, (row) => headingBox(row)[0], (row) => headingBox(row)[1]),
+    altitude: judge(observed.readHeightM, (row) => envelope.altLoM[row], (row) => envelope.altHiM[row]),
+    speed: judge(observed.readSpeedMps, (row) => speedBox(row)[0], (row) => speedBox(row)[1]),
+  };
 }
 
 // ── small checkers ───────────────────────────────────────────────────────────
@@ -892,12 +869,30 @@ export function parseTrainingIndex(raw: unknown): Parsed<TrainingIndex> {
 
 // ── one sample set ───────────────────────────────────────────────────────────
 
+/** A table that TILES its words: sorted, distinct, one more value than words. */
+function parseTable(raw: unknown, field: string, minimum: number): Parsed<number[]> {
+  const values = numberArray(raw);
+  if (values === null || values.length < minimum) {
+    return { ok: false, problem: `vocabulary.${field} is missing or holds fewer than ${minimum} values` };
+  }
+  for (let i = 1; i < values.length; i += 1) {
+    if (!(values[i] > values[i - 1])) {
+      return {
+        ok: false,
+        problem:
+          `vocabulary.${field} is not stored sorted and distinct (index ${i}: ` +
+          `${values[i - 1]} then ${values[i]}) — the boxes tile, so an unsorted table overlaps two words`,
+      };
+    }
+  }
+  return { ok: true, value: values };
+}
+
 function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
   if (!isRecord(raw)) return { ok: false, problem: "vocabulary is not an object" };
   const numbers: Array<keyof TrainingVocabulary> = [
-    "headingBinDeg", "verticalSegments",
-    "verticalLevelToleranceDeg", "verticalToleranceFraction", "speedToleranceFraction",
-    "durationBinS", "durationMaxS",
+    "redundancyFraction", "headingFloorDeg", "altitudeH0M", "altitudeDownDeg", "altitudeUpDeg",
+    "durationBinS", "durationMaxS", "courseSmoothingS", "smoothingS",
   ];
   const values: Record<string, number> = {};
   for (const field of numbers) {
@@ -905,52 +900,42 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
     if (value === null) return { ok: false, problem: `vocabulary.${field} is missing or not a number` };
     values[field] = value;
   }
-  // Every one of these is positive in `Vocabulary.__post_init__` — including the
-  // three tolerances, because a tolerance of zero is a band nothing can sit in
-  // and would quietly turn every word into an unmeetable point target.
-  for (const field of ["headingBinDeg", "verticalSegments", "durationBinS",
-                       "verticalLevelToleranceDeg", "verticalToleranceFraction",
-                       "speedToleranceFraction"]) {
+  // Every one of these is positive. A redundancy of zero is a box nothing can sit
+  // in; a wedge angle of zero is a box that never opens, which turns the altitude
+  // word back into the flat ladder this rule replaced.
+  for (const field of numbers) {
     if (values[field] <= 0) return { ok: false, problem: `vocabulary.${field} must be positive` };
   }
-  // Both mirror `Vocabulary.__post_init__`. The divisibility one is not
-  // decoration: `trainingWordCounts` ROUNDS 360/bin, so a 7° bin would give 51
-  // classes and read every heading word near the wrap into the wrong one.
-  if (360 % values.headingBinDeg !== 0) {
-    return { ok: false, problem: `vocabulary.headingBinDeg is ${values.headingBinDeg}, which does not divide 360°` };
-  }
-  if (!Number.isInteger(values.verticalSegments)) {
-    return { ok: false, problem: `vocabulary.verticalSegments is ${values.verticalSegments}, not a count of segments` };
-  }
-  // The two tables. Sorted and distinct is `Vocabulary.__post_init__`'s check as
-  // well: a word is the NEAREST centre, so two equal centres would make one of
-  // them unreachable and an unsorted table would break the reading rule.
-  const tables: Record<string, number[]> = {};
-  for (const field of ["verticalModesDeg", "speedCentresMps"] as const) {
-    const values_ = numberArray(raw[field]);
-    if (values_ === null || values_.length < 2) {
-      return { ok: false, problem: `vocabulary.${field} is missing or has fewer than two centres` };
-    }
-    for (let i = 1; i < values_.length; i += 1) {
-      if (!(values_[i] > values_[i - 1])) {
-        return {
-          ok: false,
-          problem: `vocabulary.${field} is not stored sorted and distinct (index ${i}: ${values_[i - 1]} then ${values_[i]})`,
-        };
-      }
-    }
-    tables[field] = values_;
-  }
-  // The level mode is the one the tolerance branches on, so a table without it
-  // would send every vertical word down the fraction branch — silently, since
-  // `verticalToleranceDeg` would still return a number.
-  if (!tables.verticalModesDeg.includes(TRAINING_LEVEL_MODE_DEG)) {
+  // The wedge is ASYMMETRIC and which way round decides which side is dangerous.
+  // Swapping them draws a corridor of exactly the same width with the slack on
+  // the wrong side of the target, which nothing else here would catch.
+  if (!(values.altitudeDownDeg > values.altitudeUpDeg)) {
     return {
       ok: false,
-      problem: `vocabulary.verticalModesDeg has no level mode (${TRAINING_LEVEL_MODE_DEG}\u00b0): it is the one mode whose tolerance is absolute`,
+      problem:
+        `vocabulary.altitudeDownDeg is ${values.altitudeDownDeg}° and altitudeUpDeg is ` +
+        `${values.altitudeUpDeg}° — the descent side is the wider one, so down > up`,
     };
   }
-  for (const field of ["sha256", "runwaySha256", "readingRule"]) {
+
+  const heading = parseTable(raw.headingEdgesDeg, "headingEdgesDeg", 3);
+  if (!heading.ok) return heading;
+  const speed = parseTable(raw.speedEdgesMps, "speedEdgesMps", 3);
+  if (!speed.ok) return speed;
+  const altitude = parseTable(raw.altitudeTargetsM, "altitudeTargetsM", 2);
+  if (!altitude.ok) return altitude;
+  // The boxes are two-ended and they tile: no ray, because a ray contains any
+  // value and would turn a corrupt row into a legal word (§2.1).
+  if (heading.value[0] > -180 || heading.value[heading.value.length - 1] < 180) {
+    return {
+      ok: false,
+      problem:
+        `vocabulary.headingEdgesDeg runs ${heading.value[0]}…${heading.value[heading.value.length - 1]}°, ` +
+        `which does not cover -180…180 — a relative course outside the table has no word`,
+    };
+  }
+
+  for (const field of ["sha256", "runwaySha256", "readingRule", "altitudeForm", "altitudeReading"]) {
     if (str(raw, field) === null) {
       return { ok: false, problem: `vocabulary.${field} is missing or not a non-empty string` };
     }
@@ -960,8 +945,9 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
       ok: false,
       problem:
         `vocabulary.readingRule is ${JSON.stringify(raw.readingRule)}, and this reader is written for ` +
-        `${TRAINING_READING_RULE} — the rule decides what the columns MEAN (the second is an angle, ` +
-        `descent positive), which no field of the file can say. Re-export under the current rule`,
+        `${TRAINING_READING_RULE} — the rule decides what a word IS (an interval, not a centre; the ` +
+        `second column a target height, not an angle), which no field of the file can say. ` +
+        `Re-export under the current rule`,
     };
   }
   const idents = raw.runwayIdents;
@@ -974,13 +960,14 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
     return { ok: false, problem: "vocabulary.words is missing: the artefact states its own class counts" };
   }
   const spec: TrainingWordSpec = {
-    headingBinDeg: values.headingBinDeg,
-    verticalModesDeg: tables.verticalModesDeg,
-    verticalSegments: values.verticalSegments,
-    speedCentresMps: tables.speedCentresMps,
-    verticalLevelToleranceDeg: values.verticalLevelToleranceDeg,
-    verticalToleranceFraction: values.verticalToleranceFraction,
-    speedToleranceFraction: values.speedToleranceFraction,
+    redundancyFraction: values.redundancyFraction,
+    headingEdgesDeg: heading.value,
+    headingFloorDeg: values.headingFloorDeg,
+    speedEdgesMps: speed.value,
+    altitudeTargetsM: altitude.value,
+    altitudeH0M: values.altitudeH0M,
+    altitudeDownDeg: values.altitudeDownDeg,
+    altitudeUpDeg: values.altitudeUpDeg,
     durationBinS: values.durationBinS,
     durationMaxS: values.durationMaxS,
     runwayIdents: idents as string[],
@@ -992,15 +979,15 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
     if (count === null || !Number.isInteger(count) || count <= 0) {
       return { ok: false, problem: `vocabulary.words.${kind} is ${JSON.stringify(stated[kind])}, expected a class count` };
     }
-    // The counts we derive from the bins and the counts the file states are two
-    // spellings of `Vocabulary.words`. They agreeing is the whole value of the
+    // The counts we derive from the tables and the counts the file states are two
+    // spellings of the same thing. Them agreeing is the whole value of the
     // derivation; disagreeing means one of the two mirrors has drifted, and
     // guessing which would put every word in the wrong legend.
     if (count !== derived[kind]) {
       return {
         ok: false,
         problem:
-          `vocabulary.words.${kind} is ${count}, but this file's own bins give ${derived[kind]} — ` +
+          `vocabulary.words.${kind} is ${count}, but this file's own tables give ${derived[kind]} — ` +
           `the stated counts and the spec disagree`,
       };
     }
@@ -1013,38 +1000,124 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
       sha256: str(raw, "sha256") as string,
       runwaySha256: str(raw, "runwaySha256") as string,
       readingRule: str(raw, "readingRule") as string,
+      altitudeForm: str(raw, "altitudeForm") as string,
+      altitudeReading: str(raw, "altitudeReading") as string,
+      courseSmoothingS: values.courseSmoothingS,
+      smoothingS: values.smoothingS,
       ...spec,
       words,
     },
   };
 }
 
+function parseReadingRule(raw: unknown): Parsed<TrainingReadingRule> {
+  if (!isRecord(raw)) {
+    return { ok: false, problem: "reading is missing: a verdict whose signal is not stated is a number with no meaning" };
+  }
+  const strings: Record<string, string> = {};
+  for (const field of ["rule", "courseSignal", "speedSignal", "heightSignal", "pathSignal",
+                       "remainingPathTo", "windowRows", "producedBy"]) {
+    const value = str(raw, field);
+    if (value === null) return { ok: false, problem: `reading.${field} is missing or not a non-empty string` };
+    strings[field] = value;
+  }
+  if (strings.rule !== TRAINING_READING_RULE) {
+    return { ok: false, problem: `reading.rule is ${JSON.stringify(strings.rule)}, expected ${TRAINING_READING_RULE}` };
+  }
+  const epsilon = finite(raw, "insideEpsilon");
+  if (epsilon === null || epsilon < 0) {
+    return { ok: false, problem: "reading.insideEpsilon is missing or not a tolerance" };
+  }
+  // The two sides have to judge a row on the edge the same way, and the counts
+  // are compared: a file written with a different epsilon would disagree with
+  // this reader on exactly the rows that sit on a box's edge, which is where the
+  // labeller's greedy reader leaves them.
+  if (epsilon !== TRAINING_INSIDE_EPSILON) {
+    return {
+      ok: false,
+      problem:
+        `reading.insideEpsilon is ${epsilon}, and this reader judges with ${TRAINING_INSIDE_EPSILON} — ` +
+        `the two verdicts are compared, so they have to be computed the same way`,
+    };
+  }
+  const sources = raw.constantsFrom;
+  if (!Array.isArray(sources) || !sources.every((item) => typeof item === "string")) {
+    return { ok: false, problem: "reading.constantsFrom is missing or not a list of sources" };
+  }
+  return {
+    ok: true,
+    value: {
+      rule: strings.rule,
+      courseSignal: strings.courseSignal,
+      speedSignal: strings.speedSignal,
+      heightSignal: strings.heightSignal,
+      pathSignal: strings.pathSignal,
+      remainingPathTo: strings.remainingPathTo,
+      windowRows: strings.windowRows,
+      insideEpsilon: epsilon,
+      producedBy: strings.producedBy,
+      constantsFrom: sources as string[],
+    },
+  };
+}
+
+function parseWordRows(
+  raw: unknown,
+  events: number,
+  counts: Record<TrainingKind, number>,
+  where: string,
+): Parsed<number[][]> {
+  if (!Array.isArray(raw)) return { ok: false, problem: `${where} is missing or not an array` };
+  if (raw.length !== events) {
+    return { ok: false, problem: `${where} has ${raw.length} rows, but the sentence has ${events} events` };
+  }
+  const words: number[][] = [];
+  for (let row = 0; row < raw.length; row += 1) {
+    const parsedRow = numberArray(raw[row]);
+    if (parsedRow === null) return { ok: false, problem: `${where}[${row}] is not a list of numbers` };
+    if (parsedRow.length !== TRAINING_WORD_COLUMNS) {
+      return {
+        ok: false,
+        problem:
+          `${where}[${row}] has ${parsedRow.length} columns, expected ${TRAINING_WORD_COLUMNS} ` +
+          `(${TRAINING_KINDS.join(", ")})`,
+      };
+    }
+    for (const kind of TRAINING_KINDS) {
+      const value = parsedRow[TRAINING_KIND_COLUMN[kind]];
+      if (!Number.isInteger(value) || value < 0 || value >= counts[kind]) {
+        return {
+          ok: false,
+          problem:
+            `${where}[${row}].${kind} is ${value}, outside this vocabulary's ` +
+            `0…${counts[kind] - 1} — the columns are positional, so check their ORDER first`,
+        };
+      }
+    }
+    words.push(parsedRow);
+  }
+  return { ok: true, value: words };
+}
+
 function parseSentence(
   raw: unknown,
   counts: Record<TrainingKind, number>,
+  vocabulary: TrainingWordSpec,
+  durationS: number,
   where: string,
 ): Parsed<TrainingSentence> {
   if (!isRecord(raw)) return { ok: false, problem: `${where}.sentence is not an object` };
 
   const eventTimesS = numberArray(raw.eventTimesS);
-  if (eventTimesS === null) {
-    return { ok: false, problem: `${where}.sentence.eventTimesS is missing or not a list of numbers` };
+  if (eventTimesS === null || eventTimesS.length === 0) {
+    return { ok: false, problem: `${where}.sentence.eventTimesS is missing, empty or not a list of numbers` };
   }
-  if (eventTimesS.length === 0) {
-    return { ok: false, problem: `${where}.sentence.eventTimesS is empty: a flight with no event has no sentence` };
-  }
-  if (!Array.isArray(raw.words)) {
-    return { ok: false, problem: `${where}.sentence.words is missing or not an array` };
-  }
-  if (raw.words.length !== eventTimesS.length) {
+  if (eventTimesS[0] !== 0) {
     return {
       ok: false,
-      problem: `${where}.sentence has ${eventTimesS.length} event times but ${raw.words.length} word rows — one row per event`,
+      problem: `${where}.sentence.eventTimesS opens at ${eventTimesS[0]} s, not 0 — the first box opens with the track`,
     };
   }
-  // The event sequence's own invariant: each event is a later moment than the one
-  // before it. Under the retired even grid this could not be violated; now it can,
-  // and an unsorted sentence would draw bands backwards and mis-time every jump.
   for (let i = 1; i < eventTimesS.length; i += 1) {
     if (!(eventTimesS[i] > eventTimesS[i - 1])) {
       return {
@@ -1055,41 +1128,44 @@ function parseSentence(
       };
     }
   }
+  const holdS = numberArray(raw.holdS);
+  if (holdS === null || holdS.length !== eventTimesS.length) {
+    return {
+      ok: false,
+      problem: `${where}.sentence.holdS is missing or does not have the ${eventTimesS.length} events' rows`,
+    };
+  }
+  const words = parseWordRows(raw.words, eventTimesS.length, counts, `${where}.sentence.words`);
+  if (!words.ok) return words;
 
-  const words: number[][] = [];
-  for (let row = 0; row < raw.words.length; row += 1) {
-    const parsedRow = numberArray(raw.words[row]);
-    if (parsedRow === null) {
-      return { ok: false, problem: `${where}.sentence.words[${row}] is not a list of numbers` };
-    }
-    if (parsedRow.length !== TRAINING_WORD_COLUMNS) {
+  // THE BOXES TILE THE TRACK IN TIME. Each box is held for exactly as long as the
+  // duration word says, and the next one opens where it ends — that is what makes
+  // a sentence a chain rather than a list of moments, and it is what lets every
+  // row have exactly one box in force. A gap would leave rows unjudged; an
+  // overlap would judge a row twice.
+  for (let i = 0; i < eventTimesS.length; i += 1) {
+    const stated = durationHoldS(vocabulary, words.value[i][TRAINING_KIND_COLUMN.duration]);
+    if (Math.abs(stated - holdS[i]) > 1e-6) {
       return {
         ok: false,
         problem:
-          `${where}.sentence.words[${row}] has ${parsedRow.length} columns, expected ${TRAINING_WORD_COLUMNS} ` +
-          `(${TRAINING_KINDS.join(", ")})`,
+          `${where}.sentence: event ${i} is held for ${holdS[i]} s but its duration word says ` +
+          `${stated} s — the hold and the word are ONE answer (the word describes the row it sits on)`,
       };
     }
-    for (const kind of TRAINING_KINDS) {
-      const value = parsedRow[TRAINING_KIND_COLUMN[kind]];
-      if (!Number.isInteger(value) || value < 0 || value >= counts[kind]) {
-        return {
-          ok: false,
-          problem:
-            `${where}.sentence.words[${row}].${kind} is ${value}, outside this vocabulary's ` +
-            `0…${counts[kind] - 1} — the columns are positional, so check their ORDER first`,
-        };
-      }
+    const closes = eventTimesS[i] + holdS[i];
+    const next = i + 1 < eventTimesS.length ? eventTimesS[i + 1] : durationS;
+    if (Math.abs(closes - next) > 0.05) {
+      return {
+        ok: false,
+        problem:
+          `${where}.sentence: event ${i} closes at ${closes} s but the ${i + 1 < eventTimesS.length ? "next event opens" : "track ends"} ` +
+          `at ${next} s — the boxes tile the track, so a gap leaves rows with no box in force`,
+      };
     }
-    words.push(parsedRow);
   }
 
-  const durationClamped = finite(raw, "durationClamped");
-  if (durationClamped === null || durationClamped < 0) {
-    return { ok: false, problem: `${where}.sentence.durationClamped is missing or not a count` };
-  }
-
-  return { ok: true, value: { eventTimesS, words, durationClamped } };
+  return { ok: true, value: { eventTimesS, holdS, words: words.value } };
 }
 
 function parseObserved(raw: unknown, durationS: number, where: string): Parsed<TrainingObserved> {
@@ -1100,15 +1176,10 @@ function parseObserved(raw: unknown, durationS: number, where: string): Parsed<T
   }
   // The track's clock is the flight's clock: it starts at 0 and it ends where
   // `durationS` says the flight ends, because both come from the same rows. A
-  // disagreement means the track and the sentence are not the same flight — the
-  // same check the last event already gets.
+  // disagreement means the track and the sentence are not the same flight.
   if (tS[0] !== 0) {
     return { ok: false, problem: `${where}.observed.tS starts at ${tS[0]} s, not 0` };
   }
-  // Compared at the export's own precision: `tS` is written rounded to 0.1 s and
-  // `durationS` is not, so an exact test would one day refuse a whole file over a
-  // rounding difference while blaming it on the track and the sentence being
-  // different flights.
   if (Math.abs(tS[tS.length - 1] - durationS) > 0.05) {
     return {
       ok: false,
@@ -1138,69 +1209,175 @@ function parseObserved(raw: unknown, durationS: number, where: string): Parsed<T
   if (!columns.established.every((value) => value === 0 || value === 1)) {
     return { ok: false, problem: `${where}.observed.established is not 0/1 per row` };
   }
+  // The path axis only counts up — it is a length, and the wedge reads a
+  // DIFFERENCE of it as remaining distance. A column that ever fell would give a
+  // negative remaining path, which clamps to zero and silently closes the box.
+  for (let i = 1; i < columns.pathM.length; i += 1) {
+    if (columns.pathM[i] < columns.pathM[i - 1]) {
+      return { ok: false, problem: `${where}.observed.pathM falls at row ${i}: a path length only grows` };
+    }
+  }
 
   return { ok: true, value: columns as TrainingObserved };
 }
 
-function parseFlownTrack(raw: unknown, where: string, what: string): Parsed<TrainingFlownTrack> {
-  if (!isRecord(raw)) return { ok: false, problem: `${where}.${what} is not an object` };
-  const tS = numberArray(raw.tS);
-  if (tS === null || tS.length < 2) {
-    return { ok: false, problem: `${where}.${what}.tS is missing or shorter than two steps` };
-  }
-  // `rowAt`, the x axis and the gap readout all assume this clock runs forward
-  // from 0, exactly as the observed one does.
-  if (tS[0] !== 0) {
-    return { ok: false, problem: `${where}.${what}.tS starts at ${tS[0]} s, not 0` };
-  }
-  for (let i = 1; i < tS.length; i += 1) {
-    if (!(tS[i] > tS[i - 1])) {
-      return { ok: false, problem: `${where}.${what}.tS is not increasing at step ${i}` };
-    }
-  }
-
-  const columns: Record<string, number[]> = { tS };
-  for (const column of [...TRAINING_GEOMETRIC_COLUMNS, ...TRAINING_GEODETIC_COLUMNS]) {
-    const values = numberArray(raw[column]);
-    if (values === null || values.length !== tS.length) {
-      return {
-        ok: false,
-        problem: `${where}.${what}.${column} is missing or does not have ${tS.length} rows`,
-      };
-    }
-    columns[column] = values;
-  }
-
-  const endReason = str(raw, "endReason");
-  if (endReason === null || !(TRAINING_END_REASONS as readonly string[]).includes(endReason)) {
-    return {
-      ok: false,
-      problem: `${where}.${what}.endReason is ${JSON.stringify(raw.endReason)}, expected one of ${TRAINING_END_REASONS.join(", ")}`,
-    };
-  }
+function parseEventBox(raw: unknown, index: number, where: string): Parsed<TrainingEventBox> {
+  if (!isRecord(raw)) return { ok: false, problem: `${where}.events[${index}] is not an object` };
   const numbers: Record<string, number> = {};
-  for (const field of ["finalGapM", "meanGapM", "gapP95M", "comparedS", "comparedFraction"]) {
+  for (const field of ["eventS", "holdS", "headingLoDeg", "headingHiDeg", "speedLoMps",
+                       "speedHiMps", "altitudeTargetM", "altLoM", "altHiM", "altHaeLoM", "altHaeHiM"]) {
     const value = finite(raw, field);
-    if (value === null || value < 0) {
-      return { ok: false, problem: `${where}.${what}.${field} is missing or not a distance` };
-    }
+    if (value === null) return { ok: false, problem: `${where}.events[${index}].${field} is missing or not a number` };
     numbers[field] = value;
   }
-
+  // Every box is an interval, and an inverted one is not a narrower box — it is a
+  // box nothing can be inside, which would read as "the model said something
+  // impossible" rather than as a corrupt file.
+  for (const [low, high] of [["headingLoDeg", "headingHiDeg"], ["speedLoMps", "speedHiMps"],
+                             ["altLoM", "altHiM"], ["altHaeLoM", "altHaeHiM"]]) {
+    if (numbers[low] > numbers[high]) {
+      return {
+        ok: false,
+        problem: `${where}.events[${index}] is inverted: ${low} ${numbers[low]} is above ${high} ${numbers[high]}`,
+      };
+    }
+  }
+  const corners: Record<string, number[]> = {};
+  for (const field of ["lon", "lat", "toGoM", "crossM"]) {
+    const values = numberArray(raw[field]);
+    if (values === null || values.length !== 4) {
+      return {
+        ok: false,
+        problem:
+          `${where}.events[${index}].${field} is not four corners — the ground footprint is a quad, ` +
+          `in geodetic and in course-frame coordinates`,
+      };
+    }
+    corners[field] = values;
+  }
   return {
     ok: true,
     value: {
-      ...(columns as { tS: number[] }
-        & Record<TrainingGeometricColumn, number[]>
-        & Record<TrainingGeodeticColumn, number[]>),
-      endReason: endReason as TrainingEndReason,
-      finalGapM: numbers.finalGapM,
-      meanGapM: numbers.meanGapM,
-      gapP95M: numbers.gapP95M,
-      comparedS: numbers.comparedS,
-      comparedFraction: numbers.comparedFraction,
+      eventS: numbers.eventS,
+      holdS: numbers.holdS,
+      headingLoDeg: numbers.headingLoDeg,
+      headingHiDeg: numbers.headingHiDeg,
+      speedLoMps: numbers.speedLoMps,
+      speedHiMps: numbers.speedHiMps,
+      altitudeTargetM: numbers.altitudeTargetM,
+      altLoM: numbers.altLoM,
+      altHiM: numbers.altHiM,
+      altHaeLoM: numbers.altHaeLoM,
+      altHaeHiM: numbers.altHaeHiM,
+      lon: corners.lon,
+      lat: corners.lat,
+      toGoM: corners.toGoM,
+      crossM: corners.crossM,
     },
   };
+}
+
+/**
+ * The envelope, checked against the track it is drawn over AND against the
+ * verdict the exporter wrote.
+ *
+ * The recomputation is the point. The artefact's labeller is not in this
+ * repository, so the exporter's boxes are a reconstruction from the spec; this
+ * reader measures them against the columns beside them and refuses a file where
+ * the two answers differ. A file that passes has been judged twice.
+ */
+function parseEnvelope(
+  raw: unknown,
+  flight: { observed: TrainingObserved; sentence: TrainingSentence },
+  words: number[][],
+  vocabulary: TrainingWordSpec,
+  where: string,
+  what: string,
+): Parsed<TrainingEnvelope> {
+  if (!isRecord(raw)) return { ok: false, problem: `${where}.${what} is missing or not an object` };
+  const rows = flight.observed.tS.length;
+  const columns: Record<string, number[]> = {};
+  for (const column of ["altLoM", "altHiM", "altHaeLoM", "altHaeHiM"]) {
+    const values = numberArray(raw[column]);
+    if (values === null || values.length !== rows) {
+      return { ok: false, problem: `${where}.${what}.${column} is missing or does not have the track's ${rows} rows` };
+    }
+    columns[column] = values;
+  }
+  for (let row = 0; row < rows; row += 1) {
+    if (columns.altLoM[row] > columns.altHiM[row]) {
+      return {
+        ok: false,
+        problem:
+          `${where}.${what} is inverted at row ${row}: altLoM ${columns.altLoM[row]} is above ` +
+          `altHiM ${columns.altHiM[row]}`,
+      };
+    }
+  }
+  if (!Array.isArray(raw.events) || raw.events.length !== flight.sentence.eventTimesS.length) {
+    return {
+      ok: false,
+      problem:
+        `${where}.${what}.events has ${Array.isArray(raw.events) ? raw.events.length : "no"} boxes, but the ` +
+        `sentence has ${flight.sentence.eventTimesS.length} events — one box per word`,
+    };
+  }
+  const events: TrainingEventBox[] = [];
+  for (let index = 0; index < raw.events.length; index += 1) {
+    const parsed = parseEventBox(raw.events[index], index, `${where}.${what}`);
+    if (!parsed.ok) return parsed;
+    if (Math.abs(parsed.value.eventS - flight.sentence.eventTimesS[index]) > 0.05) {
+      return {
+        ok: false,
+        problem:
+          `${where}.${what}.events[${index}] opens at ${parsed.value.eventS} s but event ${index} is at ` +
+          `${flight.sentence.eventTimesS[index]} s — the boxes are the sentence's own, in its order`,
+      };
+    }
+    events.push(parsed.value);
+  }
+
+  const stated = raw.inside;
+  if (!isRecord(stated)) {
+    return { ok: false, problem: `${where}.${what}.inside is missing: containment is this vocabulary's criterion` };
+  }
+  const envelope: TrainingEnvelope = {
+    altLoM: columns.altLoM,
+    altHiM: columns.altHiM,
+    altHaeLoM: columns.altHaeLoM,
+    altHaeHiM: columns.altHaeHiM,
+    events,
+    inside: {} as Record<TrainingBoxKind, TrainingInsideCount>,
+  };
+  const measured = trainingContainment(flight, envelope, vocabulary, words);
+  for (const kind of TRAINING_BOX_KINDS) {
+    const block = stated[kind];
+    if (!isRecord(block)) {
+      return { ok: false, problem: `${where}.${what}.inside.${kind} is missing` };
+    }
+    const count = finite(block, "rows");
+    const outside = finite(block, "outside");
+    if (count === null || outside === null || outside < 0 || outside > count) {
+      return { ok: false, problem: `${where}.${what}.inside.${kind} must carry a row count and how many are outside` };
+    }
+    if (count !== rows) {
+      return {
+        ok: false,
+        problem: `${where}.${what}.inside.${kind} judges ${count} rows, but the track has ${rows}`,
+      };
+    }
+    if (outside !== measured[kind].outside) {
+      return {
+        ok: false,
+        problem:
+          `${where}.${what}.inside.${kind} says ${outside} of ${count} rows are outside their box, and this ` +
+          `reader measures ${measured[kind].outside} on the columns beside it — the exporter's boxes and ` +
+          `this reader's reading of them disagree`,
+      };
+    }
+    envelope.inside[kind] = { rows: count, outside };
+  }
+  return { ok: true, value: envelope };
 }
 
 /**
@@ -1213,47 +1390,35 @@ function parseFlownTrack(raw: unknown, where: string, what: string): Parsed<Trai
  */
 function parseFlightPrior(
   raw: unknown,
-  events: number,
+  flight: { observed: TrainingObserved; sentence: TrainingSentence },
   counts: Record<TrainingKind, number>,
+  vocabulary: TrainingWordSpec,
   durationS: number,
   where: string,
 ): Parsed<TrainingFlightPrior> {
   if (!isRecord(raw)) {
     return { ok: false, problem: `${where}.prior is missing: this set's kind says every flight carries what the model said` };
   }
-  for (const field of ["words", "confidence"] as const) {
-    if (!Array.isArray(raw[field]) || (raw[field] as unknown[]).length !== events) {
-      return {
-        ok: false,
-        problem: `${where}.prior.${field} has ${Array.isArray(raw[field]) ? (raw[field] as unknown[]).length : "no"} rows, but the sentence has ${events} events`,
-      };
-    }
+  const events = flight.sentence.eventTimesS.length;
+  const words = parseWordRows(raw.words, events, counts, `${where}.prior.words`);
+  if (!words.ok) return words;
+  if (!Array.isArray(raw.confidence) || raw.confidence.length !== events) {
+    return {
+      ok: false,
+      problem: `${where}.prior.confidence has ${Array.isArray(raw.confidence) ? raw.confidence.length : "no"} rows, but the sentence has ${events} events`,
+    };
   }
-  const words: number[][] = [];
   const confidence: number[][] = [];
   for (let row = 0; row < events; row += 1) {
-    const said = numberArray((raw.words as unknown[])[row]);
     const sure = numberArray((raw.confidence as unknown[])[row]);
-    if (said === null || said.length !== TRAINING_WORD_COLUMNS) {
-      return { ok: false, problem: `${where}.prior.words[${row}] is not ${TRAINING_WORD_COLUMNS} words` };
-    }
     if (sure === null || sure.length !== TRAINING_WORD_COLUMNS) {
       return { ok: false, problem: `${where}.prior.confidence[${row}] is not ${TRAINING_WORD_COLUMNS} numbers` };
     }
-    for (const kind of TRAINING_KINDS) {
-      const value = said[TRAINING_KIND_COLUMN[kind]];
-      if (!Number.isInteger(value) || value < 0 || value >= counts[kind]) {
-        return {
-          ok: false,
-          problem: `${where}.prior.words[${row}].${kind} is ${value}, outside this vocabulary's 0…${counts[kind] - 1}`,
-        };
-      }
-      const probability = sure[TRAINING_KIND_COLUMN[kind]];
+    for (const probability of sure) {
       if (!(probability >= 0 && probability <= 1)) {
-        return { ok: false, problem: `${where}.prior.confidence[${row}].${kind} is ${probability}, not a probability` };
+        return { ok: false, problem: `${where}.prior.confidence[${row}] holds ${probability}, not a probability` };
       }
     }
-    words.push(said);
     confidence.push(sure);
   }
   const givenEvents = finite(raw, "givenEvents");
@@ -1267,11 +1432,14 @@ function parseFlightPrior(
   if (landed !== null && (typeof landed !== "number" || !Number.isFinite(landed) || landed < 0 || landed > durationS)) {
     return { ok: false, problem: `${where}.prior.landedAtS is ${JSON.stringify(landed)}, expected a time inside the track or null` };
   }
-  const flown = parseFlownTrack(raw.geometric, where, "prior.geometric");
-  if (!flown.ok) return flown;
+  const envelope = parseEnvelope(raw.envelope, flight, words.value, vocabulary, where, "prior.envelope");
+  if (!envelope.ok) return envelope;
   return {
     ok: true,
-    value: { words, confidence, givenEvents, landedAtS: landed as number | null, geometric: flown.value },
+    value: {
+      words: words.value, confidence, givenEvents,
+      landedAtS: landed as number | null, envelope: envelope.value,
+    },
   };
 }
 
@@ -1319,311 +1487,14 @@ function parsePrior(raw: unknown): Parsed<TrainingPrior> {
   };
 }
 
-/** The TRUTH's flown sentence: a flown track plus the corridor its words allow. */
-function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> {
-  const track = parseFlownTrack(raw, where, "geometric");
-  if (!track.ok) return track;
-  const record = raw as Record<string, unknown>;
-  const verticalBand = parseVerticalBand(record.verticalBand, track.value.tS.length, where);
-  if (!verticalBand.ok) return verticalBand;
-  const speedBand = parseSpeedBand(record.speedBand, where);
-  if (!speedBand.ok) return speedBand;
-  return {
-    ok: true,
-    value: { ...track.value, verticalBand: verticalBand.value, speedBand: speedBand.value },
-  };
-}
-
-/**
- * The vertical tolerance flown, checked to be ALIGNED WITH THE NOMINAL TRACK.
- *
- * The row count is not a formality here: the edges share the nominal track's
- * `tS`, `toGoM` and `crossM` — that is what makes two height columns a legal
- * substitute for two tracks — so a band of a different length is not a band that
- * can be drawn at all, and reading it with the nominal x values would draw a
- * corridor that is simply somewhere else.
- */
-function parseVerticalBand(raw: unknown, rows: number, where: string): Parsed<TrainingVerticalBand> {
-  if (!isRecord(raw)) {
-    return { ok: false, problem: `${where}.geometric.verticalBand is missing: the flown sentence carries the vertical word's tolerance` };
-  }
-  const columns: Record<string, number[]> = {};
-  for (const column of TRAINING_VERTICAL_BAND_COLUMNS) {
-    const values = numberArray(raw[column]);
-    if (values === null || values.length !== rows) {
-      return {
-        ok: false,
-        problem: `${where}.geometric.verticalBand.${column} is missing or does not have the nominal track's ${rows} rows`,
-      };
-    }
-    columns[column] = values;
-  }
-  // Lo is the SHALLOWER edge and stays above: the band is ordered, and a file
-  // where it is not has its two edges swapped, which would draw the fan inside
-  // out without changing its width.
-  for (let row = 0; row < rows; row += 1) {
-    if (columns.heightLoM[row] < columns.heightHiM[row]) {
-      return {
-        ok: false,
-        problem:
-          `${where}.geometric.verticalBand is inverted at row ${row}: heightLoM ${columns.heightLoM[row]} ` +
-          `is below heightHiM ${columns.heightHiM[row]} — lo is the SHALLOWER descent, so it stays above`,
-      };
-    }
-  }
-  return { ok: true, value: columns as TrainingVerticalBand };
-}
-
-/** One edge of the speed tolerance: a track of its own, plus where it stopped. */
-function parseSpeedEdge(raw: unknown, where: string): Parsed<TrainingSpeedEdge> {
-  if (!isRecord(raw)) return { ok: false, problem: `${where} is missing or not an object` };
-  const tS = numberArray(raw.tS);
-  if (tS === null || tS.length < 2) {
-    return { ok: false, problem: `${where}.tS is missing or shorter than two steps` };
-  }
-  const columns: Record<string, number[]> = { tS };
-  for (const column of TRAINING_SPEED_EDGE_COLUMNS) {
-    const values = numberArray(raw[column]);
-    if (values === null || values.length !== tS.length) {
-      return { ok: false, problem: `${where}.${column} is missing or does not have ${tS.length} rows` };
-    }
-    columns[column] = values;
-  }
-  const endReason = str(raw, "endReason");
-  if (endReason === null || !(TRAINING_END_REASONS as readonly string[]).includes(endReason)) {
-    return {
-      ok: false,
-      problem: `${where}.endReason is ${JSON.stringify(raw.endReason)}, expected one of ${TRAINING_END_REASONS.join(", ")}`,
-    };
-  }
-  const endS = finite(raw, "endS");
-  if (endS === null || endS <= 0) return { ok: false, problem: `${where}.endS is missing or not a time` };
-  if (Math.abs(endS - tS[tS.length - 1]) > 0.05) {
-    return { ok: false, problem: `${where}.endS is ${endS} s but its own track ends at ${tS[tS.length - 1]} s` };
-  }
-  return {
-    ok: true,
-    value: {
-      ...(columns as { tS: number[] } & Record<TrainingSpeedEdgeColumn, number[]>),
-      endReason: endReason as TrainingEndReason,
-      endS,
-    },
-  };
-}
-
-/**
- * The speed tolerance flown, and the arrival window it opens.
- *
- * The window is refused unless BOTH edges crossed the threshold: a window whose
- * far end is a time cap is not a window, it is the integration budget, and
- * printing it as "arrives between" would be a measurement of the stopping rule.
- */
-function parseSpeedBand(raw: unknown, where: string): Parsed<TrainingSpeedBand> {
-  if (!isRecord(raw)) {
-    return { ok: false, problem: `${where}.geometric.speedBand is missing: the flown sentence carries the speed word's tolerance` };
-  }
-  const low = parseSpeedEdge(raw.low, `${where}.geometric.speedBand.low`);
-  if (!low.ok) return low;
-  const high = parseSpeedEdge(raw.high, `${where}.geometric.speedBand.high`);
-  if (!high.ok) return high;
-
-  // The window is DERIVED from the two edges, so it is checked against them in
-  // both directions. One direction alone leaves the half a reader actually sees:
-  // a null window beside two edges that both landed renders as "no window: an
-  // edge ended on crossed-threshold", which names a reason that is not one.
-  const bothCrossed =
-    low.value.endReason === "crossed-threshold" && high.value.endReason === "crossed-threshold";
-  const window = raw.arrivalWindowS;
-  if (window === null) {
-    if (bothCrossed) {
-      return {
-        ok: false,
-        problem:
-          `${where}.geometric.speedBand.arrivalWindowS is null, but both edges crossed the threshold ` +
-          `(${high.value.endS} s and ${low.value.endS} s) — that is a window`,
-      };
-    }
-    return { ok: true, value: { low: low.value, high: high.value, arrivalWindowS: null } };
-  }
-  const pair = numberArray(window);
-  if (pair === null || pair.length !== 2) {
-    return { ok: false, problem: `${where}.geometric.speedBand.arrivalWindowS is ${JSON.stringify(window)}, expected two times or null` };
-  }
-  if (!bothCrossed) {
-    return {
-      ok: false,
-      problem:
-        `${where}.geometric.speedBand.arrivalWindowS is a window, but an edge ended on ` +
-        `${low.value.endReason === "crossed-threshold" ? high.value.endReason : low.value.endReason} — ` +
-        `an edge that never reached the runway has no arrival time`,
-    };
-  }
-  // It is the two edges' own crossings, in order: fast first. Checking the
-  // VALUES rather than just their order is what makes the field a mirror of the
-  // edges instead of a second opinion about them — and it is what catches a file
-  // whose `low` and `high` are the wrong way round, which nothing else would.
-  // The window is the two crossings IN TIME ORDER, not [fast, slow]. The faster edge does not
-  // always arrive first: turn radius is V²/(g·tanφ), so 3 % more speed is 6 % more radius, and on
-  // a vectored pattern the extra path around the turns and the intercept outweighs the extra
-  // speed — measured, 17 of the published 40 flights, every one of them vectored, by up to 42 s.
-  // Which edge is which is not lost: `low` and `high` are their own keys.
-  const edges = [high.value.endS, low.value.endS].sort((a, b) => a - b);
-  if (pair[0] !== edges[0] || pair[1] !== edges[1]) {
-    return {
-      ok: false,
-      problem:
-        `${where}.geometric.speedBand.arrivalWindowS is [${pair[0]}, ${pair[1]}], but its edges ` +
-        `cross at ${high.value.endS} s (high) and ${low.value.endS} s (low) — the window is the ` +
-        `two crossings, earliest first`,
-    };
-  }
-  return { ok: true, value: { low: low.value, high: high.value, arrivalWindowS: [pair[0], pair[1]] } };
-}
-
-function parseGeometry(raw: unknown): Parsed<TrainingGeometry> {
-  if (!isRecord(raw)) return { ok: false, problem: "geometry is missing: the flown tracks state what they were drawn under" };
-  const numbers: Record<string, number> = {};
-  for (const field of ["dtS", "bankDeg", "gravityMps2", "heightFloorM", "descentMaxDeg",
-                       "climbMaxDeg", "accelMaxMps2"]) {
-    const value = finite(raw, field);
-    if (value === null) return { ok: false, problem: `geometry.${field} is missing or not a number` };
-    numbers[field] = value;
-  }
-  const strings: Record<string, string> = {};
-  for (const field of ["method", "startsAt", "stopRule", "verticalBandFrom", "speedBandFrom"]) {
-    const value = str(raw, field);
-    if (value === null) return { ok: false, problem: `geometry.${field} is missing or not a non-empty string` };
-    strings[field] = value;
-  }
-  for (const field of ["windModelled", "aircraftTypeModelled", "verticalIsCommandedAngle", "bandsAreJoint"]) {
-    if (typeof raw[field] !== "boolean") {
-      return { ok: false, problem: `geometry.${field} is ${JSON.stringify(raw[field])}, expected a boolean` };
-    }
-  }
-  const sources = raw.constantsFrom;
-  if (!Array.isArray(sources) || !sources.every((item) => typeof item === "string")) {
-    return { ok: false, problem: "geometry.constantsFrom is missing or not a list of files" };
-  }
-
-  return {
-    ok: true,
-    value: {
-      method: strings.method,
-      startsAt: strings.startsAt,
-      stopRule: strings.stopRule,
-      dtS: numbers.dtS,
-      bankDeg: numbers.bankDeg,
-      gravityMps2: numbers.gravityMps2,
-      heightFloorM: numbers.heightFloorM,
-      descentMaxDeg: numbers.descentMaxDeg,
-      climbMaxDeg: numbers.climbMaxDeg,
-      accelMaxMps2: numbers.accelMaxMps2,
-      windModelled: raw.windModelled as boolean,
-      aircraftTypeModelled: raw.aircraftTypeModelled as boolean,
-      verticalIsCommandedAngle: raw.verticalIsCommandedAngle as boolean,
-      verticalBandFrom: strings.verticalBandFrom,
-      speedBandFrom: strings.speedBandFrom,
-      bandsAreJoint: raw.bandsAreJoint as boolean,
-      constantsFrom: sources as string[],
-    },
-  };
-}
-
-function parseKind(raw: Record<string, unknown>, where: string): Parsed<TrainingKind> {
-  const kind = str(raw, "kind");
-  if (kind === null || !(TRAINING_KINDS as readonly string[]).includes(kind)) {
-    return { ok: false, problem: `${where}.kind is ${JSON.stringify(raw.kind)}, expected one of ${TRAINING_KINDS.join(", ")}` };
-  }
-  return { ok: true, value: kind as TrainingKind };
-}
-
-function parseInstruction(
-  raw: unknown,
-  counts: Record<TrainingKind, number>,
-  where: string,
-): Parsed<TrainingInstruction> {
-  if (!isRecord(raw)) return { ok: false, problem: `${where} is not an object` };
-  const kind = parseKind(raw, where);
-  if (!kind.ok) return kind;
-
-  const word = finite(raw, "word");
-  if (word === null || !Number.isInteger(word) || word < 0 || word >= counts[kind.value]) {
-    return { ok: false, problem: `${where}.word is ${JSON.stringify(raw.word)}, outside this vocabulary's 0…${counts[kind.value] - 1} for ${kind.value}` };
-  }
-  const target = finite(raw, "target");
-  if (target === null) return { ok: false, problem: `${where}.target is missing or not a number` };
-  const issuedS = finite(raw, "issuedS");
-  if (issuedS === null) return { ok: false, problem: `${where}.issuedS is missing or not a number` };
-  // `settledS` is `number | null` and the null is MEANINGFUL (it never settled
-  // inside the track). A missing key is a different thing and is refused.
-  if (!("settledS" in raw)) return { ok: false, problem: `${where}.settledS is missing (null means it never settled; absent means the field moved)` };
-  const settled = raw.settledS;
-  if (settled !== null && (typeof settled !== "number" || !Number.isFinite(settled))) {
-    return { ok: false, problem: `${where}.settledS is ${JSON.stringify(settled)}, expected a number or null` };
-  }
-  // A manoeuvre cannot settle before it was issued. This is not a formality: a
-  // vertical instruction's span IS `issuedS`…`settledS`, and a reversed pair
-  // gives a segment with no rows in it — which does not draw, does not warn, and
-  // leaves its rows out of the "inside the band" denominator, so a corrupt
-  // export reads as a BETTER result than a good one.
-  if (settled !== null && settled < issuedS) {
-    return {
-      ok: false,
-      problem: `${where} settles at ${settled} s but was issued at ${issuedS} s — that span is empty`,
-    };
-  }
-  if (typeof raw.clamped !== "boolean") {
-    return { ok: false, problem: `${where}.clamped is ${JSON.stringify(raw.clamped)}, expected a boolean` };
-  }
-
-  return {
-    ok: true,
-    value: { kind: kind.value, word, target, issuedS, settledS: settled as number | null, clamped: raw.clamped },
-  };
-}
-
-function parseAbsorbed(
-  raw: unknown,
-  counts: Record<TrainingKind, number>,
-  where: string,
-): Parsed<TrainingAbsorbed> {
-  if (!isRecord(raw)) return { ok: false, problem: `${where} is not an object` };
-  const kind = parseKind(raw, where);
-  if (!kind.ok) return kind;
-
-  const word = finite(raw, "word");
-  if (word === null || !Number.isInteger(word) || word < 0 || word >= counts[kind.value]) {
-    return { ok: false, problem: `${where}.word is ${JSON.stringify(raw.word)}, outside this vocabulary's 0…${counts[kind.value] - 1} for ${kind.value}` };
-  }
-  const startS = finite(raw, "startS");
-  const endS = finite(raw, "endS");
-  if (startS === null || endS === null) {
-    return { ok: false, problem: `${where} needs numeric startS and endS` };
-  }
-  if (endS < startS) {
-    return { ok: false, problem: `${where} ends at ${endS} s before it starts at ${startS} s` };
-  }
-  const change = finite(raw, "change");
-  if (change === null) return { ok: false, problem: `${where}.change is missing or not a number` };
-  const reason = str(raw, "reason");
-  if (reason === null || !(ABSORBED_REASONS as readonly string[]).includes(reason)) {
-    return { ok: false, problem: `${where}.reason is ${JSON.stringify(raw.reason)}, expected one of ${ABSORBED_REASONS.join(", ")}` };
-  }
-
-  return {
-    ok: true,
-    value: { kind: kind.value, word, startS, endS, change, reason: reason as AbsorbedReason },
-  };
-}
-
 /** Parse one sample set. Unlike the manifest this is all-or-nothing: a flight the
- *  reader cannot trust would be drawn beside real ones with no way to tell. */
-/**
- * One set's sample file. ``kind`` comes from the MANIFEST ENTRY, and it decides
- * whether the model's words are required or forbidden — a `prior-generated` set
- * without them is half-written, and a `vocabulary-readback` set with them is a
- * set whose kind is wrong. Keying on the kind rather than on whether the field
- * happens to be present is what makes both of those loud.
+ *  reader cannot trust would be drawn beside real ones with no way to tell.
+ *
+ * ``kind`` comes from the MANIFEST ENTRY, and it decides whether the model's
+ * words are required or forbidden — a `prior-generated` set without them is
+ * half-written, and a `vocabulary-readback` set with them is a set whose kind is
+ * wrong. Keying on the kind rather than on whether the field happens to be
+ * present is what makes both of those loud.
  */
 export function parseTrainingSample(raw: unknown, kind: TrainingSetKind): Parsed<TrainingSample> {
   if (!isRecord(raw)) return { ok: false, problem: "the sample is not an object" };
@@ -1640,13 +1511,11 @@ export function parseTrainingSample(raw: unknown, kind: TrainingSetKind): Parsed
 
   const vocabulary = parseVocabulary(raw.vocabulary);
   if (!vocabulary.ok) return vocabulary;
-  const geometry = parseGeometry(raw.geometry);
-  if (!geometry.ok) return geometry;
+  const reading = parseReadingRule(raw.reading);
+  if (!reading.ok) return reading;
 
   // `kinds` is the exporter restating the column order, and it must agree with
-  // ours exactly — a disagreement means the columns moved. Every export writes
-  // it, so an absent one is a file from something else, not an older file to be
-  // read leniently.
+  // ours exactly — a disagreement means the columns moved.
   const kinds = Array.isArray(raw.kinds) ? raw.kinds.join(",") : String(raw.kinds);
   if (kinds !== TRAINING_KINDS.join(",")) {
     return {
@@ -1678,72 +1547,31 @@ export function parseTrainingSample(raw: unknown, kind: TrainingSetKind): Parsed
           `(${vocabulary.value.runwayIdents.join(", ")})`,
       };
     }
-    const sentence = parseSentence(entry.sentence, counts, where);
-    if (!sentence.ok) return sentence;
-
     const durationS = finite(entry, "durationS");
     if (durationS === null || durationS <= 0) {
       return { ok: false, problem: `${where}: durationS is missing or not a positive length` };
     }
-    // The bands run to the end of the TRACK, so a sentence whose last event is
-    // past it would draw off the axis. This also catches a sample whose sentence
-    // and track came from different flights.
-    const lastEventS = sentence.value.eventTimesS[sentence.value.eventTimesS.length - 1];
-    if (lastEventS > durationS) {
-      return {
-        ok: false,
-        problem: `${where}: the last event is at ${lastEventS} s but the track is ${durationS} s long — the sentence and the track are not the same flight`,
-      };
-    }
-    if (typeof entry.establishedFromStart !== "boolean") {
-      return { ok: false, problem: `${where}: establishedFromStart is ${JSON.stringify(entry.establishedFromStart)}, expected a boolean` };
-    }
-
-    if (!Array.isArray(entry.instructions)) {
-      return { ok: false, problem: `${where}: instructions is not an array` };
-    }
-    const instructions: TrainingInstruction[] = [];
-    for (let k = 0; k < entry.instructions.length; k += 1) {
-      const parsed = parseInstruction(entry.instructions[k], counts, `${where}: instructions[${k}]`);
-      if (!parsed.ok) return parsed;
-      // Same reason as the last event's check: a time outside the track is a
-      // different flight's, and it draws off the plot rather than failing.
-      const outside = [parsed.value.issuedS, parsed.value.settledS].find(
-        (time) => time !== null && (time < 0 || time > durationS),
-      );
-      if (outside !== undefined) {
-        return { ok: false, problem: `${where}: instructions[${k}] is at ${outside} s, outside the ${durationS} s track` };
+    const reading_numbers: Record<string, number> = {};
+    for (const field of ["dtS", "courseWindowRows", "signalWindowRows"]) {
+      const value = finite(entry, field);
+      if (value === null || value <= 0) {
+        return { ok: false, problem: `${where}: ${field} is missing or not positive — the smoothing is stated, never assumed` };
       }
-      instructions.push(parsed.value);
+      reading_numbers[field] = value;
     }
 
-    if (!Array.isArray(entry.absorbed)) {
-      return { ok: false, problem: `${where}: absorbed is not an array` };
-    }
-    const absorbed: TrainingAbsorbed[] = [];
-    for (let k = 0; k < entry.absorbed.length; k += 1) {
-      const parsed = parseAbsorbed(entry.absorbed[k], counts, `${where}: absorbed[${k}]`);
-      if (!parsed.ok) return parsed;
-      if (parsed.value.startS < 0 || parsed.value.endS > durationS) {
-        return {
-          ok: false,
-          problem:
-            `${where}: absorbed[${k}] spans ${parsed.value.startS}–${parsed.value.endS} s, ` +
-            `outside the ${durationS} s track`,
-        };
-      }
-      absorbed.push(parsed.value);
-    }
-
+    const sentence = parseSentence(entry.sentence, counts, vocabulary.value, durationS, where);
+    if (!sentence.ok) return sentence;
     const observed = parseObserved(entry.observed, durationS, where);
     if (!observed.ok) return observed;
-    const geometric = parseGeometric(entry.geometric, where);
-    if (!geometric.ok) return geometric;
+    const partial = { observed: observed.value, sentence: sentence.value };
+    const envelope = parseEnvelope(
+      entry.envelope, partial, sentence.value.words, vocabulary.value, where, "envelope");
+    if (!envelope.ok) return envelope;
 
     let prior: TrainingFlightPrior | undefined;
     if (kind === "prior-generated") {
-      const parsed = parseFlightPrior(
-        entry.prior, sentence.value.eventTimesS.length, counts, durationS, where);
+      const parsed = parseFlightPrior(entry.prior, partial, counts, vocabulary.value, durationS, where);
       if (!parsed.ok) return parsed;
       prior = parsed.value;
     } else if (entry.prior !== undefined) {
@@ -1759,12 +1587,12 @@ export function parseTrainingSample(raw: unknown, kind: TrainingSetKind): Parsed
       runway,
       stratum,
       durationS,
-      establishedFromStart: entry.establishedFromStart,
+      dtS: reading_numbers.dtS,
+      courseWindowRows: reading_numbers.courseWindowRows,
+      signalWindowRows: reading_numbers.signalWindowRows,
       sentence: sentence.value,
-      instructions,
-      absorbed,
       observed: observed.value,
-      geometric: geometric.value,
+      envelope: envelope.value,
       ...(prior ? { prior } : {}),
     });
   }
@@ -1784,7 +1612,7 @@ export function parseTrainingSample(raw: unknown, kind: TrainingSetKind): Parsed
   return {
     ok: true,
     value: {
-      setId, airport, vocabulary: vocabulary.value, geometry: geometry.value,
+      setId, airport, vocabulary: vocabulary.value, reading: reading.value,
       ...(prior ? { prior } : {}),
       flights,
     },
