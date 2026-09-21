@@ -207,6 +207,12 @@ of the package, not a migration in progress.
   duration 2 s/151, terminal 3. Tolerances and runway classes are deliberately OUTSIDE the sha.
   Absolute targets are read from plateaus; the vertical, a RATE, by DP piecewise-linear fitting of
   height against horizontal distance (H8).
+- **The instruction prior's first pooled readings** (2026-09-21, two seeds, `two_tier_v3_bprime_20260921`):
+  it beats "repeat the last word" on every kind (total NLL 5.80 vs bigram 7.44), but read on the
+  positions where the truth CHANGES — which is what an instruction is — recall is 0.55 heading /
+  0.44 vertical / **0.17 speed**, and the joint top-8 covers only 20.5 % of truth tuples. **The
+  runway row is a COPY, not a prediction** (it is also a context token; plan §3.2 has not been
+  done). Seed line: ±0.003 nats, ±0.003 top-1. → `docs/2026-09-21-instruction_prior_results.zh.md`
 - **A SENTENCE MUST BE ABLE TO LAND — `run_ts.py instruction_replay` is the gate** and it flies
   what the artefact SAYS, never a re-reading (the user's rule, 2026-09-21). It caught three things
   a vocabulary readout cannot: an absolute heading word cannot say which way round to turn (9.9 %
