@@ -65,7 +65,7 @@ def test_the_table_states_the_landing_rate_by_stratum_and_the_model_it_flew_unde
     assert "straight-in 1 / 1 = 100.0%" in table and "vectored    0 / 1 = 0.0%" in table
     # the assumptions travel with the number: a landing rate without the model that flew it is
     # not a measurement of the vocabulary
-    for field in ("headingWordZeroTracksTheCentreline", "bankDeg", "accelMaxMps2", "stopRule"):
+    for field in ("establishedWordTracksTheCentreline", "bankDeg", "accelMaxMps2", "stopRule"):
         assert field in table, field
     assert kinematics.METHOD in table
 

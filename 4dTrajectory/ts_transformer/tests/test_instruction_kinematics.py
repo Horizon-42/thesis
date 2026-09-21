@@ -91,23 +91,33 @@ def test_a_turn_flies_the_radius_the_MEASURED_bank_gives():
     assert radius_m == pytest.approx(expected, rel=0.02)
 
 
-def test_the_word_for_the_final_approach_course_TRACKS_it_rather_than_flying_its_direction():
-    """Word 0 names the course itself, and an aircraft told to fly the final approach course
-    tracks the centreline — it does not fly parallel to it.
+def test_only_the_ESTABLISHED_word_tracks_the_centreline_and_a_direction_word_flies_straight():
+    """The vocabulary's one POSITION word against its 72 direction words.
 
-    Measured on 150 KRDU arrivals: flown as a direction, a sentence reaches the threshold aligned
-    but a median 2,464 m to the side (the real tracks are 13 m off) and only 36.7 % of sentences
-    ever cross ON the final; tracking the centreline, 94.7 % do. Started 3 km off here, the track
-    must come back to the centreline and the crossing must count.
+    Measured on 150 KRDU arrivals: a sentence whose lateral behaviour is all direction words
+    reaches the threshold aligned but a median 2,464 m to the side — the real tracks are 13 m off
+    at that moment — and only 36.7 % of sentences cross ON the final. That is not a decoder
+    failing; it is a vocabulary of velocity targets having nothing that constrains a POSITION.
+    Word 0 keeps meaning what it says (fly the course's DIRECTION); the established word joins
+    the line.
     """
-    off = kinematics.fly(sentence(heading=0), VOCABULARY, start(cross_m=3000.0), observed_s=400)
+    established = VOCABULARY.heading_established_word
+    off = kinematics.fly(sentence(heading=established), VOCABULARY, start(cross_m=3000.0), observed_s=400)
     assert abs(off.cross_m[-1]) < abs(off.cross_m[0]) / 10.0
     assert off.end_reason == kinematics.END_CROSSED
-    # it angles off the course to get there, by at most the intercept limit
     assert 0.0 < off.relative_course_deg.max() <= kinematics.INTERCEPT_MAX_DEG + 1e-9
-    # and a flight already on the centreline is not disturbed
-    on = kinematics.fly(sentence(heading=0), VOCABULARY, start(), observed_s=80.0)
-    assert np.allclose(on.cross_m, 0.0, atol=1e-9)
+
+    # the SAME start under direction word 0 flies a parallel line and never joins it: the two
+    # differ only in what they constrain, and only when the aircraft is off the line
+    parallel = kinematics.fly(sentence(heading=0), VOCABULARY, start(cross_m=3000.0), observed_s=400)
+    assert parallel.cross_m[-1] == pytest.approx(3000.0)
+    assert parallel.end_reason == kinematics.END_TIME_CAP
+
+    # on the centreline the two are indistinguishable, which is why 92 % of the v13 rows carrying
+    # word 0 sat inside the corridor and the decoder's patch went unnoticed
+    for word in (0, established):
+        on = kinematics.fly(sentence(heading=word), VOCABULARY, start(), observed_s=80.0)
+        assert np.allclose(on.cross_m, 0.0, atol=1e-9)
 
 
 def test_the_commanded_angle_is_flown_outright_with_no_error_to_close():

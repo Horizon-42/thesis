@@ -176,11 +176,26 @@ class InstructionPrior(nn.Module):
     #: The frame now comes from the runway WORD, which is where the sentence puts it.
     CONTEXT_TOKENS = 1   # type
 
+    #: The kinds that go INTO a position's token. The runway is not one of them, although it is
+    #: still one of the heads (2026-09-21).
+    #:
+    #: The labeller writes the runway word CONSTANT for a flight — this data cannot resolve a
+    #: late change (1 in 44,622) — so while the same column was also an input, "predict the
+    #: runway at k+1" was "copy the runway at k": NLL 0.001, top-1 1.000, and one of the six
+    #: cross-entropies in the loss was identically zero. That is not a prediction, and a readout
+    #: quoting it reads as skill.
+    #:
+    #: Out of the input, the head has to infer the threshold from the trajectory itself: the
+    #: state tokens are in the AIRPORT frame (D66) while the heading and vertical words are
+    #: relative to the runway's own course, so the pair (absolute state, relative word) does
+    #: identify the runway — but only by inference, which is the question worth asking.
+    INPUT_KINDS = tuple(kind for kind in INSTRUCTION_KINDS if kind != "runway")
+
     def __init__(self, config: PriorConfig):
         super().__init__()
         self.config = config
         d = config.d_model
-        self.word_embeddings = nn.ModuleDict({kind: nn.Embedding(config.classes(kind), d) for kind in INSTRUCTION_KINDS})
+        self.word_embeddings = nn.ModuleDict({kind: nn.Embedding(config.classes(kind), d) for kind in self.INPUT_KINDS})
         self.state_embedding = nn.Linear(len(STATE_TOKEN_FEATURES), d)
         self.position_embedding = nn.Embedding(config.max_positions, d)
         self.type_embedding = nn.Embedding(config.type_count, d)
@@ -195,7 +210,8 @@ class InstructionPrior(nn.Module):
     def forward(self, batch: PriorBatch) -> PriorOutput:
         b, length, _ = batch.words.shape
         positions = torch.arange(length, device=batch.words.device)
-        tokens = sum(self.word_embeddings[kind](batch.words[..., column]) for column, kind in enumerate(INSTRUCTION_KINDS))
+        tokens = sum(self.word_embeddings[kind](batch.words[..., INSTRUCTION_KINDS.index(kind)])
+                     for kind in self.INPUT_KINDS)
         tokens = tokens + self.state_embedding(batch.states) + self.position_embedding(positions)
         context = self.type_embedding(batch.type_index).unsqueeze(1) + self.context_position
         sequence = torch.cat((context, tokens), dim=1)
@@ -282,11 +298,11 @@ def _rate(numerator: int, denominator: int) -> float | None:
 def evaluate(model: InstructionPrior, sequences: Sequence[InstructionSequence], types: TypeVocabulary, *,
              batch_size: int, device: torch.device, joint: bool = True) -> dict[str, Any]:
     """
-    CAVEAT while D66 is unimplemented: the labeller writes the runway word CONSTANT for a flight,
-    and the same word is an input column, so ``top1["runway"]`` is ~1.0, ``change_share`` is 0 and
-    the joint top-K scores a tuple whose runway element is free. ``next`` is now the sum of FIVE
-    cross-entropies and is not comparable with any number from before D62. Any readout that quotes
-    these must say so, or the runway column reads as skill.
+    The runway column is a real prediction since 2026-09-21: the word left the INPUT
+    (`InstructionPrior.INPUT_KINDS`) while staying a head, so it is inferred from the trajectory
+    rather than copied from the column beside it. Readings taken before that — anything with
+    ``top1["runway"]`` at 1.000 and ``change_share`` 0 — were scoring a copy, and their ``next``
+    is the sum of five real cross-entropies plus a zero.
 The loss parts (token-weighted over the set) and the readings the module docstring names.
     Denominators: the per-kind NLL, top-1 / top-k and `change_share` are over the positions with a
     next word; `flip_rate` over the positions where the truth HOLDS the kind's word; `miss_rate`

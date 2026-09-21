@@ -212,9 +212,23 @@ TOKEN_STEP_S = 10.0
 #:   · `vertical_fit_points` joined the spec (it moves breakpoints, so it moves words) and the
 #:     merge of two same-word segments re-angles over the combined span instead of keeping the
 #:     first piece's.
+#: v14 (2026-09-21), three changes, all from reading the v13 artefacts back and from what the
+#: replay gate could NOT tell us:
+#:   · a POSITION word. Every other word constrains a velocity, so a sentence of them has no
+#:     mechanism by which a lateral error corrects itself, and the decoder had been patching that
+#:     by flying direction word 0 as a tracking law — which the reading never said, and which
+#:     converged a displaced parallel leg the real aircraft flew straight. The heading kind gains
+#:     `heading_established_word`, read off `course_frame`'s own `established` column.
+#:   · the two ABSOLUTE kinds are cut by `tile_segments`, not by plateaus. A plateau asks a signal
+#:     to HOLD, which an approach speed never does: speed plateaus covered 51.3 % of an approach
+#:     against the heading's 84.1 %, and the missing half had no word responsible for it. Merging
+#:     the data's own 2 s rows within the tolerance and absorbing what is too short to be an
+#:     instruction tiles the track and gives BOTH behaviours from one rule — a turn's slivers fold
+#:     back onto its two ends, a deceleration's segments survive (user, 2026-09-21).
+#:   · `departure_row` is gone with them: a tiling's boundary IS the row the signal left the band.
 #: The version is part of the spec and therefore of the sha, so an artefact read under an older
 #: rule is refused by name rather than reinterpreted.
-READING_RULE = "segment-v13"
+READING_RULE = "segment-v14"
 
 VOCABULARY_SCHEMA = "ts-instruction-vocabulary-v1"
 VOCABULARY_FILE = "instruction_vocabulary.json"
@@ -292,8 +306,41 @@ class Vocabulary:
 
     # ── word counts ──────────────────────────────────────────────────────
     @property
-    def heading_words(self) -> int:
+    def heading_direction_words(self) -> int:
+        """The DIRECTION classes — the whole circle in `heading_bin_deg` steps. The wrap is over
+        these, never over `heading_words`, which is one larger."""
         return int(round(360.0 / self.heading_bin_deg))
+
+    @property
+    def heading_established_word(self) -> int:
+        """The one heading word that is not a direction: **track the final approach course**.
+
+        Every other word in this vocabulary constrains a VELOCITY — the direction of the ground
+        track, the flight path angle, the speed. None of them constrains a POSITION, and a
+        sentence made only of velocity targets has no mechanism by which a lateral error could
+        ever correct itself: told to fly the course's direction 2 km abeam, an aircraft flies a
+        line 2 km abeam for ever. That is why an open-loop replay of the v13 sentences reached the
+        threshold on the final only 36.7 % of the time.
+
+        Real control says both kinds of thing, and they are different kinds: "turn left heading
+        270" names a direction, "cleared for the approach" names a LINE and asks the aircraft to
+        join and hold it. This word is the second kind. It is still an ABSOLUTE TARGET — the
+        target is the centreline rather than a bearing — so the vocabulary's rule that words are
+        targets and never rates is intact.
+
+        It is read from the track, never assumed: `course_frame`'s `established` column (inside
+        `ESTABLISHED_CROSS_TRACK_M` of the centreline AND tracking the course) says when the
+        aircraft actually was on the line. A flight whose track merely runs PARALLEL to the course
+        while displaced keeps its direction word, which is what it was doing — measured on the
+        v13 artefacts, 8.2 % of the rows carrying the direction word 0 were outside the corridor
+        and 4.1 % were beyond 2 km, and at the moment that word was first issued the median
+        displacement was 535 m (p90 5,019 m).
+        """
+        return self.heading_direction_words
+
+    @property
+    def heading_words(self) -> int:
+        return self.heading_direction_words + 1
 
     @property
     def vertical_words(self) -> int:
@@ -314,11 +361,20 @@ class Vocabulary:
 
     # ── binning (each returns the word index; the caller counts clamps) ───
     def heading_bin(self, relative_deg: float) -> int:
-        """The word of a course relative to the final approach course; bin 0 is the course,
-        bin 18 (at 10°) the downwind; the wrap is at ±180°."""
-        return int(math.floor(wrap_deg(relative_deg) / self.heading_bin_deg + 0.5)) % self.heading_words     # half-up, never banker's
+        """The DIRECTION word of a course relative to the final approach course; bin 0 is the
+        course, bin 18 (at 10°) the downwind; the wrap is at ±180°. It never returns the
+        established word — that one is read from position, not from direction."""
+        # the wrap is over the DIRECTION classes: `heading_words` includes the established word,
+        # and a modulo over it would fold 355° onto it
+        return int(math.floor(wrap_deg(relative_deg) / self.heading_bin_deg + 0.5)) % self.heading_direction_words
 
     def heading_centre_deg(self, word: int) -> float:
+        """The bearing a DIRECTION word names. The established word has no bearing — it names a
+        line — so it RAISES here rather than answering 0°, which would read as "fly the course's
+        direction" and silently be the open-loop behaviour it exists to replace."""
+        if word == self.heading_established_word:
+            raise ValueError("the established word names the centreline, not a bearing: ask "
+                             "`instruction_kinematics.target_course_deg`, which knows where the aircraft is")
         return wrap_deg(word * self.heading_bin_deg)
 
     @staticmethod
@@ -398,7 +454,12 @@ class Vocabulary:
     #: runway is implicit in its coordinates, and handing it an index as well would be redundant
     #: AND would make the executor per-airport. The runway is a word the PRIOR says, not a number
     #: the executor listens to (D62).
-    CONDITIONING_WIDTH = 4
+    #: cos, sin of the heading's bearing, the vertical and speed centres as fractions of their
+    #: ceilings, and ONE MORE since 2026-09-21: whether the heading word is the established one.
+    #: Without that column it would be indistinguishable from direction word 0 — `72 × 5° = 360°`
+    #: has the same cosine and sine as 0° — and the executor would be told "fly the course's
+    #: direction" for the one word that means "hold the line".
+    CONDITIONING_WIDTH = 5
     CONDITIONED_KINDS = MANDATORY_KINDS
     if CONDITIONED_KINDS != INSTRUCTION_KINDS[:len(CONDITIONED_KINDS)]:      # the slice below is a PREFIX slice
         raise RuntimeError("the conditioned kinds must be the first kinds: a kind inserted before the "
@@ -417,13 +478,17 @@ class Vocabulary:
             # read back as "descend 4.4°, 157 m/s" — a silent wrong answer for the one value the
             # module defines as "nothing said yet"
             raise ValueError("a word column holds the fill value: every conditioned kind is in force from the first event")
-        heading = np.radians(words[..., 0] * self.heading_bin_deg)
+        established = words[..., 0] == self.heading_established_word
+        # the established word has no bearing; its cos/sin are those of the course it holds, and
+        # the flag beside them is what separates it from direction word 0
+        heading = np.radians(np.where(established, 0, words[..., 0]) * self.heading_bin_deg)
         modes = np.asarray(self.vertical_modes_deg, dtype=np.float64)
         speeds = np.asarray(self.speed_centres_mps, dtype=np.float64)
         out = np.stack((
             np.cos(heading), np.sin(heading),
             modes[words[..., 1]] / np.abs(modes).max(),
             speeds[words[..., 2]] / speeds.max(),
+            established.astype(np.float64),
         ), axis=-1)
         return out.astype(np.float32)
 
@@ -765,6 +830,121 @@ def departure_row(signal: np.ndarray, start: int, end: int, value: float, tolera
     return start + int(inside[-1]) + 1 if len(inside) else start
 
 
+def tile_segments(times: np.ndarray, signal: np.ndarray, tolerance: float, min_s: float) -> list[tuple[int, int]]:
+    """Cut a signal into segments that TILE it: ``[(start, end)]``, end exclusive, contiguous,
+    covering every row (user, 2026-09-21).
+
+    This replaced the plateau reader, which asked a signal to HOLD within a tolerance for
+    `plateau_min_s` before it would call anything a target. That is the right question for a
+    signal that settles and the wrong one for a signal that ramps, and an approach speed ramps:
+    measured over three airports, a speed plateau covers only **51.3 %** of an approach (the
+    heading's cover 84.1 %) while **61 %** of it has |dV/dt| > 0.1 m/s². The half the plateaus
+    missed had no word responsible for it at all, which is why the speed word could be inside its
+    own band less than half the time.
+
+    Two passes, both on the data's own 2 s rows:
+
+    1. **Merge while the band allows it.** Left to right, extend a segment while every row in it
+       stays within ``tolerance`` of the segment's midrange — i.e. while its spread is at most
+       twice the tolerance — and close it when the next row would break that. Greedy rather than
+       optimal (the vertical's DP is optimal because a rate's segments interact through their
+       slopes; an absolute target's do not), and O(n) rather than O(n²), which matters at 26,382
+       flights.
+    2. **Absorb what is too short to be an instruction.** Repeatedly take the shortest segment
+       under ``min_s`` and fold it into the neighbour its value is closer to, until none is left.
+       This is what makes ONE rule serve both kinds: a turn sweeps through many bins in a few
+       seconds, so its slivers fold away and the heading collapses back onto the two ends it was
+       commanded between; a deceleration crosses a band slowly (0.19 m/s² across 4 m/s is 21 s),
+       so its segments survive and the ramp is described instead of ignored.
+
+    A segment boundary is therefore the row at which the signal LEFT the band it was holding,
+    which is the moment an instruction is issued — the same definition the plateau reader needed
+    `departure_row` to recover.
+    """
+    n = len(signal)
+    if n == 0:
+        raise ValueError("a signal with no rows has no segments")
+    bounds: list[int] = [0]
+    low = high = float(signal[0])
+    for i in range(1, n):
+        value = float(signal[i])
+        if max(high, value) - min(low, value) > 2.0 * tolerance:
+            bounds.append(i)
+            low = high = value
+            continue
+        low, high = min(low, value), max(high, value)
+    segments = [(a, b) for a, b in zip(bounds, [*bounds[1:], n])]
+
+    while len(segments) > 1:
+        lengths = [float(times[min(b, n - 1)] - times[a]) for a, b in segments]
+        short = int(np.argmin(lengths))
+        if lengths[short] >= min_s:
+            break
+        value = float(np.median(signal[segments[short][0] : segments[short][1]]))
+        left, right = short - 1, short + 1
+        if left < 0:
+            into = right
+        elif right >= len(segments):
+            into = left
+        else:
+            near = [abs(value - float(np.median(signal[segments[k][0] : segments[k][1]]))) for k in (left, right)]
+            into = left if near[0] <= near[1] else right
+        a = min(segments[into][0], segments[short][0])
+        b = max(segments[into][1], segments[short][1])
+        segments[min(into, short)] = (a, b)
+        segments.pop(max(into, short))
+
+    # Move each interior boundary back to where the signal DEPARTED the band before it, not where
+    # it had already left by a whole one. The controller speaks and then the aircraft moves, so an
+    # instruction belongs at the start of the movement — v7 of the reading rule exists because a
+    # word placed at the end of it landed 100–200 s late. Tiling is preserved: a boundary only
+    # moves earlier, and never past the start of the segment it belongs to.
+    for k in range(len(segments) - 1):
+        a, b = segments[k]
+        value = float(np.median(signal[a:b]))
+        moved = max(a + 1, min(departure_row(signal, a, b, value, tolerance), b))
+        segments[k] = (a, moved)
+        segments[k + 1] = (moved, segments[k + 1][1])
+    return segments
+
+
+def _absolute_words(kind: str, times: np.ndarray, signal: np.ndarray, segments: list[tuple[int, int]],
+                    tolerance: float, min_change: Callable[[float], float],
+                    to_word: Callable[[float], tuple[int, float, bool]]) -> tuple[list[Instruction], list[Absorbed]]:
+    """The instructions of one ABSOLUTE-target kind from segments that tile it.
+
+    Each segment's value is its median and its word is that value's bin. The instruction is ISSUED
+    at the segment's start — where the signal left the one before — and SETTLED where the signal
+    first comes within ``tolerance`` of the value, which is the aircraft arriving at the target
+    rather than the segment ending. Those two coincided under the plateau reader and do not under
+    a tiling, where a segment runs on until the NEXT instruction. A segment reading as the word
+    already in force, or moving the signal by less than ``min_change`` of the value in force,
+    continues the instruction in force and is RECORDED (`Absorbed`) rather than dropped."""
+    out: list[Instruction] = []
+    absorbed: list[Absorbed] = []
+    in_force = 0.0
+    for index, (a, b) in enumerate(segments):
+        value = float(np.median(signal[a:b]))
+        word, target, clamped = to_word(value)
+        issued = float(times[a])
+        reached = np.flatnonzero(np.abs(signal[a:b] - value) <= tolerance)
+        settled = float(times[a + int(reached[0])]) if len(reached) else float(times[min(b, len(times) - 1)])
+        if not out:
+            out.append(Instruction(kind, word, target, float(times[0]), settled, clamped))
+            in_force = value
+            continue
+        change = value - in_force
+        if out[-1].word == word:
+            absorbed.append(Absorbed(kind, issued, settled, word, change, ABSORBED_SAME_WORD))
+            out[-1] = replace(out[-1], settled_s=settled, clamped=out[-1].clamped or clamped)
+        elif abs(change) < min_change(in_force):
+            absorbed.append(Absorbed(kind, issued, settled, out[-1].word, change, ABSORBED_SMALL_CHANGE))
+        else:
+            out.append(Instruction(kind, word, target, issued, settled, clamped))
+            in_force = value
+    return out, absorbed
+
+
 def _manoeuvre_words(kind: str, times: np.ndarray, signal: np.ndarray, flats: list[tuple[int, int]], rows: int,
                      tolerance: float, min_change: Callable[[float], float], hold_min_s: float,
                      to_word: Callable[[float], tuple[int, float, bool]]) -> tuple[list[Instruction], list[Absorbed]]:
@@ -1041,6 +1221,32 @@ def _split_long_turns(headings: list[Instruction], times: np.ndarray, course: np
     return out
 
 
+def _established_instruction(headings: list[Instruction], times: np.ndarray, established: np.ndarray,
+                             vocabulary: Vocabulary) -> list[Instruction]:
+    """Say "track the final approach course" from where the aircraft actually joined it.
+
+    `established` is `course_frame`'s own column — inside the centreline corridor AND tracking the
+    course — so this word is READ, never assumed. The run taken is the LAST one, the one that
+    reaches the end of the record: an approach joins the line once and lands on it, and an earlier
+    flicker (a downwind crossing the extended centreline) is not a join.
+
+    From that moment the direction words are over: nothing after it is a bearing any more, because
+    the aircraft is holding a line. Before it, the direction words stand exactly as they were —
+    including a leg flown PARALLEL to the course while displaced, which is a direction and not a
+    join. A flight that never establishes gets no such word, and a replay of its sentence will not
+    reach the runway, which is the truth about that flight rather than a hole in the reading.
+    """
+    if not established.any() or not established[-1]:
+        return headings
+    breaks = np.flatnonzero(~established)
+    start = int(breaks[-1] + 1) if len(breaks) else 0
+    joined_s = float(times[start])
+    kept = [item for item in headings if item.issued_s < joined_s]
+    if not kept:                                   # established from the record's first row
+        kept = []
+    return [*kept, Instruction("heading", vocabulary.heading_established_word, NO_TARGET, joined_s, joined_s, False)]
+
+
 def read_instructions(series: FlightSeries, vocabulary: Vocabulary,
                       runway_vocabulary: RunwayVocabulary) -> Reading:
     """Every instruction of one flight, and its sentence (`Reading`)."""
@@ -1054,10 +1260,12 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary,
     window = min_rows(vocabulary.smoothing_s, dt)
     height = smooth(frame["height_m"], window)
     speed = smooth(frame["ground_speed_mps"], window)
-    rows = min_rows(vocabulary.plateau_min_s, dt)
-    flats = {
-        "heading": plateaus(course, vocabulary.course_tolerance_deg, rows),
-        "speed": plateaus(speed, vocabulary.speed_tolerance_mps, rows),
+    # the two absolute kinds are cut into segments that TILE the track (`tile_segments`), so no
+    # stretch of the approach is left without a word responsible for it — the plateau reader left
+    # half of every speed profile unowned
+    segments = {
+        "heading": tile_segments(times, course, vocabulary.course_tolerance_deg, vocabulary.plateau_min_s),
+        "speed": tile_segments(times, speed, vocabulary.speed_tolerance_mps, vocabulary.plateau_min_s),
     }
 
     def heading_word(value: float) -> tuple[int, float, bool]:
@@ -1076,10 +1284,11 @@ def read_instructions(series: FlightSeries, vocabulary: Vocabulary,
     min_changes = {kind: (lambda in_force, kind=kind: vocabulary.min_change(kind, in_force))
                    for kind in ("heading", "speed")}
     for kind, signal, to_word in (("heading", course, heading_word), ("speed", speed, speed_word)):
-        words, dropped = _manoeuvre_words(kind, times, signal, flats[kind], rows, tolerances[kind], min_changes[kind],
-                                          vocabulary.hold_min_s, to_word)
+        words, dropped = _absolute_words(kind, times, signal, segments[kind], tolerances[kind],
+                                         min_changes[kind], to_word)
         if kind == "heading":
             words = _split_long_turns(words, times, course, vocabulary)
+            words = _established_instruction(words, times, frame["established"], vocabulary)
         instructions.extend(words)
         absorbed.extend(dropped)
     vertical, vertical_absorbed, fit_rms_m, merged = _vertical_instructions(times, height, frame["ground_speed_mps"], vocabulary)

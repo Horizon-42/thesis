@@ -212,7 +212,7 @@ def test_the_geometry_block_states_every_assumption_the_line_was_drawn_under():
                   "aircraftTypeModelled", "constantsFrom",
                   # word 0 is not flown as a direction (2026-09-21): a reader told only the bank
                   # and the step would still not know why the track curves back to the centreline
-                  "headingWordZeroTracksTheCentreline", "interceptMaxDeg", "bankAndAccelFrom"):
+                  "establishedWordTracksTheCentreline", "interceptMaxDeg", "bankAndAccelFrom"):
         assert field in block, field
     # the stated numbers ARE the imported ones — a block that drifted from the code it
     # describes is worse than no block

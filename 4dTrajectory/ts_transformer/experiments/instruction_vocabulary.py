@@ -82,7 +82,10 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
               for kind in INSTRUCTION_KINDS}
     unclamped = [i for r in readings for i in r.instructions if not i.clamped]
     residuals = {
-        "heading_deg": [abs(wrap_deg(i.target - vocabulary.heading_centre_deg(i.word))) for i in unclamped if i.kind == "heading"],
+        # the established word names a line, not a bearing, so it has no distance-to-centre to
+        # report — like the runway word, it is excluded rather than given a fake 0
+        "heading_deg": [abs(wrap_deg(i.target - vocabulary.heading_centre_deg(i.word)))
+                        for i in unclamped if i.kind == "heading" and i.word != vocabulary.heading_established_word],
         "vertical_deg": [abs(i.target - vocabulary.vertical_centre_deg(i.word)) for i in unclamped if i.kind == "vertical"],
         "speed_mps": [abs(i.target - vocabulary.speed_centre_mps(i.word)) for i in unclamped if i.kind == "speed"],
     }
@@ -215,6 +218,9 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
         issued = sorted((i for i in reading.instructions if i.kind == kind), key=lambda i: i.issued_s)
         for j, item in enumerate(issued):
             end = issued[j + 1].issued_s if j + 1 < len(issued) else t[-1]
+            if kind == "heading" and item.word == vocabulary.heading_established_word:
+                ax.axvspan(item.issued_s, end, color="C2", alpha=0.12)    # holding the line, not a bearing
+                continue
             level = centre(item.word)
             if period is not None:      # an unwrapped trace: draw the centre on the turn of the circle the plateau sits on
                 k = int(np.searchsorted(t, t[-1] if item.settled_s is None else item.settled_s))

@@ -44,7 +44,7 @@ from ts_transformer.outputs.guidance.controller import CLIMB_MAX_RAD, DESCENT_MA
 
 #: The reading rule's sibling: a track drawn under other rules is another track, so the name
 #: travels with the artefact and the view states it.
-METHOD = "instruction-kinematics-v2-tracked-course"
+METHOD = "instruction-kinematics-v3-established-word"
 STEP_S = 1.0
 #: The airframe this preview flies, MEASURED on the fleet rather than borrowed from the route
 #: planner (which draws routes at 20° — a different question: how tight may a drawn arc be, not
@@ -174,22 +174,21 @@ def on_final(cross_m: float, relative_course_deg: float) -> bool:
 
 
 def target_course_deg(word: int, vocabulary: Vocabulary, to_go_m: float, cross_m: float) -> float:
-    """The course to steer for one heading word — and word 0 is not like the others.
+    """The course to steer for one heading word.
 
-    Every heading word names a direction relative to the final approach course, and for 71 of
-    them steering that direction is the whole instruction. Word 0 names the COURSE ITSELF, and
-    on an approach an aircraft told to fly the final approach course tracks the centreline; it
-    does not fly parallel to it. The difference is the difference between landing and not:
-    measured on 150 KRDU arrivals, a reconstruction that flies word 0 as a direction reaches the
-    threshold aligned but a median 2,464 m to the side and never crosses ON the final (the real
-    tracks are 13 m off at that moment), and 36.7 % of sentences land. Tracking the centreline
-    instead, the same sentences land 94.7 % of the time (95.0 % at KSJC, against 78.2 %).
+    A DIRECTION word is steered as the bearing it names — open loop, because that is all a
+    direction says. The ESTABLISHED word names the centreline instead, so steering it is a
+    correction back onto that line, capped at the alignment window.
 
-    A word is still an absolute target here — the target is the centreline rather than a
-    bearing — so this adds nothing to the vocabulary and changes no sentence. It is what flying
-    the word MEANS, and it is what `outputs/guidance` already does for a route's final leg.
+    The two are one branch here and nowhere else, and which of them a position carries is decided
+    by the READING (`instructions._established_instruction`, off `course_frame`'s `established`
+    column) rather than by this function guessing from geometry. That matters: between 2026-09-21
+    morning and this, word 0 — "your track is parallel to the course" — was itself flown as a
+    tracking law, which made a displaced parallel leg converge in the replay although the sentence
+    never said to join. It also meant the reading and the flying disagreed about what one word
+    meant. Now the sentence says which it is.
     """
-    if word != 0:
+    if word != vocabulary.heading_established_word:
         return vocabulary.heading_centre_deg(word)
     # aim at a point on the centreline ahead; far out that is a gentle correction, close in it
     # saturates at the alignment window. `cross` is eaten by a POSITIVE relative course
@@ -431,7 +430,7 @@ def assumptions() -> dict[str, Any]:
         "descentMaxDeg": round(math.degrees(DESCENT_MAX_RAD), 1),
         "climbMaxDeg": round(math.degrees(CLIMB_MAX_RAD), 1),
         "accelMaxMps2": ACCEL_MAX_MPS2,
-        "headingWordZeroTracksTheCentreline": True,
+        "establishedWordTracksTheCentreline": True,
         "interceptMaxDeg": INTERCEPT_MAX_DEG,
         "startsAt": "observed-first-row",
         "stopRule": f"{END_CROSSED} or {END_TIME_CAP} at the observed duration + {OVERRUN_S:g} s",

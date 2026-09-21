@@ -46,7 +46,11 @@ def flights():
 def test_the_bins_are_the_vocabulary_and_round_trip_through_the_artefact(tmp_path):
     v = ins.Vocabulary()
     # the SPEC counts four kinds; the runway's classes are the cohort's (see word_counts below)
-    assert v.words == {"heading": 72, "vertical": 6, "speed": 16, "duration": 151, "terminal": 3}
+    # 73 heading words: 72 DIRECTIONS plus the one that names the centreline (a position)
+    assert v.words == {"heading": 73, "vertical": 6, "speed": 16, "duration": 151, "terminal": 3}
+    assert v.heading_direction_words == 72 and v.heading_established_word == 72
+    with pytest.raises(ValueError, match="names the centreline"):
+        v.heading_centre_deg(v.heading_established_word)          # it is not a bearing
     assert v.heading_bin(0.0) == 0 and v.heading_bin(-2.4) == 0 and v.heading_bin(2.6) == 1 and v.heading_bin(180.0) == 36
     assert v.heading_bin(-90.0) == 54 and v.heading_bin(365.0) == 1 and v.heading_centre_deg(54) == pytest.approx(-90.0)
     # the vertical word is a flight path angle, descent POSITIVE, and word 0 is the go-around climb
@@ -270,11 +274,17 @@ def test_a_clamped_target_reaches_the_instruction_and_an_orbit_is_absorbed(fligh
     reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), steep, np.full(len(t), 80.0)), v, RUNWAYS)
     vertical = next(i for i in reading.instructions if i.kind == "vertical")
     assert vertical.word == v.vertical_words - 1 and vertical.clamped and vertical.target > 4.4
+    # A 360° orbit is FLOWN, so the sentence says it. Under the plateau reader it vanished — the
+    # aircraft came back to the heading it started on, so there was no new plateau to word and the
+    # whole circle was recorded as one absorbed manoeuvre. A tiling cannot lose it: the orbit's
+    # course passes through every bin and the segments that survive the sliver absorption are the
+    # ones it held long enough to be instructions.
     orbit = np.interp(t, [0.0, 30.0, 150.0, 200.0], [0.0, 0.0, 360.0, 360.0])
     reading = ins.read_instructions(_track(item, t, orbit, np.full(len(t), 800.0), np.full(len(t), 80.0)), v, RUNWAYS)
-    assert [i.word for i in reading.instructions if i.kind == "heading"] == [0]
-    assert len(reading.absorbed) == 1 and reading.absorbed[0].kind == "heading" and abs(reading.absorbed[0].change) >= 180.0
-    assert (reading.words[:, 0] == 0).all() and reading.to_dict()["absorbed"][0]["kind"] == "heading"
+    headings = [i for i in reading.instructions if i.kind == "heading"]
+    assert len(headings) > 1, [i.word for i in headings]
+    assert headings[0].word == 0 and headings[-1].word == 0                # it ends where it began
+    assert [i.issued_s for i in headings] == sorted(i.issued_s for i in headings)
 
 
 def test_the_course_frame_refuses_a_row_with_no_course(flights):
@@ -286,7 +296,7 @@ def test_the_course_frame_refuses_a_row_with_no_course(flights):
         ins.course_frame(replace(item, values=values))
 
 
-def test_a_pause_inside_a_descent_and_a_drift_with_no_plateau_produce_no_word(flights):
+def test_a_pause_inside_a_descent_is_not_a_level_off_and_a_drift_is_DESCRIBED(flights):
     """A 4 s pause at 1000 m inside a 3 m/s descent is not a level-off (the opening window's
     fitted slope says the aircraft is still descending); a course drifting 0.3°/s the whole
     record has no plateau at all and reads as one manoeuvre to its end."""
@@ -299,10 +309,21 @@ def test_a_pause_inside_a_descent_and_a_drift_with_no_plateau_produce_no_word(fl
     verticals = [i for i in reading.instructions if i.kind == "vertical"]
     # level, descend, level, descend — and the last descent runs to the end
     assert [v.vertical_centre_deg(i.word) for i in verticals][0] == 0.0 and verticals[-1].word != v.vertical_modes_deg.index(0.0)
+    # A course drifting 0.3°/s for the whole record has NO plateau anywhere. The plateau reader
+    # answered that with one instruction to the final value — 90° of turning described by a single
+    # word, and the 300 s of it unowned. A tiling describes the drift: the segments cover the
+    # record end to end, and each one is a heading the aircraft genuinely held for a while.
     drift = t * 0.3
     reading = ins.read_instructions(_track(item, t, drift, np.full(len(t), 800.0), speed), v, RUNWAYS)
     headings = [i for i in reading.instructions if i.kind == "heading"]
-    assert len(headings) == 1 and headings[0].settled_s is None and headings[0].word == v.heading_bin(float(drift[-1]))
+    assert len(headings) > 1, [i.word for i in headings]
+    assert headings[0].issued_s == 0.0
+    assert [i.word for i in headings] == sorted(i.word for i in headings)   # a monotone drift reads monotone
+    # each word is its SEGMENT's median, so the last one sits inside the last segment rather than
+    # on the final sample — within a segment's own width of it
+    assert abs(ins.wrap_deg(v.heading_centre_deg(headings[-1].word) - float(drift[-1]))) <= 10.0
+    # and no stretch of the record is without a heading word in force
+    assert reading.words_at(np.array([0.0, 150.0, 298.0])).shape[0] == 3
 
 
 def test_refusals_at_the_boundary(flights):
@@ -345,9 +366,14 @@ def test_the_synthetic_arrival_reads_as_one_capture_turn_a_descent_to_the_thresh
     for item in flights:
         reading = ins.read_instructions(item, v, RUNWAYS)
         headings = [i for i in reading.instructions if i.kind == "heading"]
-        assert headings[0].issued_s == item.times[0] and headings[0].word == v.heading_bin(headings[0].target)
-        if headings[0].word != 0:                   # the entry leg reads as another word: the capture is a turn onto the course
-            assert len(headings) == 2 and headings[-1].word == 0                          # settles on the course
+        assert headings[0].issued_s == item.times[0]
+        if headings[0].word != v.heading_established_word:
+            assert headings[0].word == v.heading_bin(headings[0].target)
+        if headings[0].word != v.heading_established_word:   # the entry leg is a direction: the capture is a turn
+            # it ends on the ESTABLISHED word, not on direction 0 — the sentence says the aircraft
+            # joined the line, which is the one thing direction words cannot say
+            assert len(headings) >= 2 and headings[-1].word == v.heading_established_word
+            assert all(i.word != v.heading_established_word for i in headings[:-1])   # said once, at the join
         else:                                       # the entry leg already reads as the course: one word, no capture to speak of
             assert len(headings) == 1 and abs(headings[0].target) < v.heading_bin_deg / 2
         verticals = [i for i in reading.instructions if i.kind == "vertical"]
@@ -401,7 +427,11 @@ def test_a_track_that_is_already_on_the_course_and_level_carries_only_its_starti
     assert [i.kind for i in reading.instructions] == ["heading", "vertical", "speed", "runway"] and all(i.issued_s == 0.0 for i in reading.instructions)
     words = {i.kind: i.word for i in reading.instructions}
     level = ins.Vocabulary().vertical_modes_deg.index(0.0)
-    assert words == {"heading": 0, "vertical": level, "speed": ins.Vocabulary().speed_bin(150.0 * ins.KT)[0],
+    # the heading word is the ESTABLISHED one, not direction 0: this track is on the centreline
+    # and tracking the course, which is exactly what `course_frame`'s `established` column says,
+    # and saying "fly the course's direction" would lose that it is ON the line
+    assert words == {"heading": ins.Vocabulary().heading_established_word, "vertical": level,
+                     "speed": ins.Vocabulary().speed_bin(150.0 * ins.KT)[0],
                      "runway": RUNWAYS.index(RUNWAY_WORD)} and reading.established_from_start
     # one event for the words said at t = 0, and one for the landing: nothing changes in between,
     # and the landing row is what says how long the whole thing lasted
@@ -431,7 +461,14 @@ def test_the_words_in_force_at_a_time_and_the_executor_s_view_of_them():
         ins.segment_positions_s(0.0, 25.0, 10.0)
     cond = v.conditioning(reading.words_at(ins.segment_positions_s(20.0, 20.0, 10.0)))
     assert cond.shape == (2, v.CONDITIONING_WIDTH) and cond.dtype == np.float32
-    assert cond[0, 0] == pytest.approx(-1.0) and abs(cond[0, 1]) < 1e-6 and cond.shape[-1] == 4          # downwind, no intercept
+    # downwind: cos −1, sin 0. FIVE columns since 2026-09-21 — the fifth says whether the heading
+    # word is the established one, because `72 × 5° = 360°` has the same cosine and sine as
+    # direction word 0 and the executor would otherwise be told to fly a bearing where the
+    # sentence said to hold a line.
+    assert cond[0, 0] == pytest.approx(-1.0) and abs(cond[0, 1]) < 1e-6 and cond.shape[-1] == 5
+    assert cond[0, 4] == 0.0
+    held = v.conditioning(np.array([[v.heading_established_word, 1, 4, 0, 0, 0]]))
+    assert held[0, 4] == 1.0 and held[0, 0] == pytest.approx(1.0) and abs(held[0, 1]) < 1e-6
     assert cond[1, 0] == pytest.approx(0.0, abs=1e-6) and cond[1, 1] == pytest.approx(-1.0)   # (2 / 3)  # −90° base, bin 1
     modes = np.asarray(v.vertical_modes_deg)
     assert cond[0, 2] == pytest.approx(v.vertical_centre_deg(3) / abs(modes).max())
