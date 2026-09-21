@@ -938,3 +938,23 @@ than raise, and the segment-plan readout admits its fixed set on the observed ro
 **Judgement**: one convention would be better — either the readouts read the supervision rows (the package's
 stated truth) or the anchor sets admit on the observed ones — but changing `displacement_at`'s truth moves
 every S1 number and the `lead_time_error` accounting it mirrors, so it is a decision, not a fix.
+
+## The instruction prior re-derives its sentences instead of reading the artefact's (2026-09-21)
+
+`experiments/instruction_prior.py:136` calls `read_instructions` on every rebuilt series, so the
+sentences it trains on are re-derived rather than read from the `sentences_<split>.json` beside
+the vocabulary it names. The replay gate deliberately does the opposite (`Reading.from_dict`,
+added the same day) for a stated reason: a consumer that re-derives its own input cannot see the
+artefact drift from the code that wrote it.
+
+**Verified, and currently harmless**: the reading is deterministic given the series and the
+vocabulary, the spec's sha is checked on load, and `reading_rule` is inside that sha — so a
+vocabulary read under another rule is refused by name. What is NOT covered is the artefact's
+sentence BYTES: a prior and a published sample could be trained and drawn from sentences that
+were never compared to each other.
+
+**Judgement, not a bug.** The prior needs the series anyway (the state tokens come from
+`supervision_times/values`), so it cannot avoid rebuilding them; the change would be to take the
+words from the file and keep only the states from the series, plus a check that every rostered
+flight is in the file. Worth doing when the prior next changes, not on its own — it would
+invalidate no checkpoint, since the words are identical today.
