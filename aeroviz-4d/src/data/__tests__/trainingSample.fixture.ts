@@ -25,11 +25,12 @@
  *    altitude word covers a long segment and the wedge is drawn three times
  *    rather than twenty-six. A real 3° approach cuts far shorter segments — that
  *    arithmetic is tested directly, against the real angles, rather than here.
- *  • the box FOOTPRINTS are a coarse sector — apex at the event's own position,
- *    three points on the arc. The exporter derives the real ones from the words'
- *    reachable set at one point per degree of opening; nothing in the reader
- *    recomputes them, so the fixture only has to be the right SHAPE (an outline
- *    whose first point is the apex, of the same length in all four arrays).
+ *  • the box SOLIDS are a coarse frustum — apex at the event's own position,
+ *    three points on the arc, and a height pair at each of the four. The exporter
+ *    derives the real ones at one point per degree of opening; nothing in the
+ *    reader recomputes them, so the fixture only has to be the right SHAPE: an
+ *    outline whose first point is the apex, the same length in every array, and
+ *    never taller away from the aircraft than at it.
  *
  * The raw columns are the read ones plus a small wiggle, so a chart that plotted
  * the raw signal where it should plot the smoothed one is visibly wrong instead
@@ -44,6 +45,7 @@ import {
   TRAINING_SAMPLE_SCHEMA,
   TRAINING_INSIDE_EPSILON,
   TRAINING_READING_RULE,
+  altitudeFloorM,
   altitudeWedgeM,
   eventInForce,
   headingBoxDeg,
@@ -224,23 +226,29 @@ export function mockEnvelope(words: number[][]) {
   }
   const events = MOCK_EVENT_TIMES_S.map((eventS, event) => {
     const first = TS.findIndex((t) => t >= eventS);
-    const closes = eventS + MOCK_HOLDS_S[event];
-    const rows = TS.map((t, index) => (t >= eventS && t <= closes ? index : -1)).filter((i) => i >= 0);
     const [headingLoDeg, headingHiDeg] = headingBoxDeg(MOCK_SPEC, words[event][0]);
     const [speedLoMps, speedHiMps] = speedBoxMps(MOCK_SPEC, words[event][2]);
-    const low = Math.min(...rows.map((index) => altLoM[index]));
-    const high = Math.max(...rows.map((index) => altHiM[index]));
     // The footprint, the same SHAPE the exporter draws: apex at the event's own
     // position, then an arc at radius `hold × the speed box's upper edge` across
     // the heading box. The exporter puts one point per degree of opening; three
     // is its floor and all a fixture needs. A displacement at relative course ψ
     // over a distance d is `(-d·cos ψ, -d·sin ψ)` in this frame.
     const depth = speedHiMps * MOCK_HOLDS_S[event];
+    const altitudeTargetM = MOCK_SPEC.altitudeTargetsM[words[event][1]];
+    const altitudeFloor = altitudeFloorM(MOCK_SPEC, words[event][1]);
     const toGo = TO_GO_M[first];
     const cross = CROSS_M[first];
     const arc = [headingLoDeg, (headingLoDeg + headingHiDeg) / 2, headingHiDeg].map(
       (degrees) => (degrees * Math.PI) / 180,
     );
+    // The solid TAPERS: an outline point `depth` metres out has that much less path
+    // left to its altitude segment's end, so its slice of the wedge is tighter. The
+    // apex keeps the row's own wedge; the arc gets the one `depth` metres on.
+    const remainingAtApex = (altHiM[first] - altitudeTargetM) / Math.tan((MOCK_SPEC.altitudeDownDeg * Math.PI) / 180)
+      - altitudeFloor / Math.tan((MOCK_SPEC.altitudeDownDeg * Math.PI) / 180);
+    const atEdge = altitudeWedgeM(MOCK_SPEC, words[event][1], Math.max(remainingAtApex - depth, 0));
+    const low = [altLoM[first], atEdge[0], atEdge[0], atEdge[0]];
+    const high = [altHiM[first], atEdge[1], atEdge[1], atEdge[1]];
     return {
       eventS,
       holdS: MOCK_HOLDS_S[event],
@@ -248,11 +256,11 @@ export function mockEnvelope(words: number[][]) {
       headingHiDeg,
       speedLoMps,
       speedHiMps,
-      altitudeTargetM: MOCK_SPEC.altitudeTargetsM[words[event][1]],
+      altitudeTargetM,
       altLoM: low,
       altHiM: high,
-      altHaeLoM: THRESHOLD_HAE_M + low,
-      altHaeHiM: THRESHOLD_HAE_M + high,
+      altHaeLoM: low.map((metres) => THRESHOLD_HAE_M + metres),
+      altHaeHiM: high.map((metres) => THRESHOLD_HAE_M + metres),
       toGoM: [toGo, ...arc.map((angle) => toGo - depth * Math.cos(angle))],
       crossM: [cross, ...arc.map((angle) => cross - depth * Math.sin(angle))],
       // indicative geodetic corners: the reader only requires that the four

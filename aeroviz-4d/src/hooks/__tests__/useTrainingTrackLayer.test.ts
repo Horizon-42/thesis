@@ -7,16 +7,24 @@ import { describe, expect, it } from "vitest";
 
 import {
   trainingBandWall,
+  trainingBoxWall,
   trainingSegmentNodes,
   trainingTrackPositions,
 } from "../useTrainingTrackLayer";
-import { parseTrainingSample } from "../../data/trainingSample";
-import { mockPriorSample, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import { eventInForce, parseTrainingSample } from "../../data/trainingSample";
+import { MOCK_VOCABULARY, mockPriorSample, mockSample } from "../../data/__tests__/trainingSample.fixture";
 
 function flight(raw: unknown = mockSample(), kind: "vocabulary-readback" | "prior-generated" = "vocabulary-readback") {
   const parsed = parseTrainingSample(raw, kind);
   if (!parsed.ok) throw new Error(parsed.problem);
   return parsed.value.flights[0];
+}
+
+/** The wall needs the vocabulary: a ribbon closes on its own segment's TARGET, and
+ *  only the vocabulary knows where that is. */
+function vocabulary(_flight: unknown) {
+  void _flight;
+  return MOCK_VOCABULARY;
 }
 
 describe("trainingTrackPositions", () => {
@@ -47,59 +55,98 @@ describe("trainingBandWall", () => {
   // The wall is the altitude words' wedge made visible in space. Both heights are
   // HAE, and `altHaeHiM` is the MAXIMUM — the plain reading of the names, unlike
   // the retired corridor where "lo" named the shallower descent and sat higher.
-  it("walls the wedge between the two heights the words allow", () => {
+  //
+  // It comes back as ONE RIBBON PER ALTITUDE SEGMENT. The bound STEPS at every
+  // altitude word — a segment closes onto its target, the next opens wide again —
+  // and a single wall forced through those steps renders them as twisted facets
+  // over the turning ground track.
+  it("splits into one ribbon per altitude segment, covering every row", () => {
     const item = flight();
-    const wall = trainingBandWall(item, item.envelope);
-    expect(wall.positions).toHaveLength(item.observed.tS.length * 2);
-    expect(wall.maximumHeights).toEqual(item.envelope.altHaeHiM);
-    expect(wall.minimumHeights).toEqual(item.envelope.altHaeLoM);
-    wall.maximumHeights.forEach((top, row) => {
-      expect(top).toBeGreaterThanOrEqual(wall.minimumHeights[row]);
+    const walls = trainingBandWall(item, item.envelope, vocabulary(item), item.sentence.words);
+    // as many ribbons as the altitude column has runs over the rows
+    const forced = eventInForce(item.sentence.eventTimesS, item.observed.tS);
+    const perRow = forced.map((event) => item.sentence.words[event][1]);
+    const runs = perRow.filter((word, row) => row === 0 || word !== perRow[row - 1]).length;
+    expect(walls).toHaveLength(runs);
+    expect(walls.length).toBeGreaterThan(1);
+    walls.forEach((wall, index) => {
+      expect(wall.positions).toHaveLength(wall.maximumHeights.length * 2);
+      expect(wall.maximumHeights).toHaveLength(wall.minimumHeights.length);
+      wall.maximumHeights.forEach((top, row) => {
+        expect(top).toBeGreaterThanOrEqual(wall.minimumHeights[row]);
+      });
+      // consecutive ribbons SHARE their boundary row, or a hairline of unbounded
+      // height opens between two segments that in fact meet
+      if (index + 1 < walls.length) {
+        const endLon = wall.positions[wall.positions.length - 2];
+        expect(walls[index + 1].positions[0]).toBeCloseTo(endLon, 9);
+      }
     });
   });
 
   it("rides the aircraft's OWN ground track — the wedge is a height bound, nothing else", () => {
     const item = flight();
-    const wall = trainingBandWall(item, item.envelope);
-    expect(wall.positions.slice(0, 2)).toEqual([item.observed.lon[0], item.observed.lat[0]]);
+    const walls = trainingBandWall(item, item.envelope, vocabulary(item), item.sentence.words);
+    expect(walls[0].positions.slice(0, 2)).toEqual([item.observed.lon[0], item.observed.lat[0]]);
   });
 
-  it("narrows towards the end of each segment, which is where the target is", () => {
+  it("each ribbon narrows toward its own segment's end, which is where the target is", () => {
     const item = flight();
-    const wall = trainingBandWall(item, item.envelope);
-    const width = (row: number) => wall.maximumHeights[row] - wall.minimumHeights[row];
-    // the last row of the track is the last segment's own end
-    expect(width(wall.maximumHeights.length - 1)).toBeLessThan(width(0));
+    for (const wall of trainingBandWall(item, item.envelope, vocabulary(item), item.sentence.words)) {
+      const width = (row: number) => wall.maximumHeights[row] - wall.minimumHeights[row];
+      expect(width(wall.maximumHeights.length - 1)).toBeLessThan(width(0));
+    }
   });
 
   it("takes the MODEL's envelope when it is handed one — a different sentence, a different wall", () => {
     const item = flight(mockPriorSample(), "prior-generated");
-    const truth = trainingBandWall(item, item.envelope);
-    const said = trainingBandWall(item, item.prior!.envelope);
-    expect(said.positions).toEqual(truth.positions);
-    expect(said.maximumHeights).not.toEqual(truth.maximumHeights);
+    const truth = trainingBandWall(item, item.envelope, vocabulary(item), item.sentence.words);
+    const said = trainingBandWall(item, item.prior!.envelope, vocabulary(item), item.prior!.words);
+    expect(said.map((wall) => wall.maximumHeights.join())).not.toEqual(
+      truth.map((wall) => wall.maximumHeights.join()));
   });
 });
 
-describe("the box chain", () => {
-  it("carries one prism per word, with a four-corner footprint and two heights", () => {
+describe("the chain of solids", () => {
+  it("carries one per word, with a height pair at every point of its outline", () => {
     const item = flight();
     expect(item.envelope.events).toHaveLength(item.sentence.eventTimesS.length);
     for (const box of item.envelope.events) {
-      expect(box.lon).toHaveLength(4);
-      expect(box.lat).toHaveLength(4);
-      expect(box.altHaeHiM).toBeGreaterThanOrEqual(box.altHaeLoM);
+      const points = box.lon.length;
+      expect(points).toBeGreaterThanOrEqual(3);
+      for (const array of [box.lat, box.altLoM, box.altHiM, box.altHaeLoM, box.altHaeHiM]) {
+        expect(array).toHaveLength(points);
+      }
+      box.altHaeHiM.forEach((top, point) => expect(top).toBeGreaterThanOrEqual(box.altHaeLoM[point]));
     }
   });
 
-  it("the prism's heights are the wedge's OWN range over that word's rows", () => {
+  it("each solid TAPERS: its apex is the tall end", () => {
     const item = flight();
-    // not the target's ±5 %: the wedge is wide where a segment begins, and the
-    // box has to be as tall as the wedge is over the rows it stands for.
-    const first = item.envelope.events[0];
-    expect(first.altHiM - first.altLoM).toBeGreaterThan(
-      2 * 0.05 * (first.altitudeTargetM + 50),
-    );
+    // an outline point `d` metres out has `d` metres less path left to its segment's
+    // end, so its slice of the wedge is tighter. A flat lid is the one thing the
+    // words never say, and it over-states the ceiling at the far end.
+    for (const box of item.envelope.events) {
+      const tall = box.altHiM[0] - box.altLoM[0];
+      for (let point = 1; point < box.altHiM.length; point += 1) {
+        expect(box.altHiM[point] - box.altLoM[point]).toBeLessThanOrEqual(tall + 1e-6);
+      }
+    }
+    // and on this fixture at least one of them visibly does
+    const closes = item.envelope.events.map(
+      (box) => (box.altHiM[0] - box.altLoM[0]) - (box.altHiM[1] - box.altLoM[1]));
+    expect(Math.max(...closes)).toBeGreaterThan(1);
+  });
+
+  it("the wall Cesium draws closes the outline back onto the apex", () => {
+    const item = flight();
+    const box = item.envelope.events[0];
+    const wall = trainingBoxWall(box);
+    // one more position than the outline has points: the apex is repeated, so the
+    // two radial faces — the trapezoids — are drawn as well as the arc face
+    expect(wall.maximumHeights).toHaveLength(box.lon.length + 1);
+    expect(wall.positions.slice(0, 2)).toEqual(wall.positions.slice(-2));
+    expect(wall.maximumHeights[0]).toBe(wall.maximumHeights[wall.maximumHeights.length - 1]);
   });
 });
 

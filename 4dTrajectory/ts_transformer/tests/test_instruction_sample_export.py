@@ -366,7 +366,7 @@ def test_the_wedge_closes_onto_its_target_and_opens_asymmetrically_going_back():
     # one segment of four rows, 300 m of path, the last row being its end
     row_words = np.full(4, word, dtype=np.int64)
     path = np.array([0.0, 100.0, 200.0, 300.0])
-    low, high = altitude_envelope(row_words, path, vocabulary)
+    low, high, _ = altitude_envelope(row_words, path, vocabulary)
 
     # the LAST row is the segment's end: r = 0, so the box is the target's own tolerance
     assert high[-1] == pytest.approx(target + half)
@@ -390,7 +390,7 @@ def test_a_NEGATIVE_target_still_has_a_box_and_it_is_not_inverted():
     for word in (int(below[0]), int(below[-1])):
         target = float(vocabulary.altitude_targets[word])
         assert vocabulary.altitude_half_width(target) > 0.0
-        low, high = altitude_envelope(np.full(2, word, dtype=np.int64), np.array([0.0, 50.0]), vocabulary)
+        low, high, _ = altitude_envelope(np.full(2, word, dtype=np.int64), np.array([0.0, 50.0]), vocabulary)
         assert (high > low).all(), f"the box for target {target:g} m is inverted"
 
 
@@ -402,7 +402,7 @@ def test_a_segment_ends_at_its_own_LAST_ROW():
     first, second = 1, 2
     row_words = np.array([first, first, second, second], dtype=np.int64)
     path = np.array([0.0, 100.0, 200.0, 300.0])
-    low, high = altitude_envelope(row_words, path, vocabulary)
+    low, high, _ = altitude_envelope(row_words, path, vocabulary)
 
     for word, rows, end in ((first, (0, 1), 100.0), (second, (2, 3), 300.0)):
         target = float(vocabulary.altitude_targets[word])

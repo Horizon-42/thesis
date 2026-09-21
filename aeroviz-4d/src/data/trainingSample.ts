@@ -353,10 +353,17 @@ export type TrainingObserved = { tS: number[] }
  * belongs to an executor, and there is none here. The view has to say which of
  * the two it is drawing.
  *
- * `altLoM` / `altHiM` are the wedge at the instant the word OPENS, which is the
- * widest it gets while that word stands — so the prism's height is an outer bound
- * over the hold. They are not the target's ±5 %: that is what the wedge closes
- * onto at its segment's end.
+ * THE SOLID TAPERS, and `altLoM` / `altHiM` are therefore one height pair PER
+ * OUTLINE POINT, not one for the whole box. A word's altitude box is not a single
+ * interval: it is the wedge, and the wedge narrows as the aircraft runs path off
+ * toward its segment's end. An outline point `d` metres from the apex has `d`
+ * metres less path left — the straight line is the shortest way there — so its
+ * interval is `wedge(r₀ − d)`, tighter than the apex's. The solid is a FRUSTUM: a
+ * sector in plan, a trapezoid in every radial section.
+ *
+ * An earlier version gave the box ONE height pair and extruded it flat, which
+ * over-states the ceiling at the far end by up to 26 % of the box's own height on
+ * a long hold. A flat lid is the one thing the words never say.
  */
 export interface TrainingEventBox {
   eventS: number;
@@ -366,10 +373,12 @@ export interface TrainingEventBox {
   speedLoMps: number;
   speedHiMps: number;
   altitudeTargetM: number;
-  altLoM: number;
-  altHiM: number;
-  altHaeLoM: number;
-  altHaeHiM: number;
+  /** [N] the wedge at each outline point, in the same order as `lon` / `lat`:
+   *  point 0 is the apex and the tall end. */
+  altLoM: number[];
+  altHiM: number[];
+  altHaeLoM: number[];
+  altHaeHiM: number[];
   lon: number[];
   lat: number[];
   toGoM: number[];
@@ -1250,7 +1259,7 @@ function parseEventBox(raw: unknown, index: number, where: string): Parsed<Train
   if (!isRecord(raw)) return { ok: false, problem: `${where}.events[${index}] is not an object` };
   const numbers: Record<string, number> = {};
   for (const field of ["eventS", "holdS", "headingLoDeg", "headingHiDeg", "speedLoMps",
-                       "speedHiMps", "altitudeTargetM", "altLoM", "altHiM", "altHaeLoM", "altHaeHiM"]) {
+                       "speedHiMps", "altitudeTargetM"]) {
     const value = finite(raw, field);
     if (value === null) return { ok: false, problem: `${where}.events[${index}].${field} is missing or not a number` };
     numbers[field] = value;
@@ -1258,8 +1267,7 @@ function parseEventBox(raw: unknown, index: number, where: string): Parsed<Train
   // Every box is an interval, and an inverted one is not a narrower box — it is a
   // box nothing can be inside, which would read as "the model said something
   // impossible" rather than as a corrupt file.
-  for (const [low, high] of [["headingLoDeg", "headingHiDeg"], ["speedLoMps", "speedHiMps"],
-                             ["altLoM", "altHiM"], ["altHaeLoM", "altHaeHiM"]]) {
+  for (const [low, high] of [["headingLoDeg", "headingHiDeg"], ["speedLoMps", "speedHiMps"]]) {
     if (numbers[low] > numbers[high]) {
       return {
         ok: false,
@@ -1268,14 +1276,14 @@ function parseEventBox(raw: unknown, index: number, where: string): Parsed<Train
     }
   }
   const corners: Record<string, number[]> = {};
-  for (const field of ["lon", "lat", "toGoM", "crossM"]) {
+  for (const field of ["lon", "lat", "toGoM", "crossM", "altLoM", "altHiM", "altHaeLoM", "altHaeHiM"]) {
     const values = numberArray(raw[field]);
     if (values === null || values.length < 3) {
       return {
         ok: false,
         problem:
-          `${where}.events[${index}].${field} is missing or shorter than three points — the ground ` +
-          `footprint is a sector's outline, in geodetic and in course-frame coordinates`,
+          `${where}.events[${index}].${field} is missing or shorter than three points — a box is a ` +
+          `sector's outline with a height pair at every point of it`,
       };
     }
     corners[field] = values;
@@ -1287,10 +1295,35 @@ function parseEventBox(raw: unknown, index: number, where: string): Parsed<Train
     return {
       ok: false,
       problem:
-        `${where}.events[${index}]: lon/lat/toGoM/crossM have different lengths ` +
+        `${where}.events[${index}]: its outline arrays have different lengths ` +
         `(${Object.entries(corners).map(([field, values]) => `${field} ${values.length}`).join(", ")}) — ` +
-        `they are one outline in two coordinate systems`,
+        `they are ONE outline: two coordinate systems and a height pair per point`,
     };
+  }
+  for (let point = 0; point < corners.altLoM.length; point += 1) {
+    if (corners.altLoM[point] > corners.altHiM[point] || corners.altHaeLoM[point] > corners.altHaeHiM[point]) {
+      return {
+        ok: false,
+        problem:
+          `${where}.events[${index}] is inverted at outline point ${point}: altLoM ` +
+          `${corners.altLoM[point]} is above altHiM ${corners.altHiM[point]}`,
+      };
+    }
+  }
+  // The solid TAPERS toward its far end, because an outline point further from the
+  // apex has that much less path left to its segment's end. A box whose arc were
+  // taller than its apex would be the wedge drawn backwards.
+  const tall = corners.altHiM[0] - corners.altLoM[0];
+  for (let point = 1; point < corners.altLoM.length; point += 1) {
+    if (corners.altHiM[point] - corners.altLoM[point] > tall + 1e-6) {
+      return {
+        ok: false,
+        problem:
+          `${where}.events[${index}] is ${(corners.altHiM[point] - corners.altLoM[point]).toFixed(1)} m ` +
+          `tall at outline point ${point} and ${tall.toFixed(1)} m at its apex — the wedge narrows ` +
+          `with the path run off, so a box only ever gets shorter away from the aircraft`,
+      };
+    }
   }
   return {
     ok: true,
@@ -1302,10 +1335,10 @@ function parseEventBox(raw: unknown, index: number, where: string): Parsed<Train
       speedLoMps: numbers.speedLoMps,
       speedHiMps: numbers.speedHiMps,
       altitudeTargetM: numbers.altitudeTargetM,
-      altLoM: numbers.altLoM,
-      altHiM: numbers.altHiM,
-      altHaeLoM: numbers.altHaeLoM,
-      altHaeHiM: numbers.altHaeHiM,
+      altLoM: corners.altLoM,
+      altHiM: corners.altHiM,
+      altHaeLoM: corners.altHaeLoM,
+      altHaeHiM: corners.altHaeHiM,
       lon: corners.lon,
       lat: corners.lat,
       toGoM: corners.toGoM,

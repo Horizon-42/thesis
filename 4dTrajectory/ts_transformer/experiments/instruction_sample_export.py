@@ -420,7 +420,7 @@ def word_runs(column: list[int]) -> list[tuple[int, int]]:
 
 
 def altitude_envelope(row_words: np.ndarray, path_m: np.ndarray, vocabulary: BoxVocabulary,
-                      ) -> tuple[np.ndarray, np.ndarray]:
+                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The wedge, per row: ``T − r·tan(γ_up) − f(T) ≤ h ≤ T + r·tan(γ_down) + f(T)``.
 
     MIRROR of `box_vocabulary.contains`, line for line, including three details that each moved
@@ -438,6 +438,11 @@ def altitude_envelope(row_words: np.ndarray, path_m: np.ndarray, vocabulary: Box
     ``row_words`` is the altitude word in force at each ROW (not each event): one altitude word
     spans several events, and the wedge is anchored on the altitude segment's end.
 
+    It returns the REMAINING PATH as well, because the boxes need it: the wedge a word allows is
+    not one interval, it narrows as the aircraft runs the path off, and a box drawn at one height
+    for its whole depth over-states the ceiling at its far end (measured: by 26 % of the box on
+    the longest hold of a vectored arrival).
+
     The wedge is ASYMMETRIC by design (γ_down 1.5° above, γ_up 1.0° below): it is the set the
     target is backward-reachable from, and low is the dangerous side.
     """
@@ -449,7 +454,7 @@ def altitude_envelope(row_words: np.ndarray, path_m: np.ndarray, vocabulary: Box
     ends = np.concatenate([np.flatnonzero(np.diff(row_words)) + 1, [len(row_words)]])
     segment_end = np.repeat(path_m[ends - 1], np.diff(np.concatenate([[0], ends])))
     remaining = np.maximum(segment_end - path_m, 0.0)
-    return (targets - remaining * tan_up - half, targets + remaining * tan_down + half)
+    return (targets - remaining * tan_up - half, targets + remaining * tan_down + half, remaining)
 
 
 #: How finely the sector's arc is drawn: one point per degree of its own opening, between these
@@ -505,15 +510,24 @@ def reachable_sector(heading_lo_deg: float, heading_hi_deg: float, speed_hi: flo
     return to_go, cross
 
 
-def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m: np.ndarray,
-                high_m: np.ndarray, vocabulary: BoxVocabulary, series) -> list[dict[str, Any]]:
+def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], remaining_m: np.ndarray,
+                vocabulary: BoxVocabulary, series) -> list[dict[str, Any]]:
     """One box per event: the three intervals, the wedge over the event's own span, and the ground
     SECTOR the words allow the aircraft to be in while that word stands.
 
     A word is a box in STATE space — an interval of heading, one of speed, one of altitude — and
     that is what the vocabulary means by a bounding box. What it makes in POSITION space is not a
-    box: it is a pie slice fanning out from the aircraft (`reachable_sector`). The two are named
-    and drawn differently for that reason.
+    box: it is a pie slice fanning out from the aircraft (`reachable_sector`), and the slice
+    **TAPERS IN HEIGHT**. The two are named and drawn differently for that reason.
+
+    THE HEIGHTS ARE PER OUTLINE POINT, and that is the whole correction (2026-09-21, the user
+    again). A word's altitude box is not one interval: it is the wedge, which narrows as the
+    aircraft runs path off toward its segment's end. A point on the sector's arc, ``d`` metres
+    from the apex, has ``d`` metres less path left than the apex does — the straight line is the
+    shortest way there, and any curved one leaves even less — so the interval there is
+    ``wedge(r₀ − d)``, tighter than at the apex. The solid is therefore a FRUSTUM: a sector in
+    plan, a trapezoid in every radial section. Drawing it at one height for its whole depth
+    over-states the ceiling at the far end by up to 26 % of the box's own height on a long hold.
 
     The sector is built in the course frame and comes out as (lon, lat) as well, because the
     frame's transform lives on this side of the wire — the frontend has lon/lat columns and no way
@@ -522,6 +536,8 @@ def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m
     heading_edges = vocabulary.heading_edges
     speed_edges = vocabulary.speed_edges
     targets = vocabulary.altitude_targets
+    tan_down = math.tan(math.radians(vocabulary.altitude_down_deg))
+    tan_up = math.tan(math.radians(vocabulary.altitude_up_deg))
     columns = {kind: KINDS.index(kind) for kind in KINDS}
 
     times = observed["t_s"]
@@ -554,6 +570,18 @@ def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m
         spans.append(len(sector_to_go))
         corners_to_go.extend(sector_to_go)
         corners_cross.extend(sector_cross)
+
+        # the wedge AT EACH OUTLINE POINT: the apex keeps the row's own remaining path, and every
+        # arc point has the sector's radius less of it. Clamped at zero — a sector deeper than the
+        # path left to the segment's end closes onto the target's own box and stays there, because
+        # past that end this word is not the one in force any more.
+        target = float(targets[int(words[index, columns["altitude"]])])
+        half = float(vocabulary.altitude_half_width(target))
+        reach = [math.hypot(a - offsets_to_go[0], b - offsets_cross[0])
+                 for a, b in zip(offsets_to_go, offsets_cross)]
+        left = np.maximum(float(remaining_m[rows[0]]) - np.asarray(reach), 0.0)
+        point_low = target - left * tan_up - half
+        point_high = target + left * tan_down + half
         boxes.append({
             "eventS": round(opens_s, 1),
             "holdS": round(float(holds[index]), 1),
@@ -565,12 +593,11 @@ def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m
             "headingHiDeg": round(float(heading_hi), 4),
             "speedLoMps": round(float(speed_lo), 4),
             "speedHiMps": round(float(speed_hi), 4),
-            "altitudeTargetM": round(float(targets[int(words[index, columns["altitude"]])]), 2),
-            # The wedge at the instant the box OPENS, which is the widest it gets while this word
-            # stands (`r` only shrinks along a segment). So the prism's height is an OUTER BOUND
-            # over the hold rather than the wedge at any one moment inside it.
-            "altLoM": round(float(low_m[rows].min()), 4),
-            "altHiM": round(float(high_m[rows].max()), 4),
+            "altitudeTargetM": round(float(target), 2),
+            # ONE HEIGHT PAIR PER OUTLINE POINT, not one for the whole box: the wedge narrows with
+            # the path run off, so the apex is the tall end and the arc the short one.
+            "altLoM": [round(float(v), 4) for v in point_low],
+            "altHiM": [round(float(v), 4) for v in point_high],
         })
 
     lons, lats = lonlat_from_frame(series, corners_to_go, corners_cross)
@@ -579,13 +606,13 @@ def event_boxes(sentence: dict[str, Any], observed: dict[str, np.ndarray], low_m
     for index, box in enumerate(boxes):
         window = slice(cursor, cursor + spans[index])
         cursor += spans[index]
-        # the box's own corners sit metres from the track, so the geoid offset at the corners is
-        # the offset at the rows; taking it here rather than at the rows keeps one conversion.
+        # the box's own outline sits metres from the track, so the geoid offset along it is the
+        # offset at the rows; taking it here rather than at the rows keeps one conversion.
         base = float(offset[window].mean())
         box["lon"] = [round(float(v), 7) for v in lons[window]]
         box["lat"] = [round(float(v), 7) for v in lats[window]]
-        box["altHaeLoM"] = round(base + box["altLoM"], 2)
-        box["altHaeHiM"] = round(base + box["altHiM"], 2)
+        box["altHaeLoM"] = [round(base + v, 2) for v in box["altLoM"]]
+        box["altHaeHiM"] = [round(base + v, 2) for v in box["altHiM"]]
     return boxes
 
 
@@ -613,10 +640,11 @@ def envelope_block(sentence: dict[str, Any], observed_columns: dict[str, np.ndar
     # the event in force at each row: the last one that has opened. The events tile the track, so
     # every row has exactly one.
     in_force = np.clip(np.searchsorted(event_times, times, side="right") - 1, 0, len(event_times) - 1)
-    low, high = altitude_envelope(words[in_force, KINDS.index("altitude")], signals["path_m"], vocabulary)
+    low, high, remaining = altitude_envelope(
+        words[in_force, KINDS.index("altitude")], signals["path_m"], vocabulary)
     low = np.round(low, 4)
     high = np.round(high, 4)
-    boxes = event_boxes(sentence, observed_columns, low, high, vocabulary, series)
+    boxes = event_boxes(sentence, observed_columns, remaining, vocabulary, series)
 
     heading_word = words[in_force, KINDS.index("heading")]
     speed_word = words[in_force, KINDS.index("speed")]

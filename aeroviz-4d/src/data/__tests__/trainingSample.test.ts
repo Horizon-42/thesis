@@ -312,7 +312,7 @@ describe("what the reader refuses", () => {
     // a sector the 3D scene does not have.
     const raw = mockSample() as any;
     raw.flights[0].envelope.events[0].toGoM = [0, 1, 2, 3, 4];
-    expect(problem(raw)).toContain("one outline in two coordinate systems");
+    expect(problem(raw)).toContain("they are ONE outline");
   });
 
   it("the footprint is a SECTOR, and its first point is the aircraft", () => {

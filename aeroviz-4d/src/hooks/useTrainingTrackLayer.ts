@@ -17,16 +17,27 @@
  *  • The WALL is the altitude words' wedge, over the aircraft's own ground
  *    track: an ABSOLUTE bound on height, wide where a segment begins and closing
  *    onto ±5 % of its target where it ends. It is the one bound in this
- *    vocabulary that pins a position rather than a rate.
- *  • The SECTORS are one prism per word: the ground its heading and speed words
- *    allow while it stands, extruded over the wedge's range there. Each footprint
- *    FANS OUT FROM THE AIRCRAFT — a pie slice as deep as the hold times the speed
- *    box's upper edge, as wide as the heading box — and is deliberately NOT the
- *    rectangle around it, which would show flyable-looking ground beside the apex
- *    that no heading inside the box can reach. They are thin (a 2° box over a 4 s
- *    hold is 488 m deep and 17 m wide at its far edge), and that thinness is the
- *    finding: horizontally one word says almost nothing, and it is the
- *    accumulation over a whole sentence that opens the funnel (design §5.1).
+ *    vocabulary that pins a position rather than a rate. It is drawn as ONE WALL
+ *    PER ALTITUDE SEGMENT, not one for the flight: the bound STEPS at every
+ *    altitude word (a segment closes onto its target, the next opens wide again —
+ *    measured on one vectored arrival, nine steps of up to 59 m), and a single
+ *    ribbon forced through those steps renders them as twisted facets over the
+ *    turning ground track. Split, each ribbon tapers cleanly and the step between
+ *    two of them reads as what it is.
+ *  • The SOLIDS are one per word, and each one is a FRUSTUM, not a prism: a pie
+ *    slice in plan, a trapezoid in every radial section. The footprint FANS OUT
+ *    FROM THE AIRCRAFT — as deep as the hold times the speed box's upper edge, as
+ *    wide as the heading box — and is deliberately NOT the rectangle around it,
+ *    which would show flyable-looking ground beside the apex that no heading in
+ *    the box can reach. The HEIGHT tapers with it: an outline point `d` metres
+ *    out has `d` metres less path left to its altitude segment's end, so its
+ *    slice of the wedge is that much tighter. Extruding one height over the whole
+ *    footprint over-states the ceiling at the far end by up to 26 % of the box's
+ *    own height on a long hold — a flat lid is the one thing the words never say.
+ *    The solids are thin horizontally (a 2° box over a 4 s hold is 488 m deep and
+ *    17 m wide at its far edge), and that thinness is the finding: horizontally
+ *    one word says almost nothing, and it is the accumulation over a whole
+ *    sentence that opens the funnel (design §5.1).
  *
  * A word is a box in STATE space — heading × speed × altitude — which is what the
  * vocabulary means by a bounding box. In POSITION space it is this sector, and it
@@ -55,7 +66,15 @@ import {
   TRAINING_MODEL_COLOR,
   TRAINING_TRACE_COLOR,
 } from "../utils/trainingWordColors";
-import type { TrainingEnvelope, TrainingFlight } from "../data/trainingSample";
+import {
+  TRAINING_KIND_COLUMN,
+  altitudeWedgeM,
+  eventInForce,
+  type TrainingEnvelope,
+  type TrainingEventBox,
+  type TrainingFlight,
+  type TrainingWordSpec,
+} from "../data/trainingSample";
 
 const OBSERVED_ID = "training-observed-track";
 const WALL_ID = "training-envelope-wall";
@@ -89,19 +108,70 @@ export function trainingTrackPositions(flight: TrainingFlight): { observed: numb
  * named the shallower descent and therefore sat higher. The wedge is a height
  * interval and nothing else.
  */
-export function trainingBandWall(flight: TrainingFlight, envelope: TrainingEnvelope): {
+export function trainingBandWall(
+  flight: TrainingFlight,
+  envelope: TrainingEnvelope,
+  vocabulary: TrainingWordSpec,
+  words: number[][],
+): Array<{ positions: number[]; maximumHeights: number[]; minimumHeights: number[] }> {
+  const { lon, lat, haeOffsetM } = flight.observed;
+  const forced = eventInForce(flight.sentence.eventTimesS, flight.observed.tS);
+  const wordAt = (row: number) => words[forced[row]][TRAINING_KIND_COLUMN.altitude];
+  const walls = [];
+  let row = 0;
+  while (row < lon.length) {
+    let last = row;
+    while (last + 1 < lon.length && wordAt(last + 1) === wordAt(row)) last += 1;
+    const positions: number[] = [];
+    const maximumHeights: number[] = [];
+    const minimumHeights: number[] = [];
+    for (let index = row; index <= last; index += 1) {
+      positions.push(lon[index], lat[index]);
+      maximumHeights.push(envelope.altHaeHiM[index]);
+      minimumHeights.push(envelope.altHaeLoM[index]);
+    }
+    // ONE MORE POSITION, at the next segment's first row but with THIS segment's
+    // own closing box — the target's ±5 %, which is where its wedge ends. Without
+    // it the ribbons stop a row apart and a hairline of unbounded height opens
+    // between two segments that in fact meet; with the NEXT segment's heights
+    // instead, the ribbon's last facet spans the step and renders as the twist
+    // this split exists to remove.
+    if (last + 1 < lon.length) {
+      const [low, high] = altitudeWedgeM(vocabulary, wordAt(row), 0);
+      positions.push(lon[last + 1], lat[last + 1]);
+      maximumHeights.push(haeOffsetM[last + 1] + high);
+      minimumHeights.push(haeOffsetM[last + 1] + low);
+    }
+    walls.push({ positions, maximumHeights, minimumHeights });
+    row = last + 1;
+  }
+  return walls;
+}
+
+/**
+ * ONE WORD'S SOLID, as Cesium draws it: the outline closed back onto its apex,
+ * with the wedge's own two heights at every point of it.
+ *
+ * A `wall` takes a height pair per position, which is exactly what a frustum
+ * needs and what a `polygon` with one `extrudedHeight` cannot express. The
+ * outline is closed by repeating the apex, so the two radial faces — the
+ * trapezoids — are drawn as well as the arc face.
+ */
+export function trainingBoxWall(box: TrainingEventBox): {
   positions: number[];
   maximumHeights: number[];
   minimumHeights: number[];
 } {
-  const { lon, lat } = flight.observed;
   const positions: number[] = [];
-  for (let row = 0; row < lon.length; row += 1) positions.push(lon[row], lat[row]);
-  return {
-    positions,
-    maximumHeights: envelope.altHaeHiM,
-    minimumHeights: envelope.altHaeLoM,
-  };
+  const maximumHeights: number[] = [];
+  const minimumHeights: number[] = [];
+  for (let point = 0; point <= box.lon.length; point += 1) {
+    const index = point % box.lon.length;
+    positions.push(box.lon[index], box.lat[index]);
+    maximumHeights.push(box.altHaeHiM[index]);
+    minimumHeights.push(box.altHaeLoM[index]);
+  }
+  return { positions, maximumHeights, minimumHeights };
 }
 
 /**
@@ -135,18 +205,23 @@ export default function useTrainingTrackLayer(): void {
     if (!flight) return;
 
     const added: string[] = [];
-    const drawWall = (id: string, envelope: TrainingEnvelope, colour: string, alpha: number) => {
-      const wall = trainingBandWall(flight, envelope);
-      added.push(id);
-      viewer.entities.add({
-        id,
-        wall: {
-          positions: Cesium.Cartesian3.fromDegreesArray(wall.positions),
-          maximumHeights: wall.maximumHeights,
-          minimumHeights: wall.minimumHeights,
-          material: Cesium.Color.fromCssColorString(colour).withAlpha(alpha),
-          outline: false,
-        },
+    const vocabulary = trainingSelection!.vocabulary;
+    const drawWall = (
+      id: string, envelope: TrainingEnvelope, words: number[][], colour: string, alpha: number,
+    ) => {
+      trainingBandWall(flight, envelope, vocabulary, words).forEach((wall, segment) => {
+        const entityId = `${id}-${segment}`;
+        added.push(entityId);
+        viewer.entities.add({
+          id: entityId,
+          wall: {
+            positions: Cesium.Cartesian3.fromDegreesArray(wall.positions),
+            maximumHeights: wall.maximumHeights,
+            minimumHeights: wall.minimumHeights,
+            material: Cesium.Color.fromCssColorString(colour).withAlpha(alpha),
+            outline: false,
+          },
+        });
       });
     };
 
@@ -154,28 +229,39 @@ export default function useTrainingTrackLayer(): void {
     // it: it is the region the words allow, and the track is what is being
     // checked against it.
     if (trainingLayers.flown) {
-      drawWall(WALL_ID, flight.envelope, TRAINING_FLOWN_COLOR, 0.16);
-      // ONE PRISM PER WORD, over the sector's own outline — however many points
-      // that has (one per degree of its opening, 3 to 16). `perPositionHeight` is
-      // deliberately not used: the footprint is flat and the two heights are the
-      // wedge at the instant the word opens, so `height` / `extrudedHeight` say
-      // exactly that — an OUTER bound over the hold, since the wedge only narrows.
+      drawWall(WALL_ID, flight.envelope, flight.sentence.words, TRAINING_FLOWN_COLOR, 0.16);
+      // ONE FRUSTUM PER WORD. It is a `wall` around the closed outline rather than
+      // an extruded `polygon`, because a polygon takes ONE `extrudedHeight` and
+      // this solid does not have one: its lid slopes. The wall carries a height
+      // pair per position, which is exactly the shape, and its two radial faces
+      // ARE the trapezoids. The lid is drawn on top of it, per position.
       flight.envelope.events.forEach((box, index) => {
-        const id = `${BOX_ID}-${index}`;
-        added.push(id);
-        const corners: number[] = [];
+        const wall = trainingBoxWall(box);
+        const sides = `${BOX_ID}-${index}`;
+        added.push(sides);
+        viewer.entities.add({
+          id: sides,
+          wall: {
+            positions: Cesium.Cartesian3.fromDegreesArray(wall.positions),
+            maximumHeights: wall.maximumHeights,
+            minimumHeights: wall.minimumHeights,
+            material: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.1),
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.45),
+          },
+        });
+        const lid = `${BOX_ID}-lid-${index}`;
+        added.push(lid);
+        const top: number[] = [];
         for (let point = 0; point < box.lon.length; point += 1) {
-          corners.push(box.lon[point], box.lat[point]);
+          top.push(box.lon[point], box.lat[point], box.altHaeHiM[point]);
         }
         viewer.entities.add({
-          id,
+          id: lid,
           polygon: {
-            hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(corners)),
-            height: box.altHaeLoM,
-            extrudedHeight: box.altHaeHiM,
-            material: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.08),
-            outline: true,
-            outlineColor: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.5),
+            hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArrayHeights(top)),
+            perPositionHeight: true,
+            material: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.07),
           },
         });
       });
@@ -204,7 +290,7 @@ export default function useTrainingTrackLayer(): void {
     // in one scene is one fuzzy chain, and the comparison that answers anything
     // is between the two walls.
     if (flight.prior && trainingLayers.model) {
-      drawWall(MODEL_WALL_ID, flight.prior.envelope, TRAINING_MODEL_COLOR, 0.14);
+      drawWall(MODEL_WALL_ID, flight.prior.envelope, flight.prior.words, TRAINING_MODEL_COLOR, 0.14);
     }
 
     // The nodes go LAST, over everything: they are POINTS rather than a second

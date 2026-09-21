@@ -409,9 +409,12 @@ export default function TrainingReadbackWindow({
             const name =
               `box ${index + 1} at ${formatSeconds(box.eventS)} s, held ${formatSeconds(box.holdS)} s: ` +
               `heading ${format(box.headingLoDeg, 1)}…${format(box.headingHiDeg, 1)}°, ` +
-              `speed ${format(box.speedLoMps, 1)}…${format(box.speedHiMps, 1)} m/s, ` +
-              `${format(box.altLoM)}…${format(box.altHiM)} m — the ground it reaches is a sector ` +
-              `${format(box.holdS * box.speedHiMps)} m deep, fanning out from the aircraft`;
+              `speed ${format(box.speedLoMps, 1)}…${format(box.speedHiMps, 1)} m/s. ` +
+              `The ground it reaches is a sector ${format(box.holdS * box.speedHiMps)} m deep, fanning ` +
+              `out from the aircraft, and the height it allows TAPERS along it: ` +
+              `${format(box.altLoM[0])}…${format(box.altHiM[0])} m at the aircraft, ` +
+              `${format(box.altLoM[box.altLoM.length - 1])}…${format(box.altHiM[box.altHiM.length - 1])} m ` +
+              `at the far edge`;
             return (
               <polygon
                 key={`plan-box-${index}`}
