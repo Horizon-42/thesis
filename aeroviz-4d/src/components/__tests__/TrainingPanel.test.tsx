@@ -114,17 +114,29 @@ describe("TrainingPanel", () => {
     it("lists the flights without making the reader open anything", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
-      expect(screen.queryByText("plateau-v11")).toBeNull();
+      expect(screen.queryByText("segment-v12")).toBeNull();
     });
 
     it("shows the vocabulary the words were read under, behind the ⓘ", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText("plateau-v11")).toBeTruthy();
+      expect(screen.getByText("segment-v12")).toBeTruthy();
       // the runway classes come from the file, never from the airport's runways
       expect(screen.getByText("05L 05R 23L 23R")).toBeTruthy();
-      expect(screen.getByText(/heading 36 · altitude 11 · speed 23 · runway 4/)).toBeTruthy();
+      expect(screen.getByText(/heading 72 · vertical 6 · speed 16 · runway 4/)).toBeTruthy();
+    });
+
+    // A word is a BAND: the panel lists the vertical words with their tolerances
+    // and the speed range with its percentage, because a panel that gave only
+    // the centres would be stating half of what the vocabulary says (§5.6).
+    it("states the tolerance each word carries, not only its centre", async () => {
+      render(<TrainingPanel />);
+      expect(await screen.findByText("DAL123")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
+      expect(screen.getByText(/↑3\.0°±0\.21 · level±0\.10 · ↓1\.4°±0\.10/)).toBeTruthy();
+      expect(screen.getByText(/44…157 m\/s, ±3 %/)).toBeTruthy();
+      expect(screen.getByText(/not the joint envelope/)).toBeTruthy();
     });
 
     // The spec's sha and the runway classes' sha are separate fields: two
@@ -142,7 +154,9 @@ describe("TrainingPanel", () => {
       await waitFor(() => {
         const published = lastPublished();
         expect(published?.flight?.flightKey).toBe("DAL123_05L_a1b2c3_1699999999");
-        expect(published?.vocabulary?.readingRule).toBe("plateau-v11");
+        expect(published?.vocabulary?.readingRule).toBe("segment-v12");
+        // the views that draw the corridor need the rule it was drawn under
+        expect(published?.geometry?.bandsAreJoint).toBe(false);
       });
     });
 

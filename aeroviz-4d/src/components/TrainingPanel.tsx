@@ -28,6 +28,7 @@ import {
   fetchTrainingIndex,
   fetchTrainingSample,
   trainingIndexPath,
+  trainingWordBandLabel,
   trainingWordCounts,
   TRAINING_KINDS,
   type TrainingIndex,
@@ -157,7 +158,11 @@ export default function TrainingPanel() {
   // ── publish what the sentence bar draws ───────────────────────────────────
   useEffect(() => {
     const flight = sample?.flights.find((item) => item.flightKey === flightKey) ?? null;
-    setTrainingSelection(flight && sample ? { vocabulary: sample.vocabulary, flight } : null);
+    setTrainingSelection(
+      flight && sample
+        ? { vocabulary: sample.vocabulary, flight, geometry: sample.geometry }
+        : null,
+    );
   }, [sample, flightKey, setTrainingSelection]);
 
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
@@ -278,6 +283,25 @@ export default function TrainingPanel() {
                   <dt>Runway words</dt>
                   <dd>{sample.vocabulary.runwayIdents.join(" ")}</dd>
                 </div>
+                {/* The two kinds that carry a tolerance. A word here means "stay
+                    inside this band", so a panel that listed only the centres
+                    would be stating half of what the vocabulary says. */}
+                <div>
+                  <dt>Vertical words</dt>
+                  <dd>
+                    {sample.vocabulary.verticalModesDeg
+                      .map((_, word) => trainingWordBandLabel(sample.vocabulary, "vertical", word))
+                      .join(" · ")}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Speed words</dt>
+                  <dd>
+                    {sample.vocabulary.speedCentresMps[0]}…
+                    {sample.vocabulary.speedCentresMps[sample.vocabulary.speedCentresMps.length - 1]} m/s,
+                    {" "}±{(sample.vocabulary.speedToleranceFraction * 100).toFixed(0)} %
+                  </dd>
+                </div>
                 <div>
                   <dt>Words per kind</dt>
                   <dd>{TRAINING_KINDS.map((kind) => `${kind} ${counts[kind]}`).join(" · ")}</dd>
@@ -291,11 +315,35 @@ export default function TrainingPanel() {
                   <dd>{sample.geometry.method}, {sample.geometry.dtS} s steps</dd>
                 </div>
                 <div>
-                  <dt>Bank · height · accel</dt>
+                  <dt>Bank · angle limits · accel</dt>
                   <dd>
-                    {sample.geometry.bankDeg}° · {sample.geometry.heightGainS} s,{" "}
+                    {sample.geometry.bankDeg}° ·{" "}
                     −{sample.geometry.descentMaxDeg}°/+{sample.geometry.climbMaxDeg}° ·{" "}
                     {sample.geometry.accelMaxMps2} m/s²
+                  </dd>
+                </div>
+                {/* Where the corridor on screen comes from, and the one thing a
+                    reader would otherwise assume wrongly: the two bands are
+                    separate, not the joint envelope (V32). */}
+                <div>
+                  <dt>Bands</dt>
+                  <dd>
+                    {sample.geometry.verticalBandFrom} · {sample.geometry.speedBandFrom} ·{" "}
+                    {sample.geometry.bandsAreJoint
+                      ? "drawn jointly"
+                      : "one kind at a time, not the joint envelope"}
+                  </dd>
+                </div>
+                {/* The fan closes onto this floor, so its widest point is before
+                    the threshold rather than at it — the executor's doing, not
+                    the vocabulary's (V34). */}
+                <div>
+                  <dt>Levels at</dt>
+                  <dd>
+                    {sample.geometry.heightFloorM} m above the threshold
+                    {sample.geometry.verticalIsCommandedAngle
+                      ? "; the vertical word is the commanded angle, so nothing stops it on its own"
+                      : ""}
                   </dd>
                 </div>
                 <div>

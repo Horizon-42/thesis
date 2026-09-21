@@ -38,6 +38,7 @@ import {
   TERMINAL_WORDS,
   TRAINING_KINDS,
   TRAINING_KIND_COLUMN,
+  trainingWordBandLabel,
   trainingWordLabel,
   type TrainingAbsorbed,
   type TrainingFlight,
@@ -63,23 +64,28 @@ const MIN_PLOT_W = 320;
 /** A band is wide enough for its word only above this many pixels; below it the
  *  word stays in the band's tooltip, which every band carries. */
 const LABEL_MIN_W = 34;
+/** And wide enough for the word AND its tolerance only above this many. The
+ *  tolerance is dropped first because the centre is the part a reader cannot
+ *  reconstruct; the tooltip carries both whatever the width. */
+const BAND_LABEL_MIN_W = 64;
 /** Minimum spacing for an event number and for an axis tick label. */
 const EVENT_LABEL_GAP = 13;
 const TICK_LABEL_GAP = 32;
 
 /**
  * The three kinds whose word is a TARGET the aircraft flies towards, the way a
- * clearance is. This is not decoration: KRDU's export has straight-in arrivals
- * that enter the slice at 977 m and carry the single altitude word 0 ft for the
- * whole approach — "descend to the threshold", not "it is at zero". A bar that
- * called that row "the altitude" would read as a flat track on the ground.
+ * clearance is — and, for two of them, a target BAND rather than a value: the
+ * word says "hold this angle to within ±7 %", so the band's label carries the
+ * tolerance and the row is not read as a measurement (V24, §5.6).
  */
-const TARGET_KINDS: readonly TrainingKind[] = ["heading", "altitude", "speed"];
+const TARGET_KINDS: readonly TrainingKind[] = ["heading", "vertical", "speed"];
 
 const ROW_LABEL: Record<TrainingKind, string> = {
   heading: "Heading (°)",
-  altitude: "Altitude (ft)",
-  speed: "Speed (kt)",
+  // The angle, not a height: a word here says how steeply to fly, and the arrow
+  // in every label says which way (descent is positive in the vocabulary).
+  vertical: "Vertical (°)",
+  speed: "Speed (m/s)",
   runway: "Runway",
   duration: "Gap (s)",
   terminal: "Terminal",
@@ -206,13 +212,35 @@ export default function TrainingSentenceBar() {
   }, [flightKey]);
 
   if (!trainingSelection) return null;
-  const { flight, vocabulary } = trainingSelection;
+  const { flight, vocabulary, geometry } = trainingSelection;
   const { eventTimesS } = flight.sentence;
   const lastEventS = eventTimesS[eventTimesS.length - 1];
   const tailS = flight.durationS - lastEventS;
 
   const xFor = (seconds: number) => GUTTER + (seconds / flight.durationS) * plotW;
   const label = (kind: TrainingKind, word: number) => trainingWordLabel(vocabulary, kind, word);
+  const bandLabel = (kind: TrainingKind, word: number) =>
+    trainingWordBandLabel(vocabulary, kind, word);
+
+  /**
+   * What the speed tolerance costs, in the one unit it is legible in: when this
+   * sentence puts the aircraft over the threshold, flown at each end of every
+   * speed word's ±3 %.
+   *
+   * It is a HEADER readout rather than a bracket on the terminal row, as the
+   * design first had it: the flown sentence runs to the observed duration plus
+   * 120 s, so the window usually falls past the right-hand edge of this bar and
+   * a bracket there would be clipped away exactly when it had something to say
+   * (V39). The clock is the track's own, shared with every other time here.
+   */
+  const arrival = flight.geometric.speedBand.arrivalWindowS;
+  const arrivalReadout = arrival
+    ? `arrives ${formatSeconds(arrival[0])}–${formatSeconds(arrival[1])} s`
+    : `no arrival window: an edge ended on ${
+        flight.geometric.speedBand.low.endReason === "crossed-threshold"
+          ? flight.geometric.speedBand.high.endReason
+          : flight.geometric.speedBand.low.endReason
+      }`;
 
   const terminalWords = Array.from({ length: TERMINAL_WORDS }, (_, word) =>
     label("terminal", word),
@@ -236,6 +264,16 @@ export default function TrainingSentenceBar() {
           {flight.absorbed.length} absorbed
         </span>
         <span>{formatSeconds(flight.durationS)} s of track</span>
+        <span
+          className="training-sentence-arrival"
+          title={
+            arrival
+              ? "When the words put it over the threshold, flown at each end of every speed word's tolerance. The speed tolerance's cost is arrival TIME, so this is where it is legible."
+              : "The speed tolerance's cost is arrival time, and it cannot be read when an edge never reached the runway."
+          }
+        >
+          {arrivalReadout}
+        </span>
         <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s</span>
         {/* The window shares THIS cursor — it is the same moment of the same
             flight, so it is one number, held here and passed down. */}
@@ -336,12 +374,18 @@ export default function TrainingSentenceBar() {
               {rowBands(flight, kind).map((band, index) => {
                 const x = xFor(band.startS);
                 const width = xFor(band.endS) - x;
+                // The tooltip always carries the band; the drawn label drops it
+                // when the band is too narrow, and drops the word after that.
                 const text =
-                  band.word === null ? "no word" : label(kind, band.word);
+                  band.word === null
+                    ? "no word"
+                    : width >= BAND_LABEL_MIN_W
+                      ? bandLabel(kind, band.word)
+                      : label(kind, band.word);
                 const title =
                   band.word === null
                     ? `${formatSeconds(band.startS)}–${formatSeconds(band.endS)} s: no gap word — the sentence ends at its last event and these words are held to the threshold`
-                    : `${kind}${TARGET_KINDS.includes(kind) ? " target" : ""} ${text} (word ${band.word}), ${formatSeconds(band.startS)}–${formatSeconds(band.endS)} s`;
+                    : `${kind}${TARGET_KINDS.includes(kind) ? " target" : ""} ${bandLabel(kind, band.word)} (word ${band.word}), ${formatSeconds(band.startS)}–${formatSeconds(band.endS)} s`;
                 return (
                   <g
                     key={`${kind}-${index}`}
@@ -502,6 +546,7 @@ export default function TrainingSentenceBar() {
         <TrainingReadbackWindow
           flight={flight}
           vocabulary={vocabulary}
+          geometry={geometry}
           cursorS={cursorS}
           onCursorChange={setCursorS}
           onClose={() => setReadbackOpen(false)}

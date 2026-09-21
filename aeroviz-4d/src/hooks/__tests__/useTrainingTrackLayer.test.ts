@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { trainingTrackPositions } from "../useTrainingTrackLayer";
+import { trainingBandWall, trainingTrackPositions } from "../useTrainingTrackLayer";
 import { parseTrainingSample } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 
@@ -39,6 +39,36 @@ describe("trainingTrackPositions", () => {
     // and the two tracks share a first point, as the words' rules require
     const { flown } = trainingTrackPositions(item);
     expect(flown[2]).toBeCloseTo(observed[2], 6);
+  });
+
+  // The wall is the vertical tolerance made visible in space. Its two heights
+  // are HAE like everything else here, and `lo` — the SHALLOWER descent — is the
+  // MAXIMUM, because losing less height means staying higher. Reading the names
+  // as heights would turn the wall inside out and leave it exactly as thick.
+  it("walls the corridor between the two heights the word allows", () => {
+    const item = flight();
+    const wall = trainingBandWall(item);
+    expect(wall.positions).toHaveLength(item.geometric.tS.length * 2);
+    expect(wall.maximumHeights).toEqual(item.geometric.verticalBand.altHaeLoM);
+    expect(wall.minimumHeights).toEqual(item.geometric.verticalBand.altHaeHiM);
+    wall.maximumHeights.forEach((top, row) => {
+      expect(top).toBeGreaterThanOrEqual(wall.minimumHeights[row]);
+    });
+    // and it opens with distance: the far end is wider than the near one
+    const last = wall.maximumHeights.length - 1;
+    expect(wall.maximumHeights[last] - wall.minimumHeights[last]).toBeGreaterThan(
+      wall.maximumHeights[1] - wall.minimumHeights[1],
+    );
+  });
+
+  // The wall rides the FLOWN track's own ground positions — the commanded angle
+  // never moves the horizontal step, which is what makes two height columns a
+  // legal stand-in for two tracks.
+  it("puts the wall on the flown track's own ground positions", () => {
+    const item = flight();
+    const wall = trainingBandWall(item);
+    expect(wall.positions.slice(0, 2)).toEqual([item.geometric.lon[0], item.geometric.lat[0]]);
+    expect(wall.positions).not.toContain(item.observed.lon[5]);
   });
 
   it("draws both tracks whole — the flown one is not cut to the observation", () => {

@@ -184,3 +184,35 @@ that divergence is a known open item (see the README's "Future Improvements").
   `selectComparisonGroups` derives the file list from those (`[...new Set(groups.map(g =>
   g.czml))]`). `prune_unreferenced_outputs` keeps files by the same set, so chunking needs no
   change on either side.
+
+### AV19
+
+**一句话画出来的是一条走廊，不是一条线**，而且**被取代的 Training 产物会被当场拒掉**
+（2026-09-21，词表 `plateau-v11` → `segment-v12`）。
+
+两件事，都会让人以为界面坏了：
+
+**一、Training 页空着，多半是产物被拒了，不是读者坏了。** 新词表的第二类词从「高度」换成
+「垂直」（航迹倾角），六列的列序没变、每一行的词都还在量程里，所以旧产物**每一行都解析得过**，
+只有 `sample.json` 顶层那行 `kinds` 看得出第二列换了意思。读者按 `kinds` 逐字比对，对不上整份
+文件拒绝，界面落到设计 §4.5 的 ③。`npm run check-publication` 的报错里带上清单写的读法
+（`sample.json (read under plateau-v11): kinds is [heading,altitude,…]`），因为光报字段名会让人
+以为是读者的问题。**不要为此加兼容分支**（仓库规矩：兼容是禁用词）。
+
+**二、垂直和速度两类词各带一个冗余，界面画的是这一族航迹的边界。** 词不是点目标，是一条带子
+（平飞 ±0.1°、其余下降档 ±7 %、速度 ±3 %）。画法的规矩是**冗余画在它累积到的那根轴上**：
+
+- **垂直的冗余积到高度**（δ × 飞行距离）⇒ 时间图上是随距离张开的**扇形**，三维里是一面
+  **Cesium wall**（`altHaeLoM` / `altHaeHiM`，**HAE**；`lo` 是**上界**——浅的那条降得少所以更高，
+  把名字当高度读会把墙里外翻过来而厚度不变）。
+- **速度的冗余积到到达时间**（≈ D·δ/v²）⇒ 平面图上两条低饱和的角点线 + 句子条标题行的
+  **到达时间窗**。速度在平面里只差转弯半径 6 %（70 m/s、20° 坡度上 82 m），**只看那两条线会得出
+  「速度的松量无害」这个错结论**。
+- **航向、跑道、时长、终止没有冗余，就不画带子** —— 画了等于凭空发明一个容差。读词用的平台容差
+  （`course_tolerance_deg` = 2.0°、`speed_tolerance_mps` = 2.5）是另一个数、另一个用途，只进悬停文字。
+
+两条实现上的便宜事实：**γ 只进高度那一步**，所以垂直的上下界与标称航迹逐位对齐、产物里只多两路
+高度而不是两条航迹；**速度改水平位移、转弯半径和穿越时刻**，所以它必须真的重飞两遍。扇形在
+`geometry.heightFloorM` 处收口，那是执行器「到入口就改平」的地板，不是词表的冗余变小了。
+
+设计与决定表：`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §5.6、V29–V39。

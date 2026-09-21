@@ -11,26 +11,33 @@ import TrainingReadbackWindow, {
   chartLevels,
   flownTrace,
   gapAtS,
+  insideBandFraction,
   rowAt,
+  runsOf,
+  verticalRamps,
 } from "../TrainingReadbackWindow";
-import { parseTrainingSample } from "../../data/trainingSample";
-import { mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { FEET_TO_METERS, metresPerSecondToKnots } from "../../utils/procedureGeoMath";
+import { parseTrainingSample, speedCentreMps } from "../../data/trainingSample";
+import { DESCEND_24, mockSample } from "../../data/__tests__/trainingSample.fixture";
 
 function selection() {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
-  return { vocabulary: parsed.value.vocabulary, flight: parsed.value.flights[0] };
+  return {
+    vocabulary: parsed.value.vocabulary,
+    flight: parsed.value.flights[0],
+    geometry: parsed.value.geometry,
+  };
 }
 
 function renderWindow(overrides: Partial<React.ComponentProps<typeof TrainingReadbackWindow>> = {}) {
-  const { vocabulary, flight } = selection();
+  const { vocabulary, flight, geometry } = selection();
   const onCursorChange = vi.fn();
   const onClose = vi.fn();
   render(
     <TrainingReadbackWindow
       flight={flight}
       vocabulary={vocabulary}
+      geometry={geometry}
       cursorS={0}
       onCursorChange={onCursorChange}
       onClose={onClose}
@@ -69,16 +76,20 @@ describe("chartLevels", () => {
     ]);
   });
 
-  it("puts altitude in feet and speed in knots, off the bin centres", () => {
+  it("draws the speed step at the word's own centre, in m/s", () => {
     const { vocabulary, flight } = selection();
-    expect(chartLevels(flight, vocabulary, "altitude")[0].level).toBeCloseTo(
-      (10 * vocabulary.altitudeBinM) / FEET_TO_METERS,
-      6,
-    );
     expect(chartLevels(flight, vocabulary, "speed")[0].level).toBeCloseTo(
-      metresPerSecondToKnots(vocabulary.speedMinMps + 21 * vocabulary.speedBinMps),
+      speedCentreMps(vocabulary, 11),
       6,
     );
+  });
+
+  // The vertical word is a SLOPE. A caller that asked for levels would get a
+  // list of horizontal lines at heights the word never names, and the chart
+  // would look entirely plausible — so it throws instead.
+  it("refuses to give the vertical word a level at all", () => {
+    const { vocabulary, flight } = selection();
+    expect(() => chartLevels(flight, vocabulary, "vertical")).toThrow(/angle, not a level/);
   });
 
   // THE test: the fixture's trace runs +90 → 0, so the levels sit where the word
@@ -103,8 +114,8 @@ describe("chartLevels", () => {
 
   // A word whose manoeuvre never settled is judged at the END of the track — the
   // same fallback the figure uses. It has to be pinned on a HEADING instruction:
-  // the altitude and speed branches return before `settledS` is read at all, so a
-  // fallback of 0 would pass unnoticed there.
+  // the speed branch returns before `settledS` is read at all, so a fallback of
+  // 0 would pass unnoticed there.
   it("judges a never-settled turn at the end of the track, not at its start", () => {
     const { vocabulary, flight } = selection();
     const turned = {
@@ -127,11 +138,103 @@ describe("chartLevels", () => {
     expect(last?.level).toBe(360);
   });
 
-  it("still judges a never-settled descent by its word alone", () => {
+  it("still judges a never-settled deceleration by its word alone", () => {
     const { vocabulary, flight } = selection();
     const last = flight.instructions[flight.instructions.length - 1];
     expect(last.settledS).toBeNull();
-    expect(chartLevels(flight, vocabulary, "altitude").pop()?.level).toBe(0);
+    expect(chartLevels(flight, vocabulary, "speed").pop()?.level).toBe(
+      speedCentreMps(vocabulary, 5),
+    );
+  });
+});
+
+describe("verticalRamps", () => {
+  // The word is the slope of height against GROUND COVERED, so the ramp has to
+  // fall by tan(angle) × distance — not by anything per second. At these speeds
+  // the two differ by tens of metres over a segment.
+  it("draws the height the word implies, over the ground the aircraft covered", () => {
+    const { vocabulary, flight } = selection();
+    const ramp = verticalRamps(flight, vocabulary)[1];
+    expect(ramp.instruction.word).toBe(DESCEND_24);
+    const { tS, heightM, pathM } = flight.observed;
+    const first = rowAt(tS, ramp.instruction.issuedS);
+    const last = ramp.tS.length - 1;
+    const run = pathM[rowAt(tS, ramp.tS[last])] - pathM[first];
+    expect(ramp.centre[0]).toBeCloseTo(heightM[first], 6);
+    expect(ramp.centre[last]).toBeCloseTo(
+      heightM[first] - Math.tan((2.4 * Math.PI) / 180) * run,
+      6,
+    );
+  });
+
+  // Every segment starts again from the OBSERVED height, the way the labeller's
+  // piecewise fit does. Chaining them instead would carry one segment's error
+  // into the next and make a late word look misread because an early one was.
+  it("re-anchors each segment on the observed height", () => {
+    const { vocabulary, flight } = selection();
+    const { tS, heightM } = flight.observed;
+    for (const ramp of verticalRamps(flight, vocabulary)) {
+      expect(ramp.centre[0]).toBeCloseTo(heightM[rowAt(tS, ramp.tS[0])], 6);
+    }
+  });
+
+  // The shallower edge loses less height, so it stays ABOVE — for the climb mode
+  // too, where "shallower" means a steeper climb. Swapping them keeps the fan
+  // exactly as wide and draws it inside out.
+  it("opens the fan with distance, shallow edge above", () => {
+    const { vocabulary, flight } = selection();
+    const ramp = verticalRamps(flight, vocabulary)[2];
+    const last = ramp.tS.length - 1;
+    expect(ramp.lo[0]).toBeCloseTo(ramp.hi[0], 6);
+    expect(ramp.lo[last]).toBeGreaterThan(ramp.centre[last]);
+    expect(ramp.hi[last]).toBeLessThan(ramp.centre[last]);
+    expect(ramp.lo[last] - ramp.hi[last]).toBeGreaterThan(ramp.lo[1] - ramp.hi[1]);
+  });
+
+  // The two errors the chart is there to separate: the fitted angle's line is
+  // NOT the word's line, and the distance between them is what binning cost.
+  it("draws the fitted angle apart from the word it was rounded to", () => {
+    const { vocabulary, flight } = selection();
+    const ramp = verticalRamps(flight, vocabulary)[1];
+    const last = ramp.tS.length - 1;
+    expect(ramp.instruction.target).not.toBe(2.4);
+    expect(ramp.fitted[last]).not.toBeCloseTo(ramp.centre[last], 3);
+  });
+});
+
+describe("insideBandFraction", () => {
+  // The fixture's profile is built FROM the words, so the aircraft sits inside
+  // the vertical band nearly all the time; what is pinned is that the number is
+  // a fraction of the rows, not that it is 1.
+  it("reports the share of rows inside the band of the word in force", () => {
+    const { vocabulary, flight } = selection();
+    const vertical = insideBandFraction(flight, vocabulary, "vertical");
+    expect(vertical).not.toBeNull();
+    expect(vertical as number).toBeGreaterThan(0.5);
+    expect(vertical as number).toBeLessThanOrEqual(1);
+  });
+
+  it("falls when the aircraft leaves the band, and is null where there is none", () => {
+    const { vocabulary, flight } = selection();
+    const before = insideBandFraction(flight, vocabulary, "speed") as number;
+    const drifted = {
+      ...flight,
+      observed: {
+        ...flight.observed,
+        groundSpeedMps: flight.observed.groundSpeedMps.map((mps) => mps + 12),
+      },
+    };
+    expect(insideBandFraction(drifted, vocabulary, "speed") as number).toBeLessThan(before);
+    // The heading word carries no tolerance, so there is no band to be inside.
+    expect(insideBandFraction(flight, vocabulary, "heading")).toBeNull();
+  });
+});
+
+describe("runsOf", () => {
+  it("returns every contiguous run, single rows included", () => {
+    expect(runsOf([false, true, true, false, true, false])).toEqual([[1, 2], [4, 4]]);
+    expect(runsOf([true, true])).toEqual([[0, 1]]);
+    expect(runsOf([false, false])).toEqual([]);
   });
 });
 
@@ -154,7 +257,7 @@ describe("TrainingReadbackWindow", () => {
   it("has a chart for each signal the words are read from, and none for the rest", () => {
     renderWindow();
     expect(screen.getByText(/^heading —/)).toBeTruthy();
-    expect(screen.getByText(/^altitude —/)).toBeTruthy();
+    expect(screen.getByText(/^vertical —/)).toBeTruthy();
     expect(screen.getByText(/^speed —/)).toBeTruthy();
     expect(screen.queryByText(/^runway —/)).toBeNull();
     expect(screen.queryByText(/^duration —/)).toBeNull();
@@ -164,15 +267,27 @@ describe("TrainingReadbackWindow", () => {
   // The readout is taken from the arrays at the cursor, never from a pixel.
   it("reads out the word in force and the measured value at the cursor", () => {
     renderWindow({ cursorS: 140 });
-    // at 140 s the third speed instruction (issued 108 s) is in force
-    expect(screen.getByText(/speed —.*in force: 230 kt \(issued 108 s, settled 126 s\)/)).toBeTruthy();
-    // and the altitude word issued at 130 s, whose manoeuvre settled at 162 s
-    expect(screen.getByText(/altitude —.*in force: 4000 ft \(issued 130 s, settled 162 s\)/)).toBeTruthy();
+    // at 140 s the third speed instruction (issued 108 s) is in force, and the
+    // readout gives the BAND, because that is what the word says
+    expect(screen.getByText(/speed —.*in force: 93 m\/s±2\.8 \(issued 108 s, settled 126 s\)/)).toBeTruthy();
+    // and the vertical segment issued at 130 s, which runs to the end of the track
+    expect(screen.getByText(/vertical —.*in force: ↓3\.1°±0\.22 \(issued 130 s, settled 262 s\)/)).toBeTruthy();
   });
 
   it("says when an instruction never settled inside the track", () => {
     renderWindow({ cursorS: 240 });
-    expect(screen.getByText(/altitude —.*in force: 0 ft \(issued 222 s, never settled\)/)).toBeTruthy();
+    expect(screen.getByText(/speed —.*in force: 79 m\/s±2\.4 \(issued 188 s, never settled\)/)).toBeTruthy();
+  });
+
+  // The tolerance is the rule for "did it obey", so it gives a readout nothing
+  // else could: how much of the flight sat inside the band it was told to hold.
+  // The heading word has no tolerance, and the chart says so rather than
+  // printing a number it would have had to invent.
+  it("gives the share of time inside the band, and none where there is no band", () => {
+    renderWindow();
+    expect(screen.getByText(/vertical —.*inside the band \d+ % of the time/)).toBeTruthy();
+    expect(screen.getByText(/speed —.*inside the band \d+ % of the time/)).toBeTruthy();
+    expect(screen.getByText(/heading —.*no tolerance on this word/)).toBeTruthy();
   });
 
   // The runway word names the frame the others are measured in; it is not a
@@ -183,17 +298,18 @@ describe("TrainingReadbackWindow", () => {
     const issued = flight.instructions.filter((item) => item.kind !== "runway").length;
     expect(marks.length).toBe(issued + 1); // + the cursor's dot
     expect(screen.getByLabelText(/heading \+50° issued at 70 s/)).toBeTruthy();
+    // the speed band's two edges are polylines in the plan view, not marks
     expect(vocabulary.runwayIdents).toContain(flight.runway);
     expect(document.body.textContent).not.toContain("runway 05L issued");
   });
 
-  // The target is stored in SI and the charts are in feet and knots, so a raw
-  // target read "190 kt … target 98.7" in the one tooltip a person judges by.
-  it("reads a target in the unit of the chart it sits on", () => {
+  // The tooltip a person judges a word by: the word WITH its band, and the
+  // unbinned value it was read from, in that chart's own unit.
+  it("reads a word and the value it was read from, in the unit of its chart", () => {
     renderWindow();
-    expect(screen.getByLabelText(/speed 310 kt \(word 21\), issued 0 s, target 309 kt/)).toBeTruthy();
-    expect(screen.getByLabelText(/altitude 10000 ft \(word 10\), issued 0 s, target 9912 ft/)).toBeTruthy();
-    expect(screen.getByLabelText(/heading \+90° \(word 9\), issued 0 s, target 88\.4°/)).toBeTruthy();
+    expect(screen.getByLabelText(/speed 121 m\/s±3\.6 \(word 11\), issued 0 s, read 120\.4 m\/s/)).toBeTruthy();
+    expect(screen.getByLabelText(/vertical ↓2\.4°±0\.17 \(word 3\), issued 70 s, read 2\.31°/)).toBeTruthy();
+    expect(screen.getByLabelText(/heading \+90° \(word 18\), issued 0 s, read 88\.40°/)).toBeTruthy();
   });
 
   it("explains an absorbed span rather than only shading it", () => {
@@ -217,18 +333,13 @@ describe("TrainingReadbackWindow", () => {
 describe("the flown sentence on the charts", () => {
   // Every row, not just the first: an implementation that repeated element 0
   // would have passed the version of this test that only looked at [0].
-  it("converts every row of the flown track into each chart's own unit", () => {
+  it("plots every row of the flown track on each chart's own axis", () => {
     const { flight } = selection();
-    const feet = flownTrace(flight, "altitude");
-    const knots = flownTrace(flight, "speed");
-    expect(feet).toHaveLength(flight.geometric.heightM.length);
-    flight.geometric.heightM.forEach((metres, row) => {
-      expect(feet[row]).toBeCloseTo(metres / FEET_TO_METERS, 6);
-    });
-    flight.geometric.groundSpeedMps.forEach((mps, row) => {
-      expect(knots[row]).toBeCloseTo(metresPerSecondToKnots(mps), 6);
-    });
-    expect(new Set(feet).size).toBeGreaterThan(1);
+    const height = flownTrace(flight, "vertical");
+    const speed = flownTrace(flight, "speed");
+    expect(height).toEqual(flight.geometric.heightM);
+    expect(speed).toEqual(flight.geometric.groundSpeedMps);
+    expect(new Set(height).size).toBeGreaterThan(1);
   });
 
   // The observed heading chart plots the UNWRAPPED course and the flown track
@@ -241,7 +352,7 @@ describe("the flown sentence on the charts", () => {
       geometric: { ...flight.geometric, relCourseDeg: [170, 175, -179, -174, -170] },
     };
     expect(flownTrace(wrapping, "heading")).toEqual([170, 175, 181, 186, 190]);
-    expect(vocabulary.readingRule).toBe("plateau-v11");
+    expect(vocabulary.readingRule).toBe("segment-v12");
   });
 
   // The two tracks are on DIFFERENT clocks — 2 s rows against 1 s steps — so this

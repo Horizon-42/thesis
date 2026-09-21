@@ -237,11 +237,25 @@ export function checkTrainingIndex(manifest: unknown): PublicationFinding[] {
   }));
 }
 
-/** One set's sample file, through the panel's own reader. */
-export function checkTrainingSample(setId: string, sample: unknown): PublicationFinding[] {
+/**
+ * One set's sample file, through the panel's own reader.
+ *
+ * `readUnder` is the reading rule the MANIFEST claims for this set, and it is
+ * printed with the failure because the commonest failure now is a superseded
+ * export: the vocabulary's second word kind changed from a height to an angle on
+ * 2026-09-21, so every sentence in an older file still parses as six columns and
+ * the reader refuses it on `kinds` alone. "kinds is [heading,altitude,…]" says
+ * what is wrong; the rule that produced it says WHY, and which command to rerun.
+ */
+export function checkTrainingSample(
+  setId: string,
+  sample: unknown,
+  readUnder?: string,
+): PublicationFinding[] {
   const parsed = parseTrainingSample(sample);
   if (!parsed.ok) {
-    return [{ level: "error", category: setId, message: `sample.json: ${parsed.problem}` }];
+    const under = readUnder ? ` (read under ${readUnder})` : "";
+    return [{ level: "error", category: setId, message: `sample.json${under}: ${parsed.problem}` }];
   }
   return [];
 }

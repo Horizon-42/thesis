@@ -193,6 +193,19 @@ describe("the Training export's checks", () => {
     expect(findings[0].message).toContain("7 columns, expected 6");
   });
 
+  // The commonest failure now: an export read under the retired rule. Its rows
+  // all still parse — six columns, every word in range — and only `kinds` says
+  // the second column changed meaning, so the message has to carry the rule that
+  // produced the file or the reader looks broken rather than the file stale.
+  it("names the reading rule a refused sample was written under", () => {
+    const stale = mockSample() as any;
+    stale.kinds = ["heading", "altitude", "speed", "runway", "duration", "terminal"];
+    const findings = checkTrainingSample("vocabulary_tau10", stale, "plateau-v11");
+    expect(findings[0].message).toContain("read under plateau-v11");
+    expect(findings[0].message).toContain("altitude");
+    expect(findings[0].message).toContain("vertical");
+  });
+
   // The two files come out of ONE run of the exporter. A disagreement means they did not,
   // and averaging over it would show a sample from a vocabulary nobody asked about.
   it("catches a manifest and a sample from different exports", () => {

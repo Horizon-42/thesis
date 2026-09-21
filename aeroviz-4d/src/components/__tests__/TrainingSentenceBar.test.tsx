@@ -24,7 +24,11 @@ import { MOCK_EVENT_TIMES_S, MOCK_FLIGHT, mockSample } from "../../data/__tests_
 function selection() {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
-  return { vocabulary: parsed.value.vocabulary, flight: parsed.value.flights[0] };
+  return {
+    vocabulary: parsed.value.vocabulary,
+    flight: parsed.value.flights[0],
+    geometry: parsed.value.geometry,
+  };
 }
 
 const TRACK_S = MOCK_FLIGHT.durationS;
@@ -49,7 +53,7 @@ describe("TrainingSentenceBar", () => {
 
   it("has one row per word kind, labelled", () => {
     render(<TrainingSentenceBar />);
-    for (const label of ["Heading (°)", "Altitude (ft)", "Speed (kt)", "Runway", "Gap (s)", "Terminal"]) {
+    for (const label of ["Heading (°)", "Vertical (°)", "Speed (m/s)", "Runway", "Gap (s)", "Terminal"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
     expect(TRAINING_KINDS).toHaveLength(6);
@@ -60,9 +64,9 @@ describe("TrainingSentenceBar", () => {
   it("merges a word held across several events into one band", () => {
     const { flight } = selection();
     expect(rowBands(flight, "heading")).toEqual([
-      { startS: 0, endS: 70, word: 9 },
-      { startS: 70, endS: 130, word: 5 },
-      { startS: 130, endS: 188, word: 2 },
+      { startS: 0, endS: 70, word: 18 },
+      { startS: 70, endS: 130, word: 10 },
+      { startS: 130, endS: 188, word: 4 },
       { startS: 188, endS: TRACK_S, word: 0 },
     ]);
   });
@@ -120,7 +124,10 @@ describe("TrainingSentenceBar", () => {
     // are compared rather than their widths, so the assertion is about the time
     // axis and not about the band inset.
     const xOf = (name: RegExp) => Number(bandRect(name).getAttribute("x"));
-    const starts = [/speed target 310 kt/, /speed target 270 kt/, /speed target 230 kt/, /speed target 190 kt/].map(xOf);
+    const starts = [
+      /speed target 121 m\/s/, /speed target 107 m\/s/,
+      /speed target 93 m\/s/, /speed target 79 m\/s/,
+    ].map(xOf);
     expect(starts[1] - starts[0]).toBeGreaterThan(0);
     expect((starts[2] - starts[1]) / (starts[1] - starts[0])).toBeCloseTo(82 / 26, 6);
     expect((starts[3] - starts[2]) / (starts[1] - starts[0])).toBeCloseTo(80 / 26, 6);
@@ -166,6 +173,7 @@ describe("TrainingSentenceBar", () => {
     const { vocabulary, flight } = selection();
     appState.trainingSelection = {
       vocabulary,
+      geometry: selection().geometry,
       flight: {
         ...flight,
         sentence: {
@@ -228,13 +236,48 @@ describe("TrainingSentenceBar", () => {
 
   // V16 / design §4.4-3: the class exists and is never observed here. Saying
   // only "never used" would read as the model declining to use it.
-  // The word is a clearance, not a measurement: KRDU has arrivals that enter at
-  // 977 m carrying the single altitude word "0 ft" for the whole approach.
+  // The word is a clearance, not a measurement — and for the two kinds that
+  // carry one, the tolerance is half of what it says, so the label carries it.
   it("says a band is the target in force, not the measured state", () => {
     render(<TrainingSentenceBar />);
     fireEvent.click(screen.getByRole("button", { name: "More notes" }));
     expect(screen.getByText(/TARGET in force/)).toBeTruthy();
-    expect(screen.getByLabelText(/altitude target 10000 ft/)).toBeTruthy();
+    expect(screen.getByLabelText(/vertical target ↓2\.4°±0\.17 \(word 3\)/)).toBeTruthy();
+    expect(screen.getByLabelText(/speed target 121 m\/s±3\.6 \(word 11\)/)).toBeTruthy();
+    // and the heading word, which has no tolerance, carries no band
+    expect(screen.getByLabelText(/heading target \+90° \(word 18\)/)).toBeTruthy();
+  });
+
+  // The speed tolerance's cost is arrival TIME, and the flown sentence usually
+  // runs past the right-hand edge of this bar, so the window is a header readout
+  // rather than a bracket that would be clipped exactly when it had something to
+  // say (V39).
+  it("reads out the arrival window the speed tolerance opens", () => {
+    render(<TrainingSentenceBar />);
+    const { flight } = selection();
+    const [fast, slow] = flight.geometric.speedBand.arrivalWindowS as [number, number];
+    expect(screen.getByText(`arrives ${fast}–${slow} s`)).toBeTruthy();
+  });
+
+  it("says why there is no window when an edge never reached the runway", () => {
+    const { vocabulary, flight, geometry } = selection();
+    appState.trainingSelection = {
+      vocabulary,
+      geometry,
+      flight: {
+        ...flight,
+        geometric: {
+          ...flight.geometric,
+          speedBand: {
+            ...flight.geometric.speedBand,
+            low: { ...flight.geometric.speedBand.low, endReason: "time-cap" as const },
+            arrivalWindowS: null,
+          },
+        },
+      },
+    };
+    render(<TrainingSentenceBar />);
+    expect(screen.getByText(/no arrival window: an edge ended on time-cap/)).toBeTruthy();
   });
 
   it("lists go-around and says it is never observed in this data", () => {
@@ -249,6 +292,7 @@ describe("TrainingSentenceBar", () => {
     const { vocabulary, flight } = selection();
     appState.trainingSelection = {
       vocabulary,
+      geometry: selection().geometry,
       flight: { ...flight, sentence: { ...flight.sentence, durationClamped: 1 } },
     };
     render(<TrainingSentenceBar />);

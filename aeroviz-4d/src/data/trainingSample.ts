@@ -5,8 +5,15 @@
  * set's flights (track + sentence + instructions, and later the geometric track).
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.
  *
- * THE SENTENCE IS AN EVENT SEQUENCE, NOT AN EVEN GRID (reading rule `plateau-v11`,
- * 2026-09-20). One row per moment something changed; the gaps between rows are
+ * A WORD IS A BAND, NOT A POINT (reading rule `segment-v12`, 2026-09-21). The
+ * vertical and speed words each carry a tolerance: an executor that stays inside
+ * it has obeyed the word. So a sentence does not name one track, it names a
+ * family, and this module exposes the tolerances (`verticalToleranceDeg`,
+ * `speedToleranceMps`) beside the centres. The kinds that have no tolerance
+ * return `null` from `trainingWordTolerance` — a band drawn on them would be an
+ * invented number (design §5.6, V36).
+ *
+ * THE SENTENCE IS AN EVENT SEQUENCE, NOT AN EVEN GRID (2026-09-20). One row per moment something changed; the gaps between rows are
  * irregular. The even 10 s grid it replaced snapped every instruction forward by
  * 0–8 s, mean 4 s, always late. Two invariants follow and are checked here:
  * `eventTimesS` and `words` have the same length, and `eventTimesS` strictly
@@ -22,10 +29,10 @@
  */
 
 import { fetchJson } from "../utils/fetchJson";
-// The unit constants are the GENERATED mirror of geokit (the one exception the
-// repo allows the frontend). A feet or knots factor typed here would be a second
-// definition of a geodetic constant.
-import { FEET_TO_METERS, metresPerSecondToKnots } from "../utils/procedureGeoMath";
+// No unit conversion is imported here any more: this vocabulary is DEFINED in
+// SI (metres, m/s, degrees), so the labels print the stored numbers. The feet
+// and knots the retired bins were defined in were the reason for the conversion,
+// and they went with them (V30).
 
 /** MIRROR of the exporter's schema strings. A file that does not carry these is
  *  refused by name rather than read leniently. */
@@ -37,11 +44,13 @@ export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v1";
  * word kinds IN ORDER. The columns of `words` are positional, so this order is
  * load-bearing: reorder it and every word is read as another kind's.
  * (The intercept word was deleted on 2026-09-20, D73: it was the heading word's
- * shadow — all 4,897 were issued at the same instant as a heading word.)
+ * shadow — all 4,897 were issued at the same instant as a heading word. The
+ * altitude word became the VERTICAL word on 2026-09-21: a flight path angle
+ * instead of a height, read off a piecewise fit of the profile.)
  */
 export const TRAINING_KINDS = [
   "heading",
-  "altitude",
+  "vertical",
   "speed",
   "runway",
   "duration",
@@ -56,12 +65,23 @@ export const TRAINING_WORD_COLUMNS = TRAINING_KINDS.length;
 /** Column index per kind, so callers never count positions by hand. */
 export const TRAINING_KIND_COLUMN: Record<TrainingKind, number> = {
   heading: 0,
-  altitude: 1,
+  vertical: 1,
   speed: 2,
   runway: 3,
   duration: 4,
   terminal: 5,
 };
+
+/**
+ * MIRROR of `instructions.LEVEL_MODE_DEG`: the vertical mode that means level
+ * flight. It is named rather than spotted, because it is the one mode whose
+ * tolerance is absolute — a percentage of zero is no tolerance at all.
+ *
+ * DESCENT IS POSITIVE in this vocabulary, so the go-around mode is the NEGATIVE
+ * one. Nothing may print a bare signed angle: a reader seeing "-3.0°" reads a
+ * descent, which is exactly backwards (V37).
+ */
+export const TRAINING_LEVEL_MODE_DEG = 0;
 
 /** MIRROR of `instructions.TERMINAL_CONTINUE / _LANDED / _GO_AROUND`. */
 export const TERMINAL_CONTINUE = 0;
@@ -125,11 +145,26 @@ export interface TrainingVocabulary {
   runwaySha256: string;
   readingRule: string;
   headingBinDeg: number;
-  altitudeBinM: number;
-  altitudeMaxM: number;
-  speedBinMps: number;
-  speedMinMps: number;
-  speedMaxMps: number;
+  /**
+   * The flight path angles the vertical word can name, DESCENT POSITIVE — a
+   * TABLE, not a bin width. The descent modes were fitted to the data and
+   * rounded to one decimal, so there is no formula to derive them from, and the
+   * class count is the table's length.
+   */
+  verticalModesDeg: number[];
+  /** How many straight segments one approach's profile is cut into. Not a word
+   *  count; it is how the labeller read them, and the view states it. */
+  verticalSegments: number;
+  /** Ground speed centres in m/s — again a fitted TABLE, not min + k × step.
+   *  Control assigns indicated airspeed and the wind is inside this number, so
+   *  ground speed carries no whole-knot structure to align to. */
+  speedCentresMps: number[];
+  /** The level mode's tolerance, in degrees and ABSOLUTE. */
+  verticalLevelToleranceDeg: number;
+  /** Every other vertical mode's tolerance, as a fraction of its own angle. */
+  verticalToleranceFraction: number;
+  /** The speed word's tolerance, as a fraction of its own centre. */
+  speedToleranceFraction: number;
   durationBinS: number;
   durationMaxS: number;
   /** The class count the ARTEFACT states per kind (`word_counts` on the Python
@@ -202,6 +237,12 @@ export const TRAINING_OBSERVED_COLUMNS = [
   "toGoM",              // along the course, positive BEFORE the threshold
   "crossM",             // right of the course, positive
   "heightM",            // above the threshold
+  // Cumulative HORIZONTAL distance from the first row — the axis the vertical
+  // word was read on (`instructions._profile`: the profile is fitted as height
+  // against this, so the word IS this curve's slope). It is exported rather
+  // than integrated here so the frontend does not need a second copy of
+  // `MINIMUM_GROUND_SPEED_MPS`.
+  "pathM",
   "relCourseDeg",       // ground track against the course, wrapped
   "courseUnwrappedDeg", // the same, unwrapped along the rows
   "groundSpeedMps",
@@ -230,6 +271,52 @@ export type TrainingGeometricColumn = (typeof TRAINING_GEOMETRIC_COLUMNS)[number
 export const TRAINING_END_REASONS = ["crossed-threshold", "time-cap"] as const;
 export type TrainingEndReason = (typeof TRAINING_END_REASONS)[number];
 
+/**
+ * The vertical word's tolerance, flown (design §5.6). It is TWO HEIGHT COLUMNS,
+ * not two tracks, and that is a property of the kinematics rather than a saving:
+ * the commanded angle enters only the height step, so the horizontal columns and
+ * the stopping time of the edges are identical to the nominal track's, row for
+ * row. `altHaeLoM` / `altHaeHiM` are the same two heights as HAE, for the wall
+ * the 3D layer draws between them.
+ */
+export const TRAINING_VERTICAL_BAND_COLUMNS = [
+  "heightLoM", "heightHiM", "altHaeLoM", "altHaeHiM",
+] as const;
+export type TrainingVerticalBandColumn = (typeof TRAINING_VERTICAL_BAND_COLUMNS)[number];
+export type TrainingVerticalBand = Record<TrainingVerticalBandColumn, number[]>;
+
+/**
+ * The speed word's tolerance, flown. This one IS two tracks: a speed change
+ * moves the horizontal step, the turn radius and the moment of crossing. They
+ * carry no geodetic columns — they run within ~100 m of the nominal line, so the
+ * 3D layer does not draw them (design §5.6).
+ */
+export const TRAINING_SPEED_EDGE_COLUMNS = ["toGoM", "crossM", "heightM"] as const;
+export type TrainingSpeedEdgeColumn = (typeof TRAINING_SPEED_EDGE_COLUMNS)[number];
+
+export type TrainingSpeedEdge = { tS: number[] }
+  & Record<TrainingSpeedEdgeColumn, number[]> & {
+  endReason: TrainingEndReason;
+  finalGapM: number;
+  /** When this edge stopped, on the track's own clock. */
+  endS: number;
+};
+
+export interface TrainingSpeedBand {
+  /** Every speed word at the BOTTOM of its band, and at the top. Only the target
+   *  moves: the start speed is the observation's first row for all three runs,
+   *  so they share a first point by construction (design §5.4-1). */
+  low: TrainingSpeedEdge;
+  high: TrainingSpeedEdge;
+  /**
+   * `[the fast edge's crossing, the slow edge's crossing]` — the window the
+   * speed tolerance alone opens on the arrival time, which is the one place that
+   * tolerance is legible. `null` when either edge never reached the runway; then
+   * the edge's own `endReason` says why, and nothing may print a window.
+   */
+  arrivalWindowS: [number, number] | null;
+}
+
 export type TrainingGeometric = { tS: number[] }
   & Record<TrainingGeometricColumn, number[]>
   & Record<TrainingGeodeticColumn, number[]> & {
@@ -245,6 +332,10 @@ export type TrainingGeometric = { tS: number[] }
    *  it is a mean over an unstated window. */
   comparedS: number;
   comparedFraction: number;
+  /** One kind's slack at a time — NOT the joint 2×2 envelope (V32). The
+   *  `geometry` block states that in the file, as `bandsAreJoint: false`. */
+  verticalBand: TrainingVerticalBand;
+  speedBand: TrainingSpeedBand;
 };
 
 /** A manoeuvre the labeller read but did not word, and why. Drawn on its kind's
@@ -284,6 +375,11 @@ export interface TrainingFlight {
 export interface TrainingSelection {
   vocabulary: TrainingVocabulary;
   flight: TrainingFlight;
+  /** What the flown tracks and their bands were drawn under. It travels with the
+   *  selection because the views that draw the corridor are the ones that have
+   *  to say where it came from — a band on screen whose rule is two components
+   *  away is an approximation nobody can see stated (design §5.4). */
+  geometry: TrainingGeometry;
 }
 
 /**
@@ -297,7 +393,14 @@ export interface TrainingGeometry {
   dtS: number;
   bankDeg: number;
   gravityMps2: number;
-  heightGainS: number;
+  /** The vertical word IS the commanded angle, so there is no height error to
+   *  close — which is why the height time constant is gone from this block. */
+  verticalIsCommandedAngle: boolean;
+  /** Where the executor levels off rather than flying through the runway. The
+   *  vertical band closes onto this floor, so the widest part of the fan is
+   *  BEFORE the threshold: that is the floor's doing, not the vocabulary's,
+   *  and the legend has to say so (V34). */
+  heightFloorM: number;
   descentMaxDeg: number;
   climbMaxDeg: number;
   accelMaxMps2: number;
@@ -305,6 +408,14 @@ export interface TrainingGeometry {
   stopRule: string;
   windModelled: boolean;
   aircraftTypeModelled: boolean;
+  /** Which tolerance each band was flown from. A corridor on screen that cannot
+   *  be traced back to the number that drew it is an approximation nobody can
+   *  see stated. */
+  verticalBandFrom: string;
+  speedBandFrom: string;
+  /** Whether the two bands are the joint envelope. It is `false` and it is
+   *  stated, because the drawn corridor is one kind at a time (V32). */
+  bandsAreJoint: boolean;
   constantsFrom: string[];
 }
 
@@ -321,8 +432,8 @@ export interface TrainingSample {
  *  can derive the class counts while it is still building the vocabulary. */
 export type TrainingWordSpec = Pick<
   TrainingVocabulary,
-  | "headingBinDeg" | "altitudeBinM" | "altitudeMaxM"
-  | "speedBinMps" | "speedMinMps" | "speedMaxMps"
+  | "headingBinDeg" | "verticalModesDeg" | "verticalSegments" | "speedCentresMps"
+  | "verticalLevelToleranceDeg" | "verticalToleranceFraction" | "speedToleranceFraction"
   | "durationBinS" | "durationMaxS" | "runwayIdents"
 >;
 
@@ -333,11 +444,14 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
 /**
  * How many classes each kind has, under this file's own spec.
  *
- * MIRROR of `Vocabulary.heading_words / altitude_words / speed_words /
+ * MIRROR of `Vocabulary.heading_words / vertical_words / speed_words /
  * duration_words` and `word_counts()`: the same formulas, so a word index out of
  * range is caught here instead of indexing a legend off its end. Computing them
- * from the file's spec (rather than hardcoding 36/11/23/151) is what lets one
+ * from the file's spec (rather than hardcoding 72/6/16/151) is what lets one
  * reader serve a re-binned vocabulary and every airport's runway list.
+ *
+ * Two of them are TABLE LENGTHS now, not divisions: the vertical modes and the
+ * speed centres are fitted values with no step to divide by.
  *
  * The range check earns its keep on the POSITIONAL columns: swap two and a
  * duration word (0–150) lands in the runway column (0–3) and fails loudly,
@@ -348,11 +462,8 @@ export function trainingWordCounts(
 ): Record<TrainingKind, number> {
   return {
     heading: Math.round(360 / vocabulary.headingBinDeg),
-    altitude: Math.round(vocabulary.altitudeMaxM / vocabulary.altitudeBinM) + 1,
-    speed:
-      Math.round(
-        (vocabulary.speedMaxMps - vocabulary.speedMinMps) / vocabulary.speedBinMps,
-      ) + 1,
+    vertical: vocabulary.verticalModesDeg.length,
+    speed: vocabulary.speedCentresMps.length,
     runway: vocabulary.runwayIdents.length,
     duration: Math.round(vocabulary.durationMaxS / vocabulary.durationBinS) + 1,
     terminal: TERMINAL_WORDS,
@@ -380,14 +491,55 @@ export function headingCentreDeg(vocabulary: TrainingWordSpec, word: number): nu
   return wrapDeg(word * vocabulary.headingBinDeg);
 }
 
-/** MIRROR of `Vocabulary.altitude_centre_m`: metres ABOVE THE THRESHOLD. */
-export function altitudeCentreM(vocabulary: TrainingWordSpec, word: number): number {
-  return word * vocabulary.altitudeBinM;
+/**
+ * MIRROR of `Vocabulary.vertical_centre_deg`: the commanded flight path angle in
+ * degrees, DESCENT POSITIVE. It is a rate, not a place — there is no height to
+ * converge on, which is why the flown track integrates it directly.
+ */
+export function verticalCentreDeg(vocabulary: TrainingWordSpec, word: number): number {
+  return vocabulary.verticalModesDeg[word];
 }
 
-/** MIRROR of `Vocabulary.speed_centre_mps`: ground speed. */
+/** MIRROR of `Vocabulary.speed_centre_mps`: ground speed, from the table. */
 export function speedCentreMps(vocabulary: TrainingWordSpec, word: number): number {
-  return vocabulary.speedMinMps + word * vocabulary.speedBinMps;
+  return vocabulary.speedCentresMps[word];
+}
+
+/**
+ * MIRROR of `Vocabulary.vertical_tolerance_deg` — INCLUDING the level mode's
+ * branch. The level mode gets an absolute tolerance because a fraction of zero
+ * is no tolerance at all, and level flight is 12 % of the segments; every other
+ * mode gets a fraction of its own angle.
+ */
+export function verticalToleranceDeg(vocabulary: TrainingWordSpec, word: number): number {
+  const centre = verticalCentreDeg(vocabulary, word);
+  if (centre === TRAINING_LEVEL_MODE_DEG) return vocabulary.verticalLevelToleranceDeg;
+  return Math.abs(centre) * vocabulary.verticalToleranceFraction;
+}
+
+/** MIRROR of `Vocabulary.speed_tolerance`: a fraction of the commanded speed. */
+export function speedToleranceMps(vocabulary: TrainingWordSpec, word: number): number {
+  return speedCentreMps(vocabulary, word) * vocabulary.speedToleranceFraction;
+}
+
+/**
+ * How far a word lets the executor sit from its centre, in the kind's own unit,
+ * or `null` for the kinds that carry NO tolerance (design §5.6, V36).
+ *
+ * The null is the point of this function: the heading, runway, duration and
+ * terminal words have no redundancy, so a view that drew a band on them would be
+ * inventing a number. The plateau tolerances the LABELLER used
+ * (`course_tolerance_deg`, `speed_tolerance_mps`) are a different quantity for a
+ * different purpose and are not these.
+ */
+export function trainingWordTolerance(
+  vocabulary: TrainingWordSpec,
+  kind: TrainingKind,
+  word: number,
+): number | null {
+  if (kind === "vertical") return verticalToleranceDeg(vocabulary, word);
+  if (kind === "speed") return speedToleranceMps(vocabulary, word);
+  return null;
 }
 
 /** MIRROR of `Vocabulary.duration_centre_s`: the gap to the PREVIOUS event. */
@@ -410,11 +562,12 @@ export const TERMINAL_LABELS = ["continue", "landed", "go-around"] as const;
 /**
  * A word as a person reads it.
  *
- * The bins are DEFINED in feet and knots (1000 ft, 10 kt) and stored in SI, so
- * printing the stored metres would label every altitude 304.8 m and every speed
- * 5.14 m/s apart — arithmetic the reader would have to undo to recognise the
- * vocabulary. The conversion uses the generated geokit constants, never a factor
- * typed here.
+ * THE UNITS ARE SI, because this vocabulary is defined in SI: the speed centres
+ * were fitted in m/s and rounded to 1 m/s (44, 56, 63 …), so printing knots
+ * would label them 85.6 kt and 108.8 kt — arithmetic the reader would have to
+ * undo to recognise the vocabulary. That is the same argument the retired feet
+ * and knots labels rested on, pointing the other way now that the bins moved
+ * (V30).
  */
 export function trainingWordLabel(
   vocabulary: TrainingWordSpec,
@@ -426,10 +579,16 @@ export function trainingWordLabel(
       const degrees = Math.round(headingCentreDeg(vocabulary, word));
       return `${degrees > 0 ? "+" : ""}${degrees}\u00b0`;
     }
-    case "altitude":
-      return `${Math.round(altitudeCentreM(vocabulary, word) / FEET_TO_METERS)} ft`;
+    case "vertical": {
+      const centre = verticalCentreDeg(vocabulary, word);
+      if (centre === TRAINING_LEVEL_MODE_DEG) return "level";
+      // The ARROW says which way, never the sign: descent is positive here, so
+      // a bare "-3.0°" reads as a descent to everyone who has not read the
+      // vocabulary (V37).
+      return `${centre > 0 ? "\u2193" : "\u2191"}${Math.abs(centre).toFixed(1)}\u00b0`;
+    }
     case "speed":
-      return `${Math.round(metresPerSecondToKnots(speedCentreMps(vocabulary, word)))} kt`;
+      return `${speedCentreMps(vocabulary, word)} m/s`;
     case "runway":
       return vocabulary.runwayIdents[word];
     case "duration":
@@ -437,6 +596,23 @@ export function trainingWordLabel(
     case "terminal":
       return TERMINAL_LABELS[word];
   }
+}
+
+/**
+ * The same word WITH the band it allows — `↓3.1°±0.22`, `93 m/s±2.8` — which is
+ * what the sentence bar writes on a band, because the tolerance is half of what
+ * the word says (design §3.1). A kind without a tolerance reads exactly as
+ * `trainingWordLabel`.
+ */
+export function trainingWordBandLabel(
+  vocabulary: TrainingWordSpec,
+  kind: TrainingKind,
+  word: number,
+): string {
+  const label = trainingWordLabel(vocabulary, kind, word);
+  const tolerance = trainingWordTolerance(vocabulary, kind, word);
+  if (tolerance === null) return label;
+  return `${label}\u00b1${tolerance.toFixed(kind === "vertical" ? 2 : 1)}`;
 }
 
 // ── small checkers ───────────────────────────────────────────────────────────
@@ -536,8 +712,8 @@ export function parseTrainingIndex(raw: unknown): Parsed<TrainingIndex> {
 function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
   if (!isRecord(raw)) return { ok: false, problem: "vocabulary is not an object" };
   const numbers: Array<keyof TrainingVocabulary> = [
-    "headingBinDeg", "altitudeBinM", "altitudeMaxM",
-    "speedBinMps", "speedMinMps", "speedMaxMps",
+    "headingBinDeg", "verticalSegments",
+    "verticalLevelToleranceDeg", "verticalToleranceFraction", "speedToleranceFraction",
     "durationBinS", "durationMaxS",
   ];
   const values: Record<string, number> = {};
@@ -546,8 +722,41 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
     if (value === null) return { ok: false, problem: `vocabulary.${field} is missing or not a number` };
     values[field] = value;
   }
-  for (const field of ["headingBinDeg", "altitudeBinM", "speedBinMps", "durationBinS"]) {
+  // Every one of these is positive in `Vocabulary.__post_init__` — including the
+  // three tolerances, because a tolerance of zero is a band nothing can sit in
+  // and would quietly turn every word into an unmeetable point target.
+  for (const field of ["headingBinDeg", "verticalSegments", "durationBinS",
+                       "verticalLevelToleranceDeg", "verticalToleranceFraction",
+                       "speedToleranceFraction"]) {
     if (values[field] <= 0) return { ok: false, problem: `vocabulary.${field} must be positive` };
+  }
+  // The two tables. Sorted and distinct is `Vocabulary.__post_init__`'s check as
+  // well: a word is the NEAREST centre, so two equal centres would make one of
+  // them unreachable and an unsorted table would break the reading rule.
+  const tables: Record<string, number[]> = {};
+  for (const field of ["verticalModesDeg", "speedCentresMps"] as const) {
+    const values_ = numberArray(raw[field]);
+    if (values_ === null || values_.length < 2) {
+      return { ok: false, problem: `vocabulary.${field} is missing or has fewer than two centres` };
+    }
+    for (let i = 1; i < values_.length; i += 1) {
+      if (!(values_[i] > values_[i - 1])) {
+        return {
+          ok: false,
+          problem: `vocabulary.${field} is not stored sorted and distinct (index ${i}: ${values_[i - 1]} then ${values_[i]})`,
+        };
+      }
+    }
+    tables[field] = values_;
+  }
+  // The level mode is the one the tolerance branches on, so a table without it
+  // would send every vertical word down the fraction branch — silently, since
+  // `verticalToleranceDeg` would still return a number.
+  if (!tables.verticalModesDeg.includes(TRAINING_LEVEL_MODE_DEG)) {
+    return {
+      ok: false,
+      problem: `vocabulary.verticalModesDeg has no level mode (${TRAINING_LEVEL_MODE_DEG}\u00b0): it is the one mode whose tolerance is absolute`,
+    };
   }
   for (const field of ["sha256", "runwaySha256", "readingRule"]) {
     if (str(raw, field) === null) {
@@ -565,11 +774,12 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
   }
   const spec: TrainingWordSpec = {
     headingBinDeg: values.headingBinDeg,
-    altitudeBinM: values.altitudeBinM,
-    altitudeMaxM: values.altitudeMaxM,
-    speedBinMps: values.speedBinMps,
-    speedMinMps: values.speedMinMps,
-    speedMaxMps: values.speedMaxMps,
+    verticalModesDeg: tables.verticalModesDeg,
+    verticalSegments: values.verticalSegments,
+    speedCentresMps: tables.speedCentresMps,
+    verticalLevelToleranceDeg: values.verticalLevelToleranceDeg,
+    verticalToleranceFraction: values.verticalToleranceFraction,
+    speedToleranceFraction: values.speedToleranceFraction,
     durationBinS: values.durationBinS,
     durationMaxS: values.durationMaxS,
     runwayIdents: idents as string[],
@@ -775,6 +985,12 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
     }
     numbers[field] = value;
   }
+
+  const verticalBand = parseVerticalBand(raw.verticalBand, tS.length, where);
+  if (!verticalBand.ok) return verticalBand;
+  const speedBand = parseSpeedBand(raw.speedBand, where);
+  if (!speedBand.ok) return speedBand;
+
   return {
     ok: true,
     value: {
@@ -787,26 +1003,150 @@ function parseGeometric(raw: unknown, where: string): Parsed<TrainingGeometric> 
       gapP95M: numbers.gapP95M,
       comparedS: numbers.comparedS,
       comparedFraction: numbers.comparedFraction,
+      verticalBand: verticalBand.value,
+      speedBand: speedBand.value,
     },
   };
+}
+
+/**
+ * The vertical tolerance flown, checked to be ALIGNED WITH THE NOMINAL TRACK.
+ *
+ * The row count is not a formality here: the edges share the nominal track's
+ * `tS`, `toGoM` and `crossM` — that is what makes two height columns a legal
+ * substitute for two tracks — so a band of a different length is not a band that
+ * can be drawn at all, and reading it with the nominal x values would draw a
+ * corridor that is simply somewhere else.
+ */
+function parseVerticalBand(raw: unknown, rows: number, where: string): Parsed<TrainingVerticalBand> {
+  if (!isRecord(raw)) {
+    return { ok: false, problem: `${where}.geometric.verticalBand is missing: the flown sentence carries the vertical word's tolerance` };
+  }
+  const columns: Record<string, number[]> = {};
+  for (const column of TRAINING_VERTICAL_BAND_COLUMNS) {
+    const values = numberArray(raw[column]);
+    if (values === null || values.length !== rows) {
+      return {
+        ok: false,
+        problem: `${where}.geometric.verticalBand.${column} is missing or does not have the nominal track's ${rows} rows`,
+      };
+    }
+    columns[column] = values;
+  }
+  // Lo is the SHALLOWER edge and stays above: the band is ordered, and a file
+  // where it is not has its two edges swapped, which would draw the fan inside
+  // out without changing its width.
+  for (let row = 0; row < rows; row += 1) {
+    if (columns.heightLoM[row] < columns.heightHiM[row]) {
+      return {
+        ok: false,
+        problem:
+          `${where}.geometric.verticalBand is inverted at row ${row}: heightLoM ${columns.heightLoM[row]} ` +
+          `is below heightHiM ${columns.heightHiM[row]} — lo is the SHALLOWER descent, so it stays above`,
+      };
+    }
+  }
+  return { ok: true, value: columns as TrainingVerticalBand };
+}
+
+/** One edge of the speed tolerance: a track of its own, plus where it stopped. */
+function parseSpeedEdge(raw: unknown, where: string): Parsed<TrainingSpeedEdge> {
+  if (!isRecord(raw)) return { ok: false, problem: `${where} is missing or not an object` };
+  const tS = numberArray(raw.tS);
+  if (tS === null || tS.length < 2) {
+    return { ok: false, problem: `${where}.tS is missing or shorter than two steps` };
+  }
+  const columns: Record<string, number[]> = { tS };
+  for (const column of TRAINING_SPEED_EDGE_COLUMNS) {
+    const values = numberArray(raw[column]);
+    if (values === null || values.length !== tS.length) {
+      return { ok: false, problem: `${where}.${column} is missing or does not have ${tS.length} rows` };
+    }
+    columns[column] = values;
+  }
+  const endReason = str(raw, "endReason");
+  if (endReason === null || !(TRAINING_END_REASONS as readonly string[]).includes(endReason)) {
+    return {
+      ok: false,
+      problem: `${where}.endReason is ${JSON.stringify(raw.endReason)}, expected one of ${TRAINING_END_REASONS.join(", ")}`,
+    };
+  }
+  const finalGapM = finite(raw, "finalGapM");
+  const endS = finite(raw, "endS");
+  if (finalGapM === null || finalGapM < 0) return { ok: false, problem: `${where}.finalGapM is missing or not a distance` };
+  if (endS === null || endS <= 0) return { ok: false, problem: `${where}.endS is missing or not a time` };
+  if (Math.abs(endS - tS[tS.length - 1]) > 0.05) {
+    return { ok: false, problem: `${where}.endS is ${endS} s but its own track ends at ${tS[tS.length - 1]} s` };
+  }
+  return {
+    ok: true,
+    value: {
+      ...(columns as { tS: number[] } & Record<TrainingSpeedEdgeColumn, number[]>),
+      endReason: endReason as TrainingEndReason,
+      finalGapM,
+      endS,
+    },
+  };
+}
+
+/**
+ * The speed tolerance flown, and the arrival window it opens.
+ *
+ * The window is refused unless BOTH edges crossed the threshold: a window whose
+ * far end is a time cap is not a window, it is the integration budget, and
+ * printing it as "arrives between" would be a measurement of the stopping rule.
+ */
+function parseSpeedBand(raw: unknown, where: string): Parsed<TrainingSpeedBand> {
+  if (!isRecord(raw)) {
+    return { ok: false, problem: `${where}.geometric.speedBand is missing: the flown sentence carries the speed word's tolerance` };
+  }
+  const low = parseSpeedEdge(raw.low, `${where}.geometric.speedBand.low`);
+  if (!low.ok) return low;
+  const high = parseSpeedEdge(raw.high, `${where}.geometric.speedBand.high`);
+  if (!high.ok) return high;
+
+  const window = raw.arrivalWindowS;
+  if (window === null) {
+    return { ok: true, value: { low: low.value, high: high.value, arrivalWindowS: null } };
+  }
+  const pair = numberArray(window);
+  if (pair === null || pair.length !== 2) {
+    return { ok: false, problem: `${where}.geometric.speedBand.arrivalWindowS is ${JSON.stringify(window)}, expected two times or null` };
+  }
+  const bothCrossed = low.value.endReason === "crossed-threshold" && high.value.endReason === "crossed-threshold";
+  if (!bothCrossed) {
+    return {
+      ok: false,
+      problem:
+        `${where}.geometric.speedBand.arrivalWindowS is a window, but an edge ended on ` +
+        `${low.value.endReason === "crossed-threshold" ? high.value.endReason : low.value.endReason} — ` +
+        `an edge that never reached the runway has no arrival time`,
+    };
+  }
+  // The fast edge arrives first. A pair the other way round would still plot,
+  // as a bracket running backwards from the terminal word.
+  if (!(pair[0] <= pair[1])) {
+    return { ok: false, problem: `${where}.geometric.speedBand.arrivalWindowS is [${pair[0]}, ${pair[1]}]: the fast edge arrives first` };
+  }
+  return { ok: true, value: { low: low.value, high: high.value, arrivalWindowS: [pair[0], pair[1]] } };
 }
 
 function parseGeometry(raw: unknown): Parsed<TrainingGeometry> {
   if (!isRecord(raw)) return { ok: false, problem: "geometry is missing: the flown tracks state what they were drawn under" };
   const numbers: Record<string, number> = {};
-  for (const field of ["dtS", "bankDeg", "gravityMps2", "heightGainS", "descentMaxDeg",
+  for (const field of ["dtS", "bankDeg", "gravityMps2", "heightFloorM", "descentMaxDeg",
                        "climbMaxDeg", "accelMaxMps2"]) {
     const value = finite(raw, field);
     if (value === null) return { ok: false, problem: `geometry.${field} is missing or not a number` };
     numbers[field] = value;
   }
   const strings: Record<string, string> = {};
-  for (const field of ["method", "startsAt", "stopRule"]) {
+  for (const field of ["method", "startsAt", "stopRule", "verticalBandFrom", "speedBandFrom"]) {
     const value = str(raw, field);
     if (value === null) return { ok: false, problem: `geometry.${field} is missing or not a non-empty string` };
     strings[field] = value;
   }
-  for (const field of ["windModelled", "aircraftTypeModelled"]) {
+  for (const field of ["windModelled", "aircraftTypeModelled", "verticalIsCommandedAngle", "bandsAreJoint"]) {
     if (typeof raw[field] !== "boolean") {
       return { ok: false, problem: `geometry.${field} is ${JSON.stringify(raw[field])}, expected a boolean` };
     }
@@ -825,12 +1165,16 @@ function parseGeometry(raw: unknown): Parsed<TrainingGeometry> {
       dtS: numbers.dtS,
       bankDeg: numbers.bankDeg,
       gravityMps2: numbers.gravityMps2,
-      heightGainS: numbers.heightGainS,
+      heightFloorM: numbers.heightFloorM,
       descentMaxDeg: numbers.descentMaxDeg,
       climbMaxDeg: numbers.climbMaxDeg,
       accelMaxMps2: numbers.accelMaxMps2,
       windModelled: raw.windModelled as boolean,
       aircraftTypeModelled: raw.aircraftTypeModelled as boolean,
+      verticalIsCommandedAngle: raw.verticalIsCommandedAngle as boolean,
+      verticalBandFrom: strings.verticalBandFrom,
+      speedBandFrom: strings.speedBandFrom,
+      bandsAreJoint: raw.bandsAreJoint as boolean,
       constantsFrom: sources as string[],
     },
   };

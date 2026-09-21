@@ -8,6 +8,8 @@ import {
   TRAINING_KIND_COLUMN,
   TRAINING_GEOMETRIC_COLUMNS,
   TRAINING_OBSERVED_COLUMNS,
+  TRAINING_SPEED_EDGE_COLUMNS,
+  TRAINING_VERTICAL_BAND_COLUMNS,
   TRAINING_WORD_COLUMNS,
   formatSeconds,
   parseTrainingIndex,
@@ -15,14 +17,24 @@ import {
   trainingIndexPath,
   trainingSamplePath,
   trainingWordCounts,
+  trainingWordBandLabel,
   trainingWordLabel,
-  altitudeCentreM,
+  trainingWordTolerance,
   durationCentreS,
   headingCentreDeg,
   speedCentreMps,
+  speedToleranceMps,
+  verticalCentreDeg,
+  verticalToleranceDeg,
   wrapDeg,
 } from "../trainingSample";
-import { MOCK_VOCABULARY, mockIndex, mockSample } from "./trainingSample.fixture";
+import {
+  DESCEND_31,
+  LEVEL,
+  MOCK_VOCABULARY,
+  mockIndex,
+  mockSample,
+} from "./trainingSample.fixture";
 
 function sampleWith(mutate: (sample: any) => void) {
   const sample = mockSample();
@@ -33,10 +45,10 @@ function sampleWith(mutate: (sample: any) => void) {
 describe("the six word kinds", () => {
   // MIRROR of instructions.INSTRUCTION_KINDS. The columns are positional, so this
   // order is the contract; the intercept word was deleted on 2026-09-20 (D73).
-  it("is heading, altitude, speed, runway, duration, terminal — in that order", () => {
+  it("is heading, vertical, speed, runway, duration, terminal — in that order", () => {
     expect([...TRAINING_KINDS]).toEqual([
       "heading",
-      "altitude",
+      "vertical",
       "speed",
       "runway",
       "duration",
@@ -44,19 +56,34 @@ describe("the six word kinds", () => {
     ]);
     expect(TRAINING_WORD_COLUMNS).toBe(6);
     expect(TRAINING_KINDS).not.toContain("intercept");
+    // The word the vertical one replaced. Its column is the same, which is
+    // exactly why an artefact read under the old rule has to be refused rather
+    // than read: every row would still parse.
+    expect(TRAINING_KINDS).not.toContain("altitude");
   });
 
   it("derives each kind's class count from the file's own spec", () => {
-    // The real artefact's defaults: 36 / 11 / 23 / 151 / 3, and the runway count
-    // is the artefact's class list, not the airport's runway table.
+    // The real artefact's defaults: 72 / 6 / 16 / 151 / 3, and the runway count
+    // is the artefact's class list, not the airport's runway table. Two of them
+    // are TABLE LENGTHS — there is no bin width to divide by.
     expect(trainingWordCounts(MOCK_VOCABULARY)).toEqual({
-      heading: 36,
-      altitude: 11,
-      speed: 23,
+      heading: 72,
+      vertical: 6,
+      speed: 16,
       runway: 4,
       duration: 151,
       terminal: 3,
     });
+  });
+
+  it("counts the vertical and speed words off their tables, not off a step", () => {
+    const narrower = {
+      ...MOCK_VOCABULARY,
+      verticalModesDeg: [0, 3.0],
+      speedCentresMps: [60, 70, 80],
+    };
+    expect(trainingWordCounts(narrower).vertical).toBe(2);
+    expect(trainingWordCounts(narrower).speed).toBe(3);
   });
 
   it("says go-around is a class that exists but is never observed here", () => {
@@ -124,7 +151,7 @@ describe("parseTrainingSample", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.problem).toContain("has 5 columns, expected 6");
-    expect(parsed.problem).toContain("heading, altitude, speed, runway, duration, terminal");
+    expect(parsed.problem).toContain("heading, vertical, speed, runway, duration, terminal");
   });
 
   // The loudest symptom of a column-order mistake: a duration word (0–150) landing
@@ -167,7 +194,10 @@ describe("parseTrainingSample", () => {
 
   it("refuses a restated kinds list that disagrees with the column order", () => {
     const parsed = sampleWith((s) => {
-      s.kinds = ["heading", "altitude", "speed", "intercept", "runway", "duration"];
+      // An artefact read under the retired rule: same six columns, second one
+      // spelled `altitude`. This is the refusal that keeps a superseded export
+      // off the screen (V38), and it is the FIRST thing a stale file trips.
+      s.kinds = ["heading", "altitude", "speed", "runway", "duration", "terminal"];
     });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
@@ -242,6 +272,21 @@ describe("how a time is written", () => {
 });
 
 describe("the observed track", () => {
+  // The axis the vertical word was READ on: the word is the slope of height
+  // against this, so a chart that plotted it against anything else would be
+  // judging the word in coordinates it was never fitted in.
+  it("carries the cumulative horizontal distance, non-decreasing from 0", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const observed = parsed.value.flights[0].observed;
+    expect(observed.pathM).toHaveLength(observed.tS.length);
+    expect(observed.pathM[0]).toBe(0);
+    for (let row = 1; row < observed.pathM.length; row += 1) {
+      expect(observed.pathM[row]).toBeGreaterThan(observed.pathM[row - 1]);
+    }
+  });
+
   it("reads every column the charts plot, one value per row", () => {
     const parsed = parseTrainingSample(mockSample());
     expect(parsed.ok).toBe(true);
@@ -355,6 +400,177 @@ describe("the flown sentence", () => {
   });
 });
 
+describe("the corridor a sentence draws", () => {
+  // The vertical band is two HEIGHT columns on the nominal track's own rows, and
+  // that is only legal because the commanded angle never touches the horizontal
+  // step. If it ever stops being aligned, the fan gets drawn against the wrong x
+  // values — a corridor somewhere else entirely — so the length is checked.
+  it("reads the vertical band on the nominal track's own rows", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const flown = parsed.value.flights[0].geometric;
+    for (const column of TRAINING_VERTICAL_BAND_COLUMNS) {
+      expect(flown.verticalBand[column]).toHaveLength(flown.tS.length);
+    }
+    // It opens with distance: wider at the far end than at the start.
+    const last = flown.tS.length - 1;
+    const openingWidth = flown.verticalBand.heightLoM[0] - flown.verticalBand.heightHiM[0];
+    expect(flown.verticalBand.heightLoM[last] - flown.verticalBand.heightHiM[last])
+      .toBeGreaterThan(openingWidth);
+  });
+
+  it("refuses a vertical band that is not aligned with the track it bands", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].geometric.verticalBand.heightHiM.pop();
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("verticalBand.heightHiM");
+    expect(parsed.problem).toContain("rows");
+  });
+
+  // Swapping the edges keeps the band exactly as wide, so nothing downstream
+  // would look wrong — it would just be drawn inside out.
+  it("refuses a vertical band whose edges are the wrong way round", () => {
+    const parsed = sampleWith((sample) => {
+      const band = sample.flights[0].geometric.verticalBand;
+      [band.heightLoM, band.heightHiM] = [band.heightHiM, band.heightLoM];
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("inverted");
+    expect(parsed.problem).toContain("SHALLOWER");
+  });
+
+  it("refuses a missing band rather than drawing a line and calling it the sentence", () => {
+    for (const band of ["verticalBand", "speedBand"]) {
+      const parsed = sampleWith((sample) => {
+        delete sample.flights[0].geometric[band];
+      });
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.problem).toContain(band);
+    }
+  });
+
+  // The speed edges are tracks of their own — a speed change moves the
+  // horizontal step, the turn radius and the moment of crossing — so they have
+  // their own clocks and their own endings.
+  it("reads each speed edge as its own track, and the window it opens", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const band = parsed.value.flights[0].geometric.speedBand;
+    for (const edge of [band.low, band.high]) {
+      for (const column of TRAINING_SPEED_EDGE_COLUMNS) {
+        expect(edge[column]).toHaveLength(edge.tS.length);
+      }
+      expect(edge.endS).toBeCloseTo(edge.tS[edge.tS.length - 1], 6);
+    }
+    // The fast edge covers the same ground sooner, so it arrives first.
+    expect(band.high.endS).toBeLessThan(band.low.endS);
+    expect(band.arrivalWindowS).toEqual([band.high.endS, band.low.endS]);
+  });
+
+  // A window whose far end is the integration budget is not an arrival window,
+  // it is the stopping rule — printing it as "arrives between" would measure
+  // this module instead of the vocabulary.
+  it("refuses an arrival window when an edge never reached the runway", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].geometric.speedBand.low.endReason = "time-cap";
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("arrivalWindowS");
+    expect(parsed.problem).toContain("time-cap");
+  });
+
+  it("accepts a null window, which is how an edge that stopped short says so", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].geometric.speedBand.low.endReason = "time-cap";
+      sample.flights[0].geometric.speedBand.arrivalWindowS = null;
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.flights[0].geometric.speedBand.arrivalWindowS).toBeNull();
+    expect(parsed.value.flights[0].geometric.speedBand.low.endReason).toBe("time-cap");
+  });
+
+  it("refuses an edge whose endS disagrees with its own last step", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].geometric.speedBand.high.endS += 10;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("speedBand.high.endS");
+  });
+
+  // The `geometry` block is what lets a reader say WHERE the corridor came from.
+  // `bandsAreJoint` is the one that stops it being read as the whole envelope.
+  it("carries what each band was flown from, and that they are not joint", () => {
+    const parsed = parseTrainingSample(mockSample());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.geometry.verticalBandFrom).toContain("vertical");
+    expect(parsed.value.geometry.speedBandFrom).toContain("speed");
+    expect(parsed.value.geometry.bandsAreJoint).toBe(false);
+    // And the two assumptions that replaced the height time constant.
+    expect(parsed.value.geometry.verticalIsCommandedAngle).toBe(true);
+    expect(parsed.value.geometry.heightFloorM).toBe(0);
+  });
+
+  it("refuses a geometry block that does not say where a band came from", () => {
+    for (const field of ["verticalBandFrom", "speedBandFrom", "bandsAreJoint", "heightFloorM"]) {
+      const parsed = sampleWith((sample) => {
+        delete sample.geometry[field];
+      });
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.problem).toContain(field);
+    }
+  });
+});
+
+describe("the vocabulary's two tables", () => {
+  it("refuses centres that are not stored sorted and distinct", () => {
+    const unsorted = sampleWith((sample) => {
+      sample.vocabulary.speedCentresMps = [44, 63, 56, 68];
+      sample.vocabulary.words.speed = 4;
+    });
+    expect(unsorted.ok).toBe(false);
+    if (unsorted.ok) return;
+    expect(unsorted.problem).toContain("sorted and distinct");
+  });
+
+  // The level mode is the branch `verticalToleranceDeg` turns on. Without it
+  // every vertical word would quietly take the fraction branch and still return
+  // a number, so nothing downstream would look wrong.
+  it("refuses a vertical table with no level mode", () => {
+    const parsed = sampleWith((sample) => {
+      sample.vocabulary.verticalModesDeg = [-3.0, 1.4, 2.4, 3.1, 4.4];
+      sample.vocabulary.words.vertical = 5;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("level mode");
+  });
+
+  // A tolerance of zero is a band nothing can sit inside: it turns every word
+  // into a point target no executor can meet, and the "inside the band" readout
+  // would report 0 % for a flight that flew the sentence exactly.
+  it("refuses a tolerance of zero", () => {
+    for (const field of ["verticalLevelToleranceDeg", "verticalToleranceFraction", "speedToleranceFraction"]) {
+      const parsed = sampleWith((sample) => {
+        sample.vocabulary[field] = 0;
+      });
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.problem).toContain(field);
+    }
+  });
+});
+
 describe("paths", () => {
   it("builds the manifest and sample paths from the airport code", () => {
     expect(trainingIndexPath("KRDU")).toBe("data/airports/KRDU/training/index.json");
@@ -374,7 +590,7 @@ describe("the track length, the instructions and the absorbed manoeuvres", () =>
     const flight = parsed.value.flights[0];
     expect(flight.durationS).toBe(262);
     expect(flight.establishedFromStart).toBe(false);
-    expect(flight.instructions).toHaveLength(13);
+    expect(flight.instructions).toHaveLength(12);
     expect(flight.absorbed.map((item) => item.reason)).toEqual(["short tail", "small change"]);
   });
 
@@ -427,7 +643,7 @@ describe("the track length, the instructions and the absorbed manoeuvres", () =>
 
   it("refuses an instruction word outside its kind's range", () => {
     const parsed = sampleWith((sample) => {
-      sample.flights[0].instructions[0].word = 36; // heading has 36 classes: 0…35
+      sample.flights[0].instructions[0].word = 72; // heading has 72 classes: 0…35
     });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
@@ -484,12 +700,12 @@ describe("the fields a lenient reader would have defaulted", () => {
   // check is what makes the derivation a mirror instead of a second opinion.
   it("refuses a vocabulary whose stated counts disagree with its own bins", () => {
     const parsed = sampleWith((sample) => {
-      sample.vocabulary.words.speed = 22; // the bins give 23
+      sample.vocabulary.words.speed = 15; // the table has 16 centres
     });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.problem).toContain("words.speed is 22");
-    expect(parsed.problem).toContain("23");
+    expect(parsed.problem).toContain("words.speed is 15");
+    expect(parsed.problem).toContain("16");
   });
 
   it("refuses a vocabulary that states no counts", () => {
@@ -524,10 +740,38 @@ describe("what a word means", () => {
   // MIRRORS of Vocabulary.*_centre_*: the same arithmetic, so a re-binned
   // vocabulary reads correctly without a second table anywhere.
   it("reads the bin centres the labeller wrote", () => {
-    expect(headingCentreDeg(MOCK_VOCABULARY, 5)).toBeCloseTo(50, 9);
-    expect(altitudeCentreM(MOCK_VOCABULARY, 10)).toBeCloseTo(3048, 9);
-    expect(speedCentreMps(MOCK_VOCABULARY, 0)).toBeCloseTo(MOCK_VOCABULARY.speedMinMps, 9);
+    expect(headingCentreDeg(MOCK_VOCABULARY, 10)).toBeCloseTo(50, 9);
+    // Descent is POSITIVE and the climb mode is the negative one. Pinned by
+    // value, because a table read off by one would still return an angle.
+    expect(verticalCentreDeg(MOCK_VOCABULARY, LEVEL)).toBe(0);
+    expect(verticalCentreDeg(MOCK_VOCABULARY, DESCEND_31)).toBeCloseTo(3.1, 9);
+    expect(verticalCentreDeg(MOCK_VOCABULARY, 0)).toBeCloseTo(-3.0, 9);
+    expect(speedCentreMps(MOCK_VOCABULARY, 0)).toBeCloseTo(44, 9);
+    expect(speedCentreMps(MOCK_VOCABULARY, 11)).toBeCloseTo(121, 9);
     expect(durationCentreS(MOCK_VOCABULARY, 13)).toBe(26);
+  });
+
+  // MIRROR of `Vocabulary.vertical_tolerance_deg` / `speed_tolerance`, the level
+  // mode's branch included. That branch is the one worth pinning: a percentage
+  // of zero is zero, so a reader that lost it would give level flight a band of
+  // no width at all and report every level segment as disobeyed.
+  it("gives the level mode an absolute tolerance and every other one a fraction", () => {
+    expect(verticalToleranceDeg(MOCK_VOCABULARY, LEVEL)).toBeCloseTo(0.1, 9);
+    expect(verticalToleranceDeg(MOCK_VOCABULARY, DESCEND_31)).toBeCloseTo(3.1 * 0.07, 9);
+    // The climb mode's is a fraction of its MAGNITUDE, not a negative tolerance.
+    expect(verticalToleranceDeg(MOCK_VOCABULARY, 0)).toBeCloseTo(3.0 * 0.07, 9);
+    expect(speedToleranceMps(MOCK_VOCABULARY, 11)).toBeCloseTo(121 * 0.03, 9);
+  });
+
+  // The kinds with no redundancy return null rather than 0: a view that drew a
+  // zero-width band would be drawing a tolerance the vocabulary does not have,
+  // and one that drew any band at all would be inventing the number (V36).
+  it("says which kinds have no tolerance at all", () => {
+    expect(trainingWordTolerance(MOCK_VOCABULARY, "vertical", DESCEND_31)).toBeCloseTo(0.217, 6);
+    expect(trainingWordTolerance(MOCK_VOCABULARY, "speed", 11)).toBeCloseTo(3.63, 6);
+    for (const kind of ["heading", "runway", "duration", "terminal"] as const) {
+      expect(trainingWordTolerance(MOCK_VOCABULARY, kind, 0)).toBeNull();
+    }
   });
 
   // wrap_deg is half-open [-180, 180), so the one word at the wrap reads -180.
@@ -535,8 +779,8 @@ describe("what a word means", () => {
   // truncates where Python's floors, so `((d+180) % 360) - 180` returns -190 for
   // -190. No word reaches it today; the artefact's signed relative course does.
   it("wraps the same way the labeller does, negatives included", () => {
-    expect(headingCentreDeg(MOCK_VOCABULARY, 18)).toBe(-180);
-    expect(headingCentreDeg(MOCK_VOCABULARY, 30)).toBeCloseTo(-60, 9);
+    expect(headingCentreDeg(MOCK_VOCABULARY, 36)).toBe(-180);
+    expect(headingCentreDeg(MOCK_VOCABULARY, 60)).toBeCloseTo(-60, 9);
     expect(wrapDeg(190)).toBe(-170);
     expect(wrapDeg(-190)).toBe(170);
     expect(wrapDeg(-360)).toBe(0);
@@ -544,15 +788,33 @@ describe("what a word means", () => {
     expect(wrapDeg(540)).toBe(-180);
   });
 
-  // The bins are DEFINED in feet and knots; printing the stored SI would make a
-  // 1000 ft step read as 304.8 m and hide the vocabulary's own grid.
-  it("labels altitude in feet and speed in knots, off the generated constants", () => {
-    expect(trainingWordLabel(MOCK_VOCABULARY, "altitude", 10)).toBe("10000 ft");
-    expect(trainingWordLabel(MOCK_VOCABULARY, "altitude", 3)).toBe("3000 ft");
-    expect(trainingWordLabel(MOCK_VOCABULARY, "speed", 21)).toBe("310 kt");
-    expect(trainingWordLabel(MOCK_VOCABULARY, "heading", 5)).toBe("+50°");
+  // The vocabulary is DEFINED in SI now — the speed centres were fitted in m/s
+  // and rounded to 1 m/s — so printing knots would label them 85.6 and 108.8 and
+  // hide the vocabulary's own grid (V30).
+  it("labels speed in m/s and the vertical word as an angle with an arrow", () => {
+    expect(trainingWordLabel(MOCK_VOCABULARY, "speed", 11)).toBe("121 m/s");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "heading", 10)).toBe("+50°");
     expect(trainingWordLabel(MOCK_VOCABULARY, "heading", 0)).toBe("0°");
     expect(trainingWordLabel(MOCK_VOCABULARY, "duration", 13)).toBe("26 s");
+  });
+
+  // DESCENT IS POSITIVE in this vocabulary, so a bare signed number reads
+  // backwards to everyone who has not read the spec. The arrow carries the sign
+  // and the printed number is always a magnitude (V37).
+  it("never prints a signed vertical angle: the arrow says which way", () => {
+    expect(trainingWordLabel(MOCK_VOCABULARY, "vertical", DESCEND_31)).toBe("↓3.1°");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "vertical", LEVEL)).toBe("level");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "vertical", 0)).toBe("↑3.0°");
+    expect(trainingWordLabel(MOCK_VOCABULARY, "vertical", 0)).not.toContain("-");
+  });
+
+  // What the sentence bar writes on a band: the word is half the meaning and the
+  // band it allows is the other half.
+  it("writes the band beside the word, and nothing for the kinds without one", () => {
+    expect(trainingWordBandLabel(MOCK_VOCABULARY, "vertical", DESCEND_31)).toBe("↓3.1°±0.22");
+    expect(trainingWordBandLabel(MOCK_VOCABULARY, "vertical", LEVEL)).toBe("level±0.10");
+    expect(trainingWordBandLabel(MOCK_VOCABULARY, "speed", 11)).toBe("121 m/s±3.6");
+    expect(trainingWordBandLabel(MOCK_VOCABULARY, "heading", 10)).toBe("+50°");
   });
 
   // The runway classes come from the file, never from the airport's runway list.

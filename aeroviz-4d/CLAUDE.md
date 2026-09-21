@@ -103,6 +103,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - The comparison reference must be requested on the `arrival` track window — see
   `aeroviz_backend/CLAUDE.md` (AV12).
 
+- **A Training sample read under an older vocabulary is REFUSED on `kinds` alone** (every row still
+  parses), so an empty Training tab after a vocabulary change is the reader working; and the
+  Training views draw a CORRIDOR — each word's tolerance on the axis it accumulates into, vertical
+  into height (a fan, and a Cesium wall in HAE), speed into arrival time (AV19).
+
 ## Comparison CZML colour contract
 
 - Group status is entity `properties.status` ∈ solved/offTarget/failed; **the frontend repaint
