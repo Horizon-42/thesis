@@ -5,7 +5,7 @@
  * TIME. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §3.1 (T4a).
  *
  * THE HORIZONTAL AXIS IS TIME, NOT EVENT NUMBER. The sentence is an event
- * sequence (reading rule `plateau-v11`): the gaps are irregular — 26 s and 58 s
+ * sequence (reading rule `segment-v12`): the gaps are irregular — 26 s and 58 s
  * in the fixture, a median 44 s and a p95 of 128 s in the artefact — so evenly
  * spaced columns would draw a wrong picture of when anything was said. That is
  * the same bias the even 10 s grid was deleted for.
@@ -484,10 +484,11 @@ export default function TrainingSentenceBar() {
       </div>
 
       <footer className="training-sentence-legend">
-        {/* This line stays out: without it the rows read as the measured state,
-            and a straight-in carrying one altitude word "0 ft" for the whole
-            approach reads as a track on the ground. The rest folds away — the
-            bar is docked over the flight list, and height is what it costs. */}
+        {/* This line stays out: without it the rows read as the measured state
+            rather than as what the aircraft was told to hold — and for the two
+            kinds that carry a tolerance, what it was told is a BAND, which is
+            why the labels print one. The rest folds away: the bar is docked over
+            the flight list, and height is what it costs. */}
         <span>
           A band is the TARGET in force — what the words send the aircraft
           towards, as a clearance does — not the measured state.
@@ -503,9 +504,11 @@ export default function TrainingSentenceBar() {
         {notesOpen ? (
           <>
         <span>
-          Heading is relative to the final approach course, altitude is above the
-          threshold, speed is ground speed. The measured signals beside them are
-          the read-back window's job.
+          Heading is relative to the final approach course; the vertical word is a
+          flight path angle, with DESCENT POSITIVE — the arrow says which way, never
+          the sign; speed is ground speed. The vertical and speed words carry a
+          tolerance and their labels print it; the other four have none. The
+          measured signals beside them are the read-back window's job.
         </span>
         <span>
           Runway words: {vocabulary.runwayIdents.join(", ")} — the runways the

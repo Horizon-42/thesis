@@ -240,7 +240,10 @@ export function checkTrainingIndex(manifest: unknown): PublicationFinding[] {
 /**
  * One set's sample file, through the panel's own reader.
  *
- * `readUnder` is the reading rule the MANIFEST claims for this set, and it is
+ * `readUnder` is the reading rule the MANIFEST claims for this set. It is
+ * REQUIRED — its one caller always has it, and an optional one could only ever
+ * fire on a caller that forgot, printing a message missing the half that
+ * explains it. It is
  * printed with the failure because the commonest failure now is a superseded
  * export: the vocabulary's second word kind changed from a height to an angle on
  * 2026-09-21, so every sentence in an older file still parses as six columns and
@@ -250,12 +253,15 @@ export function checkTrainingIndex(manifest: unknown): PublicationFinding[] {
 export function checkTrainingSample(
   setId: string,
   sample: unknown,
-  readUnder?: string,
+  readUnder: string,
 ): PublicationFinding[] {
   const parsed = parseTrainingSample(sample);
   if (!parsed.ok) {
-    const under = readUnder ? ` (read under ${readUnder})` : "";
-    return [{ level: "error", category: setId, message: `sample.json${under}: ${parsed.problem}` }];
+    return [{
+      level: "error",
+      category: setId,
+      message: `sample.json (read under ${readUnder}): ${parsed.problem}`,
+    }];
   }
   return [];
 }

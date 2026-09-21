@@ -308,3 +308,16 @@ describe("TrainingSentenceBar", () => {
     expect(screen.getByText(/not the airport's full runway list/)).toBeTruthy();
   });
 });
+
+// The band's VISIBLE text, not only its tooltip: the tolerance is half of what
+// the word says, and dropping it from the drawn label left every test green.
+describe("what a band actually prints", () => {
+  it("writes the tolerance on the band, not only in its tooltip", () => {
+    render(<TrainingSentenceBar />);
+    // the opening band is too narrow for any label at this width; the next is not
+    expect(screen.getByText("107 m/s±3.2")).toBeTruthy();
+    expect(screen.getByText("↓3.1°±0.22")).toBeTruthy();
+    // and the kinds without a tolerance print the bare word
+    expect(screen.getByText("+90°")).toBeTruthy();
+  });
+});

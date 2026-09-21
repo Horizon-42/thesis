@@ -40,6 +40,22 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
 export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v1";
 
 /**
+ * MIRROR of `instructions.READING_RULE`, and REFUSED on mismatch.
+ *
+ * The file carries its own spec — bins, centres, tolerances — so most of what a
+ * word means is read from it. What is NOT in the file is the rule's semantics:
+ * that the second column is an angle, that DESCENT IS POSITIVE, that a vertical
+ * instruction's `settledS` is its segment's end rather than a plateau's. This
+ * reader hardcodes all three. So it is bound to the rule that produced the file,
+ * and says so by name rather than reading an older artefact into today's
+ * meanings (the Python side refuses across rules for the same reason).
+ *
+ * The cost of the pin is a one-line edit when the rule bumps; the cost of not
+ * pinning it is a chart that looks right and means something else.
+ */
+export const TRAINING_READING_RULE = "segment-v12";
+
+/**
  * MIRROR of `ts_transformer.manoeuvre.instructions.INSTRUCTION_KINDS` — the six
  * word kinds IN ORDER. The columns of `words` are positional, so this order is
  * load-bearing: reorder it and every word is read as another kind's.
@@ -153,7 +169,8 @@ export interface TrainingVocabulary {
    */
   verticalModesDeg: number[];
   /** How many straight segments one approach's profile is cut into. Not a word
-   *  count; it is how the labeller read them, and the view states it. */
+   *  count — it is how the labeller read the profile, and the panel states it
+   *  beside the vocabulary's other properties. */
   verticalSegments: number;
   /** Ground speed centres in m/s — again a fitted TABLE, not min + k × step.
    *  Control assigns indicated airspeed and the wind is inside this number, so
@@ -197,30 +214,26 @@ export interface TrainingSentence {
 export interface TrainingInstruction {
   kind: TrainingKind;
   word: number;
-  /** The value the plateau settled at, unbinned, in the kind's own unit: degrees
-   *  relative to the final approach course, metres above the threshold, m/s
+  /** The value this word was read from, unbinned, in the kind's own unit:
+   *  degrees relative to the final approach course (heading), degrees of flight
+   *  path angle with DESCENT POSITIVE (vertical — an angle, not a height), m/s
    *  ground speed. The runway instruction has no target at all (its WORD is the
    *  answer) and the exporter writes `instructions.NO_TARGET`, 0.0, there — so
    *  nothing may print a target for a runway word. */
   target: number;
   issuedS: number;
   /** When the manoeuvre finished, or `null` when it never settled inside the
-   *  track — the last altitude instruction usually runs to the threshold. Null is
-   *  a real answer here, not a missing field. */
+   *  track — a deceleration still slowing at the threshold has none. Null is a
+   *  real answer here, not a missing field.
+   *
+   *  For a VERTICAL instruction this is the segment's end rather than a
+   *  plateau's: the segments tile the profile, so each one's `settledS` is the
+   *  next one's `issuedS` and the last runs to the end of the record. */
   settledS: number | null;
   /** Whether the target fell outside the vocabulary's range and was clamped. */
   clamped: boolean;
 }
 
-/**
- * MIRROR of `instructions.course_frame` — the observed track in the FINAL
- * APPROACH COURSE's frame, which is the frame the words were read in. Reading
- * the words against anything else (a geodetic track, say) would let the charts
- * and the words disagree about where the aircraft was.
- *
- * Every column has one value per row of `tS`. The geodetic columns are carried
- * beside these, as `TRAINING_GEODETIC_COLUMNS`.
- */
 /**
  * The geodetic columns BOTH tracks carry, for the 3D layer.
  *
@@ -233,6 +246,15 @@ export interface TrainingInstruction {
 export const TRAINING_GEODETIC_COLUMNS = ["lon", "lat", "altHaeM"] as const;
 export type TrainingGeodeticColumn = (typeof TRAINING_GEODETIC_COLUMNS)[number];
 
+/**
+ * MIRROR of `instructions.course_frame` — the observed track in the FINAL
+ * APPROACH COURSE's frame, which is the frame the words were read in. Reading
+ * the words against anything else (a geodetic track, say) would let the charts
+ * and the words disagree about where the aircraft was.
+ *
+ * Every column has one value per row of `tS`. The geodetic columns are carried
+ * beside these, as `TRAINING_GEODETIC_COLUMNS`.
+ */
 export const TRAINING_OBSERVED_COLUMNS = [
   "toGoM",              // along the course, positive BEFORE the threshold
   "crossM",             // right of the course, positive
@@ -291,14 +313,14 @@ export type TrainingVerticalBand = Record<TrainingVerticalBandColumn, number[]>;
  * carry no geodetic columns — they run within ~100 m of the nominal line, so the
  * 3D layer does not draw them (design §5.6).
  */
-export const TRAINING_SPEED_EDGE_COLUMNS = ["toGoM", "crossM", "heightM"] as const;
+export const TRAINING_SPEED_EDGE_COLUMNS = ["toGoM", "crossM"] as const;
 export type TrainingSpeedEdgeColumn = (typeof TRAINING_SPEED_EDGE_COLUMNS)[number];
 
 export type TrainingSpeedEdge = { tS: number[] }
   & Record<TrainingSpeedEdgeColumn, number[]> & {
   endReason: TrainingEndReason;
-  finalGapM: number;
-  /** When this edge stopped, on the track's own clock. */
+  /** When this edge stopped, on the track's own clock. It is what
+   *  `arrivalWindowS` is made of, and it is checked against it. */
   endS: number;
 };
 
@@ -384,9 +406,17 @@ export interface TrainingSelection {
 
 /**
  * MIRROR of `instruction_kinematics.assumptions()`: what the flown sentences were
- * drawn under. It is REQUIRED and it is SHOWN — an approximation nobody can see
- * stated is worse than none, and the block claims in its own docstring that the
- * view shows it.
+ * drawn under. It is REQUIRED and every field of it is SHOWN, in the panel's ⓘ
+ * or in the read-back window's legend — an approximation nobody can see stated
+ * is worse than none, and the block claims in its own docstring that the view
+ * shows it.
+ *
+ * THREE OF THESE FIELDS HAVE NO PRODUCER YET: `verticalBandFrom`,
+ * `speedBandFrom` and `bandsAreJoint` are written by the exporter step that also
+ * writes the two bands (design §7, T10), which is not built. They are required
+ * here rather than optional because the repo settles a schema BEFORE the
+ * experiment that writes it runs — an export missing them is an export from
+ * unfinished code, and it is refused by name rather than read half-way.
  */
 export interface TrainingGeometry {
   method: string;
@@ -730,6 +760,15 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
                        "speedToleranceFraction"]) {
     if (values[field] <= 0) return { ok: false, problem: `vocabulary.${field} must be positive` };
   }
+  // Both mirror `Vocabulary.__post_init__`. The divisibility one is not
+  // decoration: `trainingWordCounts` ROUNDS 360/bin, so a 7° bin would give 51
+  // classes and read every heading word near the wrap into the wrong one.
+  if (360 % values.headingBinDeg !== 0) {
+    return { ok: false, problem: `vocabulary.headingBinDeg is ${values.headingBinDeg}, which does not divide 360°` };
+  }
+  if (!Number.isInteger(values.verticalSegments)) {
+    return { ok: false, problem: `vocabulary.verticalSegments is ${values.verticalSegments}, not a count of segments` };
+  }
   // The two tables. Sorted and distinct is `Vocabulary.__post_init__`'s check as
   // well: a word is the NEAREST centre, so two equal centres would make one of
   // them unreachable and an unsorted table would break the reading rule.
@@ -762,6 +801,15 @@ function parseVocabulary(raw: unknown): Parsed<TrainingVocabulary> {
     if (str(raw, field) === null) {
       return { ok: false, problem: `vocabulary.${field} is missing or not a non-empty string` };
     }
+  }
+  if (str(raw, "readingRule") !== TRAINING_READING_RULE) {
+    return {
+      ok: false,
+      problem:
+        `vocabulary.readingRule is ${JSON.stringify(raw.readingRule)}, and this reader is written for ` +
+        `${TRAINING_READING_RULE} — the rule decides what the columns MEAN (the second is an angle, ` +
+        `descent positive), which no field of the file can say. Re-export under the current rule`,
+    };
   }
   const idents = raw.runwayIdents;
   if (!Array.isArray(idents) || idents.length === 0 || !idents.every((i) => typeof i === "string" && i.length > 0)) {
@@ -1071,9 +1119,7 @@ function parseSpeedEdge(raw: unknown, where: string): Parsed<TrainingSpeedEdge> 
       problem: `${where}.endReason is ${JSON.stringify(raw.endReason)}, expected one of ${TRAINING_END_REASONS.join(", ")}`,
     };
   }
-  const finalGapM = finite(raw, "finalGapM");
   const endS = finite(raw, "endS");
-  if (finalGapM === null || finalGapM < 0) return { ok: false, problem: `${where}.finalGapM is missing or not a distance` };
   if (endS === null || endS <= 0) return { ok: false, problem: `${where}.endS is missing or not a time` };
   if (Math.abs(endS - tS[tS.length - 1]) > 0.05) {
     return { ok: false, problem: `${where}.endS is ${endS} s but its own track ends at ${tS[tS.length - 1]} s` };
@@ -1083,7 +1129,6 @@ function parseSpeedEdge(raw: unknown, where: string): Parsed<TrainingSpeedEdge> 
     value: {
       ...(columns as { tS: number[] } & Record<TrainingSpeedEdgeColumn, number[]>),
       endReason: endReason as TrainingEndReason,
-      finalGapM,
       endS,
     },
   };
@@ -1105,15 +1150,28 @@ function parseSpeedBand(raw: unknown, where: string): Parsed<TrainingSpeedBand> 
   const high = parseSpeedEdge(raw.high, `${where}.geometric.speedBand.high`);
   if (!high.ok) return high;
 
+  // The window is DERIVED from the two edges, so it is checked against them in
+  // both directions. One direction alone leaves the half a reader actually sees:
+  // a null window beside two edges that both landed renders as "no window: an
+  // edge ended on crossed-threshold", which names a reason that is not one.
+  const bothCrossed =
+    low.value.endReason === "crossed-threshold" && high.value.endReason === "crossed-threshold";
   const window = raw.arrivalWindowS;
   if (window === null) {
+    if (bothCrossed) {
+      return {
+        ok: false,
+        problem:
+          `${where}.geometric.speedBand.arrivalWindowS is null, but both edges crossed the threshold ` +
+          `(${high.value.endS} s and ${low.value.endS} s) — that is a window`,
+      };
+    }
     return { ok: true, value: { low: low.value, high: high.value, arrivalWindowS: null } };
   }
   const pair = numberArray(window);
   if (pair === null || pair.length !== 2) {
     return { ok: false, problem: `${where}.geometric.speedBand.arrivalWindowS is ${JSON.stringify(window)}, expected two times or null` };
   }
-  const bothCrossed = low.value.endReason === "crossed-threshold" && high.value.endReason === "crossed-threshold";
   if (!bothCrossed) {
     return {
       ok: false,
@@ -1123,10 +1181,26 @@ function parseSpeedBand(raw: unknown, where: string): Parsed<TrainingSpeedBand> 
         `an edge that never reached the runway has no arrival time`,
     };
   }
-  // The fast edge arrives first. A pair the other way round would still plot,
-  // as a bracket running backwards from the terminal word.
+  // It is the two edges' own crossings, in order: fast first. Checking the
+  // VALUES rather than just their order is what makes the field a mirror of the
+  // edges instead of a second opinion about them — and it is what catches a file
+  // whose `low` and `high` are the wrong way round, which nothing else would.
+  if (pair[0] !== high.value.endS || pair[1] !== low.value.endS) {
+    return {
+      ok: false,
+      problem:
+        `${where}.geometric.speedBand.arrivalWindowS is [${pair[0]}, ${pair[1]}], but its edges ` +
+        `cross at ${high.value.endS} s (high) and ${low.value.endS} s (low) — the window is the two ` +
+        `crossings, fast first`,
+    };
+  }
   if (!(pair[0] <= pair[1])) {
-    return { ok: false, problem: `${where}.geometric.speedBand.arrivalWindowS is [${pair[0]}, ${pair[1]}]: the fast edge arrives first` };
+    return {
+      ok: false,
+      problem:
+        `${where}.geometric.speedBand.arrivalWindowS is [${pair[0]}, ${pair[1]}]: the HIGH edge is ` +
+        `the faster one and arrives first, so these two edges are swapped`,
+    };
   }
   return { ok: true, value: { low: low.value, high: high.value, arrivalWindowS: [pair[0], pair[1]] } };
 }
@@ -1211,6 +1285,17 @@ function parseInstruction(
   const settled = raw.settledS;
   if (settled !== null && (typeof settled !== "number" || !Number.isFinite(settled))) {
     return { ok: false, problem: `${where}.settledS is ${JSON.stringify(settled)}, expected a number or null` };
+  }
+  // A manoeuvre cannot settle before it was issued. This is not a formality: a
+  // vertical instruction's span IS `issuedS`…`settledS`, and a reversed pair
+  // gives a segment with no rows in it — which does not draw, does not warn, and
+  // leaves its rows out of the "inside the band" denominator, so a corrupt
+  // export reads as a BETTER result than a good one.
+  if (settled !== null && settled < issuedS) {
+    return {
+      ok: false,
+      problem: `${where} settles at ${settled} s but was issued at ${issuedS} s — that span is empty`,
+    };
   }
   if (typeof raw.clamped !== "boolean") {
     return { ok: false, problem: `${where}.clamped is ${JSON.stringify(raw.clamped)}, expected a boolean` };

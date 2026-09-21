@@ -8,6 +8,7 @@ import {
   TRAINING_KIND_COLUMN,
   TRAINING_GEOMETRIC_COLUMNS,
   TRAINING_OBSERVED_COLUMNS,
+  TRAINING_READING_RULE,
   TRAINING_SPEED_EDGE_COLUMNS,
   TRAINING_VERTICAL_BAND_COLUMNS,
   TRAINING_WORD_COLUMNS,
@@ -641,6 +642,18 @@ describe("the track length, the instructions and the absorbed manoeuvres", () =>
     expect(absent.problem).toContain("settledS");
   });
 
+  // An empty span does not draw, does not warn, and leaves its own rows out of
+  // the "inside the band" denominator — so a corrupt export reads as a BETTER
+  // result than a good one. Measured on the fixture: 0.75 inside becomes 1.00.
+  it("refuses an instruction that settles before it was issued", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].instructions[9].settledS = 100; // the vertical one issued at 130
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("settles at 100 s but was issued at 130 s");
+  });
+
   it("refuses an instruction word outside its kind's range", () => {
     const parsed = sampleWith((sample) => {
       sample.flights[0].instructions[0].word = 72; // heading has 72 classes: 0…35
@@ -721,7 +734,9 @@ describe("the fields a lenient reader would have defaulted", () => {
   // another flight, and it would draw its mark off the plot instead of failing.
   it("refuses an instruction or an absorbed span outside the track", () => {
     const late = sampleWith((sample) => {
+      // both, so this is about the TRACK's length and not about the pair's order
       sample.flights[0].instructions[0].issuedS = 400; // the track is 262 s
+      sample.flights[0].instructions[0].settledS = 400;
     });
     expect(late.ok).toBe(false);
     if (late.ok) return;
@@ -826,5 +841,111 @@ describe("what a word means", () => {
   it("names the terminal classes, go-around included", () => {
     expect(trainingWordLabel(MOCK_VOCABULARY, "terminal", TERMINAL_LANDED)).toBe("landed");
     expect(trainingWordLabel(MOCK_VOCABULARY, "terminal", TERMINAL_GO_AROUND)).toBe("go-around");
+  });
+});
+
+// ── the boundaries the review found unpinned ─────────────────────────────────
+
+describe("the arrival window against its own edges", () => {
+  // The window is DERIVED from the two edges. Checking only one direction left
+  // the half a reader sees: a null window beside two landed edges rendered as
+  // "no window: an edge ended on crossed-threshold" — a reason that is not one.
+  it("refuses a null window when both edges crossed", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].geometric.speedBand.arrivalWindowS = null;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("both edges crossed");
+  });
+
+  // Checking the VALUES, not just their order, is what makes the field a mirror
+  // of the edges — and it is the only thing that catches low/high swapped.
+  it("refuses a window that is not the two edges' own crossings", () => {
+    const parsed = sampleWith((sample) => {
+      const band = sample.flights[0].geometric.speedBand;
+      band.arrivalWindowS = [band.arrivalWindowS[0] - 1, band.arrivalWindowS[1]];
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("the window is the two crossings, fast first");
+  });
+
+  it("refuses edges whose fast one is not the faster", () => {
+    const parsed = sampleWith((sample) => {
+      const band = sample.flights[0].geometric.speedBand;
+      [band.low, band.high] = [band.high, band.low];
+      band.arrivalWindowS = [band.high.endS, band.low.endS];
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("these two edges are swapped");
+  });
+});
+
+describe("the refusals a lenient reader would not have made", () => {
+  it("refuses a negative distance or a negative compared span", () => {
+    for (const field of ["finalGapM", "meanGapM", "gapP95M", "comparedS", "comparedFraction"]) {
+      const parsed = sampleWith((sample) => {
+        sample.flights[0].geometric[field] = -1;
+      });
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.problem).toContain(field);
+    }
+  });
+
+  // At the boundary, not past it: a word equal to the class count indexes one
+  // off the end of every legend, and `runwayIdents[4]` renders `undefined`.
+  it("refuses a sentence word exactly equal to its kind's class count", () => {
+    const parsed = sampleWith((sample) => {
+      sample.flights[0].sentence.words[0][TRAINING_KIND_COLUMN.runway] = 4; // classes are 0…3
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("outside this vocabulary's 0…3");
+  });
+
+  // MIRROR of `Vocabulary.__post_init__`. `trainingWordCounts` ROUNDS 360/bin,
+  // so a 7° bin would give 51 classes and read every heading near the wrap into
+  // the wrong one.
+  it("refuses a heading bin that does not divide the circle", () => {
+    const parsed = sampleWith((sample) => {
+      sample.vocabulary.headingBinDeg = 7;
+      sample.vocabulary.words.heading = 51;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("does not divide 360");
+  });
+
+  it("refuses a fractional segment count", () => {
+    const parsed = sampleWith((sample) => {
+      sample.vocabulary.verticalSegments = 5.5;
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("not a count of segments");
+  });
+});
+
+describe("the reading rule this reader is written for", () => {
+  // The file states its own bins, centres and tolerances, so most of what a word
+  // means is read from it. What is NOT in the file is that the second column is
+  // an ANGLE and that descent is positive — this reader hardcodes both. So it is
+  // bound to the rule, and refuses another one by name rather than reading an
+  // older artefact into today's meanings.
+  it("refuses an artefact read under another rule, naming both", () => {
+    const parsed = sampleWith((sample) => {
+      sample.vocabulary.readingRule = "segment-v13";
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problem).toContain("segment-v13");
+    expect(parsed.problem).toContain(TRAINING_READING_RULE);
+  });
+
+  it("is the rule the fixture carries, so the mirror is checked both ways", () => {
+    expect(TRAINING_READING_RULE).toBe(MOCK_VOCABULARY.readingRule);
   });
 });

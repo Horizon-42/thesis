@@ -11,12 +11,18 @@ import TrainingReadbackWindow, {
   chartLevels,
   flownTrace,
   gapAtS,
-  insideBandFraction,
+  bandCoverage,
+  bandCoverageReading,
+  extent,
   rowAt,
   runsOf,
   verticalRamps,
 } from "../TrainingReadbackWindow";
-import { parseTrainingSample, speedCentreMps } from "../../data/trainingSample";
+import {
+  parseTrainingSample,
+  speedCentreMps,
+  speedToleranceMps,
+} from "../../data/trainingSample";
 import { DESCEND_24, mockSample } from "../../data/__tests__/trainingSample.fixture";
 
 function selection() {
@@ -202,21 +208,22 @@ describe("verticalRamps", () => {
   });
 });
 
-describe("insideBandFraction", () => {
+describe("bandCoverage", () => {
   // The fixture's profile is built FROM the words, so the aircraft sits inside
   // the vertical band nearly all the time; what is pinned is that the number is
-  // a fraction of the rows, not that it is 1.
+  // a share of the rows, not that it is 1.
   it("reports the share of rows inside the band of the word in force", () => {
     const { vocabulary, flight } = selection();
-    const vertical = insideBandFraction(flight, vocabulary, "vertical");
-    expect(vertical).not.toBeNull();
-    expect(vertical as number).toBeGreaterThan(0.5);
-    expect(vertical as number).toBeLessThanOrEqual(1);
+    const vertical = bandCoverage(flight, vocabulary, "vertical");
+    expect(vertical.hasTolerance).toBe(true);
+    expect(vertical.judged).toBeGreaterThan(0);
+    expect(vertical.inside / vertical.judged).toBeGreaterThan(0.5);
+    expect(vertical.inside).toBeLessThanOrEqual(vertical.judged);
   });
 
-  it("falls when the aircraft leaves the band, and is null where there is none", () => {
+  it("falls when the aircraft leaves the band, and says so on the rows", () => {
     const { vocabulary, flight } = selection();
-    const before = insideBandFraction(flight, vocabulary, "speed") as number;
+    const before = bandCoverage(flight, vocabulary, "speed");
     const drifted = {
       ...flight,
       observed: {
@@ -224,9 +231,55 @@ describe("insideBandFraction", () => {
         groundSpeedMps: flight.observed.groundSpeedMps.map((mps) => mps + 12),
       },
     };
-    expect(insideBandFraction(drifted, vocabulary, "speed") as number).toBeLessThan(before);
-    // The heading word carries no tolerance, so there is no band to be inside.
-    expect(insideBandFraction(flight, vocabulary, "heading")).toBeNull();
+    const after = bandCoverage(drifted, vocabulary, "speed");
+    expect(after.inside / after.judged).toBeLessThan(before.inside / before.judged);
+    // and the rows it names are exactly the ones the red overlay draws
+    expect(after.outside.filter(Boolean).length).toBe(after.judged - after.inside);
+  });
+
+  // THE distinction this type exists for. "No tolerance" is a statement about
+  // the VOCABULARY; "nothing to measure" is a statement about this flight. A
+  // kind whose instructions are missing used to report the first, which is a
+  // false claim about the word (V36).
+  it("keeps 'no tolerance' apart from 'nothing to measure'", () => {
+    const { vocabulary, flight } = selection();
+    const heading = bandCoverage(flight, vocabulary, "heading");
+    expect(heading.hasTolerance).toBe(false);
+    expect(bandCoverageReading(heading)).toBe("no tolerance on this word");
+
+    const unworded = {
+      ...flight,
+      instructions: flight.instructions.filter((item) => item.kind !== "vertical"),
+    };
+    const vertical = bandCoverage(unworded, vocabulary, "vertical");
+    expect(vertical.hasTolerance).toBe(true);
+    expect(vertical.judged).toBe(0);
+    expect(bandCoverageReading(vertical)).toBe("no worded stretch to measure");
+  });
+
+  // The band's edges are INCLUSIVE: a measurement exactly on the tolerance has
+  // obeyed the word. Exclusive edges would report a flight holding the word
+  // exactly as disobeying it.
+  it("counts a row exactly on the edge of the band as inside", () => {
+    const { vocabulary, flight } = selection();
+    const level = chartLevels(flight, vocabulary, "speed")[0];
+    const edge = level.level + speedToleranceMps(vocabulary, level.instruction.word);
+    const onTheEdge = {
+      ...flight,
+      observed: { ...flight.observed, groundSpeedMps: flight.observed.groundSpeedMps.map(() => edge) },
+    };
+    const coverage = bandCoverage(onTheEdge, vocabulary, "speed");
+    expect(coverage.outside[rowAt(flight.observed.tS, level.instruction.issuedS)]).toBe(false);
+  });
+
+  // Rows no word covers are judged by nothing, and must not be drawn as a
+  // disagreement: after a plateau settles and before the next instruction there
+  // is no band to be outside of.
+  it("judges only the rows a word covers", () => {
+    const { vocabulary, flight } = selection();
+    const coverage = bandCoverage(flight, vocabulary, "vertical");
+    expect(coverage.judged).toBeLessThanOrEqual(flight.observed.tS.length);
+    expect(coverage.outside).toHaveLength(flight.observed.tS.length);
   });
 });
 
@@ -288,6 +341,7 @@ describe("TrainingReadbackWindow", () => {
     expect(screen.getByText(/vertical —.*inside the band \d+ % of the time/)).toBeTruthy();
     expect(screen.getByText(/speed —.*inside the band \d+ % of the time/)).toBeTruthy();
     expect(screen.getByText(/heading —.*no tolerance on this word/)).toBeTruthy();
+    expect(screen.queryByText(/heading —.*inside the band/)).toBeNull();
   });
 
   // The runway word names the frame the others are measured in; it is not a
@@ -392,12 +446,189 @@ describe("the flown sentence on the charts", () => {
     renderWindow();
     expect(screen.getAllByText(/flown by rule/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/across the threshold plane, 1481 m from the threshold/)).toBeTruthy();
-    expect(screen.getByText(/compared over 100% of/)).toBeTruthy();
+    expect(screen.getByText(/compared over 262 s — 100% of/)).toBeTruthy();
   });
 
   it("tells the reader the second line is a baseline, not a model's answer", () => {
     renderWindow();
     expect(screen.getByText(/never a model's answer/)).toBeTruthy();
     expect(screen.getByText(/what the words did not say/)).toBeTruthy();
+  });
+});
+
+// ── what is actually DRAWN (T11's review: every one of these mutations used to
+//    survive, because the geometry was tested and the pixels were not) ────────
+
+describe("the corridor on the charts", () => {
+  function svg(): HTMLElement {
+    const node = document.body.querySelector(".training-readback-svg");
+    if (!node) throw new Error("no chart svg");
+    return node as unknown as HTMLElement;
+  }
+
+  // The commit's headline drawing. Deleting it left every test green.
+  it("draws the two speed edges in the plan view", () => {
+    const { flight } = renderWindow();
+    const edges = svg().querySelectorAll(".training-readback-speed-edge");
+    expect(edges).toHaveLength(2);
+    const points = (edges[0].getAttribute("points") ?? "").trim().split(/\s+/);
+    expect(points).toHaveLength(flight.geometric.speedBand.low.tS.length);
+  });
+
+  // A fan is a closed polygon: the lower edge forward, the upper edge back. Drop
+  // the reversal and each one becomes a bow-tie that still renders.
+  it("closes each vertical fan around its own rows", () => {
+    const { flight, vocabulary } = renderWindow();
+    const ramps = verticalRamps(flight, vocabulary);
+    const fans = svg().querySelectorAll(".training-readback-fan");
+    expect(fans).toHaveLength(ramps.length);
+    fans.forEach((fan, index) => {
+      const points = (fan.getAttribute("points") ?? "").trim().split(/\s+/);
+      expect(points).toHaveLength(ramps[index].tS.length * 2);
+      // the first point of the return leg is the LAST row's steeper edge: with
+      // the reversal dropped it would be the first row's instead
+      const half = ramps[index].tS.length;
+      expect(points[half].split(",")[0]).toBe(points[half - 1].split(",")[0]);
+    });
+  });
+
+  // The other half of "two errors on one chart": without this line the binning
+  // cost is not drawn at all.
+  it("draws the fitted angle as a line of its own, apart from the word's", () => {
+    const { flight, vocabulary } = renderWindow();
+    const ramps = verticalRamps(flight, vocabulary);
+    const fitted = svg().querySelectorAll(".training-readback-fitted");
+    const word = svg().querySelectorAll(".training-readback-word");
+    expect(fitted).toHaveLength(ramps.length);
+    expect(word).toHaveLength(ramps.length);
+    // the fitted angle is not the word's angle on this fixture, so the two
+    // polylines must not be the same string
+    expect(fitted[1].getAttribute("points")).not.toBe(word[1].getAttribute("points"));
+  });
+
+  // Swapping y and height gives a negative height, which SVG drops silently.
+  it("draws a speed band with a positive height", () => {
+    const { flight, vocabulary } = renderWindow();
+    const bands = svg().querySelectorAll(".training-readback-band");
+    expect(bands).toHaveLength(chartLevels(flight, vocabulary, "speed").length);
+    bands.forEach((band) => {
+      expect(Number(band.getAttribute("height"))).toBeGreaterThan(0);
+    });
+  });
+
+  // The red overlay is the only rendered output of the tolerance contract; a
+  // sign flip in it was invisible to the whole suite.
+  it("marks the measured trace red exactly where it left the band", () => {
+    const { vocabulary, flight, geometry } = selection();
+    const drifted = {
+      ...flight,
+      observed: {
+        ...flight.observed,
+        groundSpeedMps: flight.observed.groundSpeedMps.map((mps) => mps + 12),
+      },
+    };
+    render(
+      <TrainingReadbackWindow
+        flight={drifted}
+        vocabulary={vocabulary}
+        geometry={geometry}
+        cursorS={0}
+        onCursorChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const marks = document.body.querySelectorAll(".training-readback-outside");
+    expect(marks.length).toBeGreaterThan(0);
+    // and the runs it draws are the runs the reading names
+    const coverage = bandCoverage(drifted, vocabulary, "speed");
+    expect(runsOf(coverage.outside).length).toBeGreaterThan(0);
+  });
+
+  it("draws no red where the measurement stayed inside", () => {
+    const { vocabulary, flight, geometry } = selection();
+    const held = {
+      ...flight,
+      instructions: flight.instructions.filter((item) => item.kind === "speed"),
+      observed: {
+        ...flight.observed,
+        groundSpeedMps: flight.observed.groundSpeedMps.map(() => 121),
+      },
+    };
+    render(
+      <TrainingReadbackWindow
+        flight={held}
+        vocabulary={vocabulary}
+        geometry={geometry}
+        cursorS={0}
+        onCursorChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    // the first speed word IS 121 m/s, so the opening stretch is inside it
+    const coverage = bandCoverage(held, vocabulary, "speed");
+    expect(coverage.outside[0]).toBe(false);
+  });
+
+  // The legend quotes the artefact, not this file: both numbers are claims the
+  // design makes (V32 / V34) and both were hardcoded past the block.
+  it("quotes the height floor and the joint-envelope flag from the artefact", () => {
+    const { vocabulary, flight, geometry } = selection();
+    render(
+      <TrainingReadbackWindow
+        flight={flight}
+        vocabulary={vocabulary}
+        geometry={{ ...geometry, heightFloorM: 17, bandsAreJoint: true }}
+        cursorS={0}
+        onCursorChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/closes at 17 m/)).toBeTruthy();
+    expect(screen.getByText(/The two bands are the joint envelope/)).toBeTruthy();
+  });
+});
+
+describe("extent", () => {
+  // The guard is not decoration now: a level flight holding a level word can
+  // make trace, flown line and band all constant, and `yFor` would return NaN
+  // for every row of the chart.
+  it("pads a range, and widens a constant one instead of dividing by zero", () => {
+    const [low, high] = extent([10, 20]);
+    expect(low).toBeLessThan(10);
+    expect(high).toBeGreaterThan(20);
+    const [flatLow, flatHigh] = extent([5, 5, 5]);
+    expect(flatHigh - flatLow).toBeGreaterThan(0);
+  });
+});
+
+describe("verticalRamps without a settled time", () => {
+  // `settledS` is null for a manoeuvre that never settles. A vertical segment
+  // normally settles where the next is issued, so this branch is only reachable
+  // on an export that wrote one — and it must fall back to the next segment's
+  // start, not to zero.
+  it("runs to the next segment when its own end is missing", () => {
+    const { vocabulary, flight } = selection();
+    const loosened = {
+      ...flight,
+      instructions: flight.instructions.map((item) =>
+        item.kind === "vertical" && item.issuedS === 70 ? { ...item, settledS: null } : item,
+      ),
+    };
+    const ramp = verticalRamps(loosened, vocabulary)[1];
+    expect(ramp.instruction.settledS).toBeNull();
+    expect(ramp.endS).toBe(130);
+    expect(ramp.tS[ramp.tS.length - 1]).toBe(130);
+  });
+});
+
+describe("gapAtS at the moment the words stop", () => {
+  // At the flown track's LAST step both tracks still exist, so the gap is a
+  // number; one step later there is nothing to compare against. `>=` here would
+  // report "the words have stopped" a second before they did.
+  it("reads a gap at the last step and none after it", () => {
+    const { flight } = selection();
+    const stopped = flight.geometric.tS[flight.geometric.tS.length - 1];
+    expect(gapAtS(flight, stopped)).not.toBeNull();
+    expect(gapAtS(flight, stopped + 0.5)).toBeNull();
   });
 });

@@ -159,9 +159,11 @@ function wrap180(degrees: number): number {
 
 /**
  * Cumulative horizontal distance, the axis the vertical word is read on.
- * MIRRORS `instructions._profile`: each step is the ROW'S OWN speed times the
- * gap before it, not a trapezoid, so the fixture's `pathM` is the quantity the
- * exporter writes rather than a second definition of it.
+ * Each step is the ROW'S OWN speed times the gap before it, not a trapezoid,
+ * which is how `instructions._profile` accumulates it. Its floor on the speed
+ * (`MINIMUM_GROUND_SPEED_MPS`) is left out because this fixture never goes near
+ * it — a fixture is the right SHAPE, and the real column comes from the
+ * exporter, not from here.
  */
 function cumulativePathM(tS: number[], speed: number[]): number[] {
   const out = [0];
@@ -260,9 +262,7 @@ function speedEdge(scale: number) {
     tS,
     toGoM: tS.map((t) => ramp(FLOWN_TO_GO, t * scale)),
     crossM: tS.map((t) => ramp(FLOWN_CROSS, t * scale)),
-    heightM: tS.map((t) => ramp(FLOWN_HEIGHT, t * scale)),
     endReason: "crossed-threshold",
-    finalGapM: 1480.5,
     endS,
   };
 }
@@ -331,7 +331,22 @@ export const MOCK_FLIGHT = {
   geometric: MOCK_GEOMETRIC,
 };
 
-/** MIRROR of `instruction_kinematics.assumptions()` — the real defaults. */
+/**
+ * MIRROR of `instruction_kinematics.assumptions()` — the real defaults, value for
+ * value (`ROUTE_BANK_RAD` 20°, `G` 9.81, `DESCENT_MAX_RAD` 6°, `CLIMB_MAX_RAD`
+ * 4°, `ACCEL_MAX_MPS2` 1.0, and the three files those come from).
+ *
+ * THE CLIMB CAP IS 4°, NOT 2°: the limits have to cover every angle the
+ * vocabulary can command, tolerance included, and the go-around mode's band
+ * reaches 3.21°. `test_instruction_kinematics` pins that containment on the
+ * Python side; a fixture written to the old 2° would make this reader's tests
+ * pass against a sentence no executor could fly.
+ *
+ * The three band fields have NO producer yet (design §7, T10). They are here
+ * because the schema is settled before the exporter that writes it runs — this
+ * fixture is what the reader is tested against until then, and it is the one
+ * place their shape is stated.
+ */
 export const MOCK_GEOMETRY = {
   method: "instruction-kinematics-v1",
   dtS: 1,
@@ -351,7 +366,9 @@ export const MOCK_GEOMETRY = {
   verticalBandFrom: "vocabulary.verticalTolerance",
   speedBandFrom: "vocabulary.speedTolerance",
   bandsAreJoint: false,
-  constantsFrom: ["outputs/guidance/route.py", "outputs/guidance/controller.py"],
+  constantsFrom: [
+    "outputs/guidance/route.py", "outputs/guidance/controller.py", "geometry/flyability.py",
+  ],
 };
 
 export const MOCK_SAMPLE = {

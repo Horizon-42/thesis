@@ -287,6 +287,12 @@ export default function TrainingPanel() {
                     inside this band", so a panel that listed only the centres
                     would be stating half of what the vocabulary says. */}
                 <div>
+                  {/* How the labeller cut the profile, not a word count — the
+                      vertical words are the slopes of these segments. */}
+                  <dt>Vertical segments</dt>
+                  <dd>{sample.vocabulary.verticalSegments} per approach</dd>
+                </div>
+                <div>
                   <dt>Vertical words</dt>
                   <dd>
                     {sample.vocabulary.verticalModesDeg
@@ -360,6 +366,13 @@ export default function TrainingPanel() {
                 <div>
                   <dt>Starts / stops</dt>
                   <dd>{sample.geometry.startsAt}; {sample.geometry.stopRule}</dd>
+                </div>
+                {/* Every constant above is imported from these files rather than
+                    typed into the kinematics — which is only worth saying if the
+                    files are named where the numbers are shown. */}
+                <div>
+                  <dt>Constants from</dt>
+                  <dd>{sample.geometry.constantsFrom.join(" · ")}</dd>
                 </div>
               </dl>
               ) : null}

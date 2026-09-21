@@ -270,46 +270,83 @@ export function verticalRamps(
 }
 
 /**
- * How much of the compared window the aircraft spent INSIDE the band of the word
- * in force, per kind — the readout the tolerance makes possible, because the
- * tolerance is precisely the rule for "did it obey".
+ * Which observed rows sat OUTSIDE the band of the word in force, and how many
+ * were judged at all — one function, because the chart's red overlay and the
+ * chart's percentage have to be the same reading.
  *
- * `null` for a kind with no tolerance: the heading word has none, so there is no
- * band to be inside and any number here would be invented (V36).
+ * `hasTolerance: false` for a kind that carries no redundancy (the heading,
+ * runway, duration and terminal words). That is NOT the same as having nothing
+ * to judge: a kind whose instruction list is empty has a tolerance and no rows,
+ * and saying "no tolerance on this word" there would be a false statement about
+ * the vocabulary rather than about this flight (V36).
  *
  * IT MEASURES THE READING, NOT A MODEL. A low fraction says this flight's
  * plateaus or segments are coarse — the words were read off the very track being
  * judged — and nothing at all about anyone's prediction.
+ *
+ * Only rows a word actually covers are judged: between a plateau's `settledS`
+ * and the next instruction nothing is in force to be inside of, and those rows
+ * are left out of both counts rather than scored against a neighbour.
+ *
+ * EVERY ROW IS JUDGED AT MOST ONCE. Consecutive spans share their boundary row —
+ * a vertical segment ends where the next begins, a plateau's span ends where the
+ * next word is issued — so the verdicts are written into a per-row array and the
+ * counts are read back off it, rather than accumulated as the spans are walked.
+ * Accumulating double-counted those rows (the fixture: 134 judgements over 132
+ * rows) and the overlay and the percentage then disagreed about the same flight.
+ * A boundary row takes the LATER span's verdict, because that is the word in
+ * force at that instant.
  */
-export function insideBandFraction(
+export interface BandCoverage {
+  hasTolerance: boolean;
+  /** Per observed row: true where the measurement left its word's band. Rows no
+   *  word covers are false — nothing to disagree with. */
+  outside: boolean[];
+  judged: number;
+  inside: number;
+}
+
+export function bandCoverage(
   flight: TrainingFlight,
   vocabulary: TrainingVocabulary,
   kind: ChartedKind,
-): number | null {
-  let inside = 0;
-  let total = 0;
+): BandCoverage {
+  const { tS } = flight.observed;
+  if (kind !== VERTICAL_KIND && kind !== "speed") {
+    return { hasTolerance: false, outside: tS.map(() => false), judged: 0, inside: 0 };
+  }
+  // null = no word covers this row, so there is nothing to be inside of.
+  const verdict: Array<boolean | null> = tS.map(() => null);
   if (kind === VERTICAL_KIND) {
-    const { tS, heightM } = flight.observed;
+    const { heightM } = flight.observed;
     for (const ramp of verticalRamps(flight, vocabulary)) {
       ramp.tS.forEach((seconds, index) => {
-        const height = heightM[rowAt(tS, seconds)];
-        total += 1;
-        if (height <= ramp.lo[index] && height >= ramp.hi[index]) inside += 1;
+        const row = rowAt(tS, seconds);
+        verdict[row] = heightM[row] <= ramp.lo[index] && heightM[row] >= ramp.hi[index];
       });
     }
-  } else if (kind === "speed") {
-    const { tS, groundSpeedMps } = flight.observed;
+  } else {
+    const { groundSpeedMps } = flight.observed;
     for (const level of chartLevels(flight, vocabulary, kind)) {
       const tolerance = speedToleranceMps(vocabulary, level.instruction.word);
       for (let row = rowAt(tS, level.instruction.issuedS); row <= rowAt(tS, level.endS); row += 1) {
-        total += 1;
-        if (Math.abs(groundSpeedMps[row] - level.level) <= tolerance) inside += 1;
+        verdict[row] = Math.abs(groundSpeedMps[row] - level.level) <= tolerance;
       }
     }
-  } else {
-    return null;
   }
-  return total === 0 ? null : inside / total;
+  return {
+    hasTolerance: true,
+    outside: verdict.map((value) => value === false),
+    judged: verdict.filter((value) => value !== null).length,
+    inside: verdict.filter((value) => value === true).length,
+  };
+}
+
+/** How the chart titles say it: the share inside, or WHY there is no share. */
+export function bandCoverageReading(coverage: BandCoverage): string {
+  if (!coverage.hasTolerance) return "no tolerance on this word";
+  if (coverage.judged === 0) return "no worded stretch to measure";
+  return `inside the band ${((coverage.inside / coverage.judged) * 100).toFixed(0)} % of the time`;
 }
 
 /** The contiguous runs of `true` in a per-row flag, as [firstRow, lastRow] pairs.
@@ -342,7 +379,7 @@ export function rowAt(tS: number[], seconds: number): number {
   return low;
 }
 
-function extent(values: number[]): [number, number] {
+export function extent(values: number[]): [number, number] {
   let low = values[0];
   let high = values[0];
   for (const value of values) {
@@ -466,10 +503,14 @@ export default function TrainingReadbackWindow({
   const planY = observed.crossM.map((metres) => metres / 1000);
   const flownX = flight.geometric.toGoM.map((metres) => -metres / 1000);
   const flownY = flight.geometric.crossM.map((metres) => metres / 1000);
-  // Both tracks decide the frame, or the flown one is drawn off the edge exactly
+  const speedEdges = [flight.geometric.speedBand.low, flight.geometric.speedBand.high];
+  // EVERY drawn track decides the frame, or one is drawn off the edge exactly
   // when it has gone somewhere the aircraft did not — which is what to look at.
-  const [planXLow, planXHigh] = extent([...planX, ...flownX, 0]);
-  const [planYLow, planYHigh] = extent([...planY, ...flownY, 0]);
+  // The plan has no clip, so a line outside the frame draws over the charts.
+  const edgeX = speedEdges.flatMap((edge) => edge.toGoM.map((metres) => -metres / 1000));
+  const edgeY = speedEdges.flatMap((edge) => edge.crossM.map((metres) => metres / 1000));
+  const [planXLow, planXHigh] = extent([...planX, ...flownX, ...edgeX, 0]);
+  const [planYLow, planYHigh] = extent([...planY, ...flownY, ...edgeY, 0]);
   const planScale = Math.min(
     (plotW - 12) / (planXHigh - planXLow),
     (PLAN_H - 28) / (planYHigh - planYLow),
@@ -484,11 +525,15 @@ export default function TrainingReadbackWindow({
     // ever non-empty.
     const levels = kind === VERTICAL_KIND ? [] : chartLevels(flight, vocabulary, kind);
     const ramps = kind === VERTICAL_KIND ? verticalRamps(flight, vocabulary) : [];
+    // Sorted, like `chartLevels` and `verticalRamps` are: array order is the
+    // exporter's issue order today, and three call sites in one window must not
+    // disagree about which word is in force because one of them assumed it.
     const inForce = flight.instructions
       .filter((item) => item.kind === kind && item.issuedS <= cursorS)
+      .sort((a, b) => a.issuedS - b.issuedS)
       .pop() ?? null;
-    const insideFraction = insideBandFraction(flight, vocabulary, kind);
-    return { trace, levels, ramps, inForce, insideFraction };
+    const coverage = bandCoverage(flight, vocabulary, kind);
+    return { trace, levels, ramps, inForce, coverage };
   };
 
   return createPortal(
@@ -565,9 +610,10 @@ export default function TrainingReadbackWindow({
               — because the speed tolerance's real cost is arrival TIME, which a
               static plan cannot show. It is drawn so that is visible rather than
               assumed; the number is in the sentence bar's header (design §5.6). */}
-          {[flight.geometric.speedBand.low, flight.geometric.speedBand.high].map((edge, index) => (
+          {speedEdges.map((edge, index) => (
             <polyline
               key={`speed-edge-${index}`}
+              className="training-readback-speed-edge"
               points={edge.toGoM
                 .map((metres, row) => `${planPx(-metres / 1000)},${planPy(edge.crossM[row] / 1000)}`)
                 .join(" ")}
@@ -609,7 +655,7 @@ export default function TrainingReadbackWindow({
 
           {/* ── the three signals ─────────────────────────────────────────── */}
           {CHARTED_KINDS.map((kind, index) => {
-            const { trace, levels, ramps, inForce, insideFraction } = readout(kind);
+            const { trace, levels, ramps, inForce, coverage } = readout(kind);
             const top = chartTop(index);
             const plotTop = top + 14;
             const plotH = CHART_H - 22;
@@ -622,24 +668,6 @@ export default function TrainingReadbackWindow({
             ]);
             const yFor = (value: number) => plotTop + ((high - value) / (high - low)) * plotH;
 
-            // Where the aircraft sat OUTSIDE the band of the word in force. This
-            // is the one mark on the chart that is a disagreement rather than a
-            // drawing, so it is computed from the same bands that are drawn.
-            const outside = trace.values.map(() => false);
-            for (const ramp of ramps) {
-              ramp.tS.forEach((seconds, position) => {
-                const row = rowAt(tS, seconds);
-                outside[row] = trace.values[row] > ramp.lo[position] || trace.values[row] < ramp.hi[position];
-              });
-            }
-            for (const level of levels) {
-              const tolerance = kind === "speed" ? speedToleranceMps(vocabulary, level.instruction.word) : null;
-              if (tolerance === null) continue;
-              for (let row = rowAt(tS, level.instruction.issuedS); row <= rowAt(tS, level.endS); row += 1) {
-                outside[row] = Math.abs(trace.values[row] - level.level) > tolerance;
-              }
-            }
-
             return (
               <g key={kind} className="training-readback-chart">
                 <text x={GUTTER} y={top + 9} className="training-readback-title">
@@ -650,9 +678,7 @@ export default function TrainingReadbackWindow({
                       `${inForce.settledS === null ? ", never settled" : `, settled ${formatSeconds(inForce.settledS)} s`})` +
                       ` · now ${format(trace.values[cursorRow], trace.digits)}`
                     : ""}
-                  {insideFraction === null
-                    ? " · no tolerance on this word"
-                    : ` · inside the band ${(insideFraction * 100).toFixed(0)} % of the time`}
+                  {` · ${bandCoverageReading(coverage)}`}
                 </text>
 
                 {/* absorbed first, so the trace and the steps read over it */}
@@ -686,6 +712,7 @@ export default function TrainingReadbackWindow({
                   return (
                     <rect
                       key={`band-${position}`}
+                      className="training-readback-band"
                       x={x}
                       width={Math.max(xFor(item.endS) - x, 1)}
                       y={yFor(item.level + tolerance)}
@@ -697,6 +724,7 @@ export default function TrainingReadbackWindow({
                 {ramps.map((ramp, position) => (
                   <polygon
                     key={`fan-${position}`}
+                    className="training-readback-fan"
                     points={
                       ramp.tS.map((t, row) => `${xFor(t)},${yFor(ramp.lo[row])}`).join(" ") +
                       " " +
@@ -713,10 +741,11 @@ export default function TrainingReadbackWindow({
                   className="training-readback-trace"
                 />
                 {/* …and again, in red, over the stretches that left the band. */}
-                {runsOf(outside).map(([first, last], position) =>
+                {runsOf(coverage.outside).map(([first, last], position) =>
                   first === last ? (
                     <circle
                       key={`outside-${position}`}
+                      className="training-readback-outside"
                       cx={xFor(tS[first])}
                       cy={yFor(trace.values[first])}
                       r={1.8}
@@ -725,6 +754,7 @@ export default function TrainingReadbackWindow({
                   ) : (
                     <polyline
                       key={`outside-${position}`}
+                      className="training-readback-outside"
                       points={tS.slice(first, last + 1)
                         .map((t, offset) => `${xFor(t)},${yFor(trace.values[first + offset])}`)
                         .join(" ")}
@@ -753,6 +783,7 @@ export default function TrainingReadbackWindow({
                 {ramps.map((ramp, position) => (
                   <g key={`ramp-${position}`}>
                     <polyline
+                      className="training-readback-fitted"
                       points={ramp.tS.map((t, row) => `${xFor(t)},${yFor(ramp.fitted[row])}`).join(" ")}
                       fill="none"
                       stroke={TRAINING_TRACE_COLOR}
@@ -765,6 +796,7 @@ export default function TrainingReadbackWindow({
                       </title>
                     </polyline>
                     <polyline
+                      className="training-readback-word"
                       points={ramp.tS.map((t, row) => `${xFor(t)},${yFor(ramp.centre[row])}`).join(" ")}
                       fill="none"
                       stroke={TRAINING_WORD_COLOR}
@@ -878,9 +910,9 @@ export default function TrainingReadbackWindow({
               ? `across the threshold plane, ${format(flight.geometric.finalGapM)} m from the threshold`
               : `on the time cap, ${format(flight.geometric.finalGapM)} m from the threshold` +
                 (endedPastThePlane ? ", having flown past the plane" : "")}
-            , and the two were compared over {format(flight.geometric.comparedFraction * 100)}% of
-            the approach (mean {format(flight.geometric.meanGapM)} m, p95{" "}
-            {format(flight.geometric.gapP95M)} m).
+            , and the two were compared over {format(flight.geometric.comparedS)} s —{" "}
+            {format(flight.geometric.comparedFraction * 100)}% of the approach (mean{" "}
+            {format(flight.geometric.meanGapM)} m, p95 {format(flight.geometric.gapP95M)} m).
           </span>
           <span>
             <b style={{ color: TRAINING_TRACE_COLOR }}>——</b> measured ·{" "}
@@ -888,8 +920,9 @@ export default function TrainingReadbackWindow({
             <b style={{ color: TRAINING_WORD_COLOR }}>——</b> the word in force ·{" "}
             <b style={{ color: TRAINING_BAND_EDGE }}>▩</b> the band that word allows ·{" "}
             <b style={{ color: TRAINING_OUTSIDE_COLOR }}>——</b> measured, outside it · dotted =
-            issued (yellow) and settled (green) · hatched = read but not worded ·
-            dashed = where the sentence lands.
+            issued (yellow), and settled (green) on the plateau kinds — a vertical
+            segment settles where the next one is issued, so it has no second
+            line · hatched = read but not worded · dashed = where the sentence lands.
           </span>
           <span>
             A WORD IS A BAND, not a point: the vertical and speed words each carry
