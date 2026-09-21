@@ -630,6 +630,10 @@ def main(argv: list[str] | None = None) -> int:
                                  + f" at {airport}"
                                  + f", stratified by approach_difficulty at the executor's anchor "
                                    f"(pool {len(candidates)})")},
+        # The MODEL, in the manifest and not only in the sample: the picker has to
+        # say which model a set carries before anyone downloads ten megabytes of it.
+        **({"prior": {"sha256": prior_block["sha256"], "seed": prior_block["seed"],
+                      "method": prior_block["method"]}} if prior_block is not None else {}),
         "source": {"artefact": str(artefact), "manifest": str(manifest),
                    "manifestSha256": file_sha256(manifest)},
     }

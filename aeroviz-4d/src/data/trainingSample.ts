@@ -157,6 +157,13 @@ export interface TrainingSetEntry {
   readingRule: string;
   flights: number;
   /**
+   * WHICH MODEL this set carries, when its kind says it carries one. It is in
+   * the manifest as well as in the sample because the picker has to name the
+   * model before anyone downloads ten megabytes of it — switching between two
+   * experiments should not mean loading both to find out which is which.
+   */
+  prior?: TrainingSetPrior;
+  /**
    * WHICH flights this set holds and how they were chosen. It is required and it
    * is SHOWN, because "40 of 6,853" is not a statement until the rule that picked
    * the 40 is on screen beside it.
@@ -168,6 +175,12 @@ export interface TrainingSetEntry {
    * how it used to work.
    */
   cohort: TrainingCohort;
+}
+
+export interface TrainingSetPrior {
+  sha256: string;
+  seed: number;
+  method: string;
 }
 
 export interface TrainingCohort {
@@ -798,6 +811,26 @@ function parseSetEntry(raw: unknown, position: number): Parsed<TrainingSetEntry>
   if (flights === null || flights < 0) {
     return { ok: false, problem: `${where("flights")} is missing or not a count` };
   }
+  // Keyed on the KIND, like the sample's own prior block: a prior set that
+  // cannot name its model is half-written, and a read-back set that names one
+  // has the wrong kind.
+  let prior: TrainingSetPrior | undefined;
+  if (kind === "prior-generated") {
+    const block = raw.prior;
+    if (!isRecord(block)) {
+      return { ok: false, problem: `${where("prior")} is missing: a prior set names its model in the manifest` };
+    }
+    const sha256 = str(block, "sha256");
+    const method = str(block, "method");
+    const seed = finite(block, "seed");
+    if (sha256 === null || method === null || seed === null) {
+      return { ok: false, problem: `${where("prior")} must carry the model's sha256, its seed and how it was asked` };
+    }
+    prior = { sha256, seed, method };
+  } else if (raw.prior !== undefined) {
+    return { ok: false, problem: `${where("prior")} names a model, but this set's kind is ${kind}` };
+  }
+
   const cohort = raw.cohort;
   if (!isRecord(cohort)) {
     return { ok: false, problem: `${where("cohort")} is missing: a set that cannot say how its flights were drawn is a set nobody can reproduce` };
@@ -824,6 +857,7 @@ function parseSetEntry(raw: unknown, position: number): Parsed<TrainingSetEntry>
       runwaySha256: str(raw, "runwaySha256") as string,
       readingRule: str(raw, "readingRule") as string,
       flights,
+      ...(prior ? { prior } : {}),
       cohort: { split, perStratum, seed, drawnFrom },
     },
   };

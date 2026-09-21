@@ -10,14 +10,18 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const { appState, setTrainingSelection, fetchMock } = vi.hoisted(() => ({
-  appState: { activeAirportCode: "KRDU" as string },
+const { appState, setTrainingSelection, setTrainingLayer, fetchMock } = vi.hoisted(() => ({
+  appState: {
+    activeAirportCode: "KRDU" as string,
+    trainingLayers: { flown: true, model: true },
+  },
   setTrainingSelection: vi.fn(),
+  setTrainingLayer: vi.fn(),
   fetchMock: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
-  useApp: () => ({ ...appState, setTrainingSelection }),
+  useApp: () => ({ ...appState, setTrainingSelection, setTrainingLayer }),
 }));
 
 import TrainingPanel from "../TrainingPanel";
@@ -218,5 +222,43 @@ describe("TrainingPanel", () => {
     await waitFor(() => {
       expect(lastPublished()?.flight?.callsign).toBe("AAL456");
     });
+  });
+});
+
+// ── the two switches, and the experiment picker (2026-09-21) ────────────────
+
+describe("TrainingPanel's switches", () => {
+  beforeEach(() => {
+    appState.activeAirportCode = "KRDU";
+    setTrainingLayer.mockClear();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample() });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  // The observed track has NO switch: it is the aircraft that was actually
+  // there, and every other line is read against it.
+  it("offers a switch for each line a sentence draws, and none for the measured one", async () => {
+    render(<TrainingPanel />);
+    expect(await screen.findByText("DAL123")).toBeTruthy();
+    expect(screen.getByLabelText(/the words flown by rule/)).toBeTruthy();
+    expect(screen.getByLabelText(/what the model said/)).toBeTruthy();
+    expect(screen.queryByLabelText(/measured/)).toBeNull();
+  });
+
+  it("switches a line off through the shared state, not its own", async () => {
+    render(<TrainingPanel />);
+    expect(await screen.findByText("DAL123")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/the words flown by rule/));
+    expect(setTrainingLayer).toHaveBeenCalledWith("flown", false);
+  });
+
+  // A set with no model has nothing to switch; the box says so rather than
+  // toggling a line that does not exist.
+  it("disables the model switch when the set carries none", async () => {
+    render(<TrainingPanel />);
+    expect(await screen.findByText("DAL123")).toBeTruthy();
+    expect(screen.getByLabelText(/what the model said/)).toHaveProperty("disabled", true);
   });
 });

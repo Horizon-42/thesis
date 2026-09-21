@@ -45,6 +45,7 @@ function renderWindow(overrides: Partial<React.ComponentProps<typeof TrainingRea
   const onClose = vi.fn();
   render(
     <TrainingReadbackWindow
+      layers={{ flown: true, model: true }}
       flight={flight}
       vocabulary={vocabulary}
       geometry={geometry}
@@ -300,6 +301,7 @@ describe("TrainingReadbackWindow", () => {
     const { container } = render(
       <div className="flight-ops-panel">
         <TrainingReadbackWindow
+          layers={{ flown: true, model: true }}
           {...selection()}
           cursorS={0}
           onCursorChange={vi.fn()}
@@ -533,6 +535,7 @@ describe("the corridor on the charts", () => {
     };
     render(
       <TrainingReadbackWindow
+        layers={{ flown: true, model: true }}
         flight={drifted}
         vocabulary={vocabulary}
         geometry={geometry}
@@ -560,6 +563,7 @@ describe("the corridor on the charts", () => {
     };
     render(
       <TrainingReadbackWindow
+        layers={{ flown: true, model: true }}
         flight={held}
         vocabulary={vocabulary}
         geometry={geometry}
@@ -579,6 +583,7 @@ describe("the corridor on the charts", () => {
     const { vocabulary, flight, geometry } = selection();
     render(
       <TrainingReadbackWindow
+        layers={{ flown: true, model: true }}
         flight={flight}
         vocabulary={vocabulary}
         geometry={{ ...geometry, heightFloorM: 17, bandsAreJoint: true }}
@@ -656,7 +661,7 @@ describe("the model's line in the read-back window", () => {
   // rules and the same event times as the orange line, so the distance between
   // them is the WORDS.
   it("draws the model's sentence on the plan view and every chart", () => {
-    render(<TrainingReadbackWindow {...priorProps()} />);
+    render(<TrainingReadbackWindow layers={{ flown: true, model: true }} {...priorProps()} />);
     expect(document.body.querySelectorAll(".training-readback-model")).toHaveLength(4);
   });
 
@@ -667,7 +672,7 @@ describe("the model's line in the read-back window", () => {
 
   // THE sentence that stops the whole window being read as free generation.
   it("says how the model was asked, and whether it had seen these flights", () => {
-    render(<TrainingReadbackWindow {...priorProps()} />);
+    render(<TrainingReadbackWindow layers={{ flown: true, model: true }} {...priorProps()} />);
     expect(screen.getByText(/teacher-forced-next-word/)).toBeTruthy();
     expect(screen.getByText(/did not generate this sentence/)).toBeTruthy();
     expect(screen.getByText(/never fitted on any of these flights/)).toBeTruthy();

@@ -95,7 +95,7 @@ export function trainingBandWall(flight: TrainingFlight): {
 }
 
 export default function useTrainingTrackLayer(): void {
-  const { viewer, mode, trainingSelection } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers } = useApp();
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer)) return;
@@ -122,9 +122,11 @@ export default function useTrainingTrackLayer(): void {
       });
 
     // The corridor goes in FIRST, so the two lines read over it rather than
-    // under it: it is the context for the orange line, not a third track.
+    // under it: it is the context for the orange line, not a third track — and
+    // it goes with that line, because a corridor around a line nobody is drawing
+    // is a band around nothing.
     const wall = trainingBandWall(flight);
-    viewer.entities.add({
+    if (trainingLayers.flown) viewer.entities.add({
       id: BAND_ID,
       wall: {
         positions: Cesium.Cartesian3.fromDegreesArray(wall.positions),
@@ -135,11 +137,11 @@ export default function useTrainingTrackLayer(): void {
       },
     });
     draw(OBSERVED_ID, observed, TRAINING_TRACE_COLOR, 3);
-    draw(FLOWN_ID, flown, TRAINING_FLOWN_COLOR, 2);
+    if (trainingLayers.flown) draw(FLOWN_ID, flown, TRAINING_FLOWN_COLOR, 2);
     // WHAT THE MODEL SAID, when the set carries it: the same rules, the same
     // event times, purple — never the rule-follower's orange, because one is a
     // baseline and the other is the thing being judged.
-    if (flight.prior) {
+    if (flight.prior && trainingLayers.model) {
       draw(MODEL_ID, degreesArrayHeights(flight.prior.geometric), TRAINING_MODEL_COLOR, 2);
     }
 
@@ -150,5 +152,5 @@ export default function useTrainingTrackLayer(): void {
       viewer.entities.removeById(BAND_ID);
       viewer.entities.removeById(MODEL_ID);
     };
-  }, [viewer, mode, trainingSelection]);
+  }, [viewer, mode, trainingSelection, trainingLayers]);
 }

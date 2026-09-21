@@ -240,6 +240,25 @@ interface ApproachViewSessionState {
 interface TrainingSessionState {
   trainingSelection: TrainingSelection | null;
   setTrainingSelection: (selection: TrainingSelection | null) => void;
+  /**
+   * WHICH OF THE THREE LINES ARE DRAWN. The observed track is not one of them:
+   * it is the aircraft that was actually there, and every other line is read
+   * against it, so turning it off would leave the other two measuring nothing.
+   * The two that toggle are the ones a sentence produced — the words flown by
+   * rule, and what the model said — and they toggle EVERYWHERE at once (the 3D
+   * scene, the plan view, the three charts, and the model's marks on the
+   * sentence bar), because a line present in one view and absent in another is
+   * how a reader comes to compare two different pictures.
+   */
+  trainingLayers: TrainingLayers;
+  setTrainingLayer: (layer: keyof TrainingLayers, on: boolean) => void;
+}
+
+export interface TrainingLayers {
+  /** The sentence flown by rule — the orange line (design V9: a baseline). */
+  flown: boolean;
+  /** What the model said, flown the same way — the purple line. */
+  model: boolean;
 }
 
 /**
@@ -328,6 +347,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
   const [trainingSelection, setTrainingSelection] = useState<TrainingSelection | null>(null);
+  const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({ flown: true, model: true });
+  const setTrainingLayer = useCallback((layer: keyof TrainingLayers, on: boolean) => {
+    setTrainingLayers((current) => ({ ...current, [layer]: on }));
+  }, []);
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
@@ -557,7 +580,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const trainingSessionState: TrainingSessionState = useMemo(() => ({
     trainingSelection,
     setTrainingSelection,
-  }), [trainingSelection]);
+    trainingLayers,
+    setTrainingLayer,
+  }), [trainingSelection, trainingLayers, setTrainingLayer]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,

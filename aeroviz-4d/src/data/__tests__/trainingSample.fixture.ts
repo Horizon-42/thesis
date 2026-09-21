@@ -481,6 +481,9 @@ export function mockPriorIndex(): Record<string, unknown> {
     id: "prior_s1337_val",
     kind: "prior-generated",
     file: "prior_s1337_val/sample.json",
+    // the manifest names the model, so the picker can say which experiment a set
+    // is without downloading it
+    prior: { sha256: MOCK_PRIOR.sha256, seed: MOCK_PRIOR.seed, method: MOCK_PRIOR.method },
     cohort: { ...index.sets[0].cohort, split: "val" },
   };
   return index;

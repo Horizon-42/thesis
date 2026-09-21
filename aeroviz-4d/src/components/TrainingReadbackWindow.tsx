@@ -26,6 +26,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { TrainingLayers } from "../context/AppContext";
 import {
   TRAINING_BAND_EDGE,
   TRAINING_MODEL_COLOR,
@@ -443,6 +444,9 @@ function format(value: number, digits = 0): string {
 }
 
 export interface TrainingReadbackWindowProps {
+  /** Which of the two sentence-drawn lines to draw. The measured track has no
+   *  switch: it is what everything else is read against. */
+  layers: TrainingLayers;
   flight: TrainingFlight;
   vocabulary: TrainingVocabulary;
   /** The model that said `flight.prior`, when this set carries one. */
@@ -457,6 +461,7 @@ export interface TrainingReadbackWindowProps {
 }
 
 export default function TrainingReadbackWindow({
+  layers,
   flight,
   vocabulary,
   prior,
@@ -625,7 +630,7 @@ export default function TrainingReadbackWindow({
               — because the speed tolerance's real cost is arrival TIME, which a
               static plan cannot show. It is drawn so that is visible rather than
               assumed; the number is in the sentence bar's header (design §5.6). */}
-          {speedEdges.map((edge, index) => (
+          {(layers.flown ? speedEdges : []).map((edge, index) => (
             <polyline
               key={`speed-edge-${index}`}
               className="training-readback-speed-edge"
@@ -637,14 +642,16 @@ export default function TrainingReadbackWindow({
               strokeWidth={1}
             />
           ))}
-          <polyline
-            points={flownX.map((km, index) => `${planPx(km)},${planPy(flownY[index])}`).join(" ")}
-            className="training-readback-flown"
-          />
+          {layers.flown ? (
+            <polyline
+              points={flownX.map((km, index) => `${planPx(km)},${planPy(flownY[index])}`).join(" ")}
+              className="training-readback-flown"
+            />
+          ) : null}
           {/* WHAT THE MODEL SAID, flown by the same rules on the same event
               times — so the distance between this line and the orange one is the
               WORDS and nothing else. */}
-          {flight.prior ? (
+          {flight.prior && layers.model ? (
             <polyline
               className="training-readback-model"
               points={flight.prior.geometric.toGoM
@@ -799,13 +806,15 @@ export default function TrainingReadbackWindow({
                     of the 40 exported flights fly on past the observation, and a
                     clamp stacks all those rows on the right-hand pixel — a
                     spurious vertical line the moment one is still moving. */}
-                <polyline
-                  points={flight.geometric.tS
-                    .map((t, step) => (t <= endOfTrack ? `${xFor(t)},${yFor(flown[step])}` : ""))
-                    .filter(Boolean)
-                    .join(" ")}
-                  className="training-readback-flown"
-                />
+                {layers.flown ? (
+                  <polyline
+                    points={flight.geometric.tS
+                      .map((t, step) => (t <= endOfTrack ? `${xFor(t)},${yFor(flown[step])}` : ""))
+                      .filter(Boolean)
+                      .join(" ")}
+                    className="training-readback-flown"
+                  />
+                ) : null}
 
                 {/* What the vertical word SAYS, as a height: the commanded angle
                     from the segment's own anchor, and beside it the angle the
@@ -846,7 +855,7 @@ export default function TrainingReadbackWindow({
                   </g>
                 ))}
 
-                {model ? (
+                {model && layers.model ? (
                   <polyline
                     className="training-readback-model"
                     points={flight.prior!.geometric.tS

@@ -10,7 +10,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 const { appState } = vi.hoisted(() => ({
-  appState: { trainingSelection: null as unknown },
+  appState: {
+    trainingSelection: null as unknown,
+    // both lines on, which is the default: a test that silently drew neither
+    // would pass every assertion about the bands and none about the lines
+    trainingLayers: { flown: true, model: true },
+  },
 }));
 
 vi.mock("../../context/AppContext", () => ({

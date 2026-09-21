@@ -719,6 +719,41 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   padding: 4px 6px;
 }
 
+/* The two lines a SENTENCE draws, each switchable. The measured track has no
+   switch — it is what the other two are read against — so there are two boxes
+   here and not three. */
+.training-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px solid #2a3552;
+  border-radius: 4px;
+}
+
+.training-layers legend {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(224, 230, 240, 0.45);
+  padding: 0 4px;
+}
+
+.training-layers label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.training-layers input[disabled] + span,
+.training-layers label:has(input[disabled]) {
+  color: rgba(224, 230, 240, 0.35);
+  cursor: default;
+}
+
 .training-vocabulary {
   display: flex;
   flex-direction: column;

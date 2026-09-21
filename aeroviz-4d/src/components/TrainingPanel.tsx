@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { isMissingJsonAsset } from "../utils/fetchJson";
+import { TRAINING_FLOWN_COLOR, TRAINING_MODEL_COLOR } from "../utils/trainingWordColors";
 import {
   fetchTrainingIndex,
   fetchTrainingSample,
@@ -74,7 +75,7 @@ function EmptyState({ airport }: { airport: string }) {
 }
 
 export default function TrainingPanel() {
-  const { activeAirportCode, setTrainingSelection } = useApp();
+  const { activeAirportCode, setTrainingSelection, trainingLayers, setTrainingLayer } = useApp();
   const airport = activeAirportCode || "—";
 
   const [indexState, setIndexState] = useState<IndexState>({ status: "loading" });
@@ -222,13 +223,21 @@ export default function TrainingPanel() {
 
       {indexState.status === "ready" ? (
         <>
+          {/* THE SET IS THE EXPERIMENT. One set is one vocabulary read, or one
+              vocabulary read plus one model's answers to it, so switching set is
+              how two experiments are compared — and the option has to say WHICH
+              model without anyone loading the set to find out. The manifest
+              carries that (`entry.prior`); the sample is ten megabytes. */}
           {indexState.index.sets.length > 1 ? (
             <label className="training-field">
-              <span>Sample set</span>
+              <span>Experiment</span>
               <select value={setId ?? ""} onChange={(event) => setSetId(event.target.value)}>
                 {indexState.index.sets.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {item.title} ({item.flights} flights)
+                    {item.prior
+                      ? `${item.id} · prior seed ${item.prior.seed} (${item.prior.sha256.slice(0, 8)}…)`
+                      : `${item.id} · the words alone`}
+                    {` · ${item.flights} flights, ${item.cohort.split}`}
                   </option>
                 ))}
               </select>
@@ -236,6 +245,42 @@ export default function TrainingPanel() {
           ) : (
             <p className="training-note">{entry?.title ?? "No sample set in this manifest."}</p>
           )}
+          {entry ? (
+            <p className="training-note">
+              {entry.title}
+              {entry.prior
+                ? ` · model ${entry.prior.sha256.slice(0, SHA_SHOWN)}… asked ${entry.prior.method}`
+                : " · no model in this set: the words alone"}
+            </p>
+          ) : null}
+
+          {/* WHICH LINES ARE DRAWN. The observed track has no switch: it is the
+              aircraft that was actually there and everything else is read
+              against it. These two are the lines a SENTENCE produced, and each
+              switch reaches every view at once. */}
+          <fieldset className="training-layers">
+            <legend>Draw</legend>
+            <label style={{ color: TRAINING_FLOWN_COLOR }}>
+              <input
+                type="checkbox"
+                checked={trainingLayers.flown}
+                onChange={(event) => setTrainingLayer("flown", event.target.checked)}
+              />
+              the words flown by rule
+            </label>
+            <label
+              style={{ color: hasPrior ? TRAINING_MODEL_COLOR : undefined }}
+              title={hasPrior ? undefined : "This set carries no model's words."}
+            >
+              <input
+                type="checkbox"
+                checked={trainingLayers.model}
+                disabled={!hasPrior}
+                onChange={(event) => setTrainingLayer("model", event.target.checked)}
+              />
+              what the model said
+            </label>
+          </fieldset>
 
           {/* AV6 in reverse: a rejected entry names itself and its field, and the
               sets beside it still load. */}

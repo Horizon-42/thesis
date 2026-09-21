@@ -35,6 +35,7 @@ import {
   LEVEL,
   MOCK_VOCABULARY,
   mockIndex,
+  mockPriorIndex,
   mockPriorSample,
   mockSample,
 } from "./trainingSample.fixture";
@@ -1085,5 +1086,37 @@ describe("a prior-generated set", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.problem).toContain("outside this vocabulary's 0…5");
+  });
+});
+
+describe("the manifest names the model a set carries", () => {
+  // The picker has to say WHICH experiment each option is before anyone loads
+  // ten megabytes to find out. So the model is in the manifest as well as in the
+  // sample, and it is keyed on the kind in both places.
+  it("reads the model out of the entry, without the sample", () => {
+    const parsed = parseTrainingIndex(mockPriorIndex());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.sets[0].prior?.seed).toBe(1337);
+    expect(parsed.value.sets[0].prior?.method).toBe(TRAINING_PRIOR_METHOD);
+  });
+
+  it("rejects a prior set that cannot name its model", () => {
+    const index = mockPriorIndex() as any;
+    delete index.sets[0].prior;
+    const parsed = parseTrainingIndex(index);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.sets).toHaveLength(0);
+    expect(parsed.value.rejected[0].problem).toContain("names its model");
+  });
+
+  it("rejects a read-back set that names one", () => {
+    const index = mockIndex() as any;
+    index.sets[0].prior = { sha256: "x", seed: 1, method: "teacher-forced-next-word" };
+    const parsed = parseTrainingIndex(index);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.rejected[0].problem).toContain("kind is vocabulary-readback");
   });
 });

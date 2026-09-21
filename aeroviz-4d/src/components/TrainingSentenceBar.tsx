@@ -178,7 +178,7 @@ function absorbedLabel(item: TrainingAbsorbed): string {
 }
 
 export default function TrainingSentenceBar() {
-  const { trainingSelection } = useApp();
+  const { trainingSelection, trainingLayers } = useApp();
   const frameRef = useRef<HTMLDivElement>(null);
   const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
   const [readbackOpen, setReadbackOpen] = useState<boolean>(false);
@@ -228,7 +228,7 @@ export default function TrainingSentenceBar() {
    * purple strips are the disagreements; their absence is agreement, and the
    * header counts both so the eye is not left to estimate it.
    */
-  const said = flight.prior;
+  const said = trainingLayers.model ? flight.prior : undefined;
   const disagreements = said
     ? TRAINING_KINDS.flatMap((kind) => {
         const column = TRAINING_KIND_COLUMN[kind];
@@ -619,6 +619,7 @@ export default function TrainingSentenceBar() {
           flight={flight}
           vocabulary={vocabulary}
           prior={trainingSelection.prior}
+          layers={trainingLayers}
           geometry={geometry}
           cursorS={cursorS}
           onCursorChange={setCursorS}
