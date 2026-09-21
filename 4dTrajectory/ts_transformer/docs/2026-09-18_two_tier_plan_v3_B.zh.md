@@ -1,7 +1,7 @@
 > # ⚠ 本文档已被取代，保留作记录
 >
 > **词表设计、训练方式、门槛、步骤、风险** 已经重写为
-> **[`instruction_vocabulary_plan.zh.md`](instruction_vocabulary_plan.zh.md)** ——按主题组织的设计
+> **[`2026-09-21-instruction_vocabulary_plan.zh.md`](2026-09-21-instruction_vocabulary_plan.zh.md)** ——按主题组织的设计
 > 文档，不带日期与编号，末尾列出待定项。以那一份为准。
 >
 > **本文档没有被取代的部分**（还没有别的归宿，不要当作废弃）：
