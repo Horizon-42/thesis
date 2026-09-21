@@ -3,7 +3,7 @@ Transformer over one flight's sentence that says, at every position, the six wor
 the NEXT event — one softmax per kind (factorised heads), the terminal kind among them
 instead.
 
-    [TYPE] [RWY]  [w_0, x_0] [w_1, x_1] … [w_T, x_T]
+    [TYPE]  [w_0, x_0] [w_1, x_1] … [w_T, x_T]
         →  at t: p(heading_{t+1}), p(vertical_{t+1}), p(speed_{t+1}),
                  p(runway_{t+1}), p(duration_{t+1}), p(terminal_{t+1})
 
@@ -11,8 +11,9 @@ Tokens: the sum of the six word embeddings (the runway's classes are the cohort'
 `instructions.RunwayVocabulary`,
 which is why `PriorConfig.words` carries their count rather than reading it off the spec), the
 state token (`instruction_sequences.state_token`, six features through a
-linear layer) and the position; two context tokens (aircraft type, runway) sit in front and
-every position reads them and its past. Teacher forcing on the truth's sentence; the closed-loop
+linear layer) and the position; ONE context token (the aircraft type) sits in front and every
+position reads it and its past — the runway's course was a context token until D66 removed it,
+since handing the frame to a model that must SAY the runway is handing it the answer. Teacher forcing on the truth's sentence; the closed-loop
 fine-tuning (D55) feeds `InstructionSequence`s whose states were flown and whose targets are the
 truth's words at the same absolute time — the same batch, the same loss.
 
