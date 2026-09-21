@@ -467,7 +467,7 @@ coarser than one chosen as a measurement — which also relieves H5's class-coun
 together: bin width under the anchor reading, uniform vs fitted, and the cohort (KRDU alone vs
 five airports, which moves the per-class counts by an order of magnitude).
 
-### H8 · the vocabulary those measurements produced — `fffa8bdf24a0` / `segment-v13` (2026-09-21)
+### H8 · the vocabulary those measurements produced — `2b8bf25c2a36` / `segment-v14` (2026-09-21)
 
 What H5–H7 replaced the altitude word with, decided line by line with the user and read over the
 five airports. **Six kinds**, one event sequence per flight (a row only where something changed):
@@ -475,7 +475,7 @@ five airports. **Six kinds**, one event sequence per flight (a row only where so
 | kind | values | classes |
 |---|---|---|
 | runway | `AIRPORT:ident` — qualified, because idents collide across airports | the COHORT's thresholds: **22** on the pooled cohort (the manifests hold 23 — KRDU 4 / KSJC 4 / KSTL 8 / KSMF 3 / KMSY 4 — and no KSTL 06 flight is in it) |
-| heading | relative to the final approach course, **5°** a bin | 72 |
+| heading | 72 DIRECTIONS relative to the final approach course, **5°** a bin, plus ONE POSITION — *track the centreline* (v14; see H11) | 73 |
 | vertical | **flight path angle**, six modes: climb 3.0, level 0, descent 1.4 / 2.4 / 3.1 / 4.4° (**descent POSITIVE**) | 6 |
 | speed | ground-speed centres fitted to the fleet: 44 56 63 68 74 79 86 93 99 107 114 121 129 138 147 157 m/s | 16 |
 | duration | since the previous event, 2 s a bin, 0–300 s | 151 |
@@ -486,11 +486,12 @@ five airports. **Six kinds**, one event sequence per flight (a row only where so
   runway classes are not in the sha either — they are per airport and travel beside the spec, so
   one vocabulary reads every airport.
 - **Two segmentation regimes, because the quantities differ in kind.** Absolute targets (heading,
-  speed) are read from PLATEAUS. The vertical is a RATE, and a plateau reader cannot see it, so it
-  is read by optimal piecewise-linear fitting of height against cumulative horizontal distance
-  (dynamic programming over `VERTICAL_SEGMENTS` breakpoints, then a bottom-up merge to a fixed
-  point). Measured cost 7.0 ms a flight (≈3.1 min over 26,382); greedy segmentation is 29.9 %
-  worse, and the DP is not the bottleneck — `build_series` is.
+  speed) are TILED from the data's own 2 s rows (`tile_segments`, v14 — plateaus until then; see
+  H11). The vertical is a RATE, and neither a plateau nor a value-merge can see it, so it is read
+  by optimal piecewise-linear fitting of height against cumulative horizontal distance (dynamic
+  programming over `VERTICAL_SEGMENTS` breakpoints, then a bottom-up merge to a fixed point).
+  Measured cost 7.0 ms a flight (≈3.1 min over 26,382); greedy segmentation is 29.9 % worse, and
+  the DP is not the bottleneck — `build_series` is.
 - **The climb mode exists for the go-around post-training** and it is USED in the data (a segment
   must climb past 1.5° to reach it). The executor's climb clamp was 2°, under the 3° mode plus its
   band, and was raised to 4°; an invariant test now requires every mode **plus its tolerance** to
@@ -540,7 +541,11 @@ exact plateau value the reader measured moves the gap p95 median only 2,035 → 
 while replacing it with the continuously observed speed gives 907 m (−55 %). The residual distance
 is the piecewise-constant flying model and the missing wind, not the vocabulary's resolution.
 
-### H10 · what the vocabulary can and cannot say — measured per SIGNAL (2026-09-21)
+### H10 · what the vocabulary can and cannot say — measured per SIGNAL (2026-09-21, on `segment-v13`)
+
+**These are v13's numbers, and the speed row is why v14 exists** (H11): the tiling reader was built
+to answer it, so the table below is the BEFORE. Re-measure on v14 before quoting it as current.
+
 
 The replay gate answers "can a sentence reach the runway" (99.1 % pooled), but its gap mixes what
 the words cannot say with what the preview cannot fly. This isolates the vocabulary: each signal is
@@ -582,3 +587,46 @@ this: the signal is a ramp read as holds. More speed classes would not fix any o
 
 **Not measured here**: the closed loop (every figure above is against the truth's own states),
 multi-aircraft, and the go-around — its terminal value never occurs in this cohort.
+
+### H11 · `segment-v14` — a position word, a tiling reader, and the runway out of the model's input (2026-09-21)
+
+Three changes, all from auditing what v13 could not say. The English specification of the
+vocabulary as it now stands is `docs/instruction_vocabulary.en.md`.
+
+**A POSITION word, because every other word was a velocity.** The heading, the vertical and the
+speed all constrain a velocity; nothing constrained a position, so a sentence had no mechanism by
+which a lateral error could correct itself, and an open-loop replay landed 36.7 %. The morning's
+fix put the correction in the DECODER by flying direction word 0 as a tracking law. That was wrong
+twice over: the READING never said to join — measured on the v13 artefacts, 8.2 % of the rows
+carrying word 0 were outside the 500 m corridor, 4.1 % beyond 2 km, and at the moment the word was
+first issued the median displacement was 535 m (p90 5,019 m) — and the reading and the flying then
+disagreed about what one word meant, which no artefact could have shown. The heading kind now has
+`heading_established_word`, read off `course_frame`'s own `established` column, and direction word
+0 is a direction again. **The landing rate is now the vocabulary's** (99.1 % KRDU val) rather than
+58 points of it being the decoder's.
+
+**A TILING reader for the absolute kinds** (the user's design, and the answer to H10's speed row).
+Merging the data's own 2 s rows while the tolerance allows it, then absorbing whatever is shorter
+than one instruction, gives both behaviours from one rule: a turn's slivers fold back onto its two
+ends (0 → 90° over 30 s = 2 segments), a deceleration's survive (140 → 70 m/s = 8 segments, tiling
+exactly). Plateaus gave the first and not the second, which is why half of every speed profile had
+no word responsible for it. `departure_row` survives as the boundary refinement, so an instruction
+is still issued where the aircraft STARTED moving; `settled_s` is now where it arrives at the
+target, which under a tiling is no longer the segment's end.
+
+Sentences get longer, which is the cost of describing a ramp: KRDU events per flight p50 7 → **11**
+(p95 15 → 21), speed instructions p50 3 → **5** (p95 6 → 10). **And the replay is closer to the
+track**: gap p95 median 1,085 → **821 m**, mean gap median 651 → **453 m** on the same KRDU val
+split — a quarter to a third better, against a landing rate that fell only 99.6 → 99.1 % while
+becoming honest.
+
+**The runway leaves the model's INPUT** (`InstructionPrior.INPUT_KINDS`). The labeller writes it
+constant per flight, so while the same column was also an input, "predict the runway at k+1" was
+"copy the runway at k": NLL 0.001, top-1 1.000, and one of the six cross-entropies in the loss was
+identically zero. Out of the input it must be inferred from the trajectory — the state tokens are
+in the AIRPORT frame while the heading and vertical words are relative to the runway's course, so
+the pair identifies it, by inference. Every prior reading taken before this scored a copy.
+
+**The conditioning gains a fifth column**, because `72 × 5° = 360°` has the same cosine and sine as
+direction word 0: without it an executor would be told to fly a bearing where the sentence said to
+hold a line.

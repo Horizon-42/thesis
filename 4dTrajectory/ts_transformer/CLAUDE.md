@@ -200,13 +200,16 @@ of the package, not a migration in progress.
   `trombone_surplus_reference` `beeline` (default, bit-identical to L3.e) vs `reference-rollout` —
   sizing against `L_ref` itself is the trap (H3.8). Hook diagnostics are per-FLIGHT and ABSENT
   without a hook, never zero (H4).
-- **The instruction vocabulary in force is `fffa8bdf24a0` / `segment-v13`** (2026-09-21): runway
+- **The instruction vocabulary in force is `2b8bf25c2a36` / `segment-v14`** (2026-09-21): runway
   `AIRPORT:ident` (idents collide across airports; 22 classes on the pooled cohort, of the 23 the
-  manifests hold), heading 5°/72, vertical =
+  manifests hold), heading 72 directions at 5° **plus one POSITION word** (track the centreline —
+  the only word that is not a velocity target, H11), vertical =
   **flight path angle**, six modes, descent POSITIVE, speed 16 fitted ground-speed centres,
   duration 2 s/151, terminal 3. Tolerances and runway classes are deliberately OUTSIDE the sha.
-  Absolute targets are read from plateaus; the vertical, a RATE, by DP piecewise-linear fitting of
-  height against horizontal distance (H8).
+  Absolute targets are TILED from the data's own 2 s rows — plateaus could not see a ramp, and
+  half of every speed profile had no word responsible for it; the vertical, a RATE, by DP
+  piecewise-linear fitting of height against horizontal distance (H8, H11). The vocabulary's own
+  specification in English: `docs/instruction_vocabulary.en.md`.
 - **The instruction prior's first pooled readings** (2026-09-21, two seeds, `two_tier_v3_bprime_20260921`):
   it beats "repeat the last word" on every kind (total NLL 5.80 vs bigram 7.44), but read on the
   positions where the truth CHANGES — which is what an instruction is — recall is 0.55 heading /
