@@ -4,7 +4,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { trainingBandWall, trainingTrackPositions } from "../useTrainingTrackLayer";
+import {
+  trainingBandWall,
+  trainingSegmentNodes,
+  trainingTrackPositions,
+} from "../useTrainingTrackLayer";
 import { parseTrainingSample } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 
@@ -78,5 +82,36 @@ describe("trainingTrackPositions", () => {
     expect(item.geometric.tS[item.geometric.tS.length - 1]).toBeGreaterThan(
       item.observed.tS[item.observed.tS.length - 1],
     );
+  });
+});
+
+describe("trainingSegmentNodes", () => {
+  // One node per EVENT, on the track's own rows — this is what makes the flown
+  // line readable as a sentence rather than as a curve.
+  it("puts a node on the track at every event", () => {
+    const item = flight();
+    const nodes = trainingSegmentNodes(item.geometric, item.sentence.eventTimesS);
+    expect(nodes).toHaveLength(item.sentence.eventTimesS.length);
+    expect(nodes[0].eventS).toBe(0);
+    expect(nodes[0].lon).toBe(item.geometric.lon[0]);
+    expect(nodes[0].lat).toBe(item.geometric.lat[0]);
+  });
+
+  // The row is the last one at or before the event, so a node sits ON the line
+  // rather than between two of its points.
+  it("takes the row in force at the event, never the next one", () => {
+    const item = flight();
+    const nodes = trainingSegmentNodes(item.geometric, [0, 26.5]);
+    expect(nodes[1].lon).toBe(item.geometric.lon[26]);
+  });
+
+  // The flown words can stop before the aircraft did; a clamped node would claim
+  // a cut where the line never reached.
+  it("drops an event past the end of the track", () => {
+    const item = flight();
+    const short = { ...item.geometric, tS: item.geometric.tS.slice(0, 50) };
+    const nodes = trainingSegmentNodes(short, item.sentence.eventTimesS);
+    expect(nodes.every((node) => node.eventS <= 49)).toBe(true);
+    expect(nodes.length).toBeLessThan(item.sentence.eventTimesS.length);
   });
 });

@@ -16,6 +16,7 @@ import TrainingReadbackWindow, {
   extent,
   rowAt,
   runsOf,
+  segmentNodes,
   verticalRamps,
 } from "../TrainingReadbackWindow";
 import {
@@ -354,9 +355,9 @@ describe("TrainingReadbackWindow", () => {
   // place the aircraft was, so the plan view must not mark one.
   it("marks where each instruction was issued, except the runway", () => {
     const { flight, vocabulary } = renderWindow();
-    const marks = document.body.querySelectorAll(".training-readback-svg circle");
+    const marks = document.body.querySelectorAll(".training-readback-issued-mark");
     const issued = flight.instructions.filter((item) => item.kind !== "runway").length;
-    expect(marks.length).toBe(issued + 1); // + the cursor's dot
+    expect(marks.length).toBe(issued);
     expect(screen.getByLabelText(/heading \+50° issued at 70 s/)).toBeTruthy();
     // the speed band's two edges are polylines in the plan view, not marks
     expect(vocabulary.runwayIdents).toContain(flight.runway);
@@ -677,5 +678,53 @@ describe("the model's line in the read-back window", () => {
     expect(screen.getByText(/did not generate this sentence/)).toBeTruthy();
     expect(screen.getByText(/never fitted on any of these flights/)).toBeTruthy();
     expect(screen.getByText(/first said "landed" at 188 s/)).toBeTruthy();
+  });
+});
+
+describe("where the words cut the flown track", () => {
+  // The flown line is one integration with no seams in it. The nodes are what
+  // make it readable as a SENTENCE: a turn that begins nowhere near one was not
+  // commanded there, it is the previous word still being flown.
+  it("marks every event on the flown track, in the plan view and on each chart", () => {
+    const { flight } = renderWindow();
+    const events = flight.sentence.eventTimesS.length;
+    // the plan view plus three charts
+    expect(document.body.querySelectorAll(".training-readback-node")).toHaveLength(events * 4);
+  });
+
+  // An event is one cut, however many kinds changed at it — three instructions
+  // issued at the same instant are not three places on the line.
+  it("cuts once per event, not once per instruction", () => {
+    const { flight } = renderWindow();
+    const nodes = segmentNodes(flight.geometric, flight.sentence.eventTimesS);
+    expect(nodes).toHaveLength(flight.sentence.eventTimesS.length);
+    expect(nodes.length).toBeLessThan(flight.instructions.length);
+    expect(nodes[0].eventS).toBe(0);
+  });
+
+  // The flown sentence can stop before the aircraft did. A node clamped to the
+  // last row would claim the words cut the line where they never reached.
+  it("drops an event the flown track never got to", () => {
+    const { flight } = renderWindow();
+    const short = { ...flight.geometric, tS: flight.geometric.tS.slice(0, 100) };
+    const nodes = segmentNodes(short, flight.sentence.eventTimesS);
+    expect(nodes.length).toBeLessThan(flight.sentence.eventTimesS.length);
+    expect(nodes.every((node) => node.eventS <= 99)).toBe(true);
+  });
+
+  it("marks nothing when the line it would cut is switched off", () => {
+    const { vocabulary, flight, geometry } = selection();
+    render(
+      <TrainingReadbackWindow
+        layers={{ flown: false, model: false }}
+        flight={flight}
+        vocabulary={vocabulary}
+        geometry={geometry}
+        cursorS={0}
+        onCursorChange={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(document.body.querySelectorAll(".training-readback-node")).toHaveLength(0);
   });
 });

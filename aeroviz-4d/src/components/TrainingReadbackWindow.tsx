@@ -114,6 +114,34 @@ function unwrapDegrees(values: number[]): number[] {
   return out;
 }
 
+/**
+ * WHERE THE WORDS CUT THE FLOWN TRACK: one node per event, on the track's own
+ * rows.
+ *
+ * The flown line is one integration with no seams in it, and everything it does
+ * between two events it does because one set of words was in force. So the
+ * nodes are what makes the line readable as a SENTENCE rather than as a curve —
+ * a turn that begins nowhere near a node was not commanded there, it is the
+ * previous word still being flown.
+ *
+ * The events, not the instructions: an event is the moment something changed,
+ * and several kinds changing at once is one cut, not three at the same place.
+ * The track starts at the first event, so the first node is its own start
+ * point.
+ */
+export function segmentNodes(
+  track: { tS: number[] },
+  eventTimesS: number[],
+): Array<{ eventS: number; row: number; event: number }> {
+  const last = track.tS[track.tS.length - 1];
+  return eventTimesS
+    .map((eventS, event) => ({ eventS, event, row: rowAt(track.tS, eventS) }))
+    // An event past the end of this track has no node ON it: the flown sentence
+    // can stop before the aircraft did, and a node clamped to the last row would
+    // claim the words cut the line at a place they never reached.
+    .filter((node) => node.eventS <= last);
+}
+
 /** The MODEL's sentence on the same axis, when this set carries one. */
 export function priorTrace(flight: TrainingFlight, kind: ChartedKind): number[] | null {
   const said = flight.prior;
@@ -672,6 +700,7 @@ export default function TrainingReadbackWindow({
               return (
                 <circle
                   key={`issued-${index}`}
+                  className="training-readback-issued-mark"
                   cx={planPx(planX[row])}
                   cy={planPy(planY[row])}
                   r={3}
@@ -682,6 +711,49 @@ export default function TrainingReadbackWindow({
                 </circle>
               );
             })}
+          {/* The same events, marked ON THE FLOWN LINE: this is where the words
+              cut the line the rules drew, which is what makes its shape readable
+              as a sentence. */}
+          {layers.flown
+            ? segmentNodes(flight.geometric, sentence.eventTimesS).map((node) => {
+                const name = `event ${node.event + 1} at ${formatSeconds(node.eventS)} s — the flown words change here`;
+                return (
+                  <circle
+                    key={`flown-node-${node.event}`}
+                    className="training-readback-node"
+                    cx={planPx(flownX[node.row])}
+                    cy={planPy(flownY[node.row])}
+                    r={3.2}
+                    fill="none"
+                    stroke={TRAINING_FLOWN_COLOR}
+                    strokeWidth={1.6}
+                    aria-label={name}
+                  >
+                    <title>{name}</title>
+                  </circle>
+                );
+              })
+            : null}
+          {flight.prior && layers.model
+            ? segmentNodes(flight.prior.geometric, sentence.eventTimesS).map((node) => {
+                const name = `event ${node.event + 1} at ${formatSeconds(node.eventS)} s — the model's words change here`;
+                return (
+                  <circle
+                    key={`model-node-${node.event}`}
+                    className="training-readback-node"
+                    cx={planPx(-flight.prior!.geometric.toGoM[node.row] / 1000)}
+                    cy={planPy(flight.prior!.geometric.crossM[node.row] / 1000)}
+                    r={3.2}
+                    fill="none"
+                    stroke={TRAINING_MODEL_COLOR}
+                    strokeWidth={1.6}
+                    aria-label={name}
+                  >
+                    <title>{name}</title>
+                  </circle>
+                );
+              })
+            : null}
           <circle
             cx={planPx(planX[cursorRow])}
             cy={planPy(planY[cursorRow])}
@@ -854,6 +926,23 @@ export default function TrainingReadbackWindow({
                     />
                   </g>
                 ))}
+
+                {layers.flown
+                  ? segmentNodes(flight.geometric, sentence.eventTimesS)
+                      .filter((node) => node.eventS <= endOfTrack)
+                      .map((node) => (
+                        <circle
+                          key={`flown-node-${node.event}`}
+                          className="training-readback-node"
+                          cx={xFor(node.eventS)}
+                          cy={yFor(flown[node.row])}
+                          r={2.6}
+                          fill="none"
+                          stroke={TRAINING_FLOWN_COLOR}
+                          strokeWidth={1.4}
+                        />
+                      ))
+                  : null}
 
                 {model && layers.model ? (
                   <polyline

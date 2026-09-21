@@ -46,6 +46,8 @@ const OBSERVED_ID = "training-observed-track";
 const FLOWN_ID = "training-flown-track";
 const BAND_ID = "training-vertical-band";
 const MODEL_ID = "training-model-track";
+const FLOWN_NODE_ID = "training-flown-node";
+const MODEL_NODE_ID = "training-model-node";
 
 /** Cesium wants [lon, lat, height, …]; both tracks carry the three as columns. */
 function degreesArrayHeights(track: {
@@ -79,6 +81,32 @@ export function trainingTrackPositions(flight: TrainingFlight): {
  * angle, which loses less height and therefore stays HIGHER. Reading the names
  * as heights would turn the wall inside out while leaving it exactly as thick.
  */
+/**
+ * WHERE THE WORDS CUT A FLOWN TRACK, as positions in the scene: one per event,
+ * on that track's own rows.
+ *
+ * The line is a single integration with no seams in it, so without these the
+ * shape reads as a curve rather than as a sentence — and the question "which
+ * word made it turn there" has no answer on screen. An event whose time is past
+ * the end of the track gets no node: the flown words can stop before the
+ * aircraft did, and a node clamped to the last row would claim a cut where the
+ * line never reached.
+ */
+export function trainingSegmentNodes(
+  track: { tS: number[]; lon: number[]; lat: number[]; altHaeM: number[] },
+  eventTimesS: number[],
+): Array<{ eventS: number; lon: number; lat: number; altHaeM: number }> {
+  const last = track.tS[track.tS.length - 1];
+  const nodes = [];
+  for (const eventS of eventTimesS) {
+    if (eventS > last) continue;
+    let row = 0;
+    while (row + 1 < track.tS.length && track.tS[row + 1] <= eventS) row += 1;
+    nodes.push({ eventS, lon: track.lon[row], lat: track.lat[row], altHaeM: track.altHaeM[row] });
+  }
+  return nodes;
+}
+
 export function trainingBandWall(flight: TrainingFlight): {
   positions: number[];
   maximumHeights: number[];
@@ -138,11 +166,41 @@ export default function useTrainingTrackLayer(): void {
     });
     draw(OBSERVED_ID, observed, TRAINING_TRACE_COLOR, 3);
     if (trainingLayers.flown) draw(FLOWN_ID, flown, TRAINING_FLOWN_COLOR, 2);
+
+    // The nodes go with the line they cut, and are removed with it. They are
+    // POINTS rather than a second polyline: a polyline through the same
+    // positions would be the line again, and what is wanted is where it was cut.
+    const nodeIds: string[] = [];
+    const markNodes = (
+      id: string,
+      track: { tS: number[]; lon: number[]; lat: number[]; altHaeM: number[] },
+      colour: string,
+    ) => {
+      trainingSegmentNodes(track, flight.sentence.eventTimesS).forEach((node, index) => {
+        const entityId = `${id}-${index}`;
+        nodeIds.push(entityId);
+        viewer.entities.add({
+          id: entityId,
+          position: Cesium.Cartesian3.fromDegrees(node.lon, node.lat, node.altHaeM),
+          point: {
+            pixelSize: 9,
+            color: Cesium.Color.fromCssColorString(colour),
+            outlineColor: Cesium.Color.BLACK.withAlpha(0.6),
+            outlineWidth: 2,
+            // Same reason the lines carry `depthFailMaterial`: a node hidden by
+            // terrain is a cut the reader cannot see.
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+      });
+    };
+    if (trainingLayers.flown) markNodes(FLOWN_NODE_ID, flight.geometric, TRAINING_FLOWN_COLOR);
     // WHAT THE MODEL SAID, when the set carries it: the same rules, the same
     // event times, purple — never the rule-follower's orange, because one is a
     // baseline and the other is the thing being judged.
     if (flight.prior && trainingLayers.model) {
       draw(MODEL_ID, degreesArrayHeights(flight.prior.geometric), TRAINING_MODEL_COLOR, 2);
+      markNodes(MODEL_NODE_ID, flight.prior.geometric, TRAINING_MODEL_COLOR);
     }
 
     return () => {
@@ -151,6 +209,7 @@ export default function useTrainingTrackLayer(): void {
       viewer.entities.removeById(FLOWN_ID);
       viewer.entities.removeById(BAND_ID);
       viewer.entities.removeById(MODEL_ID);
+      for (const id of nodeIds) viewer.entities.removeById(id);
     };
   }, [viewer, mode, trainingSelection, trainingLayers]);
 }
