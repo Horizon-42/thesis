@@ -10,7 +10,7 @@
  * cannot catch the contract moving (repo rule: a schema literal in a consumer is
  * a mirror; import it).
  *
- * The spec below is this vocabulary's own (`segment-v13`, 2026-09-21), and the
+ * The spec below is this vocabulary's own (`segment-v14`, 2026-09-21), and the
  * word counts it implies (heading 72, vertical 6, speed 16, duration 151,
  * terminal 3, runway 4) are what `trainingWordCounts` derives — so a row here
  * that is in range is in range for the real artefact's defaults too.
@@ -65,7 +65,7 @@ export const DESCEND_31 = 4;
 export const MOCK_VOCABULARY = {
   sha256: "c7a4f4239f52000000000000000000000000000000000000000000000000mock",
   runwaySha256: "aa11bb22cc33000000000000000000000000000000000000000000000000mock",
-  readingRule: "segment-v13",
+  readingRule: "segment-v14",
   ...MOCK_SPEC,
   // The artefact states its counts beside its spec and the reader refuses a file
   // where the two disagree — so the fixture DERIVES them rather than typing

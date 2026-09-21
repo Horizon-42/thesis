@@ -118,14 +118,14 @@ describe("TrainingPanel", () => {
     it("lists the flights without making the reader open anything", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
-      expect(screen.queryByText("segment-v13")).toBeNull();
+      expect(screen.queryByText("segment-v14")).toBeNull();
     });
 
     it("shows the vocabulary the words were read under, behind the ⓘ", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("DAL123")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText("segment-v13")).toBeTruthy();
+      expect(screen.getByText("segment-v14")).toBeTruthy();
       // the runway classes come from the file, never from the airport's runways
       expect(screen.getByText("05L 05R 23L 23R")).toBeTruthy();
       expect(screen.getByText(/heading 72 · vertical 6 · speed 16 · runway 4/)).toBeTruthy();
@@ -158,7 +158,7 @@ describe("TrainingPanel", () => {
       await waitFor(() => {
         const published = lastPublished();
         expect(published?.flight?.flightKey).toBe("DAL123_05L_a1b2c3_1699999999");
-        expect(published?.vocabulary?.readingRule).toBe("segment-v13");
+        expect(published?.vocabulary?.readingRule).toBe("segment-v14");
         // the views that draw the corridor need the rule it was drawn under
         expect(published?.geometry?.bandsAreJoint).toBe(false);
       });
@@ -256,9 +256,51 @@ describe("TrainingPanel's switches", () => {
 
   // A set with no model has nothing to switch; the box says so rather than
   // toggling a line that does not exist.
-  it("disables the model switch when the set carries none", async () => {
+  // The question is about the set that is OPEN, not about the airport: a switch
+  // enabled by a set nobody is looking at toggles a line that is not there.
+  it("disables the model switch when the OPEN set carries none", async () => {
+    const index = mockIndex() as any;
+    index.sets.push({ ...index.sets[0], id: "a_prior_set", kind: "prior-generated",
+                      prior: { sha256: "abc", seed: 1, method: "teacher-forced-next-word" } });
+    serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
+
     render(<TrainingPanel />);
     expect(await screen.findByText("DAL123")).toBeTruthy();
+    // the open set is the read-back one, even though the manifest holds a prior set
     expect(screen.getByLabelText(/what the model said/)).toHaveProperty("disabled", true);
+  });
+});
+
+describe("a manifest holding a superseded set", () => {
+  beforeEach(() => {
+    appState.activeAirportCode = "KRDU";
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  // A vocabulary bump leaves older sets listed — they are real exports, and the
+  // panel says why they cannot be read when one is picked. What it must not do
+  // is OPEN on one: the manifest states each set's reading rule, so which are
+  // current is known before any sample is fetched.
+  it("opens on a set this reader can read, not on the first by id", async () => {
+    const index = mockIndex() as any;
+    const stale = { ...index.sets[0], id: "aaa_older", readingRule: "segment-v13" };
+    index.sets = [stale, index.sets[0]];
+    serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
+
+    render(<TrainingPanel />);
+    expect(await screen.findByText("DAL123")).toBeTruthy();
+    expect(screen.queryByText(/cannot be read/)).toBeNull();
+  });
+
+  it("says which sets are superseded, in the picker itself", async () => {
+    const index = mockIndex() as any;
+    index.sets = [{ ...index.sets[0], id: "aaa_older", readingRule: "segment-v13" }, index.sets[0]];
+    serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
+
+    render(<TrainingPanel />);
+    expect(await screen.findByText("DAL123")).toBeTruthy();
+    expect(screen.getByRole("option", { name: /aaa_older.*segment-v13, superseded/ })).toBeTruthy();
   });
 });

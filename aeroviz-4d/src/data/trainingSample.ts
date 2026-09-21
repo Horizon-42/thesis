@@ -5,7 +5,7 @@
  * set's flights (track + sentence + instructions, and later the geometric track).
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.
  *
- * A WORD IS A BAND, NOT A POINT (reading rule `segment-v13`, 2026-09-21). The
+ * A WORD IS A BAND, NOT A POINT (reading rule `segment-v14`, 2026-09-21). The
  * vertical and speed words each carry a tolerance: an executor that stays inside
  * it has obeyed the word. So a sentence does not name one track, it names a
  * family, and this module exposes the tolerances (`verticalToleranceDeg`,
@@ -53,7 +53,7 @@ export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v1";
  * The cost of the pin is a one-line edit when the rule bumps; the cost of not
  * pinning it is a chart that looks right and means something else.
  */
-export const TRAINING_READING_RULE = "segment-v13";
+export const TRAINING_READING_RULE = "segment-v14";
 
 /**
  * MIRROR of `ts_transformer.manoeuvre.instructions.INSTRUCTION_KINDS` — the six

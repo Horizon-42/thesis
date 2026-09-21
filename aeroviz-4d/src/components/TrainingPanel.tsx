@@ -32,6 +32,7 @@ import {
   trainingWordBandLabel,
   trainingWordCounts,
   TRAINING_KINDS,
+  TRAINING_READING_RULE,
   type TrainingIndex,
   type TrainingSample,
   type TrainingSetEntry,
@@ -96,7 +97,14 @@ export default function TrainingPanel() {
         if (!parsed.ok) setIndexState({ status: "invalid", problem: parsed.problem });
         else {
           setIndexState({ status: "ready", index: parsed.value });
-          setSetId(parsed.value.sets[0]?.id ?? null);
+          // Open on a set this reader can READ. The manifest states each set's
+          // reading rule, so which ones are current is known before any sample is
+          // fetched — and a vocabulary bump leaves the superseded sets listed
+          // (they say why when picked) rather than opening the panel on one.
+          const readable = parsed.value.sets.find(
+            (item) => item.readingRule === TRAINING_READING_RULE,
+          );
+          setSetId((readable ?? parsed.value.sets[0])?.id ?? null);
         }
       })
       .catch((error: unknown) => {
@@ -176,9 +184,14 @@ export default function TrainingPanel() {
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
 
   const counts = sample ? trainingWordCounts(sample.vocabulary) : null;
+  // Two different questions, and the switch wants the second one: does this
+  // AIRPORT have a prior set anywhere (the note below), and does the set that is
+  // OPEN carry a model (the switch). A switch enabled by a set nobody is looking
+  // at toggles a line that is not there.
   const hasPrior =
     indexState.status === "ready" &&
     indexState.index.sets.some((item) => item.kind === "prior-generated");
+  const openSetHasPrior = entry?.kind === "prior-generated";
 
   return (
     <section className="training-panel" aria-label="Training">
@@ -238,6 +251,9 @@ export default function TrainingPanel() {
                       ? `${item.id} · prior seed ${item.prior.seed} (${item.prior.sha256.slice(0, 8)}…)`
                       : `${item.id} · the words alone`}
                     {` · ${item.flights} flights, ${item.cohort.split}`}
+                    {item.readingRule === TRAINING_READING_RULE
+                      ? ""
+                      : ` · ${item.readingRule}, superseded`}
                   </option>
                 ))}
               </select>
@@ -269,13 +285,13 @@ export default function TrainingPanel() {
               the words flown by rule
             </label>
             <label
-              style={{ color: hasPrior ? TRAINING_MODEL_COLOR : undefined }}
-              title={hasPrior ? undefined : "This set carries no model's words."}
+              style={{ color: openSetHasPrior ? TRAINING_MODEL_COLOR : undefined }}
+              title={openSetHasPrior ? undefined : "This set carries no model's words."}
             >
               <input
                 type="checkbox"
                 checked={trainingLayers.model}
-                disabled={!hasPrior}
+                disabled={!openSetHasPrior}
                 onChange={(event) => setTrainingLayer("model", event.target.checked)}
               />
               what the model said

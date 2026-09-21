@@ -165,7 +165,7 @@ describe("checkComparisonIndex", () => {
 describe("the Training export's checks", () => {
   it("passes a manifest and a sample that agree", () => {
     expect(checkTrainingIndex(mockIndex())).toEqual([]);
-    expect(checkTrainingSample("vocabulary_tau10", mockSample(), "segment-v13", "vocabulary-readback")).toEqual([]);
+    expect(checkTrainingSample("vocabulary_tau10", mockSample(), "segment-v14", "vocabulary-readback")).toEqual([]);
 
     const index = parseTrainingIndex(mockIndex());
     const sample = parseTrainingSample(mockSample(), "vocabulary-readback");
@@ -188,7 +188,7 @@ describe("the Training export's checks", () => {
   it("names the field when a sample is wrong", () => {
     const sample = mockSample() as any;
     sample.flights[0].sentence.words[0] = [0, 0, 0, 0, 0, 0, 0];
-    const findings = checkTrainingSample("vocabulary_tau10", sample, "segment-v13", "vocabulary-readback");
+    const findings = checkTrainingSample("vocabulary_tau10", sample, "segment-v14", "vocabulary-readback");
     expect(findings[0].category).toBe("vocabulary_tau10");
     expect(findings[0].message).toContain("7 columns, expected 6");
   });

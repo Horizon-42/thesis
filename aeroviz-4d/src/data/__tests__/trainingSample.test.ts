@@ -955,11 +955,11 @@ describe("the reading rule this reader is written for", () => {
     // the rule this reader was written for BEFORE the current one: a real artefact of it exists
     // on disk, and reading it into today's meanings is exactly the mistake being refused
     const parsed = sampleWith((sample) => {
-      sample.vocabulary.readingRule = "segment-v12";
+      sample.vocabulary.readingRule = "segment-v13";
     });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.problem).toContain("segment-v12");
+    expect(parsed.problem).toContain("segment-v13");
     expect(parsed.problem).toContain(TRAINING_READING_RULE);
   });
 
