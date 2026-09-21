@@ -33,7 +33,9 @@ def _config() -> TSConfig:
 #: The cohort lands on TWO thresholds: the runway word (D62) is a real column here, not a
 #: constant every flight shares, so the head's classes and `shift_words` are exercised.
 OTHER_RUNWAY = "23R"
-RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY, OTHER_RUNWAY])
+#: The class LABEL is airport-qualified (idents collide across a pooled cohort: KSJC and KSTL both
+#: have 12L); the bare ident is what the synthetic generator takes, so the two are kept apart.
+RUNWAYS = ins.RunwayVocabulary.from_idents([f"{AIRPORT}:{RUNWAY}", f"{AIRPORT}:{OTHER_RUNWAY}"])
 
 
 @pytest.fixture(scope="module")
@@ -195,7 +197,9 @@ def test_the_joint_rank_is_the_truth_tuple_s_place_among_the_product_candidates(
     assert pr._joint_ranks(logits, targets, has_next).tolist() == [0]
     logits["speed"][0, 0, min(7, classes["speed"] - 1)] = 6.0                                                    # one better speed word: rank 1
     assert pr._joint_ranks(logits, targets, has_next).tolist() == [1]
-    logits["altitude"][0, 0] = torch.arange(11.0) * 10.0                              # the truth (2) falls out of altitude's top-8
+    # A kind with MORE classes than the joint search is wide, or the truth cannot fall out of it:
+    # the vertical word has six modes and they all fit inside the top-8. The heading has 72.
+    logits["heading"][0, 0] = torch.arange(float(classes["heading"])) * 10.0          # the truth (3) falls out of heading's top-8
     assert pr._joint_ranks(logits, targets, has_next).tolist() == [pr.JOINT_SEARCH ** len(kinds)]
     # a tie with the truth counts as beaten (never an optimistic rank)
     logits = {kind: torch.zeros(1, 2, classes[kind]) for kind in kinds}
@@ -269,8 +273,14 @@ def test_the_hold_baseline_scores_a_sentence_that_never_changes_as_perfectly_hel
     assert real["positions_with_next"] == sequences[3].length - 1
     with pytest.raises(ValueError, match="words are the counts"):
         pr.PriorConfig(words={"heading": 36}, type_count=1, vocabulary_sha256="x")
-    with pytest.raises(ValueError, match="words are the counts"):                    # the kinds' ORDER is the contract
-        pr.PriorConfig(words={"altitude": 11, "heading": 36, "speed": 23, "intercept": 3, "runway": 2}, type_count=1, vocabulary_sha256="x")
+    # the kinds' ORDER is the contract: the prior embeds and scores by COLUMN INDEX, so a dict
+    # holding every kind but in another order sizes the wrong head. The case has to carry all six
+    # or it would also pass on a missing-key check and stop isolating the ordering rule.
+    every = {kind: 2 for kind in ins.INSTRUCTION_KINDS}
+    swapped = {kind: every[kind] for kind in (ins.INSTRUCTION_KINDS[1], ins.INSTRUCTION_KINDS[0], *ins.INSTRUCTION_KINDS[2:])}
+    assert set(swapped) == set(every) and tuple(swapped) != tuple(every)
+    with pytest.raises(ValueError, match="words are the counts"):
+        pr.PriorConfig(words=swapped, type_count=1, vocabulary_sha256="x")
     assert pr.PriorConfig.from_dict(config.to_dict()) == config
 
 
@@ -291,6 +301,18 @@ def test_the_runner_s_table_and_cohort_door(world):
     assert cohort_splits(payload, cohort, limit=1) == {"train": ["b"], "val": ["e"]}
     with pytest.raises(ValueError, match="not in the executor's val split"):
         cohort_splits(payload, SimpleNamespace(train_flight_ids=["a"], val_flight_ids=["a"]))
+
+
+def test_the_prior_takes_exactly_one_cohort_door(tmp_path):
+    """The prior needs TRACKS, not a trained executor, and a pooled cohort has no executor at all
+    — so the runner takes either the checkpoint door or the manifests one, and refuses neither and
+    both before it reads anything."""
+    from ts_transformer.experiments import instruction_prior as runner
+    tail = ["--vocabulary", str(tmp_path / "v.json"), "--cohort", str(tmp_path / "c.json"), "--out", str(tmp_path / "out")]
+    with pytest.raises(SystemExit):
+        runner.main(tail)
+    with pytest.raises(SystemExit):
+        runner.main(["--executor", str(tmp_path / "none.pt"), "--airports", "KRDU", *tail])
 
 
 def test_the_state_tokens_are_anchored_at_the_AIRPORT_not_at_the_landing_threshold(world):

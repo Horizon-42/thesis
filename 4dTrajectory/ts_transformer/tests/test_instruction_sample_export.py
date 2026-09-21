@@ -203,20 +203,25 @@ def test_the_flown_sentence_is_the_artefacts_own_sentence_not_a_re_reading():
 def test_the_geometry_block_states_every_assumption_the_line_was_drawn_under():
     """An approximation nobody can see stated is worse than none (design §5.4), so the block
     travels with the export and names the files its constants came from."""
-    from ts_transformer.outputs.guidance.controller import (
-        ACCEL_MAX_MPS2, CLIMB_MAX_RAD, DESCENT_MAX_RAD,
-    )
+    from ts_transformer.outputs.guidance.controller import CLIMB_MAX_RAD, DESCENT_MAX_RAD
     from ts_transformer.geometry.flyability import G
 
     block = instruction_kinematics.assumptions()
     for field in ("method", "dtS", "bankDeg", "gravityMps2", "descentMaxDeg",
                   "climbMaxDeg", "accelMaxMps2", "startsAt", "stopRule", "windModelled",
-                  "aircraftTypeModelled", "constantsFrom"):
+                  "aircraftTypeModelled", "constantsFrom",
+                  # word 0 is not flown as a direction (2026-09-21): a reader told only the bank
+                  # and the step would still not know why the track curves back to the centreline
+                  "headingWordZeroTracksTheCentreline", "interceptMaxDeg", "bankAndAccelFrom"):
         assert field in block, field
     # the stated numbers ARE the imported ones — a block that drifted from the code it
     # describes is worse than no block
     assert block["gravityMps2"] == G
-    assert block["accelMaxMps2"] == ACCEL_MAX_MPS2
+    # the bank and the acceleration are the kinematics module's OWN measured values, not the
+    # guidance controller's: the block must state what was flown, and they are different numbers
+    assert block["accelMaxMps2"] == instruction_kinematics.ACCEL_MAX_MPS2
+    assert block["bankDeg"] == pytest.approx(math.degrees(instruction_kinematics.TURN_BANK_RAD))
+    assert block["interceptMaxDeg"] == instruction_kinematics.INTERCEPT_MAX_DEG
     assert block["descentMaxDeg"] == pytest.approx(math.degrees(DESCENT_MAX_RAD))
     assert block["climbMaxDeg"] == pytest.approx(math.degrees(CLIMB_MAX_RAD))
     # The vertical word IS the commanded angle now, so the block says so and no longer carries a

@@ -1,12 +1,17 @@
 """Train the instruction prior on a cohort's sentences and read it (two-tier v3 stage B, B3′ pretraining; plan §5.2.2).
 
-    python run_ts.py instruction_prior --vocabulary <instruction_vocabulary.json> --executor <ckpt> \\
+    python run_ts.py instruction_prior --vocabulary <instruction_vocabulary.json> \\
+        (--executor <ckpt> | --airports KRDU KSJC …) \\
         --cohort <development_cohort.json> --out <dir> [--epochs 200] [--patience 20] [--batch-size 128] \\
         [--learning-rate 3e-4] [--seed 1337] [--d-model 128] [--n-layers 4] [--n-heads 4] [--d-ff 256] \\
         [--dropout 0.1] [--landed-loss-weight 1.0] [--limit N] [--device auto]
 
-The cohort's train and val flights are rebuilt through the executor checkpoint's data
-provenance (`support.rebuild_cohort`, C25 — the checkpoint is the door to the data), read into
+The cohort's train and val flights come through ONE of two doors, and the run says which. With
+``--executor`` they are rebuilt through that checkpoint's data provenance
+(`support.rebuild_cohort`, C25 — the checkpoint is the door to the data). With ``--airports`` they
+are read straight from those arrival manifests (`support.cohort_from_manifests`), whose digests are
+recorded in the checkpoint's place: a POOLED cohort has no executor, because none was ever trained
+on it, and the prior needs no trained executor anyway. Either way they are read into
 sentences under the vocabulary artefact (`instructions.read_instructions`) and turned into
 sequences (`instruction_sequences.flight_sequence`: the words in force, the truth's state at
 each position, the next position's words). The prior (`instruction_prior.InstructionPrior`,
@@ -15,7 +20,8 @@ term. Written under ``--out`` (refused if it exists):
 
     prior.pt          the prior (config, weights, the aircraft-type vocabulary, the instruction
                       vocabulary's sha and the artefact's runway classes — the runway head's
-                      size is the cohort's, not the spec's — the split keys, the executor's sha)
+                      size is the cohort's, not the spec's — the split keys, and the door's own
+                      provenance: the executor's sha, or the manifests' digests)
     history.json      every epoch's train / val terms
     readings.json     `evaluate` on val (and on train, as a reference) and `hold_baseline`
     summary.txt       the readings, one screen
@@ -34,7 +40,7 @@ from ts_transformer.backbone.adapters import resolve_device
 from ts_transformer.config import TSConfig
 from ts_transformer.data.data_provenance import provenance_eligible_set_digests
 from ts_transformer.data.development_cohorts import development_cohort_audit, load_development_cohort
-from ts_transformer.experiments.support import REPO_ROOT, cohort_splits, rebuild_cohort
+from ts_transformer.experiments.support import REPO_ROOT, cohort_from_manifests, cohort_splits, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.context import TypeVocabulary
 from ts_transformer.manoeuvre.instruction_prior import (
@@ -80,7 +86,12 @@ def render(readings: dict[str, Any], baseline: dict[str, Any], *, limit: int | N
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--vocabulary", type=Path, required=True, help="the instruction_vocabulary.json the sentences are read under")
-    parser.add_argument("--executor", type=Path, required=True, help="a checkpoint.pt: the door to the cohort's data")
+    parser.add_argument("--executor", type=Path, help="a checkpoint.pt: the door to the cohort's data (its provenance and config)")
+    parser.add_argument("--airports", nargs="+", metavar="ICAO",
+                        help="read the cohort straight from these airports' arrival manifests instead. The prior is "
+                             "trained on TRACKS and their sentences, not on a model, so no trained executor is needed "
+                             "— but the executor is also what carries the data provenance, so this path records the "
+                             "manifests' own digests in its place. Use it for a pooled cohort, which has no executor.")
     parser.add_argument("--cohort", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--epochs", type=int, default=200)
@@ -96,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=0, help="a PREFIX of each split (a smoke test)")
     parser.add_argument("--device", default="auto")
     args = parser.parse_args(argv)
+    if bool(args.executor) == bool(args.airports):
+        parser.error("give exactly one of --executor (a checkpoint's provenance) or --airports (the manifests')")
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
         parser.error(f"{out} exists; a prior is never overwritten")
@@ -105,13 +118,19 @@ def main(argv: list[str] | None = None) -> int:
 
     vocabulary_path = args.vocabulary if args.vocabulary.is_absolute() else REPO_ROOT / args.vocabulary
     vocabulary, runway_vocabulary, _payload = load_vocabulary(vocabulary_path)
-    executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
-    payload = load_checkpoint_payload(executor)
-    config = TSConfig.from_dict(payload["config"])
     cohort_path = args.cohort if args.cohort.is_absolute() else REPO_ROOT / args.cohort
     cohort = load_development_cohort(cohort_path)
-    splits = cohort_splits(payload, cohort, args.limit)
-    series = rebuild_cohort(payload, config, [*splits["train"], *splits["val"]])
+    if args.airports:
+        config = TSConfig()
+        series, splits, provenance = cohort_from_manifests(args.airports, cohort, config, args.limit)
+    else:
+        executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
+        payload = load_checkpoint_payload(executor)
+        config = TSConfig.from_dict(payload["config"])
+        provenance = {"read_from": "executor checkpoint", "path": str(executor), "executor_sha256": file_sha256(executor),
+                      "eligible_set_sha256": provenance_eligible_set_digests(payload["data_provenance"])}
+        splits = cohort_splits(payload, cohort, args.limit)
+        series = rebuild_cohort(payload, config, [*splits["train"], *splits["val"]])
     by_split = {"train": series[: len(splits["train"])], "val": series[len(splits["train"]) :]}
     sequences: dict[str, list[InstructionSequence]] = {
         name: [flight_sequence(item, read_instructions(item, vocabulary, runway_vocabulary)) for item in items]
@@ -138,9 +157,9 @@ def main(argv: list[str] | None = None) -> int:
     def log(row: dict[str, Any]) -> None:
         val = row["val"]
         print(f"  epoch {row['epoch']:3d}: train next {row['train']['next']:.3f} · val next {val['next']:.3f} "
-              f"(h {val['heading']:.3f} a {val['altitude']:.3f} s {val['speed']:.3f} "
+              f"(h {val['heading']:.3f} v {val['vertical']:.3f} s {val['speed']:.3f} "
               f"r {val['runway']:.3f} d {val['duration']:.3f} t {val['terminal']:.3f}) "
-              f"top-1 h {val['top1']['heading']:.3f} a {val['top1']['altitude']:.3f} "
+              f"top-1 h {val['top1']['heading']:.3f} v {val['top1']['vertical']:.3f} "
               f"s {val['top1']['speed']:.3f} t {val['top1']['terminal']:.3f}", flush=True)
 
     result = fit(model, sequences["train"], sequences["val"], types, epochs=args.epochs, patience=args.patience,
@@ -157,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         "vocabulary_spec": vocabulary.to_dict(), "runway_idents": list(runway_vocabulary.idents),
         "runway_sha256": runway_sha256(runway_vocabulary),
         "split": {name: [item.dataset_id for item in items] for name, items in by_split.items()},
-        "executor": str(executor), "executor_sha256": file_sha256(executor),
+        "provenance": provenance,
         "best_epoch": result.best_epoch, "best_val_next": result.best_val_next, "stopped_early": result.stopped_early,
         "settings": settings,
     }, out / PRIOR_FILE)
@@ -167,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         "vocabulary_sha256": vocabulary.sha256, "runway_idents": list(runway_vocabulary.idents),
         "runway_sha256": runway_sha256(runway_vocabulary), "prior_config": prior_config.to_dict(),
         "cohort_identity": {**development_cohort_audit(cohort_path, cohort), "path": str(cohort_path),
-                            "eligible_set_sha256": provenance_eligible_set_digests(payload["data_provenance"])},
+                            "provenance": provenance},
         "flights": {name: len(items) for name, items in sequences.items()}, "settings": settings,
         "best_epoch": result.best_epoch, "epochs_run": len(result.history), "stopped_early": result.stopped_early,
         "readings": readings, "hold_baseline": baseline, "elapsed_s": time.perf_counter() - started,

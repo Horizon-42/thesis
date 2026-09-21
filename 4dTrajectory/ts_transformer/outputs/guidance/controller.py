@@ -57,7 +57,11 @@ ACCEL_MAX_MPS2 = 1.0
 #: path angle it asks for is capped (descent / climb).
 HEIGHT_GAIN_S = 12.0
 DESCENT_MAX_RAD = math.radians(6.0)
-CLIMB_MAX_RAD = math.radians(2.0)
+#: 4.0°, not the 2.0° this was while the vertical instruction was a height. The limits must cover
+#: every angle the instruction vocabulary can command, tolerance included, or a legal sentence is
+#: one the executor cannot fly: the go-around mode is a 3.0° climb and its band reaches 3.21°.
+#: `test_instruction_kinematics` asserts that containment, so the two cannot drift apart again.
+CLIMB_MAX_RAD = math.radians(4.0)
 #: Capturing the glidepath from ABOVE: descend at this angle until on it.
 CAPTURE_DESCENT_RAD = math.radians(4.5)
 

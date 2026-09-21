@@ -29,6 +29,7 @@ import argparse
 from collections import Counter
 import csv
 from dataclasses import fields
+import math
 from pathlib import Path
 import time
 from typing import Any
@@ -41,11 +42,12 @@ from ts_transformer.data.approach_difficulty import (
 )
 from ts_transformer.data.data_provenance import provenance_eligible_set_digests
 from ts_transformer.data.development_cohorts import development_cohort_audit, load_development_cohort
-from ts_transformer.experiments.support import REPO_ROOT, cohort_splits, rebuild_cohort
+from ts_transformer.experiments.support import REPO_ROOT, cohort_from_manifests, cohort_splits, rebuild_cohort
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.data.runway_context import wrap_deg
 from ts_transformer.manoeuvre.instructions import (
-    ABSORBED_SAME_WORD, ABSORBED_SHORT_TAIL, ABSORBED_SMALL_CHANGE, INSTRUCTION_KINDS, MANDATORY_KINDS, NO_INTERCEPT,
+    ABSORBED_SAME_WORD, ABSORBED_SHORT_SEGMENT, ABSORBED_SHORT_TAIL, ABSORBED_SMALL_CHANGE, INSTRUCTION_KINDS,
+    MANDATORY_KINDS, NO_INTERCEPT,
     Reading, RunwayVocabulary, Vocabulary, course_frame, flight_runway, read_instructions, word_counts, write_vocabulary,
 )
 from ts_transformer.training.train import load_checkpoint_payload
@@ -72,7 +74,7 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
     # first six-kind run printed ("duration 0/151, terminal 0/3") although every event carries
     # one. Both counts come off the word matrix, which is the sentence itself.
     columns = {kind: INSTRUCTION_KINDS.index(kind) for kind in INSTRUCTION_KINDS}
-    spoken = ("heading", "altitude", "speed", "runway")     # the kinds an Instruction is issued for
+    spoken = ("heading", "vertical", "speed", "runway")     # the kinds an Instruction is issued for
     per_kind = {kind: ([sum(1 for i in r.instructions if i.kind == kind) for r in readings] if kind in spoken
                        else [len(r.words) for r in readings])
                 for kind in INSTRUCTION_KINDS}
@@ -81,14 +83,14 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
     unclamped = [i for r in readings for i in r.instructions if not i.clamped]
     residuals = {
         "heading_deg": [abs(wrap_deg(i.target - vocabulary.heading_centre_deg(i.word))) for i in unclamped if i.kind == "heading"],
-        "altitude_m": [abs(i.target - vocabulary.altitude_centre_m(i.word)) for i in unclamped if i.kind == "altitude"],
+        "vertical_deg": [abs(i.target - vocabulary.vertical_centre_deg(i.word)) for i in unclamped if i.kind == "vertical"],
         "speed_mps": [abs(i.target - vocabulary.speed_centre_mps(i.word)) for i in unclamped if i.kind == "speed"],
     }
     events = sum(len(r.event_times_s) for r in readings)
     # every event IS a change now (D52) — what is worth counting is how many, and the gaps
     gaps = [float(g) for r in readings for g in np.diff(r.event_times_s)]
     duration_clamped = sum(r.duration_clamped for r in readings)
-    reasons = (ABSORBED_SAME_WORD, ABSORBED_SMALL_CHANGE, ABSORBED_SHORT_TAIL)
+    reasons = (ABSORBED_SAME_WORD, ABSORBED_SMALL_CHANGE, ABSORBED_SHORT_TAIL, ABSORBED_SHORT_SEGMENT)
     absorbed = {kind: {reason: sum(1 for r in readings for a in r.absorbed if a.kind == kind and a.reason == reason) for reason in reasons}
                 for kind in MANDATORY_KINDS}
     orbits = sum(1 for r in readings for a in r.absorbed if a.kind == "heading" and abs(a.change) >= 180.0)
@@ -98,11 +100,17 @@ def summarise(readings: list[Reading], vocabulary: Vocabulary) -> dict[str, Any]
         "instructions_per_flight_p95": {kind: _p95(per_kind[kind]) for kind in INSTRUCTION_KINDS},
         "word_counts": {kind: {str(w): int(c) for w, c in sorted(counts[kind].items())} for kind in INSTRUCTION_KINDS},
         "words_used": {kind: len(counts[kind]) for kind in INSTRUCTION_KINDS},
-        "clamped": {kind: sum(1 for r in readings for i in r.instructions if i.kind == kind and i.clamped) for kind in ("altitude", "speed")},
+        "outside": {kind: sum(1 for r in readings for i in r.instructions if i.kind == kind and i.clamped) for kind in ("vertical", "speed")},
         "target_to_bin_centre_p50": {k: _p50(v) for k, v in residuals.items()},
         "target_to_bin_centre_p95": {k: _p95(v) for k, v in residuals.items()},
         "absorbed": absorbed, "absorbed_heading_orbits": orbits,
         "established_from_start_share": float(np.mean([r.established_from_start for r in readings])),
+        # what the vertical fit's segment CEILING costs, stated rather than implied: the RMS
+        # height error of the words' own profile against the track, and how many fitted pieces
+        # read as one word and were folded
+        "vertical_fit_rms_m_p50": _p50([r.vertical_fit_rms_m for r in readings]),
+        "vertical_fit_rms_m_p95": _p95([r.vertical_fit_rms_m for r in readings]),
+        "vertical_pieces_merged": sum(r.vertical_pieces_merged for r in readings),
         "events": events, "events_per_flight_p50": _p50([len(r.event_times_s) for r in readings]),
         "gap_s_p50": _p50(gaps), "gap_s_p95": _p95(gaps), "duration_clamped": duration_clamped,
         "duration_s_p50": _p50([r.duration_s for r in readings]),
@@ -124,13 +132,18 @@ def render(summary: dict[str, dict[str, Any]], vocabulary: Vocabulary, runway_vo
         lines.append("  instructions / flight p50 (p95): " + ", ".join(
             f"{k} {s['instructions_per_flight_p50'][k]:.0f} ({s['instructions_per_flight_p95'][k]:.0f})" for k in INSTRUCTION_KINDS))
         lines.append("  words used: " + ", ".join(f"{k} {s['words_used'][k]}/{words[k]}" for k in INSTRUCTION_KINDS)
-                     + f" · clamped altitude {s['clamped']['altitude']}, speed {s['clamped']['speed']}")
+                     + f" · outside the ends: vertical {s['outside']['vertical']}, speed {s['outside']['speed']}")
         lines.append("  unclamped target − bin centre p50 (p95): " + ", ".join(
             f"{k} {s['target_to_bin_centre_p50'][k]:.1f} ({s['target_to_bin_centre_p95'][k]:.1f})" for k in s["target_to_bin_centre_p50"]))
-        lines.append("  absorbed manoeuvres (same word / small change / short tail): "
-                     + ", ".join(f"{k} " + "/".join(str(v[reason]) for reason in (ABSORBED_SAME_WORD, ABSORBED_SMALL_CHANGE, ABSORBED_SHORT_TAIL))
+        lines.append("  absorbed manoeuvres (same word / small change / short tail / short segment): "
+                     + ", ".join(f"{k} " + "/".join(str(v[reason]) for reason in
+                                                    (ABSORBED_SAME_WORD, ABSORBED_SMALL_CHANGE, ABSORBED_SHORT_TAIL, ABSORBED_SHORT_SEGMENT))
                                  for k, v in s["absorbed"].items())
                      + f" · heading orbits (≥ 180°) {s['absorbed_heading_orbits']}")
+        # what the vertical fit's ceiling of `vertical_segments` costs — never silent
+        lines.append(f"  vertical fit against the track: RMS p50 {s['vertical_fit_rms_m_p50']:.0f} m, "
+                     f"p95 {s['vertical_fit_rms_m_p95']:.0f} m; {s['vertical_pieces_merged']} fitted pieces "
+                     f"read as the word beside them and were folded")
         for kind in INSTRUCTION_KINDS:
             counts = s["word_counts"][kind]
             total = sum(counts.values()) or 1
@@ -138,6 +151,38 @@ def render(summary: dict[str, dict[str, Any]], vocabulary: Vocabulary, runway_vo
             lines.append(f"  {kind:<10}" + "  ".join(f"w{w}:{c / total:.2f}" for w, c in top)
                          + (f"   (top 8 of {len(counts)} words)" if len(counts) > 8 else ""))
     return "\n".join(lines) + "\n"
+
+
+def _vertical_panel(ax, t, frame, reading, vocabulary) -> None:
+    """The vertical panel plots HEIGHT, and the words on it are the PROFILE each angle draws.
+
+    Drawing `hlines` at the word's centre — which is what every other kind's panel does, and what
+    this one did until 2026-09-21 — puts lines at −3…+4.4 on an axis that runs 0–3000 m, so every
+    word collapses onto y ≈ 0 and the page a human marks 一致/漏读/误读 on cannot show whether the
+    vertical words are right. The word is a RATE, so what it says about this panel is a slope:
+    each instruction's angle held from the height where it was issued.
+    """
+    ax.plot(t, frame["height_m"], lw=1.0, color="0.3")
+    issued = sorted((i for i in reading.instructions if i.kind == "vertical"), key=lambda i: i.issued_s)
+    speed = frame["ground_speed_mps"]
+    for j, item in enumerate(issued):
+        end = issued[j + 1].issued_s if j + 1 < len(issued) else t[-1]
+        a, b = int(np.searchsorted(t, item.issued_s)), int(np.searchsorted(t, end))
+        b = min(b, len(t) - 1)
+        if b <= a:
+            continue
+        distance = float(np.trapezoid(speed[a:b + 1], t[a:b + 1]))
+        height = float(frame["height_m"][a])
+        drop = math.tan(math.radians(vocabulary.vertical_centre_deg(item.word))) * distance
+        ax.plot([t[a], t[b]], [height, height - drop], color="C1", lw=2.0)
+        ax.axvline(item.issued_s, color="C1", lw=0.6, ls=":")
+        if item.settled_s is not None:
+            ax.axvline(item.settled_s, color="C2", lw=0.6, ls=":")
+    absorbed = [a for a in reading.absorbed if a.kind == "vertical"]
+    for item in absorbed:
+        ax.axvspan(item.start_s - 1.0, item.end_s + 1.0, color="0.85")
+    ax.set_ylabel("height above the threshold (m); C1 = the angle words"
+                  + ("; grey = absorbed" if absorbed else ""))
 
 
 def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Path) -> None:
@@ -159,7 +204,7 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
             continue                    # not a point on the track: it is the frame every other word is read in
         k = int(np.searchsorted(t, item.issued_s))
         ax.plot(-frame["to_go_m"][k] / 1000.0, frame["cross_m"][k] / 1000.0, "o", ms=4,
-                color={"heading": "C1", "altitude": "C2", "speed": "C3", "intercept": "C4"}[item.kind])
+                color={"heading": "C1", "vertical": "C2", "speed": "C3", "runway": "C4"}[item.kind])
     ax.set_xlabel("along the final approach course, km (threshold at 0)")
     ax.set_ylabel("cross-track, km (right +)")
     ax.set_title(f"{reading.flight_id} · runway {reading.runway} · plan view")
@@ -184,7 +229,7 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
         ax.set_ylabel(f"{kind} ({unit})" + ("; grey = absorbed" if absorbed else ""))
 
     steps(axes[0, 1], frame["course_unwrapped_deg"], "heading", vocabulary.heading_centre_deg, "deg rel. course, unwrapped", period=360.0)
-    steps(axes[1, 0], frame["height_m"], "altitude", vocabulary.altitude_centre_m, "m above threshold")
+    _vertical_panel(axes[1, 0], t, frame, reading, vocabulary)
     steps(axes[1, 1], frame["ground_speed_mps"], "speed", vocabulary.speed_centre_mps, "m/s ground")
     # D72: mark where the sentence says it lands — the terminal word, on every panel's clock
     for ax in (axes[0, 1], axes[1, 0], axes[1, 1]):
@@ -199,7 +244,13 @@ def hand_check_figure(series, reading: Reading, vocabulary: Vocabulary, path: Pa
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
-    parser.add_argument("--executor", type=Path, required=True, help="a checkpoint.pt: the door to the cohort's data (provenance, config)")
+    parser.add_argument("--executor", type=Path, help="a checkpoint.pt: the door to the cohort's data (provenance, config)")
+    parser.add_argument("--airports", nargs="+", metavar="ICAO",
+                        help="read the cohort straight from these airports' arrival manifests instead. "
+                             "The vocabulary is read from TRACKS, not from a model, so a trained executor is "
+                             "not needed to read it — but the executor is also what carries the data provenance, "
+                             "so this path records the manifests' own digests in its place. Use it when no "
+                             "executor exists for the cohort (a pooled cohort has none).")
     parser.add_argument("--cohort", type=Path, required=True, help="the development cohort file whose train and val flights are read")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--token-step-s", type=float, default=Vocabulary().token_step_s)
@@ -218,22 +269,42 @@ def main(argv: list[str] | None = None) -> int:
         name, _, value = item.partition("=")
         if name not in settable or not value:
             parser.error(f"--set {item!r}: not a settable Vocabulary field (one of {settable})")
-        overrides[name] = float(value)
+        # the type belongs at the boundary: `vertical_segments` and `vertical_fit_points` are
+        # COUNTS, and a float there passes `__post_init__` and dies inside the fit with a
+        # TypeError about integers
+        wanted = {f.name: f.type for f in fields(Vocabulary)}[name]
+        try:
+            overrides[name] = int(value) if wanted in ("int", int) else float(value)
+        except ValueError:
+            parser.error(f"--set {item!r}: {value!r} is not a {wanted}")
     vocabulary = Vocabulary(**overrides)
     if args.hand_check % 2:
         parser.error(f"--hand-check draws half per stratum: {args.hand_check} is odd")
 
-    executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
-    payload = load_checkpoint_payload(executor)
-    config = TSConfig.from_dict(payload["config"])
+    if bool(args.executor) == bool(args.airports):
+        parser.error("give exactly one of --executor (a checkpoint's provenance) or --airports (the manifests')")
     cohort_path = args.cohort if args.cohort.is_absolute() else REPO_ROOT / args.cohort
     cohort = load_development_cohort(cohort_path)
     # NO --limit here, deliberately (removed 2026-09-20 with D62): the runway CLASSES are read off
     # these flights and they sit OUTSIDE the sha, so a limited run would write a fully valid,
     # sha-identical artefact whose class set is only a prefix's, and nothing downstream could tell
     # the difference. This runner reads the whole cohort or it does not write.
-    splits = cohort_splits(payload, cohort, 0)
-    series = rebuild_cohort(payload, config, [*splits["train"], *splits["val"]])
+    if args.airports:
+        config = TSConfig()
+        series, splits, provenance = cohort_from_manifests(args.airports, cohort, config)
+        # WHICH config: `build_series` skips a track shorter than one window, and the window is
+        # this config's, so the population read depends on it. A default nobody wrote down is not
+        # provenance.
+        provenance["config"] = {name: getattr(config, name) for name in ("seq_len", "pred_len", "dt_s", "aircraft_type")}
+    else:
+        executor = args.executor if args.executor.is_absolute() else REPO_ROOT / args.executor
+        payload = load_checkpoint_payload(executor)
+        config = TSConfig.from_dict(payload["config"])
+        provenance = {"read_from": "executor checkpoint", "path": str(executor),
+                      "executor_sha256": file_sha256(executor),
+                      "eligible_set_sha256": provenance_eligible_set_digests(payload["data_provenance"])}
+        splits = cohort_splits(payload, cohort, 0)
+        series = rebuild_cohort(payload, config, [*splits["train"], *splits["val"]])
     by_split = {"train": series[: len(splits["train"])], "val": series[len(splits["train"]) :]}
     print(f"  {len(series)} flights rebuilt; reading instructions at τ = {vocabulary.token_step_s:g} s", flush=True)
 
@@ -246,9 +317,14 @@ def main(argv: list[str] | None = None) -> int:
     write_vocabulary(
         out, vocabulary, runway_vocabulary=runway_vocabulary,
         cohort_identity={**development_cohort_audit(cohort_path, cohort), "path": str(cohort_path),
-                         "eligible_set_sha256": provenance_eligible_set_digests(payload["data_provenance"])},
+                         "provenance": provenance},
         counts={name: summary[name]["word_counts"] for name in summary},
-        source={"executor": str(executor), "executor_sha256": file_sha256(executor)},
+        # ONE door decided this run (the parser refuses both and neither), and `provenance` is
+        # already that door's own record — built by `cohort_from_manifests` or beside the
+        # checkpoint read. Deriving the source from it keeps the two from disagreeing; deriving it
+        # from a variable only one branch binds is what made this raise after reading 26,382
+        # flights (2026-09-21).
+        source=provenance,
     )
     for name, items in readings.items():
         write_json_atomic(out / f"sentences_{name}.json", {"schema": SUMMARY_SCHEMA, "split": name, "vocabulary_sha256": vocabulary.sha256,
@@ -283,7 +359,8 @@ def main(argv: list[str] | None = None) -> int:
             writer = csv.writer(handle)
             writer.writerow(["file", "flight_id", "stratum", "tortuosity", "established_at_anchor",
                              *(f"n_{kind}" for kind in MANDATORY_KINDS), "runway", "n_events", "n_absorbed",
-                             "sentence (heading/altitude/speed/runway/duration/terminal per event)", "verdict (一致 / 漏读 / 误读)", "note"])
+                             f"sentence ({'/'.join(INSTRUCTION_KINDS)} per event)",
+                             "verdict (一致 / 漏读 / 误读)", "note"])
             for k, (stratum, index) in enumerate(chosen):
                 item, reading, d = train[index], readings["train"][index], difficulty[index]
                 name = f"{k:03d}_{reading.flight_id}.png"

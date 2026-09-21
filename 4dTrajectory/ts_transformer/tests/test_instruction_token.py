@@ -28,12 +28,12 @@ from ts_transformer.outputs.control import instruction_token as tok
 from ts_transformer.outputs.control.forecast import forecast_control_batch
 from ts_transformer.outputs.control.strategy import ControlStrategy
 from ts_transformer.run_naming import run_display_name
-from ts_transformer.tests.support import AIRPORT, RUNWAY, fake_data_provenance
+from ts_transformer.tests.support import AIRPORT, OTHER_RUNWAY_WORD, RUNWAY, RUNWAY_WORD, fake_data_provenance
 from ts_transformer.training.train import load_checkpoint, train
 
 SEGMENT_S = 20.0
 #: The runway word's classes the artefact carries beside the spec (D62); these flights land on RUNWAY.
-RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY, "23R"])
+RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY_WORD, OTHER_RUNWAY_WORD])
 
 
 def _settings(**overrides) -> dict:
@@ -223,7 +223,7 @@ def test_the_closed_loop_feeds_the_truth_s_words_by_flown_position_and_the_proto
     # other runway CLASSES are another vocabulary too: the same word index would mean another threshold
     with pytest.raises(ValueError, match="another vocabulary"):
         ls.fly(executor, series, device=cpu, batch_size=2, protocol=ls.PROTOCOL_TRUTH_INSTRUCTION,
-               feed=ls.InstructionFeed(vocabulary, ins.RunwayVocabulary.from_idents([RUNWAY]), feed.readings))
+               feed=ls.InstructionFeed(vocabulary, ins.RunwayVocabulary.from_idents([RUNWAY_WORD]), feed.readings))
     plain = TSConfig(**_settings())
     torch.manual_seed(1)
     no_token = ls.Executor(model=build_model(plain).eval(), config=plain, normalizer=executor.normalizer)

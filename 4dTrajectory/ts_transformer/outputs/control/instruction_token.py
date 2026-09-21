@@ -87,12 +87,12 @@ def nearest_truth_time_s(series: FlightSeries, flown_row: np.ndarray) -> tuple[f
 
 
 def probe_instruction_context(config: TSConfig, vocabulary: Vocabulary, batch_size: int, device: torch.device) -> dict[str, torch.Tensor]:
-    """The batch-size probe's token: every event "on the course, 3 000 ft, 180 kt, the first
-    runway, no gap, continuing", in the vocabulary's own bins. It only has to be a LEGAL
+    """The batch-size probe's token: every event "on the course, on the published glidepath,
+    180 kt, the first runway, no gap, continuing", in the vocabulary's own bins. It only has to be a LEGAL
     sentence row — `Vocabulary.conditioning` reads the first three kinds and drops the rest
     (the executor is already in the runway's frame, and the gap and the ending are the
     sentence's business, not its)."""
-    one = [vocabulary.heading_bin(0.0), vocabulary.altitude_bin(3000.0 * FT)[0],
+    one = [vocabulary.heading_bin(0.0), vocabulary.vertical_bin(3.0)[0],
            vocabulary.speed_bin(180.0 * KT)[0], 0, 0, TERMINAL_CONTINUE]
     words = np.tile(np.array([one], dtype=np.int64), (instruction_positions(config, vocabulary), 1))
     token = torch.from_numpy(vocabulary.conditioning(words)).to(device)

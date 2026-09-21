@@ -37,15 +37,28 @@ from ts_transformer.data.approach_difficulty import (
 from ts_transformer.data.runway_context import wrap_deg
 from ts_transformer.geometry.flyability import G
 from ts_transformer.manoeuvre.instructions import INSTRUCTION_KINDS, Reading, Vocabulary
-from ts_transformer.outputs.guidance.controller import (
-    ACCEL_MAX_MPS2, CLIMB_MAX_RAD, DESCENT_MAX_RAD,
-)
-from ts_transformer.outputs.guidance.route import ROUTE_BANK_RAD
+from ts_transformer.outputs.guidance.controller import CLIMB_MAX_RAD, DESCENT_MAX_RAD
 
 #: The reading rule's sibling: a track drawn under other rules is another track, so the name
 #: travels with the artefact and the view states it.
-METHOD = "instruction-kinematics-v1"
+METHOD = "instruction-kinematics-v2-tracked-course"
 STEP_S = 1.0
+#: The airframe this preview flies, MEASURED on the fleet rather than borrowed from the route
+#: planner (which draws routes at 20° — a different question: how tight may a drawn arc be, not
+#: how fast does an arrival actually turn).
+#:
+#: Turn: plateau to plateau, the real turn rate is 0.67 of what 20° gives (p50 over 280 turns of
+#: more than 20° at KRDU), which is a 14° bank; per sample the implied bank is p50 11.5° / p90
+#: 23.9° over three airports. A preview that turns half again too fast finishes each turn early
+#: and then flies straight while the aircraft is still turning, displacing everything after it.
+#: Acceleration: |dV/dt| where the speed is actually changing is p50 0.19 / p90 0.54 / p99 0.99
+#: m/s² (62,383 samples, three airports), so the old 1.0 cap was the p99 and 0.5 is the p90.
+TURN_BANK_RAD = math.radians(14.0)
+ACCEL_MAX_MPS2 = 0.5
+#: The most the aircraft will angle off the final approach course to regain the centreline.
+#: See `target_course_deg`: the heading word 0 names the course, and on an approach FLYING that
+#: course means TRACKING it. 30° is the alignment window the join rule already uses.
+INTERCEPT_MAX_DEG = 30.0
 #: How far past the observed track the flown words are allowed to run before the integration is
 #: cut. Without a cap a sentence that never reaches the threshold integrates forever; with one,
 #: `end_reason` says which happened. 120 s at a 70 m/s approach speed is ~8 km of extra path.
@@ -157,17 +170,42 @@ def on_final(cross_m: float, relative_course_deg: float) -> bool:
     )
 
 
+def target_course_deg(word: int, vocabulary: Vocabulary, to_go_m: float, cross_m: float) -> float:
+    """The course to steer for one heading word — and word 0 is not like the others.
+
+    Every heading word names a direction relative to the final approach course, and for 71 of
+    them steering that direction is the whole instruction. Word 0 names the COURSE ITSELF, and
+    on an approach an aircraft told to fly the final approach course tracks the centreline; it
+    does not fly parallel to it. The difference is the difference between landing and not:
+    measured on 150 KRDU arrivals, a reconstruction that flies word 0 as a direction reaches the
+    threshold aligned but a median 2,464 m to the side and never crosses ON the final (the real
+    tracks are 13 m off at that moment), and 36.7 % of sentences land. Tracking the centreline
+    instead, the same sentences land 94.7 % of the time (95.0 % at KSJC, against 78.2 %).
+
+    A word is still an absolute target here — the target is the centreline rather than a
+    bearing — so this adds nothing to the vocabulary and changes no sentence. It is what flying
+    the word MEANS, and it is what `outputs/guidance` already does for a route's final leg.
+    """
+    if word != 0:
+        return vocabulary.heading_centre_deg(word)
+    # aim at a point on the centreline ahead; far out that is a gentle correction, close in it
+    # saturates at the alignment window. `cross` is eaten by a POSITIVE relative course
+    # (d(cross)/dt = −V·sin χ), so the sign is +cross.
+    ahead_m = max(to_go_m, 1000.0)
+    return float(min(max(math.degrees(math.atan2(cross_m, ahead_m)), -INTERCEPT_MAX_DEG), INTERCEPT_MAX_DEG))
+
+
 def turn_rate_rad_s(speed_mps: float) -> float:
-    """The most a coordinated turn at the route's bank angle gives at this speed: ``g·tan φ / V``.
+    """The most a coordinated turn at `TURN_BANK_RAD` gives at this speed: ``g·tan φ / V``.
 
     NOT ``V / route_turn_radius_m(V)``. That function floors the RADIUS below 40 m/s so a route
     arc is never drawn tighter than a slow aircraft can fly; read as a rate the same floor
     inverts the physics — it sends the turn rate to zero as V falls, where a real aircraft at a
     fixed bank turns FASTER. The two agree above 40 m/s, which is everywhere the vocabulary can
-    reach (its slowest word is 100 kt), so this is about saying the right thing, not a different
+    reach (its slowest word is 44 m/s), so this is about saying the right thing, not a different
     number.
     """
-    return G * math.tan(ROUTE_BANK_RAD) / speed_mps
+    return G * math.tan(TURN_BANK_RAD) / speed_mps
 
 
 def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: float,
@@ -215,7 +253,7 @@ def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: floa
     while t < limit_s:
         was_ahead = to_go > 0.0
         words = reading.words_at(np.array([t]))[0]
-        target_course = vocabulary.heading_centre_deg(int(words[heading_column]))
+        target_course = target_course_deg(int(words[heading_column]), vocabulary, to_go, cross)
         vertical_word = int(words[vertical_column])
         target_gamma_deg = vocabulary.vertical_centre_deg(vertical_word)
         # The word's own band. `lo` is the SHALLOWER descent (the smaller angle, descent being
@@ -295,10 +333,18 @@ def speed_band(reading: Reading, vocabulary: Vocabulary, start: Start,
     horizontal step, the turn radius (``g·tanφ/V``) and therefore the moment the track crosses
     the threshold — so each edge is a track of its own, with its own clock and its own ending.
 
-    ``arrivalWindowS`` is ``[the fast edge's crossing, the slow edge's crossing]`` and is ``None``
+    ``arrivalWindowS`` is the window in TIME order — ``[earliest, latest]`` — and is ``None``
     unless BOTH edges reached the runway: a window whose far end is the integration budget is not
     an arrival time, it is the stopping rule, and printing it as one would measure this module
     instead of the vocabulary.
+
+    It is NOT ``[fast, slow]``, which is what it was until 2026-09-21 and what the frontend
+    checked for. **The faster edge does not always arrive first**: turn radius is ``V²/(g·tanφ)``,
+    so 3 % more speed is 6 % more radius, and on a vectored pattern the extra path around the
+    turns and the intercept outweighs the extra speed. Measured on the published 40-flight sample,
+    **17 of 40 flights** (every one of them vectored) have the fast edge arriving later, by up to
+    42 s; over the sample the fast−slow difference runs from −21 s to +42 s with a median of
+    −12 s. Which edge is which is not lost — ``low`` and ``high`` are their own keys.
     """
     fraction = vocabulary.speed_tolerance_fraction
     low = fly(reading, vocabulary, start, observed_s, speed_scale=1.0 - fraction)
@@ -307,7 +353,7 @@ def speed_band(reading: Reading, vocabulary: Vocabulary, start: Start,
     return {
         "low": low.edge_dict(),
         "high": high.edge_dict(),
-        "arrivalWindowS": ([round(float(high.t_s[-1]), 1), round(float(low.t_s[-1]), 1)]
+        "arrivalWindowS": (sorted([round(float(high.t_s[-1]), 1), round(float(low.t_s[-1]), 1)])
                            if both_crossed else None),
     }
 
@@ -342,13 +388,15 @@ def assumptions() -> dict[str, Any]:
     return {
         "method": METHOD,
         "dtS": STEP_S,
-        "bankDeg": round(math.degrees(ROUTE_BANK_RAD), 1),
+        "bankDeg": round(math.degrees(TURN_BANK_RAD), 1),
         "gravityMps2": G,
         "verticalIsCommandedAngle": True,   # the word IS gamma; there is no height error to close
         "heightFloorM": 0.0,                # it levels at the threshold rather than flying through it
         "descentMaxDeg": round(math.degrees(DESCENT_MAX_RAD), 1),
         "climbMaxDeg": round(math.degrees(CLIMB_MAX_RAD), 1),
         "accelMaxMps2": ACCEL_MAX_MPS2,
+        "headingWordZeroTracksTheCentreline": True,
+        "interceptMaxDeg": INTERCEPT_MAX_DEG,
         "startsAt": "observed-first-row",
         "stopRule": f"{END_CROSSED} or {END_TIME_CAP} at the observed duration + {OVERRUN_S:g} s",
         "windModelled": False,
@@ -360,7 +408,10 @@ def assumptions() -> dict[str, Any]:
         "verticalBandFrom": "vocabulary.verticalTolerance",
         "speedBandFrom": "vocabulary.speedTolerance",
         "bandsAreJoint": False,
+        # the bank and the acceleration are MEASURED on the fleet here (see their definitions),
+        # not borrowed: a route's drawing bank answers a different question
+        "bankAndAccelFrom": "measured on the arrival fleet",
         "constantsFrom": [
-            "outputs/guidance/route.py", "outputs/guidance/controller.py", "geometry/flyability.py",
+            "outputs/guidance/controller.py", "geometry/flyability.py",
         ],
     }

@@ -15,10 +15,8 @@ from ts_transformer.manoeuvre.instructions import (
     INSTRUCTION_KINDS, Reading, TERMINAL_CONTINUE, TERMINAL_LANDED, Vocabulary,
 )
 from ts_transformer.data.approach_difficulty import ESTABLISHED_CROSS_TRACK_M
-from ts_transformer.outputs.guidance.controller import (
-    ACCEL_MAX_MPS2, CLIMB_MAX_RAD, DESCENT_MAX_RAD, HEIGHT_GAIN_S,
-)
-from ts_transformer.outputs.guidance.route import route_turn_radius_m
+from ts_transformer.geometry.flyability import G
+from ts_transformer.outputs.guidance.controller import CLIMB_MAX_RAD, DESCENT_MAX_RAD
 
 VOCABULARY = Vocabulary()
 COLUMN = {kind: index for index, kind in enumerate(INSTRUCTION_KINDS)}
@@ -72,27 +70,44 @@ def test_holding_the_course_flies_exactly_as_far_as_the_speed_says():
     assert np.allclose(track.ground_speed_mps, STEADY_MPS)
 
 
-def test_a_turn_onto_the_course_flies_the_route_builders_radius():
-    """From 90° off, turning onto the course: the arc it flies divided by the angle it turns
-    through IS the radius, and it must be the route builder's own — `V² / (g·tan 20°)`."""
+def test_a_turn_flies_the_radius_the_MEASURED_bank_gives():
+    """From 90° off to a 30° word: the arc flown divided by the angle turned through IS the
+    radius, and it must be `V² / (g·tan φ)` at this module's own bank.
+
+    That bank is MEASURED on the arrival fleet (`TURN_BANK_RAD`), not borrowed from the route
+    builder's 20°, which answers a different question — how tight an arc may be DRAWN. Plateau to
+    plateau the fleet turns at 0.67 of what 20° gives, and a preview that turns half again too
+    fast finishes each turn early and then flies straight while the aircraft is still turning.
+    """
+    word = VOCABULARY.heading_bin(30.0)
+    target_deg = VOCABULARY.heading_centre_deg(word)
     track = kinematics.fly(
-        sentence(heading=0), VOCABULARY, start(relative_course_deg=90.0), observed_s=280,
+        sentence(heading=word), VOCABULARY, start(relative_course_deg=90.0), observed_s=280,
     )
-    arrived = int(np.flatnonzero(np.abs(track.relative_course_deg) > 1e-9)[-1]) + 1
-    assert track.relative_course_deg[arrived] == pytest.approx(0.0, abs=1e-9)   # on it, not past it
+    arrived = int(np.flatnonzero(np.abs(track.relative_course_deg - target_deg) > 1e-9)[-1]) + 1
+    assert track.relative_course_deg[arrived] == pytest.approx(target_deg, abs=1e-9)
+    radius_m = STEADY_MPS * float(track.t_s[arrived]) / math.radians(90.0 - target_deg)
+    expected = STEADY_MPS ** 2 / (G * math.tan(kinematics.TURN_BANK_RAD))
+    assert radius_m == pytest.approx(expected, rel=0.02)
 
-    radius_m = STEADY_MPS * float(track.t_s[arrived]) / math.radians(90.0)
-    assert radius_m == pytest.approx(route_turn_radius_m(STEADY_MPS), rel=0.02)
 
-    # The quarter turn also displaces it by one radius along each axis. The two come out
-    # +4 % and −2.5 % because a 1 s Euler step flies its whole length on the NEW course —
-    # the arc is walked as a 32-sided polygon, not integrated exactly.
-    assert abs(track.to_go_m[0] - track.to_go_m[arrived]) == pytest.approx(
-        route_turn_radius_m(STEADY_MPS), rel=0.05,
-    )
-    assert abs(track.cross_m[0] - track.cross_m[arrived]) == pytest.approx(
-        route_turn_radius_m(STEADY_MPS), rel=0.05,
-    )
+def test_the_word_for_the_final_approach_course_TRACKS_it_rather_than_flying_its_direction():
+    """Word 0 names the course itself, and an aircraft told to fly the final approach course
+    tracks the centreline — it does not fly parallel to it.
+
+    Measured on 150 KRDU arrivals: flown as a direction, a sentence reaches the threshold aligned
+    but a median 2,464 m to the side (the real tracks are 13 m off) and only 36.7 % of sentences
+    ever cross ON the final; tracking the centreline, 94.7 % do. Started 3 km off here, the track
+    must come back to the centreline and the crossing must count.
+    """
+    off = kinematics.fly(sentence(heading=0), VOCABULARY, start(cross_m=3000.0), observed_s=400)
+    assert abs(off.cross_m[-1]) < abs(off.cross_m[0]) / 10.0
+    assert off.end_reason == kinematics.END_CROSSED
+    # it angles off the course to get there, by at most the intercept limit
+    assert 0.0 < off.relative_course_deg.max() <= kinematics.INTERCEPT_MAX_DEG + 1e-9
+    # and a flight already on the centreline is not disturbed
+    on = kinematics.fly(sentence(heading=0), VOCABULARY, start(), observed_s=80.0)
+    assert np.allclose(on.cross_m, 0.0, atol=1e-9)
 
 
 def test_the_commanded_angle_is_flown_outright_with_no_error_to_close():
@@ -115,16 +130,18 @@ def test_the_descent_levels_at_the_threshold_instead_of_flying_through_it():
     assert track.height_m[-1] == pytest.approx(0.0, abs=1e-9)
 
 
-def test_acceleration_is_capped_at_the_controllers_limit():
+def test_acceleration_is_capped_at_the_measured_limit():
     top = VOCABULARY.speed_words - 1
     target = VOCABULARY.speed_centre_mps(top)
-    track = kinematics.fly(sentence(speed=top), VOCABULARY, start(), observed_s=0.0)
+    # far enough out, and long enough, that it reaches the word before it reaches the threshold:
+    # the measured cap is 0.5 m/s², so 74 → 157 m/s takes 166 s
+    track = kinematics.fly(sentence(speed=top), VOCABULARY, start(to_go_m=60000.0), observed_s=200.0)
     rate = np.diff(track.ground_speed_mps)
     reached = int(np.flatnonzero(track.ground_speed_mps >= target - 1e-9)[0])
 
-    # imported from the controller, NOT from `kinematics.ACCEL_MAX_MPS2`: asserting against
-    # the module's own re-export would pass even if the module retyped the number.
-    assert np.allclose(rate[: reached - 1], ACCEL_MAX_MPS2 * kinematics.STEP_S)
+    # the cap is this module's own, MEASURED on the fleet (|dV/dt| where the speed is changing is
+    # p50 0.19 / p90 0.54 / p99 0.99 m/s² over 62,383 samples, so the old 1.0 was the p99)
+    assert np.allclose(rate[: reached - 1], kinematics.ACCEL_MAX_MPS2 * kinematics.STEP_S)
     # and it settles AT the word rather than overshooting it
     assert track.ground_speed_mps[reached] == pytest.approx(target)
     assert np.allclose(rate[reached:], 0.0)

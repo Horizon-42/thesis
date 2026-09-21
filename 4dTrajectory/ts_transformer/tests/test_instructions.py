@@ -15,12 +15,18 @@ from ts_transformer.config import CONTROL_RECIPE_SIMPLE_V3, PREDICTION_CONTROL, 
 from ts_transformer.data.dataset import build_series
 from ts_transformer.data.synthetic import synthetic_arrivals
 from ts_transformer.manoeuvre import instructions as ins
-from ts_transformer.tests.support import AIRPORT, RUNWAY
+from ts_transformer.tests.support import AIRPORT, OTHER_RUNWAY_WORD, RUNWAY, RUNWAY_WORD
 
 #: The runway word's classes for these fixtures (D62): every synthetic flight lands on RUNWAY,
 #: and a second ident is carried so the word is not degenerate — `read_instructions` must pick
 #: the flight's own class out of a set, never the only one there is.
-RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY, "23R"])
+#: The speed kind's minimum change is a FRACTION of the speed IN FORCE, so `_manoeuvre_words`
+#: takes a function of it. These fixtures hold around 90 m/s; the rule itself is the
+#: vocabulary's, imported rather than restated, so a change to it fails here instead of being
+#: copied into the assertion.
+def SPEED_MIN_CHANGE(in_force: float = 90.0) -> float:
+    return ins.Vocabulary().min_change("speed", in_force)
+RUNWAYS = ins.RunwayVocabulary.from_idents([RUNWAY_WORD, OTHER_RUNWAY_WORD])
 
 
 def _config() -> TSConfig:
@@ -40,14 +46,21 @@ def flights():
 def test_the_bins_are_the_vocabulary_and_round_trip_through_the_artefact(tmp_path):
     v = ins.Vocabulary()
     # the SPEC counts four kinds; the runway's classes are the cohort's (see word_counts below)
-    assert v.words == {"heading": 36, "altitude": 11, "speed": 23, "duration": 151, "terminal": 3}
-    assert v.heading_bin(0.0) == 0 and v.heading_bin(-4.9) == 0 and v.heading_bin(5.1) == 1 and v.heading_bin(180.0) == 18
-    assert v.heading_bin(-90.0) == 27 and v.heading_bin(365.0) == 1 and v.heading_centre_deg(27) == pytest.approx(-90.0)
-    assert v.altitude_bin(0.0) == (0, False) and v.altitude_bin(1100.0 * ins.FT) == (1, False)
-    assert v.altitude_bin(-30.0) == (0, False) and v.altitude_bin(9000.0 * ins.FT) == (9, False) and v.altitude_bin(11000.0 * ins.FT) == (10, True)
-    assert v.speed_bin(100.0 * ins.KT) == (0, False) and v.speed_bin(174.0 * ins.KT) == (7, False) and v.speed_bin(300.0 * ins.KT) == (20, False)
-    assert v.speed_bin(330.0 * ins.KT) == (22, True)
-    assert v.speed_bin(90.0 * ins.KT) == (0, True) and v.speed_centre_mps(7) == pytest.approx(170.0 * ins.KT)
+    assert v.words == {"heading": 72, "vertical": 6, "speed": 16, "duration": 151, "terminal": 3}
+    assert v.heading_bin(0.0) == 0 and v.heading_bin(-2.4) == 0 and v.heading_bin(2.6) == 1 and v.heading_bin(180.0) == 36
+    assert v.heading_bin(-90.0) == 54 and v.heading_bin(365.0) == 1 and v.heading_centre_deg(54) == pytest.approx(-90.0)
+    # the vertical word is a flight path angle, descent POSITIVE, and word 0 is the go-around climb
+    assert v.vertical_centre_deg(0) == -3.0 and v.vertical_bin(-3.0) == (0, False)
+    assert v.vertical_bin(0.0) == (1, False) and v.vertical_bin(3.05) == (4, False)
+    assert v.vertical_bin(-5.0) == (0, True) and v.vertical_bin(9.0) == (5, True)    # past the ends, counted
+    # the speed centres are fitted, not a uniform grid: a word is the NEAREST centre
+    assert v.speed_bin(44.0) == (0, False) and v.speed_bin(75.0) == (4, False) and v.speed_bin(157.0) == (15, False)
+    assert v.speed_bin(30.0) == (0, True) and v.speed_bin(200.0) == (15, True)
+    assert v.speed_centre_mps(4) == pytest.approx(74.0)
+    # the tolerances a word carries: the level mode absolute, everything else a fraction
+    assert v.vertical_tolerance_deg(1) == pytest.approx(0.1)
+    assert v.vertical_tolerance_deg(4) == pytest.approx(3.1 * 0.07)
+    assert v.speed_tolerance(4) == pytest.approx(74.0 * 0.03)
     path = ins.write_vocabulary(tmp_path, v, runway_vocabulary=RUNWAYS, cohort_identity={"name": "x"}, counts={}, source={})
     loaded, runways, payload = ins.load_vocabulary(path)
     assert loaded == v and payload["sha256"] == v.sha256 and payload["words"] == v.words
@@ -65,8 +78,10 @@ def test_the_bins_are_the_vocabulary_and_round_trip_through_the_artefact(tmp_pat
     assert tuple(ins.word_counts(v, RUNWAYS)) == ins.INSTRUCTION_KINDS
     with pytest.raises(ValueError, match="divide"):
         ins.Vocabulary(heading_bin_deg=7.0)
-    with pytest.raises(ValueError, match="divide"):
-        ins.Vocabulary(speed_max_mps=325.0 * ins.KT)
+    with pytest.raises(ValueError, match="sorted"):
+        ins.Vocabulary(speed_centres_mps=(80.0, 60.0))
+    with pytest.raises(ValueError, match="level mode"):
+        ins.Vocabulary(vertical_modes_deg=(1.0, 2.0, 3.0))
     assert ins.FT == 0.3048 and ins.KT == pytest.approx(1852.0 / 3600.0)                 # geokit's exact definitions
     assert ins.Vocabulary(token_step_s=5.0).sha256 != v.sha256          # τ is part of the identity
     assert ins.Vocabulary(duration_bin_s=1.0).sha256 != v.sha256        # so is the duration's bin (D71)
@@ -95,70 +110,66 @@ def test_a_plateau_that_reads_as_the_word_in_force_is_absorbed_not_an_instructio
     what it changed; a signal that never settles is one manoeuvre to its end."""
     v = ins.Vocabulary()
     times = np.arange(60, dtype=float)
-    speed = np.concatenate((np.full(10, 90.0), np.full(20, 84.0), np.full(30, 80.0)))       # 175 → 163 → 156 kt
+    speed = np.concatenate((np.full(10, 93.0), np.full(20, 84.0), np.full(30, 89.0)))       # two centres, then the same one again
     flats = ins.plateaus(speed, v.speed_tolerance_mps, 6)
     assert flats == [(0, 10), (10, 30), (30, 60)]
     to_word = lambda x: (v.speed_bin(x)[0], x, False)                                  # noqa: E731
-    words, absorbed = ins._manoeuvre_words("speed", times, speed, flats, 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
-    assert v.speed_bin(84.0)[0] == v.speed_bin(80.0)[0] != v.speed_bin(90.0)[0]          # one bin (163 and 156 kt)
-    assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0, 0.0), (v.speed_bin(84.0)[0], 10.0, 10.0)]
-    assert absorbed == [ins.Absorbed("speed", 30.0, 30.0, words[1].word, 80.0 - 84.0, ins.ABSORBED_SAME_WORD)]      # 4 m/s, same bin
-    # the altitude's minimum change is half a bin: a 160 m step inside one bin is "same word", the next step a new word
-    height = np.concatenate((np.full(20, 800.0), np.full(20, 960.0), np.full(20, 700.0)))
-    to_height = lambda x: (v.altitude_bin(x)[0], x, False)                              # noqa: E731
-    words, absorbed = ins._manoeuvre_words("altitude", times, height, ins.plateaus(height, v.height_tolerance_m, 6), 6,
-                                           v.height_tolerance_m, v.height_min_change_m, v.hold_min_s, to_height)
-    assert [w.word for w in words] == [v.altitude_bin(800.0)[0], v.altitude_bin(700.0)[0]] and v.altitude_bin(960.0)[0] == words[0].word
-    assert [(a.reason, a.change) for a in absorbed] == [(ins.ABSORBED_SAME_WORD, 160.0)]
-    ramp, dropped = ins._manoeuvre_words("speed", times, np.linspace(100.0, 70.0, 60), [], 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, speed, flats, 6, v.speed_tolerance_mps, SPEED_MIN_CHANGE, v.hold_min_s, to_word)
+    assert v.speed_bin(89.0)[0] == v.speed_bin(84.0)[0] != v.speed_bin(93.0)[0]          # the same centre twice
+    assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(93.0)[0], 0.0, 0.0), (v.speed_bin(84.0)[0], 10.0, 10.0)]
+    assert absorbed == [ins.Absorbed("speed", 30.0, 30.0, words[1].word, 89.0 - 84.0, ins.ABSORBED_SAME_WORD)]
+    ramp, dropped = ins._manoeuvre_words("speed", times, np.linspace(100.0, 70.0, 60), [], 6, v.speed_tolerance_mps, SPEED_MIN_CHANGE, v.hold_min_s, to_word)
     assert [(w.word, w.issued_s, w.settled_s) for w in ramp] == [(v.speed_bin(70.0)[0], 0.0, None)] and not dropped
     # a tail shorter than a plateau is unreadable: recorded, never a word
     tail = np.concatenate((np.full(56, 90.0), [85.0, 80.0, 75.0, 70.0]))
-    words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, tail, ins.plateaus(tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, SPEED_MIN_CHANGE, v.hold_min_s, to_word)
     assert [w.word for w in words] == [v.speed_bin(90.0)[0]] and absorbed == [ins.Absorbed("speed", 56.0, 59.0, words[0].word, 70.0 - 90.0, ins.ABSORBED_SHORT_TAIL)]
     # an intermediate level that was held is where the next instruction was given: 98 → 95 (absorbed, held 20 rows)
     # → 91 issues "91" where the aircraft left 95, not where it left 98 (v6 did that and put words 100–200 s early)
-    staircase = np.concatenate((np.full(20, 98.0), np.full(20, 95.0), np.full(20, 91.0)))
-    assert abs(91.0 - 98.0) >= v.speed_min_change_mps > abs(95.0 - 98.0) and abs(91.0 - 95.0) > v.speed_tolerance_mps
+    staircase = np.concatenate((np.full(20, 98.0), np.full(20, 95.4), np.full(20, 91.0)))
+    assert abs(91.0 - 98.0) >= v.min_change("speed", 98.0) > abs(95.4 - 98.0) and abs(91.0 - 95.4) > v.speed_tolerance_mps
     words, absorbed = ins._manoeuvre_words("speed", times, staircase, ins.plateaus(staircase, v.speed_tolerance_mps, 6), 6,
-                                           v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
+                                           v.speed_tolerance_mps, SPEED_MIN_CHANGE, v.hold_min_s, to_word)
     assert [(w.word, w.issued_s, w.settled_s) for w in words] == [(v.speed_bin(98.0)[0], 0.0, 0.0), (v.speed_bin(91.0)[0], 40.0, 40.0)]
     assert [(a.reason, a.start_s, a.end_s) for a in absorbed] == [(ins.ABSORBED_SMALL_CHANGE, 20.0, 20.0)]
-    # a long tail settling back inside the word in force's bin (altitude: 1000 → 840 m, both bin 3, change ≥ half a bin): absorbed "same word"
-    tail_back = np.concatenate((np.full(50, 1000.0), np.linspace(1000.0, 840.0, 10)))
-    words, absorbed = ins._manoeuvre_words("altitude", times, tail_back, ins.plateaus(tail_back, v.height_tolerance_m, 6), 6,
-                                           v.height_tolerance_m, v.height_min_change_m, v.hold_min_s, lambda x: (v.altitude_bin(x)[0], x, False))
-    assert [w.word for w in words] == [v.altitude_bin(1000.0)[0]] and v.altitude_bin(840.0)[0] == words[0].word
-    assert [(a.reason, a.end_s) for a in absorbed] == [(ins.ABSORBED_SAME_WORD, 59.0)]
+    # a long tail settling back inside the word in force's own centre: absorbed "same word"
+    tail_back = np.concatenate((np.full(40, 84.0), np.full(20, 89.0)))
+    words, absorbed = ins._manoeuvre_words("speed", times, tail_back, ins.plateaus(tail_back, v.speed_tolerance_mps, 6), 6,
+                                           v.speed_tolerance_mps, SPEED_MIN_CHANGE, v.hold_min_s, to_word)
+    assert [w.word for w in words] == [v.speed_bin(84.0)[0]] and v.speed_bin(89.0)[0] == words[0].word
+    assert [(a.reason, a.end_s) for a in absorbed] == [(ins.ABSORBED_SAME_WORD, 40.0)]
     long_tail = np.concatenate((np.full(50, 90.0), np.linspace(90.0, 70.0, 10)))
-    words, absorbed = ins._manoeuvre_words("speed", times, long_tail, ins.plateaus(long_tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
+    words, absorbed = ins._manoeuvre_words("speed", times, long_tail, ins.plateaus(long_tail, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, SPEED_MIN_CHANGE, v.hold_min_s, to_word)
     assert [(w.word, w.settled_s) for w in words] == [(v.speed_bin(90.0)[0], 0.0), (v.speed_bin(70.0)[0], None)] and not absorbed
-    # a wobble under one bin is absorbed even across a bin edge (a 4 m/s = 8 kt change is no speed call)
-    wobble = np.concatenate((np.full(20, 88.5), np.full(20, 92.5), np.full(20, 88.5)))          # 172 / 180 kt: bins 5 and 6
-    assert v.speed_bin(88.5)[0] != v.speed_bin(92.5)[0] and 4.0 < v.speed_min_change_mps
-    words, absorbed = ins._manoeuvre_words("speed", times, wobble, ins.plateaus(wobble, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
+    # a wobble under one bin is absorbed even across a bin edge (a 2.6 m/s change is under the 3 % minimum)
+    wobble = np.concatenate((np.full(20, 88.2), np.full(20, 90.8), np.full(20, 88.2)))          # 172 / 180 kt: bins 5 and 6
+    assert v.speed_bin(88.2)[0] != v.speed_bin(90.8)[0] and 2.6 < v.min_change("speed", 88.2)
+    words, absorbed = ins._manoeuvre_words("speed", times, wobble, ins.plateaus(wobble, v.speed_tolerance_mps, 6), 6, v.speed_tolerance_mps, SPEED_MIN_CHANGE, v.hold_min_s, to_word)
     # out: the excursion is a transient under the minimum; the return reads as the word in force again
-    assert [w.word for w in words] == [v.speed_bin(88.5)[0]]
+    assert [w.word for w in words] == [v.speed_bin(88.2)[0]]
     assert [a.reason for a in absorbed] == [ins.ABSORBED_SMALL_CHANGE, ins.ABSORBED_SAME_WORD]
     assert absorbed[0].start_s == 20.0 and absorbed[0].end_s == 20.0
     # the SAME 4 m/s step, held past hold_min_s: a level the aircraft flew is an instruction whatever its size
-    step = np.concatenate((np.full(20, 88.5), np.full(41, 92.5)))
+    step = np.concatenate((np.full(20, 88.2), np.full(41, 90.8)))
     words, absorbed = ins._manoeuvre_words("speed", np.arange(61, dtype=float), step, ins.plateaus(step, v.speed_tolerance_mps, 6), 6,
-                                           v.speed_tolerance_mps, v.speed_min_change_mps, v.hold_min_s, to_word)
-    assert [w.word for w in words] == [v.speed_bin(88.5)[0], v.speed_bin(92.5)[0]] and not absorbed
-    assert 4.0 < v.speed_min_change_mps and v.hold_min_s == 40.0                     # under the minimum, but held 40 s
+                                           v.speed_tolerance_mps, SPEED_MIN_CHANGE, v.hold_min_s, to_word)
+    assert [w.word for w in words] == [v.speed_bin(88.2)[0], v.speed_bin(90.8)[0]] and not absorbed
+    assert 2.6 < v.min_change("speed", 88.2) and v.hold_min_s == 40.0                     # under the minimum, but held 40 s
     # one steady stretch split by a brief excursion is ONE level, however long the second half is
     # held: its median moved 1.4 m/s, under the tolerance, even though it crossed a bin edge
-    edge = np.concatenate((np.full(20, 73.8), np.full(5, 79.0), np.full(42, 75.2)))
+    edge = np.concatenate((np.full(20, 75.9), np.full(5, 84.0), np.full(42, 77.1)))
     clock = np.arange(len(edge), dtype=float)
     flats = ins.plateaus(edge, v.speed_tolerance_mps, 6)
-    assert flats == [(0, 20), (25, 67)] and v.speed_bin(73.8)[0] != v.speed_bin(75.2)[0]
+    assert flats == [(0, 20), (25, 67)] and v.speed_bin(75.9)[0] != v.speed_bin(77.1)[0]
     assert abs(75.2 - 73.8) < v.speed_tolerance_mps and clock[66] - clock[25] >= v.hold_min_s    # held past the hold, still one level
     words, absorbed = ins._manoeuvre_words("speed", clock, edge, flats, 6, v.speed_tolerance_mps,
-                                           v.speed_min_change_mps, v.hold_min_s, to_word)
-    assert [w.word for w in words] == [v.speed_bin(73.8)[0]] and [a.reason for a in absorbed] == [ins.ABSORBED_SMALL_CHANGE]
+                                           SPEED_MIN_CHANGE, v.hold_min_s, to_word)
+    assert [w.word for w in words] == [v.speed_bin(75.9)[0]] and [a.reason for a in absorbed] == [ins.ABSORBED_SMALL_CHANGE]
+    # The speed's minimum change is a FRACTION now, so it has no fixed value to compare against a
+    # tolerance at construction — the reader computes it from the track. The heading's is absolute
+    # and still carries the check: two plateaus closer than the tolerance are one plateau.
     with pytest.raises(ValueError, match="at least the kind's tolerance"):
-        ins.Vocabulary(speed_min_change_mps=1.0)
+        ins.Vocabulary(heading_min_change_deg=0.5)
     with pytest.raises(ValueError, match="at least plateau_min_s"):
         ins.Vocabulary(hold_min_s=10.0)
     assert ins.departure_row(np.array([5.0, 5.0, 5.4, 6.0, 6.8, 8.0]), 0, 5, 5.0, 2.0) == 4          # 6.8 is the first row past ±1
@@ -168,15 +179,15 @@ def test_the_runway_vocabulary_is_the_cohort_s_thresholds_and_refuses_a_stranger
     """The runway word's classes are one airport's thresholds, sorted and unique. An ident the
     cohort never carried is a DIFFERENT airport, so `index` raises — there is no fallback class
     a stranger could be quietly filed under."""
-    v = ins.RunwayVocabulary.from_idents(["23R", "05L", "05L"])
-    assert v.idents == ("05L", "23R") and len(v) == 2
-    assert v.index("05L") == 0 and v.index("23R") == 1 and v.ident(1) == "23R"
+    v = ins.RunwayVocabulary.from_idents(["KRDU:23R", "KRDU:05L", "KRDU:05L"])
+    assert v.idents == ("KRDU:05L", "KRDU:23R") and len(v) == 2
+    assert v.index("KRDU:05L") == 0 and v.index("KRDU:23R") == 1 and v.ident(1) == "KRDU:23R"
     with pytest.raises(ValueError, match="not in this vocabulary"):
-        v.index("18")
+        v.index("KRDU:18")
     with pytest.raises(ValueError, match="stored sorted"):
-        ins.RunwayVocabulary(("23R", "05L"))
+        ins.RunwayVocabulary(("KRDU:23R", "KRDU:05L"))
     with pytest.raises(ValueError, match="unique"):
-        ins.RunwayVocabulary(("05L", "05L"))
+        ins.RunwayVocabulary(("KRDU:05L", "KRDU:05L"))
     with pytest.raises(ValueError, match="at least one"):
         ins.RunwayVocabulary(())
 
@@ -216,25 +227,36 @@ def test_a_heading_change_is_read_when_it_lands_on_a_new_plateau_whatever_its_ra
     headings = [i for i in reading.instructions if i.kind == "heading"]
     assert [i.word for i in headings] == [0, v.heading_bin(12.0)] and abs(headings[1].issued_s - 40.0) <= 4.0
     assert abs(headings[1].settled_s - 44.0) <= 6.0
-    three = np.interp(t, [0.0, 40.0, 44.0, 160.0], [0.0, 0.0, 3.0, 3.0])
+    three = np.interp(t, [0.0, 40.0, 44.0, 160.0], [0.0, 0.0, 1.5, 1.5])   # under the 2.5° minimum at 5° a bin
     reading = ins.read_instructions(_track(item, t, three, level, speed), v, RUNWAYS)
-    assert [i.kind for i in reading.instructions] == ["heading", "altitude", "speed", "runway"] and not reading.absorbed
+    assert [i.kind for i in reading.instructions] == ["heading", "vertical", "speed", "runway"] and not reading.absorbed
 
 
 def test_a_level_off_is_the_descent_s_target_and_the_last_descent_targets_the_end(flights):
-    """5 000 ft, descend to a 3 000 ft level-off held 40 s, descend again to the end: three altitude
-    words — the start's, "descend to 3 000" issued at the first descent's start and settled at the
-    level-off, and the final descent's word (the end value, never settled)."""
+    """5 000 ft, descend to a 3 000 ft level-off held 40 s, descend again to the end. The vertical
+    word is an ANGLE, so this profile is four segments — level, descend, level, descend — and the
+    breakpoints land within a sample or two of the truth. The 3.57° descents read as the 3.1°
+    mode, the nearest the vocabulary has."""
     v = ins.Vocabulary()
     item = flights[0]
     t = np.arange(0.0, 300.0, 2.0)
     height = np.interp(t, [0.0, 20.0, 142.0, 182.0, 298.0], [5000 * ins.FT, 5000 * ins.FT, 3000 * ins.FT, 3000 * ins.FT, 1100 * ins.FT])
     reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), height, np.full(len(t), 80.0)), v, RUNWAYS)
-    altitudes = [i for i in reading.instructions if i.kind == "altitude"]
-    assert [i.word for i in altitudes] == [5, 3, 1] and altitudes[0].issued_s == 0.0
-    assert 20.0 <= altitudes[1].issued_s <= 20.0 + 12.0 and 142.0 - 12.0 <= altitudes[1].settled_s <= 142.0 + 2.0
-    assert altitudes[1].target == pytest.approx(3000 * ins.FT, abs=30.0) and not altitudes[1].clamped
-    assert 182.0 <= altitudes[2].issued_s <= 182.0 + 12.0 and altitudes[2].settled_s is None
+    verticals = [i for i in reading.instructions if i.kind == "vertical"]
+    level, glidepath = v.vertical_modes_deg.index(0.0), v.vertical_modes_deg.index(3.1)
+    assert [i.word for i in verticals] == [level, glidepath, level, glidepath]
+    assert verticals[0].issued_s == 0.0
+    assert 20.0 - 4.0 <= verticals[1].issued_s <= 20.0 + 4.0        # the descent starts where it starts
+    assert 142.0 - 4.0 <= verticals[2].issued_s <= 142.0 + 4.0      # and the level-off where it does
+    assert 182.0 - 4.0 <= verticals[3].issued_s <= 182.0 + 4.0
+    assert verticals[1].target == pytest.approx(3.57, abs=0.2) and not verticals[1].clamped
+    # the four-second sliver the fit spends at a breakpoint is absorbed, never an instruction —
+    # as a SHORT SEGMENT, not a "short tail": that name means the last plateau runs out before the
+    # record ends, and this sliver is in the middle of the profile
+    sliver = [a for a in reading.absorbed if a.kind == "vertical"]
+    assert [a.reason for a in sliver] == [ins.ABSORBED_SHORT_SEGMENT]
+    # `change` is what the manoeuvre MOVED the angle by, as for every other kind — not the angle
+    assert abs(sliver[0].change) < 90.0
 
 
 def test_a_clamped_target_reaches_the_instruction_and_an_orbit_is_absorbed(flights):
@@ -243,10 +265,11 @@ def test_a_clamped_target_reaches_the_instruction_and_an_orbit_is_absorbed(fligh
     v = ins.Vocabulary()
     item = flights[0]
     t = np.arange(0.0, 200.0, 2.0)
-    high = np.full(len(t), 11_000 * ins.FT)
-    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), high, np.full(len(t), 80.0)), v, RUNWAYS)
-    altitude = next(i for i in reading.instructions if i.kind == "altitude")
-    assert altitude.word == v.altitude_words - 1 and altitude.clamped
+    # A descent far steeper than the steepest mode reads AS that mode and is counted outside.
+    steep = np.linspace(3000.0, 0.0, len(t))
+    reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), steep, np.full(len(t), 80.0)), v, RUNWAYS)
+    vertical = next(i for i in reading.instructions if i.kind == "vertical")
+    assert vertical.word == v.vertical_words - 1 and vertical.clamped and vertical.target > 4.4
     orbit = np.interp(t, [0.0, 30.0, 150.0, 200.0], [0.0, 0.0, 360.0, 360.0])
     reading = ins.read_instructions(_track(item, t, orbit, np.full(len(t), 800.0), np.full(len(t), 80.0)), v, RUNWAYS)
     assert [i.word for i in reading.instructions if i.kind == "heading"] == [0]
@@ -273,8 +296,9 @@ def test_a_pause_inside_a_descent_and_a_drift_with_no_plateau_produce_no_word(fl
     speed = np.full(len(t), 75.0)
     height = np.interp(t, [0.0, 40.0, 206.0, 210.0, 300.0], [1500.0, 1500.0, 1000.0, 1000.0, 730.0])
     reading = ins.read_instructions(_track(item, t, np.zeros(len(t)), height, speed), v, RUNWAYS)
-    altitudes = [i for i in reading.instructions if i.kind == "altitude"]
-    assert [i.word for i in altitudes] == [v.altitude_bin(1500.0)[0], v.altitude_bin(730.0)[0]] and altitudes[1].settled_s is None
+    verticals = [i for i in reading.instructions if i.kind == "vertical"]
+    # level, descend, level, descend — and the last descent runs to the end
+    assert [v.vertical_centre_deg(i.word) for i in verticals][0] == 0.0 and verticals[-1].word != v.vertical_modes_deg.index(0.0)
     drift = t * 0.3
     reading = ins.read_instructions(_track(item, t, drift, np.full(len(t), 800.0), speed), v, RUNWAYS)
     headings = [i for i in reading.instructions if i.kind == "heading"]
@@ -326,8 +350,8 @@ def test_the_synthetic_arrival_reads_as_one_capture_turn_a_descent_to_the_thresh
             assert len(headings) == 2 and headings[-1].word == 0                          # settles on the course
         else:                                       # the entry leg already reads as the course: one word, no capture to speak of
             assert len(headings) == 1 and abs(headings[0].target) < v.heading_bin_deg / 2
-        altitudes = [i for i in reading.instructions if i.kind == "altitude"]
-        assert altitudes[-1].word == 0 and altitudes[-1].settled_s is None                # descending to the end
+        verticals = [i for i in reading.instructions if i.kind == "vertical"]
+        assert v.vertical_centre_deg(verticals[-1].word) > 0.0                            # descending to the end
         assert all(a.kind in ins.MANDATORY_KINDS for a in reading.absorbed)
         speeds = [i for i in reading.instructions if i.kind == "speed"]
         assert speeds[-1].word == v.speed_bin(speeds[-1].target)[0]
@@ -338,11 +362,15 @@ def test_the_synthetic_arrival_reads_as_one_capture_turn_a_descent_to_the_thresh
         # D52: an EVENT sequence — the first event is the record's start and the rest are the
         # moments something changed, so the gaps are irregular and never zero
         assert reading.event_times_s[0] == item.times[0] and (np.diff(reading.event_times_s) > 0).all()
-        assert set(reading.event_times_s.tolist()) == {i.issued_s for i in reading.instructions}
+        # every issue time is an event, plus ONE more: the landing (2026-09-21), which is an event
+        # because the flight ended rather than because a word moved
+        assert set(reading.event_times_s.tolist()) == {i.issued_s for i in reading.instructions} | {item.times[-1]}
+        assert reading.event_times_s[-1] == item.times[-1]
+        assert reading.words[-1, 5] == ins.TERMINAL_LANDED and (reading.words[:-1, 5] == ins.TERMINAL_CONTINUE).all()
         # SIX kinds since D73: heading / altitude / speed / runway / duration / terminal
         assert reading.words.shape == (len(reading.event_times_s), 6) and (reading.words[:, :3] >= 0).all()
         # the runway is said at the first position and stands for the whole sentence
-        assert reading.runway == RUNWAY and (reading.words[:, 3] == RUNWAYS.index(RUNWAY)).all()
+        assert reading.runway == RUNWAY_WORD and (reading.words[:, 3] == RUNWAYS.index(RUNWAY_WORD)).all()
         runways = [i for i in reading.instructions if i.kind == "runway"]
         assert len(runways) == 1 and runways[0].issued_s == item.times[0]
         # a threshold has a NAME, not a number, so there is no continuous value it was binned from.
@@ -370,10 +398,16 @@ def test_a_track_that_is_already_on_the_course_and_level_carries_only_its_starti
     straight = replace(item, times=t, values=values, supervision_times=t, supervision_values=values,
                        supervision_weights=np.full(values.shape, 1.0 / values.shape[1]))
     reading = ins.read_instructions(straight, ins.Vocabulary(), RUNWAYS)
-    assert [i.kind for i in reading.instructions] == ["heading", "altitude", "speed", "runway"] and all(i.issued_s == 0.0 for i in reading.instructions)
+    assert [i.kind for i in reading.instructions] == ["heading", "vertical", "speed", "runway"] and all(i.issued_s == 0.0 for i in reading.instructions)
     words = {i.kind: i.word for i in reading.instructions}
-    assert words == {"heading": 0, "altitude": 2, "speed": 5, "runway": RUNWAYS.index(RUNWAY)} and reading.established_from_start   # 150 kt: (150 − 100) / 10
-    assert len(reading.event_times_s) == len({i.issued_s for i in reading.instructions})
+    level = ins.Vocabulary().vertical_modes_deg.index(0.0)
+    assert words == {"heading": 0, "vertical": level, "speed": ins.Vocabulary().speed_bin(150.0 * ins.KT)[0],
+                     "runway": RUNWAYS.index(RUNWAY_WORD)} and reading.established_from_start
+    # one event for the words said at t = 0, and one for the landing: nothing changes in between,
+    # and the landing row is what says how long the whole thing lasted
+    assert reading.event_times_s.tolist() == [0.0, t[-1]]
+    assert reading.words[-1, 5] == ins.TERMINAL_LANDED
+    assert ins.Vocabulary().duration_centre_s(int(reading.words[-1, 4])) == t[-1]
 
 
 def test_the_words_in_force_at_a_time_and_the_executor_s_view_of_them():
@@ -383,10 +417,10 @@ def test_the_words_in_force_at_a_time_and_the_executor_s_view_of_them():
     ) and the segment positions are Δ / τ of them."""
     v = ins.Vocabulary()
     positions = np.array([0.0, 10.0, 20.0, 30.0])
-    rwy = RUNWAYS.index(RUNWAY)
+    rwy = RUNWAYS.index(RUNWAY_WORD)
     C, L = ins.TERMINAL_CONTINUE, ins.TERMINAL_LANDED
-    words = np.array([[18, 3, 4, rwy, 0, C], [18, 3, 4, rwy, 5, C],
-                      [18, 3, 4, rwy, 5, C], [27, 3, 4, rwy, 5, L]])
+    words = np.array([[36, 3, 4, rwy, 0, C], [36, 3, 4, rwy, 5, C],     # 36 = 180° at 5° a bin
+                      [36, 3, 4, rwy, 5, C], [54, 3, 4, rwy, 5, L]])    # 54 = −90°
     reading = ins.Reading("d", "f", (), positions, words, RUNWAY, False, 35.0)
     assert reading.words_at(np.array([0.0, 9.9, 27.0, 30.0, 95.0])).tolist() == [words[0].tolist(), words[0].tolist(), words[2].tolist(), words[3].tolist(), words[3].tolist()]
     with pytest.raises(ValueError, match="before the first event"):
@@ -399,7 +433,9 @@ def test_the_words_in_force_at_a_time_and_the_executor_s_view_of_them():
     assert cond.shape == (2, v.CONDITIONING_WIDTH) and cond.dtype == np.float32
     assert cond[0, 0] == pytest.approx(-1.0) and abs(cond[0, 1]) < 1e-6 and cond.shape[-1] == 4          # downwind, no intercept
     assert cond[1, 0] == pytest.approx(0.0, abs=1e-6) and cond[1, 1] == pytest.approx(-1.0)   # (2 / 3)  # −90° base, bin 1
-    assert cond[0, 2] == pytest.approx(3 * v.altitude_bin_m / v.altitude_max_m) and cond[0, 3] == pytest.approx(v.speed_centre_mps(4) / v.speed_max_mps)
+    modes = np.asarray(v.vertical_modes_deg)
+    assert cond[0, 2] == pytest.approx(v.vertical_centre_deg(3) / abs(modes).max())
+    assert cond[0, 3] == pytest.approx(v.speed_centre_mps(4) / max(v.speed_centres_mps))
     # the RUNWAY column is read in (the words are [E, 6]) but never conditioned on: the executor
     # already works in that runway's frame, so a second runway word changes no feature (D62)
     other = words.copy()
@@ -414,34 +450,52 @@ def test_the_words_in_force_at_a_time_and_the_executor_s_view_of_them():
 def test_the_sentence_is_one_row_per_moment_something_changed_and_carries_the_gap_to_the_one_before():
     """D52: an EVENT sequence, not an even grid.
 
-    Three moments here — 0 s (four kinds at once), 25 s (a turn), 61 s (a turn and the capture) —
-    so three rows, never eleven. Each row holds the latest word of every kind, plus the gap to the
-    row before it as a word (D71, 2 s a bin).
+    Three moments here — 0 s (four kinds at once), 26 s (a turn), 62 s (a turn and the capture) —
+    plus the LANDING at 140 s, so four rows, never eleven. The times are on the ADS-B row grid,
+    where the 2 s duration bin is exact (off-grid, the sum below is the rounding, not the span). Each row holds the latest word of every
+    kind, plus the gap to the row before it as a word (D71, 2 s a bin).
     """
-    said = [ins.Instruction("heading", 18, 180.0, 0.0, 0.0), ins.Instruction("altitude", 3, 900.0, 0.0, 0.0),
+    said = [ins.Instruction("heading", 36, 180.0, 0.0, 0.0), ins.Instruction("vertical", 3, 2.4, 0.0, 0.0),
             ins.Instruction("speed", 4, 80.0, 0.0, 0.0), ins.Instruction("runway", 1, ins.NO_TARGET, 0.0, 0.0),
-            ins.Instruction("heading", 27, -90.0, 25.0, 40.0),
-            ins.Instruction("heading", 0, 0.0, 61.0, 90.0)]
+            ins.Instruction("heading", 27, -90.0, 26.0, 40.0),
+            ins.Instruction("heading", 0, 0.0, 62.0, 90.0)]
     v = ins.Vocabulary()
-    times, table, clamped = ins.sentence(said, v)
-    assert times.tolist() == [0.0, 25.0, 61.0] and table.shape == (3, 6) and clamped == 0
-    assert table[:, 0].tolist() == [18, 27, 0]                       # the heading of each moment
-    assert (table[:, 1] == 3).all() and (table[:, 2] == 4).all()     # altitude and speed hold
+    times, table, clamped = ins.sentence(said, v, ends_s=140.0)
+    assert times.tolist() == [0.0, 26.0, 62.0, 140.0] and table.shape == (4, 6) and clamped == 0
+    assert table[:, 0].tolist() == [36, 27, 0, 0]                    # the heading of each moment
+    assert (table[:, 1] == 3).all() and (table[:, 2] == 4).all()     # vertical and speed hold
     assert (table[:, 3] == 1).all()                                  # the runway holds over the whole sentence
-    assert table[:, 4].tolist() == [0, v.duration_bin(25.0)[0], v.duration_bin(36.0)[0]]
-    # D72: the terminal word says where the sentence stops — continue, continue, landed
-    assert table[:, 5].tolist() == [ins.TERMINAL_CONTINUE, ins.TERMINAL_CONTINUE, ins.TERMINAL_LANDED]
+    assert table[:, 4].tolist() == [0, v.duration_bin(26.0)[0], v.duration_bin(36.0)[0], v.duration_bin(78.0)[0]]
+    # D72: the terminal word says where the sentence stops — and LANDED is the landing's own row,
+    # not the last change (2026-09-21): on real tracks the last change is a median 136 s before the
+    # record ends, so without this row nothing in the sentence says when the flight lands.
+    assert table[:, 5].tolist() == [ins.TERMINAL_CONTINUE] * 3 + [ins.TERMINAL_LANDED]
+    # the duration words sum to the flight's own span, which is what makes the landing time sayable
+    assert sum(v.duration_centre_s(int(w)) for w in table[:, 4]) == 140.0
     with pytest.raises(ValueError, match="no word in force"):
-        ins.sentence(said[:2], v)                                    # no runway word: refused, not -1
+        ins.sentence(said[:2], v, ends_s=140.0)                      # no runway word: refused, not -1
+
+
+def test_a_sentence_whose_last_change_IS_the_landing_carries_no_extra_row():
+    """The landing row exists because the record outlives the last change. When it does not — the
+    words move at the very last sample — the last change IS the landing and a second row there
+    would repeat it."""
+    v = ins.Vocabulary()
+    said = [ins.Instruction("heading", 0, 0.0, 0.0, 0.0), ins.Instruction("vertical", 0, 0.0, 0.0, 0.0),
+            ins.Instruction("speed", 4, 80.0, 0.0, 0.0), ins.Instruction("runway", 1, ins.NO_TARGET, 0.0, 0.0),
+            ins.Instruction("speed", 5, 85.0, 60.0, 60.0)]
+    times, table, _clamped = ins.sentence(said, v, ends_s=60.0)
+    assert times.tolist() == [0.0, 60.0]
+    assert table[:, 5].tolist() == [ins.TERMINAL_CONTINUE, ins.TERMINAL_LANDED]
 
 
 def test_a_gap_longer_than_the_duration_ceiling_clamps_and_is_counted():
     v = ins.Vocabulary()
     far = v.duration_max_s + 60.0
-    said = [ins.Instruction("heading", 0, 0.0, 0.0, 0.0), ins.Instruction("altitude", 0, 0.0, 0.0, 0.0),
+    said = [ins.Instruction("heading", 0, 0.0, 0.0, 0.0), ins.Instruction("vertical", 0, 0.0, 0.0, 0.0),
             ins.Instruction("speed", 4, 80.0, 0.0, 0.0), ins.Instruction("runway", 1, ins.NO_TARGET, 0.0, 0.0),
             ins.Instruction("speed", 5, 85.0, far, far)]
-    _times, table, clamped = ins.sentence(said, v)
+    _times, table, clamped = ins.sentence(said, v, ends_s=far)
     assert clamped == 1 and table[1, 4] == v.duration_words - 1
 
 
@@ -454,14 +508,106 @@ def test_a_sentence_without_a_runway_word_is_refused_rather_than_indexing_an_emb
     """
     v = ins.Vocabulary()
     heading = ins.Instruction("heading", 0, 0.0, 0.0, 0.0, False)
-    altitude = ins.Instruction("altitude", 0, 0.0, 0.0, 0.0, False)
+    altitude = ins.Instruction("vertical", 0, 0.0, 0.0, 0.0, False)
     speed = ins.Instruction("speed", 5, 0.0, 0.0, 0.0, False)
     runway = ins.Instruction("runway", 2, float("nan"), 0.0, 0.0, False)
-    times, words, _clamped = ins.sentence([heading, altitude, speed, runway], v)
+    times, words, _clamped = ins.sentence([heading, altitude, speed, runway], v, ends_s=0.0)
     assert words.shape == (len(times), len(ins.INSTRUCTION_KINDS))
     assert (words[:, ins.INSTRUCTION_KINDS.index("runway")] == 2).all()
     with pytest.raises(ValueError, match="runway"):
-        ins.sentence([heading, altitude, speed], v)
+        ins.sentence([heading, altitude, speed], v, ends_s=0.0)
+
+
+def _profile_series(t, height, speed=80.0):
+    """times, heights, a constant ground speed — the three arrays the vertical reader takes."""
+    return np.asarray(t, float), np.asarray(height, float), np.full(len(t), float(speed))
+
+
+def test_the_vertical_instructions_tile_the_track_and_preserve_the_height_they_describe():
+    """The central claim of the vertical reader: a RATE describes the shape of the whole curve, so
+    its segments must cover the track with no gap and no overlap — and folding two of them must
+    not invent or lose height. Neither was covered before (review, 2026-09-21)."""
+    v = ins.Vocabulary()
+    t = np.arange(0.0, 600.0, 2.0)
+    height = np.concatenate((np.full(50, 2000.0), 2000.0 - np.arange(150) * 8.0, np.full(100, 800.0)))
+    out, _absorbed, rms, _merged = ins._vertical_instructions(*_profile_series(t, height), v)
+    spans = [(i.issued_s, i.settled_s) for i in out]
+    assert spans[0][0] == t[0] and spans[-1][1] == t[-1]
+    for (_a, end), (start, _b) in zip(spans, spans[1:]):
+        assert end == start, spans                       # no gap, no overlap
+    # the words' own profile is within a few metres of the track it describes
+    assert rms < 60.0, rms
+    # every angle the words name is one the vocabulary can say
+    assert all(i.word in range(v.vertical_words) for i in out)
+
+
+def test_the_breakpoints_are_the_OPTIMAL_cut_not_a_greedy_one():
+    """`_breakpoints` is a dynamic program because the best k-segment fit is not the best
+    (k−1)-segment fit plus one more. Checked against brute force on a small case."""
+    from itertools import combinations
+    rng = np.random.default_rng(3)
+    x = np.arange(12, dtype=float)
+    y = np.concatenate((np.zeros(4), np.arange(1, 5, dtype=float), np.full(4, 4.0))) + rng.normal(0, 0.05, 12)
+    cost = ins._segment_costs(x, y)
+    got = ins._breakpoints(x, y, 3)
+    best = min(combinations(range(1, 11), 2), key=lambda c: cost[0][c[0]] + cost[c[0]][c[1]] + cost[c[1]][11])
+    assert got == [0, best[0], best[1], 11], (got, best)
+
+
+def test_the_segment_ceiling_is_reported_rather_than_silently_binding():
+    """More phases than `vertical_segments` can express: the extra ones are lost — which is
+    allowed — but the loss has to be VISIBLE, and the fit residual is what shows it."""
+    v = ins.Vocabulary()
+    t = np.arange(0.0, 700.0, 2.0)
+    steps = []
+    height = 3000.0
+    for k in range(7):                                   # level / descend / level / descend / …
+        rate = 0.0 if k % 2 == 0 else 6.0
+        steps.append(height - np.arange(50) * rate)
+        height = steps[-1][-1]
+    height_m = np.concatenate(steps)[: len(t)]
+    _out, _absorbed, rms, _merged = ins._vertical_instructions(*_profile_series(t, height_m), v)
+    roomy = ins.Vocabulary(vertical_segments=9)
+    _o2, _a2, rms_roomy, _m2 = ins._vertical_instructions(*_profile_series(t, height_m), roomy)
+    assert rms > rms_roomy, (rms, rms_roomy)             # the ceiling costs height error …
+    assert rms > 20.0                                    # … and enough of it to see in the summary
+
+
+def test_a_half_circle_turn_is_split_so_the_short_way_is_the_way_the_aircraft_went():
+    """A heading word names a direction, and a direction cannot say which way round.
+
+    Here the aircraft reverses course by turning through the LEFT (the unwrapped course falls by
+    180°). Unsplit, the sentence would hold two words a half circle apart, and anything flying it
+    has to guess: `wrap_deg(180)` is −180 on every implementation, so it would turn right and
+    mirror the whole track. Split, each leg is under `turn_split_deg` and the short way IS the
+    flown way — and the intermediate word is issued when the TURN STARTS, not when the aircraft
+    arrives, or nothing would send it there.
+    """
+    v = ins.Vocabulary()
+    t = np.arange(0.0, 400.0, 2.0)
+    course = np.clip(np.interp(t, [0.0, 100.0, 280.0, 400.0], [0.0, 0.0, -180.0, -180.0]), -180.0, 0.0)
+    headings = [ins.Instruction("heading", v.heading_bin(0.0), 0.0, 0.0, 0.0),
+                ins.Instruction("heading", v.heading_bin(-180.0), -180.0, 100.0, 280.0)]
+    split = ins._split_long_turns(headings, t, course, v)
+    assert len(split) == 3, [i.word for i in split]
+    via = split[1]
+    assert via.issued_s == 100.0                                  # said when the turn starts
+    assert 100.0 < via.settled_s <= 280.0                         # settled when the aircraft gets there
+    assert split[2].issued_s == via.settled_s                     # and the far word only then
+    # every leg is now inside the split angle, so the short way is the flown way
+    centres = [v.heading_centre_deg(i.word) for i in split]
+    steps = [abs(ins.wrap_deg(b - a)) for a, b in zip(centres, centres[1:])]
+    assert max(steps) < v.turn_split_deg
+    assert all(ins.wrap_deg(b - a) < 0 for a, b in zip(centres, centres[1:])), "the split must keep the LEFT turn left"
+
+
+def test_a_turn_inside_the_split_angle_is_left_alone():
+    v = ins.Vocabulary()
+    t = np.arange(0.0, 200.0, 2.0)
+    course = np.interp(t, [0.0, 60.0, 140.0, 200.0], [0.0, 0.0, 90.0, 90.0])
+    headings = [ins.Instruction("heading", v.heading_bin(0.0), 0.0, 0.0, 0.0),
+                ins.Instruction("heading", v.heading_bin(90.0), 90.0, 60.0, 140.0)]
+    assert ins._split_long_turns(headings, t, course, v) == headings
 
 
 def _on_runway(flights, ident: str):
@@ -482,9 +628,9 @@ def test_the_runway_word_is_the_FLIGHT_S_own_class_not_a_constant(flights):
     file. Pin a flight whose runway is NOT index 0 (review finding, 2026-09-20).
     """
     v = ins.Vocabulary()
-    other = RUNWAYS.idents[-1]
-    assert other != RUNWAY and RUNWAYS.index(other) != 0, "the fixture must exercise a non-zero class"
-    item = _on_runway(flights, other)
+    other = OTHER_RUNWAY_WORD
+    assert other != RUNWAY_WORD and RUNWAYS.index(other) != 0, "the fixture must exercise a non-zero class"
+    item = _on_runway(flights, other.split(":", 1)[1])
     reading = ins.read_instructions(item, v, RUNWAYS)
     assert ins.flight_runway(item) == other
     assert reading.runway == other
@@ -496,3 +642,15 @@ def test_a_runway_the_vocabulary_was_not_built_on_raises_rather_than_falling_bac
     item = _on_runway(flights, "99Z")
     with pytest.raises(ValueError, match="99Z"):
         ins.read_instructions(item, v, RUNWAYS)
+
+
+def test_the_runway_word_is_qualified_by_airport_so_a_shared_ident_is_two_words(flights):
+    """KSJC and KSTL both have 12L/12R/30L/30R, KSTL and KMSY both have 11/29 — six idents over
+    twelve runways whose approach courses point different ways. Bare, one embedding would have to
+    stand for both and the word could not say which runway it meant (the pooled cohort: 16 classes, not 22).
+    """
+    here = flights[0]
+    elsewhere = replace(here, scenario=replace(here.scenario, source={**here.scenario.source, "arr_airport": "KSJC"}))
+    assert ins.flight_runway(here) == RUNWAY_WORD
+    assert ins.flight_runway(elsewhere) == f"KSJC:{RUNWAY}"
+    assert len(ins.RunwayVocabulary.from_idents(ins.flight_runway(item) for item in (here, elsewhere))) == 2
