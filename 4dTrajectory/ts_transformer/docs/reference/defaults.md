@@ -539,3 +539,46 @@ real, but an order less than the two above.
 exact plateau value the reader measured moves the gap p95 median only 2,035 → 1,669 m (−18 %),
 while replacing it with the continuously observed speed gives 907 m (−55 %). The residual distance
 is the piecewise-constant flying model and the missing wind, not the vocabulary's resolution.
+
+### H10 · what the vocabulary can and cannot say — measured per SIGNAL (2026-09-21)
+
+The replay gate answers "can a sentence reach the runway" (99.1 % pooled), but its gap mixes what
+the words cannot say with what the preview cannot fly. This isolates the vocabulary: each signal is
+reconstructed from the words alone and compared to the observed one, the vertical integrated over
+the OBSERVED ground speed so the speed word's error cannot leak into it. Five-airport val split,
+4,492 flights, every observed row; "settled" = rows at least 30 s after the event that issued the
+word in force.
+
+| signal | all rows p50 | p90 | p99 | settled p50 | settled p90 |
+|---|---|---|---|---|---|
+| heading (deg) | 0.57 | 25.16 | 87.74 | **0.41** | **2.35** |
+| speed (m/s) | 2.86 | 26.99 | 55.66 | **2.23** | **18.04** |
+| height (m) | 35.42 | 150.51 | 328.23 | 37.10 | 151.18 |
+
+Share of the approach the aircraft spends INSIDE the word's own band: **heading 80.4 %, speed
+48.5 %**.
+
+- **Exact by construction**: the runway (a name), the terminal word (the landing is an event since
+  v13), and the duration (2 s bins on the ADS-B row grid — the duration words sum to the flight's
+  own span for 99.9 % of flights, the rest being the counted 300 s clamps).
+- **Strong: the heading.** Settled, it is inside half a bin; every plateau-to-plateau turn is
+  reproduced to p50 1° / p90 3° / max 4°. The p90 of 25° over ALL rows is the turns themselves —
+  a word names a target and the aircraft takes time to reach it.
+- **Middling: the vertical.** The five-segment fit itself is RMS 11 m (p50, from the artefact);
+  quantising its angles to the six modes and integrating gives p50 35 m / p90 150 m of accumulated
+  height error. So the six modes cost about 24 m at the median, and the error compounds because a
+  rate's does.
+- **Weak, and it is the READING RULE rather than the resolution: the speed.** Settled p90 is
+  18 m/s and the aircraft is inside the band less than half the time. The cause is mechanical:
+  only **51.3 %** of an approach is covered by a speed plateau (heading: 84.1 %) and **61 %** of it
+  has |dV/dt| > 0.1 m/s² — an approach speed is a continuous deceleration, and a plateau reader can
+  only describe holds. This is the same structural problem the altitude word had before the
+  vertical moved to segment fitting, and the speed was left on plateaus.
+
+**Three independent findings say this one thing.** H9's decomposition: replacing the speed word
+with the continuously observed speed halved the replay gap (2,035 → 907 m) while un-quantising the
+word bought 18 %. The prior's readings: recall on speed CHANGES is 0.17, missing 58 % of them. And
+this: the signal is a ramp read as holds. More speed classes would not fix any of them.
+
+**Not measured here**: the closed loop (every figure above is against the truth's own states),
+multi-aircraft, and the go-around — its terminal value never occurs in this cohort.

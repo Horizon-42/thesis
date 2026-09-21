@@ -213,6 +213,12 @@ of the package, not a migration in progress.
   0.44 vertical / **0.17 speed**, and the joint top-8 covers only 20.5 % of truth tuples. **The
   runway row is a COPY, not a prediction** (it is also a context token; plan §3.2 has not been
   done). Seed line: ±0.003 nats, ±0.003 top-1. → `docs/2026-09-21-instruction_prior_results.zh.md`
+- **What the vocabulary can SAY, per signal** (2026-09-21, pooled val): heading settled p50 0.41° /
+  p90 2.35° and inside its band 80.4 % of the time; vertical — the 5-segment fit is RMS 11 m but
+  quantising to the six modes costs p50 35 m / p90 150 m of height; **speed settled p90 18 m/s,
+  inside its band only 48.5 %**, because only 51.3 % of an approach is a speed PLATEAU and 61 % of
+  it is decelerating — a ramp read as holds, which is the reading rule and not the class count.
+  The prior's 0.17 recall on speed changes and H9's 2,035 → 907 m are the same fact (H10).
 - **A SENTENCE MUST BE ABLE TO LAND — `run_ts.py instruction_replay` is the gate** and it flies
   what the artefact SAYS, never a re-reading (the user's rule, 2026-09-21). It caught three things
   a vocabulary readout cannot: an absolute heading word cannot say which way round to turn (9.9 %
