@@ -208,6 +208,38 @@ def turn_rate_rad_s(speed_mps: float) -> float:
     return G * math.tan(TURN_BANK_RAD) / speed_mps
 
 
+class UnreachableStart(ValueError):
+    """The observed start is one no sentence could fly from, so flying it measures nothing."""
+
+
+def _refuse_unreachable_start(reading: Reading, vocabulary: Vocabulary, start: Start, budget_s: float) -> None:
+    """Refuse a start whose SPEED the sentence could not reach inside its own budget.
+
+    The start is borrowed from the observation (`Start`), and an arrival's first ADS-B row is
+    occasionally corrupt — one KMSY track reports **2017 m/s** on its first row, 4,000 kt. The
+    words are read from a SMOOTHED signal so one such row barely moves them, but the integration
+    begins at that speed and the acceleration cap can only shed 0.5 m/s of it a second: over that
+    flight's 432 s budget it sheds 216 and flies 787 km, which then reads as a 566 km "gap" and
+    swamps every distribution it appears in.
+
+    The criterion is the failure's own physics rather than an invented ceiling: the first speed
+    word is what the sentence asks for, the cap is what the model can close, and the budget is how
+    long it has. A start that cannot reach its own first word is outside what this model can
+    represent, so it RAISES — counted by the caller, never silently clipped to something flyable.
+    Measured on the five-airport val split: 4 of 4,492 flights (0.09 %), all of them first rows
+    above 200 m/s; a genuinely fast arrival at 165 m/s closes its 8 m/s in 16 s and is untouched.
+    """
+    first_word = int(reading.words[0][INSTRUCTION_KINDS.index("speed")])
+    wanted = vocabulary.speed_centre_mps(first_word)
+    closable = ACCEL_MAX_MPS2 * budget_s
+    if abs(start.ground_speed_mps - wanted) > closable:
+        raise UnreachableStart(
+            f"{reading.flight_id}: the observed start is {start.ground_speed_mps:.0f} m/s and the "
+            f"sentence's first speed word is {wanted:.0f} m/s — {abs(start.ground_speed_mps - wanted):.0f} m/s "
+            f"apart, which {ACCEL_MAX_MPS2:g} m/s² cannot close in the {budget_s:.0f} s budget"
+        )
+
+
 def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: float,
         speed_scale: float = 1.0) -> GeometricTrack:
     """Integrate the sentence from ``start`` at `STEP_S`, until it lands or runs out of budget.
@@ -241,6 +273,7 @@ def fly(reading: Reading, vocabulary: Vocabulary, start: Start, observed_s: floa
     if t != 0.0:
         raise ValueError(f"{reading.flight_id}: the first event is at {t:g} s, not at the track's own 0")
     limit_s = observed_s + OVERRUN_S
+    _refuse_unreachable_start(reading, vocabulary, start, limit_s)
 
     to_go, cross = start.to_go_m, start.cross_m
     height, speed, course = start.height_m, start.ground_speed_mps, start.relative_course_deg

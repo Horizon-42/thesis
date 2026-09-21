@@ -33,7 +33,7 @@ review 再 commit。HEAD 上另有别的 session 的提交——**这个 checkou
 conda run -n aeroviz --no-capture-output python run_ts.py instruction_vocabulary \
   --airports KRDU KSJC KSTL KSMF KMSY \
   --cohort 4dTrajectory/outputs/KRDU/experiments/plan_guidance_20260910/step5_pooled_cohort/development_cohort.json \
-  --out 4dTrajectory/outputs/POOLED/experiments/two_tier_v3_bprime_20260921/vocabulary_five_airports \
+  --out 4dTrajectory/outputs/POOLED/experiments/two_tier_v3_bprime_20260921/vocabulary_five_airports_v13 \
   --hand-check 0
 ```
 
@@ -95,13 +95,13 @@ conda run -n aeroviz --no-capture-output python run_ts.py instruction_vocabulary
 ## 4 产物与 runner 的新入口
 
 **KRDU(已产出)**
-`4dTrajectory/outputs/KRDU/experiments/two_tier_v3_bprime_20260920/vocabulary_segment_v12/`
+`4dTrajectory/outputs/KRDU/experiments/two_tier_v3_bprime_20260921/vocabulary_segment_v13/`
 train 6,853 架 / 50,825 事件(每架中位 6),val 1,404 架 / 10,309 事件;间隔 p50 34 s / p95 108 s,
 **0 撞顶**;用到 heading 72/72、vertical 6/6、speed 16/16、duration 121/151、terminal 2/3;
 越界 vertical 750、speed 303。
 
 **五机场(在跑)**
-`4dTrajectory/outputs/POOLED/experiments/two_tier_v3_bprime_20260921/vocabulary_five_airports/`
+`4dTrajectory/outputs/POOLED/experiments/two_tier_v3_bprime_20260921/vocabulary_five_airports_v13/`
 cohort = `KRDU/experiments/plan_guidance_20260910/step5_pooled_cohort/development_cohort.json`
 (train 21,911 / val 4,496,KRDU 8,261 + KSJC 6,110 + KSTL 5,952 + KSMF 3,198 + KMSY 2,886)。
 
@@ -198,8 +198,9 @@ runner 加的过滤。它们按 flight key 记进产物的 `excluded_short_track
 
 ## 8 下一步
 
-1. ~~等五机场产物落地~~ **已落地并已订正跑道词**(见 §7.1):`vocabulary_five_airports/` 22 类、
-   `vocabulary_segment_v12/` 4 类。
+1. ~~等五机场产物落地~~ **v12 的两套产物已作废并重建为 v13**(见 §7.1、§7.2):
+   `vocabulary_segment_v13/`(KRDU,4 个跑道类)与 `vocabulary_five_airports_v13/`(五机场,22 类)。
+   验收门 `instruction_replay` 在 KRDU 验证集上 99.6 % 降落。
 2. **提交**:词表 + 读法 + 执行器 + 限幅 + 下游 + 测试 + runner 新入口 + 文档订正。**改动大,按规矩要
    先 review 再提交。**
 3. **先验训练**。好消息:`PriorConfig.words` 是 `word_counts(vocabulary, runway_vocabulary)` **算出来

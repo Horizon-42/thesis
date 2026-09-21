@@ -42,7 +42,8 @@ from ts_transformer.training.train import load_checkpoint_payload
 REPLAY_SCHEMA = "ts-instruction-replay-v1"
 
 
-def render(rows: list[dict[str, Any]], vocabulary_sha: str, split: str) -> str:
+def render(rows: list[dict[str, Any]], vocabulary_sha: str, split: str,
+           refused_starts: list[dict[str, str]] | None = None) -> str:
     landed = [r for r in rows if r["landed"]]
     straight = [r for r in rows if r["stratum"] == "straight-in"]
     vectored = [r for r in rows if r["stratum"] == "vectored"]
@@ -64,6 +65,12 @@ def render(rows: list[dict[str, Any]], vocabulary_sha: str, split: str) -> str:
     for row in rows:
         reasons[row["end_reason"]] = reasons.get(row["end_reason"], 0) + 1
     lines.append(f"  end reasons: {reasons}")
+    if refused_starts:
+        # never a silent exclusion: the flights are named and the reason is theirs, not the
+        # vocabulary's (a corrupt observed first row the model cannot start from)
+        lines.append(f"  NOT FLOWN — the observed start is unreachable: {len(refused_starts)} flight(s)")
+        for item in refused_starts:
+            lines.append(f"    {item['dataset_id']}: {item['why'].split(': ', 1)[-1]}")
     lines.append("")
     lines.append("  the model these were flown under:")
     for name, value in kinematics.assumptions().items():
@@ -115,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
 
     anchor = default_anchor(config)
     rows: list[dict[str, Any]] = []
+    refused_starts: list[dict[str, str]] = []
     for item in series:
         reading = readings[item.dataset_id]
         frame = course_frame(item)
@@ -123,7 +131,13 @@ def main(argv: list[str] | None = None) -> int:
             height_m=float(frame["height_m"][0]), ground_speed_mps=float(frame["ground_speed_mps"][0]),
             relative_course_deg=float(frame["relative_course_deg"][0]),
         )
-        track = kinematics.fly(reading, vocabulary, start, reading.duration_s)
+        try:
+            track = kinematics.fly(reading, vocabulary, start, reading.duration_s)
+        except kinematics.UnreachableStart as refused:
+            # a corrupt observed first row, not a sentence the vocabulary got wrong — counted and
+            # NAMED here rather than flown into a number that would swamp every distribution
+            refused_starts.append({"dataset_id": item.dataset_id, "why": str(refused)})
+            continue
         gap = kinematics.gap_to_observed(track, frame)
         difficulty = approach_difficulty(item, anchor)
         rows.append({
@@ -135,13 +149,13 @@ def main(argv: list[str] | None = None) -> int:
             "stratum": "straight-in" if difficulty.route_tortuosity < STRAIGHT_TORTUOSITY else "vectored",
         })
 
-    table = render(rows, vocabulary.sha256, args.split)
+    table = render(rows, vocabulary.sha256, args.split, refused_starts)
     out.mkdir(parents=True)
     write_json_atomic(out / "replay.json", {
         "schema": REPLAY_SCHEMA, "written_utc": utc_now(), "split": args.split,
         "vocabulary": str(vocabulary_path), "vocabulary_sha256": vocabulary.sha256,
         "reading_rule": vocabulary.reading_rule, "assumptions": kinematics.assumptions(),
-        "provenance": provenance, "flights": rows,
+        "provenance": provenance, "flights": rows, "refused_starts": refused_starts,
         "landed": sum(r["landed"] for r in rows), "elapsed_s": time.perf_counter() - started,
     })
     (out / "summary.txt").write_text(table, encoding="utf-8")

@@ -147,6 +147,23 @@ def test_acceleration_is_capped_at_the_measured_limit():
     assert np.allclose(rate[reached:], 0.0)
 
 
+def test_a_start_the_sentence_could_never_reach_is_REFUSED_not_flown():
+    """The start is borrowed from the observation, and an arrival's first ADS-B row is
+    occasionally corrupt — one KMSY track reports 2017 m/s, 4,000 kt. Flying from it produces a
+    787 km track and a 566 km "gap" that swamps every distribution it lands in, while measuring
+    nothing about the vocabulary. The criterion is the failure's own physics: a start whose speed
+    the acceleration cap cannot bring to the sentence's FIRST speed word inside the budget.
+    """
+    budget = 100.0 + kinematics.OVERRUN_S
+    wanted = VOCABULARY.speed_centre_mps(STEADY_WORD)
+    closable = kinematics.ACCEL_MAX_MPS2 * budget
+    with pytest.raises(kinematics.UnreachableStart, match="cannot close"):
+        kinematics.fly(sentence(), VOCABULARY, start(ground_speed_mps=wanted + closable + 1.0), observed_s=100.0)
+    # and a start it CAN close is flown, right up to the boundary
+    ok = kinematics.fly(sentence(), VOCABULARY, start(ground_speed_mps=wanted + closable - 1.0), observed_s=100.0)
+    assert ok.ground_speed_mps[0] == pytest.approx(wanted + closable - 1.0)
+
+
 def test_it_stops_at_the_threshold_plane_and_says_so():
     track = kinematics.fly(sentence(), VOCABULARY, start(to_go_m=500.0), observed_s=480)
     assert track.end_reason == kinematics.END_CROSSED
