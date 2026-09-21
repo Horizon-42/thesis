@@ -466,3 +466,76 @@ coarser than one chosen as a measurement — which also relieves H5's class-coun
 (200 ft leaves a median of 9 examples per class on KRDU alone). Pending numbers to settle
 together: bin width under the anchor reading, uniform vs fitted, and the cohort (KRDU alone vs
 five airports, which moves the per-class counts by an order of magnitude).
+
+### H8 · the vocabulary those measurements produced — `fffa8bdf24a0` / `segment-v13` (2026-09-21)
+
+What H5–H7 replaced the altitude word with, decided line by line with the user and read over the
+five airports. **Six kinds**, one event sequence per flight (a row only where something changed):
+
+| kind | values | classes |
+|---|---|---|
+| runway | `AIRPORT:ident` — qualified, because idents collide across airports | the COHORT's thresholds: **22** on the pooled cohort (the manifests hold 23 — KRDU 4 / KSJC 4 / KSTL 8 / KSMF 3 / KMSY 4 — and no KSTL 06 flight is in it) |
+| heading | relative to the final approach course, **5°** a bin | 72 |
+| vertical | **flight path angle**, six modes: climb 3.0, level 0, descent 1.4 / 2.4 / 3.1 / 4.4° (**descent POSITIVE**) | 6 |
+| speed | ground-speed centres fitted to the fleet: 44 56 63 68 74 79 86 93 99 107 114 121 129 138 147 157 m/s | 16 |
+| duration | since the previous event, 2 s a bin, 0–300 s | 151 |
+| terminal | continue / landed / go-around | 3 |
+
+- **The tolerances are NOT in the sha** (they are decoding and read-back parameters): vertical
+  level mode ±0.1° absolute, every other vertical mode ±7 % of its own angle; speed ±3 %. The
+  runway classes are not in the sha either — they are per airport and travel beside the spec, so
+  one vocabulary reads every airport.
+- **Two segmentation regimes, because the quantities differ in kind.** Absolute targets (heading,
+  speed) are read from PLATEAUS. The vertical is a RATE, and a plateau reader cannot see it, so it
+  is read by optimal piecewise-linear fitting of height against cumulative horizontal distance
+  (dynamic programming over `VERTICAL_SEGMENTS` breakpoints, then a bottom-up merge to a fixed
+  point). Measured cost 7.0 ms a flight (≈3.1 min over 26,382); greedy segmentation is 29.9 %
+  worse, and the DP is not the bottleneck — `build_series` is.
+- **The climb mode exists for the go-around post-training** and it is USED in the data (a segment
+  must climb past 1.5° to reach it). The executor's climb clamp was 2°, under the 3° mode plus its
+  band, and was raised to 4°; an invariant test now requires every mode **plus its tolerance** to
+  sit inside the executor's limits.
+- Read over the five-airport cohort: train 21,890 flights / 143,434 events (p50 6 a flight, gap
+  p50 34 s / p95 110 s), val 4,492 / 29,412; every heading, vertical, speed and runway word is used
+  at least once, duration 137/151, terminal 2/3 (the go-around value is never read — no cohort
+  flight goes around).
+
+### H9 · a sentence has to be able to LAND, and two things stopped it (2026-09-21)
+
+The user's acceptance rule: before anything is trained on a sentence, that sentence must fly to
+the runway. `run_ts.py instruction_replay` is the gate — it flies what the ARTEFACT says
+(`Reading.from_dict`), never a re-reading, because a gate that re-derives its own input cannot see
+the file drift from the code that wrote it. On the first v12 artefacts **36.7 %** of KRDU sentences
+reached the threshold on the final; after the two fixes below, **99.6 %** (val split, 1,399 of
+1,404 — straight-in 100 %, vectored 99.2 %), and the gap to the observed track fell from a p95
+median of 2,035–2,586 m to **1,085 m**.
+
+**A heading word cannot say which way round to turn.** It names a direction, so a half circle is a
+coin toss and `wrap_deg(180)` is −180 on every implementation — the reconstruction turned the same
+way every time and mirrored the whole track (up to 18 km). On the five-airport train split 13.4 %
+of the 28,221 heading changes exceed 150° and **9.9 % are exactly a half circle**, so 17.1 % of
+flights carry at least one. The reading DOES know the direction — it reads the course unwrapped,
+where +178° and −182° are different numbers — so v13 spends that on intermediate targets the
+aircraft actually passed through (`turn_split_deg`, `_split_long_turns`), each said when the
+aircraft reaches the one before. That is also how a controller says it.
+
+**A heading word cannot hold a LINE.** This is what stopped the vectored flights. Measured on 150
+KRDU arrivals, at the moment a track first lines up with the course inside 10 km: the real tracks
+are **13 m** from the centreline, the reconstructions that land 33 m, and the ones that fail
+**2,464 m** — aligned with the course and flying a parallel line forever, so `to_go ≤ 0` never
+coincides with "on the final". Word 0 names the COURSE, and flying the final approach course means
+tracking the centreline (`target_course_deg`, intercept capped at 30°). That one change took the
+landing rate 36.7 % → 94.7 % on its own. It adds nothing to the vocabulary and changes no
+sentence: it is what flying the word means.
+
+**The preview's airframe was also wrong, and it is now measured, not borrowed.** Plateau to
+plateau the fleet turns at 0.67 of what a 20° bank gives (p50 over 280 turns of more than 20°),
+i.e. 14°; |dV/dt| where the speed is changing is p50 0.19 / p90 0.54 / p99 0.99 m/s² over 62,383
+samples, so the old 1.0 cap was the p99. A preview that turns half again too fast finishes each
+turn early and flies straight while the aircraft is still turning. Worth 36.7 → 48.7 % alone —
+real, but an order less than the two above.
+
+**What the gap is NOT.** Un-quantising the words barely helps: replacing the speed WORD with the
+exact plateau value the reader measured moves the gap p95 median only 2,035 → 1,669 m (−18 %),
+while replacing it with the continuously observed speed gives 907 m (−55 %). The residual distance
+is the piecewise-constant flying model and the missing wind, not the vocabulary's resolution.

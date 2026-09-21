@@ -200,16 +200,28 @@ of the package, not a migration in progress.
   `trombone_surplus_reference` `beeline` (default, bit-identical to L3.e) vs `reference-rollout` —
   sizing against `L_ref` itself is the trap (H3.8). Hook diagnostics are per-FLIGHT and ABSENT
   without a hook, never zero (H4).
-- **The instruction vocabulary's 1000 ft altitude bin is random rounding on the real levels**
-  (mean 235 / p95 472 ft against a random 250 / 475), and 56 % of its "instructions" are the
-  threshold crossing — exactly one per flight, median 62 ft, which the terminal word already
-  says. D51's justification for the bin cannot fail by construction. MSL anchoring is a wash
-  fleet-wide. 200 ft → mean 51 ft at 51 words (H5).
-- **A vertical angle is a CRITERION, not a word**: the position angle to the threshold sits at
-  p50 +0.04° from the runway's published glidepath with 88.5 % inside ±0.5° (so 88.5 % of its
-  mass is three bins — a word the model would always emit), while the flight path angle is broad
-  (p50 2.52°, 9.4 % level). Off the final course one 0.1° scale needs 598 words. Read the
-  published glidepath PER RUNWAY — KRDU 32 is 3.50° (H6).
+- **The instruction vocabulary in force is `fffa8bdf24a0` / `segment-v13`** (2026-09-21): runway
+  `AIRPORT:ident` (idents collide across airports; 22 classes on the pooled cohort, of the 23 the
+  manifests hold), heading 5°/72, vertical =
+  **flight path angle**, six modes, descent POSITIVE, speed 16 fitted ground-speed centres,
+  duration 2 s/151, terminal 3. Tolerances and runway classes are deliberately OUTSIDE the sha.
+  Absolute targets are read from plateaus; the vertical, a RATE, by DP piecewise-linear fitting of
+  height against horizontal distance (H8).
+- **A SENTENCE MUST BE ABLE TO LAND — `run_ts.py instruction_replay` is the gate** and it flies
+  what the artefact SAYS, never a re-reading (the user's rule, 2026-09-21). It caught three things
+  a vocabulary readout cannot: an absolute heading word cannot say which way round to turn (9.9 %
+  of heading changes are exactly a half circle, and guessing mirrors the whole track), it cannot
+  hold a LINE (the failures reach the threshold aligned but 2,464 m to the side, where the real
+  tracks are 13 m), and the LANDING was in no word at all (the terminal word sat on the last
+  change, a median 136 s early). 36.7 % → **99.6 %** landed. A word's resolution is NOT the gap:
+  un-quantising the speed word buys 18 %, the observed speed 55 % (H9).
+- **Its three superseded measurements, kept because they are what decided it**: the 1000 ft
+  altitude bin was indistinguishable from random rounding and 56 % of its "instructions" were the
+  threshold crossing (H5); the POSITION angle to the threshold is a criterion, not a word (p50
+  +0.04° off the published glidepath, 88.5 % inside ±0.5° — a word the model would always emit),
+  while the FLIGHT PATH angle, which is the word, is broad (p50 2.52°, 9.4 % level) — read the
+  published glidepath PER RUNWAY, KRDU 32 is 3.50° (H6); and an absolute target's error is bounded
+  by half a bin while a rate's compounds, which is what the altitude word was for (H7).
 
 ## How to read results here (conventions that prevent wrong conclusions)
 
