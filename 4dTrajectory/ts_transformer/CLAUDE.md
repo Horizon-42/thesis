@@ -146,6 +146,9 @@ of the package, not a migration in progress.
   roster's bytes or counts; v3 checkpoints still load; a pre-2026-09-08 in-flight
   `cv_candidate_progress.json` is refused on resume — delete that one file (C26).
 
+- Current `course_frame` coordinates: cross-track is right-positive; relative track angle is left-positive; height zero includes threshold crossing height (C29).
+- Instruction vocabulary design uses signed turns from the issuing model `psi` and heights above airport MSL elevation; these semantics are not yet implemented (C30).
+
 ## Current defaults and their status
 
 | axis | default | status (full text: the ID) |

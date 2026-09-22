@@ -362,6 +362,41 @@ trajectories.py` (which held a second copy of the comparison). So:
   rather than silently re-running finished candidates. Deleting that one file restarts the
   search from candidate 0; a finished `cv_results.json` is read, not refused.
 
+### C30 · instruction design: issuing heading and airport elevation
+
+The [instruction vocabulary design](../2026-09-21_box_vocabulary_design.zh.md) defines heading
+words as signed turns relative to the model `psi` at issue time, positive left and negative right.
+The issue reference remains fixed throughout the command, including event splits caused by other
+dimensions. Equal turn tokens issued twice are distinct commands; their continuation/reissue
+encoding, target set and transient envelope still need specification. Signed turns of +180 and
+−180 are different, even though their final directions coincide.
+
+The point-mass dynamics' `psi` is the physical velocity direction in moving local geographic ENU
+(east zero, increasing toward north, radians), not an independent body-yaw attitude state.
+`states_from_channels` undoes chart transport factors before recovering it. The fixed-airport-ENU
+turn statistics provide evidence, not a bit-identical substitute for model `psi` labels.
+
+Height words use `altitude_msl - airport_reference_point(airport)["elevation_m"]`. The runway gate
+retains its own MSL elevation plus TCH; its height relative to the airport is generally nonzero.
+The dynamics altitude remains MSL. Integer height targets and envelope coverage require analysis
+in the new datum; the old gate-relative candidate lists are not silently reinterpreted.
+
+These are design decisions, not changes to the live tokenizer, dynamics or saved artifacts.
+
+### C29 · instruction signal coordinates and distribution evidence
+
+`manoeuvre.instructions.course_frame` measures signed cross-track distance to the extended final
+approach course: right-positive when looking inbound, left-negative. Relative ground-track angle
+uses the opposite sign convention: left-positive. Height is the chart vertical coordinate relative
+to `FlightSeries.target_chart`; the target constructed by `flight_scenarios.runway_target` includes
+threshold elevation **plus threshold crossing height**, so negative relative height does not imply
+being below the runway surface. Preserve these distinctions when defining explicit target words.
+
+The five-airport train/validation distributions, signed cross-track histograms, approximately level
+height segments and proposed integer target sets are in
+[指令目标分布与整数词表建议](../2026-09-22_instruction_dictionary_distribution.zh.md).
+Those sets are pending user review, not an adopted dictionary or a model evaluation.
+
 ### C28 · a codebook is a hashed artefact and every executor / prior checkpoint binds to its sha
 
 **ARCHIVED 2026-09-20** — code under `archive/manoeuvre_codes_2026_09/` (its README says what moved and why; plan v3 §10's audit, the 2026-09-20 rewrite of stage B to an instruction vocabulary). The text below describes the archived code and is kept as its record. The codebook (`manoeuvre/tokenizer.py` `write_codebook` / `load_codebook`, plan §2.4; 2026-09-18) is a directory: `codebook.pt` holds the tokenizer's kind, FSQ levels, row count, segment length, the SCALE constants the rows were encoded under (`SEGMENT_ROW_SCALE`, `STATE_ROW_SCALE` — part of what decides a code, so part of the artefact), the fitted cohort's identity (C26's eligible-set digests; an empty identity is refused at write), the source checkpoint (path, sha256, run name) and the weights, ALL under one `sha256`; `codebook.json` mirrors everything but the weights and carries that sha. Loading verifies the sha, that the manifest equals the hashed payload, and that this build's scale constants are the artefact's — else it refuses by name. A loaded tokenizer is FROZEN: no gradient, and its mode stays `eval` under the parent's `train()`. **An executor trained AGAINST a codebook (`manoeuvre_codebook`) stamps `codebook_sha256` into `checkpoint_metadata.json`, and `load_checkpoint` refuses it when the directory's tokenizer weights no longer equal the ones inside the checkpoint** (`ControlStrategy.verify_checkpoint_payload`, the strategy hook `load_checkpoint` calls) — the prior's codes and the executor's z must be ONE vocabulary. A jointly trained executor carries its tokenizer inside the checkpoint and has no sha until exported; exporting a codebook from an executor that was trained against one is refused (that directory is its codebook). Writing never overwrites: an existing directory refuses.
