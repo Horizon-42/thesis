@@ -16,10 +16,10 @@
 | 词表 | 读法 `instruction-v1`，规格 sha `08ad64abb53e`（2026-09-23 冻结）。产物 `4dTrajectory/outputs/POOLED/instruction_language/v1_20260923/`，标注器源码 sha `38660840f73d` |
 | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；几何全部来自 `instructions/display.py` |
 | 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
-| 分支与提交 | `dev-instruction-frontend`（基于 `7821c08f`）：代码 `8a8aa7fa`，审查后的修正 `87b7547e`；文档与发布见 §7 |
-| 发布 | 五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v1/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），数字见 §2.1 的表 |
+| 分支与提交 | `dev-instruction-frontend`（基于 `7821c08f`）：代码 `8a8aa7fa`，审查后的修正 `87b7547e`，文档 `daf6f72c`，浏览器里看出的版面修正 `3dc2e5b2`（未合并，由用户合并） |
+| 发布 | 2026-09-23 在 `daf6f72c`（工作区干净，记在每个索引条目的 `source.git` 里）导出：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v1/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），数字见 §2.1 的表。各机场 `index.json` 的旧条目逐条原样保留 |
 | 测试 | Python：`tests/test_instruction_training_export.py` 13 条；前端 Vitest 88 个文件 638 条通过；`tsc`（`npm run build` 的类型检查）与 `npm run typecheck:scripts` 无错 |
-| 核对 | `npm run check-publication` 用前端自己的读取函数读盘上的文件，加 `--server` 时再读开发服务器实际返回的内容，见 §5 |
+| 核对 | `npm run check-publication`：五个机场盘上与开发服务器（从本工作区起在 5183 端口）两层都是 0 个错误，每个机场 1 个能读的集合，旧集合全部按名字拒读记为警告（§5）。浏览器（本机 Chrome）里打开过：Training 页开在 `instruction_v1`，句子条、读数核对窗口的平面图与三张图、三维里的航迹、贴地的漏斗与走廊、游标高亮都在，控制台没有错误。旧版前端（`7821c08f` 的读取函数）读新的索引：所有集合照常列出、0 条被拒，新样本按格式名拒读 |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于已经被取代的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 | 还没有的两样 | 执行器按句子重飞的航迹（执行器在设计中）、先验模型说出的句子（这份词表上还没训练先验）。界面上是两个明确的空位，没有假数据（§4.6） |
 
@@ -251,4 +251,5 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
   （AV19–AV23）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11）。
 - 日志式记录写进仓库的 `docs/CHANGELOG.md`。
 
-提交：`8a8aa7fa`（代码）、`87b7547e`（审查后的修正：漏斗从转弯终点那段线本身扫出、导出全部建好再写、读取时更多的一致性检查）。
+提交：`8a8aa7fa`（代码）、`87b7547e`（审查后的修正：漏斗从转弯终点那段线本身扫出、导出全部建好再写、读取时更多的
+一致性检查）、`daf6f72c`（文档；发布在这一提交上做）、`3dc2e5b2`（平面图居中、图表坐标说明不再被裁掉）。
