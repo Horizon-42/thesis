@@ -39,7 +39,7 @@ import torch
 from aerodynamic_model.common import GeodeticState
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Flown
-from ts_transformer.autopilot.judge import Verdict
+from ts_transformer.autopilot.judge import CROSSINGS, Verdict
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.data.channels import channels_from_states
 from ts_transformer.data.dataset import FlightSeries
@@ -55,7 +55,6 @@ GATE_SHARE = 0.95
 #: The name the records carry as their predictor, and the horizon they were flown over.
 PREDICTOR = "executor"
 HORIZON = "sentence"
-CROSSING_OUTCOMES = ("landed", "crossed_without_capture", "crossed_off_runway")
 REPLAY_SCHEMA = "ts-executor-replay-v1"
 
 
@@ -69,9 +68,10 @@ def word_results(verdict: Verdict) -> list[tuple[str, bool]] | None:
         turn_ok = h["turn"] is None or all(h["turn"].values())
         hold_ok = not isinstance(h["hold"], dict) or h["hold"]["inside"] == h["hold"]["rows"]
         out += [("heading", turn_ok and hold_ok)] * h["words"]
-    corridor = verdict.words["corridor"]
+    corridor, capture = verdict.words["corridor"], verdict.words["capture_turn"]
     if corridor["cleared"]:
-        out.append(("approach", corridor["entered"] and corridor["inside"] == corridor["rows"]))
+        out.append(("approach", capture is not None and capture["progress_ok"] and capture["rate_ok"]
+                    and corridor["entered"] and corridor["inside"] == corridor["rows"]))
     out += [("altitude", bool(v["contained"])) for v in verdict.words["vertical"]]
     out += [("speed", bool(v["contained"])) for v in verdict.words["speed"]]
     return out
@@ -95,7 +95,7 @@ def executor_forecast(flown: Flown, index: int, verdict: Verdict, inputs: Any, s
     return Forecast(
         times=float(series.times[0]) + offsets, values=values, normalized_progress=offsets / offsets[-1], anchor=0,
         final_time_s=float(offsets[-1]), predicted_final_time_s=float(offsets[-1]), horizon_mode=HORIZON, passes=1,
-        truncated_at_threshold=verdict.outcome in CROSSING_OUTCOMES, horizon_capped=verdict.outcome == "timeout",
+        truncated_at_threshold=verdict.outcome in CROSSINGS, horizon_capped=verdict.outcome == "timeout",
         sample_durations_s=np.full(end, dt), segment_durations_s=np.full(end, dt),
         controls=newtons.cpu().numpy().astype(np.float64), commands=commands.cpu().numpy().astype(np.float64),
         control_parameterization=contract, geodetic_values=geodetic,

@@ -5,6 +5,7 @@ angle, the corridor, the classes' angles, the speed band) is read from the `Voca
 restated. Where each value comes from — data, method A, method B — is the design's §9–§10 and the
 executor spec's (E7); this container only checks that a set of values is one the laws can fly:
 
+- the sentence's step a whole number of cycles (the judge reads the flown track at the sentence's rows);
 - ``τ_ψ ≥ 2 Δt`` (§4.1 constraint 1: each cycle removes at most half the heading error);
 - ``r_turn · τ_ψ ≤ heading_continue_lead_deg`` (§4.1 constraint 2: a split turn's next word arrives
   before the roll-out begins, so the aircraft does not level between the parts);
@@ -39,6 +40,8 @@ class ExecutorParams:
     timeout_factor: float          # the flight's own remaining time × this (§8.3)
 
     def check(self, spec: VocabularySpec) -> None:
+        if abs(spec.step_s / self.cycle_s - round(spec.step_s / self.cycle_s)) > 1e-9:
+            raise ValueError(f"the sentence's step {spec.step_s:g} s is not a whole number of {self.cycle_s:g} s cycles")
         if self.heading_time_constant_s < 2.0 * self.cycle_s:
             raise ValueError(f"τ_ψ {self.heading_time_constant_s:g} s is under 2 Δt ({2 * self.cycle_s:g} s)")
         if self.turn_rate_deg_s * self.heading_time_constant_s > spec.heading_continue_lead_deg:

@@ -177,12 +177,16 @@ def summary(verdicts: list[Verdict]) -> dict[str, Any]:
             words_failed["flown track refused by the labeller's gate"] += 1
             continue
         for h in v.words["heading"]:
+            words_failed["turn superseded by the capture (not judged)"] += h["superseded"]
             if h["turn"] is not None:
                 words_failed["turn not reached"] += not h["turn"]["reached"]
                 words_failed["turn not monotone"] += not h["turn"]["progress_ok"]
                 words_failed["turn rate or bank"] += not h["turn"]["rate_ok"]
             words_failed["hold outside its funnel"] += isinstance(h["hold"], dict) and h["hold"]["inside"] < h["hold"]["rows"]
-        corridor = v.words["corridor"]
+        corridor, capture = v.words["corridor"], v.words["capture_turn"]
+        words_failed["cleared, never captured"] += corridor["cleared"] and capture is None
+        words_failed["capture turn outside its envelope"] += capture is not None and not (
+            capture["progress_ok"] and capture["rate_ok"])
         words_failed["cleared, corridor never entered"] += corridor["cleared"] and not corridor["entered"]
         words_failed["cleared, corridor left after entry"] += corridor["cleared"] and corridor["inside"] < corridor["rows"]
         words_failed["altitude word outside its tube"] += sum(not x["contained"] for x in v.words["vertical"])

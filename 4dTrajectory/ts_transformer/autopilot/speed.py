@@ -44,20 +44,24 @@ class Speed:
         self.params, self.band_mps = params, spec.speed_tolerance_mps
         self.margin = EXECUTOR_DYNAMICS.control_speed_floor_margin
 
-    def rate(self, state: Kinematics, speed_mps: torch.Tensor, unspecified: torch.Tensor, load_factor: torch.Tensor,
-             aero_params: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """The airspeed rate for this cycle, and whether the stall floor set it."""
+    def rate(self, state: Kinematics, speed_mps: torch.Tensor, unspecified: torch.Tensor, go_around: torch.Tensor,
+             load_factor: torch.Tensor,
+             aero_params: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+        """The airspeed rate for this cycle, the rate the law wanted before the stall floor, and whether the
+        floor set it; a go-around holds the airspeed it has (§4.6)."""
         if (unspecified & self.approach_ias_mps.isnan()).any():
             raise ValueError("\"unspecified\" in force for a flight whose type publishes no approach speed")
         params = self.params
         density = isa_density(state.height_m)
         own = self.approach_ias_mps * torch.sqrt(ISA_RHO0_KG_M3 / density)
-        wanted = torch.where(unspecified, own, speed_mps / torch.cos(state.gamma_rad))
+        wanted = torch.where(go_around, state.speed_mps,
+                             torch.where(unspecified, own, speed_mps / torch.cos(state.gamma_rad)))
         floor = self.margin * stall_speed_mps(load_factor, state.mass_kg, density, aero_params[:, 0], aero_params[:, 1])
-        reference = torch.maximum(wanted, floor)
         slowing = torch.where(unspecified, params.unspecified_decel_mps2, params.decel_mps2)
-        faster = reference > state.speed_mps
-        tau = self.band_mps / torch.where(faster, torch.full_like(slowing, params.accel_mps2), slowing)
-        rate = ((reference - state.speed_mps) / tau).clamp(max=params.accel_mps2)
-        rate = torch.maximum(rate, -slowing)
-        return rate, {"stall_floor": floor > wanted}
+
+        def toward(reference: torch.Tensor) -> torch.Tensor:
+            faster = reference > state.speed_mps
+            tau = self.band_mps / torch.where(faster, torch.full_like(slowing, params.accel_mps2), slowing)
+            return torch.maximum(((reference - state.speed_mps) / tau).clamp(max=params.accel_mps2), -slowing)
+
+        return toward(torch.maximum(wanted, floor)), toward(wanted), {"stall_floor": floor > wanted}

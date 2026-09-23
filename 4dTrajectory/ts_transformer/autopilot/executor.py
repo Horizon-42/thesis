@@ -35,7 +35,7 @@ from ts_transformer.autopilot.plant import Plant
 from ts_transformer.autopilot.sentence import WordsInForce
 from ts_transformer.autopilot.speed import Speed
 from ts_transformer.autopilot.vertical import Vertical
-from ts_transformer.instructions.words import ALTITUDE, ANGLE, Words
+from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, Words
 
 #: Every limit the cycle can meet (§8.1), in the order they are applied.
 LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_floor", "thrust_max", "thrust_min",
@@ -50,7 +50,8 @@ class Flown:
 
     states: torch.Tensor                    # [B, T+1, 7] geodetic
     commands: torch.Tensor                  # [B, T, 3] thrust fraction, bank (the dynamics' sign), load factor
-    wanted: torch.Tensor                    # [B, T, 3] track rate deg/s, path-angle rate rad/s, speed rate m/s²
+    wanted: torch.Tensor                    # [B, T, 3] track rate deg/s, path-angle rate rad/s, speed rate m/s²,
+                                            # as the laws asked before their own limits (γ̇_max, the stall floor)
     limits: dict[str, torch.Tensor]         # LIMITS → [B, T] bool
     modes: dict[str, torch.Tensor]          # MODES → [B, T] bool, the state AFTER the cycle's law
     done_cycle: torch.Tensor                # [B] long: the cycle at whose end the flight was done (T − 1: never)
@@ -79,19 +80,21 @@ def fly(inputs: FlightInputs, force: WordsInForce, runways: Runways, charts: Air
     done_cycle = torch.full((batch,), cycles - 1, dtype=torch.long, device=device)
     for cycle in range(cycles):
         now = read_state(state, charts)
-        track_rate, lateral_modes = lateral.rate(now, force.heading_deg[:, cycle], force.approach[:, cycle],
-                                                 force.runway[:, cycle], runways, bank)
+        bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
+        track_rate, lateral_modes = lateral.rate(now, force.heading_deg[:, cycle], force.issued_step[:, cycle, HEADING],
+                                                 force.approach[:, cycle], force.runway[:, cycle], runways, bank,
+                                                 bank_rate)
         e0, n0, course, elevation = runways.pointed(force.runway[:, cycle])
         before, _right, _off = relative(now, e0, n0, course)
-        gamma_rate, vertical_modes = vertical.rate(now, force.altitude_m[:, cycle], force.land[:, cycle],
+        gamma_rate, gamma_wanted, vertical_modes = vertical.rate(now, force.altitude_m[:, cycle], force.land[:, cycle],
                                                    force.angle_class[:, cycle], force.angle_deg[:, cycle],
                                                    force.issued_step[:, cycle, [ALTITUDE, ANGLE]], before, elevation,
-                                                   lateral.captured)
+                                                   lateral.captured, lateral_modes["go_around"])
         attitude = inverse.attitude(now, track_rate, gamma_rate, bank, bank_cap_rad=math.radians(params.bank_cap_deg),
-                                    bank_rate_rad_s=math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s),
-                                    cycle_s=params.cycle_s)
-        accel, speed_modes = speed.rate(now, force.speed_mps[:, cycle], force.unspecified[:, cycle],
-                                        attitude.load_factor, inputs.aero_params)
+                                    bank_rate_rad_s=bank_rate, cycle_s=params.cycle_s)
+        accel, accel_wanted, speed_modes = speed.rate(now, force.speed_mps[:, cycle], force.unspecified[:, cycle],
+                                                      lateral_modes["go_around"], attitude.load_factor,
+                                                      inputs.aero_params)
         thrust = inverse.thrust(now, accel, attitude.load_factor, inputs.aero_params, inputs.max_thrust_n)
         bank = attitude.bank_rad
         command = torch.stack((thrust.fraction, bank, attitude.load_factor), dim=1)
@@ -99,7 +102,7 @@ def fly(inputs: FlightInputs, force: WordsInForce, runways: Runways, charts: Air
 
         states.append(state)
         commands.append(command)
-        wanted.append(torch.stack((track_rate, gamma_rate, accel), dim=1))
+        wanted.append(torch.stack((track_rate, gamma_wanted, accel_wanted), dim=1))
         for name, value in {**attitude.binds, **thrust.binds, **speed_modes,
                             "path_rate_limited": vertical_modes["path_rate_limited"]}.items():
             limits[name].append(value)

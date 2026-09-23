@@ -9,6 +9,7 @@ The inner loop (§5.1) turns a reference path angle into the rate the inverse fl
 | target T + descent k      | ``−γ_k`` until ``h − T ≤ V γ_k² / (2 γ̇_max)``, then hold (§5.3) |
 | target T + climb          | ``+γ_climb`` until ``T − h ≤ V γ_climb² / (2 γ̇_max)``, then hold |
 | descend to land + descent k | the angle to the aim point, kept inside class k's range   |
+| go-around, descend to land  | ``+γ_climb`` (§4.6: a new altitude word gives the target) |
 
 γ_k is the class's nominal angle (the spec's class centre, `Words.angle_deg`). "Descend to land" means land on
 the pointed runway, so once the lateral law has captured the line the descent aims, every cycle, at the point
@@ -62,13 +63,17 @@ class Vertical:
 
     def rate(self, state: Kinematics, altitude_m: torch.Tensor, land: torch.Tensor, angle_class: torch.Tensor,
              angle_deg: torch.Tensor, issued: torch.Tensor, to_go_m: torch.Tensor, threshold_elevation_m: torch.Tensor,
-             line_captured: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """The path-angle rate for this cycle; ``issued`` is ``[B, 2]``, the steps the altitude and angle
-        words in force were written at (a new word releases a captured target); ``to_go_m`` is the distance
-        along the centreline to the pointed threshold, whose elevation is ``threshold_elevation_m``, and
-        ``line_captured`` whether the lateral law has captured that centreline."""
-        if (land & (angle_class == ANGLE_LEVEL)).any():
-            raise ValueError("\"descend to land\" in force with the level class (vocabulary §2.5, rule 3)")
+             line_captured: torch.Tensor, go_around: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+        """The path-angle rate for this cycle, the rate the law wanted before its own limit ``γ̇_max``, and
+        its modes; ``issued`` is ``[B, 2]``, the steps the altitude and angle words in force were written at
+        (a new word releases a captured target); ``to_go_m`` is the distance along the centreline to the
+        pointed threshold, whose elevation is ``threshold_elevation_m``, ``line_captured`` whether the
+        lateral law has captured that centreline, and ``go_around`` whether a go-around is in force (§4.6:
+        with a target it is climbed to — the hold law climbs at most at the climb class — and with "descend
+        to land" in force the flight climbs at the climb class until an altitude word gives it one)."""
+        descent = (angle_class >= ANGLE_LEVEL + 1) & (angle_class <= self.words.n_descent)
+        if (land & ~descent).any():
+            raise ValueError("\"descend to land\" in force without a descent class (vocabulary §2.5, rule 3)")
         new_word = (issued != self.issued).any(dim=1)
         self.captured = self.captured & ~new_word
         self.issued = issued.clone()
@@ -88,6 +93,9 @@ class Vertical:
         low = self.low_rad[angle_class].clamp(min=0.0)
         aim = torch.atan2(above_aim, to_go_m.clamp(min=1.0))
         aim = torch.where(line_captured, torch.minimum(torch.maximum(aim, low), self.steep_rad[angle_class]), nominal)
-        reference = torch.where(land, -aim, torch.where(self.captured, hold, -nominal))
-        gamma_rate = ((reference - state.gamma_rad) / params.path_time_constant_s).clamp(-rate_max, rate_max)
-        return gamma_rate, {"level_captured": self.captured.clone(), "path_rate_limited": gamma_rate.abs() >= rate_max}
+        reference = torch.where(land, torch.where(go_around, torch.full_like(aim, self.climb_rad), -aim),
+                                torch.where(self.captured, hold, -nominal))
+        wanted = (reference - state.gamma_rad) / params.path_time_constant_s
+        gamma_rate = wanted.clamp(-rate_max, rate_max)
+        return gamma_rate, wanted, {"level_captured": self.captured.clone(),
+                                    "path_rate_limited": wanted.abs() > rate_max}

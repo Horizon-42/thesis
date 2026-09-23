@@ -246,8 +246,9 @@ def _params(**changes):
     return replace(base, **changes)
 
 
-def _fly_sentence(signals, grid=None, params=None):
-    """Read ``signals`` with the labeller, fly its sentence (or ``grid``) from row 0, judge it."""
+def _fly_sentence(signals, grid=None, params=None, approach_ias=None):
+    """Read ``signals`` with the labeller, fly its sentence (or ``grid``) from row 0, judge it; the A320's
+    published approach speed unless ``approach_ias`` is given."""
     from ts_transformer.autopilot.executor import fly
     from ts_transformer.autopilot.judge import judge
     from ts_transformer.autopilot.lateral import Runways
@@ -275,7 +276,8 @@ def _fly_sentence(signals, grid=None, params=None):
     force = words_in_force([grid], words, params.delays, cycle_s=params.cycle_s, cycles=int(math.ceil(limit)), device=CPU)
     flown = fly(inputs, force, Runways.of([geometry], dtype=F64, device=CPU),
                 AirportCharts.of([geometry], dtype=F64, device=CPU),
-                torch.tensor([approach_speed_ias_mps("A320", mass)], dtype=F64), params, words,
+                torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias],
+                             dtype=F64), params, words,
                 time_limit_s=torch.tensor([limit], dtype=F64))
     return flown, judge(flown, 0, geometry, 0, reading, signals, one, words), reading
 
@@ -292,7 +294,7 @@ def test_a_downwind_base_final_sentence_is_flown_to_the_runway():
     assert verdict.outcome == "landed" and verdict.flew_the_sentence
     assert abs(verdict.crossing["cross_m"]) < 1.0 and 0.0 < verdict.crossing["height_m"] < 100.0
     assert verdict.words["corridor"]["inside"] == verdict.words["corridor"]["rows"] > 0
-    # never across the centreline to the south of an eastbound final approached from the north
+    # the line is held from the north: the flown track lags the bank, so it may cross it by metres, no more
     captured = flown.modes["captured"][0].numpy()
     k = read_state(flown.states[0, 1:][captured], AirportCharts.of([instruction_airport()] * int(captured.sum()),
                                                                    dtype=F64, device=CPU))
@@ -342,6 +344,9 @@ def test_the_flights_outcome_is_the_first_event_it_meets():
     steep[1, ALTITUDE], steep[1, ANGLE] = words.altitude_land, 4       # descend to land at the steepest class, at once
     _, grounded, _ = _fly_sentence(signals, steep)
     assert grounded.outcome == "ground_contact"
+    # the steepest class at once asks more than γ̇_max: layer 1 records the rate the law wanted before its limit
+    limited = grounded.limits["path_rate_limited"]
+    assert limited["cycles"] > 0 and limited["wanted_minus_given"] > 1e-4
 
 
 def test_descents_level_off_at_their_targets_inside_the_tubes():
@@ -569,3 +574,176 @@ def test_a_replayed_flight_becomes_a_control_record_evaluation_can_grade_and_its
     assert (cell["landed"], cell["words_inside"], cell["replay_passes_where_observed_passes"]) == (0.5, 0.95, 1.0)
     assert cell["clears"] == {"landed": False, "words": True, "evaluation": True}
     assert cell["flights_with_unjudged_words"] == 1
+
+
+# ---- the E3–E6 review's cases
+def _downwind():
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    _, _, reading = _fly_sentence(signals)
+    return signals, reading
+
+
+def test_a_late_clearance_is_captured_past_the_line_and_the_line_law_brings_it_back():
+    """Review 1: cleared inside its lead, the capture turn crosses the line; it hands over to the line law
+    instead of flying away at a constant angle."""
+    signals, reading = _downwind()
+    clear = int(np.nonzero(reading.words[:, APPROACH] == APPROACH_CLEARED)[0][0])
+    for late in (38, 44):
+        grid = reading.words.copy()
+        grid[clear, APPROACH] = UNCHANGED
+        grid[clear + late, APPROACH] = APPROACH_CLEARED
+        flown, verdict, _ = _fly_sentence(signals, grid)
+        assert verdict.outcome == "landed" and abs(verdict.crossing["cross_m"]) < 5.0 and verdict.flew_the_sentence
+
+
+def _orbit():
+    legs = [(40, 0.0, 100.0, 0.0), (60, 6.0, 100.0, 0.0), (40, 0.0, 90.0, 0.0), (15, 6.0, 85.0, 0.0),
+            (110, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    return instruction_flight(*fly_legs(legs, 0.0, 1300.0, -400.0, 0.0))
+
+
+def test_an_orbit_is_flown_the_way_its_first_part_set_and_judged_as_one_whole_turn():
+    """Review 4 and 5: a 360° right orbit said in three parts. The executor turns slower than the observed
+    aircraft, so it lags the last part by more than 180°; it still turns right all the way (the word is
+    measured from the word in force), and the judge reads a 360° turn and its hold's funnel the same way."""
+    flown, verdict, reading = _fly_sentence(_orbit())
+    assert [i.kind for i in reading.instructions if i.column == HEADING] == ["initial"] + ["turn-split"] * 3
+    track = np.degrees(np.unwrap(np.radians(compass_from_math_rad(flown.states[0, :, 4].numpy()))))
+    assert np.diff(track).min() > -0.5 and track[-1] - track[0] == pytest.approx(450.0, abs=5.0)
+    (_, orbit) = verdict.words["heading"]
+    assert orbit["words"] == 3 and all(orbit["turn"].values()) and orbit["hold"]["inside"] == orbit["hold"]["rows"]
+    assert verdict.outcome == "landed" and verdict.flew_the_sentence
+
+
+def test_the_hold_funnel_mirror_equals_the_labellers_under_180_degrees():
+    from ts_transformer.autopilot.judge import hold_funnel
+    from ts_transformer.instructions.labeller.lateral import heading_spans
+    from ts_transformer.instructions.labeller.read import admit, span_funnel
+
+    one, words, geometry = spec(), Words(spec()), instruction_airport()
+    signals, reading = _downwind()
+    flight = admit(signals, geometry, one)
+    spans = [s for s in heading_spans(reading.instructions, reading.checks["turns"], None, reading.capture_row)
+             if s.turn is not None and s.held]
+    assert spans
+    for span in spans:
+        target = words.heading_deg(span.word.value)
+        track = float(flight.smoothed.track_deg[span.word.row])
+        _, theirs = span_funnel(flight, span, target, one)
+        _, ours = hold_funnel(flight, span, target, float(np_wrap180(target - track)), one)
+        assert ours.outline == pytest.approx(theirs.outline)
+
+
+def test_a_turn_the_capture_takes_over_at_once_is_superseded_not_failed():
+    """Review 3: the clearance comes with the base turn and the executor is already inside its capture lead."""
+    legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (6, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
+            (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    _, verdict, _ = _fly_sentence(instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)))
+    (_, base) = verdict.words["heading"]
+    assert base["superseded"] and base["turn"] is None
+    assert verdict.words["capture_turn"]["progress_ok"] and verdict.outcome == "landed" and verdict.flew_the_sentence
+
+
+def test_the_judge_fails_a_turn_flown_slower_than_the_vocabulary_allows():
+    """Review 12: layer 2 catches a violation, not only passes a good flight — a 5° bank cap turns the orbit at
+    under 0.5°/s at 100 m/s, below the vocabulary's slowest turn."""
+    _, verdict, _ = _fly_sentence(_orbit(), params=_params(bank_cap_deg=5.0))
+    (_, orbit) = verdict.words["heading"]
+    assert orbit["turn"] == {"reached": True, "progress_ok": True, "rate_ok": False}
+    assert not verdict.words["all_contained"] and not verdict.flew_the_sentence
+
+
+def test_crossings_are_told_apart_by_capture_and_by_the_landing_condition():
+    signals, reading = _downwind()
+    level = reading.words.copy()
+    level[1:, ALTITUDE] = UNCHANGED
+    level[1:, ANGLE] = UNCHANGED
+    _, high, _ = _fly_sentence(signals, level)                  # captured, never descends: 1000 m over the threshold
+    assert high.outcome == "crossed_off_runway" and high.crossing["height_m"] > 500.0
+    straight = [(40, 0.0, 90.0, 0.0), (30, 0.0, 80.0, 0.0), (110, 0.0, 72.0, -72.0 * np.tan(np.radians(3.0)))]
+    aligned = instruction_flight(*fly_legs(straight, 90.0, 950.0, -300.0, 0.0))
+    _, _, on_final = _fly_sentence(aligned)
+    grid = on_final.words.copy()
+    grid[grid[:, APPROACH] == APPROACH_CLEARED, APPROACH] = APPROACH_NOT_CLEARED
+    flown, uncleared, _ = _fly_sentence(aligned, grid)
+    assert uncleared.outcome == "crossed_without_capture" and not flown.modes["captured"][0].any()
+
+
+def test_a_go_around_cancels_the_capture_climbs_and_holds_its_speed():
+    from ts_transformer.instructions.words import APPROACH_GO_AROUND
+
+    signals, reading = _downwind()
+    grid = reading.words.copy()
+    grid[150, APPROACH] = APPROACH_GO_AROUND
+    flown, verdict, _ = _fly_sentence(signals, grid)
+    after = 150 * 2 + 5
+    assert flown.modes["go_around"][0, after] and not flown.modes["captured"][0, after:].any()
+    height, speed = flown.states[0, after:, 2].numpy(), flown.states[0, after:, 3].numpy()
+    assert height[60] > height[0] + 50.0 and abs(speed[60] - speed[0]) < 1.0
+    assert verdict.outcome == "timeout"
+
+
+def test_a_cleared_heading_that_misses_the_line_is_bent_by_its_tolerance():
+    """§4.3: cleared on a heading that just misses the line, the executor flies it bent toward the line."""
+    # 2 km north of an eastbound final, 41 km out, flying the course: parallel, it never reaches the line;
+    # 4.5° to the right it crosses it 25 km later, ahead of the threshold
+    legs = [(100, 0.0, 100.0, 0.0), (5, 4.0, 100.0, 0.0), (29, 0.0, 100.0, 0.0), (5, -4.0, 90.0, 0.0),
+            (100, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    signals = instruction_flight(*fly_legs(legs, 90.0, 1600.0, -400.0, 0.0))
+    _, _, reading = _fly_sentence(signals)
+    grid = reading.words.copy()
+    grid[0, APPROACH] = APPROACH_CLEARED                       # cleared at once, on the 090° it is flying
+    flown, _, _ = _fly_sentence(signals, grid)
+    bent = flown.modes["bent"][0].numpy()
+    assert bent[:150].all()
+    track = compass_from_math_rad(flown.states[0, 1:151, 4].numpy())
+    assert track[60:150] == pytest.approx(90.0 + spec().heading_tolerance_deg, abs=0.2)
+
+
+def test_the_words_the_executor_refuses():
+    from ts_transformer.autopilot.lateral import Lateral, Runways
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    signals, reading = _downwind()
+    words = Words(spec())
+    climb = reading.words.copy()
+    climb[5, ALTITUDE], climb[5, ANGLE] = words.altitude_land, words.angle_climb
+    with pytest.raises(ValueError, match="without a descent class"):
+        _fly_sentence(signals, climb)
+    unspecified = reading.words.copy()
+    unspecified[5, SPEED] = words.speed_unspecified
+    with pytest.raises(ValueError, match="publishes no approach speed"):
+        _fly_sentence(signals, unspecified, approach_ias=math.nan)
+    # the runway pointer moved once cleared (§4.6)
+    data = instruction_airport().to_dict()
+    data["candidates"].append({**data["candidates"][0], "ident": "09R", "threshold_n_m": -1500.0})
+    geometry = AirportGeometry.from_dict(data)
+    runways = Runways.of([geometry], dtype=F64, device=CPU)
+    lateral = Lateral(1, _params(), spec(), CPU)
+    state = read_state(torch.tensor([[35.0, -78.05, 900.0, 80.0, 0.0, 0.0, 60000.0]], dtype=F64),
+                       AirportCharts.of([geometry], dtype=F64, device=CPU))
+    heading, issued, bank = torch.tensor([90.0], dtype=F64), torch.tensor([0]), torch.zeros(1, dtype=F64)
+    cleared = torch.tensor([APPROACH_CLEARED])
+    lateral.rate(state, heading, issued, cleared, torch.tensor([0]), runways, bank, 0.05)
+    with pytest.raises(ValueError, match="runway pointer changed after the clearance"):
+        lateral.rate(state, heading, issued, cleared, torch.tensor([1]), runways, bank, 0.05)
+
+
+def test_a_stall_is_a_dynamics_failure_and_wins_a_row_it_shares_with_a_crossing():
+    """Review 7 and the event order: the dynamics' stall cut-off binding is a failure (§8.1), and at one row a
+    failure comes before the ground and the ground before a crossing."""
+    from ts_transformer.autopilot.judge import _outcome, flown_track
+
+    one, geometry = spec(), instruction_airport()
+    signals, _ = _downwind()
+    flown, verdict, _ = _fly_sentence(signals)
+    states = flown.states[0, : verdict.end_row + 1].numpy()
+    track = flown_track(states, geometry)
+    captured = np.concatenate(([False], flown.modes["captured"][0, : verdict.end_row].numpy()))
+    stalled = np.zeros(len(states), dtype=bool)
+    assert _outcome(states, track, captured, stalled, geometry, 0, one)[:2] == ("landed", verdict.end_row)
+    stalled[200] = True
+    assert _outcome(states, track, captured, stalled, geometry, 0, one)[:2] == ("dynamics_failure", 200)
+    stalled[:] = False
+    stalled[verdict.end_row] = True
+    assert _outcome(states, track, captured, stalled, geometry, 0, one)[:2] == ("dynamics_failure", verdict.end_row)

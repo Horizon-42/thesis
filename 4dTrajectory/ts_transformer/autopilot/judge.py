@@ -5,9 +5,10 @@ the rate the dynamics gave (the rate each limit costs: bank → track rate, load
 path-angle rate limit → path-angle rate, thrust and the stall floor → speed rate).
 
 Layer 3, the flight (§8.3), read first because it decides where the flight ends. The events, the first
-of which is the outcome:
+of which is the outcome (at one row, in `EVENT_ORDER`):
 
-- ``dynamics_failure``: a non-finite state, or no airspeed;
+- ``dynamics_failure``: a non-finite state, no airspeed, or a cycle the dynamics' own stall cut-off bound
+  (§8.1: the stall floor should never let it);
 - ``ground_contact``: below the pointed threshold's elevation while still before it;
 - the pointed threshold plane crossed, bracketed and interpolated as the harvest does
   (`instructions.labeller.read.landing_passages`, `final_approach.crossing.bracket_fraction`):
@@ -21,24 +22,32 @@ checks. The flown track is read at the sentence's 2 s rows through `read.admit` 
 flights pass, smoothing and the landing cut included — and judged from each word's own row:
 
 - a heading word — a split turn's parts together, as the labeller judges them: its turn from the (first)
-  word's row to where the flown track enters the (last) word's band
-  (`envelope.turn_progress_ok`, `envelope.turn_rate_ok`), then its hold's rows in the funnel
-  (`read.span_funnel` over a `lateral.HeadingSpan` of the FLOWN track), up to the next heading word or
-  where the executor's capture turn begins — as the labeller ends a hold at the capture turn; holds the
-  labeller would not judge (after a turn under `turn_rate_min_from_deg`, or whose slowest turn does not
-  finish) are not judged here either;
-- the clearance: once the capture turn has brought the flight into the corridor (`envelope.corridor`:
-  position AND course — the labeller's capture is the first row of the run inside it), every later row to
-  the landing stays inside;
+  word's row to where the flown track enters the (last) word's band, with the labeller's own turn check
+  (`labeller.lateral._turn_check`; the turn's way and size are the labeller's record of the observed turn,
+  so an orbit stays a 360° turn), then its hold's rows in the funnel (`read.span_funnel` over a
+  `lateral.HeadingSpan` of the FLOWN track; after a turn, `hold_funnel`, its mirror with the turn's way
+  given), up to the next heading word or where the executor's capture
+  turn begins — as the labeller ends a hold at the capture turn; holds the labeller would not judge (after
+  a turn under `turn_rate_min_from_deg`, or whose slowest turn does not finish) are not judged here either.
+  A turn the executor's capture takes over before its band is reached (the clearance comes with it, and the
+  vocabulary lets the capture begin at once, §2.2) is judged as the labeller judges an intercept the
+  capture cuts: to its furthest progress (`labeller.lateral._intercept_end`), not "reached"; a turn cut
+  before it progressed at all is ``superseded`` by the capture, not judged;
+- the clearance: the executor's capture turn, from its first row to where it hands over to the line, with
+  the same turn check toward the course (§2.2: monotone, rate and bank inside §2.3's range); and once the
+  flight is in the corridor (`envelope.corridor`: position AND course — the labeller's capture is the first
+  row of the run inside it), every later row to the landing stays inside;
 - altitude and angle words: `labeller.vertical.tube_checks`; speed words: `labeller.speed.span_checks`.
 
-A word whose row the flown track never reaches (it ended first) is counted as not reached.
+A word whose row the flown track never reaches is counted as ``not_reached`` and not judged: the sentence
+is time-indexed, so a word after the flight's end was never said to the executor — a flight that landed
+first flew what it was told, and one that did not land fails layer 3 anyway.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -48,7 +57,7 @@ from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m, relative_to_runway
-from ts_transformer.instructions.labeller.lateral import HeadingSpan
+from ts_transformer.instructions.labeller.lateral import HeadingSpan, _intercept_end, _turn_check
 from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, landing_passages, span_funnel
 from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.labeller.speed import span_checks
@@ -59,6 +68,10 @@ from ts_transformer.instructions.words import APPROACH, HEADING, Words, compass_
 
 OUTCOMES = ("landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout",
             "dynamics_failure")
+#: Which event is the outcome when two happen at the same row: a failure of the dynamics first (nothing
+#: after it is flight), then the ground, then the crossing.
+EVENT_ORDER = ("dynamics_failure", "ground_contact", "landed", "crossed_without_capture", "crossed_off_runway")
+CROSSINGS = ("landed", "crossed_without_capture", "crossed_off_runway")
 #: Which wanted rate (track, path angle, speed) a limit costs.
 LIMIT_RATE = {"bank_cap": 0, "bank_rate": 0, "load_factor": 1, "path_rate_limited": 1, "stall_floor": 2,
               "thrust_max": 2, "thrust_min": 2, "stall": 2}
@@ -77,13 +90,13 @@ class Verdict:
     limits: dict[str, dict[str, float]]
     #: layer 2 (None when the flown track does not pass the labeller's gate: ``refused`` says why)
     words: dict[str, Any] | None
+    flown_rows: int
     refused: str | None = None
-    flown_rows: int = 0
-    extra: dict[str, Any] = field(default_factory=dict)
 
     @property
     def flew_the_sentence(self) -> bool:
-        """§8.3: landed on the pointed runway, every judged word inside its envelope, no dynamics failure."""
+        """§8.3: landed on the pointed runway, every word said to it inside its envelope (a word after the
+        landing was never said: `not_reached`), no dynamics failure."""
         return self.outcome == "landed" and self.words is not None and self.words["all_contained"]
 
 
@@ -96,13 +109,16 @@ def flown_track(states: np.ndarray, geometry: AirportGeometry) -> dict[str, np.n
             "ground_speed": speed * np.cos(gamma), "vertical_rate": speed * np.sin(gamma)}
 
 
-def _outcome(states: np.ndarray, track: dict[str, np.ndarray], captured: np.ndarray, geometry: AirportGeometry,
-             runway_index: int, spec: VocabularySpec) -> tuple[str, int, dict[str, float] | None]:
+def _outcome(states: np.ndarray, track: dict[str, np.ndarray], captured: np.ndarray, stalled: np.ndarray,
+             geometry: AirportGeometry, runway_index: int,
+             spec: VocabularySpec) -> tuple[str, int, dict[str, float] | None]:
+    """``captured`` and ``stalled`` per state row: the law's capture, and the dynamics' stall cut-off having
+    bound in the cycle that ended at the row."""
     candidate = geometry.candidates[runway_index]
     relative = relative_to_runway(track["e"], track["n"], track["track"], track["height"], candidate)
     before, right, height = relative.before_threshold_m, relative.right_of_course_m, relative.height_above_threshold_m
     events: list[tuple[int, str]] = []
-    bad = np.nonzero(~np.isfinite(states).all(axis=1) | (states[:, SPEED] <= 0.0))[0]
+    bad = np.nonzero(~np.isfinite(states).all(axis=1) | (states[:, SPEED] <= 0.0) | stalled)[0]
     if len(bad):
         events.append((int(bad[0]), "dynamics_failure"))
     ground = np.nonzero((before > 0.0) & (height < 0.0))[0]
@@ -122,8 +138,8 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], captured: np.ndar
             break
     if not events:
         return "timeout", len(states) - 1, None
-    row, kind = min(events)
-    return kind, row, crossing if kind in ("landed", "crossed_without_capture", "crossed_off_runway") else None
+    row, kind = min(events, key=lambda event: (event[0], EVENT_ORDER.index(event[1])))
+    return kind, row, crossing if kind in CROSSINGS else None
 
 
 def _limits(flown: Flown, index: int, states: np.ndarray, end_row: int) -> dict[str, dict[str, float]]:
@@ -165,45 +181,67 @@ def _turn_groups(heading: list[Instruction]) -> list[list[Instruction]]:
     return groups
 
 
-def _heading_words(flight: Admitted, instructions: list[Instruction], turns: list[dict[str, Any]], capture_row: int,
-                   spec: VocabularySpec, words: Words) -> list[dict[str, Any]]:
+def hold_funnel(flight: Admitted, span: HeadingSpan, target_deg: float, turn_deg: float,
+                spec: VocabularySpec) -> tuple[envelope.TurnEnds, envelope.HoldFunnel]:
+    """MIRROR of `instructions.labeller.read.span_funnel` for a span reached through a turn, with the turn's
+    signed size from the word's row GIVEN (``turn_deg``) where the labeller takes the shorter way from the
+    track there: the executor may lag a split turn by more than 180° less its part when the last part is
+    said, and the vocabulary measures a word from the word in force (§2.3). Equal to the labeller's for a
+    turn under 180° (checked in `tests/test_autopilot.py`)."""
+    row = span.word.row
+    track, speed = flight.smoothed.track_deg, flight.smoothed.ground_speed_mps
+    positions = np.column_stack((flight.signals.e_m, flight.signals.n_m))
+    ends = envelope.turn_ends(float(track[row]), turn_deg, speed[row:], spec.step_s, spec.turn_rate_min_deg_s,
+                              spec.turn_rate_max_deg_s, spec.turn_bank_max_deg, spec.heading_tolerance_deg,
+                              spec.turn_start_delay_max_s)
+    late = math.ceil(spec.turn_start_delay_max_s / spec.step_s)
+    origin = max(row, span.hold_start - 1 - late)
+    length = float(np.hypot(*np.diff(positions[origin: span.hold_end + 1], axis=0).T).sum())
+    return ends, envelope.hold_funnel(positions[row] + ends.corners, target_deg, spec.heading_tolerance_deg, length)
+
+
+def _heading_words(flight: Admitted, instructions: list[Instruction], turns: list[dict[str, Any]],
+                   capture_row: int | None, spec: VocabularySpec, words: Words) -> list[dict[str, Any]]:
     """One result per turn (a single word, or a split turn's parts together), from its first word's row:
     the turn to where the flown track enters the last word's band, then the hold to the next heading word or
-    the executor's capture. ``turns`` are the labeller's turn records of the observed flight (their signed
-    ``turn_deg`` fixes which way a turn of more than 180° goes)."""
+    the executor's capture (``capture_row``: None when it never captured; the holds then run to the flown
+    track's end). ``turns`` are the labeller's turn records of the observed flight: their signed ``turn_deg``
+    fixes the turn's way and size."""
     smoothed = flight.smoothed
     track, speed = smoothed.track_deg, smoothed.ground_speed_mps
     groups = _turn_groups(sorted((i for i in instructions if i.column == HEADING), key=lambda item: item.row))
-    ends = [group[0].row for group in groups[1:]] + [capture_row]
+    last_end = flight.signals.n_rows - 1 if capture_row is None else capture_row
+    ends = [group[0].row for group in groups[1:]] + [last_end]
     results = []
     for group, end in zip(groups, ends):
         first, last = group[0], group[-1]
         target = words.heading_deg(last.value)
-        # "turn": None for the word flown from entry; "hold": None when no row is held (the flight ended
-        # first), a reason when the labeller would not judge it, else its rows and those inside the funnel
-        result: dict[str, Any] = {"row": first.row, "kind": first.kind, "words": len(group), "turn": None, "hold": None}
+        # "turn": None for the word flown from entry or a turn the capture superseded; "hold": None when no
+        # row is held, a reason when the labeller would not judge it, else its rows and those in the funnel
+        result: dict[str, Any] = {"row": first.row, "kind": first.kind, "words": len(group), "turn": None,
+                                  "superseded": False, "hold": None}
         if first.kind == "initial":
-            arrival, turn = first.row, None
+            arrival, turn, target_unwrapped = first.row, None, target
         else:
             (record,) = [r for r in turns if r["departure_row"] == first.row and first.kind.startswith(r["kind"])]
-            total = float(wrap180(target - track[first.row]))
-            if total * record["turn_deg"] < 0.0:
-                total += math.copysign(360.0, record["turn_deg"])
+            shorter = float(wrap180(target - track[first.row]))
+            total = shorter + 360.0 * round((record["turn_deg"] - shorter) / 360.0)
             target_unwrapped = float(track[first.row]) + total
             inside = np.abs(track[first.row: end + 1] - target_unwrapped) <= spec.heading_tolerance_deg
             arrival = first.row + int(np.argmax(inside)) if inside.any() else None
-            stop = end if arrival is None else arrival
-            rate = np.diff(track[first.row: stop + 1]) / spec.step_s if stop > first.row else np.zeros(1)
-            bank = envelope.bank_deg_from_turn_rate(rate, speed[first.row + 1: stop + 1]) if stop > first.row else np.zeros(1)
-            mean_rate = float(np.mean(rate) * math.copysign(1.0, total))
-            turn = {"rate_min_applies": abs(total) >= spec.turn_rate_min_from_deg}
-            result["turn"] = {
-                "reached": arrival is not None or first.kind.startswith("intercept"),
-                "progress_ok": envelope.turn_progress_ok(track[first.row: stop + 1], target_unwrapped,
-                                                         spec.heading_tolerance_deg),
-                "rate_ok": envelope.turn_rate_ok(total, mean_rate, float(np.max(np.abs(rate))), float(np.max(bank)),
-                                                 spec.turn_rate_min_deg_s, spec.turn_rate_max_deg_s,
-                                                 spec.turn_bank_max_deg, spec.turn_rate_min_from_deg)}
+            cut = arrival is None and capture_row is not None and end == capture_row
+            if cut:
+                stop = _intercept_end(track, first.row, end, target_unwrapped, spec.heading_tolerance_deg)
+            else:
+                stop = end if arrival is None else arrival
+            if cut and stop == first.row:
+                result["superseded"] = True
+                results.append(result)
+                continue
+            check = _turn_check(track, speed, first.row, stop, target_unwrapped, spec)
+            turn = {"rate_min_applies": check["rate_min_applies"]}
+            result["turn"] = {"reached": arrival is not None or cut, "progress_ok": check["progress_ok"],
+                              "rate_ok": check["rate_ok"]}
         if arrival is None or end <= arrival:
             results.append(result)
             continue
@@ -211,7 +249,11 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
         if turn is not None and not turn["rate_min_applies"]:
             result["hold"] = "not judged: after a turn under turn_rate_min_from_deg"
         else:
-            ends_of_turn, funnel = span_funnel(flight, span, target, spec)
+            if turn is None:
+                ends_of_turn, funnel = span_funnel(flight, span, target, spec)
+            else:
+                ends_of_turn, funnel = hold_funnel(flight, span, target, target_unwrapped - float(track[last.row]),
+                                                   spec)
             if ends_of_turn is not None and not ends_of_turn.finished:
                 result["hold"] = "not judged: slowest turn unfinished"
             else:
@@ -229,38 +271,57 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     last = int(flown.done_cycle[index]) + 1
     states = flown.states[index, : last + 1].cpu().numpy()
     track = flown_track(states, geometry)
-    captured = np.concatenate(([False], flown.modes["captured"][index, :last].cpu().numpy()))
-    outcome, end_row, crossing = _outcome(states, track, captured, geometry, runway_index, spec)
+
+    def per_row(values: np.ndarray) -> np.ndarray:
+        return np.concatenate(([False], values[index, :last].cpu().numpy()))
+
+    captured = per_row(flown.modes["captured"])
+    outcome, end_row, crossing = _outcome(states, track, captured, per_row(flown.limits["stall"]), geometry,
+                                          runway_index, spec)
     limits = _limits(flown, index, states, end_row)
     step_rows = int(round(spec.step_s / flown.cycle_s))
+    # the words are read on the rows before the crossing, where the labeller ends a sentence
+    read_to = end_row - 1 if outcome in CROSSINGS else end_row
     try:
-        flight = admit(flown_signals(track, end_row, observed, step_rows), geometry, spec)
+        flight = admit(flown_signals(track, read_to, observed, step_rows), geometry, spec)
     except Refused as refusal:
-        return Verdict(outcome, end_row, crossing, limits, None, refused=refusal.reason, flown_rows=end_row + 1)
+        return Verdict(outcome, end_row, crossing, limits, None, flown_rows=end_row + 1, refused=refusal.reason)
     rows = flight.signals.n_rows
     reached = [i for i in reading.instructions if i.row < rows]
-    def first_row(mode: str) -> int:
-        cycles = np.nonzero(flown.modes[mode][index, :last].cpu().numpy())[0]
-        return min(rows - 1, int(cycles[0] + 1) // step_rows) if len(cycles) else rows - 1
 
-    headings = _heading_words(flight, reached, reading.checks["turns"], first_row("captured"), spec, words)
-    relative = flight.relative
+    def first_row(mode: str) -> int | None:
+        cycles = np.nonzero(flown.modes[mode][index, :last].cpu().numpy())[0]
+        return min(rows - 1, int(cycles[0] + 1) // step_rows) if len(cycles) else None
+
+    capture_row, tracking_row = first_row("captured"), first_row("tracking")
+    headings = _heading_words(flight, reached, reading.checks["turns"], capture_row, spec, words)
+    smoothed, relative = flight.smoothed, flight.relative
+    capture_turn = None
+    if capture_row is not None:
+        end = rows - 1 if tracking_row is None else tracking_row
+        course = float(smoothed.track_deg[capture_row]) + float(wrap180(geometry.candidates[runway_index].course_deg
+                                                                         - smoothed.track_deg[capture_row]))
+        check = _turn_check(smoothed.track_deg, smoothed.ground_speed_mps, capture_row, end, course, spec)
+        capture_turn = {"rows": end - capture_row, "progress_ok": check["progress_ok"], "rate_ok": check["rate_ok"]}
     inside = envelope.corridor(relative.right_of_course_m, relative.track_minus_course_deg, relative.before_threshold_m,
                                spec.corridor_half_width_m, spec.corridor_widening_deg,
                                spec.corridor_course_tolerance_deg)
-    entered = np.nonzero(inside[first_row("tracking"):])[0]
-    corridor = inside[first_row("tracking") + int(entered[0]):] if len(entered) else np.zeros(0, dtype=bool)
+    from_row = rows if tracking_row is None else tracking_row
+    entered = np.nonzero(inside[from_row:])[0]
+    corridor = inside[from_row + int(entered[0]):] if len(entered) else np.zeros(0, dtype=bool)
     cleared = any(i.column == APPROACH for i in reached if i.kind == "clear")
-    vertical = tube_checks(reached, flight.smoothed.distance_m, flight.smoothed.altitude_m, spec, words)
-    speed = span_checks(reached, flight.smoothed.ground_speed_mps, spec, words)
+    vertical = tube_checks(reached, smoothed.distance_m, smoothed.altitude_m, spec, words)
+    speed = span_checks(reached, smoothed.ground_speed_mps, spec, words)
     holds = [h["hold"] for h in headings if isinstance(h["hold"], dict)]
+    clearance_ok = (capture_turn is not None and capture_turn["progress_ok"] and capture_turn["rate_ok"]
+                    and len(corridor) > 0 and bool(corridor.all()))
     contained = (all(h["turn"] is None or all(h["turn"].values()) for h in headings)
                  and all(h["inside"] == h["rows"] for h in holds)
-                 and (not cleared or (len(corridor) > 0 and bool(corridor.all())))
+                 and (not cleared or clearance_ok)
                  and all(v["contained"] for v in vertical) and all(v["contained"] for v in speed))
     return Verdict(outcome, end_row, crossing, limits, flown_rows=end_row + 1, words={
         "not_reached": len(reading.instructions) - len(reached),
-        "heading": headings,
+        "heading": headings, "capture_turn": capture_turn,
         "corridor": {"cleared": cleared, "entered": bool(len(corridor)), "rows": int(len(corridor)),
                      "inside": int(corridor.sum())},
         "vertical": vertical, "speed": speed, "all_contained": bool(contained)})
