@@ -407,6 +407,10 @@ the git head/dirty state it was measured at; `instruction_labels` / `instruction
 spec measured by other code (`require_current_labeller`), and every sentence file carries the hash
 it was read with (`load_sentences` refuses a mismatch). A sentence's words line up row for row
 with the FIRST `len(words)` rows of its flight's signals (`signal_index` names the flight): the
-sentence ends before the last threshold passage over the runway, and a flight that comes back ahead
-of the threshold after that passage is refused (`read.admit`, the one gate the labeller, the
-measurements and the figures share).
+sentence ends before its landing — since `instruction-v2` the harvest's and the evaluator's condition
+(`read.landing_passages`: the threshold plane crossed, the crossing interpolated with
+`final_approach.crossing.bracket_fraction`, within `LandingScreen`'s 1000 m of the centreline capped at half
+the spacing to a parallel runway — `airport.landing_cross_limit_m`, a MIRROR of the harvest's
+`_runway_bracket_cross_limit`, checked equal on every runway — and within its 100 m above the threshold). The
+first such crossing is the landing; a flight that comes back ahead of the threshold after it is refused
+(`read.admit`, the one gate the labeller, the measurements and the figures share).

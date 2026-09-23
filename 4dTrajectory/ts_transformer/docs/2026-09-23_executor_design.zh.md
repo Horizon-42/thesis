@@ -3,7 +3,7 @@
 **一句话**：执行器是一个自动驾驶。它每秒读一次飞机状态和此刻生效的词，按"想要的变化率"反解出推力、坡度、
 载荷因子，交给现有的点质量动力学积分。它不读任何程序数据，也不学习。
 
-词的定义见[指令词表](2026-09-23_instruction_vocabulary_design.zh.md)（已冻结，规格 `08ad64abb53e`），
+词的定义见[指令词表](2026-09-23_instruction_vocabulary_design.zh.md)（规格 `SPEC_V2_SHA`，读法 `instruction-v2`），
 总体框架见[两层模型框架](2026-09-23_two_tier_framework.zh.md)。本文是阶段 3（执行器），§11 定义阶段 4
 （回放门）。
 
@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 词表 | 已冻结：规格 `08ad64abb53e`，产物 `4dTrajectory/outputs/POOLED/instruction_language/v1_20260923/` |
+| 词表 | 规格 `SPEC_V2_SHA`（读法 `instruction-v2`：转弯按转弯率、落地与 harvest 同条件），产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260923/` |
 | 本设计 | 第二稿：控制律从动力学方程推出，每个参数写明来源；§14 前七项已确认，**第 8、9 项待确认** |
 | 初量 | §10 里标"初量"的数，来自 train 随机 6,000 / 12,000 架的探索脚本；实现时由 runner 正式量出，写进执行器规格 |
 | 实现 | 未开始，步骤见 §13 |
@@ -382,7 +382,7 @@ V_ref ≥ 1.10 · V_stall(n)                         失速下限，用 speed_fl
 
 | 词 | 检查 | 用的函数 |
 |---|---|---|
-| 航向 | 转弯单调、不越过目标超过 4.5°；转角 ≥ 10° 的转弯坡度在 4°–32°；转完后航迹在 θ ± 4.5° 内 | `envelope.turn_progress_ok`、`turn_bank_ok`、`heading_band` |
+| 航向 | 转弯单调、不越过目标超过 4.5°；各行转弯率 ≤ 4.7°/s、坡度 ≤ 32°，转角 ≥ 10° 的转弯平均转弯率 ≥ 0.5°/s；转完后航迹在 θ ± 4.5° 内，位置在漏斗里（转弯最多晚 10.5 s 开始） | `envelope.turn_progress_ok`、`turn_rate_ok`、`heading_band`、`turn_path` + `turn_end_set` + `hold_funnel_contains` |
 | 许可加入 | 截获之后一直在截获走廊里（到入口前） | `envelope.corridor` |
 | 高度 + 下降角 | 高度逐行在管子里 | `labeller.vertical.tube_bounds` |
 | 速度 | 过渡单调、加速度 ≤ 1.7 m/s²、到达后在 V ± 5 m/s 内 | `labeller.speed.span_checks` |
@@ -441,7 +441,8 @@ V_ref ≥ 1.10 · V_stall(n)                         失速下限，用 speed_fl
 - 横向：`τ_ψ` 与坡度变化速度 `p`；
 - 纵向：`γ̇_max`（在 §5.1 的下限之上）；
 - 每一列的"发令到动作的延迟" `d_ψ`、`d_h`、`d_v`。标注器的发令行是从平滑后的信号上读的：观测本身 15 s 拟合，
-  航迹再做 6 s 平均。所以发令行可能比飞机真正开始动作早几秒。
+  航迹再做 6 s 平均。所以发令行可能比飞机真正开始动作早几秒。词表的转弯包络已经按这个上限放宽：转弯最多
+  晚 t_d = (15 + 6) / 2 = 10.5 s 开始（词表 §2.3）。所以 `d_ψ` 不能超过 10.5 s，否则执行器自己的转弯会出漏斗。
 
 有五种办法，不一定要用数据标定：
 
