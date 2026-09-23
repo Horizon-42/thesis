@@ -1,0 +1,31 @@
+SOURCE: FAA Flight Standardization Board Report "FSBR ATR-42_72 Rev 8" — ATR - GIE Avions de Transport Régional (ATR 42-300, ATR 42-320, ATR 42-500, ATR 42 600, ATR 72-200, ATR 72-210, ATR 72-500, ATR 72-600, and ATR 72-600F) (issue date 07/20/2022, DRS status Current)
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID150225772920240320142052.0001
+Download: https://drs.faa.gov/api/content/alf/d90700b1-22f5-4ccf-943a-7513166ec351 (guest session)
+Local: data/AIRCRAFT/sources/faa/fsbr/FSBR_ATR-42_72_Rev_8.pdf  size 553078 B  sha256 ec019f8f8557fa3abf560a81881c7527c77bc69b94a3afed41ff29d7648caebf
+Retrieved: 2026-09-23T16:51:39Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 15-38:
+Type Certificate Data
+                             TCDS Identifier         Marketing Name            Pilot Type Rating
+   Sheet (TCDS)
+                                ATR42-200
+                                                       ATR 42-300
+       A53EU                    ATR42-300                                      ATR-42, ATR-72
+                                                       ATR 42-320
+                                ATR42-320
+                                                       ATR 42-500
+       A53EU                    ATR42-500                                      ATR-42, ATR-72
+                                                       ATR 42-600
+                                ATR72-101
+                                ATR72-201
+                                ATR72-102              ATR 72-200
+       A53EU                                                                   ATR-42, ATR-72
+                                ATR72-202              ATR 72-210
+                                ATR72-211
+                                ATR72-212
+                                                       ATR 72-500
+       A53EU                   ATR72-212A              ATR 72-600              ATR-42, ATR-72
+                                                       ATR 72-600F
+
+                          Approved by the Aircraft Evaluation Division
+                                 Federal Aviation Administration

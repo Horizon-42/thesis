@@ -1,0 +1,32 @@
+SOURCE: FAA Flight Standardization Board Report "FSBR CE-525 Rev 10" — Textron Aviation Inc. 525, 525A, 525B, 525C (issue date 09/02/2026, DRS status Current)
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID135509854320260903120541.0001
+Download: https://drs.faa.gov/api/content/alf/65b0831c-6337-4d5b-b091-fd2e2a414f83 (guest session)
+Local: data/AIRCRAFT/sources/faa/fsbr/FSBR_CE-525_Rev_10.pdf  size 717681 B  sha256 703e61fbc23b1c16834a73da0e9121af3692dd1479699886a135951021e36a94
+Retrieved: 2026-09-23T16:51:35Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-24:
+Type Certificate Data
+                           TCDS Identifier       Marketing Name        Pilot Type Rating
+   Sheet (TCDS)
+                                                 CJ, CJ1, CJ1+, M2,
+       A1WI                      525                                   CE-525, CE-525S
+                                                      M2 Gen2
+       A1WI                     525A                 CJ2, CJ2+         CE-525, CE-525S
+       A1WI                     525B            CJ3, CJ3+, CJ3 Gen2    CE-525, CE-525S
+       A1WI                     525C                      CJ4          CE-525, CE-525S
+--- PDF page 96 (printed "Page 96 of 100"), lines 1-15:
+                     APPENDIX 4. CE-525 VARIATIONS TABLE FOR MIXED FLEET FLYING
+                                  (IN ORDER OF DATE MANUFACTURED)
+                      525         525         525A        525B          525         525A         525C         525        525B
+     Model
+                     (CJ)        (CJ1)        (CJ2)       (CJ3)       (CJ1+)       (CJ2+)        (CJ4)       (M2)       (CJ3+)
+
+Certification Date 10/15/1992   2/16/2000   6/21/2000   10/15/2004   6/17/2005    9/30/2005    03/12/2010 12/20/2013   05/18/2015
+
+     Serials       525-0001     525-0360    525A-0001   525B-0001    525-0600     525A-0300 525C-0001 525-0685 and     525B-0057
+                     thru         thru         thru        thru        thru         and on    and on    525-0800          and
+                   525-0359     525-0558    525A-0299   525B-0450    525-0701                            and on        525B-0451
+                                                           excl.       excl.                                             and on
+                                                        525B-0057    525-0685
+
+  Max Ramp           10,500      10,700      12,500      14,070       10,800        12,625      17,230      10,800      14,070

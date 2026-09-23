@@ -1,0 +1,29 @@
+SOURCE: GENOT N JO 7360.7, Change to FAA Order JO 7360.1, Aircraft Type Designators
+Edition: effective 10/14/2025 (the only current notice against JO 7360.1K; adds ELECTRA EL-2 / EL2 only)
+URL: https://www.faa.gov/documentLibrary/media/Notice/GENOT_N_JO_7360.7_Change_to_FAA_Order_JO_7360.1_Aircraft_Type_Designators.pdf
+Local: data/AIRCRAFT/sources/faa/GENOT_N_JO_7360.7_Change_to_FAA_Order_JO_7360.1_Aircraft_Type_Designators.pdf  size 196098 B  sha256 bc659054b08e5b1d9fa63d8e4e78d925fdff1b380ef613ecbe6c0777429746e3
+Relevance: checked because it is the only current notice amending JO 7360.1K; it adds one designator (EL2) and changes none of the models in this report.
+
+--- PDF page 1:
+        EFFECTIVE: 10/14/2025
+
+        SUBJECT: CHANGE TO FAA ORDER JO 7360.1, AIRCRAFT TYPE
+        DESIGNATORS
+
+
+        THIS GENOT INTRODUCES A NEW AIRCRAFT DESIGNATOR, WEIGHT CLASS,
+        AND WAKE TURBULENCE CATEGORY FOR NEW ENTRANT AIRFRAMES. THIS
+        INFORMATION IS SUPPLEMENTAL TO TERMINAL PROCEDURES AND
+        INFORMATION CONTAINED IN FAA ORDERS JO 7110.65, JO 7110.126, AND JO
+        7360.1.
+
+        MANUFACTURER: ELECTRA
+        MODEL: EL-2
+        AIRCRAFT TYPE DESIGNATOR: EL2*
+        ENGINE TYPE: ELECTRIC
+        ENGINE COUNT: 8
+        FAA WEIGHT CLASS: S
+        ICAO WEIGHT CLASS: LIGHT
+        CWT: I
+        SAME RUNWAY SEPARATION (SRS): TBD
+

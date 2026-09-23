@@ -1,0 +1,34 @@
+SOURCE: FAA Type Certificate Data Sheet A24CE, Revision 132 (08/21/2026), DRS status Current
+TC holder (DRS metadata): Textron Aviation Inc.; former holders: Beech Aircraft Corp.\Raytheon Aircraft Company | Beech Aircraft Corp.\Raytheon Aircraft Company\Hawker Beechcraft Corporation | Hawker Beechcraft Corporation\Beechcraft Corporation | Raytheon Aircraft Company\Hawker Beechcraft Corporation
+Models on this TCDS (DRS metadata): 200 | 200C | 200CT | 200T | 300 | 300LW | 1900 | 1900C | 1900C (C-12J) | 1900D | A100-1 (U-21J) | A200 (C-12A) | A200 (C-12C) | A200C (UC-12B) | A200CT (C-12D) | A200CT (C-12F) | A200CT (FWC-12D) | A200CT (RC-12D) | A200CT (RC-12G) | A200CT (RC-12H) | A200CT (RC-12K) | A200CT (RC-12P) | A200CT (RC-12Q) | B200 | B200C | B200C (C-12F) | B200C (C-12R) | B200C (UC-12F) | B200C (UC-12M) | B200CGT | B200CT | B200GT | B200T | B300 | B300C | B300C (MC-12W) | B300C (UC-12W)
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID149435635720260821194755.0001
+Download: https://drs.faa.gov/api/content/alf/e3880eca-5f1f-4f7b-82f5-bb6ca1b532c5 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A24CE_Rev132.pdf  size 615650 B  sha256 4591b36127f8a54f60fe77fc8a714d6ea071f459043b8ef9607b33ad4c621ad4
+Retrieved: 2026-09-23T16:46:39Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 33-33:
+Type Certificate Holder:                Textron Aviation Inc.
+--- PDF page 1 (first page), lines 37-48:
+Type Certificate Holder Record:         Beech Aircraft Corporation transferred to
+                                        Raytheon Aircraft Company on April 15, 1996
+
+                                        Raytheon Aircraft Company transferred to
+                                        Hawker Beechcraft Corporation on March 26, 2007
+
+                                        Hawker Beechcraft Corporation transferred to
+                                        Beechcraft Corporation on April 12, 2013
+
+                                        Beechcraft Corporation transferred to
+                                        Textron Aviation on October 12, 2016.
+
+--- PDF page 30 (printed page number 30), lines 24-25:
+VIII. Model 300, Super King Air (Normal Category), Approved January 24, 1984
+      Model 300LW, Super King Air (Normal Category), Approved September 30, 1988 (See NOTES 12 & 14)
+--- PDF page 34 (printed page number 34), lines 18-21:
+IX. Model B300, Super King Air (Commuter Category), Approved December 12, 1989 (See NOTE 12)
+    Model B300C, B300C(MC-12W), B300C(UC-12W), Super King Air (Commuter Category),
+    Approved September 7, 1990
+    Model B300, B300C, Super King Air (Restricted Category), Approved June 27, 2014
+--- PDF page 35 (printed page number 35), lines 64-65:
+    Serial Nos. Eligible           Model B300:            FL-1 & On (See NOTE 10).
+                                   Model B300C:           FM-1 & On, FN-1 & On (See NOTE 10).

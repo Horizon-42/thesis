@@ -1,0 +1,12 @@
+SOURCE: FAA Type Certificate Data Sheet A00009CH, Revision 25 (12/26/2025), DRS status Current
+TC holder (DRS metadata): Cirrus Design Corporation; former holders: -
+Models on this TCDS (DRS metadata): SR20 | SR22 | SR22T
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID140348100520260127142917.0001
+Download: https://drs.faa.gov/api/content/alf/0f0df675-6bb5-4f48-b9a4-357196605dcb (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A00009CH_Rev25.pdf  size 221991 B  sha256 dc688b1226e75ceeb10371e2211e203b40a04f0656f6468d77b738b91dee3ddd
+Retrieved: 2026-09-23T16:46:13Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 17-17:
+ Type Certificate Holder:     Cirrus Design Corporation
+--- PDF page 7 (printed "Page 7 of 14"), lines 3-3:
+III - MODEL SR22T, NORMAL CATEGORY, APPROVED FEBRUARY 10, 2010

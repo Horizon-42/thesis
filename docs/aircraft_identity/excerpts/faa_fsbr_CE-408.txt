@@ -1,0 +1,14 @@
+SOURCE: FAA Flight Standardization Board Report "FSBR CE-408 Rev 0" — Textron Aviation Cessna Model 408 SkyCourier (issue date 04/01/2022, DRS status Current)
+URL: https://drs.faa.gov/browse/excelExternalWindow/78D65CB7A82BE0308625881A007EA8C1.0001
+Download: https://drs.faa.gov/api/content/alf/cc1eaec1-c17e-4ec6-be21-04dfbb3f3aba (guest session)
+Local: data/AIRCRAFT/sources/faa/fsbr/FSBR_CE-408_Rev_0.pdf  size 289668 B  sha256 5f5fb7b57d5d4ad915edb6e79815c5d2fa9ea1f38b2510a9c8e70c5855e1c8c2
+Retrieved: 2026-09-23T16:51:34Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-20:
+Type Certificate Data
+                           TCDS Identifier         Marketing Name      Pilot Type Rating
+   Sheet (TCDS)
+     A00016WI                    408                  SkyCourier           CE-408
+
+--- PDF page 3 (printed "Page 3 of 12"), lines 22-22:
+  This is the original Textron Aviation Cessna Model 408 SkyCourier (CE-408) Flight

@@ -1,0 +1,195 @@
+SOURCE: FAA Order JO 7360.1K, Aircraft Type Designators
+Edition: JO 7360.1K, issued 2025-04-10, effective 06/12/2025 (current per faa.gov document.current page on 2026-09-23; cancels JO 7360.1J)
+URL: https://www.faa.gov/documentLibrary/media/Order/FAA_Order_JO_7360.1K_Aircraft_Type_Designators.pdf
+Index page: https://www.faa.gov/regulations_policies/orders_notices/index.cfm/go/document.current/documentNumber/7360.1
+Local: data/AIRCRAFT/sources/faa/FAA_Order_JO_7360.1K_Aircraft_Type_Designators.pdf  size 11971409 B  sha256 64a709bf8863e177c3daffade253aa6362519186ba807943165f68490ee0c8fe
+Retrieved 2026-09-23. Text via `pdftotext -layout`; lines verbatim; "PDF page" = page index in the PDF, "page" = printed label.
+
+--- PDF page 1 (cover):
+                       U.S. DEPARTMENT OF TRANSPORTATION
+                         FEDERAL AVIATION ADMINISTRATION                                   ORDER
+                                 Air Traffic Organization Policy                          JO 7360.1K
+                                                                                           Effective Date:
+                                                                                             06/12/2025
+SUBJ: Aircraft Type Designators
+--- PDF page 7 (printed "4"), lines 8-14:
+2-7. Aircraft Manufacturer. A shortened name of the aircraft manufacturer is shown in capital
+letters, such as FAIRCHILD. A number in parentheses, for example (2), denotes another manufacturer
+using the same shortened name.
+    a. Appendix B provides an alphabetical list of aircraft manufacturer codes with associated aircraft.
+   b. Appendix D contains an alphabetized list of aircraft manufacturer codes with the full company
+name and country of origin.
+2-8. Aircraft Model. Appendix C contains an alphabetized list of aircraft model names/numbers,
+--- PDF page 7 (printed "4"), lines 14-15:
+2-8. Aircraft Model. Appendix C contains an alphabetized list of aircraft model names/numbers,
+including military designators.
+--- Appendix A. Decode – Type Designator (designator line sits in the vertical middle of its manufacturer, model list)
+--- PDF page 22 (printed "A-13"), lines 53-61:
+                                                                       BEECH, 300 (B300) Super King Air 350
+                                                                       BEECHCRAFT, 300 (B300) King Air 350
+                                                                       BEECHCRAFT, 300 (B300) King Air 360
+                                                                       HAWKER BEECHCRAFT, 300 (B300) King Air 350
+  B350       Fixed-wing    2T/S+     Light/Medium    H    III     7
+                                                                       HAWKER BEECHCRAFT, 300 (B300) Shadow
+                                                                       HAWKER BEECHCRAFT, MC-12
+                                                                       RAYTHEON, 300 (B300) Super King Air 350
+                                                                       RAYTHEON, LR-2 Super King Air 350
+--- PDF page 23 (printed "A-14"), lines 59-59:
+  B525       Helicopter      2T/S+     Medium    H     I           BELL, 525 Relentless
+--- Appendix B. Encode – Aircraft Manufacturer Code
+--- PDF page 149 (printed "B-28", under BELL), lines 33-33:
+  525 Relentless            B525       Helicopter     2T/S+     Medium    H    I
+--- Appendix C. Encode – Aircraft Model: every row for the models in this report (row = MODEL, MANUFACTURER, DESIGNATOR, class, engines/weight, ...). Rows whose MANUFACTURER cell is blank are rows the layout centres between two manufacturer lines.
+[PDF p283, page C-4] 208 Caravan 1           CESSNA                      C208        Fixed-wing    1T/S       Light        I   I     3
+[PDF p283, page C-4] 208 Caravan 675         CESSNA                      C208        Fixed-wing    1T/S       Light        I   I     3
+[PDF p283, page C-4] 208 Cargomaster         CESSNA                      C208        Fixed-wing    1T/S       Light        I   I     3
+[PDF p283, page C-4] 208 Grand Caravan       CESSNA                      C208        Fixed-wing    1T/S       Light        I   I     3
+[PDF p283, page C-4] 208 Super Cargomaster   CESSNA                      C208        Fixed-wing    1T/S       Light        I   I     3
+[PDF p284, page C-5] 300 (B300) King Air 350                                   B350       Fixed-wing     2T/S+     Light/Medium    H   III   7
+[PDF p284, page C-5] 300 (B300) King Air 360         BEECHCRAFT                B350       Fixed-wing     2T/S+     Light/Medium    H   III   7
+[PDF p284, page C-5] 300 (B300) Shadow               HAWKER BEECHCRAFT         B350       Fixed-wing     2T/S+     Light/Medium    H   III   7
+[PDF p284, page C-5] 300 (B300) Super King Air 350                             B350       Fixed-wing     2T/S+     Light/Medium    H   III   7
+[PDF p286, page C-7] 408 SkyCourier        CESSNA                C408        Fixed-wing   2T/S+     Light    I   II    7
+[PDF p288, page C-9] 525 Citation CJ1        CESSNA                 C525        Fixed-wing    2J/S     Light    I   III   7
+[PDF p288, page C-9] 525 Citation M2         CESSNA                 C25M        Fixed-wing    2J/S     Light    I   III   6
+[PDF p288, page C-9] 525 CitationJet         CESSNA                 C525        Fixed-wing    2J/S     Light    I   III   7
+[PDF p288, page C-9] 525 Relentless          BELL                   B525        Helicopter   2T/S+    Medium    H    I
+[PDF p288, page C-9] 525A Citation CJ2       CESSNA                 C25A        Fixed-wing    2J/S     Light    I   III   7
+[PDF p288, page C-9] 525B Citation CJ3       CESSNA                 C25B        Fixed-wing   2J/S+     Light    I   III   7
+[PDF p288, page C-9] 525C Citation CJ4       CESSNA                 C25C        Fixed-wing   2J/S+    Medium    H   III   7
+[PDF p289, page C-10] 680A Citation Latitude       CESSNA                      C68A        Fixed-wing    2J/S+     Medium    H   III   6
+[PDF p289, page C-10] 700 Citation Longitude       CESSNA                      C700        Fixed-wing    2J/S+     Medium    H   III   7
+[PDF p293, page C-14] A-330-300                   AIRBUS             A333       Fixed-wing   2J/H     Heavy     B   III   8
+[PDF p301, page C-22] ATR-72-212A (500)                  ATR                    AT75        Fixed-wing    2T/L    Medium    G   III   3
+[PDF p301, page C-22] ATR-72-212A (600)                  ATR                    AT76        Fixed-wing    2T/L    Medium    G   III   3
+[PDF p301, page C-22] ATR-72-500                         ATR                    AT75        Fixed-wing    2T/L    Medium    G   III   3
+[PDF p301, page C-22] ATR-72-600                         ATR                    AT76        Fixed-wing    2T/L    Medium    G   III   3
+[PDF p303, page C-24] BD-100 Challenger 300         BOMBARDIER                CL30        Fixed-wing     2J/S+     Medium        H   III   7
+[PDF p303, page C-24] BD-100 Challenger 350         BOMBARDIER                CL35        Fixed-wing     2J/S+     Medium        H   III   7
+[PDF p303, page C-24] BD-100 Challenger 3500        BOMBARDIER                CL35        Fixed-wing     2J/S+     Medium        H   III   7
+[PDF p304, page C-25] BD-700 Global 5000      BOMBARDIER                      GL5T        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p304, page C-25] BD-700 Global 5500      BOMBARDIER                      GL5T        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p304, page C-25] BD-700 Global 6000      BOMBARDIER                      GLEX        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p304, page C-25] BD-700 Global 6500      BOMBARDIER                      GLEX        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p304, page C-25] BD-700 Global 7000      BOMBARDIER                      GL7T        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p304, page C-25] BD-700 Global 7500      BOMBARDIER                      GL7T        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p304, page C-25] BD-700 Global 8000      BOMBARDIER                      GL7T        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p304, page C-25] BD-700 Global Express   BOMBARDIER                      GLEX        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p304, page C-25] BD-700 Sentinel         BOMBARDIER                      GLEX        Fixed-wing     2J/L   Medium    F   III   7
+[PDF p312, page C-33] CL-600 Challenger 600        CANADAIR                  CL60        Fixed-wing     2J/L   Medium    G   III   8
+[PDF p312, page C-33] CL-600 Challenger 601        CANADAIR                  CL60        Fixed-wing     2J/L   Medium    G   III   8
+[PDF p312, page C-33] CL-600 Challenger 604        CANADAIR                  CL60        Fixed-wing     2J/L   Medium    G   III   8
+[PDF p312, page C-33] CL-600 Challenger 605        CANADAIR                  CL60        Fixed-wing     2J/L   Medium    G   III   8
+[PDF p312, page C-33] CL-600 Challenger 650        BOMBARDIER                CL60        Fixed-wing     2J/L   Medium    G   III   8
+[PDF p316, page C-37] DA-50                                              DA50       Fixed-wing   1P/S      Light    I   I
+[PDF p320, page C-41] E1000                        EPIC AIRCRAFT             EPIC        Fixed-wing    1T/S     Light    I    I
+[PDF p327, page C-48] Falcon 2000             DASSAULT                   F2TH        Fixed-wing   2J/S+    Medium    H   III   8
+[PDF p327, page C-48] Falcon 7X               DASSAULT                   FA7X        Fixed-wing    3J/L    Medium    G   III   4
+[PDF p327, page C-48] Falcon 8X               DASSAULT                   FA8X        Fixed-wing    3J/L    Medium    G   III
+[PDF p327, page C-48] Falcon 900              DASSAULT                    F900       Fixed-wing    3J/L    Medium    G   III   8
+[PDF p330, page C-51] G-4 Gulfstream G350     GULFSTREAM AEROSPACE      GLF4        Fixed-wing     2J/L   Medium    G   III   8
+[PDF p330, page C-51] G-4X Gulfstream G450    GULFSTREAM AEROSPACE      GLF4        Fixed-wing     2J/L   Medium    G   III   8
+[PDF p331, page C-52] G-5SP Gulfstream G500   GULFSTREAM AEROSPACE      GLF5        Fixed-wing    2J/L    Medium    F   III   7
+[PDF p331, page C-52] G-5SP Gulfstream G550   GULFSTREAM AEROSPACE      GLF5        Fixed-wing    2J/L    Medium    F   III   7
+[PDF p331, page C-52] G-6 Gulfstream G650     GULFSTREAM AEROSPACE      GLF6        Fixed-wing    2J/L    Medium    F   III   8
+[PDF p331, page C-52] G-7 Gulfstream G500     GULFSTREAM AEROSPACE      GA5C        Fixed-wing    2J/L    Medium    F   III   7
+[PDF p331, page C-52] G-7 Gulfstream G600     GULFSTREAM AEROSPACE      GA6C        Fixed-wing    2J/L    Medium    F   III   7
+[PDF p331, page C-52] G-8 Gulfstream G700     GULFSTREAM AEROSPACE      GA7C        Fixed-wing     2J/L   Medium    F   III
+[PDF p331, page C-52] G-8 Gulfstream G800     GULFSTREAM AEROSPACE      GA8C        Fixed-wing     2J/L   Medium    F   III
+[PDF p332, page C-53] Gulfstream G280                                     G280       Fixed-wing     2J/S+     Medium    H   III   7
+[PDF p348, page C-69] MC-12                   HAWKER BEECHCRAFT          B350        Fixed-wing   2T/S+    Light/Medium    H   III   7
+[PDF p352, page C-73] Mystère 900               DASSAULT               F900       Fixed-wing       3J/L     Medium    G   III   8
+[PDF p355, page C-76] P-180 Avanti                 PIAGGIO                      P180       Fixed-wing     2T/S     Light    I   II    1
+[PDF p371, page C-92] SF-50 Vision           CIRRUS                 SF50        Fixed-wing     1J/S    Light    I   III   5
+[PDF p372, page C-93] SJ-X Vision           CIRRUS                 SF50        Fixed-wing     1J/S    Light    I   III   5
+[PDF p374, page C-95] SR-22 Turbo              CIRRUS                S22T        Fixed-wing    1P/S     Light    I    I    5
+[PDF p374, page C-95] SR-22T                   CIRRUS                S22T        Fixed-wing    1P/S     Light    I    I    5
+[PDF p378, page C-99] TBM-700              TBM                    TBM7        Fixed-wing     1T/S    Light    I    I    5
+[PDF p378, page C-99] TBM-700A                                    TBM7        Fixed-wing    1T/S     Light    I   I     5
+[PDF p378, page C-99] TBM-700B             SOCATA                 TBM7        Fixed-wing    1T/S     Light    I   I     5
+[PDF p378, page C-99] TBM-700C             SOCATA                 TBM7        Fixed-wing    1T/S     Light    I   I     5
+[PDF p378, page C-99] TBM-700N (TBM-850)   SOCATA                 TBM8        Fixed-wing    1T/S     Light    I   I     5
+[PDF p378, page C-99] TBM-700N (TBM-900)   SOCATA                 TBM9        Fixed-wing    1T/S     Light    I   I     5
+[PDF p378, page C-99] TBM-700N (TBM-910)                          TBM9        Fixed-wing    1T/S     Light    I   I     5
+[PDF p379, page C-100] TBM-700N (TBM-930)                              TBM9        Fixed-wing     1T/S        Light        I   I     5
+[PDF p379, page C-100] TBM-700N (TBM-940)      DAHER                   TBM9        Fixed-wing     1T/S        Light        I   I     5
+[PDF p379, page C-100] TBM-700N (TBM-960)      DAHER                   TBM9        Fixed-wing     1T/S        Light        I   I     5
+[PDF p379, page C-100] TBM-850                 SOCATA                  TBM8        Fixed-wing     1T/S        Light        I   I     5
+[PDF p379, page C-100] TBM-900                 SOCATA                  TBM9        Fixed-wing     1T/S        Light        I   I     5
+[PDF p379, page C-100] TBM-910                                         TBM9        Fixed-wing     1T/S        Light        I   I     5
+[PDF p379, page C-100] TBM-930                                         TBM9        Fixed-wing     1T/S        Light        I   I     5
+[PDF p379, page C-100] TBM-940                 DAHER                   TBM9        Fixed-wing     1T/S         Light       I    I    5
+[PDF p379, page C-100] TBM-960                 DAHER                   TBM9        Fixed-wing     1T/S         Light       I    I    5
+--- Appendix D. Decode – Aircraft Manufacturer Code (verbatim blocks; a code line sits in the vertical middle of its company list)
+--- PDF page 392 (printed "D-3"), lines 8-13:
+AIR-LIGHT                   Air-Light GmbH (Germany)
+                            Airbus Defence and Space (Spain)
+                            Airbus Military SAS (Spain)
+AIRBUS                      Airbus Military SL (Spain)
+                            Airbus SAS (France/Germany/UK/Spain)
+                            GIE Airbus Industrie (France/Germany/UK/Spain)
+--- PDF page 393 (printed "D-4"), lines 59-59:
+ATR                     GIE Avions de Transport Régional (France/Italy)
+--- PDF page 394 (printed "D-5"), lines 63-63:
+BEECH                   Beech Aircraft Corporation (United States)
+--- PDF page 394 (printed "D-5"), lines 65-65:
+BEECHCRAFT              Beechcraft Corporation (United States)
+--- PDF page 395 (printed "D-6"), lines 38-38:
+BOMBARDIER          Bombardier Inc (Canada)
+--- PDF page 396 (printed "D-7"), lines 24-28:
+                       Bombardier Aerospace Canadair (Canada)
+                       Canadair Group of Bombardier Inc (Canada)
+CANADAIR
+                       Canadair Inc (Canada)
+                       Canadair Ltd (Canada)
+--- PDF page 396 (printed "D-7"), lines 48-48:
+CESSNA                 Cessna Aircraft Company (United States)
+--- PDF page 396 (printed "D-7"), lines 76-76:
+CIRRUS                 Cirrus Design Corporation (United States)
+--- PDF page 397 (printed "D-8"), lines 65-67:
+                      Compagnie Daher (France)
+DAHER                 Daher Aerospace (France)
+                      Daher Aircraft Design LLC (United States)
+--- PDF page 397 (printed "D-8"), lines 75-80:
+                      Deutsche Aerospace AG (Germany)
+                      Avions Marcel Dassault-Bréguet Aviation (France)
+                      Dassault Aviation (France)
+DASSAULT
+                      Générale Aéronautique Marcel Dassault (France)
+                      Société des Avions Marcel Dassault (France)
+--- PDF page 398 (printed "D-9"), lines 28-30:
+                         Diamond Aircraft Industries GmbH (Austria)
+DIAMOND
+                         Diamond Aircraft Industries Inc (Canada)
+--- PDF page 399 (printed "D-10"), lines 37-37:
+EPIC AIRCRAFT           Epic Aircraft LLC (United States)
+--- PDF page 402 (printed "D-13"), lines 16-16:
+GULFSTREAM AEROSPACE   Gulfstream Aerospace Corporation (United States)
+--- PDF page 402 (printed "D-13"), lines 39-41:
+                       Hawker Beechcraft Corporation (United States)
+HAWKER BEECHCRAFT
+                       Hawker Beechcraft Services (United States)
+--- PDF page 403 (printed "D-14"), lines 34-36:
+                            Israel Aerospace Industries Ltd (Israel)
+IAI
+                            Israel Aircraft Industries Ltd (Israel)
+--- PDF page 409 (printed "D-20"), lines 54-56:
+                         Industrie Aeronautiche e Meccaniche Rinaldo Piaggio SpA (Italy)
+PIAGGIO                  Piaggio & Companie SpA (Italy)
+                         Piaggio Aero Industries SpA (Italy)
+--- PDF page 410 (printed "D-21"), lines 72-74:
+                        Raytheon Aircraft Company (United States)
+RAYTHEON
+                        Raytheon Corporate Jets Inc (United Kingdom)
+--- PDF page 413 (printed "D-24"), lines 41-45:
+SOCA                Société de l'Ouest de Construction Aéronautique (France)
+                    Daher-Socata (France)
+                    EADS Socata (France)
+SOCATA              Socata Group Aerospatiale (France)
+                    Socata Group Aerospatiale Matra (France)
+--- PDF page 415 (printed "D-26"), lines 30-32:
+                     TBM Corporation (France/United States)
+TBM
+                     TBM SA (France)
+--- PDF page 415 (printed "D-26"), lines 57-57:
+TEXTRON              Textron Aviation Inc (United States)

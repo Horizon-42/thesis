@@ -1,0 +1,1502 @@
+{
+ "schema_version": 1,
+ "generated": "2026-09-23",
+ "policy": "An FAA certificated model (its registry manufacturer spellings, which follow the TC holder history, are listed together) is mapped to an ICAO Doc 8643 designator here only when an FAA document (the model's TCDS or FSB report, or FAA Order JO 7360.1K) ties the FAA model designation, or a marketing name the TCDS or FSB report gives it, to a Doc 8643 record, and every Doc 8643 record so named carries the same designator. A marketing variant inside a named model is accepted (G650ER, Global XRS; the M2 Gen2, which has no serial group of its own); a distinct TC model designation, or a separately approved serial group, whose name Doc 8643 does not carry is not (208B, FALCON 2000EX, FALCON 900EX, DA 50 C: no row, so the lower-authority sources still decide them; the Cessna 525 CJ1+ group and the B300C: unresolved). One model spanning several designators is split by serial number where FAA documents print the split (serial_pattern's group 1 is the number), else recorded as unresolved. Rows here override the name matcher and the OpenSky registration crosswalk, and an unresolved row or an uncovered serial may not be filled by them. Evidence report: docs/aircraft_identity/2026-09-23_faa_model_crosswalk_evidence.md",
+ "sources": {
+  "faa_jo_7360_1k": {
+   "title": "FAA Order JO 7360.1K, Aircraft Type Designators",
+   "edition": "effective 2025-06-12 (only change: GENOT N JO 7360.7, 2025-10-14, adds the Electra EL-2 only)",
+   "url": "https://www.faa.gov/documentLibrary/media/Order/FAA_Order_JO_7360.1K_Aircraft_Type_Designators.pdf",
+   "local_path": "data/AIRCRAFT/sources/faa/FAA_Order_JO_7360.1K_Aircraft_Type_Designators.pdf",
+   "sha256": "64a709bf8863e177c3daffade253aa6362519186ba807943165f68490ee0c8fe",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_jo7360_1k.txt"
+  },
+  "faa_tcds_A00009CH": {
+   "title": "FAA Type Certificate Data Sheet A00009CH",
+   "edition": "Revision 25, 12/26/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID140348100520260127142917.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A00009CH_Rev25.pdf",
+   "sha256": "dc688b1226e75ceeb10371e2211e203b40a04f0656f6468d77b738b91dee3ddd",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A00009CH.txt"
+  },
+  "faa_tcds_A00016WI": {
+   "title": "FAA Type Certificate Data Sheet A00016WI",
+   "edition": "Revision 6, 06/26/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID160807395920260707144812.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A00016WI_Rev6.pdf",
+   "sha256": "395fb11926b51a3d393d2da84a43495d3f3d7a33d564009b0cfc4e987781ed13",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A00016WI.txt"
+  },
+  "faa_tcds_A00018CH": {
+   "title": "FAA Type Certificate Data Sheet A00018CH",
+   "edition": "Revision 7, 12/26/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID183658904520260127144935.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A00018CH_Rev7.pdf",
+   "sha256": "ffc2bc93dae22239afad21e1d35c39aa484494334d7ff3c08e1f043d95115076",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A00018CH.txt"
+  },
+  "faa_tcds_A00059SE": {
+   "title": "FAA Type Certificate Data Sheet A00059SE",
+   "edition": "Revision 7, 06/12/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID184545329120260612140828.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A00059SE_Rev7.pdf",
+   "sha256": "f37fc0759cf39b1399e20726fee63da0eb1dbe093dae4b46ae34007d944bc9be",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A00059SE.txt"
+  },
+  "faa_tcds_A12EA": {
+   "title": "FAA Type Certificate Data Sheet A12EA",
+   "edition": "Revision 54, 04/21/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID189103460420260421213052.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A12EA_Rev54.pdf",
+   "sha256": "d611384c2866dca673c43ea56ccf0dd1ff23f6a3605b8853007f3161ba770789",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A12EA.txt"
+  },
+  "faa_tcds_A1WI": {
+   "title": "FAA Type Certificate Data Sheet A1WI",
+   "edition": "Revision 34, 01/05/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID190404177620260105195202.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A1WI_Rev34.pdf",
+   "sha256": "fd9fc2c3120a639f75b1cc50bb8e5eb21460680a0db28d00548bcf9721623e10",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A1WI.txt"
+  },
+  "faa_tcds_A21EA": {
+   "title": "FAA Type Certificate Data Sheet A21EA",
+   "edition": "Revision 52, 07/29/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID100778240620260729183548.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A21EA_Rev52.pdf",
+   "sha256": "ad195be08f73bf96df65ffbfcd54d5d0cb87251d73a0f78c6374ac1c8000c31b",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A21EA.txt"
+  },
+  "faa_tcds_A24CE": {
+   "title": "FAA Type Certificate Data Sheet A24CE",
+   "edition": "Revision 132, 08/21/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID149435635720260821194755.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A24CE_Rev132.pdf",
+   "sha256": "4591b36127f8a54f60fe77fc8a714d6ea071f459043b8ef9607b33ad4c621ad4",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A24CE.txt"
+  },
+  "faa_tcds_A37CE": {
+   "title": "FAA Type Certificate Data Sheet A37CE",
+   "edition": "Revision 25, 08/01/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID139525973020250804161345.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A37CE_Rev25.pdf",
+   "sha256": "4d31562f875b4b2d18a1d6f98404ffd7b2520a39f2f90783c8054dece06dd862",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A37CE.txt"
+  },
+  "faa_tcds_A46NM": {
+   "title": "FAA Type Certificate Data Sheet A46NM",
+   "edition": "Revision 42, 06/02/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID112116929120250602172051.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A46NM_Rev42.pdf",
+   "sha256": "f7921ce6875fc2fc8c3f765a120e7938eb14ca2bde58743687b0c6913825a0ee",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A46NM.txt"
+  },
+  "faa_tcds_A53EU": {
+   "title": "FAA Type Certificate Data Sheet A53EU",
+   "edition": "Revision 38, 08/27/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID115085799420260828153438.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A53EU_Rev38.pdf",
+   "sha256": "7f014077b22e4f9e962f54fa81b9b35a89de227b41dac5bf7f927e628105a724",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A53EU.txt"
+  },
+  "faa_tcds_A59EU": {
+   "title": "FAA Type Certificate Data Sheet A59EU",
+   "edition": "Revision 27, 09/15/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID119664653220260915184611.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A59EU_Rev27.pdf",
+   "sha256": "1b8c162609b0c7815964c153ccd47d9237b491331f69f7d0ffb96aa56fecca2f",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A59EU.txt"
+  },
+  "faa_tcds_A59NM": {
+   "title": "FAA Type Certificate Data Sheet A59NM",
+   "edition": "Revision 10, 07/02/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID198164259720250715215005.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A59NM_Rev10.pdf",
+   "sha256": "36f967dd850b1b9dc6e3eb6de5caa5d13b16d949f88ae791fd9e347b82a3ef5f",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A59NM.txt"
+  },
+  "faa_tcds_A60EU": {
+   "title": "FAA Type Certificate Data Sheet A60EU",
+   "edition": "Revision 40, 04/24/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID103072862720260427180201.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A60EU_Rev40.pdf",
+   "sha256": "9e3588247658bd833343d0b5427f4a372644bb031fd07ed0e95c5988c2006a84",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A60EU.txt"
+  },
+  "faa_tcds_A61NM": {
+   "title": "FAA Type Certificate Data Sheet A61NM",
+   "edition": "Revision 12, 12/21/2021",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/665FFB146C9CDD58862587B2007A294E.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/A61NM_Rev12.pdf",
+   "sha256": "832efadaf068af2f8e6e6f57c6ec71b190b4da6090c2dba4ecbee1f258220bf1",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_A61NM.txt"
+  },
+  "faa_tcds_T00003NY": {
+   "title": "FAA Type Certificate Data Sheet T00003NY",
+   "edition": "Revision 24, 12/19/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID116658665820251219185513.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/T00003NY_Rev24.pdf",
+   "sha256": "2e6cd88f2bdcb6228eecb078ba3f9ce9efc309a582709a4d0c2b5abec2965dc5",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_T00003NY.txt"
+  },
+  "faa_tcds_T00005NY": {
+   "title": "FAA Type Certificate Data Sheet T00005NY",
+   "edition": "Revision 12, 07/02/2019",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/16C9267B2E0010B98625843100611BB5.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/T00005NY_Rev12.pdf",
+   "sha256": "746c8f8deb808820baa77231f592f9b65b426fd08d167d1b9aa6c2bf9ce3b805",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_T00005NY.txt"
+  },
+  "faa_tcds_T00012WI": {
+   "title": "FAA Type Certificate Data Sheet T00012WI",
+   "edition": "Revision 18, 09/18/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID164335445520250918155951.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/T00012WI_Rev18.pdf",
+   "sha256": "19ac1c2660499133baef866d70f6e045c5d28129845e1d6e7d910b0adc8e9930",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_T00012WI.txt"
+  },
+  "faa_tcds_T00015AT": {
+   "title": "FAA Type Certificate Data Sheet T00015AT",
+   "edition": "Revision 22, 04/16/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID130146034520250423155605.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/T00015AT_Rev22.pdf",
+   "sha256": "57dfc74d827b990828d9f2da5287e47ba4b16a9fde8aebec9648f197daf814b8",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_T00015AT.txt"
+  },
+  "faa_tcds_T00015WI": {
+   "title": "FAA Type Certificate Data Sheet T00015WI",
+   "edition": "Revision 9, 06/29/2023",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID135832854220230630133052.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/T00015WI_Rev9.pdf",
+   "sha256": "794257f7262a8ff039e0afada08ad34442423962fa52be5e2120781c4f667d98",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_T00015WI.txt"
+  },
+  "faa_tcds_T00021AT": {
+   "title": "FAA Type Certificate Data Sheet T00021AT",
+   "edition": "Revision 13, 04/09/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID110649851120260422133842.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/tcds/T00021AT_Rev13.pdf",
+   "sha256": "4f2793fbcb609a477e09252176184775cfb39fbed343cdcf8828c09ce860b0d8",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_tcds_T00021AT.txt"
+  },
+  "faa_fsbr_CE-700": {
+   "title": "FAA Flight Standardization Board Report CE-700: Textron Aviation CE-700 (#0001 and on)",
+   "edition": "Rev 2, 10/05/2023",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID145066509120231005183723.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/fsbr/FSBR_CE-700_Rev_2.pdf",
+   "sha256": "7379f88d58de733d9787a9b062718b608999988e53c887cc5bb548724d4f586e",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_fsbr_CE-700.txt"
+  },
+  "faa_fsbr_CE-408": {
+   "title": "FAA Flight Standardization Board Report CE-408: Textron Aviation Cessna Model 408 SkyCourier",
+   "edition": "Rev 0, 04/01/2022",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/78D65CB7A82BE0308625881A007EA8C1.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/fsbr/FSBR_CE-408_Rev_0.pdf",
+   "sha256": "5f5fb7b57d5d4ad915edb6e79815c5d2fa9ea1f38b2510a9c8e70c5855e1c8c2",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_fsbr_CE-408.txt"
+  },
+  "faa_fsbr_CE-525": {
+   "title": "FAA Flight Standardization Board Report CE-525: Textron Aviation Inc. 525, 525A, 525B, 525C",
+   "edition": "Rev 10, 09/02/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID135509854320260903120541.0001",
+   "local_path": "data/AIRCRAFT/sources/faa/fsbr/FSBR_CE-525_Rev_10.pdf",
+   "sha256": "703e61fbc23b1c16834a73da0e9121af3692dd1479699886a135951021e36a94",
+   "excerpt": "docs/aircraft_identity/excerpts/faa_fsbr_CE-525.txt"
+  }
+ },
+ "models": [
+  {
+   "faa_records": [
+    [
+     "TEXTRON AVIATION INC",
+     "700"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "C700",
+   "icao_records": [
+    [
+     "CESSNA",
+     "700 Citation Longitude"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00015WI",
+     "p1",
+     "holder Textron Aviation Inc.; I. Model 700 (Transport Category)"
+    ],
+    [
+     "faa_fsbr_CE-700",
+     "p1",
+     "T00015WI  700 (#0001 and on)  Longitude  CE-700"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-10",
+     "CESSNA, 700 Citation Longitude C700"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "TEXTRON AVIATION INC",
+     "680A"
+    ],
+    [
+     "CESSNA AIRCRAFT CO",
+     "680A"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "C68A",
+   "icao_records": [
+    [
+     "CESSNA",
+     "680A Citation Latitude"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00012WI",
+     "p1, p9",
+     "Cessna -> Textron transfer 2015-07-29; II. Model 680A Latitude"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-10",
+     "CESSNA, 680A Citation Latitude C68A"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "CIRRUS DESIGN CORP",
+     "SR22T"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "S22T",
+   "icao_records": [
+    [
+     "CIRRUS",
+     "SR-22T"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A00009CH",
+     "p7",
+     "III - MODEL SR22T"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-95",
+     "CIRRUS SR-22T S22T"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "TEXTRON AVIATION INC",
+     "408"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "C408",
+   "icao_records": [
+    [
+     "CESSNA",
+     "408 SkyCourier"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A00016WI",
+     "p1",
+     "I. Model 408 (Normal Category)"
+    ],
+    [
+     "faa_fsbr_CE-408",
+     "p1",
+     "A00016WI  408  SkyCourier  CE-408"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-7",
+     "CESSNA, 408 SkyCourier C408"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "BOMBARDIER INC",
+     "BD-700-2A12"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GL7T",
+   "icao_records": [
+    [
+     "BOMBARDIER",
+     "BD-700 Global 7500"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00003NY",
+     "p12, p24 NOTE 20, p25 NOTE 26",
+     "VI - Model BD-700-2A12; Global 7500 (previously Global 7000); Global 8000"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-25",
+     "BOMBARDIER, BD-700 Global 7500 GL7T"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "AIRBUS",
+     "A330-343"
+    ],
+    [
+     "AIRBUS INDUSTRIE",
+     "A330-343"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "A333",
+   "icao_records": [
+    [
+     "AIRBUS",
+     "A-330-300"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A46NM",
+     "p1, p13",
+     "A330-300 Series: ... A330-343"
+    ],
+    [
+     "faa_tcds_A46NM",
+     "DRS metadata",
+     "former holders: Airbus | Airbus Industrie\\Airbus"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-14",
+     "AIRBUS, A-330-300 A333"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "GULFSTREAM AEROSPACE CORP",
+     "GVI"
+    ],
+    [
+     "GULFSTREAM AEROSPACE CORP",
+     "GVI (G650)"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GLF6",
+   "icao_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-6 Gulfstream G650"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00015AT",
+     "p1",
+     "I - GVI (Transport Category)"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-52",
+     "GULFSTREAM AEROSPACE, G-6 Gulfstream G650 GLF6"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "GULFSTREAM AEROSPACE CORP",
+     "GVI (G650ER)"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GLF6",
+   "icao_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-6 Gulfstream G650"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00015AT",
+     "p1, p39-40 NOTE 5",
+     "I - GVI; ASC 014 designates Model GVI (G650ER)"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-52",
+     "GULFSTREAM AEROSPACE, G-6 Gulfstream G650 GLF6"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "BOMBARDIER INC",
+     "BD-700-1A10"
+    ],
+    [
+     "BOMBARDIER AEROSPACE INC",
+     "BD-700-1A10"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GLEX",
+   "icao_records": [
+    [
+     "BOMBARDIER",
+     "BD-700 Global Express"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00003NY",
+     "p1-2",
+     "I - Model BD-700-1A10; marketing designations Global Express / 6000 / 6500"
+    ],
+    [
+     "faa_tcds_T00003NY",
+     "DRS metadata",
+     "former holders: Bombardier Aerospace"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-25",
+     "BOMBARDIER, BD-700 Global 6500 GLEX"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "BOMBARDIER INC",
+     "CL-600-2B16"
+    ],
+    [
+     "CANADAIR LTD",
+     "CL-600-2B16"
+    ],
+    [
+     "CANADAIR BOMBARDIER INC",
+     "CL-600-2B16"
+    ],
+    [
+     "BOMBARDIER INC",
+     "CL-600-2B16(CL-604)"
+    ],
+    [
+     "BOMBARDIER AEROSPACE INC",
+     "CL-600-2B16 (CL-604)"
+    ],
+    [
+     "BOMBARDIER INC",
+     "CL-600-2B16(CL601-3R"
+    ],
+    [
+     "BOMBARDIER INC",
+     "CL600-2B16 (CL601-3A"
+    ],
+    [
+     "CANADAIR LTD",
+     "CL600-2B16(CL601-3A)"
+    ],
+    [
+     "CANADAIR",
+     "CL-601-3A"
+    ],
+    [
+     "CANADAIR",
+     "CL601-3R"
+    ],
+    [
+     "CANADAIR",
+     "CL-604"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "CL60",
+   "icao_records": [
+    [
+     "BOMBARDIER",
+     "CL-600 Challenger 650"
+    ],
+    [
+     "CANADAIR",
+     "CL-600 Challenger 601"
+    ],
+    [
+     "CANADAIR",
+     "CL-600 Challenger 604"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A21EA",
+     "DRS metadata",
+     "Models on this TCDS: CL-600-2B16 (601-3A Variant) | CL-600-2B16 (601-3R Variant) | CL-600-2B16 (604 Variant)"
+    ],
+    [
+     "faa_tcds_A21EA",
+     "p6",
+     "III - Model CL-600-2B16 (Transport Category), Approved April 30, 1987"
+    ],
+    [
+     "faa_tcds_A21EA",
+     "p19 NOTE 9, NOTE 14",
+     "Challenger 605 and Challenger 650 are marketing designations for the CL-600-2B16 (604 Variant)"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-33 (pdf p312)",
+     "CL-600 Challenger 601 / 604 CANADAIR CL60; CL-600 Challenger 650 BOMBARDIER CL60"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "D-7 (pdf p396)",
+     "CANADAIR = Bombardier Aerospace Canadair, Canadair Group of Bombardier Inc, Canadair Inc, Canadair Ltd"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "BOMBARDIER INC",
+     "BD-700-1A11"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GL5T",
+   "icao_records": [
+    [
+     "BOMBARDIER",
+     "BD-700 Global 5000"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00003NY",
+     "p3-4",
+     "II - Model BD-700-1A11; Global 5000 / 5500"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-25",
+     "BOMBARDIER, BD-700 Global 5500 GL5T"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "GIV-X (G450)"
+    ],
+    [
+     "GULFSTREAM AEROSPACE",
+     "GIV-X"
+    ],
+    [
+     "GULFSTREAM AEROSPACE",
+     "GIV-X (G350)"
+    ],
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-IV (G350)"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GLF4",
+   "icao_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-4X Gulfstream G450"
+    ],
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-4 Gulfstream G350"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A12EA",
+     "p41",
+     "VIII - Model GIV-X; two variants: (1) the G450, identical to the GIV-X, and (2) the G350"
+    ],
+    [
+     "faa_tcds_A12EA",
+     "p61 NOTE 8",
+     "Model GIV-X, serial number 4001 and subsequent are eligible for identification as Model GIV-X (G350)"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-51 (pdf p330)",
+     "G-4X Gulfstream G450 GLF4; G-4 Gulfstream G350 GLF4"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "GULFSTREAM AEROSPACE CORP",
+     "GVII-G600"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GA6C",
+   "icao_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-7 Gulfstream G600"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00021AT",
+     "p4",
+     "II. - GVII-G600"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-52",
+     "GULFSTREAM AEROSPACE, G-7 Gulfstream G600 GA6C"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "CIRRUS DESIGN CORP",
+     "SF50"
+    ],
+    [
+     "CIRRUS DESIGN CORPORATION",
+     "SF50"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "SF50",
+   "icao_records": [
+    [
+     "CIRRUS",
+     "SF-50 Vision"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A00018CH",
+     "p1",
+     "I - Model SF50"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-92",
+     "CIRRUS, SF-50 Vision SF50"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "GV-SP"
+    ],
+    [
+     "GULFSTREAM AEROSPACE",
+     "GV-SP (G550)"
+    ],
+    [
+     "GULFSTREAM AEROSPACE CORP",
+     "GV-SP (G550)"
+    ],
+    [
+     "GULFSTREAM AEROSPACE",
+     "GV-SP (G500)"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GLF5",
+   "icao_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-5SP Gulfstream G550"
+    ],
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-5SP Gulfstream G500"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A12EA",
+     "p35",
+     "VII. Model GV-SP; two variants (See Note 8): (1) the G550, identical to the GV-SP, and (2) the G500, reduced fuel capacity"
+    ],
+    [
+     "faa_tcds_A12EA",
+     "p61 NOTE 8",
+     "Model GV-SP, serial number 5001 and subsequent are eligible for identification as Model GV-SP (G500) when modified in accordance with ASC 10"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-52 (pdf p331)",
+     "G-5SP Gulfstream G500 GLF5; G-5SP Gulfstream G550 GLF5 (not the G-7 Gulfstream G500, GA5C, which is Model GVII-G500)"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "TEXTRON AVIATION INC",
+     "525B"
+    ],
+    [
+     "CESSNA",
+     "525B"
+    ],
+    [
+     "CESSNA AIRCRAFT CO",
+     "525B"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "C25B",
+   "icao_records": [
+    [
+     "CESSNA",
+     "525B Citation CJ3"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A1WI",
+     "p1, p16",
+     "Cessna -> Textron; III. Model 525B"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-9",
+     "CESSNA, 525B Citation CJ3 C25B"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "TEXTRON AVIATION INC",
+     "525C"
+    ],
+    [
+     "CESSNA AIRCRAFT CO",
+     "525C"
+    ],
+    [
+     "CESSNA",
+     "525C"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "C25C",
+   "icao_records": [
+    [
+     "CESSNA",
+     "525C Citation CJ4"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A1WI",
+     "p21",
+     "IV. Model 525C"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-9",
+     "CESSNA, 525C Citation CJ4 C25C"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "EPIC AIRCRAFT LLC",
+     "E1000"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "EPIC",
+   "icao_records": [
+    [
+     "EPIC AIRCRAFT",
+     "E1000"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A00059SE",
+     "p1",
+     "Model E1000 (Utility Category)"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-41",
+     "EPIC AIRCRAFT, E1000 EPIC"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "GULFSTREAM AEROSPACE CORP",
+     "GVII-G500"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GA5C",
+   "icao_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-7 Gulfstream G500"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00021AT",
+     "p1",
+     "I. - GVII-G500 (not the G-5SP G500, which is GLF5)"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-52",
+     "GULFSTREAM AEROSPACE, G-7 Gulfstream G500 GA5C"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "PIAGGIO AERO INDUSTRIES SPA",
+     "P180 AVANTI II"
+    ],
+    [
+     "PIAGGIO AERO INDUSTRIES SPA",
+     "P180"
+    ],
+    [
+     "PIAGGIO AERO INDUSTRIES S P A",
+     "P180 AVANTI"
+    ],
+    [
+     "PIAGGIO",
+     "P180"
+    ],
+    [
+     "IAM PIAGGIO S P A",
+     "P-180"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "P180",
+   "icao_records": [
+    [
+     "PIAGGIO",
+     "P-180 Avanti"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A59EU",
+     "p1, p9 Note 9",
+     "model P-180; holder Piaggio Aero Industries"
+    ],
+    [
+     "faa_tcds_A59EU",
+     "p1",
+     "Holder record: INDUSTRIE AERONAUTICHE E MECCANICHE RINALDO PIAGGIO S.p.A. transferred TC A59EU to PIAGGIO AERO INDUSTRIES S.p.A."
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-76",
+     "PIAGGIO, P-180 Avanti P180"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "GULFSTREAM AEROSPACE CORP",
+     "GVIII-G700"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GA7C",
+   "icao_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-8 Gulfstream G700"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00015AT",
+     "p4",
+     "II - GVIII-G700"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-52",
+     "GULFSTREAM AEROSPACE, G-8 Gulfstream G700 GA7C"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "GULFSTREAM AEROSPACE CORP",
+     "GVIII-G800"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "GA8C",
+   "icao_records": [
+    [
+     "GULFSTREAM AEROSPACE",
+     "G-8 Gulfstream G800"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00015AT",
+     "p7",
+     "III - GVIII-G800"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-52",
+     "GULFSTREAM AEROSPACE, G-8 Gulfstream G800 GA8C"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "IAI LTD",
+     "GULFSTREAM G280"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "G280",
+   "icao_records": [
+    [
+     "IAI",
+     "Gulfstream G280"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A61NM",
+     "p1, p5",
+     "I. Model Gulfstream G280"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-53",
+     "IAI, Gulfstream G280 G280"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "TEXTRON AVIATION INC",
+     "B300"
+    ],
+    [
+     "RAYTHEON AIRCRAFT COMPANY",
+     "B300"
+    ],
+    [
+     "HAWKER BEECHCRAFT CORP",
+     "B300"
+    ],
+    [
+     "BEECH",
+     "B300"
+    ],
+    [
+     "BEECHCRAFT CORP",
+     "B300"
+    ],
+    [
+     "BEECHCRAFT",
+     "SUPER KING AIR 350"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "B350",
+   "icao_records": [
+    [
+     "BEECH",
+     "300 (B300) Super King Air 350"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A24CE",
+     "p1",
+     "Holder record: Beech Aircraft Corporation -> Raytheon Aircraft Company (1996-04-15) -> Hawker Beechcraft Corporation (2007-03-26) -> Beechcraft Corporation (2013-04-12) -> Textron Aviation (2016-10-12)"
+    ],
+    [
+     "faa_tcds_A24CE",
+     "p34",
+     "Model B300, Super King Air"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "A-13 (pdf p22)",
+     "B350: BEECH, 300 (B300) Super King Air 350; BEECHCRAFT, 300 (B300) King Air 350; HAWKER BEECHCRAFT, 300 (B300) King Air 350; RAYTHEON, 300 (B300) Super King Air 350"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-5 (pdf p284)",
+     "300 (B300) Super King Air 350 B350 (not 300 Super King Air, BE30, which is Model 300)"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "A-13 (pdf p22)",
+     "BEECH, 300 (B300) Super King Air 350 B350 -- the registry spelling BEECHCRAFT | SUPER KING AIR 350 is this record's name; no other Doc 8643 record is named Super King Air 350"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "TEXTRON AVIATION INC",
+     "B300C"
+    ],
+    [
+     "RAYTHEON AIRCRAFT COMPANY",
+     "B300C"
+    ],
+    [
+     "HAWKER BEECHCRAFT CORP",
+     "B300C"
+    ],
+    [
+     "BEECH",
+     "B300C"
+    ],
+    [
+     "BEECHCRAFT CORP",
+     "B300C"
+    ]
+   ],
+   "decision": "unresolved",
+   "reason": "Model B300C is not named in Doc 8643; its TCDS line names two military designations that Doc 8643 files under different designators (MC-12 -> B350, UC-12 Huron -> BE20), so no FAA document ties the civil B300C to one record (the OpenSky value BE30 is the Model 300 and is not used either)",
+   "evidence": [
+    [
+     "faa_tcds_A24CE",
+     "p34",
+     "Model B300C, B300C(MC-12W), B300C(UC-12W), Super King Air (Commuter Category)"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "A-13 (pdf p22); C-69 (pdf p348)",
+     "HAWKER BEECHCRAFT, MC-12 B350"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "TEXTRON AVIATION INC",
+     "208"
+    ],
+    [
+     "CESSNA",
+     "208"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "C208",
+   "icao_records": [
+    [
+     "CESSNA",
+     "208 Caravan 1"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A37CE",
+     "p1",
+     "Holder record: Cessna Aircraft Company transferred to Textron Aviation; I. Model 208, Caravan"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-4",
+     "CESSNA, 208 Caravan 1 C208 (every CESSNA 208 record is C208)"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "BELL HELICOPTER TEXTRON INC",
+     "525"
+    ],
+    [
+     "BELL TEXTRON INC",
+     "525"
+    ]
+   ],
+   "decision": "typecode",
+   "typecode": "B525",
+   "icao_records": [
+    [
+     "BELL",
+     "525 Relentless"
+    ]
+   ],
+   "evidence": [
+    [
+     "faa_jo_7360_1k",
+     "A-14 (pdf p23); B-28 (pdf p149); C-9 (pdf p288)",
+     "BELL, 525 Relentless B525 (Helicopter) -- the only 525 under BELL; C525 is the CESSNA 525"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "BOMBARDIER INC",
+     "BD-100-1A10"
+    ],
+    [
+     "BOMBARDIER AEROSPACE INC",
+     "BD-100-1A10"
+    ]
+   ],
+   "decision": "serial_split",
+   "serial_split": [
+    {
+     "first": 20002,
+     "last": 20500,
+     "except": [],
+     "typecode": "CL30",
+     "icao_record": [
+      "BOMBARDIER",
+      "BD-100 Challenger 300"
+     ]
+    },
+    {
+     "first": 20501,
+     "last": null,
+     "except": [],
+     "typecode": "CL35",
+     "icao_record": [
+      "BOMBARDIER",
+      "BD-100 Challenger 350"
+     ]
+    }
+   ],
+   "evidence": [
+    [
+     "faa_tcds_T00005NY",
+     "p7 NOTE 7",
+     "Challenger 300 is a marketing designation for the BD-100-1A10 up to aircraft S/N 20500. Challenger 350 ... starting at aircraft S/N 20501."
+    ]
+   ],
+   "serial_pattern": "([0-9]{5})"
+  },
+  {
+   "faa_records": [
+    [
+     "DASSAULT AVIATION",
+     "FALCON 7X"
+    ]
+   ],
+   "decision": "serial_split",
+   "serial_split": [
+    {
+     "first": 1,
+     "last": 400,
+     "except": [],
+     "typecode": "FA7X",
+     "icao_record": [
+      "DASSAULT",
+      "Falcon 7X"
+     ]
+    },
+    {
+     "first": 401,
+     "last": null,
+     "except": [],
+     "typecode": "FA8X",
+     "icao_record": [
+      "DASSAULT",
+      "Falcon 8X"
+     ]
+    }
+   ],
+   "evidence": [
+    [
+     "faa_tcds_A59NM",
+     "p4 (a)",
+     "Serial Numbers Eligible: Serial numbers 0001 through 0400."
+    ],
+    [
+     "faa_tcds_A59NM",
+     "p4 (b)",
+     "The Falcon 8X does not correspond to a model designation. The Falcon 8X is only a commercial designation for stretch version of the Falcon 7X airplanes that incorporates modifications M1000 and M1254 ... M1000 is basic on all Falcon 7X aircraft starting with serial number 0401."
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-48 (pdf p327)",
+     "Falcon 7X DASSAULT FA7X; Falcon 8X DASSAULT FA8X"
+    ]
+   ],
+   "serial_pattern": "([0-9]{1,4})"
+  },
+  {
+   "faa_records": [
+    [
+     "SOCATA",
+     "TBM 700"
+    ],
+    [
+     "SOCATA",
+     "TBM 700A"
+    ],
+    [
+     "SOCATA",
+     "TBM 700B"
+    ],
+    [
+     "SOCATA",
+     "TBM-700 C2"
+    ],
+    [
+     "SOCATA",
+     "TBM-700N"
+    ],
+    [
+     "EADS SOCATA",
+     "TBM 700"
+    ],
+    [
+     "EADS SOCATA",
+     "TBM700N"
+    ],
+    [
+     "COMPAGNIE DAHER",
+     "TBM 700"
+    ],
+    [
+     "DAHER AIRCRAFT SAS",
+     "TBM 700"
+    ]
+   ],
+   "decision": "serial_split",
+   "serial_split": [
+    {
+     "first": 1,
+     "last": 345,
+     "except": [
+      269
+     ],
+     "typecode": "TBM7",
+     "icao_record": [
+      "SOCATA",
+      "TBM-700C"
+     ]
+    },
+    {
+     "first": 346,
+     "last": 999,
+     "except": [
+      687
+     ],
+     "typecode": "TBM8",
+     "icao_record": [
+      "SOCATA",
+      "TBM-850"
+     ]
+    },
+    {
+     "first": 687,
+     "last": 687,
+     "except": [],
+     "typecode": "TBM9",
+     "icao_record": [
+      "SOCATA",
+      "TBM-900"
+     ]
+    },
+    {
+     "first": 1000,
+     "last": 1626,
+     "except": [],
+     "typecode": "TBM9",
+     "icao_record": [
+      "SOCATA",
+      "TBM-900"
+     ]
+    }
+   ],
+   "unresolved_serials": "s/n 269 (named in two versions' exceptions) and s/n 1627 and on (TBM980, which the Doc 8643 snapshot does not list)",
+   "evidence": [
+    [
+     "faa_tcds_A60EU",
+     "p14 Note 14",
+     "TBM 700A/B/C = s/n 1-345 except 269; TBM 700N TBM850 = s/n 346-999 except 687; TBM900 = s/n 687, 1000-1169; TBM930/910/940/960 up to 9999; TBM980 = s/n 1627-9999"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-99, C-100 (pdf p378-379)",
+     "TBM-700A/B/C TBM7; TBM-700N (TBM-850) TBM8; TBM-700N (TBM-900 ... TBM-960) TBM9"
+    ]
+   ],
+   "serial_pattern": "([0-9]{1,4})"
+  },
+  {
+   "faa_records": [
+    [
+     "CESSNA",
+     "525"
+    ],
+    [
+     "CESSNA AIRCRAFT CO",
+     "525"
+    ],
+    [
+     "TEXTRON AVIATION INC",
+     "525"
+    ]
+   ],
+   "decision": "serial_split",
+   "serial_pattern": "525-?([0-9]{4})",
+   "serial_split": [
+    {
+     "first": 1,
+     "last": 359,
+     "except": [],
+     "typecode": "C525",
+     "icao_record": [
+      "CESSNA",
+      "525 CitationJet"
+     ]
+    },
+    {
+     "first": 360,
+     "last": 558,
+     "except": [],
+     "typecode": "C525",
+     "icao_record": [
+      "CESSNA",
+      "525 Citation CJ1"
+     ]
+    },
+    {
+     "first": 685,
+     "last": 685,
+     "except": [],
+     "typecode": "C25M",
+     "icao_record": [
+      "CESSNA",
+      "525 Citation M2"
+     ]
+    },
+    {
+     "first": 800,
+     "last": null,
+     "except": [],
+     "typecode": "C25M",
+     "icao_record": [
+      "CESSNA",
+      "525 Citation M2"
+     ]
+    }
+   ],
+   "unresolved_serials": "525-0600 thru 525-0701 except 525-0685 (the CJ1+: the TCDS approves it as its own serial group and the FSB report names that group CJ1+, a name Doc 8643 does not carry), 525-0559 thru 525-0599 and 525-0702 thru 525-0799 (no FSB group), and any serial not in the form 525-NNNN / 525NNNN",
+   "evidence": [
+    [
+     "faa_tcds_A1WI",
+     "p1",
+     "I. Model 525 S/N 525-0001 thru 525-0359 Approved October 15, 1992; S/N 525-0360 thru 525-0599 Approved February 16, 2000; S/N 525-0600 thru 525-0684, 525-0686 thru 525-0701 Approved June 17, 2005; S/N 525-0685, 525-0800 & On Approved December 20, 2013"
+    ],
+    [
+     "faa_fsbr_CE-525",
+     "p1",
+     "A1WI 525: marketing names CJ, CJ1, CJ1+, M2, M2 Gen2"
+    ],
+    [
+     "faa_fsbr_CE-525",
+     "p96 Appendix 4",
+     "525 (CJ) 525-0001 thru 525-0359; 525 (CJ1) 525-0360 thru 525-0558; 525 (CJ1+) 525-0600 thru 525-0701 excl. 525-0685; 525 (M2) 525-0685 and 525-0800 and on (the M2 Gen2 has no range of its own)"
+    ],
+    [
+     "faa_fsbr_CE-525",
+     "p5",
+     "the M2 Gen2 is an evaluation of the Model 525 M2 with new avionics: 'The handling characteristics of the base and variant airplanes are identical' -- it has no serial group of its own and sits inside the M2's 525-0800 and on"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-9 (pdf p288)",
+     "525 CitationJet C525; 525 Citation CJ1 C525; 525 Citation M2 C25M"
+    ]
+   ]
+  },
+  {
+   "faa_records": [
+    [
+     "ATR-GIE AVIONS DE TRNSP RGNL",
+     "ATR 72-212A"
+    ],
+    [
+     "ATR",
+     "ATR72-212A"
+    ]
+   ],
+   "decision": "unresolved",
+   "reason": "ATR 72-212A spans AT75 (72-500) and AT76 (72-600); the 600 version is set by production modifications 5948/6521/5977, not by serial number",
+   "evidence": [
+    [
+     "faa_tcds_A53EU",
+     "p27",
+     "ATR 72-212A; 600 version by production mods"
+    ],
+    [
+     "faa_jo_7360_1k",
+     "C-22 (pdf p301)",
+     "ATR-72-212A (500) AT75; ATR-72-212A (600) AT76"
+    ]
+   ]
+  }
+ ]
+}

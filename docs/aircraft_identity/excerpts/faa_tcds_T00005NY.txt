@@ -1,0 +1,23 @@
+SOURCE: FAA Type Certificate Data Sheet T00005NY, Revision 12 (07/02/2019), DRS status Current
+TC holder (DRS metadata): Bombardier Inc.; former holders: -
+Models on this TCDS (DRS metadata): BD-100-1A10
+URL: https://drs.faa.gov/browse/excelExternalWindow/16C9267B2E0010B98625843100611BB5.0001
+Download: https://drs.faa.gov/api/content/alf/876e5df2-342a-401c-b9e5-affeec409168 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/T00005NY_Rev12.pdf  size 181979 B  sha256 746c8f8deb808820baa77231f592f9b65b426fd08d167d1b9aa6c2bf9ce3b805
+Retrieved: 2026-09-23T16:46:10Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-19:
+Type Certificate Holder:   Bombardier Inc.
+                           800 boul. René Lévesque West
+                           Montreal, Quebec, Canada
+                           H3B1Y8
+--- PDF page 1 (first page), lines 21-22:
+I - Model BD-100-1A10, (Transport Category), Approved June 4, 2003 by the FAA and May 30, 2003, by
+Transport Canada Civil Aviation with Canadian type certificate number A-234
+--- PDF page 1 (first page), lines 25-26:
+ENGINES                    Two Honeywell AS907-1-1A for S/N 20002 to 20500, or
+                           two Honeywell AS907-2-1A for S/N 20501 and subsequent, engine type certificate number
+--- PDF page 7 (printed "Page 7 of 11"), lines 43-45:
+NOTE 7   “Challenger 300” is a marketing designation for the BD-100-1A10 up to
+         aircraft S/N 20500. “Challenger 350” is a marketing designation for the BD-
+         100-1A10 starting at aircraft S/N 20501.

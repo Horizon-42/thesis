@@ -1,0 +1,18 @@
+SOURCE: FAA Type Certificate Data Sheet A00059SE, Revision 7 (06/12/2026), DRS status Current
+TC holder (DRS metadata): Epic Aircraft LLC; former holders: -
+Models on this TCDS (DRS metadata): E1000
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID184545329120260612140828.0001
+Download: https://drs.faa.gov/api/content/alf/32685b92-21de-453c-bf98-62023e062fca (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A00059SE_Rev7.pdf  size 208518 B  sha256 f37fc0759cf39b1399e20726fee63da0eb1dbe093dae4b46ae34007d944bc9be
+Retrieved: 2026-09-23T16:46:33Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 15-15:
+TC Holder:                 Epic Aircraft, LLC
+--- PDF page 1 (first page), lines 19-19:
+Model E1000 (Utility Category), Approved November 6, 2019
+--- PDF page 1 (first page), lines 34-38:
+                           SK05000001 (SN K003 to K010), or
+                           “Pilots Operating Handbook and FAA Approved Flight Manual-Epic E1000 GX”, Epic document
+                           SK05001001 (SN K011to K013, SN K015 to K085, and SN K003 to K010 with Epic service bulletin
+                           SB-0017 incorporated), or
+                           “Pilot's Operating Handbook And FAA Approved AFM for E1000AX”, Epic document SK05003001

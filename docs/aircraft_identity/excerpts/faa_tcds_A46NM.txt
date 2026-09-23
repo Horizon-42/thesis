@@ -1,0 +1,19 @@
+SOURCE: FAA Type Certificate Data Sheet A46NM, Revision 42 (06/02/2025), DRS status Current
+TC holder (DRS metadata): Airbus SAS; former holders: Airbus | Airbus Industrie\Airbus
+Models on this TCDS (DRS metadata): A330-201 | A330-202 | A330-203 | A330-223 | A330-223F | A330-243 | A330-243F | A330-301 | A330-302 | A330-303 | A330-321 | A330-322 | A330-323 | A330-341 | A330-342 | A330-343 | A330-841 | A330-941
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID112116929120250602172051.0001
+Download: https://drs.faa.gov/api/content/alf/b7b35fcf-b3df-497e-b5bf-2550e03d5247 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A46NM_Rev42.pdf  size 787700 B  sha256 f7921ce6875fc2fc8c3f765a120e7938eb14ca2bde58743687b0c6913825a0ee
+Retrieved: 2026-09-23T16:46:17Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 15-18:
+                                                                                          A330-300 Series:
+                                                                                          Models: A330-301, A330-302, A330-
+                                                                                          303, A330-321, A330-322, A330-323,
+                                                                                          A330-341, A330-342, A330-343
+--- PDF page 1 (first page), lines 33-33:
+Type Certificate Holder:               Airbus SAS
+--- PDF page 13 (printed page number 13), lines 4-4:
+III. Airbus A330-300 Series Transport Category Airplanes
+--- PDF page 13 (printed page number 13), lines 9-9:
+ Airbus A330-321 - approved June 21, 1999                               Airbus A330-343 - approved December 21, 2000

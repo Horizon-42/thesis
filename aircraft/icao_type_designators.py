@@ -17,15 +17,17 @@ from typing import Any, Iterable, Mapping
 
 
 ICAO_STANDARD = "ICAO Doc 8643"
+ICAO_CATALOG_SCHEMA = 1
 
 
-def _compact(value: str | None) -> str:
+def compact_name(value: str | None) -> str:
+    """Upper-case alphanumerics only: the key two model strings are compared on."""
     text = unicodedata.normalize("NFKD", value or "").upper()
     return "".join(character for character in text if character.isalnum())
 
 
 def _manufacturer_family(value: str | None) -> str:
-    compact = _compact(value)
+    compact = compact_name(value)
     aliases = (
         ("AIRBUSCANADA", "AIRBUS_CANADA"),
         ("AIRBUS", "AIRBUS"),
@@ -64,6 +66,7 @@ class IcaoTypeDesignatorCatalog:
     ) -> None:
         normalized: list[dict[str, str | None]] = []
         by_typecode: dict[str, list[dict[str, str | None]]] = {}
+        by_record: dict[tuple[str, str], set[str]] = {}
         by_family: dict[str, list[tuple[str, str]]] = {}
         for raw in records:
             record = {
@@ -83,12 +86,14 @@ class IcaoTypeDesignatorCatalog:
                 continue
             normalized.append(record)
             by_typecode.setdefault(record["typecode"], []).append(record)
+            by_record.setdefault((record["manufacturer"], record["model"]), set()).add(record["typecode"])
             by_family.setdefault(
                 _manufacturer_family(record["manufacturer"]), []
-            ).append((_compact(record["model"]), record["typecode"]))
+            ).append((compact_name(record["model"]), record["typecode"]))
 
         self._records = tuple(normalized)
         self._by_typecode = by_typecode
+        self._by_record = {key: frozenset(value) for key, value in by_record.items()}
         self._by_family = {
             family: tuple(values) for family, values in by_family.items()
         }
@@ -97,7 +102,7 @@ class IcaoTypeDesignatorCatalog:
     @classmethod
     def from_json(cls, path: str | Path) -> "IcaoTypeDesignatorCatalog":
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        if payload.get("schema_version") != 1:
+        if payload.get("schema_version") != ICAO_CATALOG_SCHEMA:
             raise ValueError(f"unsupported ICAO catalog schema in {path}")
         return cls(payload.get("records", []), source=payload.get("source", {}))
 
@@ -112,6 +117,10 @@ class IcaoTypeDesignatorCatalog:
 
     def contains(self, typecode: str | None) -> bool:
         return (typecode or "").strip().upper() in self._by_typecode
+
+    def record_typecodes(self, manufacturer: str, model: str) -> frozenset[str]:
+        """The designators the snapshot gives the exact (manufacturer, model) record."""
+        return self._by_record.get((manufacturer, model), frozenset())
 
     def normalize_typecode(self, typecode: str) -> str:
         normalized = typecode.strip().upper()
@@ -130,7 +139,7 @@ class IcaoTypeDesignatorCatalog:
         deliberately return ``None`` and require an audited registry crosswalk.
         """
         family = _manufacturer_family(manufacturer)
-        model_key = _compact(model)
+        model_key = compact_name(model)
         if not model_key:
             return None
 

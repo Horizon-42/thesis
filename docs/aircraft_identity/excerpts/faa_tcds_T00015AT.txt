@@ -1,0 +1,32 @@
+SOURCE: FAA Type Certificate Data Sheet T00015AT, Revision 22 (04/16/2025), DRS status Current
+TC holder (DRS metadata): Gulfstream Aerospace Corporation; former holders: -
+Models on this TCDS (DRS metadata): GVI | GVIII-G700 | GVIII-G800
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID130146034520250423155605.0001
+Download: https://drs.faa.gov/api/content/alf/2a2f3395-cda6-4f3f-94e9-ae6845080a3b (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/T00015AT_Rev22.pdf  size 822980 B  sha256 57dfc74d827b990828d9f2da5287e47ba4b16a9fde8aebec9648f197daf814b8
+Retrieved: 2026-09-23T16:46:18Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 20-20:
+Type Certificate Holder:             Gulfstream Aerospace Corporation
+--- PDF page 1 (first page), lines 24-24:
+I - GVI (Transport Category), Approved September 7, 2012
+--- PDF page 4 (printed page number 4), lines 25-28:
+                                The Model GVI (G650) Airplane Flight Manual is
+                                  GAC-AC-G650-OPS-0001.
+                                The Model GVI (G650ER) Airplane Flight Manual is
+                                  GAC-AC-G650ER-OPS-0001
+--- PDF page 4 (printed page number 4), lines 30-30:
+II - GVIII-G700 (Transport Category), Approved March 29, 2024
+--- PDF page 7 (printed page number 7), lines 51-51:
+III - GVIII-G800 (Transport Category), Approved April 16, 2025
+--- PDF page 39 (printed page number 39), lines 43-47:
+          GVI
+          Aircraft Service Change (ASC) 001, "G650 Modification" will designate those aircraft as
+          Model GVI (G650). Those aircraft shall be operated under Airplane Fight Manual GAC-
+          AC-G650-OPS-0001.
+              Applicable to S/N 6001 and subsequent.
+--- PDF page 40 (printed page number 40), lines 9-12:
+           Aircraft Service Change (ASC) 014,”GVI Extended Range (G650ER) - Modifications” will
+           designate those aircraft as Model GVI (G650ER). Those aircraft shall be operated under
+           Airplane Flight Manual GAC-AC-G650ER-OPS-0001.
+               Applicable to S/N 6001 and subsequent

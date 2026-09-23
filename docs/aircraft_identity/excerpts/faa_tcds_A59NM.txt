@@ -1,0 +1,29 @@
+SOURCE: FAA Type Certificate Data Sheet A59NM, Revision 10 (07/02/2025), DRS status Current
+TC holder (DRS metadata): Dassault Aviation; former holders: -
+Models on this TCDS (DRS metadata): Falcon 7X
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID198164259720250715215005.0001
+Download: https://drs.faa.gov/api/content/alf/765900ed-472c-4ba3-af1a-62d99cdd5619 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A59NM_Rev10.pdf  size 181622 B  sha256 36f967dd850b1b9dc6e3eb6de5caa5d13b16d949f88ae791fd9e347b82a3ef5f
+Retrieved: 2026-09-23T16:46:27Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 17-17:
+Type Certificate Holder        Dassault Aviation
+--- PDF page 1 (first page), lines 36-36:
+I. Model Falcon 7X (Transport Category) approved April 27, 2007
+--- PDF page 1 (first page), lines 38-38:
+(a) Basic Model Definition
+--- PDF page 4 (printed "Page 4 of 10"), lines 43-43:
+Serial Numbers Eligible               Serial numbers 0001 through 0400.
+--- PDF page 4 (printed "Page 4 of 10"), lines 45-51:
+(b) Falcon 8X Definition (Approved June 27, 2016)
+
+The Falcon 8X does not correspond to a model designation. The Falcon 8X is only a commercial designation for
+stretch version of the Falcon 7X airplanes that incorporates modifications M1000 and M1254 (EASy III) installed at
+production. This Falcon 7X version incorporates Pratt & Whitney PW307D engines.
+
+M1000 is basic on all Falcon 7X aircraft starting with serial number 0401.
+--- PDF page 10 (printed "Page 10 of 10"), lines 9-12:
+                                        − Reference: DGT 125953 applicable to S/N 001to S/N 400 (modification
+                                           M1000 not included)
+                                        − Reference: DGSM 151456 applicable to S/N 401 and up (modification
+                                           M1000 included)

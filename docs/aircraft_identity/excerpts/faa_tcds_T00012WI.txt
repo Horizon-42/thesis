@@ -1,0 +1,19 @@
+SOURCE: FAA Type Certificate Data Sheet T00012WI, Revision 18 (09/18/2025), DRS status Current
+TC holder (DRS metadata): Textron Aviation Inc.; former holders: Cessna Aircraft Company
+Models on this TCDS (DRS metadata): 680 | 680A
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID164335445520250918155951.0001
+Download: https://drs.faa.gov/api/content/alf/cc029fcf-075a-48b7-9ff3-0168ae7a946a (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/T00012WI_Rev18.pdf  size 176244 B  sha256 19ac1c2660499133baef866d70f6e045c5d28129845e1d6e7d910b0adc8e9930
+Retrieved: 2026-09-23T16:46:12Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 17-22:
+Type Certificate Holder                    Textron Aviation Inc.
+                                           One Cessna Boulevard
+                                           Wichita, Kansas 67215
+
+Type Certificate Holder Record             Cessna Aircraft Company transferred to
+                                           Textron Aviation Inc. on July 29, 2015
+--- PDF page 1 (first page), lines 24-24:
+I.   Model 680 Sovereign (Transport Category) S/N 680-0001 through 680-0500 Approved June 2, 2004;
+--- PDF page 9 (printed "Page 9 of 15"), lines 38-38:
+II. Model 680A Latitude (Transport Category) S/N 680A0001 and On Approved June 5, 2015

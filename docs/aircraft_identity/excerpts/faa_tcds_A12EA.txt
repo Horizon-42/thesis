@@ -1,0 +1,38 @@
+SOURCE: FAA Type Certificate Data Sheet A12EA, Revision 54 (04/21/2026), DRS status Current
+TC holder (DRS metadata): Gulfstream Aerospace Corporation; former holders: -
+Models on this TCDS (DRS metadata): G-1159 | G-1159A | G-1159B | G-IV | GIV-X | GV | GV-SP
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID189103460420260421213052.0001
+Download: https://drs.faa.gov/api/content/alf/bf9bf9cd-c0dc-4560-8996-74288e189f91 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A12EA_Rev54.pdf  size 1079824 B  sha256 d611384c2866dca673c43ea56ccf0dd1ff23f6a3605b8853007f3161ba770789
+Retrieved: 2026-09-23T16:46:23Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 23-23:
+Type Certificate Holder:               Gulfstream Aerospace Corporation
+--- PDF page 35 (printed page number 35), lines 5-5:
+VII. Model GV-SP (Transport Category), Approved August 14, 2003
+--- PDF page 35 (printed page number 35), lines 16-17:
+NOTE: There are two variants of the GV-SP (See Note 8): (1) The G550, which is identical to the GV-SP, and (2) the G500
+(sometimes referred to as G500- 5000, G500-5000, G500 (5000 Series) or G500-5000 Series), which has a reduced fuel capacity.
+--- PDF page 41 (printed page number 41), lines 5-5:
+VIII - Model GIV-X (Transport Category), Approved August 12, 2004
+--- PDF page 41 (printed page number 41), lines 24-25:
+NOTE: There are two variants of the GIV-X (see Note 8): (1) The G450, which is identical to the GIV-X, and (2) the G350,
+which has a reduced fuel capacity.
+--- PDF page 61 (printed page number 61), lines 8-17:
+
+           Model GV-SP, serial number 5001 and subsequent are eligible for identification as Model GV-SP (G550)
+           when modified in accordance with GAC Aircraft Service Change (ASC) 11.
+
+           Model GV-SP, serial number 5001 and subsequent are eligible for identification as Model GV-SP (G500)
+           when modified in accordance with GAC Aircraft Service Change (ASC) 10. [The G500 is sometimes
+           referred to as G500 5000, G500-5000, G500 (5000 Series) or G500-5000 Series].
+
+           Model GIV-X, serial number 4001 and subsequent are eligible for identification as Model GIV-X (G450)
+           when modified in accordance with GAC Aircraft Service Change (ASC) 005.
+--- PDF page 61 (printed page number 61), lines 15-20:
+
+           Model GIV-X, serial number 4001 and subsequent are eligible for identification as Model GIV-X (G450)
+           when modified in accordance with GAC Aircraft Service Change (ASC) 005.
+
+           Model GIV-X, serial number 4001 and subsequent are eligible for identification as Model GIV-X (G350)
+           when modified in accordance with GAC Aircraft Service Change (ASC) 004.

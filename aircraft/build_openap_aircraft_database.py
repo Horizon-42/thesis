@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from aircraft.identity import OPENSKY_LOOKUP_SCHEMA
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AIRCRAFT_DATABASE = REPO_ROOT / "data" / "AIRCRAFT" / "aircraftDatabase.csv"
@@ -114,7 +116,7 @@ def scan_aircraft_database(csv_path: Path) -> tuple[dict[str, dict[str, Any]], d
             registration_to_typecode.setdefault(registration, typecode)
 
     lookup = {
-        "schema_version": 1,
+        "schema_version": OPENSKY_LOOKUP_SCHEMA,
         "generated_at_utc": now_utc(),
         "source": {
             "aircraft_database_csv": source_path(csv_path),

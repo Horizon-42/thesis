@@ -1,0 +1,15 @@
+SOURCE: FAA Type Certificate Data Sheet A00064IB, Revision 4 (01/16/2025), DRS status Current
+TC holder (DRS metadata): Diamond Aircraft Industries GmbH; former holders: -
+Models on this TCDS (DRS metadata): DA 50 C
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID157712506220250116172401.0001
+Download: https://drs.faa.gov/api/content/alf/34285b0d-4174-4507-a288-0e850b582e6e (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A00064IB_Rev4.pdf  size 113404 B  sha256 668a2083ed5fa1c98a7cfc3505ea1614bccdc76acc71eb16fcf4dc525f46c750
+Retrieved: 2026-09-23T16:46:32Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-16:
+Type Certificate Holder:           Diamond Aircraft Industries GmbH
+--- PDF page 1 (first page), lines 22-22:
+I.      Model DA 50 C (Normal Category), approved July 25, 2023
+--- PDF page 4 (printed "Page 4 of 4"), lines 46-47:
+   NOTE 8:    The following modification is required to be incorporated on the Diamond DA 50:
+              MÄM 50-097 Exhaust System Modification.

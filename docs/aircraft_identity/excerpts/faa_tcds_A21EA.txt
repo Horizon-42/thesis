@@ -1,0 +1,19 @@
+SOURCE: FAA Type Certificate Data Sheet A21EA, Revision 52 (07/29/2026), DRS status Current
+TC holder (DRS metadata): Bombardier Inc.; former holders: -
+Models on this TCDS (DRS metadata): CL-600-1A11 (600) | CL-600-2A12 (601) | CL-600-2B16 (601-3A Variant) | CL-600-2B16 (601-3R Variant) | CL-600-2B16 (604 Variant)
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID100778240620260729183548.0001
+Download: https://drs.faa.gov/api/content/alf/3ac86cd3-97af-47f3-9b21-1dedd8cc7af0 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A21EA_Rev52.pdf  size 290030 B  sha256 ad195be08f73bf96df65ffbfcd54d5d0cb87251d73a0f78c6374ac1c8000c31b
+Retrieved: 2026-09-23T16:46:20Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 28-28:
+ Type Certificate Holder:           Bombardier Inc.
+--- PDF page 6 (printed "Page 6 of 20"), lines 23-23:
+  III - Model CL-600-2B16 (Transport Category), Approved April 30, 1987, by the FAA and April 21, 1987, by the
+--- PDF page 19 (printed "Page 19 of 20"), lines 22-24:
+NOTE 9    The Challenger 605 is a marketing designation for the Challenger CL-600-2B16 (604 Variant) with Modsums 604DX10000,
+          604DX20000 and 604DX30000 incorporated, beginning with aircraft s/n 5701 to s/n 5990. This designation is for marketing
+          purposes only.
+--- PDF page 19 (printed "Page 19 of 20"), lines 39-40:
+NOTE 14   The Challenger 650 is a marketing designation for the Challenger CL-600-2B16 (604 Variant) beginning with aircraft s/n
+          6050 and subsequent. This designation is for marketing purposes only.

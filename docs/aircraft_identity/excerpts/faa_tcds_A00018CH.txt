@@ -1,0 +1,12 @@
+SOURCE: FAA Type Certificate Data Sheet A00018CH, Revision 7 (12/26/2025), DRS status Current
+TC holder (DRS metadata): Cirrus Design Corporation; former holders: -
+Models on this TCDS (DRS metadata): SF50
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID183658904520260127144935.0001
+Download: https://drs.faa.gov/api/content/alf/2cfbd9bb-1862-42f1-9cac-711f864bd9ba (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A00018CH_Rev7.pdf  size 273826 B  sha256 ffc2bc93dae22239afad21e1d35c39aa484494334d7ff3c08e1f043d95115076
+Retrieved: 2026-09-23T16:46:26Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 15-15:
+Type Certificate Holder:       Cirrus Design Corporation
+--- PDF page 1 (first page), lines 19-19:
+I - Model SF50 (7PCLM, Normal Category), Approved October 28, 2016

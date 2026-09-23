@@ -1,0 +1,13 @@
+SOURCE: FAA Flight Standardization Board Report "FSBR BD-100-1A10 Rev 8" — Bombardier BD-100-1A10 (Challenger 300 and 350) (issue date 09/24/2024, DRS status Current)
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID136391900520240924150331.0001
+Download: https://drs.faa.gov/api/content/alf/6b6eae63-1f68-452a-95e5-ea948a78517b (guest session)
+Local: data/AIRCRAFT/sources/faa/fsbr/FSBR_BD-100-1A10_Rev_8.pdf  size 471572 B  sha256 a98a9e806003dc12ede514d2b62d4a65aa0205b91701485c02880756ee342a74
+Retrieved: 2026-09-23T16:51:37Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-21:
+Type Certificate Data
+                           TCDS Identifier      Marketing Name         Pilot Type Rating
+   Sheet (TCDS)
+                                                Challenger 300 and
+     T00005NY               BD-100-1A10          Challenger 350             CL-30
+

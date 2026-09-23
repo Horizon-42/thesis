@@ -1,0 +1,134 @@
+SOURCE: ICAO Doc 8643 Aircraft Type Designators — repository snapshot aircraft/icao_doc8643.json
+Snapshot source block: {"aircraft_types_url": "https://doc8643.icao.int/External/AircraftTypes", "last_updated": "10 July 2026", "next_update": "06 August 2026", "raw_sha256": "53c64ae81229a287a203e6489b5773a731fc0081f65ecf26af2fabd669349006", "retrieved_at_utc": "2026-07-28T00:00:00Z", "standard": "ICAO Doc 8643", "stats_url": "https://doc8643.icao.int/External/Stats"}
+Snapshot file sha256 40fcc257664a19260bd344280fa8395f7cc148c57dbaf59f1d239dbb0f5e9505 size 1960778 B; 7260 records.
+Not re-downloaded: the report cites the snapshot the code actually uses.
+
+manufacturer | model | designator | description | wtc  (every snapshot record with one of the designators proposed or contrasted in the report)
+AIRBUS | A-330-300 | A333 | L2J | H
+ATR | ATR-72-201 | AT72 | L2T | M
+ATR | ATR-72-202 | AT72 | L2T | M
+ATR | ATR-72-211 | AT73 | L2T | M
+ATR | ATR-72-212 | AT73 | L2T | M
+ATR | ATR-72-212A (500) | AT75 | L2T | M
+ATR | ATR-72-500 | AT75 | L2T | M
+ATR | ATR P-72 | AT76 | L2T | M
+ATR | ATR-72-212A (600) | AT76 | L2T | M
+ATR | ATR-72-600 | AT76 | L2T | M
+BEECH | 300 (B300) Super King Air 350 | B350 | L2T | L/M
+BEECHCRAFT | 300 (B300) King Air 350 | B350 | L2T | L/M
+BEECHCRAFT | 300 (B300) King Air 360 | B350 | L2T | L/M
+HAWKER BEECHCRAFT | 300 (B300) King Air 350 | B350 | L2T | L/M
+HAWKER BEECHCRAFT | 300 (B300) Shadow | B350 | L2T | L/M
+HAWKER BEECHCRAFT | DT-05 | B350 | L2T | L/M
+HAWKER BEECHCRAFT | MC-12 | B350 | L2T | L/M
+RAYTHEON | 300 (B300) Super King Air 350 | B350 | L2T | L/M
+RAYTHEON | LR-2 Super King Air 350 | B350 | L2T | L/M
+CESSNA | 208 Caravan 1 | C208 | L1T | L
+CESSNA | 208 Caravan 675 | C208 | L1T | L
+CESSNA | 208 Cargomaster | C208 | L1T | L
+CESSNA | 208 Grand Caravan | C208 | L1T | L
+CESSNA | 208 Super Cargomaster | C208 | L1T | L
+CESSNA | AC-208 Combat Caravan | C208 | L1T | L
+CESSNA | C-98 | C208 | L1T | L
+CESSNA | U-27 | C208 | L1T | L
+CESSNA | 525B Citation CJ3 | C25B | L2J | L
+CESSNA | 525C Citation CJ4 | C25C | L2J | M
+CESSNA | 525 Citation M2 | C25M | L2J | L
+CESSNA | 525 Citation CJ1 | C525 | L2J | L
+CESSNA | 525 CitationJet | C525 | L2J | L
+CESSNA | 680A Citation Latitude | C68A | L2J | M
+CESSNA | 700 Citation Longitude | C700 | L2J | M
+BOMBARDIER | BD-100 Challenger 300 | CL30 | L2J | M
+BOMBARDIER | BD-100 Challenger 350 | CL35 | L2J | M
+BOMBARDIER | BD-100 Challenger 3500 | CL35 | L2J | M
+BOMBARDIER | CL-600 Challenger 650 | CL60 | L2J | M
+CANADAIR | C-143 Challenger 604 | CL60 | L2J | M
+CANADAIR | CC-144 Challenger 600 | CL60 | L2J | M
+CANADAIR | CC-144B Challenger 601 | CL60 | L2J | M
+CANADAIR | CE-144A Challenger 600 | CL60 | L2J | M
+CANADAIR | CL-600 Challenger 600 | CL60 | L2J | M
+CANADAIR | CL-600 Challenger 601 | CL60 | L2J | M
+CANADAIR | CL-600 Challenger 604 | CL60 | L2J | M
+CANADAIR | CL-600 Challenger 605 | CL60 | L2J | M
+DIAMOND | DA-50 | DA50 | L1P | L
+WANFENG DIAMOND | DA-50 | DA50 | L1P | L
+AIR | Epic Dynasty | EPIC | L1T | L
+AIR | Epic LT | EPIC | L1T | L
+EPIC AIRCRAFT | E1000 | EPIC | L1T | L
+EPIC AIRCRAFT | Epic LT | EPIC | L1T | L
+DASSAULT | Falcon 2000 | F2TH | L2J | M
+DASSAULT | Falcon 900 | F900 | L3J | M
+DASSAULT | Mystère 900 | F900 | L3J | M
+DASSAULT | T-18 | F900 | L3J | M
+DASSAULT | Falcon 7X | FA7X | L3J | M
+DASSAULT | Falcon 8X | FA8X | L3J | M
+GULFSTREAM AEROSPACE | Gulfstream G280 | G280 | L2J | M
+IAI | Gulfstream G280 | G280 | L2J | M
+GULFSTREAM AEROSPACE | G-7 Gulfstream G400 | GA4C | L2J | M
+GULFSTREAM AEROSPACE | G-7 Gulfstream G500 | GA5C | L2J | M
+GULFSTREAM AEROSPACE | G-7 Gulfstream G600 | GA6C | L2J | M
+GULFSTREAM AEROSPACE | G-8 Gulfstream G700 | GA7C | L2J | M
+GULFSTREAM AEROSPACE | G-8 Gulfstream G800 | GA8C | L2J | M
+BOMBARDIER | BD-700 Global 5000 | GL5T | L2J | M
+BOMBARDIER | BD-700 Global 5500 | GL5T | L2J | M
+BOMBARDIER | BD-700 Global 7000 | GL7T | L2J | M
+BOMBARDIER | BD-700 Global 7500 | GL7T | L2J | M
+BOMBARDIER | BD-700 Global 8000 | GL7T | L2J | M
+BOMBARDIER | BD-700  Global 6000 | GLEX | L2J | M
+BOMBARDIER | BD-700 Global 6500 | GLEX | L2J | M
+BOMBARDIER | BD-700 Global Express | GLEX | L2J | M
+BOMBARDIER | BD-700 Sentinel | GLEX | L2J | M
+BOMBARDIER | E-11 | GLEX | L2J | M
+RAYTHEON | Sentinel | GLEX | L2J | M
+GULFSTREAM AEROSPACE | C-20F Gulfstream 4 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | C-20G Gulfstream 4 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | C-20H Gulfstream 4 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | G-4 Gulfstream 4 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | G-4 Gulfstream 4SP | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | G-4 Gulfstream G300 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | G-4 Gulfstream G350 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | G-4 Gulfstream G400 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | G-4 Gulfstream SRA-4 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | G-4X Gulfstream G450 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | S102 Gulfstream 4 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | Tp102 Gulfstream 4 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | U-4 Gulfstream 4 | GLF4 | L2J | M
+GULFSTREAM AEROSPACE | C-37 | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | E-550 | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | EA-37 | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | G-5 Gulfstream 5 | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | G-5 Shavit | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | G-5SP Eitam | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | G-5SP Gulfstream 5SP | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | G-5SP Gulfstream G500 | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | G-5SP Gulfstream G550 | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | G-5SP Oron | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | MC-55 Peregrine | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | NC-37 | GLF5 | L2J | M
+GULFSTREAM AEROSPACE | G-6 Gulfstream G650 | GLF6 | L2J | M
+PIAGGIO | P-180 Avanti | P180 | L2T | L
+CIRRUS | SR-22 Turbo | S22T | L1P | L
+CIRRUS | SR-22T | S22T | L1P | L
+CIRRUS | SF-50 Vision | SF50 | L1J | L
+CIRRUS | SJ-X Vision | SF50 | L1J | L
+SOCATA | TBM-700A | TBM7 | L1T | L
+SOCATA | TBM-700B | TBM7 | L1T | L
+SOCATA | TBM-700C | TBM7 | L1T | L
+TBM | TBM-700 | TBM7 | L1T | L
+TBM | TBM-700A | TBM7 | L1T | L
+SOCATA | TBM-700N (TBM-850) | TBM8 | L1T | L
+SOCATA | TBM-850 | TBM8 | L1T | L
+DAHER | TBM-700N (TBM-910) | TBM9 | L1T | L
+DAHER | TBM-700N (TBM-930) | TBM9 | L1T | L
+DAHER | TBM-700N (TBM-940) | TBM9 | L1T | L
+DAHER | TBM-700N (TBM-960) | TBM9 | L1T | L
+DAHER | TBM-910 | TBM9 | L1T | L
+DAHER | TBM-930 | TBM9 | L1T | L
+DAHER | TBM-940 | TBM9 | L1T | L
+DAHER | TBM-960 | TBM9 | L1T | L
+SOCATA | TBM-700N (TBM-900) | TBM9 | L1T | L
+SOCATA | TBM-700N (TBM-910) | TBM9 | L1T | L
+SOCATA | TBM-700N (TBM-930) | TBM9 | L1T | L
+SOCATA | TBM-900 | TBM9 | L1T | L
+SOCATA | TBM-910 | TBM9 | L1T | L
+SOCATA | TBM-930 | TBM9 | L1T | L

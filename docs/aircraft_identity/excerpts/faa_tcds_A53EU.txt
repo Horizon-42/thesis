@@ -1,0 +1,25 @@
+SOURCE: FAA Type Certificate Data Sheet A53EU, Revision 38 (08/27/2026), DRS status Current
+TC holder (DRS metadata): ATR – GIE Avions de Transport Régional; former holders: Aerospatiale and Alenia\Aeritalia\ATR - GIE Avions de Transport Régional
+Models on this TCDS (DRS metadata): ATR42-200 | ATR42-300 | ATR42-320 | ATR42-500 | ATR72-101 | ATR72-102 | ATR72-201 | ATR72-202 | ATR72-211 | ATR72-212 | ATR72-212A
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID115085799420260828153438.0001
+Download: https://drs.faa.gov/api/content/alf/91a10386-a09c-440d-809f-e0b628a80ffc (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A53EU_Rev38.pdf  size 679142 B  sha256 7f014077b22e4f9e962f54fa81b9b35a89de227b41dac5bf7f927e628105a724
+Retrieved: 2026-09-23T16:46:22Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 26-26:
+Type Certificate Holder.               ATR – GIE Avions de Transport Régional
+--- PDF page 24 (printed page number 24), lines 24-24:
+VII.       ATR72-212A (Transport Category Airplane) approved June 19, 1997.
+--- PDF page 27 (printed page number 27), lines 15-18:
+(a) ATR72-212A Model “600 version” Definition (Approved April 4, 2013)
+
+The ATR72-212A “600 version” designation does not correspond to a model designation. This is only a commercial designation
+for an ATR72-212A on which Major modifications 5948, 6521, and 5977 have been embodied during production.
+--- PDF page 27 (printed page number 27), lines 20-20:
+Modification 5948 design change consists of the installation of a New Avionics Suite (NAS) and contains the following
+--- PDF page 27 (printed page number 27), lines 44-48:
+(b) ATR72-212A “600F version” (full cargo) Definition (Approved March 3, 2021)
+
+ATR72-212A “600F version” designation does not correspond to a model designation. This is only a commercial designation for
+an ATR72-212A, with New Avionics Suite (NAS), on which Major modification 7900 has been embodied during production.
+Another allowable commercial designation is ATR72-600F.

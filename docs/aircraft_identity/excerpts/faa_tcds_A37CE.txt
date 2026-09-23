@@ -1,0 +1,21 @@
+SOURCE: FAA Type Certificate Data Sheet A37CE, Revision 25 (08/01/2025), DRS status Current
+TC holder (DRS metadata): Textron Aviation Inc.; former holders: Cessna Aircraft Company
+Models on this TCDS (DRS metadata): 208 | 208B
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID139525973020250804161345.0001
+Download: https://drs.faa.gov/api/content/alf/b857e1cd-cc18-4210-b70d-cf7b0cc3169b (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A37CE_Rev25.pdf  size 176253 B  sha256 4d31562f875b4b2d18a1d6f98404ffd7b2520a39f2f90783c8054dece06dd862
+Retrieved: 2026-09-23T16:46:28Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 18-23:
+Type Certificate Holder                Textron Aviation Inc.
+                                       One Cessna Boulevard
+                                       Wichita, Kansas 67215
+
+Type Certificate Holder Record         Cessna Aircraft Company transferred to
+                                       Textron Aviation Inc. on July 29, 2015
+--- PDF page 1 (first page), lines 26-27:
+I.   Model 208, Caravan, 11 PCLM (Normal Category), Approved October 23, 1984;
+     Model 208, Caravan, 11 PCSM (Normal Category), Approved March 26, 1986
+--- PDF page 4 (printed page number 4), lines 28-29:
+II. Model 208B, Caravan, 2 PCLM (Normal Category), Approved October 9, 1986
+    Model 208B, Caravan, 11 PCLM (Normal Category), Approved December 13, 1989

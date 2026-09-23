@@ -1,0 +1,39 @@
+SOURCE: FAA Type Certificate Data Sheet T00003NY, Revision 24 (12/19/2025), DRS status Current
+TC holder (DRS metadata): Bombardier Inc.; former holders: Bombardier Aerospace
+Models on this TCDS (DRS metadata): BD-700-1A10 | BD-700-1A11 | BD-700-2A12
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID116658665820251219185513.0001
+Download: https://drs.faa.gov/api/content/alf/3018a28d-5b2e-497e-8e0c-b83fa6179e9a (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/T00003NY_Rev24.pdf  size 495841 B  sha256 2e6cd88f2bdcb6228eecb078ba3f9ce9efc309a582709a4d0c2b5abec2965dc5
+Retrieved: 2026-09-23T16:46:16Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 19-19:
+     Type Certificate Holder:    Bombardier Inc.
+--- PDF page 1 (first page), lines 23-23:
+     I - Model BD-700-1A10 (Transport Category), Approved November 13, 1998, by the FAA and July 31, 1998, by the
+--- PDF page 2 (printed "Page 2 of 25"), lines 22-29:
+SERIAL NUMBERS        Marketing Designation                  Eligible Serial Numbers
+ELIGIBLE
+                      Global Express                         9002 and Subsequent
+                      Global Express XRS                     9159 and Subsequent
+                      Global 6000                            9313, 9381, 9432 and Subsequent excluding
+                                                             9998, 60001 and Subsequent
+                      Global 6500                            9861, 9872, 60001 and Subsequent
+
+--- PDF page 3 (printed "Page 3 of 25"), lines 27-27:
+II - Model BD-700-1A11 (Transport Category), Approved September 20, 2004, by the FAA and March 12, 2004, by
+--- PDF page 4 (printed "Page 4 of 25"), lines 21-27:
+SERIAL NUMBERS        Marketing Designation                     Eligible Serial Numbers
+ELIGIBLE
+                      Global 5000                               9127 and Subsequent
+                      Global 5000 ft. GVFD                      9386, 9401, 9445 and Subsequent excluding
+                                                                9998, 60001 and Subsequent
+                      Global 5500                               60001 and Subsequent
+
+--- PDF page 12 (printed "Page 12 of 25"), lines 4-4:
+VI - Model BD-700-2A12 (Transport Category), Approved November 07, 2018, by the FAA and September 27 2018,
+--- PDF page 24 (printed "Page 24 of 25"), lines 9-10:
+NOTE 20    Global 7500 (previously known as Global 7000) is a marketing designation for BD-
+           700-2A12.
+--- PDF page 25 (printed "Page 25 of 25"), lines 4-5:
+NOTE 26    Global 8000 is a marketing designation for BD-700-2A12 equipped with the General
+           Electric Passport 20-19BB1B engines, and the following combination of

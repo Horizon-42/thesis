@@ -1,0 +1,40 @@
+SOURCE: FAA Aircraft Characteristics Database (Airports Planning and Environmental Division)
+Edition: docProps title "Aircraft Characteristics Data, October 2024", modified 2025-01-03; supplementary only (one row per ICAO code)
+URL: https://www.faa.gov/airports/engineering/aircraft_char_database/aircraft_data
+Local: data/AIRCRAFT/sources/faa/FAA_Aircraft_Characteristics_Data_2024-10.xlsx  size 125570 B  sha256 3e68848b6bb99f9700e25d33c080b993a80dc962d581a391f89aee94b6c8fcb3
+SUPPLEMENTARY ONLY: one representative row per ICAO designator; not a certificated-model crosswalk. Cited only where the TCDS/JO chain is family-level (Falcon 2000EX, Falcon 900EX).
+
+Columns: A ICAO_Code | C Manufacturer | D Model_FAA | E Model_BADA | AK FAA_Registry | AL Registration_Count (sheet1 row number in brackets)
+[row 15] A333 | AIRBUS | Airbus A330-300 | Airbus A330-301 | Yes | 43
+[row 52] AT75 | ATR | ATR-72-500 | ATR 72-210A | Yes | 3
+[row 53] AT76 | ATR | ATR 72-600/212A | ATR 72-212A 600 | Yes | 17
+[row 58] B350 | BEECH | Beech Super King Air 350 | Beechcraft Super King Air 350 | Yes | 1201
+[row 147] C208 | CESSNA | Cessna 208 Caravan 1 | Cessna 208B | Yes | 800
+[row 152] C25B | CESSNA | Cessna Citation CJ3 | Cessna Citation CJ3 | Yes  | 360
+[row 153] C25C | CESSNA | Cessna Citation CJ4 | Cessna Citation CJ4 | Yes | 153
+[row 154] C25M | CESSNA | Cessna Citation M2 | Cessna 525 Citation M2 | Yes | 73
+[row 170] C525 | CESSNA | Cessna CitationJet/CJ1 | Cessna Citation CJ1+ | Yes | 116
+[row 179] C68A | CESSNA | Cessna Citation Latitude | Cessna 680A Citation Latitude | Yes | 194
+[row 180] C700 | CESSNA | Cessna Citation Longitude | Cessna Citation Longitude | Yes | 33
+[row 187] CL30 | BOMBARDIER | Bombardier (Canadair) Challenger 300 | Bombardier Challenger 300 | Yes | 482
+[row 188] CL35 | BOMBARDIER | Bombardier Challenger 350 | Bombardier Challenger 350 | Yes  | 200
+[row 190] CL60 | CANADAIR | Canadair Challenger 600/601/604 | Canadair Challenger 604 | Yes | 630
+[row 247] F2TH | DASSAULT | Dassault Falcon 2000 | Dassault Falcon 2000EX | Yes | 443
+[row 249] F900 | DASSAULT | Dassault Falcon 900 | Dassault Falcon 900EX | Yes | 386
+[row 253] FA7X | DASSAULT | Dassault Falcon 7X | Dassault Falcon 7X | Yes | 135
+[row 254] FA8X | DASSAULT | Dassault Falcon 8X | Dassault Falcon 8X | No | 0
+[row 258] G280 | GULFSTREAM AEROSPACE | Gulfstream G280 | Gulfstream G280 | Yes | 199
+[row 259] GA5C | GULFSTREAM AEROSPACE | Gulfstream Aerospace Gulfstream G7-G500 | Gulfstream G500 (G-7) | Yes | 111
+[row 260] GA6C | GULFSTREAM AEROSPACE | Gulfstream Aerospace Gulfstream G7-G600 | Gulfstream G600 (G-7) | Yes  | 85
+[row 264] GL5T | BOMBARDIER | Bombardier BD-700 Global 5000 | Bombardier Global 5000 | Yes | 121
+[row 265] GL7T | BOMBARDIER | Bombardier BD-700 Global 7500 | Bombardier Global 7500 | Yes | 42
+[row 266] GLEX | BOMBARDIER | Bombardier BD-700 Global Express | Bombardier Global 6000 | Yes  | 305
+[row 269] GLF4 | GULFSTREAM AEROSPACE | Gulfstream IV/G400 | Gulfstream IV | Yes | 11
+[row 270] GLF5 | GULFSTREAM AEROSPACE | Gulfstream V | Gulfstream G550 | Yes | 154
+[row 271] GLF6 | GULFSTREAM AEROSPACE | Gulfstream G650 | Gulfstream G650 | Yes | 48
+[row 316] P180 | PIAGGIO | Piaggio P-180 Avanti | Piaggio P.180 Avanti II | Yes | 99
+[row 362] S22T | CIRRUS | Cirrus SR-22 Turbo | Cirrus SR22T | Yes | 1561
+[row 368] SF50 | CIRRUS | Cirrus Vision SF50 | Cirrus SF50 Vision | Yes | 317
+[row 383] TBM7 | SOCATA | Socata TBM-700/700A | Socata TBM-700 | Yes | 363
+[row 384] TBM8 | SOCATA | Socata TBM-850 | Socata TBM-850 | Yes | 330
+[row 385] TBM9 | SOCATA | Socata TBM-900 | Socata TBM-930 | Yes  | 127

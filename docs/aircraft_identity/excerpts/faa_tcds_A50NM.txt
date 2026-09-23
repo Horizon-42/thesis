@@ -1,0 +1,21 @@
+SOURCE: FAA Type Certificate Data Sheet A50NM, Revision 16 (11/13/2025), DRS status Current
+TC holder (DRS metadata): Dassault Aviation; former holders: Avions Marcel Dassault-Breguet Aviation
+Models on this TCDS (DRS metadata): FALCON 2000 | FALCON 2000EX
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID173314097720251113164846.0001
+Download: https://drs.faa.gov/api/content/alf/50c78ede-0b6e-4a04-9a4d-eb77226fc373 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A50NM_Rev16.pdf  size 404442 B  sha256 f3952bdd89e69257e863312293fa4c3fb1480f3a031e9fed50a2b67bc6ad70be
+Retrieved: 2026-09-23T16:46:35Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 18-18:
+Type Certificate Holder Dassault Aviation
+--- PDF page 1 (first page), lines 37-37:
+I. Model Falcon 2000 (Transport Category) approved February 2, 1995
+--- PDF page 5 (printed "Page 5 of 22"), lines 18-18:
+II. Model FALCON 2000EX (Transport Category Airplane) approved March 21, 2003
+--- PDF page 5 (printed "Page 5 of 22"), lines 22-22:
+The Falcon 2000EX is defined by Dassault modification M1802 and differs from the Falcon 2000 in the following
+--- PDF page 9 (printed "Page 9 of 22"), lines 30-33:
+(d) Falcon 2000LX Definition (Approved April 29, 2009)
+
+The LX definition of the Falcon 2000EX does not correspond to a model designation. The Falcon 2000LX is only a commercial
+designation for Falcon 2000EX airplanes in the EASy configuration on which modifications M2846 and M3229 are installed.

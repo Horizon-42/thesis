@@ -24,6 +24,16 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 ICAO_CATALOG_PATH = PACKAGE_DIR / "icao_doc8643.json"
 FAA_REGISTRY_PATH = PACKAGE_DIR / "faa_aircraft_identity.json"
 OPENSKY_LOOKUP_PATH = PACKAGE_DIR / "aircraft_id_lookup.json"
+#: v2 (2026-09-23): per-aircraft ``icao24_documented_typecode`` (documented serial splits)
+#: and the documented-crosswalk model methods. Written by ``build_aircraft_identity_database``.
+FAA_IDENTITY_SCHEMA = 2
+#: ``aircraft_id_lookup.json``, written by ``build_openap_aircraft_database``.
+OPENSKY_LOOKUP_SCHEMA = 1
+DOCUMENTED_METHOD = "faa_documented_crosswalk"
+REGISTRATION_CROSSWALK_METHOD = "registration_crosswalk"
+SERIAL_SPLIT_METHOD = "faa_documented_serial_split"
+DOCUMENTED_UNRESOLVED_METHOD = "faa_documented_unresolved"
+DOCUMENTED_METHODS = (DOCUMENTED_METHOD, SERIAL_SPLIT_METHOD)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +77,19 @@ class AircraftIdentityResolver:
         opensky_path: str | Path = OPENSKY_LOOKUP_PATH,
     ) -> "AircraftIdentityResolver":
         catalog = IcaoTypeDesignatorCatalog.from_json(icao_path)
-        faa_registry = _load_versioned_json(faa_path, "FAA aircraft identity")
-        opensky_lookup = _load_versioned_json(opensky_path, "OpenSky aircraft lookup")
+        faa_registry = _load_versioned_json(faa_path, "FAA aircraft identity", FAA_IDENTITY_SCHEMA)
+        if faa_registry["source"]["icao_raw_sha256"] != catalog.source["raw_sha256"]:
+            # Every FAA typecode was validated against one Doc 8643 snapshot; another
+            # snapshot may have dropped or moved a designator the crosswalk emits.
+            raise ValueError(
+                f"FAA aircraft identity {faa_path} was built against the Doc 8643 snapshot "
+                f"{faa_registry['source']['icao_raw_sha256']}, but {icao_path} is "
+                f"{catalog.source['raw_sha256']} ({catalog.last_updated}); rebuild it "
+                "(aircraft.build_aircraft_identity_database)"
+            )
+        opensky_lookup = _load_versioned_json(
+            opensky_path, "OpenSky aircraft lookup", OPENSKY_LOOKUP_SCHEMA
+        )
         return cls(
             catalog=catalog,
             faa_registry=faa_registry,
@@ -94,6 +115,19 @@ class AircraftIdentityResolver:
 
         normalized_icao24 = (icao24 or "").strip().upper()
         faa_record = self._faa_record(normalized_icao24)
+        if faa_record is not None and not faa_record.get("typecode") and faa_record.get(
+            "typecode_method"
+        ) in (SERIAL_SPLIT_METHOD, DOCUMENTED_UNRESOLVED_METHOD):
+            # An FAA document shows this model spans several designators (and, for a
+            # serial split, that this aircraft's serial falls outside every range it
+            # prints): no lower-authority source may pick one.
+            return self._faa_identity(
+                faa_record,
+                typecode=None,
+                failure_reason=faa_record["unresolved_reason"]
+                if faa_record["typecode_method"] == DOCUMENTED_UNRESOLVED_METHOD
+                else "serial number not covered by the documented serial split of this FAA model",
+            )
         if faa_record is not None:
             typecode = faa_record.get("typecode")
             if typecode:
@@ -159,11 +193,15 @@ class AircraftIdentityResolver:
         if not model:
             return None
         registration = self.faa_registry.get("icao24_to_registration", {}).get(icao24)
-        return {
+        record = {
             **model,
             "faa_model_code": model_code,
             "registration": registration,
         }
+        serial_typecode = self.faa_registry["icao24_documented_typecode"].get(icao24)
+        if serial_typecode is not None:
+            record.update(typecode=serial_typecode, confidence="high")
+        return record
 
     def _faa_identity(
         self,
@@ -179,7 +217,9 @@ class AircraftIdentityResolver:
         if typecode is not None and typecode_source is None:
             typecode_source = (
                 "faa_registry+opensky_evidence"
-                if resolved_method == "registration_crosswalk"
+                if resolved_method == REGISTRATION_CROSSWALK_METHOD
+                else "faa_registry+faa_documents+icao_doc8643"
+                if resolved_method in DOCUMENTED_METHODS
                 else "faa_registry+icao_doc8643"
             )
         return self._identity(
@@ -203,15 +243,18 @@ class AircraftIdentityResolver:
         )
 
 
-def _load_versioned_json(path: str | Path, label: str) -> dict[str, Any]:
+def _load_versioned_json(path: str | Path, label: str, schema_version: int) -> dict[str, Any]:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(
             f"missing {label} database {path}; regenerate authoritative aircraft identity data"
         )
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 1:
-        raise ValueError(f"unsupported {label} schema in {path}")
+    if payload.get("schema_version") != schema_version:
+        raise ValueError(
+            f"{label} {path} has schema {payload.get('schema_version')!r}, not "
+            f"{schema_version}; rebuild it (aircraft.build_aircraft_identity_database)"
+        )
     return payload
 
 

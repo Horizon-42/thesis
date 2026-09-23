@@ -1,0 +1,12 @@
+SOURCE: FAA Type Certificate Data Sheet A00016WI, Revision 6 (06/26/2026), DRS status Current
+TC holder (DRS metadata): Textron Aviation Inc.; former holders: -
+Models on this TCDS (DRS metadata): 408
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID160807395920260707144812.0001
+Download: https://drs.faa.gov/api/content/alf/e51c25ba-4989-4c4b-b9e0-f5e8b1a2e57a (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A00016WI_Rev6.pdf  size 117525 B  sha256 395fb11926b51a3d393d2da84a43495d3f3d7a33d564009b0cfc4e987781ed13
+Retrieved: 2026-09-23T16:46:14Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-16:
+Type Certificate Holder                                Textron Aviation Inc.
+--- PDF page 1 (first page), lines 20-20:
+I.   Model 408 (Normal Category) Approved March 11, 2022

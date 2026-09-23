@@ -1,0 +1,15 @@
+SOURCE: FAA Type Certificate Data Sheet T00015WI, Revision 9 (06/29/2023), DRS status Current
+TC holder (DRS metadata): Textron Aviation Inc.; former holders: -
+Models on this TCDS (DRS metadata): 700
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID135832854220230630133052.0001
+Download: https://drs.faa.gov/api/content/alf/7b02d1dd-bbed-465d-af1a-8e755d051bd6 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/T00015WI_Rev9.pdf  size 155311 B  sha256 794257f7262a8ff039e0afada08ad34442423962fa52be5e2120781c4f667d98
+Retrieved: 2026-09-23T16:46:09Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-19:
+Type Certificate Holder:                            Textron Aviation Inc.
+                                                    One Cessna Boulevard
+                                                    Wichita, Kansas 67215
+
+--- PDF page 1 (first page), lines 20-20:
+I.   Model 700 (Transport Category) Approved September 21, 2019

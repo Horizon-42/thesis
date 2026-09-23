@@ -1,0 +1,16 @@
+SOURCE: FAA Type Certificate Data Sheet A46EU, Revision 23 (01/16/2026), DRS status Current
+TC holder (DRS metadata): Dassault Aviation; former holders: Avions Marcel Dassault-Breguet Aviation
+Models on this TCDS (DRS metadata): Falcon 900EX | Mystere-Falcon 50 | Mystere-Falcon 900
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID108734422520260121164435.0001
+Download: https://drs.faa.gov/api/content/alf/ce88b7e0-6b26-486c-a815-3f67a22b8d55 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A46EU_Rev23.pdf  size 458071 B  sha256 a8c444d8dfaef39fb0e21178267facb2c7946729af6b486378b9c546d9b4dc06
+Retrieved: 2026-09-23T16:46:41Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 18-18:
+Type Certificate Holder.               DASSAULT AVIATION
+--- PDF page 6 (printed page number 6), lines 30-30:
+II. Model MYSTERE-FALCON 900 (Transport Category Airplane), approved March 21, 1986.
+--- PDF page 9 (printed page number 9), lines 66-66:
+III. Model FALCON 900EX (Transport Category Airplane), approved July 19, 1996.
+--- PDF page 10 (printed page number 10), lines 8-8:
+The Falcon 900EX is defined by Dassault modification M3000 and differs from the Mystere-Falcon 900 in the following major

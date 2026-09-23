@@ -1,0 +1,12 @@
+SOURCE: FAA Flight Standardization Board Report "FSBR DA-7X Rev 6" — Dassault Aviation Falcon 7X, Falcon 8X (issue date 03/17/2023, DRS status Current)
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID123476100720240321150756.0001
+Download: https://drs.faa.gov/api/content/alf/ca071f38-6a4d-4e44-a591-77b45602db9f (guest session)
+Local: data/AIRCRAFT/sources/faa/fsbr/FSBR_DA-7X_Rev_6.pdf  size 499536 B  sha256 5469c40b0b24f4d5fca6554e57c27ad3b4a52e081029e17136d7fb8d875ce9b0
+Retrieved: 2026-09-23T16:51:38Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-20:
+Type Certificate Data
+                           TCDS Identifier      Marketing Name         Pilot Type Rating
+   Sheet (TCDS)
+      A59NM                   Falcon 7X             Falcon 7X               DA-7X
+      A59NM                   Falcon 7X             Falcon 8X               DA-7X

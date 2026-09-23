@@ -1,0 +1,21 @@
+SOURCE: FAA Type Certificate Data Sheet A61NM, Revision 12 (12/21/2021), DRS status Current
+TC holder (DRS metadata): Gulfstream Aerospace LP; former holders: -
+Models on this TCDS (DRS metadata): Gulfstream G280
+URL: https://drs.faa.gov/browse/excelExternalWindow/665FFB146C9CDD58862587B2007A294E.0001
+Download: https://drs.faa.gov/api/content/alf/022fc543-0970-496b-87bf-16a6b17a568b (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A61NM_Rev12.pdf  size 248298 B  sha256 832efadaf068af2f8e6e6f57c6ec71b190b4da6090c2dba4ecbee1f258220bf1
+Retrieved: 2026-09-23T16:46:40Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 15-18:
+Type Certificate Holder                 Gulfstream Aerospace LP (GALP)
+                                        P.O. Box 1036
+                                        Airport City
+                                        7019900, Israel
+--- PDF page 1 (first page), lines 20-20:
+I. Model Gulfstream G280 (Transport Category Airplane) approved on August 30, 2012
+--- PDF page 5 (printed page number 5), lines 22-26:
+Production Basis                                  Until 31 December 2021 Gulfstream G280 airplanes, all series and models,
+                                                  were produced in Israel under production certificate PA-30 issued by the Civil
+                                                  Aviation Authority of Israel (CAAI). From 1 January 2022, Gulfstream G280
+                                                  airplanes, all series and models, are produced in Israel under production
+                                                  certificate PC-1 issued by the Civil Aviation Authority of Israel (CAAI).

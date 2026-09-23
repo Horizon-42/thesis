@@ -1,0 +1,49 @@
+SOURCE: FAA Type Certificate Data Sheet A60EU, Revision 40 (04/24/2026), DRS status Current
+TC holder (DRS metadata): Daher Aircraft SAS; former holders: -
+Models on this TCDS (DRS metadata): TBM 700
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID103072862720260427180201.0001
+Download: https://drs.faa.gov/api/content/alf/d02d457f-fe1b-461a-9057-8cd983611fad (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A60EU_Rev40.pdf  size 343014 B  sha256 9e3588247658bd833343d0b5427f4a372644bb031fd07ed0e95c5988c2006a84
+Retrieved: 2026-09-23T16:46:37Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 17-17:
+ Type Certificate Holder                  DAHER AIRCRAFT, SAS
+--- PDF page 1 (first page), lines 26-27:
+ I. Model TBM 700, 6 PCLM (Normal Category) approved August 28, 1990. [See note 14, certification Basis section, and
+    Equipment section for information on different versions and trade names of the TBM 700.]
+--- PDF page 14 (printed "Page 14 of 20"), lines 13-47:
+Note 14    TBM 700 versions:
+           TBM 700A = s/n 1-125
+           TBM 700B = s/n 126-243, except s/n 205 and
+           240TBM 700C:
+           - TBM 700C1 = s/n 244-345, except s/n 269, plus s/n 205 and 240 (MOD70-140-00)
+           - TBM 700C2 = s/n 244-345, except s/n 269, plus s/n 205 and 240 (TBM 700C1 equipped
+             with SOCATA modification No. MOD70-139-00) (see note 6)
+           TBM 700N:
+           - (Trade name: TBM850) not factory equipped with G1000 system = s/n 346-433, except
+             s/n 269
+           - (Trade name: TBM850) equipped with G1000 system = s/n 434-999, except 687
+           - (Trade name: TBM900) equipped with G1000 system, winglets, composite cowlings,
+             power single lever = s/n 687, 1000-1169, of which only airplanes equipped with MOD70-
+             0176-00
+           - (Trade name: TBM930) equipped with G3000 system, winglets, composite cowlings,
+             power single lever = s/n 1111-1271, of which only airplanes equipped with MOD70-
+             0476-00 and optional MOD70-0549-00
+           - (Trade name: TBM910) equipped with G1000 system, G1000 Nxi system, winglets,
+             composite cowlings, power single lever = s/n 1170-9999, of which only airplanes
+             equipped with MOD70-0539-00
+           - (Trade name: TBM940) equipped with G3000 system, winglets, composite cowlings,
+             power single lever = s/n 1172, 1275-9999, of which only airplanes equipped with
+             MOD70-0549-00, MOD70-0649-00, MOD70-0550-00 and MOD70-0650-34.
+           - (Trade name: TBM960) equipped with modification MOD70-0621-76 (“Engine power
+             increase, Engine control and e-Throttle”), MOD70-0665-61 (“Five blades Raptor
+             Propeller”), MOD70-0646-21 (“ENVIRO components based ECS”), MOD70-0753-00
+             (“Software Upgrade”) and MOD70-0680-10 (“Weight and balance modification, the
+             appropriate”): = s/n 1408-9999
+          - (Trade name: TBM980) equipped with modification MOD70-0876-00 (“G3000 PRIME
+             Integrated Flight Deck”), MOD70-0770-28 (“Operations without Anti Ice Additive”),
+             MOD70-0796-28 (“Electrical Fuel Pump and Fuel Unit Filter Removal”): = s/n 1627-
+             9999
+
+Note 15   Optional SOCATA modification No. MOD 70-0275-00 (Multi-Mission Aircraft).
+          Airplanes (s/n 14-9999)) are eligible for Optional SOCATA modification No. MOD 70-

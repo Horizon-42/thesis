@@ -1,0 +1,30 @@
+SOURCE: FAA Type Certificate Data Sheet A59EU, Revision 27 (09/15/2026), DRS status Current
+TC holder (DRS metadata): Baykar Piaggio Aerospace S.p.A; former holders: Piaggio & Co.\Industrie Aeronautiche e Meccaniche\Piaggio Aviation S.p.A.
+Models on this TCDS (DRS metadata): P-180
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID119664653220260915184611.0001
+Download: https://drs.faa.gov/api/content/alf/0efa5189-b156-413b-adf0-c155552ea295 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A59EU_Rev27.pdf  size 239840 B  sha256 1b8c162609b0c7815964c153ccd47d9237b491331f69f7d0ffb96aa56fecca2f
+Retrieved: 2026-09-23T16:46:36Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 14-14:
+Type Certificate Holder.               Baykar Piaggio Aerospace S.p.A.
+--- PDF page 1 (first page), lines 19-28:
+Type Certificate Holder Record:        INDUSTRIE AERONAUTICHE E MECCANICHE RINALDO PIAGGIO S.p.A.
+                                       Genoa, Italy, transferred TC A59EU to PIAGGIO AERO INDUSTRIES S.p.A. on November 17,
+                                       1998.
+
+                                       PIAGGIO AERO INDUSTRIES S.p.A
+                                       Via Cibrario, 4, 16154 Genoa, Italy transferred TC A59EU to PIAGGIO AVIATION S.p.A. on
+                                       May 3, 2022.
+
+                                       PIAGGIO AVIATION S.p.A.
+                                       Viale Generale Disegna, 1, 17038 Villanova d’Albenga (SV), Italy transferred TC A59EU to
+--- PDF page 9 (printed "Page 9 of 10"), lines 51-58:
+ Note 9.     S/N 1105 and up
+             Piaggio Model P-180 airplane manufactured from Serial number 1105 and up will incorporate the
+             Piaggio Modification No. DMT 80-0587 that includes an Electronic Flight Instrument System with
+             an Integrated Avionics processor System – Rockwell Collins Pro Line 21.
+             This modification must use the “P.180 AVANTI II Airplane Flight Manual”,
+             Report No. 180-MAN-0010-01100 (EASA approval date: October 21, 2005), and
+             the “P.180 AVANTI II Weight and Balance Manual”, Report No. 180-MAN-0020-01101 (EASA
+             approval date: October 21, 2005).

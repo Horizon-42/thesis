@@ -131,3 +131,11 @@ Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-
   `TSConfig` field, so it is recorded in the checkpoint and predict defaults to the train-time
   value; overriding it at predict shifts the ENU frames and the target Vref/threshold-crossing
   height the gates measure against, so it WARNS.
+- **FAA registry → ICAO type: a documented model beats every heuristic** (2026-09-23).
+  `aircraft/faa_icao_crosswalk.json` (TCDS / FSB report / JO 7360.1K + Doc 8643, one row per
+  certificated model listing every registry spelling) overrides the name matcher and the OpenSky
+  registration crosswalk, splits a model by serial where an FAA document prints the split, and an
+  `unresolved` row or an uncovered serial leaves the airframe untyped — OpenSky may NOT fill it.
+  Changing a row changes the openap-direct ts population; rebuild with
+  `python -m aircraft.build_aircraft_identity_database --faa-zip … --icao-catalog aircraft/icao_doc8643.json`.
+  Evidence and decisions: `docs/aircraft_identity/2026-09-23_faa_model_crosswalk_evidence.md`.

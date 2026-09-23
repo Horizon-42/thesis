@@ -1,0 +1,32 @@
+SOURCE: FAA Type Certificate Data Sheet A1WI, Revision 34 (01/05/2026), DRS status Current
+TC holder (DRS metadata): Textron Aviation Inc.; former holders: Cessna Aircraft Company
+Models on this TCDS (DRS metadata): 525 | 525A | 525B | 525C
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID190404177620260105195202.0001
+Download: https://drs.faa.gov/api/content/alf/dc4de15d-dea8-44d5-a2dd-1d30a87ee608 (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/A1WI_Rev34.pdf  size 202005 B  sha256 fd9fc2c3120a639f75b1cc50bb8e5eb21460680a0db28d00548bcf9721623e10
+Retrieved: 2026-09-23T16:46:31Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 18-23:
+Type Certificate Holder:                    Textron Aviation Inc.
+                                            One Cessna Boulevard
+                                            Wichita, Kansas 67215
+
+Type Certificate Holder Record:             Cessna Aircraft Company transferred to
+                                            Textron Aviation Inc. on July 29, 2015
+--- PDF page 1 (first page), lines 25-28:
+I.   Model 525 (Normal Category) S/N 525-0001 thru 525-0359 Approved October 15, 1992;
+     S/N 525-0360 thru 525-0599 Approved February 16, 2000;
+     S/N 525-0600 thru 525-0684, 525-0686 thru 525-0701 Approved June 17, 2005;
+     S/N 525-0685, 525-0800 & On Approved December 20, 2013
+--- PDF page 9 (printed "Page 9 of 26"), lines 53-57:
+NOTE 8.         The following serial numbers are manufactured under the name Cessna Aircraft Company:
+                525-0001 thru 525-0874, 525-0876, 525-0879, 525-0880.
+
+NOTE 9.         Company name change effective 7/29/15. The following serial numbers are manufactured under the name
+                Textron Aviation Inc.: 525-0875, 525-0877, 525-0878, 525-0881 & On.
+--- PDF page 10 (printed "Page 10 of 26"), lines 5-5:
+II. Model 525A (Normal Category) 525A-0001 thru 525A-0299 Approved June 21, 2000;
+--- PDF page 16 (printed "Page 16 of 26"), lines 5-5:
+III. Model 525B (Commuter Category) 525B0001 thru 525B0056, 525B0058 thru 525B0450 Approved October 15, 2004;
+--- PDF page 21 (printed "Page 21 of 26"), lines 19-19:
+IV. Model 525C (Commuter Category) Approved March 12, 2010

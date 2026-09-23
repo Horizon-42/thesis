@@ -1,0 +1,14 @@
+SOURCE: FAA Type Certificate Data Sheet T00021AT, Revision 13 (04/09/2026), DRS status Current
+TC holder (DRS metadata): Gulfstream Aerospace Corporation; former holders: -
+Models on this TCDS (DRS metadata): GVII-G500 | GVII-G600
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID110649851120260422133842.0001
+Download: https://drs.faa.gov/api/content/alf/1b61a502-f04a-405d-9a08-bc9bb2410d9c (guest session)
+Local: data/AIRCRAFT/sources/faa/tcds/T00021AT_Rev13.pdf  size 305505 B  sha256 4f2793fbcb609a477e09252176184775cfb39fbed343cdcf8828c09ce860b0d8
+Retrieved: 2026-09-23T16:46:24Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 18-18:
+Type Certificate Holder:         Gulfstream Aerospace Corporation
+--- PDF page 1 (first page), lines 23-23:
+I. - GVII-G500 (Transport Category), Approved July 20, 2018
+--- PDF page 4 (printed page number 4), lines 47-47:
+II. - GVII-G600 (Transport Category), Approved June 28, 2019

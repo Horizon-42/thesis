@@ -1,0 +1,12 @@
+SOURCE: FAA Flight Standardization Board Report "FSBR CE-700 Rev 2" — Textron Aviation CE-700 (#0001 and on) (issue date 10/05/2023, DRS status Current)
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID145066509120231005183723.0001
+Download: https://drs.faa.gov/api/content/alf/9d07c293-57c0-4aec-abb1-8a3e87533543 (guest session)
+Local: data/AIRCRAFT/sources/faa/fsbr/FSBR_CE-700_Rev_2.pdf  size 282125 B  sha256 7379f88d58de733d9787a9b062718b608999988e53c887cc5bb548724d4f586e
+Retrieved: 2026-09-23T16:51:33Z. Text via `pdftotext -layout`; lines below are verbatim, page = PDF page.
+
+--- PDF page 1 (first page), lines 16-20:
+Type Certificate Data
+                           TCDS Identifier      Marketing Name         Pilot Type Rating
+   Sheet (TCDS)
+     T00015WI             700 (#0001 and on)        Longitude              CE-700
+
