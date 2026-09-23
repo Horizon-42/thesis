@@ -202,7 +202,7 @@ and the readout. `instruction_figures --dir
 2026-09-23 (`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the frontend side: `aeroviz-4d/docs/35-viewer-reference.md`
 AV19–AV23). `instruction_training_export --dir <artefact> --airports-root <…/public/data/airports> --airport ICAO
 [--airport …] [--per-stratum 20] [--seed 1337] [--set-id <READING_RULE with _>] [--title …]` writes, per airport,
-`<root>/<ICAO>/training/<set-id>/sample.json` (schema `aeroviz-training-sample-v3`) and adds the set to that airport's
+`<root>/<ICAO>/training/<set-id>/sample.json` (schema `SAMPLE_SCHEMA`) and adds the set to that airport's
 `training/index.json` (schema `aeroviz-training-index-v1`, kept; every other set kept as it is). Everything is refused
 before anything is written: the set's directory existing, or the index already listing the id. It draws only VAL flights:
 the airport's labelled flights in a permutation seeded by `--seed`, read in order until both strata
