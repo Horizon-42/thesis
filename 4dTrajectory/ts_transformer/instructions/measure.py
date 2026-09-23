@@ -17,6 +17,8 @@ from typing import Any
 
 import numpy as np
 
+from final_approach.assign import LandingScreen
+from flight_scenarios.start_state import DEFAULT_WINDOW_S as VELOCITY_FIT_WINDOW_S
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.labeller.lateral import find_holds
 from ts_transformer.instructions.labeller.read import Admitted
@@ -48,10 +50,14 @@ SUGGESTED: dict[str, Any] = {
     "heading_split_part_deg": 140.0,
     "heading_continue_lead_deg": 10.0,
     "turn_onset_rate_deg_s": 0.2,
-    "turn_bank_min_from_deg": 10.0,
+    "turn_rate_min_from_deg": 10.0,
     "heading_hold_max_rate_deg_s": 0.2,
     "intercept_angle_deg": ATC_MAX_INTERCEPT_DEG,
-    "crossing_half_width_m": 100.0,
+    "landing_cross_limit_m": LandingScreen().threshold_radius_m,
+    "landing_max_height_m": LandingScreen().max_crossing_height_m,
+    # MIRROR of trajectory_data_process.harvest.threshold_event.MAX_PARALLEL_COURSE_DELTA_DEG
+    # (checked equal in tests/test_instruction_vocabulary.py)
+    "parallel_course_delta_deg": 5.0,
     "altitude_step_m": 30.0,
     "altitude_max_m": 5400.0,
     "altitude_fit_tolerance_m": 10.0,
@@ -70,6 +76,7 @@ SUGGESTED: dict[str, Any] = {
     "unspecified_distance_m": ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M,
 }
 SUGGESTED["heading_tolerance_deg"] = SUGGESTED["heading_step_deg"] / 2 + HEADING_WANDER_ALLOWANCE_DEG
+SUGGESTED["turn_start_delay_max_s"] = (VELOCITY_FIT_WINDOW_S + SUGGESTED["track_smoothing_s"]) / 2
 SUGGESTED["altitude_tolerance_m"] = SUGGESTED["altitude_step_m"] / 2 + SUGGESTED["altitude_fit_tolerance_m"]
 #: Descent classes: how many, and the outer edges (a slightly negative floor so a flat stretch
 #: inside a descent keeps a descent class; the steepest descent an airliner could fly).
@@ -96,7 +103,8 @@ PERCENTILES = (50, 90, 95, 99, 99.9)
 
 @dataclass(frozen=True)
 class MeasuredValues:
-    turn_bank_min_deg: float
+    turn_rate_min_deg_s: float
+    turn_rate_max_deg_s: float
     turn_bank_max_deg: float
     corridor_half_width_m: float
     corridor_widening_deg: float
@@ -122,7 +130,7 @@ def provisional_spec() -> VocabularySpec:
     fields at stand-in values that satisfy the spec's own invariants. Only `measure_flight`
     uses it, and only for the fields that do not depend on what it measures."""
     return build_spec(MeasuredValues(
-        turn_bank_min_deg=5.0, turn_bank_max_deg=45.0,
+        turn_rate_min_deg_s=0.1, turn_rate_max_deg_s=10.0, turn_bank_max_deg=45.0,
         corridor_half_width_m=500.0, corridor_widening_deg=0.0, corridor_course_tolerance_deg=10.0,
         descent_angle_edges_deg=(DESCENT_FLOOR_DEG, 2.0, 2.75, 3.5, DESCENT_CEILING_DEG),
         descent_angle_centres_deg=(1.5, 2.4, 3.1, 4.0),
@@ -170,7 +178,7 @@ def measure_flight(flight: Admitted, spec: VocabularySpec) -> dict[str, np.ndarr
     out: dict[str, list[float]] = {name: [] for name in (
         *(f"heading_wander_deg_band{h:g}" for h in FREE_HOLD_HALF_RANGES_DEG),
         *(f"level_wander_m_fit{t:g}" for t in LEVEL_FIT_TOLERANCES_M),
-        "turn_mean_bank_deg", "turn_row_bank_deg", "speed_wander_mps", "transition_accel_mps2",
+        "turn_mean_rate_deg_s", "turn_row_rate_deg_s", "turn_row_bank_deg", "speed_wander_mps", "transition_accel_mps2",
         "final_course_error_deg", "move_angle_deg", "move_length_m", "turns_over_max",
     )}
     for half_range in FREE_HOLD_HALF_RANGES_DEG:
@@ -180,8 +188,9 @@ def measure_flight(flight: Admitted, spec: VocabularySpec) -> dict[str, np.ndarr
     rate = np.diff(track) / spec.step_s
     bank = envelope.bank_deg_from_turn_rate(rate, speed[1:])
     for start, stop in _turn_runs(rate, spec.turn_onset_rate_deg_s):
-        if abs(track[stop] - track[start]) >= spec.turn_bank_min_from_deg:
-            out["turn_mean_bank_deg"].append(float(bank[start:stop].mean()))
+        if abs(track[stop] - track[start]) >= spec.turn_rate_min_from_deg:
+            out["turn_mean_rate_deg_s"].append(float(abs(rate[start:stop].mean())))
+            out["turn_row_rate_deg_s"] += list(np.abs(rate[start:stop]))
             out["turn_row_bank_deg"] += list(bank[start:stop])
     for fit_tolerance in LEVEL_FIT_TOLERANCES_M:
         for piece in fit_pieces(distance, smoothed.altitude_m, fit_tolerance):

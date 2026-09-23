@@ -121,17 +121,19 @@ def _intercept_end(track: np.ndarray, departure: int, capture: int, target: floa
 
 def _turn_check(track: np.ndarray, ground_speed: np.ndarray, start: int, end: int, target: float,
                 spec: VocabularySpec) -> dict[str, Any]:
-    """The turn envelope over rows ``start..end``: monotone toward the target, bank inside the range."""
-    rate = np.diff(track[start: end + 1]) / spec.step_s
-    bank = envelope.bank_deg_from_turn_rate(rate, ground_speed[start + 1: end + 1]) if len(rate) else np.zeros(1)
-    mean_bank, max_bank = float(bank.mean()), float(bank.max())
+    """The turn envelope over rows ``start..end``: monotone toward the target; the turn rate and
+    the bank it takes inside the range (§2.3)."""
     turn = float(target - track[start])
+    rate = np.diff(track[start: end + 1]) / spec.step_s if end > start else np.zeros(1)
+    bank = envelope.bank_deg_from_turn_rate(rate, ground_speed[start + 1: end + 1]) if end > start else np.zeros(1)
+    mean_rate = float(np.mean(rate) * math.copysign(1.0, turn)) if turn != 0.0 else 0.0
+    max_rate, max_bank = float(np.max(np.abs(rate))), float(np.max(bank))
     return {
         "progress_ok": envelope.turn_progress_ok(track[start: end + 1], target, spec.heading_tolerance_deg),
-        "mean_bank_deg": mean_bank, "max_bank_deg": max_bank,
-        "bank_min_applies": abs(turn) >= spec.turn_bank_min_from_deg,
-        "bank_ok": envelope.turn_bank_ok(turn, mean_bank, max_bank, spec.turn_bank_min_deg, spec.turn_bank_max_deg,
-                                         spec.turn_bank_min_from_deg),
+        "mean_rate_deg_s": mean_rate, "max_rate_deg_s": max_rate, "max_bank_deg": max_bank,
+        "rate_min_applies": abs(turn) >= spec.turn_rate_min_from_deg,
+        "rate_ok": envelope.turn_rate_ok(turn, mean_rate, max_rate, max_bank, spec.turn_rate_min_deg_s,
+                                         spec.turn_rate_max_deg_s, spec.turn_bank_max_deg, spec.turn_rate_min_from_deg),
     }
 
 
@@ -241,3 +243,56 @@ def read_lateral(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRe
     if reading.join_row > 0:
         reading.instructions.append(Instruction(APPROACH, APPROACH_NOT_CLEARED, 0, "initial"))
     return reading
+
+
+def turn_of_word(word: Instruction, turns: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The turn check a heading word belongs to: the one it DEPARTS (a single turn, or a split
+    turn's first part), or the split turn it continues (a later part, issued mid-turn); ``None``
+    for a word the flight was already flying at entry."""
+    if word.kind == "initial":
+        return None
+    kind = word.kind.removesuffix("-split")
+    if word.info["part"] == 1:
+        found = [t for t in turns if t["kind"] == kind and t["departure_row"] == word.row]
+    else:
+        found = [t for t in turns if t["kind"] == kind and t["departure_row"] < word.row <= t["arrival_row"]]
+    if len(found) != 1:
+        raise ValueError(f"heading word {word.kind} at row {word.row}: {len(found)} turn checks cover it")
+    return found[0]
+
+
+@dataclass(frozen=True)
+class HeadingSpan:
+    """One heading word, from its issue row to the next word's (§2.3)."""
+
+    word: Instruction
+    #: The labeller's check of the turn this word belongs to — shared by the parts of a split
+    #: turn; ``None`` for a word the flight was already flying at entry.
+    turn: dict[str, Any] | None
+    #: Where its hold begins: its turn's end as the labeller read it (the issue row for a word
+    #: flown from entry); ``None`` for a split part the next part supersedes mid-turn.
+    hold_start: int | None
+    #: Where its hold ends: the next heading word's row (where the next word takes over), or — for
+    #: the last one — where the capture turn begins (the capture itself when there is none).
+    hold_end: int
+
+    @property
+    def held(self) -> bool:
+        return self.hold_start is not None and self.hold_end > self.hold_start
+
+
+def heading_spans(instructions: list[Instruction], turns: list[dict[str, Any]],
+                  capture_turn: dict[str, Any] | None, capture: int) -> list[HeadingSpan]:
+    """Every heading word of a sentence with the rows its hold covers — the one definition the
+    labeller's hold check and the display share."""
+    heading = sorted((item for item in instructions if item.column == HEADING), key=lambda item: item.row)
+    last_end = capture if capture_turn is None else int(capture_turn["start_row"])
+    spans = []
+    for word, end in zip(heading, [w.row for w in heading[1:]] + [last_end]):
+        turn = turn_of_word(word, turns)
+        if turn is None:
+            start: int | None = word.row
+        else:
+            start = int(turn["arrival_row"]) if word.info["part"] == word.info["parts"] else None
+        spans.append(HeadingSpan(word=word, turn=turn, hold_start=start, hold_end=int(end)))
+    return spans

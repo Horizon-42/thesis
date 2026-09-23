@@ -72,6 +72,7 @@ def instruction_airport():
         "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
         "candidates": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0,
                         "elevation_m": 100.0, "length_m": 3000.0}],
+        "runway_ends": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0}],
     })
 
 
@@ -81,7 +82,7 @@ def instruction_spec(**changes):
     from ts_transformer.instructions.spec import VocabularySpec
 
     measured = measure.MeasuredValues(
-        turn_bank_min_deg=6.0, turn_bank_max_deg=32.0,
+        turn_rate_min_deg_s=1.0, turn_rate_max_deg_s=3.5, turn_bank_max_deg=32.0,
         corridor_half_width_m=20.0, corridor_widening_deg=0.45, corridor_course_tolerance_deg=2.0,
         descent_angle_edges_deg=(-0.5, 1.4, 2.6, 3.7, 10.0), descent_angle_centres_deg=(0.8, 2.1, 3.0, 4.4),
         climb_angle_centre_deg=1.3, speed_accel_max_mps2=2.5,

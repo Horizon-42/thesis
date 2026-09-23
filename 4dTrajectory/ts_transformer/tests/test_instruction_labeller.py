@@ -46,11 +46,52 @@ def test_downwind_base_final_reads_as_three_heading_words_a_clearance_and_a_land
     assert reading.checks["capture_turn"]["progress_ok"] and all(t["progress_ok"] for t in reading.checks["turns"])
     assert all(check["contained"] for check in reading.checks["vertical"])
     assert reading.checks["capture_before_threshold_m"] > 0.0
-    assert all(t["bank_ok"] for t in reading.checks["turns"])
+    assert all(t["rate_ok"] for t in reading.checks["turns"])
+    # the base leg is a hold after a 90° turn: every one of its rows lies in the funnel from the turn's issue point
+    judged = [h for h in reading.checks["hold_positions"] if h["issue_row"] > 0]
+    assert judged and all(h["inside"] == h["rows"] for h in judged)
     assert columns(reading, SPEED)[-1][1] == words.speed_unspecified
 
 
-def test_a_flight_is_cut_at_its_last_passage_of_the_threshold():
+def _base_leg_flight(shift_e_m: float = 0.0, rows: tuple[int, int] = (0, 0)):
+    legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
+            (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    e, n, altitude, track, speed = fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)
+    e = e.copy()
+    e[rows[0]: rows[1] + 1] += shift_e_m
+    return instruction_flight(e, n, altitude, track, speed)
+
+
+def test_a_hold_that_leaves_its_funnel_is_judged_outside():
+    one, words = spec(), Words(spec())
+    reading = read_flight(_base_leg_flight(), instruction_airport(), one, words)
+    (base,) = [h for h in reading.checks["hold_positions"] if h["issue_row"] > 0]
+    assert base["inside"] == base["rows"] == base["hold_end"] - base["hold_start"] + 1
+    # the same base leg, 3 km east of where it was flown (beyond the fastest turn's end): the same
+    # sentence, every one of its rows outside the funnel
+    moved = read_flight(_base_leg_flight(3000.0, (base["hold_start"], base["hold_end"])), instruction_airport(), one, words)
+    assert np.array_equal(moved.words, reading.words)
+    (outside,) = [h for h in moved.checks["hold_positions"] if h["issue_row"] > 0]
+    assert outside["rows"] == base["rows"] and outside["inside"] == 0
+
+
+def test_a_hold_after_a_split_turn_is_judged_from_the_last_part_s_issue_point():
+    one, words = spec(), Words(spec())
+    # north, a right turn through 180° (two words), a southbound base across the final's line, left onto the final (090)
+    legs = [(30, 0.0, 100.0, 0.0), (30, 6.0, 100.0, 0.0), (20, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0),
+            (50, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    reading = read_flight(instruction_flight(*fly_legs(legs, 0.0, 1110.0, -4000.0, 0.0)), instruction_airport(), one, words)
+    heading = [i for i in reading.instructions if i.column == HEADING]
+    assert [i.kind for i in heading] == ["initial", "turn-split", "turn-split"]
+    last = heading[-1]
+    assert words.heading_deg(last.value) == 180.0
+    (hold,) = [h for h in reading.checks["hold_positions"] if h["issue_row"] > 0]
+    turn = reading.checks["turns"][-1]
+    assert hold["issue_row"] == last.row > turn["departure_row"] and hold["hold_start"] == turn["arrival_row"]
+    assert hold["inside"] == hold["rows"]
+
+
+def test_a_flight_is_cut_at_its_landing():
     legs = [(100, 0.0, 70.0, -3.0), (20, 0.0, 60.0, 0.0)]
     e, n, altitude, track, speed = fly_legs(legs, 90.0, 700.0, 1000.0, 0.0)     # the last 1 km is over the runway
     reading = read_flight(instruction_flight(e, n, altitude, track, speed), instruction_airport(), spec())
@@ -240,13 +281,21 @@ def test_a_second_word_in_a_cell_is_refused_even_after_a_repeat_is_dropped():
                  np.full(10, 1000.0), one, words)
 
 
-def test_a_passage_over_the_threshold_the_flight_comes_back_from_is_refused():
-    # eastbound over the threshold of 09, a right turn back through the south, westbound to end 3 km short
+@pytest.mark.parametrize("altitude, refused", [(150.0, True), (600.0, False)])
+def test_a_low_pass_the_flight_comes_back_from_is_refused_and_an_overflight_is_no_landing(altitude, refused):
+    # eastbound over the threshold of 09 (elevation 100 m), a right turn back through the south,
+    # westbound to end 3 km short: at 50 m above the threshold that is a landing as the harvest
+    # judges one, and the flight coming back from it is refused; at 500 m it is an overflight
     legs = [(40, 0.0, 70.0, 0.0), (30, 6.0, 70.0, 0.0), (60, 0.0, 70.0, 0.0)]
     radius = 70.0 * INSTRUCTION_STEP_S / np.radians(6.0)
-    flight = instruction_flight(*fly_legs(legs, 90.0, 600.0, -3000.0, -2.0 * radius))
-    with pytest.raises(Refused, match="threshold passed before the landing"):
-        read_flight(flight, instruction_airport(), spec())
+    flight = instruction_flight(*fly_legs(legs, 90.0, altitude, -3000.0, -2.0 * radius))
+    if refused:
+        with pytest.raises(Refused, match="threshold passed before the landing"):
+            read_flight(flight, instruction_airport(), spec())
+    else:
+        with pytest.raises(Refused) as caught:
+            read_flight(flight, instruction_airport(), spec())
+        assert "threshold passed before the landing" not in str(caught.value)
 
 
 def test_the_labels_runner_maps_each_sentence_to_its_signals_row(tmp_path, monkeypatch):

@@ -45,7 +45,7 @@ import numpy as np
 
 from flight_scenarios.datum import geoid_undulation_m
 from ts_transformer.instructions import display
-from ts_transformer.instructions.airport import AirportGeometry
+from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m
 from ts_transformer.instructions.artefact import (
     load_candidates, load_sentences, load_signals, load_spec, spec_labeller_source,
 )
@@ -101,8 +101,9 @@ def _flags(values: np.ndarray) -> list[int]:
 
 
 def candidates_sha256(geometry: AirportGeometry) -> str:
-    """The runway pointer's classes ARE the airport's candidates (vocabulary design §4.1), so their
-    identity is the sha of that geometry — the index's ``runwaySha256``."""
+    """The runway pointer's classes ARE the airport's candidates (vocabulary design §4.1), and the
+    landing rule reads every runway end of the airport (§2.2), so the identity of both is the sha of
+    the airport geometry — candidates and runway ends — the index's ``runwaySha256``."""
     canonical = json.dumps(geometry.to_dict(), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -194,15 +195,19 @@ def draw(airport: str, flights: list[FlightSignals], sentences: dict[str, np.nda
 # ---- one flight
 def _turn(region: display.TurnRegion, globe: Globe) -> dict[str, Any]:
     return {"fromTrackDeg": round(region.from_track_deg, 3), "turnDeg": round(region.turn_deg, 3),
-            "groundSpeedMps": round(region.ground_speed_mps, 3), "radiusMinM": round(region.radius_min_m, 1),
-            "radiusMaxM": round(region.radius_max_m, 1), "region": globe.line(region.outline),
-            "innerArc": globe.line(region.inner), "outerArc": globe.line(region.outer), "end": globe.line(region.end)}
+            "rateMinDegS": region.rate_min_deg_s, "rateMaxDegS": region.rate_max_deg_s,
+            "bankMaxDeg": region.bank_max_deg, "startDelayMaxS": region.start_delay_max_s,
+            "slowFinished": region.slow_finished,
+            "region": globe.line(region.outline), "fastPath": globe.line(region.fast),
+            "slowPath": globe.line(region.slow), "end": globe.line(region.end)}
 
 
 def _turn_check(check: dict[str, Any]) -> dict[str, Any]:
-    return {"progressOk": bool(check["progress_ok"]), "bankOk": bool(check["bank_ok"]),
-            "meanBankDeg": round(float(check["mean_bank_deg"]), 3), "maxBankDeg": round(float(check["max_bank_deg"]), 3),
-            "bankMinApplies": bool(check["bank_min_applies"])}
+    return {"progressOk": bool(check["progress_ok"]), "rateOk": bool(check["rate_ok"]),
+            "meanRateDegS": round(float(check["mean_rate_deg_s"]), 4),
+            "maxRateDegS": round(float(check["max_rate_deg_s"]), 4),
+            "maxBankDeg": round(float(check["max_bank_deg"]), 3),
+            "rateMinApplies": bool(check["rate_min_applies"])}
 
 
 def heading_payload(item: display.HeadingEnvelope, globe: Globe) -> dict[str, Any]:
@@ -222,6 +227,10 @@ def heading_payload(item: display.HeadingEnvelope, globe: Globe) -> dict[str, An
         "check": None if check is None else {
             "kind": check["kind"], "departureRow": int(check["departure_row"]), "arrivalRow": int(check["arrival_row"]),
             "turnDeg": round(float(check["turn_deg"]), 3), "parts": int(check["parts"]), **_turn_check(check)},
+        "holdCheck": None if item.hold_check is None else {
+            "holdStartRow": int(item.hold_check["hold_start"]), "holdEndRow": int(item.hold_check["hold_end"]),
+            "rows": int(item.hold_check["rows"]), "inside": int(item.hold_check["inside"]),
+            "halfWidthEndM": round(float(item.hold_check["half_width_end_m"]), 1)},
     }
 
 
@@ -336,11 +345,14 @@ def vocabulary_block(spec: VocabularySpec, words: Words, labeller_sha256: str) -
         "approachClasses": [APPROACH_NAMES[index] for index in range(len(APPROACH_NAMES))],
         "headingTargetsDeg": [words.heading_deg(index) for index in range(words.n_heading)],
         "headingToleranceDeg": spec.heading_tolerance_deg, "headingMaxTurnDeg": spec.heading_max_turn_deg,
-        "turnBankMinDeg": spec.turn_bank_min_deg, "turnBankMaxDeg": spec.turn_bank_max_deg,
-        "turnBankMinFromDeg": spec.turn_bank_min_from_deg, "interceptAngleDeg": spec.intercept_angle_deg,
+        "turnRateMinDegS": spec.turn_rate_min_deg_s, "turnRateMaxDegS": spec.turn_rate_max_deg_s,
+        "turnRateMinFromDeg": spec.turn_rate_min_from_deg, "turnBankMaxDeg": spec.turn_bank_max_deg,
+        "turnStartDelayMaxS": spec.turn_start_delay_max_s,
+        "interceptAngleDeg": spec.intercept_angle_deg,
         "corridorHalfWidthM": spec.corridor_half_width_m, "corridorWideningDeg": spec.corridor_widening_deg,
         "corridorCourseToleranceDeg": spec.corridor_course_tolerance_deg,
-        "crossingHalfWidthM": spec.crossing_half_width_m,
+        "landingCrossLimitM": spec.landing_cross_limit_m, "landingMaxHeightM": spec.landing_max_height_m,
+        "parallelCourseDeltaDeg": spec.parallel_course_delta_deg,
         "altitudeTargetsM": [words.altitude_m(index) for index in range(words.n_altitude_levels)],
         "altitudeLandValue": words.altitude_land, "altitudeToleranceM": spec.altitude_tolerance_m,
         "angleClasses": [{"value": index, "name": angle_name(index), "nominalDeg": words.angle_deg(index),
@@ -354,10 +366,14 @@ def vocabulary_block(spec: VocabularySpec, words: Words, labeller_sha256: str) -
     }
 
 
-def candidates_block(geometry: AirportGeometry, globe: Globe, centreline_m: float) -> list[dict[str, Any]]:
+def candidates_block(geometry: AirportGeometry, spec: VocabularySpec, globe: Globe,
+                     centreline_m: float) -> list[dict[str, Any]]:
     return [{"index": index, "ident": candidate.ident, "thresholdEM": round(candidate.threshold_e_m, 1),
              "thresholdNM": round(candidate.threshold_n_m, 1), "courseDeg": candidate.course_deg,
              "elevationM": candidate.elevation_m, "lengthM": round(candidate.length_m, 1),
+             # the landing rule's limit off this runway's centreline (§2.2: capped by a parallel runway)
+             "landingCrossLimitM": round(landing_cross_limit_m(geometry, index, spec.landing_cross_limit_m,
+                                                               spec.parallel_course_delta_deg), 1),
              "centreline": globe.line(display.centreline(candidate, centreline_m)),
              "runway": globe.line(display.runway(candidate))}
             for index, candidate in enumerate(geometry.candidates)]
@@ -451,7 +467,7 @@ def main(argv: list[str] | None = None) -> int:
             "airportFrame": {"code": code, "lat": geometry.frame.lat0, "lon": geometry.frame.lon0,
                              "elevationM": geometry.frame.alt0},
             "candidatesSha256": sha, "centrelineLengthM": centreline_m,
-            "candidates": candidates_block(geometry, globe, centreline_m),
+            "candidates": candidates_block(geometry, spec, globe, centreline_m),
             "flights": payloads,
         }
         entry = {"id": args.set_id, "kind": KIND_READBACK, "title": title, "file": f"{args.set_id}/{SAMPLE_FILE}",

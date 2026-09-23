@@ -10,14 +10,16 @@ CIFP runway geometry the modeling plane's own target is built from
 (`flight_scenarios.runway_target.threshold_target_state`), so the line a sentence joins is the
 line the models are judged against. Only the runway's geometry is read (position, elevation,
 true course); the published threshold-crossing height and glidepath are procedure and stay out.
-The runway length comes from the runway configuration.
+The runway length comes from the runway configuration. Beside the candidates the geometry keeps
+every runway end the harvest builds (`trajectory_data_process.harvest.airports.load_airport`), the
+set its landing rule measures parallel runways against (`landing_cross_limit_m`).
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -44,10 +46,27 @@ class RunwayCandidate:
 
 
 @dataclass(frozen=True)
+class RunwayEnd:
+    """One runway end as the harvest builds it: threshold position in the airport frame (metres)
+    and true course (compass degrees)."""
+
+    ident: str
+    threshold_e_m: float
+    threshold_n_m: float
+    course_deg: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"ident": self.ident, "threshold_e_m": self.threshold_e_m, "threshold_n_m": self.threshold_n_m,
+                "course_deg": self.course_deg}
+
+
+@dataclass(frozen=True)
 class AirportGeometry:
     code: str
     frame: AirportENUFrame
     candidates: tuple[RunwayCandidate, ...]
+    #: Every runway end of the airport as the harvest builds it — a superset of the candidates.
+    runway_ends: tuple[RunwayEnd, ...]
 
     def candidate_index(self, ident: str) -> int:
         for index, candidate in enumerate(self.candidates):
@@ -58,7 +77,8 @@ class AirportGeometry:
     def to_dict(self) -> dict[str, Any]:
         return {"code": self.code,
                 "reference": {"lat": self.frame.lat0, "lon": self.frame.lon0, "elevation_m": self.frame.alt0},
-                "candidates": [candidate.to_dict() for candidate in self.candidates]}
+                "candidates": [candidate.to_dict() for candidate in self.candidates],
+                "runway_ends": [end.to_dict() for end in self.runway_ends]}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AirportGeometry:
@@ -66,12 +86,14 @@ class AirportGeometry:
         frame = AirportENUFrame.for_airport(AirportReference(
             code=data["code"], lat=reference["lat"], lon=reference["lon"], elevation_msl_m=reference["elevation_m"]))
         return cls(code=data["code"], frame=frame,
-                   candidates=tuple(RunwayCandidate(**item) for item in data["candidates"]))
+                   candidates=tuple(RunwayCandidate(**item) for item in data["candidates"]),
+                   runway_ends=tuple(RunwayEnd(**item) for item in data["runway_ends"]))
 
 
-def airport_geometry(code: str, runway_targets: dict[str, dict[str, Any]]) -> AirportGeometry:
-    """The airport frame and every landing threshold of ``code`` that the arrival manifest's
-    ``runway_targets`` publishes, sorted by ident."""
+def airport_geometry(code: str, runway_targets: dict[str, dict[str, Any]], harvest_runways: Sequence[Any]) -> AirportGeometry:
+    """The airport frame, every landing threshold of ``code`` that the arrival manifest's
+    ``runway_targets`` publishes (sorted by ident), and every runway end of ``harvest_runways``
+    (the harvest's `Runway` objects: ``ident``, ``lat``, ``lon``, ``course_deg``; sorted by ident)."""
     code = code.upper()
     point = airport_reference_point(code)
     frame = AirportENUFrame.for_airport(AirportReference(code=code, lat=point["lat"], lon=point["lon"],
@@ -88,7 +110,39 @@ def airport_geometry(code: str, runway_targets: dict[str, dict[str, Any]]) -> Ai
             course_deg=float(target["course_deg"]) % 360.0, elevation_m=float(target["elevation_msl_m"]),
             length_m=lengths[ident.upper()]))
     candidates.sort(key=lambda item: item.ident)
-    return AirportGeometry(code=code, frame=frame, candidates=tuple(candidates))
+    ends = []
+    for runway in harvest_runways:
+        e, n = frame.horizontal_from_latlon(float(runway.lat), float(runway.lon))
+        ends.append(RunwayEnd(ident=str(runway.ident).upper(), threshold_e_m=float(e), threshold_n_m=float(n),
+                              course_deg=float(runway.course_deg) % 360.0))
+    ends.sort(key=lambda item: item.ident)
+    missing = {c.ident for c in candidates} - {end.ident for end in ends}
+    if missing:
+        raise KeyError(f"{code} candidates {sorted(missing)} are not runway ends the harvest builds")
+    return AirportGeometry(code=code, frame=frame, candidates=tuple(candidates), runway_ends=tuple(ends))
+
+
+def landing_cross_limit_m(geometry: AirportGeometry, index: int, limit_m: float, parallel_delta_deg: float) -> float:
+    """How far off candidate ``index``'s centreline a threshold crossing may lie and still be a
+    landing on it: ``limit_m``, and no more than half the across-course spacing to any runway end of
+    the airport (`AirportGeometry.runway_ends`, the harvest's set) whose course is within
+    ``parallel_delta_deg`` (a parallel runway).
+
+    MIRROR of `trajectory_data_process.harvest.threshold_event._runway_bracket_cross_limit` (the
+    harvest's rule, which the evaluator's observed crossings inherit). It is restated here because
+    the harvest's function is private to it and projects in its own runway frame;
+    `tests/test_instruction_vocabulary.py` checks the two agree on every candidate of every airport."""
+    runway = geometry.candidates[index]
+    halves = []
+    for other in geometry.runway_ends:
+        if other.ident == runway.ident or abs(float(wrap180(runway.course_deg - other.course_deg))) > parallel_delta_deg:
+            continue
+        separation = abs(float(relative_to_runway(np.array([other.threshold_e_m]), np.array([other.threshold_n_m]),
+                                                  np.array([other.course_deg]), np.array([0.0]),
+                                                  runway).right_of_course_m[0]))
+        if separation > 0.0:
+            halves.append(separation / 2.0)
+    return min([limit_m, *halves])
 
 
 @dataclass(frozen=True)

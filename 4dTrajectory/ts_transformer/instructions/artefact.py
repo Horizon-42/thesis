@@ -21,6 +21,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from final_approach import crossing
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.labeller.read import Reading
 from ts_transformer.instructions.signals import SIGNALS_SCHEMA, FlightSignals, pack_signals, unpack_signals
@@ -69,16 +70,22 @@ def load_candidates(directory: Path) -> dict[str, AirportGeometry]:
 #: shown does not change the sentence.
 LABELLER_MODULES = ("spec.py", "words.py", "airport.py", "signals.py", "piecewise.py", "envelope.py", "measure.py",
                     "labeller/*.py")
+#: Modules outside the package whose code decides a sentence: the crossing interpolation the
+#: landing rule shares with the harvest and the evaluator.
+LABELLER_EXTERNAL_MODULES = (crossing,)
 
 
 def labeller_source_sha256() -> str:
-    """sha256 over `LABELLER_MODULES` (relative path and bytes, in path order): the code that
-    reads a flight into a sentence and measures the spec."""
+    """sha256 over `LABELLER_MODULES` (relative path and bytes, in path order) and then
+    `LABELLER_EXTERNAL_MODULES` (module name and bytes): the code that reads a flight into a
+    sentence and measures the spec."""
     package = Path(__file__).resolve().parent
     paths = sorted({path for pattern in LABELLER_MODULES for path in package.glob(pattern)})
     digest = hashlib.sha256()
     for path in paths:
         digest.update(path.relative_to(package).as_posix().encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    for module in LABELLER_EXTERNAL_MODULES:
+        digest.update(module.__name__.encode("utf-8") + b"\0" + Path(module.__file__).read_bytes() + b"\0")
     return digest.hexdigest()
 
 

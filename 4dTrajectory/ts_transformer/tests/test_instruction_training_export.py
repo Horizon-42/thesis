@@ -20,12 +20,15 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
     labeller_source_sha256, write_candidates, write_sentences, write_signals, write_spec,
 )
-from ts_transformer.instructions.labeller.read import admit, read_flight
+from ts_transformer.instructions.labeller.read import admit, read_flight, turn_ends_at
 from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, HEADING, UNCHANGED, Words, wrap180
 from ts_transformer.repo_layout import REPO_ROOT
 from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec as spec
+
+#: The set the exporter names after the reading rule by default.
+SET_ID = READING_RULE.replace("-", "_")
 
 TRAINING_SAMPLE_TS = REPO_ROOT / "aeroviz-4d" / "src" / "data" / "trainingSample.ts"
 
@@ -93,56 +96,42 @@ def test_the_contract_is_the_frontend_reader_s():
 
 
 # ---- display geometry
-def test_the_turn_radius_is_the_envelope_s_bank_read_backwards():
-    radius = display.turn_radius_m(105.0, 25.0)
-    assert radius == pytest.approx(105.0 ** 2 / (9.81 * math.tan(math.radians(25.0))))
-    assert float(envelope.bank_deg_from_turn_rate(math.degrees(105.0 / radius), 105.0)) == pytest.approx(25.0)
-
-
-@pytest.mark.parametrize("turn", [90.0, -60.0, 7.0])
-def test_an_arc_leaves_on_the_track_and_ends_on_the_target(turn):
-    start, radius = np.array([1000.0, -500.0]), 2000.0
-    path = display.arc(start, 45.0, turn, radius)
-    assert np.allclose(path[0], start)
-    bearing = lambda v: math.degrees(math.atan2(v[0], v[1])) % 360.0  # noqa: E731
-    half = math.copysign(abs(turn) / (len(path) - 1) / 2, turn)       # a chord points half a step into the turn
-    assert float(wrap180(bearing(path[1] - path[0]) - (45.0 + half))) == pytest.approx(0.0, abs=1e-6)
-    assert float(wrap180(bearing(path[-1] - path[-2]) - (45.0 + turn - half))) == pytest.approx(0.0, abs=1e-6)
-    side = 45.0 + math.copysign(90.0, turn)                           # the centre lies on the turn's side
-    centre = start + radius * np.array([math.sin(math.radians(side)), math.cos(math.radians(side))])
-    assert np.allclose(np.hypot(*(path - centre).T), radius)
-
-
-def test_the_turn_region_lies_between_the_tightest_and_the_widest_bank():
+def test_the_turn_region_is_the_labeller_s_turn_ends_from_the_issue_point():
     one = spec()
-    region = display.turn_region(np.zeros(2), 0.0, 270.0, 100.0, one)     # a left turn of 90°
-    assert region.turn_deg == pytest.approx(-90.0)
-    assert region.radius_min_m == pytest.approx(display.turn_radius_m(100.0, one.turn_bank_max_deg))
-    assert region.radius_max_m == pytest.approx(display.turn_radius_m(100.0, one.turn_bank_min_deg))
-    # a left turn from north ends west of the start, the widest arc further out than the tightest
-    (e0, e1), (n0, n1) = region.end.e_m, region.end.n_m
-    assert (e0, n0) == pytest.approx((-region.radius_min_m, region.radius_min_m))
-    assert (e1, n1) == pytest.approx((-region.radius_max_m, region.radius_max_m))
-    assert len(region.outline.e_m) == len(region.inner.e_m) + len(region.outer.e_m) - 1
+    flight = admit(_vectored(_key("V")), instruction_airport(), one)
+    row, target = 70, 180.0                                   # on the downwind, told to turn left onto the base
+    region = display.turn_region(flight, row, target, one)
+    ends = turn_ends_at(flight, row, target, one)
+    start = np.array([flight.signals.e_m[row], flight.signals.n_m[row]])
+    assert region.turn_deg == pytest.approx(float(wrap180(target - flight.smoothed.track_deg[row])))
+    assert region.slow_finished == ends.finished
+    corners = np.column_stack((region.end.e_m, region.end.n_m))
+    assert corners == pytest.approx(start + ends.corners)
+    # the region runs from the issue point round the fastest turn, and back along the slowest turn
+    # begun as late as allowed to the late start: the issue speed × the latest delay along the track
+    outline = np.column_stack((region.outline.e_m, region.outline.n_m))
+    track = math.radians(float(flight.smoothed.track_deg[row]))
+    late = float(flight.smoothed.ground_speed_mps[row]) * one.turn_start_delay_max_s * np.array([math.sin(track),
+                                                                                                 math.cos(track)])
+    assert outline[0] == pytest.approx(start) and outline[-1] == pytest.approx(start + late)
+    assert (region.fast.e_m[-1], region.fast.n_m[-1]) == pytest.approx(tuple(corners[0]))
 
 
-def test_the_funnel_starts_as_the_turn_end_and_widens_by_the_tolerance():
+def test_the_funnel_starts_where_the_turn_may_end_and_widens_by_the_tolerance():
     one = spec()
-    end = display.Line.of([[0.0, 0.0], [0.0, 400.0]])                    # 400 m across a hold heading east
-    funnel = display.funnel(end, 90.0, 5000.0, one)
+    tolerance = one.heading_tolerance_deg
+    funnel = display.funnel(envelope.hold_funnel(np.array([[0.0, 0.0], [0.0, 400.0]]), 90.0, tolerance, 5000.0),
+                            90.0)                                                    # 400 m across a hold heading east
     assert funnel.start_half_width_m == pytest.approx(200.0)
     assert funnel.end_half_width_m == pytest.approx(200.0 + 5000.0 * math.tan(math.radians(one.heading_tolerance_deg)))
     assert (funnel.axis.e_m[0], funnel.axis.n_m[0]) == pytest.approx((0.0, 200.0))
     assert (funnel.axis.e_m[1], funnel.axis.n_m[1]) == pytest.approx((5000.0, 200.0))
-    # the turn end SWEPT along θ: the funnel starts where the turn end does, not ahead of it
+    # the start SWEPT along θ: the funnel starts where the turn may end, not ahead of it
     east = np.array(funnel.outline.e_m)
     assert east.min() == pytest.approx(0.0) and east.max() == pytest.approx(5000.0)
     assert {(0.0, 0.0), (0.0, 400.0)} <= {(round(e, 6), round(n, 6)) for e, n in zip(funnel.outline.e_m, funnel.outline.n_m)}
-    # a turn end slanted along θ (the widest arc ends further on): the rear end is still a corner
-    slanted = display.funnel(display.Line.of([[0.0, 0.0], [3000.0, 400.0]]), 90.0, 5000.0, one)
-    assert np.array(slanted.outline.e_m).min() == pytest.approx(0.0)
     # no turn flown: the funnel is one cone from the point itself
-    cone = display.funnel(display.Line.of([[3.0, 4.0]]), 0.0, 1000.0, one)
+    cone = display.funnel(envelope.hold_funnel(np.array([[3.0, 4.0]]), 0.0, tolerance, 1000.0), 0.0)
     assert cone.start_half_width_m == 0.0 and len(cone.outline.e_m) == 3
 
 
@@ -161,6 +150,12 @@ def test_the_flight_envelopes_follow_the_labeller():
     # the last hold ends where the labeller's capture turn begins, and the turn region ends on θ
     assert turned.hold_end_row == reading.checks["capture_turn"]["start_row"] == envelopes.capture_turn.start_row
     assert turned.turn.turn_deg == pytest.approx(float(wrap180(180.0 - admitted.smoothed.track_deg[turned.word.row])))
+    # a judged hold is drawn over the rows the labeller judged, with the labeller's own funnel
+    for item in envelopes.heading:
+        if item.hold_check is not None:
+            assert (item.hold_start_row, item.hold_end_row) == (item.hold_check["hold_start"], item.hold_check["hold_end"])
+            assert item.funnel.end_half_width_m == pytest.approx(item.hold_check["half_width_end_m"])
+    assert sum(1 for item in envelopes.heading if item.funnel is not None) == reading.checks["holds"]
     # the tubes are `tube_bounds` itself, with the labeller's own verdict
     for tube, (word, end, low, high) in zip(envelopes.altitude, tube_bounds(reading.instructions, admitted.smoothed.distance_m,
                                                                             admitted.smoothed.altitude_m, one, words)):
@@ -187,12 +182,12 @@ def test_the_export_draws_both_strata_and_adds_its_set_to_the_index(tmp_path):
     index = json.loads((training / "index.json").read_text(encoding="utf-8"))
     assert index["schema"] == export.INDEX_SCHEMA and index["sets"][0] == old          # the old set, untouched
     entry = index["sets"][1]
-    assert entry["id"] == "instruction_v1" and entry["readingRule"] == READING_RULE
+    assert entry["id"] == SET_ID and entry["readingRule"] == READING_RULE
     assert entry["vocabularySha256"] == one.sha256
     assert entry["runwaySha256"] == export.candidates_sha256(instruction_airport())
     assert entry["flights"] == 2 and entry["cohort"]["perStratum"] == 1 and "4 labelled val flights" in entry["cohort"]["drawnFrom"]
 
-    sample = json.loads((training / "instruction_v1" / "sample.json").read_text(encoding="utf-8"))
+    sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
     assert sample["schema"] == export.SAMPLE_SCHEMA and sample["vocabulary"]["specSha256"] == one.sha256
     assert sample["vocabulary"]["columns"] == list(COLUMNS)
     assert sorted(f["stratum"] for f in sample["flights"]) == ["straight-in", "vectored"]
@@ -211,7 +206,7 @@ def test_the_export_draws_both_strata_and_adds_its_set_to_the_index(tmp_path):
 def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_path):
     _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))])
     assert _run(tmp_path) == 0
-    sample = json.loads((tmp_path / "airports" / "KXXX" / "training" / "instruction_v1" / "sample.json").read_text())
+    sample = json.loads((tmp_path / "airports" / "KXXX" / "training" / SET_ID / "sample.json").read_text())
     flight = next(f for f in sample["flights"] if f["stratum"] == "vectored")
     rows = flight["rows"]
     assert flight["datasetId"] == _key("V1") and flight["flightKey"] == "V1_09_abc123_20260101T000000Z"
@@ -241,7 +236,8 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
     heading = flight["envelopes"]["heading"]
     assert heading[0]["turn"] is None and heading[0]["check"] is None
     turned = heading[1]
-    assert turned["turn"]["radiusMinM"] < turned["turn"]["radiusMaxM"]
+    assert turned["turn"]["rateMinDegS"] < turned["turn"]["rateMaxDegS"] and turned["turn"]["slowFinished"]
+    assert len(turned["turn"]["slowPath"]["eM"]) > len(turned["turn"]["fastPath"]["eM"])
     assert len(turned["turn"]["region"]["lon"]) == len(turned["turn"]["region"]["eM"]) >= 3
     assert turned["check"]["progressOk"] is True
     approach = flight["envelopes"]["approach"]
@@ -265,7 +261,7 @@ def test_a_flight_whose_stored_sentence_differs_from_its_reading_stops_the_expor
     _artefact(tmp_path / "artefact", flights, readings)
     with pytest.raises(SystemExit, match="V1_09_abc123_20260101T000000Z: re-read heading word"):
         _run(tmp_path)
-    assert not (tmp_path / "airports" / "KXXX" / "training" / "instruction_v1").exists()
+    assert not (tmp_path / "airports" / "KXXX" / "training" / SET_ID).exists()
 
 
 def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path, monkeypatch):
@@ -292,9 +288,9 @@ def test_an_index_already_listing_the_set_is_refused_before_anything_is_written(
     training = tmp_path / "airports" / "KXXX" / "training"
     training.mkdir(parents=True)
     listed = {"schema": export.INDEX_SCHEMA, "writtenUtc": "x", "airport": "KXXX",
-              "sets": [{"id": "instruction_v1"}]}
+              "sets": [{"id": SET_ID}]}
     (training / "index.json").write_text(json.dumps(listed), encoding="utf-8")
-    with pytest.raises(SystemExit, match="already lists set instruction_v1"):
+    with pytest.raises(SystemExit, match="already lists set " + SET_ID):
         _run(tmp_path)
     assert json.loads((training / "index.json").read_text(encoding="utf-8")) == listed
-    assert not (training / "instruction_v1").exists()
+    assert not (training / SET_ID).exists()

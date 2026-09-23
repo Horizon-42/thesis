@@ -4,10 +4,12 @@ The design's rule is ONE implementation of the envelopes for the labeller's chec
 limits and the display (§1 principle 4). This module is the display side, built only from the
 public functions of `envelope.py` and `labeller/*`:
 
-- a turn's radius is the inverse of `envelope.bank_deg_from_turn_rate` (and checked against it:
-  a turn at the radius's rate has exactly that bank);
-- a hold's funnel widens by `envelope.funnel_half_width_m`, the capture corridor by
-  `envelope.corridor_half_width_m`, and its rows are judged by `envelope.corridor`;
+- a heading word's rows are `labeller.lateral.heading_spans`, its turn region and where its turn
+  may end are `labeller.read.turn_ends_at` (`envelope.turn_ends`), and its hold funnel is
+  `envelope.hold_funnel` over the same span — the very sets the labeller's hold check judges
+  (`envelope.hold_funnel_contains`), so what is drawn is what was judged;
+- the capture corridor widens by `envelope.corridor_half_width_m`, and its rows are judged by
+  `envelope.corridor`;
 - the altitude tubes ARE `labeller.vertical.tube_bounds`; the speed spans' band rows are judged by
   `envelope.speed_band`, and counted against the labeller's own `labeller.speed.span_checks`;
 - every verdict shown is the labeller's own (`Reading.checks`), never recomputed.
@@ -17,21 +19,11 @@ drawn does not change the sentence. Everything is in the airport frame (metres e
 airport reference point, geometric MSL, compass degrees true, seconds); the exporter adds the
 geodesy (latitude / longitude, the ellipsoid heights Cesium draws in).
 
-Two readings of the design that this module makes, both stated where they are made:
-
-- the TURN REGION is swept by the arcs of every bank in [`turn_bank_min_deg`, `turn_bank_max_deg`]
-  at the issue ground speed, turning the shorter way to θ. The labeller applies the lowest bank
-  only to turns of at least `turn_bank_min_from_deg` (a smaller change of the ground track is
-  mostly wind drift); the region is still drawn with the full range, and the word's verdict says
-  whether the lowest bank applied (`bank_min_applies`).
-- the HOLD FUNNEL starts where the turn ends. The turn ends somewhere on the segment between the
-  tightest and the widest arc's end (which one depends on the bank flown), and from wherever it
-  ends the hold may wander off the line along θ by the distance flown × tan(`heading_tolerance_deg`).
-  So the funnel is that segment SWEPT along θ, every point of it opening its own ±tolerance cone:
-  across θ it is the segment's half extent + distance × tan (the design's "转弯段末的宽度 + 已飞
-  距离 × tan δψ"), and along θ it starts where the segment starts — at the tightest turn's end, not
-  at some midpoint ahead of a normally banked aircraft. A word the flight was already holding when
-  the slice began has no turn: its funnel is the one cone from the issue point.
+One reading the display makes, stated here: the TURN REGION of a turn smaller than
+`turn_rate_min_from_deg` is still drawn with the lowest rate, though the labeller applies that rate
+only to larger turns (a smaller change of the ground track is mostly wind drift); the word's
+verdict says whether it applied (`rate_min_applies`). A word the flight was already flying at entry
+has no turn: its funnel is the one cone from the issue point.
 """
 
 from __future__ import annotations
@@ -42,18 +34,14 @@ from typing import Any
 
 import numpy as np
 
-from aerodynamic_model.common import GRAVITY_MPS2
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import RunwayCandidate
-from ts_transformer.instructions.labeller.read import Admitted, Reading
+from ts_transformer.instructions.labeller.lateral import heading_spans
+from ts_transformer.instructions.labeller.read import Admitted, Reading, span_funnel, turn_ends_at
 from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import ANGLE, ANGLE_LEVEL, HEADING, SPEED, Words, wrap180
-
-#: One outline point per this many degrees of an arc. A drawing resolution, not an envelope value.
-ARC_STEP_DEG = 2.0
-
+from ts_transformer.instructions.words import ANGLE, ANGLE_LEVEL, SPEED, Words, wrap180
 
 # ---- plane geometry (compass bearings: 0 = north, clockwise; unit vector (sin b, cos b) in (E, N))
 def _unit(bearing_deg: float) -> np.ndarray:
@@ -80,111 +68,57 @@ class Line:
 
 
 # ---- turns
-def turn_radius_m(ground_speed_mps: float, bank_deg: float) -> float:
-    """The radius of a coordinated turn at this bank and ground speed: R = V² / (g·tan φ).
-
-    The inverse of `envelope.bank_deg_from_turn_rate` — a turn flown at rate V / R has bank φ —
-    and checked against it, so the radius drawn and the bank the labeller judges cannot part."""
-    radius = ground_speed_mps ** 2 / (GRAVITY_MPS2 * math.tan(math.radians(bank_deg)))
-    back = float(envelope.bank_deg_from_turn_rate(math.degrees(ground_speed_mps / radius), ground_speed_mps))
-    if not math.isclose(back, bank_deg, rel_tol=1e-9, abs_tol=1e-9):
-        raise RuntimeError(f"the turn radius for {bank_deg}° at {ground_speed_mps} m/s reads back as {back}° "
-                           f"through envelope.bank_deg_from_turn_rate: the display and the envelope disagree")
-    return radius
-
-
-def arc(start: np.ndarray, track_deg: float, turn_deg: float, radius_m: float) -> np.ndarray:
-    """``[points, 2]``: the path of a constant-radius turn from ``start`` on ``track_deg``, through
-    ``turn_deg`` (positive = right, clockwise)."""
-    side = 1.0 if turn_deg >= 0.0 else -1.0
-    centre = start + radius_m * _right(track_deg) * side
-    count = max(2, math.ceil(abs(turn_deg) / ARC_STEP_DEG) + 1)
-    return np.array([centre + radius_m * _unit(track_deg + side * (progress - 90.0))
-                     for progress in np.linspace(0.0, abs(turn_deg), count)])
-
-
 @dataclass(frozen=True)
 class TurnRegion:
-    """Where a turn from ``start`` may take the aircraft: the region the arcs of every allowed
-    bank sweep (§2.3). ``turn_deg`` is the shorter way to the target (positive = right)."""
+    """Where a turn from its issue point may take the aircraft (§2.3, `envelope.TurnEnds`): between
+    the fastest and the slowest turn, flown at the speeds the flight flew, begun on time or as late
+    as allowed. ``turn_deg`` is the shorter way to the target (positive = right)."""
 
     from_track_deg: float
     turn_deg: float
-    ground_speed_mps: float
-    radius_min_m: float          # at the highest bank
-    radius_max_m: float          # at the lowest bank
-    inner: Line                  # the tightest arc, start → its end
-    outer: Line                  # the widest arc, start → its end
-    outline: Line                # inner arc, then the widest arc back to the start
-    end: Line                    # the turn's end: the tightest arc's end → the widest arc's end
+    rate_min_deg_s: float
+    rate_max_deg_s: float
+    bank_max_deg: float
+    start_delay_max_s: float
+    fast: Line                   # the fastest turn, begun on time, to where its track enters θ's band
+    slow: Line                   # the slowest turn, likewise (or to the flight's end)
+    slow_finished: bool          # the slowest turn gets there before the flight ends
+    outline: Line                # `envelope.TurnEnds.outline`
+    end: Line                    # where the turn may end: `envelope.TurnEnds.corners`, a parallelogram
 
 
-def turn_region(start: np.ndarray, from_track_deg: float, target_deg: float, ground_speed_mps: float,
-                spec: VocabularySpec) -> TurnRegion:
-    turn = float(wrap180(target_deg - from_track_deg))
-    radius_min = turn_radius_m(ground_speed_mps, spec.turn_bank_max_deg)
-    radius_max = turn_radius_m(ground_speed_mps, spec.turn_bank_min_deg)
-    inner = arc(start, from_track_deg, turn, radius_min)
-    outer = arc(start, from_track_deg, turn, radius_max)
+def turn_region(flight: Admitted, row: int, target_deg: float, spec: VocabularySpec) -> TurnRegion:
+    ends = turn_ends_at(flight, row, target_deg, spec)
+    start = np.array([flight.signals.e_m[row], flight.signals.n_m[row]])
+    track = float(flight.smoothed.track_deg[row])
     return TurnRegion(
-        from_track_deg=float(from_track_deg % 360.0), turn_deg=turn, ground_speed_mps=float(ground_speed_mps),
-        radius_min_m=radius_min, radius_max_m=radius_max, inner=Line.of(inner), outer=Line.of(outer),
-        outline=Line.of(np.concatenate((inner, outer[::-1][:-1]))), end=Line.of([inner[-1], outer[-1]]))
+        from_track_deg=track % 360.0, turn_deg=float(wrap180(target_deg - track)),
+        rate_min_deg_s=spec.turn_rate_min_deg_s, rate_max_deg_s=spec.turn_rate_max_deg_s,
+        bank_max_deg=spec.turn_bank_max_deg, start_delay_max_s=spec.turn_start_delay_max_s,
+        fast=Line.of(start + ends.fast), slow=Line.of(start + ends.slow), slow_finished=ends.finished,
+        outline=Line.of(start + ends.outline), end=Line.of(start + ends.corners))
 
 
 # ---- holds
-def convex_hull(points: np.ndarray) -> np.ndarray:
-    """``[k, 2]``: the convex hull of ``[n, 2]`` points, counter-clockwise in (E, N), without
-    repeating the first point (Andrew's monotone chain)."""
-    unique = sorted({(float(e), float(n)) for e, n in points})
-    if len(unique) < 3:
-        return np.array(unique)
-
-    def cross(o, a, b) -> float:
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-    lower: list[tuple[float, float]] = []
-    upper: list[tuple[float, float]] = []
-    for point in unique:
-        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
-            lower.pop()
-        lower.append(point)
-    for point in reversed(unique):
-        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
-            upper.pop()
-        upper.append(point)
-    return np.array(lower[:-1] + upper[:-1])
-
-
 @dataclass(frozen=True)
 class Funnel:
-    """A hold's allowed positions (§2.3): the turn's end swept along θ, widening by the tolerance."""
+    """A hold's allowed positions over its span (§2.3, `envelope.hold_funnel`)."""
 
     target_deg: float
     length_m: float
-    #: The turn end's half extent across θ, and that plus the widening after ``length_m``.
+    #: Where the turn may end, its half extent across θ; and that plus the widening after ``length_m``.
     start_half_width_m: float
     end_half_width_m: float
-    axis: Line                   # the nominal line along θ, through the turn end's middle
+    axis: Line                   # the nominal line along θ, through the middle of where the turn may end
     outline: Line
 
 
-def funnel(turn_end: Line, target_deg: float, length_m: float, spec: VocabularySpec) -> Funnel:
-    """``turn_end`` (one point when no turn was flown) swept ``length_m`` along θ, every point of
-    it opening a cone of `envelope.funnel_half_width_m`: the convex hull of the turn end and of each
-    of its points moved ``length_m`` along θ and that far off to either side (the sum of a segment
-    and a cone is convex)."""
-    ends = np.column_stack((turn_end.e_m, turn_end.n_m))
-    along, right = _unit(target_deg), _right(target_deg)
-    spread = float(envelope.funnel_half_width_m(length_m, spec.heading_tolerance_deg))
-    far = ends + length_m * along
-    middle = ends.mean(axis=0)
-    across = (ends - middle) @ right
-    start_width = float((across.max() - across.min()) / 2.0)
-    return Funnel(
-        target_deg=float(target_deg % 360.0), length_m=float(length_m), start_half_width_m=start_width,
-        end_half_width_m=start_width + spread, axis=Line.of([middle, middle + length_m * along]),
-        outline=Line.of(convex_hull(np.vstack((ends, far - spread * right, far + spread * right)))))
+def funnel(shape: envelope.HoldFunnel, target_deg: float) -> Funnel:
+    """A funnel to draw, with its axis through the middle of where the turn may end."""
+    middle = shape.starts.mean(axis=0)
+    return Funnel(target_deg=float(target_deg % 360.0), length_m=shape.length_m,
+                  start_half_width_m=shape.start_half_width_m, end_half_width_m=shape.end_half_width_m,
+                  axis=Line.of([middle, middle + shape.length_m * _unit(target_deg)]), outline=Line.of(shape.outline))
 
 
 def on_branch(reference_deg: float, target_deg: float) -> float:
@@ -218,63 +152,43 @@ class HeadingEnvelope:
     #: The labeller's check of the turn this word belongs to (`Reading.checks["turns"]`) — shared by
     #: the parts of a split turn; ``None`` for a word the flight was already holding.
     turn_check: dict[str, Any] | None
+    #: The labeller's check of this word's hold position (`Reading.checks["hold_positions"]`):
+    #: ``None`` for a hold it does not judge (`Reading.checks["holds_not_judged"]` counts why).
+    hold_check: dict[str, Any] | None
     turn: TurnRegion | None
     funnel: Funnel | None
 
 
-def _turn_check(word: Instruction, turns: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The turn check a heading word belongs to: the one it DEPARTS (a single turn, or a split
-    turn's first part), or the split turn it continues (a later part, issued mid-turn)."""
-    if word.kind == "initial":
-        return None
-    kind = word.kind.removesuffix("-split")
-    if word.info["part"] == 1:
-        found = [t for t in turns if t["kind"] == kind and t["departure_row"] == word.row]
-    else:
-        found = [t for t in turns if t["kind"] == kind and t["departure_row"] < word.row <= t["arrival_row"]]
-    if len(found) != 1:
-        raise ValueError(f"heading word {word.kind} at row {word.row}: {len(found)} turn checks cover it")
-    return found[0]
-
-
 def heading_envelopes(flight: Admitted, reading: Reading, spec: VocabularySpec, words: Words) -> list[HeadingEnvelope]:
-    smoothed = flight.smoothed
-    track, speed, distance = smoothed.track_deg, smoothed.ground_speed_mps, smoothed.distance_m
-    positions = np.column_stack((flight.signals.e_m, flight.signals.n_m))
-    heading = sorted((i for i in reading.instructions if i.column == HEADING), key=lambda item: item.row)
-    capture = reading.checks["capture_turn"]
-    last_end = reading.capture_row if capture is None else int(capture["start_row"])
-    ends = [w.row for w in heading[1:]] + [last_end]
+    track = flight.smoothed.track_deg
     tolerance = spec.heading_tolerance_deg
+    judged = {h["issue_row"]: h for h in reading.checks["hold_positions"]}
     result = []
-    for word, hold_end in zip(heading, ends):
-        check = _turn_check(word, reading.checks["turns"])
+    for span in heading_spans(reading.instructions, reading.checks["turns"], reading.checks["capture_turn"],
+                              reading.capture_row):
+        word = span.word
         target = words.heading_deg(word.value)
         start_track = float(track[word.row])
         target_on_track = on_branch(start_track, target)
-        if check is None:
-            hold_start: int | None = word.row
+        if span.turn is None:
             turn_end_row: int | None = None
             region, turn_band = None, None
-            turn_end = Line.of([positions[word.row]])
         else:
-            hold_start = int(check["arrival_row"]) if word.info["part"] == word.info["parts"] else None
-            turn_end_row = int(hold_end) if hold_start is None else hold_start
-            region = turn_region(positions[word.row], start_track, target, float(speed[word.row]), spec)
+            turn_end_row = span.hold_end if span.hold_start is None else span.hold_start
+            region = turn_region(flight, word.row, target, spec)
             low, high = sorted((start_track, target_on_track))
             turn_band = (low - tolerance, high + tolerance)
-            turn_end = region.end
-        held = hold_start is not None and hold_end > hold_start
-        drawn = funnel(turn_end, target, float(distance[hold_end] - distance[hold_start]), spec) if held else None
+        drawn = funnel(span_funnel(flight, span, target, spec)[1], target) if span.held else None
         result.append(HeadingEnvelope(
-            word=word, target_deg=target, turn_end_row=turn_end_row, hold_start_row=hold_start if held else None, hold_end_row=int(hold_end),
+            word=word, target_deg=target, turn_end_row=turn_end_row,
+            hold_start_row=span.hold_start if span.held else None, hold_end_row=span.hold_end,
             from_track_deg=start_track, target_on_track_deg=target_on_track, turn_band_deg=turn_band,
-            hold_band_deg=(target_on_track - tolerance, target_on_track + tolerance) if held else None,
-            turn_check=check, turn=region, funnel=drawn))
+            hold_band_deg=(target_on_track - tolerance, target_on_track + tolerance) if span.held else None,
+            turn_check=span.turn, hold_check=judged.get(word.row) if span.held else None, turn=region,
+            funnel=drawn))
     return result
 
 
-# ---- the approach
 def centreline(candidate: RunwayCandidate, length_m: float) -> Line:
     """The extended centreline, from the threshold out along the approach side."""
     threshold = np.array([candidate.threshold_e_m, candidate.threshold_n_m])
@@ -346,11 +260,9 @@ def capture_turn(flight: Admitted, reading: Reading, spec: VocabularySpec) -> Ca
     track = float(flight.smoothed.track_deg[start])
     course = on_branch(track, flight.candidate.course_deg)
     low, high = sorted((track, course))
-    position = np.array([flight.signals.e_m[start], flight.signals.n_m[start]])
     return CaptureTurn(start_row=start, course_on_track_deg=course, check=check,
                        band_deg=(low - spec.heading_tolerance_deg, high + spec.heading_tolerance_deg),
-                       region=turn_region(position, track, flight.candidate.course_deg,
-                                          float(flight.smoothed.ground_speed_mps[start]), spec))
+                       region=turn_region(flight, start, flight.candidate.course_deg, spec))
 
 
 def course_band_deg(flight: Admitted, reading: Reading, spec: VocabularySpec) -> tuple[float, float]:

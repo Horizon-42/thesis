@@ -3,8 +3,11 @@
 The flights are the live harvest's eligible arrivals, split by `data.splits` (the outer test
 split's tracks are never opened), built by the ts data plane (`build_series` + `usable_series`
 under the default `TSConfig`, so the population and preprocessing are the models' own) and
-projected into each airport's frame (`instructions.signals`). Writes ``signals_{train,val}.npz``,
-``signals.json`` and ``candidates.json`` into a NEW directory.
+projected into each airport's frame (`instructions.signals`). The candidates are each manifest's
+published runway geometry; beside them go every runway end the harvest builds, from the
+configuration and CIFP the harvest and the evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`,
+`DEFAULT_CIFP`). Writes ``signals_{train,val}.npz``, ``signals.json`` and ``candidates.json`` into a
+NEW directory.
 
     python run_ts.py instruction_signals --out 4dTrajectory/outputs/POOLED/instruction_language/<name>
 """
@@ -20,6 +23,8 @@ from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
+from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
+from trajectory_data_process.harvest.airports import load_airport
 from ts_transformer.config import TSConfig
 from ts_transformer.data.data_provenance import arrival_data_provenance
 from ts_transformer.data.lateral_eligibility import default_lateral_pass_roster_path
@@ -66,8 +71,10 @@ def main(argv: list[str] | None = None) -> int:
     rosters = [default_lateral_pass_roster_path(m) for m in manifests]
     provenance = arrival_data_provenance(manifests, eligibility_rosters=rosters)
     keys = flight_keys_by_split(provenance, config)
-    # the candidates: each manifest's published runway geometry (the modeling target's own source)
-    geometries = {a: airport_geometry(a, json.loads(m.read_text(encoding="utf-8"))["runway_targets"])
+    # the candidates: each manifest's published runway geometry (the modeling target's own source),
+    # and every runway end the harvest builds (its landing rule's parallel runways)
+    geometries = {a: airport_geometry(a, json.loads(m.read_text(encoding="utf-8"))["runway_targets"],
+                                      load_airport(a, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
                   for a, m in zip(airports, manifests)}
 
     jobs = []
@@ -114,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
         "counts": {split: {"requested": len(keys[split]), "built_usable": len(collected[split]),
                            "skipped": dict(skipped[split]), "too_short_for_one_window": unusable[split]}
                    for split in SPLITS},
+        "runway_ends_from": {"config": str(DEFAULT_CONFIG), "config_sha256": file_sha256(DEFAULT_CONFIG),
+                             "cifp": str(DEFAULT_CIFP), "cifp_sha256": file_sha256(DEFAULT_CIFP)},
         "test_flights_not_opened": len(keys["test"]),
         "limit_per_airport_and_split": args.limit or None,
         "typecodes": dict(typecodes.most_common()),

@@ -119,16 +119,22 @@ def test_compass_and_math_headings_round_trip():
 
 # ---- airport
 def test_the_candidates_are_the_published_geometry_with_the_configured_length():
+    ends = [SimpleNamespace(ident="23R", lat=35.8937988, lon=-78.7779999, course_deg=225.3),
+            SimpleNamespace(ident="05L", lat=35.8753, lon=-78.7970, course_deg=45.3)]
     geometry = airport_geometry("KRDU", {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7,
-                                                 "course_deg": 225.3}})
+                                                 "course_deg": 225.3}}, ends)
     (candidate,) = geometry.candidates
     assert candidate.ident == "23R"
     assert candidate.course_deg == pytest.approx(225.3)
     assert candidate.length_m == pytest.approx(3048.0)
     assert (candidate.threshold_e_m, candidate.threshold_n_m) == pytest.approx((843.0, 1683.0), abs=15.0)
+    assert [end.ident for end in geometry.runway_ends] == ["05L", "23R"]      # every runway end, not only candidates
     assert AirportGeometry.from_dict(geometry.to_dict()) == geometry
     with pytest.raises(KeyError):
         geometry.candidate_index("05L")
+    with pytest.raises(KeyError, match="not runway ends the harvest builds"):
+        airport_geometry("KRDU", {"23R": {"lat": 35.8937988, "lon": -78.7779999, "elevation_msl_m": 124.7,
+                                          "course_deg": 225.3}}, ends[1:])
 
 
 def test_relative_position_signs(geometry):
@@ -223,10 +229,93 @@ def test_turn_and_speed_progress():
     assert envelope.turn_progress_ok(np.array([0.0, 20.0, 50.0, 88.0, 90.0]), 90.0, 4.5)
     assert not envelope.turn_progress_ok(np.array([0.0, 30.0, 20.0, 90.0]), 90.0, 4.5)
     assert not envelope.turn_progress_ok(np.array([0.0, 50.0, 100.0]), 90.0, 4.5)
-    assert envelope.turn_bank_ok(90.0, 12.0, 30.0, 6.0, 33.0, 10.0)
-    assert not envelope.turn_bank_ok(90.0, 4.0, 30.0, 6.0, 33.0, 10.0)      # a slow large turn
-    assert envelope.turn_bank_ok(-5.0, 1.0, 3.0, 6.0, 33.0, 10.0)           # a small change of track: no lower bound
-    assert not envelope.turn_bank_ok(-5.0, 12.0, 35.0, 6.0, 33.0, 10.0)     # but never beyond the highest bank
+    ok = lambda turn, mean, top, bank: envelope.turn_rate_ok(turn, mean, top, bank, 1.0, 3.5, 32.0, 10.0)  # noqa: E731
+    assert ok(90.0, 2.0, 2.5, 20.0)
+    assert not ok(90.0, 0.8, 2.5, 20.0)          # a slow large turn
+    assert ok(-5.0, 0.2, 0.4, 2.0)               # a small change of track: no lower bound
+    assert not ok(-5.0, 2.0, 4.0, 20.0)          # but never faster than the highest rate
+    assert not ok(90.0, 2.0, 3.0, 33.0)          # nor steeper than the highest bank
+
+
+def test_a_constant_rate_turn_at_constant_speed_is_an_arc_and_the_bank_limit_slows_it():
+    speeds = np.full(200, 100.0)
+    radius = 100.0 / math.radians(2.0)
+    # a left turn from north at 2°/s: 90° is 22.5 steps, so it ends halfway through the 23rd step
+    path, finished = envelope.turn_path(0.0, -90.0, speeds, 2.0, 2.0, 45.0, within_deg=0.0)
+    assert finished and len(path) == 24
+    assert path[-1] == pytest.approx((-radius, radius), abs=5.0)
+    # a hold begins where the track comes within the tolerance: 85.5° turned, inside the 22nd step
+    path, finished = envelope.turn_path(0.0, -90.0, speeds, 2.0, 2.0, 45.0, within_deg=4.5)
+    turned = math.radians(85.5)
+    assert finished and len(path) == 23
+    assert path[-1] == pytest.approx((-radius * (1.0 - math.cos(turned)), radius * math.sin(turned)), abs=5.0)
+    # 5°/s would need 41.7° of bank at 100 m/s; with a 20° limit it turns at g·tan 20° / V
+    limited, _ = envelope.turn_path(0.0, 90.0, speeds, 2.0, 5.0, 20.0, within_deg=0.0)
+    wide = 100.0 / (9.81 * math.tan(math.radians(20.0)) / 100.0)
+    assert limited[-1] == pytest.approx((wide, wide), abs=5.0)
+    # a flight that ends first: the path runs to its last row, unfinished
+    short, finished = envelope.turn_path(0.0, 90.0, speeds[:10], 2.0, 2.0, 45.0, within_deg=4.5)
+    assert not finished and len(short) == 10
+    # nothing to turn: the issue point
+    none, finished = envelope.turn_path(0.0, 3.0, speeds, 2.0, 2.0, 45.0, within_deg=4.5)
+    assert finished and none.tolist() == [[0.0, 0.0]]
+
+
+def _in_funnel(points, starts, target_deg, length_m, tolerance_deg=4.5):
+    return envelope.inside_convex(np.atleast_2d(points),
+                                  envelope.hold_funnel(starts, target_deg, tolerance_deg, length_m).outline).tolist()
+
+
+def test_the_turn_ends_are_the_two_extreme_turns_and_the_latest_start():
+    speeds = np.full(300, 100.0)
+    ends = envelope.turn_ends(0.0, -90.0, speeds, 2.0, 0.5, 4.0, 32.0, 4.5, 10.0)
+    assert ends.finished
+    turned = math.radians(85.5)
+    fast = 100.0 / (9.81 * math.tan(math.radians(32.0)) / 100.0)     # 4°/s needs 35°: bank-limited
+    slow = 100.0 / math.radians(0.5)
+    arc = lambda r: (-r * (1.0 - math.cos(turned)), r * math.sin(turned))  # noqa: E731
+    assert ends.fast[-1] == pytest.approx(arc(fast), abs=5.0) and ends.slow[-1] == pytest.approx(arc(slow), abs=5.0)
+    assert ends.late == pytest.approx((0.0, 1000.0))                   # 10 s at 100 m/s along the issue track (north)
+    assert ends.corners == pytest.approx(np.array([ends.fast[-1], ends.slow[-1], ends.slow[-1] + ends.late,
+                                                   ends.fast[-1] + ends.late]))
+    # the region: from the issue point round the fastest turn, across the ends, back along the
+    # slowest turn begun late, to the late start
+    assert ends.outline[0] == pytest.approx((0.0, 0.0)) and ends.outline[-1] == pytest.approx((0.0, 1000.0))
+    # any turn in between, begun up to the latest start, ends where the hold funnel begins
+    for rate, delay in ((0.7, 0.0), (2.0, 5.0), (3.0, 10.0)):
+        path, _ = envelope.turn_path(0.0, -90.0, speeds, 2.0, rate, 32.0, within_deg=4.5)
+        end = path[-1] + (0.0, 100.0 * delay)
+        ahead = end + (-50.0, 0.0)                                             # 50 m on along θ (west)
+        assert _in_funnel(ahead, ends.corners, 270.0, 100.0) == [True], (rate, delay)
+    # a small turn at an in-between rate enters the band between rows — its entry point, not the row
+    # after it, lies between the extremes (a 12° turn at 2°/s begun on time)
+    small = envelope.turn_ends(0.0, -12.0, speeds, 2.0, 0.5, 4.0, 32.0, 4.5, 10.0)
+    path, _ = envelope.turn_path(0.0, -12.0, speeds, 2.0, 2.0, 32.0, within_deg=4.5)
+    beyond = path[-1] + 50.0 * np.array([math.sin(math.radians(348.0)), math.cos(math.radians(348.0))])
+    assert _in_funnel(beyond, small.corners, 348.0, 100.0) == [True]
+
+
+def test_a_hold_funnel_is_where_the_turn_may_end_swept_along_its_heading():
+    segment = np.array([[0.0, 0.0], [0.0, 1000.0]])                        # the ends lie across an eastbound θ
+    spread = lambda angle: 5000.0 * math.tan(math.radians(angle))           # noqa: E731
+    points = np.array([[5000.0, 500.0], [5000.0, 1000.0 + spread(4.4)], [5000.0, 1000.0 + spread(4.6)],
+                       [-100.0, 500.0],
+                       [100.0, 525.0],        # just ahead of the segment's middle: in the exact set, not a sampled one
+                       [7000.0, 500.0]])      # further along θ than the hold has flown: outside
+    assert _in_funnel(points, segment, 90.0, 6000.0) == [True, True, False, False, True, False]
+    funnel = envelope.hold_funnel(segment, 90.0, 4.5, 5000.0)
+    assert funnel.start_half_width_m == pytest.approx(500.0)
+    assert funnel.end_half_width_m == pytest.approx(500.0 + spread(4.5))
+    assert envelope.inside_convex(points[:1], funnel.outline).tolist() == [True]
+    # a turn that may start 10 s late (issue track 000 at 100 m/s) may end up to 1 km further north
+    late = np.vstack((segment, segment[::-1] + (0.0, 1000.0)))
+    assert _in_funnel([3000.0, 1900.0], late, 90.0, 3500.0) == [True]
+    assert _in_funnel([3000.0, 1900.0], segment, 90.0, 3500.0) == [False]
+    # a word flown from entry: one cone from the issue point
+    assert _in_funnel([[1000.0, 70.0], [1000.0, 90.0]], np.zeros((1, 2)), 90.0, 1500.0) == [True, False]
+
+
+def test_speed_transitions():
     assert envelope.speed_transition_ok(np.array([120.0, 110.0, 101.0]), 100.0, 5.0)
     assert not envelope.speed_transition_ok(np.array([120.0, 100.0, 112.0]), 100.0, 5.0)
 
@@ -285,7 +374,7 @@ def test_the_measurements_read_only_the_admitted_rows(geometry):
     assert flight.cut_at_crossing and flight.relative.before_threshold_m.min() >= 0.0
     arrays = measure.measure_flight(flight, measure.provisional_spec())
     assert {f"heading_wander_deg_band{h:g}" for h in measure.FREE_HOLD_HALF_RANGES_DEG} <= set(arrays)
-    assert len(arrays["turn_mean_bank_deg"]) == 2                     # onto the base and onto the final
+    assert len(arrays["turn_mean_rate_deg_s"]) == 2                   # onto the base and onto the final
     assert arrays["move_angle_deg"] == pytest.approx([3.0], abs=0.05)
     first = measure.aligned_final_row(flight, 2.0)
     finals, rows = measure.measure_final(flight, one, 2.0, {5.0: 4.5})
@@ -348,3 +437,52 @@ def test_the_labeller_hash_covers_the_labelling_code_only():
     covered = {p.relative_to(package).as_posix() for pattern in artefact.LABELLER_MODULES for p in package.glob(pattern)}
     assert {"spec.py", "envelope.py", "measure.py", "labeller/read.py", "labeller/lateral.py"} <= covered
     assert not covered & {"artefact.py", "readout.py", "figures.py", "__init__.py"}
+
+
+# ---- the landing, as the harvest and the evaluator judge it
+def test_a_landing_is_a_low_crossing_near_the_centreline():
+    from ts_transformer.instructions.airport import RunwayRelative
+    from ts_transformer.instructions.labeller.read import landing_passages
+
+    def relative(right, height, before=(600.0, 100.0, -50.0, -400.0)):
+        return RunwayRelative(before_threshold_m=np.array(before), right_of_course_m=np.full(4, right),
+                              track_minus_course_deg=np.zeros(4),
+                              height_above_threshold_m=np.array([height + 30.0, height + 5.0, height, height - 10.0]))
+    one = spec()
+    assert landing_passages(relative(20.0, 20.0), 1000.0, one) == [2]
+    assert landing_passages(relative(20.0, 300.0), 1000.0, one) == []          # over the airfield, too high
+    assert landing_passages(relative(20.0, -150.0), 1000.0, one) == []         # as far below: the harvest's |height|
+    assert landing_passages(relative(1500.0, 20.0), 1000.0, one) == []         # abeam, too far off the line
+    assert landing_passages(relative(150.0, 20.0), 106.7, one) == []           # nearer the parallel runway
+    # a row exactly on the plane is the first one past it, as the harvest brackets (ahead < 0 <= past)
+    assert landing_passages(relative(20.0, 20.0, before=(600.0, 100.0, 0.0, -400.0)), 1000.0, one) == [2]
+
+
+def test_the_landing_constants_are_the_harvest_s_and_the_parallel_limit_mirrors_its_rule():
+    from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
+    from final_approach.assign import LandingScreen
+    from trajectory_data_process.harvest.airports import load_airport
+    from trajectory_data_process.harvest.threshold_event import MAX_PARALLEL_COURSE_DELTA_DEG, _runway_bracket_cross_limit
+    from ts_transformer.instructions.airport import landing_cross_limit_m
+
+    one = spec()
+    assert one.landing_cross_limit_m == LandingScreen().threshold_radius_m
+    assert one.landing_max_height_m == LandingScreen().max_crossing_height_m
+    assert one.parallel_course_delta_deg == MAX_PARALLEL_COURSE_DELTA_DEG
+
+    def targets(runways):
+        return {r.ident: {"lat": r.lat, "lon": r.lon, "elevation_msl_m": 0.0, "course_deg": r.course_deg}
+                for r in runways}
+    for code in ("KMSY", "KRDU", "KSJC", "KSMF", "KSTL"):
+        runways = tuple(load_airport(code, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
+        geometry = airport_geometry(code, targets(runways), runways)
+        for runway in runways:
+            mine = landing_cross_limit_m(geometry, geometry.candidate_index(runway.ident), one.landing_cross_limit_m,
+                                         one.parallel_course_delta_deg)
+            theirs = _runway_bracket_cross_limit(runway, runways, fallback_m=LandingScreen().threshold_radius_m)
+            assert mine == pytest.approx(theirs, abs=1.0), (code, runway.ident)
+    # a runway whose parallel partner is not a candidate (no published target) is still capped by it
+    runways = tuple(load_airport("KSJC", config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
+    alone = airport_geometry("KSJC", targets(r for r in runways if r.ident == "30L"), runways)
+    assert landing_cross_limit_m(alone, 0, one.landing_cross_limit_m, one.parallel_course_delta_deg) == pytest.approx(
+        _runway_bracket_cross_limit(next(r for r in runways if r.ident == "30L"), runways, fallback_m=1000.0), abs=1.0)

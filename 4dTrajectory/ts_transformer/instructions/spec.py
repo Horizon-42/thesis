@@ -20,7 +20,7 @@ from typing import Any
 
 from geokit import FT_M, KT_MS, NM_M
 
-READING_RULE = "instruction-v1"
+READING_RULE = "instruction-v2"
 SPEC_SCHEMA = "ts-instruction-spec-v2"
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
@@ -60,13 +60,19 @@ class VocabularySpec:
     turn_onset_rate_deg_s: float
     #: A hold is flown straight: its track's fitted rate stays at or below this.
     heading_hold_max_rate_deg_s: float
-    #: Bank range of a turn (the turn envelope's radius range). The lowest bank holds only for a
-    #: turn of at least `turn_bank_min_from_deg`: a smaller change of the ground track is mostly
-    #: the wind drift of a hold, not a banked turn (on the fleet 82 % of turns ≤ 10° average under
-    #: 6° of bank, 2 % of turns of 30–90°).
-    turn_bank_min_deg: float
+    #: A turn is flown at a turn RATE between these (turns are flown at a near-constant rate
+    #: whatever the speed; the bank grows with speed), and never beyond `turn_bank_max_deg`. The
+    #: lowest rate holds only for a turn of at least `turn_rate_min_from_deg`: a smaller change of
+    #: the ground track is mostly the wind drift of a hold, not a banked turn.
+    turn_rate_min_deg_s: float
+    turn_rate_max_deg_s: float
+    turn_rate_min_from_deg: float
     turn_bank_max_deg: float
-    turn_bank_min_from_deg: float
+    #: A turn may start up to this long after its word's row. The row is read off a track smoothed
+    #: by two centred windows — the data plane's velocity fit (`flight_scenarios.start_state.
+    #: DEFAULT_WINDOW_S`) and `track_smoothing_s` — which see a turn coming half a window early,
+    #: so the word's row can lead the flown turn by half their sum. Derived, not fitted.
+    turn_start_delay_max_s: float
     # --- approach
     #: The intercept heading the labeller inserts when the track reaches the final from a
     #: heading that does not converge on it (ATC_MAX_INTERCEPT_DEG).
@@ -77,9 +83,14 @@ class VocabularySpec:
     corridor_half_width_m: float
     corridor_widening_deg: float
     corridor_course_tolerance_deg: float
-    #: The landing (§2.2): the last passage of the threshold along the course within this far of
-    #: the centreline — over the runway. The sentence ends before it.
-    crossing_half_width_m: float
+    #: The landing (§2.2), the harvest's and the evaluator's condition
+    #: (`final_approach.assign.LandingScreen`): the threshold plane crossed within
+    #: `landing_cross_limit_m` of the centreline — and within half the spacing to any runway whose
+    #: course is within `parallel_course_delta_deg` of this one's — and
+    #: within `landing_max_height_m` of the threshold's height (above or below, as the harvest tests).
+    landing_cross_limit_m: float
+    landing_max_height_m: float
+    parallel_course_delta_deg: float
     # --- altitude: geometric MSL targets
     altitude_step_m: float
     altitude_max_m: float
@@ -127,9 +138,11 @@ class VocabularySpec:
         positive = (
             "step_s", "track_smoothing_s", "altitude_smoothing_s", "speed_smoothing_s", "heading_step_deg",
             "heading_tolerance_deg", "heading_min_hold_s", "heading_max_turn_deg", "heading_split_part_deg",
-            "heading_continue_lead_deg", "turn_onset_rate_deg_s", "heading_hold_max_rate_deg_s", "turn_bank_min_deg",
-            "turn_bank_max_deg", "turn_bank_min_from_deg", "intercept_angle_deg",
-            "corridor_half_width_m", "corridor_course_tolerance_deg", "crossing_half_width_m", "altitude_step_m", "altitude_max_m",
+            "heading_continue_lead_deg", "turn_onset_rate_deg_s", "heading_hold_max_rate_deg_s", "turn_rate_min_deg_s",
+            "turn_rate_max_deg_s", "turn_rate_min_from_deg", "turn_bank_max_deg", "turn_start_delay_max_s",
+            "intercept_angle_deg",
+            "corridor_half_width_m", "corridor_course_tolerance_deg", "landing_cross_limit_m", "landing_max_height_m",
+            "parallel_course_delta_deg", "altitude_step_m", "altitude_max_m",
             "altitude_tolerance_m", "altitude_fit_tolerance_m", "level_min_s", "climb_angle_max_deg",
             "climb_angle_centre_deg", "ground_speed_floor_mps", "ground_speed_ceiling_mps", "speed_step_mps", "speed_min_mps", "speed_max_mps", "speed_tolerance_mps",
             "speed_fit_tolerance_mps", "speed_flat_accel_mps2", "speed_min_hold_s", "speed_accel_max_mps2",
@@ -149,8 +162,10 @@ class VocabularySpec:
             raise ValueError("a split part plus its lead would exceed heading_max_turn_deg")
         if not self.heading_max_turn_deg + self.heading_tolerance_deg < 180.0:
             raise ValueError("heading_max_turn_deg plus the heading tolerance must stay below a half circle")
-        if not self.turn_bank_min_deg < self.turn_bank_max_deg < 90.0:
-            raise ValueError("turn bank range must be increasing and below 90°")
+        if not self.turn_rate_min_deg_s < self.turn_rate_max_deg_s:
+            raise ValueError("turn rate range must be increasing")
+        if not self.turn_bank_max_deg < 90.0:
+            raise ValueError("turn_bank_max_deg must be below 90°")
         if not _divides(self.altitude_max_m, self.altitude_step_m):
             raise ValueError("altitude_max_m must be a whole number of altitude steps")
         if self.altitude_tolerance_m < self.altitude_step_m / 2:

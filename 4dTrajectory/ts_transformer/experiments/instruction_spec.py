@@ -143,8 +143,10 @@ def main(argv: list[str] | None = None) -> int:
     cumulative = np.cumsum(length[climbs][order]) / length[climbs].sum()
     climb_centre = float(-angle[climbs][order][np.searchsorted(cumulative, 0.5)])
     measured = measure.MeasuredValues(
-        turn_bank_min_deg=max(1.0, measure.round_down(float(np.percentile(first["turn_mean_bank_deg"], 5)), 1.0)),
-        turn_bank_max_deg=min(89.0, measure.round_up(float(np.percentile(first["turn_row_bank_deg"], 99.9)), 1.0)),
+        # every turning row is faster than turn_onset_rate_deg_s, so the p5 stays above it
+        turn_rate_min_deg_s=measure.round_down(float(np.percentile(first["turn_mean_rate_deg_s"], 5)), 0.1),
+        turn_rate_max_deg_s=measure.round_up(float(np.percentile(first["turn_row_rate_deg_s"], 99.9)), 0.1),
+        turn_bank_max_deg=measure.round_up(float(np.percentile(first["turn_row_bank_deg"], 99.9)), 1.0),
         corridor_half_width_m=measure.round_up(corridor["half_width_m"], 5.0),
         corridor_widening_deg=measure.round_up(float(np.degrees(np.arctan(corridor["slope"]))), 0.05),
         corridor_course_tolerance_deg=course_tolerance,
@@ -162,7 +164,8 @@ def main(argv: list[str] | None = None) -> int:
                                      "(see sensitivity.heading_wander_p95_by_band)",
             "altitude_tolerance_m": "chosen: altitude_step/2 + altitude_fit_tolerance "
                                     "(see sensitivity.level_wander_p95_by_fit_tolerance)",
-            "turn_bank_min_deg": "p5 of a turn's mean bank, down to 1°",
+            "turn_rate_min_deg_s": "p5 of a turn's mean rate (turns of at least turn_rate_min_from_deg, from the onset rate on), down to 0.1°/s",
+            "turn_rate_max_deg_s": "p99.9 of the turn rate on turning rows, up to 0.1°/s",
             "turn_bank_max_deg": "p99.9 of the bank on turning rows, up to 1°",
             "corridor_half_width_m": "p99 offset of the aligned final's nearest distance bin (0–3 km), up to 5 m",
             "corridor_widening_deg": "the smallest widening that keeps every bin's p99 inside at the bin's middle, up to 0.05°",
