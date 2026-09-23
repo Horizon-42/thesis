@@ -165,6 +165,15 @@ describe("parseTrainingSample", () => {
       .toMatch(/captureTurn\.turn: startDelayMaxS is 9, but the vocabulary says 10\.5/);
   });
 
+  it("reads a turn already within the target's band at issue, whose paths are one point each", () => {
+    const raw: any = mockSample();
+    const turn = raw.flights[0].envelopes.approach.captureTurn.turn;
+    const start = { eM: [turn.region.eM[0]], nM: [turn.region.nM[0]], lon: [turn.region.lon[0]], lat: [turn.region.lat[0]] };
+    turn.fastPath = start;
+    turn.slowPath = start;
+    expect(parsed(raw).flights[0].envelopes.approach.captureTurn!.turn.fastPath.eM).toHaveLength(1);
+  });
+
   it("refuses a hold check that is not the word's own hold rows", () => {
     expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].holdCheck.holdStartRow = 17; }))
       .toMatch(/holdCheck\.holdStartRow is 17, not a whole number in 16…16/);

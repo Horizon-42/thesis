@@ -896,8 +896,10 @@ function parseTurnRegion(reader: Reader, vocabulary: TrainingVocabulary): Traini
     startDelayMaxS: vocabulary.turnStartDelayMaxS,
     slowFinished: reader.boolean("slowFinished"),
     region: parsePlanLine(reader, "region", 3),
-    fastPath: parsePlanLine(reader, "fastPath", 2),
-    slowPath: parsePlanLine(reader, "slowPath", 2),
+    // A path is ONE point when the track is already within the hold band of the target at issue:
+    // there is nothing left to turn (a small capture turn, mostly).
+    fastPath: parsePlanLine(reader, "fastPath", 1),
+    slowPath: parsePlanLine(reader, "slowPath", 1),
     end,
   };
 }
