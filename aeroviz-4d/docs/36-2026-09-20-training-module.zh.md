@@ -13,13 +13,13 @@
 
 | 项 | 内容 |
 |---|---|
-| 词表 | 读法 `instruction-v2`，规格 sha `103a6eae6b90`，标注器源码 sha `c633967bd67b`（量于 `773c49ab`，工作区干净）。产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260923/` |
+| 词表 | 读法 `instruction-v2`，规格 sha `103a6eae6b90`，标注器源码 sha `47c6008a89bd`（规格写于 `35115734`，工作区干净）。产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260924/`（规格文件的格式名 `ts-instruction-spec-v3`，候选跑道文件的格式名 `ts-instruction-candidates-v2`） |
 | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；几何全部来自 `instructions/display.py` |
 | 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
-| 分支与提交 | `dev-instruction-v2`（工作区 `.claude/worktrees/instruction-v2`）：前端 `dada684b`，读取修正 `2bbbd8cd`（一步以内就在目标带里的转弯，路径只有一个点），发布记录在其后的文档提交（`git log`） |
-| 发布 | 2026-09-24 在 `dada684b`（工作区干净，记在每个索引条目的 `source.git` 里）导出：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），数字见 §2.1 的表。各机场 `index.json` 的旧条目（包括 `instruction_v1`）逐条原样保留 |
-| 测试 | Python：`tests/test_instruction_training_export.py` 9 条（含与前端的契约比对）；前端 Vitest 88 个文件 643 条通过；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
-| 核对 | `npm run check-publication`：五个机场盘上与开发服务器（从本工作区起在 5183 端口）两层都是 0 个错误，每个机场 1 个能读的集合，别的词表的集合全部按名字拒读记为警告（§5）。浏览器（本机 Chrome）里打开过 KRDU：Training 页开在 `instruction_v2`，读数核对窗口的平面图画出转弯区、最快与最慢的转弯、平行四边形、实线与虚线的漏斗，三维里贴地的包络都在，控制台没有错误 |
+| 分支与提交 | 前端读取器 `dada684b`，读取修正 `2bbbd8cd`（一步以内就在目标带里的转弯，路径只有一个点），两者都已在 `dev-two-tier` 上。样本格式名改为 `aeroviz-training-sample-v4` 的是 `caf6cf00`，在分支 `dev-instruction-names`（工作区 `.claude/worktrees/instruction-names`），还没合并：合并之前，`dev-two-tier` 上的读取器钉的还是旧名字 v3，会按名字拒读现在盘上的 `instruction_v2`。发布记录在其后的文档提交（`git log`） |
+| 发布 | 2026-09-24 在 `caf6cf00`（工作区干净，记在每个索引条目的 `source.git` 和样本的 `producedBy.git` 里）从 `v2_20260924` 导出，样本格式 `aeroviz-training-sample-v4`：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），数字见 §2.1 的表。各机场 `index.json` 里别的条目（包括 `instruction_v1`）逐条原样保留 |
+| 测试 | Python：`tests/test_instruction_training_export.py` 9 条（含与前端的契约比对），`-k instruction` 共 74 条，全部通过；前端 Vitest 88 个文件 643 条通过；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
+| 核对 | `npm run check-publication`：五个机场盘上与开发服务器（从本工作区起在 5183 端口）两层都是 0 个错误，每个机场 1 个能读的集合，别的词表的集合全部按名字拒读记为警告（§5）。浏览器（本机 Chrome，开发服务器同上）里打开过 KRDU：Training 页开在 `instruction_v2`，服务器给的样本格式是 v4；读数核对窗口的平面图画出转弯区、最快与最慢的转弯、平行四边形、实线与虚线的漏斗，三维里贴地的包络都在，控制台没有错误（只有一条 Cesium 的警告：贴地的几何不画轮廓线） |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 | 还没有的两样 | 执行器按句子重飞的航迹（执行器在设计中）、先验模型说出的句子（这份词表上还没训练先验）。界面上是两个明确的空位，没有假数据（§4.6） |
 
@@ -44,7 +44,7 @@
 
 ```bash
 python run_ts.py instruction_training_export \
-    --dir 4dTrajectory/outputs/POOLED/instruction_language/v2_20260923 \
+    --dir 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \
     --airports-root aeroviz-4d/public/data/airports \
     --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 ```
@@ -78,7 +78,7 @@ python run_ts.py instruction_training_export \
 读法是 `instruction-v2`、规格是 `103a6eae6b90`、类型是 `vocabulary-readback` 的才打开，其余按名字拒读。
 `runwaySha256` 是该机场几何的 sha：候选跑道（跑道列的类别就是它们），加上落地判定要读的全部跑道端。
 
-### 2.3 `sample.json`（`aeroviz-training-sample-v3`）
+### 2.3 `sample.json`（`aeroviz-training-sample-v4`）
 
 顶层：
 
@@ -119,8 +119,9 @@ python run_ts.py instruction_training_export \
 
 ### 2.5 按名字拒读
 
-`trainingSample.ts` 钉住并逐项核对：样本格式名、读法 `instruction-v2`、规格 sha 全文、六列的名字和顺序、
-"不变"的值、标注器会写的发令原因列表。对不上就整份拒读，报出是哪一项；不做兼容分支。
+`trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v4`、读法 `instruction-v2`、规格 sha
+全文、六列的名字和顺序、"不变"的值、标注器会写的发令原因列表。对不上就整份拒读，报出是哪一项；不做兼容分支。
+格式名不对就不往下读，不管文件里是哪个词表：v3 的文件（`instruction_v1` 的样本）按名字拒读。
 Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 TypeScript 源码逐字比对。
 
 ---
@@ -262,6 +263,9 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 
 - 本文只描述当前设计。词表换版本（新读法或新规格 sha），界面会按名字拒读新产物：同一次改动里更新
   `trainingSample.ts` 的钉住值、测试、`aeroviz-4d/CLAUDE.md` 与 `35-viewer-reference.md` 的对应条目和本文。
+- 格式名跟着文件的形状走：样本或索引的字段一有增、删、改名，Python 的 `SAMPLE_SCHEMA` / `INDEX_SCHEMA` 和
+  TypeScript 的 `TRAINING_SAMPLE_SCHEMA` / `TRAINING_INDEX_SCHEMA` 在同一次改动里一起换新名字，盘上的集合重新导出；
+  不为"旧文件还能读"或"现在没人读错"保留旧名字。
 - 长期事实一行写进 `aeroviz-4d/CLAUDE.md` 的索引，全文写进 `aeroviz-4d/docs/35-viewer-reference.md`
   （AV19–AV23）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11）。
 - 日志式记录写进仓库的 `docs/CHANGELOG.md`。

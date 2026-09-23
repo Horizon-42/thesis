@@ -187,13 +187,17 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV19 · Training 只读一份词表：`instruction-v2`，规格 `103a6eae6b90`
 
-`src/data/trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v3`、读法
+`src/data/trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v4`、读法
 `TRAINING_READING_RULE = "instruction-v2"`、规格 sha 全文 `TRAINING_SPEC_SHA256`、六列的名字和顺序
 `TRAINING_COLUMNS`（跑道、进近、航向、高度、下降角、速度，与 `instructions/words.COLUMNS` 相同，列是按位置读的）、
 "不变" `TRAINING_UNCHANGED = -1`、标注器会写的发令原因 `TRAINING_WORD_KINDS`。对不上就整份拒读并报出是哪一项，
 不做兼容分支。Python 一侧的对应常量（`instruction_training_export.py` 的 `SAMPLE_SCHEMA`、`INDEX_SCHEMA`、
 `KIND_READBACK`、`WORD_KINDS`，以及 `spec.READING_RULE`、`words.COLUMNS`、`words.UNCHANGED`）由
 `tests/test_instruction_training_export.py` 与 TypeScript 源码逐字比对。
+
+格式名跟着文件的形状走（用户 2026-09-24 的规定）：样本或索引的字段一有增、删、改名，两边的格式名在同一次改动里
+一起换新名字，盘上的集合重新导出；不为旧文件还能读、或"现在没人读错"而保留旧名字。样本格式名不对就整份拒读，
+不看文件里是哪个词表——v3（`instruction-v1` 的样本，以及改名前导出的 `instruction-v2` 样本）按名字拒读。
 
 `training/index.json` 的格式（`aeroviz-training-index-v1`）不随词表变，所有集合都列在里面，每一条写着自己的
 `readingRule` 和 `vocabularySha256`。所以**面板不下载任何样本就知道哪个集合能读**（`trainingSetRefusal`），
