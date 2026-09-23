@@ -1,0 +1,63 @@
+"""The speed law (executor design §6): the speed word as an airspeed rate.
+
+- A ground-speed word ``V_g*`` is flown as the airspeed ``V_g* / cos γ`` (no wind).
+- "Unspecified" is the pilot's own speed: the aircraft TYPE's published approach speed
+  (`aircraft.reference_speeds`, every number traced to its document), quoted as an indicated speed at the
+  maximum landing weight, scaled by ``√(m / MALW)`` and flown as the true airspeed ``· √(ρ0 / ρ(h))``. The
+  type is the flight's IDENTIFIED one (`scenario.source["resolved_typecode"]`), never the dynamics'
+  stand-in; a flight whose type publishes no approach speed cannot fly an "unspecified" stretch.
+- The rate: ``V̇* = sat((V_ref − V) / τ_V, [−a, +a_acc])`` with ``τ_V = δv / a`` — a constant
+  deceleration (``a_dec``, or ``a_unspec`` for the pilot's own) until one band half-width δv from the
+  target, then an exponential approach, so the transition is monotone and does not pass the target.
+- The stall floor: ``V_ref ≥ margin · V_stall(n)`` at the load factor the inverse commands this cycle
+  (`outputs.constraints.speed_floor.stall_speed_mps`, the control path's margin).
+"""
+
+from __future__ import annotations
+
+import math
+
+import torch
+
+from aerodynamic_model.torch_dynamics import ISA_RHO0_KG_M3, isa_density
+from aircraft.reference_speeds import reference_speed
+from geokit import KT_MS
+from ts_transformer.autopilot.frame import Kinematics
+from ts_transformer.autopilot.params import ExecutorParams
+from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
+from ts_transformer.instructions.spec import VocabularySpec
+from ts_transformer.outputs.constraints.speed_floor import stall_speed_mps
+
+
+def approach_speed_ias_mps(typecode: str | None, mass_kg: float) -> float:
+    """The type's published approach speed at this mass, indicated, m/s; NaN when the flight has no
+    identified type or its type publishes none (it then cannot fly "unspecified")."""
+    reference = None if typecode is None else reference_speed(typecode)
+    if reference is None:
+        return math.nan
+    return reference.approach_speed_kt * KT_MS * math.sqrt(mass_kg / reference.malw_kg)
+
+
+class Speed:
+    def __init__(self, approach_ias_mps: torch.Tensor, params: ExecutorParams, spec: VocabularySpec) -> None:
+        self.approach_ias_mps = approach_ias_mps
+        self.params, self.band_mps = params, spec.speed_tolerance_mps
+        self.margin = EXECUTOR_DYNAMICS.control_speed_floor_margin
+
+    def rate(self, state: Kinematics, speed_mps: torch.Tensor, unspecified: torch.Tensor, load_factor: torch.Tensor,
+             aero_params: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """The airspeed rate for this cycle, and whether the stall floor set it."""
+        if (unspecified & self.approach_ias_mps.isnan()).any():
+            raise ValueError("\"unspecified\" in force for a flight whose type publishes no approach speed")
+        params = self.params
+        density = isa_density(state.height_m)
+        own = self.approach_ias_mps * torch.sqrt(ISA_RHO0_KG_M3 / density)
+        wanted = torch.where(unspecified, own, speed_mps / torch.cos(state.gamma_rad))
+        floor = self.margin * stall_speed_mps(load_factor, state.mass_kg, density, aero_params[:, 0], aero_params[:, 1])
+        reference = torch.maximum(wanted, floor)
+        slowing = torch.where(unspecified, params.unspecified_decel_mps2, params.decel_mps2)
+        faster = reference > state.speed_mps
+        tau = self.band_mps / torch.where(faster, torch.full_like(slowing, params.accel_mps2), slowing)
+        rate = ((reference - state.speed_mps) / tau).clamp(max=params.accel_mps2)
+        rate = torch.maximum(rate, -slowing)
+        return rate, {"stall_floor": floor > wanted}

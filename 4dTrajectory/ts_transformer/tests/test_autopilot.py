@@ -178,3 +178,177 @@ def test_the_bank_cap_stays_inside_the_graders_envelope():
     with pytest.raises(ValueError, match="bank cap"):
         inverse.attitude(k, torch.zeros(1, dtype=F64), torch.zeros(1, dtype=F64), torch.zeros(1, dtype=F64),
                          bank_cap_rad=math.radians(50.0), bank_rate_rad_s=1.0, cycle_s=1.0)
+
+
+# ---- the lateral law and its mirrors of the labeller
+def test_the_lateral_mirrors_equal_the_labellers_own_functions():
+    from ts_transformer.autopilot import lateral
+    from ts_transformer.instructions import envelope
+    from ts_transformer.instructions.airport import relative_to_runway
+
+    one = spec()
+    rng = np.random.default_rng(7)
+    heading, course = rng.uniform(0, 360, 400), rng.uniform(0, 360, 400)
+    right, before = rng.uniform(-8000, 8000, 400), rng.uniform(-2000, 30000, 400)
+    right[:40] = rng.uniform(-60, 60, 40)                       # some inside the corridor's width
+    for tolerance in (0.0, one.heading_tolerance_deg):
+        mine = lateral.converges(*(torch.tensor(a, dtype=F64) for a in (heading, course, right, before)), tolerance, one)
+        theirs = [envelope.heading_converges(h, c, r, b, tolerance, one.corridor_half_width_m, one.corridor_widening_deg)
+                  for h, c, r, b in zip(heading, course, right, before)]
+        assert mine.tolist() == theirs
+    assert lateral.corridor_half_width(torch.tensor(before, dtype=F64), one).numpy() == pytest.approx(
+        envelope.corridor_half_width_m(before, one.corridor_half_width_m, one.corridor_widening_deg))
+    candidate = instruction_airport().candidates[0]
+    e, n, track = rng.uniform(-20000, 5000, 50), rng.uniform(-9000, 9000, 50), rng.uniform(0, 360, 50)
+    k = read_state(torch.zeros(50, 7, dtype=F64), AirportCharts.of([instruction_airport()] * 50, dtype=F64, device=CPU))
+    k = type(k)(**{**k.__dict__, "e_m": torch.tensor(e), "n_m": torch.tensor(n), "track_deg": torch.tensor(track)})
+    ours = lateral.relative(k, torch.tensor(candidate.threshold_e_m, dtype=F64),
+                            torch.tensor(candidate.threshold_n_m, dtype=F64), torch.tensor(candidate.course_deg, dtype=F64))
+    ref = relative_to_runway(e, n, track, np.zeros(50), candidate)
+    assert ours[0].numpy() == pytest.approx(ref.before_threshold_m) and ours[1].numpy() == pytest.approx(ref.right_of_course_m)
+    assert ours[2].numpy() == pytest.approx(ref.track_minus_course_deg)
+
+
+def test_the_heading_law_turns_the_shorter_way_at_the_steady_rate_and_eases_out():
+    from ts_transformer.autopilot.lateral import heading_rate
+
+    params = _params()
+    rate = heading_rate(torch.tensor([10.0, 350.0, 100.0, 100.0], dtype=F64),
+                        torch.tensor([350.0, 10.0, 104.0, 100.0], dtype=F64), params)
+    # 10 → 350 is 20° LEFT (not 340° right); 350 → 10 is 20° right; 4° to go eases to 4/τ_ψ
+    assert rate.tolist() == pytest.approx([-params.turn_rate_deg_s, params.turn_rate_deg_s,
+                                           4.0 / params.heading_time_constant_s, 0.0])
+
+
+def test_the_parameters_are_checked_against_the_designs_constraints():
+    from dataclasses import replace
+
+    one, params = spec(), _params()
+    params.check(one)
+    for change, message in ((dict(heading_time_constant_s=1.5), "under 2 Δt"),
+                            (dict(turn_rate_deg_s=3.0, heading_time_constant_s=4.0), "split turn"),
+                            (dict(bank_cap_deg=40.0), "φ_cap"),
+                            (dict(delays=Delays(12.0, 0.0, 0.0)), "may start late")):
+        with pytest.raises(ValueError, match=message):
+            replace(params, **change).check(one)
+
+
+# ---- whole flights
+def _params(**changes):
+    from dataclasses import replace
+    from ts_transformer.autopilot.params import ExecutorParams
+
+    base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
+                          bank_rate_deg_s=2.0, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
+                          accel_mps2=0.16, unspecified_decel_mps2=0.26, delays=Delays(0.0, 0.0, 0.0),
+                          timeout_factor=1.5)
+    return replace(base, **changes)
+
+
+def _fly_sentence(signals, grid=None, params=None):
+    """Read ``signals`` with the labeller, fly its sentence (or ``grid``) from row 0, judge it."""
+    from ts_transformer.autopilot.executor import fly
+    from ts_transformer.autopilot.judge import judge
+    from ts_transformer.autopilot.lateral import Runways
+    from ts_transformer.autopilot.speed import approach_speed_ias_mps
+    from ts_transformer.instructions.labeller.read import read_flight
+
+    one, words, geometry = spec(), Words(spec()), instruction_airport()
+    params = params or _params()
+    reading = read_flight(signals, geometry, one, words)
+    grid = reading.words if grid is None else grid
+    aircraft = aircraft_for_code("A320")
+    aero, mass = aero_params_for_aircraft(aircraft), 62000.0
+    lat, lon = geometry.frame.latlon_from_horizontal(signals.e_m[0], signals.n_m[0])
+    gamma = math.atan2(signals.vertical_rate_mps[0], signals.ground_speed_mps[0])
+    state = [lat, lon, signals.altitude_m[0], signals.ground_speed_mps[0] / math.cos(gamma),
+             math.radians(90.0 - signals.track_deg[0]), gamma, mass]
+    candidate = geometry.candidates[0]
+    tlat, tlon = geometry.frame.latlon_from_horizontal(candidate.threshold_e_m, candidate.threshold_n_m)
+    inputs = FlightInputs(
+        initial_state=torch.tensor([state], dtype=F64),
+        aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=F64),
+        frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=F64),
+        max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
+    limit = len(grid) * one.step_s * params.timeout_factor
+    force = words_in_force([grid], words, params.delays, cycle_s=params.cycle_s, cycles=int(math.ceil(limit)), device=CPU)
+    flown = fly(inputs, force, Runways.of([geometry], dtype=F64, device=CPU),
+                AirportCharts.of([geometry], dtype=F64, device=CPU),
+                torch.tensor([approach_speed_ias_mps("A320", mass)], dtype=F64), params, words,
+                time_limit_s=torch.tensor([limit], dtype=F64))
+    return flown, judge(flown, 0, geometry, 0, reading, signals, one, words), reading
+
+
+DOWNWIND_BASE_FINAL = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
+                       (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+
+
+def test_a_downwind_base_final_sentence_is_flown_to_the_runway():
+    """§13 E6: a whole flight — downwind, base, the capture, the final — lands on the pointed runway with
+    every word inside its envelope, and the capture turn ends on the line without crossing it."""
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    flown, verdict, _ = _fly_sentence(signals)
+    assert verdict.outcome == "landed" and verdict.flew_the_sentence
+    assert abs(verdict.crossing["cross_m"]) < 1.0 and 0.0 < verdict.crossing["height_m"] < 100.0
+    assert verdict.words["corridor"]["inside"] == verdict.words["corridor"]["rows"] > 0
+    # never across the centreline to the south of an eastbound final approached from the north
+    captured = flown.modes["captured"][0].numpy()
+    k = read_state(flown.states[0, 1:][captured], AirportCharts.of([instruction_airport()] * int(captured.sum()),
+                                                                   dtype=F64, device=CPU))
+    assert float(k.n_m.min()) > -5.0
+    assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "thrust_min", "stall", "load_factor"))
+
+
+def test_a_flight_on_the_final_from_row_0_is_captured_at_once_and_lands():
+    straight = [(40, 0.0, 90.0, 0.0), (30, 0.0, 80.0, 0.0), (110, 0.0, 72.0, -72.0 * np.tan(np.radians(3.0)))]
+    signals = instruction_flight(*fly_legs(straight, 90.0, 950.0, -300.0, 0.0))     # ~50 m over the threshold
+    flown, verdict, _ = _fly_sentence(signals)
+    assert bool(flown.modes["captured"][0, 0]) and verdict.outcome == "landed" and verdict.flew_the_sentence
+
+
+def test_a_split_turn_is_flown_without_levelling_between_its_parts():
+    legs = [(30, 0.0, 100.0, 0.0), (30, 6.0, 100.0, 0.0), (20, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0),
+            (100, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    signals = instruction_flight(*fly_legs(legs, 0.0, 950.0, -400.0, 0.0))
+    flown, verdict, reading = _fly_sentence(signals)
+    parts = [i for i in reading.instructions if i.kind == "turn-split"]
+    assert len(parts) == 2
+    # from the first part's row to where the flown track reaches the second part's target, the bank
+    # stays on the right-turn side (negative in the dynamics' convention) — the turn does not stop
+    bank = flown.commands[0, :, 1].numpy()
+    first, second = parts[0].row * 2, parts[1].row * 2
+    assert (bank[first + 12: second + 12] < -math.radians(5.0)).all()
+    assert verdict.outcome == "landed"
+
+
+def test_the_flights_outcome_is_the_first_event_it_meets():
+    from ts_transformer.instructions.words import APPROACH_CLEARED as CLEARED
+
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    _, verdict, reading = _fly_sentence(signals)
+    # never cleared: the executor holds the base heading past the line; told to descend to land it meets
+    # the ground, told nothing more it flies on until its time runs out
+    grid = reading.words.copy()
+    grid[grid[:, APPROACH] == CLEARED, APPROACH] = UNCHANGED
+    flown, uncleared, _ = _fly_sentence(signals, grid)
+    assert uncleared.outcome == "ground_contact" and not flown.modes["captured"][0].any()
+    grid[1:, ALTITUDE] = UNCHANGED
+    grid[1:, ANGLE] = UNCHANGED
+    _, level, _ = _fly_sentence(signals, grid)
+    assert level.outcome == "timeout" and not level.flew_the_sentence
+    words = Words(spec())
+    steep = reading.words.copy()
+    steep[1, ALTITUDE], steep[1, ANGLE] = words.altitude_land, 4       # descend to land at the steepest class, at once
+    _, grounded, _ = _fly_sentence(signals, steep)
+    assert grounded.outcome == "ground_contact"
+
+
+def test_descents_level_off_at_their_targets_inside_the_tubes():
+    """§5.3: a descent to a target levels off at it without passing it; the next descent word releases it."""
+    legs = [(100, 0.0, 75.0, 0.0), (80, 0.0, 75.0, -75.0 * np.tan(np.radians(2.1))), (120, 0.0, 75.0, 0.0),
+            (100, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    signals = instruction_flight(*fly_legs(legs, 90.0, 1500.0, -400.0, 0.0))
+    _, verdict, reading = _fly_sentence(signals)
+    targets = [i for i in reading.instructions if i.column == ALTITUDE]
+    assert len(targets) == 3 and len(verdict.words["vertical"]) == 3
+    assert all(word["contained"] for word in verdict.words["vertical"])
