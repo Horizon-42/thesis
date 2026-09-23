@@ -150,8 +150,11 @@ export default function TrainingReadbackWindow({
   const [eLow, eHigh] = extent(frameE);
   const [nLow, nHigh] = extent(frameN);
   const planScale = Math.min((plotW - 12) / (eHigh - eLow), (PLAN_H - 30) / (nHigh - nLow));
-  const px = (eKm: number) => GUTTER + 6 + (eKm - eLow) * planScale;
-  const py = (nKm: number) => 20 + (nHigh - nKm) * planScale;
+  // one scale on both axes, so the frame is centred in whichever direction has room to spare
+  const planLeft = GUTTER + 6 + (plotW - 12 - (eHigh - eLow) * planScale) / 2;
+  const planTop = 20 + (PLAN_H - 30 - (nHigh - nLow) * planScale) / 2;
+  const px = (eKm: number) => planLeft + (eKm - eLow) * planScale;
+  const py = (nKm: number) => planTop + (nHigh - nKm) * planScale;
   const points = (line: TrainingPlanLine) =>
     line.eM.map((e, index) => `${px(km(e))},${py(km(line.nM[index]))}`).join(" ");
   const at = (row: number) => ({ x: px(km(signals.eM[row])), y: py(km(signals.nM[row])) });
@@ -174,7 +177,8 @@ export default function TrainingReadbackWindow({
   ];
   const [sLow, sHigh] = extent(speedValues);
   const plotTop = 18;
-  const plotH = CHART_H - 40;
+  // room below the plot for the tick labels and the axis caption
+  const plotH = CHART_H - 48;
   const yOf = (low: number, high: number) => (value: number) => plotTop + ((high - value) / (high - low)) * plotH;
   const yHeading = yOf(hLow, hHigh);
   const yAltitude = yOf(aLow, aHigh);
