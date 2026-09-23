@@ -1,11 +1,12 @@
 """A batch of labelled flights flown from their sentences (executor design §11): who is flown, their inputs,
 the flight and the verdicts — shared by the spec's measurements, the sensitivity check and the replay gate.
 
-Who is flown (§11): flights whose dynamics are their own type's (`scenario.source`: the identified type is
-the dynamics type) and whose type publishes an approach speed ("unspecified" is flown at it); a flight
-flown on a stand-in's aerodynamics, or with no identified type, is counted, not flown. The sample is a
-seeded permutation of a split's labelled flights, read in order until each airport holds ``per_airport``
-eligible flights — the pool, the count read and the exclusions are returned with it.
+Who is flown (§11), by `group_of`: an identified type that publishes an approach speed ("unspecified" is
+flown at it) is flown — on its own dynamics (`OWN`: the identified type is the dynamics type) or on a
+stand-in's (`STAND_IN`, reported, never gated: its errors are the stand-in's aerodynamics); a flight with no
+identified type, or whose type publishes no approach speed, is counted, not flown. The sample is a seeded
+permutation of a split's labelled flights, read in order until each airport holds ``per_airport`` flights of
+the asked groups (0: every one) — the pool, the count read and the exclusions are returned with it.
 
 Every flight is re-read with the labeller and must reproduce its stored sentence (the words grid and the
 runway), the export's rule: the executor flies the reading of the flight, kinds and split parts included,
@@ -43,6 +44,7 @@ from ts_transformer.instructions.words import Words
 
 #: Rebuilt at a time while drawing the sample (a rebuild opens the flights' tracks).
 DRAW_CHUNK = 200
+OWN, STAND_IN = "own dynamics", "stand-in dynamics"
 
 
 @dataclass
@@ -52,6 +54,7 @@ class Batch:
     readings: list[Reading]
     geometries: list[AirportGeometry]
     approach_ias_mps: list[float]
+    groups: list[str]               # OWN or STAND_IN, per flight
     drawn: dict[str, Any]           # the sample's description: pool, read, exclusions, per airport
 
     def inputs(self, device: torch.device) -> FlightInputs:
@@ -73,28 +76,28 @@ def open_executor(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorP
     return params, record, Words(spec)
 
 
-def exclusion(series: FlightSeries) -> str | None:
-    """Why a flight is not flown (§11), or None."""
+def group_of(series: FlightSeries) -> str:
+    """`OWN` or `STAND_IN` for a flight that can be flown, else why it cannot (§11)."""
     source = series.scenario.source
     identified = source["resolved_typecode"]
     if identified is None:
         return "no identified type"
-    if identified != source["dynamics_typecode"]:
-        return "flown on a stand-in's dynamics"
     if math.isnan(approach_speed_ias_mps(identified, float(series.scenario.initial.m))):
         return "type publishes no approach speed"
-    return None
+    return OWN if identified == source["dynamics_typecode"] else STAND_IN
 
 
-def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int) -> Batch:
-    """The split's first ``per_airport`` eligible labelled flights per airport, in a seeded permutation."""
+def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
+         groups: tuple[str, ...] = (OWN,)) -> Batch:
+    """The split's first ``per_airport`` labelled flights of ``groups`` per airport (0: every one), in a
+    seeded permutation."""
     geometries = load_candidates(directory)
     signals = load_signals(directory, split)
     sentences = load_sentences(directory, split, spec)
     stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
     order = [int(i) for i in np.random.default_rng(seed).permutation(sorted(stored))]
-    wanted = {airport: per_airport for airport in geometries}
-    taken: list[tuple[int, FlightSeries]] = []
+    wanted = {airport: per_airport or len(order) for airport in geometries}
+    taken: list[tuple[int, FlightSeries, str]] = []
     excluded: Counter = Counter()
     read = 0
     for start in range(0, len(order), DRAW_CHUNK):
@@ -108,19 +111,19 @@ def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per
             if wanted[airport] == 0:
                 continue
             read += 1
-            reason = exclusion(series)
-            if reason is None:
-                taken.append((i, series))
+            group = group_of(series)
+            if group in groups:
+                taken.append((i, series, group))
                 wanted[airport] -= 1
             else:
-                excluded[reason] += 1
+                excluded[group] += 1
         if not any(wanted.values()):
             break
-    short = {airport: need for airport, need in wanted.items() if need}
+    short = {airport: need for airport, need in wanted.items() if need and per_airport}
     if short:
         raise ValueError(f"the {split} split holds too few eligible flights: {short} short")
     readings = []
-    for i, _series in taken:
+    for i, _series, _group in taken:
         flight = signals[i]
         reading = read_flight(flight, geometries[flight.airport], spec, words)
         k = stored[i]
@@ -128,12 +131,23 @@ def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per
         if not np.array_equal(reading.words, grid) or reading.runway_index != int(sentences["runway_index"][k]):
             raise ValueError(f"{flight.dataset_id}: the re-read sentence differs from the stored one")
         readings.append(reading)
-    return Batch(signals=[signals[i] for i, _ in taken], series=[s for _, s in taken], readings=readings,
-                 geometries=[geometries[signals[i].airport] for i, _ in taken],
+    return Batch(signals=[signals[i] for i, _, _ in taken], series=[s for _, s, _ in taken], readings=readings,
+                 geometries=[geometries[signals[i].airport] for i, _, _ in taken],
                  approach_ias_mps=[approach_speed_ias_mps(s.scenario.source["resolved_typecode"], float(s.scenario.initial.m))
-                                   for _, s in taken],
-                 drawn={"split": split, "seed": seed, "per_airport": per_airport, "pool": len(order), "read": read,
-                        "excluded": dict(excluded.most_common()), "flights": len(taken)})
+                                   for _, s, _ in taken],
+                 groups=[g for _, _, g in taken],
+                 drawn={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
+                        "groups": list(groups), "pool": len(order), "read": read,
+                        "excluded": dict(excluded.most_common()), "flights": len(taken),
+                        "by_group": dict(Counter(g for _, _, g in taken))})
+
+
+def subset(batch: Batch, indices: list[int]) -> Batch:
+    """The flights at ``indices``, in that order (the sample's description is the whole batch's)."""
+    return Batch(signals=[batch.signals[i] for i in indices], series=[batch.series[i] for i in indices],
+                 readings=[batch.readings[i] for i in indices], geometries=[batch.geometries[i] for i in indices],
+                 approach_ias_mps=[batch.approach_ias_mps[i] for i in indices], groups=[batch.groups[i] for i in indices],
+                 drawn=batch.drawn)
 
 
 def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *,
@@ -186,22 +200,29 @@ def _percentiles(values: list[float]) -> dict[str, float] | None:
     return {f"p{q}": float(np.percentile(values, q)) for q in (5, 25, 50, 75, 95)} | {"n": len(values)}
 
 
-def alignment(batch: Batch, flown: Flown, verdicts: list[Verdict]) -> dict[str, Any]:
-    """How the flown tracks differ from the observed ones (§11, reported, no gate): per flight, the mean
-    horizontal and vertical distance at the sentence's rows both tracks reach (time-aligned from row 0),
-    and for the landed flights the landing time minus the observed one (the sentence ends at the observed
-    crossing)."""
-    horizontal, vertical, landing = [], [], []
+def flight_alignment(batch: Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, float | None]]:
+    """How each flown track differs from the observed one (§11, reported, no gate): the mean horizontal and
+    vertical distance at the sentence's rows both tracks reach (time-aligned from row 0), and for a landed
+    flight the landing time minus the observed one (the sentence ends at the observed crossing; None
+    otherwise)."""
+    out = []
     for j, verdict in enumerate(verdicts):
         observed, reading = batch.signals[j], batch.readings[j]
         step_rows = int(round((observed.time_s[1] - observed.time_s[0]) / flown.cycle_s))
         track = flown_track(flown.states[j, : verdict.end_row + 1].cpu().numpy(), batch.geometries[j])
         rows = min(len(reading.words), verdict.end_row // step_rows + 1)
         flown_rows = np.arange(rows) * step_rows
-        horizontal.append(float(np.mean(np.hypot(track["e"][flown_rows] - observed.e_m[:rows],
-                                                 track["n"][flown_rows] - observed.n_m[:rows]))))
-        vertical.append(float(np.mean(np.abs(track["height"][flown_rows] - observed.altitude_m[:rows]))))
-        if verdict.outcome == "landed":
-            landing.append(verdict.end_row * flown.cycle_s - len(reading.words) * step_rows * flown.cycle_s)
-    return {"mean_horizontal_distance_m": _percentiles(horizontal), "mean_vertical_distance_m": _percentiles(vertical),
-            "landing_time_minus_observed_s": _percentiles(landing)}
+        out.append({
+            "mean_horizontal_distance_m": float(np.mean(np.hypot(track["e"][flown_rows] - observed.e_m[:rows],
+                                                                 track["n"][flown_rows] - observed.n_m[:rows]))),
+            "mean_vertical_distance_m": float(np.mean(np.abs(track["height"][flown_rows] - observed.altitude_m[:rows]))),
+            "landing_time_minus_observed_s": (verdict.end_row * flown.cycle_s - len(reading.words) * step_rows * flown.cycle_s
+                                              if verdict.outcome == "landed" else None)})
+    return out
+
+
+def alignment(batch: Batch, flown: Flown, verdicts: list[Verdict]) -> dict[str, Any]:
+    """`flight_alignment` over the batch, as percentiles (the landing time over the landed flights)."""
+    flights = flight_alignment(batch, flown, verdicts)
+    return {name: _percentiles([f[name] for f in flights if f[name] is not None])
+            for name in ("mean_horizontal_distance_m", "mean_vertical_distance_m", "landing_time_minus_observed_s")}

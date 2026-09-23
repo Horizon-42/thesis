@@ -487,7 +487,7 @@ def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_
             executor_spec.load_spec(tmp_path)
 
 
-def test_only_flights_on_their_own_types_dynamics_with_a_published_approach_speed_are_flown(monkeypatch):
+def test_a_flight_is_flown_on_its_own_or_a_stand_ins_dynamics_only_with_a_published_approach_speed(monkeypatch):
     from types import SimpleNamespace
 
     from ts_transformer.autopilot import replay
@@ -496,11 +496,11 @@ def test_only_flights_on_their_own_types_dynamics_with_a_published_approach_spee
         source = {"resolved_typecode": resolved, "dynamics_typecode": dynamics}
         return SimpleNamespace(scenario=SimpleNamespace(source=source, initial=SimpleNamespace(m=62000.0)))
 
-    assert replay.exclusion(series("A320", "A320")) is None
-    assert replay.exclusion(series(None, "A320")) == "no identified type"
-    assert replay.exclusion(series("A20N", "A320")) == "flown on a stand-in's dynamics"
+    assert replay.group_of(series("A320", "A320")) == replay.OWN
+    assert replay.group_of(series(None, "A320")) == "no identified type"
+    assert replay.group_of(series("A20N", "A320")) == replay.STAND_IN
     monkeypatch.setattr(replay, "approach_speed_ias_mps", lambda typecode, mass: math.nan)
-    assert replay.exclusion(series("A320", "A320")) == "type publishes no approach speed"
+    assert replay.group_of(series("A320", "A320")) == "type publishes no approach speed"
 
 
 def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_observed_track():
@@ -509,7 +509,7 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     flown, verdict, reading = _fly_sentence(signals)
     batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[instruction_airport()],
-                         approach_ias_mps=[], drawn={})
+                         approach_ias_mps=[], groups=[replay.OWN], drawn={})
     summary = replay.summary([verdict])
     assert summary == {"flights": 1, "outcomes": {"landed": 1}, "landed_share": 1.0, "flew_the_sentence_share": 1.0,
                        "word_failures": {}}
@@ -537,3 +537,35 @@ def test_the_sensitivity_moves_one_parameter_at_a_time_and_marks_a_word_acted_on
                 moved.check(spec())
         elif name.startswith(("heading", "bank", "path", "delays")) or name == "spec":
             moved.check(spec())
+
+
+def test_a_replayed_flight_becomes_a_control_record_evaluation_can_grade_and_its_words_are_counted_one_by_one():
+    from ts_transformer.experiments.executor_replay import executor_forecast, gate_table, word_results
+    from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
+
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    flown, verdict, reading = _fly_sentence(signals)
+    judged = word_results(verdict)
+    assert judged and all(ok for _, ok in judged)
+    assert sum(column == "heading" for column, _ in judged) == sum(h["words"] for h in verdict.words["heading"])
+    assert ("approach", True) in judged
+    # the forecast from row 0: one state per cycle to the outcome's row, the schedule and its newtons
+    inputs, _ = _a320([[0.0] * 7])
+    series = _observed_series(instruction_airport())
+    forecast = executor_forecast(flown, 0, verdict, inputs, series)
+    assert forecast.anchor == 0 and forecast.n_steps == verdict.end_row == len(forecast.controls)
+    assert forecast.final_time_s == pytest.approx(verdict.end_row * flown.cycle_s)
+    assert forecast.truncated_at_threshold and not forecast.horizon_capped
+    assert forecast.control_parameterization == EXECUTOR_DYNAMICS.control_thrust_parameterization
+    fraction = flown.commands[0, : verdict.end_row, 0].numpy()
+    assert forecast.controls[:, 0] == pytest.approx(fraction * float(inputs.max_thrust_n[0]))
+    assert forecast.controls[:, 1:] == pytest.approx(flown.commands[0, : verdict.end_row, 1:].numpy())
+    # the gates count per word and pair evaluation with the observed verdict
+    base = {"airport": "KXXX", "group": "own dynamics", "stratum": "vectored", "words_not_reached": 0}
+    rows = [{**base, "outcome": "landed", "words": [("heading", True)] * 19 + [("speed", False)],
+             "observed_verdict": "pass", "replay_verdict": "pass"},
+            {**base, "outcome": "ground_contact", "words": None, "observed_verdict": "fail", "replay_verdict": "fail"}]
+    cell = gate_table(rows)["own dynamics"]["KXXX"]["vectored"]
+    assert (cell["landed"], cell["words_inside"], cell["replay_passes_where_observed_passes"]) == (0.5, 0.95, 1.0)
+    assert cell["clears"] == {"landed": False, "words": True, "evaluation": True}
+    assert cell["flights_with_unjudged_words"] == 1
