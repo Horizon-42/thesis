@@ -15,6 +15,11 @@
  *    altitude word's tube, the angle words that re-anchor it, the runway's elevation.
  *  • SPEED against time: each word's transition and band, the "unspecified" spans, the clearance.
  *
+ * WHAT IS YELLOW is the selected word alone (`column`, the class chosen in the sentence bar or by
+ * clicking a chart, and its word in force at the cursor): its own envelope, and the rows it is in
+ * force drawn over the track and over the one chart that plots its signal. Hovering moves the cursor
+ * only; a click on a chart selects that chart's column.
+ *
  * EVERY SHAPE IS THE EXPORTER'S. Regions, bands and tubes arrive as numbers computed in Python
  * from the vocabulary's own functions, and every verdict is the labeller's; this window draws them
  * and computes none. The smoothed signal is the bright line (it is what the labeller read), the
@@ -42,14 +47,14 @@ import {
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import {
-  altitudeTubeAt,
   formatSeconds,
-  headingEnvelopeAt,
   rowAtTime,
   trainingKindLabel,
+  trainingWordAt,
   trainingWordLabel,
   TRAINING_COLUMN_INDEX,
   type TrainingCandidate,
+  type TrainingColumn,
   type TrainingFlight,
   type TrainingPlanLine,
   type TrainingVocabulary,
@@ -104,11 +109,14 @@ export interface TrainingReadbackWindowProps {
   layers: TrainingLayers;
   cursorS: number;
   onCursorChange: (seconds: number) => void;
+  /** The selected word class; its word in force at the cursor is the one drawn yellow. */
+  column: TrainingColumn | null;
+  onColumnChange: (column: TrainingColumn) => void;
   onClose: () => void;
 }
 
 export default function TrainingReadbackWindow({
-  flight, vocabulary, candidates, layers, cursorS, onCursorChange, onClose,
+  flight, vocabulary, candidates, layers, cursorS, onCursorChange, column, onColumnChange, onClose,
 }: TrainingReadbackWindowProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number>(DEFAULT_W);
@@ -129,13 +137,17 @@ export default function TrainingReadbackWindow({
   const last = flight.rows - 1;
   const plotW = width - GUTTER - PAD_R;
   const cursorRow = rowAtTime(tS, cursorS);
-  const headingInForce = headingEnvelopeAt(flight, cursorRow);
-  const tubeInForce = altitudeTubeAt(flight, cursorRow);
   const designated = candidates[flight.runwayIndex];
   const label = (column: "heading" | "altitude" | "angle" | "speed", value: number) =>
     trainingWordLabel(vocabulary, candidates, column, value);
-  const inForce = (column: "heading" | "altitude" | "angle" | "speed") =>
-    flight.words.inForce[TRAINING_COLUMN_INDEX[column]][cursorRow];
+  const inForce = (name: "heading" | "altitude" | "angle" | "speed") =>
+    flight.words.inForce[TRAINING_COLUMN_INDEX[name]][cursorRow];
+  // ── the selected word: one column's, never the step's ────────────────────
+  const focus = column === null ? null : trainingWordAt(flight, column, cursorRow);
+  /** Is this the selected word — the `index`-th word (and envelope) of column `name`? */
+  const focused = (name: TrainingColumn, index: number) => column === name && focus!.index === index;
+  // The clearance owns the approach's envelopes: the capture turn and the corridor.
+  const approachFocused = column === "approach" && focus!.event.kind === "clear";
 
   // ── time charts share one x ───────────────────────────────────────────────
   const endS = tS[last];
@@ -188,8 +200,9 @@ export default function TrainingReadbackWindow({
   const xDistance = (metres: number) => GUTTER + (metres / distanceEnd) * plotW;
   const distanceAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * distanceEnd, 0), distanceEnd);
 
-  const heading = headingInForce >= 0 ? envelopes.heading[headingInForce] : null;
-  const tube = envelopes.altitude[tubeInForce];
+  // The chart titles read out the words in force at the cursor, whichever column is selected.
+  const heading = envelopes.heading[trainingWordAt(flight, "heading", cursorRow).index];
+  const tube = envelopes.altitude[trainingWordAt(flight, "altitude", cursorRow).index];
   const capture = envelopes.approach.captureTurn;
 
   const timeAxis = (
@@ -215,6 +228,19 @@ export default function TrainingReadbackWindow({
   );
   const rowX = (row: number) => xTime(tS[row]);
   const rowXDistance = (row: number) => xDistance(signals.smoothed.distanceM[row]);
+  // The rows the selected word is in force; the stretch runs on to the next word's issue so that it
+  // meets it. Only a word issued on the last row has no stretch.
+  const focusRows = focus === null
+    ? []
+    : Array.from({ length: Math.min(focus.endRow, last) - focus.row + 1 }, (_, offset) => focus.row + offset);
+  const focusTrace = (values: number[], x: (row: number) => number, y: (value: number) => number) =>
+    focusRows.length < 2 ? null : (
+      <polyline
+        points={focusRows.map((row) => `${x(row)},${y(values[row])}`).join(" ")}
+        fill="none" stroke={TRAINING_WORD_COLOR} strokeWidth={2.6} strokeOpacity={0.9} strokeLinecap="round"
+        className="training-readback-focus"
+      />
+    );
 
   return createPortal(
     <div className="training-readback-backdrop">
@@ -254,14 +280,15 @@ export default function TrainingReadbackWindow({
                 const pointed = candidate.index === flight.runwayIndex;
                 if (!pointed && !layers.candidates) return null;
                 const colour = pointed ? TRAINING_DESIGNATED_COLOR : TRAINING_CANDIDATE_COLOR;
+                const stroke = column === "runway" && focus!.value === candidate.index ? TRAINING_WORD_COLOR : colour;
                 const name = `${pointed ? "the designated runway" : "candidate"} ${candidate.ident}: course ` +
                   `${candidate.courseDeg.toFixed(1)}°, threshold ${candidate.elevationM.toFixed(1)} m MSL`;
                 return (
                   <g key={`candidate-${candidate.ident}`} className="training-readback-candidate" aria-label={name}>
                     <title>{name}</title>
-                    <polyline points={points(candidate.centreline)} fill="none" stroke={colour} strokeDasharray="5 4"
+                    <polyline points={points(candidate.centreline)} fill="none" stroke={stroke} strokeDasharray="5 4"
                       strokeOpacity={pointed ? 0.9 : 0.5} strokeWidth={1} />
-                    <polyline points={points(candidate.runway)} fill="none" stroke={colour} strokeWidth={4}
+                    <polyline points={points(candidate.runway)} fill="none" stroke={stroke} strokeWidth={4}
                       strokeOpacity={pointed ? 1 : 0.6} />
                     <text x={px(km(candidate.thresholdEM)) + 4} y={py(km(candidate.thresholdNM)) - 4}
                       className="training-readback-candidate-label" fill={colour}>
@@ -277,9 +304,9 @@ export default function TrainingReadbackWindow({
                     className="training-readback-corridor"
                     points={points(envelopes.approach.corridor.outline)}
                     fill={TRAINING_CORRIDOR_COLOR}
-                    fillOpacity={headingInForce < 0 ? 0.4 : 0.2}
-                    stroke={headingInForce < 0 ? TRAINING_WORD_COLOR : TRAINING_CORRIDOR_COLOR}
-                    strokeWidth={0.8}
+                    fillOpacity={approachFocused ? 0.4 : 0.2}
+                    stroke={approachFocused ? TRAINING_WORD_COLOR : TRAINING_CORRIDOR_COLOR}
+                    strokeWidth={approachFocused ? 1.4 : 0.8}
                   >
                     <title>
                       the capture corridor: {envelopes.approach.corridor.halfWidthAtCaptureM.toFixed(0)} m half width at the
@@ -289,7 +316,7 @@ export default function TrainingReadbackWindow({
                     </title>
                   </polygon>
                   {envelopes.heading.map((item, index) => {
-                    const selected = index === headingInForce;
+                    const selected = focused("heading", index);
                     const failed = item.check !== null && !(item.check.progressOk && item.check.rateOk);
                     const hold = item.holdCheck;
                     const holdFailed = hold !== null && hold.inside < hold.rows;
@@ -361,10 +388,11 @@ export default function TrainingReadbackWindow({
                       className="training-readback-capture-turn"
                       points={points(capture.turn.region)}
                       fill={TRAINING_TURN_COLOR}
-                      fillOpacity={0.06}
-                      stroke={capture.check.progressOk && capture.check.rateOk ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR}
+                      fillOpacity={approachFocused ? 0.2 : 0.06}
+                      stroke={approachFocused ? TRAINING_WORD_COLOR
+                        : capture.check.progressOk && capture.check.rateOk ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR}
                       strokeDasharray="4 3"
-                      strokeWidth={0.9}
+                      strokeWidth={approachFocused ? 1.4 : 0.9}
                     >
                       <title>the capture turn onto the course {designated.courseDeg.toFixed(1)}°</title>
                     </polygon>
@@ -374,6 +402,11 @@ export default function TrainingReadbackWindow({
 
               <polyline points={signals.eM.map((e, row) => `${px(km(e))},${py(km(signals.nM[row]))}`).join(" ")}
                 fill="none" stroke={TRAINING_TRACE_COLOR} strokeWidth={1.4} className="training-readback-trace" />
+              {focusRows.length >= 2 ? (
+                <polyline points={focusRows.map((row) => `${at(row).x},${at(row).y}`).join(" ")} fill="none"
+                  stroke={TRAINING_WORD_COLOR} strokeWidth={3} strokeOpacity={0.9} strokeLinecap="round"
+                  className="training-readback-focus" />
+              ) : null}
               {envelopes.heading.map((item, index) => {
                 const point = at(item.row);
                 const name = `heading ${label("heading", item.value)} issued at step ${item.row} — ${trainingKindLabel(item.kind, item.split)}`;
@@ -419,16 +452,20 @@ export default function TrainingReadbackWindow({
           <svg className="training-readback-svg" width={width} height={CHART_H} viewBox={`0 0 ${width} ${CHART_H}`}
             aria-label="Heading chart"
             onMouseMove={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}
-            onClick={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}>
+            onClick={(event) => {
+              onCursorChange(timeAtX(event.nativeEvent.offsetX));
+              onColumnChange("heading");
+            }}>
             <text x={GUTTER} y={11} className="training-readback-title">
               heading — ground track, ° true, unwrapped · in force: {label("heading", inForce("heading"))}
-              {heading?.check
+              {heading.check
                 ? ` · its turn: ${tick(heading.check.progressOk)} monotone, ${tick(heading.check.rateOk)} rate ` +
                   `(mean ${heading.check.meanRateDegS.toFixed(2)}°/s, max ${heading.check.maxRateDegS.toFixed(2)}°/s, ` +
                   `max bank ${heading.check.maxBankDeg.toFixed(1)}°` +
                   `${heading.check.rateMinApplies ? "" : `; under ${vocabulary.turnRateMinFromDeg}°, the lowest rate not judged`})`
-                : heading === null ? " · captured: the corridor holds" : " · in force at entry, no turn"}
-              {heading?.holdCheck ? ` · its hold: ${heading.holdCheck.inside}/${heading.holdCheck.rows} rows in the funnel` : ""}
+                : " · in force at entry, no turn"}
+              {heading.holdCheck ? ` · its hold: ${heading.holdCheck.inside}/${heading.holdCheck.rows} rows in the funnel` : ""}
+              {cursorRow >= flight.captureRow ? " · captured: the corridor holds" : ""}
             </text>
             {layers.lateral ? (
               <>
@@ -439,9 +476,10 @@ export default function TrainingReadbackWindow({
                         className="training-readback-turn-band"
                         x={rowX(item.row)} width={Math.max(xTime(edge(item.turnEndRow)) - rowX(item.row), 1)}
                         y={yHeading(item.turnBandDeg[1])} height={yHeading(item.turnBandDeg[0]) - yHeading(item.turnBandDeg[1])}
-                        fill={TRAINING_TURN_COLOR} fillOpacity={0.12}
-                        stroke={item.check && !item.check.progressOk ? TRAINING_OUTSIDE_COLOR : TRAINING_TURN_COLOR}
-                        strokeOpacity={0.6} strokeWidth={0.7}
+                        fill={TRAINING_TURN_COLOR} fillOpacity={focused("heading", index) ? 0.26 : 0.12}
+                        stroke={focused("heading", index) ? TRAINING_WORD_COLOR
+                          : item.check && !item.check.progressOk ? TRAINING_OUTSIDE_COLOR : TRAINING_TURN_COLOR}
+                        strokeOpacity={focused("heading", index) ? 1 : 0.6} strokeWidth={focused("heading", index) ? 1.4 : 0.7}
                       >
                         <title>turn to {label("heading", item.value)}: from the track at issue to the target, ±{vocabulary.headingToleranceDeg}°</title>
                       </rect>
@@ -451,8 +489,9 @@ export default function TrainingReadbackWindow({
                         className="training-readback-hold-band"
                         x={rowX(item.holdStartRow)} width={Math.max(xTime(edge(item.holdEndRow)) - rowX(item.holdStartRow), 1)}
                         y={yHeading(item.holdBandDeg[1])} height={yHeading(item.holdBandDeg[0]) - yHeading(item.holdBandDeg[1])}
-                        fill={TRAINING_FUNNEL_COLOR} fillOpacity={index === headingInForce ? 0.32 : 0.16}
-                        stroke={index === headingInForce ? TRAINING_WORD_COLOR : TRAINING_FUNNEL_COLOR} strokeWidth={0.7}
+                        fill={TRAINING_FUNNEL_COLOR} fillOpacity={focused("heading", index) ? 0.32 : 0.16}
+                        stroke={focused("heading", index) ? TRAINING_WORD_COLOR : TRAINING_FUNNEL_COLOR}
+                        strokeWidth={focused("heading", index) ? 1.4 : 0.7}
                       >
                         <title>hold {label("heading", item.value)} ±{vocabulary.headingToleranceDeg}°</title>
                       </rect>
@@ -464,7 +503,8 @@ export default function TrainingReadbackWindow({
                     className="training-readback-capture-band"
                     x={rowX(capture.startRow)} width={Math.max(rowX(flight.captureRow) - rowX(capture.startRow), 1)}
                     y={yHeading(capture.bandDeg[1])} height={yHeading(capture.bandDeg[0]) - yHeading(capture.bandDeg[1])}
-                    fill="none" stroke={TRAINING_TURN_COLOR} strokeDasharray="4 3" strokeWidth={0.9}
+                    fill="none" stroke={approachFocused ? TRAINING_WORD_COLOR : TRAINING_TURN_COLOR} strokeDasharray="4 3"
+                    strokeWidth={0.9}
                   >
                     <title>the capture turn onto the course</title>
                   </rect>
@@ -474,7 +514,8 @@ export default function TrainingReadbackWindow({
                   x={rowX(flight.captureRow)} width={Math.max(rowX(last) - rowX(flight.captureRow), 1)}
                   y={yHeading(envelopes.approach.courseBandDeg[1])}
                   height={yHeading(envelopes.approach.courseBandDeg[0]) - yHeading(envelopes.approach.courseBandDeg[1])}
-                  fill={TRAINING_CORRIDOR_COLOR} fillOpacity={0.22}
+                  fill={TRAINING_CORRIDOR_COLOR} fillOpacity={approachFocused ? 0.36 : 0.22}
+                  stroke={approachFocused ? TRAINING_WORD_COLOR : "none"} strokeWidth={0.7}
                 >
                   <title>after the capture: the course ±{vocabulary.corridorCourseToleranceDeg}°</title>
                 </rect>
@@ -482,6 +523,7 @@ export default function TrainingReadbackWindow({
             ) : null}
             {trace(signals.raw.trackDeg, rowX, yHeading, TRAINING_RAW_COLOR, true)}
             {trace(signals.smoothed.trackDeg, rowX, yHeading, TRAINING_TRACE_COLOR, false)}
+            {column === "heading" ? focusTrace(signals.smoothed.trackDeg, rowX, yHeading) : null}
             {envelopes.heading.map((item, index) => (
               <circle key={`heading-issue-${index}`} cx={rowX(item.row)} cy={yHeading(signals.smoothed.trackDeg[item.row])} r={2.6}
                 fill="none" stroke={TRAINING_COLUMN_COLOR.heading} strokeWidth={1.3} />
@@ -496,15 +538,18 @@ export default function TrainingReadbackWindow({
           <svg className="training-readback-svg" width={width} height={CHART_H} viewBox={`0 0 ${width} ${CHART_H}`}
             aria-label="Altitude chart"
             onMouseMove={(event) => onCursorChange(tS[rowAtDistance(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))])}
-            onClick={(event) => onCursorChange(tS[rowAtDistance(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))])}>
+            onClick={(event) => {
+              onCursorChange(tS[rowAtDistance(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))]);
+              onColumnChange("altitude");
+            }}>
             <text x={GUTTER} y={11} className="training-readback-title">
               altitude — geometric MSL (m) against distance flown · in force: {label("altitude", inForce("altitude"))},{" "}
               {label("angle", inForce("angle"))}
-              {tube ? ` · this tube: ${tube.check.inside}/${tube.check.rows} rows inside ${tick(tube.check.contained)}` : ""}
+              {` · this tube: ${tube.check.inside}/${tube.check.rows} rows inside ${tick(tube.check.contained)}`}
             </text>
             {layers.vertical ? envelopes.altitude.map((item, index) => {
               const rows = item.lowerM.map((_, offset) => item.row + offset);
-              const selected = index === tubeInForce;
+              const selected = focused("altitude", index);
               return (
                 <polygon
                   key={`tube-${index}`}
@@ -535,8 +580,10 @@ export default function TrainingReadbackWindow({
             {envelopes.angle.map((item, index) => (
               <g key={`angle-${index}`} aria-label={`angle word ${label("angle", item.value)} at step ${item.row}`}>
                 <line x1={rowXDistance(item.row)} x2={rowXDistance(item.row)} y1={plotTop} y2={plotTop + plotH}
-                  stroke={TRAINING_COLUMN_COLOR.angle} strokeOpacity={0.6} strokeDasharray="2 2" />
-                <text x={rowXDistance(item.row) + 2} y={plotTop + 9} className="training-readback-tick" fill={TRAINING_COLUMN_COLOR.angle}>
+                  stroke={focused("angle", index) ? TRAINING_WORD_COLOR : TRAINING_COLUMN_COLOR.angle}
+                  strokeOpacity={focused("angle", index) ? 1 : 0.6} strokeDasharray="2 2" />
+                <text x={rowXDistance(item.row) + 2} y={plotTop + 9} className="training-readback-tick"
+                  fill={focused("angle", index) ? TRAINING_WORD_COLOR : TRAINING_COLUMN_COLOR.angle}>
                   {vocabulary.angleClasses[item.value].name}
                   {item.measuredDeg === null ? "" : ` ${item.measuredDeg.toFixed(2)}°`}
                 </text>
@@ -544,6 +591,7 @@ export default function TrainingReadbackWindow({
             ))}
             {trace(signals.raw.altitudeM, rowXDistance, yAltitude, TRAINING_RAW_COLOR, true)}
             {trace(signals.smoothed.altitudeM, rowXDistance, yAltitude, TRAINING_TRACE_COLOR, false)}
+            {column === "altitude" || column === "angle" ? focusTrace(signals.smoothed.altitudeM, rowXDistance, yAltitude) : null}
             {envelopes.altitude.flatMap((item, index) =>
               runsOf(item.inside.map((ok) => !ok)).map(([first, lastOut]) => (
                 <polyline
@@ -572,7 +620,10 @@ export default function TrainingReadbackWindow({
           <svg className="training-readback-svg" width={width} height={CHART_H} viewBox={`0 0 ${width} ${CHART_H}`}
             aria-label="Speed chart"
             onMouseMove={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}
-            onClick={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}>
+            onClick={(event) => {
+              onCursorChange(timeAtX(event.nativeEvent.offsetX));
+              onColumnChange("speed");
+            }}>
             <text x={GUTTER} y={11} className="training-readback-title">
               speed — ground speed (m/s) · in force: {label("speed", inForce("speed"))}
             </text>
@@ -581,7 +632,8 @@ export default function TrainingReadbackWindow({
                 return (
                   <rect key={`speed-${index}`} className="training-readback-unspecified"
                     x={rowX(span.row)} width={Math.max(xTime(edge(span.endRow)) - rowX(span.row), 1)}
-                    y={plotTop} height={plotH} fill={TRAINING_RAW_COLOR} fillOpacity={0.12}>
+                    y={plotTop} height={plotH} fill={TRAINING_RAW_COLOR} fillOpacity={focused("speed", index) ? 0.22 : 0.12}
+                    stroke={focused("speed", index) ? TRAINING_WORD_COLOR : "none"} strokeWidth={1.6}>
                     <title>unspecified from step {span.row}: the pilot's own speed — only the range {span.rangeMps![0]}–{span.rangeMps![1]} m/s holds</title>
                   </rect>
                 );
@@ -594,9 +646,10 @@ export default function TrainingReadbackWindow({
                       ...transitionRows.map((row, offset) => `${rowX(row)},${ySpeed(span.transitionUpperMps![offset])}`),
                       ...transitionRows.map((row, offset) => `${rowX(row)},${ySpeed(span.transitionLowerMps![offset])}`).reverse(),
                     ].join(" ")}
-                    fill={TRAINING_SPEED_COLOR} fillOpacity={0.1}
-                    stroke={span.check!.transitionOk && span.check!.accelOk ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR}
-                    strokeOpacity={0.6} strokeWidth={0.6}>
+                    fill={TRAINING_SPEED_COLOR} fillOpacity={focused("speed", index) ? 0.2 : 0.1}
+                    stroke={focused("speed", index) ? TRAINING_WORD_COLOR
+                      : span.check!.transitionOk && span.check!.accelOk ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR}
+                    strokeOpacity={focused("speed", index) ? 1 : 0.6} strokeWidth={focused("speed", index) ? 1.6 : 0.6}>
                     <title>
                       transition to {label("speed", span.value)}: monotone {tick(span.check!.transitionOk)}, at most{" "}
                       {vocabulary.speedAccelMaxMps2} m/s² {tick(span.check!.accelOk)}
@@ -606,8 +659,10 @@ export default function TrainingReadbackWindow({
                     <rect className="training-readback-speed-band"
                       x={rowX(span.arrivalRow)} width={Math.max(xTime(edge(span.endRow)) - rowX(span.arrivalRow), 1)}
                       y={ySpeed(span.bandMps![1])} height={ySpeed(span.bandMps![0]) - ySpeed(span.bandMps![1])}
-                      fill={TRAINING_SPEED_COLOR} fillOpacity={0.2}
-                      stroke={span.check!.contained ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR} strokeWidth={0.7}>
+                      fill={TRAINING_SPEED_COLOR} fillOpacity={focused("speed", index) ? 0.34 : 0.2}
+                      stroke={focused("speed", index) ? TRAINING_WORD_COLOR
+                        : span.check!.contained ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR}
+                      strokeWidth={focused("speed", index) ? 1.6 : 0.7}>
                       <title>
                         {label("speed", span.value)} ±{vocabulary.speedToleranceMps} m/s: {span.check!.bandInside} of{" "}
                         {span.check!.bandRows} rows inside
@@ -619,6 +674,7 @@ export default function TrainingReadbackWindow({
             }) : null}
             {trace(signals.raw.groundSpeedMps, rowX, ySpeed, TRAINING_RAW_COLOR, true)}
             {trace(signals.smoothed.groundSpeedMps, rowX, ySpeed, TRAINING_TRACE_COLOR, false)}
+            {column === "speed" ? focusTrace(signals.smoothed.groundSpeedMps, rowX, ySpeed) : null}
             {envelopes.speed.flatMap((span, index) =>
               span.arrivalRow === null || span.bandInside === null ? [] :
                 runsOf(span.bandInside.map((ok) => !ok)).map(([first, lastOut]) => (
@@ -654,7 +710,8 @@ export default function TrainingReadbackWindow({
         <footer className="training-readback-legend">
           <span>
             Move the pointer across a chart to read it out; the plan view's dot, the sentence bar and the 3D scene follow
-            the same cursor. The word in force is drawn in yellow.
+            the same cursor. Yellow is the SELECTED word only — the class chosen in the sentence bar, or by clicking a
+            chart — at the cursor: its envelope, and the rows it is in force on the track and on its own chart.
           </span>
           <span>
             <b style={{ color: TRAINING_TURN_COLOR }}>▩</b> a heading word's turn region — turning the shorter way, between

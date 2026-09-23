@@ -1,23 +1,31 @@
 /**
  * The 3D layer's plumbing: the exporter's coordinates handed to Cesium unchanged — the track at
  * its ellipsoid height, a plan line as [lon, lat, …], a tube as a wall over the track's own rows —
- * and which envelopes are in force at a time.
+ * and what ONE selected word lights up: its own column's envelope and the rows it is in force.
  */
 import { describe, expect, it } from "vitest";
 
 import {
   planDegrees,
-  trainingEnvelopeInForce,
+  planRingDegrees,
+  trainingFocusEntities,
+  trainingFocusStretch,
   trainingTrackPositions,
   trainingTubeWall,
+  TRAINING_ENTITY,
 } from "../useTrainingTrackLayer";
-import { parseTrainingSample } from "../../data/trainingSample";
+import { parseTrainingSample, trainingWordAt, type TrainingSelection } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 
-function flight(position = 0) {
+function selection(position = 0): TrainingSelection {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
-  return parsed.value.flights[position];
+  const { vocabulary, candidates, flights } = parsed.value;
+  return { vocabulary, candidates, flight: flights[position] };
+}
+
+function flight(position = 0) {
+  return selection(position).flight;
 }
 
 describe("useTrainingTrackLayer helpers", () => {
@@ -45,12 +53,34 @@ describe("useTrainingTrackLayer helpers", () => {
     expect(wall.maximumHeights).toBe(tube.upperHaeM);
   });
 
-  it("finds the envelopes in force: a heading word's before the capture, the corridor (-1) after", () => {
+  it("closes an exported ring, which is open, for its outline", () => {
+    const outline = flight().envelopes.approach.corridor.outline;
+    const ring = planRingDegrees(outline);
+    expect(ring.slice(0, -2)).toEqual(planDegrees(outline));
+    expect(ring.slice(-2)).toEqual([outline.lon[0], outline.lat[0]]);
+  });
+
+  it("lights up the selected word's OWN envelope, never another column's", () => {
+    const scene = selection();
+    const at = (column: Parameters<typeof trainingWordAt>[1], row: number) =>
+      trainingFocusEntities(scene, column, trainingWordAt(scene.flight, column, row));
+    expect(at("heading", 15)).toEqual([TRAINING_ENTITY.turn(1), TRAINING_ENTITY.turnEnd(1), TRAINING_ENTITY.funnel(1)]);
+    // after the capture a heading word is still its own turn and funnel: the corridor is the clearance's
+    expect(at("heading", 50)).toEqual(at("heading", 15));
+    expect(at("altitude", 15)).toEqual([TRAINING_ENTITY.tube(0)]);
+    expect(at("approach", 15)).toEqual([TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]);
+    expect(at("approach", 5)).toEqual([]);   // "not cleared" bounds nothing
+    expect(at("runway", 5)).toEqual([TRAINING_ENTITY.runway("09"), TRAINING_ENTITY.centreline("09")]);
+    expect(at("angle", 30)).toEqual([]);
+    expect(at("speed", 30)).toEqual([]);
+  });
+
+  it("draws the rows a word is in force, on to the next word's issue", () => {
     const item = flight();
-    expect(trainingEnvelopeInForce(item, 0)).toEqual({ heading: 0, altitude: 0 });
-    expect(trainingEnvelopeInForce(item, 20)).toEqual({ heading: 1, altitude: 0 });
-    expect(trainingEnvelopeInForce(item, 40)).toEqual({ heading: 1, altitude: 1 });
-    expect(trainingEnvelopeInForce(item, 50)).toEqual({ heading: -1, altitude: 1 });
-    expect(trainingEnvelopeInForce(flight(1), 0)).toEqual({ heading: -1, altitude: 0 });
+    const altitude = trainingWordAt(item, "altitude", 5);
+    expect(trainingFocusStretch(item, altitude)).toEqual(trainingTrackPositions(item).slice(0, 21 * 3));
+    // the last word runs to the last row
+    const last = trainingWordAt(item, "altitude", 30);
+    expect(trainingFocusStretch(item, last)).toEqual(trainingTrackPositions(item).slice(20 * 3));
   });
 });

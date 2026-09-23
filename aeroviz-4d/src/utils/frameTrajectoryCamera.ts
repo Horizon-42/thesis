@@ -30,11 +30,12 @@ const FRAME_DURATION_S = 1.2;
  * bounding sphere for the current field of view.
  *
  * No-op when there is nothing to frame (empty samples / degenerate extent).
+ * `margin` (≥ 1) widens the fitted sphere, for a view whose panels cover part of the canvas.
  */
 export function frameTrajectoryCamera(
   viewer: Cesium.Viewer,
-  samples: readonly TrajectorySample[],
-  options: { duration?: number } = {},
+  samples: ReadonlyArray<Pick<TrajectorySample, "lon" | "lat" | "altM">>,
+  options: { duration?: number; margin?: number } = {},
 ): void {
   if (samples.length === 0) return;
 
@@ -43,6 +44,7 @@ export function frameTrajectoryCamera(
   );
   const sphere = Cesium.BoundingSphere.fromPoints(points);
   if (!(sphere.radius > 0)) return; // single point / NaN — nothing to fit
+  sphere.radius *= options.margin ?? 1;
 
   viewer.camera.flyToBoundingSphere(sphere, {
     duration: options.duration ?? FRAME_DURATION_S,

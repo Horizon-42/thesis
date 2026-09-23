@@ -21,8 +21,9 @@ export const TRAINING_COLUMN_COLOR: Record<TrainingColumn, string> = {
   speed: "#fbbf24",
 };
 
-/** The word in force at the cursor, in ONE colour across every view: it is one sentence, and
- *  the eye should be able to follow it from the bar to the charts to the scene. */
+/** The SELECTED word (one column's, at the cursor), in ONE colour across every view: its band's
+ *  stroke, its envelope's edge and the rows it is in force — the eye should be able to follow it
+ *  from the bar to the charts to the scene. An envelope keeps its own hue as its fill. */
 export const TRAINING_WORD_COLOR = "#facc15";
 
 /** The smoothed signal the labeller read — the bright line every envelope is judged against. */

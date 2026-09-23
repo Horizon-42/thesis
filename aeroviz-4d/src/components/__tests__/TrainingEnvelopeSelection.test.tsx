@@ -1,7 +1,8 @@
 /**
  * The Training flight in the 3D scene, on real Cesium entities (no WebGL canvas): the envelopes
- * the switches ask for are built once, the ones in force at the shared cursor are repainted
- * yellow and restored without rebuilding anything, and leaving Training removes the layer.
+ * the switches ask for are built once; the SELECTED word — one column's, chosen in the sentence
+ * bar — lights up its own envelope and nothing of another column's, and is restored without
+ * rebuilding anything; a new flight is framed once; leaving Training removes the layer.
  */
 import { useLayoutEffect } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -11,7 +12,14 @@ import { AppProvider, useApp } from "../../context/AppContext";
 import { parseTrainingSample } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import useTrainingTrackLayer, { TRAINING_ENTITY } from "../../hooks/useTrainingTrackLayer";
-import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
+import {
+  TRAINING_CORRIDOR_COLOR,
+  TRAINING_FUNNEL_COLOR,
+  TRAINING_OUTSIDE_COLOR,
+  TRAINING_TUBE_COLOR,
+  TRAINING_TURN_COLOR,
+  TRAINING_WORD_COLOR,
+} from "../../utils/trainingWordColors";
 import TrainingSentenceBar from "../TrainingSentenceBar";
 
 vi.mock("../../utils/fetchJson", () => ({
@@ -21,13 +29,16 @@ vi.mock("../../utils/fetchJson", () => ({
   }),
 }));
 
-async function setup() {
+async function setup(position = 0) {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
-  const selection = { vocabulary: parsed.value.vocabulary, candidates: parsed.value.candidates, flight: parsed.value.flights[0] };
+  const selection = {
+    vocabulary: parsed.value.vocabulary, candidates: parsed.value.candidates, flight: parsed.value.flights[position],
+  };
   const entities = new Cesium.EntityCollection();
   const requestRender = vi.fn();
-  const viewer = { entities, scene: { requestRender }, isDestroyed: () => false } as unknown as Cesium.Viewer;
+  const camera = { heading: 0, flyToBoundingSphere: vi.fn() };
+  const viewer = { entities, scene: { requestRender }, camera, isDestroyed: () => false } as unknown as Cesium.Viewer;
   let app: ReturnType<typeof useApp>;
   function Scene() {
     app = useApp();
@@ -46,9 +57,13 @@ async function setup() {
     const graphics = entity.polygon ?? entity.wall ?? entity.polyline;
     return graphics!.material!.getValue(Cesium.JulianDate.now()).color as Cesium.Color;
   };
-  const selected = Cesium.Color.fromCssColorString(TRAINING_WORD_COLOR).withAlpha(0.45);
-  return { ...view, entities, selection, requestRender, colourOf, selected, app: () => app! };
+  const css = (value: string, alpha = 1) => Cesium.Color.fromCssColorString(value).withAlpha(alpha);
+  return { ...view, entities, selection, requestRender, camera, colourOf, css, app: () => app! };
 }
+
+const band = (name: RegExp) => screen.getByLabelText(name);
+const HEADING_180 = /^heading 180° — a turn/;
+const DESCEND_TO_LAND = /^altitude descend to land — a new target/;
 
 describe("Training envelopes in the 3D scene", () => {
   it("builds the track, the lateral envelopes, the tubes, every candidate and the issue points", async () => {
@@ -57,15 +72,33 @@ describe("Training envelopes in the 3D scene", () => {
       TRAINING_ENTITY.track, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis, TRAINING_ENTITY.captureTurn,
       TRAINING_ENTITY.turn(1), TRAINING_ENTITY.turnEnd(1), TRAINING_ENTITY.funnel(0), TRAINING_ENTITY.funnel(1), TRAINING_ENTITY.tube(0), TRAINING_ENTITY.tube(1),
       TRAINING_ENTITY.centreline("09"), TRAINING_ENTITY.runway("27"), TRAINING_ENTITY.issue(0), TRAINING_ENTITY.issue(1),
-      TRAINING_ENTITY.clearance, TRAINING_ENTITY.capture, TRAINING_ENTITY.end,
+      TRAINING_ENTITY.clearance, TRAINING_ENTITY.capture, TRAINING_ENTITY.end, TRAINING_ENTITY.groundTrace,
+      TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)), TRAINING_ENTITY.edge(TRAINING_ENTITY.corridor),
+      TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(1), "upper"), TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(1), "lower"),
     ]) {
       expect(scene.entities.getById(id), id).toBeDefined();
     }
     // a word the flight was already holding at entry has no turn region
     expect(scene.entities.getById(TRAINING_ENTITY.turn(0))).toBeUndefined();
     expect(scene.entities.getById(TRAINING_ENTITY.turnEnd(0))).toBeUndefined();
-    // the lateral envelopes are draped on the ground: they give no height
+    // the lateral envelopes are draped on the ground: they give no height; their edges are draped too
     expect(scene.entities.getById(TRAINING_ENTITY.funnel(1))!.polygon!.height).toBeUndefined();
+    expect(scene.entities.getById(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))!.polyline!.clampToGround!
+      .getValue(Cesium.JulianDate.now())).toBe(true);
+  });
+
+  it("carries the labeller's verdict on the edges, as the plan view does", async () => {
+    const scene = await setup();
+    const { heading } = scene.selection.flight.envelopes;
+    const failed = heading.findIndex((item) => item.holdCheck !== null && item.holdCheck.inside < item.holdCheck.rows);
+    const passed = heading.findIndex((item) => item.holdCheck !== null && item.holdCheck.inside === item.holdCheck.rows);
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(failed)))).toEqual(scene.css(TRAINING_OUTSIDE_COLOR));
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(passed)))).toEqual(scene.css(TRAINING_FUNNEL_COLOR));
+    // a tube with rows outside is edged in the verdict colour, not its own
+    const tubes = scene.selection.flight.envelopes.altitude;
+    const outside = tubes.findIndex((tube) => !tube.check.contained);
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(outside), "upper")))
+      .toEqual(scene.css(TRAINING_OUTSIDE_COLOR, 0.9));
   });
 
   it("walls each altitude tube over the aircraft's own ground track, between its exported edges", async () => {
@@ -78,24 +111,90 @@ describe("Training envelopes in the 3D scene", () => {
     expect(Cesium.Math.toDegrees(first.longitude)).toBeCloseTo(scene.selection.flight.signals.lon[tube.row], 9);
   });
 
-  it("paints the envelopes in force at the cursor yellow and restores them, without rebuilding", async () => {
+  it("highlights nothing until a word is selected", async () => {
+    const scene = await setup();
+    expect(scene.entities.getById(TRAINING_ENTITY.focusStretch)).toBeUndefined();
+    expect(scene.entities.getById(TRAINING_ENTITY.focusIssue)).toBeUndefined();
+    expect(scene.colourOf(TRAINING_ENTITY.funnel(0))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18));
+  });
+
+  it("lights up ONLY the selected column's word — its own hue deepened, a yellow edge, its rows", async () => {
     const scene = await setup();
     const original = [...scene.entities.values];
-    expect(scene.colourOf(TRAINING_ENTITY.funnel(0))).toEqual(scene.selected);
-    expect(scene.colourOf(TRAINING_ENTITY.tube(0))).toEqual(scene.selected);
-    fireEvent.click(screen.getByLabelText(/^heading 180° — a turn/));
-    expect(scene.colourOf(TRAINING_ENTITY.turn(1))).toEqual(scene.selected);
-    expect(scene.colourOf(TRAINING_ENTITY.turnEnd(1))).toEqual(scene.selected);
-    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.selected);
-    expect(scene.colourOf(TRAINING_ENTITY.funnel(0))).not.toEqual(scene.selected);
-    // after the capture the corridor is what holds the flight laterally
-    act(() => scene.app().setTrainingCursorS(60));
-    expect(scene.colourOf(TRAINING_ENTITY.corridor)).toEqual(scene.selected);
-    expect(scene.colourOf(TRAINING_ENTITY.tube(1))).toEqual(scene.selected);
-    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).not.toEqual(scene.selected);
-    expect(scene.colourOf(TRAINING_ENTITY.turnEnd(1))).not.toEqual(scene.selected);
+    fireEvent.click(band(HEADING_180));
+    expect(scene.colourOf(TRAINING_ENTITY.turn(1))).toEqual(scene.css(TRAINING_TURN_COLOR, 0.45));
+    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.45));
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))).toEqual(scene.css(TRAINING_WORD_COLOR));
+    // the altitude word in force at the same step is another column's: left alone
+    expect(scene.colourOf(TRAINING_ENTITY.tube(0))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.28));
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(0), "upper"))).not.toEqual(scene.css(TRAINING_WORD_COLOR));
+    expect(scene.colourOf(TRAINING_ENTITY.corridor)).toEqual(scene.css(TRAINING_CORRIDOR_COLOR, 0.3));
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.corridor))).toEqual(scene.css(TRAINING_CORRIDOR_COLOR));
+    const label = scene.entities.getById(TRAINING_ENTITY.focusIssue)!.label!.text!.getValue(Cesium.JulianDate.now());
+    expect(label).toBe("heading 180° · step 10");
+    expect(scene.entities.getById(TRAINING_ENTITY.focusStretch)).toBeDefined();
+
+    fireEvent.click(band(DESCEND_TO_LAND));
+    expect(scene.colourOf(TRAINING_ENTITY.tube(1))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.45));
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(1), "lower"))).toEqual(scene.css(TRAINING_WORD_COLOR));
+    // the heading word is restored, edge and fill
+    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18));
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))).not.toEqual(scene.css(TRAINING_WORD_COLOR));
+    // nothing was rebuilt
     original.forEach((entity) => expect(scene.entities.getById(entity.id)).toBe(entity));
+
+    // a second click on the selected word clears it
+    fireEvent.click(band(DESCEND_TO_LAND));
+    expect(scene.colourOf(TRAINING_ENTITY.tube(1))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.28));
+    expect(scene.entities.getById(TRAINING_ENTITY.focusIssue)).toBeUndefined();
     expect(scene.requestRender).toHaveBeenCalled();
+  });
+
+  it("gives the clearance its capture turn and corridor; a dashed edge turns yellow, dashed, and comes back", async () => {
+    const scene = await setup();
+    const edgeId = TRAINING_ENTITY.edge(TRAINING_ENTITY.captureTurn);
+    const edge = () => scene.entities.getById(edgeId)!.polyline!;
+    const now = Cesium.JulianDate.now();
+    const restColour = scene.colourOf(edgeId);
+    expect(edge().material).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
+    expect(edge().width!.getValue(now)).toBe(1.5);
+    fireEvent.click(band(/^approach cleared — cleared to join the final/));
+    expect(edge().material).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
+    expect(scene.colourOf(edgeId)).toEqual(scene.css(TRAINING_WORD_COLOR));
+    expect(edge().width!.getValue(now)).toBe(3);
+    expect(scene.colourOf(TRAINING_ENTITY.corridor)).toEqual(scene.css(TRAINING_CORRIDOR_COLOR, 0.45));
+    expect(scene.colourOf(TRAINING_ENTITY.corridorAxis)).toEqual(scene.css(TRAINING_WORD_COLOR));
+    // the heading words are another column's
+    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18));
+    fireEvent.click(band(/^approach cleared — cleared to join the final/));
+    expect(edge().material).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
+    expect(scene.colourOf(edgeId)).toEqual(restColour);
+    expect(edge().width!.getValue(now)).toBe(1.5);
+  });
+
+  it("finds the clearance at step 0 on a straight-in flight", async () => {
+    const scene = await setup(1);
+    fireEvent.click(band(/^approach cleared — cleared to join the final, issued at step 0/));
+    expect(scene.colourOf(TRAINING_ENTITY.corridor)).toEqual(scene.css(TRAINING_CORRIDOR_COLOR, 0.45));
+    expect(scene.entities.getById(TRAINING_ENTITY.focusIssue)!.label!.text!.getValue(Cesium.JulianDate.now()))
+      .toBe("approach cleared · step 0");
+  });
+
+  it("repaints nothing while the cursor moves inside the selected word", async () => {
+    const scene = await setup();
+    fireEvent.click(band(DESCEND_TO_LAND));
+    const marker = scene.entities.getById(TRAINING_ENTITY.focusIssue);
+    const renders = scene.requestRender.mock.calls.length;
+    act(() => scene.app().setTrainingCursorS(80));
+    expect(scene.entities.getById(TRAINING_ENTITY.focusIssue)).toBe(marker);
+    expect(scene.requestRender.mock.calls.length).toBe(renders);
+  });
+
+  it("frames the selected flight once, not on a switch", async () => {
+    const scene = await setup();
+    expect(scene.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1);
+    act(() => scene.app().setTrainingLayer("lateral", false));
+    expect(scene.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1);
   });
 
   it("follows the switches, and leaves nothing behind outside Training", async () => {

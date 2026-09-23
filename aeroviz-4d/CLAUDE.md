@@ -114,10 +114,12 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **The Training views compute NO envelope**: every turn region, turn end, funnel, corridor, tube and speed
   band is exported from `instructions/display.py`, every verdict is `Reading.checks`; the reader checks only
   the bookkeeping (AV20).
-- Training's cursor is shared by the sentence bar, the read-back window and 3D: the envelopes in force
-  repaint yellow, styles only (AV21).
-- Training in 3D: the lateral envelopes are draped on the ground, the tubes are walls in exported HAE;
-  the altitude chart's axis is the distance flown (AV22).
+- **Training highlights ONE selected word, never a step**: `trainingColumn` (the word class) + the shared
+  cursor → `trainingWordAt`; only that column's word lights up (its own envelope in its own hue with a yellow
+  edge, and its in-force rows), in the sentence bar, the read-back window and 3D alike (AV21).
+- Training in 3D: the lateral envelopes are draped on the ground with a draped edge carrying the verdict, under
+  the track's ground trace; the tubes are walls in exported HAE with edge lines; a selected flight is framed
+  once; the altitude chart's axis is the distance flown (AV22).
 - **A turn is bounded by RATE**: its region lies between the fastest (4.7°/s, ≤ 32° bank) and the slowest
   (0.5°/s, up to 10.5 s late) turn, it may end in a parallelogram, and the hold funnel swept from that
   parallelogram is exactly what the labeller judges (`holdCheck`; dashed = not judged) (AV23).

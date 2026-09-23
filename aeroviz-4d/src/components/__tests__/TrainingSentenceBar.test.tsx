@@ -1,6 +1,7 @@
 /**
  * The sentence bar: six rows in the vocabulary's order, step 0 complete, the silent steps counted,
- * the moments that are not words marked, and the cursor moved by the artefact's own steps.
+ * the moments that are not words marked, the cursor moved by the artefact's own steps, and ONE
+ * column's word selected at a time.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -17,7 +18,8 @@ vi.mock("../../context/AppContext", async () => {
   return {
     useApp: () => {
       const [trainingCursorS, setTrainingCursorS] = useState(0);
-      return { ...appState, trainingCursorS, setTrainingCursorS };
+      const [trainingColumn, setTrainingColumn] = useState<string | null>(null);
+      return { ...appState, trainingCursorS, setTrainingCursorS, trainingColumn, setTrainingColumn };
     },
   };
 });
@@ -98,6 +100,24 @@ describe("TrainingSentenceBar", () => {
     expect(screen.getByText("t = 20 s · step 10")).toBeTruthy();
     fireEvent.keyDown(screen.getByLabelText(/^Step 20 at 40 s: altitude descend to land, angle descent 3/), { key: "Enter" });
     expect(screen.getByText("t = 40 s · step 20")).toBeTruthy();
+  });
+
+  it("selects one column's word: the other words in force at that step are not highlighted", () => {
+    select();
+    render(<TrainingSentenceBar />);
+    const pressed = () => [...document.querySelectorAll("[aria-pressed='true']")].map((band) => band.getAttribute("aria-label"));
+    expect(pressed()).toEqual([]);
+    fireEvent.click(screen.getByLabelText(/^heading 180° — a turn/));
+    // step 10 also has approach "cleared", and every other column's step-0 word is in force there
+    expect(pressed()).toEqual([expect.stringMatching(/^heading 180°/)]);
+    // the step numbers move the cursor and keep the column: the heading word in force there
+    fireEvent.click(screen.getByLabelText(/^Step 0 at 0 s/));
+    expect(pressed()).toEqual([expect.stringMatching(/^heading 270°/)]);
+    fireEvent.click(screen.getByLabelText(/^altitude descend to land/));
+    expect(pressed()).toEqual([expect.stringMatching(/^altitude descend to land/)]);
+    // the selected word, clicked again, clears the selection
+    fireEvent.click(screen.getByLabelText(/^altitude descend to land/));
+    expect(pressed()).toEqual([]);
   });
 
   it("opens the read-back check", () => {

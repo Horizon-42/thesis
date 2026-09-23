@@ -2,22 +2,25 @@
  * The read-back check: every envelope the exporter sent is drawn where it belongs — the lateral
  * ones in the plan view and on the heading chart, the tubes against distance flown, the speed
  * transitions and bands against time — the switches reach every chart, the rows the labeller
- * counted outside are red, and the two empty slots say why they are empty.
+ * counted outside are red, only the selected column's word is yellow, and the two empty slots say
+ * why they are empty.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import TrainingReadbackWindow, { extent, rowAtDistance, runsOf } from "../TrainingReadbackWindow";
-import { parseTrainingSample } from "../../data/trainingSample";
+import { parseTrainingSample, type TrainingColumn } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import type { TrainingLayers } from "../../context/AppContext";
+import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 
 const ALL: TrainingLayers = { lateral: true, vertical: true, candidates: true };
 
-function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0) {
+function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: TrainingColumn | null = null) {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
   const onCursorChange = vi.fn();
+  const onColumnChange = vi.fn();
   render(
     <TrainingReadbackWindow
       flight={parsed.value.flights[position]}
@@ -26,11 +29,16 @@ function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0) {
       layers={layers}
       cursorS={cursorS}
       onCursorChange={onCursorChange}
+      column={column}
+      onColumnChange={onColumnChange}
       onClose={() => undefined}
     />,
   );
-  return { onCursorChange };
+  return { onCursorChange, onColumnChange };
 }
+
+/** The elements stroked in the selected word's colour. */
+const yellow = () => [...document.body.querySelectorAll(`[stroke="${TRAINING_WORD_COLOR}"]`)];
 
 /** The window renders through a portal into `document.body`. */
 const count = (selector: string) => document.body.querySelectorAll(selector).length;
@@ -68,7 +76,7 @@ describe("TrainingReadbackWindow", () => {
     render(
       <TrainingReadbackWindow flight={parsed.value.flights[0]} vocabulary={parsed.value.vocabulary}
         candidates={parsed.value.candidates} layers={ALL} cursorS={0} onCursorChange={() => undefined}
-        onClose={() => undefined} />,
+        column={null} onColumnChange={() => undefined} onClose={() => undefined} />,
     );
     expect(screen.getAllByText(/not judged by the labeller/).length).toBeGreaterThan(0);
   });
@@ -125,10 +133,43 @@ describe("TrainingReadbackWindow", () => {
     expect(screen.getByLabelText("Prior sentence slot").textContent).toMatch(/no prior is trained/);
   });
 
-  it("reads the cursor off a chart", () => {
-    const { onCursorChange } = open();
-    fireEvent.click(screen.getByLabelText("Speed chart"));
+  it("reads the cursor off a chart, and a click selects that chart's column", () => {
+    const { onCursorChange, onColumnChange } = open();
+    fireEvent.mouseMove(screen.getByLabelText("Heading chart"));
     expect(onCursorChange).toHaveBeenCalled();
+    expect(onColumnChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Speed chart"));
+    expect(onColumnChange).toHaveBeenCalledWith("speed");
+  });
+
+  it("draws nothing yellow until a column is selected", () => {
+    open(ALL, 0, 22);
+    expect(yellow()).toHaveLength(0);
+    expect(count(".training-readback-focus")).toBe(0);
+  });
+
+  it("draws ONLY the selected column's word yellow — not the other words in force at the same step", () => {
+    // at 22 s heading 180° (from step 10) and altitude 1110 m (from step 0) are both in force
+    open(ALL, 0, 22, "heading");
+    const lit = yellow().map((element) => element.getAttribute("class"));
+    expect(lit).toEqual(expect.arrayContaining(["training-readback-turn", "training-readback-funnel",
+      "training-readback-turn-band", "training-readback-hold-band"]));
+    expect(lit).not.toContain("training-readback-tube");
+    expect(lit).not.toContain("training-readback-corridor");
+    // its rows: over the plan track and over the heading chart, not the altitude or speed chart
+    expect(count(".training-readback-focus")).toBe(2);
+    expect(screen.getByLabelText("Altitude chart").querySelector(".training-readback-focus")).toBeNull();
+  });
+
+  it("gives the clearance the corridor and the capture turn, and an angle word its rows on the altitude chart", () => {
+    open(ALL, 0, 60, "approach");
+    const lit = yellow().map((element) => element.getAttribute("class"));
+    expect(lit).toEqual(expect.arrayContaining(["training-readback-corridor", "training-readback-capture-turn",
+      "training-readback-course-band"]));
+    expect(lit).not.toContain("training-readback-funnel");
+    cleanup();
+    open(ALL, 0, 60, "angle");
+    expect(screen.getByLabelText("Altitude chart").querySelector(".training-readback-focus")).not.toBeNull();
   });
 });
 

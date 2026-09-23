@@ -471,10 +471,16 @@ export function formatSeconds(seconds: number): string {
   return Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(1);
 }
 
+/** One word of a column and the rows it is in force: from its issue to the next word of its column. */
+export interface TrainingWordRun {
+  row: number;
+  endRow: number;
+  value: number;
+  event: TrainingWordEvent;
+}
+
 /** The runs of one column: the value in force from each of its issue rows to the next. */
-export function trainingColumnRuns(
-  flight: TrainingFlight, column: TrainingColumn,
-): Array<{ row: number; endRow: number; value: number; event: TrainingWordEvent }> {
+export function trainingColumnRuns(flight: TrainingFlight, column: TrainingColumn): TrainingWordRun[] {
   const index = TRAINING_COLUMN_INDEX[column];
   const events = flight.words.events.filter((event) => event.column === index);
   return events.map((event, position) => ({
@@ -485,20 +491,18 @@ export function trainingColumnRuns(
   }));
 }
 
-/** The heading word whose envelope holds a row (the last issued at or before it), or -1 once
- *  the flight is captured — from there the corridor is the lateral envelope. */
-export function headingEnvelopeAt(flight: TrainingFlight, row: number): number {
-  if (row >= flight.captureRow) return -1;
-  let found = -1;
-  flight.envelopes.heading.forEach((item, index) => {
-    if (item.row <= row) found = index;
-  });
-  return found;
-}
-
-/** The altitude tube covering a row. The tubes tile the sentence, so there is always one. */
-export function altitudeTubeAt(flight: TrainingFlight, row: number): number {
-  return flight.envelopes.altitude.findIndex((tube) => tube.row <= row && row < tube.endRow);
+/**
+ * The word of ONE column in force at a row, and its place among that column's words — which is also
+ * the place of its envelope: `envelopes.heading / altitude / angle / speed` hold one entry per word of
+ * their column, in order (the parser checks it). Step 0 gives every column a word and the runs tile
+ * the sentence, so there is always one.
+ */
+export function trainingWordAt(
+  flight: TrainingFlight, column: TrainingColumn, row: number,
+): TrainingWordRun & { index: number } {
+  const runs = trainingColumnRuns(flight, column);
+  const index = runs.findIndex((run) => run.row <= row && row < run.endRow);
+  return { ...runs[index], index };
 }
 
 /** The flight's verdicts, counted from the labeller's own checks. */

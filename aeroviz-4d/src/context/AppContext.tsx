@@ -45,7 +45,7 @@ import { fetchJson } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerrain";
 import type { ObservedVerdictFilter } from "../data/observedTracks";
-import type { TrainingSelection } from "../data/trainingSample";
+import type { TrainingColumn, TrainingSelection } from "../data/trainingSample";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -244,6 +244,13 @@ interface TrainingSessionState {
   trainingCursorS: number;
   setTrainingCursorS: (atS: number) => void;
   /**
+   * THE SELECTED WORD CLASS (a column), or null. What every view highlights is ONE word: this
+   * column's word in force at the cursor — never the other columns' words at the same step, whose
+   * runs start and end elsewhere. It outlives a change of flight; the cursor does not.
+   */
+  trainingColumn: TrainingColumn | null;
+  setTrainingColumn: (column: TrainingColumn | null) => void;
+  /**
    * WHICH ENVELOPES ARE DRAWN. The observed track has no switch: it is what every envelope is
    * read against. The switches reach every view at once (the 3D scene and the read-back plan and
    * charts), because an envelope present in one view and absent in another is how a reader comes
@@ -360,6 +367,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setTrainingCursorS = useCallback((atS: number) => {
     setTrainingCursor({ flightKey: trainingFlightKey, atS });
   }, [trainingFlightKey]);
+  const [trainingColumn, setTrainingColumn] = useState<TrainingColumn | null>(null);
   const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({ lateral: true, vertical: true, candidates: true });
   const setTrainingLayer = useCallback((layer: keyof TrainingLayers, on: boolean) => {
     setTrainingLayers((current) => ({ ...current, [layer]: on }));
@@ -595,9 +603,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingSelection,
     trainingCursorS,
     setTrainingCursorS,
+    trainingColumn,
+    setTrainingColumn,
     trainingLayers,
     setTrainingLayer,
-  }), [trainingSelection, trainingCursorS, setTrainingCursorS, trainingLayers, setTrainingLayer]);
+  }), [trainingSelection, trainingCursorS, setTrainingCursorS, trainingColumn, trainingLayers, setTrainingLayer]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,

@@ -5,12 +5,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  altitudeTubeAt,
-  headingEnvelopeAt,
   parseTrainingIndex,
   parseTrainingSample,
   rowAtTime,
   trainingColumnRuns,
+  trainingWordAt,
   trainingSetRefusal,
   trainingVerdicts,
   trainingWordLabel,
@@ -260,13 +259,15 @@ describe("reading a sentence", () => {
     expect(trainingColumnRuns(flight, "runway")).toHaveLength(1);
   });
 
-  it("finds the envelopes in force: the heading word's until the capture, the tube that covers the row", () => {
+  it("finds one column's word at a row, and its place among that column's words (= its envelope's)", () => {
     const flight = parsed().flights[0];
-    expect(headingEnvelopeAt(flight, 9)).toBe(0);
-    expect(headingEnvelopeAt(flight, 10)).toBe(1);
-    expect(headingEnvelopeAt(flight, 25)).toBe(-1);
-    expect(altitudeTubeAt(flight, 19)).toBe(0);
-    expect(altitudeTubeAt(flight, 20)).toBe(1);
+    expect(trainingWordAt(flight, "heading", 9)).toMatchObject({ index: 0, row: 0, endRow: 10 });
+    // after the capture the heading word in force is still the last one: the corridor is not a heading word's
+    expect(trainingWordAt(flight, "heading", 25)).toMatchObject({ index: 1, row: 10, endRow: MOCK_ROWS });
+    // heading changes at step 10 and altitude at step 20: at step 15 they are different runs
+    expect(trainingWordAt(flight, "altitude", 15)).toMatchObject({ index: 0, row: 0, endRow: 20 });
+    expect(trainingWordAt(flight, "altitude", 20).index).toBe(1);
+    expect(trainingWordAt(flight, "speed", MOCK_ROWS - 1)).toMatchObject({ index: 1, row: 30, endRow: MOCK_ROWS });
     expect(rowAtTime(flight.signals.tS, 21)).toBe(10);
   });
 

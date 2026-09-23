@@ -18,6 +18,11 @@
  * The cursor is in flight time and is moved by clicking a band or a step number: what it
  * reports is the artefact's own step, never a rounded pixel. It does NOT drive `viewer.clock`:
  * Training loads no CZML, and the clock belongs to Observe's playback.
+ *
+ * ONE COLUMN IS HIGHLIGHTED, NEVER A STEP. Clicking a band selects its word class
+ * (`trainingColumn`) and puts the cursor at its issue; every view then highlights that column's word
+ * in force at the cursor, and only it. The other columns' words at the same step are not "the same
+ * moment" — their runs begin and end elsewhere. Clicking the selected band again clears it.
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
@@ -96,6 +101,7 @@ export default function TrainingSentenceBar() {
   const {
     trainingSelection, trainingLayers,
     trainingCursorS: cursorS, setTrainingCursorS: setCursorS,
+    trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
   } = useApp();
   const frameRef = useRef<HTMLDivElement>(null);
   const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
@@ -222,11 +228,13 @@ export default function TrainingSentenceBar() {
           {TRAINING_COLUMNS.map((column, position) => {
             const y = HEAD_H + position * ROW_H;
             const colour = TRAINING_COLUMN_COLOR[column];
+            const selectedColumn = column === focusColumn;
             return (
               <g key={column} aria-label={`${column} row`}>
                 <rect x={GUTTER} y={y} width={plotW} height={ROW_H}
                   className={`training-sentence-row-bg${position % 2 ? " odd" : ""}`} />
-                <text x={GUTTER - 8} y={y + ROW_H / 2 + 4} textAnchor="end" className="training-sentence-row-label">
+                <text x={GUTTER - 8} y={y + ROW_H / 2 + 4} textAnchor="end" className="training-sentence-row-label"
+                  style={selectedColumn ? { fill: TRAINING_WORD_COLOR, fontWeight: 600 } : undefined}>
                   {ROW_LABEL[column]}
                 </text>
                 {trainingColumnRuns(flight, column).map((run) => {
@@ -239,17 +247,26 @@ export default function TrainingSentenceBar() {
                   const title =
                     `${column} ${label} — ${trainingKindLabel(run.event.kind, split)}, issued at step ${run.row} ` +
                     `(${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s`;
-                  const inForce = run.row <= cursorRow && cursorRow < run.endRow;
+                  const selected = selectedColumn && run.row <= cursorRow && cursorRow < run.endRow;
+                  const choose = () => {
+                    if (selected) {
+                      setFocusColumn(null);
+                      return;
+                    }
+                    setFocusColumn(column);
+                    setCursorS(timeOf(run.row));
+                  };
                   return (
                     <g
                       key={`${column}-${run.row}`}
                       role="button"
                       tabIndex={0}
                       aria-label={title}
+                      aria-pressed={selected}
                       className="training-sentence-band"
-                      onClick={() => setCursorS(timeOf(run.row))}
+                      onClick={choose}
                       onKeyDown={(keyEvent) => {
-                        if (keyEvent.key === "Enter" || keyEvent.key === " ") setCursorS(timeOf(run.row));
+                        if (keyEvent.key === "Enter" || keyEvent.key === " ") choose();
                       }}
                     >
                       <title>{title}</title>
@@ -260,9 +277,10 @@ export default function TrainingSentenceBar() {
                         height={ROW_H - 8}
                         rx={3}
                         fill={colour}
-                        fillOpacity={inForce ? 0.34 : 0.16}
-                        stroke={inForce ? TRAINING_WORD_COLOR : colour}
-                        strokeOpacity={inForce ? 1 : 0.6}
+                        fillOpacity={selected ? 0.4 : 0.16}
+                        stroke={selected ? TRAINING_WORD_COLOR : colour}
+                        strokeOpacity={selected ? 1 : 0.6}
+                        strokeWidth={selected ? 2 : 1}
                       />
                       {/* the issue itself */}
                       <rect x={x} y={y + 2} width={2} height={ROW_H - 4} fill={colour} className="training-sentence-issue" />
@@ -324,8 +342,9 @@ export default function TrainingSentenceBar() {
       <footer className="training-sentence-legend">
         <span>
           A band is a WORD IN FORCE, from the step it was issued (the tick at its left edge) to the
-          next word of its column; step 0 gives all six. The dashed lines mark the clearance, the
-          capture of the final and where the speed is left to the pilot.
+          next word of its column; step 0 gives all six. Click a band to select that word: it alone
+          is highlighted here, in the read-back check and in 3D (click it again to clear). The dashed
+          lines mark the clearance, the capture of the final and where the speed is left to the pilot.
           <button
             type="button"
             className="training-sentence-notes-toggle"
@@ -365,6 +384,8 @@ export default function TrainingSentenceBar() {
           layers={trainingLayers}
           cursorS={cursorS}
           onCursorChange={setCursorS}
+          column={focusColumn}
+          onColumnChange={setFocusColumn}
           onClose={() => setReadbackOpen(false)}
         />
       ) : null}
