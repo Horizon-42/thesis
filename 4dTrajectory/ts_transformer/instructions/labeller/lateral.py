@@ -217,16 +217,18 @@ def read_lateral(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRe
         side = math.copysign(1.0, offset) if offset != 0.0 else math.copysign(1.0, angle)
         intercept = course_deg - side * spec.intercept_angle_deg
         target = _snap(float(track[capture]) + float(wrap180(intercept - track[capture])), step)
-        if not envelope.heading_converges(target, course_deg, offset, float(relative.before_threshold_m[anchor]),
-                                          spec.heading_tolerance_deg, spec.corridor_half_width_m,
-                                          spec.corridor_widening_deg):
-            raise Refused("no intercept reaches the final",
-                          f"{target % 360:.0f}° from {offset:+.0f} m off the line, "
-                          f"{relative.before_threshold_m[anchor]:.0f} m before the threshold")
         direction = math.copysign(1.0, target - current)
         departure = 0 if previous is None else _departure_row(track, previous, direction, spec)
         emit_turn(current, target, departure, capture, "intercept")
         reading.intercept_inserted = True
+        # the intercept must itself reach the final, flown from where the aircraft is on it
+        on = reading.turns[-1]["arrival_row"]
+        if not envelope.heading_converges(target, course_deg, float(relative.right_of_course_m[on]),
+                                          float(relative.before_threshold_m[on]), spec.heading_tolerance_deg,
+                                          spec.corridor_half_width_m, spec.corridor_widening_deg):
+            raise Refused("no intercept reaches the final",
+                          f"{target % 360:.0f}° at row {on}, {relative.right_of_course_m[on]:+.0f} m off the line, "
+                          f"{relative.before_threshold_m[on]:.0f} m before the threshold")
     # the capture turn begins where the last hold ends, or where the inserted intercept gives way
     start = reading.turns[-1]["arrival_row"] if reading.intercept_inserted else anchor
     course = float(track[start]) + float(wrap180(course_deg - track[start]))
