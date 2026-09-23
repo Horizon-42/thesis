@@ -1,14 +1,12 @@
-"""Lockstep (two-tier v3 §3.1): the executor predicts again every round on its own flown rows.
+"""Lockstep (two-tier v3 §3.1): the executor predicts again every round on its own flown rows,
+with NO second layer — protocol ``none``, the only protocol there is.
 
-The executor forecasts its horizon from the anchor, flies the first ``executed_step_s`` of that
-forecast, and predicts again from the rows it just flew, until the forecast crosses the
-threshold ON THE FINAL (`inference.forecast.cut_at_threshold_crossing`: the flight ends,
-``crossed``) or the flight's budget runs out (``horizon``). Two protocols, one per executor:
-``none`` (`plan_conditioning = off`: nothing beside its own rows) and ``truth-instruction``
-(`plan_conditioning = instruction`, stage B's B1′ upper bound: every round the TRUTH's words in
-force over its segment, read at the truth row nearest the FLOWN position — plan §10 item 3 —
-from a reading of the WHOLE record, which the caller hands in as an `InstructionFeed`). The
-prior's words are B3′. The intent-code protocols C / A / A-truth are ARCHIVED 2026-09-20
+The executor (`plan_conditioning = off`) forecasts its horizon from the anchor, flies the first
+``executed_step_s`` of that forecast, and predicts again from the rows it just flew, until the
+forecast crosses the threshold ON THE FINAL (`inference.forecast.cut_at_threshold_crossing`: the
+flight ends, ``crossed``) or the flight's budget runs out (``horizon``). The intent-code
+protocols C / A / A-truth — the truth's code, the prior's top-1 on the flown history, the
+prior's top-1 on the truth history — are ARCHIVED 2026-09-20
 (`archive/manoeuvre_codes_2026_09/`, README there; their readings:
 `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11).
 
@@ -38,7 +36,7 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 
-from ts_transformer.config import PLAN_CONDITIONING_INSTRUCTION, TSConfig, default_anchor
+from ts_transformer.config import TSConfig, default_anchor
 from ts_transformer.data.anchor_grid import anchors_for_bin, remaining_path_profiles
 from ts_transformer.data.approach_difficulty import approach_difficulty
 from ts_transformer.data.channels import POSITION_IDX
@@ -51,16 +49,10 @@ from ts_transformer.inference.forecast import Forecast, concatenate, cut_at_thre
 from ts_transformer.inference.receding import cut_at_lead, displacement_at, rolled_series
 from ts_transformer.outputs.control.forecast import forecast_control_batch
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
-from ts_transformer.manoeuvre.instructions import Reading, RunwayVocabulary, Vocabulary, read_instructions
-from ts_transformer.outputs.control.instruction_token import instruction_context, load_vocabulary_for, nearest_truth_time_s
 
-#: No second layer: a no-token executor on its own rows. Every payload carries its protocol.
+#: The one protocol: no second layer. Kept as a name because every payload carries it and the
+#: gates refuse a payload flown under anything else (`gates.gate_grid`).
 PROTOCOL_NONE = "none"
-#: The instruction executor's closed loop (two-tier v3 stage B, B1′): every round it is handed the
-#: TRUTH's words in force over its segment, taken at the truth row nearest its FLOWN position
-#: (plan §10 item 3: by position, not by the flown clock). The prior's words are B3′.
-PROTOCOL_TRUTH_INSTRUCTION = "truth-instruction"
-PROTOCOLS = (PROTOCOL_NONE, PROTOCOL_TRUTH_INSTRUCTION)
 #: How a flight ended.
 ENDED_CROSSED = "crossed"            # the threshold on the final, inside a leg
 ENDED_HORIZON = "horizon"            # the budget
@@ -156,90 +148,42 @@ def _history(run: FlightRun, anchor: int, dt_s: float) -> FlightSeries:
     return rolled_series(run.series, run.anchor, concatenate(run.legs, run.anchor, 0.0), anchor, dt_s)
 
 
-@dataclass(frozen=True)
-class InstructionFeed:
-    """What the truth-instruction protocol hands the executor: the two vocabularies (the spec's
-    and the cohort's runway classes) and every
-    flight's reading, keyed by ``dataset_id`` — read ONCE, on the WHOLE record of each flight
-    (`read`), never on a cohort cut at its first prediction row: a cut record starts on
-    another plateau and opens another sentence, and the executor was trained on the whole one."""
-
-    vocabulary: Vocabulary
-    runway_vocabulary: RunwayVocabulary
-    readings: dict[str, Reading]
-
-    @classmethod
-    def read(cls, vocabulary: Vocabulary, runway_vocabulary: RunwayVocabulary,
-             series: Sequence[FlightSeries]) -> InstructionFeed:
-        return cls(vocabulary, runway_vocabulary,
-                   {item.dataset_id: read_instructions(item, vocabulary, runway_vocabulary) for item in series})
-
-
-def _dynamics(executor: Executor, runs: Sequence[FlightRun], histories: Sequence[FlightSeries], anchor: int,
-              device: torch.device, feed: InstructionFeed | None) -> tuple[dict[str, torch.Tensor], list[dict[str, float]]]:
-    """The executor's dynamics rows at ``anchor`` and, under the truth-instruction protocol, one
-    record per flight of where its words came from (the truth time read, the flown-to-truth
-    distance): the words in force over the segment at the truth row nearest the flown row."""
+def _dynamics(executor: Executor, histories: Sequence[FlightSeries], anchor: int,
+              device: torch.device) -> dict[str, torch.Tensor]:
+    """The executor's dynamics rows at ``anchor`` — a no-token executor's, so nothing is added
+    beside them."""
     config = executor.config
     rows = [
         dynamics_arrays(history, anchor, parameterization=config.control_thrust_parameterization,
                         condition_features=config.control_condition_features)
         for history in histories
     ]
-    sources: list[dict[str, float]] = []
-    if feed is not None:
-        for run, history, row in zip(runs, histories, rows, strict=True):
-            start_s, distance_m = nearest_truth_time_s(run.series, np.asarray(history.values[anchor], dtype=np.float64))
-            row.update(instruction_context(feed.readings[run.series.dataset_id], start_s, config, feed.vocabulary))
-            sources.append({"instruction_truth_time_s": start_s, "instruction_truth_distance_m": distance_m})
-    return {name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device) for name in rows[0]}, sources
+    return {name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device) for name in rows[0]}
 
 
-def _fly(executor: Executor, runs: Sequence[FlightRun], histories: Sequence[FlightSeries], anchor: int, device: torch.device,
-         batch_size: int, feed: InstructionFeed | None) -> tuple[list[Forecast], list[dict[str, float]]]:
+def _fly(executor: Executor, histories: Sequence[FlightSeries], anchor: int, device: torch.device,
+         batch_size: int) -> list[Forecast]:
     out: list[Forecast] = []
-    sources: list[dict[str, float]] = []
     for start in range(0, len(histories), batch_size):
         chunk = list(histories[start : start + batch_size])
-        dynamics, chunk_sources = _dynamics(executor, runs[start : start + batch_size], chunk, anchor, device, feed)
-        out.extend(forecast_control_batch(executor.model, chunk, executor.config, executor.normalizer, anchor, device, dynamics=dynamics))
-        sources.extend(chunk_sources)
-    return out, sources
+        out.extend(forecast_control_batch(
+            executor.model, chunk, executor.config, executor.normalizer, anchor, device,
+            dynamics=_dynamics(executor, chunk, anchor, device),
+        ))
+    return out
 
 
 def fly(
     executor: Executor, series: Sequence[FlightSeries], *, device: torch.device, batch_size: int,
-    log=None, execute_s: float | None = None, protocol: str = PROTOCOL_NONE, feed: InstructionFeed | None = None,
+    log=None, execute_s: float | None = None,
 ) -> list[FlightRun]:
     """Every flight of ``series`` from the executor's fixed anchor, one round at a time for the
     whole cohort. ``execute_s`` (v3 A3-a, D43) flies only the first ``execute_s`` of each forecast
-    and predicts again there — the executor still forecasts its whole horizon. ``protocol`` is
-    what the executor is handed beside its own rows: nothing (`PROTOCOL_NONE`, a no-token
-    executor) or the truth's instructions by flown position (`PROTOCOL_TRUTH_INSTRUCTION`, an
-    instruction executor, which needs ``feed`` — the whole-record readings of these flights,
-    `InstructionFeed.read` on the UNCUT cohort); the executor, the protocol and the feed must
-    agree, and the feed must hold every flight flown."""
+    and predicts again there — the executor still forecasts its whole horizon."""
     config = executor.config
     dt_s = config.dt_s
     if not config.control_horizon_s:
         raise ValueError("the lockstep flies one fixed segment per round: the executor needs control_horizon_s > 0")
-    if protocol not in PROTOCOLS:
-        raise ValueError(f"protocol {protocol!r} is not one of {PROTOCOLS}")
-    instruction_executor = config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION
-    if instruction_executor != (protocol == PROTOCOL_TRUTH_INSTRUCTION):
-        raise ValueError(
-            f"protocol {protocol!r} does not fit an executor with plan_conditioning={config.plan_conditioning!r}: "
-            "an instruction executor needs words every round, a no-token executor takes none"
-        )
-    if instruction_executor != (feed is not None):
-        raise ValueError(f"protocol {protocol!r} {'needs' if instruction_executor else 'takes no'} instruction feed")
-    if feed is not None:
-        vocabulary, runway_vocabulary = load_vocabulary_for(config)
-        if (feed.vocabulary, feed.runway_vocabulary) != (vocabulary, runway_vocabulary):
-            raise ValueError("the feed was read under another vocabulary than the executor's")
-        missing = [item.dataset_id for item in series if item.dataset_id not in feed.readings]
-        if missing:
-            raise ValueError(f"the feed holds no reading for {len(missing)} flight(s) (first {missing[0]!r}): read it on the whole cohort")
     step_s = executed_step_s(config, execute_s)
     a0 = default_anchor(config)
     step_rows = int(round(step_s / dt_s))
@@ -250,12 +194,11 @@ def fly(
         active = [run for run in runs if run.ended is None]
         anchor = a0 + round_index * step_rows
         histories = [_history(run, anchor, dt_s) for run in active]
-        forecasts, sources = _fly(executor, active, histories, anchor, device, batch_size, feed)
-        for index, (run, history, forecast) in enumerate(zip(active, histories, forecasts, strict=True)):
-            if _fly_leg(run, history, forecast, step_s=step_s, round_index=round_index) is not None and sources:
-                run.rounds[-1].update(sources[index])
+        forecasts = _fly(executor, histories, anchor, device, batch_size)
+        for run, history, forecast in zip(active, histories, forecasts, strict=True):
+            _fly_leg(run, history, forecast, step_s=step_s, round_index=round_index)
         if log is not None:
-            log(f"    {protocol} round {round_index}: {len(active)} flights at anchor {anchor}, "
+            log(f"    {PROTOCOL_NONE} round {round_index}: {len(active)} flights at anchor {anchor}, "
                 f"{sum(1 for run in runs if run.ended is None)} continue")
         round_index += 1
     return runs
@@ -358,7 +301,6 @@ def flight_row(run: FlightRun, points: int) -> tuple[dict[str, Any], dict[str, A
 
 __all__ = [
     "ENDED_CROSSED", "ENDED_HORIZON", "HORIZON_SLACK_FRACTION", "HORIZON_SLACK_S", "LEADS_S",
-    "PROTOCOL_NONE", "PROTOCOL_TRUTH_INSTRUCTION", "PROTOCOLS", "Executor", "FlightRun", "InstructionFeed",
-    "closing_horizon_s", "executed_step_s", "flight_row",
+    "PROTOCOL_NONE", "Executor", "FlightRun", "closing_horizon_s", "executed_step_s", "flight_row",
     "fly", "from_remaining_path", "from_row", "reference_verdicts", "whole_forecast",
 ]

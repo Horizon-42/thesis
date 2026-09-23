@@ -289,52 +289,14 @@ def test_the_guidance_layer_never_imports_the_control_path():
         )
 
 
-#: The manoeuvre package's LEAVES (`manoeuvre/__init__.py`): `segments` reads a manoeuvre in its
-#: start frame, `instructions` reads a track back as instruction words; both import the data
-#: plane (and geokit / torch) only, and the control path imports THEM — today
-#: `outputs/control/instruction_token.py` reads the vocabulary for the executor's token (the
-#: intent-code tokenizer that used to sit there is ARCHIVED 2026-09-20).
 MANOEUVRE = TS_DIR / "manoeuvre"
-MANOEUVRE_LEAVES = {"manoeuvre.segments", "manoeuvre.instructions"}
-#: What a leaf may import from the package — an ALLOW-list, so a new spine module cannot
-#: slip in unnamed: the data plane, the config, the io helpers, and the other leaf.
-MANOEUVRE_LEAF_IMPORTS = {"data", "config", "io_utils"}
 
 
-def _is_package_module(name: str) -> bool:
-    """Whether a package-relative import name (`_package_relative`) is this package's own
-    module or group — the layering rules do not apply to the stdlib, numpy or torch."""
-    first = name.split(".")[0]
-    return (TS_DIR / first).is_dir() or (TS_DIR / f"{first}.py").is_file()
-
-
-def test_the_manoeuvre_leaves_import_no_layer_above_the_data_plane():
-    """`manoeuvre.segments` sits BELOW the control path (plan §4.2, the 2026-09-18 layering
-    decision): it may read the data plane, `config`, `io_utils` and the vendored torch —
-    nothing else in the package, and no other manoeuvre module."""
-    for leaf in MANOEUVRE_LEAVES:
-        path = TS_DIR / (leaf.replace(".", "/") + ".py")
-        # runtime imports: a `TYPE_CHECKING` annotation (`inference.forecast.Forecast`) is not
-        # an edge of the import graph
-        offending = {
-            name for name in _runtime_imported_names(path)
-            if _is_package_module(name)
-            and name.split(".")[0] not in MANOEUVRE_LEAF_IMPORTS and name not in MANOEUVRE_LEAVES
-        }
-        assert not offending, (
-            f"{path.relative_to(TS_DIR)} imports {sorted(offending)}; a manoeuvre leaf is imported "
-            "BY the control path and reads only the data plane"
-        )
-
-
-def test_only_the_runners_reach_the_manoeuvre_package_beyond_its_leaves():
+def test_only_the_runners_reach_the_manoeuvre_package():
     """Every `manoeuvre` module imports the control path, the guidance layer, the data plane and
-    the inference helpers (plan §4.2), and nothing imports it back EXCEPT a leaf
-    (`MANOEUVRE_LEAVES`): the control path reads `manoeuvre.instructions` for the instruction
-    token (two-tier v3 stage B, 2026-09-20) the way it read `manoeuvre.segments`, and the leaf
-    test above keeps a leaf below the control path. Everything else in the package is consumed
-    by the runners under `experiments/` only. A new edge from `outputs/` is a layering
-    decision, not an import: amend `MANOEUVRE_LEAVES` and this rule together."""
+    the inference helpers (plan §4.2), and nothing imports it back: only the runners under
+    `experiments/` consume this package (the control path's edge to it went with the intent-code
+    archive, 2026-09-20). A new edge from `outputs/` is a layering decision, not an import."""
     for path in _module_files():
         if path.is_relative_to(MANOEUVRE):
             continue
@@ -342,14 +304,12 @@ def test_only_the_runners_reach_the_manoeuvre_package_beyond_its_leaves():
             ".".join(name.split(".")[:2])   # the module, not the name imported from it
             for name in _imported_names(path) if name.split(".")[0] == "manoeuvre"
         }
-        imported.discard("manoeuvre")       # `from ts_transformer.manoeuvre import segments`
-        imported -= MANOEUVRE_LEAVES
+        imported.discard("manoeuvre")       # `from ts_transformer.manoeuvre import lockstep`
         if not imported:
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         assert rel.startswith("experiments/"), (
-            f"{rel} imports {sorted(imported)}; only the runners consume the manoeuvre package "
-            "(the control path's edge to it went with the intent-code archive, 2026-09-20)"
+            f"{rel} imports {sorted(imported)}; only the runners consume the manoeuvre package"
         )
 
 

@@ -12,18 +12,16 @@ import torch.nn as nn
 from ts_transformer.config import TSConfig
 from ts_transformer.outputs.envelope import CONTROL_NAMES, ControlContract, control_contract
 from ts_transformer.outputs.conditioning import condition_names
-from ts_transformer.outputs.control.instruction_token import INSTRUCTION_KEY, instruction_token_width, load_vocabulary_for
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
     CTA_CONDITIONING_OFF,
-    DURATION_HEADS_WITH_POINT,
-    DURATION_HEADS_WITH_QUANTILES,
     DURATION_HEAD_POINT,
     DURATION_HEAD_QUANTILE,
     DURATION_HEAD_TWO_HEAD,
+    DURATION_HEADS_WITH_POINT,
+    DURATION_HEADS_WITH_QUANTILES,
     DURATION_MEDIAN_INDEX,
-    PLAN_CONDITIONING_INSTRUCTION,
 )
 from ts_transformer.outputs.duration_heads import FinalTimeHead, QuantileFinalTimeHead
 
@@ -214,23 +212,12 @@ class ControlFeatureModel(nn.Module):
         self.cta_encoder = (
             nn.Sequential(nn.Linear(1, config.d_model), nn.GELU()) if self.cta_given else None
         )
-        # The instruction token as one more fused input (`plan_conditioning='instruction'`,
-        # `outputs/control/instruction_token.py`): the words in force at the Δ / τ positions of
-        # the segment, as the vocabulary's bin centres. The vocabulary is opened HERE, once, so
-        # the encoder's width is the artefact's and the checkpoint binds to its sha. (The
-        # intent-code token that sat here is ARCHIVED 2026-09-20, archive/manoeuvre_codes_2026_09/.)
-        self.instruction_given = config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION
-        # only the SPEC sizes the encoder and binds the checkpoint; the runway classes are the
-        # cohort's and are not part of the executor's conditioning (D62)
-        vocabulary = load_vocabulary_for(config)[0] if self.instruction_given else None
-        self.instruction_vocabulary_sha256 = None if vocabulary is None else vocabulary.sha256
-        self.instruction_encoder = (
-            nn.Sequential(nn.Linear(instruction_token_width(config, vocabulary), config.d_model), nn.GELU())
-            if self.instruction_given else None
-        )
+        # The plan token was one more fused input here (`plan_conditioning`): the intent-code
+        # token is ARCHIVED 2026-09-20 (archive/manoeuvre_codes_2026_09/), so nothing is fused
+        # beside the condition and the CTA.
         self.feature_fusion = nn.Sequential(
             nn.Linear(
-                (config.enc_in + 1 + int(self.cta_given) + int(self.instruction_given)) * config.d_model,
+                (config.enc_in + 1 + int(self.cta_given)) * config.d_model,
                 config.d_model,
             ),
             nn.GELU(),
@@ -256,8 +243,6 @@ class ControlFeatureModel(nn.Module):
         if self.cta_given:
             cta = (dynamics["cta_s"] / self.cta_scale_s).to(encoded.dtype).unsqueeze(-1)
             parts.append(self.cta_encoder(cta))
-        if self.instruction_given:
-            parts.append(self.instruction_encoder(dynamics[INSTRUCTION_KEY].flatten(1).to(encoded.dtype)))
         return self.feature_fusion(torch.cat(parts, dim=-1))
 
     def quantile_head(self) -> QuantileFinalTimeHead | None:

@@ -3,18 +3,9 @@
 目的：压缩 context 后从这里接着做。计划本身在 `2026-09-18_two_tier_plan_v3.zh.md`（§5–§8 是阶段 A 的详细计划，用户已看过）。
 本文只放开发时要用的事实、状态和约定；结论和读数不在这里。
 
-## 现状（2026-09-20 晚更新；接手的 agent 先读这一节和 §7，再读计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2）
+## 现状（接手的 agent 先读这一节）
 
-**2026-09-20 晚**：阶段 B′（指令词表版）的代码在分支 `dev-instruction-vocab`（worktree `.claude/worktrees/instruction-vocab`，基于主树 79f871f = 意图码层归档之后），提交：87fff1cb（标注器）、7e711f75（平台反读）、f043f90e（执行器吃指令 + 指令先验）、426aaee5（门 B1、队列、臂、intents）、f3eed83f / cb7b1712 / 8f60e73c / 9b6dc3a2（反读规则 v4 / v5 / v6 / v8）、608bb06c、46493288（文档）；全套 ts 测试 1263 通过；**未合并到主树，未训练任何臂**。主树上 79f871f 是意图码层的归档提交（agent 做的，我在主树上提交）。
-- B0′ 反读与人工核：反读规则 v1 → v8、五轮人工核（结果文档 §12）：率阈值 0.903 → 平台 v2 0.793 → v4 **0.967**（过线）→ v6 **0.847**（我按第 3 轮的报告改发词时刻，改错了）→ v8（第 5 轮新抽 150 页，进行中）。
-  第 4 轮之后不再靠看图调规则：先量（§12.5 两项量测，整个 train split）——航向与高度每一版都准（早/晚 p95 < 一个句子位置），误差全在地速；被最小变化量压掉的 7598 条地速台阶里 4032 条飞机守了 40 s 以上且档位不同（每架 0.6 条真实台阶句子里没说）。v8 因此把最小变化量改成"只压瞬态，守住 40 s 的一层自成一词"，并把地速下限降到 100 kt（105 kt 的最后进近曾被夹到 120 kt 那档）。
-  档位定了（D51：73 词）。四词的 v9 产物（sha 1586172a6ec6，`plateau-v9`）已按用户指示删除；B0′′ 加跑道词后重建（计划 §5.2.1）。
-  **人工核的数不能跨轮直接比**：三个 agent 对"早/晚多少算错"取的阈值不同（第 4 轮同一份代码判出 10 / 21 / 1 个误读）；第 5 轮的说明把阈值写成 20 s，三份才可比。
-- 开发项：B′-dev1/2/3/6/7/8 完成（计划 §5.2.6 表有提交号），B′-dev4（执行器闭环再训）与 B′-dev5（目标导向解码）未做——两者都要先在计划里写清（dev4 的替换窗口要带真值目标，dev5 的掩码门槛 D59 待用户）。
-- 等用户的：签阶段 B′ 的 §5.2 / §6.2（M-B1′′ 之前）；D59 的切入角掩码门槛（反读出 49 % 的切入 > 45°，结果文档 §12.4）；说"跑"之后才启动 `two_tier_bprime_queue`（基线两 seed 约 8 min，两臂训练约 30 min，真值指令读数 + 门 B1，过门再训先验）；分支要不要合并。
-- 队列的启动清单在 §7.4；主树没有在跑的实验；GPU 空闲。
-
-**2026-09-20 白天**：意图码版本的阶段 B 作废（读数留在结果文档 §9–§11）；计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2 已按指令词表重写（提交 1fe0660）：词 = 绝对目标的管制指令，执行器吃生效指令，两层 CAT-K 式闭环再训（D49、D55），K 候选滚出按目标打分（D56），程序作解码掩码（D59），RL 本阶段不做（D58），多机层在阶段 C 之后（D60）；文献 `docs/literature/trajectory_as_language/`。§7 是指令词表版的开发记录；§7.5 是意图码版本（作废）的记录。
+**2026-09-20**：意图码版本的阶段 B 作废（读数留在结果文档 §9–§11，开发记录在 §7.5）。之后的指令词表版（阶段 B′）已归档：`archive/instruction_vocabulary_2026_09/`。
 
 **哪里停下**：阶段 A 全部完成（M-A0 … M-A3）。阶段 B：用户 2026-09-19 晚答复——指令词表对照臂做（12 臂）、B0 可以先跑、"最大程度利用时间，不干等实验"；
 B-dev0…7 全部写完、测试通过（全套 1288）、三轮 opus review（见 §7.1），**已提交 4cd11ea（M-B0 代码就绪）；用户尚未看过阶段 B（M-B0′）、队列未跑**；runs worktree 已移到 4cd11ea，从它 dry-run 通过（GROUP baselines + 6 组，122 步全 todo）。
@@ -191,44 +182,9 @@ seed 线取 p75（`gates.GRID_SEED_LINE_QUANTILE`）。
 - 2026-09-19 晚（用户审阶段 B 时）：计划重排成每节一个大块、阶段为小节（6515cbf）；四种读法改用名字（真值 token / 先验 token / 先验读真值历史 / 无 token）；5.2.0 加了第二层两部分的说明、先验一段重写（4af760f）；B0–B3 按"为什么 → 做什么 → 怎么判 → 不过怎么办"重写、术语行逐词解释（55ae671）；B 里的第 59 行读数删掉（961025f）。
   相对门 runner review 修完提交（01f29dc）；A3 结果与 A3-a 代码提交（f89be15、d76ed64）。记忆新增 `plain-wording.md`、`doc-structure.md`。
 
-## 7. 阶段 B′ 开发（指令词表版，2026-09-20；分支 `dev-instruction-vocab`）
+## 7. 阶段 B 的开发记录
 
-### 7.1 开发项与状态
-
-| # | 开发 | 状态 | 提交 |
-|---|---|---|---|
-| B′-dev1 | `manoeuvre/instructions.py`（词表 + 标注器）、`run_ts.py instruction_vocabulary`（产物、句子、统计、300 页人工核图，`--set 字段=值` 改阈值再读） | 完成；反读规则经三轮人工核改到 plateau-v4（结果文档 §12） | 87fff1cb、7e711f75、426aaee5、f3eed83f |
-| B′-dev2 | `plan_conditioning = instruction`：`outputs/control/instruction_token.py`（Δ/τ 个位置的四目标按档中心）、config 字段 `instruction_vocabulary`、头里开一次词表并记 sha、checkpoint 存该 sha、加载核对；lockstep 协议 `truth-instruction`（整条记录上读，按执行器所在位置取真值行，每轮记真值时刻与距离；payload v5） | 完成（review 的 blocker：闭环曾在裁过的 cohort 上读指令——改为调用方在裁之前读 `InstructionFeed`） | f043f90e |
-| B′-dev3 | `manoeuvre/instruction_sequences.py`、`instruction_prior.py`、`run_ts.py instruction_prior` | 完成（review 的 blocker：落地标签按序列长度——改为 `ends_at_landing`） | f043f90e |
-| B′-dev4 | 执行器闭环再训（D49） | 未做；先写计划：`WindowContext.override` 的替换窗口只换历史、目标为零，要扩成带同一绝对时间真值下一段的目标；分支 = 真值指令 ± 相邻档 | — |
-| B′-dev5 | 目标导向解码（D56）：lockstep 协议 `prior-decode` | 未做；先写计划；掩码门槛 D59 待用户 | — |
-| B′-dev6 | 门 B1 = D57；相对门记候选词表 | 完成 | 426aaee5 |
-| B′-dev7 | `two_tier_bprime_queue`（基线 → 训两 seed → 真值指令读数 → 失败方式 → 门 B1 → 先验） | 完成，真实臂文件 dry-run 通过 | 426aaee5 |
-| B′-dev8 | `two_tier_v3_bprime_arms.json`（I20 × 2 seed）、intents `two_tier_v3_bprime_20260920` | 完成 | 426aaee5 |
-
-### 7.2 代码事实
-
-- 词表产物是带 sha 的文件（`instruction_vocabulary.json`：档位、容差、最小变化量、反读规则版本、established 规则的两个数、cohort 身份、每词计数）；执行器与先验的 checkpoint 记它的 sha；改任何一项都是另一个词表。`Vocabulary.words = {heading 36, altitude 11, speed 21, intercept 3}`；切入词 −1 = 还没切入。
-- 执行器读词的一处来源：`Reading.words_at(t)`（句子里 t 之前最近位置的四个词）→ `Vocabulary.conditioning`（cos/sin 航向、高度与地速占上限的比例、切入分级标志）→ `instruction_token.instruction_context(reading, start_s, config, vocabulary)`；训练与 predict 传锚点时刻，闭环传离飞机最近的真值行的时刻（`nearest_truth_time_s`，整条记录的行都算）。
-- lockstep 的协议与执行器要对上：无 token 执行器只能 `none`，指令执行器只能 `truth-instruction` 且要传 `feed`（`InstructionFeed.read(vocabulary, 未裁的 series)`）；`--first-prediction-row` / `--anchor-remaining-km` 裁 cohort 在读 feed 之后。
-- `config.control_recipe` 带词表路径（两份词表是两次 run）；`predictability_report` 拒绝指令 checkpoint；`test_architecture` 允许 `outputs/` 引 manoeuvre 的叶模块（`segments`、`instructions`）。
-- 归档的意图码 token 的五个 config 字段（`manoeuvre_tokenizer` 等）作为"没人读"的退役字段被 `from_dict` 丢弃（`PLAN_TOKEN_RETIRED_FIELDS`）——阶段 A 的 checkpoint 带着它们（`plan_conditioning = off` 下从未生效），归档后曾一度加载不了；有 canary 测试。这是我做的决定，用户可推翻。
-- 先验：输入 = 四个词嵌入 + 状态 token（位置相对跑道入口）+ 位置；上下文 = 机型、跑道；输出 = 四个 softmax + 落地；读数的分母都写明（top-k 对有下一词的位置，翻转率对真值不换的位置，漏改率对真值换的位置，落地写基础率）；`_joint_ranks` 分块算联合 top-K。
-- 队列：产物 `<campaign>/baseline/L60_D20_s<seed>/L-1/`、`lockstep/<臂>/truth-instruction/`、`failure_modes/`、`gate/b1_I20/`、`priors/<臂>/`；seed 线来自网格 `gate/after_L120_D120/grid_gate.json`；PID 文件 `two_tier_bprime_queue.pid`。
-- 三轮人工核由 opus agent 看图（每轮 3 × 100 页），verdict 文件在会话 scratchpad（`hand_check_part*.csv`、`hand_check_r2_part*.csv`、`hand_check_r3_part*.csv`）；不是用户亲手核的数。
-
-### 7.3 待用户定 / 待办
-
-- 看 §5.2 的设计和 §6.2 的 D49–D60 并认可（在这之前不训任何模型，M-B1′′）；D59 的切入角门槛。分支已合并（dev-two-tier-feasibility）。
-- B′-dev4 / dev5 先在计划里写清再建（替换窗口的目标；候选来源与打分项）。
-- 第 3 轮人工核结果进结果文档 §12.2 / §12.5；≥ 0.9 则词表定稿。
-
-### 7.4 阶段 B′ 队列的启动清单（用户说"跑"之后）
-
-1. worktree `git status --short` 为空（或合并后主树为空）；`nvidia-smi` 没有别的训练；campaign 目录下没有 `two_tier_bprime_queue.pid`；空余 ≥ 3 GB。
-2. dry-run（已通过）：`conda run -n aeroviz --no-capture-output python run_ts.py two_tier_bprime_queue --arms 4dTrajectory/ts_transformer/docs/experiments/two_tier_v3_bprime_arms.json --campaign 4dTrajectory/outputs/KRDU/experiments/two_tier_v3_bprime_20260920 --airport KRDU --dry-run` → `CELL baselines`（4 步）+ `CELL I20`（8 步，先验两步标 `[needs gate b1]`）。
-3. 启动（从含代码的 worktree 或合并后的主树；`nohup setsid … > $C/two_tier_bprime_queue.log 2>&1 &`），Monitor 盯 `CELL .* complete|STOP:|queue done`，`skip .*gate b1` 表示门没过、先验没训。
-4. 预计：基线两份约 3 min + 失败方式；两臂训练约 2 × 15 min；真值指令读数约 2 min / 臂；先验约 5 min / seed。
+阶段 B′（指令词表版）的开发记录（原 §7.1–§7.4）已归档：`archive/instruction_vocabulary_2026_09/docs/cut_sections.md`。
 
 ### 7.5 意图码版本（作废，2026-09-19 晚 — 2026-09-20）的开发记录
 

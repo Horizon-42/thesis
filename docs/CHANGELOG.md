@@ -1,5 +1,27 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-23 — 指令词表设计整体归档（用户要重写一版）
+
+用户："对于词表设计相关的，把当前所有代码，都archive；我要重新写一版；你的修复最终的结果应该表现得像是系统里从来没有过词表设计。"
+全部移到 `4dTrajectory/ts_transformer/archive/instruction_vocabulary_2026_09/`（README 写明移了什么、为什么、留下了什么）：
+
+- **代码**（`git mv`，逐字节）：标注器与词表 `manoeuvre/instructions.py`、回放运动学、box 词表、句子与先验、
+  `context.py`、`segments.py`（意图码归档时为标注器留下的，已无人读）、执行器的指令 token、11 个 runner
+  （词表、回放、样本导出、先验、B′ 队列、B0′′ 量测、09-22 的四个分布量测）及其 11 个测试。
+- **留在主干、去掉词表的部分**：`plan_conditioning` 只剩 `off`，`instruction_vocabulary` 字段删除（392 个存档
+  `history.json` 都不带它）；控制头 / strategy / forecast / 命名 / lockstep 回到词表之前（`79f871f1`）；
+  `checkpoint_payload_extras` / `verify_checkpoint_payload` 两个钩子删除；lockstep 只剩协议 `none`、payload
+  `ts-manoeuvre-lockstep-v4`（磁盘上没有 v4 / v5 的 payload）；规则制导 `CLIMB_MAX_RAD` 回到 2.0°（4.0° 只为
+  词表的复飞词而改）。门 B1 的规则保留（它回答的是计划 v3 §10 审计第 5 条，不是词表的事）。
+- **文档**：只讲词表的文档、分布报告的图表、B′ 臂文件随代码归档；参考条目 C29 / C30 / H5–H12 与 intents 里
+  两个 B′ campaign 逐字剪进归档；CLAUDE.md 的词表索引行删除；混合文档（v3 总览、结果文档 §12–§15、阶段 A
+  笔记的 B′ 部分）剪进 `archive/…/docs/cut_sections.md`，原处留一句指向。
+- **没动**：前端 Training 视图（用户这次不动前端；它读的导出器已归档）；磁盘上的词表产物、回放、两个先验
+  （`4dTrajectory/outputs/{KRDU,POOLED}/experiments/two_tier_v3_bprime_*`）；harvest 的已公布最低标准。
+- 核对：ts 全套 1209 通过；392 个存档配置在归档前后能否加载、run 名与 slug 完全一致（173 个能加载，两边相同）。
+  归档前 review 找到的七个缺陷（B′ 队列调错入口、spec 加字段没升 `READING_RULE`、门飞的句子不是模型吃的句子、
+  按位置取真值行会跳 145 s 等）写在归档 README 里，留给重写。
+
 ### 2026-09-21 — Training 三维盒内显示目标高度平面
 
 每个盒子的扇形范围内绘制青色目标高度参考面，使用盒子自身的 HAE 偏移对齐高度。

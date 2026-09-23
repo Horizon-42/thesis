@@ -12,8 +12,9 @@ protocol-none readings (the intent-code protocols are archived, 2026-09-20) and 
 of THIS code's schema (an older schema is refused by name — a stage's queue flies every input it
 compares). The seed line is the grid gate's (its verdict's p75 lines, D39) or three numbers given
 explicitly, and the output names its source. The verdicts are §3.3's rows A3 and B and the
-upper-bound row B1 (beyond the line on one metric on both seeds, fully flyable, without the
-not-worse clause); which row applies is the caller's question, every row is written.
+upper-bound row B1 (both established shares not worse on both seeds, one metric beyond the line on
+both seeds, fully flyable — row B without the ADE's not-worse clause; `gates.gate_relative`); which
+row applies is the caller's question, every row is written.
 Writes ``relative_gate.json`` / ``relative_gate.txt`` under ``--out`` (refused if it exists).
 """
 
@@ -97,11 +98,6 @@ def main(argv: list[str] | None = None) -> int:
     protocols = {payload["protocol"] for _path, payload in candidate.values()}
     if len(protocols) != 1:
         parser.error(f"the candidate's two seeds are one protocol; got {sorted(protocols)}")
-    # the vocabulary an instruction reading was flown under (None under `none`): one per candidate
-    vocabularies = {json.dumps(payload["instruction_vocabulary"], sort_keys=True) for _path, payload in candidate.values()}
-    if len(vocabularies) != 1:
-        parser.error(f"the candidate's two seeds were flown under different instruction vocabularies: {sorted(vocabularies)}")
-    candidate_vocabulary = json.loads(next(iter(vocabularies)))
     if args.seed_line_from is not None:
         source = args.seed_line_from if args.seed_line_from.is_absolute() else REPO_ROOT / args.seed_line_from
         verdict = json.loads(source.read_text(encoding="utf-8"))["verdict"]
@@ -135,8 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     result = {
         "schema": RELATIVE_GATE_SCHEMA, "written_utc": utc_now(),
         "baseline_sources": provenance(baseline), "candidate_sources": provenance(candidate),
-        "candidate_protocol": next(iter(protocols)), "candidate_instruction_vocabulary": candidate_vocabulary,
-        "first_prediction": next(iter(rules)),
+        "candidate_protocol": next(iter(protocols)), "first_prediction": next(iter(rules)),
         "flights": flights, "seed_line_source": seed_line_source,
         "gate": gate["gate"], "seeds": gate["seeds"], "seed_line": gate["seed_line"], "flyable_floor": gate["flyable_floor"],
         "baseline": {str(s): r for s, r in gate["baseline"].items()}, "candidate": {str(s): r for s, r in gate["candidate"].items()},

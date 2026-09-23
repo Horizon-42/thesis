@@ -15,7 +15,6 @@ from ts_transformer.inference.calibration import conformal_intervals, interval_s
 from ts_transformer.config import (
     CTA_CONDITIONING_OFF,
     DURATION_HEADS_WITH_QUANTILES,
-    PLAN_CONDITIONING_INSTRUCTION,
     TSConfig,
     default_anchor,
 )
@@ -33,8 +32,6 @@ from ts_transformer.outputs.dynamics.hooks import per_flight_hook_diagnostics
 from ts_transformer.outputs.envelope import control_contract
 from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
-from ts_transformer.manoeuvre.instructions import read_instructions
-from ts_transformer.outputs.control.instruction_token import instruction_context, load_vocabulary_for
 
 
 def record_newton_controls(
@@ -88,13 +85,6 @@ def _dynamics_batch(
         )
         for item in series
     ]
-    if config.plan_conditioning == PLAN_CONDITIONING_INSTRUCTION:
-        # `predict`'s one-shot forecast: the truth's words in force over the segment at the
-        # anchor's own time (the closed loop feeds its own, by flown position — lockstep.py)
-        vocabulary, runway_vocabulary = load_vocabulary_for(config)
-        for item, row in zip(series, rows, strict=True):
-            reading = read_instructions(item, vocabulary, runway_vocabulary)
-            row.update(instruction_context(reading, float(item.times[anchor]), config, vocabulary))
     if config.cta_conditioning != CTA_CONDITIONING_OFF:
         given = (
             np.asarray(cta_s, dtype=np.float64) if cta_s is not None

@@ -158,7 +158,7 @@ def gate_relative(baseline: Mapping[int, Mapping[str, float]], candidate: Mappin
     one of them beyond the line, the other primary is not worse on both seeds, and the candidate
     is fully flyable ≥ the floor on both seeds. Row B: every metric not worse on both seeds, at
     least one metric beyond the line on both seeds, fully flyable ≥ the floor on both seeds.
-    Row B1 (an UPPER-BOUND reading: the second layer fed the truth; plan v3 D57, 2026-09-20):
+    Row B1 (an UPPER-BOUND reading: the second layer fed the truth; the answer to plan v3 §10 audit item 5):
     BOTH established shares not worse on both seeds, at least one metric beyond the line on both
     seeds, and fully flyable ≥ the floor — the vectored ADE may be worse (an upper bound that
     buys established at the price of ADE still says the information is there), but a truth
@@ -195,7 +195,7 @@ def gate_relative(baseline: Mapping[int, Mapping[str, float]], candidate: Mappin
                   "rule": "every metric not worse on both seeds; at least one beyond the seed line on both seeds; fully flyable ≥ floor"},
             "b1": {"pass": b1_not_worse and bool(b_beyond) and flyable_ok, "beyond_on": b_beyond, "primaries_not_worse": b1_not_worse,
                    "rule": "both established shares not worse on both seeds; at least one metric beyond the seed line on both seeds; "
-                           "fully flyable ≥ floor (the truth-instruction upper bound, D57)"},
+                           "fully flyable ≥ floor (the truth-fed upper bound, plan v3 §10 item 5)"},
         },
     }
 

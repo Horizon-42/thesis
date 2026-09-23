@@ -16,8 +16,8 @@ import torch
 from ts_transformer.config import HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig
 
 #: The tolerance a time is matched to a grid row at, everywhere a row is looked up by its
-#: time: the receding-horizon cut (`inference/receding.py`), the segment cut and the segment
-#: polyline's span (`manoeuvre/segments.py`). Series times are rebased to 0 at the first
+#: time: the receding-horizon cut (`inference/receding.py`) and the closed loop's round step
+#: (`manoeuvre/lockstep.py`). Series times are rebased to 0 at the first
 #: sample, so magnitudes are 10²–10³ s and float64 slop is ~1e-10, four orders under this.
 ROW_TOLERANCE_S = 1e-6
 

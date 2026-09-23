@@ -302,10 +302,7 @@ gets a new ID here and ONE new line in the index.**
   12R 200, 24 200, 29 363, 30L 200, 30R 200; KSMF 17L 200, 17R 200, 35L 200, **35R 287**;
   KMSY 02 396, 11 200, 20 250, 29 200. The spread is **200–410 ft above touchdown**.
 - **Above the LANDING THRESHOLD, which is the frame a trajectory is judged in, the same set runs
-  200.0–423.4 ft** (highest: KSTL 12L; lowest: KSJC 30L/30R at 199.9 ft). That whole range sits
-  inside altitude word 0 of the instruction vocabulary, which spans the threshold ±500 ft — so no
-  decision altitude in this fleet can be told from the altitude WORD, and a go-around's timing has
-  to be judged on the real height. That is the measurement behind the two-tier plan's D75.
+  200.0–423.4 ft** (highest: KSTL 12L; lowest: KSJC 30L/30R at 199.9 ft).
 - **`build_runway_config.py` can no longer rebuild this file** and could not before this change
   either: the generator writes `name`/`length_ft`/`surface`/`thresholds` only, while the config on
   disk also carries `width_ft`, `runway_width_effective_date` and now `published_minima`. Running

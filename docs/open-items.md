@@ -9,11 +9,9 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
-- **到达清单不重建，两层 B′ 接受当前的跑道覆盖**（用户 2026-09-20）。
-  `harvest-arrivals-v5-takeoff-excluded` 的跑道覆盖就是指令词表里跑道词的类别集合：KRDU 4 条（缺 14、32）、
-  KSMF 3 条（缺 35R）、KSJC 4 / KSTL 8 / KMSY 4,并集 23 条。跑道词的类名带机场前缀(2026-09-21),而**类别集合是队列的、不是机场的**:并训用的 pooled 队列里没有一架 KSTL 06,所以它是 22 类。重建成 v6 会加回 KRDU 32 与 KSMF 35R（+1876 架），而自 D62
-  起那不只是改数据集划分——它改变跑道词的**类别集合**，`runway_sha256` 变，此前训的每个先验作废。
-  **用户决定不重建、不动训练数据**，所以本阶段一切关于「模型能说出去哪条跑道」的结论都带着这个范围，
+- **到达清单不重建**（用户 2026-09-20）。`harvest-arrivals-v5-takeoff-excluded` 的跑道覆盖：KRDU 4 条（缺 14、32）、
+  KSMF 3 条（缺 35R）、KSJC 4 / KSTL 8 / KMSY 4，并集 23 条。重建成 v6 会加回 KRDU 32 与 KSMF 35R（+1876 架），
+  改变每个 ts 数据集划分。**用户决定不重建、不动训练数据**，所以本阶段关于跑道的结论都带着这个覆盖范围，
   必须在结论里写明。
 
 - **`clean_pipeline_data.py` DELETES the 70,267 optimizer records the next item says to

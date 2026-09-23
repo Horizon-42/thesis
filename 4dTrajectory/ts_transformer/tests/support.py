@@ -17,11 +17,6 @@ from ts_transformer.outputs.conditioning import CONDITION_WIDTH
 from ts_transformer.outputs.envelope import CONTROL_LOWER, CONTROL_UPPER
 
 AIRPORT, RUNWAY = "KRDU", "05L"
-#: The runway WORD for these fixtures. The class label is qualified by airport
-#: (`instructions.flight_runway`), so a fixture that builds a `RunwayVocabulary` by hand
-#: must use this, never the bare ident `synthetic_arrivals` takes.
-RUNWAY_WORD = f"{AIRPORT}:{RUNWAY}"
-OTHER_RUNWAY_WORD = f"{AIRPORT}:23R"
 
 
 def fake_data_provenance(*airports: str) -> dict:

@@ -17,7 +17,6 @@ spine call site         method
                         :meth:`epoch_config`, :meth:`training_diagnostics`,
                         :meth:`epoch_record`, :meth:`validation_extras`,
                         :meth:`checkpoint_metadata`
-`train.load_checkpoint` :meth:`verify_checkpoint_payload`
 `forecast`              :meth:`forecast` with :class:`ForecastOptions`
 `validation` (replay)   :meth:`replay` → :class:`Replay`
 `export` (record)       :meth:`record_fields`
@@ -243,18 +242,6 @@ class OutputStrategy:
 
     def checkpoint_metadata(self, config: TSConfig) -> dict[str, Any]:
         return {}
-
-    def checkpoint_payload_extras(self, config: TSConfig, model: nn.Module) -> dict[str, Any]:
-        """Keys `train` stores in the checkpoint payload beside the config (the control path:
-        the sha of the instruction vocabulary the model was built against), for
-        `verify_checkpoint_payload` to read back. Nothing, by default."""
-        return {}
-
-    def verify_checkpoint_payload(self, config: TSConfig, payload: dict[str, Any]) -> None:
-        """Refuse a stored payload this path cannot honour today (the control path: an
-        executor whose instruction vocabulary no longer carries the sha it trained against).
-        Nothing to check, by default."""
-        return None
 
     # ── inference ────────────────────────────────────────────────────────────
 

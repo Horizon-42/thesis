@@ -205,8 +205,8 @@ def course_frame_rows(
     east: np.ndarray, north: np.ndarray, track_east: np.ndarray, track_north: np.ndarray, course_rad: float
 ) -> dict[str, np.ndarray]:
     """The final approach course's frame, per row — the ONE definition every reader of "where
-    is the aircraft against the course" uses (this module's anchor covariates, the executor's
-    failure modes, the instruction labeller). Inputs are WORLD east / north offsets from the
+    is the aircraft against the course" uses (this module's anchor covariates and the executor's
+    failure modes). Inputs are WORLD east / north offsets from the
     threshold and world track components; ``course_rad`` is the inbound course (math-ENU).
 
     ``to_go_m``      distance still to fly along the course, positive BEFORE the threshold

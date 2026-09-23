@@ -49,23 +49,19 @@ of the package, not a migration in progress.
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
   `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
-- **`manoeuvre` — the SECOND LAYER's line, being rewritten.** The **intent-code** layer (a learned
-  FSQ code per segment, the executor conditioned on it, a causal prior over codes) is **ARCHIVED
-  2026-09-20**: `archive/manoeuvre_codes_2026_09/` (README there; tokenizer, sequences, prior,
-  readout, `plan_token.py`, gates T/X/P/E/S copied to `gates_manoeuvre.py`, the `manoeuvre_*`
-  runners and `two_tier_b_queue`). Why: plan v3 §10's audit — both layers trained on truth and
-  only ever evaluated closed-loop, and the truth codes were indexed by time, not by where the
-  executor was — so stage B was rewritten (2026-09-20, `docs/2026-09-18_two_tier_plan_v3.zh.md`
-  §5.2 / §6.2) around an INSTRUCTION vocabulary with closed-loop post-training of both layers.
-  Numbers: `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
+- **`manoeuvre` — the SECOND LAYER's line; the second layer itself is not built.** The
+  **intent-code** layer (a learned FSQ code per segment, the executor conditioned on it, a causal
+  prior over codes) is **ARCHIVED 2026-09-20**: `archive/manoeuvre_codes_2026_09/` (README there;
+  tokenizer, sequences, prior, readout, `plan_token.py`, gates T/X/P/E/S copied to
+  `gates_manoeuvre.py`, the `manoeuvre_*` runners and `two_tier_b_queue`). Why: plan v3 §10's
+  audit — both layers trained on truth and only ever evaluated closed-loop, and the truth codes
+  were indexed by time, not by where the executor was. Numbers:
+  `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
   `4dTrajectory/outputs/KRDU/experiments/{two_tier_v3_b_20260919,manoeuvre_tok_20260918}` +
   `outputs/codebooks/` — read them through §10 item 1 (open-loop-trained executors). `plan_conditioning`
-  is `off` or `instruction` (the words in force over the segment, `outputs/control/instruction_token.py`);
-  `manoeuvre-code` is refused at load by name (`PLAN_CONDITIONINGS_RETIRED`).
-  **Live**: the closed loop — `lockstep.py` (protocols `none` / `truth-instruction`, payload schema
-  `ts-manoeuvre-lockstep-v5`), `gates.py` (grid + relative), `segments.py` (the start frame),
-  `instructions.py` (the vocabulary + labeller, a leaf), `instruction_sequences.py` /
-  `instruction_prior.py` (the sentence prior), `context.py` (the type vocabulary), `failure_modes.py`, runners
+  keeps ONLY `off`; `manoeuvre-code` is refused at load by name (`PLAN_CONDITIONINGS_RETIRED`).
+  **Live**: the no-token closed loop — `lockstep.py` (protocol `none`, payload schema
+  `ts-manoeuvre-lockstep-v4`), `gates.py` (grid + relative), `failure_modes.py`, runners
   `manoeuvre_lockstep`, `executor_*`, `two_tier_grid_queue` (R8) — i.e. two-tier v3 stage A
   (P10, D30 / D31 / C28 / R7 / R9 are the archived layer's records).
 - **Control-path axes**: `latent_dim > 0` (latent intent z) and `cta_conditioning=given` (the
@@ -146,9 +142,6 @@ of the package, not a migration in progress.
   roster's bytes or counts; v3 checkpoints still load; a pre-2026-09-08 in-flight
   `cv_candidate_progress.json` is refused on resume — delete that one file (C26).
 
-- Current `course_frame` coordinates: cross-track is right-positive; relative track angle is left-positive; height zero includes threshold crossing height (C29).
-- Instruction vocabulary design uses signed turns from the issuing model `psi` and heights above airport MSL elevation; these semantics are not yet implemented (C30).
-
 ## Current defaults and their status
 
 | axis | default | status (full text: the ID) |
@@ -161,7 +154,7 @@ of the package, not a migration in progress.
 | `control_thrust_parameterization` = `specific-force+path-angle` | — | N7′: the third column is a path-angle target flown by a 3 s loop. **Passes every pre-registered gate on both seeds** — fully flyable 97.7 / 97.4 % against the twin's 0.4 / 0.2 %, straight-in FDE p50 543 / 559 vs 647 / 663, pooled ADE 1173 / 1182 vs 1325 / 1295. ONE regression: vectored FDE p50 +625 / +704 m, unexplained (not turn authority). **Adoption is the user's call** (D27) |
 | `control_condition_features` | `raw` | `ratios` carries the SAME information at the SAME width (so a ratios arm starts from its raw twin's weights); 4 of the 8 raw channels are constant on this fleet. Built, not yet measured (D28) |
 | `control_horizon_s` | `0` (whole approach) | two-tier L1: a FIXED rollout horizon Δ — ONE span definition (`dataset.target_horizon_s`), ONE floor rule (`dataset.effective_min_future_s`), and every duration-deciding axis (CTA, quantile head, `final_time_loss_weight`, latent, imitation teacher) refused. **An L1 arm's numbers are its readouts' [0, Δ], never the record summary's** whole-remainder ADE/FDE (D29) |
-| `plan_conditioning` | `off` | `instruction` (2026-09-20, plan v3 §5.2.1): the executor is handed the instruction words IN FORCE at the Δ/τ positions of its segment (bin centres, `Vocabulary.conditioning`) from the artefact `instruction_vocabulary` names — the truth's words in training / `predict`, by flown position in the closed loop; the checkpoint stores the vocabulary's sha and refuses an artefact whose sha moved. `manoeuvre-code` ARCHIVED 2026-09-20 (D30 / D31 are its record) and `truth-next` / `waypoints` 2026-09-18 — all three refused at load by name, each pointing at its own archive (`PLAN_CONDITIONINGS_RETIRED`) |
+| `plan_conditioning` | `off` | **`off` is the only value**: `manoeuvre-code` ARCHIVED 2026-09-20 (D30 / D31 are its record) and `truth-next` / `waypoints` 2026-09-18 — all three refused at load by name, each pointing at its own archive (`PLAN_CONDITIONINGS_RETIRED`) |
 | `control_dynamics_model` | `point-mass` | `first-order-lag`: smoothness + 3.4 % ADE, τ = 2.0 s not CV-selected; a pipeline lag cell carries `_lag` (D4) |
 | procedure penalty | weights 0 | NOT adopted; hinge scales are module constants (D5) |
 | command hook | off in training | **`predict --command-hook barrier --hook-saturation soft` is the ADOPTED use**; no arm trained through a hook beat it; `+` combinations are a lookup, their order the application order (D6) |
@@ -203,51 +196,6 @@ of the package, not a migration in progress.
   `trombone_surplus_reference` `beeline` (default, bit-identical to L3.e) vs `reference-rollout` —
   sizing against `L_ref` itself is the trap (H3.8). Hook diagnostics are per-FLIGHT and ABSENT
   without a hook, never zero (H4).
-- **The instruction vocabulary in force is `2b8bf25c2a36` / `segment-v14`** (2026-09-21): runway
-  `AIRPORT:ident` (idents collide across airports; 22 classes on the pooled cohort, of the 23 the
-  manifests hold), heading 72 directions at 5° **plus one POSITION word** (track the centreline —
-  the only word that is not a velocity target, H11), vertical =
-  **flight path angle**, six modes, descent POSITIVE, speed 16 fitted ground-speed centres,
-  duration 2 s/151, terminal 3. Tolerances and runway classes are deliberately OUTSIDE the sha.
-  Absolute targets are TILED from the data's own 2 s rows — plateaus could not see a ramp, and
-  half of every speed profile had no word responsible for it; the vertical, a RATE, by DP
-  piecewise-linear fitting of height against horizontal distance (H8, H11). The vocabulary's own
-  specification in English: `docs/instruction_vocabulary.en.md`.
-- **The instruction prior's first pooled readings** (2026-09-21, two seeds, `two_tier_v3_bprime_20260921`):
-  it beats "repeat the last word" on every kind (total NLL 5.80 vs bigram 7.44), but read on the
-  positions where the truth CHANGES — which is what an instruction is — recall is 0.55 heading /
-  0.44 vertical / **0.17 speed**, and the joint top-8 covers only 20.5 % of truth tuples. **The
-  runway row is a COPY, not a prediction** (it is also a context token; plan §3.2 has not been
-  done). Seed line: ±0.003 nats, ±0.003 top-1. → `docs/2026-09-21-instruction_prior_results.zh.md`
-- **What the vocabulary can SAY, per signal** (2026-09-21, pooled val): heading settled p50 0.41° /
-  p90 2.35° and inside its band 80.4 % of the time; vertical — the 5-segment fit is RMS 11 m but
-  quantising to the six modes costs p50 35 m / p90 150 m of height; **speed settled p90 18 m/s,
-  inside its band only 48.5 %**, because only 51.3 % of an approach is a speed PLATEAU and 61 % of
-  it is decelerating — a ramp read as holds, which is the reading rule and not the class count.
-  The prior's 0.17 recall on speed changes and H9's 2,035 → 907 m are the same fact (H10).
-- **A SENTENCE MUST BE ABLE TO LAND — `run_ts.py instruction_replay` is the gate** and it flies
-  what the artefact SAYS, never a re-reading (the user's rule, 2026-09-21). It caught three things
-  a vocabulary readout cannot: an absolute heading word cannot say which way round to turn (9.9 %
-  of heading changes are exactly a half circle, and guessing mirrors the whole track), it cannot
-  hold a LINE (the failures reach the threshold aligned but 2,464 m to the side, where the real
-  tracks are 13 m), and the LANDING was in no word at all (the terminal word sat on the last
-  change, a median 136 s early). 36.7 % → **99.6 %** landed. A word's resolution is NOT the gap:
-  un-quantising the speed word buys 18 %, the observed speed 55 % (H9).
-- **If the vertical word were an ALTITUDE, how it would have to be divided** (2026-09-21, KRDU
-  only, a design check): under the tiling reader the bin width is the only lever (tolerance is
-  free, instructions = bin crossings, error × instructions ≈ 0.3 × the descent); the grading has to
-  be GEOMETRIC and the merge takes it unchanged by tiling `ln(1 + h/h0)`; the only altitudes that
-  are instructions are the level-offs and they sit on the 1000 ft **MSL** grid, which
-  height-above-threshold destroys — plus a +97 ft, season-walking, per-day offset no bin absorbs.
-  Best division measured: geometric under 300 m + the 1000 ft MSL ladder above, 17 words and 9.7
-  instructions a flight. **Never flown through the replay gate** (H12).
-- **Its three superseded measurements, kept because they are what decided it**: the 1000 ft
-  altitude bin was indistinguishable from random rounding and 56 % of its "instructions" were the
-  threshold crossing (H5); the POSITION angle to the threshold is a criterion, not a word (p50
-  +0.04° off the published glidepath, 88.5 % inside ±0.5° — a word the model would always emit),
-  while the FLIGHT PATH angle, which is the word, is broad (p50 2.52°, 9.4 % level) — read the
-  published glidepath PER RUNWAY, KRDU 32 is 3.50° (H6); and an absolute target's error is bounded
-  by half a bin while a rate's compounds, which is what the altitude word was for (H7).
 
 ## How to read results here (conventions that prevent wrong conclusions)
 
@@ -319,11 +267,8 @@ of the package, not a migration in progress.
 - `tests/` is one file per topic; shared fixtures in `tests/support.py` (L21).
 - A module belongs under `outputs/control/` only if EVERY consumer is control-specific (L23);
   import direction rules, all enforced by `tests/test_architecture.py` (L24). **Between paths**: the
-  guidance layer never imports the control path (L28). **`manoeuvre/`**: `segments` is the one LEAF
-  (data plane, `config`, `io_utils`, torch only — an allow-list) and **nothing under `outputs/`
-  imports `manoeuvre` any more**; only the runners do. The two-leaf rule and its reverse edge (the
-  executor holding the tokenizer as a submodule) were ARCHIVED 2026-09-20 with that layer — L29 is
-  their record, and a new edge from `outputs/` amends `MANOEUVRE_LEAVES` and the rule together.
+  guidance layer never imports the control path (L28). **`manoeuvre/`**: **nothing under `outputs/`
+  imports `manoeuvre`**; only the runners do (L29).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;
@@ -409,6 +354,6 @@ grid's L60_D60 cohort).
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/2026-09-18_two_tier_plan_v3.zh.md`** — the OVERVIEW (intent, outline, the metric and readout protocol §3, the framework §4, the 2026-09-20 audit §10) and an index to the two stage documents it was split into on 2026-09-20: **`…_v3_A.zh.md`** (stage A, the no-token executor's (L, Δ) grid, run) and **`…_v3_B.zh.md`** (stage B: an INSTRUCTION vocabulary of SIX word kinds — runway, heading, altitude, speed, intercept, duration — laid out as an EVENT SEQUENCE rather than an even grid (D52/D70/D71, 2026-09-20), closed-loop post-training of both layers, goal-directed decoding; B0′/B0′′ done, no arm trained). The intent-CODE version (`2026-09-18_manoeuvre_token_plan.zh.md` + its readouts `…_results.zh.md`), the two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12; the code readouts §9–§11, read through v3 §10 item 1): W2 |
+| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/2026-09-18_two_tier_plan_v3.zh.md`** — the OVERVIEW (intent, outline, the metric and readout protocol §3, the framework §4, the 2026-09-20 audit §10) and its stage A document **`…_v3_A.zh.md`** (the no-token executor's (L, Δ) grid, run); stage B is not designed yet. The intent-CODE version (`2026-09-18_manoeuvre_token_plan.zh.md` + its readouts `…_results.zh.md`), the two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12; the code readouts §9–§11, read through v3 §10 item 1): W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

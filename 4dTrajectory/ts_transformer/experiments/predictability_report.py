@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 """Validation-only diagnostics for pooled terminal-trajectory predictors.
 
-Not for a `plan_conditioning=instruction` checkpoint: this runner builds its dynamics rows
-itself, without the instruction token, and `batch_dynamics_tensors` refuses such a checkpoint
-by name (the intent-code token it used to refuse is archived).
-
 The report answers three predeclared questions:
 
 1. How does error vary with remaining time, airport, runway and geometric route type?
@@ -42,7 +38,6 @@ import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
-    PLAN_CONDITIONING_OFF,
     default_anchor, uses_control_dynamics,
 )
 
@@ -194,11 +189,6 @@ def batch_dynamics_tensors(
     series: Sequence[FlightSeries], config: TSConfig, device: torch.device
 ) -> dict[str, torch.Tensor]:
     """Build the exact per-flight conditioning/rollout tensors used by training."""
-    if config.plan_conditioning != PLAN_CONDITIONING_OFF:
-        raise ValueError(
-            f"plan_conditioning={config.plan_conditioning!r}: this report builds its dynamics rows without the "
-            "instruction token the executor was trained on; it reads no-token checkpoints only"
-        )
     anchor = default_anchor(config)
     rows = [
         dynamics_arrays(

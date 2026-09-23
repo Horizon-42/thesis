@@ -42,12 +42,6 @@ FLEET = ("KRDU", "KSJC", "KSTL", "KSMF", "KMSY")
 # Baro-VNAV minima, which AIM 5-4-5 f 5 also puts a missed approach point at; KRDU 14
 # has no RNAV procedure at all, in the plates or in the CIFP (TD9).
 NOT_LPV = {"KRDU 32": "lnav_vnav", "KSMF 35R": "lnav_vnav", "KRDU 14": NO_VERTICAL_MINIMA}
-# MUST match ``manoeuvre.instructions.ALTITUDE_BIN_M / 2`` (1000 ft bins, so 500 ft).
-# Mirrored rather than imported because the harvest suite does not put the ts_transformer
-# tree on its path. Every published decision altitude in this fleet falls inside word 0,
-# which is why a go-around's timing cannot be judged from the word (two-tier plan D75).
-ALTITUDE_WORD_HALF_BIN_FT = 500.0
-
 # Hand-read off the plates, one per shape the parser has to handle: a plain LPV sheet, a
 # sidestep sheet that prints two TDZEs, the lowest and highest LPV in the fleet, a TDZE
 # below sea level, and the two runways whose only vertical guidance is Baro-VNAV.
@@ -144,16 +138,6 @@ class StoredMinima(unittest.TestCase):
         ]
         self.assertGreater(min(gaps), -0.5)      # -0.5 ft covers the plate's whole-foot rounding
         self.assertAlmostEqual(max(gaps), 23.9, places=1)
-
-    def test_every_decision_altitude_sits_inside_altitude_word_zero(self) -> None:
-        highest = max(
-            runway.decision_height_above_threshold_m / FT_M
-            for code in FLEET
-            for runway in load_airport(code, config_file=CONFIG, cifp_file=CIFP).runways
-            if runway.published_minima.vertically_guided
-        )
-        self.assertAlmostEqual(highest, 423.4, places=1)   # KSTL 12L
-        self.assertLess(423.4, ALTITUDE_WORD_HALF_BIN_FT)
 
     def test_an_older_configuration_is_refused_by_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
