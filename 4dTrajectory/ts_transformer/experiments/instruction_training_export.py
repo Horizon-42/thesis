@@ -4,7 +4,7 @@ artefact (design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the wor
 `docs/2026-09-23_instruction_vocabulary_design.zh.md`).
 
     python run_ts.py instruction_training_export \\
-        --dir 4dTrajectory/outputs/POOLED/instruction_language/v1_20260923 \\
+        --dir 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \\
         --airports-root aeroviz-4d/public/data/airports \\
         --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 
@@ -62,9 +62,12 @@ from ts_transformer.repo_layout import REPO_ROOT
 
 #: MIRROR of `aeroviz-4d/src/data/trainingSample.ts` (`TRAINING_INDEX_SCHEMA`,
 #: `TRAINING_SAMPLE_SCHEMA`, `TRAINING_READABLE_SET_KIND`); the reader refuses anything else by
-#: name, so these move together. The index keeps its v1 shape: sets of every vocabulary sit in it.
+#: name, so these move together. A name changes with its file's shape, on both sides, in the same
+#: change. Sample v4 is `instruction-v2`'s shape: a turn bounded by rate (fast and slow paths, rate
+#: checks), the judged hold (`holdCheck`), the landing limits in the vocabulary and per candidate.
+#: The index keeps its v1 shape: sets of every vocabulary sit in it.
 INDEX_SCHEMA = "aeroviz-training-index-v1"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v3"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v4"
 KIND_READBACK = "vocabulary-readback"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"

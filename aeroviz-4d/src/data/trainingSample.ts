@@ -35,11 +35,13 @@ import { fetchJson } from "../utils/fetchJson";
 /** MIRROR of the exporter's `INDEX_SCHEMA`. The index keeps this shape across vocabularies:
  *  every set, current or superseded, is listed in it. */
 export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
-/** MIRROR of the exporter's `SAMPLE_SCHEMA` (`instruction_training_export.py`). */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v3";
+/** MIRROR of the exporter's `SAMPLE_SCHEMA` (`instruction_training_export.py`). The name changes
+ *  with the file's shape, on both sides, in the same change: v4 is `instruction-v2`'s sample, and a
+ *  file under any other name — `v3` included, whatever vocabulary it carries — is refused. */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v4";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v2";
-/** MIRROR of the spec's sha (`v2_20260923/spec.json`). A new vocabulary is a new sha, and this
+/** MIRROR of the spec's sha (`v2_20260924/spec.json`). A new vocabulary is a new sha, and this
  *  reader is bound to the one it was written for. */
 export const TRAINING_SPEC_SHA256 = "103a6eae6b9083ad33d5a1b25daef4004a07458881786e90d4625ba04027204b";
 /** MIRROR of the exporter's `KIND_READBACK`: the one kind of set this reader opens. */
@@ -1315,7 +1317,7 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
   if (raw.schema !== TRAINING_SAMPLE_SCHEMA) {
     return {
       ok: false,
-      problem: `schema is ${JSON.stringify(raw.schema)}, expected ${JSON.stringify(TRAINING_SAMPLE_SCHEMA)} — a set of a superseded vocabulary is not read`,
+      problem: `schema is ${JSON.stringify(raw.schema)}, expected ${JSON.stringify(TRAINING_SAMPLE_SCHEMA)} — a sample of another format is not read: re-export the set`,
     };
   }
   try {

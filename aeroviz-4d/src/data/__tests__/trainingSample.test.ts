@@ -15,6 +15,7 @@ import {
   trainingVerdicts,
   trainingWordLabel,
   TRAINING_COLUMNS,
+  TRAINING_INDEX_SCHEMA,
   TRAINING_READING_RULE,
   TRAINING_SAMPLE_SCHEMA,
   TRAINING_SPEC_SHA256,
@@ -51,9 +52,13 @@ describe("parseTrainingSample", () => {
   });
 
   // ── refused by name ─────────────────────────────────────────────────────
-  it("refuses a sample of the superseded box vocabulary by its schema", () => {
-    expect(refusal((raw) => { raw.schema = "aeroviz-training-sample-v2"; })).toContain(
-      `schema is "aeroviz-training-sample-v2", expected "${TRAINING_SAMPLE_SCHEMA}"`);
+  it("refuses a sample of an earlier format by its schema name, whatever vocabulary it carries", () => {
+    // v2: the box vocabulary's sample; v3: instruction-v1's, and instruction-v2's before its change of
+    // shape got a name of its own. Both are superseded names, so they are written out here.
+    for (const schema of ["aeroviz-training-sample-v2", "aeroviz-training-sample-v3"]) {
+      expect(refusal((raw) => { raw.schema = schema; })).toContain(
+        `schema is "${schema}", expected "${TRAINING_SAMPLE_SCHEMA}" — a sample of another format is not read`);
+    }
   });
 
   it("refuses another reading rule and another spec by name", () => {
@@ -227,7 +232,7 @@ describe("the index", () => {
 
   it("refuses a manifest of another schema whole", () => {
     expect(parseTrainingIndex({ ...mockIndex(), schema: "aeroviz-training-index-v0" })).toEqual({
-      ok: false, problem: 'schema is "aeroviz-training-index-v0", expected "aeroviz-training-index-v1"',
+      ok: false, problem: `schema is "aeroviz-training-index-v0", expected "${TRAINING_INDEX_SCHEMA}"`,
     });
   });
 });
