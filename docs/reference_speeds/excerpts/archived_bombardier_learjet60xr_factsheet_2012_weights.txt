@@ -1,0 +1,22 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Bombardier Business Aircraft, Learjet 60 XR fact sheet (PDF), captured by the Internet Archive:
+http://web.archive.org/web/20121021012715id_/http://businessaircraft.bombardier.com:80/content/dam/bombardier/en/aircraft/learjet/Fact%20Sheets/L60XR_EN.pdf
+Verbatim (pdftotext -raw). Designator: LJ60 (ICAO: LEARJET 60). The figure is for the 60 XR; the original
+Learjet 60 is not covered.
+----------------------------------------------------------------------------------------------------
+Weights
+A.
+Maximum ramp weight:
+23,750 lb (10,773 kg)
+B.
+Maximum takeoff weight:
+23,500 lb (10,659 kg)
+C.
+Maximum landing weight:
+19,500 lb (8,845 kg)
+D.
+Maximum zero fuel weight:
+17,000 lb (7,711 kg)
+E.
+Typical basic operating weight:
+14,896 lb (6,757 kg)

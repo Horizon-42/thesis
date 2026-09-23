@@ -1,5 +1,33 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-23 — 机型识别有据可查的对照表；参考速度表补最小重量
+
+起因：前端观测基线三门通过率 KRDU 只有 80.2%，12.2% 是速度门判不了（机型识别不了，或机型缺最小重量）。
+用户要求两处都补，数据源必须可靠，宁缺毋滥。分析与状态：`evaluation/docs/2026-09-23_observed_baseline_pass_rate.zh.md`。
+
+- **icao24 → ICAO 机型**：新增 `aircraft/faa_icao_crosswalk.json`（32 个 FAA 型号、84 种注册库写法、25 份 FAA 文件）。
+  一个 FAA 型号只有在 TCDS / FSB 报告 / FAA JO 7360.1K 把它和 Doc 8643 的某条记录对上时才给代码；跨多个代码的按
+  FAA 文件印出的序列号拆分（BD-100-1A10 → CL30/CL35，Falcon 7X → FA7X/FA8X，TBM 700 → TBM7/8/9，Cessna 525 →
+  C525/C25M）；拆不了的（ATR 72-212A、Cessna 525 的 CJ1+ 段、King Air B300C）标“无法确定”，**OpenSky 不能再补**。它优先于名字匹配
+  和 OpenSky 注册号投票，顺带纠正了三处旧错：Bell 525 直升机 → C525、Cessna Model 525 → C25A（那是 525A）、
+  TBM 700 按多数票给 TBM7/TBM9。证据：`docs/aircraft_identity/`。
+- **注册库快照** 7/27 → 9/22（新一个月的数据在 8/21–9/22）。两件事的效果分开算（五机场 72,745 条观测航迹）：
+  识别不了 2,737 → 914；相对 7/27 库，新识别 1,846 条，换了机型 680 条（多数是注册号在 7/27 之后换了飞机），
+  丢了 21 条（737-86N 11 条：N452AC 以前是 G200，OpenSky 按注册号投票被旧飞机拉低；B300C 3 条改为无法确定；
+  2 架已注销）。进场清单里 2,534 条进场的机型变了。
+- **机型库 schema v2**（`identity.FAA_IDENTITY_SCHEMA`）：新增逐架 `icao24_documented_typecode`；常量只在
+  `identity.py` 定义，构建脚本 import；`from_paths` 拒绝用另一个 Doc 8643 快照（按 sha256）构建的机型库；测试检查
+  机型库记录的对照表 sha256 与仓库里的文件一致（改了对照表忘记重建会失败）。
+- **最小重量**：13 个机型改用 FAA / EASA TCDS 印的最小飞行重量（或 Hawker 的最小无燃油重量，新 kind `MZFW`）和
+  Gulfstream 现行官网的基本空机重量。F2TH、LJ45、F900、FA50、FA7X、FA8X、FA10、H25B、GA6C、GA5C 从无到有；
+  GLEX、GL5T、C56X 按“认证最小飞行重量优先”替换原来的厂家 BOW。缺最小重量的机型 109 → 99。只找到互联网档案馆
+  存档的 10 个机型没有采用，等用户决定。`docs/reference_speeds/README.md`“2026-09-23: type certificate data sheets”。
+- **没有重写任何报告**：只读估算重评后三门通过率 82.6% → 85.8%（KRDU 80.2% → 83.0%），速度门判不了 8,910 → 6,554；
+  Falcon 7X/8X 新判得了之后 22/54 偏快，列入跟踪项。重评、前端重发、ts cohort 重建（openap-direct 集合变 244 条
+  进场）等用户决定，见 `docs/open-items.md`。
+- 测试时发现 `test_write_reference_records_from_observed_tracks` 在干净的 HEAD 上也失败（bb643d58 起），记为
+  `docs/code-health-followups.md` #18；#19、#20 是 OpenSky 注册号复用和机型时效问题，#21 是 OpenAP 缓存读取不查 schema。
+
 ### 2026-09-23 — 数据前处理 review；CIFP 跑道几何、v7 进场切片、冻结数据代（代码部分）
 
 review 了 `trajectory_data_process/` 与 `flight_scenarios/`，并对照 `evaluation/` 和 ts 训练流程；

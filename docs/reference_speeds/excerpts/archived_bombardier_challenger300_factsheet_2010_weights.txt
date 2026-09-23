@@ -1,0 +1,24 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Bombardier Business Aircraft, Challenger 300 fact sheet (PDF), captured by the Internet Archive:
+http://web.archive.org/web/20100524190729id_/http://businessaircraft.bombardier.com:80/en/3_0/3_2/pdf/challenger_300_factsheet.pdf
+Verbatim (pdftotext -raw, reading order of the Weights column). Designator: CL30 (ICAO: BD-100 Challenger 300).
+A 2013 capture of the later fact sheet (web.archive.org/web/20130219050248id_/http://businessaircraft.bombardier.com/
+content/dam/bombardier/en/aircraft/challenger/Fact%20Sheet/Challenger%20300%20factsheet.pdf) prints
+"Typical basic operating weight: 23,850 lb (10,818 kg)"; the lower 2010 value is quoted.
+----------------------------------------------------------------------------------------------------
+Weights
+A.
+Maximum ramp weight:
+39,000 lb (17,690 kg)
+B.
+Maximum takeoff weight:
+38,850 lb (17,622 kg)
+C.
+Maximum landing weight:
+33,750 lb (15,309 kg)
+D.
+Maximum zero fuel weight:
+27,000 lb (12,247 kg)
+E.
+Typical basic operating weight:
+23,700 lb (10,750 kg)

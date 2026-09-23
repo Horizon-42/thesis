@@ -1,0 +1,28 @@
+EASA, Type-Certificate Data Sheet No. EASA.IM.A.207 (Cessna 500, 550, S550, 560, 560XL), Issue 10,
+06 July 2022. Verbatim (pdftotext -layout). BONUS finding for C56X; corroborates FAA A22CE Rev 74.
+----------------------------------------------------------------------------------------------------
+
+SECTION 5: Model 560XL Citation Excel, Citation XLS, Citation XLS+ -- item 13, Page 53 of 58
+
+                13. Maximum Certified Weights in lbs (kg)
+                                                                             *S/N 560-5001 through 560-5500       * See Note 3.
+                                            Maximum Weight                   Takeoff          20,000 lb. (9,072 kg)
+                                                                             Landing          18,700 lb. (8,482 kg)
+                                                                             Zero fuel        15,000 lb.(6,804 kg)
+                                                                             Ramp             20,200 lb. (9,163 kg)
+                                            Minimum Weight                   Inflight         12,400 lb. (5,625 kg)
+
+                                                                             S/N 560-5501 and on
+                                            Maximum Weight                   Takeoff         20,200 lb. (9,163 kg)
+                                                                             Landing         18,700 lb. (8,482 kg)
+                                                                             Zero fuel       15,100 lb. (6,849 kg)
+                                                                             Ramp            20,400 lb. (9,253 kg)
+                                            Minimum Weight                   Inflight        12,400 lb. (5,625 kg)
+
+  (Pages 54 and 55 repeat "Minimum Weight Inflight 12,400 lb. (5,625 kg)" for S/N 560-6001 thru 560-6321
+  and S/N 560-6318, 560-6322 and on.)
+
+Notes
+  * C56X: Minimum Weight (Inflight) 12,400 lb / 5,625 kg in every 560XL column of this issue. (The later
+    FAA A22CE Rev 74 adds 12,800 lb for S/N 560-6501 and on; the lowest is unchanged.)
+  * SECTION 4 (Model 560, Citation V / Ultra / Encore / Encore+; designator C560) prints maximum weights only.

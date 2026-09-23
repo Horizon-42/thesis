@@ -1,0 +1,35 @@
+EASA, Type-Certificate Data Sheet No. EASA.A.155 (Dassault Falcon 7X), Issue 17, 23 July 2025.
+Verbatim (pdftotext -layout), item 13, Page 16/22 (PDF page 16).
+BONUS finding for FA7X and FA8X (both carry min_mass_kg null in the pack; neither is on the search list).
+----------------------------------------------------------------------------------------------------
+
+13. Maximum Certified Masses
+
+                                Without modification M1000 included                 With modification M1000 included
+                                         (S/N 001 to 400)                              (S/N 401 and ongoing) NOTE 3
+                                              Fwd limit         Aft limit                        Fwd limit      Aft limit
+                               Mass                                               Mass
+                                               % MAC            % MAC                             % MAC         % MAC
+    Ramp                      31842 kg           19.5             31.5          33203 kg           19.62          27.00
+                             (70200 lbs)                                       (73200 lbs)
+    Takeoff                   31751 kg          19.05             33.65         33112 kg           19.54          27.73
+                             (70000 lbs)                                       (73000 lbs)
+    Aft CG at 38.5%           25890 kg           19.5             38.5          25890 kg           19.5           38.5
+                             (57076 lbs)                                       (57076 lbs)
+    Landing                   28304 kg           19.5             37.35         28304 kg           19.5           37.35
+                             (62400 lbs)                                       (62400 lbs)
+    Zero fuel                 18597 kg           19.5             38.5          18597 kg           19.5           38.5
+                             (41000 lbs)                                       (41000 lbs)
+    Minimum flight -          15694 kg           26.0             N/A           15694 kg           26.6            N/A
+    FWD                      (34600 lbs)                                       (34600 lbs)
+
+    Minimum flight -          14696 kg           N/A              38.5          14696 kg           N/A            38.5
+    AFT                      (32400 lbs)                                       (32400 lbs)
+
+NOTE 3 (page 19/22): "The introduction of the fuselage stretch modification M1000, for which the avionics
+EASyIII modification M1254 is a precondition, has the commercial designation "F8X". This modification is
+applicable for all F7X models from S/N 401 and ongoing."
+
+Notes
+  * Minimum flight mass 14,696 kg (32,400 lb) at the aft CG limit, 15,694 kg (34,600 lb) at the forward
+    limit, identical for the Falcon 7X (S/N 001-400) and the Falcon 8X (M1000, S/N 401 on). Lowest: 14,696 kg.

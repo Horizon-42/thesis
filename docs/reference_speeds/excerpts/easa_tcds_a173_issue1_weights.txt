@@ -1,0 +1,33 @@
+EASA, Type-Certificate Data Sheet No. EASA.A.173 (Dassault Falcon 10), Issue 1, 9 October 2009.
+Verbatim (pdftotext -layout), item 2.3.10, Page 8/14 and 9/14 (PDF pages 8-9).
+BONUS finding for FA10 (min_mass_kg null in the pack; not on the search list).
+----------------------------------------------------------------------------------------------------
+
+2.3.10. Maximum Weights:
+         From MSN 1 to 54
+          Maximum ramp                           8 300 kg
+          Maximum takeoff                        8 300 kg
+          Maximum landing:                       7 800 kg
+          Maximum zero fuel:                     5 650 kg
+          Minimum flight                         4 500 kg
+
+        From MSN 55, and MSN 1 to 54 fitted with AMD-BA service bulletin F10-0052, AFM
+        DTM721 revision 12
+         Maximum ramp                     8 500 kg
+         Maximum takeoff                  8 500 kg
+         Maximum landing:                 8 000 kg
+         Maximum zero fuel:               6 150 kg
+         Minimum flight                   4 500 kg
+
+        From MSN 212 and MSN 1 to 211 fitted with AMD-BA service bulletin F10-0238, AFM
+        DTM721 revision 28
+         Maximum ramp                     8 800 kg
+         Maximum takeoff                  8 755 kg
+         Maximum landing:                 8 000 kg
+         Maximum zero fuel:               6 540 kg
+         Minimum flight                   4 500 kg
+
+Notes
+  * Minimum flight 4,500 kg in every column. The TCDS is issued "For model: Falcon 10"; ICAO FA10 also
+    covers the Falcon 100 / Mystere 10 / 100 marketing names. Issue 1 dates from 2009 and was still the
+    issue served by the EASA document library on 2026-09-23.

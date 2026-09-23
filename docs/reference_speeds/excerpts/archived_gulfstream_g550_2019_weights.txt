@@ -1,0 +1,23 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Gulfstream Aerospace, G550 aircraft page (HTML), captured by the Internet Archive:
+http://web.archive.org/web/20190603084406/https://www.gulfstream.com/aircraft/gulfstream-g550
+(<title>Gulfstream Aerospace - Aircraft - G550</title>; today gulfstream.com answers the G550 path with HTTP 403).
+Verbatim text nodes, imperial then metric block. Designator: GLF5 (ICAO: G-5SP Gulfstream G550; GLF5 also
+covers the GV and the G-5SP "G500"). The figure is for the G550 only.
+----------------------------------------------------------------------------------------------------
+Weights
+Maximum Takeoff
+91,000 lb
+Maximum Landing
+75,300 lb
+Maximum Zero Fuel
+54,500 lb
+Basic Operating
+(including 4 crew **)
+48,300 lb
+...
+Basic Operating
+(including 4 crew **)
+21,909 kg
+...
+** Stated weights are based on theoretical standard outfitting configurations. Actual weights will be affected by outfitting options and other factors.

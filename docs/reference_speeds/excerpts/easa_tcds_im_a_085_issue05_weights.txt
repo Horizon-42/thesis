@@ -1,0 +1,75 @@
+EASA, Type-Certificate Data Sheet No. EASA.IM.A.085 (Hawker Series; TC holder Textron Aviation Inc.),
+Issue 05, 27 September 2018. Verbatim (pdftotext -layout). Printed page numbers equal PDF page numbers
+("Page N of 73"). Designator: H25B (ICAO Doc 8643: BAe-125-700, BAe-125-800, HS-125-700, C-29, U-125,
+Hawker 750 / 800 / 850 / 900).
+----------------------------------------------------------------------------------------------------
+
+Section X, Hawker Siddeley Model HS.125 Series 700A / Series 700B -- Page 28 of 73
+
+ Maximum Weights                                                       (With Mod. 258332)
+             Maximum Ramp Weight              25,000 lbs 11,340 kg   25,500 lbs 11,566 kg     (See Note 27)
+             Maximum Brake-Release Wt.        24,800 lbs 11,249 kg   25,500 lbs 11,566 kg     (See Note 27)
+             Maximum Landing Weight           22,000 lbs 9,979 kg    22,000 lbs 9,979 kg
+             Maximum Zero Fuel Weight         16,050 lbs 7,280 kg    16,300 lbs 7,394 kg      (See Notes 29 & 34)
+             Minimum Zero Fuel Weight         13,100 lbs 5,942 kg    13,100 lbs 5,942 kg
+
+Section XVI, British Aerospace Model BAe.125 Series 800A / 800B (Hawker 800) -- Page 43 of 73
+
+Maximum Weights                                                              with Modifications
+                                                                            259550 & 253169A
+         Maximum ramp weight              27,520 lbs        12,483 kg      28,100 lbs       12,746 kg   (See Note 31)
+         Maximum brake release weight     27,400 lbs        12,428 kg      28,000 lbs       12,700 kg   (See Note 31)
+         Maximum landing weight           23,350 lbs        10,591 kg      23,350 lbs       10,591 kg
+         Maximum zero fuel weight         17,520 lbs         7,947 kg      18,000 lbs        8,165 kg   (See Notes 32 & 37)
+         Minimum zero fuel weight         14,120 lbs         6,405 kg      14,120 lbs        6,405 kg
+                                          with Modification 25B047A
+         Minimum zero fuel weight         16,550 lbs       7,507 kg
+
+Section XVIII, Hawker 800XP -- Page 49 of 73
+
+ Maximum Weights
+                                    Maximum ramp weight                       28,120 lbs        12,755 kg
+                                    Maximum brake release weight              28,000 lbs        12,700 kg
+                                    Maximum landing weight                    23,350 lbs        10,591 kg
+                                    Maximum zero fuel weight                  18,450 lbs         8,369 kg
+                                    Minimum zero fuel weight                  14,120 lbs         6,405 kg
+
+Section XIX, Hawker 850XP -- Page 51 of 73
+
+Maximum Weights
+                             Maximum ramp weight                        28,120 lbs     12,755 kg
+                             Maximum brake release weight               28,000 lbs     12,700 kg
+                             Maximum landing weight                     23,350 lbs     10,591 kg
+                             Maximum zero fuel weight                   18,450 lbs      8,369 kg
+                             Minimum operating weight                   16,100 lbs      7,303 kg
+                             Minimum zero fuel weight                   14,120 lbs      6,405 kg
+
+Section XX, Hawker 900XP -- Page 54 of 73
+
+Maximum Weights
+                                   Maximum ramp weight                         28,120 lbs      12,755 kg
+                                   Maximum brake release weight                28,000 lbs      12,700 kg
+                                   Maximum landing weight                      23,350 lbs      10,591 kg
+                                   Maximum zero fuel weight                    18,450 lbs       8,369 kg
+                                   Minimum operating weight                    16,100 lbs       7,303 kg
+                                   Minimum zero fuel weight                    14,120 lbs       6,405 kg
+
+Section XXI, Hawker 750 -- Page 57 of 73
+
+                                 Maximum Landing Weight                  23,350 lbs       10,591 kg
+                                 Maximum Zero Fuel Weight                18,450 lbs        8,369 kg
+                                 Minimum Zero Fuel Weight                14,120 lbs        6,405 kg
+
+Notes
+  * No section prints a "minimum flight weight". Two minima are printed:
+      - "Minimum zero fuel weight": 13,100 lb / 5,942 kg (HS.125-700A/B), 14,120 lb / 6,405 kg
+        (800A/B, 800XP, 850XP, 900XP, 750), 16,550 lb (800 with Mod 25B047A);
+      - "Minimum operating weight": 16,100 lb / 7,303 kg, printed for the 850XP and 900XP only.
+  * Neither term is in the pack's min_mass_kind vocabulary (MFW/OEW/OWE/BOW/BEW/EW/SEW/BW). A minimum
+    zero-fuel weight is a certified floor on the aircraft's mass without usable fuel, so (our reading, not
+    printed) every in-flight mass of that model is at or above it; whether it may stand in for the row is
+    the coordinator's call.
+  * Lowest printed floor across the H25B models: 13,100 lb (5,942 kg), HS.125-700A/B, minimum zero fuel
+    weight. Using the 850XP/900XP "Minimum operating weight" (16,100 lb) for the whole designator would
+    put the floor above what the TCDS allows the 700/800/800XP/750 to weigh.
+  * FAA TCDS A3EU Rev 44 prints the same numbers (excerpt faa_tcds_a3eu_rev44_weights.txt).

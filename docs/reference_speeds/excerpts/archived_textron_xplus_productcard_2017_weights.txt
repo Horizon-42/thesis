@@ -1,0 +1,10 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Textron Aviation, Citation X+ product card (PDF), captured by the Internet Archive:
+http://web.archive.org/web/20170420093056id_/http://cessna.txtav.com:80/-/media/cessna/files/citation/xplus/xplus_productcard.ashx
+(live URL now HTTP 404). Verbatim (pdftotext -layout), WEIGHTS block.
+Designator: C750 (ICAO: CESSNA 750 Citation 10). The card is for the Citation X+ (a Model 750 variant);
+no figure for the original Citation X was found, so this is not shown to be the designator's lowest.
+----------------------------------------------------------------------------------------------------
+ WEIGHTS
+ Max Takeoff Weight                         36,600 lb         (16,601 kg)
+ Basic Oper Weight                            22,131 lb       (10,038 kg)

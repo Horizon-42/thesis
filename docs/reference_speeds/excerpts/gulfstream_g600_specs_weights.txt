@@ -1,0 +1,40 @@
+Gulfstream Aerospace, G600 product page (HTML), https://www.gulfstream.com/en/aircraft/gulfstream-g600/
+as served 2026-09-23 (<title>G600 - Gulfstream Aerospace</title>). "Weights" accordion, verbatim text
+nodes (HTML tags stripped; the page carries metric and imperial spans side by side, footnote marker "12").
+Designator: GA6C (ICAO Doc 8643: GULFSTREAM AEROSPACE G-7 Gulfstream G600).
+----------------------------------------------------------------------------------------------------
+
+Weights
+ Maximum Takeoff
+ 42,910 kg
+ 94,600 lb
+ Maximum Landing
+ 34,836 kg
+ 76,800 lb
+ Maximum Zero Fuel
+ 26,054 kg
+ 57,440 lb
+ Basic Operating (including 4 crew)
+12
+ 23,088 kg
+ 50,900 lb
+ Maximum Payload
+12
+ 2,966 kg
+ 6,540 lb
+ Maximum Payload/Full Fuel
+12
+ 1,179 kg
+ 2,600 lb
+ Maximum Fuel
+ 18,824 kg
+ 41,500 lb
+12
+Stated weights are based on theoretical standard outfitting configurations. Actual weights will be affected by outfitting options and other factors.
+
+Notes
+  * Basic Operating weight (including 4 crew): 50,900 lb / 23,088 kg (kind BOW).
+  * No approach speed and no minimum flight weight are published on the page. FAA TCDS T00021AT Rev 13
+    (GVII-G500, GVII-G600) and EASA TCDS EASA.IM.A.595 Issue 15 print maximum weights only.
+  * The page is a web page, not a file: its sha256 will change when the site is touched even if the
+    numbers do not; this excerpt pins the numbers.

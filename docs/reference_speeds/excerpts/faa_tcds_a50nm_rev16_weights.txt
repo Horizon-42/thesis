@@ -1,0 +1,40 @@
+FAA, Type Certificate Data Sheet No. A50NM (Dassault Aviation Falcon 2000, Falcon 2000EX),
+Revision 16, November 13, 2025. Verbatim (pdftotext -layout). The PDF itself prints the two weight
+columns run together without spacing ("Maximum ramp36,000 lb36,500 lb"); that is how the served
+document looks when rendered, not an extraction artefact (checked on the rendered page image).
+Designator: F2TH.
+----------------------------------------------------------------------------------------------------
+
+I. Model Falcon 2000 (Transport Category) approved February 2, 1995 -- printed page "Page 4 of 22"
+(page header "Rev 15"), PDF page 4
+
+Weight Limitations           Without Option M57With Option M57
+                             Maximum ramp36,000 lb36,500 lb
+                             Maximum take-off35,800 lb36,500 lb
+                             Maximum landing33,000 lb33,000 lb
+                             Maximum zero fuel28,660 lb28,660 lb
+                             Minimum flight
+                             at 14% CG23,075 lb23,075 lb
+                             at 32.5% CG20,100 lb20,100 lb
+
+II. Model FALCON 2000EX (Transport Category Airplane) approved March 21, 2003 -- printed page
+"Page 7 of 22" (page header "Rev 14"), PDF page 7
+
+Weight Limitations             Without M1826 (serial no.1 only)      with M1826       with M1826 and M1842
+(Maximums)                     Taxi and Ramp 40,900 lb                 41,500 lb            42,400 lb
+                               Take-off       40,700 lb               41,300 lb            42,200 lb
+                               Landing        38,300 lb               39,300 lb            39,300 lb
+                               Zero fuel      29,700 lb                29,700 lb           29,700 lb
+                               Minimum flight
+                               at 14% CG23,444 lb23,444 lb
+                               at 32.5% CG21,149 lb21,149 lb
+
+Notes
+  * The minimum flight weight is CG-dependent: 23,075 lb at 14% CG down to 20,100 lb at 32.5% CG for the
+    Falcon 2000; 23,444 lb / 21,149 lb for the Falcon 2000EX. The lowest printed figure for the designator
+    is 20,100 lb (= 9,117 kg by x 0.45359237; the TCDS prints pounds only), Falcon 2000, at 32.5% CG.
+  * ICAO Doc 8643 (aircraft/icao_doc8643.json) lists F2TH only as "DASSAULT Falcon 2000"; the 2000EX
+    figure is recorded for completeness and is higher, so it does not change the minimum.
+  * EASA TCDS EASA.A.008 Issue 13 (15 Sept 2026), item 2.5.11 page 16 of 64, prints the line
+    "- Minimum flight" three times WITH NO VALUE (checked on the rendered page image); EASA gives no
+    number for this designator, and its 2000EX/DX/LX/S/LXS sections print maximum weights only.

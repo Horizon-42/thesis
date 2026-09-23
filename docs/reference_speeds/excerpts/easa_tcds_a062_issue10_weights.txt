@@ -1,0 +1,65 @@
+EASA, Type-Certificate Data Sheet No. EASA.A.062 (Dassault Aviation MF50 / MF900 / Falcon 900EX),
+Issue 10, 15 September 2026. Verbatim (pdftotext -layout), leader dots as printed.
+Designators: FA50 (Section 2, Mystere-Falcon 50) and F900 (Section 3, Mystere-Falcon 900; Section 4, Falcon 900EX).
+----------------------------------------------------------------------------------------------------
+
+Section 2 MYSTERE FALCON 50 -- item 2.5.11, printed page "Page 15 of 70" (PDF page 15)
+
+                         2.5.11 Maximum Weights
+
+                             • Airplane without modification M1230 or Service Bulletin SB F50-161
+                               - Maximum ramp.......................................................................... 17.600 kg (38.800 lbs)
+                               - Maximum takeoff ...................................................................... 17.600 kg (38.800 lbs)
+                               - Maximum landing: .................................................................... 16.200 kg (35.715 lbs)
+                               - Maximum zero fuel: .................................................................. 11.600 kg (25.570 lbs)
+                               - Minimum flight ........................................................................ 8.600 kg (18.959 lbs)
+                             • Airplane with modification M1230 or Service Bulletin SB F50-161
+                               - Maximum ramp ......................................................................... 18,500 kg (40,780 lbs)
+                               - Maximum takeoff ...................................................................... 18,500 kg (40,780 lbs)
+                               - Maximum landing ..................................................................... 16,200 kg (35,715 lbs)
+                               - Maximum zero fuel ................................................................... 11,600 kg (25,570 lbs)
+                               - Minimum flight .......................................................................... 8,600 kg (18,959 lbs)
+
+  (The same "Minimum flight 8.600 kg (18.959 lbs)" is repeated for the M1430 / SB F50-191 column on
+  page 15 and in item 2.8.4.6 on pages 23-24.)
+
+Section 3 MYSTERE FALCON 900 -- item 3.5.11, printed page "Page 32 of 70" (PDF page 32)
+
+                         3.5.11 Maximum Weights
+
+                            • Airplane without DASSAULT AVIATION modification M1196
+                            - Maximum ramp ............................................................................... 20 729 kg (45 700 lbs)
+                            - Maximum take off ........................................................................... 20 639 kg (45 500 lbs)
+                            - Maximum landing ........................................................................... 19 051 kg (42 000 lbs)
+                            - Maximum zero fuel ......................................................................... 12 800 kg (28 220 lbs)
+                            - Minimum flight................................................................................ 9 390 kg (20 700 lbs)
+                            • Airplane with DASSAULT AVIATION modification M1196
+                            - Maximum ramp .............................................................................. 21,183 kg (46,700 lbs)
+                            - Maximum takeoff ........................................................................... 21,092 kg (46,500 lbs)
+                            - Maximum landing .......................................................................... 19051 kg (42000 lbs)
+                            - Maximum zero fuel ......................................................................... 14,000 kg (30,865 lbs)
+                            - Maximum flight .............................................................................. 9,390 kg (20,700 lbs)
+
+Section 4 FALCON 900EX -- item 4.5.11, printed page "Page 47 of 70" (PDF page 47)
+
+                         4.5.11 Maximum Weights
+
+                                                                                 Weight                   Forward limit         Aft limit
+                                  Without M3020 (BS N° 1)
+                                                                          kg                lbs              % MAC              % MAC
+                                  Minimum flight                        9.390             20.700               14                  31
+                                  ...
+                                      With M3020 (BS N° 1)                       Weight                   Forward limit         Aft limit
+                                                                          kg                lbs              % MAC              % MAC
+                                  Minimum flight                        9 390             20 700               13                  31
+
+  (The 900EX/900DX tables in item 4.10.4.3, pages 52 and 58, repeat "Minimum flight 9,390 / 20,700".)
+
+Notes
+  * FA50: Minimum flight weight 8,600 kg (18,959 lb) in every Falcon 50 weight column.
+  * F900: Minimum flight weight 9,390 kg (20,700 lb) for the Mystere-Falcon 900 and for the Falcon 900EX/DX.
+  * The MF900 "with M1196" column prints "Maximum flight ... 9,390 kg (20,700 lbs)" where every other
+    column prints "Minimum flight"; a 9,390 kg maximum is impossible next to a 21,092 kg MTOW, so it is
+    read as the same minimum flight weight mislabelled. The figure taken does not depend on it: the
+    "without M1196" column prints "Minimum flight 9 390 kg (20 700 lbs)" unambiguously.
+  * FAA TCDS A46EU Rev 23 prints the same two figures (excerpt faa_tcds_a46eu_rev23_weights.txt).

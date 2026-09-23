@@ -1,0 +1,24 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Gulfstream Aerospace, G280 aircraft page (HTML), captured by the Internet Archive:
+http://web.archive.org/web/20190520153203/https://www.gulfstream.com/aircraft/gulfstream-g280
+(<title>Gulfstream Aerospace - Aircraft - G280</title>). Verbatim text nodes. Designator: G280.
+Today's /en/aircraft/gulfstream-g280/ redirects to the NEW Gulfstream G300 page (BOW 11,059 kg incl. 2 crew),
+a different, later model; that G300 figure is not a G280 figure and must not be used for G280 (nor for GLF4,
+whose ICAO list contains the unrelated 2000s-era "G-4 Gulfstream G300").
+----------------------------------------------------------------------------------------------------
+Weights
+Maximum Takeoff
+39,600 lb
+Maximum Landing
+32,700 lb
+Maximum Zero Fuel
+28,200 lb
+Basic Operating
+(including 2 crew **)
+24,150 lb
+...
+Basic Operating
+(including 2 crew **)
+10,954 kg
+...
+** Stated weights are based on theoretical standard outfitting configurations. Actual weights will be affected by outfitting options and other factors.

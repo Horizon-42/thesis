@@ -1,0 +1,45 @@
+FAA, Type Certificate Data Sheet No. T00003NY (Bombardier BD-700-1A10, BD-700-1A11, BD-700-2A12),
+Revision No. 24, December 19, 2025. Verbatim (pdftotext -layout).
+BONUS finding: these designators (GLEX, GL5T) are not on the 2026-09-23 search list; GL7T is.
+----------------------------------------------------------------------------------------------------
+
+I - Model BD-700-1A10 (Global Express, Global Express XRS, Global 6000, Global 6500) -- PDF page 1
+
+     MAXIMUM                                                         lb                             kg
+     WEIGHTS                     Max. Taxi and Ramp         93,750                       42,525
+     ...
+                                 Max. Landing               78,600                       35,652
+                                 Max. Zero Fuel             58,000                       26,308
+                                 Min. Flight Weight         48,200                       21,865
+
+II - Model BD-700-1A11 (Global 5000, Global 5000 GVFD, Global 5500) -- printed "Page 3 of 25", PDF page 3
+
+MAXIMUM                                                           lb                                  kg
+WEIGHTS                   Max. Taxi and Ramp          87,950                           39,893
+                                                      89,950 *                         40,801 *
+                                                      92,750 **                        42,071 **
+                          Max. Take-off               87,700                           39,780
+                                                      89,700 *                         40,687 *
+                                                      92,500 **                        41,957 **
+                          Max. Landing                78,600                           35,652
+                          Max. Zero Fuel              58,000                           26,308
+                          Min. Flight Weight          51,200                           23,224
+
+VI - Model BD-700-2A12 (Global 7500, Global 8000) -- printed "Page 12 of 25", PDF page 12
+
+MAXIMUM                                                       lb                          kg
+WEIGHTS                 Max. Taxi and Ramp         115,100                   52,208
+                        Max. Take-off              114,850                   52,095
+                        Max. Landing               87,600                    39,735
+                        Max. Zero Fuel             67,500                    30,617
+                        *See applicable AFM, as listed in Approved Publications, for other weight
+                        limitations and aircraft eligibility.
+
+Notes
+  * GLEX (ICAO: BD-700 Global Express / Global 6000 / Global 6500): Min. Flight Weight 48,200 lb / 21,865 kg.
+    The pack row currently carries 23,691 kg BOW from the Global 6500 page.
+  * GL5T (ICAO: BD-700 Global 5000 / Global 5500): Min. Flight Weight 51,200 lb / 23,224 kg. The pack row
+    currently carries 23,070 kg BOW (Global 5000 fact sheet), which is LOWER than this certified minimum
+    flight weight; the pack's preference order (MFW first) and "lowest published" point different ways here.
+  * GL7T (BD-700-2A12): no minimum weight printed. TCCA TCDS A-177 Issue 23 (5 Nov 2025, scanned),
+    page 18, likewise prints only Max. Ramp / Take Off / Landing / Zero Fuel for the BD-700-2A12.

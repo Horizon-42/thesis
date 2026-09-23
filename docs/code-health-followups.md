@@ -1027,3 +1027,28 @@ delete-then-build arrivals / observed writers (TD17). What is left, one item eac
     `approach/.records-staging-*` / `.records-previous-*`, or a harvest root's
     `.<ICAO>-reclassify-*` / `-merge-*` (the v5 root holds a 170 MB `.KSJC-reclassify-akrwpor_`
     from 2026-08-24). Harmless to readers (they follow rosters); disk only.
+18. **`test_write_reference_records_from_observed_tracks` fails on a clean tree** — *verified*
+    (2026-09-23, on HEAD a27dd441 in a scratch worktree). Its `_scenario()` fixture gives
+    `source={"id", "runway"}` with no `arr_airport`, and `evaluation/records.py` has required a
+    non-empty `source.arr_airport` since bb643d58 (report v7). `run_all_tests.sh` documents ONE
+    known failure; this is a second one, so the "anything beyond that is a regression" rule no longer
+    holds until the fixture is fixed.
+19. **The OpenSky registration crosswalk counts a previous airframe's registration** — *verified*.
+    `build_aircraft_identity_database` joins OpenSky rows to FAA models by registration only. A US
+    N-number (and its Mode S address) is reissued, so an old airframe's row votes for the new one:
+    BOEING 737-86N lost its B738 vote (8 of 9, below the 95 % share) because N452AC was a G200
+    before; 11 KRDU arrivals lost their type with the 2026-09-22 snapshot. Joining on
+    (registration, serial number) — both files carry the serial — would drop such stale votes, but
+    it moves every crosswalk-derived model, so it needs a measured before/after.
+20. **The identity is the registry snapshot's, not the flight date's** — *verified*. The resolver
+    reads one FAA snapshot (2026-09-22) for flights from 2026-06 onward: 617 of 70,053 FAA-typed
+    observed flights (0.9 %) are on a registration whose certificate was issued AFTER the flight
+    (36 of them among the 506 flights whose type changed with the snapshot update), and 2 airframes
+    flown in the summer are gone from the snapshot (deregistered). FAA's DEREG file plus CERT ISSUE DATE would let the resolver
+    pick the registration valid on the flight date; that changes `resolve()`'s signature (a flight
+    date), which touches flight_scenarios and the ts dataset.
+21. **The OpenAP caches are read without a schema check** — *verified by the 2026-09-23 identity
+    review*. `aircraft/query_aircraft_parameters.py:115-116` loads `aircraft_id_lookup.json` and
+    `openap_aircraft_parameters.json` without checking `schema_version`, and
+    `build_openap_aircraft_database.py` still writes the parameters file's version as a literal `1`
+    (the lookup's now comes from `identity.OPENSKY_LOOKUP_SCHEMA`).

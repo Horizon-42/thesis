@@ -1,0 +1,26 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Embraer Executive Jets, Phenom 300 "Performance" page (HTML), captured by the Internet Archive:
+http://web.archive.org/web/20120601233735/http://embraerexecutivejets.com:80/en-US/jets/phenom-300/Pages/performance.aspx
+(original URL no longer served; embraer.com today serves brochures with no weights). Verbatim text nodes.
+Designator: E55P (ICAO: EMBRAER EMB-505 Phenom 300). Figure is for the 2012 Phenom 300 (pre-300E).
+----------------------------------------------------------------------------------------------------
+Operational Weights
+Maximum Takeoff Weight:
+  17,968 lb (8,150 kg)
+Maximum Landing Weight:
+16,865 lb (7,650 kg)
+Maximum Zero Fuel Weight:
+ 13,999 lb (6,350 kg)
+*Basic Operating Weight :
+11,583 lb (5,254 kg)
+*Maximum Payload:
+2,416 lb (1,096 kg)
+*Payload - Full Fuel:
+1,142 lb (518 kg)
+Maximum Usable Fuel:
+5,353 lb (2,428 kg)
+Adopted fuel density 6,70 lb/US gal (0.803 kg/l)
+...
+*Standard configuration (weights may vary according to optional equipment installed or interior layouts)
+
+Note: later snapshots of the same page (2014, 2016, 2018) no longer print a Basic Operating Weight value.

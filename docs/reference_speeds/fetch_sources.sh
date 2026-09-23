@@ -130,6 +130,16 @@ echo "== EASA (used only where the FAA database publishes no landing weight: SF5
 get easa/EASA_TCDS_IM_A_615_SF50_Issue6.pdf 'https://www.easa.europa.eu/en/downloads/24242/en'
 
 echo
+echo "== 2026-09-23 minimum masses: EASA type certificate data sheets, Gulfstream product pages"
+get easa/EASA_TCDS_A_062_MF50_MF900_F900EX_Issue10.pdf 'https://www.easa.europa.eu/en/downloads/7401/en'
+get easa/EASA_TCDS_IM_A_085_Hawker_Issue05.pdf 'https://www.easa.europa.eu/en/downloads/7356/en'
+get easa/EASA_TCDS_IM_A_207_Cessna_500_560XL_Issue10.pdf 'https://www.easa.europa.eu/en/downloads/7244/en'
+get easa/EASA_TCDS_A_155_Falcon7X_Issue17.pdf 'https://www.easa.europa.eu/en/downloads/7288/en'
+get easa/EASA_TCDS_A_173_Falcon10_Issue1.pdf 'https://www.easa.europa.eu/en/downloads/7270/en'
+get gulfstream/gulfstream_g600.html 'https://www.gulfstream.com/en/aircraft/gulfstream-g600/'
+get gulfstream/gulfstream_g500.html 'https://www.gulfstream.com/en/aircraft/gulfstream-g500/'
+
+echo
 echo "== EUROCONTROL Aircraft Performance Database (one page per ICAO type)"
 echo "   E75L, GLF6 and PC24 legitimately come back as 'No ICAO' -- that is the database's answer,"
 echo "   not a download failure."
@@ -150,6 +160,11 @@ else
 fi
 echo
 echo "Not fetched by this script:"
+echo "  * The six FAA type certificate data sheets (faa/FAA_TCDS_*.pdf). drs.faa.gov answers a plain"
+echo "    download with HTTP 403; it serves them after GET https://drs.faa.gov/guest/login (keep the"
+echo "    cookies), then GET /api/browse/documents/summaryguiddocview/<docUniqueId> (its JSON 'id' is the"
+echo "    file id), then GET /api/content/alf/<id>. The docUniqueId is the last path element of each"
+echo "    source's URL in README.md; check the sha256 printed there."
 echo "  * OpenAP 2.4 aircraft YAML files. They ship inside the 'aeroviz' conda env at"
 echo "    site-packages/openap/data/aircraft/<type>.yml; their values and checksums are pinned in"
 echo "    docs/reference_speeds/excerpts/openap_2_4_oew.csv."

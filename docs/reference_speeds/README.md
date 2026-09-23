@@ -1,6 +1,7 @@
 # Reference approach speeds and weights - provenance pack
 
-Generated 2026-09-07. Machine-readable table: [`aircraft/reference_speeds.json`](../../aircraft/reference_speeds.json)
+Generated 2026-09-07; minimum masses extended 2026-09-23 (see [2026-09-23: type certificate data
+sheets](#2026-09-23-type-certificate-data-sheets)). Machine-readable table: [`aircraft/reference_speeds.json`](../../aircraft/reference_speeds.json)
 (schema `aircraft-reference-speeds-v1`). Verbatim backing excerpts: [`excerpts/`](excerpts/).
 
 This pack exists so that every approach speed and every mass used by the evaluation gate can be
@@ -41,17 +42,22 @@ first 40; 27 of them also carry a published minimum operating mass.
   because the manufacturers round their own conversion. The single exception is **B739**, where the
   FAA cell is wrong - see the row note.
 * `min_mass_kg` is the lowest published operating-empty / basic-operating / minimum-flight weight for
-  the designator. Preference order: manufacturer minimum flight weight, then manufacturer OEW/BOW from
-  a published document, then OpenAP 2.4. Where a manufacturer publishes both a passenger and a
+  the designator. Preference order: a certified minimum flight weight (the type certificate data sheet
+  of the FAA or EASA, or the manufacturer's own document), then a certified minimum zero fuel weight
+  where no minimum flight weight is printed, then manufacturer OEW/BOW from a published document,
+  then OpenAP 2.4. A certified floor wins even when it is above the manufacturer's BOW (GL5T): the
+  aircraft cannot fly below it at any fuel load. Where a manufacturer publishes both a passenger and a
   freighter/BCF variant, the **passenger baseline** is the recorded value and the freighter figure is
   named in the note, because the observed fleet is scheduled passenger traffic.
 * `min_mass_kind` is the manufacturer's own term for the figure, abbreviated: `MFW` minimum flight
   weight, `OEW` operating empty weight, `OWE` operational weight empty, `BOW` basic operating
   weight, `BEW` basic empty weight, `EW` empty weight, `SEW` standard empty weight (Piper),
-  `BW` base weight (Cirrus). The term is never normalised away, because the definitions differ:
-  an MFW is a certified floor, a BOW includes crew and standard items, an EW does not.
-* `null` means nothing published was found. **109 of the 172 types are in that state** - 4 of the
-  original 40 and 105 of the 132 added ones - and none of them is guessed. What was tried for each
+  `BW` base weight (Cirrus), `MZFW` minimum zero fuel weight (Hawker TCDS). The term is never
+  normalised away, because the definitions differ: an MFW and an MZFW are certified floors (the MZFW
+  excludes fuel, so every in-flight mass is at or above it), a BOW includes crew and standard items,
+  an EW does not.
+* `null` means nothing published was found. **99 of the 172 types are in that state** - 3 of the
+  original 40 and 96 of the 132 added ones - and none of them is guessed. What was tried for each
   is written down under [Types with no published minimum mass](#types-with-no-published-minimum-mass).
 * **EUROCONTROL corroboration exists only for the original 40 types.** The 132 added rows carry no
   `eurocontrol_apd` entry; the database was not queried for them, and their tables print no EC Vat
@@ -534,7 +540,7 @@ Retrieved: 2026-09-07
 Local path: `data/reference_speeds/easa/EASA_TCDS_IM_A_615_SF50_Issue6.pdf` (517,249 bytes)  
 sha256: `24bae613e45c18994d014957fdd9a5944d3230285f94f51e1f88bc57a37bb738`
 
-Read: item 11 'Maximum Certified Weights': Ramp 2740 kg (6040 lb), Takeoff 2722 kg (6000 lb), **Landing 2517 kg (5550 lb)**, Zero Fuel 2223 kg (4900 lb). Excerpt `excerpts/easa_tcds_SF50_weights.txt`. Used for ONE number: the SF50's landing weight, because the FAA row's MALW_lb cell reads 'N/A'. A TCDS publishes certified maxima only - it states no minimum weight and no operating empty weight, so it is never a minimum-mass source here.
+Read: item 11 'Maximum Certified Weights': Ramp 2740 kg (6040 lb), Takeoff 2722 kg (6000 lb), **Landing 2517 kg (5550 lb)**, Zero Fuel 2223 kg (4900 lb). Excerpt `excerpts/easa_tcds_SF50_weights.txt`. Used for ONE number: the SF50's landing weight, because the FAA row's MALW_lb cell reads 'N/A'. A TCDS publishes certified maxima only - this one states no minimum weight and no operating empty weight, so it is not a minimum-mass source here (other data sheets do print a minimum flight weight - see [2026-09-23: type certificate data sheets](#2026-09-23-type-certificate-data-sheets)).
 
 ### piper_archer_lx_2026
 
@@ -578,7 +584,150 @@ Retrieved: 2026-09-07
 Local path: `data/reference_speeds/dassault/Falcon-2000LXS-Backgrounder.pdf` (298,437 bytes)  
 sha256: `55e2f344889141b387259998fe2a205f64bb01b7c1e36dc6fca2b9f2dc8b0ab3`
 
-Read: the WEIGHTS/CAPACITIES block: Maximum Takeoff Weight 42,800 lb, **Maximum Landing Weight 39,300 lb (17,826 kg)** - the same weight as the FAA MALW - Maximum Zero-Fuel Weight 29,700 lb, Maximum Fuel Weight 16,660 lb. Excerpt `excerpts/dassault_Falcon2000LXS_weights.txt`. **No operating empty weight is published**, which is why F2TH still carries `min_mass_kg: null`. The backgrounder does print 'Approach Speed, Vref (Typical Landing Weight): 105 kias', but that is at a typical, not maximum, landing weight and so is not comparable with the FAA figure; it is recorded in the row's corroboration note and not used.
+Read: the WEIGHTS/CAPACITIES block: Maximum Takeoff Weight 42,800 lb, **Maximum Landing Weight 39,300 lb (17,826 kg)** - the same weight as the FAA MALW - Maximum Zero-Fuel Weight 29,700 lb, Maximum Fuel Weight 16,660 lb. Excerpt `excerpts/dassault_Falcon2000LXS_weights.txt`. **No operating empty weight is published** (F2TH's minimum mass comes from its type certificate data sheet since 2026-09-23, `faa_tcds_a50nm_rev16`). The backgrounder does print 'Approach Speed, Vref (Typical Landing Weight): 105 kias', but that is at a typical, not maximum, landing weight and so is not comparable with the FAA figure; it is recorded in the row's corroboration note and not used.
+
+### faa_tcds_a50nm_rev16
+
+**Type Certificate Data Sheet A50NM - Falcon 2000, Falcon 2000EX** - FAA  
+Document: TCDS A50NM Revision 16, 11/13/2025  
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID173314097720251113164846.0001  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/faa/FAA_TCDS_A50NM_Rev16.pdf` (404,442 bytes)  
+sha256: `f3952bdd89e69257e863312293fa4c3fb1480f3a031e9fed50a2b67bc6ad70be`
+
+Read: p4 Weight Limitations (Falcon 2000): Minimum flight at 14% CG 23,075 lb, **at 32.5% CG 20,100 lb**; the Falcon 2000EX section prints 23,444 / 21,149 lb. Pounds only. Types: F2TH. Excerpt `excerpts/faa_tcds_a50nm_rev16_weights.txt`.
+
+### faa_tcds_t00008wi_rev34
+
+**Type Certificate Data Sheet T00008WI - Learjet Model 45** - FAA  
+Document: TCDS T00008WI Revision 34, 06/08/2026  
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID173477243220260610144929.0001  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/faa/FAA_TCDS_T00008WI_Rev34.pdf` (240,538 bytes)  
+sha256: `00317751673bb2ec3b346131ef133c115065ceb54b271341c1810ee740ae1bed`
+
+Read: p3, I. Model 45 (Learjet 45): **Min. Flight Weight 14,000 lbs.** in all three weight columns. Pounds only. Types: LJ45. Excerpt `excerpts/faa_tcds_t00008wi_rev34_weights.txt`.
+
+### easa_tcds_a062_issue10
+
+**Type Certificate Data Sheet EASA.A.062 - Mystère-Falcon 50, Mystère-Falcon 900, Falcon 900EX** - EASA  
+Document: TCDS No. EASA.A.062, Issue 10, 15 September 2026  
+URL: https://www.easa.europa.eu/en/downloads/7401/en  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/easa/EASA_TCDS_A_062_MF50_MF900_F900EX_Issue10.pdf` (1,074,818 bytes)  
+sha256: `d42d1e5425ae4718eb1077a530b7d0c9e17c4e52520923c1ba0bf0c5a739ed5a`
+
+Read: p15 Mystère-Falcon 50: **Minimum flight 8.600 kg (18.959 lbs)** (also pp. 23-24); p32 Mystère-Falcon 900: **Minimum flight 9 390 kg (20 700 lbs)** (the Falcon 900EX tables on pp. 47 and 58 print the same). Types: FA50, F900. Excerpt `excerpts/easa_tcds_a062_issue10_weights.txt`.
+
+### faa_tcds_a46eu_rev23
+
+**Type Certificate Data Sheet A46EU - Mystère-Falcon 50, Mystère-Falcon 900, Falcon 900EX** - FAA  
+Document: TCDS A46EU Revision 23, 01/16/2026  
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID108734422520260121164435.0001  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/faa/FAA_TCDS_A46EU_Rev23.pdf` (458,071 bytes)  
+sha256: `a8c444d8dfaef39fb0e21178267facb2c7946729af6b486378b9c546d9b4dc06`
+
+Read: pp. 3, 5-6 Falcon 50: Minimum weight 18,959 lb; p8 Falcon 900 and pp. 11, 13 Falcon 900EX: Minimum weight 20,700 lb (9 390 kg). Corroboration only - the same figures as `easa_tcds_a062_issue10`. Types: FA50, F900 (corroboration). Excerpt `excerpts/faa_tcds_a46eu_rev23_weights.txt`.
+
+### easa_tcds_im_a_085_issue05
+
+**Type Certificate Data Sheet EASA.IM.A.085 - Hawker series (HS.125)** - EASA  
+Document: TCDS No. EASA.IM.A.085, Issue 05, 27 September 2018  
+URL: https://www.easa.europa.eu/en/downloads/7356/en  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/easa/EASA_TCDS_IM_A_085_Hawker_Issue05.pdf` (2,062,377 bytes)  
+sha256: `acde0ab102659c6f8ebe90e74e36c87fef776a4e7bcbea7e2a80affb1bf615b1`
+
+Read: p28 X. HS.125 Series 700A/700B: **Minimum Zero Fuel Weight 13,100 lbs 5,942 kg**; the Series 800 family (pp. 43-57) prints 14,120 lb, pp. 51 and 54 also a minimum operating weight of 16,100 lb. No minimum flight weight is printed anywhere in this data sheet. Types: H25B. Excerpt `excerpts/easa_tcds_im_a_085_issue05_weights.txt`.
+
+### faa_tcds_a3eu_rev44
+
+**Type Certificate Data Sheet A3EU - Hawker series (HS.125)** - FAA  
+Document: TCDS A3EU Revision 44, 11/06/2017  
+URL: https://drs.faa.gov/browse/excelExternalWindow/5871EF1C07FE2CFC862581D300724B70.0001  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/faa/FAA_TCDS_A3EU_Rev44.pdf` (760,759 bytes)  
+sha256: `b771840f4c82b7d83a1ca8c836666a50b46b7c63ab48242c3f9090e46a670dae`
+
+Read: p34: Minimum zero fuel weight 13,100 Lbs. Corroboration only. Types: H25B (corroboration). Excerpt `excerpts/faa_tcds_a3eu_rev44_weights.txt`.
+
+### gulfstream_g600_specs
+
+**G600 product page, Weights block** - Gulfstream Aerospace  
+Document: product page (HTML) as served 2026-09-23  
+URL: https://www.gulfstream.com/en/aircraft/gulfstream-g600/  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/gulfstream/gulfstream_g600.html` (124,582 bytes)  
+sha256: `2bf221ef14e3b9bb38768f44b8d1fc4cc0ed0968959555907dd295a0bdc82626`
+
+Read: 'Weights' block: **Basic Operating (including 4 crew) 23,088 kg / 50,900 lb**; Maximum Landing 34,836 kg / 76,800 lb (= the FAA MALW). A web page: its sha256 changes whenever the site does; the excerpt pins the numbers. Types: GA6C. Excerpt `excerpts/gulfstream_g600_specs_weights.txt`.
+
+### gulfstream_g500_specs
+
+**G500 product page, Weights block** - Gulfstream Aerospace  
+Document: product page (HTML) as served 2026-09-23  
+URL: https://www.gulfstream.com/en/aircraft/gulfstream-g500/  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/gulfstream/gulfstream_g500.html` (122,625 bytes)  
+sha256: `511b4a86108d8b980395fc6c6a68eaf9fdbd4a105f385867f530afe4c0e95715`
+
+Read: 'Weights' block: **Basic Operating (including 3 crew) 21,251 kg / 46,850 lb**; Maximum Landing 29,189 kg / 64,350 lb (= the FAA MALW). The page is the GVII-G500 (GA5C), not the G-5SP marketed as G500 (GLF5), which must not take this number. Types: GA5C. Excerpt `excerpts/gulfstream_g500_specs_weights.txt`.
+
+### faa_tcds_t00003ny_rev24
+
+**Type Certificate Data Sheet T00003NY - Bombardier BD-700-1A10, BD-700-1A11, BD-700-2A12** - FAA  
+Document: TCDS T00003NY Revision 24, 12/19/2025  
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID116658665820251219185513.0001  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/faa/FAA_TCDS_T00003NY_Rev24.pdf` (495,841 bytes)  
+sha256: `2e6cd88f2bdcb6228eecb078ba3f9ce9efc309a582709a4d0c2b5abec2965dc5`
+
+Read: p1 I - Model BD-700-1A10: **Min. Flight Weight 48,200 lb / 21,865 kg**; p3 II - Model BD-700-1A11: **Min. Flight Weight 51,200 lb / 23,224 kg**. Section VI (BD-700-2A12, GL7T) prints maximum weights only. Types: GLEX, GL5T. Excerpt `excerpts/faa_tcds_t00003ny_rev24_weights.txt`.
+
+### easa_tcds_im_a_207_issue10
+
+**Type Certificate Data Sheet EASA.IM.A.207 - Cessna 500 to 560XL** - EASA  
+Document: TCDS No. EASA.IM.A.207, Issue 10, 06 July 2022  
+URL: https://www.easa.europa.eu/en/downloads/7244/en  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/easa/EASA_TCDS_IM_A_207_Cessna_500_560XL_Issue10.pdf` (738,739 bytes)  
+sha256: `a2c8fcdc55214623d33de8d65eb653726cc237d2b8d8cb7bc466e955808a48bd`
+
+Read: p53 Model 560XL: **Minimum Weight Inflight 12,400 lb. (5,625 kg)**. Types: C56X. Excerpt `excerpts/easa_tcds_im_a_207_issue10_weights.txt`.
+
+### faa_tcds_a22ce_rev74
+
+**Type Certificate Data Sheet A22CE - Cessna 500, 550, S550, 552, 560, 560XL** - FAA  
+Document: TCDS A22CE Revision 74, 12/08/2025  
+URL: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID132119292720251209201014.0001  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/faa/FAA_TCDS_A22CE_Rev74.pdf` (276,375 bytes)  
+sha256: `006dc82b5d0c0be00ed8888b0cda08de5f1874ed5f9b3e496ff480e843476de9`
+
+Read: p22 Model 560XL S/N 560-5001 thru 560-6000: Minimum Weight In-flight 12,400 lbs.; 12,800 lbs below the later serial groups. Corroboration only. Types: C56X (corroboration). Excerpt `excerpts/faa_tcds_a22ce_rev74_weights.txt`.
+
+### easa_tcds_a155_issue17
+
+**Type Certificate Data Sheet EASA.A.155 - Dassault Falcon 7X** - EASA  
+Document: TCDS No. EASA.A.155, Issue 17, 23 July 2025  
+URL: https://www.easa.europa.eu/en/downloads/7288/en  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/easa/EASA_TCDS_A_155_Falcon7X_Issue17.pdf` (343,270 bytes)  
+sha256: `6e988bab072039a44ad53b9c6464cc25ed380ef9cf0833da708f5e97c50bc80a`
+
+Read: p16 13. Maximum Certified Masses, both columns (S/N 001-400, and M1000 = Falcon 8X from S/N 401): **Minimum flight - AFT 14696 kg (32400 lbs)**, FWD 15694 kg. Types: FA7X, FA8X. Excerpt `excerpts/easa_tcds_a155_issue17_weights.txt`.
+
+### easa_tcds_a173_issue1
+
+**Type Certificate Data Sheet EASA.A.173 - Dassault Falcon 10** - EASA  
+Document: TCDS No. EASA.A.173, Issue 1, 09 October 2009  
+URL: https://www.easa.europa.eu/en/downloads/7270/en  
+Retrieved: 2026-09-23  
+Local path: `data/reference_speeds/easa/EASA_TCDS_A_173_Falcon10_Issue1.pdf` (121,529 bytes)  
+sha256: `8bbf314c85a8e2a1f1d11c9570ece2c1b0ba46c0aa74ad4ec4011924e0bd25ca`
+
+Read: pp. 8-9 Falcon 10: **Minimum flight 4 500 kg** for every weight variant printed. The data sheet does not cover the Falcon 100 (also FA10). Types: FA10. Excerpt `excerpts/easa_tcds_a173_issue1_weights.txt`.
 
 ## Per-type table
 
@@ -602,7 +751,7 @@ every entry is the `corroboration[].note` of that type in the JSON.
 | A21N | 881 | 136 / 136 / 136 | 174,606 | 79,200 | **136 kt** @ MLW 79,200 kg -- `airbus_ac_a321_1223` 3-5-0 (A321neo) | 140 | **50,000** | OEW | `openap_2_4` | min mass = OpenAP fallback |
 | B39M | 713 | 150 / 140 / 150 | 163,900 | 74,344 | no speed published; MLW 74,343 kg (same weight as the FAA MALW, -1 kg conversion rounding) -- `boeing_737max_acap_rev_k` 2.1.5 (737-9) | 150 | **45,000** | OEW | `openap_2_4` | min mass = OpenAP fallback; dual FSB value |
 | A20N | 535 | 137 / 137 / 137 | 148,591 | 67,400 | **131.5 kt** @ MLW 67,400 kg -- `airbus_ac_a320_0624` 3-5-0 (A320neo) | 135 | **44,300** | OEW | `openap_2_4` | min mass = OpenAP fallback |
-| C56X | 314 | 116 / 116 / 116 | 18,700 | 8,482 | no speed published; MLW 8,482 kg (same weight as the FAA MALW, +0 kg conversion rounding) -- `textron_citation_ascend_product_card` product card + model page | 117 | **5,924** | BOW | `textron_citation_ascend_product_card` |  |
+| C56X | 314 | 116 / 116 / 116 | 18,700 | 8,482 | no speed published; MLW 8,482 kg (same weight as the FAA MALW, +0 kg conversion rounding) -- `textron_citation_ascend_product_card` product card + model page | 117 | **5,625** | MFW | `easa_tcds_im_a_207_issue10` | was 5,924 BOW (`textron_citation_ascend_product_card`) until 2026-09-23 |
 | B763 | 239 | 140 / 140 / 140 | 320,000 | 145,150 | no speed published; MLW 145,149 kg (same weight as the FAA MALW, -1 kg conversion rounding) -- `boeing_767_acap_rev_k` 2.1.4 (767-300ER) | 140 | **84,540** | OEW | `boeing_767_acap_rev_k` |  |
 | B752 | 178 | 137 / 137 / 137 | 198,000 | 89,811 | no speed published; MLW 89,811 kg (same weight as the FAA MALW, +0 kg conversion rounding) -- `boeing_757_acap_rev_h` 2.1.1 (757-200) | 130 | **56,748** | OEW | `boeing_757_acap_rev_h` |  |
 | E170 | 175 | 124 / 124 / 124 | 73,413 | 33,300 | none published | 130 | **21,140** | OEW | `openap_2_4` | min mass = OpenAP fallback |
@@ -611,7 +760,7 @@ every entry is the `corroboration[].note` of that type in the JSON.
 | GLF6 | 141 | 137 / 137 / 137 | 83,500 | 37,875 | none published | - | **24,000** | OEW | `openap_2_4` | min mass = OpenAP fallback; no EUROCONTROL entry |
 | A306 | 126 | 137 / 137 / 137 | 304,230 | 137,996 | no speed published; MLW 138,000 kg (same weight as the FAA MALW, +4 kg conversion rounding) -- `airbus_ac_a300_600_dec2009` chapter 2.1 | 139 | **86,727** | OEW | `airbus_ac_a300_600_dec2009` |  |
 | C25A | 119 | 114 / 114 / 114 | 11,525 | 5,228 | none published | 110 | **null** | - | none | see 'no published minimum mass' below |
-| LJ45 | 103 | 123 / 123 / 123 | 19,200 | 8,709 | none published | 140 | **null** | - | none | see 'no published minimum mass' below |
+| LJ45 | 103 | 123 / 123 / 123 | 19,200 | 8,709 | none published | 140 | **6,350** | MFW | `faa_tcds_t00008wi_rev34` |  |
 | PC24 | 75 | 107 / 107 / 107 | 16,900 | 7,666 | no speed published; MLW 7,865 kg (FAA MALW is 199 kg lower) -- `pilatus_pc24_factsheet` factsheet WEIGHTS | - | **5,244** | BOW | `pilatus_pc24_factsheet` | no EUROCONTROL entry |
 | A333 | 71 | 137 / 137 / 137 | 412,264 | 187,000 | none published | 140 | **122,780** | OEW | `openap_2_4` | min mass = OpenAP fallback |
 | C172 | 63 | 62 / 62 / 62 | 2,450 | 1,111 | no speed published; MLW 1,157 kg (FAA MALW is 46 kg lower) -- `textron_skyhawk_product_card` product card + model page | 65 | **762** | BEW | `textron_skyhawk_product_card` |  |
@@ -619,7 +768,7 @@ every entry is the `corroboration[].note` of that type in the JSON.
 | B788 | 60 | 144 / 140 / 144 | 380,000 | 172,365 | no speed published; MLW 172,365 kg (same weight as the FAA MALW, +0 kg conversion rounding) -- `boeing_787_acap_rev_q` 2.1.1 (787-8) | 140 | **119,000** | OEW | `openap_2_4` | min mass = OpenAP fallback; dual FSB value |
 | CRJ2 | 43 | 141 / 141 / 141 | 44,700 | 20,276 | no speed published; MLW 21,319 kg (FAA MALW is 1,043 kg lower) -- `bombardier_crj200_apm_r8` 00-02-01 Table 1 | 140 | **13,835** | OWE | `bombardier_crj200_apm_r8` |  |
 | C525 | 35 | 108 / 108 / 108 | 9,900 | 4,491 | none published | 110 | **null** | - | none | see 'no published minimum mass' below |
-| GL5T | 35 | 128 / 128 / 128 | 78,600 | 35,652 | no speed published; MLW 35,652 kg (same weight as the FAA MALW, +0 kg conversion rounding) -- `bombardier_global5000_factsheet` fact sheet Weights | 122 | **23,070** | BOW | `bombardier_global5000_factsheet` |  |
+| GL5T | 35 | 128 / 128 / 128 | 78,600 | 35,652 | no speed published; MLW 35,652 kg (same weight as the FAA MALW, +0 kg conversion rounding) -- `bombardier_global5000_factsheet` fact sheet Weights | 122 | **23,224** | MFW | `faa_tcds_t00003ny_rev24` | was 23,070 BOW (`bombardier_global5000_factsheet`) until 2026-09-23; the certified floor is higher |
 | B789 | 33 | 144 / 140 / 144 | 425,000 | 192,777 | no speed published; MLW 192,776 kg (same weight as the FAA MALW, -1 kg conversion rounding) -- `boeing_787_acap_rev_q` 2.1.2 (787-9) | 150 | **128,000** | OEW | `openap_2_4` | min mass = OpenAP fallback; dual FSB value |
 | C550 | 33 | 105 / 105 / 105 | 13,500 | 6,123 | none published | 110 | **3,655** | OEW | `openap_2_4` | min mass = OpenAP fallback |
 | A332 | 27 | 136 / 136 / 136 | 401,241 | 182,000 | none published | 140 | **120,200** | OEW | `openap_2_4` | min mass = OpenAP fallback |
@@ -658,13 +807,13 @@ these types). `rows` is again the observed arrival count in the cohort.
 | C750 | 157 | 131 / 131 / 131 | 31,800 | 14,424 | none published | **null** | - | none | see 'no published minimum mass' |
 | B350 | 134 | 107 / 107 / 107 | 15,000 | 6,804 | none published | **4,516** | BOW | `textron_king_air_360_product_card` |  |
 | G280 | 127 | 125 / 125 / 125 | 32,700 | 14,832 | none published | **null** | - | none | see 'no published minimum mass' |
-| H25B | 126 | 137 / 137 / 137 | 23,350 | 10,591 | none published | **null** | - | none | see 'no published minimum mass' |
+| H25B | 126 | 137 / 137 / 137 | 23,350 | 10,591 | none published | **5,942** | MZFW | `easa_tcds_im_a_085_issue05` | MZFW: no minimum flight weight is printed |
 | C208 | 121 | 79 / 79 / 79 | 7,800 | 3,538 | none published | **2,145** | EW | `textron_caravan_product_card` |  |
 | GLF4 | 117 | 144 / 144 / 144 | 66,000 | 29,937 | none published | **null** | - | none | see 'no published minimum mass' |
 | C700 | 115 | 121 / 121 / 121 | 33,500 | 15,195 | none published | **10,705** | BOW | `textron_citation_longitude_product_card` |  |
-| GLEX | 111 | 131 / 131 / 131 | 78,600 | 35,652 | MLW 35,652 kg -- `bombardier_global6500_specs` page Specifications/Weights | **23,691** | BOW | `bombardier_global6500_specs` |  |
+| GLEX | 111 | 131 / 131 / 131 | 78,600 | 35,652 | MLW 35,652 kg -- `bombardier_global6500_specs` page Specifications/Weights | **21,865** | MFW | `faa_tcds_t00003ny_rev24` | was 23,691 BOW (`bombardier_global6500_specs`) until 2026-09-23 |
 | C560 | 105 | 103 / 103 / 103 | 15,200 | 6,895 | none published | **null** | - | none | see 'no published minimum mass' |
-| F2TH | 98 | 130 / 130 / 130 | 39,300 | 17,826 | MLW 17,826 kg -- `dassault_falcon2000lxs_backgrounder` backgrounder WEIGHTS | **null** | - | none | see 'no published minimum mass' |
+| F2TH | 98 | 130 / 130 / 130 | 39,300 | 17,826 | MLW 17,826 kg -- `dassault_falcon2000lxs_backgrounder` backgrounder WEIGHTS | **9,117** | MFW | `faa_tcds_a50nm_rev16` |  |
 | BE20 | 88 | 107 / 107 / 107 | 12,500 | 5,670 | none published | **4,005** | BOW | `textron_king_air_260_product_card` |  |
 | SR22 | 70 | 78 / 78 / 78 | 3,400 | 1,542 | none published | **1,030** | BW | `cirrus_sr_series_specs` | **FAA MALW anomaly**, see row note |
 | LJ60 | 59 | 125 / 125 / 125 | 19,500 | 8,845 | none published | **null** | - | none | see 'no published minimum mass' |
@@ -673,7 +822,7 @@ these types). `rows` is again the observed arrival count in the cohort.
 | BE36 | 47 | 77 / 77 / 77 | 3,650 | 1,656 | none published | **1,182** | BEW | `textron_bonanza_product_card` |  |
 | E550 | 47 | 113 / 113 / 113 | 34,524 | 15,660 | none published | **null** | - | none | see 'no published minimum mass' |
 | GALX | 46 | 130 / 130 / 130 | 30,000 | 13,608 | none published | **null** | - | none | see 'no published minimum mass' |
-| F900 | 46 | 130 / 130 / 130 | 44,500 | 20,185 | none published | **null** | - | none | see 'no published minimum mass' |
+| F900 | 46 | 130 / 130 / 130 | 44,500 | 20,185 | none published | **9,390** | MFW | `easa_tcds_a062_issue10` |  |
 | BE30 | 44 | 107 / 107 / 107 | 14,000 | 6,350 | none published | **null** | - | none | see 'no published minimum mass' |
 | DA40 | 40 | 77 / 77 / 77 | 2,407 | 1,092 | none published | **903** | EW | `diamond_da40ng_folder_2025` |  |
 | SF50 | 40 | 87 / 87 / 87 | N/A (rejected) | 2,517 | no landing weight published -- `cirrus_vision_jet_specs` page Specifications | **1,610** | BEW | `cirrus_vision_jet_specs` | **FAA MALW anomaly**, see row note |
@@ -683,7 +832,7 @@ these types). `rows` is again the observed arrival count in the cohort.
 | BE58 | 38 | 95 / 95 / 95 | 5,400 | 2,449 | none published | **1,798** | BEW | `textron_baron_product_card` |  |
 | T210 | 38 | 73 / 73 / 73 | 3,800 | 1,724 | none published | **null** | - | none | see 'no published minimum mass' |
 | AT43 | 37 | 104 / 104 / 104 | 36,160 | 16,402 | none published | **null** | - | none | see 'no published minimum mass' |
-| GA6C | 31 | 129 / 129 / 129 | 76,800 | 34,836 | none published | **null** | - | none | see 'no published minimum mass' |
+| GA6C | 31 | 129 / 129 / 129 | 76,800 | 34,836 | none published | **23,088** | BOW | `gulfstream_g600_specs` |  |
 | PRM1 | 29 | 120 / 120 / 120 | 11,600 | 5,262 | none published | **null** | - | none | see 'no published minimum mass' |
 | HDJT | 28 | 111 / 111 / 111 | 9,859 | 4,472 | none published | **null** | - | none | **FAA MALW anomaly**, see row note; see 'no published minimum mass' |
 | C650 | 27 | 126 / 126 / 126 | 17,000 | 7,711 | none published | **null** | - | none | see 'no published minimum mass' |
@@ -694,7 +843,7 @@ these types). `rows` is again the observed arrival count in the cohort.
 | P46T | 23 | 75 / 75 / 75 | 4,850 | 2,200 | none published | **1,559** | SEW | `piper_m500_2026` |  |
 | E50P | 21 | 100 / 100 / 100 | 9,766 | 4,430 | none published | **null** | - | none | see 'no published minimum mass' |
 | LJ31 | 21 | 120 / 120 / 120 | 15,300 | 6,940 | none published | **null** | - | none | see 'no published minimum mass' |
-| FA50 | 20 | 124 / 124 / 124 | 35,715 | 16,200 | none published | **null** | - | none | see 'no published minimum mass' |
+| FA50 | 20 | 124 / 124 / 124 | 35,715 | 16,200 | none published | **8,600** | MFW | `easa_tcds_a062_issue10` |  |
 | P180 | 20 | 121 / 121 / 121 | 11,500 | 5,216 | none published | **null** | - | none | see 'no published minimum mass' |
 | C510 | 20 | 105 / 105 / 105 | 8,000 | 3,629 | none published | **null** | - | none | see 'no published minimum mass' |
 | BT36 | 20 | 73 / 73 / 73 | 3,850 | 1,746 | none published | **null** | - | none | see 'no published minimum mass' |
@@ -703,7 +852,7 @@ these types). `rows` is again the observed arrival count in the cohort.
 | PA38 | 16 | 60 / 60 / 60 | 1,670 | 757 | none published | **null** | - | none | see 'no published minimum mass' |
 | E35L | 15 | 124 / 124 / 124 | 40,785 | 18,500 | none published | **null** | - | none | see 'no published minimum mass' |
 | P32R | 15 | 80 / 80 / 80 | 3,600 | 1,633 | none published | **null** | - | none | see 'no published minimum mass' |
-| FA7X | 15 | 104 / 104 / 104 | 62,400 | 28,304 | none published | **null** | - | none | see 'no published minimum mass' |
+| FA7X | 15 | 104 / 104 / 104 | 62,400 | 28,304 | none published | **14,696** | MFW | `easa_tcds_a155_issue17` |  |
 | A30B | 14 | 137 / 137 / 137 | 299,829 | 136,000 | none published | **null** | - | none | see 'no published minimum mass' |
 | AA5 | 14 | 69 / 69 / 69 | 2,200 | 998 | none published | **null** | - | none | see 'no published minimum mass' |
 | C150 | 14 | 55 / 55 / 55 | 1,600 | 726 | none published | **null** | - | none | see 'no published minimum mass' |
@@ -715,7 +864,7 @@ these types). `rows` is again the observed arrival count in the cohort.
 | C414 | 11 | 95 / 95 / 95 | 6,750 | 3,062 | none published | **null** | - | none | see 'no published minimum mass' |
 | SR20 | 10 | 74 / 74 / 74 | 2,900 | 1,315 | none published | **947** | BW | `cirrus_sr_series_specs` | **FAA MALW anomaly**, see row note |
 | C340 | 10 | 94 / 94 / 94 | 5,990 | 2,717 | none published | **null** | - | none | see 'no published minimum mass' |
-| GA5C | 10 | 132 / 132 / 132 | 64,350 | 29,189 | none published | **null** | - | none | see 'no published minimum mass' |
+| GA5C | 10 | 132 / 132 / 132 | 64,350 | 29,189 | none published | **21,251** | BOW | `gulfstream_g500_specs` |  |
 | B78X | 10 | 149 / 149 / 149 | 445,000 | 201,849 | none published | **null** | - | none | see 'no published minimum mass' |
 | DA42 | 9 | 88 / 88 / 88 | 3,748 | 1,700 | none published | **null** | - | none | see 'no published minimum mass' |
 | C210 | 9 | 85 / 85 / 85 | 3,800 | 1,724 | none published | **null** | - | none | see 'no published minimum mass' |
@@ -733,7 +882,7 @@ these types). `rows` is again the observed arrival count in the cohort.
 | HA4T | 5 | 128 / 128 / 128 | 33,500 | 15,195 | none published | **null** | - | none | see 'no published minimum mass' |
 | H25C | 4 | 132 / 132 / 132 | 25,000 | 11,340 | none published | **null** | - | none | see 'no published minimum mass' |
 | SB20 | 4 | 122 / 122 / 122 | 48,501 | 22,000 | none published | **null** | - | none | see 'no published minimum mass' |
-| FA10 | 3 | 107 / 107 / 107 | 17,640 | 8,001 | none published | **null** | - | none | see 'no published minimum mass' |
+| FA10 | 3 | 107 / 107 / 107 | 17,640 | 8,001 | none published | **4,500** | MFW | `easa_tcds_a173_issue1` | Falcon 10 only |
 | B190 | 2 | 121 / 109 / 121 | 16,000 | 7,257 | none published | **null** | - | none | dual FSB value; see 'no published minimum mass' |
 | C180 | 2 | 64 / 64 / 64 | 2,800 | 1,270 | none published | **null** | - | none | see 'no published minimum mass' |
 | BE9T | 2 | 108 / 108 / 108 | 10,950 | 4,967 | none published | **null** | - | none | see 'no published minimum mass' |
@@ -768,7 +917,7 @@ these types). `rows` is again the observed arrival count in the cohort.
 | MU2 | 1 | 105 / 105 / 105 | 11,025 | 5,001 | none published | **null** | - | none | see 'no published minimum mass' |
 | MD83 | 1 | 144 / 144 / 144 | 139,500 | 63,276 | none published | **null** | - | none | see 'no published minimum mass' |
 | WW24 | 1 | 129 / 129 / 129 | 19,000 | 8,618 | none published | **null** | - | none | see 'no published minimum mass' |
-| FA8X | 1 | 106 / 106 / 106 | 62,400 | 28,304 | none published | **null** | - | none | see 'no published minimum mass' |
+| FA8X | 1 | 106 / 106 / 106 | 62,400 | 28,304 | none published | **14,696** | MFW | `easa_tcds_a155_issue17` |  |
 | MD88 | 1 | 130 / 130 / 130 | 130,000 | 58,967 | none published | **null** | - | none | see 'no published minimum mass' |
 | B722 | 1 | 133 / 133 / 133 | 150,000 | 68,039 | none published | **null** | - | none | see 'no published minimum mass' |
 | C441 | 1 | 98 / 98 / 98 | 9,360 | 4,246 | none published | **null** | - | none | see 'no published minimum mass' |
@@ -839,29 +988,78 @@ C82T/C82S, T206, G200). The two largest, **C82T** (23 rows, Cessna Turbo Skylane
 (12 rows, Turbo Stationair HD), do have current Textron product cards - the missing piece is the
 FAA *speed*, not the mass, so the cards were not downloaded.
 
+## 2026-09-23: type certificate data sheets
+
+The first pass (2026-09-07) searched manufacturer documents only. The second pass, on 2026-09-23,
+searched **authority documents first** for the null types, ranked by blocked observed flights: FAA and
+EASA type certificate data sheets (TCDS), then TCCA/ANAC data sheets, then manufacturer pages served
+today. Acceptance rule (the user's, "better missing than wrong"): an FAA/EASA TCDS printing a weight
+usable as a minimum, a manufacturer publication served from its own domain today, or another civil
+aviation authority's document - no third-party compilations, no OpenAP, no derivations. The full search
+record, including every dead end, is [`2026-09-23_min_mass_search.md`](2026-09-23_min_mass_search.md);
+every figure below was re-read from the downloaded document (sha256 checked) before it was written.
+
+| type | minimum mass kg | kind | source | replaces |
+|---|---:|---|---|---|
+| F2TH | 9,117 | MFW | `faa_tcds_a50nm_rev16` (20,100 lb, Falcon 2000 at aft CG) | null |
+| LJ45 | 6,350 | MFW | `faa_tcds_t00008wi_rev34` (14,000 lb) | null |
+| F900 | 9,390 | MFW | `easa_tcds_a062_issue10` | null |
+| FA50 | 8,600 | MFW | `easa_tcds_a062_issue10` | null |
+| FA7X, FA8X | 14,696 | MFW | `easa_tcds_a155_issue17` (aft CG) | null |
+| FA10 | 4,500 | MFW | `easa_tcds_a173_issue1` (Falcon 10 only) | null |
+| H25B | 5,942 | MZFW | `easa_tcds_im_a_085_issue05` (Series 700A/B) | null |
+| GA6C | 23,088 | BOW | `gulfstream_g600_specs` | null |
+| GA5C | 21,251 | BOW | `gulfstream_g500_specs` | null |
+| GLEX | 21,865 | MFW | `faa_tcds_t00003ny_rev24` | 23,691 BOW |
+| GL5T | 23,224 | MFW | `faa_tcds_t00003ny_rev24` | 23,070 BOW |
+| C56X | 5,625 | MFW | `easa_tcds_im_a_207_issue10` | 5,924 BOW |
+
+GLEX, GL5T and C56X already had a manufacturer BOW; the certified minimum flight weight replaces it
+under the preference order above (for GL5T the certified floor is 154 kg ABOVE the BOW).
+
+**Found, not accepted - the manufacturer's own former pages, preserved only by the Internet Archive**
+(stored apart under `data/reference_speeds/_archived/`, excerpts `excerpts/archived_*_weights.txt`).
+Each figure covers one variant at one date and is not shown to be the lowest for the designator. They
+stay out of the table until the user decides on archived sources:
+
+| type | figure | kind | variant, date |
+|---|---|---|---|
+| E55P | 11,583 lb (5,254 kg) | BOW | Phenom 300, 2012 page |
+| CL30 | 23,700 lb (10,750 kg); a 2013 sheet says 23,850 lb | typical BOW | Challenger 300, 2010 fact sheet |
+| C750 | 22,131 lb (10,038 kg) | BOW | Citation X+ only, 2017 card |
+| C680 | 18,235 lb (8,271 kg) | BOW | Sovereign+ only, 2017 card |
+| GLF5 | 48,300 lb (21,909 kg) | BOW incl. 4 crew | G550 only, 2019 page |
+| G280 | 24,150 lb (10,954 kg) | BOW incl. 2 crew | G280, 2019 page |
+| LJ60 | 14,896 lb (6,757 kg) | typical BOW | Learjet 60 XR only, 2012 fact sheet |
+| BE9L | 7,265 lb (3,295 kg) | BOW (1 pilot) | King Air C90GTx only, 2017 card |
+| C510 | 5,600 lb (2,540 kg) | BOW | Citation Mustang, 2017 card |
+| E50P | 7,132 lb (3,235 kg) | BOW | Phenom 100, 2012 page |
+
+For 24 more null types every data sheet reached prints maximum weights only (per-type list in the
+search record).
+
 ## Types with no published minimum mass
 
-109 of the 172 types carry `min_mass_kg: null`. Nothing is guessed for any of them; what was tried
+99 of the 172 types carry `min_mass_kg: null`. Nothing is guessed for any of them; what was tried
 is recorded here.
 
 ### The original 40 types
 
-Four of them, recorded when the pack was first built:
+Three of them (LJ45 was closed on 2026-09-23 from its type certificate data sheet):
 
 * **GLF5** (147 rows) - no published figure found. gulfstream.com no longer serves a Gulfstream V / G550 aircraft page (HTTP 403 AccessDenied, checked 2026-09-07), Gulfstream airport planning manuals sit behind the MyGulfstream login, and OpenAP 2.4 has no glf5.yml. Third-party compilations quote 48,300 lb but they are not manufacturer publications, so nothing is recorded here
 * **C25A** (119 rows) - no published figure found. Textron Aviation has retired the Citation CJ2 / Model 525A product page (cessna.txtav.com/en/citation/cj2 returns HTTP 404, checked 2026-09-07) and OpenAP 2.4 has no c25a.yml
-* **LJ45** (103 rows) - no published figure found. Bombardier's public document index (RACSDocument.nsf) carries only CRJ and Dash 8 manuals, there is no Learjet 45 airport planning manual or spec sheet on a Bombardier domain, and OpenAP 2.4 has no lj45.yml
 * **C525** (35 rows) - no published figure found. Textron Aviation has retired the CitationJet / CJ1 (Model 525) product page (cessna.txtav.com/en/citation/cj1 returns HTTP 404, checked 2026-09-07) and OpenAP 2.4 has no c525.yml
 
 ### The 132 added types
 
-105 of the added rows have no published minimum mass. **OpenAP is not available as a fallback for a
+96 of the added rows have no published minimum mass. **OpenAP is not available as a fallback for a
 single one of them** (see Conventions), so every one of these is a manufacturer-document search that
 came back empty.
 
 Why so many: the FAA database is a *fleet* database, so most of these designators are airframes that
-left production years or decades ago - Citation V / X / III-VI-VII / Mustang / 425, Hawker 800 and
-Premier 1, Learjet 31/35/60, King Air 90 and 300, Falcon 50/900/7X/10/20, Gulfstream III/IV/G150/G200,
+left production years or decades ago - Citation V / X / III-VI-VII / Mustang / 425, Premier 1,
+Learjet 31/35/60, King Air 90 and 300, Falcon 20, Gulfstream III/IV/G150/G200,
 ATR 42-300, Beechjet 400, TBM 700, Mooney M20C, Cessna T210/340/414/421/441. Manufacturers do not host
 spec sheets for retired models, and the airport planning manuals that would have the weights sit behind
 customer logins. The pack does not substitute a third-party compilation for them.
@@ -878,20 +1076,18 @@ document this session could not reach:
 | C680 | 167 | Textron has retired the Sovereign product card (`cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_sovereign_product_card.pdf` and the `sovereign_` variant both HTTP 404) |
 | C750 | 157 | Textron has retired the Citation X card (`citation_x_product_card.pdf` HTTP 404) |
 | G280 | 127 | gulfstream.com serves a 1,103-byte bot interstitial for `/en/aircraft/gulfstream-g280/` (HTTP 200 but no content), and `/en/newsroom/press-kit/` returns HTTP 403. No Gulfstream document was reachable for any of its six designators |
-| H25B | 126 | Hawker 800 out of production; Textron Aviation supports the fleet but publishes no card |
 | GLF4 | 117 | as G280 |
 | C560 | 105 | Citation V/Ultra/Encore out of production; no card |
-| F2TH | 98 | the Falcon 2000LXS backgrounder **is** in the pack and gives MTOW/MLW/MZFW/max fuel - but Dassault publishes no operating empty weight in it, and the same is true of the 900/7X/8X sheets in that series |
 | E550 | 47 | as E545 |
-| GA6C | 31 | as G280 |
 | HDJT | 28 | hondajet.com returns HTTP 403 to every path tried, including the site root |
 | GL7T | 24 | `bombardier.com/en/aircraft/global-7500` now redirects to the Global 8000 page, whose HTML contains the word "weight" zero times; `bombardier.com/en/media/media-library/global-7500` returns HTTP 403 |
 | E50P | 21 | as E55P - the Phenom 100EX brochure publishes no weights |
 | P180 | 20 | piaggioaerospace.it renders its aircraft pages from JavaScript; `/en/aviation/p180-avanti-evo` and `/en/p180-avanti-evo` both return HTTP 404 and the site index exposes no Avanti brochure PDF |
 | P28R | 23 | `piper.com/model/arrow/` still resolves but carries no weight block (the Arrow is no longer in the price list) |
 
-The remaining 88 null rows are all out-of-production designators; 71 of them have fewer than 20
-observed records each (369 rows in total) and no document was sought for them.
+The remaining 82 null rows are all out-of-production designators; 67 of them have fewer than 20
+observed records each (340 rows in total). No document was sought for those on 2026-09-07; the
+2026-09-23 search (above) covered the ones among the 40 most-flown null types.
 
 ## Where the three sources disagree by more than 5 kt
 

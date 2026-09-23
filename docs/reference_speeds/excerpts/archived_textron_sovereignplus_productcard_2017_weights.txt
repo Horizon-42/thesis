@@ -1,0 +1,10 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Textron Aviation, Citation Sovereign+ product card (PDF), captured by the Internet Archive:
+http://web.archive.org/web/20170413004647id_/http://cessna.txtav.com:80/-/media/cessna/files/citation/sovereignplus/sovereignplus_productcard.ashx
+(live URL now HTTP 404). Verbatim (pdftotext -layout), WEIGHTS block.
+Designator: C680 (ICAO: CESSNA 680 Citation Sovereign). The card is for the Sovereign+ (a Model 680 variant);
+no figure for the original Sovereign was found, so this is not shown to be the designator's lowest.
+----------------------------------------------------------------------------------------------------
+ WEIGHTS
+ Max Takeoff Weight                           30,775 lb        (13,959 kg)
+ Basic Oper Weight                            18,235 lb          (8,271 kg)

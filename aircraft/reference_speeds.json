@@ -472,6 +472,136 @@
    "sha256": "55e2f344889141b387259998fe2a205f64bb01b7c1e36dc6fca2b9f2dc8b0ab3",
    "local_path": "data/reference_speeds/dassault/Falcon-2000LXS-Backgrounder.pdf",
    "readme": "docs/reference_speeds/README.md#dassault_falcon2000lxs_backgrounder"
+  },
+  "faa_tcds_a50nm_rev16": {
+   "title": "Type Certificate Data Sheet A50NM - Falcon 2000, Falcon 2000EX",
+   "publisher": "FAA",
+   "document": "TCDS A50NM Revision 16, 11/13/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID173314097720251113164846.0001",
+   "retrieved": "2026-09-23",
+   "sha256": "f3952bdd89e69257e863312293fa4c3fb1480f3a031e9fed50a2b67bc6ad70be",
+   "local_path": "data/reference_speeds/faa/FAA_TCDS_A50NM_Rev16.pdf",
+   "readme": "docs/reference_speeds/README.md#faa_tcds_a50nm_rev16"
+  },
+  "faa_tcds_t00008wi_rev34": {
+   "title": "Type Certificate Data Sheet T00008WI - Learjet Model 45",
+   "publisher": "FAA",
+   "document": "TCDS T00008WI Revision 34, 06/08/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID173477243220260610144929.0001",
+   "retrieved": "2026-09-23",
+   "sha256": "00317751673bb2ec3b346131ef133c115065ceb54b271341c1810ee740ae1bed",
+   "local_path": "data/reference_speeds/faa/FAA_TCDS_T00008WI_Rev34.pdf",
+   "readme": "docs/reference_speeds/README.md#faa_tcds_t00008wi_rev34"
+  },
+  "easa_tcds_a062_issue10": {
+   "title": "Type Certificate Data Sheet EASA.A.062 - Mystère-Falcon 50, Mystère-Falcon 900, Falcon 900EX",
+   "publisher": "EASA",
+   "document": "TCDS No. EASA.A.062, Issue 10, 15 September 2026",
+   "url": "https://www.easa.europa.eu/en/downloads/7401/en",
+   "retrieved": "2026-09-23",
+   "sha256": "d42d1e5425ae4718eb1077a530b7d0c9e17c4e52520923c1ba0bf0c5a739ed5a",
+   "local_path": "data/reference_speeds/easa/EASA_TCDS_A_062_MF50_MF900_F900EX_Issue10.pdf",
+   "readme": "docs/reference_speeds/README.md#easa_tcds_a062_issue10"
+  },
+  "faa_tcds_a46eu_rev23": {
+   "title": "Type Certificate Data Sheet A46EU - Mystère-Falcon 50, Mystère-Falcon 900, Falcon 900EX",
+   "publisher": "FAA",
+   "document": "TCDS A46EU Revision 23, 01/16/2026",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID108734422520260121164435.0001",
+   "retrieved": "2026-09-23",
+   "sha256": "a8c444d8dfaef39fb0e21178267facb2c7946729af6b486378b9c546d9b4dc06",
+   "local_path": "data/reference_speeds/faa/FAA_TCDS_A46EU_Rev23.pdf",
+   "readme": "docs/reference_speeds/README.md#faa_tcds_a46eu_rev23"
+  },
+  "easa_tcds_im_a_085_issue05": {
+   "title": "Type Certificate Data Sheet EASA.IM.A.085 - Hawker series (HS.125)",
+   "publisher": "EASA",
+   "document": "TCDS No. EASA.IM.A.085, Issue 05, 27 September 2018",
+   "url": "https://www.easa.europa.eu/en/downloads/7356/en",
+   "retrieved": "2026-09-23",
+   "sha256": "acde0ab102659c6f8ebe90e74e36c87fef776a4e7bcbea7e2a80affb1bf615b1",
+   "local_path": "data/reference_speeds/easa/EASA_TCDS_IM_A_085_Hawker_Issue05.pdf",
+   "readme": "docs/reference_speeds/README.md#easa_tcds_im_a_085_issue05"
+  },
+  "faa_tcds_a3eu_rev44": {
+   "title": "Type Certificate Data Sheet A3EU - Hawker series (HS.125)",
+   "publisher": "FAA",
+   "document": "TCDS A3EU Revision 44, 11/06/2017",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/5871EF1C07FE2CFC862581D300724B70.0001",
+   "retrieved": "2026-09-23",
+   "sha256": "b771840f4c82b7d83a1ca8c836666a50b46b7c63ab48242c3f9090e46a670dae",
+   "local_path": "data/reference_speeds/faa/FAA_TCDS_A3EU_Rev44.pdf",
+   "readme": "docs/reference_speeds/README.md#faa_tcds_a3eu_rev44"
+  },
+  "gulfstream_g600_specs": {
+   "title": "G600 product page, Weights block",
+   "publisher": "Gulfstream Aerospace",
+   "document": "product page (HTML) as served 2026-09-23",
+   "url": "https://www.gulfstream.com/en/aircraft/gulfstream-g600/",
+   "retrieved": "2026-09-23",
+   "sha256": "2bf221ef14e3b9bb38768f44b8d1fc4cc0ed0968959555907dd295a0bdc82626",
+   "local_path": "data/reference_speeds/gulfstream/gulfstream_g600.html",
+   "readme": "docs/reference_speeds/README.md#gulfstream_g600_specs"
+  },
+  "gulfstream_g500_specs": {
+   "title": "G500 product page, Weights block",
+   "publisher": "Gulfstream Aerospace",
+   "document": "product page (HTML) as served 2026-09-23",
+   "url": "https://www.gulfstream.com/en/aircraft/gulfstream-g500/",
+   "retrieved": "2026-09-23",
+   "sha256": "511b4a86108d8b980395fc6c6a68eaf9fdbd4a105f385867f530afe4c0e95715",
+   "local_path": "data/reference_speeds/gulfstream/gulfstream_g500.html",
+   "readme": "docs/reference_speeds/README.md#gulfstream_g500_specs"
+  },
+  "faa_tcds_t00003ny_rev24": {
+   "title": "Type Certificate Data Sheet T00003NY - Bombardier BD-700-1A10, BD-700-1A11, BD-700-2A12",
+   "publisher": "FAA",
+   "document": "TCDS T00003NY Revision 24, 12/19/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID116658665820251219185513.0001",
+   "retrieved": "2026-09-23",
+   "sha256": "2e6cd88f2bdcb6228eecb078ba3f9ce9efc309a582709a4d0c2b5abec2965dc5",
+   "local_path": "data/reference_speeds/faa/FAA_TCDS_T00003NY_Rev24.pdf",
+   "readme": "docs/reference_speeds/README.md#faa_tcds_t00003ny_rev24"
+  },
+  "easa_tcds_im_a_207_issue10": {
+   "title": "Type Certificate Data Sheet EASA.IM.A.207 - Cessna 500 to 560XL",
+   "publisher": "EASA",
+   "document": "TCDS No. EASA.IM.A.207, Issue 10, 06 July 2022",
+   "url": "https://www.easa.europa.eu/en/downloads/7244/en",
+   "retrieved": "2026-09-23",
+   "sha256": "a2c8fcdc55214623d33de8d65eb653726cc237d2b8d8cb7bc466e955808a48bd",
+   "local_path": "data/reference_speeds/easa/EASA_TCDS_IM_A_207_Cessna_500_560XL_Issue10.pdf",
+   "readme": "docs/reference_speeds/README.md#easa_tcds_im_a_207_issue10"
+  },
+  "faa_tcds_a22ce_rev74": {
+   "title": "Type Certificate Data Sheet A22CE - Cessna 500, 550, S550, 552, 560, 560XL",
+   "publisher": "FAA",
+   "document": "TCDS A22CE Revision 74, 12/08/2025",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID132119292720251209201014.0001",
+   "retrieved": "2026-09-23",
+   "sha256": "006dc82b5d0c0be00ed8888b0cda08de5f1874ed5f9b3e496ff480e843476de9",
+   "local_path": "data/reference_speeds/faa/FAA_TCDS_A22CE_Rev74.pdf",
+   "readme": "docs/reference_speeds/README.md#faa_tcds_a22ce_rev74"
+  },
+  "easa_tcds_a155_issue17": {
+   "title": "Type Certificate Data Sheet EASA.A.155 - Dassault Falcon 7X",
+   "publisher": "EASA",
+   "document": "TCDS No. EASA.A.155, Issue 17, 23 July 2025",
+   "url": "https://www.easa.europa.eu/en/downloads/7288/en",
+   "retrieved": "2026-09-23",
+   "sha256": "6e988bab072039a44ad53b9c6464cc25ed380ef9cf0833da708f5e97c50bc80a",
+   "local_path": "data/reference_speeds/easa/EASA_TCDS_A_155_Falcon7X_Issue17.pdf",
+   "readme": "docs/reference_speeds/README.md#easa_tcds_a155_issue17"
+  },
+  "easa_tcds_a173_issue1": {
+   "title": "Type Certificate Data Sheet EASA.A.173 - Dassault Falcon 10",
+   "publisher": "EASA",
+   "document": "TCDS No. EASA.A.173, Issue 1, 09 October 2009",
+   "url": "https://www.easa.europa.eu/en/downloads/7270/en",
+   "retrieved": "2026-09-23",
+   "sha256": "8bbf314c85a8e2a1f1d11c9570ece2c1b0ba46c0aa74ad4ec4011924e0bd25ca",
+   "local_path": "data/reference_speeds/easa/EASA_TCDS_A_173_Falcon10_Issue1.pdf",
+   "readme": "docs/reference_speeds/README.md#easa_tcds_a173_issue1"
   }
  },
  "types": {
@@ -791,10 +921,10 @@
    "malw_kg": 8482,
    "malw_source": "faa_acd_2024_10",
    "malw_note": "MALW_lb 18,700",
-   "min_mass_kg": 5924,
-   "min_mass_kind": "BOW",
-   "min_mass_source": "textron_citation_ascend_product_card",
-   "min_mass_note": "WEIGHTS block: Basic Operating Weight 13,060 lb. The card covers the current Model 560XL (Citation Ascend); Excel/XLS/XLS+ share the C56X designator",
+   "min_mass_kg": 5625,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "easa_tcds_im_a_207_issue10",
+   "min_mass_note": "p53 Model 560XL: Minimum Weight Inflight 12,400 lb. (5,625 kg). Replaces the Citation Ascend card's basic operating weight 13,060 lb (5,924 kg) under the MFW-first preference order",
    "corroboration": [
     {
      "source": "eurocontrol_apd",
@@ -804,6 +934,10 @@
      "source": "textron_citation_ascend_product_card",
      "mlw_kg": 8482,
      "note": "Citation Ascend page: Maximum Landing Weight 18,700 lb (8,482 kg), matches the FAA MALW exactly; no approach speed is published on the product card"
+    },
+    {
+     "source": "faa_tcds_a22ce_rev74",
+     "note": "p22 Model 560XL S/N 560-5001 thru 560-6000: Minimum Weight In-flight 12,400 lbs. - the same figure; 12,800 lbs is printed below the later serial groups"
     }
    ]
   },
@@ -992,10 +1126,10 @@
    "malw_kg": 8709,
    "malw_source": "faa_acd_2024_10",
    "malw_note": "MALW_lb 19,200",
-   "min_mass_kg": null,
-   "min_mass_kind": null,
-   "min_mass_source": null,
-   "min_mass_note": "no published figure found. Bombardier's public document index (RACSDocument.nsf) carries only CRJ and Dash 8 manuals, there is no Learjet 45 airport planning manual or spec sheet on a Bombardier domain, and OpenAP 2.4 has no lj45.yml",
+   "min_mass_kg": 6350,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "faa_tcds_t00008wi_rev34",
+   "min_mass_note": "p3, I. Model 45 (Learjet 45): Min. Flight Weight 14,000 lbs. in all three weight columns (basic, SB 45-11-4, SB 45-11-5); printed in pounds only, 14,000 lb = 6,350 kg",
    "corroboration": [
     {
      "source": "eurocontrol_apd",
@@ -1178,10 +1312,10 @@
    "malw_kg": 35652,
    "malw_source": "faa_acd_2024_10",
    "malw_note": "MALW_lb 78,600",
-   "min_mass_kg": 23070,
-   "min_mass_kind": "BOW",
-   "min_mass_source": "bombardier_global5000_factsheet",
-   "min_mass_note": "Weights block: Basic operating weight 50,861 lb",
+   "min_mass_kg": 23224,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "faa_tcds_t00003ny_rev24",
+   "min_mass_note": "p3 II - Model BD-700-1A11: Min. Flight Weight 51,200 lb / 23,224 kg. Replaces the Global 5000 fact sheet's basic operating weight 50,861 lb (23,070 kg) under the MFW-first preference order; the certified floor is the higher of the two, since the aircraft cannot fly below it at any fuel load",
    "corroboration": [
     {
      "source": "eurocontrol_apd",
@@ -1711,7 +1845,17 @@
    "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
    "malw_kg": 10591,
    "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 23,350"
+   "malw_note": "MALW_lb 23,350",
+   "min_mass_kg": 5942,
+   "min_mass_kind": "MZFW",
+   "min_mass_source": "easa_tcds_im_a_085_issue05",
+   "min_mass_note": "p28 X. HS.125 Series 700A/700B: Minimum Zero Fuel Weight 13,100 lbs 5,942 kg - the lowest printed floor across the H25B models (the BAe.125 Series 800 family, pp. 43-57, prints 14,120 lb; pp. 51 and 54 also print a minimum operating weight of 16,100 lb). No minimum flight weight is printed. A minimum zero fuel weight bounds the aircraft without fuel, so every in-flight mass is at or above it",
+   "corroboration": [
+    {
+     "source": "faa_tcds_a3eu_rev44",
+     "note": "p34: Minimum zero fuel weight 13,100 Lbs. - the same figure"
+    }
+   ]
   },
   "C208": {
    "approach_speed_kt": 79,
@@ -1760,10 +1904,10 @@
    "malw_kg": 35652,
    "malw_source": "faa_acd_2024_10",
    "malw_note": "MALW_lb 78,600",
-   "min_mass_kg": 23691,
-   "min_mass_kind": "BOW",
-   "min_mass_source": "bombardier_global6500_specs",
-   "min_mass_note": "Specifications, Weights: Basic operating weight 52,230 lb (23,691 kg). The Global 6500 is the current build of the BD-700-1A10 family that carries the GLEX designator",
+   "min_mass_kg": 21865,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "faa_tcds_t00003ny_rev24",
+   "min_mass_note": "p1 I - Model BD-700-1A10: Min. Flight Weight 48,200 lb / 21,865 kg. Replaces the Global 6500 page's basic operating weight 52,230 lb (23,691 kg) under the MFW-first preference order",
    "corroboration": [
     {
      "source": "bombardier_global6500_specs",
@@ -1791,6 +1935,10 @@
    "malw_kg": 17826,
    "malw_source": "faa_acd_2024_10",
    "malw_note": "MALW_lb 39,300",
+   "min_mass_kg": 9117,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "faa_tcds_a50nm_rev16",
+   "min_mass_note": "p4 Weight Limitations, Falcon 2000: Minimum flight at 14% CG 23,075 lb, at 32.5% CG 20,100 lb (printed in pounds only; 20,100 lb = 9,117 kg). The Falcon 2000EX section prints 23,444 / 21,149 lb, so 20,100 lb is the lowest for the designator",
    "corroboration": [
     {
      "source": "dassault_falcon2000lxs_backgrounder",
@@ -1899,7 +2047,17 @@
    "approach_speed_note": "According to FSB data, If flaps are not down (not flaps), AAC is D.",
    "malw_kg": 20185,
    "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 44,500"
+   "malw_note": "MALW_lb 44,500",
+   "min_mass_kg": 9390,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "easa_tcds_a062_issue10",
+   "min_mass_note": "p32 Mystère-Falcon 900: Minimum flight 9 390 kg (20 700 lbs); the Falcon 900EX weight tables (pp. 47, 58) print the same 9 390 kg",
+   "corroboration": [
+    {
+     "source": "faa_tcds_a46eu_rev23",
+     "note": "p8 Model MYSTERE-FALCON 900: Minimum weight 20,700 lb; pp. 11 and 13 (Falcon 900EX): 9 390 kg / 20 700 lb - the same figure"
+    }
+   ]
   },
   "BE30": {
    "approach_speed_kt": 107,
@@ -2025,7 +2183,11 @@
    "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report. Moved the wingspan to winglet column.",
    "malw_kg": 34836,
    "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 76,800"
+   "malw_note": "MALW_lb 76,800",
+   "min_mass_kg": 23088,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "gulfstream_g600_specs",
+   "min_mass_note": "Weights block: Basic Operating (including 4 crew) 23,088 kg / 50,900 lb; Maximum Landing 34,836 kg / 76,800 lb, the same as the FAA MALW. A web page: its sha256 changes when the site does, the excerpt pins the numbers"
   },
   "PRM1": {
    "approach_speed_kt": 120,
@@ -2139,7 +2301,17 @@
    "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
    "malw_kg": 16200,
    "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 35,715"
+   "malw_note": "MALW_lb 35,715",
+   "min_mass_kg": 8600,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "easa_tcds_a062_issue10",
+   "min_mass_note": "p15 Mystère-Falcon 50: Minimum flight 8.600 kg (18.959 lbs), the same with modifications M1230 and M1430; pp. 23-24 print the same 8.600 kg",
+   "corroboration": [
+    {
+     "source": "faa_tcds_a46eu_rev23",
+     "note": "pp. 3, 5-6 Model MYSTERE-FALCON 50: Minimum weight 18,959 lb - the same figure"
+    }
+   ]
   },
   "P180": {
    "approach_speed_kt": 121,
@@ -2233,7 +2405,11 @@
    "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
    "malw_kg": 28304,
    "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 62,400"
+   "malw_note": "MALW_lb 62,400",
+   "min_mass_kg": 14696,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "easa_tcds_a155_issue17",
+   "min_mass_note": "p16 13. Maximum Certified Masses, S/N 001 to 400: Minimum flight - AFT 14696 kg (32400 lbs) at 38.5% MAC; FWD 15694 kg (34600 lbs)"
   },
   "A30B": {
    "approach_speed_kt": 137,
@@ -2361,7 +2537,11 @@
    "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report. Moved the wingspan to winglet column.",
    "malw_kg": 29189,
    "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 64,350"
+   "malw_note": "MALW_lb 64,350",
+   "min_mass_kg": 21251,
+   "min_mass_kind": "BOW",
+   "min_mass_source": "gulfstream_g500_specs",
+   "min_mass_note": "Weights block: Basic Operating (including 3 crew) 21,251 kg / 46,850 lb; Maximum Landing 29,189 kg / 64,350 lb, the same as the FAA MALW. The page is the GVII-G500 (GA5C), not the G-5SP marketed as G500 (GLF5). A web page: the excerpt pins the numbers"
   },
   "B78X": {
    "approach_speed_kt": 149,
@@ -2541,7 +2721,11 @@
    "approach_speed_note": "the FAA row carries no Remarks entry.",
    "malw_kg": 8001,
    "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 17,640"
+   "malw_note": "MALW_lb 17,640",
+   "min_mass_kg": 4500,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "easa_tcds_a173_issue1",
+   "min_mass_note": "pp. 8-9 Falcon 10: Minimum flight 4 500 kg for every weight variant printed. The TCDS covers the Falcon 10 only; no figure is printed for the Falcon 100, which shares the FA10 designator"
   },
   "B190": {
    "approach_speed_kt": 121,
@@ -2891,7 +3075,11 @@
    "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
    "malw_kg": 28304,
    "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 62,400"
+   "malw_note": "MALW_lb 62,400",
+   "min_mass_kg": 14696,
+   "min_mass_kind": "MFW",
+   "min_mass_source": "easa_tcds_a155_issue17",
+   "min_mass_note": "p16 13. Maximum Certified Masses, with modification M1000 (S/N 401 and on, the Falcon 8X): Minimum flight - AFT 14696 kg (32400 lbs) at 38.5% MAC; FWD 15694 kg (34600 lbs)"
   },
   "MD88": {
    "approach_speed_kt": 130,

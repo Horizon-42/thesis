@@ -1,0 +1,23 @@
+FAA, Type Certificate Data Sheet No. T00008WI (Learjet Model 45), Revision 34, June 8, 2026.
+Verbatim (pdftotext -layout). Designator: LJ45 (ICAO Doc 8643: "LEARJET 45"; the Learjet 40, 70 and 75,
+which share the Model 45 type certificate, are the separate designators LJ40, LJ70, LJ75).
+----------------------------------------------------------------------------------------------------
+
+I. Model 45 (Learjet 45), S/N 45-002 thru 45-455 -- printed page "3 of 26" (header "Rev. 34"), PDF page 3
+
+                                                                                      A/C modified      A/C modified
+                                                                                      by SB 45-11-4     by SB 45-11-5
+                                                  Ramp               20,750 lbs.        21,750 lbs.       20,750 lbs.
+                                                  Takeoff            20,500 lbs.        21,500 lbs.       20,500 lbs.
+                                 Maximum          Landing            19,200 lbs.        19,200 lbs.       19,200 lbs.
+                                Weight (lbs.)     Zero Fuel          16,000 lbs.        16,000 lbs.       16,500 lbs.
+                                                  Min. Flight Weight 14,000 lbs.        14,000 lbs.       14,000 lbs.
+                                                  See AFM, maximum weights vary with serial numbers and modifications.
+
+Notes
+  * Learjet 45: Min. Flight Weight 14,000 lb in all three columns (= 6,350 kg by x 0.45359237; the TCDS
+    prints pounds only).
+  * For reference only (other designators): Learjet 40 (Section II, PDF page 8) and Learjet 70 (Section IV,
+    PDF page 18) print "Minimum Flight Weight 13,500 lbs."; Learjet 75 (Section III, PDF page 13) prints
+    14,000 lbs.
+  * EASA TCDS EASA.IM.A.020 Issue 18 (7 August 2026) prints maximum weights only.

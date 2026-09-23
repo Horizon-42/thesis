@@ -1,0 +1,11 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Textron Aviation (Beechcraft), King Air C90GTx product card (PDF), captured by the Internet Archive:
+http://web.archive.org/web/20170413002200id_/http://beechcraft.txtav.com:80/-/media/beechcraft/files/litho/king_air_c90gtx_productcard.ashx
+(live product-card URLs for the C90 return HTTP 404). Verbatim (pdftotext -layout), WEIGHTS block.
+Designator: BE9L (ICAO: King Air 90 family). The card is for the C90GTx only; the older 90/A90-E90 are not covered.
+----------------------------------------------------------------------------------------------------
+ WEIGHTS
+ Max Takeoff Weight                              10,485 lb        4,756 kg
+ Basic Operating Weight*                             7,265 lb    3,295 kg
+ ...
+ * Typ. equipped, w/1 pilot @ 200 lb, unusable fuel/oil.

@@ -1,0 +1,43 @@
+FAA, Type Certificate Data Sheet No. A46EU (Dassault Aviation Mystere-Falcon 50, Mystere-Falcon 900,
+Falcon 900EX), Revision 23, January 16, 2026. Verbatim (pdftotext -layout).
+The page headers of the pages quoted still carry "Rev. 22" (page-level revision marks; the document is Rev 23).
+----------------------------------------------------------------------------------------------------
+
+I. Model MYSTERE-FALCON 50 -- printed page "3 of 24" (PDF page 3)
+
+Weight Limitations.       Maximum Weights
+                           Maximum ramp                           38,800 lb.
+                           Maximum takeoff (brake release)        38,800 lb.
+                           Maximum landing                        35,715 lb.
+                           Maximum zero fuel                      25,570 lb.
+                           Minimum weight                         18,959 lb.
+
+                          For aircraft incorporating AMD-BA Modification 1230 or modification 1430 (Falcon
+                          50 Service Bulletin Number 161 or 191), weight limitations are modified as follows:
+
+                           Maximum ramp                           40,780 lb.
+                           Maximum takeoff (brake release)        40,780 lb.
+                           Maximum landing                        35,715 lb.
+                           Maximum zero fuel                      25,570 lb.
+                           Minimum weight                         18,959 lb.
+
+  ("Minimum weight 18,959 lb. (unchanged)" is repeated on pages 5 and 6 for the later Falcon 50 variants.)
+
+II. Model MYSTERE-FALCON 900 -- printed page "8 of 24" (PDF page 8)
+
+Weight Limitations.       Maximum Weights
+                            Maximum ramp                                     45,700 lb
+                            Maximum takeoff (brake release)                  45,500 lb
+                            Maximum landing                                  42,000 lb
+                            Maximum zero fuel                                28,220 lb
+                            Minimum weight                                   20,700 lb
+
+III. Model FALCON 900EX -- PDF pages 11 and 13 (tables)
+
+Minimum weight                              9 390             20 700             14                  31
+Minimum weight                              9 390             20 700            13                   31
+
+Notes
+  * The FAA calls the figure "Minimum weight"; EASA TCDS EASA.A.062 calls the same figure "Minimum flight"
+    (8,600 kg / 18,959 lb for the Falcon 50; 9,390 kg / 20,700 lb for the Falcon 900 and 900EX).
+  * Corroboration only; the primary source proposed for FA50/F900 is easa_tcds_a062_issue10.

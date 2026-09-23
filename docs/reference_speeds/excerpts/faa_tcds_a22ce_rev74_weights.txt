@@ -1,0 +1,40 @@
+FAA, Type Certificate Data Sheet No. A22CE (Textron Aviation Models 500, 550, S550, 552, 560, 560XL),
+Revision 74, December 8, 2025. Verbatim (pdftotext -layout).
+BONUS finding for C56X (not on the search list; the pack row carries a 5,924 kg BOW). Also records that
+the Model 560 sections (designator C560, on the list) print no minimum weight.
+----------------------------------------------------------------------------------------------------
+
+VII. Model 560XL (Excel / XLS / XLS+ / later) -- printed "Page 22 of 40", PDF page 22
+
+                                    *S/N 560-5001 thru 560-5500                        S/N 560-5501 thru 560-6000
+    Maximum Weight                   Takeoff             20,000 lbs.                   Takeoff           20,200 lbs.
+                                     Landing             18,700 lbs.                   Landing           18,700 lbs.
+                                     Zero fuel           15,000 lbs.                   Zero fuel         15,100 lbs.
+                                     Ramp                20,200 lbs.                   Ramp              20,400 lbs.
+                                     *See NOTE 32.
+    Minimum Weight                   In-flight               12,400 lbs.               In-flight         12,400 lbs.
+                                     S/N 560-6001 thru 560-6317 and                    S/N 560-6318 and 560-6322
+                                     560-6319 thru 560-6321                            thru 560-6500
+    Maximum Weight                   Takeoff             20,200 lbs.                   Takeoff           20,330 lbs.
+                                     Landing             18,700 lbs.                   Landing           18,700 lbs.
+                                     Zero fuel           15,100 lbs.                   Zero fuel         15,360 lbs.
+                                     Ramp                20,400 lbs.                   Ramp              20,530 lbs.
+                                     S/N 560-6501 and On
+    Maximum Weight                   Takeoff             20,500 lbs.
+                                     Landing             18,700 lbs.
+                                     Zero fuel           15,800 lbs.
+                                     Ramp                20,700 lbs.
+    Minimum Weight                   In-flight               12,800 lbs.
+
+VI. Model 550 (Bravo) -- PDF page 17 (designator C55B in ICAO Doc 8643, not C550; recorded for reference)
+
+    Minimum Weight                  In-flight:Forward C.G. Limit: 9,147 lbs.
+                                              Aft C.G. Limit: 8,670 lbs.
+                                    NOTE: Linear variation between forward and aft limits.
+
+Notes
+  * C56X: lowest printed in-flight minimum weight 12,400 lb (S/N 560-5001 thru 560-6000); 12,800 lb for
+    S/N 560-6501 and on. EASA.IM.A.207 Issue 10 prints 12,400 lb (5,625 kg) for every 560XL column
+    (excerpt easa_tcds_im_a_207_issue10_weights.txt).
+  * C560 (Sections V, VIII, IX: Model 560 Citation V / Ultra / Encore / Encore+): maximum weights only;
+    no minimum weight is printed.

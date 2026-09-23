@@ -1,0 +1,9 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Textron Aviation, Citation Mustang product card (PDF), captured by the Internet Archive:
+http://web.archive.org/web/20170411054820id_/http://cessna.txtav.com:80/-/media/cessna/files/citation/mustang/mustang_productcard.ashx
+(live URL now redirects to /error/page-not-found, HTTP 404). Verbatim (pdftotext -layout), WEIGHTS block.
+Designator: C510 (ICAO: CESSNA 510 Citation Mustang).
+----------------------------------------------------------------------------------------------------
+                                                                                  WEIGHTS
+                                                                                  Max Takeoff Weight                            8,645 lb         (3,921 kg)
+                                                                                  Basic Oper Weight                             5,600 lb        (2,540 kg)

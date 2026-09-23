@@ -1,0 +1,36 @@
+Gulfstream Aerospace, G500 product page (HTML), https://www.gulfstream.com/en/aircraft/gulfstream-g500/
+as served 2026-09-23 (<title>G500 - Gulfstream Aerospace</title>). "Weights" accordion, verbatim text
+nodes (HTML tags stripped; footnote marker "11").
+BONUS finding for GA5C (GVII-G500; min_mass_kg null in the pack; not on the search list).
+----------------------------------------------------------------------------------------------------
+
+Weights
+ Maximum Takeoff
+ 36,106 kg
+ 79,600 lb
+ Maximum Landing
+ 29,189 kg
+ 64,350 lb
+ Maximum Zero Fuel
+ 23,632 kg
+ 52,100 lb
+ Basic Operating (including 3 crew)
+11
+ 21,251 kg
+ 46,850 lb
+ Maximum Payload
+11
+ 2,381 kg
+ 5,250 lb
+ Maximum Payload/Full Fuel
+11
+ 1,315 kg
+ 2,900 lb
+ ...
+11
+Stated weights are based on theoretical standard outfitting configurations. Actual weights will be affected by outfitting options and other factors.
+
+Notes
+  * Basic Operating (including 3 crew): 46,850 lb / 21,251 kg (kind BOW).
+  * This page is the current GVII-G500 (ICAO GA5C). It is NOT the older "Gulfstream G500" marketing name of
+    the G-5SP, which ICAO Doc 8643 files under GLF5; the GLF5 row must not take this number.

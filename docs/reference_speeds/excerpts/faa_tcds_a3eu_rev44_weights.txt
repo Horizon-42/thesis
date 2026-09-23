@@ -1,0 +1,36 @@
+FAA, Type Certificate Data Sheet No. A3EU (Hawker DH.125 / HS.125 / BAe.125 / Hawker series;
+TC holder Textron Aviation), Revision 44, November 6, 2017. Verbatim (pdftotext -layout). Printed page
+numbers equal PDF page numbers ("Page N of 105"). Designator: H25B. Corroborates EASA.IM.A.085 Issue 05.
+----------------------------------------------------------------------------------------------------
+
+X. Model HS.125 Series 700A, Model HS.125 Series 700B -- Page 34 of 105
+
+Maximum Weights                                                                         with Modification
+                                                                                            258332
+                                  Maximum ramp weight                   25,000 Lbs.         25,500 Lbs.   (See NOTE 27)
+                                  Maximum brake release weight          24,800 Lbs.         25,500 Lbs.   (See NOTE 27)
+                                  Maximum landing weight                22,000 Lbs.         22,000 Lbs.
+                                  Maximum zero fuel weight              16,050 Lbs.         16,300 Lbs.   (See NOTES 29 & 34)
+                                  Minimum zero fuel weight              13,100 Lbs.         13,100 Lbs.
+
+XVI. Model BAe.125 Series 800A (and 800B, Hawker 800) -- Page 61 of 105
+                                 Minimum zero fuel weight              14,120 Lbs.       14,120 Lbs.
+
+XVIII. Hawker 800XP -- Page 70 of 105
+                                        Minimum zero fuel weight                 14,120 Lbs.
+
+XIX. Hawker 850XP -- Page 75 of 105
+                                        Minimum operating weight                    16,100 Lbs.
+                                        Minimum zero fuel weight                    14,120 Lbs.
+
+XX. Hawker 900XP -- Page 79 of 105
+                                        Minimum operating weight                    16,100 Lbs.
+                                        Minimum zero fuel weight                    14,120 Lbs.
+
+XXI. Hawker 750 -- Page 84 of 105
+                               Minimum Zero Fuel Weight                       14,120 Lbs.
+
+Notes
+  * Same figures as EASA.IM.A.085 Issue 05 (which also prints the kilogram values: 13,100 lb = 5,942 kg,
+    14,120 lb = 6,405 kg, 16,100 lb = 7,303 kg). The FAA prints pounds only.
+  * No "minimum flight weight" is printed for any Hawker model; see the EASA excerpt for the kind question.

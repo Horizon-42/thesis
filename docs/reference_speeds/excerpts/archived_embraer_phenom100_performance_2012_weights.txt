@@ -1,0 +1,22 @@
+ARCHIVED MANUFACTURER DOCUMENT -- NOT an accepted source; listed for the user's decision only.
+Embraer Executive Jets, Phenom 100 "Performance" page (HTML), captured by the Internet Archive:
+http://web.archive.org/web/20120605011528/http://embraerexecutivejets.com:80/en-US/jets/phenom-100/Pages/performance.aspx
+Verbatim text nodes. Designator: E50P (ICAO: EMBRAER EMB-500 Phenom 100). Figure is for the 2012 Phenom 100.
+----------------------------------------------------------------------------------------------------
+Operational Weights
+Maximum Takeoff Weight:
+10,472 lb (4,750 kg)
+Maximum Landing Weight:
+9,766 lb (4,430 kg)
+Maximum Zero Fuel Weight:
+8,444 lb (3,830 kg)
+*Basic Operating Weight:
+7,132 lb (3,235 kg)
+*Maximum Payload:
+1,312 lb (595 kg)
+*Payload - Full Fuel:
+580 lb (263 kg)
+Maximum Usable Fuel:
+2,804 lb (1,272 kg)
+...
+*Standard configuration (actual weights may vary according to optional equipment installed or interior layouts)
