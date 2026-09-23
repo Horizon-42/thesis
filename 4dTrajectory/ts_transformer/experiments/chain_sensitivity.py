@@ -70,7 +70,8 @@ from ts_transformer.experiments.anytime_curve import FORBIDDEN_SPLIT, Arm, Grid,
 from ts_transformer.experiments.support import REPO_ROOT
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import Forecast, concatenate, forecast_approaches
-from ts_transformer.inference.receding import ROW_TOLERANCE_S, cut_at_lead, displacement_at, rolled_series
+from ts_transformer.data.time_grids import ROW_TOLERANCE_S
+from ts_transformer.inference.receding import cut_at_lead, displacement_at, rolled_series
 from ts_transformer.io_utils import file_sha256
 
 RESULT_SCHEMA = "ts-chain-sensitivity-v1"

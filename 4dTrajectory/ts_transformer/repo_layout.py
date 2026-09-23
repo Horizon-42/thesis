@@ -13,6 +13,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 #: The package CLI, for the runners that train or predict in a subprocess.
 TS_SCRIPT = TS_DIR / "__main__.py"
+#: The runners' CLI (`python run_ts.py <runner>`), for a runner that spawns another runner — NOT
+#: `TS_SCRIPT`, which knows only train / predict / … and refuses a runner's name.
+RUN_TS = REPO_ROOT / "run_ts.py"
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 OPT_OUTPUTS_ROOT = REPO_ROOT / "4dTrajectory" / "outputs"
 COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"

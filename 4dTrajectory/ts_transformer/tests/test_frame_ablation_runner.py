@@ -91,17 +91,17 @@ def test_a_stored_arm_is_resumed_only_when_complete_and_unchanged(tmp_path):
     are both refused by name, and nothing is deleted."""
     _config, declared = runner.arm_config(ARMS["base"], {"coordinate_frame": "airport-enu"})
     arm = tmp_path / "A"
-    assert runner.stale_arm_error("A", arm, declared) is None          # never trained: runs
+    assert runner.stale_arm_error("A", arm, declared, None) is None          # never trained: runs
     arm.mkdir()
     (arm / "checkpoint.pt").write_bytes(b"x")
-    error = runner.stale_arm_error("A", arm, declared)
+    error = runner.stale_arm_error("A", arm, declared, None)
     assert error and "without history.json" in error and "aborted" in error
     # The trained config carries fields the arm never declared (the CLI's seed, say);
     # only the DECLARED fields are compared.
     (arm / "history.json").write_text(json.dumps({"config": {**declared, "seed": 4711}}))
-    assert runner.stale_arm_error("A", arm, declared) is None
+    assert runner.stale_arm_error("A", arm, declared, None) is None
     changed = {**declared, "coordinate_frame": "enu"}
-    error = runner.stale_arm_error("A", arm, changed)
+    error = runner.stale_arm_error("A", arm, changed, None)
     assert error and "coordinate_frame" in error and "new arm" in error
     assert (arm / "checkpoint.pt").exists() and (arm / "history.json").exists()
 
@@ -123,15 +123,52 @@ def test_a_field_added_after_an_arm_trained_reads_as_the_default_it_flew(tmp_pat
     arm = tmp_path / "B1"
     arm.mkdir()
     (arm / "history.json").write_text(json.dumps({"config": stored}))
-    assert runner.stale_arm_error("B1", arm, declared) is None
+    assert runner.stale_arm_error("B1", arm, declared, None) is None
     # ...but a stored run that flew the OTHER law is a different arm.
     (arm / "history.json").write_text(json.dumps(
         {"config": {**stored, "control_thrust_parameterization": "specific-force"}}))
-    assert "control_thrust_parameterization" in runner.stale_arm_error("B1", arm, declared)
+    assert "control_thrust_parameterization" in runner.stale_arm_error("B1", arm, declared, None)
     # ...and a REQUIRED field that is missing is not defaulted.
     required = {key: value for key, value in declared.items() if key != "control_dynamics_model"}
     (arm / "history.json").write_text(json.dumps({"config": required}))
-    assert "control_dynamics_model" in runner.stale_arm_error("B1", arm, declared)
+    assert "control_dynamics_model" in runner.stale_arm_error("B1", arm, declared, None)
+
+
+def test_an_arm_is_resumed_only_on_the_cohort_it_trained_on(tmp_path):
+    """The development cohort is a FILE the arm names, and `plan_cohort` rewrites it in place: an
+    arm is resumed only when its training recorded that cohort with the same train and val flights
+    (the eligible set's digests); a run that recorded no cohort is refused, not assumed, and so is a
+    run that recorded one when the arm names none."""
+    from ts_transformer.data.development_cohorts import (
+        development_cohort_audit, load_development_cohort, write_development_cohort,
+    )
+
+    _config, declared = runner.arm_config(ARMS["base"], {})
+    cohort = tmp_path / "cohort" / "development_cohort.json"
+    write_development_cohort(cohort, name="grid/L60_D20", train_flight_ids=["KRDU:a", "KRDU:b"],
+                             val_flight_ids=["KRDU:c"], selection={"rule": "test"})
+    arm = tmp_path / "A"
+    arm.mkdir()
+    record = {"config": declared, "data_selection": {}}
+    (arm / "history.json").write_text(json.dumps(record))
+    error = runner.stale_arm_error("A", arm, declared, cohort)
+    assert error and "trained without a development cohort" in error
+    audit = development_cohort_audit(cohort, load_development_cohort(cohort))
+    (arm / "history.json").write_text(json.dumps({**record, "data_selection": {"development_cohort": audit}}))
+    assert runner.stale_arm_error("A", arm, declared, cohort) is None
+    # the same path rewritten with another val set: the arm trained on other flights
+    write_development_cohort(cohort, name="grid/L60_D20", train_flight_ids=["KRDU:a", "KRDU:b"],
+                             val_flight_ids=["KRDU:c", "KRDU:d"], selection={"rule": "test"})
+    error = runner.stale_arm_error("A", arm, declared, cohort)
+    assert error and "whose val flights are not" in error
+    # an arm that trained on a cohort and now names none is a changed arm too
+    error = runner.stale_arm_error("A", arm, declared, None)
+    assert error and "names none" in error
+    # ...while a run that was given no cohort resumes on its config alone, as before — whether its
+    # history holds an empty selection, a null one (what `train` writes when handed none) or none
+    for selection in ({"data_selection": {}}, {"data_selection": None}, {}):
+        (arm / "history.json").write_text(json.dumps({"config": declared, **selection}))
+        assert runner.stale_arm_error("A", arm, declared, None) is None
 
 
 def test_the_train_step_is_done_when_history_json_exists(tmp_path):

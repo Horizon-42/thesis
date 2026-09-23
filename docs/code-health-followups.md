@@ -938,3 +938,13 @@ than raise, and the segment-plan readout admits its fixed set on the observed ro
 **Judgement**: one convention would be better — either the readouts read the supervision rows (the package's
 stated truth) or the anchor sets admit on the observed ones — but changing `displacement_at`'s truth moves
 every S1 number and the `lead_time_error` accounting it mirrors, so it is a decision, not a fix.
+
+## ts_transformer: four runners redefine `HARVEST_ROOT`, and `EXPERIMENTS_MAIN` lives outside `repo_layout` (2026-09-23)
+
+**Verified** (`git grep '^HARVEST_ROOT = '`): `experiments/frame_ablation.py:63`,
+`runway_hypotheses.py:57`, `runway_intent_r0.py:45` and `runway_intent_r1.py:74` each restate
+`REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"`, which `repo_layout.HARVEST_ROOT` already
+defines; `support.EXPERIMENTS_MAIN` is a repository path defined in `experiments/support.py`. Layout rule
+L3 makes `repo_layout.py` the one definition of repository paths — the confusion of two such paths
+(`TS_SCRIPT` imported as `RUN_TS`) is what broke the archived stage B′ queue, and `RUN_TS` itself moved into
+`repo_layout` on 2026-09-23. Import them instead; no behaviour changes (same values).

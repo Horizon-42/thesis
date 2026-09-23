@@ -1,4 +1,4 @@
-"""Plan-and-guidance step 5: the development cohort a plan run trains on — the locked by-flight split over the given rosters minus the train flights the random-anchor future contract does not cover.
+"""The development cohort a random-anchor run trains on — the locked by-flight split over the given rosters minus the train flights the random-anchor future contract does not cover.
 
 The train CLI refuses a random-anchor run whose contract covers fewer train flights than the
 split holds ("adjust the train roster explicitly instead of silently changing experiment
@@ -9,7 +9,7 @@ filter, the same window set — every flight the window set gives no admissible 
 from train, and the selection names them with the airports, the seed and the contract.
 
     python run_ts.py plan_cohort --data <harvest/ICAO> ... --eligibility-roster <json> ... \\
-        --prediction-output plan --config-overrides <json> --name NAME --output-dir <dir>
+        --prediction-output control --config-overrides <json> --name NAME --output-dir <dir>
 
 The cohort is ``<output-dir>/development_cohort.json`` (`--output-dir` is the shared training
 flag), beside it ``data_selection.json`` — the build report with the REASON every flight of the

@@ -24,8 +24,7 @@ from ts_transformer.inference.forecast import Forecast, cut_rows
 # A cut lead must fall on a rollout query row: the dense grid is the integrator step plus the
 # segment boundaries (`dense_query_offsets`), so a Δ that is a whole multiple of the step has
 # a row exactly there. `ROW_TOLERANCE_S` (one definition, `data/time_grids.py`) is the
-# tolerance that row is found at; re-exported here for the readers that always took it from
-# this module.
+# tolerance that row is found at.
 
 
 def rolled_series(series: FlightSeries, anchor: int, flown: Forecast, until: int, dt_s: float) -> FlightSeries:
@@ -121,4 +120,4 @@ def displacement_at(series: FlightSeries, forecast: Forecast, origin_index: int,
     return value
 
 
-__all__ = ["ROW_TOLERANCE_S", "cut_at_lead", "displacement_at", "mean_displacement_to", "rolled_series"]
+__all__ = ["cut_at_lead", "displacement_at", "mean_displacement_to", "rolled_series"]

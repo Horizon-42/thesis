@@ -77,7 +77,7 @@ def _row(established: bool, vectored: bool, ade: float, flyable: bool = True) ->
 
 def _payload(rows: dict, protocol: str = "none", segment_s: float = 20.0, executed_s: float = 20.0) -> dict:
     return {"schema": LOCKSTEP_SCHEMA, "protocol": protocol, "segment_s": segment_s, "executed_s": executed_s,
-            "first_prediction": {"rule": "fixed L-1 (row 29)"},
+            "anchor": 29, "split": "val", "limit": None, "first_prediction": {"rule": "fixed L-1 (row 29)"},
             "executor": f"{protocol}-executor", "executor_sha256": "0" * 64, "executor_name": "twin", "flights": len(rows), "rows": rows}
 
 
@@ -130,3 +130,19 @@ def test_the_runner_intersects_the_flights_recomputes_both_readings_and_names_th
     with pytest.raises(SystemExit):
         runner.main(argv[:4] + [f"1337={older}", f"2024={dirs[('candidate', 2024)]}"] + argv[6:-1] + [str(tmp_path / "gate3")])
     assert f"is not {LOCKSTEP_SCHEMA!r}" in capsys.readouterr().err
+    # the lookback, the seconds flown per round and the split must agree on all four readings, and a
+    # smoke test's --limit prefix is never an input (the rule text names the lookback only under L-1)
+    for key, value, message in (("anchor", 59, "differ in anchor"), ("executed_s", 60.0, "differ in executed_s"),
+                                ("split", "train", "read on val"), ("limit", 20, "smoke test")):
+        odd = tmp_path / f"odd_{key}"
+        odd.mkdir()
+        (odd / "manoeuvre_lockstep.json").write_text(json.dumps({**_payload(candidate_rows), key: value}), encoding="utf-8")
+        target = tmp_path / f"gate_{key}"
+        with pytest.raises(SystemExit):
+            runner.main(argv[:4] + [f"1337={odd}", f"2024={dirs[('candidate', 2024)]}"] + argv[6:-1] + [str(target)])
+        assert message in capsys.readouterr().err and not target.exists()
+    # an integer and a float of the same value are one value (an arms file may write either)
+    same = tmp_path / "same_int"
+    same.mkdir()
+    (same / "manoeuvre_lockstep.json").write_text(json.dumps({**_payload(candidate_rows), "executed_s": 20}), encoding="utf-8")
+    assert runner.main(argv[:4] + [f"1337={same}", f"2024={dirs[('candidate', 2024)]}"] + argv[6:-1] + [str(tmp_path / "gate_int")]) == 0

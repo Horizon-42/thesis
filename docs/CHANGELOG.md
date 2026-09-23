@@ -1,5 +1,23 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-23 — 两层代码 review 里词表之外的问题修掉
+
+同一次 review 在还留在主干的两层代码里找到的问题（词表归档之后仍然存在的那部分）：
+
+- **队列的 PID 文件**：空文件被读成 PID 0，而 `os.kill(0, 0)` 发给的是本进程组、总会成功，队列就永远以
+  "a queue is still running (pid 0)" 拒绝启动；乱码则直接抛异常。现在文件里必须是一个正整数 PID，否则按名字拒绝。
+- **相对门**原来只核对 schema 和起点规则：现在四份读数的 lookback（`anchor` = L−1；读数 (b)/(c) 的规则文字里
+  不含 L）、每轮飞的秒数、split 必须一致，带 `--limit` 的冒烟读数不收。段长允许不同（A3-a 用 60 s 预测、每轮飞 20 s
+  对 20 s 的基线）。说明文字里门 B1 的旧规则改成现行的。
+- **网格门**不查任何身份：现在拒收别的 schema、非 val、带 `--limit`、段长不是该格 Δ 的读数。因此 09-18 网格存档的
+  v2 payload 不能再由这个 runner 重判（它的判定文件还在），与相对门一样只读本代码写的 schema。
+- **续跑**（`frame_ablation`）只比配置，不比 development cohort 文件；`plan_cohort` 会原地重写同一路径。现在声明了
+  cohort 的臂只在训练时记下的 train / val 航班集合与文件现状一致时才续跑，否则按名字拒绝。
+- 过时说明：`plan_cohort`（不再是 plan-and-guidance 的第 5 步）、`frame_ablation`（state 与 control 臂都跑）；
+  `receding.py` 为"一直从这里 import 的读者"再导出的 `ROW_TOLERANCE_S` 删掉；`run_ts.py` 的路径 `RUN_TS` 移进
+  `repo_layout.py`（与 `TS_SCRIPT` 放在一起写明两者的区别——把后者当前者 import 正是归档的 B′ 队列坏掉的原因）。
+- ts 全套 1211 通过。
+
 ### 2026-09-23 — 指令词表设计整体归档（用户要重写一版）
 
 用户："对于词表设计相关的，把当前所有代码，都archive；我要重新写一版；你的修复最终的结果应该表现得像是系统里从来没有过词表设计。"

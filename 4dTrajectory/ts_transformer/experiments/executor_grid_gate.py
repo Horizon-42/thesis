@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ts_transformer.experiments.manoeuvre_lockstep import LOCKSTEP_SCHEMA
 from ts_transformer.experiments.support import REPO_ROOT, arm_config, declaration_base
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.manoeuvre.gates import GRID_SEED_LINE_QUANTILE, cell_name, cell_reading, gate_grid
@@ -48,6 +49,21 @@ def grid_cells(declaration: dict[str, Any]) -> dict[tuple[float, float], dict[in
 
 def reading_path(campaign: Path, arm: str, reading: str) -> Path:
     return campaign / LOCKSTEP_DIR / arm / reading / "manoeuvre_lockstep.json"
+
+
+def reading_problem(payload: dict[str, Any], segment_s: float) -> str | None:
+    """Why a cell's reading cannot enter the table, or None: another schema (the gate reads what
+    this code writes, as the relative gate does), a split other than val, a smoke test's --limit
+    prefix, or a segment that is not the cell's."""
+    if payload["schema"] != LOCKSTEP_SCHEMA:
+        return f"lockstep schema {payload['schema']!r} is not {LOCKSTEP_SCHEMA!r}; fly the reading again with this code"
+    if payload["split"] != "val":
+        return f"a {payload['split']!r} reading; the grid is read on val"
+    if payload["limit"]:
+        return f"a --limit {payload['limit']} reading is a smoke test's prefix of the cohort, not an input to a verdict"
+    if payload["segment_s"] != segment_s:
+        return f"segment {payload['segment_s']:g} s, but the cell's is {segment_s:g} s"
+    return None
 
 
 def render(payload: dict[str, Any]) -> str:
@@ -109,6 +125,9 @@ def main(argv: list[str] | None = None) -> int:
                 table[cell_name(*cell)][seed] = None
                 continue
             payload = json.loads(path.read_text(encoding="utf-8"))
+            problem = reading_problem(payload, cell[1])
+            if problem:
+                parser.error(f"{path}: {problem}")
             payloads.setdefault(cell, {})[seed] = payload
             sources[arm] = {"path": str(path), "sha256": file_sha256(path)}
             table[cell_name(*cell)][seed] = cell_reading(payload)

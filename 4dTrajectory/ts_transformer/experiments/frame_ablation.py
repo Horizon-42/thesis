@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Train, predict and evaluate a set of STATE-output arms that differ by one axis.
+"""Train, predict and evaluate a set of arms (state or control) that differ by one axis.
 
 The airport-center frame ablation (``4dTrajectory/ts_transformer/docs/
 2026-09-03_airport_frame_ablation_plan.md``) compares one recipe under three charts —
@@ -64,6 +64,7 @@ HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 
 
 from ts_transformer.config import absent_field_defaults  # noqa: E402
+from ts_transformer.data.development_cohorts import development_cohort_audit, load_development_cohort  # noqa: E402
 from ts_transformer.run_naming import run_display_name, run_slug  # noqa: E402
 
 # A state arm on one airport: ~50 MB of checkpoint/history + ~0.3 GB of validation records.
@@ -90,7 +91,16 @@ def write_arm_config(destination: Path, settings: dict) -> Path:
 TRAIN_COMPLETE_ARTIFACT = "history.json"
 
 
-def stale_arm_error(key: str, train_dir: Path, declared: dict) -> str | None:
+def recorded_cohort(record: dict) -> dict | None:
+    """The development-cohort audit a run's `history.json` recorded (`data_selection.development_cohort`),
+    or None when the run was given none: `train` writes the key only for a run handed a cohort, a
+    history from before `data_selection` existed (2026-07-29) names none, and `train` stores a null
+    selection when it was handed none at all."""
+    selection = record.get("data_selection") or {}
+    return selection["development_cohort"] if "development_cohort" in selection else None
+
+
+def stale_arm_error(key: str, train_dir: Path, declared: dict, development_cohort: Path | None) -> str | None:
     """Why a stored arm may NOT be resumed under ``declared``, or ``None`` if it may.
 
     Resume used to mean "checkpoint.pt exists", and the override file was rewritten before
@@ -100,6 +110,13 @@ def stale_arm_error(key: str, train_dir: Path, declared: dict) -> str | None:
     metadata and no history. Two rules instead — the arm is resumed only when its
     ``history.json`` exists AND the config it trained under agrees with every field the
     arm declares today. An arm that fails either is refused by name; nothing is deleted.
+
+    The arm's ``development_cohort`` is part of what it declares, and it is a FILE, so its path
+    alone says nothing: `plan_cohort` rewrites it in place. An arm that names one is resumed only
+    when its training recorded that cohort with the same train and val flights
+    (`data_selection.development_cohort`, the eligible SET's digests, C26); a run that recorded no
+    cohort is refused rather than assumed to match, and so is a run that recorded one when the arm
+    now names none.
     """
     history = train_dir / TRAIN_COMPLETE_ARTIFACT
     checkpoint = train_dir / "checkpoint.pt"
@@ -111,7 +128,8 @@ def stale_arm_error(key: str, train_dir: Path, declared: dict) -> str | None:
         )
     if not history.exists():
         return None
-    stored = json.loads(history.read_text(encoding="utf-8")).get("config") or {}
+    record = json.loads(history.read_text(encoding="utf-8"))
+    stored = record.get("config") or {}
     # A field the stored config predates reads the way `TSConfig.from_dict` reads it — its
     # default, unless it is a REQUIRED field (then it stays absent, and differs). Read as
     # None instead, the first field a recipe pins after an arm trained refused every such
@@ -127,6 +145,22 @@ def stale_arm_error(key: str, train_dir: Path, declared: dict) -> str | None:
             f"{', '.join(differing)} differ(s) from the arm's overrides today. A changed arm "
             "is a new arm: give it a new key, or move the directory aside"
         )
+    recorded = recorded_cohort(record)
+    if development_cohort is None:
+        if recorded is None:
+            return None
+        return (f"arm {key}: {train_dir} was trained on development cohort {recorded['name']!r}, and the arm now "
+                "names none — a changed arm is a new arm: give it a new key, or move the directory aside")
+    if recorded is None:
+        return (f"arm {key}: {train_dir} was trained without a development cohort, and the arm now names "
+                f"{development_cohort} — a changed arm is a new arm: give it a new key, or move the directory aside")
+    today = development_cohort_audit(development_cohort, load_development_cohort(development_cohort))["splits"]
+    moved = [split for split in ("train", "val")
+             if recorded["splits"][split]["identity_sha256"] != today[split]["identity_sha256"]]
+    if moved:
+        return (f"arm {key}: {train_dir} was trained on development cohort {recorded['name']!r}, whose "
+                f"{' and '.join(moved)} flights are not those of {development_cohort} today (the file was "
+                "rewritten) — a changed cohort is a new arm: give it a new key, or move the directory aside")
     return None
 
 
@@ -325,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         trained_arms += 1
         produced[(campaign / key / "checkpoint.pt").resolve()] = key
         config, declared = arm_config(base, arm.get("overrides", {}))
-        stale = stale_arm_error(key, campaign / key, declared)
+        stale = stale_arm_error(key, campaign / key, declared, cohorts[key])
         if stale:
             parser.error(stale)
         config_path = campaign / key / "config.json"

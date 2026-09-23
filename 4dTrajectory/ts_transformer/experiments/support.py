@@ -21,7 +21,7 @@ from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
 from ts_transformer.data.dataset import build_series, load_flight_dicts
 import ts_transformer.geometry.geometric_metrics as gm
-from ts_transformer.repo_layout import REPO_ROOT, TS_DIR, TS_SCRIPT, arrival_manifest_path
+from ts_transformer.repo_layout import REPO_ROOT, RUN_TS, TS_DIR, TS_SCRIPT, arrival_manifest_path
 from ts_transformer.training.train import usable_series
 
 if TYPE_CHECKING:
@@ -36,7 +36,6 @@ __all__ = [
 
 #: The runners' own entry point, for a runner that spawns another runner.
 EXPERIMENTS_MAIN = TS_DIR / "experiments" / "__main__.py"
-RUN_TS = REPO_ROOT / "run_ts.py"
 
 
 def declaration_base(declaration: dict[str, Any]) -> dict[str, Any]:

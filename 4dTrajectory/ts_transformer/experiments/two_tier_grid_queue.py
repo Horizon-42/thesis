@@ -49,13 +49,20 @@ def cells_of(declaration: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def live_pid(path: Path) -> int | None:
-    """The PID a previous queue left in ``path``, if that process is still alive."""
+    """The PID a previous queue left in ``path``, if that process is still alive. The file holds
+    one positive PID, as `main` writes it; anything else is refused by name — an empty file used
+    to read as PID 0, and ``os.kill(0, 0)`` signals this process's own group, so it always looked
+    alive."""
     if not path.is_file():
         return None
-    pid = int(path.read_text(encoding="utf-8").strip() or 0)
+    text = path.read_text(encoding="utf-8").strip()
+    if not text.isdigit() or int(text) <= 0:
+        raise ValueError(f"{path} holds {text!r}, not a PID: a queue writes its own PID there; "
+                         "remove the file if no queue is running")
+    pid = int(text)
     try:
         os.kill(pid, 0)
-    except (ProcessLookupError, ValueError):
+    except ProcessLookupError:
         return None
     except PermissionError:
         return pid
@@ -130,7 +137,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     campaign.mkdir(parents=True, exist_ok=True)
     pid_file = campaign / PID_FILE
-    previous = live_pid(pid_file)
+    try:
+        previous = live_pid(pid_file)
+    except ValueError as exc:
+        parser.error(str(exc))
     if previous is not None:
         parser.error(f"a queue is still running on this campaign (pid {previous}, {pid_file})")
     pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")

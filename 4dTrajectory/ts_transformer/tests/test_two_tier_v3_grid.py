@@ -197,7 +197,10 @@ def test_the_grid_gate_runner_groups_arms_by_cell_and_reports_pending_readings(t
     assert cell_name(30.0, 20.0) == "L30_D20"
     # a campaign with one cell's two readings written: the table has them, the verdict waits
     campaign = tmp_path / "campaign"
-    payload = {"protocol": "none", "segment_s": 20.0, "executed_s": 20.0, "flights": 1400, "strata": {
+    from ts_transformer.experiments.manoeuvre_lockstep import LOCKSTEP_SCHEMA
+
+    payload = {"schema": LOCKSTEP_SCHEMA, "split": "val", "limit": None,
+               "protocol": "none", "segment_s": 20.0, "executed_s": 20.0, "flights": 1400, "strata": {
         "all": {"n": 1400, "established_share": 0.7, "fully_flyable_share": 0.99, "fde_p50_m": 500.0},
         "vectored (tortuosity >= 1.05, not established)": {"n": 600, "established_share": 0.3, "ade_mean_m": 2000.0},
         "straight-in (tortuosity < 1.05)": {"n": 800, "established_share": 1.0}}}
@@ -212,6 +215,15 @@ def test_the_grid_gate_runner_groups_arms_by_cell_and_reports_pending_readings(t
     assert "verdict: pending (38 readings missing" in capsys.readouterr().out
     with pytest.raises(SystemExit):        # never overwritten
         gate_runner.main(["--campaign", str(campaign), "--arms", str(GRID), "--out", str(tmp_path / "gate")])
+    # a reading of another schema, split, a smoke test's prefix, or another segment is refused by name
+    path = gate_runner.reading_path(campaign, "L30_D20_s2024", "L-1")
+    for key, value, message in (("schema", "ts-manoeuvre-lockstep-v2", "is not"), ("split", "train", "read on val"),
+                                ("limit", 20, "smoke test"), ("segment_s", 60.0, "the cell's is 20 s")):
+        path.write_text(json.dumps({**payload, key: value}), encoding="utf-8")
+        target = tmp_path / f"gate_{key}"
+        with pytest.raises(SystemExit):
+            gate_runner.main(["--campaign", str(campaign), "--arms", str(GRID), "--out", str(target)])
+        assert message in capsys.readouterr().err and not target.exists()
 
 
 def test_the_queue_plans_one_cell_at_a_time_and_skips_written_readings(tmp_path, capsys):
@@ -245,3 +257,25 @@ def test_the_queue_plans_one_cell_at_a_time_and_skips_written_readings(tmp_path,
     assert not (campaign / queue.PID_FILE).exists()
     with pytest.raises(SystemExit):
         queue.main(["--arms", str(GRID), "--campaign", str(campaign), "--airport", "KRDU", "--cells", "L7_D7", "--dry-run"])
+
+
+def test_the_queue_reads_only_a_real_pid_from_its_pid_file(tmp_path):
+    """An empty PID file used to read as PID 0 — and `os.kill(0, 0)` signals this process's own
+    group, so a crashed write looked like a live queue for ever. The file holds one positive PID,
+    or it is refused by name; a PID whose process has ended is not a live queue."""
+    import os
+    import subprocess
+    import sys
+    from ts_transformer.experiments import two_tier_grid_queue as queue
+
+    pid_file = tmp_path / queue.PID_FILE
+    assert queue.live_pid(pid_file) is None                     # no file: no queue
+    for text in ("", "0", "abc", "-5"):
+        pid_file.write_text(text, encoding="utf-8")
+        with pytest.raises(ValueError, match="not a PID"):
+            queue.live_pid(pid_file)
+    pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    assert queue.live_pid(pid_file) == os.getpid()
+    ended = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, check=True)
+    pid_file.write_text(ended.stdout, encoding="utf-8")
+    assert queue.live_pid(pid_file) is None

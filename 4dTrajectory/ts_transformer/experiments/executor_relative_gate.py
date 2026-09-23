@@ -111,6 +111,22 @@ def main(argv: list[str] | None = None) -> int:
     rules = {payload["first_prediction"]["rule"] for _path, payload in (*baseline.values(), *candidate.values())}
     if len(rules) != 1:
         parser.error(f"the four readings start their closed loops by different rules ({sorted(rules)}); compare like with like")
+    # What else makes the four readings ONE comparison: the executor's first-prediction row
+    # (`anchor` = max(L−1, anchor_floor_index) — the lookback when no floor applies; the rule text
+    # names it only under the L−1 reading) and the seconds flown per round. The SEGMENT may differ: an
+    # A3-a candidate forecasts 60 s and flies 20 s against a 20 s baseline. A verdict is read on val,
+    # and a `--limit` reading is a smoke test's prefix, never a verdict's input.
+    four = [payload for _path, payload in (*baseline.values(), *candidate.values())]
+    for key in ("anchor", "executed_s"):
+        values = {payload[key] for payload in four}          # a set: 20 and 20.0 are one value
+        if len(values) != 1:
+            parser.error(f"the four readings differ in {key} ({', '.join(f'{v:g}' for v in sorted(values))}); "
+                         "compare like with like")
+    splits = sorted({payload["split"] for payload in four})
+    if splits != ["val"]:
+        parser.error(f"a verdict is read on val; these readings are {', '.join(splits)}")
+    if any(payload["limit"] for payload in four):
+        parser.error("a --limit reading is a smoke test's prefix of the cohort, not an input to a verdict")
     readings_b: dict[int, dict[str, float]] = {}
     readings_c: dict[int, dict[str, float]] = {}
     flights: dict[str, dict[str, int]] = {}
