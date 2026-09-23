@@ -1,488 +1,262 @@
 /**
- * trainingSample.fixture.ts
- * -------------------------
- * MOCK data for the Training views. It lives in the test tree and is never
- * served: the only thing under `public/data/.../training/` is a real export
- * (design §1).
+ * A small, internally consistent Training export for the tests — the shape the exporter
+ * (`instruction_training_export.py`) writes, built by hand. Every contract literal (schema,
+ * reading rule, spec sha, column order, "unchanged") is IMPORTED from the reader, never restated:
+ * a fixture that restated them could not catch them moving.
  *
- * The shape is the real one and the CONSTANTS ARE IMPORTED, never restated — a
- * fixture that types its own schema string or column order is a fixture that
- * cannot catch the contract moving (repo rule: a schema literal in a consumer is
- * a mirror; import it).
- *
- * THE FLIGHT IS BUILT FROM ITS WORDS, NOT BESIDE THEM. Under `box-v3` a
- * file is only valid if the track is inside the boxes its sentence makes, so a
- * fixture with hand-typed columns would be refused by its own reader. The three
- * signals here are therefore generated from the word sequence: at every event
- * boundary the value is the EDGE the two adjacent words share, and inside a span
- * it runs linearly between two values that are both in that span's box. That is
- * what a real crossing looks like, and it makes containment true by construction
- * rather than by luck.
- *
- * TWO THINGS ARE DELIBERATELY SIMPLER THAN THE ARTEFACT, and both are stated so
- * nothing is read off this file that only the real one can answer:
- *  • the descent is SHALLOW (about 1.3°, under the wedge's 1.5° opening), so one
- *    altitude word covers a long segment and the wedge is drawn three times
- *    rather than twenty-six. A real 3° approach cuts far shorter segments — that
- *    arithmetic is tested directly, against the real angles, rather than here.
- *  • the box SOLIDS are a coarse frustum — apex at the event's own position,
- *    three points on the arc, and a height pair at each of the four. The exporter
- *    derives the real ones at one point per degree of opening; nothing in the
- *    reader recomputes them, so the fixture only has to be the right SHAPE: an
- *    outline whose first point is the apex, the same length in every array, and
- *    never taller away from the aircraft than at it.
- *
- * The raw columns are the read ones plus a small wiggle, so a chart that plotted
- * the raw signal where it should plot the smoothed one is visibly wrong instead
- * of subtly wrong.
+ * Two flights on candidate "09" of two: a VECTORED one (a heading turn at step 10 with the
+ * clearance, a capture turn from step 20, captured at step 25, one altitude row outside its tube)
+ * and a STRAIGHT-IN one (on the final from step 0). 60 steps of 2 s each.
  */
 
 import {
-  TERMINAL_CONTINUE,
-  TERMINAL_LANDED,
+  TRAINING_COLUMNS,
   TRAINING_INDEX_SCHEMA,
-  TRAINING_KINDS,
-  TRAINING_SAMPLE_SCHEMA,
-  TRAINING_INSIDE_EPSILON,
+  TRAINING_READABLE_SET_KIND,
   TRAINING_READING_RULE,
-  altitudeFloorM,
-  altitudeWedgeM,
-  eventInForce,
-  headingBoxDeg,
-  speedBoxMps,
-  trainingWordCounts,
+  TRAINING_SAMPLE_SCHEMA,
+  TRAINING_SPEC_SHA256,
+  TRAINING_UNCHANGED,
 } from "../trainingSample";
 
-/** KRDU's four vocabulary classes, with the airport prefix the runway word
- *  carries since the vocabulary went pooled. */
-export const MOCK_RUNWAY_IDENTS = ["KRDU:05L", "KRDU:05R", "KRDU:23L", "KRDU:23R"];
+export const MOCK_ROWS = 60;
+export const MOCK_STEP_S = 2;
+export const MOCK_CANDIDATES_SHA = "c".repeat(64);
+export const MOCK_LABELLER_SHA = "d".repeat(64);
 
-/**
- * The spec this vocabulary is read under. The tables are COARSER than the
- * artefact's (11 heading boxes rather than 65, 6 speed boxes rather than 22, 8
- * altitude targets rather than 61) so a reader of the rows below can see which
- * box a value is in; every structural rule the parser checks — the heading edges
- * covering -180…180, the tables tiling, the wedge asymmetric — holds exactly as
- * it does in the real file.
- */
-export const MOCK_SPEC = {
-  redundancyFraction: 0.05,
-  headingEdgesDeg: [-180, -90, -30, -10, -3, -1, 1, 3, 10, 30, 90, 180],
-  headingFloorDeg: 1,
-  speedEdgesMps: [60, 70, 80, 90, 100, 110, 125],
-  altitudeTargetsM: [-20, 0, 30, 70, 110, 170, 250, 360],
-  altitudeH0M: 50,
-  altitudeDownDeg: 1.5,
-  altitudeUpDeg: 1.0,
-  durationBinS: 2,
-  durationMaxS: 60,
-  runwayIdents: MOCK_RUNWAY_IDENTS,
-};
-
-export const MOCK_VOCABULARY = {
-  sha256: "8695be0c64e0000000000000000000000000000000000000000000000000mock",
-  runwaySha256: "aa11bb22cc33000000000000000000000000000000000000000000000000mock",
-  readingRule: TRAINING_READING_RULE,
-  courseSmoothingS: 6,
-  smoothingS: 10,
-  ...MOCK_SPEC,
-  // The artefact states its counts beside its spec and the reader refuses a file
-  // where the two disagree — so the fixture DERIVES them rather than typing them,
-  // which would be a third copy of the same numbers.
-  words: trainingWordCounts(MOCK_SPEC),
-};
-
-export const MOCK_TRACK_S = 120;
-const ROW_STEP_S = 2;
-
-/**
- * The sentence. The boxes TILE the track: each hold is the duration word times
- * the bin, and the next event opens where the one before it closes — so the last
- * event plus its hold is exactly `durationS`, which the reader checks.
- *
- * The holds are deliberately IRREGULAR (10, 20, 16, 14, 24, 20, 16 s).
- */
-export const MOCK_EVENT_TIMES_S = [0, 10, 30, 46, 60, 84, 104];
-export const MOCK_HOLDS_S = [10, 20, 16, 14, 24, 20, 16];
-
-/** The words this fixture uses, by name, so a reader of the rows below does not
- *  have to count table positions. Each kind's sequence steps between ADJACENT
- *  words, which is what lets the signals be continuous and still inside. */
-const HEADING_WORDS = [9, 9, 8, 8, 7, 6, 5];
-const ALTITUDE_WORDS = [5, 5, 4, 4, 1, 1, 1];
-const SPEED_WORDS = [4, 4, 3, 3, 2, 2, 1];
-const RUNWAY_WORD = 0;
-
-export const MOCK_WORDS = MOCK_EVENT_TIMES_S.map((_, event) => [
-  HEADING_WORDS[event],
-  ALTITUDE_WORDS[event],
-  SPEED_WORDS[event],
-  RUNWAY_WORD,
-  MOCK_HOLDS_S[event] / MOCK_SPEC.durationBinS,
-  event === MOCK_EVENT_TIMES_S.length - 1 ? TERMINAL_LANDED : TERMINAL_CONTINUE,
-]);
-
-const TS: number[] = [];
-for (let t = 0; t <= MOCK_TRACK_S; t += ROW_STEP_S) TS.push(t);
-
-/** Linear between anchors, flat outside them. */
-function ramp(anchors: Array<[number, number]>, t: number): number {
-  const last = anchors.length - 1;
-  if (t <= anchors[0][0]) return anchors[0][1];
-  if (t >= anchors[last][0]) return anchors[last][1];
-  const index = anchors.findIndex(([at]) => at > t);
-  const [t0, v0] = anchors[index - 1];
-  const [t1, v1] = anchors[index];
-  return v0 + ((v1 - v0) * (t - t0)) / (t1 - t0);
-}
-
-/**
- * A signal that stays inside its own boxes: at every event boundary it sits on
- * the EDGE the two adjacent words share (or in the middle of the box when the
- * word does not change), and between boundaries it runs linearly between two
- * values that both lie in the box in force there.
- */
-function signalFromWords(
-  edges: number[],
-  words: number[],
-  eventTimesS: number[],
-  endS: number,
-): number[] {
-  const centre = (word: number) => (edges[word] + edges[word + 1]) / 2;
-  const anchors: Array<[number, number]> = eventTimesS.map((time, event) => {
-    if (event === 0 || words[event] === words[event - 1]) return [time, centre(words[event])];
-    return [time, edges[Math.max(words[event], words[event - 1])]];
-  });
-  anchors.push([endS, centre(words[words.length - 1])]);
-  return TS.map((t) => ramp(anchors, t));
-}
-
-const READ_COURSE = signalFromWords(
-  MOCK_SPEC.headingEdgesDeg, HEADING_WORDS, MOCK_EVENT_TIMES_S, MOCK_TRACK_S);
-const READ_SPEED = signalFromWords(
-  MOCK_SPEC.speedEdgesMps, SPEED_WORDS, MOCK_EVENT_TIMES_S, MOCK_TRACK_S);
-
-/**
- * The path axis: the ground speed integrated. It is what the altitude wedge is
- * measured on — `r` is remaining PATH, never the projection on the course.
- */
-const PATH_M = (() => {
-  const out = [0];
-  for (let i = 1; i < TS.length; i += 1) {
-    out.push(out[i - 1] + READ_SPEED[i] * (TS[i] - TS[i - 1]));
-  }
-  return out;
-})();
-
-/**
- * The height, anchored on the ladder: each altitude segment ENDS on its own
- * target, and runs back up at about 1.3° — inside the wedge's 1.5° opening, so
- * the whole segment fits in one box.
- */
-const READ_HEIGHT = TS.map((t) =>
-  ramp(
-    [
-      [0, 214],
-      [30, MOCK_SPEC.altitudeTargetsM[5]],
-      [60, MOCK_SPEC.altitudeTargetsM[4]],
-      [MOCK_TRACK_S, MOCK_SPEC.altitudeTargetsM[1]],
-    ],
-    t,
-  ),
-);
-
-/** A repeatable wiggle, so the raw column is not the read one. */
-function wiggle(row: number, amplitude: number): number {
-  return amplitude * Math.sin(row * 1.7);
-}
-
-/**
- * The envelope one sentence makes over this track — the same derivation the
- * exporter does, so the fixture is a file the reader accepts rather than one it
- * refuses.
- *
- * The altitude segment's end is the NEXT ALTITUDE EVENT'S instant (the track's
- * last row for the final segment), and `r` is the path still to run to it.
- */
-export function mockEnvelope(words: number[][]) {
-  const forced = eventInForce(MOCK_EVENT_TIMES_S, TS);
-  const altLoM = new Array<number>(TS.length).fill(0);
-  const altHiM = new Array<number>(TS.length).fill(0);
-  let row = 0;
-  while (row < TS.length) {
-    const word = words[forced[row]][1];
-    let last = row;
-    while (last + 1 < TS.length && words[forced[last + 1]][1] === word) last += 1;
-    // the instant the word changes: the next row's time, or the end of the track
-    const closesS = last + 1 < TS.length ? TS[last + 1] : TS[TS.length - 1];
-    const endPath = last + 1 < TS.length ? PATH_M[last + 1] : PATH_M[TS.length - 1];
-    void closesS;
-    for (let index = row; index <= last; index += 1) {
-      const [low, high] = altitudeWedgeM(MOCK_SPEC, word, endPath - PATH_M[index]);
-      altLoM[index] = low;
-      altHiM[index] = high;
-    }
-    row = last + 1;
-  }
-  const events = MOCK_EVENT_TIMES_S.map((eventS, event) => {
-    const first = TS.findIndex((t) => t >= eventS);
-    const [headingLoDeg, headingHiDeg] = headingBoxDeg(MOCK_SPEC, words[event][0]);
-    const [speedLoMps, speedHiMps] = speedBoxMps(MOCK_SPEC, words[event][2]);
-    // The footprint, the same SHAPE the exporter draws: apex at the event's own
-    // position, then an arc at radius `hold × the speed box's upper edge` across
-    // the heading box. The exporter puts one point per degree of opening; three
-    // is its floor and all a fixture needs. A displacement at relative course ψ
-    // over a distance d is `(-d·cos ψ, -d·sin ψ)` in this frame.
-    const depth = speedHiMps * MOCK_HOLDS_S[event];
-    const altitudeTargetM = MOCK_SPEC.altitudeTargetsM[words[event][1]];
-    const altitudeFloor = altitudeFloorM(MOCK_SPEC, words[event][1]);
-    const toGo = TO_GO_M[first];
-    const cross = CROSS_M[first];
-    const arc = [headingLoDeg, (headingLoDeg + headingHiDeg) / 2, headingHiDeg].map(
-      (degrees) => (degrees * Math.PI) / 180,
-    );
-    // The solid TAPERS: an outline point `depth` metres out has that much less path
-    // left to its altitude segment's end, so its slice of the wedge is tighter. The
-    // apex keeps the row's own wedge; the arc gets the one `depth` metres on.
-    const remainingAtApex = (altHiM[first] - altitudeTargetM) / Math.tan((MOCK_SPEC.altitudeDownDeg * Math.PI) / 180)
-      - altitudeFloor / Math.tan((MOCK_SPEC.altitudeDownDeg * Math.PI) / 180);
-    const atEdge = altitudeWedgeM(MOCK_SPEC, words[event][1], Math.max(remainingAtApex - depth, 0));
-    const low = [altLoM[first], atEdge[0], atEdge[0], atEdge[0]];
-    const high = [altHiM[first], atEdge[1], atEdge[1], atEdge[1]];
-    return {
-      eventS,
-      holdS: MOCK_HOLDS_S[event],
-      headingLoDeg,
-      headingHiDeg,
-      speedLoMps,
-      speedHiMps,
-      altitudeTargetM,
-      altLoM: low,
-      altHiM: high,
-      altHaeLoM: low.map((metres) => THRESHOLD_HAE_M + metres),
-      altHaeHiM: high.map((metres) => THRESHOLD_HAE_M + metres),
-      toGoM: [toGo, ...arc.map((angle) => toGo - depth * Math.cos(angle))],
-      crossM: [cross, ...arc.map((angle) => cross - depth * Math.sin(angle))],
-      // indicative geodetic corners: the reader only requires that the four
-      // arrays are one outline, of the same length, with at least three points
-      lon: [LON[first], ...arc.map((_, point) => LON[first] + 0.004 - 0.0002 * point)],
-      lat: [LAT[first], ...arc.map((_, point) => LAT[first] + 0.003 + 0.0002 * point)],
-    };
-  });
-  const inside = (values: number[], low: (row: number) => number, high: (row: number) => number) => {
-    let outside = 0;
-    values.forEach((value, index) => {
-      if (value < low(index) - TRAINING_INSIDE_EPSILON || value > high(index) + TRAINING_INSIDE_EPSILON) {
-        outside += 1;
-      }
-    });
-    return { rows: values.length, outside };
-  };
-  const headingAt = (index: number) => headingBoxDeg(MOCK_SPEC, words[forced[index]][0]);
-  const speedAt = (index: number) => speedBoxMps(MOCK_SPEC, words[forced[index]][2]);
-  return {
-    altLoM,
-    altHiM,
-    altHaeLoM: altLoM.map((metres) => THRESHOLD_HAE_M + metres),
-    altHaeHiM: altHiM.map((metres) => THRESHOLD_HAE_M + metres),
-    events,
-    inside: {
-      heading: inside(READ_COURSE, (i) => headingAt(i)[0], (i) => headingAt(i)[1]),
-      altitude: inside(READ_HEIGHT, (i) => altLoM[i], (i) => altHiM[i]),
-      speed: inside(READ_SPEED, (i) => speedAt(i)[0], (i) => speedAt(i)[1]),
-    },
-  };
-}
-
-/** KRDU's own numbers, so the mock lands where the real export does. */
-const THRESHOLD_LON = -78.7875;
-const THRESHOLD_LAT = 35.8776;
-const THRESHOLD_HAE_M = 100.0;
-const COURSE_RAD = (52 * Math.PI) / 180;
-
-const TO_GO_M = TS.map((t) => ramp([[0, 9600], [MOCK_TRACK_S, 0]], t));
-const CROSS_M = TS.map((t) => ramp([[0, 2400], [60, 900], [104, 60], [MOCK_TRACK_S, 0]], t));
-
-/** A flat-earth inverse of `course_frame_rows` at KRDU's latitude — all a fixture
- *  needs to be the right SHAPE and roughly the right place. */
-const LON: number[] = [];
-const LAT: number[] = [];
-TS.forEach((_, row) => {
-  const east = -TO_GO_M[row] * Math.cos(COURSE_RAD) + CROSS_M[row] * Math.sin(COURSE_RAD);
-  const north = -TO_GO_M[row] * Math.sin(COURSE_RAD) - CROSS_M[row] * Math.cos(COURSE_RAD);
-  LAT.push(THRESHOLD_LAT + north / 111320);
-  LON.push(THRESHOLD_LON + east / (111320 * Math.cos((THRESHOLD_LAT * Math.PI) / 180)));
+const range = (count: number, from = 0, step = 1) => Array.from({ length: count }, (_, i) => from + i * step);
+const line = (eM: number[], nM: number[]) => ({
+  eM, nM, lon: eM.map((e) => -78 + e / 90000), lat: nM.map((n) => 35 + n / 111000),
 });
 
-export const MOCK_OBSERVED = {
-  tS: TS,
-  toGoM: TO_GO_M,
-  crossM: CROSS_M,
-  heightM: READ_HEIGHT.map((metres, row) => metres + wiggle(row, 3)),
-  pathM: PATH_M,
-  relCourseDeg: READ_COURSE.map((degrees, row) => degrees + wiggle(row, 1.5)),
-  groundSpeedMps: READ_SPEED.map((mps, row) => mps + wiggle(row, 0.8)),
-  established: TS.map((t) => (t >= 104 ? 1 : 0)),
-  readCourseDeg: READ_COURSE,
-  readSpeedMps: READ_SPEED,
-  readHeightM: READ_HEIGHT,
-  lon: LON,
-  lat: LAT,
-  altHaeM: READ_HEIGHT.map((metres) => THRESHOLD_HAE_M + metres),
-  haeOffsetM: TS.map(() => THRESHOLD_HAE_M),
-};
-
-export const MOCK_FLIGHT = {
-  flightKey: "DAL123_05L_a1b2c3_1699999999",
-  callsign: "DAL123",
-  runway: "KRDU:05L",
-  stratum: "vectored",
-  durationS: MOCK_TRACK_S,
-  dtS: ROW_STEP_S,
-  courseWindowRows: 4,
-  signalWindowRows: 6,
-  sentence: {
-    eventTimesS: MOCK_EVENT_TIMES_S,
-    holdS: MOCK_HOLDS_S,
-    words: MOCK_WORDS,
-  },
-  observed: MOCK_OBSERVED,
-  envelope: mockEnvelope(MOCK_WORDS),
-};
-
-/** MIRROR of `instruction_sample_export.reading_block()` — how a track became the
- *  signals the boxes judge. Its `insideEpsilon` is the reader's own constant,
- *  because the two verdicts are compared and a file written with another number
- *  would disagree on exactly the rows that sit on an edge. */
-export const MOCK_READING = {
-  rule: TRAINING_READING_RULE,
-  altitudeForm: "target + backward-reachable wedge, on remaining path length",
-  altitudeReading: "greedy longest reach, read BACKWARDS (the target anchors the segment's end)",
-  courseSignal: "wrap(moving average of the UNWRAPPED relative ground track over courseSmoothingS)",
-  speedSignal: "moving average of the ground speed over smoothingS",
-  heightSignal: "moving average of the height above the threshold over smoothingS",
-  pathSignal: "the smoothed ground speed integrated, floored at MINIMUM_GROUND_SPEED_MPS",
-  remainingPathTo: "the next altitude event's instant; the track's last row for the final segment",
-  windowRows: "round(seconds / median dt) + 1, centred, edges padded with the edge value",
-  insideEpsilon: TRAINING_INSIDE_EPSILON,
-  producedBy: "ts_transformer.experiments.instruction_sample_export (the artefact's own labeller is NOT in this repository)",
-  constantsFrom: [
-    "the artefact's spec block (redundancy, the wedge's angles, the ladder, the smoothing)",
-    "ts_transformer/manoeuvre/instructions.py (course_frame, smooth, min_rows, wrap_deg)",
+export const MOCK_VOCABULARY = {
+  readingRule: TRAINING_READING_RULE,
+  specSha256: TRAINING_SPEC_SHA256,
+  labellerSourceSha256: MOCK_LABELLER_SHA,
+  columns: [...TRAINING_COLUMNS],
+  unchanged: TRAINING_UNCHANGED,
+  stepS: MOCK_STEP_S,
+  smoothingS: { track: 6, altitude: 10, speed: 10 },
+  classCounts: { approach: 3, heading: 72, altitude: 182, angle: 6, speed: 48 },
+  approachClasses: ["not cleared", "cleared", "go-around"],
+  headingTargetsDeg: range(72, 0, 5),
+  headingToleranceDeg: 4.5,
+  headingMaxTurnDeg: 150,
+  turnBankMinDeg: 4,
+  turnBankMaxDeg: 32,
+  turnBankMinFromDeg: 10,
+  interceptAngleDeg: 30,
+  corridorHalfWidthM: 20,
+  corridorWideningDeg: 0.45,
+  corridorCourseToleranceDeg: 2,
+  crossingHalfWidthM: 100,
+  altitudeTargetsM: range(181, 0, 30),
+  altitudeLandValue: 181,
+  altitudeToleranceM: 25,
+  angleClasses: [
+    { value: 0, name: "level", nominalDeg: 0, lowDeg: 0, steepDeg: 0 },
+    { value: 1, name: "descent 1", nominalDeg: 0.91, lowDeg: -0.5, steepDeg: 1.52 },
+    { value: 2, name: "descent 2", nominalDeg: 2.12, lowDeg: 1.52, steepDeg: 2.59 },
+    { value: 3, name: "descent 3", nominalDeg: 3.06, lowDeg: 2.59, steepDeg: 3.73 },
+    { value: 4, name: "descent 4", nominalDeg: 4.41, lowDeg: 3.73, steepDeg: 10 },
+    { value: 5, name: "climb", nominalDeg: -1.22, lowDeg: -15, steepDeg: -0.5 },
   ],
+  speedTargetsMps: range(47, 20, 5),
+  speedUnspecifiedValue: 47,
+  speedToleranceMps: 5,
+  speedAccelMaxMps2: 1.7,
+  speedRangeMps: [15, 255],
 };
 
-export const MOCK_SAMPLE = {
-  schema: TRAINING_SAMPLE_SCHEMA,
-  setId: "box_v3",
-  airport: "KRDU",
-  kinds: [...TRAINING_KINDS],
-  vocabulary: MOCK_VOCABULARY,
-  reading: MOCK_READING,
-  flights: [MOCK_FLIGHT],
-};
-
-export const MOCK_INDEX = {
-  schema: TRAINING_INDEX_SCHEMA,
-  writtenUtc: "2026-09-21T12:00:00Z",
-  airport: "KRDU",
-  sets: [
-    {
-      id: "box_v3",
-      kind: "vocabulary-readback",
-      title: "Box vocabulary (a word is an interval)",
-      file: "box_v3/sample.json",
-      vocabularySha256: MOCK_VOCABULARY.sha256,
-      runwaySha256: MOCK_VOCABULARY.runwaySha256,
-      readingRule: MOCK_VOCABULARY.readingRule,
-      flights: 1,
-      cohort: {
-        split: "val",
-        perStratum: 20,
-        seed: 1337,
-        drawnFrom: "a seeded permutation of the val split at KRDU, stratified by approach_difficulty at the executor's anchor (pool 200)",
-      },
-    },
-  ],
-};
-
-/** A deep copy, so a test that corrupts one field cannot leak into the next. */
-export function mockSample(): Record<string, unknown> {
-  return structuredClone(MOCK_SAMPLE);
-}
-
-export function mockIndex(): Record<string, unknown> {
-  return structuredClone(MOCK_INDEX);
-}
-
-/**
- * The same flight with WHAT THE MODEL SAID beside it — a `prior-generated` set.
- *
- * The said words are deliberately a MIXTURE: the opening event is the truth's
- * (it is given), two events match exactly, one differs in a single kind and two
- * in three — so a view that drew "differs" per row, per event or per kind can be
- * told apart. One of them names a different ALTITUDE target, so the model's own
- * wedge is a different shape and not one the track stays inside: that is the
- * answer the comparison exists to give, and a fixture whose model was always
- * right could not show it.
- */
-export const MOCK_PRIOR_WORDS = [
-  [9, 5, 4, RUNWAY_WORD, 5, TERMINAL_CONTINUE],   // given: the truth's opening event
-  [9, 5, 4, RUNWAY_WORD, 3, TERMINAL_CONTINUE],   // the hold differs
-  [8, 4, 3, RUNWAY_WORD, 8, TERMINAL_CONTINUE],   // exactly the truth
-  [7, 5, 3, RUNWAY_WORD, 5, TERMINAL_CONTINUE],   // heading and ALTITUDE off, and the hold
-  [7, 1, 2, RUNWAY_WORD, 12, TERMINAL_CONTINUE],  // exactly the truth
-  [6, 1, 4, RUNWAY_WORD, 7, TERMINAL_LANDED],     // speed two boxes off, says landed early
-  [5, 1, 1, RUNWAY_WORD, 8, TERMINAL_LANDED],     // the truth's last event, matched
+export const MOCK_CANDIDATES = [
+  { index: 0, ident: "09", thresholdEM: 0, thresholdNM: 0, courseDeg: 90, elevationM: 100, lengthM: 3000,
+    centreline: line([0, -30000], [0, 0]), runway: line([0, 3000], [0, 0]) },
+  { index: 1, ident: "27", thresholdEM: 3000, thresholdNM: 0, courseDeg: 270, elevationM: 101, lengthM: 3000,
+    centreline: line([3000, 33000], [0, 0]), runway: line([3000, 0], [0, 0]) },
 ];
 
-const MOCK_PRIOR_CONFIDENCE = MOCK_PRIOR_WORDS.map((row, event) =>
-  row.map((_, column) => (event === 0 ? 1 : column === 4 ? 0.06 : 0.84)),
-);
+/** Word values used below, named. */
+export const WORD = {
+  runway09: 0, notCleared: 0, cleared: 1,
+  heading270: 54, heading180: 36, heading090: 18,
+  altitude1110: 37, land: 181, level: 0, descent3: 3,
+  speed110: 18, speed90: 14, unspecified: 47,
+} as const;
 
-export const MOCK_PRIOR = {
-  sha256: "e7a9657afdc7000000000000000000000000000000000000000000000000mock",
-  method: "teacher-forced-next-word",
-  seed: 1337,
-  bestEpoch: 35,
-  trainedOnTheseFlights: 0,
-  readout: {
-    val: { heading: 0.4728, altitude: 0.6894, speed: 0.8554, runway: 0.0013, duration: 3.6703, terminal: 0.1105, next: 5.7996 },
-  },
-};
+type Event = { row: number; column: number; value: number; kind: string };
 
-export function mockPriorSample(): Record<string, unknown> {
-  const sample = structuredClone(MOCK_SAMPLE) as Record<string, unknown> & {
-    setId: string;
-    prior?: unknown;
-    flights: Array<Record<string, unknown>>;
-  };
-  sample.setId = "prior_s1337_val";
-  sample.prior = structuredClone(MOCK_PRIOR);
-  sample.flights[0].prior = {
-    words: structuredClone(MOCK_PRIOR_WORDS),
-    confidence: structuredClone(MOCK_PRIOR_CONFIDENCE),
-    givenEvents: 1,
-    landedAtS: MOCK_EVENT_TIMES_S[5],
-    envelope: mockEnvelope(MOCK_PRIOR_WORDS),
-  };
-  return sample;
+function inForce(events: Event[]): number[][] {
+  return TRAINING_COLUMNS.map((_, column) => {
+    let value = TRAINING_UNCHANGED;
+    return range(MOCK_ROWS).map((row) => {
+      const issued = events.find((event) => event.row === row && event.column === column);
+      if (issued) value = issued.value;
+      return value;
+    });
+  });
 }
 
-/** The manifest entry that set would have: the kind is what makes the reader
- *  require the model's words. */
-export function mockPriorIndex(): Record<string, unknown> {
-  const index = structuredClone(MOCK_INDEX) as Record<string, unknown> & {
-    sets: Array<Record<string, unknown>>;
+const turnRegion = (e0: number, n0: number) => ({
+  fromTrackDeg: 270, turnDeg: -90, groundSpeedMps: 100, radiusMinM: 1632.1, radiusMaxM: 14584.4,
+  region: line([e0, e0 - 1000, e0 - 1600, e0 - 14000, e0 - 9000], [n0, n0 - 300, n0 - 1600, n0 - 14000, n0 - 4000]),
+  innerArc: line([e0, e0 - 1000, e0 - 1600], [n0, n0 - 300, n0 - 1600]),
+  outerArc: line([e0, e0 - 9000, e0 - 14000], [n0, n0 - 4000, n0 - 14000]),
+  end: line([e0 - 1600, e0 - 14000], [n0 - 1600, n0 - 14000]),
+});
+const turnCheck = { progressOk: true, bankOk: true, meanBankDeg: 18.2, maxBankDeg: 24.9, bankMinApplies: true };
+
+/** One flight. `vectored`: a turn at step 10 and a capture at 25; else on the final from step 0. */
+export function mockFlight(key: string, vectored: boolean): Record<string, unknown> {
+  const rows = MOCK_ROWS;
+  const captureRow = vectored ? 25 : 0;
+  const joinRow = vectored ? 10 : 0;
+  const events: Event[] = [
+    { row: 0, column: 0, value: WORD.runway09, kind: "initial" },
+    { row: 0, column: 1, value: vectored ? WORD.notCleared : WORD.cleared, kind: vectored ? "initial" : "clear" },
+    { row: 0, column: 2, value: vectored ? WORD.heading270 : WORD.heading090, kind: "initial" },
+    { row: 0, column: 3, value: WORD.altitude1110, kind: "initial" },
+    { row: 0, column: 4, value: WORD.level, kind: "initial" },
+    { row: 0, column: 5, value: WORD.speed110, kind: "initial" },
+    ...(vectored ? [
+      { row: 10, column: 1, value: WORD.cleared, kind: "clear" },
+      { row: 10, column: 2, value: WORD.heading180, kind: "turn" },
+    ] : []),
+    { row: 20, column: 3, value: WORD.land, kind: "target" },
+    { row: 20, column: 4, value: WORD.descent3, kind: "angle" },
+    { row: 30, column: 5, value: WORD.unspecified, kind: "unspecified" },
+  ];
+  const eM = range(rows, -20000, 300);
+  const nM = range(rows).map((row) => (vectored && row < 25 ? 3000 - row * 100 : 0));
+  const altitude = range(rows).map((row) => (row < 20 ? 1110 : 1110 - (row - 20) * 16));
+  const track = range(rows).map((row) => (vectored ? (row < 10 ? 270 : row < 16 ? 270 - (row - 10) * 15 : row < 25 ? 180 : 90) : 90));
+  const speed = range(rows).map((row) => (row < 30 ? 110 : 110 - (row - 30) * 0.8));
+  const distance = range(rows, 0, 220);
+  const heading = vectored
+    ? [
+        {
+          row: 0, value: WORD.heading270, kind: "initial", targetDeg: 270, split: null, turnEndRow: null,
+          holdStartRow: 0, holdEndRow: 10, fromTrackDeg: 270, targetOnTrackDeg: 270, turnBandDeg: null,
+          holdBandDeg: [265.5, 274.5], turn: null,
+          funnel: { lengthM: 2200, startHalfWidthM: 0, endHalfWidthM: 173.1, axis: line([-20000, -22200], [3000, 3000]),
+                    outline: line([-20000, -22200, -22200, -20000], [3000, 2826.9, 3173.1, 3000]) },
+          check: null,
+        },
+        {
+          row: 10, value: WORD.heading180, kind: "turn", targetDeg: 180, split: null, turnEndRow: 16,
+          holdStartRow: 16, holdEndRow: 20, fromTrackDeg: 270, targetOnTrackDeg: 180, turnBandDeg: [175.5, 274.5],
+          holdBandDeg: [175.5, 184.5], turn: turnRegion(-17000, 2000),
+          funnel: { lengthM: 880, startHalfWidthM: 6200, endHalfWidthM: 6269.3, axis: line([-24800, -24800], [-5800, -6680]),
+                    outline: line([-31000, -31069, -18531, -18600], [-5800, -6680, -6680, -5800]) },
+          check: { ...turnCheck, kind: "turn", departureRow: 10, arrivalRow: 16, turnDeg: -90, parts: 1 },
+        },
+      ]
+    : [
+        {
+          row: 0, value: WORD.heading090, kind: "initial", targetDeg: 90, split: null, turnEndRow: null,
+          holdStartRow: null, holdEndRow: 0, fromTrackDeg: 90, targetOnTrackDeg: 90, turnBandDeg: null,
+          holdBandDeg: null, turn: null, funnel: null, check: null,
+        },
+      ];
+  const tubeInside = range(40).map((offset) => (vectored && offset === 5 ? 0 : 1));
+  return {
+    datasetId: `KXXX:${key}`, flightKey: key, callsign: key.split("_")[0], typecode: "A320",
+    runway: "09", runwayIndex: 0, stratum: vectored ? "vectored" : "straight-in", rows,
+    captureRow, joinRow, unspecifiedRow: 30, captureBeforeThresholdM: 12500,
+    signals: {
+      tS: range(rows, 0, MOCK_STEP_S), eM, nM, lon: eM.map((e) => -78 + e / 90000), lat: nM.map((n) => 35 + n / 111000),
+      altitudeHaeM: altitude.map((h) => h - 33),
+      raw: { trackDeg: track.map((t) => t + 0.4), altitudeM: altitude.map((h) => h + 3), groundSpeedMps: speed.map((v) => v + 0.5),
+             verticalRateMps: range(rows).map((row) => (row < 20 ? 0 : -4)) },
+      smoothed: { trackDeg: track, altitudeM: altitude, groundSpeedMps: speed, distanceM: distance },
+      beforeThresholdM: eM.map((e) => -e), rightOfCourseM: nM.map((n) => -n),
+    },
+    words: { events, inForce: inForce(events) },
+    envelopes: {
+      heading,
+      approach: {
+        clearanceRow: joinRow, captureRow, captureBeforeThresholdM: 12500, interceptInserted: false,
+        captureTurn: vectored
+          ? { startRow: 20, courseOnTrackDeg: 90, bandDeg: [85.5, 184.5], check: turnCheck, turn: turnRegion(-14000, 1000) }
+          : null,
+        courseBandDeg: [88, 92],
+        corridor: {
+          beforeThresholdM: 12500, halfWidthAtCaptureM: 118.2, halfWidthAtThresholdM: 20, rows: rows - captureRow,
+          axis: line([-12500, 0], [0, 0]), outline: line([-12500, 0, 0, -12500], [-118.2, -20, 20, 118.2]),
+        },
+        landing: { cutAtCrossing: false, lastRowBeforeThresholdM: 2300, crossing: null },
+      },
+      altitude: [
+        {
+          row: 0, endRow: 20, value: WORD.altitude1110, kind: "initial", targetM: 1110,
+          lowerM: range(20).map(() => 1085), upperM: range(20).map(() => 1135),
+          lowerHaeM: range(20).map(() => 1052), upperHaeM: range(20).map(() => 1102),
+          inside: range(20).map(() => 1), check: { rows: 20, inside: 20, contained: true, tubeWidthEndM: 50 },
+        },
+        {
+          row: 20, endRow: 60, value: WORD.land, kind: "target", targetM: null,
+          lowerM: range(40).map((i) => 1085 - i * 20), upperM: range(40).map((i) => 1135 - i * 10),
+          lowerHaeM: range(40).map((i) => 1052 - i * 20), upperHaeM: range(40).map((i) => 1102 - i * 10),
+          inside: tubeInside,
+          check: { rows: 40, inside: tubeInside.filter(Boolean).length, contained: !vectored, tubeWidthEndM: 440 },
+        },
+      ],
+      angle: [
+        { row: 0, value: WORD.level, kind: "initial", measuredDeg: null },
+        { row: 20, value: WORD.descent3, kind: "angle", measuredDeg: 3.05 },
+      ],
+      speed: [
+        {
+          row: 0, endRow: 30, value: WORD.speed110, kind: "initial", targetMps: 110, arrivalRow: 0,
+          transitionLowerMps: [110], transitionUpperMps: [110], bandMps: [105, 115], bandInside: range(30).map(() => 1),
+          check: { arrivalRows: 0, cutBeforeArrival: false, transitionOk: true, accelOk: true, bandRows: 30, bandInside: 30, contained: true },
+          rangeMps: null,
+        },
+        {
+          row: 30, endRow: 60, value: WORD.unspecified, kind: "unspecified", targetMps: null, arrivalRow: null,
+          transitionLowerMps: null, transitionUpperMps: null, bandMps: null, bandInside: null, check: null, rangeMps: [15, 255],
+        },
+      ],
+    },
   };
-  index.sets[0] = {
-    ...index.sets[0],
-    id: "prior_s1337_val",
-    kind: "prior-generated",
-    file: "prior_s1337_val/sample.json",
-    // the manifest names the model, so the picker can say which experiment a set
-    // is without downloading it
-    prior: { sha256: MOCK_PRIOR.sha256, seed: MOCK_PRIOR.seed, method: MOCK_PRIOR.method },
+}
+
+export const VECTORED_KEY = "TST1_09_abc123_20260101T000000Z";
+export const STRAIGHT_KEY = "TST2_09_abc124_20260101T000100Z";
+
+/** A readable sample: the vectored flight first, then the straight-in one. */
+export function mockSample(): Record<string, unknown> {
+  return {
+    schema: TRAINING_SAMPLE_SCHEMA,
+    setId: "instruction_v1",
+    airport: "KXXX",
+    writtenUtc: "2026-09-23T00:00:00+00:00",
+    producedBy: { runner: "test", artefact: "test", git: { head: "test", dirty: false } },
+    cohort: { split: "val", perStratum: 1, seed: 1337, drawnFrom: "a test draw", pool: 2, read: 2 },
+    vocabulary: structuredClone(MOCK_VOCABULARY),
+    airportFrame: { code: "KXXX", lat: 35, lon: -78, elevationM: 100 },
+    candidatesSha256: MOCK_CANDIDATES_SHA,
+    centrelineLengthM: 30000,
+    candidates: structuredClone(MOCK_CANDIDATES),
+    flights: [mockFlight(VECTORED_KEY, true), mockFlight(STRAIGHT_KEY, false)],
   };
-  return index;
+}
+
+/** The readable entry, a superseded one and a prior one — as a manifest of today looks. */
+export function mockIndex(): Record<string, unknown> {
+  const cohort = { split: "val", perStratum: 1, seed: 1337, drawnFrom: "a test draw" };
+  return {
+    schema: TRAINING_INDEX_SCHEMA,
+    airport: "KXXX",
+    sets: [
+      { id: "box_v3", kind: "vocabulary-readback", title: "an old set", file: "box_v3/sample.json",
+        vocabularySha256: "a".repeat(64), runwaySha256: "b".repeat(64), readingRule: "box-v3", flights: 40,
+        cohort: { ...cohort, perStratum: 20 } },
+      { id: "instruction_v1", kind: TRAINING_READABLE_SET_KIND, title: "Instruction vocabulary", file: "instruction_v1/sample.json",
+        vocabularySha256: TRAINING_SPEC_SHA256, runwaySha256: MOCK_CANDIDATES_SHA, readingRule: TRAINING_READING_RULE,
+        flights: 2, cohort, source: { any: "extra keys are the exporter's provenance" } },
+      { id: "prior_s1337_val", kind: "prior-generated", title: "an old prior", file: "prior_s1337_val/sample.json",
+        vocabularySha256: "e".repeat(64), runwaySha256: "b".repeat(64), readingRule: "segment-v13", flights: 40,
+        cohort: { ...cohort, perStratum: 20 }, prior: { sha256: "f".repeat(64), seed: 1337, method: "teacher-forced-next-word" } },
+    ],
+  };
 }

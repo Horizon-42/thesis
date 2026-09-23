@@ -941,9 +941,10 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-width: 1.5;
 }
 
-.training-sentence-absorbed {
-  pointer-events: auto;
+.training-sentence-marker {
+  pointer-events: none;
 }
+
 
 .training-sentence-legend {
   display: flex;
@@ -1068,23 +1069,10 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-width: 1.2;
 }
 
-/* The sentence flown by rule. Thinner and orange, never the dashed style the
-   comparison view gives a model's output: it is a baseline, not a prediction. */
-.training-readback-flown {
-  fill: none;
-  stroke: #fb923c;
-  stroke-width: 1;
-  opacity: 0.85;
-}
-
-.training-readback-course {
-  stroke: rgba(224, 230, 240, 0.28);
-  stroke-width: 1;
-}
-
-.training-readback-threshold {
-  stroke: rgba(248, 113, 113, 0.75);
-  stroke-width: 1.2;
+.training-readback-candidate-label,
+.training-readback-issue-label {
+  font-size: 10px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
 .training-readback-cursor-dot {
@@ -1096,24 +1084,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-width: 1.2;
 }
 
-.training-readback-issued {
-  stroke: rgba(250, 204, 21, 0.55);   /* the word's colour: this marks when it was issued */
-  stroke-width: 0.8;
-  stroke-dasharray: 2 3;
-}
-
-.training-readback-settled {
-  stroke: rgba(134, 239, 172, 0.55);
-  stroke-width: 0.8;
-  stroke-dasharray: 2 3;
-}
-
-.training-readback-landed {
-  stroke: rgba(244, 114, 182, 0.8);
-  stroke-width: 1.2;
-  stroke-dasharray: 5 4;
-}
-
 .training-readback-axis {
   stroke: rgba(224, 230, 240, 0.25);
 }
@@ -1122,6 +1092,29 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   fill: rgba(224, 230, 240, 0.5);
   font-size: 10px;
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* The two envelopes that do not exist yet — an executor's replay and a prior's sentence — are
+   empty slots, drawn as dashed boxes with the reason, never with placeholder data. */
+.training-readback-slots {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+
+.training-readback-slot {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px dashed rgba(224, 230, 240, 0.28);
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: rgba(224, 230, 240, 0.55);
+}
+
+.training-slot {
+  opacity: 0.55;
+  font-style: italic;
 }
 
 .training-readback-legend {

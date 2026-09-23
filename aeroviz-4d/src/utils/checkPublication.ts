@@ -31,7 +31,7 @@ import {
 import {
   parseTrainingIndex,
   parseTrainingSample,
-  type TrainingSetKind,
+  trainingSetRefusal,
   type TrainingSample,
   type TrainingSetEntry,
 } from "../data/trainingSample";
@@ -214,17 +214,15 @@ export function checkComparisonIndex(
   return findings;
 }
 
-// ── the Training export (design §7, T8) ──────────────────────────────────────
+// ── the Training export ──────────────────────────────────────────────────────
 
 /**
- * The Training manifest as the panel would read it, plus what the panel cannot see:
- * that every set it lists has a sample file on disk.
+ * The Training manifest as the panel reads it.
  *
- * Training is checked on the OPPOSITE rule to the comparison picker above. There a bad
- * category empties the airport, so the check exists to stop that; here a bad set is greyed
- * on its own by design (§4.5 ③), which means a half-written export is easy to publish and
- * never notice. The check is what notices — and it names the set and the field, because
- * "the manifest is invalid" is what wasted the two sessions this module's rule came from.
+ * Training is checked on the OPPOSITE rule to the comparison picker above. There a bad category
+ * empties the airport, so the check exists to stop that; here a bad entry is greyed out on its own
+ * by design, which means a half-written export is easy to publish and never notice. The check is
+ * what notices — naming the entry and the field.
  */
 export function checkTrainingIndex(manifest: unknown): PublicationFinding[] {
   const parsed = parseTrainingIndex(manifest);
@@ -234,71 +232,46 @@ export function checkTrainingIndex(manifest: unknown): PublicationFinding[] {
   return parsed.value.rejected.map((item) => ({
     level: "error" as const,
     category: item.id,
-    message: `the panel would grey this set out: ${item.problem}`,
+    message: `the panel would grey this entry out: ${item.problem}`,
   }));
 }
 
 /**
- * One set's sample file, through the panel's own reader.
- *
- * `readUnder` is the reading rule the MANIFEST claims for this set. It is
- * REQUIRED — its one caller always has it, and an optional one could only ever
- * fire on a caller that forgot, printing a message missing the half that
- * explains it. It is
- * printed with the failure because the commonest failure now is a superseded
- * export: the vocabulary's second word kind changed from a height to an angle on
- * 2026-09-21, so every sentence in an older file still parses as six columns and
- * the reader refuses it on `kinds` alone. "kinds is [heading,altitude,…]" says
- * what is wrong; the rule that produced it says WHY, and which command to rerun.
+ * A listed set the panel REFUSES by name — a superseded vocabulary, another spec, a prior set —
+ * is a warning, not an error: it is refused on purpose, from the manifest alone, and deleting it
+ * is a decision about data on disk, not about whether the panel loads.
  */
-export function checkTrainingSample(
-  setId: string,
-  sample: unknown,
-  readUnder: string,
-  kind: TrainingSetKind,
-): PublicationFinding[] {
-  const parsed = parseTrainingSample(sample, kind);
-  if (!parsed.ok) {
-    return [{
-      level: "error",
-      category: setId,
-      message: `sample.json (read under ${readUnder}): ${parsed.problem}`,
-    }];
-  }
-  return [];
+export function checkTrainingSetRefusal(entry: TrainingSetEntry): PublicationFinding[] {
+  const refusal = trainingSetRefusal(entry);
+  return refusal === null
+    ? []
+    : [{ level: "warn", category: entry.id, message: `listed, and refused by name: ${refusal}` }];
+}
+
+/** One readable set's sample file, through the panel's own reader. */
+export function checkTrainingSample(setId: string, sample: unknown): PublicationFinding[] {
+  const parsed = parseTrainingSample(sample);
+  return parsed.ok ? [] : [{ level: "error", category: setId, message: `sample.json: ${parsed.problem}` }];
 }
 
 /**
- * What the manifest promises against what the sample holds. The two files are written by one
- * run of the exporter, so a disagreement means they came from different runs — which the
- * panel says on screen and the check says here, rather than either of them averaging over it.
+ * What the manifest promises against what the sample holds. The two files are written by one run
+ * of the exporter, so a disagreement means they came from different runs.
  */
-export function checkTrainingSetAgrees(
-  entry: TrainingSetEntry,
-  sample: TrainingSample,
-): PublicationFinding[] {
+export function checkTrainingSetAgrees(entry: TrainingSetEntry, sample: TrainingSample): PublicationFinding[] {
   const findings: PublicationFinding[] = [];
-  if (sample.setId !== entry.id) {
-    findings.push({ level: "error", category: entry.id, message: `sample.json calls itself ${sample.setId}` });
-  }
-  if (sample.flights.length !== entry.flights) {
-    findings.push({
-      level: "error",
-      category: entry.id,
-      message: `the manifest lists ${entry.flights} flights, sample.json holds ${sample.flights.length}`,
-    });
-  }
-  for (const [what, listed, held] of [
-    ["vocabularySha256", entry.vocabularySha256, sample.vocabulary.sha256],
-    ["runwaySha256", entry.runwaySha256, sample.vocabulary.runwaySha256],
+  const pairs: Array<[string, string | number, string | number]> = [
+    ["setId", entry.id, sample.setId],
+    ["flights", entry.flights, sample.flights.length],
+    ["vocabularySha256", entry.vocabularySha256, sample.vocabulary.specSha256],
+    ["runwaySha256", entry.runwaySha256, sample.candidatesSha256],
     ["readingRule", entry.readingRule, sample.vocabulary.readingRule],
-  ] as const) {
+    ["cohort.perStratum", entry.cohort.perStratum, sample.cohort.perStratum],
+    ["cohort.seed", entry.cohort.seed, sample.cohort.seed],
+  ];
+  for (const [what, listed, held] of pairs) {
     if (listed !== held) {
-      findings.push({
-        level: "error",
-        category: entry.id,
-        message: `${what}: the manifest says ${listed}, sample.json says ${held}`,
-      });
+      findings.push({ level: "error", category: entry.id, message: `${what}: the manifest says ${listed}, sample.json says ${held}` });
     }
   }
   return findings;

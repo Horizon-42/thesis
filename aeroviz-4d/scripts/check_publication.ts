@@ -3,6 +3,7 @@
  *
  *   npm run check-publication -- --airport KSMF [--airport KRDU …] [--server http://localhost:5173]
  *   npm run check-publication                      # every airport under public/data/airports
+ *   npm run check-publication -- --airports-root /tmp/export   # another airports directory
  *
  * Two layers, each answering a question a bare `curl … 200` cannot:
  *   1. DISK — `comparison/categories.json` and every drawable category's
@@ -14,7 +15,12 @@
  *      file must come back as JSON, every CZML file must not come back as HTML. A server
  *      started before the publication answers a new category directory with the SPA fallback
  *      (`aeroviz-4d/CLAUDE.md`, "a RUNNING dev server never sees a newly published category"),
- *      which this layer reports as "restart the dev server".
+ *      which this layer reports as "restart the dev server". A Training sample the server
+ *      answers is also read through the panel's own parser: HTTP 200 is not "it loads".
+ *
+ * Training sets: every set the manifest lists must have its file; a set the panel refuses by
+ * name (a superseded vocabulary) is a WARNING, since it is refused on purpose; every readable set
+ * is parsed by the panel's own reader and compared with its manifest entry.
  *
  * Exit status 1 on any error-level finding, 2 on a usage error. Runs under vite-node (no
  * build, no browser); `npm run typecheck:scripts` type-checks it.
@@ -35,22 +41,25 @@ import {
   checkTrainingIndex,
   checkTrainingSample,
   checkTrainingSetAgrees,
+  checkTrainingSetRefusal,
   indexCzmlFiles,
   type PublicationFinding,
 } from "../src/utils/checkPublication";
 import { parseTrainingIndex, parseTrainingSample } from "../src/data/trainingSample";
 
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const AIRPORTS_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
+const PUBLISHED_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
 const USAGE =
-  "usage: npm run check-publication -- [--airport ICAO]... [--server http://localhost:5173]\n" +
-  "  no --airport: every airport under public/data/airports with a comparison/categories.json";
+  "usage: npm run check-publication -- [--airport ICAO]... [--server http://localhost:5173] [--airports-root DIR]\n" +
+  "  no --airport: every airport under the airports directory with a comparison or a Training manifest\n" +
+  "  --airports-root: another airports directory (default public/data/airports); not with --server";
 
 class UsageError extends Error {}
 
 interface Options {
   airports: string[];
   server: string | null;
+  root: string;
 }
 
 function flagValue(argv: string[], position: number): string {
@@ -62,7 +71,7 @@ function flagValue(argv: string[], position: number): string {
 }
 
 function parseArgs(argv: string[]): Options {
-  const options: Options = { airports: [], server: null };
+  const options: Options = { airports: [], server: null, root: PUBLISHED_ROOT };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--airport") {
@@ -71,15 +80,22 @@ function parseArgs(argv: string[]): Options {
     } else if (arg === "--server") {
       options.server = flagValue(argv, i).replace(/\/+$/, "");
       i += 1;
+    } else if (arg === "--airports-root") {
+      options.root = path.resolve(flagValue(argv, i));
+      i += 1;
     } else {
       throw new UsageError(arg === "--help" || arg === "-h" ? "" : `unknown argument ${arg}`);
     }
   }
+  // The server serves public/data: comparing it with another directory would compare two things.
+  if (options.server !== null && options.root !== PUBLISHED_ROOT) {
+    throw new UsageError("--server checks what the dev server serves from public/data; do not combine it with --airports-root");
+  }
   if (options.airports.length === 0) {
-    options.airports = readdirSync(AIRPORTS_ROOT, { withFileTypes: true })
+    options.airports = readdirSync(options.root, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && (
-        existsSync(path.join(AIRPORTS_ROOT, entry.name, "comparison", "categories.json"))
-        || existsSync(path.join(AIRPORTS_ROOT, entry.name, "training", "index.json"))
+        existsSync(path.join(options.root, entry.name, "comparison", "categories.json"))
+        || existsSync(path.join(options.root, entry.name, "training", "index.json"))
       ))
       .map((entry) => entry.name)
       .sort();
@@ -130,6 +146,7 @@ async function served(url: string, kind: "json" | "czml"): Promise<string | null
 interface AirportReport {
   listed: number;
   trainingSets: number;
+  readableTrainingSets: number;
   findings: PublicationFinding[];
 }
 
@@ -139,10 +156,10 @@ interface AirportReport {
  * an export that exists and is half-written: the panel greys a bad set out and carries on
  * (§4.5 ③), so nothing on screen shouts, and this is what shouts.
  */
-async function checkTraining(airport: string, server: string | null): Promise<AirportReport> {
-  const trainingDir = path.join(AIRPORTS_ROOT, airport, "training");
+async function checkTraining(root: string, airport: string, server: string | null): Promise<AirportReport> {
+  const trainingDir = path.join(root, airport, "training");
   const manifestFile = path.join(trainingDir, "index.json");
-  if (!existsSync(manifestFile)) return { listed: 0, trainingSets: 0, findings: [] };
+  if (!existsSync(manifestFile)) return { listed: 0, trainingSets: 0, readableTrainingSets: 0, findings: [] };
 
   const findings: PublicationFinding[] = [];
   let manifest: unknown;
@@ -151,15 +168,16 @@ async function checkTraining(airport: string, server: string | null): Promise<Ai
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     return {
-      listed: 0, trainingSets: 0,
+      listed: 0, trainingSets: 0, readableTrainingSets: 0,
       findings: [{ level: "error", message: `training/index.json is not readable JSON: ${detail}` }],
     };
   }
   findings.push(...checkTrainingIndex(manifest));
   const parsed = parseTrainingIndex(manifest);
-  if (!parsed.ok) return { listed: 0, trainingSets: 0, findings };
+  if (!parsed.ok) return { listed: 0, trainingSets: 0, readableTrainingSets: 0, findings };
 
   const serverRoot = server ? `${server}/data/airports/${airport}/training` : null;
+  let readable = 0;
   if (serverRoot) {
     const problem = await served(`${serverRoot}/index.json`, "json");
     if (problem) findings.push({ level: "error", message: `server: training/index.json ${problem}` });
@@ -171,11 +189,14 @@ async function checkTraining(airport: string, server: string | null): Promise<Ai
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is listed but missing on disk` });
       continue;
     }
-    // A half-written export is the failure this check EXISTS for, and a truncated
-    // file is the commonest shape of it. Left to `readJson` it threw out of the
-    // sweep with a bare "Unexpected end of JSON input", no filename, no set, and
-    // the remaining sets unchecked — the "invalid manifest" message this module
-    // was written to replace.
+    // A set the panel refuses by name is never downloaded by it, so it is not parsed here either:
+    // it is reported as what it is — listed, and refused on purpose.
+    const refusal = checkTrainingSetRefusal(entry);
+    if (refusal.length) {
+      findings.push(...refusal);
+      continue;
+    }
+    // A truncated file is the commonest shape of a half-written export: name the set and go on.
     let sample: unknown;
     try {
       sample = readJson(sampleFile);
@@ -184,30 +205,39 @@ async function checkTraining(airport: string, server: string | null): Promise<Ai
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${detail}` });
       continue;
     }
-    findings.push(...checkTrainingSample(entry.id, sample, entry.readingRule, entry.kind));
-    const read = parseTrainingSample(sample, entry.kind);
-    if (read.ok) findings.push(...checkTrainingSetAgrees(entry, read.value));
+    findings.push(...checkTrainingSample(entry.id, sample));
+    const read = parseTrainingSample(sample);
+    if (read.ok) {
+      readable += 1;
+      findings.push(...checkTrainingSetAgrees(entry, read.value));
+    }
     if (serverRoot) {
       const problem = await served(`${serverRoot}/${entry.file}`, "json");
       if (problem) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file} ${problem}` });
+      else {
+        // HTTP 200 is not "it loads": the SERVED body goes through the same reader.
+        const body = await (await fetch(`${serverRoot}/${entry.file}`)).json() as unknown;
+        const answered = parseTrainingSample(body);
+        if (!answered.ok) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file}: ${answered.problem}` });
+      }
     }
   }
-  return { listed: 0, trainingSets: parsed.value.sets.length, findings };
+  return { listed: 0, trainingSets: parsed.value.sets.length, readableTrainingSets: readable, findings };
 }
 
-async function checkAirport(airport: string, server: string | null): Promise<AirportReport> {
+async function checkAirport(root: string, airport: string, server: string | null): Promise<AirportReport> {
   const findings: PublicationFinding[] = [];
-  const comparisonDir = path.join(AIRPORTS_ROOT, airport, "comparison");
+  const comparisonDir = path.join(root, airport, "comparison");
   const manifestFile = path.join(comparisonDir, "categories.json");
   if (!existsSync(manifestFile)) {
     // An airport can be published with a Training export and no comparison at all; only an
     // airport asked for BY NAME with neither is a mistake, and `checkTraining` says so.
-    const level = existsSync(path.join(AIRPORTS_ROOT, airport, "training", "index.json")) ? "warn" : "error";
-    return { listed: 0, trainingSets: 0, findings: [{ level, message: `${manifestFile} does not exist` }] };
+    const level = existsSync(path.join(root, airport, "training", "index.json")) ? "warn" : "error";
+    return { listed: 0, trainingSets: 0, readableTrainingSets: 0, findings: [{ level, message: `${manifestFile} does not exist` }] };
   }
   const manifest = readJson(manifestFile);
   findings.push(...checkCategoriesManifest(manifest));
-  if (!isComparisonCategoriesManifest(manifest)) return { listed: 0, trainingSets: 0, findings };
+  if (!isComparisonCategoriesManifest(manifest)) return { listed: 0, trainingSets: 0, readableTrainingSets: 0, findings };
 
   const serverRoot = server ? `${server}/data/airports/${airport}/comparison` : null;
   if (serverRoot) {
@@ -250,22 +280,24 @@ async function checkAirport(airport: string, server: string | null): Promise<Air
       }
     }
   }
-  return { listed: manifest.categories.length, trainingSets: 0, findings };
+  return { listed: manifest.categories.length, trainingSets: 0, readableTrainingSets: 0, findings };
 }
 
 async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
   let errors = 0;
   for (const airport of options.airports) {
-    const comparison = await checkAirport(airport, options.server);
-    const training = await checkTraining(airport, options.server);
+    const comparison = await checkAirport(options.root, airport, options.server);
+    const training = await checkTraining(options.root, airport, options.server);
     const findings = [...comparison.findings, ...training.findings];
     const errorCount = findings.filter((finding) => finding.level === "error").length;
     errors += errorCount;
     const verdict = errorCount === 0 ? "picker loads" : "picker BROKEN";
     const scope = options.server ? " (disk + server)" : " (disk only)";
     const listed = comparison.listed;
-    const trained = training.trainingSets ? `, ${training.trainingSets} Training sets` : "";
+    const trained = training.trainingSets
+      ? `, ${training.trainingSets} Training sets (${training.readableTrainingSets} readable)`
+      : "";
     console.log(`${airport}: ${listed} categories listed${trained}, ${errorCount} errors, ${findings.length - errorCount} warnings — ${verdict}${scope}`);
     for (const finding of findings) {
       console.log(`  ${finding.level.toUpperCase().padEnd(5)} ${finding.category ? `[${finding.category}] ` : ""}${finding.message}`);

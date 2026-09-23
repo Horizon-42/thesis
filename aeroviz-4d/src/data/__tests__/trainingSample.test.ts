@@ -1,468 +1,218 @@
 /**
- * The Training contract, under `box-v3`.
- *
- * Three groups of test, and they are not the same question:
- *  • WHAT A WORD MEANS — the edge tables, the ladder, the wedge. These are the
- *    mirrors of the artefact's spec, and a drift in any of them silently moves
- *    every box.
- *  • WHAT THE READER REFUSES — a file of another rule, a table that does not
- *    tile, a sentence whose boxes leave a gap, a verdict that disagrees with the
- *    columns beside it. Each of these is a file that would otherwise draw
- *    something plausible and wrong.
- *  • THE VERDICT — containment, per row, computed here and checked against the
- *    file's own count.
+ * The Training reader under `instruction-v1`: what it accepts, and — the point of it — that
+ * everything it refuses is refused BY NAME, with the field that failed.
  */
-
 import { describe, expect, it } from "vitest";
+
 import {
-  TERMINAL_LANDED,
-  TRAINING_BOX_KINDS,
-  TRAINING_INSIDE_EPSILON,
-  TRAINING_KINDS,
-  TRAINING_KIND_COLUMN,
-  TRAINING_READING_RULE,
-  TRAINING_SAMPLE_SCHEMA,
-  altitudeFloorM,
-  altitudeTargetM,
-  altitudeWedgeM,
-  eventInForce,
-  headingBoxDeg,
-  headingWordAt,
-  isTrainingBoxKind,
+  altitudeTubeAt,
+  headingEnvelopeAt,
   parseTrainingIndex,
   parseTrainingSample,
-  speedBoxMps,
-  trainingContainment,
-  trainingWordBandLabel,
-  trainingWordBox,
-  trainingWordCounts,
+  rowAtTime,
+  trainingColumnRuns,
+  trainingSetRefusal,
+  trainingVerdicts,
   trainingWordLabel,
+  TRAINING_COLUMNS,
+  TRAINING_READING_RULE,
+  TRAINING_SPEC_SHA256,
   type TrainingSample,
 } from "../trainingSample";
-import {
-  MOCK_EVENT_TIMES_S,
-  MOCK_HOLDS_S,
-  MOCK_SPEC,
-  MOCK_VOCABULARY,
-  MOCK_WORDS,
-  mockIndex,
-  mockPriorIndex,
-  mockPriorSample,
-  mockSample,
-} from "./trainingSample.fixture";
+import { MOCK_ROWS, STRAIGHT_KEY, VECTORED_KEY, WORD, mockIndex, mockSample } from "./trainingSample.fixture";
 
 function parsed(raw: unknown = mockSample()): TrainingSample {
-  const result = parseTrainingSample(raw, "vocabulary-readback");
+  const result = parseTrainingSample(raw);
   if (!result.ok) throw new Error(result.problem);
   return result.value;
 }
 
-function problem(raw: unknown, kind: "vocabulary-readback" | "prior-generated" = "vocabulary-readback"): string {
-  const result = parseTrainingSample(raw, kind);
-  expect(result.ok).toBe(false);
-  return result.ok ? "" : result.problem;
+/** The sample with one change applied to its raw JSON, and the reader's answer. */
+function refusal(change: (raw: any) => void): string {
+  const raw: any = mockSample();
+  change(raw);
+  const result = parseTrainingSample(raw);
+  if (result.ok) throw new Error("the change was accepted");
+  return result.problem;
 }
 
-describe("what a word means", () => {
-  it("counts the classes from the tables, and knows which table tiles", () => {
-    const counts = trainingWordCounts(MOCK_SPEC);
-    // The edge tables hold one more value than they have words; the ladder holds
-    // one target PER word. Getting that backwards shifts every altitude word by
-    // half a box and still plots.
-    expect(counts.heading).toBe(MOCK_SPEC.headingEdgesDeg.length - 1);
-    expect(counts.speed).toBe(MOCK_SPEC.speedEdgesMps.length - 1);
-    expect(counts.altitude).toBe(MOCK_SPEC.altitudeTargetsM.length);
-    expect(counts.terminal).toBe(3);
-    expect(counts.duration).toBe(MOCK_SPEC.durationMaxS / MOCK_SPEC.durationBinS + 1);
-  });
-
-  it("a heading or speed word is the interval between two edges", () => {
-    expect(headingBoxDeg(MOCK_SPEC, 0)).toEqual([MOCK_SPEC.headingEdgesDeg[0], MOCK_SPEC.headingEdgesDeg[1]]);
-    expect(speedBoxMps(MOCK_SPEC, 2)).toEqual([MOCK_SPEC.speedEdgesMps[2], MOCK_SPEC.speedEdgesMps[3]]);
-    // they tile: one word's top edge is the next one's bottom
-    expect(headingBoxDeg(MOCK_SPEC, 3)[1]).toBe(headingBoxDeg(MOCK_SPEC, 4)[0]);
-  });
-
-  it("the box on the course is the narrowest one", () => {
-    const onCourse = headingWordAt(MOCK_SPEC, 0);
-    const [low, high] = headingBoxDeg(MOCK_SPEC, onCourse);
-    expect(low).toBeLessThanOrEqual(0);
-    expect(high).toBeGreaterThanOrEqual(0);
-    const widths = MOCK_SPEC.headingEdgesDeg.slice(1).map((edge, word) => edge - MOCK_SPEC.headingEdgesDeg[word]);
-    expect(high - low).toBe(Math.min(...widths));
-  });
-
-  it("an altitude word is a target, and its own tolerance is a fraction of the target plus h0", () => {
-    const word = 4;
-    expect(altitudeTargetM(MOCK_SPEC, word)).toBe(MOCK_SPEC.altitudeTargetsM[word]);
-    expect(altitudeFloorM(MOCK_SPEC, word)).toBeCloseTo(
-      MOCK_SPEC.redundancyFraction * (MOCK_SPEC.altitudeTargetsM[word] + MOCK_SPEC.altitudeH0M), 9);
-    // The `+ h0` is what gives a target of 0 m a box at all: without it the one
-    // target on the ladder that means "the threshold" would be unmeetable.
-    const atZero = MOCK_SPEC.altitudeTargetsM.indexOf(0);
-    expect(altitudeFloorM(MOCK_SPEC, atZero)).toBeGreaterThan(0);
-  });
-
-  it("a NEGATIVE target still has a box, and it is not inverted", () => {
-    // Thirteen of the artefact's sixty-one targets are negative: the ladder spans the threshold,
-    // because an arrival passing below the threshold elevation is an ordinary one. The half width
-    // takes the target's ABSOLUTE value — without that, `redundancy × (T + h0)` reaches zero at
-    // T = −h0 and goes negative below it, which draws a corridor nothing can be inside.
-    const below = MOCK_SPEC.altitudeTargetsM.findIndex((metres) => metres < 0);
-    expect(below).toBeGreaterThanOrEqual(0);
-    const target = altitudeTargetM(MOCK_SPEC, below);
-    expect(altitudeFloorM(MOCK_SPEC, below)).toBeCloseTo(
-      MOCK_SPEC.redundancyFraction * (Math.abs(target) + MOCK_SPEC.altitudeH0M), 9);
-    expect(altitudeFloorM(MOCK_SPEC, below)).toBeGreaterThan(0);
-    const [low, high] = altitudeWedgeM(MOCK_SPEC, below, 0);
-    expect(high).toBeGreaterThan(low);
-    // and a target far below the threshold, where the un-absolute form would be worst
-    const deep: typeof MOCK_SPEC = { ...MOCK_SPEC, altitudeTargetsM: [-400, -100, 0, 100] };
-    expect(altitudeFloorM(deep, 0)).toBeCloseTo(0.05 * (400 + 50), 9);
-    expect(altitudeWedgeM(deep, 0, 0)[1]).toBeGreaterThan(altitudeWedgeM(deep, 0, 0)[0]);
-  });
-
-  it("the wedge closes onto the target's own box, and opens ASYMMETRICALLY going back", () => {
-    const word = 5;
-    const target = altitudeTargetM(MOCK_SPEC, word);
-    const floor = altitudeFloorM(MOCK_SPEC, word);
-    expect(altitudeWedgeM(MOCK_SPEC, word, 0)).toEqual([target - floor, target + floor]);
-
-    const [low, high] = altitudeWedgeM(MOCK_SPEC, word, 1000);
-    // down is the WIDER side and it opens ABOVE the target: the wedge is the set
-    // the target is backward-reachable from, and losing height has the most room.
-    expect(high - target - floor).toBeCloseTo(1000 * Math.tan((1.5 * Math.PI) / 180), 6);
-    expect(target - floor - low).toBeCloseTo(1000 * Math.tan((1.0 * Math.PI) / 180), 6);
-    expect(high - target).toBeGreaterThan(target - low);
-  });
-
-  it("a negative remaining path cannot widen the wedge", () => {
-    // The path column only grows, so this cannot arise from a good file — but a
-    // clamp that was missing would turn rounding at a segment's end into a box
-    // wider than the one the labeller used.
-    expect(altitudeWedgeM(MOCK_SPEC, 3, -500)).toEqual(altitudeWedgeM(MOCK_SPEC, 3, 0));
-  });
-
-  it("only three kinds are boxes; the other three return null", () => {
-    for (const kind of TRAINING_KINDS) {
-      const box = trainingWordBox(MOCK_SPEC, kind, 0);
-      expect(box === null).toBe(!isTrainingBoxKind(kind));
-    }
-  });
-
-  it("labels the interval, in SI, and the altitude word's target with its own tolerance", () => {
-    expect(trainingWordLabel(MOCK_SPEC, "speed", 2)).toBe("80–90 m/s");
-    expect(trainingWordLabel(MOCK_SPEC, "runway", 0)).toBe(MOCK_SPEC.runwayIdents[0]);
-    expect(trainingWordLabel(MOCK_SPEC, "duration", 5)).toBe(`${5 * MOCK_SPEC.durationBinS} s`);
-    expect(trainingWordLabel(MOCK_SPEC, "terminal", TERMINAL_LANDED)).toBe("landed");
-    // the altitude label names the TARGET; the band label adds the box it closes onto
-    expect(trainingWordLabel(MOCK_SPEC, "altitude", 5)).toBe("170 m");
-    expect(trainingWordBandLabel(MOCK_SPEC, "altitude", 5)).toBe("170 m±11.0");
-    // a kind whose label is already the interval gains nothing from the band label
-    expect(trainingWordBandLabel(MOCK_SPEC, "speed", 2)).toBe(trainingWordLabel(MOCK_SPEC, "speed", 2));
-  });
-});
-
-describe("the sample the reader accepts", () => {
-  it("reads the fixture, and every row of it is inside its boxes", () => {
+describe("parseTrainingSample", () => {
+  it("reads both flights, the candidates and the vocabulary's tables", () => {
     const sample = parsed();
-    expect(sample.vocabulary.readingRule).toBe(TRAINING_READING_RULE);
+    expect(sample.flights.map((flight) => flight.flightKey)).toEqual([VECTORED_KEY, STRAIGHT_KEY]);
+    expect(sample.candidates.map((candidate) => candidate.ident)).toEqual(["09", "27"]);
+    expect(sample.vocabulary.specSha256).toBe(TRAINING_SPEC_SHA256);
     const flight = sample.flights[0];
-    for (const kind of TRAINING_BOX_KINDS) {
-      expect(flight.envelope.inside[kind].rows).toBe(flight.observed.tS.length);
-      expect(flight.envelope.inside[kind].outside).toBe(0);
-    }
+    expect(flight.rows).toBe(MOCK_ROWS);
+    expect(flight.words.inForce).toHaveLength(TRAINING_COLUMNS.length);
+    expect(flight.envelopes.altitude[1].inside.filter((ok) => !ok)).toHaveLength(1);
+    expect(flight.envelopes.approach.captureTurn?.startRow).toBe(20);
   });
 
-  it("the boxes tile the track, so every row has exactly one in force", () => {
-    const flight = parsed().flights[0];
-    const forced = eventInForce(flight.sentence.eventTimesS, flight.observed.tS);
-    expect(forced.length).toBe(flight.observed.tS.length);
-    expect(forced[0]).toBe(0);
-    expect(forced[forced.length - 1]).toBe(flight.sentence.eventTimesS.length - 1);
-    // monotone: a row never falls back to an earlier box
-    for (let row = 1; row < forced.length; row += 1) {
-      expect(forced[row]).toBeGreaterThanOrEqual(forced[row - 1]);
-    }
-    const last = flight.sentence.eventTimesS.length - 1;
-    expect(flight.sentence.eventTimesS[last] + flight.sentence.holdS[last]).toBeCloseTo(flight.durationS, 6);
+  // ── refused by name ─────────────────────────────────────────────────────
+  it("refuses a sample of the superseded box vocabulary by its schema", () => {
+    expect(refusal((raw) => { raw.schema = "aeroviz-training-sample-v2"; })).toMatch(
+      /schema is "aeroviz-training-sample-v2", expected "aeroviz-training-sample-v3"/);
   });
 
-  it("carries one box per event, in the sentence's own order", () => {
-    const flight = parsed().flights[0];
-    expect(flight.envelope.events.length).toBe(flight.sentence.eventTimesS.length);
-    flight.envelope.events.forEach((box, event) => {
-      expect(box.eventS).toBe(flight.sentence.eventTimesS[event]);
-      expect(box.holdS).toBe(flight.sentence.holdS[event]);
-      expect(box.lon).toHaveLength(4);
-      expect(box.toGoM).toHaveLength(4);
-    });
+  it("refuses another reading rule and another spec by name", () => {
+    expect(refusal((raw) => { raw.vocabulary.readingRule = "box-v3"; })).toMatch(
+      new RegExp(`readingRule is box-v3, and this reader is written for ${TRAINING_READING_RULE}`));
+    expect(refusal((raw) => { raw.vocabulary.specSha256 = "0".repeat(64); })).toMatch(
+      new RegExp(`specSha256 is 000000000000, and this reader is written for spec ${TRAINING_SPEC_SHA256.slice(0, 12)}`));
   });
 
-  it("keeps the model's words and the boxes THEY make", () => {
-    const result = parseTrainingSample(mockPriorSample(), "prior-generated");
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const flight = result.value.flights[0];
-    expect(flight.prior).toBeDefined();
-    expect(flight.prior?.words).toHaveLength(flight.sentence.words.length);
-    // The model's sentence is a different sentence, so its boxes are a different
-    // envelope — and on this fixture it is one the track leaves. That is the
-    // answer the comparison exists to give.
-    const outside = TRAINING_BOX_KINDS.reduce(
-      (total, kind) => total + (flight.prior?.envelope.inside[kind].outside ?? 0), 0);
-    expect(outside).toBeGreaterThan(0);
-  });
-});
-
-describe("what the reader refuses", () => {
-  it("a file of another reading rule, by name", () => {
-    const raw = mockSample() as any;
-    raw.vocabulary.readingRule = "segment-v14";
-    expect(problem(raw)).toMatch(/readingRule is "segment-v14".*written for box-v3/s);
+  it("refuses the columns in another order — they are positional", () => {
+    expect(refusal((raw) => { raw.vocabulary.columns = ["runway", "approach", "heading", "angle", "altitude", "speed"]; }))
+      .toMatch(/columns are \[runway, approach, heading, angle, altitude, speed\], expected \[runway, approach, heading, altitude, angle, speed\]/);
   });
 
-  it("a sample of the retired schema", () => {
-    const raw = mockSample() as any;
-    raw.schema = "aeroviz-training-sample-v1";
-    expect(problem(raw)).toContain(TRAINING_SAMPLE_SCHEMA);
+  it("refuses a class table that disagrees with the stated class count", () => {
+    expect(refusal((raw) => { raw.vocabulary.headingTargetsDeg.pop(); }))
+      .toMatch(/headingTargetsDeg holds 71 classes, but classCounts says 72/);
   });
 
-  it("the kinds in another order — the columns are positional", () => {
-    const raw = mockSample() as any;
-    raw.kinds = ["altitude", "heading", "speed", "runway", "duration", "terminal"];
-    expect(problem(raw)).toContain("expected [heading,altitude,speed,runway,duration,terminal]");
+  it("refuses a step 0 that does not carry all six words", () => {
+    expect(refusal((raw) => {
+      raw.flights[0].words.events = raw.flights[0].words.events.filter((e: any) => !(e.row === 0 && e.column === 4));
+    })).toMatch(/step 0 carries no word for angle/);
   });
 
-  it("an edge table that does not tile -180…180", () => {
-    const raw = mockSample() as any;
-    raw.vocabulary.headingEdgesDeg = [-90, -30, 0, 30, 90];
-    raw.vocabulary.words.heading = 4;
-    expect(problem(raw)).toContain("does not cover -180");
+  it("refuses a per-row table that is not the events filled forward", () => {
+    expect(refusal((raw) => { raw.flights[0].words.inForce[2][12] = WORD.heading270; }))
+      .toMatch(/inForce\.heading\[12\] is 54, but the events put 36 in force there/);
   });
 
-  it("a table stored unsorted", () => {
-    const raw = mockSample() as any;
-    raw.vocabulary.speedEdgesMps = [60, 80, 70, 90, 100, 110, 125];
-    expect(problem(raw)).toContain("not stored sorted and distinct");
+  it("refuses a word outside its column's classes", () => {
+    expect(refusal((raw) => { raw.flights[0].words.events[0].value = 2; }))
+      .toMatch(/events\[0\]\.value is 2, not a whole number in 0…1/);
   });
 
-  it("a wedge whose two angles are the wrong way round", () => {
-    const raw = mockSample() as any;
-    raw.vocabulary.altitudeDownDeg = 1.0;
-    raw.vocabulary.altitudeUpDeg = 1.5;
-    // Swapping them draws a corridor of exactly the same width with the slack on
-    // the wrong side of the target, which nothing else here would catch.
-    expect(problem(raw)).toContain("the descent side is the wider one");
+  it("refuses a word issued for a reason the labeller does not name", () => {
+    expect(refusal((raw) => { raw.flights[0].words.events[6].kind = "guess"; }))
+      .toMatch(/events\[6\]: kind is guess, not one of the labeller's initial, turn/);
   });
 
-  it("class counts that disagree with the file's own tables", () => {
-    const raw = mockSample() as any;
-    raw.vocabulary.words.altitude = MOCK_SPEC.altitudeTargetsM.length + 1;
-    expect(problem(raw)).toContain("the stated counts and the spec disagree");
+  it("refuses an envelope list that does not match its column's words", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading.pop(); }))
+      .toMatch(/heading holds 1 envelopes for 2 heading words/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.altitude[1].row = 21; }))
+      .toMatch(/altitude\[1\]: is \(row 21, value 181\), but the sentence's altitude word 1 is \(row 20, value 181, target\)/);
   });
 
-  it("a hold that is not what its duration word says", () => {
-    const raw = mockSample() as any;
-    raw.flights[0].sentence.holdS[2] += MOCK_SPEC.durationBinS;
-    expect(problem(raw)).toMatch(/the hold and the word are ONE answer/);
+  it("refuses a verdict whose count is not the count of its own flags", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.altitude[1].check.inside = 40; }))
+      .toMatch(/says 40 rows inside, but the tube's own flags count 39/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.speed[0].bandInside[3] = 0; }))
+      .toMatch(/says 30 band rows inside, but the band's own flags count 29/);
   });
 
-  it("boxes that leave a gap in the track", () => {
-    const raw = mockSample() as any;
-    // shorten one hold AND its word together, so the hold/word check passes and
-    // only the tiling check can catch it
-    raw.flights[0].sentence.holdS[1] -= MOCK_SPEC.durationBinS;
-    raw.flights[0].sentence.words[1][TRAINING_KIND_COLUMN.duration] -= 1;
-    expect(problem(raw)).toContain("the boxes tile the track");
+  it("refuses a tube of the wrong length and an inverted one", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.altitude[0].lowerM.pop(); }))
+      .toMatch(/altitude\[0\]\.lowerM has 19 values, expected 20/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.altitude[0].lowerM[3] = 2000; }))
+      .toMatch(/is inverted at row 3/);
   });
 
-  it("a sentence that does not open with the track", () => {
-    const raw = mockSample() as any;
-    raw.flights[0].sentence.eventTimesS[0] = 2;
-    expect(problem(raw)).toContain("the first box opens with the track");
+  it("refuses a runway that is not the candidate pointed at", () => {
+    expect(refusal((raw) => { raw.flights[0].runway = "27"; }))
+      .toMatch(/runway is 27, but candidate 0 is 09/);
   });
 
-  it("an envelope inverted at one row", () => {
-    const raw = mockSample() as any;
-    const low = raw.flights[0].envelope.altLoM;
-    const high = raw.flights[0].envelope.altHiM;
-    [low[7], high[7]] = [high[7], low[7]];
-    expect(problem(raw)).toContain("is inverted at row 7");
+  it("refuses a missing field by its path rather than reading it as a default", () => {
+    expect(refusal((raw) => { delete raw.flights[0].envelopes.approach.corridor; }))
+      .toMatch(/envelopes\.approach\.corridor is not an object/);
+    expect(refusal((raw) => { delete raw.flights[1].envelopes.approach.captureTurn; }))
+      .toMatch(/envelopes\.approach\.captureTurn is not an object/);
   });
 
-  it("a verdict that disagrees with the columns beside it", () => {
-    const raw = mockSample() as any;
-    raw.flights[0].envelope.inside.speed.outside += 1;
-    // This is the one check that stands in for a producer that is not in this
-    // repository: the exporter derives the boxes from the artefact's spec, and
-    // this reader measures them against the columns it shipped with them.
-    expect(problem(raw)).toMatch(/the exporter's boxes and this reader's reading of them disagree/);
+  it("refuses a measured angle for the level class", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.angle[0].measuredDeg = 0.1; }))
+      .toMatch(/angle\[0\]: a measured angle is given for every class but level/);
   });
 
-  it("a footprint too short to be an outline", () => {
-    const raw = mockSample() as any;
-    raw.flights[0].envelope.events[0].toGoM = [0, 1];
-    expect(problem(raw)).toContain("shorter than three points");
-  });
-
-  it("a footprint whose two coordinate systems are different lengths", () => {
-    // The four arrays are ONE outline twice over. A length that differs between
-    // them is two shapes drawn as though they were one — the plan view would show
-    // a sector the 3D scene does not have.
-    const raw = mockSample() as any;
-    raw.flights[0].envelope.events[0].toGoM = [0, 1, 2, 3, 4];
-    expect(problem(raw)).toContain("they are ONE outline");
-  });
-
-  it("the footprint is a SECTOR, and its first point is the aircraft", () => {
-    const flight = parsed().flights[0];
-    flight.envelope.events.forEach((box, event) => {
-      // the apex sits on the track, at the row where this word opened
-      const row = flight.observed.tS.findIndex((t) => t >= box.eventS);
-      expect(box.toGoM[0]).toBeCloseTo(flight.observed.toGoM[row], 6);
-      expect(box.crossM[0]).toBeCloseTo(flight.observed.crossM[row], 6);
-      // and it reaches no further than the hold times the speed box's UPPER edge
-      const depth = box.holdS * box.speedHiMps;
-      for (let point = 1; point < box.toGoM.length; point += 1) {
-        const reach = Math.hypot(box.toGoM[point] - box.toGoM[0], box.crossM[point] - box.crossM[0]);
-        expect(reach).toBeLessThanOrEqual(depth + 1e-6);
-      }
-      void event;
-    });
-  });
-
-  it("a path column that falls", () => {
-    const raw = mockSample() as any;
-    raw.flights[0].observed.pathM[5] = raw.flights[0].observed.pathM[4] - 10;
-    expect(problem(raw)).toContain("a path length only grows");
-  });
-
-  it("a reading block written with another epsilon", () => {
-    const raw = mockSample() as any;
-    raw.reading.insideEpsilon = TRAINING_INSIDE_EPSILON * 10;
-    expect(problem(raw)).toContain("the two verdicts are compared");
-  });
-
-  it("a word outside its kind's classes, naming the column order first", () => {
-    const raw = mockSample() as any;
-    raw.flights[0].sentence.words[0][TRAINING_KIND_COLUMN.runway] = 9;
-    expect(problem(raw)).toContain("the columns are positional");
-  });
-
-  it("a read-back set that carries a model's words, and a prior set that does not", () => {
-    expect(problem(mockPriorSample())).toContain("this set's kind is vocabulary-readback");
-    const raw = mockSample() as any;
-    expect(problem(raw, "prior-generated")).toContain("every flight carries what the model said");
-  });
-
-  it("a prior asked a way this view's wording does not describe", () => {
-    const raw = mockPriorSample() as any;
-    raw.prior.method = "free-generation";
-    expect(problem(raw, "prior-generated")).toContain("a free run is a different experiment");
+  it("refuses a speed band for 'unspecified'", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.speed[1].bandMps = [10, 20]; }))
+      .toMatch(/bandMps is given for "unspecified"/);
   });
 });
 
-describe("the verdict", () => {
-  it("judges every row exactly once, against the box in force", () => {
-    const flight = parsed().flights[0];
-    const measured = trainingContainment(flight, flight.envelope, MOCK_VOCABULARY, flight.sentence.words);
-    for (const kind of TRAINING_BOX_KINDS) {
-      // One verdict per row: an earlier reading of this walked spans and
-      // double-counted the boundary row two consecutive spans share.
-      expect(measured[kind].inside).toHaveLength(flight.observed.tS.length);
-      expect(measured[kind].rows).toBe(flight.observed.tS.length);
-      expect(measured[kind].outside).toBe(flight.envelope.inside[kind].outside);
-    }
+describe("the index", () => {
+  it("keeps every entry and names what the reader refuses, from the manifest alone", () => {
+    const index = parseTrainingIndex(mockIndex());
+    if (!index.ok) throw new Error(index.problem);
+    expect(index.value.sets.map((entry) => entry.id)).toEqual(["box_v3", "instruction_v1", "prior_s1337_val"]);
+    const [old, current, prior] = index.value.sets;
+    expect(trainingSetRefusal(current)).toBeNull();
+    expect(trainingSetRefusal(old)).toMatch(/read under box-v3, a superseded vocabulary/);
+    expect(trainingSetRefusal(prior)).toMatch(/read under segment-v13/);
+    expect(trainingSetRefusal({ ...current, vocabularySha256: "9".repeat(64) }))
+      .toMatch(/spec 999999999999 is not the frozen instruction-v1 spec/);
+    expect(trainingSetRefusal({ ...current, kind: "prior-generated" }))
+      .toMatch(/no prior is trained on instruction-v1 yet/);
   });
 
-  it("marks the row that leaves its box, and only that row", () => {
-    const raw = mockSample() as any;
-    const flight = parsed().flights[0];
-    void raw;
-    const moved = {
-      ...flight,
-      observed: {
-        ...flight.observed,
-        readSpeedMps: flight.observed.readSpeedMps.map(
-          (value, row) => (row === 12 ? value + 40 : value)),
-      },
-    };
-    const measured = trainingContainment(moved, flight.envelope, MOCK_VOCABULARY, flight.sentence.words);
-    expect(measured.speed.outside).toBe(1);
-    expect(measured.speed.inside[12]).toBe(false);
-    expect(measured.speed.inside[11]).toBe(true);
-    // the other two kinds are untouched: the verdict is per kind, not per flight
-    expect(measured.heading.outside).toBe(0);
-    expect(measured.altitude.outside).toBe(0);
+  it("greys out one malformed entry without emptying the manifest", () => {
+    const raw: any = mockIndex();
+    delete raw.sets[0].cohort;
+    const index = parseTrainingIndex(raw);
+    if (!index.ok) throw new Error(index.problem);
+    expect(index.value.sets.map((entry) => entry.id)).toEqual(["instruction_v1", "prior_s1337_val"]);
+    expect(index.value.rejected).toEqual([{ id: "box_v3", problem: "set box_v3.cohort is not an object" }]);
   });
 
-  it("a row exactly on an edge is inside, and one a whisker past it is not", () => {
-    const flight = parsed().flights[0];
-    const forced = eventInForce(flight.sentence.eventTimesS, flight.observed.tS);
-    const [, high] = speedBoxMps(MOCK_VOCABULARY, flight.sentence.words[forced[3]][TRAINING_KIND_COLUMN.speed]);
-    const onEdge = {
-      ...flight,
-      observed: { ...flight.observed, readSpeedMps: flight.observed.readSpeedMps.map((v, row) => (row === 3 ? high : v)) },
-    };
-    expect(trainingContainment(onEdge, flight.envelope, MOCK_VOCABULARY, flight.sentence.words).speed.outside).toBe(0);
-    const past = {
-      ...flight,
-      observed: {
-        ...flight.observed,
-        readSpeedMps: flight.observed.readSpeedMps.map(
-          (v, row) => (row === 3 ? high + 10 * TRAINING_INSIDE_EPSILON : v)),
-      },
-    };
-    expect(trainingContainment(past, flight.envelope, MOCK_VOCABULARY, flight.sentence.words).speed.outside).toBe(1);
+  it("refuses a manifest of another schema whole", () => {
+    expect(parseTrainingIndex({ ...mockIndex(), schema: "aeroviz-training-index-v0" })).toEqual({
+      ok: false, problem: 'schema is "aeroviz-training-index-v0", expected "aeroviz-training-index-v1"',
+    });
   });
 });
 
-describe("the manifest", () => {
-  it("keeps the good sets and reports a bad one by field", () => {
-    const raw = mockIndex() as any;
-    raw.sets.push({ ...raw.sets[0], id: "broken", cohort: undefined });
-    const result = parseTrainingIndex(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.sets.map((item) => item.id)).toEqual(["box_v3"]);
-    expect(result.value.rejected[0].id).toBe("broken");
-    expect(result.value.rejected[0].problem).toContain("cohort");
+describe("reading a sentence", () => {
+  it("labels every column from the vocabulary's tables, in SI", () => {
+    const { vocabulary, candidates } = parsed();
+    const label = (column: (typeof TRAINING_COLUMNS)[number], value: number) =>
+      trainingWordLabel(vocabulary, candidates, column, value);
+    expect(label("runway", WORD.runway09)).toBe("09");
+    expect(label("approach", WORD.cleared)).toBe("cleared");
+    expect(label("heading", WORD.heading090)).toBe("090°");
+    expect(label("altitude", WORD.altitude1110)).toBe("1110 m");
+    expect(label("altitude", WORD.land)).toBe("descend to land");
+    expect(label("angle", WORD.level)).toBe("level");
+    expect(label("angle", WORD.descent3)).toBe("descent 3 (3.06°)");
+    expect(label("speed", WORD.speed110)).toBe("110 m/s");
+    expect(label("speed", WORD.unspecified)).toBe("unspecified");
   });
 
-  it("a prior set names its model in the manifest, before anyone downloads it", () => {
-    const result = parseTrainingIndex(mockPriorIndex());
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.sets[0].prior?.seed).toBe(1337);
+  it("runs a column from each issue to the next, the last to the end", () => {
+    const flight = parsed().flights[0];
+    expect(trainingColumnRuns(flight, "heading").map(({ row, endRow, value }) => [row, endRow, value]))
+      .toEqual([[0, 10, WORD.heading270], [10, MOCK_ROWS, WORD.heading180]]);
+    expect(trainingColumnRuns(flight, "runway")).toHaveLength(1);
   });
 
-  it("lists a superseded set rather than dropping it — its rule is in the manifest", () => {
-    const raw = mockIndex() as any;
-    raw.sets[0].readingRule = "segment-v14";
-    const result = parseTrainingIndex(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    // The manifest does not pin the rule: the panel marks such a set and says why
-    // when it is picked, which is what keeps a vocabulary bump from emptying the
-    // picker (AV6 in reverse).
-    expect(result.value.sets[0].readingRule).toBe("segment-v14");
-    expect(result.value.rejected).toHaveLength(0);
+  it("finds the envelopes in force: the heading word's until the capture, the tube that covers the row", () => {
+    const flight = parsed().flights[0];
+    expect(headingEnvelopeAt(flight, 9)).toBe(0);
+    expect(headingEnvelopeAt(flight, 10)).toBe(1);
+    expect(headingEnvelopeAt(flight, 25)).toBe(-1);
+    expect(altitudeTubeAt(flight, 19)).toBe(0);
+    expect(altitudeTubeAt(flight, 20)).toBe(1);
+    expect(rowAtTime(flight.signals.tS, 21)).toBe(10);
   });
-});
 
-describe("the sentence's own invariants", () => {
-  it("the fixture's events are strictly increasing and its holds are its duration words", () => {
-    MOCK_EVENT_TIMES_S.forEach((time, event) => {
-      if (event > 0) expect(time).toBeGreaterThan(MOCK_EVENT_TIMES_S[event - 1]);
-      expect(MOCK_HOLDS_S[event]).toBe(
-        MOCK_WORDS[event][TRAINING_KIND_COLUMN.duration] * MOCK_SPEC.durationBinS);
+  it("counts the labeller's verdicts, a split turn once", () => {
+    const flight = parsed().flights[0];
+    const verdicts = trainingVerdicts(flight);
+    expect(verdicts).toMatchObject({
+      turns: 1, turnsProgressOk: 1, turnsBankOk: 1, altitudeWords: 2, altitudeContained: 1,
+      speedWords: 1, speedContained: 1, instructionsAfterStep0: 5,
     });
-  });
-
-  it("only the last event says landed", () => {
-    MOCK_WORDS.forEach((row, event) => {
-      expect(row[TRAINING_KIND_COLUMN.terminal] === TERMINAL_LANDED).toBe(event === MOCK_WORDS.length - 1);
-    });
+    expect(verdicts.silentSteps).toBe(MOCK_ROWS - 1 - 3);   // steps 10, 20 and 30 say something
+    const split = { ...flight.envelopes.heading[1].check!, parts: 2 };
+    const twice = { ...flight, envelopes: { ...flight.envelopes, heading: [
+      flight.envelopes.heading[0], { ...flight.envelopes.heading[1], check: split }, { ...flight.envelopes.heading[1], check: { ...split } },
+    ] } };
+    expect(trainingVerdicts(twice).turns).toBe(1);
   });
 });

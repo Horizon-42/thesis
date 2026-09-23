@@ -1,132 +1,73 @@
 /**
  * TrainingSentenceBar.tsx
  * -----------------------
- * The sentence as a picture: the six word kinds as six rows, drawn against REAL
- * TIME. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §3.1 (T4a).
+ * The sentence as a picture: the six columns as six rows — runway pointer, approach, heading,
+ * altitude, angle, speed, in the vocabulary's order — against the flight's own time. Design:
+ * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
- * THE HORIZONTAL AXIS IS TIME, NOT EVENT NUMBER. The sentence is an event
- * sequence: the gaps are irregular — a median hold of 4 s and a p95 of 20 s in
- * the artefact — so evenly spaced columns would draw a wrong picture of when
- * anything was said.
+ * A BAND IS A WORD IN FORCE, from the step it was issued to the step the next word of its column
+ * replaces it. Step 0 carries all six columns, so every row opens with a band at 0; after that a
+ * column is "unchanged" until its next word, and most steps say nothing at all. The tick at a
+ * band's left edge is the issue itself; the numbers along the top count the steps that say
+ * anything, and the header counts the silent ones.
  *
- * THE BOXES TILE THE TRACK. Under `box-v2-wedge` each box carries its own hold
- * (the duration word describes the row it sits on), and the next box opens where
- * it closes — so every row of the track has exactly one box in force and there is
- * no unworded tail. That is a change from the retired rule, where the gap word
- * measured the interval BEHIND its event and the last 145 s of a median arrival
- * carried no word at all.
+ * The three moments that are not words — the clearance, the capture of the final and the speed
+ * becoming "unspecified" — are marked as lines across the rows. The header reads out the
+ * labeller's own verdicts; nothing here recomputes one.
  *
- * WHAT THE HEADER READS OUT IS CONTAINMENT, because that is this vocabulary's
- * criterion: a sentence holds if every row of the track is inside the boxes in
- * force at its moment. It is recomputed here from the columns rather than read
- * off the file — the parser has already refused a file whose own verdict differs.
- *
- * `go-around` is a terminal class that EXISTS and is never observed here (the
- * 25 km arrival slice keeps only the final successful approach). The legend says
- * so in those words — a reader must not take it for a word the model declines to
- * use.
- *
- * The cursor is in FLIGHT TIME and is moved by clicking a band or an event: no
- * pixel→time arithmetic anywhere, so what it reports is the artefact's own number
- * rather than a rounded screen position. It does NOT drive `viewer.clock`:
- * Training loads no CZML (design V2), and the export carries no absolute epoch to
- * anchor one to.
+ * The cursor is in flight time and is moved by clicking a band or a step number: what it
+ * reports is the artefact's own step, never a rounded pixel. It does NOT drive `viewer.clock`:
+ * Training loads no CZML, and the clock belongs to Observe's playback.
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
-import { TRAINING_KIND_COLOR, TRAINING_MODEL_COLOR } from "../utils/trainingWordColors";
+import {
+  TRAINING_COLUMN_COLOR,
+  TRAINING_CORRIDOR_COLOR,
+  TRAINING_WORD_COLOR,
+} from "../utils/trainingWordColors";
 import {
   formatSeconds,
-  TERMINAL_NEVER_OBSERVED,
-  TERMINAL_WORDS,
-  TRAINING_BOX_KINDS,
-  TRAINING_KINDS,
-  TRAINING_KIND_COLUMN,
-  isTrainingBoxKind,
-  trainingContainment,
-  trainingWordBandLabel,
+  rowAtTime,
+  trainingColumnRuns,
+  trainingKindLabel,
+  trainingVerdicts,
   trainingWordLabel,
-  type TrainingFlight,
-  type TrainingKind,
+  TRAINING_COLUMNS,
+  type TrainingColumn,
 } from "../data/trainingSample";
 
-// ── geometry ────────────────────────────────────────────────────────────────
-// One SVG unit is one pixel: the bar is as wide as the dock and always exactly
-// VIEW_H tall. A viewBox scaled to the width instead would make the bar taller on
-// a wider window — tall enough here to cover the flight list it is read beside —
-// and would scale the type with it.
-const GUTTER = 104; // the row labels
+// One SVG unit is one pixel: the bar is as wide as the dock and always VIEW_H tall.
+const GUTTER = 96;
 const PAD_R = 22;
-const HEAD_H = 20; // event numbers + cursor read-out
+const HEAD_H = 22;
 const ROW_H = 20;
 const AXIS_H = 22;
-const VIEW_H = HEAD_H + TRAINING_KINDS.length * ROW_H + AXIS_H;
+const VIEW_H = HEAD_H + TRAINING_COLUMNS.length * ROW_H + AXIS_H;
 /** Used until the element has been measured, and in jsdom, which has no layout. */
 const DEFAULT_PLOT_W = 1074;
-/** Below this the words cannot be read at all, so the bar scrolls instead. */
 const MIN_PLOT_W = 320;
+/** A band carries its word only above this many pixels; the tooltip always does. */
+const LABEL_MIN_W = 40;
+const STEP_LABEL_GAP = 14;
+const TICK_LABEL_GAP = 34;
 
-/** A band is wide enough for its word only above this many pixels; below it the
- *  word stays in the band's tooltip, which every band carries. */
-const LABEL_MIN_W = 34;
-/** And wide enough for the word AND its box only above this many. */
-const BAND_LABEL_MIN_W = 64;
-/** Minimum spacing for an event number and for an axis tick label. */
-const EVENT_LABEL_GAP = 13;
-const TICK_LABEL_GAP = 32;
-
-const ROW_LABEL: Record<TrainingKind, string> = {
-  heading: "Heading (°)",
-  // A target HEIGHT above the threshold, with a wedge around it — not the
-  // retired vertical word, which was a flight path angle.
-  altitude: "Altitude (m)",
-  speed: "Speed (m/s)",
+const ROW_LABEL: Record<TrainingColumn, string> = {
   runway: "Runway",
-  duration: "Hold (s)",
-  terminal: "Terminal",
+  approach: "Approach",
+  heading: "Heading",
+  altitude: "Altitude",
+  angle: "Angle",
+  speed: "Speed",
 };
 
-interface Band {
-  startS: number;
-  endS: number;
-  word: number;
-}
-
 /**
- * The bands of one row. Consecutive events carrying the SAME word are one band —
- * only one column changes at most events, so an unmerged row would be chopped
- * into identical pieces and read as repeated instructions.
- *
- * THE DURATION ROW IS NOT MERGED. Its word describes the row it sits on ("this
- * box is held for T"), so two consecutive 4 s holds are two boxes, not one 8 s
- * one, and merging them would draw a hold the sentence never says.
- */
-export function rowBands(flight: TrainingFlight, kind: TrainingKind): Band[] {
-  const { eventTimesS, holdS, words } = flight.sentence;
-  const column = TRAINING_KIND_COLUMN[kind];
-  const bands: Band[] = [];
-  eventTimesS.forEach((time, index) => {
-    const word = words[index][column];
-    const endS = index + 1 < eventTimesS.length ? eventTimesS[index + 1] : time + holdS[index];
-    const open = bands[bands.length - 1];
-    if (kind !== "duration" && open && open.word === word) open.endS = endS;
-    else bands.push({ startS: time, endS, word });
-  });
-  return bands;
-}
-
-/**
- * Which of these ascending x positions may carry a text label: greedy from the
- * left, keeping one only when it clears the last kept by `minGap`. The LAST
- * position is always kept (it is the end of the axis), evicting the previous
- * keeper if they would collide.
- *
- * This earns its keep on real data: a median hold is 4 s — a few pixels at the
- * default width — so the numbers and tick labels would print on top of each
- * other into a smudge. The label is dropped, never the event: its hit area and
- * its tooltip are untouched, exactly as `LABEL_MIN_W` does for a narrow band.
+ * Which of these ascending x positions may carry a text label: greedy from the left, keeping one
+ * only when it clears the last kept by `minGap`. With `keepLast` the last position is always
+ * kept, evicting the previous keeper if they would collide. The label is dropped, never the
+ * step: its hit area and tooltip stay.
  */
 export function spacedLabels(xs: number[], minGap: number, keepLast = false): boolean[] {
   const keep = xs.map(() => false);
@@ -162,8 +103,6 @@ export default function TrainingSentenceBar() {
   const [notesOpen, setNotesOpen] = useState<boolean>(false);
   const flightKey = trainingSelection?.flight.flightKey ?? null;
 
-  // Measured before paint, so the frame in which the bar appears is already drawn
-  // at the real width instead of at DEFAULT_PLOT_W.
   useLayoutEffect(() => {
     const node = frameRef.current;
     if (!node) return;
@@ -176,113 +115,55 @@ export default function TrainingSentenceBar() {
   }, [flightKey]);
 
   if (!trainingSelection) return null;
-  const { flight, vocabulary, reading } = trainingSelection;
-  const { eventTimesS } = flight.sentence;
+  const { flight, vocabulary, candidates } = trainingSelection;
+  const { tS } = flight.signals;
+  // Step r covers [r·step, (r+1)·step): the axis ends where the last step does.
+  const endS = flight.rows * vocabulary.stepS;
+  const timeOf = (row: number) => row * vocabulary.stepS;
+  const xFor = (seconds: number) => GUTTER + (seconds / endS) * plotW;
+  const verdicts = trainingVerdicts(flight);
+  const cursorRow = rowAtTime(tS, cursorS);
 
-  const xFor = (seconds: number) => GUTTER + (seconds / flight.durationS) * plotW;
-  const label = (kind: TrainingKind, word: number) => trainingWordLabel(vocabulary, kind, word);
-  const bandLabel = (kind: TrainingKind, word: number) =>
-    trainingWordBandLabel(vocabulary, kind, word);
-
-  /**
-   * WHAT THE MODEL SAID, drawn only where it DIFFERS from the truth.
-   *
-   * Agreement is the common case, so drawing every said word would paint the
-   * whole bar and hide the answer. The purple strips are the disagreements; their
-   * absence is agreement, and the header counts both so the eye is not left to
-   * estimate it.
-   */
-  const said = trainingLayers.model ? flight.prior : undefined;
-  const disagreements = said
-    ? TRAINING_KINDS.flatMap((kind) => {
-        const column = TRAINING_KIND_COLUMN[kind];
-        return eventTimesS.flatMap((startS, event) => {
-          if (event < said.givenEvents) return [];
-          if (said.words[event][column] === flight.sentence.words[event][column]) return [];
-          return [{
-            kind,
-            startS,
-            endS: event + 1 < eventTimesS.length
-              ? eventTimesS[event + 1]
-              : startS + flight.sentence.holdS[event],
-            word: said.words[event][column],
-            truth: flight.sentence.words[event][column],
-            confidence: said.confidence[event][column],
-          }];
-        });
-      })
-    : [];
-  const saidWords = said
-    ? (eventTimesS.length - said.givenEvents) * TRAINING_KINDS.length
-    : 0;
-
-  /**
-   * THE VERDICT: how many of the track's rows sit inside the boxes in force.
-   *
-   * It is the criterion of this vocabulary, so it is in the header rather than
-   * behind a toggle — and it is recomputed from the columns, not read off the
-   * file, so what is on screen is what this code measures.
-   */
-  const inside = trainingContainment(flight, flight.envelope, vocabulary, flight.sentence.words);
-  const modelInside = said
-    ? trainingContainment(flight, said.envelope, vocabulary, said.words)
-    : undefined;
-  const insideReadout = TRAINING_BOX_KINDS
-    .map((kind) => `${kind} ${inside[kind].rows - inside[kind].outside}/${inside[kind].rows}`)
-    .join(" · ");
-
-  const terminalWords = Array.from({ length: TERMINAL_WORDS }, (_, word) =>
-    label("terminal", word),
-  );
-  const neverObserved = TERMINAL_NEVER_OBSERVED.map((word) => label("terminal", word));
-
-  const eventNumberShown = spacedLabels(eventTimesS.map(xFor), EVENT_LABEL_GAP);
-  // The axis is ticked at every event, plus the end of the track — which is kept
-  // whatever else has to go, because it is where the last band stops.
-  const tickTimesS = [...eventTimesS, flight.durationS];
-  const tickShown = spacedLabels(tickTimesS.map(xFor), TICK_LABEL_GAP, true);
+  // The steps that SAY something, numbered; step 0 is the opening and is always complete.
+  const issueRows = [...new Set(flight.words.events.map((event) => event.row))].sort((a, b) => a - b);
+  const stepShown = spacedLabels(issueRows.map((row) => xFor(timeOf(row))), STEP_LABEL_GAP);
+  const tickRows = [...issueRows, flight.rows];
+  const tickShown = spacedLabels(tickRows.map((row) => xFor(timeOf(row))), TICK_LABEL_GAP, true);
+  const markers = [
+    { row: flight.joinRow, label: "cleared", title: `cleared to join the final at ${formatSeconds(timeOf(flight.joinRow))} s` },
+    {
+      row: flight.captureRow, label: "captured",
+      title: `the final captured at ${formatSeconds(timeOf(flight.captureRow))} s, ` +
+        `${(flight.captureBeforeThresholdM / 1000).toFixed(1)} km before the threshold`,
+    },
+    { row: flight.unspecifiedRow, label: "speed unspecified", title: `speed left to the pilot from ${formatSeconds(timeOf(flight.unspecifiedRow))} s` },
+  ];
+  const tick = (ok: boolean) => (ok ? "✓" : "✗");
+  const capture = verdicts.captureTurn;
+  const landing = flight.envelopes.approach.landing;
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar">
       <header className="training-sentence-head">
         <strong>{flight.callsign}</strong>
+        <span>{flight.typecode}</span>
         <span>runway {flight.runway}</span>
         <span>{flight.stratum}</span>
-        <span>{eventTimesS.length} boxes</span>
-        <span>{formatSeconds(flight.durationS)} s of track</span>
+        <span>
+          {flight.rows} steps · {verdicts.instructionsAfterStep0} words after step 0 ·{" "}
+          {verdicts.silentSteps} of {flight.rows - 1} later steps silent
+        </span>
         <span
           className="training-sentence-arrival"
-          title={
-            "Containment is this vocabulary's criterion: a sentence holds if every row of the " +
-            "track is inside the boxes in force at its moment. Measured on the smoothed signals " +
-            `the boxes were read from — ${reading.courseSignal}.`
-          }
+          title="The labeller's own checks of this flight's envelopes (Reading.checks)."
         >
-          inside: {insideReadout}
+          turns {verdicts.turnsProgressOk}/{verdicts.turns} monotone, {verdicts.turnsBankOk}/{verdicts.turns} bank ·
+          capture turn {capture === null ? "none (on the final at entry)" : `${tick(capture.progressOk)} ${tick(capture.bankOk)}`} ·
+          altitude {verdicts.altitudeContained}/{verdicts.altitudeWords} · speed {verdicts.speedContained}/{verdicts.speedWords}
         </span>
-        {said ? (
-          <span
-            className="training-sentence-model-readout"
-            style={{ color: TRAINING_MODEL_COLOR }}
-            title={
-              "What the model said at each of this flight's events, asked from the truth's own " +
-              "history and state (teacher-forced). Purple marks a word it got wrong; the model " +
-              "did not generate this sentence."
-            }
-          >
-            model: {saidWords - disagreements.length}/{saidWords} words
-            {modelInside
-              ? `, its boxes hold ${TRAINING_BOX_KINDS.map(
-                  (kind) => `${modelInside[kind].rows - modelInside[kind].outside}/${modelInside[kind].rows}`,
-                ).join("/")}`
-              : ""}
-            {said.landedAtS === null
-              ? ""
-              : `, said landed at ${formatSeconds(said.landedAtS)} s`}
-          </span>
-        ) : null}
-        <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s</span>
-        {/* The window and 3D boxes share the sentence bar's flight-relative cursor. */}
+        <span className="training-sentence-cursor-readout">
+          t = {formatSeconds(cursorS)} s · step {cursorRow}
+        </span>
         <button
           type="button"
           className="training-sentence-readback-button"
@@ -293,192 +174,156 @@ export default function TrainingSentenceBar() {
       </header>
 
       <div className="training-sentence-frame" ref={frameRef}>
-      <svg
-        className="training-sentence-svg"
-        width={GUTTER + plotW + PAD_R}
-        height={VIEW_H}
-        viewBox={`0 0 ${GUTTER + plotW + PAD_R} ${VIEW_H}`}
-        role="img"
-        aria-label={`The sentence of ${flight.callsign} on runway ${flight.runway}`}
-      >
-        {/* the event lines, behind everything */}
-        {eventTimesS.map((time, index) => (
-          <line
-            key={`event-line-${index}`}
-            x1={xFor(time)}
-            x2={xFor(time)}
-            y1={HEAD_H - 8}
-            y2={HEAD_H + TRAINING_KINDS.length * ROW_H}
-            className="training-sentence-event-line"
-          />
-        ))}
-
-        {/* The event numbers, each a button that moves the cursor to its own
-            time. The hit areas run from midpoint to midpoint, so they cannot
-            overlap however close two events are — a fixed-width box would hand a
-            click on the 52 s event to the one at 54 s. */}
-        {eventTimesS.map((time, index) => {
-          const left = index === 0 ? GUTTER : xFor((eventTimesS[index - 1] + time) / 2);
-          const right =
-            index === eventTimesS.length - 1
+        <svg
+          className="training-sentence-svg"
+          width={GUTTER + plotW + PAD_R}
+          height={VIEW_H}
+          viewBox={`0 0 ${GUTTER + plotW + PAD_R} ${VIEW_H}`}
+          role="img"
+          aria-label={`The sentence of ${flight.callsign} on runway ${flight.runway}`}
+        >
+          {/* the steps that say something: numbers along the top, each a button */}
+          {issueRows.map((row, index) => {
+            const left = index === 0 ? GUTTER : xFor((timeOf(issueRows[index - 1]) + timeOf(row)) / 2);
+            const right = index === issueRows.length - 1
               ? GUTTER + plotW
-              : xFor((time + eventTimesS[index + 1]) / 2);
-          const name = `Event ${index + 1} at ${formatSeconds(time)} s`;
-          return (
-            <g
-              key={`event-${index}`}
-              role="button"
-              tabIndex={0}
-              aria-label={name}
-              className="training-sentence-event"
-              onClick={() => setCursorS(time)}
-              onKeyDown={(keyEvent) => {
-                if (keyEvent.key === "Enter" || keyEvent.key === " ") setCursorS(time);
-              }}
-            >
-              <title>{name}</title>
-              <rect x={left} y={2} width={Math.max(right - left, 1)} height={HEAD_H - 6} fill="transparent" />
-              {eventNumberShown[index] ? (
-                <text x={xFor(time)} y={HEAD_H - 9} textAnchor="middle" className="training-sentence-event-number">
-                  {index + 1}
+              : xFor((timeOf(row) + timeOf(issueRows[index + 1])) / 2);
+            const words = flight.words.events.filter((event) => event.row === row);
+            const name =
+              `Step ${row} at ${formatSeconds(timeOf(row))} s: ` +
+              words.map((event) => `${TRAINING_COLUMNS[event.column]} ${trainingWordLabel(vocabulary, candidates, TRAINING_COLUMNS[event.column], event.value)}`).join(", ");
+            return (
+              <g
+                key={`step-${row}`}
+                role="button"
+                tabIndex={0}
+                aria-label={name}
+                className="training-sentence-event"
+                onClick={() => setCursorS(timeOf(row))}
+                onKeyDown={(keyEvent) => {
+                  if (keyEvent.key === "Enter" || keyEvent.key === " ") setCursorS(timeOf(row));
+                }}
+              >
+                <title>{name}</title>
+                <rect x={left} y={2} width={Math.max(right - left, 1)} height={HEAD_H - 6} fill="transparent" />
+                <line x1={xFor(timeOf(row))} x2={xFor(timeOf(row))} y1={HEAD_H - 6} y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
+                  className="training-sentence-event-line" />
+                {stepShown[index] ? (
+                  <text x={xFor(timeOf(row))} y={HEAD_H - 9} textAnchor="middle" className="training-sentence-event-number">
+                    {row}
+                  </text>
+                ) : null}
+              </g>
+            );
+          })}
+
+          {TRAINING_COLUMNS.map((column, position) => {
+            const y = HEAD_H + position * ROW_H;
+            const colour = TRAINING_COLUMN_COLOR[column];
+            return (
+              <g key={column} aria-label={`${column} row`}>
+                <rect x={GUTTER} y={y} width={plotW} height={ROW_H}
+                  className={`training-sentence-row-bg${position % 2 ? " odd" : ""}`} />
+                <text x={GUTTER - 8} y={y + ROW_H / 2 + 4} textAnchor="end" className="training-sentence-row-label">
+                  {ROW_LABEL[column]}
                 </text>
-              ) : null}
-            </g>
-          );
-        })}
-
-        {TRAINING_KINDS.map((kind, row) => {
-          const y = HEAD_H + row * ROW_H;
-          return (
-            <g key={kind}>
-              <rect
-                x={GUTTER}
-                y={y}
-                width={plotW}
-                height={ROW_H}
-                className={`training-sentence-row-bg${row % 2 ? " odd" : ""}`}
-              />
-              <text x={GUTTER - 8} y={y + ROW_H / 2 + 4} textAnchor="end" className="training-sentence-row-label">
-                {ROW_LABEL[kind]}
-              </text>
-
-              {rowBands(flight, kind).map((band, index) => {
-                const x = xFor(band.startS);
-                const width = xFor(band.endS) - x;
-                // The tooltip always carries the box; the drawn label drops the
-                // tolerance when the band is too narrow, and the word after that.
-                const text =
-                  width >= BAND_LABEL_MIN_W ? bandLabel(kind, band.word) : label(kind, band.word);
-                const title =
-                  `${kind}${isTrainingBoxKind(kind) ? " box" : ""} ${bandLabel(kind, band.word)} ` +
-                  `(word ${band.word}), ${formatSeconds(band.startS)}–${formatSeconds(band.endS)} s`;
-                return (
-                  <g
-                    key={`${kind}-${index}`}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={title}
-                    className="training-sentence-band"
-                    onClick={() => setCursorS(band.startS)}
-                    onKeyDown={(keyEvent) => {
-                      if (keyEvent.key === "Enter" || keyEvent.key === " ") setCursorS(band.startS);
-                    }}
-                  >
-                    <title>{title}</title>
-                    <rect
-                      x={x + 1}
-                      y={y + 4}
-                      width={Math.max(width - 2, 1)}
-                      height={ROW_H - 8}
-                      rx={3}
-                      fill={TRAINING_KIND_COLOR[kind]}
-                      fillOpacity={0.18}
-                      stroke={TRAINING_KIND_COLOR[kind]}
-                      strokeOpacity={0.6}
-                    />
-                    {width >= LABEL_MIN_W ? (
-                      <text
-                        x={x + width / 2}
-                        y={y + ROW_H / 2 + 4}
-                        textAnchor="middle"
-                        className="training-sentence-word"
-                        fill={TRAINING_KIND_COLOR[kind]}
-                      >
-                        {text}
-                      </text>
-                    ) : null}
-                  </g>
-                );
-              })}
-
-              {/* WHERE THE MODEL SAID SOMETHING ELSE. A strip along the band's
-                  bottom edge rather than a row of its own: the bar is docked
-                  over the flight list and its height is what that costs. */}
-              {disagreements
-                .filter((item) => item.kind === kind)
-                .map((item, index) => {
-                  const name =
-                    `the model said ${trainingWordLabel(vocabulary, kind, item.word)} here ` +
-                    `(p ${item.confidence.toFixed(2)}); the words say ${trainingWordLabel(vocabulary, kind, item.truth)}`;
+                {trainingColumnRuns(flight, column).map((run) => {
+                  const x = xFor(timeOf(run.row));
+                  const width = xFor(timeOf(run.endRow)) - x;
+                  const label = trainingWordLabel(vocabulary, candidates, column, run.value);
+                  const split = column === "heading"
+                    ? flight.envelopes.heading.find((item) => item.row === run.row)?.split ?? null
+                    : null;
+                  const title =
+                    `${column} ${label} — ${trainingKindLabel(run.event.kind, split)}, issued at step ${run.row} ` +
+                    `(${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s`;
+                  const inForce = run.row <= cursorRow && cursorRow < run.endRow;
                   return (
-                    <g key={`said-${kind}-${index}`} aria-label={name}>
-                      <title>{name}</title>
+                    <g
+                      key={`${column}-${run.row}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={title}
+                      className="training-sentence-band"
+                      onClick={() => setCursorS(timeOf(run.row))}
+                      onKeyDown={(keyEvent) => {
+                        if (keyEvent.key === "Enter" || keyEvent.key === " ") setCursorS(timeOf(run.row));
+                      }}
+                    >
+                      <title>{title}</title>
                       <rect
-                        x={xFor(item.startS) + 1}
-                        y={y + ROW_H - 7}
-                        width={Math.max(xFor(item.endS) - xFor(item.startS) - 2, 1)}
-                        height={3}
-                        fill={TRAINING_MODEL_COLOR}
+                        x={x + 1}
+                        y={y + 4}
+                        width={Math.max(width - 2, 1)}
+                        height={ROW_H - 8}
+                        rx={3}
+                        fill={colour}
+                        fillOpacity={inForce ? 0.34 : 0.16}
+                        stroke={inForce ? TRAINING_WORD_COLOR : colour}
+                        strokeOpacity={inForce ? 1 : 0.6}
                       />
+                      {/* the issue itself */}
+                      <rect x={x} y={y + 2} width={2} height={ROW_H - 4} fill={colour} className="training-sentence-issue" />
+                      {width >= LABEL_MIN_W ? (
+                        <text x={x + width / 2} y={y + ROW_H / 2 + 4} textAnchor="middle" className="training-sentence-word" fill={colour}>
+                          {label}
+                          {run.event.kind.startsWith("intercept") ? " ⤳" : ""}
+                          {split ? ` ${split.part}/${split.parts}` : ""}
+                        </text>
+                      ) : null}
                     </g>
                   );
                 })}
-            </g>
-          );
-        })}
+              </g>
+            );
+          })}
 
-        {/* the axis: every event time, which is what the reader needs to line the
-            bands up against the holds */}
-        <line
-          x1={GUTTER}
-          x2={GUTTER + plotW}
-          y1={HEAD_H + TRAINING_KINDS.length * ROW_H}
-          y2={HEAD_H + TRAINING_KINDS.length * ROW_H}
-          className="training-sentence-axis"
-        />
-        {/* The last tick carries the unit, so the axis needs no caption beside it —
-            a caption anchored to the same end simply overprinted it. */}
-        {tickTimesS.map((time, index) =>
-          tickShown[index] ? (
-            <text
-              key={`tick-${index}`}
-              x={xFor(time)}
-              y={HEAD_H + TRAINING_KINDS.length * ROW_H + 15}
-              textAnchor={index === tickTimesS.length - 1 ? "end" : "middle"}
-              className="training-sentence-tick"
-            >
-              {index === tickTimesS.length - 1 ? `${formatSeconds(time)} s` : formatSeconds(time)}
-            </text>
-          ) : null,
-        )}
-        <line
-          x1={xFor(cursorS)}
-          x2={xFor(cursorS)}
-          y1={HEAD_H - 8}
-          y2={HEAD_H + TRAINING_KINDS.length * ROW_H + 4}
-          className="training-sentence-cursor"
-        />
-      </svg>
+          {/* the moments that are not words */}
+          {markers.map((marker) => (
+            <g key={marker.label} aria-label={marker.title}>
+              <title>{marker.title}</title>
+              <line
+                x1={xFor(timeOf(marker.row))}
+                x2={xFor(timeOf(marker.row))}
+                y1={HEAD_H}
+                y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
+                stroke={TRAINING_CORRIDOR_COLOR}
+                strokeDasharray="3 3"
+                className="training-sentence-marker"
+              />
+            </g>
+          ))}
+
+          <line x1={GUTTER} x2={GUTTER + plotW} y1={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
+            y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H} className="training-sentence-axis" />
+          {tickRows.map((row, index) =>
+            tickShown[index] ? (
+              <text
+                key={`tick-${row}`}
+                x={xFor(timeOf(row))}
+                y={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 15}
+                textAnchor={index === tickRows.length - 1 ? "end" : "middle"}
+                className="training-sentence-tick"
+              >
+                {index === tickRows.length - 1 ? `${formatSeconds(timeOf(row))} s` : formatSeconds(timeOf(row))}
+              </text>
+            ) : null,
+          )}
+          <line
+            x1={xFor(cursorS)}
+            x2={xFor(cursorS)}
+            y1={HEAD_H - 8}
+            y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4}
+            className="training-sentence-cursor"
+          />
+        </svg>
       </div>
 
       <footer className="training-sentence-legend">
-        {/* This line stays out: without it the rows read as the measured state
-            rather than as the interval the aircraft was told to stay inside. The
-            rest folds away: the bar is docked over the flight list, and height is
-            what it costs. */}
         <span>
-          A band is the BOX in force — the interval the words allow, not the
-          measured state.
+          A band is a WORD IN FORCE, from the step it was issued (the tick at its left edge) to the
+          next word of its column; step 0 gives all six. The dashed lines mark the clearance, the
+          capture of the final and where the speed is left to the pilot.
           <button
             type="button"
             className="training-sentence-notes-toggle"
@@ -490,39 +335,22 @@ export default function TrainingSentenceBar() {
         </span>
         {notesOpen ? (
           <>
-        <span>
-          Heading is a range of ground track relative to the final approach
-          course; speed a range of ground speed; the altitude word is a TARGET
-          height above the threshold, and its box is the wedge that target is
-          reachable from — wide at the start of a segment, closing onto
-          ±{(vocabulary.redundancyFraction * 100).toFixed(0)} % at its end. The
-          runway word is the frame the other three are measured in, the hold is
-          how long this box stands, and the terminal word says whether the
-          sentence ends here.
-        </span>
-        <span>
-          The boxes TILE the track: each one is held for exactly its hold and the
-          next opens where it closes, so every row has one box in force and there
-          is no unworded tail.
-        </span>
-        <span>
-          Runway words: {vocabulary.runwayIdents.join(", ")} — the runways the
-          arrival manifest covers, not the airport's full runway list.
-        </span>
-        <span>
-          {/* Both lists come from the vocabulary's own constants: a class the
-              data never shows is still a class, and spelling either list out by
-              hand is how one of them silently stops matching the other. */}
-          Terminal words: {terminalWords.join(" / ")};{" "}
-          {neverObserved.join(" and ")}{" "}
-          {neverObserved.length > 1 ? "are" : "is"} never observed in this data —
-          the 25 km arrival slice keeps only the final successful approach.
-        </span>
-        <span>
-          The verdict is measured on the smoothed signals the boxes were read
-          from ({vocabulary.courseSmoothingS} s on the course,{" "}
-          {vocabulary.smoothingS} s on speed and height): {reading.heightSignal}.
-        </span>
+            <span>
+              Runway is a POINTER at one of {candidates.length} candidate thresholds (
+              {candidates.map((candidate) => candidate.ident).join(", ")}); heading is an absolute ground
+              track flown the shorter way; altitude a geometric MSL target or "descend to land"; angle the
+              class of the descent (or level, or climb); speed a ground speed or "unspecified". ⤳ marks an
+              intercept heading the labeller inserted; n/m a part of a split turn.
+            </span>
+            <span>
+              The sentence ends before the landing: its last step is{" "}
+              {(landing.lastRowBeforeThresholdM / 1000).toFixed(2)} km before the threshold
+              {landing.cutAtCrossing ? ", cut before the last passage of the threshold" : ", where the data ends"}.
+            </span>
+            <span>
+              Executor replay and a prior's sentence are not drawn: the executor is being designed and no
+              prior is trained on this vocabulary.
+            </span>
           </>
         ) : null}
       </footer>
@@ -531,9 +359,8 @@ export default function TrainingSentenceBar() {
         <TrainingReadbackWindow
           flight={flight}
           vocabulary={vocabulary}
-          prior={trainingSelection.prior}
+          candidates={candidates}
           layers={trainingLayers}
-          reading={reading}
           cursorS={cursorS}
           onCursorChange={setCursorS}
           onClose={() => setReadbackOpen(false)}

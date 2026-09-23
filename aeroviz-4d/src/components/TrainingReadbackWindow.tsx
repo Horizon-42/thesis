@@ -1,200 +1,80 @@
 /**
  * TrainingReadbackWindow.tsx
  * --------------------------
- * The interactive read-back check: the plan view in the runway's frame, and the
- * three signals the boxes judge, each with the BOX in force drawn over it.
- * Design: §3.2 of `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` (T4b).
+ * The read-back check: one flight's sentence against its track, envelope by envelope. Design:
+ * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
- * WHAT IT IS FOR: under `box-v2-wedge` a sentence holds if the track is inside
- * its boxes. This window is that check, row by row — the box in force, the signal
- * it judges, and in red the rows that left it.
+ *  • PLAN VIEW (the airport frame, one scale on both axes): every candidate runway and its
+ *    extended centreline, the capture corridor, each heading word's turn region and hold funnel,
+ *    the capture turn, the track, where each heading word was issued, the clearance, the capture
+ *    and the end of the sentence.
+ *  • HEADING against time: each word's turn band and hold band, the capture turn, the course
+ *    band after the capture.
+ *  • ALTITUDE against the horizontal distance flown — the axis the tubes are defined on: each
+ *    altitude word's tube, the angle words that re-anchor it, the runway's elevation.
+ *  • SPEED against time: each word's transition and band, the "unspecified" spans, the clearance.
  *
- * THERE IS NO SECOND LINE ON THESE CHARTS. The retired reading drew the sentence
- * flown by rule beside the measurement; flying a box sentence needs a
- * height-tracking executor (the replay gate), which is not built. What is drawn
- * instead is the region the words allow, which is what a box vocabulary says.
+ * EVERY SHAPE IS THE EXPORTER'S. Regions, bands and tubes arrive as numbers computed in Python
+ * from the vocabulary's own functions, and every verdict is the labeller's; this window draws them
+ * and computes none. The smoothed signal is the bright line (it is what the labeller read), the
+ * raw rows are behind it, and red marks rows the labeller counted outside their envelope.
  *
- * TWO LINES PER SIGNAL, AND THE FAINT ONE IS THE AIRCRAFT. The boxes were read
- * from a moving average, so the verdict is computed on the smoothed signal and
- * that is the bright line; the raw rows are behind it, because a chart showing
- * only the smoothed line would be showing a signal nobody flew.
- *
- * THE HEADING CHART IS WRAPPED. The heading box is an interval of the wrapped
- * relative course, so the chart has to be in the same coordinate the box is — an
- * unwrapped trace would leave a box at +170° looking nowhere near a trace at
- * +190°. A flight that turns through the cut therefore jumps on this chart. The
- * SMOOTHING behind it is done on the unwrapped signal (`box-v3` changed that;
- * `box-v2-wedge` averaged the wrapped one and turned +179° and −179° into 0°),
- * so the line no longer dives to zero at the wrap — only the plot does, and only
- * by one row.
- *
- * It renders through a PORTAL into `document.body` (AV7): `.flight-ops-panel`
- * carries a `backdrop-filter`, which makes a descendant with `position: fixed`
- * position against IT rather than the viewport.
+ * It renders through a PORTAL into `document.body` (AV7): `.flight-ops-panel` carries a
+ * `backdrop-filter`, which would make a `position: fixed` descendant position against it.
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TrainingLayers } from "../context/AppContext";
 import {
-  TRAINING_BAND_EDGE,
-  TRAINING_MODEL_COLOR,
-  TRAINING_BAND_FILL,
-  TRAINING_FLOWN_COLOR,
+  TRAINING_CANDIDATE_COLOR,
+  TRAINING_COLUMN_COLOR,
+  TRAINING_CORRIDOR_COLOR,
+  TRAINING_DESIGNATED_COLOR,
+  TRAINING_FUNNEL_COLOR,
   TRAINING_OUTSIDE_COLOR,
+  TRAINING_RAW_COLOR,
+  TRAINING_SPEED_COLOR,
   TRAINING_TRACE_COLOR,
+  TRAINING_TUBE_COLOR,
+  TRAINING_TURN_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import {
-  altitudeTargetM,
-  eventInForce,
+  altitudeTubeAt,
   formatSeconds,
-  headingBoxDeg,
-  speedBoxMps,
-  trainingContainment,
-  trainingWordBandLabel,
-  type TrainingEnvelope,
+  headingEnvelopeAt,
+  rowAtTime,
+  trainingKindLabel,
+  trainingWordLabel,
+  TRAINING_COLUMN_INDEX,
+  type TrainingCandidate,
   type TrainingFlight,
-  type TrainingObservedColumn,
-  type TrainingPrior,
-  type TrainingReadingRule,
+  type TrainingPlanLine,
   type TrainingVocabulary,
 } from "../data/trainingSample";
 
-// ── geometry (pixels; the window measures itself) ───────────────────────────
-const GUTTER = 62;
+const GUTTER = 64;
 const PAD_R = 16;
-const PLAN_H = 190;
-const CHART_H = 116;
-const AXIS_H = 26;
+const PLAN_H = 300;
+const CHART_H = 150;
 const DEFAULT_W = 980;
 const MIN_W = 420;
 
-/** The three signals the boxes judge. The runway word names the frame they are
- *  all measured in, and the duration and terminal words are not signals at all,
- *  so neither gets a chart — they are the sentence bar's rows. */
-const CHARTED_KINDS = ["heading", "altitude", "speed"] as const;
-type ChartedKind = (typeof CHARTED_KINDS)[number];
-
-/** The smoothed column each chart's verdict is computed on, and the raw one
- *  drawn behind it. */
-const READ_COLUMN: Record<ChartedKind, TrainingObservedColumn> = {
-  heading: "readCourseDeg",
-  altitude: "readHeightM",
-  speed: "readSpeedMps",
-};
-const RAW_COLUMN: Record<ChartedKind, TrainingObservedColumn> = {
-  heading: "relCourseDeg",
-  altitude: "heightM",
-  speed: "groundSpeedMps",
-};
-
-/**
- * One drawn box on a chart: the interval, and the stretch of time it stands for.
- *
- * Consecutive events carrying the same word are ONE span — only one column
- * changes at most events, so an unmerged row would be a picket fence of
- * identical rectangles and would read as repeated instructions.
- */
-export interface BoxSpan {
-  startS: number;
-  endS: number;
-  word: number;
-  event: number;
-  lo: number;
-  hi: number;
+/** [low, high] of the values, padded by 8 %, never zero-wide. */
+export function extent(values: number[]): [number, number] {
+  let low = Infinity;
+  let high = -Infinity;
+  for (const value of values) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
+  if (high === low) return [low - 1, high + 1];
+  const pad = (high - low) * 0.08;
+  return [low - pad, high + pad];
 }
 
-/**
- * The heading or speed boxes of one sentence, merged. The ALTITUDE word has no
- * constant interval — its box narrows along its segment — so it is not here:
- * `altitudeSegments` draws it from the envelope's own per-row columns.
- */
-export function boxSpans(
-  flight: TrainingFlight,
-  vocabulary: TrainingVocabulary,
-  kind: "heading" | "speed",
-  words: number[][],
-): BoxSpan[] {
-  const { eventTimesS, holdS } = flight.sentence;
-  const column = kind === "heading" ? 0 : 2;
-  const box = kind === "heading" ? headingBoxDeg : speedBoxMps;
-  const spans: BoxSpan[] = [];
-  eventTimesS.forEach((startS, event) => {
-    const word = words[event][column];
-    const endS = event + 1 < eventTimesS.length ? eventTimesS[event + 1] : startS + holdS[event];
-    const open = spans[spans.length - 1];
-    if (open && open.word === word) {
-      open.endS = endS;
-      return;
-    }
-    const [lo, hi] = box(vocabulary, word);
-    spans.push({ startS, endS, word, event, lo, hi });
-  });
-  return spans;
-}
-
-/**
- * One altitude segment as it is drawn: the rows it covers, the wedge over them,
- * and the target the wedge closes onto.
- *
- * The rows come from the ENVELOPE the exporter wrote, not from a second
- * derivation here: the wedge depends on the remaining path to the segment's end,
- * and two implementations of that would be two answers on one chart.
- */
-export interface AltitudeSegment {
-  event: number;
-  word: number;
-  firstRow: number;
-  lastRow: number;
-  targetM: number;
-}
-
-export function altitudeSegments(
-  flight: TrainingFlight,
-  vocabulary: TrainingVocabulary,
-  words: number[][],
-): AltitudeSegment[] {
-  const forced = eventInForce(flight.sentence.eventTimesS, flight.observed.tS);
-  const segments: AltitudeSegment[] = [];
-  forced.forEach((event, row) => {
-    const word = words[event][1];
-    const open = segments[segments.length - 1];
-    if (open && open.word === word) {
-      open.lastRow = row;
-      return;
-    }
-    segments.push({
-      event,
-      word,
-      firstRow: row,
-      lastRow: row,
-      targetM: altitudeTargetM(vocabulary, word),
-    });
-  });
-  return segments;
-}
-
-/**
- * WHERE THE WORDS CUT THE TRACK: one node per event, on the track's own rows.
- *
- * Without them the track reads as a curve rather than as a sentence — and the
- * question "which word is in force here" has no answer on screen. The events,
- * not the words of one kind: an event is the moment something changed, and
- * several kinds changing at once is one cut, not three at the same place.
- */
-export function segmentNodes(
-  track: { tS: number[] },
-  eventTimesS: number[],
-): Array<{ eventS: number; row: number; event: number }> {
-  const last = track.tS[track.tS.length - 1];
-  return eventTimesS
-    .map((eventS, event) => ({ eventS, event, row: rowAt(track.tS, eventS) }))
-    .filter((node) => node.eventS <= last);
-}
-
-/** The contiguous runs of `true` in a per-row flag, as [firstRow, lastRow] pairs.
- *  A run of one row still has to be drawn, so the pair is inclusive. */
+/** The contiguous runs of `true` in a per-row flag, as inclusive [first, last] pairs. */
 export function runsOf(flags: boolean[]): Array<[number, number]> {
   const runs: Array<[number, number]> = [];
   let start: number | null = null;
@@ -209,70 +89,25 @@ export function runsOf(flags: boolean[]): Array<[number, number]> {
   return runs;
 }
 
-/** The row in force at a time: the last row at or before it. */
-export function rowAt(tS: number[], seconds: number): number {
-  let low = 0;
-  let high = tS.length - 1;
-  if (seconds <= tS[0]) return 0;
-  if (seconds >= tS[high]) return high;
-  while (low < high) {
-    const mid = (low + high + 1) >> 1;
-    if (tS[mid] <= seconds) low = mid;
-    else high = mid - 1;
-  }
-  return low;
+/** The row whose horizontal distance flown is nearest at or before `metres`. */
+export function rowAtDistance(distanceM: number[], metres: number): number {
+  return rowAtTime(distanceM, metres);
 }
 
-export function extent(values: number[]): [number, number] {
-  let low = values[0];
-  let high = values[0];
-  for (const value of values) {
-    if (value < low) low = value;
-    if (value > high) high = value;
-  }
-  // A divide-by-zero guard, not a domain bound: `yFor` would produce NaN for
-  // every row. It cannot fire on this artefact, because what is constant for a
-  // whole approach is the WORD, and `extent` always sees the trace too.
-  if (high === low) return [low - 1, high + 1];
-  const pad = (high - low) * 0.12;
-  return [low - pad, high + pad];
-}
-
-/** How a chart's title says the verdict, in this vocabulary's own terms. */
-export function insideReading(count: { rows: number; outside: number }): string {
-  if (count.outside === 0) return `every one of the ${count.rows} rows is inside its box`;
-  return `${count.rows - count.outside} of ${count.rows} rows inside — ${count.outside} outside`;
-}
-
-function format(value: number, digits = 0): string {
-  return value.toFixed(digits);
-}
+const tick = (ok: boolean) => (ok ? "✓" : "✗");
 
 export interface TrainingReadbackWindowProps {
-  /** Which of the two drawn sentences to show. The measured track has no switch:
-   *  it is what everything else is read against. */
-  layers: TrainingLayers;
   flight: TrainingFlight;
   vocabulary: TrainingVocabulary;
-  /** The model that said `flight.prior`, when this set carries one. */
-  prior?: TrainingPrior;
-  /** How the signals the boxes judge were made. The legend quotes it, because a
-   *  verdict whose signal is not stated is a number with no meaning. */
-  reading: TrainingReadingRule;
+  candidates: TrainingCandidate[];
+  layers: TrainingLayers;
   cursorS: number;
   onCursorChange: (seconds: number) => void;
   onClose: () => void;
 }
 
 export default function TrainingReadbackWindow({
-  layers,
-  flight,
-  vocabulary,
-  prior,
-  reading,
-  cursorS,
-  onCursorChange,
-  onClose,
+  flight, vocabulary, candidates, layers, cursorS, onCursorChange, onClose,
 }: TrainingReadbackWindowProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number>(DEFAULT_W);
@@ -288,60 +123,93 @@ export default function TrainingReadbackWindow({
     return () => observer.disconnect();
   }, []);
 
-  const { observed, sentence, envelope } = flight;
-  const { tS } = observed;
-  const endOfTrack = tS[tS.length - 1];
+  const { signals, envelopes } = flight;
+  const { tS } = signals;
+  const last = flight.rows - 1;
   const plotW = width - GUTTER - PAD_R;
-  const xFor = (seconds: number) => GUTTER + (seconds / endOfTrack) * plotW;
-  // The ONE place a pixel becomes a time. The charts are drawn at one unit per
-  // pixel, so the SVG's own offset is the x coordinate — no rect arithmetic, and
-  // nothing to get wrong when the window is resized or scrolled.
-  const timeAtX = (x: number) =>
-    Math.min(Math.max(((x - GUTTER) / plotW) * endOfTrack, 0), endOfTrack);
+  const cursorRow = rowAtTime(tS, cursorS);
+  const headingInForce = headingEnvelopeAt(flight, cursorRow);
+  const tubeInForce = altitudeTubeAt(flight, cursorRow);
+  const designated = candidates[flight.runwayIndex];
+  const label = (column: "heading" | "altitude" | "angle" | "speed", value: number) =>
+    trainingWordLabel(vocabulary, candidates, column, value);
+  const inForce = (column: "heading" | "altitude" | "angle" | "speed") =>
+    flight.words.inForce[TRAINING_COLUMN_INDEX[column]][cursorRow];
 
-  const cursorRow = rowAt(tS, cursorS);
-  const forced = eventInForce(sentence.eventTimesS, tS);
-  const said = layers.model ? flight.prior : undefined;
-  const inside = trainingContainment(flight, envelope, vocabulary, sentence.words);
-  const modelInside = said
-    ? trainingContainment(flight, said.envelope, vocabulary, said.words)
-    : undefined;
+  // ── time charts share one x ───────────────────────────────────────────────
+  const endS = tS[last];
+  const xTime = (seconds: number) => GUTTER + (seconds / endS) * plotW;
+  const timeAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * endS, 0), endS);
+  /** A row as a time edge; the step after the last row is the last row. */
+  const edge = (row: number) => tS[Math.min(row, last)];
 
-  const UNIT: Record<ChartedKind, string> = {
-    heading: "° of ground track relative to the course, wrapped",
-    altitude: "m above the threshold — the word is a TARGET, the box is the wedge around it",
-    speed: "m/s ground speed",
-  };
-  const DIGITS: Record<ChartedKind, number> = { heading: 1, altitude: 0, speed: 1 };
+  // ── the plan view: the track and the thresholds decide the frame ─────────
+  const km = (metres: number) => metres / 1000;
+  const frameE = [...signals.eM, designated.thresholdEM, ...envelopes.approach.corridor.axis.eM].map(km);
+  const frameN = [...signals.nM, designated.thresholdNM, ...envelopes.approach.corridor.axis.nM].map(km);
+  const [eLow, eHigh] = extent(frameE);
+  const [nLow, nHigh] = extent(frameN);
+  const planScale = Math.min((plotW - 12) / (eHigh - eLow), (PLAN_H - 30) / (nHigh - nLow));
+  const px = (eKm: number) => GUTTER + 6 + (eKm - eLow) * planScale;
+  const py = (nKm: number) => 20 + (nHigh - nKm) * planScale;
+  const points = (line: TrainingPlanLine) =>
+    line.eM.map((e, index) => `${px(km(e))},${py(km(line.nM[index]))}`).join(" ");
+  const at = (row: number) => ({ x: px(km(signals.eM[row])), y: py(km(signals.nM[row])) });
 
-  const chartTop = (index: number) => PLAN_H + 8 + index * CHART_H;
-  const totalH = PLAN_H + 8 + CHARTED_KINDS.length * CHART_H + AXIS_H;
+  // ── the charts' y ────────────────────────────────────────────────────────
+  const headingValues = [
+    ...signals.smoothed.trackDeg, ...signals.raw.trackDeg,
+    ...(layers.lateral ? envelopes.heading.flatMap((item) => [...(item.turnBandDeg ?? []), ...(item.holdBandDeg ?? [])]) : []),
+    ...(layers.lateral ? envelopes.approach.courseBandDeg : []),
+  ];
+  const [hLow, hHigh] = extent(headingValues);
+  const altitudeValues = [
+    ...signals.smoothed.altitudeM, ...signals.raw.altitudeM, designated.elevationM,
+    ...(layers.vertical ? envelopes.altitude.flatMap((tube) => [...tube.lowerM, ...tube.upperM]) : []),
+  ];
+  const [aLow, aHigh] = extent(altitudeValues);
+  const speedValues = [
+    ...signals.smoothed.groundSpeedMps, ...signals.raw.groundSpeedMps,
+    ...(layers.vertical ? envelopes.speed.flatMap((span) => [...(span.bandMps ?? []), ...(span.transitionLowerMps ?? []), ...(span.transitionUpperMps ?? [])]) : []),
+  ];
+  const [sLow, sHigh] = extent(speedValues);
+  const plotTop = 18;
+  const plotH = CHART_H - 40;
+  const yOf = (low: number, high: number) => (value: number) => plotTop + ((high - value) / (high - low)) * plotH;
+  const yHeading = yOf(hLow, hHigh);
+  const yAltitude = yOf(aLow, aHigh);
+  const ySpeed = yOf(sLow, sHigh);
+  const distanceEnd = signals.smoothed.distanceM[last];
+  const xDistance = (metres: number) => GUTTER + (metres / distanceEnd) * plotW;
+  const distanceAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * distanceEnd, 0), distanceEnd);
 
-  // ── the plan view, at one scale on both axes so a turn looks like a turn ──
-  const planX = observed.toGoM.map((metres) => -metres / 1000);
-  const planY = observed.crossM.map((metres) => metres / 1000);
-  // The BOXES decide the frame as much as the track does: a footprint drawn off
-  // the edge is exactly the one saying the words allow somewhere the aircraft
-  // did not go. The plan has no clip, so a shape outside the frame draws over
-  // the charts.
-  const boxX = envelope.events.flatMap((box) => box.toGoM.map((metres) => -metres / 1000));
-  const boxY = envelope.events.flatMap((box) => box.crossM.map((metres) => metres / 1000));
-  const [planXLow, planXHigh] = extent([...planX, ...(layers.flown ? boxX : []), 0]);
-  const [planYLow, planYHigh] = extent([...planY, ...(layers.flown ? boxY : []), 0]);
-  const planScale = Math.min(
-    (plotW - 12) / (planXHigh - planXLow),
-    (PLAN_H - 28) / (planYHigh - planYLow),
+  const heading = headingInForce >= 0 ? envelopes.heading[headingInForce] : null;
+  const tube = envelopes.altitude[tubeInForce];
+  const capture = envelopes.approach.captureTurn;
+
+  const timeAxis = (
+    <g>
+      <line x1={GUTTER} x2={GUTTER + plotW} y1={plotTop + plotH} y2={plotTop + plotH} className="training-readback-axis" />
+      {[0, 0.25, 0.5, 0.75, 1].map((fraction) => (
+        <text key={fraction} x={xTime(fraction * endS)} y={plotTop + plotH + 14} textAnchor="middle" className="training-readback-tick">
+          {formatSeconds(Math.round(fraction * endS))}
+        </text>
+      ))}
+      <text x={GUTTER + plotW} y={plotTop + plotH + 26} textAnchor="end" className="training-readback-tick">s from the first step</text>
+    </g>
   );
-  const planPx = (km: number) => GUTTER + 6 + (km - planXLow) * planScale;
-  const planPy = (km: number) => 18 + (planYHigh - km) * planScale;
-
-  // The sector's outline, in the plan's own axes. The FIRST point is the apex —
-  // the aircraft's position when that word opened — so the shape fans out from
-  // the track rather than sitting beside it.
-  const boxPolygon = (box: TrainingEnvelope["events"][number]) =>
-    box.toGoM
-      .map((metres, point) => `${planPx(-metres / 1000)},${planPy(box.crossM[point] / 1000)}`)
-      .join(" ");
+  const trace = (values: number[], x: (row: number) => number, y: (value: number) => number, colour: string, faint: boolean) => (
+    <polyline
+      points={values.map((value, row) => `${x(row)},${y(value)}`).join(" ")}
+      fill="none"
+      stroke={colour}
+      strokeOpacity={faint ? 0.4 : 1}
+      strokeWidth={faint ? 1 : 1.4}
+      className={faint ? "training-readback-raw" : "training-readback-trace"}
+    />
+  );
+  const rowX = (row: number) => xTime(tS[row]);
+  const rowXDistance = (row: number) => xDistance(signals.smoothed.distanceM[row]);
 
   return createPortal(
     <div className="training-readback-backdrop">
@@ -360,419 +228,423 @@ export default function TrainingReadbackWindow({
           <span>{flight.callsign}</span>
           <span>runway {flight.runway}</span>
           <span>{flight.stratum}</span>
-          <span>{sentence.eventTimesS.length} boxes</span>
-          <span className="training-readback-cursor">
-            t = {formatSeconds(cursorS)} s · box {forced[cursorRow] + 1}
-          </span>
-          <button type="button" onClick={onClose} aria-label="Close the read-back check">
-            ×
-          </button>
+          <span className="training-readback-cursor">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
+          <button type="button" onClick={onClose} aria-label="Close the read-back check">×</button>
         </header>
 
-        {/* The measured element carries NO padding of its own: `clientWidth`
-            includes padding, so measuring the window would draw an SVG wider
-            than the box that holds it and put a scrollbar under every chart. */}
         <div className="training-readback-frame" ref={frameRef}>
-        <svg
-          className="training-readback-svg"
-          width={width}
-          height={totalH}
-          viewBox={`0 0 ${width} ${totalH}`}
-          onMouseMove={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}
-          // A touch has no move before its tap, so the same reading is bound to
-          // both; with a mouse the click is a no-op on a cursor already there.
-          onClick={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}
-        >
           {/* ── the plan view ─────────────────────────────────────────────── */}
-          <text x={GUTTER} y={12} className="training-readback-title">
-            plan view · along the course (km, threshold at 0) × cross-track (km, right +)
-          </text>
-          <line
-            x1={planPx(planXLow)} x2={planPx(planXHigh)} y1={planPy(0)} y2={planPy(0)}
-            className="training-readback-course"
-          />
-          <line
-            x1={planPx(0)} x2={planPx(0)} y1={planPy(planYHigh)} y2={planPy(planYLow)}
-            className="training-readback-threshold"
-          />
-          {/* THE CHAIN OF SECTORS, under the track: one footprint per word, the
-              ground the heading and speed words allow while that word stands.
-              Each one FANS OUT FROM THE AIRCRAFT — a pie slice of radius
-              `hold × the speed box's upper edge`, spanning the heading box — and
-              not a rectangle: the corners beside the apex are ground no heading
-              inside the box can reach. They are thin (over a median 4 s hold a 2°
-              box opens about 17 m at its far edge), and that thinness is the
-              finding, not a drawing fault: horizontally one word says almost
-              nothing, and it is the accumulation over a sentence that opens the
-              funnel. */}
-          {(layers.flown ? envelope.events : []).map((box, index) => {
-            const name =
-              `box ${index + 1} at ${formatSeconds(box.eventS)} s, held ${formatSeconds(box.holdS)} s: ` +
-              `heading ${format(box.headingLoDeg, 1)}…${format(box.headingHiDeg, 1)}°, ` +
-              `speed ${format(box.speedLoMps, 1)}…${format(box.speedHiMps, 1)} m/s. ` +
-              `The ground it reaches is a sector ${format(box.holdS * box.speedHiMps)} m deep, fanning ` +
-              `out from the aircraft, and the height it allows TAPERS along it: ` +
-              `${format(box.altLoM[0])}…${format(box.altHiM[0])} m at the aircraft, ` +
-              `${format(box.altLoM[box.altLoM.length - 1])}…${format(box.altHiM[box.altHiM.length - 1])} m ` +
-              `at the far edge`;
-            return (
-              <polygon
-                key={`plan-box-${index}`}
-                className="training-readback-plan-box"
-                points={boxPolygon(box)}
-                fill={TRAINING_BAND_FILL}
-                stroke={TRAINING_BAND_EDGE}
-                strokeWidth={0.6}
-                aria-label={name}
-              >
-                <title>{name}</title>
-              </polygon>
-            );
-          })}
-          <polyline
-            points={planX.map((km, index) => `${planPx(km)},${planPy(planY[index])}`).join(" ")}
-            className="training-readback-trace"
-          />
-          {/* Where the words cut the track. This is the only track here, so the
-              nodes go on it: the aircraft's own rows at each event. */}
-          {segmentNodes(observed, sentence.eventTimesS).map((node) => {
-            const name = `event ${node.event + 1} at ${formatSeconds(node.eventS)} s — a new box opens here`;
-            return (
-              <circle
-                key={`node-${node.event}`}
-                className="training-readback-node"
-                cx={planPx(planX[node.row])}
-                cy={planPy(planY[node.row])}
-                r={3.2}
-                fill="none"
-                stroke={TRAINING_FLOWN_COLOR}
-                strokeWidth={1.6}
-                aria-label={name}
-              >
-                <title>{name}</title>
-              </circle>
-            );
-          })}
-          <circle
-            cx={planPx(planX[cursorRow])}
-            cy={planPy(planY[cursorRow])}
-            r={4.5}
-            className="training-readback-cursor-dot"
-          />
+          <svg className="training-readback-svg" width={width} height={PLAN_H} viewBox={`0 0 ${width} ${PLAN_H}`}
+            aria-label="Plan view">
+            <defs>
+              <clipPath id="training-plan-clip">
+                <rect x={GUTTER} y={14} width={plotW} height={PLAN_H - 18} />
+              </clipPath>
+            </defs>
+            <text x={GUTTER} y={11} className="training-readback-title">
+              plan view · airport frame, km east × km north of the reference point · clipped to the track
+            </text>
+            <g clipPath="url(#training-plan-clip)">
+              {candidates.map((candidate) => {
+                const pointed = candidate.index === flight.runwayIndex;
+                if (!pointed && !layers.candidates) return null;
+                const colour = pointed ? TRAINING_DESIGNATED_COLOR : TRAINING_CANDIDATE_COLOR;
+                const name = `${pointed ? "the designated runway" : "candidate"} ${candidate.ident}: course ` +
+                  `${candidate.courseDeg.toFixed(1)}°, threshold ${candidate.elevationM.toFixed(1)} m MSL`;
+                return (
+                  <g key={`candidate-${candidate.ident}`} className="training-readback-candidate" aria-label={name}>
+                    <title>{name}</title>
+                    <polyline points={points(candidate.centreline)} fill="none" stroke={colour} strokeDasharray="5 4"
+                      strokeOpacity={pointed ? 0.9 : 0.5} strokeWidth={1} />
+                    <polyline points={points(candidate.runway)} fill="none" stroke={colour} strokeWidth={4}
+                      strokeOpacity={pointed ? 1 : 0.6} />
+                    <text x={px(km(candidate.thresholdEM)) + 4} y={py(km(candidate.thresholdNM)) - 4}
+                      className="training-readback-candidate-label" fill={colour}>
+                      {candidate.ident}
+                    </text>
+                  </g>
+                );
+              })}
 
-          {/* ── the three signals ─────────────────────────────────────────── */}
-          {CHARTED_KINDS.map((kind, index) => {
-            const read = observed[READ_COLUMN[kind]];
-            const raw = observed[RAW_COLUMN[kind]];
-            const top = chartTop(index);
-            const plotTop = top + 14;
-            const plotH = CHART_H - 22;
-            const spans =
-              kind === "altitude" ? [] : boxSpans(flight, vocabulary, kind, sentence.words);
-            const segments =
-              kind === "altitude" ? altitudeSegments(flight, vocabulary, sentence.words) : [];
-            const modelSpans =
-              said && kind !== "altitude" ? boxSpans(flight, vocabulary, kind, said.words) : [];
-            const [low, high] = extent([
-              ...read,
-              ...raw,
-              ...spans.flatMap((span) => [span.lo, span.hi]),
-              ...modelSpans.flatMap((span) => [span.lo, span.hi]),
-              ...(kind === "altitude" ? [...envelope.altLoM, ...envelope.altHiM] : []),
-              ...(kind === "altitude" && said ? [...said.envelope.altLoM, ...said.envelope.altHiM] : []),
-            ]);
-            const yFor = (value: number) => plotTop + ((high - value) / (high - low)) * plotH;
-            const inForce = sentence.words[forced[cursorRow]][
-              kind === "heading" ? 0 : kind === "altitude" ? 1 : 2
-            ];
-
-            return (
-              <g key={kind} className="training-readback-chart">
-                <text x={GUTTER} y={top + 9} className="training-readback-title">
-                  {kind} — {UNIT[kind]}
-                  {` · in force: ${trainingWordBandLabel(vocabulary, kind, inForce)}`}
-                  {` · now ${format(read[cursorRow], DIGITS[kind])}`}
-                  {` · ${insideReading(inside[kind])}`}
-                </text>
-
-                {/* THE BOX, under the traces. The heading and speed words are a
-                    rectangle each; the altitude word is a wedge, because it
-                    narrows as the aircraft runs out of path to its segment's
-                    end. */}
-                {spans.map((span, position) => {
-                  const x = xFor(span.startS);
-                  const name =
-                    `${kind} ${trainingWordBandLabel(vocabulary, kind, span.word)} (word ${span.word}), ` +
-                    `${formatSeconds(span.startS)}–${formatSeconds(span.endS)} s`;
-                  return (
-                    <rect
-                      key={`box-${position}`}
-                      className="training-readback-band"
-                      x={x}
-                      width={Math.max(xFor(span.endS) - x, 1)}
-                      y={yFor(span.hi)}
-                      height={Math.max(yFor(span.lo) - yFor(span.hi), 1)}
-                      fill={TRAINING_BAND_FILL}
-                      stroke={TRAINING_BAND_EDGE}
-                      strokeWidth={0.75}
-                      aria-label={name}
+              {layers.lateral ? (
+                <>
+                  <polygon
+                    className="training-readback-corridor"
+                    points={points(envelopes.approach.corridor.outline)}
+                    fill={TRAINING_CORRIDOR_COLOR}
+                    fillOpacity={headingInForce < 0 ? 0.4 : 0.2}
+                    stroke={headingInForce < 0 ? TRAINING_WORD_COLOR : TRAINING_CORRIDOR_COLOR}
+                    strokeWidth={0.8}
+                  >
+                    <title>
+                      the capture corridor: {envelopes.approach.corridor.halfWidthAtCaptureM.toFixed(0)} m half width at the
+                      capture ({(envelopes.approach.corridor.beforeThresholdM / 1000).toFixed(1)} km out),{" "}
+                      {envelopes.approach.corridor.halfWidthAtThresholdM.toFixed(0)} m at the threshold, course ±
+                      {vocabulary.corridorCourseToleranceDeg}° — every one of its {envelopes.approach.corridor.rows} rows inside
+                    </title>
+                  </polygon>
+                  {envelopes.heading.map((item, index) => {
+                    const selected = index === headingInForce;
+                    const failed = item.check !== null && !(item.check.progressOk && item.check.bankOk);
+                    return (
+                      <g key={`plan-heading-${index}`} aria-label={`heading word ${index + 1} envelope`}>
+                        {item.turn ? (
+                          <polygon
+                            className="training-readback-turn"
+                            points={points(item.turn.region)}
+                            fill={TRAINING_TURN_COLOR}
+                            fillOpacity={selected ? 0.3 : 0.1}
+                            stroke={selected ? TRAINING_WORD_COLOR : failed ? TRAINING_OUTSIDE_COLOR : TRAINING_TURN_COLOR}
+                            strokeWidth={selected ? 1.4 : 0.7}
+                          >
+                            <title>
+                              turn to {label("heading", item.value)} from {item.turn.fromTrackDeg.toFixed(1)}° (
+                              {item.turn.turnDeg > 0 ? "right" : "left"} {Math.abs(item.turn.turnDeg).toFixed(1)}°) at{" "}
+                              {item.turn.groundSpeedMps.toFixed(0)} m/s: radius {(item.turn.radiusMinM / 1000).toFixed(2)}–
+                              {(item.turn.radiusMaxM / 1000).toFixed(2)} km for bank {vocabulary.turnBankMaxDeg}–
+                              {vocabulary.turnBankMinDeg}°
+                            </title>
+                          </polygon>
+                        ) : null}
+                        {item.funnel ? (
+                          <polygon
+                            className="training-readback-funnel"
+                            points={points(item.funnel.outline)}
+                            fill={TRAINING_FUNNEL_COLOR}
+                            fillOpacity={selected ? 0.3 : 0.1}
+                            stroke={selected ? TRAINING_WORD_COLOR : TRAINING_FUNNEL_COLOR}
+                            strokeWidth={selected ? 1.4 : 0.7}
+                          >
+                            <title>
+                              hold {label("heading", item.value)} ±{vocabulary.headingToleranceDeg}°:{" "}
+                              {(item.funnel.lengthM / 1000).toFixed(1)} km, half width{" "}
+                              {item.funnel.startHalfWidthM.toFixed(0)} → {item.funnel.endHalfWidthM.toFixed(0)} m
+                            </title>
+                          </polygon>
+                        ) : null}
+                      </g>
+                    );
+                  })}
+                  {capture ? (
+                    <polygon
+                      className="training-readback-capture-turn"
+                      points={points(capture.turn.region)}
+                      fill={TRAINING_TURN_COLOR}
+                      fillOpacity={0.06}
+                      stroke={capture.check.progressOk && capture.check.bankOk ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR}
+                      strokeDasharray="4 3"
+                      strokeWidth={0.9}
                     >
-                      <title>{name}</title>
-                    </rect>
-                  );
-                })}
-                {segments.map((segment, position) => {
-                  const rows: number[] = [];
-                  for (let row = segment.firstRow; row <= segment.lastRow; row += 1) rows.push(row);
-                  const name =
-                    `altitude target ${format(segment.targetM)} m (word ${segment.word}), ` +
-                    `${formatSeconds(tS[segment.firstRow])}–${formatSeconds(tS[segment.lastRow])} s — ` +
-                    `the wedge closes onto ±${(vocabulary.redundancyFraction * 100).toFixed(0)} % of it`;
-                  return (
-                    <g key={`wedge-${position}`}>
-                      <polygon
-                        className="training-readback-fan"
-                        points={
-                          rows.map((row) => `${xFor(tS[row])},${yFor(envelope.altHiM[row])}`).join(" ") +
-                          " " +
-                          rows.map((row) => `${xFor(tS[row])},${yFor(envelope.altLoM[row])}`).reverse().join(" ")
-                        }
-                        fill={TRAINING_BAND_FILL}
-                        stroke={TRAINING_BAND_EDGE}
-                        strokeWidth={0.75}
-                        aria-label={name}
-                      >
-                        <title>{name}</title>
-                      </polygon>
-                      {/* the TARGET itself, at the end of its segment: what the
-                          word names, as opposed to the room it leaves */}
-                      <line
-                        className="training-readback-word"
-                        x1={xFor(tS[Math.max(segment.lastRow - 1, segment.firstRow)])}
-                        x2={xFor(tS[segment.lastRow])}
-                        y1={yFor(segment.targetM)}
-                        y2={yFor(segment.targetM)}
-                        stroke={TRAINING_WORD_COLOR}
-                        strokeWidth={2}
-                      />
-                    </g>
-                  );
-                })}
-                {/* WHAT THE MODEL SAID, as the boxes its words would have made:
-                    outlined, never filled, so the truth's box stays readable
-                    underneath. */}
-                {modelSpans.map((span, position) => {
-                  const x = xFor(span.startS);
-                  const name =
-                    `the model's ${kind} box here is ${trainingWordBandLabel(vocabulary, kind, span.word)} ` +
-                    `(word ${span.word})`;
-                  return (
-                    <rect
-                      key={`model-box-${position}`}
-                      className="training-readback-model"
-                      x={x}
-                      width={Math.max(xFor(span.endS) - x, 1)}
-                      y={yFor(span.hi)}
-                      height={Math.max(yFor(span.lo) - yFor(span.hi), 1)}
-                      fill="none"
-                      stroke={TRAINING_MODEL_COLOR}
-                      strokeWidth={1}
-                      strokeDasharray="3 2"
-                      aria-label={name}
-                    >
-                      <title>{name}</title>
-                    </rect>
-                  );
-                })}
-                {said && kind === "altitude" ? (
-                  <polyline
-                    className="training-readback-model"
-                    points={
-                      tS.map((t, row) => `${xFor(t)},${yFor(said.envelope.altHiM[row])}`).join(" ") +
-                      " " +
-                      tS.map((t, row) => `${xFor(t)},${yFor(said.envelope.altLoM[row])}`).reverse().join(" ")
-                    }
-                    fill="none"
-                    stroke={TRAINING_MODEL_COLOR}
-                    strokeWidth={1}
-                    strokeDasharray="3 2"
-                  />
-                ) : null}
+                      <title>the capture turn onto the course {designated.courseDeg.toFixed(1)}°</title>
+                    </polygon>
+                  ) : null}
+                </>
+              ) : null}
 
-                {/* The raw rows, behind: what the aircraft did, as opposed to
-                    what the boxes were read from. */}
-                <polyline
-                  points={tS.map((t, row) => `${xFor(t)},${yFor(raw[row])}`).join(" ")}
-                  className="training-readback-raw"
-                  fill="none"
-                  stroke={TRAINING_TRACE_COLOR}
-                  strokeOpacity={0.35}
-                  strokeWidth={1}
-                />
-                <polyline
-                  points={tS.map((t, row) => `${xFor(t)},${yFor(read[row])}`).join(" ")}
-                  className="training-readback-trace"
-                />
-                {/* …and again, in red, over the stretches that left the box. */}
-                {runsOf(inside[kind].inside.map((ok) => !ok)).map(([first, last], position) =>
-                  first === last ? (
-                    <circle
-                      key={`outside-${position}`}
-                      className="training-readback-outside"
-                      cx={xFor(tS[first])}
-                      cy={yFor(read[first])}
-                      r={1.8}
-                      fill={TRAINING_OUTSIDE_COLOR}
-                    />
-                  ) : (
-                    <polyline
-                      key={`outside-${position}`}
-                      className="training-readback-outside"
-                      points={tS.slice(first, last + 1)
-                        .map((t, offset) => `${xFor(t)},${yFor(read[first + offset])}`)
-                        .join(" ")}
-                      fill="none"
-                      stroke={TRAINING_OUTSIDE_COLOR}
-                      strokeWidth={1.6}
-                    />
-                  ),
-                )}
-
-                {/* where each box opens */}
-                {segmentNodes(observed, sentence.eventTimesS).map((node) => (
-                  <circle
-                    key={`node-${node.event}`}
-                    className="training-readback-node"
-                    cx={xFor(node.eventS)}
-                    cy={yFor(read[node.row])}
-                    r={2.2}
-                    fill="none"
-                    stroke={TRAINING_FLOWN_COLOR}
-                    strokeWidth={1.2}
-                  />
-                ))}
-
-                <line
-                  x1={xFor(cursorS)}
-                  x2={xFor(cursorS)}
-                  y1={plotTop}
-                  y2={plotTop + plotH}
-                  className="training-readback-cursor-line"
+              <polyline points={signals.eM.map((e, row) => `${px(km(e))},${py(km(signals.nM[row]))}`).join(" ")}
+                fill="none" stroke={TRAINING_TRACE_COLOR} strokeWidth={1.4} className="training-readback-trace" />
+              {envelopes.heading.map((item, index) => {
+                const point = at(item.row);
+                const name = `heading ${label("heading", item.value)} issued at step ${item.row} — ${trainingKindLabel(item.kind, item.split)}`;
+                return (
+                  <g key={`issue-${index}`} className="training-readback-issue" aria-label={name}>
+                    <title>{name}</title>
+                    <circle cx={point.x} cy={point.y} r={3.4} fill="none" stroke={TRAINING_COLUMN_COLOR.heading} strokeWidth={1.6} />
+                    <text x={point.x + 5} y={point.y - 5} className="training-readback-issue-label" fill={TRAINING_COLUMN_COLOR.heading}>
+                      {label("heading", item.value)}
+                    </text>
+                  </g>
+                );
+              })}
+              <g aria-label={`cleared at step ${flight.joinRow}`}>
+                <title>cleared to join the final at step {flight.joinRow}</title>
+                <rect x={at(flight.joinRow).x - 4} y={at(flight.joinRow).y - 4} width={8} height={8}
+                  transform={`rotate(45 ${at(flight.joinRow).x} ${at(flight.joinRow).y})`}
+                  fill="none" stroke={TRAINING_COLUMN_COLOR.approach} strokeWidth={1.6} />
+              </g>
+              <g aria-label={`captured at step ${flight.captureRow}`}>
+                <title>
+                  the final captured at step {flight.captureRow}, {(flight.captureBeforeThresholdM / 1000).toFixed(1)} km before
+                  the threshold
+                </title>
+                <rect x={at(flight.captureRow).x - 4} y={at(flight.captureRow).y - 4} width={8} height={8}
+                  fill={TRAINING_CORRIDOR_COLOR} stroke="black" strokeWidth={0.6} />
+              </g>
+              <g aria-label="the end of the sentence">
+                <title>
+                  the sentence ends here, {(envelopes.approach.landing.lastRowBeforeThresholdM / 1000).toFixed(2)} km before the
+                  threshold{envelopes.approach.landing.cutAtCrossing ? " (cut before the last passage of the threshold)" : ""}
+                </title>
+                <polygon
+                  points={`${at(last).x},${at(last).y - 5} ${at(last).x - 4},${at(last).y + 3} ${at(last).x + 4},${at(last).y + 3}`}
+                  fill={TRAINING_TRACE_COLOR}
                 />
               </g>
-            );
-          })}
+              <circle cx={at(cursorRow).x} cy={at(cursorRow).y} r={4.5} className="training-readback-cursor-dot" />
+            </g>
+          </svg>
 
-          {/* ── the shared time axis ──────────────────────────────────────── */}
-          <line
-            x1={GUTTER}
-            x2={GUTTER + plotW}
-            y1={totalH - AXIS_H}
-            y2={totalH - AXIS_H}
-            className="training-readback-axis"
-          />
-          {[0, 0.25, 0.5, 0.75, 1].map((fraction) => (
-            <text
-              key={`tick-${fraction}`}
-              x={xFor(fraction * endOfTrack)}
-              y={totalH - AXIS_H + 14}
-              textAnchor="middle"
-              className="training-readback-tick"
-            >
-              {formatSeconds(Math.round(fraction * endOfTrack))}
+          {/* ── heading ───────────────────────────────────────────────────── */}
+          <svg className="training-readback-svg" width={width} height={CHART_H} viewBox={`0 0 ${width} ${CHART_H}`}
+            aria-label="Heading chart"
+            onMouseMove={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}
+            onClick={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}>
+            <text x={GUTTER} y={11} className="training-readback-title">
+              heading — ground track, ° true, unwrapped · in force: {label("heading", inForce("heading"))}
+              {heading?.check
+                ? ` · its turn: ${tick(heading.check.progressOk)} monotone, ${tick(heading.check.bankOk)} bank ` +
+                  `(mean ${heading.check.meanBankDeg.toFixed(1)}°, max ${heading.check.maxBankDeg.toFixed(1)}°` +
+                  `${heading.check.bankMinApplies ? "" : `; under ${vocabulary.turnBankMinFromDeg}°, the lowest bank not judged`})`
+                : heading === null ? " · captured: the corridor holds" : " · in force at entry, no turn"}
             </text>
-          ))}
-          <text x={GUTTER + plotW} y={totalH - 3} textAnchor="end" className="training-readback-tick">
-            seconds from the start of the track
-          </text>
-        </svg>
+            {layers.lateral ? (
+              <>
+                {envelopes.heading.map((item, index) => (
+                  <g key={`heading-band-${index}`}>
+                    {item.turnBandDeg && item.turnEndRow !== null ? (
+                      <rect
+                        className="training-readback-turn-band"
+                        x={rowX(item.row)} width={Math.max(xTime(edge(item.turnEndRow)) - rowX(item.row), 1)}
+                        y={yHeading(item.turnBandDeg[1])} height={yHeading(item.turnBandDeg[0]) - yHeading(item.turnBandDeg[1])}
+                        fill={TRAINING_TURN_COLOR} fillOpacity={0.12}
+                        stroke={item.check && !item.check.progressOk ? TRAINING_OUTSIDE_COLOR : TRAINING_TURN_COLOR}
+                        strokeOpacity={0.6} strokeWidth={0.7}
+                      >
+                        <title>turn to {label("heading", item.value)}: from the track at issue to the target, ±{vocabulary.headingToleranceDeg}°</title>
+                      </rect>
+                    ) : null}
+                    {item.holdBandDeg && item.holdStartRow !== null ? (
+                      <rect
+                        className="training-readback-hold-band"
+                        x={rowX(item.holdStartRow)} width={Math.max(xTime(edge(item.holdEndRow)) - rowX(item.holdStartRow), 1)}
+                        y={yHeading(item.holdBandDeg[1])} height={yHeading(item.holdBandDeg[0]) - yHeading(item.holdBandDeg[1])}
+                        fill={TRAINING_FUNNEL_COLOR} fillOpacity={index === headingInForce ? 0.32 : 0.16}
+                        stroke={index === headingInForce ? TRAINING_WORD_COLOR : TRAINING_FUNNEL_COLOR} strokeWidth={0.7}
+                      >
+                        <title>hold {label("heading", item.value)} ±{vocabulary.headingToleranceDeg}°</title>
+                      </rect>
+                    ) : null}
+                  </g>
+                ))}
+                {capture ? (
+                  <rect
+                    className="training-readback-capture-band"
+                    x={rowX(capture.startRow)} width={Math.max(rowX(flight.captureRow) - rowX(capture.startRow), 1)}
+                    y={yHeading(capture.bandDeg[1])} height={yHeading(capture.bandDeg[0]) - yHeading(capture.bandDeg[1])}
+                    fill="none" stroke={TRAINING_TURN_COLOR} strokeDasharray="4 3" strokeWidth={0.9}
+                  >
+                    <title>the capture turn onto the course</title>
+                  </rect>
+                ) : null}
+                <rect
+                  className="training-readback-course-band"
+                  x={rowX(flight.captureRow)} width={Math.max(rowX(last) - rowX(flight.captureRow), 1)}
+                  y={yHeading(envelopes.approach.courseBandDeg[1])}
+                  height={yHeading(envelopes.approach.courseBandDeg[0]) - yHeading(envelopes.approach.courseBandDeg[1])}
+                  fill={TRAINING_CORRIDOR_COLOR} fillOpacity={0.22}
+                >
+                  <title>after the capture: the course ±{vocabulary.corridorCourseToleranceDeg}°</title>
+                </rect>
+              </>
+            ) : null}
+            {trace(signals.raw.trackDeg, rowX, yHeading, TRAINING_RAW_COLOR, true)}
+            {trace(signals.smoothed.trackDeg, rowX, yHeading, TRAINING_TRACE_COLOR, false)}
+            {envelopes.heading.map((item, index) => (
+              <circle key={`heading-issue-${index}`} cx={rowX(item.row)} cy={yHeading(signals.smoothed.trackDeg[item.row])} r={2.6}
+                fill="none" stroke={TRAINING_COLUMN_COLOR.heading} strokeWidth={1.3} />
+            ))}
+            <line x1={rowX(flight.joinRow)} x2={rowX(flight.joinRow)} y1={plotTop} y2={plotTop + plotH}
+              stroke={TRAINING_COLUMN_COLOR.approach} strokeDasharray="3 3" />
+            <line x1={xTime(cursorS)} x2={xTime(cursorS)} y1={plotTop} y2={plotTop + plotH} className="training-readback-cursor-line" />
+            {timeAxis}
+          </svg>
+
+          {/* ── altitude against distance flown ───────────────────────────── */}
+          <svg className="training-readback-svg" width={width} height={CHART_H} viewBox={`0 0 ${width} ${CHART_H}`}
+            aria-label="Altitude chart"
+            onMouseMove={(event) => onCursorChange(tS[rowAtDistance(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))])}
+            onClick={(event) => onCursorChange(tS[rowAtDistance(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))])}>
+            <text x={GUTTER} y={11} className="training-readback-title">
+              altitude — geometric MSL (m) against distance flown · in force: {label("altitude", inForce("altitude"))},{" "}
+              {label("angle", inForce("angle"))}
+              {tube ? ` · this tube: ${tube.check.inside}/${tube.check.rows} rows inside ${tick(tube.check.contained)}` : ""}
+            </text>
+            {layers.vertical ? envelopes.altitude.map((item, index) => {
+              const rows = item.lowerM.map((_, offset) => item.row + offset);
+              const selected = index === tubeInForce;
+              return (
+                <polygon
+                  key={`tube-${index}`}
+                  className="training-readback-tube"
+                  points={[
+                    ...rows.map((row, offset) => `${rowXDistance(row)},${yAltitude(item.upperM[offset])}`),
+                    ...rows.map((row, offset) => `${rowXDistance(row)},${yAltitude(item.lowerM[offset])}`).reverse(),
+                  ].join(" ")}
+                  fill={TRAINING_TUBE_COLOR}
+                  fillOpacity={selected ? 0.34 : 0.16}
+                  stroke={selected ? TRAINING_WORD_COLOR : item.check.contained ? TRAINING_TUBE_COLOR : TRAINING_OUTSIDE_COLOR}
+                  strokeWidth={selected ? 1.2 : 0.7}
+                >
+                  <title>
+                    {label("altitude", item.value)} from step {item.row}: the tube ±{vocabulary.altitudeToleranceM} m, re-anchored at
+                    each angle word, {item.check.tubeWidthEndM.toFixed(0)} m wide at its end — {item.check.inside} of {item.check.rows} rows
+                    inside
+                  </title>
+                </polygon>
+              );
+            }) : null}
+            <line x1={GUTTER} x2={GUTTER + plotW} y1={yAltitude(designated.elevationM)} y2={yAltitude(designated.elevationM)}
+              stroke={TRAINING_DESIGNATED_COLOR} strokeDasharray="2 3" className="training-readback-elevation" />
+            <text x={GUTTER + plotW - 2} y={yAltitude(designated.elevationM) - 3} textAnchor="end" className="training-readback-tick"
+              fill={TRAINING_DESIGNATED_COLOR}>
+              threshold {designated.ident} {designated.elevationM.toFixed(1)} m
+            </text>
+            {envelopes.angle.map((item, index) => (
+              <g key={`angle-${index}`} aria-label={`angle word ${label("angle", item.value)} at step ${item.row}`}>
+                <line x1={rowXDistance(item.row)} x2={rowXDistance(item.row)} y1={plotTop} y2={plotTop + plotH}
+                  stroke={TRAINING_COLUMN_COLOR.angle} strokeOpacity={0.6} strokeDasharray="2 2" />
+                <text x={rowXDistance(item.row) + 2} y={plotTop + 9} className="training-readback-tick" fill={TRAINING_COLUMN_COLOR.angle}>
+                  {vocabulary.angleClasses[item.value].name}
+                  {item.measuredDeg === null ? "" : ` ${item.measuredDeg.toFixed(2)}°`}
+                </text>
+              </g>
+            ))}
+            {trace(signals.raw.altitudeM, rowXDistance, yAltitude, TRAINING_RAW_COLOR, true)}
+            {trace(signals.smoothed.altitudeM, rowXDistance, yAltitude, TRAINING_TRACE_COLOR, false)}
+            {envelopes.altitude.flatMap((item, index) =>
+              runsOf(item.inside.map((ok) => !ok)).map(([first, lastOut]) => (
+                <polyline
+                  key={`altitude-out-${index}-${first}`}
+                  className="training-readback-outside"
+                  points={signals.smoothed.altitudeM.slice(item.row + first, item.row + lastOut + 1)
+                    .map((value, offset) => `${rowXDistance(item.row + first + offset)},${yAltitude(value)}`).join(" ")}
+                  fill="none" stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2}
+                />
+              )))}
+            <line x1={rowXDistance(cursorRow)} x2={rowXDistance(cursorRow)} y1={plotTop} y2={plotTop + plotH}
+              className="training-readback-cursor-line" />
+            <line x1={GUTTER} x2={GUTTER + plotW} y1={plotTop + plotH} y2={plotTop + plotH} className="training-readback-axis" />
+            {[0, 0.25, 0.5, 0.75, 1].map((fraction) => (
+              <text key={fraction} x={xDistance(fraction * distanceEnd)} y={plotTop + plotH + 14} textAnchor="middle"
+                className="training-readback-tick">
+                {((fraction * distanceEnd) / 1000).toFixed(1)}
+              </text>
+            ))}
+            <text x={GUTTER + plotW} y={plotTop + plotH + 26} textAnchor="end" className="training-readback-tick">
+              km flown (the smoothed ground speed, integrated)
+            </text>
+          </svg>
+
+          {/* ── speed ─────────────────────────────────────────────────────── */}
+          <svg className="training-readback-svg" width={width} height={CHART_H} viewBox={`0 0 ${width} ${CHART_H}`}
+            aria-label="Speed chart"
+            onMouseMove={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}
+            onClick={(event) => onCursorChange(timeAtX(event.nativeEvent.offsetX))}>
+            <text x={GUTTER} y={11} className="training-readback-title">
+              speed — ground speed (m/s) · in force: {label("speed", inForce("speed"))}
+            </text>
+            {layers.vertical ? envelopes.speed.map((span, index) => {
+              if (span.targetMps === null) {
+                return (
+                  <rect key={`speed-${index}`} className="training-readback-unspecified"
+                    x={rowX(span.row)} width={Math.max(xTime(edge(span.endRow)) - rowX(span.row), 1)}
+                    y={plotTop} height={plotH} fill={TRAINING_RAW_COLOR} fillOpacity={0.12}>
+                    <title>unspecified from step {span.row}: the pilot's own speed — only the range {span.rangeMps![0]}–{span.rangeMps![1]} m/s holds</title>
+                  </rect>
+                );
+              }
+              const transitionRows = span.transitionLowerMps!.map((_, offset) => span.row + offset);
+              return (
+                <g key={`speed-${index}`} aria-label={`speed ${label("speed", span.value)} from step ${span.row}`}>
+                  <polygon className="training-readback-transition"
+                    points={[
+                      ...transitionRows.map((row, offset) => `${rowX(row)},${ySpeed(span.transitionUpperMps![offset])}`),
+                      ...transitionRows.map((row, offset) => `${rowX(row)},${ySpeed(span.transitionLowerMps![offset])}`).reverse(),
+                    ].join(" ")}
+                    fill={TRAINING_SPEED_COLOR} fillOpacity={0.1}
+                    stroke={span.check!.transitionOk && span.check!.accelOk ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR}
+                    strokeOpacity={0.6} strokeWidth={0.6}>
+                    <title>
+                      transition to {label("speed", span.value)}: monotone {tick(span.check!.transitionOk)}, at most{" "}
+                      {vocabulary.speedAccelMaxMps2} m/s² {tick(span.check!.accelOk)}
+                    </title>
+                  </polygon>
+                  {span.arrivalRow !== null ? (
+                    <rect className="training-readback-speed-band"
+                      x={rowX(span.arrivalRow)} width={Math.max(xTime(edge(span.endRow)) - rowX(span.arrivalRow), 1)}
+                      y={ySpeed(span.bandMps![1])} height={ySpeed(span.bandMps![0]) - ySpeed(span.bandMps![1])}
+                      fill={TRAINING_SPEED_COLOR} fillOpacity={0.2}
+                      stroke={span.check!.contained ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR} strokeWidth={0.7}>
+                      <title>
+                        {label("speed", span.value)} ±{vocabulary.speedToleranceMps} m/s: {span.check!.bandInside} of{" "}
+                        {span.check!.bandRows} rows inside
+                      </title>
+                    </rect>
+                  ) : null}
+                </g>
+              );
+            }) : null}
+            {trace(signals.raw.groundSpeedMps, rowX, ySpeed, TRAINING_RAW_COLOR, true)}
+            {trace(signals.smoothed.groundSpeedMps, rowX, ySpeed, TRAINING_TRACE_COLOR, false)}
+            {envelopes.speed.flatMap((span, index) =>
+              span.arrivalRow === null || span.bandInside === null ? [] :
+                runsOf(span.bandInside.map((ok) => !ok)).map(([first, lastOut]) => (
+                  <polyline
+                    key={`speed-out-${index}-${first}`}
+                    className="training-readback-outside"
+                    points={signals.smoothed.groundSpeedMps.slice(span.arrivalRow! + first, span.arrivalRow! + lastOut + 1)
+                      .map((value, offset) => `${rowX(span.arrivalRow! + first + offset)},${ySpeed(value)}`).join(" ")}
+                    fill="none" stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2}
+                  />
+                )))}
+            <line x1={rowX(flight.joinRow)} x2={rowX(flight.joinRow)} y1={plotTop} y2={plotTop + plotH}
+              stroke={TRAINING_COLUMN_COLOR.approach} strokeDasharray="3 3">
+              <title>cleared at step {flight.joinRow}</title>
+            </line>
+            <line x1={xTime(cursorS)} x2={xTime(cursorS)} y1={plotTop} y2={plotTop + plotH} className="training-readback-cursor-line" />
+            {timeAxis}
+          </svg>
+
+          {/* ── the two slots that are empty on purpose ───────────────────── */}
+          <div className="training-readback-slots">
+            <div className="training-readback-slot" aria-label="Executor replay slot">
+              <strong>Executor replay</strong> — not built yet. The executor that flies a sentence by dynamics alone
+              is being designed (stage 3); its replay of this sentence will be drawn here beside the track.
+            </div>
+            <div className="training-readback-slot" aria-label="Prior sentence slot">
+              <strong>Prior-generated sentence</strong> — no prior is trained on this vocabulary yet (stage 5); what a
+              prior says for this flight will be drawn here against the labelled sentence.
+            </div>
+          </div>
         </div>
 
         <footer className="training-readback-legend">
           <span>
-            Move the pointer across a chart to read it out; the plan view's dot and
-            the sentence bar follow the same cursor.
+            Move the pointer across a chart to read it out; the plan view's dot, the sentence bar and the 3D scene follow
+            the same cursor. The word in force is drawn in yellow.
           </span>
           <span>
-            A WORD IS AN INTERVAL, and a sentence is a chain of boxes. The check is
-            containment: every row of the track has to lie inside the boxes in
-            force at its moment. On this flight{" "}
-            {CHARTED_KINDS.map(
-              (kind) => `${kind} ${inside[kind].rows - inside[kind].outside}/${inside[kind].rows}`,
-            ).join(", ")}
-            .
+            <b style={{ color: TRAINING_TURN_COLOR }}>▩</b> a heading word's turn region — the arcs of every bank from{" "}
+            {vocabulary.turnBankMinDeg}° to {vocabulary.turnBankMaxDeg}° at the issue ground speed, turning the shorter way;
+            under {vocabulary.turnBankMinFromDeg}° of turn the lowest bank is not judged, so its outer arc does not bind ·{" "}
+            <b style={{ color: TRAINING_FUNNEL_COLOR }}>▩</b> its hold funnel — along the target from where the turn ends,
+            starting as wide as the turn's end and widening by the distance × tan {vocabulary.headingToleranceDeg}° ·{" "}
+            <b style={{ color: TRAINING_CORRIDOR_COLOR }}>▩</b> the capture corridor — {vocabulary.corridorHalfWidthM} m at the
+            threshold, widening {vocabulary.corridorWideningDeg}° outward, course ±{vocabulary.corridorCourseToleranceDeg}°.
           </span>
           <span>
-            The ALTITUDE box is a wedge, not a band: the word is a target height,
-            and its box is the set that target is reachable from — opening
-            backwards at {vocabulary.altitudeDownDeg}° above and{" "}
-            {vocabulary.altitudeUpDeg}° below, and closing onto ±
-            {(vocabulary.redundancyFraction * 100).toFixed(0)} % of the target at
-            the segment's end. It is asymmetric because low is the dangerous side.
-            The yellow tick at the end of each wedge is the target itself.
+            <b style={{ color: TRAINING_TUBE_COLOR }}>▩</b> an altitude word's tube, from where it was issued: between the lines
+            of its angle class's two edges, stopped at the target, ±{vocabulary.altitudeToleranceM} m, and re-anchored at every
+            angle word · <b style={{ color: TRAINING_SPEED_COLOR }}>▩</b> a speed word: the transition (monotone toward the
+            target, at most {vocabulary.speedAccelMaxMps2} m/s²), then the band ±{vocabulary.speedToleranceMps} m/s · grey:
+            "unspecified", the pilot's own speed.
           </span>
           <span>
-            There is NO sentence flown by rule here. Flying a box sentence needs a
-            height-tracking executor — the replay gate, which is not built — so
-            what is drawn is the region the words allow rather than one line
-            through it.
-          </span>
-          <span>
-            A word is a box in STATE space (heading × speed × altitude), and that
-            is what the vocabulary calls a bounding box. The ground it reaches is
-            NOT a box: it is a sector fanning out from the aircraft, as deep as
-            the hold times the speed box's upper edge and as wide as the heading
-            box. The speed box's LOWER edge does not bound it — at any instant
-            before the hold is up the aircraft is nearer than that. Nothing in it
-            limits how fast the heading may swing inside its box, because the word
-            does not: that would be an executor's rule, and there is none here.
-          </span>
-          {flight.prior && prior ? (
-            <span>
-              <b style={{ color: TRAINING_MODEL_COLOR }}>┈┈</b> WHAT THE MODEL SAID, as the boxes
-              its own words would have made over this same track. It is <b>{prior.method}</b>: at
-              every event the model saw the truth's own words and state up to that point and was
-              asked for the next one — it did not generate this sentence, and a free run is a
-              different experiment.{" "}
-              {modelInside
-                ? `Its boxes hold ${CHARTED_KINDS.map(
-                    (kind) => `${kind} ${modelInside[kind].rows - modelInside[kind].outside}/${modelInside[kind].rows}`,
-                  ).join(", ")}.`
-                : ""}{" "}
-              {prior.trainedOnTheseFlights === 0
-                ? "It was never fitted on any of these flights."
-                : `It WAS fitted on ${prior.trainedOnTheseFlights} of these flights.`}
-              {flight.prior.landedAtS === null
-                ? ""
-                : ` It first said "landed" at ${formatSeconds(flight.prior.landedAtS)} s.`}
-            </span>
-          ) : null}
-          <span>
-            <b style={{ color: TRAINING_TRACE_COLOR }}>——</b> the signal the boxes judge ·{" "}
-            faint = the raw rows · <b style={{ color: TRAINING_BAND_EDGE }}>▩</b> the box in force ·{" "}
-            <b style={{ color: TRAINING_WORD_COLOR }}>——</b> the altitude target ·{" "}
-            <b style={{ color: TRAINING_OUTSIDE_COLOR }}>——</b> measured, outside its box ·{" "}
-            <b style={{ color: TRAINING_FLOWN_COLOR }}>○</b> where a box opens.
-          </span>
-          <span>
-            The verdict is computed on the smoothed signals the labeller read the
-            boxes from ({vocabulary.courseSmoothingS} s on the course,{" "}
-            {vocabulary.smoothingS} s on speed and height; {flight.courseWindowRows} and{" "}
-            {flight.signalWindowRows} rows at this flight's {flight.dtS} s step).{" "}
-            {reading.courseSignal}.
-          </span>
-          <span>
-            Heading is plotted WRAPPED, because the box is an interval of the
-            wrapped course, so a flight that turns through ±180° jumps on this
-            chart. The average behind it is taken on the UNWRAPPED signal and
-            wrapped afterwards — {reading.courseSignal} — which is what{" "}
-            <b>box-v3</b> changed: the rule before it averaged the wrapped course
-            and turned +179° and −179° into 0° at the cut.
-          </span>
-          <span>
-            Everything here is SI, because this vocabulary is: the edges were
-            fitted in metres and m/s, so knots would hide the grid the words sit
-            on. The boxes were produced by <i>{reading.producedBy}</i>.
+            <b style={{ color: TRAINING_TRACE_COLOR }}>——</b> the smoothed signal the labeller read (track{" "}
+            {vocabulary.smoothingS.track} s, altitude {vocabulary.smoothingS.altitude} s, speed {vocabulary.smoothingS.speed} s) ·
+            faint: the raw rows · <b style={{ color: TRAINING_OUTSIDE_COLOR }}>——</b> rows the labeller counted outside, or
+            an envelope whose check failed. Every region and verdict is the exporter's and the labeller's; nothing here is
+            recomputed.
           </span>
         </footer>
       </div>
