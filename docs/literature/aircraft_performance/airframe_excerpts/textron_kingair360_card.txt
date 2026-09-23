@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/king_air_360_product_card.pdf  sha256: 36a0ece4210b8487a8999d19a8ed66052420b47f3c8dcc763a3ef60aa3c50b3d
+# id: textron_kingair360_card | Textron Aviation | Product card: King Air 360 (B300) | undated product card PDF
+# url: https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/king_air_360_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 33-35  (match: /Output +1,050/)
+
+                                                                                                                                                                               Output                                  1,050 shp ea 783 kW ea

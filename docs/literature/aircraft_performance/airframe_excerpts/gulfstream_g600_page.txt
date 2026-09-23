@@ -1,0 +1,11 @@
+# source: data/reference_speeds/gulfstream/gulfstream_g600.html  sha256: 2bf221ef14e3b9bb38768f44b8d1fc4cc0ed0968959555907dd295a0bdc82626
+# id: gulfstream_g600_page | Gulfstream Aerospace | G600 product page | HTML as served 2026-09-23
+# url: https://www.gulfstream.com/en/aircraft/gulfstream-g600/
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- lines 287-291  (match: /Rated Takeoff Thrust \(each\)/)
+Engines
+Two Pratt & Whitney PW815GA
+Rated Takeoff Thrust (each)
+69.74 kN
+15,680 lb

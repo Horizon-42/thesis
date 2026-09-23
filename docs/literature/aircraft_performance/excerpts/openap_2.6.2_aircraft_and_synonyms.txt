@@ -1,0 +1,73 @@
+# source: openap 2.6.2 wheel from PyPI (uploaded 2026-09-22), retrieved 2026-09-23
+# file: openap-2.6.2-py3-none-any.whl sha256 c4a793251231fb9a10ecd3b37266e1f564667949b0eff2d42346fb8bf508a295
+# member openap/data/aircraft/_synonym.csv sha256 d223e24368f64ed671bcf4c4e14df0ea5630b105bdcde28511c96baa13bc1c3e
+# member openap/data/dragpolar/_synonym.csv sha256 8464028474dfcac5f6624a8eae68919a93962b3d3b8cfc1f5047f07d08d71ebc
+# the whole openap/data/ tree of 2.6.2 is byte-identical to 2.4 (diff -rq, and to the installed aeroviz copy);
+# GitHub junzis/openap master HEAD a19a1cd (2026-09-22, 'release 2.6.2') carries the same aircraft/_synonym.csv
+
+[aircraft/*.yml native models: 37]
+A19N A20N A21N A318 A319 A320 A321 A332 A333 A343 A359 A388 B37M B38M B39M B3XM B734 B737 B738 B739 B744 B748 B752 B763 B772 B773 B77W B788 B789 C550 CRJ9 E145 E170 E190 E195 E75L GLF6
+
+[dragpolar/*.yml native drag polars: 26]
+A20N A319 A320 A321 A332 A333 A343 A359 A388 B38M B734 B737 B738 B739 B744 B748 B752 B772 B77W B788 B789 C550 E190 E195 E75L GLF6
+
+[aircraft/_synonym.csv verbatim]
+orig,new
+a124,b744
+a306,a332
+a310,a318
+at72,e145
+at75,e145
+at76,e145
+b733,b734
+b735,b734
+b762,b763
+b77l,b77w
+c25a,c550
+c525,c550
+c56x,c550
+crj2,e145
+crj9,e75l
+e290,e190
+glf5,glf6
+gl5t,glf6
+lj45,glf6
+md11,b773
+pc24,c550
+su95,e170
+
+
+[dragpolar/_synonym.csv verbatim]
+orig,new
+a124,b744
+a19n,a20n
+a21n,a20n
+a306,a332
+a310,a319
+a318,a319
+at72,e75l
+at75,e75l
+at76,e75l
+b37m,b38m
+b39m,b38m
+b3xm,b38m
+b733,b734
+b735,b734
+b762,b752
+b763,b752
+b773,b77w
+b77l,b77w
+c25a,c550
+c525,c550
+c56x,c550
+crj2,e75l
+crj9,e75l
+e145,e75l
+e170,e75l
+e290,e190
+glf5,glf6
+gl5t,glf6
+lj45,glf6
+md11,b77w
+pc24,glf6
+su95,e75l

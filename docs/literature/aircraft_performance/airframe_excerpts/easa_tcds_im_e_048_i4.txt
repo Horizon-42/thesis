@@ -1,0 +1,17 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_048_PW530_Issue4.pdf  sha256: f022fea9ee6ad9203344e756cd2f1bad080f3d35fbd9bcb94c827758d706c7a5
+# id: easa_tcds_im_e_048_i4 | EASA | TCDS EASA.IM.E.048 - Pratt & Whitney Canada PW530 series | Issue 04, 10 January 2020
+# url: https://www.easa.europa.eu/en/downloads/7715/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p8, lines 317-327  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                               Rating                      PW530A           PW535A           PW535B          PW535E          PW535E1
+                     Thrust, daN Take-off                   1284.2           1512.4           1512.4         1494.6           1547,1
+                                   (5 minutes)
+                                   Maximum                  1264.6           1512.4            1512.4         1494.6           1547,1
+                                   Continuous
+
+                Take off ratings quoted valid up to 22.8ºC (PW530A), 27.2°C (PW535A and PW535B), 33°C
+                (PW535E and PW535E1); maximum continuous ratings to 15ºC (PW530A), 19.6°C (PW535A
+                and PW535B), 24°C (PW535E and PW535E1)

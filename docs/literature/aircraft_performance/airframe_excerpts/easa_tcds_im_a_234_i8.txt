@@ -1,0 +1,34 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_234_PA-28_Issue8.pdf  sha256: 4b2e8e58629e524ee41d8b0e5bacbe1b438db771245d3203e91782155a4d4151
+# id: easa_tcds_im_a_234_i8 | EASA | TCDS EASA.IM.A.234 - Piper PA-28 (model PA-28-181 Archer III only) | Issue 8, 09 April 2026
+# url: https://www.easa.europa.eu/en/downloads/17202/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p1, lines 25-25  (match: /For Models: +PA-28-181/)
+                For Models:               PA-28-181 (Archer III)
+
+--- PDF p7, lines 299-324  (match: /Wing Area +15\.79/)
+                                  4. Dimensions:
+                                            Span                            10.82 m (35.5 ft)
+                                            Length                           7.32 m (24.0 ft)
+                                            Height                           2.23 m    (7.3 ft)
+                                            Wing Area                       15.79 m² (170 ft²)
+
+
+                                  5. Engines:
+
+                                        5.1 Engine:                           1 Lycoming O-360-A4M, carburetor setting 10-6102 or
+                                                                              10-5193 for aircraft prior to S/N 2843501
+
+                                                                              Or
+
+                                                                              1 Lycoming IO-360-B4A engine with injector model RSA-5AD1,
+                                                                              Lycoming Part Number 61J28702, Avstar Part Number AV
+                                                                              2581600.
+
+
+                                                                              The EASA Engine Type Certification standard includes that of
+                                                                              FAA TCDS E-286 (in accordance with EC 748/2012, Article 3,
+                                                                              para. 1(a)).
+
+                                        5.2 Engine Limits:                    For all operations:
+                                                                              2700 RPM (180 HP)

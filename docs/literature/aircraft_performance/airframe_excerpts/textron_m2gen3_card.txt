@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/citation_m2_gen3_product_card.pdf  sha256: 0ae9432d51f63be557e0e035a7589c1ab951cd79bbc045246ebe92889c96496f
+# id: textron_m2gen3_card | Textron Aviation | Product card: Citation M2 Gen3 (525) | undated product card PDF
+# url: https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_m2_gen3_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 30-32  (match: /Power Output/)
+
+                                                                                                                                                              Power Output                              1,965 lb ea 8.74 kN ea

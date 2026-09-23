@@ -1,0 +1,18 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_158_EMB-505_Issue11.pdf  sha256: 5b94a48c6915c110087e529de3466cc7149a9bfa75165b5e250f37bcf1e2e214
+# id: easa_tcds_im_a_158_i11 | EASA | TCDS EASA.IM.A.158 - Embraer EMB-505 (Phenom 300) | Issue 11, 29 August 2024
+# url: https://www.easa.europa.eu/en/downloads/7282/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p9, lines 337-345  (match: /^ *3\. Dimensions$/)
+                3. Dimensions
+                Length                                           15.64 m            (51 ft 3.74 in)
+                Span                                             15.91 m            (52 ft 2.38 in)
+                Height                                           5.10 m             (16 ft 8.78 in)
+                Wing Area                                        28.5 m2            (306.77 ft2)
+
+                4. Engine
+                Two Pratt & Whitney Canada PW535E or PW535E1 turbofans (TC/TCDS reference IM.E.048)
+
+
+--- PDF p13, lines 541-541  (match: /NOTE 12 . For aircraft equipped with PW535E1/)
+                NOTE 12 – For aircraft equipped with PW535E1 engines.

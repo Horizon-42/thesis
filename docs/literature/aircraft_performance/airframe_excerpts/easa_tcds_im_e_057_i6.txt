@@ -1,0 +1,18 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_057_PW308_Issue06.pdf  sha256: ef904e5196313dcfeb5e0624fb4dd4d6502e48f3a8588b74d95da5d488bf5af9
+# id: easa_tcds_im_e_057_i6 | EASA | TCDS EASA.IM.E.057 - Pratt & Whitney Canada PW308 series | Issue 06, 10 January 2023
+# url: https://www.easa.europa.eu/en/downloads/7705/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p6, lines 249-260  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                The ISA sea-level static thrust ratings are:
+
+                     Rating                         PW308A               PW308C
+                     Thrust, daN        Take-off    3071                 3115
+                                        (5 minutes)
+                                        Maximum 3071                     3113
+                                        Continuous
+
+                Take off ratings quoted valid up to 37ºC (PW308A); 38°C (PW308C), maximum continuous ratings to
+                28ºC (PW308A); 32°C (PW308C)

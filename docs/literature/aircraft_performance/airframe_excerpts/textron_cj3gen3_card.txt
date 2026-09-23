@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/citation_cj3_gen3_product_card.pdf  sha256: c9f1fa1e73ee68e46366c3eed33c34dd5fdb70be8625f8d7c0b72d1dd56780e7
+# id: textron_cj3gen3_card | Textron Aviation | Product card: Citation CJ3 Gen3 (525B) | undated product card PDF
+# url: https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_cj3_gen3_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 32-34  (match: /Power Output/)
+
+                                                                                                                                                                  Power Output                             2,820 lb ea 12.54 kN ea

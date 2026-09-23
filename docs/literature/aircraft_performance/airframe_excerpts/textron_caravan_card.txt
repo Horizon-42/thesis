@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/caravan_product_card.pdf  sha256: 37248e00073bee31791ffee44bbea482753187729ac841358a26643a594019ba
+# id: textron_caravan_card | Textron Aviation | Product card: Caravan (208) | undated product card PDF
+# url: https://cessna.txtav.com/-/media/cessna/files/product-cards/turboprop/caravan_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 34-36  (match: /Power Output/)
+
+                                                                                                                                                               Power Output                                  675 shp           503 kW

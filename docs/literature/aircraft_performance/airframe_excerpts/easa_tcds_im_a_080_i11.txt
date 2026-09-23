@@ -1,0 +1,27 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_080_BD-100_Issue11.pdf  sha256: 9d59d400184bfb4aa1013a8d389f9621fa7ad45f7bbd95bff0d7cd99dc4c5ea4
+# id: easa_tcds_im_a_080_i11 | EASA | TCDS EASA.IM.A.080 - Bombardier BD-100-1A10 (Challenger 300/350) | Issue 11, 13-14 February 2025
+# url: https://www.easa.europa.eu/en/downloads/7364/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p6, lines 248-253  (match: /S/N 20002 up to 20500 are equipped/)
+          S/N 20002 up to 20500 are equipped with two Honeywell AS907-1-1A turbofan
+          engines, with reverse thrust capability. Refer to EASA Type Certificate Data Sheet
+          IM.E.058.
+
+          S/N 20501 and subsequent are equipped with two Honeywell AS907-2-1A
+          turbofan engines, with reverse thrust capability. Refer to EASA Type Certificate
+
+--- PDF p9, lines 425-432  (match: /^ *16\. Dimensions/)
+      16. Dimensions
+
+                                 S/N 20002 - 20500        S/N above 20501
+            Span                 19.4 m (63.8 ft.)        21.1 m (69.0 ft)
+            Length               20.9 m (68.7 ft.)        20.9 m (68.7 ft.)
+            Height               6.2 m (20.25 ft.)        6.2 m (20.25 ft.)
+            Wing Area            48.5 m2 (522.0 ft2)      48.5 m2 (522.0 ft2)
+
+
+--- PDF p11, lines 539-541  (match: /Challenger 300. is a marketing designation/)
+    6. “Challenger 300” is a marketing designation for the BD-100-1A10 up to aircraft S/N
+       20500. “Challenger 350” is a marketing designation for the BD-100-1A10 starting at
+       aircraft S/N 20501.

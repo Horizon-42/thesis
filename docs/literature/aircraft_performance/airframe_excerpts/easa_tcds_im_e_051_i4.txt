@@ -1,0 +1,29 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_051_PW306_Issue04.pdf  sha256: f37e95baa670601a60cf6096424b27097756212c9c92549eadc44385968ec9d6
+# id: easa_tcds_im_e_051_i4 | EASA | TCDS EASA.IM.E.051 - Pratt & Whitney Canada PW305 & PW306 series | Issue 04, 17 November 2015
+# url: https://www.easa.europa.eu/en/downloads/7711/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 277-299  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                                  Rating                      PW305                 PW305A         PW305B
+                                  Thrust, daN     Take-off    2324                  2081           2342
+                                                  (5 minutes)
+                                                  Normal      2324                  2081           2315
+                                                  Take-off
+                                                  Maximum     2112                  2081           1994
+                                                  Continuous
+
+
+                                  Rating                    PW306A          PW306B         PW306C          PW306D/PW306D1
+                                  Thrust,       Take-off    2687            2691           2567            2627
+                                  daN           (5 minutes)
+                                                Normal      2687            -----          -----           -----
+                                                Take-off
+                                                Maximum 2687                2691           2567            2627
+                                                Continuous
+
+                           Take off ratings quoted valid up to 22°C (PW305), 33,9°C (PW305A), 23,5°C (PW305B), 31,7ºC
+                           (PW306A); 35°C (PW306B); 33°C (PW306C); 32°C (PW306D and PW306D1), maximum
+                           continuous ratings to 19,4°C (PW305), 20,8°C (PW305A), 26,7ºC (PW306A); 35°C (PW306B);
+                           32°C (PW306C); 30°C (PW306D and PW306D1)

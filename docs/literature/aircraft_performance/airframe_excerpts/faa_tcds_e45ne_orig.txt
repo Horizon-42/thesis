@@ -1,0 +1,10 @@
+# source: data/aircraft_performance/airframes/faa/FAA_TCDS_E45NE_Original.pdf  sha256: 644bfe4771a7bb519f495d8c64ce35b19183e5dcdb643428be2e53008983240b
+# id: faa_tcds_e45ne_orig | FAA | TCDS E45NE - Pratt & Whitney Canada JT15D-5D | Original, December 16, 1993
+# url: https://drs.faa.gov/browse/excelExternalWindow/D9ECD1561D65A54686257547006E5B34.0001
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p1, lines 26-29  (match: /^THRUST RATING, POUNDS/)
+THRUST RATING, POUNDS
+(See NOTE 1)
+ Maximum continuous at sea level             3,045
+ Takeoff (5 min.) at sea level               3,045

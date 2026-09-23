@@ -1,0 +1,22 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_595_GVII_Issue15.pdf  sha256: 87745d4c6251f4ac9b0301b689b1392c998e40ba6acea7aeb779dc0418fbe4a9
+# id: easa_tcds_im_a_595_i15 | EASA | TCDS EASA.IM.A.595 - Gulfstream GVII (G500, G600) | Issue 15, 28 November 2025
+# url: https://www.easa.europa.eu/en/downloads/104086/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p3, lines 67-67  (match: /SECTION [23]: GVII-G[56]00\./)
+                SECTION 2: GVII-G500...................................................................................................................... 6
+
+--- PDF p4, lines 127-127  (match: /SECTION [23]: GVII-G[56]00\./)
+                SECTION 3: GVII-G600.................................................................................................................... 16
+
+--- PDF p20, lines 963-972  (match: /Wingspan 28\.96 metres/)
+
+                4. Dimensions
+                       Wingspan 28.96 metres [95.00 feet]
+                       Fuselage Length 29.29 metres [96.11 feet]
+                       Fuselage Width at Constant Section 2.57 metres (8.42 feet (101 inches))
+
+                5. Engines
+                        Two (2) Pratt & Whitney Canada Turbofan Engines Model: PW815GA (EASA Engine Type
+                        Certificate No. IM.E.096), see the Engine Type Certificate Data Sheet EASA.IM.E.096 dated 31
+                        August 2017. See Note 1

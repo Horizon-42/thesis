@@ -1,0 +1,17 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_620_M700_Issue3.pdf  sha256: 3f9e09f5ecf687b86b17d52eb91cea6b977bea3bbb80af061db1ca0bc7c3bfe8
+# id: easa_tcds_im_a_620_i3 | EASA | TCDS EASA.IM.A.620 - Textron Model 700 (Citation Longitude) | Issue 03, 26 October 2021
+# url: https://www.easa.europa.eu/en/downloads/129064/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 268-270  (match: /Wing Area:/)
+                Height (Static Condition):                                    5.91 m (19.5 Ft) Wing Span:
+                    21.00 m (68.11 Ft)
+                Wing Area:                                                   49.91 m2 (537.27 Ft2)
+
+--- PDF p8, lines 282-287  (match: /^ *5\. Engines *$/)
+                5. Engines
+                Two Honeywell AS907-2-1S Turbofan Engines (refer to EASA Data Sheet EASA.IM.E.058)
+
+                Engine Limits Static Thrust Standard Day, Sea Level
+                        Takeoff:                                 34.10 kN (7,665 lbs)
+                        Maximum Continuous:                      33.04 kN (7,428 lbs)

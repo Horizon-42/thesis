@@ -1,0 +1,15 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_070_Gulfstream_GII-GV_Issue13.pdf  sha256: 45e502417e6a30f8450e4f75a6d4341e19d857650db88861ce5d2edd8d4fbdce
+# id: easa_tcds_im_a_070_i13 | EASA | TCDS EASA.IM.A.070 - Gulfstream GII, GIII, GIV, GV | Issue 13, 06 August 2026
+# url: https://www.easa.europa.eu/en/downloads/7384/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p34, lines 1530-1539  (match: /Two Rolls Royce Tay 611-8 turbofan engines/)
+    Two Rolls Royce Tay 611-8 turbofan engines.
+
+    2.1       Engine Limits
+
+               DATA SHEET: E25NE (FAA)
+                                 EASA.E.063
+              Static thrust at sea level:
+                   takeoff (5 minutes)*        61,608 N (13,850 lbs)
+                   maximum continuous          55,247 N (12,420 lbs)

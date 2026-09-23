@@ -1,0 +1,21 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_044_AE3007_Issue05.pdf  sha256: 850b453b49d6ece45cdb08e2d0db417258b0ef3dddd867c154ffe2ccbc7d7591
+# id: easa_tcds_im_e_044_i5 | EASA | TCDS EASA.IM.E.044 - Rolls-Royce Corporation AE3007 series | Issue 05, 22 May 2015
+# url: https://www.easa.europa.eu/en/downloads/7719/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p8, lines 361-376  (match: /Model +Take-Off \(5 min\.\)/)
+                                                                     Static Thrust
+                         Model                        Take-Off (5 min.)    Maximum Continuous                            Flat Rated
+                       AE 3007C                      28.65 kN (6442 lbf)     28.65 kN (6442 lbf)                          ISA+15°C
+                 AE 3007A, AE 3007A1/1               33.71 kN (7580 lbf)     30.33 kN (6820 lbf)                          ISA+15°C
+                      AE 3007A1/2                    33.71 kN (7580 lbf)     30.33 kN (6820 lbf)                          ISA+23°C
+                       AE 3007A1                     33.71 kN (7580 lbf)     30.33 kN (6820 lbf)                          ISA+30°C
+                      AE 3007A1/3                    33.71 kN (7580 lbf)     30.33 kN (6820 lbf)                          ISA+30°C
+                       AE 3007A3                     32.02 kN (7201 lbf)     30.33 kN (6820 lbf)                          ISA+15°C
+                      AE 3007A1P                     37.08 kN (8338 lbf)     30.33 kN (6820 lbf)                          ISA+19°C
+                       AE 3007C1                     30.08 kN (6764 lbf)     30.08 kN (6764 lbf)                          ISA+15°C
+                      AE 3007A1E                     39.67 kN (8917 lbf)     32.65 kN (7339 lbf)                     ISA+19°C (Take-Off)
+                                                                                                                  ISA+30°C (Max.Continuous)
+                              AE 3007A2              41.99 kN (9440 lbf)          36.02 kN (8097 lbf)                ISA+15°C (Take-Off)
+                                                                                                                 ISA+20°C (Max. Continuous)
+                              AE 3007C2              31.32 kN (7042 lbf)          31.32 kN (7042 lbf)                     ISA+15°C

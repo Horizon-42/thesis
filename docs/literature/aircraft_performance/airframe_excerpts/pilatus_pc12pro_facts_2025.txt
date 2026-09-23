@@ -1,0 +1,11 @@
+# source: data/reference_speeds/pilatus/PC-12-PRO-Just-The-Facts-2025-web.pdf  sha256: e19a79473f05458cd83b71807d7b8ddebb8edb557b578086770f311d8f990203
+# id: pilatus_pc12pro_facts_2025 | Pilatus Aircraft Ltd | PC-12 PRO - Just the Facts | 2025 edition
+# url: https://www.pilatus-aircraft.com/assets/files/PC-12-PRO-Just-The-Facts-2025-web.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p3, lines 33-34  (match: /PT6E-67XP engine, flat-rated to/)
+A Pratt & Whitney Canada PT6E-67XP engine, flat-rated to
+1,200 shaft horsepower                                        Certified for flight into known icing conditions
+
+--- PDF p4, lines 84-84  (match: /Wing area/)
+                Wing area                         277.80 ft 2   25.81 m2

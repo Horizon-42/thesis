@@ -1,0 +1,45 @@
+# source: data/aircraft_performance/airframes/faa/FAA_TCDS_2A13_Rev66.pdf  sha256: 284334b7de705d5549fb9484e57a264b4266d02d8ccc67981e08d5295057c1b1
+# id: faa_tcds_2a13_r66 | FAA | TCDS 2A13 - Piper PA-28 series | Revision 66, October 10, 2025
+# url: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID125895332520251113164724.0001
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p23, lines 1375-1383  (match: /^XVI - A\. - Model PA-28-161/)
+XVI - A. - Model PA-28-161 (Warrior II), 4 PCLM (Normal Category), 2 PCLM (Utility Category), Approved
+October 22, 1976, for S/N 28-7716001 through 28-8216300, and 2841001 through 2841365 (Cadet only)
+
+    Engine                           Lycoming O-320-D3G with carburetor setting 10-5135, 10-5009 or 10-5217, or
+                                     Lycoming O-320-D2A with carburetor setting 10-5135 or 10-5217.
+
+    Fuel                             100 octane minimum grade aviation gasoline
+
+    Engine Limits                    For all operations, 2700 r.p.m.      (160 hp)
+
+--- PDF p20, lines 1142-1156  (match: /^XV - A\.- Model PA-28-181/)
+XV - A.- Model PA-28-181 (Archer II), 4 PCLM (Normal Category), 2 PCLM (Utility Category), Approved July 8, 1975,
+for S/N 28-7690001 through 28-8690056; 28-8690061; 28-8690062; and 2890001 through 2890205.
+
+    Engine                           Lycoming O-360-A4M with carburetor settings 10-3878 or 10-5193 or
+                                     Lycoming O-360-A4A with carburetor setting 10-5193.
+
+    Fuel                             100/130 minimum grade aviation gasoline
+
+    Engine Limits                    Applicable to S/N 28-7690001 through 28-7990589:
+                                         For all operations, 2700 r.p.m. (180 hp)
+                                     Applicable to S/N 28-8090001 through 28-8690056; 28-8690061; 28-8690062; and
+                                         2890001 through 2890205:
+                                         For takeoff 5 minutes at 2700 r.p.m. (180 hp)
+                                         For maximum continuous operation, 2650 r.p.m. (178 hp)
+
+
+--- PDF p27, lines 1621-1631  (match: /^XVII - Model PA-28R-201 /)
+XVII - Model PA-28R-201 (Arrow III), 4 PCLM (Normal Category), Approved November 3, 1976, for S/N 28R-7737002
+through 28R-7837317; 2837001 through 2837061; and 2844001 and up.
+
+    Engine                           Lycoming IO-360-C1C6
+
+    Injector                         Bendix Type RSA-5AD1, Part List Number 2524450
+                                     Precision Airmotive (PAC) formerly Bendix: Part List Number PAM 2524450-9
+
+    Fuel                             100 or 100LL aviation grade gasoline
+
+    Engine Limits                    For all operations, 2700 r.p.m.    (200 hp)

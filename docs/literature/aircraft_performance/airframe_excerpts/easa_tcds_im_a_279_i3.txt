@@ -1,0 +1,17 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_279_Bonanza_Issue3.pdf  sha256: 28013b372cf28269372d711aaf05f5dd5b4c5693379f9e543d97020f18b35905
+# id: easa_tcds_im_a_279_i3 | EASA | TCDS EASA.IM.A.279 - Beechcraft 33, 35, 36 (Bonanza), model G36 only | Issue 03, 21 June 2018
+# url: https://www.easa.europa.eu/en/downloads/7204/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p1, lines 26-26  (match: /^ *For models:/)
+                For models:           G36
+
+--- PDF p4, lines 140-147  (match: /Wing Area +16\.82/)
+                                                                             later approved revision.
+                4.          Dimensions:                                      Span                 10.2 m           (33 ft. 6 in)
+                                                                             Length               8.4 m            (27 ft. 6 in)
+                                                                             Height               2.63 m           (8 ft. 7 in)
+                                                                             Wing Area            16.82 sq. m      (181 sq. ft.)
+                5.          Engines                                          1 Teledyne Continental Motors, Inc., (Mobile, Alabama),
+                                                                             IO-550-B.
+                                  Engine Limits:                             For all operations 2700 rpm (300hp)

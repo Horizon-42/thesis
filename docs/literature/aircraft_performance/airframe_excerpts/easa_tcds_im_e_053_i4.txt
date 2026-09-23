@@ -1,0 +1,52 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_053_CF34-8_Issue04.pdf  sha256: 3004618db3ea3b26b7e11dc7750f133fa2b3134bdbcf603dbfe110b2871c2177
+# id: easa_tcds_im_e_053_i4 | EASA | TCDS EASA.IM.E.053 - GE CF34-8 series | Issue 04, 30 January 2023
+# url: https://www.easa.europa.eu/en/downloads/18525/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 277-322  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                        Rating (see Note 2)               CF34-8C1          CF34-8C5         CF34-8C5A1        CF34-8C5B1        CF34-8C5A2
+                                    Maximum
+                                     Takeoff (5
+                                                            61.34             64.54                64.54           61.34             64.54
+                                     min) (see
+                                                           (13790)           (14510)              (14510)         (13790)           (14510)
+                                      Notes 3
+                                       and 4)
+                     Thrust kN        Normal
+                         (lb)        Takeoff (5
+                                                            56.36             59.43                60.63           59.36             62.50
+                                     min) (see
+                                                           (12670)           (13360)              (13630)         (12670)           (14050)
+                                      Notes 3
+                                       and 4)
+                                    Maximum                 59.05             60.84                60.84           59.06             60.84
+                                    Continuous             (13277)           (13680)              (13680)         (13280)           (13680)
+                      Flat rate     Maximum                   30                30                   30              30                30
+                      ambient         Takeoff               (86.0)            (86.0)               (86.0)          (86.0)            (86.0)
+                   temperature Maximum                        25                30                   30              25                30
+                       C(F)       continuous               (77)              (86)                 (86)            (77)              (86)
+
+
+                       Rating (see Note 2)               CF34-8C5A3          CF34-8E2        CF34-8E2A1          CF34-8E5        CF34-8E5A1
+                                   Maximum
+                                   Takeoff (5
+                                                             64.54             59.16               59.16           64.54             64.54
+                                   min) (see
+                                                            (14510)           (13300)             (13300)         (14510)           (14510)
+                                  Notes 3 and
+                                      4)
+                    Thrust kN       Normal
+                        (lb)       Takeoff (5
+                                                             64.54             55.20               59.16           59.70             62.50
+                                   min) (see
+                                                            (14510)           (12410)             (13300)         (13420)           (14050)
+                                  Notes 3 and
+                                      4)
+                                   Maximum                   60.84             55.78               55.78           60.14             60.14
+                                  Continuous                (13680)           (12540)             (12540)         (13520)           (13520)
+                     Flat rate     Maximum                     30                30                  30              30                30
+                     ambient        Takeoff                   (86)              (86)                (86)            (86)              (86)
+                  temperature Maximum                          30                30                  30              30                30
+                      C(F)      continuous                  (86)              (86)                (86)            (86)              (86)

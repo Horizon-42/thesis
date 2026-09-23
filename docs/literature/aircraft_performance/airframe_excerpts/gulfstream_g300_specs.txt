@@ -1,0 +1,12 @@
+# source: data/aircraft_performance/airframes/gulfstream/g300_specs.pdf  sha256: d1070f3ca36f09e8cdcd7bcfc3af7b6b2ead0341679b4a1bbd947b1fd6dc2291
+# id: gulfstream_g300_specs | Gulfstream Aerospace | G300 specification sheet (Download Specs) | g300.pdf as served 2026-09-23
+# url: https://assets.gulfstream.aero/downloads/g300.pdf
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 69-70  (match: /Maximum Takeoff 39,750/)
+Maximum Range1 3,600 nm | 6,667 km                                                                              Maximum Takeoff 39,750 lb | 18,030 kg
+
+
+--- PDF p2, lines 92-93  (match: /Rated Takeoff Thrust \(each\)/)
+
+Cabin Length (excluding baggage) 27 ft 7 in | 8.41 m                                                            Rated Takeoff Thrust (each) 7,624 lb | 33.90 kN

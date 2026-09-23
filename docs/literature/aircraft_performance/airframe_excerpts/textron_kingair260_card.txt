@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/king_air_260_product_card.pdf  sha256: ea962cb5c1ce2f596a9ea70912993ec43af19c1caabe9adf2469c770519fefcc
+# id: textron_kingair260_card | Textron Aviation | Product card: King Air 260 (B200GT) | undated product card PDF
+# url: https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/king_air_260_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 29-31  (match: /Output +850/)
+ passenger pleasure in mind. Increased legroom and                               is fully automated and optimized for presenting an                              Model                                                      (2) PT6A-52
+ revamped seats allow for a comfortable flight. The                              accurate picture of surrounding weather.                                        Output                                    850 shp ea        634 kW ea

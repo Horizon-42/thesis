@@ -1,0 +1,25 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_016_FJ44_FJ33_Issue13.pdf  sha256: 5b8a2f51e78546b09b3a94b909c304c346ad90c704609fd313cb1eac4aaec050
+# id: easa_tcds_im_e_016_i13 | EASA | TCDS EASA.IM.E.016 - Williams International FJ44/FJ33 series | Issue 13, 21 July 2021
+# url: https://www.easa.europa.eu/en/downloads/7771/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p9, lines 402-420  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+                                    Model                                        Static Thrust daN (lbf)
+                                                              Take off (5 minutes)                  Maximum Continuous
+                              FJ44-1A                      845 (1900) at 22.2°C (72 F)            845 (1900) at 15°C (59 F)
+                              FJ44-1AP                     847 (1965) at 22.2°C (72 F)            867 (1950) at 15°C (59 F)
+                              FJ44-2A                     1023 (2300) at 22.2°C (72 F)           1023 (2300) at 15°C (59 F)
+                              FJ44-2C                     1068 (2400) at 22.2°C (72 F)           1068 (2400) at 15°C (59 F)
+                              FJ44-3A                     1254 (2820) at 26.1°C (79 F)         1254 (2820) at 11.7°C (53 F)
+                              FJ44-3A-24                  1107 (2490) at 22.2°C (72 F)           1107 (2490) at 15°C (59 F)
+                              FJ44-3AP                    1358 (3052) at 22.2°C (72 F)         1358 (3052) at 11.7°C (53 F)
+                              FJ44-4A                     1610 (3,621) at 26.1°C (79 F)         1531 (3,443) at 7.8°C (46 F)
+                              FJ44-4A-32                  1437 (3,230) at 32.2°C (90 F)         1435 (3,227) at 20°C (68 F)
+                                                           1608 (3,616) at 22.7°C (73°F)
+                                                                    Maximum
+                              FJ44-4A-QPM                                                         1527 (3,433) at 15°C (59°F)
+                                                           1528 (3,435) at 22.7°C (73°F)
+                                                                     Normal
+                      FJ33-5A                              821 (1846) at 15.6C (60F)            821 (1846) at 7.8C (46F)
+                See Notes 2 and 3.

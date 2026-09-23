@@ -1,0 +1,13 @@
+# source: data/reference_speeds/easa/EASA_TCDS_A_062_MF50_MF900_F900EX_Issue10.pdf  sha256: d42d1e5425ae4718eb1077a530b7d0c9e17c4e52520923c1ba0bf0c5a739ed5a
+# id: easa_tcds_a_062_i10 | EASA | TCDS EASA.A.062 - Mystere-Falcon 50, Mystere-Falcon 900, Falcon 900EX | Issue 10, 15 September 2026
+# url: https://www.easa.europa.eu/en/downloads/7401/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p43, lines 2144-2150  (match: /Model: ALLIEDSIGNAL / HONEYWELL ENGINES TFE 731-60/)
+                            Model: ALLIEDSIGNAL / HONEYWELL ENGINES TFE 731-60 (EASA TCDS IM.E.011).
+
+                            Number: 3.
+
+                            Engine limits:
+
+                            - Maximum takeoff static thrust: 2 225 daN (5 000 lbs) (sea level, not installed, ISA conditions

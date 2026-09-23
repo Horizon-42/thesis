@@ -1,0 +1,46 @@
+# source: data/reference_speeds/easa/EASA_TCDS_IM_A_207_Cessna_500_560XL_Issue10.pdf  sha256: a2c8fcdc55214623d33de8d65eb653726cc237d2b8d8cb7bc466e955808a48bd
+# id: easa_tcds_im_a_207_i10 | EASA | TCDS EASA.IM.A.207 - Cessna 500, 550, S550, 560, 560XL | Issue 10, 06 July 2022
+# url: https://www.easa.europa.eu/en/downloads/7244/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p36, lines 1974-1990  (match: /4\.1 +Dimensions for Citation V$/)
+                4.1         Dimensions for Citation V
+                                   Span                                        52 ft 2 in      (15.90 m)
+                                   Length                                      48 ft 9 in      (14.90 m)
+                                   Height                                      15 ft 0 in      (4.57 m)
+                                   Wing Area                                   342.6 sq ft     (31.83 sq m)
+
+                4.2         Dimensions for Citation Ultra
+                                   Same as for Citation V, see III 4.2
+
+                4.3         Dimensions for Citation Encore
+                                   Span                                        54 ft 1 in      (16.48 m)
+                                   Length                                      48 ft 11 in     (14.91m)
+                                   Height                                      15 ft 2 in      (4.62 m)
+                                   Wing Area                                   322.3 ft2       (29.94 m2)
+
+                4.4         Dimensions for Citation Citation Encore+
+                                                                              Same as for Citation Encore+, see III 4.3
+
+--- PDF p36, lines 1995-2002  (match: /Variant of Model 560 +Citation V +Citation Ultra/)
+                Variant of Model 560                                     Citation V          Citation Ultra     Citation Encore        Citation Encore+
+
+                Engines                                              Two Pratt &             Two Pratt &          Two Pratt &            Two Pratt &
+                                                                     Whitney of              Whitney of           Whitney of             Whitney of
+                                                                     Canada, Inc.            Canada, Inc.         Canada, Inc.           Canada, Inc.
+                                                                      JT15D-5A                JT15D-5D              PW535A                 PW535B
+                                                                      turbofans               turbofans            turbofans              turbofans
+
+
+--- PDF p37, lines 2011-2018  (match: /Variant of Model 560 +Citation V +Citation Ultra/)
+                Variant of Model 560                                    Citation V           Citation Ultra     Citation Encore        Citation Encore+
+
+                Engine Limits               Takeoff                      2900 lbs              3045 lbs.            3,400 lbs.              3,400 lbs
+                Static thrust,              (5 min., Normal
+                                                                        (1315 kg)              (1381 kg)            (1,542 kg)             (1,542 kg)
+                standard day,               All Engines
+                sea level                   Operating)
+                                            Takeoff (10 min.,               --                     --               3,400 lbs.              3,400 lbs
+
+--- PDF p40, lines 2201-2201  (match: /Takeoff +7212 kg \(15,900 lbs\)/)
+                    Takeoff                     7212 kg (15,900 lbs)       7394 kg (16,300 lbs)        7,543 kg (16,630 lbs)      7,634 kg (16,830 lbs

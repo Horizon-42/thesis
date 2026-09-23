@@ -1,0 +1,7 @@
+# source: data/reference_speeds/piper/2026_Archer_LX_Foldover.pdf  sha256: 1c6146ddcfa9a441e5873728edf1f22b64a4bb9207c9981f4df7ae410154d137
+# id: piper_archer_lx_2026 | Piper Aircraft, Inc. | 2026 Archer LX specification foldover | 2026_Archer_LX_Foldover.pdf
+# url: https://www.piper.com/wp-content/uploads/2019/01/2026_Archer_LX_Foldover.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p3, lines 20-20  (match: /a 180-horsepower Lycoming engine/)
+a 180-horsepower Lycoming engine, advanced Garmin

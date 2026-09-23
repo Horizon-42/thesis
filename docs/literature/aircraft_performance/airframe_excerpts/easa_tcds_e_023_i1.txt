@@ -1,0 +1,14 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_E_023_BR700-715_Issue01.pdf  sha256: 3b281158e75aea94f099e1837d3d607a8ce9f1440e4d75e62b186c367e3736f1
+# id: easa_tcds_e_023_i1 | EASA | TCDS EASA.E.023 - Rolls-Royce Deutschland BR700-715 series | Issue 01, 27 July 2009
+# url: https://www.easa.europa.eu/en/downloads/7757/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p4, lines 153-160  (match: /^ *6\. Ratings: *$/)
+6. Ratings:
+
+
+                                        BR700-715A1-30            BR700-715B1-30               BR700-715C1-30
+
+            Take off                        83,23 kN                  89,68 kN                      95,33 kN
+
+            Maximum Continuous              78,74 kN                  89,68 kN                      90,84 kN

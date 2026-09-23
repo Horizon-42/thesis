@@ -1,0 +1,76 @@
+# Verbatim clauses behind the licence verdicts in ../README.md (retrieved 2026-09-23).
+# Text taken from `pdftotext -layout` of the named PDF; whitespace collapsed; the BADA templates' diagonal
+# 'FOR INFORMATION ONLY' watermark letters removed; Symbol-font private-use glyphs mapped as stated. Nothing else is edited.
+
+## BADA standard licence template B3B4BHSTD_V30072019 ('Download terms and conditions of use', eurocontrol.int/model/bada)
+# file: data/aircraft_performance/bada/bada-standard-licence-information.pdf  sha256 60a2eb5ff254ac106b738d63602cb8cb9bd885e9066859ee1d82ced17a81abb6
+> For BADA 3 family the complete Datasets will be provided.
+> For BADA 4 family a sample dataset consisting of one jet, one turboprop and one piston aircraft model will be provided (additional datasets are subject to the prior authorization of the aircraft manufacturers).
+> YOU may use BADA only for modelling (in the framework of ATM research and development activities), and/or for strategic planning in operational ground based air traffic management operations;
+> sublicense, distribute or otherwise make available the Specifications, Datasets, any calculation results/output thereof and/or tools where Specifications and Datasets are integrated to any person other than the End-Users without the explicit and prior written approval by EUROCONTROL;
+> display BADA on any public bulletin board, ftp site, worldwide web site, chat room or by any other unauthorised means;
+> YOU are strictly prohibited from using BADA for any comparisons of any kind between aircraft types (from the same or different aircraft manufacturers) where the intent of such a comparison is to identify a direct relationship between aircraft performances between different aircraft types. Therefore YOU shall not mention any name of aircraft type in the publication.
+> YOU shall inform and coordinate in advance with EUROCONTROL of any planned public communication or statement or release of document comprising elements of, related to or referring to BADA and/or its performance. EUROCONTROL reserves the right to review in advance all documents to be released and to disapprove of the distribution or use of the same if it considers that they affect EUROCONTROL’s interests or its data suppliers adversely.
+> Confidential Information means confidential, proprietary information including namely the Specifications, Datasets, any calculation results/output thereof and/or tools where the Specifications and Datasets are integrated. The Confidential Information may be owned by EUROCONTROL or other third parties known to EUROCONTROL.
+
+## BADA licence template B3B4BH_OPEN_STD_V03062025 (the Family 4 link on eurocontrol.int/model/bada)
+# file: data/aircraft_performance/bada/bada-licence-information-family-4.pdf  sha256 523e4f2b474d7840fd1729ba572779ffe4b610a4b07eb1602c984d768f75b04b
+> Aircraft Performance Model Specification (algorithms, mathematical models and documentation that can be accessed on GithHub at https://github.com/eurocontrol-bada),
+> For the purpose of this Agreement, BADA consists of Datasets only.
+> sublicense, distribute or otherwise make available the Datasets, any calculation results/output thereof and/or Tools where Datasets are integrated to any person other than the End-Users without the explicit and prior written approval by EUROCONTROL;
+> YOU are strictly prohibited from using BADA for any comparisons of any kind between aircraft types (from the same or different aircraft manufacturers) where the intent of such a comparison is to identify a direct relationship between aircraft performances. Therefore, YOU shall not mention any name of aircraft type in the publication.
+
+## BADA integrated-tool licence template B3INT_V21122017 (BADA inside a third-party tool such as AEDT)
+# file: data/aircraft_performance/bada/bada-integrated-standard-licence-for-information.pdf  sha256 63b5ac4094d1bde6f745303fdc72990593c0b068b65d0f8d2c4f892f43497d9c
+> The BADA 3 data shall not be provided to YOU directly.
+> not use BADA 3 for any comparison of any kind between aircraft types (from the same or different aircraft manufacturers) where the intention of such comparison is to identify a direct relationship between aircraft performances of different aircraft types. Therefore you shall not mention any aircraft type designator in any publication,
+
+## EUROCONTROL BADA showcase slides (Nov 2025)
+# file: data/aircraft_performance/bada/eurocontrol-showcase-summit-bada-latest-evolutions.pdf  sha256 9ec0b5e6dbbbdc5a66b657bafb033a3f6fb00e8a1314ab14dc3580bf41b8db1c
+> BADA is free to use, its distribution is regulated through a license agreement to protect the interests of data providers.
+
+## EASA ANP Database Terms and Conditions Issue 3 (03/06/2024)
+# file: data/aircraft_performance/anp/EASA_ANP_Database_Terms_and_Conditions_Issue_3.pdf  sha256 1eebbd843c81b7da57d15326be3fd626a5ff99575150acec4541a31b2a387923
+> The ANP Data is designed and solely provided to calculate noise contours around airports for an average of fleet and traffic mix, in line with the methods and recommendations described in ICAO Doc 9911, ECAC Doc 29 or Annex II to Directive 2002/49/EC. The data may also be used to estimate airplane fuel consumption solely for an average of fleet and traffic mix in the terminal area in line with the method described in SAE AIR6183. The use of the ANP Data beyond the scope of these methods and recommendations shall be subject to the prior written consent of the ANP Data Provider2.
+> The ANP Data shall not be used to benchmark the noise or performance and procedures of specific aircraft types and models or of specific fleets of aircraft, without the prior written consent of the ANP Data Provider2.
+> Without prejudice to the above subparagraph f), the ANP Database User shall not modify, reverse- engineer, disassemble, publish, sell, assign, sublicense or reproduce the ANP Data, with the trademarks of the ANP Data Provider, without prior written consent of the ANP Data Provider2.
+
+## Poll & Schumann (2025), Part 3 (Aeronautical Journal 129(1334):825-861)
+# file: data/aircraft_performance/pycontrails/papers/Poll_Schumann_2025_Part3_aer.2024.141_DLR-elib.pdf  sha256 ee868646aebd9279ef2582df436f6b439031dc289bb61aac93d99bc314fc2f09
+> The flight phases of primary interest are the climb, cruise, descent and holding, when the flaps and undercarriage are fully retracted and the engine is providing significant, positive thrust.
+> This is an Open Access article, distributed under the terms of the Creative Commons Attribution licence (https://creativecommons.org/licenses/by/4.0/), which permits unrestricted re-use, distribution and reproduction, provided the original article is properly cited.
+> since the method, in its current form, only addresses the clean configuration
+> where j 3 is also a constant and is currently taken to be 40.
+
+## ECAC Doc 29 4th ed., Vol 2 (Dec 2016), Appendix B (Symbol-font glyphs mapped: U+F0D6 -> √, U+F0D7 -> ·, U+F0BB -> ≈; the radical over W in B-24 is drawn as a graphic and absent from the text layer)
+# file: data/aircraft_performance/anp/ECAC-Doc_29_4th_edition_Dec_2016_Volume_2.pdf  sha256 15c23476fb6250cbd7dfc3bd8875accd90d7bea31f84b19122fc97686b6e6029
+> The landing approach calibrated airspeed, VCA, is related to the landing gross weight by an equation of the same form as equation B-11, namely
+> VCA ≈ D· W (B-24)
+> where the coefficient D (kt/√lbf) corresponds to the landing flap setting.
+> by solving equation B-12 for the landing weight W and a drag-to-lift ratio R appropriate for the flap setting with landing gear extended.
+> is the ratio of the aeroplane’s drag coefficient to its lift coefficient appropriate to the given flap setting. The landing gear is assumed to be retracted.
+
+## EASA ANP page
+# file: data/aircraft_performance/anp/easa_anp_data_page.html  sha256 54135f9f5ccec4fae1cdd046caf141fe9458eed1295e6e62a20ba050176b444c (live page; text extracted from HTML)
+> EUROCONTROL published consecutive versions of the ANP data (versions 1.0 to 2.3) which are now published on the EASA website to provide end users with a single data collection point
+> Aircraft models and variants that are not presently covered by the ANP databases must be represented by substitutes (often referred to as ‘proxy’ aircraft)
+
+## EASA copyright notice
+# file: data/aircraft_performance/anp/easa_copyright_disclaimer.html  sha256 be8334bdb72cb98fe3f7278cd09744b0c3351c9762975f2b6f9a361ad4819d09 (live page; text extracted from HTML)
+> Reproduction is authorised, provided the source is acknowledged, save where otherwise stated.
+
+## EASA ICAO Engine Emissions Databank page
+# file: data/aircraft_performance/icao_emissions/easa_icao_edb_page.html  sha256 86ad20ae341f166af3e95a73b58d9ade495c464e8af2b3f19114378b7625953f (live page; text extracted from HTML)
+> The databank covers engine types which emissions are regulated, namely turbojet and turbofan engines with a static thrust greater than 26.7 kilonewtons.
+> The information is provided by the engine manufacturers, who are solely responsible for its accuracy.
+
+## EUROCONTROL Aircraft Performance Database, page footer (every details page)
+# file: data/aircraft_performance/eurocontrol_apd/BCS3.html  sha256 488c64596eeec36dcead37d6a5da15a05076977f1808dcaea1c278c6cbe0ffab (live page; text extracted from HTML)
+> All data presented is only indicative and should not be used operationally.
+> Copyright permission must be sought from EUROCONTROL
+
+## FAA AEDT purchase page
+# file: data/aircraft_performance/other/aedt_purchase.html  sha256 8bfd1ba3848f32f67e4340d28d620665233f58fe31d9c6ea65ed90b2a5007ce5 (live page; text extracted from HTML)
+> The BADA license is free to obtain. EUROCONTROL can take up to two weeks to respond to an individual license request.
+> You must request and acquire a BADA license in advance of purchasing AEDT.
+> 1 AEDT 4 Site License: US $1200

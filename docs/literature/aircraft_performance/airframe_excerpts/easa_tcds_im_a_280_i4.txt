@@ -1,0 +1,14 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_280_Beech55-58-95_Issue4.pdf  sha256: 6bed91d49ce6832c76d872ba0c5fe0d379f7e904e7154b796a9f709bea9bc601
+# id: easa_tcds_im_a_280_i4 | EASA | TCDS EASA.IM.A.280 - Beechcraft 55, 56, 58, 95 (model G58 only) | Issue 04, 21 June 2018
+# url: https://www.easa.europa.eu/en/downloads/7202/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p4, lines 136-143  (match: /Wing Area +18\.5 sq/)
+                                                                             later approved revision.
+                4.          Dimensions:                                      Span              11.53 m           (37 ft. 10 in)
+                                                                             Length            9.09 m            (29 ft. 10 in)
+                                                                             Height            2.97 m            (9 ft. 9 in)
+                                                                             Wing Area         18.5 sq. meters (199.2 sq. ft.)
+                5.          Engines                                          Two (2) Teledyne Continental Motors, Inc. (Mobile,
+                                                                             Alabama) Model IO-550-C engines.
+                                                                             Engine Limits: For all operations 2700 rpm (300 hp.)

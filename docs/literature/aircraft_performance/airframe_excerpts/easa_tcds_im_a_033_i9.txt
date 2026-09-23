@@ -1,0 +1,55 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_033_C680_Issue9.pdf  sha256: 53965090e88775c9a3afb25413905d1dec7c514ab99127e0766a4aed1b6c1c22
+# id: easa_tcds_im_a_033_i9 | EASA | TCDS EASA.IM.A.033 - Cessna 680 (Sovereign) and 680A (Latitude) | Issue 09, 25 March 2026
+# url: https://www.easa.europa.eu/en/downloads/7459/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p9, lines 386-418  (match: /4\.1 Dimensions for Citation Sovereign$/)
+                4.1 Dimensions for Citation Sovereign
+                        Span                       19.24 m (63.13 ft)
+                        Length                     19.37 m (63.54 ft)
+                        Height                     6.17 m (20.25 ft)
+                        Wing Area                  47.93 m² (515.9 ft²)
+
+                4.2 Dimensions for Citation Sovereign+
+                        Span                       22.04 m (72.32 ft)
+                        Length                     19.37 m (63.54 ft)
+                        Height                     6.17 m (20.25 ft)
+                        Wing Area                  50.40 m² (542.52 ft²)
+
+                5. Engines
+
+
+                            Variant of Model 680                                 Sovereign                           Sovereign+
+                            Engines                                    Two Pratt & Whiney Canada           Two Pratt & Whiney Canada
+                                                                          Corp. Model PW306C                  Corp. Model PW306D
+                                                                        Turbofan Engines refer to           Turbofan Engines refer to
+                                                                        EASA Data Sheet IM.E.051            EASA Data Sheet IM.E.051
+                            Engine Limits        Takeoff                           25.66 kN                            26.27 kN
+                            Static thrust,       (5 min., Normal                  (5770 lbs)                          (5907 lbs)
+                            standard day,        All Engines
+                            sea level            Operating)
+                                                 Maximum                           25.66 kN                            26.27 kN
+                                                 continuous                       (5770 lbs)                          (5907 lbs)
+
+                            Engine Limits        N1 (Fan)                     105% r.p.m.                          105% r.p.m.
+                            Maximum              steady state             (100% = 10,608 r.p.m)                (100% = 10,608 r.p.m)
+
+
+
+                         TE.CERT.00051-002 © European Union Aviation Safety Agency. All rights reserved. ISO9001 Certified.      Page 9 of 32
+
+--- PDF p24, lines 1122-1136  (match: /Wing Area +50\.40 m. \(542\.51/)
+
+                                  Span                     22.04 m (72.320 ft)
+                                  Length                   18.98 m (62.256 ft)
+                                  Height                   6.34 m (20.798 ft)
+                                  Wing Area                50.40 m² (542.51 ft²)
+
+                5. Engines
+
+                                  Two Pratt & Whiney Canada Corp. Model PW306D1 Turbofan Engines (refer to EASA Data
+                                  Sheet IM.E.051).
+
+                                  Engine Limits Static thrust, standard day, sea level:
+                                     Takeoff                          26.27 kN (5907 lbs)
+                                     Maximum continuous               26.27 kN (5907 lbs)

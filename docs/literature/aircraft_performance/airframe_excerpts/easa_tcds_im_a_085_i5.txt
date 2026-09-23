@@ -1,0 +1,37 @@
+# source: data/reference_speeds/easa/EASA_TCDS_IM_A_085_Hawker_Issue05.pdf  sha256: acde0ab102659c6f8ebe90e74e36c87fef776a4e7bcbea7e2a80affb1bf615b1
+# id: easa_tcds_im_a_085_i5 | EASA | TCDS EASA.IM.A.085 - Hawker series (HS.125) | Issue 05, 27 September 2018
+# url: https://www.easa.europa.eu/en/downloads/7356/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p47, lines 3047-3050  (match: /XVIII\. Hawker 800XP/)
+XVIII. Hawker 800XP (Transport Aircraft) Approved July 28, 1995 (See Notes 47, 59, 64 and 65).
+
+       The Hawker 800XP differs respectively from the BAe.125 Series 800A aircraft in the following major respects: (i) Allied
+       Signal Engines TFE 731-5BR turbofan engines replace the Garrett Turbine Engine Company TFE 731-5R turbofan
+
+--- PDF p47, lines 3058-3058  (match: /^Engines +2 Allied Signal Engines TFE 731-5BR turbofan engines\.$/)
+Engines                             2 Allied Signal Engines TFE 731-5BR turbofan engines.
+
+--- PDF p47, lines 3069-3074  (match: /Engine Limits +TFE 731-5BR +TFE 731-5BR$/)
+Engine Limits                                                                        TFE 731-5BR           TFE 731-5BR
+                                                                                      with APR                with APR
+                                                                                      not operating           operating
+                                    Take-off static thrust standard day, sea
+                                      level conditions (5 minute limit) lbs.     4,750                 4,750
+                                    Maximum continuous static thrust,
+
+--- PDF p50, lines 3255-3260  (match: /Engine Limits +TFE 731-5BR +TFE 731-5BR$/)
+Engine Limits                                                              TFE 731-5BR            TFE 731-5BR
+                                                                            with APR                with APR
+                                                                            not operating           operating
+                          Take-off static thrust standard day, sea
+                           level conditions (5 minute limit) lbs.       4,750                   4,750
+                          Maximum continuous static thrust,
+
+--- PDF p55, lines 3613-3618  (match: /Engine Limits +TFE 731-5BR +TFE 731-5BR$/)
+Engine Limits                                                                  TFE 731-5BR           TFE 731-5BR
+                                                                               with APR               with APR
+                                                                               not operating          operating
+                                   Take-off static thrust:
+                                    standard day, sea level conditions           4,750                4,750
+                                   (5 minute limit) lbs.

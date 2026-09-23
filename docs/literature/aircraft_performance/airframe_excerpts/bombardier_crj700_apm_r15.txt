@@ -1,0 +1,16 @@
+# source: data/reference_speeds/bombardier/CRJ700APMR15.pdf  sha256: 195e92c0b358f347342a51d4f084a13f721fc099015b82439f7acd22b7ad45ce
+# id: bombardier_crj700_apm_r15 | Bombardier | CRJ700 Airport Planning Manual | CSP B-020 Rev 15 (page 00-02-02 dated Dec 18/2014)
+# url: https://customer.aero.bombardier.com/webd/BAG/CustSite/BRAD/RACSDocument.nsf/51aae8b2b3bfdf6685256c300045ff31/ec63f8639ff3ab9d85257c1500635bd8/$FILE/ATTE8Q23.pdf/CRJ700APMR15.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p29, lines 906-906  (match: /Table 1 . General Aircraft Dimensions and Areas/)
+                                  Table 1 − General Aircraft Dimensions and Areas
+
+--- PDF p29, lines 915-915  (match: /Total Wing Span/)
+ Total Wing Span                                                          915.2 in. (23.25 m)
+
+--- PDF p29, lines 925-925  (match: /Total Wing Area/)
+ Total Wing Area                                                          760 ft.² (70.61 m²)
+
+--- PDF p29, lines 949-949  (match: /00.02.02 +Dec 18/2014/)
+                                                                       00−02−02                    Dec 18/2014

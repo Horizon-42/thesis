@@ -1,0 +1,74 @@
+# source: EASA 'ANP Aircraft Substitutions - Jets & heavy props' (list dated 22/02/2018), sheet 'by ICAO code'
+# file anp_aircraft_substitutions_-_jets_heavy_props_22022018_.xlsx sha256 2691383eecae1bafb9995e315da1a817dc57c3f0390251ed403396784cd54ac2
+# ANP_PROXY is a NOISE proxy (MTOW, thrust/MTOW, certified noise levels); DELTA_*_dB and N_* are noise corrections
+AIRFRAME_MANUFACTURER	ICAO_CODE	AIRCRAFT_VARIANT	ANP_PROXY	DELTA_DEP_dB	DELTA_APP_dB	N_DEP	N_APP
+Airbus	A306		A300-622R	0.1	0.2	1.02	1.05
+Airbus	A30B		A300B4-203	0	0.3	1	1.07
+Gulfstream Aerospace LP 	ASTR		IA1125	0	0	1	1
+ATR-GIE Avions de Transport Regional	AT43		DHC8	-2.1	2.2999999999999998	0.62	1.7
+ATR-GIE Avions de Transport Regional	AT73		HS748A	-4.8	0	0.33	1
+McDonnell Douglas Corporation	B712		717200	0.3	0.5	1.07	1.1200000000000001
+The Boeing Company	B722		727D15	0	0	1	1
+The Boeing Company	B735		737500	2.8	2.6	1.91	1.82
+The Boeing Company	B753		757300	1.1000000000000001	2.1	1.29	1.62
+The Boeing Company	B762	GE engines	767CF6	2.2000000000000002	0.2	1.66	1.05
+The Boeing Company	B762	PW engines	767JT9	0.7	0	1.17	1
+The Boeing Company	B764		767400	0	0	1	1
+Bombardier Inc.	BCS1		737500	-3.5	-5.9	0.45	0.26
+Bombardier Inc.	BCS3		737700	-4.5999999999999996	-3.5	0.35	0.45
+Hawker Beechcraft Corporation	BE40		MU3001	0.3	0.3	1.07	1.07
+Textron Aviation Inc.	C25A		CNA525C	-2.5	1.9	0.56000000000000005	1.55
+Cessna Aircraft Company	C25B		CNA525C	-2.2999999999999998	-0.9	0.59	0.81
+Cessna Aircraft Company	C501		CNA500	-2.4	2	0.57999999999999996	1.58
+Textron Aviation Inc.	C510		CNA510	0	0	1	1
+Textron Aviation Inc.	C525		CNA525C	0.1	0.2	1.02	1.05
+Cessna Aircraft Company	C560	PW535 engines	CNA560E	-8.9	5	0.13	3.16
+Cessna Aircraft Company	C560	JT15D engines	CNA560U	0.2	3.2	1.05	2.09
+Cessna Aircraft Company	C56X		CNA560XL	1.1000000000000001	0	1.29	1
+Cessna Aircraft Company	C650		CIT3	0.5	1.4	1.1200000000000001	1.38
+Textron Aviation Inc.	C680		CNA680	1.1000000000000001	0	1.29	1
+Cessna Aircraft Company	C750		CNA750	0	0	1	1
+Bombardier Inc.	CL30		CL600	-2.9	-1.6	0.51	0.69
+Bombardier Inc.	CL60		CL601	0.8	0.1	1.2	1.02
+Bombardier Inc.	CRJ1		CL601	-0.9	1.2	0.81	1.32
+Bombardier Inc.	CRJ2		CL601	-1.5	1.2	0.71	1.32
+Bombardier Inc.	CRJ7		CL601	4	1.4	2.5099999999999998	1.38
+328 Support Services GmbH	D328		DO328	0	0	1	1
+Embraer	E120		EMB120	0	0	1	1
+Embraer	E135		EMB145	0.8	-0.3	1.2	0.93
+Embraer	E50P		CNA510	-3.3	0.1	0.47	1.02
+Embraer	E545		CNA750	1.7	-0.4	1.48	0.91
+Embraer	E55P		CNA560XL	1.3	-4.2	1.35	0.38
+Embraer	E75S		EMB175	0.7	0.2	1.17	1.05
+Eclipse Aerospace, Inc.	EA50		ECLIPSE500	0	0	1	1
+Dassault Aviation	F2TH	CFE engines	CL600	2.6	3.8	1.82	2.4
+Dassault Aviation	F2TH	PW engines	CL601	4.0999999999999996	-0.2	2.57	0.95
+Dassault Aviation	F900		EMB14L	3.3	-0.2	2.14	0.95
+Dassault Aviation	FA10		LEAR35	-1.3	3	0.74	2
+Dassault Aviation	FA20		FAL20	9.6	5.3	9.1199999999999992	3.39
+Dassault Aviation	FA50		FAL20	0.2	-2.6	1.05	0.55000000000000004
+Dassault Aviation	FA7X		CRJ9-ER	1	0.2	1.26	1.05
+Gulfstream Aerospace LP 	G150		IA1125	1.7	0	1.48	1
+Gulfstream Aerospace LP 	G280		EMB145	-0.1	-2.1	0.98	0.62
+Gulfstream Aerospace LP 	GALX		EMB145	1.5	0.1	1.41	1.02
+Bombardier Inc.	GL5T		GV	0.4	-1.1000000000000001	1.1000000000000001	0.78
+Bombardier Inc.	GLEX		F10065	-0.7	-3.3	0.85	0.47
+Gulfstream Aerospace Corporation	GLF3		GIIB	0	0	1	1
+Gulfstream Aerospace Corporation	GLF4		GIV	0	0	1	1
+Gulfstream Aerospace Corporation	GLF5		GV	0.1	0.1	1.02	1.02
+Hawker Beechcraft Corporation	H25A		IA1125	4.4000000000000004	4.4000000000000004	2.75	2.75
+Hawker Beechcraft Corporation	H25B		IA1125	7.6	4.5999999999999996	5.75	2.88
+Hawker Beechcraft Corporation	H25C		IA1125	-0.5	-0.3	0.89	0.93
+Hawker Beechcraft Corporation	HA4T		EMB145	0.9	-1	1.23	0.79
+Honda Aircraft Company	HDJT		CNA55B	-0.3	-3.7	0.93	0.43
+Learjet Inc.	LJ31		LEAR35	0	0.9	1	1.23
+Learjet Inc.	LJ35		LEAR35	1.5	0.5	1.41	1.1200000000000001
+Learjet Inc.	LJ45		LEAR35	-4.5999999999999996	1.2	0.35	1.32
+Learjet Inc.	LJ55		LEAR35	3.4	0.2	2.19	1.05
+Learjet Inc.	LJ60		CNA560XL	-1.4	-5.4	0.72	0.28999999999999998
+McDonnell Douglas	MD82		MD82	0.6	1.3	1.1499999999999999	1.35
+McDonnell Douglas	MD83		MD83	0	0.9	1	1.23
+McDonnell Douglas	MD88		MD83	-1.1000000000000001	0.2	0.78	1.05
+Hawker Beechcraft Corporation	PRM1		CNA55B	2.8	0.8	1.91	1.2
+Saab AB, Saab Aerosystems	SB20		SF340	1.5	-5.0999999999999996	1.41	0.31
+Sabreliner Corporation	SBR1		IA1125	4.2	-1.3	2.63	0.74

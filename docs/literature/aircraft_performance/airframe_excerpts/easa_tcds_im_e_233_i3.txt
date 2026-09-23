@@ -1,0 +1,36 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_233_CF34-1_CF34-3_Issue03.pdf  sha256: f2d3dbc8e983203e2140e626f2e240de13f11fe1457935332f3e8c5f14232839
+# id: easa_tcds_im_e_233_i3 | EASA | TCDS EASA.IM.E.233 - GE CF34-1 and CF34-3 series | Issue 03, 30 January 2023
+# url: https://www.easa.europa.eu/en/downloads/65434/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 278-307  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                                                                                      CF34-         CF34-                      CF34-
+                            Rating (see Note 2)          CF34-1A CF34-3A                                        CF34-3B
+                                                                                       3A1           3A2                        3B1
+                                        APR Takeoff
+                                        (5 min) (see        40.66        41.01        41.01          41.01        41.01         41.01
+                                        Notes 3 and        (9140)       (9220)       (9220)         (9220)       (9220)        (9220)
+                                             4)
+                      Thrust kN          Takeoff (5
+                         (lb)            min) (see          38.48        38.83        38.83          38.83        38.83         38.83
+                                        Notes 3 and        (8650)       (8729)       (8729)         (8729)       (8729)        (8729)
+                                             4)
+                                         Maximum            39.68        40.66        40.66          40.66        40.66         40.66
+                                        Continuous         (8920)       (9140)       (9140)         (9140)       (9140)        (9140)
+
+                Automatic Power Reserve (APR) is a single engine thrust rating used during One Engine Inoperable
+                (OEI) operating conditions. Twin engine use of this thrust level may be limited. APR Takeoff represents
+                the thrust that the engine can deliver for 5 minutes in the take-off envelope of the aircraft. The thrust
+                stated at the rating condition is the minimum thrust that the engine will deliver at the rating condition
+                without exceeding and speed or temperature limits at that rating condition. Per the operating
+                instructions (SEI-579). Any time APR activates during a takeoff/go-around, a logbook entry containing
+                time at APR (min/sec) and ITT during APR operation must be recorded. A limited number of APR usages
+                are permitted without the need for special hardware inspections or replacement. If overtemperature
+                should occur, the provisions of Chapter 3 of the operating instructions applies.
+
+                Takeoff is the thrust that the engine can deliver for 5 minutes in the take-off envelope of the aircraft.
+                The thrust stated at the rating condition is the minimum thrust that the engine will deliver at the rating
+                condition without exceeding and speed or temperature limits at that rating condition. This thrust level
+                represents and unlimited twin engine use.

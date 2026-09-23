@@ -1,0 +1,16 @@
+# source: data/aircraft_performance/airframes/gulfstream/gulfstream_g300.html  sha256: 8654046083bc553a5f1d43d8167a4dac987f191cb1e547d706b00beeabe23d99
+# id: gulfstream_g300_page | Gulfstream Aerospace | G300 product page (www.gulfstream.com/en/aircraft/gulfstream-g280/ redirects here) | HTML as served 2026-09-23
+# url: https://www.gulfstream.com/en/aircraft/gulfstream-g300/
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- lines 235-237  (match: /Maximum Landing/)
+Maximum Landing
+14,832 kg
+32,700 lb
+
+--- lines 265-269  (match: /Rated Takeoff Thrust \(each\)/)
+Engines
+Two Honeywell HTF7250G
+Rated Takeoff Thrust (each)
+33.90 kN
+7,624 lb

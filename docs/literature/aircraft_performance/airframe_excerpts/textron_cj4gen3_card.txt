@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/citation_cj4_gen3_product_card.pdf  sha256: 9c67bf6a98de659f97841170aff6fd55a98afbeb4369ed58eb4501146a436f30
+# id: textron_cj4gen3_card | Textron Aviation | Product card: Citation CJ4 Gen3 (525C) | undated product card PDF
+# url: https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_cj4_gen3_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 31-33  (match: /Thrust/)
+
+                                                                                                                                                             Thrust                                    3,621 lb ea 16.11 kN ea
