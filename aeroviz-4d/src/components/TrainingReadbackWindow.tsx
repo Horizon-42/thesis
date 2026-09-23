@@ -5,10 +5,10 @@
  * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
  *  • PLAN VIEW (the airport frame, one scale on both axes): every candidate runway and its
- *    extended centreline, the capture corridor, each heading word's turn region (between its
- *    fastest and its slowest turn), where that turn may end (a parallelogram) and its hold funnel,
- *    the capture turn, the track, where each heading word was issued, the clearance, the capture
- *    and the end of the sentence.
+ *    extended centreline, the capture corridor, each heading word's turn region, where that turn
+ *    may end (a parallelogram) and its hold funnel, the capture turn, the fastest and the slowest
+ *    turn of every turn region (a switch of their own), the track, where each heading word was
+ *    issued, the clearance, the capture and the end of the sentence.
  *  • HEADING against time: each word's turn band and hold band, the capture turn, the course
  *    band after the capture.
  *  • ALTITUDE against the horizontal distance flown — the axis the tubes are defined on: each
@@ -340,11 +340,6 @@ export default function TrainingReadbackWindow({
                                 {item.turn.slowFinished ? "" : " — the slowest turn does not finish before the flight ends"}
                               </title>
                             </polygon>
-                            <polyline className="training-readback-turn-path" points={points(item.turn.fastPath)} fill="none"
-                              stroke={TRAINING_TURN_COLOR} strokeOpacity={0.7} strokeWidth={0.6} />
-                            <polyline className="training-readback-turn-path" points={points(item.turn.slowPath)} fill="none"
-                              stroke={TRAINING_TURN_COLOR} strokeOpacity={0.7} strokeWidth={0.6}
-                              strokeDasharray={item.turn.slowFinished ? undefined : "2 2"} />
                             <polygon
                               className="training-readback-turn-end"
                               points={points(item.turn.end)}
@@ -399,6 +394,30 @@ export default function TrainingReadbackWindow({
                   ) : null}
                 </>
               ) : null}
+
+              {/* the fastest and the slowest turn of every turn region, in the region's verdict colour
+                  (they run along its edge); the slowest dashed where it does not finish */}
+              {layers.turnPaths ? [
+                ...envelopes.heading.flatMap((item, index) => item.turn === null ? [] : [{
+                  key: `heading-${index}`, turn: item.turn, name: `heading word ${index + 1}`, selected: focused("heading", index),
+                  ok: item.check === null || (item.check.progressOk && item.check.rateOk),
+                }]),
+                ...(capture === null ? [] : [{
+                  key: "capture", turn: capture.turn, name: "the capture turn", selected: approachFocused,
+                  ok: capture.check.progressOk && capture.check.rateOk,
+                }]),
+              ].map(({ key, turn, name, selected, ok }) => {
+                const stroke = selected ? TRAINING_WORD_COLOR : ok ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR;
+                return (
+                  <g key={`turn-paths-${key}`} aria-label={`the fastest and the slowest turn of ${name}`}>
+                    <polyline className="training-readback-turn-path" points={points(turn.fastPath)} fill="none"
+                      stroke={stroke} strokeOpacity={selected ? 1 : 0.8} strokeWidth={selected ? 1.2 : 0.8} />
+                    <polyline className="training-readback-turn-path" points={points(turn.slowPath)} fill="none"
+                      stroke={stroke} strokeOpacity={selected ? 1 : 0.8} strokeWidth={selected ? 1.2 : 0.8}
+                      strokeDasharray={turn.slowFinished ? undefined : "2 2"} />
+                  </g>
+                );
+              }) : null}
 
               <polyline points={signals.eM.map((e, row) => `${px(km(e))},${py(km(signals.nM[row]))}`).join(" ")}
                 fill="none" stroke={TRAINING_TRACE_COLOR} strokeWidth={1.4} className="training-readback-trace" />
@@ -633,7 +652,7 @@ export default function TrainingReadbackWindow({
                   <rect key={`speed-${index}`} className="training-readback-unspecified"
                     x={rowX(span.row)} width={Math.max(xTime(edge(span.endRow)) - rowX(span.row), 1)}
                     y={plotTop} height={plotH} fill={TRAINING_RAW_COLOR} fillOpacity={focused("speed", index) ? 0.22 : 0.12}
-                    stroke={focused("speed", index) ? TRAINING_WORD_COLOR : "none"} strokeWidth={1.6}>
+                    stroke={focused("speed", index) ? TRAINING_WORD_COLOR : "none"} strokeWidth={1.4}>
                     <title>unspecified from step {span.row}: the pilot's own speed — only the range {span.rangeMps![0]}–{span.rangeMps![1]} m/s holds</title>
                   </rect>
                 );
@@ -649,7 +668,7 @@ export default function TrainingReadbackWindow({
                     fill={TRAINING_SPEED_COLOR} fillOpacity={focused("speed", index) ? 0.2 : 0.1}
                     stroke={focused("speed", index) ? TRAINING_WORD_COLOR
                       : span.check!.transitionOk && span.check!.accelOk ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR}
-                    strokeOpacity={focused("speed", index) ? 1 : 0.6} strokeWidth={focused("speed", index) ? 1.6 : 0.6}>
+                    strokeOpacity={focused("speed", index) ? 1 : 0.6} strokeWidth={focused("speed", index) ? 1.4 : 0.6}>
                     <title>
                       transition to {label("speed", span.value)}: monotone {tick(span.check!.transitionOk)}, at most{" "}
                       {vocabulary.speedAccelMaxMps2} m/s² {tick(span.check!.accelOk)}
@@ -662,7 +681,7 @@ export default function TrainingReadbackWindow({
                       fill={TRAINING_SPEED_COLOR} fillOpacity={focused("speed", index) ? 0.34 : 0.2}
                       stroke={focused("speed", index) ? TRAINING_WORD_COLOR
                         : span.check!.contained ? TRAINING_SPEED_COLOR : TRAINING_OUTSIDE_COLOR}
-                      strokeWidth={focused("speed", index) ? 1.6 : 0.7}>
+                      strokeWidth={focused("speed", index) ? 1.4 : 0.7}>
                       <title>
                         {label("speed", span.value)} ±{vocabulary.speedToleranceMps} m/s: {span.check!.bandInside} of{" "}
                         {span.check!.bandRows} rows inside

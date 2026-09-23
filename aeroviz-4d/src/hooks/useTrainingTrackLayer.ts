@@ -15,6 +15,9 @@
  *    carries no outline, so each has a draped EDGE styled as the plan view strokes it: a turn region
  *    and a funnel red where the labeller's check failed, a funnel dashed where its hold is not
  *    judged, the capture turn dashed (red if its check failed).
+ *  • THE TURN PATHS (`trainingLayers.turnPaths`): the fastest and the slowest turn of every turn
+ *    region, draped, in the region's verdict colour (the fastest runs along its edge); the slowest
+ *    dashed where it does not finish before the flight ends — as the plan view draws them.
  *  • THE ALTITUDE TUBES (`trainingLayers.vertical`): one Cesium wall per altitude word, over the
  *    aircraft's own ground track, between the tube's lower and upper edge (both HAE, exported), and
  *    the two edges as lines — ±25 m is a sliver under the track from any distance; the lines are not.
@@ -63,6 +66,7 @@ import {
   type TrainingFlight,
   type TrainingPlanLine,
   type TrainingSelection,
+  type TrainingTurnRegion,
   type TrainingWordRun,
 } from "../data/trainingSample";
 
@@ -73,6 +77,8 @@ export const TRAINING_ENTITY = {
   turnEnd: (index: number) => `training-turn-end-${index}`,
   funnel: (index: number) => `training-funnel-${index}`,
   captureTurn: "training-capture-turn",
+  /** A turn region's fastest or slowest turn (`id` is the region's). */
+  path: (id: string, which: "fast" | "slow") => `${id}-${which}`,
   corridor: "training-corridor",
   corridorAxis: "training-corridor-axis",
   tube: (index: number) => `training-tube-${index}`,
@@ -95,8 +101,10 @@ const ALPHA = { turn: 0.16, turnEnd: 0.4, funnel: 0.18, corridor: 0.3, tube: 0.2
 /** An envelope's edge, at rest and when it is the selected word's (px). */
 const EDGE_WIDTH = 1.5;
 const EDGE_SELECTED_WIDTH = 3;
+/** A turn path's width (px): above the region's edge, which its fastest turn runs along. */
+const PATH_WIDTH = 2;
 /** How much wider than the track the framed view is. */
-const FRAME_MARGIN = 1.25;
+const FRAME_MARGIN = 1.5;
 
 /** Cesium wants [lon, lat, height, …]; the track carries the three as columns. */
 export function trainingTrackPositions(flight: TrainingFlight): number[] {
@@ -133,12 +141,18 @@ export function trainingFocusEntities(
   selection: TrainingSelection, column: TrainingColumn, word: TrainingWordRun & { index: number },
 ): string[] {
   switch (column) {
-    case "heading":
-      return [TRAINING_ENTITY.turn(word.index), TRAINING_ENTITY.turnEnd(word.index), TRAINING_ENTITY.funnel(word.index)];
-    case "approach":
+    case "heading": {
+      const turn = TRAINING_ENTITY.turn(word.index);
+      return [turn, TRAINING_ENTITY.path(turn, "fast"), TRAINING_ENTITY.path(turn, "slow"),
+        TRAINING_ENTITY.turnEnd(word.index), TRAINING_ENTITY.funnel(word.index)];
+    }
+    case "approach": {
+      const turn = TRAINING_ENTITY.captureTurn;
       return word.event.kind === "clear"
-        ? [TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]
+        ? [turn, TRAINING_ENTITY.path(turn, "fast"), TRAINING_ENTITY.path(turn, "slow"),
+          TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]
         : [];
+    }
     case "altitude":
       return [TRAINING_ENTITY.tube(word.index)];
     case "runway": {
@@ -246,6 +260,28 @@ export default function useTrainingTrackLayer(): void {
         ground(TRAINING_ENTITY.captureTurn, capture.turn.region, TRAINING_TURN_COLOR, ALPHA.turn / 2, "The capture turn",
           { css: verdict(capture.check.progressOk && capture.check.rateOk, TRAINING_TURN_COLOR), dashed: true });
       }
+    }
+
+    if (trainingLayers.turnPaths) {
+      const paths = (id: string, turn: TrainingTurnRegion, ok: boolean, name: string) => {
+        const css = verdict(ok, TRAINING_TURN_COLOR);
+        const fastest = planDegrees(turn.fastPath);
+        const slowest = planDegrees(turn.slowPath);
+        // A turn already inside its target band within one step has a path of one point: no line.
+        if (fastest.length >= 4) groundLine(TRAINING_ENTITY.path(id, "fast"), fastest, PATH_WIDTH, colour(css, 0.9), `The fastest turn, ${name}`);
+        if (slowest.length >= 4) {
+          groundLine(TRAINING_ENTITY.path(id, "slow"), slowest, PATH_WIDTH, turn.slowFinished ? colour(css, 0.9) : dash(css),
+            `The slowest turn, ${name}`);
+        }
+      };
+      envelopes.heading.forEach((item, index) => {
+        if (item.turn) {
+          paths(TRAINING_ENTITY.turn(index), item.turn, item.check === null || (item.check.progressOk && item.check.rateOk),
+            `heading word ${index + 1}`);
+        }
+      });
+      const capture = envelopes.approach.captureTurn;
+      if (capture) paths(TRAINING_ENTITY.captureTurn, capture.turn, capture.check.progressOk && capture.check.rateOk, "the capture turn");
     }
 
     if (trainingLayers.vertical) {

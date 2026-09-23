@@ -27,6 +27,7 @@ import {
   TRAINING_CANDIDATE_COLOR,
   TRAINING_FUNNEL_COLOR,
   TRAINING_TUBE_COLOR,
+  TRAINING_TURN_COLOR,
 } from "../utils/trainingWordColors";
 import {
   fetchTrainingIndex,
@@ -244,6 +245,14 @@ export default function TrainingPanel() {
                 onChange={(event) => setTrainingLayer("lateral", event.target.checked)}
               />
               lateral: turn regions, hold funnels, the capture corridor
+            </label>
+            <label style={{ color: TRAINING_TURN_COLOR }}>
+              <input
+                type="checkbox"
+                checked={trainingLayers.turnPaths}
+                onChange={(event) => setTrainingLayer("turnPaths", event.target.checked)}
+              />
+              turn paths: the fastest and the slowest turn
             </label>
             <label style={{ color: TRAINING_TUBE_COLOR }}>
               <input

@@ -11,14 +11,20 @@
 
 import type { TrainingColumn } from "../data/trainingSample";
 
-/** One colour per column, in `TRAINING_COLUMNS` order. */
+/** One colour per column, in `TRAINING_COLUMNS` order.
+ *
+ *  Speed is a purple (2026-09-24): its amber was the selection's yellow to the eye (OKLab ΔE 3.4).
+ *  Checked with the dataviz palette validator on the bar's surface (#0f131e): ΔE 39 from the
+ *  selection, 23 from the verdict red, 18 from the raw grey, ≥ 10 from every other colour here under
+ *  simulated colour blindness — a teal read 4.6 from the approach pink and 5.3 from the raw grey for
+ *  a deuteranope. Altitude and angle are near each other (ΔE 4.3); their rows are labelled. */
 export const TRAINING_COLUMN_COLOR: Record<TrainingColumn, string> = {
   runway: "#86efac",
   approach: "#f472b6",
   heading: "#7dd3fc",
   altitude: "#a5b4fc",
   angle: "#c4b5fd",
-  speed: "#fbbf24",
+  speed: "#be76ff",
 };
 
 /** The SELECTED word (one column's, at the cursor), in ONE colour across every view: its band's

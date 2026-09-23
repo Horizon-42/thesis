@@ -29,8 +29,10 @@ vi.mock("../../utils/fetchJson", () => ({
   }),
 }));
 
-async function setup(position = 0) {
-  const parsed = parseTrainingSample(mockSample());
+async function setup(position = 0, edit: (raw: any) => void = () => undefined) {
+  const raw = mockSample();
+  edit(raw);
+  const parsed = parseTrainingSample(raw);
   if (!parsed.ok) throw new Error(parsed.problem);
   const selection = {
     vocabulary: parsed.value.vocabulary, candidates: parsed.value.candidates, flight: parsed.value.flights[position],
@@ -75,6 +77,8 @@ describe("Training envelopes in the 3D scene", () => {
       TRAINING_ENTITY.clearance, TRAINING_ENTITY.capture, TRAINING_ENTITY.end, TRAINING_ENTITY.groundTrace,
       TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)), TRAINING_ENTITY.edge(TRAINING_ENTITY.corridor),
       TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(1), "upper"), TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(1), "lower"),
+      TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "fast"), TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"),
+      TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "fast"), TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "slow"),
     ]) {
       expect(scene.entities.getById(id), id).toBeDefined();
     }
@@ -125,6 +129,7 @@ describe("Training envelopes in the 3D scene", () => {
     expect(scene.colourOf(TRAINING_ENTITY.turn(1))).toEqual(scene.css(TRAINING_TURN_COLOR, 0.45));
     expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.45));
     expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))).toEqual(scene.css(TRAINING_WORD_COLOR));
+    expect(scene.colourOf(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"))).toEqual(scene.css(TRAINING_WORD_COLOR));
     // the altitude word in force at the same step is another column's: left alone
     expect(scene.colourOf(TRAINING_ENTITY.tube(0))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.28));
     expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(0), "upper"))).not.toEqual(scene.css(TRAINING_WORD_COLOR));
@@ -140,6 +145,7 @@ describe("Training envelopes in the 3D scene", () => {
     // the heading word is restored, edge and fill
     expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18));
     expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))).not.toEqual(scene.css(TRAINING_WORD_COLOR));
+    expect(scene.colourOf(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"))).toEqual(scene.css(TRAINING_TURN_COLOR, 0.9));
     // nothing was rebuilt
     original.forEach((entity) => expect(scene.entities.getById(entity.id)).toBe(entity));
 
@@ -180,6 +186,22 @@ describe("Training envelopes in the 3D scene", () => {
       .toBe("approach cleared · step 0");
   });
 
+  it("dashes a slowest turn that does not finish, and draws no line for a path of one point", async () => {
+    const unfinished = await setup(0, (raw) => { raw.flights[0].envelopes.approach.captureTurn.turn.slowFinished = false; });
+    const slow = unfinished.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "slow"))!.polyline!;
+    expect(slow.material).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
+    unfinished.unmount();
+    const within = await setup(0, (raw) => {
+      const turn = raw.flights[0].envelopes.approach.captureTurn.turn;
+      const start = { eM: [turn.region.eM[0]], nM: [turn.region.nM[0]], lon: [turn.region.lon[0]], lat: [turn.region.lat[0]] };
+      turn.fastPath = start;
+      turn.slowPath = start;
+    });
+    expect(within.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "fast"))).toBeUndefined();
+    expect(within.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "slow"))).toBeUndefined();
+    expect(within.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "fast"))).toBeDefined();
+  });
+
   it("repaints nothing while the cursor moves inside the selected word", async () => {
     const scene = await setup();
     fireEvent.click(band(DESCEND_TO_LAND));
@@ -199,8 +221,14 @@ describe("Training envelopes in the 3D scene", () => {
 
   it("follows the switches, and leaves nothing behind outside Training", async () => {
     const scene = await setup();
+    act(() => scene.app().setTrainingLayer("turnPaths", false));
+    expect(scene.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "fast"))).toBeUndefined();
+    expect(scene.entities.getById(TRAINING_ENTITY.turn(1))).toBeDefined();   // the region stays
+    act(() => scene.app().setTrainingLayer("turnPaths", true));
     act(() => scene.app().setTrainingLayer("lateral", false));
     expect(scene.entities.getById(TRAINING_ENTITY.corridor)).toBeUndefined();
+    // the paths have a switch of their own
+    expect(scene.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "fast"))).toBeDefined();
     expect(scene.entities.getById(TRAINING_ENTITY.tube(0))).toBeDefined();
     act(() => scene.app().setTrainingLayer("vertical", false));
     expect(scene.entities.getById(TRAINING_ENTITY.tube(0))).toBeUndefined();

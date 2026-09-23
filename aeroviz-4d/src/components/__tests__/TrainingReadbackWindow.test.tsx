@@ -14,7 +14,7 @@ import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import type { TrainingLayers } from "../../context/AppContext";
 import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 
-const ALL: TrainingLayers = { lateral: true, vertical: true, candidates: true };
+const ALL: TrainingLayers = { lateral: true, vertical: true, candidates: true, turnPaths: true };
 
 function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: TrainingColumn | null = null) {
   const parsed = parseTrainingSample(mockSample());
@@ -50,11 +50,22 @@ describe("TrainingReadbackWindow", () => {
     // where the turn may end: its own four-cornered polygon, and the fastest and slowest turns
     expect(count(".training-readback-turn-end")).toBe(1);
     expect(document.body.querySelector(".training-readback-turn-end")!.getAttribute("points")!.split(" ")).toHaveLength(4);
-    expect(count(".training-readback-turn-path")).toBe(2);
+    // the fastest and the slowest turn of the heading word's turn and of the capture turn
+    expect(count(".training-readback-turn-path")).toBe(4);
     expect(count(".training-readback-funnel")).toBe(2);
     expect(count(".training-readback-corridor")).toBe(1);
     expect(count(".training-readback-capture-turn")).toBe(1);
     expect(count(".training-readback-candidate")).toBe(2);
+  });
+
+  it("draws the turn paths by their own switch, whatever the lateral switch says", () => {
+    open({ ...ALL, turnPaths: false });
+    expect(count(".training-readback-turn-path")).toBe(0);
+    expect(count(".training-readback-turn")).toBe(1);
+    cleanup();
+    open({ ...ALL, lateral: false });
+    expect(count(".training-readback-turn-path")).toBe(4);
+    expect(count(".training-readback-turn")).toBe(0);
   });
 
   it("keeps the designated runway when the other candidates are switched off", () => {

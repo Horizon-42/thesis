@@ -9,7 +9,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 const { appState } = vi.hoisted(() => ({
   appState: {
     trainingSelection: null as unknown,
-    trainingLayers: { lateral: true, vertical: true, candidates: true },
+    trainingLayers: { lateral: true, vertical: true, candidates: true, turnPaths: true },
   },
 }));
 

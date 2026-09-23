@@ -64,11 +64,15 @@ describe("useTrainingTrackLayer helpers", () => {
     const scene = selection();
     const at = (column: Parameters<typeof trainingWordAt>[1], row: number) =>
       trainingFocusEntities(scene, column, trainingWordAt(scene.flight, column, row));
-    expect(at("heading", 15)).toEqual([TRAINING_ENTITY.turn(1), TRAINING_ENTITY.turnEnd(1), TRAINING_ENTITY.funnel(1)]);
+    const turn = TRAINING_ENTITY.turn(1);
+    expect(at("heading", 15)).toEqual([turn, TRAINING_ENTITY.path(turn, "fast"), TRAINING_ENTITY.path(turn, "slow"),
+      TRAINING_ENTITY.turnEnd(1), TRAINING_ENTITY.funnel(1)]);
     // after the capture a heading word is still its own turn and funnel: the corridor is the clearance's
     expect(at("heading", 50)).toEqual(at("heading", 15));
     expect(at("altitude", 15)).toEqual([TRAINING_ENTITY.tube(0)]);
-    expect(at("approach", 15)).toEqual([TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]);
+    const capture = TRAINING_ENTITY.captureTurn;
+    expect(at("approach", 15)).toEqual([capture, TRAINING_ENTITY.path(capture, "fast"), TRAINING_ENTITY.path(capture, "slow"),
+      TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]);
     expect(at("approach", 5)).toEqual([]);   // "not cleared" bounds nothing
     expect(at("runway", 5)).toEqual([TRAINING_ENTITY.runway("09"), TRAINING_ENTITY.centreline("09")]);
     expect(at("angle", 30)).toEqual([]);

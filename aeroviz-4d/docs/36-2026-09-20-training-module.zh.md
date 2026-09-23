@@ -18,8 +18,8 @@
 | 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
 | 分支与提交 | 前端读取器 `dada684b`，读取修正 `2bbbd8cd`（一步以内就在目标带里的转弯，路径只有一个点），两者都已在 `dev-two-tier` 上。样本格式名改为 `aeroviz-training-sample-v4` 的是 `caf6cf00`，在分支 `dev-instruction-names`（工作区 `.claude/worktrees/instruction-names`），还没合并：合并之前，`dev-two-tier` 上的读取器钉的还是旧名字 v3，会按名字拒读现在盘上的 `instruction_v2`。发布记录在其后的文档提交（`git log`） |
 | 发布 | 2026-09-24 在 `caf6cf00`（工作区干净，记在每个索引条目的 `source.git` 和样本的 `producedBy.git` 里）从 `v2_20260924` 导出，样本格式 `aeroviz-training-sample-v4`：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），数字见 §2.1 的表。各机场 `index.json` 里别的条目（包括 `instruction_v1`）逐条原样保留 |
-| 测试 | Python：`tests/test_instruction_training_export.py` 9 条（含与前端的契约比对），`-k instruction` 共 74 条，全部通过；前端 Vitest 88 个文件 655 条通过（2026-09-24 高亮改动之后）；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
-| 高亮与三维（2026-09-24） | 高亮改成"选中的一个词"：`trainingColumn` + 游标 → `trainingWordAt`，只亮这一列的词（§4.5）；三维加地面投影、贴地边线（带判定）、管子上下沿、选航班时取景一次（§4.4）。在 `dev-two-tier` 上，本机 Chrome 里 KRDU 的 N994FG 逐类点过（航向、高度、进近、下降角），读数窗口同样只亮所选的类 |
+| 测试 | Python：`tests/test_instruction_training_export.py` 9 条（含与前端的契约比对），`-k instruction` 共 74 条，全部通过；前端 Vitest 88 个文件 657 条通过（2026-09-24 高亮、转弯路径改动之后）；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
+| 高亮与三维（2026-09-24） | 高亮改成"选中的一个词"：`trainingColumn` + 游标 → `trainingWordAt`，只亮这一列的词（§4.5）；三维加地面投影、贴地边线（带判定）、管子上下沿、最快 / 最慢转弯路径（开关 "turn paths"）、选航班时取景一次（§4.4）；速度列换成紫色 `#be76ff`（原来的琥珀色和选中的黄色分不开，`trainingWordColors.ts` 写了校验数字）。在 `dev-two-tier` 上，本机 Chrome 里 KRDU 的 N994FG 逐类点过（航向、高度、进近、下降角），读数窗口同样只亮所选的类 |
 | 核对 | `npm run check-publication`：五个机场盘上与开发服务器（从本工作区起在 5183 端口）两层都是 0 个错误，每个机场 1 个能读的集合，别的词表的集合全部按名字拒读记为警告（§5）。浏览器（本机 Chrome，开发服务器同上）里打开过 KRDU：Training 页开在 `instruction_v2`，服务器给的样本格式是 v4；读数核对窗口的平面图画出转弯区、最快与最慢的转弯、平行四边形、实线与虚线的漏斗，三维里贴地的包络都在，控制台没有错误（只有一条 Cesium 的警告：贴地的几何不画轮廓线） |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 | 还没有的两样 | 执行器按句子重飞的航迹（执行器在设计中）、先验模型说出的句子（这份词表上还没训练先验）。界面上是两个明确的空位，没有假数据（§4.6） |
@@ -187,8 +187,9 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 ### 4.1 左侧面板
 
 - 集合下拉：能读的集合；别的词表的集合也列着，后面写"— refused"，选中时显示按名字拒读的原因，不下载。
-- **Draw**：横向包络（转弯区、转弯可能结束的位置、漏斗、走廊）、垂直包络（管子；速度图上的带也跟着它）、
-  全部候选跑道，三个开关同时作用于三维、读数窗口的平面图和各图表。下面是两个灰掉的空位（§4.6）。
+- **Draw**：横向包络（转弯区、转弯可能结束的位置、漏斗、走廊）、转弯路径（最快和最慢的转弯，独立于横向包络的
+  开关）、垂直包络（管子；速度图上的带也跟着它）、全部候选跑道，四个开关同时作用于三维、读数窗口的平面图和
+  各图表。下面是两个灰掉的空位（§4.6）。
 - ⓘ 展开词表的说明：读法、sha、每列类别数、各项容差（包括转弯率、坡度、晚开始、每条跑道的落地横向界限）、
   下降角类、平滑窗口。
 - 抽样说明（原文照录文件里的规则）和航班列表（呼号、跑道、分组、第 0 步之后的词数）。
@@ -210,7 +211,7 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 ### 4.3 读数核对窗口
 
 - **平面图**（机场坐标系，两轴同一比例，按航迹取景并裁剪）：候选跑道和延长中线、走廊、每个航向词的
-  转弯区（最快和最慢的转弯画成细线）、转弯可能结束的平行四边形、漏斗（红边 = 有保持行在外面，虚线边 =
+  转弯区、最快和最慢的转弯（细线，开关 "turn paths"，截获转弯也画）、转弯可能结束的平行四边形、漏斗（红边 = 有保持行在外面，虚线边 =
   不判）、截获转弯、航迹、各航向词的发令点、许可、截获点、句子结束处、游标点。
 - **航向—时间**：平滑航迹（亮）与原始航迹（淡），每个航向词的转弯带和保持带，截获转弯，截获后的航道带；
   标题写出游标处生效的词、它的转弯判定（平均与最大转弯率、最大坡度）和保持判定。
@@ -228,7 +229,9 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 - 横向包络贴地画（它们只约束平面位置，不给高度），转弯可能结束的平行四边形画得更深。贴地的多边形画不出
   轮廓，每个另画一条贴地边线，带标注器的判定，与平面图一致：红 = 判定不过，虚线 = 不判的保持段和截获转弯。
 - 候选跑道与延长中线贴地；航向词发令点、许可、截获点、句子结束处。
-- 选中一架航班时相机取景一次（留 1.25 倍余量，句子条和左栏遮住一部分画面）；之后相机归用户，游标从不动它。
+- 最快和最慢的转弯（每个转弯区和截获转弯的两条路径）贴地画，颜色跟转弯区的判定，最慢的转不完时画虚线；
+  开关 "turn paths" 单独控制（§4.1）。
+- 选中一架航班时相机取景一次（留 1.5 倍余量，句子条和左栏遮住一部分画面）；之后相机归用户，游标从不动它。
 - 静态实体，不接 CZML，不动 `viewer.clock`。
 
 ### 4.5 共享游标与高亮

@@ -267,6 +267,9 @@ export interface TrainingLayers {
   vertical: boolean;
   /** Every candidate runway with its extended centreline — the runway pointer's choices. */
   candidates: boolean;
+  /** The fastest and the slowest turn of each turn region (heading words and the capture turn): the
+   *  two paths the region lies between. A switch of its own, like the candidates: the regions stay. */
+  turnPaths: boolean;
 }
 
 /**
@@ -368,7 +371,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingCursor({ flightKey: trainingFlightKey, atS });
   }, [trainingFlightKey]);
   const [trainingColumn, setTrainingColumn] = useState<TrainingColumn | null>(null);
-  const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({ lateral: true, vertical: true, candidates: true });
+  const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({
+    lateral: true, vertical: true, candidates: true, turnPaths: true,
+  });
   const setTrainingLayer = useCallback((layer: keyof TrainingLayers, on: boolean) => {
     setTrainingLayers((current) => ({ ...current, [layer]: on }));
   }, []);
