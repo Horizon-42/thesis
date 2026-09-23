@@ -279,7 +279,9 @@ of the package, not a migration in progress.
   guidance layer never imports the control path (L28). **`manoeuvre/`**: **nothing under `outputs/`
   imports `manoeuvre`**; only the runners do (L29). **`instructions/`** (2026-09-23): the second
   layer's language — vocabulary, signals, envelopes, labeller, artefact; torch-free, below every
-  model, only the runners consume it until the executor and the prior exist (L30).
+  model, consumed by the runners and the executor (L30). **`autopilot/`** (2026-09-24): the executor —
+  flies the words through the control path's point-mass dynamics one 1 s cycle at a time (that backend
+  runs no hooks), exact inverse, limits in order; imports no model, training or path package (L31).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;

@@ -436,6 +436,23 @@ the readout and the eye-check figures. Torch-free; inside the package it imports
 `data.channels`, `data.coordinate_frames` and `io_utils` (outside it: `flight_scenarios`,
 `aerodynamic_model.common`, `geokit`, numpy)
 (`tests/test_architecture.py::test_the_instructions_package_sits_below_the_models`), and until the
-executor and the prior exist only the runners consume it
-(`test_only_the_runners_reach_the_instructions_package_for_now`). The planned groups above it —
-`autopilot/`, `prior/`, `closed_loop/`, `constraints/` — are in the framework document §2.
+prior exists only the runners and the executor (`autopilot/`, L31) consume it
+(`test_only_the_runners_and_the_executor_reach_the_instructions_package`). The planned groups above
+it — `prior/`, `closed_loop/`, `constraints/` — are in the framework document §2.
+
+### L31 · `autopilot/`: the executor, flying the words through the shared dynamics
+
+2026-09-24 (`docs/2026-09-23_executor_design.zh.md`). Stage 3 of the two-tier framework: `frame`
+(the dynamics' geodetic rows read the way the words read a flight — airport frame, compass track,
+geometric MSL height; a positive bank turns LEFT), `sentence` (the word in force per column per
+control cycle, each column's delay after its step), `flights` (a labelled flight rebuilt from the
+recorded manifest with `build_series`, refused unless it reproduces the stored signals row for row;
+its physical context is `outputs.dynamics.context.rollout_context` at row 0), `plant` (one cycle of
+the control path's point-mass scaled-chart dynamics through `rollout_control_endpoints` — that
+backend runs no command hooks, so the executor steps it cycle by cycle, the same computation),
+`inverse` (wanted rates → bank, load factor, thrust; limits in the design's order, each recorded).
+It may import the data plane, the shared dynamics and geometry, and `instructions/`; never
+`training`, `experiments`, `cli`, `backbone`, `inference`, `manoeuvre`, `outputs.control`,
+`outputs.guidance`, `outputs.state`
+(`tests/test_architecture.py::test_the_executor_flies_through_the_shared_dynamics_only`); only the
+runners consume it (`test_only_the_runners_reach_the_executor_for_now`).

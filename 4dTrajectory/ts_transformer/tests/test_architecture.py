@@ -681,12 +681,40 @@ def test_the_instructions_package_sits_below_the_models():
                 assert module in INSTRUCTIONS_MAY_IMPORT, f"{rel} imports {name}"
 
 
-def test_only_the_runners_reach_the_instructions_package_for_now():
-    """Until the executor and the prior exist (framework document §0), nothing in the package
-    but the runners consumes the instruction language."""
+def test_only_the_runners_and_the_executor_reach_the_instructions_package():
+    """Until the prior exists (framework document §0), the instruction language is consumed by the
+    runners and by the executor (`autopilot/`), which flies its words."""
     for path in _module_files():
         if path.is_relative_to(INSTRUCTIONS):
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
-            assert rel.startswith("experiments/"), f"{rel} imports the instructions package"
+            assert rel.startswith(("experiments/", "autopilot/")), f"{rel} imports the instructions package"
+
+
+AUTOPILOT = TS_DIR / "autopilot"
+#: The executor sits above the instruction language and the dynamics, beside the models and below
+#: nothing yet (framework document §2): it flies words through the control path's shared rollout, so
+#: it may read the data plane, the shared dynamics and geometry, and never a model, the training
+#: plane, a runner, the CLI, a prediction path's own package or the archived manoeuvre layer.
+AUTOPILOT_MAY_NOT_IMPORT = ("training", "experiments", "cli", "backbone", "inference", "manoeuvre",
+                            "outputs.control", "outputs.guidance", "outputs.state")
+
+
+def test_the_executor_flies_through_the_shared_dynamics_only():
+    for path in AUTOPILOT.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        for name in _imported_names(path):
+            for refused in AUTOPILOT_MAY_NOT_IMPORT:
+                assert name != refused and not name.startswith(refused + "."), f"{rel} imports {name}"
+
+
+def test_only_the_runners_reach_the_executor_for_now():
+    for path in _module_files():
+        if path.is_relative_to(AUTOPILOT):
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        if any(name.split(".")[0] == "autopilot" for name in _imported_names(path)):
+            assert rel.startswith("experiments/"), f"{rel} imports the executor"

@@ -64,6 +64,47 @@ def anchor_controls(
     return control_contract(parameterization).relative_to_anchor(actual, float(states[-1, 3]))
 
 
+def rollout_context(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
+    """The flight's physical context at ``anchor``, what any rollout of it needs whoever commands
+    it: the state there (geodetic), the airframe's aero row, the installed thrust and the chart
+    the rollout integrates in. `dynamics_arrays` is this plus what a control MODEL reads; the
+    executor (`autopilot/`) reads this alone — it commands from its own laws, so it needs neither
+    the head's box and condition row nor the lookback's implied controls (which need rows before
+    the anchor, and the executor starts at a flight's first row)."""
+    scenario = series.scenario
+    initial = states_from_channels(
+        np.array([0.0], dtype=np.float64),
+        series.values[anchor : anchor + 1],
+        series.frame,
+        mass_kg=float(scenario.initial.m),
+    )[0][1]
+    aero = scenario.aero
+    heading = float(getattr(series.frame, "heading_rad", 0.0))
+    return {
+        "initial_state": np.array(
+            [
+                initial.latitude,
+                initial.longitude,
+                initial.altitude,
+                initial.V,
+                initial.psi,
+                initial.gamma,
+                initial.m,
+            ],
+            dtype=np.float64,
+        ),
+        "aero_params": np.array(
+            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
+            dtype=np.float64,
+        ),
+        "max_thrust_n": np.array(float(scenario.aircraft.engine.max_thrust_total_n), dtype=np.float64),
+        "frame_params": np.array(
+            [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
+            dtype=np.float64,
+        ),
+    }
+
+
 def dynamics_arrays(
     series: FlightSeries, anchor: int, *, parameterization: str, condition_features: str
 ) -> dict[str, np.ndarray]:
@@ -83,35 +124,13 @@ def dynamics_arrays(
     contract = control_contract(parameterization)
     scenario = series.scenario
     mass_kg = float(scenario.initial.m)
-    initial = states_from_channels(
-        np.array([0.0], dtype=np.float64),
-        series.values[anchor : anchor + 1],
-        series.frame,
-        mass_kg=mass_kg,
-    )[0][1]
-    aero = scenario.aero
-    max_thrust = float(scenario.aircraft.engine.max_thrust_total_n)
-    condition = condition_vector(mass_kg, max_thrust, aero, features=condition_features)
-    heading = float(getattr(series.frame, "heading_rad", 0.0))
+    context = rollout_context(series, anchor)
+    condition = condition_vector(mass_kg, float(context["max_thrust_n"]), scenario.aero, features=condition_features)
     return {
         "condition": condition,
-        "initial_state": np.array(
-            [
-                initial.latitude,
-                initial.longitude,
-                initial.altitude,
-                initial.V,
-                initial.psi,
-                initial.gamma,
-                initial.m,
-            ],
-            dtype=np.float64,
-        ),
-        "aero_params": np.array(
-            [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
-            dtype=np.float64,
-        ),
-        "max_thrust_n": np.array(max_thrust, dtype=np.float64),
+        "initial_state": context["initial_state"],
+        "aero_params": context["aero_params"],
+        "max_thrust_n": context["max_thrust_n"],
         # The contract's box is the same on every airframe (outputs/envelope.py); the
         # flight's installed thrust enters through max_thrust_n.
         "control_lower": contract.lower_array.astype(np.float32),
@@ -125,10 +144,7 @@ def dynamics_arrays(
             contract.lower_array,
             contract.upper_array,
         ).astype(np.float64),
-        "frame_params": np.array(
-            [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
-            dtype=np.float64,
-        ),
+        "frame_params": context["frame_params"],
         # The rollout frame rotation and the runway heading coincide only for the
         # runway-aligned coordinate frame.  Keep the terminal-loss reference separate
         # so ENU rollouts are decomposed along/across the actual runway, not east/north.
