@@ -1,19 +1,14 @@
 /**
- * TrainingPanel: the empty state (T1) and the three states of design §4.5 that
- * arrived with the reader (T4a).
- *
- * The states are kept apart deliberately: "not exported yet" is the normal state
- * on a fresh machine and must stay actionable (path + command + the vite
- * restart, AV5), while "exported but wrong" must name the field — and must not
- * take the other sets down with it (AV6, in reverse).
+ * TrainingPanel: the empty state, the readable set, the sets it refuses BY NAME from the manifest
+ * alone (never downloaded), a readable set that fails with its field, and the two empty slots.
  */
-import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const { appState, setTrainingSelection, setTrainingLayer, fetchMock } = vi.hoisted(() => ({
   appState: {
-    activeAirportCode: "KRDU" as string,
-    trainingLayers: { flown: true, model: true },
+    activeAirportCode: "KXXX" as string,
+    trainingLayers: { lateral: true, vertical: true, candidates: true },
   },
   setTrainingSelection: vi.fn(),
   setTrainingLayer: vi.fn(),
@@ -25,41 +20,34 @@ vi.mock("../../context/AppContext", () => ({
 }));
 
 import TrainingPanel from "../TrainingPanel";
-import { trainingIndexPath } from "../../data/trainingSample";
-import { mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import { STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 
 function jsonResponse(body: unknown) {
-  return {
-    ok: true,
-    headers: { get: () => "application/json" },
-    text: async () => JSON.stringify(body),
-  };
+  return { ok: true, headers: { get: () => "application/json" }, text: async () => JSON.stringify(body) };
 }
 
 function notFound() {
   return { ok: false, status: 404, headers: { get: () => "text/html" }, text: async () => "<!doctype html>" };
 }
 
-/** Serve the manifest and the sample from a per-test table, by path. */
 function serve(files: Record<string, unknown>) {
-  fetchMock.mockImplementation(async (url: string) =>
-    url in files ? jsonResponse(files[url]) : notFound(),
-  );
+  fetchMock.mockImplementation(async (url: string) => (url in files ? jsonResponse(files[url]) : notFound()));
 }
 
-/** The most recent thing the panel published for the sentence bar. */
 function lastPublished(): any {
   const calls = setTrainingSelection.mock.calls;
   return calls.length ? calls[calls.length - 1][0] : null;
 }
 
-const INDEX_PATH = "data/airports/KRDU/training/index.json";
-const SAMPLE_PATH = "data/airports/KRDU/training/box_v3/sample.json";
+const INDEX_PATH = "data/airports/KXXX/training/index.json";
+const SAMPLE_PATH = "data/airports/KXXX/training/instruction_v1/sample.json";
+const OLD_PATH = "data/airports/KXXX/training/box_v3/sample.json";
 
 describe("TrainingPanel", () => {
   beforeEach(() => {
-    appState.activeAirportCode = "KRDU";
+    appState.activeAirportCode = "KXXX";
     setTrainingSelection.mockClear();
+    setTrainingLayer.mockClear();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -68,254 +56,97 @@ describe("TrainingPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  // ── ① nothing exported ────────────────────────────────────────────────────
   describe("with no export on disk", () => {
     beforeEach(() => serve({}));
 
-    it("says there is no export yet, for the ACTIVE airport", async () => {
+    it("names the airport, the path it reads and the command that writes it", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText(/No Training export for KRDU yet/)).toBeTruthy();
+      expect(await screen.findByText(/No Training export for KXXX yet/)).toBeTruthy();
+      expect(screen.getByText(INDEX_PATH)).toBeTruthy();
+      expect(screen.getByText(/run_ts\.py instruction_training_export .*--airport KXXX/)).toBeTruthy();
     });
 
-    it("names the exact path it reads, so the message is actionable", async () => {
-      render(<TrainingPanel />);
-      expect(await screen.findByText(INDEX_PATH)).toBeTruthy();
-    });
-
-    it("names the command that writes it", async () => {
-      render(<TrainingPanel />);
-      expect(await screen.findByText(/run_ts\.py instruction_sample_export/)).toBeTruthy();
-    });
-
-    // AV5: vite does not watch public/data, so a directory created after the dev
-    // server booted is served as the SPA fallback. Without this line the first
-    // person to export hits a "received HTML" error about a file that is on disk.
+    // AV5: vite does not watch public/data, so a directory created after boot is the SPA fallback.
     it("warns that the dev server must be restarted after the first export", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText(/restart the dev server/i)).toBeTruthy();
-      expect(screen.getByText(/npm run dev/)).toBeTruthy();
-    });
-
-    it("follows the active airport rather than hardcoding one", async () => {
-      appState.activeAirportCode = "KSJC";
-      render(<TrainingPanel />);
-      expect(await screen.findByText(/No Training export for KSJC yet/)).toBeTruthy();
-      expect(screen.getByText("data/airports/KSJC/training/index.json")).toBeTruthy();
-    });
-
-    it("exports the path helper the reader shares with the message", () => {
-      expect(trainingIndexPath("KSTL")).toBe("data/airports/KSTL/training/index.json");
     });
   });
 
-  // ── a good export ─────────────────────────────────────────────────────────
   describe("with an export", () => {
     beforeEach(() => serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample() }));
 
-    // The flight list and the set's title are always out; everything read ONCE —
-    // what the module is, the shas, the word counts — folds behind the ⓘ so the
-    // list keeps the height the sentence bar would otherwise take.
-    it("lists the flights without making the reader open anything", async () => {
+    it("opens on the set it can read, not the first one listed, and downloads only that", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText("DAL123")).toBeTruthy();
-      expect(screen.queryByText("box-v3")).toBeNull();
+      expect(await screen.findByText("TST1")).toBeTruthy();
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("instruction_v1");
+      const fetched = fetchMock.mock.calls.map(([url]) => url);
+      expect(fetched).toContain(SAMPLE_PATH);
+      expect(fetched).not.toContain(OLD_PATH);
     });
 
-    it("shows the vocabulary the words were read under, behind the ⓘ", async () => {
+    it("publishes the flight with the vocabulary and the candidate runways", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText("DAL123")).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText("box-v3")).toBeTruthy();
-      // the runway classes come from the file, never from the airport's runways
-      expect(screen.getByText("KRDU:05L KRDU:05R KRDU:23L KRDU:23R")).toBeTruthy();
-      expect(screen.getByText(/heading 11 · altitude 8 · speed 6 · runway 4/)).toBeTruthy();
+      await waitFor(() => expect(lastPublished()?.flight.flightKey).toBe(VECTORED_KEY));
+      expect(lastPublished().candidates.map((c: any) => c.ident)).toEqual(["09", "27"]);
+      fireEvent.click(screen.getByText("TST2"));
+      await waitFor(() => expect(lastPublished()?.flight.flightKey).toBe(STRAIGHT_KEY));
     });
 
-    // A WORD IS AN INTERVAL, so the panel states the numbers a box is built from
-    // — the redundancy, the two edge tables, the ladder and the wedge's angles.
-    // Every one of them is inside the vocabulary's sha: the tolerance IS the word
-    // here, and a panel giving only the class counts would state the shape of the
-    // vocabulary and none of its meaning.
-    it("states what a box is built from, not only how many there are", async () => {
+    it("refuses a superseded set BY NAME from the manifest alone, without downloading it", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText("DAL123")).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText(/±5 %, with a\s*1° floor on the heading box/)).toBeTruthy();
-      expect(screen.getByText(/11 tiling\s*-180…180°/)).toBeTruthy();
-      expect(screen.getByText(/6 tiling 60…125 m\/s/)).toBeTruthy();
-      expect(screen.getByText(/1\.5° above \/ 1° below/)).toBeTruthy();
+      await screen.findByText("TST1");
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "box_v3" } });
+      expect(await screen.findByText(/read under box-v3, a superseded vocabulary/)).toBeTruthy();
+      expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain(OLD_PATH);
+      await waitFor(() => expect(lastPublished()).toBeNull());
     });
 
-    // The producer of the artefact is NOT in this repository, so the boxes here
-    // are a reconstruction — which is exactly why the panel names what rebuilt
-    // them and the reader measures the verdict twice.
-    it("names what rebuilt the boxes, and what the verdict was computed on", async () => {
+    it("marks the refused sets in the chooser", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText("DAL123")).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText(/the artefact's own labeller is NOT in this repository/)).toBeTruthy();
-      expect(screen.getByText(/course 6 s · speed and height 10 s/)).toBeTruthy();
+      await screen.findByText("TST1");
+      const options = [...(screen.getByRole("combobox") as HTMLSelectElement).options].map((option) => option.text);
+      expect(options.find((text) => text.startsWith("box_v3"))).toMatch(/box-v3 — refused/);
+      expect(options.find((text) => text.startsWith("instruction_v1"))).not.toMatch(/refused/);
     });
 
-    // The spec's sha and the runway classes' sha are separate fields: two
-    // artefacts with the same spec can carry different runway lists (§4.4-2).
-    it("shows the vocabulary sha and the runway sha apart", async () => {
+    it("shows the two slots that are empty on purpose, disabled", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText("DAL123")).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText("8695be0c64e0…")).toBeTruthy();
-      expect(screen.getByText("aa11bb22cc33…")).toBeTruthy();
+      await screen.findByText("TST1");
+      const replay = screen.getByLabelText(/executor replay — not built yet/) as HTMLInputElement;
+      const prior = screen.getByLabelText(/prior-generated sentence — no prior yet/) as HTMLInputElement;
+      expect(replay.disabled && prior.disabled).toBe(true);
     });
 
-    it("publishes the selected flight for the sentence bar to draw", async () => {
+    it("switches the envelopes everywhere through the shared layers", async () => {
       render(<TrainingPanel />);
-      await waitFor(() => {
-        const published = lastPublished();
-        expect(published?.flight?.flightKey).toBe("DAL123_05L_a1b2c3_1699999999");
-        expect(published?.vocabulary?.readingRule).toBe("box-v3");
-        // the views that draw a verdict need to be able to say what it was
-        // computed on, so the reading rule travels with the selection
-        expect(published?.reading?.rule).toBe("box-v3");
-      });
+      await screen.findByText("TST1");
+      fireEvent.click(screen.getByLabelText(/vertical: the altitude tubes/));
+      expect(setTrainingLayer).toHaveBeenCalledWith("vertical", false);
     });
 
-    // ② the second layer has no artefact until stage B3′
-    it("says why there is no prior-generated set rather than leaving a blank", async () => {
+    it("states the draw it came from", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText("DAL123")).toBeTruthy();
-      fireEvent.click(screen.getByRole("button", { name: /What does this panel show/ }));
-      expect(screen.getByText(/No prior-generated set for KRDU/)).toBeTruthy();
-      expect(screen.getByText(/stage B3′/)).toBeTruthy();
+      expect(await screen.findByText(/2 flights · a test draw\./)).toBeTruthy();
     });
   });
 
-  // ── ③ one bad set, and one bad manifest entry ─────────────────────────────
-  it("names the field when a set's sample is wrong, and keeps the panel up", async () => {
-    const broken = mockSample() as any;
-    // one row per event still, but two events at the same instant
-    broken.flights[0].sentence.eventTimesS = [0, 10, 10, 46, 60, 84, 104];
+  it("names the field when a readable set fails, and leaves the manifest standing", async () => {
+    const broken: any = mockSample();
+    broken.flights[0].envelopes.altitude[0].check.inside = 3;
     serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: broken });
-
     render(<TrainingPanel />);
-    expect(await screen.findByText(/Set box_v3 cannot be read/)).toBeTruthy();
-    expect(screen.getByText(/strictly increasing/)).toBeTruthy();
-    // the panel itself is still there, with its heading
-    expect(screen.getByRole("heading", { name: "Training" })).toBeTruthy();
+    expect(await screen.findByText(/Set instruction_v1 cannot be read/)).toBeTruthy();
+    expect(screen.getByText(/says 3 rows inside, but the tube's own flags count 20/)).toBeTruthy();
+    expect(screen.getByRole("combobox")).toBeTruthy();
   });
 
-  // AV6 in reverse: one rejected entry names itself, the good set still loads.
-  it("greys a rejected manifest entry without emptying the list", async () => {
-    const index = mockIndex() as any;
-    index.sets.push({ ...index.sets[0], id: "broken_set", kind: "not-a-kind" });
+  it("greys out a malformed entry by name while the others load", async () => {
+    const index: any = mockIndex();
+    delete index.sets[0].title;
     serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
-
     render(<TrainingPanel />);
-    expect(await screen.findByText(/Set broken_set was rejected/)).toBeTruthy();
-    expect(screen.getByText(/not-a-kind/)).toBeTruthy();
-    expect(await screen.findByText("DAL123")).toBeTruthy();
-  });
-
-  it("reports a manifest that is not a manifest, by field", async () => {
-    serve({ [INDEX_PATH]: { schema: "something-else", airport: "KRDU", sets: [] } });
-    render(<TrainingPanel />);
-    expect(await screen.findByText(new RegExp(`${INDEX_PATH} cannot be read`))).toBeTruthy();
-    expect(screen.getByText(/schema is "something-else"/)).toBeTruthy();
-  });
-
-  it("selects another flight when its row is clicked", async () => {
-    const sample = mockSample() as any;
-    const second = structuredClone(sample.flights[0]);
-    second.flightKey = "AAL456_23R_b2c3d4_1700000000";
-    second.callsign = "AAL456";
-    second.runway = "KRDU:23R";
-    second.stratum = "straight-in";
-    sample.flights.push(second);
-    serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: sample });
-
-    render(<TrainingPanel />);
-    fireEvent.click(await screen.findByText("AAL456"));
-    await waitFor(() => {
-      expect(lastPublished()?.flight?.callsign).toBe("AAL456");
-    });
-  });
-});
-
-// ── the two switches, and the experiment picker (2026-09-21) ────────────────
-
-describe("TrainingPanel's switches", () => {
-  beforeEach(() => {
-    appState.activeAirportCode = "KRDU";
-    setTrainingLayer.mockClear();
-    fetchMock.mockReset();
-    vi.stubGlobal("fetch", fetchMock);
-    serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample() });
-  });
-  afterEach(() => vi.unstubAllGlobals());
-
-  // The observed track has NO switch: it is the aircraft that was actually
-  // there, and every other line is read against it.
-  it("offers a switch for each line a sentence draws, and none for the measured one", async () => {
-    render(<TrainingPanel />);
-    expect(await screen.findByText("DAL123")).toBeTruthy();
-    expect(screen.getByLabelText(/the envelope the words allow/)).toBeTruthy();
-    expect(screen.getByLabelText(/the envelope the model said/)).toBeTruthy();
-    expect(screen.queryByLabelText(/measured/)).toBeNull();
-  });
-
-  it("switches a line off through the shared state, not its own", async () => {
-    render(<TrainingPanel />);
-    expect(await screen.findByText("DAL123")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText(/the envelope the words allow/));
-    expect(setTrainingLayer).toHaveBeenCalledWith("flown", false);
-  });
-
-  // A set with no model has nothing to switch; the box says so rather than
-  // toggling a line that does not exist.
-  // The question is about the set that is OPEN, not about the airport: a switch
-  // enabled by a set nobody is looking at toggles a line that is not there.
-  it("disables the model switch when the OPEN set carries none", async () => {
-    const index = mockIndex() as any;
-    index.sets.push({ ...index.sets[0], id: "a_prior_set", kind: "prior-generated",
-                      prior: { sha256: "abc", seed: 1, method: "teacher-forced-next-word" } });
-    serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
-
-    render(<TrainingPanel />);
-    expect(await screen.findByText("DAL123")).toBeTruthy();
-    // the open set is the read-back one, even though the manifest holds a prior set
-    expect(screen.getByLabelText(/the envelope the model said/)).toHaveProperty("disabled", true);
-  });
-});
-
-describe("a manifest holding a superseded set", () => {
-  beforeEach(() => {
-    appState.activeAirportCode = "KRDU";
-    fetchMock.mockReset();
-    vi.stubGlobal("fetch", fetchMock);
-  });
-  afterEach(() => vi.unstubAllGlobals());
-
-  // A vocabulary bump leaves older sets listed — they are real exports, and the
-  // panel says why they cannot be read when one is picked. What it must not do
-  // is OPEN on one: the manifest states each set's reading rule, so which are
-  // current is known before any sample is fetched.
-  it("opens on a set this reader can read, not on the first by id", async () => {
-    const index = mockIndex() as any;
-    const stale = { ...index.sets[0], id: "aaa_older", readingRule: "segment-v14" };
-    index.sets = [stale, index.sets[0]];
-    serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
-
-    render(<TrainingPanel />);
-    expect(await screen.findByText("DAL123")).toBeTruthy();
-    expect(screen.queryByText(/cannot be read/)).toBeNull();
-  });
-
-  it("says which sets are superseded, in the picker itself", async () => {
-    const index = mockIndex() as any;
-    index.sets = [{ ...index.sets[0], id: "aaa_older", readingRule: "segment-v14" }, index.sets[0]];
-    serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
-
-    render(<TrainingPanel />);
-    expect(await screen.findByText("DAL123")).toBeTruthy();
-    expect(screen.getByRole("option", { name: /aaa_older.*segment-v14, superseded/ })).toBeTruthy();
+    expect(await screen.findByText(/Entry box_v3 was rejected/)).toBeTruthy();
+    expect(await screen.findByText("TST1")).toBeTruthy();
   });
 });

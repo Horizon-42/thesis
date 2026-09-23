@@ -312,7 +312,9 @@ THIS code's schema only, no compatibility) (R8). **Stage B's intent-code queue**
 ARCHIVED 2026-09-20 (R9 is its record); `manoeuvre_lockstep --cohort` stayed (B0's re-read on the B cohort = the
 grid's L60_D60 cohort). **The instruction labeller** (2026-09-23): `instruction_signals` →
 `instruction_spec` (measured on TRAIN only) → `instruction_labels` → `instruction_figures`, each into
-one never-overwritten artefact directory (R10).
+one never-overwritten artefact directory (R10). `instruction_training_export` writes the frontend's Training sets
+from that artefact — a seeded per-airport VAL sample, every flight re-read against its stored sentence, every envelope's
+geometry from `instructions/display.py`, added to each airport's `training/index.json` without touching its other sets (R11).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

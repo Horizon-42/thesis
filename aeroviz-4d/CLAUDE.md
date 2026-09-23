@@ -26,8 +26,10 @@ npm run build:local-terrain          # Airport-local heightmap terrain tiles
 npm run build:local-terrain:visual-assets
 # Does the picker load what was just published? The frontend's own guards over
 # categories.json + every comparison_index.json (names the rejected category and field),
-# the referenced CZML/report files, and — with --server — what the RUNNING dev server answers.
+# the referenced CZML/report files, every readable Training set through the Training reader, and —
+# with --server — what the RUNNING dev server answers (a served Training sample is parsed too).
 npm run check-publication -- --airport KSMF --server http://localhost:5173   # all airports if no --airport
+npm run check-publication -- --airports-root /tmp/export   # another airports directory (not with --server)
 npm run typecheck:scripts            # tsc over scripts/ (outside tsconfig.json's `src` include)
 
 # Python side
@@ -103,14 +105,21 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - The comparison reference must be requested on the `arrival` track window — see
   `aeroviz_backend/CLAUDE.md` (AV12).
 
-- **A Training set of a superseded vocabulary is REFUSED by name** (reading rule + schema), so a
-  greyed-out set after a vocabulary change is the reader working — the panel opens on one it CAN
-  read; and the Training views draw a CHAIN OF BOXES, not a line: the altitude word's wedge as a
-  Cesium wall in HAE, one prism per word, and the verdict computed on the SMOOTHED signals the
-  boxes were read from — and WHICH signal that is changed with `box-v3`, so a rule bump means
-  re-measuring every one of them, not assuming they carried over (AV19).
-- Training's sentence cursor is shared with read-back and 3D: the box in force is highlighted yellow, with selection changes updating styles only (AV20).
-- Training boxes include cyan target-altitude planes using the box's own HAE offset; they share envelope visibility and segment selection (AV21).
+- **Training reads ONE vocabulary: `instruction-v1`, spec `08ad64abb53e`** — the sample schema, the
+  reading rule, the spec sha, the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
+  refused by name; `training/index.json` keeps its v1 schema across vocabularies, so a superseded set
+  stays listed and is refused from the manifest alone, never downloaded (`check-publication`: a warning)
+  (AV19).
+- **The Training views compute NO envelope**: every turn region, funnel, corridor, tube and speed band is
+  exported from `instructions/display.py`, every verdict is `Reading.checks`; the reader checks only the
+  bookkeeping (AV20).
+- Training's cursor is shared by the sentence bar, the read-back window and 3D: the envelopes in force
+  repaint yellow, styles only (AV21).
+- Training in 3D: the lateral envelopes are draped on the ground, the tubes are walls in exported HAE;
+  the altitude chart's axis is the distance flown (AV22).
+- **The hold funnels are wide by the design's formula** — the turn end's segment swept along θ with the
+  ±4.5° widening, and the 4° lowest bank makes that segment long: val end half width p50 1.1 km, p95
+  9.6 km; they hold 92.5 % of the hold rows (AV23).
 
 ## Comparison CZML colour contract
 

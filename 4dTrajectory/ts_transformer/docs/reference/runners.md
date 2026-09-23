@@ -196,3 +196,22 @@ val with that spec — refusing a spec measured by other code — and writes the
 and the readout. `instruction_figures --dir
 [--count 24] [--seed 1337]` draws a seeded half straight-in / half vectored sample of VAL flights into
 `figures/` with an `index.csv` for a verdict column. Every step refuses to write over an existing file.
+
+### R11 · `run_ts.py instruction_training_export` — the frontend's Training sets
+
+2026-09-23 (`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the frontend side: `aeroviz-4d/docs/35-viewer-reference.md`
+AV19–AV23). `instruction_training_export --dir <artefact> --airports-root <…/public/data/airports> --airport ICAO
+[--airport …] [--per-stratum 20] [--seed 1337] [--set-id instruction_v1] [--title …]` writes, per airport,
+`<root>/<ICAO>/training/<set-id>/sample.json` (schema `aeroviz-training-sample-v3`) and adds the set to that airport's
+`training/index.json` (schema `aeroviz-training-index-v1`, kept; every other set kept as it is). Everything is refused
+before anything is written: the set's directory existing, or the index already listing the id. It draws only VAL flights:
+the airport's labelled flights in a permutation seeded by `--seed`, read in order until both strata
+(`readout.flight_record`) hold `--per-stratum`; the pool, the count read and the rule are written into the file and the
+index. Every flight read is RE-READ with `read_flight` and must equal its stored sentence (the words grid, runway,
+capture, clearance and "unspecified" rows) or the export stops naming the flight and the first differing cell;
+`require_current_labeller` is deliberately NOT called, so the frozen artefact stays exportable after unrelated code
+changes. All envelope geometry comes from `instructions/display.py` (outside the labeller hash, built only from
+`envelope.py` / `labeller/*`); the runner adds only the geodesy (airport-frame metres → lat/lon; MSL → HAE for the track
+and the tube walls, `flight_scenarios.datum.geoid_undulation_m`) and refuses a word kind outside `WORD_KINDS` (the
+frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `tests/test_instruction_training_export.py`
+(every write into `tmp_path`; the schema / rule / columns / kinds mirrors checked against `trainingSample.ts`).

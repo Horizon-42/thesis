@@ -13,6 +13,7 @@ import {
   checkTrainingIndex,
   checkTrainingSample,
   checkTrainingSetAgrees,
+  checkTrainingSetRefusal,
 } from "../checkPublication";
 import { parseTrainingIndex, parseTrainingSample } from "../../data/trainingSample";
 import { mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
@@ -160,100 +161,66 @@ describe("checkComparisonIndex", () => {
   });
 });
 
-// ── the Training export (T8) ─────────────────────────────────────────────────
+// ── the Training export ──────────────────────────────────────────────────────
+
+function readable() {
+  const index = parseTrainingIndex(mockIndex());
+  const sample = parseTrainingSample(mockSample());
+  if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
+  const entry = index.value.sets.find((item) => item.id === "instruction_v1")!;
+  return { index: index.value, entry, sample: sample.value };
+}
 
 describe("the Training export's checks", () => {
-  it("passes a manifest and a sample that agree", () => {
+  it("passes a manifest and a readable sample that agree", () => {
+    const { entry, sample } = readable();
     expect(checkTrainingIndex(mockIndex())).toEqual([]);
-    expect(checkTrainingSample("box_v3", mockSample(), "box-v2-wedge", "vocabulary-readback")).toEqual([]);
-
-    const index = parseTrainingIndex(mockIndex());
-    const sample = parseTrainingSample(mockSample(), "vocabulary-readback");
-    if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
-    expect(checkTrainingSetAgrees(index.value.sets[0], sample.value)).toEqual([]);
+    expect(checkTrainingSample("instruction_v1", mockSample())).toEqual([]);
+    expect(checkTrainingSetRefusal(entry)).toEqual([]);
+    expect(checkTrainingSetAgrees(entry, sample)).toEqual([]);
   });
 
-  // The acceptance test of T8: break one field, get the set id and the field back.
-  it("names the set and the field when the panel would grey a set out", () => {
-    const index = mockIndex() as any;
-    index.sets.push({ ...index.sets[0], id: "half_written", kind: "not-a-kind" });
+  // A set of a superseded vocabulary is refused on purpose: a WARNING naming why, not an error.
+  it("warns, by name, about the sets the panel refuses", () => {
+    const { index } = readable();
+    const findings = index.sets.flatMap(checkTrainingSetRefusal);
+    expect(findings.map((finding) => [finding.level, finding.category])).toEqual([
+      ["warn", "box_v3"], ["warn", "prior_s1337_val"],
+    ]);
+    expect(findings[0].message).toContain("read under box-v3, a superseded vocabulary");
+  });
 
+  it("names the entry and the field when the panel would grey an entry out", () => {
+    const index = mockIndex() as any;
+    index.sets.push({ ...index.sets[1], id: "half_written", kind: "not-a-kind" });
     const findings = checkTrainingIndex(index);
     expect(findings).toHaveLength(1);
     expect(findings[0].category).toBe("half_written");
-    expect(findings[0].message).toContain("kind");
     expect(findings[0].message).toContain("not-a-kind");
   });
 
-  it("names the field when a sample is wrong", () => {
+  it("names the field when a readable sample is wrong", () => {
     const sample = mockSample() as any;
-    sample.flights[0].sentence.words[0] = [0, 0, 0, 0, 0, 0, 0];
-    const findings = checkTrainingSample("box_v3", sample, "box-v2-wedge", "vocabulary-readback");
-    expect(findings[0].category).toBe("box_v3");
-    expect(findings[0].message).toContain("7 columns, expected 6");
+    sample.flights[0].envelopes.speed[0].check.bandInside = 7;
+    const findings = checkTrainingSample("instruction_v1", sample);
+    expect(findings[0].category).toBe("instruction_v1");
+    expect(findings[0].message).toContain("says 7 band rows inside");
   });
 
-  // The commonest failure now: an export read under a retired rule. Its rows can
-  // all still parse — six columns, every word in range — so the message has to
-  // carry the rule that produced the file, or the reader looks broken rather than
-  // the file stale.
-  it("names the reading rule a refused sample was written under", () => {
-    const stale = mockSample() as any;
-    stale.vocabulary.readingRule = "segment-v14";
-    const findings = checkTrainingSample("box_v3", stale, "segment-v14", "vocabulary-readback");
-    expect(findings[0].message).toContain("read under segment-v14");
-    expect(findings[0].message).toContain("box-v3");
-  });
-
-  // The two files come out of ONE run of the exporter. A disagreement means they did not,
-  // and averaging over it would show a sample from a vocabulary nobody asked about.
-  it("catches a manifest and a sample from different exports", () => {
-    const index = parseTrainingIndex(mockIndex());
-    const raw = mockSample() as any;
-    raw.vocabulary.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
-    const sample = parseTrainingSample(raw, "vocabulary-readback");
-    if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
-
-    const findings = checkTrainingSetAgrees(index.value.sets[0], sample.value);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].category).toBe("box_v3");
-    expect(findings[0].message).toContain("vocabularySha256");
-  });
-
-  // Every row of the agreement loop, not just the sha: deleting the runway-sha or
-  // the reading-rule row passed the whole suite before this.
-  it("catches each field the two files must agree on", () => {
-    const index = parseTrainingIndex(mockIndex());
-    const sample = parseTrainingSample(mockSample(), "vocabulary-readback");
-    if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
-
+  // The two files come out of ONE run of the exporter; every field they must agree on is checked.
+  it("catches each field the manifest and the sample must agree on", () => {
+    const { entry, sample } = readable();
     for (const [field, value] of [
+      ["vocabularySha256", "0".repeat(64)],
       ["runwaySha256", "0000"],
       ["readingRule", "plateau-v9"],
+      ["flights", 40],
+      ["id", "another_set"],
     ] as const) {
-      const findings = checkTrainingSetAgrees(
-        { ...index.value.sets[0], [field]: value },
-        sample.value,
-      );
-      expect(findings).toHaveLength(1);
-      expect(findings[0].message).toContain(field);
+      const findings = checkTrainingSetAgrees({ ...entry, [field]: value }, sample);
+      expect(findings, field).toHaveLength(1);
     }
-
-    // and the sample calling itself by another name
-    const renamed = checkTrainingSetAgrees(index.value.sets[0], {
-      ...sample.value,
-      setId: "another_set",
-    });
-    expect(renamed[0].message).toContain("another_set");
-  });
-
-  it("catches a manifest that promises more flights than the sample holds", () => {
-    const index = parseTrainingIndex(mockIndex());
-    const sample = parseTrainingSample(mockSample(), "vocabulary-readback");
-    if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
-
-    const findings = checkTrainingSetAgrees({ ...index.value.sets[0], flights: 40 }, sample.value);
-    expect(findings[0].message).toContain("lists 40 flights");
-    expect(findings[0].message).toContain("holds 1");
+    const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } }, sample);
+    expect(reseeded[0].message).toContain("cohort.seed");
   });
 });

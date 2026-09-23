@@ -1,60 +1,28 @@
 /**
  * useTrainingTrackLayer.ts
  * ------------------------
- * The selected Training flight in the 3D scene: the aircraft's own track, and the
- * ENVELOPE its sentence allows around it — the wedge wall the altitude words
- * make, and the chain of boxes the sentence is. Design:
- * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §3.1 / §5.6, T6 / T15.
+ * The selected Training flight in the 3D scene: its track, and the envelopes its sentence allows.
+ * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
- * THE SCENE DRAWS A REGION, NOT A SECOND CURVE. Under `box-v2-wedge` a word is an
- * interval and a sentence is a chain of bounding boxes, so what the words say
- * about this flight is a volume; there is no sentence flown by rule to draw
- * beside the track (that needs a height-tracking executor — the replay gate,
- * which is not built). Drawing one line here would be drawing the one thing this
- * vocabulary does not say.
+ *  • THE TRACK, in 3D, at its ellipsoid height (the exporter converted MSL once: h = H + N).
+ *  • THE LATERAL ENVELOPES on the ground (`trainingLayers.lateral`): each heading word's turn
+ *    region and hold funnel, the capture turn, and the capture corridor with its centreline. They
+ *    bound positions in plan only — the vertical is the tubes' business — so they are draped on
+ *    the terrain rather than floated at some height the words do not give them.
+ *  • THE ALTITUDE TUBES (`trainingLayers.vertical`): one Cesium wall per altitude word, over the
+ *    aircraft's own ground track, between the tube's lower and upper edge (both HAE, exported).
+ *  • THE CANDIDATE RUNWAYS (`trainingLayers.candidates`): every threshold the runway pointer can
+ *    point at, its runway and extended centreline; the designated one is drawn whatever the
+ *    switch says, because the corridor and the landing are measured from it.
+ *  • WHERE WORDS WERE ISSUED: a point on the track at every heading word, the clearance, the
+ *    capture and the end of the sentence.
  *
- * TWO SHAPES, AND THEY ANSWER DIFFERENT QUESTIONS.
- *  • The WALL is the altitude words' wedge, over the aircraft's own ground
- *    track: an ABSOLUTE bound on height, wide where a segment begins and closing
- *    onto ±5 % of its target where it ends. It is the one bound in this
- *    vocabulary that pins a position rather than a rate. It is drawn as ONE WALL
- *    PER ALTITUDE SEGMENT, not one for the flight: the bound STEPS at every
- *    altitude word (a segment closes onto its target, the next opens wide again —
- *    measured on one vectored arrival, nine steps of up to 59 m), and a single
- *    ribbon forced through those steps renders them as twisted facets over the
- *    turning ground track. Split, each ribbon tapers cleanly and the step between
- *    two of them reads as what it is.
- *  • The SOLIDS are one per word, and each one is a FRUSTUM, not a prism: a pie
- *    slice in plan, a trapezoid in every radial section. The footprint FANS OUT
- *    FROM THE AIRCRAFT — as deep as the hold times the speed box's upper edge, as
- *    wide as the heading box — and is deliberately NOT the rectangle around it,
- *    which would show flyable-looking ground beside the apex that no heading in
- *    the box can reach. The HEIGHT tapers with it: an outline point `d` metres
- *    out has `d` metres less path left to its altitude segment's end, so its
- *    slice of the wedge is that much tighter. Extruding one height over the whole
- *    footprint over-states the ceiling at the far end by up to 26 % of the box's
- *    own height on a long hold — a flat lid is the one thing the words never say.
- *    The solids are thin horizontally (a 2° box over a 4 s hold is 488 m deep and
- *    17 m wide at its far edge), and that thinness is the finding: horizontally
- *    one word says almost nothing, and it is the accumulation over a whole
- *    sentence that opens the funnel (design §5.1).
+ * Every coordinate is the exporter's (lon / lat and heights computed in Python); this hook draws
+ * them and computes no geometry. The envelope in force at the shared cursor is repainted yellow
+ * without rebuilding anything.
  *
- * A word is a box in STATE space — heading × speed × altitude — which is what the
- * vocabulary means by a bounding box. In POSITION space it is this sector, and it
- * is DERIVED: a word constrains the state at every instant, and where that lets
- * the aircraft go over its hold is this. Nothing bounds how fast the heading may
- * swing inside its box, because the word does not. The outline is computed at the
- * exporter, in the course frame, because the frame's transform lives there.
- *
- * STATIC GEOMETRY, NOT TIME-SAMPLED ENTITIES. Training loads no CZML on purpose
- * (design V2): a time-dynamic entity would drive the shared `viewer.clock`, and
- * the clock belongs to Observe's playback — switching tasks would move it.
- *
- * The altitudes are already HAE (`altHaeM`, `altHaeLoM`, `altHaeHiM`, converted
- * at the exporter), which is what Cesium wants. Feeding it MSL would float
- * everything ~33.5 m ABOVE where it belongs (h = H + N, and N is negative here)
- * — together, so the error would be invisible within the scene and visible only
- * against the terrain.
+ * STATIC ENTITIES, NOT TIME-SAMPLED ONES: a time-dynamic entity would drive the shared
+ * `viewer.clock`, which belongs to Observe's playback.
  */
 
 import { useEffect } from "react";
@@ -62,278 +30,202 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import {
-  TRAINING_FLOWN_COLOR,
-  TRAINING_MODEL_COLOR,
+  TRAINING_CANDIDATE_COLOR,
+  TRAINING_COLUMN_COLOR,
+  TRAINING_CORRIDOR_COLOR,
+  TRAINING_DESIGNATED_COLOR,
+  TRAINING_FUNNEL_COLOR,
   TRAINING_TRACE_COLOR,
-  TRAINING_TARGET_COLOR,
+  TRAINING_TUBE_COLOR,
+  TRAINING_TURN_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import {
-  TRAINING_KIND_COLUMN,
-  altitudeWedgeM,
-  eventInForce,
-  type TrainingEnvelope,
-  type TrainingEventBox,
+  altitudeTubeAt,
+  headingEnvelopeAt,
+  rowAtTime,
+  type TrainingAltitudeTube,
   type TrainingFlight,
-  type TrainingWordSpec,
+  type TrainingPlanLine,
 } from "../data/trainingSample";
 
-const OBSERVED_ID = "training-observed-track";
-const WALL_ID = "training-envelope-wall";
-const MODEL_WALL_ID = "training-model-envelope-wall";
-const BOX_ID = "training-envelope-box";
-const NODE_ID = "training-segment-node";
+export const TRAINING_ENTITY = {
+  track: "training-track",
+  turn: (index: number) => `training-turn-${index}`,
+  funnel: (index: number) => `training-funnel-${index}`,
+  captureTurn: "training-capture-turn",
+  corridor: "training-corridor",
+  corridorAxis: "training-corridor-axis",
+  tube: (index: number) => `training-tube-${index}`,
+  centreline: (ident: string) => `training-centreline-${ident}`,
+  runway: (ident: string) => `training-runway-${ident}`,
+  runwayLabel: (ident: string) => `training-runway-label-${ident}`,
+  issue: (index: number) => `training-issue-${index}`,
+  clearance: "training-clearance",
+  capture: "training-capture",
+  end: "training-end",
+} as const;
+
+/** How opaque each envelope is at rest, and when it is the one in force. */
+const ALPHA = { turn: 0.16, funnel: 0.18, corridor: 0.3, tube: 0.22, selected: 0.45 } as const;
 
 /** Cesium wants [lon, lat, height, …]; the track carries the three as columns. */
-function degreesArrayHeights(track: {
-  lon: number[];
-  lat: number[];
-  altHaeM: number[];
-}): number[] {
-  const flat: number[] = [];
-  for (let row = 0; row < track.lon.length; row += 1) {
-    flat.push(track.lon[row], track.lat[row], track.altHaeM[row]);
-  }
-  return flat;
+export function trainingTrackPositions(flight: TrainingFlight): number[] {
+  const { lon, lat, altitudeHaeM } = flight.signals;
+  return lon.flatMap((value, row) => [value, lat[row], altitudeHaeM[row]]);
 }
 
-export function trainingTrackPositions(flight: TrainingFlight): { observed: number[] } {
-  return { observed: degreesArrayHeights(flight.observed) };
+/** A plan line as Cesium's flat [lon, lat, …]. */
+export function planDegrees(line: TrainingPlanLine): number[] {
+  return line.lon.flatMap((value, point) => [value, line.lat[point]]);
 }
 
-/**
- * The altitude wedge as a Cesium wall: one ground track, a maximum height per
- * position and a minimum.
- *
- * BOTH ARE HAE. `altHaeHiM` is the MAXIMUM and `altHaeLoM` the minimum, which is
- * the plain reading of the names here — unlike the retired corridor, where "lo"
- * named the shallower descent and therefore sat higher. The wedge is a height
- * interval and nothing else.
- */
-export function trainingBandWall(
-  flight: TrainingFlight,
-  envelope: TrainingEnvelope,
-  vocabulary: TrainingWordSpec,
-  words: number[][],
-): Array<{ positions: number[]; maximumHeights: number[]; minimumHeights: number[] }> {
-  const { lon, lat, haeOffsetM } = flight.observed;
-  const forced = eventInForce(flight.sentence.eventTimesS, flight.observed.tS);
-  const wordAt = (row: number) => words[forced[row]][TRAINING_KIND_COLUMN.altitude];
-  const walls = [];
-  let row = 0;
-  while (row < lon.length) {
-    let last = row;
-    while (last + 1 < lon.length && wordAt(last + 1) === wordAt(row)) last += 1;
-    const positions: number[] = [];
-    const maximumHeights: number[] = [];
-    const minimumHeights: number[] = [];
-    for (let index = row; index <= last; index += 1) {
-      positions.push(lon[index], lat[index]);
-      maximumHeights.push(envelope.altHaeHiM[index]);
-      minimumHeights.push(envelope.altHaeLoM[index]);
-    }
-    // ONE MORE POSITION, at the next segment's first row but with THIS segment's
-    // own closing box — the target's ±5 %, which is where its wedge ends. Without
-    // it the ribbons stop a row apart and a hairline of unbounded height opens
-    // between two segments that in fact meet; with the NEXT segment's heights
-    // instead, the ribbon's last facet spans the step and renders as the twist
-    // this split exists to remove.
-    if (last + 1 < lon.length) {
-      const [low, high] = altitudeWedgeM(vocabulary, wordAt(row), 0);
-      positions.push(lon[last + 1], lat[last + 1]);
-      maximumHeights.push(haeOffsetM[last + 1] + high);
-      minimumHeights.push(haeOffsetM[last + 1] + low);
-    }
-    walls.push({ positions, maximumHeights, minimumHeights });
-    row = last + 1;
-  }
-  return walls;
-}
-
-/**
- * ONE WORD'S SOLID, as Cesium draws it: the outline closed back onto its apex,
- * with the wedge's own two heights at every point of it.
- *
- * A `wall` takes a height pair per position, which is exactly what a frustum
- * needs and what a `polygon` with one `extrudedHeight` cannot express. The
- * outline is closed by repeating the apex, so the two radial faces — the
- * trapezoids — are drawn as well as the arc face.
- */
-export function trainingBoxWall(box: TrainingEventBox): {
-  positions: number[];
-  maximumHeights: number[];
-  minimumHeights: number[];
-} {
+/** One altitude tube as a wall over the aircraft's own ground track: a position per row it
+ *  covers, with that row's lower and upper edge (HAE, as exported). */
+export function trainingTubeWall(flight: TrainingFlight, tube: TrainingAltitudeTube) {
   const positions: number[] = [];
-  const maximumHeights: number[] = [];
-  const minimumHeights: number[] = [];
-  for (let point = 0; point <= box.lon.length; point += 1) {
-    const index = point % box.lon.length;
-    positions.push(box.lon[index], box.lat[index]);
-    maximumHeights.push(box.altHaeHiM[index]);
-    minimumHeights.push(box.altHaeLoM[index]);
-  }
-  return { positions, maximumHeights, minimumHeights };
+  for (let row = tube.row; row < tube.endRow; row += 1) positions.push(flight.signals.lon[row], flight.signals.lat[row]);
+  return { positions, minimumHeights: tube.lowerHaeM, maximumHeights: tube.upperHaeM };
 }
 
-/**
- * WHERE THE WORDS CUT THE TRACK, as positions in the scene: one per event, on the
- * track's own rows.
- *
- * Without these the shape reads as a curve rather than as a sentence — and the
- * question "which word is in force here" has no answer on screen.
- */
-export function trainingSegmentNodes(
-  track: { tS: number[]; lon: number[]; lat: number[]; altHaeM: number[] },
-  eventTimesS: number[],
-): Array<{ eventS: number; lon: number; lat: number; altHaeM: number }> {
-  const last = track.tS[track.tS.length - 1];
-  const nodes = [];
-  for (const eventS of eventTimesS) {
-    if (eventS > last) continue;
-    let row = 0;
-    while (row + 1 < track.tS.length && track.tS[row + 1] <= eventS) row += 1;
-    nodes.push({ eventS, lon: track.lon[row], lat: track.lat[row], altHaeM: track.altHaeM[row] });
-  }
-  return nodes;
+/** The envelopes in force at a time: the heading word's (-1 once captured) and the tube. */
+export function trainingEnvelopeInForce(flight: TrainingFlight, seconds: number): { heading: number; altitude: number } {
+  const row = rowAtTime(flight.signals.tS, seconds);
+  return { heading: headingEnvelopeAt(flight, row), altitude: altitudeTubeAt(flight, row) };
 }
+
+const colour = (css: string, alpha = 1) => Cesium.Color.fromCssColorString(css).withAlpha(alpha);
 
 export default function useTrainingTrackLayer(): void {
   const { viewer, mode, trainingSelection, trainingLayers, trainingCursorS } = useApp();
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer)) return;
-    const flight = mode === "training" ? trainingSelection?.flight : undefined;
-    if (!flight) return;
-
+    const selection = mode === "training" ? trainingSelection : null;
+    if (!selection) return;
+    const { flight, candidates } = selection;
+    const { envelopes, signals } = flight;
     const added: string[] = [];
-    const vocabulary = trainingSelection!.vocabulary;
-    const drawWall = (
-      id: string, envelope: TrainingEnvelope, words: number[][], colour: string, alpha: number,
-    ) => {
-      trainingBandWall(flight, envelope, vocabulary, words).forEach((wall, segment) => {
-        const entityId = `${id}-${segment}`;
-        added.push(entityId);
-        viewer.entities.add({
-          id: entityId,
-          wall: {
-            positions: Cesium.Cartesian3.fromDegreesArray(wall.positions),
-            maximumHeights: wall.maximumHeights,
-            minimumHeights: wall.minimumHeights,
-            material: Cesium.Color.fromCssColorString(colour).withAlpha(alpha),
-            outline: false,
-          },
-        });
-      });
+    const add = (options: Cesium.Entity.ConstructorOptions & { id: string }) => {
+      added.push(options.id);
+      viewer.entities.add(options);
     };
-
-    // The envelope goes in FIRST, so the track reads over it rather than under
-    // it: it is the region the words allow, and the track is what is being
-    // checked against it.
-    if (trainingLayers.flown) {
-      drawWall(WALL_ID, flight.envelope, flight.sentence.words, TRAINING_FLOWN_COLOR, 0.16);
-      // ONE FRUSTUM PER WORD. It is a `wall` around the closed outline rather than
-      // an extruded `polygon`, because a polygon takes ONE `extrudedHeight` and
-      // this solid does not have one: its lid slopes. The wall carries a height
-      // pair per position, which is exactly the shape, and its two radial faces
-      // ARE the trapezoids. The lid is drawn on top of it, per position.
-      flight.envelope.events.forEach((box, index) => {
-        const wall = trainingBoxWall(box);
-        const sides = `${BOX_ID}-${index}`;
-        added.push(sides);
-        viewer.entities.add({
-          id: sides,
-          wall: {
-            positions: Cesium.Cartesian3.fromDegreesArray(wall.positions),
-            maximumHeights: wall.maximumHeights,
-            minimumHeights: wall.minimumHeights,
-            material: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.1),
-            outline: true,
-            outlineColor: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.45),
-          },
-        });
-        const lid = `${BOX_ID}-lid-${index}`;
-        added.push(lid);
-        const top: number[] = [];
-        for (let point = 0; point < box.lon.length; point += 1) {
-          top.push(box.lon[point], box.lat[point], box.altHaeHiM[point]);
-        }
-        viewer.entities.add({
-          id: lid,
-          polygon: {
-            hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArrayHeights(top)),
-            perPositionHeight: true,
-            material: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR).withAlpha(0.07),
-          },
-        });
-
-        // The target is relative to the runway threshold. Recover the box's
-        // exported datum offset so the reference plane aligns with its walls.
-        // It is a constant target height, independent of the asymmetric wedge.
-        const target = `${BOX_ID}-target-${index}`;
-        added.push(target);
-        viewer.entities.add({
-          id: target,
-          name: `Target altitude: ${box.altitudeTargetM.toFixed(1)} m above runway threshold`,
-          polygon: {
-            hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(
-              box.lon.flatMap((lon, point) => [lon, box.lat[point]]),
-            )),
-            height: box.altitudeTargetM + box.altHaeLoM[0] - box.altLoM[0],
-            material: Cesium.Color.fromCssColorString(TRAINING_TARGET_COLOR).withAlpha(0.22),
-            outline: true,
-            outlineColor: Cesium.Color.fromCssColorString(TRAINING_TARGET_COLOR).withAlpha(0.8),
-          },
-        });
-      });
-    }
-
-    added.push(OBSERVED_ID);
-    viewer.entities.add({
-      id: OBSERVED_ID,
-      polyline: {
-        positions: Cesium.Cartesian3.fromDegreesArrayHeights(degreesArrayHeights(flight.observed)),
-        width: 3,
-        material: Cesium.Color.fromCssColorString(TRAINING_TRACE_COLOR),
-        // The track must not be hidden by terrain: a track that runs into a hill
-        // is a reading, not a rendering accident. `depthFailMaterial` is what
-        // says so — an unclamped polyline still loses the depth test.
-        depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
-          color: Cesium.Color.fromCssColorString(TRAINING_TRACE_COLOR).withAlpha(0.55),
-        }),
-      },
-    });
-
-    // WHAT THE MODEL SAID, when the set carries it: the wedge ITS altitude words
-    // would have allowed, over the same ground track — purple, never the
-    // envelope's orange, because one is the reading and the other is the thing
-    // being judged. Its boxes are not drawn as prisms: two chains of thin prisms
-    // in one scene is one fuzzy chain, and the comparison that answers anything
-    // is between the two walls.
-    if (flight.prior && trainingLayers.model) {
-      drawWall(MODEL_WALL_ID, flight.prior.envelope, flight.prior.words, TRAINING_MODEL_COLOR, 0.14);
-    }
-
-    // The nodes go LAST, over everything: they are POINTS rather than a second
-    // polyline, because a polyline through the same positions would be the track
-    // again, and what is wanted is where it was cut.
-    trainingSegmentNodes(flight.observed, flight.sentence.eventTimesS).forEach((node, index) => {
-      const id = `${NODE_ID}-${index}`;
-      added.push(id);
-      viewer.entities.add({
+    const ground = (id: string, line: TrainingPlanLine, css: string, alpha: number, name: string) =>
+      add({
         id,
-        position: Cesium.Cartesian3.fromDegrees(node.lon, node.lat, node.altHaeM),
-        point: {
-          pixelSize: 9,
-          color: Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR),
-          outlineColor: Cesium.Color.BLACK.withAlpha(0.6),
-          outlineWidth: 2,
-          // Same reason the track carries `depthFailMaterial`: a node hidden by
-          // terrain is a cut the reader cannot see.
+        name,
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(planDegrees(line))),
+          material: colour(css, alpha),
+          classificationType: Cesium.ClassificationType.BOTH,
+        },
+      });
+    const groundLine = (id: string, line: TrainingPlanLine, css: string, width: number, dashed: boolean) =>
+      add({
+        id,
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArray(planDegrees(line)),
+          clampToGround: true,
+          width,
+          material: dashed ? new Cesium.PolylineDashMaterialProperty({ color: colour(css, 0.8) }) : colour(css),
+        },
+      });
+
+    // THE RUNWAYS first, so every envelope reads over them.
+    for (const candidate of candidates) {
+      const pointed = candidate.index === flight.runwayIndex;
+      if (!pointed && !trainingLayers.candidates) continue;
+      const css = pointed ? TRAINING_DESIGNATED_COLOR : TRAINING_CANDIDATE_COLOR;
+      groundLine(TRAINING_ENTITY.centreline(candidate.ident), candidate.centreline, css, pointed ? 2 : 1.5, true);
+      groundLine(TRAINING_ENTITY.runway(candidate.ident), candidate.runway, css, pointed ? 7 : 5, false);
+      add({
+        id: TRAINING_ENTITY.runwayLabel(candidate.ident),
+        position: Cesium.Cartesian3.fromDegrees(candidate.runway.lon[0], candidate.runway.lat[0]),
+        label: {
+          text: candidate.ident,
+          font: "13px sans-serif",
+          fillColor: colour(css),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          pixelOffset: new Cesium.Cartesian2(0, -14),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       });
+    }
+
+    if (trainingLayers.lateral) {
+      ground(TRAINING_ENTITY.corridor, envelopes.approach.corridor.outline, TRAINING_CORRIDOR_COLOR, ALPHA.corridor,
+        "The capture corridor");
+      groundLine(TRAINING_ENTITY.corridorAxis, envelopes.approach.corridor.axis, TRAINING_CORRIDOR_COLOR, 2, false);
+      envelopes.heading.forEach((item, index) => {
+        if (item.turn) ground(TRAINING_ENTITY.turn(index), item.turn.region, TRAINING_TURN_COLOR, ALPHA.turn, `Turn region, heading word ${index + 1}`);
+        if (item.funnel) ground(TRAINING_ENTITY.funnel(index), item.funnel.outline, TRAINING_FUNNEL_COLOR, ALPHA.funnel, `Hold funnel, heading word ${index + 1}`);
+      });
+      const capture = envelopes.approach.captureTurn;
+      if (capture) ground(TRAINING_ENTITY.captureTurn, capture.turn.region, TRAINING_TURN_COLOR, ALPHA.turn / 2, "The capture turn");
+    }
+
+    if (trainingLayers.vertical) {
+      envelopes.altitude.forEach((tube, index) => {
+        const wall = trainingTubeWall(flight, tube);
+        if (wall.minimumHeights.length >= 2) {
+          add({
+            id: TRAINING_ENTITY.tube(index),
+            name: `Altitude tube ${index + 1}`,
+            wall: {
+              positions: Cesium.Cartesian3.fromDegreesArray(wall.positions),
+              minimumHeights: wall.minimumHeights,
+              maximumHeights: wall.maximumHeights,
+              material: colour(TRAINING_TUBE_COLOR, ALPHA.tube),
+              outline: false,
+            },
+          });
+        } else {
+          // A tube of ONE row has no length to be a wall along: its extent is a vertical segment.
+          add({
+            id: TRAINING_ENTITY.tube(index),
+            name: `Altitude tube ${index + 1}`,
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+                wall.positions[0], wall.positions[1], wall.minimumHeights[0],
+                wall.positions[0], wall.positions[1], wall.maximumHeights[0],
+              ]),
+              width: 3,
+              material: colour(TRAINING_TUBE_COLOR, 0.8),
+            },
+          });
+        }
+      });
+    }
+
+    add({
+      id: TRAINING_ENTITY.track,
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArrayHeights(trainingTrackPositions(flight)),
+        width: 3,
+        material: colour(TRAINING_TRACE_COLOR),
+        // A track that runs into a hill is a reading, not a rendering accident: show it dashed.
+        depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: colour(TRAINING_TRACE_COLOR, 0.55) }),
+      },
     });
+
+    const point = (id: string, row: number, css: string, size: number, name: string) =>
+      add({
+        id,
+        name,
+        position: Cesium.Cartesian3.fromDegrees(signals.lon[row], signals.lat[row], signals.altitudeHaeM[row]),
+        point: {
+          pixelSize: size,
+          color: colour(css),
+          outlineColor: Cesium.Color.BLACK.withAlpha(0.6),
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    envelopes.heading.forEach((item, index) =>
+      point(TRAINING_ENTITY.issue(index), item.row, TRAINING_COLUMN_COLOR.heading, 9, `Heading word ${index + 1} issued`));
+    point(TRAINING_ENTITY.clearance, flight.joinRow, TRAINING_COLUMN_COLOR.approach, 10, "Cleared to join the final");
+    point(TRAINING_ENTITY.capture, flight.captureRow, TRAINING_CORRIDOR_COLOR, 10, "The final captured");
+    point(TRAINING_ENTITY.end, flight.rows - 1, TRAINING_TRACE_COLOR, 8, "The end of the sentence");
 
     return () => {
       if (!isCesiumViewerUsable(viewer)) return;
@@ -341,48 +233,37 @@ export default function useTrainingTrackLayer(): void {
     };
   }, [viewer, mode, trainingSelection, trainingLayers]);
 
-  // Selection only changes appearance; retain the flight's geometry and camera.
-  // The same event lookup drives the read-back charts, including exact boundaries.
+  // The envelopes in force at the cursor, repainted — styles only, no geometry rebuilt.
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || mode !== "training" || !trainingSelection) return;
-    const [index] = eventInForce(trainingSelection.flight.sentence.eventTimesS, [trainingCursorS]);
-    const wall = viewer.entities.getById(`${BOX_ID}-${index}`)?.wall;
-    const lid = viewer.entities.getById(`${BOX_ID}-lid-${index}`)?.polygon;
-    const target = viewer.entities.getById(`${BOX_ID}-target-${index}`)?.polygon;
-    const node = viewer.entities.getById(`${NODE_ID}-${index}`)?.point;
-    const selected = Cesium.Color.fromCssColorString(TRAINING_WORD_COLOR);
-    const base = Cesium.Color.fromCssColorString(TRAINING_FLOWN_COLOR);
-    const targetColour = Cesium.Color.fromCssColorString(TRAINING_TARGET_COLOR);
-    if (wall) {
-      wall.material = new Cesium.ColorMaterialProperty(selected.withAlpha(0.4));
-      wall.outlineColor = new Cesium.ConstantProperty(selected);
+    const { heading, altitude } = trainingEnvelopeInForce(trainingSelection.flight, trainingCursorS);
+    const selected = colour(TRAINING_WORD_COLOR, ALPHA.selected);
+    const painted: Array<[Cesium.Entity, Cesium.MaterialProperty]> = [];
+    const paint = (id: string) => {
+      const entity = viewer.entities.getById(id);
+      const graphics = entity?.polygon ?? entity?.wall ?? entity?.polyline;
+      if (!entity || !graphics?.material) return;
+      painted.push([entity, graphics.material]);
+      graphics.material = new Cesium.ColorMaterialProperty(selected);
+    };
+    if (heading >= 0) {
+      paint(TRAINING_ENTITY.turn(heading));
+      paint(TRAINING_ENTITY.funnel(heading));
+    } else {
+      paint(TRAINING_ENTITY.corridor);
     }
-    if (lid) lid.material = new Cesium.ColorMaterialProperty(selected.withAlpha(0.3));
-    if (target) {
-      target.material = new Cesium.ColorMaterialProperty(targetColour.withAlpha(0.6));
-      target.outlineColor = new Cesium.ConstantProperty(selected);
-    }
-    if (node) {
-      node.color = new Cesium.ConstantProperty(selected);
-      node.pixelSize = new Cesium.ConstantProperty(14);
-    }
+    paint(TRAINING_ENTITY.tube(altitude));
+    const issue = heading >= 0 ? viewer.entities.getById(TRAINING_ENTITY.issue(heading))?.point : undefined;
+    if (issue) issue.pixelSize = new Cesium.ConstantProperty(14);
     viewer.scene.requestRender();
 
     return () => {
       if (!isCesiumViewerUsable(viewer)) return;
-      if (wall) {
-        wall.material = new Cesium.ColorMaterialProperty(base.withAlpha(0.1));
-        wall.outlineColor = new Cesium.ConstantProperty(base.withAlpha(0.45));
+      for (const [entity, material] of painted) {
+        const graphics = entity.polygon ?? entity.wall ?? entity.polyline;
+        if (graphics) graphics.material = material;
       }
-      if (lid) lid.material = new Cesium.ColorMaterialProperty(base.withAlpha(0.07));
-      if (target) {
-        target.material = new Cesium.ColorMaterialProperty(targetColour.withAlpha(0.22));
-        target.outlineColor = new Cesium.ConstantProperty(targetColour.withAlpha(0.8));
-      }
-      if (node) {
-        node.color = new Cesium.ConstantProperty(base);
-        node.pixelSize = new Cesium.ConstantProperty(9);
-      }
+      if (issue) issue.pixelSize = new Cesium.ConstantProperty(9);
       viewer.scene.requestRender();
     };
   }, [viewer, mode, trainingSelection, trainingLayers, trainingCursorS]);
