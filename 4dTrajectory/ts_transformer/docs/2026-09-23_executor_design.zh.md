@@ -382,7 +382,7 @@ V_ref ≥ 1.10 · V_stall(n)                         失速下限，用 speed_fl
 
 | 词 | 检查 | 用的函数 |
 |---|---|---|
-| 航向 | 转弯单调、不越过目标超过 4.5°；各行转弯率 ≤ 4.7°/s、坡度 ≤ 32°，转角 ≥ 10° 的转弯平均转弯率 ≥ 0.5°/s；转完后航迹在 θ ± 4.5° 内，位置在漏斗里（转弯最多晚 10.5 s 开始） | `envelope.turn_progress_ok`、`turn_rate_ok`、`heading_band`、`turn_path` + `turn_end_set` + `hold_funnel_contains` |
+| 航向 | 转弯单调、不越过目标超过 4.5°；各行转弯率 ≤ 4.7°/s、坡度 ≤ 32°，转角 ≥ 10° 的转弯平均转弯率 ≥ 0.5°/s；转完后航迹在 θ ± 4.5° 内，位置在漏斗里（转弯最多晚 10.5 s 开始） | `envelope.turn_progress_ok`、`turn_rate_ok`、`heading_band`、`labeller.read.span_funnel`（`envelope.turn_ends` + `hold_funnel`）+ `envelope.inside_convex` |
 | 许可加入 | 截获之后一直在截获走廊里（到入口前） | `envelope.corridor` |
 | 高度 + 下降角 | 高度逐行在管子里 | `labeller.vertical.tube_bounds` |
 | 速度 | 过渡单调、加速度 ≤ 1.7 m/s²、到达后在 V ± 5 m/s 内 | `labeller.speed.span_checks` |

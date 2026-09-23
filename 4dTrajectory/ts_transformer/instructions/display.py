@@ -7,7 +7,7 @@ public functions of `envelope.py` and `labeller/*`:
 - a heading word's rows are `labeller.lateral.heading_spans`, its turn region and where its turn
   may end are `labeller.read.turn_ends_at` (`envelope.turn_ends`), and its hold funnel is
   `envelope.hold_funnel` over the same span — the very sets the labeller's hold check judges
-  (`envelope.hold_funnel_contains`), so what is drawn is what was judged;
+  (`labeller.read.span_funnel`, judged with `envelope.inside_convex`), so what is drawn is what was judged;
 - the capture corridor widens by `envelope.corridor_half_width_m`, and its rows are judged by
   `envelope.corridor`;
 - the altitude tubes ARE `labeller.vertical.tube_bounds`; the speed spans' band rows are judged by
