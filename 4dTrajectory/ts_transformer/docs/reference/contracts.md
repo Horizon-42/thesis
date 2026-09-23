@@ -385,3 +385,28 @@ Users: `experiments/support.checkpoint_manifests`, `anytime_curve.load_arm` (and
 `predict` / `evaluate-fit` take `--data` explicitly — pass the frozen root's manifests there.
 New training always reads the live root (`repo_layout.HARVEST_ROOT`, the one definition; the
 four runners that restated it import it).
+
+### C30 · the instruction sentence artefact: one spec sha, written once, rows aligned with the signals
+
+2026-09-23 (the instruction labeller, `docs/2026-09-23_two_tier_framework.zh.md` §3). An artefact
+directory under `4dTrajectory/outputs/POOLED/instruction_language/<name>/` is written by the four
+runners in order and never overwritten (`instructions.artefact._fresh` refuses an existing file):
+`signals_{train,val}.npz` + `signals.json` (the flights, from the live harvest's eligible arrivals,
+split by `data.splits` — the test split's tracks are never opened — built by `build_series` +
+`usable_series` under the default `TSConfig`, so the population is the models'), `candidates.json`
+(each airport's candidate runways: the arrival manifest's `runway_targets`, the FAA CIFP runway
+geometry the modeling target is built from; position, elevation, true course only — never the
+published glidepath or TCH), `spec.json` + `measurements.json`, `sentences_{train,val}.npz` +
+`labels.json` + `readout.{json,md}`. The spec's sha covers every word, grid, class, tolerance and the
+reading rule (`instructions.spec.READING_RULE`); `load_sentences` refuses a sentences file read with
+another sha, `VocabularySpec.from_dict` refuses a missing or extra key and another reading rule —
+no compatibility. **The code is part of the identity**: `spec.json` records
+`labeller_source_sha256` (the modules that decide a sentence and the spec, `artefact.LABELLER_MODULES` —
+not the artefact, readout, figure or display code) and
+the git head/dirty state it was measured at; `instruction_labels` / `instruction_figures` refuse a
+spec measured by other code (`require_current_labeller`), and every sentence file carries the hash
+it was read with (`load_sentences` refuses a mismatch). A sentence's words line up row for row
+with the FIRST `len(words)` rows of its flight's signals (`signal_index` names the flight): the
+sentence ends before the last threshold passage over the runway, and a flight that comes back ahead
+of the threshold after that passage is refused (`read.admit`, the one gate the labeller, the
+measurements and the figures share).

@@ -1,5 +1,31 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-23 — 指令标注器：第二层的"语言"读完五机场开发集
+
+按新的指令词表（`4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`）实现标注器，
+在五机场 train + val 上读出全部句子，量出词档。总体框架：`…/docs/2026-09-23_two_tier_framework.zh.md`；读数：
+`…/docs/2026-09-23_instruction_labels_readout.zh.md`。分支 `dev-instruction-labeller`，用户合并。
+
+- **新包 `ts_transformer/instructions/`**（不 import torch，只有 runner 使用）：词表规格与 sha、词的编解码、
+  机场坐标系与候选跑道（清单里的 CIFP 跑道几何）、逐步信号、分段拟合、包络、标注器（横向 / 高度与下降角 /
+  速度 / 拼句 / 入口）、量测、产物、读数、目视图。runner：`instruction_signals` → `instruction_spec` →
+  `instruction_labels` → `instruction_figures`（R10），产物契约 C30，包的位置 L30。
+- **产物** `4dTrajectory/outputs/POOLED/instruction_language/v1_20260923/`（规格 `08ad64abb53e`，量于 commit
+  `4ffd801d`）：train 50,178 / val 10,527 架成功（均 99.1 %）；拒绝按原因计数。
+- **代码 review 后的修正**（都在合并前）：切入航向的"收敛"改为在航向容差内判断、直角基线两侧对称
+  （`envelope.heading_converges`）；切入航向的转弯检查不再跨进截获转弯，截获转弯单独检查；标注与定档共用
+  一道门 `read.admit`（原来定档量到了会被拒绝的航班，加速度上限因此从 2.5 降到 1.7 m/s²、坡度上限从 33° 降到
+  32°）；越过入口后又回到入口前的航班拒绝（原来会截在错误的那次越过上）；两个依赖带宽的容差改为选定值并
+  报灵敏度；坡度下限只约束转角 ≥ 10° 的转弯，并按标注器自己的转弯起点量（6° → 4°）；补的切入航向本身
+  到不了航线时拒绝（从转到它的那一行起判断；第一版从最后保持段的末端判断，误拒了 3,284 架）；两个改平段
+  直接相接时的高度词在前一段末发出、方向跟随高度差；管子按类的方向封口；拼句在丢弃重复词之前查冲突，检查只算保留下来的词；产物记录标注器源码 sha，规格与
+  句子由不同代码写出时拒绝。
+- 其他包的小改动：`data.coordinate_frames.horizontal_from_latlon`（`latlon_from_horizontal` 的逆）、
+  `flight_scenarios.runway_target.airport_runways`、`aerodynamic_model.common.GRAVITY_MPS2`（`torch_dynamics` 改为
+  import 它）。
+- **待用户确认**：航向网格（5°）、保持段最大角速度（0.2°/s）、下降档数（4）、最陡一档上沿（10°）；确认后
+  冻结词表，再开始执行器。
+
 ### 2026-09-23 — 机型识别有据可查的对照表；参考速度表补最小重量
 
 起因：前端观测基线三门通过率 KRDU 只有 80.2%，12.2% 是速度门判不了（机型识别不了，或机型缺最小重量）。

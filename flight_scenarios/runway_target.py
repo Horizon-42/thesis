@@ -49,6 +49,16 @@ def find_threshold(
     return None
 
 
+def airport_runways(airport: str, *, path: Path = _THRESHOLDS_PATH) -> list[dict[str, Any]]:
+    """Every runway record of ``airport`` as the config stores it: ``{name, length_ft,
+    thresholds: [{ident, lat, lon, elevation_m, heading_deg, …}, …], …}`` (deep copies).
+    Raises for an unknown airport."""
+    record = _load_airports(path).get(airport.upper())
+    if record is None:
+        raise KeyError(f"no airport {airport!r} in {path}")
+    return json.loads(json.dumps(record["runways"]))
+
+
 def airport_reference_point(
     airport: str, *, path: Path = _THRESHOLDS_PATH
 ) -> dict[str, float]:

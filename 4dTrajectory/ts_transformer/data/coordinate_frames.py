@@ -45,6 +45,16 @@ class CoordinateFrame(ABC):
             self.lon0 + east / self.m_per_deg_lon,
         )
 
+    def horizontal_from_latlon(self, lat_deg, lon_deg):
+        """``(lat, lon)`` degrees -> this frame's horizontal coordinates in metres.
+
+        The exact inverse of :meth:`latlon_from_horizontal` (same projection, same
+        constants); works element-wise on numpy arrays."""
+        return self.from_world_horizontal(
+            (lon_deg - self.lon0) * self.m_per_deg_lon,
+            (lat_deg - self.lat0) * METRES_PER_DEG_LAT,
+        )
+
     def chart_velocity_factors(self, lat_deg: float, alt_m: float) -> tuple[float, float]:
         """Transport factors from physical ENU velocity to chart derivatives."""
         r_m, r_n = wgs84_curvature_radii(lat_deg)

@@ -425,3 +425,17 @@ configs. The publisher stamps the rows as `experiment.parameters` and **`experim
 anytime bin's group is its RECORD campaign, its run intent still the training campaign's). **No
 entry ⇒ the publication is blocked** before any predict/CZML work; `--refresh-labels-only
 --output-root <root>` restamps a published root (metadata only, all-or-nothing on intents).
+
+### L30 · `instructions/`: the second layer's language, below every model
+
+2026-09-23. The instruction vocabulary (`spec`, `words`), the per-step signals in the airport frame
+(`signals`, `airport`), the envelopes (`envelope`, the one implementation the labeller, the executor
+and the display share), the piecewise fit, the labeller (`labeller/`: `records`, `lateral`,
+`vertical`, `speed`, `sentence`, `read`), the measurements (`measure`), the artefact (`artefact`),
+the readout and the eye-check figures. Torch-free; inside the package it imports only
+`data.channels`, `data.coordinate_frames` and `io_utils` (outside it: `flight_scenarios`,
+`aerodynamic_model.common`, `geokit`, numpy)
+(`tests/test_architecture.py::test_the_instructions_package_sits_below_the_models`), and until the
+executor and the prior exist only the runners consume it
+(`test_only_the_runners_reach_the_instructions_package_for_now`). The planned groups above it —
+`autopilot/`, `prior/`, `closed_loop/`, `constraints/` — are in the framework document §2.
