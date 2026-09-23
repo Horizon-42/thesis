@@ -8,13 +8,13 @@ from pathlib import Path
 
 import numpy as np
 
-from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.labeller.read import Reading, admit
+from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import (
-    ALTITUDE, ANGLE, ANGLE_LEVEL, APPROACH, HEADING, SPEED, UNCHANGED, Words,
+    ANGLE, APPROACH, HEADING, SPEED, UNCHANGED, Words,
 )
 
 
@@ -57,25 +57,12 @@ def draw_flight(signals: FlightSignals, reading: Reading, geometry: AirportGeome
     s = smoothed.distance_m
     vertical.plot(s / 1000, signals.altitude_m, color="0.75", lw=1, label="altitude (raw)")
     vertical.plot(s / 1000, smoothed.altitude_m, color="k", lw=1, label="altitude (smoothed)")
-    altitude_rows = list(np.nonzero(grid[:, ALTITUDE] != UNCHANGED)[0]) + [len(grid)]
     angle_rows = list(np.nonzero(grid[:, ANGLE] != UNCHANGED)[0])
-    for start, stop in zip(altitude_rows, altitude_rows[1:]):
-        target = words.altitude_m(int(grid[start, ALTITUDE]))
-        anchors = [r for r in angle_rows if start <= r < stop]
-        if not anchors or anchors[0] != start:
-            anchors.insert(0, start)
-        for a, b in zip(anchors, anchors[1:] + [stop]):
-            in_force = int(next(grid[r, ANGLE] for r in range(a, -1, -1) if grid[r, ANGLE] != UNCHANGED))
-            rows = slice(a, b)
-            if in_force == ANGLE_LEVEL:
-                low = np.full(b - a, target - spec.altitude_tolerance_m)
-                high = np.full(b - a, target + spec.altitude_tolerance_m)
-            else:
-                low, high = envelope.vertical_tube(s[rows] - s[a], float(smoothed.altitude_m[a]), target,
-                                                   words.angle_bounds(in_force), spec.altitude_tolerance_m)
-            vertical.fill_between(s[rows] / 1000, low, high, color="tab:orange", alpha=0.25, lw=0)
+    for word, stop, low, high in tube_bounds(reading.instructions, s, smoothed.altitude_m, spec, words):
+        vertical.fill_between(s[word.row: stop] / 1000, low, high, color="tab:orange", alpha=0.25, lw=0)
+        target = words.altitude_m(word.value)
         label = "land" if target is None else f"{target:.0f} m"
-        vertical.annotate(label, (s[start] / 1000, smoothed.altitude_m[start]), fontsize=8, color="tab:orange",
+        vertical.annotate(label, (s[word.row] / 1000, smoothed.altitude_m[word.row]), fontsize=8, color="tab:orange",
                           xytext=(2, 6), textcoords="offset points")
     for row in angle_rows:
         vertical.annotate(f"{words.angle_deg(int(grid[row, ANGLE])):.1f}°", (s[row] / 1000, smoothed.altitude_m[row]),

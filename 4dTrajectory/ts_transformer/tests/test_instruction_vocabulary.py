@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -338,3 +339,12 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
     (other / "sentences_train.npz").write_bytes((tmp_path / "sentences_train.npz").read_bytes())
     with pytest.raises(ValueError, match="not the one that measured the spec"):
         load_sentences(other, "train", one)
+
+
+def test_the_labeller_hash_covers_the_labelling_code_only():
+    from ts_transformer.instructions import artefact
+
+    package = Path(artefact.__file__).resolve().parent
+    covered = {p.relative_to(package).as_posix() for pattern in artefact.LABELLER_MODULES for p in package.glob(pattern)}
+    assert {"spec.py", "envelope.py", "measure.py", "labeller/read.py", "labeller/lateral.py"} <= covered
+    assert not covered & {"artefact.py", "readout.py", "figures.py", "__init__.py"}

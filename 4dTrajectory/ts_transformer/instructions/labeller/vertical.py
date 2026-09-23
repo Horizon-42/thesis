@@ -166,32 +166,45 @@ def _step(previous: VerticalPiece, level: VerticalPiece, distance: np.ndarray, a
         raise Refused("path angle out of range", str(error)) from None
 
 
-def tube_checks(instructions: list[Instruction], distance: np.ndarray, altitude: np.ndarray,
-                spec: VocabularySpec, words: Words) -> list[dict[str, Any]]:
-    """Each altitude word's span, checked against the tube (re-anchored at every angle word).
-    Run on the assembled sentence, so a word the assembly dropped is not judged."""
+def tube_bounds(instructions: list[Instruction], distance: np.ndarray, altitude: np.ndarray,
+                spec: VocabularySpec, words: Words) -> list[tuple[Instruction, int, np.ndarray, np.ndarray]]:
+    """Each altitude word's tube, row by row: ``(word, end, lower, upper)`` over rows
+    ``word.row..end-1``, re-anchored at every angle word inside the span (the angle in force at the
+    word's own row anchors its start). The one reading of §2.5's tube: the labeller's checks and
+    every display draw it from here."""
     altitude_words = sorted((i for i in instructions if i.column == ALTITUDE), key=lambda item: item.row)
     angle_words = sorted((i for i in instructions if i.column == ANGLE), key=lambda item: item.row)
     ends = [item.row for item in altitude_words[1:]] + [len(altitude)]
-    results = []
+    tubes = []
     for word, end in zip(altitude_words, ends):
         target = words.altitude_m(word.value)
         anchors = [a for a in angle_words if word.row <= a.row < end]
         before = [a for a in angle_words if a.row < word.row]
         if not anchors or anchors[0].row != word.row:
             anchors.insert(0, Instruction(ANGLE, before[-1].value, word.row, "in force"))
-        inside_rows, lower_end, upper_end = 0, 0.0, 0.0
+        lows, highs = [], []
         for anchor, stop in zip(anchors, [a.row for a in anchors[1:]] + [end]):
             rows = slice(anchor.row, stop)
             if anchor.value == ANGLE_LEVEL:
-                low = np.full(stop - anchor.row, target - spec.altitude_tolerance_m)
-                high = np.full(stop - anchor.row, target + spec.altitude_tolerance_m)
+                lows.append(np.full(stop - anchor.row, target - spec.altitude_tolerance_m))
+                highs.append(np.full(stop - anchor.row, target + spec.altitude_tolerance_m))
             else:
                 low, high = envelope.vertical_tube(distance[rows] - distance[anchor.row], float(altitude[anchor.row]),
                                                    target, words.angle_bounds(anchor.value), spec.altitude_tolerance_m)
-            inside_rows += int(np.count_nonzero((altitude[rows] >= low) & (altitude[rows] <= high)))
-            lower_end, upper_end = float(low[-1]), float(high[-1])
-        rows_total = end - word.row
-        results.append({"row": word.row, "rows": rows_total, "inside": inside_rows, "contained": inside_rows == rows_total,
-                        "target_m": target, "tube_width_end_m": upper_end - lower_end})
+                lows.append(low)
+                highs.append(high)
+        tubes.append((word, end, np.concatenate(lows), np.concatenate(highs)))
+    return tubes
+
+
+def tube_checks(instructions: list[Instruction], distance: np.ndarray, altitude: np.ndarray,
+                spec: VocabularySpec, words: Words) -> list[dict[str, Any]]:
+    """Each altitude word's span, checked against its tube (`tube_bounds`). Run on the assembled
+    sentence, so a word the assembly dropped is not judged."""
+    results = []
+    for word, end, low, high in tube_bounds(instructions, distance, altitude, spec, words):
+        span = altitude[word.row: end]
+        inside = int(np.count_nonzero((span >= low) & (span <= high)))
+        results.append({"row": word.row, "rows": end - word.row, "inside": inside, "contained": inside == end - word.row,
+                        "target_m": words.altitude_m(word.value), "tube_width_end_m": float(high[-1] - low[-1])})
     return results

@@ -401,7 +401,8 @@ published glidepath or TCH), `spec.json` + `measurements.json`, `sentences_{trai
 reading rule (`instructions.spec.READING_RULE`); `load_sentences` refuses a sentences file read with
 another sha, `VocabularySpec.from_dict` refuses a missing or extra key and another reading rule —
 no compatibility. **The code is part of the identity**: `spec.json` records
-`labeller_source_sha256` (every module of `instructions/`, `artefact.labeller_source_sha256`) and
+`labeller_source_sha256` (the modules that decide a sentence and the spec, `artefact.LABELLER_MODULES` —
+not the artefact, readout, figure or display code) and
 the git head/dirty state it was measured at; `instruction_labels` / `instruction_figures` refuse a
 spec measured by other code (`require_current_labeller`), and every sentence file carries the hash
 it was read with (`load_sentences` refuses a mismatch). A sentence's words line up row for row

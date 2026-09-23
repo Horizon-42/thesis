@@ -7,7 +7,7 @@
 
 A reader checks the spec's sha against the sentences it opens and refuses a mismatch — the
 sentence files carry the sha they were read with. The spec also records the LABELLER's source
-hash (every module of this package): labelling refuses to run with a labeller other than the one
+hash (`LABELLER_MODULES`): labelling refuses to run with a labeller other than the one
 that measured the spec, and a sentence file refuses to load under a spec measured by another.
 Nothing here is ever overwritten.
 """
@@ -64,12 +64,20 @@ def load_candidates(directory: Path) -> dict[str, AirportGeometry]:
     return {code: AirportGeometry.from_dict(data) for code, data in record["airports"].items()}
 
 
+#: The modules that decide a sentence and the spec — what the labeller's source hash covers.
+#: The artefact, readout, figure and display modules are left out: changing how a sentence is
+#: shown does not change the sentence.
+LABELLER_MODULES = ("spec.py", "words.py", "airport.py", "signals.py", "piecewise.py", "envelope.py", "measure.py",
+                    "labeller/*.py")
+
+
 def labeller_source_sha256() -> str:
-    """sha256 over this package's modules (relative path and bytes, in path order): the code
-    that reads a flight into a sentence and measures the spec."""
+    """sha256 over `LABELLER_MODULES` (relative path and bytes, in path order): the code that
+    reads a flight into a sentence and measures the spec."""
     package = Path(__file__).resolve().parent
+    paths = sorted({path for pattern in LABELLER_MODULES for path in package.glob(pattern)})
     digest = hashlib.sha256()
-    for path in sorted(package.rglob("*.py")):
+    for path in paths:
         digest.update(path.relative_to(package).as_posix().encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()
 
