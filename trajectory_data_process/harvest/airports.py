@@ -19,9 +19,15 @@ fourth appearance of the same family of bug in this project, so here the datum i
 REQUIRED argument of ``Runway.frame`` rather than a convention to remember.
 
 For an LPV runway, N comes directly from its same-point CIFP HAE/MSL pair. A non-LPV
-runway exists only as an assignment candidate: its configured MSL elevation is paired
-with N from the nearest published Path Point at the same airport. This keeps assignment
-in the airport's CIFP-derived datum without turning the fallback into a model target.
+runway takes its Landing Threshold Point and elevation from its CIFP Runway record and
+pairs that MSL elevation with N from the nearest published Path Point at the same
+airport. Such a runway is a model target when its RNAV (GPS) approach publishes an
+LNAV/VNAV path (KRDU 32, KSMF 35R), so its threshold must be the published point, not
+the OurAirports runway end (39.4 m cross-track off at KSMF 35R).
+
+Every runway's COURSE is the centreline through its own and the opposite end's CIFP
+Runway records. OurAirports publishes whole degrees, up to 0.45 deg off this fleet's
+centrelines (KMSY 11/29) -- ~40 m of cross-track 5 km out on final.
 """
 
 from __future__ import annotations
@@ -34,7 +40,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal, Sequence
 
-from geokit import FT_M
+from geokit import FT_M, bearing_rad
 
 from final_approach import RunwayFrame
 
@@ -45,22 +51,33 @@ from trajectory_data_process.harvest.approach_minima import (
 from trajectory_data_process.harvest.cifp import (
     ApproachVertical,
     PathPoint,
+    RunwayRecord,
     read_approach_verticals,
     read_path_points,
+    read_runway_records,
 )
 
 Datum = Literal["msl", "hae"]
-RUNWAY_DATA_FINGERPRINT_SCHEMA = "harvest-runway-data-v1"
-THRESHOLD_FRAME_FINGERPRINT_SCHEMA = "threshold-physical-frame-v1"
+# v2 (2026-09-23): a Runway names where its course came from (``course_source``) and a
+# non-LPV threshold is the CIFP Runway record's LTP; every stored event is re-derived.
+RUNWAY_DATA_FINGERPRINT_SCHEMA = "harvest-runway-data-v2"
+THRESHOLD_FRAME_FINGERPRINT_SCHEMA = "threshold-physical-frame-v2"
+PATH_POINT_POSITION_SOURCE = "faa_cifp_path_point"
+RUNWAY_RECORD_POSITION_SOURCE = "faa_cifp_runway_record"
+RUNWAY_RECORD_COURSE_SOURCE = "faa_cifp_runway_records"
+# The configured (OurAirports) heading is whole degrees; this fleet's centrelines sit
+# within 0.45 deg of it. A CIFP centreline farther off than this means the two files do
+# not describe the same pair of runway ends.
+_MAX_COURSE_DISAGREEMENT_DEG = 1.0
 # ``Runway.tch_source`` values: the LPV Path Point, or the RNAV (GPS) approach's runway
 # leg (``cifp.ApproachVertical``) on a runway that publishes LNAV/VNAV minima only.
 PATH_POINT_TCH_SOURCE = "faa_cifp_path_point"
 APPROACH_LEG_TCH_SOURCE = "faa_cifp_approach_leg"
-# A decoded approach-leg TCH above this means the configured threshold elevation and
-# the CIFP runway altitude disagree, not a real crossing height (the fleet publishes
-# 13.7-19.5 m; PANS-OPS design TCH tops out near 25 m). It guards the REPORTED TCH
-# only: the judged crossing altitude is elevation + (leg - elevation) = the leg's own
-# figure, so a wrong configured elevation moves this number and never the gate.
+# A decoded approach-leg TCH above this means the Runway record's threshold elevation
+# and the approach leg's runway altitude disagree, not a real crossing height (the fleet
+# publishes 13.7-19.5 m; PANS-OPS design TCH tops out near 25 m). It guards the REPORTED
+# TCH only: the judged crossing altitude is elevation + (leg - elevation) = the leg's own
+# figure, so a wrong elevation moves this number and never the gate.
 _MAX_PLAUSIBLE_TCH_M = 30.0
 
 
@@ -68,9 +85,11 @@ _MAX_PLAUSIBLE_TCH_M = 30.0
 class Runway:
     """One landing threshold, with everything needed to judge approaches to it.
 
-    ``lat``/``lon`` are the LANDING threshold (displaced where the runway has one), not
-    the pavement end -- see ``acquisition/runways.py``. Six thresholds in this fleet are
-    displaced, KSJC 30L/30R by 775 m, which on a 3 deg path is a 40.6 m altitude error.
+    ``lat``/``lon`` are the CIFP Landing Threshold Point (displaced where the runway has
+    one), not the pavement end: the Path Point's on an LPV runway, the Runway record's
+    otherwise (``position_source``). Six thresholds in this fleet are displaced, KSJC
+    30L/30R by 775 m, which on a 3 deg path is a 40.6 m altitude error. ``course_deg`` is
+    the centreline through the two ends' Runway records (``course_source``).
 
     ``threshold_crossing_height_m`` / ``published_glidepath_deg`` are the PUBLISHED
     vertical path: the LPV Path Point's, or -- on a runway without LPV -- the RNAV (GPS)
@@ -101,9 +120,10 @@ class Runway:
     published_minima: PublishedMinima
     # Provenance is carried because CIFP and runway geometry can differ by tens of
     # metres and that difference lands directly in the measured deviations.
-    position_source: str = "faa_cifp_path_point"
+    position_source: str = PATH_POINT_POSITION_SOURCE
     vertical_source: str = "faa_cifp_path_point"
     width_source: str = "faa_nasr_apt_rwy"
+    course_source: str = RUNWAY_RECORD_COURSE_SOURCE
     # Where the TCH and glidepath come from -- named by whoever sets a TCH, never
     # assumed. NOT part of the physical-frame fingerprint (``threshold_frame_snapshot``):
     # it decides how a crossing is judged, not where the plane it was measured against
@@ -257,6 +277,7 @@ def threshold_frame_snapshot(runway: Runway) -> dict:
         "procedure_source_cycle": runway.procedure_source_cycle,
         "position_source": runway.position_source,
         "vertical_source": runway.vertical_source,
+        "course_source": runway.course_source,
     }
 
 
@@ -291,12 +312,14 @@ def load_airport(
 ) -> Airport:
     """Build one airport from ``runway_thresholds.json`` plus the required CIFP.
 
-    ``cifp_file`` is mandatory. Configuration supplies the active roster and the
-    geometry/elevation fallback needed to classify landings on non-LPV runways; CIFP
-    Path Points replace that fallback wherever an LPV procedure exists.
+    ``cifp_file`` is mandatory. Configuration supplies the active roster (which runway
+    ends exist and pair up), the runway widths and the published minima; every threshold
+    position, elevation and course comes from the CIFP -- the Path Point LTP where an LPV
+    procedure exists, the Runway record's LTP otherwise, and the course from the Runway
+    records of both ends.
 
-    A threshold missing ``heading_deg`` raises because there is no runway frame without
-    a heading. A non-LPV threshold also requires its configured MSL elevation.
+    A threshold missing ``heading_deg`` raises: it is the cross-check that the CIFP pair
+    and the configured pair are the same runway (``_MAX_COURSE_DISAGREEMENT_DEG``).
     """
     config = json.loads(config_file.read_text(encoding="utf-8"))
     if config["schema_version"] != RUNWAY_THRESHOLDS_SCHEMA:
@@ -313,6 +336,9 @@ def load_airport(
     verticals: dict[tuple[str, str], ApproachVertical] = read_approach_verticals(
         cifp_file, airport=code, path_points=published
     )
+    records: dict[tuple[str, str], RunwayRecord] = read_runway_records(
+        cifp_file, airport=code, path_points=published
+    )
 
     runway_rows = [
         (threshold, runway)
@@ -325,12 +351,11 @@ def load_airport(
         raise ValueError(f"{code}: runway_width_effective_date is required")
     procedure_cycle = _cifp_cycle(cifp_file)
 
-    # Where a published LPV exists, its Landing Threshold Point WINS over the runway
-    # geometry derived from OurAirports. The LTP is what the procedure is aimed at, so it
-    # is the correct along-track origin, and the two disagree measurably: KSMF 35L by
-    # 40.7 m cross-track (which showed up as that runway's entire apparent lateral error)
-    # and KSTL 30L by 61.4 m along-track. Where both agree the substitution is a no-op --
-    # 19 of this fleet's 23 LPV runways are within 10 m.
+    # Where a published LPV exists, its Landing Threshold Point is the threshold; any
+    # other runway end takes its CIFP Runway record's LTP. Never the OurAirports runway
+    # end: it disagrees measurably -- KSMF 35L/35R by 40.7/39.4 m cross-track (each
+    # showed up as that runway's entire apparent lateral error) and KSTL 30L by 61.4 m
+    # along-track.
     airport_path_points = tuple(published.values())
     runways = tuple(
         _build_runway(
@@ -338,6 +363,8 @@ def load_airport(
             threshold,
             runway_row,
             published.get((code, threshold["ident"])),
+            _runway_record(records, code, threshold["ident"]),
+            _centreline_course_deg(records, code, threshold, runway_row),
             verticals.get((code, threshold["ident"])),
             airport_path_points,
             PublishedMinima.from_config(threshold["published_minima"]),
@@ -356,11 +383,54 @@ def load_airport(
     )
 
 
+def _runway_record(
+    records: dict[tuple[str, str], RunwayRecord], code: str, ident: str
+) -> RunwayRecord:
+    record = records.get((code, ident))
+    if record is None:
+        raise ValueError(f"{code} {ident}: the CIFP has no Runway record for this threshold")
+    return record
+
+
+def _centreline_course_deg(
+    records: dict[tuple[str, str], RunwayRecord],
+    code: str,
+    threshold: dict,
+    runway_row: dict,
+) -> float:
+    """Landing course of ``threshold``: its LTP towards the opposite end's LTP, compass
+    degrees. Both LTPs lie on the centreline (displaced or not), so this is the runway's
+    true centreline bearing to ~0.01 deg over a 2-3 km runway."""
+    ends = [end["ident"] for end in runway_row["thresholds"]]
+    if len(ends) != 2 or threshold["ident"] not in ends:
+        raise ValueError(
+            f"{code} {runway_row.get('name')}: a runway needs exactly its two ends to "
+            f"define a centreline, got {ends}"
+        )
+    opposite = ends[1] if ends[0] == threshold["ident"] else ends[0]
+    own = _runway_record(records, code, threshold["ident"])
+    far = _runway_record(records, code, opposite)
+    course = math.degrees(
+        bearing_rad(own.latitude, own.longitude, far.latitude, far.longitude)
+    ) % 360.0
+    configured = float(threshold["heading_deg"])
+    if abs((course - configured + 180.0) % 360.0 - 180.0) > _MAX_COURSE_DISAGREEMENT_DEG:
+        raise ValueError(
+            f"{code} {threshold['ident']}: CIFP centreline {course:.2f} deg disagrees with "
+            f"the configured heading {configured:g} deg by more than "
+            f"{_MAX_COURSE_DISAGREEMENT_DEG:g} deg; the two files describe different "
+            "runway ends"
+        )
+    return course
+
+
 def _build_runway(
     code: str,
     threshold: dict,
     runway_row: dict,
     point: PathPoint | None,
+    record: RunwayRecord,
+    course_deg: float,
     vertical: ApproachVertical | None,
     airport_path_points: Sequence[PathPoint],
     minima: PublishedMinima,
@@ -379,7 +449,7 @@ def _build_runway(
         return Runway(
             airport=code, ident=threshold["ident"], lat=point.latitude, lon=point.longitude,
             elevation_hae_m=hae, elevation_msl_m=msl, hae_minus_msl_m=hae - msl,
-            course_deg=float(threshold["heading_deg"]),
+            course_deg=course_deg,
             threshold_crossing_height_m=point.threshold_crossing_height_m,
             published_glidepath_deg=point.glidepath_deg,
             width_m=width_m,
@@ -387,23 +457,19 @@ def _build_runway(
             published_minima=minima,
             runway_source_cycle=runway_source_cycle,
             procedure_source_cycle=procedure_source_cycle,
-            position_source="faa_cifp_path_point",
+            position_source=PATH_POINT_POSITION_SOURCE,
             vertical_source="faa_cifp_path_point",
             tch_source=PATH_POINT_TCH_SOURCE,
             baro_vnav_minima=baro_vnav_minima,
         )
 
-    if threshold.get("elevation_m") is None:
-        raise ValueError(
-            f"{code} {threshold['ident']}: non-LPV runway has no configured MSL elevation"
-        )
     if not airport_path_points:
         raise ValueError(
             f"{code}: no CIFP Path Point is available to establish the airport HAE/MSL offset"
         )
 
-    lat = float(threshold["lat"])
-    lon = float(threshold["lon"])
+    lat = record.latitude
+    lon = record.longitude
     reference = min(
         airport_path_points,
         key=lambda candidate: (
@@ -414,7 +480,7 @@ def _build_runway(
             ) ** 2
         ),
     )
-    msl = float(threshold["elevation_m"])
+    msl = record.threshold_elevation_msl_m
     hae_minus_msl = (
         reference.ltp_ellipsoidal_height_m
         - reference.ltp_orthometric_height_m
@@ -437,8 +503,8 @@ def _build_runway(
         if not 0.0 < tch < _MAX_PLAUSIBLE_TCH_M:
             raise ValueError(
                 f"{code} {threshold['ident']}: approach {vertical.procedure} crosses the "
-                f"runway at {vertical.crossing_altitude_msl_m:.1f} m MSL but the "
-                f"configured threshold elevation is {msl:.1f} m; the two sources disagree"
+                f"runway at {vertical.crossing_altitude_msl_m:.1f} m MSL but the Runway "
+                f"record's threshold elevation is {msl:.1f} m; the two records disagree"
             )
         glidepath = vertical.glidepath_deg
         tch_source = APPROACH_LEG_TCH_SOURCE
@@ -447,7 +513,7 @@ def _build_runway(
         elevation_hae_m=msl + hae_minus_msl,
         elevation_msl_m=msl,
         hae_minus_msl_m=hae_minus_msl,
-        course_deg=float(threshold["heading_deg"]),
+        course_deg=course_deg,
         threshold_crossing_height_m=tch,
         published_glidepath_deg=glidepath,
         width_m=width_m,
@@ -455,7 +521,7 @@ def _build_runway(
         published_minima=minima,
         runway_source_cycle=runway_source_cycle,
         procedure_source_cycle=procedure_source_cycle,
-        position_source="runway_geometry",
+        position_source=RUNWAY_RECORD_POSITION_SOURCE,
         vertical_source="nearest_faa_cifp_path_point_offset",
         tch_source=tch_source,
         baro_vnav_minima=baro_vnav_minima,

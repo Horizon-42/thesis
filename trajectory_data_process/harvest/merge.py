@@ -23,6 +23,7 @@ from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
     ALTITUDE_SOURCE,
     HarvestPaths,
+    integrity_audits,
 )
 _BUCKETS = ("assigned", "ambiguous", "unassignable", "not_landing")
 
@@ -35,6 +36,7 @@ def merge_stored_tracks(
     metadata_lookup: StateMetadataLookup,
     metadata_provenance: dict[str, Any],
     metadata_lookup_many: StateMetadataBatchLookup | None = None,
+    jobs: int = 1,
 ) -> dict[str, Any]:
     """Merge destination plus additional source manifests through a staged hard-link tree.
 
@@ -42,7 +44,14 @@ def merge_stored_tracks(
     the current airport data, checked for current-key collisions, and serialized before
     the destination is changed. Duplicate identities or relative record paths are
     rejected rather than guessed away. Because all current harvest roots share one
-    filesystem, hard links keep the raw staging tree small.
+    filesystem, hard links keep the raw staging tree small; reclassification writes new
+    files, so no source record is ever modified through its link.
+
+    Each source's exclusion audits (``store.integrity_audits``: a freshness rebuild's
+    ``source_integrity``, or an earlier merge's flattened ones) are carried into its
+    ``provenance.merge.sources`` entry with its unaudited count: the merged roster has no
+    single denominator, and the source manifest itself is replaced by the merge.
+    ``jobs`` is reclassification's worker count (throughput only; output is identical).
     """
     if not additional_sources:
         raise ValueError("at least one additional harvest source is required")
@@ -76,6 +85,7 @@ def merge_stored_tracks(
             metadata_lookup=metadata_lookup,
             metadata_provenance=metadata_provenance,
             metadata_lookup_many=metadata_lookup_many,
+            jobs=jobs,
         )
         _replace_tracks_directory(staged.tracks, destination.tracks)
 
@@ -138,6 +148,7 @@ def _validate_source(source: HarvestPaths, airport: str) -> dict[str, Any]:
         )
     if manifest.get("per_runway") != dict(sorted(per_runway.items())):
         raise ValueError(f"{source.manifest}: per_runway disagrees with records roster")
+    audits, unaudited = integrity_audits(manifest)
 
     return {
         "paths": source,
@@ -148,6 +159,8 @@ def _validate_source(source: HarvestPaths, airport: str) -> dict[str, Any]:
             "written_utc": manifest.get("written_utc"),
             "total": len(rows),
             "provenance": manifest.get("provenance"),
+            "source_integrity_audits": audits,
+            "sources_without_integrity_audit": unaudited,
         },
     }
 

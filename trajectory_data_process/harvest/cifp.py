@@ -27,6 +27,13 @@ vertical path may still be published by its RNAV (GPS) approach's runway leg whe
 approach carries LNAV/VNAV minima (``read_approach_verticals``, ``ApproachVertical``);
 only a runway with no such approach at all (KRDU 14) is left with TCH None -- NOT
 defaulted -- because a crossing with no published path cannot be judged vertically.
+
+Every runway END, LPV or not, also has a Runway record (section P / subsection G) whose
+latitude/longitude ARE its Landing Threshold Point (ARINC 424-23 §5.36/5.37 Note 5, and
+§5.57: "the latitude/longitude information in the runway record reflects the Landing
+Threshold Point of the runway"). ``read_runway_records`` decodes them: they are the
+threshold of a non-LPV runway (the OurAirports end put KSMF 35R 39.4 m cross-track off)
+and, pairwise, the runway's centreline course (OurAirports publishes whole degrees).
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-FT_M = 0.3048
+from geokit import FT_M, haversine_m
 
 # Fixed-column offsets of the Path Point primary record (continuation "001").
 _SECTION = 4
@@ -82,6 +89,22 @@ _MINIMA_AUTHORIZED = "A"
 # pair that agrees sits within a foot (file-wide p99 over 3,455 LPV pairs: 0.8 ft); a
 # shifted column is off by hundreds.
 _APPROACH_LEG_ALTITUDE_TOLERANCE_FT = 2.0
+
+# Fixed-column offsets of the Runway primary record (section P / subsection G, ARINC
+# 424-23 §4.1.10.1), 0-based slices of the 132-column line.
+_RUNWAY_RECORD_IDENT = slice(13, 18)                # "RW35R"
+_RUNWAY_RECORD_CONTINUATION = 21                    # "0"/"1" primary
+_RUNWAY_RECORD_LATITUDE = slice(32, 41)             # N/S + DDMMSSss (0.01 arc-second)
+_RUNWAY_RECORD_LONGITUDE = slice(41, 51)            # E/W + DDDMMSSss
+_RUNWAY_RECORD_THRESHOLD_ELEVATION = slice(66, 71)  # landing threshold elevation, whole feet MSL
+# A runway record and a Path Point both describe the same Landing Threshold Point. Over
+# the 4,670 LPV runway ends of CIFP 2608 (file-wide) the positions agree to p50 0.12 m /
+# p95 0.48 m (the runway record rounds to 0.01", ~0.3 m) and the elevations to p50
+# 0.08 m / p95 0.19 m (whole feet vs 0.1 m); 95.8 % meet BOTH tolerances below, the rest
+# are mostly Path Points on a fictitious threshold. A shifted column misses by kilometres
+# or hundreds of feet, so the pin is the same confidence rule as the Path Point decode.
+_RUNWAY_RECORD_LTP_TOLERANCE_M = 1.0
+_RUNWAY_RECORD_ELEVATION_TOLERANCE_M = 1.0 * FT_M
 
 
 def _is_rnav_gps_runway_procedure(procedure: str) -> bool:
@@ -342,6 +365,93 @@ def read_approach_verticals(
     if path_points is not None:
         _verify_approach_decode(cifp_file, verticals, path_points)
     return verticals
+
+
+@dataclass(frozen=True)
+class RunwayRecord:
+    """One runway end's Landing Threshold Point, as its CIFP Runway record publishes it.
+
+    ``latitude``/``longitude`` are the LTP (displaced where the runway is), to 0.01".
+    ``threshold_elevation_msl_m`` is the landing threshold elevation, published in whole
+    feet (ARINC 424-23 §5.68).
+    """
+
+    airport: str
+    runway: str
+    latitude: float
+    longitude: float
+    threshold_elevation_msl_m: float
+
+
+def read_runway_records(
+    cifp_file: Path,
+    *,
+    airport: str,
+    path_points: dict[tuple[str, str], PathPoint],
+) -> dict[tuple[str, str], RunwayRecord]:
+    """Decode one airport's Runway records, keyed like Path Points (``("KSMF", "35R")``).
+
+    ``path_points`` (the same airport's decoded Path Points) pins the decode: on the
+    runways that have both, position and elevation must agree within
+    ``_RUNWAY_RECORD_LTP_TOLERANCE_M`` / ``_RUNWAY_RECORD_ELEVATION_TOLERANCE_M`` on at
+    least ``_DECODE_CONFIDENCE`` of them. An airport with no Path Point has nothing to pin
+    against and raises: the harvest needs one for its datum offset anyway.
+    """
+    records: dict[tuple[str, str], RunwayRecord] = {}
+    for line in cifp_file.read_text(errors="replace").splitlines():
+        if len(line) < _MIN_RECORD_LENGTH:
+            continue
+        if line[_SECTION] != "P" or line[_SUBSECTION] != "G":
+            continue
+        if line[_AIRPORT].strip() != airport:
+            continue
+        ident = line[_RUNWAY_RECORD_IDENT].strip()
+        if not ident.startswith("RW") or line[_RUNWAY_RECORD_CONTINUATION] not in "01":
+            continue
+        key = (airport, ident.removeprefix("RW"))
+        if key in records:
+            raise ValueError(f"{cifp_file}: two Runway records for {airport} {ident}")
+        records[key] = RunwayRecord(
+            airport=airport,
+            runway=key[1],
+            latitude=_decode_angle(line[_RUNWAY_RECORD_LATITUDE]),
+            longitude=_decode_angle(line[_RUNWAY_RECORD_LONGITUDE]),
+            threshold_elevation_msl_m=int(line[_RUNWAY_RECORD_THRESHOLD_ELEVATION]) * FT_M,
+        )
+    _verify_runway_record_decode(cifp_file, airport, records, path_points)
+    return records
+
+
+def _verify_runway_record_decode(
+    cifp_file: Path,
+    airport: str,
+    records: dict[tuple[str, str], RunwayRecord],
+    path_points: dict[tuple[str, str], PathPoint],
+) -> None:
+    comparable = agreeing = 0
+    for key, point in path_points.items():
+        record = records.get(key)
+        if record is None:
+            continue
+        comparable += 1
+        gap_m = haversine_m(record.latitude, record.longitude, point.latitude, point.longitude)
+        if (
+            gap_m <= _RUNWAY_RECORD_LTP_TOLERANCE_M
+            and abs(record.threshold_elevation_msl_m - point.ltp_orthometric_height_m)
+            <= _RUNWAY_RECORD_ELEVATION_TOLERANCE_M
+        ):
+            agreeing += 1
+    if comparable == 0:
+        raise ValueError(
+            f"{cifp_file}: {airport} has no runway with both a Runway record and a Path "
+            "Point, so the Runway-record decode is unverified"
+        )
+    if agreeing / comparable < _DECODE_CONFIDENCE:
+        raise ValueError(
+            f"{cifp_file}: Runway-record decode agrees with the Path Points on only "
+            f"{agreeing}/{comparable} {airport} runways (need >= {_DECODE_CONFIDENCE:.0%}). "
+            "Check the ARINC 424 revision."
+        )
 
 
 def _minima_authorized(field: str, service: str) -> bool:

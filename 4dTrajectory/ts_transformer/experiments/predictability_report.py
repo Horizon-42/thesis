@@ -35,6 +35,7 @@ import torch  # noqa: E402
 from sklearn.neighbors import NearestNeighbors  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
+from ts_transformer.repo_layout import checkpoint_arrival_manifests  # noqa: E402
 from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
@@ -1120,7 +1121,7 @@ def main() -> None:
 
     provenance = reference.payload["data_provenance"]
     airports = tuple(entry["airport"] for entry in provenance["manifests"])
-    manifests = [pipeline.arrival_manifest_path(airport) for airport in airports]
+    manifests = checkpoint_arrival_manifests(reference.payload, pipeline.HARVEST_ROOT)
     current_provenance = checkpoint_data_provenance(reference.payload, manifests)
     for run in runs:
         require_matching_data_provenance(run.payload, current_provenance)

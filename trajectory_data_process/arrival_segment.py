@@ -28,12 +28,15 @@ the truncated segment's times are REBASED to 0 so every downstream consumer
 (scenario building, reference records, CZML rendering, evaluation baselines)
 sees one canonical arrival segment. ``entry_time_utc`` (the absolute time the
 flight crossed into the ring — the boundary condition multi-aircraft interaction
-studies need) is derived from ``landing_time_utc`` minus the segment duration.
+studies need) is the first kept sample's own time: the flight's ``start_time_utc``
+(the absolute time of waypoint offset 0) plus that sample's offset, to the
+millisecond. It used to be the whole-second landing time minus the segment duration,
+which put it 0–2 s early and moved with wherever the segment happened to end.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from trajectory_data_process.geo import haversine_km
@@ -158,6 +161,9 @@ def truncate_flights(
     provenance fields: ``arrival_truncated`` (whether anything was cut),
     ``cut_samples`` (how many), ``arrival_duration_s`` and ``entry_time_utc``.
     Locals and takeoffs are returned unmodified for the review side file.
+
+    Every flight must carry ``start_time_utc``, the absolute time of its waypoint
+    offset 0 (the stored track's own field).
     """
     arrivals: list[dict[str, Any]] = []
     locals_: list[dict[str, Any]] = []
@@ -177,17 +183,16 @@ def truncate_flights(
         out["waypoints"] = segment
         out["arrival_truncated"] = len(segment) < len(waypoints)
         out["cut_samples"] = len(waypoints) - len(segment)
-        duration_s = float(segment[-1][0])
-        out["arrival_duration_s"] = duration_s
-        out["entry_time_utc"] = _entry_time_utc(flight.get("landing_time_utc"), duration_s)
+        out["arrival_duration_s"] = float(segment[-1][0])
+        out["entry_time_utc"] = _entry_time_utc(
+            flight["start_time_utc"], float(waypoints[out["cut_samples"]][0])
+        )
         arrivals.append(out)
     return arrivals, locals_, takeoffs
 
 
-def _entry_time_utc(landing_time_utc: str | None, duration_s: float) -> str | None:
-    """Absolute ring-entry time = landing time − segment duration (None if unknown)."""
-    if not landing_time_utc:
-        return None
-    landing = datetime.fromisoformat(landing_time_utc.replace("Z", "+00:00"))
-    entry = landing - timedelta(seconds=duration_s)
-    return entry.strftime("%Y-%m-%dT%H:%M:%SZ")
+def _entry_time_utc(start_time_utc: str, entry_offset_s: float) -> str:
+    """Absolute ring-entry time: the track start plus the first kept sample's offset."""
+    start = datetime.fromisoformat(start_time_utc.replace("Z", "+00:00"))
+    entry = (start + timedelta(seconds=entry_offset_s)).astimezone(timezone.utc)
+    return entry.isoformat(timespec="milliseconds").replace("+00:00", "Z")

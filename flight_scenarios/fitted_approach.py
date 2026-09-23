@@ -1,7 +1,8 @@
 """A fitted ADS-B threshold crossing shared by optimization and TS supervision.
 
-The arrival manifest deliberately stops at the last measured sample.  For most harvested
-arrivals that sample is still short of the runway, so it is not a physical arrival target.
+The arrival manifest deliberately stops at a measured sample: the one after a measured
+threshold crossing, else the last one before the threshold -- for censored arrivals still
+short of the runway, so it is not a physical arrival target.
 This module applies :mod:`final_approach` in the flight's declared vertical datum, and
 exposes two views of the same fit:
 

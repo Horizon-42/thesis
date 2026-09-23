@@ -176,7 +176,8 @@ def _write_harvest_with_arrivals(root: Path) -> tuple[HarvestPaths, str]:
             "threshold_crossing_altitude_m": runway.elevation_hae_m + 15.0,
             "altitude_datum": "hae",
             "signed_cross_track_m": 0.0,
-            "source_sample_range": [0, 1],
+            # The measured crossing brackets the landing sample (6), as classify writes it.
+            "source_sample_range": [5, 6],
             "interpolation_fraction": 1.0,
             "extrapolation_distance_m": 0.0,
             "uncertainty": {"status": "uncalibrated"},

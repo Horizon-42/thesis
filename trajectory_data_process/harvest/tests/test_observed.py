@@ -154,6 +154,7 @@ def test_event_availability_counts_ambiguous_and_unassignable_candidates():
             {"outcome": "unassignable", "event_status": "unavailable"},
             {"outcome": "not_landing", "event_status": "unavailable"},
         ],
+        "provenance": {"radius_km": 30.0},
     }
 
     availability = source_event_availability(source)
@@ -198,6 +199,34 @@ def test_event_availability_counts_source_integrity_exclusions():
     assert availability["event_unavailable"] == 1
     assert availability["excluded_not_landing"] == 1
     assert availability["source_integrity_excluded_candidates"] == 1
+    assert availability["sources_without_integrity_audit"] == 0
+
+
+def test_a_merged_roster_counts_each_sources_audit_and_names_the_unaudited():
+    """After ``--merge-source`` the audits live in ``provenance.merge.sources``; the
+    denominator keeps the audited exclusions and the report says one source had none."""
+    audit = {"excluded": [
+        {"source_flight_key": "LOST", "source_outcome": "assigned"},
+        {"source_flight_key": "LOST2", "source_outcome": "unassignable"},
+        {"source_flight_key": "OVERFLIGHT", "source_outcome": "not_landing"},
+    ]}
+    source = {
+        "total": 1,
+        "records": [{"outcome": "assigned", "event_status": "estimated"}],
+        "provenance": {"merge": {"sources": [
+            {"manifest": "old", "source_integrity_audits": [audit],
+             "sources_without_integrity_audit": 0},
+            {"manifest": "new", "source_integrity_audits": [],
+             "sources_without_integrity_audit": 1},
+        ]}},
+    }
+
+    availability = source_event_availability(source)
+
+    assert availability["source_integrity_excluded_candidates"] == 2
+    assert availability["event_denominator"] == 3
+    assert availability["excluded_not_landing"] == 1
+    assert availability["sources_without_integrity_audit"] == 1
 
 
 def test_observed_record_names_the_resolved_airframe_type_and_omits_it_when_unresolved(monkeypatch):
@@ -235,3 +264,34 @@ def test_observed_record_names_the_resolved_airframe_type_and_omits_it_when_unre
     explicit = observed_record(track, runway, mass_kg=50_000.0)
     assert "aircraft_type" not in explicit["source"]
     assert explicit["source"]["mass_source"] == "explicit"
+
+
+def test_a_failed_observed_rebuild_leaves_the_previous_records_and_summary(tmp_path, monkeypatch):
+    """Records are built in a staging directory and swapped in only when all succeeded."""
+    from trajectory_data_process.harvest import observed
+    from trajectory_data_process.harvest.store import HarvestPaths
+
+    paths = HarvestPaths(tmp_path, "KAAA")
+    monkeypatch.setattr(observed, "read_manifest", lambda _paths: {})
+    monkeypatch.setattr(observed, "require_source_timed_manifest", lambda *_a, **_k: None)
+    monkeypatch.setattr(observed, "source_event_availability", lambda _source: {})
+
+    def good_batch(_airport, _paths, _source, _availability, records_dir, *, mass_kg):
+        (records_dir / "A_eval.json").write_text("{}", encoding="utf-8")
+        return {"results": [{"eval_file": "records/A_eval.json"}]}
+
+    def failing_batch(_airport, _paths, _source, _availability, records_dir, *, mass_kg):
+        (records_dir / "B_eval.json").write_text("{}", encoding="utf-8")
+        raise ValueError("stale event")
+
+    monkeypatch.setattr(observed, "_write_observed_batch", good_batch)
+    observed.write_observed_records(None, paths)
+    summary_before = (paths.approach / observed.SUMMARY_NAME).read_bytes()
+
+    monkeypatch.setattr(observed, "_write_observed_batch", failing_batch)
+    with pytest.raises(ValueError, match="stale event"):
+        observed.write_observed_records(None, paths)
+
+    assert sorted(p.name for p in (paths.approach / "records").iterdir()) == ["A_eval.json"]
+    assert (paths.approach / observed.SUMMARY_NAME).read_bytes() == summary_before
+    assert sorted(p.name for p in paths.approach.iterdir()) == ["records", observed.SUMMARY_NAME]

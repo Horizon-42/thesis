@@ -109,7 +109,10 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
     manifest = tmp_path / "manifest.json"
     indexed = {dataset_flight_key(flight, index): flight
                for index, flight in enumerate(flights)}
-    monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
+    monkeypatch.setattr(
+        runner, "checkpoint_arrival_manifests",
+        lambda payload, _root: [manifest] * len(payload["data_provenance"]["manifests"]),
+    )
     monkeypatch.setattr(
         runner, "checkpoint_data_provenance", lambda _payload, _manifests: fake_data_provenance()
     )
@@ -198,7 +201,10 @@ def test_the_fingerprint_goes_through_the_package_helper(monkeypatch, tmp_path,
     """
     _flights, checkpoint = trained_checkpoint
     manifest = tmp_path / "manifest.json"
-    monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
+    monkeypatch.setattr(
+        runner, "checkpoint_arrival_manifests",
+        lambda payload, _root: [manifest] * len(payload["data_provenance"]["manifests"]),
+    )
     seen: dict = {}
 
     def spy(payload, manifests):
@@ -737,7 +743,10 @@ def test_the_command_hook_is_passed_through_like_predict(
     grid = runner.Grid(split="val", bins_m=(10_000.0,), min_future_s=10.0,
                        batch_size=None, limit=0)
     manifest = tmp_path / "manifest.json"
-    monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
+    monkeypatch.setattr(
+        runner, "checkpoint_arrival_manifests",
+        lambda payload, _root: [manifest] * len(payload["data_provenance"]["manifests"]),
+    )
     monkeypatch.setattr(
         runner, "checkpoint_data_provenance", lambda _payload, _manifests: fake_data_provenance()
     )

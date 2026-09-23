@@ -22,14 +22,6 @@ one command rebuilds the whole file. Until then the file is maintained by
 "fix the GENERATOR, never the JSON" rule (TD8) being broken by necessity. Not urgent: the airport
 set has not changed since the widths were added.
 
-## `trajectory_data_process/harvest/cifp.py` restates `FT_M` (2026-09-20)
-
-**Verified** — `cifp.py:37` defines `FT_M = 0.3048` locally while `geokit.constants` defines the
-same constant and eight other modules in the tree import it from there. Noticed while adding
-`approach_minima.py` next to it (which imports from geokit). Harmless today — the two values
-agree — but it is the single-source-of-truth rule the repo states for exactly this kind of
-conversion, and a local copy is a copy that cannot be corrected centrally.
-
 ## Two suites fail at HEAD, outside the ts tree (2026-09-20)
 
 **Verified** — `./run_all_tests.sh` on `dev-two-tier-feasibility` at `e74d5644`, with the working
@@ -939,12 +931,99 @@ than raise, and the segment-plan readout admits its fixed set on the observed ro
 stated truth) or the anchor sets admit on the observed ones — but changing `displacement_at`'s truth moves
 every S1 number and the `lead_time_error` accounting it mirrors, so it is a decision, not a fix.
 
-## ts_transformer: four runners redefine `HARVEST_ROOT`, and `EXPERIMENTS_MAIN` lives outside `repo_layout` (2026-09-23)
+## ts_transformer: `EXPERIMENTS_MAIN` lives outside `repo_layout` (2026-09-23)
 
-**Verified** (`git grep '^HARVEST_ROOT = '`): `experiments/frame_ablation.py:63`,
-`runway_hypotheses.py:57`, `runway_intent_r0.py:45` and `runway_intent_r1.py:74` each restate
-`REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"`, which `repo_layout.HARVEST_ROOT` already
-defines; `support.EXPERIMENTS_MAIN` is a repository path defined in `experiments/support.py`. Layout rule
-L3 makes `repo_layout.py` the one definition of repository paths — the confusion of two such paths
-(`TS_SCRIPT` imported as `RUN_TS`) is what broke the archived stage B′ queue, and `RUN_TS` itself moved into
-`repo_layout` on 2026-09-23. Import them instead; no behaviour changes (same values).
+**Verified**: `support.EXPERIMENTS_MAIN` is a repository path defined in `experiments/support.py`.
+Layout rule L3 makes `repo_layout.py` the one definition of repository paths — the confusion of two
+such paths (`TS_SCRIPT` imported as `RUN_TS`) is what broke the archived stage B′ queue. Import it
+instead; no behaviour change. (The four runners that restated `HARVEST_ROOT` import it since the
+data-merge change of 2026-09-23.)
+
+## Review of trajectory_data_process + flight_scenarios against evaluation / ts (2026-09-23)
+
+Three read-only reviewers plus a cross-pipeline check, before merging the 2026-08-22..09-22
+download. FIXED in that change (not listed here): KSMF 35R's threshold and every runway's course
+now from the CIFP (TD21), the merge's dropped `source_integrity` and `--jobs` (TD24), a plain
+download clearing a merged root (TD24), `download_landings.py`'s drifted CIFP cycle, the arrival
+slice ending before its measured crossing and the 0–2 s early `entry_time_utc` (TD22), and the
+delete-then-build arrivals / observed writers (TD17). What is left, one item each:
+
+1. **Two duplicate-row policies in one store** — *verified in code, size unmeasured*.
+   `history_store.py:99-110` (direct download) keeps the LAST of conflicting `(icao24, time)`
+   state rows (`INSERT OR REPLACE`); the sidecar path (`adsb_metadata.py:125-131`, the old root's
+   freshness rebuild) returns None for them. Such rows are common (`nonunique_time_icao_rows`:
+   KRDU 62,118, KSJC 318,722, KSTL 111,918), so the merged live root mixes the two rules.
+2. **Short tracks dropped uncounted on a direct download** — *verified in code*. `tracks.py:239-240`
+   drops tracks with < 10 samples after the freshness filter and crop, and the runner writes no
+   population audit (why a fresh download's manifest has no `source_integrity`), against
+   `store.py`'s "every fetched track is the denominator".
+3. **A cross-window duplicate with a different key is stored twice** — *judgement, not triggered
+   on 2026-09-23 (zero overlap)*. `merge.py:224-240` and `store.py:170-176` compare the whole
+   `flight_key`; one physical flight truncated at a window edge (other outcome, other end time)
+   or with a different first callsign gets another key. `classify.py:10` defines identity as
+   `(icao24, landing time)`; the merge could check that too.
+4. **Rows without geoaltitude are dropped before the ground-run split** — *judgement, low impact*.
+   `tracks.py:225-228`, 337: a turnaround or touch-and-go under 900 s can glue the arrival to the
+   departure, and `source_timed_final_block` keeps only the departure block.
+5. **CZML censored tail** — *verified, viewer only*. `czml.py:275-286` starts the extrapolated tail
+   at `source_sample_range[1]` while `extrapolation_distance_m` is measured from
+   `diagnostics.closest_support_sample_index`: the drawn crossing precedes the last supporting
+   sample in 1,871/7,827 censored KRDU flights (new download). Line 280 has a silent
+   `speed_ms = 70.0` fallback, and the tail's timing differs from `crossing_span`'s trapezoid.
+6. **`runway_targets` lists only runways with an included arrival** — *verified*. `arrivals.py`
+   `setdefault` per included flight; `ts data/runway_context.py:274-301` and
+   `experiments/runway_intent_r0.py:180` / `r1.py:275` treat it as the airport's runway set, so
+   the entry-sector centroid and the candidate set move with the data window (KSTL 06, KMSY 20
+   absent from the new download; KRDU 32 / KSMF 35R added: 349 m / 539 m centroid shifts).
+7. **`GROUND_START_AGL_M`'s "empty band" no longer holds** — *verified*. KRDU 32 brings helicopter
+   traffic (ZEUS*): 7 `takeoff_in_segment` exclusions starting 32–70 m up 18–20 km out, and one
+   rostered arrival, `ZEUS11_32_aeaaaf_20260910T191932Z`, at 116.0 m (TD15). Re-measure on v7.
+8. **The vertical-datum docs describe code that no longer runs** — *verified*. `flight_scenarios/
+   CLAUDE.md` and `datum.py:1-35` say EGM96 via pyproj; `flight_to_msl` subtracts the runway's CIFP
+   `hae_minus_msl_m` (KRDU 05L −32.0 m vs EGM96 −33.53 m). `_geoid_transformer`,
+   `geoid_undulation_m`, `waypoints_to_msl` (`datum.py:57-116`) and `vertical_datum.msl_to_hae` have
+   no callers but are exported — a new consumer following the docs is 1.5 m off.
+   `observed.py:114-117` hand-rolls the same subtraction instead of calling `flight_to_msl`.
+9. **ts `openap-direct` flies a different A320 than the optimizer** — *verified*.
+   `ts data/dataset.py:574-584` passes `aircraft_provider="openap"`; flight_scenarios / the
+   optimizer use `"auto"` (presets win, `build.py:44`). FFT2440: ts 66,000 kg / 124 m², optimizer
+   66,300 kg / 122.6 m². Any ts-vs-optimizer thrust or flyability comparison mixes two models.
+   (`FlightScenario.from_dict`, `scenario.py:314-322`, would also reload an openap-built scenario
+   with "auto" — latent, no writer does.)
+10. **Three velocity estimates for one first sample** — *verified*. `scenario.initial` fits a
+    forward 15 s window (`start_state.py:70`), ts rows and optimizer reference records a centred
+    window clipped at the start (`:121-131`), the observed record the whole track incl. pre-ring
+    samples. RPA4668: V 87.30 vs 82.80 m/s, ψ 7.1° apart; `evaluation/reference.py` claims they agree.
+11. **`flight_time_s` has a different origin per subject** — *verified*. Observed records start at
+    first reception (FFT2440's arrival starts at t = 33.9 s), optimizer records at ring entry, ts
+    records at the anchor (and keep the ring-entry `entry_time_utc`, `export.py:148`); the batch
+    "flight times" are not comparable across subjects.
+12. **ts and optimizer populations differ and nothing joins them** — *verified*. ts keeps the
+    flights flight_scenarios drops as `UnusableFittedApproach` (9 of 9 tested built; 3 end 35–55 m
+    short with no crossing row), and applies the lateral roster and `openap-direct`; the optimizer
+    applies neither, only the per-runway cap. Per-airport rates are over different flights.
+13. **Fallbacks that can never bind on manifest input** — *verified*. `build.py:88-115` silently
+    falls back to `target_source="track_end"` when `threshold_target_state` is None (non-manifest
+    path), so `ts dataset.py:585-588` can never fire; the TCH/glidepath skips at `dataset.py:522-529`
+    are dead because `arrivals._validate_runway_target` requires those fields.
+14. **ts observed-crossing scan has no on-final check without a fit** — *judgement*. `dataset.py:680`:
+    with `fitted is None` the scan starts at row 1 with the plane test alone (contra C3). No
+    spurious cut seen on 9 tested flights.
+15. **Small nits** — *verified*: `fitted_approach.py:62-63` defaults `hae_minus_msl_m=0.0` (a
+    forgotten offset is 32 m low; make it required); `procedure_final.py:260` `elevationFt or 0.0`;
+    `scenario_optimization.py:932-958` looks references up by `(id, icao24, landing_time)`, not
+    `flight_key`; observed `source.id` is the raw callsign (10 fleet tracks differ, e.g. `'0  YP'`);
+    `train.usable_series` exclusions are printed only; `channels.py`'s docstring calls `u` height
+    above the THRESHOLD (it is threshold + TCH); `arrivals.py` restates
+    `"opensky_history_geoaltitude_m"`; `airports.py:354` `entry.get("elevation_m", 0.0)`;
+    `altitude_outliers --rerender-czml` renders with `DEFAULT_POLICY` whatever the audit's policy;
+    `runner.py:267-271` omits `max_crossing_height_m` from the landing-screen provenance.
+16. **Two replay paths still read the live root by path** — *verified in code, low impact*.
+    `ts experiments/control_basis_oracle.build_cohort_series` (the width study) rebuilds a
+    reference prediction's cohort from the live manifest and records the digest without comparing
+    it; after the 2026-09-23 merge a v5-era reference is rebuilt from v7 slices. Resolve it by the
+    reference checkpoint's digest (`repo_layout.checkpoint_arrival_manifest`) if the study is rerun.
+17. **Staging leftovers are never cleaned** — *verified*. A SIGKILL mid-write leaves
+    `approach/.records-staging-*` / `.records-previous-*`, or a harvest root's
+    `.<ICAO>-reclassify-*` / `-merge-*` (the v5 root holds a 170 MB `.KSJC-reclassify-akrwpor_`
+    from 2026-08-24). Harmless to readers (they follow rosters); disk only.

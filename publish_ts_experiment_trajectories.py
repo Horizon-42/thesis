@@ -67,6 +67,11 @@ _TS_DIR = REPO_ROOT / "4dTrajectory" / "ts_transformer"
 if str(_TS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_TS_DIR.parent))
 
+from ts_transformer.repo_layout import (  # noqa: E402
+    HARVEST_ROOT,
+    arrival_manifest_path,
+    arrival_manifest_with_digest,
+)
 from ts_transformer.run_naming import (  # noqa: E402
     SPLIT_DAYVAL,
     category_display_label,
@@ -79,7 +84,6 @@ EXPERIMENT_INDEX = EXPERIMENT_ROOT / "index.json"
 RAW_OUTPUT_ROOT = (
     REPO_ROOT / "4dTrajectory" / "outputs" / "POOLED" / "experiment_predictions"
 )
-HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 FRONTEND_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
 TS_SCRIPT = REPO_ROOT / "4dTrajectory" / "ts_transformer" / "__main__.py"
 CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
@@ -651,9 +655,17 @@ class PublicationPlan:
         """
         return self.variant if self.anytime is None else self.anytime.variant
 
-    @property
+    @cached_property
     def data_manifest(self) -> Path:
-        return self.harvest_root / self.airport / "arrivals" / "manifest.json"
+        """The arrival manifest this checkpoint trained on, found by the digest it recorded:
+        the live root's, or a frozen generation's (ts contract C29); the live path when
+        neither matches, which ``preflight_error`` then reports as a digest mismatch."""
+        expected = self.experiment.arrival_manifests.get(self.airport)
+        match = (
+            None if expected is None
+            else arrival_manifest_with_digest(self.airport, expected, self.harvest_root)
+        )
+        return match or arrival_manifest_path(self.airport, self.harvest_root)
 
     @property
     def eligibility_roster(self) -> Path:

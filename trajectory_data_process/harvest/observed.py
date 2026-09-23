@@ -10,9 +10,9 @@ three things, none of which belongs upstream of it:
      least-squares fit, imported rather than re-derived. That fit projects through the
      true tangent scales; a hand-rolled flat-chart version overstates the north component
      by 0.33%, which is a bug this project has already paid for once.
-  3. **Target.** The published per-runway TCH from the CIFP, never a flat assumption. A
-     runway with no LPV procedure has no TCH and is SKIPPED, loudly -- it cannot be
-     judged against LPV gates at all.
+  3. **Target.** The published per-runway TCH from the CIFP, never a flat assumption:
+     the LPV Path Point's, or the LNAV/VNAV runway leg's. A runway with neither (KRDU 14)
+     has no TCH and is SKIPPED, loudly -- it has no published path to judge against.
 
 Output lands in ``approach/``, apart from ``tracks/``, because this is an evaluation
 view: it converts datum, derives kinematics, supplies the benchmark target, and carries
@@ -27,9 +27,11 @@ reports how many altitudes that filter replaced.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterator
+from uuid import uuid4
 
 from flight_scenarios.build import resolve_airframe
 from flight_scenarios.crossing_span import CROSSING_SPAN_KEY, crossing_span_from_event
@@ -46,6 +48,7 @@ from trajectory_data_process.harvest.altitude_filter import (
 )
 from trajectory_data_process.harvest.store import (
     HarvestPaths,
+    integrity_audits,
     read_manifest,
     read_track_view,
     require_source_timed_manifest,
@@ -194,16 +197,49 @@ def write_observed_records(
 ) -> dict[str, Any]:
     """Build observed records for every assigned track; return the summary roster.
 
-    Tracks on runways with no published LPV TCH are skipped and LISTED -- a bounded
+    Tracks on runways with no published vertical path are skipped and LISTED -- a bounded
     coverage that is stated in the output rather than silently shrinking the batch.
+
+    Records are written into a staging directory and swapped in only once every one of
+    them was built, so a failure leaves the previous ``records/`` + ``summary.json`` pair
+    intact rather than a summary pointing at deleted records.
     """
     source = read_manifest(paths)
     require_source_timed_manifest(source, path=paths.manifest)
     availability = source_event_availability(source)
     records_dir = paths.approach / RECORDS_DIR
-    _clear(records_dir)
-    records_dir.mkdir(parents=True, exist_ok=True)
+    staging = paths.approach / f".{RECORDS_DIR}-staging-{uuid4().hex}"
+    staging.mkdir(parents=True)
+    try:
+        summary = _write_observed_batch(
+            airport, paths, source, availability, staging, mass_kg=mass_kg
+        )
+    except BaseException:
+        shutil.rmtree(staging)
+        raise
+    summary_path = paths.approach / SUMMARY_NAME
+    staged_summary = summary_path.with_suffix(summary_path.suffix + ".tmp")
+    staged_summary.write_text(json.dumps(summary, indent=1, allow_nan=False), encoding="utf-8")
+    previous = paths.approach / f".{RECORDS_DIR}-previous-{uuid4().hex}"
+    if records_dir.exists():
+        records_dir.replace(previous)
+    staging.replace(records_dir)
+    staged_summary.replace(summary_path)
+    if previous.exists():
+        shutil.rmtree(previous)
+    return summary
 
+
+def _write_observed_batch(
+    airport: Airport,
+    paths: HarvestPaths,
+    source: dict[str, Any],
+    availability: dict[str, Any],
+    records_dir: Path,
+    *,
+    mass_kg: float | None,
+) -> dict[str, Any]:
+    """Write every observed record into ``records_dir``; return the summary roster."""
     roster: list[dict[str, Any]] = []
     skipped: list[SkippedTrack] = []
 
@@ -262,9 +298,6 @@ def write_observed_records(
         "skipped": [{"flight_key": s.flight_key, "reason": s.reason} for s in skipped],
         "results": roster,
     }
-    (paths.approach / SUMMARY_NAME).write_text(
-        json.dumps(summary, indent=1, allow_nan=False), encoding="utf-8"
-    )
     return summary
 
 
@@ -273,7 +306,10 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
 
     ``not_landing`` tracks are outside the population: classification determined that
     they are not arrivals at this airport. Assigned, ambiguous, and unassignable tracks
-    are candidate arrivals and therefore all belong in the denominator.
+    are candidate arrivals and therefore all belong in the denominator, and so do the
+    candidates a freshness rebuild excluded (``store.integrity_audits``). A roster built
+    from harvests that did not all carry an exclusion audit says how many did not
+    (``sources_without_integrity_audit``): its denominator covers the audited ones only.
     """
     records = source.get("records")
     if not isinstance(records, list) or source.get("total") != len(records):
@@ -298,8 +334,8 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
         candidates.append(status)
     estimated = sum(status == "estimated" for status in candidates)
     integrity_excluded_candidates = 0
-    integrity = source.get("source_integrity")
-    if integrity is not None:
+    audits, unaudited = integrity_audits(source)
+    for integrity in audits:
         if not isinstance(integrity, dict) or not isinstance(
             integrity.get("excluded"), list
         ):
@@ -328,7 +364,9 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
         "event_estimated_rate": estimated / denominator if denominator else 0.0,
         "excluded_not_landing": excluded_not_landing,
         "source_integrity_excluded_candidates": integrity_excluded_candidates,
+        "sources_without_integrity_audit": unaudited,
     }
+
 
 
 def iter_observed_records(paths: HarvestPaths) -> Iterator[Any]:
@@ -349,9 +387,3 @@ def iter_observed_records(paths: HarvestPaths) -> Iterator[Any]:
 def load_observed_records(paths: HarvestPaths) -> list[Any]:
     """Materialize the observed batch; prefer :func:`iter_observed_records` for evaluation."""
     return list(iter_observed_records(paths))
-
-
-def _clear(directory: Path) -> None:
-    if directory.exists():
-        for path in directory.glob("*.json"):
-            path.unlink()

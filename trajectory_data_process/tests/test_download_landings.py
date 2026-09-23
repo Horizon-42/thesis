@@ -13,6 +13,7 @@ from trajectory_data_process.harvest.__main__ import (
     _completed_download_manifest,
     _resolve_download_options,
 )
+from trajectory_data_process.harvest.runner import CHECKPOINT_VERSION
 from trajectory_data_process.harvest.store import HarvestPaths
 
 
@@ -91,7 +92,7 @@ def test_download_reuses_interrupted_checkpoint_start_for_cache_keys(tmp_path: P
     paths.checkpoint_state.write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": CHECKPOINT_VERSION,
                 "start_utc": "2026-07-22T11:50:11.064893+00:00",
             }
         ),

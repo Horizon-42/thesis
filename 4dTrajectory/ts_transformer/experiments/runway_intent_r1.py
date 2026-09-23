@@ -71,7 +71,7 @@ from ts_transformer.data.runway_features import (  # noqa: E402
 )
 from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
 
-HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
+from ts_transformer.repo_layout import HARVEST_ROOT  # noqa: E402
 METAR_ROOT = REPO_ROOT / "data" / "metar"
 # v2: operating days, ring anchors, per-partition majority; v3: the per-operating-day blocks
 SCHEMA = "ts-runway-intent-r1-v3"

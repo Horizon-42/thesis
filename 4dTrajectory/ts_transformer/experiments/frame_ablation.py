@@ -60,7 +60,7 @@ import sys
 from pathlib import Path
 
 from ts_transformer.experiments.support import REPO_ROOT, TS_SCRIPT, arm_config, declaration_base
-HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
+from ts_transformer.repo_layout import HARVEST_ROOT
 
 
 from ts_transformer.config import absent_field_defaults  # noqa: E402

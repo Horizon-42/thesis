@@ -249,6 +249,31 @@ def require_source_timed_manifest(
         )
 
 
+def integrity_audits(manifest: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """Every exclusion audit behind a tracks roster, flattened through merges, and how many
+    of the harvests it was built from carried none.
+
+    A freshness rebuild carries its own manifest-level ``source_integrity``; a direct
+    download carries none (the runner does not count what it drops,
+    `docs/code-health-followups.md`) and counts as one unaudited harvest. A merged roster
+    has no single denominator: the merge records, per source, that source's flattened
+    audits and unaudited count (``provenance.merge.sources[i]``), so a second merge keeps
+    the first one's audits.
+    """
+    own = manifest.get("source_integrity")
+    if own is not None:
+        return [own], 0
+    merge = manifest["provenance"].get("merge")
+    if merge is None:
+        return [], 1
+    audits: list[dict[str, Any]] = []
+    unaudited = 0
+    for entry in merge["sources"]:
+        audits.extend(entry["source_integrity_audits"])
+        unaudited += entry["sources_without_integrity_audit"]
+    return audits, unaudited
+
+
 def read_track_view(paths: HarvestPaths, relative: str) -> dict[str, Any]:
     """One stored track as a DERIVED VIEW, which is the only way to render or model it.
 

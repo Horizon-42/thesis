@@ -70,7 +70,12 @@ def _airport() -> Airport:
     )
 
 
-def _threshold_event(runway: Runway, *, status: str = "estimated") -> dict:
+def _threshold_event(
+    runway: Runway,
+    *,
+    status: str = "estimated",
+    source_sample_range: tuple[int, int] = (0, 1),
+) -> dict:
     common = {
         "schema_version": "runway-threshold-event-v1",
         "runway": runway.ident,
@@ -97,7 +102,7 @@ def _threshold_event(runway: Runway, *, status: str = "estimated") -> dict:
         "threshold_crossing_altitude_m": runway.elevation_hae_m + 15.0,
         "altitude_datum": "hae",
         "signed_cross_track_m": 0.0,
-        "source_sample_range": [0, 1],
+        "source_sample_range": list(source_sample_range),
         "interpolation_fraction": 1.0,
         "extrapolation_distance_m": 0.0,
         "uncertainty": {"status": "uncalibrated"},
@@ -112,8 +117,13 @@ def _source_track(
     runway: str,
     samples: list[list[float]],
     landing_sample_index: int,
+    bracket: tuple[int, int] | None = None,
 ) -> dict:
+    """``bracket``: the measured crossing's two samples; default ends ON the landing
+    sample (the slice then ends there, as it always did)."""
     landing_time = f"1970-01-01T00:00:{landing_sample_index:02d}Z"
+    if bracket is None:
+        bracket = (landing_sample_index - 1, landing_sample_index)
     key = flight_key(
         {
             "id": callsign,
@@ -137,7 +147,9 @@ def _source_track(
         "altitude_source": ALTITUDE_SOURCE,
         "altitude_datum": ALTITUDE_DATUM,
         "assignment": {"outcome": "assigned", "runway": runway},
-        "observed_threshold_event": _threshold_event(_runway(runway)),
+        "observed_threshold_event": _threshold_event(
+            _runway(runway), source_sample_range=bracket
+        ),
         "samples": samples,
     }
     relative = f"assigned/{runway}/{key}.json"
@@ -392,3 +404,93 @@ def test_loader_rejects_a_legacy_flight_array_instead_of_treating_it_as_a_manife
 
     with pytest.raises(ValueError, match="arrival manifest"):
         load_arrival_flights(legacy)
+
+
+def _write_single_arrival(tmp_path, **track):
+    paths = HarvestPaths(tmp_path, "KAAA")
+    row = _source_track(
+        paths, callsign="ARR1", icao24="aaa001", runway="18", samples=_approach_samples(),
+        **{"landing_sample_index": 6, **track},
+    )
+    _write_source_manifest(paths, [row])
+    return paths, row
+
+
+def test_a_measured_crossing_is_inside_the_slice_when_the_landing_sample_is_its_left_end(
+    tmp_path,
+):
+    """v7: ``landing_sample_index`` (the bracket sample nearer the threshold, and so the
+    landing time and the identity) stays; the SLICE runs on to the bracket's post-crossing
+    sample, so the measured crossing is inside its own arrival."""
+    paths, row = _write_single_arrival(tmp_path, landing_sample_index=5, bracket=(5, 6))
+
+    manifest = write_arrival_records(_airport(), paths)
+
+    [record] = manifest["records"]
+    assert record["flight_key"] == row["flight_key"]
+    assert record["landing_time_utc"] == "1970-01-01T00:00:05Z"
+    assert record["last_sample_index"] == 6
+    [flight] = load_arrival_flights(paths.airport)
+    assert flight["waypoints"][-1][1] == pytest.approx(0.0)      # sample 6, the crossing side
+
+
+def test_a_landing_sample_outside_its_measured_bracket_is_refused(tmp_path):
+    paths, _row = _write_single_arrival(tmp_path, landing_sample_index=6, bracket=(2, 3))
+    with pytest.raises(ValueError, match="not a sample of its measured crossing bracket"):
+        write_arrival_records(_airport(), paths)
+
+
+def test_entry_time_is_the_first_kept_samples_own_time(tmp_path):
+    paths, _row = _write_single_arrival(tmp_path)
+    manifest = write_arrival_records(_airport(), paths)
+    [record] = manifest["records"]
+    assert record["first_sample_index"] == 3
+    assert record["entry_time_utc"] == "1970-01-01T00:00:03.000Z"   # start + samples[3][0]
+
+
+def test_a_failed_rebuild_leaves_the_previous_arrivals_and_roster_intact(tmp_path):
+    paths, _row = _write_single_arrival(tmp_path)
+    write_arrival_records(_airport(), paths)
+    arrivals = paths.airport / "arrivals"
+    (arrivals / "lateral_pass_eligibility.json").write_text("{}", encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in arrivals.iterdir()}
+
+    record_path = paths.tracks / json.loads(paths.manifest.read_text())["records"][0]["file"]
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["observed_threshold_event"]["source_sample_range"] = [1, 2]
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="measured crossing bracket"):
+        write_arrival_records(_airport(), paths)
+
+    assert {path.name: path.read_bytes() for path in arrivals.iterdir()} == before
+
+
+def test_the_loader_reads_only_the_current_schema_or_a_frozen_generations_bytes(
+    tmp_path, monkeypatch
+):
+    """Another schema is refused by name -- unless the manifest's bytes are one a
+    registered frozen generation recorded, which is read as written (a stored checkpoint
+    replays against exactly those bytes)."""
+    from trajectory_data_process.harvest import generations
+
+    paths, _row = _write_single_arrival(tmp_path / "live")
+    write_arrival_records(_airport(), paths)
+    manifest_path = paths.airport / "arrivals" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = "harvest-arrivals-v5-takeoff-excluded"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(generations, "OUTPUTS_ROOT", tmp_path)
+    monkeypatch.setattr(generations, "FROZEN_GENERATIONS", ("frozen",))
+
+    with pytest.raises(ValueError, match="no frozen generation's roster"):
+        load_arrival_flights(manifest_path)
+
+    (tmp_path / "live").rename(tmp_path / "frozen")
+    generations.freeze_generation(tmp_path / "frozen", reason="test")
+    frozen_manifest = tmp_path / "frozen" / "KAAA" / "arrivals" / "manifest.json"
+    [flight] = load_arrival_flights(frozen_manifest)
+    assert flight["id"] == "ARR1"
+
+    frozen_manifest.write_text(frozen_manifest.read_text() + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no frozen generation's roster"):
+        load_arrival_flights(frozen_manifest)        # one byte moved: not the frozen roster

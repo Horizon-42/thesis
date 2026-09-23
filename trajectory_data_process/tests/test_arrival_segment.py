@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from trajectory_data_process.arrival_segment import (
     ENTRY_RADIUS_KM,
@@ -102,8 +103,10 @@ class TruncateFlightsTests(unittest.TestCase):
         arrival_track = _inbound(0.0, 29.0, 0.0, 30)
         local_track = _inbound(0.0, 0.5, 12.0, 10) + _inbound(100.0, 12.0, 0.0, 10)
         flights = [
-            {"id": "AAL1", "landing_time_utc": "2026-06-18T10:10:00Z", "waypoints": arrival_track},
-            {"id": "N123", "landing_time_utc": "2026-06-18T11:00:00Z", "waypoints": local_track},
+            {"id": "AAL1", "start_time_utc": "2026-06-18T10:00:00.250Z",
+             "waypoints": arrival_track},
+            {"id": "N123", "start_time_utc": "2026-06-18T10:50:00.000Z",
+             "waypoints": local_track},
         ]
         arrivals, locals_, takeoffs = truncate_flights(
             flights, AIRPORT_LAT, AIRPORT_LON, field_elevation_m=FIELD_ELEVATION_M
@@ -116,11 +119,15 @@ class TruncateFlightsTests(unittest.TestCase):
         self.assertTrue(kept["arrival_truncated"])
         self.assertEqual(kept["cut_samples"], len(arrival_track) - len(kept["waypoints"]))
         self.assertEqual(kept["arrival_duration_s"], kept["waypoints"][-1][0])
-        # entry time = landing time − segment duration
-        expected_entry_offset = 600 - kept["arrival_duration_s"]  # 10:10 landing
+        # entry time = the track start + the first KEPT sample's own offset, to the ms
+        entry_offset = arrival_track[kept["cut_samples"]][0]
+        self.assertGreater(entry_offset, 0.0)
+        expected = datetime(2026, 6, 18, 10, 0, 0, 250000, tzinfo=timezone.utc) + timedelta(
+            seconds=entry_offset
+        )
         self.assertEqual(
             kept["entry_time_utc"],
-            f"2026-06-18T10:{int(expected_entry_offset // 60):02d}:{int(expected_entry_offset % 60):02d}Z",
+            expected.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         )
         # the raw input flight dict is not mutated
         self.assertNotIn("arrival_truncated", flights[0])
@@ -201,9 +208,9 @@ class SatelliteFieldTakeoffTests(unittest.TestCase):
     def test_truncate_flights_routes_takeoffs_to_their_own_bucket(self) -> None:
         takeoff_track = _climb_out(0.0, 9.0, 20.0, 20, 1500.0) + _inbound(300.0, 20.0, 0.0, 25)
         flights = [
-            {"id": "AAL1", "landing_time_utc": "2026-06-18T10:10:00Z",
+            {"id": "AAL1", "start_time_utc": "2026-06-18T10:00:00Z",
              "waypoints": _inbound(0.0, 29.0, 0.0, 30)},
-            {"id": "N456", "landing_time_utc": "2026-06-18T11:00:00Z",
+            {"id": "N456", "start_time_utc": "2026-06-18T10:50:00Z",
              "waypoints": takeoff_track},
         ]
         arrivals, locals_, takeoffs = truncate_flights(

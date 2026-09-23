@@ -177,6 +177,10 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
     indexed = {dataset_flight_key(flight, index): flight
                for index, flight in enumerate(flights)}
     monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
+    monkeypatch.setattr(
+        runner, "checkpoint_arrival_manifests",
+        lambda payload, _root: [manifest] * len(payload["data_provenance"]["manifests"]),
+    )
     # the width study fingerprints the manifest alone; the teacher fit fingerprints the
     # checkpoint's own data (roster included) — both seams point at the synthetic plane
     monkeypatch.setattr(runner, "arrival_data_provenance", lambda _paths, eligibility_rosters=None: fake_data_provenance())

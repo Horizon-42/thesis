@@ -42,7 +42,7 @@ from ts_transformer.data.runway_features import ENTRY, anchors, track_course_at 
 from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
 from ts_transformer.training.train import load_checkpoint  # noqa: E402
 
-HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
+from ts_transformer.repo_layout import checkpoint_arrival_manifest  # noqa: E402
 METAR_ROOT = REPO_ROOT / "data" / "metar"
 SCHEMA = "ts-runway-intent-r0-v1"
 #: The landing direction in a bin is the group with the most landings; bins with fewer
@@ -170,9 +170,10 @@ def main(argv: list[str] | None = None) -> int:
 
     airport = args.airport.upper()
     bins_km = [float(value) for value in args.bins_km.split(",")]
-    manifest_path = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
-    tracks_path = HARVEST_ROOT / airport / "tracks" / "manifest.json"
     _model, config, _normalizer, payload = load_checkpoint(args.checkpoint)
+    # The checkpoint's own validation split, so its own harvest generation (C29), by digest.
+    manifest_path = checkpoint_arrival_manifest(payload, airport)
+    tracks_path = manifest_path.parent.parent / "tracks" / "manifest.json"
 
     def split_of(key: str) -> str:
         return split_name_for_dataset_id(f"{airport}:{key}", config)

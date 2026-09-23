@@ -16,6 +16,7 @@ fact gets a new ID there and one line here.
 | an observed-record contract change (a new `source` field, a resolver fix, records without `crossing_span`) | `--observed-only` | `approach/` only (records, `summary.json`, report, publication); `arrivals/` and `lateral_pass_eligibility.json` untouched, no CZML (TD3) |
 | an arrival-schema bump or evaluation-policy change | `--evaluate-only` | re-rosters `arrivals/` from stored `tracks/` and **DELETES `lateral_pass_eligibility.json`**, which nothing rebuilds for you — run `lateral_eligibility.ensure_lateral_pass_roster(<arrivals>/manifest.json)` right after (TD16, TD17) |
 | a changed runway-data cycle or assignment method | `--reclassify-existing` | re-derives runway assignment — NOT the rebuild command (TD18) |
+| a new download to add to the live root | `--merge-source <root> --jobs N [--no-czml --no-publish]` | reclassifies EVERY track, then deletes + rebuilds `arrivals/` and `approach/` in the same run; freeze the old root first if checkpoints must stay replayable (TD23, TD24) |
 
 Never under a running ts campaign: a rebuilt roster changes every ts dataset split (2026-08-21: a
 rebuild under a running campaign cost an arm). A harvest killed with SIGTERM can still
@@ -58,6 +59,11 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
   plate's height is above TOUCHDOWN, so use `Runway.decision_height_above_threshold_m`. Nothing
   parses a PDF at harvest or training time, and `build_runway_config.py` now REFUSES to overwrite
   the config it can no longer produce (TD20).
+- **Every threshold and course comes from the CIFP**: the Path Point LTP on an LPV runway, the
+  Runway record's LTP otherwise (the OurAirports end was 39.4 m off at KSMF 35R — its whole
+  runway read as lateral fails); the course is the centreline through both ends' Runway records
+  (OurAirports' whole degrees were up to 0.45° off). The configured heading is only a ±1°
+  cross-check (TD21).
 
 ## Altitude outlier repair
 
@@ -77,6 +83,17 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
 - Arrival truncation (`arrival_segment.py`): `ENTRY_RADIUS_KM = 25`, `ENTRY_HYSTERESIS_SAMPLES = 3`,
   `LOCAL_START_RADIUS_KM = 5`, `GROUND_START_AGL_M = 100` (in an empty band of the fleet);
   `field_elevation_m` is REQUIRED — the waypoints are HAE (TD15).
-- Arrival manifest schema: the writer is `harvest-arrivals-v6-published-vertical-path`, loaders
-  accept v5 and v6 (`READABLE_SCHEMA_VERSIONS`), v4 fails loudly; the five manifests on disk are
-  still v5 (read 2026-09-16) (TD16).
+- Arrival manifest schema: `harvest-arrivals-v7-measured-crossing-in-slice` — a measured
+  crossing is inside its slice (the slice ends on the bracket's post-crossing sample; the landing
+  sample and `flight_key` do not move) and `entry_time_utc` is the first kept sample's own time
+  (ms). The loader reads ONLY this version, or a frozen generation's bytes (TD16, TD22, TD23).
+
+## Generations & merging
+
+- **A checkpoint replays only against the bytes it trained on**: an old live root is MOVED aside
+  and frozen (`harvest.generations freeze`, `FROZEN.json`, registered in `FROZEN_GENERATIONS`),
+  and ts replays find a checkpoint's manifests by digest (`repo_layout.checkpoint_arrival_manifests`)
+  (TD23).
+- A merge keeps every source's exclusion audits, flattened, in `provenance.merge.sources`
+  (`store.integrity_audits` reads them), and a plain download REFUSES a merged/rebuilt root (it
+  used to clear `tracks/` in place) (TD24).

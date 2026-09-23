@@ -152,6 +152,45 @@ gets a new ID here and ONE new line in the index.**
 
 **Note (2026-09-16):** "a 9.15 m window" is the vertical gate this text was written against; it has been ±22 m (`evaluation.thresholds.RNAV_TERMINAL_VERTICAL_BOUND_M`) since c9ca54b (2026-08-15). The TCH bias measurement itself stands.
 
+**Correction (2026-09-23):** the non-LPV runways' threshold POSITION no longer comes from the
+configured OurAirports end, and every runway's course no longer from the configured heading —
+both come from the CIFP Runway records now (TD21). `threshold_frame_snapshot` changed (schema
+`threshold-physical-frame-v2`), so every stored event is stale and is re-derived by the
+reclassification a `--merge-source` runs.
+
+### TD21 · every threshold and course comes from the CIFP (Runway records)
+
+- **Threshold position.** An LPV runway's threshold is its Path Point LTP (unchanged); every
+  other runway's is its **CIFP Runway record** (section P / subsection G) LTP —
+  `cifp.read_runway_records`, ARINC 424-23 §4.1.10.1 (latitude cols 33–41, longitude 42–51,
+  landing threshold elevation 67–71 in whole feet). §5.36/5.37 Note 5: "The Runway latitude and
+  longitude shall represent the runway's Landing Threshold"; §5.57 repeats it. The configured
+  OurAirports end put **KSMF 35R 39.4 m cross-track** off the published LTP; after v6 admitted
+  35R (TD9) every one of its arrivals read as a ~41 m lateral miss (383/383 of the 2026-08-22..09-22
+  download, 259/259 in the v5 root's observed report), so the lateral roster dropped the whole
+  runway from ts and the optimizer targeted a point 40 m off. KRDU 32 was 0.4 m off, KRDU 14 3.9 m.
+  `position_source == "faa_cifp_runway_record"`; the non-LPV MSL elevation is the record's
+  landing threshold elevation (equal to the configured value on all three non-LPV runways),
+  N still from the nearest Path Point. The record also publishes the LTP's ellipsoidal height
+  (cols 61–66, 0.1 m), but N = HAE − MSL taken from it inherits the MSL elevation's whole-foot
+  rounding (±0.15 m), while the nearest Path Point's N is exact at a point 1–2 km away where the
+  geoid differs by centimetres — so N stays the Path Point's (KRDU 32: 0.14 m apart).
+- **Course.** `Runway.course_deg` is the initial bearing from the runway end's Runway-record LTP
+  to the opposite end's (`course_source == "faa_cifp_runway_records"`). Both are on the
+  centreline, displaced or not, so this is the true centreline to ~0.01° over a 2–3 km runway.
+  OurAirports publishes whole degrees: up to **0.45° off** this fleet (KMSY 11 105.55 not 106,
+  KSMF 35R 0.75 not 1, KSTL 30R 302.32 not 302) — ~40 m of cross-track 5 km out, ~80 m at 10 km.
+  The threshold crossing itself was never biased (the final-segment fit has a slope term); what
+  moved is everything measured ALONG the final in the runway frame (path-shape deviation, the
+  established cone, cross-track readouts, the headwind component). The configured heading stays
+  as a cross-check: a CIFP centreline more than 1° from it raises (the two files would describe
+  different runway ends).
+- **The decode is pinned** like the other two CIFP readers: on every runway with both a Runway
+  record and a Path Point, position within 1 m and elevation within 1 ft, on ≥ 75 % of them.
+  File-wide over CIFP 2608's 4,670 LPV runway ends: position p50 0.12 m / p95 0.48 m, elevation
+  p50 0.08 m / p95 0.19 m, 95.8 % meet both (the rest are mostly fictitious-threshold Path Points).
+  A column misread by one digit misses by kilometres and fails the pin, not a parse.
+
 ## Altitude outlier repair
 
 ### TD10 · outliers are repaired in the view, read-time
@@ -224,6 +263,13 @@ gets a new ID here and ONE new line in the index.**
 
 **Correction (2026-09-16):** the WRITER is now `harvest-arrivals-v6-published-vertical-path` (`harvest/arrivals.py` `SCHEMA_VERSION`) and loaders accept v5 AND v6 (`READABLE_SCHEMA_VERSIONS`), so "loaders compare exactly" now means against that pair; a v4 manifest still fails loudly. All five manifests on disk were still v5 when read on 2026-09-16. A rebuild writes v6 and grows the rosters (TD9).
 
+**Correction (2026-09-23):** the writer is **`harvest-arrivals-v7-measured-crossing-in-slice`**
+(TD22) and `READABLE_SCHEMA_VERSIONS` is gone: the loader reads the CURRENT schema only, or a
+manifest whose bytes a registered frozen generation recorded (TD23) — read as written, nothing
+converted. The version string says which rule WROTE a roster; the gate exists so that new
+training never picks up a roster written under an older rule, and a frozen roster is identified
+by its content instead (the identity a checkpoint pins).
+
 ### TD17 · rebuilding `arrivals/` deletes `lateral_pass_eligibility.json`
 
 - **Rebuilding `arrivals/` DELETES `lateral_pass_eligibility.json`, which nothing rebuilds
@@ -235,6 +281,13 @@ gets a new ID here and ONE new line in the index.**
   2026-08-21 that was mid-campaign, after one arm had already trained. Rebuild it right
   after the harvest, from the regenerated approach report:
   `lateral_eligibility.ensure_lateral_pass_roster(<arrivals>/manifest.json)`.
+
+**Correction (2026-09-23):** the writer now builds the whole roster first and replaces
+`arrivals/` only then (manifest written to `manifest.json.tmp` and renamed), so a rebuild that
+raises part-way leaves the previous manifest AND its lateral roster intact. A successful rebuild
+still deletes the lateral roster (it is bound to the manifest bytes it was joined against).
+`observed.write_observed_records` likewise builds `records/` in a staging directory and swaps it
+in with `summary.json` only on success.
 
 ### TD18 · `--reclassify-existing` is not the rebuild command
 
@@ -308,3 +361,76 @@ gets a new ID here and ONE new line in the index.**
   disk also carries `width_ft`, `runway_width_effective_date` and now `published_minima`. Running
   it would drop all three. Recorded in `docs/code-health-followups.md`; until it is fixed, edit
   the JSON through `extract_approach_minima.py`, never by regenerating.
+
+## Merging, slices and generations (2026-09-23)
+
+### TD22 · the arrival slice contains its measured crossing (v7); `entry_time_utc` is exact
+
+- `landing_sample_index` is whichever sample of the measured bracket is nearer the threshold
+  (`classify._landing_sample_index`); it defines `landing_time_utc` and so the `flight_key`, and
+  it does NOT move. Before v7 the arrival slice ENDED there, so about half the bracketed arrivals
+  (KSMF new download: 2,396 left / 2,228 right; KSJC v5 sample 729 / 770) stopped one sample short
+  of their own measured crossing, and `ts dataset._observed_threshold_crossing` (which needs both
+  bracket samples) supervised those on a fitted tail instead — two supervision contracts for one
+  kind of measurement, decided by which sample happened to be closer.
+- v7 (`harvest-arrivals-v7-measured-crossing-in-slice`): when the event is a direct bracket
+  (`method == direct_linear_bracket`), `last_sample_index` is the bracket's post-crossing sample
+  (`arrivals._slice_end_index`); a landing sample outside its own bracket raises. Censored events
+  keep the landing sample. For bracketed flights the slice now ends one sample (typically
+  ~70 m) PAST the threshold — the ts loader cuts the grid before the crossing, the optimizer's
+  observed reference carries the extra row.
+- `entry_time_utc` is the first kept sample's own time — the track's `start_time_utc` plus that
+  sample's offset, millisecond ISO (`…T10:03:07.123Z`). It was the whole-second landing time
+  minus the segment duration: 0–2 s early, and it would have moved with the slice end.
+  `arrival_segment.truncate_flights` therefore requires `start_time_utc` on every flight.
+
+### TD23 · frozen harvest generations; a checkpoint finds its data by digest
+
+- A ts checkpoint fingerprints the exact bytes it trained on (each airport's arrival-manifest
+  SHA-256 and each source track's). Rebuilding or merging the live root moves those bytes, so a
+  checkpoint can only replay against the GENERATION it trained on. Freezing keeps it: the root
+  is MOVED aside (never edited), and `python -m trajectory_data_process.harvest.generations
+  freeze <root> --reason …` writes `FROZEN.json` (schema `harvest-frozen-generation-v1`) with every
+  airport's arrival- and tracks-manifest SHA-256. Registered in code:
+  `generations.FROZEN_GENERATIONS` (a reviewed change, never a directory scan). A registered root
+  that is absent is skipped (a clone may not hold it); one present without its marker raises.
+- `arrivals.load_arrival_flights` reads a non-current schema only when its bytes are a frozen
+  generation's (`generations.is_frozen_arrival_manifest`). ts replay runners find a checkpoint's
+  manifests with `repo_layout.checkpoint_arrival_manifest(s)`: among the live root and the frozen
+  roots, the file whose SHA-256 equals the recorded `arrival_manifest_sha256`; none raises by
+  airport and digest. New training reads the live root (`repo_layout.HARVEST_ROOT`, now the one
+  definition; four runners had their own copy). A frozen roster passed EXPLICITLY
+  (`train --data <frozen manifest>`) is read too — deliberately: retraining an old recipe on
+  its own generation is a legitimate, fully fingerprinted choice; no default path reaches it.
+- **A frozen root is never written**: every harvest mode refuses an `--output` holding
+  `FROZEN.json`, and the root is made read-only (`chmod -R a-w`) when frozen.
+  `freeze` records only airport directories (`[A-Z]{4}`), so a killed reclassification's hidden
+  `.KSJC-reclassify-*` leftover (170 MB in the v5 root) is carried along but not recorded.
+- Hard links: a merge stages the destination's records as hard links and reclassification writes
+  NEW files, so nothing is written through a link — a frozen root that shares inodes with the
+  live one is not modified by a merge (tested: source bytes identical after a merge).
+
+### TD24 · merging a new download (`--merge-source`)
+
+- `python -m trajectory_data_process.harvest --airport <ICAO> --merge-source <root> --jobs N
+  [--no-czml --no-publish]` validates every source roster and record, hard-links them into a
+  staged tree, reclassifies EVERY track under current code and runway data, swaps `tracks/`, then
+  DELETES `arrivals/` and `approach/` and rebuilds both in the same run (and the observed CZML /
+  frontend publication unless told not to). Identical flight_keys or record paths across sources
+  refuse the whole transaction before anything changes. `--jobs` reaches reclassification
+  (it was single-process before 2026-09-23; output is identical at any value).
+- Each source's exclusion audits (`store.integrity_audits`: a freshness rebuild's
+  `source_integrity` — 2,458 excluded tracks over the five v5 roots — or an earlier merge's,
+  flattened) are carried into its `provenance.merge.sources[i]` as `source_integrity_audits`
+  with `sources_without_integrity_audit` (a direct download has none); the merged manifest has
+  no single denominator and no top-level `source_integrity`, and `observed.source_event_availability`
+  reads the flattened audits and reports the unaudited count. Before 2026-09-23 the merge
+  dropped the audit and the availability denominator silently lost those candidates.
+- **A plain download refuses a merged or rebuilt root** (`__main__._refuse_download_over_derived_tracks`,
+  provenance key `merge` / `freshness_rebuild`): `store.write_tracks` clears `tracks/` in place,
+  and such a root never reads as a completed download (no `radius_km`), so
+  `python -m trajectory_data_process.harvest --airport KRDU` used to replace months of merged
+  harvest with one 30-day window. Download into a new `--output` and merge it.
+- `download_landings.py` imports the harvest CLI's defaults; its own copy had drifted to CIFP
+  260319, and the 2026-08-22..09-22 download (`outputs/new_data_9_22`) was stamped with that cycle
+  (the merge re-derives every event under 260806).

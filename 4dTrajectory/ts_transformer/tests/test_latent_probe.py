@@ -86,7 +86,10 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
     manifest = tmp_path / "manifest.json"
     indexed = {dataset_flight_key(flight, index): flight
                for index, flight in enumerate(flights)}
-    monkeypatch.setattr(replay.pipeline, "arrival_manifest_path", lambda _airport: manifest)
+    monkeypatch.setattr(
+        replay, "checkpoint_arrival_manifests",
+        lambda payload, _root: [manifest] * len(payload["data_provenance"]["manifests"]),
+    )
     monkeypatch.setattr(
         replay, "checkpoint_data_provenance", lambda _payload, _manifests: fake_data_provenance()
     )

@@ -47,14 +47,14 @@ import json
 import math
 from collections import Counter
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from ts_transformer.experiments.support import REPO_ROOT
-HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
+from ts_transformer.repo_layout import checkpoint_arrival_manifest
 
 from ts_transformer.data.approach_difficulty import STRAIGHT_TORTUOSITY, STRATUM_ALL, STRATUM_STRAIGHT_IN, STRATUM_VECTORED  # noqa: E402
 from ts_transformer.data.approach_difficulty import approach_difficulty  # noqa: E402
@@ -71,7 +71,7 @@ from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402
 from ts_transformer.data.lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
 from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
 from ts_transformer.data.runway_context import RULES as CONTEXT_RULES  # noqa: E402
-from ts_transformer.data.runway_context import build_airport_context  # noqa: E402
+from ts_transformer.data.runway_context import build_airport_context, parse_utc  # noqa: E402
 from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
 from ts_transformer.training.train import load_checkpoint  # noqa: E402
 from flight_scenarios.identity import flight_key  # noqa: E402
@@ -97,10 +97,6 @@ def identity(source: dict[str, Any]) -> str:
 
 def _wrap_deg(degrees: float) -> float:
     return (degrees + 180.0) % 360.0 - 180.0
-
-
-def _parse_utc(value: str) -> datetime:
-    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
 def reproject(forecast: Forecast, from_series: FlightSeries, to_series: FlightSeries) -> Forecast:
@@ -184,14 +180,14 @@ def active_configuration(
 ) -> "callable":
     """Most-used runway among development landings in the window before an entry time."""
     landings = sorted(
-        (_parse_utc(row["landing_time_utc"]), row["runway"])
+        (parse_utc(row["landing_time_utc"]), row["runway"])
         for row in records
         if f"{airport}:{row['flight_key']}" in development_keys
     )
     times = [item[0] for item in landings]
 
     def lookup(entry_time_utc: str) -> tuple[str | None, int]:
-        entry = _parse_utc(entry_time_utc)
+        entry = parse_utc(entry_time_utc)
         lo = np.searchsorted(times, entry - window, side="left")
         hi = np.searchsorted(times, entry, side="left")
         recent = Counter(runway for _t, runway in landings[lo:hi])
@@ -327,9 +323,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     airport = args.airport.upper()
-    manifest_path = HARVEST_ROOT / airport / "arrivals" / "manifest.json"
-    roster_path = default_lateral_pass_roster_path(manifest_path)
     model, config, normalizer, payload = load_checkpoint(args.checkpoint)
+    # The generation this checkpoint trained on, by digest (live or frozen).
+    manifest_path = checkpoint_arrival_manifest(payload, airport)
+    roster_path = default_lateral_pass_roster_path(manifest_path)
     if config.coordinate_frame == COORDINATE_FRAME_AIRPORT_ENU:
         parser.error("runway hypotheses need a threshold-anchored checkpoint (enu / runway-aligned)")
     provenance = arrival_data_provenance(manifest_path, eligibility_rosters=[roster_path])
@@ -361,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     split_of = lambda key: split_name_for_dataset_id(f"{airport}:{key}", config)  # noqa: E731
     pool = build_airport_context(
-        manifest_path, HARVEST_ROOT / airport / "tracks" / "manifest.json",
+        manifest_path, manifest_path.parent.parent / "tracks" / "manifest.json",
         sorted((METAR_ROOT / airport).glob("asos_*.csv")),
         {runway: float(targets[runway]["course_deg"]) for runway in candidates}, split_of,
         window=timedelta(minutes=args.context_window_min),
@@ -413,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
         picks = select(rows, candidates, assigned=assigned, config_runway=config_runway)
         # The context rules, read at the FORECAST anchor's wall-clock time (series time 0 is
         # the first waypoint) with the track's course there in degrees true.
-        anchor_time = _parse_utc(flight["entry_time_utc"]) + timedelta(
+        anchor_time = parse_utc(flight["entry_time_utc"]) + timedelta(
             seconds=float(flight["waypoints"][0][0]) + float(truth.times[anchor])
         )
         context_picks = pool.rules.picks(

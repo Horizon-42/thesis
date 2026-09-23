@@ -118,6 +118,7 @@ from ts_transformer.io_utils import file_sha256  # noqa: E402
 from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
 from ts_transformer.training.train import load_checkpoint, usable_series  # noqa: E402
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
+from ts_transformer.repo_layout import checkpoint_arrival_manifests  # noqa: E402
 from ts_transformer.data.anchor_grid import bin_anchor  # noqa: F401  (read off this module by its tests / sibling runners)
 
 RESULT_SCHEMA = "ts-anytime-curve-a0-v2"
@@ -313,7 +314,7 @@ def load_arm(label: str, path: Path, grid: Grid, device: torch.device,
             config, control_command_hook=command_hook, control_hook_saturation=hook_saturation
         )
     airports = tuple(entry["airport"] for entry in payload["data_provenance"]["manifests"])
-    manifests = [pipeline.arrival_manifest_path(item) for item in airports]
+    manifests = checkpoint_arrival_manifests(payload, pipeline.HARVEST_ROOT)
     # The package helper owns the roster rule (the fingerprint reads the pre-split
     # lateral-pass roster iff the checkpoint recorded one); every replaying runner goes
     # through it, which is what the L5.a fitter was missing when it died at startup.

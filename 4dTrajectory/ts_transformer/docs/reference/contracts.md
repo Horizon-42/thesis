@@ -365,3 +365,23 @@ trajectories.py` (which held a second copy of the comparison). So:
 ### C28 · a codebook is a hashed artefact and every executor / prior checkpoint binds to its sha
 
 **ARCHIVED 2026-09-20** — code under `archive/manoeuvre_codes_2026_09/` (its README says what moved and why; plan v3 §10's audit). The text below describes the archived code and is kept as its record. The codebook (`manoeuvre/tokenizer.py` `write_codebook` / `load_codebook`, plan §2.4; 2026-09-18) is a directory: `codebook.pt` holds the tokenizer's kind, FSQ levels, row count, segment length, the SCALE constants the rows were encoded under (`SEGMENT_ROW_SCALE`, `STATE_ROW_SCALE` — part of what decides a code, so part of the artefact), the fitted cohort's identity (C26's eligible-set digests; an empty identity is refused at write), the source checkpoint (path, sha256, run name) and the weights, ALL under one `sha256`; `codebook.json` mirrors everything but the weights and carries that sha. Loading verifies the sha, that the manifest equals the hashed payload, and that this build's scale constants are the artefact's — else it refuses by name. A loaded tokenizer is FROZEN: no gradient, and its mode stays `eval` under the parent's `train()`. **An executor trained AGAINST a codebook (`manoeuvre_codebook`) stamps `codebook_sha256` into `checkpoint_metadata.json`, and `load_checkpoint` refuses it when the directory's tokenizer weights no longer equal the ones inside the checkpoint** (`ControlStrategy.verify_checkpoint_payload`, the strategy hook `load_checkpoint` calls) — the prior's codes and the executor's z must be ONE vocabulary. A jointly trained executor carries its tokenizer inside the checkpoint and has no sha until exported; exporting a codebook from an executor that was trained against one is refused (that directory is its codebook). Writing never overwrites: an existing directory refuses.
+
+### C29 · a replay finds a checkpoint's arrival manifests by the digest it recorded
+
+2026-09-23 (the 2026-08-22..09-22 download merged into the live harvest). A checkpoint's
+`data_provenance` pins each airport's `arrival_manifest_sha256` and every source track's
+SHA-256, so it can only replay against the GENERATION of the harvest it trained on — not
+against whatever `outputs/harvest` holds today. The superseded live root is frozen whole
+(`trajectory_data_process.harvest.generations`, TD23 in `trajectory_data_process/docs/
+06-harvest-reference.md`: moved aside, `FROZEN.json` with its manifest digests, registered in
+`FROZEN_GENERATIONS`), and every replay path resolves the manifests through
+`repo_layout.checkpoint_arrival_manifest(s)(payload, harvest_root)`: among the live root and the
+frozen roots, the file whose bytes hash to the recorded digest; none raises by airport and
+digest. The arrival loader reads a non-current schema only when the bytes are a frozen
+generation's, so a frozen roster is read AS WRITTEN (the checkpoint's data is not converted).
+Users: `experiments/support.checkpoint_manifests`, `anytime_curve.load_arm` (and through it
+`latent_probe`, `chain_sensitivity`), `control_capacity_ceiling`, `clock_attribution`,
+`predictability_report`, `control_basis_oracle` (teacher fit), `runway_hypotheses`.
+`predict` / `evaluate-fit` take `--data` explicitly — pass the frozen root's manifests there.
+New training always reads the live root (`repo_layout.HARVEST_ROOT`, the one definition; the
+four runners that restated it import it).

@@ -21,7 +21,13 @@ from ts_transformer.data.channels import POSITION_IDX
 from ts_transformer.data.data_provenance import checkpoint_data_provenance, require_matching_data_provenance
 from ts_transformer.data.dataset import build_series, load_flight_dicts
 import ts_transformer.geometry.geometric_metrics as gm
-from ts_transformer.repo_layout import REPO_ROOT, RUN_TS, TS_DIR, TS_SCRIPT, arrival_manifest_path
+from ts_transformer.repo_layout import (
+    REPO_ROOT,
+    RUN_TS,
+    TS_DIR,
+    TS_SCRIPT,
+    checkpoint_arrival_manifests,
+)
 from ts_transformer.training.train import usable_series
 
 if TYPE_CHECKING:
@@ -62,8 +68,9 @@ def arm_config(base: dict[str, Any], overrides: dict[str, Any]) -> tuple[TSConfi
 
 
 def checkpoint_manifests(payload: dict[str, Any]) -> list[Path]:
-    """The arrival manifests a checkpoint's own provenance names, in its order."""
-    return [arrival_manifest_path(entry["airport"]) for entry in payload["data_provenance"]["manifests"]]
+    """The arrival manifests a checkpoint's own provenance names, in its order -- the
+    generation it trained on, found by digest (`repo_layout.checkpoint_arrival_manifests`)."""
+    return checkpoint_arrival_manifests(payload)
 
 
 def rebuild_cohort(payload: dict[str, Any], config: TSConfig, keys: Sequence[str]) -> list[FlightSeries]:

@@ -114,6 +114,7 @@ from ts_transformer.geometry.physical_criteria import fixed_dt_position_ade_m  #
 from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
 from ts_transformer.training.train import load_checkpoint, usable_series  # noqa: E402
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
+from ts_transformer.repo_layout import checkpoint_arrival_manifests  # noqa: E402
 from dataclasses import fields  # noqa: F401  (read off this module by its tests / sibling runners)
 
 RESULT_SCHEMA = "l0-control-basis-oracle-v1"
@@ -743,7 +744,7 @@ def run_teacher_fit(
             f"--airport {args.airport} is not one of the checkpoint's own airports {airports}; "
             "the teacher cohort is the checkpoint's splits, not a chosen airport"
         )
-    manifests = [pipeline.arrival_manifest_path(item) for item in airports]
+    manifests = checkpoint_arrival_manifests(payload, pipeline.HARVEST_ROOT)
     provenance = checkpoint_data_provenance(payload, manifests)
     require_matching_data_provenance(payload, provenance)
 

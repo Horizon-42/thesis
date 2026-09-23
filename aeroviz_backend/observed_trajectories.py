@@ -13,7 +13,8 @@ Two windows of the same measurement are served, chosen by ``window``:
     This is what the Observe/Baseline layer shows and what ``trajectories.czml``
     contains.
 ``arrival``
-    The model arrival slice only — terminal-ring entry to the landing anchor —
+    The model arrival slice only — terminal-ring entry to the landing anchor (the
+    sample after a measured threshold crossing, arrivals v7) —
     with time rebased so ``t = 0`` is the entry. This is the window every
     modeling artifact lives in, so it is the one the comparison overlay's
     reference must use: an optimizer/prediction group's ``t = 0`` is the entry,

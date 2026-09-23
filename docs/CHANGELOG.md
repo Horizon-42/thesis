@@ -1,5 +1,27 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-23 — 数据前处理 review；CIFP 跑道几何、v7 进场切片、冻结数据代（代码部分）
+
+review 了 `trajectory_data_process/` 与 `flight_scenarios/`，并对照 `evaluation/` 和 ts 训练流程；
+为合并 `outputs/new_data_9_22`（2026-08-22..09-22 的新下载）先修代码。计划与状态：
+`trajectory_data_process/docs/11-2026-09-23-merge-new-data.zh.md`。
+
+- **KSMF 35R 的阈值偏 39.4 m**：没有 LPV 的跑道原来用 OurAirports 的跑道端点，v6 把 35R 放进名单后，
+  它的 383/383 条进场横向全判 fail（lateral 名单因此整条跑道剔除，优化器却照用偏了的目标）。现在所有
+  非 LPV 跑道用 CIFP 跑道记录（PG，ARINC 424-23 §5.36/5.37 Note 5：坐标即着陆阈值点）。TD21。
+- **跑道航向**原来是 OurAirports 整度数，最多差 0.45°（五边 5 km 处约 40 m 横向系统偏差；阈值处判定不受影响）；
+  现在是两端 CIFP 阈值点连线。阈值帧指纹 schema 升 v2，所有存储的阈值事件需要重算（合并时重算）。
+- **arrivals v7**：实测跨越（直接夹逼）的切片延到跨越后那个点，约一半的进场原来在实测跨越前一点就截断、
+  ts 只能用拟合尾段监督；`entry_time_utc` 改为首个保留样本的真实时间（毫秒），原来早 0–2 s。TD22。
+  `READABLE_SCHEMA_VERSIONS` 删掉：只读当前版本，或冻结代按字节识别原样读取。
+- **冻结数据代**（`harvest/generations.py`）与 ts 回放按数据指纹找 manifest（`repo_layout.
+  checkpoint_arrival_manifests`，C29），旧 checkpoint 在合并后仍可回放。TD23。
+- **合并**保留每个来源的 `source_integrity`（原来丢掉 2,458 条剔除记录），`--jobs` 传到重新分类；
+  **普通下载拒绝覆盖合并过的目录**（原来会就地清空 `tracks/`，换成一个 30 天窗口）；`download_landings.py`
+  的默认值改为 import（原来 CIFP 周期抄旧成 260319）；arrivals / observed 改为全部成功后再替换。TD17、TD24。
+- 其余 review 发现（ts 与优化器机型参数不同、三种初始速度估计、各类记录时间原点不同等 15 条）记在
+  `docs/code-health-followups.md`。
+
 ### 2026-09-23 — 两层代码 review 里词表之外的问题修掉
 
 同一次 review 在还留在主干的两层代码里找到的问题（词表归档之后仍然存在的那部分）：

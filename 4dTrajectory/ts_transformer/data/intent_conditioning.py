@@ -189,8 +189,8 @@ def lead_eta_s(series: "FlightSeries", *, anchor_time_s: float) -> float:
 
     ``anchor_time_s`` is the anchor's time on the series' own clock (``series.times``,
     zero at the first observed sample), whose absolute time is the arrival record's
-    ``entry_time_utc`` (measured on the KRDU and KSJC manifests: within 2 s of the first
-    sample, p50 ≈ 0.9 s and always early — nothing against ``LEAD_ETA_SCALE_S``). No lead
+    ``entry_time_utc`` (that sample's own time to the millisecond since arrivals v7; v5
+    rosters wrote it 0–2 s early — nothing against ``LEAD_ETA_SCALE_S``). No lead
     in the roster reads as the negative clip — the runway has been clear for as long as
     the channel can express.
     """

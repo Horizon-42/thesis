@@ -68,6 +68,12 @@ change you are making go in `docs/code-health-followups.md` instead.
   `.selection.json`, 92 MB, built 2026-08-23; the arrival manifests were rewritten 2026-08-24,
   whether the scenarios can be reused as-is is UNVERIFIED — let the runner's prepared-input
   signature check decide.
+  **2026-09-23: regrading them now judges them in the NEW runway frame.** `evaluation/arrival.py`
+  builds the grading frame from today's `load_airport` course (the CIFP centreline, TD21), while
+  these records were solved toward the old whole-degree OurAirports course (up to 0.45° off,
+  KMSY; ~0.3° at KSTL). The threshold crossing is unaffected; path-shape and cross-track readouts
+  along the final move by up to ~40 m at 5 km. The same holds for re-evaluating any ts prediction
+  made before 2026-09-23. State it with any regraded number.
   The arrival manifests were re-harvested 2026-08-15…17 for all five airports (the old
   "KSJC and KSTL need a re-harvest" item is closed) but need the v5 re-roster above first; after it,
   `prepare_scenario_inputs.py --skip-observed` is safe and skips rebuilding the observed

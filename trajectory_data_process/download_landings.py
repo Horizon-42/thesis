@@ -22,13 +22,16 @@ if __package__ in (None, ""):  # pragma: no cover - direct script execution
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from trajectory_data_process.harvest.__main__ import main as harvest_main
-
-HERE = Path(__file__).resolve().parent
-DEFAULT_CONFIG = HERE / "config" / "runway_thresholds.json"
-DEFAULT_OUTPUT = HERE / "outputs" / "harvest"
-DEFAULT_CIFP = HERE.parents[0] / "data" / "CIFP" / "CIFP_260319" / "FAACIFP18"
-DEFAULT_FRONTEND_DATA = HERE.parents[0] / "aeroviz-4d" / "public" / "data"
+# The defaults are the single-airport CLI's own: a copy here once drifted to an older
+# CIFP cycle (260319 vs 260806) and stamped every event of a harvest with it.
+from trajectory_data_process.arrival_segment import ENTRY_RADIUS_KM
+from trajectory_data_process.harvest.__main__ import (
+    DEFAULT_CIFP,
+    DEFAULT_CONFIG,
+    DEFAULT_FRONTEND_DATA,
+    DEFAULT_OUTPUT,
+    main as harvest_main,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-lookback-days", type=float, default=30.0)
     parser.add_argument("--chunk-hours", type=float, default=6.0)
     parser.add_argument("--radius-km", type=float, default=30.0)
-    parser.add_argument("--entry-radius-km", type=float, default=25.0)
+    parser.add_argument("--entry-radius-km", type=float, default=ENTRY_RADIUS_KM)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--cifp", type=Path, default=DEFAULT_CIFP)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)

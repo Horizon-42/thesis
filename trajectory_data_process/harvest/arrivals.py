@@ -1,9 +1,16 @@
 """Build the one model-ready arrival view from the authoritative harvest roster.
 
 ``tracks/`` is the complete measured harvest and keeps all four outcomes.  Modeling
-consumers need a narrower, explicit contract: one assigned runway, a published LPV
-threshold target, and the final terminal-entry-to-threshold segment.  This module builds
-that view through a second manifest; consumers never glob either directory.
+consumers need a narrower, explicit contract: one assigned runway, a published vertical
+path (an LPV Path Point, or the LNAV/VNAV runway leg of the runway's RNAV (GPS)
+approach), and the final terminal-entry-to-threshold segment.  This module builds that
+view through a second manifest; consumers never glob either directory.
+
+The slice ends at the landing sample, except that a MEASURED crossing (a direct bracket
+event) is always inside it: the slice then ends on the bracket's post-crossing sample.
+Before v7 it ended on whichever bracket sample was nearer the threshold -- about half the
+bracketed arrivals stopped one sample short of their own measured crossing, and the ts
+loader supervised those on a fitted tail instead.
 
 The record geometry remains HAE.  Cesium needs HAE, while the modeling plane converts it
 to MSL at ``flight_scenarios.datum``.  Moving that conversion here would silently apply
@@ -23,6 +30,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from final_approach.event_contract import DIRECT_EVENT_METHOD
+
 from trajectory_data_process.arrival_segment import (
     ENTRY_RADIUS_KM,
     GROUND_START_AGL_M,
@@ -38,6 +47,7 @@ from trajectory_data_process.harvest.altitude_filter import (
     filtered_track,
 )
 from trajectory_data_process.harvest.czml import czml_input_flight, verify_identity
+from trajectory_data_process.harvest.generations import is_frozen_arrival_manifest
 from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
     HarvestPaths,
@@ -53,11 +63,13 @@ MANIFEST_NAME = "manifest.json"
 # split that still contains 75 takeoffs -- the roster's MEANING changed, not its shape.
 # v6 (2026-09-07): the cohort admits runways whose vertical path comes from the RNAV
 # (GPS) approach leg (LNAV/VNAV minima, ``Runway.tch_source``), not only LPV Path
-# Points -- KRDU 32 and KSMF 35R join the roster on the next harvest. The roster SHAPE
-# is unchanged, so readers accept v5 too: the five rosters on disk are v5 and stay
-# valid until deliberately rebuilt (a re-harvest changes every ts dataset split).
-SCHEMA_VERSION = "harvest-arrivals-v6-published-vertical-path"
-READABLE_SCHEMA_VERSIONS = ("harvest-arrivals-v5-takeoff-excluded", SCHEMA_VERSION)
+# Points -- KRDU 32 and KSMF 35R.
+# v7 (2026-09-23): a measured (direct bracket) crossing lies inside the slice, and
+# ``entry_time_utc`` is the first kept sample's own time to the millisecond (it was the
+# whole-second landing time minus the duration, 0-2 s early).
+# The loader reads THIS version only. A roster of a frozen generation (``generations``)
+# is read as written, identified by its bytes -- the identity a checkpoint pins.
+SCHEMA_VERSION = "harvest-arrivals-v7-measured-crossing-in-slice"
 
 
 def arrival_manifest_path(paths: HarvestPaths) -> Path:
@@ -89,10 +101,6 @@ def write_arrival_records(
             f"expected {ALTITUDE_DATUM!r}; the arrival ground test compares stored "
             "altitudes against the runway's HAE elevation"
         )
-    root = paths.airport / ARRIVALS_DIR
-    _clear(root)
-    root.mkdir(parents=True, exist_ok=True)
-
     roster: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
     runway_targets: dict[str, dict[str, Any]] = {}
@@ -124,11 +132,14 @@ def write_arrival_records(
             )
             continue
 
-        anchor = _anchor_index(track, runway)
+        anchor = _slice_end_index(track, runway)
         flight = czml_input_flight(track)
         # The measured track may include rollout/taxi.  The supervised arrival ends at
-        # the sample that defined landing_time_utc, never after it.
+        # the landing sample, or at the post-crossing sample of a measured crossing
+        # (``_slice_end_index``), never later.
         flight["waypoints"] = track["samples"][: anchor + 1]
+        # The absolute time of waypoint offset 0: ``entry_time_utc`` is read off it.
+        flight["start_time_utc"] = track["start_time_utc"]
         # Indices are into the SOURCE array and stay valid: the filter replaces altitudes
         # and never adds or drops a row.
         flight["arr_airport"] = airport.code
@@ -232,11 +243,15 @@ def write_arrival_records(
         "excluded": excluded,
         "records": roster,
     }
+    # Only now, with the whole roster built, is the old view replaced: a failure above
+    # leaves the previous arrivals/ (and its lateral roster) exactly as they were. The
+    # lateral roster is bound to the manifest it was joined against, so it goes too.
     path = arrival_manifest_path(paths)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(manifest, indent=1, allow_nan=False), encoding="utf-8"
-    )
+    staged = path.with_suffix(path.suffix + ".tmp")
+    staged.write_text(json.dumps(manifest, indent=1, allow_nan=False), encoding="utf-8")
+    staged.replace(path)
+    _clear(path.parent, keep=path)
     return manifest
 
 
@@ -252,16 +267,22 @@ def load_arrival_flights(
     validation/test trajectory values.
     """
     manifest_path = resolve_arrival_manifest(path)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
     if not isinstance(manifest, dict):
         raise ValueError(
             f"{manifest_path} is not an arrival manifest object; legacy flight-array "
             "inputs are no longer supported"
         )
-    if manifest.get("schema_version") not in READABLE_SCHEMA_VERSIONS:
+    if (
+        manifest.get("schema_version") != SCHEMA_VERSION
+        and not is_frozen_arrival_manifest(manifest_bytes)
+    ):
         raise ValueError(
-            f"{manifest_path} has schema {manifest.get('schema_version')!r}; "
-            f"expected one of {READABLE_SCHEMA_VERSIONS!r}"
+            f"{manifest_path} has schema {manifest.get('schema_version')!r}, not "
+            f"{SCHEMA_VERSION!r}, and is no frozen generation's roster "
+            "(harvest.generations). Rebuild it from its tracks -- --evaluate-only, after "
+            "--reclassify-existing when its threshold events are stale (TD16, TD23)"
         )
     if manifest.get("altitude_source") != "opensky_history_geoaltitude_m":
         raise ValueError(
@@ -389,6 +410,27 @@ def _outliers_in_slice(track: dict[str, Any], first: int, last: int) -> int:
     )
 
 
+def _slice_end_index(track: dict[str, Any], runway: Runway) -> int:
+    """Where the arrival slice ends: the landing sample, or -- when the crossing was
+    MEASURED (a direct bracket) -- the bracket's post-crossing sample.
+
+    ``landing_sample_index`` is whichever bracket sample is nearer the threshold (it
+    defines ``landing_time_utc`` and so the flight identity, and does not move). Ending
+    the slice there cut about half the measured crossings out of their own arrival.
+    """
+    landing = _anchor_index(track, runway)
+    event = track["observed_threshold_event"]
+    if event["method"] != DIRECT_EVENT_METHOD:
+        return landing
+    before, after = event["source_sample_range"]
+    if landing not in (before, after):
+        raise ValueError(
+            f"track {track['flight_key']!r}: landing sample {landing} is not a sample of "
+            f"its measured crossing bracket [{before}, {after}]; run --reclassify-existing"
+        )
+    return after
+
+
 def _anchor_index(track: dict[str, Any], runway: Runway) -> int:
     samples = track.get("samples")
     if not isinstance(samples, list) or not samples:
@@ -417,6 +459,7 @@ def _runway_target(runway: Runway) -> dict[str, Any]:
         "elevation_hae_m": runway.elevation_hae_m,
         "hae_minus_msl_m": runway.hae_minus_msl_m,
         "course_deg": runway.course_deg,
+        "course_source": runway.course_source,
         "threshold_crossing_height_m": runway.threshold_crossing_height_m,
         "published_glidepath_deg": runway.published_glidepath_deg,
         "position_source": runway.position_source,
@@ -447,10 +490,11 @@ def _validate_runway_target(flight: dict[str, Any], path: Path) -> None:
         raise ValueError(f"{path}: flight {flight.get('id')!r} has inconsistent runway datum")
 
 
-def _clear(directory: Path) -> None:
-    if not directory.exists():
-        return
+def _clear(directory: Path, *, keep: Path) -> None:
+    """Remove every other JSON (the lateral roster bound to the replaced manifest, and any
+    older layout's leftovers) and the emptied subdirectories."""
     for path in sorted(directory.rglob("*.json"), reverse=True):
-        path.unlink()
+        if path != keep:
+            path.unlink()
     for path in sorted((p for p in directory.rglob("*") if p.is_dir()), reverse=True):
         path.rmdir()

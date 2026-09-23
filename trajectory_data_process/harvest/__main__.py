@@ -23,7 +23,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from evaluation.cli import DEFAULT_METAR_ROOT
+from evaluation.cli import DEFAULT_CIFP, DEFAULT_METAR_ROOT
 from evaluation.metrics import evaluate_batch
 from evaluation.wind import load_wind_tables
 from evaluation.context import contexts_for_airport
@@ -40,6 +40,7 @@ from trajectory_data_process.harvest.observed import (
 )
 from trajectory_data_process.harvest.czml import render_observed_czml
 from trajectory_data_process.harvest.freshness_rebuild import rebuild_fresh_tracks
+from trajectory_data_process.harvest.generations import FROZEN_MARKER
 from trajectory_data_process.harvest.merge import merge_stored_tracks
 from trajectory_data_process.harvest.publish import publish_observed_report
 from trajectory_data_process.harvest.runner import (
@@ -55,7 +56,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = REPO_ROOT / "trajectory_data_process/config/runway_thresholds.json"
 DEFAULT_OUTPUT = REPO_ROOT / "trajectory_data_process/outputs/harvest"
 DEFAULT_ADSB_METADATA = REPO_ROOT / "trajectory_data_process/outputs/adsb-metadata"
-DEFAULT_CIFP = REPO_ROOT / "data/CIFP/CIFP_260806/FAACIFP18"
 DEFAULT_FRONTEND_DATA = REPO_ROOT / "aeroviz-4d/public/data"
 
 
@@ -115,9 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=max(1, (os.cpu_count() or 1) - 4),
         help=(
-            "worker processes for --reclassify-existing's per-track classification "
-            "(default: cores-4, min 1). Output is identical at any value; other "
-            "modes ignore it."
+            "worker processes for the per-track classification of --reclassify-existing "
+            "and --merge-source (default: cores-4, min 1). Output is identical at any "
+            "value; other modes ignore it."
         ),
     )
     mode.add_argument(
@@ -163,10 +163,19 @@ def main(argv: list[str] | None = None) -> int:
             f"{args.entry_radius_km:g} vs {args.radius_km:g}"
         )
     code = args.airport.upper()
+    if (args.output / FROZEN_MARKER).exists():
+        raise SystemExit(
+            f"[harvest] {args.output} is a frozen harvest generation ({FROZEN_MARKER}); every "
+            "mode writes into its --output, and a frozen generation is never written"
+        )
     paths = HarvestPaths(root=args.output, code=code)
-    if not args.evaluate_only and not args.observed_only and not args.reclassify_existing \
-            and not args.merge_source and not args.rebuild_fresh_from \
-            and not args.full_redownload:
+    downloading = not (
+        args.evaluate_only or args.observed_only or args.reclassify_existing
+        or args.merge_source or args.rebuild_fresh_from
+    )
+    if downloading:
+        _refuse_download_over_derived_tracks(paths)
+    if downloading and not args.full_redownload:
         completed = _completed_download_manifest(
             paths,
             expected_runways=_configured_runways(args.config, code),
@@ -218,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             metadata_lookup=metadata.lookup,
             metadata_provenance=metadata.provenance,
             metadata_lookup_many=metadata.lookup_many,
+            jobs=args.jobs,
         )
         print(
             f"[harvest] merged and reclassified {len(sources) + 1} source manifests "
@@ -310,6 +320,38 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+# Provenance keys of a tracks/ tree that is NOT one download window: a merge of several
+# harvests, or a freshness rebuild of one. No download can reproduce either.
+DERIVED_TRACKS_PROVENANCE = ("merge", "freshness_rebuild")
+
+
+def _refuse_download_over_derived_tracks(paths: HarvestPaths) -> None:
+    """A download REPLACES ``tracks/`` (``store.write_tracks`` clears it in place first).
+
+    Over a merged or rebuilt root that is months of harvest lost to one 30-day window,
+    and such a root never reads as a completed download (its provenance has no
+    ``radius_km``/``start_utc``), so the resume check cannot stop it. Download into a
+    new ``--output`` and ``--merge-source`` that root instead.
+    """
+    try:
+        manifest = read_manifest(paths)
+    except FileNotFoundError:
+        return
+    except json.JSONDecodeError as error:
+        raise SystemExit(
+            f"[harvest] {paths.manifest} is unreadable ({error}); a download would replace "
+            "tracks/ without knowing what it holds. Inspect it, and remove it if it is a "
+            "killed download's half-written manifest."
+        ) from error
+    derived = [key for key in DERIVED_TRACKS_PROVENANCE if key in manifest["provenance"]]
+    if derived:
+        raise SystemExit(
+            f"[harvest] {paths.manifest} holds a {'/'.join(derived)} harvest, not one "
+            "download window; a download would replace it. Download into a new --output "
+            "and merge it with --merge-source."
+        )
+
+
 def _print_digest(code: str, manifest: dict, summary: dict, report: dict) -> None:
     counts = manifest["counts"]
     print(f"\n{code} harvest")
@@ -317,7 +359,7 @@ def _print_digest(code: str, manifest: dict, summary: dict, report: dict) -> Non
           + ", ".join(f"{k} {v}" for k, v in counts.items()))
     print(f"  per runway  : {manifest['per_runway']}")
     if summary["skipped"]:
-        print(f"  skipped     : {len(summary['skipped'])} (no published LPV TCH)")
+        print(f"  skipped     : {len(summary['skipped'])} (no published vertical path)")
     observed = report.get("observed", {})
     if observed:
         print(f"  events      : {observed['event_estimated']}/"

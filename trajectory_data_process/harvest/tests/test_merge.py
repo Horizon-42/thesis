@@ -18,6 +18,7 @@ from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
     ALTITUDE_SOURCE,
     HarvestPaths,
+    integrity_audits,
 )
 
 
@@ -329,3 +330,108 @@ def test_cli_exposes_merge_as_an_exclusive_no_download_mode(tmp_path):
                 "--evaluate-only",
             ]
         )
+
+
+def test_merge_keeps_each_sources_integrity_audit_and_never_writes_through_a_link(tmp_path):
+    """The destination's manifest-level ``source_integrity`` (a freshness rebuild's
+    exclusion list) is replaced along with the manifest, so the merge carries it into
+    that source's audit entry; and the linked source records are byte-identical after."""
+    destination = _write_harvest(
+        tmp_path / "current",
+        key="NOW_not_landing_abc001_20260701T000000Z",
+        relative="not_landing/NOW_not_landing_abc001_20260701T000000Z.json",
+        icao24="abc001",
+        provenance={"window": "current"},
+    )
+    audit = {"schema_version": "opensky-source-timing-v1", "excluded_total": 3, "excluded": []}
+    manifest = json.loads(destination.manifest.read_text(encoding="utf-8"))
+    manifest["source_integrity"] = audit
+    destination.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    source = _write_harvest(
+        tmp_path / "new",
+        key="NEW_not_landing_abc002_20260901T000000Z",
+        relative="not_landing/NEW_not_landing_abc002_20260901T000000Z.json",
+        icao24="abc002",
+        provenance={"window": "new"},
+    )
+    source_record = source.tracks / "not_landing/NEW_not_landing_abc002_20260901T000000Z.json"
+    before = source_record.read_bytes()
+
+    merged = merge_stored_tracks(
+        destination,
+        [source],
+        airport=_airport(),
+        metadata_lookup=_metadata,
+        metadata_provenance={"test": True},
+    )
+
+    sources = merged["provenance"]["merge"]["sources"]
+    assert (sources[0]["source_integrity_audits"], sources[0]["sources_without_integrity_audit"]) == ([audit], 0)
+    assert (sources[1]["source_integrity_audits"], sources[1]["sources_without_integrity_audit"]) == ([], 1)
+    assert "source_integrity" not in merged
+    assert source_record.read_bytes() == before
+
+    # A second merge into the merged root keeps the first one's audit, one level down.
+    later = _write_harvest(
+        tmp_path / "later",
+        key="LATER_not_landing_abc003_20261001T000000Z",
+        relative="not_landing/LATER_not_landing_abc003_20261001T000000Z.json",
+        icao24="abc003",
+        provenance={"window": "later"},
+    )
+    again = merge_stored_tracks(
+        destination, [later], airport=_airport(),
+        metadata_lookup=_metadata, metadata_provenance={"test": True},
+    )
+    assert integrity_audits(again) == ([audit], 2)
+
+
+def test_a_download_refuses_to_replace_a_merged_or_rebuilt_harvest(tmp_path):
+    from trajectory_data_process.harvest.__main__ import (
+        _refuse_download_over_derived_tracks,
+        main,
+    )
+
+    download = _write_harvest(
+        tmp_path / "download",
+        key="NOW_not_landing_abc001_20260701T000000Z",
+        relative="not_landing/NOW_not_landing_abc001_20260701T000000Z.json",
+        icao24="abc001",
+        provenance={"radius_km": 30.0, "start_utc": "2026-07-01T00:00:00Z"},
+    )
+    _refuse_download_over_derived_tracks(download)       # one download window: allowed
+    _refuse_download_over_derived_tracks(HarvestPaths(tmp_path / "empty", "KAAA"))
+
+    for key in ("merge", "freshness_rebuild"):
+        derived = _write_harvest(
+            tmp_path / key,
+            key="NOW_not_landing_abc001_20260701T000000Z",
+            relative="not_landing/NOW_not_landing_abc001_20260701T000000Z.json",
+            icao24="abc001",
+            provenance={key: {"completed_utc": "2026-08-12T00:00:00Z"}},
+        )
+        before = derived.manifest.read_bytes()
+        with pytest.raises(SystemExit, match="would replace it"):
+            main(["--airport", "KAAA", "--output", str(tmp_path / key),
+                  "--frontend-data", str(tmp_path / "frontend"),
+                  "--adsb-metadata", str(tmp_path / "adsb")])
+        assert derived.manifest.read_bytes() == before
+
+
+def test_no_mode_writes_into_a_frozen_generation_and_an_unreadable_manifest_is_refused(tmp_path):
+    from trajectory_data_process.harvest.__main__ import main
+    from trajectory_data_process.harvest.generations import FROZEN_MARKER
+
+    tmp_args = ["--frontend-data", str(tmp_path / "frontend"), "--adsb-metadata", str(tmp_path / "adsb")]
+    frozen = tmp_path / "frozen"
+    frozen.mkdir()
+    (frozen / FROZEN_MARKER).write_text("{}", encoding="utf-8")
+    for mode in ([], ["--evaluate-only"], ["--reclassify-existing"], ["--merge-source", str(tmp_path)]):
+        with pytest.raises(SystemExit, match="frozen harvest generation"):
+            main(["--airport", "KAAA", "--output", str(frozen), *mode, *tmp_args])
+
+    broken = HarvestPaths(tmp_path / "broken", "KAAA")
+    broken.manifest.parent.mkdir(parents=True)
+    broken.manifest.write_text('{"records": [', encoding="utf-8")
+    with pytest.raises(SystemExit, match="unreadable"):
+        main(["--airport", "KAAA", "--output", str(tmp_path / "broken"), *tmp_args])

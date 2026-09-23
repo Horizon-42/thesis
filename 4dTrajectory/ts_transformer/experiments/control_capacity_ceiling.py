@@ -28,6 +28,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
+from ts_transformer.repo_layout import checkpoint_arrival_manifests  # noqa: E402
 import ts_transformer.experiments.predictability_report as common_report  # noqa: E402
 from ts_transformer.config import PREDICTION_CONTROL, default_anchor  # noqa: E402
 from ts_transformer.outputs.dynamics.rollout import rollout_control_endpoints  # noqa: E402
@@ -485,9 +486,7 @@ def main() -> None:
         split="val",
     )
     selected_keys = train_keys + val_keys
-    provenance = payload["data_provenance"]
-    airports = tuple(entry["airport"] for entry in provenance["manifests"])
-    manifests = [pipeline.arrival_manifest_path(airport) for airport in airports]
+    manifests = checkpoint_arrival_manifests(payload, pipeline.HARVEST_ROOT)
     require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
     print(
         f"loading {len(train_keys)} train + {len(val_keys)} validation identities; "

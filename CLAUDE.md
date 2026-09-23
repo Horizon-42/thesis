@@ -226,12 +226,13 @@ Maintenance convention:
 Full status — every campaign, measurement and blocked item — is **`docs/open-items.md`**.
 Only the hazards that must fire unprompted are repeated here.
 
-- **`--evaluate-only` DELETES `lateral_pass_eligibility.json` and re-rosters `arrivals/`.** The five
-  manifests on disk are `harvest-arrivals-v5-takeoff-excluded` (**42,650** arrivals — KRDU 14,435 /
-  KSJC 11,082 / KSTL 8,767 / KSMF 4,219 / KMSY 4,147); a rebuild writes
-  `harvest-arrivals-v6-published-vertical-path` (+1,876 arrivals: KRDU 32 + KSMF 35R), which
-  changes every ts dataset split. Not without need, never under a running campaign. **To rebuild
-  only the observed evaluation records/report (`approach/`) use `--observed-only`.**
+- **`--evaluate-only` / `--merge-source` DELETE `lateral_pass_eligibility.json` and re-roster
+  `arrivals/`.** The v5 rosters (**42,650** arrivals) are being FROZEN as
+  `outputs/harvest-v5-20260823` and the 2026-08-22..09-22 download merged into a new live root as
+  `harvest-arrivals-v7-measured-crossing-in-slice` (status: `trajectory_data_process/docs/
+  11-2026-09-23-merge-new-data.zh.md`). A rebuild changes every ts dataset split; never under a
+  running campaign. **To rebuild only the observed evaluation records/report (`approach/`) use
+  `--observed-only`.**
 - **All control-output ts checkpoints from before 2026-08-18 are stale** — the control contract
   changed units (newtons → fraction of installed thrust) and `TSConfig` gained required fields, so
   `load_checkpoint` refuses them; any ts checkpoint trained before 2026-08-24 predates the v5 cohort.
