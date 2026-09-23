@@ -9,6 +9,10 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
+- **跟踪项：教练机在速度门偏慢（用户 2026-09-23：“先按教练机来，加入后期跟踪项，看后面需不需要改”）。**
+  KRDU 的 P28A 2,084 条里 168 条（8%）比速度窗口下限慢，中位数约 3 kt；占 KRDU 速度门 fail 的 15%。
+  现在把它解释为训练飞行的实际飞法，门不改。以后需要回答：通航/教练机是否该用单独的速度窗口（有没有权威的
+  训练进近速度来源），还是维持现状并在结论里注明。分析：`evaluation/docs/2026-09-23_observed_baseline_pass_rate.zh.md`。
 - **到达清单已重建并合并新数据**（用户 2026-09-23 决定；2026-09-20 的“不重建”就此作废）。live 根目录是
   v5 数据加 8/22–9/22 新下载，v7 名单 72,574 条、eligible 72,247 条，KRDU 32 与 KSMF 35R 已加回（跑道覆盖：
   KRDU 5 条，只缺没有 RNAV 程序的 14）。旧 v5 名单冻结为 `outputs/harvest-v5-20260823`，旧 checkpoint 按指纹回放。
