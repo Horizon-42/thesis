@@ -10,14 +10,15 @@
   机场坐标系与候选跑道（清单里的 CIFP 跑道几何）、逐步信号、分段拟合、包络、标注器（横向 / 高度与下降角 /
   速度 / 拼句 / 入口）、量测、产物、读数、目视图。runner：`instruction_signals` → `instruction_spec` →
   `instruction_labels` → `instruction_figures`（R10），产物契约 C30，包的位置 L30。
-- **产物** `4dTrajectory/outputs/POOLED/instruction_language/v1_20260923/`：train 50,187 / val 10,529 架成功
-  （均 99.1 %）；拒绝按原因计数。
+- **产物** `4dTrajectory/outputs/POOLED/instruction_language/v1_20260923/`（规格 `08ad64abb53e`，量于 commit
+  `4ffd801d`）：train 50,178 / val 10,527 架成功（均 99.1 %）；拒绝按原因计数。
 - **代码 review 后的修正**（都在合并前）：切入航向的"收敛"改为在航向容差内判断、直角基线两侧对称
   （`envelope.heading_converges`）；切入航向的转弯检查不再跨进截获转弯，截获转弯单独检查；标注与定档共用
   一道门 `read.admit`（原来定档量到了会被拒绝的航班，加速度上限因此从 2.5 降到 1.7 m/s²、坡度上限从 33° 降到
   32°）；越过入口后又回到入口前的航班拒绝（原来会截在错误的那次越过上）；两个依赖带宽的容差改为选定值并
-  报灵敏度；坡度下限只约束转角 ≥ 10° 的转弯；两个改平段直接相接时的高度词在前一段末发出、方向跟随高度差；
-  管子按类的方向封口；拼句在丢弃重复词之前查冲突，检查只算保留下来的词；产物记录标注器源码 sha，规格与
+  报灵敏度；坡度下限只约束转角 ≥ 10° 的转弯，并按标注器自己的转弯起点量（6° → 4°）；补的切入航向本身
+  到不了航线时拒绝（从转到它的那一行起判断；第一版从最后保持段的末端判断，误拒了 3,284 架）；两个改平段
+  直接相接时的高度词在前一段末发出、方向跟随高度差；管子按类的方向封口；拼句在丢弃重复词之前查冲突，检查只算保留下来的词；产物记录标注器源码 sha，规格与
   句子由不同代码写出时拒绝。
 - 其他包的小改动：`data.coordinate_frames.horizontal_from_latlon`（`latlon_from_horizontal` 的逆）、
   `flight_scenarios.runway_target.airport_runways`、`aerodynamic_model.common.GRAVITY_MPS2`（`torch_dynamics` 改为
