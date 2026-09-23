@@ -81,9 +81,12 @@ def fly(inputs: FlightInputs, force: WordsInForce, runways: Runways, charts: Air
         now = read_state(state, charts)
         track_rate, lateral_modes = lateral.rate(now, force.heading_deg[:, cycle], force.approach[:, cycle],
                                                  force.runway[:, cycle], runways, bank)
+        e0, n0, course, elevation = runways.pointed(force.runway[:, cycle])
+        before, _right, _off = relative(now, e0, n0, course)
         gamma_rate, vertical_modes = vertical.rate(now, force.altitude_m[:, cycle], force.land[:, cycle],
                                                    force.angle_class[:, cycle], force.angle_deg[:, cycle],
-                                                   force.issued_step[:, cycle, [ALTITUDE, ANGLE]])
+                                                   force.issued_step[:, cycle, [ALTITUDE, ANGLE]], before, elevation,
+                                                   lateral.captured)
         attitude = inverse.attitude(now, track_rate, gamma_rate, bank, bank_cap_rad=math.radians(params.bank_cap_deg),
                                     bank_rate_rad_s=math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s),
                                     cycle_s=params.cycle_s)
@@ -104,7 +107,6 @@ def fly(inputs: FlightInputs, force: WordsInForce, runways: Runways, charts: Air
             modes[name].append(value)
 
         after = read_state(state, charts)
-        e0, n0, course, elevation = runways.pointed(force.runway[:, cycle])
         before, _right, _off = relative(after, e0, n0, course)
         finished = ((lateral.captured & (before <= 0.0)) | ((before > 0.0) & (after.height_m < elevation))
                     | ~torch.isfinite(state).all(dim=1) | (after.speed_mps <= 0.0)

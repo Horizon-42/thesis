@@ -240,7 +240,8 @@ def _params(**changes):
 
     base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
                           bank_rate_deg_s=2.0, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
-                          accel_mps2=0.16, unspecified_decel_mps2=0.26, delays=Delays(0.0, 0.0, 0.0),
+                          accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8,
+                          delays=Delays(0.0, 0.0, 0.0),
                           timeout_factor=1.5)
     return replace(base, **changes)
 

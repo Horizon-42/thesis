@@ -33,6 +33,7 @@ class ExecutorParams:
     decel_mps2: float              # a_dec
     accel_mps2: float              # a_acc
     unspecified_decel_mps2: float  # a_unspec
+    land_aim_height_m: float       # where "descend to land" aims: this far above the pointed threshold
     delays: Delays                 # d_ψ, d_h, d_v
     timeout_factor: float          # the flight's own remaining time × this (§8.3)
 
@@ -49,6 +50,9 @@ class ExecutorParams:
         if self.delays.heading_s > spec.turn_start_delay_max_s:
             raise ValueError(f"d_ψ {self.delays.heading_s:g} s exceeds the {spec.turn_start_delay_max_s:g} s a turn "
                              f"may start late (vocabulary §2.3)")
+        if not 0.0 <= self.land_aim_height_m <= spec.landing_max_height_m:
+            raise ValueError(f"the landing aim {self.land_aim_height_m:g} m is outside the landing condition's "
+                             f"0–{spec.landing_max_height_m:g} m")
         positive = (self.cycle_s, self.turn_rate_deg_s, self.bank_rate_deg_s, self.path_rate_factor,
                     self.decel_mps2, self.accel_mps2, self.unspecified_decel_mps2, self.timeout_factor)
         if min(positive) <= 0.0:

@@ -16,8 +16,10 @@ Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.
   every term the executor's own, nothing tuned;
 - captured, the aircraft flies the arc that ends tangent to the line from where it is NOW: the rate
   ``V (1 − cos |Δχ|) / |y|`` toward the course, solved again every cycle — so a deceleration inside the
-  turn (a shorter radius) or a late roll-in does not leave it short of the line or past it — at most
-  ``r_turn``, and at most ``|Δχ| / τ_ψ``: the heading law's own roll-out, which the bank rate can follow
+  turn (a shorter radius) or a late roll-in does not leave it short of the line or past it — at most the
+  rate the bank cap gives at this speed (``g tan φ_cap / V``: a base close in needs a tighter turn than the
+  steady rate, and the bank cap is the word envelope's own bound), and at most ``|Δχ| / τ_ψ``: the heading
+  law's own roll-out, which the bank rate can follow
   (§4.1 constraint 3), so the turn does not run past the course while the bank comes back; once its
   track is within the heading tolerance of the course the line's own target takes over
   (§4.5): ``course − sat(k_y · y, intercept angle)``,
@@ -162,8 +164,9 @@ class Lateral:
         # the capture turn: the arc to the line from here, toward the course
         off = torch.deg2rad(off_course)
         arc = state.ground_speed_mps * (1.0 - torch.cos(off)) / right.abs().clamp(min=1e-9)
+        tightest = GRAVITY_MPS2 * math.tan(math.radians(params.bank_cap_deg)) / state.ground_speed_mps
         capture = -torch.sign(off_course) * torch.minimum(
-            torch.rad2deg(arc).clamp(max=params.turn_rate_deg_s), off_course.abs() / params.heading_time_constant_s)
+            torch.rad2deg(torch.minimum(arc, tightest)), off_course.abs() / params.heading_time_constant_s)
         rate = torch.where(self.captured & ~self.tracking, capture, heading_rate(state.track_deg, target, params))
         return rate, {"captured": self.captured.clone(),
                                                                "tracking": self.tracking.clone(), "bent": bend,

@@ -20,7 +20,8 @@ Layer 2, every word (§8.2): the sentence's words checked against what was FLOWN
 checks. The flown track is read at the sentence's 2 s rows through `read.admit` — the gate observed
 flights pass, smoothing and the landing cut included — and judged from each word's own row:
 
-- a heading word: its turn from the word's row to where the flown track enters θ's band
+- a heading word — a split turn's parts together, as the labeller judges them: its turn from the (first)
+  word's row to where the flown track enters the (last) word's band
   (`envelope.turn_progress_ok`, `envelope.turn_rate_ok`), then its hold's rows in the funnel
   (`read.span_funnel` over a `lateral.HeadingSpan` of the FLOWN track), up to the next heading word or
   where the executor's capture turn begins — as the labeller ends a hold at the capture turn; holds the
@@ -150,41 +151,59 @@ def flown_signals(track: dict[str, np.ndarray], end_row: int, reference: FlightS
                          vertical_rate_mps=track["vertical_rate"][rows])
 
 
-def _heading_words(flight: Admitted, instructions: list[Instruction], capture_row: int, spec: VocabularySpec,
-                   words: Words) -> list[dict[str, Any]]:
-    smoothed = flight.smoothed
-    heading = sorted((i for i in instructions if i.column == HEADING), key=lambda item: item.row)
-    ends = [w.row for w in heading[1:]] + [capture_row]
-    speed = smoothed.ground_speed_mps
-    results = []
-    for word, end in zip(heading, ends):
-        target = words.heading_deg(word.value)
-        track = smoothed.track_deg
-        target_unwrapped = float(track[word.row] + wrap180(target - track[word.row]))
-        result: dict[str, Any] = {"row": word.row, "kind": word.kind}
-        if word.kind == "initial":
-            arrival, turn = word.row, None
+def _turn_groups(heading: list[Instruction]) -> list[list[Instruction]]:
+    """Heading words grouped into the turns they fly: a split turn's parts are ONE turn (the labeller
+    judges it whole, its next part issued before the previous one's band is reached)."""
+    groups: list[list[Instruction]] = []
+    for word in heading:
+        continues = word.kind.endswith("-split") and word.info["part"] > 1
+        if continues:
+            groups[-1].append(word)
         else:
-            inside = envelope.heading_band(track[word.row: end + 1], target, spec.heading_tolerance_deg)
-            arrival = word.row + int(np.argmax(inside)) if inside.any() else None
+            groups.append([word])
+    return groups
+
+
+def _heading_words(flight: Admitted, instructions: list[Instruction], turns: list[dict[str, Any]], capture_row: int,
+                   spec: VocabularySpec, words: Words) -> list[dict[str, Any]]:
+    """One result per turn (a single word, or a split turn's parts together), from its first word's row:
+    the turn to where the flown track enters the last word's band, then the hold to the next heading word or
+    the executor's capture. ``turns`` are the labeller's turn records of the observed flight (their signed
+    ``turn_deg`` fixes which way a turn of more than 180° goes)."""
+    smoothed = flight.smoothed
+    track, speed = smoothed.track_deg, smoothed.ground_speed_mps
+    groups = _turn_groups(sorted((i for i in instructions if i.column == HEADING), key=lambda item: item.row))
+    ends = [group[0].row for group in groups[1:]] + [capture_row]
+    results = []
+    for group, end in zip(groups, ends):
+        first, last = group[0], group[-1]
+        target = words.heading_deg(last.value)
+        result: dict[str, Any] = {"row": first.row, "kind": first.kind, "words": len(group)}
+        if first.kind == "initial":
+            arrival, turn = first.row, None
+        else:
+            (record,) = [r for r in turns if r["departure_row"] == first.row and first.kind.startswith(r["kind"])]
+            total = float(wrap180(target - track[first.row]))
+            if total * record["turn_deg"] < 0.0:
+                total += math.copysign(360.0, record["turn_deg"])
+            target_unwrapped = float(track[first.row]) + total
+            inside = np.abs(track[first.row: end + 1] - target_unwrapped) <= spec.heading_tolerance_deg
+            arrival = first.row + int(np.argmax(inside)) if inside.any() else None
             stop = end if arrival is None else arrival
-            turn_deg = target_unwrapped - float(track[word.row])
-            rate = np.diff(track[word.row: stop + 1]) / spec.step_s if stop > word.row else np.zeros(1)
-            bank = envelope.bank_deg_from_turn_rate(rate, speed[word.row + 1: stop + 1]) if stop > word.row else np.zeros(1)
-            mean_rate = float(np.mean(rate) * math.copysign(1.0, turn_deg)) if turn_deg != 0.0 else 0.0
-            turn = {"rate_min_applies": abs(turn_deg) >= spec.turn_rate_min_from_deg}
-            result.update(turn_reached=arrival is not None,
-                          progress_ok=envelope.turn_progress_ok(track[word.row: stop + 1], target_unwrapped,
+            rate = np.diff(track[first.row: stop + 1]) / spec.step_s if stop > first.row else np.zeros(1)
+            bank = envelope.bank_deg_from_turn_rate(rate, speed[first.row + 1: stop + 1]) if stop > first.row else np.zeros(1)
+            mean_rate = float(np.mean(rate) * math.copysign(1.0, total))
+            turn = {"rate_min_applies": abs(total) >= spec.turn_rate_min_from_deg}
+            result.update(turn_reached=arrival is not None or first.kind.startswith("intercept"),
+                          progress_ok=envelope.turn_progress_ok(track[first.row: stop + 1], target_unwrapped,
                                                                 spec.heading_tolerance_deg),
-                          rate_ok=envelope.turn_rate_ok(turn_deg, mean_rate, float(np.max(np.abs(rate))),
-                                                        float(np.max(bank)), spec.turn_rate_min_deg_s,
-                                                        spec.turn_rate_max_deg_s, spec.turn_bank_max_deg,
-                                                        spec.turn_rate_min_from_deg))
-        last_part = word.kind == "initial" or word.info["part"] == word.info["parts"]
-        if not last_part or arrival is None or end <= arrival:
+                          rate_ok=envelope.turn_rate_ok(total, mean_rate, float(np.max(np.abs(rate))), float(np.max(bank)),
+                                                        spec.turn_rate_min_deg_s, spec.turn_rate_max_deg_s,
+                                                        spec.turn_bank_max_deg, spec.turn_rate_min_from_deg))
+        if arrival is None or end <= arrival:
             results.append(result)
             continue
-        span = HeadingSpan(word=word, turn=turn, hold_start=arrival, hold_end=end)
+        span = HeadingSpan(word=last, turn=turn, hold_start=arrival, hold_end=end)
         if turn is not None and not turn["rate_min_applies"]:
             result["hold"] = "not judged: after a turn under turn_rate_min_from_deg"
         else:
@@ -220,7 +239,7 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
         cycles = np.nonzero(flown.modes[mode][index, :last].cpu().numpy())[0]
         return min(rows - 1, int(cycles[0] + 1) // step_rows) if len(cycles) else rows - 1
 
-    headings = _heading_words(flight, reached, first_row("captured"), spec, words)
+    headings = _heading_words(flight, reached, reading.checks["turns"], first_row("captured"), spec, words)
     relative = flight.relative
     inside = envelope.corridor(relative.right_of_course_m, relative.track_minus_course_deg, relative.before_threshold_m,
                                spec.corridor_half_width_m, spec.corridor_widening_deg,
