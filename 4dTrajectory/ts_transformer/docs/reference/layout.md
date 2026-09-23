@@ -450,8 +450,15 @@ recorded manifest with `build_series`, refused unless it reproduces the stored s
 its physical context is `outputs.dynamics.context.rollout_context` at row 0), `plant` (one cycle of
 the control path's point-mass scaled-chart dynamics through `rollout_control_endpoints` — that
 backend runs no command hooks, so the executor steps it cycle by cycle, the same computation),
-`inverse` (wanted rates → bank, load factor, thrust; limits in the design's order, each recorded).
-It may import the data plane, the shared dynamics and geometry, and `instructions/`; never
+`inverse` (wanted rates → bank, load factor, thrust; limits in the design's order, each recorded),
+`lateral` / `vertical` / `speed` (the three laws), `params` (the executor's parameters and the design's
+constraints on them), `executor` (the cycle loop, `fly`), `judge` (the three-layer verdict, with the
+labeller's own checks), `replay` (who is flown — own dynamics or a stand-in's — drawing, flying and reading
+a batch), `measure` (the data parameters, torch-free for the runner's workers), `derive` (method A), `observe`
+(method B: the data plane's fit-and-grid chain on a flown track) and `spec` (`ts-executor-spec-v1`: the
+parameters written once with their sha and the executor's source hash, `EXECUTOR_MODULES`; a replay refuses a
+spec measured by other code, `replay.open_executor`). It may import the data plane (`data.dataset`,
+`data.channels`), the shared dynamics and geometry, and `instructions/`; never
 `training`, `experiments`, `cli`, `backbone`, `inference`, `manoeuvre`, `outputs.control`,
 `outputs.guidance`, `outputs.state`
 (`tests/test_architecture.py::test_the_executor_flies_through_the_shared_dynamics_only`); only the

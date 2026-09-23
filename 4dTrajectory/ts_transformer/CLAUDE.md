@@ -318,6 +318,9 @@ grid's L60_D60 cohort). **The instruction labeller** (2026-09-23): `instruction_
 one never-overwritten artefact directory (R10). `instruction_training_export` writes the frontend's Training sets
 from that artefact — a seeded per-airport VAL sample, every flight re-read against its stored sentence, every envelope's
 geometry from `instructions/display.py`, added to each airport's `training/index.json` without touching its other sets (R11).
+**The executor** (2026-09-24): `executor_spec` (data on train, methods A and B, a clean tree, written once) →
+`executor_sensitivity` (train, one parameter at a time; a negative delay is a probe) → `executor_replay` (the §11 gate
+readout through evaluation, paired with the observed verdicts; val = stage 4, only on the user's go-ahead) (R12).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 
