@@ -78,7 +78,7 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
 
 ## Population: who gets into a dataset
 
-Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-09-16; FS5 added 2026-09-23).
+Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-09-16; FS5–FS6 added 2026-09-24).
 
 - **`build_scenarios_from_arrivals` is strict; `dataset.build_scenario_dataset` is the batch
   layer**: a flight with no usable fitted final approach (~0.08 % of the roster) raises
@@ -128,9 +128,14 @@ Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-
 
 ## Aircraft resolution
 
+- **Types without a native model are decided by `aircraft/performance_index.json`** (2026-09-24):
+  preset → index row (own parameters / a substitute flown under ITS code / excluded) → OpenAP-direct;
+  OpenAP synonyms are never flown under their own code; nothing flies as an A320 unless a caller passes
+  the explicit fallback (only the ts `all` filter does). The batch layer drops and names flights with no
+  dynamics (`excluded_no_dynamics`, selection schema v2) (FS6).
 - **`"type": "UNK"` on every harvested arrival does NOT mean the batch is single-type.**
   `_resolve_aircraft` (`flight_scenarios/build.py`, mirrored in `ts_transformer/data/dataset.py`)
-  tries declared type → **`icao24` via the OpenAP lookup** → `--aircraft-type` fallback, and the
+  tries declared type → **`icao24` via the OpenAP lookup** → the explicit fallback, and the
   icao24 path recovers the REAL airframe for most flights: **20 distinct types** across 400 KRDU
   arrivals (A320 224, B738 38, E75L 25, CRJ9 23, … A333, GLF6, C550). Anything assuming one
   airframe per batch is wrong — that is exactly how the flyability check first shipped, grading

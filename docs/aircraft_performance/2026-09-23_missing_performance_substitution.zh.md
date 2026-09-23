@@ -13,7 +13,7 @@
 | 一手文件里的翼面积、发动机推力 / 功率 | 完成：训练航班最多的 37 型 + 另 10 型（含 09-24 补的 C56X）| [`airframe_facts.csv`](../literature/aircraft_performance/airframe_facts.csv)，90 份 EASA / FAA 型号合格证数据单和厂家文件，全部存档、有 sha256 |
 | 替代映射 | 完成，199 个机型 | 本文 §7；完整表 [`2026-09-23_substitution_table.csv`](2026-09-23_substitution_table.csv) |
 | 代码：进近参考速度改用各机型公布值，按质量换算（§9 第 5 项，方案 A）| 完成，本分支 | `Approach.speeds` / `reference_speed_ms(m)`；FS5 / K10；参考速度表补 18 行 |
-| 代码：一张索引表落地第 1–3 项（本机参数 / 替代 / 排除）| 用户 2026-09-24 同意，**进行中** | 见 §9 |
+| 代码：一张索引表落地第 1–3 项（本机参数 / 替代 / 排除）| 完成，本分支（ts 的 `all` 过滤器怎么改待用户定）| `aircraft/performance_index.json`；FS6；见 §9.2 |
 | git | 分支 `docs-aero-substitution`（worktree `.claude/worktrees/aero-substitution`），只有文档 | 未合并 |
 | 原始下载 | `data/aircraft_performance/`（git 忽略，约 130 个文件）| 两个 `download*.sh` 可重新下载 |
 
@@ -378,9 +378,9 @@ CL60、GLF4、GLEX、G280、H25B、GA6C、GL7T、BE40、C408（TCDS 不印翼面
 
 | 项 | 内容 | 决定 | 状态 |
 |---|---|---|---|
-| 1 | 21 个喷气机型用一手文件的着陆质量、翼面积、推力 | 做成一张索引表，代码读它；不改 `Aircraft` 类（用户："of course"）| 进行中（与 2、3 同一张表）|
-| 2 | 其余有替代的机型按 §7 落地 | 同上 | 进行中 |
-| 3 | 活塞机和涡桨 | **排除** | 表里写"排除"，代替现在的 A320 回退，随 1、2 一起做 |
+| 1 | 21 个喷气机型用一手文件的着陆质量、翼面积、推力 | 做成一张索引表，代码读它；不改 `Aircraft` 类（用户："of course"）| **已完成**（§9.2）|
+| 2 | 其余有替代的机型按 §7 落地 | 同上 | **已完成**（§9.2）|
+| 3 | 活塞机和涡桨 | **排除** | **已完成**：表里写"排除"，不再用 A320 代替（ts 的 `all` 过滤器除外，待定）|
 | 4 | 写信问 EASA，公开的 ANP v2.3 系数能否在论文里引用 | 先不做，设为待办 | `docs/open-items.md` |
 | 5 | 进近参考速度改用各机型公布值 | 改；目标速度用**方案 A**（按质量换算的公布速度）；Pilot 面板的目标范围用速度门的窗口 | **已完成**（本分支）|
 
@@ -396,7 +396,8 @@ CL60、GLF4、GLEX、G280、H25B、GA6C、GL7T、BE40、C408（TCDS 不印翼面
 - `aircraft/query_aircraft_parameters.py`：OpenAP 机型取"质量所属机体"那一行 —— 原生机型取自己的；OpenAP 同义机型
   取替代机型的（LJ45 的质量是 GLF6 的，所以速度也用 GLF6 的，不然换算出 257 kt）；C56X 的质量已被改回它自己的，所以用自己的。
   没有公布值的机型（只有 B3XM）既不能建模，也不再算 OpenAP 原生机型。
-- `aircraft/reference_speeds.json`：补 18 个 OpenAP 机型的 FAA 行，规则与原有 FAA 行相同（`docs/reference_speeds/README.md`）。
+- `aircraft/reference_speeds.json`：补 18 个 OpenAP 机型的 FAA 行，规则与原有 FAA 行相同（`docs/reference_speeds/README.md`；
+  09-24 又为三个用 Poll–Schumann 本机参数的机型补了 3 行，共 193 行）。
 - 已准备好的场景文件（`flight_scenarios/outputs/*_threshold_scenarios.json`，存的是 145 kt）在加载时被拒绝，
   重新求解前要重跑 `prepare_scenario_inputs.py`（覆盖数据，到时再征得同意）。
 - 后端机型目录与 Pilot 面板：Pilot 的状态一律按最大起飞质量求解，目录的目标速度 = 这个质量下的公布速度，可调范围 =
@@ -404,7 +405,7 @@ CL60、GLF4、GLEX、G280、H25B、GA6C、GL7T、BE40、C408（TCDS 不印翼面
   原来目录按着陆质量给、求解按最大起飞质量，默认目标解不出来）；前端去掉了 145 / 135 / 155 kt 的缺省值，目录没加载时不显示目标编辑框。
 - 优化器：速度下限原来的 V_ref 上界永远不起作用（1.10 × 失速速度最多是公布下沿的 0.93 倍），已删；`--resume` 遇到目标
   不同的旧记录会重新求解，不再把 145 kt 目标下的记录当成完成。
-- 评估报告的方法说明记录参考速度表的 sha256 和行数（190 行）。
+- 评估报告的方法说明记录参考速度表的 sha256 和行数（193 行）。
 - 影响：优化器 `runway` 模式的终端速度、速度下限的上界、交互优化器的默认速度下限；评估报告的速度偏差字段；
   后端目录与 Pilot 面板。**ts 数据集不读目标速度，cohort 和 checkpoint 都不动。** 磁盘上的 70,267 条优化器记录保持原来的
   目标，重新求解才会变。
@@ -416,6 +417,38 @@ CL60、GLF4、GLEX、G280、H25B、GA6C、GL7T、BE40、C408（TCDS 不印翼面
   速度门比对，不写死数字；旧场景文件被拒。aircraft / flight_scenarios / backend / evaluation / 优化器 / geokit、ts（1,280 个）、
   前端（638 个）测试全部通过，只剩两个与本改动无关的已知失败（numpy 标量；`test_write_reference_records_from_observed_tracks`，
   在未改动的 dev-two-tier 上同样失败，记入 followups）。
+
+### 9.2 第 1–3 项做了什么（一张索引表）
+
+- `aircraft/performance_index.json`（schema `aircraft-performance-index-v1`）：§7 的 199 个机型各一行，由
+  `docs/aircraft_performance` 的分析生成；另外 10 个没有航班的 OpenAP 同义机型也按分析里同义机型的规则各给一行
+  （6 个保留 OpenAP 的替代机型，3 个螺旋桨排除，B77L 不满足规则排除），共 209 行。下面的数字是 199 个机型部分的。
+  - `own` 31 个：21 个来自型号合格证数据单和 FAA 表，10 个来自 Poll–Schumann。每个数都带出处编号，出处列在文件的
+    `sources` 里。
+  - `substitute` 47 个：按替代机型原样飞，用的是替代机型自己的代码。这样质量、进近速度和速度门都属于同一架飞机；
+    真实机型仍记在 `resolved_typecode`。
+  - `exclude` 121 个：螺旋桨飞机（用户决定）、旋翼机和军机、FAA 表没有进近速度的、没有同类机型的。
+- 读取器 `aircraft/performance_index.py` 在加载时一次检查完所有行，下面几种情况直接拒绝：
+  - 一行盖住了本来就有模型的机型（预设或 OpenAP 原生机型）；
+  - 替代机型本身不是有模型的机型；
+  - `own` 行没有公布的进近速度，或没有写出处。
+- `flight_scenarios`：机型解析的顺序改为 预设 → 索引表 → OpenAP 原生机型。
+  - OpenAP 的同义机型不再用替代机型的数据、挂自己的代码去飞。所以 §8 提到的"同义机型的速度门对不上"也一起消失了。
+  - 没有动力学的航班（排除的、识别不出机型的、没有任何模型的）默认不再用 A320 代替：批量构建时丢掉，并记进
+    `<scenarios>.selection.json`（新字段 `excluded_no_dynamics`，schema v2）；命令行去掉了 `--aircraft-type`。
+  - 场景记录新增 `performance_index_decision` 字段。
+  - 观测记录只在"按本机建模"的机型上给质量。
+- 每个场景和 `selection.json` 都记上所用索引表的 sha256；加载场景文件时如果指纹不同（或没有指纹）就拒绝，
+  所以 09-24 以前准备的全部场景文件（阈值目标和 fitted-ADS-B 两种）在重新求解前都要重新生成（覆盖数据，先问用户）。
+- C56X 原来是 OpenAP 同义机型加一段手工改质量的代码，现在由索引表的 `own` 行接替，那段代码删了。
+  另外给 A339、B753、MD82 在参考速度表里补了 FAA 行（它们是 8–9 月的新数据带进来的）。
+- **还没动的**：ts 的 `aircraft_filter = all` 仍然把排除的机型按 A320 飞（`TSConfig.aircraft_type`）。
+  它记录在 28 个旧的状态预测 run 里，怎么改要用户定。
+  - 另外，这些旧 run 回放时，模型输入和预测不变（状态预测不读飞机参数）。但导出记录里的 `dynamics_typecode` 和质量
+    会按索引表变，重新评估时速度门的判定会变。
+  - `openap-direct` 的 215 个 run 完全不受影响。
+- 测试：索引表读取器（每类错误都拒绝，写死的样例值）；按本机参数飞、按替代机型飞、排除时报名字；批量构建丢掉并记名；
+  观测质量的规则；同义机型被拒；C56X 的一手数据。所有测试套件通过（ts 1,280 个），只剩已知失败。
 
 ## 10. 数据源
 
@@ -450,9 +483,11 @@ python docs/aircraft_performance/scripts/missing_types.py   # 缺参数机型清
 python docs/aircraft_performance/scripts/synonym_current.py # OpenAP 同义机型现在实际飞的参数
 python docs/aircraft_performance/scripts/final_mapping.py   # 决策（§6）
 python docs/aircraft_performance/scripts/render_table.py    # 写 2026-09-23_substitution_table.csv
+python docs/aircraft_performance/scripts/build_performance_index.py  # 写 aircraft/performance_index.json（§9.2）
 ```
 
 输入数据的版本：harvest v7 名单（72,574 条 / 合格 72,247 条），机型识别库 2026-09-23 版，OpenAP 2.4 缓存
-（`aircraft/openap_aircraft_parameters.json`）。数据源调研读的 `missing_types.csv`（README 记的 sha256 `bad4a0d4…`）
+（`aircraft/openap_aircraft_parameters.json`）。**这些脚本描述的是分析时的状态**（"现在用 A320 / OpenAP 同义机型"）；
+在索引表落地之后的代码上运行，`synonym_current.py` 读到的已是索引表的决定。要复现本文的数字，请在提交 `6753226c` 上运行。数据源调研读的 `missing_types.csv`（README 记的 sha256 `bad4a0d4…`）
 与 `missing_types.py` 现在写出的行完全相同，只是航班数相同的行排序不同（旧版本的排序取决于进程内集合顺序，现已固定为
 航班数、机型代码）。

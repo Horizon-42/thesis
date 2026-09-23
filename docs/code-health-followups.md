@@ -1103,3 +1103,19 @@ single-valued preset (its `terminalSpeedMinKt` equals `terminalSpeedKt`), and no
 panel when the catalog fails to load (the target editor is then not rendered and the summary reads
 "— (no aircraft)"). The tests pass; they just no longer look like the real catalog.
 
+## Performance index: points the stage-2 review left for later (2026-09-24)
+
+**Verified** (opus review of the performance-index change).
+- `trajectory_data_process/harvest/observed.py:106` labels every modelled landing mass
+  `openap_landing_mass`, also for presets and the index's own-parameter types; and a substituted type now
+  gets no mass, so its observed record falls back to the nominal 60 t (C25A/C525/PC24 6.8 t → 60 t). The gate
+  never reads that mass; the label should say where the mass came from. Changes observed records only when
+  they are regenerated.
+- `docs/literature/control_normalization/measurements/per_class_readout.py:51` and
+  `4dTrajectory/ts_transformer/docs/specific_force_teacher_distribution.py:49` resolve `dynamics_typecode`
+  with `provider="openap"`; on a record of an index own-parameter type (only produced under `auto`) they raise.
+- Index data worth a look (judgement): B722's Poll–Schumann landing mass is 5.2 % above its FAA MALW, so its
+  target is 136.4 kt against a published 133 kt; MD88 flies as B737 because a substitute must be a native
+  airframe and its PS synonym MD82 is an own-parameter row; the similarity distance has no mass term, so LJ35
+  (6.5 t) flies as B737 and GLF3 as B763 (dynamically similar, by the method's definition).
+

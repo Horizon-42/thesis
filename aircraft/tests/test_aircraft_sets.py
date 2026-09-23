@@ -7,7 +7,6 @@ from aircraft.query_aircraft_parameters import (
     get_aircraft_parameters,
     load_json,
     openap_direct_typecodes,
-    openap_performance_metadata,
     openap_support_kind,
     PARAMETERS_PATH,
 )
@@ -75,7 +74,7 @@ class TestPublishedApproachSpeed(unittest.TestCase):
     """Every approach speed the model flies is a published one, never a default, and it
     belongs to the airframe whose mass the model carries (it is rescaled by that mass)."""
 
-    def test_every_openap_type_flies_the_published_speed_of_its_mass_airframe(self):
+    def test_every_openap_direct_type_flies_its_own_published_speed(self):
         records = load_json(PARAMETERS_PATH)["typecodes"]
         supported = sorted(code for code, record in records.items() if record.get("openap_supported"))
         refused = []
@@ -85,27 +84,17 @@ class TestPublishedApproachSpeed(unittest.TestCase):
             except AircraftLookupError:
                 refused.append(code)
                 continue
-            if openap_support_kind(code) == "direct":
-                self.assertEqual(aircraft.approach.speeds, reference_speed(code), code)
-            self.assertAlmostEqual(aircraft.approach.speeds.malw_kg, aircraft.landing_mass,
-                                   delta=0.25 * aircraft.landing_mass, msg=code)
-        # The one OpenAP type the FAA Aircraft Characteristics Database does not list.
-        self.assertEqual(refused, ["B3XM"])
-
-    def test_a_synonym_type_flies_the_speed_of_the_airframe_whose_mass_it_carries(self):
-        # A synonym is cached with its surrogate's performance AND mass (LJ45 with GLF6's), so
-        # it lands at its surrogate's speed; C56X's own mass was restored, so it keeps its own.
-        records = load_json(PARAMETERS_PATH)["typecodes"]
-        synonyms = sorted(code for code in records if openap_support_kind(code) == "synonym")
+            self.assertEqual(openap_support_kind(code), "direct", code)
+            self.assertEqual(aircraft.approach.speeds, reference_speed(code), code)
+        # Refused: every OpenAP synonym (the performance index decides those) and B3XM,
+        # the one direct type the FAA Aircraft Characteristics Database does not list.
+        synonyms = [code for code in supported
+                    if (records[code]["parameters"].get("openap_performance_typecode") or code) != code]
         self.assertEqual(len(synonyms), 21)
-        for code in synonyms:
-            surrogate = openap_performance_metadata(code)["performance_typecode"]
-            expected = code if code == "C56X" else surrogate
-            self.assertEqual(get_aircraft_parameters(code).approach.speeds,
-                             reference_speed(expected), code)
+        self.assertEqual(sorted(refused), sorted(synonyms + ["B3XM"]))
 
     def test_a_type_without_a_published_speed_is_refused(self):
-        with self.assertRaisesRegex(AircraftLookupError, "no published"):
+        with self.assertRaisesRegex(AircraftLookupError, "no published approach speed"):
             get_aircraft_parameters("B3XM")
         self.assertIsNone(openap_support_kind("B3XM"))
         self.assertNotIn("B3XM", openap_direct_typecodes())

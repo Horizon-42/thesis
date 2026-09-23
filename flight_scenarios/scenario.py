@@ -16,6 +16,11 @@ from typing import Any
 from aerodynamic_model.common import GeodeticState
 from aircraft.aero_params import AeroParams
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS, Aircraft
+from aircraft.performance_index import (
+    PERFORMANCE_INDEX_SCHEMA,
+    index_entry,
+    performance_index_identity,
+)
 from aircraft.query_aircraft_parameters import (
     AircraftLookupError,
     get_aircraft_parameters,
@@ -30,10 +35,13 @@ AIRCRAFT_PROVIDERS = ("auto", "openap")
 def aircraft_for_code(aircraft_id: str, *, provider: str = "auto") -> Aircraft:
     """Resolve an aircraft code (e.g. ``"A320"``) to an :class:`Aircraft`.
 
-    Under the legacy/default ``auto`` policy, hand-tuned presets win (they carry a
-    calibrated approach envelope) and all other types use OpenAP. ``openap`` explicitly
-    bypasses presets so a fleet-filtered experiment cannot claim OpenAP provenance while
-    silently using A320/B77W preset dynamics.
+    ``auto`` (the default): a hand-tuned preset wins; then the performance index
+    (``aircraft/performance_index.json``) decides the types with no native model -- the
+    type's own parameters, the airframe it is flown as (returned under THAT airframe's code,
+    so its mass, approach speed and speed gate belong together), or excluded (``KeyError``
+    naming why); every other type is flown by its own OpenAP model. ``openap`` uses OpenAP
+    only, bypassing presets and the index, so a fleet-filtered experiment cannot claim OpenAP
+    provenance while silently using other dynamics.
     """
     if provider not in AIRCRAFT_PROVIDERS:
         raise ValueError(f"unknown aircraft provider {provider!r}; expected {AIRCRAFT_PROVIDERS}")
@@ -42,29 +50,42 @@ def aircraft_for_code(aircraft_id: str, *, provider: str = "auto") -> Aircraft:
         preset = AIRCRAFT_PRESETS.get(code)
         if preset is not None:
             return preset
+        entry = index_entry(code)
+        if entry is not None:
+            if entry.decision == "own":
+                return entry.aircraft
+            if entry.decision == "substitute":
+                return aircraft_for_code(entry.substitute)
+            raise KeyError(f"aircraft '{aircraft_id}' is excluded by the performance index: {entry.reason}")
     try:
         return get_aircraft_parameters(code)
     except AircraftLookupError as exc:
-        available = ", ".join(sorted(AIRCRAFT_PRESETS))
-        raise KeyError(
-            f"unknown aircraft '{aircraft_id}'; known presets: {available}; OpenAP: {exc}"
-        ) from None
+        where = "" if provider == "openap" else "not a preset, no performance-index row; "
+        raise KeyError(f"no dynamics for aircraft '{aircraft_id}': {where}OpenAP: {exc}") from None
+
+
+def _index_own(code: str) -> bool:
+    entry = index_entry(code)
+    return entry is not None and entry.decision == "own"
 
 
 def aircraft_dynamics_source(aircraft_code: str, *, provider: str = "auto") -> str:
-    """Return the provider label used for a resolved scenario aircraft."""
+    """Return the provider label used for a resolved scenario aircraft (the FLOWN code)."""
     code = aircraft_code.strip().upper()
     if provider == "auto" and code in AIRCRAFT_PRESETS:
         return "aircraft_preset"
+    if provider == "auto" and _index_own(code):
+        return PERFORMANCE_INDEX_SCHEMA
     return openap_source_label()
 
 
 def aircraft_dynamics_surrogate_typecode(
     aircraft_code: str, *, provider: str = "auto"
 ) -> str | None:
-    """OpenAP's actual surrogate type, or ``None`` for hand-tuned presets."""
+    """OpenAP's performance type for an OpenAP-flown aircraft (its own code, since synonyms are
+    not flown directly), or ``None`` for a preset or an own-parameter index type."""
     code = aircraft_code.strip().upper()
-    if provider == "auto" and code in AIRCRAFT_PRESETS:
+    if provider == "auto" and (code in AIRCRAFT_PRESETS or _index_own(code)):
         return None
     return str(openap_performance_metadata(code)["performance_typecode"])
 
@@ -104,7 +125,11 @@ class FlightScenario:
         must fly the airframe's published approach speed at the target mass
         (``Approach.reference_speed_ms``); a file prepared under another rule or another table
         (before 2026-09-24 every 5.7-150 t type targeted 145 kt) would pin the old speed, so it
-        is refused by name instead of being flown mixed.
+        is refused by name instead of being flown mixed. Likewise the stored aircraft code is
+        re-resolved through today's performance index, so a scenario must carry the index it
+        was built with (``source["performance_index_sha256"]``); a file built under another
+        index -- or before there was one -- could come back as another airframe under its
+        stored aero, and is refused.
         """
         target = data.get("target")
         scenario = cls(
@@ -114,6 +139,14 @@ class FlightScenario:
             aero=AeroParams(**data["aero"]),
             source=data.get("source", {}),
         )
+        built_with = scenario.source.get("performance_index_sha256")
+        if built_with != performance_index_identity()["sha256"]:
+            raise ValueError(
+                f"scenario {scenario.source.get('flight_key')!r} was built with performance index "
+                f"{built_with!r}, not today's {performance_index_identity()['sha256']!r}; its aircraft "
+                "would be re-resolved under different decisions — regenerate it with "
+                "prepare_scenario_inputs.py"
+            )
         if scenario.target is not None and scenario.source["target_source"] == "runway_threshold":
             expected = scenario.aircraft.approach.reference_speed_ms(scenario.target.m)
             if not math.isclose(scenario.target.V, expected, rel_tol=1e-9):

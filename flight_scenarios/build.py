@@ -4,8 +4,9 @@ Orchestration only — it wires the pieces together:
 
     CZML-input flight ──► initial_state_from_track ──► GeodeticState
     declared type / ICAO24 ──► ICAO Doc 8643 identity ─┐
-                                                      ├─► OpenAP/preset Aircraft ─► AeroParams
-      (else --aircraft-type dynamics fallback) ───────┘
+                                                      ├─► preset / performance index / OpenAP
+      (no dynamics: NoAircraftDynamics, or an explicit ┘      Aircraft ─► AeroParams
+       caller fallback -- only the ts `all` filter passes one)
     => FlightScenario(initial, aircraft, aero, source)
 """
 
@@ -18,6 +19,7 @@ from typing import Any
 from aircraft.aero_params import aero_params_for_aircraft
 from aircraft.aircraft_sets import Aircraft
 from aircraft.identity import AircraftIdentity, get_default_identity_resolver
+from aircraft.performance_index import index_entry, performance_index_identity
 
 from .datum import flight_to_msl, flights_to_msl
 from .fitted_approach import UnusableFittedApproach, fit_flight_final_approach
@@ -48,9 +50,10 @@ def build_scenario(
     ``flight`` is one element of a CZML-input file: ``{id, callsign, icao24, arr_airport,
     runway, waypoints: [[t, lon, lat, alt], ...], ...}``. Identity is resolved separately
     from performance: declared designators and registry results are validated against ICAO
-    Doc 8643, then OpenAP supplies type-level parameters. ``aircraft_type`` (for example
-    ``"A320"``) is an explicit *dynamics* fallback when identity is unknown or unsupported;
-    it never overwrites the audited real identity. ``mass_kg`` defaults to the selected
+    Doc 8643, then ``scenario.aircraft_for_code`` picks the dynamics (a preset, the performance
+    index's decision, or the type's own OpenAP model). Without dynamics the build raises
+    :class:`NoAircraftDynamics`, unless ``aircraft_type`` names an explicit fallback to fly
+    instead; it never overwrites the audited real identity. ``mass_kg`` defaults to the selected
     dynamics model's landing mass (these are approach scenarios).
 
     ``target_from_threshold`` chooses the published runway endpoint.  The mutually exclusive
@@ -192,6 +195,20 @@ def build_scenarios_from_arrivals(
     ]
 
 
+class NoAircraftDynamics(KeyError):
+    """The flight's aircraft has no dynamics the model may fly: no ICAO type, a type the
+    performance index excludes, or a type nothing models. Batch layers drop the flight and
+    name ``typecode`` and ``reason``; nothing is flown in its place."""
+
+    def __init__(self, typecode: str | None, reason: str, flight_id: Any = None) -> None:
+        super().__init__(f"no aircraft dynamics for flight {flight_id!r} (type {typecode}): {reason}")
+        self.typecode = typecode
+        self.reason = reason
+
+    def __str__(self) -> str:          # KeyError would quote the message
+        return str(self.args[0])
+
+
 @dataclass(frozen=True, slots=True)
 class _AircraftSelection:
     aircraft: Aircraft
@@ -222,6 +239,15 @@ class _AircraftSelection:
             "dynamics_surrogate_typecode": aircraft_dynamics_surrogate_typecode(
                 self.aircraft.code, provider=self.provider
             ),
+            # What the performance index decided for the identity's type (own / substitute /
+            # exclude), or None when the type is flown natively or the provider bypasses it.
+            "performance_index_decision": (
+                entry.decision
+                if self.provider == "auto" and identity.typecode is not None
+                and (entry := index_entry(identity.typecode)) is not None
+                else None
+            ),
+            "performance_index_sha256": performance_index_identity()["sha256"],
             "aircraft_fallback_used": self.fallback_used,
             "aircraft_fallback_reason": self.fallback_reason,
         }
@@ -238,11 +264,12 @@ def resolve_airframe(
     For the harvest's observed records. The IDENTITY (icao24 → ICAO type, the same
     resolver ``build_scenario`` uses) is what the evaluation speed gate looks its
     PUBLISHED approach-speed window up by (``evaluation.speed_gate.TYPECODE_KEYS``),
-    so it is returned whenever it resolves. The mass is the type's OpenAP/preset
-    landing mass when those dynamics exist, else None -- an observed record's mass is
-    an assumption the states carry, not something the gate reads, so a type OpenAP
-    does not model (BCS3, E55P, CRJ7, most bizjets and GA: 21 % of the observed
-    fleet) must not lose its type over it. No fallback type on purpose: an
+    so it is returned whenever it resolves. The mass is the type's OWN landing mass when
+    the model flies the type as itself (a preset, an OpenAP-direct type, an own-parameter
+    row of the performance index), else None -- a substitute airframe's mass is not the
+    observed type's, and an observed record's mass is an assumption the states carry, not
+    something the gate reads, so a type without its own dynamics must not lose its type
+    over it. No fallback type on purpose: an
     unresolvable identity returns None and the caller grades speed indeterminate,
     loudly, instead of judging a bizjet against an A320 window.
     """
@@ -254,6 +281,8 @@ def resolve_airframe(
     try:
         aircraft = aircraft_for_code(identity.typecode, provider=aircraft_provider)
     except KeyError:
+        return None, identity.typecode
+    if aircraft.code != identity.typecode:
         return None, identity.typecode
     return aircraft.landing_mass, identity.typecode
 
@@ -275,7 +304,7 @@ def _resolve_aircraft(
         try:
             aircraft = aircraft_for_code(identity.typecode, provider=aircraft_provider)
         except KeyError as exc:
-            failure = str(exc)
+            failure = exc.args[0]
         else:
             return _AircraftSelection(
                 aircraft=aircraft,
@@ -286,10 +315,8 @@ def _resolve_aircraft(
             )
 
     if not fallback_type:
-        detail = failure or "identity has no ICAO typecode"
-        raise KeyError(
-            f"could not resolve aircraft dynamics for flight {flight.get('id')!r}: {detail}; "
-            "pass --aircraft-type as a fallback"
+        raise NoAircraftDynamics(
+            identity.typecode, failure or "identity has no ICAO typecode", flight.get("id")
         )
 
     fallback_code = resolver.catalog.normalize_typecode(fallback_type)

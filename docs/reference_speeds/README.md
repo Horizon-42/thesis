@@ -1,7 +1,7 @@
 # Reference approach speeds and weights - provenance pack
 
 Generated 2026-09-07; minimum masses extended 2026-09-23 (see [2026-09-23: type certificate data
-sheets](#2026-09-23-type-certificate-data-sheets)); 18 rows added 2026-09-23 for the aircraft model's
+sheets](#2026-09-23-type-certificate-data-sheets)); 21 rows added 2026-09-23/24 for the aircraft model's
 approach speed (see [2026-09-23: rows for the aircraft model](#2026-09-23-rows-for-the-aircraft-model)). Machine-readable table: [`aircraft/reference_speeds.json`](../../aircraft/reference_speeds.json)
 (schema `aircraft-reference-speeds-v1`). Verbatim backing excerpts: [`excerpts/`](excerpts/).
 
@@ -1026,6 +1026,16 @@ are reproducible from the spreadsheet with these rules alone.
 | E290 | 125 | 125–125 | 49,050 | MALW_lb 108,136 | AAC validated by Flight Standardization Board (FSB) report. |
 | MD11 | 158 | 158–158 | 195,045 | MALW_lb 430,000 | AAC validated by Flight Standardization Board (FSB) report. |
 | SU95 | 140 | 140–140 | 41,000 | MALW_lb 90,390 | the FAA row carries no Remarks entry. |
+
+Three more rows were added on 2026-09-24 by the same rules, for the types the aircraft performance
+index (`aircraft/performance_index.json`) flies with their own Poll–Schumann parameters: they are in
+the FAA spreadsheet but arrived with the 2026-08-22 → 09-22 download, after this pack was built.
+
+| type | approach speed kt | min–max | MALW kg | MALW note | FAA Remarks |
+|---|---:|---|---:|---|---|
+| A339 | 140 | 140–140 | 190,999 | MALW_lb 421,080 | AAC validated by Flight Standardization Board (FSB) report. |
+| B753 | 143 | 143–143 | 101,605 | MALW_lb 224,000 | the FAA row carries no Remarks entry. |
+| MD82 | 135 | 135–135 | 58,967 | MALW_lb 130,000 | the FAA row carries no Remarks entry. |
 
 **B3XM** (737 MAX 10) is the one OpenAP type with no FAA row, so it gets none and the aircraft model
 refuses it. In the 2026-09-23 train/val census (the test split was not resolved) the only one of

@@ -21,6 +21,7 @@ from aircraft.identity import (
     get_default_identity_resolver,
 )
 from aircraft.query_aircraft_parameters import (
+    AircraftLookupError,
     get_aircraft_parameters,
     openap_direct_typecodes,
     openap_performance_metadata,
@@ -242,12 +243,12 @@ def test_generated_faa_snapshot_emits_only_official_icao_designators():
     )
 
 
-def test_openap_synonym_typecode_retains_icao_identity():
-    aircraft = get_aircraft_parameters("A306")
-
-    assert aircraft.code == "A306"
-    assert aircraft.geometry.wing_area_m2 > 0.0
-    assert aircraft.engine.max_thrust_total_n > 0.0
+def test_an_openap_synonym_is_not_flown_with_its_surrogates_data_directly():
+    # OpenAP covers A306 only with A332's data; the model does not fly that under the A306
+    # code (the gate would judge it against the wrong airframe) -- the performance index
+    # decides the type instead. The provenance still names the surrogate.
+    with pytest.raises(AircraftLookupError, match="A332"):
+        get_aircraft_parameters("A306")
     metadata = openap_performance_metadata("A306")
     assert metadata["source"].startswith("openap-")
     assert metadata["performance_typecode"] == "A332"

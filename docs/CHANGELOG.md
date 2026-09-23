@@ -32,6 +32,18 @@
   的 `training/instruction_v2/`，同一批 40 架航班，`check-publication` 盘上与服务器 0 错误。opus 审查两轮，发现
   （关掉横向开关时不按路径取景、`arrivalRow` 上界、最慢路径与曲线长度的潜在不一致、单点路径不该标名字）已改。
 - 测试：pytest `-k instruction` 75 条，前端 Vitest 88 个文件 660 条，`npm run build` 无错。
+### 2026-09-24 — 机型性能索引表：没有模型的机型按表飞（本机参数 / 替代 / 排除），默认不再用 A320
+
+分支 `docs-aero-substitution`（接在下一条之后），用户合并。用户 2026-09-24 决定第 1–3 项做成一张索引表。
+
+- `aircraft/performance_index.json` + `aircraft/performance_index.py`：209 个机型（分析的 199 个 + 10 个没有航班的 OpenAP
+  同义机型），own 31（一手文件 21、Poll–Schumann 10）、substitute 53（按替代机型的代码飞）、exclude 125（螺旋桨、旋翼 / 军机、
+  无 FAA 进近速度、无同类机型）；加载时校验，每个 OpenAP 同义机型都必须有决定。场景和 selection 文件记索引表的 sha256，
+  加载时指纹不同就拒绝（09-24 以前的场景文件都要重新生成）。
+- `aircraft_for_code`（auto）：预设 → 索引表 → OpenAP 原生机型；OpenAP 同义机型不再直接飞；C56X 的手工质量修正删掉，由 own 行接替。
+- `flight_scenarios`：`NoAircraftDynamics`；批量构建丢掉没有动力学的航班并记名（selection schema v2）；命令行去掉 `--aircraft-type`；
+  新审计字段 `performance_index_decision`；观测记录只在按本机建模时给质量。参考速度表再补 A339、B753、MD82 三行（共 193 行）。
+- 未改：ts `aircraft_filter = all` 的 A320 回退（28 个旧状态预测 run 记着它），待用户定。`flight_scenarios/docs/population_reference.md` FS6。
 
 ### 2026-09-24 — 缺气动参数机型的分析报告；进近参考速度改用各机型公布值（按质量换算）
 

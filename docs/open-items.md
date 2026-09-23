@@ -11,7 +11,10 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 - **缺气动参数的机型一律用 A320（2026-09-23 分析完成）。** train 50,693 条里 13,164 条（26.0 %）用 A320 飞，其中 4,599 条的机型进近速度落在 A320 模型的失速分支里或更低（活塞机全部）。报告与 199 个机型的替代表：`docs/aircraft_performance/2026-09-23_missing_performance_substitution.zh.md`。用户的决定（09-23 / 09-24）：
   - **进近参考速度改用各机型公布值、按质量换算（方案 A）—— 已完成**（分支 `docs-aero-substitution`，FS5 / K10）。09-24 前准备的 `flight_scenarios/outputs/*_threshold_scenarios.json` 加载时被拒，重新求解前要重跑 `prepare_scenario_inputs.py`（先问用户）。
-  - **第 1–3 项做成一张索引表**（本机参数 / 替代 / 排除，代替 A320 回退；活塞、涡桨排除）—— 进行中。ts：215 个 `openap-direct` run 不受影响；28 个旧的 `aircraft_filter = all` 状态预测 run（2026-09-04 起的 final_constraint 等）回放时会少掉被排除的机型，怎么处理要问用户。
+  - **第 1–3 项做成一张索引表 —— 已完成**（`aircraft/performance_index.json`，FS6）：own 31 / substitute 53 / exclude 125（含 10 个没有航班的同义机型）；
+    flight_scenarios 与优化器场景默认不再用 A320。**待用户定**：ts `aircraft_filter = all` 仍按 A320 飞被排除的机型；
+    28 个旧的 `all` 状态预测 run（2026-09-04 起的 final_constraint 等）回放时预测不变，但导出记录的机型 / 质量按索引表变、
+    速度门判定会变；去掉回退则回放会少掉被排除的航班。215 个 `openap-direct` run 不受影响。
   - **待办**：写信问 EASA（environment@easa.europa.eu），公开的 ANP v2.3 表的系数能否在论文里引用（唯一有襟翼档进近速度规律的公开来源）。先不做。
 - **机型识别与最小重量已补（2026-09-23，用户要求“数据源必须靠谱，宁缺”）。** 用户当天决定并已执行：
   (1) 五个机场的观测报告已重评并重发前端（三门通过率 82.6% → 85.8%，横向/垂直判定无一变化，横向名单的合格集合

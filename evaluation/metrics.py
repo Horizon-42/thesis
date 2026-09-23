@@ -172,8 +172,8 @@ METHODOLOGY: dict[str, Any] = {
         "reference_speeds": {
             "table": str(REFERENCE_SPEEDS_PATH.relative_to(REFERENCE_SPEEDS_PATH.parents[1])),
             "schema": REFERENCE_SPEEDS_SCHEMA,
-            # Rows were added on 2026-09-23 (18 types, for the aircraft model); the digest
-            # tells a report written against the 172-row table from one against the 190-row one.
+            # Rows were added on 2026-09-23/24 (21 types, for the aircraft model); the digest
+            # tells a report written against the 172-row table from one against the 193-row one.
             **reference_speeds_identity(),
             "definition": (
                 "FAA Office of Airports, Aircraft Characteristics Database (October 2024): "

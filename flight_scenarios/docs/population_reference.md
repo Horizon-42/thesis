@@ -77,10 +77,11 @@ gets a new ID here and ONE new line in the index.**
   synonyms:** the speed gate keys on the record's `dynamics_typecode` — the synonym's own code — and
   scales the synonym's own row by the record's (surrogate) mass, so for 12 of the 21 synonyms a target
   at the surrogate's speed sits outside the synonym's window (worst LJ45: window [256.6, 276.6] kt).
-  The cause predates this change (the gate keyed on the synonym before too); the performance index
-  replaces flown synonyms with explicit substitutes, whose code is the surrogate's.
-- Types covered: the 172 rows of the 2026-09-07 pack + 18 rows added 2026-09-23 for the OpenAP types it
-  did not list (`docs/reference_speeds/README.md`). **B3XM** is not in the FAA table:
+  The cause predates this change (the gate keyed on the synonym before too). **Resolved by FS6:** synonyms
+  are no longer flown under their own code at all; the performance index flies each as an explicit
+  substitute (code = the surrogate's) or with its own parameters (C56X).
+- Types covered: the 172 rows of the 2026-09-07 pack + 21 rows added 2026-09-23/24 for the OpenAP and
+  own-parameter types it did not list (`docs/reference_speeds/README.md`). **B3XM** is not in the FAA table:
   `get_aircraft_parameters("B3XM")` refuses it and `openap_support_kind("B3XM")` is None, so it is
   neither buildable nor in `openap_direct_typecodes()`. No harvested flight is a B3XM.
 - **Saved scenarios are checked.** `FlightScenario.from_dict` rebuilds the aircraft from its code (today's
@@ -96,6 +97,41 @@ gets a new ID here and ONE new line in the index.**
   range (the gate window at the landing mass). The ts datasets read only the target's position, ψ and γ,
   so no ts cohort or checkpoint moves. Optimizer records already on disk keep the target they were solved
   against until re-solved.
+
+### FS6 · Types without a native model are decided by the performance index; none flies as an A320 by default
+
+- **Order** (`scenario.aircraft_for_code`, provider `auto`): a hand-tuned preset; else the row of
+  `aircraft/performance_index.json` (schema `aircraft-performance-index-v1`, loader
+  `aircraft/performance_index.py`); else the type's own OpenAP model if OpenAP models it DIRECTLY and it
+  has a published approach speed. OpenAP synonyms are no longer flown with their surrogate's data under
+  their own code (`get_aircraft_parameters` refuses them); B3XM (no FAA speed) is refused. Provider
+  `openap` (ts `openap-direct`) bypasses presets and the index, as before.
+- **Rows** (2026-09-24, 209 types = the 199 types of the train/val census without a native model, decided by
+  `docs/aircraft_performance/2026-09-23_missing_performance_substitution.zh.md` (user decisions
+  2026-09-23/24), + the 10 OpenAP synonyms no observed flight carries, decided by the analysis's synonym
+  rule): `own` (31 types: 21 from type-certificate data sheets + FAA ACD masses, 10 from the Poll–Schumann
+  file) builds the type's own `Aircraft` (own landing mass, wing area, installed thrust, each citing a source
+  id listed in the file; its own published speed; the MTOW-class procedure); `substitute` (53) returns the
+  substitute airframe UNDER ITS OWN CODE, so mass, speed and speed gate stay one airframe (`resolved_typecode`
+  keeps the identity); `exclude` (125: propeller aircraft by user decision, rotorcraft/military, no FAA
+  approach speed, no same-class airframe) raises `KeyError` naming the reason. The loader refuses a row that
+  would shadow a native airframe, a substitute that is not native, an own row without a published speed or a
+  cited source, and a file that leaves any OpenAP synonym undecided.
+- **Which index.** `performance_index_identity()` (sha256 + row count) is stamped into every scenario's
+  `source["performance_index_sha256"]` and every `<scenarios>.selection.json`; `FlightScenario.from_dict`
+  refuses a scenario built under another index or none (its code would be re-resolved into another airframe
+  under its stored aero), so EVERY scenario file prepared before 2026-09-24 — threshold and fitted-ADS-B —
+  must be regenerated before a re-solve.
+- **No A320 by default.** `_resolve_aircraft` raises `NoAircraftDynamics(typecode, reason)` when nothing
+  flies the type and no fallback was passed; `dataset.build_scenario_dataset` drops such flights and names
+  them in `<scenarios>.selection.json` (`excluded_no_dynamics`, schema `flight-scenarios-selection-v2`); the
+  CLI has no `--aircraft-type` any more. The explicit fallback parameter remains for the ts `all` filter
+  (`TSConfig.aircraft_type`, recorded in every checkpoint) until the user decides that filter's future.
+- **Audit**: `source["performance_index_decision"]` (own / substitute / exclude / None);
+  `dynamics_source` is `aircraft-performance-index-v1` for an own-parameter type.
+- **Observed records** (`resolve_airframe`): the mass is returned only when the model flies the type as
+  itself (preset, OpenAP-direct, index own); a substituted or excluded type keeps its type and gets no mass.
+  Observed records change only when regenerated (with the user's permission).
 
 ### FS4 · `source["flight_key"]` is populated here
 

@@ -80,13 +80,12 @@ class Approach:
     only meaningful at a mass: :meth:`reference_speed_ms` rescales it by sqrt(m / MALW), the
     same law the threshold speed gate uses (``aircraft.reference_speeds.ReferenceSpeed.vref_kt``).
     The target speed is the upper edge, the speed floor the lower one, so for a record the gate
-    judges against THIS row (a preset, a direct OpenAP type, C56X) a target flown at
+    judges against THIS row -- every flown airframe, since the flown code is the row's code -- a
+    target flown at
     ``reference_speed_ms(m)`` is ``evaluation.speed_gate.speed_gate_bounds(...).vref_high_ms`` at
     that crossing mass: inside the gate's window, on its lower edge when the type publishes one
     value (FAA AC 91-79B §5.2.2: V_ref plus wind and gust additives until 50 ft over the
-    threshold; the model flies no wind, so no additive). An OpenAP synonym flies its
-    surrogate's row while the gate keys on the synonym's own code; the performance index
-    (``aircraft/performance_index.json``) replaces synonyms with explicit substitutes.
+    threshold; the model flies no wind, so no additive).
 
     One stated approximation: the published speed is an indicated airspeed and the model
     flies it as a true airspeed; at this fleet's threshold elevations they differ by < 1 %.
@@ -149,6 +148,37 @@ class Aircraft:
         if self.mass.max_landing_kg is not None:
             return float(self.mass.max_landing_kg)
         return _LANDING_MASS_FRACTION_OF_MTOW * self.mass.max_takeoff_kg
+
+
+# The approach PROCEDURE defaults (not the speeds) of a maximum take-off weight's class, for the
+# airframes that have no hand-tuned envelope (OpenAP types, the performance index's own-parameter
+# types); they mirror the presets below. Weight is the key: OpenAP's own ``category``
+# (transport_jet / business_or_general_aviation / unknown) lumps the A318 and the 777 together.
+# Class boundaries (kg): 5 700 = the light/large-aircraft regulatory split; 150 000 ≈ the
+# narrow-body/wide-body split (A321 ~93 t … B767 ~186 t).
+_LIGHT_MAX_TAKEOFF_KG = 5_700.0
+_WIDE_BODY_MIN_TAKEOFF_KG = 150_000.0
+_GENERAL_AVIATION_PROCEDURE = dict(
+    final_segment_min_nm=2.0, final_segment_max_nm=5.0, protection_half_width_nm=0.5,
+    glide_angle_deg=3.0, threshold_crossing_height_m=15.0, thrust_guess_n=800.0,
+)
+_NARROW_BODY_PROCEDURE = dict(
+    final_segment_min_nm=5.0, final_segment_max_nm=10.0, protection_half_width_nm=0.8,
+    glide_angle_deg=3.0, threshold_crossing_height_m=15.0, thrust_guess_n=40000.0,
+)
+_WIDE_BODY_PROCEDURE = dict(
+    final_segment_min_nm=6.0, final_segment_max_nm=12.0, protection_half_width_nm=1.0,
+    glide_angle_deg=3.0, threshold_crossing_height_m=15.0, thrust_guess_n=140000.0,
+)
+
+
+def class_procedure(max_takeoff_kg: float) -> dict[str, float]:
+    """The approach procedure defaults of a maximum take-off weight's class (``Approach`` kwargs)."""
+    if max_takeoff_kg < _LIGHT_MAX_TAKEOFF_KG:
+        return dict(_GENERAL_AVIATION_PROCEDURE)
+    if max_takeoff_kg >= _WIDE_BODY_MIN_TAKEOFF_KG:
+        return dict(_WIDE_BODY_PROCEDURE)
+    return dict(_NARROW_BODY_PROCEDURE)
 
 
 def published_speeds(typecode: str) -> ReferenceSpeed:
