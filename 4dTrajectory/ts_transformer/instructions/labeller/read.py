@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -143,19 +144,23 @@ def span_funnel(flight: Admitted, span: HeadingSpan, target_deg: float,
                 spec: VocabularySpec) -> tuple[envelope.TurnEnds | None, envelope.HoldFunnel]:
     """A held heading word's funnel (§2.3), as long as the flight flew it: from where its turn may
     end (`turn_ends_at` from the word's issue row), or from the issue point itself for a word flown
-    from entry. Its length is the distance flown to the hold's end from the turn's last row — the
-    track enters the band between that row and the hold's first — or from the issue row for a word
-    flown from entry; so a row can lie in it only if it could have been reached from where the turn
-    may end."""
-    distance = flight.smoothed.distance_m
+    from entry. Its length is the path flown to the hold's end, summed along the very positions the
+    rows are judged by (the smoothed ground speed integrates to ~0.2 % less, which would push a long
+    hold's last rows out), from where the turn may have ended: `turn_start_delay_max_s` before the
+    turn's last row, not before the issue row. The track enters the band between that row and the
+    hold's first as the labeller reads it, and the two centred windows that let the reading see a
+    turn begin up to `turn_start_delay_max_s` early let it see the turn end as much late. A word
+    flown from entry measures from its issue row. No row can then lie beyond the funnel along θ
+    from a turn that ended where it may, and the length bounds only how far along θ it ended."""
     row = span.word.row
-    position = np.array([flight.signals.e_m[row], flight.signals.n_m[row]])
+    positions = np.column_stack((flight.signals.e_m, flight.signals.n_m))
     if span.turn is None:
-        ends, starts, origin = None, position[None, :], span.hold_start
+        ends, starts, origin = None, positions[row][None, :], span.hold_start
     else:
         ends = turn_ends_at(flight, row, target_deg, spec)
-        starts, origin = position + ends.corners, span.hold_start - 1
-    length = float(distance[span.hold_end] - distance[origin])
+        late = math.ceil(spec.turn_start_delay_max_s / spec.step_s)
+        starts, origin = positions[row] + ends.corners, max(row, span.hold_start - 1 - late)
+    length = float(np.hypot(*np.diff(positions[origin: span.hold_end + 1], axis=0).T).sum())
     return ends, envelope.hold_funnel(starts, target_deg, spec.heading_tolerance_deg, length)
 
 
