@@ -36,6 +36,12 @@ nothing here is importable — there is no `__init__.py` on the way in.
 | `docs/assets/instruction_distribution_20260922/` | `docs/assets/` | the distribution report's figures and tables |
 | `docs/experiments/two_tier_v3_bprime_arms.json` | `docs/experiments/` | the B′ campaign's arm declaration |
 
+**Never committed anywhere else**: `experiments/final_vertical_check.py` — the D61 vertical check
+(where a sentence's last event sits against the published path), left untracked in the
+`dev-freegen-readout` worktree and copied here byte for byte on 2026-09-23 when that worktree was
+removed. That branch's nine commits (the prior's free generation and the D61 landing gate, based
+on 09-20 code) were never merged; the tag `archive/freegen-readout` (`208ab00f`) keeps them.
+
 **Cut verbatim out of live files** (not a `git mv`; the text is unchanged):
 
 - `docs/reference/entries.md` — contracts C30 and C29 (`docs/reference/contracts.md`) and the
