@@ -9,11 +9,12 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
-- **机型识别与最小重量已补（2026-09-23，用户要求“数据源必须靠谱，宁缺”），三件事等用户决定：**
-  (1) 重评五个机场的观测报告并重发前端（只读估算：三门通过率 82.6% → 85.8%，速度门判不了 8,910 → 6,554；
-  `--observed-only` 会重写 `approach/` 和前端副本）；(2) ts 的 openap-direct 集合因机型库变了 244 条进场，
-  `cohorts_v7_20260923` 是旧机型库建的，是否用 `plan_cohort` 重建；(3) 10 个机型只有厂家旧网页的互联网档案馆
-  存档（E55P、CL30、C750、C680、GLF5、G280、LJ60、BE9L、C510、E50P），是否接受这类来源。
+- **机型识别与最小重量已补（2026-09-23，用户要求“数据源必须靠谱，宁缺”）。** 用户当天决定并已执行：
+  (1) 五个机场的观测报告已重评并重发前端（三门通过率 82.6% → 85.8%，横向/垂直判定无一变化，横向名单的合格集合
+  不变）；(2) `cohorts_v7_20260923` 已按新机型库重建（每单元 train −4、val −3，全部是 openap-direct 资格变化的航班）；
+  (3) 10 个机型只有厂家旧网页的互联网档案馆存档（E55P、CL30、C750、C680、GLF5、G280、LJ60、BE9L、C510、E50P）——
+  **先记录，不进参考表**，数字与出处在 `docs/reference_speeds/README.md`“2026-09-23: type certificate data sheets”，
+  以后需要时再决定。
   分析与数字：`evaluation/docs/2026-09-23_observed_baseline_pass_rate.zh.md`。
 - **跟踪项：Falcon 7X/8X 新判得了速度之后 54 条里 22 条偏快**（窗口上限约 124 kt，中位数 123 kt）。上限锚在 FAA
   飞机特性数据库的进近速度 104 / 106 kt；需要另一份公开来源核对这个数是否偏低，再决定是否改表。
@@ -26,7 +27,7 @@ change you are making go in `docs/code-health-followups.md` instead.
   KRDU 5 条，只缺没有 RNAV 程序的 14）。旧 v5 名单冻结为 `outputs/harvest-v5-20260823`，旧 checkpoint 按指纹回放。
   状态与数字：`trajectory_data_process/docs/11-2026-09-23-merge-new-data.zh.md`。
   已完成：`new_data_9_22` 核对后删除；前端 observed 已更新；stage A 网格 cohort 已按新数据重建到
-  `4dTrajectory/outputs/KRDU/experiments/cohorts_v7_20260923/two_tier_v3_grid/`。前端 `training/` 下已归档词表的导出
+  `4dTrajectory/outputs/KRDU/experiments/cohorts_v7_20260923/two_tier_v3_grid/`（同日晚按新机型库再重建一次，见上条）。前端 `training/` 下已归档词表的导出
   （box_v3、prior_*）在 `check-publication` 里报错（读取规则/schema 已变），与合并无关，待词表重写后处理。
 
 - **`clean_pipeline_data.py` DELETES the 70,267 optimizer records the next item says to

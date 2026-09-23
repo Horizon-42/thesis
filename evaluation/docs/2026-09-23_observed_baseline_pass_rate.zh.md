@@ -5,10 +5,11 @@
 | 项 | 状态 | 说明 |
 |---|---|---|
 | 原因查明 | 完成 | 见下 |
-| 1. 补最小重量（参考表 `aircraft/reference_speeds.json`） | 完成（未提交前待复核） | 13 个机型用上了 FAA / EASA 型号合格证数据单（TCDS）或 Gulfstream 官网现行页面的数字：F2TH、LJ45、F900、FA50、FA7X、FA8X、FA10、H25B、GA6C、GA5C 从“没有”变成有；GLEX、GL5T、C56X 原来用厂家基本空机重量，按“认证最小飞行重量优先”的既定顺序改成 TCDS 数字。每个数字都重新从下载的原文件核对过（sha256 一致）。缺最小重量的机型 109 → 99。另有 10 个机型只找到**厂家旧网页的互联网档案馆存档**，未采用，等用户决定。明细 `docs/reference_speeds/README.md`“2026-09-23: type certificate data sheets” |
-| 2. 补 icao24 → 机型（`aircraft/faa_aircraft_identity.json`） | 完成（待复核后提交） | 新增有证据的对照表 `aircraft/faa_icao_crosswalk.json`（32 个型号、84 种注册库写法）：FAA 型号只有在 TCDS / FSB 报告 / FAA JO 7360.1K 与 Doc 8643 两边都对得上时才映射；一个型号跨多个 ICAO 代码的按 FAA 文件印的序列号拆分（BD-100、Falcon 7X、TBM 700、Cessna 525），拆不了的标“无法确定”（ATR 72-212A、Cessna 525 的 CJ1+ 段、King Air B300C），并且**不再让 OpenSky 猜**。注册库快照换到 9/22。识别不了的航迹 2,737 → 914 |
+| 1. 补最小重量（参考表 `aircraft/reference_speeds.json`） | 完成，d5acb04f | 13 个机型用上了 FAA / EASA 型号合格证数据单（TCDS）或 Gulfstream 官网现行页面的数字：F2TH、LJ45、F900、FA50、FA7X、FA8X、FA10、H25B、GA6C、GA5C 从“没有”变成有；GLEX、GL5T、C56X 原来用厂家基本空机重量，按“认证最小飞行重量优先”的既定顺序改成 TCDS 数字。每个数字都重新从下载的原文件核对过（sha256 一致）。缺最小重量的机型 109 → 99。另有 10 个机型只找到**厂家旧网页的互联网档案馆存档**，未采用，等用户决定。明细 `docs/reference_speeds/README.md`“2026-09-23: type certificate data sheets” |
+| 2. 补 icao24 → 机型（`aircraft/faa_aircraft_identity.json`） | 完成，750daafb | 新增有证据的对照表 `aircraft/faa_icao_crosswalk.json`（32 个型号、84 种注册库写法）：FAA 型号只有在 TCDS / FSB 报告 / FAA JO 7360.1K 与 Doc 8643 两边都对得上时才映射；一个型号跨多个 ICAO 代码的按 FAA 文件印的序列号拆分（BD-100、Falcon 7X、TBM 700、Cessna 525），拆不了的标“无法确定”（ATR 72-212A、Cessna 525 的 CJ1+ 段、King Air B300C），并且**不再让 OpenSky 猜**。注册库快照换到 9/22。识别不了的航迹 2,737 → 914 |
 | 3. 教练机偏慢 | 先不改，列为跟踪项 | 见 `docs/open-items.md` 同日条目 |
-| 观测报告重评 + 前端重发 | **等用户同意** | 只读估算见下节；重评会重写 `approach/` 报告与前端副本 |
+| 观测报告重评 + 前端重发 | 完成（用户同意，2026-09-23 19:19–19:28 UTC） | `--observed-only` 逐机场重跑；结果与下节只读估算逐项一致；横向、垂直判定无一变化；五个前端副本与报告字节一致；横向名单已刷新，合格集合不变（72,247）；`check-publication` 对比类别全部通过 |
+| ts cohort 重建 | 完成（用户同意） | `cohorts_v7_20260923/two_tier_v3_grid` 20 个单元：每单元 train −4（+5 −9）、val −3，无航班换边；差异全部是 openap-direct 资格变化（737-86N 丢机型 10、GLF6 新增 2 等） |
 
 ## 数字（live 报告，合并后）
 
@@ -41,7 +42,7 @@ P28A 的偏慢 fail 占 KRDU 速度门 fail 的 15%（168/1,084），P28A 本身
 进近速度按最小重量缩放（`speed_gate_bounds`）；训练飞行常在较轻重量、较低速度进近。**现在按“教练机实际飞法”
 解释，门不改**；是否需要为教练机/通航单独定窗口，列入跟踪项（`docs/open-items.md`）。
 
-## 1、2 完成后的只读估算（未重写任何报告）
+## 1、2 完成后的重评结果（先做只读估算，重评后逐项一致）
 
 用当前的机型库和参考表，把五个机场报告里已有的交叉速度、载荷系数重新套速度门（`evaluation.speed_gate.speed_gate_bounds`），
 横向、垂直结果不动。脚本只读报告，不写文件；用旧库算出的 KRDU 80.2% 与前端一致，说明口径对得上。
@@ -60,4 +61,4 @@ P28A 的偏慢 fail 占 KRDU 速度门 fail 的 15%（168/1,084），P28A 本身
 - **Falcon 7X/8X 新判得了之后偏快**：54 条里 22 条超过上限（窗口约 75–124 kt，中位数 123 kt）。上限来自 FAA 数据库
   的进近速度 104 / 106 kt，偏低的可能性要查，列入跟踪项。
 - 对 ts 的影响：openap-direct 机型集合相对 9/23 上午（旧机型库）变 244 条进场（+191：A333 KSMF 96、GLF6 KSJC 71 …；
-  −53：GLF6 → GA7C/GA8C 31、737-86N 11 …），今天建的 `cohorts_v7_20260923` 是旧机型库下的，重建与否等用户决定。
+  −53：GLF6 → GA7C/GA8C 31、737-86N 11 …）；KRDU 的 stage A 网格 cohort 已重建（见状态表）。

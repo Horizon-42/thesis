@@ -113,6 +113,8 @@ python -c "from ts_transformer.data.lateral_eligibility import ensure_lateral_pa
   与 `two_tier_v3_grid_arms.json` 相同，只是 cohort 路径指向这里，不改写原实验的 cohort）。每单元
   train 10,075–10,162 / val 2,121–2,140（原来 6,798–6,857 / 1,392–1,405）；原 cohort 的航班全部保留、没有换划分。
   其余三组 cohort（manoeuvre_tok、plan_guidance、runway_intent_r2b）属于已归档/已结束的实验，没有重建。
+  同日晚按新机型库（750daafb）用同一条命令再重建一次：每单元 train −4、val −3，全部是 openap-direct 资格变化的
+  航班（`evaluation/docs/2026-09-23_observed_baseline_pass_rate.zh.md`）。
   顺带修了 `plan_cohort --arms` 的一个 bug：`--model` 有默认值，旧的“不为 None 就是用户给了”判断让 `--arms` 永远拒绝运行。
 
 ## 合并后核对（清单）

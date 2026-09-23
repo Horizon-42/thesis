@@ -25,6 +25,10 @@
 - **没有重写任何报告**：只读估算重评后三门通过率 82.6% → 85.8%（KRDU 80.2% → 83.0%），速度门判不了 8,910 → 6,554；
   Falcon 7X/8X 新判得了之后 22/54 偏快，列入跟踪项。重评、前端重发、ts cohort 重建（openap-direct 集合变 244 条
   进场）等用户决定，见 `docs/open-items.md`。
+- **数据（同日执行，用户同意）**：五个机场 `--observed-only` 重评并重发前端，结果与只读估算逐项一致（82.6% → 85.8%，
+  KRDU 80.2% → 83.0%），横向/垂直判定无一变化；横向名单刷新后合格集合不变（72,247）。KRDU stage A 网格 cohort
+  （`cohorts_v7_20260923/two_tier_v3_grid`）用同一条 `plan_cohort` 命令重建：每单元 train −4、val −3，无航班换边。
+  档案馆存档的 10 个最小重量：用户决定先记录、不采用。
 - 测试时发现 `test_write_reference_records_from_observed_tracks` 在干净的 HEAD 上也失败（bb643d58 起），记为
   `docs/code-health-followups.md` #18；#19、#20 是 OpenSky 注册号复用和机型时效问题，#21 是 OpenAP 缓存读取不查 schema。
 
