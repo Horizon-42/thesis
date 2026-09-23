@@ -396,11 +396,14 @@ split by `data.splits` — the test split's tracks are never opened — built by
 `usable_series` under the default `TSConfig`, so the population is the models'), `candidates.json`
 (each airport's candidate runways: the arrival manifest's `runway_targets`, the FAA CIFP runway
 geometry the modeling target is built from; position, elevation, true course only — never the
-published glidepath or TCH), `spec.json` + `measurements.json`, `sentences_{train,val}.npz` +
-`labels.json` + `readout.{json,md}`. The spec's sha covers every word, grid, class, tolerance and the
-reading rule (`instructions.spec.READING_RULE`); `load_sentences` refuses a sentences file read with
-another sha, `VocabularySpec.from_dict` refuses a missing or extra key and another reading rule —
-no compatibility. **The code is part of the identity**: `spec.json` records
+published glidepath or TCH — and every runway end the harvest builds, which the landing rule reads),
+`spec.json` + `measurements.json`, `sentences_{train,val}.npz` + `labels.json` + `readout.{json,md}`.
+Every file code reads back carries its format's name (`SIGNALS_SCHEMA`, `CANDIDATES_SCHEMA`,
+`SPEC_SCHEMA`, `SENTENCES_SCHEMA`) and is refused under any other; **a name changes with its file's
+shape**, in the same change (2026-09-24, the user's rule). The spec's sha covers every word, grid,
+class, tolerance and the reading rule (`instructions.spec.READING_RULE`); `load_sentences` refuses a
+sentences file read with another sha, `VocabularySpec.from_dict` refuses a missing or extra key and
+another reading rule — no compatibility. **The code is part of the identity**: `spec.json` records
 `labeller_source_sha256` (the modules that decide a sentence and the spec, `artefact.LABELLER_MODULES` —
 not the artefact, readout, figure or display code) and
 the git head/dirty state it was measured at; `instruction_labels` / `instruction_figures` refuse a

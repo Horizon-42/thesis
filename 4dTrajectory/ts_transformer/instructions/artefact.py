@@ -2,7 +2,7 @@
 
 ``signals_<split>.npz`` + ``signals.json``   the per-step signals and where they came from
 ``spec.json`` + ``measurements.json``        the vocabulary spec (with its sha) and the numbers behind it
-``candidates.json``                          every airport's candidate runways (the artefact's geometry)
+``candidates.json``                          every airport's candidate runways and runway ends (its geometry)
 ``sentences_<split>.npz`` + ``labels.json``  the sentences, and every flight's outcome
 
 A reader checks the spec's sha against the sentences it opens and refuses a mismatch — the
@@ -29,6 +29,7 @@ from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
 from ts_transformer.io_utils import write_json_atomic
 
 SENTENCES_SCHEMA = "ts-instruction-sentences-v2"
+CANDIDATES_SCHEMA = "ts-instruction-candidates-v2"
 SPLITS = ("train", "val")
 
 
@@ -57,11 +58,14 @@ def load_signals(directory: Path, split: str) -> list[FlightSignals]:
 
 def write_candidates(directory: Path, geometries: dict[str, AirportGeometry]) -> None:
     write_json_atomic(_fresh(directory / "candidates.json"),
-                      {"airports": {code: geometry.to_dict() for code, geometry in sorted(geometries.items())}})
+                      {"schema": CANDIDATES_SCHEMA,
+                       "airports": {code: geometry.to_dict() for code, geometry in sorted(geometries.items())}})
 
 
 def load_candidates(directory: Path) -> dict[str, AirportGeometry]:
     record = json.loads((directory / "candidates.json").read_text(encoding="utf-8"))
+    if "schema" not in record or record["schema"] != CANDIDATES_SCHEMA:
+        raise ValueError(f"{directory / 'candidates.json'} is not a {CANDIDATES_SCHEMA} file")
     return {code: AirportGeometry.from_dict(data) for code, data in record["airports"].items()}
 
 

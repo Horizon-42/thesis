@@ -21,7 +21,7 @@ from typing import Any
 from geokit import FT_M, KT_MS, NM_M
 
 READING_RULE = "instruction-v2"
-SPEC_SCHEMA = "ts-instruction-spec-v2"
+SPEC_SCHEMA = "ts-instruction-spec-v3"
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
 #: more outside the approach gate.

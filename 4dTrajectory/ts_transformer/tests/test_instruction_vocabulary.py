@@ -17,13 +17,14 @@ from ts_transformer.data.channels import channels_from_states
 from ts_transformer.instructions import envelope, measure
 from ts_transformer.instructions.airport import AirportGeometry, airport_geometry, relative_to_runway
 from ts_transformer.instructions.artefact import (
-    labeller_source_sha256, load_candidates, load_sentences, load_signals, load_spec, require_current_labeller,
+    CANDIDATES_SCHEMA, labeller_source_sha256, load_candidates, load_sentences, load_signals, load_spec,
+    require_current_labeller,
     write_candidates, write_sentences, write_signals, write_spec,
 )
 from ts_transformer.instructions.labeller.read import admit, read_flight
 from ts_transformer.instructions.piecewise import fit_pieces, moving_average
 from ts_transformer.instructions.signals import FlightSignals, signals_from_series
-from ts_transformer.instructions.spec import VocabularySpec
+from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
 from ts_transformer.instructions.words import (
     ANGLE_LEVEL, Words, compass_from_math_rad, math_rad_from_compass, wrap180,
 )
@@ -397,6 +398,12 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
     assert back[1].e_m.tolist() == flights["train"][1].e_m.tolist()
     write_candidates(tmp_path, {"KXXX": geometry})
     assert load_candidates(tmp_path)["KXXX"] == geometry
+    # a candidates file without this schema's name (the runway ends came with it) is refused by name
+    (tmp_path / "unnamed").mkdir()
+    (tmp_path / "unnamed" / "candidates.json").write_text(json.dumps({"airports": {"KXXX": geometry.to_dict()}}),
+                                                          encoding="utf-8")
+    with pytest.raises(ValueError, match=f"is not a {CANDIDATES_SCHEMA} file"):
+        load_candidates(tmp_path / "unnamed")
     one = spec()
     source = {"labeller_source_sha256": labeller_source_sha256(), "git": {"head": "test", "dirty": False}}
     write_spec(tmp_path, one, {"n": 1}, source)
@@ -415,9 +422,9 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
     assert len(sentences["instruction_row"]) == len(reading.instructions)
     # a spec file of another schema is refused by name
     (tmp_path / "old").mkdir()
-    (tmp_path / "old" / "spec.json").write_text(json.dumps({"schema": "ts-instruction-spec-v1", "sha256": one.sha256,
+    (tmp_path / "old" / "spec.json").write_text(json.dumps({"schema": f"{SPEC_SCHEMA}-other", "sha256": one.sha256,
                                                             "spec": one.to_dict()}), encoding="utf-8")
-    with pytest.raises(ValueError, match="is not a ts-instruction-spec-v2 file"):
+    with pytest.raises(ValueError, match=f"is not a {SPEC_SCHEMA} file"):
         load_spec(tmp_path / "old")
     # a spec measured by another labeller: labelling refuses, and so does the sentence file
     other = tmp_path / "other"
