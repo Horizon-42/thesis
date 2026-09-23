@@ -66,3 +66,8 @@ restrictions, HSL, the numpy test failure): repo `docs/open-items.md`, "Optimize
   the first fix; frame-anchor contract validated at ±150 m (K8).
 - Playback drift guard: `playbackDriftM` on every optimize response; WARNING above
   `PLAYBACK_DRIFT_WARN_M = 50` (K9).
+- Target speed: `runway`-mode pins the terminal V to the airframe's PUBLISHED approach speed at the
+  solve mass (`approach.reference_speed_ms(m)`, the speed gate's own law; since 2026-09-24, was 145 kt
+  for every 5.7–150 t type); velocity floor `1.10 · V_s1g` (its V_ref cap could not bind); the
+  interactive optimizer's default floor is the published lower edge at the solve mass; `--resume`
+  re-solves records flown to another target (K10).

@@ -399,6 +399,12 @@ bucket for both), which is the 737 family's "fast" cluster in one line.
   *observed* crossing speed, which is a ground speed; on a headwind day it can sit
   below V_ref, and a solve that faithfully hits it will fail the speed gate. Quote
   speed-gate rates per `target_source`, never pooled.
+- **RESOLVED 2026-09-24 for new solves: the optimizer's target is this gate's own upper
+  reference at the crossing mass**, `V_ref,hi(m)` from the same table and the same sqrt(m / MALW)
+  law (`flight_scenarios/docs/population_reference.md` FS5, `4dTrajectory/docs/optimizer_reference.md`
+  K10), so a converged `runway` solve crosses inside the window — on its lower edge for a type that
+  publishes one value. The two bullets below describe the records solved before that date — every
+  `runway` record on disk — and stay true for them.
 - **The category-default target V_ref can itself fail the gate — that is a finding,
   not a bug.** OpenAP-resolved aircraft get an approach group by MTOW class
   (`query_aircraft_parameters._default_approach`): everything 5.7–150 t targets

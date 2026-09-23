@@ -311,7 +311,7 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
     (config) => config.code === initialState.aircraftType,
   ) ?? aircraftConfigs[0] ?? null;
   const selectedMaxThrustN = selectedAircraft?.maxThrustN ?? FALLBACK_MAX_THRUST_N;
-  const targetSpeedBounds = targetSpeedBoundsMps(selectedAircraft);
+  const targetSpeedBounds = selectedAircraft ? targetSpeedBoundsMps(selectedAircraft) : null;
   const selectedTargetRunway = runwayTargets.find(
     (target) => target.id === targetState.runwayThresholdId,
   );
@@ -1145,6 +1145,8 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
 
     let nextValue = clamp(value, min, max);
     if (key === "speedMps") {
+      // The editor is only rendered once an aircraft is selected (it owns the speed range).
+      if (!selectedAircraft) return;
       nextValue = clampTargetSpeedMps(nextValue, selectedAircraft);
     } else if (key === "headingDeg") {
       nextValue = selectedTargetRunway
@@ -1739,7 +1741,11 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
               </div>
               <div>
                 <dt>Vt</dt>
-                <dd>{formatNumberInputValue(targetState.speedMps)} m/s</dd>
+                <dd>
+                  {Number.isFinite(targetState.speedMps)
+                    ? `${formatNumberInputValue(targetState.speedMps)} m/s`
+                    : "— (no aircraft)"}
+                </dd>
               </div>
               <div>
                 <dt>Gamma</dt>
@@ -1748,17 +1754,19 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
             </dl>
           </section>
 
-          <PilotTargetStateOverlay
-            open={isTargetEditorOpen}
-            state={targetState}
-            runwayTargets={runwayTargets}
-            speedMinMps={targetSpeedBounds.min}
-            speedMaxMps={targetSpeedBounds.max}
-            disabled={targetControlsDisabled}
-            onClose={closeTargetEditor}
-            onRunwayChange={updateTargetRunway}
-            onFieldChange={updateTargetField}
-          />
+          {targetSpeedBounds && (
+            <PilotTargetStateOverlay
+              open={isTargetEditorOpen}
+              state={targetState}
+              runwayTargets={runwayTargets}
+              speedMinMps={targetSpeedBounds.min}
+              speedMaxMps={targetSpeedBounds.max}
+              disabled={targetControlsDisabled}
+              onClose={closeTargetEditor}
+              onRunwayChange={updateTargetRunway}
+              onFieldChange={updateTargetField}
+            />
+          )}
 
           <section className="pilot-optimization-row" aria-label="Trajectory optimization settings">
             <label>
@@ -2495,6 +2503,10 @@ function makeDefaultTrajectoryTarget(
   resetSpeed = false,
 ): PilotTargetState {
   const fallbackSpeed = resetSpeed ? undefined : fallback?.speedMps;
+  // No aircraft yet: no target speed (NaN) until the catalog names one; then the published
+  // speed, or the kept speed clamped into that aircraft's range.
+  const keptSpeed =
+    fallbackSpeed !== undefined && Number.isFinite(fallbackSpeed) ? fallbackSpeed : undefined;
   return {
     runwayThresholdId: runwayTarget?.id ?? fallback?.runwayThresholdId ?? "",
     lon: runwayTarget?.lon ?? fallback?.lon ?? 0,
@@ -2502,10 +2514,9 @@ function makeDefaultTrajectoryTarget(
     altM: runwayTarget
       ? targetAltitudeMForThreshold(runwayTarget.altM, aircraft)
       : fallback?.altM ?? 0,
-    speedMps: clampTargetSpeedMps(
-      fallbackSpeed ?? defaultTargetSpeedMps(aircraft),
-      aircraft,
-    ),
+    speedMps: aircraft
+      ? clampTargetSpeedMps(keptSpeed ?? defaultTargetSpeedMps(aircraft), aircraft)
+      : fallbackSpeed ?? Number.NaN,
     headingDeg: runwayTarget
       ? runwayAlignedHeadingDeg(runwayTarget.psiDeg)
       : runwayAlignedHeadingDeg(fallback?.headingDeg ?? 0),

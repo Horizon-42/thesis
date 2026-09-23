@@ -200,3 +200,36 @@ gets a new ID here and ONE new line in the index.**
 
 - **Playback drift guard**: `playbackDriftM` on every optimize response; stderr WARNING above
   `PLAYBACK_DRIFT_WARN_M = 50`.
+
+### K10 · terminal speed and velocity floor
+
+- **The `runway`-mode target speed is the airframe's published approach speed at the solve mass**
+  (2026-09-24): the scenario target's V is `aircraft.approach.reference_speed_ms(m)` — the airframe's row
+  in `aircraft/reference_speeds.json` (FAA Aircraft Characteristics Database at MALW) × sqrt(m / MALW),
+  the threshold speed gate's own law and upper reference — and the collocation terminal pin holds the
+  full state, V included, so a converged solve crosses inside the gate's window (on its lower edge for a
+  single-valued type; replay drift below it fails the gate, as it should). Before, it was a weight-class
+  default (145 kt for every 5.7–150 t type, 155 kt above), which the gate failed as too fast for light
+  narrow-bodies and business jets (`evaluation/docs/THRESHOLD_SPEED_GATE.md` §7);
+  `flight_scenarios/docs/population_reference.md` FS5.
+- **Velocity floor** (`scenario_optimization`): `_STALL_MARGIN · V_s1g(initial mass)` with
+  `_STALL_MARGIN = 1.10` on the project stall model. Its former `V_ref` cap was removed on 2026-09-24
+  because it cannot bind: 1.10 · V_s1g is at most 0.93 × the published lower edge on every buildable
+  airframe (`test_the_stall_margin_floor_stays_below_every_published_lower_edge`). The floor itself
+  still comes from the stall model (`docs/code-health-followups.md` #23, remaining half).
+- **Interactive default floor**: `CollocationOptimizer` without `min_speed_ms` (the backend's optimize
+  path) floors the whole path at `approach.minimum_speed_ms(initial mass)`, the gate's 1-g lower edge;
+  `CasadiOptimizer(..., mass_kg)` builds its NLP with the floor at the given solve mass. The backend
+  solves every Pilot state at `pilot_mass_kg` (MTOW), and its catalog quotes the target speed and range
+  at that same mass, so the panel's range starts at the floor. A320 at MTOW: 147.8 kt (was 145).
+- **`--resume` re-solves a record flown to another target**: `_resumable_record` compares the record's
+  `target_state` with the scenario's target, so records solved to the 145 kt targets are re-solved
+  after the scenario files are regenerated.
+- `fitted_adsb` / `track_end` targets carry the observed crossing speed and are unaffected.
+- **Prepared scenario files are stale**: `flight_scenarios/outputs/*_threshold_scenarios.json` prepared
+  before 2026-09-24 carry 145 kt targets and `FlightScenario.from_dict` refuses them; rerun
+  `prepare_scenario_inputs.py` before a re-solve (`--resume` then re-solves every runway record). The 70,267 records on disk were solved against the old
+  targets; regenerating their reports does not change that, only a re-solve does.
+- The benchmark scripts (`solver_backend_benchmark.py`, `collocation_scheme_comparison.py`,
+  `geodetic_vs_reanchored_error.py`) start from `V_ref(MTOW)` + 10–12 m/s, so their printed numbers
+  shift on a re-run.

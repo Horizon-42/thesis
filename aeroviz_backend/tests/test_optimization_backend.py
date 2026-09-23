@@ -358,7 +358,7 @@ class TestOptimizationBackend(unittest.TestCase):
         solves = []
 
         class FakeCasadiOptimizer:
-            def __init__(self, n_segments, dt, max_duration, aircraft):
+            def __init__(self, n_segments, dt, max_duration, aircraft, mass_kg):
                 self.instance_id = len(constructions) + 1
                 constructions.append({
                     "aircraft": aircraft.code,

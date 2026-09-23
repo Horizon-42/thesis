@@ -134,7 +134,7 @@ def test_build_scenario_target_from_threshold():
     assert (scen.target.latitude, scen.target.longitude) == (
         FLIGHT["runway_target"]["lat"], FLIGHT["runway_target"]["lon"]
     )
-    assert scen.target.V == scen.aircraft.approach.reference_speed_ms
+    assert scen.target.V == scen.aircraft.approach.reference_speed_ms(scen.target.m)
 
 
 def test_build_scenario_target_from_threshold_falls_back_when_unknown():

@@ -191,11 +191,15 @@ for m in missing:
                    sub_tw=round(cands[best]["TW"], 3))
         if verdict:
             pass
+        elif eng in ("Piston", "Turboprop"):
+            verdict = "exclude: propeller aircraft (user decision 2026-09-23)"
+        # Order = source reliability: the type's own primary documents, then OpenAP's own
+        # synonym, then the Poll-Schumann file, then the nearest modelled airframe.
+        elif own and R_LO <= rec["r_own"] <= R_HI:
+            verdict = "own parameters (primary documents)"
         elif (r_now is not None and R_LO <= r_now <= R_HI
               and aac(t) == aac(m["openap24_surrogate"])):
             verdict = f"keep OpenAP synonym ({m['openap24_surrogate']})"
-        elif own and R_LO <= rec["r_own"] <= R_HI:
-            verdict = "own parameters (primary documents)"
         elif ps_code and ps_native:
             verdict = f"PS parameters ({ps_code})"
         elif not qualified:

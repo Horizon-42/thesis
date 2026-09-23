@@ -3110,6 +3110,186 @@
    "malw_kg": 4246,
    "malw_source": "faa_acd_2024_10",
    "malw_note": "MALW_lb 9,360"
+  },
+  "A124": {
+   "approach_speed_kt": 151,
+   "approach_speed_min_kt": 151,
+   "approach_speed_max_kt": 151,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 330000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 727,525"
+  },
+  "A19N": {
+   "approach_speed_kt": 130,
+   "approach_speed_min_kt": 130,
+   "approach_speed_max_kt": 130,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 62500,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 137,789"
+  },
+  "A310": {
+   "approach_speed_kt": 139,
+   "approach_speed_min_kt": 139,
+   "approach_speed_max_kt": 139,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 123999,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 273,372"
+  },
+  "A318": {
+   "approach_speed_kt": 121,
+   "approach_speed_min_kt": 121,
+   "approach_speed_max_kt": 121,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 57500,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 126,766"
+  },
+  "A388": {
+   "approach_speed_kt": 138,
+   "approach_speed_min_kt": 138,
+   "approach_speed_max_kt": 138,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 394000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 868,621"
+  },
+  "AT72": {
+   "approach_speed_kt": 114,
+   "approach_speed_min_kt": 114,
+   "approach_speed_max_kt": 114,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 21350,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 47,068"
+  },
+  "AT75": {
+   "approach_speed_kt": 120,
+   "approach_speed_min_kt": 120,
+   "approach_speed_max_kt": 120,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 21850,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 48,171"
+  },
+  "AT76": {
+   "approach_speed_kt": 113,
+   "approach_speed_min_kt": 113,
+   "approach_speed_max_kt": 113,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 22350,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 49,273"
+  },
+  "B37M": {
+   "approach_speed_kt": 145,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 145,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "Depending on flaps configuration and MALW, AAC could be C. AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 66043,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 145,600"
+  },
+  "B733": {
+   "approach_speed_kt": 135,
+   "approach_speed_min_kt": 135,
+   "approach_speed_max_kt": 135,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 52526,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 115,800"
+  },
+  "B744": {
+   "approach_speed_kt": 157,
+   "approach_speed_min_kt": 157,
+   "approach_speed_max_kt": 157,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 285763,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 630,000"
+  },
+  "B748": {
+   "approach_speed_kt": 159,
+   "approach_speed_min_kt": 159,
+   "approach_speed_max_kt": 159,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 312072,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 688,000"
+  },
+  "B773": {
+   "approach_speed_kt": 149,
+   "approach_speed_min_kt": 149,
+   "approach_speed_max_kt": 149,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 237682,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 524,000"
+  },
+  "B77L": {
+   "approach_speed_kt": 140,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 140,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 260816,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 575,000"
+  },
+  "E195": {
+   "approach_speed_kt": 135,
+   "approach_speed_min_kt": 135,
+   "approach_speed_max_kt": 135,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 45800,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 100,972"
+  },
+  "E290": {
+   "approach_speed_kt": 125,
+   "approach_speed_min_kt": 125,
+   "approach_speed_max_kt": 125,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 49050,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 108,136"
+  },
+  "MD11": {
+   "approach_speed_kt": 158,
+   "approach_speed_min_kt": 158,
+   "approach_speed_max_kt": 158,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
+   "malw_kg": 195045,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 430,000"
+  },
+  "SU95": {
+   "approach_speed_kt": 140,
+   "approach_speed_min_kt": 140,
+   "approach_speed_max_kt": 140,
+   "approach_speed_source": "faa_acd_2024_10",
+   "approach_speed_note": "the FAA row carries no Remarks entry.",
+   "malw_kg": 41000,
+   "malw_source": "faa_acd_2024_10",
+   "malw_note": "MALW_lb 90,390"
   }
  }
 }

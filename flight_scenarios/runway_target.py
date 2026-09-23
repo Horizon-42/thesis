@@ -131,7 +131,7 @@ def threshold_target_state(
         latitude=lat,
         longitude=lon,
         altitude=altitude,
-        V=aircraft.approach.reference_speed_ms,
+        V=aircraft.approach.reference_speed_ms(mass_kg),
         psi=psi,
         gamma=math.radians(-glidepath_deg),
         m=mass_kg,

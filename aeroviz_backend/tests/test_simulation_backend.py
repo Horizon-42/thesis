@@ -1,9 +1,10 @@
 import math
 import unittest
 
-from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog
+from aeroviz_backend.simulation_backend import SimulationBackend, aircraft_catalog, pilot_mass_kg
 from aerodynamic_model.casadi_simulator import CasadiSimulator
-from aircraft.aircraft_sets import B77W
+from aircraft.aircraft_sets import A320, B77W
+from geokit import ms_to_kt
 from geodetic_simulator import GeodeticSimulator
 from simulator_simple import LoadFactorSimulator
 
@@ -201,7 +202,19 @@ class TestSimulationBackend(unittest.TestCase):
         a320 = next(item for item in payload["aircraft"] if item["code"] == "A320")
         b77w = next(item for item in payload["aircraft"] if item["code"] == "B77W")
 
-        self.assertEqual(a320["terminalSpeedKt"], 145.0)
+        # Pilot states are solved at MTOW; the catalog quotes its speeds at that same mass:
+        # the A320's published 136 kt at its 66,000 kg MALW x sqrt(78,000 / 66,000).
+        self.assertEqual(a320["massKg"], pilot_mass_kg(A320))
+        self.assertAlmostEqual(a320["terminalSpeedKt"], 147.848, places=3)
+        self.assertAlmostEqual(a320["terminalSpeedMinKt"], 147.848, places=3)
+        self.assertAlmostEqual(a320["terminalSpeedMaxKt"], 167.848, places=3)
+        # The range's low end is the collocation optimizer's default speed floor at that mass,
+        # so the panel's default target (its low end for a single-valued type) is solvable.
+        for aircraft in (A320, B77W):
+            item = next(i for i in payload["aircraft"] if i["code"] == aircraft.code)
+            floor_kt = ms_to_kt(aircraft.approach.minimum_speed_ms(pilot_mass_kg(aircraft)))
+            self.assertAlmostEqual(item["terminalSpeedMinKt"], floor_kt)
+            self.assertGreaterEqual(item["terminalSpeedKt"], floor_kt)
         self.assertEqual(a320["maxThrustN"], 240000.0)
         self.assertEqual(a320["finalApproachMinNm"], 5.0)
         self.assertEqual(b77w["maxThrustN"], 1026000.0)

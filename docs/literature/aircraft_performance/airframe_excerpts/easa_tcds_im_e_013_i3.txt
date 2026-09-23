@@ -1,0 +1,34 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_013_PW545_Issue03.pdf  sha256: 6af0c7b5984fc019eb992690c7334462f39abefde66438ab493b1f1649660309
+# id: easa_tcds_im_e_013_i3 | EASA | TCDS EASA.IM.E.013 - Pratt & Whitney Canada PW545 series | Issue 03, 18 December 2024
+# url: https://www.easa.europa.eu/en/downloads/7777/en
+# retrieved: 2026-09-24. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p1, lines 1-2  (match: /TCDS No\.: IM\.E\.013/)
+                 TCDS No.: IM.E.013                                    Pratt & Whitney Canada
+                 Issue: 03                                              PW545 series engines                     Date: 18 December 2024
+
+--- PDF p6, lines 247-255  (match: /^ *5\. Ratings *$/)
+                5. Ratings
+
+                               Rating                       PW545A           PW545B            PW545C          PW545D
+                     Thrust, daN    Take‐off                  1758             1832              1832            1876
+                     (lbf)          (5 minutes)              (3592)           (4119)            (4119)          (4218)
+                                    Maximum                   1500             1500              1500            1536
+                                    Continuous               (3372)           (3372)            (3372)          (3453)
+
+                 Take off ratings quoted valid up to 25°C, maximum continuous ratings to 35°C
+
+--- PDF p10, lines 449-452  (match: /^ *2\. +The engine ratings are based on/)
+                2.           The engine ratings are based on dry sea‐level static ICAO Standard Atmospheric Conditions, no
+                             airbleed and no external accessory loads. The engine ratings specified are obtainable on a test
+                             stand with the specified fuel and oil, without intake ducting and using exhaust duct and intake
+                             specified in the Installation and Operating Instructions Manual.
+
+--- PDF p10, lines 457-460  (match: /^ *4\. +Take.off ratings that are normally limited/)
+                4.           Take‐off ratings that are normally limited to 5 minutes duration may be used for up to 10 minutes
+                             for OEI operations without adverse effects upon engine airworthiness. Such operations are
+                             anticipated on an infrequent basis (as engine failures at take‐off events are uncommon) and no
+                             limits or special inspections have been imposed.
+
+# note: the PW545A cell prints "1758" daN over "(3592)" lbf; 1758 daN = 3952.1 lbf, and IM.A.207, FAA A22CE and
+#       FAA E00059EN all print 3952 lb for the PW545A - "(3592)" is read as a digit transposition of 3952.

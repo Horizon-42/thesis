@@ -9,8 +9,15 @@ from aeroviz_backend.casadi_lock import CASADI_LOCK
 from aerodynamic_model.casadi_simulator import CasadiSimulator
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS, Aircraft, A320
 from common import Atmosphere, Control, GeodeticState, LoadFactorControl
+from evaluation.speed_gate import speed_gate_bounds
+from geokit import ms_to_kt
 from geodetic_simulator import GeodeticSimulator
 from simulator_simple import LoadFactorSimulator
+
+
+def pilot_mass_kg(aircraft: Aircraft) -> float:
+    """The one mass every Pilot-panel state is flown and solved at, and its speeds quoted at."""
+    return aircraft.mass.max_takeoff_kg
 
 
 DEFAULT_STATE = GeodeticState(
@@ -20,7 +27,7 @@ DEFAULT_STATE = GeodeticState(
     V=120.0,
     psi=0.0,
     gamma=0.0,
-    m=A320.mass.max_takeoff_kg,
+    m=pilot_mass_kg(A320),
 )
 
 DEFAULT_CONTROL = Control(
@@ -364,7 +371,7 @@ def read_geodetic_state(
         gamma=math.radians(
             read_float(payload, "flightPathDeg", math.degrees(fallback.gamma))
         ),
-        m=aircraft.mass.max_takeoff_kg,
+        m=pilot_mass_kg(aircraft),
     )
 
 
@@ -459,6 +466,24 @@ def casadi_snapshot_aero(
     return cl, cd, actual_load_factor
 
 
+def _terminal_speeds_kt(aircraft: Aircraft) -> dict[str, float]:
+    """The target speed and the range the Pilot panel may set it in, at the Pilot mass.
+
+    The speed is the airframe's published approach speed at :func:`pilot_mass_kg`, the mass
+    every Pilot state is solved at (``Approach.reference_speed_ms``); the range is the threshold
+    speed gate's own window at that mass and 1 g (``evaluation.speed_gate.speed_gate_bounds``:
+    [V_ref,lo, V_ref,hi + 20 kt]), so a target set inside it is a crossing speed the gate accepts,
+    and its lower end is the collocation optimizer's default speed floor at the same mass.
+    """
+    mass_kg = pilot_mass_kg(aircraft)
+    window = speed_gate_bounds(aircraft.approach.speeds, load_factor=1.0, crossing_mass_kg=mass_kg)
+    return {
+        "terminalSpeedKt": ms_to_kt(aircraft.approach.reference_speed_ms(mass_kg)),
+        "terminalSpeedMinKt": ms_to_kt(window.lower_ms),
+        "terminalSpeedMaxKt": ms_to_kt(window.upper_ms),
+    }
+
+
 def aircraft_catalog() -> dict[str, Any]:
     return {
         "ok": True,
@@ -467,13 +492,11 @@ def aircraft_catalog() -> dict[str, Any]:
                 "code": aircraft.code,
                 "name": aircraft.name,
                 "category": aircraft.category,
-                "massKg": aircraft.mass.max_takeoff_kg,
+                "massKg": pilot_mass_kg(aircraft),
                 "wingAreaM2": aircraft.geometry.wing_area_m2,
                 "maxThrustN": aircraft.engine.max_thrust_total_n,
                 "approachThrustGuessN": aircraft.approach.thrust_guess_n,
-                "terminalSpeedKt": aircraft.approach.reference_speed_kt,
-                "terminalSpeedMinKt": aircraft.approach.min_speed_kt,
-                "terminalSpeedMaxKt": aircraft.approach.max_speed_kt,
+                **_terminal_speeds_kt(aircraft),
                 "finalApproachMinNm": aircraft.approach.final_segment_min_nm,
                 "finalApproachMaxNm": aircraft.approach.final_segment_max_nm,
                 "finalApproachLateralHalfWidthNm": (

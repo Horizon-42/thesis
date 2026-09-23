@@ -9,6 +9,7 @@ path runs the solver, so it is exercised by the CLI, not the unit suite.
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -262,6 +263,45 @@ def test_resume_rejects_records_from_a_different_configuration(monkeypatch, tmp_
     assert solves["n"] == 2
     record = json.loads((tmp_path / "AFR074_05L_eval.json").read_text(encoding="utf-8"))
     assert record["optimization_config"]["max_iterations"] == 500
+
+
+def test_resume_re_solves_a_record_flown_to_another_target(monkeypatch, tmp_path):
+    # A scenario file regenerated under new target rules keeps the flight identity and the
+    # batch config but moves the runway target's V (145 kt -> the published speed, 2026-09-24);
+    # --resume must not keep the record solved to the old target.
+    target = GeodeticState(35.59, -78.49, 500.0, 80.0, 1.5, -0.05, A320.landing_mass)
+    solves = {"n": 0}
+
+    def fake_optimize_scenario(s, **kwargs):
+        solves["n"] += 1
+        return so.ScenarioOptimization(
+            s.source, 12.0, [], [],
+            evaluation=ee.evaluation_record(
+                s.initial, s.target, _rollout_samples(s.initial), s.source, subject="optimized",
+            ),
+        )
+
+    monkeypatch.setattr(so, "optimize_scenario", fake_optimize_scenario)
+    so.optimize_scenarios([_scenario(target=target)], output_dir=tmp_path, jobs=1)
+    moved = replace(target, V=target.V - 4.6)
+    so.optimize_scenarios([_scenario(target=moved)], output_dir=tmp_path, jobs=1, resume=True)
+    assert solves["n"] == 2
+    record = json.loads((tmp_path / "AFR074_05L_eval.json").read_text(encoding="utf-8"))
+    assert record["target_state"]["V"] == pytest.approx(moved.V)
+
+
+def test_the_stall_margin_floor_stays_below_every_published_lower_edge():
+    # Why the floor lost its V_ref cap (2026-09-24): 1.10 x V_s1g is mass-independent relative
+    # to the published speed and below its lower edge on every airframe the model builds, so
+    # the cap could never bind. If a new airframe breaks this, the cap question is back.
+    from aircraft.aircraft_sets import AIRCRAFT_PRESETS
+    from aircraft.query_aircraft_parameters import get_aircraft_parameters, openap_direct_typecodes
+
+    for code in sorted(set(openap_direct_typecodes()) | set(AIRCRAFT_PRESETS)):
+        aircraft = AIRCRAFT_PRESETS.get(code) or get_aircraft_parameters(code)
+        mass = aircraft.landing_mass
+        floor = so._STALL_MARGIN * so._stall_speed_ms(mass, aero_params_for_aircraft(aircraft))
+        assert floor < 0.95 * aircraft.approach.minimum_speed_ms(mass), code
 
 
 def test_resolve_jobs_auto_and_explicit():

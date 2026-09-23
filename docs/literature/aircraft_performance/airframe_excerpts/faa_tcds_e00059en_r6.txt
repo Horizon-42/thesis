@@ -1,0 +1,49 @@
+# source: data/aircraft_performance/airframes/faa/FAA_TCDS_E00059EN_Rev6.pdf  sha256: f9c9ddfe7aebcecd5f1f42b92e5c9b85661ced06c754e83b74f874e088dcbd9d
+# id: faa_tcds_e00059en_r6 | FAA | TCDS E00059EN - Pratt & Whitney Canada PW545A, PW545B, PW545C, PW545D | Revision 6, July 10, 2024
+# url: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID170763942020240724131938.0001
+# retrieved: 2026-09-24. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p1, lines 1-9  (match: /TCDS NUMBER E00059EN/)
+                                                                                               TCDS NUMBER E00059EN
+                                                                                                         REVISION: 6
+               U.S. DEPARTMENT OF TRANSPORTATION
+                                                                                                       DATE: July 10, 2024
+                FEDERAL AVIATION ADMINISTRATION
+                                                                                     PRATT & WHITNEY CANADA.CORP.
+                    TYPE CERTIFICATE DATA SHEET
+                                                                               MODELS:
+                                  E00059EN                                     PW545A, PW545B, PW545C, PW545D
+
+--- PDF p1, lines 14-15  (match: /which is part of Type Certificate Number E00083EN/)
+Engines of models described herein conforming with this data sheet (which is part of Type Certificate Number E00083EN)
+and other approved data on file with the Federal Aviation Administration, meet the minimum standards for use in certificated
+
+--- PDF p1, lines 34-43  (match: /MODELS: +PW545A +PW545B/)
+            MODELS:                                PW545A              PW545B              PW545C             PW545D
+
+            THRUST RATINGS POUNDS
+            (See Note 1)
+            Takeoff (5 minutes)
+                                                     3952                4,119                --                 4,218
+            (See NOTE 13)
+
+            Maximum Continuous
+                                                     3,372                --                  --                  --
+
+--- PDF p1, lines 62-63  (match: /LEGEND: \"- -\" INDICATES \"SAME AS PRECEDING MODEL\"/)
+ PAGE      1   2    3    4    5     6                        LEGEND: "- -" INDICATES "SAME AS PRECEDING MODEL"
+ REV.      6    6    6   6    6     6                               "---" NOT APPLICABLE
+
+--- PDF p2, lines 105-112  (match: /^NOTE 1 +ENGINE RATINGS/)
+NOTE 1              ENGINE RATINGS
+                .
+                    The engine ratings for the PW545A, PW545B, PW545C and PW545D engine models are based on
+                    static sea level conditions:
+
+                    Compressor inlet air (dry) 77ºF, at takeoff and 95ºF at max. continuous
+
+                    29.92 in. Hg
+
+# note: the PW545C take-off cell is "--" = "same as preceding model" (legend, PDF p1) = 4,119 lb.
+# note: line 14 calls this data sheet part of Type Certificate Number E00083EN (the PDF title metadata is also
+#       "E00083EN"), while the header and page footers say E00059EN; the thrust figures are not affected.

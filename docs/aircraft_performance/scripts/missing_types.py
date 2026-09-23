@@ -8,14 +8,14 @@ import collections
 import csv
 import json
 
-from _paths import REPO, WORK
+from _paths import CODE, WORK
 
 rows = json.loads((WORK / "census_rows.json").read_text())
 acd = {}
 for r in json.loads((WORK / "acd.json").read_text()):
     acd.setdefault(r["ICAO_Code"], r)
 cat = {}
-for r in json.loads((REPO / "aircraft/icao_doc8643.json").read_text())["records"]:
+for r in json.loads((CODE / "aircraft/icao_doc8643.json").read_text())["records"]:
     cat.setdefault(r["typecode"], []).append(r)
 OUTCOMES = ("no_dynamics->A320", "openap_synonym")
 tr = collections.Counter((r["typecode"], r["outcome"], r["perf"]) for r in rows

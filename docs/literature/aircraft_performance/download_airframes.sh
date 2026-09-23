@@ -153,6 +153,11 @@ get data/reference_speeds/textron/citation_latitude_product_card.pdf 'https://ce
 get data/reference_speeds/textron/citation_longitude_product_card.pdf 'https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_longitude_product_card.pdf'
 get data/reference_speeds/textron/citation_m2_gen3_product_card.pdf 'https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_m2_gen3_product_card.pdf'
 echo
+echo "== Added 2026-09-24 for C56X (Cessna 560XL); the aircraft TCDS IM.A.207 is in the EASA list above"
+get data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_013_PW545_Issue03.pdf 'https://www.easa.europa.eu/en/downloads/7777/en'
+get_drs data/reference_speeds/faa/FAA_TCDS_A22CE_Rev74.pdf DRSDOCID132119292720251209201014.0001
+get_drs data/aircraft_performance/airframes/faa/FAA_TCDS_E00059EN_Rev6.pdf DRSDOCID170763942020240724131938.0001
+echo
 if [ "$rc" -eq 0 ]; then echo "all sources present."; else echo "one or more downloads FAILED -- see above." >&2; fi
 echo "Text layers (read by the excerpts) are regenerated with: pdftotext -layout <file>.pdf <file>.txt"
 exit "$rc"

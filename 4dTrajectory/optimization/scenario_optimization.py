@@ -88,6 +88,7 @@ from evaluation_export import (  # noqa: E402
     failed_evaluation_record,
     file_sha256 as _file_sha256,
     observed_track_document,
+    state_dict,
     observed_track_path as _observed_track_path,
     reference_evaluation_record,
     summary_row,
@@ -131,9 +132,11 @@ def _scheme_for_fitting(fitting: str) -> str:
             f"unknown fitting {fitting!r}; choose from {sorted(FITTING_SCHEMES)}"
         ) from None
 
-# Velocity floor = STALL_MARGIN x stall speed (at the scenario's landing mass), so the
-# optimizer admits realistic touchdown-speed targets instead of forcing V >= Vref. Capped at
-# Vref so it never raises the optimizer's default floor.
+# Velocity floor = STALL_MARGIN x stall speed (at the scenario's mass), so the optimizer admits
+# realistic touchdown-speed targets instead of forcing V >= Vref. It used to be capped at V_ref;
+# since V_ref is the published approach speed (2026-09-24) the cap cannot bind: 1.10 x V_s1g is at
+# most 0.93 x the published lower edge on every buildable airframe (pinned by
+# tests/test_scenario_optimization.py), so it was removed.
 _STALL_MARGIN = 1.10
 
 # The replay ground guard sits this far BELOW the NLP's altitude floor. The guard exists
@@ -249,11 +252,8 @@ def optimize_scenario(
         )
 
     # Run the optimizer (initial -> target). Floor the velocity at a stall margin (not Vref)
-    # so observed touchdown-speed targets are admissible; never above the aircraft's Vref.
-    min_speed_ms = min(
-        _STALL_MARGIN * _stall_speed_ms(initial.m, scenario.aero),
-        aircraft.approach.reference_speed_ms,
-    )
+    # so observed touchdown-speed targets are admissible.
+    min_speed_ms = _STALL_MARGIN * _stall_speed_ms(initial.m, scenario.aero)
     # Default fitting is Hermite-Simpson (4th order), matching the constrained path and
     # the frontend default. Trapezoidal (2nd order) produced node-feasible plans whose
     # TRUE-dynamics replays drifted km-scale on aggressive min-time floor-riding solves —
@@ -532,6 +532,11 @@ def _resumable_record(
     ):
         return None
     if record.get("optimization_config") != expected_config:
+        return None
+    # A record solved against another target is not this scenario's result: a scenario file
+    # regenerated under new target rules (the published approach speeds, 2026-09-24) keeps the
+    # flight identity but moves the runway target's V, and the old record must be re-solved.
+    if record.get("target_state") != state_dict(scenario.target):
         return None
     final_time = record.get("final_time_s")
     if final_time is None:
@@ -1216,10 +1221,7 @@ def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path, airport: st
         raise ValueError(f"no IAF->runway paths in the procedure for {apt} {runway}")
     _require_procedure_threshold_agrees(target, paths)
     aircraft = scenario.aircraft
-    min_speed_ms = min(
-        _STALL_MARGIN * _stall_speed_ms(scenario.initial.m, scenario.aero),
-        aircraft.approach.reference_speed_ms,
-    )
+    min_speed_ms = _STALL_MARGIN * _stall_speed_ms(scenario.initial.m, scenario.aero)
     return target, paths, aircraft, min_speed_ms
 
 

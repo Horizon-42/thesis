@@ -43,7 +43,6 @@ from pathlib import Path
 import casadi as ca
 import numpy as np
 
-from geokit import kt_to_ms
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -121,7 +120,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     aircraft = _AIRCRAFT[args.aircraft]
-    speed = kt_to_ms(aircraft.approach.reference_speed_kt) + 12.0
+    speed = aircraft.approach.reference_speed_ms(aircraft.mass.max_takeoff_kg) + 12.0
     init = GeodeticState(35.60, -78.50, 1500.0, speed, math.radians(40.0), math.radians(-3.0), aircraft.mass.max_takeoff_kg)
     target = _feasible_target(aircraft, init, args.horizon)
 

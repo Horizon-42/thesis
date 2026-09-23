@@ -53,7 +53,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from geokit import equirectangular_distance_m, kt_to_ms
+from geokit import equirectangular_distance_m
 from aircraft.aircraft_sets import A320, C172  # noqa: E402
 from aerodynamic_model.casadi_simulator import (  # noqa: E402
     AeroParams,
@@ -147,7 +147,7 @@ def compare_heading(
     """Propagate all three steppers in lockstep from a common state and
     record the divergence whenever the re-anchored stepper crosses each
     distance milestone."""
-    V0 = kt_to_ms(aircraft.approach.reference_speed_kt) + 10.0
+    V0 = aircraft.approach.reference_speed_ms(aircraft.mass.max_takeoff_kg) + 10.0
     psi0 = math.radians(heading_deg)
     gamma0 = 0.0
     u = ca.DM([aircraft.approach.thrust_guess_n, 0.0, 1.0])

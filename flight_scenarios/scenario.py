@@ -8,6 +8,7 @@ data-driven model consume. It carries the domain types from the modeling plane
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -96,14 +97,34 @@ class FlightScenario:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FlightScenario":
+        """Rebuild a saved scenario; refuse one whose runway-threshold target is stale.
+
+        The aircraft is rebuilt from its code, so it carries TODAY's approach envelope, while
+        the saved target carries the speed it was built with. A ``runway_threshold`` target
+        must fly the airframe's published approach speed at the target mass
+        (``Approach.reference_speed_ms``); a file prepared under another rule or another table
+        (before 2026-09-24 every 5.7-150 t type targeted 145 kt) would pin the old speed, so it
+        is refused by name instead of being flown mixed.
+        """
         target = data.get("target")
-        return cls(
+        scenario = cls(
             initial=GeodeticState(**data["initial"]),
             target=GeodeticState(**target) if target is not None else None,
             aircraft=aircraft_for_code(data["aircraft_code"]),
             aero=AeroParams(**data["aero"]),
             source=data.get("source", {}),
         )
+        if scenario.target is not None and scenario.source["target_source"] == "runway_threshold":
+            expected = scenario.aircraft.approach.reference_speed_ms(scenario.target.m)
+            if not math.isclose(scenario.target.V, expected, rel_tol=1e-9):
+                raise ValueError(
+                    f"scenario {scenario.source.get('flight_key')!r}: its runway-threshold target "
+                    f"flies {scenario.target.V:.3f} m/s, but {scenario.aircraft.code}'s published "
+                    f"approach speed at {scenario.target.m:.0f} kg is {expected:.3f} m/s; the file "
+                    "was prepared under another approach-speed rule or table — regenerate it "
+                    "with prepare_scenario_inputs.py"
+                )
+        return scenario
 
 
 def save_scenarios(scenarios: list[FlightScenario], path: str | Path) -> None:

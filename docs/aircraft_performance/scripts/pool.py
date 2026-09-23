@@ -18,6 +18,8 @@ acd = {}
 for r in json.loads((WORK / "acd.json").read_text()):
     acd.setdefault(r["ICAO_Code"], r)
 
+# Every airframe the model can fly natively: OpenAP direct types + presets (B3XM, with no
+# published approach speed, is not an OpenAP direct type since 2026-09-24).
 pool = sorted(set(openap_direct_typecodes()) | set(AIRCRAFT_PRESETS))
 out = {}
 for code in pool:
@@ -32,7 +34,7 @@ for code in pool:
         "S_m2": aero.S, "cl_max": aero.Cl_max, "T_total_N": a.engine.max_thrust_total_n,
         "TW": a.engine.max_thrust_total_n / (a.mass.max_takeoff_kg * 9.81),
         "WS_landing": m / aero.S, "vs_model_kt": vs,
-        "vref_model_kt": a.approach.reference_speed_kt,
+        "vref_published_kt": a.approach.speeds.approach_speed_kt,
         "faa_vapp_kt": float(f["Approach_Speed_knot"]) if f.get("Approach_Speed_knot") not in (None, "N/A") else None,
         "faa_engine": f.get("Physical_Class_Engine"), "faa_mtow_lb": f.get("MTOW_lb"), "faa_malw_lb": f.get("MALW_lb"),
     }

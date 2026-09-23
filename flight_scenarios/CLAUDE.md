@@ -78,7 +78,7 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
 
 ## Population: who gets into a dataset
 
-Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-09-16).
+Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-09-16; FS5 added 2026-09-23).
 
 - **`build_scenarios_from_arrivals` is strict; `dataset.build_scenario_dataset` is the batch
   layer**: a flight with no usable fitted final approach (~0.08 % of the roster) raises
@@ -118,6 +118,13 @@ Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-
   bit-identical to the evaluation context), but `ts_transformer/data/synthetic.py` builds on the NASR
   point — which is why its test context pins the NASR coordinates explicitly.
   `evaluation.arrival._require_target_agrees_with_runway_data` now catches any such mix at 1 cm.
+- **The threshold target's speed is the airframe's PUBLISHED approach speed at the target mass**
+  (since 2026-09-24): `approach.reference_speed_ms(m)` = the `aircraft/reference_speeds.json` row
+  (FAA Aircraft Characteristics Database, at MALW) × sqrt(m / MALW) — the threshold speed gate's own
+  law and upper reference, so the target sits inside the gate's window (on its lower edge for a
+  single-valued type). Every 5.7–150 t type used to target 145 kt. A saved `runway_threshold` scenario
+  whose V disagrees is refused at load; B3XM (no FAA row) has no dynamics; ts series never read the
+  target speed (FS5).
 
 ## Aircraft resolution
 

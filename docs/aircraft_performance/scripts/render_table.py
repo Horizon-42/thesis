@@ -23,6 +23,8 @@ def recommendation(r):
     if v.startswith("surrogate"):
         note = "（失速余量高于原生范围）" if "outside" in v else ""
         return f"改用 {r['sub']}{note}", r["sub"], r["r_sub"]
+    if v.startswith("exclude: propeller"):
+        return "排除：螺旋桨飞机（用户决定）", "", None
     if v.startswith("no airframe"):
         return "排除：模型里没有同动力、同进近类别的机型", "", None
     if v.startswith("no FAA"):

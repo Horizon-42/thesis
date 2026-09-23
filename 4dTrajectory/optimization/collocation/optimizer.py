@@ -415,7 +415,7 @@ class CollocationOptimizer:
             self.aero_params.S, self.aero_params.Cl_max, self.aero_params.Cd0,
             self.aero_params.k, self.aero_params.stall_threshold, self.aero_params.k_stall,
         )
-        meta = self._aircraft_meta(target_state.altitude)
+        meta = self._aircraft_meta(target_state.altitude, initial_state.m)
         state_lb, state_ub = _schemes._normalized_position_bounds(
             *_components.make_state_bounds(meta["min_altitude"], meta["min_terminal_speed"]), self.scheme
         )
@@ -735,14 +735,15 @@ class CollocationOptimizer:
         return [math.degrees(phys_row[0]), math.degrees(phys_row[1]),
                 phys_row[2], phys_row[3], phys_row[4], phys_row[5]]
 
-    def _aircraft_meta(self, target_altitude_m):
+    def _aircraft_meta(self, target_altitude_m, mass_kg):
         a = self.aircraft
         return {
             "max_thrust": a.engine.max_thrust_total_n,
             "min_load_factor": 0.5,
             "max_load_factor": 2.0,
             "min_terminal_speed": (
-                self.min_speed_ms if self.min_speed_ms is not None else a.approach.reference_speed_ms
+                self.min_speed_ms if self.min_speed_ms is not None
+                else a.approach.minimum_speed_ms(mass_kg)
             ),
             # Altitude floor: a generous margin below the destination threshold (the lowest point),
             # anchored to the target so it is correct at every field elevation.
