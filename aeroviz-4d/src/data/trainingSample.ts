@@ -136,6 +136,8 @@ export interface TrainingVocabulary {
   altitudeLandValue: number;
   altitudeToleranceM: number;
   angleClasses: TrainingAngleClass[];
+  /** The angle value "level": a target reached, not a slope. */
+  angleLevelValue: number;
   speedTargetsMps: number[];
   /** The speed value "unspecified": one past the last target. */
   speedUnspecifiedValue: number;
@@ -383,7 +385,7 @@ export function trainingWordLabel(
         : `${vocabulary.altitudeTargetsM[value].toFixed(0)} m`;
     case "angle": {
       const angle = vocabulary.angleClasses[value];
-      return angle.name === "level" ? "level" : `${angle.name} (${angle.nominalDeg.toFixed(2)}°)`;
+      return value === vocabulary.angleLevelValue ? angle.name : `${angle.name} (${angle.nominalDeg.toFixed(2)}°)`;
     }
     case "speed":
       return value === vocabulary.speedUnspecifiedValue
@@ -563,6 +565,15 @@ class Reader {
     return value;
   }
 
+  /** A whole number of at least ``low`` — a count, with no upper bound to pretend to. */
+  count(key: string, low: number): number {
+    const value = this.number(key);
+    if (!Number.isInteger(value) || value < low) {
+      throw new Refusal(`${this.at(key)} is ${value}, not a whole number of at least ${low}`);
+    }
+    return value;
+  }
+
   nullableInteger(key: string, low: number, high: number): number | null {
     return this.source[key] === null ? null : this.integer(key, low, high);
   }
@@ -722,11 +733,11 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
   }
   const counts = reader.child("classCounts");
   const classCounts = {
-    approach: counts.integer("approach", 1, 1000),
-    heading: counts.integer("heading", 1, 1000),
-    altitude: counts.integer("altitude", 1, 1000),
-    angle: counts.integer("angle", 1, 1000),
-    speed: counts.integer("speed", 1, 1000),
+    approach: counts.count("approach", 1),
+    heading: counts.count("heading", 1),
+    altitude: counts.count("altitude", 1),
+    angle: counts.count("angle", 1),
+    speed: counts.count("speed", 1),
   };
   const approachClasses = reader.strings("approachClasses");
   const headingTargetsDeg = reader.numbers("headingTargetsDeg");
@@ -755,6 +766,7 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
   if (altitudeLandValue !== altitudeTargetsM.length) {
     reader.fail(`altitudeLandValue is ${altitudeLandValue}, expected ${altitudeTargetsM.length} (one past the last target)`);
   }
+  const angleLevelValue = reader.integer("angleLevelValue", 0, angleClasses.length - 1);
   const speedUnspecifiedValue = reader.number("speedUnspecifiedValue");
   if (speedUnspecifiedValue !== speedTargetsMps.length) {
     reader.fail(`speedUnspecifiedValue is ${speedUnspecifiedValue}, expected ${speedTargetsMps.length} (one past the last target)`);
@@ -783,6 +795,7 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
     altitudeLandValue,
     altitudeToleranceM: reader.number("altitudeToleranceM"),
     angleClasses,
+    angleLevelValue,
     speedTargetsMps,
     speedUnspecifiedValue,
     speedToleranceMps: reader.number("speedToleranceMps"),
@@ -949,20 +962,45 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
     if (targetDeg !== vocabulary.headingTargetsDeg[words[index].value]) {
       item.fail(`targetDeg is ${targetDeg}, but word ${words[index].value} is ${vocabulary.headingTargetsDeg[words[index].value]}°`);
     }
+    const word = words[index];
     const splitReader = item.nullableChild("split");
     const funnel = item.nullableChild("funnel");
     const check = item.nullableChild("check");
     const turn = item.nullableChild("turn");
-    if ((turn === null) !== (check === null)) item.fail("a turn region comes with the labeller's check of that turn, and only with it");
+    // WHAT COMES TOGETHER: a turn is a region, a chart band, an end row and the labeller's check of
+    // it; a hold is a funnel, a band and a start row. Half of either is a half-written envelope.
+    const turned = [turn, item.raw("turnBandDeg"), item.raw("turnEndRow"), check].map((part) => part !== null);
+    if (new Set(turned).size !== 1) item.fail("turn, turnBandDeg, turnEndRow and check come together or not at all");
+    const held = [funnel, item.raw("holdBandDeg"), item.raw("holdStartRow")].map((part) => part !== null);
+    if (new Set(held).size !== 1) item.fail("funnel, holdBandDeg and holdStartRow come together or not at all");
+    if ((word.kind === "initial") === turned[0]) item.fail(`a ${word.kind} word ${turned[0] ? "has" : "lacks"} a turn`);
+    if ((splitReader !== null) !== word.kind.endsWith("-split")) item.fail(`split is given exactly for a split part, and this word is ${word.kind}`);
+    const split = splitReader === null ? null : { part: splitReader.count("part", 1), parts: splitReader.count("parts", 2) };
+    if (split !== null && split.part > split.parts) splitReader!.fail(`part ${split.part} of ${split.parts}`);
+    const turnEndRow = item.nullableInteger("turnEndRow", word.row, rows);
+    const holdEndRow = item.integer("holdEndRow", word.row, rows);
+    const holdStartRow = item.nullableInteger("holdStartRow", word.row, holdEndRow - 1);
+    if (turnEndRow !== null && turnEndRow > holdEndRow) item.fail(`the turn ends at row ${turnEndRow}, after the hold ends at ${holdEndRow}`);
+    const verdict = check === null ? null : {
+      ...parseTurnCheck(check),
+      kind: check.string("kind"),
+      departureRow: check.integer("departureRow", 0, word.row),
+      arrivalRow: check.integer("arrivalRow", word.row, rows),
+      turnDeg: check.number("turnDeg"),
+      parts: check.count("parts", 1),
+    };
+    if (verdict !== null && verdict.kind !== word.kind.replace(/-split$/, "")) {
+      check!.fail(`is the check of a ${verdict.kind}, but the word is ${word.kind}`);
+    }
     return {
-      row: words[index].row,
-      value: words[index].value,
-      kind: words[index].kind,
+      row: word.row,
+      value: word.value,
+      kind: word.kind,
       targetDeg,
-      split: splitReader === null ? null : { part: splitReader.integer("part", 1, 100), parts: splitReader.integer("parts", 2, 100) },
-      turnEndRow: item.nullableInteger("turnEndRow", 0, rows),
-      holdStartRow: item.nullableInteger("holdStartRow", 0, rows),
-      holdEndRow: item.integer("holdEndRow", 0, rows),
+      split,
+      turnEndRow,
+      holdStartRow,
+      holdEndRow,
       fromTrackDeg: item.number("fromTrackDeg"),
       targetOnTrackDeg: item.number("targetOnTrackDeg"),
       turnBandDeg: item.nullableRange("turnBandDeg"),
@@ -975,14 +1013,7 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
         axis: parsePlanLine(funnel, "axis", 2),
         outline: parsePlanLine(funnel, "outline", 3),
       },
-      check: check === null ? null : {
-        ...parseTurnCheck(check),
-        kind: check.string("kind"),
-        departureRow: check.integer("departureRow", 0, rows),
-        arrivalRow: check.integer("arrivalRow", 0, rows),
-        turnDeg: check.number("turnDeg"),
-        parts: check.integer("parts", 1, 100),
-      },
+      check: verdict,
     };
   });
 }
@@ -1070,7 +1101,7 @@ function parseAltitude(reader: Reader, events: TrainingWordEvent[], vocabulary: 
   });
 }
 
-function parseAngle(reader: Reader, events: TrainingWordEvent[]) {
+function parseAngle(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary) {
   const words = eventsOf(events, "angle");
   const list = reader.list("angle");
   if (list.length !== words.length) reader.fail(`angle holds ${list.length} entries for ${words.length} angle words`);
@@ -1078,7 +1109,7 @@ function parseAngle(reader: Reader, events: TrainingWordEvent[]) {
     const item = Reader.of(raw, reader.at(`angle[${index}]`));
     matchWord(item, words[index], index, "angle");
     const measuredDeg = item.nullableNumber("measuredDeg");
-    if ((measuredDeg === null) !== (words[index].value === 0)) {
+    if ((measuredDeg === null) !== (words[index].value === vocabulary.angleLevelValue)) {
       item.fail("a measured angle is given for every class but level, which is a target reached");
     }
     return { row: words[index].row, value: words[index].value, kind: words[index].kind, measuredDeg };
@@ -1119,7 +1150,7 @@ function parseSpeed(reader: Reader, events: TrainingWordEvent[], vocabulary: Tra
     const bandInside = arrivalRow === null ? null : item.flags("bandInside", bandRows);
     if (arrivalRow === null && item.raw("bandInside") !== null) item.fail("bandInside is given, but the band is never reached");
     const verdict = {
-      arrivalRows: check.integer("arrivalRows", 0, rows),
+      arrivalRows: check.integer("arrivalRows", (arrivalRow ?? endRow) - row, (arrivalRow ?? endRow) - row),
       cutBeforeArrival: cut,
       transitionOk: check.boolean("transitionOk"),
       accelOk: check.boolean("accelOk"),
@@ -1129,6 +1160,9 @@ function parseSpeed(reader: Reader, events: TrainingWordEvent[], vocabulary: Tra
     };
     const counted = bandInside === null ? 0 : bandInside.filter(Boolean).length;
     if (counted !== verdict.bandInside) check.fail(`says ${verdict.bandInside} band rows inside, but the band's own flags count ${counted}`);
+    if (verdict.contained !== (verdict.transitionOk && counted === bandRows)) {
+      check.fail(`contained is ${verdict.contained}, with the transition ${verdict.transitionOk ? "ok" : "failed"} and ${counted} of ${bandRows} band rows inside`);
+    }
     return {
       row, endRow, value, kind: words[index].kind, targetMps, arrivalRow,
       transitionLowerMps: item.numbers("transitionLowerMps", transitionRows),
@@ -1143,7 +1177,7 @@ function parseFlight(
 ): TrainingFlight {
   const key = isRecord(raw) && str(raw, "flightKey") ? (raw.flightKey as string) : `flights[${position}]`;
   const flight = Reader.of(raw, `flight ${key}`);
-  const rows = flight.integer("rows", 2, 1_000_000);
+  const rows = flight.count("rows", 2);
   const runwayIndex = flight.integer("runwayIndex", 0, candidates.length - 1);
   const runway = flight.string("runway");
   if (runway !== candidates[runwayIndex].ident) {
@@ -1157,6 +1191,17 @@ function parseFlight(
   if (pointer.value !== runwayIndex) flight.fail(`step 0 points at runway ${pointer.value}, the flight lands on ${runwayIndex}`);
   const captureRow = flight.integer("captureRow", 0, rows - 1);
   const joinRow = flight.integer("joinRow", 0, rows - 1);
+  const unspecifiedRow = flight.integer("unspecifiedRow", 0, rows - 1);
+  // The markers the views draw are the words' own rows: the clearance, and the speed left to the pilot.
+  const cleared = words.events.find((event) => event.kind === "clear");
+  if (cleared === undefined || cleared.row !== joinRow) {
+    flight.fail(`joinRow is ${joinRow}, but the clearance is issued at ${cleared === undefined ? "no row" : `row ${cleared.row}`}`);
+  }
+  const speeds = words.events.filter((event) => event.column === TRAINING_COLUMN_INDEX.speed);
+  const unspecified = speeds[speeds.length - 1];
+  if (unspecified.value !== vocabulary.speedUnspecifiedValue || unspecified.row !== unspecifiedRow) {
+    flight.fail(`unspecifiedRow is ${unspecifiedRow}, but the last speed word is ${unspecified.value} at row ${unspecified.row}`);
+  }
   const envelopes = flight.child("envelopes");
   return {
     datasetId: flight.string("datasetId"),
@@ -1169,7 +1214,7 @@ function parseFlight(
     rows,
     captureRow,
     joinRow,
-    unspecifiedRow: flight.integer("unspecifiedRow", 0, rows - 1),
+    unspecifiedRow,
     captureBeforeThresholdM: flight.number("captureBeforeThresholdM"),
     signals: parseSignals(flight.child("signals"), rows, vocabulary.stepS),
     words,
@@ -1177,7 +1222,7 @@ function parseFlight(
       heading: parseHeading(envelopes, words.events, vocabulary, rows),
       approach: parseApproach(envelopes, { rows, captureRow, joinRow }),
       altitude: parseAltitude(envelopes, words.events, vocabulary, rows),
-      angle: parseAngle(envelopes, words.events),
+      angle: parseAngle(envelopes, words.events, vocabulary),
       speed: parseSpeed(envelopes, words.events, vocabulary, rows),
     },
   };

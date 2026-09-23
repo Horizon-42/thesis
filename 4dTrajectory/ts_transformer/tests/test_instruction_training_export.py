@@ -16,6 +16,7 @@ import pytest
 
 from ts_transformer.experiments import instruction_training_export as export
 from ts_transformer.instructions import display, envelope
+from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
     labeller_source_sha256, write_candidates, write_sentences, write_signals, write_spec,
 )
@@ -48,13 +49,17 @@ def _straight(identifier: str):
     return instruction_flight(*fly_legs(STRAIGHT, 90.0, 1200.0, -300.0, 0.0), dataset_id=identifier)
 
 
-def _artefact(directory, flights, readings=None):
-    """A frozen-artefact directory: val signals, the candidates, a spec measured by this labeller,
-    and the val sentences (the flights' own readings unless ``readings`` replaces them)."""
+def _artefact(directory, flights, readings=None, also=()):
+    """A frozen-artefact directory: val signals, the candidates (KXXX's, and the same geometry
+    under each code of ``also``), a spec measured by this labeller, and the val sentences (the
+    flights' own readings unless ``readings`` replaces them)."""
     one = spec()
     directory.mkdir(parents=True)
     write_signals(directory, {"val": flights}, {"note": "test"})
-    write_candidates(directory, {"KXXX": instruction_airport()})
+    geometries = {"KXXX": instruction_airport()}
+    for code in also:
+        geometries[code] = AirportGeometry.from_dict({**instruction_airport().to_dict(), "code": code})
+    write_candidates(directory, geometries)
     write_spec(directory, one, {"n": 1}, {"labeller_source_sha256": labeller_source_sha256(),
                                           "git": {"head": "test", "dirty": False}})
     readings = readings or [read_flight(flight, instruction_airport(), one) for flight in flights]
@@ -129,8 +134,16 @@ def test_the_funnel_starts_as_the_turn_end_and_widens_by_the_tolerance():
     assert funnel.end_half_width_m == pytest.approx(200.0 + 5000.0 * math.tan(math.radians(one.heading_tolerance_deg)))
     assert (funnel.axis.e_m[0], funnel.axis.n_m[0]) == pytest.approx((0.0, 200.0))
     assert (funnel.axis.e_m[1], funnel.axis.n_m[1]) == pytest.approx((5000.0, 200.0))
-    # no turn flown: the funnel opens from the point itself
-    assert display.funnel(display.Line.of([[3.0, 4.0]]), 0.0, 1000.0, one).start_half_width_m == 0.0
+    # the turn end SWEPT along θ: the funnel starts where the turn end does, not ahead of it
+    east = np.array(funnel.outline.e_m)
+    assert east.min() == pytest.approx(0.0) and east.max() == pytest.approx(5000.0)
+    assert {(0.0, 0.0), (0.0, 400.0)} <= {(round(e, 6), round(n, 6)) for e, n in zip(funnel.outline.e_m, funnel.outline.n_m)}
+    # a turn end slanted along θ (the widest arc ends further on): the rear end is still a corner
+    slanted = display.funnel(display.Line.of([[0.0, 0.0], [3000.0, 400.0]]), 90.0, 5000.0, one)
+    assert np.array(slanted.outline.e_m).min() == pytest.approx(0.0)
+    # no turn flown: the funnel is one cone from the point itself
+    cone = display.funnel(display.Line.of([[3.0, 4.0]]), 0.0, 1000.0, one)
+    assert cone.start_half_width_m == 0.0 and len(cone.outline.e_m) == 3
 
 
 def test_the_flight_envelopes_follow_the_labeller():
@@ -201,7 +214,8 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
     sample = json.loads((tmp_path / "airports" / "KXXX" / "training" / "instruction_v1" / "sample.json").read_text())
     flight = next(f for f in sample["flights"] if f["stratum"] == "vectored")
     rows = flight["rows"]
-    assert flight["flightKey"] == "v1" and flight["callsign"] == "v1" or flight["datasetId"] == _key("V1")
+    assert flight["datasetId"] == _key("V1") and flight["flightKey"] == "V1_09_abc123_20260101T000000Z"
+    assert flight["callsign"] == "V1" and flight["runway"] == "09" and flight["runwayIndex"] == 0
     signals = flight["signals"]
     assert all(len(signals[k]) == rows for k in ("tS", "eM", "nM", "lon", "lat", "altitudeHaeM"))
     # the lon/lat are the airport frame's own projection of the metres
@@ -252,6 +266,25 @@ def test_a_flight_whose_stored_sentence_differs_from_its_reading_stops_the_expor
     with pytest.raises(SystemExit, match="V1_09_abc123_20260101T000000Z: re-read heading word"):
         _run(tmp_path)
     assert not (tmp_path / "airports" / "KXXX" / "training" / "instruction_v1").exists()
+
+
+def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path, monkeypatch):
+    """Every airport is built before any is written: a flight the export stops on leaves no set anywhere."""
+    _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))], also=("KYYY",))
+    calls = []
+
+    def refuse_on_second(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise SystemExit("stopped at the second airport")
+        return real(*args, **kwargs)
+
+    real = export.draw
+    monkeypatch.setattr(export, "draw", refuse_on_second)
+    with pytest.raises(SystemExit, match="stopped at the second airport"):
+        export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
+                     "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])
+    assert calls == [1, 1] and not (tmp_path / "airports").exists()
 
 
 def test_an_index_already_listing_the_set_is_refused_before_anything_is_written(tmp_path):

@@ -361,8 +361,8 @@ export default function TrainingPanel() {
                     <dt>Angle</dt>
                     <dd>
                       {sample.vocabulary.angleClasses
-                        .map((angle) => angle.name === "level"
-                          ? "level"
+                        .map((angle) => angle.value === sample.vocabulary.angleLevelValue
+                          ? angle.name
                           : `${angle.name} ${angle.nominalDeg}° (${angle.lowDeg}…${angle.steepDeg}°)`)
                         .join(" · ")}
                     </dd>

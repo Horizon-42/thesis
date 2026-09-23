@@ -346,6 +346,7 @@ def vocabulary_block(spec: VocabularySpec, words: Words, labeller_sha256: str) -
         "angleClasses": [{"value": index, "name": angle_name(index), "nominalDeg": words.angle_deg(index),
                           "lowDeg": words.angle_bounds(index)[0], "steepDeg": words.angle_bounds(index)[1]}
                          for index in range(words.n_descent + 2)],
+        "angleLevelValue": ANGLE_LEVEL,
         "speedTargetsMps": [words.speed_mps(index) for index in range(words.n_speed_levels)],
         "speedUnspecifiedValue": words.speed_unspecified, "speedToleranceMps": spec.speed_tolerance_mps,
         "speedAccelMaxMps2": spec.speed_accel_max_mps2,
@@ -394,6 +395,8 @@ def main(argv: list[str] | None = None) -> int:
     airports = [code.upper() for code in args.airport]
     if args.per_stratum < 1:
         parser.error("--per-stratum must be at least 1")
+    if len(set(airports)) != len(airports):
+        parser.error(f"an airport is named twice in {airports}")
     started = time.perf_counter()
 
     spec = load_spec(directory)
@@ -419,6 +422,9 @@ def main(argv: list[str] | None = None) -> int:
     git = _git_state()
     title = args.title or f"Instruction vocabulary · {READING_RULE} · spec {spec.sha256[:12]} · {SPLIT}"
 
+    # Every airport is BUILT before any is written: a re-read that differs, or an envelope the
+    # display refuses, stops the export with nothing on disk.
+    built: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, int]]] = {}
     for code in airports:
         geometry = geometries[code]
         globe = Globe(geometry)
@@ -437,9 +443,7 @@ def main(argv: list[str] | None = None) -> int:
                                 f"vectored = heading turns before the capture adding up to at least "
                                 f"{VECTORED_TURN_DEG:g}° (readout.flight_record)")}
         sha = candidates_sha256(geometry)
-        out = root / code / "training" / args.set_id
-        out.mkdir(parents=True)
-        write_json_atomic(out / SAMPLE_FILE, {
+        sample = {
             "schema": SAMPLE_SCHEMA, "setId": args.set_id, "airport": code, "writtenUtc": utc_now(),
             "producedBy": {"runner": RUNNER, "artefact": artefact_name, "git": git},
             "cohort": {**cohort, "pool": counts["pool"], "read": counts["read"]},
@@ -449,16 +453,21 @@ def main(argv: list[str] | None = None) -> int:
             "candidatesSha256": sha, "centrelineLengthM": centreline_m,
             "candidates": candidates_block(geometry, globe, centreline_m),
             "flights": payloads,
-        }, allow_nan=False)
+        }
         entry = {"id": args.set_id, "kind": KIND_READBACK, "title": title, "file": f"{args.set_id}/{SAMPLE_FILE}",
                  "vocabularySha256": spec.sha256, "runwaySha256": sha, "readingRule": READING_RULE,
                  "flights": len(payloads), "cohort": cohort,
                  "source": {"artefact": artefact_name, "specSha256": spec.sha256, "labellerSourceSha256": labeller,
                             "exporter": RUNNER, "git": git}}
+        built[code] = (sample, entry, counts)
+    for code, (sample, entry, counts) in built.items():
+        out = root / code / "training" / args.set_id
+        out.mkdir(parents=True)
+        write_json_atomic(out / SAMPLE_FILE, sample, allow_nan=False)
         write_json_atomic(out.parent / INDEX_FILE, {"schema": INDEX_SCHEMA, "writtenUtc": utc_now(), "airport": code,
                                                     "sets": [*existing[code], entry]})
         size = (out / SAMPLE_FILE).stat().st_size / 1e6
-        print(f"  {code}: {len(payloads)} flights ({args.per_stratum} per stratum; {counts['read']} of "
+        print(f"  {code}: {entry['flights']} flights ({args.per_stratum} per stratum; {counts['read']} of "
               f"{counts['pool']:,} read), {size:.1f} MB → {out / SAMPLE_FILE}", flush=True)
     print(f"  done in {time.perf_counter() - started:.0f} s", flush=True)
     return 0

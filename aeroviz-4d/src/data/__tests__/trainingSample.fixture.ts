@@ -61,6 +61,7 @@ export const MOCK_VOCABULARY = {
     { value: 4, name: "descent 4", nominalDeg: 4.41, lowDeg: 3.73, steepDeg: 10 },
     { value: 5, name: "climb", nominalDeg: -1.22, lowDeg: -15, steepDeg: -0.5 },
   ],
+  angleLevelValue: 0,
   speedTargetsMps: range(47, 20, 5),
   speedUnspecifiedValue: 47,
   speedToleranceMps: 5,

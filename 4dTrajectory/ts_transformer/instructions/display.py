@@ -8,8 +8,8 @@ public functions of `envelope.py` and `labeller/*`:
   a turn at the radius's rate has exactly that bank);
 - a hold's funnel widens by `envelope.funnel_half_width_m`, the capture corridor by
   `envelope.corridor_half_width_m`, and its rows are judged by `envelope.corridor`;
-- the altitude tubes ARE `labeller.vertical.tube_bounds`; the speed spans' verdicts are
-  `labeller.speed.span_checks` and their band rows `envelope.speed_band`;
+- the altitude tubes ARE `labeller.vertical.tube_bounds`; the speed spans' band rows are judged by
+  `envelope.speed_band`, and counted against the labeller's own `labeller.speed.span_checks`;
 - every verdict shown is the labeller's own (`Reading.checks`), never recomputed.
 
 It is outside the labeller's source hash (`artefact.LABELLER_MODULES`): changing how a sentence is
@@ -25,10 +25,13 @@ Two readings of the design that this module makes, both stated where they are ma
   mostly wind drift); the region is still drawn with the full range, and the word's verdict says
   whether the lowest bank applied (`bank_min_applies`).
 - the HOLD FUNNEL starts where the turn ends. The turn ends somewhere on the segment between the
-  tightest and the widest arc's end (which one depends on the bank flown), so the funnel starts as
-  that segment's extent across θ, its nominal line along θ through the segment's midpoint, and
-  widens by the distance flown along θ × tan(`heading_tolerance_deg`). A word the flight was
-  already holding when the slice began has no turn: its funnel starts at the issue point.
+  tightest and the widest arc's end (which one depends on the bank flown), and from wherever it
+  ends the hold may wander off the line along θ by the distance flown × tan(`heading_tolerance_deg`).
+  So the funnel is that segment SWEPT along θ, every point of it opening its own ±tolerance cone:
+  across θ it is the segment's half extent + distance × tan (the design's "转弯段末的宽度 + 已飞
+  距离 × tan δψ"), and along θ it starts where the segment starts — at the tightest turn's end, not
+  at some midpoint ahead of a normally banked aircraft. A word the flight was already holding when
+  the slice began has no turn: its funnel is the one cone from the issue point.
 """
 
 from __future__ import annotations
@@ -44,7 +47,6 @@ from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import RunwayCandidate
 from ts_transformer.instructions.labeller.read import Admitted, Reading
 from ts_transformer.instructions.labeller.records import Instruction
-from ts_transformer.instructions.labeller.speed import span_checks
 from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import ANGLE, ANGLE_LEVEL, HEADING, SPEED, Words, wrap180
@@ -131,34 +133,58 @@ def turn_region(start: np.ndarray, from_track_deg: float, target_deg: float, gro
 
 
 # ---- holds
+def convex_hull(points: np.ndarray) -> np.ndarray:
+    """``[k, 2]``: the convex hull of ``[n, 2]`` points, counter-clockwise in (E, N), without
+    repeating the first point (Andrew's monotone chain)."""
+    unique = sorted({(float(e), float(n)) for e, n in points})
+    if len(unique) < 3:
+        return np.array(unique)
+
+    def cross(o, a, b) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[tuple[float, float]] = []
+    upper: list[tuple[float, float]] = []
+    for point in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
+            lower.pop()
+        lower.append(point)
+    for point in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
+            upper.pop()
+        upper.append(point)
+    return np.array(lower[:-1] + upper[:-1])
+
+
 @dataclass(frozen=True)
 class Funnel:
-    """A hold's allowed positions along θ (§2.3): the nominal line and its widening half width."""
+    """A hold's allowed positions (§2.3): the turn's end swept along θ, widening by the tolerance."""
 
     target_deg: float
     length_m: float
+    #: The turn end's half extent across θ, and that plus the widening after ``length_m``.
     start_half_width_m: float
     end_half_width_m: float
-    axis: Line                   # the nominal line, start → end
-    outline: Line                # start cap left, end cap left, end cap right, start cap right
+    axis: Line                   # the nominal line along θ, through the turn end's middle
+    outline: Line
 
 
 def funnel(turn_end: Line, target_deg: float, length_m: float, spec: VocabularySpec) -> Funnel:
-    """From ``turn_end`` (one point when no turn was flown): the nominal line along θ through its
-    midpoint, half width = its extent across θ + `envelope.funnel_half_width_m` of the distance
-    flown along θ."""
+    """``turn_end`` (one point when no turn was flown) swept ``length_m`` along θ, every point of
+    it opening a cone of `envelope.funnel_half_width_m`: the convex hull of the turn end and of each
+    of its points moved ``length_m`` along θ and that far off to either side (the sum of a segment
+    and a cone is convex)."""
     ends = np.column_stack((turn_end.e_m, turn_end.n_m))
-    middle = ends.mean(axis=0)
     along, right = _unit(target_deg), _right(target_deg)
+    spread = float(envelope.funnel_half_width_m(length_m, spec.heading_tolerance_deg))
+    far = ends + length_m * along
+    middle = ends.mean(axis=0)
     across = (ends - middle) @ right
     start_width = float((across.max() - across.min()) / 2.0)
-    end_width = start_width + float(envelope.funnel_half_width_m(length_m, spec.heading_tolerance_deg))
-    far = middle + length_m * along
     return Funnel(
         target_deg=float(target_deg % 360.0), length_m=float(length_m), start_half_width_m=start_width,
-        end_half_width_m=end_width, axis=Line.of([middle, far]),
-        outline=Line.of([middle - start_width * right, far - end_width * right,
-                         far + end_width * right, middle + start_width * right]))
+        end_half_width_m=start_width + spread, axis=Line.of([middle, middle + length_m * along]),
+        outline=Line.of(convex_hull(np.vstack((ends, far - spread * right, far + spread * right)))))
 
 
 def on_branch(reference_deg: float, target_deg: float) -> float:
@@ -399,7 +425,7 @@ class SpeedSpan:
     transition_upper_mps: np.ndarray | None
     band_mps: tuple[float, float] | None
     band_inside: np.ndarray | None        # per band row (arrival .. end), `envelope.speed_band`
-    check: dict[str, Any] | None          # `labeller.speed.span_checks` for this word
+    check: dict[str, Any] | None          # `Reading.checks["speed"]` for this word
     #: "unspecified": the only bound left is the speed words' range, as `read.admit` applies it.
     range_mps: tuple[float, float] | None
 
@@ -408,7 +434,7 @@ def speed_spans(flight: Admitted, reading: Reading, spec: VocabularySpec, words:
     speed, time = flight.smoothed.ground_speed_mps, flight.signals.time_s
     ordered = sorted((i for i in reading.instructions if i.column == SPEED), key=lambda item: item.row)
     ends = [item.row for item in ordered[1:]] + [len(speed)]
-    checks = {check["row"]: check for check in span_checks(reading.instructions, speed, spec, words)}
+    checks = {check["row"]: check for check in reading.checks["speed"]}
     tolerance = spec.speed_tolerance_mps
     spans = []
     for word, end in zip(ordered, ends):

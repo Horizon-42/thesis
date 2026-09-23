@@ -16,6 +16,7 @@ import {
   trainingWordLabel,
   TRAINING_COLUMNS,
   TRAINING_READING_RULE,
+  TRAINING_SAMPLE_SCHEMA,
   TRAINING_SPEC_SHA256,
   type TrainingSample,
 } from "../trainingSample";
@@ -51,8 +52,8 @@ describe("parseTrainingSample", () => {
 
   // ── refused by name ─────────────────────────────────────────────────────
   it("refuses a sample of the superseded box vocabulary by its schema", () => {
-    expect(refusal((raw) => { raw.schema = "aeroviz-training-sample-v2"; })).toMatch(
-      /schema is "aeroviz-training-sample-v2", expected "aeroviz-training-sample-v3"/);
+    expect(refusal((raw) => { raw.schema = "aeroviz-training-sample-v2"; })).toContain(
+      `schema is "aeroviz-training-sample-v2", expected "${TRAINING_SAMPLE_SCHEMA}"`);
   });
 
   it("refuses another reading rule and another spec by name", () => {
@@ -124,6 +125,31 @@ describe("parseTrainingSample", () => {
       .toMatch(/envelopes\.approach\.corridor is not an object/);
     expect(refusal((raw) => { delete raw.flights[1].envelopes.approach.captureTurn; }))
       .toMatch(/envelopes\.approach\.captureTurn is not an object/);
+  });
+
+  it("refuses a heading envelope that is half a turn or half a hold", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turnBandDeg = null; }))
+      .toMatch(/heading\[1\]: turn, turnBandDeg, turnEndRow and check come together or not at all/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[0].funnel = null; }))
+      .toMatch(/heading\[0\]: funnel, holdBandDeg and holdStartRow come together or not at all/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turnEndRow = 30; }))
+      .toMatch(/the turn ends at row 30, after the hold ends at 20/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].check.kind = "intercept"; }))
+      .toMatch(/is the check of a intercept, but the word is turn/);
+  });
+
+  it("refuses markers that are not the words' own rows", () => {
+    expect(refusal((raw) => { raw.flights[0].joinRow = 11; raw.flights[0].envelopes.approach.clearanceRow = 11; }))
+      .toMatch(/joinRow is 11, but the clearance is issued at row 10/);
+    expect(refusal((raw) => { raw.flights[0].unspecifiedRow = 31; }))
+      .toMatch(/unspecifiedRow is 31, but the last speed word is 47 at row 30/);
+  });
+
+  it("refuses a speed verdict at odds with its own parts", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.speed[0].check.arrivalRows = 2; }))
+      .toMatch(/arrivalRows is 2, not a whole number in 0…0/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.speed[0].check.transitionOk = false; }))
+      .toMatch(/contained is true, with the transition failed/);
   });
 
   it("refuses a measured angle for the level class", () => {
