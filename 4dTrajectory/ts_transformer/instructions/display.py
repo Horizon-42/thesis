@@ -184,7 +184,7 @@ def heading_envelopes(flight: Admitted, reading: Reading, spec: VocabularySpec, 
             hold_start_row=span.hold_start if span.held else None, hold_end_row=span.hold_end,
             from_track_deg=start_track, target_on_track_deg=target_on_track, turn_band_deg=turn_band,
             hold_band_deg=(target_on_track - tolerance, target_on_track + tolerance) if span.held else None,
-            turn_check=span.turn, hold_check=judged.get(word.row) if span.held else None, turn=region,
+            turn_check=span.turn, hold_check=judged[word.row] if word.row in judged else None, turn=region,
             funnel=drawn))
     return result
 
