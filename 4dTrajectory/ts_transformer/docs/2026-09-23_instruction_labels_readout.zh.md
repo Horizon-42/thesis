@@ -11,8 +11,8 @@
 | 项 | 内容 |
 |---|---|
 | 产物 | `4dTrajectory/outputs/POOLED/instruction_language/v1_20260923/`（信号、候选跑道、规格、量测、句子、`labels.json`、`readout.{json,md}`、`figures/`） |
-| 规格 | sha `08ad64abb53e`，读法 `instruction-v1`；标注器源码 sha `5d7cc6c6d5ea`，量于 commit `4ffd801d`（工作区干净），都记在 `spec.json` 的 `source` |
-| 代码 | 分支 `dev-instruction-labeller`（`instructions/` 与四个 runner），commit `c79a8adb`、`4ffd801d` |
+| 规格 | sha `08ad64abb53e`，读法 `instruction-v1`；标注器源码 sha `38660840f73d`（只算决定句子与规格的模块），量于 commit `cadd29d1`（工作区干净），都记在 `spec.json` 的 `source` |
+| 代码 | 分支 `dev-instruction-labeller`（`instructions/` 与四个 runner） |
 | 数据 | live harvest v7；名单 train 50,693 / val 10,635 架，其中 44 + 10 架短于一个窗口（120 s），可用 50,649 / 10,625 架；test 的 10,919 架没有打开 |
 | 结果 | train 成功 50,178 架（99.1 %），val 10,527 架（99.1 %）；拒绝的原因见 §1 |
 | 冻结 | **词表已冻结**（2026-09-23，用户确认 §5 四项）：规格 `08ad64abb53e` 就是词表，此后改任何一项都是新版本 |
