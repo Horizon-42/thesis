@@ -20,7 +20,7 @@ from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, APPROACH_CLEARED, APPROACH_NOT_CLEARED, HEADING, SPEED, UNCHANGED, Words,
     compass_from_math_rad, wrap180 as np_wrap180,
 )
-from ts_transformer.tests.support import instruction_airport, instruction_spec as spec
+from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec as spec
 
 F64 = torch.float64
 CPU = torch.device("cpu")
@@ -76,6 +76,22 @@ def test_a_sentence_must_write_every_column_at_step_0():
     grid[0, :5] = [0, 0, 0, 0, 0]
     with pytest.raises(ValueError, match="step 0 must write every column"):
         words_in_force([grid], words, Delays(0.0, 0.0, 0.0), cycle_s=1.0, cycles=4, device=CPU)
+
+
+# ---- the rebuilt flight
+def test_a_rebuilt_flight_must_be_the_one_the_signals_were_read_from(monkeypatch):
+    from dataclasses import replace
+    from ts_transformer.autopilot import flights
+
+    stored = instruction_flight(*fly_legs([(20, 0.0, 90.0, 0.0)], 90.0, 900.0, -3000.0, 0.0))
+    rebuilt = {"signals": stored}
+    monkeypatch.setattr(flights, "signals_from_series", lambda series, geometry: rebuilt["signals"])
+    flights.require_same_flight(object(), stored, instruction_airport())
+    for change, message in ((dict(typecode="B738"), "typecode"), (dict(runway="27"), "runway"),
+                            (dict(altitude_m=stored.altitude_m + 0.01), "altitude_m")):
+        rebuilt["signals"] = replace(stored, **change)
+        with pytest.raises(ValueError, match=message):
+            flights.require_same_flight(object(), stored, instruction_airport())
 
 
 # ---- the plant and the inverse

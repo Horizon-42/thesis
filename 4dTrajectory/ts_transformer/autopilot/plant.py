@@ -46,6 +46,8 @@ class Plant:
         """``state`` ``[B,7]`` geodetic, ``command`` ``[B,3]`` (thrust fraction, bank, load factor)
         held for ``duration_s`` → the geodetic state at the cycle's end."""
         inputs = self.inputs
+        # ``initial_controls`` is a lagged model's actuator state; the point-mass rows never read it
+        assert EXECUTOR_DYNAMICS.control_dynamics_model == CONTROL_DYNAMICS_POINT_MASS
         rollout = rollout_control_endpoints(
             command[:, None, :],
             torch.full((len(state), 1), duration_s, dtype=state.dtype, device=state.device),

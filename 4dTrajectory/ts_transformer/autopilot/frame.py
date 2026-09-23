@@ -22,7 +22,8 @@ from aerodynamic_model.torch_dynamics import STATE_NAMES
 from geokit import METRES_PER_DEG_LAT
 from ts_transformer.instructions.airport import AirportGeometry
 
-LAT, LON, ALT, SPEED, PSI, GAMMA, MASS = (STATE_NAMES.index(name) for name in STATE_NAMES)
+LAT, LON, ALT, SPEED, PSI, GAMMA, MASS = (STATE_NAMES.index(name) for name in
+                                          ("lat_deg", "lon_deg", "alt_m", "V", "psi", "gamma", "mass_kg"))
 
 
 def compass_deg(psi_rad: torch.Tensor) -> torch.Tensor:

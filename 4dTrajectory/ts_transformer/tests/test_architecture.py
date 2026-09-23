@@ -693,22 +693,26 @@ def test_only_the_runners_and_the_executor_reach_the_instructions_package():
 
 
 AUTOPILOT = TS_DIR / "autopilot"
-#: The executor sits above the instruction language and the dynamics, beside the models and below
-#: nothing yet (framework document §2): it flies words through the control path's shared rollout, so
-#: it may read the data plane, the shared dynamics and geometry, and never a model, the training
-#: plane, a runner, the CLI, a prediction path's own package or the archived manoeuvre layer.
-AUTOPILOT_MAY_NOT_IMPORT = ("training", "experiments", "cli", "backbone", "inference", "manoeuvre",
-                            "outputs.control", "outputs.guidance", "outputs.state")
+#: The executor sits above the instruction language and the shared dynamics and below the prior and
+#: the closed loop (framework document §2): it flies words through the control path's rollout, so
+#: inside the package it reads only these (a module, or a whole group ending in ``.``) — never a
+#: model, the training plane, a runner, a prediction path's own package or a layer above it.
+AUTOPILOT_MAY_IMPORT = ("autopilot.", "instructions.", "config", "io_utils", "repo_layout", "data.dataset",
+                        "geometry.flyability", "outputs.dynamics.", "outputs.envelope", "outputs.constraints.speed_floor")
 
 
 def test_the_executor_flies_through_the_shared_dynamics_only():
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
     for path in AUTOPILOT.rglob("*.py"):
         if "__pycache__" in path.parts:
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         for name in _imported_names(path):
-            for refused in AUTOPILOT_MAY_NOT_IMPORT:
-                assert name != refused and not name.startswith(refused + "."), f"{rel} imports {name}"
+            if name.split(".")[0] not in groups or name == "autopilot":
+                continue
+            allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
+                          (name == item or name.startswith(item + ".")) for item in AUTOPILOT_MAY_IMPORT)
+            assert allowed, f"{rel} imports {name}"
 
 
 def test_only_the_runners_reach_the_executor_for_now():
