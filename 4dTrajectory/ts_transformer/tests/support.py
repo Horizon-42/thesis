@@ -61,3 +61,65 @@ def terminal_contexts() -> dict[tuple[str, str], AssessmentContext]:
         threshold_elevation_hae_m=141.86, threshold_elevation_msl_m=111.86,
         threshold_crossing_height_m=15.0, lpv_course_width_m=106.75,
     )}
+
+
+def instruction_airport():
+    """A synthetic airport for the instruction labeller: one candidate runway "09", threshold at
+    the airport frame's origin, course 090° true, elevation 100 m MSL."""
+    from ts_transformer.instructions.airport import AirportGeometry
+
+    return AirportGeometry.from_dict({
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
+        "candidates": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0,
+                        "elevation_m": 100.0, "length_m": 3000.0}],
+    })
+
+
+def instruction_spec(**changes):
+    """A vocabulary spec at the development set's measured values, with ``changes`` applied."""
+    from ts_transformer.instructions import measure
+    from ts_transformer.instructions.spec import VocabularySpec
+
+    measured = measure.MeasuredValues(
+        turn_bank_min_deg=6.0, turn_bank_max_deg=32.0,
+        corridor_half_width_m=20.0, corridor_widening_deg=0.45, corridor_course_tolerance_deg=2.0,
+        descent_angle_edges_deg=(-0.5, 1.4, 2.6, 3.7, 10.0), descent_angle_centres_deg=(0.8, 2.1, 3.0, 4.4),
+        climb_angle_centre_deg=1.3, speed_accel_max_mps2=2.5,
+    )
+    data = measure.build_spec(measured).to_dict()
+    data.update(changes)
+    return VocabularySpec.from_dict(data)
+
+
+INSTRUCTION_STEP_S = 2.0
+
+
+def fly_legs(legs, track0, altitude0, end_e, end_n):
+    """Integrate legs of ``(rows, turn °/row, ground speed m/s, vertical rate m/s)`` from a
+    track and an altitude, 2 s a row, then shift the path so its last row sits at
+    ``(end_e, end_n)``. Returns ``(e, n, altitude, track, speed)``."""
+    import numpy as np
+
+    track, altitude, speed = [track0], [altitude0], []
+    for rows, turn, v, climb in legs:
+        for _ in range(rows):
+            speed.append(v)
+            track.append(track[-1] + turn)
+            altitude.append(altitude[-1] + climb * INSTRUCTION_STEP_S)
+    speed.append(speed[-1])
+    track, altitude, speed = np.array(track), np.array(altitude), np.array(speed)
+    heading = np.radians(track)
+    e = np.concatenate(([0.0], np.cumsum(speed[:-1] * np.sin(heading[:-1]) * INSTRUCTION_STEP_S)))
+    n = np.concatenate(([0.0], np.cumsum(speed[:-1] * np.cos(heading[:-1]) * INSTRUCTION_STEP_S)))
+    return e - e[-1] + end_e, n - n[-1] + end_n, altitude, track, speed
+
+
+def instruction_flight(e, n, altitude, track, speed, dataset_id="KXXX:test"):
+    """`FlightSignals` for a synthetic flight onto `instruction_airport`'s runway 09."""
+    import numpy as np
+
+    from ts_transformer.instructions.signals import FlightSignals
+
+    t = np.arange(len(e)) * INSTRUCTION_STEP_S
+    return FlightSignals(dataset_id, "KXXX", "09", "A320", t, e, n, altitude, track, speed,
+                         np.gradient(altitude, INSTRUCTION_STEP_S))

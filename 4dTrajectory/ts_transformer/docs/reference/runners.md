@@ -177,3 +177,22 @@ The no-token executor's own axes — lookback L × segment Δ, `docs/experiments
 - **`executor_relative_gate`** writes a third verdict row, **gate B1** (§5.2.2: the truth-token upper bound — beyond the seed line on ≥ 1 of the three metrics on both seeds, fully flyable ≥ the floor, WITHOUT row B's not-worse clause: a truth token that buys one thing at another's price still carries information the prior is worth training for; row B, read on the prior's token, is where the price counts).
 - **`two_tier_b_queue --arms … --campaign … --airport KRDU [--groups …] [--device auto] [--dry-run]`** (§8.2): step 0 the baselines (above); then one group = one configuration × vocabulary, both seeds (`groups_of`); per group, in declaration order (K16: S20, S60-h60, S60-held; then cv): `frame_ablation --only` its two arms → per arm `manoeuvre_codebook` (into the declaration's `stage_b.codebook_dir`, `4dTrajectory/outputs/codebooks/two_tier_v3_b_20260919_<arm>/`), `manoeuvre_lockstep --protocol C --write-records` (`<campaign>/lockstep/<arm>/C/`), `executor_failure_modes` (`failure_modes/<arm>_C/`), `manoeuvre_code_atlas` (`atlas/<arm>/`; under a held token the K paths are the horizon long and the truth's segment the span long, both named) → `executor_relative_gate` against the configuration's baseline (`stage_b.configurations[<c>].baseline` names a `stage_b.baselines` entry; the seed line from `stage_b.seed_line_from`, the grid's `gate/after_L120_D120/grid_gate.json` — a verdict, not a reading) into `gate/b1_<group>/` → ONLY when `verdicts.b1.pass` (read at run time): per arm `manoeuvre_prior --seed <the arm's>` (`priors/<arm>/`), lockstep A (records) and A-truth, failure modes on A → the relative gate on the A readings into `gate/b_<group>/`. A step whose artefact exists is skipped; the first failure stops the chain (D42); `GROUP <g> complete` / `GATE B1 PASS|FAIL` / `STOP:` for a watcher; the free disk (≥ 3 GB) checked per group; PID `<campaign>/two_tier_b_queue.pid`; the baseline checkpoints, the cohort file and a seed line carrying every metric's p75 must exist before the queue starts (checked at plan time); `--groups` narrows the arm groups and step 0 to the baselines they need.
 
+
+### R10 · the instruction labeller: `instruction_signals` → `instruction_spec` → `instruction_labels` → `instruction_figures`
+
+2026-09-23 (`docs/2026-09-23_instruction_vocabulary_design.zh.md` §3, §7–§8; artefact contract C30).
+`instruction_signals --out <new dir> [--airports …] [--workers N] [--limit N]` reads the train and
+val flights of every harvested airport (process pool, 500 keys per chunk, spawn), writes the signals
+and `candidates.json`; `--limit` is a SMOKE option recorded in `signals.json`. `instruction_spec --dir`
+measures on TRAIN only, and only on the flights and rows the labeller admits (`read.admit`; the
+refusals are counted in `measurements.json` `not_admitted`) — pass A with `measure.provisional_spec()`
+(turn banks on turns ≥ `turn_bank_min_from_deg`, speed transition accelerations, the course error on
+the last 1.5 km flown, the move-piece angles for the descent classes, and the track / level wander
+for the bands the two CHOSEN tolerances are read against: `sensitivity`), pass B with the measured
+course tolerance (the aligned final's offsets by distance, the heading grid comparison on the rows
+before it) — and writes `spec.json` (`measure.SUGGESTED` + `MeasuredValues`, the labeller source
+hash, the git state; the rules in `measurements.json`). `instruction_labels --dir` reads train and
+val with that spec — refusing a spec measured by other code — and writes the sentences, `labels.json`
+and the readout. `instruction_figures --dir
+[--count 24] [--seed 1337]` draws a seeded half straight-in / half vectored sample of VAL flights into
+`figures/` with an `index.csv` for a verdict column. Every step refuses to write over an existing file.

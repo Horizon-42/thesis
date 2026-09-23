@@ -18,10 +18,10 @@ from typing import NamedTuple
 import torch
 
 from geokit import WGS84_A, WGS84_B, WGS84_E2, WGS84_E_PRIME2
+from .common import GRAVITY_MPS2
 from .torch_piecewise_rollout import rollout_piecewise_constant_with_step
 
 
-GRAVITY_MPS2 = 9.81
 ISA_T0_K = 288.15
 ISA_LAPSE_K_PER_M = 0.0065
 ISA_RHO0_KG_M3 = 1.225

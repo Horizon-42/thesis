@@ -658,3 +658,35 @@ def test_every_new_run_vocabulary_is_actually_refused(tmp_path, capsys):
         assert info.value.code == 2, field
         message = capsys.readouterr().err
         assert f"{field}={refused[0]!r} cannot be selected for a new run" in message, field
+
+
+INSTRUCTIONS = TS_DIR / "instructions"
+#: The second layer's language sits below every model (framework document §2): inside the
+#: package it reads only the torch-free data-plane modules its signals come through, itself and
+#: the plain utilities.
+INSTRUCTIONS_MAY_IMPORT = {"data.channels", "data.coordinate_frames", "io_utils"}
+
+
+def test_the_instructions_package_sits_below_the_models():
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
+    for path in INSTRUCTIONS.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        for name in _imported_names(path):
+            top = name.split(".")[0]
+            assert top != "torch", f"{rel} imports torch"
+            if top in groups and top != "instructions":
+                module = top if top in INSTRUCTIONS_MAY_IMPORT else ".".join(name.split(".")[:2])
+                assert module in INSTRUCTIONS_MAY_IMPORT, f"{rel} imports {name}"
+
+
+def test_only_the_runners_reach_the_instructions_package_for_now():
+    """Until the executor and the prior exist (framework document §0), nothing in the package
+    but the runners consumes the instruction language."""
+    for path in _module_files():
+        if path.is_relative_to(INSTRUCTIONS):
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
+            assert rel.startswith("experiments/"), f"{rel} imports the instructions package"

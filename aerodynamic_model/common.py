@@ -3,6 +3,9 @@ from dataclasses import dataclass
 import math
 import numpy as np
 
+#: Gravitational acceleration of the point-mass flight model (torch and envelope code read this one value).
+GRAVITY_MPS2 = 9.81
+
 @dataclass
 class State:
     x: float

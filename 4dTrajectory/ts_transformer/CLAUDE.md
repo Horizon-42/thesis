@@ -144,6 +144,11 @@ of the package, not a migration in progress.
 - **A replay finds a checkpoint's manifests by the digest it recorded**
   (`repo_layout.checkpoint_arrival_manifests`): the live harvest or a FROZEN generation
   (`harvest-v5-20260823` holds every checkpoint of 2026-08-24..09-23); never by path (C29).
+- **The instruction sentence artefact** (`instructions/`, 2026-09-23): one spec sha, written once and
+  refused on a sha mismatch; the LABELLER's source hash is part of it (a spec measured by other code
+  refuses to label); candidates = the manifest's CIFP runway geometry; one gate (`read.admit`) for
+  labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
+  signals (it ends before the landing) (C30).
 
 ## Current defaults and their status
 
@@ -271,7 +276,9 @@ of the package, not a migration in progress.
 - A module belongs under `outputs/control/` only if EVERY consumer is control-specific (L23);
   import direction rules, all enforced by `tests/test_architecture.py` (L24). **Between paths**: the
   guidance layer never imports the control path (L28). **`manoeuvre/`**: **nothing under `outputs/`
-  imports `manoeuvre`**; only the runners do (L29).
+  imports `manoeuvre`**; only the runners do (L29). **`instructions/`** (2026-09-23): the second
+  layer's language — vocabulary, signals, envelopes, labeller, artefact; torch-free, below every
+  model, only the runners consume it until the executor and the prior exist (L30).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;
@@ -303,7 +310,9 @@ for every lookback — reading (a) from L−1 confounds lookback with starting p
 protocol-none baseline on the common flights (§3.3 rows A3 / B / B1, the seed line named, never typed in; it reads
 THIS code's schema only, no compatibility) (R8). **Stage B's intent-code queue** (`two_tier_b_queue`, 2026-09-19):
 ARCHIVED 2026-09-20 (R9 is its record); `manoeuvre_lockstep --cohort` stayed (B0's re-read on the B cohort = the
-grid's L60_D60 cohort).
+grid's L60_D60 cohort). **The instruction labeller** (2026-09-23): `instruction_signals` →
+`instruction_spec` (measured on TRAIN only) → `instruction_labels` → `instruction_figures`, each into
+one never-overwritten artefact directory (R10).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 
@@ -357,6 +366,6 @@ grid's L60_D60 cohort).
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/2026-09-18_two_tier_plan_v3.zh.md`** — the OVERVIEW (intent, outline, the metric and readout protocol §3, the framework §4, the 2026-09-20 audit §10) and its stage A document **`…_v3_A.zh.md`** (the no-token executor's (L, Δ) grid, run); stage B is not designed yet. The intent-CODE version (`2026-09-18_manoeuvre_token_plan.zh.md` + its readouts `…_results.zh.md`), the two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12; the code readouts §9–§11, read through v3 §10 item 1): W2 |
+| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/2026-09-18_two_tier_plan_v3.zh.md`** — the OVERVIEW (intent, outline, the metric and readout protocol §3, the framework §4, the 2026-09-20 audit §10) and its stage A document **`…_v3_A.zh.md`** (the no-token executor's (L, Δ) grid, run). **The second layer now**: **`docs/2026-09-23_two_tier_framework.zh.md`** (layers, packages, artefact, stage gates), **`docs/2026-09-23_instruction_vocabulary_design.zh.md`** (the words, envelopes, labelling rules, values) and **`docs/2026-09-23_instruction_labels_readout.zh.md`** (the labeller's readout on the five-airport development set). The intent-CODE version (`2026-09-18_manoeuvre_token_plan.zh.md` + its readouts `…_results.zh.md`), the two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12; the code readouts §9–§11, read through v3 §10 item 1): W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |
