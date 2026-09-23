@@ -2,7 +2,7 @@
  * TrainingPanel.tsx
  * -----------------
  * The Training task's left-dock panel: which exported set, which flight, which envelopes are
- * drawn — for the instruction vocabulary (`instruction-v1`). Design:
+ * drawn — for the instruction vocabulary (`TRAINING_READING_RULE`). Design:
  * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
  * It owns the only fetch and publishes the selected flight through `trainingSelection`, which the
@@ -332,13 +332,23 @@ export default function TrainingPanel() {
                     </dd>
                   </div>
                   <div>
+                    <dt>Landing</dt>
+                    <dd>
+                      passing the threshold within {sample.vocabulary.landingMaxHeightM} m of its height and,
+                      off the centreline, within{" "}
+                      {sample.candidates.map((candidate) => `${candidate.ident} ${candidate.landingCrossLimitM} m`).join(", ")}{" "}
+                      ({sample.vocabulary.landingCrossLimitM} m, or half the spacing to a parallel runway)
+                    </dd>
+                  </div>
+                  <div>
                     <dt>Heading</dt>
                     <dd>
                       {sample.vocabulary.headingTargetsDeg[1] - sample.vocabulary.headingTargetsDeg[0]}° grid,
-                      hold ±{sample.vocabulary.headingToleranceDeg}°, turns at bank{" "}
-                      {sample.vocabulary.turnBankMinDeg}–{sample.vocabulary.turnBankMaxDeg}° (the lowest bank
-                      only for turns of {sample.vocabulary.turnBankMinFromDeg}° or more), at most{" "}
-                      {sample.vocabulary.headingMaxTurnDeg}° per word
+                      hold ±{sample.vocabulary.headingToleranceDeg}°, at most {sample.vocabulary.headingMaxTurnDeg}° per
+                      word; a turn at {sample.vocabulary.turnRateMinDegS}–{sample.vocabulary.turnRateMaxDegS}°/s (the
+                      lowest rate only for turns of {sample.vocabulary.turnRateMinFromDeg}° or more) and at most{" "}
+                      {sample.vocabulary.turnBankMaxDeg}° of bank, begun up to {sample.vocabulary.turnStartDelayMaxS} s
+                      after the word
                     </dd>
                   </div>
                   <div>

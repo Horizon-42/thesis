@@ -1,5 +1,5 @@
 /**
- * The Training reader under `instruction-v1`: what it accepts, and — the point of it — that
+ * The Training reader under the instruction vocabulary: what it accepts, and — the point of it — that
  * everything it refuses is refused BY NAME, with the field that failed.
  */
 import { describe, expect, it } from "vitest";
@@ -20,7 +20,7 @@ import {
   TRAINING_SPEC_SHA256,
   type TrainingSample,
 } from "../trainingSample";
-import { MOCK_ROWS, STRAIGHT_KEY, VECTORED_KEY, WORD, mockIndex, mockSample } from "./trainingSample.fixture";
+import { MOCK_ROWS, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockIndex, mockSample } from "./trainingSample.fixture";
 
 function parsed(raw: unknown = mockSample()): TrainingSample {
   const result = parseTrainingSample(raw);
@@ -57,8 +57,10 @@ describe("parseTrainingSample", () => {
   });
 
   it("refuses another reading rule and another spec by name", () => {
-    expect(refusal((raw) => { raw.vocabulary.readingRule = "box-v3"; })).toMatch(
-      new RegExp(`readingRule is box-v3, and this reader is written for ${TRAINING_READING_RULE}`));
+    for (const rule of ["box-v3", "instruction-v1"]) {
+      expect(refusal((raw) => { raw.vocabulary.readingRule = rule; })).toContain(
+        `readingRule is ${rule}, and this reader is written for ${TRAINING_READING_RULE}`);
+    }
     expect(refusal((raw) => { raw.vocabulary.specSha256 = "0".repeat(64); })).toMatch(
       new RegExp(`specSha256 is 000000000000, and this reader is written for spec ${TRAINING_SPEC_SHA256.slice(0, 12)}`));
   });
@@ -152,6 +154,32 @@ describe("parseTrainingSample", () => {
       .toMatch(/contained is true, with the transition failed/);
   });
 
+  it("refuses a turn drawn with limits other than the vocabulary's, or an end that is not four corners", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turn.rateMinDegS = 0.4; }))
+      .toMatch(/turn: rateMinDegS is 0\.4, but the vocabulary says 0\.5/);
+    expect(refusal((raw) => {
+      const end = raw.flights[0].envelopes.heading[1].turn.end;
+      for (const key of ["eM", "nM", "lon", "lat"]) end[key] = end[key].slice(0, 2);
+    })).toMatch(/turn\.end: holds 2 points, fewer than 4/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.approach.captureTurn.turn.startDelayMaxS = 9; }))
+      .toMatch(/captureTurn\.turn: startDelayMaxS is 9, but the vocabulary says 10\.5/);
+  });
+
+  it("refuses a hold check that is not the word's own hold rows", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].holdCheck.holdStartRow = 17; }))
+      .toMatch(/holdCheck\.holdStartRow is 17, not a whole number in 16…16/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].holdCheck.rows = 4; }))
+      .toMatch(/holdCheck\.rows is 4, not a whole number in 5…5/);
+    expect(refusal((raw) => {
+      raw.flights[1].envelopes.heading[0].holdCheck = { holdStartRow: 0, holdEndRow: 0, rows: 1, inside: 1, halfWidthEndM: 0 };
+    })).toMatch(/holdCheck is given for a word with no hold/);
+  });
+
+  it("refuses a runway's landing limit above the vocabulary's", () => {
+    expect(refusal((raw) => { raw.candidates[1].landingCrossLimitM = 1200; }))
+      .toMatch(/candidates\[1\]: landingCrossLimitM is 1200, not in \(0, 1000\] m/);
+  });
+
   it("refuses a measured angle for the level class", () => {
     expect(refusal((raw) => { raw.flights[0].envelopes.angle[0].measuredDeg = 0.1; }))
       .toMatch(/angle\[0\]: a measured angle is given for every class but level/);
@@ -167,15 +195,16 @@ describe("the index", () => {
   it("keeps every entry and names what the reader refuses, from the manifest alone", () => {
     const index = parseTrainingIndex(mockIndex());
     if (!index.ok) throw new Error(index.problem);
-    expect(index.value.sets.map((entry) => entry.id)).toEqual(["box_v3", "instruction_v1", "prior_s1337_val"]);
-    const [old, current, prior] = index.value.sets;
+    expect(index.value.sets.map((entry) => entry.id)).toEqual(["box_v3", "instruction_v1", SET_ID, "prior_s1337_val"]);
+    const [old, first, current, prior] = index.value.sets;
     expect(trainingSetRefusal(current)).toBeNull();
     expect(trainingSetRefusal(old)).toMatch(/read under box-v3, a superseded vocabulary/);
+    expect(trainingSetRefusal(first)).toMatch(/read under instruction-v1, a superseded vocabulary/);
     expect(trainingSetRefusal(prior)).toMatch(/read under segment-v13/);
     expect(trainingSetRefusal({ ...current, vocabularySha256: "9".repeat(64) }))
-      .toMatch(/spec 999999999999 is not the frozen instruction-v1 spec/);
+      .toContain(`spec 999999999999 is not the ${TRAINING_READING_RULE} spec`);
     expect(trainingSetRefusal({ ...current, kind: "prior-generated" }))
-      .toMatch(/no prior is trained on instruction-v1 yet/);
+      .toContain(`no prior is trained on ${TRAINING_READING_RULE} yet`);
   });
 
   it("greys out one malformed entry without emptying the manifest", () => {
@@ -183,7 +212,7 @@ describe("the index", () => {
     delete raw.sets[0].cohort;
     const index = parseTrainingIndex(raw);
     if (!index.ok) throw new Error(index.problem);
-    expect(index.value.sets.map((entry) => entry.id)).toEqual(["instruction_v1", "prior_s1337_val"]);
+    expect(index.value.sets.map((entry) => entry.id)).toEqual(["instruction_v1", SET_ID, "prior_s1337_val"]);
     expect(index.value.rejected).toEqual([{ id: "box_v3", problem: "set box_v3.cohort is not an object" }]);
   });
 
@@ -231,8 +260,8 @@ describe("reading a sentence", () => {
     const flight = parsed().flights[0];
     const verdicts = trainingVerdicts(flight);
     expect(verdicts).toMatchObject({
-      turns: 1, turnsProgressOk: 1, turnsBankOk: 1, altitudeWords: 2, altitudeContained: 1,
-      speedWords: 1, speedContained: 1, instructionsAfterStep0: 5,
+      turns: 1, turnsProgressOk: 1, turnsRateOk: 1, holdsJudged: 2, holdsContained: 1, holdsNotJudged: 0,
+      altitudeWords: 2, altitudeContained: 1, speedWords: 1, speedContained: 1, instructionsAfterStep0: 5,
     });
     expect(verdicts.silentSteps).toBe(MOCK_ROWS - 1 - 3);   // steps 10, 20 and 30 say something
     const split = { ...flight.envelopes.heading[1].check!, parts: 2 };

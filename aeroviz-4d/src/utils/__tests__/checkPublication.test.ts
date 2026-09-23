@@ -16,7 +16,7 @@ import {
   checkTrainingSetRefusal,
 } from "../checkPublication";
 import { parseTrainingIndex, parseTrainingSample } from "../../data/trainingSample";
-import { mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import { SET_ID, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 
 const observed: ComparisonCategory = {
   key: "observed",
@@ -167,7 +167,7 @@ function readable() {
   const index = parseTrainingIndex(mockIndex());
   const sample = parseTrainingSample(mockSample());
   if (!index.ok || !sample.ok) throw new Error("the fixture should parse");
-  const entry = index.value.sets.find((item) => item.id === "instruction_v1")!;
+  const entry = index.value.sets.find((item) => item.id === SET_ID)!;
   return { index: index.value, entry, sample: sample.value };
 }
 
@@ -175,7 +175,7 @@ describe("the Training export's checks", () => {
   it("passes a manifest and a readable sample that agree", () => {
     const { entry, sample } = readable();
     expect(checkTrainingIndex(mockIndex())).toEqual([]);
-    expect(checkTrainingSample("instruction_v1", mockSample())).toEqual([]);
+    expect(checkTrainingSample(SET_ID, mockSample())).toEqual([]);
     expect(checkTrainingSetRefusal(entry)).toEqual([]);
     expect(checkTrainingSetAgrees(entry, sample)).toEqual([]);
   });
@@ -185,7 +185,7 @@ describe("the Training export's checks", () => {
     const { index } = readable();
     const findings = index.sets.flatMap(checkTrainingSetRefusal);
     expect(findings.map((finding) => [finding.level, finding.category])).toEqual([
-      ["warn", "box_v3"], ["warn", "prior_s1337_val"],
+      ["warn", "box_v3"], ["warn", "instruction_v1"], ["warn", "prior_s1337_val"],
     ]);
     expect(findings[0].message).toContain("read under box-v3, a superseded vocabulary");
   });
@@ -202,8 +202,8 @@ describe("the Training export's checks", () => {
   it("names the field when a readable sample is wrong", () => {
     const sample = mockSample() as any;
     sample.flights[0].envelopes.speed[0].check.bandInside = 7;
-    const findings = checkTrainingSample("instruction_v1", sample);
-    expect(findings[0].category).toBe("instruction_v1");
+    const findings = checkTrainingSample(SET_ID, sample);
+    expect(findings[0].category).toBe(SET_ID);
     expect(findings[0].message).toContain("says 7 band rows inside");
   });
 

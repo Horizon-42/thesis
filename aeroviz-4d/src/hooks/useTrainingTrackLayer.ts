@@ -6,7 +6,8 @@
  *
  *  • THE TRACK, in 3D, at its ellipsoid height (the exporter converted MSL once: h = H + N).
  *  • THE LATERAL ENVELOPES on the ground (`trainingLayers.lateral`): each heading word's turn
- *    region and hold funnel, the capture turn, and the capture corridor with its centreline. They
+ *    region, where its turn may end (a parallelogram, drawn darker) and its hold funnel, the
+ *    capture turn, and the capture corridor with its centreline. They
  *    bound positions in plan only — the vertical is the tubes' business — so they are draped on
  *    the terrain rather than floated at some height the words do not give them.
  *  • THE ALTITUDE TUBES (`trainingLayers.vertical`): one Cesium wall per altitude word, over the
@@ -52,6 +53,7 @@ import {
 export const TRAINING_ENTITY = {
   track: "training-track",
   turn: (index: number) => `training-turn-${index}`,
+  turnEnd: (index: number) => `training-turn-end-${index}`,
   funnel: (index: number) => `training-funnel-${index}`,
   captureTurn: "training-capture-turn",
   corridor: "training-corridor",
@@ -67,7 +69,7 @@ export const TRAINING_ENTITY = {
 } as const;
 
 /** How opaque each envelope is at rest, and when it is the one in force. */
-const ALPHA = { turn: 0.16, funnel: 0.18, corridor: 0.3, tube: 0.22, selected: 0.45 } as const;
+const ALPHA = { turn: 0.16, turnEnd: 0.4, funnel: 0.18, corridor: 0.3, tube: 0.22, selected: 0.45 } as const;
 
 /** Cesium wants [lon, lat, height, …]; the track carries the three as columns. */
 export function trainingTrackPositions(flight: TrainingFlight): number[] {
@@ -157,7 +159,11 @@ export default function useTrainingTrackLayer(): void {
         "The capture corridor");
       groundLine(TRAINING_ENTITY.corridorAxis, envelopes.approach.corridor.axis, TRAINING_CORRIDOR_COLOR, 2, false);
       envelopes.heading.forEach((item, index) => {
-        if (item.turn) ground(TRAINING_ENTITY.turn(index), item.turn.region, TRAINING_TURN_COLOR, ALPHA.turn, `Turn region, heading word ${index + 1}`);
+        if (item.turn) {
+          ground(TRAINING_ENTITY.turn(index), item.turn.region, TRAINING_TURN_COLOR, ALPHA.turn, `Turn region, heading word ${index + 1}`);
+          ground(TRAINING_ENTITY.turnEnd(index), item.turn.end, TRAINING_TURN_COLOR, ALPHA.turnEnd,
+            `Where the turn of heading word ${index + 1} may end`);
+        }
         if (item.funnel) ground(TRAINING_ENTITY.funnel(index), item.funnel.outline, TRAINING_FUNNEL_COLOR, ALPHA.funnel, `Hold funnel, heading word ${index + 1}`);
       });
       const capture = envelopes.approach.captureTurn;
@@ -248,6 +254,7 @@ export default function useTrainingTrackLayer(): void {
     };
     if (heading >= 0) {
       paint(TRAINING_ENTITY.turn(heading));
+      paint(TRAINING_ENTITY.turnEnd(heading));
       paint(TRAINING_ENTITY.funnel(heading));
     } else {
       paint(TRAINING_ENTITY.corridor);

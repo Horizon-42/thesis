@@ -77,7 +77,7 @@ describe("TrainingSentenceBar", () => {
   it("reads out the labeller's verdicts", () => {
     select();
     render(<TrainingSentenceBar />);
-    expect(screen.getByText(/turns 1\/1 monotone, 1\/1 bank · capture turn ✓ ✓ · altitude 1\/2 · speed 1\/1/)).toBeTruthy();
+    expect(screen.getByText(/turns 1\/1 monotone, 1\/1 rate · holds 1\/2 in their funnel · capture turn ✓ ✓ · altitude 1\/2 · speed 1\/1/)).toBeTruthy();
     select(1);
     render(<TrainingSentenceBar />);
     expect(screen.getByText(/capture turn none \(on the final at entry\)/)).toBeTruthy();

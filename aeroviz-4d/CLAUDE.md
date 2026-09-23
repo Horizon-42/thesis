@@ -105,21 +105,21 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - The comparison reference must be requested on the `arrival` track window — see
   `aeroviz_backend/CLAUDE.md` (AV12).
 
-- **Training reads ONE vocabulary: `instruction-v1`, spec `08ad64abb53e`** — the sample schema, the
+- **Training reads ONE vocabulary: `instruction-v2`, spec `103a6eae6b90`** — the sample schema, the
   reading rule, the spec sha, the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
-  refused by name; `training/index.json` keeps its v1 schema across vocabularies, so a superseded set
-  stays listed and is refused from the manifest alone, never downloaded (`check-publication`: a warning)
-  (AV19).
-- **The Training views compute NO envelope**: every turn region, funnel, corridor, tube and speed band is
-  exported from `instructions/display.py`, every verdict is `Reading.checks`; the reader checks only the
-  bookkeeping (AV20).
+  refused by name; `training/index.json` keeps its v1 schema across vocabularies, so a set of another
+  vocabulary (`instruction_v1` included) stays listed and is refused from the manifest alone, never
+  downloaded (`check-publication`: a warning) (AV19).
+- **The Training views compute NO envelope**: every turn region, turn end, funnel, corridor, tube and speed
+  band is exported from `instructions/display.py`, every verdict is `Reading.checks`; the reader checks only
+  the bookkeeping (AV20).
 - Training's cursor is shared by the sentence bar, the read-back window and 3D: the envelopes in force
   repaint yellow, styles only (AV21).
 - Training in 3D: the lateral envelopes are draped on the ground, the tubes are walls in exported HAE;
   the altitude chart's axis is the distance flown (AV22).
-- **The hold funnels are wide by the design's formula** — the turn end's segment swept along θ with the
-  ±4.5° widening, and the 4° lowest bank makes that segment long: val end half width p50 1.1 km, p95
-  9.6 km; they hold 92.5 % of the hold rows (AV23).
+- **A turn is bounded by RATE**: its region lies between the fastest (4.7°/s, ≤ 32° bank) and the slowest
+  (0.5°/s, up to 10.5 s late) turn, it may end in a parallelogram, and the hold funnel swept from that
+  parallelogram is exactly what the labeller judges (`holdCheck`; dashed = not judged) (AV23).
 
 ## Comparison CZML colour contract
 

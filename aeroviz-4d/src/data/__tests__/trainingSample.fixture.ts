@@ -19,6 +19,9 @@ import {
   TRAINING_UNCHANGED,
 } from "../trainingSample";
 
+/** The set the exporter names after the reading rule. */
+export const SET_ID = TRAINING_READING_RULE.replace("-", "_");
+
 export const MOCK_ROWS = 60;
 export const MOCK_STEP_S = 2;
 export const MOCK_CANDIDATES_SHA = "c".repeat(64);
@@ -42,14 +45,18 @@ export const MOCK_VOCABULARY = {
   headingTargetsDeg: range(72, 0, 5),
   headingToleranceDeg: 4.5,
   headingMaxTurnDeg: 150,
-  turnBankMinDeg: 4,
+  turnRateMinDegS: 0.5,
+  turnRateMaxDegS: 4.7,
+  turnRateMinFromDeg: 10,
   turnBankMaxDeg: 32,
-  turnBankMinFromDeg: 10,
+  turnStartDelayMaxS: 10.5,
   interceptAngleDeg: 30,
   corridorHalfWidthM: 20,
   corridorWideningDeg: 0.45,
   corridorCourseToleranceDeg: 2,
-  crossingHalfWidthM: 100,
+  landingCrossLimitM: 1000,
+  landingMaxHeightM: 100,
+  parallelCourseDeltaDeg: 5,
   altitudeTargetsM: range(181, 0, 30),
   altitudeLandValue: 181,
   altitudeToleranceM: 25,
@@ -71,9 +78,9 @@ export const MOCK_VOCABULARY = {
 
 export const MOCK_CANDIDATES = [
   { index: 0, ident: "09", thresholdEM: 0, thresholdNM: 0, courseDeg: 90, elevationM: 100, lengthM: 3000,
-    centreline: line([0, -30000], [0, 0]), runway: line([0, 3000], [0, 0]) },
+    landingCrossLimitM: 1000, centreline: line([0, -30000], [0, 0]), runway: line([0, 3000], [0, 0]) },
   { index: 1, ident: "27", thresholdEM: 3000, thresholdNM: 0, courseDeg: 270, elevationM: 101, lengthM: 3000,
-    centreline: line([3000, 33000], [0, 0]), runway: line([3000, 0], [0, 0]) },
+    landingCrossLimitM: 450, centreline: line([3000, 33000], [0, 0]), runway: line([3000, 0], [0, 0]) },
 ];
 
 /** Word values used below, named. */
@@ -97,14 +104,20 @@ function inForce(events: Event[]): number[][] {
   });
 }
 
+/** A left turn of 90° from a westbound track: the fastest turn, the slowest, and both moved 1 km
+ *  west by the latest start — the end is their four corners, the region the ring through them. */
 const turnRegion = (e0: number, n0: number) => ({
-  fromTrackDeg: 270, turnDeg: -90, groundSpeedMps: 100, radiusMinM: 1632.1, radiusMaxM: 14584.4,
-  region: line([e0, e0 - 1000, e0 - 1600, e0 - 14000, e0 - 9000], [n0, n0 - 300, n0 - 1600, n0 - 14000, n0 - 4000]),
-  innerArc: line([e0, e0 - 1000, e0 - 1600], [n0, n0 - 300, n0 - 1600]),
-  outerArc: line([e0, e0 - 9000, e0 - 14000], [n0, n0 - 4000, n0 - 14000]),
-  end: line([e0 - 1600, e0 - 14000], [n0 - 1600, n0 - 14000]),
+  fromTrackDeg: 270, turnDeg: -90, rateMinDegS: 0.5, rateMaxDegS: 4.7, bankMaxDeg: 32, startDelayMaxS: 10.5,
+  slowFinished: true,
+  region: line([e0, e0 - 1000, e0 - 1300, e0 - 11500, e0 - 12500, e0 - 2000, e0 - 1000],
+               [n0, n0 - 300, n0 - 1300, n0 - 11500, n0 - 11500, n0 - 1000, n0]),
+  fastPath: line([e0, e0 - 1000, e0 - 1300], [n0, n0 - 300, n0 - 1300]),
+  slowPath: line([e0, e0 - 9000, e0 - 11500], [n0, n0 - 4000, n0 - 11500]),
+  end: line([e0 - 1300, e0 - 11500, e0 - 12500, e0 - 2300], [n0 - 1300, n0 - 11500, n0 - 11500, n0 - 1300]),
 });
-const turnCheck = { progressOk: true, bankOk: true, meanBankDeg: 18.2, maxBankDeg: 24.9, bankMinApplies: true };
+const turnCheck = {
+  progressOk: true, rateOk: true, meanRateDegS: 2.4, maxRateDegS: 3.1, maxBankDeg: 24.9, rateMinApplies: true,
+};
 
 /** One flight. `vectored`: a turn at step 10 and a capture at 25; else on the final from step 0. */
 export function mockFlight(key: string, vectored: boolean): Record<string, unknown> {
@@ -141,6 +154,7 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
           funnel: { lengthM: 2200, startHalfWidthM: 0, endHalfWidthM: 173.1, axis: line([-20000, -22200], [3000, 3000]),
                     outline: line([-20000, -22200, -22200, -20000], [3000, 2826.9, 3173.1, 3000]) },
           check: null,
+          holdCheck: { holdStartRow: 0, holdEndRow: 10, rows: 11, inside: 11, halfWidthEndM: 173.1 },
         },
         {
           row: 10, value: WORD.heading180, kind: "turn", targetDeg: 180, split: null, turnEndRow: 16,
@@ -149,13 +163,15 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
           funnel: { lengthM: 880, startHalfWidthM: 6200, endHalfWidthM: 6269.3, axis: line([-24800, -24800], [-5800, -6680]),
                     outline: line([-31000, -31069, -18531, -18600], [-5800, -6680, -6680, -5800]) },
           check: { ...turnCheck, kind: "turn", departureRow: 10, arrivalRow: 16, turnDeg: -90, parts: 1 },
+          // one of its five hold rows outside the funnel
+          holdCheck: { holdStartRow: 16, holdEndRow: 20, rows: 5, inside: 4, halfWidthEndM: 6269.3 },
         },
       ]
     : [
         {
           row: 0, value: WORD.heading090, kind: "initial", targetDeg: 90, split: null, turnEndRow: null,
           holdStartRow: null, holdEndRow: 0, fromTrackDeg: 90, targetOnTrackDeg: 90, turnBandDeg: null,
-          holdBandDeg: null, turn: null, funnel: null, check: null,
+          holdBandDeg: null, turn: null, funnel: null, check: null, holdCheck: null,
         },
       ];
   const tubeInside = range(40).map((offset) => (vectored && offset === 5 ? 0 : 1));
@@ -228,7 +244,7 @@ export const STRAIGHT_KEY = "TST2_09_abc124_20260101T000100Z";
 export function mockSample(): Record<string, unknown> {
   return {
     schema: TRAINING_SAMPLE_SCHEMA,
-    setId: "instruction_v1",
+    setId: SET_ID,
     airport: "KXXX",
     writtenUtc: "2026-09-23T00:00:00+00:00",
     producedBy: { runner: "test", artefact: "test", git: { head: "test", dirty: false } },
@@ -252,7 +268,10 @@ export function mockIndex(): Record<string, unknown> {
       { id: "box_v3", kind: "vocabulary-readback", title: "an old set", file: "box_v3/sample.json",
         vocabularySha256: "a".repeat(64), runwaySha256: "b".repeat(64), readingRule: "box-v3", flights: 40,
         cohort: { ...cohort, perStratum: 20 } },
-      { id: "instruction_v1", kind: TRAINING_READABLE_SET_KIND, title: "Instruction vocabulary", file: "instruction_v1/sample.json",
+      { id: "instruction_v1", kind: "vocabulary-readback", title: "the instruction vocabulary as first frozen",
+        file: "instruction_v1/sample.json", vocabularySha256: "0".repeat(64), runwaySha256: "b".repeat(64),
+        readingRule: "instruction-v1", flights: 40, cohort: { ...cohort, perStratum: 20 } },
+      { id: SET_ID, kind: TRAINING_READABLE_SET_KIND, title: "Instruction vocabulary", file: `${SET_ID}/sample.json`,
         vocabularySha256: TRAINING_SPEC_SHA256, runwaySha256: MOCK_CANDIDATES_SHA, readingRule: TRAINING_READING_RULE,
         flights: 2, cohort, source: { any: "extra keys are the exporter's provenance" } },
       { id: "prior_s1337_val", kind: "prior-generated", title: "an old prior", file: "prior_s1337_val/sample.json",

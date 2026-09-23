@@ -55,7 +55,7 @@ describe("Training envelopes in the 3D scene", () => {
     const scene = await setup();
     for (const id of [
       TRAINING_ENTITY.track, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis, TRAINING_ENTITY.captureTurn,
-      TRAINING_ENTITY.turn(1), TRAINING_ENTITY.funnel(0), TRAINING_ENTITY.funnel(1), TRAINING_ENTITY.tube(0), TRAINING_ENTITY.tube(1),
+      TRAINING_ENTITY.turn(1), TRAINING_ENTITY.turnEnd(1), TRAINING_ENTITY.funnel(0), TRAINING_ENTITY.funnel(1), TRAINING_ENTITY.tube(0), TRAINING_ENTITY.tube(1),
       TRAINING_ENTITY.centreline("09"), TRAINING_ENTITY.runway("27"), TRAINING_ENTITY.issue(0), TRAINING_ENTITY.issue(1),
       TRAINING_ENTITY.clearance, TRAINING_ENTITY.capture, TRAINING_ENTITY.end,
     ]) {
@@ -63,6 +63,7 @@ describe("Training envelopes in the 3D scene", () => {
     }
     // a word the flight was already holding at entry has no turn region
     expect(scene.entities.getById(TRAINING_ENTITY.turn(0))).toBeUndefined();
+    expect(scene.entities.getById(TRAINING_ENTITY.turnEnd(0))).toBeUndefined();
     // the lateral envelopes are draped on the ground: they give no height
     expect(scene.entities.getById(TRAINING_ENTITY.funnel(1))!.polygon!.height).toBeUndefined();
   });
@@ -84,6 +85,7 @@ describe("Training envelopes in the 3D scene", () => {
     expect(scene.colourOf(TRAINING_ENTITY.tube(0))).toEqual(scene.selected);
     fireEvent.click(screen.getByLabelText(/^heading 180° — a turn/));
     expect(scene.colourOf(TRAINING_ENTITY.turn(1))).toEqual(scene.selected);
+    expect(scene.colourOf(TRAINING_ENTITY.turnEnd(1))).toEqual(scene.selected);
     expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.selected);
     expect(scene.colourOf(TRAINING_ENTITY.funnel(0))).not.toEqual(scene.selected);
     // after the capture the corridor is what holds the flight laterally
@@ -91,6 +93,7 @@ describe("Training envelopes in the 3D scene", () => {
     expect(scene.colourOf(TRAINING_ENTITY.corridor)).toEqual(scene.selected);
     expect(scene.colourOf(TRAINING_ENTITY.tube(1))).toEqual(scene.selected);
     expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).not.toEqual(scene.selected);
+    expect(scene.colourOf(TRAINING_ENTITY.turnEnd(1))).not.toEqual(scene.selected);
     original.forEach((entity) => expect(scene.entities.getById(entity.id)).toBe(entity));
     expect(scene.requestRender).toHaveBeenCalled();
   });

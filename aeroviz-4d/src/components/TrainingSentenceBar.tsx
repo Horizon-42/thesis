@@ -157,8 +157,10 @@ export default function TrainingSentenceBar() {
           className="training-sentence-arrival"
           title="The labeller's own checks of this flight's envelopes (Reading.checks)."
         >
-          turns {verdicts.turnsProgressOk}/{verdicts.turns} monotone, {verdicts.turnsBankOk}/{verdicts.turns} bank ·
-          capture turn {capture === null ? "none (on the final at entry)" : `${tick(capture.progressOk)} ${tick(capture.bankOk)}`} ·
+          turns {verdicts.turnsProgressOk}/{verdicts.turns} monotone, {verdicts.turnsRateOk}/{verdicts.turns} rate ·
+          holds {verdicts.holdsContained}/{verdicts.holdsJudged} in their funnel
+          {verdicts.holdsNotJudged ? ` (${verdicts.holdsNotJudged} not judged)` : ""} ·
+          capture turn {capture === null ? "none (on the final at entry)" : `${tick(capture.progressOk)} ${tick(capture.rateOk)}`} ·
           altitude {verdicts.altitudeContained}/{verdicts.altitudeWords} · speed {verdicts.speedContained}/{verdicts.speedWords}
         </span>
         <span className="training-sentence-cursor-readout">

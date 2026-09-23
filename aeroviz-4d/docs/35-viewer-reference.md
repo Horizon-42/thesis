@@ -185,63 +185,64 @@ that divergence is a known open item (see the README's "Future Improvements").
   g.czml))]`). `prune_unreferenced_outputs` keeps files by the same set, so chunking needs no
   change on either side.
 
-### AV19 · Training 只读一份词表：`instruction-v1`，规格 `08ad64abb53e`
+### AV19 · Training 只读一份词表：`instruction-v2`，规格 `103a6eae6b90`
 
 `src/data/trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v3`、读法
-`TRAINING_READING_RULE = "instruction-v1"`、规格 sha 全文 `TRAINING_SPEC_SHA256`、六列的名字和顺序
+`TRAINING_READING_RULE = "instruction-v2"`、规格 sha 全文 `TRAINING_SPEC_SHA256`、六列的名字和顺序
 `TRAINING_COLUMNS`（跑道、进近、航向、高度、下降角、速度，与 `instructions/words.COLUMNS` 相同，列是按位置读的）、
 "不变" `TRAINING_UNCHANGED = -1`、标注器会写的发令原因 `TRAINING_WORD_KINDS`。对不上就整份拒读并报出是哪一项，
 不做兼容分支。Python 一侧的对应常量（`instruction_training_export.py` 的 `SAMPLE_SCHEMA`、`INDEX_SCHEMA`、
 `KIND_READBACK`、`WORD_KINDS`，以及 `spec.READING_RULE`、`words.COLUMNS`、`words.UNCHANGED`）由
 `tests/test_instruction_training_export.py` 与 TypeScript 源码逐字比对。
 
-`training/index.json` 的格式（`aeroviz-training-index-v1`）不随词表变，新旧集合都列在里面，每一条写着自己的
+`training/index.json` 的格式（`aeroviz-training-index-v1`）不随词表变，所有集合都列在里面，每一条写着自己的
 `readingRule` 和 `vocabularySha256`。所以**面板不下载任何样本就知道哪个集合能读**（`trainingSetRefusal`），
-被取代的集合列着、标 "refused"、选中时按名字说出原因，永远不会被下载。`npm run check-publication` 把这类集合
-记为警告而不是错误：拒读是有意的，删不删是用户的决定。
+别的词表的集合（包括 `instruction_v1`）列着、标 "refused"、选中时按名字说出原因，永远不会被下载。
+`npm run check-publication` 把这类集合记为警告而不是错误：拒读是有意的，删不删是用户的决定。
 
-词表换版本（新读法或新 sha）时界面会拒读新产物，这是读者在工作：同一次改动里更新钉住值、导出器、测试和
+词表换版本（新读法或新 sha）时界面会拒读新产物，这是读者在工作：同一次改动里更新钉住值、测试和
 `docs/36-2026-09-20-training-module.zh.md`。
 
 ### AV20 · Training 的界面不算包络
 
-转弯区、保持漏斗、截获转弯、走廊、高度管子、速度的过渡与速度带，全部由
+转弯区、转弯可能结束的位置、保持漏斗、截获转弯、走廊、高度管子、速度的过渡与速度带，全部由
 `python run_ts.py instruction_training_export` 在 Python 里算好写进文件：几何来自
 `4dTrajectory/ts_transformer/instructions/display.py`，它只用 `envelope.py` 与 `labeller/*` 的公开函数
-（管子就是 `labeller.vertical.tube_bounds`；转弯半径是 `envelope.bank_deg_from_turn_rate` 的反函数并当场反算
-核对），不在标注器 sha（`artefact.LABELLER_MODULES`）的范围里。每一个判定都是标注器的 `Reading.checks`。
+（转弯区和保持漏斗与标注器的保持判定调用同一组函数，管子就是 `labeller.vertical.tube_bounds`），不在标注器 sha
+（`artefact.LABELLER_MODULES`）的范围里。每一个判定都是标注器的 `Reading.checks`。
 
 前端只检查"账"：数组长度与行号、每步生效的词等于发令事件逐行往后填、每个包络对应它那一列的一个词、判定里的
-计数等于它自己逐行标记的计数。它不再算一遍包络——那会在一个屏幕上给出两个答案。导出器也会把每一架读过的航班
-用 `read_flight` 重读并与产物里存的句子逐格比对，不同就停。
+计数等于它自己逐行标记的计数、保持判定的起止行就是这个词的保持段、画转弯区用的转弯率 / 坡度 / 晚开始就是词表的。
+它不再算一遍包络——那会在一个屏幕上给出两个答案。导出器也会把每一架读过的航班用 `read_flight` 重读并与产物里存的
+句子逐格比对，不同就停。
 
 ### AV21 · Training 的游标与高亮
 
 `AppContext.trainingCursorS`（航班内的秒数）由句子条、读数核对窗口和三维图层共用。游标所在那一步生效的包络
-画成 `TRAINING_WORD_COLOR` 黄色：截获之前是那一步生效的航向词的转弯区和漏斗（`headingEnvelopeAt`），截获之后
-是走廊；再加上覆盖那一步的高度管子（`altitudeTubeAt`）。换游标只改实体的材质并请求重绘，不重建几何、不动相机、
-不动共享的 `viewer.clock`；换航班时游标归零。
+画成 `TRAINING_WORD_COLOR` 黄色：截获之前是那一步生效的航向词的转弯区、转弯可能结束的平行四边形和漏斗
+（`headingEnvelopeAt`），截获之后是走廊；再加上覆盖那一步的高度管子（`altitudeTubeAt`）。换游标只改实体的材质并
+请求重绘，不重建几何、不动相机、不动共享的 `viewer.clock`；换航班时游标归零。
 
 ### AV22 · Training 的三维与图表各用什么坐标
 
 - 三维：航迹用 `signals.altitudeHaeM`（椭球高）；高度管子是一面墙，沿飞机自己的地面航迹，上下沿为导出的
-  `lowerHaeM` / `upperHaeM`；转弯区、漏斗、截获转弯、走廊、候选跑道和延长中线**贴地画**——它们只约束平面位置，
-  词没有给它们高度，飘在任何高度都是编出来的。文件里其余高度都是几何 MSL，椭球高只在这三处，由导出器一次换好
-  （h = H + N，EGM96）。
+  `lowerHaeM` / `upperHaeM`；转弯区、平行四边形、漏斗、截获转弯、走廊、候选跑道和延长中线**贴地画**——它们只约束
+  平面位置，词没有给它们高度，飘在任何高度都是编出来的。文件里其余高度都是几何 MSL，椭球高只在这三处，由导出器
+  一次换好（h = H + N，EGM96）。
 - 读数窗口的高度图横轴是**水平飞过的距离**（平滑地速积分），因为管子就定义在这根轴上；游标经由行号在时间和
   距离之间换算。航向图画的是展开（不回绕）的航迹，各带也在同一分支上。
-- 平面图按航迹、所指跑道入口和走廊取景并裁剪：转弯区可以伸出十几公里，按它取景会把航迹缩成一团。
+- 平面图按航迹、所指跑道入口和走廊取景并裁剪：最慢的转弯可以伸出十几公里，按它取景会把航迹缩成一团。
 
-### AV23 · Training 的保持漏斗按公式就是宽的
+### AV23 · Training 的转弯区与保持漏斗是怎么画的
 
-漏斗是转弯终点那段线（最紧与最宽圆弧终点之间）沿目标方向平移扫出的区域，每一点再张开 ±4.5°（这些点的凸包，
-`display.funnel`）：横向半宽 = 这段线横向宽度的一半 + 飞过的距离 × tan 4.5°，纵向从这段线本身开始——不是从它的
-中点开始，中点可能在正常坡度转完的飞机前方好几公里（第一版就是这样画的，审查时查出 24 % 的漏斗一行保持段都
-没装下）。坡度下限 4° 使最宽的圆弧半径在 100 m/s 时约 14.6 km，所以大转弯之后的漏斗一开始就有
-几公里宽：val 全部 10,527 架上 21,168 个漏斗，末端半宽中位 1.1 km、p95 9.6 km（标注读数里只算保持段距离的那个
-"漏斗半宽" p50 / p95 为 425 / 1,718 m，二者不是同一个量）。这是词表设计的公式本身的结果，不是画法的错误。
-小于 10° 的小修正，标注器不检查坡度下限，但转弯区仍按 4°–32° 画出，判定里写明"坡度下限未判"。
-
-显示端的读数（标注器不判保持段的位置）：val 全体的保持段行有 92.5 %（683,294 / 738,853）在自己的漏斗里；一行都
-没装下的 482 个漏斗全部跟在转弯之后——转弯区按发令时的地速算半径，飞机在转弯中减速或受风，实际转得比最紧的圆弧
-还紧，转完的位置就落在区域之外。
+- **转弯区**夹在最快和最慢的转弯之间，都按飞机实际飞的地速飞：最快 4.7°/s（坡度超过 32° 时按 32°）、按时开始；
+  最慢 0.5°/s、最多晚 10.5 s 开始；都转到航迹离目标不到 4.5°。边界是一圈：最快的转弯、两个终点、倒着沿晚开始的
+  最慢转弯回到晚开始的点、再回到发令点。
+- **转弯可能结束的位置**是一个平行四边形（`turn.end` 的四个角）：两个终点，以及它们沿发令航迹挪过晚开始的距离。
+  界面上画得比转弯区深。
+- **保持漏斗**是这个平行四边形沿目标方向扫出、每一点张开 ±4.5° 的凸包；长度是已飞路程（沿位置点累计，从转弯最后
+  一行之前 10.5 s 起算，不早于发令行）。标注器判的就是这个漏斗，`holdCheck` 给出保持段多少行在里面：有行在外面画
+  红边；**不判**的漏斗（转弯小于 10°，或最慢的转弯在航班结束前转不完）照样画，画虚线边。
+- 最慢的转弯转不完时，它的路径停在航班结束处（虚线），转弯区在那里截断；转角接近 150° 时截断的边界可能自己交叉
+  ——这是画法，不是数据坏了，那个保持段本来也不判。
+- 小于 10° 的小修正，标注器不检查最低转弯率，但转弯区仍按 0.5–4.7°/s 画出，判定里写明"最低转弯率未判"。

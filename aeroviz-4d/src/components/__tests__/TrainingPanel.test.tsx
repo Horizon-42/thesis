@@ -20,7 +20,7 @@ vi.mock("../../context/AppContext", () => ({
 }));
 
 import TrainingPanel from "../TrainingPanel";
-import { STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 
 function jsonResponse(body: unknown) {
   return { ok: true, headers: { get: () => "application/json" }, text: async () => JSON.stringify(body) };
@@ -40,8 +40,9 @@ function lastPublished(): any {
 }
 
 const INDEX_PATH = "data/airports/KXXX/training/index.json";
-const SAMPLE_PATH = "data/airports/KXXX/training/instruction_v1/sample.json";
+const SAMPLE_PATH = `data/airports/KXXX/training/${SET_ID}/sample.json`;
 const OLD_PATH = "data/airports/KXXX/training/box_v3/sample.json";
+const FIRST_PATH = "data/airports/KXXX/training/instruction_v1/sample.json";
 
 describe("TrainingPanel", () => {
   beforeEach(() => {
@@ -79,10 +80,11 @@ describe("TrainingPanel", () => {
     it("opens on the set it can read, not the first one listed, and downloads only that", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText("TST1")).toBeTruthy();
-      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("instruction_v1");
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe(SET_ID);
       const fetched = fetchMock.mock.calls.map(([url]) => url);
       expect(fetched).toContain(SAMPLE_PATH);
       expect(fetched).not.toContain(OLD_PATH);
+      expect(fetched).not.toContain(FIRST_PATH);
     });
 
     it("publishes the flight with the vocabulary and the candidate runways", async () => {
@@ -107,7 +109,8 @@ describe("TrainingPanel", () => {
       await screen.findByText("TST1");
       const options = [...(screen.getByRole("combobox") as HTMLSelectElement).options].map((option) => option.text);
       expect(options.find((text) => text.startsWith("box_v3"))).toMatch(/box-v3 — refused/);
-      expect(options.find((text) => text.startsWith("instruction_v1"))).not.toMatch(/refused/);
+      expect(options.find((text) => text.startsWith("instruction_v1"))).toMatch(/instruction-v1 — refused/);
+      expect(options.find((text) => text.startsWith(SET_ID))).not.toMatch(/refused/);
     });
 
     it("shows the two slots that are empty on purpose, disabled", async () => {
@@ -136,7 +139,7 @@ describe("TrainingPanel", () => {
     broken.flights[0].envelopes.altitude[0].check.inside = 3;
     serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: broken });
     render(<TrainingPanel />);
-    expect(await screen.findByText(/Set instruction_v1 cannot be read/)).toBeTruthy();
+    expect(await screen.findByText(new RegExp(`Set ${SET_ID} cannot be read`))).toBeTruthy();
     expect(screen.getByText(/says 3 rows inside, but the tube's own flags count 20/)).toBeTruthy();
     expect(screen.getByRole("combobox")).toBeTruthy();
   });

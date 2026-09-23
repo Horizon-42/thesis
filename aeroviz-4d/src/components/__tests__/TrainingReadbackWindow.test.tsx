@@ -39,6 +39,10 @@ describe("TrainingReadbackWindow", () => {
   it("draws the plan view's envelopes: one turn region per turn, a funnel per hold, the corridor, the capture turn", () => {
     open();
     expect(count(".training-readback-turn")).toBe(1);
+    // where the turn may end: its own four-cornered polygon, and the fastest and slowest turns
+    expect(count(".training-readback-turn-end")).toBe(1);
+    expect(document.body.querySelector(".training-readback-turn-end")!.getAttribute("points")!.split(" ")).toHaveLength(4);
+    expect(count(".training-readback-turn-path")).toBe(2);
     expect(count(".training-readback-funnel")).toBe(2);
     expect(count(".training-readback-corridor")).toBe(1);
     expect(count(".training-readback-capture-turn")).toBe(1);
@@ -49,6 +53,24 @@ describe("TrainingReadbackWindow", () => {
     open({ ...ALL, candidates: false });
     const drawn = [...document.body.querySelectorAll(".training-readback-candidate")].map((g) => g.getAttribute("aria-label"));
     expect(drawn).toEqual([expect.stringMatching(/^the designated runway 09/)]);
+  });
+
+  it("marks a hold with rows outside its funnel, and a hold the labeller does not judge", () => {
+    open();
+    const funnels = [...document.body.querySelectorAll(".training-readback-funnel")];
+    expect(funnels.map((funnel) => funnel.textContent)).toEqual([
+      expect.stringMatching(/11 of 11 hold rows inside/), expect.stringMatching(/4 of 5 hold rows inside/),
+    ]);
+    const raw: any = mockSample();
+    raw.flights[0].envelopes.heading[0].holdCheck = null;
+    const parsed = parseTrainingSample(raw);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    render(
+      <TrainingReadbackWindow flight={parsed.value.flights[0]} vocabulary={parsed.value.vocabulary}
+        candidates={parsed.value.candidates} layers={ALL} cursorS={0} onCursorChange={() => undefined}
+        onClose={() => undefined} />,
+    );
+    expect(screen.getAllByText(/not judged by the labeller/).length).toBeGreaterThan(0);
   });
 
   it("switches the lateral envelopes off in the plan view AND on the heading chart", () => {
@@ -88,7 +110,7 @@ describe("TrainingReadbackWindow", () => {
 
   it("names what is in force at the cursor, with the turn's verdict", () => {
     open(ALL, 0, 22);
-    expect(screen.getByText(/in force: 180° · its turn: ✓ monotone, ✓ bank \(mean 18\.2°, max 24\.9°\)/)).toBeTruthy();
+    expect(screen.getByText(/in force: 180° · its turn: ✓ monotone, ✓ rate \(mean 2\.40°\/s, max 3\.10°\/s, max bank 24\.9°\) · its hold: 4\/5 rows in the funnel/)).toBeTruthy();
     expect(screen.getByText(/in force: 1110 m, level/)).toBeTruthy();
   });
 

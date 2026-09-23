@@ -2,15 +2,15 @@
  * trainingSample.ts
  * -----------------
  * The Training module's data contract: the manifest of exported sets, and one set's flights
- * under the instruction vocabulary (`instruction-v1`, spec `08ad64abb53e`, frozen 2026-09-23).
+ * under the instruction vocabulary (`instruction-v2`, spec `103a6eae6b90`).
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the words:
  * `4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`.
  *
  * A SENTENCE IS SIX COLUMNS PER 2 s STEP — runway pointer, approach, heading, altitude, angle,
  * speed, in that order — and every column has "unchanged" (-1). Step 0 carries all six; after it
  * the sentence is mostly silent. A WORD IS A TARGET PLUS THE ENVELOPE IT ALLOWS FROM ITS ISSUE
- * POINT: a heading word's turn region and hold funnel, the capture corridor, an altitude word's
- * tube, a speed word's transition and band.
+ * POINT: a heading word's turn region, where its turn may end and its hold funnel, the capture
+ * corridor, an altitude word's tube, a speed word's transition and band.
  *
  * THIS FILE COMPUTES NO ENVELOPE. Every region, band and tube is geometry the exporter computed
  * in Python from the vocabulary's own functions (`instructions/display.py` over `envelope.py`
@@ -38,14 +38,14 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
 /** MIRROR of the exporter's `SAMPLE_SCHEMA` (`instruction_training_export.py`). */
 export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v3";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
-export const TRAINING_READING_RULE = "instruction-v1";
-/** MIRROR of the frozen spec's sha (`v1_20260923/spec.json`). A new vocabulary is a new sha,
- *  and this reader is bound to the one it was written for. */
-export const TRAINING_SPEC_SHA256 = "08ad64abb53eae9dd9da64059758e89ca0c82931ee4ff695dade807cdd2bacd4";
+export const TRAINING_READING_RULE = "instruction-v2";
+/** MIRROR of the spec's sha (`v2_20260923/spec.json`). A new vocabulary is a new sha, and this
+ *  reader is bound to the one it was written for. */
+export const TRAINING_SPEC_SHA256 = "103a6eae6b9083ad33d5a1b25daef4004a07458881786e90d4625ba04027204b";
 /** MIRROR of the exporter's `KIND_READBACK`: the one kind of set this reader opens. */
 export const TRAINING_READABLE_SET_KIND = "vocabulary-readback";
-/** The set kinds the manifest may list. A `prior-generated` set has no contract under
- *  `instruction-v1` yet — no prior is trained — so it is listed and refused by name. */
+/** The set kinds the manifest may list. A `prior-generated` set has no contract under this
+ *  vocabulary yet — no prior is trained — so it is listed and refused by name. */
 export const TRAINING_SET_KINDS = ["vocabulary-readback", "prior-generated"] as const;
 export type TrainingSetKind = (typeof TRAINING_SET_KINDS)[number];
 
@@ -87,8 +87,8 @@ export interface TrainingSetEntry {
   file: string;
   /** The vocabulary spec's sha. */
   vocabularySha256: string;
-  /** Under `instruction-v1`: the sha of the airport's candidate runways — the runway pointer's
-   *  choices (the sample's `candidatesSha256`). */
+  /** The sha of the airport's geometry: its candidate runways (the runway pointer's choices) and
+   *  every runway end the landing rule reads (the sample's `candidatesSha256`). */
   runwaySha256: string;
   readingRule: string;
   flights: number;
@@ -123,14 +123,24 @@ export interface TrainingVocabulary {
   headingTargetsDeg: number[];
   headingToleranceDeg: number;
   headingMaxTurnDeg: number;
-  turnBankMinDeg: number;
+  /** A turn's rate: at most `turnRateMaxDegS` on every row (and at most `turnBankMaxDeg` of bank at
+   *  the flown speed); at least `turnRateMinDegS` on average for a turn of `turnRateMinFromDeg` or
+   *  more. It may begin up to `turnStartDelayMaxS` after the word. */
+  turnRateMinDegS: number;
+  turnRateMaxDegS: number;
+  turnRateMinFromDeg: number;
   turnBankMaxDeg: number;
-  turnBankMinFromDeg: number;
+  turnStartDelayMaxS: number;
   interceptAngleDeg: number;
   corridorHalfWidthM: number;
   corridorWideningDeg: number;
   corridorCourseToleranceDeg: number;
-  crossingHalfWidthM: number;
+  /** The landing: the threshold passed within this far of the centreline (capped per runway by a
+   *  parallel runway — `TrainingCandidate.landingCrossLimitM`) and this high above the threshold. */
+  landingCrossLimitM: number;
+  landingMaxHeightM: number;
+  /** Two runways within this of each other's course are parallel partners for the cap. */
+  parallelCourseDeltaDeg: number;
   altitudeTargetsM: number[];
   /** The altitude value "descend to land": one past the last target. */
   altitudeLandValue: number;
@@ -163,6 +173,9 @@ export interface TrainingCandidate {
   courseDeg: number;
   elevationM: number;
   lengthM: number;
+  /** The landing's limit off this runway's centreline: the vocabulary's, capped at half the spacing
+   *  to a parallel runway. */
+  landingCrossLimitM: number;
   /** From the threshold out along the approach side, `centrelineLengthM` long. */
   centreline: TrainingPlanLine;
   /** The runway: the threshold to its far end. */
@@ -177,28 +190,50 @@ export interface TrainingWordEvent {
   kind: TrainingWordKind;
 }
 
+/**
+ * Where a turn may take the aircraft: between its fastest and its slowest turn, flown at the speeds
+ * the flight flew, begun on time or as late as allowed.
+ */
 export interface TrainingTurnRegion {
   fromTrackDeg: number;
   /** The shorter way to the target, positive = right. */
   turnDeg: number;
-  groundSpeedMps: number;
-  /** At the highest and the lowest bank of the vocabulary's range. */
-  radiusMinM: number;
-  radiusMaxM: number;
+  rateMinDegS: number;
+  rateMaxDegS: number;
+  bankMaxDeg: number;
+  startDelayMaxS: number;
+  /** The slowest turn reaches the target's band before the flight ends. When it does not, its path
+   *  stops at the flight's end and the region is cut there. */
+  slowFinished: boolean;
+  /** A ring: the fastest turn begun on time, the two on-time ends, the slowest turn begun as late
+   *  as allowed back to where it began, and back to the issue point. */
   region: TrainingPlanLine;
-  innerArc: TrainingPlanLine;
-  outerArc: TrainingPlanLine;
+  fastPath: TrainingPlanLine;
+  slowPath: TrainingPlanLine;
+  /** Where the turn may end — four corners: the fastest turn's end, the slowest turn's end, then
+   *  the same two moved along the issue track by the latest start. */
   end: TrainingPlanLine;
 }
 
-/** The labeller's check of a turn: monotone progress, bank inside the range. */
+/** The labeller's check of a turn: monotone progress, turn rate inside the range. */
 export interface TrainingTurnCheck {
   progressOk: boolean;
-  bankOk: boolean;
-  meanBankDeg: number;
+  rateOk: boolean;
+  meanRateDegS: number;
+  maxRateDegS: number;
   maxBankDeg: number;
-  /** The lowest bank is judged only for turns of at least `turnBankMinFromDeg`. */
-  bankMinApplies: boolean;
+  /** The lowest rate is judged only for turns of at least `turnRateMinFromDeg`. */
+  rateMinApplies: boolean;
+}
+
+/** The labeller's check of a hold: its rows, from the hold's start to its end inclusive, against
+ *  the drawn funnel. */
+export interface TrainingHoldCheck {
+  holdStartRow: number;
+  holdEndRow: number;
+  rows: number;
+  inside: number;
+  halfWidthEndM: number;
 }
 
 export interface TrainingHeadingEnvelope {
@@ -226,6 +261,9 @@ export interface TrainingHeadingEnvelope {
   check: (TrainingTurnCheck & {
     kind: string; departureRow: number; arrivalRow: number; turnDeg: number; parts: number;
   }) | null;
+  /** null for a word with no hold, and for a hold the labeller does not judge: after a turn under
+   *  `turnRateMinFromDeg`, or when the slowest turn does not finish. Its funnel is still drawn. */
+  holdCheck: TrainingHoldCheck | null;
 }
 
 export interface TrainingApproach {
@@ -472,10 +510,14 @@ export function trainingVerdicts(flight: TrainingFlight) {
   const tubes = flight.envelopes.altitude;
   const speeds = flight.envelopes.speed.flatMap((span) => (span.check === null ? [] : [span.check]));
   const issued = new Set(flight.words.events.filter((event) => event.row > 0).map((event) => event.row));
+  const holds = flight.envelopes.heading.flatMap((item) => (item.holdCheck === null ? [] : [item.holdCheck]));
   return {
     turns: checks.length,
     turnsProgressOk: checks.filter((check) => check.progressOk).length,
-    turnsBankOk: checks.filter((check) => check.bankOk).length,
+    turnsRateOk: checks.filter((check) => check.rateOk).length,
+    holdsJudged: holds.length,
+    holdsContained: holds.filter((hold) => hold.inside === hold.rows).length,
+    holdsNotJudged: flight.envelopes.heading.filter((item) => item.funnel !== null && item.holdCheck === null).length,
     captureTurn: flight.envelopes.approach.captureTurn?.check ?? null,
     altitudeWords: tubes.length,
     altitudeContained: tubes.filter((tube) => tube.check.contained).length,
@@ -703,7 +745,7 @@ export function trainingSetRefusal(entry: TrainingSetEntry): string | null {
   }
   if (entry.vocabularySha256 !== TRAINING_SPEC_SHA256) {
     return (
-      `spec ${entry.vocabularySha256.slice(0, 12)} is not the frozen ${TRAINING_READING_RULE} spec ` +
+      `spec ${entry.vocabularySha256.slice(0, 12)} is not the ${TRAINING_READING_RULE} spec ` +
       `${TRAINING_SPEC_SHA256.slice(0, 12)} this reader is written for`
     );
   }
@@ -783,14 +825,18 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
     headingTargetsDeg,
     headingToleranceDeg: reader.number("headingToleranceDeg"),
     headingMaxTurnDeg: reader.number("headingMaxTurnDeg"),
-    turnBankMinDeg: reader.number("turnBankMinDeg"),
+    turnRateMinDegS: reader.number("turnRateMinDegS"),
+    turnRateMaxDegS: reader.number("turnRateMaxDegS"),
+    turnRateMinFromDeg: reader.number("turnRateMinFromDeg"),
     turnBankMaxDeg: reader.number("turnBankMaxDeg"),
-    turnBankMinFromDeg: reader.number("turnBankMinFromDeg"),
+    turnStartDelayMaxS: reader.number("turnStartDelayMaxS"),
     interceptAngleDeg: reader.number("interceptAngleDeg"),
     corridorHalfWidthM: reader.number("corridorHalfWidthM"),
     corridorWideningDeg: reader.number("corridorWideningDeg"),
     corridorCourseToleranceDeg: reader.number("corridorCourseToleranceDeg"),
-    crossingHalfWidthM: reader.number("crossingHalfWidthM"),
+    landingCrossLimitM: reader.number("landingCrossLimitM"),
+    landingMaxHeightM: reader.number("landingMaxHeightM"),
+    parallelCourseDeltaDeg: reader.number("parallelCourseDeltaDeg"),
     altitudeTargetsM,
     altitudeLandValue,
     altitudeToleranceM: reader.number("altitudeToleranceM"),
@@ -804,10 +850,15 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
   };
 }
 
-function parseCandidates(reader: Reader): TrainingCandidate[] {
+function parseCandidates(reader: Reader, vocabulary: TrainingVocabulary): TrainingCandidate[] {
   const candidates = reader.list("candidates").map((item, index) => {
     const candidate = Reader.of(item, reader.at(`candidates[${index}]`));
     if (candidate.number("index") !== index) candidate.fail(`index is ${candidate.raw("index")}, expected ${index}`);
+    // A parallel runway can only tighten the landing's limit, never loosen it.
+    const landingCrossLimitM = candidate.number("landingCrossLimitM");
+    if (!(landingCrossLimitM > 0 && landingCrossLimitM <= vocabulary.landingCrossLimitM)) {
+      candidate.fail(`landingCrossLimitM is ${landingCrossLimitM}, not in (0, ${vocabulary.landingCrossLimitM}] m`);
+    }
     return {
       index,
       ident: candidate.string("ident"),
@@ -816,6 +867,7 @@ function parseCandidates(reader: Reader): TrainingCandidate[] {
       courseDeg: candidate.number("courseDeg"),
       elevationM: candidate.number("elevationM"),
       lengthM: candidate.number("lengthM"),
+      landingCrossLimitM,
       centreline: parsePlanLine(candidate, "centreline", 2),
       runway: parsePlanLine(candidate, "runway", 2),
     };
@@ -824,27 +876,40 @@ function parseCandidates(reader: Reader): TrainingCandidate[] {
   return candidates;
 }
 
-function parseTurnRegion(reader: Reader): TrainingTurnRegion {
+function parseTurnRegion(reader: Reader, vocabulary: TrainingVocabulary): TrainingTurnRegion {
+  // The region's limits are the vocabulary's own: a region drawn with other numbers is another turn.
+  const limits: Array<[string, number]> = [
+    ["rateMinDegS", vocabulary.turnRateMinDegS], ["rateMaxDegS", vocabulary.turnRateMaxDegS],
+    ["bankMaxDeg", vocabulary.turnBankMaxDeg], ["startDelayMaxS", vocabulary.turnStartDelayMaxS],
+  ];
+  for (const [key, value] of limits) {
+    if (reader.number(key) !== value) reader.fail(`${key} is ${reader.raw(key)}, but the vocabulary says ${value}`);
+  }
+  const end = parsePlanLine(reader, "end", 4);
+  if (end.eM.length !== 4) reader.fail(`end has ${end.eM.length} corners; where a turn may end has four`);
   return {
     fromTrackDeg: reader.number("fromTrackDeg"),
     turnDeg: reader.number("turnDeg"),
-    groundSpeedMps: reader.number("groundSpeedMps"),
-    radiusMinM: reader.number("radiusMinM"),
-    radiusMaxM: reader.number("radiusMaxM"),
+    rateMinDegS: vocabulary.turnRateMinDegS,
+    rateMaxDegS: vocabulary.turnRateMaxDegS,
+    bankMaxDeg: vocabulary.turnBankMaxDeg,
+    startDelayMaxS: vocabulary.turnStartDelayMaxS,
+    slowFinished: reader.boolean("slowFinished"),
     region: parsePlanLine(reader, "region", 3),
-    innerArc: parsePlanLine(reader, "innerArc", 2),
-    outerArc: parsePlanLine(reader, "outerArc", 2),
-    end: parsePlanLine(reader, "end", 2),
+    fastPath: parsePlanLine(reader, "fastPath", 2),
+    slowPath: parsePlanLine(reader, "slowPath", 2),
+    end,
   };
 }
 
 function parseTurnCheck(reader: Reader): TrainingTurnCheck {
   return {
     progressOk: reader.boolean("progressOk"),
-    bankOk: reader.boolean("bankOk"),
-    meanBankDeg: reader.number("meanBankDeg"),
+    rateOk: reader.boolean("rateOk"),
+    meanRateDegS: reader.number("meanRateDegS"),
+    maxRateDegS: reader.number("maxRateDegS"),
     maxBankDeg: reader.number("maxBankDeg"),
-    bankMinApplies: reader.boolean("bankMinApplies"),
+    rateMinApplies: reader.boolean("rateMinApplies"),
   };
 }
 
@@ -992,6 +1057,16 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
     if (verdict !== null && verdict.kind !== word.kind.replace(/-split$/, "")) {
       check!.fail(`is the check of a ${verdict.kind}, but the word is ${word.kind}`);
     }
+    // THE HOLD CHECK judges exactly the drawn funnel over the word's own hold rows, inclusive.
+    const holdReader = item.nullableChild("holdCheck");
+    if (holdReader !== null && funnel === null) item.fail("holdCheck is given for a word with no hold");
+    const holdCheck = holdReader === null ? null : {
+      holdStartRow: holdReader.integer("holdStartRow", holdStartRow!, holdStartRow!),
+      holdEndRow: holdReader.integer("holdEndRow", holdEndRow, holdEndRow),
+      rows: holdReader.integer("rows", holdEndRow - holdStartRow! + 1, holdEndRow - holdStartRow! + 1),
+      inside: holdReader.integer("inside", 0, holdEndRow - holdStartRow! + 1),
+      halfWidthEndM: holdReader.number("halfWidthEndM"),
+    };
     return {
       row: word.row,
       value: word.value,
@@ -1005,7 +1080,7 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
       targetOnTrackDeg: item.number("targetOnTrackDeg"),
       turnBandDeg: item.nullableRange("turnBandDeg"),
       holdBandDeg: item.nullableRange("holdBandDeg"),
-      turn: turn === null ? null : parseTurnRegion(turn),
+      turn: turn === null ? null : parseTurnRegion(turn, vocabulary),
       funnel: funnel === null ? null : {
         lengthM: funnel.number("lengthM"),
         startHalfWidthM: funnel.number("startHalfWidthM"),
@@ -1014,11 +1089,14 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
         outline: parsePlanLine(funnel, "outline", 3),
       },
       check: verdict,
+      holdCheck,
     };
   });
 }
 
-function parseApproach(reader: Reader, flight: { rows: number; captureRow: number; joinRow: number }): TrainingApproach {
+function parseApproach(
+  reader: Reader, flight: { rows: number; captureRow: number; joinRow: number }, vocabulary: TrainingVocabulary,
+): TrainingApproach {
   const approach = reader.child("approach");
   if (approach.number("clearanceRow") !== flight.joinRow) approach.fail(`clearanceRow is ${approach.raw("clearanceRow")}, the flight's joinRow ${flight.joinRow}`);
   if (approach.number("captureRow") !== flight.captureRow) approach.fail(`captureRow is ${approach.raw("captureRow")}, the flight's ${flight.captureRow}`);
@@ -1042,7 +1120,7 @@ function parseApproach(reader: Reader, flight: { rows: number; captureRow: numbe
       courseOnTrackDeg: capture.number("courseOnTrackDeg"),
       bandDeg: capture.range("bandDeg"),
       check: parseTurnCheck(capture.child("check")),
-      turn: parseTurnRegion(capture.child("turn")),
+      turn: parseTurnRegion(capture.child("turn"), vocabulary),
     },
     courseBandDeg: approach.range("courseBandDeg"),
     corridor: {
@@ -1220,7 +1298,7 @@ function parseFlight(
     words,
     envelopes: {
       heading: parseHeading(envelopes, words.events, vocabulary, rows),
-      approach: parseApproach(envelopes, { rows, captureRow, joinRow }),
+      approach: parseApproach(envelopes, { rows, captureRow, joinRow }, vocabulary),
       altitude: parseAltitude(envelopes, words.events, vocabulary, rows),
       angle: parseAngle(envelopes, words.events, vocabulary),
       speed: parseSpeed(envelopes, words.events, vocabulary, rows),
@@ -1241,7 +1319,7 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
   try {
     const sample = new Reader(raw, "sample");
     const vocabulary = parseVocabulary(sample.child("vocabulary"));
-    const candidates = parseCandidates(sample);
+    const candidates = parseCandidates(sample, vocabulary);
     const cohort = sample.child("cohort");
     const frame = sample.child("airportFrame");
     const flights = sample.list("flights").map((item, position) => parseFlight(item, position, vocabulary, candidates));

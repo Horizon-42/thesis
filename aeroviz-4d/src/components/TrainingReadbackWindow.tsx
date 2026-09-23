@@ -5,7 +5,8 @@
  * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
  *  • PLAN VIEW (the airport frame, one scale on both axes): every candidate runway and its
- *    extended centreline, the capture corridor, each heading word's turn region and hold funnel,
+ *    extended centreline, the capture corridor, each heading word's turn region (between its
+ *    fastest and its slowest turn), where that turn may end (a parallelogram) and its hold funnel,
  *    the capture turn, the track, where each heading word was issued, the clearance, the capture
  *    and the end of the sentence.
  *  • HEADING against time: each word's turn band and hold band, the capture turn, the course
@@ -289,26 +290,48 @@ export default function TrainingReadbackWindow({
                   </polygon>
                   {envelopes.heading.map((item, index) => {
                     const selected = index === headingInForce;
-                    const failed = item.check !== null && !(item.check.progressOk && item.check.bankOk);
+                    const failed = item.check !== null && !(item.check.progressOk && item.check.rateOk);
+                    const hold = item.holdCheck;
+                    const holdFailed = hold !== null && hold.inside < hold.rows;
                     return (
                       <g key={`plan-heading-${index}`} aria-label={`heading word ${index + 1} envelope`}>
                         {item.turn ? (
-                          <polygon
-                            className="training-readback-turn"
-                            points={points(item.turn.region)}
-                            fill={TRAINING_TURN_COLOR}
-                            fillOpacity={selected ? 0.3 : 0.1}
-                            stroke={selected ? TRAINING_WORD_COLOR : failed ? TRAINING_OUTSIDE_COLOR : TRAINING_TURN_COLOR}
-                            strokeWidth={selected ? 1.4 : 0.7}
-                          >
-                            <title>
-                              turn to {label("heading", item.value)} from {item.turn.fromTrackDeg.toFixed(1)}° (
-                              {item.turn.turnDeg > 0 ? "right" : "left"} {Math.abs(item.turn.turnDeg).toFixed(1)}°) at{" "}
-                              {item.turn.groundSpeedMps.toFixed(0)} m/s: radius {(item.turn.radiusMinM / 1000).toFixed(2)}–
-                              {(item.turn.radiusMaxM / 1000).toFixed(2)} km for bank {vocabulary.turnBankMaxDeg}–
-                              {vocabulary.turnBankMinDeg}°
-                            </title>
-                          </polygon>
+                          <>
+                            <polygon
+                              className="training-readback-turn"
+                              points={points(item.turn.region)}
+                              fill={TRAINING_TURN_COLOR}
+                              fillOpacity={selected ? 0.24 : 0.08}
+                              stroke={selected ? TRAINING_WORD_COLOR : failed ? TRAINING_OUTSIDE_COLOR : TRAINING_TURN_COLOR}
+                              strokeWidth={selected ? 1.4 : 0.7}
+                            >
+                              <title>
+                                turn to {label("heading", item.value)} from {item.turn.fromTrackDeg.toFixed(1)}° (
+                                {item.turn.turnDeg > 0 ? "right" : "left"} {Math.abs(item.turn.turnDeg).toFixed(1)}°): between
+                                the fastest turn ({item.turn.rateMaxDegS}°/s, at most {item.turn.bankMaxDeg}° of bank) begun on
+                                time and the slowest ({item.turn.rateMinDegS}°/s) begun up to {item.turn.startDelayMaxS} s late
+                                {item.turn.slowFinished ? "" : " — the slowest turn does not finish before the flight ends"}
+                              </title>
+                            </polygon>
+                            <polyline className="training-readback-turn-path" points={points(item.turn.fastPath)} fill="none"
+                              stroke={TRAINING_TURN_COLOR} strokeOpacity={0.7} strokeWidth={0.6} />
+                            <polyline className="training-readback-turn-path" points={points(item.turn.slowPath)} fill="none"
+                              stroke={TRAINING_TURN_COLOR} strokeOpacity={0.7} strokeWidth={0.6}
+                              strokeDasharray={item.turn.slowFinished ? undefined : "2 2"} />
+                            <polygon
+                              className="training-readback-turn-end"
+                              points={points(item.turn.end)}
+                              fill={TRAINING_TURN_COLOR}
+                              fillOpacity={selected ? 0.55 : 0.35}
+                              stroke={selected ? TRAINING_WORD_COLOR : TRAINING_TURN_COLOR}
+                              strokeWidth={selected ? 1.2 : 0.8}
+                            >
+                              <title>
+                                where the turn to {label("heading", item.value)} may end: the fastest and the slowest turn's
+                                ends, and both moved by a start up to {item.turn.startDelayMaxS} s late
+                              </title>
+                            </polygon>
+                          </>
                         ) : null}
                         {item.funnel ? (
                           <polygon
@@ -316,13 +339,17 @@ export default function TrainingReadbackWindow({
                             points={points(item.funnel.outline)}
                             fill={TRAINING_FUNNEL_COLOR}
                             fillOpacity={selected ? 0.3 : 0.1}
-                            stroke={selected ? TRAINING_WORD_COLOR : TRAINING_FUNNEL_COLOR}
+                            stroke={selected ? TRAINING_WORD_COLOR : holdFailed ? TRAINING_OUTSIDE_COLOR : TRAINING_FUNNEL_COLOR}
+                            strokeDasharray={hold === null ? "4 3" : undefined}
                             strokeWidth={selected ? 1.4 : 0.7}
                           >
                             <title>
                               hold {label("heading", item.value)} ±{vocabulary.headingToleranceDeg}°:{" "}
                               {(item.funnel.lengthM / 1000).toFixed(1)} km, half width{" "}
-                              {item.funnel.startHalfWidthM.toFixed(0)} → {item.funnel.endHalfWidthM.toFixed(0)} m
+                              {item.funnel.startHalfWidthM.toFixed(0)} → {item.funnel.endHalfWidthM.toFixed(0)} m —{" "}
+                              {hold === null
+                                ? "not judged by the labeller (after a turn under the lowest rate's threshold, or a slowest turn that does not finish)"
+                                : `${hold.inside} of ${hold.rows} hold rows inside`}
                             </title>
                           </polygon>
                         ) : null}
@@ -335,7 +362,7 @@ export default function TrainingReadbackWindow({
                       points={points(capture.turn.region)}
                       fill={TRAINING_TURN_COLOR}
                       fillOpacity={0.06}
-                      stroke={capture.check.progressOk && capture.check.bankOk ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR}
+                      stroke={capture.check.progressOk && capture.check.rateOk ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR}
                       strokeDasharray="4 3"
                       strokeWidth={0.9}
                     >
@@ -396,10 +423,12 @@ export default function TrainingReadbackWindow({
             <text x={GUTTER} y={11} className="training-readback-title">
               heading — ground track, ° true, unwrapped · in force: {label("heading", inForce("heading"))}
               {heading?.check
-                ? ` · its turn: ${tick(heading.check.progressOk)} monotone, ${tick(heading.check.bankOk)} bank ` +
-                  `(mean ${heading.check.meanBankDeg.toFixed(1)}°, max ${heading.check.maxBankDeg.toFixed(1)}°` +
-                  `${heading.check.bankMinApplies ? "" : `; under ${vocabulary.turnBankMinFromDeg}°, the lowest bank not judged`})`
+                ? ` · its turn: ${tick(heading.check.progressOk)} monotone, ${tick(heading.check.rateOk)} rate ` +
+                  `(mean ${heading.check.meanRateDegS.toFixed(2)}°/s, max ${heading.check.maxRateDegS.toFixed(2)}°/s, ` +
+                  `max bank ${heading.check.maxBankDeg.toFixed(1)}°` +
+                  `${heading.check.rateMinApplies ? "" : `; under ${vocabulary.turnRateMinFromDeg}°, the lowest rate not judged`})`
                 : heading === null ? " · captured: the corridor holds" : " · in force at entry, no turn"}
+              {heading?.holdCheck ? ` · its hold: ${heading.holdCheck.inside}/${heading.holdCheck.rows} rows in the funnel` : ""}
             </text>
             {layers.lateral ? (
               <>
@@ -628,11 +657,14 @@ export default function TrainingReadbackWindow({
             the same cursor. The word in force is drawn in yellow.
           </span>
           <span>
-            <b style={{ color: TRAINING_TURN_COLOR }}>▩</b> a heading word's turn region — the arcs of every bank from{" "}
-            {vocabulary.turnBankMinDeg}° to {vocabulary.turnBankMaxDeg}° at the issue ground speed, turning the shorter way;
-            under {vocabulary.turnBankMinFromDeg}° of turn the lowest bank is not judged, so its outer arc does not bind ·{" "}
-            <b style={{ color: TRAINING_FUNNEL_COLOR }}>▩</b> its hold funnel — along the target from where the turn ends,
-            starting as wide as the turn's end and widening by the distance × tan {vocabulary.headingToleranceDeg}° ·{" "}
+            <b style={{ color: TRAINING_TURN_COLOR }}>▩</b> a heading word's turn region — turning the shorter way, between
+            the fastest turn ({vocabulary.turnRateMaxDegS}°/s, at most {vocabulary.turnBankMaxDeg}° of bank) and the slowest
+            ({vocabulary.turnRateMinDegS}°/s), at the speeds flown, begun on time or up to {vocabulary.turnStartDelayMaxS} s
+            late; the darker parallelogram is where the turn may end; under {vocabulary.turnRateMinFromDeg}° of turn the lowest
+            rate is not judged ·{" "}
+            <b style={{ color: TRAINING_FUNNEL_COLOR }}>▩</b> its hold funnel — that parallelogram swept along the target,
+            widening by the distance flown × tan {vocabulary.headingToleranceDeg}°; the labeller counts the hold's rows in it
+            (dashed: a hold it does not judge) ·{" "}
             <b style={{ color: TRAINING_CORRIDOR_COLOR }}>▩</b> the capture corridor — {vocabulary.corridorHalfWidthM} m at the
             threshold, widening {vocabulary.corridorWideningDeg}° outward, course ±{vocabulary.corridorCourseToleranceDeg}°.
           </span>
