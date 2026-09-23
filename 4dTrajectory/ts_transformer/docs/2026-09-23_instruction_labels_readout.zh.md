@@ -10,8 +10,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 产物 | `4dTrajectory/outputs/POOLED/instruction_language/v2_20260923/`（信号、候选跑道与机场全部跑道端、规格、量测、句子、`labels.json`、`readout.{json,md}`、`figures/`） |
-| 规格 | sha `103a6eae6b90`，读法 `instruction-v2`；标注器源码 sha `c633967bd67b`（只算决定句子与规格的模块，加上与 harvest、evaluation 共用的 `final_approach.crossing`），量于 commit `773c49ab`（工作区干净），都记在 `spec.json` 的 `source` |
+| 产物 | `4dTrajectory/outputs/POOLED/instruction_language/v2_20260924/`（信号、候选跑道与机场全部跑道端、规格、量测、句子、`labels.json`、`readout.{json,md}`、`figures/`） |
+| 规格 | sha `103a6eae6b90`，读法 `instruction-v2`；标注器源码 sha `47c6008a89bd`（只算决定句子与规格的模块，加上与 harvest、evaluation 共用的 `final_approach.crossing`），量于 commit `35115734`（工作区干净），都记在 `spec.json` 的 `source`。每个产物文件带自己格式的名字（规格 `ts-instruction-spec-v3`、候选跑道 `ts-instruction-candidates-v2`），读时核对 |
 | 代码 | 分支 `dev-instruction-v2`（`instructions/` 与四个 runner） |
 | 数据 | live harvest v7；名单 train 50,693 / val 10,635 架，其中 44 + 10 架短于一个窗口（120 s），可用 50,649 / 10,625 架；test 的 10,919 架没有打开 |
 | 结果 | train 成功 50,214 架（99.1 %），val 10,540 架（99.2 %）；拒绝的原因见 §1 |

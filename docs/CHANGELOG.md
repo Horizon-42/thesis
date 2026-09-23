@@ -1,5 +1,19 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-24 — 指令产物的格式名跟着内容改；产物重建为 `v2_20260924`
+
+`instruction-v2` 改了规格的字段（转弯率、转弯最多晚开始的时间、harvest 的落地条件），也给 `candidates.json` 加了
+机场全部跑道端，但规格文件的格式名还是 `ts-instruction-spec-v2`，`candidates.json` 根本没有格式名；前端样本也还叫
+`aeroviz-training-sample-v3`。用户的规矩（2026-09-24）：格式名跟着文件的形状改，在同一次改动里、在每个钉住它的
+地方一起改，不为了兼容留旧名字。
+
+- `SPEC_SCHEMA` → `ts-instruction-spec-v3`；`candidates.json` 写入并核对 `CANDIDATES_SCHEMA` =
+  `ts-instruction-candidates-v2`，别的名字按名字拒读（分支 `dev-instruction-names`，`35115734`）。规格 sha 只覆盖字段，
+  仍是 `103a6eae6b90`。
+- 产物在干净的工作区重建为 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260924/`（标注器源码 sha
+  `47c6008a89bd`），读数与原来逐字相同；被取代的 `v2_20260923` 已删除。
+- 前端样本格式名改名并从新产物重新导出 `training/instruction_v2/`（opus agent，见前端文档 36）。
+
 ### 2026-09-23 — 指令词表 `instruction-v2`：转弯按转弯率，落地与 harvest / evaluation 同条件
 
 用户要求的两处修改（词表设计 §2.2、§2.3；读数文档）。分支 `dev-instruction-v2`（基于 `3b2b0bcf`），两轮 opus 审查、

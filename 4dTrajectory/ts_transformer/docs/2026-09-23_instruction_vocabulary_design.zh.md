@@ -571,7 +571,7 @@ LPV 的航道宽度和下滑道窗口只用来评估飞出的航迹。与管制�
 ## 8 取值
 
 规格 `103a6eae6b90`（读法 `instruction-v2`），存于
-`4dTrajectory/outputs/POOLED/instruction_language/v2_20260923/spec.json`。"量出"的规则与量测见同目录的
+`4dTrajectory/outputs/POOLED/instruction_language/v2_20260924/spec.json`。"量出"的规则与量测见同目录的
 `measurements.json` 和读数文档 §4。
 
 | 项 | 值 | 来源 |

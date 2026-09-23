@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 词表 | 规格 `103a6eae6b90`（读法 `instruction-v2`：转弯按转弯率、落地与 harvest 同条件），产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260923/` |
+| 词表 | 规格 `103a6eae6b90`（读法 `instruction-v2`：转弯按转弯率、落地与 harvest 同条件），产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260924/` |
 | 本设计 | 第二稿：控制律从动力学方程推出，每个参数写明来源；§14 前七项已确认，**第 8、9 项待确认** |
 | 初量 | §10 里标"初量"的数，来自 train 随机 6,000 / 12,000 架的探索脚本；实现时由 runner 正式量出，写进执行器规格 |
 | 实现 | 未开始，步骤见 §13 |
