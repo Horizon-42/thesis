@@ -1,5 +1,27 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-23 — 前端 Training 模块换成指令词表（`instruction-v1`），画出每个词的飞行盒
+
+Training 页原来读的是已被取代的包围盒词表（`box-v3`），整套换成冻结的指令词表（读法 `instruction-v1`，规格
+`08ad64abb53e`）。分支 `dev-instruction-frontend`（基于 `7821c08f`），用户合并。设计与状态：
+`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`（原地重写）。
+
+- **几何在 Python 里算，前端只画**：新模块 `ts_transformer/instructions/display.py`（不在标注器 sha 范围内，只用
+  `envelope.py` / `labeller/*` 的公开函数）给出每个词的包络——航向词的转弯区（坡度 4°–32° 的圆弧扫过的区域）
+  与保持漏斗、截获转弯、走廊、高度管子（就是 `tube_bounds`）、速度的过渡与速度带；判定全是 `Reading.checks`。
+- **导出**：`run_ts.py instruction_training_export`（R11）按机场抽 val 航班（种子 1337，直线进近 20 + 雷达引导 20），
+  每一架都用 `read_flight` 重读并与产物逐格比对；写 `training/instruction_v1/sample.json`（`aeroviz-training-sample-v3`），
+  并加进各机场的 `training/index.json`（格式 v1 不变，旧集合原样保留）。
+- **前端**：数据契约与读取（`trainingSample.ts`，按名字拒读别的读法、别的 sha、别的列序）、句子条（六列，第 0 步
+  完整，数沉默的步）、读数核对窗口（平面图 + 航向 / 高度—距离 / 地速三图）、Cesium 图层（横向包络贴地、管子为
+  椭球高的墙、全部候选跑道）、配色；执行器重飞与先验句子两个空位不放假数据。`check-publication` 用读取函数本身
+  核对盘上与开发服务器返回的样本，新增 `--airports-root`。
+- **发现**：保持漏斗按词表公式就很宽——它是转弯终点那段线沿目标方向扫出的区域，而坡度下限 4° 让最宽的
+  转弯半径在 100 m/s 时约 14.6 km；val 全体 21,168 个漏斗末端半宽中位 1.1 km、p95 9.6 km，装下 92.5 % 的
+  保持段行（AV23）。审查查出第一版把漏斗起点放在那段线的中点，24 % 的漏斗一行都没装下，已改。
+- 盘上的旧集合（`box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`，KRDU 另有 `v15_nomerge_noposition`）未删，
+  界面按名字拒读；删不删由用户决定。
+
 ### 2026-09-23 — 指令标注器：第二层的"语言"读完五机场开发集
 
 按新的指令词表（`4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`）实现标注器，
