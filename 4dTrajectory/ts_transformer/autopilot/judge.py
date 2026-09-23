@@ -178,7 +178,9 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
     for group, end in zip(groups, ends):
         first, last = group[0], group[-1]
         target = words.heading_deg(last.value)
-        result: dict[str, Any] = {"row": first.row, "kind": first.kind, "words": len(group)}
+        # "turn": None for the word flown from entry; "hold": None when no row is held (the flight ended
+        # first), a reason when the labeller would not judge it, else its rows and those inside the funnel
+        result: dict[str, Any] = {"row": first.row, "kind": first.kind, "words": len(group), "turn": None, "hold": None}
         if first.kind == "initial":
             arrival, turn = first.row, None
         else:
@@ -194,12 +196,13 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
             bank = envelope.bank_deg_from_turn_rate(rate, speed[first.row + 1: stop + 1]) if stop > first.row else np.zeros(1)
             mean_rate = float(np.mean(rate) * math.copysign(1.0, total))
             turn = {"rate_min_applies": abs(total) >= spec.turn_rate_min_from_deg}
-            result.update(turn_reached=arrival is not None or first.kind.startswith("intercept"),
-                          progress_ok=envelope.turn_progress_ok(track[first.row: stop + 1], target_unwrapped,
-                                                                spec.heading_tolerance_deg),
-                          rate_ok=envelope.turn_rate_ok(total, mean_rate, float(np.max(np.abs(rate))), float(np.max(bank)),
-                                                        spec.turn_rate_min_deg_s, spec.turn_rate_max_deg_s,
-                                                        spec.turn_bank_max_deg, spec.turn_rate_min_from_deg))
+            result["turn"] = {
+                "reached": arrival is not None or first.kind.startswith("intercept"),
+                "progress_ok": envelope.turn_progress_ok(track[first.row: stop + 1], target_unwrapped,
+                                                         spec.heading_tolerance_deg),
+                "rate_ok": envelope.turn_rate_ok(total, mean_rate, float(np.max(np.abs(rate))), float(np.max(bank)),
+                                                 spec.turn_rate_min_deg_s, spec.turn_rate_max_deg_s,
+                                                 spec.turn_bank_max_deg, spec.turn_rate_min_from_deg)}
         if arrival is None or end <= arrival:
             results.append(result)
             continue
@@ -249,14 +252,14 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     cleared = any(i.column == APPROACH for i in reached if i.kind == "clear")
     vertical = tube_checks(reached, flight.smoothed.distance_m, flight.smoothed.altitude_m, spec, words)
     speed = span_checks(reached, flight.smoothed.ground_speed_mps, spec, words)
-    holds = [h["hold"] for h in headings if isinstance(h.get("hold"), dict)]
-    contained = (all(h.get("progress_ok", True) and h.get("rate_ok", True) and h.get("turn_reached", True)
-                     for h in headings)
+    holds = [h["hold"] for h in headings if isinstance(h["hold"], dict)]
+    contained = (all(h["turn"] is None or all(h["turn"].values()) for h in headings)
                  and all(h["inside"] == h["rows"] for h in holds)
                  and (not cleared or (len(corridor) > 0 and bool(corridor.all())))
                  and all(v["contained"] for v in vertical) and all(v["contained"] for v in speed))
     return Verdict(outcome, end_row, crossing, limits, flown_rows=end_row + 1, words={
         "not_reached": len(reading.instructions) - len(reached),
         "heading": headings,
-        "corridor": {"entered": bool(len(corridor)), "rows": int(len(corridor)), "inside": int(corridor.sum())},
+        "corridor": {"cleared": cleared, "entered": bool(len(corridor)), "rows": int(len(corridor)),
+                     "inside": int(corridor.sum())},
         "vertical": vertical, "speed": speed, "all_contained": bool(contained)})

@@ -23,17 +23,25 @@ import torch
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, RUNWAY, SPEED, UNCHANGED, Words
 
 
+#: Which columns each delay moves: the manoeuvre columns method B measures it on, and the columns that
+#: follow them (the runway pointer and the clearance go with the heading).
+DELAY_GROUPS = {"heading_s": (HEADING,), "vertical_s": (ALTITUDE, ANGLE), "speed_s": (SPEED,)}
+FOLLOWS_HEADING = (RUNWAY, APPROACH)
+
+
 @dataclass(frozen=True)
 class Delays:
-    """Seconds from a word's step to its effect, per group of columns."""
+    """Seconds from a word's step to its effect, per group of columns (`DELAY_GROUPS`)."""
 
     heading_s: float
     vertical_s: float
     speed_s: float
 
     def column(self, index: int) -> float:
-        return {RUNWAY: self.heading_s, APPROACH: self.heading_s, HEADING: self.heading_s,
-                ALTITUDE: self.vertical_s, ANGLE: self.vertical_s, SPEED: self.speed_s}[index]
+        if index in FOLLOWS_HEADING:
+            return self.heading_s
+        (name,) = [name for name, columns in DELAY_GROUPS.items() if index in columns]
+        return getattr(self, name)
 
 
 @dataclass(frozen=True)

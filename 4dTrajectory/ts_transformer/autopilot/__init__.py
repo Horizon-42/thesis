@@ -11,4 +11,10 @@ nothing.
 - ``flights``  a labelled flight's inputs, rebuilt from the data plane and checked row for row
 - ``plant``    one control cycle of the dynamics
 - ``inverse``  wanted rates → bank, load factor, thrust; the limits, in their order
+- ``lateral`` / ``vertical`` / ``speed``  the three laws: words in force → the rates wanted
+- ``params``   the executor's own parameters and the design's constraints on them
+- ``executor`` the cycle loop (``fly``); ``judge`` the three-layer verdict on what was flown
+- ``replay``   a batch of labelled flights: who is flown, flying and judging them
+- ``measure`` (data), ``derive`` (method A), ``observe`` (method B)  where the parameters come from
+- ``spec``     the executor spec on disk, written once
 """

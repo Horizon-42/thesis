@@ -8,6 +8,7 @@ runner each computed the repository root from their own `__file__`.
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -100,3 +101,11 @@ def discover_k_airports(harvest_root: Path = HARVEST_ROOT) -> list[str]:
         and child.name.upper().startswith("K")
         and arrival_manifest_path(child.name, harvest_root).exists()
     )
+
+
+def git_state() -> dict[str, Any]:
+    """The repository's HEAD and whether the working tree differs from it — what a formal artefact records
+    about the code that wrote it."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=REPO_ROOT, check=True, capture_output=True, text=True).stdout.strip()
+    return {"head": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}

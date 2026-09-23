@@ -353,3 +353,151 @@ def test_descents_level_off_at_their_targets_inside_the_tubes():
     targets = [i for i in reading.instructions if i.column == ALTITUDE]
     assert len(targets) == 3 and len(verdict.words["vertical"]) == 3
     assert all(word["contained"] for word in verdict.words["vertical"])
+
+
+# ---- E7: the parameters and the executor spec
+def test_the_data_parameters_are_read_from_the_labellers_reading_of_each_flight():
+    from ts_transformer.autopilot import measure
+    from ts_transformer.instructions.labeller.read import admit, read_flight
+
+    one, words, geometry = spec(), Words(spec()), instruction_airport()
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    reading = read_flight(signals, geometry, one, words)
+    out = measure.flight_measurements(admit(signals, geometry, one), reading, geometry, one, words)
+    # two 90° turns at 6°/row (3°/s); the middle half of each is the steady rate, and at 100 m/s neither
+    # is in the fast band the bank cap is read from
+    assert np.median(out["turn_mid_rate_deg_s"]) == pytest.approx(3.0, abs=0.05)
+    assert out["turn_mid_fast_bank_deg"] == []
+    # the final is a straight 3° line, so the extrapolated crossing is the line's height at the threshold
+    height = signals.altitude_m[-1] - geometry.candidates[0].elevation_m
+    assert out["crossing_height_m"] == [pytest.approx(height - 400.0 * math.tan(math.radians(3.0)), abs=0.5)]
+    # the measured sentence must be the stored one
+    stored = [(reading.words, reading.runway_index)]
+    measure.measure_flights([signals], stored, one, words, {"KXXX": geometry})
+    changed = reading.words.copy()
+    changed[1, SPEED] = words.speed_unspecified
+    with pytest.raises(ValueError, match="differs from the stored one"):
+        measure.measure_flights([signals], [(changed, 0)], one, words, {"KXXX": geometry})
+
+
+def test_the_data_parameters_are_the_pooled_medians_rounded_as_the_spec_says():
+    from ts_transformer.autopilot import measure
+
+    one = spec()
+    pooled = {"turn_mid_rate_deg_s": [2.1, 2.16, 2.3], "turn_mid_fast_bank_deg": [24.2, 24.6, 40.0],
+              "transition_accel_mps2": [-0.3, -0.24, -0.2, 0.1, 0.16, 0.5], "unspecified_slope_mps2": [-0.26, -0.3, -0.2],
+              "crossing_height_m": [16.0, 20.84, 26.0]}
+    measured = measure.measured_values(pooled, one)
+    assert measured["values"] == {"turn_rate_deg_s": 2.15, "bank_cap_deg": 25.0, "decel_mps2": 0.24, "accel_mps2": 0.16,
+                                  "unspecified_decel_mps2": 0.26, "land_aim_height_m": 20.8}
+    assert measured["counts"]["decelerations"] == measured["counts"]["accelerations"] == 3
+    # never past the vocabulary's own bank ceiling
+    steep = measure.measured_values({**pooled, "turn_mid_fast_bank_deg": [40.0]}, one)
+    assert steep["values"]["bank_cap_deg"] == one.turn_bank_max_deg
+
+
+def test_method_a_takes_the_gentlest_roll_out_and_roll_rate_the_constraints_allow():
+    from dataclasses import replace
+
+    from ts_transformer.autopilot import derive
+
+    one = spec()
+    assert derive.heading_time_constant_s(2.15, one, 1.0) == 4.5              # 10° / 2.15°/s = 4.65 → 4.5
+    with pytest.raises(ValueError, match="under 2 Δt"):
+        derive.heading_time_constant_s(6.0, one, 1.0)
+    params = _params(heading_time_constant_s=4.5)
+    slow, fast = (derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=p), 140.0) for p in (1.0, 5.0))
+    assert slow > one.heading_tolerance_deg > fast >= 0.0                        # a slower roll passes further
+    rate, overshoots = derive.roll_rate_deg_s(params, one)
+    assert max(overshoots.values()) <= one.heading_tolerance_deg
+    assert derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=rate - derive.ROLL_RATE_STEP_DEG_S), 140.0) \
+        > one.heading_tolerance_deg or rate == derive.ROLL_RATE_STEP_DEG_S
+
+
+def test_a_received_word_is_matched_to_the_nearest_reread_word_of_its_column_and_value():
+    from ts_transformer.autopilot.observe import word_leads
+
+    received = [(HEADING, 7, 100.0), (ALTITUDE, 3, 200.0), (SPEED, 5, 300.0)]
+    reread = [(HEADING, 7, 96.0), (HEADING, 7, 150.0), (HEADING, 8, 100.0), (ALTITUDE, 3, 206.0), (SPEED, 5, 400.0)]
+    assert word_leads(received, reread, 30.0) == [(HEADING, 4.0), (ALTITUDE, -6.0)]
+
+
+def _observed_series(geometry):
+    from types import SimpleNamespace
+
+    from ts_transformer.data.coordinate_frames import ENUFrame
+    from ts_transformer.data.dataset import FlightSeries
+
+    candidate = geometry.candidates[0]
+    lat, lon = geometry.frame.latlon_from_horizontal(candidate.threshold_e_m, candidate.threshold_n_m)
+    scenario = SimpleNamespace(source={"arr_airport": "KXXX", "runway": "09"}, initial=SimpleNamespace(m=62000.0),
+                               target=SimpleNamespace(latitude=lat, longitude=lon, psi=0.0), aircraft=SimpleNamespace(code="A320"))
+    return FlightSeries(flight_id="TEST1", scenario=scenario, frame=ENUFrame(lat0=lat, lon0=lon, alt0=candidate.elevation_m),
+                        times=np.zeros(1), values=np.zeros((1, 6)))
+
+
+def test_the_observation_operator_reads_a_flown_track_as_the_data_plane_reads_a_radar_track():
+    """Method B's O: the flown track, sampled once a cycle, through the data plane's own fit and grid, reads
+    back as the track that was flown, and the labeller re-reads its words from it: the turn within a row of
+    where it was said, the descent LATER than the executor began it (the reading needs height lost before it
+    sees a descent — method B's finding, flown with no delay)."""
+    from ts_transformer.autopilot.observe import flight_leads, observe
+    from ts_transformer.autopilot.judge import _track
+
+    one, words, geometry = spec(), Words(spec()), instruction_airport()
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    flown, verdict, reading = _fly_sentence(signals)
+    states = flown.states[0, : verdict.end_row + 1].numpy()
+    seen = observe(states, 1.0, _observed_series(geometry), geometry, one.step_s)
+    truth = _track(states, geometry)
+    rows = (seen.time_s / 1.0).astype(int)
+    assert len(seen.time_s) == len(states[::2]) and seen.time_s[1] - seen.time_s[0] == one.step_s
+    assert np.abs(seen.e_m - truth["e"][rows]).max() < 5.0 and np.abs(seen.altitude_m - truth["height"][rows]).max() < 2.0
+    leads, received = flight_leads(states, 1.0, _observed_series(geometry), geometry, reading, one, words, 30.0)
+    said = [i for i in reading.instructions if i.row > 0 and i.column in (HEADING, ALTITUDE, ANGLE, SPEED)]
+    assert received == len(said) == 5
+    by_column = dict(leads)
+    assert abs(by_column[HEADING]) <= one.step_s
+    assert by_column[ALTITUDE] < 0.0 and by_column[ANGLE] < 0.0
+
+
+def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_executors(tmp_path):
+    import json
+    from dataclasses import replace
+
+    from ts_transformer.autopilot import spec as executor_spec
+
+    params = _params(delays=Delays(2.0, 0.0, 0.0))
+    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "git": {"head": "x", "dirty": False}}
+    executor_spec.write_spec(tmp_path, params, "vocabulary", {"data": {}}, source)
+    loaded, record = executor_spec.load_spec(tmp_path)
+    assert loaded == params and record["sha256"] == executor_spec.params_sha256(params)
+    executor_spec.require_current_executor(record)
+    with pytest.raises(FileExistsError):
+        executor_spec.write_spec(tmp_path, params, "vocabulary", {}, source)
+    assert executor_spec.params_sha256(replace(params, bank_rate_deg_s=3.0)) != record["sha256"]
+    with pytest.raises(ValueError, match="other executor code"):
+        executor_spec.require_current_executor({**record, "source": {**source, "executor_source_sha256": "0" * 64}})
+    stored = json.loads((tmp_path / "spec.json").read_text())
+    for broken, message in (({**stored, "params": {**stored["params"], "bank_rate_deg_s": 9.0}}, "do not hash"),
+                            ({**stored, "params": {**stored["params"], "extra_s": 1.0}}, "extra"),
+                            ({**stored, "schema": "ts-executor-spec-v0"}, "is not a ts-executor-spec-v1 file")):
+        (tmp_path / "spec.json").write_text(json.dumps(broken))
+        with pytest.raises(ValueError, match=message):
+            executor_spec.load_spec(tmp_path)
+
+
+def test_only_flights_on_their_own_types_dynamics_with_a_published_approach_speed_are_flown(monkeypatch):
+    from types import SimpleNamespace
+
+    from ts_transformer.autopilot import replay
+
+    def series(resolved, dynamics):
+        source = {"resolved_typecode": resolved, "dynamics_typecode": dynamics}
+        return SimpleNamespace(scenario=SimpleNamespace(source=source, initial=SimpleNamespace(m=62000.0)))
+
+    assert replay.exclusion(series("A320", "A320")) is None
+    assert replay.exclusion(series(None, "A320")) == "no identified type"
+    assert replay.exclusion(series("A20N", "A320")) == "flown on a stand-in's dynamics"
+    monkeypatch.setattr(replay, "approach_speed_ias_mps", lambda typecode, mass: math.nan)
+    assert replay.exclusion(series("A320", "A320")) == "type publishes no approach speed"

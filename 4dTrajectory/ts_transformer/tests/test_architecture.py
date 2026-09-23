@@ -697,8 +697,11 @@ AUTOPILOT = TS_DIR / "autopilot"
 #: the closed loop (framework document §2): it flies words through the control path's rollout, so
 #: inside the package it reads only these (a module, or a whole group ending in ``.``) — never a
 #: model, the training plane, a runner, a prediction path's own package or a layer above it.
+#: ``data.channels``: the observation operator (method B) reads a flown track as the data plane reads
+#: an observed one.
 AUTOPILOT_MAY_IMPORT = ("autopilot.", "instructions.", "config", "io_utils", "repo_layout", "data.dataset",
-                        "geometry.flyability", "outputs.dynamics.", "outputs.envelope", "outputs.constraints.speed_floor")
+                        "data.channels", "geometry.flyability", "outputs.dynamics.", "outputs.envelope",
+                        "outputs.constraints.speed_floor")
 
 
 def test_the_executor_flies_through_the_shared_dynamics_only():
