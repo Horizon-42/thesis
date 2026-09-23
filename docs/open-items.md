@@ -9,10 +9,12 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
-- **到达清单不重建**（用户 2026-09-20）。`harvest-arrivals-v5-takeoff-excluded` 的跑道覆盖：KRDU 4 条（缺 14、32）、
-  KSMF 3 条（缺 35R）、KSJC 4 / KSTL 8 / KMSY 4，并集 23 条。重建成 v6 会加回 KRDU 32 与 KSMF 35R（+1876 架），
-  改变每个 ts 数据集划分。**用户决定不重建、不动训练数据**，所以本阶段关于跑道的结论都带着这个覆盖范围，
-  必须在结论里写明。
+- **到达清单已重建并合并新数据**（用户 2026-09-23 决定；2026-09-20 的“不重建”就此作废）。live 根目录是
+  v5 数据加 8/22–9/22 新下载，v7 名单 72,574 条、eligible 72,247 条，KRDU 32 与 KSMF 35R 已加回（跑道覆盖：
+  KRDU 5 条，只缺没有 RNAV 程序的 14）。旧 v5 名单冻结为 `outputs/harvest-v5-20260823`，旧 checkpoint 按指纹回放。
+  状态与数字：`trajectory_data_process/docs/11-2026-09-23-merge-new-data.zh.md`。
+  **待办**：用新数据训练前重建实验 cohort；前端的 observed 发布未更新；`new_data_9_22` 与冻结代里的
+  重新分类残留目录是否删除，等用户决定。
 
 - **`clean_pipeline_data.py` DELETES the 70,267 optimizer records the next item says to
   regenerate from** (verified 2026-09-20). Root `CLAUDE.md` carries both halves of the

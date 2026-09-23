@@ -21,6 +21,12 @@ review 了 `trajectory_data_process/` 与 `flight_scenarios/`，并对照 `evalu
   的默认值改为 import（原来 CIFP 周期抄旧成 260319）；arrivals / observed 改为全部成功后再替换。TD17、TD24。
 - 其余 review 发现（ts 与优化器机型参数不同、三种初始速度估计、各类记录时间原点不同等 15 条）记在
   `docs/code-health-followups.md`。
+- **数据（同日执行）**：旧 v5 根目录冻结为 `outputs/harvest-v5-20260823`（`FROZEN.json`，只读），新 live 根目录 =
+  v5 的 tracks（硬链接）合并 `outputs/new_data_9_22`，全部重新分类后重建 v7 arrivals / 观测报告 / lateral 名单；
+  先下载了 8/21–9/22 的 METAR。结果：arrivals 42,650 → 72,574，eligible 42,571 → 72,247（train 50,693 / val 10,635 /
+  test 10,919）；旧 test 无一离开 test；KSMF 35R 643/643 横向通过；只有 KSMF 35L 两条两次进近的航班换了 key
+  （其中 1 条 val → train）。第一次运行时后台 PID 记错、在同一机场并发跑了两次，KMSY 的视图被删，用 `--evaluate-only`
+  从完整的 tracks 重建（冻结代未受影响）。明细：`trajectory_data_process/docs/11-2026-09-23-merge-new-data.zh.md`。
 
 ### 2026-09-23 — 两层代码 review 里词表之外的问题修掉
 
