@@ -13,12 +13,13 @@
 
 | 项 | 内容 |
 |---|---|
-| 词表 | 读法 `instruction-v2`，规格 sha `103a6eae6b90`。产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260923/` |
+| 词表 | 读法 `instruction-v2`，规格 sha `103a6eae6b90`，标注器源码 sha `c633967bd67b`（量于 `773c49ab`，工作区干净）。产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260923/` |
 | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；几何全部来自 `instructions/display.py` |
 | 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
-| 分支 | `dev-instruction-v2`（工作区 `.claude/worktrees/instruction-v2`），提交见 §7 |
-| 发布 | 待导出：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337） |
-| 测试 | Python：`tests/test_instruction_training_export.py`；前端 Vitest 88 个文件 642 条通过；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
+| 分支与提交 | `dev-instruction-v2`（工作区 `.claude/worktrees/instruction-v2`）：前端 `dada684b`，读取修正 `2bbbd8cd`（一步以内就在目标带里的转弯，路径只有一个点），发布记录在其后的文档提交（`git log`） |
+| 发布 | 2026-09-24 在 `dada684b`（工作区干净，记在每个索引条目的 `source.git` 里）导出：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），数字见 §2.1 的表。各机场 `index.json` 的旧条目（包括 `instruction_v1`）逐条原样保留 |
+| 测试 | Python：`tests/test_instruction_training_export.py` 9 条（含与前端的契约比对）；前端 Vitest 88 个文件 643 条通过；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
+| 核对 | `npm run check-publication`：五个机场盘上与开发服务器（从本工作区起在 5183 端口）两层都是 0 个错误，每个机场 1 个能读的集合，别的词表的集合全部按名字拒读记为警告（§5）。浏览器（本机 Chrome）里打开过 KRDU：Training 页开在 `instruction_v2`，读数核对窗口的平面图画出转弯区、最快与最慢的转弯、平行四边形、实线与虚线的漏斗，三维里贴地的包络都在，控制台没有错误 |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 | 还没有的两样 | 执行器按句子重飞的航迹（执行器在设计中）、先验模型说出的句子（这份词表上还没训练先验）。界面上是两个明确的空位，没有假数据（§4.6） |
 
@@ -57,6 +58,18 @@ python run_ts.py instruction_training_export \
 - **每一架读过的航班都用 `read_flight` 重读一遍，必须和产物里存的句子完全相同**（六列词、跑道、截获行、
   许可行、"未指定"行），否则导出停止并说出是哪一架哪一格。导出器**不**要求当前代码的标注器 sha 等于
   产物的：产物在无关的代码改动之后仍然能导出，而重读保证显示的就是存下的那一句。
+
+| 机场 | 候选池（已标注 val） | 读了 | 抽中 | 文件 | 转弯（含截获转弯） | 保持段：判的 / 不判的 | 判的保持段的行在漏斗里 |
+|---|---|---|---|---|---|---|---|
+| KMSY | 1,107 | 51 | 20 + 20 | 5.7 MB | 76 | 55 / 10 | 2,667 / 2,668 |
+| KRDU | 3,528 | 44 | 20 + 20 | 6.7 MB | 127 | 86 / 28 | 3,008 / 3,014 |
+| KSJC | 2,487 | 143 | 20 + 20 | 5.8 MB | 92 | 50 / 15 | 2,107 / 2,122 |
+| KSMF | 1,321 | 43 | 20 + 20 | 6.5 MB | 104 | 81 / 6 | 3,457 / 3,461 |
+| KSTL | 2,097 | 50 | 20 + 20 | 6.5 MB | 111 | 88 / 8 | 2,865 / 2,874 |
+
+五个机场共 510 个转弯里，74 个的转弯区面积几乎为零：发令时航迹已经在目标带里或只差一点（多是 2° 左右的截获
+转弯），最快和最慢的转弯只有发令点一两个点；只有 1 个转弯区的边界自己交叉（KSJC XSN90 的截获转弯，转角 4.8°，刚过
+4.5° 的带，交叉出的只是一条约 30 m² 的细缝），在任何比例下都看不出来。
 
 ### 2.2 `index.json`
 
