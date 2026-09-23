@@ -26,7 +26,7 @@ import torch
 from ts_transformer.autopilot.executor import Flown, fly
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, rebuild_series
 from ts_transformer.autopilot.frame import AirportCharts
-from ts_transformer.autopilot.judge import Verdict, judge
+from ts_transformer.autopilot.judge import Verdict, flown_track, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import words_in_force
@@ -178,3 +178,30 @@ def summary(verdicts: list[Verdict]) -> dict[str, Any]:
             "landed_share": outcomes["landed"] / n,
             "flew_the_sentence_share": sum(v.flew_the_sentence for v in verdicts) / n,
             "word_failures": {k: int(c) for k, c in words_failed.most_common() if c}}
+
+
+def _percentiles(values: list[float]) -> dict[str, float] | None:
+    if not values:
+        return None
+    return {f"p{q}": float(np.percentile(values, q)) for q in (5, 25, 50, 75, 95)} | {"n": len(values)}
+
+
+def alignment(batch: Batch, flown: Flown, verdicts: list[Verdict]) -> dict[str, Any]:
+    """How the flown tracks differ from the observed ones (§11, reported, no gate): per flight, the mean
+    horizontal and vertical distance at the sentence's rows both tracks reach (time-aligned from row 0),
+    and for the landed flights the landing time minus the observed one (the sentence ends at the observed
+    crossing)."""
+    horizontal, vertical, landing = [], [], []
+    for j, verdict in enumerate(verdicts):
+        observed, reading = batch.signals[j], batch.readings[j]
+        step_rows = int(round((observed.time_s[1] - observed.time_s[0]) / flown.cycle_s))
+        track = flown_track(flown.states[j, : verdict.end_row + 1].cpu().numpy(), batch.geometries[j])
+        rows = min(len(reading.words), verdict.end_row // step_rows + 1)
+        flown_rows = np.arange(rows) * step_rows
+        horizontal.append(float(np.mean(np.hypot(track["e"][flown_rows] - observed.e_m[:rows],
+                                                 track["n"][flown_rows] - observed.n_m[:rows]))))
+        vertical.append(float(np.mean(np.abs(track["height"][flown_rows] - observed.altitude_m[:rows]))))
+        if verdict.outcome == "landed":
+            landing.append(verdict.end_row * flown.cycle_s - len(reading.words) * step_rows * flown.cycle_s)
+    return {"mean_horizontal_distance_m": _percentiles(horizontal), "mean_vertical_distance_m": _percentiles(vertical),
+            "landing_time_minus_observed_s": _percentiles(landing)}

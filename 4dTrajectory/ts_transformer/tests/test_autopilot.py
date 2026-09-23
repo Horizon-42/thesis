@@ -442,14 +442,14 @@ def test_the_observation_operator_reads_a_flown_track_as_the_data_plane_reads_a_
     where it was said, the descent LATER than the executor began it (the reading needs height lost before it
     sees a descent — method B's finding, flown with no delay)."""
     from ts_transformer.autopilot.observe import flight_leads, observe
-    from ts_transformer.autopilot.judge import _track
+    from ts_transformer.autopilot.judge import flown_track
 
     one, words, geometry = spec(), Words(spec()), instruction_airport()
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     flown, verdict, reading = _fly_sentence(signals)
     states = flown.states[0, : verdict.end_row + 1].numpy()
     seen = observe(states, 1.0, _observed_series(geometry), geometry, one.step_s)
-    truth = _track(states, geometry)
+    truth = flown_track(states, geometry)
     rows = (seen.time_s / 1.0).astype(int)
     assert len(seen.time_s) == len(states[::2]) and seen.time_s[1] - seen.time_s[0] == one.step_s
     assert np.abs(seen.e_m - truth["e"][rows]).max() < 5.0 and np.abs(seen.altitude_m - truth["height"][rows]).max() < 2.0
@@ -501,3 +501,39 @@ def test_only_flights_on_their_own_types_dynamics_with_a_published_approach_spee
     assert replay.exclusion(series("A20N", "A320")) == "flown on a stand-in's dynamics"
     monkeypatch.setattr(replay, "approach_speed_ias_mps", lambda typecode, mass: math.nan)
     assert replay.exclusion(series("A320", "A320")) == "type publishes no approach speed"
+
+
+def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_observed_track():
+    from ts_transformer.autopilot import replay
+
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    flown, verdict, reading = _fly_sentence(signals)
+    batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[instruction_airport()],
+                         approach_ias_mps=[], drawn={})
+    summary = replay.summary([verdict])
+    assert summary == {"flights": 1, "outcomes": {"landed": 1}, "landed_share": 1.0, "flew_the_sentence_share": 1.0,
+                       "word_failures": {}}
+    aligned = replay.alignment(batch, flown, [verdict])
+    # the executor flies the words, not the legs: it stays within a kilometre of the synthetic flight and lands
+    # later (after "unspecified" it slows to the A320's published approach speed, under the legs' 75 m/s)
+    assert aligned["mean_horizontal_distance_m"]["p50"] < 1000.0 and aligned["mean_vertical_distance_m"]["p50"] < 30.0
+    landing = aligned["landing_time_minus_observed_s"]
+    assert landing["n"] == 1 and 0.0 < landing["p50"] < 40.0
+
+
+def test_the_sensitivity_moves_one_parameter_at_a_time_and_marks_a_word_acted_on_early_as_a_probe():
+    from ts_transformer.experiments.executor_sensitivity import variants
+
+    params = _params(heading_time_constant_s=4.5, bank_rate_deg_s=2.5, delays=Delays(2.0, 0.0, 0.0))
+    table = {name: (moved, probe) for name, moved, probe in variants(params)}
+    assert table["spec"] == (params, False)
+    assert {n for n in table if n.startswith("heading_time")} == {f"heading_time_constant_s={t:g}" for t in (2, 3, 4)}
+    assert "path_rate_factor=2" not in table and "bank_rate_deg_s=2" in table
+    assert table["delays.heading_s=-2"][1] and not table["delays.heading_s=6"][1]
+    assert table["delays.vertical_s=-4"][1] and table["delays.vertical_s=-4"][0].delays == Delays(2.0, -4.0, 0.0)
+    for name, (moved, probe) in table.items():
+        if probe:
+            with pytest.raises(ValueError, match="before it is said"):
+                moved.check(spec())
+        elif name.startswith(("heading", "bank", "path", "delays")) or name == "spec":
+            moved.check(spec())

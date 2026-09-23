@@ -8,7 +8,8 @@ executor spec's (E7); this container only checks that a set of values is one the
 - ``τ_ψ ≥ 2 Δt`` (§4.1 constraint 1: each cycle removes at most half the heading error);
 - ``r_turn · τ_ψ ≤ heading_continue_lead_deg`` (§4.1 constraint 2: a split turn's next word arrives
   before the roll-out begins, so the aircraft does not level between the parts);
-- ``τ_γ ≥ 2 Δt``; ``φ_cap`` inside the vocabulary's bank ceiling and the grader's.
+- ``τ_γ ≥ 2 Δt``; ``φ_cap`` inside the vocabulary's bank ceiling and the grader's;
+- every delay ``≥ 0`` (a word acts once said) and ``d_ψ`` inside the late start the turn envelope allows.
 """
 
 from __future__ import annotations
@@ -47,6 +48,8 @@ class ExecutorParams:
             raise ValueError(f"τ_γ {self.path_time_constant_s:g} s is under 2 Δt")
         if not 0.0 < self.bank_cap_deg <= min(spec.turn_bank_max_deg, math.degrees(BANK_MAX_RAD)):
             raise ValueError(f"φ_cap {self.bank_cap_deg:g}° outside (0, {spec.turn_bank_max_deg:g}°]")
+        if min(self.delays.heading_s, self.delays.vertical_s, self.delays.speed_s) < 0.0:
+            raise ValueError(f"{self.delays}: a word cannot take effect before it is said")
         if self.delays.heading_s > spec.turn_start_delay_max_s:
             raise ValueError(f"d_ψ {self.delays.heading_s:g} s exceeds the {spec.turn_start_delay_max_s:g} s a turn "
                              f"may start late (vocabulary §2.3)")

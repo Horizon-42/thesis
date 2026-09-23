@@ -87,7 +87,8 @@ class Verdict:
         return self.outcome == "landed" and self.words is not None and self.words["all_contained"]
 
 
-def _track(states: np.ndarray, geometry: AirportGeometry) -> dict[str, np.ndarray]:
+def flown_track(states: np.ndarray, geometry: AirportGeometry) -> dict[str, np.ndarray]:
+    """A flown state sequence ``[T, 7]`` read in the airport frame, as the words read a flight."""
     e, n = geometry.frame.horizontal_from_latlon(states[:, LAT], states[:, LON])
     speed, gamma = states[:, SPEED], states[:, GAMMA]
     return {"e": e, "n": n, "height": states[:, ALT], "speed": speed, "gamma": gamma, "mass": states[:, MASS],
@@ -227,7 +228,7 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     labeller's reading of the observed flight, whose words the executor flew)."""
     last = int(flown.done_cycle[index]) + 1
     states = flown.states[index, : last + 1].cpu().numpy()
-    track = _track(states, geometry)
+    track = flown_track(states, geometry)
     captured = np.concatenate(([False], flown.modes["captured"][index, :last].cpu().numpy()))
     outcome, end_row, crossing = _outcome(states, track, captured, geometry, runway_index, spec)
     limits = _limits(flown, index, states, end_row)
