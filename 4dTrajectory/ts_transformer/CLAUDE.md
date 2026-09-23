@@ -148,7 +148,8 @@ of the package, not a migration in progress.
   refused on a sha mismatch; the LABELLER's source hash is part of it (a spec measured by other code
   refuses to label); candidates = the manifest's CIFP runway geometry; one gate (`read.admit`) for
   labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
-  signals (it ends before the landing) (C30).
+  signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
+  from every runway end the harvest builds; the labeller and the display share one hold funnel) (C30).
 
 ## Current defaults and their status
 
