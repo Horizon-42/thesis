@@ -13,8 +13,9 @@ change you are making go in `docs/code-health-followups.md` instead.
   v5 数据加 8/22–9/22 新下载，v7 名单 72,574 条、eligible 72,247 条，KRDU 32 与 KSMF 35R 已加回（跑道覆盖：
   KRDU 5 条，只缺没有 RNAV 程序的 14）。旧 v5 名单冻结为 `outputs/harvest-v5-20260823`，旧 checkpoint 按指纹回放。
   状态与数字：`trajectory_data_process/docs/11-2026-09-23-merge-new-data.zh.md`。
-  **待办**：用新数据训练前重建实验 cohort；前端的 observed 发布未更新；`new_data_9_22` 与冻结代里的
-  重新分类残留目录是否删除，等用户决定。
+  已完成：`new_data_9_22` 核对后删除；前端 observed 已更新；stage A 网格 cohort 已按新数据重建到
+  `4dTrajectory/outputs/KRDU/experiments/cohorts_v7_20260923/two_tier_v3_grid/`。前端 `training/` 下已归档词表的导出
+  （box_v3、prior_*）在 `check-publication` 里报错（读取规则/schema 已变），与合并无关，待词表重写后处理。
 
 - **`clean_pipeline_data.py` DELETES the 70,267 optimizer records the next item says to
   regenerate from** (verified 2026-09-20). Root `CLAUDE.md` carries both halves of the

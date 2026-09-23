@@ -279,3 +279,20 @@ def test_the_queue_reads_only_a_real_pid_from_its_pid_file(tmp_path):
     ended = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, check=True)
     pid_file.write_text(ended.stdout, encoding="utf-8")
     assert queue.live_pid(pid_file) is None
+
+
+def test_arms_refuses_only_config_flags_actually_given():
+    """``--model`` has a non-None default; ``--arms`` must not read it as a flag the caller gave."""
+    import argparse
+
+    from ts_transformer.cli.common import add_training_run_arguments
+
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    add_training_run_arguments(parser, cohort_help="-")
+    base = ["--data", "x", "--output-dir", "y"]
+    assert plan_cohort.explicit_config_flags(parser.parse_args(base), parser) == []
+    given = plan_cohort.explicit_config_flags(parser.parse_args([*base, "--seq-len", "30"]), parser)
+    assert given == ["seq_len"]
+    given = plan_cohort.explicit_config_flags(parser.parse_args([*base, "--no-instance-norm"]), parser)
+    assert given == ["instance_norm"]
+

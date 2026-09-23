@@ -99,12 +99,21 @@ python -c "from ts_transformer.data.lateral_eligibility import ensure_lateral_pa
   step5b_KSMF，runway_intent_r2b 的 KSMF_day_a）各含上面那 1–2 条 KSMF 航班，在新数据上会被拒绝——
   都是旧实验的 cohort，新实验本来就要重建 cohort。
 
-## 还没做 / 需要另问
+## 合并之后（用户 2026-09-23 同意后执行）
 
-- 前端发布：observed CZML 和观测报告（`--no-czml --no-publish` 没发布）；`evaluation_report.html` 只有 `run_all_evaluations.py` 生成。
-- 用新数据训练前要重建实验 cohort（`plan_cohort` 等），旧 cohort 文件绑定的是旧代。
-- `outputs/new_data_9_22`（5.2 GB）已合并进 live，可删，需要你同意。
-- 冻结代里的 `.KSJC-reclassify-akrwpor_`（170 MB，8/24 被杀的重新分类留下的）可删，需要你同意。
+- **删除 `outputs/new_data_9_22`（5.2 GB）**：删前逐条核对，169,449 条新航迹全部在 live 里且采样点完全相同
+  （缺失 0、不一致 0；24 条 key 变了——落地时刻差 1 秒或类别变化，都是新航班，没进过任何 checkpoint）。
+  冻结代里的 `.KSJC-reclassify-akrwpor_`（170 MB，8/24 被杀的重新分类残留，没有共享 inode）也删了，冻结代恢复只读。
+- **前端已更新**：5 个机场的 `trajectories.czml` 与 observed 报告改为合并后的数据（KMSY 7,701 / KSMF 9,240 /
+  KSTL 14,683 / KSJC 16,880 / KRDU 24,260 条航迹）。9/22 的新下载曾把前端覆盖成只有新一个月，这次一并纠正。
+  `npm run check-publication`：对比类别全部通过；报错只在 `training/` 下已归档词表的导出（box_v3、prior_*，
+  读取规则/schema 已变），之前就存在，与本次无关。`evaluation_report.html` 没有重新生成（只有 `run_all_evaluations.py` 生成，会重写报告）。
+- **cohort 已按新数据重建**（two-tier v3 stage A 网格的 20 个单元，KRDU）：
+  `4dTrajectory/outputs/KRDU/experiments/cohorts_v7_20260923/two_tier_v3_grid/`（派生声明 `arms.json`：
+  与 `two_tier_v3_grid_arms.json` 相同，只是 cohort 路径指向这里，不改写原实验的 cohort）。每单元
+  train 10,075–10,162 / val 2,121–2,140（原来 6,798–6,857 / 1,392–1,405）；原 cohort 的航班全部保留、没有换划分。
+  其余三组 cohort（manoeuvre_tok、plan_guidance、runway_intent_r2b）属于已归档/已结束的实验，没有重建。
+  顺带修了 `plan_cohort --arms` 的一个 bug：`--model` 有默认值，旧的“不为 None 就是用户给了”判断让 `--arms` 永远拒绝运行。
 
 ## 合并后核对（清单）
 

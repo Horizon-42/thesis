@@ -27,6 +27,10 @@ review 了 `trajectory_data_process/` 与 `flight_scenarios/`，并对照 `evalu
   test 10,919）；旧 test 无一离开 test；KSMF 35R 643/643 横向通过；只有 KSMF 35L 两条两次进近的航班换了 key
   （其中 1 条 val → train）。第一次运行时后台 PID 记错、在同一机场并发跑了两次，KMSY 的视图被删，用 `--evaluate-only`
   从完整的 tracks 重建（冻结代未受影响）。明细：`trajectory_data_process/docs/11-2026-09-23-merge-new-data.zh.md`。
+- **随后**：逐条核对新下载全部并入 live 后删除 `outputs/new_data_9_22`；前端 5 个机场的 observed CZML 与报告改为合并后的数据
+  （9/22 的下载曾把它们覆盖成只有新一个月）；stage A 网格的 20 个 cohort 按新数据重建到
+  `4dTrajectory/outputs/KRDU/experiments/cohorts_v7_20260923/two_tier_v3_grid/`；修 `plan_cohort --arms` 永远拒绝的 bug
+  （`--model` 的默认值被当成“用户给了”）。
 
 ### 2026-09-23 — 两层代码 review 里词表之外的问题修掉
 

@@ -177,6 +177,23 @@ def write_cohort(out: Path, name: str, run: TrainingRun, config: TSConfig) -> De
     return cohort
 
 
+def explicit_config_flags(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[str]:
+    """The config flags given a value other than their default -- what ``--arms`` refuses.
+
+    Compared with the value an absent flag parses to, not with None: ``--model`` defaults to
+    the first model, so an ``is not None`` test refused every ``--arms`` run whatever was
+    passed. That value is the FIRST action's default for a dest, as ``parse_args`` sets it --
+    not ``parser.get_default``, which skips a None default and so reads ``--no-instance-norm``'s
+    True where an absent ``--instance-norm`` parses to None."""
+    absent: dict[str, object] = {}
+    for action in parser._actions:
+        absent.setdefault(action.dest, action.default)
+    return [
+        name for name in ("config_overrides", "batch_size", "instance_norm", *CLI_CONFIG_FIELDS)
+        if getattr(args, name) != absent[name]
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     add_training_run_arguments(parser, cohort_help="not accepted here: this runner WRITES the cohort")
@@ -198,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_per_airport(cohort)
         return 0
 
-    given = [name for name in ("config_overrides", "batch_size", "instance_norm", *CLI_CONFIG_FIELDS) if getattr(args, name) is not None]
+    given = explicit_config_flags(args, parser)
     if given:
         parser.error(f"--arms takes every cell's config from the declaration; drop --{given[0].replace('_', '-')}")
     if not args.airport:
