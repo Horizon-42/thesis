@@ -28,7 +28,6 @@ import ts_transformer.repo_layout as repo_layout  # noqa: E402
 from ts_transformer.cli.common import parse_airports  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     COORDINATE_FRAMES,
-    DEFAULT_AIRCRAFT_TYPE,
     MODELS,
     TSConfig,
 )
@@ -292,7 +291,6 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES, default="enu")
     parser.add_argument("--config-overrides", default=None,
                         help="optional CV best_config.json for the exact selected architecture")
-    parser.add_argument("--aircraft-type", default=DEFAULT_AIRCRAFT_TYPE)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
@@ -327,7 +325,6 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         **tuned,
         "model": args.model,
         "coordinate_frame": args.coordinate_frame,
-        "aircraft_type": args.aircraft_type,
         "seed": args.seed,
         "device": args.device,
         "random_train_anchor": args.random_train_anchor,
@@ -366,7 +363,7 @@ def run_cli(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     print("loading outer-train source tracks only (validation/test trajectory files stay closed)",
           flush=True)
     flights, data_audit = load_outer_train_flights(manifests, config)
-    series, report = build_series(flights, config, aircraft_type=config.aircraft_type)
+    series, report = build_series(flights, config)
     print(report.format(), flush=True)
     series = usable_series(series, config, verbose=True)
     if not series:

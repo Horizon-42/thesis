@@ -34,7 +34,6 @@ from pathlib import Path
 import casadi as ca
 import numpy as np
 
-from geokit import kt_to_ms
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -116,13 +115,13 @@ def main(argv=None) -> int:
 
     aircraft = _AIRCRAFT[args.aircraft]
     init = GeodeticState(35.60, -78.50, 1500.0,
-                         kt_to_ms(aircraft.approach.reference_speed_kt) + 12.0,
+                         aircraft.approach.reference_speed_ms(aircraft.mass.max_takeoff_kg) + 12.0,
                          math.radians(40.0), math.radians(-3.0), aircraft.mass.max_takeoff_kg)
     feasible = _feasible_target(aircraft, init, args.horizon)
     # Aggressive: a steep straight-in to a near-stall terminal speed.
     aggressive = GeodeticState(
         feasible.latitude, feasible.longitude, init.altitude - 1300.0,
-        kt_to_ms(aircraft.approach.reference_speed_kt), init.psi, math.radians(-4.0),
+        aircraft.approach.reference_speed_ms(aircraft.mass.max_takeoff_kg), init.psi, math.radians(-4.0),
         aircraft.mass.max_takeoff_kg,
     )
 

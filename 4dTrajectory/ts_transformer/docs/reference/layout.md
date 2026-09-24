@@ -383,8 +383,8 @@ predict, whose config comes from the CHECKPOINT so its flags are overrides rathe
 settings (`cli/predict.PREDICT_CONFIG_FLAGS`, asserted the same way):
 `--command-hook` / `--hook-saturation` keep their short names because `CLAUDE.md` names them
 as the adopted delivery form and two arm files spell them in re-runnable `predict_args`.
-`--aircraft-type` is in that table too: predicting under another airframe builds the series
-under it, and the config written beside the records carries it (review C-5). Predict refuses
+(`--aircraft-type` was in that table until 2026-09-24, when the A320 fallback it chose was
+retired; review C-5's concern went with it.) Predict refuses
 repeated `--data` with `--airport` exactly as train does
 (`cli/common.refuse_airport_override_for_pooled_data`, review C-19).
 
@@ -453,7 +453,8 @@ backend runs no command hooks, so the executor steps it cycle by cycle, the same
 `inverse` (wanted rates → bank, load factor, thrust; limits in the design's order, each recorded),
 `lateral` / `vertical` / `speed` (the three laws), `params` (the executor's parameters and the design's
 constraints on them), `executor` (the cycle loop, `fly`), `judge` (the three-layer verdict, with the
-labeller's own checks), `replay` (who is flown — own dynamics or a stand-in's — drawing, flying and reading
+labeller's own checks), `replay` (who is flown — own dynamics or a stand-in's, the performance index's
+substitute; a flight without aircraft dynamics is counted, never flown, C31 — drawing, flying and reading
 a batch), `measure` (the data parameters, torch-free for the runner's workers), `derive` (method A), `observe`
 (method B: the data plane's fit-and-grid chain on a flown track) and `spec` (`ts-executor-spec-v1`: the
 parameters written once with their sha and the executor's source hash, `executor_source_files`; a replay refuses a

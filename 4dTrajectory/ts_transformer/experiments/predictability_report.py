@@ -1055,7 +1055,6 @@ def comparison_identity_error(reference: LoadedRun, candidate: LoadedRun) -> str
         "dt_s",
         "seed",
         "coordinate_frame",
-        "aircraft_type",
         "aircraft_filter",
     ):
         if getattr(candidate.config, field) != getattr(reference.config, field):
@@ -1135,7 +1134,6 @@ def main() -> None:
     all_series, build_report = build_series(
         load_flight_dicts(manifests, include_flight_keys=development_keys),
         reference.config,
-        aircraft_type=reference.config.aircraft_type,
     )
     print(build_report.format(), flush=True)
     all_series = usable_series(all_series, reference.config, verbose=False)

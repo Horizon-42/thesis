@@ -78,7 +78,7 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
 
 ## Population: who gets into a dataset
 
-Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-09-16).
+Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-09-16; FS5–FS6 added 2026-09-24).
 
 - **`build_scenarios_from_arrivals` is strict; `dataset.build_scenario_dataset` is the batch
   layer**: a flight with no usable fitted final approach (~0.08 % of the roster) raises
@@ -118,19 +118,31 @@ Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-
   bit-identical to the evaluation context), but `ts_transformer/data/synthetic.py` builds on the NASR
   point — which is why its test context pins the NASR coordinates explicitly.
   `evaluation.arrival._require_target_agrees_with_runway_data` now catches any such mix at 1 cm.
+- **The threshold target's speed is the airframe's PUBLISHED approach speed at the target mass**
+  (since 2026-09-24): `approach.reference_speed_ms(m)` = the `aircraft/reference_speeds.json` row
+  (FAA Aircraft Characteristics Database, at MALW) × sqrt(m / MALW) — the threshold speed gate's own
+  law and upper reference, so the target sits inside the gate's window (on its lower edge for a
+  single-valued type). Every 5.7–150 t type used to target 145 kt. A saved `runway_threshold` scenario
+  whose V disagrees is refused at load; B3XM (no FAA row) has no dynamics; ts series never read the
+  target speed (FS5).
 
 ## Aircraft resolution
 
+- **Types without a native model are decided by `aircraft/performance_index.json`** (2026-09-24):
+  preset → index row (own parameters / a substitute flown under ITS code / excluded) → OpenAP-direct;
+  OpenAP synonyms are never flown under their own code; nothing flies as a stand-in (the A320 fallback is
+  gone). The batch layer drops and names flights with no dynamics (`excluded_no_dynamics`, selection schema
+  v2); a trajectory-only consumer asks `build_scenario(..., require_dynamics=False)` and gets a scenario
+  WITHOUT dynamics (aircraft/aero `None`, mass and target V NaN), from which anything needing dynamics must
+  ask `scenario.dynamics(purpose)` — it raises `NoAircraftDynamics` by name (FS6).
 - **`"type": "UNK"` on every harvested arrival does NOT mean the batch is single-type.**
   `_resolve_aircraft` (`flight_scenarios/build.py`, mirrored in `ts_transformer/data/dataset.py`)
-  tries declared type → **`icao24` via the OpenAP lookup** → `--aircraft-type` fallback, and the
-  icao24 path recovers the REAL airframe for most flights: **20 distinct types** across 400 KRDU
-  arrivals (A320 224, B738 38, E75L 25, CRJ9 23, … A333, GLF6, C550). Anything assuming one
-  airframe per batch is wrong — that is exactly how the flyability check first shipped, grading
-  ~44% of flights against an A320. The fallback (`--aircraft-type`, train default `A320`) is a
-  `TSConfig` field, so it is recorded in the checkpoint and predict defaults to the train-time
-  value; overriding it at predict shifts the ENU frames and the target Vref/threshold-crossing
-  height the gates measure against, so it WARNS.
+  tries declared type → **`icao24` via the identity resolver**, and the icao24 path recovers the
+  REAL airframe for most flights: **20 distinct types** across 400 KRDU arrivals (A320 224, B738
+  38, E75L 25, CRJ9 23, … A333, GLF6, C550). Anything assuming one airframe per batch is wrong —
+  that is exactly how the flyability check first shipped, grading ~44% of flights against an
+  A320. The `--aircraft-type` fallback that flew every unresolved type as an A320 was retired on
+  2026-09-24 (ts: `aircraft_filter`, see FS6).
 - **FAA registry → ICAO type: a documented model beats every heuristic** (2026-09-23).
   `aircraft/faa_icao_crosswalk.json` (TCDS / FSB report / JO 7360.1K + Doc 8643, one row per
   certificated model listing every registry spelling) overrides the name matcher and the OpenSky

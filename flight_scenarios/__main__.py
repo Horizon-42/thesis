@@ -66,10 +66,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--harvest-root", default=str(DEFAULT_HARVEST_ROOT))
     parser.add_argument("--output", default=None, help="output path; requires one input/airport")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
-    parser.add_argument(
-        "--aircraft-type", default="A320",
-        help="fallback aircraft code when icao24 cannot be resolved",
-    )
     target_mode = parser.add_mutually_exclusive_group()
     target_mode.add_argument("--target-from-threshold", action="store_true")
     target_mode.add_argument(
@@ -111,7 +107,6 @@ def main(argv: list[str] | None = None) -> int:
         airport = airport_for_manifest(manifest)
         scenarios, selection = build_scenario_dataset(
             manifest,
-            args.aircraft_type,
             target=target,
             max_per_runway=args.max_per_runway,
             mass_kg=args.mass_kg,
@@ -135,6 +130,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"    population: {selection.summary_line()}")
         for row in selection.excluded_unfittable:
             print(f"      dropped {row['flight_key']} ({row['runway']}): {row['reason']}")
+        no_dynamics = Counter(str(row["typecode"]) for row in selection.excluded_no_dynamics)
+        if no_dynamics:
+            print(f"      dropped, no aircraft dynamics (by type; reasons in the selection file): "
+                  f"{dict(no_dynamics.most_common())}")
         print(f"    selection: {selection_file}")
         print(f"    aircraft: {dict(distribution)}")
         total += len(scenarios)

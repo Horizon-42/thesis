@@ -63,7 +63,73 @@
   的 `training/instruction_v2/`，同一批 40 架航班，`check-publication` 盘上与服务器 0 错误。opus 审查两轮，发现
   （关掉横向开关时不按路径取景、`arrivalRow` 上界、最慢路径与曲线长度的潜在不一致、单点路径不该标名字）已改。
 - 测试：pytest `-k instruction` 75 条，前端 Vitest 88 个文件 660 条，`npm run build` 无错。
+### 2026-09-24 — ts 去掉 A320 回退：航班只在要用动力学的地方丢（按需丢弃）
 
+分支 `docs-aero-substitution`（接在下一条之后），用户合并。用户 2026-09-24 决定：“B，去掉 all 的 A320 回退”，
+然后 “ts 用2 按需丢弃”。
+
+- **`aircraft_filter`**（C31）：`all` 与 `TSConfig.aircraft_type`（A320 回退）删除，存下的配置带着它们就按名字拒读
+  （`aircraft_type` 只在 `openap-direct` 下丢掉，那里本来不读）。三个取值：`all-flights`（所有航班；没有动力学的
+  航班照样保留，场景里没有飞机、质量为 NaN，只给状态输出和指令标注器用）、`modelled`（只留能按模型飞的航班，控制输出用）、
+  `openap-direct`（不变）。**默认按需**：状态输出 `all-flights`，控制输出 `modelled`，构造时就定成具体值；存下的配置必须写着
+  这个字段；控制输出配 `all-flights` 直接拒绝。
+- `flight_scenarios`：`build_scenario(..., require_dynamics=False)` 给没有动力学的航班造“无动力学场景”（FS6）；
+  `scenario.dynamics(用途)` 在没有动力学时按用途报错。优化器、控制输出的上下文 / 监督 / 锚点门、lockstep 判定、
+  飞行性报告都改成走它。
+- `predict`：没有动力学的航班不预测（评估记录的状态要带质量），数量写进 `summary["skipped"]["no_aircraft_dynamics"]`。
+  `data_selection.json` 升到 `ts-data-selection-v3-performance-index`，记索引表 sha256；checkpoint 也记，加载时索引表
+  不同就拒绝（`openap-direct` 除外，它不读索引表）。
+- 执行器（`autopilot/`，合并时已在 `dev-two-tier` 上）：没有动力学的航班只计数不飞（"no aircraft dynamics"）；
+  "替身"组只剩性能索引表的替代机型；`rollout_context` 走 `scenario.dynamics`；plant 的控制配置写明 `modelled`。
+  §11 的 val 读数（落地 98.6 % 等）是改之前量的：那时"自己的动力学"组不含索引表给了本机参数的机型，A320 替身在替身组里。
+- 审查修正：构建报告只数真正建好的序列；控制基函数 oracle 从状态 run 取种子时按 `modelled` 重建它评过的航班；
+  frame_ablation 续跑时也比对按需定下的过滤取值，旧 `all` 训练的 arm 在续跑时就被拒。
+- 管线目录与前端类别：每个取值都带自己的后缀（`_all_flights` / `_modelled` / `_openap_direct`），不带后缀的名字属于旧
+  `all`，新 run 不会写进去。运行名按“按需默认”比较，两种默认都不显示 `fleet`。
+- **指令信号** `ts-instruction-signals-v2`：`typecode` 是航班自己的 ICAO 机型（身份没解析出来时为 null）；v1 写的是
+  动力学飞的机型，没有动力学的一律 A320。前端训练样本随之从 v5 升到 `aeroviz-training-sample-v6`（`typecode` 可为 null，
+  界面显示 “type unknown”）。`instruction_signals` 另记 `without_dynamics` 与索引表身份。
+- **过时的产物**（没有删，也没有重建）：28 个旧 `all` 状态预测 run 的配置不再能加载；`instruction_language/v1_20260923`
+  与 `v2_20260924` 的信号是 v1，新代码拒读，标注链（signals → spec → labels → export）要重跑才能用；前端 `training/`
+  下的 v5 样本被新读取器拒读，要在信号重建后重新导出成 v6。重建时机由用户定。
+- 规模（09-24 名单普查，建序列前）：train 50,693 条，有动力学 46,260（91.3 %），openap-direct 36,294（71.6 %），
+  没有动力学 4,433（索引表排除 3,821、身份不明 612）；val 10,635 / 9,668 / 7,574。
+
+### 2026-09-24 — 机型性能索引表：没有模型的机型按表飞（本机参数 / 替代 / 排除），默认不再用 A320
+
+分支 `docs-aero-substitution`（接在下一条之后），用户合并。用户 2026-09-24 决定第 1–3 项做成一张索引表。
+
+- `aircraft/performance_index.json` + `aircraft/performance_index.py`：209 个机型（分析的 199 个 + 10 个没有航班的 OpenAP
+  同义机型），own 31（一手文件 21、Poll–Schumann 10）、substitute 53（按替代机型的代码飞）、exclude 125（螺旋桨、旋翼 / 军机、
+  无 FAA 进近速度、无同类机型）；加载时校验，每个 OpenAP 同义机型都必须有决定。场景和 selection 文件记索引表的 sha256，
+  加载时指纹不同就拒绝（09-24 以前的场景文件都要重新生成）。
+- `aircraft_for_code`（auto）：预设 → 索引表 → OpenAP 原生机型；OpenAP 同义机型不再直接飞；C56X 的手工质量修正删掉，由 own 行接替。
+- `flight_scenarios`：`NoAircraftDynamics`；批量构建丢掉没有动力学的航班并记名（selection schema v2）；命令行去掉 `--aircraft-type`；
+  新审计字段 `performance_index_decision`；观测记录只在按本机建模时给质量。参考速度表再补 A339、B753、MD82 三行（共 193 行）。
+- 未改：ts `aircraft_filter = all` 的 A320 回退（28 个旧状态预测 run 记着它），待用户定（同日已定，见上一条）。`flight_scenarios/docs/population_reference.md` FS6。
+
+### 2026-09-24 — 缺气动参数机型的分析报告；进近参考速度改用各机型公布值（按质量换算）
+
+分支 `docs-aero-substitution`，用户合并。
+
+- **分析报告**（2026-09-23，只有文档）：`docs/aircraft_performance/2026-09-23_missing_performance_substitution.zh.md`。
+  train 50,693 条里 13,164 条（26.0 %）用 A320 的参数飞；公开数据源调研（`docs/literature/aircraft_performance/`）；
+  199 个机型的替代表；用户的决定见该文 §9。
+- **进近参考速度改用各机型公布值，并按质量换算**（用户 2026-09-23 决定“改”，2026-09-24 选方案 A）：`Approach.speeds`
+  是该机体在 `aircraft/reference_speeds.json` 里的一行（FAA 飞机特性数据库，MALW 下的进近速度），
+  `reference_speed_ms(m)` = 公布速度 × √(m / MALW)，与阈值速度门同一条换算、同一个上沿参考，所以求解飞到目标就落在门的
+  窗口里。预设机型同样取表（A320 136 kt、B77W 149、C172 62，均为 MALW 下的值）。同义机型取“质量所属机体”的那一行
+  （LJ45 用 GLF6 的，C56X 用自己的）。依据：FAA AC 91-79B §5.2.2。第一版（09-23，未合并）没按质量换算，审查发现
+  A320 等 13 个机型会按构造落到门下沿以下，已改。
+- 参考速度表补 18 个 OpenAP 机型的 FAA 行（`docs/reference_speeds/README.md`）；B3XM 不在 FAA 表里，改为不能建模，
+  也不再算 openap 原生机型。评估报告的方法说明记录表的 sha256 和行数。
+- **影响**：优化器 `runway` 模式的终端速度；优化器速度下限原来的 V_ref 上界永远不起作用（1.10·失速速度最多是公布下沿的
+  0.93 倍），已删；交互优化器的默认速度下限 = 求解质量下的公布下沿；`--resume` 遇到目标不同的记录会重新求解（K10）；
+  评估报告的速度偏差字段；后端机型目录与 Pilot 面板（Pilot 一律按最大起飞质量求解，目录的目标速度和范围也按这个质量给：
+  范围 = 速度门窗口，下端就是优化器的默认下限；前端去掉 145/135/155 kt 缺省值）。
+  09-24 以前准备的 `flight_scenarios/outputs/*_threshold_scenarios.json` 在加载时被拒绝，重新求解前要重跑
+  `prepare_scenario_inputs.py`。ts 数据集只读目标的位置、航向和下滑角，cohort 与 checkpoint 不受影响。
+  `flight_scenarios/docs/population_reference.md` FS5；`code-health-followups.md` #18 已解决、#23 解决一半。
 ### 2026-09-24 — Training：高亮只给选中的一个词；三维包络的画法
 
 用户的两个要求：审一遍各类词在三维里画得好不好；句子条里点一个词（比如航向）时高度段也跟着亮，而这些段并没有

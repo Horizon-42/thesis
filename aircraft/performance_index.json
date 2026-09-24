@@ -1,0 +1,1424 @@
+{
+ "schema": "aircraft-performance-index-v1",
+ "generated": "2026-09-24",
+ "decisions": "docs/aircraft_performance/2026-09-23_missing_performance_substitution.zh.md",
+ "sources": {
+  "airbus_a220_acp_i013": {
+   "title": "A220 Aircraft Characteristics Publication (ACP)",
+   "publisher": "Airbus",
+   "revision": "Issue 013-00, 27 November 2025 (BD500-3AB48-13800-00)",
+   "url": "https://www.aircraft.airbus.com/sites/g/files/jlcbta126/files/2025-12/A220-ACP-Issue013-00-27Nov2025.pdf",
+   "local_path": "data/reference_speeds/airbus/A220-ACP-Issue013-00-27Nov2025.pdf",
+   "sha256": "ac489084ac6fd0b68f7d8df65bde42f01644442dc6069b9c0562b42bc7ae678b"
+  },
+  "bombardier_crj700_apm_r15": {
+   "title": "CRJ700 Airport Planning Manual",
+   "publisher": "Bombardier",
+   "revision": "CSP B-020 Rev 15 (page 00-02-02 dated Dec 18/2014)",
+   "url": "https://customer.aero.bombardier.com/webd/BAG/CustSite/BRAD/RACSDocument.nsf/51aae8b2b3bfdf6685256c300045ff31/ec63f8639ff3ab9d85257c1500635bd8/$FILE/ATTE8Q23.pdf/CRJ700APMR15.pdf",
+   "local_path": "data/reference_speeds/bombardier/CRJ700APMR15.pdf",
+   "sha256": "195e92c0b358f347342a51d4f084a13f721fc099015b82439f7acd22b7ad45ce"
+  },
+  "easa_tcds_a_008_i13": {
+   "title": "TCDS EASA.A.008 - Dassault Falcon 2000, Falcon 2000EX",
+   "publisher": "EASA",
+   "revision": "Issue 13, 15 September 2026",
+   "url": "https://www.easa.europa.eu/en/downloads/7510/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_A_008_Falcon2000_Issue13.pdf",
+   "sha256": "cb2553ee615ec422b4c85e91c17141b5055c3d71d63a36d531ee65f36019ccb3"
+  },
+  "easa_tcds_e_023_i1": {
+   "title": "TCDS EASA.E.023 - Rolls-Royce Deutschland BR700-715 series",
+   "publisher": "EASA",
+   "revision": "Issue 01, 27 July 2009",
+   "url": "https://www.easa.europa.eu/en/downloads/7757/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_E_023_BR700-715_Issue01.pdf",
+   "sha256": "3b281158e75aea94f099e1837d3d607a8ce9f1440e4d75e62b186c367e3736f1"
+  },
+  "easa_tcds_im_a_001_i13": {
+   "title": "TCDS EASA.IM.A.001 - Embraer ERJ 170",
+   "publisher": "EASA",
+   "revision": "Issue 13, 31 January 2022",
+   "url": "https://www.easa.europa.eu/en/downloads/7525/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_001_ERJ170_Issue13.pdf",
+   "sha256": "366e7e1eff1173f3a3b0883d667a278f28221070f794787b7c77bac38ae610f6"
+  },
+  "easa_tcds_im_a_033_i9": {
+   "title": "TCDS EASA.IM.A.033 - Cessna 680 (Sovereign) and 680A (Latitude)",
+   "publisher": "EASA",
+   "revision": "Issue 09, 25 March 2026",
+   "url": "https://www.easa.europa.eu/en/downloads/7459/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_033_C680_Issue9.pdf",
+   "sha256": "53965090e88775c9a3afb25413905d1dec7c514ab99127e0766a4aed1b6c1c22"
+  },
+  "easa_tcds_im_a_073_i2": {
+   "title": "TCDS EASA.IM.A.073 - Beechcraft 390 (Premier I)",
+   "publisher": "EASA",
+   "revision": "Issue 02, 13 March 2018",
+   "url": "https://www.easa.europa.eu/en/downloads/7378/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_073_Beech390_Issue2.pdf",
+   "sha256": "bfacfe1b8d8a806bffbee654cbba2270910adaccf078381c01731530bb2201ad"
+  },
+  "easa_tcds_im_a_078_i19": {
+   "title": "TCDS EASA.IM.A.078 - Textron 525/525A/525B/525C (CitationJet family)",
+   "publisher": "EASA",
+   "revision": "Issue 19, 07 May 2026",
+   "url": "https://www.easa.europa.eu/en/downloads/7368/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_078_C525_R19.pdf",
+   "sha256": "5303bd296427fd62ffd2f536a03ddffc9e09368e13890125712153f1f7cfdc11"
+  },
+  "easa_tcds_im_a_080_i11": {
+   "title": "TCDS EASA.IM.A.080 - Bombardier BD-100-1A10 (Challenger 300/350)",
+   "publisher": "EASA",
+   "revision": "Issue 11, 13-14 February 2025",
+   "url": "https://www.easa.europa.eu/en/downloads/7364/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_080_BD-100_Issue11.pdf",
+   "sha256": "9d59d400184bfb4aa1013a8d389f9621fa7ad45f7bbd95bff0d7cd99dc4c5ea4"
+  },
+  "easa_tcds_im_a_097_i3": {
+   "title": "TCDS EASA.IM.A.097 - Cessna 750 (Citation X)",
+   "publisher": "EASA",
+   "revision": "Issue 03, 07 January 2016",
+   "url": "https://www.easa.europa.eu/en/downloads/7335/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_097_C750_Issue3.pdf",
+   "sha256": "14ceb39b028e8fef6d0af8415fbad5bf491d4bb6914e9ebefd12a3f9faaf0ac6"
+  },
+  "easa_tcds_im_a_158_i11": {
+   "title": "TCDS EASA.IM.A.158 - Embraer EMB-505 (Phenom 300)",
+   "publisher": "EASA",
+   "revision": "Issue 11, 29 August 2024",
+   "url": "https://www.easa.europa.eu/en/downloads/7282/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_158_EMB-505_Issue11.pdf",
+   "sha256": "5b94a48c6915c110087e529de3466cc7149a9bfa75165b5e250f37bcf1e2e214"
+  },
+  "easa_tcds_im_a_207_i10": {
+   "title": "TCDS EASA.IM.A.207 - Cessna 500, 550, S550, 560, 560XL",
+   "publisher": "EASA",
+   "revision": "Issue 10, 06 July 2022",
+   "url": "https://www.easa.europa.eu/en/downloads/7244/en",
+   "local_path": "data/reference_speeds/easa/EASA_TCDS_IM_A_207_Cessna_500_560XL_Issue10.pdf",
+   "sha256": "a2c8fcdc55214623d33de8d65eb653726cc237d2b8d8cb7bc466e955808a48bd"
+  },
+  "easa_tcds_im_a_211_i3": {
+   "title": "TCDS EASA.IM.A.211 - MD-90-30, B717-200",
+   "publisher": "EASA",
+   "revision": "Issue 3.0, 04 July 2025",
+   "url": "https://www.easa.europa.eu/en/downloads/7240/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_211_MD90_B717_Issue3.pdf",
+   "sha256": "5e6d3a9802d6a6d6688e68e0221a85ab4386992ea2cac1b186541cbc073fa02b"
+  },
+  "easa_tcds_im_a_526_i12": {
+   "title": "TCDS EASA.IM.A.526 - Embraer EMB-550 and EMB-545",
+   "publisher": "EASA",
+   "revision": "Issue 12, 23 September 2026",
+   "url": "https://www.easa.europa.eu/en/downloads/17998/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_526_EMB-550_Issue12.pdf",
+   "sha256": "faf1aa1d12f40418d44e44b37d0527fcccb7371e618d2cb97f4ce47ac5039894"
+  },
+  "easa_tcds_im_a_620_i3": {
+   "title": "TCDS EASA.IM.A.620 - Textron Model 700 (Citation Longitude)",
+   "publisher": "EASA",
+   "revision": "Issue 03, 26 October 2021",
+   "url": "https://www.easa.europa.eu/en/downloads/129064/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_620_M700_Issue3.pdf",
+   "sha256": "3f9e09f5ecf687b86b17d52eb91cea6b977bea3bbb80af061db1ca0bc7c3bfe8"
+  },
+  "easa_tcds_im_e_013_i3": {
+   "title": "TCDS EASA.IM.E.013 - Pratt & Whitney Canada PW545 series",
+   "publisher": "EASA",
+   "revision": "Issue 03, 18 December 2024",
+   "url": "https://www.easa.europa.eu/en/downloads/7777/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_013_PW545_Issue03.pdf",
+   "sha256": "6af0c7b5984fc019eb992690c7334462f39abefde66438ab493b1f1649660309"
+  },
+  "easa_tcds_im_e_016_i13": {
+   "title": "TCDS EASA.IM.E.016 - Williams International FJ44/FJ33 series",
+   "publisher": "EASA",
+   "revision": "Issue 13, 21 July 2021",
+   "url": "https://www.easa.europa.eu/en/downloads/7771/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_016_FJ44_FJ33_Issue13.pdf",
+   "sha256": "5b8a2f51e78546b09b3a94b909c304c346ad90c704609fd313cb1eac4aaec050"
+  },
+  "easa_tcds_im_e_044_i5": {
+   "title": "TCDS EASA.IM.E.044 - Rolls-Royce Corporation AE3007 series",
+   "publisher": "EASA",
+   "revision": "Issue 05, 22 May 2015",
+   "url": "https://www.easa.europa.eu/en/downloads/7719/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_044_AE3007_Issue05.pdf",
+   "sha256": "850b453b49d6ece45cdb08e2d0db417258b0ef3dddd867c154ffe2ccbc7d7591"
+  },
+  "easa_tcds_im_e_048_i4": {
+   "title": "TCDS EASA.IM.E.048 - Pratt & Whitney Canada PW530 series",
+   "publisher": "EASA",
+   "revision": "Issue 04, 10 January 2020",
+   "url": "https://www.easa.europa.eu/en/downloads/7715/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_048_PW530_Issue4.pdf",
+   "sha256": "f022fea9ee6ad9203344e756cd2f1bad080f3d35fbd9bcb94c827758d706c7a5"
+  },
+  "easa_tcds_im_e_051_i4": {
+   "title": "TCDS EASA.IM.E.051 - Pratt & Whitney Canada PW305 & PW306 series",
+   "publisher": "EASA",
+   "revision": "Issue 04, 17 November 2015",
+   "url": "https://www.easa.europa.eu/en/downloads/7711/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_051_PW306_Issue04.pdf",
+   "sha256": "f37e95baa670601a60cf6096424b27097756212c9c92549eadc44385968ec9d6"
+  },
+  "easa_tcds_im_e_053_i4": {
+   "title": "TCDS EASA.IM.E.053 - GE CF34-8 series",
+   "publisher": "EASA",
+   "revision": "Issue 04, 30 January 2023",
+   "url": "https://www.easa.europa.eu/en/downloads/18525/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_053_CF34-8_Issue04.pdf",
+   "sha256": "3004618db3ea3b26b7e11dc7750f133fa2b3134bdbcf603dbfe110b2871c2177"
+  },
+  "easa_tcds_im_e_057_i6": {
+   "title": "TCDS EASA.IM.E.057 - Pratt & Whitney Canada PW308 series",
+   "publisher": "EASA",
+   "revision": "Issue 06, 10 January 2023",
+   "url": "https://www.easa.europa.eu/en/downloads/7705/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_057_PW308_Issue06.pdf",
+   "sha256": "ef904e5196313dcfeb5e0624fb4dd4d6502e48f3a8588b74d95da5d488bf5af9"
+  },
+  "easa_tcds_im_e_058_i10": {
+   "title": "TCDS EASA.IM.E.058 - Honeywell AS907 series (HTF7000 family)",
+   "publisher": "EASA",
+   "revision": "Issue 10, 30 July 2026",
+   "url": "https://www.easa.europa.eu/en/downloads/7703/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_058_AS907_Issue10.pdf",
+   "sha256": "2218cf5329583bf9db42b631415978c03612b61f14bdedf2a13811214f213269"
+  },
+  "easa_tcds_im_e_090_i10": {
+   "title": "TCDS EASA.IM.E.090 - Pratt & Whitney PW1500G series",
+   "publisher": "EASA",
+   "revision": "Issue 10, 14 August 2025",
+   "url": "https://www.easa.europa.eu/en/downloads/20863/en",
+   "local_path": "data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_090_PW1500G_Issue10.pdf",
+   "sha256": "606e781824c45743c64b5cf5b1790ae0967fff2f3516f6a4ba8633cc7a2a30dd"
+  },
+  "faa_acd_2024_10": {
+   "title": "Aircraft Characteristics Database",
+   "publisher": "FAA Office of Airports",
+   "revision": "Aircraft Characteristics (October 2024); page last updated 2025-01-07",
+   "url": "https://www.faa.gov/airports/engineering/aircraft_char_database/aircraft_data",
+   "local_path": "data/reference_speeds/faa/FAA-Aircraft-Characteristics-Database-2024-10.xlsx",
+   "sha256": "3e68848b6bb99f9700e25d33c080b993a80dc962d581a391f89aee94b6c8fcb3"
+  },
+  "faa_tcds_e45ne_orig": {
+   "title": "TCDS E45NE - Pratt & Whitney Canada JT15D-5D",
+   "publisher": "FAA",
+   "revision": "Original, December 16, 1993",
+   "url": "https://drs.faa.gov/browse/excelExternalWindow/D9ECD1561D65A54686257547006E5B34.0001",
+   "local_path": "data/aircraft_performance/airframes/faa/FAA_TCDS_E45NE_Original.pdf",
+   "sha256": "644bfe4771a7bb519f495d8c64ce35b19183e5dcdb643428be2e53008983240b"
+  },
+  "pycontrails_ps_20250328": {
+   "title": "Poll-Schumann aircraft performance parameters (ps-aircraft-params-20250328.csv)",
+   "publisher": "pycontrails 0.63.5 (Contrails.org / Breakthrough Energy), Apache-2.0",
+   "revision": "2025-03-28",
+   "url": "https://pypi.org/project/pycontrails/0.63.5/",
+   "local_path": "data/aircraft_performance/pycontrails/",
+   "sha256": "2d462e5a8cc4f1fbf8671b8f850232562d0acf86981b24633dc1f96d2978a0db"
+  }
+ },
+ "types": {
+  "A119": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "A124": {
+   "decision": "substitute",
+   "substitute": "B744",
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.35, same FAA approach category"
+  },
+  "A306": {
+   "decision": "substitute",
+   "substitute": "A332",
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.22, same FAA approach category"
+  },
+  "A30B": {
+   "decision": "own",
+   "name": "Airbus A300B4-200",
+   "mtow_kg": 165000,
+   "mlw_kg": 135333,
+   "wing_area_m2": 260.0,
+   "engines": 2,
+   "max_thrust_n_each": 233100.0,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "A310": {
+   "decision": "substitute",
+   "substitute": "A318",
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.43, same FAA approach category"
+  },
+  "A339": {
+   "decision": "own",
+   "name": "Airbus A330-900",
+   "mtow_kg": 242000,
+   "mlw_kg": 191000,
+   "wing_area_m2": 374.0,
+   "engines": 2,
+   "max_thrust_n_each": 327800.0,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "A5": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AA5": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AC11": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AC95": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AEST": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AN2": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "AS55": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "ASTR": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.267 (A320 0.25), stall margin 1.56; thrust-to-weight not checked (no primary thrust)"
+  },
+  "AT43": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AT72": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AT73": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AT75": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "AT76": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "B190": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "B350": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "B36T": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "B712": {
+   "decision": "own",
+   "name": "Boeing 717-200",
+   "mtow_kg": 53524,
+   "mlw_kg": 45359,
+   "wing_area_m2": 92.97,
+   "engines": 2,
+   "max_thrust_n_each": 95330.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_211_i3",
+    "thrust": "easa_tcds_e_023_i1"
+   }
+  },
+  "B722": {
+   "decision": "own",
+   "name": "Boeing 727-200",
+   "mtow_kg": 83820,
+   "mlw_kg": 71600,
+   "wing_area_m2": 157.9,
+   "engines": 3,
+   "max_thrust_n_each": 67918.8,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "B733": {
+   "decision": "substitute",
+   "substitute": "B734",
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.15, same FAA approach category"
+  },
+  "B735": {
+   "decision": "own",
+   "name": "Boeing B737-500",
+   "mtow_kg": 60555,
+   "mlw_kg": 49895,
+   "wing_area_m2": 103.7,
+   "engines": 2,
+   "max_thrust_n_each": 93650.0,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "B753": {
+   "decision": "own",
+   "name": "Boeing B757-300",
+   "mtow_kg": 122470,
+   "mlw_kg": 101610,
+   "wing_area_m2": 189.0,
+   "engines": 2,
+   "max_thrust_n_each": 178981.0,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "B762": {
+   "decision": "substitute",
+   "substitute": "B763",
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.23, same FAA approach category"
+  },
+  "B764": {
+   "decision": "own",
+   "name": "Boeing B767-400ER",
+   "mtow_kg": 204116,
+   "mlw_kg": 158757,
+   "wing_area_m2": 283.3,
+   "engines": 2,
+   "max_thrust_n_each": 256397.9,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "B77L": {
+   "decision": "exclude",
+   "reason": "OpenAP 2.4 synonym of B77W with no observed flights; the surrogate fails the analysis rule (stall margin 1.07, approach category C vs D)"
+  },
+  "B78X": {
+   "decision": "own",
+   "name": "Boeing B787-10",
+   "mtow_kg": 254011,
+   "mlw_kg": 201848,
+   "wing_area_m2": 377.0,
+   "engines": 2,
+   "max_thrust_n_each": 344280.0,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "BCS1": {
+   "decision": "own",
+   "name": "Airbus A220-100",
+   "mtow_kg": 63095,
+   "mlw_kg": 54200,
+   "wing_area_m2": 112.3,
+   "engines": 2,
+   "max_thrust_n_each": 108540.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "airbus_a220_acp_i013",
+    "thrust": "easa_tcds_im_e_090_i10"
+   }
+  },
+  "BCS3": {
+   "decision": "own",
+   "name": "Airbus A220-300",
+   "mtow_kg": 70900,
+   "mlw_kg": 60600,
+   "wing_area_m2": 112.3,
+   "engines": 2,
+   "max_thrust_n_each": 108540.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "airbus_a220_acp_i013",
+    "thrust": "easa_tcds_im_e_090_i10"
+   }
+  },
+  "BE10": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE20": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE23": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE30": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE33": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE35": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE36": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE40": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.271 (A320 0.513), stall margin 1.49"
+  },
+  "BE55": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE58": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE95": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE9L": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BE9T": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BL17": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BL8": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "BT36": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C150": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C152": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C177": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C180": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C182": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C185": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C208": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C210": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C240": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C25A": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.49, same FAA approach category"
+  },
+  "C25B": {
+   "decision": "own",
+   "name": "Cessna Citation CJ3",
+   "mtow_kg": 6291,
+   "mlw_kg": 5783,
+   "wing_area_m2": 27.32,
+   "engines": 2,
+   "max_thrust_n_each": 12540.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_078_i19",
+    "thrust": "easa_tcds_im_e_016_i13"
+   }
+  },
+  "C25C": {
+   "decision": "own",
+   "name": "Cessna Citation CJ4",
+   "mtow_kg": 7761,
+   "mlw_kg": 7103,
+   "wing_area_m2": 30.67,
+   "engines": 2,
+   "max_thrust_n_each": 16100.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_078_i19",
+    "thrust": "easa_tcds_im_e_016_i13"
+   }
+  },
+  "C25M": {
+   "decision": "own",
+   "name": "Cessna Citation M2",
+   "mtow_kg": 4853,
+   "mlw_kg": 4491,
+   "wing_area_m2": 22.3,
+   "engines": 2,
+   "max_thrust_n_each": 8741.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_078_i19",
+    "thrust": "easa_tcds_im_a_078_i19"
+   }
+  },
+  "C27J": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "C30J": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "C310": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C340": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C404": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C408": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "C414": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C421": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C425": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C441": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C501": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.4; thrust-to-weight not checked (no primary thrust)"
+  },
+  "C510": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.517), stall margin 1.37; thrust-to-weight not checked (no primary thrust)"
+  },
+  "C525": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.41, same FAA approach category"
+  },
+  "C560": {
+   "decision": "own",
+   "name": "Cessna Citation V/Ultra/Encore",
+   "mtow_kg": 7394,
+   "mlw_kg": 6895,
+   "wing_area_m2": 31.83,
+   "engines": 2,
+   "max_thrust_n_each": 13545.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_207_i10",
+    "thrust": "faa_tcds_e45ne_orig"
+   }
+  },
+  "C56X": {
+   "decision": "own",
+   "name": "Cessna Excel/XLS",
+   "mtow_kg": 9163,
+   "mlw_kg": 8482,
+   "wing_area_m2": 34.4,
+   "engines": 2,
+   "max_thrust_n_each": 18320.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_207_i10",
+    "thrust": "easa_tcds_im_e_013_i3"
+   }
+  },
+  "C650": {
+   "decision": "substitute",
+   "substitute": "E75L",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.153), stall margin 1.23; thrust-to-weight not checked (no primary thrust)"
+  },
+  "C680": {
+   "decision": "own",
+   "name": "Cessna Citation Sovereign",
+   "mtow_kg": 13744,
+   "mlw_kg": 12292,
+   "wing_area_m2": 47.93,
+   "engines": 2,
+   "max_thrust_n_each": 25670.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_033_i9",
+    "thrust": "easa_tcds_im_e_051_i4"
+   }
+  },
+  "C68A": {
+   "decision": "own",
+   "name": "Cessna Citation Latitude",
+   "mtow_kg": 13971,
+   "mlw_kg": 12508,
+   "wing_area_m2": 50.4,
+   "engines": 2,
+   "max_thrust_n_each": 26270.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_033_i9",
+    "thrust": "easa_tcds_im_e_051_i4"
+   }
+  },
+  "C700": {
+   "decision": "own",
+   "name": "Cessna Citation Longitude",
+   "mtow_kg": 17917,
+   "mlw_kg": 15195,
+   "wing_area_m2": 49.91,
+   "engines": 2,
+   "max_thrust_n_each": 34040.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_620_i3",
+    "thrust": "easa_tcds_im_e_058_i10"
+   }
+  },
+  "C72R": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C750": {
+   "decision": "own",
+   "name": "Cessna Citation X",
+   "mtow_kg": 16375,
+   "mlw_kg": 14424,
+   "wing_area_m2": 48.96,
+   "engines": 2,
+   "max_thrust_n_each": 30080.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_097_i3",
+    "thrust": "easa_tcds_im_e_044_i5"
+   }
+  },
+  "C82R": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "C82S": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "C82T": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "CL30": {
+   "decision": "own",
+   "name": "Bombardier (Canadair) Challenger 300",
+   "mtow_kg": 17622,
+   "mlw_kg": 15309,
+   "wing_area_m2": 48.5,
+   "engines": 2,
+   "max_thrust_n_each": 30730.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_080_i11",
+    "thrust": "easa_tcds_im_e_058_i10"
+   }
+  },
+  "CL35": {
+   "decision": "own",
+   "name": "Bombardier Challenger 350",
+   "mtow_kg": 18416,
+   "mlw_kg": 15490,
+   "wing_area_m2": 48.5,
+   "engines": 2,
+   "max_thrust_n_each": 33390.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_080_i11",
+    "thrust": "easa_tcds_im_e_058_i10"
+   }
+  },
+  "CL60": {
+   "decision": "substitute",
+   "substitute": "GLF6",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.071 (A320 0.171), stall margin 1.62"
+  },
+  "COL3": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "COL4": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "CRJ1": {
+   "decision": "substitute",
+   "substitute": "CRJ9",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.072), stall margin 1.38; thrust-to-weight not checked (no primary thrust)"
+  },
+  "CRJ2": {
+   "decision": "substitute",
+   "substitute": "CRJ9",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.072), stall margin 1.38; thrust-to-weight not checked (no primary thrust)"
+  },
+  "CRJ7": {
+   "decision": "own",
+   "name": "canadair CRJ-700",
+   "mtow_kg": 34019,
+   "mlw_kg": 30391,
+   "wing_area_m2": 70.61,
+   "engines": 2,
+   "max_thrust_n_each": 56360.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "bombardier_crj700_apm_r15",
+    "thrust": "easa_tcds_im_e_053_i4"
+   }
+  },
+  "CRUZ": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "D328": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "DA40": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "DA42": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "DA62": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "DHC6": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "E110": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "E120": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "E135": {
+   "decision": "own",
+   "name": "Embraer EMB-135LR",
+   "mtow_kg": 20000,
+   "mlw_kg": 18500,
+   "wing_area_m2": 51.18,
+   "engines": 2,
+   "max_thrust_n_each": 33050.0,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "E290": {
+   "decision": "substitute",
+   "substitute": "E190",
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.22, same FAA approach category"
+  },
+  "E35L": {
+   "decision": "substitute",
+   "substitute": "E145",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.185), stall margin 1.22; thrust-to-weight not checked (no primary thrust)"
+  },
+  "E50P": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.098 (A320 0.615), stall margin 1.3; thrust-to-weight not checked (no primary thrust)"
+  },
+  "E545": {
+   "decision": "own",
+   "name": "Embraer EMB-545 Legacy 450",
+   "mtow_kg": 16204,
+   "mlw_kg": 14750,
+   "wing_area_m2": 44.85,
+   "engines": 2,
+   "max_thrust_n_each": 29530.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_526_i12",
+    "thrust": "easa_tcds_im_a_526_i12"
+   }
+  },
+  "E550": {
+   "decision": "own",
+   "name": "Legacy 500/Praetor 600",
+   "mtow_kg": 17400,
+   "mlw_kg": 15660,
+   "wing_area_m2": 44.85,
+   "engines": 2,
+   "max_thrust_n_each": 31750.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_526_i12",
+    "thrust": "easa_tcds_im_a_526_i12"
+   }
+  },
+  "E55P": {
+   "decision": "own",
+   "name": "Embraer Phenom 300",
+   "mtow_kg": 8150,
+   "mlw_kg": 7568,
+   "wing_area_m2": 28.5,
+   "engines": 2,
+   "max_thrust_n_each": 14946.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_158_i11",
+    "thrust": "easa_tcds_im_e_048_i4"
+   }
+  },
+  "E75S": {
+   "decision": "own",
+   "name": "Embraer 175 short wing",
+   "mtow_kg": 37500,
+   "mlw_kg": 34000,
+   "wing_area_m2": 72.72,
+   "engines": 2,
+   "max_thrust_n_each": 62500.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_001_i13",
+    "thrust": "easa_tcds_im_e_053_i4"
+   }
+  },
+  "EA50": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.286 (A320 0.804), stall margin 1.19; thrust-to-weight not checked (no primary thrust)"
+  },
+  "EC20": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "EC45": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "EPIC": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "EXNG": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "F2TH": {
+   "decision": "own",
+   "name": "Dassault Falcon 2000",
+   "mtow_kg": 19232,
+   "mlw_kg": 17826,
+   "wing_area_m2": 49.0,
+   "engines": 2,
+   "max_thrust_n_each": 31150.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_a_008_i13",
+    "thrust": "easa_tcds_im_e_057_i6"
+   }
+  },
+  "F5": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "F900": {
+   "decision": "substitute",
+   "substitute": "A19N",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.05 (A320 0.115), stall margin 1.29"
+  },
+  "FA10": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.4; thrust-to-weight not checked (no primary thrust)"
+  },
+  "FA20": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.4; thrust-to-weight not checked (no primary thrust)"
+  },
+  "FA50": {
+   "decision": "substitute",
+   "substitute": "E145",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.185), stall margin 1.22; thrust-to-weight not checked (no primary thrust)"
+  },
+  "FA7X": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.019 (A320 0.537), stall margin 1.36; thrust-to-weight not checked (no primary thrust)"
+  },
+  "FA8X": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.019 (A320 0.498), stall margin 1.38; thrust-to-weight not checked (no primary thrust)"
+  },
+  "G150": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.09), stall margin 1.27; thrust-to-weight not checked (no primary thrust)"
+  },
+  "G200": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "G280": {
+   "decision": "substitute",
+   "substitute": "E170",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.068 (A320 0.347), stall margin 1.24"
+  },
+  "GA5C": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.031 (A320 0.06), stall margin 1.29; thrust-to-weight not checked (no primary thrust)"
+  },
+  "GA6C": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.022 (A320 0.182), stall margin 1.26"
+  },
+  "GA7C": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "GA8": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "GA8C": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "GALX": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.006 (A320 0.167), stall margin 1.27"
+  },
+  "GL5T": {
+   "decision": "substitute",
+   "substitute": "GLF6",
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.52, same FAA approach category"
+  },
+  "GL7T": {
+   "decision": "substitute",
+   "substitute": "E170",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.017 (A320 0.295), stall margin 1.24"
+  },
+  "GLEX": {
+   "decision": "substitute",
+   "substitute": "A19N",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.033 (A320 0.132), stall margin 1.3"
+  },
+  "GLF3": {
+   "decision": "substitute",
+   "substitute": "B763",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.058), stall margin 1.27; thrust-to-weight not checked (no primary thrust)"
+  },
+  "GLF4": {
+   "decision": "substitute",
+   "substitute": "CRJ9",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.198 (A320 0.302), stall margin 1.4"
+  },
+  "GLF5": {
+   "decision": "substitute",
+   "substitute": "GLF6",
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.61, same FAA approach category"
+  },
+  "H25A": {
+   "decision": "substitute",
+   "substitute": "E75L",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.016 (A320 0.169), stall margin 1.22; thrust-to-weight not checked (no primary thrust)"
+  },
+  "H25B": {
+   "decision": "substitute",
+   "substitute": "GLF6",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.007 (A320 0.093), stall margin 1.62"
+  },
+  "H25C": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.031 (A320 0.06), stall margin 1.29; thrust-to-weight not checked (no primary thrust)"
+  },
+  "H47": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "H60": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "H64": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "HA4T": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.031 (A320 0.121), stall margin 1.25; thrust-to-weight not checked (no primary thrust)"
+  },
+  "HDJT": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.111 (A320 0.406), stall margin 1.45; thrust-to-weight not checked (no primary thrust)"
+  },
+  "HUSK": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "K100": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "LJ31": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.267 (A320 0.25), stall margin 1.56; thrust-to-weight not checked (no primary thrust)"
+  },
+  "LJ35": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.031 (A320 0.121), stall margin 1.25; thrust-to-weight not checked (no primary thrust)"
+  },
+  "LJ40": {
+   "decision": "substitute",
+   "substitute": "E145",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.016 (A320 0.201), stall margin 1.21; thrust-to-weight not checked (no primary thrust)"
+  },
+  "LJ45": {
+   "decision": "substitute",
+   "substitute": "GLF6",
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.46, same FAA approach category"
+  },
+  "LJ55": {
+   "decision": "substitute",
+   "substitute": "E75L",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.016 (A320 0.169), stall margin 1.22; thrust-to-weight not checked (no primary thrust)"
+  },
+  "LJ60": {
+   "decision": "substitute",
+   "substitute": "E170",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.144 (A320 0.422), stall margin 1.24"
+  },
+  "M20P": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "M20T": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "M600": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "M700": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "MD11": {
+   "decision": "substitute",
+   "substitute": "B773",
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.34, same FAA approach category"
+  },
+  "MD82": {
+   "decision": "own",
+   "name": "Boeing MD-82",
+   "mtow_kg": 67812,
+   "mlw_kg": 58967,
+   "wing_area_m2": 112.3,
+   "engines": 2,
+   "max_thrust_n_each": 92740.0,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "MD83": {
+   "decision": "own",
+   "name": "Boeing MD-83",
+   "mtow_kg": 72575,
+   "mlw_kg": 63276,
+   "wing_area_m2": 112.3,
+   "engines": 2,
+   "max_thrust_n_each": 96520.0,
+   "sources": {
+    "mass": "pycontrails_ps_20250328",
+    "wing_area": "pycontrails_ps_20250328",
+    "thrust": "pycontrails_ps_20250328"
+   }
+  },
+  "MD88": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.09), stall margin 1.27; thrust-to-weight not checked (no primary thrust)"
+  },
+  "P06T": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "P180": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "P210": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "P28A": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "P28B": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "P28R": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "P28S": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "P32R": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "P32T": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "P46T": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PA24": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PA27": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PA31": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PA32": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PA34": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PA38": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PA44": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PA46": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PAY2": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PAY3": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PC12": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "PC24": {
+   "decision": "substitute",
+   "substitute": "C550",
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.4, same FAA approach category"
+  },
+  "PC7": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "PRM1": {
+   "decision": "own",
+   "name": "Raytheon Premier 1/390 Premier 1",
+   "mtow_kg": 5670,
+   "mlw_kg": 5262,
+   "wing_area_m2": 22.9,
+   "engines": 2,
+   "max_thrust_n_each": 10230.0,
+   "sources": {
+    "mass": "faa_acd_2024_10",
+    "wing_area": "easa_tcds_im_a_073_i2",
+    "thrust": "easa_tcds_im_e_016_i13"
+   }
+  },
+  "PTS1": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "RV14": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "RV6": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "RV7": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "S22T": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "S76": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "SB20": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "SBR1": {
+   "decision": "substitute",
+   "substitute": "E75L",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.153), stall margin 1.23; thrust-to-weight not checked (no primary thrust)"
+  },
+  "SF50": {
+   "decision": "exclude",
+   "reason": "no modelled airframe of the same propulsion class and FAA approach category"
+  },
+  "SR20": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "SR22": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "SU95": {
+   "decision": "substitute",
+   "substitute": "E170",
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.39, same FAA approach category"
+  },
+  "SW4": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "T206": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "T210": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "T38": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "TBM7": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "TBM8": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "TBM9": {
+   "decision": "exclude",
+   "reason": "propeller aircraft (user decision 2026-09-23)"
+  },
+  "TEX2": {
+   "decision": "exclude",
+   "reason": "rotorcraft or military type, not a fixed-wing civil approach"
+  },
+  "TWEN": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "VO10": {
+   "decision": "exclude",
+   "reason": "no published approach speed (not in the FAA Aircraft Characteristics Database)"
+  },
+  "WW24": {
+   "decision": "substitute",
+   "substitute": "B737",
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.015 (A320 0.106), stall margin 1.26; thrust-to-weight not checked (no primary thrust)"
+  }
+ }
+}

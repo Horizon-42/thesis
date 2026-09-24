@@ -1,0 +1,22 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_078_PT6A-41.pdf  sha256: 61feb77bf6d3f74d19744705d04b9280724250de9ef66b1f9843099f04b02df2
+# id: easa_tcds_im_e_078_i2 | EASA | TCDS EASA.IM.E.078 - Pratt & Whitney Canada PT6A-41 series (incl. -42, -52, -60A, -65SC) | Issue 02, 17 March 2022
+# url: https://www.easa.europa.eu/en/downloads/7669/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p6, lines 256-271  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                                    Engine Model         Maximum Continuous Power                         Take-off Power (5 minutes)
+                                                                  (kW)                                               (mm)
+                                  PT6A-41, -42, -42A,
+                                                                        634                                            634
+                                  -52, -61
+                                  PT6A-45A                              760                                         875
+                                  PT6A-45B                              761                                         875
+                                  PT6A-45R                              760                                 893 (875 Alternative)
+                                  PT6A-60A                              783                                         783
+                                  PT6A-62                               708                                         708
+                                  PT6A-65AG                             910                                         969
+                                  PT6A-65AR                             910                                 1062 (918 Alternative)
+                                  PT6A-65B                              875                                         875
+                                  PT6A-65SC                             828                                         828

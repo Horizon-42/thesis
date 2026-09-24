@@ -44,6 +44,7 @@ from final_approach import bracket_fraction
 from flight_scenarios import (
     FittedApproach,
     FlightScenario,
+    NoAircraftDynamics,
     build_scenario,
     fit_flight_final_approach,
     flight_key,
@@ -71,8 +72,8 @@ from ts_transformer.data.anchor_strata import (
 )
 from ts_transformer.data.approach_difficulty import remaining_path_profile_m
 from ts_transformer.config import (
+    AIRCRAFT_FILTER_ALL_FLIGHTS,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
-    DEFAULT_AIRCRAFT_TYPE,
     HORIZON_FULL,
     HORIZON_NORMALIZED,
     HORIZON_WINDOW,
@@ -398,8 +399,11 @@ class BuildReport:
 
     built: int = 0
     skipped: dict[str, int] = field(default_factory=dict)  # reason -> count
+    # The ICAO types of the BUILT series ("unresolved" when the identity has none).
     selected_typecodes: dict[str, int] = field(default_factory=dict)
     rejected_aircraft: dict[str, int] = field(default_factory=dict)
+    # `all-flights` only: BUILT series without aircraft dynamics, by reason.
+    without_dynamics: dict[str, int] = field(default_factory=dict)
 
     def skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
@@ -410,6 +414,9 @@ class BuildReport:
     def reject_aircraft(self, reason: str) -> None:
         self.rejected_aircraft[reason] = self.rejected_aircraft.get(reason, 0) + 1
         self.skip("aircraft filter rejected")
+
+    def keep_without_dynamics(self, reason: str) -> None:
+        self.without_dynamics[reason] = self.without_dynamics.get(reason, 0) + 1
 
     @property
     def total(self) -> int:
@@ -427,6 +434,11 @@ class BuildReport:
                 )
             )
             lines.append(f"  selected aircraft  {selected}")
+        if self.without_dynamics:
+            lines.append(
+                f"  kept {sum(self.without_dynamics.values()):5d}  flights without aircraft "
+                "dynamics (trajectory only; see data_selection.json)"
+            )
         rejected = sorted(
             self.rejected_aircraft.items(), key=lambda item: (-item[1], item[0])
         )
@@ -447,6 +459,7 @@ class BuildReport:
             "skipped": dict(sorted(self.skipped.items())),
             "selected_typecodes": dict(sorted(self.selected_typecodes.items())),
             "rejected_aircraft": dict(sorted(self.rejected_aircraft.items())),
+            "without_dynamics": dict(sorted(self.without_dynamics.items())),
         }
 
 
@@ -490,7 +503,6 @@ def build_series(
     config: TSConfig,
     *,
     airport: str | None = None,
-    aircraft_type: str = DEFAULT_AIRCRAFT_TYPE,
 ) -> tuple[list[FlightSeries], BuildReport]:
     """Flight dicts -> :class:`FlightSeries`, skipping what cannot be built.
 
@@ -500,12 +512,14 @@ def build_series(
     minimum: ``seq_len + 1`` at L-1 — counted on the lookback length before 2026-09-16, so
     under an ``anchor_floor_index`` arms at different L kept different cohorts).
 
-    ``aircraft_type`` is the fallback when the flight dict does not name a resolvable type.
-    Every harvested arrival currently carries ``"type": "UNK"`` (``czml_export`` hardcodes
-    it), and ``flight_scenarios._resolve_aircraft`` RAISES rather than guessing — so
-    without this the whole batch dies on the first flight. The choice is not cosmetic: it
-    sets the target state's Vref and threshold-crossing height, which is what the
-    evaluation gates measure the final state against.
+    The aircraft filter (``config.aircraft_filter``) decides which flights are kept, AFTER the
+    split was assigned from manifest metadata: ``openap-direct`` keeps the types OpenAP models
+    under their own designator (checked before any geometry is built); ``modelled`` keeps every
+    flight the aircraft model can fly (preset, performance index, OpenAP-direct) and rejects the
+    rest by name (`flight_scenarios.NoAircraftDynamics`); ``all-flights`` keeps every flight, a
+    flight without dynamics as a scenario WITHOUT dynamics (no aircraft, unknown mass), counted
+    in ``report.without_dynamics``. No type flies as a stand-in type (the A320 fallback was
+    retired on 2026-09-24).
     """
     minimum_samples = minimum_build_samples(config)
     # Stated in seconds of track: at L-1 this is the lookback, the text every stored build
@@ -513,6 +527,8 @@ def build_series(
     too_short = f"track shorter than one window ({(minimum_samples - 1) * config.dt_s:.0f}s)"
     series: list[FlightSeries] = []
     report = BuildReport()
+    provider = "openap" if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT else "auto"
+    require_dynamics = config.aircraft_filter != AIRCRAFT_FILTER_ALL_FLIGHTS
 
     for index, flight in enumerate(flights):
         # Real inputs come through the harvest arrival manifest and must carry the
@@ -560,7 +576,6 @@ def build_series(
                     reason = f"no native OpenAP model ({identity.typecode})"
                 report.reject_aircraft(reason)
                 continue
-            report.select_typecode(identity.typecode)
 
         # Into the modeling plane: harvested altitude is ellipsoidal (HAE) while the
         # threshold-anchored channels and the evaluation gates are MSL. Converted HERE, not
@@ -571,17 +586,14 @@ def build_series(
         flight = flight_to_msl(flight)
         waypoints = flight["waypoints"]
 
-        scenario = build_scenario(flight,
-            None if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
-            else aircraft_type,
-            airport=airport,
-            target_from_threshold=True,
-            aircraft_provider=(
-                "openap"
-                if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT
-                else "auto"
-            ),
-        )
+        try:
+            scenario = build_scenario(flight, airport=airport, target_from_threshold=True,
+                                      aircraft_provider=provider, require_dynamics=require_dynamics)
+        except NoAircraftDynamics as exc:
+            # `modelled`: a type the performance index excludes, or no identity at all
+            # (`openap-direct` rejected every such row above, before any geometry).
+            report.reject_aircraft(f"no aircraft dynamics: {exc.reason}")
+            continue
         if scenario.target is None:
             runway = flight.get("runway") or "?"
             report.skip(f"no published threshold for runway {runway}")
@@ -646,6 +658,11 @@ def build_series(
             lead_landing=flight.get("lead_landing"),
         ))
         report.built += 1
+        # Counted on a BUILT series only: the skips above (no threshold, too short) would
+        # otherwise be reported as kept.
+        report.select_typecode(str(scenario.source["resolved_typecode"] or "unresolved"))
+        if not scenario.has_dynamics:
+            report.keep_without_dynamics(str(scenario.source["no_dynamics_reason"]))
 
     return series, report
 

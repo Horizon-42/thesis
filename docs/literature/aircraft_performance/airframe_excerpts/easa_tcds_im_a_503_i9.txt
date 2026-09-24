@@ -1,0 +1,67 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_503_C90_Issue9.pdf  sha256: 4589d12e501ee76338f9b874c5e23ea5fc910551a6ea5dae0efc467c8927b450
+# id: easa_tcds_im_a_503_i9 | EASA | TCDS EASA.IM.A.503 - Beechcraft C90A, C90GT, C90GTi (King Air) | Issue 9, 20 January 2020
+# url: https://www.easa.europa.eu/en/downloads/7106/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p8, lines 371-371  (match: /^ *MODEL C90(A|GT|GTi)$/)
+                MODEL C90A
+
+--- PDF p12, lines 582-582  (match: /^ *MODEL C90(A|GT|GTi)$/)
+                MODEL C90GT
+
+--- PDF p14, lines 725-725  (match: /^ *MODEL C90(A|GT|GTi)$/)
+                MODEL C90GTi
+
+--- PDF p8, lines 380-395  (match: /Wing Area +27\.308/)
+                                                                           IM.A.503 for appropriate AFM/POH part number).
+                4.          Dimensions:                                    Span                   15.32 m (50 ft. 3 in)
+                                                                           Length                 10.82 m (35 ft. 6 in)
+                                                                           Height                 4.34 m (14 ft. 3 in)
+                                                                           Wing Area              27.308 sq. meters (293.94 sq. ft.)
+                5.          Engines                                        2 Pratt & Whitney Aircraft of Canada, Ltd. PT6A-21
+                                                                           (Turboprop).
+                                  Engine Limits:
+                                                                          Shaft         N¹ Gas           Prop     Max. Permissible Turbine
+                                                                       Horsepower      Generator        Shaft    Interstage Temp. (Deg. C)
+                                                                                       Speed %          Speed
+                                                                         S.H.P.                         R.P.M
+                                      Takeoff (5 minutes)                 550              101.5        2200*               695
+                                      Max Continuous                      550              101.5        2200*               695
+                                      Starting Transient (2 seconds)                       102.6                            1090
+                                      Max Reverse (1 minute)              300              88.0         2100                695
+
+--- PDF p12, lines 590-605  (match: /Wing Area +27\.308/)
+                                                                               or later approved revision.
+                4. Dimensions:                                                 Span                  15.32 m (50 ft. 3 in.)
+                                                                               Length                10.82 m (35 ft. 6 in.)
+                                                                               Height                4.34 m (14 ft. 3 in.)
+                                                                               Wing Area             27.308 sq. meters (293.94 sq. ft.)
+                5. Engines                                                     2 Pratt & Whitney Aircraft of Canada, Ltd. PT6A-
+                                                                               135A (Turboprop) Per Hawker Beechcraft
+                                                                               Corporation Specification BS184061.
+                                  Engine Limits:
+                                                                        Shaft           N¹ Gas              Prop     Max. Permissible Turbine
+                                                                     Horsepower        Generator           Shaft    Interstage Temp. (Deg. C)
+                                                                                       Speed %             Speed
+                                                                       S.H.P                               R.P.M.
+                                    Takeoff (5 minutes)                 550               101.5            1900*              805
+                                    Max Continuous                      550               101.5            1900*              805
+                                    Starting Transient (2 seconds)                        102.6                               1090
+
+--- PDF p15, lines 745-760  (match: /Wing Area +27\.308/)
+                                                                               or later approved revision.
+                4. Dimensions:                                                 Span                  15.32 m (50 ft. 3 in.)
+                                                                               Length                10.82 m (35 ft. 6 in.)
+                                                                               Height                4.34 m (14 ft. 3 in.)
+                                                                               Wing Area             27.308 sq. meters (293.94 sq. ft.)
+                5. Engines                                                     2 Pratt & Whitney Aircraft of Canada, Ltd. PT6A-
+                                                                               135A (Turboprop) Per Hawker Beechcraft
+                                                                               Corporation Specification BS184061.
+                                  Engine Limits:
+                                                                        Shaft           N¹ Gas              Prop     Max. Permissible Turbine
+                                                                     Horsepower        Generator           Shaft    Interstage Temp. (Deg. C)
+                                                                                       Speed %             Speed
+                                                                       S.H.P                               R.P.M.
+                                    Takeoff (5 minutes)                 550               101.5            1900*              805
+                                    Max Continuous                      550               101.5            1900*              805
+                                    Starting Transient (2 seconds)                        102.6                               1090

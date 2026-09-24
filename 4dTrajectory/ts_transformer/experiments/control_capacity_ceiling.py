@@ -496,7 +496,6 @@ def main() -> None:
     all_series, build_report = build_series(
         load_flight_dicts(manifests, include_flight_keys=set(selected_keys)),
         config,
-        aircraft_type=config.aircraft_type,
     )
     print(build_report.format(), flush=True)
     all_series = usable_series(all_series, config, verbose=False)
@@ -546,7 +545,7 @@ def main() -> None:
                 "mode": mode,
                 "dataset_id": item.dataset_id,
                 "airport": item.airport,
-                "aircraft_type": item.scenario.aircraft.code,
+                "aircraft_type": item.scenario.source["resolved_typecode"],
                 "trajectory_type": route_types[index],
                 "ade_m": ade[index],
                 "fde_m": fde[index],
@@ -603,7 +602,7 @@ def main() -> None:
                 "mode": "state_reference",
                 "dataset_id": item.dataset_id,
                 "airport": item.airport,
-                "aircraft_type": item.scenario.aircraft.code,
+                "aircraft_type": item.scenario.source["resolved_typecode"],
                 "trajectory_type": route_types[index],
                 "ade_m": state_block["ade_per_flight_m"][index],
                 "fde_m": state_block["fde_per_flight_m"][index],

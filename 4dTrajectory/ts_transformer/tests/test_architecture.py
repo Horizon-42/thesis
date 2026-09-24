@@ -477,7 +477,7 @@ def _training_parser():
     from ts_transformer.cli.common import add_data_args, add_training_args
 
     parser = argparse.ArgumentParser()
-    add_data_args(parser)          # --aircraft-type / --aircraft-filter live here
+    add_data_args(parser)          # --aircraft-filter lives here
     add_training_args(parser)
     return parser
 

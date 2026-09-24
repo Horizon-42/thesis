@@ -1,0 +1,20 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_011_TFE731-20-60_Issue08.pdf  sha256: 72e2f61b95af3331f75e5cab5b8c534289e6b30a93975476f99b8107bfdc310d
+# id: easa_tcds_im_e_011_i8 | EASA | TCDS EASA.IM.E.011 - Honeywell TFE731-20, -40, -50, -60 series | Issue 08, 30 July 2026
+# url: https://www.easa.europa.eu/en/downloads/7781/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 311-324  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                                                    Maximum Continuous                           Take off (5 minutes)
+                                                       at Sea Level (1)                            at Sea Level (1)(2)
+                  TFE731-20                          15.57 kN (3500 lb)                           15.57 kN (3500 lb)
+                  TFE731-20AR                        15.57 kN (3500 lb)                           16.24 kN (3650 lb)
+                  TFE731-20BR                        15.57 kN (3500 lb)                           16.24 kN (3650 lb)
+                  TFE731-20R                         15.57 kN (3500 lb)                           16.24 kN (3650 lb)
+                  TFE731-40                          18.90 kN (4250 lb)                           18.90 kN (4250 lb)
+                  TFE731-40R                         18.90 kN (4250 lb)                           19.84 kN (4462 lb)
+                  TFE731-40AR                        18.90 kN (4250 lb)                           19.66 kN (4420 lb)
+                  TFE731-40BR                        15.57 kN (3500 lb)                           17.31 kN (3850 lb)
+                  TFE731-50R                         22.24 kN (5000 lb)                           22.24 kN(5000 lb)
+                  TFE731-60                          20.13 kN (4525 lb)                           22.24 kN (5000 lb)

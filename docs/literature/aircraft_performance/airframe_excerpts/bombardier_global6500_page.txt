@@ -1,0 +1,10 @@
+# source: data/reference_speeds/bombardier/bombardier_global-6500.html  sha256: f4e3b62cfe35759a9fb745781150259aa1f058f938a48beb96c27e403846d886
+# id: bombardier_global6500_page | Bombardier | Global 6500 product page, Specifications block | HTML as served 2026-09-07
+# url: https://bombardier.com/en/aircraft/global-6500
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- lines 338-341  (match: /Thrust: 15,125 lbf/)
+Engines
+Rolls-Royce Pearl engine
+Thrust: 15,125 lbf (67.3 kN)
+Flat rated to ISA + 15°C

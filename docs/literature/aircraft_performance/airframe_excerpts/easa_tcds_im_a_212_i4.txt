@@ -1,0 +1,15 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_212_LearjetM60.pdf  sha256: 3547ba1ab3fbda499abea1d45fa5966aad186293cddfaf96b8eb71961436c68b
+# id: easa_tcds_im_a_212_i4 | EASA | TCDS EASA.IM.A.212 - Learjet Model 60 | Issue 04, 12 November 2024
+# url: https://www.easa.europa.eu/en/downloads/7238/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 298-302  (match: /Two Pratt & Whitney Canada PW305A \(P/N 31B4067-01\)/)
+                      2. Engines
+
+                      Two Pratt & Whitney Canada PW305A (P/N 31B4067-01)
+                      Two P&W Canada PW305A (P/N 31B4067-02), (see NOTE 4)
+                      Two P&W Canada PW305A (P/N 31B4067-04), (see NOTE 5)
+
+--- PDF p8, lines 316-317  (match: /Thrust ratings \(lb\.\)/)
+                      Thrust ratings (lb.)
+                      Takeoff (standard day), static 4600

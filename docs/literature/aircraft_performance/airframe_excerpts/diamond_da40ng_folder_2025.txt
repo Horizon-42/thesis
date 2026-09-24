@@ -1,0 +1,7 @@
+# source: data/reference_speeds/diamond/DA40_NG_Product_Folder_2025_SCREEN.pdf  sha256: f9512ef36cf7e6277aa42d13c87617a19dd7eed63789c24c462d6e2e9d9895d3
+# id: diamond_da40ng_folder_2025 | Diamond Aircraft Industries | DA40 NG Product Folder 2025 | DA40_NG_Product_Folder_2025_SCREEN.pdf
+# url: https://www.diamondaircraft.com/fileadmin/diamondaircraft/documents/da40/DA40_NG_Product_Folder_2025_SCREEN.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p3, lines 46-46  (match: /turbocharged 168 HP Austro AE300/)
+                                                                           The turbocharged 168 HP Austro AE300 jet fuel piston engine                                                                                                                          You want to explore the great outdoors or are a flight school sur-

@@ -107,7 +107,8 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   `aeroviz_backend/CLAUDE.md` (AV12).
 
 - **Training reads ONE vocabulary: `instruction-v2`, spec `103a6eae6b90`** — the sample schema
-  (`aeroviz-training-sample-v5`; a format name changes with its file's shape, both sides in one change), the
+  (`aeroviz-training-sample-v6` since 2026-09-24: v5's shape with a flight's `typecode` its own type or null;
+  a format name changes with its file's shape, both sides in one change), the
   reading rule, the spec sha, the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
   refused by name; `training/index.json` keeps its v1 schema across vocabularies, so a set of another
   vocabulary (`instruction_v1` included) stays listed and is refused from the manifest alone, never

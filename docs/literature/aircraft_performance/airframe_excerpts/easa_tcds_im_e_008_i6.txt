@@ -1,0 +1,29 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_008_PT6A-67_Issue06.pdf  sha256: 1dae61f682fb45b224e66ef40ea2b903248cd50a9a36472e58b614c724935232
+# id: easa_tcds_im_e_008_i6 | EASA | TCDS EASA.IM.E.008 - Pratt & Whitney Canada PT6A-67 series (incl. PT6A-66D, PT6E-67XP, PT6E-66XT) | Issue 06, 18 February 2022
+# url: https://www.easa.europa.eu/en/downloads/7787/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p8, lines 354-376  (match: /^ *5\. Ratings *$/)
+                5. Ratings
+
+
+                                  Engine Model               Maximum Continuous Power                 Take-off Power (5 minutes)
+                                                                      (kW)                                       (kW)
+
+                     PT6A-66                                                634                                     634
+                     PT6A-67                                                895                                     895
+                     PT6A-67A                                               895                                     895
+                     PT6A-67R                                               910                                    1062
+                     PT6A-67AF                                              910                                    1062
+                     PT6A-64                                                522                                     522
+                     PT6A-67B                                               895                                     895
+                     PT6A-67D                                               906                                     954
+                     PT6A-67AG                                              910                                    1006
+                     PT6A-66A                                               634                                     634
+                     PT6A-67T                                               910                                    1062
+                     PT6A-66D                                               634                                     634
+                     PT6A-66B                                               709                                     709
+                     PT6A-67F                                               1268                                   1268
+                     PT6A-67P                                               895                                     895
+                     PT6E-67XP                                              895                                    895
+                     PT6E-66XT                                              667                                     667

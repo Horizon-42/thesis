@@ -42,8 +42,10 @@ FlightScenario(
 ```
 
 Position comes from the track. Velocity, math-ENU heading, and flight-path angle are fit
-from a short sample window. Aircraft resolution tries the declared type, then `icao24`
-through OpenAP, then the explicit `--aircraft-type` fallback.
+from a short sample window. Aircraft resolution finds the ICAO type (declared type, then
+`icao24`), then flies a hand-tuned preset, the decision of `aircraft/performance_index.json`
+(the type's own parameters, a substitute airframe, or excluded), or the type's own OpenAP
+model; a flight with no dynamics is dropped and named in `<scenarios>.selection.json`.
 
 ## Target modes
 
@@ -90,7 +92,6 @@ from flight_scenarios import build_scenarios_from_arrivals, load_scenarios
 
 scenarios = build_scenarios_from_arrivals(
     "trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json",
-    aircraft_type="A320",
     airport="KRDU",
     target_from_threshold=True,
 )

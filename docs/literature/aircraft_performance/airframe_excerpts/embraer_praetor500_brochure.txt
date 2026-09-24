@@ -1,0 +1,8 @@
+# source: data/reference_speeds/embraer/praetor-500-eletronic.pdf  sha256: eb34dad0bd4f2db3089be1790b5efc6d811652aac7254a43cd929a2ae93ed065
+# id: embraer_praetor500_brochure | Embraer | Praetor 500 brochure | praetor-500-eletronic.pdf (undated)
+# url: https://embraer.com/media/asbhvchi/praetor-500-eletronic.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p19, lines 226-227  (match: /ENGINE THRUST / FLAT RATING/)
+                                    21 ft 1 in   ENGINE THRUST / FLAT RATING
+                                    (6.43 m)     6,540 lbf / ISA + 18ºC

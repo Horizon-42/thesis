@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/citation_longitude_product_card.pdf  sha256: a1e9d2e42cfddfb2232d58f8218d275d4af15d5d54ecfd6c483f1143e22d5b6c
+# id: textron_longitude_card | Textron Aviation | Product card: Citation Longitude (700) | undated product card PDF
+# url: https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_longitude_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 32-34  (match: /Thrust/)
+
+                                                                                                                                                               Thrust                                  7,665 lb ea 34.10 kN ea

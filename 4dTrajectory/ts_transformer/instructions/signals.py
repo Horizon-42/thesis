@@ -21,7 +21,9 @@ from ts_transformer.data.channels import states_from_channels
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.words import compass_from_math_rad, wrap180
 
-SIGNALS_SCHEMA = "ts-instruction-signals-v1"
+#: v2 (2026-09-24): ``typecode`` is the flight's own ICAO type (``None`` when its identity is
+#: unresolved); v1 carried the type the dynamics flew, an A320 for every type without dynamics.
+SIGNALS_SCHEMA = "ts-instruction-signals-v2"
 
 #: The per-row arrays, in storage order.
 ROW_FIELDS = ("time_s", "e_m", "n_m", "altitude_m", "track_deg", "ground_speed_mps", "vertical_rate_mps")
@@ -32,7 +34,7 @@ class FlightSignals:
     dataset_id: str
     airport: str
     runway: str
-    typecode: str
+    typecode: str | None          # the flight's ICAO type; None = identity unresolved
     time_s: np.ndarray            # [N] seconds from the built flight's first row, uniform step
     e_m: np.ndarray               # [N] airport frame, metres
     n_m: np.ndarray
@@ -77,7 +79,7 @@ def signals_from_series(series: Any, geometry: AirportGeometry) -> FlightSignals
         dataset_id=series.dataset_id,
         airport=series.airport,
         runway=runway,
-        typecode=str(series.scenario.aircraft.code),
+        typecode=series.scenario.source["resolved_typecode"],
         time_s=np.asarray(series.times, dtype=np.float64),
         e_m=np.asarray(e, dtype=np.float64),
         n_m=np.asarray(n, dtype=np.float64),

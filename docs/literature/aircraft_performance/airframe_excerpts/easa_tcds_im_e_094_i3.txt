@@ -1,0 +1,25 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_094_PT6A-100_Issue3.pdf  sha256: 3810c293c24c0708b9d2bd61db01febea16b3afef4912aa9484b06abf7429ee4
+# id: easa_tcds_im_e_094_i3 | EASA | TCDS EASA.IM.E.094 - Pratt & Whitney Canada PT6A-100 series | Issue 03, 27 March 2023
+# url: https://www.easa.europa.eu/en/downloads/16560/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 279-297  (match: /^ *5\. Ratings *$/)
+                5. Ratings
+
+                   Model                Maximum Continuous                   Take-off (5 minutes)                  Maximum Reverse
+                                    Shaft Output       Gas               Shaft Output         Gas             Shaft Output      Gas
+                                    Power Speed Generator                Power Speed Generator                Power Speed Generator
+                                     (kW)    (rpm)    Speed               (kW)    (rpm)      Speed             (kW)   (rpm)    Speed
+                                                      (rpm)                                  (rpm)                             (rpm)
+            PT6A-35                   559    2190     38100                559    2190       38100              537    2100    38100
+            PT6A-110                  354    1900     38100                354    1900       38100              340    1825    38100
+            PT6A-112                  373    1900     38100                373    1900       38100              354    1825    38100
+            PT6A-114                  447    1900     38100                447    1900       38100              447    1825    38100
+            PT6A-114A                 503    1900     38100                503    1900       38100              503    1825    38100
+            PT6A-121                  459    1900     38100                459    1900       38100              441    1825    38100
+            PT6A-135,
+                                     559       1900         38100         559       1900         38100         537        1825        38100
+            PT6A-135A
+            PT6A-140                 647       1900         38850         647       1900         38850         647        1825        38850
+            PT6A-140A                671       1900         38850         671       1900         38850         671        1825        38850
+            PT6A-140AG               647       1900         38850         647       1900         38850         647        1825        38850

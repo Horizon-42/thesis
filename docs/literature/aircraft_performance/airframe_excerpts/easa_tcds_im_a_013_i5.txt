@@ -1,0 +1,16 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_013_G200_Issue05.pdf  sha256: 6a13a864bd47bdf822dd0efabe12c857014e456e3ddd75d77b94912e3902e2f6
+# id: easa_tcds_im_a_013_i5 | EASA | TCDS EASA.IM.A.013 - Galaxy / Gulfstream 200 | Issue 05, 26 May 2025
+# url: https://www.easa.europa.eu/en/downloads/7500/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p10, lines 429-432  (match: /Two PW306A, refer to EASA Data sheet/)
+                                  Two PW306A, refer to EASA Data sheet No.: EASA.IM.E.051
+                                        Static thrust at sea level: lbs
+                                        -        Take-off (5 minutes) (with and without APR)              6040
+                                        -        Maximum continuous                                       6040
+
+--- PDF p20, lines 986-989  (match: /Two PW306A, refer to EASA Data sheet/)
+                                  Two PW306A, refer to EASA Data sheet No.: EASA.IM.E.051
+                                        Static thrust at sea level: lbs
+                                        -        Take-off (5 minutes) (with and without APR)              6040
+                                        -        Maximum continuous                                       6040

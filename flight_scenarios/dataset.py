@@ -32,10 +32,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from aircraft.performance_index import performance_index_identity
+
 from .fitted_approach import UnusableFittedApproach
 from .identity import flight_key
 
-SELECTION_SCHEMA_VERSION = "flight-scenarios-selection-v1"
+# v2 (2026-09-24): flights whose aircraft has no dynamics are dropped and named
+# (``excluded_no_dynamics``) instead of being flown as an A320.
+SELECTION_SCHEMA_VERSION = "flight-scenarios-selection-v2"
 SELECTION_SUFFIX = ".selection.json"
 
 # How a capped runway's flights are chosen. Named because the report repeats the claim.
@@ -49,12 +53,14 @@ class RunwaySelection:
     available: int = 0
     selected: int = 0
     excluded_unfittable: int = 0
+    excluded_no_dynamics: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "available": self.available,
             "selected": self.selected,
             "excluded_unfittable": self.excluded_unfittable,
+            "excluded_no_dynamics": self.excluded_no_dynamics,
         }
 
 
@@ -69,6 +75,7 @@ class SelectionReport:
     selected: int
     per_runway: dict[str, RunwaySelection] = field(default_factory=dict)
     excluded_unfittable: list[dict[str, Any]] = field(default_factory=list)
+    excluded_no_dynamics: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +90,9 @@ class SelectionReport:
                 runway: row.to_dict() for runway, row in sorted(self.per_runway.items())
             },
             "excluded_unfittable": self.excluded_unfittable,
+            "excluded_no_dynamics": self.excluded_no_dynamics,
+            # The aircraft decisions the population was drawn under.
+            "performance_index": performance_index_identity(),
         }
 
     def summary_line(self) -> str:
@@ -99,6 +109,8 @@ class SelectionReport:
             )
         if self.excluded_unfittable:
             parts.append(f"{len(self.excluded_unfittable)} dropped: no usable fitted approach")
+        if self.excluded_no_dynamics:
+            parts.append(f"{len(self.excluded_no_dynamics)} dropped: no aircraft dynamics")
         return "; ".join(parts)
 
 
@@ -181,7 +193,6 @@ def select_flight_keys(
 
 def build_scenario_dataset(
     manifest_path: str | Path,
-    aircraft_type: str | None = None,
     *,
     target: str,
     max_per_runway: int | None = None,
@@ -189,15 +200,16 @@ def build_scenario_dataset(
     window_s: float | None = None,
     aircraft_provider: str = "auto",
 ) -> tuple[list[Any], SelectionReport]:
-    """Build one airport's scenario dataset, capped and with unfittable flights dropped.
+    """Build one airport's scenario dataset, capped, with unusable flights dropped and named.
 
     ``target`` is ``"runway"`` (published threshold), ``"fitted-adsb"`` (the fitted OLS
-    threshold crossing) or ``"track-end"``.  Only the fitted-ADS-B target can be unusable,
-    and only for the individual flight — so it is the only one that ever drops anything.
+    threshold crossing) or ``"track-end"``. Two per-flight reasons drop a flight: the
+    fitted-ADS-B target is unusable, or the aircraft has no dynamics (no ICAO type, a type
+    the performance index excludes, or one nothing models); nothing is flown in its place.
     """
     # Local imports: this module is the batch policy layer, and `build` pulls in the whole
     # aircraft/aerodynamic stack that the pure roster read above does not need.
-    from .build import build_scenario, load_model_arrivals
+    from .build import NoAircraftDynamics, build_scenario
     from .start_state import DEFAULT_WINDOW_S
 
     targets = ("runway", "fitted-adsb", "track-end")
@@ -215,7 +227,7 @@ def build_scenario_dataset(
     for flight in flights:
         try:
             scenarios.append(build_scenario(
-                flight, aircraft_type, airport=airport, mass_kg=mass_kg,
+                flight, airport=airport, mass_kg=mass_kg,
                 window_s=window,
                 target_from_threshold=target == "runway",
                 target_from_fitted_adsb=target == "fitted-adsb",
@@ -231,6 +243,18 @@ def build_scenario_dataset(
             row = report.per_runway.get(runway)
             if row is not None:
                 row.excluded_unfittable += 1
+                row.selected -= 1
+        except NoAircraftDynamics as exc:
+            runway = str(flight.get("runway") or "unknown")
+            report.excluded_no_dynamics.append({
+                "flight_key": flight_key(flight, len(scenarios)),
+                "runway": runway,
+                "typecode": exc.typecode,
+                "reason": exc.reason,
+            })
+            row = report.per_runway.get(runway)
+            if row is not None:
+                row.excluded_no_dynamics += 1
                 row.selected -= 1
     report.selected = len(scenarios)
     return scenarios, report

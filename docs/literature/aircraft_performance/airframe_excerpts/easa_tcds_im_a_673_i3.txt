@@ -1,0 +1,11 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_673_CL-600_RJ_Issue3.pdf  sha256: 98c9056e474eb3b34b51a8cc56bb7732a88e2af3e767827924314701018797bf
+# id: easa_tcds_im_a_673_i3 | EASA | TCDS EASA.IM.A.673 - CL-600 Regional Jet Series | Issue 3.0, 18 September 2023
+# url: https://www.easa.europa.eu/en/downloads/111186/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p1, lines 25-25  (match: /CL-600-2C10 \(Regional Jet Series 700, 701 & 702\)/)
+                                     CL-600-2C10 (Regional Jet Series 700, 701 & 702)
+
+--- PDF p15, lines 808-809  (match: /Two General Electric CF34-8C1 Turbofan Engines/)
+                     Two General Electric CF34-8C1 Turbofan Engines, or two General Electric CF34-8C5B1
+                     Turbofan Engines, JAA Executive Board recommendation letter 04/12/46/10/00-L162

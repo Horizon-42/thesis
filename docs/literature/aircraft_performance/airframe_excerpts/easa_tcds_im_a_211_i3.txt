@@ -1,0 +1,16 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_211_MD90_B717_Issue3.pdf  sha256: 5e6d3a9802d6a6d6688e68e0221a85ab4386992ea2cac1b186541cbc073fa02b
+# id: easa_tcds_im_a_211_i3 | EASA | TCDS EASA.IM.A.211 - MD-90-30, B717-200 | Issue 3.0, 04 July 2025
+# url: https://www.easa.europa.eu/en/downloads/7240/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p16, lines 704-708  (match: /Wing Area +92\.97/)
+
+       Span                   28.45 m      (93 ft 4.2 in)
+       Length                 37.81 m     (124 ft 0.4 in)
+       Height                  8.88 m      (29 ft 1.5 in)
+       Wing Area             92.97 m2     (1,000.7 sq ft)
+
+--- PDF p16, lines 716-718  (match: /Two Rolls-Royce Deutschland Ltd & Co KG BR700-715A1-30/)
+2.    Engines
+      Two Rolls-Royce Deutschland Ltd & Co KG BR700-715A1-30 or BR700-715C1-30
+      engines.

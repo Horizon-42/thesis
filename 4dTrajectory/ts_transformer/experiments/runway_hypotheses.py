@@ -378,8 +378,7 @@ def main(argv: list[str] | None = None) -> int:
                 {**flight, "runway": runway, "runway_target": targets[runway]}
                 for flight in raw_flights
             ]
-        series, report = build_series(clones, config, airport=airport,
-                                      aircraft_type=config.aircraft_type)
+        series, report = build_series(clones, config, airport=airport)
         print(f"  {runway}: {report.format().splitlines()[0]}")
         forecasts = forecast_approaches(model, series, config, normalizer, device=device)
         per_candidate[runway] = {

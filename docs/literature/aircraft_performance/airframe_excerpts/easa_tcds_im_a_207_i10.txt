@@ -1,0 +1,148 @@
+# source: data/reference_speeds/easa/EASA_TCDS_IM_A_207_Cessna_500_560XL_Issue10.pdf  sha256: a2c8fcdc55214623d33de8d65eb653726cc237d2b8d8cb7bc466e955808a48bd
+# id: easa_tcds_im_a_207_i10 | EASA | TCDS EASA.IM.A.207 - Cessna 500, 550, S550, 560, 560XL | Issue 10, 06 July 2022
+# url: https://www.easa.europa.eu/en/downloads/7244/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p36, lines 1974-1990  (match: /4\.1 +Dimensions for Citation V$/)
+                4.1         Dimensions for Citation V
+                                   Span                                        52 ft 2 in      (15.90 m)
+                                   Length                                      48 ft 9 in      (14.90 m)
+                                   Height                                      15 ft 0 in      (4.57 m)
+                                   Wing Area                                   342.6 sq ft     (31.83 sq m)
+
+                4.2         Dimensions for Citation Ultra
+                                   Same as for Citation V, see III 4.2
+
+                4.3         Dimensions for Citation Encore
+                                   Span                                        54 ft 1 in      (16.48 m)
+                                   Length                                      48 ft 11 in     (14.91m)
+                                   Height                                      15 ft 2 in      (4.62 m)
+                                   Wing Area                                   322.3 ft2       (29.94 m2)
+
+                4.4         Dimensions for Citation Citation Encore+
+                                                                              Same as for Citation Encore+, see III 4.3
+
+--- PDF p36, lines 1995-2002  (match: /Variant of Model 560 +Citation V +Citation Ultra/)
+                Variant of Model 560                                     Citation V          Citation Ultra     Citation Encore        Citation Encore+
+
+                Engines                                              Two Pratt &             Two Pratt &          Two Pratt &            Two Pratt &
+                                                                     Whitney of              Whitney of           Whitney of             Whitney of
+                                                                     Canada, Inc.            Canada, Inc.         Canada, Inc.           Canada, Inc.
+                                                                      JT15D-5A                JT15D-5D              PW535A                 PW535B
+                                                                      turbofans               turbofans            turbofans              turbofans
+
+
+--- PDF p37, lines 2011-2018  (match: /Variant of Model 560 +Citation V +Citation Ultra/)
+                Variant of Model 560                                    Citation V           Citation Ultra     Citation Encore        Citation Encore+
+
+                Engine Limits               Takeoff                      2900 lbs              3045 lbs.            3,400 lbs.              3,400 lbs
+                Static thrust,              (5 min., Normal
+                                                                        (1315 kg)              (1381 kg)            (1,542 kg)             (1,542 kg)
+                standard day,               All Engines
+                sea level                   Operating)
+                                            Takeoff (10 min.,               --                     --               3,400 lbs.              3,400 lbs
+
+--- PDF p40, lines 2201-2201  (match: /Takeoff +7212 kg \(15,900 lbs\)/)
+                    Takeoff                     7212 kg (15,900 lbs)       7394 kg (16,300 lbs)        7,543 kg (16,630 lbs)      7,634 kg (16,830 lbs
+
+# --- appended 2026-09-24 for C56X (Section 5, Model 560XL); sha256 re-taken 2026-09-24, unchanged.
+
+--- PDF p45, lines 2459-2467  (match: /^ *SECTION 5: Model 560XL Citation Excel, Citation XLS, Citation XLS\+/)
+                SECTION 5: Model 560XL Citation Excel, Citation XLS, Citation XLS+
+
+                I.                  General
+
+                1. Model/Variant
+                1.1 Model:                                                          560XL
+                1.2 Variants:                                                       Excel (S/N 560-5001 through 560-5500)
+                                                                                    XLS (S/N 560-5501 through 560-6000)
+                                                                                    XLS+ (S/N 560-6001 and on)
+
+--- PDF p50, lines 2779-2797  (match: /^ *4\. Dimensions: *$/)
+                4. Dimensions:
+                          Span                                               55 ft 8 in (16.97 m)
+                          Length                                             51 ft 10 in (15.80 m) (Excel, XLS)
+                                                                             52 ft 9 in (16.07 m) (XLS+)
+                                  Height                                     17 ft 2 in (5.23 m)
+                                  Wing Area                                  369.7 sq ft (34.4 sq m)
+
+                5. Engines:
+                                                           S/N 560-5001 through 560-5500
+                                                                        Two Pratt & Whitney of Canada, Inc.
+                                                                        PW545A Turbofans
+
+                                                                             S/N 560-5501 and on.
+                                                                             Two Pratt & Whitney of Canada, Inc.
+                                                                             PW545B Turbofans
+
+                       S/N 560-6001 and on.
+                                                                             Two Pratt & Whitney of Canada, Inc.
+                       PW545C Turbofans
+
+--- PDF p51, lines 2808-2814  (match: /^ *Engine Limits: +S/N 560-5001 through 560-5500/)
+                                  Engine Limits:                             S/N 560-5001 through 560-5500
+                                                                             PW545A Turbofans
+
+                                                                             Static thrust standard day, sea level:
+
+                                                                             Takeoff (5 min.)            3952 lb.(1,793kg)
+                                                                             Max. continuous             3372 lb.(1,530kg)
+
+--- PDF p51, lines 2828-2834  (match: /^ *S/N 560-5501 and on$/)
+                                                                             S/N 560-5501 and on
+                                                                             PW545B Turbofans
+
+                                                                             Static thrust standard day, sea level:
+
+                                                                             Takeoff (5 min.)                                     4119 lb.(1,868kg)
+                                                                             Max. continuous                                      3372 lb.(1,530kg)
+
+--- PDF p51, lines 2847-2853  (match: /^ *S/N 560-6001 and on$/)
+                                                                             S/N 560-6001 and on
+                                                                             PW545C Turbofans
+
+                       Static thrust standard day, sea level:
+
+                                                                             Takeoff (5 min.)                                     4119 lb.(1,868kg)
+                                                                             Max. continuous                                      3372 lb.(1,530kg)
+
+--- PDF p53, lines 2950-2968  (match: /^ *13\. Maximum Certified Weights in lbs \(kg\)/)
+                13. Maximum Certified Weights in lbs (kg)
+                                                                             *S/N 560-5001 through 560-5500       * See Note 3.
+                                            Maximum Weight                   Takeoff          20,000 lb. (9,072 kg)
+                                                                             Landing          18,700 lb. (8,482 kg)
+                                                                             Zero fuel        15,000 lb.(6,804 kg)
+                                                                             Ramp             20,200 lb. (9,163 kg)
+                                            Minimum Weight                   Inflight         12,400 lb. (5,625 kg)
+
+                                                                             S/N 560-5501 and on
+                                            Maximum Weight                   Takeoff         20,200 lb. (9,163 kg)
+                                                                             Landing         18,700 lb. (8,482 kg)
+                                                                             Zero fuel       15,100 lb. (6,849 kg)
+                                                                             Ramp            20,400 lb. (9,253 kg)
+                                            Minimum Weight                   Inflight        12,400 lb. (5,625 kg)
+
+                                                                             S/N 560-6001 through 560-6317 and 560-6319 through 560-
+                                                                   6321
+                                            Maximum Weight                   Takeoff               20,200 lb. (9,163 kg)
+                                                                             Landing               18,700 lb. (8,482 kg)
+
+--- PDF p54, lines 2977-2986  (match: /^ *Zero fuel +15,100 lb\. \(6,849 kg\)/)
+                                                                             Zero fuel             15,100 lb. (6,849 kg)
+                                                                             Ramp                  20,400 lb. (9,253 kg)
+                                             Minimum Weight                  Inflight              12,400 lb. (5,625 kg)
+
+                                                                             S/N 560-6318 and 560-6322 and on
+                                             Maximum Weight                  Takeoff         20,330 lb. (9,222 kg)
+                                                                             Landing         18,700 lb. (8,482 kg)
+                                                                             Zero fuel       15,360lb. (6,967 kg)
+                                                                             Ramp            20,530 lb. (9,312 kg)
+                                             Minimum Weight                  Inflight        12,400 lb. (5,625 kg)
+
+--- PDF p55, lines 3067-3067  (match: /^ *NOTE 3 +Model 560XL aircraft, S/N 560-5001 through 560-5500, modified per SB560XL-32-28/)
+                NOTE 3                Model 560XL aircraft, S/N 560-5001 through 560-5500, modified per SB560XL-32-28:
+
+--- PDF p55, lines 3078-3080  (match: /^ *Maximum Weight *$/)
+                                                Maximum Weight
+                                                Takeoff      20,200 lb. (9,163 kg)
+                                                Landing      18,700 lb. (8,482 kg)

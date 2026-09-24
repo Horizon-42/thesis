@@ -110,12 +110,13 @@ def airborne_control_candidates(series: FlightSeries, anchors: Sequence[int]) ->
         series.values[candidate_indices][:, velocity_indices], axis=1
     )
     scenario = series.scenario
+    _aircraft, aero = scenario.dynamics("the control anchor's stall-speed gate")
     stall_speed = math.sqrt(
         2.0 * float(scenario.initial.m) * GRAVITY_MPS2
         / (
             SEA_LEVEL_DENSITY_KG_M3
-            * float(scenario.aero.S)
-            * float(scenario.aero.Cl_max)
+            * float(aero.S)
+            * float(aero.Cl_max)
         )
     )
     return candidate_indices[

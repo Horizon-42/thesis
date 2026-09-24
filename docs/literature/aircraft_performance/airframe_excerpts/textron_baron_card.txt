@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/baron_product_card.pdf  sha256: bfef90840da9287bc94fb7f0fb9c539709652f6d4acb77b4cdc2973ad1314cd7
+# id: textron_baron_card | Textron Aviation | Product card: Baron G58 | undated product card PDF
+# url: https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/baron_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 29-31  (match: /Power Output/)
+USB ports in both cockpit and cabin. Carbon monoxide
+(CO) detector installed.                                                                                                                                       Power Output                              300 hp ea 224 kW ea

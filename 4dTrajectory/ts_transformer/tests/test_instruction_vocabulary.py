@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -171,16 +172,29 @@ def _series(geometry, target_psi: float):
     times, values = channels_from_states(samples, frame)
     lat0, lon0 = frame.latlon_from_horizontal(0.0, 0.0)
     target = GeodeticState(latitude=lat0, longitude=lon0, altitude=100.0, V=70.0, psi=target_psi, gamma=0.0, m=6.0e4)
-    scenario = SimpleNamespace(source={"runway": "09"}, target=target, initial=samples[0][1],
-                               aircraft=SimpleNamespace(code="A320"))
+    # A GLF4 is flown as its substitute CRJ9 (aircraft/performance_index.json).
+    scenario = SimpleNamespace(source={"runway": "09", "resolved_typecode": "GLF4"}, target=target,
+                               initial=samples[0][1], aircraft=SimpleNamespace(code="CRJ9"))
     return SimpleNamespace(airport="KXXX", dataset_id="KXXX:turn", scenario=scenario, times=times, values=values,
                            frame=frame), samples
+
+
+def test_a_flight_without_dynamics_keeps_its_signals_and_names_no_type(geometry):
+    # `all-flights` keeps a flight whose type has no dynamics (or no identity): no aircraft,
+    # unknown mass. Its signals are kinematics only, and its type is None -- never an A320.
+    series, _ = _series(geometry, float(math_rad_from_compass(90.0)))
+    series.scenario.aircraft = None
+    series.scenario.initial = replace(series.scenario.initial, m=math.nan)
+    series.scenario.source["resolved_typecode"] = None
+    flight = signals_from_series(series, geometry)
+    assert flight.typecode is None
+    assert flight.ground_speed_mps.tolist() == pytest.approx([70.0 * math.cos(math.radians(3.0))] * 11)
 
 
 def test_signals_from_a_series_are_an_unwrapped_compass_track_in_the_airport_frame(geometry):
     series, samples = _series(geometry, float(math_rad_from_compass(90.0)))
     flight = signals_from_series(series, geometry)
-    assert flight.runway == "09" and flight.typecode == "A320"
+    assert flight.runway == "09" and flight.typecode == "GLF4"     # its own type, not the flown one
     assert flight.track_deg.tolist() == pytest.approx([350.0 + 2.0 * row for row in range(11)], abs=1e-6)
     assert flight.ground_speed_mps.tolist() == pytest.approx([70.0 * math.cos(math.radians(3.0))] * 11)
     assert flight.vertical_rate_mps.tolist() == pytest.approx([70.0 * math.sin(math.radians(3.0))] * 11)

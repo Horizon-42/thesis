@@ -4,6 +4,11 @@
 
 日期：2026-06-14
 
+**2026-09-24 更新**：目标速度不再是本文下面的建议值。后端机型目录的 `terminalSpeedKt` 是该机型公布的进近速度
+（`aircraft/reference_speeds.json`，FAA 飞机特性数据库）按着陆质量换算后的值；`terminalSpeedMinKt` / `terminalSpeedMaxKt`
+是阈值速度门在同一质量下的窗口 [V_ref,lo, V_ref,hi + 20 kt]，Pilot 面板的目标速度只能在这个范围里设。前端不再有
+145 / 135 / 155 kt 的缺省值；目录没加载时不显示目标编辑框。见 `flight_scenarios/docs/population_reference.md` FS5。
+
 本文档记录 AeroViz-4D 中哪些轨迹优化参数必须按飞机类型设计。它面向后续开发，不是飞行手册，也不代表真实机型认证数据。这里的数值优先服务于当前简化点质量动力学模型和 SLSQP 优化器的数值稳定性。
 
 ## 背景

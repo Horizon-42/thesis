@@ -11,7 +11,8 @@ from __future__ import annotations
 import unittest
 
 from aircraft.aero_params import aero_params_for_aircraft, stall_speed_ms
-from aircraft.query_aircraft_parameters import get_aircraft_parameters
+from aircraft.performance_index import index_entry
+from aircraft.query_aircraft_parameters import AircraftLookupError, get_aircraft_parameters
 from geokit import ms_to_kt
 
 
@@ -45,14 +46,19 @@ class A320FamilyLandingClMax(unittest.TestCase):
         self.assertLessEqual(floor_kt, 129.0)
 
 
-class AirframeIdentityCorrections(unittest.TestCase):
-    def test_c56x_carries_certificated_masses_not_the_c550_surrogate(self):
-        aircraft = get_aircraft_parameters("C56X")
-        self.assertEqual(aircraft.mass.max_takeoff_kg, 9072.0)
-        self.assertEqual(aircraft.mass.max_landing_kg, 8482.0)
-        self.assertEqual(aircraft.geometry.wing_area_m2, 34.35)
-        # landing_mass follows the corrected MLW.
-        self.assertEqual(aircraft.landing_mass, 8482.0)
+class C56XOwnParameters(unittest.TestCase):
+    def test_c56x_is_flown_with_its_own_certificated_facts_not_the_c550_surrogate(self):
+        # Since 2026-09-24 the C56X comes from the performance index's own-parameter row
+        # (FAA ACD masses, EASA TCDS wing area and PW545B/C take-off thrust), which replaced
+        # the airframe-identity correction patched over OpenAP's C550 synonym.
+        with self.assertRaises(AircraftLookupError):
+            get_aircraft_parameters("C56X")
+        aircraft = index_entry("C56X").aircraft
+        self.assertEqual(aircraft.code, "C56X")
+        self.assertEqual(aircraft.mass.max_takeoff_kg, 9163.0)    # FAA ACD 20,200 lb (XLS/XLS+)
+        self.assertEqual(aircraft.landing_mass, 8482.0)            # FAA ACD 18,700 lb
+        self.assertEqual(aircraft.geometry.wing_area_m2, 34.4)     # EASA IM.A.207, 369.7 sq ft
+        self.assertEqual(aircraft.engine.max_thrust_total_n, 2 * 18320.0)
 
 
 if __name__ == "__main__":

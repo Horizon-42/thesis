@@ -70,6 +70,8 @@ from ts_transformer.data.approach_difficulty import STRATUM_ALL, STRATUM_VECTORE
 from ts_transformer.data.batch_contract import model_forward  # noqa: E402
 from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
+    AIRCRAFT_FILTER_MODELLED,
+    AIRCRAFT_FILTERS_WITH_DYNAMICS,
     CONTROL_HOOK_OFF,
     CONTROL_IMITATION_TARGET_INVERSE_DYNAMICS,
     CONTROL_RECIPE_CUSTOM,
@@ -195,6 +197,11 @@ def basis_config(config_dict: dict, n_segments: int, device: str) -> TSConfig:
     # would have been swallowed here instead of refused.
     payload = TSConfig.from_dict(config_dict).to_dict()
     payload.update(_RECIPE_OVERRIDES)
+    # A state seed keeps flights without aircraft dynamics (`all-flights`); the control fit
+    # needs dynamics, so it reads the seed's cohort under `modelled` -- the flights the seed's
+    # own predict scored (it skips the rest). `openap-direct` is kept as it is (C31).
+    if payload["aircraft_filter"] not in AIRCRAFT_FILTERS_WITH_DYNAMICS:
+        payload["aircraft_filter"] = AIRCRAFT_FILTER_MODELLED
     payload["n_segments"] = int(n_segments)
     payload["device"] = device
     # Through `from_dict` once more: the seed may be a state or closure checkpoint, whose
@@ -769,7 +776,6 @@ def run_teacher_fit(
     built, report = build_series(
         load_flight_dicts(manifests, include_flight_keys=set(wanted), verbose=False),
         config,
-        aircraft_type=config.aircraft_type,
     )
     print(report.format(), flush=True)
     by_id = {item.dataset_id: item for item in usable_series(built, config, verbose=False)}

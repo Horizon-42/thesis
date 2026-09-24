@@ -21,7 +21,12 @@ See ``flight_scenarios/README.md`` for the architecture and the start-state math
 
 from __future__ import annotations
 
-from .build import build_scenario, build_scenarios_from_arrivals, load_model_arrivals
+from .build import (
+    NoAircraftDynamics,
+    build_scenario,
+    build_scenarios_from_arrivals,
+    load_model_arrivals,
+)
 from .datum import flights_to_msl, geoid_undulation_m
 from .fitted_approach import FittedApproach, TimedFittedPoint, fit_flight_final_approach
 from .identity import flight_key
@@ -35,6 +40,7 @@ from .start_state import (
 
 __all__ = [
     "FlightScenario",
+    "NoAircraftDynamics",
     "build_scenario",
     "build_scenarios_from_arrivals",
     "load_model_arrivals",

@@ -1,11 +1,17 @@
 # Reference approach speeds and weights - provenance pack
 
 Generated 2026-09-07; minimum masses extended 2026-09-23 (see [2026-09-23: type certificate data
-sheets](#2026-09-23-type-certificate-data-sheets)). Machine-readable table: [`aircraft/reference_speeds.json`](../../aircraft/reference_speeds.json)
+sheets](#2026-09-23-type-certificate-data-sheets)); 21 rows added 2026-09-23/24 for the aircraft model's
+approach speed (see [2026-09-23: rows for the aircraft model](#2026-09-23-rows-for-the-aircraft-model)). Machine-readable table: [`aircraft/reference_speeds.json`](../../aircraft/reference_speeds.json)
 (schema `aircraft-reference-speeds-v1`). Verbatim backing excerpts: [`excerpts/`](excerpts/).
 
 This pack exists so that every approach speed and every mass used by the evaluation gate can be
-traced, in one hop, to a page of a published document that is on this disk.
+traced, in one hop, to a page of a published document that is on this disk. Since 2026-09-24 the
+same table also sets the aircraft model's approach speed (`aircraft.aircraft_sets.Approach.speeds`;
+`reference_speed_ms(m)` applies the gate's own sqrt(m / MALW) law: the scenario target's V, the
+optimizer's `runway`-mode terminal speed and speed floor, the Pilot panel's target range), so a row
+edited here moves both the gate and the model. Evaluation reports record the table's sha256 and row
+count (`methodology.terminal_speed.reference_speeds`) from 2026-09-24.
 
 **172 types.** The pack was built in two passes. The first covered the **40 types the optimizer
 already has dynamics for** (the table under [Per-type table](#per-type-table)). The second, on the
@@ -987,6 +993,55 @@ Most are helicopters (B407, EC20, AS50/AS55/AS65, H60, B06, B429, H269, A119), h
 C82T/C82S, T206, G200). The two largest, **C82T** (23 rows, Cessna Turbo Skylane) and **T206**
 (12 rows, Turbo Stationair HD), do have current Textron product cards - the missing piece is the
 FAA *speed*, not the mass, so the cards were not downloaded.
+
+## 2026-09-23: rows for the aircraft model
+
+The aircraft model now takes every airframe's approach speed from this table
+(`flight_scenarios/docs/population_reference.md` FS5), so every type it has dynamics for needs a row.
+18 of the 59 (OpenAP-supported types + presets) had none, because the pack was built from the
+observed cohort. They were added from the **same FAA spreadsheet** (`faa_acd_2024_10`, sha256
+`3e68848b…c8fcb3`) by the same rules as the other FAA rows: `approach_speed_kt` / `_min_kt` / `_max_kt`
+= `Approach_Speed_knot` / `_minimum_knot` / `_maximum_knot` (the main value where the FAA gives one),
+`malw_kg` = `MALW_lb` x 0.45359237 rounded to the kilogram, the note = the row's `Remarks` cell
+verbatim. No minimum mass is recorded for them (the aircraft model does not read one). The rows
+are reproducible from the spreadsheet with these rules alone.
+
+| type | approach speed kt | min–max | MALW kg | MALW note | FAA Remarks |
+|---|---:|---|---:|---|---|
+| A124 | 151 | 151–151 | 330,000 | MALW_lb 727,525 | the FAA row carries no Remarks entry. |
+| A19N | 130 | 130–130 | 62,500 | MALW_lb 137,789 | AAC validated by Flight Standardization Board (FSB) report. |
+| A310 | 139 | 139–139 | 123,999 | MALW_lb 273,372 | AAC validated by Flight Standardization Board (FSB) report. |
+| A318 | 121 | 121–121 | 57,500 | MALW_lb 126,766 | AAC validated by Flight Standardization Board (FSB) report. |
+| A388 | 138 | 138–138 | 394,000 | MALW_lb 868,621 | AAC validated by Flight Standardization Board (FSB) report. |
+| AT72 | 114 | 114–114 | 21,350 | MALW_lb 47,068 | the FAA row carries no Remarks entry. |
+| AT75 | 120 | 120–120 | 21,850 | MALW_lb 48,171 | the FAA row carries no Remarks entry. |
+| AT76 | 113 | 113–113 | 22,350 | MALW_lb 49,273 | the FAA row carries no Remarks entry. |
+| B37M | 145 | 140–145 | 66,043 | MALW_lb 145,600 | Depending on flaps configuration and MALW, AAC could be C. AAC validated by Flight Standardization Board (FSB) report. |
+| B733 | 135 | 135–135 | 52,526 | MALW_lb 115,800 | AAC validated by Flight Standardization Board (FSB) report. |
+| B744 | 157 | 157–157 | 285,763 | MALW_lb 630,000 | AAC validated by Flight Standardization Board (FSB) report. |
+| B748 | 159 | 159–159 | 312,072 | MALW_lb 688,000 | AAC validated by Flight Standardization Board (FSB) report. |
+| B773 | 149 | 149–149 | 237,682 | MALW_lb 524,000 | AAC validated by Flight Standardization Board (FSB) report. |
+| B77L | 140 | 140–140 | 260,816 | MALW_lb 575,000 | AAC validated by Flight Standardization Board (FSB) report. |
+| E195 | 135 | 135–135 | 45,800 | MALW_lb 100,972 | AAC validated by Flight Standardization Board (FSB) report. |
+| E290 | 125 | 125–125 | 49,050 | MALW_lb 108,136 | AAC validated by Flight Standardization Board (FSB) report. |
+| MD11 | 158 | 158–158 | 195,045 | MALW_lb 430,000 | AAC validated by Flight Standardization Board (FSB) report. |
+| SU95 | 140 | 140–140 | 41,000 | MALW_lb 90,390 | the FAA row carries no Remarks entry. |
+
+Three more rows were added on 2026-09-24 by the same rules, for the types the aircraft performance
+index (`aircraft/performance_index.json`) flies with their own Poll–Schumann parameters: they are in
+the FAA spreadsheet but arrived with the 2026-08-22 → 09-22 download, after this pack was built.
+
+| type | approach speed kt | min–max | MALW kg | MALW note | FAA Remarks |
+|---|---:|---|---:|---|---|
+| A339 | 140 | 140–140 | 190,999 | MALW_lb 421,080 | AAC validated by Flight Standardization Board (FSB) report. |
+| B753 | 143 | 143–143 | 101,605 | MALW_lb 224,000 | the FAA row carries no Remarks entry. |
+| MD82 | 135 | 135–135 | 58,967 | MALW_lb 130,000 | the FAA row carries no Remarks entry. |
+
+**B3XM** (737 MAX 10) is the one OpenAP type with no FAA row, so it gets none and the aircraft model
+refuses it. In the 2026-09-23 train/val census (the test split was not resolved) the only one of
+these 18 types is B744, with 1 train flight; wherever a B744 or any of the others appears in an
+observed report, the speed gate can now grade it where it said "no published approach speed"
+before. That changes verdicts only when a report is regenerated.
 
 ## 2026-09-23: type certificate data sheets
 

@@ -1,0 +1,200 @@
+typecode,segment,status_now,train_flights,val_flights,faa_engine_class,faa_aac,faa_approach_speed_kt,approach_speed_ms,faa_mtow_kg,faa_malw_kg,wing_area_m2,wing_area_source,thrust_total_kN,thrust_source,power_total_kW,thrust_to_weight,stall_margin_now,recommendation,recommendation_zh,model_code_after,stall_margin_after,stall_margin_own_mass_and_area,nearest_existing,nearest_existing_engine,nearest_existing_aac,nearest_existing_class_match,nearest_existing_stall_margin,second_nearest_existing,similarity_distance_nearest,distance_speed_term,distance_thrust_to_weight_term,similarity_distance_A320,ps_model_code,stall_margin_ps,notes
+BCS3,airliner,A320,1760,409,Jet,C,135.0,69.4,70900,60600,112.3,airbus_a220_acp_i013,217.1,easa_tcds_im_e_090_i10,,0.312,1.29,own parameters (primary documents),用本机参数（一手文件）,BCS3,1.23,1.23,E195,Jet,C,True,1.29,A320,0.005,0.0,0.005,0.02,BCS3,1.24,PS wing area 115 m2 differs from the primary document 112.3 m2
+P28A,piston_ga,A320,1335,306,Piston,A,70.0,36.0,1107,966,15.79,easa_tcds_im_a_234_i8,,,119,,0.67,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.71,C172,Piston,A,True,1.71,,0.243,0.243,,1.328,,,
+CRJ7,airliner,A320,808,191,Jet,C,135.0,69.4,34019,30391,70.61,bombardier_crj700_apm_r15,112.7,easa_tcds_im_e_053_i4,,0.338,1.29,own parameters (primary documents),用本机参数（一手文件）,CRJ7,1.37,1.37,GLF6,Jet,C,True,1.6,E195,0.04,0.029,0.011,0.089,CRJ9,1.3,
+E55P,business_jet,A320,778,168,Jet,B,116.0,59.7,8150,7568,28.5,easa_tcds_im_a_158_i11,29.9,easa_tcds_im_e_048_i4,,0.374,1.11,own parameters (primary documents),用本机参数（一手文件）,E55P,1.36,1.36,C550,Jet,B,True,1.51,,0.321,0.199,0.122,0.494,,,
+BCS1,airliner,A320,607,127,Jet,C,130.0,66.9,63095,54200,112.3,airbus_a220_acp_i013,217.1,easa_tcds_im_e_090_i10,,0.351,1.24,own parameters (primary documents),用本机参数（一手文件）,BCS1,1.25,1.25,B737,Jet,C,True,1.27,E170,0.029,0.0,0.029,0.202,BCS1,1.28,PS wing area 115 m2 differs from the primary document 112.3 m2
+CL35,business_jet,A320,585,101,Jet,C,124.0,63.8,18416,15490,48.5,easa_tcds_im_a_080_i11,66.8,easa_tcds_im_e_058_i10,,0.37,1.19,own parameters (primary documents),用本机参数（一手文件）,CL35,1.32,1.32,E170,Jet,C,True,1.23,E145,0.038,0.0,0.038,0.349,,,
+C68A,business_jet,A320,523,104,Jet,B,100.0,51.4,13971,12508,50.4,easa_tcds_im_a_033_i9,52.5,easa_tcds_im_e_051_i4,,0.383,0.96,own parameters (primary documents),用本机参数（一手文件）,C68A,1.21,1.21,C550,Jet,B,True,1.3,,0.244,0.098,0.147,0.816,,,
+PC12,turboprop,A320,336,73,Turboprop,A,85.0,43.7,4740,4500,25.81,easa_tcds_a_089_i11,,,895,,0.81,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.23,C550,Jet,B,False,1.11,C172,0.423,0.423,,0.94,,,
+C700,business_jet,A320,335,70,Jet,C,121.0,62.2,17917,15195,49.91,easa_tcds_im_a_620_i3,68.1,easa_tcds_im_e_058_i10,,0.387,1.16,own parameters (primary documents),用本机参数（一手文件）,C700,1.32,1.32,E170,Jet,C,True,1.2,E145,0.134,0.049,0.085,0.445,,,
+C56X,business_jet,OpenAP 同义 C550,327,62,Jet,B,116.0,59.7,9163,8482,34.4,easa_tcds_im_a_207_i10,36.6,easa_tcds_im_e_013_i3,,0.408,1.41,own parameters (primary documents),用本机参数（一手文件）,C56X,1.41,1.41,C550,Jet,B,True,1.51,,0.407,0.199,0.208,0.58,,,
+CL60,business_jet,A320,256,59,Jet,C,137.0,70.5,21591,17237,,,77.7,easa_tcds_im_e_233_i3,,0.367,1.31,surrogate GLF6,改用 GLF6,GLF6,1.62,,GLF6,Jet,C,True,1.62,B752,0.071,0.0,0.071,0.171,,,
+CL30,business_jet,A320,254,51,Jet,C,126.0,64.8,17622,15309,48.5,easa_tcds_im_a_080_i11,61.5,easa_tcds_im_e_058_i10,,0.356,1.21,own parameters (primary documents),用本机参数（一手文件）,CL30,1.35,1.35,E170,Jet,C,True,1.25,B737,0.033,0.032,0.001,0.278,,,
+E545,business_jet,A320,222,47,Jet,B,111.0,57.1,16204,14750,44.85,easa_tcds_im_a_526_i12,59.1,easa_tcds_im_a_526_i12,,0.372,1.06,own parameters (primary documents),用本机参数（一手文件）,E545,1.17,1.17,C550,Jet,B,True,1.45,,0.227,0.111,0.115,0.576,,,
+C25B,business_jet,A320,214,42,Jet,B,108.0,55.6,6291,5783,27.32,easa_tcds_im_a_078_i19,25.1,easa_tcds_im_e_016_i13,,0.406,1.03,own parameters (primary documents),用本机参数（一手文件）,C25B,1.42,1.42,C550,Jet,B,True,1.41,,0.261,0.056,0.205,0.72,,,
+C208,turboprop,A320,202,53,Turboprop,A,79.0,40.6,4110,3538,25.96,easa_tcds_im_a_226_i15,,,503,,0.76,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.29,C172,Piston,A,False,1.93,C550,0.485,0.485,,1.086,,,
+B712,airliner,A320,188,32,Jet,C,139.0,71.5,53524,45359,92.97,easa_tcds_im_a_211_i3,190.7,easa_tcds_e_023_i1,,0.363,1.33,own parameters (primary documents),用本机参数（一手文件）,B712,1.33,1.33,GLF6,Jet,C,True,1.65,B752,0.091,0.029,0.062,0.19,B712,1.29,
+E75S,airliner,A320,183,49,Jet,C,124.0,63.8,37500,34000,72.72,easa_tcds_im_a_001_i13,125.0,easa_tcds_im_e_053_i4,,0.34,1.19,own parameters (primary documents),用本机参数（一手文件）,E75S,1.21,1.21,E170,Jet,C,True,1.23,E145,0.046,0.0,0.046,0.265,E75S,1.29,PS wing area 83 m2 differs from the primary document 72.72 m2
+GLF4,business_jet,A320,175,43,Jet,D,144.0,74.1,33203,29937,,,123.2,easa_tcds_e_063_i6,,0.378,1.38,surrogate CRJ9,改用 CRJ9,CRJ9,1.4,,CRJ9,Jet,D,True,1.4,B738,0.198,0.042,0.156,0.302,,,
+B350,turboprop,A320,172,51,Turboprop,B,107.0,55.0,6804,6804,27.87,easa_tcds_im_a_277_i22,,,1566,,1.02,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.31,C550,Jet,B,False,1.4,A318,0.038,0.038,,0.48,,,
+GLF5,business_jet,OpenAP 同义 GLF6,163,35,Jet,C,136.0,70.0,41050,34156,105.56,PS,137.5,PS F00,,0.342,1.61,keep OpenAP synonym (GLF6),保留 OpenAP 的同义机型 GLF6,GLF6,1.61,1.6,GLF6,Jet,C,True,1.61,A320,0.015,0.015,0.0,0.085,GLF5,1.6,
+C750,business_jet,A320,159,24,Jet,C,131.0,67.4,16375,14424,48.96,easa_tcds_im_a_097_i3,60.2,easa_tcds_im_e_044_i5,,0.375,1.25,own parameters (primary documents),用本机参数（一手文件）,C750,1.46,1.46,B737,Jet,C,True,1.28,E170,0.11,0.015,0.095,0.252,,,
+GLEX,business_jet,A320,159,28,Jet,C,131.0,67.4,45132,35652,,,131.2,easa_tcds_e_018_i16,,0.296,1.25,surrogate A19N,改用 A19N,A19N,1.3,,A19N,Jet,C,True,1.3,A319,0.033,0.015,0.018,0.132,,,
+S22T,piston_ga,A320,157,28,Piston,A,77.0,39.6,1633,1633,13.46,easa_tcds_im_a_007_i19,,,235,,0.74,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.33,C172,Piston,A,True,1.88,,0.433,0.433,,1.138,,,
+G280,business_jet,A320,156,33,Jet,C,125.0,64.3,17962,14832,,,66.1,easa_tcds_im_a_348_i6,,0.375,1.2,surrogate E170,改用 E170,E170,1.24,,E170,Jet,C,True,1.24,E145,0.068,0.016,0.052,0.347,,,
+SR22,piston_ga,A320,148,37,Piston,A,78.0,40.1,1070,1542,13.46,easa_tcds_im_a_007_i19,,,231,,0.75,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.39,C172,Piston,A,True,1.91,,0.459,0.459,,1.112,,,
+A306,airliner,OpenAP 同义 A332,145,33,Jet,C,137.0,70.5,164999,137996,260.0,PS,524.9,PS F00,,0.324,1.22,keep OpenAP synonym (A332),保留 OpenAP 的同义机型 A332,A332,1.22,1.18,B752,Jet,C,True,1.21,A20N,0.03,0.0,0.03,0.048,A306,1.18,
+H25B,business_jet,A320,127,27,Jet,C,137.0,70.5,12701,10591,,,42.3,faa_tcds_e6we_r18,,0.339,1.31,surrogate GLF6,改用 GLF6,GLF6,1.62,,GLF6,Jet,C,True,1.62,B752,0.007,0.0,0.007,0.093,,,
+C680,business_jet,A320,120,16,Jet,B,108.0,55.6,13744,12292,47.93,easa_tcds_im_a_033_i9,51.3,easa_tcds_im_e_051_i4,,0.381,1.03,own parameters (primary documents),用本机参数（一手文件）,C680,1.29,1.29,C550,Jet,B,True,1.41,,0.196,0.056,0.14,0.655,,,
+LJ45,business_jet,OpenAP 同义 GLF6,113,20,Jet,C,123.0,63.3,9752,8709,,,,,,,1.46,keep OpenAP synonym (GLF6),保留 OpenAP 的同义机型 GLF6,GLF6,1.46,,E145,Jet,C,True,1.21,E170,0.016,0.016,,0.201,,,thrust-to-weight not checked (no thrust from a primary document)
+C560,business_jet,A320,107,13,Jet,B,103.0,53.0,7394,6895,31.83,easa_tcds_im_a_207_i10,27.1,faa_tcds_e45ne_orig,,0.373,0.99,own parameters (primary documents),用本机参数（一手文件）,C560,1.33,1.33,C550,Jet,B,True,1.34,,0.159,0.038,0.121,0.73,,,
+BE20,turboprop,A320,100,15,Turboprop,B,107.0,55.0,5670,5670,28.1496,easa_tcds_im_a_277_i22,,,1268,,1.02,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.44,C550,Jet,B,False,1.4,A318,0.038,0.038,,0.48,,,
+GA6C,business_jet,A320,89,12,Jet,C,129.0,66.4,42910,34836,,,142.4,easa_tcds_im_e_096_i7,,0.338,1.24,surrogate B737,改用 B737,B737,1.26,,B737,Jet,C,True,1.26,E75L,0.022,0.015,0.007,0.182,,,
+GL7T,business_jet,A320,88,23,Jet,C,125.0,64.3,48194,38918,,,168.3,easa_tcds_im_e_113_i6,,0.356,1.2,surrogate E170,改用 E170,E170,1.24,,E170,Jet,C,True,1.24,E145,0.017,0.016,0.001,0.295,,,FAA AAC column B contradicts its approach speed; category C from the speed
+GL5T,business_jet,OpenAP 同义 GLF6,82,18,Jet,C,128.0,65.8,41957,35652,,,,,,,1.52,keep OpenAP synonym (GLF6),保留 OpenAP 的同义机型 GLF6,GLF6,1.52,,B737,Jet,C,True,1.25,A19N,0.031,0.031,,0.121,,,thrust-to-weight not checked (no thrust from a primary document)
+F2TH,business_jet,A320,80,12,Jet,C,130.0,66.9,19232,17826,49.0,easa_tcds_a_008_i13,62.3,easa_tcds_im_e_057_i6,,0.33,1.24,own parameters (primary documents),用本机参数（一手文件）,F2TH,1.3,1.3,B737,Jet,C,True,1.27,E75L,0.031,0.0,0.031,0.142,,,
+BE36,piston_ga,A320,77,17,Piston,A,77.0,39.6,1656,1656,16.82,easa_tcds_im_a_279_i3,,,224,,0.74,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.48,C172,Piston,A,True,1.88,,0.433,0.433,,1.138,,,
+CRJ2,airliner,OpenAP 同义 E145,75,11,Jet,D,141.0,72.5,21523,20276,,,,,,,1.38,surrogate CRJ9,改用 CRJ9,CRJ9,1.38,,CRJ9,Jet,D,True,1.38,A321,0.0,0.0,,0.072,,,thrust-to-weight not checked (no thrust from a primary document)
+C25M,business_jet,A320,73,11,Jet,B,100.0,51.4,4853,4491,22.3,easa_tcds_im_a_078_i19,17.5,easa_tcds_im_a_078_i19,,0.367,0.96,own parameters (primary documents),用本机参数（一手文件）,C25M,1.34,1.34,C550,Jet,B,True,1.3,,0.201,0.098,0.104,0.773,,,
+SF50,business_jet,A320,69,16,Jet,A,87.0,44.8,2722,,18.18,easa_tcds_im_a_615_i6,8.2,easa_tcds_im_e_016_i13,,0.308,0.83,no airframe of the same propulsion class and approach category: exclude or new data,排除：模型里没有同动力、同进近类别的机型,,,,C550,Jet,B,False,1.13,A318,0.45,0.376,0.074,0.913,,,
+PC24,business_jet,OpenAP 同义 C550,68,13,Jet,B,107.0,55.0,8301,7666,,,,,,,1.4,keep OpenAP synonym (C550),保留 OpenAP 的同义机型 C550,C550,1.4,,C550,Jet,B,True,1.4,,0.038,0.038,,0.48,,,thrust-to-weight not checked (no thrust from a primary document)
+DA40,piston_ga,A320,64,17,Piston,A,77.0,39.6,1310,1092,13.244,easa_tcds_im_a_022_i24,,,124,,0.74,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.62,C172,Piston,A,True,1.88,,0.433,0.433,,1.138,,,
+BE58,piston_ga,A320,63,15,Piston,B,95.0,48.9,2495,2449,18.5,easa_tcds_im_a_280_i4,,,448,,0.91,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.57,C550,Jet,B,False,1.24,A318,0.2,0.2,,0.718,,,
+BE40,business_jet,A320,62,12,Jet,B,114.0,58.6,7303,7121,,,26.4,easa_tcds_im_e_077_i1,,0.368,1.09,surrogate C550,改用 C550,C550,1.49,,C550,Jet,B,True,1.49,,0.271,0.164,0.107,0.513,,,
+C25A,business_jet,OpenAP 同义 C550,61,14,Jet,B,114.0,58.6,5670,5228,,,,,,,1.49,keep OpenAP synonym (C550),保留 OpenAP 的同义机型 C550,C550,1.49,,C550,Jet,B,True,1.49,,0.164,0.164,,0.353,,,thrust-to-weight not checked (no thrust from a primary document)
+C408,turboprop,A320,60,16,,,,,,,,,,,1656,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+LJ60,business_jet,A320,59,12,Jet,C,125.0,64.3,10319,8845,,,40.9,easa_tcds_im_a_212_i4,,0.404,1.2,surrogate E170,改用 E170,E170,1.24,,E170,Jet,C,True,1.24,E145,0.144,0.016,0.128,0.422,,,
+E550,business_jet,A320,52,11,Jet,B,113.0,58.1,17400,15660,44.85,easa_tcds_im_a_526_i12,63.5,easa_tcds_im_a_526_i12,,0.372,1.08,own parameters (primary documents),用本机参数（一手文件）,E550,1.15,1.15,C550,Jet,B,True,1.47,,0.264,0.147,0.117,0.541,,,
+F900,business_jet,A320,52,10,Jet,C,130.0,66.9,22226,20185,,,66.7,easa_tcds_im_e_011_i8,,0.306,1.24,surrogate A19N,改用 A19N,A19N,1.29,,A19N,Jet,C,True,1.29,E75L,0.05,0.0,0.05,0.115,,,
+C25C,business_jet,A320,51,13,Jet,B,111.0,57.1,7761,7103,30.67,easa_tcds_im_a_078_i19,32.2,easa_tcds_im_e_016_i13,,0.423,1.06,own parameters (primary documents),用本机参数（一手文件）,C25C,1.39,1.39,C550,Jet,B,True,1.45,,0.356,0.111,0.245,0.705,,,
+C525,business_jet,OpenAP 同义 C550,47,13,Jet,B,108.0,55.6,4853,4491,,,,,,,1.41,keep OpenAP synonym (C550),保留 OpenAP 的同义机型 C550,C550,1.41,,C550,Jet,B,True,1.41,,0.056,0.056,,0.461,,,thrust-to-weight not checked (no thrust from a primary document)
+TBM9,turboprop,A320,47,6,Turboprop,A,85.0,43.7,3354,3186,18.0,easa_tcds_a_010_i22,,,634,,0.81,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.22,C550,Jet,B,False,1.11,C172,0.423,0.423,,0.94,,,
+GALX,business_jet,A320,45,13,Jet,C,130.0,66.9,16171,13608,,,53.7,easa_tcds_im_e_051_i4,,0.339,1.24,surrogate B737,改用 B737,B737,1.27,,B737,Jet,C,True,1.27,GLF6,0.006,0.0,0.006,0.167,,,
+BE9L,turboprop,A320,43,11,Turboprop,B,100.0,51.4,4756,4354,27.308,easa_tcds_im_a_503_i9,,,820,,0.96,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,1.51,C550,Jet,B,False,1.3,A318,0.098,0.098,,0.615,,,
+P28R,piston_ga,A320,43,6,Piston,A,73.0,37.6,1251,1315,,,,,149,,0.7,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.79,,0.327,0.327,,1.244,,,
+BE35,piston_ga,A320,40,7,Piston,A,72.0,37.0,1542,1542,,,,,,,0.69,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.76,,0.299,0.299,,1.272,,,
+GA7C,business_jet,A320,40,7,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+C82T,piston_ga,A320,39,10,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+P180,turboprop,A320,39,9,Turboprop,C,121.0,62.2,5466,5216,,,,,,,1.16,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,A318,Jet,C,False,1.24,E145,0.0,0.0,,0.234,,,
+PA38,piston_ga,A320,38,10,Piston,A,60.0,30.9,757,757,,,,,,,0.57,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.47,,0.066,0.066,,1.637,,,
+AT43,airliner,A320,37,10,Turboprop,B,104.0,53.5,16704,16402,,,,,,,1.0,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.36,A318,0.019,0.019,,0.537,,,
+T210,piston_ga,A320,35,6,Piston,A,73.0,37.6,1724,1724,,,,,,,0.7,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.79,,0.327,0.327,,1.244,,,
+HDJT,business_jet,A320,34,0,Jet,B,111.0,57.1,4100,4472,,,,,,,1.06,surrogate C550,改用 C550,C550,1.45,,C550,Jet,B,True,1.45,,0.111,0.111,,0.406,,,thrust-to-weight not checked (no thrust from a primary document)
+PRM1,business_jet,A320,34,9,Jet,B,120.0,61.7,5670,5262,22.9,easa_tcds_im_a_073_i2,20.5,easa_tcds_im_e_016_i13,,0.368,1.15,own parameters (primary documents),用本机参数（一手文件）,PRM1,1.51,1.51,C550,Jet,B,True,1.56,,0.373,0.267,0.106,0.41,,,
+GA5C,business_jet,A320,32,10,Jet,C,132.0,67.9,36106,29189,,,,,,,1.26,surrogate B737,改用 B737,B737,1.29,,B737,Jet,C,True,1.29,A19N,0.031,0.031,,0.06,,,thrust-to-weight not checked (no thrust from a primary document)
+M20P,piston_ga,A320,30,8,Piston,A,77.0,39.6,1530,1451,,,,,,,0.74,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.88,,0.433,0.433,,1.138,,,
+P46T,turboprop,A320,28,3,Turboprop,A,75.0,38.6,2310,2200,,,,,,,0.72,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,False,1.84,C550,0.381,0.381,,1.19,,,
+C425,turboprop,A320,26,7,Turboprop,B,98.0,50.4,3901,3629,,,,,,,0.94,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.28,A318,0.138,0.138,,0.655,,,
+C510,business_jet,A320,26,4,Jet,B,105.0,54.0,3921,3629,,,,,,,1.01,surrogate C550,改用 C550,C550,1.37,,C550,Jet,B,True,1.37,,0.0,0.0,,0.517,,,thrust-to-weight not checked (no thrust from a primary document)
+FA7X,business_jet,A320,26,6,Jet,B,104.0,53.5,31751,28304,,,,,,,1.0,surrogate C550,改用 C550,C550,1.36,,C550,Jet,B,True,1.36,,0.019,0.019,,0.537,,,thrust-to-weight not checked (no thrust from a primary document)
+GA8C,business_jet,A320,25,6,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+C650,business_jet,A320,24,7,Jet,C,126.0,64.8,10433,7711,,,,,,,1.21,surrogate E75L,改用 E75L,E75L,1.23,,E75L,Jet,C,True,1.23,A319,0.0,0.0,,0.153,,,thrust-to-weight not checked (no thrust from a primary document)
+EPIC,turboprop,A320,24,3,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+FA50,business_jet,A320,24,8,Jet,C,124.0,63.8,18008,16200,,,,,,,1.19,surrogate E145,改用 E145,E145,1.22,,E145,Jet,C,True,1.22,E170,0.0,0.0,,0.185,,,thrust-to-weight not checked (no thrust from a primary document)
+P32R,piston_ga,A320,24,6,Piston,A,80.0,41.2,1633,1633,,,,,,,0.77,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.96,,0.51,0.51,,1.061,,,
+BE30,turboprop,A320,23,4,Turboprop,B,107.0,55.0,6350,6350,,,,,,,1.02,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.4,A318,0.038,0.038,,0.48,,,
+BE95,piston_ga,A320,21,1,Piston,A,79.0,40.6,1905,,,,,,,,0.76,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.93,,0.485,0.485,,1.086,,,
+E50P,business_jet,A320,21,4,Jet,B,100.0,51.4,4800,4430,,,,,,,0.96,surrogate C550,改用 C550,C550,1.3,,C550,Jet,B,True,1.3,,0.098,0.098,,0.615,,,thrust-to-weight not checked (no thrust from a primary document)
+LJ31,business_jet,A320,19,9,Jet,B,120.0,61.7,7031,6940,,,,,,,1.15,surrogate C550,改用 C550,C550,1.56,,C550,Jet,B,True,1.56,,0.267,0.267,,0.25,,,surrogate is not closer than A320 in similarity distance; thrust-to-weight not checked (no thrust from a primary document)
+C150,piston_ga,A320,18,4,Piston,A,55.0,28.3,726,726,,,,,,,0.53,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.35,,0.24,0.24,,1.811,,,
+A30B,airliner,A320,17,3,Jet,C,137.0,70.5,164999,136000,260.0,PS,466.2,PS F00,,0.288,1.31,PS parameters (A30B),用 PS 本机参数（A30B）,A30B,1.2,1.19,A332,Jet,C,True,1.22,B734,0.029,0.015,0.014,0.1,A30B,1.2,
+BT36,piston_ga,A320,17,0,Piston,A,73.0,37.6,1746,1746,,,,,,,0.7,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.79,,0.327,0.327,,1.244,,,
+E35L,business_jet,A320,17,3,Jet,C,124.0,63.8,20000,18500,,,,,,,1.19,surrogate E145,改用 E145,E145,1.22,,E145,Jet,C,True,1.22,E170,0.0,0.0,,0.185,,,thrust-to-weight not checked (no thrust from a primary document)
+C182,piston_ga,A320,16,6,Piston,A,65.0,33.4,1406,1338,,,,,,,0.62,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.59,,0.095,0.095,,1.477,,,
+DA42,piston_ga,A320,16,4,Piston,A,88.0,45.3,1785,1700,,,,,,,0.84,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,2.15,,0.7,0.7,,0.871,,,
+G150,business_jet,A320,15,2,Jet,C,130.0,66.9,11839,9843,,,,,,,1.24,surrogate B737,改用 B737,B737,1.27,,B737,Jet,C,True,1.27,A19N,0.0,0.0,,0.09,,,thrust-to-weight not checked (no thrust from a primary document)
+PA34,piston_ga,A320,15,4,Piston,A,81.0,41.7,2155,2047,,,,,,,0.78,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.98,,0.535,0.535,,1.036,,,
+PA46,piston_ga,A320,15,6,Piston,A,75.0,38.6,1969,1769,,,,,,,0.72,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.84,,0.381,0.381,,1.19,,,
+AA5,piston_ga,A320,14,2,Piston,A,69.0,35.5,998,998,,,,,,,0.66,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.69,,0.214,0.214,,1.357,,,
+C340,piston_ga,A320,14,2,Piston,B,94.0,48.4,2717,2717,,,,,,,0.9,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.23,A318,0.221,0.221,,0.739,,,
+C82R,piston_ga,A320,14,2,Piston,A,64.0,32.9,1406,1338,,,,,,,0.61,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.57,,0.063,0.063,,1.508,,,
+TBM7,turboprop,A320,14,5,Turboprop,A,74.0,38.1,3000,2835,,,,,,,0.71,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,False,1.81,C550,0.354,0.354,,1.217,,,
+C414,piston_ga,A320,12,2,Piston,B,95.0,48.9,3062,3062,,,,,,,0.91,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.24,A318,0.2,0.2,,0.718,,,
+PA32,piston_ga,A320,12,2,Piston,A,78.0,40.1,1633,1633,,,,,,,0.75,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.91,,0.459,0.459,,1.112,,,
+PA44,piston_ga,A320,12,2,Piston,A,66.0,34.0,1724,1724,,,,,,,0.63,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.62,,0.125,0.125,,1.446,,,
+SR20,piston_ga,A320,12,3,Piston,A,74.0,38.1,964,1315,,,,,,,0.71,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.81,,0.354,0.354,,1.217,,,
+SW4,turboprop,A320,12,4,Turboprop,B,112.0,57.6,7257,7110,,,,,,,1.07,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.46,A318,0.129,0.129,,0.388,,,
+FA8X,business_jet,A320,11,2,Jet,B,106.0,54.5,33112,28304,,,,,,,1.01,surrogate C550,改用 C550,C550,1.38,,C550,Jet,B,True,1.38,,0.019,0.019,,0.498,,,thrust-to-weight not checked (no thrust from a primary document)
+BE33,piston_ga,A320,10,2,Piston,A,69.0,35.5,1542,1542,,,,,,,0.66,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.69,,0.214,0.214,,1.357,,,
+C82S,piston_ga,A320,10,2,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+T206,piston_ga,A320,10,4,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+B762,airliner,OpenAP 同义 B763,9,2,Jet,C,135.0,69.4,142882,117934,283.3,PS,504.4,PS F00,,0.36,1.23,keep OpenAP synonym (B763),保留 OpenAP 的同义机型 B763,B763,1.23,1.32,GLF6,Jet,C,True,1.6,B737,0.082,0.029,0.053,0.152,B762,1.26,
+DA62,piston_ga,A320,9,3,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+LJ35,business_jet,A320,8,3,Jet,C,128.0,65.8,8301,6486,,,,,,,1.23,surrogate B737,改用 B737,B737,1.25,,B737,Jet,C,True,1.25,A19N,0.031,0.031,,0.121,,,thrust-to-weight not checked (no thrust from a primary document)
+C210,piston_ga,A320,7,2,Piston,A,85.0,43.7,1724,1724,,,,,,,0.81,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,2.08,,0.631,0.631,,0.94,,,
+FA10,business_jet,A320,7,3,Jet,B,107.0,55.0,8500,8001,,,,,,,1.02,surrogate C550,改用 C550,C550,1.4,,C550,Jet,B,True,1.4,,0.038,0.038,,0.48,,,thrust-to-weight not checked (no thrust from a primary document)
+FA20,business_jet,A320,7,1,Jet,B,107.0,55.0,13000,12392,,,,,,,1.02,surrogate C550,改用 C550,C550,1.4,,C550,Jet,B,True,1.4,,0.038,0.038,,0.48,,,thrust-to-weight not checked (no thrust from a primary document)
+G200,piston_ga,A320,7,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+H64,rotorcraft,A320,7,1,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+P28B,piston_ga,A320,7,0,Piston,A,62.0,31.9,1361,1361,,,,,,,0.59,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.52,,0.0,0.0,,1.571,,,
+TBM8,turboprop,A320,7,1,Turboprop,A,85.0,43.7,3354,3186,,,,,,,0.81,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.11,C172,0.423,0.423,,0.94,,,
+B78X,airliner,A320,6,3,Jet,D,149.0,76.7,254012,201849,377.0,PS,688.6,PS F00,,0.276,1.43,PS parameters (B78X),用 PS 本机参数（B78X）,B78X,1.28,1.28,B773,Jet,D,True,1.26,B739,0.014,0.0,0.014,0.309,B78X,1.28,
+C30J,military,A320,6,1,Turboprop,C,128.0,65.8,70307,58967,,,,,,,1.23,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,B737,Jet,C,False,1.25,A19N,0.031,0.031,,0.121,,,
+COL4,piston_ga,A320,6,0,Piston,A,78.0,40.1,1542,1465,,,,,,,0.75,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.91,,0.459,0.459,,1.112,,,
+GA8,piston_ga,A320,6,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+P28S,piston_ga,A320,6,2,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+PA24,piston_ga,A320,6,0,Piston,A,75.0,38.6,1315,1315,,,,,,,0.72,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.84,,0.381,0.381,,1.19,,,
+AEST,piston_ga,A320,5,0,Piston,B,96.0,49.4,2864,2722,,,,,,,0.92,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.25,A318,0.179,0.179,,0.697,,,
+C421,piston_ga,A320,5,1,Piston,B,96.0,49.4,3379,3266,,,,,,,0.92,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.25,A318,0.179,0.179,,0.697,,,
+EC20,rotorcraft,A320,5,0,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+M600,turboprop,A320,5,1,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+M700,turboprop,A320,5,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+SB20,airliner,A320,5,1,Turboprop,C,122.0,62.8,23000,22000,,,,,,,1.17,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,A318,Jet,C,False,1.25,E145,0.016,0.016,,0.217,,,
+D328,airliner,A320,4,0,Turboprop,B,110.0,56.6,13990,14390,,,,,,,1.05,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.43,A318,0.093,0.093,,0.424,,,
+EA50,business_jet,A320,4,2,Jet,B,91.0,46.8,2699,2456,,,,,,,0.87,surrogate C550,改用 C550,C550,1.19,,C550,Jet,B,True,1.19,,0.286,0.286,,0.804,,,thrust-to-weight not checked (no thrust from a primary document)
+EC45,rotorcraft,A320,4,3,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+H25C,business_jet,A320,4,0,Jet,C,132.0,67.9,14107,11340,,,,,,,1.26,surrogate B737,改用 B737,B737,1.29,,B737,Jet,C,True,1.29,A19N,0.031,0.031,,0.06,,,thrust-to-weight not checked (no thrust from a primary document)
+K100,turboprop,A320,4,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+MD88,airliner,A320,4,1,Jet,C,130.0,66.9,67812,58967,,,,,,,1.24,surrogate B737,改用 B737,B737,1.27,,B737,Jet,C,True,1.27,A19N,0.0,0.0,,0.09,MD82,1.2,thrust-to-weight not checked (no thrust from a primary document)
+RV6,piston_ga,A320,4,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+T38,military,A320,4,3,Jet,D,160.0,82.3,5485,,,,,,,,1.53,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,B748,Jet,D,True,1.34,B744,0.013,0.013,,0.325,,,thrust-to-weight not checked (no thrust from a primary document)
+B190,turboprop,A320,3,0,Turboprop,C,121.0,62.2,7766,7257,,,,,,,1.16,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,A318,Jet,C,False,1.24,E145,0.0,0.0,,0.234,,,FAA AAC column B contradicts its approach speed; category C from the speed
+BE9T,turboprop,A320,3,0,Turboprop,B,108.0,55.6,4967,4967,,,,,,,1.03,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.41,A318,0.056,0.056,,0.461,,,
+C185,piston_ga,A320,3,0,Piston,A,64.0,32.9,1520,1520,,,,,,,0.61,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.57,,0.063,0.063,,1.508,,,
+E120,airliner,A320,3,0,Turboprop,B,113.0,58.1,11990,11700,,,,,,,1.08,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,A318,Jet,C,False,1.16,C550,0.137,0.137,,0.371,,,
+H25A,business_jet,A320,3,1,Jet,C,125.0,64.3,11340,10000,,,,,,,1.2,surrogate E75L,改用 E75L,E75L,1.22,,E75L,Jet,C,True,1.22,A319,0.016,0.016,,0.169,,,thrust-to-weight not checked (no thrust from a primary document)
+MD83,airliner,A320,3,0,Jet,D,144.0,74.1,72575,63276,112.3,PS,193.0,PS F00,,0.271,1.38,PS parameters (MD83),用 PS 本机参数（MD83）,MD83,1.28,1.28,B38M,Jet,D,True,1.32,B789,0.034,0.014,0.02,0.26,MD83,1.28,
+AC11,piston_ga,A320,2,0,Piston,A,70.0,36.0,1474,1424,,,,,,,0.67,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.71,,0.243,0.243,,1.328,,,
+B36T,turboprop,A320,2,1,Piston,A,73.0,37.6,1656,1656,,,,,,,0.7,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.79,,0.327,0.327,,1.244,,,
+C27J,military,A320,2,0,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+C310,piston_ga,A320,2,1,Piston,A,87.0,44.8,2495,2495,,,,,,,0.83,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,2.13,,0.678,0.678,,0.893,,,
+C404,piston_ga,A320,2,0,Piston,B,96.0,49.4,3810,3674,,,,,,,0.92,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.25,A318,0.179,0.179,,0.697,,,
+E135,airliner,A320,2,0,Jet,C,124.0,63.8,20200,18700,51.18,PS,66.1,PS F00,,0.334,1.19,PS parameters (E135),用 PS 本机参数（E135）,E135,1.24,1.24,E145,Jet,C,True,1.22,E190,0.031,0.0,0.031,0.246,E135,1.24,
+F5,military,A320,2,0,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+GLF3,business_jet,A320,2,0,Jet,C,140.0,72.0,31615,26535,,,,,,,1.34,surrogate B763,改用 B763,B763,1.27,,B763,Jet,C,True,1.27,A359,0.0,0.0,,0.058,,,thrust-to-weight not checked (no thrust from a primary document)
+HA4T,business_jet,A320,2,3,Jet,C,128.0,65.8,17917,15195,,,,,,,1.23,surrogate B737,改用 B737,B737,1.25,,B737,Jet,C,True,1.25,A19N,0.031,0.031,,0.121,,,thrust-to-weight not checked (no thrust from a primary document)
+LJ40,business_jet,A320,2,0,Jet,C,123.0,63.3,9525,8709,,,,,,,1.18,surrogate E145,改用 E145,E145,1.21,,E145,Jet,C,True,1.21,E170,0.016,0.016,,0.201,,,thrust-to-weight not checked (no thrust from a primary document)
+P210,piston_ga,A320,2,1,Piston,A,75.0,38.6,1814,1724,,,,,,,0.72,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.84,,0.381,0.381,,1.19,,,
+P32T,piston_ga,A320,2,0,Piston,A,80.0,41.2,1633,1633,,,,,,,0.77,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.96,,0.51,0.51,,1.061,,,
+PA27,piston_ga,A320,2,0,Piston,B,91.0,46.8,2359,2241,,,,,,,0.87,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.19,A318,0.286,0.286,,0.804,,,
+PA31,piston_ga,A320,2,0,Piston,B,95.0,48.9,2948,2948,,,,,,,0.91,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.24,A318,0.2,0.2,,0.718,,,
+RV14,piston_ga,A320,2,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+RV7,piston_ga,A320,2,1,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+TEX2,military,A320,2,1,Turboprop,B,103.0,53.0,2948,3130,,,,,,,0.99,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,C550,Jet,B,False,1.34,A318,0.038,0.038,,0.556,,,
+TWEN,piston_ga,A320,2,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+A339,airliner,A320,1,0,Jet,C,140.0,72.0,251018,190999,374.0,PS,655.6,PS F00,,0.266,1.34,PS parameters (A339),用 PS 本机参数（A339）,A339,1.23,1.23,A359,Jet,C,True,1.29,B772,0.036,0.0,0.036,0.222,A339,1.23,
+A5,piston_ga,A320,1,0,Piston,A,59.0,30.4,685,685,,,,,,,0.56,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.44,,0.099,0.099,,1.67,,,
+AC95,turboprop,A320,1,0,Turboprop,B,100.0,51.4,4683,4389,,,,,,,0.96,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.3,A318,0.098,0.098,,0.615,,,
+AN2,piston_ga,A320,1,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+AS55,rotorcraft,A320,1,0,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+ASTR,business_jet,A320,1,0,Jet,B,120.0,61.7,10659,9389,,,,,,,1.15,surrogate C550,改用 C550,C550,1.56,,C550,Jet,B,True,1.56,,0.267,0.267,,0.25,,,surrogate is not closer than A320 in similarity distance; thrust-to-weight not checked (no thrust from a primary document)
+AT73,airliner,A320,1,0,Turboprop,B,109.0,56.1,21500,21350,,,,,,,1.04,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.42,A318,0.075,0.075,,0.443,,,
+B722,airliner,A320,1,0,Jet,C,133.0,68.4,83824,68039,157.9,PS,203.8,PS F00,,0.248,1.27,PS parameters (B722),用 PS 本机参数（B722）,B722,1.32,1.35,A388,Jet,C,True,1.24,A333,0.097,0.074,0.024,0.28,B722,1.32,
+B735,airliner,OpenAP 同义 B734,1,0,Jet,C,128.0,65.8,61689,49895,103.7,PS,187.3,PS F00,,0.31,1.09,PS parameters (B735),用 PS 本机参数（B735）,B735,1.23,1.23,E75L,Jet,C,True,1.25,E190,0.045,0.031,0.013,0.135,B735,1.23,
+B753,airliner,A320,1,0,Jet,D,143.0,73.6,122470,101605,189.0,PS,358.0,PS F00,,0.298,1.37,PS parameters (B753),用 PS 本机参数（B753）,B753,1.23,1.23,B738,Jet,D,True,1.31,A321,0.027,0.014,0.013,0.152,B753,1.23,
+B764,airliner,A320,1,0,Jet,D,150.0,77.2,204117,158757,283.3,PS,512.8,PS F00,,0.256,1.44,PS parameters (B764),用 PS 本机参数（B764）,B764,1.26,1.26,B39M,Jet,D,True,1.33,B773,0.007,0.0,0.007,0.399,B764,1.26,
+BE10,turboprop,A320,1,0,Turboprop,B,111.0,57.1,5352,5085,,,,,,,1.06,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.45,A318,0.111,0.111,,0.406,,,
+BE23,piston_ga,A320,1,0,Piston,A,70.0,36.0,1111,1111,,,,,,,0.67,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.71,,0.243,0.243,,1.328,,,
+BE55,piston_ga,A320,1,0,Piston,B,95.0,48.9,2313,2313,,,,,,,0.91,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.24,A318,0.2,0.2,,0.718,,,
+BL17,piston_ga,A320,1,0,Piston,A,79.0,40.6,1508,1508,,,,,,,0.76,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.93,,0.485,0.485,,1.086,,,
+BL8,piston_ga,A320,1,0,Piston,A,56.0,28.8,975,,,,,,,,0.54,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.37,,0.204,0.204,,1.775,,,
+C152,piston_ga,A320,1,0,Piston,A,56.0,28.8,760,760,,,,,,,0.54,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.37,,0.204,0.204,,1.775,,,
+C177,piston_ga,A320,1,3,Piston,A,52.0,26.8,1134,1134,,,,,,,0.5,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.27,,0.352,0.352,,1.923,,,
+C240,piston_ga,A320,1,0,Piston,A,78.0,40.1,1633,1551,,,,,,,0.75,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.91,,0.459,0.459,,1.112,,,
+C441,turboprop,A320,1,1,Turboprop,B,98.0,50.4,4468,4246,,,,,,,0.94,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.28,A318,0.138,0.138,,0.655,,,
+C501,business_jet,A320,1,0,Jet,B,107.0,55.0,5375,5148,,,,,,,1.02,surrogate C550,改用 C550,C550,1.4,,C550,Jet,B,True,1.4,,0.038,0.038,,0.48,,,thrust-to-weight not checked (no thrust from a primary document)
+C72R,piston_ga,A320,1,0,Piston,A,62.0,31.9,1111,1111,,,,,,,0.59,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.52,,0.0,0.0,,1.571,,,
+COL3,piston_ga,A320,1,0,Piston,A,78.0,40.1,1542,1465,,,,,,,0.75,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.91,,0.459,0.459,,1.112,,,
+CRUZ,piston_ga,A320,1,0,Piston,A,39.0,20.1,599,599,,,,,,,0.37,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,0.95,,0.927,0.927,,2.498,,,
+DHC6,turboprop,A320,1,0,Turboprop,A,74.0,38.1,5670,5579,,,,,,,0.71,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,False,1.81,C550,0.354,0.354,,1.217,,,
+E110,turboprop,A320,1,0,Turboprop,B,92.0,47.3,5901,5700,,,,,,,0.88,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.2,A318,0.264,0.264,,0.782,,,
+H47,rotorcraft,A320,1,0,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+H60,rotorcraft,A320,1,0,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+HUSK,piston_ga,A320,1,0,Piston,A,60.0,30.9,907,907,,,,,,,0.57,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.47,,0.066,0.066,,1.637,,,
+LJ55,business_jet,A320,1,0,Jet,C,125.0,64.3,8845,7711,,,,,,,1.2,surrogate E75L,改用 E75L,E75L,1.22,,E75L,Jet,C,True,1.22,A319,0.016,0.016,,0.169,,,thrust-to-weight not checked (no thrust from a primary document)
+M20T,piston_ga,A320,1,0,Piston,A,77.0,39.6,1528,1451,,,,,,,0.74,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.88,,0.433,0.433,,1.138,,,
+MD82,airliner,A320,1,0,Jet,C,135.0,69.4,67812,58967,112.3,PS,185.5,PS F00,,0.279,1.29,PS parameters (MD82),用 PS 本机参数（MD82）,MD82,1.24,1.24,A332,Jet,C,True,1.2,A333,0.033,0.015,0.018,0.132,MD82,1.24,
+P06T,piston_ga,A320,1,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+PAY2,turboprop,A320,1,1,Piston,B,100.0,51.4,4297,4082,,,,,,,0.96,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C550,Jet,B,False,1.3,A318,0.098,0.098,,0.615,,,
+PAY3,turboprop,A320,1,0,Turboprop,B,113.0,58.1,5080,4686,,,,,,,1.08,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,A318,Jet,C,False,1.16,C550,0.137,0.137,,0.371,,,
+PTS1,piston_ga,A320,1,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+S76,rotorcraft,A320,1,0,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+SBR1,business_jet,A320,1,0,Jet,C,126.0,64.8,9150,7938,,,,,,,1.21,surrogate E75L,改用 E75L,E75L,1.23,,E75L,Jet,C,True,1.23,A319,0.0,0.0,,0.153,,,thrust-to-weight not checked (no thrust from a primary document)
+VO10,piston_ga,A320,1,0,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+WW24,business_jet,A320,1,0,Jet,C,129.0,66.4,10659,8618,,,,,,,1.24,surrogate B737,改用 B737,B737,1.26,,B737,Jet,C,True,1.26,A19N,0.015,0.015,,0.106,,,thrust-to-weight not checked (no thrust from a primary document)
+A119,rotorcraft,A320,0,1,,,,,,,,,,,,,,exclude: not a fixed-wing civil approach,排除：旋翼机 / 军机,,,,,,,,,,,,,,,,
+C180,piston_ga,A320,0,1,Piston,A,64.0,32.9,1270,1270,,,,,,,0.61,exclude: propeller aircraft (user decision 2026-09-23),排除：螺旋桨飞机（用户决定）,,,,C172,Piston,A,True,1.57,,0.063,0.063,,1.508,,,
+CRJ1,airliner,A320,0,1,Jet,D,141.0,72.5,21523,21319,,,,,,,1.35,surrogate CRJ9,改用 CRJ9,CRJ9,1.38,,CRJ9,Jet,D,True,1.38,A321,0.0,0.0,,0.072,,,thrust-to-weight not checked (no thrust from a primary document)
+EXNG,piston_ga,A320,0,1,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,
+PC7,turboprop,A320,0,1,,,,,,,,,,,,,,no FAA approach speed: exclude or new data,排除：FAA 表没有进近速度,,,,,,,,,,,,,,,,

@@ -1,0 +1,17 @@
+# source: data/reference_speeds/easa/EASA_TCDS_IM_A_615_SF50_Issue6.pdf  sha256: 24bae613e45c18994d014957fdd9a5944d3230285f94f51e1f88bc57a37bb738
+# id: easa_tcds_im_a_615_i6 | EASA | TCDS EASA.IM.A.615 - Cirrus SF50 | Issue 6, 01 June 2026
+# url: https://www.easa.europa.eu/en/downloads/24242/en
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 305-305  (match: /Wing Area +18\.18/)
+                                                                            Wing Area              18.18 m2         (195.7 ft2)
+
+--- PDF p8, lines 317-324  (match: /One \(1\) Williams International FJ33-5A/)
+                   4.             Engine:                                   One (1) Williams International FJ33-5A turbofan engine
+                                                                            Type Certificate E3GL
+                   5.             Fuel:                                     Jet A, Jet A-1 or JP-8
+                   6.             Oil:                                      Refer to applicable manuals
+                   7.             Engine Limits:
+                                  Thrust Setting         ITT °C         N1 RPM (%)                 N2 RPM (%)          Thrust (lb)
+                                                         877 (10 Sec)   23,566                     51,703
+                                  Takeoff                862 (5min)     (104.74%)                  (100.39%)           1846

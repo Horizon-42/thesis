@@ -27,7 +27,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
-from ts_transformer.config import DEFAULT_AIRCRAFT_TYPE, MODELS, TSConfig  # noqa: E402
+from ts_transformer.config import MODELS, TSConfig  # noqa: E402
 from ts_transformer.data.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
 from ts_transformer.data.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
 from ts_transformer.data.splits import flight_keys_by_split, split_by_flight  # noqa: E402
@@ -544,7 +544,6 @@ def main(argv: list[str] | None = None) -> int:
         dropout=args.dropout,
         seed=args.seed,
         device=args.device,
-        aircraft_type=DEFAULT_AIRCRAFT_TYPE,
         coordinate_frame="enu",
         random_train_anchor=False,
     )
@@ -554,7 +553,6 @@ def main(argv: list[str] | None = None) -> int:
     series, report = build_series(
         load_flight_dicts(manifests, include_flight_keys=development_keys),
         config,
-        aircraft_type=config.aircraft_type,
     )
     print(report.format())
     run_ablation(

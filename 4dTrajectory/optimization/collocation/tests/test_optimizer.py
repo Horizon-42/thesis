@@ -34,6 +34,10 @@ from collocation import components as _components  # noqa: E402
 from collocation import optimizer as _optimizer  # noqa: E402
 
 MTOW = A320.mass.max_takeoff_kg
+# The constrained-route tests land just above the optimizer's default speed floor, which is the
+# A320's published approach speed at the solve mass (MTOW here); the same 1.4 m/s margin the
+# fixed 76 m/s target had over the former 145 kt class default.
+ROUTE_TARGET_SPEED_MS = A320.approach.reference_speed_ms(MTOW) + 1.4
 
 
 # ── shared scenario builders ───────────────────────────────────────────────
@@ -489,7 +493,7 @@ def test_route_unwrapped_terminal_heading_solves_double_dogleg():
     init = GeodeticState(float(init_ll[0]), float(init_ll[1]), 1300.0, 90.0,
                          5.0 * math.pi / 4.0, 0.0, MTOW)      # heading = target ψ + π (the tie)
     tll = frame.to_latlon(ltp)
-    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, 76.0,
+    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, ROUTE_TARGET_SPEED_MS,
                            math.pi / 4.0, math.radians(-3.0), MTOW)
     # Unit-level: the chained-course unwrap picks the route's branch (ψ_target + 2π), where the
     # plain initial-heading unwrap ties at exactly π and can pick ψ_target. The hull spans the
@@ -537,7 +541,7 @@ def test_only_the_prefaf_fix_carries_a_passage_disc():
     init = GeodeticState(float(e_ll[0]), float(e_ll[1]), 1200.0, 90.0,
                          -math.pi / 2.0, 0.0, MTOW)            # at E, heading down-course
     tll = frame.to_latlon(ltp)
-    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, 76.0,
+    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, ROUTE_TARGET_SPEED_MS,
                            -math.pi / 2.0, math.radians(-3.0), MTOW)
     opt = CollocationOptimizer(A320, segments=segments)
     _t, _c, states = opt.optimize_free_time(init, target, 400.0)
@@ -776,7 +780,7 @@ def test_transition_phase_altitude_floor_binds():
     init = GeodeticState(float(s_ll[0]), float(s_ll[1]), 1500.0, 90.0,
                          -math.pi / 2.0, 0.0, MTOW)
     tll = frame.to_latlon(ltp)
-    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, 76.0,
+    target = GeodeticState(float(tll[0]), float(tll[1]), 120.0 + 50.0 * 0.3048, ROUTE_TARGET_SPEED_MS,
                            -math.pi / 2.0, math.radians(-3.0), MTOW)
     opt = CollocationOptimizer(A320, segments=segments)
     _t, _c, states = opt.optimize_free_time(init, target, 400.0)

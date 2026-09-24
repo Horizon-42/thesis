@@ -1,0 +1,19 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_077_JT15D_Issue01.pdf  sha256: a0697a5ff155098b86c72c84cecf080a9c3a6eabad3de05879df857287a46684
+# id: easa_tcds_im_e_077_i1 | EASA | TCDS EASA.IM.E.077 - Pratt & Whitney Canada JT15D series | Issue 01, 07 September 2006
+# url: https://www.easa.europa.eu/en/downloads/7671/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+This PDF has no text layer (scanned, CCITT images). Transcribed by reading the rendered page 6
+("page 6", section "6. Ratings:"), cell by cell:
+
+              JT15D-1  JT15D-1A  JT15D-1B  JT15D-4
+Take-off [daN]  978,6     978,6     978,6   1112,1
+Max. Continuous [daN]  929,6  929,6  929,6  1056,5
+              JT15D-4B  JT15D-4C  JT15D-4D  JT15D-5
+Take-off [daN]  1112,1    1112,1    1112,1    1319
+Max. Continuous [daN]  1056,5  1056,5  1056,5  1290
+              JT15D-5A  JT15D-5C  JT15D-5R
+Take-off [daN]  1290      1418,9    1319
+Max. Continuous [daN]  1290  1418,9  1290
+
+Page 1 variant list: JT15D-1, -1A, -1B, -4, -4B, -4C, -4D, -5, -5A, -5C, -5R (no JT15D-5D).

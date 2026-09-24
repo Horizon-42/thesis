@@ -1,17 +1,19 @@
 """End-to-end build wiring: manifest arrival + aircraft -> FlightScenario."""
 
 import json
+import math
 from pathlib import Path
 
 import pytest
 
 from aircraft.aircraft_sets import A320
+from aircraft.performance_index import PERFORMANCE_INDEX_SCHEMA, performance_index_identity
 from flight_scenarios.__main__ import (
     airport_for_manifest,
     discover_arrival_manifests,
     scenario_output_name,
 )
-from flight_scenarios.build import build_scenario, build_scenarios_from_arrivals
+from flight_scenarios.build import NoAircraftDynamics, build_scenario, build_scenarios_from_arrivals
 
 # A minimal model-ready arrival record.
 # icao24 3949ea is a real Air France transponder address -> resolves to B772 via OpenAP.
@@ -56,10 +58,21 @@ def test_build_scenario_resolves_aircraft_from_icao24():
     assert scen.target.longitude == FLIGHT["waypoints"][-1][1]
 
 
-def test_build_scenario_falls_back_to_aircraft_type_when_icao24_unresolvable():
-    flight = {**FLIGHT, "icao24": None}  # no transponder address -> use the explicit fallback
-    scen = build_scenario(flight, "A320")
-    assert scen.aircraft is A320
+def test_a_trajectory_only_build_keeps_a_flight_without_dynamics_and_says_so():
+    # No transponder address and no declared type: nothing flies it, and nothing stands in.
+    flight = {**FLIGHT, "icao24": None}
+    with pytest.raises(NoAircraftDynamics):
+        build_scenario(flight)
+    scen = build_scenario(flight, require_dynamics=False)
+    assert scen.aircraft is None and scen.aero is None and not scen.has_dynamics
+    assert math.isnan(scen.initial.m) and math.isnan(scen.target.m)
+    assert scen.source["dynamics_typecode"] is None
+    assert scen.source["landing_aero"] is None
+    assert scen.source["no_dynamics_reason"]
+    # The trajectory is intact: position and kinematics come from the track.
+    assert scen.initial.longitude == FLIGHT["waypoints"][0][1]
+    with pytest.raises(NoAircraftDynamics, match="the optimizer needs aircraft dynamics"):
+        scen.dynamics("the optimizer")
 
 
 def test_build_scenario_records_identity_and_dynamics_provenance():
@@ -76,40 +89,84 @@ def test_build_scenario_records_identity_and_dynamics_provenance():
     assert scen.source["typecode_standard"] == "ICAO Doc 8643"
     assert scen.source["dynamics_typecode"] == "B739"
     assert scen.source["dynamics_source"].startswith("openap")
-    assert scen.source["aircraft_fallback_used"] is False
-    assert scen.source["aircraft_fallback_reason"] is None
+    assert scen.source["no_dynamics_reason"] is None
 
 
-def test_build_scenario_keeps_real_identity_when_openap_needs_fallback():
-    flight = {**FLIGHT, "type": "BCS3", "icao24": None}
+def test_build_scenario_flies_an_index_type_with_its_own_parameters():
+    # BCS3 used to fly as an A320; the performance index gives it its own documents' facts.
+    scen = build_scenario({**FLIGHT, "type": "BCS3", "icao24": None})
 
-    scen = build_scenario(flight, "A320")
-
-    assert scen.aircraft is A320
+    assert scen.aircraft.code == "BCS3"
     assert scen.source["resolved_typecode"] == "BCS3"
     assert scen.source["identity_source"] == "declared_type"
-    assert scen.source["typecode_source"] == "declared_type"
-    assert scen.source["dynamics_typecode"] == "A320"
-    assert scen.source["aircraft_fallback_used"] is True
-    assert "BCS3" in scen.source["aircraft_fallback_reason"]
+    assert scen.source["dynamics_typecode"] == "BCS3"
+    assert scen.source["dynamics_source"] == PERFORMANCE_INDEX_SCHEMA
+    assert scen.source["dynamics_surrogate_typecode"] is None
+    assert scen.source["performance_index_decision"] == "own"
+    assert scen.source["no_dynamics_reason"] is None
 
 
-def test_build_scenario_records_openap_surrogate_without_changing_identity():
-    flight = {**FLIGHT, "type": "A306", "icao24": None}
+def test_build_scenario_flies_a_substitute_under_its_own_code_keeping_the_identity():
+    # A306 is an OpenAP synonym of A332; the index flies it AS the A332, so its mass, approach
+    # speed and speed gate all belong to one airframe, while the identity stays A306.
+    scen = build_scenario({**FLIGHT, "type": "A306", "icao24": None})
 
-    scen = build_scenario(flight, "A320")
-
-    assert scen.aircraft.code == "A306"
+    assert scen.aircraft.code == "A332"
     assert scen.source["resolved_typecode"] == "A306"
-    assert scen.source["dynamics_typecode"] == "A306"
+    assert scen.source["dynamics_typecode"] == "A332"
+    assert scen.source["dynamics_source"].startswith("openap-")      # the A332's own OpenAP model
     assert scen.source["dynamics_surrogate_typecode"] == "A332"
-    assert scen.source["aircraft_fallback_used"] is False
+    assert scen.source["performance_index_decision"] == "substitute"
+    assert scen.source["performance_index_sha256"] == performance_index_identity()["sha256"]
+
+
+def test_an_excluded_type_raises_by_name_or_builds_without_dynamics():
+    flight = {**FLIGHT, "type": "PC12", "icao24": None, "arr_airport": "KRDU"}
+    with pytest.raises(NoAircraftDynamics) as caught:
+        build_scenario(flight)
+    assert caught.value.typecode == "PC12" and "propeller" in caught.value.reason
+    assert "propeller" in str(caught.value) and not str(caught.value).startswith("'")
+
+    scen = build_scenario(flight, require_dynamics=False, target_from_threshold=True)
+    assert scen.aircraft is None
+    assert scen.source["resolved_typecode"] == "PC12"
+    assert scen.source["performance_index_decision"] == "exclude"
+    assert "propeller" in scen.source["no_dynamics_reason"]
+    # The published target's geometry is there; its speed is unknown, never a stand-in.
+    assert (scen.target.latitude, scen.target.longitude) == (
+        FLIGHT["runway_target"]["lat"], FLIGHT["runway_target"]["lon"]
+    )
+    assert math.isnan(scen.target.V)
 
 
 def test_build_scenario_raises_when_unresolvable_and_no_fallback():
     flight = {**FLIGHT, "icao24": None}
-    with pytest.raises(KeyError):
+    with pytest.raises(NoAircraftDynamics):
         build_scenario(flight)
+
+
+def test_the_batch_layer_drops_and_names_a_flight_without_dynamics(monkeypatch):
+    import flight_scenarios.dataset as dataset
+
+    flights = [FLIGHT, {**FLIGHT, "id": "PC1", "type": "PC12", "icao24": None}]
+    report = dataset.SelectionReport(
+        airport="KRDU", target="track-end", max_per_runway=None, available=2, selected=2,
+        per_runway={"05L": dataset.RunwaySelection(available=2, selected=2)},
+    )
+    monkeypatch.setattr(dataset, "select_flight_keys", lambda *a, **k: (["x", "y"], report, "KRDU"))
+    monkeypatch.setattr(dataset, "load_model_arrivals_subset", lambda *a, **k: flights)
+
+    scenarios, selection = dataset.build_scenario_dataset("unused", target="track-end")
+
+    assert [s.aircraft.code for s in scenarios] == ["B772"]
+    assert selection.selected == 1 and selection.per_runway["05L"].selected == 1
+    (dropped,) = selection.excluded_no_dynamics
+    assert dropped["typecode"] == "PC12" and "propeller" in dropped["reason"]
+    payload = selection.to_dict()
+    assert payload["schema_version"] == "flight-scenarios-selection-v2"
+    assert payload["performance_index"] == performance_index_identity()
+    assert payload["per_runway"]["05L"]["excluded_no_dynamics"] == 1
+    assert "1 dropped: no aircraft dynamics" in selection.summary_line()
 
 
 def test_build_scenario_rejects_mutually_exclusive_targets_before_processing():
@@ -134,12 +191,12 @@ def test_build_scenario_target_from_threshold():
     assert (scen.target.latitude, scen.target.longitude) == (
         FLIGHT["runway_target"]["lat"], FLIGHT["runway_target"]["lon"]
     )
-    assert scen.target.V == scen.aircraft.approach.reference_speed_ms
+    assert scen.target.V == scen.aircraft.approach.reference_speed_ms(scen.target.m)
 
 
 def test_build_scenario_target_from_threshold_falls_back_when_unknown():
     flight = {**FLIGHT, "arr_airport": "KRDU", "runway": "99X"}  # no such threshold
-    scen = build_scenario(flight, "A320", target_from_threshold=True)
+    scen = build_scenario(flight, target_from_threshold=True)
     assert scen.source["target_source"] == "runway_threshold"
 
 
@@ -200,8 +257,14 @@ def test_resolve_airframe_names_the_type_even_when_openap_has_no_dynamics(monkey
         def resolve(self, *, declared_type, icao24):
             return SimpleNamespace(typecode=self.typecode)
 
+    # A type the index flies with its own parameters carries its own landing mass ...
     monkeypatch.setattr(build, "get_default_identity_resolver", lambda: _Resolver("E55P"))
-    assert build.resolve_airframe("abc123") == (None, "E55P")
+    assert build.resolve_airframe("abc123") == (7568.0, "E55P")
+    # ... a substituted or excluded type keeps its type but no mass (a substitute's mass
+    # is not the observed type's).
+    for typecode in ("GLF4", "PC12"):
+        monkeypatch.setattr(build, "get_default_identity_resolver", lambda t=typecode: _Resolver(t))
+        assert build.resolve_airframe("abc123") == (None, typecode)
 
     monkeypatch.setattr(build, "get_default_identity_resolver", lambda: _Resolver("A320"))
     mass, typecode = build.resolve_airframe("abc123")

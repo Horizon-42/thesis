@@ -1,0 +1,37 @@
+# source: data/aircraft_performance/airframes/faa/FAA_TCDS_A16SW_Rev29.pdf  sha256: a881e3f785b1881b69f11ba5ba19f9bbec7c48f8152c387a76deaa5e63b1c2f3
+# id: faa_tcds_a16sw_r29 | FAA | TCDS A16SW - Textron Aviation MU-300-10, 400, 400A, 400T | Revision 29, October 12, 2016
+# url: https://drs.faa.gov/browse/excelExternalWindow/231916F7717E56DC8625811A00650FEA.0001
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p6, lines 250-253  (match: /^II\. Model 400A, Beechjet/)
+II. Model 400A, Beechjet (Hawker 400XP), (Transport Category), Approved June 20, 1990
+
+    Engines                       2 Pratt & Whitney Canada JT15D-5 turbofans (RK-1 through RK-507)
+                                  2 Pratt & Whitney Canada JT15D-5R turbofans (RK-508 and On)
+
+--- PDF p2, lines 59-63  (match: /Engine Limits +Static thrust standard day, sea level:/)
+     Engine Limits                Static thrust standard day, sea level:
+                                  Takeoff (5 min.)        2,900 lb.
+                                  Max. continuous         2,900 lb.
+
+                                  Max. permissible engine rotor operating speeds:
+
+--- PDF p6, lines 269-273  (match: /Engine Limits +Static thrust standard day, sea level:/)
+    Engine Limits                 Static thrust standard day, sea level:
+                                  Takeoff (5 min.)          2,900 lb. (RK-1 thru RK-92)
+                                                            (See note 6)
+
+                                  Takeoff (5 min.)       2,965 lb. (RK-93 & after)
+
+--- PDF p11, lines 532-536  (match: /Engine Limits +Static thrust standard day, sea level:/)
+    Engine Limits                  Static thrust standard day, sea level:
+                                   Takeoff (5 min.)              2,900 lb.
+                                   Max. continuous               2,900 lb.
+
+                                   Max. permissible engine rotor operating speeds:
+
+--- PDF p8, lines 338-338  (match: /Maximum Weight +Takeoff +16,100 lb\./)
+    Maximum Weight                Takeoff        16,100 lb.
+
+--- PDF p12, lines 590-590  (match: /Maximum Weight +Takeoff +16,100 lb\./)
+    Maximum Weight         Takeoff        16,100 lb.

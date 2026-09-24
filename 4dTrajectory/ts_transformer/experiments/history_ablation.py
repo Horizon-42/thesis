@@ -21,7 +21,6 @@ import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.training.batching import resolve_batch_size  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     COORDINATE_FRAMES_AVAILABLE,
-    DEFAULT_AIRCRAFT_TYPE,
     MODELS,
     TSConfig,
 )
@@ -481,7 +480,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=_batch_size, default="auto")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--aircraft-type", default=DEFAULT_AIRCRAFT_TYPE)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -533,7 +531,6 @@ def main(argv: list[str] | None = None) -> int:
         "seq_len": maximum_l,
         "seed": args.seed,
         "device": args.device,
-        "aircraft_type": args.aircraft_type,
         "random_train_anchor": False,
     }
     if args.n_segments is not None:
@@ -548,11 +545,7 @@ def main(argv: list[str] | None = None) -> int:
         manifests,
         include_flight_keys=set(outer_split_keys["train"]),
     )
-    series, report = build_series(
-        flights,
-        base_config,
-        aircraft_type=base_config.aircraft_type,
-    )
+    series, report = build_series(flights, base_config)
     print(report.format())
     if not series:
         parser.error("no usable trajectory series")

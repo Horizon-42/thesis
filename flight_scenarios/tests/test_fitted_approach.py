@@ -110,7 +110,6 @@ def test_fitted_target_does_not_convert_an_already_msl_fit_twice():
     # then build_scenario receives the already-MSL dict.
     [scenario] = build_scenarios_from_arrivals(
         [flight],
-        aircraft_type="A320",
         target_from_fitted_adsb=True,
     )
 

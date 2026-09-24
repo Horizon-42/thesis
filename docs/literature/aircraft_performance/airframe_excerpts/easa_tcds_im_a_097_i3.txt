@@ -1,0 +1,33 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_097_C750_Issue3.pdf  sha256: 14ceb39b028e8fef6d0af8415fbad5bf491d4bb6914e9ebefd12a3f9faaf0ac6
+# id: easa_tcds_im_a_097_i3 | EASA | TCDS EASA.IM.A.097 - Cessna 750 (Citation X) | Issue 03, 07 January 2016
+# url: https://www.easa.europa.eu/en/downloads/7335/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p6, lines 240-266  (match: /Wing Area +48\.96/)
+
+                                  Span                       19.39 m (63.6 ft)
+                                  Length                     22.04 m (725.3 ft)
+                                  Height                     5.85 m (19.2 ft)
+                                  Wing Area                  48.96 m² (527ft²)
+
+                5. Engines
+
+
+                            Variants of Model 750                      S/N 750‐0001 to 750‐0172                S/N 750‐0173 and on
+                                                                           not incorporating                     or incorporating
+                                                                            SB 750‐71‐10 &                         SB 750‐71‐10
+                                                                       S/N 750‐0001 to 750‐0172
+                                                                         incorp. SB 750‐32‐50
+                            Engines                                     Two Rolls‐Royce Model                Two Rolls‐Royce Model
+                                                                       AE3007C Turbofan Engines            AE3007C1 Turbofan Engines
+                                                                            P/N 23057202                         P/N 23074408
+                                                                        refer to JAA Data Sheet              refer to JAA Data Sheet
+                                                                             JAA/E/96‐017                         JAA/E/96‐017
+                            Engine Limits        Takeoff                          28.66 kN                             30.09 kN
+                            Static thrust,       (5 min., Normal                 (6442 lbs)                           (6764 lbs)
+                            standard day,        All Engines
+                            sea level            Operating)
+                                                 Maximum                          28.66 kN                             30.09 kN
+                                                 continuous                       (6442 lb)                           (6764 lbs)
+
+                            Engine Limits        N1 (Fan)                       100% r.p.m.                          100% r.p.m.

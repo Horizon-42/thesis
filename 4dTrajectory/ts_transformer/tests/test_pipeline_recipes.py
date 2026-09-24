@@ -33,7 +33,6 @@ def test_pipeline_carries_and_names_complete_control_recipe(tmp_path):
         n_segments=32,
         seed=2027,
         split_seed=1337,
-        aircraft_type="A320",
         aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT,
         batch_size="16",
         control_duration_parameterization=CONTROL_DURATION_UNIFORM,

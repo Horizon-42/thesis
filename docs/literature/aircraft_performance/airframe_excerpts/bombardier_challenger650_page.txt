@@ -1,0 +1,10 @@
+# source: data/reference_speeds/bombardier/bombardier_challenger-650.html  sha256: fcc96c7b5012771265148e7956e2cb321b548d1a2ccc290f6302da59ce36909b
+# id: bombardier_challenger650_page | Bombardier | Challenger 650 product page, Specifications block | HTML as served 2026-09-07
+# url: https://bombardier.com/en/aircraft/challenger-650
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- lines 299-302  (match: /Thrust: 9,220 lbf/)
+Engines
+GE CF34-3B MTO
+Thrust: 9,220 lbf (41kN)
+Flat rated to ISA + 15°C

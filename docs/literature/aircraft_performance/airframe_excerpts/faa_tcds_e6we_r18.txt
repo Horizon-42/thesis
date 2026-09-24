@@ -1,0 +1,23 @@
+# source: data/aircraft_performance/airframes/faa/FAA_TCDS_E6WE_Rev18.pdf  sha256: 8d00e9b7cb799d9e1f1f2079dcf41444de316c4f72f80c139f82869e98e97599
+# id: faa_tcds_e6we_r18 | FAA | TCDS E6WE - Honeywell TFE731-2 ... -5R series | Revision 18, March 27, 2026
+# url: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID176321561520260605175830.0001
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 59-76  (match: /Static Thrust Ratings:/)
+ Static Thrust Ratings:               TFE731 Models              Maximum Continuous                 Takeoff at
+                                                                  at Sea Level, lbs.          Sea Level, lbs. (5 mins.)
+                                        -2, -2B, -2C                    3500                           3500
+                                             -2A                        3600                           3600
+                                            -2BR                        3500                           3650
+                                     -3, -3A, -3C, -3D                  3700                           3700
+                                  -3R, -3AR, -3CR, -3DR                 3700                           3880
+                                             -3B                        3650                           3650
+                                             3BR                        3650                           3850
+                                              -4                        4080                           4080
+                                             -4R                        4080                           4080
+                                              -5                        4304                           4304
+                                             -5R                        4304                           4304
+                                             -5A                        4500                           4500
+                                            -5AR                        4500                           4500
+                                             -5B                        4634                           4750
+                                            -5BR                        4634                           4750

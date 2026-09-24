@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/citation_latitude_product_card.pdf  sha256: 377b8319cd88ed04c02b3a0f27371905f8a68ee2456ed67468ac97908c8972be
+# id: textron_latitude_card | Textron Aviation | Product card: Citation Latitude (680A) | undated product card PDF
+# url: https://cessna.txtav.com/-/media/cessna/files/product-cards/citation/citation_latitude_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 31-33  (match: /Thrust/)
+
+                                                                                                                                                                         Thrust                                 5,907 lb ea 26.28 kN ea

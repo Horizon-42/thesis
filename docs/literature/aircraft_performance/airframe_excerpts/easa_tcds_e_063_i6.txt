@@ -1,0 +1,18 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_E_063_Tay_Issue06.pdf  sha256: ef463f5d29070d3a51a62c419e3eaac3055ab21a74457b838f92743d2f2a57b5
+# id: easa_tcds_e_063_i6 | EASA | TCDS EASA.E.063 - Rolls-Royce Deutschland Tay series | Issue 06, 20 February 2024
+# url: https://www.easa.europa.eu/en/downloads/7697/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p9, lines 352-361  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+
+                                                 Tay 611-8        Tay 620-15       Tay 650-15       Tay 611-8C
+
+                  Take off                               61,61 kN                   67,17 kN           61,61 kN
+
+                  Maximum                        55,25 kN          59,94 kN         62,28 kN           55,25 kN
+                  Continuous
+                See Note VI.3
+
+NOTE (reader, not document text): Checked on the rendered PDF page 9: in the "Take off" row the cell "61,61 kN" is ONE merged cell spanning the Tay 611-8 and Tay 620-15 columns; "67,17 kN" is Tay 650-15 and "61,61 kN" is Tay 611-8C.

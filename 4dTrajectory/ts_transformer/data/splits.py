@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, Any, Sequence
 
+from aircraft.performance_index import performance_index_identity
 from aircraft.query_aircraft_parameters import (
     openap_direct_typecodes,
     openap_source_label,
@@ -25,7 +26,7 @@ if TYPE_CHECKING:   # annotations only: importing `dataset` here would drag torc
     from ts_transformer.data.dataset import BuildReport, FlightSeries
 
 
-DATA_SELECTION_SCHEMA = "ts-data-selection-v2-pre-split-eligibility"
+DATA_SELECTION_SCHEMA = "ts-data-selection-v3-performance-index"
 #: How a flight's split is decided, as recorded in every data-selection audit.
 SPLIT_ASSIGNMENT_METHOD = "sha256(seed:airport-qualified-flight-id)"
 
@@ -101,6 +102,9 @@ def data_selection_audit(
         "aircraft_filter": config.aircraft_filter,
         "identity_standard": "ICAO Doc 8643",
         "performance_provider": openap_source_label(),
+        # Decides every type with no native model (`modelled` / `all-flights`); a changed index
+        # changes which flights have dynamics.
+        "performance_index": performance_index_identity(),
         "openap_direct_typecodes": {
             "count": len(direct_typecodes),
             "sha256": direct_digest,

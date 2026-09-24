@@ -1,0 +1,24 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_E_200_Austro_E4_Issue12.pdf  sha256: f9636b31d22533bca1f2e8b859b91c5e98cfae9acd4454826efef9a93d45bcac
+# id: easa_tcds_e_200_i12 | EASA | TCDS EASA.E.200 - Austro Engine E4 series (AE300) | Issue 12, 30 June 2020
+# url: https://www.easa.europa.eu/en/downloads/7617/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p5, lines 195-210  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                         Rating                              E4                E4P
+                                                                               132 kW at
+                                         Take-off                              3880 rpm
+                                                             123.5 kW at       (2300 prop rpm)
+                         Power
+                                                             3880 rpm
+                                                                               126 kW at
+                                                             (2300 prop rpm)
+                                         Max. Continuous                       3720 rpm
+                                                                               (2200 prop rpm)
+
+                Note:             The performance values specified above correspond to minimum values defined under the
+                                  conditionsof ICAO or ARDC standard atmosphere.
+
+
+NOTE (reader, not document text): Checked on the rendered PDF page 5: for the E4 the cell "123.5 kW at 3880 rpm (2300 prop rpm)" is ONE merged cell covering both the Take-off and the Max. Continuous rows; the E4P column has 132 kW take-off and 126 kW max. continuous.

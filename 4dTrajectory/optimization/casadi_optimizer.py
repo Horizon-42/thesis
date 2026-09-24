@@ -127,7 +127,10 @@ def make_multiple_shooting_solver(segment_num: int, dt: float, max_duration: flo
     return solver, lbw, ubw, lbg, ubg
 
 class CasadiOptimizer:
-    def __init__(self, n_segments: int, dt: float, max_duration: float, aircraft: Aircraft):
+    def __init__(self, n_segments: int, dt: float, max_duration: float, aircraft: Aircraft,
+                 mass_kg: float):
+        """``mass_kg`` is the mass the solves fly at: the speed floor is the published
+        approach speed's lower edge at that mass (the NLP is built here, before any state)."""
         if n_segments < 2:
             raise ValueError("n_segments must be at least 2 for this multiple-shooting NLP")
         self.n_segments = n_segments
@@ -145,7 +148,7 @@ class CasadiOptimizer:
                 "max_thrust": aircraft.engine.max_thrust_total_n,
                 "min_load_factor": 0.5,
                 "max_load_factor": 2, # need to check the actual limits for the aircraft, these are just example values
-                "min_terminal_speed": aircraft.approach.reference_speed_ms,
+                "min_terminal_speed": aircraft.approach.minimum_speed_ms(mass_kg),
                 "min_altitude": aircraft.approach.threshold_crossing_height_m + 10.0, # set minimum altitude slightly above threshold crossing height to avoid infeasible solutions, can be tuned
             },)
     

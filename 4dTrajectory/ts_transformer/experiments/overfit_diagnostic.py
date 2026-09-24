@@ -26,7 +26,7 @@ import torch  # noqa: E402
 
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
-from ts_transformer.config import DEFAULT_AIRCRAFT_TYPE, TSConfig  # noqa: E402
+from ts_transformer.config import TSConfig  # noqa: E402
 from ts_transformer.data.data_provenance import arrival_data_provenance, provenance_manifest_digests  # noqa: E402
 from ts_transformer.data.dataset import (  # noqa: E402
     FixedAnchorTrajectoryWindows,
@@ -377,7 +377,6 @@ def main(argv: list[str] | None = None) -> int:
         dropout=args.dropout,
         seed=args.seed,
         device=args.device,
-        aircraft_type=DEFAULT_AIRCRAFT_TYPE,
         coordinate_frame="enu",
         random_train_anchor=False,
     )
@@ -387,11 +386,7 @@ def main(argv: list[str] | None = None) -> int:
         manifests,
         include_flight_keys=set(outer_split_keys["train"]),
     )
-    series, report = build_series(
-        flights,
-        config,
-        aircraft_type=config.aircraft_type,
-    )
+    series, report = build_series(flights, config)
     print(report.format())
     if not series:
         parser.error("no usable trajectory series")

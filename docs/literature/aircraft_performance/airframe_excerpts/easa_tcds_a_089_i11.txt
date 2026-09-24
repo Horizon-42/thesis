@@ -1,0 +1,38 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_A_089_PC-12_Issue11.pdf  sha256: caa42b9915e8b927aac9f0eb2f30107b695748ac399c178631a3dcc277366277
+# id: easa_tcds_a_089_i11 | EASA | TCDS EASA.A.089 - Pilatus PC-12 and variants | Issue 11, 07 July 2025
+# url: https://www.easa.europa.eu/en/downloads/7348/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p5, lines 190-193  (match: /Total Wing Area/)
+                          Total Wing Area:                        25.81 m2 - (277.8 ft2)
+                4. Engine:
+                        4.1. Model:                               1 Pratt & Whitney Canada (PWC) PT6A-67B
+                                                                  turboprop engine, flat rated at 1200 shp for takeoff.
+
+--- PDF p11, lines 489-492  (match: /Total Wing Area/)
+                          Total Wing Area:                        25.81 m2 - (277.8 ft2)
+                4. Engine:
+                        4.1. Model:                               1 Pratt & Whitney Canada (PWC) PT6A-67B
+                                                                  turboprop engine, flat rated at 1200 shp for takeoff.
+
+--- PDF p17, lines 789-792  (match: /Total Wing Area/)
+                          Total Wing Area:                        25.81 m2 - (277.8 ft2)
+                4. Engine:
+                        4.1. Model:                               1 Pratt & Whitney Canada (PWC) PT6A-67B
+                                                                  turboprop engine, flat rated at 1200 shp for takeoff.
+
+--- PDF p25, lines 1190-1193  (match: /Total Wing Area/)
+                          Total Wing Area:                        25.81 m2 - (277.8 ft2)
+                4. Engine:
+                        4.1.A MSN 545, 1001 to MSN 1944:          1 Pratt & Whitney Canada (PWC) PT6A-67P
+                                                                  turboprop engine, flat rated at 1200 shp for takeoff.
+
+--- PDF p34, lines 1602-1605  (match: /Total Wing Area/)
+                          Total Wing Area:                                   25.81 m2 - (277.8 ft2)
+                4. Engine:
+                                  4.1                                        1 Pratt & Whitney Canada (PWC) PT6E-67XP
+                                                                             turboprop engine, flat rated at 1200 shp for takeoff.
+
+--- PDF p25, lines 1194-1195  (match: /4\.1\.B MSN 1720, 2001 and up/)
+                                  4.1.B MSN 1720, 2001 and up:               1 Pratt & Whitney Canada (PWC) PT6E-67XP
+                                                                             turboprop engine, flat rated at 1200 shp for takeoff.

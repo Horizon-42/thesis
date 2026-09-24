@@ -1,0 +1,25 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_058_AS907_Issue10.pdf  sha256: 2218cf5329583bf9db42b631415978c03612b61f14bdedf2a13811214f213269
+# id: easa_tcds_im_e_058_i10 | EASA | TCDS EASA.IM.E.058 - Honeywell AS907 series (HTF7000 family) | Issue 10, 30 July 2026
+# url: https://www.easa.europa.eu/en/downloads/7703/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 314-327  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                                                      Static Thrust(1)(3)                                         Static Thrust(1)(4)
+                                                             kN                                                           kN
+                                          Maximum Continuous             Take off                        Maximum                   Take off
+                                                                    (5 minutes)(2)                      Continuous             (5 minutes)(2)
+                       AS907-1-1A               30.63                     30.73                      30.82 at ISA +15oC      30.89 at ISA +20oC
+                                                                                                                      o
+                       AS907-2-1G               32.49                     34.37                      32.64 at ISA +17 C      34.54 at ISA +17oC
+                       AS907-2-1A               33.39                     33.39                      33.50 at ISA +14oC      33.50 at ISA +20oC
+                       AS907-3-1E               32.60                     33.91                     32.63 at ISA +22.5 C 33.98 at ISA +18oC
+                                                                                                                        o
+
+                       AS907-2-1S               32.90                     34.04                      33.04 at ISA +15oC 34.10 at ISA +18.9oC
+
+--- PDF p7, lines 338-340  (match: /\(3\) Sea level standard day/)
+                            contingency.
+                        (3) Sea level standard day (ISA) conditions.
+                        (4) Sea level conditions at breakpoint ambient temperature.

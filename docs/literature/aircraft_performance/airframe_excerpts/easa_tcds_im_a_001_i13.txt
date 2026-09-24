@@ -1,0 +1,15 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_001_ERJ170_Issue13.pdf  sha256: 366e7e1eff1173f3a3b0883d667a278f28221070f794787b7c77bac38ae610f6
+# id: easa_tcds_im_a_001_i13 | EASA | TCDS EASA.IM.A.001 - Embraer ERJ 170 | Issue 13, 31 January 2022
+# url: https://www.easa.europa.eu/en/downloads/7525/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p16, lines 754-763  (match: /Countruies. Issue A or later is applicable to ERJ 170-200/)
+                                                               Countruies” Issue A or later is applicable to ERJ 170-200.
+
+                5.       Dimensions                            Length           31.68 m        (103 ft 11 in)
+                                                               Span             26.0 m         (85 ft 4 in)
+                                                               Height           9.82 m         (32 ft 3 in)
+                                                               Wing Area        72.72 m2       (783 ft2)
+
+                6.       Engines:                              Two General Electric CF-34-8E5 or -8E5A1 Turbofan
+                                                               Engines

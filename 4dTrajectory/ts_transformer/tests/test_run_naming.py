@@ -36,8 +36,7 @@ def _state_defaults() -> dict:
 
 
 def _control_config(**overrides) -> dict:
-    config = TSConfig().to_dict()
-    config["prediction_output"] = "control"
+    config = TSConfig(prediction_output="control").to_dict()
     config.update(overrides)
     return config
 
@@ -252,7 +251,7 @@ def test_the_recipe_definitions_are_literals_and_match_the_defaults_today():
         assert not leaked, f"{function.__name__} spells a mutable default: {leaked}"
     defaults = TSConfig()
     recipe = control_recipe_overrides(CONTROL_RECIPE_SIMPLE_V1)
-    for field in ("dt_s", "seq_len", "channels", "aircraft_type", "random_train_anchor_min_future_s",
+    for field in ("dt_s", "seq_len", "channels", "random_train_anchor_min_future_s",
                   "validation_common_grid_points", "position_loss_scale_m", "final_time_scale_s"):
         assert recipe[field] == getattr(defaults, field), field
 
@@ -382,3 +381,12 @@ def test_parameter_rows_of_a_named_recipe_list_the_settings_the_recipe_freezes()
     assert sections["Model"]["Loss design"] == "simple-v3"
     assert sections["Training"]["lr_plateau_patience"] == "8"
     assert not any(section.startswith("Loss edits") for section in sections)
+
+
+def test_the_aircraft_filter_names_a_run_only_off_its_output_default():
+    # The default is by need (config.default_aircraft_filter): all-flights for state, modelled
+    # for control; a run under either says nothing, openap-direct says so.
+    assert "fleet" not in run_display_name(_state_defaults())
+    assert "fleet" not in run_display_name(_control_config())
+    assert "fleet=openap-direct" in run_display_name(_control_config(aircraft_filter="openap-direct"))
+    assert "fleet=modelled" in run_display_name({**_state_defaults(), "aircraft_filter": "modelled"})

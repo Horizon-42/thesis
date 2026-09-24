@@ -50,7 +50,7 @@ def anchor_controls(
         ],
         dtype=np.float64,
     )
-    aero = series.scenario.aero
+    aircraft, aero = series.scenario.dynamics("the anchor's control state")
     actual = actual_controls(
         states,
         times,
@@ -58,7 +58,7 @@ def anchor_controls(
             [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
             dtype=np.float64,
         ),
-        max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
+        max_thrust_n=float(aircraft.engine.max_thrust_total_n),
         parameterization=parameterization,
     )[-1]
     return control_contract(parameterization).relative_to_anchor(actual, float(states[-1, 3]))
@@ -72,13 +72,13 @@ def rollout_context(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
     the head's box and condition row nor the lookback's implied controls (which need rows before
     the anchor, and the executor starts at a flight's first row)."""
     scenario = series.scenario
+    aircraft, aero = scenario.dynamics("a rollout")
     initial = states_from_channels(
         np.array([0.0], dtype=np.float64),
         series.values[anchor : anchor + 1],
         series.frame,
         mass_kg=float(scenario.initial.m),
     )[0][1]
-    aero = scenario.aero
     heading = float(getattr(series.frame, "heading_rad", 0.0))
     return {
         "initial_state": np.array(
@@ -97,7 +97,7 @@ def rollout_context(series: FlightSeries, anchor: int) -> dict[str, np.ndarray]:
             [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
             dtype=np.float64,
         ),
-        "max_thrust_n": np.array(float(scenario.aircraft.engine.max_thrust_total_n), dtype=np.float64),
+        "max_thrust_n": np.array(float(aircraft.engine.max_thrust_total_n), dtype=np.float64),
         "frame_params": np.array(
             [series.frame.lat0, series.frame.lon0, series.frame.alt0, heading],
             dtype=np.float64,
@@ -123,9 +123,10 @@ def dynamics_arrays(
     """
     contract = control_contract(parameterization)
     scenario = series.scenario
+    _aircraft, aero = scenario.dynamics("a control model's airframe row")
     mass_kg = float(scenario.initial.m)
     context = rollout_context(series, anchor)
-    condition = condition_vector(mass_kg, float(context["max_thrust_n"]), scenario.aero, features=condition_features)
+    condition = condition_vector(mass_kg, float(context["max_thrust_n"]), aero, features=condition_features)
     return {
         "condition": condition,
         "initial_state": context["initial_state"],

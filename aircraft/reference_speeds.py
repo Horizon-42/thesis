@@ -2,7 +2,9 @@
 
 The threshold speed gate (``evaluation/speed_gate.py``) anchors on the approach speed
 each aircraft TYPE publishes -- not on a stall model -- so every bound traces to a
-document a reader can open. The table ``reference_speeds.json`` beside this module is
+document a reader can open. Since 2026-09-23 the aircraft model reads the same rows for its
+approach envelope (``aircraft.aircraft_sets.Approach``): the scenario target and the
+optimizer's terminal speed, so a row edited here moves the gate and the model together. The table ``reference_speeds.json`` beside this module is
 hand-curated from those documents; ``docs/reference_speeds/README.md`` is the
 provenance index (URL, retrieval date, SHA-256, page) for every number in it, and the
 downloaded sources live under ``data/reference_speeds/`` (git-ignored, re-fetched by
@@ -32,6 +34,7 @@ anchor instead of a modelled Cl_max.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -157,5 +160,15 @@ def _table() -> dict[str, ReferenceSpeed]:
 
 def reference_speed(typecode: str) -> ReferenceSpeed | None:
     """The packaged table's entry for an ICAO type designator, or None when the type
-    has no published entry (the caller grades speed indeterminate and says so)."""
+    has no published entry (the gate grades speed indeterminate and says so; the aircraft
+    model refuses the type)."""
     return _table().get(typecode.upper())
+
+
+@lru_cache(maxsize=1)
+def reference_speeds_identity() -> dict[str, Any]:
+    """Which table a result was computed against: the packaged file's sha256 and row count."""
+    return {
+        "sha256": hashlib.sha256(REFERENCE_SPEEDS_PATH.read_bytes()).hexdigest(),
+        "types": len(_table()),
+    }

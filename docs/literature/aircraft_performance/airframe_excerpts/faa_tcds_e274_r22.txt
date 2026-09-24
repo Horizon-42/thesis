@@ -1,0 +1,23 @@
+# source: data/aircraft_performance/airframes/faa/FAA_TCDS_E-274_Rev22.pdf  sha256: 1aab617f2278104f284185390843ff1ff3fb8740e1a29536daee4ef08db86758
+# id: faa_tcds_e274_r22 | FAA | TCDS E-274 - Lycoming O-320 series | Revision 22, April 30, 2013
+# url: https://drs.faa.gov/browse/excelExternalWindow/74C397F0D8FA23B886257B63006BA6A4.0001
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 44-60  (match: /^Model +O-320-B1A/)
+Model                                                                                                 O-320-B1A, -B1B,
+                                         O-320-A1A, -A1B, -A2A, -A2B,                                 -B2A, -B2B, -B2C,
+                                         -A2C, -A2D, -A3A, -A3B, -A3C,                                -B2D, -B3A, -B3B,
+                                         -C1A, -C1B, -C2A, -C2B, -C2C,                                -B3C, -B2E -D1A,
+                                         -C3A, -C3B, -C3C, -E1A, -E1B,          O-320-H1AD,            -D1B, -D1C, -D1D,
+                                         -E1C, -E1F -E1J, -E2A, -E2B,           -H1BD, -H2AD,         -D1F, -D2A, -D2B,
+                                         -E2C, -E2D, -E2F, -E2G, -E2H,          -H2BD, -H3AD,          -D2C, -D2F, -D2G,
+                                         -E3D, -E3H                             -H3BD                 -D2H, -D2J, -D3G
+
+Type                                     4H0A                                   - -                   - -
+
+Rating
+Max. continuous, h.p. r.p.m. full
+throttle at:
+ Sea level pressure altitude             150-2700                               160-2700              160-2700
+Takeoff, h.p. r.p.m. full throttle at:
+ Sea level pressure altitude             150-2700 (See NOTE 8)                  160-2700 See NOTE 8   160-2700 (See NOTE 8)

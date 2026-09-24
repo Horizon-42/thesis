@@ -119,9 +119,11 @@ def test_clustering_artifact_preserves_zero_split_seed(tmp_path: Path) -> None:
     assert document["source"]["split_seed"] == 0
 
 
-def test_comparison_rebuilds_with_checkpoint_aircraft_type(
+def test_comparison_rebuilds_the_cohort_under_the_checkpoint_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # The checkpoint's own config decides the build (its aircraft filter among it), never
+    # this build's defaults.
     cohort = DevelopmentCohort(
         name="shared-validation",
         train_flight_ids=("KSJC:train",),
@@ -133,8 +135,8 @@ def test_comparison_rebuilds_with_checkpoint_aircraft_type(
     checkpoint = tmp_path / "checkpoint.pt"
     checkpoint.write_bytes(b"checkpoint")
     config = SimpleNamespace(
-        aircraft_type="B738",
-        to_dict=lambda: {"aircraft_type": "B738"},
+        aircraft_filter="openap-direct",
+        to_dict=lambda: {"aircraft_filter": "openap-direct"},
     )
     payload = {
         "split": {"train": ["KSJC:train"], "val": ["KSJC:val"]},
@@ -166,11 +168,11 @@ def test_comparison_rebuilds_with_checkpoint_aircraft_type(
         clustering_evaluation, "require_matching_data_provenance", lambda *_args: None
     )
 
-    def build_with_aircraft_type(_flights, _config, *, aircraft_type=None):
-        captured["aircraft_type"] = aircraft_type
+    def build_with_config(_flights, built_config):
+        captured["config"] = built_config
         return series, report
 
-    monkeypatch.setattr(clustering_evaluation, "build_series", build_with_aircraft_type)
+    monkeypatch.setattr(clustering_evaluation, "build_series", build_with_config)
     monkeypatch.setattr(clustering_evaluation, "resolve_device", lambda _name: "cpu")
     monkeypatch.setattr(
         clustering_evaluation,
@@ -182,12 +184,12 @@ def test_comparison_rebuilds_with_checkpoint_aircraft_type(
         data=tmp_path / "manifest.json",
         cohort_path=cohort_path,
         checkpoints=[checkpoint],
-        labels=["B738"],
+        labels=["openap-direct"],
         output_path=tmp_path / "comparison.json",
         device_name="cpu",
     )
 
-    assert captured["aircraft_type"] == "B738"
+    assert captured["config"] is config
 
 
 def test_development_cohort_accepts_only_locked_train_and_validation() -> None:

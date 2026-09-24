@@ -1,0 +1,8 @@
+# source: data/reference_speeds/textron/bonanza_product_card.pdf  sha256: 587d951feca2d3b251e537082afa35e6afef70bbadecdcd6eb14a7d40e92addb
+# id: textron_bonanza_card | Textron Aviation | Product card: Bonanza G36 | undated product card PDF
+# url: https://beechcraft.txtav.com/-/media/beechcraft/files/product-card/bonanza_product_card.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p2, lines 29-31  (match: /Power Output/)
+
+                                                                                                                                                             Power Output                                  300 hp           224 kW

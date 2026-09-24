@@ -27,24 +27,26 @@ export function targetAltitudeMForThreshold(
     (aircraft?.thresholdCrossingHeightM ?? TARGET_THRESHOLD_CROSSING_HEIGHT_M);
 }
 
-export function defaultTargetSpeedMps(
-  aircraft: TargetSpeedAircraftConfig | null,
-): number {
-  return knotsToMetresPerSecond(aircraft?.terminalSpeedKt ?? 145);
+// The backend catalog states each aircraft's target speed and the range it may be set in:
+// the published approach speed at the landing mass, and the threshold speed gate's window at
+// that mass (aeroviz_backend.simulation_backend._terminal_speeds_kt). There is no default
+// aircraft: without a catalog entry there is no target speed.
+export function defaultTargetSpeedMps(aircraft: TargetSpeedAircraftConfig): number {
+  return knotsToMetresPerSecond(aircraft.terminalSpeedKt);
 }
 
 export function targetSpeedBoundsMps(
-  aircraft: TargetSpeedAircraftConfig | null,
+  aircraft: TargetSpeedAircraftConfig,
 ): { min: number; max: number } {
   return {
-    min: knotsToMetresPerSecond(aircraft?.terminalSpeedMinKt ?? 135),
-    max: knotsToMetresPerSecond(aircraft?.terminalSpeedMaxKt ?? 155),
+    min: knotsToMetresPerSecond(aircraft.terminalSpeedMinKt),
+    max: knotsToMetresPerSecond(aircraft.terminalSpeedMaxKt),
   };
 }
 
 export function clampTargetSpeedMps(
   speedMps: number,
-  aircraft: TargetSpeedAircraftConfig | null,
+  aircraft: TargetSpeedAircraftConfig,
 ): number {
   const bounds = targetSpeedBoundsMps(aircraft);
   return clamp(

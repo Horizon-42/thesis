@@ -1,0 +1,47 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_A_010_TBM700_Issue22.pdf  sha256: 2ccc93a25bd161822e2c2452408270c01756804b0a6e38a623078105834898c8
+# id: easa_tcds_a_010_i22 | EASA | TCDS EASA.A.010 - Daher TBM700 (TBM 850/900/910/930/940/960/980) | Issue 22, 24 April 2026
+# url: https://www.easa.europa.eu/en/downloads/16508/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p6, lines 189-191  (match: /TBM930 is the commercial / marketing designation/)
+                                  TBM930 is the commercial / marketing designation to identify TBM700 N equipped with MOD70-
+                                  0476-00, -0211-57, -0234-24, -0322-00, -0323-71, -0324-00, -0325-21, -0357-71, -0439-79, -0423-34
+                                  and -0462-34.
+
+--- PDF p13, lines 501-517  (match: /^ *4\. Dimensions$/)
+                4. Dimensions
+                        For TBM700 A, B, C1, C2 & N:
+                              Wing Span:                                                                12,680 m (41,6 ft)
+                              Length:                                                                   10,645 m (34,9 ft)
+                              Height:                                                                   4,355 m (14,3 ft)
+                              Wing Area:                                                                18,00 m² (193,7 ft²)
+                        For TBM700 N equipped with MOD70-0322-00:
+                              Wing Span:                                                                12,833 m (42,1 ft)
+                              Length:                                                                   10,736 m (35,2 ft)
+                              Height:                                                                   4,355 m (14,3 ft)
+                              Wing Area:                                                                18,00 m² (193,7 ft²)
+
+                5. Engine
+                        5.1. Models
+                                  For TBM700 A, B, C1 & C2: 1 Pratt & Whitney Canada (PWC) PT6A-64
+                                  For TBM700 N with MOD70-0188-00: 1 Pratt & Whitney Canada (PWC) PT6A-66D
+                                  For TBM700 N with MOD70-0621-76: 1 Pratt & Whitney Canada (PWC) PT6E-66XT
+
+--- PDF p14, lines 542-554  (match: /^ *PT6A-66D:$/)
+                                  PT6A-66D:
+                                       Gas generator rotation speed:                          39000 RPM (104.1%)
+                                       Propeller rotation speed:                              2000 RPM
+                                       For TBM700 N not equipped with MOD70-0357-71:
+                                          Maximum take-off power:                             700 shp
+                                          Maximum continuous power:                           850 shp
+                                       For TBM700 N equipped with MOD70-0357-71:
+                                          Maximum take-off & continuous power:                850 shp
+                                       For powerplant limitations, refer to EASA approved Airplane Flight Manual, Section 2.
+                                  PT6E-66XT:
+                                        Gas generator rotation speed:                          39000 RPM (104%)
+                                        Propeller rotation speed:                              1925 RPM
+                                        Maximum take-off and continuous power:                 895 shp
+
+--- PDF p23, lines 964-965  (match: /1\.14\. +Modification MOD70-0357-71/)
+                         1.14.    Modification MOD70-0357-71 “Take-Off and Landing Operation at 850 SHP”:
+                                  This modification is applicable on TBM700 N from MSN1000, plus MSN687.

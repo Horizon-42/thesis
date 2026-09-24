@@ -1,0 +1,99 @@
+# source: data/reference_speeds/faa/FAA_TCDS_A22CE_Rev74.pdf  sha256: 006dc82b5d0c0be00ed8888b0cda08de5f1874ed5f9b3e496ff480e843476de9
+# id: faa_tcds_a22ce_r74 | FAA | TCDS A22CE - Textron Aviation 500, 550, S550, 552, 560, 560XL | Revision 74, December 8, 2025
+# url: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID132119292720251209201014.0001
+# retrieved: 2026-09-23 by the reference-speeds pack (file reused), re-read and re-hashed 2026-09-24. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p19, lines 1122-1147  (match: /^VII\. Model 560XL \(Excel\) Approved April 22, 1998/)
+VII. Model 560XL (Excel) Approved April 22, 1998; (XLS) Approved March 22, 2004;
+     (XLS+) Approved May 30, 2008; (XLS GEN 2) Approved April 22, 2022; (Ascend) Approved November 5, 2025
+     (Transport Category)
+     Model 560XL is defined by Cessna Airplane Assembly Drawing No. 6600000.
+
+    Serial No. Eligible:         560-5001 thru 560-5500 (Excel)
+    Serial No. Eligible:         560-5501 thru 560-6000 (XLS)
+    Serial No. Eligible:         560-6001 thru 560-6317, 560-6319 thru 560-6321 (XLS+)
+    Serial No. Eligible:         560-6318 and 560-6322 thru 560-6500 (XLS GEN 2)
+    Serial No Eligible:          560-6501 and On (Ascend)
+
+    Engines                      S/N 560-5001 thru 560-5500
+                                 Two Pratt & Whitney of Canada, Inc.
+                                 PW545A Turbofans
+
+                                 S/N 560-5501 thru 560-6000
+                                 Two Pratt & Whitney of Canada, Inc.
+                                 PW545B Turbofans
+
+                                 S/N 560-6001 thru 560-6500
+                                 Two Pratt & Whitney of Canada, Inc.
+                                 PW545C Turbofans
+
+                                 S/N 560-6501 and On
+                                 Two Pratt & Whitney of Canada, Inc.
+                                 PW545D Turbofans
+
+--- PDF p20, lines 1176-1183  (match: /^VII\. Model 560XL \(cont/)
+VII. Model 560XL (cont’d)
+
+    Engine Limits           S/N 560-5001 thru 560-5500
+                            PW545A Turbofans
+
+                            Static thrust standard day, sea level:
+                              Takeoff (5 min.)                             3952 lb.
+                              Max. continuous                              3372 lb.
+
+--- PDF p20, lines 1195-1200  (match: /S/N 560-5501 thru 560-6000/)
+                            S/N 560-5501 thru 560-6000
+                            PW545B Turbofans
+
+                            Static thrust standard day, sea level:
+                            Takeoff (5 min.)                               4119 lb.
+                            Max. continuous                                3372 lb.
+
+--- PDF p20, lines 1211-1216  (match: /S/N 560-6001 thru 560-6500/)
+                            S/N 560-6001 thru 560-6500
+                            PW545C Turbofans
+
+                            Static thrust standard day, sea level:
+                            Takeoff (5 min.)                               4119 lb.
+                            Max. continuous                                3372 lb.
+
+--- PDF p20, lines 1227-1232  (match: /S/N 560-6501 and on/)
+                            S/N 560-6501 and on
+                            PW545D Turbofans
+
+                            Static thrust standard day, sea level:
+                            Takeoff (5 min.)                               4218 lb.
+                            Max. continuous                                3453 lb.
+
+--- PDF p22, lines 1329-1349  (match: /\*S/N 560-5001 thru 560-5500 +S/N 560-5501 thru 560-6000/)
+                                    *S/N 560-5001 thru 560-5500                        S/N 560-5501 thru 560-6000
+    Maximum Weight                   Takeoff             20,000 lbs.                   Takeoff           20,200 lbs.
+                                     Landing             18,700 lbs.                   Landing           18,700 lbs.
+                                     Zero fuel           15,000 lbs.                   Zero fuel         15,100 lbs.
+                                     Ramp                20,200 lbs.                   Ramp              20,400 lbs.
+                                     *See NOTE 32.
+
+    Minimum Weight                   In-flight               12,400 lbs.               In-flight         12,400 lbs.
+
+                                     S/N 560-6001 thru 560-6317 and                    S/N 560-6318 and 560-6322
+                                     560-6319 thru 560-6321                            thru 560-6500
+    Maximum Weight                   Takeoff             20,200 lbs.                   Takeoff           20,330 lbs.
+                                     Landing             18,700 lbs.                   Landing           18,700 lbs.
+                                     Zero fuel           15,100 lbs.                   Zero fuel         15,360 lbs.
+                                     Ramp                20,400 lbs.                   Ramp              20,530 lbs.
+
+                                     S/N 560-6501 and On
+    Maximum Weight                   Takeoff             20,500 lbs.
+                                     Landing             18,700 lbs.
+                                     Zero fuel           15,800 lbs.
+                                     Ramp                20,700 lbs.
+
+--- PDF p39, lines 2426-2426  (match: /^NOTE 32\. +Model 560XL, S/N 560-5001 thru 560-5500, modified per SB560XL-32-28/)
+NOTE 32.   Model 560XL, S/N 560-5001 thru 560-5500, modified per SB560XL-32-28:
+
+--- PDF p39, lines 2437-2439  (match: /^ +Maximum Weight *$/)
+           Maximum Weight
+           Takeoff        20,200 lbs.
+           Landing        18,700 lbs.
+
+# note: this data sheet prints no wing area for any model (no "Wing Area", "sq ft" or "span" in its text layer).

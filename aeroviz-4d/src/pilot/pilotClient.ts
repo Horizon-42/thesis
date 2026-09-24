@@ -29,6 +29,8 @@ export interface PilotAircraftConfig {
   wingAreaM2: number;
   maxThrustN: number;
   approachThrustGuessN: number;
+  // Published approach speed at the landing mass, and the threshold speed gate's window at
+  // that mass: the range the target speed may be set in (backend _terminal_speeds_kt).
   terminalSpeedKt: number;
   terminalSpeedMinKt: number;
   terminalSpeedMaxKt: number;

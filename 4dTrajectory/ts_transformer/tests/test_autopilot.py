@@ -467,7 +467,8 @@ def _observed_series(geometry):
 
     candidate = geometry.candidates[0]
     lat, lon = geometry.frame.latlon_from_horizontal(candidate.threshold_e_m, candidate.threshold_n_m)
-    scenario = SimpleNamespace(source={"arr_airport": "KXXX", "runway": "09"}, initial=SimpleNamespace(m=62000.0),
+    scenario = SimpleNamespace(source={"arr_airport": "KXXX", "runway": "09", "resolved_typecode": "A320"},
+                               initial=SimpleNamespace(m=62000.0),
                                target=SimpleNamespace(latitude=lat, longitude=lon, psi=0.0), aircraft=SimpleNamespace(code="A320"))
     return FlightSeries(flight_id="TEST1", scenario=scenario, frame=ENUFrame(lat0=lat, lon0=lon, alt0=candidate.elevation_m),
                         times=np.zeros(1), values=np.zeros((1, 6)))
@@ -532,11 +533,15 @@ def test_a_flight_is_flown_on_its_own_or_a_stand_ins_dynamics_only_with_a_publis
 
     def series(resolved, dynamics):
         source = {"resolved_typecode": resolved, "dynamics_typecode": dynamics}
-        return SimpleNamespace(scenario=SimpleNamespace(source=source, initial=SimpleNamespace(m=62000.0)))
+        return SimpleNamespace(scenario=SimpleNamespace(source=source, initial=SimpleNamespace(m=62000.0),
+                                                        has_dynamics=dynamics is not None))
 
     assert replay.group_of(series("A320", "A320")) == replay.OWN
-    assert replay.group_of(series(None, "A320")) == "no identified type"
-    assert replay.group_of(series("A20N", "A320")) == replay.STAND_IN
+    assert replay.group_of(series(None, None)) == "no identified type"
+    # the performance index flies a GLF4 as a CRJ9: a stand-in, reported and never gated
+    assert replay.group_of(series("GLF4", "CRJ9")) == replay.STAND_IN
+    # an excluded type is kept by the signals (`all-flights`) but has nothing to fly on
+    assert replay.group_of(series("PC12", None)) == "no aircraft dynamics"
     monkeypatch.setattr(replay, "approach_speed_ias_mps", lambda typecode, mass: math.nan)
     assert replay.group_of(series("A320", "A320")) == "type publishes no approach speed"
 
@@ -819,7 +824,8 @@ def test_a_stand_ins_unspecified_speed_is_its_types_as_published():
 
     def series(resolved, dynamics, mass):
         return SimpleNamespace(scenario=SimpleNamespace(
-            source={"resolved_typecode": resolved, "dynamics_typecode": dynamics}, initial=SimpleNamespace(m=mass)))
+            source={"resolved_typecode": resolved, "dynamics_typecode": dynamics}, initial=SimpleNamespace(m=mass),
+            has_dynamics=True))
 
     own = series("A320", "A320", 60000.0)
     assert replay.flight_approach_ias_mps(own, replay.OWN) == approach_speed_ias_mps("A320", 60000.0)
@@ -916,7 +922,7 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
     monkeypatch.setattr(replay, "load_sentences", lambda d, split, spec: sentences)
     monkeypatch.setattr(replay, "rebuild_series", lambda d, items: [SimpleNamespace(scenario=SimpleNamespace(
         source=dict(zip(("resolved_typecode", "dynamics_typecode"), typecode[int(f.dataset_id[1:])])),
-        initial=SimpleNamespace(m=60000.0))) for f in items])
+        initial=SimpleNamespace(m=60000.0), has_dynamics=True)) for f in items])
     reread = {"differ": None}
     monkeypatch.setattr(replay, "read_flight", lambda f, g, s, w: SimpleNamespace(
         words=stored[int(f.dataset_id[1:])] + (1 if f.dataset_id == reread["differ"] else 0), runway_index=0))

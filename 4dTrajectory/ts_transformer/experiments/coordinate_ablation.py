@@ -274,7 +274,6 @@ def main() -> int:
                         help="final-training epoch cap (early stopping still applies)")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--device", default=None)
-    parser.add_argument("--aircraft-type", default=None)
     parser.add_argument("--batch-size", default="auto")
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
@@ -345,7 +344,6 @@ def main() -> int:
             epochs=args.epochs,
             seed=args.seed,
             device=args.device,
-            aircraft_type=args.aircraft_type,
             coordinate_frame=frame,
             batch_size=args.batch_size,
             cv_folds=args.cv_folds,

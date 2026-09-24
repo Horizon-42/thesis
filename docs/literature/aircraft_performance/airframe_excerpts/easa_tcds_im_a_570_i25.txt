@@ -1,0 +1,41 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_570_BD-500_Issue25.pdf  sha256: ee72e24467e24954c038c2c0dbfda46130ac7213f6e8959f4c901c77be123957
+# id: easa_tcds_im_a_570_i25 | EASA | TCDS EASA.IM.A.570 - BD-500 (Airbus A220) | Issue 25, 21 August 2026
+# url: https://www.easa.europa.eu/en/downloads/20964/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p1, lines 27-28  (match: /For Models:/)
+                For Models:           BD-500-1A10
+                                      BD-500-1A11
+
+--- PDF p3, lines 53-53  (match: /SECTION [12]: MODEL BD-500-1A1[01] \./)
+                SECTION 1: MODEL BD-500-1A10 .......................................................................... 6
+
+--- PDF p4, lines 123-123  (match: /SECTION [12]: MODEL BD-500-1A1[01] \./)
+                SECTION 2: MODEL BD-500-1A11 ........................................................................ 17
+
+--- PDF p10, lines 463-475  (match: /^ *4\. Dimensions$/)
+                4. Dimensions
+
+                Wingspan                        35.1 m (115 ft 1 in)
+                Overall Length                  34.9 m (114 ft 9 in)
+                Height                          11.8 m (38 ft 8 in)
+
+                5. Engines
+
+                Two (2) Pratt & Whitney PW1524G (EASA TCDS EASA.IM.E.090)
+                Two (2) Pratt & Whitney PW1521G (EASA TCDS EASA.IM.E.090)
+                Two (2) Pratt & Whitney PW1519G (EASA TCDS EASA.IM.E.090)
+
+                6. Auxiliary Power Unit
+
+--- PDF p21, lines 1074-1086  (match: /^ *4\. Dimensions$/)
+                4. Dimensions
+
+                Wingspan                        35.1 m (115 ft 1 in)
+                Overall Length                  38.7 m (127 ft)
+                Height                          11.5 m (37 ft 9 in)
+
+                5. Engines
+
+                Two (2) Pratt & Whitney PW1521G-3 (EASA TCDS EASA.IM.E.090)
+                Two (2) Pratt & Whitney PW1524G-3 (EASA TCDS EASA.IM.E.090)

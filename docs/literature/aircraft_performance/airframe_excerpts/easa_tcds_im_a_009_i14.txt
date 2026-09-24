@@ -1,0 +1,35 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_009_BD-700_Issue14.pdf  sha256: 0aa904838d96b56d76c22b32663aecb82683652e2ec0359bbfcb4bb88c529f57
+# id: easa_tcds_im_a_009_i14 | EASA | TCDS EASA.IM.A.009 - Bombardier Global BD-700 | Issue 14, 23 January 2026
+# url: https://www.easa.europa.eu/en/downloads/7508/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p14, lines 657-666  (match: /^ *3\.1 Engines:/)
+    3.1 Engines:
+        Two Rolls Royce Deutschland Ltd & Co KG BR700-710A2-20. EASA Type Certificate E.018 and associated
+        Type Certificate Data Sheet.
+
+   3.2 Engine Limits:
+
+                                     SL Static                                  Fan            Core                   ITT            Time
+                                       Thrust                                  RPM             RPM                                   Limit
+                                   lbf         kN                              N1%             N2%             °C             °F
+              Max. Take-off,AEO 14,750** 65.6**                                102.0           99.6           900           1,652   5 min.
+
+--- PDF p15, lines 708-717  (match: /^ *4\.1 Engines:/)
+    4.1 Engines:
+        Two Rolls Royce Deutschland Ltd & Co KG BR700-710D5-21. EASA Type Certificate E.018 and associated
+        Type Certificate Data Sheet.
+
+   4.2 Engine Limits:
+
+                                                    SL Static                    Fan           Core                    ITT             Time
+                                                      Thrust                    RPM            RPM                                     Limit
+                                                  lbf         kN                 N1%            N2%             °C             °F
+               Max. Take-off                    15,250       67.8               102.1          101.6           890           1,634     5 min
+
+--- PDF p30, lines 1512-1517  (match: /^10\. Engines:/)
+10. Engines:
+BD-700-2A12 aircraft with commercial designations of Global 7500 (See Note 5):
+      Two General Electric Passport 20-19BB1A
+       BD-700-2A12 aircraft with commercial designations of Global 8000 (See Note 6):
+       Two General Electric Passport 20-19BB1B

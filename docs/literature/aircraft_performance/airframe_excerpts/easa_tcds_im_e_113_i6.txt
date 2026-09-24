@@ -1,0 +1,20 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_113_Passport20_Issue06.pdf  sha256: a55452667ba71b505e275e68567704dbd57eefff449c0c0dcd02e080a65c9716
+# id: easa_tcds_im_e_113_i6 | EASA | TCDS EASA.IM.E.113 - GE Passport 20 series | Issue 06, 26 May 2026
+# url: https://www.easa.europa.eu/en/downloads/68115/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 324-337  (match: /^ *6\. Ratings *$/)
+                6. Ratings
+
+                Static thrust, at sea level - see Notes 1, 3 and 4 -:
+                                                      Take-off (5 minutes)                          Maximum Continuous
+                  Model                             Rating          Flat Rating                     Rating     Flat Rating
+                                                - see Note 4 -        Ambient                                   Ambient
+                                                                   Temperature                                Temperature
+                                                    (daN)               (°C)                        (daN)          (°C)
+                  Passport 20-17BB1A                 7893                                            7480
+                                                                         35
+                  Passport 20-18BB1A                 8200                                            7813
+                                                                                                                    25
+                  Passport 20-19BB1A                 8416                30                          7813
+                  Passport 20-19BB1B

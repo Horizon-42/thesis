@@ -9,6 +9,18 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
+- **缺气动参数的机型一律用 A320（2026-09-23 分析完成）。** train 50,693 条里 13,164 条（26.0 %）用 A320 飞，其中 4,599 条的机型进近速度落在 A320 模型的失速分支里或更低（活塞机全部）。报告与 199 个机型的替代表：`docs/aircraft_performance/2026-09-23_missing_performance_substitution.zh.md`。用户的决定（09-23 / 09-24）：
+  - **进近参考速度改用各机型公布值、按质量换算（方案 A）—— 已完成**（分支 `docs-aero-substitution`，FS5 / K10）。09-24 前准备的 `flight_scenarios/outputs/*_threshold_scenarios.json` 加载时被拒，重新求解前要重跑 `prepare_scenario_inputs.py`（先问用户）。
+  - **第 1–3 项做成一张索引表 —— 已完成**（`aircraft/performance_index.json`，FS6）：own 31 / substitute 53 / exclude 125（含 10 个没有航班的同义机型）；
+    flight_scenarios 与优化器场景默认不再用 A320。
+  - **ts 去掉 A320 回退，按需丢弃 —— 已完成**（用户 09-24：“B，去掉 all 的 A320 回退”“ts 用2 按需丢弃”；C31）：
+    `all-flights`（状态输出、指令标注器，保留没有动力学的航班）/ `modelled`（控制输出）/ `openap-direct`，默认按需。
+    **合并后要用户决定何时重建**（都没删）：28 个旧 `all` 状态预测 run（2026-09-04 起的 final_constraint 等）的配置不再
+    能加载；`4dTrajectory/outputs/POOLED/instruction_language/{v1_20260923,v2_20260924}` 的信号是 v1，新代码拒读，
+    标注链要从 `instruction_signals` 重跑（数值不变，只有 `typecode` 变：v1 里没有动力学的航班写的是 A320）；前端
+    `training/` 的 v5 样本（另一个会话 09-24 在 `a66c3276` 从 `v2_20260924` 导出的）要在信号重建后重新导出成 v6。
+    另一个会话正在做标注器，合并时间要和它协调。215 个 `openap-direct` run 不受影响。
+  - **待办**：写信问 EASA（environment@easa.europa.eu），公开的 ANP v2.3 表的系数能否在论文里引用（唯一有襟翼档进近速度规律的公开来源）。先不做。
 - **机型识别与最小重量已补（2026-09-23，用户要求“数据源必须靠谱，宁缺”）。** 用户当天决定并已执行：
   (1) 五个机场的观测报告已重评并重发前端（三门通过率 82.6% → 85.8%，横向/垂直判定无一变化，横向名单的合格集合
   不变）；(2) `cohorts_v7_20260923` 已按新机型库重建（每单元 train −4、val −3，全部是 openap-direct 资格变化的航班）；

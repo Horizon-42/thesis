@@ -1,0 +1,61 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_277_KingAir_B200_B300_Issue22.pdf  sha256: fe73bced940644d2f101fbb7ca0a49b374efae64e7689970234fae9335da44d4
+# id: easa_tcds_im_a_277_i22 | EASA | TCDS EASA.IM.A.277 - Beechcraft King Air B200, B200C, B200GT, B200CGT, B300, B300C | Issue 22, 04 December 2024
+# url: https://www.easa.europa.eu/en/downloads/7208/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p16, lines 806-806  (match: /^ *MODEL B(200|300)/)
+                     MODEL B200, B200C
+
+--- PDF p23, lines 1163-1163  (match: /^ *MODEL B(200|300)/)
+                MODEL B200GT, B200CGT
+
+--- PDF p27, lines 1340-1340  (match: /^ *MODEL B(200|300)/)
+                MODEL B300, B300C (Commuter Category) approved April 1990.
+
+--- PDF p27, lines 1341-1341  (match: /^ *MODEL B(200|300)/)
+                MODEL B300, B300C (Restricted Category) approved August 2014
+
+--- PDF p16, lines 818-818  (match: /Wing Area +28\.1496 sq\. meters \(303\.0 sq\. ft\.\)$/)
+                                                                            Wing Area      28.1496 sq. meters (303.0 sq. ft.)
+
+--- PDF p16, lines 823-823  (match: /Wing Area +28\.1496 sq\. meters \(303\.0 sq\. ft\.\)$/)
+                                                                            Wing Area       28.1496 sq. meters (303.0 sq. ft.)
+
+--- PDF p16, lines 824-832  (match: /PT6A-42 \(Turboprop\)/)
+                5.          Engines                                         2 United Aircraft of Canada, Ltd. or Pratt & Whitney
+                                                                            PT6A-42 (Turboprop) per Beech Specification BS
+                                                                            23319/1 (B200, B200C)
+                                  Engine Limits:
+                                                                    Shaft             N¹ Gas            Prop          Max. Permissible
+                                                                 Horsepower          Generator         Shaft         Turbine Interstage
+                                                                                      Speed            Speed           Temp. (Deg. C)
+                                    Take-off (5 minutes)              850              101.5%          2000*      750 (200, 200C, A200C)
+                                    Max Continuous                    850              101.5%          2000*      750 (200, 200C, A200C)
+
+--- PDF p23, lines 1174-1184  (match: /Wing Area +28\.15 sq/)
+                                                                            Wing Area           28.15 sq. meters (303.0 sq. ft.)
+                5. Engines                                                  2 Pratt & Whitney Aircraft of Canada, Ltd. PT6A- 52
+                                                                            (Turboprop) Per Beech Specification BS267046
+                                                                            (B200GT, B200CGT).
+
+
+                                  Engine Limits:
+                                                                    Shaft             N¹ Gas            Prop          Max. Permissible
+                                                                 Horsepower          Generator         Shaft         Turbine Interstage
+                                                                                      Speed            Speed           Temp. (Deg. C)
+                                    Takeoff (5 minutes)               850               104.0          2000*                    820
+
+--- PDF p27, lines 1352-1364  (match: /Wing Area +27\.87/)
+                                                                             Wing Area         27.87 sq. meters (300.0 sq. ft.)
+                5. Engines                                                   2 Pratt & Whitney Aircraft of Canada, Ltd. PT6A-
+                                                                             60A (Turboprop) Per Beech Specification BS
+                                                                             23433B.
+                                                                             *See Note 17 for alternate P&W PT60A-67A production
+                                                                             or engine installation kit.
+                                  Engine Limits:
+                                                                    Shaft             N¹ Gas            Prop          Max. Permissible
+                                                                 Horsepower          Generator         Shaft         Turbine Interstage
+                                                                                      Speed            Speed           Temp. (Deg. C)
+                                    Take-off (5 minutes)              1050              104%           1700*                    820
+                                    Max Continuous                    1050              104%           1700*                    820
+                                    Starting Transient (2                                                                       1000

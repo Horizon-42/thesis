@@ -1,0 +1,33 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_A_007_Cirrus_SR2x_Issue19.pdf  sha256: fd956109569e1e94b082307a414c9ad98184536bd696d87af367496f06cb0948
+# id: easa_tcds_im_a_007_i19 | EASA | TCDS EASA.IM.A.007 - Cirrus SR20, SR22, SR22T | Issue 19, 22 April 2026
+# url: https://www.easa.europa.eu/en/downloads/7512/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p12, lines 594-604  (match: /Teledyne Continental IO-550-N/)
+                                Height                                                      2.71 m         (8.90 ft)
+                                Wing Area                                                   13.46 m²       (144.90 ft²)
+
+                        5. Engines:                                                  Teledyne Continental IO-550-N
+                                                                                     EASA TC IM.E.100
+
+                                  5.1 Firmware:                                      Not Applicable
+
+                                  5.2 Mapping:                                       Not Applicable
+
+                                  5.3 Engine Limits:                Maximum Take-off    2700 RPM (310 hp)
+
+--- PDF p19, lines 980-993  (match: /Teledyne Continental TSIO-550-K/)
+                                Height                                               2.71 m         (8.90 ft)
+                                Wing Area                                            13.46 m²       (144.90 ft²)
+
+                        5. Engines:                                                  Teledyne Continental TSIO-550-K
+                                                                                     EASA TC IM.E.105
+
+                                  5.1 Firmware:                                      Not Applicable
+
+                                  5.2 Mapping:                                       Not Applicable
+
+                                  5.3 Engine Limits:                                 Maximum Take-off    2500 RPM (315
+                                                                                     hp)
+                                                                                     Maximum Continuous Power 2500 RPM
+                                                                                     (315 hp)

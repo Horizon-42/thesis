@@ -23,16 +23,17 @@ def test_find_threshold_case_insensitive_and_unknown():
 
 def test_threshold_target_uses_threshold_and_approach_envelope():
     thr = find_threshold("KRDU", "05L")
-    t = threshold_target_state("KRDU", "05L", A320, mass_kg=66000.0)
+    t = threshold_target_state("KRDU", "05L", A320, mass_kg=60000.0)
     assert (t.latitude, t.longitude) == (thr["lat"], thr["lon"])
     # crosses the threshold at the coded crossing height above its elevation
     assert t.altitude == pytest.approx(thr["elevation_m"] + A320.approach.threshold_crossing_height_m)
-    assert t.V == pytest.approx(A320.approach.reference_speed_ms)          # Vref
+    # V_ref at the mass: the A320's published 136 kt at its 66,000 kg MALW x sqrt(60/66)
+    assert t.V == pytest.approx(66.7084, abs=1e-4)
     # 05L is a compass bearing of 45deg; in math-ENU psi = 90 - 45 = 45deg (the diagonal is
     # the reflection's fixed point, so this case alone can't catch the convention — see below).
     assert t.psi == pytest.approx(math.radians(45.0))
     assert t.gamma == pytest.approx(math.radians(-A320.approach.glide_angle_deg))  # descending
-    assert t.m == 66000.0
+    assert t.m == 60000.0
 
 
 def test_threshold_target_psi_is_math_enu_not_compass():

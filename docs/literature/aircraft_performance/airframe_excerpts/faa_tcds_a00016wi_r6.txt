@@ -1,0 +1,55 @@
+# source: data/aircraft_performance/airframes/faa/FAA_TCDS_A00016WI_Rev6.pdf  sha256: 395fb11926b51a3d393d2da84a43495d3f3d7a33d564009b0cfc4e987781ed13
+# id: faa_tcds_a00016wi_r6 | FAA | TCDS A00016WI - Textron Aviation 408 (SkyCourier) | Revision 6, June 26, 2026
+# url: https://drs.faa.gov/browse/excelExternalWindow/DRSDOCID160807395920260707144812.0001
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p1, lines 20-34  (match: /^I\. +Model 408/)
+I.   Model 408 (Normal Category) Approved March 11, 2022
+
+     Engines                      Two Pratt & Whitney PT6A-65SC (turboprop)
+
+     Engine Limits
+
+                                                                               N1 Gas                            Max. Permissible
+                                                                                                Prop Shaft
+                                                Shaft         Torque*         Generator                             Interstage
+                                                                                                 Speed**
+                                              Horsepower        (%)           Speed**                             Turbine Temp
+                                                                                                  (rpm)
+                                                                                (%)                                    (ºC)
+                     Takeoff                    1110            100             104                1700                830
+                Max. continuous                 1110            100             104                1700                815
+
+--- PDF p2, lines 74-88  (match: /^I\. +Model 408/)
+I.   Model 408 (cont’d)
+
+     Propeller and        Two McCauley 4-blade, full feathering and reversible, metal propellers
+      Propeller Limits    Model:             4HFR34C779/110FDA-0
+                          Diameter:          110 in. (maximum)
+                                             Minimum Allowable for repairs: 108 in.
+                                             No further reduction permitted.
+                          Pitch Settings at: Reverse -9.0 +/- 0.2 degrees
+                                             Feathered +88.0 +/- 0.2 degrees
+                          (See McCauley Propeller TCDS P3NE for additional details and limitations).
+
+     Airspeed             VMO (Maximum operating speed)
+      Limitations           Sea Level (0 ft.) to 12,614 ft.               210 KIAS (210 KCAS)
+                          MMO above 12,614 ft.                            0.40 MI (0.40 MACH calibrated)
+                          VO (Maximum operating maneuvering speed Sea Level)
+
+--- PDF p3, lines 134-148  (match: /^I\. +Model 408/)
+I.   Model 408 (cont’d)
+
+     Maximum Operating       25,000 ft.
+      Altitude
+
+     Control Surface Movements
+      (Up/Down/Left/Right refers to motion of the trailing edge of each control surface)
+
+                             Elevator                             Up                   24.0 +1.0/-0.0 degrees
+                                                                  Down                 15.0 +/-1.0 degrees
+                             Elevator Tab                         Up                    6.5 +/-1.0 degrees
+                                                                  Down                 13.0 +/-1.0 degrees
+                             Rudder                               Right                30.5 +/-0.5 degrees
+                                                                  Left                 30.5 +/-0.5 degrees
+                             Rudder Tab                           Right                11.0 +/-0.5 degrees

@@ -25,9 +25,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from aircraft.performance_index import performance_index_identity
 from ts_transformer.data.channels import CHANNELS
 from ts_transformer.training.batching import resolve_batch_size
 from ts_transformer.config import (
+    AIRCRAFT_FILTER_OPENAP_DIRECT,
     CHECKPOINT_SELECTION_ANCHOR_GRID_ADE,
     CHECKPOINT_SELECTION_COMMON_GRID_METRICS,
     CHECKPOINT_SELECTION_OBJECTIVE,
@@ -1203,6 +1205,8 @@ def train(
         "training_cohort": training_cohort,
         "data_provenance": data_provenance,
         "data_selection": data_selection,
+        # Which aircraft each flight was flown as (C31): checked at load, see load_checkpoint.
+        "performance_index": performance_index_identity(),
     }
     if training_input is not None:
         checkpoint_payload[training_input.metadata_key] = training_input.provenance
@@ -1410,6 +1414,20 @@ def load_checkpoint(path: str | Path) -> tuple[nn.Module, TSConfig, Normalizer, 
             "trained on are not the ones this build would feed it. Re-train, or run the "
             "matching code version."
         )
+    # Under `modelled` / `all-flights` the performance index decides which flights have
+    # dynamics and which airframe each is flown as (mass, wing area, thrust: the control
+    # condition, labels and rollout). A checkpoint rebuilt under another index would be flown
+    # as other aircraft, so it is refused, as a saved scenario is (C31). `openap-direct`
+    # bypasses the index.
+    if config.aircraft_filter != AIRCRAFT_FILTER_OPENAP_DIRECT:
+        trained_under = payload.get("performance_index")
+        if trained_under != performance_index_identity():
+            raise ValueError(
+                f"checkpoint trained under performance index {trained_under!r}, not today's "
+                f"{performance_index_identity()!r}; under aircraft_filter="
+                f"{config.aircraft_filter!r} its flights would be flown as other aircraft — "
+                "re-train it"
+            )
     normalizer = Normalizer.from_dict(payload["normalizer"])
     model = build_model(config)
     # ``StateOutputLayer.offset_mask`` is a pure function of the channel contract and is

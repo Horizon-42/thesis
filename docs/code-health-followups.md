@@ -6,6 +6,24 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## Three ts ablation runners write into fixed directories that carry no aircraft filter (2026-09-24)
+
+**Verified** (code review of the A320-fallback removal): `experiments/kinematic_ablation.py:514`,
+`experiments/history_ablation.py:509` and `experiments/overfit_diagnostic.py` name their output
+directory without the aircraft filter and create it with `mkdir(exist_ok=True)`. A rerun today
+(default `all-flights`) would write into the directory the retired `all` run left, e.g.
+`4dTrajectory/outputs/POOLED/ts_itransformer_kinematic_weight_ablation`. The pipeline's
+directories carry the filter tag (C31); these three do not. The overwrite-on-rerun itself is
+older than the change.
+
+**Judgement**: give them the filter tag (or refuse an existing directory, as
+`coordinate_ablation` does through `refuse_repeated_test`) the next time one of them is run.
+Also: four arm declarations under `4dTrajectory/ts_transformer/docs/experiments/`
+(`airport_frame_arms.json`, `airport_frame_seed2024_arms.json`, `final_constraint_arms.json`,
+`state_v2_anchor_relative_arms.json`) set `"aircraft_filter": "all"` and `closure_p1c_arms.json`
+sets `"aircraft_type"`; they are records of finished campaigns and now fail by name at
+`arm_config` if re-run.
+
 ## The executor spec's source hash depends on where `geokit` resolves (2026-09-24)
 
 **Verified** — `autopilot.spec.executor_source_files` hashes every executor module and the repository modules they import
@@ -582,6 +600,10 @@ so it moved for all 26 runways when `tch_source`/`baro_vnav_minima` were added
 
 ## 18. `THRESHOLD_SPEED_GATE.md` §7: the upper edge is where `runway`-mode solves pile up
 
+**RESOLVED for new solves (2026-09-23)**: the target is the type's published approach speed
+(`flight_scenarios/docs/population_reference.md` FS5), not a class constant. The records on disk
+were solved against the old 145 kt target and keep this edge sensitivity until re-solved.
+
 **Verified** (2026-09-07 measurement). With the A320 family's calibrated `Cl_max` the 64.5 t
 window is 126.7–146.7 kt and the class-default target of 145 kt sits 1.7 kt under the top, so
 the ~15 % "fast" fails in `KMSY/runway` are decided by sub-knot replay drift. The real fix is
@@ -633,6 +655,10 @@ time (`docs/reference_speeds/README.md` "Types with no published minimum mass");
 not state OEW. A published BOW/OEW (spec sheet, APM) for each closes it as a cited JSON row.
 
 ## 23. The optimizer's velocity floor and V_ref target still come from the stall model
+
+**Half resolved (2026-09-23)**: the V_ref target and the floor's cap now read
+`aircraft.reference_speeds` (FS5, `optimizer_reference.md` K10). The floor itself is still
+`1.10 × stall_speed_ms` on the stall model, so the gaps below still apply to the floor.
 
 **Verified** (opus review, 2026-09-07). Since v9 the evaluation gate anchors on the published
 approach speed while `4dTrajectory/optimization/scenario_optimization.py` floors velocity at
@@ -1074,3 +1100,58 @@ delete-then-build arrivals / observed writers (TD17). What is left, one item eac
     `experiments/instruction_spec.py` and `experiments/instruction_training_export.py` each define a
     private `_git_state()` byte-identical to `repo_layout.git_state()` (added for `executor_spec`);
     replace both with the import.
+
+## `test_write_reference_records_from_observed_tracks` fails on dev-two-tier (2026-09-23)
+
+**Verified** (found while testing the published-approach-speed change; reproduced on unchanged
+`dev-two-tier` at `3b2b0bcf` in the main checkout). `4dTrajectory/optimization/tests/test_scenario_optimization.py
+::test_write_reference_records_from_observed_tracks` fails with
+`ValueError: …_reference_eval.json: source.arr_airport must be a non-empty string`
+(`evaluation/records.py:108`, raised while the test reads back the reference record it wrote).
+Cause not investigated. Not caused by the approach-speed change; `run_all_tests.sh`'s header still
+lists only the numpy-scalar failure as known.
+
+
+## `THRESHOLD_SPEED_GATE.md` §3.3 quotes a "+5/−0 kt" margin that AC 91-79B does not contain (2026-09-23)
+
+**Verified** against the saved `docs/regulation/FAA_AC_91-79B_2023.pdf` (dated 8/28/23, text
+extracted with `pdftotext -layout`): no "+5", "5/", "minus" or "5 kt" anywhere. The only threshold
+speed rule is §5.2.2 "Excess Airspeed": "The recommended approach reference landing airspeed (Vref),
+plus wind and gust additives, should be maintained until 50 ft over the runway threshold." The
+"+5/−0 kt" and the "Boeing/Airbus FCTM … typically +5 kt" sentence therefore have no primary text on
+disk (perhaps an earlier AC 91-79A; not checked). The gate's window itself rests on FSF ALAR 7.1 and
+is unaffected; the sentence needs a source or removal.
+
+## B77W preset: `landing_mass` is 19 % above its published MALW (2026-09-24)
+
+**Verified** (review of the published-approach-speed change). The B77W preset carries no
+`max_landing_kg`, so `landing_mass` = 0.85 × 351,530 = 298.8 t against the FAA MALW of 251.3 t; the
+sqrt(m / MALW) law then extrapolates its 149 kt to 162.5 kt at that mass (176.2 kt at the Pilot
+panel's MTOW). The A320 preset (66.3 t vs 66.0 t) and C172 (983 kg vs 1,157 kg) are closer. Giving the
+presets `max_landing_kg` from their published row would fix it, but it moves the preset masses, the
+analysis's native stall-margin range (B77W is its lower end) and the 2 B77W arrivals' scenarios.
+
+## Pilot frontend tests still use a 145 / 135 / 155 kt catalog fixture (2026-09-24)
+
+**Verified** (same review). `PilotPanel.test.tsx`, `pilotClient.test.ts`, `PilotInitialStateOverlay.test.tsx`
+and `usePilotInitialPlacement.test.ts` feed a catalog the backend can no longer produce for a
+single-valued preset (its `terminalSpeedMinKt` equals `terminalSpeedKt`), and nothing tests the
+panel when the catalog fails to load (the target editor is then not rendered and the summary reads
+"— (no aircraft)"). The tests pass; they just no longer look like the real catalog.
+
+## Performance index: points the stage-2 review left for later (2026-09-24)
+
+**Verified** (opus review of the performance-index change).
+- `trajectory_data_process/harvest/observed.py:106` labels every modelled landing mass
+  `openap_landing_mass`, also for presets and the index's own-parameter types; and a substituted type now
+  gets no mass, so its observed record falls back to the nominal 60 t (C25A/C525/PC24 6.8 t → 60 t). The gate
+  never reads that mass; the label should say where the mass came from. Changes observed records only when
+  they are regenerated.
+- `docs/literature/control_normalization/measurements/per_class_readout.py:51` and
+  `4dTrajectory/ts_transformer/docs/specific_force_teacher_distribution.py:49` resolve `dynamics_typecode`
+  with `provider="openap"`; on a record of an index own-parameter type (only produced under `auto`) they raise.
+- Index data worth a look (judgement): B722's Poll–Schumann landing mass is 5.2 % above its FAA MALW, so its
+  target is 136.4 kt against a published 133 kt; MD88 flies as B737 because a substitute must be a native
+  airframe and its PS synonym MD82 is an own-parameter row; the similarity distance has no mass term, so LJ35
+  (6.5 t) flies as B737 and GLF3 as B763 (dynamically similar, by the method's definition).
+

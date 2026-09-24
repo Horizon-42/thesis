@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from ts_transformer.config import (
+    AIRCRAFT_FILTER_ALL_FLIGHTS,
+    AIRCRAFT_FILTER_MODELLED,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     AIRCRAFT_FILTERS,
     CHECKPOINT_SELECTION_METRICS,
@@ -37,7 +39,6 @@ from ts_transformer.config import (
     CONTROL_STATE_OBJECTIVES,
     COORDINATE_FRAMES_AVAILABLE,
     RETIRED_FIELD_NAMES,
-    DEFAULT_AIRCRAFT_TYPE,
     HORIZON_MODES,
     INTENT_CONDITIONINGS_AVAILABLE,
     INTENT_FIELDS,
@@ -93,18 +94,17 @@ def add_data_args(parser: argparse.ArgumentParser) -> None:
     add_eligibility_arg(parser)
     parser.add_argument("--airport", default=None,
                         help="ICAO code, when the flight dicts do not carry arr_airport")
-    parser.add_argument("--aircraft-type", default=None,
-                        help="fallback aircraft when the flight dict has no resolvable type "
-                             f"(train default: {DEFAULT_AIRCRAFT_TYPE}; predict default: the "
-                             "checkpoint's train-time value). This sets the "
-                             "target Vref / threshold-crossing height the gates measure against")
     parser.add_argument(
         "--aircraft-filter",
         choices=AIRCRAFT_FILTERS,
         default=None,
         help=(
-            "fleet selection stored in the checkpoint; 'openap-direct' keeps only ICAO "
-            "Doc 8643 types with a native same-type OpenAP model (no synonym or fallback)"
+            "fleet selection stored in the checkpoint (default: by need -- 'all-flights' for "
+            "state output, 'modelled' for control). 'all-flights' keeps every flight, those "
+            "whose type has no aircraft dynamics without them; 'modelled' keeps the flights "
+            "the aircraft model can fly (preset, performance index, OpenAP-direct) and drops "
+            "the rest by name; 'openap-direct' keeps only ICAO Doc 8643 types with a native "
+            "same-type OpenAP model"
         ),
     )
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -616,7 +616,6 @@ CLI_CONFIG_FIELDS = (
     "seed",
     "split_seed",
     "device",
-    "aircraft_type",
     "coordinate_frame",
     "target_conditioning",
     "intent_conditioning",
@@ -778,17 +777,18 @@ def config_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser) 
     return config, batch_auto
 
 
+AIRCRAFT_FILTER_NOTICE = {
+    AIRCRAFT_FILTER_ALL_FLIGHTS: "every flight; a type without aircraft dynamics is kept without "
+                                 "them (trajectory only)",
+    AIRCRAFT_FILTER_MODELLED: "preset / performance index / OpenAP-direct; the rest dropped by name",
+    AIRCRAFT_FILTER_OPENAP_DIRECT: "ICAO Doc 8643 identity + native same-type OpenAP model only",
+}
+
+
 def build_series_or_exit(args: argparse.Namespace, config: TSConfig,
                           parser: argparse.ArgumentParser, flights: list[dict]):
-    # config.aircraft_type is the train-time value (checkpoint-carried on predict); an
-    # explicit --aircraft-type wins, with the mismatch warned about at the predict site.
-    aircraft_type = args.aircraft_type or config.aircraft_type
-    series, report = build_series(flights, config, airport=args.airport,
-                                  aircraft_type=aircraft_type)
-    if config.aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT:
-        print("  aircraft   ICAO Doc 8643 identity + native same-type OpenAP model only")
-    else:
-        print(f"  aircraft   {aircraft_type} (fallback for unresolvable types)")
+    series, report = build_series(flights, config, airport=args.airport)
+    print(f"  aircraft   {AIRCRAFT_FILTER_NOTICE[config.aircraft_filter]}")
     print(report.format())
     if not series:
         parser.error(f"no usable series built from {args.data} — see the skip reasons above")

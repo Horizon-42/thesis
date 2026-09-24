@@ -1,0 +1,7 @@
+# source: data/reference_speeds/embraer/phenom-300e-electronic.pdf  sha256: e41897ec792708d1229fab2018791f32095dc4ac98a019d4bab6ddc9a51955bb
+# id: embraer_phenom300e_brochure | Embraer | Phenom 300E brochure | phenom-300e-electronic.pdf (undated)
+# url: https://embraer.com/media/b4lchr5u/phenom-300e-electronic.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p24, lines 390-390  (match: /PW535E1 / 3,478 lbf/)
+                                                     High-speed cruise: 464 ktas                      PW535E1 / 3,478 lbf     Deck (G3000)           cross section cabin design                Generous baggage compartment                             Externally serviced lavatory                  Central maintenance computer

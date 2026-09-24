@@ -1,0 +1,19 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_090_PW1500G_Issue10.pdf  sha256: 606e781824c45743c64b5cf5b1790ae0967fff2f3516f6a4ba8633cc7a2a30dd
+# id: easa_tcds_im_e_090_i10 | EASA | TCDS EASA.IM.E.090 - Pratt & Whitney PW1500G series | Issue 10, 14 August 2025
+# url: https://www.easa.europa.eu/en/downloads/20863/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p7, lines 330-343  (match: /^ *6\. Ratings *$/)
+                   6. Ratings
+                   See Notes 1 and 2.
+                                                            Sea Level Static Thrust
+                                                            Take-off           Flat Rating            Maximum                Flat Rating
+                                                            (5 minutes)        Ambient                Continuous             Ambient
+                     Models
+                                                                               Temperature                                   Temperature
+                                                            daN (lbf)          °C (°F)                daN (lbf)              °C (°F)
+                     PW1519G                                8796 (19775)       30 (86)                8312 (18685)           25 (77)
+                     PW1521G / PW1521G-3 /                  9773 (21970)       30 (86)                9235 (20760)           25 (77)
+                     PW1521GA
+                     PW1524G / PW1524G-3                    10854 (24400)         30 (86)             10253 (23050)          25 (77)
+                     PW1525G / PW1525G-3                    10854 (24400)         30 (86)             10253 (23050)          25 (77)

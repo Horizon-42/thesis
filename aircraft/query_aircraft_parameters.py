@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Resolve an aircraft (by ICAO24, registration, or typecode) to an ``Aircraft``.
 
-The OpenAP cache supplies geometry / mass / engine / drag. OpenAP has no *approach*
-envelope (reference speeds, final-approach geometry), so a category-based default fills
-that group — refine per type as needed.
+The OpenAP cache supplies geometry / mass / engine / drag for the types OpenAP models
+DIRECTLY. OpenAP has no *approach* envelope: its speeds are the type's published approach speed
+(``aircraft/reference_speeds.json``, FAA Aircraft Characteristics Database), and its procedure
+geometry and thrust guess are MTOW-class defaults (``aircraft_sets.class_procedure``). Refused:
+a type with no published approach speed (B3XM), and an OpenAP SYNONYM -- a type OpenAP only
+covers with another type's data. Those are decided once, per type, in
+``aircraft/performance_index.json`` (own parameters, an explicit substitute, or excluded).
 
 CLI:
     python aircraft/query_aircraft_parameters.py 4951d9
@@ -22,37 +26,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from aircraft.aircraft_sets import Aircraft, Approach, Drag, Engine, Geometry, Mass
+from aircraft.aircraft_sets import Aircraft, Approach, Drag, Engine, Geometry, Mass, class_procedure
+from aircraft.reference_speeds import reference_speed
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PARAMETERS_PATH = SCRIPT_DIR / "openap_aircraft_parameters.json"
 LOOKUP_PATH = SCRIPT_DIR / "aircraft_id_lookup.json"
-
-
-# OpenAP carries no approach envelope; default one by MTOW class (mirrors the hand-tuned
-# presets in aircraft_sets). OpenAP's own ``category`` (transport_jet /
-# business_or_general_aviation / unknown) can't discriminate — it lumps the A318 and the
-# 777 into "transport_jet" — so weight is the right key. Refine per type when better data
-# is available.
-_GENERAL_AVIATION_APPROACH = Approach(65.0, 60.0, 75.0, 2.0, 5.0, 0.5, 3.0, 15.0, 800.0)
-_NARROW_BODY_APPROACH = Approach(145.0, 135.0, 155.0, 5.0, 10.0, 0.8, 3.0, 15.0, 40000.0)
-_WIDE_BODY_APPROACH = Approach(155.0, 145.0, 165.0, 6.0, 12.0, 1.0, 3.0, 15.0, 140000.0)
-
-# MTOW class boundaries (kg): 5 700 = the light/large-aircraft regulatory split;
-# 150 000 ≈ the narrow-body/wide-body split (A321 ~93 t … B767 ~186 t).
-_LIGHT_MAX_TAKEOFF_KG = 5_700.0
-_WIDE_BODY_MIN_TAKEOFF_KG = 150_000.0
-
-
-def _default_approach(max_takeoff_kg: float | None) -> Approach:
-    """Pick a default approach envelope by maximum take-off weight."""
-    if max_takeoff_kg is None:
-        return _NARROW_BODY_APPROACH
-    if max_takeoff_kg < _LIGHT_MAX_TAKEOFF_KG:
-        return _GENERAL_AVIATION_APPROACH
-    if max_takeoff_kg >= _WIDE_BODY_MIN_TAKEOFF_KG:
-        return _WIDE_BODY_APPROACH
-    return _NARROW_BODY_APPROACH
 
 
 class AircraftLookupError(LookupError):
@@ -90,26 +69,6 @@ def resolve_typecode(aircraft_id: str, parameters: dict[str, Any], lookup: dict[
     raise AircraftLookupError(f"Aircraft id {normalized} was not found in {LOOKUP_PATH.name}.")
 
 
-# OpenAP substitutes a SURROGATE performance model for types it lacks
-# (``openap_performance_typecode`` in the cache). That is fine for what the
-# surrogate exists for — engine/drag performance — but it must not misstate the
-# AIRFRAME's identity facts. For C56X the surrogate is the much smaller Citation II
-# (C550): MTOW 6,849 kg against the real Citation Excel/XLS's ~9,100 kg — a 25 %
-# mass understatement that placed the speed gate's stall-anchored window ~13 kt
-# low and mislabelled half the type's real crossings "too fast"
-# (evaluation/docs/BASELINE_SPEED_GATE_RESULTS.md §5). The corrections below
-# restore the certificated airframe facts (Cessna 560XL series: MTOW 20,000 lb =
-# 9,072 kg, MLW 18,700 lb = 8,482 kg, wing area 369.7 sq ft = 34.35 m²); the
-# surrogate keeps supplying performance, and
-# ``aircraft_dynamics_surrogate_typecode`` still reports it for audit.
-_AIRFRAME_IDENTITY_CORRECTIONS: dict[str, dict[str, dict[str, float]]] = {
-    "C56X": {
-        "geometry": {"wing_area_m2": 34.35},
-        "mass": {"mtow_kg": 9072.0, "mlw_kg": 8482.0},
-    },
-}
-
-
 def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
     """Resolve ``aircraft_id`` to an :class:`Aircraft` built from the OpenAP cache."""
     parameters = load_json(PARAMETERS_PATH)
@@ -122,17 +81,24 @@ def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
     if not record.get("openap_supported"):
         reason = record.get("error", "not supported by OpenAP")
         raise AircraftLookupError(f"{aircraft_id} resolves to {typecode}, but {reason}")
-
     data = record["parameters"]
-    geometry = dict(data.get("geometry", {}))
-    mass = dict(data.get("mass", {}))
+    surrogate = normalize_id(data.get("openap_performance_typecode") or typecode)
+    if surrogate != typecode:
+        raise AircraftLookupError(
+            f"{aircraft_id} resolves to {typecode}, which OpenAP covers only with {surrogate}'s data; "
+            "the model does not fly that data under another type's code"
+        )
+    speeds = reference_speed(typecode)
+    if speeds is None:
+        raise AircraftLookupError(
+            f"{aircraft_id} resolves to {typecode}, which has no published approach speed in "
+            "aircraft/reference_speeds.json"
+        )
+    geometry = data.get("geometry", {})
+    mass = data.get("mass", {})
     drag = data.get("drag", {})
     engine = data.get("engine", {})
     category = data.get("category")
-    correction = _AIRFRAME_IDENTITY_CORRECTIONS.get(typecode)
-    if correction is not None:
-        geometry.update(correction.get("geometry", {}))
-        mass.update(correction.get("mass", {}))
 
     return Aircraft(
         code=typecode,
@@ -148,7 +114,7 @@ def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
             fuselage_height_m=geometry.get("fuselage_height_m"),
         ),
         mass=Mass(
-            max_takeoff_kg=mass.get("mtow_kg"),
+            max_takeoff_kg=mass["mtow_kg"],
             max_landing_kg=mass.get("mlw_kg"),
             operating_empty_kg=mass.get("oew_kg"),
             max_fuel_kg=mass.get("maximum_fuel_capacity_kg"),
@@ -160,7 +126,7 @@ def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
             cruise_thrust_n_each=engine.get("cruise_thrust_n_each"),
             cruise_sfc=engine.get("cruise_sfc"),
         ),
-        approach=_default_approach(mass.get("mtow_kg")),
+        approach=Approach(speeds=speeds, **class_procedure(mass["mtow_kg"])),
         drag=Drag(
             zero_lift_cd0=drag.get("cd0"),
             induced_drag_factor=drag.get("k"),
@@ -198,6 +164,11 @@ def openap_support_kind(typecode: str | None) -> str | None:
     exact OpenAP performance policy they accept.  In particular, a strict experiment can
     exclude both unsupported aircraft and OpenAP synonym/surrogate models without
     maintaining a second hard-coded aircraft list.
+
+    ``direct`` means :func:`get_aircraft_parameters` builds it: OpenAP models the type itself
+    AND it has a published approach speed (B3XM, absent from the FAA table, returns ``None``).
+    ``synonym`` means OpenAP covers it only with another type's data; the model does not fly
+    that data directly (``aircraft/performance_index.json`` decides those types).
     """
     normalized = normalize_id(typecode)
     if not normalized:
@@ -208,7 +179,9 @@ def openap_support_kind(typecode: str | None) -> str | None:
     performance_typecode = normalize_id(
         record.get("parameters", {}).get("openap_performance_typecode") or normalized
     )
-    return "direct" if performance_typecode == normalized else "synonym"
+    if performance_typecode != normalized:
+        return "synonym"
+    return "direct" if reference_speed(normalized) is not None else None
 
 
 def openap_direct_typecodes() -> tuple[str, ...]:
@@ -224,7 +197,8 @@ def format_aircraft(aircraft: Aircraft) -> str:
         f"  geometry  wing_area_m2={fmt(g.wing_area_m2)}  wing_span_m={fmt(g.wing_span_m)}",
         f"  mass      max_takeoff_kg={fmt(m.max_takeoff_kg)}  max_landing_kg={fmt(m.max_landing_kg)}",
         f"  engine    count={fmt(e.count)}  max_thrust_n_each={fmt(e.max_thrust_n_each)}  total_n={fmt(e.max_thrust_total_n)}",
-        f"  approach  Vref_kt={fmt(aircraft.approach.reference_speed_kt)} (category default)",
+        f"  approach  Vref_kt={fmt(aircraft.approach.speeds.approach_speed_kt)} at MALW "
+        f"{fmt(aircraft.approach.speeds.malw_kg)} kg (published, reference_speeds.json)",
     ])
 
 

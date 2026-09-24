@@ -1,0 +1,14 @@
+# source: data/aircraft_performance/airframes/easa/EASA_TCDS_IM_E_105_TSIO-550_Issue03.pdf  sha256: b8d877c8a1638abd2cac7f928239ae797a343471964e76d39d21f1b93034ca5b
+# id: easa_tcds_im_e_105_i3 | EASA | TCDS EASA.IM.E.105 - Continental TSIO-550 series | Issue 03, 03 September 2020
+# url: https://www.easa.europa.eu/en/downloads/7639/en
+# retrieved: 2026-09-23. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p6, lines 263-271  (match: /Rating +TSIO-550-G +TSIO-550-K/)
+                          Rating             TSIO-550-G                  TSIO-550-K
+
+                                        231 kW (310 HP) at          235 kW (315 HP) at
+                        Max.              2700 RPM and                2500 RPM and
+                     Continuous          115 kPa (34 in.Hg)         127 kPa (37.5 in.Hg)
+                                         manifold pressure           manifold pressure
+                                       and 6706 m (22000 ft)       and 5486 m (18000 ft)
+                                          critical altitude           critical altitude

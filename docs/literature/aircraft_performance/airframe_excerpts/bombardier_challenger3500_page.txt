@@ -1,0 +1,10 @@
+# source: data/reference_speeds/bombardier/bombardier_challenger-3500.html  sha256: ca1afcade8cd0ce0be3540769a29771b17425491f8102b80e1d27fda1b18d359
+# id: bombardier_challenger3500_page | Bombardier | Challenger 3500 product page, Specifications block | HTML as served 2026-09-07
+# url: https://bombardier.com/en/aircraft/challenger-3500
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- lines 322-325  (match: /Thrust: 7,323 lbf/)
+Engines
+Honeywell HTF7350 turbofans
+Thrust: 7,323 lbf (33 kN)
+Flat rated to ISA + 15°C

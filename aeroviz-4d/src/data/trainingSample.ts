@@ -37,9 +37,11 @@ import { fetchJson } from "../utils/fetchJson";
 export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
 /** MIRROR of the exporter's `SAMPLE_SCHEMA` (`instruction_training_export.py`). The name changes
  *  with the file's shape, on both sides, in the same change: v5 is `instruction-v2`'s sample with a
- *  turn's heading against time, and a file under any other name — `v4` and `v3` included, whatever
+ *  turn's heading against time; v6 is v5 with a flight's `typecode` its own ICAO type or null (v5
+ *  carried the type the dynamics flew, an A320 for every type without dynamics); a file under any
+ *  other name — `v5`, `v4` and `v3` included, whatever
  *  vocabulary it carries — is refused. */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v5";
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v6";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v2";
 /** MIRROR of the spec's sha (`v2_20260924/spec.json`). A new vocabulary is a new sha, and this
@@ -372,7 +374,8 @@ export interface TrainingFlight {
   datasetId: string;
   flightKey: string;
   callsign: string;
-  typecode: string;
+  /** The flight's own ICAO type; null = its identity is unresolved (sample v6). */
+  typecode: string | null;
   runway: string;
   runwayIndex: number;
   stratum: TrainingStratum;
@@ -625,6 +628,10 @@ class Reader {
     const value = str(this.source, key);
     if (value === null) throw new Refusal(`${this.at(key)} is ${JSON.stringify(this.source[key])}, not a non-empty string`);
     return value;
+  }
+
+  nullableString(key: string): string | null {
+    return this.source[key] === null ? null : this.string(key);
   }
 
   number(key: string): number {
@@ -1352,7 +1359,7 @@ function parseFlight(
     datasetId: flight.string("datasetId"),
     flightKey: flight.string("flightKey"),
     callsign: flight.string("callsign"),
-    typecode: flight.string("typecode"),
+    typecode: flight.nullableString("typecode"),
     runway,
     runwayIndex,
     stratum: stratum as TrainingStratum,

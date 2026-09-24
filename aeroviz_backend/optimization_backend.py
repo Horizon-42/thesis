@@ -15,6 +15,7 @@ from aeroviz_backend.simulation_backend import (
     clamp,
     format_control,
     format_geodetic_state,
+    pilot_mass_kg,
     read_aircraft,
     read_float,
     read_geodetic_state,
@@ -483,6 +484,7 @@ def make_optimizer(
             dt=dt,
             max_duration=arrival_time_s,
             aircraft=geodetic_simulator.simulator.aircraft,
+            mass_kg=pilot_mass_kg(geodetic_simulator.simulator.aircraft),
         )
 
     if optimizer_name in DIRECT_COLLOCATION_SCHEMES:

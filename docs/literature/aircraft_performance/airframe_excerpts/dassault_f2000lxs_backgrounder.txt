@@ -1,0 +1,8 @@
+# source: data/reference_speeds/dassault/Falcon-2000LXS-Backgrounder.pdf  sha256: 55e2f344889141b387259998fe2a205f64bb01b7c1e36dc6fca2b9f2dc8b0ab3
+# id: dassault_f2000lxs_backgrounder | Dassault Aviation | Falcon 2000LXS Backgrounder | Falcon-2000LXS-Backgrounder.pdf (2023/02 upload)
+# url: https://www.dassaultfalcon.com/app/uploads/2023/02/Falcon-2000LXS-Backgrounder.pdf
+# retrieved: 2026-09-07. Verbatim lines of the text layer (pdftotext -layout), trailing blanks stripped; "PDF pN" = 1-based page index of the PDF file.
+
+--- PDF p3, lines 136-137  (match: /generation Pratt & Whitney Canada PW308C engines/)
+generation Pratt & Whitney Canada PW308C engines, already proven on the Falcon
+2000EX/LX, provide 7,000 lbs (31.14 kN) max thrust each at ISA+15°C. Its new Talon II
