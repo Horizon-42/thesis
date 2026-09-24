@@ -15,16 +15,15 @@ The inner loop (§5.1) turns a reference path angle into the rate the inverse fl
 the pointed runway, crossing its threshold at its published threshold crossing height (TCH, `lateral.Runways`): the
 crossing point is the TCH moved into the word's tube at the threshold (`labeller.vertical.tube_bounds`: the class's
 two angles from where the altitude or angle word in force was said, ± the altitude tolerance, along the path flown;
-its inner half), where the tube meets the heights the vocabulary admits there — the TCH ± the altitude tolerance,
-within the landing condition. Toward that point: once the line is captured, the angle from here to it along the
-centreline; before, the class's nominal angle. Either way the angle is held inside the tube in force as it is now: no shallower than the class's shallow edge at the tube's inner upper edge, no steeper than its steep edge at
-the inner lower edge (a correction over τ_h, as the hold law's). The land word's tube is re-drawn at every angle word
-the observed descent changed class at; a straight line to a fixed aim point left it at such a change in 71 of 85
-failures the tube could have held (stage 2 of the vocabulary-only plan, 2026-09-24). Where the tube misses the
-admitted heights at the threshold the landing comes first: the aim goes to their nearer edge and leaves the tube
-(mode ``aim_left_tube``). And never steeper than the straight line to the crossing point (the shortest path there
-is, so it never descends into the ground on a downwind), whatever the tube says. Nothing here is measured from
-data: the TCH is the runway's, the rest the vocabulary's.
+its inner half), where the tube meets the heights admitted there — the TCH ± the altitude tolerance's inner half,
+within the landing condition; where it does not, the admitted edge nearer the tube (mode ``aim_left_tube``: the
+landing comes first). Once the lateral law has captured the line the descent aims, every cycle, at that point — the
+angle from here to there along the centreline, from level to the steepest class's steep edge; before, the class's
+nominal angle, never steeper than the straight line to it (the shortest path there is, so it never descends into
+the ground on a downwind). Nothing here is measured from data: the TCH is the runway's, the rest the vocabulary's.
+(Stage 2 of the vocabulary-only plan, 2026-09-24, also flew the land word inside the tube in force — the class's
+edges as bounds, or its centre line: on 500 train flights the land word stayed inside its tube no more often,
+86.9–88.5 % against 86.9 %, the straight-line cap binding first, so the simpler law stayed.)
 ``γ̇_max`` is ``path_rate_factor``
 times the least rate that keeps an entry into the steepest class inside its tube (§5.1:
 ``V γ_lo² / (2 ε)``, γ_lo the steepest class's lower edge, ε the altitude tolerance). Once a target is
@@ -43,8 +42,9 @@ from ts_transformer.autopilot.frame import Kinematics
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.instructions.words import ANGLE_LEVEL, Words
 
-#: The landing aim keeps this share of the word's tube tolerance in hand (the tube is judged on the smoothed
-#: altitude, and the path-angle loop tracks its reference within metres).
+#: The landing aim keeps this share of the altitude tolerance in hand, in the word's tube and in the heights admitted
+#: at the threshold (the tube is judged on the smoothed altitude, and the path-angle loop tracks its reference within
+#: metres; at the full tolerance about the TCH, 17 of 500 train crossings fell outside evaluation's ±22 m, none at half).
 TUBE_MARGIN_SHARE = 0.5
 
 
@@ -111,38 +111,25 @@ class Vertical:
         hold_tau = 4.0 * params.path_time_constant_s
         hold = (-height_to_go / (state.speed_mps * hold_tau)).clamp(-self.descent_max_rad, self.climb_rad)
         # "descend to land": the crossing point, the published TCH moved into the word's tube (its inner half) at the
-        # threshold where the two meet inside the window of heights the vocabulary admits there (± the altitude
-        # tolerance about the TCH, within the landing condition); where they do not, the window's edge nearer the tube
+        # threshold where the two meet inside the heights admitted there (the TCH ± the altitude tolerance's inner half,
+        # within the landing condition); where they do not, the admitted edge nearer the tube (the landing comes first)
         along = self.flown_m - self.anchor_m + to_go_m
         margin = TUBE_MARGIN_SHARE * self.tolerance_m
-        steep_tan, shallow_tan = self.steep_tan[angle_class], self.shallow_tan[angle_class]
-        tube_low = self.anchor_height_m - along * steep_tan - self.tolerance_m + margin - threshold_elevation_m
-        tube_high = self.anchor_height_m - along * shallow_tan + self.tolerance_m - margin - threshold_elevation_m
-        window_low = (crossing_height_m - self.tolerance_m).clamp(min=0.0)
-        window_high = (crossing_height_m + self.tolerance_m).clamp(max=self.landing_max_height_m)
+        tube_low = (self.anchor_height_m - along * self.steep_tan[angle_class] - self.tolerance_m + margin
+                    - threshold_elevation_m)
+        tube_high = (self.anchor_height_m - along * self.shallow_tan[angle_class] + self.tolerance_m - margin
+                     - threshold_elevation_m)
+        window_low = (crossing_height_m - self.tolerance_m + margin).clamp(min=0.0)
+        window_high = (crossing_height_m + self.tolerance_m - margin).clamp(max=self.landing_max_height_m)
         low, high = torch.maximum(tube_low, window_low), torch.minimum(tube_high, window_high)
         in_both = torch.minimum(torch.maximum(crossing_height_m, low), high)
         window_edge = torch.where(tube_low > window_high, window_high, window_low)
         crossing = torch.where(low <= high, in_both, window_edge)
         self.left_tube = land & line_captured & (low > high)
         above_crossing = state.height_m - threshold_elevation_m - crossing
-        on_line = torch.atan2(above_crossing, to_go_m.clamp(min=1.0)).clamp(min=0.0)
+        on_line = torch.atan2(above_crossing, to_go_m.clamp(min=1.0)).clamp(0.0, self.steepest_rad)
         shortest = torch.atan2(above_crossing, straight_m.clamp(min=1.0)).clamp(min=0.0)
-        straight_to_crossing = torch.where(line_captured, on_line, shortest)
-        toward = torch.where(line_captured, on_line, torch.minimum(nominal, shortest))
-        # ... flown inside the tube in force as it is now (the angle word said last anchors it): no shallower than its
-        # shallow edge once at its inner upper edge, no steeper than its steep edge once at its inner lower edge
-        # (§5.2, stage 2 of the vocabulary-only plan: the land word's tube is re-drawn at every angle word, and a
-        # straight line to the crossing point left it at a class change 71 times in 85); not where the tube misses
-        # the window — the landing comes first there; and never steeper than the straight line to the crossing point,
-        # whatever the tube says (the ground comes before the word)
-        here = self.flown_m - self.anchor_m
-        upper = self.anchor_height_m - here * shallow_tan + self.tolerance_m - margin
-        lower = self.anchor_height_m - here * steep_tan - self.tolerance_m + margin
-        shallowest = torch.atan(shallow_tan) + (state.height_m - upper) / (state.speed_mps * hold_tau)
-        steepest = torch.atan(steep_tan) + (state.height_m - lower) / (state.speed_mps * hold_tau)
-        inside = torch.minimum(torch.maximum(toward, shallowest), steepest)
-        aim = torch.minimum(torch.where(self.left_tube, toward, inside), straight_to_crossing).clamp(0.0, self.steepest_rad)
+        aim = torch.where(line_captured, on_line, torch.minimum(nominal, shortest))
         reference = torch.where(land, torch.where(go_around, torch.full_like(aim, self.climb_rad), -aim),
                                 torch.where(self.captured, hold, -nominal))
         wanted = (reference - state.gamma_rad) / params.path_time_constant_s
