@@ -39,7 +39,9 @@ class ExecutorParams:
     delays: Delays                 # d_ψ, d_h, d_v
     timeout_factor: float          # the flight's own remaining time × this (§8.3)
 
-    def check(self, spec: VocabularySpec) -> None:
+    def check(self, spec: VocabularySpec, *, early_words: bool = False) -> None:
+        """``early_words``: allow a negative delay — a word acting before it is said. Only the sensitivity
+        check's probes pass it (they measure what the labeller's late reading costs); a spec never does."""
         if abs(spec.step_s / self.cycle_s - round(spec.step_s / self.cycle_s)) > 1e-9:
             raise ValueError(f"the sentence's step {spec.step_s:g} s is not a whole number of {self.cycle_s:g} s cycles")
         if self.heading_time_constant_s < 2.0 * self.cycle_s:
@@ -51,7 +53,7 @@ class ExecutorParams:
             raise ValueError(f"τ_γ {self.path_time_constant_s:g} s is under 2 Δt")
         if not 0.0 < self.bank_cap_deg <= min(spec.turn_bank_max_deg, math.degrees(BANK_MAX_RAD)):
             raise ValueError(f"φ_cap {self.bank_cap_deg:g}° outside (0, {spec.turn_bank_max_deg:g}°]")
-        if min(self.delays.heading_s, self.delays.vertical_s, self.delays.speed_s) < 0.0:
+        if not early_words and min(self.delays.heading_s, self.delays.vertical_s, self.delays.speed_s) < 0.0:
             raise ValueError(f"{self.delays}: a word cannot take effect before it is said")
         if self.delays.heading_s > spec.turn_start_delay_max_s:
             raise ValueError(f"d_ψ {self.delays.heading_s:g} s exceeds the {spec.turn_start_delay_max_s:g} s a turn "

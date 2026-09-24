@@ -7,8 +7,8 @@ Three sources, in order, each feeding the next:
 2. method A (`autopilot/derive.py`): τ_ψ from the split-turn constraint, p from the executor's own 90° turn;
 3. method B (`autopilot/observe.py`): the word delays — a seeded train sample (`replay.draw`) flown with no
    delay, each flown track re-read by the labeller through the observation operator; a delay is the median
-   of how much earlier the re-read places a word than the executor received it, floored at 0 (the
-   executor cannot act on a word before it is said).
+   of how much earlier the re-read places a word that starts a manoeuvre than the executor received it,
+   floored at 0 (the executor cannot act on a word before it is said; `observe.delays_from_leads`).
 
 The design's fixed choices are module constants below. Writes ``spec.json`` + ``measurements.json`` into
 ``--dir`` (never over an existing file), from a clean tree only: the spec records the commit it was
@@ -37,7 +37,6 @@ from ts_transformer.autopilot import derive, measure, observe, replay
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import DELAY_GROUPS, Delays
 from ts_transformer.autopilot.spec import executor_source_sha256, params_sha256, write_spec
-from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
     labeller_source_sha256, load_candidates, load_sentences, load_signals, load_spec, require_current_labeller,
 )
@@ -64,13 +63,6 @@ def _percentiles(values: list[float]) -> dict[str, float]:
     return {f"p{q}": float(np.percentile(values, q)) for q in PERCENTILES} | {"n": len(values)}
 
 
-def _measure_chunk(flights: list[Any], stored: list[tuple[np.ndarray, int]], spec_data: dict[str, Any],
-                   geometry_data: dict[str, Any]) -> dict[str, list[float]]:
-    spec = VocabularySpec.from_dict(spec_data)
-    geometries = {code: AirportGeometry.from_dict(data) for code, data in geometry_data.items()}
-    return measure.measure_flights(flights, stored, spec, Words(spec), geometries)
-
-
 def data_parameters(directory: Path, spec: VocabularySpec, workers: int) -> tuple[dict[str, Any], dict[str, list[float]]]:
     signals = load_signals(directory, "train")
     sentences = load_sentences(directory, "train", spec)
@@ -82,7 +74,8 @@ def data_parameters(directory: Path, spec: VocabularySpec, workers: int) -> tupl
     geometry_data = {code: geometry.to_dict() for code, geometry in load_candidates(directory).items()}
     pooled: dict[str, list[float]] = {name: [] for name in measure.MEASUREMENTS}
     with ProcessPoolExecutor(max_workers=workers, mp_context=get_context("spawn")) as pool:
-        futures = [pool.submit(_measure_chunk, flights[i: i + CHUNK], stored[i: i + CHUNK], spec.to_dict(), geometry_data)
+        futures = [pool.submit(measure.measure_chunk, flights[i: i + CHUNK], stored[i: i + CHUNK], spec.to_dict(),
+                               geometry_data)
                    for i in range(0, len(flights), CHUNK)]
         for future in futures:
             for name, values in future.result().items():
@@ -96,32 +89,34 @@ def method_b(batch: replay.Batch, params: ExecutorParams, words: Words, device: 
     spec = words.spec
     flown, verdicts = replay.fly_batch(batch, params, words, device=device)
     leads: dict[int, list[float]] = {column: [] for column in observe.MEASURED_COLUMNS}
-    received = 0
+    received: Counter = Counter()
     refused: Counter = Counter()
     for j, verdict in enumerate(verdicts):
         states = flown.states[j, : verdict.end_row + 1].cpu().numpy()
         try:
-            pairs, count = observe.flight_leads(states, params.cycle_s, batch.series[j], batch.geometries[j],
-                                                batch.readings[j], spec, words, LEAD_WINDOW_S)
+            pairs, counts = observe.flight_leads(states, params.cycle_s, batch.series[j], batch.geometries[j],
+                                                 batch.readings[j], spec, words, LEAD_WINDOW_S)
         except Refused as refusal:
             refused[refusal.reason] += 1
             continue
         for column, lead in pairs:
             leads[column].append(lead)
-        received += count
+        received.update(counts)
+    delays = observe.delays_from_leads(leads)
     by_group = {name: [lead for column in columns for lead in leads[column]] for name, columns in DELAY_GROUPS.items()}
-    delays = Delays(**{name: max(0.0, float(np.median(values))) for name, values in by_group.items()})
     return {
         "delays": delays,
         "record": {
             "drawn": batch.drawn, "flown_with": {"delays": "0 s on every column"},
             "flights": replay.summary(verdicts),
             "flown_track_refused_by_the_labeller": dict(refused.most_common()),
-            "words_received": received,
+            "words_received_and_matched": {COLUMNS[column]: {"received": received[column], "matched": len(leads[column])}
+                                           for column in observe.MEASURED_COLUMNS},
             "lead_s_by_column": {COLUMNS[column]: _percentiles(values) for column, values in leads.items() if values},
             "lead_s_by_delay": {name: _percentiles(values) for name, values in by_group.items()},
             "rule": "delay = max(0, median lead of the group's columns); lead = received − re-read, seconds; "
-                    f"matched within {LEAD_WINDOW_S:g} s on the same column and value",
+                    f"matched within {LEAD_WINDOW_S:g} s on the same column and value; heading words only where "
+                    "they begin a turn",
         },
     }
 
@@ -139,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     if directory.exists():
         parser.error(f"{directory} exists; an executor spec is never overwritten")
+    if not instructions.resolve().is_relative_to(REPO_ROOT.resolve()):
+        parser.error(f"{instructions} is outside this repository ({REPO_ROOT}); name the artefact inside it")
+    artefact_name = instructions.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
     git = git_state()
     if git["dirty"]:
         parser.error("the tree has uncommitted changes; an executor spec is measured at a commit")
@@ -165,7 +163,8 @@ def main(argv: list[str] | None = None) -> int:
     roll_rate, overshoots = derive.roll_rate_deg_s(provisional, spec)
     undelayed = replace(provisional, bank_rate_deg_s=roll_rate)
     undelayed.check(spec)
-    print(f"method A: τ_ψ {tau:g} s, p {roll_rate:g}°/s (overshoot by speed {overshoots})", flush=True)
+    print(f"method A: τ_ψ {tau:g} s, p {roll_rate:g}°/s (a {spec.heading_max_turn_deg:g}° turn's overshoot by "
+          f"speed {overshoots})", flush=True)
 
     batch = replay.draw(instructions, "train", spec, words, per_airport=args.method_b_per_airport, seed=args.seed)
     b = method_b(batch, undelayed, words, device)
@@ -181,8 +180,9 @@ def main(argv: list[str] | None = None) -> int:
             "heading_time_constant_s": {"value": tau, "rule": "the largest τ_ψ with r_turn τ_ψ ≤ heading_continue_lead_deg, "
                                                               "down to 0.5 s"},
             "bank_rate_deg_s": {"value": roll_rate, "overshoot_deg_by_speed_mps": overshoots,
-                                "rule": f"the least p on a {derive.ROLL_RATE_STEP_DEG_S:g}°/s grid whose 90° turn passes "
-                                        "its target by at most heading_tolerance_deg at every speed"},
+                                "rule": f"the least p on a {derive.ROLL_RATE_STEP_DEG_S:g}°/s grid whose "
+                                        f"{spec.heading_max_turn_deg:g}° turn passes its target by at most "
+                                        "heading_tolerance_deg at every speed"},
         },
         "method_b": b["record"],
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
@@ -190,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         "elapsed_s": time.perf_counter() - started,
     }
     source = {"executor_source_sha256": executor, "labeller_source_sha256": labeller,
-              "instructions": instructions.relative_to(REPO_ROOT).as_posix(), "git": git}
+              "instructions": artefact_name, "git": git}
     write_spec(directory, params, spec.sha256, measurements, source)
     print(f"executor spec {params_sha256(params)[:12]} → {directory}")
     for name, value in asdict(params).items():

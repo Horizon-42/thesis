@@ -9,12 +9,15 @@ resolved to newtons by the contract's own law) that the evaluation package grade
 ``flight_key`` to the observed flight's own verdict in the harvest's ``approach/evaluation_report.json``.
 
 The gates (§11), per airport and stratum (`instructions.readout`: straight-in / vectored), on the own-dynamics
-flights: (1) landed on the pointed runway ≥ `GATE_SHARE`; (2) words inside their envelopes ≥ `GATE_SHARE`,
-counted per word judged (a word the flown track never reached is reported, not counted: the flight had
-landed, or failed gate 1); (3) of the flights whose observed track passes evaluation, the replays that pass
-too ≥ `GATE_SHARE`. Reported beside them: outcomes, word failures, limits, the distance to the observed track.
+flights only (the stand-in group is reported, with no verdict): (1) landed on the pointed runway ≥ `GATE_SHARE`;
+(2) words inside their envelopes ≥ `GATE_SHARE`, counted per word judged (`replay.word_results`; a word the flown
+track never reached, or one the judge did not judge, is reported, not counted); (3) of the flights whose observed
+track passes evaluation, the replays that pass too ≥ `GATE_SHARE` — the observed verdicts are the harvest's own
+report, refused unless it is the same evaluation schema and methodology as the replay's. Reported beside them:
+outcomes, word failures, limits, the distance to the observed track.
 
-Stage 4 of the framework is the VAL replay and waits for the user's go-ahead; development runs use train.
+Stage 4 of the framework is the VAL replay and waits for the user's go-ahead; it runs from a clean tree.
+Development runs use train.
 
     python run_ts.py executor_replay --split train --per-airport 20 \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \\
@@ -58,30 +61,12 @@ HORIZON = "sentence"
 REPLAY_SCHEMA = "ts-executor-replay-v1"
 
 
-def word_results(verdict: Verdict) -> list[tuple[str, bool]] | None:
-    """Every word the judge judged, ``(column, inside its envelope)``; None when the flown track did not pass
-    the labeller's gate (nothing was judged). A heading result stands for each word of its turn."""
-    if verdict.words is None:
-        return None
-    out: list[tuple[str, bool]] = []
-    for h in verdict.words["heading"]:
-        turn_ok = h["turn"] is None or all(h["turn"].values())
-        hold_ok = not isinstance(h["hold"], dict) or h["hold"]["inside"] == h["hold"]["rows"]
-        out += [("heading", turn_ok and hold_ok)] * h["words"]
-    corridor, capture = verdict.words["corridor"], verdict.words["capture_turn"]
-    if corridor["cleared"]:
-        out.append(("approach", capture is not None and capture["progress_ok"] and capture["rate_ok"]
-                    and corridor["entered"] and corridor["inside"] == corridor["rows"]))
-    out += [("altitude", bool(v["contained"])) for v in verdict.words["vertical"]]
-    out += [("speed", bool(v["contained"])) for v in verdict.words["speed"]]
-    return out
-
-
 def executor_forecast(flown: Flown, index: int, verdict: Verdict, inputs: Any, series: FlightSeries) -> Forecast:
     """Flight ``index``'s flown track as a control-path forecast from row 0: the states at every cycle to the
-    one its outcome is read at, the schedule in the plant's contract, and its newtons resolved by that
-    contract's own law."""
-    end, dt = verdict.end_row, flown.cycle_s
+    one its outcome is read at (before it, for a dynamics failure: no state of the failure enters the record),
+    the schedule in the plant's contract, and its newtons resolved by that contract's own law."""
+    end = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
+    dt = flown.cycle_s
     states = flown.states[index, : end + 1]
     commands = flown.commands[index, :end]
     contract = EXECUTOR_DYNAMICS.control_thrust_parameterization
@@ -116,6 +101,7 @@ def gate_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 cells[(row["group"], airport, stratum)].append(row)
     for (group, airport, stratum), members in sorted(cells.items()):
         judged = [w for r in members if r["words"] is not None for w in r["words"]]
+        gated = group == replay.OWN
         paired = [r for r in members if r["observed_verdict"] == "pass"]
         landed = _share(sum(r["outcome"] == "landed" for r in members), len(members))
         words = _share(sum(ok for _, ok in judged), len(judged))
@@ -124,31 +110,42 @@ def gate_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "flights": len(members), "landed": landed, "words_judged": len(judged), "words_inside": words,
             "observed_passes": len(paired), "replay_passes_where_observed_passes": evaluation,
             "flights_with_unjudged_words": sum(r["words"] is None for r in members),
+            "heading_words_not_judged": sum(r["heading_words_not_judged"] for r in members),
             "words_not_reached": sum(r["words_not_reached"] for r in members),
-            "clears": {name: value is not None and value >= GATE_SHARE
-                       for name, value in (("landed", landed), ("words", words), ("evaluation", evaluation))},
+            "clears": ({name: value is not None and value >= GATE_SHARE
+                        for name, value in (("landed", landed), ("words", words), ("evaluation", evaluation))}
+                       if gated else "not gated: a stand-in's dynamics"),
             "outcomes": dict(Counter(r["outcome"] for r in members).most_common()),
         }
     return table
 
 
-def _evaluate(records: Path) -> dict[str, dict[str, Any]]:
+def _evaluate(records: Path) -> dict[str, Any]:
     report = records / "evaluation_report.json"
     subprocess.run([sys.executable, "-m", "evaluation", "--input", str(records), "--output", str(report)],
                    cwd=REPO_ROOT, check=True)
-    return {row["flight_key"]: row for row in json.loads(report.read_text(encoding="utf-8"))["trajectories"]}
+    return json.loads(report.read_text(encoding="utf-8"))
 
 
-def _observed_verdicts(airport: str) -> dict[str, str]:
+def observed_report(airport: str) -> dict[str, Any]:
     report = json.loads(default_evaluation_report_path(arrival_manifest_path(airport)).read_text(encoding="utf-8"))
     if report["subject"] != "observed":
         raise ValueError(f"{airport}: the harvest's approach report is not an observed report")
-    return {row["flight_key"]: row["verdict"] for row in report["trajectories"]}
+    return report
+
+
+def require_same_grading(replayed: dict[str, Any], observed: dict[str, Any], airport: str) -> None:
+    """Gate 3 pairs two reports: the same evaluation schema and methodology, or they are not one grading."""
+    for key in ("schema_version", "methodology"):
+        if replayed[key] != observed[key]:
+            raise ValueError(f"{airport}: the replay's evaluation {key} differs from the observed report's — grade "
+                             "the observed records again with this evaluation code before pairing")
 
 
 def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any, *, chunk: int, device: torch.device,
-                records: Path, split: str, executor_dir: Path, record: dict[str, Any]) -> list[dict[str, Any]]:
-    """Fly and judge one airport's flights, write their records, grade them, and return one row each."""
+                records: Path, split: str, executor_dir: Path,
+                record: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fly and judge one airport's flights, write their records, grade them; one row each, and the report."""
     rows, predictions, metrics = [], [], []
     for start in range(0, len(members), chunk):
         part = replay.subset(batch, members[start: start + chunk])
@@ -156,6 +153,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
         inputs = part.inputs(device)
         aligned = replay.flight_alignment(part, flown, verdicts)
         for j, verdict in enumerate(verdicts):
+            counted = replay.word_results(verdict)
             series = part.series[j]
             forecast = executor_forecast(flown, j, verdict, inputs, series)
             predictions.append(build_prediction_record(series, forecast, index=start + j, model_name=PREDICTOR,
@@ -166,7 +164,8 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
                 "dataset_id": reading.dataset_id, "flight_key": series.scenario.source["flight_key"],
                 "airport": reading.airport, "group": part.groups[j], "stratum": flight_record(reading)["stratum"],
                 "outcome": verdict.outcome, "flew_the_sentence": verdict.flew_the_sentence,
-                "crossing": verdict.crossing, "words": word_results(verdict),
+                "crossing": verdict.crossing, "words": None if counted is None else counted[0],
+                "heading_words_not_judged": 0 if counted is None else counted[1],
                 "words_not_reached": 0 if verdict.words is None else verdict.words["not_reached"],
                 "refused": verdict.refused, "limits": verdict.limits, **aligned[j]})
         del flown, verdicts
@@ -176,9 +175,10 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
                 flight_metrics=metrics, checkpoint=str(executor_dir), split=split,
                 extra_summary={"executor_spec_sha256": record["sha256"]})
     graded = _evaluate(records)
+    by_key = {row["flight_key"]: row for row in graded["trajectories"]}
     for row in rows:
-        row["replay_verdict"] = graded[row["flight_key"]]["verdict"]
-    return rows
+        row["replay_verdict"] = by_key[row["flight_key"]]["verdict"]
+    return rows, graded
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -197,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
         parser.error(f"{out} exists; a readout is never overwritten")
+    if args.split == "val" and git_state()["dirty"]:
+        parser.error("the val replay (stage 4) runs from a clean tree")
     params, record, words = replay.open_executor(executor, instructions)
     spec = words.spec
     started = time.perf_counter()
@@ -210,14 +212,19 @@ def main(argv: list[str] | None = None) -> int:
     by_airport: dict[str, list[int]] = defaultdict(list)
     for j, flight in enumerate(batch.signals):
         by_airport[flight.airport].append(j)
-    for airport, members in sorted(by_airport.items()):
-        observed = _observed_verdicts(airport)
-        flown_rows = fly_airport(batch, members, params, words, chunk=args.chunk, device=torch.device(args.device),
-                                 records=out / "records" / airport, split=args.split, executor_dir=executor,
-                                 record=record)
-        missing = [row["flight_key"] for row in flown_rows if row["flight_key"] not in observed]
+    observed_reports = {airport: observed_report(airport) for airport in by_airport}
+    for airport, members in by_airport.items():
+        verdicts = {row["flight_key"] for row in observed_reports[airport]["trajectories"]}
+        missing = [batch.series[j].scenario.source["flight_key"] for j in members
+                   if batch.series[j].scenario.source["flight_key"] not in verdicts]
         if missing:
             raise ValueError(f"{airport}: {len(missing)} flight(s) have no observed verdict, e.g. {missing[:3]}")
+    for airport, members in sorted(by_airport.items()):
+        observed = {row["flight_key"]: row["verdict"] for row in observed_reports[airport]["trajectories"]}
+        flown_rows, graded = fly_airport(batch, members, params, words, chunk=args.chunk,
+                                         device=torch.device(args.device), records=out / "records" / airport,
+                                         split=args.split, executor_dir=executor, record=record)
+        require_same_grading(graded, observed_reports[airport], airport)
         for row in flown_rows:
             row["observed_verdict"] = observed[row["flight_key"]]
         rows += flown_rows

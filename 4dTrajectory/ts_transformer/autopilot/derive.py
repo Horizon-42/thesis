@@ -4,7 +4,8 @@ flying the executor's own manoeuvre rather than read from data.
 - ``heading_time_constant_s`` (τ_ψ): the largest the split-turn constraint admits (``r_turn τ_ψ ≤ lead``,
   down to 0.5 s) — the gentlest roll-out that still banks through a split turn;
 - ``roll_rate_deg_s`` (p): the least bank rate (a `ROLL_RATE_STEP_DEG_S` grid) at which the executor's own
-  90° turn, level and at a held speed, passes its target by no more than the heading tolerance at every
+  turn through the vocabulary's largest word (`heading_max_turn_deg`, the turn that passes its target
+  furthest), level and at a held speed, passes its target by no more than the heading tolerance at every
   speed of `ROLL_CHECK_SPEEDS_MPS` (`turn_overshoot_deg` simulates it on an A320 at 1500 m).
 """
 
@@ -55,7 +56,7 @@ def _a320_level(speed_mps: float) -> tuple[FlightInputs, AirportCharts]:
     return inputs, charts
 
 
-def turn_overshoot_deg(params: ExecutorParams, speed_mps: float, turn_deg: float = 90.0) -> float:
+def turn_overshoot_deg(params: ExecutorParams, speed_mps: float, turn_deg: float) -> float:
     """How far past the target the executor's own heading law turns (a right turn of ``turn_deg`` from
     wings level, level flight, speed held), degrees."""
     inputs, charts = _a320_level(speed_mps)
@@ -77,12 +78,13 @@ def turn_overshoot_deg(params: ExecutorParams, speed_mps: float, turn_deg: float
 
 
 def roll_rate_deg_s(params: ExecutorParams, spec: VocabularySpec) -> tuple[float, dict[str, float]]:
-    """The least bank rate that keeps the executor's own 90° turn inside the heading tolerance (module
+    """The least bank rate that keeps the executor's own largest turn inside the heading tolerance (module
     docstring); returns it with the overshoot at each speed."""
     rate = ROLL_RATE_STEP_DEG_S
     while rate <= ROLL_RATE_MAX_DEG_S:
         trial = replace(params, bank_rate_deg_s=rate)
-        overshoot = {f"{speed:g}": turn_overshoot_deg(trial, speed) for speed in ROLL_CHECK_SPEEDS_MPS}
+        overshoot = {f"{speed:g}": turn_overshoot_deg(trial, speed, spec.heading_max_turn_deg)
+                     for speed in ROLL_CHECK_SPEEDS_MPS}
         if max(overshoot.values()) <= spec.heading_tolerance_deg:
             return rate, overshoot
         rate += ROLL_RATE_STEP_DEG_S

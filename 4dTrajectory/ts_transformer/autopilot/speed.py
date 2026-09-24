@@ -5,7 +5,8 @@
   (`aircraft.reference_speeds`, every number traced to its document), quoted as an indicated speed at the
   maximum landing weight, scaled by ``√(m / MALW)`` and flown as the true airspeed ``· √(ρ0 / ρ(h))``. The
   type is the flight's IDENTIFIED one (`scenario.source["resolved_typecode"]`), never the dynamics'
-  stand-in; a flight whose type publishes no approach speed cannot fly an "unspecified" stretch.
+  stand-in; a flight whose type publishes no approach speed cannot fly an "unspecified" stretch. A flight
+  on a stand-in's dynamics carries the stand-in's mass, so its type's speed is taken as published, unscaled.
 - The rate: ``V̇* = sat((V_ref − V) / τ_V, [−a, +a_acc])`` with ``τ_V = δv / a`` — a constant
   deceleration (``a_dec``, or ``a_unspec`` for the pilot's own) until one band half-width δv from the
   target, then an exponential approach, so the transition is monotone and does not pass the target.
@@ -29,13 +30,16 @@ from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.outputs.constraints.speed_floor import stall_speed_mps
 
 
-def approach_speed_ias_mps(typecode: str | None, mass_kg: float) -> float:
-    """The type's published approach speed at this mass, indicated, m/s; NaN when the flight has no
-    identified type or its type publishes none (it then cannot fly "unspecified")."""
+def approach_speed_ias_mps(typecode: str | None, mass_kg: float | None) -> float:
+    """The type's published approach speed, indicated, m/s: at this mass (``√(m / MALW)``), or as published
+    — at its maximum landing weight — when ``mass_kg`` is None (a flight flown on a stand-in's dynamics carries
+    the stand-in's mass, not its own type's). NaN when the flight has no identified type or its type
+    publishes none (it then cannot fly "unspecified")."""
     reference = None if typecode is None else reference_speed(typecode)
     if reference is None:
         return math.nan
-    return reference.approach_speed_kt * KT_MS * math.sqrt(mass_kg / reference.malw_kg)
+    scale = 1.0 if mass_kg is None else math.sqrt(mass_kg / reference.malw_kg)
+    return reference.approach_speed_kt * KT_MS * scale
 
 
 class Speed:

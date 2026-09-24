@@ -5,12 +5,14 @@ One seeded train sample (`replay.draw`: per airport, own dynamics, a published a
 per variant: the spec's own parameters, then each of τ_ψ, p, the γ̇ factor and the three delays moved alone.
 τ_ψ runs from 2 s up to the spec's value (a larger one breaks the split-turn constraint), p over 2–5°/s, the
 γ̇ factor over 1–3, each delay by ± `DELAY_STEP_S`. A delay moved below 0 makes a word act BEFORE it is said:
-such a variant is a probe, marked ``probe`` in the readout — it measures what the labeller's late reading of a
-manoeuvre's onset costs (method B's finding), and could never be a spec's value. Every variant reports the
-landed share, the share flown as said, the word checks that failed, and how far the flown tracks lie from
+such a variant is a probe, flown with `ExecutorParams.check`'s ``early_words`` and marked ``probe`` in the
+readout — it measures what the labeller's late reading of a manoeuvre's onset costs (method B's finding), and
+could never be a spec's value. Every variant reports the landed share, the share flown as said, the words
+inside their envelopes (per word judged), the word checks that failed, and how far the flown tracks lie from
 the observed ones (`replay.alignment`).
 
-Writes ``sensitivity.json`` into ``--out`` (a new directory; default beside the spec).
+Writes into ``--out`` (a new directory; default beside the spec): ``variants/<nn>_<variant>.json`` as each is
+flown, then ``sensitivity.json`` with every row.
 
     python run_ts.py executor_sensitivity \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \\
@@ -84,20 +86,22 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{batch.drawn['flights']} train flights drawn ({batch.drawn['read']} read, excluded "
           f"{batch.drawn['excluded']}), {time.perf_counter() - started:.0f}s", flush=True)
 
+    (out / "variants").mkdir(parents=True)
     rows: list[dict[str, Any]] = []
-    for name, moved, probe in variants(params):
-        if not probe:
-            moved.check(spec)
-        flown, verdicts = replay.fly_batch(batch, moved, words, device=device)
-        row = {"variant": name, "probe": probe, **replay.summary(verdicts), **replay.alignment(batch, flown, verdicts)}
+    for number, (name, moved, probe) in enumerate(variants(params)):
+        moved.check(spec, early_words=probe)
+        flown, verdicts = replay.fly_batch(batch, moved, words, device=device, early_words=probe)
+        row = {"variant": name, "probe": probe, "params": asdict(moved), **replay.summary(verdicts),
+               **replay.alignment(batch, flown, verdicts)}
+        write_json_atomic(out / "variants" / f"{number:02d}_{name}.json", row)
         rows.append(row)
         landing = row["landing_time_minus_observed_s"]
         print(f"  {name:32s}{' (probe)' if probe else '':8s} landed {row['landed_share']:.3f}  "
-              f"flew as said {row['flew_the_sentence_share']:.3f}  landing Δt p50 "
+              f"flew as said {row['flew_the_sentence_share']:.3f}  words inside {row['words_inside_share']:.3f}  "
+              f"landing Δt p50 "
               f"{landing['p50'] if landing else float('nan'):+.0f} s  {time.perf_counter() - started:.0f}s", flush=True)
         del flown, verdicts
 
-    out.mkdir(parents=True)
     write_json_atomic(out / "sensitivity.json", {
         "written_utc": utc_now(), "split": "train", "executor_spec_sha256": record["sha256"],
         "vocabulary_spec_sha256": spec.sha256, "params": asdict(params), "drawn": batch.drawn,

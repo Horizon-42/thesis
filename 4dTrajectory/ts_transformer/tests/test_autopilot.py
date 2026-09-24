@@ -4,6 +4,8 @@ the exact inverse, on synthetic states of a real airframe."""
 from __future__ import annotations
 
 import math
+from collections import Counter
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -246,7 +248,7 @@ def _params(**changes):
     return replace(base, **changes)
 
 
-def _fly_sentence(signals, grid=None, params=None, approach_ias=None):
+def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_words=False):
     """Read ``signals`` with the labeller, fly its sentence (or ``grid``) from row 0, judge it; the A320's
     published approach speed unless ``approach_ias`` is given."""
     from ts_transformer.autopilot.executor import fly
@@ -278,7 +280,7 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None):
                 AirportCharts.of([geometry], dtype=F64, device=CPU),
                 torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias],
                              dtype=F64), params, words,
-                time_limit_s=torch.tensor([limit], dtype=F64))
+                time_limit_s=torch.tensor([limit], dtype=F64), early_words=early_words)
     return flown, judge(flown, 0, geometry, 0, reading, signals, one, words), reading
 
 
@@ -369,10 +371,12 @@ def test_the_data_parameters_are_read_from_the_labellers_reading_of_each_flight(
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     reading = read_flight(signals, geometry, one, words)
     out = measure.flight_measurements(admit(signals, geometry, one), reading, geometry, one, words)
-    # two 90° turns at 6°/row (3°/s); the middle half of each is the steady rate, and at 100 m/s neither
-    # is in the fast band the bank cap is read from
-    assert np.median(out["turn_mid_rate_deg_s"]) == pytest.approx(3.0, abs=0.05)
-    assert out["turn_mid_fast_bank_deg"] == []
+    # the base turn, 90° at 6°/row (3°/s; the turn onto the final is the capture, not a word): one steady rate;
+    # at 100 m/s it is not in the fast band the bank cap is read from
+    assert out["turn_steady_rate_deg_s"] == [pytest.approx(3.0, abs=0.05)]
+    assert out["turn_fast_bank_deg"] == []
+    # the legs change speed in a step: no transition lasts the MIN_SPAN_S a rate is read from
+    assert out["transition_accel_mps2"] == []
     # the final is a straight 3° line, so the extrapolated crossing is the line's height at the threshold
     height = signals.altitude_m[-1] - geometry.candidates[0].elevation_m
     assert out["crossing_height_m"] == [pytest.approx(height - 400.0 * math.tan(math.radians(3.0)), abs=0.5)]
@@ -389,7 +393,7 @@ def test_the_data_parameters_are_the_pooled_medians_rounded_as_the_spec_says():
     from ts_transformer.autopilot import measure
 
     one = spec()
-    pooled = {"turn_mid_rate_deg_s": [2.1, 2.16, 2.3], "turn_mid_fast_bank_deg": [24.2, 24.6, 40.0],
+    pooled = {"turn_steady_rate_deg_s": [2.1, 2.16, 2.3], "turn_fast_bank_deg": [24.2, 24.6, 40.0],
               "transition_accel_mps2": [-0.3, -0.24, -0.2, 0.1, 0.16, 0.5], "unspecified_slope_mps2": [-0.26, -0.3, -0.2],
               "crossing_height_m": [16.0, 20.84, 26.0]}
     measured = measure.measured_values(pooled, one)
@@ -397,7 +401,7 @@ def test_the_data_parameters_are_the_pooled_medians_rounded_as_the_spec_says():
                                   "unspecified_decel_mps2": 0.26, "land_aim_height_m": 20.8}
     assert measured["counts"]["decelerations"] == measured["counts"]["accelerations"] == 3
     # never past the vocabulary's own bank ceiling
-    steep = measure.measured_values({**pooled, "turn_mid_fast_bank_deg": [40.0]}, one)
+    steep = measure.measured_values({**pooled, "turn_fast_bank_deg": [40.0]}, one)
     assert steep["values"]["bank_cap_deg"] == one.turn_bank_max_deg
 
 
@@ -411,12 +415,14 @@ def test_method_a_takes_the_gentlest_roll_out_and_roll_rate_the_constraints_allo
     with pytest.raises(ValueError, match="under 2 Δt"):
         derive.heading_time_constant_s(6.0, one, 1.0)
     params = _params(heading_time_constant_s=4.5)
-    slow, fast = (derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=p), 140.0) for p in (1.0, 5.0))
+    largest = one.heading_max_turn_deg
+    slow, fast = (derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=p), 140.0, largest) for p in (1.0, 5.0))
     assert slow > one.heading_tolerance_deg > fast >= 0.0                        # a slower roll passes further
     rate, overshoots = derive.roll_rate_deg_s(params, one)
     assert max(overshoots.values()) <= one.heading_tolerance_deg
-    assert derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=rate - derive.ROLL_RATE_STEP_DEG_S), 140.0) \
-        > one.heading_tolerance_deg or rate == derive.ROLL_RATE_STEP_DEG_S
+    less = replace(params, bank_rate_deg_s=rate - derive.ROLL_RATE_STEP_DEG_S)
+    assert rate == derive.ROLL_RATE_STEP_DEG_S or max(
+        derive.turn_overshoot_deg(less, speed, largest) for speed in derive.ROLL_CHECK_SPEEDS_MPS) > one.heading_tolerance_deg
 
 
 def test_a_received_word_is_matched_to_the_nearest_reread_word_of_its_column_and_value():
@@ -460,7 +466,7 @@ def test_the_observation_operator_reads_a_flown_track_as_the_data_plane_reads_a_
     assert np.abs(seen.e_m - truth["e"][rows]).max() < 5.0 and np.abs(seen.altitude_m - truth["height"][rows]).max() < 2.0
     leads, received = flight_leads(states, 1.0, _observed_series(geometry), geometry, reading, one, words, 30.0)
     said = [i for i in reading.instructions if i.row > 0 and i.column in (HEADING, ALTITUDE, ANGLE, SPEED)]
-    assert received == len(said) == 5
+    assert sum(received.values()) == len(said) == 5 and received[HEADING] == 1
     by_column = dict(leads)
     assert abs(by_column[HEADING]) <= one.step_s
     assert by_column[ALTITUDE] < 0.0 and by_column[ANGLE] < 0.0
@@ -516,14 +522,19 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
     batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[instruction_airport()],
                          approach_ias_mps=[], groups=[replay.OWN], drawn={})
     summary = replay.summary([verdict])
+    judged = replay.word_results(verdict)[0]
     assert summary == {"flights": 1, "outcomes": {"landed": 1}, "landed_share": 1.0, "flew_the_sentence_share": 1.0,
-                       "word_failures": {}}
+                       "words_judged": len(judged), "words_inside_share": 1.0, "heading_words_not_judged": 0,
+                       "flights_with_unjudged_words": 0, "word_failures": {}}
     aligned = replay.alignment(batch, flown, [verdict])
     # the executor flies the words, not the legs: it stays within a kilometre of the synthetic flight and lands
     # later (after "unspecified" it slows to the A320's published approach speed, under the legs' 75 m/s)
     assert aligned["mean_horizontal_distance_m"]["p50"] < 1000.0 and aligned["mean_vertical_distance_m"]["p50"] < 30.0
+    # the observed landing: the last row, 400 m short, carried on at 75 m/s; the flown one: its interpolated crossing
     landing = aligned["landing_time_minus_observed_s"]
-    assert landing["n"] == 1 and 0.0 < landing["p50"] < 40.0
+    observed = (len(reading.words) - 1) * 2.0 + 400.0 / 75.0
+    assert landing["n"] == 1 and landing["p50"] == pytest.approx(verdict.crossing["at_row"] - observed)
+    assert 0.0 < landing["p50"] < 40.0
 
 
 def test_the_sensitivity_moves_one_parameter_at_a_time_and_marks_a_word_acted_on_early_as_a_probe():
@@ -545,12 +556,14 @@ def test_the_sensitivity_moves_one_parameter_at_a_time_and_marks_a_word_acted_on
 
 
 def test_a_replayed_flight_becomes_a_control_record_evaluation_can_grade_and_its_words_are_counted_one_by_one():
-    from ts_transformer.experiments.executor_replay import executor_forecast, gate_table, word_results
     from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
+    from ts_transformer.autopilot.replay import word_results
+    from ts_transformer.experiments.executor_replay import executor_forecast, gate_table
 
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     flown, verdict, reading = _fly_sentence(signals)
-    judged = word_results(verdict)
+    judged, not_judged = word_results(verdict)
+    assert not_judged == 0
     assert judged and all(ok for _, ok in judged)
     assert sum(column == "heading" for column, _ in judged) == sum(h["words"] for h in verdict.words["heading"])
     assert ("approach", True) in judged
@@ -566,7 +579,8 @@ def test_a_replayed_flight_becomes_a_control_record_evaluation_can_grade_and_its
     assert forecast.controls[:, 0] == pytest.approx(fraction * float(inputs.max_thrust_n[0]))
     assert forecast.controls[:, 1:] == pytest.approx(flown.commands[0, : verdict.end_row, 1:].numpy())
     # the gates count per word and pair evaluation with the observed verdict
-    base = {"airport": "KXXX", "group": "own dynamics", "stratum": "vectored", "words_not_reached": 0}
+    base = {"airport": "KXXX", "group": "own dynamics", "stratum": "vectored", "words_not_reached": 0,
+            "heading_words_not_judged": 0}
     rows = [{**base, "outcome": "landed", "words": [("heading", True)] * 19 + [("speed", False)],
              "observed_verdict": "pass", "replay_verdict": "pass"},
             {**base, "outcome": "ground_contact", "words": None, "observed_verdict": "fail", "replay_verdict": "fail"}]
@@ -747,3 +761,158 @@ def test_a_stall_is_a_dynamics_failure_and_wins_a_row_it_shares_with_a_crossing(
     stalled[:] = False
     stalled[verdict.end_row] = True
     assert _outcome(states, track, captured, stalled, geometry, 0, one)[:2] == ("dynamics_failure", verdict.end_row)
+
+
+# ---- the E7–E8 review's cases
+def test_a_sensitivity_probe_flies_its_words_early_only_when_named():
+    """Review H1: a negative delay is refused unless the flight is flown as a probe, and then the words act
+    that much earlier."""
+    signals, _ = _downwind()
+    early = _params(delays=Delays(0.0, -4.0, 0.0))
+    with pytest.raises(ValueError, match="before it is said"):
+        _fly_sentence(signals, params=early)
+    on_time, _, reading = _fly_sentence(signals)
+    ahead, _, _ = _fly_sentence(signals, params=early, early_words=True)
+    descent = [i.row for i in reading.instructions if i.column == ANGLE and i.row > 0][0] * 2
+    gamma_on_time, gamma_ahead = on_time.states[0, :, 5].numpy(), ahead.states[0, :, 5].numpy()
+    assert gamma_ahead[descent - 1] < gamma_on_time[descent - 1] - 1e-3        # already pitching down
+
+
+def test_a_stand_ins_unspecified_speed_is_its_types_as_published():
+    """Review H2: a flight on a stand-in's dynamics carries the stand-in's mass; its own type's published speed
+    is taken unscaled, never scaled by another airframe's mass."""
+    from types import SimpleNamespace
+
+    from ts_transformer.autopilot import replay
+    from ts_transformer.autopilot.speed import approach_speed_ias_mps
+
+    def series(resolved, dynamics, mass):
+        return SimpleNamespace(scenario=SimpleNamespace(
+            source={"resolved_typecode": resolved, "dynamics_typecode": dynamics}, initial=SimpleNamespace(m=mass)))
+
+    own = series("A320", "A320", 60000.0)
+    assert replay.flight_approach_ias_mps(own, replay.OWN) == approach_speed_ias_mps("A320", 60000.0)
+    stand_in = series("CRJ7", "A320", 66300.0)
+    assert replay.group_of(stand_in) == replay.STAND_IN
+    published = approach_speed_ias_mps("CRJ7", None)
+    assert replay.flight_approach_ias_mps(stand_in, replay.STAND_IN) == published < 80.0
+    assert approach_speed_ias_mps("CRJ7", 66300.0) > published
+
+
+def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
+    """Review M1: a superseded turn, or a word with neither a turn nor a hold judged, is counted apart."""
+    from ts_transformer.autopilot.judge import Verdict
+    from ts_transformer.autopilot.replay import word_results
+
+    heading = [{"row": 0, "kind": "initial", "words": 1, "turn": None, "superseded": False, "hold": {"rows": 5, "inside": 5}},
+               {"row": 9, "kind": "turn", "words": 1, "turn": None, "superseded": True, "hold": None},
+               {"row": 20, "kind": "turn-split", "words": 2, "turn": {"reached": True, "progress_ok": True, "rate_ok": False},
+                "superseded": False, "hold": "not judged: slowest turn unfinished"},
+               {"row": 40, "kind": "turn", "words": 1, "turn": None, "superseded": False, "hold": None}]
+    words = {"not_reached": 0, "heading": heading, "capture_turn": None,
+             "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0},
+             "vertical": [{"contained": True}], "speed": [{"contained": False}], "all_contained": False}
+    judged, not_judged = word_results(Verdict("landed", 50, None, {}, words, flown_rows=51))
+    assert not_judged == 2
+    assert judged == [("heading", True), ("heading", False), ("heading", False), ("altitude", True), ("speed", False)]
+
+
+def test_the_executor_hash_covers_the_package_and_what_it_imports_from_the_repository():
+    """Review M2: the dynamics, the envelope and the approach-speed table decide a flown track; the instruction
+    language has its own hash."""
+    from ts_transformer.autopilot import spec as executor_spec
+    from ts_transformer.repo_layout import REPO_ROOT
+
+    root = REPO_ROOT.resolve()
+    files = {path.relative_to(root).as_posix() for path in executor_spec.executor_source_files()}
+    package = {path.name for path in executor_spec.PACKAGE.glob("*.py")} - {"spec.py"}
+    assert {f"4dTrajectory/ts_transformer/autopilot/{name}" for name in package} <= files
+    assert "4dTrajectory/ts_transformer/autopilot/spec.py" not in files
+    for needed in ("aerodynamic_model/torch_dynamics.py", "aircraft/reference_speeds.py", "flight_scenarios/start_state.py",
+                   "4dTrajectory/ts_transformer/outputs/dynamics/rollout.py", "4dTrajectory/ts_transformer/outputs/envelope.py",
+                   "4dTrajectory/ts_transformer/data/channels.py"):
+        assert needed in files
+    assert not any("/instructions/" in f or f.endswith(("io_utils.py", "repo_layout.py")) for f in files)
+
+
+def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_labeller(tmp_path, monkeypatch):
+    """Review M3: the vocabulary sha, the artefact's labeller and the spec's recorded labeller must all agree."""
+    from ts_transformer.autopilot import replay
+    from ts_transformer.autopilot import spec as executor_spec
+
+    one = spec()
+    source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "labeller_source_sha256": "a" * 64,
+              "git": {"head": "x", "dirty": False}}
+    executor_spec.write_spec(tmp_path / "spec", _params(), one.sha256, {}, source)
+    monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: one)
+    monkeypatch.setattr(replay.artefact, "require_current_labeller", lambda directory: None)
+    monkeypatch.setattr(replay.artefact, "labeller_source_sha256", lambda: "a" * 64)
+    params, _, _ = replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
+    assert params == _params()
+    monkeypatch.setattr(replay.artefact, "labeller_source_sha256", lambda: "b" * 64)
+    with pytest.raises(ValueError, match="other labeller code"):
+        replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
+    monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: spec(heading_tolerance_deg=4.0))
+    with pytest.raises(ValueError, match="measured against vocabulary"):
+        replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
+
+
+def test_method_bs_delays_are_the_groups_median_leads_floored_at_zero():
+    from ts_transformer.autopilot.observe import delays_from_leads
+
+    leads = {HEADING: [2.0, 2.0, 4.0], ALTITUDE: [-6.0, -4.0], ANGLE: [-6.0], SPEED: [-9.0, 3.0, -8.0]}
+    assert delays_from_leads(leads) == Delays(heading_s=2.0, vertical_s=0.0, speed_s=0.0)
+    assert delays_from_leads({**leads, ALTITUDE: [5.0, 7.0], ANGLE: [6.0]}).vertical_s == 6.0
+    with pytest.raises(ValueError, match="matched no word of speed_s"):
+        delays_from_leads({**leads, SPEED: []})
+
+
+def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch):
+    """`replay.draw`: the seed fixes the flights, each airport stops at its count, 0 takes every flight, a short
+    airport is refused, and a re-read that differs from the stored sentence stops the draw."""
+    from types import SimpleNamespace
+
+    from ts_transformer.autopilot import replay
+
+    flights = [SimpleNamespace(airport="KAAA" if i % 3 else "KBBB", dataset_id=f"F{i}") for i in range(30)]
+    stored = [np.full((3, 6), i, dtype=np.int16) for i in range(30)]
+    sentences = {"signal_index": np.arange(30), "offsets": np.arange(31) * 3,
+                 "words": np.concatenate(stored), "runway_index": np.zeros(30, dtype=np.int64)}
+    typecode = {i: ("A320", "A320") if i % 4 else ("CRJ7", "A320") for i in range(30)}
+    monkeypatch.setattr(replay, "load_candidates", lambda d: {"KAAA": "geo-a", "KBBB": "geo-b"})
+    monkeypatch.setattr(replay, "load_signals", lambda d, split: flights)
+    monkeypatch.setattr(replay, "load_sentences", lambda d, split, spec: sentences)
+    monkeypatch.setattr(replay, "rebuild_series", lambda d, items: [SimpleNamespace(scenario=SimpleNamespace(
+        source=dict(zip(("resolved_typecode", "dynamics_typecode"), typecode[int(f.dataset_id[1:])])),
+        initial=SimpleNamespace(m=60000.0))) for f in items])
+    reread = {"differ": None}
+    monkeypatch.setattr(replay, "read_flight", lambda f, g, s, w: SimpleNamespace(
+        words=stored[int(f.dataset_id[1:])] + (1 if f.dataset_id == reread["differ"] else 0), runway_index=0))
+    one, words = spec(), Words(spec())
+    first = replay.draw(Path("x"), "train", one, words, per_airport=3, seed=5)
+    again = replay.draw(Path("x"), "train", one, words, per_airport=3, seed=5)
+    assert [f.dataset_id for f in first.signals] == [f.dataset_id for f in again.signals]
+    assert Counter(f.airport for f in first.signals) == {"KAAA": 3, "KBBB": 3}
+    assert set(first.groups) == {replay.OWN}
+    every = replay.draw(Path("x"), "train", one, words, per_airport=0, seed=5, groups=(replay.OWN, replay.STAND_IN))
+    assert len(every.signals) == 30 and every.drawn["by_group"] == {replay.OWN: 22, replay.STAND_IN: 8}
+    with pytest.raises(ValueError, match="too few eligible flights"):
+        replay.draw(Path("x"), "train", one, words, per_airport=9, seed=5)
+    reread["differ"] = first.signals[0].dataset_id
+    with pytest.raises(ValueError, match="differs from the stored one"):
+        replay.draw(Path("x"), "train", one, words, per_airport=3, seed=5)
+
+
+def test_a_split_turn_said_only_in_part_is_judged_toward_the_part_said():
+    """Review: when the flight ends after the first part of a 360° orbit was said, the turn judged is that part's
+    120°, not the whole orbit's end — read here on the observed orbit, which reaches 120° and turns on."""
+    from ts_transformer.autopilot.judge import _heading_words
+    from ts_transformer.instructions.labeller.read import admit, read_flight
+
+    one, words, geometry = spec(), Words(spec()), instruction_airport()
+    signals = _orbit()
+    reading = read_flight(signals, geometry, one, words)
+    first = [i for i in reading.instructions if i.kind == "turn-split"][0]
+    said = [i for i in reading.instructions if i.column == HEADING and i.row <= first.row]
+    (_, part) = _heading_words(admit(signals, geometry, one), said, reading.checks["turns"], None, one, words)
+    assert part["words"] == 1 and part["turn"]["reached"] and part["turn"]["progress_ok"]

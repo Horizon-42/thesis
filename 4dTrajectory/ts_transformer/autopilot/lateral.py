@@ -167,8 +167,11 @@ class Lateral:
         return (speed / rate * (1.0 - torch.cos(off.abs())) + speed * torch.sin(off.abs()) * roll_s / 2.0
                 + speed * rate * params.heading_time_constant_s ** 2 / 2.0 + speed * rate ** 3 / (6.0 * k ** 2))
 
-    def word_error(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor) -> torch.Tensor:
-        """The heading word's error, degrees: its target unwrapped from the words before it (§4.1)."""
+    def word_error(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor,
+                   go_around: torch.Tensor) -> torch.Tensor:
+        """The heading word's error, degrees: its target unwrapped from the words before it (§4.1). A go-around
+        flies the course, not the word, so the word's target is anchored again at the track meanwhile: a word
+        after it is measured from where the aircraft is."""
         if self.word_deg is None:
             self.track_unwrapped = state.track_deg.clone()
             self.target_unwrapped = state.track_deg + wrap180(heading_deg - state.track_deg)
@@ -176,6 +179,8 @@ class Lateral:
             self.track_unwrapped = self.track_unwrapped + wrap180(state.track_deg - self.last_track)
             new = issued != self.word_step
             self.target_unwrapped = torch.where(new, self.target_unwrapped + wrap180(heading_deg - self.word_deg),
+                                                self.target_unwrapped)
+            self.target_unwrapped = torch.where(go_around, self.track_unwrapped + wrap180(heading_deg - state.track_deg),
                                                 self.target_unwrapped)
         self.word_deg, self.word_step, self.last_track = heading_deg.clone(), issued.clone(), state.track_deg.clone()
         return self.target_unwrapped - self.track_unwrapped
@@ -208,7 +213,8 @@ class Lateral:
         bend = cleared & ~self.captured & misses & converges(heading_deg, course, right, before,
                                                               spec.heading_tolerance_deg, spec)
         side = torch.where(right >= 0.0, -1.0, 1.0).to(right.dtype)
-        error = self.word_error(state, heading_deg, issued) + torch.where(bend, side * spec.heading_tolerance_deg, 0.0)
+        error = self.word_error(state, heading_deg, issued, go_around) + torch.where(
+            bend, side * spec.heading_tolerance_deg, 0.0)
         # tracking: the line's own target, critically damped, steering inside the corridor's course tolerance
         gain = 1.0 / (4.0 * state.ground_speed_mps * params.heading_time_constant_s)
         steer = torch.where(inside, torch.full_like(right, spec.corridor_course_tolerance_deg / 2.0),

@@ -2,14 +2,18 @@
 once — the vocabulary's rule for its own spec.
 
 ``spec.json`` carries the parameters (`ExecutorParams`), their sha, the vocabulary spec they were measured
-against and the executor's source hash (`EXECUTOR_MODULES`: the laws, the loop and the dynamics seam — a
-spec measured by other code is refused at replay, `require_current_executor`), and the git state;
-``measurements.json`` the numbers behind every value. Nothing here is ever overwritten.
+against, the labeller that read the flights and the executor's source hash (`executor_source_files`: the code
+that flies a sentence and measures the values — a spec measured by other code is refused at replay,
+`require_current_executor`), and the git state; ``measurements.json`` the numbers behind every value. Nothing
+here is ever overwritten.
 """
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -18,12 +22,53 @@ from typing import Any
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Delays
 from ts_transformer.io_utils import write_json_atomic
+from ts_transformer.repo_layout import REPO_ROOT
 
 EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v1"
-#: What decides a flown track and the values it is flown with: every module of the executor except the
-#: spec file itself and the judge (how a flight is graded is not how it is flown).
-EXECUTOR_MODULES = ("__init__.py", "frame.py", "sentence.py", "flights.py", "plant.py", "inverse.py", "params.py",
-                    "lateral.py", "vertical.py", "speed.py", "executor.py", "replay.py", "observe.py", "measure.py")
+PACKAGE = Path(__file__).resolve().parent
+#: Imported by the executor but not part of what decides a flown track or a value: the instruction language
+#: (its own hash, the labeller's, is recorded in the spec and checked at replay) and the path and file helpers.
+UNHASHED_IMPORTS = ("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout")
+
+
+def _imported_files(path: Path) -> set[Path]:
+    """The source files of the modules ``path`` imports (absolute imports; for ``from package import name``,
+    the submodule ``package.name`` when there is one)."""
+    files: set[Path] = set()
+
+    def add(name: str) -> importlib.machinery.ModuleSpec | None:
+        found = importlib.util.find_spec(name)
+        if found is not None and found.origin not in (None, "built-in", "frozen"):
+            files.add(Path(found.origin).resolve())
+        return found
+
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                add(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            base = add(node.module)
+            if base is not None and base.submodule_search_locations is not None:
+                for alias in node.names:
+                    add(f"{node.module}.{alias.name}")
+    return files
+
+
+def executor_source_files() -> list[Path]:
+    """What the hash covers: every module of the package except this file, and every module they import
+    directly that lives in the repository (the dynamics, the envelope, the approach-speed table, the
+    observation operator's fit…), except `UNHASHED_IMPORTS`. Direct imports only, as the labeller's hash."""
+    root = REPO_ROOT.resolve()
+    own = sorted(path.resolve() for path in PACKAGE.glob("*.py") if path.name != "spec.py")
+    unhashed = []
+    for name in UNHASHED_IMPORTS:
+        found = importlib.util.find_spec(name)
+        locations = found.submodule_search_locations
+        unhashed.append(Path(locations[0] if locations else found.origin).resolve())
+    external = {file for path in own for file in _imported_files(path)
+                if file.is_relative_to(root) and file.parent != PACKAGE.resolve()
+                and not any(file.is_relative_to(place) for place in unhashed)}
+    return own + sorted(external)
 
 
 def params_to_dict(params: ExecutorParams) -> dict[str, Any]:
@@ -44,10 +89,11 @@ def params_sha256(params: ExecutorParams) -> str:
 
 
 def executor_source_sha256() -> str:
-    package = Path(__file__).resolve().parent
+    """sha256 over `executor_source_files` (path relative to the repository, and bytes, in order)."""
     digest = hashlib.sha256()
-    for name in sorted(EXECUTOR_MODULES):
-        digest.update(name.encode("utf-8") + b"\0" + (package / name).read_bytes() + b"\0")
+    root = REPO_ROOT.resolve()
+    for path in executor_source_files():
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()
 
 

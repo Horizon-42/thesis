@@ -60,10 +60,11 @@ class Flown:
 
 def fly(inputs: FlightInputs, force: WordsInForce, runways: Runways, charts: AirportCharts,
         approach_ias_mps: torch.Tensor, params: ExecutorParams, words: Words, *,
-        time_limit_s: torch.Tensor) -> Flown:
-    """Fly every flight's words until each is done, or ``force``'s cycles run out."""
+        time_limit_s: torch.Tensor, early_words: bool = False) -> Flown:
+    """Fly every flight's words until each is done, or ``force``'s cycles run out (``early_words``: a
+    probe's negative delays, `ExecutorParams.check`)."""
     spec = words.spec
-    params.check(spec)
+    params.check(spec, early_words=early_words)
     batch, cycles = force.heading_deg.shape
     device = inputs.initial_state.device
     plant = Plant(inputs)

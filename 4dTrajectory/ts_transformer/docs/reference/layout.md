@@ -456,7 +456,7 @@ constraints on them), `executor` (the cycle loop, `fly`), `judge` (the three-lay
 labeller's own checks), `replay` (who is flown — own dynamics or a stand-in's — drawing, flying and reading
 a batch), `measure` (the data parameters, torch-free for the runner's workers), `derive` (method A), `observe`
 (method B: the data plane's fit-and-grid chain on a flown track) and `spec` (`ts-executor-spec-v1`: the
-parameters written once with their sha and the executor's source hash, `EXECUTOR_MODULES`; a replay refuses a
+parameters written once with their sha and the executor's source hash, `executor_source_files`; a replay refuses a
 spec measured by other code, `replay.open_executor`). It may import the data plane (`data.dataset`,
 `data.channels`), the shared dynamics and geometry, and `instructions/`; never
 `training`, `experiments`, `cli`, `backbone`, `inference`, `manoeuvre`, `outputs.control`,

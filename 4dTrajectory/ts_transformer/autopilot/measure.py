@@ -4,21 +4,23 @@ Data (train, the labeller's own reading of each flight — `flight_measurements`
 `measured_values`):
 
 - ``turn_rate_deg_s`` (r_turn): turns of at least `TURN_MIN_DEG`, their middle half (the first and last
-  quarter dropped: the 15 s velocity fit smears the roll-in and roll-out), the median row rate;
-- ``bank_cap_deg`` (φ_cap): the same middle rows at ground speeds in `FAST_BAND_MPS`, the median bank,
-  up to a whole degree, never past the vocabulary's bank ceiling;
+  quarter dropped: the 15 s velocity fit smears the roll-in and roll-out); each turn's steady rate is the
+  median of its middle rows, and r_turn the median over turns — a typical turn's steady rate, every turn
+  counted once whatever its length;
+- ``bank_cap_deg`` (φ_cap): the same middle rows at ground speeds in `FAST_BAND_MPS`, each turn's median
+  bank there, the median over the turns that have such rows, up to a whole degree, never past the
+  vocabulary's bank ceiling;
 - ``decel_mps2`` / ``accel_mps2`` (a_dec, a_acc): speed words with a target, from the word's row to
   where the speed enters the target's band, transitions of at least `MIN_SPAN_S`, the median mean
   acceleration of each sign;
 - ``unspecified_decel_mps2`` (a_unspec): after an "unspecified" word, the first decelerating piece of
   the ground speed's piecewise fit lasting at least `MIN_SPAN_S`, the median slope;
 - ``land_aim_height_m``: the height above the pointed threshold at which the flight would cross it,
-  extrapolated along its last `CROSSING_FIT_ROWS` rows, the median — over the flights whose sentence ends
-  within `CROSSING_MAX_BEFORE_M` of the threshold (a longer extrapolation reads the track's slope, not
-  where it crosses).
+  extrapolated along its last `CROSSING_FIT_ROWS` rows, the median. (Every labelled train sentence ends
+  within 1.2 km of the threshold, median 0.1 km: the extrapolation is short.)
 
-Torch-free, so the runner's worker processes read the train split without loading the dynamics; method A
-is `derive.py`, method B `observe.py`.
+Torch-free, so the runner's worker processes (`measure_chunk`) read the train split without loading the
+dynamics; method A is `derive.py`, method B `observe.py`.
 """
 
 from __future__ import annotations
@@ -41,8 +43,7 @@ TURN_MIN_DEG = 90.0
 FAST_BAND_MPS = (115.0, 140.0)
 MIN_SPAN_S = 20.0
 CROSSING_FIT_ROWS = 10
-CROSSING_MAX_BEFORE_M = 1500.0
-MEASUREMENTS = ("turn_mid_rate_deg_s", "turn_mid_fast_bank_deg", "transition_accel_mps2", "unspecified_slope_mps2",
+MEASUREMENTS = ("turn_steady_rate_deg_s", "turn_fast_bank_deg", "transition_accel_mps2", "unspecified_slope_mps2",
                 "crossing_height_m")
 
 
@@ -60,9 +61,11 @@ def flight_measurements(flight: Admitted, reading: Reading, geometry: AirportGeo
         rows = slice(start + quarter, stop - quarter)
         rate = np.abs(np.diff(track[rows])) / spec.step_s
         middle_speed = speed[rows][1:]
-        out["turn_mid_rate_deg_s"] += rate.tolist()
+        out["turn_steady_rate_deg_s"].append(float(np.median(rate)))
         fast = (middle_speed >= FAST_BAND_MPS[0]) & (middle_speed <= FAST_BAND_MPS[1])
-        out["turn_mid_fast_bank_deg"] += envelope.bank_deg_from_turn_rate(rate[fast], middle_speed[fast]).tolist()
+        if fast.any():
+            out["turn_fast_bank_deg"].append(float(np.median(
+                envelope.bank_deg_from_turn_rate(rate[fast], middle_speed[fast]))))
     for check in span_checks(reading.instructions, speed, spec, words):
         seconds = check["arrival_rows"] * spec.step_s
         if not check["cut_before_arrival"] and seconds >= MIN_SPAN_S:
@@ -84,10 +87,9 @@ def flight_measurements(flight: Admitted, reading: Reading, geometry: AirportGeo
     relative = relative_to_runway(signals.e_m[:rows], signals.n_m[:rows], signals.track_deg[:rows],
                                   signals.altitude_m[:rows], candidate)
     before, height = relative.before_threshold_m, relative.height_above_threshold_m
-    if rows >= CROSSING_FIT_ROWS and before[-1] <= CROSSING_MAX_BEFORE_M:
-        last = slice(rows - CROSSING_FIT_ROWS, rows)
-        slope = np.polyfit(before[last], height[last], 1)[0]
-        out["crossing_height_m"].append(float(height[-1] - slope * before[-1]))
+    last = slice(rows - CROSSING_FIT_ROWS, rows)
+    slope = np.polyfit(before[last], height[last], 1)[0]
+    out["crossing_height_m"].append(float(height[-1] - slope * before[-1]))
     return out
 
 
@@ -100,8 +102,8 @@ def measured_values(pooled: dict[str, Sequence[float]], spec: VocabularySpec) ->
     """The data parameters from the pooled measurements, with the count behind each."""
     accel = np.asarray(pooled["transition_accel_mps2"])
     values = {
-        "turn_rate_deg_s": rounded(float(np.median(pooled["turn_mid_rate_deg_s"])), 0.05, round),
-        "bank_cap_deg": min(spec.turn_bank_max_deg, rounded(float(np.median(pooled["turn_mid_fast_bank_deg"])), 1.0,
+        "turn_rate_deg_s": rounded(float(np.median(pooled["turn_steady_rate_deg_s"])), 0.05, round),
+        "bank_cap_deg": min(spec.turn_bank_max_deg, rounded(float(np.median(pooled["turn_fast_bank_deg"])), 1.0,
                                                            math.ceil)),
         "decel_mps2": rounded(float(np.median(-accel[accel < 0.0])), 0.01, round),
         "accel_mps2": rounded(float(np.median(accel[accel > 0.0])), 0.01, round),
@@ -111,6 +113,14 @@ def measured_values(pooled: dict[str, Sequence[float]], spec: VocabularySpec) ->
     counts = {name: len(pooled[name]) for name in MEASUREMENTS}
     counts["decelerations"], counts["accelerations"] = int((accel < 0.0).sum()), int((accel > 0.0).sum())
     return {"values": values, "counts": counts}
+
+
+def measure_chunk(flights: list[FlightSignals], stored: list[tuple[np.ndarray, int]], spec_data: dict[str, Any],
+                  geometry_data: dict[str, Any]) -> dict[str, list[float]]:
+    """`measure_flights` in a worker process: the spec and the geometries as their dicts."""
+    spec = VocabularySpec.from_dict(spec_data)
+    geometries = {code: AirportGeometry.from_dict(data) for code, data in geometry_data.items()}
+    return measure_flights(flights, stored, spec, Words(spec), geometries)
 
 
 def measure_flights(flights: list[FlightSignals], stored: list[tuple[np.ndarray, int]], spec: VocabularySpec,

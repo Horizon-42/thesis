@@ -700,7 +700,7 @@ AUTOPILOT = TS_DIR / "autopilot"
 #: ``data.channels``: the observation operator (method B) reads a flown track as the data plane reads
 #: an observed one.
 AUTOPILOT_MAY_IMPORT = ("autopilot.", "instructions.", "config", "io_utils", "repo_layout", "data.dataset",
-                        "data.channels", "geometry.flyability", "outputs.dynamics.", "outputs.envelope",
+                        "data.channels", "data.reference_velocity", "geometry.flyability", "outputs.dynamics.", "outputs.envelope",
                         "outputs.constraints.speed_floor")
 
 

@@ -3,8 +3,10 @@ the flight and the verdicts — shared by the spec's measurements, the sensitivi
 
 Who is flown (§11), by `group_of`: an identified type that publishes an approach speed ("unspecified" is
 flown at it) is flown — on its own dynamics (`OWN`: the identified type is the dynamics type) or on a
-stand-in's (`STAND_IN`, reported, never gated: its errors are the stand-in's aerodynamics); a flight with no
-identified type, or whose type publishes no approach speed, is counted, not flown. The sample is a seeded
+stand-in's (`STAND_IN`, reported, never gated: its errors are the stand-in's aerodynamics, and its
+"unspecified" speed is its type's as published, unscaled — the flight's mass is the stand-in's,
+`flight_approach_ias_mps`); a flight with no identified type, or whose type publishes no approach speed, is
+counted, not flown. The sample is a seeded
 permutation of a split's labelled flights, read in order until each airport holds ``per_airport`` flights of
 the asked groups (0: every one) — the pool, the count read and the exclusions are returned with it.
 
@@ -35,7 +37,7 @@ from ts_transformer.autopilot.spec import load_spec, require_current_executor
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.instructions import artefact
-from ts_transformer.instructions.airport import AirportGeometry
+from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
 from ts_transformer.instructions.labeller.read import Reading, read_flight
 from ts_transformer.instructions.signals import FlightSignals
@@ -72,6 +74,10 @@ def open_executor(executor_dir: Path, instructions_dir: Path) -> tuple[ExecutorP
         raise ValueError(f"the executor spec was measured against vocabulary {record['vocabulary_spec_sha256'][:12]}, "
                          f"{instructions_dir} holds {spec.sha256[:12]}")
     artefact.require_current_labeller(instructions_dir)
+    if record["source"]["labeller_source_sha256"] != artefact.labeller_source_sha256():
+        raise ValueError("the executor spec was measured on readings of other labeller code "
+                         f"({record['source']['labeller_source_sha256'][:12]}, now "
+                         f"{artefact.labeller_source_sha256()[:12]})")
     params.check(spec)
     return params, record, Words(spec)
 
@@ -82,9 +88,16 @@ def group_of(series: FlightSeries) -> str:
     identified = source["resolved_typecode"]
     if identified is None:
         return "no identified type"
-    if math.isnan(approach_speed_ias_mps(identified, float(series.scenario.initial.m))):
+    if math.isnan(approach_speed_ias_mps(identified, None)):
         return "type publishes no approach speed"
     return OWN if identified == source["dynamics_typecode"] else STAND_IN
+
+
+def flight_approach_ias_mps(series: FlightSeries, group: str) -> float:
+    """The "unspecified" speed a flown flight is given: its type's at its mass on its own dynamics, as
+    published (unscaled) on a stand-in's."""
+    mass = float(series.scenario.initial.m) if group == OWN else None
+    return approach_speed_ias_mps(series.scenario.source["resolved_typecode"], mass)
 
 
 def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
@@ -133,8 +146,7 @@ def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per
         readings.append(reading)
     return Batch(signals=[signals[i] for i, _, _ in taken], series=[s for _, s, _ in taken], readings=readings,
                  geometries=[geometries[signals[i].airport] for i, _, _ in taken],
-                 approach_ias_mps=[approach_speed_ias_mps(s.scenario.source["resolved_typecode"], float(s.scenario.initial.m))
-                                   for _, s, _ in taken],
+                 approach_ias_mps=[flight_approach_ias_mps(s, g) for _, s, g in taken],
                  groups=[g for _, _, g in taken],
                  drawn={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
                         "groups": list(groups), "pool": len(order), "read": read,
@@ -150,9 +162,9 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
                  drawn=batch.drawn)
 
 
-def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *,
-              device: torch.device) -> tuple[Flown, list[Verdict]]:
-    """Fly every flight's sentence from its row 0 and judge it."""
+def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device,
+              early_words: bool = False) -> tuple[Flown, list[Verdict]]:
+    """Fly every flight's sentence from its row 0 and judge it (``early_words``: a sensitivity probe)."""
     spec = words.spec
     f64 = torch.float64
     limits = torch.tensor([len(r.words) * spec.step_s * params.timeout_factor for r in batch.readings], dtype=f64,
@@ -162,15 +174,45 @@ def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *,
                            cycles=cycles, device=device)
     flown = fly(batch.inputs(device), force, Runways.of(batch.geometries, dtype=f64, device=device),
                 AirportCharts.of(batch.geometries, dtype=f64, device=device),
-                torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits)
+                torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits,
+                early_words=early_words)
     verdicts = [judge(flown, j, batch.geometries[j], batch.readings[j].runway_index, batch.readings[j],
                       batch.signals[j], spec, words) for j in range(len(batch.readings))]
     return flown, verdicts
 
 
+def word_results(verdict: Verdict) -> tuple[list[tuple[str, bool]], int] | None:
+    """Every word the judge judged, ``(column, inside its envelope)``, and how many heading words it did not
+    judge (a turn the capture superseded, or a word with neither a turn nor a hold judged); None when the
+    flown track did not pass the labeller's gate (nothing was judged). A judged heading result stands for
+    each word of its turn."""
+    if verdict.words is None:
+        return None
+    judged: list[tuple[str, bool]] = []
+    not_judged = 0
+    for h in verdict.words["heading"]:
+        hold = h["hold"] if isinstance(h["hold"], dict) else None
+        if h["turn"] is None and hold is None:
+            not_judged += h["words"]
+            continue
+        turn_ok = h["turn"] is None or all(h["turn"].values())
+        hold_ok = hold is None or hold["inside"] == hold["rows"]
+        judged += [("heading", turn_ok and hold_ok)] * h["words"]
+    corridor, capture = verdict.words["corridor"], verdict.words["capture_turn"]
+    if corridor["cleared"]:
+        judged.append(("approach", capture is not None and capture["progress_ok"] and capture["rate_ok"]
+                       and corridor["entered"] and corridor["inside"] == corridor["rows"]))
+    judged += [("altitude", bool(v["contained"])) for v in verdict.words["vertical"]]
+    judged += [("speed", bool(v["contained"])) for v in verdict.words["speed"]]
+    return judged, not_judged
+
+
 def summary(verdicts: list[Verdict]) -> dict[str, Any]:
-    """The batch's headline numbers: outcomes, flown as said, and the word checks that failed."""
+    """The batch's headline numbers: outcomes, flown as said, the words inside their envelopes (per word
+    judged; the words not judged beside it), and the word checks that failed."""
     outcomes = Counter(v.outcome for v in verdicts)
+    counted = [word_results(v) for v in verdicts]
+    judged = [ok for c in counted if c is not None for _, ok in c[0]]
     words_failed: Counter = Counter()
     for v in verdicts:
         if v.words is None:
@@ -195,6 +237,9 @@ def summary(verdicts: list[Verdict]) -> dict[str, Any]:
     return {"flights": n, "outcomes": dict(outcomes.most_common()),
             "landed_share": outcomes["landed"] / n,
             "flew_the_sentence_share": sum(v.flew_the_sentence for v in verdicts) / n,
+            "words_judged": len(judged), "words_inside_share": sum(judged) / len(judged) if judged else None,
+            "heading_words_not_judged": sum(c[1] for c in counted if c is not None),
+            "flights_with_unjudged_words": sum(c is None for c in counted),
             "word_failures": {k: int(c) for k, c in words_failed.most_common() if c}}
 
 
@@ -204,11 +249,22 @@ def _percentiles(values: list[float]) -> dict[str, float] | None:
     return {f"p{q}": float(np.percentile(values, q)) for q in (5, 25, 50, 75, 95)} | {"n": len(values)}
 
 
+def observed_landing_s(observed: FlightSignals, reading: Reading, geometry: AirportGeometry) -> float:
+    """When the observed flight reached the pointed threshold: its sentence's last row, carried on at that row's
+    ground speed over the distance still to go."""
+    last = len(reading.words) - 1
+    candidate = geometry.candidates[reading.runway_index]
+    relative = relative_to_runway(observed.e_m[last: last + 1], observed.n_m[last: last + 1],
+                                  observed.track_deg[last: last + 1], observed.altitude_m[last: last + 1], candidate)
+    return float(observed.time_s[last] + relative.before_threshold_m[0] / observed.ground_speed_mps[last])
+
+
 def flight_alignment(batch: Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, float | None]]:
     """How each flown track differs from the observed one (§11, reported, no gate): the mean horizontal and
     vertical distance at the sentence's rows both tracks reach (time-aligned from row 0), and for a landed
-    flight the landing time minus the observed one (the sentence ends at the observed crossing; None
-    otherwise)."""
+    flight its landing time minus the observed one — its interpolated crossing against the sentence's last
+    row carried to the threshold at that row's ground speed (the data plane ends a flight at its landing, so
+    the last row is the last one before it; None for a flight that did not land)."""
     out = []
     for j, verdict in enumerate(verdicts):
         observed, reading = batch.signals[j], batch.readings[j]
@@ -220,8 +276,8 @@ def flight_alignment(batch: Batch, flown: Flown, verdicts: list[Verdict]) -> lis
             "mean_horizontal_distance_m": float(np.mean(np.hypot(track["e"][flown_rows] - observed.e_m[:rows],
                                                                  track["n"][flown_rows] - observed.n_m[:rows]))),
             "mean_vertical_distance_m": float(np.mean(np.abs(track["height"][flown_rows] - observed.altitude_m[:rows]))),
-            "landing_time_minus_observed_s": (verdict.end_row * flown.cycle_s - len(reading.words) * step_rows * flown.cycle_s
-                                              if verdict.outcome == "landed" else None)})
+            "landing_time_minus_observed_s": (verdict.crossing["at_row"] * flown.cycle_s - observed_landing_s(
+                observed, reading, batch.geometries[j]) if verdict.outcome == "landed" else None)})
     return out
 
 

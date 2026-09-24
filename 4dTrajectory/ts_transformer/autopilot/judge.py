@@ -84,7 +84,7 @@ class Verdict:
     #: the state row the outcome is read at (a crossing's first row past the plane)
     end_row: int
     #: at the interpolated threshold crossing, for a crossing outcome: metres right of the centreline and
-    #: above the threshold
+    #: above the threshold, and the (fractional) state row it happened at
     crossing: dict[str, float] | None
     #: layer 1: per limit, the cycles it bound and the mean |wanted − given| of the rate it costs then
     limits: dict[str, dict[str, float]]
@@ -132,7 +132,8 @@ def _outcome(states: np.ndarray, track: dict[str, np.ndarray], captured: np.ndar
         if row in landings or captured[row]:
             fraction = bracket_fraction(-float(before[row - 1]), -float(before[row]))
             crossing = {"cross_m": float(right[row - 1] + fraction * (right[row] - right[row - 1])),
-                        "height_m": float(height[row - 1] + fraction * (height[row] - height[row - 1]))}
+                        "height_m": float(height[row - 1] + fraction * (height[row] - height[row - 1])),
+                        "at_row": float(row - 1 + fraction)}
             kind = ("landed" if captured[row] else "crossed_without_capture") if row in landings else "crossed_off_runway"
             events.append((row, kind))
             break
@@ -213,7 +214,7 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
     last_end = flight.signals.n_rows - 1 if capture_row is None else capture_row
     ends = [group[0].row for group in groups[1:]] + [last_end]
     results = []
-    for group, end in zip(groups, ends):
+    for number, (group, end) in enumerate(zip(groups, ends)):
         first, last = group[0], group[-1]
         target = words.heading_deg(last.value)
         # "turn": None for the word flown from entry or a turn the capture superseded; "hold": None when no
@@ -224,12 +225,14 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
             arrival, turn, target_unwrapped = first.row, None, target
         else:
             (record,) = [r for r in turns if r["departure_row"] == first.row and first.kind.startswith(r["kind"])]
+            # the turn said so far: all of it, or the parts said (the sentence may end mid split turn)
+            said = record["turn_deg"] * len(group) / record["parts"]
             shorter = float(wrap180(target - track[first.row]))
-            total = shorter + 360.0 * round((record["turn_deg"] - shorter) / 360.0)
+            total = shorter + 360.0 * round((said - shorter) / 360.0)
             target_unwrapped = float(track[first.row]) + total
             inside = np.abs(track[first.row: end + 1] - target_unwrapped) <= spec.heading_tolerance_deg
             arrival = first.row + int(np.argmax(inside)) if inside.any() else None
-            cut = arrival is None and capture_row is not None and end == capture_row
+            cut = arrival is None and capture_row is not None and number == len(groups) - 1
             if cut:
                 stop = _intercept_end(track, first.row, end, target_unwrapped, spec.heading_tolerance_deg)
             else:
@@ -290,7 +293,9 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     reached = [i for i in reading.instructions if i.row < rows]
 
     def first_row(mode: str) -> int | None:
-        cycles = np.nonzero(flown.modes[mode][index, :last].cpu().numpy())[0]
+        # up to the outcome's row: after a crossing without capture the executor flies on, and a later mode
+        # belongs to no judged row
+        cycles = np.nonzero(flown.modes[mode][index, :end_row].cpu().numpy())[0]
         return min(rows - 1, int(cycles[0] + 1) // step_rows) if len(cycles) else None
 
     capture_row, tracking_row = first_row("captured"), first_row("tracking")
