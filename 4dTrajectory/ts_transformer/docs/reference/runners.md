@@ -293,7 +293,12 @@ the frontend the users run carries `sentence` in `EXPERIMENT_HORIZON_MODES` — 
 that airport's whole picker (AV6).
 
 Tests: `tests/test_training_overlays.py` (the verdict mapping on synthetic flights against `word_results`, the prior's
-predictions on a small untrained network, the overlay helpers' refusals, the frontend mirrors, and both `main()` on the
-formal artefacts over a 3-flight copy of the KSMF set — every write into `tmp_path`; the executor test bypasses only
-`require_current_executor`, because the suite's `conftest.py` puts this tree's `geokit/src` on the path) and
+predictions on a small untrained network, the overlay helpers' refusals, the frontend mirrors, and the prior's `main()` end
+to end on a synthetic artefact and checkpoint — every write into `tmp_path`) and
 `tests/test_publish_ts_experiment_trajectories.py` (the executor mode, the builder stubbed, every root in `tmp_path`).
+**Generations**: both runners open only artefacts this code reads. The 2026-09-24 publication (executor spec
+`2674ab8c71a9`, prior `v1_20260924`, over the v5 `instruction_v2` sets) was made at `a320d1bd` on
+`dev-publish-executor-prior`, where tests also ran both `main()` on those artefacts; since 9fb1b137 (signals v2, sample v6,
+no A320 stand-in) neither the artefact nor the spec opens, so the next publication needs the next generation — a new
+instruction artefact, Training v6 sets, an executor spec and replay measured by this code, a prior trained on the new
+sentences.

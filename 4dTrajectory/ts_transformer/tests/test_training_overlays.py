@@ -4,8 +4,10 @@ overlay manifest they share (`experiments/instruction_training_export.py`).
 
 Each word's executor verdict is rebuilt from the judge on synthetic flights and must give back the judge's own count;
 the prior's per-step predictions come from a small untrained network; the manifest's refusals are exercised on files in
-``tmp_path``. The runners' ``main()`` run end to end on the formal artefacts when they are on this machine, every write
-into ``tmp_path``.
+``tmp_path``; the prior's runner runs end to end on a synthetic artefact and checkpoint, every write into ``tmp_path``.
+The tests that ran both runners on the formal `v2_20260924` artefacts (the publication of 2026-09-24, `dba44622` on
+`dev-publish-executor-prior`) are gone: this code no longer opens that generation (signals v2, the labeller after
+9fb1b137), and a test that can never run again binds nothing.
 """
 
 from __future__ import annotations
@@ -247,71 +249,6 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
     assert json.loads(_ts_constant("TRAINING_EXECUTOR_SCHEMA")) == executor_export.SCHEMA
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_EXECUTOR_STATUSES"))) == executor_export.STATUSES
     assert json.loads(_ts_constant("TRAINING_PRIOR_SCHEMA")) == prior_export.SCHEMA
-
-
-# ---- the runners, end to end on the formal artefacts
-POOLED = REPO_ROOT / "4dTrajectory" / "outputs" / "POOLED"
-INSTRUCTIONS = POOLED / "instruction_language" / "v2_20260924"
-EXECUTOR = POOLED / "executor" / "v2_20260924"
-PRIOR = POOLED / "prior" / "v1_20260924"
-LIVE_SET = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports" / "KSMF" / "training"
-FORMAL = pytest.mark.skipif(
-    not all(path.exists() for path in (INSTRUCTIONS, EXECUTOR / "replay-val" / "replay.json", PRIOR / "checkpoint.pt",
-                                       LIVE_SET / "instruction_v2" / "sample.json")),
-    reason="the formal instruction, executor and prior artefacts and the published KSMF set are not on this machine")
-
-
-def _three_flight_set(tmp_path):
-    """The published KSMF `instruction_v2` set cut to its first three flights, in ``tmp_path`` — read, never written."""
-    training = tmp_path / "airports" / "KSMF" / "training"
-    (training / "instruction_v2").mkdir(parents=True)
-    sample = json.loads((LIVE_SET / "instruction_v2" / "sample.json").read_text(encoding="utf-8"))
-    sample["flights"] = sample["flights"][:3]
-    (training / "instruction_v2" / "sample.json").write_text(json.dumps(sample), encoding="utf-8")
-    index = json.loads((LIVE_SET / "index.json").read_text(encoding="utf-8"))
-    index["sets"] = [item for item in index["sets"] if item["id"] == "instruction_v2"]
-    (training / "index.json").write_text(json.dumps(index), encoding="utf-8")
-    return tmp_path / "airports", training
-
-
-@FORMAL
-def test_the_executor_export_reflies_the_set_and_matches_the_formal_replay(tmp_path, monkeypatch):
-    # `conftest.py` puts this tree's `geokit/src` on the path, and `autopilot.spec.executor_source_files` then hashes
-    # geokit with the executor — which the formal spec's hash (measured in a worktree, geokit outside it) does not
-    # cover, so the spec is refused here though no executor file differs (docs/code-health-followups.md, 2026-09-24).
-    # The export's own check stands in for it: every re-flown flight must reproduce its formal replay row.
-    from ts_transformer.autopilot import replay
-    monkeypatch.setattr(replay, "require_current_executor", lambda record: None)
-    root, training = _three_flight_set(tmp_path)
-    args = ["--executor", str(EXECUTOR), "--replay", str(EXECUTOR / "replay-val"), "--instructions", str(INSTRUCTIONS),
-            "--airports-root", str(root), "--set", "instruction_v2", "--airport", "KSMF", "--overlay-id", "ex_test"]
-    assert executor_export.main(args) == 0
-    payload = json.loads((training / "ex_test" / "executor.json").read_text(encoding="utf-8"))
-    assert payload["schema"] == executor_export.SCHEMA and len(payload["flights"]) == 3
-    assert payload["gate"]["own dynamics"]["all"]["all"]["flights"] == 7773
-    sample = json.loads((training / "instruction_v2" / "sample.json").read_text(encoding="utf-8"))
-    for flight, item in zip(payload["flights"], sample["flights"]):
-        if flight["flown"]:
-            assert [(w["row"], w["column"], w["value"]) for w in flight["words"]] == \
-                [(e["row"], e["column"], e["value"]) for e in item["words"]["events"]]
-            assert flight["track"]["tS"][0] == 0 and math.isfinite(flight["track"]["altitudeHaeM"][-1])
-    with pytest.raises(SystemExit):   # never overwritten
-        executor_export.main(args)
-
-
-@FORMAL
-def test_the_prior_export_predicts_the_set_under_the_checkpoint_it_names(tmp_path):
-    root, training = _three_flight_set(tmp_path)
-    args = ["--prior", str(PRIOR), "--instructions", str(INSTRUCTIONS), "--airports-root", str(root),
-            "--set", "instruction_v2", "--airport", "KSMF", "--overlay-id", "pr_test"]
-    assert prior_export.main(args) == 0
-    payload = json.loads((training / "pr_test" / "prior.json").read_text(encoding="utf-8"))
-    assert payload["schema"] == prior_export.SCHEMA and payload["columns"] == list(COLUMNS)
-    assert payload["readout"]["model"]["nllPerStep"] == pytest.approx(0.17782562442333233)
-    sample = json.loads((training / "instruction_v2" / "sample.json").read_text(encoding="utf-8"))
-    assert [f["rows"] for f in payload["flights"]] == [f["rows"] for f in sample["flights"]]
-    manifest = json.loads((training / export.OVERLAYS_FILE).read_text(encoding="utf-8"))
-    assert [item["id"] for item in manifest["overlays"]] == ["pr_test"]
 
 
 # ---- the prior's runner end to end, on a synthetic artefact and an untrained checkpoint (every write in tmp_path)
