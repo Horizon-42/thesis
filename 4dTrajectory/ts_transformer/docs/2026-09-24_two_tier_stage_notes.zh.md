@@ -1,4 +1,4 @@
-# 两层模型：阶段记录（更新于 2026-09-24 22:00 UTC）
+# 两层模型：阶段记录（更新于 2026-09-24 22:25 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、正在进行的事、
 接下来按什么顺序做。设计本身在各自的设计文档里，这里只给结论、指路和实现计划；历史看 git 和 `docs/CHANGELOG.md`。
@@ -15,7 +15,7 @@
 | 2 标注器 | **完成**：句子产物 `outputs/POOLED/instruction_language/v3_20260924/`（按航班划分：训练集 50,223 架、验证集 10,542 架已标注） | 包 `instructions/` |
 | 3 执行器 | **完成，只用词表**（第一、二阶段）：除词表外只读被指跑道公布的入口跨越高度 TCH。已合入 `dev-two-tier` | `docs/2026-09-23_executor_design.zh.md`；包 `autopilot/` |
 | 4 回放门 | **训练集上每格都过**（`outputs/POOLED/executor/v5_20260924/`，规格 `0d6a68a92c6f`，§2）。验证集的回放门：按新划分重建句子产物后，**在新验证集运行日上跑，用户已同意**（2026-09-24） | |
-| 5 先验 | 第一版、第二版训练过（按航班划分，第二版队列还在跑）；**第三版设计已定（用户 2026-09-24），下一步实现**（§3） | `docs/2026-09-24_prior_design.zh.md`（现行设计）、`docs/2026-09-24_prior_readouts.zh.md`（每次训练的读数） |
+| 5 先验 | 第一版、第二版训练过（按航班划分，第二版队列还在跑）；第三版设计已定（用户 2026-09-24）；**第三版第 0 步代码已提交（`dev-prior-v3` `67e0e5c9`），正式链正在跑**（§3.3） | `docs/2026-09-24_prior_design.zh.md`（现行设计）、`docs/2026-09-24_prior_readouts.zh.md`（每次训练的读数） |
 | 前端 | Training 视图读 instruction-v3；五个机场的 `instruction_v3` 集已导出，**要用户重启 vite 才看得到**（§5） | `aeroviz-4d/public/data/airports/<ICAO>/training/instruction_v3/` |
 | 6 后训练 / 7 约束 / 8 多机 | 未开始；多机按场景做已写进先验设计（§3） | 先验设计 §6、§9 |
 
@@ -91,7 +91,14 @@
 文档：取 `dev-two-tier` 的版本，它的 §8.6、§8.7 内容已经挪进读数文档）→ 请用户合并（或得到同意后我合）→ 把 `dev-prior-v3` 重建在
 合并后的 `dev-two-tier` 上。**设计文档直接提交到 `dev-two-tier`**（用户 2026-09-24）。
 
-**第 0 步：划分、信号、规格、句子产物**
+**第 0 步：划分、信号、规格、句子产物**（代码已写完并提交：`dev-prior-v3` `67e0e5c9`，两次 opus 审查已改完，ts 全套 1,392 通过；
+与下面计划不同的两处：一架航班的运行日取**落地时刻**，不取进入时刻——航迹清单只有落地时刻，同一架航班在两份清单里要落在同一天，
+两种取法不同的只有 20 架；按天数取整的分法**只做一次并提交进仓库**（`data/day_split_20260924.json`，14 / 14 / 9 / 53 天），
+harvest 的运行日与它不一致时 runner 拒绝。信号里的绝对时间叫 `entry_time_utc`（不是 `start_time_utc`：那是航迹文件第一次收到信号
+的时刻，早约 45 s）。**正式链**：脚本 `$CLAUDE_JOB_DIR/tmp/formal/v4_step0.sh`（进程号 `v4_step0.pid`，日志 `v4_step0.log`），
+2026-09-24 22:22 UTC 从干净的 `dev-prior-v3` 工作树启动，依次写 `outputs/POOLED/instruction_language/v4_20260924/`（信号 → 规格 →
+句子）、`outputs/POOLED/prior/v3_census_20260924/census.json`、`outputs/POOLED/executor/v6_20260924/`（规格、`replay-train`、
+`replay-val`）。）
 
 1. 新模块 `data/day_split.py`（不依赖 torch）：输入运行日列表和种子，按 `sha256(f"{seed}:{day}")` 排序，取前 round(0.15 N) 天为测试、
    再 round(0.15 N) 天为验证、其余里 round(剩余 / 7) 天为内部选择集、剩下为训练——按天数取整，不用阈值（90 天时份额才准）。每架航班
