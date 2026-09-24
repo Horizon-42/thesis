@@ -1052,3 +1052,7 @@ delete-then-build arrivals / observed writers (TD17). What is left, one item eac
     `openap_aircraft_parameters.json` without checking `schema_version`, and
     `build_openap_aircraft_database.py` still writes the parameters file's version as a literal `1`
     (the lookup's now comes from `identity.OPENSKY_LOOKUP_SCHEMA`).
+22. **Two runners keep their own copy of the git-state helper** — *verified* (2026-09-24).
+    `experiments/instruction_spec.py` and `experiments/instruction_training_export.py` each define a
+    private `_git_state()` byte-identical to `repo_layout.git_state()` (added for `executor_spec`);
+    replace both with the import.

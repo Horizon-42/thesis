@@ -215,3 +215,26 @@ changes. All envelope geometry comes from `instructions/display.py` (outside the
 and the tube walls, `flight_scenarios.datum.geoid_undulation_m`) and refuses a word kind outside `WORD_KINDS` (the
 frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `tests/test_instruction_training_export.py`
 (every write into `tmp_path`; the schema / rule / columns / kinds mirrors checked against `trainingSample.ts`).
+
+### R12 · the executor: `executor_spec` → `executor_sensitivity` → `executor_replay`
+
+2026-09-24 (`docs/2026-09-23_executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
+--dir <new dir> [--method-b-per-airport 40] [--seed 1337] [--workers 8] [--device cpu]` refuses a dirty tree, an
+existing directory and a labeller other than the artefact's; measures the data parameters on EVERY labelled train
+flight (process pool of torch-free workers, 1,000 flights a chunk, each flight re-read and required to equal its
+stored sentence), derives τ_ψ and p by method A (the executor's own 90° turn on an A320, 60–140 m/s), then flies a
+seeded train sample of own-dynamics flights with no delay and re-reads each flown track through the observation
+operator for the delays (method B: median lead per group, floored at 0). The design's fixed choices (Δt, τ_γ, the
+γ̇ factor, the timeout factor, the 30 s match window) are module constants and are written into `measurements.json`
+beside `spec.json`. ~6 s per 1,500 flights for the data pass in one process. `executor_sensitivity --instructions
+--executor <spec dir> [--per-airport 400] [--seed 1337] [--out]` flies one seeded TRAIN sample per variant (the spec,
+then τ_ψ, p, the γ̇ factor, each delay ± 4 s, one at a time); a delay below 0 is a `probe` (a word acting before it
+is said) and never a spec value; writes `sensitivity.json` into a new directory (default beside the spec).
+`executor_replay --instructions --executor --split {train,val} --out <new dir> [--per-airport 0 = every flight]
+[--seed] [--chunk 500]` is the §11 readout: own-dynamics flights gated, a stand-in's reported; each airport flown in
+chunks, judged, written as control-path prediction records (`records/<ICAO>/`, the plant contract's law resolving
+the newtons) that `python -m evaluation` grades; its verdicts are paired with the harvest's observed
+`approach/evaluation_report.json` by `flight_key`; `replay.json` holds every flight's row and the gate table (per
+group, airport and stratum: landed, words inside per word judged, evaluation where the observed passes, ≥ 0.95).
+**The VAL replay is stage 4 and runs only on the user's go-ahead**; development uses train. Every write refuses an
+existing directory. Tests: `tests/test_autopilot.py` (every write into `tmp_path`).

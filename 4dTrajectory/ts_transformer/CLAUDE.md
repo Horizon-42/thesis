@@ -279,7 +279,9 @@ of the package, not a migration in progress.
   guidance layer never imports the control path (L28). **`manoeuvre/`**: **nothing under `outputs/`
   imports `manoeuvre`**; only the runners do (L29). **`instructions/`** (2026-09-23): the second
   layer's language — vocabulary, signals, envelopes, labeller, artefact; torch-free, below every
-  model, only the runners consume it until the executor and the prior exist (L30).
+  model, consumed by the runners and the executor (L30). **`autopilot/`** (2026-09-24): the executor —
+  flies the words through the control path's point-mass dynamics one 1 s cycle at a time (that backend
+  runs no hooks), exact inverse, limits in order; imports no model, training or path package (L31).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;
@@ -316,6 +318,9 @@ grid's L60_D60 cohort). **The instruction labeller** (2026-09-23): `instruction_
 one never-overwritten artefact directory (R10). `instruction_training_export` writes the frontend's Training sets
 from that artefact — a seeded per-airport VAL sample, every flight re-read against its stored sentence, every envelope's
 geometry from `instructions/display.py`, added to each airport's `training/index.json` without touching its other sets (R11).
+**The executor** (2026-09-24): `executor_spec` (data on train, methods A and B, a clean tree, written once) →
+`executor_sensitivity` (train, one parameter at a time; a negative delay is a probe) → `executor_replay` (the §11 gate
+readout through evaluation, paired with the observed verdicts; val = stage 4, only on the user's go-ahead) (R12).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

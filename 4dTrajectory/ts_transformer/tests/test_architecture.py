@@ -681,12 +681,76 @@ def test_the_instructions_package_sits_below_the_models():
                 assert module in INSTRUCTIONS_MAY_IMPORT, f"{rel} imports {name}"
 
 
-def test_only_the_runners_reach_the_instructions_package_for_now():
-    """Until the executor and the prior exist (framework document §0), nothing in the package
-    but the runners consumes the instruction language."""
+def test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_package():
+    """The instruction language is consumed by the runners, the executor (`autopilot/`), which flies its words,
+    and the prior (`prior/`), which learns to say them (framework document §2)."""
     for path in _module_files():
         if path.is_relative_to(INSTRUCTIONS):
             continue
         rel = path.relative_to(TS_DIR).as_posix()
         if any(name.split(".")[0] == "instructions" for name in _imported_names(path)):
-            assert rel.startswith("experiments/"), f"{rel} imports the instructions package"
+            assert rel.startswith(("experiments/", "autopilot/", "prior/")), f"{rel} imports the instructions package"
+
+
+AUTOPILOT = TS_DIR / "autopilot"
+#: The executor sits above the instruction language and the shared dynamics and below the prior and
+#: the closed loop (framework document §2): it flies words through the control path's rollout, so
+#: inside the package it reads only these (a module, or a whole group ending in ``.``) — never a
+#: model, the training plane, a runner, a prediction path's own package or a layer above it.
+#: ``data.channels``: the observation operator (method B) reads a flown track as the data plane reads
+#: an observed one.
+AUTOPILOT_MAY_IMPORT = ("autopilot.", "instructions.", "config", "io_utils", "repo_layout", "data.dataset",
+                        "data.channels", "data.reference_velocity", "geometry.flyability", "outputs.dynamics.", "outputs.envelope",
+                        "outputs.constraints.speed_floor")
+
+
+def test_the_executor_flies_through_the_shared_dynamics_only():
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
+    for path in AUTOPILOT.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        for name in _imported_names(path):
+            if name.split(".")[0] not in groups or name == "autopilot":
+                continue
+            allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
+                          (name == item or name.startswith(item + ".")) for item in AUTOPILOT_MAY_IMPORT)
+            assert allowed, f"{rel} imports {name}"
+
+
+def test_only_the_runners_reach_the_executor_for_now():
+    for path in _module_files():
+        if path.is_relative_to(AUTOPILOT):
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        if any(name.split(".")[0] == "autopilot" for name in _imported_names(path)):
+            assert rel.startswith("experiments/"), f"{rel} imports the executor"
+
+
+PRIOR = TS_DIR / "prior"
+#: The prior sits on the instruction language (framework document §2): it reads the words and the artefact, never
+#: the executor, a model of the prediction paths, the training plane or a runner.
+PRIOR_MAY_IMPORT = ("prior.", "instructions.", "io_utils", "repo_layout")
+
+
+def test_the_prior_reads_only_the_instruction_language():
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
+    for path in PRIOR.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        for name in _imported_names(path):
+            if name.split(".")[0] not in groups or name == "prior":
+                continue
+            allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
+                          (name == item or name.startswith(item + ".")) for item in PRIOR_MAY_IMPORT)
+            assert allowed, f"{rel} imports {name}"
+
+
+def test_only_the_runners_reach_the_prior_for_now():
+    for path in _module_files():
+        if path.is_relative_to(PRIOR):
+            continue
+        rel = path.relative_to(TS_DIR).as_posix()
+        if any(name.split(".")[0] == "prior" for name in _imported_names(path)):
+            assert rel.startswith("experiments/"), f"{rel} imports the prior"
