@@ -27,14 +27,13 @@ from typing import Any
 import numpy as np
 import torch
 
-from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
-from trajectory_data_process.harvest.airports import load_airport
 from ts_transformer.autopilot.executor import Flown, fly
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, rebuild_series
 from ts_transformer.autopilot.frame import AirportCharts
 from ts_transformer.autopilot.judge import Outcome, Verdict, flown_track, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
+from ts_transformer.autopilot.runway_data import published_crossing_heights
 from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock
 from ts_transformer.autopilot.spec import load_spec, require_current_executor
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
@@ -120,22 +119,6 @@ class Drawn:
     description: dict[str, Any]
 
 
-def published_crossing_heights(geometry: AirportGeometry) -> tuple[float, ...]:
-    """Each candidate runway's published threshold crossing height (TCH, m above the threshold), in the candidates'
-    order: the harvest's runway data for the airport (`trajectory_data_process.harvest.airports.load_airport`, the
-    FAA CIFP's vertical path) — the evaluation's own reference plane. A candidate that publishes none is refused:
-    "descend to land" has no crossing point there."""
-    runways = {runway.ident: runway for runway in load_airport(geometry.code, config_file=DEFAULT_CONFIG,
-                                                                 cifp_file=DEFAULT_CIFP).runways}
-    heights = []
-    for candidate in geometry.candidates:
-        height = runways[candidate.ident].threshold_crossing_height_m
-        if height is None:
-            raise ValueError(f"{geometry.code} {candidate.ident} publishes no threshold crossing height")
-        heights.append(float(height))
-    return tuple(heights)
-
-
 def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airport: int, seed: int,
                  groups: tuple[str, ...] = (OWN,)) -> Drawn:
     """Of the split's signals at ``candidates``, the first ``per_airport`` of ``groups`` per airport (0: every
@@ -169,13 +152,17 @@ def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airp
     short = {airport: need for airport, need in wanted.items() if need and per_airport}
     if short:
         raise ValueError(f"the {split} split holds too few eligible flights: {short} short")
+    heights = {code: published_crossing_heights(geometry) for code, geometry in geometries.items()}
     return Drawn(indices=[i for i, _, _ in taken], signals=[signals[i] for i, _, _ in taken],
                  series=[s for _, s, _ in taken], groups=[g for _, _, g in taken], geometries=geometries,
-                 crossing_heights={code: published_crossing_heights(geometry) for code, geometry in geometries.items()},
+                 crossing_heights=heights,
                  description={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
                               "groups": list(groups), "pool": len(order), "read": read,
                               "excluded": dict(excluded.most_common()), "flights": len(taken),
-                              "by_group": dict(Counter(g for _, _, g in taken))})
+                              "by_group": dict(Counter(g for _, _, g in taken)),
+                              "threshold_crossing_heights_m": {
+                                  code: dict(zip((c.ident for c in geometry.candidates), heights[code]))
+                                  for code, geometry in geometries.items()}})
 
 
 def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading]) -> Batch:

@@ -4,10 +4,10 @@ The executor takes no information beyond the vocabulary (the user's rule, 2026-0
 (`autopilot/derive.py`) sets τ_ψ = the heading lead and p = the bank limit over the lead; the turn rates, the bank
 limit, the speed changes' pace and the altitude tolerance are the vocabulary's, read at run time; a word takes effect
 when it is said; the landing crosses the pointed runway at its published threshold crossing height (read at replay,
-`replay.published_crossing_heights`). Nothing is measured from data (the measurements that set these before are
+`runway_data.published_crossing_heights`). Nothing is measured from data (the measurements that set these before are
 archived: `archive/executor_vocabulary_only_2026_09/`). The design's fixed choices are module constants below. Writes ``spec.json`` + ``measurements.json`` into
 ``--dir`` (never over an existing file), from a clean tree only: the spec records the commit it was
-measured at and the executor's source hash, and a replay refuses a spec measured by other code.
+measured at and the executor's source hash, and a replay refuses a spec written by other code.
 
     python run_ts.py executor_spec \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
                                 "altitude_tolerance_m": spec.altitude_tolerance_m,
                                 "landing_max_height_m": spec.landing_max_height_m},
         "from_the_runway": "each candidate's published threshold crossing height, read at replay "
-                           "(replay.published_crossing_heights)",
+                           "(runway_data.published_crossing_heights)",
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
                   "timeout_factor": TIMEOUT_FACTOR},
     }

@@ -14,7 +14,7 @@
   beyond the vocabulary, 2026-09-24). The pilot's own speed is the one it lands at: slowing to it takes ``a``, or
   the deceleration that reaches it over the straight-line distance left to the threshold when that is harder (the
   shortest path there, so it errs early) — at most the vocabulary's largest acceleration. Said late on a long final at a
-  high speed, ``a_unspec`` alone crossed the threshold 20 m/s over the type's window.
+  high speed, the pace alone crossed the threshold 20 m/s over the type's window.
 - The stall floor: ``V_ref ≥ margin · V_stall(n)`` at the load factor the inverse commands this cycle
   (`outputs.constraints.speed_floor.stall_speed_mps`, the control path's margin).
 """

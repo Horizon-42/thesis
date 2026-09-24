@@ -22,7 +22,7 @@ matched to its word. The outcome, the flown-as-said flag, the verdict list — r
 row, and the crossing must match it within `CROSSING_TOLERANCE`, or the export stops, naming the flight. The evaluation
 verdicts (the replay's and the observed track's) are the formal row's: evaluation is not run again.
 
-**Where it runs.** `replay.open_executor` refuses a spec measured by other executor code, by a hash over the executor's
+**Where it runs.** `replay.open_executor` refuses a spec written by other executor code, by a hash over the executor's
 files and the repository modules they import (`autopilot.spec.executor_source_files`), each labelled by its module
 name, so the hash is the same from any checkout.
 
@@ -68,6 +68,7 @@ from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.flights import rebuild_series
 from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
+from ts_transformer.autopilot.runway_data import published_crossing_heights
 from ts_transformer.experiments.executor_replay import REPLAY_SCHEMA
 from ts_transformer.experiments.instruction_training_export import (
     KIND_EXECUTOR, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
@@ -432,7 +433,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
             raise SystemExit(f"{signals[j].dataset_id} is not flown here ({group}) but has a row in the formal replay")
     batch = replay.Batch(signals=[signals[j] for j in flyable], series=[series[j] for j in flyable], readings=readings,
                          geometries=[geometry] * len(flyable),
-                         crossing_heights=[replay.published_crossing_heights(geometry)] * len(flyable),
+                         crossing_heights=[published_crossing_heights(geometry)] * len(flyable),
                          approach_ias_mps=[replay.flight_approach_ias_mps(series[j], groups[j]) for j in flyable],
                          groups=[groups[j] for j in flyable], drawn={})
     flown, verdicts = replay.fly_batch(batch, params, words, device=device) if flyable else (None, [])

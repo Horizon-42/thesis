@@ -1,10 +1,10 @@
 """The executor spec on disk (executor design §10, the E7 plan in §9): the parameters, with a sha, written
 once — the vocabulary's rule for its own spec.
 
-``spec.json`` carries the parameters (`ExecutorParams`), their sha, the vocabulary spec they were measured
-against, the labeller that read the flights and the executor's source hash (`executor_source_files`: the code
-that flies a sentence and measures the values — a spec measured by other code is refused at replay,
-`require_current_executor`), and the git state; ``measurements.json`` the numbers behind every value. Nothing
+``spec.json`` carries the parameters (`ExecutorParams`), their sha, the vocabulary spec they were derived
+from, the labeller that reads the flights and the executor's source hash (`executor_source_files`: the code
+that flies a sentence and derives the values — a spec written by other code is refused at replay,
+`require_current_executor`), and the git state; ``measurements.json`` where every value comes from. Nothing
 here is ever overwritten.
 """
 
@@ -28,8 +28,10 @@ from ts_transformer.io_utils import write_json_atomic
 EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v5"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language
-#: (its own hash, the labeller's, is recorded in the spec and checked at replay) and the path and file helpers.
-UNHASHED_IMPORTS = ("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout")
+#: (its own hash, the labeller's, is recorded in the spec and checked at replay), the path and file helpers, and the
+#: evaluation CLI (it only names the runway data's files; a replay records the crossing heights it flew to).
+UNHASHED_IMPORTS = ("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout",
+                    "evaluation.cli")
 
 
 def _imported_modules(path: Path) -> dict[str, Path]:
@@ -130,7 +132,7 @@ def load_spec(directory: Path) -> tuple[ExecutorParams, dict[str, Any]]:
 
 
 def require_current_executor(record: dict[str, Any]) -> None:
-    """A spec measured by other executor code is refused: its values were fitted to other laws."""
+    """A spec written by other executor code is refused: its values belong to other laws."""
     if record["source"]["executor_source_sha256"] != executor_source_sha256():
-        raise ValueError("the executor spec was measured by other executor code "
+        raise ValueError("the executor spec was written by other executor code "
                          f"({record['source']['executor_source_sha256'][:12]}, now {executor_source_sha256()[:12]})")

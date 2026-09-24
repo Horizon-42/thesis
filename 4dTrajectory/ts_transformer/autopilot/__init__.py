@@ -15,7 +15,6 @@ nothing.
 - ``params``   the executor's own parameters and the design's constraints on them
 - ``executor`` the cycle loop (``fly``); ``judge`` the three-layer verdict on what was flown
 - ``replay``   a batch of labelled flights: who is flown, flying and judging them
-- ``derive`` (method A, from the vocabulary), ``measure`` (the data values the vocabulary does not settle yet)
-  where the parameters come from
+- ``derive``   the executor's own parameters, from the vocabulary alone
 - ``spec``     the executor spec on disk, written once
 """

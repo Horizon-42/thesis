@@ -60,8 +60,8 @@ GATE_SHARE = 0.95
 #: The name the records carry as their predictor, and the horizon they were flown over.
 PREDICTOR = "executor"
 HORIZON = "sentence"
-#: v2 (2026-09-24, instruction-v3): a heading word is judged on the rows a lead after it (vocabulary design §10.1),
-#: no turn or hold.
+#: v4 (2026-09-24): the vocabulary-only executor (stage 1: every word acts when said, the clock-skipped heading
+#: words counted apart; stage 2: the landing crosses the pointed runway's published TCH).
 REPLAY_SCHEMA = "ts-executor-replay-v4"
 
 
