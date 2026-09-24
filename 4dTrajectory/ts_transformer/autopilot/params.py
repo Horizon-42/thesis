@@ -10,15 +10,14 @@ that a set of values is one the laws can fly:
 - the sentence's step a whole number of cycles (the judge reads the flown track at the sentence's rows);
 - ``τ_ψ ≥ 2 Δt`` (§4.1 constraint 1: each cycle removes at most half the heading error; the heading words' own law
   floors its time left at the same 2 Δt, `lateral.word_rate`);
-- ``τ_γ ≥ 2 Δt``; the vocabulary's bank limit inside the grader's.
+- ``τ_γ ≥ 2 Δt`` (the vocabulary's bank limit is checked against the grader's where it is flown,
+  `inverse.attitude`).
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
-from ts_transformer.autopilot.inverse import BANK_MAX_RAD
 from ts_transformer.autopilot.sentence import CLOCKS
 from ts_transformer.instructions.spec import VocabularySpec
 
@@ -46,9 +45,6 @@ class ExecutorParams:
             raise ValueError(f"τ_ψ {self.heading_time_constant_s:g} s is under 2 Δt ({2 * self.cycle_s:g} s)")
         if self.path_time_constant_s < 2.0 * self.cycle_s:
             raise ValueError(f"τ_γ {self.path_time_constant_s:g} s is under 2 Δt")
-        if not 0.0 < spec.turn_bank_max_deg <= math.degrees(BANK_MAX_RAD):
-            raise ValueError(f"the vocabulary's bank limit {spec.turn_bank_max_deg:g}° is outside the grader's "
-                             f"(0, {math.degrees(BANK_MAX_RAD):g}°]")
         if not 0.0 <= self.land_window_low_m <= self.land_aim_height_m <= self.land_window_high_m <= spec.landing_max_height_m:
             raise ValueError(f"the landing aim {self.land_aim_height_m:g} m and its window {self.land_window_low_m:g}–"
                              f"{self.land_window_high_m:g} m are not inside the landing condition's "

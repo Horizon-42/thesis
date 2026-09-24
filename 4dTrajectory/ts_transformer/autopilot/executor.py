@@ -56,7 +56,8 @@ class Flown:
     limits: dict[str, torch.Tensor]         # LIMITS → [B, T] bool
     modes: dict[str, torch.Tensor]          # MODES → [B, T] bool, the state AFTER the cycle's law
     done_cycle: torch.Tensor                # [B] long: the cycle at whose end the flight was done (T − 1: never)
-    sentence_s: torch.Tensor                # [B, T]: the sentence time each cycle's words were looked up at
+    sentence_s: torch.Tensor                # [B, T]: each cycle's sentence time; its words are the ones of the cycle
+                                            # that started its row (`sentence`, `judge.words_said`)
     cycle_s: float
 
 

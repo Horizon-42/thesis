@@ -242,9 +242,9 @@ def test_the_executors_own_turn_takes_the_shorter_way_within_the_vocabularys_rat
     params, one = _params(), spec()
     track, target = torch.tensor([10.0, 350.0, 100.0, 100.0], dtype=F64), torch.tensor([350.0, 10.0, 104.0, 100.0],
                                                                                         dtype=F64)
-    rate = rate_for_error(wrap180(target - track), torch.full((4,), 70.0, dtype=F64), params, one)
+    rate = rate_for_error(wrap180(target - track), params, one)
     # 10 → 350 is 20° LEFT (not 340° right); 350 → 10 is 20° right, both at the vocabulary's largest rate; 4° to go
-    # eases to 4/τ_ψ (under the stopping limit at 70 m/s)
+    # eases to 4/τ_ψ
     assert rate.tolist() == pytest.approx([-one.turn_rate_max_deg_s, one.turn_rate_max_deg_s,
                                            4.0 / params.heading_time_constant_s, 0.0])
 
@@ -283,8 +283,7 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
                             (dict(land_aim_height_m=50.0), "landing aim")):
         with pytest.raises(ValueError, match=message):
             replace(params, **change).check(one)
-    with pytest.raises(ValueError, match="grader's"):
-        params.check(spec(turn_bank_max_deg=50.0))
+
 
 
 # ---- whole flights
@@ -300,16 +299,18 @@ def _params(**changes):
     return replace(base, **changes)
 
 
-def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=None, clock="time"):
+def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=None, clock="time", vocabulary=None):
     """Read ``signals`` with the labeller (or take ``reading``), fly its sentence (or ``grid``) from row 0 on ``clock``
-    (`sentence.CLOCKS`), judge it; the A320's published approach speed unless ``approach_ias`` is given."""
+    (`sentence.CLOCKS`), judge it; the A320's published approach speed unless ``approach_ias`` is given; the test
+    vocabulary unless ``vocabulary`` is."""
     from ts_transformer.autopilot.executor import fly
     from ts_transformer.autopilot.judge import judge
     from ts_transformer.autopilot.lateral import Runways
     from ts_transformer.autopilot.speed import approach_speed_ias_mps
     from ts_transformer.instructions.labeller.read import read_flight
 
-    one, words, geometry = spec(), Words(spec()), instruction_airport()
+    one = vocabulary or spec()
+    words, geometry = Words(one), instruction_airport()
     params = params or _params()
     reading = read_flight(signals, geometry, one, words) if reading is None else reading
     grid = reading.words if grid is None else grid
@@ -626,6 +627,34 @@ def _downwind():
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     _, _, reading = _fly_sentence(signals)
     return signals, reading
+
+
+def test_an_early_clearance_is_captured_inside_the_vocabularys_turn_rates(monkeypatch):
+    """The stage-1 review (2026-09-24): planned at the vocabulary's slowest rate, a capture cleared early waits, then turns
+    at exactly 0.5°/s — read by the judge just under it (the roll-in, the track average), so outside its envelope.
+    Planned at the geometric mean of the vocabulary's rates it is inside. A 30° intercept, cleared 25 rows early,
+    with the real vocabulary's turn rates (the test vocabulary's slowest is 1°/s)."""
+    from ts_transformer.autopilot import lateral
+
+    real = spec(turn_rate_min_deg_s=0.5, turn_rate_max_deg_s=4.7)
+    assert lateral.capture_planning_rate_deg_s(real) == pytest.approx(math.sqrt(0.5 * 4.7))
+
+    def captures(speed):
+        legs = [(60, 0.0, speed, 0.0), *_turn(-30.0, speed, 4.0), (140, 0.0, 70.0, -70.0 * np.tan(np.radians(3.0)))]
+        signals = instruction_flight(*fly_legs(legs, 120.0, 1300.0, -400.0, 0.0))
+        _, _, reading = _fly_sentence(signals, vocabulary=real)
+        clear = int(np.nonzero(reading.words[:, APPROACH] == APPROACH_CLEARED)[0][0])
+        grid = reading.words.copy()
+        grid[clear, APPROACH] = UNCHANGED
+        grid[clear - 25, APPROACH] = APPROACH_CLEARED
+        _, verdict, _ = _fly_sentence(signals, grid, reading=reading, vocabulary=real)
+        assert verdict.outcome == "landed"
+        return verdict.words["capture_turn"]
+
+    for speed in (75.0, 120.0):
+        assert captures(speed)["rate_ok"] and captures(speed)["progress_ok"]
+    monkeypatch.setattr(lateral, "capture_planning_rate_deg_s", lambda vocabulary: vocabulary.turn_rate_min_deg_s)
+    assert not any(captures(speed)["rate_ok"] for speed in (75.0, 120.0))
 
 
 def test_a_late_clearance_is_captured_past_the_line_and_the_line_law_brings_it_back():
