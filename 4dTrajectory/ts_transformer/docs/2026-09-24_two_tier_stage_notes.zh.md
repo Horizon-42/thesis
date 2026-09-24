@@ -1,4 +1,4 @@
-# 两层模型：阶段记录（更新于 2026-09-24 22:25 UTC）
+# 两层模型：阶段记录（更新于 2026-09-24 22:50 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、正在进行的事、
 接下来按什么顺序做。设计本身在各自的设计文档里，这里只给结论、指路和实现计划；历史看 git 和 `docs/CHANGELOG.md`。
@@ -11,11 +11,11 @@
 
 | 阶段 | 状态 | 在哪 |
 |---|---|---|
-| 1 词表 | **定稿**：读法 `instruction-v3`（航向词逐行标注、5° 一档、提前 4 s 说），规格 `0b4ea75be36d`。第三版先验按运行日重新划分后，要用新训练集重新测量一次规格（§3.3） | `docs/2026-09-23_instruction_vocabulary_design.zh.md` |
-| 2 标注器 | **完成**：句子产物 `outputs/POOLED/instruction_language/v3_20260924/`（按航班划分：训练集 50,223 架、验证集 10,542 架已标注） | 包 `instructions/` |
+| 1 词表 | **定稿**：读法 `instruction-v3`（航向词逐行标注、5° 一档、提前 4 s 说），按运行日划分后在新训练集上重新测量的规格 `145d6911e75b`（原 `0b4ea75be36d`；只差下降角档边界 ≤ 0.02°、最大加速度 1.7 → 1.4 m/s²） | `docs/2026-09-23_instruction_vocabulary_design.zh.md` |
+| 2 标注器 | **完成**：现行句子产物 `outputs/POOLED/instruction_language/v4_20260924/`（按运行日划分：训练 44,362 架、内部选择 6,842、验证 10,633 已标注；测试日不打开） | 包 `instructions/` |
 | 3 执行器 | **完成，只用词表**（第一、二阶段）：除词表外只读被指跑道公布的入口跨越高度 TCH。已合入 `dev-two-tier` | `docs/2026-09-23_executor_design.zh.md`；包 `autopilot/` |
-| 4 回放门 | **训练集上每格都过**（`outputs/POOLED/executor/v5_20260924/`，规格 `0d6a68a92c6f`，§2）。验证集的回放门：按新划分重建句子产物后，**在新验证集运行日上跑，用户已同意**（2026-09-24） | |
-| 5 先验 | 第一版、第二版训练过（按航班划分，第二版队列还在跑）；第三版设计已定（用户 2026-09-24）；**第三版第 0 步代码已提交（`dev-prior-v3` `67e0e5c9`），正式链正在跑**（§3.3） | `docs/2026-09-24_prior_design.zh.md`（现行设计）、`docs/2026-09-24_prior_readouts.zh.md`（每次训练的读数） |
+| 4 回放门 | **新划分的训练集、验证集上每格都过**（`outputs/POOLED/executor/v6_20260924/`，规格 `0d6a68a92c6f`；验证集自己的动力学 9,246 架：落地 99.9 %、词 98.0 %、evaluation 98.6 %，执行器设计 §11） | |
+| 5 先验 | 第一版、第二版训练完（第二版选中 V2d，val 每步 0.2542，读数文档 §2）；第三版设计已定；**第三版第 0 步完成**（划分、句子产物 `instruction_language/v4_20260924`、普查，读数文档 §3）；**下一步第 1 步：单机先验**（§3.3） | `docs/2026-09-24_prior_design.zh.md`（现行设计）、`docs/2026-09-24_prior_readouts.zh.md`（每次训练的读数） |
 | 前端 | Training 视图读 instruction-v3；五个机场的 `instruction_v3` 集已导出，**要用户重启 vite 才看得到**（§5） | `aeroviz-4d/public/data/airports/<ICAO>/training/instruction_v3/` |
 | 6 后训练 / 7 约束 / 8 多机 | 未开始；多机按场景做已写进先验设计（§3） | 先验设计 §6、§9 |
 
@@ -25,11 +25,14 @@
 
 | 产物 | 路径 | 说明 |
 |---|---|---|
-| 句子产物（当前） | `outputs/POOLED/instruction_language/v3_20260924/` | 信号 `ts-instruction-signals-v2`、句子 `ts-instruction-sentences-v2`、候选跑道 `ts-instruction-candidates-v2`、规格 `0b4ea75be36d`；按航班划分（`data.splits`）。第三版先验不再用它训练（§3.3） |
-| 执行器正式产物 | `outputs/POOLED/executor/v5_20260924/` | 规格 `0d6a68a92c6f`（`ts-executor-spec-v5`，`1b0cd4f4` 干净），`replay-train/`（`ts-executor-replay-v4`），`sensitivity-train-400-seed1337/` |
+| 句子产物（当前） | `outputs/POOLED/instruction_language/v4_20260924/` | 信号 `ts-instruction-signals-v3`（带 `entry_time_utc` / `landing_time_utc`，内含划分）、句子 `ts-instruction-sentences-v2`、规格 `145d6911e75b`；按运行日划分（`data/day_split_20260924.json`），代码 `67e0e5c9` |
+| 句子产物（上一版） | `outputs/POOLED/instruction_language/v3_20260924/` | 按航班划分、信号 `ts-instruction-signals-v2`；新代码按格式名拒绝读它；第二版先验用它训练 |
+| 第三版第 0 步普查 | `outputs/POOLED/prior/v3_census_20260924/census.json` | 读数文档 §3 |
+| 执行器正式产物 | `outputs/POOLED/executor/v6_20260924/` | 规格 `0d6a68a92c6f`（与 v5 逐字节相同），`replay-train/`、`replay-val/`（新划分，每格都过门） |
+| 执行器上一版产物 | `outputs/POOLED/executor/v5_20260924/` | 同一规格在旧句子产物上，`replay-train/`、`sensitivity-train-400-seed1337/` |
 | 旧的执行器产物 | `outputs/POOLED/executor/{v2,v3,v4}_20260924/` | 已被 v5 取代，**留着不删**（用户 2026-09-24）。v2 的验证集回放门是早期的记录 |
 | 先验第一版 | `outputs/POOLED/prior/v1_20260924/` | 读数在读数文档 §1 |
-| 先验第二版 | `outputs/POOLED/prior/v2_20260924/` | 队列进行中（§3.1），读数写进读数文档 §2 |
+| 先验第二版 | `outputs/POOLED/prior/v2_20260924/` | 队列 22:24 UTC 跑完；选中 V2d（`choice.json`），读数文档 §2 |
 | 前端 Training 集 | `aeroviz-4d/public/data/airports/<ICAO>/training/instruction_v3/sample.json` | `aeroviz-training-sample-v7`，每机场 40 架验证集航班（直线进近 / 被引导各 20），校验器从磁盘读 0 错误 |
 
 ---
