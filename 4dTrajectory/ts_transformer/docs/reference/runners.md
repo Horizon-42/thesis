@@ -302,3 +302,20 @@ to end on a synthetic artefact and checkpoint — every write into `tmp_path`) a
 no A320 stand-in) neither the artefact nor the spec opens, so the next publication needs the next generation — a new
 instruction artefact, Training v6 sets, an executor spec and replay measured by this code, a prior trained on the new
 sentences.
+
+### R14 · `run_ts.py heading_reading_compare` — the heading readings flown by the real executor (vocabulary design §10.1)
+
+2026-09-24. One TRAIN sample (`replay.draw_flights`: `--per-airport` flights of each airport on their own type's dynamics,
+a seeded permutation) read under every variant (`VARIANTS`: `H1` = the holds reading; `H3-<step>-L<lead>` = the per-step
+reading at a 5° or 2° step, merged with a half-step band, labelled `lead` seconds early), each flown by the executor at the
+formal executor spec's parameters, HELD FIXED (its source hash is not required: the refactor of `judge` / `replay` moved it).
+The vocabulary values are `--base-spec`'s (the previous vocabulary's spec file, schema `ts-instruction-spec-v3` and sha
+checked), except the heading reading's and the heading tolerance (half a step + `HEADING_WANDER_ALLOWANCE_DEG`). Per flight:
+`judge.outcome_of` (no word is judged), the evaluation verdict paired with the OBSERVED flight's graded here by the same
+evaluation code (`observed_verdicts`: the harvest's record files linked read-only under `--out`, a cut `summary.json`; the
+harvest's stored report may predate a change of the evaluation's methodology), the time-aligned mean and largest horizontal
+distance to the observed flight, the heading words, the clearance and "unspecified" rows (both move with the reading). Rows
+find their flight by dataset id (`tag_rows`: `fly_variant` returns them grouped by airport). Groups: all, the H1 strata,
+"onto final" (an H1 inserted intercept ≥ 90°). Also one line per variant over every drawn flight, a refusal counted as a
+failure. Writes `compare.json` (`ts-heading-reading-compare-v1`), `compare.md`, `records/<variant>/<ICAO>/`,
+`observed/<ICAO>/` into a NEW directory. The measurement of 2026-09-24: `outputs/POOLED/analyses/heading_reading_20260924/`.
