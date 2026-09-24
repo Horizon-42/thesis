@@ -15,14 +15,14 @@
 |---|---|
 | 词表 | 读法 `instruction-v2`，规格 sha `103a6eae6b90`，标注器源码 sha `47c6008a89bd`（规格写于 `35115734`，工作区干净）。产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260924/`（规格文件的格式名 `ts-instruction-spec-v3`，候选跑道文件的格式名 `ts-instruction-candidates-v2`） |
 | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；几何全部来自 `instructions/display.py` |
-| 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
+| 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/data/trainingOverlays.ts`（叠加层的契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/hooks/useTrainingOverlays.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
 | 分支与提交 | 都在 `dev-two-tier` 上：前端读取器 `dada684b`、读取修正 `2bbbd8cd`、样本 v4 `caf6cf00`；2026-09-24 的高亮按词 `a485c1bc`、速度紫色与转弯路径开关 `f15c938e`、**样本 v5（航向随时间的转弯、淡化、实际转弯起止）`a66c3276`**、取景含转弯区 `37e7e916` |
 | 发布 | 2026-09-24 在 `a66c3276`（工作区干净，记在每个索引条目的 `source.git` 和样本的 `producedBy.git` 里）从 `v2_20260924` **重新导出**，样本格式 `aeroviz-training-sample-v5`：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），读过的航班数与 v4 那次相同（51 / 44 / 143 / 43 / 50），是同一批航班。只重新导出，没有重新标注。v4 的集合与索引条目已删除；各机场 `index.json` 里别的条目（包括 `instruction_v1`）逐条原样保留 |
 | 测试 | 2026-09-24 样本 v5 之后：Python `tests/test_instruction_training_export.py` 10 条（含与前端的契约比对、航向曲线与平面路径逐点一致），`-k instruction` 共 75 条，全部通过；前端 Vitest 88 个文件 663 条通过；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
 | 高亮与三维（2026-09-24） | 高亮改成"选中的一个词"：`trainingColumn` + 游标 → `trainingWordAt`，只亮这一列的词（§4.5）；三维加地面投影、贴地边线（带判定）、管子上下沿、最快 / 最慢转弯路径（开关 "turn paths"）、选航班时取景一次（§4.4）；速度列换成紫色 `#be76ff`（原来的琥珀色和选中的黄色分不开，`trainingWordColors.ts` 写了校验数字）。在 `dev-two-tier` 上，本机 Chrome 里 KRDU 的 N994FG 逐类点过（航向、高度、进近、下降角），读数窗口同样只亮所选的类 |
 | 核对 | 2026-09-24 v5 重新导出后：`npm run check-publication -- --server http://localhost:5173`，五个机场盘上与开发服务器两层都是 0 个错误，每个机场 1 个能读的集合，别的词表的集合按名字拒读记为警告（§5）。本机 Chrome 打开 KRDU 的 DAL689（150° 的切入转弯），选中 075° 这个词：航向图画出楔形，实际航迹落在最快与最慢两条曲线之间；平面图按整个转弯区取景，两条路径和实际转弯起止（第 139、198 步）标了名字，其余的词淡化；三维取景含转弯区。（这个浏览器标签在后台时 `document.hidden` 为真，Cesium 不渲染，截图时才更新——看起来像渲染滞后。） |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
-| 还没有的两样 | 执行器按句子重飞的航迹（执行器在设计中）、先验模型说出的句子（这份词表上还没训练先验）。界面上是两个明确的空位，没有假数据（§4.6） |
+| 叠加层（2026-09-24） | 执行器的 val 回放（规格 `2674ab8c71a9`）和先验的第一次训练（`prior/v1_20260924`）画在 `instruction_v2` 的航班上：`training/overlays.json` 与 `training/executor_v2_20260924/executor.json`、`training/prior_v1_20260924/prior.json`（§2.6、§4.6）。分支 `dev-publish-executor-prior`；发布与核对见 §2.6 的表 |
 
 ---
 
@@ -128,6 +128,45 @@ python run_ts.py instruction_training_export \
 格式名不对就不往下读，不管文件里是哪个词表：v4、v3 的文件（v3 是 `instruction_v1` 的样本）按名字拒读。
 Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 TypeScript 源码逐字比对。
 
+### 2.6 叠加层：执行器的回放与先验的预测
+
+别的模型对一个集合里这些航班做了什么，写在集合**旁边**，不写进集合：
+
+```bash
+# 执行器：从工作树（worktree）里跑——在主工作区，执行器规格的源码 sha 会把 geokit 算进去而拒读（见 ts 的 R13）
+python run_ts.py executor_training_export \
+    --executor 4dTrajectory/outputs/POOLED/executor/v2_20260924 \
+    --replay 4dTrajectory/outputs/POOLED/executor/v2_20260924/replay-val \
+    --instructions 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \
+    --airports-root aeroviz-4d/public/data/airports --set instruction_v2 \
+    --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
+python run_ts.py prior_training_export \
+    --prior 4dTrajectory/outputs/POOLED/prior/v1_20260924 \
+    --instructions 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \
+    --airports-root aeroviz-4d/public/data/airports --set instruction_v2 \
+    --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
+```
+
+- **清单**：每个机场一个 `training/overlays.json`（`aeroviz-training-overlays-v1`），一条一个叠加层：种类、所画的集合、
+  那个集合样本文件的 sha256、文件位置。叠加层文件放在 `training/<叠加层 id>/`，目录已存在或清单里已有同名 id 就拒绝，
+  五个机场都建好才写。`index.json` 不动。
+- **执行器**（`executor.json`，`aeroviz-training-executor-v1`）：用正式规格把集合里的航班重新飞一遍、判一遍。重飞是必须的：
+  正式回放的 `replay.json` 只记了每架航班"哪一类词合不合格"的列表，没有记是哪一条词。重飞后每条判定对回句子里的词，
+  并且**每架航班必须和正式回放的那一行一致**：结局、是否按原话飞完、判定列表、不判 / 没说到 / 被取代的词数完全相同，
+  越过入口的偏离与高度差在 1e-9 以内（换一批航班一起飞，浮点求和的次序不同，差一个末位），否则导出停下、说出是哪一架。
+  evaluation 的判定取正式回放的，不重跑。每条词一个状态：在包络里、出界、不判（转弯被截获接管，或没有转弯也没有保持
+  段，或飞出的航迹没过标注器的门）、没说到（航班先结束了）、被取代（同一列两条词落在飞出的同一步，只飞后一条）、
+  没有自己的检查（跑道指针、下降角词、"未许可"、"未指定"）。拆分的大转弯各份共用一个判定；执行器离开航向词自己去
+  切入航道的那条航向词记为出界。回放不飞的航班（没有识别出机型、机型没有公开进近速度）列出原因，没有航迹。飞出的
+  航迹每 2 s 一点，到结局那一行，带 MSL 与椭球高；还附上这个机场与全部机场的回放门表。
+- **先验**（`prior.json`，`aeroviz-training-prior-v1`）：检查点必须是这份产物的规格与标注器训练的、不是冒烟试跑、候选跑道表
+  与产物相同、状态整份载入。推断用教师强制（每一步看到真值句子在它之前的词），与训练和读数时一样；这条推断路径在全部
+  10,540 架 val 航班上复现 `readout.json` 的每步负对数似然到 1e-9。每架航班每列每步：说一个词的概率、若说一个词最可能的
+  3 个词（列的取值少于 3 个时更少，例如一个机场的候选跑道）及其概率、真值的概率；每架航班每步的负对数似然（总的和
+  分列的，四舍五入前算）。val 的读数随文件一起走，原样照抄。
+- **绑定与核对**：叠加层自己写出所画集合的 id、样本的写出时刻、规格 sha；前端逐项核对，并核对每架航班的键、执行器的
+  每条词（步、列、值）、先验的步数，对不上整份拒读。`check-publication` 另外核对盘上样本文件的 sha256。
+
 ---
 
 ## 3 每个词画成什么（飞行盒）
@@ -206,10 +245,14 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
   - **hold funnels**（默认关）：转完弯保持新航向时允许的位置；
   - **the capture corridor**（默认开）：走廊、中线、截获后的航道带；
   - **vertical**：管子（速度图上的带也跟着它）；**every candidate runway**。
-  开关同时作用于三维、读数窗口的平面图和各图表；航向图上的保持带（航向容差）总是画。下面是两个灰掉的空位（§4.6）。
+  开关同时作用于三维、读数窗口的平面图和各图表；航向图上的保持带（航向容差）总是画。
+  下面是两个叠加层的开关（§4.6）：**执行器的回放**、**先验的预测**。集合上有叠加层时默认打开；没有就灰掉，并写出生成它的
+  命令。同一种有几个时给一个下拉，默认最后列出的。开关下面折叠着回放的门表（这个机场按进近方式分、全部机场，自己机型
+  动力学进门、替代动力学只报）和先验的读数表（每列：先验、两个基线、换词步上说词的概率、第一名命中率）。
 - ⓘ 展开词表的说明：读法、sha、每列类别数、各项容差（包括转弯率、坡度、晚开始、每条跑道的落地横向界限）、
   下降角类、平滑窗口。
-- 抽样说明（原文照录文件里的规则）和航班列表（呼号、跑道、分组、第 0 步之后的词数）。
+- 抽样说明（原文照录文件里的规则）和航班列表（呼号、跑道、分组、第 0 步之后的词数；执行器的回放打开时，每架下面一行
+  它的结局和合格的词数，全在包络里且落地为青色，否则红色）。
 - 各种出错状态都说清楚：没有导出（给出路径、命令和"导出后重启开发服务器"，AV5）、索引里某一条格式
   不对（只标灰这一条）、能读的集合读出错（给出字段）、别的词表的集合（给出原因）。
 
@@ -224,6 +267,9 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 - 点一条带：选中它这一列（词类），游标移到它的发令步；再点一次取消。点步号只移游标，选中的列不变。
   只有选中那一列在游标处生效的词亮（黄边、加深），列名变黄——别的列在同一步生效的词不亮（§4.5）。
 - "Read-back check" 打开读数核对窗口。
+- 执行器的回放打开时：每条词左端一个点——青 = 飞在自己的包络里，红 = 出界，空心灰 = 不判 / 没说到 / 被取代，没有自己
+  检查的词不画；悬停写出每项检查与原因。头部写出结局、越过入口时离中线与入口的距离、合格的词数、evaluation 判定。
+- 先验的预测打开时：头部写出这架航班每步的负对数似然和 val 整体的；"Prior predictions" 打开先验窗口（§4.6）。
 
 ### 4.3 读数核对窗口
 
@@ -239,6 +285,8 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 - **地速—时间**：过渡、速度带、"未指定"段、许可、出带的行（红）。
 - 鼠标移过图只移游标；在图上点一下，选中这张图的列（航向 / 高度 / 速度）。黄色只给选中的那个词：它自己的
   包络，以及它生效的那几行——画在平面图的航迹上和画它那个信号的图上（§4.5）。
+- 执行器的回放打开时：平面图画它飞出的航迹（青色虚线）和终点；三张图用青色虚线画它的航向、高度、地速——横轴是**它自己的
+  时间和它自己飞过的路程**，与观测不对齐，坐标轴放宽到装得下两者。
 - 窗口经 portal 渲染到 `document.body`（AV7）。
 
 ### 4.4 三维场景
@@ -259,6 +307,7 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
   （"fastest …" / "slowest …"），选中航向词时航迹上标出实际转弯的起止两点。
 - 选中一架航班时相机取景一次，框住航迹和每个转弯区（留 1.5 倍余量，句子条和左栏遮住一部分画面）；之后相机归
   用户，游标从不动它。
+- 执行器的回放打开时：它飞出的航迹（青色，椭球高）、贴地的虚线投影、终点和结局标签，图例加一行；开关它不重新取景。
 - 静态实体，不接 CZML，不动 `viewer.clock`。
 
 ### 4.5 共享游标与高亮
@@ -283,13 +332,17 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 里整体透明度 0.3，候选跑道与航迹不变；取消选中就全部恢复。平面图按选中词的整个包络取景（它的转弯区、
 平行四边形、漏斗，或许可的截获转弯），不再只按航迹裁剪——大转弯的最慢边界会伸出航迹很远。
 
-### 4.6 两个空位
+### 4.6 执行器的回放与先验的预测
 
-- **执行器重飞**：执行器（只按动力学飞词的自动驾驶）还在设计中。等它能飞，真值句子重飞出的航迹画在
-  实测航迹旁边。
-- **先验说出的句子**：这份词表上还没有训练先验。等有了，它说出的句子和标注出的句子并排比较。
-
-两处在面板和读数窗口里都写明在等什么，不画任何占位数据。它们需要的文件格式等产物出现时再定。
+- **执行器的回放**回答"这套词飞得出来吗"：真值句子从第 0 行交给执行器，每条词在执行器飞到观测飞机听到它的位置时说，
+  飞出的航迹画在实测航迹旁边（§4.3、§4.4），每条词的判定画在句子条上（§4.2）。要记住一点：**执行器的每条词是按从它自己
+  听到这条词的位置重新画的包络判的**，界面上画的包络是观测航班的，两者不是同一块区域；所以出界的红点要对照悬停里的检查
+  读，而不是对照画出来的包络。
+- **先验的预测**回答"先验对这句话有多意外"：Prior predictions 窗口上半是游标所在这一步的表——每列真值在这一步说了什么
+  （或不变，以及当时生效的词）、先验给真值的概率、给"这一步说一个词"的概率、若说一个词最可能的几个词（与真值相同的
+  标青色）；下半每列一条带：说词的概率（列的颜色）、真值的概率（灰），真值在第 0 步之后说的每个词一根竖线，先验排第一
+  的词就是它为青色，否则红色。鼠标移动改游标，点一行或一条带选中那一列。**这是教师强制的读法**：每一步都看到真值句子
+  在它之前的词，不是先验自己说出一句话；先验自己说、执行器接着飞，是下一步（先验设计 §8 第 1 项）。
 
 ---
 
@@ -301,6 +354,9 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 - 加 `--server <地址>`：同样的文件从正在运行的开发服务器取，JSON 必须是 JSON（不是 SPA 回退页），能读的
   样本**把服务器返回的内容再用读取函数读一遍**——HTTP 200 不等于"能加载"。
 - 加 `--airports-root <目录>`：核对另一个目录（例如导出到临时目录的试跑），不能和 `--server` 同用。
+- 叠加层：`overlays.json` 用前端自己的读取函数读，每个叠加层对照它所画集合的样本读一遍，并核对盘上样本文件的 sha256 是
+  叠加层记下的那一个（集合重新导出过就报错）；画在界面不读的集合上的叠加层记为警告。加 `--server` 时服务器返回的叠加层
+  也再读一遍。
 
 ---
 
@@ -320,7 +376,10 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
   `trainingSample.ts` 的钉住值、测试、`aeroviz-4d/CLAUDE.md` 与 `35-viewer-reference.md` 的对应条目和本文。
 - 格式名跟着文件的形状走：样本或索引的字段一有增、删、改名，Python 的 `SAMPLE_SCHEMA` / `INDEX_SCHEMA` 和
   TypeScript 的 `TRAINING_SAMPLE_SCHEMA` / `TRAINING_INDEX_SCHEMA` 在同一次改动里一起换新名字，盘上的集合重新导出；
-  不为"旧文件还能读"或"现在没人读错"保留旧名字。
+  不为"旧文件还能读"或"现在没人读错"保留旧名字。叠加层的三个格式名（`OVERLAYS_SCHEMA`、`executor_training_export.SCHEMA`、
+  `prior_training_export.SCHEMA` 与 `trainingOverlays.ts` 里的 `TRAINING_OVERLAYS_SCHEMA`、`TRAINING_EXECUTOR_SCHEMA`、
+  `TRAINING_PRIOR_SCHEMA`）同理，由 `test_training_overlays.py` 逐字比对。
+- 集合重新导出后，画在它上面的叠加层会被按名字拒读（样本的写出时刻变了）：重新生成叠加层，用新的叠加层 id。
 - 长期事实一行写进 `aeroviz-4d/CLAUDE.md` 的索引，全文写进 `aeroviz-4d/docs/35-viewer-reference.md`
-  （AV19–AV23）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11）。
+  （AV19–AV25）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11；叠加层 R13）。
 - 日志式记录写进仓库的 `docs/CHANGELOG.md`。

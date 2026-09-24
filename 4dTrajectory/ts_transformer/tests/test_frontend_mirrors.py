@@ -2,7 +2,8 @@
 
 `aeroviz-4d/src/data/airportData.ts` restates two of this package's vocabularies in
 TypeScript — `EXPERIMENT_PREDICTION_OUTPUTS` for `config.PREDICTION_OUTPUTS` and
-`EXPERIMENT_HORIZON_MODES` for `config.HORIZON_MODES`. It cannot import them, the publisher
+`EXPERIMENT_HORIZON_MODES` for `config.HORIZON_MODES` followed by the executor replay's own
+horizon (its records fly the whole sentence; published under Experiments since 2026-09-24). It cannot import them, the publisher
 writes each run's values straight through, and the picker's manifest validator rejects a
 category whose value is not listed — and, through `.every`, the whole airport's manifest
 with it. Twice a new output was published before the mirror learned it (`closure`
@@ -18,6 +19,7 @@ import re
 import pytest
 
 from ts_transformer.config import HORIZON_MODES, PREDICTION_OUTPUTS_PUBLISHED
+from ts_transformer.experiments.executor_replay import HORIZON as EXECUTOR_HORIZON
 from ts_transformer.repo_layout import REPO_ROOT
 
 AIRPORT_DATA_TS = REPO_ROOT / "aeroviz-4d" / "src" / "data" / "airportData.ts"
@@ -37,7 +39,7 @@ def frontend_vocabulary(name: str) -> tuple[str, ...]:
     ("frontend_name", "vocabulary"),
     [
         ("EXPERIMENT_PREDICTION_OUTPUTS", PREDICTION_OUTPUTS_PUBLISHED),
-        ("EXPERIMENT_HORIZON_MODES", HORIZON_MODES),
+        ("EXPERIMENT_HORIZON_MODES", (*HORIZON_MODES, EXECUTOR_HORIZON)),
     ],
 )
 def test_frontend_vocabulary_mirrors_the_config(frontend_name, vocabulary):

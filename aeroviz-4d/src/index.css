@@ -834,6 +834,90 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(255, 255, 255, 0.8);
 }
 
+/* The executor's outcome under each flight: a line of its own, in its verdict's colour. */
+.training-flight-executor {
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* An overlay's switch, what it is, and why it is missing or unreadable. */
+.training-overlay-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 3px;
+}
+
+.training-overlay-switch select {
+  align-self: flex-start;
+  background: #17203a;
+  border: 1px solid #2f3f63;
+  border-radius: 4px;
+  color: #e0e6f0;
+  font-size: 11px;
+}
+
+.training-overlay-note {
+  margin: 0 0 0 20px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: rgba(224, 230, 240, 0.55);
+  overflow-wrap: anywhere;
+}
+
+.training-overlay-note code {
+  font-size: 10px;
+  user-select: text;
+}
+
+/* The readouts behind the overlays: the executor's gate table, the prior's readout. */
+.training-results {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 1px solid #2a3552;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.training-results summary {
+  cursor: pointer;
+  color: #c8d8ec;
+}
+
+.training-results-table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-results-table caption {
+  text-align: left;
+  padding-bottom: 2px;
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-results-table th,
+.training-results-table td {
+  padding: 1px 4px;
+  text-align: right;
+  border-bottom: 1px solid rgba(42, 53, 82, 0.6);
+}
+
+.training-results-table th[scope="row"] {
+  text-align: left;
+  font-weight: 500;
+}
+
+.training-results-note {
+  margin: 6px 0 2px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: rgba(224, 230, 240, 0.5);
+}
+
 /* The bar spans the whole width above the transport: the sentence is read left to
    right against real time, so a narrow dock would compress the long gaps that are
    the most informative thing in it. */
@@ -1105,8 +1189,8 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
-/* The two envelopes that do not exist yet — an executor's replay and a prior's sentence — are
-   empty slots, drawn as dashed boxes with the reason, never with placeholder data. */
+/* The executor's replay, said in words beside the charts: what its dashed teal lines are, or why
+   there are none — never placeholder data. */
 .training-readback-slots {
   display: flex;
   gap: 8px;
@@ -1126,6 +1210,40 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-slot {
   opacity: 0.55;
   font-style: italic;
+}
+
+/* The prior's window: the table at the cursor above the strips. */
+.training-prior-table {
+  width: 100%;
+  margin: 8px 0 6px;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-prior-table th,
+.training-prior-table td {
+  padding: 2px 6px;
+  text-align: left;
+  border-bottom: 1px solid rgba(42, 53, 82, 0.6);
+}
+
+.training-prior-table thead th {
+  font-weight: 500;
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-prior-table tbody tr {
+  cursor: pointer;
+}
+
+.training-prior-muted {
+  color: rgba(224, 230, 240, 0.5);
+}
+
+.training-sentence-executor,
+.training-sentence-prior {
+  font-size: 11px;
 }
 
 .training-readback-legend {

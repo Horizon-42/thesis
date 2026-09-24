@@ -14,6 +14,7 @@ import { TRAINING_WEAK_HOLD_WIDTH_M, type TrainingVocabulary } from "../data/tra
 import {
   TRAINING_CORRIDOR_COLOR,
   TRAINING_ENVELOPE_ALPHA,
+  TRAINING_EXECUTOR_COLOR,
   TRAINING_FUNNEL_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
@@ -37,7 +38,11 @@ function SwatchIcon({ swatch }: { swatch: Swatch }) {
   );
 }
 
-export default function TrainingLegend({ layers, vocabulary }: { layers: TrainingLayers; vocabulary: TrainingVocabulary }) {
+export default function TrainingLegend({ layers, vocabulary, executorTrack = false }: {
+  layers: TrainingLayers; vocabulary: TrainingVocabulary;
+  /** The executor's flown track is drawn (its overlay is on and the flight was flown). */
+  executorTrack?: boolean;
+}) {
   const [open, setOpen] = useState<boolean>(true);
   const weakKm = TRAINING_WEAK_HOLD_WIDTH_M / 1000;
   const rows: Array<{ key: string; swatch: Swatch; text: string; shown: boolean }> = [
@@ -65,6 +70,8 @@ export default function TrainingLegend({ layers, vocabulary }: { layers: Trainin
       text: "red: the labeller's check failed (a turn, rows outside a funnel or a tube)" },
     { key: "selected", swatch: { kind: "line", colour: TRAINING_WORD_COLOR }, shown: true,
       text: "yellow: the selected word — its envelope's edge and the rows it is in force; the rest fades" },
+    { key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: executorTrack,
+      text: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0" },
   ];
 
   return (

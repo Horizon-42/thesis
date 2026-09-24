@@ -162,13 +162,16 @@ export function isExperimentPredictionOutput(
 }
 
 /**
- * MUST match `4dTrajectory/ts_transformer/config.py::HORIZON_MODES` — the same validator, the
+ * MUST match `4dTrajectory/ts_transformer/config.py::HORIZON_MODES`, then the executor replay's own
+ * horizon (`experiments/executor_replay.py::HORIZON`: its records fly the whole sentence, and the
+ * comparison builder stamps a category's `horizonMode` from its records) — the same validator, the
  * same `.every`, the same empty picker. Pinned by `ts_transformer/tests/test_frontend_mirrors.py`.
  */
 export const EXPERIMENT_HORIZON_MODES = [
   "normalized",
   "full",
   "window",
+  "sentence",
 ] as const;
 export type ExperimentHorizonMode = typeof EXPERIMENT_HORIZON_MODES[number];
 

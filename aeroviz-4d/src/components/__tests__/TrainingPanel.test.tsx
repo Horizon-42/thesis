@@ -1,26 +1,32 @@
 /**
  * TrainingPanel: the empty state, the readable set, the sets it refuses BY NAME from the manifest
- * alone (never downloaded), a readable set that fails with its field, and the two empty slots.
+ * alone (never downloaded), a readable set that fails with its field, and the overlays drawn over the
+ * set — the executor's replay and the prior's predictions — or, without them, the switches that say so.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const { appState, setTrainingSelection, setTrainingLayer, fetchMock } = vi.hoisted(() => ({
+const { appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, fetchMock } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
     trainingLayers: { turnPaths: true, turnRegions: false, holdFunnels: false, corridor: true, vertical: true, candidates: true },
   },
   setTrainingSelection: vi.fn(),
   setTrainingLayer: vi.fn(),
+  setTrainingExecutor: vi.fn(),
+  setTrainingPrior: vi.fn(),
   fetchMock: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
-  useApp: () => ({ ...appState, setTrainingSelection, setTrainingLayer }),
+  useApp: () => ({ ...appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior }),
 }));
 
 import TrainingPanel from "../TrainingPanel";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import {
+  EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlays, mockPriorOverlay,
+} from "../../data/__tests__/trainingOverlays.fixture";
 
 function jsonResponse(body: unknown) {
   return { ok: true, headers: { get: () => "application/json" }, text: async () => JSON.stringify(body) };
@@ -39,16 +45,26 @@ function lastPublished(): any {
   return calls.length ? calls[calls.length - 1][0] : null;
 }
 
+function lastOf(mock: ReturnType<typeof vi.fn>): any {
+  const calls = mock.mock.calls;
+  return calls.length ? calls[calls.length - 1][0] : undefined;
+}
+
 const INDEX_PATH = "data/airports/KXXX/training/index.json";
 const SAMPLE_PATH = `data/airports/KXXX/training/${SET_ID}/sample.json`;
 const OLD_PATH = "data/airports/KXXX/training/box_v3/sample.json";
 const FIRST_PATH = "data/airports/KXXX/training/instruction_v1/sample.json";
+const OVERLAYS_PATH = "data/airports/KXXX/training/overlays.json";
+const EXECUTOR_PATH = `data/airports/KXXX/training/${EXECUTOR_ID}/executor.json`;
+const PRIOR_PATH = `data/airports/KXXX/training/${PRIOR_ID}/prior.json`;
 
 describe("TrainingPanel", () => {
   beforeEach(() => {
     appState.activeAirportCode = "KXXX";
     setTrainingSelection.mockClear();
     setTrainingLayer.mockClear();
+    setTrainingExecutor.mockClear();
+    setTrainingPrior.mockClear();
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -113,12 +129,16 @@ describe("TrainingPanel", () => {
       expect(options.find((text) => text.startsWith(SET_ID))).not.toMatch(/refused/);
     });
 
-    it("shows the two slots that are empty on purpose, disabled", async () => {
+    it("with no overlay published, keeps both switches off and names the commands that write them", async () => {
       render(<TrainingPanel />);
       await screen.findByText("TST1");
-      const replay = screen.getByLabelText(/executor replay — not built yet/) as HTMLInputElement;
-      const prior = screen.getByLabelText(/prior-generated sentence — no prior yet/) as HTMLInputElement;
+      const replay = screen.getByLabelText(/the executor's replay/) as HTMLInputElement;
+      const prior = screen.getByLabelText(/the prior's predictions/) as HTMLInputElement;
       expect(replay.disabled && prior.disabled).toBe(true);
+      expect(replay.checked || prior.checked).toBe(false);
+      expect(screen.getByText(/run_ts\.py executor_training_export .*--set instruction_v2 --airport KXXX/)).toBeTruthy();
+      expect(screen.getByText(/run_ts\.py prior_training_export .*--set instruction_v2 --airport KXXX/)).toBeTruthy();
+      await waitFor(() => expect(lastOf(setTrainingExecutor)).toBeNull());
     });
 
     it("switches the envelopes everywhere through the shared layers", async () => {
@@ -135,6 +155,66 @@ describe("TrainingPanel", () => {
     it("states the draw it came from", async () => {
       render(<TrainingPanel />);
       expect(await screen.findByText(/2 flights · a test draw\./)).toBeTruthy();
+    });
+  });
+
+  describe("with the executor's replay and the prior's predictions over the set", () => {
+    beforeEach(() => serve({
+      [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlays(),
+      [EXECUTOR_PATH]: mockExecutorOverlay(), [PRIOR_PATH]: mockPriorOverlay(),
+    }));
+
+    it("publishes both for the selected flight, and follows the selection", async () => {
+      render(<TrainingPanel />);
+      await waitFor(() => expect(lastOf(setTrainingExecutor)?.flight.flightKey).toBe(VECTORED_KEY));
+      await waitFor(() => expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY));
+      fireEvent.click(screen.getByText("TST2"));
+      await waitFor(() => expect(lastOf(setTrainingExecutor)?.flight.flightKey).toBe(STRAIGHT_KEY));
+      expect(lastOf(setTrainingExecutor).flight.flown).toBe(false);
+    });
+
+    it("says under each flight what the executor made of it", async () => {
+      render(<TrainingPanel />);
+      expect(await screen.findByText("landed · 5/6")).toBeTruthy();
+      expect(screen.getByText("not flown")).toBeTruthy();
+    });
+
+    it("folds the replay's gate table and the prior's readout under the switches", async () => {
+      render(<TrainingPanel />);
+      expect(await screen.findByText(/The executor's val replay gate · spec 777777777777/)).toBeTruthy();
+      expect(screen.getByText(/The prior's val readout · 0\.1778 per step against 0\.3444 \/ 0\.3260/)).toBeTruthy();
+      expect(screen.getByText(/own dynamics — gated, each share ≥ 95 %/)).toBeTruthy();
+      expect(screen.getByText(/stand-in dynamics — reported, not gated/)).toBeTruthy();
+    });
+
+    it("stops publishing an overlay switched off", async () => {
+      render(<TrainingPanel />);
+      await waitFor(() => expect(lastOf(setTrainingExecutor)?.flight.flightKey).toBe(VECTORED_KEY));
+      fireEvent.click(screen.getByLabelText(/the executor's replay/));
+      await waitFor(() => expect(lastOf(setTrainingExecutor)).toBeNull());
+      expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY);
+    });
+
+    it("never fetches the last airport's overlay under the next airport's path", async () => {
+      const { rerender } = render(<TrainingPanel />);
+      await waitFor(() => expect(lastOf(setTrainingExecutor)?.flight.flightKey).toBe(VECTORED_KEY));
+      appState.activeAirportCode = "KYYY";
+      rerender(<TrainingPanel />);
+      await waitFor(() => expect(fetchMock.mock.calls.map(([url]) => url)).toContain("data/airports/KYYY/training/index.json"));
+      const fetched = fetchMock.mock.calls.map(([url]) => url as string);
+      expect(fetched.filter((url) => url.startsWith("data/airports/KYYY/training/executor_test"))).toEqual([]);
+      expect(fetched.filter((url) => url.startsWith("data/airports/KYYY/training/prior_test"))).toEqual([]);
+    });
+
+    it("refuses an overlay drawn over the set before it was re-exported, and says why", async () => {
+      const stale: any = mockExecutorOverlay();
+      stale.base.sampleWrittenUtc = "2026-09-01T00:00:00+00:00";
+      serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlays(), [EXECUTOR_PATH]: stale,
+              [PRIOR_PATH]: mockPriorOverlay() });
+      render(<TrainingPanel />);
+      expect(await screen.findByText(`Overlay ${EXECUTOR_ID} cannot be read.`)).toBeTruthy();
+      expect(screen.getByText(/the set was re-exported after the overlay/)).toBeTruthy();
+      await waitFor(() => expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY));
     });
   });
 

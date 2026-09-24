@@ -40,6 +40,10 @@
  * labeller's departure and arrival rows) is marked on the track. Moving the cursor within one word
  * repaints nothing. Selecting a flight frames it once; the cursor never moves the camera.
  *
+ * THE EXECUTOR'S REPLAY (`trainingExecutor`, when the panel publishes it): its flown track at its ellipsoid height in
+ * teal, its ground trace dashed and where it ended, named with its outcome — entities of their own, so switching it
+ * redraws nothing else and never moves the camera.
+ *
  * STATIC ENTITIES, NOT TIME-SAMPLED ONES: a time-dynamic entity would drive the shared
  * `viewer.clock`, which belongs to Observe's playback.
  */
@@ -55,6 +59,7 @@ import {
   TRAINING_CORRIDOR_COLOR,
   TRAINING_DESIGNATED_COLOR,
   TRAINING_ENVELOPE_ALPHA,
+  TRAINING_EXECUTOR_COLOR,
   TRAINING_FUNNEL_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
@@ -75,6 +80,7 @@ import {
   type TrainingTurnRegion,
   type TrainingWordRun,
 } from "../data/trainingSample";
+import type { TrainingExecutorTrack } from "../data/trainingOverlays";
 
 export const TRAINING_ENTITY = {
   track: "training-track",
@@ -104,6 +110,10 @@ export const TRAINING_ENTITY = {
   /** The selected turn's paths, named at their ends; its turn as flown, at its two rows. */
   focusPathLabel: (which: "fast" | "slow") => `training-focus-path-${which}`,
   focusFlown: (which: "starts" | "ends") => `training-focus-flown-${which}`,
+  /** The executor's replay: its flown track, its ground trace, and where it ended. */
+  executorTrack: "training-executor-track",
+  executorGround: "training-executor-ground",
+  executorEnd: "training-executor-end",
 } as const;
 
 const ALPHA = TRAINING_ENVELOPE_ALPHA;
@@ -121,6 +131,11 @@ const FRAME_MARGIN = 1.5;
 export function trainingTrackPositions(flight: TrainingFlight): number[] {
   const { lon, lat, altitudeHaeM } = flight.signals;
   return lon.flatMap((value, row) => [value, lat[row], altitudeHaeM[row]]);
+}
+
+/** The executor's flown track as Cesium's [lon, lat, height, …] — at its ellipsoid height, as the exporter wrote it. */
+export function executorTrackPositions(track: TrainingExecutorTrack): number[] {
+  return track.lon.flatMap((value, index) => [value, track.lat[index], track.altitudeHaeM[index]]);
 }
 
 /** A plan line as Cesium's flat [lon, lat, …]. */
@@ -207,7 +222,71 @@ export function trainingFocusStretch(flight: TrainingFlight, word: TrainingWordR
 const colour = (css: string, alpha = 1) => Cesium.Color.fromCssColorString(css).withAlpha(alpha);
 
 export default function useTrainingTrackLayer(): void {
-  const { viewer, mode, trainingSelection, trainingLayers, trainingCursorS, trainingColumn } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers, trainingCursorS, trainingColumn, trainingExecutor } = useApp();
+
+  // THE EXECUTOR'S REPLAY of the selected flight, drawn and removed on its own.
+  const executorFlight = mode === "training" && trainingExecutor?.flight.flightKey === trainingSelection?.flight.flightKey
+    ? trainingExecutor?.flight ?? null : null;
+  useEffect(() => {
+    if (!isCesiumViewerUsable(viewer) || executorFlight === null || executorFlight.track === null) return;
+    const track = executorFlight.track;
+    const added: string[] = [];
+    const add = (options: Cesium.Entity.ConstructorOptions & { id: string }) => {
+      added.push(options.id);
+      viewer.entities.add(options);
+    };
+    if (track.lon.length >= 2) {
+      add({
+        id: TRAINING_ENTITY.executorGround,
+        name: "The executor's ground trace",
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArray(track.lon.flatMap((lon, index) => [lon, track.lat[index]])),
+          clampToGround: true,
+          width: 2,
+          material: new Cesium.PolylineDashMaterialProperty({ color: colour(TRAINING_EXECUTOR_COLOR, 0.6) }),
+        },
+      });
+      add({
+        id: TRAINING_ENTITY.executorTrack,
+        name: "The executor's flown track",
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArrayHeights(executorTrackPositions(track)),
+          width: 3,
+          material: colour(TRAINING_EXECUTOR_COLOR),
+          depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: colour(TRAINING_EXECUTOR_COLOR, 0.55) }),
+        },
+      });
+    }
+    const end = track.lon.length - 1;
+    add({
+      id: TRAINING_ENTITY.executorEnd,
+      name: "Where the executor's flight ended",
+      position: Cesium.Cartesian3.fromDegrees(track.lon[end], track.lat[end], track.altitudeHaeM[end]),
+      point: {
+        pixelSize: 10,
+        color: colour(TRAINING_EXECUTOR_COLOR),
+        outlineColor: Cesium.Color.BLACK.withAlpha(0.6),
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: `executor: ${(executorFlight.outcome ?? "").replace(/_/g, " ")}`,
+        font: "600 12px sans-serif",
+        fillColor: colour(TRAINING_EXECUTOR_COLOR),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, 18),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    viewer.scene.requestRender();
+    return () => {
+      if (!isCesiumViewerUsable(viewer)) return;
+      for (const id of added) viewer.entities.removeById(id);
+      viewer.scene.requestRender();
+    };
+  }, [viewer, executorFlight]);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer)) return;

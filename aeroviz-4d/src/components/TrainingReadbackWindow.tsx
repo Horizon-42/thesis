@@ -31,6 +31,11 @@
  * and computes none. The smoothed signal is the bright line (it is what the labeller read), the
  * raw rows are behind it, and red marks rows the labeller counted outside their envelope.
  *
+ * THE EXECUTOR'S REPLAY, when it is on (`executor`): its flown track in the plan view and, dashed teal, its
+ * heading, altitude and ground speed on its OWN clock and its own distance flown — it flies at its own pace, so
+ * the axes are extended to hold both, and nothing is aligned. The envelopes drawn are the observed flight's; the
+ * executor is judged on each word's envelope re-drawn from where it was told the word (the sentence bar's dots).
+ *
  * It renders through a PORTAL into `document.body` (AV7): `.flight-ops-panel` carries a
  * `backdrop-filter`, which would make a `position: fixed` descendant position against it.
  */
@@ -43,6 +48,7 @@ import {
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_DESIGNATED_COLOR,
+  TRAINING_EXECUTOR_COLOR,
   TRAINING_FUNNEL_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_RAW_COLOR,
@@ -69,6 +75,7 @@ import {
   type TrainingTurnRegion,
   type TrainingVocabulary,
 } from "../data/trainingSample";
+import type { TrainingExecutorFlight } from "../data/trainingOverlays";
 
 const GUTTER = 64;
 const PAD_R = 16;
@@ -125,10 +132,12 @@ export interface TrainingReadbackWindowProps {
   column: TrainingColumn | null;
   onColumnChange: (column: TrainingColumn) => void;
   onClose: () => void;
+  /** The executor's replay of this flight, when its overlay is on; null otherwise. */
+  executor?: TrainingExecutorFlight | null;
 }
 
 export default function TrainingReadbackWindow({
-  flight, vocabulary, candidates, layers, cursorS, onCursorChange, column, onColumnChange, onClose,
+  flight, vocabulary, candidates, layers, cursorS, onCursorChange, column, onColumnChange, onClose, executor = null,
 }: TrainingReadbackWindowProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number>(DEFAULT_W);
@@ -147,6 +156,8 @@ export default function TrainingReadbackWindow({
   const { signals, envelopes } = flight;
   const { tS } = signals;
   const last = flight.rows - 1;
+  // the executor's flown track, drawn on its own clock (and not at all without two points)
+  const flownTrack = executor?.track && executor.track.tS.length >= 2 ? executor.track : null;
   const plotW = width - GUTTER - PAD_R;
   const cursorRow = rowAtTime(tS, cursorS);
   const designated = candidates[flight.runwayIndex];
@@ -168,10 +179,11 @@ export default function TrainingReadbackWindow({
   const focusTurn: TrainingTurnRegion | null = focusHeading !== null ? focusHeading.turn
     : approachFocused && capture !== null ? capture.turn : null;
 
-  // ── time charts share one x ───────────────────────────────────────────────
-  const endS = tS[last];
+  // ── time charts share one x: the observed flight's, or longer when the executor flew longer ──
+  const endS = Math.max(tS[last], flownTrack ? flownTrack.tS[flownTrack.tS.length - 1] : 0);
   const xTime = (seconds: number) => GUTTER + (seconds / endS) * plotW;
-  const timeAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * endS, 0), endS);
+  // The cursor is the observed flight's time: past its end (where only the executor's lines run) it stays at the end.
+  const timeAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * endS, 0), tS[last]);
   /** A row as a time edge; the step after the last row is the last row. */
   const edge = (row: number) => tS[Math.min(row, last)];
 
@@ -183,9 +195,9 @@ export default function TrainingReadbackWindow({
     ...(layers.holdFunnels && focusHeading?.funnel ? [focusHeading.funnel.outline] : []),
   ];
   const frameE = [...signals.eM, designated.thresholdEM, ...envelopes.approach.corridor.axis.eM,
-    ...focusOutlines.flatMap((line) => line.eM)].map(km);
+    ...focusOutlines.flatMap((line) => line.eM), ...(flownTrack?.eM ?? [])].map(km);
   const frameN = [...signals.nM, designated.thresholdNM, ...envelopes.approach.corridor.axis.nM,
-    ...focusOutlines.flatMap((line) => line.nM)].map(km);
+    ...focusOutlines.flatMap((line) => line.nM), ...(flownTrack?.nM ?? [])].map(km);
   const [eLow, eHigh] = extent(frameE);
   const [nLow, nHigh] = extent(frameN);
   const planScale = Math.min((plotW - 12) / (eHigh - eLow), (PLAN_H - 30) / (nHigh - nLow));
@@ -215,16 +227,19 @@ export default function TrainingReadbackWindow({
     ...envelopes.heading.flatMap((item) => item.holdBandDeg ?? []),
     ...(layers.turnRegions || layers.turnPaths ? turns.flatMap(({ turn }) => turn.headingRegion.deg) : []),
     ...(layers.corridor ? envelopes.approach.courseBandDeg : []),
+    ...(flownTrack?.trackDeg ?? []),
   ];
   const [hLow, hHigh] = extent(headingValues);
   const altitudeValues = [
     ...signals.smoothed.altitudeM, ...signals.raw.altitudeM, designated.elevationM,
     ...(layers.vertical ? envelopes.altitude.flatMap((tube) => [...tube.lowerM, ...tube.upperM]) : []),
+    ...(flownTrack?.altitudeM ?? []),
   ];
   const [aLow, aHigh] = extent(altitudeValues);
   const speedValues = [
     ...signals.smoothed.groundSpeedMps, ...signals.raw.groundSpeedMps,
     ...(layers.vertical ? envelopes.speed.flatMap((span) => [...(span.bandMps ?? []), ...(span.transitionLowerMps ?? []), ...(span.transitionUpperMps ?? [])]) : []),
+    ...(flownTrack?.groundSpeedMps ?? []),
   ];
   const [sLow, sHigh] = extent(speedValues);
   const plotTop = 18;
@@ -234,7 +249,8 @@ export default function TrainingReadbackWindow({
   const yHeading = yOf(hLow, hHigh);
   const yAltitude = yOf(aLow, aHigh);
   const ySpeed = yOf(sLow, sHigh);
-  const distanceEnd = signals.smoothed.distanceM[last];
+  const distanceEnd = Math.max(signals.smoothed.distanceM[last],
+    flownTrack ? flownTrack.distanceM[flownTrack.distanceM.length - 1] : 0);
   const xDistance = (metres: number) => GUTTER + (metres / distanceEnd) * plotW;
   const distanceAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * distanceEnd, 0), distanceEnd);
 
@@ -272,6 +288,13 @@ export default function TrainingReadbackWindow({
     ? [{ which: "starts", row: focusHeading.check.departureRow }, { which: "ends", row: focusHeading.check.arrivalRow }]
     : [];
   const rowXDistance = (row: number) => xDistance(signals.smoothed.distanceM[row]);
+  /** The executor's flown values against its own time (or distance): one dashed teal line. */
+  const flownTrace = (along: number[], values: number[], xOf: (value: number) => number, y: (value: number) => number, name: string) => (
+    <polyline points={values.map((value, index) => `${xOf(along[index])},${y(value)}`).join(" ")} fill="none"
+      stroke={TRAINING_EXECUTOR_COLOR} strokeWidth={1.4} strokeDasharray="5 3" className="training-readback-executor">
+      <title>{name}</title>
+    </polyline>
+  );
   // The rows the selected word is in force; the stretch runs on to the next word's issue so that it
   // meets it. Only a word issued on the last row has no stretch.
   const focusRows = focus === null
@@ -474,6 +497,21 @@ export default function TrainingReadbackWindow({
 
               <polyline points={signals.eM.map((e, row) => `${px(km(e))},${py(km(signals.nM[row]))}`).join(" ")}
                 fill="none" stroke={TRAINING_TRACE_COLOR} strokeWidth={1.4} className="training-readback-trace" />
+              {flownTrack ? (
+                <g aria-label="the executor's flown track">
+                  <polyline points={flownTrack.eM.map((e, index) => `${px(km(e))},${py(km(flownTrack.nM[index]))}`).join(" ")}
+                    fill="none" stroke={TRAINING_EXECUTOR_COLOR} strokeWidth={1.4} strokeDasharray="5 3"
+                    className="training-readback-executor">
+                    <title>the executor's flown track — the truth sentence flown from row 0</title>
+                  </polyline>
+                  <rect x={px(km(flownTrack.eM[flownTrack.eM.length - 1])) - 3.5} y={py(km(flownTrack.nM[flownTrack.nM.length - 1])) - 3.5}
+                    width={7} height={7} fill={TRAINING_EXECUTOR_COLOR} stroke="black" strokeWidth={0.6} />
+                  <text x={px(km(flownTrack.eM[flownTrack.eM.length - 1])) + 6} y={py(km(flownTrack.nM[flownTrack.nM.length - 1])) + 12}
+                    className="training-readback-path-label" fill={TRAINING_EXECUTOR_COLOR}>
+                    executor: {(executor!.outcome ?? "").replace(/_/g, " ")}
+                  </text>
+                </g>
+              ) : null}
               {focusRows.length >= 2 ? (
                 <polyline points={focusRows.map((row) => `${at(row).x},${at(row).y}`).join(" ")} fill="none"
                   stroke={TRAINING_WORD_COLOR} strokeWidth={3} strokeOpacity={0.9} strokeLinecap="round"
@@ -646,6 +684,7 @@ export default function TrainingReadbackWindow({
             </g>
             {trace(signals.raw.trackDeg, rowX, yHeading, TRAINING_RAW_COLOR, true)}
             {trace(signals.smoothed.trackDeg, rowX, yHeading, TRAINING_TRACE_COLOR, false)}
+            {flownTrack ? flownTrace(flownTrack.tS, flownTrack.trackDeg, xTime, yHeading, "the executor's track, on its own clock") : null}
             {column === "heading" ? focusTrace(signals.smoothed.trackDeg, rowX, yHeading) : null}
             {flown.map(({ which, row }) => (
               <circle key={`heading-flown-${which}`} className="training-readback-flown" cx={rowX(row)}
@@ -722,6 +761,7 @@ export default function TrainingReadbackWindow({
             ))}
             {trace(signals.raw.altitudeM, rowXDistance, yAltitude, TRAINING_RAW_COLOR, true)}
             {trace(signals.smoothed.altitudeM, rowXDistance, yAltitude, TRAINING_TRACE_COLOR, false)}
+            {flownTrack ? flownTrace(flownTrack.distanceM, flownTrack.altitudeM, xDistance, yAltitude, "the executor's altitude, against its own distance flown") : null}
             {column === "altitude" || column === "angle" ? focusTrace(signals.smoothed.altitudeM, rowXDistance, yAltitude) : null}
             {envelopes.altitude.flatMap((item, index) =>
               runsOf(item.inside.map((ok) => !ok)).map(([first, lastOut]) => (
@@ -806,6 +846,7 @@ export default function TrainingReadbackWindow({
             }) : null}
             {trace(signals.raw.groundSpeedMps, rowX, ySpeed, TRAINING_RAW_COLOR, true)}
             {trace(signals.smoothed.groundSpeedMps, rowX, ySpeed, TRAINING_TRACE_COLOR, false)}
+            {flownTrack ? flownTrace(flownTrack.tS, flownTrack.groundSpeedMps, xTime, ySpeed, "the executor's ground speed, on its own clock") : null}
             {column === "speed" ? focusTrace(signals.smoothed.groundSpeedMps, rowX, ySpeed) : null}
             {envelopes.speed.flatMap((span, index) =>
               span.arrivalRow === null || span.bandInside === null ? [] :
@@ -826,15 +867,19 @@ export default function TrainingReadbackWindow({
             {timeAxis}
           </svg>
 
-          {/* ── the two slots that are empty on purpose ───────────────────── */}
+          {/* ── the executor's replay ──────────────────────────────────────── */}
           <div className="training-readback-slots">
-            <div className="training-readback-slot" aria-label="Executor replay slot">
-              <strong>Executor replay</strong> — not built yet. The executor that flies a sentence by dynamics alone
-              is being designed (stage 3); its replay of this sentence will be drawn here beside the track.
-            </div>
-            <div className="training-readback-slot" aria-label="Prior sentence slot">
-              <strong>Prior-generated sentence</strong> — no prior is trained on this vocabulary yet (stage 5); what a
-              prior says for this flight will be drawn here against the labelled sentence.
+            <div className="training-readback-slot" aria-label="Executor replay">
+              <strong style={{ color: TRAINING_EXECUTOR_COLOR }}>Executor replay</strong> —{" "}
+              {executor === null
+                ? "off, or not published for this set (the panel's switch says which)."
+                : !executor.flown
+                  ? `not flown: ${executor.group}.`
+                  : `${(executor.outcome ?? "").replace(/_/g, " ")} on ${executor.group}; dashed teal: its flown track, ` +
+                    "and its heading, altitude and ground speed on its own clock and its own distance flown. It flies at its " +
+                    "own pace from row 0, each word said where the observed aircraft heard it, so its lines do not line up " +
+                    "with the observed ones in time; its words are judged on envelopes re-drawn from where IT was told each " +
+                    "word — the sentence bar's dots — not on the observed flight's drawn here."}
             </div>
           </div>
         </div>

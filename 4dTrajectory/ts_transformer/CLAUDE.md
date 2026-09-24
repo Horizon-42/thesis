@@ -321,6 +321,10 @@ geometry from `instructions/display.py`, added to each airport's `training/index
 **The executor** (2026-09-24): `executor_spec` (data on train, methods A and B, a clean tree, written once) →
 `executor_sensitivity` (train, one parameter at a time; a negative delay is a probe) → `executor_replay` (the §11 gate
 readout through evaluation, paired with the observed verdicts; val = stage 4, only on the user's go-ahead) (R12).
+**Publishing the executor and the prior** (2026-09-24): `executor_training_export` / `prior_training_export` write
+OVERLAYS beside a Training set (`training/overlays.json`; every re-flown flight must reproduce its formal replay row, the
+prior's path reproduces its val readout; the executor export runs from a worktree — the spec's hash counts `geokit` from
+the main checkout), and the root publisher's `--executor-replay` files the replay's records under Experiments (R13).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

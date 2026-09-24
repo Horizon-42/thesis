@@ -42,6 +42,17 @@ training / validation flights. ``--category-group``
 files such a variant under the campaign that WROTE the records (its registry entry gives the heading
 and question) rather than the one that trained the checkpoint.
 
+**The executor's replay (``--executor-replay DIR --executor-campaign CAMPAIGN``).** The two-tier executor's formal
+replay (`run_ts.py executor_replay`, ``<spec dir>/replay-<split>/``) writes control-path prediction records of the
+same contract, graded by the same evaluation — but they were flown by an executor spec, not predicted by a
+checkpoint: there is no `TSConfig` to name them by, no arrival-manifest digest or training split to check. So they
+do not go through the checkpoint plan: `ExecutorReplay` / `ExecutorPublicationPlan` publish each airport's records
+as one Experiments category, named from the spec (its sha, its parameters as rows, the run = the spec directory's
+name), under CAMPAIGN's registry entry (blocked without one, like any experiment), with the replay's own evaluation
+report (never re-run) and the CZML split every `EXECUTOR_GROUPS_PER_CZML` flights; a category that exists is
+refused, never overwritten. Its manifest has its own schema (`EXECUTOR_PUBLICATION_SCHEMA`), which the checkpoint
+refresh and the publication index pass by.
+
 Outer-test is not a valid option here.  This command is for development train/validation
 inspection (and a day partition's held-out days) only.
 """
@@ -55,6 +66,7 @@ import re
 import subprocess
 import sys
 import tarfile
+from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from functools import cached_property, lru_cache
@@ -1493,6 +1505,273 @@ def run_publication(
         return "failed"
 
 
+# ── the executor's replay (two-tier stage 4) ────────────────────────────────────
+
+#: MIRRORS of the replay runner's and the executor spec's names (`experiments.executor_replay.REPLAY_SCHEMA`,
+#: `PREDICTOR`, `HORIZON`; `autopilot.spec.EXECUTOR_SPEC_SCHEMA`) — not imported: those modules pull in torch and
+#: the executor, and this orchestrator stays importable without them. `test_the_executor_names_mirror_the_runners`
+#: pins them.
+EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v1"
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v2"
+EXECUTOR_PREDICTOR = "executor"
+EXECUTOR_HORIZON = "sentence"
+#: The executor's own publication record: not a checkpoint's (`PUBLICATION_SCHEMA`), so the checkpoint refresh and
+#: the publication index — which read a run's `TSConfig` — pass it by.
+EXECUTOR_PUBLICATION_SCHEMA = "ts-executor-publication-v1"
+#: A replay publishes every flight of its split, thousands per airport: its CZML is split into files of at most this
+#: many flight groups (`build_scenario_comparison_czml.py --max-groups-per-czml`, AV17; transparent to the viewer).
+EXECUTOR_GROUPS_PER_CZML = 500
+
+
+@dataclass(frozen=True)
+class ExecutorReplay:
+    """A formal val (or train) replay of the two-tier executor: ``<spec dir>/replay-<split>/`` holding
+    ``replay.json`` and one record directory per airport, beside the spec (``spec.json``) it flew.
+
+    Not a checkpoint. Its records are control-path prediction records (the same contract, graded by the same
+    evaluation), but what produced them is an executor spec — a sha and a table of parameters — not a `TSConfig`,
+    so it is named from the spec, not by the checkpoint grammar (`run_naming`). The run is the spec directory's
+    name; the experiment id is ``executor/<run>``.
+    """
+
+    directory: Path
+    spec: dict[str, Any]
+    document: dict[str, Any]
+
+    @classmethod
+    def open(cls, directory: Path) -> "ExecutorReplay":
+        """Refused unless the replay is of this spec and both files are the schemas this publisher knows. A relative
+        ``directory`` is the repository's, kept LEXICAL (not resolved): in a worktree `4dTrajectory/outputs` is a
+        symlink into the main tree, and a resolved path would leave the manifests' repository-relative spelling."""
+        directory = directory if directory.is_absolute() else REPO_ROOT / directory
+        spec = _load_object(directory.parent / "spec.json")
+        document = _load_object(directory / "replay.json")
+        if spec["schema"] != EXECUTOR_SPEC_SCHEMA:
+            raise ValueError(f"{directory.parent / 'spec.json'} is a {spec['schema']} file, not {EXECUTOR_SPEC_SCHEMA}")
+        if document["schema"] != EXECUTOR_REPLAY_SCHEMA:
+            raise ValueError(f"{directory / 'replay.json'} is a {document['schema']} file, not {EXECUTOR_REPLAY_SCHEMA}")
+        if document["executor_spec_sha256"] != spec["sha256"]:
+            raise ValueError(f"{directory} replays spec {document['executor_spec_sha256'][:12]}, not the "
+                             f"{spec['sha256'][:12]} beside it")
+        if document["split"] not in DEVELOPMENT_SPLITS:
+            raise ValueError(f"{directory} is the {document['split']!r} replay; only {DEVELOPMENT_SPLITS} are published")
+        return cls(directory, spec, document)
+
+    @property
+    def run_id(self) -> str:
+        return self.directory.parent.name
+
+    @property
+    def experiment_id(self) -> str:
+        return f"executor/{self.run_id}"
+
+    @property
+    def split(self) -> str:
+        return self.document["split"]
+
+    @property
+    def token(self) -> str:
+        return self.spec["sha256"][:12]
+
+    @property
+    def airports(self) -> list[str]:
+        return sorted(path.name for path in (self.directory / "records").iterdir() if path.is_dir())
+
+    def parameter_rows(self, airport: str) -> list[dict[str, str]]:
+        """The spec and the replay as the picker's named rows: the spec's sha and every parameter as written in
+        ``spec.json`` (a nested one dotted), then what this airport's category holds."""
+        rows = [{"section": "Executor", "name": "spec", "value": self.token},
+                {"section": "Executor", "name": "vocabulary spec", "value": self.document["vocabulary_spec_sha256"][:12]}]
+
+        def flatten(values: dict[str, Any], prefix: str = "") -> None:
+            for name, value in values.items():
+                if isinstance(value, dict):
+                    flatten(value, f"{prefix}{name}.")
+                else:
+                    rows.append({"section": "Executor parameters", "name": f"{prefix}{name}", "value": str(value)})
+
+        flatten(self.spec["params"])
+        rows += [{"section": "Replay", "name": "split", "value": self.split},
+                 {"section": "Replay", "name": "gate share", "value": str(self.document["gate_share"])}]
+        rows += [{"section": "Replay", "name": f"flights on {group}", "value": str(count)}
+                 for group, count in sorted(self.recorded(airport).items())]
+        unrecorded = sum(not row["recorded"] for row in self.document["flights"] if row["airport"] == airport)
+        if unrecorded:
+            rows.append({"section": "Replay", "name": "flown, no record (failed in the first cycle)",
+                         "value": str(unrecorded)})
+        return rows
+
+    def recorded(self, airport: str) -> Counter:
+        """The airport's flights with a record — the ones its category holds — by dynamics group. A flight whose
+        dynamics failed in the first cycle left no state to record (`executor_replay.fly_airport`)."""
+        return Counter(row["group"] for row in self.document["flights"] if row["airport"] == airport and row["recorded"])
+
+
+@dataclass(frozen=True)
+class ExecutorPublicationPlan:
+    """One airport's records of an executor replay, as one Experiments category."""
+
+    replay: ExecutorReplay
+    airport: str
+    campaign: str
+    raw_output_root: Path = RAW_OUTPUT_ROOT
+    frontend_airports_root: Path = FRONTEND_AIRPORTS_ROOT
+
+    @property
+    def records_dir(self) -> Path:
+        return self.replay.directory / "records" / self.airport
+
+    @property
+    def summary(self) -> Path:
+        return self.records_dir / "summary.json"
+
+    @property
+    def evaluation_report(self) -> Path:
+        """The replay runner's own grading of these records — read, never re-run."""
+        return self.records_dir / "evaluation_report.json"
+
+    @property
+    def category(self) -> str:
+        return f"experiment_executor_{_safe_stem(self.replay.run_id, limit=42).lower()}_{self.replay.token}_{self.replay.split}"
+
+    @property
+    def comparison_dir(self) -> Path:
+        return self.frontend_airports_root / self.airport / "comparison" / self.category
+
+    @property
+    def output_dir(self) -> Path:
+        return self.raw_output_root / "executor" / self.replay.run_id / self.airport / self.replay.split
+
+    @property
+    def publication_manifest(self) -> Path:
+        return self.output_dir / PUBLICATION_MANIFEST
+
+    @property
+    def checkpoint(self) -> str:
+        return _path_for_manifest(self.replay.directory.parent / "spec.json")
+
+    @cached_property
+    def display_name(self) -> str:
+        flights = " + ".join(f"{count} on {group}" for group, count in sorted(self.replay.recorded(self.airport).items()))
+        return (f"executor · spec {self.replay.token} · word clock {self.replay.spec['params']['word_clock']} · the "
+                f"truth sentence flown from row 0 ({flights}), {self.replay.run_id}")
+
+    @property
+    def label(self) -> str:
+        return category_display_label(self.replay.split, self.display_name, kind="Experiment")
+
+    @property
+    def experiment_metadata(self) -> dict[str, Any]:
+        """The category's ``experiment`` block. Raises ``MissingIntentError``: the replay is published only with
+        its campaign's question and its run's line in the registry."""
+        return {
+            "id": self.replay.experiment_id,
+            "group": self.campaign,
+            "checkpoint": self.checkpoint,
+            "label": self.display_name,
+            "runName": self.replay.run_id,
+            "variantLabel": None,
+            "parameters": self.replay.parameter_rows(self.airport),
+            "intent": experiment_intent(group=self.campaign, training_campaign=self.campaign,
+                                        run_id=self.replay.run_id, variant=None),
+            "model": EXECUTOR_PREDICTOR,
+            "predictionOutput": "control",
+            "horizonMode": EXECUTOR_HORIZON,
+            "seed": None,
+        }
+
+    def preflight_error(self) -> str | None:
+        """Refuse anything but this replay's own records of this airport, graded, onto a category nobody holds."""
+        if not self.summary.is_file() or not self.evaluation_report.is_file():
+            return f"{self.records_dir} holds no summary.json and evaluation_report.json"
+        summary = _load_object(self.summary)
+        config = summary["config"]
+        if (config["model"], config["horizon_mode"]) != (EXECUTOR_PREDICTOR, EXECUTOR_HORIZON):
+            return f"{self.summary} is not an executor replay's summary (model {config['model']!r})"
+        if summary["executor_spec_sha256"] != self.replay.spec["sha256"] or summary["split"] != self.replay.split:
+            return (f"{self.summary} holds the {summary['split']!r} records of spec "
+                    f"{summary['executor_spec_sha256'][:12]}, not this replay's")
+        airports = {str(row["arr_airport"]).upper() for row in summary["results"]}
+        if airports != {self.airport}:
+            return f"{self.summary} holds flights of {sorted(airports)}, not only {self.airport}"
+        recorded = sum(self.replay.recorded(self.airport).values())
+        if len(summary["results"]) != recorded:
+            return (f"{self.summary} holds {len(summary['results'])} records, replay.json {recorded} recorded flights "
+                    f"at {self.airport}: not one replay")
+        listed = _listed_category_keys(self.frontend_airports_root, self.airport)
+        if self.category in listed or self.comparison_dir.exists() or self.publication_manifest.exists():
+            return (f"category {self.category!r} is already published at {self.airport}; a publication is never "
+                    "overwritten")
+        return None
+
+    def publish_command(self) -> list[str]:
+        return [
+            sys.executable, str(CZML_SCRIPT),
+            "--summary", str(self.summary),
+            "--output-dir", str(self.comparison_dir),
+            "--airport", self.airport,
+            "--category", self.category,
+            "--category-label", self.label,
+            "--dataset-split", self.replay.split,
+            "--evaluation-report", str(self.evaluation_report),
+            "--result-source", "experiment",
+            "--experiment-id", self.replay.experiment_id,
+            "--experiment-group", self.campaign,
+            "--experiment-checkpoint", self.checkpoint,
+            "--max-groups-per-czml", str(EXECUTOR_GROUPS_PER_CZML),
+        ]
+
+    def manifest(self) -> dict[str, Any]:
+        report = _load_object(self.evaluation_report)
+        return {
+            "schemaVersion": EXECUTOR_PUBLICATION_SCHEMA,
+            "updatedAtUtc": _utc_now(),
+            "status": "completed",
+            "experimentId": self.replay.experiment_id,
+            "campaign": self.campaign,
+            "runId": self.replay.run_id,
+            "specSha256": self.replay.spec["sha256"],
+            "spec": self.checkpoint,
+            "replayDir": _path_for_manifest(self.replay.directory),
+            "recordsDir": _path_for_manifest(self.records_dir),
+            "airport": self.airport,
+            "split": self.replay.split,
+            "resultSource": "experiment",
+            "category": self.category,
+            "frontendDir": _path_for_manifest(self.comparison_dir),
+            "groupsPerCzml": EXECUTOR_GROUPS_PER_CZML,
+            "accuracy": _load_object(self.summary)["accuracy"],
+            "evaluation": {key: value for key, value in report.items() if key not in {"trajectories", "reference"}},
+        }
+
+
+def run_executor_publication(plan: ExecutorPublicationPlan, *, dry_run: bool) -> str:
+    """Intent, preflight, the comparison CZML, the category's metadata, the manifest — in that order, and nothing
+    written before the first two pass."""
+    context = f"{plan.replay.experiment_id} · {plan.airport} · {plan.replay.split}"
+    try:
+        metadata = plan.experiment_metadata
+    except MissingIntentError as error:
+        print(f"  ⚠ blocked {context}: {error}")
+        return "blocked"
+    error = plan.preflight_error()
+    if error:
+        print(f"  ⚠ blocked {context}: {error}")
+        return "blocked"
+    command = plan.publish_command()
+    if dry_run:
+        print(f"\n━━ {context}\n  [publish-czml] {' '.join(command)}")
+        return "planned"
+    print(f"\n=== [{context} · publish-czml] ===\n{' '.join(command)}", flush=True)
+    subprocess.run(command, cwd=REPO_ROOT, check=True)
+    if not _apply_category_refresh(plan.comparison_dir.parent / "categories.json", plan.category, plan.label,
+                                   "experiment", metadata):
+        raise RuntimeError(f"the CZML builder did not register {plan.category} at {plan.airport}")
+    _write_json_atomic(plan.publication_manifest, plan.manifest())
+    print(f"  ✓ published {context} → {plan.category}")
+    return "completed"
+
+
 def _experiment_root(index_path: Path) -> Path:
     document = _load_object(index_path)
     return Path(document.get("root") or index_path.parent).resolve()
@@ -1607,7 +1886,67 @@ def main(argv: list[str] | None = None) -> int:
             "--output-root from its stored manifest; no prediction, no CZML, no archive"
         ),
     )
+    parser.add_argument(
+        "--executor-replay",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help=(
+            "publish an executor replay instead of checkpoints: DIR is `<executor spec dir>/replay-<split>` "
+            "(`run_ts.py executor_replay --out`), one Experiments category per airport of its records, under "
+            "--executor-campaign's registry entry; its own grading is published, never re-run. Takes --airport, "
+            "--output-root, --frontend-airports-root and --dry-run; refuses every checkpoint flag"
+        ),
+    )
+    parser.add_argument(
+        "--executor-campaign",
+        default=None,
+        metavar="CAMPAIGN",
+        help="the intent registry's campaign an --executor-replay is filed under (its run: the spec directory's name)",
+    )
     args = parser.parse_args(argv)
+
+    if args.executor_replay is not None:
+        # every flag of the checkpoint mode, refused rather than silently ignored
+        checkpoint_flags = {
+            "--checkpoint": args.checkpoint, "--campaign": args.campaign,
+            "--reuse-prediction-dir": args.reuse_prediction_dir, "--category-variant": args.category_variant,
+            "--category-group": args.category_group, "--split": args.split,
+            "--refresh-labels-only": args.refresh_labels_only, "--max-checkpoints": args.max_checkpoints,
+            "--force": args.force, "--fail-fast": args.fail_fast,
+            "--result-source": args.result_source != "experiment", "--record-retention": args.record_retention != "archive",
+            "--device": args.device != "auto", "--experiment-index": args.experiment_index != EXPERIMENT_INDEX,
+            "--harvest-root": args.harvest_root != HARVEST_ROOT,
+        }
+        given = [flag for flag, value in checkpoint_flags.items() if value]
+        if given:
+            parser.error(f"--executor-replay publishes an executor replay, not checkpoints: drop {given}")
+        if not args.executor_campaign:
+            parser.error("--executor-replay needs --executor-campaign: the registry entry its categories are filed under")
+        try:
+            replay = ExecutorReplay.open(args.executor_replay)
+        except (OSError, ValueError, KeyError) as error:
+            parser.error(f"--executor-replay {args.executor_replay}: {error}")
+        airports = replay.airports
+        if args.airport:
+            requested = {value.strip().upper() for value in args.airport}
+            unknown = requested - set(airports)
+            if unknown:
+                parser.error(f"--executor-replay {replay.directory} holds no records of {sorted(unknown)}")
+            airports = [airport for airport in airports if airport in requested]
+        counts: dict[str, int] = {}
+        for airport in airports:
+            # the roots LEXICAL (absolute, not resolved), so the manifest's paths stay repository-relative from a
+            # worktree whose data trees are symlinks into the main checkout (`ExecutorReplay.open`)
+            plan = ExecutorPublicationPlan(
+                replay, airport, args.executor_campaign,
+                raw_output_root=args.output_root.absolute(),
+                frontend_airports_root=args.frontend_airports_root.absolute(),
+            )
+            status = run_executor_publication(plan, dry_run=args.dry_run)
+            counts[status] = counts.get(status, 0) + 1
+        print(f"\n✓ executor publication finished: {counts}")
+        return 1 if counts.get("blocked", 0) else 0
 
     if args.refresh_labels_only:
         try:

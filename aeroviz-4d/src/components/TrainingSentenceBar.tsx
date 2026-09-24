@@ -23,17 +23,32 @@
  * (`trainingColumn`) and puts the cursor at its issue; every view then highlights that column's word
  * in force at the cursor, and only it. The other columns' words at the same step are not "the same
  * moment" — their runs begin and end elsewhere. Clicking the selected band again clears it.
+ *
+ * THE OVERLAYS, when the panel publishes them: the EXECUTOR's verdict on each word as a dot at the band's
+ * left (teal inside its envelope, red outside, hollow grey not judged, not reached or superseded; none for
+ * a word with no check of its own) and its outcome in the header; the PRIOR's likelihood of this flight in
+ * the header, with the button that opens its window (`TrainingPriorWindow`).
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
+import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import {
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
+  TRAINING_EXECUTOR_COLOR,
+  TRAINING_OUTSIDE_COLOR,
+  TRAINING_RAW_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
+import {
+  executorWordAt,
+  executorWordCounts,
+  type TrainingExecutorFlight,
+  type TrainingExecutorWord,
+} from "../data/trainingOverlays";
 import {
   formatSeconds,
   rowAtTime,
@@ -99,15 +114,52 @@ export function spacedLabels(xs: number[], minGap: number, keepLast = false): bo
   return keep;
 }
 
+/** A word's executor verdict as the band's tooltip reads it. */
+export function executorVerdictText(word: TrainingExecutorWord): string {
+  const checks = word.checks.map((check) =>
+    `${check.name} ${check.ok ? "✓" : "✗"}${check.rows === null ? "" : ` (${check.inside}/${check.rows})`}`).join(", ");
+  const told = word.flownRow === null ? "" : `, told at its step ${word.flownRow}`;
+  return `the executor: ${word.status}${told}${checks ? ` — ${checks}` : ""}${word.reason ? ` — ${word.reason}` : ""}`;
+}
+
+/** The header's line on the executor's replay of this flight. */
+export function executorSummary(flight: TrainingExecutorFlight): string {
+  if (!flight.flown) return `the executor: not flown — ${flight.group}`;
+  const counts = executorWordCounts(flight);
+  const outcome = (flight.outcome ?? "").replace(/_/g, " ");
+  const crossing = flight.crossing === null ? ""
+    : ` ${Math.abs(flight.crossing.crossM).toFixed(1)} m ${flight.crossing.crossM >= 0 ? "right" : "left"} of the centreline, ` +
+      `${flight.crossing.heightM.toFixed(1)} m above the threshold at ${formatSeconds(flight.crossing.atS)} s`;
+  const refused = flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`;
+  // the judge's own tally, as the replay gate counts it (the word left to intercept the final on its own counts twice)
+  const { wordsInside, wordsJudged } = flight.counts!;
+  return `the executor (${flight.group}): ${outcome}${crossing} · ${wordsInside}/${wordsJudged} words ` +
+    `inside their envelopes${counts.notJudged ? `, ${counts.notJudged} not judged` : ""}` +
+    `${counts.notReached ? `, ${counts.notReached} not reached` : ""}${counts.superseded ? `, ${counts.superseded} superseded` : ""}` +
+    ` · evaluation ${flight.evaluation?.replay} (observed ${flight.evaluation?.observed})${refused}`;
+}
+
+/** The dot a word's executor verdict draws: filled for a verdict, hollow for none; none for a word with no check. */
+function verdictMark(status: TrainingExecutorWord["status"]): { fill: string; stroke: string } | null {
+  switch (status) {
+    case "inside": return { fill: TRAINING_EXECUTOR_COLOR, stroke: TRAINING_EXECUTOR_COLOR };
+    case "outside": return { fill: TRAINING_OUTSIDE_COLOR, stroke: TRAINING_OUTSIDE_COLOR };
+    case "no check": return null;
+    default: return { fill: "none", stroke: TRAINING_RAW_COLOR };
+  }
+}
+
 export default function TrainingSentenceBar() {
   const {
     trainingSelection, trainingLayers,
     trainingCursorS: cursorS, setTrainingCursorS: setCursorS,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
+    trainingExecutor, trainingPrior,
   } = useApp();
   const frameRef = useRef<HTMLDivElement>(null);
   const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
   const [readbackOpen, setReadbackOpen] = useState<boolean>(false);
+  const [priorOpen, setPriorOpen] = useState<boolean>(false);
   const [notesOpen, setNotesOpen] = useState<boolean>(false);
   const flightKey = trainingSelection?.flight.flightKey ?? null;
 
@@ -149,10 +201,13 @@ export default function TrainingSentenceBar() {
   const tick = (ok: boolean) => (ok ? "✓" : "✗");
   const capture = verdicts.captureTurn;
   const landing = flight.envelopes.approach.landing;
+  // the overlays are published for the selected flight; a stale one (a flight switch in flight) is not drawn
+  const executor = trainingExecutor?.flight.flightKey === flight.flightKey ? trainingExecutor.flight : null;
+  const prior = trainingPrior?.flight.flightKey === flight.flightKey ? trainingPrior : null;
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar">
-      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} />
+      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.track != null} />
       <header className="training-sentence-head">
         <strong>{flight.callsign}</strong>
         <span>{flight.typecode}</span>
@@ -177,6 +232,19 @@ export default function TrainingSentenceBar() {
           capture turn {capture === null ? "none (on the final at entry)" : `${tick(capture.progressOk)} ${tick(capture.rateOk)}`} ·
           altitude {verdicts.altitudeContained}/{verdicts.altitudeWords} · speed {verdicts.speedContained}/{verdicts.speedWords}
         </span>
+        {executor ? (
+          <span className="training-sentence-executor" style={{ color: TRAINING_EXECUTOR_COLOR }}
+            title="The executor flew this sentence from row 0, each word said where the observed aircraft heard it; its verdicts are the judge's, each word's envelope re-drawn from where the executor was told it.">
+            {executorSummary(executor)}
+          </span>
+        ) : null}
+        {prior ? (
+          <span className="training-sentence-prior"
+            title="The negative log-likelihood of this flight's truth sentence under the prior (teacher-forced), per 2 s step.">
+            the prior: {prior.flight.nllPerStep.toFixed(3)} nats per step here ({prior.overlay.readout.split}{" "}
+            {prior.overlay.readout.model.nllPerStep.toFixed(4)})
+          </span>
+        ) : null}
         <span className="training-sentence-cursor-readout">
           t = {formatSeconds(cursorS)} s · step {cursorRow}
         </span>
@@ -187,6 +255,11 @@ export default function TrainingSentenceBar() {
         >
           {readbackOpen ? "Close read-back check" : "Read-back check"}
         </button>
+        {prior ? (
+          <button type="button" className="training-sentence-readback-button" onClick={() => setPriorOpen((open) => !open)}>
+            {priorOpen ? "Close prior predictions" : "Prior predictions"}
+          </button>
+        ) : null}
       </header>
 
       <div className="training-sentence-frame" ref={frameRef}>
@@ -252,9 +325,12 @@ export default function TrainingSentenceBar() {
                   const split = column === "heading"
                     ? flight.envelopes.heading.find((item) => item.row === run.row)?.split ?? null
                     : null;
+                  const verdict = executor === null ? null : executorWordAt(executor, run.row, column);
+                  const mark = verdict === null ? null : verdictMark(verdict.status);
                   const title =
                     `${column} ${label} — ${trainingKindLabel(run.event.kind, split)}, issued at step ${run.row} ` +
-                    `(${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s`;
+                    `(${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s` +
+                    (verdict === null ? "" : `\n${executorVerdictText(verdict)}`);
                   const selected = selectedColumn && run.row <= cursorRow && cursorRow < run.endRow;
                   const choose = () => {
                     if (selected) {
@@ -292,6 +368,11 @@ export default function TrainingSentenceBar() {
                       />
                       {/* the issue itself */}
                       <rect x={x} y={y + 2} width={2} height={ROW_H - 4} fill={colour} className="training-sentence-issue" />
+                      {/* the executor's verdict on this word */}
+                      {mark !== null ? (
+                        <circle cx={x + 7} cy={y + ROW_H / 2} r={3.2} fill={mark.fill} stroke={mark.stroke} strokeWidth={1.2}
+                          className={`training-sentence-verdict training-sentence-verdict-${verdict!.status.replace(/ /g, "-")}`} />
+                      ) : null}
                       {width >= LABEL_MIN_W ? (
                         <text x={x + width / 2} y={y + ROW_H / 2 + 4} textAnchor="middle" className="training-sentence-word" fill={colour}>
                           {label}
@@ -377,8 +458,13 @@ export default function TrainingSentenceBar() {
               {landing.cutAtCrossing ? ", cut before the last passage of the threshold" : ", where the data ends"}.
             </span>
             <span>
-              Executor replay and a prior's sentence are not drawn: the executor is being designed and no
-              prior is trained on this vocabulary.
+              With the executor's replay on, a dot at a band's left edge is the executor's verdict on that word:{" "}
+              <b style={{ color: TRAINING_EXECUTOR_COLOR }}>●</b> flown inside its envelope,{" "}
+              <b style={{ color: TRAINING_OUTSIDE_COLOR }}>●</b> outside, ○ not judged, not reached or superseded (the
+              tooltip says which and why); a word with no check of its own (the runway pointer, an angle word, "not
+              cleared", "unspecified") has none. The executor is judged against each word's envelope re-drawn from where
+              IT was told the word, not the observed flight's. With the prior's predictions on, "Prior predictions" shows
+              what it gives each column at each step.
             </span>
           </>
         ) : null}
@@ -395,6 +481,20 @@ export default function TrainingSentenceBar() {
           column={focusColumn}
           onColumnChange={setFocusColumn}
           onClose={() => setReadbackOpen(false)}
+          executor={executor}
+        />
+      ) : null}
+      {priorOpen && prior ? (
+        <TrainingPriorWindow
+          flight={flight}
+          vocabulary={vocabulary}
+          candidates={candidates}
+          prior={prior}
+          cursorS={cursorS}
+          onCursorChange={setCursorS}
+          column={focusColumn}
+          onColumnChange={setFocusColumn}
+          onClose={() => setPriorOpen(false)}
         />
       ) : null}
     </section>

@@ -11,12 +11,18 @@ import {
   explainCategoryRejection,
   indexCzmlFiles,
   checkTrainingIndex,
+  checkTrainingOverlay,
+  checkTrainingOverlays,
   checkTrainingSample,
   checkTrainingSetAgrees,
   checkTrainingSetRefusal,
 } from "../checkPublication";
 import { parseTrainingIndex, parseTrainingSample } from "../../data/trainingSample";
+import { parseTrainingOverlays } from "../../data/trainingOverlays";
 import { SET_ID, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import {
+  MOCK_SAMPLE_SHA, mockExecutorOverlay, mockOverlays, mockPriorOverlay,
+} from "../../data/__tests__/trainingOverlays.fixture";
 
 const observed: ComparisonCategory = {
   key: "observed",
@@ -222,5 +228,48 @@ describe("the Training export's checks", () => {
     }
     const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } }, sample);
     expect(reseeded[0].message).toContain("cohort.seed");
+  });
+});
+
+describe("the Training overlays' checks", () => {
+  function entries() {
+    const parsed = parseTrainingOverlays(mockOverlays());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    return parsed.value.overlays;
+  }
+
+  function sample() {
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    return parsed.value;
+  }
+
+  it("passes both overlays read against the sample whose sha they recorded", () => {
+    const [executor, prior] = entries();
+    expect(checkTrainingOverlays(mockOverlays())).toEqual([]);
+    expect(checkTrainingOverlay(executor, mockExecutorOverlay(), sample(), MOCK_SAMPLE_SHA)).toEqual([]);
+    expect(checkTrainingOverlay(prior, mockPriorOverlay(), sample(), MOCK_SAMPLE_SHA)).toEqual([]);
+  });
+
+  it("names an overlay the panel would reject", () => {
+    const raw: any = mockOverlays();
+    raw.overlays[1].flights = -1;
+    expect(checkTrainingOverlays(raw)).toEqual([expect.objectContaining({ level: "error", category: "prior_test" })]);
+  });
+
+  it("is an error when the set's sample on disk is not the one the overlay was drawn over", () => {
+    const [executor] = entries();
+    const findings = checkTrainingOverlay(executor, mockExecutorOverlay(), sample(), "6".repeat(64));
+    expect(findings).toEqual([expect.objectContaining({ level: "error", category: "executor_test" })]);
+    expect(findings[0].message).toMatch(/the file on disk is 666666666666/);
+  });
+
+  it("names the field when an overlay does not read, and a flight count the manifest does not match", () => {
+    const [executor, prior] = entries();
+    const broken: any = mockPriorOverlay();
+    broken.flights[0].columns[3].truthP[0] = -0.1;
+    expect(checkTrainingOverlay(prior, broken, sample(), MOCK_SAMPLE_SHA)[0].message).toMatch(/truthP\[0\] is -0.1/);
+    expect(checkTrainingOverlay({ ...executor, flights: 40 }, mockExecutorOverlay(), sample(), MOCK_SAMPLE_SHA)[0].message)
+      .toMatch(/the manifest says 40 flights/);
   });
 });

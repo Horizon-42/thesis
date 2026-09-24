@@ -35,6 +35,12 @@ import {
   type TrainingSample,
   type TrainingSetEntry,
 } from "../data/trainingSample";
+import {
+  parseTrainingExecutorOverlay,
+  parseTrainingOverlays,
+  parseTrainingPriorOverlay,
+  type TrainingOverlayEntry,
+} from "../data/trainingOverlays";
 
 export interface PublicationFinding {
   level: "error" | "warn";
@@ -273,6 +279,42 @@ export function checkTrainingSetAgrees(entry: TrainingSetEntry, sample: Training
     if (listed !== held) {
       findings.push({ level: "error", category: entry.id, message: `${what}: the manifest says ${listed}, sample.json says ${held}` });
     }
+  }
+  return findings;
+}
+
+// ── the Training overlays ────────────────────────────────────────────────────
+
+/** The overlays manifest as the panel reads it: an entry it rejects is shown as a problem, so it is an error here. */
+export function checkTrainingOverlays(manifest: unknown): PublicationFinding[] {
+  const parsed = parseTrainingOverlays(manifest);
+  if (!parsed.ok) return [{ level: "error", message: `training/overlays.json is not a manifest: ${parsed.problem}` }];
+  return parsed.value.rejected.map((item) => ({
+    level: "error" as const, category: item.id, message: `the panel would reject this overlay: ${item.problem}`,
+  }));
+}
+
+/**
+ * One overlay's file through the panel's own reader, against the sample of the set it is drawn over — and that
+ * sample's sha256 on disk against the one the overlay recorded: a set re-exported under its id since would otherwise
+ * be matched by id alone.
+ */
+export function checkTrainingOverlay(
+  entry: TrainingOverlayEntry, payload: unknown, sample: TrainingSample, sampleSha256: string,
+): PublicationFinding[] {
+  const findings: PublicationFinding[] = [];
+  if (entry.baseSampleSha256 !== sampleSha256) {
+    findings.push({
+      level: "error", category: entry.id,
+      message: `drawn over ${entry.base}'s sample ${entry.baseSampleSha256.slice(0, 12)}, the file on disk is ${sampleSha256.slice(0, 12)}`,
+    });
+  }
+  const parsed = entry.kind === "executor-replay"
+    ? parseTrainingExecutorOverlay(payload, sample)
+    : parseTrainingPriorOverlay(payload, sample);
+  if (!parsed.ok) findings.push({ level: "error", category: entry.id, message: `${entry.file}: ${parsed.problem}` });
+  else if (parsed.value.flights.length !== entry.flights) {
+    findings.push({ level: "error", category: entry.id, message: `the manifest says ${entry.flights} flights, ${entry.file} holds ${parsed.value.flights.length}` });
   }
   return findings;
 }

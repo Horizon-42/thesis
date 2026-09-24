@@ -20,12 +20,15 @@
  *
  * Training sets: every set the manifest lists must have its file; a set the panel refuses by
  * name (a superseded vocabulary) is a WARNING, since it is refused on purpose; every readable set
- * is parsed by the panel's own reader and compared with its manifest entry.
+ * is parsed by the panel's own reader and compared with its manifest entry. Every overlay listed in
+ * `training/overlays.json` (the executor's replay, the prior's predictions) is read against the sample
+ * of the set it is drawn over, whose sha256 on disk must be the one it recorded.
  *
  * Exit status 1 on any error-level finding, 2 on a usage error. Runs under vite-node (no
  * build, no browser); `npm run typecheck:scripts` type-checks it.
  */
 
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,13 +42,16 @@ import {
   checkCategoriesManifest,
   checkComparisonIndex,
   checkTrainingIndex,
+  checkTrainingOverlay,
+  checkTrainingOverlays,
   checkTrainingSample,
   checkTrainingSetAgrees,
   checkTrainingSetRefusal,
   indexCzmlFiles,
   type PublicationFinding,
 } from "../src/utils/checkPublication";
-import { parseTrainingIndex, parseTrainingSample } from "../src/data/trainingSample";
+import { parseTrainingIndex, parseTrainingSample, type TrainingSample } from "../src/data/trainingSample";
+import { parseTrainingOverlays } from "../src/data/trainingOverlays";
 
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLISHED_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
@@ -147,6 +153,9 @@ interface AirportReport {
   listed: number;
   trainingSets: number;
   readableTrainingSets: number;
+  /** Overlays listed in `training/overlays.json`, and how many read against their set. */
+  overlays?: number;
+  readableOverlays?: number;
   findings: PublicationFinding[];
 }
 
@@ -178,6 +187,8 @@ async function checkTraining(root: string, airport: string, server: string | nul
 
   const serverRoot = server ? `${server}/data/airports/${airport}/training` : null;
   let readable = 0;
+  // the readable sets' samples, for the overlays drawn over them: the parsed sample and its file's sha256
+  const samples = new Map<string, { sample: TrainingSample; sha256: string }>();
   if (serverRoot) {
     const problem = await served(`${serverRoot}/index.json`, "json");
     if (problem) findings.push({ level: "error", message: `server: training/index.json ${problem}` });
@@ -210,6 +221,7 @@ async function checkTraining(root: string, airport: string, server: string | nul
     if (read.ok) {
       readable += 1;
       findings.push(...checkTrainingSetAgrees(entry, read.value));
+      samples.set(entry.id, { sample: read.value, sha256: createHash("sha256").update(readFileSync(sampleFile)).digest("hex") });
     }
     if (serverRoot) {
       const problem = await served(`${serverRoot}/${entry.file}`, "json");
@@ -222,7 +234,63 @@ async function checkTraining(root: string, airport: string, server: string | nul
       }
     }
   }
-  return { listed: 0, trainingSets: parsed.value.sets.length, readableTrainingSets: readable, findings };
+  const overlays = await checkOverlays(trainingDir, samples, serverRoot, findings);
+  return { listed: 0, trainingSets: parsed.value.sets.length, readableTrainingSets: readable, ...overlays, findings };
+}
+
+/**
+ * The overlays drawn over the readable sets (design §2.6). OPTIONAL like the export: no manifest is a count of zero.
+ * An overlay over a set the panel does not read is a WARNING (the panel never offers it); one that fails to read
+ * against its set is an ERROR, named with the field.
+ */
+async function checkOverlays(
+  trainingDir: string, samples: Map<string, { sample: TrainingSample; sha256: string }>, serverRoot: string | null,
+  findings: PublicationFinding[],
+): Promise<{ overlays: number; readableOverlays: number }> {
+  const manifestFile = path.join(trainingDir, "overlays.json");
+  if (!existsSync(manifestFile)) return { overlays: 0, readableOverlays: 0 };
+  let manifest: unknown;
+  try {
+    manifest = readJson(manifestFile);
+  } catch (error) {
+    findings.push({ level: "error", message: `training/overlays.json is not readable JSON: ${error instanceof Error ? error.message : String(error)}` });
+    return { overlays: 0, readableOverlays: 0 };
+  }
+  findings.push(...checkTrainingOverlays(manifest));
+  const parsed = parseTrainingOverlays(manifest);
+  if (!parsed.ok) return { overlays: 0, readableOverlays: 0 };
+  if (serverRoot) {
+    const problem = await served(`${serverRoot}/overlays.json`, "json");
+    if (problem) findings.push({ level: "error", message: `server: training/overlays.json ${problem}` });
+  }
+  let readable = 0;
+  for (const entry of parsed.value.overlays) {
+    const base = samples.get(entry.base);
+    if (!base) {
+      findings.push({ level: "warn", category: entry.id, message: `drawn over ${entry.base}, a set the panel does not read` });
+      continue;
+    }
+    const file = path.join(trainingDir, entry.file);
+    if (!existsSync(file)) {
+      findings.push({ level: "error", category: entry.id, message: `${entry.file} is listed but missing on disk` });
+      continue;
+    }
+    const found = checkTrainingOverlay(entry, readJson(file), base.sample, base.sha256);
+    findings.push(...found);
+    if (!found.length) readable += 1;
+    if (serverRoot) {
+      const problem = await served(`${serverRoot}/${entry.file}`, "json");
+      if (problem) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file} ${problem}` });
+      else {
+        // the SERVED body through the same reader
+        const body = await (await fetch(`${serverRoot}/${entry.file}`)).json() as unknown;
+        for (const finding of checkTrainingOverlay(entry, body, base.sample, base.sha256)) {
+          findings.push({ ...finding, message: `server: ${finding.message}` });
+        }
+      }
+    }
+  }
+  return { overlays: parsed.value.overlays.length, readableOverlays: readable };
 }
 
 async function checkAirport(root: string, airport: string, server: string | null): Promise<AirportReport> {
@@ -296,7 +364,8 @@ async function main(): Promise<number> {
     const scope = options.server ? " (disk + server)" : " (disk only)";
     const listed = comparison.listed;
     const trained = training.trainingSets
-      ? `, ${training.trainingSets} Training sets (${training.readableTrainingSets} readable)`
+      ? `, ${training.trainingSets} Training sets (${training.readableTrainingSets} readable)` +
+        (training.overlays ? `, ${training.overlays} overlays (${training.readableOverlays} read against their set)` : "")
       : "";
     console.log(`${airport}: ${listed} categories listed${trained}, ${errorCount} errors, ${findings.length - errorCount} warnings — ${verdict}${scope}`);
     for (const finding of findings) {

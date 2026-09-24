@@ -1,14 +1,21 @@
 /**
  * The sentence bar: six rows in the vocabulary's order, step 0 complete, the silent steps counted,
- * the moments that are not words marked, the cursor moved by the artefact's own steps, and ONE
- * column's word selected at a time.
+ * the moments that are not words marked, the cursor moved by the artefact's own steps, ONE
+ * column's word selected at a time, and — when their overlays are on — the executor's verdict on
+ * each word and the way into the prior's predictions.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 const { appState, DEFAULT_LAYERS } = vi.hoisted(() => {
   const DEFAULT_LAYERS = { turnPaths: true, turnRegions: false, holdFunnels: false, corridor: true, vertical: true, candidates: true };
-  return { DEFAULT_LAYERS, appState: { trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS } } };
+  return {
+    DEFAULT_LAYERS,
+    appState: {
+      trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
+      trainingExecutor: null as unknown, trainingPrior: null as unknown,
+    },
+  };
 });
 
 vi.mock("../../context/AppContext", async () => {
@@ -25,6 +32,19 @@ vi.mock("../../context/AppContext", async () => {
 import TrainingSentenceBar, { spacedLabels } from "../TrainingSentenceBar";
 import { parseTrainingSample, TRAINING_COLUMNS } from "../../data/trainingSample";
 import { MOCK_ROWS, mockSample } from "../../data/__tests__/trainingSample.fixture";
+import { mockExecutorOverlay, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay } from "../../data/trainingOverlays";
+
+/** Publish the fixture's overlays for the selected flight, as the panel does. */
+function overlays(position = 0) {
+  const parsed = parseTrainingSample(mockSample());
+  if (!parsed.ok) throw new Error(parsed.problem);
+  const executor = parseTrainingExecutorOverlay(mockExecutorOverlay(), parsed.value);
+  const prior = parseTrainingPriorOverlay(mockPriorOverlay(), parsed.value);
+  if (!executor.ok || !prior.ok) throw new Error("the overlay fixtures do not read");
+  appState.trainingExecutor = { overlay: executor.value, flight: executor.value.flights[position] };
+  appState.trainingPrior = { overlay: prior.value, flight: prior.value.flights[position] };
+}
 
 function select(position = 0) {
   const parsed = parseTrainingSample(mockSample());
@@ -38,6 +58,46 @@ describe("TrainingSentenceBar", () => {
   beforeEach(() => {
     appState.trainingSelection = null;
     appState.trainingLayers = { ...DEFAULT_LAYERS };
+    appState.trainingExecutor = null;
+    appState.trainingPrior = null;
+  });
+
+  it("marks each word with the executor's verdict, and none where a word has no check of its own", () => {
+    select();
+    overlays();
+    render(<TrainingSentenceBar />);
+    expect(document.querySelectorAll(".training-sentence-verdict-inside")).toHaveLength(5);
+    expect(document.querySelectorAll(".training-sentence-verdict-outside")).toHaveLength(1);
+    expect(document.querySelectorAll(".training-sentence-verdict")).toHaveLength(6);
+    expect(screen.getByLabelText(/^approach cleared .* issued at step 10 /).textContent).toMatch(
+      /the executor: outside, told at its step 10 — capture turn monotone ✓, corridor held to the landing ✗ \(30\/35\)/);
+    expect(screen.getByText(/the executor \(own dynamics\): landed 1\.5 m right of the centreline, 20\.8 m above the threshold/)).toBeTruthy();
+    expect(screen.getByText(/5\/6 words inside their envelopes · evaluation pass \(observed pass\)/)).toBeTruthy();
+  });
+
+  it("says why a flight the replay does not fly has no verdicts", () => {
+    select(1);
+    overlays(1);
+    render(<TrainingSentenceBar />);
+    expect(document.querySelectorAll(".training-sentence-verdict")).toHaveLength(0);
+    expect(screen.getByText("the executor: not flown — no identified type")).toBeTruthy();
+  });
+
+  it("opens the prior's predictions from its own button", () => {
+    select();
+    overlays();
+    render(<TrainingSentenceBar />);
+    expect(screen.getByText(/the prior: 0\.250 nats per step here \(val 0\.1778\)/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Prior predictions"));
+    expect(screen.getByRole("dialog", { name: "Prior predictions" })).toBeTruthy();
+  });
+
+  it("ignores an overlay published for another flight", () => {
+    select(0);
+    overlays(1);
+    render(<TrainingSentenceBar />);
+    expect(screen.queryByText(/the executor/)).toBeNull();
+    expect(screen.queryByText("Prior predictions")).toBeNull();
   });
 
   it("draws nothing until a flight is selected", () => {

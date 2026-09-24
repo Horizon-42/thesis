@@ -26,8 +26,9 @@ npm run build:local-terrain          # Airport-local heightmap terrain tiles
 npm run build:local-terrain:visual-assets
 # Does the picker load what was just published? The frontend's own guards over
 # categories.json + every comparison_index.json (names the rejected category and field),
-# the referenced CZML/report files, every readable Training set through the Training reader, and —
-# with --server — what the RUNNING dev server answers (a served Training sample is parsed too).
+# the referenced CZML/report files, every readable Training set through the Training reader (and every overlay
+# drawn over one, against its sample's sha256), and — with --server — what the RUNNING dev server answers (a served
+# Training sample or overlay is parsed too).
 npm run check-publication -- --airport KSMF --server http://localhost:5173   # all airports if no --airport
 npm run check-publication -- --airports-root /tmp/export   # another airports directory (not with --server)
 npm run typecheck:scripts            # tsc over scripts/ (outside tsconfig.json's `src` include)
@@ -128,6 +129,13 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   parallelogram is exactly what the labeller judges (`holdCheck`; dashed = not judged); the two turn paths are
   its edges (the slowest begun LATE), and the heading chart's wedge is the same two turns against time, read
   back from the paths by `display.turn_heading` (`envelope.py` untouched) (AV23).
+- **Training overlays sit BESIDE a set, never in it**: `training/overlays.json` (`aeroviz-training-overlays-v1`) lists the
+  executor's replay (`aeroviz-training-executor-v1`) and the prior's predictions (`aeroviz-training-prior-v1`), each bound to
+  its set by id, the sample's `writtenUtc` and spec (and on disk its sha256) and flight by flight — refused whole on any
+  mismatch; published as `trainingExecutor` / `trainingPrior`, apart from the selection; the executor's words are judged on
+  envelopes re-drawn from where IT heard them, its lines run on its own clock; the prior is teacher-forced (AV24).
+- **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
+  by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 
 ## Comparison CZML colour contract
 

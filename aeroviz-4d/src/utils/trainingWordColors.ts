@@ -61,3 +61,9 @@ export const TRAINING_DESIGNATED_COLOR = TRAINING_COLUMN_COLOR.runway;
 /** The signal where it sits OUTSIDE the envelope of the word in force — the one thing on these
  *  views that is a disagreement rather than a drawing. */
 export const TRAINING_OUTSIDE_COLOR = "#f87171";
+
+/** THE EXECUTOR's flown track and its verdicts "inside" (the replay of the truth sentence, `trainingOverlays.ts`).
+ *  Teal (2026-09-24): OKLab ΔE on the palette above is ≥ 11.9 from every colour here (nearest: the raw grey 11.9,
+ *  the funnel blue 12.3, the corridor green 13.8) and 53 from the bar's surface (#0f131e); every candidate hue
+ *  between them sat under 10 from one of the columns. */
+export const TRAINING_EXECUTOR_COLOR = "#14b8a6";

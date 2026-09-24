@@ -46,6 +46,7 @@ import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerrain";
 import type { ObservedVerdictFilter } from "../data/observedTracks";
 import type { TrainingColumn, TrainingSelection } from "../data/trainingSample";
+import type { TrainingExecutorView, TrainingPriorView } from "../data/trainingOverlays";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -258,6 +259,16 @@ interface TrainingSessionState {
    */
   trainingLayers: TrainingLayers;
   setTrainingLayer: (layer: keyof TrainingLayers, on: boolean) => void;
+  /**
+   * WHAT ANOTHER MODEL MAKES OF THE SELECTED FLIGHT (`data/trainingOverlays.ts`): the executor's replay of its truth
+   * sentence and the prior's predictions over it. The panel publishes each for the selected flight while its switch
+   * is on and its overlay is loaded, and null otherwise. Kept apart from `trainingSelection`, so switching one on or
+   * off redraws its own marks and never re-frames the flight.
+   */
+  trainingExecutor: TrainingExecutorView | null;
+  setTrainingExecutor: (view: TrainingExecutorView | null) => void;
+  trainingPrior: TrainingPriorView | null;
+  setTrainingPrior: (view: TrainingPriorView | null) => void;
 }
 
 export interface TrainingLayers {
@@ -384,6 +395,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setTrainingLayer = useCallback((layer: keyof TrainingLayers, on: boolean) => {
     setTrainingLayers((current) => ({ ...current, [layer]: on }));
   }, []);
+  const [trainingExecutor, setTrainingExecutor] = useState<TrainingExecutorView | null>(null);
+  const [trainingPrior, setTrainingPrior] = useState<TrainingPriorView | null>(null);
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
@@ -619,7 +632,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingColumn,
     trainingLayers,
     setTrainingLayer,
-  }), [trainingSelection, trainingCursorS, setTrainingCursorS, trainingColumn, trainingLayers, setTrainingLayer]);
+    trainingExecutor,
+    setTrainingExecutor,
+    trainingPrior,
+    setTrainingPrior,
+  }), [trainingSelection, trainingCursorS, setTrainingCursorS, trainingColumn, trainingLayers, setTrainingLayer,
+    trainingExecutor, trainingPrior]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,

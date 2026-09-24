@@ -1369,3 +1369,129 @@ def test_the_repository_intent_registry_is_well_formed():
     )
     assert campaigns
 
+
+
+# ── the executor's replay ───────────────────────────────────────────────────────
+
+_EXECUTOR_SHA = "a" * 64
+
+
+def _executor_replay(tmp_path: Path, intent_registry: Path, *, recorded: tuple[bool, ...] = (True, True, False)) -> Path:
+    """A replay directory beside its spec, as `executor_replay` writes them: KXXX's records hold the recorded
+    flights; the registry gains the campaign it is published under."""
+    spec_dir = tmp_path / "outputs" / "executor" / "v2_test"
+    _write_json(spec_dir / "spec.json", {
+        "schema": publisher.EXECUTOR_SPEC_SCHEMA, "sha256": _EXECUTOR_SHA,
+        "params": {"cycle_s": 1.0, "delays": {"heading_s": 1.0, "vertical_s": 0.0}, "word_clock": "track"},
+        "vocabulary_spec_sha256": "b" * 64, "source": {},
+    })
+    groups = ("own dynamics", "stand-in dynamics", "stand-in dynamics")
+    replay = spec_dir / "replay-val"
+    _write_json(replay / "replay.json", {
+        "schema": publisher.EXECUTOR_REPLAY_SCHEMA, "executor_spec_sha256": _EXECUTOR_SHA, "split": "val",
+        "vocabulary_spec_sha256": "b" * 64, "gate_share": 0.95,
+        "flights": [{"airport": "KXXX", "group": group, "recorded": flag} for group, flag in zip(groups, recorded)],
+    })
+    records = replay / "records" / "KXXX"
+    _write_json(records / "summary.json", {
+        "config": {"model": "executor", "horizon_mode": "sentence", "prediction_output": "control"},
+        "executor_spec_sha256": _EXECUTOR_SHA, "split": "val", "accuracy": {"ade_m": {"mean": 700.0}},
+        "results": [{"arr_airport": "KXXX"}, {"arr_airport": "KXXX"}],
+    })
+    _write_json(records / "evaluation_report.json", {"schema_version": "v9", "trajectories": [], "passRate": 0.97})
+    registry = json.loads(intent_registry.read_text())
+    registry["campaigns"]["executor_campaign"] = {
+        "title": "The executor", "intent": "Can the vocabulary be flown?", "runs": {"v2_test": "The spec flown over val."},
+    }
+    _write_json(intent_registry, registry)
+    return replay
+
+
+def _builder(calls: list[list[str]]):
+    """The comparison builder as `run_executor_publication` runs it: it registers the category it wrote, stamping
+    the experiment block from the records' own config (so `horizonMode` is the executor's)."""
+    def run(command, **_kwargs):
+        calls.append(command)
+        value = {flag: command[command.index(flag) + 1] for flag in ("--output-dir", "--category", "--category-label",
+                                                                      "--experiment-id", "--experiment-group",
+                                                                      "--experiment-checkpoint")}
+        out = Path(value["--output-dir"])
+        _write_json(out / "comparison_index.json", {"groups": []})
+        manifest = out.parent / "categories.json"
+        categories = json.loads(manifest.read_text())["categories"] if manifest.exists() else []
+        categories.append({"key": value["--category"], "label": value["--category-label"], "dir": out.name, "groups": 2,
+                           "constrained": False, "datasetSplit": "val", "resultSource": "experiment",
+                           "experiment": {"id": value["--experiment-id"], "group": value["--experiment-group"],
+                                          "checkpoint": value["--experiment-checkpoint"], "model": "executor",
+                                          "predictionOutput": "control", "horizonMode": "sentence", "seed": None}})
+        _write_json(manifest, {"categories": categories})
+    return run
+
+
+def test_the_executor_names_mirror_the_runners():
+    from ts_transformer.autopilot.spec import EXECUTOR_SPEC_SCHEMA
+    from ts_transformer.experiments.executor_replay import HORIZON, PREDICTOR, REPLAY_SCHEMA
+
+    assert (publisher.EXECUTOR_REPLAY_SCHEMA, publisher.EXECUTOR_SPEC_SCHEMA) == (REPLAY_SCHEMA, EXECUTOR_SPEC_SCHEMA)
+    assert (publisher.EXECUTOR_PREDICTOR, publisher.EXECUTOR_HORIZON) == (PREDICTOR, HORIZON)
+
+
+def test_an_executor_replay_publishes_one_experiment_category_per_airport(monkeypatch, tmp_path, intent_registry):
+    replay = _executor_replay(tmp_path, intent_registry)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(publisher.subprocess, "run", _builder(calls))
+    frontend, published = tmp_path / "frontend", tmp_path / "published"
+    code = publisher.main(["--executor-replay", str(replay), "--executor-campaign", "executor_campaign",
+                           "--output-root", str(published), "--frontend-airports-root", str(frontend)])
+    assert code == 0 and len(calls) == 1
+    command = calls[0]
+    # the replay's own grading, never a re-run evaluation; the CZML split for thousands of flights
+    assert command[command.index("--evaluation-report") + 1] == str(replay / "records" / "KXXX" / "evaluation_report.json")
+    assert command[command.index("--max-groups-per-czml") + 1] == str(publisher.EXECUTOR_GROUPS_PER_CZML)
+    (category,) = json.loads((frontend / "KXXX" / "comparison" / "categories.json").read_text())["categories"]
+    assert category["key"] == "experiment_executor_v2_test_aaaaaaaaaaaa_val"
+    experiment = category["experiment"]
+    assert (experiment["id"], experiment["group"], experiment["runName"]) == ("executor/v2_test", "executor_campaign", "v2_test")
+    assert (experiment["model"], experiment["predictionOutput"], experiment["horizonMode"]) == ("executor", "control", "sentence")
+    assert experiment["intent"] == {"groupTitle": "The executor", "group": "Can the vocabulary be flown?",
+                                    "run": "The spec flown over val."}
+    rows = {(row["section"], row["name"]): row["value"] for row in experiment["parameters"]}
+    assert rows[("Executor", "spec")] == "aaaaaaaaaaaa" and rows[("Executor parameters", "delays.heading_s")] == "1.0"
+    assert rows[("Replay", "flights on stand-in dynamics")] == "1"
+    assert rows[("Replay", "flown, no record (failed in the first cycle)")] == "1"
+    assert "1 on own dynamics + 1 on stand-in dynamics" in category["label"]
+    manifest = json.loads((published / "executor" / "v2_test" / "KXXX" / "val" / "publication.json").read_text())
+    assert manifest["schemaVersion"] == publisher.EXECUTOR_PUBLICATION_SCHEMA and manifest["specSha256"] == _EXECUTOR_SHA
+    # the checkpoint refresh and the publication index pass it by
+    assert publisher.refresh_labels_from_manifests(published, frontend) == (0, 0)
+    # never overwritten
+    assert publisher.main(["--executor-replay", str(replay), "--executor-campaign", "executor_campaign",
+                           "--output-root", str(published), "--frontend-airports-root", str(frontend)]) == 1
+    assert len(calls) == 1
+
+
+def test_an_executor_replay_without_its_intent_or_with_records_of_another_count_is_blocked(
+    monkeypatch, tmp_path, intent_registry,
+):
+    replay = _executor_replay(tmp_path, intent_registry, recorded=(True, True, True))
+    calls: list[list[str]] = []
+    monkeypatch.setattr(publisher.subprocess, "run", _builder(calls))
+    roots = ["--output-root", str(tmp_path / "published"), "--frontend-airports-root", str(tmp_path / "frontend")]
+    assert publisher.main(["--executor-replay", str(replay), "--executor-campaign", "unregistered", *roots]) == 1
+    # three recorded flights in replay.json, two records: not one replay
+    assert publisher.main(["--executor-replay", str(replay), "--executor-campaign", "executor_campaign", *roots]) == 1
+    assert calls == []
+
+
+def test_the_executor_mode_refuses_the_checkpoint_flags(tmp_path, intent_registry, capsys):
+    replay = _executor_replay(tmp_path, intent_registry)
+    with pytest.raises(SystemExit):
+        publisher.main(["--executor-replay", str(replay), "--executor-campaign", "executor_campaign", "--checkpoint", "x"])
+    assert "--executor-replay publishes an executor replay, not checkpoints" in capsys.readouterr().err
+    with pytest.raises(SystemExit):   # a checkpoint flag is refused, not silently ignored
+        publisher.main(["--executor-replay", str(replay), "--executor-campaign", "executor_campaign", "--force",
+                        "--device", "cpu"])
+    assert "['--force', '--device']" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        publisher.main(["--executor-replay", str(replay)])
+    assert "needs --executor-campaign" in capsys.readouterr().err

@@ -238,3 +238,59 @@ the newtons) that `python -m evaluation` grades; its verdicts are paired with th
 group, airport and stratum: landed, words inside per word judged, evaluation where the observed passes, ≥ 0.95).
 **The VAL replay is stage 4 and runs only on the user's go-ahead**; development uses train. Every write refuses an
 existing directory. Tests: `tests/test_autopilot.py` (every write into `tmp_path`).
+
+### R13 · publishing the executor and the prior: `executor_training_export`, `prior_training_export`, `publish_ts_experiment_trajectories.py --executor-replay`
+
+2026-09-24 (`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §2.6, §4.6; the frontend side: `aeroviz-4d/docs/35-viewer-reference.md`
+AV24–AV25). Two runners write OVERLAYS beside a Training set (R11), never into it: a file of their own schema under
+`<root>/<ICAO>/training/<overlay-id>/`, listed in the airport's `training/overlays.json` (`OVERLAYS_SCHEMA`
+`aeroviz-training-overlays-v1`, one entry per overlay: its kind, the set it is drawn over, that set's sample sha256, the
+file). The index (`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instruction_training_export`
+(`open_base_set`: the set must be a read-back of this reading rule and spec under this `SAMPLE_SCHEMA`, drawn from val;
+`base_flights`: each of its flights found in the artefact, its stored sentence equal to the set's events;
+`read_overlays` / `write_overlay`: an id listed or a directory existing is refused; the payload is written compact).
+Every airport is built before any is written.
+
+`executor_training_export --executor <spec dir> --replay <spec dir>/replay-val --instructions <artefact>
+--airports-root <…/public/data/airports> --set instruction_v2 --airport ICAO [--airport …] [--overlay-id
+executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v1`): opens the spec with
+`replay.open_executor` (refused unless this executor code measured it), rebuilds the set's flights, flies those the
+replay flies (own and stand-in dynamics) in one batch per airport and judges them. `replay.json` keeps each flight's
+word verdicts without the words, so `word_verdicts` maps the judge's results back to the sentence (`said_words` MIRRORS
+`judge.judge`'s bookkeeping: `judge.py` is in the executor's source hash and cannot hand it out) and rebuilds the
+`replay.word_results` list; that list, the outcome, the flown-as-said flag and the counts of words not judged / not
+reached / superseded must equal the formal replay row exactly, the crossing within `CROSSING_TOLERANCE` (1e-9: another
+batch composition reassociates float sums by an ulp), or the export stops naming the flight. One status per word
+(`STATUSES`); a split turn's parts share one; the heading word left to intercept the final on its own is failed with
+that check. The flown track goes out every 2 s step to its outcome's row (MSL and HAE, the heading on the observed
+branch), with the formal row's evaluation verdicts, alignment and limits, and the replay's gate table for the airport and
+all airports. **Run it from a worktree**: the spec's source hash counts `geokit` only when it resolves inside the
+repository — outside from a worktree (as when the spec was measured), inside from the main checkout, where the spec is
+refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 flights on CPU.
+
+`prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v2 --airport
+ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v1`): the checkpoint is refused
+unless it is `ts-prior-checkpoint-v1` of the artefact's spec and labeller, not a smoke run, its candidate table equal to
+the artefact's and its state loading whole; inference is teacher-forced over the stored sentence (`prior.data.flight_steps`),
+as it was trained and read out. Per flight, column and step: `changeP` (1 − P(unchanged)), the `k` most likely words given
+a word is said (`TOP_K` 3, fewer where the column has fewer values: an airport's candidate runways) and their
+probabilities, `truthP`; each flight's NLL per step in all and per column, computed before rounding
+(`PROBABILITY_DIGITS` 4). The val `readout.json` travels unchanged. The inference path reproduces `readout.json`'s val NLL
+per step to 1e-9 (checked 2026-09-24 over all 10,540 val flights). ~2 s per airport on CPU.
+
+`publish_ts_experiment_trajectories.py --executor-replay <spec dir>/replay-val --executor-campaign CAMPAIGN [--airport …]
+[--dry-run]` puts the replay's records under Experiments, one category per airport (`experiment_executor_<run>_<spec
+sha12>_<split>`): `ExecutorReplay` / `ExecutorPublicationPlan`, not the checkpoint plan (the records came from an executor
+spec, not a `TSConfig`). The category is named from the spec (its sha, its parameters as rows, run = the spec directory's
+name, horizon `sentence` — a value the frontend's `EXPERIMENT_HORIZON_MODES` mirror lists after `config.HORIZON_MODES`),
+filed under CAMPAIGN's `intents.json` entry (blocked without one), with the replay's own evaluation report (never re-run)
+and the CZML split every `EXECUTOR_GROUPS_PER_CZML` (500) flights; the preflight requires the records' summary to be this
+spec's and split's, of this airport only, and as many as `replay.json`'s recorded flights; an existing category is
+refused. Its manifest (`ts-executor-publication-v1`, under `<output-root>/executor/<run>/<ICAO>/<split>/`) is passed by
+the checkpoint refresh and the publication index. Checkpoint flags are refused in this mode.
+
+Tests: `tests/test_training_overlays.py` (the verdict mapping on synthetic flights against `word_results`, the prior's
+predictions on a small untrained network, the overlay helpers' refusals, the frontend mirrors, and both `main()` on the
+formal artefacts over a 3-flight copy of the KSMF set — every write into `tmp_path`; the executor test bypasses only
+`require_current_executor`, because the suite's `conftest.py` puts this tree's `geokit/src` on the path) and
+`tests/test_publish_ts_experiment_trajectories.py` (the executor mode, the builder stubbed, every root in `tmp_path`).

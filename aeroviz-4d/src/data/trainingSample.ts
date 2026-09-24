@@ -396,6 +396,8 @@ export interface TrainingFlight {
 export interface TrainingSample {
   setId: string;
   airport: string;
+  /** When the exporter wrote it: an overlay drawn over the set names the sample it was drawn over by it. */
+  writtenUtc: string;
   cohort: TrainingCohort & { pool: number; read: number };
   vocabulary: TrainingVocabulary;
   airportFrame: { code: string; lat: number; lon: number; elevationM: number };
@@ -1393,6 +1395,7 @@ export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
       value: {
         setId: sample.string("setId"),
         airport: sample.string("airport"),
+        writtenUtc: sample.string("writtenUtc"),
         cohort: {
           split: cohort.string("split"), perStratum: cohort.number("perStratum"), seed: cohort.number("seed"),
           drawnFrom: cohort.string("drawnFrom"), pool: cohort.number("pool"), read: cohort.number("read"),

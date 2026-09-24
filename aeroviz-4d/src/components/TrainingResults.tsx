@@ -1,0 +1,119 @@
+/**
+ * TrainingResults.tsx
+ * -------------------
+ * The two readouts behind the Training overlays, as plain tables in the Training panel: the executor's replay gate
+ * (the formal val replay's own table, for this airport and all airports) and the prior's val readout (per column,
+ * against the two baselines). Both are copied from the artefacts by the exporters; nothing here is recomputed.
+ */
+
+import { TRAINING_COLUMNS, TRAINING_STRATA } from "../data/trainingSample";
+import type { TrainingExecutorOverlay, TrainingGateCell, TrainingPriorOverlay } from "../data/trainingOverlays";
+
+const STRATA = [...TRAINING_STRATA, "all"] as const;
+const COLUMN_LABEL: Record<(typeof TRAINING_COLUMNS)[number], string> = {
+  runway: "runway", approach: "approach", heading: "heading", altitude: "altitude", angle: "angle", speed: "speed",
+};
+
+function share(value: number | null): string {
+  return value === null ? "—" : `${(value * 100).toFixed(1)} %`;
+}
+
+function mark(ok: boolean | undefined): string {
+  return ok === undefined ? "" : ok ? " ✓" : " ✗";
+}
+
+function GateRow({ name, cell }: { name: string; cell: TrainingGateCell }) {
+  return (
+    <tr>
+      <th scope="row">{name}</th>
+      <td>{cell.flights.toLocaleString("en")}</td>
+      <td>{share(cell.landed)}{mark(cell.clears?.landed)}</td>
+      <td>{share(cell.wordsInside)}{mark(cell.clears?.words)}</td>
+      <td>{share(cell.evaluationPaired)}{mark(cell.clears?.evaluation)}</td>
+    </tr>
+  );
+}
+
+export function TrainingExecutorGate({ overlay }: { overlay: TrainingExecutorOverlay }) {
+  const airport = overlay.airport;
+  const gateShare = `${(overlay.replay.gateShare * 100).toFixed(0)} %`;
+  return (
+    <details className="training-results" aria-label="The executor's replay gate">
+      <summary>The executor's {overlay.replay.split} replay gate · spec {overlay.executor.specSha256.slice(0, 12)}</summary>
+      {Object.entries(overlay.gate).map(([group, places]) => {
+        const gated = places[airport]?.all?.clears != null;
+        return (
+          <table key={group} className="training-results-table">
+            <caption>
+              {group} — {gated ? `gated, each share ≥ ${gateShare}` : `reported, not gated: ${places[airport]?.all?.notGated ?? ""}`}
+            </caption>
+            <thead>
+              <tr><th scope="col" /><th scope="col">flights</th><th scope="col">landed</th><th scope="col">words inside</th><th scope="col">evaluation paired</th></tr>
+            </thead>
+            <tbody>
+              {STRATA.flatMap((stratum) => (places[airport]?.[stratum]
+                ? [<GateRow key={`${airport}-${stratum}`} name={`${airport} ${stratum}`} cell={places[airport][stratum]} />] : []))}
+              {places.all?.all ? <GateRow name="all airports" cell={places.all.all} /> : null}
+            </tbody>
+          </table>
+        );
+      })}
+      <p className="training-results-note">
+        landed: on the pointed runway, as the harvest and evaluation judge a landing · words inside: of the words the
+        judge judged, those flown inside their envelopes, each envelope re-drawn from where the executor was told the
+        word · evaluation paired: of the flights whose observed track passes evaluation, the replays that pass too. Every
+        flyable {overlay.replay.split} flight was flown ({String(overlay.replay.drawn.flights ?? "?")}); the table is the
+        formal replay's, written {overlay.replay.writtenUtc.slice(0, 16).replace("T", " ")} UTC.
+      </p>
+    </details>
+  );
+}
+
+export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverlay }) {
+  const { readout } = overlay;
+  const nll = (value: number) => value.toFixed(4);
+  return (
+    <details className="training-results" aria-label="The prior's readout">
+      <summary>The prior's {readout.split} readout · {nll(readout.model.nllPerStep)} per step against {nll(readout.baselines.repeat.all)} / {nll(readout.baselines.previousWord.all)}</summary>
+      <table className="training-results-table">
+        <caption>negative log-likelihood per step (nats), lower is better</caption>
+        <thead>
+          <tr>
+            <th scope="col">column</th><th scope="col">prior</th><th scope="col">repeat</th><th scope="col">previous word</th>
+            <th scope="col" title="the mean probability the prior gives a word being said, on the steps where one is">P(word) where said</th>
+            <th scope="col" title="how often the prior's most likely word, given one is said, is the word said">top 1</th>
+          </tr>
+        </thead>
+        <tbody>
+          {TRAINING_COLUMNS.map((column) => {
+            const own = readout.model.perColumn[column];
+            return (
+              <tr key={column}>
+                <th scope="row">{COLUMN_LABEL[column]}</th>
+                <td>{nll(own.nllPerStep)}</td>
+                <td>{nll(readout.baselines.repeat[column])}</td>
+                <td>{nll(readout.baselines.previousWord[column])}</td>
+                <td>{own.changeProbabilityWhereChanged.toFixed(3)}</td>
+                <td>{own.top1GivenChange.toFixed(3)}</td>
+              </tr>
+            );
+          })}
+          <tr>
+            <th scope="row">all</th>
+            <td>{nll(readout.model.nllPerStep)}</td>
+            <td>{nll(readout.baselines.repeat.all)}</td>
+            <td>{nll(readout.baselines.previousWord.all)}</td>
+            <td /><td />
+          </tr>
+        </tbody>
+      </table>
+      <p className="training-results-note">
+        {readout.steps.toLocaleString("en")} {readout.split} steps (2 s each), best epoch {readout.bestEpoch}; teacher-forced — every
+        step sees the truth sentence before it. The baselines are counted from train: "repeat" says a word with the column's
+        train frequency, the word by its train frequency; "previous word" the word by its train frequency after the column's
+        previous word. Prior {overlay.prior.checkpointSha256.slice(0, 12)}: {overlay.prior.parameters.toLocaleString("en")}{" "}
+        parameters, d {overlay.prior.model.dModel}, {overlay.prior.model.layers} layers, {overlay.prior.model.heads} heads.
+      </p>
+    </details>
+  );
+}

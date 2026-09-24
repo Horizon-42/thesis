@@ -6,6 +6,24 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## The executor spec's source hash depends on where `geokit` resolves (2026-09-24)
+
+**Verified** — `autopilot.spec.executor_source_files` hashes every executor module and the repository modules they import
+directly, keeping a file only if it lies under `REPO_ROOT`. `autopilot/frame.py` imports `geokit`, which is an editable
+install from the MAIN checkout (`/home/supercomputing/studys/thesis/geokit/src`). From a worktree that file is outside the
+worktree's `REPO_ROOT` and is left out; from the main checkout it is inside and counted. So the same code hashes to
+`c5ee5d71bbbe` in a worktree (the formal spec `executor/v2_20260924` was measured in one and records it) and to
+`5cdac57bb095` in the main checkout, where `replay.open_executor` therefore refuses the formal spec though no executor file
+differs. The ts suite's `conftest.py` puts the tree's own `geokit/src` first on `sys.path`, so under pytest the hash counts
+geokit in any tree (seen: `952cffb5732b` in the publish worktree).
+
+**Judgement**: make the file set independent of the checkout — e.g. list `geokit` in `UNHASHED_IMPORTS` (the formal hash
+never covered it, so `c5ee5d71bbbe` would reproduce everywhere) or hash it by its package-relative path wherever it
+resolves (which would change every recorded hash). `spec.py` itself is outside the hash, so the fix does not disturb the
+formal spec, but it changes what "the executor that measured this spec" means — the executor's owner's call. Until then
+`executor_replay` and `executor_training_export` run from a worktree; `tests/test_training_overlays.py` bypasses only this
+check in its formal-artefact test.
+
 ## `build_runway_config.py` can no longer rebuild `runway_thresholds.json` (2026-09-20)
 
 **Verified** — the generator writes `name` / `length_ft` / `surface` / `thresholds` per runway.

@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  executorTrackPositions,
   planDegrees,
   planRingDegrees,
   trainingFocusEntities,
@@ -16,6 +17,8 @@ import {
 } from "../useTrainingTrackLayer";
 import { parseTrainingSample, trainingWordAt, type TrainingSelection } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
+import { mockExecutorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import { parseTrainingExecutorOverlay } from "../../data/trainingOverlays";
 
 function selection(position = 0): TrainingSelection {
   const parsed = parseTrainingSample(mockSample());
@@ -35,6 +38,18 @@ describe("useTrainingTrackLayer helpers", () => {
     expect(positions).toHaveLength(item.rows * 3);
     expect(positions.slice(0, 3)).toEqual([item.signals.lon[0], item.signals.lat[0], item.signals.altitudeHaeM[0]]);
     expect(positions[2]).not.toBe(item.signals.smoothed.altitudeM[0]);
+  });
+
+  it("flattens the executor's flown track at its ellipsoid height", () => {
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const overlay = parseTrainingExecutorOverlay(mockExecutorOverlay(), parsed.value);
+    if (!overlay.ok) throw new Error(overlay.problem);
+    const track = overlay.value.flights[0].track!;
+    const positions = executorTrackPositions(track);
+    expect(positions).toHaveLength(track.lon.length * 3);
+    expect(positions.slice(0, 3)).toEqual([track.lon[0], track.lat[0], track.altitudeHaeM[0]]);
+    expect(positions[2]).not.toBe(track.altitudeM[0]);
   });
 
   it("hands a plan line over as [lon, lat, …]", () => {

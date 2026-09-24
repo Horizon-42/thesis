@@ -15,21 +15,27 @@
  *   ③ a readable set that fails to parse → THAT set alone, with the field
  *   ④ an entry that is not a set entry  → greyed out on its own; the others still load (AV6)
  *
- * Two things do not exist yet, and the panel says so instead of drawing anything in their place:
- * the executor's replay of a sentence (the executor is being designed) and a sentence a trained
- * prior says (no prior is trained on this vocabulary).
+ * Over the open set it offers the OVERLAYS published for it (`useTrainingOverlays`): the executor's replay of each
+ * flight's truth sentence and the prior's predictions over it, each behind its own switch, with their readouts —
+ * the replay's gate table and the prior's val readout — folded below the switches. A set with none says so and names
+ * the command that writes one; nothing is drawn in its place.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { useApp, type TrainingLayers } from "../context/AppContext";
+import useTrainingOverlays, { type OverlayKindState } from "../hooks/useTrainingOverlays";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
   TRAINING_CANDIDATE_COLOR,
   TRAINING_CORRIDOR_COLOR,
+  TRAINING_EXECUTOR_COLOR,
   TRAINING_FUNNEL_COLOR,
+  TRAINING_OUTSIDE_COLOR,
   TRAINING_TUBE_COLOR,
   TRAINING_TURN_COLOR,
 } from "../utils/trainingWordColors";
+import { trainingOverlaysPath, type TrainingExecutorFlight } from "../data/trainingOverlays";
+import { TrainingExecutorGate, TrainingPriorReadout } from "./TrainingResults";
 import {
   fetchTrainingIndex,
   fetchTrainingSample,
@@ -37,7 +43,6 @@ import {
   trainingSetRefusal,
   trainingVerdicts,
   TRAINING_COLUMNS,
-  TRAINING_READING_RULE,
   TRAINING_SPEC_SHA256,
   type TrainingIndex,
   type TrainingSample,
@@ -71,8 +76,65 @@ const SHA_SHOWN = 12;
 
 /** The command that writes the export, as the empty state shows it. */
 export const TRAINING_EXPORT_COMMAND =
-  "python run_ts.py instruction_training_export --dir 4dTrajectory/outputs/POOLED/instruction_language/v1_20260923 " +
+  "python run_ts.py instruction_training_export --dir 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 " +
   "--airports-root aeroviz-4d/public/data/airports --airport ";
+
+/** The commands that write the overlays, as the switches show them when a set has none. */
+export const TRAINING_OVERLAY_COMMAND = {
+  "executor-replay": "python run_ts.py executor_training_export --executor <spec dir> --replay <spec dir>/replay-val " +
+    "--instructions <artefact> --airports-root aeroviz-4d/public/data/airports --set ",
+  "prior-prediction": "python run_ts.py prior_training_export --prior <prior dir> --instructions <artefact> " +
+    "--airports-root aeroviz-4d/public/data/airports --set ",
+} as const;
+
+/** One overlay kind's switch: on / off, which overlay (when several), and what failed. */
+function OverlaySwitch<T>({ state, colour, text, setId, airport }: {
+  state: OverlayKindState<T>; colour: string; text: string; setId: string; airport: string;
+}) {
+  const { entry, entries, shown, setShown, load, choose } = state;
+  return (
+    <div className="training-overlay-switch">
+      <label style={entry ? { color: colour } : undefined} className={entry ? undefined : "training-slot"}>
+        <input type="checkbox" checked={entry !== null && shown} disabled={entry === null}
+          onChange={(event) => setShown(event.target.checked)} />
+        {text}
+      </label>
+      {entry === null ? (
+        <p className="training-overlay-note">
+          none published over {setId}: <code>{TRAINING_OVERLAY_COMMAND[state.kind]}{setId} --airport {airport}</code>
+        </p>
+      ) : null}
+      {entry !== null && entries.length > 1 ? (
+        <select aria-label={`which ${state.kind} overlay`} value={entry.id} onChange={(event) => choose(event.target.value)}>
+          {entries.map((item) => <option key={item.id} value={item.id}>{item.id}</option>)}
+        </select>
+      ) : null}
+      {entry !== null ? <p className="training-overlay-note">{entry.title}</p> : null}
+      {entry !== null && shown && load.status === "loading" ? (
+        <p className="training-overlay-note" role="status">Loading {entry.file} …</p>
+      ) : null}
+      {entry !== null && load.status === "invalid" ? (
+        <div className="training-problem" role="alert">
+          <p className="training-empty-title">Overlay {entry.id} cannot be read.</p>
+          <p className="training-problem-detail">{load.problem}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** What the flight list says of a flight's replay: its outcome, and its words inside of those judged. */
+export function executorTag(flight: TrainingExecutorFlight): { text: string; ok: boolean; title: string } {
+  if (!flight.flown) return { text: "not flown", ok: false, title: `the replay does not fly it: ${flight.group}` };
+  const { wordsInside, wordsJudged } = flight.counts!;
+  const outcome = (flight.outcome ?? "").replace(/_/g, " ");
+  return {
+    text: `${outcome} · ${wordsInside}/${wordsJudged}`,
+    ok: flight.outcome === "landed" && wordsInside === wordsJudged,
+    title: `the executor on ${flight.group}: ${outcome}; ${wordsInside} of ${wordsJudged} words inside their envelopes, ` +
+      `as the replay gate counts them${flight.flewTheSentence ? " — it flew the sentence" : ""}`,
+  };
+}
 
 function EmptyState({ airport }: { airport: string }) {
   return (
@@ -167,6 +229,13 @@ export default function TrainingPanel() {
   }, [activeAirportCode, entry]);
 
   const sample = sampleState.status === "ready" ? sampleState.sample : null;
+  const overlays = useTrainingOverlays(activeAirportCode || null, sample, flightKey);
+  const executorOverlay = overlays.executor.shown && overlays.executor.load.status === "ready" ? overlays.executor.load.overlay : null;
+  const priorOverlay = overlays.prior.shown && overlays.prior.load.status === "ready" ? overlays.prior.load.overlay : null;
+  const executorFlights = useMemo(
+    () => new Map((executorOverlay?.flights ?? []).map((flight) => [flight.flightKey, flight])),
+    [executorOverlay],
+  );
 
   // Keep the selection on the same flight across a reload when it is still there; otherwise the
   // first, so the sentence bar is never blank beside a list.
@@ -259,17 +328,31 @@ export default function TrainingPanel() {
                 {text}
               </label>
             ))}
-            {/* TWO EMPTY SLOTS, on purpose: neither exists yet, and nothing is drawn in their
-                place. They arrive with the executor (stage 3) and the prior (stage 5). */}
-            <label className="training-slot" title="The executor is being designed (stage 3): nothing to replay yet.">
-              <input type="checkbox" checked={false} disabled readOnly />
-              executor replay — not built yet
-            </label>
-            <label className="training-slot" title={`No prior is trained on ${TRAINING_READING_RULE} yet (stage 5).`}>
-              <input type="checkbox" checked={false} disabled readOnly />
-              prior-generated sentence — no prior yet
-            </label>
+            {/* THE OVERLAYS over this set: another model's output on its own flights. */}
+            {sample ? (
+              <>
+                <OverlaySwitch state={overlays.executor} colour={TRAINING_EXECUTOR_COLOR} setId={sample.setId} airport={airport}
+                  text="the executor's replay: its flown track and each word's verdict" />
+                <OverlaySwitch state={overlays.prior} colour={TRAINING_EXECUTOR_COLOR} setId={sample.setId} airport={airport}
+                  text="the prior's predictions at each step (teacher-forced)" />
+              </>
+            ) : null}
           </fieldset>
+
+          {overlays.manifest.status === "invalid" ? (
+            <div className="training-problem" role="alert">
+              <p className="training-empty-title">{trainingOverlaysPath(airport)} cannot be read.</p>
+              <p className="training-problem-detail">{overlays.manifest.problem}</p>
+            </div>
+          ) : null}
+          {overlays.manifest.status === "ready" ? overlays.manifest.overlays.rejected.map((item) => (
+            <div className="training-problem" role="alert" key={`overlay-${item.id}`}>
+              <p className="training-empty-title">Overlay {item.id} was rejected.</p>
+              <p className="training-problem-detail">{item.problem}</p>
+            </div>
+          )) : null}
+          {executorOverlay ? <TrainingExecutorGate overlay={executorOverlay} /> : null}
+          {priorOverlay ? <TrainingPriorReadout overlay={priorOverlay} /> : null}
 
           {/* ④ an entry that is not a set entry names itself and its field; the others load */}
           {indexState.index.rejected.map((item) => (
@@ -416,6 +499,15 @@ export default function TrainingPanel() {
                       <span className="training-flight-events">
                         {trainingVerdicts(flight).instructionsAfterStep0} words
                       </span>
+                      {executorFlights.has(flight.flightKey) ? (() => {
+                        const tag = executorTag(executorFlights.get(flight.flightKey)!);
+                        return (
+                          <span className="training-flight-executor" title={tag.title}
+                            style={{ color: tag.ok ? TRAINING_EXECUTOR_COLOR : TRAINING_OUTSIDE_COLOR }}>
+                            {tag.text}
+                          </span>
+                        );
+                      })() : null}
                     </button>
                   </li>
                 ))}

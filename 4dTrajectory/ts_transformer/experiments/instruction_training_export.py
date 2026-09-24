@@ -28,6 +28,13 @@ says the sentence shown is the sentence stored.
 airport frame's metres → latitude / longitude (`AirportENUFrame.latlon_from_horizontal`), and MSL →
 the ellipsoid height Cesium draws in (h = H + N, `flight_scenarios.datum.geoid_undulation_m`) for
 the track and the altitude tubes that ride it. Units are SI throughout.
+
+**Overlays.** What another model makes of a set's own flights — the executor's replay
+(`executor_training_export`), the prior's predictions (`prior_training_export`) — is written beside
+the set, never into it: a file of its own schema under ``training/<overlay-id>/``, listed in
+``training/overlays.json`` (`OVERLAYS_SCHEMA`) with the set it is drawn over and that set's sample
+sha256. The helpers those runners share live here, with the files they bind to: `open_base_set`,
+`base_flights`, `read_overlays`, `overlay_entry`, `serialise_overlay`, `write_overlay`.
 """
 
 from __future__ import annotations
@@ -38,6 +45,7 @@ import json
 import math
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +81,17 @@ KIND_READBACK = "vocabulary-readback"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"
 RUNNER = "ts_transformer.experiments.instruction_training_export"
+
+#: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_OVERLAYS_SCHEMA`, `TRAINING_OVERLAY_KINDS`): the
+#: manifest of what is drawn OVER this airport's sets — another model's output on a set's own flights, each in a
+#: file of its own schema (`executor_training_export`: the executor's replay; `prior_training_export`: the prior's
+#: predictions). The index lists sets and keeps its shape; this file lists overlays, each naming the set it is
+#: drawn over and that set's sample by its sha256, so a set re-exported under the same id is not mistaken for it.
+OVERLAYS_SCHEMA = "aeroviz-training-overlays-v1"
+OVERLAYS_FILE = "overlays.json"
+KIND_EXECUTOR = "executor-replay"
+KIND_PRIOR = "prior-prediction"
+OVERLAY_KINDS = (KIND_EXECUTOR, KIND_PRIOR)
 
 #: Only validation flights are drawn: train is what a prior will be fitted on, and test stays shut.
 SPLIT = "val"
@@ -403,6 +422,123 @@ def read_index(training: Path, airport: str, set_id: str) -> list[dict[str, Any]
     if any(item["id"] == set_id for item in payload["sets"]):
         raise SystemExit(f"{path} already lists set {set_id}; an export is never overwritten")
     return payload["sets"]
+
+
+# ---- overlays: another model's output, drawn over an exported set's own flights
+@dataclass(frozen=True)
+class BaseSet:
+    """An exported set an overlay is drawn over: its index entry, its sample, and the sample file's sha256."""
+
+    airport: str
+    entry: dict[str, Any]
+    sample: dict[str, Any]
+    sha256: str
+
+    @property
+    def block(self) -> dict[str, Any]:
+        """What an overlay records of its set: the frontend matches the set id, the sample's time of writing and
+        the spec against the sample it loaded; `check-publication` matches the sha256 of the file on disk."""
+        return {"setId": self.entry["id"], "sampleWrittenUtc": self.sample["writtenUtc"], "sampleSha256": self.sha256,
+                "specSha256": self.sample["vocabulary"]["specSha256"]}
+
+
+def open_base_set(training: Path, airport: str, set_id: str, spec: VocabularySpec) -> BaseSet:
+    """A set this exporter writes and the frontend reads: listed in the airport's index as a read-back of this
+    reading rule and ``spec``, its sample under `SAMPLE_SCHEMA`, drawn from `SPLIT`. Anything else is refused by
+    name — an overlay drawn over a set the frontend refuses would never be seen."""
+    path = training / INDEX_FILE
+    index = json.loads(path.read_text(encoding="utf-8"))
+    if index["schema"] != INDEX_SCHEMA or index["airport"] != airport:
+        raise SystemExit(f"{path} is not {airport}'s {INDEX_SCHEMA} index")
+    listed = [item for item in index["sets"] if item["id"] == set_id]
+    if not listed:
+        raise SystemExit(f"{path} lists no set {set_id}")
+    (entry,) = listed
+    if (entry["kind"], entry["readingRule"], entry["vocabularySha256"]) != (KIND_READBACK, READING_RULE, spec.sha256):
+        raise SystemExit(f"set {set_id} at {airport} is a {entry['kind']} set of {entry['readingRule']} / spec "
+                         f"{entry['vocabularySha256'][:12]}, not a {KIND_READBACK} set of {READING_RULE} / spec "
+                         f"{spec.sha256[:12]}")
+    file = training / entry["file"]
+    raw = file.read_bytes()
+    sample = json.loads(raw)
+    if sample["schema"] != SAMPLE_SCHEMA:
+        raise SystemExit(f"{file} is a {sample['schema']} file, not {SAMPLE_SCHEMA}: re-export the set first")
+    found = (sample["setId"], sample["airport"], sample["vocabulary"]["specSha256"], sample["cohort"]["split"])
+    if found != (set_id, airport, spec.sha256, SPLIT):
+        raise SystemExit(f"{file} holds set {found[0]} at {found[1]}, spec {found[2][:12]}, split {found[3]}; expected "
+                         f"{set_id} at {airport}, spec {spec.sha256[:12]}, split {SPLIT}")
+    return BaseSet(airport, entry, sample, hashlib.sha256(raw).hexdigest())
+
+
+def base_flights(base: BaseSet, flights: list[FlightSignals], sentences: dict[str, np.ndarray]) -> list[tuple[FlightSignals, int]]:
+    """Each of the set's flights in the artefact — its signals and its sentence's position in ``sentences`` — in the
+    set's order; refused unless the stored sentence is the set's own: every word at its step and column, and the
+    same number of steps."""
+    by_id = {flight.dataset_id: i for i, flight in enumerate(flights)}
+    stored_at = {int(index): k for k, index in enumerate(sentences["signal_index"])}
+    out = []
+    for item in base.sample["flights"]:
+        i = by_id.get(item["datasetId"])
+        if i is None or i not in stored_at:
+            raise SystemExit(f"{item['datasetId']} of set {base.entry['id']} has no labelled sentence in the artefact")
+        k = stored_at[i]
+        grid = stored_sentence(sentences, k)["words"]
+        cells = [(int(r), int(c), int(grid[r, c])) for r, c in zip(*np.nonzero(grid != UNCHANGED))]
+        events = [(event["row"], event["column"], event["value"]) for event in item["words"]["events"]]
+        if len(grid) != item["rows"] or cells != events:
+            raise SystemExit(f"{item['datasetId']}: the artefact's sentence ({len(grid)} steps) is not the one set "
+                             f"{base.entry['id']} shows ({item['rows']} steps)")
+        out.append((flights[i], k))
+    return out
+
+
+def read_overlays(training: Path, airport: str, overlay_id: str) -> list[dict[str, Any]]:
+    """The airport's overlays as they stand (none yet: an empty list); refused when the manifest is another
+    schema's or another airport's, or already lists this overlay — an overlay is never overwritten."""
+    path = training / OVERLAYS_FILE
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload["schema"] != OVERLAYS_SCHEMA:
+        raise SystemExit(f"{path} is a {payload['schema']} file, not {OVERLAYS_SCHEMA}")
+    if payload["airport"] != airport:
+        raise SystemExit(f"{path} is {payload['airport']}'s overlays, not {airport}'s")
+    if any(item["id"] == overlay_id for item in payload["overlays"]):
+        raise SystemExit(f"{path} already lists overlay {overlay_id}; an overlay is never overwritten")
+    return payload["overlays"]
+
+
+def overlay_entry(overlay_id: str, kind: str, base: BaseSet, title: str, file_name: str, flights: int,
+                  source: dict[str, Any]) -> dict[str, Any]:
+    """One overlay as the manifest lists it: what it is, the set it is drawn over, and where its file is."""
+    if kind not in OVERLAY_KINDS:
+        raise ValueError(f"unknown overlay kind {kind!r}")
+    return {"id": overlay_id, "kind": kind, "base": base.entry["id"], "baseSampleSha256": base.sha256, "title": title,
+            "file": f"{overlay_id}/{file_name}", "flights": flights, "source": source}
+
+
+def serialise_overlay(payload: dict[str, Any]) -> str:
+    """An overlay's file as it is written: without indentation (its per-step arrays are long, and one number per line
+    triples its size) and refusing NaN. Called while every airport is built, so a payload that cannot be written
+    stops the run before the first airport is."""
+    return json.dumps(payload, separators=(",", ":"), allow_nan=False)
+
+
+def write_overlay(training: Path, airport: str, overlay_id: str, entry: dict[str, Any], text: str,
+                  existing: list[dict[str, Any]]) -> Path:
+    """The overlay's file (``text``, `serialise_overlay`'s) in a directory of its own (refused if it exists), then the
+    manifest with it added — refused when the manifest is no longer what ``existing`` read at the start of the run
+    (another export wrote it meanwhile: adding to the old list would drop that one's entry)."""
+    if read_overlays(training, airport, overlay_id) != existing:
+        raise SystemExit(f"{training / OVERLAYS_FILE} changed since this run read it; run the export again")
+    out = training / entry["file"]
+    out.parent.mkdir()
+    temporary = out.with_suffix(out.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(out)
+    write_json_atomic(training / OVERLAYS_FILE, {"schema": OVERLAYS_SCHEMA, "writtenUtc": utc_now(), "airport": airport,
+                                                 "overlays": [*existing, entry]})
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -2,6 +2,7 @@ import type {
   ComparisonCategory,
   ComparisonResultSource,
   DatasetSplit,
+  ExperimentHorizonMode,
   ExperimentIntent,
   ExperimentParameterRow,
   ExperimentPredictionOutput,
@@ -109,17 +110,18 @@ export interface ExperimentOption {
   checkpoint: string;
   model?: string | null;
   predictionOutput?: ExperimentPredictionOutput | null;
-  horizonMode?: "normalized" | "full" | "window" | null;
+  horizonMode?: ExperimentHorizonMode | null;
   seed?: number | null;
   /** The ranking metric's value for the preferred split; null without a sort/value. */
   metricValue?: number | null;
 }
 
-const HORIZON_SUFFIX = {
+const HORIZON_SUFFIX: Record<ExperimentHorizonMode, string> = {
   normalized: " · normalized time",
   full: " · full horizon",
   window: " · recursive window",
-} as const;
+  sentence: " · the whole sentence",
+};
 
 /**
  * The picker label for one experiment. The publisher stamps a canonical

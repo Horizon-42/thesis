@@ -289,3 +289,40 @@ that divergence is a known open item (see the README's "Future Improvements").
 - 大转弯的包络大，是因为最慢的边界：0.5°/s 在 118 m/s 时半径约 13.5 km，最快的边界受 32° 坡度限制约 3.0°/s、
   半径约 2.3 km；150° 的转弯区有十几到二十公里，实际转弯（这批航班 1.2–2.1°/s）只占它的一小角。
 - 小于 10° 的小修正，标注器不检查最低转弯率，但转弯区仍按 0.5–4.7°/s 画出，判定里写明"最低转弯率未判"。
+
+### AV24 · Training 的叠加层：执行器的回放与先验的预测，画在一个集合的航班上
+
+- **叠加层在集合旁边，不在集合里面。** 每个机场的 `training/overlays.json`（`aeroviz-training-overlays-v1`）列出叠加层：
+  种类（`executor-replay` / `prior-prediction`）、画在哪个集合上（`base`）、那个集合的样本文件的 sha256、文件位置
+  （`training/<叠加层 id>/executor.json` 或 `prior.json`）。集合的索引 `index.json` 不动。写它们的是
+  `run_ts.py executor_training_export` 和 `prior_training_export`（ts 的 R13）。
+- **绑定**：叠加层文件（`aeroviz-training-executor-v1` / `aeroviz-training-prior-v1`）自己写出所画集合的 id、样本的写出
+  时刻和规格 sha，每架航班按集合的顺序一架一条；执行器的每条词与句子的词逐条对应（步、列、值），先验每架的步数等于
+  句子的步数。`trainingOverlays.ts` 逐项核对，对不上就整份拒读、说出是哪一项——例如集合按同一个 id 重新导出过，
+  样本的写出时刻就不同，叠加层被拒读（"the set was re-exported after the overlay"）。`check-publication` 另外核对
+  盘上样本文件的 sha256。
+- **界面**（`useTrainingOverlays`）：面板的 Draw 里两个开关（有叠加层时默认开），没有就灰掉并写出生成它的命令；同一种
+  有几个时给一个下拉，默认最后列出的。打开时把所选航班的那一条发布为 `trainingExecutor` / `trainingPrior`，与
+  `trainingSelection` 分开，所以开关一个叠加层不会重新取景。执行器回放的门表、先验的读数表折叠在开关下面
+  （`TrainingResults`），数字照抄产物。
+- **执行器**（青色 `TRAINING_EXECUTOR_COLOR` #14b8a6，OKLab 与调色板里每种颜色的距离 ≥ 11.9）：句子条每条词左端一个点
+  （青 = 在自己的包络里，红 = 出界，空心灰 = 不判 / 没说到 / 被同一步的后一条词取代；没有自己检查的词——跑道指针、
+  下降角词、"未许可"、"未指定"——不画），悬停写出每项检查和原因；头部写结局、越过入口时的偏离和高度、词的合格数、
+  evaluation 判定；航班列表每架下面一行结局与合格数；读数窗口平面图画它的航迹，三张图用虚线画它在**自己的时钟和自己
+  飞过的路程**上的航向、高度、地速（它按自己的节奏飞，不和观测在时间上对齐，坐标轴放宽到能装下两者）；三维画它的航迹
+  （椭球高）、贴地的虚线投影和终点标签。**执行器的词是按从它自己听到这条词的位置重新画的包络判的**，画出来的包络是
+  观测航班的。
+- **先验**：头部写这架航班每步的负对数似然和 val 整体的；"Prior predictions" 窗口（`TrainingPriorWindow`）在游标处按列给出
+  真值在这一步说了什么、先验给真值的概率、给"这一步说一个词"的概率、若说一个词最可能的几个词；下面每列一条带：说词的概率
+  （列的颜色）、真值的概率（灰），真值在第 0 步之后说的每个词一根竖线——先验排第一的词就是它为青色，否则红色。**这是
+  教师强制的读法**：每一步都看到真值句子在它之前的词，不是先验自己说出的句子。
+
+### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
+
+- 根目录的发布器 `--executor-replay` 把执行器的 val 回放记录（和 ts 预测同一个记录契约）发布成 Experiments 类别，每个机场
+  一个（`experiment_executor_v2_20260924_2674ab8c71a9_val`），挂在 `intents.json` 的 `executor_val_replay_20260924` 下。
+- 这些记录的 `horizon_mode` 是 `sentence`（飞完整句话），比较 CZML 的生成器把它写进类别的 `experiment.horizonMode`；前端的
+  `EXPERIMENT_HORIZON_MODES` 在 `config.HORIZON_MODES` 之后加上它（`test_frontend_mirrors.py` 钉住，与
+  `executor_replay.HORIZON` 比对）。不加的话，一个这样的类别就会让整个机场的选择器变空（AV6）。
+- 类别里是这个机场全部被飞的航班，自己机型动力学和 A320 替代动力学两组都在；标签写出两组各多少架，参数表写出规格 sha
+  和每个参数。第一个周期就动力学失败的航班没有记录，不在类别里（参数表写出有几架）。

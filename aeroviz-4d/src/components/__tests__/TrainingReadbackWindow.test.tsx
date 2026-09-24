@@ -2,8 +2,8 @@
  * The read-back check: every envelope the exporter sent is drawn where it belongs — the lateral
  * ones in the plan view and on the heading chart, the tubes against distance flown, the speed
  * transitions and bands against time — the switches reach every chart, the rows the labeller
- * counted outside are red, only the selected column's word is yellow, and the two empty slots say
- * why they are empty.
+ * counted outside are red, only the selected column's word is yellow, and the executor's replay,
+ * when it is on, is drawn on its own clock beside the observed track.
  */
 import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -11,6 +11,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import TrainingReadbackWindow, { extent, rowAtDistance, runsOf } from "../TrainingReadbackWindow";
 import { parseTrainingSample, type TrainingColumn } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
+import { mockExecutorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import { parseTrainingExecutorOverlay, type TrainingExecutorFlight } from "../../data/trainingOverlays";
 import type { TrainingLayers } from "../../context/AppContext";
 import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 
@@ -18,7 +20,16 @@ const ALL: TrainingLayers = {
   turnPaths: true, turnRegions: true, holdFunnels: true, corridor: true, vertical: true, candidates: true,
 };
 
-function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: TrainingColumn | null = null) {
+function executorFlight(position = 0): TrainingExecutorFlight {
+  const parsed = parseTrainingSample(mockSample());
+  if (!parsed.ok) throw new Error(parsed.problem);
+  const overlay = parseTrainingExecutorOverlay(mockExecutorOverlay(), parsed.value);
+  if (!overlay.ok) throw new Error(overlay.problem);
+  return overlay.value.flights[position];
+}
+
+function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: TrainingColumn | null = null,
+  executor: TrainingExecutorFlight | null = null) {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
   const onCursorChange = vi.fn();
@@ -34,6 +45,7 @@ function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: T
       column={column}
       onColumnChange={onColumnChange}
       onClose={() => undefined}
+      executor={executor}
     />,
   );
   return { onCursorChange, onColumnChange };
@@ -166,10 +178,24 @@ describe("TrainingReadbackWindow", () => {
     expect(screen.getByText(/captured: the corridor holds/)).toBeTruthy();
   });
 
-  it("keeps the two slots empty, saying why", () => {
+  it("draws no executor without its replay, and says so", () => {
     open();
-    expect(screen.getByLabelText("Executor replay slot").textContent).toMatch(/not built yet/);
-    expect(screen.getByLabelText("Prior sentence slot").textContent).toMatch(/no prior is trained/);
+    expect(screen.getByLabelText("Executor replay").textContent).toMatch(/off, or not published for this set/);
+    expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);
+  });
+
+  it("draws the executor's flown track in plan and its three signals on its own clock", () => {
+    open(ALL, 0, 0, null, executorFlight(0));
+    // the plan view's track, the heading, the altitude and the ground speed
+    expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(4);
+    expect(screen.getByText("executor: landed")).toBeTruthy();
+    expect(screen.getByLabelText("Executor replay").textContent).toMatch(/landed on own dynamics; dashed teal/);
+  });
+
+  it("names why a flight the replay does not fly has no executor line", () => {
+    open(ALL, 1, 0, null, executorFlight(1));
+    expect(screen.getByLabelText("Executor replay").textContent).toMatch(/not flown: no identified type/);
+    expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);
   });
 
   it("reads the cursor off a chart, and a click selects that chart's column", () => {
