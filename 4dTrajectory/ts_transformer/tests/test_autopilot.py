@@ -880,20 +880,20 @@ def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
 
 def test_the_executor_hash_covers_the_package_and_what_it_imports_from_the_repository():
     """Review M2: the dynamics, the envelope and the approach-speed table decide a flown track; the instruction
-    language has its own hash."""
+    language has its own hash. Outside the package a module counts by its NAME, so the hash is the same from any
+    checkout (geokit is installed editable from the main checkout, outside a worktree); the environment's own
+    modules (the standard library, site-packages) never count."""
     from ts_transformer.autopilot import spec as executor_spec
-    from ts_transformer.repo_layout import REPO_ROOT
 
-    root = REPO_ROOT.resolve()
-    files = {path.relative_to(root).as_posix() for path in executor_spec.executor_source_files()}
+    labels = [label for label, _ in executor_spec.executor_source_files()]
     package = {path.name for path in executor_spec.PACKAGE.glob("*.py")} - {"spec.py"}
-    assert {f"4dTrajectory/ts_transformer/autopilot/{name}" for name in package} <= files
-    assert "4dTrajectory/ts_transformer/autopilot/spec.py" not in files
-    for needed in ("aerodynamic_model/torch_dynamics.py", "aircraft/reference_speeds.py", "flight_scenarios/start_state.py",
-                   "4dTrajectory/ts_transformer/outputs/dynamics/rollout.py", "4dTrajectory/ts_transformer/outputs/envelope.py",
-                   "4dTrajectory/ts_transformer/data/channels.py"):
-        assert needed in files
-    assert not any("/instructions/" in f or f.endswith(("io_utils.py", "repo_layout.py")) for f in files)
+    assert {f"autopilot/{name}" for name in package} <= set(labels) and "autopilot/spec.py" not in labels
+    for needed in ("aerodynamic_model.torch_dynamics", "aircraft.reference_speeds", "flight_scenarios.start_state",
+                   "ts_transformer.outputs.dynamics.rollout", "ts_transformer.outputs.envelope",
+                   "ts_transformer.data.channels", "geokit"):
+        assert needed in labels
+    assert not any(label.startswith(("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout",
+                                      "torch", "numpy", "math")) for label in labels)
 
 
 def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_labeller(tmp_path, monkeypatch):

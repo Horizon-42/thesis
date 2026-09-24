@@ -15,6 +15,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import json
+import sysconfig
 from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,6 @@ from typing import Any
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import Delays
 from ts_transformer.io_utils import write_json_atomic
-from ts_transformer.repo_layout import REPO_ROOT
 
 #: v3 (2026-09-24, instruction-v3): the heading delay is gone (a heading word carries its own lead), τ_ψ and p are
 #: derived for the per-step heading words.
@@ -33,15 +33,15 @@ PACKAGE = Path(__file__).resolve().parent
 UNHASHED_IMPORTS = ("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout")
 
 
-def _imported_files(path: Path) -> set[Path]:
-    """The source files of the modules ``path`` imports (absolute imports; for ``from package import name``,
-    the submodule ``package.name`` when there is one)."""
-    files: set[Path] = set()
+def _imported_modules(path: Path) -> dict[str, Path]:
+    """The modules ``path`` imports, by name, with their source files (absolute imports; for ``from package import
+    name``, the submodule ``package.name`` when there is one)."""
+    modules: dict[str, Path] = {}
 
     def add(name: str) -> importlib.machinery.ModuleSpec | None:
         found = importlib.util.find_spec(name)
         if found is not None and found.origin not in (None, "built-in", "frozen"):
-            files.add(Path(found.origin).resolve())
+            modules[name] = Path(found.origin).resolve()
         return found
 
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -53,24 +53,30 @@ def _imported_files(path: Path) -> set[Path]:
             if base is not None and base.submodule_search_locations is not None:
                 for alias in node.names:
                     add(f"{node.module}.{alias.name}")
-    return files
+    return modules
 
 
-def executor_source_files() -> list[Path]:
-    """What the hash covers: every module of the package except this file, and every module they import
-    directly that lives in the repository (the dynamics, the envelope, the approach-speed table, the
-    observation operator's fit…), except `UNHASHED_IMPORTS`. Direct imports only, as the labeller's hash."""
-    root = REPO_ROOT.resolve()
+def _installed(file: Path) -> bool:
+    """A module of the environment itself — the standard library or site-packages — not of this repository's code."""
+    places = {Path(sysconfig.get_paths()[key]).resolve() for key in ("stdlib", "platstdlib", "purelib", "platlib")}
+    return any(file.is_relative_to(place) for place in places)
+
+
+def executor_source_files() -> list[tuple[str, Path]]:
+    """What the hash covers, as ``(label, file)``: every module of the package except this file (labelled by its path in
+    the package), and every module they import directly that is the repository's code rather than the environment's
+    (labelled by its module name: the dynamics, the envelope, the approach-speed table, the observation operator's
+    fit, geokit…), except `UNHASHED_IMPORTS`. Labels, not paths, so the hash is the same from any checkout — geokit
+    is installed editable from the main checkout, outside a worktree. Direct imports only, as the labeller's hash."""
     own = sorted(path.resolve() for path in PACKAGE.glob("*.py") if path.name != "spec.py")
-    unhashed = []
-    for name in UNHASHED_IMPORTS:
-        found = importlib.util.find_spec(name)
-        locations = found.submodule_search_locations
-        unhashed.append(Path(locations[0] if locations else found.origin).resolve())
-    external = {file for path in own for file in _imported_files(path)
-                if file.is_relative_to(root) and file.parent != PACKAGE.resolve()
-                and not any(file.is_relative_to(place) for place in unhashed)}
-    return own + sorted(external)
+    external: dict[str, Path] = {}
+    for path in own:
+        for name, file in _imported_modules(path).items():
+            if (file.parent != PACKAGE.resolve() and not _installed(file)
+                    and not any(name == unhashed or name.startswith(unhashed + ".") for unhashed in UNHASHED_IMPORTS)):
+                external[name] = file
+    return ([(f"{PACKAGE.name}/{path.name}", path) for path in own]
+            + [(name, external[name]) for name in sorted(external)])
 
 
 def params_to_dict(params: ExecutorParams) -> dict[str, Any]:
@@ -91,11 +97,10 @@ def params_sha256(params: ExecutorParams) -> str:
 
 
 def executor_source_sha256() -> str:
-    """sha256 over `executor_source_files` (path relative to the repository, and bytes, in order)."""
+    """sha256 over `executor_source_files` (label and bytes, in order)."""
     digest = hashlib.sha256()
-    root = REPO_ROOT.resolve()
-    for path in executor_source_files():
-        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+    for label, path in executor_source_files():
+        digest.update(label.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()
 
 
