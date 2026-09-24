@@ -200,7 +200,8 @@ and the readout. `instruction_figures --dir
 ### R11 · `run_ts.py instruction_training_export` — the frontend's Training sets
 
 2026-09-23 (`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the frontend side: `aeroviz-4d/docs/35-viewer-reference.md`
-AV19–AV23). `instruction_training_export --dir <artefact> --airports-root <…/public/data/airports> --airport ICAO
+AV19–AV23; rewritten 2026-09-24 for `instruction-v3`, sample `aeroviz-training-sample-v7`). `instruction_training_export
+--dir <artefact> --airports-root <…/public/data/airports> --airport ICAO
 [--airport …] [--per-stratum 20] [--seed 1337] [--set-id <READING_RULE with _>] [--title …]` writes, per airport,
 `<root>/<ICAO>/training/<set-id>/sample.json` (schema `SAMPLE_SCHEMA`) and adds the set to that airport's
 `training/index.json` (schema `aeroviz-training-index-v1`, kept; every other set kept as it is). Everything is refused
@@ -211,7 +212,11 @@ index. Every flight read is RE-READ with `read_flight` and must equal its stored
 capture, clearance and "unspecified" rows) or the export stops naming the flight and the first differing cell;
 `require_current_labeller` is deliberately NOT called, so the frozen artefact stays exportable after unrelated code
 changes. All envelope geometry comes from `instructions/display.py` (outside the labeller hash, built only from
-`envelope.py` / `labeller/*`); the runner adds only the geodesy (airport-frame metres → lat/lon; MSL → HAE for the track
+`envelope.py` / `labeller/*`): a heading word is its band over the rows it is judged on (`envelope.heading_word_rows`: its
+row plus `heading_lead_s` to the next word's, never past the clearance) with each row's verdict (`display.rows_inside`:
+`envelope.heading_words_inside` asked one row at a time), refused unless the count is `Reading.checks["heading"]`'s; the
+capture turn is its rows (clearance → capture) and `checks["capture_turn"]`; the stratum is `readout.flight_record`'s
+(from `turning_deg`). The runner adds only the geodesy (airport-frame metres → lat/lon; MSL → HAE for the track
 and the tube walls, `flight_scenarios.datum.geoid_undulation_m`) and refuses a word kind outside `WORD_KINDS` (the
 frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `tests/test_instruction_training_export.py`
 (every write into `tmp_path`; the schema / rule / columns / kinds mirrors checked against `trainingSample.ts`).
@@ -253,8 +258,9 @@ file). The index (`aeroviz-training-index-v1`) is not touched. The shared helper
 Every airport is built before any is written.
 
 `executor_training_export --executor <spec dir> --replay <spec dir>/replay-val --instructions <artefact>
---airports-root <…/public/data/airports> --set instruction_v2 --airport ICAO [--airport …] [--overlay-id
-executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v1`): opens the spec with
+--airports-root <…/public/data/airports> --set instruction_v3 --airport ICAO [--airport …] [--overlay-id
+executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v2` since 2026-09-24, `instruction-v3`;
+the replay `ts-executor-replay-v2`): opens the spec with
 `replay.open_executor` (refused unless this executor code measured it), rebuilds the set's flights, flies those the
 replay flies (own and stand-in dynamics) in one batch per airport and judges them. `replay.json` keeps each flight's
 word verdicts without the words, so `word_verdicts` maps the judge's results back to the sentence (`said_words` MIRRORS
@@ -262,14 +268,20 @@ word verdicts without the words, so `word_verdicts` maps the judge's results bac
 `replay.word_results` list; that list, the outcome, the flown-as-said flag and the counts of words not judged / not
 reached / superseded must equal the formal replay row exactly, the crossing within `CROSSING_TOLERANCE` (1e-9: another
 batch composition reassociates float sums by an ulp), or the export stops naming the flight. One status per word
-(`STATUSES`); a split turn's parts share one; the heading word left to intercept the final on its own is failed with
-that check. The flown track goes out every 2 s step to its outcome's row (MSL and HAE, the heading on the observed
-branch), with the formal row's evaluation verdicts, alignment and limits, and the replay's gate table for the airport and
-all airports. **Run it from a worktree**: the spec's source hash counts `geokit` only when it resolves inside the
+(`STATUSES`); a heading word is inside / outside by the judge's `verdict.words["heading"]` result for it (its rows from the
+flown step it was told plus the lead), not judged when that result has no row (the lead reaches the clearance it was told
+or its capture, or the next heading word was told on the same flown step); the heading word left to intercept the final on
+its own is failed with that check. Each judged heading word carries its band on the flown rows (`display.heading_band`,
+refused unless it gives back the judge's count) and each flight judged the flown track as the judge's gate read it
+(`judgedTrackDeg`, its step k the exported track's point k), both on the observed track's branch (`chart_shift_deg`) —
+except a dynamics failure, whose judge read the failed state the exported track leaves out: its words keep their statuses
+and checks with no band and no judged track. The flown track goes out every 2 s step to
+its outcome's row (MSL and HAE, the heading on the observed branch), with the formal row's evaluation verdicts, alignment
+and limits, and the replay's gate table for the airport and all airports. **Run it from a worktree**: the spec's source hash counts `geokit` only when it resolves inside the
 repository — outside from a worktree (as when the spec was measured), inside from the main checkout, where the spec is
 refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 flights on CPU.
 
-`prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v2 --airport
+`prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v3 --airport
 ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v1`): the checkpoint is refused
 unless it is `ts-prior-checkpoint-v1` of the artefact's spec and labeller, not a smoke run, its candidate table equal to
 the artefact's and its state loading whole; inference is teacher-forced over the stored sentence (`prior.data.flight_steps`),
@@ -299,9 +311,10 @@ to end on a synthetic artefact and checkpoint — every write into `tmp_path`) a
 **Generations**: both runners open only artefacts this code reads. The 2026-09-24 publication (executor spec
 `2674ab8c71a9`, prior `v1_20260924`, over the v5 `instruction_v2` sets) was made at `a320d1bd` on
 `dev-publish-executor-prior`, where tests also ran both `main()` on those artefacts; since 9fb1b137 (signals v2, sample v6,
-no A320 stand-in) neither the artefact nor the spec opens, so the next publication needs the next generation — a new
-instruction artefact, Training v6 sets, an executor spec and replay measured by this code, a prior trained on the new
-sentences.
+no A320 stand-in) neither the artefact nor the spec opens, so the next publication needs the next generation — since
+2026-09-24 an `instruction-v3` artefact, Training v7 sets (R11), an executor spec (`ts-executor-spec-v3`) and replay
+(`ts-executor-replay-v2`) measured by this code, a prior trained on the new sentences; and the frontend's
+`TRAINING_SPEC_SHA256` moved to the v3 spec's sha, or every v7 set is refused.
 
 ### R14 · `run_ts.py heading_reading_compare` — the heading readings flown by the real executor (vocabulary design §10.1)
 

@@ -1154,14 +1154,13 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   stroke-width: 1.2;
 }
 
-.training-readback-candidate-label,
-.training-readback-issue-label {
+.training-readback-candidate-label {
   font-size: 10px;
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
-/* The selected turn's two paths and its flown turn, named on the plan: a dark halo keeps the text
-   readable over the envelopes. */
+/* Names on the plan (where the executor's flight ended): a dark halo keeps the text readable over the
+   envelopes. */
 .training-readback-path-label {
   font-size: 10px;
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;

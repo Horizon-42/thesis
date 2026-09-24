@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 const { appState, DEFAULT_LAYERS } = vi.hoisted(() => {
-  const DEFAULT_LAYERS = { turnPaths: true, turnRegions: false, holdFunnels: false, corridor: true, vertical: true, candidates: true };
+  const DEFAULT_LAYERS = { headingBands: true, corridor: true, vertical: true, candidates: true };
   return {
     DEFAULT_LAYERS,
     appState: {
@@ -67,12 +67,15 @@ describe("TrainingSentenceBar", () => {
     overlays();
     render(<TrainingSentenceBar />);
     expect(document.querySelectorAll(".training-sentence-verdict-inside")).toHaveLength(5);
-    expect(document.querySelectorAll(".training-sentence-verdict-outside")).toHaveLength(1);
-    expect(document.querySelectorAll(".training-sentence-verdict")).toHaveLength(6);
-    expect(screen.getByLabelText(/^approach cleared .* issued at step 10 /).textContent).toMatch(
-      /the executor: outside, told at its step 10 — capture turn monotone ✓, corridor held to the landing ✗ \(30\/35\)/);
+    expect(document.querySelectorAll(".training-sentence-verdict-outside")).toHaveLength(2);
+    expect(document.querySelectorAll(".training-sentence-verdict")).toHaveLength(7);
+    expect(screen.getByLabelText(/^approach cleared .* issued at step 20 /).textContent).toMatch(
+      /the executor: outside, told at its step 20 — capture turn monotone ✓, corridor held to the landing ✗ \(30\/35\)/);
+    // a heading word's verdict: its band's rows on the flown track, from where it was told plus the lead
+    expect(screen.getByLabelText(/^heading 180° .* issued at step 10 /).textContent).toMatch(
+      /the executor: outside, told at its step 10 — track within ±4\.5° of the word, 4 s after it was told, to the next word's ✗ \(7\/8\)/);
     expect(screen.getByText(/the executor \(own dynamics\): landed 1\.5 m right of the centreline, 20\.8 m above the threshold/)).toBeTruthy();
-    expect(screen.getByText(/5\/6 words inside their envelopes · evaluation pass \(observed pass\)/)).toBeTruthy();
+    expect(screen.getByText(/5\/7 words inside their envelopes · evaluation pass \(observed pass\)/)).toBeTruthy();
   });
 
   it("says why a flight the replay does not fly has no verdicts", () => {
@@ -120,34 +123,35 @@ describe("TrainingSentenceBar", () => {
     }
   });
 
-  it("labels the words from the vocabulary, the heading turn by why it was issued", () => {
+  it("labels the words from the vocabulary, a heading word by why it was issued", () => {
     select();
     render(<TrainingSentenceBar />);
-    expect(screen.getByLabelText(/^heading 180° — a turn, issued at step 10 \(20 s\), in force to 120 s$/)).toBeTruthy();
+    expect(screen.getByLabelText(/^heading 225° — the heading the track reaches a lead later, issued at step 8 \(16 s\), in force to 20 s$/)).toBeTruthy();
+    expect(screen.getByLabelText(/^heading 180° — the heading the track reaches a lead later, issued at step 10 \(20 s\), in force to 120 s$/)).toBeTruthy();
     expect(screen.getByLabelText(/^altitude descend to land — a new target, issued at step 20/)).toBeTruthy();
     expect(screen.getByLabelText(/^speed unspecified — speed left to the pilot, issued at step 30/)).toBeTruthy();
-    expect(screen.getByLabelText(/^approach cleared — cleared to join the final, issued at step 10/)).toBeTruthy();
+    expect(screen.getByLabelText(/^approach cleared — cleared to join the final, issued at step 20/)).toBeTruthy();
   });
 
   it("counts the words after step 0 and the silent steps", () => {
     select();
     render(<TrainingSentenceBar />);
-    expect(screen.getByText(`${MOCK_ROWS} steps · 5 words after step 0 · ${MOCK_ROWS - 4} of ${MOCK_ROWS - 1} later steps silent`)).toBeTruthy();
+    expect(screen.getByText(`${MOCK_ROWS} steps · 6 words after step 0 · ${MOCK_ROWS - 5} of ${MOCK_ROWS - 1} later steps silent`)).toBeTruthy();
   });
 
   it("reads out the labeller's verdicts", () => {
     select();
     render(<TrainingSentenceBar />);
-    expect(screen.getByText(/turns 1\/1 monotone, 1\/1 rate · holds 1\/2 in their funnel \(1 weak: the funnel starts over 2 km wide\) · capture turn ✓ ✓ · altitude 1\/2 · speed 1\/1/)).toBeTruthy();
+    expect(screen.getByText(/heading 2\/3 in their bands · capture turn ✓ ✓ · altitude 1\/2 · speed 1\/1/)).toBeTruthy();
     select(1);
     render(<TrainingSentenceBar />);
-    expect(screen.getByText(/capture turn none \(on the final at entry\)/)).toBeTruthy();
+    expect(screen.getByText(/heading 0\/0 in their bands \(1 with no row of their own: the lead reaches the clearance\) · capture turn none \(on the final at entry\)/)).toBeTruthy();
   });
 
   it("marks the clearance, the capture and the unspecified speed", () => {
     select();
     render(<TrainingSentenceBar />);
-    expect(screen.getByLabelText(/^cleared to join the final at 20 s$/)).toBeTruthy();
+    expect(screen.getByLabelText(/^cleared to join the final at 40 s$/)).toBeTruthy();
     expect(screen.getByLabelText(/^the final captured at 50 s, 12\.5 km before the threshold$/)).toBeTruthy();
     expect(screen.getByLabelText(/^speed left to the pilot from 60 s$/)).toBeTruthy();
   });
@@ -155,9 +159,9 @@ describe("TrainingSentenceBar", () => {
   it("moves the cursor to a band's issue and to a numbered step", () => {
     select();
     render(<TrainingSentenceBar />);
-    fireEvent.click(screen.getByLabelText(/^heading 180° — a turn/));
+    fireEvent.click(screen.getByLabelText(/^heading 180° — the heading/));
     expect(screen.getByText("t = 20 s · step 10")).toBeTruthy();
-    fireEvent.keyDown(screen.getByLabelText(/^Step 20 at 40 s: altitude descend to land, angle descent 3/), { key: "Enter" });
+    fireEvent.keyDown(screen.getByLabelText(/^Step 20 at 40 s: approach cleared, altitude descend to land, angle descent 3/), { key: "Enter" });
     expect(screen.getByText("t = 40 s · step 20")).toBeTruthy();
   });
 
@@ -166,8 +170,8 @@ describe("TrainingSentenceBar", () => {
     render(<TrainingSentenceBar />);
     const pressed = () => [...document.querySelectorAll("[aria-pressed='true']")].map((band) => band.getAttribute("aria-label"));
     expect(pressed()).toEqual([]);
-    fireEvent.click(screen.getByLabelText(/^heading 180° — a turn/));
-    // step 10 also has approach "cleared", and every other column's step-0 word is in force there
+    fireEvent.click(screen.getByLabelText(/^heading 180° — the heading/));
+    // every other column's step-0 word is in force at step 10 too
     expect(pressed()).toEqual([expect.stringMatching(/^heading 180°/)]);
     // the step numbers move the cursor and keep the column: the heading word in force there
     fireEvent.click(screen.getByLabelText(/^Step 0 at 0 s/));
@@ -183,15 +187,14 @@ describe("TrainingSentenceBar", () => {
     select();
     render(<TrainingSentenceBar />);
     const legend = screen.getByLabelText("What the 3D scene shows");
-    expect(legend.textContent).toMatch(/where the turn may end: between the two turns' ends/);
-    expect(legend.textContent).not.toMatch(/hold funnel/);          // off by default
-    expect(legend.textContent).not.toMatch(/turn region/);
+    expect(legend.textContent).toMatch(/a heading word's judged rows, on the ground: from 4 s after it is said to the next word's, where the track must stay within ±4\.5° of it/);
+    expect(legend.textContent).toMatch(/the capture turn's rows on the ground/);
+    expect(legend.textContent).not.toMatch(/funnel|turn region|where the turn may end/);
     fireEvent.click(screen.getByText("Legend ▾"));
-    expect(legend.textContent).not.toMatch(/where the turn may end/);
-    appState.trainingLayers = { ...appState.trainingLayers, holdFunnels: true };
+    expect(legend.textContent).not.toMatch(/judged rows/);
+    appState.trainingLayers = { ...appState.trainingLayers, headingBands: false };
     render(<TrainingSentenceBar />);
-    expect(screen.getAllByLabelText("What the 3D scene shows")[1].textContent)
-      .toMatch(/a judged hold whose funnel starts over 2 km wide: a weak check/);
+    expect(screen.getAllByLabelText("What the 3D scene shows")[1].textContent).not.toMatch(/judged rows/);
   });
 
   it("opens the read-back check", () => {

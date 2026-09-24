@@ -9,7 +9,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 const { appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, fetchMock } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
-    trainingLayers: { turnPaths: true, turnRegions: false, holdFunnels: false, corridor: true, vertical: true, candidates: true },
+    trainingLayers: { headingBands: true, corridor: true, vertical: true, candidates: true },
   },
   setTrainingSelection: vi.fn(),
   setTrainingLayer: vi.fn(),
@@ -54,6 +54,7 @@ const INDEX_PATH = "data/airports/KXXX/training/index.json";
 const SAMPLE_PATH = `data/airports/KXXX/training/${SET_ID}/sample.json`;
 const OLD_PATH = "data/airports/KXXX/training/box_v3/sample.json";
 const FIRST_PATH = "data/airports/KXXX/training/instruction_v1/sample.json";
+const SECOND_PATH = "data/airports/KXXX/training/instruction_v2/sample.json";
 const OVERLAYS_PATH = "data/airports/KXXX/training/overlays.json";
 const EXECUTOR_PATH = `data/airports/KXXX/training/${EXECUTOR_ID}/executor.json`;
 const PRIOR_PATH = `data/airports/KXXX/training/${PRIOR_ID}/prior.json`;
@@ -101,6 +102,7 @@ describe("TrainingPanel", () => {
       expect(fetched).toContain(SAMPLE_PATH);
       expect(fetched).not.toContain(OLD_PATH);
       expect(fetched).not.toContain(FIRST_PATH);
+      expect(fetched).not.toContain(SECOND_PATH);
     });
 
     it("publishes the flight with the vocabulary and the candidate runways", async () => {
@@ -126,6 +128,7 @@ describe("TrainingPanel", () => {
       const options = [...(screen.getByRole("combobox") as HTMLSelectElement).options].map((option) => option.text);
       expect(options.find((text) => text.startsWith("box_v3"))).toMatch(/box-v3 — refused/);
       expect(options.find((text) => text.startsWith("instruction_v1"))).toMatch(/instruction-v1 — refused/);
+      expect(options.find((text) => text.startsWith("instruction_v2"))).toMatch(/instruction-v2 — refused/);
       expect(options.find((text) => text.startsWith(SET_ID))).not.toMatch(/refused/);
     });
 
@@ -136,8 +139,8 @@ describe("TrainingPanel", () => {
       const prior = screen.getByLabelText(/the prior's predictions/) as HTMLInputElement;
       expect(replay.disabled && prior.disabled).toBe(true);
       expect(replay.checked || prior.checked).toBe(false);
-      expect(screen.getByText(/run_ts\.py executor_training_export .*--set instruction_v2 --airport KXXX/)).toBeTruthy();
-      expect(screen.getByText(/run_ts\.py prior_training_export .*--set instruction_v2 --airport KXXX/)).toBeTruthy();
+      expect(screen.getByText(new RegExp(`run_ts\\.py executor_training_export .*--set ${SET_ID} --airport KXXX`))).toBeTruthy();
+      expect(screen.getByText(new RegExp(`run_ts\\.py prior_training_export .*--set ${SET_ID} --airport KXXX`))).toBeTruthy();
       await waitFor(() => expect(lastOf(setTrainingExecutor)).toBeNull());
     });
 
@@ -146,10 +149,10 @@ describe("TrainingPanel", () => {
       await screen.findByText("TST1");
       fireEvent.click(screen.getByLabelText(/vertical: the altitude tubes/));
       expect(setTrainingLayer).toHaveBeenCalledWith("vertical", false);
-      fireEvent.click(screen.getByLabelText(/turns: the fastest and the slowest, and where each may end/));
-      expect(setTrainingLayer).toHaveBeenCalledWith("turnPaths", false);
-      fireEvent.click(screen.getByLabelText(/hold funnels: where a hold may fly after its turn/));
-      expect(setTrainingLayer).toHaveBeenCalledWith("holdFunnels", true);
+      fireEvent.click(screen.getByLabelText(/heading words: each word's band over the rows it is judged on/));
+      expect(setTrainingLayer).toHaveBeenCalledWith("headingBands", false);
+      fireEvent.click(screen.getByLabelText(/the capture: its turn and the corridor/));
+      expect(setTrainingLayer).toHaveBeenCalledWith("corridor", false);
     });
 
     it("states the draw it came from", async () => {
@@ -175,7 +178,7 @@ describe("TrainingPanel", () => {
 
     it("says under each flight what the executor made of it", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText("landed · 5/6")).toBeTruthy();
+      expect(await screen.findByText("landed · 5/7")).toBeTruthy();
       expect(screen.getByText("not flown")).toBeTruthy();
     });
 

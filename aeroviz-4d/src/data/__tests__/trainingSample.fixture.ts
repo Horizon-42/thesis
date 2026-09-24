@@ -4,9 +4,11 @@
  * reading rule, spec sha, column order, "unchanged") is IMPORTED from the reader, never restated:
  * a fixture that restated them could not catch them moving.
  *
- * Two flights on candidate "09" of two: a VECTORED one (a heading turn at step 10 with the
- * clearance, a capture turn from step 20, captured at step 25, one altitude row outside its tube)
- * and a STRAIGHT-IN one (on the final from step 0). 60 steps of 2 s each.
+ * Two flights on candidate "09" of two: a VECTORED one (heading words at steps 0, 8 and 10 — the
+ * turn to 180° read step by step, each word judged from a lead of 2 steps after it, the last one with
+ * one row outside its band — the clearance at step 20 where the capture turn begins, captured at step
+ * 25, one altitude row outside its tube) and a STRAIGHT-IN one (on the final from step 0: its one
+ * heading word has no row of its own). 60 steps of 2 s each.
  */
 
 import {
@@ -43,13 +45,14 @@ export const MOCK_VOCABULARY = {
   classCounts: { approach: 3, heading: 72, altitude: 182, angle: 6, speed: 48 },
   approachClasses: ["not cleared", "cleared", "go-around"],
   headingTargetsDeg: range(72, 0, 5),
+  headingLeadS: 4,
+  headingLeadRows: 2,
   headingToleranceDeg: 4.5,
-  headingMaxTurnDeg: 150,
+  turnOnsetRateDegS: 0.2,
   turnRateMinDegS: 0.5,
   turnRateMaxDegS: 4.7,
   turnRateMinFromDeg: 10,
   turnBankMaxDeg: 32,
-  turnStartDelayMaxS: 10.5,
   interceptAngleDeg: 30,
   corridorHalfWidthM: 20,
   corridorWideningDeg: 0.45,
@@ -86,7 +89,7 @@ export const MOCK_CANDIDATES = [
 /** Word values used below, named. */
 export const WORD = {
   runway09: 0, notCleared: 0, cleared: 1,
-  heading270: 54, heading180: 36, heading090: 18,
+  heading270: 54, heading225: 45, heading180: 36, heading090: 18,
   altitude1110: 37, land: 181, level: 0, descent3: 3,
   speed110: 18, speed90: 14, unspecified: 47,
 } as const;
@@ -104,34 +107,22 @@ function inForce(events: Event[]): number[][] {
   });
 }
 
-/** A left turn of 90° from a westbound track: the fastest turn, the slowest, and both moved 1 km
- *  west by the latest start — the end is their four corners, the region the ring through them. */
-const turnRegion = (e0: number, n0: number, issueS: number) => ({
-  fromTrackDeg: 270, turnDeg: -90, rateMinDegS: 0.5, rateMaxDegS: 4.7, bankMaxDeg: 32, startDelayMaxS: 10.5,
-  slowFinished: true,
-  region: line([e0, e0 - 1000, e0 - 1300, e0 - 11500, e0 - 12500, e0 - 2000, e0 - 1000],
-               [n0, n0 - 300, n0 - 1300, n0 - 11500, n0 - 11500, n0 - 1000, n0]),
-  fastPath: line([e0, e0 - 1000, e0 - 1300], [n0, n0 - 300, n0 - 1300]),
-  // the slowest turn begun late: straight 1 km west first
-  slowPath: line([e0, e0 - 1000, e0 - 10000, e0 - 12500], [n0, n0, n0 - 4000, n0 - 11500]),
-  end: line([e0 - 1300, e0 - 11500, e0 - 12500, e0 - 2300], [n0 - 1300, n0 - 11500, n0 - 11500, n0 - 1300]),
-  // the same two turns against time: one point per path point, from the issue
-  headingFast: { tS: [issueS, issueS + 10, issueS + 28.5], deg: [270, 240, 184.5] },
-  headingSlow: { tS: [issueS, issueS + 10.5, issueS + 100, issueS + 190.5], deg: [270, 270, 225, 184.5] },
-  headingRegion: {
-    tS: [issueS, issueS + 10, issueS + 28.5, issueS + 190.5, issueS + 190.5, issueS + 100, issueS + 10.5, issueS],
-    deg: [270, 240, 184.5, 184.5, 184.5, 225, 270, 270],
-  },
-});
 const turnCheck = {
   progressOk: true, rateOk: true, meanRateDegS: 2.4, maxRateDegS: 3.1, maxBankDeg: 24.9, rateMinApplies: true,
 };
 
-/** One flight. `vectored`: a turn at step 10 and a capture at 25; else on the final from step 0. */
+/** A heading word's band: judged from `first` to `stop`, its target ± 4.5°, the rows' verdicts. */
+const band = (row: number, value: number, targetDeg: number, first: number, stop: number, inside: number[]) => ({
+  row, value, kind: row === 0 ? "initial" : "per-step", targetDeg, firstRow: first, stopRow: stop,
+  targetOnTrackDeg: targetDeg, bandDeg: [targetDeg - 4.5, targetDeg + 4.5], inside,
+  check: { rows: stop - first, inside: inside.filter(Boolean).length },
+});
+
+/** One flight. `vectored`: a turn from step 10, cleared at 20, captured at 25; else on the final from step 0. */
 export function mockFlight(key: string, vectored: boolean): Record<string, unknown> {
   const rows = MOCK_ROWS;
   const captureRow = vectored ? 25 : 0;
-  const joinRow = vectored ? 10 : 0;
+  const joinRow = vectored ? 20 : 0;
   const events: Event[] = [
     { row: 0, column: 0, value: WORD.runway09, kind: "initial" },
     { row: 0, column: 1, value: vectored ? WORD.notCleared : WORD.cleared, kind: vectored ? "initial" : "clear" },
@@ -140,8 +131,9 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
     { row: 0, column: 4, value: WORD.level, kind: "initial" },
     { row: 0, column: 5, value: WORD.speed110, kind: "initial" },
     ...(vectored ? [
-      { row: 10, column: 1, value: WORD.cleared, kind: "clear" },
-      { row: 10, column: 2, value: WORD.heading180, kind: "turn" },
+      { row: 8, column: 2, value: WORD.heading225, kind: "per-step" },
+      { row: 10, column: 2, value: WORD.heading180, kind: "per-step" },
+      { row: 20, column: 1, value: WORD.cleared, kind: "clear" },
     ] : []),
     { row: 20, column: 3, value: WORD.land, kind: "target" },
     { row: 20, column: 4, value: WORD.descent3, kind: "angle" },
@@ -150,38 +142,18 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
   const eM = range(rows, -20000, 300);
   const nM = range(rows).map((row) => (vectored && row < 25 ? 3000 - row * 100 : 0));
   const altitude = range(rows).map((row) => (row < 20 ? 1110 : 1110 - (row - 20) * 16));
-  const track = range(rows).map((row) => (vectored ? (row < 10 ? 270 : row < 16 ? 270 - (row - 10) * 15 : row < 25 ? 180 : 90) : 90));
+  // the turn to 180° flown from step 10; at step 12 the track is still 10° short of it: that row is outside its band
+  const track = range(rows).map((row) => (vectored ? (row < 10 ? 270 : row < 12 ? 225 : row === 12 ? 190 : row < 25 ? 180 : 90) : 90));
   const speed = range(rows).map((row) => (row < 30 ? 110 : 110 - (row - 30) * 0.8));
   const distance = range(rows, 0, 220);
+  // a lead of 2 steps: each word judged from two steps after it to the next word's, the last to the clearance
   const heading = vectored
     ? [
-        {
-          row: 0, value: WORD.heading270, kind: "initial", targetDeg: 270, split: null, turnEndRow: null,
-          holdStartRow: 0, holdEndRow: 10, fromTrackDeg: 270, targetOnTrackDeg: 270,
-          holdBandDeg: [265.5, 274.5], turn: null,
-          funnel: { lengthM: 2200, startHalfWidthM: 0, endHalfWidthM: 173.1, axis: line([-20000, -22200], [3000, 3000]),
-                    outline: line([-20000, -22200, -22200, -20000], [3000, 2826.9, 3173.1, 3000]) },
-          check: null,
-          holdCheck: { holdStartRow: 0, holdEndRow: 10, rows: 11, inside: 11, halfWidthEndM: 173.1 },
-        },
-        {
-          row: 10, value: WORD.heading180, kind: "turn", targetDeg: 180, split: null, turnEndRow: 16,
-          holdStartRow: 16, holdEndRow: 20, fromTrackDeg: 270, targetOnTrackDeg: 180,
-          holdBandDeg: [175.5, 184.5], turn: turnRegion(-17000, 2000, 10 * MOCK_STEP_S),
-          funnel: { lengthM: 880, startHalfWidthM: 6200, endHalfWidthM: 6269.3, axis: line([-24800, -24800], [-5800, -6680]),
-                    outline: line([-31000, -31069, -18531, -18600], [-5800, -6680, -6680, -5800]) },
-          check: { ...turnCheck, kind: "turn", departureRow: 10, arrivalRow: 16, turnDeg: -90, parts: 1 },
-          // one of its five hold rows outside the funnel
-          holdCheck: { holdStartRow: 16, holdEndRow: 20, rows: 5, inside: 4, halfWidthEndM: 6269.3 },
-        },
+        band(0, WORD.heading270, 270, 2, 10, range(8).map(() => 1)),
+        band(8, WORD.heading225, 225, 10, 12, [1, 1]),
+        band(10, WORD.heading180, 180, 12, 20, [0, ...range(7).map(() => 1)]),
       ]
-    : [
-        {
-          row: 0, value: WORD.heading090, kind: "initial", targetDeg: 90, split: null, turnEndRow: null,
-          holdStartRow: null, holdEndRow: 0, fromTrackDeg: 90, targetOnTrackDeg: 90,
-          holdBandDeg: null, turn: null, funnel: null, check: null, holdCheck: null,
-        },
-      ];
+    : [band(0, WORD.heading090, 90, 2, 2, [])];
   const tubeInside = range(40).map((offset) => (vectored && offset === 5 ? 0 : 1));
   return {
     datasetId: `KXXX:${key}`, flightKey: key, callsign: key.split("_")[0], typecode: "A320",
@@ -199,10 +171,8 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
     envelopes: {
       heading,
       approach: {
-        clearanceRow: joinRow, captureRow, captureBeforeThresholdM: 12500, interceptInserted: false,
-        captureTurn: vectored
-          ? { startRow: 20, courseOnTrackDeg: 90, check: turnCheck, turn: turnRegion(-14000, 1000, 20 * MOCK_STEP_S) }
-          : null,
+        clearanceRow: joinRow, captureRow, captureBeforeThresholdM: 12500,
+        captureTurn: vectored ? { startRow: 20, endRow: 25, courseOnTrackDeg: 90, check: turnCheck } : null,
         courseBandDeg: [88, 92],
         corridor: {
           beforeThresholdM: 12500, halfWidthAtCaptureM: 118.2, halfWidthAtThresholdM: 20, rows: rows - captureRow,
@@ -279,6 +249,9 @@ export function mockIndex(): Record<string, unknown> {
       { id: "instruction_v1", kind: "vocabulary-readback", title: "the instruction vocabulary as first frozen",
         file: "instruction_v1/sample.json", vocabularySha256: "0".repeat(64), runwaySha256: "b".repeat(64),
         readingRule: "instruction-v1", flights: 40, cohort: { ...cohort, perStratum: 20 } },
+      { id: "instruction_v2", kind: "vocabulary-readback", title: "the vocabulary of turns and holds",
+        file: "instruction_v2/sample.json", vocabularySha256: "1".repeat(64), runwaySha256: "b".repeat(64),
+        readingRule: "instruction-v2", flights: 40, cohort: { ...cohort, perStratum: 20 } },
       { id: SET_ID, kind: TRAINING_READABLE_SET_KIND, title: "Instruction vocabulary", file: `${SET_ID}/sample.json`,
         vocabularySha256: TRAINING_SPEC_SHA256, runwaySha256: MOCK_CANDIDATES_SHA, readingRule: TRAINING_READING_RULE,
         flights: 2, cohort, source: { any: "extra keys are the exporter's provenance" } },

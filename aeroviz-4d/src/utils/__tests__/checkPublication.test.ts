@@ -191,7 +191,7 @@ describe("the Training export's checks", () => {
     const { index } = readable();
     const findings = index.sets.flatMap(checkTrainingSetRefusal);
     expect(findings.map((finding) => [finding.level, finding.category])).toEqual([
-      ["warn", "box_v3"], ["warn", "instruction_v1"], ["warn", "prior_s1337_val"],
+      ["warn", "box_v3"], ["warn", "instruction_v1"], ["warn", "instruction_v2"], ["warn", "prior_s1337_val"],
     ]);
     expect(findings[0].message).toContain("read under box-v3, a superseded vocabulary");
   });

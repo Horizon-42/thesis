@@ -52,7 +52,6 @@ import {
 import {
   formatSeconds,
   rowAtTime,
-  TRAINING_WEAK_HOLD_WIDTH_M,
   trainingColumnRuns,
   trainingKindLabel,
   trainingVerdicts,
@@ -221,14 +220,8 @@ export default function TrainingSentenceBar() {
           className="training-sentence-arrival"
           title="The labeller's own checks of this flight's envelopes (Reading.checks)."
         >
-          turns {verdicts.turnsProgressOk}/{verdicts.turns} monotone, {verdicts.turnsRateOk}/{verdicts.turns} rate ·
-          holds {verdicts.holdsContained}/{verdicts.holdsJudged} in their funnel
-          {verdicts.holdsNotJudged || verdicts.holdsWeak
-            ? ` (${[
-              verdicts.holdsNotJudged ? `${verdicts.holdsNotJudged} not judged` : "",
-              verdicts.holdsWeak ? `${verdicts.holdsWeak} weak: the funnel starts over ${TRAINING_WEAK_HOLD_WIDTH_M / 1000} km wide` : "",
-            ].filter(Boolean).join("; ")})`
-            : ""} ·
+          heading {verdicts.headingContained}/{verdicts.headingJudged} in their bands
+          {verdicts.headingNotJudged ? ` (${verdicts.headingNotJudged} with no row of their own: the lead reaches the clearance)` : ""} ·
           capture turn {capture === null ? "none (on the final at entry)" : `${tick(capture.progressOk)} ${tick(capture.rateOk)}`} ·
           altitude {verdicts.altitudeContained}/{verdicts.altitudeWords} · speed {verdicts.speedContained}/{verdicts.speedWords}
         </span>
@@ -322,13 +315,10 @@ export default function TrainingSentenceBar() {
                   const x = xFor(timeOf(run.row));
                   const width = xFor(timeOf(run.endRow)) - x;
                   const label = trainingWordLabel(vocabulary, candidates, column, run.value);
-                  const split = column === "heading"
-                    ? flight.envelopes.heading.find((item) => item.row === run.row)?.split ?? null
-                    : null;
                   const verdict = executor === null ? null : executorWordAt(executor, run.row, column);
                   const mark = verdict === null ? null : verdictMark(verdict.status);
                   const title =
-                    `${column} ${label} — ${trainingKindLabel(run.event.kind, split)}, issued at step ${run.row} ` +
+                    `${column} ${label} — ${trainingKindLabel(run.event.kind)}, issued at step ${run.row} ` +
                     `(${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s` +
                     (verdict === null ? "" : `\n${executorVerdictText(verdict)}`);
                   const selected = selectedColumn && run.row <= cursorRow && cursorRow < run.endRow;
@@ -376,8 +366,6 @@ export default function TrainingSentenceBar() {
                       {width >= LABEL_MIN_W ? (
                         <text x={x + width / 2} y={y + ROW_H / 2 + 4} textAnchor="middle" className="training-sentence-word" fill={colour}>
                           {label}
-                          {run.event.kind.startsWith("intercept") ? " ⤳" : ""}
-                          {split ? ` ${split.part}/${split.parts}` : ""}
                         </text>
                       ) : null}
                     </g>
@@ -448,9 +436,10 @@ export default function TrainingSentenceBar() {
             <span>
               Runway is a POINTER at one of {candidates.length} candidate thresholds (
               {candidates.map((candidate) => candidate.ident).join(", ")}); heading is an absolute ground
-              track flown the shorter way; altitude a geometric MSL target or "descend to land"; angle the
-              class of the descent (or level, or climb); speed a ground speed or "unspecified". ⤳ marks an
-              intercept heading the labeller inserted; n/m a part of a split turn.
+              track, read step by step: a new word wherever the track {vocabulary.headingLeadS} s later
+              reaches another {vocabulary.headingTargetsDeg[1] - vocabulary.headingTargetsDeg[0]}° cell, so a
+              turn is a run of words at the pace it was flown; altitude a geometric MSL target or "descend to
+              land"; angle the class of the descent (or level, or climb); speed a ground speed or "unspecified".
             </span>
             <span>
               The sentence ends before the landing: its last step is{" "}
@@ -463,8 +452,8 @@ export default function TrainingSentenceBar() {
               <b style={{ color: TRAINING_OUTSIDE_COLOR }}>●</b> outside, ○ not judged, not reached or superseded (the
               tooltip says which and why); a word with no check of its own (the runway pointer, an angle word, "not
               cleared", "unspecified") has none. The executor is judged against each word's envelope re-drawn from where
-              IT was told the word, not the observed flight's. With the prior's predictions on, "Prior predictions" shows
-              what it gives each column at each step.
+              IT was told the word — a heading word on its flown track from then plus the lead — not the observed
+              flight's. With the prior's predictions on, "Prior predictions" shows what it gives each column at each step.
             </span>
           </>
         ) : null}

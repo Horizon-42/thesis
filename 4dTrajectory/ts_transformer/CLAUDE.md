@@ -149,7 +149,8 @@ of the package, not a migration in progress.
   refuses to label); candidates = the manifest's CIFP runway geometry; one gate (`read.admit`) for
   labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
-  from every runway end the harvest builds; the labeller and the display share one hold funnel) (C30).
+  from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
+  `envelope.heading_words_inside`, since `instruction-v3`) (C30).
 - **No A320 stand-in; a flight is dropped only where dynamics are used** (2026-09-24):
   `aircraft_filter` ∈ `all-flights` (every flight, one without dynamics kept with no aircraft and
   mass NaN — state output, the labeller) | `modelled` (control) | `openap-direct`; the default is BY
@@ -323,14 +324,17 @@ grid's L60_D60 cohort). **The instruction labeller** (2026-09-23): `instruction_
 `instruction_spec` (measured on TRAIN only) → `instruction_labels` → `instruction_figures`, each into
 one never-overwritten artefact directory (R10). `instruction_training_export` writes the frontend's Training sets
 from that artefact — a seeded per-airport VAL sample, every flight re-read against its stored sentence, every envelope's
-geometry from `instructions/display.py`, added to each airport's `training/index.json` without touching its other sets (R11).
+geometry from `instructions/display.py` (instruction-v3: a heading word is its band over its judged rows, row verdicts
+checked against the labeller's count; sample v7), added to each airport's `training/index.json` without touching its other
+sets (R11).
 **The executor** (2026-09-24): `executor_spec` (data on train, methods A and B, a clean tree, written once) →
 `executor_sensitivity` (train, one parameter at a time; a negative delay is a probe) → `executor_replay` (the §11 gate
 readout through evaluation, paired with the observed verdicts; val = stage 4, only on the user's go-ahead) (R12).
 **Publishing the executor and the prior** (2026-09-24): `executor_training_export` / `prior_training_export` write
-OVERLAYS beside a Training set (`training/overlays.json`; every re-flown flight must reproduce its formal replay row, the
-prior's path reproduces its val readout; the executor export runs from a worktree — the spec's hash counts `geokit` from
-the main checkout), and the root publisher's `--executor-replay` files the replay's records under Experiments (R13).
+OVERLAYS beside a Training set (`training/overlays.json`; every re-flown flight must reproduce its formal replay row — a
+heading word's verdict is the judge's per-row band result, exported with its band, overlay v2 — the prior's path reproduces
+its val readout; the executor export runs from a worktree — the spec's hash counts `geokit` from the main checkout), and the
+root publisher's `--executor-replay` files the replay's records under Experiments (R13).
 `heading_reading_compare` (ARCHIVED 2026-09-24 with the holds reading) flew one train sample under every heading reading at
 fixed executor parameters, pairing evaluation with the observed flights graded by the same code (vocabulary design §10.1) (R14).
 

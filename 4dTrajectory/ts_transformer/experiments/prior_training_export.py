@@ -4,9 +4,9 @@ is, and the probability of the truth — with its val readout against the two ba
 `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`).
 
     python run_ts.py prior_training_export \\
-        --prior 4dTrajectory/outputs/POOLED/prior/v1_20260924 \\
-        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \\
-        --airports-root aeroviz-4d/public/data/airports --set instruction_v2 \\
+        --prior 4dTrajectory/outputs/POOLED/prior/<a prior of instruction-v3> \\
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/<its instruction-v3 artefact> \\
+        --airports-root aeroviz-4d/public/data/airports --set instruction_v3 \\
         --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 
 Per airport, writes ``<airports-root>/<ICAO>/training/<overlay-id>/prior.json`` (schema `SCHEMA`; refused if the
@@ -147,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instructions", type=Path, required=True, help="the instruction artefact it was trained on")
     parser.add_argument("--airports-root", type=Path, required=True,
                         help="the frontend's airports directory (…/public/data/airports)")
-    parser.add_argument("--set", required=True, help="the Training set whose flights are predicted, e.g. instruction_v2")
+    parser.add_argument("--set", required=True, help="the Training set whose flights are predicted, e.g. instruction_v3")
     parser.add_argument("--airport", action="append", required=True, help="an ICAO code; repeat for several")
     parser.add_argument("--overlay-id", default=None, help="default: prior_<the prior directory's name>")
     args = parser.parse_args(argv)

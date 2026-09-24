@@ -2,20 +2,21 @@
  * trainingSample.ts
  * -----------------
  * The Training module's data contract: the manifest of exported sets, and one set's flights
- * under the instruction vocabulary (`instruction-v3`: its heading reading is being chosen, vocabulary design §10,
- * and no set is exported under it yet — `TRAINING_SPEC_SHA256` moves to its spec when that is written).
+ * under the instruction vocabulary (`instruction-v3`: the heading read step by step, vocabulary design §10.1; no set
+ * is exported under it yet — see `TRAINING_SPEC_SHA256`).
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the words:
  * `4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`.
  *
  * A SENTENCE IS SIX COLUMNS PER 2 s STEP — runway pointer, approach, heading, altitude, angle,
  * speed, in that order — and every column has "unchanged" (-1). Step 0 carries all six; after it
- * the sentence is mostly silent. A WORD IS A TARGET PLUS THE ENVELOPE IT ALLOWS FROM ITS ISSUE
- * POINT: a heading word's turn region, where its turn may end and its hold funnel, the capture
- * corridor, an altitude word's tube, a speed word's transition and band.
+ * the sentence is mostly silent. A WORD IS A TARGET PLUS THE ENVELOPE IT ALLOWS: a heading word's
+ * band — its target ± the heading tolerance over the rows it is judged on, from a lead after it is
+ * said to the next heading word's — the capture turn and corridor, an altitude word's tube, a speed
+ * word's transition and band.
  *
- * THIS FILE COMPUTES NO ENVELOPE. Every region, band and tube is geometry the exporter computed
- * in Python from the vocabulary's own functions (`instructions/display.py` over `envelope.py`
- * and `labeller/*`), and every verdict is the labeller's. The reader checks the file's
+ * THIS FILE COMPUTES NO ENVELOPE. Every band, row verdict, region and tube is what the exporter
+ * computed in Python from the vocabulary's own functions (`instructions/display.py` over
+ * `envelope.py` and `labeller/*`), and every verdict is the labeller's. The reader checks the file's
  * BOOKKEEPING — lengths, rows, that the per-row words are the events filled forward, that a
  * verdict's count is the count of its own per-row flags — and draws numbers. A second
  * implementation of the envelopes here would be a second answer on one screen.
@@ -37,17 +38,19 @@ import { fetchJson } from "../utils/fetchJson";
  *  every set, current or superseded, is listed in it. */
 export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
 /** MIRROR of the exporter's `SAMPLE_SCHEMA` (`instruction_training_export.py`). The name changes
- *  with the file's shape, on both sides, in the same change: v5 is `instruction-v2`'s sample with a
- *  turn's heading against time; v6 is v5 with a flight's `typecode` its own ICAO type or null (v5
- *  carried the type the dynamics flew, an A320 for every type without dynamics); a file under any
- *  other name — `v5`, `v4` and `v3` included, whatever
- *  vocabulary it carries — is refused. */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v6";
+ *  with the file's shape, on both sides, in the same change: v7 is `instruction-v3`'s sample — a
+ *  heading word is its band over its judged rows with a verdict per row, the capture turn its rows
+ *  and its check, and there are no turn regions, hold funnels, split parts or inserted intercepts;
+ *  a file under any other name — `v6` (instruction-v2's turns and holds) and every earlier one
+ *  included, whatever vocabulary it carries — is refused. */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v7";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v3";
-/** MIRROR of the spec's sha. A new vocabulary is a new sha, and this reader is bound to the one it was written
- *  for. Still `v2_20260924/spec.json`'s: instruction-v3's spec is not written yet, so every set is refused by its
- *  reading rule before this is read; the exporter's first v3 set fails `check-publication` until this moves. */
+/** MIRROR of the spec's sha: a new vocabulary is a new sha, and this reader is bound to the one it was written for.
+ *  This value is still instruction-v2's (`v2_20260924/spec.json`, which this reader no longer reads: its sets carry
+ *  that rule and are refused by it first). No instruction-v3 spec is written yet; until the session that writes it
+ *  moves this value to its sha, every instruction-v3 set is refused here by its spec, by name, and
+ *  `check-publication` reports it. */
 export const TRAINING_SPEC_SHA256 = "103a6eae6b9083ad33d5a1b25daef4004a07458881786e90d4625ba04027204b";
 /** MIRROR of the exporter's `KIND_READBACK`: the one kind of set this reader opens. */
 export const TRAINING_READABLE_SET_KIND = "vocabulary-readback";
@@ -69,7 +72,7 @@ export type TrainingStratum = (typeof TRAINING_STRATA)[number];
 /** MIRROR of the exporter's `WORD_KINDS`: why the labeller issued a word. A kind outside it is
  *  refused by name — the views name every kind, and an unnamed one would be shown as a code. */
 export const TRAINING_WORD_KINDS = [
-  "initial", "turn", "turn-split", "intercept", "intercept-split", "clear", "target", "step", "angle", "unspecified",
+  "initial", "per-step", "clear", "target", "step", "angle", "unspecified",
 ] as const;
 export type TrainingWordKind = (typeof TRAINING_WORD_KINDS)[number];
 
@@ -128,16 +131,21 @@ export interface TrainingVocabulary {
   classCounts: Record<Exclude<TrainingColumn, "runway">, number>;
   approachClasses: string[];
   headingTargetsDeg: number[];
+  /** A heading word says where the track is this long after it is said, and is judged from then. */
+  headingLeadS: number;
+  /** The same lead in steps, as the exporter wrote it (`spec.rows_exact`); the reader checks the two agree. */
+  headingLeadRows: number;
+  /** A heading word's band: the track within this of its target on every row it is judged on. */
   headingToleranceDeg: number;
-  headingMaxTurnDeg: number;
-  /** A turn's rate: at most `turnRateMaxDegS` on every row (and at most `turnBankMaxDeg` of bank at
-   *  the flown speed); at least `turnRateMinDegS` on average for a turn of `turnRateMinFromDeg` or
-   *  more. It may begin up to `turnStartDelayMaxS` after the word. */
+  /** The capture turn begins where the track turns toward the course faster than this. */
+  turnOnsetRateDegS: number;
+  /** The capture turn's rate: at most `turnRateMaxDegS` on every row (and at most `turnBankMaxDeg`
+   *  of bank at the flown speed); at least `turnRateMinDegS` on average for a turn of
+   *  `turnRateMinFromDeg` or more. */
   turnRateMinDegS: number;
   turnRateMaxDegS: number;
   turnRateMinFromDeg: number;
   turnBankMaxDeg: number;
-  turnStartDelayMaxS: number;
   interceptAngleDeg: number;
   corridorHalfWidthM: number;
   corridorWideningDeg: number;
@@ -197,48 +205,7 @@ export interface TrainingWordEvent {
   kind: TrainingWordKind;
 }
 
-/** A heading against time, on the heading chart's own axes: seconds of the flight (`signals.tS`)
- *  and degrees on the branch of the unwrapped smoothed track at the issue. */
-export interface TrainingHeadingProfile {
-  tS: number[];
-  deg: number[];
-}
-
-/**
- * Where a turn may take the aircraft: between the fastest turn begun on time and the slowest begun
- * as late as allowed, flown at the speeds the flight flew — in plan, and as the heading against time.
- */
-export interface TrainingTurnRegion {
-  fromTrackDeg: number;
-  /** The shorter way to the target, positive = right. */
-  turnDeg: number;
-  rateMinDegS: number;
-  rateMaxDegS: number;
-  bankMaxDeg: number;
-  startDelayMaxS: number;
-  /** The slowest turn reaches the target's band before the flight ends. When it does not, its path
-   *  stops at the flight's end and the region is cut there. */
-  slowFinished: boolean;
-  /** A ring: the fastest turn begun on time, the two on-time ends, the slowest turn begun as late
-   *  as allowed back to where it began, and back to the issue point. */
-  region: TrainingPlanLine;
-  /** The fastest turn begun on time, to where its track enters the target's band. */
-  fastPath: TrainingPlanLine;
-  /** The slowest turn begun as late as allowed: straight from the issue point, then the turn — the
-   *  region's far edge. */
-  slowPath: TrainingPlanLine;
-  /** Where the turn may end — four corners: the fastest turn's end, the slowest turn's end, then
-   *  the same two moved along the issue track by the latest start. */
-  end: TrainingPlanLine;
-  /** The same two turns as the heading against time, one point per point of their paths, and the
-   *  region between them: the fastest turn to the band, the band's edge on to the slowest turn's
-   *  end, back along the slowest turn. */
-  headingFast: TrainingHeadingProfile;
-  headingSlow: TrainingHeadingProfile;
-  headingRegion: TrainingHeadingProfile;
-}
-
-/** The labeller's check of a turn: monotone progress, turn rate inside the range. */
+/** The labeller's check of the capture turn: monotone progress toward the course, its rate inside the range. */
 export interface TrainingTurnCheck {
   progressOk: boolean;
   rateOk: boolean;
@@ -249,55 +216,43 @@ export interface TrainingTurnCheck {
   rateMinApplies: boolean;
 }
 
-/** The labeller's check of a hold: its rows, from the hold's start to its end inclusive, against
- *  the drawn funnel. */
-export interface TrainingHoldCheck {
-  holdStartRow: number;
-  holdEndRow: number;
-  rows: number;
-  inside: number;
-  halfWidthEndM: number;
+/**
+ * A heading word's envelope (vocabulary design §10.1): its target ± the heading tolerance over the rows it is judged
+ * on — from its row plus the lead to the next heading word's row plus the lead, never at or past the clearance — and
+ * each row's verdict. None when the lead carries its rows to the clearance (`firstRow === stopRow`). The executor's
+ * overlay writes its words' bands in this shape too, on its own flown rows.
+ */
+export interface TrainingHeadingBand {
+  firstRow: number;
+  /** One past the last row judged. */
+  stopRow: number;
+  /** The target on the heading chart's branch. */
+  targetOnTrackDeg: number;
+  bandDeg: [number, number];
+  /** One per judged row: the track within the band. */
+  inside: boolean[];
 }
 
-export interface TrainingHeadingEnvelope {
+export interface TrainingHeadingEnvelope extends TrainingHeadingBand {
   row: number;
   value: number;
   kind: TrainingWordKind;
   targetDeg: number;
-  split: { part: number; parts: number } | null;
-  turnEndRow: number | null;
-  holdStartRow: number | null;
-  holdEndRow: number;
-  fromTrackDeg: number;
-  targetOnTrackDeg: number;
-  holdBandDeg: [number, number] | null;
-  turn: TrainingTurnRegion | null;
-  funnel: {
-    lengthM: number;
-    startHalfWidthM: number;
-    endHalfWidthM: number;
-    axis: TrainingPlanLine;
-    outline: TrainingPlanLine;
-  } | null;
-  /** Shared by every part of a split turn. */
-  check: (TrainingTurnCheck & {
-    kind: string; departureRow: number; arrivalRow: number; turnDeg: number; parts: number;
-  }) | null;
-  /** null for a word with no hold, and for a hold the labeller does not judge: after a turn under
-   *  `turnRateMinFromDeg`, or when the slowest turn does not finish. Its funnel is still drawn. */
-  holdCheck: TrainingHoldCheck | null;
+  /** The labeller's check: its judged rows and how many were inside. */
+  check: { rows: number; inside: number };
 }
 
 export interface TrainingApproach {
   clearanceRow: number;
   captureRow: number;
   captureBeforeThresholdM: number;
-  interceptInserted: boolean;
+  /** From the clearance to the capture, onto the course; null for a flight on the final at step 0. */
   captureTurn: {
     startRow: number;
+    endRow: number;
+    /** The course on the heading chart's branch at the start. */
     courseOnTrackDeg: number;
     check: TrainingTurnCheck;
-    turn: TrainingTurnRegion;
   } | null;
   /** The course ± its tolerance, on the heading chart's branch, from the capture on. */
   courseBandDeg: [number, number];
@@ -459,10 +414,7 @@ export function trainingWordLabel(
 /** Why a word was issued, in words — one for every kind the labeller writes. */
 const KIND_LABEL: Record<TrainingWordKind, string> = {
   initial: "in force at entry (step 0)",
-  turn: "a turn",
-  "turn-split": "part of a split turn",
-  intercept: "an inserted intercept heading",
-  "intercept-split": "part of a split inserted intercept",
+  "per-step": "the heading the track reaches a lead later",
   clear: "cleared to join the final",
   target: "a new target",
   step: "a step between two holds",
@@ -470,8 +422,8 @@ const KIND_LABEL: Record<TrainingWordKind, string> = {
   unspecified: "speed left to the pilot",
 };
 
-export function trainingKindLabel(kind: TrainingWordKind, split?: { part: number; parts: number } | null): string {
-  return split ? `${KIND_LABEL[kind]} ${split.part}/${split.parts}` : KIND_LABEL[kind];
+export function trainingKindLabel(kind: TrainingWordKind): string {
+  return KIND_LABEL[kind];
 }
 
 /** The row in force at a time: the last row at or before it. */
@@ -527,40 +479,18 @@ export function trainingWordAt(
   return { ...runs[index], index };
 }
 
-/**
- * A READOUT THRESHOLD, not an envelope value: a judged hold whose funnel starts wider than this is
- * marked as a WEAK check. The funnel starts across everywhere its turn may have ended — after a big
- * turn that stretches from the fastest turn's end to the slowest's, 12–18 km at KRDU — so "every row
- * inside" then says little about how the heading was held. The labeller's verdict is unchanged;
- * the views only say how much it constrains.
- */
-export const TRAINING_WEAK_HOLD_WIDTH_M = 2000;
-
-/** Is this heading word's hold judged against a funnel that starts wider than the threshold? */
-export function trainingWeakHold(item: TrainingHeadingEnvelope): boolean {
-  return item.holdCheck !== null && item.funnel !== null && 2 * item.funnel.startHalfWidthM > TRAINING_WEAK_HOLD_WIDTH_M;
-}
-
 /** The flight's verdicts, counted from the labeller's own checks. */
 export function trainingVerdicts(flight: TrainingFlight) {
-  // The parts of a split turn share ONE check: count each turn once, by where it departed.
-  const turns = new Map<string, NonNullable<TrainingHeadingEnvelope["check"]>>();
-  for (const item of flight.envelopes.heading) {
-    if (item.check !== null) turns.set(`${item.check.kind}@${item.check.departureRow}`, item.check);
-  }
-  const checks = [...turns.values()];
+  const heading = flight.envelopes.heading;
+  const judged = heading.filter((item) => item.check.rows > 0);
   const tubes = flight.envelopes.altitude;
   const speeds = flight.envelopes.speed.flatMap((span) => (span.check === null ? [] : [span.check]));
   const issued = new Set(flight.words.events.filter((event) => event.row > 0).map((event) => event.row));
-  const holds = flight.envelopes.heading.flatMap((item) => (item.holdCheck === null ? [] : [item.holdCheck]));
   return {
-    turns: checks.length,
-    turnsProgressOk: checks.filter((check) => check.progressOk).length,
-    turnsRateOk: checks.filter((check) => check.rateOk).length,
-    holdsJudged: holds.length,
-    holdsContained: holds.filter((hold) => hold.inside === hold.rows).length,
-    holdsNotJudged: flight.envelopes.heading.filter((item) => item.funnel !== null && item.holdCheck === null).length,
-    holdsWeak: flight.envelopes.heading.filter(trainingWeakHold).length,
+    headingJudged: judged.length,
+    headingContained: judged.filter((item) => item.check.inside === item.check.rows).length,
+    /** Heading words the lead carries to the clearance: no row of their own to judge. */
+    headingNotJudged: heading.length - judged.length,
     captureTurn: flight.envelopes.approach.captureTurn?.check ?? null,
     altitudeWords: tubes.length,
     altitudeContained: tubes.filter((tube) => tube.check.contained).length,
@@ -861,22 +791,30 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
     reader.fail(`speedUnspecifiedValue is ${speedUnspecifiedValue}, expected ${speedTargetsMps.length} (one past the last target)`);
   }
   const smoothing = reader.child("smoothingS");
+  const stepS = reader.number("stepS");
+  // The lead in seconds and in steps are one number: a word's first judged row is its own row plus the steps.
+  const headingLeadS = reader.number("headingLeadS");
+  const headingLeadRows = reader.count("headingLeadRows", 0);
+  if (Math.abs(headingLeadRows * stepS - headingLeadS) > 1e-9) {
+    reader.fail(`headingLeadRows is ${headingLeadRows}, but ${headingLeadRows} steps of ${stepS} s are not headingLeadS ${headingLeadS} s`);
+  }
   return {
     readingRule: rule,
     specSha256: sha,
     labellerSourceSha256: reader.string("labellerSourceSha256"),
-    stepS: reader.number("stepS"),
+    stepS,
     smoothingS: { track: smoothing.number("track"), altitude: smoothing.number("altitude"), speed: smoothing.number("speed") },
     classCounts,
     approachClasses,
     headingTargetsDeg,
+    headingLeadS,
+    headingLeadRows,
     headingToleranceDeg: reader.number("headingToleranceDeg"),
-    headingMaxTurnDeg: reader.number("headingMaxTurnDeg"),
+    turnOnsetRateDegS: reader.number("turnOnsetRateDegS"),
     turnRateMinDegS: reader.number("turnRateMinDegS"),
     turnRateMaxDegS: reader.number("turnRateMaxDegS"),
     turnRateMinFromDeg: reader.number("turnRateMinFromDeg"),
     turnBankMaxDeg: reader.number("turnBankMaxDeg"),
-    turnStartDelayMaxS: reader.number("turnStartDelayMaxS"),
     interceptAngleDeg: reader.number("interceptAngleDeg"),
     corridorHalfWidthM: reader.number("corridorHalfWidthM"),
     corridorWideningDeg: reader.number("corridorWideningDeg"),
@@ -921,56 +859,6 @@ function parseCandidates(reader: Reader, vocabulary: TrainingVocabulary): Traini
   });
   if (candidates.length === 0) reader.fail("candidates is empty: the runway pointer has nothing to point at");
   return candidates;
-}
-
-/** A heading profile of ``length`` points: as many times as degrees, running forward from ``startS``. */
-function parseProfile(reader: Reader, key: string, startS: number, length: number): TrainingHeadingProfile {
-  const profile = reader.child(key);
-  const tS = profile.numbers("tS", length);
-  if (tS[0] !== startS) profile.fail(`starts at ${tS[0]} s, but the turn is issued at ${startS} s`);
-  if (tS.some((value, index) => index > 0 && value < tS[index - 1])) profile.fail("runs backwards in time");
-  return { tS, deg: profile.numbers("deg", tS.length) };
-}
-
-/** A turn region from its issue at ``issueS``: its plan paths and its heading profiles are the same
- *  two turns, point for point. */
-function parseTurnRegion(reader: Reader, vocabulary: TrainingVocabulary, issueS: number): TrainingTurnRegion {
-  // The region's limits are the vocabulary's own: a region drawn with other numbers is another turn.
-  const limits: Array<[string, number]> = [
-    ["rateMinDegS", vocabulary.turnRateMinDegS], ["rateMaxDegS", vocabulary.turnRateMaxDegS],
-    ["bankMaxDeg", vocabulary.turnBankMaxDeg], ["startDelayMaxS", vocabulary.turnStartDelayMaxS],
-  ];
-  for (const [key, value] of limits) {
-    if (reader.number(key) !== value) reader.fail(`${key} is ${reader.raw(key)}, but the vocabulary says ${value}`);
-  }
-  const end = parsePlanLine(reader, "end", 4);
-  if (end.eM.length !== 4) reader.fail(`end has ${end.eM.length} corners; where a turn may end has four`);
-  // A path is ONE point when the track is already within the hold band of the target at issue:
-  // there is nothing left to turn (a small capture turn, mostly). The late slowest turn still has
-  // its straight start.
-  const fastPath = parsePlanLine(reader, "fastPath", 1);
-  const slowPath = parsePlanLine(reader, "slowPath", 2);
-  const headingFast = parseProfile(reader, "headingFast", issueS, fastPath.eM.length);
-  const headingSlow = parseProfile(reader, "headingSlow", issueS, slowPath.eM.length);
-  const headingRegion = reader.child("headingRegion");
-  const ring = headingFast.tS.length + 1 + headingSlow.tS.length;
-  const regionTS = headingRegion.numbers("tS", ring);
-  return {
-    fromTrackDeg: reader.number("fromTrackDeg"),
-    turnDeg: reader.number("turnDeg"),
-    rateMinDegS: vocabulary.turnRateMinDegS,
-    rateMaxDegS: vocabulary.turnRateMaxDegS,
-    bankMaxDeg: vocabulary.turnBankMaxDeg,
-    startDelayMaxS: vocabulary.turnStartDelayMaxS,
-    slowFinished: reader.boolean("slowFinished"),
-    region: parsePlanLine(reader, "region", 3),
-    fastPath,
-    slowPath,
-    end,
-    headingFast,
-    headingSlow,
-    headingRegion: { tS: regionTS, deg: headingRegion.numbers("deg", ring) },
-  };
 }
 
 function parseTurnCheck(reader: Reader): TrainingTurnCheck {
@@ -1087,88 +975,99 @@ function matchWord(item: Reader, event: TrainingWordEvent | undefined, index: nu
   }
 }
 
-function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, tS: number[]) {
-  const rows = tS.length;
+/**
+ * What is wrong with a heading word's band by the bookkeeping alone, or null: its first row is the word's own plus the
+ * lead, its rows run forward and end by ``lastStop`` (the next word's first row, or the clearance) — or it has none
+ * when the lead carries it there — one verdict per row, and the band is the word's target ± the vocabulary's
+ * tolerance on some branch. Which rows it ends at is the exporter's (`envelope.heading_word_rows`), not recomputed
+ * here. The executor's overlay checks its words' bands with it, against its own flown rows.
+ */
+export function headingBandProblem(
+  band: TrainingHeadingBand, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, lastStop: number,
+): string | null {
+  const first = wordRow + vocabulary.headingLeadRows;
+  if (band.firstRow !== first) {
+    return `firstRow is ${band.firstRow}, but a word told at step ${wordRow} is judged from ${first} (the ` +
+      `${vocabulary.headingLeadS} s lead)`;
+  }
+  const stopMax = Math.max(band.firstRow, lastStop);
+  if (!(band.firstRow <= band.stopRow && band.stopRow <= stopMax)) return `stopRow is ${band.stopRow}, not in ${band.firstRow}…${stopMax}`;
+  if (band.inside.length !== band.stopRow - band.firstRow) {
+    return `inside holds ${band.inside.length} verdicts for the ${band.stopRow - band.firstRow} rows judged`;
+  }
+  const turns = (band.targetOnTrackDeg - targetDeg) / 360;
+  if (Math.abs(turns - Math.round(turns)) > 1e-5) {
+    return `targetOnTrackDeg is ${band.targetOnTrackDeg}, not the word's ${targetDeg}° on any branch`;
+  }
+  const tolerance = vocabulary.headingToleranceDeg;
+  if (Math.abs(band.bandDeg[0] - (band.targetOnTrackDeg - tolerance)) > 2e-3
+      || Math.abs(band.bandDeg[1] - (band.targetOnTrackDeg + tolerance)) > 2e-3) {
+    return `bandDeg is [${band.bandDeg.join(", ")}], not ${band.targetOnTrackDeg}° ± the vocabulary's ${tolerance}°`;
+  }
+  return null;
+}
+
+/**
+ * The rows a band judged outside, as inclusive [first, last] row spans to DRAW on a line of rows `0..lastRow`: each
+ * run of rows outside on to the next row, so that one row outside is a segment (back to the row before it at the
+ * line's end). One rule for the read-back window and the 3D scene; the verdicts are the band's own.
+ */
+export function trainingBandOutsideSpans(band: TrainingHeadingBand, lastRow: number): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  let start: number | null = null;
+  band.inside.forEach((ok, offset) => {
+    if (!ok && start === null) start = offset;
+    const closes = start !== null && (ok || offset === band.inside.length - 1);
+    if (!closes) return;
+    const first = band.firstRow + start!;
+    const last = Math.min(band.firstRow + (ok ? offset - 1 : offset) + 1, lastRow);
+    spans.push(last > first ? [first, last] : [Math.max(first - 1, 0), first]);
+    start = null;
+  });
+  return spans.filter(([first, last]) => last > first);
+}
+
+function readHeadingBand(
+  item: Reader, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, lastStop: number,
+): TrainingHeadingBand {
+  const firstRow = item.integer("firstRow", 0, Number.MAX_SAFE_INTEGER);
+  const stopRow = item.integer("stopRow", firstRow, Number.MAX_SAFE_INTEGER);
+  const band = {
+    firstRow, stopRow, targetOnTrackDeg: item.number("targetOnTrackDeg"), bandDeg: item.range("bandDeg"),
+    inside: item.flags("inside", stopRow - firstRow),
+  };
+  const problem = headingBandProblem(band, wordRow, targetDeg, vocabulary, lastStop);
+  if (problem !== null) item.fail(problem);
+  return band;
+}
+
+function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, joinRow: number) {
   const words = eventsOf(events, "heading");
   const list = reader.list("heading");
   if (list.length !== words.length) reader.fail(`heading holds ${list.length} envelopes for ${words.length} heading words`);
   return list.map((raw, index): TrainingHeadingEnvelope => {
     const item = Reader.of(raw, reader.at(`heading[${index}]`));
     matchWord(item, words[index], index, "heading");
-    const targetDeg = item.number("targetDeg");
-    if (targetDeg !== vocabulary.headingTargetsDeg[words[index].value]) {
-      item.fail(`targetDeg is ${targetDeg}, but word ${words[index].value} is ${vocabulary.headingTargetsDeg[words[index].value]}°`);
-    }
     const word = words[index];
-    const splitReader = item.nullableChild("split");
-    const funnel = item.nullableChild("funnel");
-    const check = item.nullableChild("check");
-    const turn = item.nullableChild("turn");
-    // WHAT COMES TOGETHER: a turn is a region, an end row and the labeller's check of it; a hold is
-    // a funnel, a band and a start row. Half of either is a half-written envelope.
-    const turned = [turn, item.raw("turnEndRow"), check].map((part) => part !== null);
-    if (new Set(turned).size !== 1) item.fail("turn, turnEndRow and check come together or not at all");
-    const held = [funnel, item.raw("holdBandDeg"), item.raw("holdStartRow")].map((part) => part !== null);
-    if (new Set(held).size !== 1) item.fail("funnel, holdBandDeg and holdStartRow come together or not at all");
-    if ((word.kind === "initial") === turned[0]) item.fail(`a ${word.kind} word ${turned[0] ? "has" : "lacks"} a turn`);
-    if ((splitReader !== null) !== word.kind.endsWith("-split")) item.fail(`split is given exactly for a split part, and this word is ${word.kind}`);
-    const split = splitReader === null ? null : { part: splitReader.count("part", 1), parts: splitReader.count("parts", 2) };
-    if (split !== null && split.part > split.parts) splitReader!.fail(`part ${split.part} of ${split.parts}`);
-    const turnEndRow = item.nullableInteger("turnEndRow", word.row, rows);
-    const holdEndRow = item.integer("holdEndRow", word.row, rows);
-    const holdStartRow = item.nullableInteger("holdStartRow", word.row, holdEndRow - 1);
-    if (turnEndRow !== null && turnEndRow > holdEndRow) item.fail(`the turn ends at row ${turnEndRow}, after the hold ends at ${holdEndRow}`);
-    const verdict = check === null ? null : {
-      ...parseTurnCheck(check),
-      kind: check.string("kind"),
-      departureRow: check.integer("departureRow", 0, word.row),
-      arrivalRow: check.integer("arrivalRow", word.row, rows - 1),
-      turnDeg: check.number("turnDeg"),
-      parts: check.count("parts", 1),
-    };
-    if (verdict !== null && verdict.kind !== word.kind.replace(/-split$/, "")) {
-      check!.fail(`is the check of a ${verdict.kind}, but the word is ${word.kind}`);
+    const targetDeg = item.number("targetDeg");
+    if (targetDeg !== vocabulary.headingTargetsDeg[word.value]) {
+      item.fail(`targetDeg is ${targetDeg}, but word ${word.value} is ${vocabulary.headingTargetsDeg[word.value]}°`);
     }
-    // THE HOLD CHECK judges exactly the drawn funnel over the word's own hold rows, inclusive.
-    const holdReader = item.nullableChild("holdCheck");
-    if (holdReader !== null && funnel === null) item.fail("holdCheck is given for a word with no hold");
-    const holdCheck = holdReader === null ? null : {
-      holdStartRow: holdReader.integer("holdStartRow", holdStartRow!, holdStartRow!),
-      holdEndRow: holdReader.integer("holdEndRow", holdEndRow, holdEndRow),
-      rows: holdReader.integer("rows", holdEndRow - holdStartRow! + 1, holdEndRow - holdStartRow! + 1),
-      inside: holdReader.integer("inside", 0, holdEndRow - holdStartRow! + 1),
-      halfWidthEndM: holdReader.number("halfWidthEndM"),
-    };
-    return {
-      row: word.row,
-      value: word.value,
-      kind: word.kind,
-      targetDeg,
-      split,
-      turnEndRow,
-      holdStartRow,
-      holdEndRow,
-      fromTrackDeg: item.number("fromTrackDeg"),
-      targetOnTrackDeg: item.number("targetOnTrackDeg"),
-      holdBandDeg: item.nullableRange("holdBandDeg"),
-      turn: turn === null ? null : parseTurnRegion(turn, vocabulary, tS[word.row]),
-      funnel: funnel === null ? null : {
-        lengthM: funnel.number("lengthM"),
-        startHalfWidthM: funnel.number("startHalfWidthM"),
-        endHalfWidthM: funnel.number("endHalfWidthM"),
-        axis: parsePlanLine(funnel, "axis", 2),
-        outline: parsePlanLine(funnel, "outline", 3),
-      },
-      check: verdict,
-      holdCheck,
-    };
+    // A word's rows end by the next word's first row, and never past the clearance.
+    const next = words[index + 1];
+    const lastStop = next === undefined ? joinRow : Math.min(next.row + vocabulary.headingLeadRows, joinRow);
+    const band = readHeadingBand(item, word.row, targetDeg, vocabulary, lastStop);
+    // THE CHECK counts exactly the drawn rows and their verdicts.
+    const check = item.child("check");
+    const rows = check.integer("rows", band.stopRow - band.firstRow, band.stopRow - band.firstRow);
+    const counted = band.inside.filter(Boolean).length;
+    const insideCount = check.integer("inside", 0, rows);
+    if (insideCount !== counted) check.fail(`says ${insideCount} rows inside, but the band's own flags count ${counted}`);
+    return { row: word.row, value: word.value, kind: word.kind, targetDeg, ...band, check: { rows, inside: insideCount } };
   });
 }
 
-function parseApproach(
-  reader: Reader, flight: { rows: number; captureRow: number; joinRow: number }, vocabulary: TrainingVocabulary,
-  tS: number[],
-): TrainingApproach {
+function parseApproach(reader: Reader, flight: { rows: number; captureRow: number; joinRow: number }): TrainingApproach {
   const approach = reader.child("approach");
   if (approach.number("clearanceRow") !== flight.joinRow) approach.fail(`clearanceRow is ${approach.raw("clearanceRow")}, the flight's joinRow ${flight.joinRow}`);
   if (approach.number("captureRow") !== flight.captureRow) approach.fail(`captureRow is ${approach.raw("captureRow")}, the flight's ${flight.captureRow}`);
@@ -1178,15 +1077,16 @@ function parseApproach(
   if (rows !== flight.rows - flight.captureRow) {
     corridor.fail(`rows is ${rows}, but the capture at row ${flight.captureRow} leaves ${flight.rows - flight.captureRow}`);
   }
-  const captureTurn = (turn: Reader) => {
-    const startRow = turn.integer("startRow", 0, flight.captureRow);
-    return {
-      startRow,
-      courseOnTrackDeg: turn.number("courseOnTrackDeg"),
-      check: parseTurnCheck(turn.child("check")),
-      turn: parseTurnRegion(turn.child("turn"), vocabulary, tS[startRow]),
-    };
-  };
+  // The capture turn runs from the clearance to the capture; a flight on the final at step 0 has none.
+  if ((capture === null) !== (flight.captureRow === 0)) {
+    approach.fail(`captureTurn is ${capture === null ? "absent" : "given"} with the capture at step ${flight.captureRow}`);
+  }
+  const captureTurn = (turn: Reader) => ({
+    startRow: turn.integer("startRow", flight.joinRow, flight.joinRow),
+    endRow: turn.integer("endRow", flight.captureRow, flight.captureRow),
+    courseOnTrackDeg: turn.number("courseOnTrackDeg"),
+    check: parseTurnCheck(turn.child("check")),
+  });
   const landing = approach.child("landing");
   const crossing = landing.nullableChild("crossing");
   const cutAtCrossing = landing.boolean("cutAtCrossing");
@@ -1195,7 +1095,6 @@ function parseApproach(
     clearanceRow: flight.joinRow,
     captureRow: flight.captureRow,
     captureBeforeThresholdM: approach.number("captureBeforeThresholdM"),
-    interceptInserted: approach.boolean("interceptInserted"),
     captureTurn: capture === null ? null : captureTurn(capture),
     courseBandDeg: approach.range("courseBandDeg"),
     corridor: {
@@ -1373,8 +1272,8 @@ function parseFlight(
     signals,
     words,
     envelopes: {
-      heading: parseHeading(envelopes, words.events, vocabulary, signals.tS),
-      approach: parseApproach(envelopes, { rows, captureRow, joinRow }, vocabulary, signals.tS),
+      heading: parseHeading(envelopes, words.events, vocabulary, joinRow),
+      approach: parseApproach(envelopes, { rows, captureRow, joinRow }),
       altitude: parseAltitude(envelopes, words.events, vocabulary, rows),
       angle: parseAngle(envelopes, words.events, vocabulary),
       speed: parseSpeed(envelopes, words.events, vocabulary, rows),

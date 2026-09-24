@@ -4,7 +4,7 @@ artefact (design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the wor
 `docs/2026-09-23_instruction_vocabulary_design.zh.md`).
 
     python run_ts.py instruction_training_export \\
-        --dir 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \\
+        --dir 4dTrajectory/outputs/POOLED/instruction_language/<an instruction-v3 artefact> \\
         --airports-root aeroviz-4d/public/data/airports \\
         --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 
@@ -71,14 +71,15 @@ from ts_transformer.repo_layout import REPO_ROOT
 #: MIRROR of `aeroviz-4d/src/data/trainingSample.ts` (`TRAINING_INDEX_SCHEMA`,
 #: `TRAINING_SAMPLE_SCHEMA`, `TRAINING_READABLE_SET_KIND`); the reader refuses anything else by
 #: name, so these move together. A name changes with its file's shape, on both sides, in the same
-#: change. Sample v5 is `instruction-v2`'s shape: a turn bounded by rate (the fastest turn on time
-#: and the slowest begun late, in plan AND as the heading against time — no turn band), the judged
-#: hold (`holdCheck`), the landing limits in the vocabulary and per candidate. Sample v6
-#: (2026-09-24) is v5 with a flight's ``typecode`` its own ICAO type or null (identity unresolved),
-#: from signals v2; v5 carried the type the dynamics flew, an A320 for every type without
-#: dynamics. The index keeps its v1 shape: sets of every vocabulary sit in it.
+#: change. Sample v7 (2026-09-24) is `instruction-v3`'s shape: a heading word is the band θ ± the
+#: heading tolerance over the rows it is judged on (from its row plus the lead to the next heading
+#: word's, `display.HeadingBand`) with each row's verdict — no turn region, turn end, hold funnel,
+#: split part or inserted intercept any more; the capture turn is its rows and the labeller's check;
+#: the vocabulary carries the lead. (v6 was `instruction-v2`'s: turns bounded by rate, judged holds;
+#: a flight's ``typecode`` its own ICAO type or null, as in v7.) The index keeps its v1 shape: sets
+#: of every vocabulary sit in it.
 INDEX_SCHEMA = "aeroviz-training-index-v1"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v6"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v7"
 KIND_READBACK = "vocabulary-readback"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"
@@ -101,8 +102,7 @@ SPLIT = "val"
 #: Why a word was issued — every `Instruction.kind` the labeller (`instructions/labeller/*`) writes
 #: into a kept sentence. MIRROR of `TRAINING_WORD_KINDS` in the frontend reader, which names each
 #: one; a kind outside this list stops the export by name rather than reaching a view unnamed.
-WORD_KINDS = ("initial", "turn", "turn-split", "intercept", "intercept-split", "clear", "target", "step", "angle",
-              "unspecified")
+WORD_KINDS = ("initial", "per-step", "clear", "target", "step", "angle", "unspecified")
 
 #: The approach column's classes by name, in their class order.
 APPROACH_NAMES = {APPROACH_NOT_CLEARED: "not cleared", APPROACH_CLEARED: "cleared", APPROACH_GO_AROUND: "go-around"}
@@ -218,21 +218,6 @@ def draw(airport: str, flights: list[FlightSignals], sentences: dict[str, np.nda
 
 
 # ---- one flight
-def _profile(profile: display.HeadingProfile) -> dict[str, list[float]]:
-    return {"tS": _r(profile.t_s, 3), "deg": _r(profile.deg, 3)}
-
-
-def _turn(region: display.TurnRegion, globe: Globe) -> dict[str, Any]:
-    return {"fromTrackDeg": round(region.from_track_deg, 3), "turnDeg": round(region.turn_deg, 3),
-            "rateMinDegS": region.rate_min_deg_s, "rateMaxDegS": region.rate_max_deg_s,
-            "bankMaxDeg": region.bank_max_deg, "startDelayMaxS": region.start_delay_max_s,
-            "slowFinished": region.slow_finished,
-            "region": globe.line(region.outline), "fastPath": globe.line(region.fast),
-            "slowPath": globe.line(region.slow), "end": globe.line(region.end),
-            "headingFast": _profile(region.heading_fast), "headingSlow": _profile(region.heading_slow),
-            "headingRegion": _profile(region.heading_outline)}
-
-
 def _turn_check(check: dict[str, Any]) -> dict[str, Any]:
     return {"progressOk": bool(check["progress_ok"]), "rateOk": bool(check["rate_ok"]),
             "meanRateDegS": round(float(check["mean_rate_deg_s"]), 4),
@@ -241,28 +226,17 @@ def _turn_check(check: dict[str, Any]) -> dict[str, Any]:
             "rateMinApplies": bool(check["rate_min_applies"])}
 
 
-def heading_payload(item: display.HeadingEnvelope, globe: Globe) -> dict[str, Any]:
-    word, check = item.word, item.turn_check
-    split = word.kind.endswith("-split")
-    return {
-        "row": word.row, "value": word.value, "kind": word.kind, "targetDeg": item.target_deg,
-        "split": {"part": int(word.info["part"]), "parts": int(word.info["parts"])} if split else None,
-        "turnEndRow": item.turn_end_row, "holdStartRow": item.hold_start_row, "holdEndRow": item.hold_end_row,
-        "fromTrackDeg": round(item.from_track_deg, 3), "targetOnTrackDeg": round(item.target_on_track_deg, 3),
-        "holdBandDeg": _pair(item.hold_band_deg, 3),
-        "turn": None if item.turn is None else _turn(item.turn, globe),
-        "funnel": None if item.funnel is None else {
-            "lengthM": round(item.funnel.length_m, 1), "startHalfWidthM": round(item.funnel.start_half_width_m, 1),
-            "endHalfWidthM": round(item.funnel.end_half_width_m, 1), "axis": globe.line(item.funnel.axis),
-            "outline": globe.line(item.funnel.outline)},
-        "check": None if check is None else {
-            "kind": check["kind"], "departureRow": int(check["departure_row"]), "arrivalRow": int(check["arrival_row"]),
-            "turnDeg": round(float(check["turn_deg"]), 3), "parts": int(check["parts"]), **_turn_check(check)},
-        "holdCheck": None if item.hold_check is None else {
-            "holdStartRow": int(item.hold_check["hold_start"]), "holdEndRow": int(item.hold_check["hold_end"]),
-            "rows": int(item.hold_check["rows"]), "inside": int(item.hold_check["inside"]),
-            "halfWidthEndM": round(float(item.hold_check["half_width_end_m"]), 1)},
-    }
+def band_payload(band: display.HeadingBand) -> dict[str, Any]:
+    """A heading word's band as the reader takes it: its judged rows, θ ± the tolerance on the chart's branch, and each
+    row's verdict (the executor's overlay writes its words' bands the same way)."""
+    return {"firstRow": band.first_row, "stopRow": band.stop_row, "targetOnTrackDeg": round(band.target_on_track_deg, 3),
+            "bandDeg": _pair(band.band_deg, 3), "inside": _flags(band.inside)}
+
+
+def heading_payload(item: display.HeadingEnvelope) -> dict[str, Any]:
+    word = item.word
+    return {"row": word.row, "value": word.value, "kind": word.kind, "targetDeg": item.target_deg,
+            **band_payload(item.band), "check": {"rows": int(item.check["rows"]), "inside": int(item.check["inside"])}}
 
 
 def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, stratum: str,
@@ -309,14 +283,13 @@ def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, 
         },
         "words": {"events": events, "inForce": [[int(v) for v in in_force[:, c]] for c in range(len(COLUMNS))]},
         "envelopes": {
-            "heading": [heading_payload(item, globe) for item in envelopes.heading],
+            "heading": [heading_payload(item) for item in envelopes.heading],
             "approach": {
                 "clearanceRow": reading.join_row, "captureRow": reading.capture_row,
                 "captureBeforeThresholdM": round(corridor.before_threshold_m, 1),
-                "interceptInserted": bool(reading.checks["intercept_inserted"]),
                 "captureTurn": None if capture is None else {
-                    "startRow": capture.start_row, "courseOnTrackDeg": round(capture.course_on_track_deg, 3),
-                    "check": _turn_check(capture.check), "turn": _turn(capture.region, globe)},
+                    "startRow": capture.start_row, "endRow": capture.end_row,
+                    "courseOnTrackDeg": round(capture.course_on_track_deg, 3), "check": _turn_check(capture.check)},
                 "courseBandDeg": _pair(envelopes.course_band_deg, 3),
                 "corridor": {"beforeThresholdM": round(corridor.before_threshold_m, 1),
                              "halfWidthAtCaptureM": round(corridor.half_width_at_capture_m, 2),
@@ -375,10 +348,11 @@ def vocabulary_block(spec: VocabularySpec, words: Words, labeller_sha256: str) -
         "classCounts": words.class_counts(),
         "approachClasses": [APPROACH_NAMES[index] for index in range(len(APPROACH_NAMES))],
         "headingTargetsDeg": [words.heading_deg(index) for index in range(words.n_heading)],
-        "headingToleranceDeg": spec.heading_tolerance_deg, "headingMaxTurnDeg": spec.heading_max_turn_deg,
+        "headingLeadS": spec.heading_lead_s, "headingLeadRows": spec.rows_exact(spec.heading_lead_s),
+        "headingToleranceDeg": spec.heading_tolerance_deg,
+        "turnOnsetRateDegS": spec.turn_onset_rate_deg_s,
         "turnRateMinDegS": spec.turn_rate_min_deg_s, "turnRateMaxDegS": spec.turn_rate_max_deg_s,
         "turnRateMinFromDeg": spec.turn_rate_min_from_deg, "turnBankMaxDeg": spec.turn_bank_max_deg,
-        "turnStartDelayMaxS": spec.turn_start_delay_max_s,
         "interceptAngleDeg": spec.intercept_angle_deg,
         "corridorHalfWidthM": spec.corridor_half_width_m, "corridorWideningDeg": spec.corridor_widening_deg,
         "corridorCourseToleranceDeg": spec.corridor_course_tolerance_deg,
@@ -604,8 +578,9 @@ def main(argv: list[str] | None = None) -> int:
                   "drawnFrom": (f"a permutation seeded {args.seed} of the {counts['pool']:,} labelled {SPLIT} flights "
                                 f"at {code} in {artefact_name}, read in that order until {args.per_stratum} "
                                 f"straight-in and {args.per_stratum} vectored were found ({counts['read']} read); "
-                                f"vectored = heading turns before the capture adding up to at least "
-                                f"{VECTORED_TURN_DEG:g}° (readout.flight_record)")}
+                                f"vectored = the heading turned before the capture — word to word, and on from the "
+                                f"last word to the course — adding up to at least {VECTORED_TURN_DEG:g}° "
+                                f"(readout.flight_record)")}
         sha = candidates_sha256(geometry)
         sample = {
             "schema": SAMPLE_SCHEMA, "setId": args.set_id, "airport": code, "writtenUtc": utc_now(),

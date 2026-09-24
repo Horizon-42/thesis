@@ -38,7 +38,7 @@ function open(cursorS = 0, column: TrainingColumn | null = null) {
 
 describe("TrainingPriorWindow", () => {
   it("reads the step at the cursor: the truth, its probability, and the prior's ranked words", () => {
-    open(20);   // step 10: the heading turn to 180° and the clearance
+    open(20);   // step 10: the heading word 180°
     const table = screen.getByRole("table", { name: "The prior at step 10" });
     const heading = within(table).getByText("heading").closest("tr")!;
     expect(heading.textContent).toMatch(/says 180°/);
@@ -51,12 +51,12 @@ describe("TrainingPriorWindow", () => {
   it("ticks each word the truth says after step 0, teal where the prior ranked it first and red where not", () => {
     open();
     const ticks = [...document.body.querySelectorAll(".training-prior-tick line")];
-    // the vectored flight's words after step 0: the clearance and the turn at 10, altitude and angle at 20, speed at 30
-    expect(ticks).toHaveLength(5);
+    // the vectored flight's words after step 0: heading at 8 and 10, the clearance, altitude and angle at 20, speed at 30
+    expect(ticks).toHaveLength(6);
     const red = ticks.filter((line) => line.getAttribute("stroke") === TRAINING_OUTSIDE_COLOR);
     expect(red).toHaveLength(1);
     expect(red[0].closest("g")!.getAttribute("aria-label")).toBe("heading 180° at step 10");
-    expect(ticks.filter((line) => line.getAttribute("stroke") === TRAINING_EXECUTOR_COLOR)).toHaveLength(4);
+    expect(ticks.filter((line) => line.getAttribute("stroke") === TRAINING_EXECUTOR_COLOR)).toHaveLength(5);
   });
 
   it("states the flight's likelihood beside the readout's", () => {
