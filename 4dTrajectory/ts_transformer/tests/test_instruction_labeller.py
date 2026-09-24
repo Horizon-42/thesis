@@ -148,6 +148,35 @@ def test_per_step_band_keeps_the_word_while_the_track_wanders_inside_it():
     assert count(pure) > 5 and count(banded) == 1
 
 
+# a westbound downwind north of an eastbound final (course 090), then one continuous left turn of 180° onto it,
+# 3° a row, captured where the turn ends
+DOWNWIND_TO_FINAL = np.concatenate((np.full(30, 270.0), 270.0 - np.arange(1, 61) * 3.0))
+
+
+def test_per_step_clearance_rules_place_the_clearance_and_stop_the_words():
+    """§10.1: with the last word the words run to the capture; at the capture turn's onset they stop at the turn's
+    first row, the downwind word still in force (it does not reach the final); at the onset but not before a word
+    that reaches the final, they run until 180 is in force (185 is 95° off the course, beyond 90° + the tolerance)."""
+    capture = 89
+    readings = {rule: _per_step(DOWNWIND_TO_FINAL, capture, 90.0, -100.0, heading_clearance=rule)[0]
+                for rule in ("last-word", "capture-turn", "capture-turn-converging")}
+
+    def heading(reading):
+        return [(i.row, round(Words(spec()).heading_deg(i.value))) for i in reading.instructions if i.column == HEADING]
+
+    last = readings["last-word"]
+    assert heading(last)[-1][1] == 95 and last.join_row == heading(last)[-1][0] < capture     # the row before the capture
+    onset = readings["capture-turn"]
+    assert onset.join_row == 29 and heading(onset) == [(0, 270)]
+    converging = readings["capture-turn-converging"]
+    words = heading(converging)
+    assert words[-1][1] == 180 and converging.join_row == words[-1][0] + 1
+    assert all(row < converging.join_row for row, _ in words)
+    for reading in readings.values():
+        cleared = [i.row for i in reading.instructions if i.column == APPROACH and i.value == APPROACH_CLEARED]
+        assert cleared == [reading.join_row]
+
+
 def test_per_step_refuses_a_last_word_that_does_not_reach_the_final():
     # flying the course 3 km left of the line: bent by the heading tolerance it meets the line only 38 km on
     with pytest.raises(Refused, match="does not reach the final"):

@@ -28,6 +28,9 @@ SPEC_SCHEMA = "ts-instruction-spec-v4"
 #: ``per-step`` — every row labelled with the grid heading nearest the track `heading_lead_s` later, a new word
 #: whenever that leaves the word in force by more than `heading_band_deg` (half a step: every change of grid cell).
 HEADING_READINGS = ("holds", "per-step")
+#: Where the per-step reading says the clearance (§10.1, under measurement): with the last heading word, at the capture
+#: turn's onset, or at the onset but not before the heading word in force reaches the final.
+HEADING_CLEARANCES = ("last-word", "capture-turn", "capture-turn-converging")
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
 #: more outside the approach gate.
@@ -52,10 +55,11 @@ class VocabularySpec:
     speed_smoothing_s: float
     # --- heading: absolute ground-track targets, flown the shorter way
     #: `HEADING_READINGS`. The hold / split / intercept fields below are read by ``holds`` only, the lead and
-    #: the band by ``per-step`` only: §10.1 compares the two, and the reading it rejects goes with its fields.
+    #: the band and the clearance by ``per-step`` only: §10.1 compares them, and what it rejects goes with its fields.
     heading_reading: str
     heading_lead_s: float
     heading_band_deg: float
+    heading_clearance: str
     heading_step_deg: float
     #: The hold band about a heading target (covers the grid's half step plus the track's wander).
     heading_tolerance_deg: float
@@ -169,6 +173,8 @@ class VocabularySpec:
         if self.heading_tolerance_deg < self.heading_step_deg / 2:
             raise ValueError("heading_tolerance_deg below half a heading step: a steady track between two "
                              "targets could never be held")
+        if self.heading_clearance not in HEADING_CLEARANCES:
+            raise ValueError(f"heading_clearance {self.heading_clearance!r} is not one of {HEADING_CLEARANCES}")
         if self.heading_reading not in HEADING_READINGS:
             raise ValueError(f"heading_reading {self.heading_reading!r} is not one of {HEADING_READINGS}")
         if self.heading_lead_s < 0.0 or not _divides(self.heading_lead_s, self.step_s):

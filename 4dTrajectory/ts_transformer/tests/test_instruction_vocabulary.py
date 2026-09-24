@@ -64,6 +64,7 @@ def test_from_dict_refuses_a_missing_or_an_extra_key_and_another_reading_rule():
     ({"altitude_tolerance_m": 10.0}, "half an altitude step"),
     ({"heading_step_deg": 7.0}, "does not divide 360"),
     ({"heading_reading": "zigzag"}, "is not one of"),
+    ({"heading_clearance": "whenever"}, "is not one of"),
     ({"heading_lead_s": 3.0}, "not a whole number of steps"),
     ({"heading_lead_s": -2.0}, "not a whole number of steps"),
     ({"heading_band_deg": 2.0}, "heading_band_deg below half a heading step"),

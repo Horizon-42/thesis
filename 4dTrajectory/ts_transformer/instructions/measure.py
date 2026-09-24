@@ -49,6 +49,7 @@ SUGGESTED: dict[str, Any] = {
     "heading_reading": "holds",
     "heading_lead_s": 0.0,
     "heading_band_deg": 2.5,
+    "heading_clearance": "last-word",
     "heading_step_deg": 5.0,
     "heading_min_hold_s": 10.0,
     "heading_max_turn_deg": 150.0,

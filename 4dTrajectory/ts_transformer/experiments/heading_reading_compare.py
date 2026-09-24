@@ -15,7 +15,9 @@ What differs between the variants besides the heading words: the clearance goes 
 too; every row records both.
 
 The variants (`VARIANTS`): ``H1`` — the holds reading (§3.2, instruction-v2's); ``H3-<step>-L<lead>`` — the per-step
-reading (§10.1) at a heading step of 5° or 2°, merged with a band of half a step, labelled ``lead`` seconds early.
+reading (§10.1) at a heading step of 5° or 2°, merged with a band of half a step, labelled ``lead`` seconds early,
+the clearance with the last word; ``-onset`` / ``-conv`` say it at the capture turn's onset / there but not before the
+word in force reaches the final (`VocabularySpec.heading_clearance`).
 
 Per flight and variant: the outcome (`judge.outcome_of`: the words are NOT judged — the per-step words' envelope is
 still to be designed), the evaluation verdict of the flown record paired with the observed flight's, the time-aligned
@@ -81,6 +83,7 @@ class Variant:
     reading: str
     step_deg: float
     lead_s: float
+    clearance: str = "last-word"
 
 
 VARIANTS = (
@@ -91,6 +94,8 @@ VARIANTS = (
     Variant("H3-5-L6", "per-step", 5.0, 6.0),
     Variant("H3-2-L4", "per-step", 2.0, 4.0),
     Variant("H3-2-L6", "per-step", 2.0, 6.0),
+    Variant("H3-5-L4-onset", "per-step", 5.0, 4.0, "capture-turn"),
+    Variant("H3-5-L4-conv", "per-step", 5.0, 4.0, "capture-turn-converging"),
 )
 
 
@@ -106,14 +111,15 @@ def base_spec(path: Path) -> tuple[VocabularySpec, str]:
     values = dict(record["spec"])
     values.pop("reading_rule")
     values.update(heading_reading="holds", heading_lead_s=0.0, heading_band_deg=values["heading_step_deg"] / 2,
-                  reading_rule=READING_RULE)
+                  heading_clearance="last-word", reading_rule=READING_RULE)
     return VocabularySpec.from_dict(values), record["sha256"]
 
 
 def variant_spec(base: VocabularySpec, variant: Variant) -> VocabularySpec:
     return replace(base, heading_reading=variant.reading, heading_step_deg=variant.step_deg,
                    heading_tolerance_deg=variant.step_deg / 2 + HEADING_WANDER_ALLOWANCE_DEG,
-                   heading_lead_s=variant.lead_s, heading_band_deg=variant.step_deg / 2)
+                   heading_lead_s=variant.lead_s, heading_band_deg=variant.step_deg / 2,
+                   heading_clearance=variant.clearance)
 
 
 def heading_words(reading: Reading) -> int:
@@ -279,7 +285,7 @@ def clearance_shift(rows: list[dict[str, Any]], h1_rows: list[dict[str, Any]], c
 def render(result: dict[str, Any]) -> str:
     lines = [f"heading readings on {result['sample']['flights']} {SPLIT} flights ({result['common_flights']} labelled "
              "by every variant); executor params held at the formal spec's", ""]
-    head = (f"{'variant':10s} {'group':14s} {'n':>5s} {'landed':>7s} {'eval':>6s}  {'mean dist p50/p90 km':>21s}  "
+    head = (f"{'variant':14s} {'group':14s} {'n':>5s} {'landed':>7s} {'eval':>6s}  {'mean dist p50/p90 km':>21s}  "
             f"{'max dist p50/p90 km':>20s}  {'hdg words p50':>13s}  {'steps w/ word':>13s}")
     lines.append(head)
     for name, by_group in result["common"].items():
@@ -288,7 +294,7 @@ def render(result: dict[str, Any]) -> str:
                 continue
             mean, largest, words = s["mean_horizontal_m"], s["max_horizontal_m"], s["heading_words_per_flight"]
             evaluation = s["replay_passes_where_observed_passes"]
-            lines.append(f"{name:10s} {stratum:14s} {s['flights']:5d} {100 * s['landed']:6.1f}% "
+            lines.append(f"{name:14s} {stratum:14s} {s['flights']:5d} {100 * s['landed']:6.1f}% "
                          f"{'—' if evaluation is None else f'{100 * evaluation:5.1f}%'}  "
                          f"{mean['p50'] / 1000:9.2f} / {mean['p90'] / 1000:5.2f}     "
                          f"{largest['p50'] / 1000:8.2f} / {largest['p90'] / 1000:5.2f}      {words['p50']:9.0f}      "
@@ -296,11 +302,11 @@ def render(result: dict[str, Any]) -> str:
                             f"{100 * s['share_of_pre_capture_steps_with_a_heading_word']:9.1f}%"))
     lines += ["", "every drawn flight, a refusal counted as a failure:"]
     for name, d in result["over_drawn"].items():
-        lines.append(f"  {name:10s} landed {100 * d['landed']:5.1f}%  eval {100 * d['replay_passes_where_observed_passes']:5.1f}%")
+        lines.append(f"  {name:14s} landed {100 * d['landed']:5.1f}%  eval {100 * d['replay_passes_where_observed_passes']:5.1f}%")
     lines += ["", "clearance and unspecified speed, rows later than H1 (p10/p50/p90):"]
     for name, shift in result["clearance_shift"].items():
         j, u = shift["join_row_minus_h1"], shift["unspecified_row_minus_h1"]
-        lines.append(f"  {name:10s} clearance {j['p10']:+.0f}/{j['p50']:+.0f}/{j['p90']:+.0f}  "
+        lines.append(f"  {name:14s} clearance {j['p10']:+.0f}/{j['p50']:+.0f}/{j['p90']:+.0f}  "
                      f"unspecified {u['p10']:+.0f}/{u['p50']:+.0f}/{u['p90']:+.0f}")
     lines += ["", "refused by the labeller, per variant: " + json.dumps(result["refused"])]
     return "\n".join(lines)

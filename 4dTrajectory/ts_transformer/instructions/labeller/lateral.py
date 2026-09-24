@@ -157,7 +157,7 @@ def read_lateral(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRe
         return reading
 
     if spec.heading_reading == "per-step":
-        return _read_per_step(track, relative, course_deg, reading, spec, words)
+        return _read_per_step(track, ground_speed, relative, course_deg, reading, spec, words)
     holds = find_holds(track, capture, spec)
     reading.holds = holds
     step = spec.heading_step_deg
@@ -251,33 +251,62 @@ def read_lateral(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRe
     return reading
 
 
-def _read_per_step(track: np.ndarray, relative: RunwayRelative, course_deg: float, reading: LateralReading,
-                   spec: VocabularySpec, words: Words) -> LateralReading:
+def _capture_turn_onset(track: np.ndarray, capture: int, course_deg: float, spec: VocabularySpec) -> int:
+    """Where the turn onto the course that ends at the capture began: walking back from the capture while the track
+    was already moving toward the course faster than the onset rate (the rule `_departure_row` reads a turn by)."""
+    course = float(track[capture]) + float(wrap180(course_deg - track[capture]))
+    threshold = spec.turn_onset_rate_deg_s * spec.step_s
+    row = capture
+    while row > 0 and (track[row] - track[row - 1]) * math.copysign(1.0, course - float(track[row - 1])) > threshold:
+        row -= 1
+    return row
+
+
+def _read_per_step(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRelative, course_deg: float,
+                   reading: LateralReading, spec: VocabularySpec, words: Words) -> LateralReading:
     """§10.1's per-step reading of a flight not on the final at row 0: each row before the capture labelled with the
     grid heading nearest the track `heading_lead_s` later (the capture row's track once that lies past it), and a
     new word only where that leaves the word in force by more than `heading_band_deg`. No hold, no split, no
-    inserted intercept: the words run to the capture, and the clearance goes with the last of them, which must
-    reach the final (`envelope.heading_converges`) or the flight is refused."""
+    inserted intercept. Where the clearance goes (`VocabularySpec.heading_clearance`): with the last word (the words
+    run to the capture; that word must reach the final, `envelope.heading_converges`, or the flight is refused); at
+    the capture turn's onset (`_capture_turn_onset`); or there but not before the word in force reaches the final.
+    Under the two capture-turn rules the words stop at the clearance and the capture turn is the executor's."""
     capture, step = reading.capture_row, spec.heading_step_deg
     lead = int(round(spec.heading_lead_s / spec.step_s))
     led = track[np.minimum(np.arange(capture) + lead, capture)]
     current = _snap(float(led[0]), step)
-    reading.instructions.append(Instruction(HEADING, words.heading_index(current), 0, "initial",
-                                            {"target_deg": current % 360.0}))
+    said = [Instruction(HEADING, words.heading_index(current), 0, "initial", {"target_deg": current % 360.0})]
+    in_force = np.empty(capture + 1)                 # the word in force at each row (said at a row before it)
+    in_force[:2] = current
     for row in range(1, capture):
         if abs(float(led[row]) - current) > spec.heading_band_deg:
             current = _snap(float(led[row]), step)
-            reading.instructions.append(Instruction(HEADING, words.heading_index(current), row, "per-step",
-                                                    {"target_deg": current % 360.0}))
-    last = reading.instructions[-1].row
-    offset, before = float(relative.right_of_course_m[last]), float(relative.before_threshold_m[last])
-    if not envelope.heading_converges(current, course_deg, offset, before, spec.heading_tolerance_deg,
-                                      spec.corridor_half_width_m, spec.corridor_widening_deg):
-        raise Refused("the last heading word does not reach the final",
-                      f"{current % 360:.0f}° at row {last}, {offset:+.0f} m off the line, {before:.0f} m before the threshold")
-    reading.join_row = last
-    reading.instructions.append(Instruction(APPROACH, APPROACH_CLEARED, last, "clear"))
-    if last > 0:
+            said.append(Instruction(HEADING, words.heading_index(current), row, "per-step", {"target_deg": current % 360.0}))
+        in_force[row + 1] = current
+
+    def converges(row: int, heading_deg: float) -> bool:
+        return envelope.heading_converges(heading_deg, course_deg, float(relative.right_of_course_m[row]),
+                                          float(relative.before_threshold_m[row]), spec.heading_tolerance_deg,
+                                          spec.corridor_half_width_m, spec.corridor_widening_deg)
+
+    if spec.heading_clearance == "last-word":
+        clear = said[-1].row
+        if not converges(clear, current):
+            raise Refused("the last heading word does not reach the final",
+                          f"{current % 360:.0f}° at row {clear}, {relative.right_of_course_m[clear]:+.0f} m off "
+                          f"the line, {relative.before_threshold_m[clear]:.0f} m before the threshold")
+    else:
+        clear = _capture_turn_onset(track, capture, course_deg, spec)
+        if spec.heading_clearance == "capture-turn-converging":
+            clear = next(row for row in range(clear, capture + 1)
+                         if row == capture or converges(row, float(in_force[row])))
+        said = [item for item in said if item.row < max(clear, 1)]
+        course = float(track[clear]) + float(wrap180(course_deg - track[clear]))
+        reading.capture_turn = {"start_row": clear, **_turn_check(track, ground_speed, clear, capture, course, spec)}
+    reading.instructions += said
+    reading.join_row = clear
+    reading.instructions.append(Instruction(APPROACH, APPROACH_CLEARED, clear, "clear"))
+    if clear > 0:
         reading.instructions.append(Instruction(APPROACH, APPROACH_NOT_CLEARED, 0, "initial"))
     return reading
 
