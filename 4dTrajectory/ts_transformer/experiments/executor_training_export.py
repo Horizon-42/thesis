@@ -3,10 +3,10 @@ by a formal executor spec, its flown track, its outcome and every word's verdict
 module: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`).
 
     python run_ts.py executor_training_export \\
-        --executor 4dTrajectory/outputs/POOLED/executor/v2_20260924 \\
-        --replay 4dTrajectory/outputs/POOLED/executor/v2_20260924/replay-val \\
-        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \\
-        --airports-root aeroviz-4d/public/data/airports --set instruction_v2 \\
+        --executor 4dTrajectory/outputs/POOLED/executor/<an executor spec of instruction-v3> \\
+        --replay 4dTrajectory/outputs/POOLED/executor/<that spec>/replay-val \\
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/<its instruction-v3 artefact> \\
+        --airports-root aeroviz-4d/public/data/airports --set instruction_v3 \\
         --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 
 Per airport, writes ``<airports-root>/<ICAO>/training/<overlay-id>/executor.json`` (schema `SCHEMA`; refused if the
@@ -30,13 +30,21 @@ though no executor file differs (docs/code-health-followups.md, 2026-09-24). Run
 
 **A verdict per word.** Each word of the sentence gets one status (`STATUSES`): ``inside`` / ``outside`` its envelope
 as the judge read it on the FLOWN track (a word's envelope re-drawn from where the executor was when it was said, not
-the observed flight's); ``not judged`` (a turn the capture took over, a word with no turn and no hold rows, or a flown
-track the labeller's gate refuses); ``not reached`` (the flight ended before the executor was told it, or after the
-flown track's last row); ``superseded`` (another word of its column was said on the same flown step, and only the
-later one flew); ``no check`` (the runway pointer — judged by the landing — an approach word other than the
-clearance, an angle word — it re-anchors its altitude tube — and "unspecified" speed). A split turn's parts share
-one verdict, as the judge counts them; the heading word the executor left to intercept the final on its own is failed
-with that check added.
+the observed flight's); ``not judged`` (a heading word with no row to judge — its rows, from the step it was told plus
+the lead to the next heading word's, begin at or past the clearance the executor was told or its capture, or the next
+heading word was told on the same step — or a flown track the labeller's gate refuses); ``not reached`` (the flight
+ended before the executor was told it, or after the flown track's last row); ``superseded`` (another word of its
+column was said on the same flown step, and only the later one flew); ``no check`` (the runway pointer — judged by the
+landing — an approach word other than the clearance, an angle word — it re-anchors its altitude tube — and
+"unspecified" speed). The heading word the executor left to intercept the final on its own is failed with that check
+added.
+
+**What a heading word's verdict draws** (vocabulary design §10.1): the band θ ± the heading tolerance over the flown rows
+the judge judged it on, and each row's verdict (`instructions.display.heading_band`: the judge's own check asked row by
+row, refused unless it gives back the judge's count), with the flown track as the judge's gate read it (smoothed, to the
+landing cut) — both on the chart branch the flown track is exported on, the judged track's step k the exported track's
+point k. Not for a dynamics failure: its judge read the failed state (non-finite, or a stall), which the exported track
+leaves out, so its words keep the judge's statuses and checks but draw no band and no judged track.
 
 A flight the replay does not fly (no identified type, or a type publishing no approach speed) is listed with the reason
 and no track. Units are SI; the flown track is exported every sentence step (2 s) to its outcome's row, with its
@@ -61,15 +69,16 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.flights import rebuild_series
 from ts_transformer.autopilot.frame import ALT, LAT, LON
-from ts_transformer.autopilot.judge import CROSSINGS, Verdict, _turn_groups, flown_signals, flown_track, said_at
+from ts_transformer.autopilot.judge import CROSSINGS, Verdict, flown_signals, flown_track, said_at
 from ts_transformer.experiments.executor_replay import REPLAY_SCHEMA
 from ts_transformer.experiments.instruction_training_export import (
-    KIND_EXECUTOR, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays, serialise_overlay,
-    write_overlay,
+    KIND_EXECUTOR, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
+    serialise_overlay, write_overlay,
 )
+from ts_transformer.instructions import display
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
-from ts_transformer.instructions.labeller.read import Reading, admit, read_flight
+from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, read_flight
 from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
@@ -80,8 +89,10 @@ from ts_transformer.io_utils import utc_now
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_EXECUTOR_SCHEMA`, `TRAINING_EXECUTOR_STATUSES`);
-#: the reader refuses anything else by name. A name changes with its file's shape, on both sides, in one change.
-SCHEMA = "aeroviz-training-executor-v1"
+#: the reader refuses anything else by name. A name changes with its file's shape, on both sides, in one change: v2
+#: (2026-09-24, instruction-v3) gives every heading word judged its band and per-row verdicts (``heading``) and every
+#: flight judged its flown track as the judge read it (``judgedTrackDeg``); v1's heading verdicts were turns and holds.
+SCHEMA = "aeroviz-training-executor-v2"
 PAYLOAD_FILE = "executor.json"
 RUNNER = "ts_transformer.experiments.executor_training_export"
 STATUSES = ("inside", "outside", "not judged", "not reached", "superseded", "no check")
@@ -128,24 +139,31 @@ def checkable(word: Instruction, words: Words) -> bool:
 
 def said_words(flown: Flown, index: int, verdict: Verdict, reading: Reading, observed: FlightSignals,
                geometry: AirportGeometry, spec: VocabularySpec
-               ) -> tuple[dict[tuple[int, int], int], list[Instruction], int]:
+               ) -> tuple[dict[tuple[int, int], int], list[Instruction], Admitted]:
     """MIRROR of `autopilot.judge.judge`'s word bookkeeping — `judge.py` is part of the executor's source hash, so it
     cannot hand this out itself without the formal spec refusing it: the cycle each word the executor's clock reached
     was said at (by its sentence cell), those words at the flown rows they were said at (`judge.said_at`, the
-    superseded ones dropped), and the rows of the flown track as the labeller's gate read it. Only for a flight whose
-    flown track passed the gate (``verdict.words`` set). `word_verdicts`' callers check the result reproduces the
-    judge's own counts."""
+    superseded ones dropped), and the flown track as the labeller's gate read it (its rows are the rows judged). Only
+    for a flight whose flown track passed the gate (``verdict.words`` set). `word_verdicts`' callers check the result
+    reproduces the judge's own counts."""
     last = int(flown.done_cycle[index]) + 1
     states = flown.states[index, : last + 1].cpu().numpy()
     step_rows = int(round(spec.step_s / flown.cycle_s))
     read_to = verdict.end_row - 1 if verdict.outcome in CROSSINGS else verdict.end_row
-    rows = admit(flown_signals(flown_track(states, geometry), read_to, observed, step_rows), geometry, spec).signals.n_rows
+    flight = admit(flown_signals(flown_track(states, geometry), read_to, observed, step_rows), geometry, spec)
     sentence = flown.sentence_s[index, :last].cpu().numpy()
     said_cycles = [int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9)) for word in reading.instructions]
     said = [(word, cycle // step_rows) for word, cycle in zip(reading.instructions, said_cycles) if cycle < len(sentence)]
     moved, _superseded = said_at([word for word, _ in said], [row for _, row in said])
     said_cycle = {_cell(word): cycle for word, cycle in zip(reading.instructions, said_cycles) if cycle < len(sentence)}
-    return said_cycle, moved, rows
+    return said_cycle, moved, flight
+
+
+def chart_shift_deg(flown: Flown, index: int, geometry: AirportGeometry, observed_track_deg: float) -> float:
+    """The whole turns that put the flown track on the chart's branch: the observed smoothed track's at row 0
+    (``observed_track_deg``), so the two read on one heading axis."""
+    states = flown.states[index, :1].cpu().numpy()
+    return 360.0 * round((observed_track_deg - float(flown_track(states, geometry)["track"][0])) / 360.0)
 
 
 def _check(name: str, ok: bool, inside: int | None = None, rows: int | None = None) -> dict[str, Any]:
@@ -153,13 +171,16 @@ def _check(name: str, ok: bool, inside: int | None = None, rows: int | None = No
 
 
 def word_verdicts(flown: Flown, index: int, verdict: Verdict, reading: Reading, observed: FlightSignals,
-                  geometry: AirportGeometry, spec: VocabularySpec, words: Words
-                  ) -> tuple[list[dict[str, Any]], list[tuple[str, bool]] | None, int]:
+                  geometry: AirportGeometry, spec: VocabularySpec, words: Words, shift_deg: float
+                  ) -> tuple[list[dict[str, Any]], list[tuple[str, bool]] | None, int, np.ndarray | None]:
     """One verdict per word of ``reading``'s sentence, in its order; the words judged as `replay.word_results`
     lists them (None when the flown track did not pass the gate) and the heading words not judged — for the caller
-    to check against the judge's own count."""
+    to check against the judge's own count — and the flown track as the judge read it (smoothed, to the landing cut;
+    None with the gate refusing it, or for a dynamics failure: see the module's note). ``shift_deg``
+    (`chart_shift_deg`) moves that track and each heading word's band onto the chart's branch."""
     out = {_cell(word): {"row": int(word.row), "column": int(word.column), "value": int(word.value), "status": None,
-                         "flownRow": None, "checks": [], "reason": None} for word in reading.instructions}
+                         "flownRow": None, "heading": None, "checks": [], "reason": None}
+           for word in reading.instructions}
     by_cell = {_cell(word): word for word in reading.instructions}
 
     def settle(cell: tuple[int, int], status: str, reason: str | None = None) -> None:
@@ -174,9 +195,10 @@ def word_verdicts(flown: Flown, index: int, verdict: Verdict, reading: Reading, 
                 settle(cell, "not judged", f"the flown track did not pass the labeller's gate ({verdict.refused})")
             else:
                 settle(cell, "no check", no_check_reason(by_cell[cell]))
-        return list(out.values()), None, 0
+        return list(out.values()), None, 0, None
 
-    said, moved, rows = said_words(flown, index, verdict, reading, observed, geometry, spec)
+    said, moved, flight = said_words(flown, index, verdict, reading, observed, geometry, spec)
+    rows = flight.signals.n_rows
     flown_row = {_said_cell(word): int(word.row) for word in moved}
     for cell in remaining():
         if cell not in said:
@@ -203,39 +225,42 @@ def word_verdicts(flown: Flown, index: int, verdict: Verdict, reading: Reading, 
         off_cell = max(told, key=lambda cell: (said[cell], cell[0]))
         judged.append(("heading", False))
 
-    groups = _turn_groups(sorted((word for word in reached if word.column == HEADING), key=lambda word: word.row))
+    # the heading words the judge judged, in its order (`judge.judge`: the words reached, as said), each on the rows it
+    # judged: from its flown row plus the lead, as many as its result counts
+    heading = [word for word in reached if word.column == HEADING]
     results = verdict.words["heading"]
-    if len(groups) != len(results):
-        raise ValueError(f"{reading.dataset_id}: {len(groups)} heading turns said, the judge judged {len(results)}")
-    for group, result in zip(groups, results):
-        if (result["row"], result["words"]) != (group[0].row, len(group)):
-            raise ValueError(f"{reading.dataset_id}: the judge's heading result at row {result['row']} is not the turn "
-                             f"said at row {group[0].row}")
-        cells = [_said_cell(word) for word in group]
-        hold = result["hold"] if isinstance(result["hold"], dict) else None
-        if result["turn"] is None and hold is None:
-            # as `replay.word_results` counts it: a turn the capture superseded, or a word with neither a turn nor a
-            # hold judged
-            not_judged += len(group)
-            reason = ("the executor's capture took this turn over before it progressed, or it was said at or after "
-                      "the capture" if result["superseded"] else
-                      f"its hold is {result['hold']}" if isinstance(result["hold"], str) else
-                      "no turn to judge and no hold rows")
-            for cell in cells:
-                settle(cell, "not judged", reason)
+    if [word.row for word in heading] != [result["row"] for result in results]:
+        raise ValueError(f"{reading.dataset_id}: the judge's heading results are not the heading words said")
+    lead = spec.rows_exact(spec.heading_lead_s)
+    # the judge read the failed state of a dynamics failure, which the exported track leaves out: nothing to draw on
+    drawn = verdict.outcome != "dynamics_failure"
+    track = flight.smoothed.track_deg + shift_deg
+    for number, (word, result) in enumerate(zip(heading, results)):
+        cell = _said_cell(word)
+        first_row = word.row + lead
+        if drawn:
+            band = display.heading_band(track, word.row, float(word.info["target_deg"]), first_row,
+                                        first_row + result["rows"], spec.heading_tolerance_deg, result)
+            out[cell]["heading"] = band_payload(band)
+        if result["rows"] == 0:
+            not_judged += 1
+            following = heading[number + 1] if number + 1 < len(heading) else None
+            if following is not None and following.row == word.row:
+                reason = "no row to judge: the next heading word was told on the same flown step"
+            elif first_row >= rows:
+                reason = (f"no row to judge: its rows, {spec.heading_lead_s:g} s after it was told, begin past the end "
+                          "of the flown track its judge read")
+            else:
+                reason = (f"no row to judge: its rows, {spec.heading_lead_s:g} s after it was told, begin at or past "
+                          "the clearance the executor was told or its capture (the capture turn is judged in its place)")
+            settle(cell, "not judged", reason)
             continue
-        checks = []
-        if result["turn"] is not None:
-            checks += [_check("turn reached its target", result["turn"]["reached"]),
-                       _check("turn monotone", result["turn"]["progress_ok"]),
-                       _check("turn rate and bank", result["turn"]["rate_ok"])]
-        if hold is not None:
-            checks.append(_check("hold in its funnel", hold["inside"] == hold["rows"], hold["inside"], hold["rows"]))
-        ok = all(check["ok"] for check in checks)
-        for cell in cells:
-            out[cell]["checks"] = list(checks)
-            settle(cell, "inside" if ok else "outside")
-        judged += [("heading", ok)] * len(group)
+        ok = result["inside"] == result["rows"]
+        out[cell]["checks"] = [_check(f"track within ±{spec.heading_tolerance_deg:g}° of the word, "
+                                      f"{spec.heading_lead_s:g} s after it was told, to the next word's",
+                                      ok, result["inside"], result["rows"])]
+        settle(cell, "inside" if ok else "outside")
+        judged.append(("heading", ok))
     if off_cell is not None:
         out[off_cell]["checks"] = [*out[off_cell]["checks"],
                                    _check(f"held until the capture — left for {off_cycles} cycles to intercept the final "
@@ -290,14 +315,14 @@ def word_verdicts(flown: Flown, index: int, verdict: Verdict, reading: Reading, 
         if item["status"] in ("inside", "outside") and (item["status"] == "inside") != all(c["ok"] for c in item["checks"]):
             raise ValueError(f"{reading.dataset_id}: the word at step {item['row']}, column {item['column']} is "
                              f"{item['status']} but its checks say {item['checks']}")
-    return list(out.values()), judged, not_judged
+    return list(out.values()), judged, not_judged, track if drawn else None
 
 
 def track_payload(flown: Flown, index: int, verdict: Verdict, geometry: AirportGeometry, spec: VocabularySpec,
-                  observed_track_deg: float) -> dict[str, Any]:
+                  shift_deg: float) -> dict[str, Any]:
     """The flown track every sentence step from row 0 to its outcome's row (a dynamics failure: to the row before
-    it, as the records keep it), in the airport frame and on the globe; its track unwrapped on the observed smoothed
-    track's branch at row 0, so the two read on one heading axis."""
+    it, as the records keep it), in the airport frame and on the globe; its track unwrapped and moved by
+    ``shift_deg`` (`chart_shift_deg`) onto the observed smoothed track's branch, so the two read on one heading axis."""
     end = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
     states = flown.states[index, : end + 1].cpu().numpy()
     track = flown_track(states, geometry)
@@ -308,8 +333,7 @@ def track_payload(flown: Flown, index: int, verdict: Verdict, geometry: AirportG
     lat, lon, height = states[rows, LAT], states[rows, LON], states[rows, ALT]
     undulation = np.asarray(geoid_undulation_m(list(lat), list(lon)), dtype=np.float64)
     distance = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(track["e"]), np.diff(track["n"])))))
-    heading = track["track"][rows]
-    heading = heading + 360.0 * round((observed_track_deg - float(heading[0])) / 360.0)
+    heading = track["track"][rows] + shift_deg
     return {"tS": _r(np.asarray(rows) * flown.cycle_s, 3), "eM": _r(track["e"][rows], 1), "nM": _r(track["n"][rows], 1),
             "lon": _r(lon, 7), "lat": _r(lat, 7), "altitudeM": _r(height, 2), "altitudeHaeM": _r(height + undulation, 2),
             "groundSpeedMps": _r(track["ground_speed"][rows], 3), "trackDeg": _r(heading, 3),
@@ -340,9 +364,11 @@ def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index:
     if flown is None:
         return {**base, "flown": False, "outcome": None, "flewTheSentence": None, "endS": None, "crossing": None,
                 "refused": None, "evaluation": None, "alignment": None, "limits": None, "counts": None, "track": None,
-                "words": []}
+                "judgedTrackDeg": None, "words": []}
     dataset_id = item["datasetId"]
-    verdicts, judged, not_judged = word_verdicts(flown, index, verdict, reading, observed, geometry, spec, words)
+    shift = chart_shift_deg(flown, index, geometry, item["signals"]["smoothed"]["trackDeg"][0])
+    verdicts, judged, not_judged, judged_track = word_verdicts(flown, index, verdict, reading, observed, geometry, spec,
+                                                               words, shift)
     counted = replay.word_results(verdict)
     theirs = None if counted is None else [list(pair) for pair in counted[0]]
     ours = None if judged is None else [list(pair) for pair in judged]
@@ -384,7 +410,8 @@ def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index:
         "counts": {"wordsJudged": 0 if judged is None else len(judged),
                    "wordsInside": 0 if judged is None else sum(ok for _, ok in judged),
                    "headingWordsNotJudged": not_judged},
-        "track": track_payload(flown, index, verdict, geometry, spec, item["signals"]["smoothed"]["trackDeg"][0]),
+        "track": track_payload(flown, index, verdict, geometry, spec, shift),
+        "judgedTrackDeg": None if judged_track is None else _r(judged_track, 3),
         "words": verdicts,
     }
 
@@ -438,7 +465,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instructions", type=Path, required=True, help="the instruction artefact it flies")
     parser.add_argument("--airports-root", type=Path, required=True,
                         help="the frontend's airports directory (…/public/data/airports)")
-    parser.add_argument("--set", required=True, help="the Training set whose flights are replayed, e.g. instruction_v2")
+    parser.add_argument("--set", required=True, help="the Training set whose flights are replayed, e.g. instruction_v3")
     parser.add_argument("--airport", action="append", required=True, help="an ICAO code; repeat for several")
     parser.add_argument("--overlay-id", default=None, help="default: executor_<the spec directory's name>")
     parser.add_argument("--device", default="cpu")

@@ -29,10 +29,9 @@ import {
   TRAINING_CANDIDATE_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
-  TRAINING_FUNNEL_COLOR,
+  TRAINING_HEADING_BAND_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TUBE_COLOR,
-  TRAINING_TURN_COLOR,
 } from "../utils/trainingWordColors";
 import { trainingOverlaysPath, type TrainingExecutorFlight } from "../data/trainingOverlays";
 import { TrainingExecutorGate, TrainingPriorReadout } from "./TrainingResults";
@@ -51,10 +50,8 @@ import {
 
 /** The Draw switches, in drawing order: what each shows, in its own colour. */
 const LAYER_SWITCHES: Array<{ layer: keyof TrainingLayers; colour: string; text: string }> = [
-  { layer: "turnPaths", colour: TRAINING_TURN_COLOR, text: "turns: the fastest and the slowest, and where each may end" },
-  { layer: "turnRegions", colour: TRAINING_TURN_COLOR, text: "turn regions: the area between the two turns" },
-  { layer: "holdFunnels", colour: TRAINING_FUNNEL_COLOR, text: "hold funnels: where a hold may fly after its turn" },
-  { layer: "corridor", colour: TRAINING_CORRIDOR_COLOR, text: "the capture corridor" },
+  { layer: "headingBands", colour: TRAINING_HEADING_BAND_COLOR, text: "heading words: each word's band over the rows it is judged on" },
+  { layer: "corridor", colour: TRAINING_CORRIDOR_COLOR, text: "the capture: its turn and the corridor" },
   { layer: "vertical", colour: TRAINING_TUBE_COLOR, text: "vertical: the altitude tubes" },
   { layer: "candidates", colour: TRAINING_CANDIDATE_COLOR, text: "every candidate runway" },
 ];
@@ -76,7 +73,7 @@ const SHA_SHOWN = 12;
 
 /** The command that writes the export, as the empty state shows it. */
 export const TRAINING_EXPORT_COMMAND =
-  "python run_ts.py instruction_training_export --dir 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 " +
+  "python run_ts.py instruction_training_export --dir 4dTrajectory/outputs/POOLED/instruction_language/<an instruction-v3 artefact> " +
   "--airports-root aeroviz-4d/public/data/airports --airport ";
 
 /** The commands that write the overlays, as the switches show them when a set has none. */
@@ -281,8 +278,8 @@ export default function TrainingPanel() {
       {aboutOpen ? (
         <p className="training-panel-lede">
           Each arrival read as the instructions a controller could have given — six columns per
-          2 s step — with the region every word allows from where it was issued: the turn and
-          the hold funnel of a heading, the capture corridor, the altitude tube, the speed band.
+          2 s step — with what every word allows: a heading word's band over the rows it is judged
+          on, the capture turn and corridor, the altitude tube, the speed band.
         </p>
       ) : null}
 
@@ -424,12 +421,18 @@ export default function TrainingPanel() {
                   <div>
                     <dt>Heading</dt>
                     <dd>
-                      {sample.vocabulary.headingTargetsDeg[1] - sample.vocabulary.headingTargetsDeg[0]}° grid,
-                      hold ±{sample.vocabulary.headingToleranceDeg}°, at most {sample.vocabulary.headingMaxTurnDeg}° per
-                      word; a turn at {sample.vocabulary.turnRateMinDegS}–{sample.vocabulary.turnRateMaxDegS}°/s (the
-                      lowest rate only for turns of {sample.vocabulary.turnRateMinFromDeg}° or more) and at most{" "}
-                      {sample.vocabulary.turnBankMaxDeg}° of bank, begun up to {sample.vocabulary.turnStartDelayMaxS} s
-                      after the word
+                      {sample.vocabulary.headingTargetsDeg[1] - sample.vocabulary.headingTargetsDeg[0]}° grid, read
+                      step by step: a word says where the track is {sample.vocabulary.headingLeadS} s later, and from
+                      then to the next word's the track stays within ±{sample.vocabulary.headingToleranceDeg}° of it
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Capture turn</dt>
+                    <dd>
+                      from the clearance onto the course, begun where the track turns toward it faster than{" "}
+                      {sample.vocabulary.turnOnsetRateDegS}°/s: monotone, {sample.vocabulary.turnRateMinDegS}–
+                      {sample.vocabulary.turnRateMaxDegS}°/s (the lowest rate only for turns of{" "}
+                      {sample.vocabulary.turnRateMinFromDeg}° or more), at most {sample.vocabulary.turnBankMaxDeg}° of bank
                     </dd>
                   </div>
                   <div>

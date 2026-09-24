@@ -10,16 +10,16 @@
 
 import { useState } from "react";
 import type { TrainingLayers } from "../context/AppContext";
-import { TRAINING_WEAK_HOLD_WIDTH_M, type TrainingVocabulary } from "../data/trainingSample";
+import type { TrainingVocabulary } from "../data/trainingSample";
 import {
+  TRAINING_CAPTURE_TURN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_ENVELOPE_ALPHA,
   TRAINING_EXECUTOR_COLOR,
-  TRAINING_FUNNEL_COLOR,
+  TRAINING_HEADING_BAND_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
   TRAINING_TUBE_COLOR,
-  TRAINING_TURN_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 
@@ -44,34 +44,25 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack = fal
   executorTrack?: boolean;
 }) {
   const [open, setOpen] = useState<boolean>(true);
-  const weakKm = TRAINING_WEAK_HOLD_WIDTH_M / 1000;
   const rows: Array<{ key: string; swatch: Swatch; text: string; shown: boolean }> = [
     { key: "track", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, shown: true,
       text: "the track (and, faint on the ground, its ground trace)" },
-    { key: "turns", swatch: { kind: "line", colour: TRAINING_TURN_COLOR }, shown: layers.turnPaths,
-      text: `a turn: the fastest, and the slowest (${vocabulary.turnRateMinDegS}°/s, begun ${vocabulary.turnStartDelayMaxS} s ` +
-        "late); dashed where the slowest does not finish" },
-    { key: "turn-end", swatch: { kind: "area", colour: TRAINING_TURN_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.turnEnd }, shown: layers.turnPaths,
-      text: "where the turn may end: between the two turns' ends" },
-    { key: "turn-region", swatch: { kind: "area", colour: TRAINING_TURN_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.turn }, shown: layers.turnRegions,
-      text: "turn region: the area between the two turns" },
-    { key: "funnel", swatch: { kind: "area", colour: TRAINING_FUNNEL_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.funnel }, shown: layers.holdFunnels,
-      text: `hold funnel: after the turn, along the new heading ±${vocabulary.headingToleranceDeg}° from anywhere the ` +
-        "turn may have ended" },
-    { key: "funnel-dashed", swatch: { kind: "line", colour: TRAINING_FUNNEL_COLOR, dash: "4 3" }, shown: layers.holdFunnels,
-      text: "a hold the labeller does not judge" },
-    { key: "funnel-dotted", swatch: { kind: "line", colour: TRAINING_FUNNEL_COLOR, dash: "1 3" }, shown: layers.holdFunnels,
-      text: `a judged hold whose funnel starts over ${weakKm} km wide: a weak check` },
+    { key: "heading", swatch: { kind: "line", colour: TRAINING_HEADING_BAND_COLOR }, shown: layers.headingBands,
+      text: `a heading word's judged rows, on the ground: from ${vocabulary.headingLeadS} s after it is said to the next ` +
+        `word's, where the track must stay within ±${vocabulary.headingToleranceDeg}° of it` },
+    { key: "capture-turn", swatch: { kind: "line", colour: TRAINING_CAPTURE_TURN_COLOR, dash: "4 3" }, shown: layers.corridor,
+      text: "the capture turn's rows on the ground: from the clearance onto the course" },
     { key: "corridor", swatch: { kind: "area", colour: TRAINING_CORRIDOR_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.corridor }, shown: layers.corridor,
       text: "the capture corridor to the threshold" },
     { key: "tube", swatch: { kind: "area", colour: TRAINING_TUBE_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.tube }, shown: layers.vertical,
       text: `an altitude word's tube, ±${vocabulary.altitudeToleranceM} m` },
     { key: "outside", swatch: { kind: "line", colour: TRAINING_OUTSIDE_COLOR }, shown: true,
-      text: "red: the labeller's check failed (a turn, rows outside a funnel or a tube)" },
+      text: "red: the labeller's check failed (rows outside a heading band or a tube, a capture turn)" },
     { key: "selected", swatch: { kind: "line", colour: TRAINING_WORD_COLOR }, shown: true,
-      text: "yellow: the selected word — its envelope's edge and the rows it is in force; the rest fades" },
+      text: "yellow: the selected word — its envelope and the rows it is in force; the rest fades" },
     { key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: executorTrack,
-      text: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0" },
+      text: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0" +
+        (layers.headingBands ? "; red on its ground trace: its rows outside the heading word it was told" : "") },
   ];
 
   return (

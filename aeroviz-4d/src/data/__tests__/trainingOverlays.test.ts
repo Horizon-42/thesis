@@ -74,17 +74,94 @@ describe("parseTrainingExecutorOverlay", () => {
     if (!parsed.ok) throw new Error(parsed.problem);
     const [vectored, straight] = parsed.value.flights;
     expect(vectored.flightKey).toBe(VECTORED_KEY);
-    expect(executorWordCounts(vectored)).toEqual({ inside: 5, outside: 1, notJudged: 0, notReached: 0, superseded: 0 });
-    expect(executorWordAt(vectored, 10, "approach")?.status).toBe("outside");
-    expect(executorWordAt(vectored, 10, "heading")?.status).toBe("inside");
+    expect(executorWordCounts(vectored)).toEqual({ inside: 5, outside: 2, notJudged: 0, notReached: 0, superseded: 0 });
+    expect(executorWordAt(vectored, 20, "approach")?.status).toBe("outside");
+    expect(executorWordAt(vectored, 8, "heading")?.status).toBe("inside");
     expect(executorWordAt(vectored, 5, "heading")).toBeNull();          // no word is said there
-    expect(straight).toMatchObject({ flightKey: STRAIGHT_KEY, flown: false, group: "no identified type", track: null, words: [] });
+    // a heading word carries its band on the flown rows, from where it was told plus the lead; no other word does
+    const turned = executorWordAt(vectored, 10, "heading")!;
+    expect(turned).toMatchObject({ status: "outside", heading: { firstRow: 12, stopRow: 20, targetOnTrackDeg: 180 } });
+    expect(turned.heading!.inside.filter((ok) => !ok)).toHaveLength(1);
+    expect(executorWordAt(vectored, 20, "approach")?.heading).toBeNull();
+    expect(vectored.judgedTrackDeg).toHaveLength(49);
+    expect(straight).toMatchObject({ flightKey: STRAIGHT_KEY, flown: false, group: "no identified type", track: null,
+      judgedTrackDeg: null, words: [] });
     expect(parsed.value.gate["own dynamics"].KXXX.all.clears).toEqual({ landed: true, words: false, evaluation: true });
     expect(parsed.value.gate["stand-in dynamics"].KXXX.all.notGated).toMatch(/stand-in/);
   });
 
-  it("refuses another schema by name", () => {
-    expect(executorRefusal((raw) => { raw.schema = "aeroviz-training-executor-v0"; })).toContain(TRAINING_EXECUTOR_SCHEMA);
+  it("refuses another schema by name — v1's turns and holds included", () => {
+    for (const schema of ["aeroviz-training-executor-v0", "aeroviz-training-executor-v1"]) {
+      expect(executorRefusal((raw) => { raw.schema = schema; })).toContain(TRAINING_EXECUTOR_SCHEMA);
+    }
+  });
+
+  it("refuses a heading band that is not a lead after the flown step the word was told, or runs past the judged track", () => {
+    expect(executorRefusal((raw) => { raw.flights[0].words[7].heading.firstRow = 11; raw.flights[0].words[7].heading.inside.push(1); }))
+      .toMatch(/words\[7\]\.heading: firstRow is 11, but a word told at step 10 is judged from 12/);
+    expect(executorRefusal((raw) => { raw.flights[0].judgedTrackDeg = raw.flights[0].judgedTrackDeg.slice(0, 15); }))
+      .toMatch(/words\[7\]\.heading: stopRow is 20, not in 12…15/);
+  });
+
+  it("refuses a heading band its word's check does not count, or on a word that is not a heading word", () => {
+    expect(executorRefusal((raw) => { raw.flights[0].words[7].heading.inside[0] = 1; }))
+      .toMatch(/its band counts 8 of 8 rows inside, and no check says so/);
+    expect(executorRefusal((raw) => { raw.flights[0].words[3].heading = raw.flights[0].words[2].heading; }))
+      .toMatch(/words\[3\]: carries a heading band, but it is not a heading word the judge judged/);
+    // a word with no row of its own is not judged — unless it was left to intercept the final on its own
+    expect(executorRefusal((raw) => {
+      Object.assign(raw.flights[0].words[6].heading, { stopRow: 10, inside: [] });
+      raw.flights[0].words[6].checks = [{ name: "a check of something else", ok: true, inside: null, rows: null }];
+    })).toMatch(/words\[6\]: is inside with no row judged/);
+    const raw: any = mockExecutorOverlay();
+    Object.assign(raw.flights[0].words[6], { status: "not judged", checks: [], reason: "no row to judge" });
+    Object.assign(raw.flights[0].words[6].heading, { stopRow: 10, inside: [] });
+    raw.flights[0].counts.wordsJudged = 6;
+    raw.flights[0].counts.wordsInside = 4;
+    const parsed = parseTrainingExecutorOverlay(raw, sample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.flights[0].words[6]).toMatchObject({ status: "not judged", heading: { firstRow: 10, stopRow: 10, inside: [] } });
+  });
+
+  it("refuses a judged track given with the gate refusing it or the dynamics failing, or missing otherwise", () => {
+    expect(executorRefusal((raw) => { raw.flights[0].judgedTrackDeg = null; }))
+      .toMatch(/judgedTrackDeg is absent for a flight judged on its flown track/);
+    expect(executorRefusal((raw) => { raw.flights[0].refused = "too short"; }))
+      .toMatch(/judgedTrackDeg is given for a flight whose flown track the gate refused/);
+    expect(executorRefusal((raw) => { raw.flights[0].outcome = "dynamics_failure"; }))
+      .toMatch(/judgedTrackDeg is given for a flight whose dynamics failed/);
+    // a dynamics failure keeps its words' statuses and checks, and draws no band
+    const raw: any = mockExecutorOverlay();
+    raw.flights[0].outcome = "dynamics_failure";
+    raw.flights[0].judgedTrackDeg = null;
+    for (const word of raw.flights[0].words) word.heading = null;
+    const parsed = parseTrainingExecutorOverlay(raw, sample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.flights[0].words.filter((word) => word.status === "outside")).toHaveLength(2);
+  });
+
+  it("refuses a judged track whose steps are not the flown track's points", () => {
+    expect(executorRefusal((raw) => { raw.flights[0].track.tS[3] = 7; }))
+      .toMatch(/judgedTrackDeg's step 3 is not the flown track's point 3 \(7 s\)/);
+  });
+
+  it("refuses a heading word the judge judged that carries no band", () => {
+    expect(executorRefusal((raw) => { raw.flights[0].words[6].heading = null; }))
+      .toMatch(/words\[6\]: is a heading word the judge judged on the flown track, and carries no band/);
+  });
+
+  it("refuses a judged count that is not one per verdict, the word left to intercept on its own once more", () => {
+    expect(executorRefusal((raw) => { raw.flights[0].counts.wordsJudged = 8; raw.flights[0].counts.wordsInside = 5; }))
+      .toMatch(/says 8 words judged, but 7 words carry a verdict/);
+    // left to intercept the final on its own: that word's two checks, counted twice
+    const raw: any = mockExecutorOverlay();
+    const word = raw.flights[0].words[6];
+    word.status = "outside";
+    word.checks.push({ name: "held until the capture — left for 3 cycles to intercept the final on its own", ok: false, inside: null, rows: null });
+    raw.flights[0].counts.wordsJudged = 8;
+    raw.flights[0].counts.wordsInside = 4;
+    const parsed = parseTrainingExecutorOverlay(raw, sample());
+    if (!parsed.ok) throw new Error(parsed.problem);
   });
 
   it("refuses an overlay drawn over the set as it was before a re-export", () => {
@@ -103,7 +180,7 @@ describe("parseTrainingExecutorOverlay", () => {
 
   it("refuses a status it does not know, and a verdict its own checks contradict", () => {
     expect(executorRefusal((raw) => { raw.flights[0].words[2].status = "maybe"; })).toMatch(/status is maybe/);
-    expect(executorRefusal((raw) => { raw.flights[0].words[6].status = "inside"; }))
+    expect(executorRefusal((raw) => { raw.flights[0].words[8].status = "inside"; }))
       .toMatch(/is inside, but its checks say .*corridor held to the landing false/);
     expect(executorRefusal((raw) => { raw.flights[0].words[0].reason = null; })).toMatch(/is no check and says no reason/);
   });

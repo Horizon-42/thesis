@@ -37,10 +37,11 @@ export const TRAINING_TRACE_COLOR = "#e2e8f0";
 /** The raw rows behind it: what the aircraft did, before the reading's smoothing. */
 export const TRAINING_RAW_COLOR = "#94a3b8";
 
-/** A heading word's TURN REGION: the arcs of every allowed bank from its issue point. */
-export const TRAINING_TURN_COLOR = "#fb923c";
-/** A heading word's HOLD FUNNEL: the nominal line along θ and its widening half width. */
-export const TRAINING_FUNNEL_COLOR = "#38bdf8";
+/** A heading word's BAND: its target ± the heading tolerance over the rows it is judged on — on the heading chart, and
+ *  those rows of the ground trace in 3D (instruction-v3). The blue of the heading family, deeper than the column's. */
+export const TRAINING_HEADING_BAND_COLOR = "#38bdf8";
+/** The CAPTURE TURN: its rows, from the clearance onto the course. */
+export const TRAINING_CAPTURE_TURN_COLOR = "#fb923c";
 /** The CAPTURE CORRIDOR from the capture to the threshold (and the course band after it). */
 export const TRAINING_CORRIDOR_COLOR = "#4ade80";
 /** An altitude word's TUBE — the altitude column's own colour. */
@@ -48,10 +49,10 @@ export const TRAINING_TUBE_COLOR = TRAINING_COLUMN_COLOR.altitude;
 /** A speed word's transition and band — the speed column's own colour. */
 export const TRAINING_SPEED_COLOR = TRAINING_COLUMN_COLOR.speed;
 
-/** How opaque each envelope's fill is in the 3D scene at rest, and when it is the selected word's —
- *  one table, so the legend's swatches are the scene's. */
+/** How opaque each envelope is in the 3D scene at rest, and a fill when it is the selected word's — one table, so the
+ *  legend's swatches are the scene's. The heading bands and the capture turn are lines on the ground. */
 export const TRAINING_ENVELOPE_ALPHA = {
-  turn: 0.16, turnEnd: 0.4, funnel: 0.18, corridor: 0.3, tube: 0.28, selected: 0.45,
+  headingBand: 0.85, captureTurn: 0.85, corridor: 0.3, tube: 0.28, selected: 0.45,
 } as const;
 
 /** Every candidate runway (the pointer's choices) — and the one pointed at. */

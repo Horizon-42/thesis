@@ -1,7 +1,8 @@
 /**
  * The 3D layer's plumbing: the exporter's coordinates handed to Cesium unchanged — the track at
- * its ellipsoid height, a plan line as [lon, lat, …], a tube as a wall over the track's own rows —
- * and what ONE selected word lights up: its own column's envelope and the rows it is in force.
+ * its ellipsoid height, a plan line as [lon, lat, …], a tube as a wall over the track's own rows, a
+ * heading word's judged rows and its rows outside on the ground — and what ONE selected word lights
+ * up: its own column's envelope and the rows it is in force.
  */
 import { describe, expect, it } from "vitest";
 
@@ -9,6 +10,9 @@ import {
   executorTrackPositions,
   planDegrees,
   planRingDegrees,
+  trainingBandGround,
+  trainingBandOutsideGround,
+  trainingEnvelopeEntities,
   trainingFocusEntities,
   trainingFocusStretch,
   trainingTrackPositions,
@@ -75,23 +79,49 @@ describe("useTrainingTrackLayer helpers", () => {
     expect(ring.slice(-2)).toEqual([outline.lon[0], outline.lat[0]]);
   });
 
+  it("drapes a heading word's judged rows on the ground, on to where the next word's begin", () => {
+    const item = flight();
+    const { lon, lat } = item.signals;
+    const [first, second, third] = item.envelopes.heading;
+    const rows = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, k) => [lon[from + k], lat[from + k]]).flat();
+    expect(trainingBandGround(lon, lat, first)).toEqual(rows(2, 10));
+    expect(trainingBandGround(lon, lat, second)).toEqual(rows(10, 12));
+    expect(trainingBandGround(lon, lat, third)).toEqual(rows(12, 20));
+    // a word with no row of its own has nothing on the ground
+    expect(trainingBandGround(lon, lat, flight(1).envelopes.heading[0])).toEqual([]);
+  });
+
+  it("draws a band's rows outside as segments on the ground, one row outside on to the next", () => {
+    const item = flight();
+    const { lon, lat } = item.signals;
+    expect(trainingBandOutsideGround(lon, lat, item.envelopes.heading[2])).toEqual([[lon[12], lat[12], lon[13], lat[13]]]);
+    expect(trainingBandOutsideGround(lon, lat, item.envelopes.heading[0])).toEqual([]);
+    // a run to the band's end, and a run of one row at the line's very end (back to the row before it)
+    const band = { firstRow: 57, stopRow: 60, targetOnTrackDeg: 90, bandDeg: [85.5, 94.5] as [number, number], inside: [true, false, false] };
+    expect(trainingBandOutsideGround(lon, lat, band)).toEqual([[lon[58], lat[58], lon[59], lat[59]]]);
+    const last = { ...band, firstRow: 59, stopRow: 60, inside: [false] };
+    expect(trainingBandOutsideGround(lon, lat, last)).toEqual([[lon[58], lat[58], lon[59], lat[59]]]);
+  });
+
   it("lights up the selected word's OWN envelope, never another column's", () => {
     const scene = selection();
     const at = (column: Parameters<typeof trainingWordAt>[1], row: number) =>
       trainingFocusEntities(scene, column, trainingWordAt(scene.flight, column, row));
-    const turn = TRAINING_ENTITY.turn(1);
-    expect(at("heading", 15)).toEqual([turn, TRAINING_ENTITY.path(turn, "fast"), TRAINING_ENTITY.path(turn, "slow"),
-      TRAINING_ENTITY.turnEnd(1), TRAINING_ENTITY.funnel(1)]);
-    // after the capture a heading word is still its own turn and funnel: the corridor is the clearance's
+    expect(at("heading", 15)).toEqual([TRAINING_ENTITY.heading(2)]);
+    expect(at("heading", 9)).toEqual([TRAINING_ENTITY.heading(1)]);
+    // after the capture a heading word is still its own: the corridor is the clearance's
     expect(at("heading", 50)).toEqual(at("heading", 15));
     expect(at("altitude", 15)).toEqual([TRAINING_ENTITY.tube(0)]);
-    const capture = TRAINING_ENTITY.captureTurn;
-    expect(at("approach", 15)).toEqual([capture, TRAINING_ENTITY.path(capture, "fast"), TRAINING_ENTITY.path(capture, "slow"),
-      TRAINING_ENTITY.captureTurnEnd, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]);
+    expect(at("approach", 25)).toEqual([TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]);
     expect(at("approach", 5)).toEqual([]);   // "not cleared" bounds nothing
     expect(at("runway", 5)).toEqual([TRAINING_ENTITY.runway("09"), TRAINING_ENTITY.centreline("09")]);
     expect(at("angle", 30)).toEqual([]);
     expect(at("speed", 30)).toEqual([]);
+    expect(trainingEnvelopeEntities(scene.flight)).toEqual([
+      TRAINING_ENTITY.heading(0), TRAINING_ENTITY.heading(1), TRAINING_ENTITY.heading(2),
+      TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis,
+      TRAINING_ENTITY.tube(0), TRAINING_ENTITY.tube(1),
+    ]);
   });
 
   it("draws the rows a word is in force, on to the next word's issue", () => {

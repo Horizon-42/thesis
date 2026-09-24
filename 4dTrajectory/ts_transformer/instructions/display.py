@@ -1,13 +1,17 @@
-"""What a read sentence's envelopes look like, as geometry to draw (vocabulary design §2).
+"""What a read sentence's envelopes look like, as data to draw (vocabulary design §2; the heading word's, §10.1).
 
 The design's rule is ONE implementation of the envelopes for the labeller's checks, the executor's
-limits and the display (§1 principle 4). This module is the display side, built only from the
-public functions of `envelope.py` and `labeller/*`:
+judge and the display (§1 principle 4). This module is the display side, built only from the public
+functions of `envelope.py` and `labeller/*`, and it draws only what is judged:
 
-- a heading word's rows are `labeller.lateral.heading_spans`, its turn region and where its turn
-  may end are `labeller.read.turn_ends_at` (`envelope.turn_ends`), and its hold funnel is
-  `envelope.hold_funnel` over the same span — the very sets the labeller's hold check judges
-  (`labeller.read.span_funnel`, judged with `envelope.inside_convex`), so what is drawn is what was judged;
+- a heading word (instruction-v3) bounds no position: it says where the track is `heading_lead_s`
+  after it is said, so its envelope is the band θ ± `heading_tolerance_deg` over the rows it is
+  judged on — `envelope.heading_word_rows` (from its row plus the lead to the next heading word's
+  row plus the lead, never at or past the clearance) — with each row's verdict asked of
+  `envelope.heading_words_inside` one row at a time (`rows_inside`), and the count checked against
+  the labeller's own (`Reading.checks["heading"]`), so what is drawn is what was judged;
+- the capture turn is the labeller's `checks["capture_turn"]` over its rows, from the clearance to
+  the capture, toward the course (`labeller.lateral.turn_check`);
 - the capture corridor widens by `envelope.corridor_half_width_m`, and its rows are judged by
   `envelope.corridor`;
 - the altitude tubes ARE `labeller.vertical.tube_bounds`; the speed spans' band rows are judged by
@@ -18,12 +22,6 @@ It is outside the labeller's source hash (`artefact.LABELLER_MODULES`): changing
 drawn does not change the sentence. Everything is in the airport frame (metres east / north of the
 airport reference point, geometric MSL, compass degrees true, seconds); the exporter adds the
 geodesy (latitude / longitude, the ellipsoid heights Cesium draws in).
-
-One reading the display makes, stated here: the TURN REGION of a turn smaller than
-`turn_rate_min_from_deg` is still drawn with the lowest rate, though the labeller applies that rate
-only to larger turns (a smaller change of the ground track is mostly wind drift); the word's
-verdict says whether it applied (`rate_min_applies`). A word the flight was already flying at entry
-has no turn: its funnel is the one cone from the issue point.
 """
 
 from __future__ import annotations
@@ -36,12 +34,11 @@ import numpy as np
 
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import RunwayCandidate
-from ts_transformer.instructions.labeller.lateral import heading_spans
-from ts_transformer.instructions.labeller.read import Admitted, Reading, span_funnel, turn_ends_at
+from ts_transformer.instructions.labeller.read import Admitted, Reading
 from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import ANGLE, ANGLE_LEVEL, SPEED, Words, wrap180
+from ts_transformer.instructions.words import ANGLE, ANGLE_LEVEL, HEADING, SPEED, Words, wrap180
 
 # ---- plane geometry (compass bearings: 0 = north, clockwise; unit vector (sin b, cos b) in (E, N))
 def _unit(bearing_deg: float) -> np.ndarray:
@@ -67,167 +64,73 @@ class Line:
         return cls(e_m=array[:, 0].copy(), n_m=array[:, 1].copy())
 
 
-# ---- turns
-@dataclass(frozen=True)
-class HeadingProfile:
-    """A heading against time: seconds of the flight (`FlightSignals.time_s`) and degrees on the
-    branch of the unwrapped smoothed track at the issue row — the heading chart's own axes."""
-
-    t_s: np.ndarray
-    deg: np.ndarray
-
-
-def turn_heading(path: np.ndarray, track_deg: float, turn_deg: float, start_s: float,
-                 speeds_mps: np.ndarray) -> HeadingProfile:
-    """The heading an `envelope.turn_path` path flies, begun at ``start_s``, read back from the path
-    itself — so the chart's two turns are the plan's two turns, with no second copy of the turn: its
-    step from point ``j − 1`` to ``j`` is flown at the mean of the two ends' tracks, so each end
-    follows from the one before and the step's bearing; the step lasts its length over the mean of
-    the two rows' speeds (a whole step for all but the last, which the path cuts where the track
-    enters the band)."""
-    side = math.copysign(1.0, turn_deg)
-    speeds = np.asarray(speeds_mps, dtype=np.float64)
-    turned, elapsed = [0.0], [0.0]
-    for j in range(1, len(path)):
-        step = path[j] - path[j - 1]
-        mean = side * float(wrap180(math.degrees(math.atan2(step[0], step[1])) - track_deg))
-        turned.append(2.0 * mean - turned[-1])
-        elapsed.append(elapsed[-1] + float(np.hypot(step[0], step[1])) / (0.5 * (speeds[j - 1] + speeds[j])))
-    return HeadingProfile(t_s=start_s + np.array(elapsed), deg=track_deg + side * np.array(turned))
-
-
-@dataclass(frozen=True)
-class TurnRegion:
-    """Where a turn from its issue point may take the aircraft (§2.3, `envelope.TurnEnds`): between
-    the fastest turn begun on time and the slowest begun as late as allowed, both flown at the speeds
-    the flight flew — in plan, and as the heading against time. ``turn_deg`` is the shorter way to
-    the target (positive = right)."""
-
-    from_track_deg: float
-    turn_deg: float
-    rate_min_deg_s: float
-    rate_max_deg_s: float
-    bank_max_deg: float
-    start_delay_max_s: float
-    fast: Line                   # the fastest turn, begun on time, to where its track enters θ's band
-    #: The slowest turn begun as late as allowed — the straight flight from the issue point, then the
-    #: turn (or to the flight's end): the outline's far edge.
-    slow: Line
-    slow_finished: bool          # the slowest turn gets there before the flight ends
-    outline: Line                # `envelope.TurnEnds.outline`
-    end: Line                    # where the turn may end: `envelope.TurnEnds.corners`, a parallelogram
-    #: The same two turns as the heading against time, and the region between them: the fastest turn
-    #: to the band, the band's edge on to the slowest turn's end, back along the slowest turn.
-    heading_fast: HeadingProfile
-    heading_slow: HeadingProfile
-    heading_outline: HeadingProfile
-
-
-def turn_region(flight: Admitted, row: int, target_deg: float, spec: VocabularySpec) -> TurnRegion:
-    ends = turn_ends_at(flight, row, target_deg, spec)
-    start = np.array([flight.signals.e_m[row], flight.signals.n_m[row]])
-    track = float(flight.smoothed.track_deg[row])
-    turn = float(wrap180(target_deg - track))
-    issue_s, speeds = float(flight.signals.time_s[row]), flight.smoothed.ground_speed_mps[row:]
-    fast = turn_heading(ends.fast, track, turn, issue_s, speeds)
-    # The slowest turn begun as late as allowed: the straight start from the issue point, then the
-    # turn — the same in plan and against time, point for point.
-    late = turn_heading(ends.slow, track, turn, issue_s + spec.turn_start_delay_max_s, speeds)
-    slow = HeadingProfile(t_s=np.concatenate(([issue_s], late.t_s)), deg=np.concatenate(([track], late.deg)))
-    outline = HeadingProfile(t_s=np.concatenate((fast.t_s, [slow.t_s[-1]], slow.t_s[::-1])),
-                             deg=np.concatenate((fast.deg, [fast.deg[-1]], slow.deg[::-1])))
-    return TurnRegion(
-        from_track_deg=track % 360.0, turn_deg=turn,
-        rate_min_deg_s=spec.turn_rate_min_deg_s, rate_max_deg_s=spec.turn_rate_max_deg_s,
-        bank_max_deg=spec.turn_bank_max_deg, start_delay_max_s=spec.turn_start_delay_max_s,
-        fast=Line.of(start + ends.fast), slow=Line.of(np.vstack((start, start + ends.slow + ends.late))),
-        slow_finished=ends.finished, outline=Line.of(start + ends.outline), end=Line.of(start + ends.corners),
-        heading_fast=fast, heading_slow=slow, heading_outline=outline)
-
-
-# ---- holds
-@dataclass(frozen=True)
-class Funnel:
-    """A hold's allowed positions over its span (§2.3, `envelope.hold_funnel`)."""
-
-    target_deg: float
-    length_m: float
-    #: Where the turn may end, its half extent across θ; and that plus the widening after ``length_m``.
-    start_half_width_m: float
-    end_half_width_m: float
-    axis: Line                   # the nominal line along θ, through the middle of where the turn may end
-    outline: Line
-
-
-def funnel(shape: envelope.HoldFunnel, target_deg: float) -> Funnel:
-    """A funnel to draw, with its axis through the middle of where the turn may end."""
-    middle = shape.starts.mean(axis=0)
-    return Funnel(target_deg=float(target_deg % 360.0), length_m=shape.length_m,
-                  start_half_width_m=shape.start_half_width_m, end_half_width_m=shape.end_half_width_m,
-                  axis=Line.of([middle, middle + shape.length_m * _unit(target_deg)]), outline=Line.of(shape.outline))
-
-
 def on_branch(reference_deg: float, target_deg: float) -> float:
     """``target_deg`` on the branch of an unwrapped track at ``reference_deg`` (the shorter way)."""
     return float(reference_deg + wrap180(target_deg - reference_deg))
 
 
+# ---- heading words (instruction-v3, §10.1)
+def rows_inside(track_deg, target_deg: float, first: int, stop: int, tolerance_deg: float) -> np.ndarray:
+    """Row by row over ``first..stop - 1``: is the track within the tolerance of the target? The labeller's own check
+    (`envelope.heading_words_inside`) asked of one row at a time — a word at every row, no lead, each ending at the
+    next — so each flag is the check's, and their sum is its count."""
+    rows = list(range(first, stop))
+    counted = envelope.heading_words_inside(track_deg, [(row, target_deg) for row in rows], 0, stop, tolerance_deg)
+    return np.array([item["inside"] == 1 for item in counted], dtype=bool)
+
+
+@dataclass(frozen=True)
+class HeadingBand:
+    """One heading word's envelope as a chart draws it: the band θ ± the tolerance over the rows it is judged on
+    (``first_row .. stop_row - 1``; none when the lead carries them to the clearance), and each row's verdict."""
+
+    first_row: int
+    stop_row: int
+    #: θ on the branch of the track at the first judged row (at the word's own row when it has none).
+    target_on_track_deg: float
+    band_deg: tuple[float, float]
+    inside: np.ndarray
+
+
+def heading_band(track_deg, word_row: int, target_deg: float, first: int, stop: int, tolerance_deg: float,
+                 check: dict[str, Any]) -> HeadingBand:
+    """The band of a heading word judged over rows ``first..stop - 1`` of ``track_deg`` (unwrapped), refused unless
+    its rows and its rows inside are ``check``'s — the labeller's, or the executor's judge's, count of this word."""
+    inside = rows_inside(track_deg, target_deg, first, stop, tolerance_deg)
+    if (len(inside), int(inside.sum())) != (check["rows"], check["inside"]):
+        raise ValueError(f"the heading word at row {word_row}: {int(inside.sum())} of {len(inside)} rows inside its band, "
+                         f"its check counts {check['inside']} of {check['rows']}")
+    target = on_branch(float(np.asarray(track_deg)[first if stop > first else word_row]), target_deg)
+    return HeadingBand(first_row=int(first), stop_row=int(stop), target_on_track_deg=target,
+                       band_deg=(target - tolerance_deg, target + tolerance_deg), inside=inside)
+
+
 @dataclass(frozen=True)
 class HeadingEnvelope:
-    """One heading word's envelope, from its issue point (§2.3)."""
+    """One heading word's envelope (§10.1): its band over the rows it is judged on, and the labeller's check of it
+    (`Reading.checks["heading"]`: its row, its rows and how many are inside)."""
 
     word: Instruction
     target_deg: float            # θ, the word's own grid value
-    #: Where its turn ends: the labeller's turn end for a single turn or a split turn's last part,
-    #: the next part's issue row for an earlier part; ``None`` for a word with no turn.
-    turn_end_row: int | None
-    #: Where its hold begins: its turn's end as the labeller read it (the issue row for a word the
-    #: flight was already holding at entry); ``None`` for a split part the next part supersedes
-    #: mid-turn.
-    hold_start_row: int | None
-    #: Where its hold ends: the next heading word's row, or — for the last one — where the
-    #: labeller's capture turn begins (the capture itself when there is no capture turn).
-    hold_end_row: int
-    from_track_deg: float        # the smoothed track at the issue row, unwrapped
-    target_on_track_deg: float   # θ on that track's branch
-    #: The hold's chart band: θ ± the tolerance; ``None`` when the word has no hold. (The turn's is
-    #: its region's heading outline.)
-    hold_band_deg: tuple[float, float] | None
-    #: The labeller's check of the turn this word belongs to (`Reading.checks["turns"]`) — shared by
-    #: the parts of a split turn; ``None`` for a word the flight was already holding.
-    turn_check: dict[str, Any] | None
-    #: The labeller's check of this word's hold position (`Reading.checks["hold_positions"]`):
-    #: ``None`` for a hold it does not judge (`Reading.checks["holds_not_judged"]` counts why).
-    hold_check: dict[str, Any] | None
-    turn: TurnRegion | None
-    funnel: Funnel | None
+    band: HeadingBand
+    check: dict[str, Any]
 
 
 def heading_envelopes(flight: Admitted, reading: Reading, spec: VocabularySpec, words: Words) -> list[HeadingEnvelope]:
-    track = flight.smoothed.track_deg
-    tolerance = spec.heading_tolerance_deg
-    judged = {h["issue_row"]: h for h in reading.checks["hold_positions"]}
+    """Every heading word of the sentence, in order: its rows from `envelope.heading_word_rows` (to the clearance,
+    `Reading.join_row`), each row judged on the smoothed track the labeller read."""
+    said = sorted((item for item in reading.instructions if item.column == HEADING), key=lambda item: item.row)
+    checks = reading.checks["heading"]
+    if [check["row"] for check in checks] != [word.row for word in said]:
+        raise ValueError(f"{reading.dataset_id}: the labeller's heading checks are not the heading words said")
+    spans = envelope.heading_word_rows([word.row for word in said], spec.rows_exact(spec.heading_lead_s),
+                                       reading.join_row)
     result = []
-    for span in heading_spans(reading.instructions, reading.checks["turns"], reading.checks["capture_turn"],
-                              reading.capture_row):
-        word = span.word
-        target = words.heading_deg(word.value)
-        start_track = float(track[word.row])
-        target_on_track = on_branch(start_track, target)
-        if span.turn is None:
-            turn_end_row: int | None = None
-            region = None
-        else:
-            turn_end_row = span.hold_end if span.hold_start is None else span.hold_start
-            region = turn_region(flight, word.row, target, spec)
-        drawn = funnel(span_funnel(flight, span, target, spec)[1], target) if span.held else None
-        result.append(HeadingEnvelope(
-            word=word, target_deg=target, turn_end_row=turn_end_row,
-            hold_start_row=span.hold_start if span.held else None, hold_end_row=span.hold_end,
-            from_track_deg=start_track, target_on_track_deg=target_on_track,
-            hold_band_deg=(target_on_track - tolerance, target_on_track + tolerance) if span.held else None,
-            turn_check=span.turn, hold_check=judged[word.row] if word.row in judged else None, turn=region,
-            funnel=drawn))
+    for word, (first, stop), check in zip(said, spans, checks):
+        # judged against the target the labeller judged it against (its `target_deg`, the class's value mod 360)
+        band = heading_band(flight.smoothed.track_deg, word.row, float(word.info["target_deg"]), first, stop,
+                            spec.heading_tolerance_deg, check)
+        result.append(HeadingEnvelope(word=word, target_deg=words.heading_deg(word.value), band=band, check=check))
     return result
 
 
@@ -283,22 +186,26 @@ def corridor(flight: Admitted, reading: Reading, spec: VocabularySpec) -> Corrid
 
 @dataclass(frozen=True)
 class CaptureTurn:
-    """From the end of the last hold (or of an inserted intercept) onto the course (§2.2)."""
+    """The capture turn (§2.2, §10.1): from the clearance onto the course, judged over its rows — the clearance's
+    row to the capture's — by the labeller's `turn_check` (monotone toward the course; its rate and its bank)."""
 
     start_row: int
+    end_row: int                  # the capture: the first row of the final run inside the corridor
     course_on_track_deg: float    # the course on the branch of the smoothed track at the start row
     check: dict[str, Any]         # `Reading.checks["capture_turn"]`
-    region: TurnRegion            # its heading outline is the chart's picture of it
 
 
-def capture_turn(flight: Admitted, reading: Reading, spec: VocabularySpec) -> CaptureTurn | None:
+def capture_turn(flight: Admitted, reading: Reading) -> CaptureTurn | None:
+    """``None`` for a flight already on the final at row 0 (the labeller reads no capture turn)."""
     check = reading.checks["capture_turn"]
     if check is None:
         return None
     start = int(check["start_row"])
+    if start != reading.join_row:
+        raise ValueError(f"{reading.dataset_id}: the capture turn starts at row {start}, the clearance is said at "
+                         f"{reading.join_row}")
     course = on_branch(float(flight.smoothed.track_deg[start]), flight.candidate.course_deg)
-    return CaptureTurn(start_row=start, course_on_track_deg=course, check=check,
-                       region=turn_region(flight, start, flight.candidate.course_deg, spec))
+    return CaptureTurn(start_row=start, end_row=reading.capture_row, course_on_track_deg=course, check=check)
 
 
 def course_band_deg(flight: Admitted, reading: Reading, spec: VocabularySpec) -> tuple[float, float]:
@@ -431,7 +338,7 @@ def flight_envelopes(flight: Admitted, reading: Reading, spec: VocabularySpec, w
         raise ValueError(f"{reading.dataset_id}: {flight.signals.n_rows} admitted rows but a sentence of "
                          f"{len(reading.words)} steps")
     return FlightEnvelopes(
-        heading=heading_envelopes(flight, reading, spec, words), capture_turn=capture_turn(flight, reading, spec),
+        heading=heading_envelopes(flight, reading, spec, words), capture_turn=capture_turn(flight, reading),
         course_band_deg=course_band_deg(flight, reading, spec), corridor=corridor(flight, reading, spec),
         altitude=altitude_tubes(flight, reading, spec, words), angle=angle_words(reading),
         speed=speed_spans(flight, reading, spec, words))

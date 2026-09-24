@@ -8,8 +8,8 @@ frontend's airports directory is a ``tmp_path`` directory too.
 from __future__ import annotations
 
 import json
-import math
 import re
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -20,7 +20,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
     labeller_source_sha256, write_candidates, write_sentences, write_signals, write_spec,
 )
-from ts_transformer.instructions.labeller.read import admit, read_flight, turn_ends_at
+from ts_transformer.instructions.labeller.read import admit, read_flight
 from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, HEADING, UNCHANGED, Words, wrap180
@@ -96,79 +96,75 @@ def test_the_contract_is_the_frontend_reader_s():
 
 
 # ---- display geometry
-def test_the_turn_region_is_the_labeller_s_turn_ends_from_the_issue_point():
-    one = spec()
-    flight = admit(_vectored(_key("V")), instruction_airport(), one)
-    row, target = 70, 180.0                                   # on the downwind, told to turn left onto the base
-    region = display.turn_region(flight, row, target, one)
-    ends = turn_ends_at(flight, row, target, one)
-    start = np.array([flight.signals.e_m[row], flight.signals.n_m[row]])
-    assert region.turn_deg == pytest.approx(float(wrap180(target - flight.smoothed.track_deg[row])))
-    assert region.slow_finished == ends.finished
-    corners = np.column_stack((region.end.e_m, region.end.n_m))
-    assert corners == pytest.approx(start + ends.corners)
-    # the region runs from the issue point round the fastest turn, and back along the slowest turn
-    # begun as late as allowed to the late start: the issue speed × the latest delay along the track
-    outline = np.column_stack((region.outline.e_m, region.outline.n_m))
-    track = math.radians(float(flight.smoothed.track_deg[row]))
-    late = float(flight.smoothed.ground_speed_mps[row]) * one.turn_start_delay_max_s * np.array([math.sin(track),
-                                                                                                 math.cos(track)])
-    assert outline[0] == pytest.approx(start) and outline[-1] == pytest.approx(start + late)
-    assert (region.fast.e_m[-1], region.fast.n_m[-1]) == pytest.approx(tuple(corners[0]))
-    # the slowest turn drawn is the one begun as late as allowed: straight from the issue point,
-    # then the turn — the outline's far edge — ending on the parallelogram's late corner
-    slow = np.column_stack((region.slow.e_m, region.slow.n_m))
-    assert slow[0] == pytest.approx(start) and slow[1] == pytest.approx(start + late)
-    assert slow[-1] == pytest.approx(corners[2])
+def test_a_heading_word_s_rows_run_from_a_lead_after_it_to_the_next_word_s_and_stop_at_the_clearance():
+    one, words = spec(), Words(spec())
+    flight, geometry = _vectored(_key("V")), instruction_airport()
+    reading = read_flight(flight, geometry, one, words)
+    admitted = admit(flight, geometry, one)
+    envelopes = display.flight_envelopes(admitted, reading, one, words)
+    said = sorted((i for i in reading.instructions if i.column == HEADING), key=lambda item: item.row)
+    assert [h.word for h in envelopes.heading] == said and len(said) > 2          # a turn said step by step
+    lead = one.rows_exact(one.heading_lead_s)
+    track, tolerance = admitted.smoothed.track_deg, one.heading_tolerance_deg
+    for number, (item, check) in enumerate(zip(envelopes.heading, reading.checks["heading"])):
+        band = item.band
+        following = said[number + 1].row + lead if number + 1 < len(said) else reading.join_row
+        assert band.first_row == item.word.row + lead
+        assert band.stop_row == max(band.first_row, min(following, reading.join_row))
+        assert item.check is check and (band.stop_row - band.first_row, int(band.inside.sum())) == (check["rows"], check["inside"])
+        # each row's verdict is the track against θ ± the tolerance, circularly
+        rows = slice(band.first_row, band.stop_row)
+        assert list(band.inside) == list(np.abs(wrap180(track[rows] - item.target_deg)) <= tolerance)
+        assert band.band_deg == pytest.approx((band.target_on_track_deg - tolerance, band.target_on_track_deg + tolerance))
+        assert float(wrap180(band.target_on_track_deg - item.target_deg)) == pytest.approx(0.0, abs=1e-9)
+        if band.stop_row > band.first_row:
+            assert abs(band.target_on_track_deg - track[band.first_row]) <= 180.0
+    # the observed track is inside its words by construction, and the rows tile the approach to the clearance
+    assert all(h.band.inside.all() for h in envelopes.heading)
+    judged = [h.band for h in envelopes.heading if h.band.stop_row > h.band.first_row]
+    assert all(a.stop_row == b.first_row for a, b in zip(judged, judged[1:])) and judged[-1].stop_row == reading.join_row
 
 
-def test_the_heading_chart_s_turns_are_the_plan_s_turns_against_time():
-    one = spec()
-    flight = admit(_vectored(_key("V")), instruction_airport(), one)
-    row, target = 70, 180.0
-    region = display.turn_region(flight, row, target, one)
-    track, issue_s = float(flight.smoothed.track_deg[row]), float(flight.signals.time_s[row])
-    speeds, side, step = flight.smoothed.ground_speed_mps[row:], math.copysign(1.0, region.turn_deg), one.step_s
-    need = abs(region.turn_deg) - one.heading_tolerance_deg
-    fast, slow = region.heading_fast, region.heading_slow
-    # one point per point of the plan's path, from the issue, whole steps but the last
-    assert len(fast.t_s) == len(region.fast.e_m) and len(slow.t_s) == len(region.slow.e_m)
-    assert (fast.t_s[0], fast.deg[0]) == pytest.approx((issue_s, track))
-    assert np.diff(fast.t_s)[:-1] == pytest.approx(step) and 0.0 < np.diff(fast.t_s)[-1] <= step + 1e-9
-    # each whole step turns at the fastest rate the bank allows at the step's mean speed, and the
-    # turn ends where the track enters the band
-    mean = 0.5 * (speeds[:-1] + speeds[1:])
-    rate = np.minimum(one.turn_rate_max_deg_s, np.degrees(envelope.GRAVITY_MPS2 * np.tan(np.radians(one.turn_bank_max_deg)) / mean))
-    assert side * np.diff(fast.deg)[:-1] == pytest.approx(rate[: len(fast.deg) - 2] * step)
-    assert fast.deg[-1] == pytest.approx(track + side * need)
-    # the slowest begins as late as allowed: straight, then the lowest rate
-    assert slow.t_s[:2] == pytest.approx([issue_s, issue_s + one.turn_start_delay_max_s])
-    assert slow.deg[:2] == pytest.approx([track, track])
-    assert side * np.diff(slow.deg[1:])[:-1] == pytest.approx(one.turn_rate_min_deg_s * step)
-    assert slow.deg[-1] == pytest.approx(track + side * need) and region.slow_finished
-    # the region between them: the fastest turn, the band's edge on to the slowest's end, back
-    ring = region.heading_outline
-    assert ring.t_s[: len(fast.t_s)] == pytest.approx(fast.t_s)
-    assert (ring.t_s[len(fast.t_s)], ring.deg[len(fast.t_s)]) == pytest.approx((slow.t_s[-1], fast.deg[-1]))
-    assert ring.t_s[len(fast.t_s) + 1:] == pytest.approx(slow.t_s[::-1])
+def test_the_row_verdicts_are_the_envelope_s_own_check_asked_row_by_row():
+    # rows 1–6: 4.5° off counts inside, a whole turn off is the same heading (circular)
+    track = np.array([88.0, 91.0, 94.5, 99.4, 86.0, 360.0 + 91.0, 90.0])
+    flags = display.rows_inside(track, 90.0, 1, 7, 4.5)
+    assert [bool(flag) for flag in flags] == [True, True, False, True, True, True]
+    assert int(flags.sum()) == envelope.heading_words_inside(track, [(0, 90.0)], 1, 7, 4.5)[0]["inside"]
+    assert len(display.rows_inside(track, 90.0, 3, 3, 4.5)) == 0
+    band = display.heading_band(track + 360.0, 0, 90.0, 1, 7, 4.5, {"rows": 6, "inside": 5})
+    assert band.target_on_track_deg == pytest.approx(450.0) and band.band_deg == pytest.approx((445.5, 454.5))
+    with pytest.raises(ValueError, match="5 of 6 rows inside its band, its check counts 4 of 6"):
+        display.heading_band(track, 0, 90.0, 1, 7, 4.5, {"rows": 6, "inside": 4})
 
 
-def test_the_funnel_starts_where_the_turn_may_end_and_widens_by_the_tolerance():
-    one = spec()
-    tolerance = one.heading_tolerance_deg
-    funnel = display.funnel(envelope.hold_funnel(np.array([[0.0, 0.0], [0.0, 400.0]]), 90.0, tolerance, 5000.0),
-                            90.0)                                                    # 400 m across a hold heading east
-    assert funnel.start_half_width_m == pytest.approx(200.0)
-    assert funnel.end_half_width_m == pytest.approx(200.0 + 5000.0 * math.tan(math.radians(one.heading_tolerance_deg)))
-    assert (funnel.axis.e_m[0], funnel.axis.n_m[0]) == pytest.approx((0.0, 200.0))
-    assert (funnel.axis.e_m[1], funnel.axis.n_m[1]) == pytest.approx((5000.0, 200.0))
-    # the start SWEPT along θ: the funnel starts where the turn may end, not ahead of it
-    east = np.array(funnel.outline.e_m)
-    assert east.min() == pytest.approx(0.0) and east.max() == pytest.approx(5000.0)
-    assert {(0.0, 0.0), (0.0, 400.0)} <= {(round(e, 6), round(n, 6)) for e, n in zip(funnel.outline.e_m, funnel.outline.n_m)}
-    # no turn flown: the funnel is one cone from the point itself
-    cone = display.funnel(envelope.hold_funnel(np.array([[3.0, 4.0]]), 0.0, tolerance, 1000.0), 0.0)
-    assert cone.start_half_width_m == 0.0 and len(cone.outline.e_m) == 3
+def test_a_reading_whose_heading_checks_are_not_its_words_is_refused():
+    one, words = spec(), Words(spec())
+    flight, geometry = _vectored(_key("V")), instruction_airport()
+    reading = read_flight(flight, geometry, one, words)
+    admitted = admit(flight, geometry, one)
+    checks = dict(reading.checks, heading=reading.checks["heading"][:-1])
+    with pytest.raises(ValueError, match="heading checks are not the heading words said"):
+        display.flight_envelopes(admitted, replace(reading, checks=checks), one, words)
+
+
+def test_the_capture_turn_runs_from_the_clearance_to_the_capture_and_a_straight_in_has_none():
+    one, words = spec(), Words(spec())
+    geometry = instruction_airport()
+    vectored, straight = _vectored(_key("V")), _straight(_key("S"))
+    reading = read_flight(vectored, geometry, one, words)
+    admitted = admit(vectored, geometry, one)
+    capture = display.flight_envelopes(admitted, reading, one, words).capture_turn
+    assert (capture.start_row, capture.end_row) == (reading.join_row, reading.capture_row)
+    assert capture.check is reading.checks["capture_turn"]
+    assert float(wrap180(capture.course_on_track_deg - geometry.candidates[0].course_deg)) == pytest.approx(0.0, abs=1e-9)
+    assert abs(capture.course_on_track_deg - admitted.smoothed.track_deg[capture.start_row]) <= 180.0
+    reading = read_flight(straight, geometry, one, words)
+    envelopes = display.flight_envelopes(admit(straight, geometry, one), reading, one, words)
+    assert reading.capture_row == 0 and envelopes.capture_turn is None
+    # on the final from row 0: the one heading word is cleared at once, its rows the lead carries past the clearance
+    (heading,) = envelopes.heading
+    assert heading.band.stop_row == heading.band.first_row and heading.check["rows"] == 0
 
 
 def test_the_flight_envelopes_follow_the_labeller():
@@ -177,21 +173,6 @@ def test_the_flight_envelopes_follow_the_labeller():
     reading = read_flight(flight, geometry, one, words)
     admitted = admit(flight, geometry, one)
     envelopes = display.flight_envelopes(admitted, reading, one, words)
-    heading = [i for i in reading.instructions if i.column == HEADING]
-    assert [h.word for h in envelopes.heading] == sorted(heading, key=lambda item: item.row)
-    first, turned = envelopes.heading[0], envelopes.heading[1]
-    assert first.turn is None and first.turn_check is None and first.hold_start_row == 0
-    assert turned.turn is not None and turned.turn_check["departure_row"] == turned.word.row
-    assert turned.hold_start_row == turned.turn_check["arrival_row"] == turned.turn_end_row
-    # the last hold ends where the labeller's capture turn begins, and the turn region ends on θ
-    assert turned.hold_end_row == reading.checks["capture_turn"]["start_row"] == envelopes.capture_turn.start_row
-    assert turned.turn.turn_deg == pytest.approx(float(wrap180(180.0 - admitted.smoothed.track_deg[turned.word.row])))
-    # a judged hold is drawn over the rows the labeller judged, with the labeller's own funnel
-    for item in envelopes.heading:
-        if item.hold_check is not None:
-            assert (item.hold_start_row, item.hold_end_row) == (item.hold_check["hold_start"], item.hold_check["hold_end"])
-            assert item.funnel.end_half_width_m == pytest.approx(item.hold_check["half_width_end_m"])
-    assert sum(1 for item in envelopes.heading if item.funnel is not None) == reading.checks["holds"]
     # the tubes are `tube_bounds` itself, with the labeller's own verdict
     for tube, (word, end, low, high) in zip(envelopes.altitude, tube_bounds(reading.instructions, admitted.smoothed.distance_m,
                                                                             admitted.smoothed.altitude_m, one, words)):
@@ -226,6 +207,8 @@ def test_the_export_draws_both_strata_and_adds_its_set_to_the_index(tmp_path):
     sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
     assert sample["schema"] == export.SAMPLE_SCHEMA and sample["vocabulary"]["specSha256"] == one.sha256
     assert sample["vocabulary"]["columns"] == list(COLUMNS)
+    assert sample["vocabulary"]["headingLeadS"] == one.heading_lead_s
+    assert not {"headingMaxTurnDeg", "turnStartDelayMaxS"} & set(sample["vocabulary"])
     assert sorted(f["stratum"] for f in sample["flights"]) == ["straight-in", "vectored"]
     assert sample["cohort"]["pool"] == 4 and sample["candidatesSha256"] == entry["runwaySha256"]
     counts = sample["vocabulary"]["classCounts"]
@@ -269,20 +252,24 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
         for row in range(rows):
             value = issued.get(row, value)
             assert flight["words"]["inForce"][column][row] == value
+    # every heading word: its judged rows a lead after it, its band θ ± the tolerance, a verdict per row that its
+    # check counts; the words said step by step through the turns
     heading = flight["envelopes"]["heading"]
-    assert heading[0]["turn"] is None and heading[0]["check"] is None
-    turned = heading[1]
-    assert turned["turn"]["rateMinDegS"] < turned["turn"]["rateMaxDegS"] and turned["turn"]["slowFinished"]
-    assert len(turned["turn"]["slowPath"]["eM"]) > len(turned["turn"]["fastPath"]["eM"])
-    assert len(turned["turn"]["region"]["lon"]) == len(turned["turn"]["region"]["eM"]) >= 3
-    # the heading chart's turns: one point per point of the plan's, starting at the issue's time
-    for path, profile in (("fastPath", "headingFast"), ("slowPath", "headingSlow")):
-        assert len(turned["turn"][profile]["tS"]) == len(turned["turn"][profile]["deg"]) == len(turned["turn"][path]["eM"])
-        assert turned["turn"][profile]["tS"][0] == signals["tS"][turned["row"]]
-    assert "turnBandDeg" not in turned
-    assert turned["check"]["progressOk"] is True
+    lead = sample["vocabulary"]["headingLeadRows"]
+    assert lead * sample["vocabulary"]["stepS"] == sample["vocabulary"]["headingLeadS"]
+    tolerance = sample["vocabulary"]["headingToleranceDeg"]
+    assert [h["kind"] for h in heading] == ["initial"] + ["per-step"] * (len(heading) - 1) and len(heading) > 2
+    for item in heading:
+        assert item["firstRow"] == item["row"] + lead and item["stopRow"] >= item["firstRow"]
+        assert len(item["inside"]) == item["stopRow"] - item["firstRow"] == item["check"]["rows"]
+        assert sum(item["inside"]) == item["check"]["inside"]
+        assert item["bandDeg"] == pytest.approx([item["targetOnTrackDeg"] - tolerance, item["targetOnTrackDeg"] + tolerance])
+        assert not {"turn", "funnel", "holdCheck", "split"} & set(item)
     approach = flight["envelopes"]["approach"]
-    assert approach["captureTurn"]["startRow"] == turned["holdEndRow"]
+    assert "interceptInserted" not in approach
+    capture = approach["captureTurn"]
+    assert (capture["startRow"], capture["endRow"]) == (flight["joinRow"], flight["captureRow"]) and "turn" not in capture
+    assert capture["check"]["progressOk"] is True and heading[-1]["stopRow"] <= flight["joinRow"]
     assert len(approach["corridor"]["outline"]["eM"]) == 4
     assert approach["landing"]["cutAtCrossing"] is False and approach["landing"]["crossing"] is None
     speeds = flight["envelopes"]["speed"]
