@@ -9,7 +9,10 @@ Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.
   still lags it (the shorter way from the TRACK would turn back once the lag exceeds 180° less the part);
 - cleared, not yet captured (§4.3): when θ itself cannot reach the pointed runway's line but a track
   within the heading tolerance can (the labeller's own test, `instructions.envelope.heading_converges`),
-  θ is flown bent by the tolerance toward the line — still inside the word's envelope;
+  θ is flown bent by the tolerance toward the line — still inside the word's envelope; when not even that
+  reaches it (the executor is not where the observed aircraft was: a wider turn rolled out parallel to the
+  final), it intercepts at the vocabulary's intercept angle, the rule the labeller reads an inserted intercept
+  by (§2.2) — outside the word's envelope, which the judge reports;
 - the capture (§4.4) starts when the turn onto the course would end on the line, flying toward it — or
   at once inside the corridor's width; captured is the executor's state, not a word. The turn is the one
   the laws fly, at ``r = min(r_turn, g tan φ_cap / V)`` (the steady rate, where the bank cap allows it):
@@ -211,13 +214,17 @@ class Lateral:
         on_course = off_course.abs() <= spec.corridor_course_tolerance_deg
         self.tracking = self.captured & (self.tracking | on_course | ~toward_line)
 
-        # before the capture: the word, bent toward the line when only its tolerance reaches it
+        # before the capture: the word, bent toward the line when only its tolerance reaches it, and when not even
+        # that reaches it, an intercept at the vocabulary's intercept angle (as the labeller reads one, §2.2)
         misses = ~converges(heading_deg, course, right, before, 0.0, spec)
-        bend = cleared & ~self.captured & misses & converges(heading_deg, course, right, before,
-                                                              spec.heading_tolerance_deg, spec)
+        bent_reaches = converges(heading_deg, course, right, before, spec.heading_tolerance_deg, spec)
+        waiting = cleared & ~self.captured & (before > 0.0)
+        bend = waiting & misses & bent_reaches
+        intercept = waiting & ~bent_reaches
         side = torch.where(right >= 0.0, -1.0, 1.0).to(right.dtype)
         error = self.word_error(state, heading_deg, issued, go_around) + torch.where(
             bend, side * spec.heading_tolerance_deg, 0.0)
+        error = torch.where(intercept, wrap180(course + side * spec.intercept_angle_deg - state.track_deg), error)
         # tracking: the line's own target, critically damped, steering inside the corridor's course tolerance
         gain = 1.0 / (4.0 * state.ground_speed_mps * params.heading_time_constant_s)
         steer = torch.where(inside, torch.full_like(right, spec.corridor_course_tolerance_deg / 2.0),
@@ -241,4 +248,4 @@ class Lateral:
         rate = torch.where(self.captured & ~self.tracking, capture,
                            torch.where(self.tracking, line_rate, rate_for_error(error, params)))
         return rate, {"captured": self.captured.clone(), "tracking": self.tracking.clone(), "bent": bend,
-                      "go_around": go_around}
+                      "intercepting": intercept, "go_around": go_around}

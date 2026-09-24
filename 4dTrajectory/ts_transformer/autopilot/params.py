@@ -19,7 +19,7 @@ import math
 from dataclasses import dataclass
 
 from ts_transformer.autopilot.inverse import BANK_MAX_RAD
-from ts_transformer.autopilot.sentence import Delays
+from ts_transformer.autopilot.sentence import CLOCKS, Delays
 from ts_transformer.instructions.spec import VocabularySpec
 
 
@@ -36,8 +36,11 @@ class ExecutorParams:
     accel_mps2: float              # a_acc
     unspecified_decel_mps2: float  # a_unspec
     land_aim_height_m: float       # where "descend to land" aims: this far above the pointed threshold
+    land_window_low_m: float       # ... and the heights it may cross at instead, to stay inside the word's tube
+    land_window_high_m: float
     delays: Delays                 # d_ψ, d_h, d_v
     timeout_factor: float          # the flight's own remaining time × this (§8.3)
+    word_clock: str                # which clock a replay says a truth sentence's words on (`sentence.CLOCKS`, §11)
 
     def check(self, spec: VocabularySpec, *, early_words: bool = False) -> None:
         """``early_words``: allow a negative delay — a word acting before it is said. Only the sensitivity
@@ -58,9 +61,12 @@ class ExecutorParams:
         if self.delays.heading_s > spec.turn_start_delay_max_s:
             raise ValueError(f"d_ψ {self.delays.heading_s:g} s exceeds the {spec.turn_start_delay_max_s:g} s a turn "
                              f"may start late (vocabulary §2.3)")
-        if not 0.0 <= self.land_aim_height_m <= spec.landing_max_height_m:
-            raise ValueError(f"the landing aim {self.land_aim_height_m:g} m is outside the landing condition's "
-                             f"0–{spec.landing_max_height_m:g} m")
+        if not 0.0 <= self.land_window_low_m <= self.land_aim_height_m <= self.land_window_high_m <= spec.landing_max_height_m:
+            raise ValueError(f"the landing aim {self.land_aim_height_m:g} m and its window {self.land_window_low_m:g}–"
+                             f"{self.land_window_high_m:g} m are not inside the landing condition's "
+                             f"0–{spec.landing_max_height_m:g} m, the aim inside its window")
+        if self.word_clock not in CLOCKS:
+            raise ValueError(f"word_clock {self.word_clock!r} is none of {CLOCKS}")
         positive = (self.cycle_s, self.turn_rate_deg_s, self.bank_rate_deg_s, self.path_rate_factor,
                     self.decel_mps2, self.accel_mps2, self.unspecified_decel_mps2, self.timeout_factor)
         if min(positive) <= 0.0:

@@ -32,7 +32,7 @@ from ts_transformer.autopilot.frame import AirportCharts
 from ts_transformer.autopilot.judge import Verdict, flown_track, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.sentence import words_in_force
+from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock
 from ts_transformer.autopilot.spec import load_spec, require_current_executor
 from ts_transformer.autopilot.speed import approach_speed_ias_mps
 from ts_transformer.data.dataset import FlightSeries
@@ -162,6 +162,18 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
                  drawn=batch.drawn)
 
 
+def word_clock(batch: Batch, params: ExecutorParams, step_s: float,
+               device: torch.device) -> TimeClock | DistanceClock | TrackClock:
+    """The clock the batch's truth sentences are said on (`ExecutorParams.word_clock`, §11): the distance clock
+    reads each observed flight's path at its sentence's rows."""
+    if params.word_clock == "time":
+        return TimeClock(params.cycle_s)
+    rows = [len(r.words) for r in batch.readings]
+    e_m, n_m = [f.e_m[:n] for f, n in zip(batch.signals, rows)], [f.n_m[:n] for f, n in zip(batch.signals, rows)]
+    clock = DistanceClock if params.word_clock == "distance" else TrackClock
+    return clock.of(e_m, n_m, step_s, device=device)
+
+
 def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device,
               early_words: bool = False) -> tuple[Flown, list[Verdict]]:
     """Fly every flight's sentence from its row 0 and judge it (``early_words``: a sensitivity probe)."""
@@ -169,10 +181,9 @@ def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *, device: tor
     f64 = torch.float64
     limits = torch.tensor([len(r.words) * spec.step_s * params.timeout_factor for r in batch.readings], dtype=f64,
                           device=device)
-    cycles = int(math.ceil(float(limits.max()) / params.cycle_s))
-    force = words_in_force([r.words for r in batch.readings], words, params.delays, cycle_s=params.cycle_s,
-                           cycles=cycles, device=device)
-    flown = fly(batch.inputs(device), force, Runways.of(batch.geometries, dtype=f64, device=device),
+    sentences = Sentences([r.words for r in batch.readings], words, device=device)
+    flown = fly(batch.inputs(device), sentences, word_clock(batch, params, spec.step_s, device),
+                Runways.of(batch.geometries, dtype=f64, device=device),
                 AirportCharts.of(batch.geometries, dtype=f64, device=device),
                 torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits,
                 early_words=early_words)

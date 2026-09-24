@@ -49,7 +49,7 @@ first flew what it was told, and one that did not land fails layer 3 anyway.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -203,13 +203,21 @@ def hold_funnel(flight: Admitted, span: HeadingSpan, target_deg: float, turn_deg
     return ends, envelope.hold_funnel(positions[row] + ends.corners, target_deg, spec.heading_tolerance_deg, length)
 
 
+def said_at(instructions: list[Instruction], flown_rows: list[int]) -> list[Instruction]:
+    """The sentence's words at the flown rows the executor was told them at (``info["sentence_row"]``: the row
+    the observed aircraft was told it at)."""
+    return [replace(word, row=row, info={**word.info, "sentence_row": word.row})
+            for word, row in zip(instructions, flown_rows)]
+
+
 def _heading_words(flight: Admitted, instructions: list[Instruction], turns: list[dict[str, Any]],
                    capture_row: int | None, spec: VocabularySpec, words: Words) -> list[dict[str, Any]]:
     """One result per turn (a single word, or a split turn's parts together), from its first word's row:
     the turn to where the flown track enters the last word's band, then the hold to the next heading word or
     the executor's capture (``capture_row``: None when it never captured; the holds then run to the flown
-    track's end). ``turns`` are the labeller's turn records of the observed flight: their signed ``turn_deg``
-    fixes the turn's way and size."""
+    track's end). ``instructions`` are at the flown rows the executor was told them at (`said_at`); ``turns``
+    are the labeller's turn records of the observed flight, found by the sentence row: their signed
+    ``turn_deg`` fixes the turn's way and size."""
     smoothed = flight.smoothed
     track, speed = smoothed.track_deg, smoothed.ground_speed_mps
     every = _turn_groups(sorted((i for i in instructions if i.column == HEADING), key=lambda item: item.row))
@@ -228,7 +236,8 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
         if first.kind == "initial":
             arrival, turn, target_unwrapped = first.row, None, target
         else:
-            (record,) = [r for r in turns if r["departure_row"] == first.row and first.kind.startswith(r["kind"])]
+            (record,) = [r for r in turns
+                         if r["departure_row"] == first.info["sentence_row"] and first.kind.startswith(r["kind"])]
             # the turn said so far: all of it, or the parts said (the sentence may end mid split turn)
             said = record["turn_deg"] * len(group) / record["parts"]
             shorter = float(wrap180(target - track[first.row]))
@@ -299,7 +308,12 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     except Refused as refusal:
         return Verdict(outcome, end_row, crossing, limits, None, flown_rows=end_row + 1, refused=refusal.reason)
     rows = flight.signals.n_rows
-    reached = [i for i in reading.instructions if i.row < rows]
+    # each word at the flown row where the executor was told it: the first cycle whose sentence time reached the
+    # word's step (on the time clock, the word's own row)
+    sentence = flown.sentence_s[index, :last].cpu().numpy()
+    flown_rows = [int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9)) // step_rows
+                  for word in reading.instructions]
+    reached = [word for word in said_at(reading.instructions, flown_rows) if word.row < rows]
 
     def first_row(mode: str) -> int | None:
         # up to the outcome's row: after a crossing without capture the executor flies on, and a later mode

@@ -80,16 +80,21 @@ def starts(word) -> bool:
     return word.column != HEADING or (word.kind in ("turn", "turn-split") and word.info["part"] == 1)
 
 
-def flight_leads(states: np.ndarray, cycle_s: float, series: FlightSeries, geometry: AirportGeometry, reading: Reading,
-                 spec: VocabularySpec, words: Words, window_s: float) -> tuple[list[tuple[int, float]], Counter]:
-    """Method B on one flight flown with no delay: ``states`` up to where its flight ended. The words the
-    executor received — every word of `MEASURED_COLUMNS` after step 0 (step 0 describes what the aircraft
-    is already doing) at a time the flight reached — against the labeller's re-reading of the flown track
-    through `observe`. Returns the ``(column, lead)`` pairs and how many words of each column were received;
+def flight_leads(states: np.ndarray, sentence_s: np.ndarray, cycle_s: float, series: FlightSeries,
+                 geometry: AirportGeometry, reading: Reading, spec: VocabularySpec, words: Words,
+                 window_s: float) -> tuple[list[tuple[int, float]], Counter]:
+    """Method B on one flight flown with no delay: ``states`` up to where its flight ended, ``sentence_s`` the
+    sentence time of each cycle (the replay's clock). The words the executor received — every word of
+    `MEASURED_COLUMNS` after step 0 (step 0 describes what the aircraft is already doing) that starts a
+    manoeuvre, at the time it was told it, within the flight — against the labeller's re-reading of the flown
+    track through `observe`. Returns the ``(column, lead)`` pairs and how many words of each column were received;
     raises `Refused` when the labeller will not read the flown track."""
-    flown_s = (len(states) - 1) * cycle_s
-    received = [(i.column, i.value, i.row * spec.step_s) for i in reading.instructions
-                if i.column in MEASURED_COLUMNS and i.row > 0 and i.row * spec.step_s < flown_s and starts(i)]
+    received = []
+    for word in reading.instructions:
+        if word.column in MEASURED_COLUMNS and word.row > 0 and starts(word):
+            cycle = int(np.searchsorted(sentence_s, word.row * spec.step_s - 1e-9))
+            if cycle < len(states) - 1:
+                received.append((word.column, word.value, cycle * cycle_s))
     again = read_flight(observe(states, cycle_s, series, geometry, spec.step_s), geometry, spec, words)
     reread = [(i.column, i.value, i.row * spec.step_s) for i in again.instructions if i.row > 0]
     return word_leads(received, reread, window_s), Counter(column for column, _, _ in received)

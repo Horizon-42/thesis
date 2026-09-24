@@ -16,7 +16,9 @@ Data (train, the labeller's own reading of each flight — `flight_measurements`
 - ``unspecified_decel_mps2`` (a_unspec): after an "unspecified" word, the first decelerating piece of
   the ground speed's piecewise fit lasting at least `MIN_SPAN_S`, the median slope;
 - ``land_aim_height_m``: the height above the pointed threshold at which the flight would cross it,
-  extrapolated along its last `CROSSING_FIT_ROWS` rows, the median. (Every labelled train sentence ends
+  extrapolated along its last `CROSSING_FIT_ROWS` rows, the median; ``land_window_low_m`` / ``land_window_high_m``
+  the same heights' `LAND_WINDOW_PERCENTILES` — where the observed flights cross, the window the executor may
+  cross in to keep inside a word's tube. (Every labelled train sentence ends
   within 1.2 km of the threshold, median 0.1 km: the extrapolation is short.)
 
 Torch-free, so the runner's worker processes (`measure_chunk`) read the train split without loading the
@@ -43,6 +45,7 @@ TURN_MIN_DEG = 90.0
 FAST_BAND_MPS = (115.0, 140.0)
 MIN_SPAN_S = 20.0
 CROSSING_FIT_ROWS = 10
+LAND_WINDOW_PERCENTILES = (5.0, 95.0)
 MEASUREMENTS = ("turn_steady_rate_deg_s", "turn_fast_bank_deg", "transition_accel_mps2", "unspecified_slope_mps2",
                 "crossing_height_m")
 
@@ -109,6 +112,10 @@ def measured_values(pooled: dict[str, Sequence[float]], spec: VocabularySpec) ->
         "accel_mps2": rounded(float(np.median(accel[accel > 0.0])), 0.01, round),
         "unspecified_decel_mps2": rounded(float(np.median(-np.asarray(pooled["unspecified_slope_mps2"]))), 0.01, round),
         "land_aim_height_m": rounded(float(np.median(pooled["crossing_height_m"])), 0.1, round),
+        "land_window_low_m": rounded(float(np.percentile(pooled["crossing_height_m"], LAND_WINDOW_PERCENTILES[0])),
+                                     0.1, round),
+        "land_window_high_m": rounded(float(np.percentile(pooled["crossing_height_m"], LAND_WINDOW_PERCENTILES[1])),
+                                      0.1, round),
     }
     counts = {name: len(pooled[name]) for name in MEASUREMENTS}
     counts["decelerations"], counts["accelerations"] = int((accel < 0.0).sum()), int((accel > 0.0).sum())

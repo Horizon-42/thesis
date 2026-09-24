@@ -17,7 +17,7 @@ from ts_transformer.autopilot import inverse
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import AirportCharts, compass_deg, read_state, wrap180
 from ts_transformer.autopilot.plant import Plant
-from ts_transformer.autopilot.sentence import Delays, words_in_force
+from ts_transformer.autopilot.sentence import Delays, DistanceClock, Sentences, TimeClock
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, APPROACH_CLEARED, APPROACH_NOT_CLEARED, HEADING, SPEED, UNCHANGED, Words,
     compass_from_math_rad, wrap180 as np_wrap180,
@@ -47,9 +47,9 @@ def test_the_state_reads_as_the_words_read_a_flight():
     assert float(k.ground_speed_mps) == pytest.approx(100.0 * math.cos(math.radians(3.0)))
 
 
-# ---- words in force
-def test_each_word_takes_effect_its_columns_delay_after_its_step_and_stays_in_force():
-    one, words = spec(), Words(spec())
+# ---- words in force, and the clocks they are said on
+def _grid():
+    words = Words(spec())
     grid = np.full((5, 6), UNCHANGED, dtype=np.int64)
     grid[0] = [0, APPROACH_NOT_CLEARED, words.heading_index(270.0), words.altitude_index(1200.0), 0,
                words.speed_index(100.0)]
@@ -58,18 +58,25 @@ def test_each_word_takes_effect_its_columns_delay_after_its_step_and_stays_in_fo
     grid[3, ALTITUDE] = words.altitude_land                 # issued at t = 6 s
     grid[3, ANGLE] = 3
     grid[4, SPEED] = words.speed_unspecified                # issued at t = 8 s
+    return grid
+
+
+def test_each_word_takes_effect_its_columns_delay_after_its_step_and_stays_in_force():
+    one, words = spec(), Words(spec())
+    sentences = Sentences([_grid()], words, device=CPU)
     delays = Delays(heading_s=3.0, vertical_s=1.0, speed_s=0.0)
-    force = words_in_force([grid], words, delays, cycle_s=1.0, cycles=20, device=CPU)
-    heading = force.heading_deg[0].numpy()
+    at = [sentences.at(torch.tensor([float(t)], dtype=F64), delays) for t in range(20)]
+    heading = np.array([float(w.heading_deg[0]) for w in at])
     assert (heading[:7] == 270.0).all() and (heading[7:] == 180.0).all()        # 4 s + 3 s
-    assert force.approach[0, 6] == APPROACH_NOT_CLEARED and force.approach[0, 7] == APPROACH_CLEARED
-    land = force.land[0].numpy()
+    assert at[6].approach[0] == APPROACH_NOT_CLEARED and at[7].approach[0] == APPROACH_CLEARED
+    land = np.array([bool(w.land[0]) for w in at])
     assert not land[:7].any() and land[7:].all()                                 # 6 s + 1 s
-    assert float(force.altitude_m[0, 0]) == 1200.0 and float(force.angle_deg[0, 7]) == one.descent_angle_centres_deg[2]
-    assert not force.unspecified[0, :8].any() and force.unspecified[0, 8:].all()
-    assert (force.runway[0] == 0).all()
-    assert force.issued_step[0, 6, HEADING] == 0 and force.issued_step[0, 7, HEADING] == 2
-    assert force.issued_step[0, 19, SPEED] == 4                                  # held after the last step
+    assert float(at[0].altitude_m[0]) == 1200.0 and float(at[7].angle_deg[0]) == one.descent_angle_centres_deg[2]
+    unspecified = np.array([bool(w.unspecified[0]) for w in at])
+    assert not unspecified[:8].any() and unspecified[8:].all()
+    assert all(int(w.runway[0]) == 0 for w in at)
+    assert at[6].issued_step[0, HEADING] == 0 and at[7].issued_step[0, HEADING] == 2
+    assert at[19].issued_step[0, SPEED] == 4                                     # held after the last step
 
 
 def test_a_sentence_must_write_every_column_at_step_0():
@@ -77,10 +84,26 @@ def test_a_sentence_must_write_every_column_at_step_0():
     grid = np.full((3, 6), UNCHANGED, dtype=np.int64)
     grid[0, :5] = [0, 0, 0, 0, 0]
     with pytest.raises(ValueError, match="step 0 must write every column"):
-        words_in_force([grid], words, Delays(0.0, 0.0, 0.0), cycle_s=1.0, cycles=4, device=CPU)
+        Sentences([grid], words, device=CPU)
 
 
-# ---- the rebuilt flight
+def test_the_distance_clock_says_a_word_where_the_observed_aircraft_was_told_it():
+    """Observed: 100 m every 2 s row. An executor twice as fast reaches row 3's position in 3 s, not 6 s;
+    past the observed path's end the clock stays at the sentence's last row."""
+    from ts_transformer.autopilot.frame import Kinematics
+
+    e = np.arange(5) * 100.0
+    clock = DistanceClock.of([e], [np.zeros(5)], 2.0, device=CPU)
+
+    def at(position):
+        state = Kinematics(*(torch.tensor([value], dtype=F64) for value in (position, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)))
+        return float(clock.now(0, state)[0])
+
+    times = [at(100.0 * t) for t in range(6)]                                   # 100 m a second
+    assert times == pytest.approx([0.0, 2.0, 4.0, 6.0, 8.0, 8.0])
+    assert float(TimeClock(1.0).now(7, Kinematics(*(torch.zeros(1, dtype=F64) for _ in range(8))))[0]) == 7.0
+
+
 def test_a_rebuilt_flight_must_be_the_one_the_signals_were_read_from(monkeypatch):
     from dataclasses import replace
     from ts_transformer.autopilot import flights
@@ -242,9 +265,10 @@ def _params(**changes):
 
     base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
                           bank_rate_deg_s=2.0, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
-                          accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8,
+                          accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8, land_window_low_m=8.4,
+                          land_window_high_m=36.5,
                           delays=Delays(0.0, 0.0, 0.0),
-                          timeout_factor=1.5)
+                          timeout_factor=1.5, word_clock="time")
     return replace(base, **changes)
 
 
@@ -275,8 +299,8 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_word
         frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=F64),
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
     limit = len(grid) * one.step_s * params.timeout_factor
-    force = words_in_force([grid], words, params.delays, cycle_s=params.cycle_s, cycles=int(math.ceil(limit)), device=CPU)
-    flown = fly(inputs, force, Runways.of([geometry], dtype=F64, device=CPU),
+    flown = fly(inputs, Sentences([grid], words, device=CPU), TimeClock(params.cycle_s),
+                Runways.of([geometry], dtype=F64, device=CPU),
                 AirportCharts.of([geometry], dtype=F64, device=CPU),
                 torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias],
                              dtype=F64), params, words,
@@ -331,20 +355,21 @@ def test_the_flights_outcome_is_the_first_event_it_meets():
 
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     _, verdict, reading = _fly_sentence(signals)
-    # never cleared: the executor holds the base heading past the line; told to descend to land it meets
-    # the ground, told nothing more it flies on until its time runs out
+    # never cleared: the executor holds the base heading past the line; told to descend to land it never goes
+    # below the straight line to the threshold, and flies on until its time runs out
     grid = reading.words.copy()
     grid[grid[:, APPROACH] == CLEARED, APPROACH] = UNCHANGED
     flown, uncleared, _ = _fly_sentence(signals, grid)
-    assert uncleared.outcome == "ground_contact" and not flown.modes["captured"][0].any()
-    grid[1:, ALTITUDE] = UNCHANGED
-    grid[1:, ANGLE] = UNCHANGED
-    _, level, _ = _fly_sentence(signals, grid)
-    assert level.outcome == "timeout" and not level.flew_the_sentence
+    assert uncleared.outcome == "timeout" and not flown.modes["captured"][0].any()
+    assert not uncleared.flew_the_sentence
+    # told to descend below the threshold's elevation (a target of 0 m MSL; the threshold is at 100 m), it meets
+    # the ground before the threshold
     words = Words(spec())
-    steep = reading.words.copy()
-    steep[1, ALTITUDE], steep[1, ANGLE] = words.altitude_land, 4       # descend to land at the steepest class, at once
-    _, grounded, _ = _fly_sentence(signals, steep)
+    below = reading.words.copy()
+    below[1, ALTITUDE], below[1, ANGLE] = words.altitude_index(0.0), 4          # at the steepest class, at once
+    below[2:, ALTITUDE] = UNCHANGED
+    below[2:, ANGLE] = UNCHANGED
+    _, grounded, _ = _fly_sentence(signals, below)
     assert grounded.outcome == "ground_contact"
     # the steepest class at once asks more than γ̇_max: layer 1 records the rate the law wanted before its limit
     limited = grounded.limits["path_rate_limited"]
@@ -398,7 +423,8 @@ def test_the_data_parameters_are_the_pooled_medians_rounded_as_the_spec_says():
               "crossing_height_m": [16.0, 20.84, 26.0]}
     measured = measure.measured_values(pooled, one)
     assert measured["values"] == {"turn_rate_deg_s": 2.15, "bank_cap_deg": 25.0, "decel_mps2": 0.24, "accel_mps2": 0.16,
-                                  "unspecified_decel_mps2": 0.26, "land_aim_height_m": 20.8}
+                                  "unspecified_decel_mps2": 0.26, "land_aim_height_m": 20.8,
+                                  "land_window_low_m": 16.5, "land_window_high_m": 25.5}
     assert measured["counts"]["decelerations"] == measured["counts"]["accelerations"] == 3
     # never past the vocabulary's own bank ceiling
     steep = measure.measured_values({**pooled, "turn_fast_bank_deg": [40.0]}, one)
@@ -464,7 +490,8 @@ def test_the_observation_operator_reads_a_flown_track_as_the_data_plane_reads_a_
     rows = (seen.time_s / 1.0).astype(int)
     assert len(seen.time_s) == len(states[::2]) and seen.time_s[1] - seen.time_s[0] == one.step_s
     assert np.abs(seen.e_m - truth["e"][rows]).max() < 5.0 and np.abs(seen.altitude_m - truth["height"][rows]).max() < 2.0
-    leads, received = flight_leads(states, 1.0, _observed_series(geometry), geometry, reading, one, words, 30.0)
+    leads, received = flight_leads(states, flown.sentence_s[0].numpy(), 1.0, _observed_series(geometry), geometry,
+                                   reading, one, words, 30.0)
     said = [i for i in reading.instructions if i.row > 0 and i.column in (HEADING, ALTITUDE, ANGLE, SPEED)]
     assert sum(received.values()) == len(said) == 5 and received[HEADING] == 1
     by_column = dict(leads)
@@ -492,7 +519,7 @@ def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_
     stored = json.loads((tmp_path / "spec.json").read_text())
     for broken, message in (({**stored, "params": {**stored["params"], "bank_rate_deg_s": 9.0}}, "do not hash"),
                             ({**stored, "params": {**stored["params"], "extra_s": 1.0}}, "extra"),
-                            ({**stored, "schema": "ts-executor-spec-v0"}, "is not a ts-executor-spec-v1 file")):
+                            ({**stored, "schema": "ts-executor-spec-v0"}, f"is not a {executor_spec.EXECUTOR_SPEC_SCHEMA} file")):
         (tmp_path / "spec.json").write_text(json.dumps(broken))
         with pytest.raises(ValueError, match=message):
             executor_spec.load_spec(tmp_path)
@@ -910,7 +937,7 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
 def test_a_split_turn_said_only_in_part_is_judged_toward_the_part_said():
     """Review: when the flight ends after the first part of a 360° orbit was said, the turn judged is that part's
     120°, not the whole orbit's end — read here on the observed orbit, which reaches 120° and turns on."""
-    from ts_transformer.autopilot.judge import _heading_words
+    from ts_transformer.autopilot.judge import _heading_words, said_at
     from ts_transformer.instructions.labeller.read import admit, read_flight
 
     one, words, geometry = spec(), Words(spec()), instruction_airport()
@@ -918,5 +945,6 @@ def test_a_split_turn_said_only_in_part_is_judged_toward_the_part_said():
     reading = read_flight(signals, geometry, one, words)
     first = [i for i in reading.instructions if i.kind == "turn-split"][0]
     said = [i for i in reading.instructions if i.column == HEADING and i.row <= first.row]
+    said = said_at(said, [i.row for i in said])                                 # told where the observed aircraft was
     (_, part) = _heading_words(admit(signals, geometry, one), said, reading.checks["turns"], None, one, words)
     assert part["words"] == 1 and part["turn"]["reached"] and part["turn"]["progress_ok"]

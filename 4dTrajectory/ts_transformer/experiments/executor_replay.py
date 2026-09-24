@@ -155,10 +155,14 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
         for j, verdict in enumerate(verdicts):
             counted = replay.word_results(verdict)
             series = part.series[j]
-            forecast = executor_forecast(flown, j, verdict, inputs, series)
-            predictions.append(build_prediction_record(series, forecast, index=start + j, model_name=PREDICTOR,
-                                                       horizon_mode=HORIZON, split=split))
-            metrics.append(observed_series_metrics(series, forecast))
+            # a dynamics failure in the first cycle leaves no state to record (a stand-in's airframe below its
+            # observed speed): no record, and the row says so
+            recorded = not (verdict.outcome == "dynamics_failure" and verdict.end_row <= 1)
+            if recorded:
+                forecast = executor_forecast(flown, j, verdict, inputs, series)
+                predictions.append(build_prediction_record(series, forecast, index=start + j, model_name=PREDICTOR,
+                                                           horizon_mode=HORIZON, split=split))
+                metrics.append(observed_series_metrics(series, forecast))
             reading = part.readings[j]
             rows.append({
                 "dataset_id": reading.dataset_id, "flight_key": series.scenario.source["flight_key"],
@@ -167,7 +171,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
                 "crossing": verdict.crossing, "words": None if counted is None else counted[0],
                 "heading_words_not_judged": 0 if counted is None else counted[1],
                 "words_not_reached": 0 if verdict.words is None else verdict.words["not_reached"],
-                "refused": verdict.refused, "limits": verdict.limits, **aligned[j]})
+                "refused": verdict.refused, "limits": verdict.limits, "recorded": recorded, **aligned[j]})
         del flown, verdicts
     write_batch(predictions, output_dir=records, config_dict={"model": PREDICTOR, "horizon_mode": HORIZON,
                                                               "prediction_output": EXECUTOR_DYNAMICS.prediction_output,
@@ -177,7 +181,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
     graded = _evaluate(records)
     by_key = {row["flight_key"]: row for row in graded["trajectories"]}
     for row in rows:
-        row["replay_verdict"] = by_key[row["flight_key"]]["verdict"]
+        row["replay_verdict"] = by_key[row["flight_key"]]["verdict"] if row["recorded"] else "no record: failed at once"
     return rows, graded
 
 

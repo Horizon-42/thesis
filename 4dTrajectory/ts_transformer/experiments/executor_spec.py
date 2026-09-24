@@ -35,7 +35,7 @@ import torch
 
 from ts_transformer.autopilot import derive, measure, observe, replay
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.sentence import DELAY_GROUPS, Delays
+from ts_transformer.autopilot.sentence import CLOCKS, DELAY_GROUPS, Delays
 from ts_transformer.autopilot.spec import executor_source_sha256, params_sha256, write_spec
 from ts_transformer.instructions.artefact import (
     labeller_source_sha256, load_candidates, load_sentences, load_signals, load_spec, require_current_labeller,
@@ -94,8 +94,9 @@ def method_b(batch: replay.Batch, params: ExecutorParams, words: Words, device: 
     for j, verdict in enumerate(verdicts):
         states = flown.states[j, : verdict.end_row + 1].cpu().numpy()
         try:
-            pairs, counts = observe.flight_leads(states, params.cycle_s, batch.series[j], batch.geometries[j],
-                                                 batch.readings[j], spec, words, LEAD_WINDOW_S)
+            pairs, counts = observe.flight_leads(states, flown.sentence_s[j].cpu().numpy(), params.cycle_s,
+                                                 batch.series[j], batch.geometries[j], batch.readings[j], spec, words,
+                                                 LEAD_WINDOW_S)
         except Refused as refusal:
             refused[refusal.reason] += 1
             continue
@@ -125,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True, help="the instruction artefact the executor flies")
     parser.add_argument("--dir", type=Path, required=True, help="the new executor spec directory")
+    parser.add_argument("--word-clock", choices=CLOCKS, required=True,
+                        help="the clock a replay says a truth sentence's words on (§11); method B measures on it")
     parser.add_argument("--method-b-per-airport", type=int, default=40)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--workers", type=int, default=8)
@@ -159,8 +162,10 @@ def main(argv: list[str] | None = None) -> int:
                                  bank_rate_deg_s=derive.ROLL_RATE_STEP_DEG_S, path_time_constant_s=PATH_TIME_CONSTANT_S,
                                  path_rate_factor=PATH_RATE_FACTOR, decel_mps2=values["decel_mps2"],
                                  accel_mps2=values["accel_mps2"], unspecified_decel_mps2=values["unspecified_decel_mps2"],
-                                 land_aim_height_m=values["land_aim_height_m"], delays=Delays(0.0, 0.0, 0.0),
-                                 timeout_factor=TIMEOUT_FACTOR)
+                                 land_aim_height_m=values["land_aim_height_m"],
+                                 land_window_low_m=values["land_window_low_m"],
+                                 land_window_high_m=values["land_window_high_m"], delays=Delays(0.0, 0.0, 0.0),
+                                 timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock)
     roll_rate, overshoots = derive.roll_rate_deg_s(provisional, spec)
     undelayed = replace(provisional, bank_rate_deg_s=roll_rate)
     undelayed.check(spec)
