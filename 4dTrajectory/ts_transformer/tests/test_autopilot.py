@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -65,7 +66,9 @@ def test_each_word_takes_effect_its_columns_delay_after_its_step_and_stays_in_fo
     one, words = spec(), Words(spec())
     sentences = Sentences([_grid()], words, device=CPU)
     delays = Delays(vertical_s=1.0, speed_s=0.0)
-    at = [sentences.at(torch.tensor([float(t)], dtype=F64), delays) for t in range(20)]
+    # each second's lookup, the undelayed columns at the second that started its row (the time clock: every other)
+    at = [sentences.at(torch.tensor([float(t)], dtype=F64), torch.tensor([float(t - t % 2)], dtype=F64), delays)
+          for t in range(20)]
     heading = np.array([float(w.heading_deg[0]) for w in at])
     # a heading word, and the clearance with it, act when said: they carry their own lead (§10.1)
     assert (heading[:4] == 270.0).all() and (heading[4:] == 180.0).all()
@@ -246,14 +249,27 @@ def test_the_heading_law_turns_the_shorter_way_at_the_steady_rate_and_eases_out(
                                            4.0 / params.heading_time_constant_s, 0.0])
 
 
-def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out():
-    from ts_transformer.autopilot.lateral import word_rate
+def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than_the_bank_can_stop():
+    from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
+    from ts_transformer.autopilot.lateral import Lateral, stopping_rate_deg_s, word_rate
 
     params, one = _params(), spec()
     error = torch.tensor([6.0, 6.0, 6.0, 20.0, -6.0], dtype=F64)
     to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 1.0], dtype=F64)
-    # 6° over the 4 s or 3 s left; past the lead (and under 2Δt) a hold at 2Δt; never faster than r_max 3.5°/s
-    assert word_rate(error, to_go, params, one).tolist() == pytest.approx([1.5, 2.0, 3.0, 3.5, -3.0])
+    speed = torch.full((5,), 100.0, dtype=F64)
+    stop = float(stopping_rate_deg_s(torch.tensor([6.0], dtype=F64), torch.tensor([100.0], dtype=F64), params))
+    # at 100 m/s and p 3.5°/s the bank can still be taken out before 6° from 2.03°/s
+    assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(3.5) / 100.0 * math.radians(6.0))))
+    # 6° over the 4 s or 3 s left; past the lead (and under 2Δt) a hold at 2Δt, here held to the stopping rate;
+    # never faster than r_max 3.5°/s
+    assert word_rate(error, to_go, speed, params, one).tolist() == pytest.approx([1.5, 2.0, stop, 3.5, -stop])
+    # a go-around starts the word's clock again: the word after it is measured from where, and when, it is flown
+    lateral = Lateral(1, params, one, CPU)
+    state = SimpleNamespace(track_deg=torch.tensor([90.0], dtype=F64))
+    issued, heading = torch.tensor([0]), torch.tensor([90.0], dtype=F64)
+    lateral.word_error(state, heading, issued, torch.tensor([False]), 0.0)
+    lateral.word_error(state, heading, issued, torch.tensor([True]), 30.0)
+    assert float(lateral.heard_s[0]) == 30.0
 
 
 def test_the_parameters_are_checked_against_the_designs_constraints():
@@ -273,10 +289,10 @@ def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
-    # τ_ψ = the lead and p 2.5°/s: method A's values here — at 2.0 a 90° turn said word by word at 120–140 m/s ends
-    # past its words' envelopes (`derive.follow_excess_deg`)
+    # τ_ψ = the lead and p 3.5°/s: method A's values here — at 3.0 a 90° turn said word by word at 120–140 m/s, flown
+    # on the word law's stopping limit, ends past its words' envelopes (`derive.follow_excess_deg`)
     base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
-                          bank_rate_deg_s=2.5, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
+                          bank_rate_deg_s=3.5, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
                           accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8, land_window_low_m=8.4,
                           land_window_high_m=36.5,
                           delays=Delays(0.0, 0.0),
@@ -284,9 +300,9 @@ def _params(**changes):
     return replace(base, **changes)
 
 
-def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_words=False, reading=None):
-    """Read ``signals`` with the labeller (or take ``reading``), fly its sentence (or ``grid``) from row 0, judge it;
-    the A320's published approach speed unless ``approach_ias`` is given."""
+def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_words=False, reading=None, clock="time"):
+    """Read ``signals`` with the labeller (or take ``reading``), fly its sentence (or ``grid``) from row 0 on ``clock``
+    (`sentence.CLOCKS`), judge it; the A320's published approach speed unless ``approach_ias`` is given."""
     from ts_transformer.autopilot.executor import fly
     from ts_transformer.autopilot.judge import judge
     from ts_transformer.autopilot.lateral import Runways
@@ -311,7 +327,13 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_word
         frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=F64),
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
     limit = len(grid) * one.step_s * params.timeout_factor
-    flown = fly(inputs, Sentences([grid], words, device=CPU), TimeClock(params.cycle_s),
+    rows = len(grid)
+    clocks = {"time": lambda: TimeClock(params.cycle_s),
+              "track": lambda: TrackClock.of([signals.e_m[:rows]], [signals.n_m[:rows]], one.step_s, params.cycle_s,
+                                             device=CPU),
+              "distance": lambda: DistanceClock.of([signals.e_m[:rows]], [signals.n_m[:rows]], one.step_s,
+                                                   params.cycle_s, device=CPU)}
+    flown = fly(inputs, Sentences([grid], words, device=CPU), clocks[clock](),
                 Runways.of([geometry], dtype=F64, device=CPU),
                 AirportCharts.of([geometry], dtype=F64, device=CPU),
                 torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias],
@@ -322,12 +344,14 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_word
 
 # a 90° left turn as flown: rolled into and out of over 4 s each, steady at 2.25°/s (4.5° a 2 s row), the data's typical
 # steady rate — under the 25° bank cap the executor follows it at every speed flown here (3°/s at 100 m/s needs 28°)
-def _turn(degrees: float, speed_mps: float) -> list[tuple[int, float, float, float]]:
-    """A turn of ``degrees`` (positive right) rolled in and out over 4 s each, steady at 4.5° a row between."""
+def _turn(degrees: float, speed_mps: float, per_row_deg: float = 4.5) -> list[tuple[int, float, float, float]]:
+    """A turn of ``degrees`` (positive right) rolled in and out over 4 s each, steady at ``per_row_deg`` a row
+    between."""
     side = math.copysign(1.0, degrees)
-    steady = int(round((abs(degrees) - 18.0) / 4.5))
-    return [(2, side * 1.5, speed_mps, 0.0), (2, side * 3.0, speed_mps, 0.0), (steady, side * 4.5, speed_mps, 0.0),
-            (2, side * 3.0, speed_mps, 0.0), (2, side * 1.5, speed_mps, 0.0)]
+    steady = int(round((abs(degrees) - 4.0 * per_row_deg) / per_row_deg))
+    return [(2, side * per_row_deg / 3.0, speed_mps, 0.0), (2, side * per_row_deg * 2.0 / 3.0, speed_mps, 0.0),
+            (steady, side * per_row_deg, speed_mps, 0.0),
+            (2, side * per_row_deg * 2.0 / 3.0, speed_mps, 0.0), (2, side * per_row_deg / 3.0, speed_mps, 0.0)]
 
 
 DOWNWIND_BASE_FINAL = [(60, 0.0, 100.0, 0.0), *_turn(-90.0, 100.0), (20, 0.0, 90.0, 0.0), *_turn(-90.0, 85.0),
@@ -342,11 +366,12 @@ def test_a_downwind_base_final_sentence_is_flown_to_the_runway():
     assert verdict.outcome == "landed" and verdict.flew_the_sentence
     assert abs(verdict.crossing["cross_m"]) < 1.0 and 0.0 < verdict.crossing["height_m"] < 100.0
     assert verdict.words["corridor"]["inside"] == verdict.words["corridor"]["rows"] > 0
-    # the line is held from the north: the flown track lags the bank, so it may cross it by metres, no more
+    # the line is held from the north: the flown track lags the bank, so it may cross it by metres, no more (9 m at a
+    # bank rate of 2°/s, 15 m from 3.5°/s up, where a brisker roll makes the capture turn later and tighter)
     captured = flown.modes["captured"][0].numpy()
     k = read_state(flown.states[0, 1:][captured], AirportCharts.of([instruction_airport()] * int(captured.sum()),
                                                                    dtype=F64, device=CPU))
-    assert float(k.n_m.min()) > -10.0
+    assert float(k.n_m.min()) > -20.0
     assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "thrust_min", "stall", "load_factor"))
 
 
@@ -468,7 +493,7 @@ def test_the_data_parameters_are_the_pooled_medians_rounded_as_the_spec_says():
     assert steep["values"]["bank_cap_deg"] == one.turn_bank_max_deg
 
 
-def test_method_a_takes_the_gentlest_roll_out_and_roll_rate_the_constraints_allow():
+def test_method_a_takes_the_lead_for_the_executors_own_turns_and_the_gentlest_roll_rate_the_checks_allow():
     from dataclasses import replace
 
     from ts_transformer.autopilot import derive
@@ -708,6 +733,22 @@ def test_an_orbit_said_word_by_word_is_flown_all_the_way_round():
     assert all(h["inside"] == h["rows"] for h in verdict.words["heading"])
     # (its landing descent leaves the word's tube for the landing window: the altitude word's §10.2 question)
     assert verdict.outcome == "landed"
+
+
+def test_a_fast_turn_said_word_by_word_is_followed_on_every_clock():
+    """The review of 2026-09-24: base and final turns at 3°/s at 80 m/s (23° bank, inside the 25° cap). On the track and
+    distance clocks a word heard between rows lay a cycle before the row the judge reads it from — 1–2 words outside
+    until the undelayed columns were heard once a step; and the time left alone, without the word law's stopping
+    limit, passed a turn's last word by 5.5° (the review's measurement)."""
+    from ts_transformer.autopilot.sentence import CLOCKS
+
+    legs = [(40, 0.0, 80.0, 0.0), *_turn(-90.0, 80.0, 6.0), (20, 0.0, 80.0, 0.0), *_turn(-90.0, 80.0, 6.0),
+            (120, 0.0, 70.0, -70.0 * np.tan(np.radians(3.0)))]
+    signals = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0))
+    for clock in CLOCKS:
+        _, verdict, _ = _fly_sentence(signals, clock=clock)
+        assert verdict.outcome == "landed", clock
+        assert all(h["inside"] == h["rows"] for h in verdict.words["heading"]), clock
 
 
 def test_a_heading_word_whose_rows_the_lead_carries_past_the_clearance_is_not_judged():

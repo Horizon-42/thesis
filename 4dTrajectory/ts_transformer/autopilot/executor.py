@@ -81,12 +81,15 @@ def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceC
     limits: dict[str, list[torch.Tensor]] = {name: [] for name in LIMITS}
     modes: dict[str, list[torch.Tensor]] = {name: [] for name in MODES}
     sentence_times = []
+    step_rows = int(round(spec.step_s / params.cycle_s))
     done = torch.zeros(batch, dtype=torch.bool, device=device)
     done_cycle = torch.full((batch,), cycles - 1, dtype=torch.long, device=device)
     for cycle in range(cycles):
         now = read_state(state, charts)
         sentence_s = clock.now(cycle, now)
-        force = sentences.at(sentence_s, params.delays)
+        if cycle % step_rows == 0:
+            step_start_s = sentence_s                  # the undelayed columns are heard once a step (`sentence`)
+        force = sentences.at(sentence_s, step_start_s, params.delays)
         sentence_times.append(sentence_s)
         bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
         track_rate, lateral_modes = lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],

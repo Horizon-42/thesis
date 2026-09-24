@@ -50,6 +50,7 @@ import numpy as np
 from final_approach.crossing import bracket_fraction
 from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
+from ts_transformer.autopilot.sentence import UNDELAYED
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m, relative_to_runway
 from ts_transformer.instructions.labeller.lateral import turn_check
@@ -224,10 +225,17 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
         return Verdict(outcome, end_row, crossing, limits, None, flown_rows=end_row + 1, refused=refusal.reason)
     rows = flight.signals.n_rows
     # each word at the flown row where the executor was told it: the first cycle whose sentence time reached the
-    # word's step (on the time clock, the word's own row)
-    # (a word the clock never reached was never said: it is past the flight's rows)
+    # word's step — for an undelayed column, the first cycle that starts a row (`sentence.Sentences.at`); on the time
+    # clock, the word's own row (a word the clock never reached was never said: it is past the flight's rows)
     sentence = flown.sentence_s[index, :last].cpu().numpy()
-    said_cycles = [int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9)) for word in reading.instructions]
+    step_starts = sentence[::step_rows]
+
+    def said_cycle(word: Instruction) -> int:
+        if word.column in UNDELAYED:
+            return int(np.searchsorted(step_starts, word.row * spec.step_s - 1e-9)) * step_rows
+        return int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9))
+
+    said_cycles = [said_cycle(word) for word in reading.instructions]
     said = [(word, cycle // step_rows) for word, cycle in zip(reading.instructions, said_cycles) if cycle < len(sentence)]
     moved, superseded = said_at([word for word, _ in said], [row for _, row in said])
     reached = [word for word in moved if word.row < rows]

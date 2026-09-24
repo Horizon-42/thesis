@@ -23,8 +23,11 @@ rows still takes effect after its delay; delays are sentence seconds.
   the aircraft is, and the closed loop's model will say it from the executor's own state: the distance and track
   clocks are the truth sentence said that way.
 
-The runway pointer and the approach column follow the heading's delay: the clearance is given with the heading
-word it goes with (vocabulary design §3.2), and the pointer is written at step 0.
+The columns without a delay (`UNDELAYED`: the runway pointer, the approach column, the heading) are heard once a step,
+on the cycles that start a row: a heading word says where the track is a lead after the row it is heard at, and the
+judge reads the flown track at rows (`judge.said_at`). On the time clock a row starts on such a cycle anyway; on the
+track and distance clocks a word whose row the sentence time reaches between them waits for the next one (a cycle).
+The delayed columns are looked up every cycle.
 """
 
 from __future__ import annotations
@@ -123,12 +126,14 @@ class Sentences:
         self.speed = table([words.speed_mps(i) if i != words.speed_unspecified else math.nan
                             for i in range(words.speed_unspecified + 1)])
 
-    def at(self, sentence_s: torch.Tensor, delays: Delays) -> WordsNow:
-        """The words in force at each flight's sentence time ``[B]``."""
+    def at(self, sentence_s: torch.Tensor, step_start_s: torch.Tensor, delays: Delays) -> WordsNow:
+        """The words in force at each flight's sentence time ``[B]``; the undelayed columns at ``step_start_s``, the
+        sentence time of the last cycle that started a row (module docstring)."""
         batch = torch.arange(len(self.rows), device=self.rows.device)
         value, issued = [], []
         for column in range(6):
-            row = torch.floor((sentence_s - delays.column(column)) / self.step_s + 1e-9).long()
+            heard_s = step_start_s if column in UNDELAYED else sentence_s - delays.column(column)
+            row = torch.floor(heard_s / self.step_s + 1e-9).long()
             row = torch.minimum(row.clamp(min=0), self.rows - 1)
             value.append(self.value[batch, row, column])
             issued.append(self.issued[batch, row, column])

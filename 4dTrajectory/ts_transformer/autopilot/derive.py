@@ -9,12 +9,18 @@ flying the executor's own manoeuvre rather than read from data.
   `ROLL_CHECK_SPEEDS_MPS` (A320, level, at 1500 m, speed held), (1) the executor's own largest turn on its heading law
   (`largest_own_turn_deg`: from a heading word that just reaches the final — 90° plus the tolerance off the course —
   to its own intercept of the final) passes its target by no more than the heading tolerance (`turn_overshoot_deg`),
-  and (2) a typical turn said word by word is followed inside every word's envelope (`follow_excess_deg`): a
+  and (2) a typical turn said word by word is flown inside every word's envelope (`follow_excess_deg`): a
   `FOLLOW_TURN_DEG` turn at the steady rate r_turn (or what the bank cap allows at the speed), read the way the
   labeller reads an observed track — the data plane's centred velocity fit and the labeller's track average, taken
   here as two centred moving averages of the heading (an approximation: the fit is a least-squares line over
-  positions) — then `labeller.lateral.per_step_words` at the lead. The roll-in is what (2) prices: a slow roll lags
-  the first words of a turn past their envelope (the executor review of 2026-09-24).
+  positions; the review of 2026-09-24 found a least-squares weighting moves no word at 5° cells) — then
+  `labeller.lateral.per_step_words` at the lead; flown on the word law (each word heard on the cycle that starts its
+  row) and read as the judge reads a flown track (the track average alone). The turn is an ideal one — the observed
+  aircraft at its rate at once — so (2) prices the executor's roll-in and its roll-out before each word (the word
+  law's stopping limit, `lateral.stopping_rate_deg_s`). Turns faster than r_turn up to the bank cap, and a word of two
+  grid steps out of straight flight, are left to the train replay and the sensitivity: an ideal turn at the bank cap
+  cannot be caught up by any roll rate (the executor is at the cap too), and the labeller's smoothed track never
+  steps two cells from straight flight.
 """
 
 from __future__ import annotations
@@ -100,53 +106,67 @@ def turn_overshoot_deg(params: ExecutorParams, speed_mps: float, turn_deg: float
 
 
 def as_labelled(heading_per_s: np.ndarray, spec: VocabularySpec) -> np.ndarray:
-    """A heading sampled once a second, read the way the labeller reads a track (module docstring): the velocity fit
-    as a centred moving average, the 2 s grid, the labeller's track average. An approximation, stated there."""
+    """An observed heading sampled once a second, read the way the labeller reads a track (module docstring): the
+    velocity fit as a centred moving average, the 2 s grid, the labeller's track average. An approximation, stated
+    there."""
     fitted = moving_average(heading_per_s, int(round(VELOCITY_FIT_WINDOW_S)))
     return moving_average(fitted[:: int(round(spec.step_s))], spec.rows(spec.track_smoothing_s))
 
 
-def follow_words(params: ExecutorParams, spec: VocabularySpec, speed_mps: float) -> tuple[list[tuple[int, float]],
-                                                                                          np.ndarray]:
-    """The follow check at ``speed_mps`` (module docstring): the words read off the typical turn and the flown heading
-    as the labeller would read it, per sentence row. The turn is right, from compass 0°."""
-    rate = min(params.turn_rate_deg_s,
-               math.degrees(GRAVITY_MPS2 * math.tan(math.radians(params.bank_cap_deg)) / speed_mps))
-    seconds = np.arange(0.0, 2 * FOLLOW_STRAIGHT_S + FOLLOW_TURN_DEG / rate, 1.0)
-    said = per_step_words(as_labelled(np.clip((seconds - FOLLOW_STRAIGHT_S) * rate, 0.0, FOLLOW_TURN_DEG), spec),
-                          len(seconds) // int(round(spec.step_s)) - 1, spec.heading_step_deg,
-                          spec.rows_exact(spec.heading_lead_s))
+def turn_words(spec: VocabularySpec, rate_deg_s: float) -> tuple[list[tuple[int, float]], int]:
+    """The words the labeller reads off a `FOLLOW_TURN_DEG` right turn at ``rate_deg_s`` between two straight legs,
+    from compass 0°, and the sentence's rows."""
+    seconds = np.arange(0.0, 2 * FOLLOW_STRAIGHT_S + FOLLOW_TURN_DEG / rate_deg_s, 1.0)
+    observed = as_labelled(np.clip((seconds - FOLLOW_STRAIGHT_S) * rate_deg_s, 0.0, FOLLOW_TURN_DEG), spec)
+    return per_step_words(observed, len(observed) - 1, spec.heading_step_deg, spec.rows_exact(spec.heading_lead_s)), \
+        len(observed)
+
+
+def fly_words(params: ExecutorParams, spec: VocabularySpec, speed_mps: float, said: list[tuple[int, float]],
+              rows: int) -> np.ndarray:
+    """A level A320 at ``speed_mps`` flying heading words ``(row, target)`` on the executor's word law, each heard on
+    the cycle that starts its row; the flown track at the sentence's rows as the judge reads it (the labeller's track
+    average, `flown_track` → `read.smooth`), unwrapped from compass 0°."""
     inputs, charts = _a320_level(speed_mps)
     plant = Plant(inputs)
     state, bank = inputs.initial_state, torch.zeros(1, dtype=torch.float64)
+    step_rows = int(round(spec.step_s / params.cycle_s))
     flown, heard = [], 0
-    for cycle in range(int(round(seconds[-1] / params.cycle_s)) + 1):
+    for cycle in range(rows * step_rows):
         now = read_state(state, charts)
-        time_s = cycle * params.cycle_s
-        if abs(time_s - round(time_s)) < 1e-9:
+        if cycle % step_rows == 0:
             flown.append(float(now.track_deg[0]))
-        while heard + 1 < len(said) and said[heard + 1][0] * spec.step_s <= time_s:
-            heard += 1
+            while heard + 1 < len(said) and said[heard + 1][0] <= cycle // step_rows:
+                heard += 1
+        time_s = cycle * params.cycle_s
         error = wrap180(torch.tensor([said[heard][1]], dtype=torch.float64) - now.track_deg)
         to_go = torch.tensor([said[heard][0] * spec.step_s + spec.heading_lead_s - time_s], dtype=torch.float64)
-        attitude = inverse.attitude(now, word_rate(error, to_go, params, spec), torch.zeros(1, dtype=torch.float64),
-                                    bank, bank_cap_rad=math.radians(params.bank_cap_deg),
+        attitude = inverse.attitude(now, word_rate(error, to_go, now.ground_speed_mps, params, spec),
+                                    torch.zeros(1, dtype=torch.float64), bank,
+                                    bank_cap_rad=math.radians(params.bank_cap_deg),
                                     bank_rate_rad_s=math.radians(params.bank_rate_deg_s), cycle_s=params.cycle_s)
         thrust = inverse.thrust(now, torch.zeros(1, dtype=torch.float64), attitude.load_factor, inputs.aero_params,
                                 inputs.max_thrust_n)
         bank = attitude.bank_rad
         state = plant.step(state, torch.stack((thrust.fraction, bank, attitude.load_factor), dim=1), params.cycle_s)
-    return said, as_labelled(np.unwrap(np.asarray(flown), period=360.0), spec)
+    return moving_average(np.unwrap(np.asarray(flown), period=360.0), spec.rows(spec.track_smoothing_s))
 
 
-def follow_excess_deg(params: ExecutorParams, spec: VocabularySpec, speed_mps: float) -> float:
-    """How far past the heading tolerance the flown heading lies at worst, over every word's judged rows, while
-    following the typical turn's words at ``speed_mps`` (degrees; at most 0 when every row is inside). Words and
-    flown heading lie on one unwrapped branch."""
-    said, flown = follow_words(params, spec, speed_mps)
+def words_excess_deg(spec: VocabularySpec, said: list[tuple[int, float]], flown: np.ndarray) -> float:
+    """How far past the heading tolerance ``flown`` lies at worst over every word's judged rows
+    (`envelope.heading_word_rows`), degrees; at most 0 when every row is inside."""
     rows = envelope.heading_word_rows([row for row, _ in said], spec.rows_exact(spec.heading_lead_s), len(flown))
     return max(float(np.abs(flown[first:stop] - target).max()) - spec.heading_tolerance_deg
                for (_, target), (first, stop) in zip(said, rows) if stop > first)
+
+
+def follow_excess_deg(params: ExecutorParams, spec: VocabularySpec, speed_mps: float) -> float:
+    """The worst excess past the words' envelopes at ``speed_mps`` of a typical turn said word by word (module
+    docstring): at the steady rate r_turn, or what the bank cap allows at this speed."""
+    rate = min(params.turn_rate_deg_s,
+               math.degrees(GRAVITY_MPS2 * math.tan(math.radians(params.bank_cap_deg)) / speed_mps))
+    said, rows = turn_words(spec, rate)
+    return words_excess_deg(spec, said, fly_words(params, spec, speed_mps, said, rows))
 
 
 def roll_rate_deg_s(params: ExecutorParams, spec: VocabularySpec) -> tuple[float, dict[str, dict[str, float]]]:

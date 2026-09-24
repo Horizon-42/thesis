@@ -4,8 +4,9 @@ Three sources, in order, each feeding the next:
 
 1. data (`autopilot/measure.py`): r_turn, φ_cap, a_dec, a_acc, a_unspec and the landing aim, on every
    labelled TRAIN flight, each re-read and checked against its stored sentence;
-2. method A (`autopilot/derive.py`): τ_ψ from the per-step heading word's envelope, p from the executor's own
-   largest turn on its heading law;
+2. method A (`autopilot/derive.py`): τ_ψ = the heading lead (the executor's own turns; heading words have their own
+   law), p the least bank rate at which its own largest turn stays within the heading tolerance and a typical turn
+   said word by word is flown inside every word's envelope;
 3. method B (`autopilot/observe.py`): the vertical and speed word delays — a seeded train sample (`replay.draw`)
    flown with no delay, each flown track re-read by the labeller through the observation operator; a delay is the
    median of how much earlier the re-read places a word than the executor received it, floored at 0 (the executor
@@ -196,9 +197,9 @@ def main(argv: list[str] | None = None) -> int:
                                 "rule": f"the least p on a {derive.ROLL_RATE_STEP_DEG_S:g}°/s grid at which, at every "
                                         f"speed, the executor's own {derive.largest_own_turn_deg(spec):g}° turn passes "
                                         "its target by at most heading_tolerance_deg and a "
-                                        f"{derive.FOLLOW_TURN_DEG:g}° turn at r_turn, said word by word (read through "
-                                        "a moving-average approximation of the velocity fit), is flown inside every "
-                                        "word's envelope"},
+                                        f"{derive.FOLLOW_TURN_DEG:g}° turn at r_turn (or the bank cap's rate), said "
+                                        "word by word (read through a moving-average approximation of the velocity "
+                                        "fit), is flown inside every word's envelope as the judge reads it"},
         },
         "method_b": b["record"],
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
