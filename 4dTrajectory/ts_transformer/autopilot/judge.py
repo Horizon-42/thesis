@@ -215,8 +215,9 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     ended = outcome_of(flown, index, geometry, runway_index, spec)
     outcome, end_row, crossing, limits = ended.outcome, ended.end_row, ended.crossing, ended.limits
     step_rows = int(round(spec.step_s / flown.cycle_s))
-    # the words are read on the rows before the crossing, where the labeller ends a sentence
-    read_to = end_row - 1 if outcome in CROSSINGS else end_row
+    # the words are read on the rows before the crossing, where the labeller ends a sentence, and before a failed
+    # state (a non-finite one is no track to judge a word on)
+    read_to = end_row - 1 if outcome in (*CROSSINGS, "dynamics_failure") else end_row
     try:
         flight = admit(flown_signals(track, read_to, observed, step_rows), geometry, spec)
     except Refused as refusal:

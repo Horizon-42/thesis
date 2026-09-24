@@ -838,6 +838,26 @@ def test_a_stall_is_a_dynamics_failure_and_wins_a_row_it_shares_with_a_crossing(
     assert _outcome(states, track, captured, stalled, geometry, 0, one)[:2] == ("dynamics_failure", verdict.end_row)
 
 
+def test_a_dynamics_failure_judges_its_words_only_on_the_states_before_it():
+    """The frontend export's report (2026-09-24): the failed state is no track — read up to it, a word judged there
+    would count NaN rows as outside."""
+    from dataclasses import replace
+
+    from ts_transformer.autopilot.judge import judge
+
+    one, words, geometry = spec(), Words(spec()), instruction_airport()
+    signals, _ = _downwind()
+    flown, _, reading = _fly_sentence(signals)
+    failed_at = 120                                                   # a state on the 2 s grid (row 60)
+    states = flown.states.clone()
+    states[0, failed_at:] = float("nan")
+    broken = replace(flown, states=states, done_cycle=torch.tensor([failed_at - 1]))
+    verdict = judge(broken, 0, geometry, 0, reading, signals, one, words)
+    assert verdict.outcome == "dynamics_failure" and verdict.end_row == failed_at
+    judged = [h for h in verdict.words["heading"] if h["rows"] > 0]
+    assert judged and all(h["inside"] == h["rows"] for h in judged)
+
+
 # ---- the E7–E8 review's cases
 def test_a_sensitivity_probe_flies_its_words_early_only_when_named():
     """Review H1: a negative delay is refused unless the flight is flown as a probe, and then the words act
