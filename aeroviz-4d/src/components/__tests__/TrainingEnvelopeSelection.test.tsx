@@ -130,11 +130,18 @@ describe("Training envelopes in the 3D scene", () => {
     expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.45));
     expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))).toEqual(scene.css(TRAINING_WORD_COLOR));
     expect(scene.colourOf(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"))).toEqual(scene.css(TRAINING_WORD_COLOR));
-    // the altitude word in force at the same step is another column's: left alone
-    expect(scene.colourOf(TRAINING_ENTITY.tube(0))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.28));
-    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(0), "upper"))).not.toEqual(scene.css(TRAINING_WORD_COLOR));
-    expect(scene.colourOf(TRAINING_ENTITY.corridor)).toEqual(scene.css(TRAINING_CORRIDOR_COLOR, 0.3));
-    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.corridor))).toEqual(scene.css(TRAINING_CORRIDOR_COLOR));
+    // the altitude word in force at the same step is another column's: never lit, and it recedes
+    // with every other word's envelope, keeping its hue
+    expect(scene.colourOf(TRAINING_ENTITY.tube(0))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.28 * 0.3));
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(0), "upper"))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.9 * 0.3));
+    expect(scene.colourOf(TRAINING_ENTITY.corridor)).toEqual(scene.css(TRAINING_CORRIDOR_COLOR, 0.3 * 0.3));
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.corridor))).toEqual(scene.css(TRAINING_CORRIDOR_COLOR, 0.3));
+    // its two turn paths named where they end, and its turn as flown marked on the track
+    const text = (id: string) => scene.entities.getById(id)!.label!.text!.getValue(Cesium.JulianDate.now());
+    expect(text(TRAINING_ENTITY.focusPathLabel("fast"))).toBe("fastest: ≤ 4.7°/s, ≤ 32° bank");
+    expect(text(TRAINING_ENTITY.focusPathLabel("slow"))).toBe("slowest: 0.5°/s, begun 10.5 s late");
+    expect(text(TRAINING_ENTITY.focusFlown("starts"))).toBe("turn flown starts · step 10");
+    expect(text(TRAINING_ENTITY.focusFlown("ends"))).toBe("turn flown ends · step 16");
     const label = scene.entities.getById(TRAINING_ENTITY.focusIssue)!.label!.text!.getValue(Cesium.JulianDate.now());
     expect(label).toBe("heading 180° · step 10");
     expect(scene.entities.getById(TRAINING_ENTITY.focusStretch)).toBeDefined();
@@ -142,16 +149,20 @@ describe("Training envelopes in the 3D scene", () => {
     fireEvent.click(band(DESCEND_TO_LAND));
     expect(scene.colourOf(TRAINING_ENTITY.tube(1))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.45));
     expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.tube(1), "lower"))).toEqual(scene.css(TRAINING_WORD_COLOR));
-    // the heading word is restored, edge and fill
-    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18));
+    // the heading word now recedes like every other word's, and its marks are gone
+    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18 * 0.3));
+    expect(scene.entities.getById(TRAINING_ENTITY.focusFlown("starts"))).toBeUndefined();
+    expect(scene.entities.getById(TRAINING_ENTITY.focusPathLabel("fast"))).toBeUndefined();
     expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))).not.toEqual(scene.css(TRAINING_WORD_COLOR));
-    expect(scene.colourOf(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"))).toEqual(scene.css(TRAINING_TURN_COLOR, 0.9));
+    expect(scene.colourOf(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"))).toEqual(scene.css(TRAINING_TURN_COLOR, 0.9 * 0.3));
     // nothing was rebuilt
     original.forEach((entity) => expect(scene.entities.getById(entity.id)).toBe(entity));
 
-    // a second click on the selected word clears it
+    // a second click on the selected word clears it: every envelope back at rest
     fireEvent.click(band(DESCEND_TO_LAND));
     expect(scene.colourOf(TRAINING_ENTITY.tube(1))).toEqual(scene.css(TRAINING_TUBE_COLOR, 0.28));
+    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18));
+    expect(scene.colourOf(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"))).toEqual(scene.css(TRAINING_TURN_COLOR, 0.9));
     expect(scene.entities.getById(TRAINING_ENTITY.focusIssue)).toBeUndefined();
     expect(scene.requestRender).toHaveBeenCalled();
   });
@@ -170,8 +181,11 @@ describe("Training envelopes in the 3D scene", () => {
     expect(edge().width!.getValue(now)).toBe(3);
     expect(scene.colourOf(TRAINING_ENTITY.corridor)).toEqual(scene.css(TRAINING_CORRIDOR_COLOR, 0.45));
     expect(scene.colourOf(TRAINING_ENTITY.corridorAxis)).toEqual(scene.css(TRAINING_WORD_COLOR));
-    // the heading words are another column's
-    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18));
+    // the heading words are another column's: they recede; the clearance names its capture turn's
+    // paths but has no turn flown of its own to mark
+    expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.18 * 0.3));
+    expect(scene.entities.getById(TRAINING_ENTITY.focusPathLabel("slow"))).toBeDefined();
+    expect(scene.entities.getById(TRAINING_ENTITY.focusFlown("starts"))).toBeUndefined();
     fireEvent.click(band(/^approach cleared — cleared to join the final/));
     expect(edge().material).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
     expect(scene.colourOf(edgeId)).toEqual(restColour);
@@ -186,7 +200,7 @@ describe("Training envelopes in the 3D scene", () => {
       .toBe("approach cleared · step 0");
   });
 
-  it("dashes a slowest turn that does not finish, and draws no line for a path of one point", async () => {
+  it("dashes a slowest turn that does not finish, and draws no line for a fastest path of one point", async () => {
     const unfinished = await setup(0, (raw) => { raw.flights[0].envelopes.approach.captureTurn.turn.slowFinished = false; });
     const slow = unfinished.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "slow"))!.polyline!;
     expect(slow.material).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
@@ -195,10 +209,15 @@ describe("Training envelopes in the 3D scene", () => {
       const turn = raw.flights[0].envelopes.approach.captureTurn.turn;
       const start = { eM: [turn.region.eM[0]], nM: [turn.region.nM[0]], lon: [turn.region.lon[0]], lat: [turn.region.lat[0]] };
       turn.fastPath = start;
-      turn.slowPath = start;
+      turn.headingFast = { tS: [turn.headingFast.tS[0]], deg: [270] };
+      turn.headingRegion = { tS: turn.headingRegion.tS.slice(2), deg: turn.headingRegion.deg.slice(2) };
     });
     expect(within.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "fast"))).toBeUndefined();
-    expect(within.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "slow"))).toBeUndefined();
+    expect(within.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.captureTurn, "slow"))).toBeDefined();
+    // a path that is not drawn is not named either
+    fireEvent.click(band(/^approach cleared — cleared to join the final/));
+    expect(within.entities.getById(TRAINING_ENTITY.focusPathLabel("fast"))).toBeUndefined();
+    expect(within.entities.getById(TRAINING_ENTITY.focusPathLabel("slow"))).toBeDefined();
     expect(within.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "fast"))).toBeDefined();
   });
 

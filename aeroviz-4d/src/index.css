@@ -1075,6 +1075,17 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
+/* The selected turn's two paths and its flown turn, named on the plan: a dark halo keeps the text
+   readable over the envelopes. */
+.training-readback-path-label {
+  font-size: 10px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  paint-order: stroke;
+  stroke: rgba(10, 14, 24, 0.9);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
 .training-readback-cursor-dot {
   fill: #67e8f9;
 }

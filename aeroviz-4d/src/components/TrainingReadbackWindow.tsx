@@ -9,11 +9,17 @@
  *    may end (a parallelogram) and its hold funnel, the capture turn, the fastest and the slowest
  *    turn of every turn region (a switch of their own), the track, where each heading word was
  *    issued, the clearance, the capture and the end of the sentence.
- *  • HEADING against time: each word's turn band and hold band, the capture turn, the course
- *    band after the capture.
+ *  • HEADING against time: each word's turn as the heading against time — the fastest turn begun on
+ *    time, the slowest begun as late as allowed, and the region between them (the same two turns the
+ *    plan view draws) — its hold band, the capture turn likewise, the course band after the capture.
  *  • ALTITUDE against the horizontal distance flown — the axis the tubes are defined on: each
  *    altitude word's tube, the angle words that re-anchor it, the runway's elevation.
  *  • SPEED against time: each word's transition and band, the "unspecified" spans, the clearance.
+ *
+ * WHAT IS SELECTED STANDS OUT, THE REST RECEDES: every other word's envelope is drawn faded, the
+ * plan view frames the selected word's whole envelope (a big turn's slowest bound reaches far past
+ * the track), its two turn paths are named, and a heading word's turn as actually flown (the
+ * labeller's departure and arrival rows) is marked on the track.
  *
  * WHAT IS YELLOW is the selected word alone (`column`, the class chosen in the sentence bar or by
  * clicking a chart, and its word in force at the cursor): its own envelope, and the rows it is in
@@ -56,7 +62,9 @@ import {
   type TrainingCandidate,
   type TrainingColumn,
   type TrainingFlight,
+  type TrainingHeadingProfile,
   type TrainingPlanLine,
+  type TrainingTurnRegion,
   type TrainingVocabulary,
 } from "../data/trainingSample";
 
@@ -66,6 +74,8 @@ const PLAN_H = 300;
 const CHART_H = 150;
 const DEFAULT_W = 980;
 const MIN_W = 420;
+/** Every envelope that is not the selected word's is drawn at this opacity while a word is selected. */
+const FADED = 0.3;
 
 /** [low, high] of the values, padded by 8 %, never zero-wide. */
 export function extent(values: number[]): [number, number] {
@@ -148,6 +158,13 @@ export default function TrainingReadbackWindow({
   const focused = (name: TrainingColumn, index: number) => column === name && focus!.index === index;
   // The clearance owns the approach's envelopes: the capture turn and the corridor.
   const approachFocused = column === "approach" && focus!.event.kind === "clear";
+  const capture = envelopes.approach.captureTurn;
+  /** An envelope's opacity: full for the selected word's, or for every word when none is selected. */
+  const recede = (mine: boolean) => (column === null || mine ? 1 : FADED);
+  // The selected word's own turn, if it has one: a heading word's, or the clearance's capture turn.
+  const focusHeading = column === "heading" ? envelopes.heading[focus!.index] : null;
+  const focusTurn: TrainingTurnRegion | null = focusHeading !== null ? focusHeading.turn
+    : approachFocused && capture !== null ? capture.turn : null;
 
   // ── time charts share one x ───────────────────────────────────────────────
   const endS = tS[last];
@@ -156,10 +173,20 @@ export default function TrainingReadbackWindow({
   /** A row as a time edge; the step after the last row is the last row. */
   const edge = (row: number) => tS[Math.min(row, last)];
 
-  // ── the plan view: the track and the thresholds decide the frame ─────────
+  // ── the plan view: the track, the threshold and the selected word's envelope decide the frame ──
   const km = (metres: number) => metres / 1000;
-  const frameE = [...signals.eM, designated.thresholdEM, ...envelopes.approach.corridor.axis.eM].map(km);
-  const frameN = [...signals.nM, designated.thresholdNM, ...envelopes.approach.corridor.axis.nM].map(km);
+  const focusOutlines: TrainingPlanLine[] = [
+    ...(layers.lateral && focusHeading !== null
+      ? [focusHeading.turn?.region, focusHeading.turn?.end, focusHeading.funnel?.outline]
+        .filter((line): line is TrainingPlanLine => line !== undefined)
+      : layers.lateral && focusTurn !== null ? [focusTurn.region] : []),
+    // the paths alone reach as far when the regions are switched off
+    ...(layers.turnPaths && focusTurn !== null ? [focusTurn.fastPath, focusTurn.slowPath] : []),
+  ];
+  const frameE = [...signals.eM, designated.thresholdEM, ...envelopes.approach.corridor.axis.eM,
+    ...focusOutlines.flatMap((line) => line.eM)].map(km);
+  const frameN = [...signals.nM, designated.thresholdNM, ...envelopes.approach.corridor.axis.nM,
+    ...focusOutlines.flatMap((line) => line.nM)].map(km);
   const [eLow, eHigh] = extent(frameE);
   const [nLow, nHigh] = extent(frameN);
   const planScale = Math.min((plotW - 12) / (eHigh - eLow), (PLAN_H - 30) / (nHigh - nLow));
@@ -173,9 +200,21 @@ export default function TrainingReadbackWindow({
   const at = (row: number) => ({ x: px(km(signals.eM[row])), y: py(km(signals.nM[row])) });
 
   // ── the charts' y ────────────────────────────────────────────────────────
+  // every turn of the flight, with the word it belongs to: the heading words', then the capture turn
+  const turns = [
+    ...envelopes.heading.flatMap((item, index) => item.turn === null ? [] : [{
+      key: `heading-${index}`, turn: item.turn, name: `heading word ${index + 1}`, selected: focused("heading", index),
+      ok: item.check === null || (item.check.progressOk && item.check.rateOk),
+    }]),
+    ...(capture === null ? [] : [{
+      key: "capture", turn: capture.turn, name: "the capture turn", selected: approachFocused,
+      ok: capture.check.progressOk && capture.check.rateOk,
+    }]),
+  ];
   const headingValues = [
     ...signals.smoothed.trackDeg, ...signals.raw.trackDeg,
-    ...(layers.lateral ? envelopes.heading.flatMap((item) => [...(item.turnBandDeg ?? []), ...(item.holdBandDeg ?? [])]) : []),
+    ...(layers.lateral ? envelopes.heading.flatMap((item) => item.holdBandDeg ?? []) : []),
+    ...(layers.lateral || layers.turnPaths ? turns.flatMap(({ turn }) => turn.headingRegion.deg) : []),
     ...(layers.lateral ? envelopes.approach.courseBandDeg : []),
   ];
   const [hLow, hHigh] = extent(headingValues);
@@ -203,7 +242,6 @@ export default function TrainingReadbackWindow({
   // The chart titles read out the words in force at the cursor, whichever column is selected.
   const heading = envelopes.heading[trainingWordAt(flight, "heading", cursorRow).index];
   const tube = envelopes.altitude[trainingWordAt(flight, "altitude", cursorRow).index];
-  const capture = envelopes.approach.captureTurn;
 
   const timeAxis = (
     <g>
@@ -227,6 +265,13 @@ export default function TrainingReadbackWindow({
     />
   );
   const rowX = (row: number) => xTime(tS[row]);
+  const profilePoints = (profile: TrainingHeadingProfile) =>
+    profile.tS.map((seconds, index) => `${xTime(seconds)},${yHeading(profile.deg[index])}`).join(" ");
+  const pathEnd = (line: TrainingPlanLine) => ({ x: px(km(line.eM[line.eM.length - 1])), y: py(km(line.nM[line.nM.length - 1])) });
+  // A heading word's turn as the labeller read it flown: from its departure row to its arrival row.
+  const flown = focusHeading?.check
+    ? [{ which: "starts", row: focusHeading.check.departureRow }, { which: "ends", row: focusHeading.check.arrivalRow }]
+    : [];
   const rowXDistance = (row: number) => xDistance(signals.smoothed.distanceM[row]);
   // The rows the selected word is in force; the stretch runs on to the next word's issue so that it
   // meets it. Only a word issued on the last row has no stretch.
@@ -273,7 +318,8 @@ export default function TrainingReadbackWindow({
               </clipPath>
             </defs>
             <text x={GUTTER} y={11} className="training-readback-title">
-              plan view · airport frame, km east × km north of the reference point · clipped to the track
+              plan view · airport frame, km east × km north of the reference point · framed on the track
+              {focusOutlines.length ? " and the selected word's envelope" : ""}
             </text>
             <g clipPath="url(#training-plan-clip)">
               {candidates.map((candidate) => {
@@ -307,6 +353,7 @@ export default function TrainingReadbackWindow({
                     fillOpacity={approachFocused ? 0.4 : 0.2}
                     stroke={approachFocused ? TRAINING_WORD_COLOR : TRAINING_CORRIDOR_COLOR}
                     strokeWidth={approachFocused ? 1.4 : 0.8}
+                    opacity={recede(approachFocused)}
                   >
                     <title>
                       the capture corridor: {envelopes.approach.corridor.halfWidthAtCaptureM.toFixed(0)} m half width at the
@@ -321,7 +368,7 @@ export default function TrainingReadbackWindow({
                     const hold = item.holdCheck;
                     const holdFailed = hold !== null && hold.inside < hold.rows;
                     return (
-                      <g key={`plan-heading-${index}`} aria-label={`heading word ${index + 1} envelope`}>
+                      <g key={`plan-heading-${index}`} aria-label={`heading word ${index + 1} envelope`} opacity={recede(selected)}>
                         {item.turn ? (
                           <>
                             <polygon
@@ -388,6 +435,7 @@ export default function TrainingReadbackWindow({
                         : capture.check.progressOk && capture.check.rateOk ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR}
                       strokeDasharray="4 3"
                       strokeWidth={approachFocused ? 1.4 : 0.9}
+                      opacity={recede(approachFocused)}
                     >
                       <title>the capture turn onto the course {designated.courseDeg.toFixed(1)}°</title>
                     </polygon>
@@ -397,19 +445,10 @@ export default function TrainingReadbackWindow({
 
               {/* the fastest and the slowest turn of every turn region, in the region's verdict colour
                   (they run along its edge); the slowest dashed where it does not finish */}
-              {layers.turnPaths ? [
-                ...envelopes.heading.flatMap((item, index) => item.turn === null ? [] : [{
-                  key: `heading-${index}`, turn: item.turn, name: `heading word ${index + 1}`, selected: focused("heading", index),
-                  ok: item.check === null || (item.check.progressOk && item.check.rateOk),
-                }]),
-                ...(capture === null ? [] : [{
-                  key: "capture", turn: capture.turn, name: "the capture turn", selected: approachFocused,
-                  ok: capture.check.progressOk && capture.check.rateOk,
-                }]),
-              ].map(({ key, turn, name, selected, ok }) => {
+              {layers.turnPaths ? turns.map(({ key, turn, name, selected, ok }) => {
                 const stroke = selected ? TRAINING_WORD_COLOR : ok ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR;
                 return (
-                  <g key={`turn-paths-${key}`} aria-label={`the fastest and the slowest turn of ${name}`}>
+                  <g key={`turn-paths-${key}`} aria-label={`the fastest and the slowest turn of ${name}`} opacity={recede(selected)}>
                     <polyline className="training-readback-turn-path" points={points(turn.fastPath)} fill="none"
                       stroke={stroke} strokeOpacity={selected ? 1 : 0.8} strokeWidth={selected ? 1.2 : 0.8} />
                     <polyline className="training-readback-turn-path" points={points(turn.slowPath)} fill="none"
@@ -426,6 +465,27 @@ export default function TrainingReadbackWindow({
                   stroke={TRAINING_WORD_COLOR} strokeWidth={3} strokeOpacity={0.9} strokeLinecap="round"
                   className="training-readback-focus" />
               ) : null}
+              {/* the selected turn's two paths, named where they end */}
+              {focusTurn !== null && layers.turnPaths ? (
+                [
+                  { line: focusTurn.fastPath, text: `fastest: ≤ ${focusTurn.rateMaxDegS}°/s, ≤ ${focusTurn.bankMaxDeg}° bank` },
+                  { line: focusTurn.slowPath, text: `slowest: ${focusTurn.rateMinDegS}°/s, begun ${focusTurn.startDelayMaxS} s late` },
+                ].filter(({ line }) => line.eM.length >= 2).map(({ line, text }) => (
+                  <text key={text} x={pathEnd(line).x + 5} y={pathEnd(line).y + 4} className="training-readback-path-label"
+                    fill={TRAINING_WORD_COLOR}>
+                    {text}
+                  </text>
+                ))
+              ) : null}
+              {/* where the selected heading word's turn was actually flown */}
+              {flown.map(({ which, row }) => (
+                <g key={`flown-${which}`} className="training-readback-flown" aria-label={`the turn flown ${which} at step ${row}`}>
+                  <circle cx={at(row).x} cy={at(row).y} r={3.6} fill={TRAINING_WORD_COLOR} stroke="black" strokeWidth={0.8} />
+                  <text x={at(row).x + 6} y={at(row).y - 6} className="training-readback-path-label" fill={TRAINING_WORD_COLOR}>
+                    turn flown {which} · step {row}
+                  </text>
+                </g>
+              ))}
               {envelopes.heading.map((item, index) => {
                 const point = at(item.row);
                 const name = `heading ${label("heading", item.value)} issued at step ${item.row} — ${trainingKindLabel(item.kind, item.split)}`;
@@ -486,22 +546,31 @@ export default function TrainingReadbackWindow({
               {heading.holdCheck ? ` · its hold: ${heading.holdCheck.inside}/${heading.holdCheck.rows} rows in the funnel` : ""}
               {cursorRow >= flight.captureRow ? " · captured: the corridor holds" : ""}
             </text>
+            <defs>
+              <clipPath id="training-heading-clip">
+                <rect x={GUTTER} y={plotTop} width={plotW} height={plotH} />
+              </clipPath>
+            </defs>
+            <g clipPath="url(#training-heading-clip)">
             {layers.lateral ? (
               <>
                 {envelopes.heading.map((item, index) => (
-                  <g key={`heading-band-${index}`}>
-                    {item.turnBandDeg && item.turnEndRow !== null ? (
-                      <rect
+                  <g key={`heading-band-${index}`} opacity={recede(focused("heading", index))}>
+                    {item.turn !== null ? (
+                      <polygon
                         className="training-readback-turn-band"
-                        x={rowX(item.row)} width={Math.max(xTime(edge(item.turnEndRow)) - rowX(item.row), 1)}
-                        y={yHeading(item.turnBandDeg[1])} height={yHeading(item.turnBandDeg[0]) - yHeading(item.turnBandDeg[1])}
+                        points={profilePoints(item.turn.headingRegion)}
                         fill={TRAINING_TURN_COLOR} fillOpacity={focused("heading", index) ? 0.26 : 0.12}
                         stroke={focused("heading", index) ? TRAINING_WORD_COLOR
-                          : item.check && !item.check.progressOk ? TRAINING_OUTSIDE_COLOR : TRAINING_TURN_COLOR}
+                          : item.check && !(item.check.progressOk && item.check.rateOk) ? TRAINING_OUTSIDE_COLOR : TRAINING_TURN_COLOR}
                         strokeOpacity={focused("heading", index) ? 1 : 0.6} strokeWidth={focused("heading", index) ? 1.4 : 0.7}
                       >
-                        <title>turn to {label("heading", item.value)}: from the track at issue to the target, ±{vocabulary.headingToleranceDeg}°</title>
-                      </rect>
+                        <title>
+                          turn to {label("heading", item.value)}: the heading between the fastest turn begun on time and the
+                          slowest ({item.turn.rateMinDegS}°/s) begun {item.turn.startDelayMaxS} s late, until it is within
+                          ±{vocabulary.headingToleranceDeg}° of the target
+                        </title>
+                      </polygon>
                     ) : null}
                     {item.holdBandDeg && item.holdStartRow !== null ? (
                       <rect
@@ -518,15 +587,15 @@ export default function TrainingReadbackWindow({
                   </g>
                 ))}
                 {capture ? (
-                  <rect
+                  <polygon
                     className="training-readback-capture-band"
-                    x={rowX(capture.startRow)} width={Math.max(rowX(flight.captureRow) - rowX(capture.startRow), 1)}
-                    y={yHeading(capture.bandDeg[1])} height={yHeading(capture.bandDeg[0]) - yHeading(capture.bandDeg[1])}
-                    fill="none" stroke={approachFocused ? TRAINING_WORD_COLOR : TRAINING_TURN_COLOR} strokeDasharray="4 3"
-                    strokeWidth={0.9}
+                    points={profilePoints(capture.turn.headingRegion)}
+                    fill={TRAINING_TURN_COLOR} fillOpacity={approachFocused ? 0.2 : 0.06}
+                    stroke={approachFocused ? TRAINING_WORD_COLOR : TRAINING_TURN_COLOR} strokeDasharray="4 3"
+                    strokeWidth={0.9} opacity={recede(approachFocused)}
                   >
-                    <title>the capture turn onto the course</title>
-                  </rect>
+                    <title>the capture turn onto the course, between its fastest and its slowest turn</title>
+                  </polygon>
                 ) : null}
                 <rect
                   className="training-readback-course-band"
@@ -535,14 +604,36 @@ export default function TrainingReadbackWindow({
                   height={yHeading(envelopes.approach.courseBandDeg[0]) - yHeading(envelopes.approach.courseBandDeg[1])}
                   fill={TRAINING_CORRIDOR_COLOR} fillOpacity={approachFocused ? 0.36 : 0.22}
                   stroke={approachFocused ? TRAINING_WORD_COLOR : "none"} strokeWidth={0.7}
+                  opacity={recede(approachFocused)}
                 >
                   <title>after the capture: the course ±{vocabulary.corridorCourseToleranceDeg}°</title>
                 </rect>
               </>
             ) : null}
+            {/* the fastest and the slowest turn as the heading against time: the plan's two paths */}
+            {layers.turnPaths ? turns.map(({ key, turn, name, selected, ok }) => {
+              const stroke = selected ? TRAINING_WORD_COLOR : ok ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR;
+              return (
+                <g key={`turn-heading-${key}`} aria-label={`the fastest and the slowest turn of ${name}, against time`}
+                  opacity={recede(selected)}>
+                  <polyline className="training-readback-turn-heading" points={profilePoints(turn.headingFast)} fill="none"
+                    stroke={stroke} strokeOpacity={selected ? 1 : 0.8} strokeWidth={selected ? 1.4 : 0.9} />
+                  <polyline className="training-readback-turn-heading" points={profilePoints(turn.headingSlow)} fill="none"
+                    stroke={stroke} strokeOpacity={selected ? 1 : 0.8} strokeWidth={selected ? 1.4 : 0.9}
+                    strokeDasharray={turn.slowFinished ? undefined : "2 2"} />
+                </g>
+              );
+            }) : null}
+            </g>
             {trace(signals.raw.trackDeg, rowX, yHeading, TRAINING_RAW_COLOR, true)}
             {trace(signals.smoothed.trackDeg, rowX, yHeading, TRAINING_TRACE_COLOR, false)}
             {column === "heading" ? focusTrace(signals.smoothed.trackDeg, rowX, yHeading) : null}
+            {flown.map(({ which, row }) => (
+              <circle key={`heading-flown-${which}`} className="training-readback-flown" cx={rowX(row)}
+                cy={yHeading(signals.smoothed.trackDeg[row])} r={3.4} fill={TRAINING_WORD_COLOR} stroke="black" strokeWidth={0.8}>
+                <title>the turn flown {which} at step {row}</title>
+              </circle>
+            ))}
             {envelopes.heading.map((item, index) => (
               <circle key={`heading-issue-${index}`} cx={rowX(item.row)} cy={yHeading(signals.smoothed.trackDeg[item.row])} r={2.6}
                 fill="none" stroke={TRAINING_COLUMN_COLOR.heading} strokeWidth={1.3} />
@@ -581,6 +672,7 @@ export default function TrainingReadbackWindow({
                   fillOpacity={selected ? 0.34 : 0.16}
                   stroke={selected ? TRAINING_WORD_COLOR : item.check.contained ? TRAINING_TUBE_COLOR : TRAINING_OUTSIDE_COLOR}
                   strokeWidth={selected ? 1.2 : 0.7}
+                  opacity={recede(selected)}
                 >
                   <title>
                     {label("altitude", item.value)} from step {item.row}: the tube ±{vocabulary.altitudeToleranceM} m, re-anchored at
@@ -597,7 +689,8 @@ export default function TrainingReadbackWindow({
               threshold {designated.ident} {designated.elevationM.toFixed(1)} m
             </text>
             {envelopes.angle.map((item, index) => (
-              <g key={`angle-${index}`} aria-label={`angle word ${label("angle", item.value)} at step ${item.row}`}>
+              <g key={`angle-${index}`} aria-label={`angle word ${label("angle", item.value)} at step ${item.row}`}
+                opacity={recede(focused("angle", index))}>
                 <line x1={rowXDistance(item.row)} x2={rowXDistance(item.row)} y1={plotTop} y2={plotTop + plotH}
                   stroke={focused("angle", index) ? TRAINING_WORD_COLOR : TRAINING_COLUMN_COLOR.angle}
                   strokeOpacity={focused("angle", index) ? 1 : 0.6} strokeDasharray="2 2" />
@@ -649,7 +742,7 @@ export default function TrainingReadbackWindow({
             {layers.vertical ? envelopes.speed.map((span, index) => {
               if (span.targetMps === null) {
                 return (
-                  <rect key={`speed-${index}`} className="training-readback-unspecified"
+                  <rect key={`speed-${index}`} className="training-readback-unspecified" opacity={recede(focused("speed", index))}
                     x={rowX(span.row)} width={Math.max(xTime(edge(span.endRow)) - rowX(span.row), 1)}
                     y={plotTop} height={plotH} fill={TRAINING_RAW_COLOR} fillOpacity={focused("speed", index) ? 0.22 : 0.12}
                     stroke={focused("speed", index) ? TRAINING_WORD_COLOR : "none"} strokeWidth={1.4}>
@@ -659,7 +752,8 @@ export default function TrainingReadbackWindow({
               }
               const transitionRows = span.transitionLowerMps!.map((_, offset) => span.row + offset);
               return (
-                <g key={`speed-${index}`} aria-label={`speed ${label("speed", span.value)} from step ${span.row}`}>
+                <g key={`speed-${index}`} aria-label={`speed ${label("speed", span.value)} from step ${span.row}`}
+                  opacity={recede(focused("speed", index))}>
                   <polygon className="training-readback-transition"
                     points={[
                       ...transitionRows.map((row, offset) => `${rowX(row)},${ySpeed(span.transitionUpperMps![offset])}`),
@@ -734,10 +828,12 @@ export default function TrainingReadbackWindow({
           </span>
           <span>
             <b style={{ color: TRAINING_TURN_COLOR }}>▩</b> a heading word's turn region — turning the shorter way, between
-            the fastest turn ({vocabulary.turnRateMaxDegS}°/s, at most {vocabulary.turnBankMaxDeg}° of bank) and the slowest
-            ({vocabulary.turnRateMinDegS}°/s), at the speeds flown, begun on time or up to {vocabulary.turnStartDelayMaxS} s
-            late; the darker parallelogram is where the turn may end; under {vocabulary.turnRateMinFromDeg}° of turn the lowest
-            rate is not judged ·{" "}
+            the fastest turn begun on time ({vocabulary.turnRateMaxDegS}°/s, or less where {vocabulary.turnBankMaxDeg}° of bank
+            allows less at the speed flown) and the slowest ({vocabulary.turnRateMinDegS}°/s) begun{" "}
+            {vocabulary.turnStartDelayMaxS} s late; the darker parallelogram is where the turn may end; on the heading chart the
+            same two turns are the heading against time, the region between them where the heading may be; under{" "}
+            {vocabulary.turnRateMinFromDeg}° of turn the lowest rate is not judged. A big turn's slowest bound reaches far past
+            the track: select the word to frame it, name its two turns and mark where the turn was actually flown ·{" "}
             <b style={{ color: TRAINING_FUNNEL_COLOR }}>▩</b> its hold funnel — that parallelogram swept along the target,
             widening by the distance flown × tan {vocabulary.headingToleranceDeg}°; the labeller counts the hold's rows in it
             (dashed: a hold it does not judge) ·{" "}

@@ -106,14 +106,22 @@ function inForce(events: Event[]): number[][] {
 
 /** A left turn of 90° from a westbound track: the fastest turn, the slowest, and both moved 1 km
  *  west by the latest start — the end is their four corners, the region the ring through them. */
-const turnRegion = (e0: number, n0: number) => ({
+const turnRegion = (e0: number, n0: number, issueS: number) => ({
   fromTrackDeg: 270, turnDeg: -90, rateMinDegS: 0.5, rateMaxDegS: 4.7, bankMaxDeg: 32, startDelayMaxS: 10.5,
   slowFinished: true,
   region: line([e0, e0 - 1000, e0 - 1300, e0 - 11500, e0 - 12500, e0 - 2000, e0 - 1000],
                [n0, n0 - 300, n0 - 1300, n0 - 11500, n0 - 11500, n0 - 1000, n0]),
   fastPath: line([e0, e0 - 1000, e0 - 1300], [n0, n0 - 300, n0 - 1300]),
-  slowPath: line([e0, e0 - 9000, e0 - 11500], [n0, n0 - 4000, n0 - 11500]),
+  // the slowest turn begun late: straight 1 km west first
+  slowPath: line([e0, e0 - 1000, e0 - 10000, e0 - 12500], [n0, n0, n0 - 4000, n0 - 11500]),
   end: line([e0 - 1300, e0 - 11500, e0 - 12500, e0 - 2300], [n0 - 1300, n0 - 11500, n0 - 11500, n0 - 1300]),
+  // the same two turns against time: one point per path point, from the issue
+  headingFast: { tS: [issueS, issueS + 10, issueS + 28.5], deg: [270, 240, 184.5] },
+  headingSlow: { tS: [issueS, issueS + 10.5, issueS + 100, issueS + 190.5], deg: [270, 270, 225, 184.5] },
+  headingRegion: {
+    tS: [issueS, issueS + 10, issueS + 28.5, issueS + 190.5, issueS + 190.5, issueS + 100, issueS + 10.5, issueS],
+    deg: [270, 240, 184.5, 184.5, 184.5, 225, 270, 270],
+  },
 });
 const turnCheck = {
   progressOk: true, rateOk: true, meanRateDegS: 2.4, maxRateDegS: 3.1, maxBankDeg: 24.9, rateMinApplies: true,
@@ -149,7 +157,7 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
     ? [
         {
           row: 0, value: WORD.heading270, kind: "initial", targetDeg: 270, split: null, turnEndRow: null,
-          holdStartRow: 0, holdEndRow: 10, fromTrackDeg: 270, targetOnTrackDeg: 270, turnBandDeg: null,
+          holdStartRow: 0, holdEndRow: 10, fromTrackDeg: 270, targetOnTrackDeg: 270,
           holdBandDeg: [265.5, 274.5], turn: null,
           funnel: { lengthM: 2200, startHalfWidthM: 0, endHalfWidthM: 173.1, axis: line([-20000, -22200], [3000, 3000]),
                     outline: line([-20000, -22200, -22200, -20000], [3000, 2826.9, 3173.1, 3000]) },
@@ -158,8 +166,8 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
         },
         {
           row: 10, value: WORD.heading180, kind: "turn", targetDeg: 180, split: null, turnEndRow: 16,
-          holdStartRow: 16, holdEndRow: 20, fromTrackDeg: 270, targetOnTrackDeg: 180, turnBandDeg: [175.5, 274.5],
-          holdBandDeg: [175.5, 184.5], turn: turnRegion(-17000, 2000),
+          holdStartRow: 16, holdEndRow: 20, fromTrackDeg: 270, targetOnTrackDeg: 180,
+          holdBandDeg: [175.5, 184.5], turn: turnRegion(-17000, 2000, 10 * MOCK_STEP_S),
           funnel: { lengthM: 880, startHalfWidthM: 6200, endHalfWidthM: 6269.3, axis: line([-24800, -24800], [-5800, -6680]),
                     outline: line([-31000, -31069, -18531, -18600], [-5800, -6680, -6680, -5800]) },
           check: { ...turnCheck, kind: "turn", departureRow: 10, arrivalRow: 16, turnDeg: -90, parts: 1 },
@@ -170,7 +178,7 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
     : [
         {
           row: 0, value: WORD.heading090, kind: "initial", targetDeg: 90, split: null, turnEndRow: null,
-          holdStartRow: null, holdEndRow: 0, fromTrackDeg: 90, targetOnTrackDeg: 90, turnBandDeg: null,
+          holdStartRow: null, holdEndRow: 0, fromTrackDeg: 90, targetOnTrackDeg: 90,
           holdBandDeg: null, turn: null, funnel: null, check: null, holdCheck: null,
         },
       ];
@@ -193,7 +201,7 @@ export function mockFlight(key: string, vectored: boolean): Record<string, unkno
       approach: {
         clearanceRow: joinRow, captureRow, captureBeforeThresholdM: 12500, interceptInserted: false,
         captureTurn: vectored
-          ? { startRow: 20, courseOnTrackDeg: 90, bandDeg: [85.5, 184.5], check: turnCheck, turn: turnRegion(-14000, 1000) }
+          ? { startRow: 20, courseOnTrackDeg: 90, check: turnCheck, turn: turnRegion(-14000, 1000, 20 * MOCK_STEP_S) }
           : null,
         courseBandDeg: [88, 92],
         corridor: {

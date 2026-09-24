@@ -32,9 +32,11 @@
  *
  * THE SELECTED WORD (`trainingColumn`, its word in force at the cursor) is the only thing
  * highlighted: its own envelope keeps its hue, deepened, with a yellow edge; the rows it is in force
- * are drawn yellow over the track, and its issue is marked with its name. Another column's word at
- * the same step is left alone — its run begins and ends elsewhere. Moving the cursor within one
- * word repaints nothing. Selecting a flight frames it once; the cursor never moves the camera.
+ * are drawn yellow over the track, and its issue is marked with its name. Every other word's
+ * envelope recedes (its colours faded), so one big turn is not read through another. A selected
+ * turn's two paths are named where they end, and a heading word's turn as actually flown (the
+ * labeller's departure and arrival rows) is marked on the track. Moving the cursor within one word
+ * repaints nothing. Selecting a flight frames it once; the cursor never moves the camera.
  *
  * STATIC ENTITIES, NOT TIME-SAMPLED ONES: a time-dynamic entity would drive the shared
  * `viewer.clock`, which belongs to Observe's playback.
@@ -94,6 +96,9 @@ export const TRAINING_ENTITY = {
   /** The selected word: the rows it is in force, and its issue with its name. */
   focusStretch: "training-focus-stretch",
   focusIssue: "training-focus-issue",
+  /** The selected turn's paths, named at their ends; its turn as flown, at its two rows. */
+  focusPathLabel: (which: "fast" | "slow") => `training-focus-path-${which}`,
+  focusFlown: (which: "starts" | "ends") => `training-focus-flown-${which}`,
 } as const;
 
 /** How opaque each envelope's fill is at rest, and when it is the selected word's. */
@@ -101,6 +106,8 @@ const ALPHA = { turn: 0.16, turnEnd: 0.4, funnel: 0.18, corridor: 0.3, tube: 0.2
 /** An envelope's edge, at rest and when it is the selected word's (px). */
 const EDGE_WIDTH = 1.5;
 const EDGE_SELECTED_WIDTH = 3;
+/** How much of its colour's opacity another word's envelope keeps while a word is selected. */
+const FADED = 0.3;
 /** A turn path's width (px): above the region's edge, which its fastest turn runs along. */
 const PATH_WIDTH = 2;
 /** How much wider than the track the framed view is. */
@@ -163,6 +170,26 @@ export function trainingFocusEntities(
     case "speed":
       return [];
   }
+}
+
+/** Every envelope of a flight, by the id of its main entity: the one that `trainingFocusEntities`
+ *  names, and whose edges and turn paths (`TRAINING_ENTITY.edge` / `.path` of it) go with it. */
+export function trainingEnvelopeEntities(flight: TrainingFlight): string[] {
+  return [
+    ...flight.envelopes.heading.flatMap((_, index) =>
+      [TRAINING_ENTITY.turn(index), TRAINING_ENTITY.turnEnd(index), TRAINING_ENTITY.funnel(index)]),
+    TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis,
+    ...flight.envelopes.altitude.map((_, index) => TRAINING_ENTITY.tube(index)),
+  ];
+}
+
+/** The selected word's own turn, if it has one: a heading word's, or the clearance's capture turn. */
+export function trainingFocusTurn(
+  flight: TrainingFlight, column: TrainingColumn, word: TrainingWordRun & { index: number },
+): TrainingTurnRegion | null {
+  if (column === "heading") return flight.envelopes.heading[word.index].turn;
+  if (column === "approach" && word.event.kind === "clear") return flight.envelopes.approach.captureTurn?.turn ?? null;
+  return null;
 }
 
 /** The track rows a word is in force, as positions: on to the next word's issue, so that it meets
@@ -406,12 +433,35 @@ export default function useTrainingTrackLayer(): void {
         if (graphics instanceof Cesium.PolylineGraphics) graphics.width = savedWidth;
       });
     };
-    const yellowLine = (graphics: Cesium.PolylineGraphics, width?: number) =>
+    const recolour = (graphics: Cesium.PolylineGraphics, colourOf: (own: Cesium.Color) => Cesium.Color, width?: number) => {
+      const own = (graphics.material.getValue(time) as { color: Cesium.Color }).color;
       repaint(graphics, graphics.material instanceof Cesium.PolylineDashMaterialProperty
-        ? new Cesium.PolylineDashMaterialProperty({ color: selectedEdge })
-        : new Cesium.ColorMaterialProperty(selectedEdge), width);
+        ? new Cesium.PolylineDashMaterialProperty({ color: colourOf(own) })
+        : new Cesium.ColorMaterialProperty(colourOf(own)), width);
+    };
+    const yellowLine = (graphics: Cesium.PolylineGraphics, width?: number) => recolour(graphics, () => selectedEdge, width);
 
-    for (const id of trainingFocusEntities(trainingSelection, trainingColumn, word)) {
+    const mine = trainingFocusEntities(trainingSelection, trainingColumn, word);
+    // Every other word's envelope recedes: its fill, its edges and its turn paths keep their hue.
+    const own = new Set(mine);
+    for (const id of trainingEnvelopeEntities(focusFlight)) {
+      if (own.has(id)) continue;
+      const parts = [id, TRAINING_ENTITY.edge(id), TRAINING_ENTITY.edge(id, "upper"), TRAINING_ENTITY.edge(id, "lower"),
+        TRAINING_ENTITY.path(id, "fast"), TRAINING_ENTITY.path(id, "slow")];
+      for (const part of parts) {
+        const entity = viewer.entities.getById(part);
+        if (!entity) continue;
+        const fill = entity.polygon ?? entity.wall;
+        if (fill) {
+          const colourNow = (fill.material.getValue(time) as { color: Cesium.Color }).color;
+          repaint(fill, new Cesium.ColorMaterialProperty(colourNow.withAlpha(colourNow.alpha * FADED)));
+        } else if (entity.polyline) {
+          recolour(entity.polyline, (colourNow) => colourNow.withAlpha(colourNow.alpha * FADED));
+        }
+      }
+    }
+
+    for (const id of mine) {
       const entity = viewer.entities.getById(id);
       if (!entity) continue;
       const fill = entity.polygon ?? entity.wall;
@@ -444,6 +494,56 @@ export default function useTrainingTrackLayer(): void {
       });
     }
     const { lon, lat, altitudeHaeM } = focusFlight.signals;
+    const tag = (text: string) => ({
+      text,
+      font: "600 12px sans-serif",
+      fillColor: selectedEdge,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 3,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+      pixelOffset: new Cesium.Cartesian2(10, 0),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    });
+    // The selected turn's two paths, named where they end (on the ground, with them).
+    const turn = trainingFocusTurn(focusFlight, trainingColumn, word);
+    if (turn !== null && trainingLayers.turnPaths) {
+      const names = {
+        fast: `fastest: ≤ ${turn.rateMaxDegS}°/s, ≤ ${turn.bankMaxDeg}° bank`,
+        slow: `slowest: ${turn.rateMinDegS}°/s, begun ${turn.startDelayMaxS} s late`,
+      };
+      for (const which of ["fast", "slow"] as const) {
+        const line = which === "fast" ? turn.fastPath : turn.slowPath;
+        const end = line.lon.length - 1;
+        if (end < 1) continue;   // a path of one point is not drawn, so it is not named
+        added.push(TRAINING_ENTITY.focusPathLabel(which));
+        viewer.entities.add({
+          id: TRAINING_ENTITY.focusPathLabel(which),
+          position: Cesium.Cartesian3.fromDegrees(line.lon[end], line.lat[end]),
+          label: { ...tag(names[which]), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+        });
+      }
+    }
+    // A heading word's turn as the labeller read it flown: its departure and arrival rows.
+    const check = trainingColumn === "heading" ? focusFlight.envelopes.heading[word.index].check : null;
+    if (check !== null) {
+      for (const [which, row] of [["starts", check.departureRow], ["ends", check.arrivalRow]] as const) {
+        added.push(TRAINING_ENTITY.focusFlown(which));
+        viewer.entities.add({
+          id: TRAINING_ENTITY.focusFlown(which),
+          name: `The turn flown ${which}`,
+          position: Cesium.Cartesian3.fromDegrees(lon[row], lat[row], altitudeHaeM[row]),
+          point: {
+            pixelSize: 9,
+            color: selectedEdge,
+            outlineColor: Cesium.Color.BLACK.withAlpha(0.7),
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          label: tag(`turn flown ${which} · step ${row}`),
+        });
+      }
+    }
     added.push(TRAINING_ENTITY.focusIssue);
     viewer.entities.add({
       id: TRAINING_ENTITY.focusIssue,

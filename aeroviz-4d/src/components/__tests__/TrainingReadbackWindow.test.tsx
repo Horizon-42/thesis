@@ -100,6 +100,22 @@ describe("TrainingReadbackWindow", () => {
     }
   });
 
+  it("draws a turn on the heading chart as the heading between its fastest and slowest turn", () => {
+    open();
+    const flight = parseTrainingSample(mockSample());
+    if (!flight.ok) throw new Error(flight.problem);
+    const turn = flight.value.flights[0].envelopes.heading[1].turn!;
+    const region = document.body.querySelector(".training-readback-turn-band")!;
+    expect(region.tagName).toBe("polygon");
+    expect(region.getAttribute("points")!.split(" ")).toHaveLength(turn.headingRegion.tS.length);
+    // the two turns themselves, for the heading word's turn and the capture turn, by the paths switch
+    expect(count(".training-readback-turn-heading")).toBe(4);
+    cleanup();
+    open({ ...ALL, turnPaths: false });
+    expect(count(".training-readback-turn-heading")).toBe(0);
+    expect(count(".training-readback-turn-band")).toBe(1);
+  });
+
   it("draws the heading chart's bands from the exporter's numbers", () => {
     open();
     expect(count(".training-readback-turn-band")).toBe(1);
@@ -170,6 +186,29 @@ describe("TrainingReadbackWindow", () => {
     // its rows: over the plan track and over the heading chart, not the altitude or speed chart
     expect(count(".training-readback-focus")).toBe(2);
     expect(screen.getByLabelText("Altitude chart").querySelector(".training-readback-focus")).toBeNull();
+  });
+
+  it("lets every other word's envelope recede, names the selected turn's paths and marks its turn as flown", () => {
+    open(ALL, 0, 22, "heading");
+    const opacity = (selector: string) => document.body.querySelector(selector)!.getAttribute("opacity");
+    expect(opacity(".training-readback-corridor")).toBe("0.3");
+    expect(opacity(".training-readback-capture-turn")).toBe("0.3");
+    expect(screen.getByLabelText("heading word 2 envelope").getAttribute("opacity")).toBe("1");
+    expect(screen.getByLabelText("heading word 1 envelope").getAttribute("opacity")).toBe("0.3");
+    expect(screen.getByText("fastest: ≤ 4.7°/s, ≤ 32° bank")).toBeTruthy();
+    expect(screen.getByText("slowest: 0.5°/s, begun 10.5 s late")).toBeTruthy();
+    expect(screen.getByText("turn flown starts · step 10")).toBeTruthy();
+    expect(screen.getByText("turn flown ends · step 16")).toBeTruthy();
+    expect(screen.getByText(/framed on the track\s+and the selected word's envelope/)).toBeTruthy();
+    // the regions switched off, the selected turn's paths still frame the plan
+    cleanup();
+    open({ ...ALL, lateral: false }, 0, 22, "heading");
+    expect(screen.getByText(/framed on the track\s+and the selected word's envelope/)).toBeTruthy();
+    // with nothing selected nothing recedes and nothing is named
+    cleanup();
+    open(ALL, 0, 22);
+    expect(opacity(".training-readback-corridor")).toBe("1");
+    expect(screen.queryByText(/turn flown starts/)).toBeNull();
   });
 
   it("gives the clearance the corridor and the capture turn, and an angle word its rows on the altitude chart", () => {

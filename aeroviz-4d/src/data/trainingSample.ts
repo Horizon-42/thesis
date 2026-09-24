@@ -36,9 +36,10 @@ import { fetchJson } from "../utils/fetchJson";
  *  every set, current or superseded, is listed in it. */
 export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
 /** MIRROR of the exporter's `SAMPLE_SCHEMA` (`instruction_training_export.py`). The name changes
- *  with the file's shape, on both sides, in the same change: v4 is `instruction-v2`'s sample, and a
- *  file under any other name — `v3` included, whatever vocabulary it carries — is refused. */
-export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v4";
+ *  with the file's shape, on both sides, in the same change: v5 is `instruction-v2`'s sample with a
+ *  turn's heading against time, and a file under any other name — `v4` and `v3` included, whatever
+ *  vocabulary it carries — is refused. */
+export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v5";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v2";
 /** MIRROR of the spec's sha (`v2_20260924/spec.json`). A new vocabulary is a new sha, and this
@@ -192,9 +193,16 @@ export interface TrainingWordEvent {
   kind: TrainingWordKind;
 }
 
+/** A heading against time, on the heading chart's own axes: seconds of the flight (`signals.tS`)
+ *  and degrees on the branch of the unwrapped smoothed track at the issue. */
+export interface TrainingHeadingProfile {
+  tS: number[];
+  deg: number[];
+}
+
 /**
- * Where a turn may take the aircraft: between its fastest and its slowest turn, flown at the speeds
- * the flight flew, begun on time or as late as allowed.
+ * Where a turn may take the aircraft: between the fastest turn begun on time and the slowest begun
+ * as late as allowed, flown at the speeds the flight flew — in plan, and as the heading against time.
  */
 export interface TrainingTurnRegion {
   fromTrackDeg: number;
@@ -210,11 +218,20 @@ export interface TrainingTurnRegion {
   /** A ring: the fastest turn begun on time, the two on-time ends, the slowest turn begun as late
    *  as allowed back to where it began, and back to the issue point. */
   region: TrainingPlanLine;
+  /** The fastest turn begun on time, to where its track enters the target's band. */
   fastPath: TrainingPlanLine;
+  /** The slowest turn begun as late as allowed: straight from the issue point, then the turn — the
+   *  region's far edge. */
   slowPath: TrainingPlanLine;
   /** Where the turn may end — four corners: the fastest turn's end, the slowest turn's end, then
    *  the same two moved along the issue track by the latest start. */
   end: TrainingPlanLine;
+  /** The same two turns as the heading against time, one point per point of their paths, and the
+   *  region between them: the fastest turn to the band, the band's edge on to the slowest turn's
+   *  end, back along the slowest turn. */
+  headingFast: TrainingHeadingProfile;
+  headingSlow: TrainingHeadingProfile;
+  headingRegion: TrainingHeadingProfile;
 }
 
 /** The labeller's check of a turn: monotone progress, turn rate inside the range. */
@@ -249,7 +266,6 @@ export interface TrainingHeadingEnvelope {
   holdEndRow: number;
   fromTrackDeg: number;
   targetOnTrackDeg: number;
-  turnBandDeg: [number, number] | null;
   holdBandDeg: [number, number] | null;
   turn: TrainingTurnRegion | null;
   funnel: {
@@ -276,7 +292,6 @@ export interface TrainingApproach {
   captureTurn: {
     startRow: number;
     courseOnTrackDeg: number;
-    bandDeg: [number, number];
     check: TrainingTurnCheck;
     turn: TrainingTurnRegion;
   } | null;
@@ -882,7 +897,18 @@ function parseCandidates(reader: Reader, vocabulary: TrainingVocabulary): Traini
   return candidates;
 }
 
-function parseTurnRegion(reader: Reader, vocabulary: TrainingVocabulary): TrainingTurnRegion {
+/** A heading profile of ``length`` points: as many times as degrees, running forward from ``startS``. */
+function parseProfile(reader: Reader, key: string, startS: number, length: number): TrainingHeadingProfile {
+  const profile = reader.child(key);
+  const tS = profile.numbers("tS", length);
+  if (tS[0] !== startS) profile.fail(`starts at ${tS[0]} s, but the turn is issued at ${startS} s`);
+  if (tS.some((value, index) => index > 0 && value < tS[index - 1])) profile.fail("runs backwards in time");
+  return { tS, deg: profile.numbers("deg", tS.length) };
+}
+
+/** A turn region from its issue at ``issueS``: its plan paths and its heading profiles are the same
+ *  two turns, point for point. */
+function parseTurnRegion(reader: Reader, vocabulary: TrainingVocabulary, issueS: number): TrainingTurnRegion {
   // The region's limits are the vocabulary's own: a region drawn with other numbers is another turn.
   const limits: Array<[string, number]> = [
     ["rateMinDegS", vocabulary.turnRateMinDegS], ["rateMaxDegS", vocabulary.turnRateMaxDegS],
@@ -893,6 +919,16 @@ function parseTurnRegion(reader: Reader, vocabulary: TrainingVocabulary): Traini
   }
   const end = parsePlanLine(reader, "end", 4);
   if (end.eM.length !== 4) reader.fail(`end has ${end.eM.length} corners; where a turn may end has four`);
+  // A path is ONE point when the track is already within the hold band of the target at issue:
+  // there is nothing left to turn (a small capture turn, mostly). The late slowest turn still has
+  // its straight start.
+  const fastPath = parsePlanLine(reader, "fastPath", 1);
+  const slowPath = parsePlanLine(reader, "slowPath", 2);
+  const headingFast = parseProfile(reader, "headingFast", issueS, fastPath.eM.length);
+  const headingSlow = parseProfile(reader, "headingSlow", issueS, slowPath.eM.length);
+  const headingRegion = reader.child("headingRegion");
+  const ring = headingFast.tS.length + 1 + headingSlow.tS.length;
+  const regionTS = headingRegion.numbers("tS", ring);
   return {
     fromTrackDeg: reader.number("fromTrackDeg"),
     turnDeg: reader.number("turnDeg"),
@@ -902,11 +938,12 @@ function parseTurnRegion(reader: Reader, vocabulary: TrainingVocabulary): Traini
     startDelayMaxS: vocabulary.turnStartDelayMaxS,
     slowFinished: reader.boolean("slowFinished"),
     region: parsePlanLine(reader, "region", 3),
-    // A path is ONE point when the track is already within the hold band of the target at issue:
-    // there is nothing left to turn (a small capture turn, mostly).
-    fastPath: parsePlanLine(reader, "fastPath", 1),
-    slowPath: parsePlanLine(reader, "slowPath", 1),
+    fastPath,
+    slowPath,
     end,
+    headingFast,
+    headingSlow,
+    headingRegion: { tS: regionTS, deg: headingRegion.numbers("deg", ring) },
   };
 }
 
@@ -1024,7 +1061,8 @@ function matchWord(item: Reader, event: TrainingWordEvent | undefined, index: nu
   }
 }
 
-function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, rows: number) {
+function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, tS: number[]) {
+  const rows = tS.length;
   const words = eventsOf(events, "heading");
   const list = reader.list("heading");
   if (list.length !== words.length) reader.fail(`heading holds ${list.length} envelopes for ${words.length} heading words`);
@@ -1040,10 +1078,10 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
     const funnel = item.nullableChild("funnel");
     const check = item.nullableChild("check");
     const turn = item.nullableChild("turn");
-    // WHAT COMES TOGETHER: a turn is a region, a chart band, an end row and the labeller's check of
-    // it; a hold is a funnel, a band and a start row. Half of either is a half-written envelope.
-    const turned = [turn, item.raw("turnBandDeg"), item.raw("turnEndRow"), check].map((part) => part !== null);
-    if (new Set(turned).size !== 1) item.fail("turn, turnBandDeg, turnEndRow and check come together or not at all");
+    // WHAT COMES TOGETHER: a turn is a region, an end row and the labeller's check of it; a hold is
+    // a funnel, a band and a start row. Half of either is a half-written envelope.
+    const turned = [turn, item.raw("turnEndRow"), check].map((part) => part !== null);
+    if (new Set(turned).size !== 1) item.fail("turn, turnEndRow and check come together or not at all");
     const held = [funnel, item.raw("holdBandDeg"), item.raw("holdStartRow")].map((part) => part !== null);
     if (new Set(held).size !== 1) item.fail("funnel, holdBandDeg and holdStartRow come together or not at all");
     if ((word.kind === "initial") === turned[0]) item.fail(`a ${word.kind} word ${turned[0] ? "has" : "lacks"} a turn`);
@@ -1058,7 +1096,7 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
       ...parseTurnCheck(check),
       kind: check.string("kind"),
       departureRow: check.integer("departureRow", 0, word.row),
-      arrivalRow: check.integer("arrivalRow", word.row, rows),
+      arrivalRow: check.integer("arrivalRow", word.row, rows - 1),
       turnDeg: check.number("turnDeg"),
       parts: check.count("parts", 1),
     };
@@ -1086,9 +1124,8 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
       holdEndRow,
       fromTrackDeg: item.number("fromTrackDeg"),
       targetOnTrackDeg: item.number("targetOnTrackDeg"),
-      turnBandDeg: item.nullableRange("turnBandDeg"),
       holdBandDeg: item.nullableRange("holdBandDeg"),
-      turn: turn === null ? null : parseTurnRegion(turn, vocabulary),
+      turn: turn === null ? null : parseTurnRegion(turn, vocabulary, tS[word.row]),
       funnel: funnel === null ? null : {
         lengthM: funnel.number("lengthM"),
         startHalfWidthM: funnel.number("startHalfWidthM"),
@@ -1104,6 +1141,7 @@ function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: T
 
 function parseApproach(
   reader: Reader, flight: { rows: number; captureRow: number; joinRow: number }, vocabulary: TrainingVocabulary,
+  tS: number[],
 ): TrainingApproach {
   const approach = reader.child("approach");
   if (approach.number("clearanceRow") !== flight.joinRow) approach.fail(`clearanceRow is ${approach.raw("clearanceRow")}, the flight's joinRow ${flight.joinRow}`);
@@ -1114,6 +1152,15 @@ function parseApproach(
   if (rows !== flight.rows - flight.captureRow) {
     corridor.fail(`rows is ${rows}, but the capture at row ${flight.captureRow} leaves ${flight.rows - flight.captureRow}`);
   }
+  const captureTurn = (turn: Reader) => {
+    const startRow = turn.integer("startRow", 0, flight.captureRow);
+    return {
+      startRow,
+      courseOnTrackDeg: turn.number("courseOnTrackDeg"),
+      check: parseTurnCheck(turn.child("check")),
+      turn: parseTurnRegion(turn.child("turn"), vocabulary, tS[startRow]),
+    };
+  };
   const landing = approach.child("landing");
   const crossing = landing.nullableChild("crossing");
   const cutAtCrossing = landing.boolean("cutAtCrossing");
@@ -1123,13 +1170,7 @@ function parseApproach(
     captureRow: flight.captureRow,
     captureBeforeThresholdM: approach.number("captureBeforeThresholdM"),
     interceptInserted: approach.boolean("interceptInserted"),
-    captureTurn: capture === null ? null : {
-      startRow: capture.integer("startRow", 0, flight.captureRow),
-      courseOnTrackDeg: capture.number("courseOnTrackDeg"),
-      bandDeg: capture.range("bandDeg"),
-      check: parseTurnCheck(capture.child("check")),
-      turn: parseTurnRegion(capture.child("turn"), vocabulary),
-    },
+    captureTurn: capture === null ? null : captureTurn(capture),
     courseBandDeg: approach.range("courseBandDeg"),
     corridor: {
       beforeThresholdM: corridor.number("beforeThresholdM"),
@@ -1289,6 +1330,7 @@ function parseFlight(
     flight.fail(`unspecifiedRow is ${unspecifiedRow}, but the last speed word is ${unspecified.value} at row ${unspecified.row}`);
   }
   const envelopes = flight.child("envelopes");
+  const signals = parseSignals(flight.child("signals"), rows, vocabulary.stepS);
   return {
     datasetId: flight.string("datasetId"),
     flightKey: flight.string("flightKey"),
@@ -1302,11 +1344,11 @@ function parseFlight(
     joinRow,
     unspecifiedRow,
     captureBeforeThresholdM: flight.number("captureBeforeThresholdM"),
-    signals: parseSignals(flight.child("signals"), rows, vocabulary.stepS),
+    signals,
     words,
     envelopes: {
-      heading: parseHeading(envelopes, words.events, vocabulary, rows),
-      approach: parseApproach(envelopes, { rows, captureRow, joinRow }, vocabulary),
+      heading: parseHeading(envelopes, words.events, vocabulary, signals.tS),
+      approach: parseApproach(envelopes, { rows, captureRow, joinRow }, vocabulary, signals.tS),
       altitude: parseAltitude(envelopes, words.events, vocabulary, rows),
       angle: parseAngle(envelopes, words.events, vocabulary),
       speed: parseSpeed(envelopes, words.events, vocabulary, rows),

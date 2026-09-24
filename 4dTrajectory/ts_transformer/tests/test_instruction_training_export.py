@@ -115,6 +115,42 @@ def test_the_turn_region_is_the_labeller_s_turn_ends_from_the_issue_point():
                                                                                                  math.cos(track)])
     assert outline[0] == pytest.approx(start) and outline[-1] == pytest.approx(start + late)
     assert (region.fast.e_m[-1], region.fast.n_m[-1]) == pytest.approx(tuple(corners[0]))
+    # the slowest turn drawn is the one begun as late as allowed: straight from the issue point,
+    # then the turn — the outline's far edge — ending on the parallelogram's late corner
+    slow = np.column_stack((region.slow.e_m, region.slow.n_m))
+    assert slow[0] == pytest.approx(start) and slow[1] == pytest.approx(start + late)
+    assert slow[-1] == pytest.approx(corners[2])
+
+
+def test_the_heading_chart_s_turns_are_the_plan_s_turns_against_time():
+    one = spec()
+    flight = admit(_vectored(_key("V")), instruction_airport(), one)
+    row, target = 70, 180.0
+    region = display.turn_region(flight, row, target, one)
+    track, issue_s = float(flight.smoothed.track_deg[row]), float(flight.signals.time_s[row])
+    speeds, side, step = flight.smoothed.ground_speed_mps[row:], math.copysign(1.0, region.turn_deg), one.step_s
+    need = abs(region.turn_deg) - one.heading_tolerance_deg
+    fast, slow = region.heading_fast, region.heading_slow
+    # one point per point of the plan's path, from the issue, whole steps but the last
+    assert len(fast.t_s) == len(region.fast.e_m) and len(slow.t_s) == len(region.slow.e_m)
+    assert (fast.t_s[0], fast.deg[0]) == pytest.approx((issue_s, track))
+    assert np.diff(fast.t_s)[:-1] == pytest.approx(step) and 0.0 < np.diff(fast.t_s)[-1] <= step + 1e-9
+    # each whole step turns at the fastest rate the bank allows at the step's mean speed, and the
+    # turn ends where the track enters the band
+    mean = 0.5 * (speeds[:-1] + speeds[1:])
+    rate = np.minimum(one.turn_rate_max_deg_s, np.degrees(envelope.GRAVITY_MPS2 * np.tan(np.radians(one.turn_bank_max_deg)) / mean))
+    assert side * np.diff(fast.deg)[:-1] == pytest.approx(rate[: len(fast.deg) - 2] * step)
+    assert fast.deg[-1] == pytest.approx(track + side * need)
+    # the slowest begins as late as allowed: straight, then the lowest rate
+    assert slow.t_s[:2] == pytest.approx([issue_s, issue_s + one.turn_start_delay_max_s])
+    assert slow.deg[:2] == pytest.approx([track, track])
+    assert side * np.diff(slow.deg[1:])[:-1] == pytest.approx(one.turn_rate_min_deg_s * step)
+    assert slow.deg[-1] == pytest.approx(track + side * need) and region.slow_finished
+    # the region between them: the fastest turn, the band's edge on to the slowest's end, back
+    ring = region.heading_outline
+    assert ring.t_s[: len(fast.t_s)] == pytest.approx(fast.t_s)
+    assert (ring.t_s[len(fast.t_s)], ring.deg[len(fast.t_s)]) == pytest.approx((slow.t_s[-1], fast.deg[-1]))
+    assert ring.t_s[len(fast.t_s) + 1:] == pytest.approx(slow.t_s[::-1])
 
 
 def test_the_funnel_starts_where_the_turn_may_end_and_widens_by_the_tolerance():
@@ -239,6 +275,11 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
     assert turned["turn"]["rateMinDegS"] < turned["turn"]["rateMaxDegS"] and turned["turn"]["slowFinished"]
     assert len(turned["turn"]["slowPath"]["eM"]) > len(turned["turn"]["fastPath"]["eM"])
     assert len(turned["turn"]["region"]["lon"]) == len(turned["turn"]["region"]["eM"]) >= 3
+    # the heading chart's turns: one point per point of the plan's, starting at the issue's time
+    for path, profile in (("fastPath", "headingFast"), ("slowPath", "headingSlow")):
+        assert len(turned["turn"][profile]["tS"]) == len(turned["turn"][profile]["deg"]) == len(turned["turn"][path]["eM"])
+        assert turned["turn"][profile]["tS"][0] == signals["tS"][turned["row"]]
+    assert "turnBandDeg" not in turned
     assert turned["check"]["progressOk"] is True
     approach = flight["envelopes"]["approach"]
     assert approach["captureTurn"]["startRow"] == turned["holdEndRow"]

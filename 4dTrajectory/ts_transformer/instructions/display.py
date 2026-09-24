@@ -69,10 +69,39 @@ class Line:
 
 # ---- turns
 @dataclass(frozen=True)
+class HeadingProfile:
+    """A heading against time: seconds of the flight (`FlightSignals.time_s`) and degrees on the
+    branch of the unwrapped smoothed track at the issue row — the heading chart's own axes."""
+
+    t_s: np.ndarray
+    deg: np.ndarray
+
+
+def turn_heading(path: np.ndarray, track_deg: float, turn_deg: float, start_s: float,
+                 speeds_mps: np.ndarray) -> HeadingProfile:
+    """The heading an `envelope.turn_path` path flies, begun at ``start_s``, read back from the path
+    itself — so the chart's two turns are the plan's two turns, with no second copy of the turn: its
+    step from point ``j − 1`` to ``j`` is flown at the mean of the two ends' tracks, so each end
+    follows from the one before and the step's bearing; the step lasts its length over the mean of
+    the two rows' speeds (a whole step for all but the last, which the path cuts where the track
+    enters the band)."""
+    side = math.copysign(1.0, turn_deg)
+    speeds = np.asarray(speeds_mps, dtype=np.float64)
+    turned, elapsed = [0.0], [0.0]
+    for j in range(1, len(path)):
+        step = path[j] - path[j - 1]
+        mean = side * float(wrap180(math.degrees(math.atan2(step[0], step[1])) - track_deg))
+        turned.append(2.0 * mean - turned[-1])
+        elapsed.append(elapsed[-1] + float(np.hypot(step[0], step[1])) / (0.5 * (speeds[j - 1] + speeds[j])))
+    return HeadingProfile(t_s=start_s + np.array(elapsed), deg=track_deg + side * np.array(turned))
+
+
+@dataclass(frozen=True)
 class TurnRegion:
     """Where a turn from its issue point may take the aircraft (§2.3, `envelope.TurnEnds`): between
-    the fastest and the slowest turn, flown at the speeds the flight flew, begun on time or as late
-    as allowed. ``turn_deg`` is the shorter way to the target (positive = right)."""
+    the fastest turn begun on time and the slowest begun as late as allowed, both flown at the speeds
+    the flight flew — in plan, and as the heading against time. ``turn_deg`` is the shorter way to
+    the target (positive = right)."""
 
     from_track_deg: float
     turn_deg: float
@@ -81,22 +110,39 @@ class TurnRegion:
     bank_max_deg: float
     start_delay_max_s: float
     fast: Line                   # the fastest turn, begun on time, to where its track enters θ's band
-    slow: Line                   # the slowest turn, likewise (or to the flight's end)
+    #: The slowest turn begun as late as allowed — the straight flight from the issue point, then the
+    #: turn (or to the flight's end): the outline's far edge.
+    slow: Line
     slow_finished: bool          # the slowest turn gets there before the flight ends
     outline: Line                # `envelope.TurnEnds.outline`
     end: Line                    # where the turn may end: `envelope.TurnEnds.corners`, a parallelogram
+    #: The same two turns as the heading against time, and the region between them: the fastest turn
+    #: to the band, the band's edge on to the slowest turn's end, back along the slowest turn.
+    heading_fast: HeadingProfile
+    heading_slow: HeadingProfile
+    heading_outline: HeadingProfile
 
 
 def turn_region(flight: Admitted, row: int, target_deg: float, spec: VocabularySpec) -> TurnRegion:
     ends = turn_ends_at(flight, row, target_deg, spec)
     start = np.array([flight.signals.e_m[row], flight.signals.n_m[row]])
     track = float(flight.smoothed.track_deg[row])
+    turn = float(wrap180(target_deg - track))
+    issue_s, speeds = float(flight.signals.time_s[row]), flight.smoothed.ground_speed_mps[row:]
+    fast = turn_heading(ends.fast, track, turn, issue_s, speeds)
+    # The slowest turn begun as late as allowed: the straight start from the issue point, then the
+    # turn — the same in plan and against time, point for point.
+    late = turn_heading(ends.slow, track, turn, issue_s + spec.turn_start_delay_max_s, speeds)
+    slow = HeadingProfile(t_s=np.concatenate(([issue_s], late.t_s)), deg=np.concatenate(([track], late.deg)))
+    outline = HeadingProfile(t_s=np.concatenate((fast.t_s, [slow.t_s[-1]], slow.t_s[::-1])),
+                             deg=np.concatenate((fast.deg, [fast.deg[-1]], slow.deg[::-1])))
     return TurnRegion(
-        from_track_deg=track % 360.0, turn_deg=float(wrap180(target_deg - track)),
+        from_track_deg=track % 360.0, turn_deg=turn,
         rate_min_deg_s=spec.turn_rate_min_deg_s, rate_max_deg_s=spec.turn_rate_max_deg_s,
         bank_max_deg=spec.turn_bank_max_deg, start_delay_max_s=spec.turn_start_delay_max_s,
-        fast=Line.of(start + ends.fast), slow=Line.of(start + ends.slow), slow_finished=ends.finished,
-        outline=Line.of(start + ends.outline), end=Line.of(start + ends.corners))
+        fast=Line.of(start + ends.fast), slow=Line.of(np.vstack((start, start + ends.slow + ends.late))),
+        slow_finished=ends.finished, outline=Line.of(start + ends.outline), end=Line.of(start + ends.corners),
+        heading_fast=fast, heading_slow=slow, heading_outline=outline)
 
 
 # ---- holds
@@ -144,10 +190,8 @@ class HeadingEnvelope:
     hold_end_row: int
     from_track_deg: float        # the smoothed track at the issue row, unwrapped
     target_on_track_deg: float   # θ on that track's branch
-    #: The chart bands. The turn: from the track at issue to θ, each side widened by the tolerance
-    #: (the bound `envelope.turn_progress_ok` implies); ``None`` for a word with no turn. The hold:
-    #: θ ± the tolerance; ``None`` when the word has no hold.
-    turn_band_deg: tuple[float, float] | None
+    #: The hold's chart band: θ ± the tolerance; ``None`` when the word has no hold. (The turn's is
+    #: its region's heading outline.)
     hold_band_deg: tuple[float, float] | None
     #: The labeller's check of the turn this word belongs to (`Reading.checks["turns"]`) — shared by
     #: the parts of a split turn; ``None`` for a word the flight was already holding.
@@ -172,17 +216,15 @@ def heading_envelopes(flight: Admitted, reading: Reading, spec: VocabularySpec, 
         target_on_track = on_branch(start_track, target)
         if span.turn is None:
             turn_end_row: int | None = None
-            region, turn_band = None, None
+            region = None
         else:
             turn_end_row = span.hold_end if span.hold_start is None else span.hold_start
             region = turn_region(flight, word.row, target, spec)
-            low, high = sorted((start_track, target_on_track))
-            turn_band = (low - tolerance, high + tolerance)
         drawn = funnel(span_funnel(flight, span, target, spec)[1], target) if span.held else None
         result.append(HeadingEnvelope(
             word=word, target_deg=target, turn_end_row=turn_end_row,
             hold_start_row=span.hold_start if span.held else None, hold_end_row=span.hold_end,
-            from_track_deg=start_track, target_on_track_deg=target_on_track, turn_band_deg=turn_band,
+            from_track_deg=start_track, target_on_track_deg=target_on_track,
             hold_band_deg=(target_on_track - tolerance, target_on_track + tolerance) if span.held else None,
             turn_check=span.turn, hold_check=judged[word.row] if word.row in judged else None, turn=region,
             funnel=drawn))
@@ -245,11 +287,8 @@ class CaptureTurn:
 
     start_row: int
     course_on_track_deg: float    # the course on the branch of the smoothed track at the start row
-    #: The chart band: from the track at the start row to the course, each side widened by the
-    #: heading tolerance (the bound the labeller's progress check implies).
-    band_deg: tuple[float, float]
     check: dict[str, Any]         # `Reading.checks["capture_turn"]`
-    region: TurnRegion
+    region: TurnRegion            # its heading outline is the chart's picture of it
 
 
 def capture_turn(flight: Admitted, reading: Reading, spec: VocabularySpec) -> CaptureTurn | None:
@@ -257,11 +296,8 @@ def capture_turn(flight: Admitted, reading: Reading, spec: VocabularySpec) -> Ca
     if check is None:
         return None
     start = int(check["start_row"])
-    track = float(flight.smoothed.track_deg[start])
-    course = on_branch(track, flight.candidate.course_deg)
-    low, high = sorted((track, course))
+    course = on_branch(float(flight.smoothed.track_deg[start]), flight.candidate.course_deg)
     return CaptureTurn(start_row=start, course_on_track_deg=course, check=check,
-                       band_deg=(low - spec.heading_tolerance_deg, high + spec.heading_tolerance_deg),
                        region=turn_region(flight, start, flight.candidate.course_deg, spec))
 
 

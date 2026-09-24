@@ -106,7 +106,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   `aeroviz_backend/CLAUDE.md` (AV12).
 
 - **Training reads ONE vocabulary: `instruction-v2`, spec `103a6eae6b90`** — the sample schema
-  (`aeroviz-training-sample-v4`; a format name changes with its file's shape, both sides in one change), the
+  (`aeroviz-training-sample-v5`; a format name changes with its file's shape, both sides in one change), the
   reading rule, the spec sha, the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
   refused by name; `training/index.json` keeps its v1 schema across vocabularies, so a set of another
   vocabulary (`instruction_v1` included) stays listed and is refused from the manifest alone, never
@@ -116,14 +116,17 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   the bookkeeping (AV20).
 - **Training highlights ONE selected word, never a step**: `trainingColumn` (the word class) + the shared
   cursor → `trainingWordAt`; only that column's word lights up (its own envelope in its own hue with a yellow
-  edge, and its in-force rows), in the sentence bar, the read-back window and 3D alike (AV21).
+  edge, and its in-force rows), in the sentence bar, the read-back window and 3D alike; every other word's
+  envelope recedes (× 0.3) and the plan view frames the selected envelope (AV21).
 - Training in 3D: the lateral envelopes are draped on the ground with a draped edge carrying the verdict, under
   the track's ground trace; the fastest / slowest turn paths have their own switch (`turnPaths`); the tubes are
   walls in exported HAE with edge lines; a selected flight is framed once; the altitude chart's axis is the
   distance flown (AV22).
 - **A turn is bounded by RATE**: its region lies between the fastest (4.7°/s, ≤ 32° bank) and the slowest
   (0.5°/s, up to 10.5 s late) turn, it may end in a parallelogram, and the hold funnel swept from that
-  parallelogram is exactly what the labeller judges (`holdCheck`; dashed = not judged) (AV23).
+  parallelogram is exactly what the labeller judges (`holdCheck`; dashed = not judged); the two turn paths are
+  its edges (the slowest begun LATE), and the heading chart's wedge is the same two turns against time, read
+  back from the paths by `display.turn_heading` (`envelope.py` untouched) (AV23).
 
 ## Comparison CZML colour contract
 

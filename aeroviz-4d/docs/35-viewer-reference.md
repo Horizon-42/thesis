@@ -187,7 +187,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV19 · Training 只读一份词表：`instruction-v2`，规格 `103a6eae6b90`
 
-`src/data/trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v4`、读法
+`src/data/trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v5`、读法
 `TRAINING_READING_RULE = "instruction-v2"`、规格 sha 全文 `TRAINING_SPEC_SHA256`、六列的名字和顺序
 `TRAINING_COLUMNS`（跑道、进近、航向、高度、下降角、速度，与 `instructions/words.COLUMNS` 相同，列是按位置读的）、
 "不变" `TRAINING_UNCHANGED = -1`、标注器会写的发令原因 `TRAINING_WORD_KINDS`。对不上就整份拒读并报出是哪一项，
@@ -239,6 +239,9 @@ that divergence is a known open item (see the README's "Future Improvements").
   高度 / 下降角→高度图，速度→地速图）；三维在发令处加一个黄点和词名标签。
 - 选中的包络保留它自己的颜色、加深，边线变黄（三维原来把填充整块换成黄色，转弯区和漏斗就分不出来了；现在
   三处视图一致：本色加深 + 黄边）。
+- **其余的淡化**：选中一个词时，别的词的包络在三维里颜色透明度乘 0.3（`trainingEnvelopeEntities` 列出全部包络
+  及其边线、转弯路径），在读数窗口里整体透明度 0.3；平面图按选中词的整个包络取景；选中的转弯两条路径标名字，
+  选中的航向词在航迹上标出实际转弯的起止（`check.departureRow` / `arrivalRow`）。
 - 游标在同一个词里移动，三维什么都不重画（以该词的发令行为键）；换词只改材质和线宽、加减两个小实体，不重建
   其余几何，不动共享的 `viewer.clock`。游标从不移动相机（选航班时取景一次，见 AV22）。
 
@@ -272,4 +275,11 @@ that divergence is a known open item (see the README's "Future Improvements").
   红边；**不判**的漏斗（转弯小于 10°，或最慢的转弯在航班结束前转不完）照样画，画虚线边。
 - 最慢的转弯转不完时，它的路径停在航班结束处（虚线），转弯区在那里截断；转角接近 150° 时截断的边界可能自己交叉
   ——这是画法，不是数据坏了，那个保持段本来也不判。
+- **画出来的两条转弯路径就是转弯区的两条边**：最快的转弯（按时开始）和最慢的转弯（晚 10.5 s 开始，先直飞），
+  2026-09-24 起导出的是晚开始的这条（样本 v5；v4 里是按时开始的最慢转弯，在区域内部）。**航向图上的楔形**是
+  同样这两个转弯的航向随时间（`headingFast` / `headingSlow` / `headingRegion`），由 `display.turn_heading` 从
+  平面路径逐点读出：`turn_path` 每一步按前后两行航向的平均值飞，所以下一行的航向 = 2 × 这一步的方向 − 上一行的
+  航向，这一步用时 = 步长的路程 / 两行地速的平均。`envelope.py` 在标注器 sha 里，没有改。
+- 大转弯的包络大，是因为最慢的边界：0.5°/s 在 118 m/s 时半径约 13.5 km，最快的边界受 32° 坡度限制约 3.0°/s、
+  半径约 2.3 km；150° 的转弯区有十几到二十公里，实际转弯（这批航班 1.2–2.1°/s）只占它的一小角。
 - 小于 10° 的小修正，标注器不检查最低转弯率，但转弯区仍按 0.5–4.7°/s 画出，判定里写明"最低转弯率未判"。

@@ -63,11 +63,12 @@ from ts_transformer.repo_layout import REPO_ROOT
 #: MIRROR of `aeroviz-4d/src/data/trainingSample.ts` (`TRAINING_INDEX_SCHEMA`,
 #: `TRAINING_SAMPLE_SCHEMA`, `TRAINING_READABLE_SET_KIND`); the reader refuses anything else by
 #: name, so these move together. A name changes with its file's shape, on both sides, in the same
-#: change. Sample v4 is `instruction-v2`'s shape: a turn bounded by rate (fast and slow paths, rate
-#: checks), the judged hold (`holdCheck`), the landing limits in the vocabulary and per candidate.
-#: The index keeps its v1 shape: sets of every vocabulary sit in it.
+#: change. Sample v5 is `instruction-v2`'s shape: a turn bounded by rate (the fastest turn on time
+#: and the slowest begun late, in plan AND as the heading against time — no turn band), the judged
+#: hold (`holdCheck`), the landing limits in the vocabulary and per candidate. The index keeps its
+#: v1 shape: sets of every vocabulary sit in it.
 INDEX_SCHEMA = "aeroviz-training-index-v1"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v4"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v5"
 KIND_READBACK = "vocabulary-readback"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"
@@ -196,13 +197,19 @@ def draw(airport: str, flights: list[FlightSignals], sentences: dict[str, np.nda
 
 
 # ---- one flight
+def _profile(profile: display.HeadingProfile) -> dict[str, list[float]]:
+    return {"tS": _r(profile.t_s, 3), "deg": _r(profile.deg, 3)}
+
+
 def _turn(region: display.TurnRegion, globe: Globe) -> dict[str, Any]:
     return {"fromTrackDeg": round(region.from_track_deg, 3), "turnDeg": round(region.turn_deg, 3),
             "rateMinDegS": region.rate_min_deg_s, "rateMaxDegS": region.rate_max_deg_s,
             "bankMaxDeg": region.bank_max_deg, "startDelayMaxS": region.start_delay_max_s,
             "slowFinished": region.slow_finished,
             "region": globe.line(region.outline), "fastPath": globe.line(region.fast),
-            "slowPath": globe.line(region.slow), "end": globe.line(region.end)}
+            "slowPath": globe.line(region.slow), "end": globe.line(region.end),
+            "headingFast": _profile(region.heading_fast), "headingSlow": _profile(region.heading_slow),
+            "headingRegion": _profile(region.heading_outline)}
 
 
 def _turn_check(check: dict[str, Any]) -> dict[str, Any]:
@@ -221,7 +228,7 @@ def heading_payload(item: display.HeadingEnvelope, globe: Globe) -> dict[str, An
         "split": {"part": int(word.info["part"]), "parts": int(word.info["parts"])} if split else None,
         "turnEndRow": item.turn_end_row, "holdStartRow": item.hold_start_row, "holdEndRow": item.hold_end_row,
         "fromTrackDeg": round(item.from_track_deg, 3), "targetOnTrackDeg": round(item.target_on_track_deg, 3),
-        "turnBandDeg": _pair(item.turn_band_deg, 3), "holdBandDeg": _pair(item.hold_band_deg, 3),
+        "holdBandDeg": _pair(item.hold_band_deg, 3),
         "turn": None if item.turn is None else _turn(item.turn, globe),
         "funnel": None if item.funnel is None else {
             "lengthM": round(item.funnel.length_m, 1), "startHalfWidthM": round(item.funnel.start_half_width_m, 1),
@@ -288,7 +295,7 @@ def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, 
                 "interceptInserted": bool(reading.checks["intercept_inserted"]),
                 "captureTurn": None if capture is None else {
                     "startRow": capture.start_row, "courseOnTrackDeg": round(capture.course_on_track_deg, 3),
-                    "bandDeg": _pair(capture.band_deg, 3), "check": _turn_check(capture.check), "turn": _turn(capture.region, globe)},
+                    "check": _turn_check(capture.check), "turn": _turn(capture.region, globe)},
                 "courseBandDeg": _pair(envelopes.course_band_deg, 3),
                 "corridor": {"beforeThresholdM": round(corridor.before_threshold_m, 1),
                              "halfWidthAtCaptureM": round(corridor.half_width_at_capture_m, 2),

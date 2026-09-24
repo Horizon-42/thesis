@@ -134,14 +134,17 @@ describe("parseTrainingSample", () => {
   });
 
   it("refuses a heading envelope that is half a turn or half a hold", () => {
-    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turnBandDeg = null; }))
-      .toMatch(/heading\[1\]: turn, turnBandDeg, turnEndRow and check come together or not at all/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turnEndRow = null; }))
+      .toMatch(/heading\[1\]: turn, turnEndRow and check come together or not at all/);
     expect(refusal((raw) => { raw.flights[0].envelopes.heading[0].funnel = null; }))
       .toMatch(/heading\[0\]: funnel, holdBandDeg and holdStartRow come together or not at all/);
     expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turnEndRow = 30; }))
       .toMatch(/the turn ends at row 30, after the hold ends at 20/);
     expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].check.kind = "intercept"; }))
       .toMatch(/is the check of a intercept, but the word is turn/);
+    // a turn arrives on a row of the sentence: a hold's start or the capture
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].check.arrivalRow = MOCK_ROWS; }))
+      .toMatch(/arrivalRow is 60, not a whole number in 10…59/);
   });
 
   it("refuses markers that are not the words' own rows", () => {
@@ -169,13 +172,30 @@ describe("parseTrainingSample", () => {
       .toMatch(/captureTurn\.turn: startDelayMaxS is 9, but the vocabulary says 10\.5/);
   });
 
-  it("reads a turn already within the target's band at issue, whose paths are one point each", () => {
+  it("reads a turn already within the target's band at issue: its fastest path is one point", () => {
     const raw: any = mockSample();
     const turn = raw.flights[0].envelopes.approach.captureTurn.turn;
     const start = { eM: [turn.region.eM[0]], nM: [turn.region.nM[0]], lon: [turn.region.lon[0]], lat: [turn.region.lat[0]] };
+    const issue = turn.headingFast.tS[0];
     turn.fastPath = start;
-    turn.slowPath = start;
+    turn.headingFast = { tS: [issue], deg: [270] };
+    // the slowest, begun late, is its straight start alone
+    turn.slowPath = { eM: [...start.eM, start.eM[0] - 1000], nM: [...start.nM, start.nM[0]],
+                      lon: [...start.lon, start.lon[0]], lat: [...start.lat, start.lat[0]] };
+    turn.headingSlow = { tS: [issue, issue + 10.5], deg: [270, 270] };
+    turn.headingRegion = { tS: [issue, issue + 10.5, issue + 10.5, issue], deg: [270, 270, 270, 270] };
     expect(parsed(raw).flights[0].envelopes.approach.captureTurn!.turn.fastPath.eM).toHaveLength(1);
+  });
+
+  it("refuses heading profiles that are not the plan's two turns from the issue", () => {
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turn.headingFast.tS.pop(); }))
+      .toMatch(/turn\.headingFast\.tS has 2 values, expected 3/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turn.headingSlow.tS[0] = 21; }))
+      .toMatch(/turn\.headingSlow: starts at 21 s, but the turn is issued at 20 s/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turn.headingSlow.tS[2] = 25; }))
+      .toMatch(/turn\.headingSlow: runs backwards in time/);
+    expect(refusal((raw) => { raw.flights[0].envelopes.heading[1].turn.headingRegion.deg.pop(); }))
+      .toMatch(/turn\.headingRegion\.deg has 7 values, expected 8/);
   });
 
   it("refuses a hold check that is not the word's own hold rows", () => {
