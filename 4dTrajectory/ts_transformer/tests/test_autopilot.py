@@ -981,8 +981,8 @@ def test_the_track_clock_follows_the_observed_track_forward_one_row_a_cycle_at_m
         [0.0, 2.0, 4.0, 4.0, 6.0, 8.0, 10.0, 11.0])
 
 
-def test_the_landing_aim_stays_in_the_words_tube_while_it_can_still_land():
-    """A tube that misses the landing window: its nearest edge while that is still a landing, else the window."""
+def test_the_landing_aim_leaves_the_words_tube_only_when_the_tube_misses_the_landing_window():
+    """The aim stays inside the word's tube where the tube meets the landing window; where it does not, the window."""
     from ts_transformer.autopilot.frame import Kinematics
     from ts_transformer.autopilot.vertical import Vertical
 

@@ -21,9 +21,10 @@ line higher or lower than the observed aircraft did; held to class k's own range
 word's tube when it can: the tube (`labeller.vertical.tube_bounds`: the class's two angles from where the altitude
 or angle word in force was said, ± the altitude tolerance, along the path flown) projected to the threshold, its
 inner half, meets the window of heights the observed flights cross at (``land_window_*``); the aim height is
-moved into that overlap; when there is none it stays on the tube's edge nearest the window as long as that edge is
-still a landing (0 to the landing condition's height over the threshold), and only when it is not does the aim leave
-the tube, to the window's nearer edge (mode ``aim_left_tube``). Before the capture the path still to
+moved into that overlap; when there is none the aim leaves the tube, to the window's nearer edge (mode
+``aim_left_tube``). The landing that counts is the window's: kept on the tube's nearest edge up to the landing
+condition's 100 m instead, 2,000 train flights crossed high enough to fail evaluation's glidepath gate (paired pass
+96.5 → 94.1 %) and flew no more words inside their envelopes (2026-09-24). Before the capture the path still to
 fly is unknown (a downwind may run past the threshold before it turns back) and the descent flies the class's
 nominal angle — but never steeper than the straight line to the aim point, the shortest path there is, so it
 never descends into the ground on the way. The aim height is data: the median height at which the train flights
@@ -63,7 +64,6 @@ class Vertical:
         self.captured = torch.zeros(batch, dtype=torch.bool, device=device)
         self.issued = torch.full((batch, 2), -1, dtype=torch.long, device=device)
         self.steepest_rad = math.radians(words.angle_bounds(words.n_descent)[1])
-        self.landing_max_m = spec.landing_max_height_m
         self.left_tube = torch.zeros(batch, dtype=torch.bool, device=device)
         bounds = [words.angle_bounds(index) for index in range(words.n_descent + 2)]
         self.shallow_tan = torch.tensor([math.tan(math.radians(low)) for low, _ in bounds], dtype=torch.float64,
@@ -123,12 +123,10 @@ class Vertical:
         low, high = tube_low.clamp(min=params.land_window_low_m), tube_high.clamp(max=params.land_window_high_m)
         in_both = torch.minimum(torch.maximum(torch.full_like(low, params.land_aim_height_m), low), high)
         above = tube_low > params.land_window_high_m                   # the tube passes above the window
-        tube_edge = torch.where(above, tube_low, tube_high)
         window_edge = torch.where(above, torch.full_like(low, params.land_window_high_m),
                                   torch.full_like(low, params.land_window_low_m))
-        still_a_landing = (tube_edge >= 0.0) & (tube_edge <= self.landing_max_m)
-        crossing = torch.where(low <= high, in_both, torch.where(still_a_landing, tube_edge, window_edge))
-        self.left_tube = land & line_captured & (low > high) & ~still_a_landing
+        crossing = torch.where(low <= high, in_both, window_edge)
+        self.left_tube = land & line_captured & (low > high)
         on_line = torch.atan2(state.height_m - threshold_elevation_m - crossing, to_go_m.clamp(min=1.0)).clamp(
             0.0, self.steepest_rad)
         shortest = torch.atan2(above_aim, straight_m.clamp(min=1.0)).clamp(min=0.0)
