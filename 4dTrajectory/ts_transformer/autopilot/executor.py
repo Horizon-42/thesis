@@ -41,7 +41,8 @@ from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, Words
 LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_floor", "thrust_max", "thrust_min",
           "stall")
 #: What the laws were doing each cycle.
-MODES = ("captured", "tracking", "bent", "intercepting", "go_around", "level_captured")
+MODES = ("captured", "tracking", "bent", "intercepting", "intercepting_off_word", "go_around", "level_captured",
+         "aim_left_tube")
 
 
 @dataclass(frozen=True)
@@ -113,7 +114,8 @@ def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceC
         for name, value in {**attitude.binds, **thrust.binds, **speed_modes,
                             "path_rate_limited": vertical_modes["path_rate_limited"]}.items():
             limits[name].append(value)
-        for name, value in {**lateral_modes, "level_captured": vertical_modes["level_captured"]}.items():
+        for name, value in {**lateral_modes, "level_captured": vertical_modes["level_captured"],
+                            "aim_left_tube": vertical_modes["aim_left_tube"]}.items():
             modes[name].append(value)
 
         after = read_state(state, charts)

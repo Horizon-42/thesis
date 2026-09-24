@@ -17,7 +17,7 @@ from ts_transformer.autopilot import inverse
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import AirportCharts, compass_deg, read_state, wrap180
 from ts_transformer.autopilot.plant import Plant
-from ts_transformer.autopilot.sentence import Delays, DistanceClock, Sentences, TimeClock
+from ts_transformer.autopilot.sentence import Delays, DistanceClock, Sentences, TimeClock, TrackClock
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, APPROACH_CLEARED, APPROACH_NOT_CLEARED, HEADING, SPEED, UNCHANGED, Words,
     compass_from_math_rad, wrap180 as np_wrap180,
@@ -89,18 +89,18 @@ def test_a_sentence_must_write_every_column_at_step_0():
 
 def test_the_distance_clock_says_a_word_where_the_observed_aircraft_was_told_it():
     """Observed: 100 m every 2 s row. An executor twice as fast reaches row 3's position in 3 s, not 6 s;
-    past the observed path's end the clock stays at the sentence's last row."""
+    past the observed path's end sentence time runs on at the executor's own pace."""
     from ts_transformer.autopilot.frame import Kinematics
 
     e = np.arange(5) * 100.0
-    clock = DistanceClock.of([e], [np.zeros(5)], 2.0, device=CPU)
+    clock = DistanceClock.of([e], [np.zeros(5)], 2.0, 1.0, device=CPU)
 
     def at(position):
         state = Kinematics(*(torch.tensor([value], dtype=F64) for value in (position, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)))
         return float(clock.now(0, state)[0])
 
-    times = [at(100.0 * t) for t in range(6)]                                   # 100 m a second
-    assert times == pytest.approx([0.0, 2.0, 4.0, 6.0, 8.0, 8.0])
+    times = [at(100.0 * t) for t in range(7)]                                   # 100 m a second
+    assert times == pytest.approx([0.0, 2.0, 4.0, 6.0, 8.0, 9.0, 10.0])        # past the end: the executor's pace
     assert float(TimeClock(1.0).now(7, Kinematics(*(torch.zeros(1, dtype=F64) for _ in range(8))))[0]) == 7.0
 
 
@@ -840,7 +840,8 @@ def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
                {"row": 20, "kind": "turn-split", "words": 2, "turn": {"reached": True, "progress_ok": True, "rate_ok": False},
                 "superseded": False, "hold": "not judged: slowest turn unfinished"},
                {"row": 40, "kind": "turn", "words": 1, "turn": None, "superseded": False, "hold": None}]
-    words = {"not_reached": 0, "heading": heading, "capture_turn": None,
+    words = {"not_reached": 0, "superseded_before_flown": 0, "heading": heading, "capture_turn": None,
+             "intercepting_off_word_cycles": 0, "aim_left_tube_cycles": 0,
              "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0},
              "vertical": [{"contained": True}], "speed": [{"contained": False}], "all_contained": False}
     judged, not_judged = word_results(Verdict("landed", 50, None, {}, words, flown_rows=51))
@@ -962,3 +963,93 @@ def test_words_said_on_one_flown_row_leave_the_later_one_of_each_column():
     assert superseded == 1
     assert [(w.column, w.value, w.row, w.info["sentence_row"]) for w in kept] == [
         (ALTITUDE, 20, 7, 12), (HEADING, 5, 7, 10), (HEADING, 9, 7, 11), (SPEED, 14, 15, 20)]
+
+
+def test_the_track_clock_follows_the_observed_track_forward_one_row_a_cycle_at_most():
+    """The nearest point ahead, never back, at most one row a cycle (no word is skipped), and on at the executor's
+    pace past the track's end."""
+    from ts_transformer.autopilot.frame import Kinematics
+
+    e = np.arange(6) * 100.0
+    clock = TrackClock.of([e], [np.zeros(6)], 2.0, 1.0, device=CPU)
+
+    def at(position):
+        state = Kinematics(*(torch.tensor([value], dtype=F64) for value in (position, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)))
+        return float(clock.now(0, state)[0])
+
+    assert [at(x) for x in (0.0, 440.0, 460.0, 120.0, 900.0, 900.0, 900.0, 900.0)] == pytest.approx(
+        [0.0, 2.0, 4.0, 4.0, 6.0, 8.0, 10.0, 11.0])
+
+
+def test_the_landing_aim_stays_in_the_words_tube_while_it_can_still_land():
+    """A tube that misses the landing window: its nearest edge while that is still a landing, else the window."""
+    from ts_transformer.autopilot.frame import Kinematics
+    from ts_transformer.autopilot.vertical import Vertical
+
+    words = Words(spec())
+    params = _params()                                   # window 8.4–36.5 m, aim 20.8 m
+    vertical = Vertical(1, params, words, CPU)
+
+    def crossing_for(anchor_above_threshold_m, angle_class):
+        vertical.anchor_height_m = torch.tensor([float("nan")], dtype=F64)
+        vertical.issued = torch.full((1, 2), -1, dtype=torch.long)
+        vertical.flown_m = torch.zeros(1, dtype=F64)
+        state = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0 + anchor_above_threshold_m, 75.0,
+                                                                     90.0, 0.0, 75.0, 60000.0)))
+        rate, _, modes = vertical.rate(state, torch.tensor([float("nan")], dtype=F64), torch.tensor([True]),
+                                       torch.tensor([angle_class]), torch.tensor([words.angle_deg(angle_class)], dtype=F64),
+                                       torch.tensor([[0, 0]]), torch.tensor([3000.0], dtype=F64),
+                                       torch.tensor([100.0], dtype=F64), torch.tensor([3000.0], dtype=F64),
+                                       torch.tensor([True]), torch.tensor([False]))
+        return bool(modes["aim_left_tube"][0])
+
+    # 3000 m out, the 3° class from 160 m over the threshold: its tube reaches the threshold near 0 m — the window
+    assert not crossing_for(160.0, 3)
+    # the shallowest descent class from 600 m: the tube crosses 500+ m over the threshold, no landing: the aim leaves it
+    assert crossing_for(600.0, 1)
+
+
+def test_the_pilots_own_speed_is_reached_by_the_threshold():
+    """"Unspecified": at least the deceleration that reaches the approach speed over the straight line left."""
+    from ts_transformer.autopilot.frame import Kinematics
+    from ts_transformer.autopilot.speed import Speed
+
+    one = spec()
+    speed = Speed(torch.tensor([65.0], dtype=F64), _params(), one)
+    state = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 90.0, 90.0, 0.0, 90.0, 60000.0)))
+    aero = torch.tensor([[122.6, 2.5, 0.02, 0.04, 0.9, 0.2]], dtype=F64)
+
+    def rate(straight_m):
+        return float(speed.rate(state, torch.tensor([float("nan")], dtype=F64), torch.tensor([True]),
+                                torch.tensor([False]), torch.ones(1, dtype=F64), aero,
+                                torch.tensor([straight_m], dtype=F64))[0][0])
+
+    far, near = rate(50_000.0), rate(3_000.0)
+    assert far == pytest.approx(-_params().unspecified_decel_mps2)            # far out: the pilot's own rate
+    assert -one.speed_accel_max_mps2 <= near < far                          # close in: harder, within the vocabulary
+
+
+def test_an_executor_intercepting_off_its_word_fails_that_word():
+    """Review 2026-09-24: cleared on a heading that cannot reach the line even bent, the executor intercepts on its
+    own; when that is more than the tolerance off the word, the word failed and the flight did not fly as said."""
+    legs = [(100, 0.0, 100.0, 0.0), (5, 4.0, 100.0, 0.0), (29, 0.0, 100.0, 0.0), (5, -4.0, 90.0, 0.0),
+            (100, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
+    signals = instruction_flight(*fly_legs(legs, 90.0, 1600.0, -400.0, 0.0))
+    _, _, reading = _fly_sentence(signals)
+    words = Words(spec())
+    grid = reading.words.copy()
+    grid[0, APPROACH] = APPROACH_CLEARED
+    grid[0, HEADING] = words.heading_index(60.0)                            # away from the line: cannot reach it
+    grid[1:, HEADING] = UNCHANGED
+    flown, verdict, _ = _fly_sentence(signals, grid)
+    assert flown.modes["intercepting_off_word"][0].any()
+    assert verdict.words["intercepting_off_word_cycles"] > 0 and not verdict.flew_the_sentence
+
+
+def test_a_word_the_clock_never_reached_is_not_reached():
+    """Review 2026-09-24: a word past the flight's end was never said — not counted as flown at the last row."""
+    signals, reading = _downwind()
+    params = _params(timeout_factor=0.3)                                    # the flight stops a third of the way
+    _, verdict, _ = _fly_sentence(signals, params=params)
+    later = [i for i in reading.instructions if i.row * 2.0 >= verdict.end_row]
+    assert later and verdict.words["not_reached"] == len(later)

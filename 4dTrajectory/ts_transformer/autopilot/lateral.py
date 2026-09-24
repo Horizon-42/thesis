@@ -247,5 +247,7 @@ class Lateral:
                                                       torch.rad2deg(torch.sqrt(k * torch.deg2rad(error.abs()))))
         rate = torch.where(self.captured & ~self.tracking, capture,
                            torch.where(self.tracking, line_rate, rate_for_error(error, params)))
+        intercept_target = course + side * spec.intercept_angle_deg
+        off_word = intercept & (wrap180(intercept_target - heading_deg).abs() > spec.heading_tolerance_deg)
         return rate, {"captured": self.captured.clone(), "tracking": self.tracking.clone(), "bent": bend,
-                      "intercepting": intercept, "go_around": go_around}
+                      "intercepting": intercept, "intercepting_off_word": off_word, "go_around": go_around}

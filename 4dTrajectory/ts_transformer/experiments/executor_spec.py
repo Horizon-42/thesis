@@ -22,6 +22,7 @@ measured at and the executor's source hash, and a replay refuses a spec measured
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
@@ -133,7 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args(argv)
-    instructions = args.instructions if args.instructions.is_absolute() else REPO_ROOT / args.instructions
+    # normalised (".." resolved, links kept): a worktree's data trees are links to the main tree's
+    instructions = Path(os.path.normpath(args.instructions if args.instructions.is_absolute()
+                                         else REPO_ROOT / args.instructions))
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     if directory.exists():
         parser.error(f"{directory} exists; an executor spec is never overwritten")

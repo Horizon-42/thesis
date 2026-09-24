@@ -171,7 +171,7 @@ def word_clock(batch: Batch, params: ExecutorParams, step_s: float,
     rows = [len(r.words) for r in batch.readings]
     e_m, n_m = [f.e_m[:n] for f, n in zip(batch.signals, rows)], [f.n_m[:n] for f, n in zip(batch.signals, rows)]
     clock = DistanceClock if params.word_clock == "distance" else TrackClock
-    return clock.of(e_m, n_m, step_s, device=device)
+    return clock.of(e_m, n_m, step_s, params.cycle_s, device=device)
 
 
 def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device,
@@ -201,6 +201,8 @@ def word_results(verdict: Verdict) -> tuple[list[tuple[str, bool]], int] | None:
         return None
     judged: list[tuple[str, bool]] = []
     not_judged = 0
+    if verdict.words["intercepting_off_word_cycles"]:
+        judged.append(("heading", False))                   # the word the executor left to intercept on its own
     for h in verdict.words["heading"]:
         hold = h["hold"] if isinstance(h["hold"], dict) else None
         if h["turn"] is None and hold is None:
@@ -236,6 +238,9 @@ def summary(verdicts: list[Verdict]) -> dict[str, Any]:
                 words_failed["turn not monotone"] += not h["turn"]["progress_ok"]
                 words_failed["turn rate or bank"] += not h["turn"]["rate_ok"]
             words_failed["hold outside its funnel"] += isinstance(h["hold"], dict) and h["hold"]["inside"] < h["hold"]["rows"]
+        words_failed["left its heading word to intercept on its own"] += v.words["intercepting_off_word_cycles"] > 0
+        words_failed["landing aim left the word's tube"] += v.words["aim_left_tube_cycles"] > 0
+        words_failed["superseded before flown (not judged)"] += v.words["superseded_before_flown"]
         corridor, capture = v.words["corridor"], v.words["capture_turn"]
         words_failed["cleared, never captured"] += corridor["cleared"] and capture is None
         words_failed["capture turn outside its envelope"] += capture is not None and not (

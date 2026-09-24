@@ -34,6 +34,8 @@ flights pass, smoothing and the landing cut included — and judged from each wo
   capture cuts: to its furthest progress (`labeller.lateral._intercept_end`), not "reached", its rate judged
   on the turn it flew before the capture took over; a turn cut before it progressed at all, or said at or after the capture (a word acting early — a sensitivity probe, or a
   generated sentence), is ``superseded`` by the capture, not judged;
+- the heading word in force while the executor intercepted the line on its own at more than the heading tolerance
+  from it (`lateral`: cleared on a heading that cannot reach the line) failed;
 - the clearance: the executor's capture turn, from its first row to where the track is on the course (within
   the corridor's course tolerance; no turn when it already is), with the same turn check toward the course
   (§2.2: monotone, rate and bank inside §2.3's range); and once the
@@ -320,11 +322,13 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     rows = flight.signals.n_rows
     # each word at the flown row where the executor was told it: the first cycle whose sentence time reached the
     # word's step (on the time clock, the word's own row)
+    # (a word the clock never reached was never said: it is past the flight's rows)
     sentence = flown.sentence_s[index, :last].cpu().numpy()
-    flown_rows = [int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9)) // step_rows
-                  for word in reading.instructions]
-    moved, superseded = said_at(reading.instructions, flown_rows)
+    said_cycles = [int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9)) for word in reading.instructions]
+    said = [(word, cycle // step_rows) for word, cycle in zip(reading.instructions, said_cycles) if cycle < len(sentence)]
+    moved, superseded = said_at([word for word, _ in said], [row for _, row in said])
     reached = [word for word in moved if word.row < rows]
+    never = len(reading.instructions) - len(said) + len(moved) - len(reached)
 
     def first_row(mode: str) -> int | None:
         # up to the outcome's row: after a crossing without capture the executor flies on, and a later mode
@@ -357,13 +361,16 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     holds = [h["hold"] for h in headings if isinstance(h["hold"], dict)]
     clearance_ok = (capture_turn is not None and capture_turn["progress_ok"] and capture_turn["rate_ok"]
                     and len(corridor) > 0 and bool(corridor.all()))
-    contained = (all(h["turn"] is None or all(h["turn"].values()) for h in headings)
+    # the executor left the heading word in force to intercept the line on its own (lateral law): that word failed
+    off_word = int(flown.modes["intercepting_off_word"][index, :end_row].sum())
+    contained = (off_word == 0 and all(h["turn"] is None or all(h["turn"].values()) for h in headings)
                  and all(h["inside"] == h["rows"] for h in holds)
                  and (not cleared or clearance_ok)
                  and all(v["contained"] for v in vertical) and all(v["contained"] for v in speed))
     return Verdict(outcome, end_row, crossing, limits, flown_rows=end_row + 1, words={
-        "not_reached": len(moved) - len(reached), "superseded_before_flown": superseded,
-        "heading": headings, "capture_turn": capture_turn,
+        "not_reached": never, "superseded_before_flown": superseded,
+        "heading": headings, "capture_turn": capture_turn, "intercepting_off_word_cycles": off_word,
+        "aim_left_tube_cycles": int(flown.modes["aim_left_tube"][index, :end_row].sum()),
         "corridor": {"cleared": cleared, "entered": bool(len(corridor)), "rows": int(len(corridor)),
                      "inside": int(corridor.sum())},
         "vertical": vertical, "speed": speed, "all_contained": bool(contained)})

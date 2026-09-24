@@ -7,7 +7,9 @@ the column's delay (the labeller's issue row leads the manoeuvre it reads, §9 m
 what the aircraft is already doing and are in force from the start. After the sentence's last step every word
 stays in force. `Sentences.at` looks the words up at any sentence time.
 
-Which sentence time a control cycle is at is the replay's CLOCK (§11):
+Which sentence time a control cycle is at is the replay's CLOCK (§11). Past the observed track's end (the executor
+slower, or on a longer path) sentence time runs on at the executor's own pace, so a word said in the sentence's last
+rows still takes effect after its delay; delays are sentence seconds.
 
 - `TimeClock` — the sentence's own clock: a word is said at the second it was said to the observed aircraft;
 - `DistanceClock` — a word is said when the executor has flown as far along its own path as the observed aircraft
@@ -43,8 +45,12 @@ DELAY_GROUPS = {"heading_s": (HEADING,), "vertical_s": (ALTITUDE, ANGLE), "speed
 FOLLOWS_HEADING = (RUNWAY, APPROACH)
 CLOCKS = ("time", "distance", "track")
 #: The track clock looks this far ahead along the observed track for the executor's nearest point (it moves only
-#: forward, so a track that loops — an orbit — is followed around, never jumped across).
+#: forward, so a track that loops — an orbit — is followed around, never jumped across) ...
 TRACK_WINDOW_S = 60.0
+#: ... and moves at most this many rows a cycle: sentence time then runs at most twice as fast as the observed
+#: flight's (a row is 2 s, a cycle 1 s), every row is passed, and no word is skipped — however far from the observed
+#: track the executor is, where "nearest" means little.
+TRACK_MAX_ROWS_PER_CYCLE = 1
 
 
 @dataclass(frozen=True)
@@ -146,17 +152,18 @@ class TimeClock:
 
 class DistanceClock:
     """Where the observed aircraft was (module docstring): a cycle's sentence time is the time at which the observed
-    aircraft had flown, along its own path from row 0, as far as the executor has along its own. ``observed_path_m``
-    is ``[B, N]``: each flight's path length at its sentence's rows (``step_s`` apart), padded past the flight's own
-    rows with a path that never ends (its words then stay in force)."""
+    aircraft had flown, along its own path from row 0, as far as the executor has along its own; past the path's end,
+    on at the executor's pace (``cycle_s`` a cycle). ``observed_path_m`` is ``[B, N]``: each flight's path length at its
+    sentence's rows (``step_s`` apart), padded past the flight's own rows with a path that never ends."""
 
-    def __init__(self, observed_path_m: torch.Tensor, rows: torch.Tensor, step_s: float) -> None:
-        self.path, self.rows, self.step_s = observed_path_m, rows, step_s
+    def __init__(self, observed_path_m: torch.Tensor, rows: torch.Tensor, step_s: float, cycle_s: float) -> None:
+        self.path, self.rows, self.step_s, self.cycle_s = observed_path_m, rows, step_s, cycle_s
         self.flown: torch.Tensor | None = None
         self.last: tuple[torch.Tensor, torch.Tensor] | None = None
+        self.beyond_s: torch.Tensor | None = None
 
     @classmethod
-    def of(cls, e_m: Sequence[np.ndarray], n_m: Sequence[np.ndarray], step_s: float, *,
+    def of(cls, e_m: Sequence[np.ndarray], n_m: Sequence[np.ndarray], step_s: float, cycle_s: float, *,
            device: torch.device) -> DistanceClock:
         """From each flight's observed positions at its sentence's rows."""
         width = max(len(e) for e in e_m)
@@ -165,11 +172,13 @@ class DistanceClock:
             steps = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(e), np.diff(n)))))
             path[flight, : len(e)] = steps
             path[flight, len(e):] = steps[-1] + 1e9 * np.arange(1, width - len(e) + 1)
-        return cls(torch.as_tensor(path, device=device), torch.as_tensor([len(e) for e in e_m], device=device), step_s)
+        return cls(torch.as_tensor(path, device=device), torch.as_tensor([len(e) for e in e_m], device=device), step_s,
+                   cycle_s)
 
     def now(self, cycle: int, state: Kinematics) -> torch.Tensor:
         if self.last is None:
             self.flown = torch.zeros_like(state.e_m)
+            self.beyond_s = torch.zeros_like(state.e_m)
         else:
             self.flown = self.flown + torch.hypot(state.e_m - self.last[0], state.n_m - self.last[1])
         self.last = (state.e_m.clone(), state.n_m.clone())
@@ -178,22 +187,30 @@ class DistanceClock:
         batch = torch.arange(len(index), device=index.device)
         low, high = self.path[batch, index], self.path[batch, index + 1]
         time = (index + ((self.flown - low) / (high - low)).clamp(0.0, 1.0)) * self.step_s
-        return torch.minimum(time, (self.rows - 1) * self.step_s)
+        end = (self.rows - 1) * self.step_s
+        past = time >= end
+        time = torch.where(past, end + self.beyond_s, time)
+        self.beyond_s = torch.where(past, self.beyond_s + self.cycle_s, self.beyond_s)
+        return time
 
 
 class TrackClock:
     """Where the observed aircraft was (module docstring): a cycle's sentence time is the time of the observed track's
-    point nearest the executor, looking `TRACK_WINDOW_S` ahead of the last one, never back. ``observed_e_m`` /
+    point nearest the executor, looking `TRACK_WINDOW_S` ahead of the last one, never back, at most
+    `TRACK_MAX_ROWS_PER_CYCLE` rows a cycle; past the track's last row, on at the executor's pace. ``observed_e_m`` /
     ``observed_n_m`` are ``[B, N]``, each flight's observed positions at its sentence's rows, padded past its own rows
-    with its last position (its words then stay in force)."""
+    with its last position."""
 
-    def __init__(self, observed_e_m: torch.Tensor, observed_n_m: torch.Tensor, rows: torch.Tensor, step_s: float) -> None:
-        self.e, self.n, self.rows, self.step_s = observed_e_m, observed_n_m, rows, step_s
+    def __init__(self, observed_e_m: torch.Tensor, observed_n_m: torch.Tensor, rows: torch.Tensor, step_s: float,
+                 cycle_s: float) -> None:
+        self.e, self.n, self.rows, self.step_s, self.cycle_s = observed_e_m, observed_n_m, rows, step_s, cycle_s
         self.window = int(round(TRACK_WINDOW_S / step_s))
         self.row = torch.zeros(len(rows), dtype=torch.long, device=rows.device)
+        self.beyond_s = torch.zeros(len(rows), dtype=torch.float64, device=rows.device)
 
     @classmethod
-    def of(cls, e_m: Sequence[np.ndarray], n_m: Sequence[np.ndarray], step_s: float, *, device: torch.device) -> TrackClock:
+    def of(cls, e_m: Sequence[np.ndarray], n_m: Sequence[np.ndarray], step_s: float, cycle_s: float, *,
+           device: torch.device) -> TrackClock:
         width = max(len(e) for e in e_m)
 
         def padded(values: Sequence[np.ndarray]) -> torch.Tensor:
@@ -202,11 +219,13 @@ class TrackClock:
                 out[flight, : len(v)], out[flight, len(v):] = v, v[-1]
             return torch.as_tensor(out, device=device)
 
-        return cls(padded(e_m), padded(n_m), torch.as_tensor([len(e) for e in e_m], device=device), step_s)
+        return cls(padded(e_m), padded(n_m), torch.as_tensor([len(e) for e in e_m], device=device), step_s, cycle_s)
 
     def now(self, cycle: int, state: Kinematics) -> torch.Tensor:
         ahead = self.row[:, None] + torch.arange(self.window + 1, device=self.row.device)[None, :]
         ahead = torch.minimum(ahead, (self.rows - 1)[:, None])
         distance = torch.hypot(self.e.gather(1, ahead) - state.e_m[:, None], self.n.gather(1, ahead) - state.n_m[:, None])
-        self.row = ahead.gather(1, distance.argmin(dim=1, keepdim=True))[:, 0]
-        return self.row * self.step_s
+        nearest = ahead.gather(1, distance.argmin(dim=1, keepdim=True))[:, 0]
+        self.beyond_s = torch.where(self.row == self.rows - 1, self.beyond_s + self.cycle_s, self.beyond_s)
+        self.row = torch.minimum(nearest, self.row + TRACK_MAX_ROWS_PER_CYCLE)
+        return self.row.to(torch.float64) * self.step_s + self.beyond_s

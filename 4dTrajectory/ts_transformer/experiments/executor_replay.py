@@ -171,6 +171,8 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
                 "crossing": verdict.crossing, "words": None if counted is None else counted[0],
                 "heading_words_not_judged": 0 if counted is None else counted[1],
                 "words_not_reached": 0 if verdict.words is None else verdict.words["not_reached"],
+                "words_superseded_before_flown": 0 if verdict.words is None else verdict.words["superseded_before_flown"],
+                "intercepting_off_word_cycles": 0 if verdict.words is None else verdict.words["intercepting_off_word_cycles"],
                 "refused": verdict.refused, "limits": verdict.limits, "recorded": recorded, **aligned[j]})
         del flown, verdicts
     write_batch(predictions, output_dir=records, config_dict={"model": PREDICTOR, "horizon_mode": HORIZON,
