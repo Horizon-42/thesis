@@ -3,14 +3,6 @@
 Data (train, the labeller's own reading of each flight — `flight_measurements`, pooled by
 `measured_values`):
 
-- ``turn_rate_deg_s`` (r_turn): the turns the heading words describe — before the clearance, each run of rows turning
-  one way faster than the turn onset rate (`labeller.lateral.turn_runs`) — of at least `TURN_MIN_DEG`, their
-  middle half (the first and last quarter dropped: the 15 s velocity fit smears the roll-in and roll-out); each
-  turn's steady rate is the median of its middle rows, and r_turn the median over turns — a typical turn's steady
-  rate, every turn counted once whatever its length;
-- ``bank_cap_deg`` (φ_cap): the same middle rows at ground speeds in `FAST_BAND_MPS`, each turn's median
-  bank there, the median over the turns that have such rows, up to a whole degree, never past the
-  vocabulary's bank ceiling;
 - ``decel_mps2`` / ``accel_mps2`` (a_dec, a_acc): speed words with a target, from the word's row to
   where the speed enters the target's band, transitions of at least `MIN_SPAN_S`, the median mean
   acceleration of each sign;
@@ -22,55 +14,38 @@ Data (train, the labeller's own reading of each flight — `flight_measurements`
   cross in to keep inside a word's tube. (Every labelled train sentence ends
   within 1.2 km of the threshold, median 0.1 km: the extrapolation is short.)
 
-Torch-free, so the runner's worker processes (`measure_chunk`) read the train split without loading the
-dynamics; method A is `derive.py`, method B `observe.py`.
+These are the values the vocabulary does not settle yet (the vocabulary-only plan's second stage, user 2026-09-24):
+the pace of a speed change and the landing aim. The turn rate and bank the executor flies at, and the word delays, are
+the vocabulary's (`derive.py`; the data measurements that set them are archived: `archive/executor_vocabulary_only_2026_09/`).
+Torch-free, so the runner's worker processes (`measure_chunk`) read the train split without loading the dynamics.
 """
 
 from __future__ import annotations
 
-import math
 from typing import Any, Sequence
 
 import numpy as np
 
-from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, read_flight
 from ts_transformer.instructions.labeller.speed import span_checks
-from ts_transformer.instructions.labeller.lateral import turn_runs
 from ts_transformer.instructions.piecewise import fit_pieces
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import SPEED, Words
 
-TURN_MIN_DEG = 90.0
-FAST_BAND_MPS = (115.0, 140.0)
 MIN_SPAN_S = 20.0
 CROSSING_FIT_ROWS = 10
 LAND_WINDOW_PERCENTILES = (5.0, 95.0)
-MEASUREMENTS = ("turn_steady_rate_deg_s", "turn_fast_bank_deg", "transition_accel_mps2", "unspecified_slope_mps2",
-                "crossing_height_m")
+MEASUREMENTS = ("transition_accel_mps2", "unspecified_slope_mps2", "crossing_height_m")
 
 
 def flight_measurements(flight: Admitted, reading: Reading, geometry: AirportGeometry, spec: VocabularySpec,
                         words: Words) -> dict[str, list[float]]:
     """One labelled flight's contribution to every data parameter."""
     smoothed = flight.smoothed
-    track, speed = smoothed.track_deg, smoothed.ground_speed_mps
+    speed = smoothed.ground_speed_mps
     out: dict[str, list[float]] = {name: [] for name in MEASUREMENTS}
-    turning = np.diff(track[: reading.join_row + 1]) / spec.step_s
-    for start, stop in turn_runs(turning, spec.turn_onset_rate_deg_s):
-        if abs(track[stop] - track[start]) < TURN_MIN_DEG:
-            continue
-        quarter = (stop - start) // 4
-        middle = slice(start + quarter, stop - quarter)
-        rate = np.abs(turning[middle])
-        middle_speed = speed[1:][middle]
-        out["turn_steady_rate_deg_s"].append(float(np.median(rate)))
-        fast = (middle_speed >= FAST_BAND_MPS[0]) & (middle_speed <= FAST_BAND_MPS[1])
-        if fast.any():
-            out["turn_fast_bank_deg"].append(float(np.median(
-                envelope.bank_deg_from_turn_rate(rate[fast], middle_speed[fast]))))
     for check in span_checks(reading.instructions, speed, spec, words):
         seconds = check["arrival_rows"] * spec.step_s
         if not check["cut_before_arrival"] and seconds >= MIN_SPAN_S:
@@ -107,9 +82,6 @@ def measured_values(pooled: dict[str, Sequence[float]], spec: VocabularySpec) ->
     """The data parameters from the pooled measurements, with the count behind each."""
     accel = np.asarray(pooled["transition_accel_mps2"])
     values = {
-        "turn_rate_deg_s": rounded(float(np.median(pooled["turn_steady_rate_deg_s"])), 0.05, round),
-        "bank_cap_deg": min(spec.turn_bank_max_deg, rounded(float(np.median(pooled["turn_fast_bank_deg"])), 1.0,
-                                                           math.ceil)),
         "decel_mps2": rounded(float(np.median(-accel[accel < 0.0])), 0.01, round),
         "accel_mps2": rounded(float(np.median(accel[accel > 0.0])), 0.01, round),
         "unspecified_decel_mps2": rounded(float(np.median(-np.asarray(pooled["unspecified_slope_mps2"]))), 0.01, round),

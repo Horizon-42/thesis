@@ -1,6 +1,8 @@
 """The lateral law (executor design §4): a heading word, the clearance, the capture and the line.
 
-Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.attitude`) to fly:
+Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.attitude`) to fly, within the
+vocabulary's turn rates and under its bank limit (the executor takes nothing beyond the vocabulary, the user's rule
+of 2026-09-24):
 
 - a heading word θ (§4.1, instruction-v3): each says the track a lead ``L`` later, so the law arrives on it then —
   ``|χ̇*| = min(|e| / max(t_heard + L − t, 2Δt), sqrt(2 g p |e| / V), r_max)``: the error over the time left until the
@@ -8,7 +10,7 @@ Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.
   a row, `sentence`; the judge reads each word from that row), floored at the law's stability floor 2Δt (after that,
   a hold); no faster than the bank can still be taken out before the word (`stopping_rate_deg_s`, as the line law:
   the executor cannot know a word is a turn's last); up to the vocabulary's largest turn rate ``r_max`` (the words set
-  the pace; the bank cap binds first in the inverse at most speeds). A first-order law ``e / τ_ψ`` at τ_ψ = L arrives
+  the pace; the bank limit binds first in the inverse at most speeds). A first-order law ``e / τ_ψ`` at τ_ψ = L arrives
   on a turn's last word only asymptotically — 37 % of its error left a lead after it — and leaves it outside its
   envelope; the time left alone, without the stopping limit, passes a turn's last word by up to 10° (§4.1, the
   reviews of 2026-09-24). The error ``e`` is measured from the word in force: a new word turns ``wrap180(θ_new −
@@ -21,8 +23,8 @@ Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.
   final), it intercepts at the vocabulary's intercept angle, the rule the labeller reads an inserted intercept
   by (§2.2) — outside the word's envelope, which the judge reports;
 - the capture (§4.4) starts when the turn onto the course would end on the line, flying toward it — or
-  at once inside the corridor's width; captured is the executor's state, not a word. The turn is the one
-  the laws fly, at ``r = min(r_turn, g tan φ_cap / V)`` (the steady rate, where the bank cap allows it):
+  at once inside the corridor's width; captured is the executor's state, not a word. The turn is planned at the
+  vocabulary's slowest turn rate ``r = r_min`` (the mildest turn a word admits; where the bank limit allows it):
   the bank first rolls to the turn's (``t_roll = |φ_turn − φ| / p``, the aircraft closing on the line at
   ``V sin |Δχ|`` meanwhile, as if half that time straight), then an arc of ``R = V / r``, then the
   roll-out's tail — the ``|Δχ| / τ_ψ`` ease-out (``V r τ_ψ² / 2`` beyond the arc) and the bank's own
@@ -34,20 +36,20 @@ Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.
   vocabulary's slowest turn rate (a capture begun inside the corridor, far from the line, would otherwise
   flatten into a turn slower than any word allows; it then reaches the course before the line, and the line
   law closes the rest), at most the
-  rate the bank cap gives at this speed (``g tan φ_cap / V``: a base close in needs a tighter turn than the
-  steady rate), the vocabulary's largest turn rate, ``|Δχ| / τ_ψ`` (the heading law's own roll-out), and
+  rate the vocabulary's bank limit gives at this speed (``g tan φ_max / V``: a base close in needs a tighter turn
+  than the planned rate), the vocabulary's largest turn rate, ``|Δχ| / τ_ψ`` (the heading law's own roll-out), and
   ``sqrt(k |Δχ|)``: at a turn rate r the bank is ``≈ V r / g``, and returning it at p turns the track
   ``r² V / (2 g p)`` further, so this is the rate the bank can still take out before the course (a
   small-bank reading). The capture hands over to the line (§4.5) once the track is within the corridor's
   course tolerance of the course, or once it no longer closes on the line (it crossed it: a late clearance,
-  or a turn the bank cap slowed — the arc toward a line behind the aircraft has no rate left);
+  or a turn the bank limit slowed — the arc toward a line behind the aircraft has no rate left);
 - tracking the line (§4.5): ``course − sat(k_y · y, a)``, ``k_y = 1 / (4 V τ_ψ)`` (critical damping of the
   first-order loop ``τ_ψ ÿ + ẏ + V k_y y = 0``; the flown track lags the bank, so it may cross the
   centreline by metres). ``a`` is the vocabulary's intercept angle outside the corridor and HALF the
   corridor's course tolerance inside it: the corridor holds the track within that tolerance of the
-  course, and the heading law's own lag keeps the other half. The heading law flies it at no more than
-  ``sqrt(k |e|)``, as the capture does: a recovery from a capture that ran past the line otherwise swings
-  past the course by more than the tolerance while the bank comes back;
+  course, and the heading law's own lag keeps the other half. The executor's own heading law (`rate_for_error`) flies
+  it, at no more than ``sqrt(k |e|)``, as the capture does: a recovery from a capture that ran past the line
+  otherwise swings past the course by more than the tolerance while the bank comes back;
 - a go-around (§4.6) cancels the clearance and the capture and flies the pointed runway's course. A change
   of the runway pointer once cleared is refused (§4.6), as the labeller refuses it.
 
@@ -68,12 +70,6 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import APPROACH_CLEARED, APPROACH_GO_AROUND
-
-
-def rate_for_error(error_deg: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
-    """§4.1: the compass track rate, deg/s, of the executor's OWN turn that takes out a heading error of ``error_deg``
-    (target − track): at most its steady rate r_turn — its own intercept, a go-around, the line's heading."""
-    return (error_deg / params.heading_time_constant_s).clamp(-params.turn_rate_deg_s, params.turn_rate_deg_s)
 
 
 def bank_return_gain(speed_mps: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
@@ -99,9 +95,14 @@ def word_rate(error_deg: torch.Tensor, to_go_s: torch.Tensor, speed_mps: torch.T
     return torch.sign(error_deg) * rate.clamp(max=spec.turn_rate_max_deg_s)
 
 
-def heading_rate(track_deg: torch.Tensor, target_deg: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
-    """§4.1: the compass track rate, deg/s, of the executor's own turn the shorter way onto ``target_deg``."""
-    return rate_for_error(wrap180(target_deg - track_deg), params)
+def rate_for_error(error_deg: torch.Tensor, speed_mps: torch.Tensor, params: ExecutorParams,
+                   spec: VocabularySpec) -> torch.Tensor:
+    """§4.1: the compass track rate, deg/s, of the executor's OWN turn that takes out a heading error of ``error_deg``
+    (target − track) — its own intercept, a go-around, the line's heading: ``e / τ_ψ``, within the vocabulary's turn
+    rates and no faster than the bank can still be taken out before the target (`stopping_rate_deg_s`)."""
+    rate = torch.minimum((error_deg / params.heading_time_constant_s).abs(),
+                         stopping_rate_deg_s(error_deg, speed_mps, params))
+    return torch.sign(error_deg) * rate.clamp(max=spec.turn_rate_max_deg_s)
 
 
 @dataclass(frozen=True)
@@ -184,12 +185,14 @@ class Lateral:
         self.last_track = torch.zeros(batch, dtype=torch.float64, device=device)
 
     def tightest_rad_s(self, state: Kinematics) -> torch.Tensor:
-        """The turn rate the bank cap gives at this speed."""
-        return GRAVITY_MPS2 * math.tan(math.radians(self.params.bank_cap_deg)) / state.ground_speed_mps
+        """The turn rate the vocabulary's bank limit gives at this speed."""
+        return GRAVITY_MPS2 * math.tan(math.radians(self.spec.turn_bank_max_deg)) / state.ground_speed_mps
 
     def turn_rate_rad_s(self, state: Kinematics) -> torch.Tensor:
-        """The capture turn's steady rate: r_turn where the bank cap allows it at this speed."""
-        return torch.clamp(self.tightest_rad_s(state), max=math.radians(self.params.turn_rate_deg_s))
+        """The rate the capture turn is planned at (`capture_lead`): the vocabulary's slowest turn rate, the mildest
+        turn a word admits — where the bank limit allows it at this speed. The turn flown is the arc to the line from
+        where the aircraft is, whatever its rate inside the vocabulary's (`rate`)."""
+        return torch.clamp(self.tightest_rad_s(state), max=math.radians(self.spec.turn_rate_min_deg_s))
 
     def capture_lead(self, state: Kinematics, off_course_deg: torch.Tensor, bank_rad: torch.Tensor,
                      bank_rate_rad_s: float) -> torch.Tensor:
@@ -277,21 +280,13 @@ class Lateral:
                                                           off_course.abs() / params.heading_time_constant_s)
         # on the line the heading law turns no faster than the bank can take out before the target: the
         # corridor's course tolerance is tighter than a heading word's
-        line_rate = torch.sign(error) * torch.minimum(rate_for_error(error, params).abs(),
-                                                      stopping_rate_deg_s(error, state.ground_speed_mps, params))
+        line_rate = rate_for_error(error, state.ground_speed_mps, params, spec)
         # the words set the pace of a turn they describe; the executor's own intercept and a go-around are its own
         to_go = self.heard_s + spec.heading_lead_s - time_s
-        free = torch.where(intercept | go_around, rate_for_error(error, params),
+        free = torch.where(intercept | go_around, rate_for_error(error, state.ground_speed_mps, params, spec),
                            word_rate(error, to_go, state.ground_speed_mps, params, spec))
         rate = torch.where(self.captured & ~self.tracking, capture, torch.where(self.tracking, line_rate, free))
         intercept_target = course + side * spec.intercept_angle_deg
         off_word = intercept & (wrap180(intercept_target - heading_deg).abs() > spec.heading_tolerance_deg)
-        following = ~self.captured & ~self.tracking & ~intercept & ~go_around
-        return rate, {"captured": self.captured.clone(), "tracking": self.tracking.clone(), "following_words": following,
-                      "bent": bend, "intercepting": intercept, "intercepting_off_word": off_word, "go_around": go_around}
-
-    def bank_cap_rad(self, modes: dict[str, torch.Tensor]) -> torch.Tensor:
-        """The bank cap for this cycle (§4.1): the vocabulary's own bank limit while the words set the pace (the
-        labeller admits a turn up to it), φ_cap for the executor's own turns (measured from the data's fast turns)."""
-        return torch.where(modes["following_words"], math.radians(self.spec.turn_bank_max_deg),
-                           math.radians(self.params.bank_cap_deg))
+        return rate, {"captured": self.captured.clone(), "tracking": self.tracking.clone(), "bent": bend,
+                      "intercepting": intercept, "intercepting_off_word": off_word, "go_around": go_around}

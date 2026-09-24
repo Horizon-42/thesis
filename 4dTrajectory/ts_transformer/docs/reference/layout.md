@@ -455,11 +455,13 @@ backend runs no command hooks, so the executor steps it cycle by cycle, the same
 constraints on them), `executor` (the cycle loop, `fly`), `judge` (the three-layer verdict, with the
 labeller's own checks), `replay` (who is flown — own dynamics or a stand-in's, the performance index's
 substitute; a flight without aircraft dynamics is counted, never flown, C31 — drawing, flying and reading
-a batch), `measure` (the data parameters, torch-free for the runner's workers), `derive` (method A), `observe`
-(method B: the data plane's fit-and-grid chain on a flown track) and `spec` (`ts-executor-spec-v1`: the
-parameters written once with their sha and the executor's source hash, `executor_source_files`; a replay refuses a
-spec measured by other code, `replay.open_executor`). It may import the data plane (`data.dataset`,
-`data.channels`), the shared dynamics and geometry, and `instructions/`; never
+a batch), `derive` (method A: τ_ψ and p from the vocabulary), `measure` (the data values the vocabulary does not
+settle yet — the speed changes' pace and the landing aim — torch-free for the runner's workers) and `spec`
+(`ts-executor-spec-v4` since 2026-09-24: the parameters written once with their sha and the executor's source hash,
+`executor_source_files`; a replay refuses a spec measured by other code, `replay.open_executor`). Method B (`observe`,
+the word delays) and method A's flown checks are archived (`archive/executor_vocabulary_only_2026_09/`: the executor
+takes no information beyond the vocabulary, the user's rule of 2026-09-24). It may import the data plane
+(`data.dataset`), the shared dynamics and geometry, and `instructions/`; never
 `training`, `experiments`, `cli`, `backbone`, `inference`, `manoeuvre`, `outputs.control`,
 `outputs.guidance`, `outputs.state`
 (`tests/test_architecture.py::test_the_executor_flies_through_the_shared_dynamics_only`); only the

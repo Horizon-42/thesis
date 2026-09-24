@@ -18,7 +18,7 @@ from ts_transformer.autopilot import inverse
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import AirportCharts, compass_deg, read_state, wrap180
 from ts_transformer.autopilot.plant import Plant
-from ts_transformer.autopilot.sentence import Delays, DistanceClock, Sentences, TimeClock, TrackClock
+from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, APPROACH_CLEARED, APPROACH_NOT_CLEARED, HEADING, SPEED, UNCHANGED, Words,
     compass_from_math_rad, wrap180 as np_wrap180,
@@ -62,20 +62,18 @@ def _grid():
     return grid
 
 
-def test_each_word_takes_effect_its_columns_delay_after_its_step_and_stays_in_force():
+def test_each_word_takes_effect_when_it_is_said_and_stays_in_force():
     one, words = spec(), Words(spec())
     sentences = Sentences([_grid()], words, device=CPU)
-    delays = Delays(vertical_s=1.0, speed_s=0.0)
-    # each second's lookup, the undelayed columns at the second that started its row (the time clock: every other)
-    at = [sentences.at(torch.tensor([float(t)], dtype=F64), torch.tensor([float(t - t % 2)], dtype=F64), delays)
-          for t in range(20)]
+    # each second's lookup is the one of the second that started its row (the time clock: every other second)
+    at = [sentences.at(torch.tensor([float(t - t % 2)], dtype=F64)) for t in range(20)]
     heading = np.array([float(w.heading_deg[0]) for w in at])
-    # a heading word, and the clearance with it, act when said: they carry their own lead (§10.1)
+    # every word acts when said: no delay (the vocabulary's meaning; method B is archived)
     assert (heading[:4] == 270.0).all() and (heading[4:] == 180.0).all()
     assert at[3].approach[0] == APPROACH_NOT_CLEARED and at[4].approach[0] == APPROACH_CLEARED
     land = np.array([bool(w.land[0]) for w in at])
-    assert not land[:7].any() and land[7:].all()                                 # 6 s + 1 s
-    assert float(at[0].altitude_m[0]) == 1200.0 and float(at[7].angle_deg[0]) == one.descent_angle_centres_deg[2]
+    assert not land[:6].any() and land[6:].all()                                 # said at 6 s
+    assert float(at[0].altitude_m[0]) == 1200.0 and float(at[6].angle_deg[0]) == one.descent_angle_centres_deg[2]
     unspecified = np.array([bool(w.unspecified[0]) for w in at])
     assert not unspecified[:8].any() and unspecified[8:].all()
     assert all(int(w.runway[0]) == 0 for w in at)
@@ -238,14 +236,16 @@ def test_the_lateral_mirrors_equal_the_labellers_own_functions():
     assert ours[2].numpy() == pytest.approx(ref.track_minus_course_deg)
 
 
-def test_the_heading_law_turns_the_shorter_way_at_the_steady_rate_and_eases_out():
-    from ts_transformer.autopilot.lateral import heading_rate
+def test_the_executors_own_turn_takes_the_shorter_way_within_the_vocabularys_rates_and_eases_out():
+    from ts_transformer.autopilot.lateral import rate_for_error
 
-    params = _params()
-    rate = heading_rate(torch.tensor([10.0, 350.0, 100.0, 100.0], dtype=F64),
-                        torch.tensor([350.0, 10.0, 104.0, 100.0], dtype=F64), params)
-    # 10 → 350 is 20° LEFT (not 340° right); 350 → 10 is 20° right; 4° to go eases to 4/τ_ψ
-    assert rate.tolist() == pytest.approx([-params.turn_rate_deg_s, params.turn_rate_deg_s,
+    params, one = _params(), spec()
+    track, target = torch.tensor([10.0, 350.0, 100.0, 100.0], dtype=F64), torch.tensor([350.0, 10.0, 104.0, 100.0],
+                                                                                        dtype=F64)
+    rate = rate_for_error(wrap180(target - track), torch.full((4,), 70.0, dtype=F64), params, one)
+    # 10 → 350 is 20° LEFT (not 340° right); 350 → 10 is 20° right, both at the vocabulary's largest rate; 4° to go
+    # eases to 4/τ_ψ (under the stopping limit at 70 m/s)
+    assert rate.tolist() == pytest.approx([-one.turn_rate_max_deg_s, one.turn_rate_max_deg_s,
                                            4.0 / params.heading_time_constant_s, 0.0])
 
 
@@ -256,10 +256,10 @@ def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than
     params, one = _params(), spec()
     error = torch.tensor([6.0, 6.0, 6.0, 20.0, -6.0], dtype=F64)
     to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 1.0], dtype=F64)
-    speed = torch.full((5,), 100.0, dtype=F64)
-    stop = float(stopping_rate_deg_s(torch.tensor([6.0], dtype=F64), torch.tensor([100.0], dtype=F64), params))
-    # at 100 m/s and p 5°/s the bank can still be taken out before 6° from 2.4°/s
-    assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / 100.0
+    speed = torch.full((5,), 140.0, dtype=F64)
+    stop = float(stopping_rate_deg_s(torch.tensor([6.0], dtype=F64), torch.tensor([140.0], dtype=F64), params))
+    # at 140 m/s and p 8°/s the bank can still be taken out before 6° from 2.6°/s
+    assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / 140.0
                                                         * math.radians(6.0))))
     # 6° over the 4 s or 3 s left; past the lead (and under 2Δt) a hold at 2Δt, here held to the stopping rate;
     # never faster than r_max 3.5°/s
@@ -279,10 +279,12 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
     one, params = spec(), _params()
     params.check(one)
     for change, message in ((dict(heading_time_constant_s=1.5), "under 2 Δt"),
-                            (dict(bank_cap_deg=40.0), "φ_cap"),
-                            (dict(delays=Delays(-1.0, 0.0)), "cannot take effect")):
+                            (dict(path_time_constant_s=1.0), "under 2 Δt"),
+                            (dict(land_aim_height_m=50.0), "landing aim")):
         with pytest.raises(ValueError, match=message):
             replace(params, **change).check(one)
+    with pytest.raises(ValueError, match="grader's"):
+        params.check(spec(turn_bank_max_deg=50.0))
 
 
 # ---- whole flights
@@ -290,18 +292,15 @@ def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
-    # τ_ψ = the lead and p 5°/s: method A's values here — at 4.5 the fastest turn said word by word (at the vocabulary's
-    # bank limit, rolled into at the executor's own p) ends past its words' envelopes (`derive.follow_excess_deg`)
-    base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
-                          bank_rate_deg_s=5.0, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
-                          accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8, land_window_low_m=8.4,
-                          land_window_high_m=36.5,
-                          delays=Delays(0.0, 0.0),
-                          timeout_factor=1.5, word_clock="time")
+    # τ_ψ = the lead and p = the bank limit over the lead: method A's values from the vocabulary (`derive`)
+    base = ExecutorParams(cycle_s=1.0, heading_time_constant_s=4.0, bank_rate_deg_s=8.0, path_time_constant_s=2.0,
+                          path_rate_factor=2.0, decel_mps2=0.24, accel_mps2=0.16, unspecified_decel_mps2=0.26,
+                          land_aim_height_m=20.8, land_window_low_m=8.4, land_window_high_m=36.5, timeout_factor=1.5,
+                          word_clock="time")
     return replace(base, **changes)
 
 
-def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_words=False, reading=None, clock="time"):
+def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=None, clock="time"):
     """Read ``signals`` with the labeller (or take ``reading``), fly its sentence (or ``grid``) from row 0 on ``clock``
     (`sentence.CLOCKS`), judge it; the A320's published approach speed unless ``approach_ias`` is given."""
     from ts_transformer.autopilot.executor import fly
@@ -339,7 +338,7 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_word
                 AirportCharts.of([geometry], dtype=F64, device=CPU),
                 torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias],
                              dtype=F64), params, words,
-                time_limit_s=torch.tensor([limit], dtype=F64), early_words=early_words)
+                time_limit_s=torch.tensor([limit], dtype=F64))
     return flown, judge(flown, 0, geometry, 0, reading, signals, one, words), reading
 
 
@@ -459,10 +458,6 @@ def test_the_data_parameters_are_read_from_the_labellers_reading_of_each_flight(
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     reading = read_flight(signals, geometry, one, words)
     out = measure.flight_measurements(admit(signals, geometry, one), reading, geometry, one, words)
-    # the base turn, 90° steady at 4.5° a row (2.25°/s; the turn onto the final is the capture, after the clearance):
-    # one steady rate; at 100 m/s it is not in the fast band the bank cap is read from
-    assert out["turn_steady_rate_deg_s"] == [pytest.approx(2.25, abs=0.05)]
-    assert out["turn_fast_bank_deg"] == []
     # the legs change speed in a step: no transition lasts the MIN_SPAN_S a rate is read from
     assert out["transition_accel_mps2"] == []
     # the final is a straight 3° line, so the extrapolated crossing is the line's height at the threshold
@@ -481,53 +476,12 @@ def test_the_data_parameters_are_the_pooled_medians_rounded_as_the_spec_says():
     from ts_transformer.autopilot import measure
 
     one = spec()
-    pooled = {"turn_steady_rate_deg_s": [2.1, 2.16, 2.3], "turn_fast_bank_deg": [24.2, 24.6, 40.0],
-              "transition_accel_mps2": [-0.3, -0.24, -0.2, 0.1, 0.16, 0.5], "unspecified_slope_mps2": [-0.26, -0.3, -0.2],
+    pooled = {"transition_accel_mps2": [-0.3, -0.24, -0.2, 0.1, 0.16, 0.5], "unspecified_slope_mps2": [-0.26, -0.3, -0.2],
               "crossing_height_m": [16.0, 20.84, 26.0]}
     measured = measure.measured_values(pooled, one)
-    assert measured["values"] == {"turn_rate_deg_s": 2.15, "bank_cap_deg": 25.0, "decel_mps2": 0.24, "accel_mps2": 0.16,
-                                  "unspecified_decel_mps2": 0.26, "land_aim_height_m": 20.8,
-                                  "land_window_low_m": 16.5, "land_window_high_m": 25.5}
+    assert measured["values"] == {"decel_mps2": 0.24, "accel_mps2": 0.16, "unspecified_decel_mps2": 0.26,
+                                  "land_aim_height_m": 20.8, "land_window_low_m": 16.5, "land_window_high_m": 25.5}
     assert measured["counts"]["decelerations"] == measured["counts"]["accelerations"] == 3
-    # never past the vocabulary's own bank ceiling
-    steep = measure.measured_values({**pooled, "turn_fast_bank_deg": [40.0]}, one)
-    assert steep["values"]["bank_cap_deg"] == one.turn_bank_max_deg
-
-
-def test_method_a_takes_the_lead_for_the_executors_own_turns_and_the_gentlest_roll_rate_the_checks_allow():
-    from dataclasses import replace
-
-    from ts_transformer.autopilot import derive
-
-    one = spec()
-    # the executor's own turns settle on the lead a word gives
-    assert derive.heading_time_constant_s(one, 1.0) == one.heading_lead_s == 4.0
-    with pytest.raises(ValueError, match="under 2 Δt"):
-        derive.heading_time_constant_s(spec(heading_lead_s=0.0), 1.0)
-    params = _params(heading_time_constant_s=4.0)
-    largest = derive.largest_own_turn_deg(one)
-    assert largest == 90.0 + one.heading_tolerance_deg + one.intercept_angle_deg
-    slow, fast = (derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=p), 140.0, largest) for p in (1.0, 5.0))
-    assert slow > one.heading_tolerance_deg > fast >= 0.0                        # a slower roll passes further
-    # a slow roll-in lags the first words of a worded turn past their envelope; a brisk one follows them
-    steady = derive.follow_rates_deg_s(params, one, 140.0)["steady"]
-    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=1.0), one, 140.0, steady, rolled=False) > 0.0
-    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=5.0), one, 140.0, steady, rolled=False) <= 0.0
-    rate, measures = derive.roll_rate_deg_s(params, one)
-    assert set(measures) == {"overshoot_deg", "steady_excess_deg", "fastest_excess_deg"}
-    assert all(len(values) == len(derive.ROLL_CHECK_SPEEDS_MPS) for values in measures.values())
-    assert max(measures["overshoot_deg"].values()) <= one.heading_tolerance_deg
-    assert max(measures["steady_excess_deg"].values()) <= 0.0 and max(measures["fastest_excess_deg"].values()) <= 0.0
-    less = replace(params, bank_rate_deg_s=rate - derive.ROLL_RATE_STEP_DEG_S)
-    assert rate == derive.ROLL_RATE_STEP_DEG_S or not derive.roll_checks(less, one, stop_at_first_failure=True)[0]
-
-
-def test_a_received_word_is_matched_to_the_nearest_reread_word_of_its_column_and_value():
-    from ts_transformer.autopilot.observe import word_leads
-
-    received = [(HEADING, 7, 100.0), (ALTITUDE, 3, 200.0), (SPEED, 5, 300.0)]
-    reread = [(HEADING, 7, 96.0), (HEADING, 7, 150.0), (HEADING, 8, 100.0), (ALTITUDE, 3, 206.0), (SPEED, 5, 400.0)]
-    assert word_leads(received, reread, 30.0) == [(HEADING, 4.0), (ALTITUDE, -6.0)]
 
 
 def _observed_series(geometry):
@@ -545,38 +499,13 @@ def _observed_series(geometry):
                         times=np.zeros(1), values=np.zeros((1, 6)))
 
 
-def test_the_observation_operator_reads_a_flown_track_as_the_data_plane_reads_a_radar_track():
-    """Method B's O: the flown track, sampled once a cycle, through the data plane's own fit and grid, reads
-    back as the track that was flown, and the labeller re-reads its words from it: the descent LATER than the
-    executor began it (the reading needs height lost before it sees a descent — method B's finding, flown with no
-    delay). Heading words are not measured: each carries its own lead (§10.1)."""
-    from ts_transformer.autopilot.observe import flight_leads, observe
-    from ts_transformer.autopilot.judge import flown_track
-
-    one, words, geometry = spec(), Words(spec()), instruction_airport()
-    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
-    flown, verdict, reading = _fly_sentence(signals)
-    states = flown.states[0, : verdict.end_row + 1].numpy()
-    seen = observe(states, 1.0, _observed_series(geometry), geometry, one.step_s)
-    truth = flown_track(states, geometry)
-    rows = (seen.time_s / 1.0).astype(int)
-    assert len(seen.time_s) == len(states[::2]) and seen.time_s[1] - seen.time_s[0] == one.step_s
-    assert np.abs(seen.e_m - truth["e"][rows]).max() < 5.0 and np.abs(seen.altitude_m - truth["height"][rows]).max() < 2.0
-    leads, received = flight_leads(states, flown.sentence_s[0].numpy(), 1.0, _observed_series(geometry), geometry,
-                                   reading, one, words, 30.0)
-    said = [i for i in reading.instructions if i.row > 0 and i.column in (ALTITUDE, ANGLE, SPEED)]
-    assert sum(received.values()) == len(said) == 5 and HEADING not in received
-    by_column = dict(leads)
-    assert by_column[ALTITUDE] < 0.0 and by_column[ANGLE] < 0.0
-
-
 def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_executors(tmp_path):
     import json
     from dataclasses import replace
 
     from ts_transformer.autopilot import spec as executor_spec
 
-    params = _params(delays=Delays(2.0, 0.0))
+    params = _params()
     source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "git": {"head": "x", "dirty": False}}
     executor_spec.write_spec(tmp_path, params, "vocabulary", {"data": {}}, source)
     loaded, record = executor_spec.load_spec(tmp_path)
@@ -640,22 +569,17 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
     assert 0.0 < landing["p50"] < 40.0
 
 
-def test_the_sensitivity_moves_one_parameter_at_a_time_and_marks_a_word_acted_on_early_as_a_probe():
+def test_the_sensitivity_moves_one_parameter_at_a_time():
     from ts_transformer.experiments.executor_sensitivity import variants
 
-    params = _params(heading_time_constant_s=4.0, bank_rate_deg_s=2.5, delays=Delays(2.0, 0.0))
-    table = {name: (moved, probe) for name, moved, probe in variants(params)}
-    assert table["spec"] == (params, False)
+    params = _params()
+    table = dict(variants(params))
+    assert table["spec"] == params
     assert {n for n in table if n.startswith("heading_time")} == {f"heading_time_constant_s={t:g}" for t in (2, 3, 5, 6)}
-    assert "path_rate_factor=2" not in table and "bank_rate_deg_s=2" in table
-    assert table["delays.vertical_s=-2"][1] and not table["delays.vertical_s=6"][1]
-    assert table["delays.speed_s=-4"][1] and table["delays.speed_s=-4"][0].delays == Delays(2.0, -4.0)
-    for name, (moved, probe) in table.items():
-        if probe:
-            with pytest.raises(ValueError, match="before it is said"):
-                moved.check(spec())
-        elif name.startswith(("heading", "bank", "path", "delays")) or name == "spec":
-            moved.check(spec())
+    assert {n for n in table if n.startswith("bank_rate")} == {f"bank_rate_deg_s={p:g}" for p in (4, 6, 10)}
+    assert "path_rate_factor=2" not in table and "path_rate_factor=1" in table
+    for moved in table.values():
+        moved.check(spec())
 
 
 def test_a_replayed_flight_becomes_a_control_record_evaluation_can_grade_and_its_words_are_counted_one_by_one():
@@ -717,7 +641,8 @@ def test_a_late_clearance_is_captured_past_the_line_and_the_line_law_brings_it_b
         grid[clear + late, APPROACH] = APPROACH_CLEARED
         flown, verdict, _ = _fly_sentence(signals, grid)
         track = flown_track(flown.states[0].numpy(), instruction_airport())
-        assert float(track["n"].min()) < -500.0                                    # the capture turn crossed the line
+        # the capture turn crossed the line (by 0.2 km cleared 6 rows late, 1.6 km 14 rows late)
+        assert float(track["n"].min()) < -100.0
         assert verdict.outcome == "landed" and abs(verdict.crossing["cross_m"]) < 5.0
 
 
@@ -780,17 +705,10 @@ def test_a_fast_turn_said_word_by_word_is_followed_on_every_clock():
         assert all(h["inside"] == h["rows"] for h in verdict.words["heading"]), clock
 
 
-def test_words_are_followed_up_to_the_vocabularys_bank_limit_and_the_executors_own_turns_to_its_bank_cap(monkeypatch):
+def test_words_are_followed_up_to_the_vocabularys_bank_limit():
     """The dry train replay of 2026-09-24: with the bank capped at φ_cap (25°, the data's median steep bank) the
-    executor fell behind half the fast turns the words describe — the vocabulary admits a turn up to 32°. A 2.8°/s turn
-    at 110 m/s needs 29°: followed up to the vocabulary's limit it is flown inside every word; capped at φ_cap it is
-    not. The executor's own turns keep φ_cap."""
-    from ts_transformer.autopilot.lateral import Lateral
-
-    one = spec()
-    lateral = Lateral(2, _params(), one, CPU)
-    modes = {"following_words": torch.tensor([True, False])}
-    assert torch.rad2deg(lateral.bank_cap_rad(modes)).tolist() == pytest.approx([one.turn_bank_max_deg, 25.0])
+    executor fell behind half the fast turns the words describe — the vocabulary admits a turn up to 32°, and the
+    executor now banks to it. A 2.8°/s turn at 110 m/s needs 29°: it is flown inside every word."""
     legs = [(40, 0.0, 110.0, 0.0), *_turn(-90.0, 110.0, 5.6), (20, 0.0, 110.0, 0.0), *_turn(-90.0, 110.0, 5.6),
             (120, 0.0, 70.0, -70.0 * np.tan(np.radians(3.0)))]
     signals = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0))
@@ -798,10 +716,6 @@ def test_words_are_followed_up_to_the_vocabularys_bank_limit_and_the_executors_o
     judged = [h for h in verdict.words["heading"] if h["rows"] > 0]
     assert verdict.outcome == "landed" and all(h["inside"] == h["rows"] for h in judged)
     assert math.degrees(float(flown.commands[0, :, 1].abs().max())) > 25.0 + 1.0
-    monkeypatch.setattr(Lateral, "bank_cap_rad", lambda self, modes: torch.full_like(
-        modes["following_words"], math.radians(self.params.bank_cap_deg), dtype=F64))
-    _, capped, _ = _fly_sentence(signals)
-    assert any(h["inside"] < h["rows"] for h in capped.words["heading"] if h["rows"] > 0)
 
 
 def test_a_heading_word_whose_rows_the_lead_carries_past_the_clearance_is_not_judged():
@@ -954,20 +868,6 @@ def test_a_dynamics_failure_judges_its_words_only_on_the_states_before_it():
 
 
 # ---- the E7–E8 review's cases
-def test_a_sensitivity_probe_flies_its_words_early_only_when_named():
-    """Review H1: a negative delay is refused unless the flight is flown as a probe, and then the words act
-    that much earlier."""
-    signals, _ = _downwind()
-    early = _params(delays=Delays(-4.0, 0.0))
-    with pytest.raises(ValueError, match="before it is said"):
-        _fly_sentence(signals, params=early)
-    on_time, _, reading = _fly_sentence(signals)
-    ahead, _, _ = _fly_sentence(signals, params=early, early_words=True)
-    descent = [i.row for i in reading.instructions if i.column == ANGLE and i.row > 0][0] * 2
-    gamma_on_time, gamma_ahead = on_time.states[0, :, 5].numpy(), ahead.states[0, :, 5].numpy()
-    assert gamma_ahead[descent - 1] < gamma_on_time[descent - 1] - 1e-3        # already pitching down
-
-
 def test_a_stand_ins_unspecified_speed_is_its_types_as_published():
     """Review H2: a flight on a stand-in's dynamics carries the stand-in's mass; its own type's published speed
     is taken unscaled, never scaled by another airframe's mass."""
@@ -1017,9 +917,8 @@ def test_the_executor_hash_covers_the_package_and_what_it_imports_from_the_repos
     labels = [label for label, _ in executor_spec.executor_source_files()]
     package = {path.name for path in executor_spec.PACKAGE.glob("*.py")} - {"spec.py"}
     assert {f"autopilot/{name}" for name in package} <= set(labels) and "autopilot/spec.py" not in labels
-    for needed in ("aerodynamic_model.torch_dynamics", "aircraft.reference_speeds", "flight_scenarios.start_state",
-                   "ts_transformer.outputs.dynamics.rollout", "ts_transformer.outputs.envelope",
-                   "ts_transformer.data.channels", "geokit"):
+    for needed in ("aerodynamic_model.torch_dynamics", "aircraft.reference_speeds",
+                   "ts_transformer.outputs.dynamics.rollout", "ts_transformer.outputs.envelope", "geokit"):
         assert needed in labels
     assert not any(label.startswith(("ts_transformer.instructions", "ts_transformer.io_utils", "ts_transformer.repo_layout",
                                       "torch", "numpy", "math")) for label in labels)
@@ -1045,16 +944,6 @@ def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_labeller
     monkeypatch.setattr(replay.artefact, "load_spec", lambda directory: spec(heading_tolerance_deg=4.0))
     with pytest.raises(ValueError, match="measured against vocabulary"):
         replay.open_executor(tmp_path / "spec", tmp_path / "artefact")
-
-
-def test_method_bs_delays_are_the_groups_median_leads_floored_at_zero():
-    from ts_transformer.autopilot.observe import delays_from_leads
-
-    leads = {ALTITUDE: [-6.0, -4.0], ANGLE: [-6.0], SPEED: [-9.0, 3.0, -8.0]}
-    assert delays_from_leads(leads) == Delays(vertical_s=0.0, speed_s=0.0)
-    assert delays_from_leads({**leads, ALTITUDE: [5.0, 7.0], ANGLE: [6.0]}).vertical_s == 6.0
-    with pytest.raises(ValueError, match="matched no word of speed_s"):
-        delays_from_leads({**leads, SPEED: []})
 
 
 def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch):

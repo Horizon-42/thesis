@@ -1511,8 +1511,8 @@ def run_publication(
 #: `PREDICTOR`, `HORIZON`; `autopilot.spec.EXECUTOR_SPEC_SCHEMA`) — not imported: those modules pull in torch and
 #: the executor, and this orchestrator stays importable without them. `test_the_executor_names_mirror_the_runners`
 #: pins them.
-EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v2"
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v3"
+EXECUTOR_REPLAY_SCHEMA = "ts-executor-replay-v3"
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v4"
 EXECUTOR_PREDICTOR = "executor"
 EXECUTOR_HORIZON = "sentence"
 #: The executor's own publication record: not a checkpoint's (`PUBLICATION_SCHEMA`), so the checkpoint refresh and
@@ -1579,18 +1579,11 @@ class ExecutorReplay:
 
     def parameter_rows(self, airport: str) -> list[dict[str, str]]:
         """The spec and the replay as the picker's named rows: the spec's sha and every parameter as written in
-        ``spec.json`` (a nested one dotted), then what this airport's category holds."""
+        ``spec.json``, then what this airport's category holds."""
         rows = [{"section": "Executor", "name": "spec", "value": self.token},
                 {"section": "Executor", "name": "vocabulary spec", "value": self.document["vocabulary_spec_sha256"][:12]}]
-
-        def flatten(values: dict[str, Any], prefix: str = "") -> None:
-            for name, value in values.items():
-                if isinstance(value, dict):
-                    flatten(value, f"{prefix}{name}.")
-                else:
-                    rows.append({"section": "Executor parameters", "name": f"{prefix}{name}", "value": str(value)})
-
-        flatten(self.spec["params"])
+        rows += [{"section": "Executor parameters", "name": name, "value": str(value)}
+                 for name, value in self.spec["params"].items()]
         rows += [{"section": "Replay", "name": "split", "value": self.split},
                  {"section": "Replay", "name": "gate share", "value": str(self.document["gate_share"])}]
         rows += [{"section": "Replay", "name": f"flights on {group}", "value": str(count)}

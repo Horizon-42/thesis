@@ -1382,7 +1382,7 @@ def _executor_replay(tmp_path: Path, intent_registry: Path, *, recorded: tuple[b
     spec_dir = tmp_path / "outputs" / "executor" / "v2_test"
     _write_json(spec_dir / "spec.json", {
         "schema": publisher.EXECUTOR_SPEC_SCHEMA, "sha256": _EXECUTOR_SHA,
-        "params": {"cycle_s": 1.0, "delays": {"vertical_s": 1.0, "speed_s": 0.0}, "word_clock": "track"},
+        "params": {"cycle_s": 1.0, "bank_rate_deg_s": 8.0, "word_clock": "track"},
         "vocabulary_spec_sha256": "b" * 64, "source": {},
     })
     groups = ("own dynamics", "stand-in dynamics", "stand-in dynamics")
@@ -1456,7 +1456,7 @@ def test_an_executor_replay_publishes_one_experiment_category_per_airport(monkey
     assert experiment["intent"] == {"groupTitle": "The executor", "group": "Can the vocabulary be flown?",
                                     "run": "The spec flown over val."}
     rows = {(row["section"], row["name"]): row["value"] for row in experiment["parameters"]}
-    assert rows[("Executor", "spec")] == "aaaaaaaaaaaa" and rows[("Executor parameters", "delays.vertical_s")] == "1.0"
+    assert rows[("Executor", "spec")] == "aaaaaaaaaaaa" and rows[("Executor parameters", "bank_rate_deg_s")] == "8.0"
     assert rows[("Replay", "flights on stand-in dynamics")] == "1"
     assert rows[("Replay", "flown, no record (failed in the first cycle)")] == "1"
     assert "1 on own dynamics + 1 on stand-in dynamics" in category["label"]

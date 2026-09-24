@@ -62,7 +62,7 @@ PREDICTOR = "executor"
 HORIZON = "sentence"
 #: v2 (2026-09-24, instruction-v3): a heading word is judged on the rows a lead after it (vocabulary design §10.1),
 #: no turn or hold.
-REPLAY_SCHEMA = "ts-executor-replay-v2"
+REPLAY_SCHEMA = "ts-executor-replay-v3"
 
 
 def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inputs: Any,

@@ -41,8 +41,7 @@ from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, Words
 LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_floor", "thrust_max", "thrust_min",
           "stall")
 #: What the laws were doing each cycle.
-MODES = ("captured", "tracking", "following_words", "bent", "intercepting", "intercepting_off_word", "go_around",
-         "level_captured",
+MODES = ("captured", "tracking", "bent", "intercepting", "intercepting_off_word", "go_around", "level_captured",
          "aim_left_tube")
 
 
@@ -63,11 +62,10 @@ class Flown:
 
 def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceClock | TrackClock, runways: Runways,
         charts: AirportCharts, approach_ias_mps: torch.Tensor, params: ExecutorParams, words: Words, *,
-        time_limit_s: torch.Tensor, early_words: bool = False) -> Flown:
-    """Fly every flight's sentence, its words said on ``clock``, until each is done or its time limit
-    (``early_words``: a probe's negative delays, `ExecutorParams.check`)."""
+        time_limit_s: torch.Tensor) -> Flown:
+    """Fly every flight's sentence, its words said on ``clock``, until each is done or its time limit."""
     spec = words.spec
-    params.check(spec, early_words=early_words)
+    params.check(spec)
     batch = len(time_limit_s)
     cycles = int(math.ceil(float(time_limit_s.max()) / params.cycle_s))
     device = inputs.initial_state.device
@@ -89,8 +87,8 @@ def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceC
         now = read_state(state, charts)
         sentence_s = clock.now(cycle, now)
         if cycle % step_rows == 0:
-            step_start_s = sentence_s                  # the undelayed columns are heard once a step (`sentence`)
-        force = sentences.at(sentence_s, step_start_s, params.delays)
+            step_start_s = sentence_s                  # every word is heard once a step (`sentence`)
+        force = sentences.at(step_start_s)
         sentence_times.append(sentence_s)
         bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
         track_rate, lateral_modes = lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],
@@ -103,7 +101,7 @@ def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceC
                                                    force.issued_step[:, [ALTITUDE, ANGLE]], before, elevation,
                                                    torch.hypot(before, right), lateral.captured,
                                                    lateral_modes["go_around"])
-        attitude = inverse.attitude(now, track_rate, gamma_rate, bank, bank_cap_rad=lateral.bank_cap_rad(lateral_modes),
+        attitude = inverse.attitude(now, track_rate, gamma_rate, bank, bank_cap_rad=math.radians(spec.turn_bank_max_deg),
                                     bank_rate_rad_s=bank_rate, cycle_s=params.cycle_s)
         accel, accel_wanted, speed_modes = speed.rate(now, force.speed_mps, force.unspecified,
                                                       lateral_modes["go_around"], attitude.load_factor,

@@ -1,15 +1,13 @@
-"""Which word of each column is in force at each control cycle (executor design §2.3, §9 method B, §11).
+"""Which word of each column is in force at each control cycle (executor design §2.3, §11).
 
 A sentence is a grid of steps (`VocabularySpec.step_s` apart) × the six columns; a cell holds a word or
 `UNCHANGED`. The word in force at a SENTENCE TIME is the last one written in its column at or before it —
-step 0 writes every column. A word read at step ``r ≥ 1`` takes effect ``delay`` seconds after its step's time,
-the column's delay (the labeller's issue row leads the manoeuvre it reads, §9 method B); step 0's words describe
-what the aircraft is already doing and are in force from the start. After the sentence's last step every word
-stays in force. `Sentences.at` looks the words up at any sentence time.
+step 0 writes every column. A word takes effect when it is said: the vocabulary's own meaning, and the executor
+takes nothing else (no delay; method B, which measured one, is archived: `archive/executor_vocabulary_only_2026_09/`).
+After the sentence's last step every word stays in force. `Sentences.at` looks the words up at any sentence time.
 
 Which sentence time a control cycle is at is the replay's CLOCK (§11). Past the observed track's end (the executor
-slower, or on a longer path) sentence time runs on at the executor's own pace, so a word said in the sentence's last
-rows still takes effect after its delay; delays are sentence seconds.
+slower, or on a longer path) sentence time runs on at the executor's own pace.
 
 - `TimeClock` — the sentence's own clock: a word is said at the second it was said to the observed aircraft;
 - `DistanceClock` — a word is said when the executor has flown as far along its own path as the observed aircraft
@@ -23,11 +21,10 @@ rows still takes effect after its delay; delays are sentence seconds.
   the aircraft is, and the closed loop's model will say it from the executor's own state: the distance and track
   clocks are the truth sentence said that way.
 
-The columns without a delay (`UNDELAYED`: the runway pointer, the approach column, the heading) are heard once a step,
-on the cycles that start a row: a heading word says where the track is a lead after the row it is heard at, and the
-judge reads the flown track at rows (`judge.said_at`). On the time clock a row starts on such a cycle anyway; on the
-track and distance clocks a word whose row the sentence time reaches between them waits for the next one (a cycle).
-The delayed columns are looked up every cycle.
+Every word is heard once a step, on the cycle that starts a row: a heading word says where the track is a lead after
+the row it is heard at, and the judge reads the flown track at rows (`judge.words_said`). On the time clock a row
+starts on such a cycle anyway; on the track and distance clocks a word whose row the sentence time reaches between
+them waits for the next one (a cycle).
 """
 
 from __future__ import annotations
@@ -42,21 +39,16 @@ import torch
 from ts_transformer.autopilot.frame import Kinematics
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, RUNWAY, SPEED, UNCHANGED, Words
 
-#: Which columns each delay moves: the manoeuvre columns method B measures it on. A heading word carries its own
-#: timing — it says where the track is `heading_lead_s` later (vocabulary design §10.1) — so it acts when it is
-#: said, and the runway pointer and the clearance, which go with it, do too.
-DELAY_GROUPS = {"vertical_s": (ALTITUDE, ANGLE), "speed_s": (SPEED,)}
-UNDELAYED = (RUNWAY, APPROACH, HEADING)
 CLOCKS = ("time", "distance", "track")
 #: The track clock looks this far ahead along the observed track for the executor's nearest point (it moves only
 #: forward, so a track that loops — an orbit — is followed around, never jumped across) ...
 TRACK_WINDOW_S = 60.0
 #: ... and moves at most this many rows a cycle: sentence time then runs at most twice as fast as the observed
 #: flight's (a row is 2 s, a cycle 1 s) and every row is passed — however far from the observed track the executor is,
-#: where "nearest" means little. The delayed columns see every row; the undelayed ones, heard once a step, do not see a
-#: row the clock passes within a step (the distance clock, which has no such cap, can pass several): two heading words
-#: then arrive together and the first is never flown — the judge judges it on no rows, and the replay counts the one
-#: told with it apart (`replay.told_with_skipped`).
+#: where "nearest" means little. Heard once a step, a word does not see a row the clock passes within a step (the
+#: distance clock, which has no such cap, can pass several): two words of a column then arrive together and the first
+#: is never flown — the judge judges a heading word on no rows, and the replay counts the one told with it apart
+#: (`replay.told_with_skipped`).
 TRACK_MAX_ROWS_PER_CYCLE = 1
 #: A sentence time this close below a row's start (in rows) is read as that row: float round-off.
 ROW_ROUNDING = 1e-9
@@ -67,20 +59,6 @@ def row_at(seconds, step_s: float):
     (`Sentences.at`) and the judge's filing of a word (`judge.words_said`) share."""
     scaled = seconds / step_s + ROW_ROUNDING
     return torch.floor(scaled).long() if isinstance(scaled, torch.Tensor) else np.floor(scaled).astype(np.int64)
-
-
-@dataclass(frozen=True)
-class Delays:
-    """Seconds from a word's step to its effect, per group of columns (`DELAY_GROUPS`)."""
-
-    vertical_s: float
-    speed_s: float
-
-    def column(self, index: int) -> float:
-        if index in UNDELAYED:
-            return 0.0
-        (name,) = [name for name, columns in DELAY_GROUPS.items() if index in columns]
-        return getattr(self, name)
 
 
 @dataclass(frozen=True)
@@ -138,15 +116,13 @@ class Sentences:
         self.speed = table([words.speed_mps(i) if i != words.speed_unspecified else math.nan
                             for i in range(words.speed_unspecified + 1)])
 
-    def at(self, sentence_s: torch.Tensor, step_start_s: torch.Tensor, delays: Delays) -> WordsNow:
-        """The words in force at each flight's sentence time ``[B]``; the undelayed columns at ``step_start_s``, the
-        sentence time of the last cycle that started a row (module docstring)."""
+    def at(self, heard_s: torch.Tensor) -> WordsNow:
+        """The words in force at each flight's sentence time ``[B]`` — the one of the last cycle that started a row
+        (module docstring)."""
         batch = torch.arange(len(self.rows), device=self.rows.device)
         value, issued = [], []
+        row = torch.minimum(row_at(heard_s, self.step_s).clamp(min=0), self.rows - 1)
         for column in range(6):
-            heard_s = step_start_s if column in UNDELAYED else sentence_s - delays.column(column)
-            row = row_at(heard_s, self.step_s)
-            row = torch.minimum(row.clamp(min=0), self.rows - 1)
             value.append(self.value[batch, row, column])
             issued.append(self.issued[batch, row, column])
         v = torch.stack(value, dim=1)

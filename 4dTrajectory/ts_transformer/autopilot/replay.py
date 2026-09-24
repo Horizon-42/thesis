@@ -203,9 +203,8 @@ def word_clock(batch: Batch, params: ExecutorParams, step_s: float,
     return clock.of(e_m, n_m, step_s, params.cycle_s, device=device)
 
 
-def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device,
-                  early_words: bool = False) -> Flown:
-    """Fly every flight's sentence from its row 0 (``early_words``: a sensitivity probe)."""
+def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device) -> Flown:
+    """Fly every flight's sentence from its row 0."""
     spec = words.spec
     f64 = torch.float64
     limits = torch.tensor([len(r.words) * spec.step_s * params.timeout_factor for r in batch.readings], dtype=f64,
@@ -214,14 +213,13 @@ def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device:
     return fly(batch.inputs(device), sentences, word_clock(batch, params, spec.step_s, device),
                Runways.of(batch.geometries, dtype=f64, device=device),
                AirportCharts.of(batch.geometries, dtype=f64, device=device),
-               torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits,
-               early_words=early_words)
+               torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits)
 
 
-def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device,
-              early_words: bool = False) -> tuple[Flown, list[Verdict]]:
-    """Fly every flight's sentence from its row 0 and judge it (``early_words``: a sensitivity probe)."""
-    flown = fly_sentences(batch, params, words, device=device, early_words=early_words)
+def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *,
+              device: torch.device) -> tuple[Flown, list[Verdict]]:
+    """Fly every flight's sentence from its row 0 and judge it."""
+    flown = fly_sentences(batch, params, words, device=device)
     verdicts = [judge(flown, j, batch.geometries[j], batch.readings[j].runway_index, batch.readings[j],
                       batch.signals[j], words.spec, words) for j in range(len(batch.readings))]
     return flown, verdicts

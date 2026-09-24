@@ -50,7 +50,7 @@ import numpy as np
 from final_approach.crossing import bracket_fraction
 from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
-from ts_transformer.autopilot.sentence import UNDELAYED, row_at
+from ts_transformer.autopilot.sentence import row_at
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m, relative_to_runway
 from ts_transformer.instructions.labeller.lateral import turn_check
@@ -195,19 +195,12 @@ class Said:
 
 def words_said(flown: Flown, index: int, reading: Reading, spec: VocabularySpec) -> Said:
     """Each word at the flown row where the executor was told it, as the executor looked it up (`sentence.Sentences.at`,
-    one reading of a sentence time, `sentence.row_at`): the first cycle whose sentence time's row reaches the word's —
-    for an undelayed column the first cycle that starts a row; on the time clock, the word's own row."""
+    one reading of a sentence time, `sentence.row_at`): the first cycle that starts a row whose sentence time's row
+    reaches the word's; on the time clock, the word's own row."""
     last = int(flown.done_cycle[index]) + 1
     step_rows = int(round(spec.step_s / flown.cycle_s))
-    rows = row_at(flown.sentence_s[index, :last].cpu().numpy(), spec.step_s)
-    step_start_rows = rows[::step_rows]
-
-    def said_cycle(word: Instruction) -> int:
-        if word.column in UNDELAYED:
-            return min(int(np.searchsorted(step_start_rows, word.row)) * step_rows, last)
-        return int(np.searchsorted(rows, word.row))
-
-    cycles = [said_cycle(word) for word in reading.instructions]
+    step_start_rows = row_at(flown.sentence_s[index, :last].cpu().numpy(), spec.step_s)[::step_rows]
+    cycles = [min(int(np.searchsorted(step_start_rows, word.row)) * step_rows, last) for word in reading.instructions]
     said = [(word, cycle // step_rows) for word, cycle in zip(reading.instructions, cycles) if cycle < last]
     moved, superseded = said_at([word for word, _ in said], [row for _, row in said])
     return Said(cycles, last, moved, superseded)

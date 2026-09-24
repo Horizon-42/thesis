@@ -224,21 +224,17 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 ### R12 · the executor: `executor_spec` → `executor_sensitivity` → `executor_replay`
 
 2026-09-24 (`docs/2026-09-23_executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
---dir <new dir> [--method-b-per-airport 40] [--seed 1337] [--workers 8] [--device cpu]` refuses a dirty tree, an
-existing directory and a labeller other than the artefact's; measures the data parameters on EVERY labelled train
-flight (process pool of torch-free workers, 1,000 flights a chunk, each flight re-read and required to equal its
-stored sentence), derives τ_ψ and p by method A (instruction-v3: τ_ψ = the heading lead, the executor's own turns
-only; p the least bank rate at which, on an A320 every 5 m/s from 60 to 140 m/s, its own 124.5° turn overshoots by at
-most the heading tolerance and 90° turns said word by word — an ideal one at r_turn and one at the vocabulary's largest
-rate rolled into at p, each within the vocabulary's bank limit, which the executor follows words up to — are flown
-inside every word's envelope; ~1 min), then flies a seeded train sample
-of own-dynamics flights with no delay and re-reads each flown track through the observation operator for the
-altitude/angle and speed delays (method B: median lead per group, floored at 0; heading words carry their own lead). The design's fixed choices (Δt, τ_γ, the
-γ̇ factor, the timeout factor, the 30 s match window) are module constants and are written into `measurements.json`
-beside `spec.json`. ~6 s per 1,500 flights for the data pass in one process. `executor_sensitivity --instructions
---executor <spec dir> [--per-airport 400] [--seed 1337] [--out]` flies one seeded TRAIN sample per variant (the spec,
-then τ_ψ over 2–6 s, p, the γ̇ factor, each delay ± 4 s, one at a time); a delay below 0 is a `probe` (a word acting before it
-is said) and never a spec value; writes `sensitivity.json` into a new directory (default beside the spec).
+--dir <new dir> --word-clock {time,distance,track} [--workers 8]` (`ts-executor-spec-v4` since 2026-09-24: the
+executor takes no information beyond the vocabulary) refuses a dirty tree, an existing directory and a labeller other
+than the artefact's; takes τ_ψ (the heading lead) and p (the vocabulary's bank limit over the lead) by method A from
+the vocabulary, and measures the values the vocabulary does not settle yet (the speed changes' pace, the landing aim)
+on EVERY labelled train flight (process pool of torch-free workers, 1,000 flights a chunk, each flight re-read and
+required to equal its stored sentence). The turn rates and the bank limit are the vocabulary's, read at run time; a
+word acts when said (method B is archived). The design's fixed choices (Δt, τ_γ, the γ̇ factor, the timeout factor)
+are module constants and are written into `measurements.json` beside `spec.json`. ~30 s for the data pass.
+`executor_sensitivity --instructions --executor <spec dir> [--per-airport 400] [--seed 1337] [--out]` flies one seeded
+TRAIN sample per variant (the spec, then τ_ψ over 2–6 s, p over 4/6/10°/s, the γ̇ factor over 1–3, one at a time);
+writes `sensitivity.json` into a new directory (default beside the spec).
 `executor_replay --instructions --executor --split {train,val} --out <new dir> [--per-airport 0 = every flight]
 [--seed] [--chunk 500]` is the §11 readout: own-dynamics flights gated, a stand-in's (the performance index's
 substitute) reported, a flight without aircraft dynamics counted (C31); each airport flown in
@@ -266,11 +262,11 @@ Every airport is built before any is written.
 `executor_training_export --executor <spec dir> --replay <spec dir>/replay-val --instructions <artefact>
 --airports-root <…/public/data/airports> --set instruction_v3 --airport ICAO [--airport …] [--overlay-id
 executor_<spec dir name>] [--device cpu]` (schema `aeroviz-training-executor-v2` since 2026-09-24, `instruction-v3`;
-the replay `ts-executor-replay-v2`): opens the spec with
+the replay `ts-executor-replay-v3`): opens the spec with
 `replay.open_executor` (refused unless this executor code measured it), rebuilds the set's flights, flies those the
 replay flies (own and stand-in dynamics) in one batch per airport and judges them. `replay.json` keeps each flight's
-word verdicts without the words, so `word_verdicts` maps the judge's results back to the sentence (`said_words` MIRRORS
-`judge.judge`'s bookkeeping: `judge.py` is in the executor's source hash and cannot hand it out) and rebuilds the
+word verdicts without the words, so `word_verdicts` maps the judge's results back to the sentence (`said_words` uses
+the judge's own bookkeeping, `judge.words_said` and `judge.read_flown`) and rebuilds the
 `replay.word_results` list; that list, the outcome, the flown-as-said flag and the counts of words not judged / not
 reached / superseded must equal the formal replay row exactly, the crossing within `CROSSING_TOLERANCE` (1e-9: another
 batch composition reassociates float sums by an ulp), or the export stops naming the flight. One status per word
@@ -318,8 +314,8 @@ to end on a synthetic artefact and checkpoint — every write into `tmp_path`) a
 `2674ab8c71a9`, prior `v1_20260924`, over the v5 `instruction_v2` sets) was made at `a320d1bd` on
 `dev-publish-executor-prior`, where tests also ran both `main()` on those artefacts; since 9fb1b137 (signals v2, sample v6,
 no A320 stand-in) neither the artefact nor the spec opens, so the next publication needs the next generation — since
-2026-09-24 an `instruction-v3` artefact, Training v7 sets (R11), an executor spec (`ts-executor-spec-v3`) and replay
-(`ts-executor-replay-v2`) measured by this code, a prior trained on the new sentences; and the frontend's
+2026-09-24 an `instruction-v3` artefact, Training v7 sets (R11), an executor spec (`ts-executor-spec-v4`) and replay
+(`ts-executor-replay-v3`) measured by this code, a prior trained on the new sentences; and the frontend's
 `TRAINING_SPEC_SHA256` moved to the v3 spec's sha, or every v7 set is refused.
 
 ### R14 · `run_ts.py heading_reading_compare` — the heading readings flown by the real executor (vocabulary design §10.1)

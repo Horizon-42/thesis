@@ -21,12 +21,11 @@ from pathlib import Path
 from typing import Any
 
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.sentence import Delays
 from ts_transformer.io_utils import write_json_atomic
 
-#: v3 (2026-09-24, instruction-v3): the heading delay is gone (a heading word carries its own lead and its own law),
-#: τ_ψ is the lead and p is checked against a turn said word by word.
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v3"
+#: v4 (2026-09-24): the executor takes nothing beyond the vocabulary — r_turn, φ_cap and the word delays are gone
+#: (the vocabulary's turn rates and bank limit; a word acts when said), p is the bank limit over the lead.
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v4"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language
 #: (its own hash, the labeller's, is recorded in the spec and checked at replay) and the path and file helpers.
@@ -65,8 +64,7 @@ def _installed(file: Path) -> bool:
 def executor_source_files() -> list[tuple[str, Path]]:
     """What the hash covers, as ``(label, file)``: every module of the package except this file (labelled by its path in
     the package), and every module they import directly that is the repository's code rather than the environment's
-    (labelled by its module name: the dynamics, the envelope, the approach-speed table, the observation operator's
-    fit, geokit…), except `UNHASHED_IMPORTS`. Labels, not paths, so the hash is the same from any checkout — geokit
+    (labelled by its module name: the dynamics, the envelope, the approach-speed table, geokit…), except `UNHASHED_IMPORTS`. Labels, not paths, so the hash is the same from any checkout — geokit
     is installed editable from the main checkout, outside a worktree. Direct imports only, as the labeller's hash."""
     own = sorted(path.resolve() for path in PACKAGE.glob("*.py") if path.name != "spec.py")
     external: dict[str, Path] = {}
@@ -88,7 +86,7 @@ def params_from_dict(data: dict[str, Any]) -> ExecutorParams:
     if set(data) != names:
         raise ValueError(f"an executor spec needs exactly {sorted(names)}; missing {sorted(names - set(data))}, "
                          f"extra {sorted(set(data) - names)}")
-    return ExecutorParams(**{**data, "delays": Delays(**data["delays"])})
+    return ExecutorParams(**data)
 
 
 def params_sha256(params: ExecutorParams) -> str:
