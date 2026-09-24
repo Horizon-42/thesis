@@ -16,11 +16,11 @@
 | 词表 | 读法 `instruction-v2`，规格 sha `103a6eae6b90`，标注器源码 sha `47c6008a89bd`（规格写于 `35115734`，工作区干净）。产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260924/`（规格文件的格式名 `ts-instruction-spec-v3`，候选跑道文件的格式名 `ts-instruction-candidates-v2`） |
 | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；几何全部来自 `instructions/display.py` |
 | 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
-| 分支与提交 | 前端读取器 `dada684b`，读取修正 `2bbbd8cd`（一步以内就在目标带里的转弯，路径只有一个点），两者都已在 `dev-two-tier` 上。样本格式名改为 `aeroviz-training-sample-v4` 的是 `caf6cf00`，在分支 `dev-instruction-names`（工作区 `.claude/worktrees/instruction-names`），还没合并：合并之前，`dev-two-tier` 上的读取器钉的还是旧名字 v3，会按名字拒读现在盘上的 `instruction_v2`。发布记录在其后的文档提交（`git log`） |
-| 发布 | 2026-09-24 在 `caf6cf00`（工作区干净，记在每个索引条目的 `source.git` 和样本的 `producedBy.git` 里）从 `v2_20260924` 导出，样本格式 `aeroviz-training-sample-v4`：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），数字见 §2.1 的表。各机场 `index.json` 里别的条目（包括 `instruction_v1`）逐条原样保留 |
-| 测试 | Python：`tests/test_instruction_training_export.py` 9 条（含与前端的契约比对），`-k instruction` 共 74 条，全部通过；前端 Vitest 88 个文件 657 条通过（2026-09-24 高亮、转弯路径改动之后）；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
+| 分支与提交 | 都在 `dev-two-tier` 上：前端读取器 `dada684b`、读取修正 `2bbbd8cd`、样本 v4 `caf6cf00`；2026-09-24 的高亮按词 `a485c1bc`、速度紫色与转弯路径开关 `f15c938e`、**样本 v5（航向随时间的转弯、淡化、实际转弯起止）`a66c3276`**、取景含转弯区 `37e7e916` |
+| 发布 | 2026-09-24 在 `a66c3276`（工作区干净，记在每个索引条目的 `source.git` 和样本的 `producedBy.git` 里）从 `v2_20260924` **重新导出**，样本格式 `aeroviz-training-sample-v5`：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），读过的航班数与 v4 那次相同（51 / 44 / 143 / 43 / 50），是同一批航班。只重新导出，没有重新标注。v4 的集合与索引条目已删除；各机场 `index.json` 里别的条目（包括 `instruction_v1`）逐条原样保留 |
+| 测试 | 2026-09-24 样本 v5 之后：Python `tests/test_instruction_training_export.py` 10 条（含与前端的契约比对、航向曲线与平面路径逐点一致），`-k instruction` 共 75 条，全部通过；前端 Vitest 88 个文件 660 条通过；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
 | 高亮与三维（2026-09-24） | 高亮改成"选中的一个词"：`trainingColumn` + 游标 → `trainingWordAt`，只亮这一列的词（§4.5）；三维加地面投影、贴地边线（带判定）、管子上下沿、最快 / 最慢转弯路径（开关 "turn paths"）、选航班时取景一次（§4.4）；速度列换成紫色 `#be76ff`（原来的琥珀色和选中的黄色分不开，`trainingWordColors.ts` 写了校验数字）。在 `dev-two-tier` 上，本机 Chrome 里 KRDU 的 N994FG 逐类点过（航向、高度、进近、下降角），读数窗口同样只亮所选的类 |
-| 核对 | `npm run check-publication`：五个机场盘上与开发服务器（从本工作区起在 5183 端口）两层都是 0 个错误，每个机场 1 个能读的集合，别的词表的集合全部按名字拒读记为警告（§5）。浏览器（本机 Chrome，开发服务器同上）里打开过 KRDU：Training 页开在 `instruction_v2`，服务器给的样本格式是 v4；读数核对窗口的平面图画出转弯区、最快与最慢的转弯、平行四边形、实线与虚线的漏斗，三维里贴地的包络都在，控制台没有错误（只有一条 Cesium 的警告：贴地的几何不画轮廓线） |
+| 核对 | 2026-09-24 v5 重新导出后：`npm run check-publication -- --server http://localhost:5173`，五个机场盘上与开发服务器两层都是 0 个错误，每个机场 1 个能读的集合，别的词表的集合按名字拒读记为警告（§5）。本机 Chrome 打开 KRDU 的 DAL689（150° 的切入转弯），选中 075° 这个词：航向图画出楔形，实际航迹落在最快与最慢两条曲线之间；平面图按整个转弯区取景，两条路径和实际转弯起止（第 139、198 步）标了名字，其余的词淡化；三维取景含转弯区。（这个浏览器标签在后台时 `document.hidden` 为真，Cesium 不渲染，截图时才更新——看起来像渲染滞后。） |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 | 还没有的两样 | 执行器按句子重飞的航迹（执行器在设计中）、先验模型说出的句子（这份词表上还没训练先验）。界面上是两个明确的空位，没有假数据（§4.6） |
 
@@ -246,7 +246,8 @@ Python 这一侧的对应常量由 `test_instruction_training_export.py` 与 Typ
 - 最快和最慢的转弯（每个转弯区和截获转弯的两条路径；最慢的是晚 10.5 s 开始的那条）贴地画，颜色跟转弯区的
   判定，最慢的转不完时画虚线；开关 "turn paths" 单独控制（§4.1）。选中一个转弯时两条路径的末端标出名字
   （"fastest …" / "slowest …"），选中航向词时航迹上标出实际转弯的起止两点。
-- 选中一架航班时相机取景一次（留 1.5 倍余量，句子条和左栏遮住一部分画面）；之后相机归用户，游标从不动它。
+- 选中一架航班时相机取景一次，框住航迹和每个转弯区（留 1.5 倍余量，句子条和左栏遮住一部分画面）；之后相机归
+  用户，游标从不动它。
 - 静态实体，不接 CZML，不动 `viewer.clock`。
 
 ### 4.5 共享游标与高亮
