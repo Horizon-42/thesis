@@ -31,11 +31,12 @@ flights pass, smoothing and the landing cut included — and judged from each wo
   a turn under `turn_rate_min_from_deg`, or whose slowest turn does not finish) are not judged here either.
   A turn the executor's capture takes over before its band is reached (the clearance comes with it, and the
   vocabulary lets the capture begin at once, §2.2) is judged as the labeller judges an intercept the
-  capture cuts: to its furthest progress (`labeller.lateral._intercept_end`), not "reached"; a turn cut
-  before it progressed at all, or said at or after the capture (a word acting early — a sensitivity probe, or a
+  capture cuts: to its furthest progress (`labeller.lateral._intercept_end`), not "reached", its rate judged
+  on the turn it flew before the capture took over; a turn cut before it progressed at all, or said at or after the capture (a word acting early — a sensitivity probe, or a
   generated sentence), is ``superseded`` by the capture, not judged;
-- the clearance: the executor's capture turn, from its first row to where it hands over to the line, with
-  the same turn check toward the course (§2.2: monotone, rate and bank inside §2.3's range); and once the
+- the clearance: the executor's capture turn, from its first row to where the track is on the course (within
+  the corridor's course tolerance; no turn when it already is), with the same turn check toward the course
+  (§2.2: monotone, rate and bank inside §2.3's range); and once the
   flight is in the corridor (`envelope.corridor`: position AND course — the labeller's capture is the first
   row of the run inside it), every later row to the landing stays inside;
 - altitude and angle words: `labeller.vertical.tube_checks`; speed words: `labeller.speed.span_checks`.
@@ -246,8 +247,12 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
                 continue
             check = _turn_check(track, speed, first.row, stop, target_unwrapped, spec)
             turn = {"rate_min_applies": check["rate_min_applies"]}
+            # a turn the capture cut is judged at the rate of the turn it flew before the capture took over (the
+            # rest of the turn is the capture's, judged there): its mean over a span of a row or two is its roll-in
+            rate_ok = (_turn_check(track, speed, first.row, stop, float(track[stop]), spec)["rate_ok"] if cut
+                       else check["rate_ok"])
             result["turn"] = {"reached": arrival is not None or cut, "progress_ok": check["progress_ok"],
-                              "rate_ok": check["rate_ok"]}
+                              "rate_ok": rate_ok}
         if arrival is None or end <= arrival:
             results.append(result)
             continue
@@ -307,9 +312,12 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     smoothed, relative = flight.smoothed, flight.relative
     capture_turn = None
     if capture_row is not None:
-        end = rows - 1 if tracking_row is None else tracking_row
+        # the capture turn: from the capture to where the track is on the course (within the corridor's course
+        # tolerance) — none when it already is
         course = float(smoothed.track_deg[capture_row]) + float(wrap180(geometry.candidates[runway_index].course_deg
                                                                          - smoothed.track_deg[capture_row]))
+        on_course = np.abs(smoothed.track_deg[capture_row:] - course) <= spec.corridor_course_tolerance_deg
+        end = capture_row + int(np.argmax(on_course)) if on_course.any() else rows - 1
         check = _turn_check(smoothed.track_deg, smoothed.ground_speed_mps, capture_row, end, course, spec)
         capture_turn = {"rows": end - capture_row, "progress_ok": check["progress_ok"], "rate_ok": check["rate_ok"]}
     inside = envelope.corridor(relative.right_of_course_m, relative.track_minus_course_deg, relative.before_threshold_m,

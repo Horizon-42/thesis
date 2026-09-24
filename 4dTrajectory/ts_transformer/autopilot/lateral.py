@@ -20,7 +20,10 @@ Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.
   the executor's own, nothing tuned;
 - captured, the aircraft flies the arc that ends tangent to the line from where it is NOW: the rate
   ``V (1 − cos |Δχ|) / |y|`` toward the course, solved again every cycle — so a deceleration inside the
-  turn (a shorter radius) or a late roll-in does not leave it short of the line or past it — at most the
+  turn (a shorter radius) or a late roll-in does not leave it short of the line or past it — at least the
+  vocabulary's slowest turn rate (a capture begun inside the corridor, far from the line, would otherwise
+  flatten into a turn slower than any word allows; it then reaches the course before the line, and the line
+  law closes the rest), at most the
   rate the bank cap gives at this speed (``g tan φ_cap / V``: a base close in needs a tighter turn than the
   steady rate), the vocabulary's largest turn rate, ``|Δχ| / τ_ψ`` (the heading law's own roll-out), and
   ``sqrt(k |Δχ|)``: at a turn rate r the bank is ``≈ V r / g``, and returning it at p turns the track
@@ -226,7 +229,8 @@ class Lateral:
         off = torch.deg2rad(off_course).abs()
         arc = state.ground_speed_mps * (1.0 - torch.cos(off)) / right.abs().clamp(min=1e-9)
         k = 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / state.ground_speed_mps
-        capture_rad_s = torch.minimum(torch.minimum(arc, self.tightest_rad_s(state).clamp(
+        steady = torch.clamp(arc, min=math.radians(spec.turn_rate_min_deg_s))
+        capture_rad_s = torch.minimum(torch.minimum(steady, self.tightest_rad_s(state).clamp(
             max=math.radians(spec.turn_rate_max_deg_s))), torch.sqrt(k * off))
         capture = -torch.sign(off_course) * torch.minimum(torch.rad2deg(capture_rad_s),
                                                           off_course.abs() / params.heading_time_constant_s)
