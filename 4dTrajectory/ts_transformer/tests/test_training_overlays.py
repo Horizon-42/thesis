@@ -77,6 +77,23 @@ def test_every_word_gets_one_verdict_and_the_judged_ones_give_back_the_judges_co
     assert all((w["heading"] is not None) == (w["column"] == HEADING) for w in words)
 
 
+def test_the_verdicts_give_back_the_judges_count_on_every_clock():
+    """The re-review of 2026-09-24: the export filed the words by its own copy of the judge's bookkeeping, and on the
+    track and distance clocks (the gate's is the track clock) that copy put the heading words on other rows than the
+    judge — the export stopped. It now uses the judge's own (`judge.words_said`, `judge.read_flown`)."""
+    from ts_transformer.autopilot.sentence import CLOCKS
+    from ts_transformer.tests.test_autopilot import _orbit
+
+    flights = {"downwind-base-final": instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0)),
+               "orbit": _orbit()}
+    for name, signals in flights.items():
+        for clock in CLOCKS:
+            verdict, reading, words, judged, not_judged, _ = _verdicts(signals, clock=clock)
+            assert (judged, not_judged) == word_results(verdict), (name, clock)
+            heading = [w for w in words if w["column"] == HEADING and w["status"] in ("inside", "outside")]
+            assert len(heading) == sum(h["rows"] > 0 for h in verdict.words["heading"]), (name, clock)
+
+
 def test_a_heading_word_is_judged_on_its_band_a_lead_after_it_was_told_row_by_row_as_the_judge_counts():
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     verdict, _, words, _, _, track = _verdicts(signals, params=_params(bank_cap_deg=5.0))   # too slow to keep up

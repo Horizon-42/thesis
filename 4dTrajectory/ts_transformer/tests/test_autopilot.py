@@ -258,8 +258,9 @@ def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than
     to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 1.0], dtype=F64)
     speed = torch.full((5,), 100.0, dtype=F64)
     stop = float(stopping_rate_deg_s(torch.tensor([6.0], dtype=F64), torch.tensor([100.0], dtype=F64), params))
-    # at 100 m/s and p 3.5°/s the bank can still be taken out before 6° from 2.03°/s
-    assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(3.5) / 100.0 * math.radians(6.0))))
+    # at 100 m/s and p 4.5°/s the bank can still be taken out before 6° from 2.3°/s
+    assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / 100.0
+                                                        * math.radians(6.0))))
     # 6° over the 4 s or 3 s left; past the lead (and under 2Δt) a hold at 2Δt, here held to the stopping rate;
     # never faster than r_max 3.5°/s
     assert word_rate(error, to_go, speed, params, one).tolist() == pytest.approx([1.5, 2.0, stop, 3.5, -stop])
@@ -289,10 +290,10 @@ def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
-    # τ_ψ = the lead and p 3.5°/s: method A's values here — at 3.0 a 90° turn said word by word at 120–140 m/s, flown
-    # on the word law's stopping limit, ends past its words' envelopes (`derive.follow_excess_deg`)
+    # τ_ψ = the lead and p 4.5°/s: method A's values here — at 4.0 a turn at the bank cap said word by word at 100 m/s,
+    # flown on the word law's stopping limit, ends past its words' envelopes (`derive.follow_excess_deg`)
     base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
-                          bank_rate_deg_s=3.5, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
+                          bank_rate_deg_s=4.5, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
                           accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8, land_window_low_m=8.4,
                           land_window_high_m=36.5,
                           delays=Delays(0.0, 0.0),
@@ -509,15 +510,16 @@ def test_method_a_takes_the_lead_for_the_executors_own_turns_and_the_gentlest_ro
     slow, fast = (derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=p), 140.0, largest) for p in (1.0, 5.0))
     assert slow > one.heading_tolerance_deg > fast >= 0.0                        # a slower roll passes further
     # a slow roll-in lags the first words of a worded turn past their envelope; a brisk one follows them
-    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=1.0), one, 140.0) > 0.0
-    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=5.0), one, 140.0) <= 0.0
-    rate, checks = derive.roll_rate_deg_s(params, one)
-    assert max(checks["overshoot_deg"].values()) <= one.heading_tolerance_deg
-    assert max(checks["follow_excess_deg"].values()) <= 0.0
+    steady = derive.follow_rates_deg_s(params, one, 140.0)["steady"]
+    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=1.0), one, 140.0, steady) > 0.0
+    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=5.0), one, 140.0, steady) <= 0.0
+    rate, measures = derive.roll_rate_deg_s(params, one)
+    assert set(measures) == {"overshoot_deg", "steady_excess_deg", "fastest_excess_deg"}
+    assert all(len(values) == len(derive.ROLL_CHECK_SPEEDS_MPS) for values in measures.values())
+    assert max(measures["overshoot_deg"].values()) <= one.heading_tolerance_deg
+    assert max(measures["steady_excess_deg"].values()) <= 0.0 and max(measures["fastest_excess_deg"].values()) <= 0.0
     less = replace(params, bank_rate_deg_s=rate - derive.ROLL_RATE_STEP_DEG_S)
-    assert rate == derive.ROLL_RATE_STEP_DEG_S or any(
-        derive.turn_overshoot_deg(less, speed, largest) > one.heading_tolerance_deg
-        or derive.follow_excess_deg(less, one, speed) > 0.0 for speed in derive.ROLL_CHECK_SPEEDS_MPS)
+    assert rate == derive.ROLL_RATE_STEP_DEG_S or not derive.roll_checks(less, one, stop_at_first_failure=True)[0]
 
 
 def test_a_received_word_is_matched_to_the_nearest_reread_word_of_its_column_and_value():
@@ -625,6 +627,7 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
     judged = replay.word_results(verdict)[0]
     assert summary == {"flights": 1, "outcomes": {"landed": 1}, "landed_share": 1.0, "flew_the_sentence_share": 1.0,
                        "words_judged": len(judged), "words_inside_share": 1.0, "heading_words_not_judged": 0,
+                       "heading_words_told_with_a_skipped_word": {"judged": 0, "inside": 0},
                        "flights_with_unjudged_words": 0, "word_failures": {}}
     aligned = replay.alignment(batch, flown, [verdict])
     # the executor flies the words, not the legs: it stays within a kilometre of the synthetic flight and lands
@@ -733,6 +736,22 @@ def test_an_orbit_said_word_by_word_is_flown_all_the_way_round():
     assert all(h["inside"] == h["rows"] for h in verdict.words["heading"])
     # (its landing descent leaves the word's tube for the landing window: the altitude word's §10.2 question)
     assert verdict.outcome == "landed"
+
+
+def test_heading_words_the_track_clock_tells_together_are_counted_apart():
+    """The re-review of 2026-09-24: on the track clock the orbit passes two sentence rows within one step, so two
+    heading words are told on one flown row — the first is never flown (judged on no rows), and the one told with it
+    is counted apart in the summary: what the clock did, not the executor."""
+    from ts_transformer.autopilot.replay import heard_together, summary
+
+    _, verdict, _ = _fly_sentence(_orbit(), clock="track")
+    headings = verdict.words["heading"]
+    together = heard_together(headings)
+    pairs = [i for i, t in enumerate(together) if t]
+    assert pairs and all(headings[i - 1]["rows"] == 0 and headings[i]["rows"] > 0 for i in pairs)
+    counted = summary([verdict])
+    assert counted["word_failures"]["heading word skipped by the clock (told with the next, not judged)"] == len(pairs)
+    assert counted["heading_words_told_with_a_skipped_word"]["judged"] == len(pairs)
 
 
 def test_a_fast_turn_said_word_by_word_is_followed_on_every_clock():

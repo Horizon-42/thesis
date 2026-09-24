@@ -9,18 +9,19 @@ flying the executor's own manoeuvre rather than read from data.
   `ROLL_CHECK_SPEEDS_MPS` (A320, level, at 1500 m, speed held), (1) the executor's own largest turn on its heading law
   (`largest_own_turn_deg`: from a heading word that just reaches the final — 90° plus the tolerance off the course —
   to its own intercept of the final) passes its target by no more than the heading tolerance (`turn_overshoot_deg`),
-  and (2) a typical turn said word by word is flown inside every word's envelope (`follow_excess_deg`): a
-  `FOLLOW_TURN_DEG` turn at the steady rate r_turn (or what the bank cap allows at the speed), read the way the
-  labeller reads an observed track — the data plane's centred velocity fit and the labeller's track average, taken
-  here as two centred moving averages of the heading (an approximation: the fit is a least-squares line over
-  positions; the review of 2026-09-24 found a least-squares weighting moves no word at 5° cells) — then
-  `labeller.lateral.per_step_words` at the lead; flown on the word law (each word heard on the cycle that starts its
-  row) and read as the judge reads a flown track (the track average alone). The turn is an ideal one — the observed
-  aircraft at its rate at once — so (2) prices the executor's roll-in and its roll-out before each word (the word
-  law's stopping limit, `lateral.stopping_rate_deg_s`). Turns faster than r_turn up to the bank cap, and a word of two
-  grid steps out of straight flight, are left to the train replay and the sensitivity: an ideal turn at the bank cap
-  cannot be caught up by any roll rate (the executor is at the cap too), and the labeller's smoothed track never
-  steps two cells from straight flight.
+  and (2) a turn said word by word is flown inside every word's envelope (`follow_excess_deg`), for two
+  `FOLLOW_TURN_DEG` turns (`follow_rates_deg_s`): at the steady rate r_turn, and at the vocabulary's largest turn
+  rate r_max — each no faster than the bank cap allows at the speed. The words are read the way the labeller reads an
+  observed track — the data plane's centred velocity fit and the labeller's track average, taken here as two centred
+  moving averages of the heading (an approximation: the fit is a least-squares line over positions; the re-review
+  of 2026-09-24 found a least-squares weighting moves no word at 5° cells) — then `labeller.lateral.per_step_words` at
+  the lead; flown on the word law (each word heard on the cycle that starts its row) and read as the judge reads a
+  flown track (the track average alone). The turns are ideal — the observed aircraft at its rate at once — so (2)
+  prices the executor's roll-in and its roll-out before each word (the word law's stopping limit,
+  `lateral.stopping_rate_deg_s`); at the bank cap it is the lead alone that lets the executor keep up. Left out: a word
+  of two grid steps out of straight flight (the labeller's smoothed track never steps two cells from straight flight;
+  no plausible bank rate follows one — 10°/s still fails). The track clock can make such a pair (it passes two rows in
+  a step, and two heading words arrive together): the replay counts those words apart (`replay.summary`).
 """
 
 from __future__ import annotations
@@ -47,7 +48,9 @@ from ts_transformer.instructions.labeller.lateral import per_step_words
 from ts_transformer.instructions.piecewise import moving_average
 from ts_transformer.instructions.spec import VocabularySpec
 
-ROLL_CHECK_SPEEDS_MPS = (60.0, 80.0, 100.0, 120.0, 140.0)
+#: Every 5 m/s: the follow check's excess moves by up to 0.8° between neighbouring speeds (where a word falls against
+#: the 2 s rows), so a coarser grid misses the worst (the re-review of 2026-09-24: 20 m/s steps gave p 3.5, 5 m/s 4.0).
+ROLL_CHECK_SPEEDS_MPS = tuple(float(v) for v in range(60, 141, 5))
 ROLL_RATE_STEP_DEG_S = 0.5
 ROLL_RATE_MAX_DEG_S = 20.0
 #: The typical turn the follow check flies, and the straight flight before and after it (seconds).
@@ -160,26 +163,49 @@ def words_excess_deg(spec: VocabularySpec, said: list[tuple[int, float]], flown:
                for (_, target), (first, stop) in zip(said, rows) if stop > first)
 
 
-def follow_excess_deg(params: ExecutorParams, spec: VocabularySpec, speed_mps: float) -> float:
-    """The worst excess past the words' envelopes at ``speed_mps`` of a typical turn said word by word (module
-    docstring): at the steady rate r_turn, or what the bank cap allows at this speed."""
-    rate = min(params.turn_rate_deg_s,
-               math.degrees(GRAVITY_MPS2 * math.tan(math.radians(params.bank_cap_deg)) / speed_mps))
-    said, rows = turn_words(spec, rate)
+def follow_rates_deg_s(params: ExecutorParams, spec: VocabularySpec, speed_mps: float) -> dict[str, float]:
+    """The turns the follow check flies at ``speed_mps``: the steady rate r_turn and the fastest one — the vocabulary's
+    largest turn rate — each no faster than the bank cap allows at this speed."""
+    cap = math.degrees(GRAVITY_MPS2 * math.tan(math.radians(params.bank_cap_deg)) / speed_mps)
+    return {"steady": min(params.turn_rate_deg_s, cap), "fastest": min(spec.turn_rate_max_deg_s, cap)}
+
+
+def follow_excess_deg(params: ExecutorParams, spec: VocabularySpec, speed_mps: float, rate_deg_s: float) -> float:
+    """The worst excess past the words' envelopes of a turn at ``rate_deg_s`` said word by word, flown at
+    ``speed_mps`` (module docstring)."""
+    said, rows = turn_words(spec, rate_deg_s)
     return words_excess_deg(spec, said, fly_words(params, spec, speed_mps, said, rows))
 
 
+def roll_checks(params: ExecutorParams, spec: VocabularySpec, *, stop_at_first_failure: bool
+                ) -> tuple[bool, dict[str, dict[str, float]]]:
+    """Method A's checks of the bank rate in ``params`` at every speed of `ROLL_CHECK_SPEEDS_MPS`: the own turn's
+    overshoot and each follow turn's excess (`follow_rates_deg_s`); whether all pass, and the measures (up to the
+    first failure when ``stop_at_first_failure``)."""
+    out: dict[str, dict[str, float]] = {"overshoot_deg": {}, "steady_excess_deg": {}, "fastest_excess_deg": {}}
+    ok = True
+    for speed in ROLL_CHECK_SPEEDS_MPS:
+        key = f"{speed:g}"
+        out["overshoot_deg"][key] = turn_overshoot_deg(params, speed, largest_own_turn_deg(spec))
+        ok &= out["overshoot_deg"][key] <= spec.heading_tolerance_deg
+        for name, rate in follow_rates_deg_s(params, spec, speed).items():
+            if ok or not stop_at_first_failure:
+                out[f"{name}_excess_deg"][key] = follow_excess_deg(params, spec, speed, rate)
+                ok &= out[f"{name}_excess_deg"][key] <= 0.0
+        if not ok and stop_at_first_failure:
+            break
+    return ok, out
+
+
 def roll_rate_deg_s(params: ExecutorParams, spec: VocabularySpec) -> tuple[float, dict[str, dict[str, float]]]:
-    """The least bank rate that keeps the executor's own largest turn inside the heading tolerance and follows a
-    typical turn's words inside their envelopes (module docstring); returns it with both measures at each speed."""
+    """The least bank rate that keeps the executor's own largest turn inside the heading tolerance and follows the
+    words of a steady and a fastest turn inside their envelopes at every speed (module docstring); returns it with
+    every measure at each speed."""
     rate = ROLL_RATE_STEP_DEG_S
     while rate <= ROLL_RATE_MAX_DEG_S:
         trial = replace(params, bank_rate_deg_s=rate)
-        overshoot = {f"{speed:g}": turn_overshoot_deg(trial, speed, largest_own_turn_deg(spec))
-                     for speed in ROLL_CHECK_SPEEDS_MPS}
-        excess = {f"{speed:g}": follow_excess_deg(trial, spec, speed) for speed in ROLL_CHECK_SPEEDS_MPS}
-        if max(overshoot.values()) <= spec.heading_tolerance_deg and max(excess.values()) <= 0.0:
-            return rate, {"overshoot_deg": overshoot, "follow_excess_deg": excess}
+        if roll_checks(trial, spec, stop_at_first_failure=True)[0]:
+            return rate, roll_checks(trial, spec, stop_at_first_failure=False)[1]
         rate += ROLL_RATE_STEP_DEG_S
     raise ValueError(f"no bank rate up to {ROLL_RATE_MAX_DEG_S:g}°/s keeps the executor's own turn inside the heading "
-                     "tolerance and a typical turn's words inside their envelopes")
+                     "tolerance and a steady and a fastest turn's words inside their envelopes")

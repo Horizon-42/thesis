@@ -76,12 +76,16 @@ def rate_for_error(error_deg: torch.Tensor, params: ExecutorParams) -> torch.Ten
     return (error_deg / params.heading_time_constant_s).clamp(-params.turn_rate_deg_s, params.turn_rate_deg_s)
 
 
+def bank_return_gain(speed_mps: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
+    """``k = 2 g p / V``, 1/s²: at a turn rate r the bank is ``≈ V r / g``, and returning it at p turns the track
+    ``r² / k`` further (radians; a small-bank reading)."""
+    return 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / speed_mps
+
+
 def stopping_rate_deg_s(error_deg: torch.Tensor, speed_mps: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
-    """The fastest track rate, deg/s, whose bank the executor can still take out before ``error_deg`` is gone: at a
-    rate r the bank is ``≈ V r / g``, and returning it at p turns the track ``r² V / (2 g p)`` further (a small-bank
-    reading), so ``r = sqrt(2 g p |e| / V)``."""
-    k = 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / speed_mps
-    return torch.rad2deg(torch.sqrt(k * torch.deg2rad(error_deg.abs())))
+    """The fastest track rate, deg/s, whose bank the executor can still take out before ``error_deg`` is gone:
+    ``r = sqrt(k |e|)`` (`bank_return_gain`)."""
+    return torch.rad2deg(torch.sqrt(bank_return_gain(speed_mps, params) * torch.deg2rad(error_deg.abs())))
 
 
 def word_rate(error_deg: torch.Tensor, to_go_s: torch.Tensor, speed_mps: torch.Tensor, params: ExecutorParams,
@@ -197,7 +201,7 @@ class Lateral:
         # the turn toward the line is to the left when the track is right of the course (compass)
         turn_bank = torch.atan(speed * rate / GRAVITY_MPS2) * torch.where(off > 0.0, 1.0, -1.0).to(off.dtype)
         roll_s = (turn_bank - bank_rad).abs() / bank_rate_rad_s
-        k = 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / speed
+        k = bank_return_gain(speed, params)
         return (speed / rate * (1.0 - torch.cos(off.abs())) + speed * torch.sin(off.abs()) * roll_s / 2.0
                 + speed * rate * params.heading_time_constant_s ** 2 / 2.0 + speed * rate ** 3 / (6.0 * k ** 2))
 
@@ -265,7 +269,7 @@ class Lateral:
         # the capture turn: the arc to the line from here, toward the course, as fast as the bank allows
         off = torch.deg2rad(off_course).abs()
         arc = state.ground_speed_mps * (1.0 - torch.cos(off)) / right.abs().clamp(min=1e-9)
-        k = 2.0 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / state.ground_speed_mps
+        k = bank_return_gain(state.ground_speed_mps, params)
         steady = torch.clamp(arc, min=math.radians(spec.turn_rate_min_deg_s))
         capture_rad_s = torch.minimum(torch.minimum(steady, self.tightest_rad_s(state).clamp(
             max=math.radians(spec.turn_rate_max_deg_s))), torch.sqrt(k * off))

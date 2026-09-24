@@ -52,9 +52,20 @@ CLOCKS = ("time", "distance", "track")
 #: forward, so a track that loops — an orbit — is followed around, never jumped across) ...
 TRACK_WINDOW_S = 60.0
 #: ... and moves at most this many rows a cycle: sentence time then runs at most twice as fast as the observed
-#: flight's (a row is 2 s, a cycle 1 s), every row is passed, and no word is skipped — however far from the observed
-#: track the executor is, where "nearest" means little.
+#: flight's (a row is 2 s, a cycle 1 s) and every row is passed — however far from the observed track the executor is,
+#: where "nearest" means little. The delayed columns see every row; the undelayed ones, heard once a step, do not see a
+#: row the clock passes within a step: two heading words then arrive together and the first is never flown (the judge
+#: judges it on no rows, and counts the one after it as heard with a skipped word, `judge`).
 TRACK_MAX_ROWS_PER_CYCLE = 1
+#: A sentence time this close below a row's start (in rows) is read as that row: float round-off.
+ROW_ROUNDING = 1e-9
+
+
+def row_at(seconds, step_s: float):
+    """The sentence row a sentence time falls in (torch or numpy) — the one reading of it the executor's lookup
+    (`Sentences.at`) and the judge's filing of a word (`judge.words_said`) share."""
+    scaled = seconds / step_s + ROW_ROUNDING
+    return torch.floor(scaled).long() if isinstance(scaled, torch.Tensor) else np.floor(scaled).astype(np.int64)
 
 
 @dataclass(frozen=True)
@@ -133,7 +144,7 @@ class Sentences:
         value, issued = [], []
         for column in range(6):
             heard_s = step_start_s if column in UNDELAYED else sentence_s - delays.column(column)
-            row = torch.floor(heard_s / self.step_s + 1e-9).long()
+            row = row_at(heard_s, self.step_s)
             row = torch.minimum(row.clamp(min=0), self.rows - 1)
             value.append(self.value[batch, row, column])
             issued.append(self.issued[batch, row, column])

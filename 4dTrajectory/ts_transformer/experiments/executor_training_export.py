@@ -67,7 +67,7 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.flights import rebuild_series
 from ts_transformer.autopilot.frame import ALT, LAT, LON
-from ts_transformer.autopilot.judge import CROSSINGS, Verdict, flown_signals, flown_track, said_at
+from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
 from ts_transformer.experiments.executor_replay import REPLAY_SCHEMA
 from ts_transformer.experiments.instruction_training_export import (
     KIND_EXECUTOR, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
@@ -76,7 +76,7 @@ from ts_transformer.experiments.instruction_training_export import (
 from ts_transformer.instructions import display
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
-from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, read_flight
+from ts_transformer.instructions.labeller.read import Admitted, Reading, read_flight
 from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
@@ -138,23 +138,14 @@ def checkable(word: Instruction, words: Words) -> bool:
 def said_words(flown: Flown, index: int, verdict: Verdict, reading: Reading, observed: FlightSignals,
                geometry: AirportGeometry, spec: VocabularySpec
                ) -> tuple[dict[tuple[int, int], int], list[Instruction], Admitted]:
-    """MIRROR of `autopilot.judge.judge`'s word bookkeeping — `judge.py` is part of the executor's source hash, so it
-    cannot hand this out itself without the formal spec refusing it: the cycle each word the executor's clock reached
-    was said at (by its sentence cell), those words at the flown rows they were said at (`judge.said_at`, the
-    superseded ones dropped), and the flown track as the labeller's gate read it (its rows are the rows judged). Only
-    for a flight whose flown track passed the gate (``verdict.words`` set). `word_verdicts`' callers check the result
-    reproduces the judge's own counts."""
-    last = int(flown.done_cycle[index]) + 1
-    states = flown.states[index, : last + 1].cpu().numpy()
-    step_rows = int(round(spec.step_s / flown.cycle_s))
-    read_to = verdict.end_row - 1 if verdict.outcome in CROSSINGS else verdict.end_row
-    flight = admit(flown_signals(flown_track(states, geometry), read_to, observed, step_rows), geometry, spec)
-    sentence = flown.sentence_s[index, :last].cpu().numpy()
-    said_cycles = [int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9)) for word in reading.instructions]
-    said = [(word, cycle // step_rows) for word, cycle in zip(reading.instructions, said_cycles) if cycle < len(sentence)]
-    moved, _superseded = said_at([word for word, _ in said], [row for _, row in said])
-    said_cycle = {_cell(word): cycle for word, cycle in zip(reading.instructions, said_cycles) if cycle < len(sentence)}
-    return said_cycle, moved, flight
+    """The judge's own word bookkeeping (`judge.words_said`, `judge.read_flown`): the cycle each word the executor's
+    clock reached was said at (by its sentence cell), those words at the flown rows they were said at, the superseded
+    dropped, and the flown track as the labeller's gate read it (its rows are the rows judged). Only for a flight whose
+    flown track passed the gate (``verdict.words`` set)."""
+    said = words_said(flown, index, reading, spec)
+    flight = read_flown(flown, index, verdict.outcome, verdict.end_row, geometry, observed, spec)
+    cycles = {_cell(word): cycle for word, cycle in zip(reading.instructions, said.cycles) if cycle < said.n_cycles}
+    return cycles, said.moved, flight
 
 
 def chart_shift_deg(flown: Flown, index: int, geometry: AirportGeometry, observed_track_deg: float) -> float:

@@ -50,11 +50,11 @@ import numpy as np
 from final_approach.crossing import bracket_fraction
 from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
-from ts_transformer.autopilot.sentence import UNDELAYED
+from ts_transformer.autopilot.sentence import UNDELAYED, row_at
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m, relative_to_runway
 from ts_transformer.instructions.labeller.lateral import turn_check
-from ts_transformer.instructions.labeller.read import Reading, admit, landing_passages
+from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, landing_passages
 from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.labeller.speed import span_checks
 from ts_transformer.instructions.labeller.vertical import tube_checks
@@ -182,6 +182,48 @@ def said_at(instructions: list[Instruction], flown_rows: list[int]) -> tuple[lis
     return kept, len(moved) - len(kept)
 
 
+@dataclass(frozen=True)
+class Said:
+    """How the sentence's words reached the executor: ``cycles``, one per word of the reading, the cycle it was said
+    at (``n_cycles`` for a word the clock never reached — past the flight's rows); ``moved``, the words said, at the
+    flown rows they were said at, the superseded dropped (`said_at`)."""
+    cycles: list[int]
+    n_cycles: int
+    moved: list[Instruction]
+    superseded: int
+
+
+def words_said(flown: Flown, index: int, reading: Reading, spec: VocabularySpec) -> Said:
+    """Each word at the flown row where the executor was told it, as the executor looked it up (`sentence.Sentences.at`,
+    one reading of a sentence time, `sentence.row_at`): the first cycle whose sentence time's row reaches the word's —
+    for an undelayed column the first cycle that starts a row; on the time clock, the word's own row."""
+    last = int(flown.done_cycle[index]) + 1
+    step_rows = int(round(spec.step_s / flown.cycle_s))
+    rows = row_at(flown.sentence_s[index, :last].cpu().numpy(), spec.step_s)
+    step_start_rows = rows[::step_rows]
+
+    def said_cycle(word: Instruction) -> int:
+        if word.column in UNDELAYED:
+            return min(int(np.searchsorted(step_start_rows, word.row)) * step_rows, last)
+        return int(np.searchsorted(rows, word.row))
+
+    cycles = [said_cycle(word) for word in reading.instructions]
+    said = [(word, cycle // step_rows) for word, cycle in zip(reading.instructions, cycles) if cycle < last]
+    moved, superseded = said_at([word for word, _ in said], [row for _, row in said])
+    return Said(cycles, last, moved, superseded)
+
+
+def read_flown(flown: Flown, index: int, outcome: str, end_row: int, geometry: AirportGeometry,
+               observed: FlightSignals, spec: VocabularySpec) -> Admitted:
+    """The flown track through the labeller's gate (`read.admit`, which raises `Refused`), on the rows before a
+    crossing — where the labeller ends a sentence — and before a failed state (a non-finite one is no track to judge
+    a word on)."""
+    last = int(flown.done_cycle[index]) + 1
+    track = flown_track(flown.states[index, : last + 1].cpu().numpy(), geometry)
+    read_to = end_row - 1 if outcome in (*CROSSINGS, "dynamics_failure") else end_row
+    return admit(flown_signals(track, read_to, observed, int(round(spec.step_s / flown.cycle_s))), geometry, spec)
+
+
 @dataclass
 class Outcome:
     """Layer 1 of a verdict alone — how the flight ended, where, and the limits — for a reading whose words have
@@ -210,36 +252,19 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
           observed: FlightSignals, spec: VocabularySpec, words: Words) -> Verdict:
     """Flight ``index`` of ``flown``: its outcome, its limits, and its words (``reading`` is the
     labeller's reading of the observed flight, whose words the executor flew)."""
-    last = int(flown.done_cycle[index]) + 1
-    states = flown.states[index, : last + 1].cpu().numpy()
-    track = flown_track(states, geometry)
     ended = outcome_of(flown, index, geometry, runway_index, spec)
     outcome, end_row, crossing, limits = ended.outcome, ended.end_row, ended.crossing, ended.limits
     step_rows = int(round(spec.step_s / flown.cycle_s))
-    # the words are read on the rows before the crossing, where the labeller ends a sentence, and before a failed
-    # state (a non-finite one is no track to judge a word on)
-    read_to = end_row - 1 if outcome in (*CROSSINGS, "dynamics_failure") else end_row
     try:
-        flight = admit(flown_signals(track, read_to, observed, step_rows), geometry, spec)
+        flight = read_flown(flown, index, outcome, end_row, geometry, observed, spec)
     except Refused as refusal:
         return Verdict(outcome, end_row, crossing, limits, None, flown_rows=end_row + 1, refused=refusal.reason)
     rows = flight.signals.n_rows
-    # each word at the flown row where the executor was told it: the first cycle whose sentence time reached the
-    # word's step — for an undelayed column, the first cycle that starts a row (`sentence.Sentences.at`); on the time
-    # clock, the word's own row (a word the clock never reached was never said: it is past the flight's rows)
-    sentence = flown.sentence_s[index, :last].cpu().numpy()
-    step_starts = sentence[::step_rows]
-
-    def said_cycle(word: Instruction) -> int:
-        if word.column in UNDELAYED:
-            return int(np.searchsorted(step_starts, word.row * spec.step_s - 1e-9)) * step_rows
-        return int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9))
-
-    said_cycles = [said_cycle(word) for word in reading.instructions]
-    said = [(word, cycle // step_rows) for word, cycle in zip(reading.instructions, said_cycles) if cycle < len(sentence)]
-    moved, superseded = said_at([word for word, _ in said], [row for _, row in said])
+    # (a word the clock never reached was never said: it is past the flight's rows)
+    said = words_said(flown, index, reading, spec)
+    moved, superseded = said.moved, said.superseded
     reached = [word for word in moved if word.row < rows]
-    never = len(reading.instructions) - len(said) + len(moved) - len(reached)
+    never = len(reading.instructions) - superseded - len(reached)
 
     def first_row(mode: str) -> int | None:
         # up to the outcome's row: after a crossing without capture the executor flies on, and a later mode

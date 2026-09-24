@@ -172,12 +172,14 @@ def main(argv: list[str] | None = None) -> int:
                                  land_window_low_m=values["land_window_low_m"],
                                  land_window_high_m=values["land_window_high_m"], delays=Delays(0.0, 0.0),
                                  timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock)
-    roll_rate, roll_checks = derive.roll_rate_deg_s(provisional, spec)
+    roll_rate, roll_measures = derive.roll_rate_deg_s(provisional, spec)
     undelayed = replace(provisional, bank_rate_deg_s=roll_rate)
     undelayed.check(spec)
-    print(f"method A: τ_ψ {tau:g} s, p {roll_rate:g}°/s (by speed: a {derive.largest_own_turn_deg(spec):g}° own turn's "
-          f"overshoot {roll_checks['overshoot_deg']}, a {derive.FOLLOW_TURN_DEG:g}° worded turn's excess past its "
-          f"envelopes {roll_checks['follow_excess_deg']})", flush=True)
+    worst = {name: max(values.values()) for name, values in roll_measures.items()}
+    print(f"method A: τ_ψ {tau:g} s, p {roll_rate:g}°/s (worst over {len(derive.ROLL_CHECK_SPEEDS_MPS)} speeds: the "
+          f"{derive.largest_own_turn_deg(spec):g}° own turn's overshoot {worst['overshoot_deg']:.2f}°, the "
+          f"{derive.FOLLOW_TURN_DEG:g}° worded turns' excess past their envelopes: steady "
+          f"{worst['steady_excess_deg']:+.2f}°, fastest {worst['fastest_excess_deg']:+.2f}°)", flush=True)
 
     batch = replay.draw(instructions, "train", spec, words, per_airport=args.method_b_per_airport, seed=args.seed)
     b = method_b(batch, undelayed, words, device)
@@ -193,13 +195,14 @@ def main(argv: list[str] | None = None) -> int:
             "heading_time_constant_s": {"value": tau, "rule": "chosen: heading_lead_s, the time a heading word gives "
                                                               "to arrive — τ_ψ eases out the executor's own turns only; "
                                                               "heading words arrive a lead after they are heard"},
-            "bank_rate_deg_s": {"value": roll_rate, "by_speed_mps": roll_checks,
+            "bank_rate_deg_s": {"value": roll_rate, "by_speed_mps": roll_measures,
                                 "rule": f"the least p on a {derive.ROLL_RATE_STEP_DEG_S:g}°/s grid at which, at every "
                                         f"speed, the executor's own {derive.largest_own_turn_deg(spec):g}° turn passes "
                                         "its target by at most heading_tolerance_deg and a "
-                                        f"{derive.FOLLOW_TURN_DEG:g}° turn at r_turn (or the bank cap's rate), said "
-                                        "word by word (read through a moving-average approximation of the velocity "
-                                        "fit), is flown inside every word's envelope as the judge reads it"},
+                                        f"{derive.FOLLOW_TURN_DEG:g}° turn at r_turn and one at turn_rate_max_deg_s "
+                                        "(each within the bank cap), said word by word (read through a "
+                                        "moving-average approximation of the velocity fit), are flown inside every "
+                                        "word's envelope as the judge reads it; speeds every 5 m/s from 60 to 140"},
         },
         "method_b": b["record"],
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,

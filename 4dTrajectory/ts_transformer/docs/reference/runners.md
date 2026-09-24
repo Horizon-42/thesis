@@ -228,8 +228,9 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 existing directory and a labeller other than the artefact's; measures the data parameters on EVERY labelled train
 flight (process pool of torch-free workers, 1,000 flights a chunk, each flight re-read and required to equal its
 stored sentence), derives τ_ψ and p by method A (instruction-v3: τ_ψ = the heading lead, the executor's own turns
-only; p the least bank rate at which, on an A320 at 60–140 m/s, its own 124.5° turn overshoots by at most the heading
-tolerance and a 90° turn said word by word is flown inside every word's envelope), then flies a seeded train sample
+only; p the least bank rate at which, on an A320 every 5 m/s from 60 to 140 m/s, its own 124.5° turn overshoots by at
+most the heading tolerance and 90° turns said word by word — at r_turn and at the vocabulary's largest rate, each
+within the bank cap — are flown inside every word's envelope; ~1 min), then flies a seeded train sample
 of own-dynamics flights with no delay and re-reads each flown track through the observation operator for the
 altitude/angle and speed delays (method B: median lead per group, floored at 0; heading words carry their own lead). The design's fixed choices (Δt, τ_γ, the
 γ̇ factor, the timeout factor, the 30 s match window) are module constants and are written into `measurements.json`
