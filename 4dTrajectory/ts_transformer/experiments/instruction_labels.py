@@ -76,33 +76,28 @@ def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
 
     def group_rows(title: str, groups: dict[str, dict[str, Any]]) -> list[str]:
         out = ["", f"### {title}", "",
-               "| 组 | 架次 | 每架指令 均值 / p95 | 航向 | 高度 | 下降角 | 速度 | 进近 | 非沉默步 | 大转弯拆分/架 | 插入切入航向 | "
-               f"航向词中 < {spec.turn_rate_min_from_deg:g}° 的小修正 | 在入口处截断 |",
-               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+               "| 组 | 架次 | 每架指令 均值 / p95 | 航向 | 高度 | 下降角 | 速度 | 进近 | 非沉默步 | 截获前转过的角度 p50 / p95 | "
+               "在入口处截断 |",
+               "|---|---|---|---|---|---|---|---|---|---|---|"]
         for name, g in groups.items():
-            w = g["words_per_flight"]
+            w, t = g["words_per_flight"], g["turning_deg"]
             out.append(f"| {name} | {g['flights']} | {_fmt(g['instructions_per_flight'].get('mean'))} / "
                        f"{_fmt(g['instructions_per_flight'].get('p95'), 0)} | "
                        + " | ".join(_fmt(w[c].get("mean"), 2) for c in ("heading", "altitude", "angle", "speed", "approach"))
-                       + f" | {_pct(g['non_silent_step_share'])} | {_fmt(g['heading_splits_per_flight'].get('mean'), 2)} | "
-                       f"{_pct(g['intercept_inserted_share'])} | {_pct(g['small_heading_turn_share'])} | "
+                       + f" | {_pct(g['non_silent_step_share'])} | {_fmt(t.get('p50'), 0)} / {_fmt(t.get('p95'), 0)} | "
                        f"{_pct(g['cut_at_crossing_share'])} |")
         return out
 
     def envelope_rows(title: str, groups: dict[str, dict[str, Any]]) -> list[str]:
         out = ["", f"### {title}", "",
-               "| 组 | 转弯单调 | 转弯率与坡度在范围内 | 插入的切入航向单调 | 截获转弯单调 / 转弯率与坡度在范围内 | "
-               "判定的保持段 / 全部 | 保持段在漏斗内：逐行 / 整段 | 保持段末漏斗半宽 p50 / p95 (m) | 截获时离入口 p5 / p50 (km) | "
-               "高度词包含 | 高度逐行 | 管子末宽 p50 / p95 (m) | 下降至落地末宽 p50 / p95 (m) | 速度词包含 | 速度带内逐行 |",
-               "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+               "| 组 | 航向词包含：整条 / 逐行 | 截获转弯单调 / 转弯率与坡度在范围内 | 截获转弯平均转弯率 p50 (°/s) | "
+               "截获时离入口 p5 / p50 (km) | 高度词包含 | 高度逐行 | 管子末宽 p50 / p95 (m) | 下降至落地末宽 p50 / p95 (m) | "
+               "速度词包含 | 速度带内逐行 |",
+               "|---|---|---|---|---|---|---|---|---|---|---|"]
         for name, g in groups.items():
-            h, a, v, c = g["hold_funnel_half_width_end_m"], g["altitude"], g["speed"], g["capture_turns"]
-            d, hp = g["capture_before_threshold_m"], g["holds"]
-            out.append(f"| {name} | {_pct(g['turns']['progress_ok'])} | {_pct(g['turns']['rate_ok'])} | "
-                       f"{_pct(g['turns']['intercept_progress_ok'])} | "
-                       f"{_pct(c['progress_ok'])} / {_pct(c['rate_ok'])} | "
-                       f"{hp['judged']} / {hp['held']} | {_pct(hp['row_share'])} / {_pct(hp['contained_share'])} | "
-                       f"{_fmt(h.get('p50'), 0)} / {_fmt(h.get('p95'), 0)} | "
+            h, a, v, c, d = g["heading"], g["altitude"], g["speed"], g["capture_turns"], g["capture_before_threshold_m"]
+            out.append(f"| {name} | {_pct(h['contained_share'])} / {_pct(h['row_share'])} | "
+                       f"{_pct(c['progress_ok'])} / {_pct(c['rate_ok'])} | {_fmt(c['mean_rate_deg_s'].get('p50'), 2)} | "
                        f"{_fmt(d['p5'] / 1000, 1)} / {_fmt(d['p50'] / 1000, 1)} | "
                        f"{_pct(a['contained_share'])} | {_pct(a['row_share'])} | "
                        f"{_fmt(a['tube_width_end_m'].get('p50'), 0)} / {_fmt(a['tube_width_end_m'].get('p95'), 0)} | "
@@ -116,9 +111,6 @@ def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
         lines += group_rows("句子长度（第 0 步之后的指令数，每架）",
                             {"全部": s["all"], **s["by_stratum"], **s["by_airport"]})
         lines += envelope_rows("包络：包含率与宽度", {"全部": s["all"], **s["by_stratum"], **s["by_airport"]})
-        skipped = s["all"]["holds"]["not_judged"]
-        lines += ["", "未判定的保持段（全部）：" + ("；".join(f"{reason} {count}" for reason, count in
-                                                  sorted(skipped.items(), key=lambda kv: -kv[1])) or "无")]
     lines += ["", "## 类别使用（train，含第 0 步）", "", "| 列 | 类别数 | 用到 | 少于 10 次 | 最少一类的次数 |", "|---|---|---|---|---|"]
     for column, u in summary["train"]["class_usage"].items():
         lines.append(f"| {column} | {u['classes']} | {u['used']} | {u['rare_under_10']} | {u['min_used']} |")

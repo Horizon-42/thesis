@@ -305,6 +305,9 @@ sentences.
 
 ### R14 · `run_ts.py heading_reading_compare` — the heading readings flown by the real executor (vocabulary design §10.1)
 
+**ARCHIVED 2026-09-24** (`archive/heading_reading_2026_09/`, README there) with the holds reading it compared; to re-run,
+check out `bd262763`.
+
 2026-09-24. One TRAIN sample (`replay.draw_flights`: `--per-airport` flights of each airport on their own type's dynamics,
 a seeded permutation) read under every variant (`VARIANTS`: `H1` = the holds reading; `H3-<step>-L<lead>` = the per-step
 reading at a 5° or 2° step, merged with a half-step band, labelled `lead` seconds early), each flown by the executor at the

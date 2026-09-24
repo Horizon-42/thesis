@@ -60,14 +60,10 @@ def test_from_dict_refuses_a_missing_or_an_extra_key_and_another_reading_rule():
 
 @pytest.mark.parametrize("changes, message", [
     ({"heading_tolerance_deg": 2.0}, "half a heading step"),
-    ({"heading_split_part_deg": 145.0}, "split part plus its lead"),
     ({"altitude_tolerance_m": 10.0}, "half an altitude step"),
     ({"heading_step_deg": 7.0}, "does not divide 360"),
-    ({"heading_reading": "zigzag"}, "is not one of"),
-    ({"heading_clearance": "whenever"}, "is not one of"),
     ({"heading_lead_s": 3.0}, "not a whole number of steps"),
     ({"heading_lead_s": -2.0}, "not a whole number of steps"),
-    ({"heading_band_deg": 2.0}, "heading_band_deg below half a heading step"),
     ({"descent_angle_edges_deg": [-0.5, 3.0, 2.6, 3.7, 10.0]}, "edges must increase"),
     ({"descent_angle_centres_deg": [0.8, 2.1, 3.0, 11.0]}, "inside its class"),
 ])
@@ -257,82 +253,20 @@ def test_turn_and_speed_progress():
     assert not ok(90.0, 2.0, 3.0, 33.0)          # nor steeper than the highest bank
 
 
-def test_a_constant_rate_turn_at_constant_speed_is_an_arc_and_the_bank_limit_slows_it():
-    speeds = np.full(200, 100.0)
-    radius = 100.0 / math.radians(2.0)
-    # a left turn from north at 2°/s: 90° is 22.5 steps, so it ends halfway through the 23rd step
-    path, finished = envelope.turn_path(0.0, -90.0, speeds, 2.0, 2.0, 45.0, within_deg=0.0)
-    assert finished and len(path) == 24
-    assert path[-1] == pytest.approx((-radius, radius), abs=5.0)
-    # a hold begins where the track comes within the tolerance: 85.5° turned, inside the 22nd step
-    path, finished = envelope.turn_path(0.0, -90.0, speeds, 2.0, 2.0, 45.0, within_deg=4.5)
-    turned = math.radians(85.5)
-    assert finished and len(path) == 23
-    assert path[-1] == pytest.approx((-radius * (1.0 - math.cos(turned)), radius * math.sin(turned)), abs=5.0)
-    # 5°/s would need 41.7° of bank at 100 m/s; with a 20° limit it turns at g·tan 20° / V
-    limited, _ = envelope.turn_path(0.0, 90.0, speeds, 2.0, 5.0, 20.0, within_deg=0.0)
-    wide = 100.0 / (9.81 * math.tan(math.radians(20.0)) / 100.0)
-    assert limited[-1] == pytest.approx((wide, wide), abs=5.0)
-    # a flight that ends first: the path runs to its last row, unfinished
-    short, finished = envelope.turn_path(0.0, 90.0, speeds[:10], 2.0, 2.0, 45.0, within_deg=4.5)
-    assert not finished and len(short) == 10
-    # nothing to turn: the issue point
-    none, finished = envelope.turn_path(0.0, 3.0, speeds, 2.0, 2.0, 45.0, within_deg=4.5)
-    assert finished and none.tolist() == [[0.0, 0.0]]
-
-
-def _in_funnel(points, starts, target_deg, length_m, tolerance_deg=4.5):
-    return envelope.inside_convex(np.atleast_2d(points),
-                                  envelope.hold_funnel(starts, target_deg, tolerance_deg, length_m).outline).tolist()
-
-
-def test_the_turn_ends_are_the_two_extreme_turns_and_the_latest_start():
-    speeds = np.full(300, 100.0)
-    ends = envelope.turn_ends(0.0, -90.0, speeds, 2.0, 0.5, 4.0, 32.0, 4.5, 10.0)
-    assert ends.finished
-    turned = math.radians(85.5)
-    fast = 100.0 / (9.81 * math.tan(math.radians(32.0)) / 100.0)     # 4°/s needs 35°: bank-limited
-    slow = 100.0 / math.radians(0.5)
-    arc = lambda r: (-r * (1.0 - math.cos(turned)), r * math.sin(turned))  # noqa: E731
-    assert ends.fast[-1] == pytest.approx(arc(fast), abs=5.0) and ends.slow[-1] == pytest.approx(arc(slow), abs=5.0)
-    assert ends.late == pytest.approx((0.0, 1000.0))                   # 10 s at 100 m/s along the issue track (north)
-    assert ends.corners == pytest.approx(np.array([ends.fast[-1], ends.slow[-1], ends.slow[-1] + ends.late,
-                                                   ends.fast[-1] + ends.late]))
-    # the region: from the issue point round the fastest turn, across the ends, back along the
-    # slowest turn begun late, to the late start
-    assert ends.outline[0] == pytest.approx((0.0, 0.0)) and ends.outline[-1] == pytest.approx((0.0, 1000.0))
-    # any turn in between, begun up to the latest start, ends where the hold funnel begins
-    for rate, delay in ((0.7, 0.0), (2.0, 5.0), (3.0, 10.0)):
-        path, _ = envelope.turn_path(0.0, -90.0, speeds, 2.0, rate, 32.0, within_deg=4.5)
-        end = path[-1] + (0.0, 100.0 * delay)
-        ahead = end + (-50.0, 0.0)                                             # 50 m on along θ (west)
-        assert _in_funnel(ahead, ends.corners, 270.0, 100.0) == [True], (rate, delay)
-    # a small turn at an in-between rate enters the band between rows — its entry point, not the row
-    # after it, lies between the extremes (a 12° turn at 2°/s begun on time)
-    small = envelope.turn_ends(0.0, -12.0, speeds, 2.0, 0.5, 4.0, 32.0, 4.5, 10.0)
-    path, _ = envelope.turn_path(0.0, -12.0, speeds, 2.0, 2.0, 32.0, within_deg=4.5)
-    beyond = path[-1] + 50.0 * np.array([math.sin(math.radians(348.0)), math.cos(math.radians(348.0))])
-    assert _in_funnel(beyond, small.corners, 348.0, 100.0) == [True]
-
-
-def test_a_hold_funnel_is_where_the_turn_may_end_swept_along_its_heading():
-    segment = np.array([[0.0, 0.0], [0.0, 1000.0]])                        # the ends lie across an eastbound θ
-    spread = lambda angle: 5000.0 * math.tan(math.radians(angle))           # noqa: E731
-    points = np.array([[5000.0, 500.0], [5000.0, 1000.0 + spread(4.4)], [5000.0, 1000.0 + spread(4.6)],
-                       [-100.0, 500.0],
-                       [100.0, 525.0],        # just ahead of the segment's middle: in the exact set, not a sampled one
-                       [7000.0, 500.0]])      # further along θ than the hold has flown: outside
-    assert _in_funnel(points, segment, 90.0, 6000.0) == [True, True, False, False, True, False]
-    funnel = envelope.hold_funnel(segment, 90.0, 4.5, 5000.0)
-    assert funnel.start_half_width_m == pytest.approx(500.0)
-    assert funnel.end_half_width_m == pytest.approx(500.0 + spread(4.5))
-    assert envelope.inside_convex(points[:1], funnel.outline).tolist() == [True]
-    # a turn that may start 10 s late (issue track 000 at 100 m/s) may end up to 1 km further north
-    late = np.vstack((segment, segment[::-1] + (0.0, 1000.0)))
-    assert _in_funnel([3000.0, 1900.0], late, 90.0, 3500.0) == [True]
-    assert _in_funnel([3000.0, 1900.0], segment, 90.0, 3500.0) == [False]
-    # a word flown from entry: one cone from the issue point
-    assert _in_funnel([[1000.0, 70.0], [1000.0, 90.0]], np.zeros((1, 2)), 90.0, 1500.0) == [True, False]
+def test_a_heading_word_is_judged_from_its_row_plus_the_lead_to_the_next_words():
+    """§10.1: a word said at row r says where the track is a lead later — judged from r + lead to the next word's row +
+    lead, never at or past the clearance; a word the lead carries past it has no rows."""
+    assert envelope.heading_word_rows([0, 10, 25, 29], 2, 30) == [(2, 12), (12, 27), (27, 30), (31, 31)]
+    track = np.concatenate((np.full(12, 90.0), np.full(10, 95.0), np.full(8, 101.0)))
+    judged = envelope.heading_words_inside(track, [(0, 90.0), (10, 95.0), (20, 100.0)], 2, 30, 4.5)
+    assert [(j["rows"], j["inside"]) for j in judged] == [(10, 10), (10, 10), (8, 8)]
+    # the same words over a track that turned 6° past its word from row 25 on: those rows are outside
+    late = track.copy()
+    late[25:] = 106.0
+    assert [j["inside"] for j in envelope.heading_words_inside(late, [(0, 90.0), (10, 95.0), (20, 100.0)], 2, 30, 4.5)] \
+        == [10, 10, 3]
+    # the circle: 358° against a word of 005 is 7° off, 002° is 3° off
+    assert envelope.heading_words_inside(np.array([358.0, 2.0]), [(0, 5.0)], 0, 2, 4.5)[0]["inside"] == 1
 
 
 def test_speed_transitions():
@@ -399,7 +333,8 @@ def test_the_measurements_read_only_the_admitted_rows(geometry):
     first = measure.aligned_final_row(flight, 2.0)
     finals, rows = measure.measure_final(flight, one, 2.0, {5.0: 4.5})
     assert len(finals["aligned_offset_m"]) == flight.signals.n_rows - first
-    assert rows["5"][0] == 2.0                                        # the downwind and the base
+    # each 90° turn at 6° a row says 15 words on the 5° grid (the grid skips a cell every 30°)
+    assert rows["5"][0] == 30.0
 
 
 # ---- artefact

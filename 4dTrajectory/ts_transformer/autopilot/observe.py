@@ -15,9 +15,8 @@ from are built with it; `observe` refuses another). One difference stays, by con
 runs on past the threshold, so its last rows' fits are centred; the flown track ends at the crossing, so its
 last ~7 s are fitted one-sided.
 
-Method B's delays (`delays_from_leads`) are measured on the words that START a manoeuvre: a heading word
-that begins a turn (a later part of a split turn, or an inserted intercept, would measure the executor's
-turn rate against the observed one, not the reading's lead), every altitude, angle and speed word.
+Method B's delays (`delays_from_leads`) are measured on every altitude, angle and speed word after step 0.
+Heading words have no delay to measure: each says where the track is a lead later (vocabulary design §10.1).
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.labeller.read import Reading, read_flight
 from ts_transformer.instructions.signals import FlightSignals, signals_from_series
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import HEADING, Words
+from ts_transformer.instructions.words import Words
 
 #: The columns method B measures a delay on (a manoeuvre's onset); the runway pointer and the clearance
 #: follow the heading's delay.
@@ -74,24 +73,18 @@ def word_leads(received: list[tuple[int, int, float]], reread: list[tuple[int, i
     return leads
 
 
-def starts(word) -> bool:
-    """A word that starts a manoeuvre (module docstring): every word but a heading word that continues or
-    intercepts a turn."""
-    return word.column != HEADING or (word.kind in ("turn", "turn-split") and word.info["part"] == 1)
-
-
 def flight_leads(states: np.ndarray, sentence_s: np.ndarray, cycle_s: float, series: FlightSeries,
                  geometry: AirportGeometry, reading: Reading, spec: VocabularySpec, words: Words,
                  window_s: float) -> tuple[list[tuple[int, float]], Counter]:
     """Method B on one flight flown with no delay: ``states`` up to where its flight ended, ``sentence_s`` the
     sentence time of each cycle (the replay's clock). The words the executor received — every word of
-    `MEASURED_COLUMNS` after step 0 (step 0 describes what the aircraft is already doing) that starts a
-    manoeuvre, at the time it was told it, within the flight — against the labeller's re-reading of the flown
+    `MEASURED_COLUMNS` after step 0 (step 0 describes what the aircraft is already doing), at the time it was told
+    it, within the flight — against the labeller's re-reading of the flown
     track through `observe`. Returns the ``(column, lead)`` pairs and how many words of each column were received;
     raises `Refused` when the labeller will not read the flown track."""
     received = []
     for word in reading.instructions:
-        if word.column in MEASURED_COLUMNS and word.row > 0 and starts(word):
+        if word.column in MEASURED_COLUMNS and word.row > 0:
             cycle = int(np.searchsorted(sentence_s, word.row * spec.step_s - 1e-9))
             if cycle < len(states) - 1:
                 received.append((word.column, word.value, cycle * cycle_s))

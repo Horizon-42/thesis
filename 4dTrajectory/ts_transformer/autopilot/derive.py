@@ -1,12 +1,14 @@
 """Method A (executor design §9, the E7 plan): the mildest values the design's constraints allow, found by
 flying the executor's own manoeuvre rather than read from data.
 
-- ``heading_time_constant_s`` (τ_ψ): the largest the split-turn constraint admits (``r_turn τ_ψ ≤ lead``,
-  down to 0.5 s) — the gentlest roll-out that still banks through a split turn;
+- ``heading_time_constant_s`` (τ_ψ): the largest the per-step word envelope admits (``r_turn |τ_ψ − L| ≤ δψ − s/2``,
+  `params.ExecutorParams.check`; down to 0.5 s) — the gentlest roll-out whose steady lag in a turn still keeps the
+  flown track inside the word a lead earlier;
 - ``roll_rate_deg_s`` (p): the least bank rate (a `ROLL_RATE_STEP_DEG_S` grid) at which the executor's own
-  turn through the vocabulary's largest word (`heading_max_turn_deg`, the turn that passes its target
-  furthest), level and at a held speed, passes its target by no more than the heading tolerance at every
-  speed of `ROLL_CHECK_SPEEDS_MPS` (`turn_overshoot_deg` simulates it on an A320 at 1500 m).
+  largest turn on its heading law (`largest_own_turn_deg`: from a heading word that just reaches the final — 90°
+  plus the tolerance off the course — to its own intercept of the final), level and at a held speed, passes its
+  target by no more than the heading tolerance at every speed of `ROLL_CHECK_SPEEDS_MPS` (`turn_overshoot_deg`
+  simulates it on an A320 at 1500 m). Heading words themselves turn a step or two at a time.
 """
 
 from __future__ import annotations
@@ -34,11 +36,18 @@ ROLL_RATE_MAX_DEG_S = 20.0
 
 
 def heading_time_constant_s(turn_rate_deg_s: float, spec: VocabularySpec, cycle_s: float) -> float:
-    """The largest τ_ψ the split-turn constraint admits (``r_turn τ_ψ ≤ lead``), down to 0.5 s."""
-    tau = rounded(spec.heading_continue_lead_deg / turn_rate_deg_s, 0.5, math.floor)
+    """The largest τ_ψ the per-step word envelope admits (``r_turn |τ_ψ − L| ≤ δψ − s/2``), down to 0.5 s."""
+    slack_s = (spec.heading_tolerance_deg - spec.heading_step_deg / 2) / turn_rate_deg_s
+    tau = rounded(spec.heading_lead_s + slack_s, 0.5, math.floor)
     if tau < 2.0 * cycle_s:
-        raise ValueError(f"τ_ψ {tau:g} s would be under 2 Δt: r_turn {turn_rate_deg_s:g}°/s is too fast for the lead")
+        raise ValueError(f"τ_ψ {tau:g} s would be under 2 Δt: the lead {spec.heading_lead_s:g} s is too short")
     return tau
+
+
+def largest_own_turn_deg(spec: VocabularySpec) -> float:
+    """The largest turn the executor's heading law flies on its own: from a heading word that just reaches the final
+    (`envelope.heading_converges`: 90° plus the tolerance off the course) to its own intercept of it."""
+    return 90.0 + spec.heading_tolerance_deg + spec.intercept_angle_deg
 
 
 def _a320_level(speed_mps: float) -> tuple[FlightInputs, AirportCharts]:
@@ -83,7 +92,7 @@ def roll_rate_deg_s(params: ExecutorParams, spec: VocabularySpec) -> tuple[float
     rate = ROLL_RATE_STEP_DEG_S
     while rate <= ROLL_RATE_MAX_DEG_S:
         trial = replace(params, bank_rate_deg_s=rate)
-        overshoot = {f"{speed:g}": turn_overshoot_deg(trial, speed, spec.heading_max_turn_deg)
+        overshoot = {f"{speed:g}": turn_overshoot_deg(trial, speed, largest_own_turn_deg(spec))
                      for speed in ROLL_CHECK_SPEEDS_MPS}
         if max(overshoot.values()) <= spec.heading_tolerance_deg:
             return rate, overshoot

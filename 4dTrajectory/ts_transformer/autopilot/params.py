@@ -7,10 +7,12 @@ executor spec's (E7); this container only checks that a set of values is one the
 
 - the sentence's step a whole number of cycles (the judge reads the flown track at the sentence's rows);
 - ``τ_ψ ≥ 2 Δt`` (§4.1 constraint 1: each cycle removes at most half the heading error);
-- ``r_turn · τ_ψ ≤ heading_continue_lead_deg`` (§4.1 constraint 2: a split turn's next word arrives
-  before the roll-out begins, so the aircraft does not level between the parts);
+- ``r_turn |τ_ψ − L| ≤ δψ − s/2`` (§4.1 constraint 2 under instruction-v3: a heading word says the track the lead
+  ``L`` later; in a steady turn a first-order heading law trails its target by ``r_turn τ_ψ``, so the flown track
+  meets the word's envelope — the word a lead earlier ± the tolerance ``δψ``, the word itself up to half a step
+  ``s/2`` off the observed track — only if the two lags agree within what the tolerance leaves);
 - ``τ_γ ≥ 2 Δt``; ``φ_cap`` inside the vocabulary's bank ceiling and the grader's;
-- every delay ``≥ 0`` (a word acts once said) and ``d_ψ`` inside the late start the turn envelope allows.
+- every delay ``≥ 0`` (a word acts once said; heading words have none, `sentence.UNDELAYED`).
 """
 
 from __future__ import annotations
@@ -49,18 +51,17 @@ class ExecutorParams:
             raise ValueError(f"the sentence's step {spec.step_s:g} s is not a whole number of {self.cycle_s:g} s cycles")
         if self.heading_time_constant_s < 2.0 * self.cycle_s:
             raise ValueError(f"τ_ψ {self.heading_time_constant_s:g} s is under 2 Δt ({2 * self.cycle_s:g} s)")
-        if self.turn_rate_deg_s * self.heading_time_constant_s > spec.heading_continue_lead_deg:
-            raise ValueError(f"r_turn · τ_ψ = {self.turn_rate_deg_s * self.heading_time_constant_s:.1f}° exceeds the "
-                             f"{spec.heading_continue_lead_deg:g}° a split turn's next word leads by")
+        lag = self.turn_rate_deg_s * (self.heading_time_constant_s - spec.heading_lead_s)
+        if abs(lag) > spec.heading_tolerance_deg - spec.heading_step_deg / 2:
+            raise ValueError(f"r_turn (τ_ψ − lead) = {lag:+.1f}°: in a steady turn the flown track would trail the word "
+                             f"a lead earlier by more than the {spec.heading_tolerance_deg - spec.heading_step_deg / 2:g}° "
+                             "the heading tolerance leaves past the half step (vocabulary design §10.1)")
         if self.path_time_constant_s < 2.0 * self.cycle_s:
             raise ValueError(f"τ_γ {self.path_time_constant_s:g} s is under 2 Δt")
         if not 0.0 < self.bank_cap_deg <= min(spec.turn_bank_max_deg, math.degrees(BANK_MAX_RAD)):
             raise ValueError(f"φ_cap {self.bank_cap_deg:g}° outside (0, {spec.turn_bank_max_deg:g}°]")
-        if not early_words and min(self.delays.heading_s, self.delays.vertical_s, self.delays.speed_s) < 0.0:
+        if not early_words and min(self.delays.vertical_s, self.delays.speed_s) < 0.0:
             raise ValueError(f"{self.delays}: a word cannot take effect before it is said")
-        if self.delays.heading_s > spec.turn_start_delay_max_s:
-            raise ValueError(f"d_ψ {self.delays.heading_s:g} s exceeds the {spec.turn_start_delay_max_s:g} s a turn "
-                             f"may start late (vocabulary §2.3)")
         if not 0.0 <= self.land_window_low_m <= self.land_aim_height_m <= self.land_window_high_m <= spec.landing_max_height_m:
             raise ValueError(f"the landing aim {self.land_aim_height_m:g} m and its window {self.land_window_low_m:g}–"
                              f"{self.land_window_high_m:g} m are not inside the landing condition's "

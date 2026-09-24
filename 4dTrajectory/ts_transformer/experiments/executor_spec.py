@@ -4,18 +4,20 @@ Three sources, in order, each feeding the next:
 
 1. data (`autopilot/measure.py`): r_turn, φ_cap, a_dec, a_acc, a_unspec and the landing aim, on every
    labelled TRAIN flight, each re-read and checked against its stored sentence;
-2. method A (`autopilot/derive.py`): τ_ψ from the split-turn constraint, p from the executor's own 90° turn;
-3. method B (`autopilot/observe.py`): the word delays — a seeded train sample (`replay.draw`) flown with no
-   delay, each flown track re-read by the labeller through the observation operator; a delay is the median
-   of how much earlier the re-read places a word that starts a manoeuvre than the executor received it,
-   floored at 0 (the executor cannot act on a word before it is said; `observe.delays_from_leads`).
+2. method A (`autopilot/derive.py`): τ_ψ from the per-step heading word's envelope, p from the executor's own
+   largest turn on its heading law;
+3. method B (`autopilot/observe.py`): the vertical and speed word delays — a seeded train sample (`replay.draw`)
+   flown with no delay, each flown track re-read by the labeller through the observation operator; a delay is the
+   median of how much earlier the re-read places a word than the executor received it, floored at 0 (the executor
+   cannot act on a word before it is said; `observe.delays_from_leads`). Heading words have none: each says where
+   the track is a lead later.
 
 The design's fixed choices are module constants below. Writes ``spec.json`` + ``measurements.json`` into
 ``--dir`` (never over an existing file), from a clean tree only: the spec records the commit it was
 measured at and the executor's source hash, and a replay refuses a spec measured by other code.
 
     python run_ts.py executor_spec \\
-        --instructions 4dTrajectory/outputs/POOLED/instruction_language/v2_20260924 \\
+        --instructions 4dTrajectory/outputs/POOLED/instruction_language/<artefact> \\
         --dir 4dTrajectory/outputs/POOLED/executor/<name>
 """
 
@@ -167,12 +169,12 @@ def main(argv: list[str] | None = None) -> int:
                                  accel_mps2=values["accel_mps2"], unspecified_decel_mps2=values["unspecified_decel_mps2"],
                                  land_aim_height_m=values["land_aim_height_m"],
                                  land_window_low_m=values["land_window_low_m"],
-                                 land_window_high_m=values["land_window_high_m"], delays=Delays(0.0, 0.0, 0.0),
+                                 land_window_high_m=values["land_window_high_m"], delays=Delays(0.0, 0.0),
                                  timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock)
     roll_rate, overshoots = derive.roll_rate_deg_s(provisional, spec)
     undelayed = replace(provisional, bank_rate_deg_s=roll_rate)
     undelayed.check(spec)
-    print(f"method A: τ_ψ {tau:g} s, p {roll_rate:g}°/s (a {spec.heading_max_turn_deg:g}° turn's overshoot by "
+    print(f"method A: τ_ψ {tau:g} s, p {roll_rate:g}°/s (a {derive.largest_own_turn_deg(spec):g}° turn's overshoot by "
           f"speed {overshoots})", flush=True)
 
     batch = replay.draw(instructions, "train", spec, words, per_airport=args.method_b_per_airport, seed=args.seed)
@@ -186,11 +188,11 @@ def main(argv: list[str] | None = None) -> int:
     measurements = {
         "data": measured,
         "method_a": {
-            "heading_time_constant_s": {"value": tau, "rule": "the largest τ_ψ with r_turn τ_ψ ≤ heading_continue_lead_deg, "
-                                                              "down to 0.5 s"},
+            "heading_time_constant_s": {"value": tau, "rule": "the largest τ_ψ with r_turn |τ_ψ − heading_lead_s| ≤ "
+                                                              "heading_tolerance_deg − heading_step_deg / 2, down to 0.5 s"},
             "bank_rate_deg_s": {"value": roll_rate, "overshoot_deg_by_speed_mps": overshoots,
                                 "rule": f"the least p on a {derive.ROLL_RATE_STEP_DEG_S:g}°/s grid whose "
-                                        f"{spec.heading_max_turn_deg:g}° turn passes its target by at most "
+                                        f"{derive.largest_own_turn_deg(spec):g}° turn passes its target by at most "
                                         "heading_tolerance_deg at every speed"},
         },
         "method_b": b["record"],

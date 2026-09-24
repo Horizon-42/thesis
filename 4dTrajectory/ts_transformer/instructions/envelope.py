@@ -1,5 +1,5 @@
-"""The allowed region of each instruction, from its issue point — one implementation for the
-labeller's checks, the executor's limits and the display (vocabulary design §2).
+"""The allowed region of each instruction — one implementation for the labeller's checks, the executor's judge and
+the display (vocabulary design §2; the heading word's, §10.1).
 
 Pure functions over numpy arrays; every angle in degrees (compass for tracks, descending
 positive for path angles), every length in metres.
@@ -8,7 +8,6 @@ positive for path angles), every length in metres.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 
 import numpy as np
 
@@ -16,12 +15,32 @@ from aerodynamic_model.common import GRAVITY_MPS2
 from ts_transformer.instructions.words import wrap180
 
 
-# ---- heading
-def heading_band(track_deg, target_deg: float, tolerance_deg: float) -> np.ndarray:
-    """Hold: the track within ±tolerance of the target (circular difference)."""
-    return np.abs(wrap180(np.asarray(track_deg) - target_deg)) <= tolerance_deg
+# ---- heading (instruction-v3, §10.1)
+def heading_word_rows(word_rows: list[int], lead_rows: int, end_row: int) -> list[tuple[int, int]]:
+    """The rows each heading word is judged on, ``(first, stop)``: a word said at row ``r`` says where the track is
+    ``lead_rows`` later, so it is judged from ``r + lead_rows`` to the next word's row plus the lead, never at or past
+    ``end_row`` (the clearance: the capture turn is judged as its own); empty when the lead passes it."""
+    rows = []
+    for row, following in zip(word_rows, [*word_rows[1:], None]):
+        first = row + lead_rows
+        stop = end_row if following is None else min(following + lead_rows, end_row)
+        rows.append((first, max(first, stop)))
+    return rows
 
 
+def heading_words_inside(track_deg, words: list[tuple[int, float]], lead_rows: int, end_row: int,
+                         tolerance_deg: float) -> list[dict[str, int]]:
+    """Each heading word ``(row, target)`` against the track: over its rows (`heading_word_rows`), how many lie within
+    ``tolerance_deg`` of its target (circular difference)."""
+    track = np.asarray(track_deg)
+    out = []
+    for (row, target), (first, stop) in zip(words, heading_word_rows([r for r, _ in words], lead_rows, end_row)):
+        inside = np.abs(wrap180(track[first:stop] - target)) <= tolerance_deg
+        out.append({"row": row, "rows": int(stop - first), "inside": int(inside.sum())})
+    return out
+
+
+# ---- the capture turn
 def turn_rate_ok(turn_deg: float, mean_rate_deg_s: float, max_rate_deg_s: float, max_bank_deg: float,
                  rate_min_deg_s: float, rate_max_deg_s: float, bank_max_deg: float, rate_min_from_deg: float) -> bool:
     """Turn: never faster than the highest turn rate nor steeper than the highest bank; a turn of at
@@ -44,143 +63,10 @@ def turn_progress_ok(track_unwrapped_deg, target_unwrapped_deg: float, tolerance
     return bool(np.max(backing) <= tolerance_deg and np.max(progress) <= total + tolerance_deg)
 
 
-def turn_path(from_track_deg: float, turn_deg: float, speeds_mps, step_s: float, rate_deg_s: float,
-              bank_max_deg: float, within_deg: float) -> tuple[np.ndarray, bool]:
-    """A turn at a constant turn RATE, flown at the speeds the flight flew (one per row from the
-    issue row), from the issue point until its track comes within ``within_deg`` of the target:
-    ``(path [k, 2] in (E, N) metres from the issue point, whether it got there)``. One point per
-    row; the last one is where the track enters the band — inside the step where it does, since a
-    turn enters it between rows — or the last row when the flight ends first. ``turn_deg`` > 0
-    turns right (clockwise). Where the rate would need more bank than ``bank_max_deg`` at the speed
-    flown, the bank-limited rate is flown instead. Each step flies the mean of its two ends' tracks
-    (a second-order step). With ``within_deg`` = the heading tolerance the end is where a hold
-    begins — the labeller's own definition (§3.2)."""
-    speeds = np.asarray(speeds_mps, dtype=np.float64)
-    side, need = math.copysign(1.0, turn_deg), abs(turn_deg) - within_deg
-    points = [np.zeros(2)]
-    turned = 0.0
-    for row in range(1, len(speeds)):
-        if turned >= need:
-            return np.array(points), True
-        v = 0.5 * (speeds[row - 1] + speeds[row])
-        rate = min(rate_deg_s, math.degrees(GRAVITY_MPS2 * math.tan(math.radians(bank_max_deg)) / v))
-        fraction = min(1.0, (need - turned) / (rate * step_s))
-        after = turned + fraction * rate * step_s
-        track = math.radians(from_track_deg + side * 0.5 * (turned + after))
-        points.append(points[-1] + fraction * v * step_s * np.array([math.sin(track), math.cos(track)]))
-        turned = need if fraction < 1.0 else after
-    return np.array(points), turned >= need
-
-
-@dataclass(frozen=True)
-class TurnEnds:
-    """Where a heading word's turn may take the aircraft (§2.3), in metres from the issue point:
-    the fastest and the slowest turn, each to where its track enters the target's band, and the
-    latest start. A turn begun ``d`` seconds late is the same turn moved ``d`` seconds of straight
-    flight along the issue track."""
-
-    fast: np.ndarray        # [k, 2] the fastest turn (the highest rate, bank-limited)
-    slow: np.ndarray        # [k, 2] the slowest turn (the lowest rate), or to the flight's end
-    finished: bool          # the slowest turn enters the band before the flight ends
-    late: np.ndarray        # [2] the latest start's shift
-
-    @property
-    def corners(self) -> np.ndarray:
-        """``[4, 2]`` where the turn may end: the fastest and the slowest turn's ends, then the same
-        two moved by the latest start — a parallelogram."""
-        return np.array([self.fast[-1], self.slow[-1], self.slow[-1] + self.late, self.fast[-1] + self.late])
-
-    @property
-    def outline(self) -> np.ndarray:
-        """``[k, 2]`` the region the turn may sweep, as a ring (first point not repeated): the fastest
-        turn begun on time, the two on-time ends, the slowest turn begun as late as allowed back to
-        where it began, and the straight flight before it back to the issue point. For drawing: a
-        slowest turn cut short by the flight's end, on a turn of nearly 150° at a lowest rate under
-        0.5°/s, can make the ring cross itself (its hold is not judged)."""
-        return np.vstack((self.fast, self.slow[-1:], (self.slow + self.late)[::-1]))
-
-
-def turn_ends(from_track_deg: float, turn_deg: float, speeds_mps, step_s: float, rate_min_deg_s: float,
-              rate_max_deg_s: float, bank_max_deg: float, within_deg: float, delay_max_s: float) -> TurnEnds:
-    """The two extreme turns of §2.3 from one issue point (`turn_path`), and the latest start at
-    the issue speed."""
-    fast, _ = turn_path(from_track_deg, turn_deg, speeds_mps, step_s, rate_max_deg_s, bank_max_deg, within_deg)
-    slow, finished = turn_path(from_track_deg, turn_deg, speeds_mps, step_s, rate_min_deg_s, bank_max_deg, within_deg)
-    track = math.radians(from_track_deg)
-    late = float(np.asarray(speeds_mps)[0]) * delay_max_s * np.array([math.sin(track), math.cos(track)])
-    return TurnEnds(fast=fast, slow=slow, finished=finished, late=late)
-
-
-def convex_hull(points: np.ndarray) -> np.ndarray:
-    """``[k, 2]``: the convex hull of ``[n, 2]`` points, counter-clockwise in (E, N), without
-    repeating the first point (Andrew's monotone chain)."""
-    unique = sorted({(float(e), float(n)) for e, n in points})
-    if len(unique) < 3:
-        return np.array(unique)
-
-    def cross(o, a, b) -> float:
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-    lower: list[tuple[float, float]] = []
-    upper: list[tuple[float, float]] = []
-    for point in unique:
-        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
-            lower.pop()
-        lower.append(point)
-    for point in reversed(unique):
-        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
-            upper.pop()
-        upper.append(point)
-    return np.array(lower[:-1] + upper[:-1])
-
-
-def inside_convex(points_en, outline: np.ndarray, tolerance_m: float = 1e-6) -> np.ndarray:
-    """Whether each point lies in (or within ``tolerance_m`` of) a counter-clockwise convex polygon."""
-    points = np.atleast_2d(np.asarray(points_en, dtype=np.float64))
-    edges = np.roll(outline, -1, axis=0) - outline
-    offsets = points[:, None, :] - outline[None, :, :]
-    left = (edges[None, :, 0] * offsets[..., 1] - edges[None, :, 1] * offsets[..., 0]) / np.hypot(*edges.T)[None, :]
-    return (left >= -tolerance_m).all(axis=1)
-
-
-@dataclass(frozen=True)
-class HoldFunnel:
-    """A hold's allowed positions up to some length along θ (§2.3)."""
-
-    starts: np.ndarray              # [k, 2] where the turn may end (or the one issue point)
-    length_m: float
-    outline: np.ndarray             # [k, 2] counter-clockwise, first point not repeated
-    start_half_width_m: float       # the turn end's half extent across θ
-    end_half_width_m: float         # that, plus the widening after the length
-
-
-def hold_funnel(start_points, target_deg: float, tolerance_deg: float, length_m: float) -> HoldFunnel:
-    """Where the turn may end (``start_points``: `TurnEnds.corners`, or the one issue point of a
-    word the flight was already holding at entry) swept ``length_m`` along θ, every point of it
-    opening a ± ``tolerance_deg`` cone. The sum of a convex set and a cone is convex: the hull of
-    the start points and of each moved ``length_m`` along θ and ``length_m`` · tan(tolerance) to
-    either side."""
-    starts = np.atleast_2d(np.asarray(start_points, dtype=np.float64))
-    theta = math.radians(target_deg)
-    along, right = np.array([math.sin(theta), math.cos(theta)]), np.array([math.cos(theta), -math.sin(theta)])
-    spread = float(funnel_half_width_m(length_m, tolerance_deg))
-    far = starts + length_m * along
-    across = starts @ right
-    start_width = float(across.max() - across.min()) / 2.0
-    return HoldFunnel(starts=starts, length_m=float(length_m),
-                      outline=convex_hull(np.vstack((starts, far - spread * right, far + spread * right))),
-                      start_half_width_m=start_width, end_half_width_m=start_width + spread)
-
-
 def bank_deg_from_turn_rate(turn_rate_deg_s, ground_speed_mps):
     """The coordinated bank that turns at this rate at this speed."""
     rate = np.radians(np.asarray(turn_rate_deg_s))
     return np.degrees(np.arctan(np.abs(rate) * np.asarray(ground_speed_mps) / GRAVITY_MPS2))
-
-
-def funnel_half_width_m(distance_m, tolerance_deg: float):
-    """Hold: how far the track may wander off the nominal line after ``distance_m``."""
-    return np.asarray(distance_m) * math.tan(math.radians(tolerance_deg))
 
 
 # ---- approach

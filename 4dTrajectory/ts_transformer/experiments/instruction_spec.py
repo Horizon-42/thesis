@@ -82,14 +82,9 @@ def _pool(results: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
 def _grid_table(grid_rows: dict[str, list[list[float]]], grids: dict[float, float]) -> dict[str, Any]:
     table = {}
     for step, tolerance in grids.items():
-        rows = grid_rows[f"{step:g}"]
-        holds = np.array([r[0] for r in rows])
-        changes = np.array([r[1] for r in rows])
-        widths = np.array([w for r in rows for w in r[2:]])
+        words = np.array([r[0] for r in grid_rows[f"{step:g}"]])
         table[f"{step:g}"] = {"tolerance_deg": tolerance, "classes": int(round(360 / step)),
-                              "holds_per_flight": measure.percentiles(holds),
-                              "target_changes_per_flight": measure.percentiles(changes),
-                              "hold_funnel_half_width_end_m": measure.percentiles(widths)}
+                              "heading_words_per_flight": measure.percentiles(words)}
     return table
 
 
@@ -201,9 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  descent K={k}: centres {[round(c, 2) for c in fit['centres_deg']]}  end-height error p50 "
               f"{e['p50']:.1f} m, p95 {e['p95']:.1f} m")
     for grid, row in measurements["heading_grids"].items():
-        print(f"  heading grid {grid}°: tolerance {row['tolerance_deg']}°, target changes/flight "
-              f"p50 {row['target_changes_per_flight']['p50']:.0f}, funnel end p95 "
-              f"{row['hold_funnel_half_width_end_m']['p95']:.0f} m")
+        print(f"  heading grid {grid}°: tolerance {row['tolerance_deg']}°, heading words/flight "
+              f"p50 {row['heading_words_per_flight']['p50']:.0f}, p95 {row['heading_words_per_flight']['p95']:.0f}")
     print(f"wrote spec.json and measurements.json in {time.perf_counter() - started:.0f}s")
     return 0
 

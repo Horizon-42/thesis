@@ -23,15 +23,6 @@ from geokit import FT_M, KT_MS, NM_M
 READING_RULE = "instruction-v3"
 SPEC_SCHEMA = "ts-instruction-spec-v4"
 
-#: How heading words are read (vocabulary design §10.1, under comparison): ``holds`` — one word per straight
-#: hold, larger turns split, an intercept inserted where the heading in force does not reach the final (§3.2);
-#: ``per-step`` — every row labelled with the grid heading nearest the track `heading_lead_s` later, a new word
-#: whenever that leaves the word in force by more than `heading_band_deg` (half a step: every change of grid cell).
-HEADING_READINGS = ("holds", "per-step")
-#: Where the per-step reading says the clearance (§10.1, under measurement): with the last heading word, at the capture
-#: turn's onset, or at the onset but not before the heading word in force reaches the final.
-HEADING_CLEARANCES = ("last-word", "capture-turn", "capture-turn-converging")
-
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
 #: more outside the approach gate.
 ATC_MAX_INTERCEPT_DEG = 30.0
@@ -53,44 +44,26 @@ class VocabularySpec:
     track_smoothing_s: float
     altitude_smoothing_s: float
     speed_smoothing_s: float
-    # --- heading: absolute ground-track targets, flown the shorter way
-    #: `HEADING_READINGS`. The hold / split / intercept fields below are read by ``holds`` only, the lead and
-    #: the band and the clearance by ``per-step`` only: §10.1 compares them, and what it rejects goes with its fields.
-    heading_reading: str
+    # --- heading: absolute ground-track targets, read row by row (vocabulary design §10.1, instruction-v3)
+    #: Each row before the clearance is labelled with the grid heading nearest the track this long later, and the
+    #: rows merged into one word while that stays the same grid cell: a word says where the track will be.
     heading_lead_s: float
-    heading_band_deg: float
-    heading_clearance: str
     heading_step_deg: float
-    #: The hold band about a heading target (covers the grid's half step plus the track's wander).
+    #: A word's envelope: from each row, the track this far from the word in force `heading_lead_s` earlier, at most
+    #: (the grid's half step plus the track's wander); the clearance's convergence is judged within it too.
     heading_tolerance_deg: float
-    heading_min_hold_s: float
-    #: A heading word's turn from the target in force never exceeds this (from the track at
-    #: issue, which may sit anywhere in that target's band: this plus the heading tolerance).
-    heading_max_turn_deg: float
-    #: Larger turns are cut into equal parts no longer than this ...
-    heading_split_part_deg: float
-    #: ... and the next part is issued this far before the previous part's target is reached.
-    heading_continue_lead_deg: float
-    #: A turn begins where the track starts moving toward the next target faster than this.
+    #: The capture turn begins where the track starts moving toward the course faster than this.
     turn_onset_rate_deg_s: float
-    #: A hold is flown straight: its track's fitted rate stays at or below this.
-    heading_hold_max_rate_deg_s: float
-    #: A turn is flown at a turn RATE between these (turns are flown at a near-constant rate
-    #: whatever the speed; the bank grows with speed), and never beyond `turn_bank_max_deg`. The
-    #: lowest rate holds only for a turn of at least `turn_rate_min_from_deg`: a smaller change of
-    #: the ground track is mostly the wind drift of a hold, not a banked turn.
+    #: The capture turn is flown at a turn RATE between these (turns are flown at a near-constant rate whatever the
+    #: speed; the bank grows with speed), and never beyond `turn_bank_max_deg`. The lowest rate holds only for a
+    #: capture turn of at least `turn_rate_min_from_deg`: a smaller change of the ground track is mostly wind drift.
     turn_rate_min_deg_s: float
     turn_rate_max_deg_s: float
     turn_rate_min_from_deg: float
     turn_bank_max_deg: float
-    #: A turn may start up to this long after its word's row. The row is read off a track smoothed
-    #: by two centred windows — the data plane's velocity fit (`flight_scenarios.start_state.
-    #: DEFAULT_WINDOW_S`) and `track_smoothing_s` — which see a turn coming half a window early,
-    #: so the word's row can lead the flown turn by half their sum. Derived, not fitted.
-    turn_start_delay_max_s: float
     # --- approach
-    #: The intercept heading the labeller inserts when the track reaches the final from a
-    #: heading that does not converge on it (ATC_MAX_INTERCEPT_DEG).
+    #: Cleared, the executor intercepts the final at this angle on its own when the heading in force cannot reach it
+    #: even bent by the heading tolerance (ATC_MAX_INTERCEPT_DEG).
     intercept_angle_deg: float
     #: After capture the corridor's half width is `corridor_half_width_m` at the threshold and
     #: widens by tan(`corridor_widening_deg`) per metre before it (an angular corridor, as LOC /
@@ -152,10 +125,8 @@ class VocabularySpec:
                 raise ValueError(f"{item.name} = {value} is not finite")
         positive = (
             "step_s", "track_smoothing_s", "altitude_smoothing_s", "speed_smoothing_s", "heading_step_deg",
-            "heading_tolerance_deg", "heading_min_hold_s", "heading_max_turn_deg", "heading_split_part_deg",
-            "heading_continue_lead_deg", "turn_onset_rate_deg_s", "heading_hold_max_rate_deg_s", "turn_rate_min_deg_s",
-            "turn_rate_max_deg_s", "turn_rate_min_from_deg", "turn_bank_max_deg", "turn_start_delay_max_s",
-            "intercept_angle_deg",
+            "heading_tolerance_deg", "turn_onset_rate_deg_s", "turn_rate_min_deg_s", "turn_rate_max_deg_s",
+            "turn_rate_min_from_deg", "turn_bank_max_deg", "intercept_angle_deg",
             "corridor_half_width_m", "corridor_course_tolerance_deg", "landing_cross_limit_m", "landing_max_height_m",
             "parallel_course_delta_deg", "altitude_step_m", "altitude_max_m",
             "altitude_tolerance_m", "altitude_fit_tolerance_m", "level_min_s", "climb_angle_max_deg",
@@ -171,21 +142,10 @@ class VocabularySpec:
         if not _divides(360.0, self.heading_step_deg):
             raise ValueError(f"heading_step_deg {self.heading_step_deg} does not divide 360")
         if self.heading_tolerance_deg < self.heading_step_deg / 2:
-            raise ValueError("heading_tolerance_deg below half a heading step: a steady track between two "
-                             "targets could never be held")
-        if self.heading_clearance not in HEADING_CLEARANCES:
-            raise ValueError(f"heading_clearance {self.heading_clearance!r} is not one of {HEADING_CLEARANCES}")
-        if self.heading_reading not in HEADING_READINGS:
-            raise ValueError(f"heading_reading {self.heading_reading!r} is not one of {HEADING_READINGS}")
+            raise ValueError("heading_tolerance_deg below half a heading step: the observed track, within half a "
+                             "step of its own word, would leave the word's envelope")
         if self.heading_lead_s < 0.0 or not _divides(self.heading_lead_s, self.step_s):
             raise ValueError(f"heading_lead_s {self.heading_lead_s} is not a whole number of steps")
-        if self.heading_band_deg < self.heading_step_deg / 2:
-            raise ValueError("heading_band_deg below half a heading step: a track between two targets would switch "
-                             "words at every row")
-        if self.heading_split_part_deg + self.heading_continue_lead_deg > self.heading_max_turn_deg:
-            raise ValueError("a split part plus its lead would exceed heading_max_turn_deg")
-        if not self.heading_max_turn_deg + self.heading_tolerance_deg < 180.0:
-            raise ValueError("heading_max_turn_deg plus the heading tolerance must stay below a half circle")
         if not self.turn_rate_min_deg_s < self.turn_rate_max_deg_s:
             raise ValueError("turn rate range must be increasing")
         if not self.turn_bank_max_deg < 90.0:
@@ -233,6 +193,12 @@ class VocabularySpec:
     def rows(self, seconds: float) -> int:
         """Seconds on the step grid, as a whole number of rows (at least one)."""
         return max(1, int(round(seconds / self.step_s)))
+
+    def rows_exact(self, seconds: float) -> int:
+        """Seconds that are a whole number of steps (a lead, which may be none), as rows."""
+        if not _divides(seconds, self.step_s):
+            raise ValueError(f"{seconds} s is not a whole number of {self.step_s} s steps")
+        return int(round(seconds / self.step_s))
 
 
 def _divides(total: float, step: float) -> bool:

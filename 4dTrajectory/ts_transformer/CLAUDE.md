@@ -331,8 +331,8 @@ readout through evaluation, paired with the observed verdicts; val = stage 4, on
 OVERLAYS beside a Training set (`training/overlays.json`; every re-flown flight must reproduce its formal replay row, the
 prior's path reproduces its val readout; the executor export runs from a worktree — the spec's hash counts `geokit` from
 the main checkout), and the root publisher's `--executor-replay` files the replay's records under Experiments (R13).
-`heading_reading_compare` flies one train sample under every heading reading at fixed executor parameters, pairing
-evaluation with the observed flights graded by the same code (vocabulary design §10.1) (R14).
+`heading_reading_compare` (ARCHIVED 2026-09-24 with the holds reading) flew one train sample under every heading reading at
+fixed executor parameters, pairing evaluation with the observed flights graded by the same code (vocabulary design §10.1) (R14).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

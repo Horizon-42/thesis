@@ -1,8 +1,9 @@
 """The labeller's readout (vocabulary design §7): completeness, envelopes with their widths,
 sentence length and class usage — per split, per airport, per stratum.
 
-The stratum is read off the sentence itself: VECTORED when the heading turns before the capture
-add up to at least `VECTORED_TURN_DEG`, STRAIGHT-IN otherwise.
+The stratum is read off the sentence itself: VECTORED when the heading turned before the capture — from word to
+word, and on from the last word to the course (`LateralReading.turning_deg`) — adds up to at least
+`VECTORED_TURN_DEG`, STRAIGHT-IN otherwise.
 """
 
 from __future__ import annotations
@@ -25,32 +26,23 @@ def flight_record(reading: Reading) -> dict[str, Any]:
     """The compact per-flight record the summary pools (and `labels.json` keeps)."""
     after = reading.words[1:] != UNCHANGED
     checks = reading.checks
-    turns = checks["turns"]
+    heading, capture = checks["heading"], checks["capture_turn"]
     vertical, speed = checks["vertical"], checks["speed"]
     return {
         "dataset_id": reading.dataset_id, "airport": reading.airport, "status": "labelled",
         "rows": int(len(reading.words)),
-        "stratum": "vectored" if sum(abs(t["turn_deg"]) for t in turns) >= VECTORED_TURN_DEG else "straight-in",
+        "stratum": "vectored" if checks["turning_deg"] >= VECTORED_TURN_DEG else "straight-in",
+        "turning_deg": checks["turning_deg"],
         "words_after_step0": {COLUMNS[c]: int(after[:, c].sum()) for c in range(len(COLUMNS))},
         "silent_steps": int((~after.any(axis=1)).sum()),
-        "heading_splits": sum(1 for t in turns if t["parts"] > 1),
-        "intercept_inserted": bool(checks["intercept_inserted"]),
-        "turns": len(turns),
-        "turns_progress_ok": sum(1 for t in turns if t["progress_ok"]),
-        "turns_rate_ok": sum(1 for t in turns if t["rate_ok"]),
-        "turn_max_bank_deg": [t["max_bank_deg"] for t in turns],
-        "turn_mean_rate_deg_s": [t["mean_rate_deg_s"] for t in turns],
-        "intercept_turns": sum(1 for t in turns if t["kind"] == "intercept"),
-        "intercept_turns_progress_ok": sum(1 for t in turns if t["kind"] == "intercept" and t["progress_ok"]),
-        "capture_turns": int(checks["capture_turn"] is not None),
-        "capture_turns_progress_ok": int(checks["capture_turn"] is not None and checks["capture_turn"]["progress_ok"]),
-        "capture_turns_rate_ok": int(checks["capture_turn"] is not None and checks["capture_turn"]["rate_ok"]),
-        "holds_held": checks["holds"], "holds_judged": len(checks["hold_positions"]),
-        "holds_not_judged": checks["holds_not_judged"],
-        "hold_rows": sum(h["rows"] for h in checks["hold_positions"]),
-        "hold_rows_inside": sum(h["inside"] for h in checks["hold_positions"]),
-        "holds_contained": sum(1 for h in checks["hold_positions"] if h["inside"] == h["rows"]),
-        "hold_funnel_half_width_end_m": [h["half_width_end_m"] for h in checks["hold_positions"]],
+        "heading_words_judged": sum(1 for h in heading if h["rows"]),
+        "heading_contained": sum(1 for h in heading if h["rows"] and h["inside"] == h["rows"]),
+        "heading_rows": sum(h["rows"] for h in heading), "heading_rows_inside": sum(h["inside"] for h in heading),
+        "capture_turns": int(capture is not None),
+        "capture_turns_progress_ok": int(capture is not None and capture["progress_ok"]),
+        "capture_turns_rate_ok": int(capture is not None and capture["rate_ok"]),
+        "capture_turn_max_bank_deg": [] if capture is None else [capture["max_bank_deg"]],
+        "capture_turn_mean_rate_deg_s": [] if capture is None else [capture["mean_rate_deg_s"]],
         "capture_before_threshold_m": checks["capture_before_threshold_m"],
         "altitude_words": len(vertical), "altitude_contained": sum(1 for v in vertical if v["contained"]),
         "altitude_rows": sum(v["rows"] for v in vertical), "altitude_rows_inside": sum(v["inside"] for v in vertical),
@@ -63,9 +55,6 @@ def flight_record(reading: Reading) -> dict[str, Any]:
         "speed_band_rows": sum(v["band_rows"] for v in speed), "speed_band_inside": sum(v["band_inside"] for v in speed),
         "capture_row": reading.capture_row, "join_row": reading.join_row, "unspecified_row": reading.unspecified_row,
         "cut_at_crossing": reading.cut_at_crossing,
-        "heading_turns_deg": [t["turn_deg"] for t in turns],
-        # a turn below the spec's `turn_rate_min_from_deg`: a correction, mostly the track drifting with the wind
-        "small_turns": sum(1 for t in turns if not t["rate_min_applies"]),
     }
 
 
@@ -91,24 +80,16 @@ def summarise_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "instructions_per_flight": _quantiles(sum(r["words_after_step0"].values()) for r in records),
         "non_silent_step_share": _share(sum(r["rows"] - 1 - r["silent_steps"] for r in records),
                                         sum(r["rows"] - 1 for r in records)),
-        "heading_splits_per_flight": _quantiles(r["heading_splits"] for r in records),
-        "intercept_inserted_share": _share(sum(r["intercept_inserted"] for r in records), len(records)),
         "cut_at_crossing_share": _share(sum(r["cut_at_crossing"] for r in records), len(records)),
-        "heading_turn_deg": _quantiles(abs(t) for r in records for t in r["heading_turns_deg"]),
-        "small_heading_turn_share": _share(total("small_turns"), total("turns")),
-        "turns": {"n": total("turns"), "progress_ok": _share(total("turns_progress_ok"), total("turns")),
-                  "rate_ok": _share(total("turns_rate_ok"), total("turns")),
-                  "max_bank_deg": _quantiles(b for r in records for b in r["turn_max_bank_deg"]),
-                  "mean_rate_deg_s": _quantiles(b for r in records for b in r["turn_mean_rate_deg_s"]),
-                  "intercept_progress_ok": _share(total("intercept_turns_progress_ok"), total("intercept_turns"))},
+        "turning_deg": _quantiles(r["turning_deg"] for r in records),
+        "heading": {"judged": total("heading_words_judged"),
+                    "contained_share": _share(total("heading_contained"), total("heading_words_judged")),
+                    "row_share": _share(total("heading_rows_inside"), total("heading_rows"))},
         "capture_turns": {"n": total("capture_turns"),
                           "progress_ok": _share(total("capture_turns_progress_ok"), total("capture_turns")),
-                          "rate_ok": _share(total("capture_turns_rate_ok"), total("capture_turns"))},
-        "holds": {"held": total("holds_held"), "judged": total("holds_judged"),
-                  "not_judged": dict(sum((Counter(r["holds_not_judged"]) for r in records), Counter())),
-                  "row_share": _share(total("hold_rows_inside"), total("hold_rows")),
-                  "contained_share": _share(total("holds_contained"), total("holds_judged"))},
-        "hold_funnel_half_width_end_m": _quantiles(w for r in records for w in r["hold_funnel_half_width_end_m"]),
+                          "rate_ok": _share(total("capture_turns_rate_ok"), total("capture_turns")),
+                          "max_bank_deg": _quantiles(b for r in records for b in r["capture_turn_max_bank_deg"]),
+                          "mean_rate_deg_s": _quantiles(b for r in records for b in r["capture_turn_mean_rate_deg_s"])},
         "capture_before_threshold_m": _quantiles(r["capture_before_threshold_m"] for r in records),
         "altitude": {"words": total("altitude_words"),
                      "contained_share": _share(total("altitude_contained"), total("altitude_words")),

@@ -18,9 +18,8 @@ from typing import Any
 import numpy as np
 
 from final_approach.assign import LandingScreen
-from flight_scenarios.start_state import DEFAULT_WINDOW_S as VELOCITY_FIT_WINDOW_S
 from ts_transformer.instructions import envelope
-from ts_transformer.instructions.labeller.lateral import find_holds
+from ts_transformer.instructions.labeller.lateral import per_step_words
 from ts_transformer.instructions.labeller.read import Admitted
 from ts_transformer.instructions.labeller.vertical import MOVE, vertical_pieces
 from ts_transformer.instructions.piecewise import fit_pieces
@@ -30,10 +29,12 @@ from ts_transformer.instructions.spec import (
 from ts_transformer.instructions.words import Words
 
 #: The heading tolerance is half the grid step plus this allowance for the track's own wander in
-#: a hold — a choice: the wander measured inside a free hold (no grid) grows with the band it is
+#: straight flight — a choice: the wander measured inside a free hold (no grid) grows with the band it is
 #: measured in, so `measurements.json` lists it for the bands in `FREE_HOLD_HALF_RANGES_DEG`.
 HEADING_WANDER_ALLOWANCE_DEG = 2.0
 FREE_HOLD_HALF_RANGES_DEG = (1.0, 2.0, 3.0, 4.0)
+#: A free hold (straight flight inside a band, for the wander above) is at least this long.
+FREE_HOLD_MIN_S = 10.0
 #: Likewise the altitude tolerance is half the step plus the fit tolerance (a level piece's rows
 #: lie within it of their line); the level wander is listed for these fit tolerances.
 LEVEL_FIT_TOLERANCES_M = (5.0, 10.0, 20.0)
@@ -44,20 +45,11 @@ SUGGESTED: dict[str, Any] = {
     "track_smoothing_s": 6.0,
     "altitude_smoothing_s": 10.0,
     "speed_smoothing_s": 10.0,
-    # §10.1 compares the two heading readings (`experiments/heading_reading_compare.py` sets its own); until the
-    # user picks one, a formal spec keeps the reading of instruction-v2
-    "heading_reading": "holds",
-    "heading_lead_s": 0.0,
-    "heading_band_deg": 2.5,
-    "heading_clearance": "last-word",
+    # §10.1 (user 2026-09-24): the per-step reading on a 5° grid, each row labelled with the track 4 s later
+    "heading_lead_s": 4.0,
     "heading_step_deg": 5.0,
-    "heading_min_hold_s": 10.0,
-    "heading_max_turn_deg": 150.0,
-    "heading_split_part_deg": 140.0,
-    "heading_continue_lead_deg": 10.0,
     "turn_onset_rate_deg_s": 0.2,
     "turn_rate_min_from_deg": 10.0,
-    "heading_hold_max_rate_deg_s": 0.2,
     "intercept_angle_deg": ATC_MAX_INTERCEPT_DEG,
     "landing_cross_limit_m": LandingScreen().threshold_radius_m,
     "landing_max_height_m": LandingScreen().max_crossing_height_m,
@@ -82,7 +74,6 @@ SUGGESTED: dict[str, Any] = {
     "unspecified_distance_m": ATC_NO_SPEED_ASSIGNMENT_DISTANCE_M,
 }
 SUGGESTED["heading_tolerance_deg"] = SUGGESTED["heading_step_deg"] / 2 + HEADING_WANDER_ALLOWANCE_DEG
-SUGGESTED["turn_start_delay_max_s"] = (VELOCITY_FIT_WINDOW_S + SUGGESTED["track_smoothing_s"]) / 2
 SUGGESTED["altitude_tolerance_m"] = SUGGESTED["altitude_step_m"] / 2 + SUGGESTED["altitude_fit_tolerance_m"]
 #: Descent classes: how many, and the outer edges (a slightly negative floor so a flat stretch
 #: inside a descent keeps a descent class; the steepest descent an airliner could fly).
@@ -160,8 +151,9 @@ def _free_holds(track: np.ndarray, min_rows: int, half_range_deg: float) -> list
     return holds
 
 
-def _turn_runs(rate: np.ndarray, onset_deg_s: float) -> list[tuple[int, int]]:
-    """Runs of rows turning one way faster than the labeller's turn onset rate."""
+def turn_runs(rate: np.ndarray, onset_deg_s: float) -> list[tuple[int, int]]:
+    """Runs of rows turning one way faster than the labeller's turn onset rate: ``(start, stop)`` over ``rate``
+    (``rate[i]`` turns the track from row ``i`` to ``i + 1``), so the turn runs from track row ``start`` to ``stop``."""
     turning = np.abs(rate) > onset_deg_s
     runs, row = [], 0
     while row < len(rate):
@@ -185,15 +177,15 @@ def measure_flight(flight: Admitted, spec: VocabularySpec) -> dict[str, np.ndarr
         *(f"heading_wander_deg_band{h:g}" for h in FREE_HOLD_HALF_RANGES_DEG),
         *(f"level_wander_m_fit{t:g}" for t in LEVEL_FIT_TOLERANCES_M),
         "turn_mean_rate_deg_s", "turn_row_rate_deg_s", "turn_row_bank_deg", "speed_wander_mps", "transition_accel_mps2",
-        "final_course_error_deg", "move_angle_deg", "move_length_m", "turns_over_max",
+        "final_course_error_deg", "move_angle_deg", "move_length_m",
     )}
     for half_range in FREE_HOLD_HALF_RANGES_DEG:
-        for start, stop in _free_holds(track, spec.rows(spec.heading_min_hold_s), half_range):
+        for start, stop in _free_holds(track, spec.rows(FREE_HOLD_MIN_S), half_range):
             segment = track[start:stop]
             out[f"heading_wander_deg_band{half_range:g}"] += list(np.abs(segment - np.median(segment)))
     rate = np.diff(track) / spec.step_s
     bank = envelope.bank_deg_from_turn_rate(rate, speed[1:])
-    for start, stop in _turn_runs(rate, spec.turn_onset_rate_deg_s):
+    for start, stop in turn_runs(rate, spec.turn_onset_rate_deg_s):
         if abs(track[stop] - track[start]) >= spec.turn_rate_min_from_deg:
             out["turn_mean_rate_deg_s"].append(float(abs(rate[start:stop].mean())))
             out["turn_row_rate_deg_s"] += list(np.abs(rate[start:stop]))
@@ -217,10 +209,6 @@ def measure_flight(flight: Admitted, spec: VocabularySpec) -> dict[str, np.ndarr
         if piece.kind == MOVE:
             out["move_angle_deg"].append(piece.angle_deg)
             out["move_length_m"].append(float(distance[piece.stop - 1] - distance[piece.start]))
-    holds = find_holds(track, len(track), spec)
-    for previous, hold in zip(holds, holds[1:]):
-        if abs(hold.target_unwrapped - previous.target_unwrapped) > spec.heading_max_turn_deg:
-            out["turns_over_max"].append(abs(hold.target_unwrapped - previous.target_unwrapped))
     return {name: np.asarray(values, dtype=np.float64) for name, values in out.items()}
 
 
@@ -239,8 +227,8 @@ def aligned_final_row(flight: Admitted, course_tolerance_deg: float) -> int | No
 def measure_final(flight: Admitted, spec: VocabularySpec, course_tolerance_deg: float,
                   grids: dict[float, float]) -> tuple[dict[str, np.ndarray], dict[str, list[float]]]:
     """Pass B, with the measured course tolerance: the aligned final's offsets by distance (the
-    corridor), and for each heading grid (step → tolerance) the holds before the aligned final,
-    their changes of target and each hold's funnel half width at its end — the trade the grid
+    corridor), and for each heading grid (step → tolerance) the heading words the per-step reading says
+    before the aligned final (`labeller.lateral.per_step_words`, at the spec's lead) — the trade the grid
     choice is made on."""
     first = aligned_final_row(flight, course_tolerance_deg)
     relative, smoothed = flight.relative, flight.smoothed
@@ -248,22 +236,11 @@ def measure_final(flight: Admitted, spec: VocabularySpec, course_tolerance_deg: 
     if first is not None:
         arrays = {"aligned_offset_m": np.abs(relative.right_of_course_m[first:]),
                   "aligned_distance_m": np.asarray(relative.before_threshold_m[first:], dtype=np.float64)}
-    stop = len(smoothed.track_deg) if first is None else first
-    rows: dict[str, list[float]] = {}
-    for step, tolerance in grids.items():
-        grid_spec = _with(spec, heading_step_deg=step, heading_tolerance_deg=tolerance)
-        holds = find_holds(smoothed.track_deg, stop, grid_spec)
-        changes = sum(1 for a, b in zip(holds, holds[1:]) if a.target_unwrapped != b.target_unwrapped)
-        widths = [float(envelope.funnel_half_width_m(smoothed.distance_m[h.stop - 1] - smoothed.distance_m[h.start],
-                                                     tolerance)) for h in holds]
-        rows[f"{step:g}"] = [float(len(holds)), float(changes), *widths]
+    stop = len(smoothed.track_deg) - 1 if first is None else first
+    lead = spec.rows_exact(spec.heading_lead_s)
+    rows = {f"{step:g}": [float(len(per_step_words(smoothed.track_deg, max(stop, 1), step, lead)) - 1)]
+            for step in grids}
     return arrays, rows
-
-
-def _with(spec: VocabularySpec, **changes: Any) -> VocabularySpec:
-    data = spec.to_dict()
-    data.update(changes)
-    return VocabularySpec.from_dict(data)
 
 
 def percentiles(values: np.ndarray) -> dict[str, float]:

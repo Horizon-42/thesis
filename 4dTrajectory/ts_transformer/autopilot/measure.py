@@ -3,10 +3,11 @@
 Data (train, the labeller's own reading of each flight — `flight_measurements`, pooled by
 `measured_values`):
 
-- ``turn_rate_deg_s`` (r_turn): turns of at least `TURN_MIN_DEG`, their middle half (the first and last
-  quarter dropped: the 15 s velocity fit smears the roll-in and roll-out); each turn's steady rate is the
-  median of its middle rows, and r_turn the median over turns — a typical turn's steady rate, every turn
-  counted once whatever its length;
+- ``turn_rate_deg_s`` (r_turn): the turns the heading words describe — before the clearance, each run of rows turning
+  one way faster than the turn onset rate (`instructions.measure.turn_runs`) — of at least `TURN_MIN_DEG`, their
+  middle half (the first and last quarter dropped: the 15 s velocity fit smears the roll-in and roll-out); each
+  turn's steady rate is the median of its middle rows, and r_turn the median over turns — a typical turn's steady
+  rate, every turn counted once whatever its length;
 - ``bank_cap_deg`` (φ_cap): the same middle rows at ground speeds in `FAST_BAND_MPS`, each turn's median
   bank there, the median over the turns that have such rows, up to a whole degree, never past the
   vocabulary's bank ceiling;
@@ -36,6 +37,7 @@ from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, read_flight
 from ts_transformer.instructions.labeller.speed import span_checks
+from ts_transformer.instructions.measure import turn_runs
 from ts_transformer.instructions.piecewise import fit_pieces
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
@@ -56,14 +58,14 @@ def flight_measurements(flight: Admitted, reading: Reading, geometry: AirportGeo
     smoothed = flight.smoothed
     track, speed = smoothed.track_deg, smoothed.ground_speed_mps
     out: dict[str, list[float]] = {name: [] for name in MEASUREMENTS}
-    for turn in reading.checks["turns"]:
-        if turn["kind"] != "turn" or abs(turn["turn_deg"]) < TURN_MIN_DEG:
+    turning = np.diff(track[: reading.join_row + 1]) / spec.step_s
+    for start, stop in turn_runs(turning, spec.turn_onset_rate_deg_s):
+        if abs(track[stop] - track[start]) < TURN_MIN_DEG:
             continue
-        start, stop = int(turn["departure_row"]), int(turn["arrival_row"])
         quarter = (stop - start) // 4
-        rows = slice(start + quarter, stop - quarter)
-        rate = np.abs(np.diff(track[rows])) / spec.step_s
-        middle_speed = speed[rows][1:]
+        middle = slice(start + quarter, stop - quarter)
+        rate = np.abs(turning[middle])
+        middle_speed = speed[1:][middle]
         out["turn_steady_rate_deg_s"].append(float(np.median(rate)))
         fast = (middle_speed >= FAST_BAND_MPS[0]) & (middle_speed <= FAST_BAND_MPS[1])
         if fast.any():

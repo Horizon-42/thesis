@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -14,7 +12,7 @@ from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import (
     AirportGeometry, RunwayCandidate, RunwayRelative, landing_cross_limit_m, relative_to_runway,
 )
-from ts_transformer.instructions.labeller.lateral import HeadingSpan, LateralReading, heading_spans, read_lateral
+from ts_transformer.instructions.labeller.lateral import read_lateral
 from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.labeller.sentence import assemble
 from ts_transformer.instructions.labeller.speed import read_speed, span_checks
@@ -22,7 +20,7 @@ from ts_transformer.instructions.labeller.vertical import read_vertical, tube_ch
 from ts_transformer.instructions.piecewise import moving_average
 from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import RUNWAY, Words, wrap180
+from ts_transformer.instructions.words import HEADING, RUNWAY, Words
 
 
 @dataclass
@@ -131,66 +129,6 @@ def admit(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpe
                     relative=relative, cut_at_crossing=crossing is not None)
 
 
-def turn_ends_at(flight: Admitted, row: int, target_deg: float, spec: VocabularySpec) -> envelope.TurnEnds:
-    """§2.3's extreme turns from ``row`` (a heading word's issue row, or the capture turn's start):
-    the shorter way from the track there to ``target_deg``, flown at the speeds the flight flew."""
-    track, speed = flight.smoothed.track_deg, flight.smoothed.ground_speed_mps
-    return envelope.turn_ends(float(track[row]), float(wrap180(target_deg - track[row])), speed[row:], spec.step_s,
-                              spec.turn_rate_min_deg_s, spec.turn_rate_max_deg_s, spec.turn_bank_max_deg,
-                              spec.heading_tolerance_deg, spec.turn_start_delay_max_s)
-
-
-def span_funnel(flight: Admitted, span: HeadingSpan, target_deg: float,
-                spec: VocabularySpec) -> tuple[envelope.TurnEnds | None, envelope.HoldFunnel]:
-    """A held heading word's funnel (§2.3), as long as the flight flew it: from where its turn may
-    end (`turn_ends_at` from the word's issue row), or from the issue point itself for a word flown
-    from entry. Its length is the path flown to the hold's end, summed along the very positions the
-    rows are judged by (the smoothed ground speed integrates to ~0.2 % less, which would push a long
-    hold's last rows out), from where the turn may have ended: `turn_start_delay_max_s` before the
-    turn's last row, not before the issue row. The track enters the band between that row and the
-    hold's first as the labeller reads it, and the two centred windows that let the reading see a
-    turn begin up to `turn_start_delay_max_s` early let it see the turn end as much late. A word
-    flown from entry measures from its issue row. No row can then lie beyond the funnel along θ
-    from a turn that ended where it may, and the length bounds only how far along θ it ended."""
-    row = span.word.row
-    positions = np.column_stack((flight.signals.e_m, flight.signals.n_m))
-    if span.turn is None:
-        ends, starts, origin = None, positions[row][None, :], span.hold_start
-    else:
-        ends = turn_ends_at(flight, row, target_deg, spec)
-        late = math.ceil(spec.turn_start_delay_max_s / spec.step_s)
-        starts, origin = positions[row] + ends.corners, max(row, span.hold_start - 1 - late)
-    length = float(np.hypot(*np.diff(positions[origin: span.hold_end + 1], axis=0).T).sum())
-    return ends, envelope.hold_funnel(starts, target_deg, spec.heading_tolerance_deg, length)
-
-
-def hold_positions(flight: Admitted, lateral: LateralReading, kept: list[Instruction], spec: VocabularySpec,
-                   words: Words) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """§2.3's hold envelope, judged row by row: for every heading word with a hold
-    (`lateral.heading_spans`), whether each of its rows, from the hold's start to its end
-    inclusive, lies in the word's funnel (`span_funnel`). Returns the judged holds and, by reason,
-    the holds not judged: after a turn smaller than `turn_rate_min_from_deg` (the lowest rate does
-    not apply, so there is no slowest turn), and where the slowest turn does not reach the band
-    before the flight ends."""
-    positions = np.column_stack((flight.signals.e_m, flight.signals.n_m))
-    judged, skipped = [], Counter()
-    for span in heading_spans(kept, lateral.turns, lateral.capture_turn, lateral.capture_row):
-        if not span.held:
-            continue
-        if span.turn is not None and not span.turn["rate_min_applies"]:
-            skipped["after a turn under turn_rate_min_from_deg"] += 1
-            continue
-        ends, funnel = span_funnel(flight, span, words.heading_deg(span.word.value), spec)
-        if ends is not None and not ends.finished:
-            skipped["slowest turn unfinished"] += 1
-            continue
-        rows = positions[span.hold_start: span.hold_end + 1]
-        judged.append({"issue_row": span.word.row, "hold_start": span.hold_start, "hold_end": span.hold_end,
-                       "rows": len(rows), "inside": int(envelope.inside_convex(rows, funnel.outline).sum()),
-                       "half_width_end_m": funnel.end_half_width_m})
-    return judged, dict(skipped)
-
-
 def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: VocabularySpec,
                 words: Words | None = None) -> Reading:
     words = words or Words(spec)
@@ -204,13 +142,12 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
                     *lateral.instructions, *vertical.instructions, *speeds.instructions]
     grid, kept = assemble(signals.n_rows, instructions, smoothed.altitude_m, spec, words)
 
-    # every check runs on the sentence as kept: a word the assembly dropped is not judged; the per-step reading has
-    # no holds, and its words' envelope is still to be designed (§10.1)
-    held, not_held = hold_positions(flight, lateral, kept, spec, words) if spec.heading_reading == "holds" else ([], {})
+    # every check runs on the sentence as kept: a word the assembly dropped is not judged
+    heading = [(item.row, float(item.info["target_deg"])) for item in kept if item.column == HEADING]
     checks = {
-        "holds": len(held) + sum(not_held.values()),
-        "turns": lateral.turns, "intercept_inserted": lateral.intercept_inserted, "capture_turn": lateral.capture_turn,
-        "hold_positions": held, "holds_not_judged": not_held,
+        "heading": envelope.heading_words_inside(smoothed.track_deg, heading, spec.rows_exact(spec.heading_lead_s),
+                                                 lateral.join_row, spec.heading_tolerance_deg),
+        "capture_turn": lateral.capture_turn, "turning_deg": lateral.turning_deg,
         "capture_before_threshold_m": float(relative.before_threshold_m[lateral.capture_row]),
         "vertical": tube_checks(kept, smoothed.distance_m, smoothed.altitude_m, spec, words),
         "speed": span_checks(kept, smoothed.ground_speed_mps, spec, words),

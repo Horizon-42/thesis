@@ -21,19 +21,11 @@ Layer 2, every word (§8.2): the sentence's words checked against what was FLOWN
 checks. The flown track is read at the sentence's 2 s rows through `read.admit` — the gate observed
 flights pass, smoothing and the landing cut included — and judged from each word's own row:
 
-- a heading word — a split turn's parts together, as the labeller judges them: its turn from the (first)
-  word's row to where the flown track enters the (last) word's band, with the labeller's own turn check
-  (`labeller.lateral._turn_check`; the turn's way and size are the labeller's record of the observed turn,
-  so an orbit stays a 360° turn), then its hold's rows in the funnel (`read.span_funnel` over a
-  `lateral.HeadingSpan` of the FLOWN track; after a turn, `hold_funnel`, its mirror with the turn's way
-  given), up to the next heading word or where the executor's capture
-  turn begins — as the labeller ends a hold at the capture turn; holds the labeller would not judge (after
-  a turn under `turn_rate_min_from_deg`, or whose slowest turn does not finish) are not judged here either.
-  A turn the executor's capture takes over before its band is reached (the clearance comes with it, and the
-  vocabulary lets the capture begin at once, §2.2) is judged as the labeller judges an intercept the
-  capture cuts: to its furthest progress (`labeller.lateral._intercept_end`), not "reached", its rate judged
-  on the turn it flew before the capture took over; a turn cut before it progressed at all, or said at or after the capture (a word acting early — a sensitivity probe, or a
-  generated sentence), is ``superseded`` by the capture, not judged;
+- a heading word (vocabulary design §10.1): said at a flown row, it says where the track is `heading_lead_s`
+  later, so from that row plus the lead to the next heading word's row plus the lead every row of the flown track
+  lies within the heading tolerance of it (`envelope.heading_words_inside`, the labeller's own check), up to the
+  clearance the executor was told or its capture, whichever came first (the capture turn is judged as its own); a
+  word whose rows the lead carries past that is not judged;
 - the heading word in force while the executor intercepted the line on its own at more than the heading tolerance
   from it (`lateral`: cleared on a heading that cannot reach the line) failed;
 - the clearance: the executor's capture turn, from its first row to where the track is on the course (within
@@ -50,7 +42,6 @@ first flew what it was told, and one that did not land fails layer 3 anyway.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -61,8 +52,8 @@ from ts_transformer.autopilot.executor import LIMITS, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
 from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m, relative_to_runway
-from ts_transformer.instructions.labeller.lateral import HeadingSpan, _intercept_end, _turn_check
-from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, landing_passages, span_funnel
+from ts_transformer.instructions.labeller.lateral import turn_check
+from ts_transformer.instructions.labeller.read import Reading, admit, landing_passages
 from ts_transformer.instructions.labeller.records import Instruction, Refused
 from ts_transformer.instructions.labeller.speed import span_checks
 from ts_transformer.instructions.labeller.vertical import tube_checks
@@ -174,44 +165,12 @@ def flown_signals(track: dict[str, np.ndarray], end_row: int, reference: FlightS
                          vertical_rate_mps=track["vertical_rate"][rows])
 
 
-def _turn_groups(heading: list[Instruction]) -> list[list[Instruction]]:
-    """Heading words grouped into the turns they fly: a split turn's parts are ONE turn (the labeller
-    judges it whole, its next part issued before the previous one's band is reached)."""
-    groups: list[list[Instruction]] = []
-    for word in heading:
-        continues = word.kind.endswith("-split") and word.info["part"] > 1
-        if continues:
-            groups[-1].append(word)
-        else:
-            groups.append([word])
-    return groups
-
-
-def hold_funnel(flight: Admitted, span: HeadingSpan, target_deg: float, turn_deg: float,
-                spec: VocabularySpec) -> tuple[envelope.TurnEnds, envelope.HoldFunnel]:
-    """MIRROR of `instructions.labeller.read.span_funnel` for a span reached through a turn, with the turn's
-    signed size from the word's row GIVEN (``turn_deg``) where the labeller takes the shorter way from the
-    track there: the executor may lag a split turn by more than 180° less its part when the last part is
-    said, and the vocabulary measures a word from the word in force (§2.3). Equal to the labeller's for a
-    turn under 180° (checked in `tests/test_autopilot.py`)."""
-    row = span.word.row
-    track, speed = flight.smoothed.track_deg, flight.smoothed.ground_speed_mps
-    positions = np.column_stack((flight.signals.e_m, flight.signals.n_m))
-    ends = envelope.turn_ends(float(track[row]), turn_deg, speed[row:], spec.step_s, spec.turn_rate_min_deg_s,
-                              spec.turn_rate_max_deg_s, spec.turn_bank_max_deg, spec.heading_tolerance_deg,
-                              spec.turn_start_delay_max_s)
-    late = math.ceil(spec.turn_start_delay_max_s / spec.step_s)
-    origin = max(row, span.hold_start - 1 - late)
-    length = float(np.hypot(*np.diff(positions[origin: span.hold_end + 1], axis=0).T).sum())
-    return ends, envelope.hold_funnel(positions[row] + ends.corners, target_deg, spec.heading_tolerance_deg, length)
-
-
 def said_at(instructions: list[Instruction], flown_rows: list[int]) -> tuple[list[Instruction], int]:
     """The sentence's words at the flown rows the executor was told them at (``info["sentence_row"]``: the row
     the observed aircraft was told it at), and how many were superseded before they flew: on a clock that runs
     ahead of the sentence (the executor cut a corner the observed aircraft flew round), two altitude, angle or
-    speed words can fall on one flown row, and only the later one is flown. Heading words are kept (a split
-    turn's parts said together are still one turn)."""
+    speed words can fall on one flown row, and only the later one is flown. Heading words are kept (each is judged
+    on its own rows, `envelope.heading_words_inside`)."""
     moved = [replace(word, row=row, info={**word.info, "sentence_row": word.row})
              for word, row in zip(instructions, flown_rows)]
     last = {}
@@ -220,81 +179,6 @@ def said_at(instructions: list[Instruction], flown_rows: list[int]) -> tuple[lis
     kept = [word for number, word in enumerate(moved)
             if word.column not in (ALTITUDE, ANGLE, SPEED_WORD) or last[(word.column, word.row)] == number]
     return kept, len(moved) - len(kept)
-
-
-def _heading_words(flight: Admitted, instructions: list[Instruction], turns: list[dict[str, Any]],
-                   capture_row: int | None, spec: VocabularySpec, words: Words) -> list[dict[str, Any]]:
-    """One result per turn (a single word, or a split turn's parts together), from its first word's row:
-    the turn to where the flown track enters the last word's band, then the hold to the next heading word or
-    the executor's capture (``capture_row``: None when it never captured; the holds then run to the flown
-    track's end). ``instructions`` are at the flown rows the executor was told them at (`said_at`); ``turns``
-    are the labeller's turn records of the observed flight, found by the sentence row: their signed
-    ``turn_deg`` fixes the turn's way and size."""
-    smoothed = flight.smoothed
-    track, speed = smoothed.track_deg, smoothed.ground_speed_mps
-    every = _turn_groups(sorted((i for i in instructions if i.column == HEADING), key=lambda item: item.row))
-    # a heading word said at or after the executor's capture never flew: the capture had taken over
-    groups = [g for g in every if capture_row is None or g[0].row < capture_row or g[0].kind == "initial"]
-    last_end = flight.signals.n_rows - 1 if capture_row is None else capture_row
-    ends = [group[0].row for group in groups[1:]] + [last_end]
-    results = []
-    for number, (group, end) in enumerate(zip(groups, ends)):
-        first, last = group[0], group[-1]
-        target = words.heading_deg(last.value)
-        # "turn": None for the word flown from entry or a turn the capture superseded; "hold": None when no
-        # row is held, a reason when the labeller would not judge it, else its rows and those in the funnel
-        result: dict[str, Any] = {"row": first.row, "kind": first.kind, "words": len(group), "turn": None,
-                                  "superseded": False, "hold": None}
-        if first.kind == "initial":
-            arrival, turn, target_unwrapped = first.row, None, target
-        else:
-            (record,) = [r for r in turns
-                         if r["departure_row"] == first.info["sentence_row"] and first.kind.startswith(r["kind"])]
-            # the turn said so far: all of it, or the parts said (the sentence may end mid split turn)
-            said = record["turn_deg"] * len(group) / record["parts"]
-            shorter = float(wrap180(target - track[first.row]))
-            total = shorter + 360.0 * round((said - shorter) / 360.0)
-            target_unwrapped = float(track[first.row]) + total
-            inside = np.abs(track[first.row: end + 1] - target_unwrapped) <= spec.heading_tolerance_deg
-            arrival = first.row + int(np.argmax(inside)) if inside.any() else None
-            cut = arrival is None and capture_row is not None and number == len(groups) - 1
-            if cut:
-                stop = _intercept_end(track, first.row, end, target_unwrapped, spec.heading_tolerance_deg)
-            else:
-                stop = end if arrival is None else arrival
-            if cut and stop == first.row:
-                result["superseded"] = True
-                results.append(result)
-                continue
-            check = _turn_check(track, speed, first.row, stop, target_unwrapped, spec)
-            turn = {"rate_min_applies": check["rate_min_applies"]}
-            # a turn the capture cut is judged at the rate of the turn it flew before the capture took over (the
-            # rest of the turn is the capture's, judged there): its mean over a span of a row or two is its roll-in
-            rate_ok = (_turn_check(track, speed, first.row, stop, float(track[stop]), spec)["rate_ok"] if cut
-                       else check["rate_ok"])
-            result["turn"] = {"reached": arrival is not None or cut, "progress_ok": check["progress_ok"],
-                              "rate_ok": rate_ok}
-        if arrival is None or end <= arrival:
-            results.append(result)
-            continue
-        span = HeadingSpan(word=last, turn=turn, hold_start=arrival, hold_end=end)
-        if turn is not None and not turn["rate_min_applies"]:
-            result["hold"] = "not judged: after a turn under turn_rate_min_from_deg"
-        else:
-            if turn is None:
-                ends_of_turn, funnel = span_funnel(flight, span, target, spec)
-            else:
-                ends_of_turn, funnel = hold_funnel(flight, span, target, target_unwrapped - float(track[last.row]),
-                                                   spec)
-            if ends_of_turn is not None and not ends_of_turn.finished:
-                result["hold"] = "not judged: slowest turn unfinished"
-            else:
-                positions = np.column_stack((flight.signals.e_m, flight.signals.n_m))[arrival: end + 1]
-                inside = envelope.inside_convex(positions, funnel.outline)
-                result["hold"] = {"rows": int(len(inside)), "inside": int(inside.sum())}
-        results.append(result)
-    return results + [{"row": group[0].row, "kind": group[0].kind, "words": len(group), "turn": None,
-                       "superseded": True, "hold": None} for group in every[len(groups):]]
 
 
 @dataclass
@@ -355,8 +239,12 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
         return min(rows - 1, int(cycles[0] + 1) // step_rows) if len(cycles) else None
 
     capture_row, tracking_row = first_row("captured"), first_row("tracking")
-    headings = _heading_words(flight, reached, reading.checks["turns"], capture_row, spec, words)
     smoothed, relative = flight.smoothed, flight.relative
+    cleared_at = [word.row for word in reached if word.column == APPROACH and word.kind == "clear"]
+    heading_end = min([rows, *cleared_at, *([] if capture_row is None else [capture_row])])
+    headings = envelope.heading_words_inside(
+        smoothed.track_deg, [(word.row, float(word.info["target_deg"])) for word in reached if word.column == HEADING],
+        spec.rows_exact(spec.heading_lead_s), heading_end, spec.heading_tolerance_deg)
     capture_turn = None
     if capture_row is not None:
         # the capture turn: from the capture to where the track is on the course (within the corridor's course
@@ -365,7 +253,7 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
                                                                          - smoothed.track_deg[capture_row]))
         on_course = np.abs(smoothed.track_deg[capture_row:] - course) <= spec.corridor_course_tolerance_deg
         end = capture_row + int(np.argmax(on_course)) if on_course.any() else rows - 1
-        check = _turn_check(smoothed.track_deg, smoothed.ground_speed_mps, capture_row, end, course, spec)
+        check = turn_check(smoothed.track_deg, smoothed.ground_speed_mps, capture_row, end, course, spec)
         capture_turn = {"rows": end - capture_row, "progress_ok": check["progress_ok"], "rate_ok": check["rate_ok"]}
     inside = envelope.corridor(relative.right_of_course_m, relative.track_minus_course_deg, relative.before_threshold_m,
                                spec.corridor_half_width_m, spec.corridor_widening_deg,
@@ -376,13 +264,11 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     cleared = any(i.column == APPROACH for i in reached if i.kind == "clear")
     vertical = tube_checks(reached, smoothed.distance_m, smoothed.altitude_m, spec, words)
     speed = span_checks(reached, smoothed.ground_speed_mps, spec, words)
-    holds = [h["hold"] for h in headings if isinstance(h["hold"], dict)]
     clearance_ok = (capture_turn is not None and capture_turn["progress_ok"] and capture_turn["rate_ok"]
                     and len(corridor) > 0 and bool(corridor.all()))
     # the executor left the heading word in force to intercept the line on its own (lateral law): that word failed
     off_word = int(flown.modes["intercepting_off_word"][index, :end_row].sum())
-    contained = (off_word == 0 and all(h["turn"] is None or all(h["turn"].values()) for h in headings)
-                 and all(h["inside"] == h["rows"] for h in holds)
+    contained = (off_word == 0 and all(h["inside"] == h["rows"] for h in headings)
                  and (not cleared or clearance_ok)
                  and all(v["contained"] for v in vertical) and all(v["contained"] for v in speed))
     return Verdict(outcome, end_row, crossing, limits, flown_rows=end_row + 1, words={

@@ -58,7 +58,9 @@ GATE_SHARE = 0.95
 #: The name the records carry as their predictor, and the horizon they were flown over.
 PREDICTOR = "executor"
 HORIZON = "sentence"
-REPLAY_SCHEMA = "ts-executor-replay-v1"
+#: v2 (2026-09-24, instruction-v3): a heading word is judged on the rows a lead after it (vocabulary design §10.1),
+#: no turn or hold.
+REPLAY_SCHEMA = "ts-executor-replay-v2"
 
 
 def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inputs: Any,

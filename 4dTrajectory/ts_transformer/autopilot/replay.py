@@ -229,9 +229,8 @@ def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *, device: tor
 
 def word_results(verdict: Verdict) -> tuple[list[tuple[str, bool]], int] | None:
     """Every word the judge judged, ``(column, inside its envelope)``, and how many heading words it did not
-    judge (a turn the capture superseded, or a word with neither a turn nor a hold judged); None when the
-    flown track did not pass the labeller's gate (nothing was judged). A judged heading result stands for
-    each word of its turn."""
+    judge (the lead carried their rows past the clearance or the capture); None when the flown track did not
+    pass the labeller's gate (nothing was judged)."""
     if verdict.words is None:
         return None
     judged: list[tuple[str, bool]] = []
@@ -239,13 +238,10 @@ def word_results(verdict: Verdict) -> tuple[list[tuple[str, bool]], int] | None:
     if verdict.words["intercepting_off_word_cycles"]:
         judged.append(("heading", False))                   # the word the executor left to intercept on its own
     for h in verdict.words["heading"]:
-        hold = h["hold"] if isinstance(h["hold"], dict) else None
-        if h["turn"] is None and hold is None:
-            not_judged += h["words"]
+        if h["rows"] == 0:
+            not_judged += 1
             continue
-        turn_ok = h["turn"] is None or all(h["turn"].values())
-        hold_ok = hold is None or hold["inside"] == hold["rows"]
-        judged += [("heading", turn_ok and hold_ok)] * h["words"]
+        judged.append(("heading", h["inside"] == h["rows"]))
     corridor, capture = verdict.words["corridor"], verdict.words["capture_turn"]
     if corridor["cleared"]:
         judged.append(("approach", capture is not None and capture["progress_ok"] and capture["rate_ok"]
@@ -267,12 +263,8 @@ def summary(verdicts: list[Verdict]) -> dict[str, Any]:
             words_failed["flown track refused by the labeller's gate"] += 1
             continue
         for h in v.words["heading"]:
-            words_failed["turn superseded by the capture (not judged)"] += h["superseded"]
-            if h["turn"] is not None:
-                words_failed["turn not reached"] += not h["turn"]["reached"]
-                words_failed["turn not monotone"] += not h["turn"]["progress_ok"]
-                words_failed["turn rate or bank"] += not h["turn"]["rate_ok"]
-            words_failed["hold outside its funnel"] += isinstance(h["hold"], dict) and h["hold"]["inside"] < h["hold"]["rows"]
+            words_failed["heading word past the clearance or capture (not judged)"] += h["rows"] == 0
+            words_failed["track off its heading word a lead later"] += 0 < h["rows"] and h["inside"] < h["rows"]
         words_failed["left its heading word to intercept on its own"] += v.words["intercepting_off_word_cycles"] > 0
         words_failed["landing aim left the word's tube"] += v.words["aim_left_tube_cycles"] > 0
         words_failed["superseded before flown (not judged)"] += v.words["superseded_before_flown"]

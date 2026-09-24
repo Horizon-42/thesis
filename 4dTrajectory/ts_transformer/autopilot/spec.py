@@ -24,7 +24,9 @@ from ts_transformer.autopilot.sentence import Delays
 from ts_transformer.io_utils import write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT
 
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v2"
+#: v3 (2026-09-24, instruction-v3): the heading delay is gone (a heading word carries its own lead), τ_ψ and p are
+#: derived for the per-step heading words.
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v3"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language
 #: (its own hash, the labeller's, is recorded in the spec and checked at replay) and the path and file helpers.

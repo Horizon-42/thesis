@@ -27,68 +27,33 @@ def columns(reading, column):
     return [(int(row), int(grid[row, column])) for row in np.nonzero(grid[:, column] != UNCHANGED)[0]]
 
 
-def test_downwind_base_final_reads_as_three_heading_words_a_clearance_and_a_landing():
+def test_downwind_base_final_reads_as_words_turn_by_turn_a_clearance_and_a_landing():
+    """§10.1: the downwind, the turn onto the base read 5° at a time (4 s early), the base, and the clearance where the
+    turn onto the final begins — the base heading already reaches the final, so the capture turn is the executor's."""
     one, words = spec(), Words(spec())
     # downwind west, left turn onto a base south, left turn onto the final east (course 090)
     legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
             (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
     reading = read_flight(instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)), instruction_airport(), one, words)
-    headings = columns(reading, HEADING)
-    assert [words.heading_deg(v) for _, v in headings] == [270.0, 180.0]
-    assert 55 <= headings[1][0] <= 62                        # issued where the turn onto the base began
-    assert columns(reading, APPROACH) == [(0, APPROACH_NOT_CLEARED), (headings[1][0], APPROACH_CLEARED)]
+    headings = [(row, words.heading_deg(value)) for row, value in columns(reading, HEADING)]
+    values = [value for _, value in headings]
+    assert values[0] == 270.0 and 180.0 in values and values == sorted(values, reverse=True)
+    # the base turn begins at row 60; the 6 s smoothing and the 2-row lead put its first word at row 59
+    assert headings[1][0] == 59
+    assert 94 <= reading.join_row <= 96 and all(row < reading.join_row for row, _ in headings)
+    assert columns(reading, APPROACH) == [(0, APPROACH_NOT_CLEARED), (reading.join_row, APPROACH_CLEARED)]
     assert columns(reading, RUNWAY) == [(0, 0)]
     altitude = columns(reading, ALTITUDE)
     assert words.altitude_m(altitude[0][1]) == 1110.0 and altitude[-1][1] == words.altitude_land
     angle = columns(reading, ANGLE)
     assert angle[0] == (0, ANGLE_LEVEL) and words.angle_bounds(angle[-1][1]) == (2.6, 3.7)
-    assert reading.capture_row > headings[1][0]
-    assert reading.checks["capture_turn"]["progress_ok"] and all(t["progress_ok"] for t in reading.checks["turns"])
+    assert reading.capture_row > reading.join_row
+    capture = reading.checks["capture_turn"]
+    assert capture["start_row"] == reading.join_row and capture["progress_ok"] and capture["rate_ok"]
+    assert all(h["inside"] == h["rows"] for h in reading.checks["heading"])     # the observed track, by construction
     assert all(check["contained"] for check in reading.checks["vertical"])
-    assert reading.checks["capture_before_threshold_m"] > 0.0
-    assert all(t["rate_ok"] for t in reading.checks["turns"])
-    # the base leg is a hold after a 90° turn: every one of its rows lies in the funnel from the turn's issue point
-    judged = [h for h in reading.checks["hold_positions"] if h["issue_row"] > 0]
-    assert judged and all(h["inside"] == h["rows"] for h in judged)
+    assert reading.checks["capture_before_threshold_m"] > 0.0 and reading.checks["turning_deg"] >= 180.0
     assert columns(reading, SPEED)[-1][1] == words.speed_unspecified
-
-
-def _base_leg_flight(shift_e_m: float = 0.0, rows: tuple[int, int] = (0, 0)):
-    legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
-            (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
-    e, n, altitude, track, speed = fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)
-    e = e.copy()
-    e[rows[0]: rows[1] + 1] += shift_e_m
-    return instruction_flight(e, n, altitude, track, speed)
-
-
-def test_a_hold_that_leaves_its_funnel_is_judged_outside():
-    one, words = spec(), Words(spec())
-    reading = read_flight(_base_leg_flight(), instruction_airport(), one, words)
-    (base,) = [h for h in reading.checks["hold_positions"] if h["issue_row"] > 0]
-    assert base["inside"] == base["rows"] == base["hold_end"] - base["hold_start"] + 1
-    # the same base leg, 3 km east of where it was flown (beyond the fastest turn's end): the same
-    # sentence, every one of its rows outside the funnel
-    moved = read_flight(_base_leg_flight(3000.0, (base["hold_start"], base["hold_end"])), instruction_airport(), one, words)
-    assert np.array_equal(moved.words, reading.words)
-    (outside,) = [h for h in moved.checks["hold_positions"] if h["issue_row"] > 0]
-    assert outside["rows"] == base["rows"] and outside["inside"] == 0
-
-
-def test_a_hold_after_a_split_turn_is_judged_from_the_last_part_s_issue_point():
-    one, words = spec(), Words(spec())
-    # north, a right turn through 180° (two words), a southbound base across the final's line, left onto the final (090)
-    legs = [(30, 0.0, 100.0, 0.0), (30, 6.0, 100.0, 0.0), (20, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0),
-            (50, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
-    reading = read_flight(instruction_flight(*fly_legs(legs, 0.0, 1110.0, -4000.0, 0.0)), instruction_airport(), one, words)
-    heading = [i for i in reading.instructions if i.column == HEADING]
-    assert [i.kind for i in heading] == ["initial", "turn-split", "turn-split"]
-    last = heading[-1]
-    assert words.heading_deg(last.value) == 180.0
-    (hold,) = [h for h in reading.checks["hold_positions"] if h["issue_row"] > 0]
-    turn = reading.checks["turns"][-1]
-    assert hold["issue_row"] == last.row > turn["departure_row"] and hold["hold_start"] == turn["arrival_row"]
-    assert hold["inside"] == hold["rows"]
 
 
 def test_a_flight_is_cut_at_its_landing():
@@ -107,7 +72,7 @@ def _relative(n_rows: int, capture: int, course: float, track: np.ndarray, offse
 
 
 def _per_step(track, capture, course, offset, **changes):
-    one = spec(heading_reading="per-step", **changes)
+    one = spec(**changes)
     words = Words(one)
     return read_lateral(track, np.full(len(track), 90.0), _relative(len(track), capture, course, track, offset),
                         course, one, words), words
@@ -118,34 +83,33 @@ CONTINUOUS = np.concatenate((np.full(30, 0.0), np.arange(1, 31) * 3.0, np.full(3
 
 
 def test_per_step_merges_the_rows_into_a_word_per_grid_cell_and_runs_to_the_capture():
-    """§10.1 H3 at half a step's band: the words are the run-length reading of every row's nearest grid heading
-    before the capture — no hold, no split, no inserted intercept — and the clearance goes with the last word."""
-    reading, words = _per_step(CONTINUOUS, 70, 90.0, -500.0)
+    """§10.1: the words are the run-length reading of every row's nearest grid heading (here with no lead) — no hold,
+    no split, no inserted intercept. The turn onto the course began at row 29, where 000 does not reach the final:
+    the clearance waits until 090 is in force (row 60), and the rows after it say no word."""
+    reading, words = _per_step(CONTINUOUS, 70, 90.0, -500.0, heading_lead_s=0.0)
     heading = [(i.row, words.heading_deg(i.value), i.kind) for i in reading.instructions if i.column == HEADING]
     cells = np.round(CONTINUOUS[:70] / 5.0) * 5.0
     expected = [(0, cells[0])] + [(r, cells[r]) for r in range(1, 70) if cells[r] != cells[r - 1]]
     assert [(row, deg) for row, deg, _ in heading] == expected
     assert heading[-1][1] == 90.0 and {kind for _, _, kind in heading[1:]} == {"per-step"}
-    assert not reading.intercept_inserted and reading.turns == [] and reading.holds == []
     cleared = [i.row for i in reading.instructions if i.column == APPROACH and i.value == APPROACH_CLEARED]
-    assert cleared == [heading[-1][0]] == [reading.join_row]
+    assert cleared == [reading.join_row] == [60]
 
 
 def test_per_step_lead_labels_each_row_with_the_track_that_many_seconds_later():
-    base, _ = _per_step(CONTINUOUS, 70, 90.0, -500.0)
+    base, _ = _per_step(CONTINUOUS, 70, 90.0, -500.0, heading_lead_s=0.0)
     led, words = _per_step(CONTINUOUS, 70, 90.0, -500.0, heading_lead_s=4.0)
     rows = lambda reading: [(i.row, i.value) for i in reading.instructions if i.column == HEADING and i.row > 0]  # noqa: E731
     assert rows(led) == [(row - 2, value) for row, value in rows(base)]
 
 
-def test_per_step_band_keeps_the_word_while_the_track_wanders_inside_it():
-    """A wander of ±2° about 092.4 crosses the 092.5 cell edge: pure merging says a word at each crossing, a band of
-    4.5° keeps the first word to the capture."""
+def test_per_step_says_a_word_each_time_a_wander_crosses_a_cell_edge():
+    """§10.1 (user, 2026-09-24): the boundary words are kept — a wander of ±2° about 092.4 crosses the 092.5 edge, and
+    each crossing is a word (their average is the track the words describe)."""
     track = np.concatenate((92.4 + 2.0 * np.sin(np.arange(70) / 3.0), np.full(10, 90.0)))
-    pure, _ = _per_step(track, 70, 90.0, -200.0)
-    banded, _ = _per_step(track, 70, 90.0, -200.0, heading_band_deg=4.5)
-    count = lambda reading: sum(1 for i in reading.instructions if i.column == HEADING)  # noqa: E731
-    assert count(pure) > 5 and count(banded) == 1
+    reading, words = _per_step(track, 70, 90.0, -200.0, heading_lead_s=0.0)
+    values = [words.heading_deg(i.value) for i in reading.instructions if i.column == HEADING]
+    assert len(values) > 5 and set(values) == {90.0, 95.0}
 
 
 # a westbound downwind north of an eastbound final (course 090), then one continuous left turn of 180° onto it,
@@ -153,69 +117,17 @@ def test_per_step_band_keeps_the_word_while_the_track_wanders_inside_it():
 DOWNWIND_TO_FINAL = np.concatenate((np.full(30, 270.0), 270.0 - np.arange(1, 61) * 3.0))
 
 
-def test_per_step_clearance_rules_place_the_clearance_and_stop_the_words():
-    """§10.1: with the last word the words run to the capture; at the capture turn's onset they stop at the turn's
-    first row, the downwind word still in force (it does not reach the final); at the onset but not before a word
-    that reaches the final, they run until 180 is in force (185 is 95° off the course, beyond 90° + the tolerance)."""
-    capture = 89
-    readings = {rule: _per_step(DOWNWIND_TO_FINAL, capture, 90.0, -100.0, heading_clearance=rule)[0]
-                for rule in ("last-word", "capture-turn", "capture-turn-converging")}
-
-    def heading(reading):
-        return [(i.row, round(Words(spec()).heading_deg(i.value))) for i in reading.instructions if i.column == HEADING]
-
-    last = readings["last-word"]
-    assert heading(last)[-1][1] == 95 and last.join_row == heading(last)[-1][0] < capture     # the row before the capture
-    onset = readings["capture-turn"]
-    assert onset.join_row == 29 and heading(onset) == [(0, 270)]
-    converging = readings["capture-turn-converging"]
-    words = heading(converging)
-    assert words[-1][1] == 180 and converging.join_row == words[-1][0] + 1
-    assert all(row < converging.join_row for row, _ in words)
-    for reading in readings.values():
-        cleared = [i.row for i in reading.instructions if i.column == APPROACH and i.value == APPROACH_CLEARED]
-        assert cleared == [reading.join_row]
-
-
-def test_per_step_refuses_a_last_word_that_does_not_reach_the_final():
-    # flying the course 3 km left of the line: bent by the heading tolerance it meets the line only 38 km on
-    with pytest.raises(Refused, match="does not reach the final"):
-        _per_step(np.full(80, 90.0), 70, 90.0, -3000.0)
-
-
-def test_a_reversal_is_split_into_two_words_and_the_second_continues_the_turn():
-    one, words = spec(), Words(spec())
-    # 000 → a right turn through 180° → 180 (converging on a westbound final from its north side)
-    # → a right turn onto the final (270), where the capture ends the heading words
-    track = np.concatenate((np.full(30, 0.0), np.arange(1, 31) * 6.0, np.full(30, 180.0),
-                            180.0 + np.arange(1, 16) * 6.0, np.full(20, 270.0)))
-    relative = _relative(len(track), 105, 270.0, track, 500.0)
-    reading = read_lateral(track, np.full(len(track), 90.0), relative, 270.0, one, words)
-    assert reading.capture_row == 105 and not reading.intercept_inserted
-    heading = [(i.row, i.value, i.kind) for i in reading.instructions if i.column == HEADING]
-    assert [words.heading_deg(v) for _, v, _ in heading] == [0.0, 90.0, 180.0]
-    assert [kind for _, _, kind in heading] == ["initial", "turn-split", "turn-split"]
-    first, second = heading[1][0], heading[2][0]
-    assert 80.0 <= track[second] < 90.0                       # within the 10° lead, still turning
-    assert 28 <= first < second < 60
-    assert reading.join_row == second
-
-
-def test_a_parallel_leg_that_never_converges_gets_an_intercept_word_on_the_right_side():
-    one, words = spec(), Words(spec())
-    # flying the course (090) 2 km left (north) of the centreline, then a jog onto it
-    track = np.concatenate((np.full(60, 90.0), np.array([100.0, 110.0, 120.0, 110.0, 100.0]), np.full(40, 90.0)))
-    relative = _relative(len(track), 65, 90.0, track, -2000.0)
-    reading = read_lateral(track, np.full(len(track), 90.0), relative, 90.0, one, words)
-    assert reading.intercept_inserted
-    heading = [i for i in reading.instructions if i.column == HEADING]
-    assert words.heading_deg(heading[-1].value) == 120.0       # course + 30°: toward the line from its left
-    assert [i for i in reading.instructions if i.column == APPROACH and i.value == APPROACH_CLEARED][0].row == heading[-1].row
-    # the intercept turn is judged until the track reaches 120 (row 62); the turn back onto the
-    # course from there is the capture turn, judged against the course
-    intercept = reading.turns[-1]
-    assert intercept["kind"] == "intercept" and intercept["arrival_row"] == 62 and intercept["progress_ok"]
-    assert reading.capture_turn["start_row"] == 62 and reading.capture_turn["progress_ok"]
+def test_the_clearance_waits_for_a_heading_word_that_reaches_the_final():
+    """§10.1: the capture turn — one continuous left turn of 180° from a downwind — begins at row 29, where the
+    downwind word does not reach the final; the words run on until 180 is in force (185 is 95° off the course, beyond
+    90° + the tolerance), and the clearance is said there."""
+    reading, words = _per_step(DOWNWIND_TO_FINAL, 89, 90.0, -100.0, heading_lead_s=0.0)
+    said = [(i.row, round(words.heading_deg(i.value))) for i in reading.instructions if i.column == HEADING]
+    assert said[0] == (0, 270) and said[-1][1] == 180 and reading.join_row == said[-1][0] + 1
+    assert all(row < reading.join_row for row, _ in said)
+    cleared = [i.row for i in reading.instructions if i.column == APPROACH and i.value == APPROACH_CLEARED]
+    assert cleared == [reading.join_row] and reading.capture_turn["start_row"] == reading.join_row
+    assert reading.turning_deg == pytest.approx(180.0)
 
 
 def test_level_descend_level_descend_reads_targets_angles_and_land():
@@ -270,20 +182,6 @@ def test_the_assembly_drops_repeats_and_refuses_conflicts_and_an_empty_step_zero
         assemble(10, [*base, Instruction(ALTITUDE, 20, 3, "descend with a level angle")], altitude, one, words)
 
 
-def test_a_slow_continuous_turn_is_one_turn_not_a_string_of_holds():
-    one, words = spec(), Words(spec())
-    # 000, then a 0.5°/s turn to 090 (every 10 s of it stays inside a ±4.5° band), then 090,
-    # which converges at 30° on a final of 060 from its left; the capture turn onto 060
-    track = np.concatenate((np.full(20, 0.0), np.arange(1, 91) * 1.0, np.full(40, 90.0),
-                            90.0 - np.arange(1, 16) * 2.0, np.full(20, 60.0)))
-    relative = _relative(len(track), 165, 60.0, track, -600.0)
-    reading = read_lateral(track, np.full(len(track), 90.0), relative, 60.0, one, words)
-    assert not reading.intercept_inserted
-    heading = [(i.row, words.heading_deg(i.value)) for i in reading.instructions if i.column == HEADING]
-    assert [value for _, value in heading] == [0.0, 90.0]
-    assert 18 <= heading[1][0] <= 21
-
-
 def test_a_flight_on_the_final_from_row_0_is_cleared_at_row_0():
     one, words = spec(), Words(spec())
     track = np.full(40, 91.0)
@@ -293,13 +191,14 @@ def test_a_flight_on_the_final_from_row_0_is_cleared_at_row_0():
         (HEADING, 0, words.heading_index(91.0)), (APPROACH, 0, APPROACH_CLEARED)]
 
 
-def test_a_flight_entering_mid_turn_is_told_the_first_hold_at_row_0():
+def test_a_flight_entering_mid_turn_is_told_the_heading_a_lead_ahead_at_row_0():
     one, words = spec(), Words(spec())
     # turning from 000 at 3°/row onto 090, which converges at 30° on a final of 060 from its left
     track = np.concatenate((np.arange(0, 30) * 3.0, np.full(40, 90.0), 90.0 - np.arange(1, 16) * 2.0, np.full(20, 60.0)))
     reading = read_lateral(track, np.full(len(track), 90.0), _relative(len(track), 85, 60.0, track, -600.0), 60.0, one, words)
     heading = [(i.row, words.heading_deg(i.value)) for i in reading.instructions if i.column == HEADING]
-    assert heading == [(0, 90.0)] and not reading.intercept_inserted
+    assert heading[0] == (0, 5.0) and heading[-1][1] == 90.0         # row 0 is told the track 4 s (2 rows) on: 006
+    assert reading.join_row == 69                                    # the turn from 090 onto the course begins there
 
 
 @pytest.mark.parametrize("track, offset", [
@@ -311,20 +210,23 @@ def test_a_flight_entering_mid_turn_is_told_the_first_hold_at_row_0():
     (np.concatenate((np.full(30, 272.0), 272.0 - np.arange(1, 16) * 92.0 / 15, np.full(30, 180.0),
                      180.0 - np.arange(1, 16) * 88.0 / 15, np.full(20, 92.0))), -800.0),
 ])
-def test_perpendicular_bases_on_both_sides_of_an_off_grid_course_need_no_intercept_word(track, offset):
+def test_perpendicular_bases_on_both_sides_of_an_off_grid_course_are_cleared_where_the_capture_turn_begins(track, offset):
+    """A base 88–92° off the course reaches the final from either side: the clearance comes at the capture turn's onset
+    (its last straight row, 74), the lead having said the turn's first 5° there."""
     one, words = spec(), Words(spec())
     reading = read_lateral(track, np.full(len(track), 90.0), _relative(len(track), 90, 92.0, track, offset), 92.0, one, words)
-    assert not reading.intercept_inserted
     heading = [words.heading_deg(i.value) for i in reading.instructions if i.column == HEADING]
-    assert heading[0] in (270.0, 275.0) and heading[-1] in (0.0, 180.0) and len(heading) == 2
+    assert heading[0] in (270.0, 275.0) and heading[-1] in (5.0, 175.0)
+    assert reading.join_row == 74
 
 
-def test_an_aligned_heading_just_outside_the_corridor_drifts_in_without_an_intercept_word():
+def test_an_aligned_heading_just_outside_the_corridor_drifts_in_on_one_word():
     one, words = spec(), Words(spec())
     # 090 against a course of 092, 100 m left of the line where the corridor is about 84 m wide
     track = np.concatenate((np.full(60, 90.0), np.array([91.0, 92.0]), np.full(20, 92.0)))
     reading = read_lateral(track, np.full(len(track), 80.0), _relative(len(track), 62, 92.0, track, -100.0), 92.0, one, words)
-    assert reading.capture_row == 62 and not reading.intercept_inserted
+    # already within the course tolerance from row 0: no turn onto the course, cleared at entry
+    assert reading.capture_row == 62 and reading.join_row == 0
     assert [words.heading_deg(i.value) for i in reading.instructions if i.column == HEADING] == [90.0]
 
 
@@ -402,14 +304,3 @@ def test_the_labels_runner_maps_each_sentence_to_its_signals_row(tmp_path, monke
     assert load_sentences(tmp_path, "val", spec())["signal_index"].tolist() == [0]
 
 
-def test_a_flight_whose_intercept_word_could_not_reach_the_final_either_is_refused():
-    one, words = spec(), Words(spec())
-    # 130 toward a final of 090 from 3 km left of it, about 2 km before the threshold: neither the
-    # 40° heading nor a 30° intercept (120) meets the line ahead of the threshold
-    track = np.concatenate((np.full(40, 130.0), 130.0 - np.arange(1, 8) * 40.0 / 7, np.full(20, 90.0)))
-    n = len(track)
-    relative = RunwayRelative(before_threshold_m=np.linspace(4000.0, 500.0, n),
-                              right_of_course_m=np.where(np.arange(n) >= 47, 0.0, -3000.0),
-                              track_minus_course_deg=track - 90.0, height_above_threshold_m=np.full(n, 300.0))
-    with pytest.raises(Refused, match="no intercept reaches the final"):
-        read_lateral(track, np.full(n, 80.0), relative, 90.0, one, words)

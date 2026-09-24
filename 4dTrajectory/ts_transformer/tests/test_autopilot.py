@@ -64,18 +64,19 @@ def _grid():
 def test_each_word_takes_effect_its_columns_delay_after_its_step_and_stays_in_force():
     one, words = spec(), Words(spec())
     sentences = Sentences([_grid()], words, device=CPU)
-    delays = Delays(heading_s=3.0, vertical_s=1.0, speed_s=0.0)
+    delays = Delays(vertical_s=1.0, speed_s=0.0)
     at = [sentences.at(torch.tensor([float(t)], dtype=F64), delays) for t in range(20)]
     heading = np.array([float(w.heading_deg[0]) for w in at])
-    assert (heading[:7] == 270.0).all() and (heading[7:] == 180.0).all()        # 4 s + 3 s
-    assert at[6].approach[0] == APPROACH_NOT_CLEARED and at[7].approach[0] == APPROACH_CLEARED
+    # a heading word, and the clearance with it, act when said: they carry their own lead (§10.1)
+    assert (heading[:4] == 270.0).all() and (heading[4:] == 180.0).all()
+    assert at[3].approach[0] == APPROACH_NOT_CLEARED and at[4].approach[0] == APPROACH_CLEARED
     land = np.array([bool(w.land[0]) for w in at])
     assert not land[:7].any() and land[7:].all()                                 # 6 s + 1 s
     assert float(at[0].altitude_m[0]) == 1200.0 and float(at[7].angle_deg[0]) == one.descent_angle_centres_deg[2]
     unspecified = np.array([bool(w.unspecified[0]) for w in at])
     assert not unspecified[:8].any() and unspecified[8:].all()
     assert all(int(w.runway[0]) == 0 for w in at)
-    assert at[6].issued_step[0, HEADING] == 0 and at[7].issued_step[0, HEADING] == 2
+    assert at[3].issued_step[0, HEADING] == 0 and at[4].issued_step[0, HEADING] == 2
     assert at[19].issued_step[0, SPEED] == 4                                     # held after the last step
 
 
@@ -251,9 +252,10 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
     one, params = spec(), _params()
     params.check(one)
     for change, message in ((dict(heading_time_constant_s=1.5), "under 2 Δt"),
-                            (dict(turn_rate_deg_s=3.0, heading_time_constant_s=4.0), "split turn"),
+                            (dict(heading_time_constant_s=6.0), "trail the word"),        # 2.15 × (6 − 4) > 4.5 − 2.5
+                            (dict(heading_time_constant_s=2.5), "trail the word"),
                             (dict(bank_cap_deg=40.0), "φ_cap"),
-                            (dict(delays=Delays(12.0, 0.0, 0.0)), "may start late")):
+                            (dict(delays=Delays(-1.0, 0.0)), "cannot take effect")):
         with pytest.raises(ValueError, match=message):
             replace(params, **change).check(one)
 
@@ -267,7 +269,7 @@ def _params(**changes):
                           bank_rate_deg_s=2.0, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
                           accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8, land_window_low_m=8.4,
                           land_window_high_m=36.5,
-                          delays=Delays(0.0, 0.0, 0.0),
+                          delays=Delays(0.0, 0.0),
                           timeout_factor=1.5, word_clock="time")
     return replace(base, **changes)
 
@@ -519,7 +521,7 @@ def test_the_executor_spec_is_written_once_and_refused_unless_it_is_the_current_
 
     from ts_transformer.autopilot import spec as executor_spec
 
-    params = _params(delays=Delays(2.0, 0.0, 0.0))
+    params = _params(delays=Delays(2.0, 0.0))
     source = {"executor_source_sha256": executor_spec.executor_source_sha256(), "git": {"head": "x", "dirty": False}}
     executor_spec.write_spec(tmp_path, params, "vocabulary", {"data": {}}, source)
     loaded, record = executor_spec.load_spec(tmp_path)
@@ -585,13 +587,14 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
 def test_the_sensitivity_moves_one_parameter_at_a_time_and_marks_a_word_acted_on_early_as_a_probe():
     from ts_transformer.experiments.executor_sensitivity import variants
 
-    params = _params(heading_time_constant_s=4.5, bank_rate_deg_s=2.5, delays=Delays(2.0, 0.0, 0.0))
-    table = {name: (moved, probe) for name, moved, probe in variants(params)}
+    params = _params(heading_time_constant_s=4.5, bank_rate_deg_s=2.5, delays=Delays(2.0, 0.0))
+    table = {name: (moved, probe) for name, moved, probe in variants(params, spec())}
     assert table["spec"] == (params, False)
-    assert {n for n in table if n.startswith("heading_time")} == {f"heading_time_constant_s={t:g}" for t in (2, 3, 4)}
+    # the envelope admits τ_ψ within (4.5 − 2.5) / 2.15 = 0.93 s of the 4 s lead: 3.5 and 4 below the spec's 4.5
+    assert {n for n in table if n.startswith("heading_time")} == {f"heading_time_constant_s={t:g}" for t in (3.5, 4)}
     assert "path_rate_factor=2" not in table and "bank_rate_deg_s=2" in table
-    assert table["delays.heading_s=-2"][1] and not table["delays.heading_s=6"][1]
-    assert table["delays.vertical_s=-4"][1] and table["delays.vertical_s=-4"][0].delays == Delays(2.0, -4.0, 0.0)
+    assert table["delays.vertical_s=-2"][1] and not table["delays.vertical_s=6"][1]
+    assert table["delays.speed_s=-4"][1] and table["delays.speed_s=-4"][0].delays == Delays(2.0, -4.0)
     for name, (moved, probe) in table.items():
         if probe:
             with pytest.raises(ValueError, match="before it is said"):
@@ -911,8 +914,8 @@ def test_an_executor_spec_is_opened_only_against_its_own_vocabulary_and_labeller
 def test_method_bs_delays_are_the_groups_median_leads_floored_at_zero():
     from ts_transformer.autopilot.observe import delays_from_leads
 
-    leads = {HEADING: [2.0, 2.0, 4.0], ALTITUDE: [-6.0, -4.0], ANGLE: [-6.0], SPEED: [-9.0, 3.0, -8.0]}
-    assert delays_from_leads(leads) == Delays(heading_s=2.0, vertical_s=0.0, speed_s=0.0)
+    leads = {ALTITUDE: [-6.0, -4.0], ANGLE: [-6.0], SPEED: [-9.0, 3.0, -8.0]}
+    assert delays_from_leads(leads) == Delays(vertical_s=0.0, speed_s=0.0)
     assert delays_from_leads({**leads, ALTITUDE: [5.0, 7.0], ANGLE: [6.0]}).vertical_s == 6.0
     with pytest.raises(ValueError, match="matched no word of speed_s"):
         delays_from_leads({**leads, SPEED: []})
@@ -952,30 +955,6 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
     reread["differ"] = first.signals[0].dataset_id
     with pytest.raises(ValueError, match="differs from the stored one"):
         replay.draw(Path("x"), "train", one, words, per_airport=3, seed=5)
-
-
-def test_the_heading_comparison_tags_each_row_by_its_dataset_id_not_its_position(monkeypatch):
-    """Review of §10.1's runner: `fly_variant` returns the rows grouped by airport, while the sample interleaves the
-    airports — the rows must find their flight, stratum and H1 intercept turn by dataset id."""
-    from types import SimpleNamespace
-
-    from ts_transformer.experiments.heading_reading_compare import in_group, tag_rows
-
-    def h1(turns):
-        return SimpleNamespace(checks={"turns": turns})
-
-    ids = ["KRDU:a", "KSJC:b", "KRDU:c"]                       # the sample: airports interleaved
-    turn = {"turn_deg": -150.0, "kind": "intercept"}
-    readings = {0: h1([]), 1: h1([turn])}                      # flight 2 refused by H1
-    rows = [{"dataset_id": "KRDU:a"}, {"dataset_id": "KRDU:c"}, {"dataset_id": "KSJC:b"}]   # grouped by airport
-    import ts_transformer.experiments.heading_reading_compare as compare
-    monkeypatch.setattr(compare, "flight_record",
-                        lambda reading: {"stratum": "vectored" if reading.checks["turns"] else "straight-in"})
-    tag_rows(rows, ids, readings)
-    assert [(r["sample_index"], r["stratum"], r["h1_intercept_turn_deg"]) for r in rows] == [
-        (0, "straight-in", 0.0), (2, "refused by H1", None), (1, "vectored", 150.0)]
-    assert [in_group(r, "onto final") for r in rows] == [False, False, True]
-    assert [in_group(r, "not onto final") for r in rows] == [True, True, False]
 
 
 def test_a_split_turn_said_only_in_part_is_judged_toward_the_part_said():

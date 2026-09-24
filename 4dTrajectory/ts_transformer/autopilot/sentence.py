@@ -39,10 +39,11 @@ import torch
 from ts_transformer.autopilot.frame import Kinematics
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, RUNWAY, SPEED, UNCHANGED, Words
 
-#: Which columns each delay moves: the manoeuvre columns method B measures it on, and the columns that
-#: follow them (the runway pointer and the clearance go with the heading).
-DELAY_GROUPS = {"heading_s": (HEADING,), "vertical_s": (ALTITUDE, ANGLE), "speed_s": (SPEED,)}
-FOLLOWS_HEADING = (RUNWAY, APPROACH)
+#: Which columns each delay moves: the manoeuvre columns method B measures it on. A heading word carries its own
+#: timing — it says where the track is `heading_lead_s` later (vocabulary design §10.1) — so it acts when it is
+#: said, and the runway pointer and the clearance, which go with it, do too.
+DELAY_GROUPS = {"vertical_s": (ALTITUDE, ANGLE), "speed_s": (SPEED,)}
+UNDELAYED = (RUNWAY, APPROACH, HEADING)
 CLOCKS = ("time", "distance", "track")
 #: The track clock looks this far ahead along the observed track for the executor's nearest point (it moves only
 #: forward, so a track that loops — an orbit — is followed around, never jumped across) ...
@@ -57,13 +58,12 @@ TRACK_MAX_ROWS_PER_CYCLE = 1
 class Delays:
     """Seconds from a word's step to its effect, per group of columns (`DELAY_GROUPS`)."""
 
-    heading_s: float
     vertical_s: float
     speed_s: float
 
     def column(self, index: int) -> float:
-        if index in FOLLOWS_HEADING:
-            return self.heading_s
+        if index in UNDELAYED:
+            return 0.0
         (name,) = [name for name, columns in DELAY_GROUPS.items() if index in columns]
         return getattr(self, name)
 
