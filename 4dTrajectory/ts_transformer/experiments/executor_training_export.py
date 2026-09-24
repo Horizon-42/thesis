@@ -23,10 +23,8 @@ row, and the crossing must match it within `CROSSING_TOLERANCE`, or the export s
 verdicts (the replay's and the observed track's) are the formal row's: evaluation is not run again.
 
 **Where it runs.** `replay.open_executor` refuses a spec measured by other executor code, by a hash over the executor's
-files and the repository modules they import (`autopilot.spec.executor_source_files`). `geokit` counts only when it
-resolves inside the repository: from a worktree the editable install lies outside it, as when the formal spec was
-measured; from the main checkout (and under the test suite's `conftest.py`) it lies inside, and the spec is refused
-though no executor file differs (docs/code-health-followups.md, 2026-09-24). Run the export from a worktree.
+files and the repository modules they import (`autopilot.spec.executor_source_files`), each labelled by its module
+name, so the hash is the same from any checkout.
 
 **A verdict per word.** Each word of the sentence gets one status (`STATUSES`): ``inside`` / ``outside`` its envelope
 as the judge read it on the FLOWN track (a word's envelope re-drawn from where the executor was when it was said, not
