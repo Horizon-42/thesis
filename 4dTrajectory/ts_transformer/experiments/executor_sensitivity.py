@@ -3,8 +3,8 @@ design §9, the E7 plan item 5) — on TRAIN, never val.
 
 One seeded train sample (`replay.draw`: per airport, own dynamics, a published approach speed) is flown once
 per variant: the spec's own parameters, then each of τ_ψ, p, the γ̇ factor and the two delays moved alone.
-τ_ψ runs on a 0.5 s grid from the least the per-step heading word's envelope admits up to the spec's value (method A
-takes the largest it admits; `ExecutorParams.check`), p over 2–5°/s, the γ̇ factor over 1–3, each delay by
+τ_ψ (the executor's own turns' ease-out; heading words have their own law) over 2–6 s, p over 2–5°/s, the γ̇ factor
+over 1–3, each delay by
 ± `DELAY_STEP_S`. A delay moved below 0 makes a word act BEFORE it is said:
 such a variant is a probe, flown with `ExecutorParams.check`'s ``early_words`` and marked ``probe`` in the
 readout — it measures what the labeller's late reading of a manoeuvre's onset costs (method B's finding), and
@@ -23,7 +23,6 @@ flown, then ``sensitivity.json`` with every row.
 from __future__ import annotations
 
 import argparse
-import math
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -32,28 +31,24 @@ from typing import Any
 import torch
 
 from ts_transformer.autopilot import replay
-from ts_transformer.autopilot.measure import rounded
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import DELAY_GROUPS
-from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-HEADING_TIME_CONSTANT_STEP_S = 0.5
+HEADING_TIME_CONSTANTS_S = (2.0, 3.0, 4.0, 5.0, 6.0)
 BANK_RATES_DEG_S = (2.0, 3.0, 4.0, 5.0)
 PATH_RATE_FACTORS = (1.0, 2.0, 3.0)
 DELAY_STEP_S = 4.0
 
 
-def variants(params: ExecutorParams, spec: VocabularySpec) -> list[tuple[str, ExecutorParams, bool]]:
+def variants(params: ExecutorParams) -> list[tuple[str, ExecutorParams, bool]]:
     """``(name, params, probe)``: the spec's own first, then one parameter moved at a time (a value equal to
     the spec's is not flown twice)."""
     out = [("spec", params, False)]
-    slack_s = (spec.heading_tolerance_deg - spec.heading_step_deg / 2) / spec.turn_rate_max_deg_s
-    tau = rounded(max(spec.heading_lead_s - slack_s, 2.0 * params.cycle_s), HEADING_TIME_CONSTANT_STEP_S, math.ceil)
-    while tau < params.heading_time_constant_s:
-        out.append((f"heading_time_constant_s={tau:g}", replace(params, heading_time_constant_s=tau), False))
-        tau += HEADING_TIME_CONSTANT_STEP_S
+    for tau in HEADING_TIME_CONSTANTS_S:
+        if tau != params.heading_time_constant_s:
+            out.append((f"heading_time_constant_s={tau:g}", replace(params, heading_time_constant_s=tau), False))
     for rate in BANK_RATES_DEG_S:
         if rate != params.bank_rate_deg_s:
             out.append((f"bank_rate_deg_s={rate:g}", replace(params, bank_rate_deg_s=rate), False))
@@ -94,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
 
     (out / "variants").mkdir(parents=True)
     rows: list[dict[str, Any]] = []
-    for number, (name, moved, probe) in enumerate(variants(params, spec)):
+    for number, (name, moved, probe) in enumerate(variants(params)):
         moved.check(spec, early_words=probe)
         flown, verdicts = replay.fly_batch(batch, moved, words, device=device, early_words=probe)
         row = {"variant": name, "probe": probe, "params": asdict(moved), **replay.summary(verdicts),
@@ -111,7 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(out / "sensitivity.json", {
         "written_utc": utc_now(), "split": "train", "executor_spec_sha256": record["sha256"],
         "vocabulary_spec_sha256": spec.sha256, "params": asdict(params), "drawn": batch.drawn,
-        "grid": {"heading_time_constant_step_s": HEADING_TIME_CONSTANT_STEP_S, "bank_rate_deg_s": BANK_RATES_DEG_S,
+        "grid": {"heading_time_constant_s": HEADING_TIME_CONSTANTS_S,
+                 "bank_rate_deg_s": BANK_RATES_DEG_S,
                  "path_rate_factor": PATH_RATE_FACTORS, "delay_step_s": DELAY_STEP_S},
         "variants": rows, "git": git_state(), "elapsed_s": time.perf_counter() - started})
     print(f"→ {out / 'sensitivity.json'}")

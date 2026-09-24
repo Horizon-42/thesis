@@ -1,9 +1,8 @@
 """The labeller's readout (vocabulary design §7): completeness, envelopes with their widths,
 sentence length and class usage — per split, per airport, per stratum.
 
-The stratum is read off the sentence itself: VECTORED when the heading turned before the capture — from word to
-word, and on from the last word to the course (`LateralReading.turning_deg`) — adds up to at least
-`VECTORED_TURN_DEG`, STRAIGHT-IN otherwise.
+The stratum is read off the reading: VECTORED when the track's turns before the capture — each run of rows turning
+one way, its net turn (`LateralReading.turning_deg`) — add up to at least `VECTORED_TURN_DEG`, STRAIGHT-IN otherwise.
 """
 
 from __future__ import annotations

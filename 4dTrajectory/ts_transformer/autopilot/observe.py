@@ -39,8 +39,8 @@ from ts_transformer.instructions.signals import FlightSignals, signals_from_seri
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import Words
 
-#: The columns method B measures a delay on (a manoeuvre's onset); the runway pointer and the clearance
-#: follow the heading's delay.
+#: The columns method B measures a delay on (`sentence.DELAY_GROUPS`); heading words, the runway pointer and the
+#: clearance have none (`sentence.UNDELAYED`).
 MEASURED_COLUMNS = tuple(column for columns in DELAY_GROUPS.values() for column in columns)
 
 

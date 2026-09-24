@@ -19,7 +19,7 @@ import numpy as np
 
 from final_approach.assign import LandingScreen
 from ts_transformer.instructions import envelope
-from ts_transformer.instructions.labeller.lateral import per_step_words
+from ts_transformer.instructions.labeller.lateral import per_step_words, turn_runs
 from ts_transformer.instructions.labeller.read import Admitted
 from ts_transformer.instructions.labeller.vertical import MOVE, vertical_pieces
 from ts_transformer.instructions.piecewise import fit_pieces
@@ -149,23 +149,6 @@ def _free_holds(track: np.ndarray, min_rows: int, half_range_deg: float) -> list
         else:
             row += 1
     return holds
-
-
-def turn_runs(rate: np.ndarray, onset_deg_s: float) -> list[tuple[int, int]]:
-    """Runs of rows turning one way faster than the labeller's turn onset rate: ``(start, stop)`` over ``rate``
-    (``rate[i]`` turns the track from row ``i`` to ``i + 1``), so the turn runs from track row ``start`` to ``stop``."""
-    turning = np.abs(rate) > onset_deg_s
-    runs, row = [], 0
-    while row < len(rate):
-        if not turning[row]:
-            row += 1
-            continue
-        stop, sign = row + 1, np.sign(rate[row])
-        while stop < len(rate) and turning[stop] and np.sign(rate[stop]) == sign:
-            stop += 1
-        runs.append((row, stop))
-        row = stop
-    return runs
 
 
 def measure_flight(flight: Admitted, spec: VocabularySpec) -> dict[str, np.ndarray]:

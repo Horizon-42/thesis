@@ -2,12 +2,16 @@
 
 Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.attitude`) to fly:
 
-- a heading word θ (§4.1, instruction-v3): ``χ̇* = sat(e / τ_ψ, ±r_max)`` — the words set the pace (each says the
-  track a lead later, a turn is a run of them), so the law follows them up to the vocabulary's largest turn rate
-  ``r_max``, the bank it takes capped and rate-limited in the inverse (at most speeds the bank cap binds first);
-  with τ_ψ equal to the lead it trails a steady turn by the lead, as the words lead it. The error ``e`` is measured
-  from the word in force: a new word turns ``wrap180(θ_new − θ_old)`` further than the old one, so a turn said word
-  by word keeps its way even while the aircraft lags it;
+- a heading word θ (§4.1, instruction-v3): each says the track a lead ``L`` later, so the law arrives on it then —
+  ``χ̇* = sat(e / max(t_heard + L − t, 2Δt), ±r_max)``, the error over the time left until the lead runs out, measured
+  on the executor's own clock from the cycle it heard the word (the judge's own reading: each word from the flown row
+  it was told at), floored at the law's stability floor 2Δt (after that, a hold). The words set the pace (a turn is
+  a run of them), so the law follows them up to the vocabulary's largest turn rate ``r_max``, the bank it takes
+  capped and rate-limited in the inverse (at most speeds the bank cap binds first). A first-order law
+  ``e / τ_ψ`` at τ_ψ = L trails a steady turn by the lead too, but arrives on a turn's last word only asymptotically
+  — 37 % of its error left a lead after it — and leaves that word outside its envelope (§4.1, the review of
+  2026-09-24). The error ``e`` is measured from the word in force: a new word turns ``wrap180(θ_new − θ_old)``
+  further than the old one, so a turn said word by word keeps its way even while the aircraft lags it;
 - cleared, not yet captured (§4.3): when θ itself cannot reach the pointed runway's line but a track
   within the heading tolerance can (the labeller's own test, `instructions.envelope.heading_converges`),
   θ is flown bent by the tolerance toward the line — still inside the word's envelope; when not even that
@@ -70,10 +74,13 @@ def rate_for_error(error_deg: torch.Tensor, params: ExecutorParams) -> torch.Ten
     return (error_deg / params.heading_time_constant_s).clamp(-params.turn_rate_deg_s, params.turn_rate_deg_s)
 
 
-def word_rate(error_deg: torch.Tensor, params: ExecutorParams, spec: VocabularySpec) -> torch.Tensor:
-    """§4.1 (instruction-v3): the compass track rate, deg/s, that follows the heading words — the words set the pace,
-    so the law turns as fast as the vocabulary's largest turn rate allows (the bank cap binds in the inverse)."""
-    return (error_deg / params.heading_time_constant_s).clamp(-spec.turn_rate_max_deg_s, spec.turn_rate_max_deg_s)
+def word_rate(error_deg: torch.Tensor, to_go_s: torch.Tensor, params: ExecutorParams,
+              spec: VocabularySpec) -> torch.Tensor:
+    """§4.1 (instruction-v3): the compass track rate, deg/s, that arrives on the heading word in force when its lead
+    runs out (``to_go_s`` from now), floored at the stability floor 2Δt — the words set the pace, so the law turns as
+    fast as the vocabulary's largest turn rate allows (the bank cap binds in the inverse)."""
+    return (error_deg / to_go_s.clamp(min=2.0 * params.cycle_s)).clamp(-spec.turn_rate_max_deg_s,
+                                                                        spec.turn_rate_max_deg_s)
 
 
 def heading_rate(track_deg: torch.Tensor, target_deg: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
@@ -152,9 +159,10 @@ class Lateral:
         self.tracking = torch.zeros(batch, dtype=torch.bool, device=device)
         self.cleared = torch.zeros(batch, dtype=torch.bool, device=device)
         self.runway: torch.Tensor | None = None
-        # the word in force, and track and target unwrapped along the flight (§4.1)
+        # the word in force, when the executor heard it, and track and target unwrapped along the flight (§4.1)
         self.word_deg: torch.Tensor | None = None
         self.word_step = torch.zeros(batch, dtype=torch.long, device=device)
+        self.heard_s = torch.zeros(batch, dtype=torch.float64, device=device)
         self.track_unwrapped = torch.zeros(batch, dtype=torch.float64, device=device)
         self.target_unwrapped = torch.zeros(batch, dtype=torch.float64, device=device)
         self.last_track = torch.zeros(batch, dtype=torch.float64, device=device)
@@ -182,16 +190,17 @@ class Lateral:
                 + speed * rate * params.heading_time_constant_s ** 2 / 2.0 + speed * rate ** 3 / (6.0 * k ** 2))
 
     def word_error(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor,
-                   go_around: torch.Tensor) -> torch.Tensor:
-        """The heading word's error, degrees: its target unwrapped from the words before it (§4.1). A go-around
-        flies the course, not the word, so the word's target is anchored again at the track meanwhile: a word
-        after it is measured from where the aircraft is."""
+                   go_around: torch.Tensor, time_s: float) -> torch.Tensor:
+        """The heading word's error, degrees: its target unwrapped from the words before it (§4.1); a new word's
+        hearing time is ``time_s``. A go-around flies the course, not the word, so the word's target is anchored
+        again at the track meanwhile: a word after it is measured from where the aircraft is."""
         if self.word_deg is None:
             self.track_unwrapped = state.track_deg.clone()
             self.target_unwrapped = state.track_deg + wrap180(heading_deg - state.track_deg)
         else:
             self.track_unwrapped = self.track_unwrapped + wrap180(state.track_deg - self.last_track)
             new = issued != self.word_step
+            self.heard_s = torch.where(new, time_s, self.heard_s)
             self.target_unwrapped = torch.where(new, self.target_unwrapped + wrap180(heading_deg - self.word_deg),
                                                 self.target_unwrapped)
             self.target_unwrapped = torch.where(go_around, self.track_unwrapped + wrap180(heading_deg - state.track_deg),
@@ -200,11 +209,12 @@ class Lateral:
         return self.target_unwrapped - self.track_unwrapped
 
     def rate(self, state: Kinematics, heading_deg: torch.Tensor, issued: torch.Tensor, approach: torch.Tensor,
-             runway: torch.Tensor, runways: Runways, bank_rad: torch.Tensor,
-             bank_rate_rad_s: float) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+             runway: torch.Tensor, runways: Runways, bank_rad: torch.Tensor, bank_rate_rad_s: float,
+             time_s: float) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """The track rate for this cycle, and what the law did (``captured``, ``tracking`` the line, ``bent``,
         ``go_around``); ``issued`` is the step the heading word in force was written at, ``bank_rad`` the bank
-        in force (the dynamics' sign), which the capture turn rolls from at ``bank_rate_rad_s``."""
+        in force (the dynamics' sign), which the capture turn rolls from at ``bank_rate_rad_s``; ``time_s`` the
+        time flown."""
         params, spec = self.params, self.spec
         if self.runway is not None and bool(((runway != self.runway) & (self.cleared | self.captured)).any()):
             raise ValueError("the runway pointer changed after the clearance (executor design §4.6)")
@@ -230,7 +240,7 @@ class Lateral:
         bend = waiting & misses & bent_reaches
         intercept = waiting & ~bent_reaches
         side = torch.where(right >= 0.0, -1.0, 1.0).to(right.dtype)
-        error = self.word_error(state, heading_deg, issued, go_around) + torch.where(
+        error = self.word_error(state, heading_deg, issued, go_around, time_s) + torch.where(
             bend, side * spec.heading_tolerance_deg, 0.0)
         error = torch.where(intercept, wrap180(course + side * spec.intercept_angle_deg - state.track_deg), error)
         # tracking: the line's own target, critically damped, steering inside the corridor's course tolerance
@@ -254,7 +264,8 @@ class Lateral:
         line_rate = torch.sign(error) * torch.minimum(rate_for_error(error, params).abs(),
                                                       torch.rad2deg(torch.sqrt(k * torch.deg2rad(error.abs()))))
         # the words set the pace of a turn they describe; the executor's own intercept and a go-around are its own
-        free = torch.where(intercept | go_around, rate_for_error(error, params), word_rate(error, params, spec))
+        to_go = self.heard_s + spec.heading_lead_s - time_s
+        free = torch.where(intercept | go_around, rate_for_error(error, params), word_rate(error, to_go, params, spec))
         rate = torch.where(self.captured & ~self.tracking, capture, torch.where(self.tracking, line_rate, free))
         intercept_target = course + side * spec.intercept_angle_deg
         off_word = intercept & (wrap180(intercept_target - heading_deg).abs() > spec.heading_tolerance_deg)

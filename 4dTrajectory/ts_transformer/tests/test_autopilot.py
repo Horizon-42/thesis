@@ -246,14 +246,22 @@ def test_the_heading_law_turns_the_shorter_way_at_the_steady_rate_and_eases_out(
                                            4.0 / params.heading_time_constant_s, 0.0])
 
 
+def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out():
+    from ts_transformer.autopilot.lateral import word_rate
+
+    params, one = _params(), spec()
+    error = torch.tensor([6.0, 6.0, 6.0, 20.0, -6.0], dtype=F64)
+    to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 1.0], dtype=F64)
+    # 6° over the 4 s or 3 s left; past the lead (and under 2Δt) a hold at 2Δt; never faster than r_max 3.5°/s
+    assert word_rate(error, to_go, params, one).tolist() == pytest.approx([1.5, 2.0, 3.0, 3.5, -3.0])
+
+
 def test_the_parameters_are_checked_against_the_designs_constraints():
     from dataclasses import replace
 
     one, params = spec(), _params()
     params.check(one)
     for change, message in ((dict(heading_time_constant_s=1.5), "under 2 Δt"),
-                            (dict(heading_time_constant_s=6.0), "trail the word"),        # 2.15 × (6 − 4) > 4.5 − 2.5
-                            (dict(heading_time_constant_s=2.5), "trail the word"),
                             (dict(bank_cap_deg=40.0), "φ_cap"),
                             (dict(delays=Delays(-1.0, 0.0)), "cannot take effect")):
         with pytest.raises(ValueError, match=message):
@@ -265,8 +273,8 @@ def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
-    # p 2.5°/s: at 2.0 the roll-in of a 2.25°/s turn said word by word lags its first words by up to 0.2° past their
-    # envelope (vocabulary design §10.1; what the real fleet needs is method A's and the train replay's to say)
+    # τ_ψ = the lead and p 2.5°/s: method A's values here — at 2.0 a 90° turn said word by word at 120–140 m/s ends
+    # past its words' envelopes (`derive.follow_excess_deg`)
     base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
                           bank_rate_deg_s=2.5, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
                           accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8, land_window_low_m=8.4,
@@ -466,20 +474,25 @@ def test_method_a_takes_the_gentlest_roll_out_and_roll_rate_the_constraints_allo
     from ts_transformer.autopilot import derive
 
     one = spec()
-    # the lead 4 s plus (4.5° − 2.5°) / the largest turn rate 3.5°/s = 4.57 s → 4.5
-    assert derive.heading_time_constant_s(one, 1.0) == 4.5
+    # the executor's own turns settle on the lead a word gives
+    assert derive.heading_time_constant_s(one, 1.0) == one.heading_lead_s == 4.0
     with pytest.raises(ValueError, match="under 2 Δt"):
         derive.heading_time_constant_s(spec(heading_lead_s=0.0), 1.0)
-    params = _params(heading_time_constant_s=4.5)
+    params = _params(heading_time_constant_s=4.0)
     largest = derive.largest_own_turn_deg(one)
     assert largest == 90.0 + one.heading_tolerance_deg + one.intercept_angle_deg
     slow, fast = (derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=p), 140.0, largest) for p in (1.0, 5.0))
     assert slow > one.heading_tolerance_deg > fast >= 0.0                        # a slower roll passes further
-    rate, overshoots = derive.roll_rate_deg_s(params, one)
-    assert max(overshoots.values()) <= one.heading_tolerance_deg
+    # a slow roll-in lags the first words of a worded turn past their envelope; a brisk one follows them
+    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=1.0), one, 140.0) > 0.0
+    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=5.0), one, 140.0) <= 0.0
+    rate, checks = derive.roll_rate_deg_s(params, one)
+    assert max(checks["overshoot_deg"].values()) <= one.heading_tolerance_deg
+    assert max(checks["follow_excess_deg"].values()) <= 0.0
     less = replace(params, bank_rate_deg_s=rate - derive.ROLL_RATE_STEP_DEG_S)
-    assert rate == derive.ROLL_RATE_STEP_DEG_S or max(
-        derive.turn_overshoot_deg(less, speed, largest) for speed in derive.ROLL_CHECK_SPEEDS_MPS) > one.heading_tolerance_deg
+    assert rate == derive.ROLL_RATE_STEP_DEG_S or any(
+        derive.turn_overshoot_deg(less, speed, largest) > one.heading_tolerance_deg
+        or derive.follow_excess_deg(less, one, speed) > 0.0 for speed in derive.ROLL_CHECK_SPEEDS_MPS)
 
 
 def test_a_received_word_is_matched_to_the_nearest_reread_word_of_its_column_and_value():
@@ -602,11 +615,10 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
 def test_the_sensitivity_moves_one_parameter_at_a_time_and_marks_a_word_acted_on_early_as_a_probe():
     from ts_transformer.experiments.executor_sensitivity import variants
 
-    params = _params(heading_time_constant_s=4.5, bank_rate_deg_s=2.5, delays=Delays(2.0, 0.0))
-    table = {name: (moved, probe) for name, moved, probe in variants(params, spec())}
+    params = _params(heading_time_constant_s=4.0, bank_rate_deg_s=2.5, delays=Delays(2.0, 0.0))
+    table = {name: (moved, probe) for name, moved, probe in variants(params)}
     assert table["spec"] == (params, False)
-    # the envelope admits τ_ψ within (4.5 − 2.5) / 2.15 = 0.93 s of the 4 s lead: 3.5 and 4 below the spec's 4.5
-    assert {n for n in table if n.startswith("heading_time")} == {f"heading_time_constant_s={t:g}" for t in (3.5, 4)}
+    assert {n for n in table if n.startswith("heading_time")} == {f"heading_time_constant_s={t:g}" for t in (2, 3, 5, 6)}
     assert "path_rate_factor=2" not in table and "bank_rate_deg_s=2" in table
     assert table["delays.vertical_s=-2"][1] and not table["delays.vertical_s=6"][1]
     assert table["delays.speed_s=-4"][1] and table["delays.speed_s=-4"][0].delays == Delays(2.0, -4.0)
@@ -689,7 +701,9 @@ def test_an_orbit_said_word_by_word_is_flown_all_the_way_round():
     however far it lags, and every word is inside its envelope."""
     flown, verdict, reading = _fly_sentence(_orbit())
     track = np.degrees(np.unwrap(np.radians(compass_from_math_rad(flown.states[0, :, 4].numpy()))))
-    assert np.diff(track).min() > -0.5 and track[-1] - track[0] == pytest.approx(450.0, abs=5.0)
+    # never back by more than the tolerance from the furthest it turned (the arrival on the last word may pass it)
+    assert (track - np.maximum.accumulate(track)).min() > -spec().heading_tolerance_deg
+    assert track[-1] - track[0] == pytest.approx(450.0, abs=5.0)
     assert len([i for i in reading.instructions if i.column == HEADING]) > 60
     assert all(h["inside"] == h["rows"] for h in verdict.words["heading"])
     # (its landing descent leaves the word's tube for the landing window: the altitude word's §10.2 question)
@@ -799,9 +813,9 @@ def test_the_words_the_executor_refuses():
                        AirportCharts.of([geometry], dtype=F64, device=CPU))
     heading, issued, bank = torch.tensor([90.0], dtype=F64), torch.tensor([0]), torch.zeros(1, dtype=F64)
     cleared = torch.tensor([APPROACH_CLEARED])
-    lateral.rate(state, heading, issued, cleared, torch.tensor([0]), runways, bank, 0.05)
+    lateral.rate(state, heading, issued, cleared, torch.tensor([0]), runways, bank, 0.05, 0.0)
     with pytest.raises(ValueError, match="runway pointer changed after the clearance"):
-        lateral.rate(state, heading, issued, cleared, torch.tensor([1]), runways, bank, 0.05)
+        lateral.rate(state, heading, issued, cleared, torch.tensor([1]), runways, bank, 0.05, 1.0)
 
 
 def test_a_stall_is_a_dynamics_failure_and_wins_a_row_it_shares_with_a_crossing():
@@ -970,7 +984,7 @@ def test_words_said_on_one_flown_row_leave_the_later_one_of_each_column():
     from ts_transformer.instructions.labeller.records import Instruction
 
     words = [Instruction(ALTITUDE, 30, 10, "target"), Instruction(ALTITUDE, 20, 12, "target"),
-             Instruction(HEADING, 5, 10, "turn-split", {"part": 1}), Instruction(HEADING, 9, 11, "turn-split", {"part": 2}),
+             Instruction(HEADING, 5, 10, "per-step", {"target_deg": 25.0}), Instruction(HEADING, 9, 11, "per-step", {"target_deg": 45.0}),
              Instruction(SPEED, 14, 20, "target")]
     kept, superseded = said_at(words, [7, 7, 7, 7, 15])
     assert superseded == 1

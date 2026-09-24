@@ -52,7 +52,8 @@ def test_downwind_base_final_reads_as_words_turn_by_turn_a_clearance_and_a_landi
     assert capture["start_row"] == reading.join_row and capture["progress_ok"] and capture["rate_ok"]
     assert all(h["inside"] == h["rows"] for h in reading.checks["heading"])     # the observed track, by construction
     assert all(check["contained"] for check in reading.checks["vertical"])
-    assert reading.checks["capture_before_threshold_m"] > 0.0 and reading.checks["turning_deg"] >= 180.0
+    # two 90° turns; the smoothed track turns slower than the onset rate at their very ends
+    assert reading.checks["capture_before_threshold_m"] > 0.0 and reading.checks["turning_deg"] == pytest.approx(180.0, abs=5.0)
     assert columns(reading, SPEED)[-1][1] == words.speed_unspecified
 
 

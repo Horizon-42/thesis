@@ -119,8 +119,8 @@ def method_b(batch: replay.Batch, params: ExecutorParams, words: Words, device: 
             "lead_s_by_column": {COLUMNS[column]: _percentiles(values) for column, values in leads.items() if values},
             "lead_s_by_delay": {name: _percentiles(values) for name, values in by_group.items()},
             "rule": "delay = max(0, median lead of the group's columns); lead = received − re-read, seconds; "
-                    f"matched within {LEAD_WINDOW_S:g} s on the same column and value; heading words only where "
-                    "they begin a turn",
+                    f"matched within {LEAD_WINDOW_S:g} s on the same column and value; heading words are not measured "
+                    "(each says the track a lead later: no delay)",
         },
     }
 
@@ -171,11 +171,12 @@ def main(argv: list[str] | None = None) -> int:
                                  land_window_low_m=values["land_window_low_m"],
                                  land_window_high_m=values["land_window_high_m"], delays=Delays(0.0, 0.0),
                                  timeout_factor=TIMEOUT_FACTOR, word_clock=args.word_clock)
-    roll_rate, overshoots = derive.roll_rate_deg_s(provisional, spec)
+    roll_rate, roll_checks = derive.roll_rate_deg_s(provisional, spec)
     undelayed = replace(provisional, bank_rate_deg_s=roll_rate)
     undelayed.check(spec)
-    print(f"method A: τ_ψ {tau:g} s, p {roll_rate:g}°/s (a {derive.largest_own_turn_deg(spec):g}° turn's overshoot by "
-          f"speed {overshoots})", flush=True)
+    print(f"method A: τ_ψ {tau:g} s, p {roll_rate:g}°/s (by speed: a {derive.largest_own_turn_deg(spec):g}° own turn's "
+          f"overshoot {roll_checks['overshoot_deg']}, a {derive.FOLLOW_TURN_DEG:g}° worded turn's excess past its "
+          f"envelopes {roll_checks['follow_excess_deg']})", flush=True)
 
     batch = replay.draw(instructions, "train", spec, words, per_airport=args.method_b_per_airport, seed=args.seed)
     b = method_b(batch, undelayed, words, device)
@@ -188,13 +189,16 @@ def main(argv: list[str] | None = None) -> int:
     measurements = {
         "data": measured,
         "method_a": {
-            "heading_time_constant_s": {"value": tau, "rule": "the largest τ_ψ with turn_rate_max_deg_s |τ_ψ − "
-                                                              "heading_lead_s| ≤ heading_tolerance_deg − heading_step_deg / 2, "
-                                                              "down to 0.5 s"},
-            "bank_rate_deg_s": {"value": roll_rate, "overshoot_deg_by_speed_mps": overshoots,
-                                "rule": f"the least p on a {derive.ROLL_RATE_STEP_DEG_S:g}°/s grid whose "
-                                        f"{derive.largest_own_turn_deg(spec):g}° turn passes its target by at most "
-                                        "heading_tolerance_deg at every speed"},
+            "heading_time_constant_s": {"value": tau, "rule": "chosen: heading_lead_s, the time a heading word gives "
+                                                              "to arrive — τ_ψ eases out the executor's own turns only; "
+                                                              "heading words arrive a lead after they are heard"},
+            "bank_rate_deg_s": {"value": roll_rate, "by_speed_mps": roll_checks,
+                                "rule": f"the least p on a {derive.ROLL_RATE_STEP_DEG_S:g}°/s grid at which, at every "
+                                        f"speed, the executor's own {derive.largest_own_turn_deg(spec):g}° turn passes "
+                                        "its target by at most heading_tolerance_deg and a "
+                                        f"{derive.FOLLOW_TURN_DEG:g}° turn at r_turn, said word by word (read through "
+                                        "a moving-average approximation of the velocity fit), is flown inside every "
+                                        "word's envelope"},
         },
         "method_b": b["record"],
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,

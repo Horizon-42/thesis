@@ -90,7 +90,8 @@ def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceC
         sentence_times.append(sentence_s)
         bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
         track_rate, lateral_modes = lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],
-                                                 force.approach, force.runway, runways, bank, bank_rate)
+                                                 force.approach, force.runway, runways, bank, bank_rate,
+                                                 cycle * params.cycle_s)
         e0, n0, course, elevation = runways.pointed(force.runway)
         before, right, _off = relative(now, e0, n0, course)
         gamma_rate, gamma_wanted, vertical_modes = vertical.rate(now, force.altitude_m, force.land,

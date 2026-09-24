@@ -240,11 +240,16 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
 
     capture_row, tracking_row = first_row("captured"), first_row("tracking")
     smoothed, relative = flight.smoothed, flight.relative
-    cleared_at = [word.row for word in reached if word.column == APPROACH and word.kind == "clear"]
-    heading_end = min([rows, *cleared_at, *([] if capture_row is None else [capture_row])])
-    headings = envelope.heading_words_inside(
-        smoothed.track_deg, [(word.row, float(word.info["target_deg"])) for word in reached if word.column == HEADING],
-        spec.rows_exact(spec.heading_lead_s), heading_end, spec.heading_tolerance_deg)
+    # a heading word is judged up to the next clearance the executor was told, or its capture, after the word's row
+    # (a generated sentence may clear, go around and clear again): words sharing that end are judged together
+    ends = sorted({rows, *(w.row for w in reached if w.column == APPROACH and w.kind == "clear"),
+                   *([] if capture_row is None else [capture_row])})
+    said_heading = [(word.row, float(word.info["target_deg"])) for word in reached if word.column == HEADING]
+    headings = []
+    for low, high in zip([-1, *ends[:-1]], ends):
+        group = [(row, target) for row, target in said_heading if low <= row < high]
+        headings += envelope.heading_words_inside(smoothed.track_deg, group, spec.rows_exact(spec.heading_lead_s), high,
+                                                  spec.heading_tolerance_deg)
     capture_turn = None
     if capture_row is not None:
         # the capture turn: from the capture to where the track is on the course (within the corridor's course

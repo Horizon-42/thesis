@@ -39,8 +39,9 @@ class LateralReading:
     #: The capture turn, from the clearance to the capture (`turn_check`); ``None`` for a flight already on the
     #: final at row 0.
     capture_turn: dict[str, Any] | None
-    #: The heading changed before the capture: the sum of the turns from word to word, and on from the last word to
-    #: the course (the stratum's measure, `readout.flight_record`).
+    #: How far the track turned before the capture: the net turn of every run of rows turning one way faster than the
+    #: onset rate (`turn_runs`), summed — the stratum's measure (`readout.flight_record`), blind to a word boundary
+    #: the track wanders across.
     turning_deg: float
 
 
@@ -95,6 +96,23 @@ def per_step_words(track: np.ndarray, stop: int, step_deg: float, lead_rows: int
     return said
 
 
+def turn_runs(rate: np.ndarray, onset_deg_s: float) -> list[tuple[int, int]]:
+    """Runs of rows turning one way faster than the turn onset rate: ``(start, stop)`` over ``rate`` (``rate[i]`` turns
+    the track from row ``i`` to ``i + 1``), so the turn runs from track row ``start`` to ``stop``."""
+    turning = np.abs(rate) > onset_deg_s
+    runs, row = [], 0
+    while row < len(rate):
+        if not turning[row]:
+            row += 1
+            continue
+        stop, sign = row + 1, np.sign(rate[row])
+        while stop < len(rate) and turning[stop] and np.sign(rate[stop]) == sign:
+            stop += 1
+        runs.append((row, stop))
+        row = stop
+    return runs
+
+
 def capture_turn_onset(track: np.ndarray, capture: int, course_deg: float, spec: VocabularySpec) -> int:
     """Where the turn onto the course that ends at the capture began: walking back from the capture over the rows
     already on the course (within the corridor's course tolerance: the turn ended before the track entered the
@@ -107,11 +125,6 @@ def capture_turn_onset(track: np.ndarray, capture: int, course_deg: float, spec:
     while row > 0 and (track[row] - track[row - 1]) * math.copysign(1.0, course - float(track[row - 1])) > threshold:
         row -= 1
     return row
-
-
-def _turning_deg(targets: list[float], course_unwrapped: float) -> float:
-    path = [*targets, course_unwrapped]
-    return float(sum(abs(b - a) for a, b in zip(path, path[1:])))
 
 
 def read_lateral(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRelative,
@@ -145,8 +158,9 @@ def read_lateral(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRe
     instructions.append(Instruction(APPROACH, APPROACH_CLEARED, clear, "clear"))
     if clear > 0:
         instructions.append(Instruction(APPROACH, APPROACH_NOT_CLEARED, 0, "initial"))
-    last = kept[-1][1]
+    rate = np.diff(track[: capture + 1]) / spec.step_s
+    turning = float(sum(abs(track[stop] - track[start]) for start, stop in turn_runs(rate, spec.turn_onset_rate_deg_s)))
     return LateralReading(
         instructions=instructions, capture_row=capture, join_row=clear,
         capture_turn={"start_row": clear, **turn_check(track, ground_speed, clear, capture, course, spec)},
-        turning_deg=_turning_deg([t for _, t in kept], last + float(wrap180(course_deg - last))))
+        turning_deg=turning)

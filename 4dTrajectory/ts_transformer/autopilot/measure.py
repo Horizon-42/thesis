@@ -4,7 +4,7 @@ Data (train, the labeller's own reading of each flight — `flight_measurements`
 `measured_values`):
 
 - ``turn_rate_deg_s`` (r_turn): the turns the heading words describe — before the clearance, each run of rows turning
-  one way faster than the turn onset rate (`instructions.measure.turn_runs`) — of at least `TURN_MIN_DEG`, their
+  one way faster than the turn onset rate (`labeller.lateral.turn_runs`) — of at least `TURN_MIN_DEG`, their
   middle half (the first and last quarter dropped: the 15 s velocity fit smears the roll-in and roll-out); each
   turn's steady rate is the median of its middle rows, and r_turn the median over turns — a typical turn's steady
   rate, every turn counted once whatever its length;
@@ -37,7 +37,7 @@ from ts_transformer.instructions import envelope
 from ts_transformer.instructions.airport import AirportGeometry, relative_to_runway
 from ts_transformer.instructions.labeller.read import Admitted, Reading, admit, read_flight
 from ts_transformer.instructions.labeller.speed import span_checks
-from ts_transformer.instructions.measure import turn_runs
+from ts_transformer.instructions.labeller.lateral import turn_runs
 from ts_transformer.instructions.piecewise import fit_pieces
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec

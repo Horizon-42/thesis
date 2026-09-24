@@ -1,15 +1,20 @@
 """Method A (executor design §9, the E7 plan): the mildest values the design's constraints allow, found by
 flying the executor's own manoeuvre rather than read from data.
 
-- ``heading_time_constant_s`` (τ_ψ): the largest the per-step word envelope admits (``r_max |τ_ψ − L| ≤ δψ − s/2``
-  at the vocabulary's largest turn rate r_max, which the heading law follows words up to; `params.ExecutorParams.check`;
-  down to 0.5 s) — the gentlest roll-out whose steady lag in any turn the words describe keeps the flown track inside
-  the word a lead earlier (on the design's values, τ_ψ = L);
-- ``roll_rate_deg_s`` (p): the least bank rate (a `ROLL_RATE_STEP_DEG_S` grid) at which the executor's own
-  largest turn on its heading law (`largest_own_turn_deg`: from a heading word that just reaches the final — 90°
-  plus the tolerance off the course — to its own intercept of the final), level and at a held speed, passes its
-  target by no more than the heading tolerance at every speed of `ROLL_CHECK_SPEEDS_MPS` (`turn_overshoot_deg`
-  simulates it on an A320 at 1500 m). Heading words themselves turn a step or two at a time.
+- ``heading_time_constant_s`` (τ_ψ): the ease-out of the executor's OWN turns (its intercept, a go-around, the capture,
+  the line) — the heading words have their own law, which arrives on each word a lead after it is heard
+  (`lateral.word_rate`). Chosen, not derived: the lead L, the time a word gives to arrive, so the executor's own turns
+  settle on the scale the words do (at least 2Δt, `params.ExecutorParams.check`);
+- ``roll_rate_deg_s`` (p): the least bank rate (a `ROLL_RATE_STEP_DEG_S` grid) at which, at every speed of
+  `ROLL_CHECK_SPEEDS_MPS` (A320, level, at 1500 m, speed held), (1) the executor's own largest turn on its heading law
+  (`largest_own_turn_deg`: from a heading word that just reaches the final — 90° plus the tolerance off the course —
+  to its own intercept of the final) passes its target by no more than the heading tolerance (`turn_overshoot_deg`),
+  and (2) a typical turn said word by word is followed inside every word's envelope (`follow_excess_deg`): a
+  `FOLLOW_TURN_DEG` turn at the steady rate r_turn (or what the bank cap allows at the speed), read the way the
+  labeller reads an observed track — the data plane's centred velocity fit and the labeller's track average, taken
+  here as two centred moving averages of the heading (an approximation: the fit is a least-squares line over
+  positions) — then `labeller.lateral.per_step_words` at the lead. The roll-in is what (2) prices: a slow roll lags
+  the first words of a turn past their envelope (the executor review of 2026-09-24).
 """
 
 from __future__ import annotations
@@ -17,32 +22,39 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 
+import numpy as np
 import torch
 
+from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from aircraft.aero_params import aero_params_for_aircraft
 from flight_scenarios.scenario import aircraft_for_code
+from flight_scenarios.start_state import DEFAULT_WINDOW_S as VELOCITY_FIT_WINDOW_S
 from geokit import metres_per_deg_lon
 from ts_transformer.autopilot import inverse
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.autopilot.frame import AirportCharts, read_state, wrap180
-from ts_transformer.autopilot.lateral import heading_rate
-from ts_transformer.autopilot.measure import rounded
+from ts_transformer.autopilot.lateral import heading_rate, word_rate
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import Plant
+from ts_transformer.instructions import envelope
+from ts_transformer.instructions.labeller.lateral import per_step_words
+from ts_transformer.instructions.piecewise import moving_average
 from ts_transformer.instructions.spec import VocabularySpec
 
 ROLL_CHECK_SPEEDS_MPS = (60.0, 80.0, 100.0, 120.0, 140.0)
 ROLL_RATE_STEP_DEG_S = 0.5
 ROLL_RATE_MAX_DEG_S = 20.0
+#: The typical turn the follow check flies, and the straight flight before and after it (seconds).
+FOLLOW_TURN_DEG = 90.0
+FOLLOW_STRAIGHT_S = 40.0
 
 
 def heading_time_constant_s(spec: VocabularySpec, cycle_s: float) -> float:
-    """The largest τ_ψ the per-step word envelope admits (``r_max |τ_ψ − L| ≤ δψ − s/2``), down to 0.5 s."""
-    slack_s = (spec.heading_tolerance_deg - spec.heading_step_deg / 2) / spec.turn_rate_max_deg_s
-    tau = rounded(spec.heading_lead_s + slack_s, 0.5, math.floor)
-    if tau < 2.0 * cycle_s:
-        raise ValueError(f"τ_ψ {tau:g} s would be under 2 Δt: the lead {spec.heading_lead_s:g} s is too short")
-    return tau
+    """τ_ψ, the executor's own turns' ease-out: the lead, the time a heading word gives to arrive (module docstring);
+    at least 2Δt."""
+    if spec.heading_lead_s < 2.0 * cycle_s:
+        raise ValueError(f"τ_ψ {spec.heading_lead_s:g} s would be under 2 Δt: the lead is too short")
+    return spec.heading_lead_s
 
 
 def largest_own_turn_deg(spec: VocabularySpec) -> float:
@@ -87,16 +99,67 @@ def turn_overshoot_deg(params: ExecutorParams, speed_mps: float, turn_deg: float
     return furthest
 
 
-def roll_rate_deg_s(params: ExecutorParams, spec: VocabularySpec) -> tuple[float, dict[str, float]]:
-    """The least bank rate that keeps the executor's own largest turn inside the heading tolerance (module
-    docstring); returns it with the overshoot at each speed."""
+def as_labelled(heading_per_s: np.ndarray, spec: VocabularySpec) -> np.ndarray:
+    """A heading sampled once a second, read the way the labeller reads a track (module docstring): the velocity fit
+    as a centred moving average, the 2 s grid, the labeller's track average. An approximation, stated there."""
+    fitted = moving_average(heading_per_s, int(round(VELOCITY_FIT_WINDOW_S)))
+    return moving_average(fitted[:: int(round(spec.step_s))], spec.rows(spec.track_smoothing_s))
+
+
+def follow_words(params: ExecutorParams, spec: VocabularySpec, speed_mps: float) -> tuple[list[tuple[int, float]],
+                                                                                          np.ndarray]:
+    """The follow check at ``speed_mps`` (module docstring): the words read off the typical turn and the flown heading
+    as the labeller would read it, per sentence row. The turn is right, from compass 0°."""
+    rate = min(params.turn_rate_deg_s,
+               math.degrees(GRAVITY_MPS2 * math.tan(math.radians(params.bank_cap_deg)) / speed_mps))
+    seconds = np.arange(0.0, 2 * FOLLOW_STRAIGHT_S + FOLLOW_TURN_DEG / rate, 1.0)
+    said = per_step_words(as_labelled(np.clip((seconds - FOLLOW_STRAIGHT_S) * rate, 0.0, FOLLOW_TURN_DEG), spec),
+                          len(seconds) // int(round(spec.step_s)) - 1, spec.heading_step_deg,
+                          spec.rows_exact(spec.heading_lead_s))
+    inputs, charts = _a320_level(speed_mps)
+    plant = Plant(inputs)
+    state, bank = inputs.initial_state, torch.zeros(1, dtype=torch.float64)
+    flown, heard = [], 0
+    for cycle in range(int(round(seconds[-1] / params.cycle_s)) + 1):
+        now = read_state(state, charts)
+        time_s = cycle * params.cycle_s
+        if abs(time_s - round(time_s)) < 1e-9:
+            flown.append(float(now.track_deg[0]))
+        while heard + 1 < len(said) and said[heard + 1][0] * spec.step_s <= time_s:
+            heard += 1
+        error = wrap180(torch.tensor([said[heard][1]], dtype=torch.float64) - now.track_deg)
+        to_go = torch.tensor([said[heard][0] * spec.step_s + spec.heading_lead_s - time_s], dtype=torch.float64)
+        attitude = inverse.attitude(now, word_rate(error, to_go, params, spec), torch.zeros(1, dtype=torch.float64),
+                                    bank, bank_cap_rad=math.radians(params.bank_cap_deg),
+                                    bank_rate_rad_s=math.radians(params.bank_rate_deg_s), cycle_s=params.cycle_s)
+        thrust = inverse.thrust(now, torch.zeros(1, dtype=torch.float64), attitude.load_factor, inputs.aero_params,
+                                inputs.max_thrust_n)
+        bank = attitude.bank_rad
+        state = plant.step(state, torch.stack((thrust.fraction, bank, attitude.load_factor), dim=1), params.cycle_s)
+    return said, as_labelled(np.unwrap(np.asarray(flown), period=360.0), spec)
+
+
+def follow_excess_deg(params: ExecutorParams, spec: VocabularySpec, speed_mps: float) -> float:
+    """How far past the heading tolerance the flown heading lies at worst, over every word's judged rows, while
+    following the typical turn's words at ``speed_mps`` (degrees; at most 0 when every row is inside). Words and
+    flown heading lie on one unwrapped branch."""
+    said, flown = follow_words(params, spec, speed_mps)
+    rows = envelope.heading_word_rows([row for row, _ in said], spec.rows_exact(spec.heading_lead_s), len(flown))
+    return max(float(np.abs(flown[first:stop] - target).max()) - spec.heading_tolerance_deg
+               for (_, target), (first, stop) in zip(said, rows) if stop > first)
+
+
+def roll_rate_deg_s(params: ExecutorParams, spec: VocabularySpec) -> tuple[float, dict[str, dict[str, float]]]:
+    """The least bank rate that keeps the executor's own largest turn inside the heading tolerance and follows a
+    typical turn's words inside their envelopes (module docstring); returns it with both measures at each speed."""
     rate = ROLL_RATE_STEP_DEG_S
     while rate <= ROLL_RATE_MAX_DEG_S:
         trial = replace(params, bank_rate_deg_s=rate)
         overshoot = {f"{speed:g}": turn_overshoot_deg(trial, speed, largest_own_turn_deg(spec))
                      for speed in ROLL_CHECK_SPEEDS_MPS}
-        if max(overshoot.values()) <= spec.heading_tolerance_deg:
-            return rate, overshoot
+        excess = {f"{speed:g}": follow_excess_deg(trial, spec, speed) for speed in ROLL_CHECK_SPEEDS_MPS}
+        if max(overshoot.values()) <= spec.heading_tolerance_deg and max(excess.values()) <= 0.0:
+            return rate, {"overshoot_deg": overshoot, "follow_excess_deg": excess}
         rate += ROLL_RATE_STEP_DEG_S
-    raise ValueError(f"no bank rate up to {ROLL_RATE_MAX_DEG_S:g}°/s keeps the executor's turn inside the "
-                     "heading tolerance")
+    raise ValueError(f"no bank rate up to {ROLL_RATE_MAX_DEG_S:g}°/s keeps the executor's own turn inside the heading "
+                     "tolerance and a typical turn's words inside their envelopes")
