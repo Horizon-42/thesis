@@ -656,6 +656,10 @@ def test_a_turn_the_capture_takes_over_at_once_is_superseded_not_failed():
     (_, base) = verdict.words["heading"]
     assert base["superseded"] and base["turn"] is None
     assert verdict.words["capture_turn"]["progress_ok"] and verdict.outcome == "landed" and verdict.flew_the_sentence
+    # a probe acting on the words 2 s early captures before the base turn's own row: the word never flew
+    signals = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0))
+    _, early, _ = _fly_sentence(signals, params=_params(delays=Delays(-2.0, 0.0, 0.0)), early_words=True)
+    assert [h["superseded"] for h in early.words["heading"]] == [False, True]
 
 
 def test_the_judge_fails_a_turn_flown_slower_than_the_vocabulary_allows():

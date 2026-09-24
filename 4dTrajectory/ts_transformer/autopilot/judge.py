@@ -32,7 +32,8 @@ flights pass, smoothing and the landing cut included — and judged from each wo
   A turn the executor's capture takes over before its band is reached (the clearance comes with it, and the
   vocabulary lets the capture begin at once, §2.2) is judged as the labeller judges an intercept the
   capture cuts: to its furthest progress (`labeller.lateral._intercept_end`), not "reached"; a turn cut
-  before it progressed at all is ``superseded`` by the capture, not judged;
+  before it progressed at all, or said at or after the capture (a word acting early — a sensitivity probe, or a
+  generated sentence), is ``superseded`` by the capture, not judged;
 - the clearance: the executor's capture turn, from its first row to where it hands over to the line, with
   the same turn check toward the course (§2.2: monotone, rate and bank inside §2.3's range); and once the
   flight is in the corridor (`envelope.corridor`: position AND course — the labeller's capture is the first
@@ -210,7 +211,9 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
     fixes the turn's way and size."""
     smoothed = flight.smoothed
     track, speed = smoothed.track_deg, smoothed.ground_speed_mps
-    groups = _turn_groups(sorted((i for i in instructions if i.column == HEADING), key=lambda item: item.row))
+    every = _turn_groups(sorted((i for i in instructions if i.column == HEADING), key=lambda item: item.row))
+    # a heading word said at or after the executor's capture never flew: the capture had taken over
+    groups = [g for g in every if capture_row is None or g[0].row < capture_row or g[0].kind == "initial"]
     last_end = flight.signals.n_rows - 1 if capture_row is None else capture_row
     ends = [group[0].row for group in groups[1:]] + [last_end]
     results = []
@@ -264,7 +267,8 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
                 inside = envelope.inside_convex(positions, funnel.outline)
                 result["hold"] = {"rows": int(len(inside)), "inside": int(inside.sum())}
         results.append(result)
-    return results
+    return results + [{"row": group[0].row, "kind": group[0].kind, "words": len(group), "turn": None,
+                       "superseded": True, "hold": None} for group in every[len(groups):]]
 
 
 def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int, reading: Reading,
