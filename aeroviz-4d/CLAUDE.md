@@ -130,7 +130,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   ground in 3D, rows outside red everywhere; the capture turn is its rows, clearance → capture (AV23).
 - **Training overlays sit BESIDE a set, never in it**: `training/overlays.json` (`aeroviz-training-overlays-v1`) lists the
   executor's replay (`aeroviz-training-executor-v2`: each judged heading word's band on the flown rows + `judgedTrackDeg`) and
-  the prior's predictions (`aeroviz-training-prior-v1`), each bound to its set by id, the sample's `writtenUtc` and spec (and
+  the prior's predictions (`aeroviz-training-prior-v2`: step 0 predicts only the runway), each bound to its set by id, the sample's `writtenUtc` and spec (and
   on disk its sha256) and flight by flight — refused whole on any mismatch; published as `trainingExecutor` /
   `trainingPrior`, apart from the selection; the executor's words are judged on envelopes re-drawn from where IT heard them,
   its lines and bands run on its own clock; the prior is teacher-forced (AV24).
