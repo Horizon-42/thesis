@@ -227,20 +227,23 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 --dir <new dir> [--method-b-per-airport 40] [--seed 1337] [--workers 8] [--device cpu]` refuses a dirty tree, an
 existing directory and a labeller other than the artefact's; measures the data parameters on EVERY labelled train
 flight (process pool of torch-free workers, 1,000 flights a chunk, each flight re-read and required to equal its
-stored sentence), derives τ_ψ and p by method A (the executor's own 90° turn on an A320, 60–140 m/s), then flies a
-seeded train sample of own-dynamics flights with no delay and re-reads each flown track through the observation
-operator for the delays (method B: median lead per group, floored at 0). The design's fixed choices (Δt, τ_γ, the
+stored sentence), derives τ_ψ and p by method A (instruction-v3: τ_ψ = the heading lead, the executor's own turns
+only; p the least bank rate at which, on an A320 at 60–140 m/s, its own 124.5° turn overshoots by at most the heading
+tolerance and a 90° turn said word by word is flown inside every word's envelope), then flies a seeded train sample
+of own-dynamics flights with no delay and re-reads each flown track through the observation operator for the
+altitude/angle and speed delays (method B: median lead per group, floored at 0; heading words carry their own lead). The design's fixed choices (Δt, τ_γ, the
 γ̇ factor, the timeout factor, the 30 s match window) are module constants and are written into `measurements.json`
 beside `spec.json`. ~6 s per 1,500 flights for the data pass in one process. `executor_sensitivity --instructions
 --executor <spec dir> [--per-airport 400] [--seed 1337] [--out]` flies one seeded TRAIN sample per variant (the spec,
-then τ_ψ, p, the γ̇ factor, each delay ± 4 s, one at a time); a delay below 0 is a `probe` (a word acting before it
+then τ_ψ over 2–6 s, p, the γ̇ factor, each delay ± 4 s, one at a time); a delay below 0 is a `probe` (a word acting before it
 is said) and never a spec value; writes `sensitivity.json` into a new directory (default beside the spec).
 `executor_replay --instructions --executor --split {train,val} --out <new dir> [--per-airport 0 = every flight]
 [--seed] [--chunk 500]` is the §11 readout: own-dynamics flights gated, a stand-in's (the performance index's
 substitute) reported, a flight without aircraft dynamics counted (C31); each airport flown in
 chunks, judged, written as control-path prediction records (`records/<ICAO>/`, the plant contract's law resolving
-the newtons) that `python -m evaluation` grades; its verdicts are paired with the harvest's observed
-`approach/evaluation_report.json` by `flight_key`; `replay.json` holds every flight's row and the gate table (per
+the newtons) that `python -m evaluation` grades; the drawn flights' observed records are linked read-only and graded
+by the same evaluation code (the harvest's own reports predate the speed gate's current methodology), and paired by
+`flight_key`; `replay.json` holds every flight's row and the gate table (per
 group, airport and stratum: landed, words inside per word judged, evaluation where the observed passes, ≥ 0.95).
 **The VAL replay is stage 4 and runs only on the user's go-ahead**; development uses train. Every write refuses an
 existing directory. Tests: `tests/test_autopilot.py` (every write into `tmp_path`).
