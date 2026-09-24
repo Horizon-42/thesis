@@ -1,5 +1,97 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-24 — Training 的导出与界面改成 instruction-v3：航向词是逐行判定的航向带
+
+词表换成 `instruction-v3`（航向词按步读，词表设计 §10.1）之后，前端的导出链和 Training 视图还在读保持段读法的转弯区与
+漏斗。分支 `dev-vocab-v3-frontend`（从 `dev-vocab-v3` 的 `ba77d65c` 分出，与改执行器 / 标注器的会话并行），代码与测试
+`8f7a8640`，文档在其后一个提交；没有合并。
+执行器、标注器、`spec.py`、`envelope.py`、`measure.py`、`readout.py` 一行没动。
+
+- **显示几何**（`instructions/display.py`）：转弯区、转弯路径、平行四边形、保持漏斗全部删掉。一个航向词的包络是它被判的
+  那几行上的航向带：行由 `envelope.heading_word_rows` 给出（说出那一行加提前量 4 s，到下一个词的那一行加提前量，不超过
+  许可），每一行在不在目标 ± 4.5° 以内由 `envelope.heading_words_inside` 一行一行地问（`rows_inside`），合计必须等于
+  标注器的 `checks["heading"]`，否则导出停下（`heading_band`）。截获转弯是许可行到截获行和 `checks["capture_turn"]`。
+- **样本格式 `aeroviz-training-sample-v7`**（Python `SAMPLE_SCHEMA` 与 TypeScript `TRAINING_SAMPLE_SCHEMA` 同一次改）：
+  航向词带 `firstRow` / `stopRow` / `targetOnTrackDeg` / `bandDeg` / `inside` / `check`；截获转弯带 `startRow` / `endRow` /
+  `courseOnTrackDeg` / `check`；词表块加 `headingLeadS`、`turnOnsetRateDegS`，去掉 `headingMaxTurnDeg`、`turnStartDelayMaxS`；
+  去掉 `interceptInserted`；发令原因只剩 `initial`、`per-step`、`clear`、`target`、`step`、`angle`、`unspecified`。v6 及更早的
+  样本按名字拒读。
+- **执行器叠加层 `aeroviz-training-executor-v2`**：航向词的判定就是判决对它的那一条结果（从执行器听到它的那一步加提前量
+  算起的行里，多少行在带里）；没有行的词记"不判"并说明原因；每个被判的航向词带上它在飞出航迹上的航向带和逐行判定，
+  每架被判的航班带上判决读到的飞出航迹（`judgedTrackDeg`），都在观测航迹的展开分支上。仍然要求每架重飞的航班与正式回放
+  那一行完全一致。动力学失败的航班不画带：判决读到了失败的那个状态（可能不是有限值，写不进 JSON），而导出的航迹有意不含它，
+  这些航班的词只保留判决的状态和检查。先验叠加层的形状没变，仍是 `aeroviz-training-prior-v1`。
+- **前端**：读取器按新形状核对账（航向带的第一行 = 词的行 + 提前量，末行不越过下一个词的第一行和许可行，带 = 目标 ±
+  容差，判定计数 = 逐行标记的计数；执行器的带不越过判决读到的航迹）。读数窗口的航向图每个词一块航向带矩形，出界的行画红，
+  截获转弯是一段竖条和航道虚线；执行器的航向带在它自己的时间轴上画青色边框。三维：航向词没有平面区域，画它被判的那一段
+  地面投影（航向带的颜色，一个词一个实体，可以选中），出界的行用红线盖在上面；执行器出界的行红色画在它的地面投影上。
+  开关换成 `headingBands`、`corridor`（含截获转弯）、`vertical`、`candidates`；图例、面板说明、句子条头部（航向词全在带里的
+  个数、没有自己的行的个数）跟着改。
+- **代码审查（opus）后的修正**：动力学失败不画带（上一条）；"不判"的原因分三种（下一个词在同一步说出 / 行在判决读到的航迹
+  结束之后 / 行在许可或截获之后）；出界行的画法（一行出界画到下一行成一段）只在 `trainingBandOutsideSpans` 一处，读数窗口
+  和三维共用；提前量的步数由导出器用规格的 `rows_exact` 写出（`headingLeadRows`），前端只核对与秒数一致；执行器读取器要求
+  被判的航向词都带带子、判定数恰好等于有判定的词数（离开航向词自己切入的那个词若带子也判过行则多一次）、判决航迹的第 k 步
+  就是导出航迹的第 k 个点。
+- **规格 sha 没动**：前端的 `TRAINING_SPEC_SHA256` 仍是 `instruction-v2` 的 `103a6eae6b90`，因为 v3 的规格还没写；在它换成
+  v3 规格的 sha 之前，任何 v3 集合都按规格 sha 被拒读。**没有发布任何东西**：没有 v3 产物可导，也就没有浏览器核对。
+- 测试：ts 全套改之前 1337 通过、14 失败（`test_autopilot.py`，执行器正由另一个会话改）、2 个文件收集时出错（本改动的两个测试
+  文件，读的是已删的函数）；改之后 1360 通过、同样那 14 条失败。前端 Vitest 改之前 701 通过、1 失败（`--set instruction_v2`），
+  改之后 90 个文件 710 条全过；`tsc`、`npm run build`、`npm run typecheck:scripts` 无错。
+- 文档：`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`（§0、§2、§3、§4 按 v3 重写）、`35-viewer-reference.md`
+  AV19–AV24、`aeroviz-4d/CLAUDE.md` 与 ts `CLAUDE.md` 的索引行、ts `docs/reference/runners.md` R11 / R13。
+- **从训练模块文档移到这里的 v2 发布记录**（原文照录，那些集合与叠加层现在按名字拒读）：
+
+  原 §0 状态表中关于 v2 的几行：
+
+  | 项 | 内容 |
+  |---|---|
+  | 词表 | 读法 `instruction-v2`，规格 sha `103a6eae6b90`，标注器源码 sha `47c6008a89bd`（规格写于 `35115734`，工作区干净）。产物 `4dTrajectory/outputs/POOLED/instruction_language/v2_20260924/`（规格文件的格式名 `ts-instruction-spec-v3`，候选跑道文件的格式名 `ts-instruction-candidates-v2`） |
+  | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；几何全部来自 `instructions/display.py` |
+  | 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/data/trainingOverlays.ts`（叠加层的契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/hooks/useTrainingOverlays.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
+  | 分支与提交 | 都在 `dev-two-tier` 上：前端读取器 `dada684b`、读取修正 `2bbbd8cd`、样本 v4 `caf6cf00`；2026-09-24 的高亮按词 `a485c1bc`、速度紫色与转弯路径开关 `f15c938e`、**样本 v5（航向随时间的转弯、淡化、实际转弯起止）`a66c3276`**、取景含转弯区 `37e7e916` |
+  | 发布 | 2026-09-24 在 `a66c3276`（工作区干净，记在每个索引条目的 `source.git` 和样本的 `producedBy.git` 里）从 `v2_20260924` **重新导出**，样本格式 `aeroviz-training-sample-v5`：五个机场（KMSY、KRDU、KSJC、KSMF、KSTL）各一个集合 `training/instruction_v2/`，每个机场 40 架 val 航班（直线进近 20 + 雷达引导 20，种子 1337），读过的航班数与 v4 那次相同（51 / 44 / 143 / 43 / 50），是同一批航班。只重新导出，没有重新标注。v4 的集合与索引条目已删除；各机场 `index.json` 里别的条目（包括 `instruction_v1`）逐条原样保留 |
+  | 测试 | 2026-09-24 样本 v5 之后：Python `tests/test_instruction_training_export.py` 10 条（含与前端的契约比对、航向曲线与平面路径逐点一致），`-k instruction` 共 75 条，全部通过；前端 Vitest 88 个文件 663 条通过；`npm run build`（`tsc` 加 vite 打包）与 `npm run typecheck:scripts` 无错 |
+  | 高亮与三维（2026-09-24） | 高亮改成"选中的一个词"：`trainingColumn` + 游标 → `trainingWordAt`，只亮这一列的词（§4.5）；三维加地面投影、贴地边线（带判定）、管子上下沿、最快 / 最慢转弯路径（开关 "turn paths"）、选航班时取景一次（§4.4）；速度列换成紫色 `#be76ff`（原来的琥珀色和选中的黄色分不开，`trainingWordColors.ts` 写了校验数字）。在 `dev-two-tier` 上，本机 Chrome 里 KRDU 的 N994FG 逐类点过（航向、高度、进近、下降角），读数窗口同样只亮所选的类 |
+  | 核对 | 2026-09-24 v5 重新导出后：`npm run check-publication -- --server http://localhost:5173`，五个机场盘上与开发服务器两层都是 0 个错误，每个机场 1 个能读的集合，别的词表的集合按名字拒读记为警告（§5）。本机 Chrome 打开 KRDU 的 DAL689（150° 的切入转弯），选中 075° 这个词：航向图画出楔形，实际航迹落在最快与最慢两条曲线之间；平面图按整个转弯区取景，两条路径和实际转弯起止（第 139、198 步）标了名字，其余的词淡化；三维取景含转弯区。（这个浏览器标签在后台时 `document.hidden` 为真，Cesium 不渲染，截图时才更新——看起来像渲染滞后。） |
+  | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
+  | 叠加层（2026-09-24） | 执行器的 val 回放（规格 `2674ab8c71a9`）和先验的第一次训练（`prior/v1_20260924`）画在 `instruction_v2` 的航班上：`training/overlays.json` 与 `training/executor_v2_20260924/executor.json`、`training/prior_v1_20260924/prior.json`（§2.6、§4.6）。分支 `dev-publish-executor-prior`（`49a81d93` 发布，`b7acb11f` 表格修正），在 `49a81d93`（干净）发布到五个机场；发布与核对见 §2.6 的表。**注意**：`dev-two-tier` 同一天改成样本 v6（`9fb1b137`），在它上面这些 v5 集合和画在上面的叠加层都按名字拒读，要看它们用本分支的前端 |
+
+  原 §2.1 v2 导出的数字：
+
+  | 机场 | 候选池（已标注 val） | 读了 | 抽中 | 文件 | 转弯（含截获转弯） | 保持段：判的 / 不判的 | 判的保持段的行在漏斗里 |
+  |---|---|---|---|---|---|---|---|
+  | KMSY | 1,107 | 51 | 20 + 20 | 5.7 MB | 76 | 55 / 10 | 2,667 / 2,668 |
+  | KRDU | 3,528 | 44 | 20 + 20 | 6.7 MB | 127 | 86 / 28 | 3,008 / 3,014 |
+  | KSJC | 2,487 | 143 | 20 + 20 | 5.8 MB | 92 | 50 / 15 | 2,107 / 2,122 |
+  | KSMF | 1,321 | 43 | 20 + 20 | 6.5 MB | 104 | 81 / 6 | 3,457 / 3,461 |
+  | KSTL | 2,097 | 50 | 20 + 20 | 6.5 MB | 111 | 88 / 8 | 2,865 / 2,874 |
+
+  五个机场共 510 个转弯里，74 个的转弯区面积几乎为零：发令时航迹已经在目标带里或只差一点（多是 2° 左右的截获
+  转弯），最快和最慢的转弯只有发令点一两个点；只有 1 个转弯区的边界自己交叉（KSJC XSN90 的截获转弯，转角 4.8°，刚过
+  4.5° 的带，交叉出的只是一条约 30 m² 的细缝），在任何比例下都看不出来。
+
+  原 §2.6 叠加层的发布：
+
+  2026-09-24 在 `49a81d93`（干净的工作树）发布到五个机场，每个机场的 `instruction_v2`（40 架）：
+
+  | 机场 | 执行器飞了（自己的动力学 / 替代动力学） | 结局 | 自己的动力学：落地 / 词在包络里 / evaluation 配对 | 先验每步负对数似然 | 文件（执行器 / 先验） |
+  |---|---|---|---|---|---|
+  | KMSY | 40（34 / 6） | 落地 39、超时 1 | 34/34、211/221、32/32 | 0.1753 | 0.8 / 1.8 MB |
+  | KRDU | 40（24 / 16） | 落地 34、动力学失败 6（都是替代动力学的小飞机，第一步就失败） | 24/24、158/169、24/24 | 0.2129 | 0.7 / 2.1 MB |
+  | KSJC | 39（27 / 12）；1 架没有识别出机型，不飞 | 落地 39 | 27/27、141/146、24/26 | 0.1783 | 0.7 / 1.8 MB |
+  | KSMF | 39（37 / 2）；1 架机型没有公开进近速度，不飞 | 落地 36、落在跑道外 3 | 34/37、230/247、30/37 | 0.1448 | 0.8 / 2.0 MB |
+  | KSTL | 40（28 / 12） | 落地 40 | 28/28、170/189、25/27 | 0.1913 | 0.8 / 1.9 MB |
+
+  198 架被飞的航班每一架都与正式回放的那一行一致（判定列表、词数、结局完全相同，越过入口的数差在 1e-9 以内）。
+  val 整体先验每步 0.1778（这里的 200 架是抽样，各机场的数字只是这些航班的）。核对：`check-publication --server`
+  （本分支的开发服务器）五个机场 0 个错误，每个机场 2 个叠加层都对照所画集合读通；浏览器里 KRDU 与 KSMF 逐项看过：
+  面板的两个开关、门表与读数表、航班列表的结局、句子条的判定点与头部、Prior predictions 窗口、读数窗口的执行器航迹与
+  三张图、三维的执行器航迹与终点标签，切换机场时只取新机场的文件。
+
+  **Experiments 里的执行器回放还没有发布**：它的类别带 `horizonMode: "sentence"`，而 `dev-two-tier` 上的前端镜像还不认这个值，
+  在合并本分支之前发布会让每个机场的选择器变空（AV6、AV25）；另外回放里替代动力学那一组是按 A320 飞的，`9fb1b137` 之后
+  不再这样做，要不要把它放进 Experiments 由用户决定。命令见 ts 的 R13（合并之后、在工作树里跑）。
+
 ### 2026-09-24 — 发布执行器的 val 回放与先验的第一次训练：Training 的叠加层
 
 用户要求把执行器（阶段 4 的 val 回放）和先验（阶段 5 的第一次训练）的结果发布到前端，用能重跑的脚本发布，前端缺的

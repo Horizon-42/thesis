@@ -106,35 +106,34 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - The comparison reference must be requested on the `arrival` track window — see
   `aeroviz_backend/CLAUDE.md` (AV12).
 
-- **Training reads ONE vocabulary: `instruction-v2`, spec `103a6eae6b90`** — the sample schema
-  (`aeroviz-training-sample-v6` since 2026-09-24: v5's shape with a flight's `typecode` its own type or null;
-  a format name changes with its file's shape, both sides in one change), the
-  reading rule, the spec sha, the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
-  refused by name; `training/index.json` keeps its v1 schema across vocabularies, so a set of another
-  vocabulary (`instruction_v1` included) stays listed and is refused from the manifest alone, never
-  downloaded (`check-publication`: a warning) (AV19).
-- **The Training views compute NO envelope**: every turn region, turn end, funnel, corridor, tube and speed
-  band is exported from `instructions/display.py`, every verdict is `Reading.checks`; the reader checks only
-  the bookkeeping (AV20).
+- **Training reads ONE vocabulary: `instruction-v3`** — the sample schema (`aeroviz-training-sample-v7` since
+  2026-09-24: heading words as per-row bands, no turn regions / funnels; a format name changes with its file's shape, both
+  sides in one change), the reading rule, the spec sha (STILL instruction-v2's `103a6eae6b90` until the v3 spec is written:
+  every v3 set is refused by it until then), the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
+  refused by name; `training/index.json` keeps its v1 schema across vocabularies, so a set of another vocabulary
+  (`instruction_v1`, `instruction_v2`) stays listed and is refused from the manifest alone, never downloaded
+  (`check-publication`: a warning) (AV19).
+- **The Training views compute NO envelope**: every heading band and row verdict, capture turn, corridor, tube and speed
+  band is exported from `instructions/display.py` (`envelope.heading_word_rows` / `heading_words_inside`, checked against
+  the labeller's counts), every verdict is `Reading.checks`; the reader checks only the bookkeeping (AV20).
 - **Training highlights ONE selected word, never a step**: `trainingColumn` (the word class) + the shared
-  cursor → `trainingWordAt`; only that column's word lights up (its own envelope in its own hue with a yellow
-  edge, and its in-force rows), in the sentence bar, the read-back window and 3D alike; every other word's
-  envelope recedes (× 0.3) and the plan view frames the selected envelope (AV21).
-- Training in 3D: the plan envelopes are draped on the ground with a draped edge carrying the verdict, under the
-  track's ground trace; each has its own switch and by DEFAULT only the turns (fastest / slowest + where they may
-  end) and the corridor are drawn — turn regions and hold funnels are off; a hold whose funnel starts wider than
-  `TRAINING_WEAK_HOLD_WIDTH_M` is dotted (a weak check); a legend lists what is on; the tubes are walls in exported
-  HAE with edge lines; a selected flight is framed once; the altitude chart's axis is the distance flown (AV22).
-- **A turn is bounded by RATE**: its region lies between the fastest (4.7°/s, ≤ 32° bank) and the slowest
-  (0.5°/s, up to 10.5 s late) turn, it may end in a parallelogram, and the hold funnel swept from that
-  parallelogram is exactly what the labeller judges (`holdCheck`; dashed = not judged); the two turn paths are
-  its edges (the slowest begun LATE), and the heading chart's wedge is the same two turns against time, read
-  back from the paths by `display.turn_heading` (`envelope.py` untouched) (AV23).
+  cursor → `trainingWordAt`; only that column's word lights up (its own envelope yellow — a line — or its hue deepened with a
+  yellow edge — a fill — and its in-force rows), in the sentence bar, the read-back window and 3D alike; every other word's
+  envelope recedes (× 0.3); red rows outside never fade (AV21).
+- Training in 3D: what bounds position is draped on the ground under the track's ground trace — a heading word's judged rows,
+  the capture turn's rows, the corridor; switches `headingBands` / `corridor` / `vertical` / `candidates`; a legend lists what
+  is on; the tubes are walls in exported HAE with edge lines; a selected flight is framed once; the altitude chart's axis is
+  the distance flown (AV22).
+- **A heading word (instruction-v3) is a BAND over the rows it is judged on**: from its row plus the 4 s lead to the next
+  heading word's, never past the clearance, the track within ±4.5° of its target row by row; a word the lead carries to the
+  clearance has no row of its own (not drawn, not judged); drawn as rectangles on the heading chart, its judged rows on the
+  ground in 3D, rows outside red everywhere; the capture turn is its rows, clearance → capture (AV23).
 - **Training overlays sit BESIDE a set, never in it**: `training/overlays.json` (`aeroviz-training-overlays-v1`) lists the
-  executor's replay (`aeroviz-training-executor-v1`) and the prior's predictions (`aeroviz-training-prior-v1`), each bound to
-  its set by id, the sample's `writtenUtc` and spec (and on disk its sha256) and flight by flight — refused whole on any
-  mismatch; published as `trainingExecutor` / `trainingPrior`, apart from the selection; the executor's words are judged on
-  envelopes re-drawn from where IT heard them, its lines run on its own clock; the prior is teacher-forced (AV24).
+  executor's replay (`aeroviz-training-executor-v2`: each judged heading word's band on the flown rows + `judgedTrackDeg`) and
+  the prior's predictions (`aeroviz-training-prior-v1`), each bound to its set by id, the sample's `writtenUtc` and spec (and
+  on disk its sha256) and flight by flight — refused whole on any mismatch; published as `trainingExecutor` /
+  `trainingPrior`, apart from the selection; the executor's words are judged on envelopes re-drawn from where IT heard them,
+  its lines and bands run on its own clock; the prior is teacher-forced (AV24).
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 
