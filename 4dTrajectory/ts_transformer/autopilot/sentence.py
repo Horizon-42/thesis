@@ -54,8 +54,9 @@ TRACK_WINDOW_S = 60.0
 #: ... and moves at most this many rows a cycle: sentence time then runs at most twice as fast as the observed
 #: flight's (a row is 2 s, a cycle 1 s) and every row is passed — however far from the observed track the executor is,
 #: where "nearest" means little. The delayed columns see every row; the undelayed ones, heard once a step, do not see a
-#: row the clock passes within a step: two heading words then arrive together and the first is never flown (the judge
-#: judges it on no rows, and counts the one after it as heard with a skipped word, `judge`).
+#: row the clock passes within a step (the distance clock, which has no such cap, can pass several): two heading words
+#: then arrive together and the first is never flown — the judge judges it on no rows, and the replay counts the one
+#: told with it apart (`replay.told_with_skipped`).
 TRACK_MAX_ROWS_PER_CYCLE = 1
 #: A sentence time this close below a row's start (in rows) is read as that row: float round-off.
 ROW_ROUNDING = 1e-9

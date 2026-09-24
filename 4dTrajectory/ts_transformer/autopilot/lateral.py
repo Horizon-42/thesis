@@ -286,5 +286,12 @@ class Lateral:
         rate = torch.where(self.captured & ~self.tracking, capture, torch.where(self.tracking, line_rate, free))
         intercept_target = course + side * spec.intercept_angle_deg
         off_word = intercept & (wrap180(intercept_target - heading_deg).abs() > spec.heading_tolerance_deg)
-        return rate, {"captured": self.captured.clone(), "tracking": self.tracking.clone(), "bent": bend,
-                      "intercepting": intercept, "intercepting_off_word": off_word, "go_around": go_around}
+        following = ~self.captured & ~self.tracking & ~intercept & ~go_around
+        return rate, {"captured": self.captured.clone(), "tracking": self.tracking.clone(), "following_words": following,
+                      "bent": bend, "intercepting": intercept, "intercepting_off_word": off_word, "go_around": go_around}
+
+    def bank_cap_rad(self, modes: dict[str, torch.Tensor]) -> torch.Tensor:
+        """The bank cap for this cycle (§4.1): the vocabulary's own bank limit while the words set the pace (the
+        labeller admits a turn up to it), φ_cap for the executor's own turns (measured from the data's fast turns)."""
+        return torch.where(modes["following_words"], math.radians(self.spec.turn_bank_max_deg),
+                           math.radians(self.params.bank_cap_deg))

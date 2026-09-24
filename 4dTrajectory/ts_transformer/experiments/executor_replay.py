@@ -110,12 +110,19 @@ def gate_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
         paired = [r for r in members if r["observed_verdict"] == "pass"]
         landed = _share(sum(r["outcome"] == "landed" for r in members), len(members))
         words = _share(sum(ok for _, ok in judged), len(judged))
+        # the words the clock told two at a time, apart (`replay.told_with_skipped`): the gate counts them; beside it,
+        # the share without them says what the executor did with the words it was told one at a time
+        pairs = [r["heading_words_told_with_a_skipped_word"] for r in members]
+        pair_judged, pair_inside = sum(p["judged"] for p in pairs), sum(p["inside"] for p in pairs)
+        words_alone = _share(sum(ok for _, ok in judged) - pair_inside, len(judged) - pair_judged)
         evaluation = _share(sum(r["replay_verdict"] == "pass" for r in paired), len(paired))
         table.setdefault(group, {}).setdefault(airport, {})[stratum] = {
             "flights": len(members), "landed": landed, "words_judged": len(judged), "words_inside": words,
             "observed_passes": len(paired), "replay_passes_where_observed_passes": evaluation,
             "flights_with_unjudged_words": sum(r["words"] is None for r in members),
             "heading_words_not_judged": sum(r["heading_words_not_judged"] for r in members),
+            "heading_words_told_with_a_skipped_word": {"judged": pair_judged, "inside": pair_inside},
+            "words_inside_without_them": words_alone,
             "words_not_reached": sum(r["words_not_reached"] for r in members),
             "clears": ({name: value is not None and value >= GATE_SHARE
                         for name, value in (("landed", landed), ("words", words), ("evaluation", evaluation))}
@@ -187,6 +194,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
                 "outcome": verdict.outcome, "flew_the_sentence": verdict.flew_the_sentence,
                 "crossing": verdict.crossing, "words": None if counted is None else counted[0],
                 "heading_words_not_judged": 0 if counted is None else counted[1],
+                "heading_words_told_with_a_skipped_word": replay.clock_pairs(verdict),
                 "words_not_reached": 0 if verdict.words is None else verdict.words["not_reached"],
                 "words_superseded_before_flown": 0 if verdict.words is None else verdict.words["superseded_before_flown"],
                 "intercepting_off_word_cycles": 0 if verdict.words is None else verdict.words["intercepting_off_word_cycles"],

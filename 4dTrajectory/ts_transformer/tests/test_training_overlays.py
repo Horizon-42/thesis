@@ -96,7 +96,7 @@ def test_the_verdicts_give_back_the_judges_count_on_every_clock():
 
 def test_a_heading_word_is_judged_on_its_band_a_lead_after_it_was_told_row_by_row_as_the_judge_counts():
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
-    verdict, _, words, _, _, track = _verdicts(signals, params=_params(bank_cap_deg=5.0))   # too slow to keep up
+    verdict, _, words, _, _, track = _verdicts(signals, params=_params(bank_rate_deg_s=0.5))   # too slow to keep up
     one = spec()
     lead, tolerance = one.rows_exact(one.heading_lead_s), one.heading_tolerance_deg
     heading = [w for w in words if w["column"] == HEADING]

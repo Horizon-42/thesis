@@ -224,6 +224,7 @@ def word_verdicts(flown: Flown, index: int, verdict: Verdict, reading: Reading, 
     # the judge read the failed state of a dynamics failure, which the exported track leaves out: nothing to draw on
     drawn = verdict.outcome != "dynamics_failure"
     track = flight.smoothed.track_deg + shift_deg
+    skipped = replay.skipped_by_clock(results)
     for number, (word, result) in enumerate(zip(heading, results)):
         cell = _said_cell(word)
         first_row = word.row + lead
@@ -233,8 +234,7 @@ def word_verdicts(flown: Flown, index: int, verdict: Verdict, reading: Reading, 
             out[cell]["heading"] = band_payload(band)
         if result["rows"] == 0:
             not_judged += 1
-            following = heading[number + 1] if number + 1 < len(heading) else None
-            if following is not None and following.row == word.row:
+            if skipped[number]:
                 reason = "no row to judge: the next heading word was told on the same flown step"
             elif first_row >= rows:
                 reason = (f"no row to judge: its rows, {spec.heading_lead_s:g} s after it was told, begin past the end "

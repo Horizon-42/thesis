@@ -229,8 +229,9 @@ existing directory and a labeller other than the artefact's; measures the data p
 flight (process pool of torch-free workers, 1,000 flights a chunk, each flight re-read and required to equal its
 stored sentence), derives τ_ψ and p by method A (instruction-v3: τ_ψ = the heading lead, the executor's own turns
 only; p the least bank rate at which, on an A320 every 5 m/s from 60 to 140 m/s, its own 124.5° turn overshoots by at
-most the heading tolerance and 90° turns said word by word — at r_turn and at the vocabulary's largest rate, each
-within the bank cap — are flown inside every word's envelope; ~1 min), then flies a seeded train sample
+most the heading tolerance and 90° turns said word by word — an ideal one at r_turn and one at the vocabulary's largest
+rate rolled into at p, each within the vocabulary's bank limit, which the executor follows words up to — are flown
+inside every word's envelope; ~1 min), then flies a seeded train sample
 of own-dynamics flights with no delay and re-reads each flown track through the observation operator for the
 altitude/angle and speed delays (method B: median lead per group, floored at 0; heading words carry their own lead). The design's fixed choices (Δt, τ_γ, the
 γ̇ factor, the timeout factor, the 30 s match window) are module constants and are written into `measurements.json`
@@ -245,7 +246,8 @@ chunks, judged, written as control-path prediction records (`records/<ICAO>/`, t
 the newtons) that `python -m evaluation` grades; the drawn flights' observed records are linked read-only and graded
 by the same evaluation code (the harvest's own reports predate the speed gate's current methodology), and paired by
 `flight_key`; `replay.json` holds every flight's row and the gate table (per
-group, airport and stratum: landed, words inside per word judged, evaluation where the observed passes, ≥ 0.95).
+group, airport and stratum: landed, words inside per word judged, evaluation where the observed passes, ≥ 0.95; beside
+the words, the heading words the clock told two at a time and the share without them).
 **The VAL replay is stage 4 and runs only on the user's go-ahead**; development uses train. Every write refuses an
 existing directory. Tests: `tests/test_autopilot.py` (every write into `tmp_path`).
 

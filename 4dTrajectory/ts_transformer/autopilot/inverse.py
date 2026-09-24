@@ -53,18 +53,20 @@ class Attitude:
 
 
 def attitude(state: Kinematics, track_rate_deg_s: torch.Tensor, gamma_rate_rad_s: torch.Tensor,
-             previous_bank_rad: torch.Tensor, *, bank_cap_rad: float, bank_rate_rad_s: float,
+             previous_bank_rad: torch.Tensor, *, bank_cap_rad: float | torch.Tensor, bank_rate_rad_s: float,
              cycle_s: float) -> Attitude:
-    """Bank and load factor for the wanted track and path-angle rates (limits 1 and 2)."""
-    if not 0.0 < bank_cap_rad <= BANK_MAX_RAD:
-        raise ValueError(f"bank cap {math.degrees(bank_cap_rad):.1f}° outside (0, {math.degrees(BANK_MAX_RAD):.0f}°]")
+    """Bank and load factor for the wanted track and path-angle rates (limits 1 and 2); ``bank_cap_rad`` one cap, or
+    one per flight."""
+    cap = torch.as_tensor(bank_cap_rad, dtype=track_rate_deg_s.dtype, device=track_rate_deg_s.device)
+    if not bool(((cap > 0.0) & (cap <= BANK_MAX_RAD)).all()):
+        raise ValueError(f"bank cap {torch.rad2deg(cap).tolist()}° outside (0, {math.degrees(BANK_MAX_RAD):.0f}°]")
     if not (bank_rate_rad_s > 0.0 and cycle_s > 0.0):
         raise ValueError(f"the bank rate ({bank_rate_rad_s}) and the cycle ({cycle_s}) must be positive")
     speed, gamma = state.speed_mps, state.gamma_rad
     a = -torch.deg2rad(track_rate_deg_s) * speed * torch.cos(gamma) / GRAVITY_MPS2
     b = gamma_rate_rad_s * speed / GRAVITY_MPS2 + torch.cos(gamma)
     wanted = torch.atan2(a, b.clamp(min=0.0))
-    capped = wanted.clamp(-bank_cap_rad, bank_cap_rad)
+    capped = torch.minimum(torch.maximum(wanted, -cap), cap)
     step = bank_rate_rad_s * cycle_s
     bank = torch.minimum(torch.maximum(capped, previous_bank_rad - step), previous_bank_rad + step)
     load = b / torch.cos(bank)

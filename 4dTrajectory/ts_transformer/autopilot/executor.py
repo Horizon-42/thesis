@@ -41,7 +41,8 @@ from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, Words
 LIMITS = ("bank_cap", "bank_rate", "load_factor", "path_rate_limited", "stall_floor", "thrust_max", "thrust_min",
           "stall")
 #: What the laws were doing each cycle.
-MODES = ("captured", "tracking", "bent", "intercepting", "intercepting_off_word", "go_around", "level_captured",
+MODES = ("captured", "tracking", "following_words", "bent", "intercepting", "intercepting_off_word", "go_around",
+         "level_captured",
          "aim_left_tube")
 
 
@@ -102,7 +103,7 @@ def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceC
                                                    force.issued_step[:, [ALTITUDE, ANGLE]], before, elevation,
                                                    torch.hypot(before, right), lateral.captured,
                                                    lateral_modes["go_around"])
-        attitude = inverse.attitude(now, track_rate, gamma_rate, bank, bank_cap_rad=math.radians(params.bank_cap_deg),
+        attitude = inverse.attitude(now, track_rate, gamma_rate, bank, bank_cap_rad=lateral.bank_cap_rad(lateral_modes),
                                     bank_rate_rad_s=bank_rate, cycle_s=params.cycle_s)
         accel, accel_wanted, speed_modes = speed.rate(now, force.speed_mps, force.unspecified,
                                                       lateral_modes["go_around"], attitude.load_factor,

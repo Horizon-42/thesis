@@ -251,37 +251,50 @@ def word_results(verdict: Verdict) -> tuple[list[tuple[str, bool]], int] | None:
     return judged, not_judged
 
 
-def heard_together(headings: list[dict[str, int]]) -> list[bool]:
-    """For each of a verdict's heading words, whether it was told on the same flown row as the heading word before it
-    — the track clock passed two rows within a step, and the earlier word, never flown, is judged on no rows
-    (`sentence.TRACK_MAX_ROWS_PER_CYCLE`)."""
-    return [i > 0 and headings[i - 1]["row"] == h["row"] for i, h in enumerate(headings)]
+def skipped_by_clock(headings: list[dict[str, int]]) -> list[bool]:
+    """For each of a verdict's heading words, whether the clock skipped it: a later heading word was told on its flown
+    row (the track or distance clock passed two sentence rows within a step, `sentence.TRACK_MAX_ROWS_PER_CYCLE`) and
+    that row's last word is judged — so this one, never flown, is judged on no rows because of the clock, not because
+    its lead ran past the clearance or the capture."""
+    last = {h["row"]: h for h in headings}
+    return [h["rows"] == 0 and last[h["row"]] is not h and last[h["row"]]["rows"] > 0 for h in headings]
+
+
+def told_with_skipped(headings: list[dict[str, int]]) -> list[bool]:
+    """For each of a verdict's heading words, whether it is judged and was told on the flown row of a word the clock
+    skipped (`skipped_by_clock`): it arrives two steps' worth of turn at once."""
+    skipped_rows = {h["row"] for h, skipped in zip(headings, skipped_by_clock(headings)) if skipped}
+    return [h["rows"] > 0 and h["row"] in skipped_rows for h in headings]
+
+
+def clock_pairs(verdict: Verdict) -> dict[str, int]:
+    """The judged heading words told with a word the clock skipped (`told_with_skipped`), and how many are inside."""
+    headings = [] if verdict.words is None else verdict.words["heading"]
+    told = [h for h, together in zip(headings, told_with_skipped(headings)) if together]
+    return {"judged": len(told), "inside": sum(h["inside"] == h["rows"] for h in told)}
 
 
 def summary(verdicts: list[Verdict]) -> dict[str, Any]:
     """The batch's headline numbers: outcomes, flown as said, the words inside their envelopes (per word
-    judged; the words not judged beside it), and the word checks that failed. The heading words told together with
-    a skipped one (`heard_together`) are counted apart as well: what the clock did to the sentence, not the
+    judged; the words not judged beside it), and the word checks that failed. The heading words told with one the
+    clock skipped (`told_with_skipped`) are counted apart as well: what the clock did to the sentence, not the
     executor."""
     outcomes = Counter(v.outcome for v in verdicts)
     counted = [word_results(v) for v in verdicts]
     judged = [ok for c in counted if c is not None for _, ok in c[0]]
     words_failed: Counter = Counter()
-    with_skipped: list[tuple[bool, bool]] = []
+    pairs = [clock_pairs(v) for v in verdicts]
     for v in verdicts:
         if v.words is None:
             words_failed["flown track refused by the labeller's gate"] += 1
             continue
         headings = v.words["heading"]
-        together = heard_together(headings)
-        for i, h in enumerate(headings):
-            skipped = i + 1 < len(headings) and together[i + 1]
+        for h, skipped, together in zip(headings, skipped_by_clock(headings), told_with_skipped(headings)):
             outside = 0 < h["rows"] and h["inside"] < h["rows"]
-            words_failed["heading word skipped by the clock (told with the next, not judged)"] += h["rows"] == 0 and skipped
+            words_failed["heading word skipped by the clock (told with the next, not judged)"] += skipped
             words_failed["heading word past the clearance or capture (not judged)"] += h["rows"] == 0 and not skipped
-            words_failed["track off its heading word a lead later"] += outside and not together[i]
-            words_failed["track off its heading word a lead later, told with a skipped word"] += outside and together[i]
-            with_skipped.append((h["rows"] > 0 and together[i], h["rows"] > 0 and together[i] and not outside))
+            words_failed["track off its heading word a lead later"] += outside and not together
+            words_failed["track off its heading word a lead later, told with a skipped word"] += outside and together
         words_failed["left its heading word to intercept on its own"] += v.words["intercepting_off_word_cycles"] > 0
         words_failed["landing aim left the word's tube"] += v.words["aim_left_tube_cycles"] > 0
         words_failed["superseded before flown (not judged)"] += v.words["superseded_before_flown"]
@@ -299,8 +312,8 @@ def summary(verdicts: list[Verdict]) -> dict[str, Any]:
             "flew_the_sentence_share": sum(v.flew_the_sentence for v in verdicts) / n,
             "words_judged": len(judged), "words_inside_share": sum(judged) / len(judged) if judged else None,
             "heading_words_not_judged": sum(c[1] for c in counted if c is not None),
-            "heading_words_told_with_a_skipped_word": {"judged": sum(j for j, _ in with_skipped),
-                                                       "inside": sum(i for _, i in with_skipped)},
+            "heading_words_told_with_a_skipped_word": {"judged": sum(p["judged"] for p in pairs),
+                                                       "inside": sum(p["inside"] for p in pairs)},
             "flights_with_unjudged_words": sum(c is None for c in counted),
             "word_failures": {k: int(c) for k, c in words_failed.most_common() if c}}
 

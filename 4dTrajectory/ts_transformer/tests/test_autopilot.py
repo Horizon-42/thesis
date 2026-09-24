@@ -258,7 +258,7 @@ def test_a_heading_word_is_flown_to_arrive_when_its_lead_runs_out_no_faster_than
     to_go = torch.tensor([4.0, 3.0, -5.0, 4.0, 1.0], dtype=F64)
     speed = torch.full((5,), 100.0, dtype=F64)
     stop = float(stopping_rate_deg_s(torch.tensor([6.0], dtype=F64), torch.tensor([100.0], dtype=F64), params))
-    # at 100 m/s and p 4.5°/s the bank can still be taken out before 6° from 2.3°/s
+    # at 100 m/s and p 5°/s the bank can still be taken out before 6° from 2.4°/s
     assert stop == pytest.approx(math.degrees(math.sqrt(2 * GRAVITY_MPS2 * math.radians(params.bank_rate_deg_s) / 100.0
                                                         * math.radians(6.0))))
     # 6° over the 4 s or 3 s left; past the lead (and under 2Δt) a hold at 2Δt, here held to the stopping rate;
@@ -290,10 +290,10 @@ def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
-    # τ_ψ = the lead and p 4.5°/s: method A's values here — at 4.0 a turn at the bank cap said word by word at 100 m/s,
-    # flown on the word law's stopping limit, ends past its words' envelopes (`derive.follow_excess_deg`)
+    # τ_ψ = the lead and p 5°/s: method A's values here — at 4.5 the fastest turn said word by word (at the vocabulary's
+    # bank limit, rolled into at the executor's own p) ends past its words' envelopes (`derive.follow_excess_deg`)
     base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
-                          bank_rate_deg_s=4.5, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
+                          bank_rate_deg_s=5.0, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
                           accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8, land_window_low_m=8.4,
                           land_window_high_m=36.5,
                           delays=Delays(0.0, 0.0),
@@ -511,8 +511,8 @@ def test_method_a_takes_the_lead_for_the_executors_own_turns_and_the_gentlest_ro
     assert slow > one.heading_tolerance_deg > fast >= 0.0                        # a slower roll passes further
     # a slow roll-in lags the first words of a worded turn past their envelope; a brisk one follows them
     steady = derive.follow_rates_deg_s(params, one, 140.0)["steady"]
-    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=1.0), one, 140.0, steady) > 0.0
-    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=5.0), one, 140.0, steady) <= 0.0
+    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=1.0), one, 140.0, steady, rolled=False) > 0.0
+    assert derive.follow_excess_deg(replace(params, bank_rate_deg_s=5.0), one, 140.0, steady, rolled=False) <= 0.0
     rate, measures = derive.roll_rate_deg_s(params, one)
     assert set(measures) == {"overshoot_deg", "steady_excess_deg", "fastest_excess_deg"}
     assert all(len(values) == len(derive.ROLL_CHECK_SPEEDS_MPS) for values in measures.values())
@@ -683,13 +683,17 @@ def test_a_replayed_flight_becomes_a_control_record_evaluation_can_grade_and_its
     assert forecast.controls[:, 1:] == pytest.approx(flown.commands[0, : verdict.end_row, 1:].numpy())
     # the gates count per word and pair evaluation with the observed verdict
     base = {"airport": "KXXX", "group": "own dynamics", "stratum": "vectored", "words_not_reached": 0,
-            "heading_words_not_judged": 0}
-    rows = [{**base, "outcome": "landed", "words": [("heading", True)] * 19 + [("speed", False)],
-             "observed_verdict": "pass", "replay_verdict": "pass"},
+            "heading_words_not_judged": 0, "heading_words_told_with_a_skipped_word": {"judged": 0, "inside": 0}}
+    rows = [{**base, "outcome": "landed", "words": [("heading", True)] * 17 + [("heading", False)] * 2 + [("speed", True)],
+             "observed_verdict": "pass", "replay_verdict": "pass",
+             "heading_words_told_with_a_skipped_word": {"judged": 2, "inside": 0}},
             {**base, "outcome": "ground_contact", "words": None, "observed_verdict": "fail", "replay_verdict": "fail"}]
     cell = gate_table(rows)["own dynamics"]["KXXX"]["vectored"]
-    assert (cell["landed"], cell["words_inside"], cell["replay_passes_where_observed_passes"]) == (0.5, 0.95, 1.0)
-    assert cell["clears"] == {"landed": False, "words": True, "evaluation": True}
+    assert (cell["landed"], cell["words_inside"], cell["replay_passes_where_observed_passes"]) == (0.5, 0.9, 1.0)
+    # the gate counts the words the clock told two at a time; beside it, the share without them
+    assert cell["heading_words_told_with_a_skipped_word"] == {"judged": 2, "inside": 0}
+    assert cell["words_inside_without_them"] == 1.0
+    assert cell["clears"] == {"landed": False, "words": False, "evaluation": True}
     assert cell["flights_with_unjudged_words"] == 1
 
 
@@ -739,19 +743,25 @@ def test_an_orbit_said_word_by_word_is_flown_all_the_way_round():
 
 
 def test_heading_words_the_track_clock_tells_together_are_counted_apart():
-    """The re-review of 2026-09-24: on the track clock the orbit passes two sentence rows within one step, so two
+    """The re-reviews of 2026-09-24: on the track clock the orbit passes two sentence rows within one step, so two
     heading words are told on one flown row — the first is never flown (judged on no rows), and the one told with it
     is counted apart in the summary: what the clock did, not the executor."""
-    from ts_transformer.autopilot.replay import heard_together, summary
+    from ts_transformer.autopilot.replay import clock_pairs, skipped_by_clock, summary, told_with_skipped
 
     _, verdict, _ = _fly_sentence(_orbit(), clock="track")
     headings = verdict.words["heading"]
-    together = heard_together(headings)
-    pairs = [i for i, t in enumerate(together) if t]
-    assert pairs and all(headings[i - 1]["rows"] == 0 and headings[i]["rows"] > 0 for i in pairs)
+    skipped, together = skipped_by_clock(headings), told_with_skipped(headings)
+    assert any(skipped) and sum(skipped) == sum(together)
+    assert all(h["rows"] == 0 for h, s in zip(headings, skipped) if s)
     counted = summary([verdict])
-    assert counted["word_failures"]["heading word skipped by the clock (told with the next, not judged)"] == len(pairs)
-    assert counted["heading_words_told_with_a_skipped_word"]["judged"] == len(pairs)
+    assert counted["word_failures"]["heading word skipped by the clock (told with the next, not judged)"] == sum(skipped)
+    assert counted["heading_words_told_with_a_skipped_word"] == clock_pairs(verdict)
+    assert clock_pairs(verdict)["judged"] == sum(together)
+    # a pair the clearance cuts off is the clearance's, not the clock's; three words on one row: two skipped
+    blocked = [{"row": 5, "rows": 3, "inside": 3}, {"row": 9, "rows": 0, "inside": 0}, {"row": 9, "rows": 0, "inside": 0}]
+    assert skipped_by_clock(blocked) == [False, False, False] and told_with_skipped(blocked) == [False] * 3
+    triple = [{"row": 4, "rows": 0, "inside": 0}, {"row": 4, "rows": 0, "inside": 0}, {"row": 4, "rows": 2, "inside": 1}]
+    assert skipped_by_clock(triple) == [True, True, False] and told_with_skipped(triple) == [False, False, True]
 
 
 def test_a_fast_turn_said_word_by_word_is_followed_on_every_clock():
@@ -768,6 +778,30 @@ def test_a_fast_turn_said_word_by_word_is_followed_on_every_clock():
         _, verdict, _ = _fly_sentence(signals, clock=clock)
         assert verdict.outcome == "landed", clock
         assert all(h["inside"] == h["rows"] for h in verdict.words["heading"]), clock
+
+
+def test_words_are_followed_up_to_the_vocabularys_bank_limit_and_the_executors_own_turns_to_its_bank_cap(monkeypatch):
+    """The dry train replay of 2026-09-24: with the bank capped at φ_cap (25°, the data's median steep bank) the
+    executor fell behind half the fast turns the words describe — the vocabulary admits a turn up to 32°. A 2.8°/s turn
+    at 110 m/s needs 29°: followed up to the vocabulary's limit it is flown inside every word; capped at φ_cap it is
+    not. The executor's own turns keep φ_cap."""
+    from ts_transformer.autopilot.lateral import Lateral
+
+    one = spec()
+    lateral = Lateral(2, _params(), one, CPU)
+    modes = {"following_words": torch.tensor([True, False])}
+    assert torch.rad2deg(lateral.bank_cap_rad(modes)).tolist() == pytest.approx([one.turn_bank_max_deg, 25.0])
+    legs = [(40, 0.0, 110.0, 0.0), *_turn(-90.0, 110.0, 5.6), (20, 0.0, 110.0, 0.0), *_turn(-90.0, 110.0, 5.6),
+            (120, 0.0, 70.0, -70.0 * np.tan(np.radians(3.0)))]
+    signals = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0))
+    flown, verdict, _ = _fly_sentence(signals)
+    judged = [h for h in verdict.words["heading"] if h["rows"] > 0]
+    assert verdict.outcome == "landed" and all(h["inside"] == h["rows"] for h in judged)
+    assert math.degrees(float(flown.commands[0, :, 1].abs().max())) > 25.0 + 1.0
+    monkeypatch.setattr(Lateral, "bank_cap_rad", lambda self, modes: torch.full_like(
+        modes["following_words"], math.radians(self.params.bank_cap_deg), dtype=F64))
+    _, capped, _ = _fly_sentence(signals)
+    assert any(h["inside"] < h["rows"] for h in capped.words["heading"] if h["rows"] > 0)
 
 
 def test_a_heading_word_whose_rows_the_lead_carries_past_the_clearance_is_not_judged():
@@ -794,9 +828,10 @@ def test_a_heading_word_whose_rows_the_lead_carries_past_the_clearance_is_not_ju
 
 
 def test_the_judge_fails_words_the_flown_track_falls_behind():
-    """Review 12: layer 2 catches a violation, not only passes a good flight — a 5° bank cap turns at under 0.5°/s at
-    100 m/s, so the flown track falls ever further behind the orbit's words."""
-    _, verdict, _ = _fly_sentence(_orbit(), params=_params(bank_cap_deg=5.0))
+    """Review 12: layer 2 catches a violation, not only passes a good flight — rolling at 0.5°/s the executor takes
+    40 s to bank for the orbit (words are followed up to the vocabulary's bank limit, not φ_cap, so the bank rate is
+    the handicap), and the flown track falls behind the orbit's words."""
+    _, verdict, _ = _fly_sentence(_orbit(), params=_params(bank_rate_deg_s=0.5))
     outside = [h for h in verdict.words["heading"] if h["rows"] and h["inside"] < h["rows"]]
     assert len(outside) > 30
     assert not verdict.words["all_contained"] and not verdict.flew_the_sentence
