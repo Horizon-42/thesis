@@ -14,7 +14,7 @@
 | 1 词表 | **定稿**：读法 `instruction-v3`（航向词逐行标注、5° 一档、提前 4 s 说），规格 `0b4ea75be36d`。第三版先验按运行日重新划分后，要用新训练集重新测量一次规格（§3.3） | `docs/2026-09-23_instruction_vocabulary_design.zh.md` |
 | 2 标注器 | **完成**：句子产物 `outputs/POOLED/instruction_language/v3_20260924/`（按航班划分：训练集 50,223 架、验证集 10,542 架已标注） | 包 `instructions/` |
 | 3 执行器 | **完成，只用词表**（第一、二阶段）：除词表外只读被指跑道公布的入口跨越高度 TCH。已合入 `dev-two-tier` | `docs/2026-09-23_executor_design.zh.md`；包 `autopilot/` |
-| 4 回放门 | **训练集上每格都过**（`outputs/POOLED/executor/v5_20260924/`，规格 `0d6a68a92c6f`，§2）。验证集的回放门还没跑：按新划分重建句子产物后，在新验证集运行日上跑，要用户同意 | |
+| 4 回放门 | **训练集上每格都过**（`outputs/POOLED/executor/v5_20260924/`，规格 `0d6a68a92c6f`，§2）。验证集的回放门：按新划分重建句子产物后，**在新验证集运行日上跑，用户已同意**（2026-09-24） | |
 | 5 先验 | 第一版、第二版训练过（按航班划分，第二版队列还在跑）；**第三版设计已定（用户 2026-09-24），下一步实现**（§3） | `docs/2026-09-24_prior_design.zh.md`（现行设计）、`docs/2026-09-24_prior_readouts.zh.md`（每次训练的读数） |
 | 前端 | Training 视图读 instruction-v3；五个机场的 `instruction_v3` 集已导出，**要用户重启 vite 才看得到**（§5） | `aeroviz-4d/public/data/airports/<ICAO>/training/instruction_v3/` |
 | 6 后训练 / 7 约束 / 8 多机 | 未开始；多机按场景做已写进先验设计（§3） | 先验设计 §6、§9 |
@@ -27,7 +27,7 @@
 |---|---|---|
 | 句子产物（当前） | `outputs/POOLED/instruction_language/v3_20260924/` | 信号 `ts-instruction-signals-v2`、句子 `ts-instruction-sentences-v2`、候选跑道 `ts-instruction-candidates-v2`、规格 `0b4ea75be36d`；按航班划分（`data.splits`）。第三版先验不再用它训练（§3.3） |
 | 执行器正式产物 | `outputs/POOLED/executor/v5_20260924/` | 规格 `0d6a68a92c6f`（`ts-executor-spec-v5`，`1b0cd4f4` 干净），`replay-train/`（`ts-executor-replay-v4`），`sensitivity-train-400-seed1337/` |
-| 旧的执行器产物 | `outputs/POOLED/executor/{v2,v3,v4}_20260924/` | 已被 v5 取代；v3、v4 要不要删问过用户，**还没答复**。v2 的验证集回放门是早期的记录 |
+| 旧的执行器产物 | `outputs/POOLED/executor/{v2,v3,v4}_20260924/` | 已被 v5 取代，**留着不删**（用户 2026-09-24）。v2 的验证集回放门是早期的记录 |
 | 先验第一版 | `outputs/POOLED/prior/v1_20260924/` | 读数在读数文档 §1 |
 | 先验第二版 | `outputs/POOLED/prior/v2_20260924/` | 队列进行中（§3.1），读数写进读数文档 §2 |
 | 前端 Training 集 | `aeroviz-4d/public/data/airports/<ICAO>/training/instruction_v3/sample.json` | `aeroviz-training-sample-v7`，每机场 40 架验证集航班（直线进近 / 被引导各 20），校验器从磁盘读 0 错误 |
@@ -159,7 +159,9 @@
   定下；机型不加、留接口。
 - **设计文档只写最终设计**，历史交给 git；**设计文档直接提交到 `dev-two-tier`**；代码走分支 + 审查。
 - 说人话：不用缩写和中英夹杂的造词（例如"在新 train 天上重量"应写"用新训练集的航班重新测量"）。
-- 验证集只在用户同意后跑一次；写共享 outputs、删产物、重启服务都要用户同意；`兼容`是禁用词（格式一变就换名字，不留旧名）。
+- 验证集：新划分出来后，用户同意在新验证集上跑（执行器回放门、先验读数）；**底线是测试集运行日的数据在训练阶段一点都不碰**
+  （不读信号、不标注、不进落地统计和场景、不参与任何取值）。旧执行器产物 v2–v4 留着不删。
+- 写共享 outputs、删产物、重启服务都要用户同意；`兼容`是禁用词（格式一变就换名字，不留旧名）。
 
 ---
 
@@ -171,7 +173,7 @@
    回放 → 普查 runner 的各项测量。代码审查后提交，再在干净的工作树上跑。
 3. **第三版第 1 步**：单机先验按 §3.3 实现、审查、训练、读数；然后单机自由生成。
 4. ~~文献~~：已提交，要点写进了先验设计 §6、§7、§8、§11。
-5. 等用户：重启 vite；旧执行器产物 v3、v4 删不删；执行器验证集回放门（在新划分的验证集上）。
+5. 等用户：重启 vite。（执行器验证集回放门在新划分出来后直接跑，用户已同意。）
 6. 之后：§9 第 2–5 步（交互、多机、闭环与后训练）；先验交叉验证；替代机型的动力学（用户在 `aircraft/` 处理）。
 
 ---
