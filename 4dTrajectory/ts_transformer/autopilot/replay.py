@@ -27,6 +27,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
+from trajectory_data_process.harvest.airports import load_airport
 from ts_transformer.autopilot.executor import Flown, fly
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, rebuild_series
 from ts_transformer.autopilot.frame import AirportCharts
@@ -56,6 +58,7 @@ class Batch:
     series: list[FlightSeries]
     readings: list[Reading]
     geometries: list[AirportGeometry]
+    crossing_heights: list[tuple[float, ...]]   # each flight's candidates' published TCH (`published_crossing_heights`)
     approach_ias_mps: list[float]
     groups: list[str]               # OWN or STAND_IN, per flight
     drawn: dict[str, Any]           # the sample's description: pool, read, exclusions, per airport
@@ -113,7 +116,24 @@ class Drawn:
     series: list[FlightSeries]
     groups: list[str]
     geometries: dict[str, AirportGeometry]
+    crossing_heights: dict[str, tuple[float, ...]]
     description: dict[str, Any]
+
+
+def published_crossing_heights(geometry: AirportGeometry) -> tuple[float, ...]:
+    """Each candidate runway's published threshold crossing height (TCH, m above the threshold), in the candidates'
+    order: the harvest's runway data for the airport (`trajectory_data_process.harvest.airports.load_airport`, the
+    FAA CIFP's vertical path) — the evaluation's own reference plane. A candidate that publishes none is refused:
+    "descend to land" has no crossing point there."""
+    runways = {runway.ident: runway for runway in load_airport(geometry.code, config_file=DEFAULT_CONFIG,
+                                                                 cifp_file=DEFAULT_CIFP).runways}
+    heights = []
+    for candidate in geometry.candidates:
+        height = runways[candidate.ident].threshold_crossing_height_m
+        if height is None:
+            raise ValueError(f"{geometry.code} {candidate.ident} publishes no threshold crossing height")
+        heights.append(float(height))
+    return tuple(heights)
 
 
 def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airport: int, seed: int,
@@ -151,6 +171,7 @@ def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airp
         raise ValueError(f"the {split} split holds too few eligible flights: {short} short")
     return Drawn(indices=[i for i, _, _ in taken], signals=[signals[i] for i, _, _ in taken],
                  series=[s for _, s, _ in taken], groups=[g for _, _, g in taken], geometries=geometries,
+                 crossing_heights={code: published_crossing_heights(geometry) for code, geometry in geometries.items()},
                  description={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
                               "groups": list(groups), "pool": len(order), "read": read,
                               "excluded": dict(excluded.most_common()), "flights": len(taken),
@@ -161,6 +182,7 @@ def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading]) -> Batch:
     """The flights of ``drawn`` at ``keep`` flown from ``readings`` (one per kept flight, in that order)."""
     return Batch(signals=[drawn.signals[i] for i in keep], series=[drawn.series[i] for i in keep], readings=readings,
                  geometries=[drawn.geometries[drawn.signals[i].airport] for i in keep],
+                 crossing_heights=[drawn.crossing_heights[drawn.signals[i].airport] for i in keep],
                  approach_ias_mps=[flight_approach_ias_mps(drawn.series[i], drawn.groups[i]) for i in keep],
                  groups=[drawn.groups[i] for i in keep], drawn=drawn.description)
 
@@ -187,6 +209,7 @@ def subset(batch: Batch, indices: list[int]) -> Batch:
     """The flights at ``indices``, in that order (the sample's description is the whole batch's)."""
     return Batch(signals=[batch.signals[i] for i in indices], series=[batch.series[i] for i in indices],
                  readings=[batch.readings[i] for i in indices], geometries=[batch.geometries[i] for i in indices],
+                 crossing_heights=[batch.crossing_heights[i] for i in indices],
                  approach_ias_mps=[batch.approach_ias_mps[i] for i in indices], groups=[batch.groups[i] for i in indices],
                  drawn=batch.drawn)
 
@@ -211,7 +234,7 @@ def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device:
                           device=device)
     sentences = Sentences([r.words for r in batch.readings], words, device=device)
     return fly(batch.inputs(device), sentences, word_clock(batch, params, spec.step_s, device),
-               Runways.of(batch.geometries, dtype=f64, device=device),
+               Runways.of(batch.geometries, batch.crossing_heights, dtype=f64, device=device),
                AirportCharts.of(batch.geometries, dtype=f64, device=device),
                torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits)
 

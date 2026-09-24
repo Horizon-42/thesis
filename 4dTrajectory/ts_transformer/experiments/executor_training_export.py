@@ -432,6 +432,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
             raise SystemExit(f"{signals[j].dataset_id} is not flown here ({group}) but has a row in the formal replay")
     batch = replay.Batch(signals=[signals[j] for j in flyable], series=[series[j] for j in flyable], readings=readings,
                          geometries=[geometry] * len(flyable),
+                         crossing_heights=[replay.published_crossing_heights(geometry)] * len(flyable),
                          approach_ias_mps=[replay.flight_approach_ias_mps(series[j], groups[j]) for j in flyable],
                          groups=[groups[j] for j in flyable], drawn={})
     flown, verdicts = replay.fly_batch(batch, params, words, device=device) if flyable else (None, [])

@@ -73,7 +73,7 @@ def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceC
     plant = Plant(inputs)
     lateral = Lateral(batch, params, spec, device)
     vertical = Vertical(batch, params, words, device)
-    speed = Speed(approach_ias_mps, params, spec)
+    speed = Speed(approach_ias_mps, spec)
 
     state = inputs.initial_state
     bank = torch.zeros(batch, dtype=state.dtype, device=device)
@@ -95,12 +95,12 @@ def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceC
         track_rate, lateral_modes = lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],
                                                  force.approach, force.runway, runways, bank, bank_rate,
                                                  cycle * params.cycle_s)
-        e0, n0, course, elevation = runways.pointed(force.runway)
+        e0, n0, course, elevation, crossing = runways.pointed(force.runway)
         before, right, _off = relative(now, e0, n0, course)
         gamma_rate, gamma_wanted, vertical_modes = vertical.rate(now, force.altitude_m, force.land,
                                                    force.angle_class, force.angle_deg,
                                                    force.issued_step[:, [ALTITUDE, ANGLE]], before, elevation,
-                                                   torch.hypot(before, right), lateral.captured,
+                                                   crossing, torch.hypot(before, right), lateral.captured,
                                                    lateral_modes["go_around"])
         attitude = inverse.attitude(now, track_rate, gamma_rate, bank, bank_cap_rad=math.radians(spec.turn_bank_max_deg),
                                     bank_rate_rad_s=bank_rate, cycle_s=params.cycle_s)

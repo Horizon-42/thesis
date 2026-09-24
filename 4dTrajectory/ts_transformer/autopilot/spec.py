@@ -23,9 +23,9 @@ from typing import Any
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.io_utils import write_json_atomic
 
-#: v4 (2026-09-24): the executor takes nothing beyond the vocabulary — r_turn, φ_cap and the word delays are gone
-#: (the vocabulary's turn rates and bank limit; a word acts when said), p is the bank limit over the lead.
-EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v4"
+#: v5 (2026-09-24, the vocabulary-only plan's stage 2): nothing measured from data is left — the speed changes'
+#: pace is the vocabulary's, the landing crosses at the runway's published TCH (v4: r_turn, φ_cap and the delays went).
+EXECUTOR_SPEC_SCHEMA = "ts-executor-spec-v5"
 PACKAGE = Path(__file__).resolve().parent
 #: Imported by the executor but not part of what decides a flown track or a value: the instruction language
 #: (its own hash, the labeller's, is recorded in the spec and checked at replay) and the path and file helpers.

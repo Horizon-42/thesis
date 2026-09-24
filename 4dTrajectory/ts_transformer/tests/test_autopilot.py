@@ -280,22 +280,28 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
     params.check(one)
     for change, message in ((dict(heading_time_constant_s=1.5), "under 2 Δt"),
                             (dict(path_time_constant_s=1.0), "under 2 Δt"),
-                            (dict(land_aim_height_m=50.0), "landing aim")):
+                            (dict(timeout_factor=0.0), "positive")):
         with pytest.raises(ValueError, match=message):
             replace(params, **change).check(one)
 
 
 
 # ---- whole flights
+#: The test airport's runways' published threshold crossing height (the fleet's run 13.7–19.5 m).
+TEST_TCH_M = 15.0
+
+
+def crossing_heights(geometry):
+    return tuple(TEST_TCH_M for _ in geometry.candidates)
+
+
 def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
     # τ_ψ = the lead and p = the bank limit over the lead: method A's values from the vocabulary (`derive`)
     base = ExecutorParams(cycle_s=1.0, heading_time_constant_s=4.0, bank_rate_deg_s=8.0, path_time_constant_s=2.0,
-                          path_rate_factor=2.0, decel_mps2=0.24, accel_mps2=0.16, unspecified_decel_mps2=0.26,
-                          land_aim_height_m=20.8, land_window_low_m=8.4, land_window_high_m=36.5, timeout_factor=1.5,
-                          word_clock="time")
+                          path_rate_factor=2.0, timeout_factor=1.5, word_clock="time")
     return replace(base, **changes)
 
 
@@ -335,7 +341,7 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=No
               "distance": lambda: DistanceClock.of([signals.e_m[:rows]], [signals.n_m[:rows]], one.step_s,
                                                    params.cycle_s, device=CPU)}
     flown = fly(inputs, Sentences([grid], words, device=CPU), clocks[clock](),
-                Runways.of([geometry], dtype=F64, device=CPU),
+                Runways.of([geometry], [crossing_heights(geometry)], dtype=F64, device=CPU),
                 AirportCharts.of([geometry], dtype=F64, device=CPU),
                 torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias],
                              dtype=F64), params, words,
@@ -451,40 +457,6 @@ def test_descents_level_off_at_their_targets_inside_the_tubes():
 
 
 # ---- E7: the parameters and the executor spec
-def test_the_data_parameters_are_read_from_the_labellers_reading_of_each_flight():
-    from ts_transformer.autopilot import measure
-    from ts_transformer.instructions.labeller.read import admit, read_flight
-
-    one, words, geometry = spec(), Words(spec()), instruction_airport()
-    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
-    reading = read_flight(signals, geometry, one, words)
-    out = measure.flight_measurements(admit(signals, geometry, one), reading, geometry, one, words)
-    # the legs change speed in a step: no transition lasts the MIN_SPAN_S a rate is read from
-    assert out["transition_accel_mps2"] == []
-    # the final is a straight 3° line, so the extrapolated crossing is the line's height at the threshold
-    height = signals.altitude_m[-1] - geometry.candidates[0].elevation_m
-    assert out["crossing_height_m"] == [pytest.approx(height - 400.0 * math.tan(math.radians(3.0)), abs=0.5)]
-    # the measured sentence must be the stored one
-    stored = [(reading.words, reading.runway_index)]
-    measure.measure_flights([signals], stored, one, words, {"KXXX": geometry})
-    changed = reading.words.copy()
-    changed[1, SPEED] = words.speed_unspecified
-    with pytest.raises(ValueError, match="differs from the stored one"):
-        measure.measure_flights([signals], [(changed, 0)], one, words, {"KXXX": geometry})
-
-
-def test_the_data_parameters_are_the_pooled_medians_rounded_as_the_spec_says():
-    from ts_transformer.autopilot import measure
-
-    one = spec()
-    pooled = {"transition_accel_mps2": [-0.3, -0.24, -0.2, 0.1, 0.16, 0.5], "unspecified_slope_mps2": [-0.26, -0.3, -0.2],
-              "crossing_height_m": [16.0, 20.84, 26.0]}
-    measured = measure.measured_values(pooled, one)
-    assert measured["values"] == {"decel_mps2": 0.24, "accel_mps2": 0.16, "unspecified_decel_mps2": 0.26,
-                                  "land_aim_height_m": 20.8, "land_window_low_m": 16.5, "land_window_high_m": 25.5}
-    assert measured["counts"]["decelerations"] == measured["counts"]["accelerations"] == 3
-
-
 def _observed_series(geometry):
     from types import SimpleNamespace
 
@@ -552,7 +524,8 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     flown, verdict, reading = _fly_sentence(signals)
     batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[instruction_airport()],
-                         approach_ias_mps=[], groups=[replay.OWN], drawn={})
+                         crossing_heights=[crossing_heights(instruction_airport())], approach_ias_mps=[],
+                         groups=[replay.OWN], drawn={})
     summary = replay.summary([verdict])
     judged = replay.word_results(verdict)[0]
     assert summary == {"flights": 1, "outcomes": {"landed": 1}, "landed_share": 1.0, "flew_the_sentence_share": 1.0,
@@ -845,7 +818,7 @@ def test_the_words_the_executor_refuses():
     data = instruction_airport().to_dict()
     data["candidates"].append({**data["candidates"][0], "ident": "09R", "threshold_n_m": -1500.0})
     geometry = AirportGeometry.from_dict(data)
-    runways = Runways.of([geometry], dtype=F64, device=CPU)
+    runways = Runways.of([geometry], [crossing_heights(geometry)], dtype=F64, device=CPU)
     lateral = Lateral(1, _params(), spec(), CPU)
     state = read_state(torch.tensor([[35.0, -78.05, 900.0, 80.0, 0.0, 0.0, 60000.0]], dtype=F64),
                        AirportCharts.of([geometry], dtype=F64, device=CPU))
@@ -988,6 +961,7 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
                  "words": np.concatenate(stored), "runway_index": np.zeros(30, dtype=np.int64)}
     typecode = {i: ("A320", "A320") if i % 4 else ("CRJ7", "A320") for i in range(30)}
     monkeypatch.setattr(replay, "load_candidates", lambda d: {"KAAA": "geo-a", "KBBB": "geo-b"})
+    monkeypatch.setattr(replay, "published_crossing_heights", lambda geometry: {"geo-a": (15.0,), "geo-b": (16.0,)}[geometry])
     monkeypatch.setattr(replay, "load_signals", lambda d, split: flights)
     monkeypatch.setattr(replay, "load_sentences", lambda d, split, spec: sentences)
     monkeypatch.setattr(replay, "rebuild_series", lambda d, items: [SimpleNamespace(scenario=SimpleNamespace(
@@ -1002,6 +976,7 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
     assert [f.dataset_id for f in first.signals] == [f.dataset_id for f in again.signals]
     assert Counter(f.airport for f in first.signals) == {"KAAA": 3, "KBBB": 3}
     assert set(first.groups) == {replay.OWN}
+    assert first.crossing_heights == [(15.0,) if f.airport == "KAAA" else (16.0,) for f in first.signals]
     every = replay.draw(Path("x"), "train", one, words, per_airport=0, seed=5, groups=(replay.OWN, replay.STAND_IN))
     assert len(every.signals) == 30 and every.drawn["by_group"] == {replay.OWN: 22, replay.STAND_IN: 8}
     with pytest.raises(ValueError, match="too few eligible flights"):
@@ -1009,6 +984,24 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
     reread["differ"] = first.signals[0].dataset_id
     with pytest.raises(ValueError, match="differs from the stored one"):
         replay.draw(Path("x"), "train", one, words, per_airport=3, seed=5)
+
+
+def test_each_candidate_crosses_at_its_runways_published_crossing_height(monkeypatch):
+    """Stage 2 (2026-09-24): "descend to land" aims at the pointed runway's published TCH, read from the harvest's
+    runway data in the candidates' order; a candidate that publishes none is refused."""
+    from types import SimpleNamespace
+
+    from ts_transformer.autopilot import replay
+
+    geometry = instruction_airport()
+    idents = [c.ident for c in geometry.candidates]
+    published = {ident: 15.0 + k for k, ident in enumerate(idents)}
+    monkeypatch.setattr(replay, "load_airport", lambda code, **_: SimpleNamespace(runways=[
+        SimpleNamespace(ident=ident, threshold_crossing_height_m=height) for ident, height in reversed(published.items())]))
+    assert replay.published_crossing_heights(geometry) == tuple(published[ident] for ident in idents)
+    published[idents[0]] = None
+    with pytest.raises(ValueError, match="publishes no threshold crossing height"):
+        replay.published_crossing_heights(geometry)
 
 
 def test_words_said_on_one_flown_row_leave_the_later_one_of_each_column():
@@ -1041,14 +1034,15 @@ def test_the_track_clock_follows_the_observed_track_forward_one_row_a_cycle_at_m
         [0.0, 2.0, 4.0, 4.0, 6.0, 8.0, 10.0, 11.0])
 
 
-def test_the_landing_aim_leaves_the_words_tube_only_when_the_tube_misses_the_landing_window():
-    """The aim stays inside the word's tube where the tube meets the landing window; where it does not, the window."""
+def test_the_landing_aim_leaves_the_words_tube_only_when_the_tube_misses_the_admitted_heights():
+    """The aim stays inside the word's tube where the tube meets the heights admitted at the threshold (the published
+    TCH ± the altitude tolerance, within the landing condition); where it does not, their nearer edge."""
     from ts_transformer.autopilot.frame import Kinematics
     from ts_transformer.autopilot.vertical import Vertical
 
     words = Words(spec())
-    params = _params()                                   # window 8.4–36.5 m, aim 20.8 m
-    vertical = Vertical(1, params, words, CPU)
+    params = _params()
+    vertical = Vertical(1, params, words, CPU)                  # TCH 15 m: heights admitted 0–40 m
 
     def crossing_for(anchor_above_threshold_m, angle_class):
         vertical.anchor_height_m = torch.tensor([float("nan")], dtype=F64)
@@ -1059,11 +1053,11 @@ def test_the_landing_aim_leaves_the_words_tube_only_when_the_tube_misses_the_lan
         rate, _, modes = vertical.rate(state, torch.tensor([float("nan")], dtype=F64), torch.tensor([True]),
                                        torch.tensor([angle_class]), torch.tensor([words.angle_deg(angle_class)], dtype=F64),
                                        torch.tensor([[0, 0]]), torch.tensor([3000.0], dtype=F64),
-                                       torch.tensor([100.0], dtype=F64), torch.tensor([3000.0], dtype=F64),
-                                       torch.tensor([True]), torch.tensor([False]))
+                                       torch.tensor([100.0], dtype=F64), torch.tensor([TEST_TCH_M], dtype=F64),
+                                       torch.tensor([3000.0], dtype=F64), torch.tensor([True]), torch.tensor([False]))
         return bool(modes["aim_left_tube"][0])
 
-    # 3000 m out, the 3° class from 160 m over the threshold: its tube reaches the threshold near 0 m — the window
+    # 3000 m out, the 3° class from 160 m over the threshold: its tube reaches the threshold near 0 m — admitted
     assert not crossing_for(160.0, 3)
     # the shallowest descent class from 600 m: the tube crosses 500+ m over the threshold, no landing: the aim leaves it
     assert crossing_for(600.0, 1)
@@ -1072,10 +1066,10 @@ def test_the_landing_aim_leaves_the_words_tube_only_when_the_tube_misses_the_lan
 def test_the_pilots_own_speed_is_reached_by_the_threshold():
     """"Unspecified": at least the deceleration that reaches the approach speed over the straight line left."""
     from ts_transformer.autopilot.frame import Kinematics
-    from ts_transformer.autopilot.speed import Speed
+    from ts_transformer.autopilot.speed import Speed, speed_change_mps2
 
     one = spec()
-    speed = Speed(torch.tensor([65.0], dtype=F64), _params(), one)
+    speed = Speed(torch.tensor([65.0], dtype=F64), one)
     state = Kinematics(*(torch.tensor([v], dtype=F64) for v in (0.0, 0.0, 100.0, 90.0, 90.0, 0.0, 90.0, 60000.0)))
     aero = torch.tensor([[122.6, 2.5, 0.02, 0.04, 0.9, 0.2]], dtype=F64)
 
@@ -1085,7 +1079,7 @@ def test_the_pilots_own_speed_is_reached_by_the_threshold():
                                 torch.tensor([straight_m], dtype=F64))[0][0])
 
     far, near = rate(50_000.0), rate(3_000.0)
-    assert far == pytest.approx(-_params().unspecified_decel_mps2)            # far out: the pilot's own rate
+    assert far == pytest.approx(-speed_change_mps2(one))                     # far out: the vocabulary's pace
     assert -one.speed_accel_max_mps2 <= near < far                          # close in: harder, within the vocabulary
 
 

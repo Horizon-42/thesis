@@ -111,30 +111,38 @@ def rate_for_error(error_deg: torch.Tensor, params: ExecutorParams, spec: Vocabu
 
 @dataclass(frozen=True)
 class Runways:
-    """Each flight's candidate runways, padded to the batch's widest airport: ``[B, C]`` each."""
+    """Each flight's candidate runways, padded to the batch's widest airport: ``[B, C]`` each — with each runway's
+    published threshold crossing height (TCH, above the threshold), where "descend to land" crosses it (§5.2)."""
 
     threshold_e_m: torch.Tensor
     threshold_n_m: torch.Tensor
     course_deg: torch.Tensor
     elevation_m: torch.Tensor
+    crossing_height_m: torch.Tensor
 
     @classmethod
-    def of(cls, geometries: Sequence[AirportGeometry], *, dtype: torch.dtype, device: torch.device) -> Runways:
+    def of(cls, geometries: Sequence[AirportGeometry], crossing_heights: Sequence[Sequence[float]], *,
+           dtype: torch.dtype, device: torch.device) -> Runways:
+        """``crossing_heights``: each airport's candidates' published TCH, in the candidates' order."""
         width = max(len(g.candidates) for g in geometries)
 
+        def padded(rows: list[list[float]]) -> torch.Tensor:
+            return torch.tensor([row + [math.nan] * (width - len(row)) for row in rows], dtype=dtype, device=device)
+
         def table(field: str) -> torch.Tensor:
-            rows = [[getattr(c, field) for c in g.candidates] + [math.nan] * (width - len(g.candidates))
-                    for g in geometries]
-            return torch.tensor(rows, dtype=dtype, device=device)
+            return padded([[getattr(c, field) for c in g.candidates] for g in geometries])
 
+        if [len(heights) for heights in crossing_heights] != [len(g.candidates) for g in geometries]:
+            raise ValueError("one published crossing height per candidate runway")
         return cls(threshold_e_m=table("threshold_e_m"), threshold_n_m=table("threshold_n_m"),
-                   course_deg=table("course_deg"), elevation_m=table("elevation_m"))
+                   course_deg=table("course_deg"), elevation_m=table("elevation_m"),
+                   crossing_height_m=padded([list(heights) for heights in crossing_heights]))
 
-    def pointed(self, index: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """``(threshold e, threshold n, course, elevation)`` of each flight's pointed runway."""
+    def pointed(self, index: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        """``(threshold e, threshold n, course, elevation, crossing height)`` of each flight's pointed runway."""
         rows = index[:, None]
         return tuple(t.gather(1, rows)[:, 0] for t in (self.threshold_e_m, self.threshold_n_m, self.course_deg,
-                                                        self.elevation_m))
+                                                        self.elevation_m, self.crossing_height_m))
 
 
 def relative(state: Kinematics, threshold_e_m: torch.Tensor, threshold_n_m: torch.Tensor,
@@ -235,7 +243,7 @@ class Lateral:
         if self.runway is not None and bool(((runway != self.runway) & (self.cleared | self.captured)).any()):
             raise ValueError("the runway pointer changed after the clearance (executor design §4.6)")
         self.runway = runway.clone()
-        e0, n0, course, _elevation = runways.pointed(runway)
+        e0, n0, course, _elevation, _crossing = runways.pointed(runway)
         before, right, off_course = relative(state, e0, n0, course)
         go_around = approach == APPROACH_GO_AROUND
         cleared = approach == APPROACH_CLEARED

@@ -8,7 +8,9 @@ included, since the labeller reads kinematics only) and
 projected into each airport's frame (`instructions.signals`). The candidates are each manifest's
 published runway geometry; beside them go every runway end the harvest builds, from the
 configuration and CIFP the harvest and the evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`,
-`DEFAULT_CIFP`). Writes ``signals_{train,val}.npz``, ``signals.json`` and ``candidates.json`` into a
+`DEFAULT_CIFP`). Every candidate must publish a threshold crossing height there (the executor's crossing point for
+"descend to land", `autopilot.replay.published_crossing_heights`): a runway without one is refused before anything is
+written, never dropped quietly. Writes ``signals_{train,val}.npz``, ``signals.json`` and ``candidates.json`` into a
 NEW directory.
 
     python run_ts.py instruction_signals --out 4dTrajectory/outputs/POOLED/instruction_language/<name>
@@ -28,6 +30,7 @@ from typing import Any
 from aircraft.performance_index import performance_index_identity
 from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
 from trajectory_data_process.harvest.airports import load_airport
+from ts_transformer.autopilot.replay import published_crossing_heights
 from ts_transformer.config import TSConfig
 from ts_transformer.data.data_provenance import arrival_data_provenance
 from ts_transformer.data.lateral_eligibility import default_lateral_pass_roster_path
@@ -85,6 +88,10 @@ def main(argv: list[str] | None = None) -> int:
     geometries = {a: airport_geometry(a, json.loads(m.read_text(encoding="utf-8"))["runway_targets"],
                                       load_airport(a, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways)
                   for a, m in zip(airports, manifests)}
+    # a candidate runway must publish a threshold crossing height: "descend to land" crosses it there (the executor's
+    # crossing point, executor design §5.2) — refused before anything is written, never dropped quietly
+    for geometry in geometries.values():
+        published_crossing_heights(geometry)
 
     jobs = []
     for split in SPLITS:
