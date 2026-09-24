@@ -9,6 +9,17 @@ change you are making go in `docs/code-health-followups.md` instead.
 
 ---
 
+- **观测的速度通道含有未来 7.5 s 的信息，不能当因果模型的输入（2026-09-24 核实代码；影响大小未量）。**
+  `flight_scenarios.state_samples_from_track` 对每个 ADS-B 点在前后各 7.5 s（`DEFAULT_WINDOW_S = 15`）的窗口里做
+  最小二乘拟合，得到速度、航迹、升降角；ts 数据集（`data/dataset.py`，默认 `reference_velocity_source = track-fit`）和
+  句子产物的信号都用它。位置不受影响。合成例子：100 m/s、第 0 s 起 2°/s 右转，居中拟合在 −2 s 已偏 0.89°、0 s 偏
+  2.30°，只用过去 15 s 的拟合在 0 s 为 0。
+  - 事后用（evaluation、参考记录、前端、标注器读完整航迹）没有问题。
+  - 有问题的是模型输入：两层框架的先验（第 t 步输入这一行的航迹 / 地速 / 升降率，航向词正好标在转弯开始那一行）；
+    旧 ts 预测模型的历史窗口（最后几行的速度通道看到起点后最多 7.5 s）。2026-08-02 的参考速度消融按预测精度选了
+    `track-fit`（因果平滑差分 FDE 1202.9 → 1367.1 m），这个差距里有多少来自未来信息没有分开过。
+  - 待定（用户）：先验在下一代产物里改用因果速度（在 `prior/data.py` 里由位置算，不动数据平面）；旧 ts 结果要不要重量。
+
 - **缺气动参数的机型一律用 A320（2026-09-23 分析完成）。** train 50,693 条里 13,164 条（26.0 %）用 A320 飞，其中 4,599 条的机型进近速度落在 A320 模型的失速分支里或更低（活塞机全部）。报告与 199 个机型的替代表：`docs/aircraft_performance/2026-09-23_missing_performance_substitution.zh.md`。用户的决定（09-23 / 09-24）：
   - **进近参考速度改用各机型公布值、按质量换算（方案 A）—— 已完成**（分支 `docs-aero-substitution`，FS5 / K10）。09-24 前准备的 `flight_scenarios/outputs/*_threshold_scenarios.json` 加载时被拒，重新求解前要重跑 `prepare_scenario_inputs.py`（先问用户）。
   - **第 1–3 项做成一张索引表 —— 已完成**（`aircraft/performance_index.json`，FS6）：own 31 / substitute 53 / exclude 125（含 10 个没有航班的同义机型）；
