@@ -27,7 +27,9 @@ from ts_transformer.prior.data import (
 from ts_transformer.prior.model import Prior, PriorConfig, predicted_entries
 from ts_transformer.prior.readout import Baselines
 from ts_transformer.prior.train import column_nll
-from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec as spec
+from ts_transformer.tests.support import (
+    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
+)
 
 
 def _grid(words, rows=6):
@@ -307,14 +309,14 @@ def _artefact(directory):
     one = spec()
     directory.mkdir(parents=True)
 
-    def flights(prefix, count):
+    def flights(prefix, count, split):
         return [instruction_flight(*(fly_legs(VECTORED, 270.0, 1110.0, -400.0, 0.0) if i % 2
                                      else fly_legs(STRAIGHT, 90.0, 1200.0, -300.0, 0.0)),
-                                   dataset_id=f"KXXX:{prefix}{i}_09_abc{i:03d}_20260101T000000Z")
+                                   dataset_id=f"KXXX:{prefix}{i}_09_abc{i:03d}_20260101T000000Z", split=split)
                 for i in range(count)]
 
-    items = {"train": flights("T", 12), "val": flights("V", 4)}
-    write_signals(directory, items, {"note": "test"})
+    items = {"train": flights("T", 12, "train"), "val": flights("V", 4, "val")}
+    write_signals(directory, items, {"note": "test"}, fixture_days())
     write_candidates(directory, {"KXXX": _two_runways()})
     write_spec(directory, one, {"n": 1}, {"labeller_source_sha256": labeller_source_sha256(),
                                           "git": {"head": "test", "dirty": False}})
