@@ -134,9 +134,10 @@ def main(argv: list[str] | None = None) -> int:
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
     if directory.exists():
         parser.error(f"{directory} exists; an executor spec is never overwritten")
-    if not instructions.resolve().is_relative_to(REPO_ROOT.resolve()):
+    # named as the repository names it (a worktree's data trees are links to the main tree's)
+    if not instructions.is_relative_to(REPO_ROOT):
         parser.error(f"{instructions} is outside this repository ({REPO_ROOT}); name the artefact inside it")
-    artefact_name = instructions.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+    artefact_name = instructions.relative_to(REPO_ROOT).as_posix()
     git = git_state()
     if git["dirty"]:
         parser.error("the tree has uncommitted changes; an executor spec is measured at a commit")
