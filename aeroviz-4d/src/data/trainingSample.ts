@@ -2,8 +2,8 @@
  * trainingSample.ts
  * -----------------
  * The Training module's data contract: the manifest of exported sets, and one set's flights
- * under the instruction vocabulary (`instruction-v3`: the heading read step by step, vocabulary design §10.1; no set
- * is exported under it yet — see `TRAINING_SPEC_SHA256`).
+ * under the instruction vocabulary (`instruction-v3`: the heading read step by step, vocabulary design §10.1; spec
+ * `0b4ea75be36d`, `4dTrajectory/outputs/POOLED/instruction_language/v3_20260924/`).
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the words:
  * `4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`.
  *
@@ -46,12 +46,9 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
 export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v7";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v3";
-/** MIRROR of the spec's sha: a new vocabulary is a new sha, and this reader is bound to the one it was written for.
- *  This value is still instruction-v2's (`v2_20260924/spec.json`, which this reader no longer reads: its sets carry
- *  that rule and are refused by it first). No instruction-v3 spec is written yet; until the session that writes it
- *  moves this value to its sha, every instruction-v3 set is refused here by its spec, by name, and
- *  `check-publication` reports it. */
-export const TRAINING_SPEC_SHA256 = "103a6eae6b9083ad33d5a1b25daef4004a07458881786e90d4625ba04027204b";
+/** MIRROR of the spec's sha: a new vocabulary is a new sha, and this reader is bound to the one it was written for
+ *  (`v3_20260924/spec.json`, instruction-v3, measured at 05c5cd80). */
+export const TRAINING_SPEC_SHA256 = "0b4ea75be36d8b214f04cbcdfdc33a77c5ec0b36e40194e5ddfda18e5de97791";
 /** MIRROR of the exporter's `KIND_READBACK`: the one kind of set this reader opens. */
 export const TRAINING_READABLE_SET_KIND = "vocabulary-readback";
 /** The set kinds the manifest may list. A `prior-generated` set has no contract under this
