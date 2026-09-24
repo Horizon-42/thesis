@@ -2,11 +2,12 @@
 
 Every law here returns a compass TRACK RATE for the inverse (`autopilot.inverse.attitude`) to fly:
 
-- a heading word θ (§4.1): ``χ̇* = sat(e / τ_ψ, ±r_turn)`` — at the steady rate, easing out over τ_ψ; the bank
-  it takes is the inverse's, capped and rate-limited there. The error ``e`` is measured from the word in
-  force, as the vocabulary measures a word (§2.3): a new word turns ``wrap180(θ_new − θ_old)`` further than
-  the old one, so a split turn's next part continues the way the first part set even while the aircraft
-  still lags it (the shorter way from the TRACK would turn back once the lag exceeds 180° less the part);
+- a heading word θ (§4.1, instruction-v3): ``χ̇* = sat(e / τ_ψ, ±r_max)`` — the words set the pace (each says the
+  track a lead later, a turn is a run of them), so the law follows them up to the vocabulary's largest turn rate
+  ``r_max``, the bank it takes capped and rate-limited in the inverse (at most speeds the bank cap binds first);
+  with τ_ψ equal to the lead it trails a steady turn by the lead, as the words lead it. The error ``e`` is measured
+  from the word in force: a new word turns ``wrap180(θ_new − θ_old)`` further than the old one, so a turn said word
+  by word keeps its way even while the aircraft lags it;
 - cleared, not yet captured (§4.3): when θ itself cannot reach the pointed runway's line but a track
   within the heading tolerance can (the labeller's own test, `instructions.envelope.heading_converges`),
   θ is flown bent by the tolerance toward the line — still inside the word's envelope; when not even that
@@ -64,12 +65,19 @@ from ts_transformer.instructions.words import APPROACH_CLEARED, APPROACH_GO_AROU
 
 
 def rate_for_error(error_deg: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
-    """§4.1: the compass track rate, deg/s, that takes out a heading error of ``error_deg`` (target − track)."""
+    """§4.1: the compass track rate, deg/s, of the executor's OWN turn that takes out a heading error of ``error_deg``
+    (target − track): at most its steady rate r_turn — its own intercept, a go-around, the line's heading."""
     return (error_deg / params.heading_time_constant_s).clamp(-params.turn_rate_deg_s, params.turn_rate_deg_s)
 
 
+def word_rate(error_deg: torch.Tensor, params: ExecutorParams, spec: VocabularySpec) -> torch.Tensor:
+    """§4.1 (instruction-v3): the compass track rate, deg/s, that follows the heading words — the words set the pace,
+    so the law turns as fast as the vocabulary's largest turn rate allows (the bank cap binds in the inverse)."""
+    return (error_deg / params.heading_time_constant_s).clamp(-spec.turn_rate_max_deg_s, spec.turn_rate_max_deg_s)
+
+
 def heading_rate(track_deg: torch.Tensor, target_deg: torch.Tensor, params: ExecutorParams) -> torch.Tensor:
-    """§4.1: the compass track rate, deg/s, that turns the shorter way onto ``target_deg``."""
+    """§4.1: the compass track rate, deg/s, of the executor's own turn the shorter way onto ``target_deg``."""
     return rate_for_error(wrap180(target_deg - track_deg), params)
 
 
@@ -245,8 +253,9 @@ class Lateral:
         # corridor's course tolerance is tighter than a heading word's
         line_rate = torch.sign(error) * torch.minimum(rate_for_error(error, params).abs(),
                                                       torch.rad2deg(torch.sqrt(k * torch.deg2rad(error.abs()))))
-        rate = torch.where(self.captured & ~self.tracking, capture,
-                           torch.where(self.tracking, line_rate, rate_for_error(error, params)))
+        # the words set the pace of a turn they describe; the executor's own intercept and a go-around are its own
+        free = torch.where(intercept | go_around, rate_for_error(error, params), word_rate(error, params, spec))
+        rate = torch.where(self.captured & ~self.tracking, capture, torch.where(self.tracking, line_rate, free))
         intercept_target = course + side * spec.intercept_angle_deg
         off_word = intercept & (wrap180(intercept_target - heading_deg).abs() > spec.heading_tolerance_deg)
         return rate, {"captured": self.captured.clone(), "tracking": self.tracking.clone(), "bent": bend,

@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"data parameters from {measured['labelled_train_flights']} train flights, "
           f"{time.perf_counter() - started:.0f}s: {values}", flush=True)
 
-    tau = derive.heading_time_constant_s(values["turn_rate_deg_s"], spec, CYCLE_S)
+    tau = derive.heading_time_constant_s(spec, CYCLE_S)
     provisional = ExecutorParams(cycle_s=CYCLE_S, turn_rate_deg_s=values["turn_rate_deg_s"],
                                  bank_cap_deg=values["bank_cap_deg"], heading_time_constant_s=tau,
                                  bank_rate_deg_s=derive.ROLL_RATE_STEP_DEG_S, path_time_constant_s=PATH_TIME_CONSTANT_S,
@@ -188,8 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     measurements = {
         "data": measured,
         "method_a": {
-            "heading_time_constant_s": {"value": tau, "rule": "the largest τ_ψ with r_turn |τ_ψ − heading_lead_s| ≤ "
-                                                              "heading_tolerance_deg − heading_step_deg / 2, down to 0.5 s"},
+            "heading_time_constant_s": {"value": tau, "rule": "the largest τ_ψ with turn_rate_max_deg_s |τ_ψ − "
+                                                              "heading_lead_s| ≤ heading_tolerance_deg − heading_step_deg / 2, "
+                                                              "down to 0.5 s"},
             "bank_rate_deg_s": {"value": roll_rate, "overshoot_deg_by_speed_mps": overshoots,
                                 "rule": f"the least p on a {derive.ROLL_RATE_STEP_DEG_S:g}°/s grid whose "
                                         f"{derive.largest_own_turn_deg(spec):g}° turn passes its target by at most "

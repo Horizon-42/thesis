@@ -49,7 +49,7 @@ def variants(params: ExecutorParams, spec: VocabularySpec) -> list[tuple[str, Ex
     """``(name, params, probe)``: the spec's own first, then one parameter moved at a time (a value equal to
     the spec's is not flown twice)."""
     out = [("spec", params, False)]
-    slack_s = (spec.heading_tolerance_deg - spec.heading_step_deg / 2) / params.turn_rate_deg_s
+    slack_s = (spec.heading_tolerance_deg - spec.heading_step_deg / 2) / spec.turn_rate_max_deg_s
     tau = rounded(max(spec.heading_lead_s - slack_s, 2.0 * params.cycle_s), HEADING_TIME_CONSTANT_STEP_S, math.ceil)
     while tau < params.heading_time_constant_s:
         out.append((f"heading_time_constant_s={tau:g}", replace(params, heading_time_constant_s=tau), False))

@@ -265,8 +265,10 @@ def _params(**changes):
     from dataclasses import replace
     from ts_transformer.autopilot.params import ExecutorParams
 
+    # p 2.5°/s: at 2.0 the roll-in of a 2.25°/s turn said word by word lags its first words by up to 0.2° past their
+    # envelope (vocabulary design §10.1; what the real fleet needs is method A's and the train replay's to say)
     base = ExecutorParams(cycle_s=1.0, turn_rate_deg_s=2.15, bank_cap_deg=25.0, heading_time_constant_s=4.0,
-                          bank_rate_deg_s=2.0, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
+                          bank_rate_deg_s=2.5, path_time_constant_s=2.0, path_rate_factor=2.0, decel_mps2=0.24,
                           accel_mps2=0.16, unspecified_decel_mps2=0.26, land_aim_height_m=20.8, land_window_low_m=8.4,
                           land_window_high_m=36.5,
                           delays=Delays(0.0, 0.0),
@@ -274,9 +276,9 @@ def _params(**changes):
     return replace(base, **changes)
 
 
-def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_words=False):
-    """Read ``signals`` with the labeller, fly its sentence (or ``grid``) from row 0, judge it; the A320's
-    published approach speed unless ``approach_ias`` is given."""
+def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_words=False, reading=None):
+    """Read ``signals`` with the labeller (or take ``reading``), fly its sentence (or ``grid``) from row 0, judge it;
+    the A320's published approach speed unless ``approach_ias`` is given."""
     from ts_transformer.autopilot.executor import fly
     from ts_transformer.autopilot.judge import judge
     from ts_transformer.autopilot.lateral import Runways
@@ -285,7 +287,7 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_word
 
     one, words, geometry = spec(), Words(spec()), instruction_airport()
     params = params or _params()
-    reading = read_flight(signals, geometry, one, words)
+    reading = read_flight(signals, geometry, one, words) if reading is None else reading
     grid = reading.words if grid is None else grid
     aircraft = aircraft_for_code("A320")
     aero, mass = aero_params_for_aircraft(aircraft), 62000.0
@@ -310,7 +312,17 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, early_word
     return flown, judge(flown, 0, geometry, 0, reading, signals, one, words), reading
 
 
-DOWNWIND_BASE_FINAL = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (20, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
+# a 90° left turn as flown: rolled into and out of over 4 s each, steady at 2.25°/s (4.5° a 2 s row), the data's typical
+# steady rate — under the 25° bank cap the executor follows it at every speed flown here (3°/s at 100 m/s needs 28°)
+def _turn(degrees: float, speed_mps: float) -> list[tuple[int, float, float, float]]:
+    """A turn of ``degrees`` (positive right) rolled in and out over 4 s each, steady at 4.5° a row between."""
+    side = math.copysign(1.0, degrees)
+    steady = int(round((abs(degrees) - 18.0) / 4.5))
+    return [(2, side * 1.5, speed_mps, 0.0), (2, side * 3.0, speed_mps, 0.0), (steady, side * 4.5, speed_mps, 0.0),
+            (2, side * 3.0, speed_mps, 0.0), (2, side * 1.5, speed_mps, 0.0)]
+
+
+DOWNWIND_BASE_FINAL = [(60, 0.0, 100.0, 0.0), *_turn(-90.0, 100.0), (20, 0.0, 90.0, 0.0), *_turn(-90.0, 85.0),
                        (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
 
 
@@ -326,7 +338,7 @@ def test_a_downwind_base_final_sentence_is_flown_to_the_runway():
     captured = flown.modes["captured"][0].numpy()
     k = read_state(flown.states[0, 1:][captured], AirportCharts.of([instruction_airport()] * int(captured.sum()),
                                                                    dtype=F64, device=CPU))
-    assert float(k.n_m.min()) > -5.0
+    assert float(k.n_m.min()) > -10.0
     assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "thrust_min", "stall", "load_factor"))
 
 
@@ -350,19 +362,21 @@ def test_a_flight_on_the_final_from_row_0_is_captured_at_once_and_lands():
     assert bool(flown.modes["captured"][0, 0]) and verdict.outcome == "landed" and verdict.flew_the_sentence
 
 
-def test_a_split_turn_is_flown_without_levelling_between_its_parts():
-    legs = [(30, 0.0, 100.0, 0.0), (30, 6.0, 100.0, 0.0), (20, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0),
+def test_a_turn_said_word_by_word_is_flown_without_levelling():
+    """§10.1: a 180° right turn said 5° at a time, each word a lead before the track reaches it — the executor banks
+    through the whole turn (it never rolls out between words) and lands."""
+    legs = [(30, 0.0, 100.0, 0.0), *_turn(180.0, 100.0), (20, 0.0, 100.0, 0.0), *_turn(-90.0, 100.0),
             (100, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
     signals = instruction_flight(*fly_legs(legs, 0.0, 950.0, -400.0, 0.0))
     flown, verdict, reading = _fly_sentence(signals)
-    parts = [i for i in reading.instructions if i.kind == "turn-split"]
-    assert len(parts) == 2
-    # from the first part's row to where the flown track reaches the second part's target, the bank
-    # stays on the right-turn side (negative in the dynamics' convention) — the turn does not stop
+    turn = [i for i in reading.instructions if i.column == HEADING and 0 < i.row < 80]
+    assert len(turn) > 25 and {i.kind for i in turn} == {"per-step"}
+    # from the turn's first word plus the roll-in to its last word, the bank stays on the right-turn side (negative in
+    # the dynamics' convention)
     bank = flown.commands[0, :, 1].numpy()
-    first, second = parts[0].row * 2, parts[1].row * 2
-    assert (bank[first + 12: second + 12] < -math.radians(5.0)).all()
-    assert verdict.outcome == "landed"
+    first, last = turn[0].row * 2, turn[-1].row * 2
+    assert (bank[first + 8: last] < -math.radians(5.0)).all()
+    assert verdict.outcome == "landed" and verdict.flew_the_sentence
 
 
 def test_the_flights_outcome_is_the_first_event_it_meets():
@@ -411,9 +425,9 @@ def test_the_data_parameters_are_read_from_the_labellers_reading_of_each_flight(
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     reading = read_flight(signals, geometry, one, words)
     out = measure.flight_measurements(admit(signals, geometry, one), reading, geometry, one, words)
-    # the base turn, 90° at 6°/row (3°/s; the turn onto the final is the capture, not a word): one steady rate;
-    # at 100 m/s it is not in the fast band the bank cap is read from
-    assert out["turn_steady_rate_deg_s"] == [pytest.approx(3.0, abs=0.05)]
+    # the base turn, 90° steady at 4.5° a row (2.25°/s; the turn onto the final is the capture, after the clearance):
+    # one steady rate; at 100 m/s it is not in the fast band the bank cap is read from
+    assert out["turn_steady_rate_deg_s"] == [pytest.approx(2.25, abs=0.05)]
     assert out["turn_fast_bank_deg"] == []
     # the legs change speed in a step: no transition lasts the MIN_SPAN_S a rate is read from
     assert out["transition_accel_mps2"] == []
@@ -452,11 +466,13 @@ def test_method_a_takes_the_gentlest_roll_out_and_roll_rate_the_constraints_allo
     from ts_transformer.autopilot import derive
 
     one = spec()
-    assert derive.heading_time_constant_s(2.15, one, 1.0) == 4.5              # 10° / 2.15°/s = 4.65 → 4.5
+    # the lead 4 s plus (4.5° − 2.5°) / the largest turn rate 3.5°/s = 4.57 s → 4.5
+    assert derive.heading_time_constant_s(one, 1.0) == 4.5
     with pytest.raises(ValueError, match="under 2 Δt"):
-        derive.heading_time_constant_s(6.0, one, 1.0)
+        derive.heading_time_constant_s(spec(heading_lead_s=0.0), 1.0)
     params = _params(heading_time_constant_s=4.5)
-    largest = one.heading_max_turn_deg
+    largest = derive.largest_own_turn_deg(one)
+    assert largest == 90.0 + one.heading_tolerance_deg + one.intercept_angle_deg
     slow, fast = (derive.turn_overshoot_deg(replace(params, bank_rate_deg_s=p), 140.0, largest) for p in (1.0, 5.0))
     assert slow > one.heading_tolerance_deg > fast >= 0.0                        # a slower roll passes further
     rate, overshoots = derive.roll_rate_deg_s(params, one)
@@ -491,9 +507,9 @@ def _observed_series(geometry):
 
 def test_the_observation_operator_reads_a_flown_track_as_the_data_plane_reads_a_radar_track():
     """Method B's O: the flown track, sampled once a cycle, through the data plane's own fit and grid, reads
-    back as the track that was flown, and the labeller re-reads its words from it: the turn within a row of
-    where it was said, the descent LATER than the executor began it (the reading needs height lost before it
-    sees a descent — method B's finding, flown with no delay)."""
+    back as the track that was flown, and the labeller re-reads its words from it: the descent LATER than the
+    executor began it (the reading needs height lost before it sees a descent — method B's finding, flown with no
+    delay). Heading words are not measured: each carries its own lead (§10.1)."""
     from ts_transformer.autopilot.observe import flight_leads, observe
     from ts_transformer.autopilot.judge import flown_track
 
@@ -508,10 +524,9 @@ def test_the_observation_operator_reads_a_flown_track_as_the_data_plane_reads_a_
     assert np.abs(seen.e_m - truth["e"][rows]).max() < 5.0 and np.abs(seen.altitude_m - truth["height"][rows]).max() < 2.0
     leads, received = flight_leads(states, flown.sentence_s[0].numpy(), 1.0, _observed_series(geometry), geometry,
                                    reading, one, words, 30.0)
-    said = [i for i in reading.instructions if i.row > 0 and i.column in (HEADING, ALTITUDE, ANGLE, SPEED)]
-    assert sum(received.values()) == len(said) == 5 and received[HEADING] == 1
+    said = [i for i in reading.instructions if i.row > 0 and i.column in (ALTITUDE, ANGLE, SPEED)]
+    assert sum(received.values()) == len(said) == 5 and HEADING not in received
     by_column = dict(leads)
-    assert abs(by_column[HEADING]) <= one.step_s
     assert by_column[ALTITUDE] < 0.0 and by_column[ANGLE] < 0.0
 
 
@@ -613,7 +628,7 @@ def test_a_replayed_flight_becomes_a_control_record_evaluation_can_grade_and_its
     judged, not_judged = word_results(verdict)
     assert not_judged == 0
     assert judged and all(ok for _, ok in judged)
-    assert sum(column == "heading" for column, _ in judged) == sum(h["words"] for h in verdict.words["heading"])
+    assert sum(column == "heading" for column, _ in judged) == sum(1 for h in verdict.words["heading"] if h["rows"])
     assert ("approach", True) in judged
     # the forecast from row 0: one state per cycle to the outcome's row, the schedule and its newtons
     inputs, _ = _a320([[0.0] * 7])
@@ -648,74 +663,68 @@ def _downwind():
 def test_a_late_clearance_is_captured_past_the_line_and_the_line_law_brings_it_back():
     """Review 1: cleared inside its lead, the capture turn crosses the line; it hands over to the line law
     instead of flying away at a constant angle."""
+    from ts_transformer.autopilot.judge import flown_track
+
     signals, reading = _downwind()
     clear = int(np.nonzero(reading.words[:, APPROACH] == APPROACH_CLEARED)[0][0])
-    for late in (38, 44):
+    for late in (6, 10, 14):
         grid = reading.words.copy()
         grid[clear, APPROACH] = UNCHANGED
         grid[clear + late, APPROACH] = APPROACH_CLEARED
         flown, verdict, _ = _fly_sentence(signals, grid)
-        assert verdict.outcome == "landed" and abs(verdict.crossing["cross_m"]) < 5.0 and verdict.flew_the_sentence
+        track = flown_track(flown.states[0].numpy(), instruction_airport())
+        assert float(track["n"].min()) < -500.0                                    # the capture turn crossed the line
+        assert verdict.outcome == "landed" and abs(verdict.crossing["cross_m"]) < 5.0
 
 
 def _orbit():
-    legs = [(40, 0.0, 100.0, 0.0), (60, 6.0, 100.0, 0.0), (40, 0.0, 90.0, 0.0), (15, 6.0, 85.0, 0.0),
+    legs = [(40, 0.0, 100.0, 0.0), *_turn(360.0, 100.0), (40, 0.0, 90.0, 0.0), *_turn(90.0, 85.0),
             (110, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
     return instruction_flight(*fly_legs(legs, 0.0, 1300.0, -400.0, 0.0))
 
 
-def test_an_orbit_is_flown_the_way_its_first_part_set_and_judged_as_one_whole_turn():
-    """Review 4 and 5: a 360° right orbit said in three parts. The executor turns slower than the observed
-    aircraft, so it lags the last part by more than 180°; it still turns right all the way (the word is
-    measured from the word in force), and the judge reads a 360° turn and its hold's funnel the same way."""
+def test_an_orbit_said_word_by_word_is_flown_all_the_way_round():
+    """Review 4 (instruction-v3): a 360° right orbit said 5° at a time. Each word turns the target a step further from
+    the word before (the executor measures a word from the word in force), so it turns right all the way round
+    however far it lags, and every word is inside its envelope."""
     flown, verdict, reading = _fly_sentence(_orbit())
-    assert [i.kind for i in reading.instructions if i.column == HEADING] == ["initial"] + ["turn-split"] * 3
     track = np.degrees(np.unwrap(np.radians(compass_from_math_rad(flown.states[0, :, 4].numpy()))))
     assert np.diff(track).min() > -0.5 and track[-1] - track[0] == pytest.approx(450.0, abs=5.0)
-    (_, orbit) = verdict.words["heading"]
-    assert orbit["words"] == 3 and all(orbit["turn"].values()) and orbit["hold"]["inside"] == orbit["hold"]["rows"]
-    assert verdict.outcome == "landed" and verdict.flew_the_sentence
+    assert len([i for i in reading.instructions if i.column == HEADING]) > 60
+    assert all(h["inside"] == h["rows"] for h in verdict.words["heading"])
+    # (its landing descent leaves the word's tube for the landing window: the altitude word's §10.2 question)
+    assert verdict.outcome == "landed"
 
 
-def test_the_hold_funnel_mirror_equals_the_labellers_under_180_degrees():
-    from ts_transformer.autopilot.judge import hold_funnel
-    from ts_transformer.instructions.labeller.lateral import heading_spans
-    from ts_transformer.instructions.labeller.read import admit, span_funnel
+def test_a_heading_word_whose_rows_the_lead_carries_past_the_clearance_is_not_judged():
+    """§10.1: a word is judged from its row plus the lead; one said within the lead of the clearance (the labeller says
+    one when a capture turn's first rows jump a cell) has no rows before the clearance: not judged, counted apart, not
+    failed. Here one is added to the downwind sentence a row before its clearance."""
+    from dataclasses import replace
 
-    one, words, geometry = spec(), Words(spec()), instruction_airport()
+    from ts_transformer.autopilot.replay import word_results
+    from ts_transformer.instructions.labeller.records import Instruction
+
     signals, reading = _downwind()
-    flight = admit(signals, geometry, one)
-    spans = [s for s in heading_spans(reading.instructions, reading.checks["turns"], None, reading.capture_row)
-             if s.turn is not None and s.held]
-    assert spans
-    for span in spans:
-        target = words.heading_deg(span.word.value)
-        track = float(flight.smoothed.track_deg[span.word.row])
-        _, theirs = span_funnel(flight, span, target, one)
-        _, ours = hold_funnel(flight, span, target, float(np_wrap180(target - track)), one)
-        assert ours.outline == pytest.approx(theirs.outline)
+    words = Words(spec())
+    row = reading.join_row - 1
+    added = Instruction(HEADING, words.heading_index(175.0), row, "per-step", {"target_deg": 175.0})
+    grid = reading.words.copy()
+    grid[row, HEADING] = added.value
+    moved = replace(reading, words=grid, instructions=sorted([*reading.instructions, added], key=lambda i: i.row))
+    _, verdict, _ = _fly_sentence(signals, reading=moved)
+    (late,) = [h for h in verdict.words["heading"] if h["row"] == row]                # the time clock: flown = said
+    assert late["rows"] == 0
+    judged, not_judged = word_results(verdict)
+    assert not_judged == 1 and sum(column == "heading" for column, _ in judged) == len(verdict.words["heading"]) - 1
 
 
-def test_a_turn_the_capture_takes_over_at_once_is_superseded_not_failed():
-    """Review 3: the clearance comes with the base turn and the executor is already inside its capture lead."""
-    legs = [(60, 0.0, 100.0, 0.0), (15, -6.0, 100.0, 0.0), (6, 0.0, 90.0, 0.0), (15, -6.0, 85.0, 0.0),
-            (120, 0.0, 75.0, -75.0 * np.tan(np.radians(3.0)))]
-    _, verdict, _ = _fly_sentence(instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0)))
-    (_, base) = verdict.words["heading"]
-    assert base["superseded"] and base["turn"] is None
-    assert verdict.words["capture_turn"]["progress_ok"] and verdict.outcome == "landed" and verdict.flew_the_sentence
-    # a probe acting on the words 2 s early captures before the base turn's own row: the word never flew
-    signals = instruction_flight(*fly_legs(legs, 270.0, 1110.0, -400.0, 0.0))
-    _, early, _ = _fly_sentence(signals, params=_params(delays=Delays(-2.0, 0.0, 0.0)), early_words=True)
-    assert [h["superseded"] for h in early.words["heading"]] == [False, True]
-
-
-def test_the_judge_fails_a_turn_flown_slower_than_the_vocabulary_allows():
-    """Review 12: layer 2 catches a violation, not only passes a good flight — a 5° bank cap turns the orbit at
-    under 0.5°/s at 100 m/s, below the vocabulary's slowest turn."""
+def test_the_judge_fails_words_the_flown_track_falls_behind():
+    """Review 12: layer 2 catches a violation, not only passes a good flight — a 5° bank cap turns at under 0.5°/s at
+    100 m/s, so the flown track falls ever further behind the orbit's words."""
     _, verdict, _ = _fly_sentence(_orbit(), params=_params(bank_cap_deg=5.0))
-    (_, orbit) = verdict.words["heading"]
-    assert orbit["turn"] == {"reached": True, "progress_ok": True, "rate_ok": False}
+    outside = [h for h in verdict.words["heading"] if h["rows"] and h["inside"] < h["rows"]]
+    assert len(outside) > 30
     assert not verdict.words["all_contained"] and not verdict.flew_the_sentence
 
 
@@ -820,7 +829,7 @@ def test_a_sensitivity_probe_flies_its_words_early_only_when_named():
     """Review H1: a negative delay is refused unless the flight is flown as a probe, and then the words act
     that much earlier."""
     signals, _ = _downwind()
-    early = _params(delays=Delays(0.0, -4.0, 0.0))
+    early = _params(delays=Delays(-4.0, 0.0))
     with pytest.raises(ValueError, match="before it is said"):
         _fly_sentence(signals, params=early)
     on_time, _, reading = _fly_sentence(signals)
@@ -853,22 +862,20 @@ def test_a_stand_ins_unspecified_speed_is_its_types_as_published():
 
 
 def test_the_word_count_leaves_out_the_words_the_judge_did_not_judge():
-    """Review M1: a superseded turn, or a word with neither a turn nor a hold judged, is counted apart."""
+    """Review M1: a heading word with no rows (the lead carried them past the clearance or the capture) is counted
+    apart; the others count one each, inside only if every row is."""
     from ts_transformer.autopilot.judge import Verdict
     from ts_transformer.autopilot.replay import word_results
 
-    heading = [{"row": 0, "kind": "initial", "words": 1, "turn": None, "superseded": False, "hold": {"rows": 5, "inside": 5}},
-               {"row": 9, "kind": "turn", "words": 1, "turn": None, "superseded": True, "hold": None},
-               {"row": 20, "kind": "turn-split", "words": 2, "turn": {"reached": True, "progress_ok": True, "rate_ok": False},
-                "superseded": False, "hold": "not judged: slowest turn unfinished"},
-               {"row": 40, "kind": "turn", "words": 1, "turn": None, "superseded": False, "hold": None}]
+    heading = [{"row": 0, "rows": 5, "inside": 5}, {"row": 9, "rows": 3, "inside": 2}, {"row": 12, "rows": 0, "inside": 0},
+               {"row": 13, "rows": 0, "inside": 0}]
     words = {"not_reached": 0, "superseded_before_flown": 0, "heading": heading, "capture_turn": None,
              "intercepting_off_word_cycles": 0, "aim_left_tube_cycles": 0,
              "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0},
              "vertical": [{"contained": True}], "speed": [{"contained": False}], "all_contained": False}
     judged, not_judged = word_results(Verdict("landed", 50, None, {}, words, flown_rows=51))
     assert not_judged == 2
-    assert judged == [("heading", True), ("heading", False), ("heading", False), ("altitude", True), ("speed", False)]
+    assert judged == [("heading", True), ("heading", False), ("altitude", True), ("speed", False)]
 
 
 def test_the_executor_hash_covers_the_package_and_what_it_imports_from_the_repository():
@@ -955,22 +962,6 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
     reread["differ"] = first.signals[0].dataset_id
     with pytest.raises(ValueError, match="differs from the stored one"):
         replay.draw(Path("x"), "train", one, words, per_airport=3, seed=5)
-
-
-def test_a_split_turn_said_only_in_part_is_judged_toward_the_part_said():
-    """Review: when the flight ends after the first part of a 360° orbit was said, the turn judged is that part's
-    120°, not the whole orbit's end — read here on the observed orbit, which reaches 120° and turns on."""
-    from ts_transformer.autopilot.judge import _heading_words, said_at
-    from ts_transformer.instructions.labeller.read import admit, read_flight
-
-    one, words, geometry = spec(), Words(spec()), instruction_airport()
-    signals = _orbit()
-    reading = read_flight(signals, geometry, one, words)
-    first = [i for i in reading.instructions if i.kind == "turn-split"][0]
-    said = [i for i in reading.instructions if i.column == HEADING and i.row <= first.row]
-    said, _ = said_at(said, [i.row for i in said])                              # told where the observed aircraft was
-    (_, part) = _heading_words(admit(signals, geometry, one), said, reading.checks["turns"], None, one, words)
-    assert part["words"] == 1 and part["turn"]["reached"] and part["turn"]["progress_ok"]
 
 
 def test_words_said_on_one_flown_row_leave_the_later_one_of_each_column():

@@ -1,9 +1,10 @@
 """Method A (executor design §9, the E7 plan): the mildest values the design's constraints allow, found by
 flying the executor's own manoeuvre rather than read from data.
 
-- ``heading_time_constant_s`` (τ_ψ): the largest the per-step word envelope admits (``r_turn |τ_ψ − L| ≤ δψ − s/2``,
-  `params.ExecutorParams.check`; down to 0.5 s) — the gentlest roll-out whose steady lag in a turn still keeps the
-  flown track inside the word a lead earlier;
+- ``heading_time_constant_s`` (τ_ψ): the largest the per-step word envelope admits (``r_max |τ_ψ − L| ≤ δψ − s/2``
+  at the vocabulary's largest turn rate r_max, which the heading law follows words up to; `params.ExecutorParams.check`;
+  down to 0.5 s) — the gentlest roll-out whose steady lag in any turn the words describe keeps the flown track inside
+  the word a lead earlier (on the design's values, τ_ψ = L);
 - ``roll_rate_deg_s`` (p): the least bank rate (a `ROLL_RATE_STEP_DEG_S` grid) at which the executor's own
   largest turn on its heading law (`largest_own_turn_deg`: from a heading word that just reaches the final — 90°
   plus the tolerance off the course — to its own intercept of the final), level and at a held speed, passes its
@@ -35,9 +36,9 @@ ROLL_RATE_STEP_DEG_S = 0.5
 ROLL_RATE_MAX_DEG_S = 20.0
 
 
-def heading_time_constant_s(turn_rate_deg_s: float, spec: VocabularySpec, cycle_s: float) -> float:
-    """The largest τ_ψ the per-step word envelope admits (``r_turn |τ_ψ − L| ≤ δψ − s/2``), down to 0.5 s."""
-    slack_s = (spec.heading_tolerance_deg - spec.heading_step_deg / 2) / turn_rate_deg_s
+def heading_time_constant_s(spec: VocabularySpec, cycle_s: float) -> float:
+    """The largest τ_ψ the per-step word envelope admits (``r_max |τ_ψ − L| ≤ δψ − s/2``), down to 0.5 s."""
+    slack_s = (spec.heading_tolerance_deg - spec.heading_step_deg / 2) / spec.turn_rate_max_deg_s
     tau = rounded(spec.heading_lead_s + slack_s, 0.5, math.floor)
     if tau < 2.0 * cycle_s:
         raise ValueError(f"τ_ψ {tau:g} s would be under 2 Δt: the lead {spec.heading_lead_s:g} s is too short")
