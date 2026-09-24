@@ -945,6 +945,20 @@ def test_a_split_turn_said_only_in_part_is_judged_toward_the_part_said():
     reading = read_flight(signals, geometry, one, words)
     first = [i for i in reading.instructions if i.kind == "turn-split"][0]
     said = [i for i in reading.instructions if i.column == HEADING and i.row <= first.row]
-    said = said_at(said, [i.row for i in said])                                 # told where the observed aircraft was
+    said, _ = said_at(said, [i.row for i in said])                              # told where the observed aircraft was
     (_, part) = _heading_words(admit(signals, geometry, one), said, reading.checks["turns"], None, one, words)
     assert part["words"] == 1 and part["turn"]["reached"] and part["turn"]["progress_ok"]
+
+
+def test_words_said_on_one_flown_row_leave_the_later_one_of_each_column():
+    """A clock running ahead of the sentence can say two words of a column on one flown row: the later one flies."""
+    from ts_transformer.autopilot.judge import said_at
+    from ts_transformer.instructions.labeller.records import Instruction
+
+    words = [Instruction(ALTITUDE, 30, 10, "target"), Instruction(ALTITUDE, 20, 12, "target"),
+             Instruction(HEADING, 5, 10, "turn-split", {"part": 1}), Instruction(HEADING, 9, 11, "turn-split", {"part": 2}),
+             Instruction(SPEED, 14, 20, "target")]
+    kept, superseded = said_at(words, [7, 7, 7, 7, 15])
+    assert superseded == 1
+    assert [(w.column, w.value, w.row, w.info["sentence_row"]) for w in kept] == [
+        (ALTITUDE, 20, 7, 12), (HEADING, 5, 7, 10), (HEADING, 9, 7, 11), (SPEED, 14, 15, 20)]

@@ -66,7 +66,8 @@ from ts_transformer.instructions.labeller.speed import span_checks
 from ts_transformer.instructions.labeller.vertical import tube_checks
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import APPROACH, HEADING, Words, compass_from_math_rad, wrap180
+from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, Words, compass_from_math_rad, wrap180
+from ts_transformer.instructions.words import SPEED as SPEED_WORD
 
 OUTCOMES = ("landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout",
             "dynamics_failure")
@@ -203,11 +204,20 @@ def hold_funnel(flight: Admitted, span: HeadingSpan, target_deg: float, turn_deg
     return ends, envelope.hold_funnel(positions[row] + ends.corners, target_deg, spec.heading_tolerance_deg, length)
 
 
-def said_at(instructions: list[Instruction], flown_rows: list[int]) -> list[Instruction]:
+def said_at(instructions: list[Instruction], flown_rows: list[int]) -> tuple[list[Instruction], int]:
     """The sentence's words at the flown rows the executor was told them at (``info["sentence_row"]``: the row
-    the observed aircraft was told it at)."""
-    return [replace(word, row=row, info={**word.info, "sentence_row": word.row})
-            for word, row in zip(instructions, flown_rows)]
+    the observed aircraft was told it at), and how many were superseded before they flew: on a clock that runs
+    ahead of the sentence (the executor cut a corner the observed aircraft flew round), two altitude, angle or
+    speed words can fall on one flown row, and only the later one is flown. Heading words are kept (a split
+    turn's parts said together are still one turn)."""
+    moved = [replace(word, row=row, info={**word.info, "sentence_row": word.row})
+             for word, row in zip(instructions, flown_rows)]
+    last = {}
+    for number, word in enumerate(moved):
+        last[(word.column, word.row)] = number
+    kept = [word for number, word in enumerate(moved)
+            if word.column not in (ALTITUDE, ANGLE, SPEED_WORD) or last[(word.column, word.row)] == number]
+    return kept, len(moved) - len(kept)
 
 
 def _heading_words(flight: Admitted, instructions: list[Instruction], turns: list[dict[str, Any]],
@@ -313,7 +323,8 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     sentence = flown.sentence_s[index, :last].cpu().numpy()
     flown_rows = [int(np.searchsorted(sentence, word.row * spec.step_s - 1e-9)) // step_rows
                   for word in reading.instructions]
-    reached = [word for word in said_at(reading.instructions, flown_rows) if word.row < rows]
+    moved, superseded = said_at(reading.instructions, flown_rows)
+    reached = [word for word in moved if word.row < rows]
 
     def first_row(mode: str) -> int | None:
         # up to the outcome's row: after a crossing without capture the executor flies on, and a later mode
@@ -351,7 +362,7 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
                  and (not cleared or clearance_ok)
                  and all(v["contained"] for v in vertical) and all(v["contained"] for v in speed))
     return Verdict(outcome, end_row, crossing, limits, flown_rows=end_row + 1, words={
-        "not_reached": len(reading.instructions) - len(reached),
+        "not_reached": len(moved) - len(reached), "superseded_before_flown": superseded,
         "heading": headings, "capture_turn": capture_turn,
         "corridor": {"cleared": cleared, "entered": bool(len(corridor)), "rows": int(len(corridor)),
                      "inside": int(corridor.sum())},
