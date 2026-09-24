@@ -224,14 +224,16 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 ### R12 · the executor: `executor_spec` → `executor_sensitivity` → `executor_replay`
 
 2026-09-24 (`docs/2026-09-23_executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
---dir <new dir> --word-clock {time,distance,track} [--workers 8]` (`ts-executor-spec-v4` since 2026-09-24: the
-executor takes no information beyond the vocabulary) refuses a dirty tree, an existing directory and a labeller other
-than the artefact's; takes τ_ψ (the heading lead) and p (the vocabulary's bank limit over the lead) by method A from
-the vocabulary, and measures the values the vocabulary does not settle yet (the speed changes' pace, the landing aim)
-on EVERY labelled train flight (process pool of torch-free workers, 1,000 flights a chunk, each flight re-read and
-required to equal its stored sentence). The turn rates and the bank limit are the vocabulary's, read at run time; a
-word acts when said (method B is archived). The design's fixed choices (Δt, τ_γ, the γ̇ factor, the timeout factor)
-are module constants and are written into `measurements.json` beside `spec.json`. ~30 s for the data pass.
+--dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v5` since 2026-09-24: the executor takes no
+information beyond the vocabulary and the pointed runway's published threshold crossing height) refuses a dirty tree,
+an existing directory and a labeller other than the artefact's; takes τ_ψ (the heading lead) and p (the vocabulary's
+bank limit over the lead) by method A from the vocabulary. Nothing is measured from data: the turn rates, the bank
+limit, the speed changes' pace (a speed step over the shortest speed hold, 0.25 m/s²) and the altitude tolerance are
+the vocabulary's, read at run time; the landing crosses each candidate's published TCH, read at replay
+(`autopilot/runway_data.py`, the harvest's runway data at the evaluation CLI's default configuration and CIFP; the draw
+records the heights); a word acts when said. The design's fixed choices (Δt, τ_γ, the γ̇ factor, the timeout factor)
+are module constants and are written into `measurements.json` beside `spec.json`, with where every other value comes
+from. Seconds.
 `executor_sensitivity --instructions --executor <spec dir> [--per-airport 400] [--seed 1337] [--out]` flies one seeded
 TRAIN sample per variant (the spec, then τ_ψ over 2–6 s, p over 4/6/10°/s, the γ̇ factor over 1–3, one at a time);
 writes `sensitivity.json` into a new directory (default beside the spec).
