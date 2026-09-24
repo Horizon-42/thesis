@@ -42,7 +42,7 @@ import torch
 from aerodynamic_model.common import GeodeticState
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Flown
-from ts_transformer.autopilot.judge import CROSSINGS, Verdict
+from ts_transformer.autopilot.judge import CROSSINGS, Outcome, Verdict
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.data.channels import channels_from_states
 from ts_transformer.data.dataset import FlightSeries
@@ -61,7 +61,8 @@ HORIZON = "sentence"
 REPLAY_SCHEMA = "ts-executor-replay-v1"
 
 
-def executor_forecast(flown: Flown, index: int, verdict: Verdict, inputs: Any, series: FlightSeries) -> Forecast:
+def executor_forecast(flown: Flown, index: int, verdict: Outcome | Verdict, inputs: Any,
+                      series: FlightSeries) -> Forecast:
     """Flight ``index``'s flown track as a control-path forecast from row 0: the states at every cycle to the
     one its outcome is read at (before it, for a dynamics failure: no state of the failure enters the record),
     the schedule in the plant's contract, and its newtons resolved by that contract's own law."""
@@ -120,7 +121,7 @@ def gate_table(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return table
 
 
-def _evaluate(records: Path) -> dict[str, Any]:
+def evaluate_records(records: Path) -> dict[str, Any]:
     report = records / "evaluation_report.json"
     subprocess.run([sys.executable, "-m", "evaluation", "--input", str(records), "--output", str(report)],
                    cwd=REPO_ROOT, check=True)
@@ -180,7 +181,7 @@ def fly_airport(batch: replay.Batch, members: list[int], params: Any, words: Any
                                                               "executor_params": asdict(params)},
                 flight_metrics=metrics, checkpoint=str(executor_dir), split=split,
                 extra_summary={"executor_spec_sha256": record["sha256"]})
-    graded = _evaluate(records)
+    graded = evaluate_records(records)
     by_key = {row["flight_key"]: row for row in graded["trajectories"]}
     for row in rows:
         row["replay_verdict"] = by_key[row["flight_key"]]["verdict"] if row["recorded"] else "no record: failed at once"

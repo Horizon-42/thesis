@@ -63,6 +63,10 @@ def test_from_dict_refuses_a_missing_or_an_extra_key_and_another_reading_rule():
     ({"heading_split_part_deg": 145.0}, "split part plus its lead"),
     ({"altitude_tolerance_m": 10.0}, "half an altitude step"),
     ({"heading_step_deg": 7.0}, "does not divide 360"),
+    ({"heading_reading": "zigzag"}, "is not one of"),
+    ({"heading_lead_s": 3.0}, "not a whole number of steps"),
+    ({"heading_lead_s": -2.0}, "not a whole number of steps"),
+    ({"heading_band_deg": 2.0}, "heading_band_deg below half a heading step"),
     ({"descent_angle_edges_deg": [-0.5, 3.0, 2.6, 3.7, 10.0]}, "edges must increase"),
     ({"descent_angle_centres_deg": [0.8, 2.1, 3.0, 11.0]}, "inside its class"),
 ])

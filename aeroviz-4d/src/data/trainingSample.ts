@@ -2,7 +2,8 @@
  * trainingSample.ts
  * -----------------
  * The Training module's data contract: the manifest of exported sets, and one set's flights
- * under the instruction vocabulary (`instruction-v2`, spec `103a6eae6b90`).
+ * under the instruction vocabulary (`instruction-v3`: its heading reading is being chosen, vocabulary design §10,
+ * and no set is exported under it yet — `TRAINING_SPEC_SHA256` moves to its spec when that is written).
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the words:
  * `4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`.
  *
@@ -43,9 +44,10 @@ export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
  *  vocabulary it carries — is refused. */
 export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v6";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
-export const TRAINING_READING_RULE = "instruction-v2";
-/** MIRROR of the spec's sha (`v2_20260924/spec.json`). A new vocabulary is a new sha, and this
- *  reader is bound to the one it was written for. */
+export const TRAINING_READING_RULE = "instruction-v3";
+/** MIRROR of the spec's sha. A new vocabulary is a new sha, and this reader is bound to the one it was written
+ *  for. Still `v2_20260924/spec.json`'s: instruction-v3's spec is not written yet, so every set is refused by its
+ *  reading rule before this is read; the exporter's first v3 set fails `check-publication` until this moves. */
 export const TRAINING_SPEC_SHA256 = "103a6eae6b9083ad33d5a1b25daef4004a07458881786e90d4625ba04027204b";
 /** MIRROR of the exporter's `KIND_READBACK`: the one kind of set this reader opens. */
 export const TRAINING_READABLE_SET_KIND = "vocabulary-readback";

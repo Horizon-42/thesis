@@ -44,6 +44,11 @@ SUGGESTED: dict[str, Any] = {
     "track_smoothing_s": 6.0,
     "altitude_smoothing_s": 10.0,
     "speed_smoothing_s": 10.0,
+    # §10.1 compares the two heading readings (`experiments/heading_reading_compare.py` sets its own); until the
+    # user picks one, a formal spec keeps the reading of instruction-v2
+    "heading_reading": "holds",
+    "heading_lead_s": 0.0,
+    "heading_band_deg": 2.5,
     "heading_step_deg": 5.0,
     "heading_min_hold_s": 10.0,
     "heading_max_turn_deg": 150.0,

@@ -30,7 +30,7 @@ import torch
 from ts_transformer.autopilot.executor import Flown, fly
 from ts_transformer.autopilot.flights import FlightInputs, flight_inputs, rebuild_series
 from ts_transformer.autopilot.frame import AirportCharts
-from ts_transformer.autopilot.judge import Verdict, flown_track, judge
+from ts_transformer.autopilot.judge import Outcome, Verdict, flown_track, judge
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock
@@ -105,15 +105,24 @@ def flight_approach_ias_mps(series: FlightSeries, group: str) -> float:
     return approach_speed_ias_mps(series.scenario.source["resolved_typecode"], mass)
 
 
-def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
-         groups: tuple[str, ...] = (OWN,)) -> Batch:
-    """The split's first ``per_airport`` labelled flights of ``groups`` per airport (0: every one), in a
-    seeded permutation."""
+@dataclass
+class Drawn:
+    """A split's sample before any sentence: the flights, their rebuilt series and groups, and its description."""
+    indices: list[int]              # into the artefact's signals of the split
+    signals: list[FlightSignals]
+    series: list[FlightSeries]
+    groups: list[str]
+    geometries: dict[str, AirportGeometry]
+    description: dict[str, Any]
+
+
+def draw_flights(directory: Path, split: str, candidates: list[int], *, per_airport: int, seed: int,
+                 groups: tuple[str, ...] = (OWN,)) -> Drawn:
+    """Of the split's signals at ``candidates``, the first ``per_airport`` of ``groups`` per airport (0: every
+    one), in a seeded permutation."""
     geometries = load_candidates(directory)
     signals = load_signals(directory, split)
-    sentences = load_sentences(directory, split, spec)
-    stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
-    order = [int(i) for i in np.random.default_rng(seed).permutation(sorted(stored))]
+    order = [int(i) for i in np.random.default_rng(seed).permutation(sorted(candidates))]
     wanted = {airport: per_airport or len(order) for airport in geometries}
     taken: list[tuple[int, FlightSeries, str]] = []
     excluded: Counter = Counter()
@@ -140,23 +149,38 @@ def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per
     short = {airport: need for airport, need in wanted.items() if need and per_airport}
     if short:
         raise ValueError(f"the {split} split holds too few eligible flights: {short} short")
+    return Drawn(indices=[i for i, _, _ in taken], signals=[signals[i] for i, _, _ in taken],
+                 series=[s for _, s, _ in taken], groups=[g for _, _, g in taken], geometries=geometries,
+                 description={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
+                              "groups": list(groups), "pool": len(order), "read": read,
+                              "excluded": dict(excluded.most_common()), "flights": len(taken),
+                              "by_group": dict(Counter(g for _, _, g in taken))})
+
+
+def batch_of(drawn: Drawn, keep: list[int], readings: list[Reading]) -> Batch:
+    """The flights of ``drawn`` at ``keep`` flown from ``readings`` (one per kept flight, in that order)."""
+    return Batch(signals=[drawn.signals[i] for i in keep], series=[drawn.series[i] for i in keep], readings=readings,
+                 geometries=[drawn.geometries[drawn.signals[i].airport] for i in keep],
+                 approach_ias_mps=[flight_approach_ias_mps(drawn.series[i], drawn.groups[i]) for i in keep],
+                 groups=[drawn.groups[i] for i in keep], drawn=drawn.description)
+
+
+def draw(directory: Path, split: str, spec: VocabularySpec, words: Words, *, per_airport: int, seed: int,
+         groups: tuple[str, ...] = (OWN,)) -> Batch:
+    """The split's first ``per_airport`` labelled flights of ``groups`` per airport (0: every one), in a
+    seeded permutation, each re-read and checked against its stored sentence."""
+    sentences = load_sentences(directory, split, spec)
+    stored = {int(index): k for k, index in enumerate(sentences["signal_index"])}
+    drawn = draw_flights(directory, split, list(stored), per_airport=per_airport, seed=seed, groups=groups)
     readings = []
-    for i, _series, _group in taken:
-        flight = signals[i]
-        reading = read_flight(flight, geometries[flight.airport], spec, words)
+    for i, flight in zip(drawn.indices, drawn.signals):
+        reading = read_flight(flight, drawn.geometries[flight.airport], spec, words)
         k = stored[i]
         grid = sentences["words"][sentences["offsets"][k]: sentences["offsets"][k + 1]]
         if not np.array_equal(reading.words, grid) or reading.runway_index != int(sentences["runway_index"][k]):
             raise ValueError(f"{flight.dataset_id}: the re-read sentence differs from the stored one")
         readings.append(reading)
-    return Batch(signals=[signals[i] for i, _, _ in taken], series=[s for _, s, _ in taken], readings=readings,
-                 geometries=[geometries[signals[i].airport] for i, _, _ in taken],
-                 approach_ias_mps=[flight_approach_ias_mps(s, g) for _, s, g in taken],
-                 groups=[g for _, _, g in taken],
-                 drawn={"split": split, "seed": seed, "per_airport": per_airport or "every labelled flight",
-                        "groups": list(groups), "pool": len(order), "read": read,
-                        "excluded": dict(excluded.most_common()), "flights": len(taken),
-                        "by_group": dict(Counter(g for _, _, g in taken))})
+    return batch_of(drawn, list(range(len(readings))), readings)
 
 
 def subset(batch: Batch, indices: list[int]) -> Batch:
@@ -179,21 +203,27 @@ def word_clock(batch: Batch, params: ExecutorParams, step_s: float,
     return clock.of(e_m, n_m, step_s, params.cycle_s, device=device)
 
 
-def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device,
-              early_words: bool = False) -> tuple[Flown, list[Verdict]]:
-    """Fly every flight's sentence from its row 0 and judge it (``early_words``: a sensitivity probe)."""
+def fly_sentences(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device,
+                  early_words: bool = False) -> Flown:
+    """Fly every flight's sentence from its row 0 (``early_words``: a sensitivity probe)."""
     spec = words.spec
     f64 = torch.float64
     limits = torch.tensor([len(r.words) * spec.step_s * params.timeout_factor for r in batch.readings], dtype=f64,
                           device=device)
     sentences = Sentences([r.words for r in batch.readings], words, device=device)
-    flown = fly(batch.inputs(device), sentences, word_clock(batch, params, spec.step_s, device),
-                Runways.of(batch.geometries, dtype=f64, device=device),
-                AirportCharts.of(batch.geometries, dtype=f64, device=device),
-                torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits,
-                early_words=early_words)
+    return fly(batch.inputs(device), sentences, word_clock(batch, params, spec.step_s, device),
+               Runways.of(batch.geometries, dtype=f64, device=device),
+               AirportCharts.of(batch.geometries, dtype=f64, device=device),
+               torch.tensor(batch.approach_ias_mps, dtype=f64, device=device), params, words, time_limit_s=limits,
+               early_words=early_words)
+
+
+def fly_batch(batch: Batch, params: ExecutorParams, words: Words, *, device: torch.device,
+              early_words: bool = False) -> tuple[Flown, list[Verdict]]:
+    """Fly every flight's sentence from its row 0 and judge it (``early_words``: a sensitivity probe)."""
+    flown = fly_sentences(batch, params, words, device=device, early_words=early_words)
     verdicts = [judge(flown, j, batch.geometries[j], batch.readings[j].runway_index, batch.readings[j],
-                      batch.signals[j], spec, words) for j in range(len(batch.readings))]
+                      batch.signals[j], words.spec, words) for j in range(len(batch.readings))]
     return flown, verdicts
 
 
@@ -280,7 +310,8 @@ def observed_landing_s(observed: FlightSignals, reading: Reading, geometry: Airp
     return float(observed.time_s[last] + relative.before_threshold_m[0] / observed.ground_speed_mps[last])
 
 
-def flight_alignment(batch: Batch, flown: Flown, verdicts: list[Verdict]) -> list[dict[str, float | None]]:
+def flight_alignment(batch: Batch, flown: Flown,
+                     verdicts: list[Outcome] | list[Verdict]) -> list[dict[str, float | None]]:
     """How each flown track differs from the observed one (§11, reported, no gate): the mean horizontal and
     vertical distance at the sentence's rows both tracks reach (time-aligned from row 0), and for a landed
     flight its landing time minus the observed one — its interpolated crossing against the sentence's last

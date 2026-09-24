@@ -204,8 +204,9 @@ def read_flight(signals: FlightSignals, geometry: AirportGeometry, spec: Vocabul
                     *lateral.instructions, *vertical.instructions, *speeds.instructions]
     grid, kept = assemble(signals.n_rows, instructions, smoothed.altitude_m, spec, words)
 
-    # every check runs on the sentence as kept: a word the assembly dropped is not judged
-    held, not_held = hold_positions(flight, lateral, kept, spec, words)
+    # every check runs on the sentence as kept: a word the assembly dropped is not judged; the per-step reading has
+    # no holds, and its words' envelope is still to be designed (§10.1)
+    held, not_held = hold_positions(flight, lateral, kept, spec, words) if spec.heading_reading == "holds" else ([], {})
     checks = {
         "holds": len(held) + sum(not_held.values()),
         "turns": lateral.turns, "intercept_inserted": lateral.intercept_inserted, "capture_turn": lateral.capture_turn,

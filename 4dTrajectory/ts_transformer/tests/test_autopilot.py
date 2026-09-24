@@ -328,6 +328,19 @@ def test_a_downwind_base_final_sentence_is_flown_to_the_runway():
     assert not any(verdict.limits[name]["cycles"] for name in ("thrust_max", "thrust_min", "stall", "load_factor"))
 
 
+def test_the_outcome_alone_is_the_verdict_s_first_layer():
+    """`judge.outcome_of`, which the heading-reading comparison (vocabulary design §10.1) reads without judging
+    any word, is exactly the outcome, row, crossing and limits `judge` reports."""
+    from ts_transformer.autopilot.judge import outcome_of
+
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    flown, verdict, _ = _fly_sentence(signals)
+    ended = outcome_of(flown, 0, instruction_airport(), 0, spec())
+    assert ended.outcome == "landed"
+    assert (ended.outcome, ended.end_row, ended.crossing, ended.limits) == (
+        verdict.outcome, verdict.end_row, verdict.crossing, verdict.limits)
+
+
 def test_a_flight_on_the_final_from_row_0_is_captured_at_once_and_lands():
     straight = [(40, 0.0, 90.0, 0.0), (30, 0.0, 80.0, 0.0), (110, 0.0, 72.0, -72.0 * np.tan(np.radians(3.0)))]
     signals = instruction_flight(*fly_legs(straight, 90.0, 950.0, -300.0, 0.0))     # ~50 m over the threshold

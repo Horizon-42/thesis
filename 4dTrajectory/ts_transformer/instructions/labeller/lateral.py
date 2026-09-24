@@ -1,6 +1,10 @@
 """Heading words, the splitting of large turns, the capture of the final and the approach
 clearance (vocabulary design §2.2, §2.3, §3.2).
 
+The heading words are read one of two ways (`VocabularySpec.heading_reading`, §10.1 compares them): ``holds``
+below, or ``per-step`` (`_read_per_step`): every row labelled with the grid heading the track reaches
+`heading_lead_s` later, merged into one word while it stays within `heading_band_deg` of the word in force.
+
 Holds are read by TILING on the heading grid: from each row, the longest run of rows whose
 smoothed track stays within the heading tolerance of one grid target and turns no faster than
 the hold's largest rate; a run shorter than the minimum hold belongs to a turn. A hold's word
@@ -152,6 +156,8 @@ def read_lateral(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRe
         ]
         return reading
 
+    if spec.heading_reading == "per-step":
+        return _read_per_step(track, relative, course_deg, reading, spec, words)
     holds = find_holds(track, capture, spec)
     reading.holds = holds
     step = spec.heading_step_deg
@@ -241,6 +247,37 @@ def read_lateral(track: np.ndarray, ground_speed: np.ndarray, relative: RunwayRe
     reading.join_row = max(item.row for item in reading.instructions)
     reading.instructions.append(Instruction(APPROACH, APPROACH_CLEARED, reading.join_row, "clear"))
     if reading.join_row > 0:
+        reading.instructions.append(Instruction(APPROACH, APPROACH_NOT_CLEARED, 0, "initial"))
+    return reading
+
+
+def _read_per_step(track: np.ndarray, relative: RunwayRelative, course_deg: float, reading: LateralReading,
+                   spec: VocabularySpec, words: Words) -> LateralReading:
+    """§10.1's per-step reading of a flight not on the final at row 0: each row before the capture labelled with the
+    grid heading nearest the track `heading_lead_s` later (the capture row's track once that lies past it), and a
+    new word only where that leaves the word in force by more than `heading_band_deg`. No hold, no split, no
+    inserted intercept: the words run to the capture, and the clearance goes with the last of them, which must
+    reach the final (`envelope.heading_converges`) or the flight is refused."""
+    capture, step = reading.capture_row, spec.heading_step_deg
+    lead = int(round(spec.heading_lead_s / spec.step_s))
+    led = track[np.minimum(np.arange(capture) + lead, capture)]
+    current = _snap(float(led[0]), step)
+    reading.instructions.append(Instruction(HEADING, words.heading_index(current), 0, "initial",
+                                            {"target_deg": current % 360.0}))
+    for row in range(1, capture):
+        if abs(float(led[row]) - current) > spec.heading_band_deg:
+            current = _snap(float(led[row]), step)
+            reading.instructions.append(Instruction(HEADING, words.heading_index(current), row, "per-step",
+                                                    {"target_deg": current % 360.0}))
+    last = reading.instructions[-1].row
+    offset, before = float(relative.right_of_course_m[last]), float(relative.before_threshold_m[last])
+    if not envelope.heading_converges(current, course_deg, offset, before, spec.heading_tolerance_deg,
+                                      spec.corridor_half_width_m, spec.corridor_widening_deg):
+        raise Refused("the last heading word does not reach the final",
+                      f"{current % 360:.0f}° at row {last}, {offset:+.0f} m off the line, {before:.0f} m before the threshold")
+    reading.join_row = last
+    reading.instructions.append(Instruction(APPROACH, APPROACH_CLEARED, last, "clear"))
+    if last > 0:
         reading.instructions.append(Instruction(APPROACH, APPROACH_NOT_CLEARED, 0, "initial"))
     return reading
 

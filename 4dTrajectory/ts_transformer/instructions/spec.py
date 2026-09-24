@@ -20,8 +20,14 @@ from typing import Any
 
 from geokit import FT_M, KT_MS, NM_M
 
-READING_RULE = "instruction-v2"
-SPEC_SCHEMA = "ts-instruction-spec-v3"
+READING_RULE = "instruction-v3"
+SPEC_SCHEMA = "ts-instruction-spec-v4"
+
+#: How heading words are read (vocabulary design §10.1, under comparison): ``holds`` — one word per straight
+#: hold, larger turns split, an intercept inserted where the heading in force does not reach the final (§3.2);
+#: ``per-step`` — every row labelled with the grid heading nearest the track `heading_lead_s` later, a new word
+#: whenever that leaves the word in force by more than `heading_band_deg` (half a step: every change of grid cell).
+HEADING_READINGS = ("holds", "per-step")
 
 #: FAA JO 7110.65BB 5-9-2 TBL 5-9-1: the largest final-approach interception angle 2 NM or
 #: more outside the approach gate.
@@ -45,6 +51,11 @@ class VocabularySpec:
     altitude_smoothing_s: float
     speed_smoothing_s: float
     # --- heading: absolute ground-track targets, flown the shorter way
+    #: `HEADING_READINGS`. The hold / split / intercept fields below are read by ``holds`` only, the lead and
+    #: the band by ``per-step`` only: §10.1 compares the two, and the reading it rejects goes with its fields.
+    heading_reading: str
+    heading_lead_s: float
+    heading_band_deg: float
     heading_step_deg: float
     #: The hold band about a heading target (covers the grid's half step plus the track's wander).
     heading_tolerance_deg: float
@@ -158,6 +169,13 @@ class VocabularySpec:
         if self.heading_tolerance_deg < self.heading_step_deg / 2:
             raise ValueError("heading_tolerance_deg below half a heading step: a steady track between two "
                              "targets could never be held")
+        if self.heading_reading not in HEADING_READINGS:
+            raise ValueError(f"heading_reading {self.heading_reading!r} is not one of {HEADING_READINGS}")
+        if self.heading_lead_s < 0.0 or not _divides(self.heading_lead_s, self.step_s):
+            raise ValueError(f"heading_lead_s {self.heading_lead_s} is not a whole number of steps")
+        if self.heading_band_deg < self.heading_step_deg / 2:
+            raise ValueError("heading_band_deg below half a heading step: a track between two targets would switch "
+                             "words at every row")
         if self.heading_split_part_deg + self.heading_continue_lead_deg > self.heading_max_turn_deg:
             raise ValueError("a split part plus its lead would exceed heading_max_turn_deg")
         if not self.heading_max_turn_deg + self.heading_tolerance_deg < 180.0:

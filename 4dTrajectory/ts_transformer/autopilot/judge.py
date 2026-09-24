@@ -297,10 +297,18 @@ def _heading_words(flight: Admitted, instructions: list[Instruction], turns: lis
                        "superseded": True, "hold": None} for group in every[len(groups):]]
 
 
-def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int, reading: Reading,
-          observed: FlightSignals, spec: VocabularySpec, words: Words) -> Verdict:
-    """Flight ``index`` of ``flown``: its outcome, its limits, and its words (``reading`` is the
-    labeller's reading of the observed flight, whose words the executor flew)."""
+@dataclass
+class Outcome:
+    """Layer 1 of a verdict alone — how the flight ended, where, and the limits — for a reading whose words have
+    no envelope to be judged against yet (vocabulary design §10.1's comparison)."""
+    outcome: str
+    end_row: int
+    crossing: dict[str, float] | None
+    limits: dict[str, dict[str, float]]
+
+
+def outcome_of(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int, spec: VocabularySpec) -> Outcome:
+    """Flight ``index`` of ``flown``: its outcome, the state row it is read at, the crossing and the limits."""
     last = int(flown.done_cycle[index]) + 1
     states = flown.states[index, : last + 1].cpu().numpy()
     track = flown_track(states, geometry)
@@ -308,10 +316,20 @@ def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int
     def per_row(values: np.ndarray) -> np.ndarray:
         return np.concatenate(([False], values[index, :last].cpu().numpy()))
 
-    captured = per_row(flown.modes["captured"])
-    outcome, end_row, crossing = _outcome(states, track, captured, per_row(flown.limits["stall"]), geometry,
-                                          runway_index, spec)
-    limits = _limits(flown, index, states, end_row)
+    outcome, end_row, crossing = _outcome(states, track, per_row(flown.modes["captured"]),
+                                          per_row(flown.limits["stall"]), geometry, runway_index, spec)
+    return Outcome(outcome, end_row, crossing, _limits(flown, index, states, end_row))
+
+
+def judge(flown: Flown, index: int, geometry: AirportGeometry, runway_index: int, reading: Reading,
+          observed: FlightSignals, spec: VocabularySpec, words: Words) -> Verdict:
+    """Flight ``index`` of ``flown``: its outcome, its limits, and its words (``reading`` is the
+    labeller's reading of the observed flight, whose words the executor flew)."""
+    last = int(flown.done_cycle[index]) + 1
+    states = flown.states[index, : last + 1].cpu().numpy()
+    track = flown_track(states, geometry)
+    ended = outcome_of(flown, index, geometry, runway_index, spec)
+    outcome, end_row, crossing, limits = ended.outcome, ended.end_row, ended.crossing, ended.limits
     step_rows = int(round(spec.step_s / flown.cycle_s))
     # the words are read on the rows before the crossing, where the labeller ends a sentence
     read_to = end_row - 1 if outcome in CROSSINGS else end_row

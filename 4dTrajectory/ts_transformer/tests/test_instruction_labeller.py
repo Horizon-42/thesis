@@ -106,6 +106,54 @@ def _relative(n_rows: int, capture: int, course: float, track: np.ndarray, offse
                           height_above_threshold_m=np.full(n_rows, 500.0))
 
 
+def _per_step(track, capture, course, offset, **changes):
+    one = spec(heading_reading="per-step", **changes)
+    words = Words(one)
+    return read_lateral(track, np.full(len(track), 90.0), _relative(len(track), capture, course, track, offset),
+                        course, one, words), words
+
+
+# a slow continuous turn from north onto an eastbound final (course 090), 500 m left of it: 3° a row for 30 rows
+CONTINUOUS = np.concatenate((np.full(30, 0.0), np.arange(1, 31) * 3.0, np.full(30, 90.0)))
+
+
+def test_per_step_merges_the_rows_into_a_word_per_grid_cell_and_runs_to_the_capture():
+    """§10.1 H3 at half a step's band: the words are the run-length reading of every row's nearest grid heading
+    before the capture — no hold, no split, no inserted intercept — and the clearance goes with the last word."""
+    reading, words = _per_step(CONTINUOUS, 70, 90.0, -500.0)
+    heading = [(i.row, words.heading_deg(i.value), i.kind) for i in reading.instructions if i.column == HEADING]
+    cells = np.round(CONTINUOUS[:70] / 5.0) * 5.0
+    expected = [(0, cells[0])] + [(r, cells[r]) for r in range(1, 70) if cells[r] != cells[r - 1]]
+    assert [(row, deg) for row, deg, _ in heading] == expected
+    assert heading[-1][1] == 90.0 and {kind for _, _, kind in heading[1:]} == {"per-step"}
+    assert not reading.intercept_inserted and reading.turns == [] and reading.holds == []
+    cleared = [i.row for i in reading.instructions if i.column == APPROACH and i.value == APPROACH_CLEARED]
+    assert cleared == [heading[-1][0]] == [reading.join_row]
+
+
+def test_per_step_lead_labels_each_row_with_the_track_that_many_seconds_later():
+    base, _ = _per_step(CONTINUOUS, 70, 90.0, -500.0)
+    led, words = _per_step(CONTINUOUS, 70, 90.0, -500.0, heading_lead_s=4.0)
+    rows = lambda reading: [(i.row, i.value) for i in reading.instructions if i.column == HEADING and i.row > 0]  # noqa: E731
+    assert rows(led) == [(row - 2, value) for row, value in rows(base)]
+
+
+def test_per_step_band_keeps_the_word_while_the_track_wanders_inside_it():
+    """A wander of ±2° about 092.4 crosses the 092.5 cell edge: pure merging says a word at each crossing, a band of
+    4.5° keeps the first word to the capture."""
+    track = np.concatenate((92.4 + 2.0 * np.sin(np.arange(70) / 3.0), np.full(10, 90.0)))
+    pure, _ = _per_step(track, 70, 90.0, -200.0)
+    banded, _ = _per_step(track, 70, 90.0, -200.0, heading_band_deg=4.5)
+    count = lambda reading: sum(1 for i in reading.instructions if i.column == HEADING)  # noqa: E731
+    assert count(pure) > 5 and count(banded) == 1
+
+
+def test_per_step_refuses_a_last_word_that_does_not_reach_the_final():
+    # flying the course 3 km left of the line: bent by the heading tolerance it meets the line only 38 km on
+    with pytest.raises(Refused, match="does not reach the final"):
+        _per_step(np.full(80, 90.0), 70, 90.0, -3000.0)
+
+
 def test_a_reversal_is_split_into_two_words_and_the_second_continues_the_turn():
     one, words = spec(), Words(spec())
     # 000 → a right turn through 180° → 180 (converging on a westbound final from its north side)
