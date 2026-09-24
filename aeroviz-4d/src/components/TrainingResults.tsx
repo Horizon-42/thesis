@@ -15,7 +15,7 @@ const COLUMN_LABEL: Record<(typeof TRAINING_COLUMNS)[number], string> = {
 };
 
 function share(value: number | null): string {
-  return value === null ? "—" : `${(value * 100).toFixed(1)} %`;
+  return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
 function mark(ok: boolean | undefined): string {
@@ -41,27 +41,27 @@ export function TrainingExecutorGate({ overlay }: { overlay: TrainingExecutorOve
     <details className="training-results" aria-label="The executor's replay gate">
       <summary>The executor's {overlay.replay.split} replay gate · spec {overlay.executor.specSha256.slice(0, 12)}</summary>
       {Object.entries(overlay.gate).map(([group, places]) => {
-        const gated = places[airport]?.all?.clears != null;
+        const notGated = places[airport]?.all?.notGated ?? null;
         return (
           <table key={group} className="training-results-table">
             <caption>
-              {group} — {gated ? `gated, each share ≥ ${gateShare}` : `reported, not gated: ${places[airport]?.all?.notGated ?? ""}`}
+              {group} at {airport} — {notGated === null ? `gated, each share ≥ ${gateShare}` : `reported, ${notGated}`}
             </caption>
             <thead>
-              <tr><th scope="col" /><th scope="col">flights</th><th scope="col">landed</th><th scope="col">words inside</th><th scope="col">evaluation paired</th></tr>
+              <tr><th scope="col" /><th scope="col">flights</th><th scope="col">landed</th><th scope="col">words</th><th scope="col">eval.</th></tr>
             </thead>
             <tbody>
               {STRATA.flatMap((stratum) => (places[airport]?.[stratum]
-                ? [<GateRow key={`${airport}-${stratum}`} name={`${airport} ${stratum}`} cell={places[airport][stratum]} />] : []))}
+                ? [<GateRow key={`${airport}-${stratum}`} name={stratum} cell={places[airport][stratum]} />] : []))}
               {places.all?.all ? <GateRow name="all airports" cell={places.all.all} /> : null}
             </tbody>
           </table>
         );
       })}
       <p className="training-results-note">
-        landed: on the pointed runway, as the harvest and evaluation judge a landing · words inside: of the words the
-        judge judged, those flown inside their envelopes, each envelope re-drawn from where the executor was told the
-        word · evaluation paired: of the flights whose observed track passes evaluation, the replays that pass too. Every
+        landed: on the pointed runway, as the harvest and evaluation judge a landing · words: of the words the judge
+        judged, those flown inside their envelopes, each envelope re-drawn from where the executor was told the word ·
+        eval.: evaluation paired — of the flights whose observed track passes evaluation, the replays that pass too. Every
         flyable {overlay.replay.split} flight was flown ({String(overlay.replay.drawn.flights ?? "?")}); the table is the
         formal replay's, written {overlay.replay.writtenUtc.slice(0, 16).replace("T", " ")} UTC.
       </p>
@@ -76,25 +76,24 @@ export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverla
     <details className="training-results" aria-label="The prior's readout">
       <summary>The prior's {readout.split} readout · {nll(readout.model.nllPerStep)} per step against {nll(readout.baselines.repeat.all)} / {nll(readout.baselines.previousWord.all)}</summary>
       <table className="training-results-table">
-        <caption>negative log-likelihood per step (nats), lower is better</caption>
+        <caption>negative log-likelihood per step (nats), lower is better; hover a row for its word changes</caption>
         <thead>
-          <tr>
-            <th scope="col">column</th><th scope="col">prior</th><th scope="col">repeat</th><th scope="col">previous word</th>
-            <th scope="col" title="the mean probability the prior gives a word being said, on the steps where one is">P(word) where said</th>
-            <th scope="col" title="how often the prior's most likely word, given one is said, is the word said">top 1</th>
-          </tr>
+          <tr><th scope="col">column</th><th scope="col">prior</th><th scope="col">repeat</th><th scope="col">prev. word</th></tr>
         </thead>
         <tbody>
           {TRAINING_COLUMNS.map((column) => {
             const own = readout.model.perColumn[column];
+            const title =
+              `${own.changeSteps.toLocaleString("en")} steps where the truth says a word: the prior gives a word ` +
+              `${own.changeProbabilityWhereChanged.toFixed(3)} on average there; its most likely word is the one said ` +
+              `${(own.top1GivenChange * 100).toFixed(1)}% of the time, among its first five ${(own.top5GivenChange * 100).toFixed(1)}%; ` +
+              `on the steps where nothing is said it says a word ${(own.falseChangeShareWhereKept * 100).toFixed(2)}% of the time`;
             return (
-              <tr key={column}>
+              <tr key={column} title={title}>
                 <th scope="row">{COLUMN_LABEL[column]}</th>
                 <td>{nll(own.nllPerStep)}</td>
                 <td>{nll(readout.baselines.repeat[column])}</td>
                 <td>{nll(readout.baselines.previousWord[column])}</td>
-                <td>{own.changeProbabilityWhereChanged.toFixed(3)}</td>
-                <td>{own.top1GivenChange.toFixed(3)}</td>
               </tr>
             );
           })}
@@ -103,7 +102,6 @@ export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverla
             <td>{nll(readout.model.nllPerStep)}</td>
             <td>{nll(readout.baselines.repeat.all)}</td>
             <td>{nll(readout.baselines.previousWord.all)}</td>
-            <td /><td />
           </tr>
         </tbody>
       </table>

@@ -192,6 +192,14 @@ describe("TrainingReadbackWindow", () => {
     expect(screen.getByLabelText("Executor replay").textContent).toMatch(/landed on own dynamics; dashed teal/);
   });
 
+  it("says so when the executor's flight ended within its first step", () => {
+    const flown = executorFlight(0);
+    const point = Object.fromEntries(Object.entries(flown.track!).map(([key, values]) => [key, values.slice(0, 1)]));
+    open(ALL, 0, 0, null, { ...flown, outcome: "dynamics_failure", track: point as typeof flown.track });
+    expect(screen.getByLabelText("Executor replay").textContent).toMatch(/dynamics failure on own dynamics within its first step/);
+    expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);
+  });
+
   it("names why a flight the replay does not fly has no executor line", () => {
     open(ALL, 1, 0, null, executorFlight(1));
     expect(screen.getByLabelText("Executor replay").textContent).toMatch(/not flown: no identified type/);

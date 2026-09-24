@@ -183,8 +183,8 @@ describe("TrainingPanel", () => {
       render(<TrainingPanel />);
       expect(await screen.findByText(/The executor's val replay gate · spec 777777777777/)).toBeTruthy();
       expect(screen.getByText(/The prior's val readout · 0\.1778 per step against 0\.3444 \/ 0\.3260/)).toBeTruthy();
-      expect(screen.getByText(/own dynamics — gated, each share ≥ 95 %/)).toBeTruthy();
-      expect(screen.getByText(/stand-in dynamics — reported, not gated/)).toBeTruthy();
+      expect(screen.getByText(/own dynamics at KXXX — gated, each share ≥ 95 %/)).toBeTruthy();
+      expect(screen.getByText(/stand-in dynamics at KXXX — reported, not gated: a stand-in's dynamics/)).toBeTruthy();
     });
 
     it("stops publishing an overlay switched off", async () => {

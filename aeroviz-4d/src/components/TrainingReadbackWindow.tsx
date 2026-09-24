@@ -875,6 +875,9 @@ export default function TrainingReadbackWindow({
                 ? "off, or not published for this set (the panel's switch says which)."
                 : !executor.flown
                   ? `not flown: ${executor.group}.`
+                  : flownTrack === null
+                    ? `${(executor.outcome ?? "").replace(/_/g, " ")} on ${executor.group} within its first step: no flown ` +
+                      "track to draw."
                   : `${(executor.outcome ?? "").replace(/_/g, " ")} on ${executor.group}; dashed teal: its flown track, ` +
                     "and its heading, altitude and ground speed on its own clock and its own distance flown. It flies at its " +
                     "own pace from row 0, each word said where the observed aircraft heard it, so its lines do not line up " +

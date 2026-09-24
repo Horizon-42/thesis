@@ -901,8 +901,9 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .training-results-table th,
 .training-results-table td {
-  padding: 1px 4px;
+  padding: 1px 3px;
   text-align: right;
+  white-space: nowrap;
   border-bottom: 1px solid rgba(42, 53, 82, 0.6);
 }
 
