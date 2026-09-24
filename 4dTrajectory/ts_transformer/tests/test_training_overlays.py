@@ -174,30 +174,36 @@ def test_a_dynamics_failure_keeps_its_verdicts_and_draws_no_band():
 
 
 # ---- the prior: predictions per step
-def _flights(words):
-    grid = np.full((6, 6), UNCHANGED, dtype=np.int16)
-    grid[0] = [0, 0, words.heading_index(270.0), words.altitude_index(1200.0), 0, words.speed_index(100.0)]
-    grid[3, HEADING] = words.heading_index(180.0)
-    grid[5, 5] = words.speed_unspecified
+def _flights(words, grid):
     signals = instruction_flight(*fly_legs([(10, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0))
-    return [Flight(f"F{n}", 0, *flight_steps(signals, grid, instruction_airport())) for n in range(2)]
+    return [Flight(f"F{n}", 0, *flight_steps(signals, grid, instruction_airport(), prior_data.INPUT_SETS["V2d"]))
+            for n in range(2)]
 
 
 def test_the_prior_ranks_words_given_one_is_said_and_keeps_the_flights_likelihood():
     words = Words(spec())
     classes = column_classes(words, 2)
-    candidates = torch.zeros(1, 2, len(prior_data.CANDIDATE_FEATURES))
-    candidates[0, 0, -1] = 1.0                                           # one real candidate, one empty slot
+    candidates = torch.as_tensor(prior_data.candidate_table({"KXXX": instruction_airport()}, ("KXXX",), 2))
     torch.manual_seed(0)
-    model = Prior(PriorConfig(classes=classes, airports=("KXXX",), candidate_slots=2, d_model=32, layers=2, heads=4,
-                              feedforward=64, dropout=0.0), candidates).eval()
-    flights = _flights(words)
-    out = prior_export.predictions(model, Split(flights, ("KXXX",), candidates.numpy(), classes))
+    model = Prior(PriorConfig(classes=classes, airports=("KXXX",), candidate_slots=2, inputs="V2d", d_model=32,
+                              layers=2, heads=4, feedforward=64, dropout=0.0), candidates).eval()
+    grid = np.full((6, 6), UNCHANGED, dtype=np.int16)
+    grid[0] = [0, 0, words.heading_index(270.0), words.altitude_index(1200.0), 0, words.speed_index(100.0)]
+    grid[3, HEADING] = words.heading_index(180.0)
+    grid[5, 5] = words.speed_unspecified
+    out = prior_export.predictions(model, Split(_flights(words, grid), ("KXXX",), candidates.numpy(), classes, "V2d"))
     assert [item["rows"] for item in out] == [6, 6]
     item = out[0]
     assert len(item["columns"]) == len(COLUMNS)
     # the runway head ranks only the airport's one candidate, never the masked slot
     assert item["columns"][RUNWAY]["k"] == 1 and set(item["columns"][RUNWAY]["words"]) == {0}
+    assert item["columns"][RUNWAY]["changeP"][0] == 1.0                  # step 0 says a runway
+    # step 0's other columns are the hand-over's words, given: the truth at probability 1, ranked first
+    for column in prior_data.GIVEN_AT_HANDOVER:
+        values = item["columns"][column]
+        assert values["k"] == min(prior_export.TOP_K, classes[column] - 1)
+        assert values["changeP"][0] == 1.0 and values["truthP"][0] == 1.0
+        assert values["words"][0] == grid[0, column] and values["wordsP"][: values["k"]] == [1.0] + [0.0] * (values["k"] - 1)
     for column, values in enumerate(item["columns"]):
         k = values["k"]
         assert len(values["words"]) == len(values["wordsP"]) == 6 * k
@@ -319,8 +325,8 @@ def _prior_dir(directory, artefact):
     geometries = load_candidates(artefact)
     airports = tuple(sorted(geometries))
     slots = max(len(g.candidates) for g in geometries.values())
-    config = PriorConfig(classes=column_classes(Words(one), slots), airports=airports, candidate_slots=slots, d_model=32,
-                         layers=2, heads=4, feedforward=64, dropout=0.0)
+    config = PriorConfig(classes=column_classes(Words(one), slots), airports=airports, candidate_slots=slots,
+                         inputs="V2d", d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
     torch.manual_seed(0)
     model = Prior(config, torch.as_tensor(prior_data.candidate_table(geometries, airports, slots)))
     directory.mkdir()

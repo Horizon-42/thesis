@@ -18,8 +18,11 @@ val — flights the prior never trained on.
 words before it (`prior.data.flight_steps` over the stored sentence, which must be the set's own), never the prior's
 own earlier guesses — this is not the prior speaking a sentence of its own (that needs the executor in the loop).
 The checkpoint is refused unless it is a `PRIOR_CHECKPOINT_SCHEMA` file measured on this artefact's spec, its airports'
-candidate table is the artefact's, and its state loads whole. Its val readout (``readout.json``) travels with the
-predictions, unchanged.
+candidate table is the artefact's, and its state loads whole (`prior_train.load_prior`), and unless it holds a val
+readout (``readout.json``, the chosen variant's, `prior_select`), which travels with the predictions, unchanged.
+At step 0 the prior asks only the runway: every other column there is the hand-over's word, given, so its
+distribution is the point mass on the truth — ``changeP`` 1, ``truthP`` 1, the word first in ``words`` at probability
+1 and the other ranks at 0 (prior design §8.2 item 2).
 
 Per column and step: ``changeP``, the probability that a word is said (1 − P(unchanged)); ``words`` / ``wordsP``, the
 column's ``k`` most likely words GIVEN that one is said (the readout's top-k convention), each a value as the sentence
@@ -38,19 +41,18 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
 
 from ts_transformer.experiments.instruction_training_export import (
     KIND_PRIOR, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays, serialise_overlay, write_overlay,
 )
-from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA
-from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec, spec_labeller_source
+from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior
+from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import file_sha256, utc_now
-from ts_transformer.prior.data import Flight, Split, batches, candidate_table, flight_steps
-from ts_transformer.prior.model import Prior, PriorConfig
-from ts_transformer.prior.train import TrainConfig, to_batch
+from ts_transformer.prior.data import INPUT_SETS, Flight, Split, batches, flight_steps
+from ts_transformer.prior.model import Prior
+from ts_transformer.prior.train import TrainConfig, batch_logits, to_batch
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_PRIOR_SCHEMA`); the reader refuses anything else by
@@ -64,30 +66,15 @@ PROBABILITY_DIGITS = 4
 
 def open_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], dict[str, Any], str]:
     """The prior at ``directory`` on CPU, in eval mode, with its config and readout files and its checkpoint's
-    sha256 — refused unless it is a `PRIOR_CHECKPOINT_SCHEMA` checkpoint of ``instructions``' spec and labeller whose
-    candidate table is the artefact's."""
-    checkpoint = directory / "checkpoint.pt"
-    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    config_file = json.loads((directory / "config.json").read_text(encoding="utf-8"))
-    spec = load_spec(instructions)
-    if payload["schema"] != PRIOR_CHECKPOINT_SCHEMA or config_file["schema"] != PRIOR_CHECKPOINT_SCHEMA:
-        raise SystemExit(f"{directory} is not a {PRIOR_CHECKPOINT_SCHEMA} prior")
-    if payload["spec_sha256"] != spec.sha256:
-        raise SystemExit(f"the prior was trained on spec {payload['spec_sha256'][:12]}, {instructions} holds "
-                         f"{spec.sha256[:12]}")
-    if config_file["instructions"]["labeller_source_sha256"] != spec_labeller_source(instructions):
-        raise SystemExit(f"the prior was trained on sentences of another labeller than {instructions}'s")
+    sha256 — refused unless `prior_train.load_prior` opens it on ``instructions``, it is not a smoke run and it holds
+    a val readout (`prior_select` writes one, on the chosen variant only)."""
+    model, _, config_file = load_prior(directory, instructions)
     if config_file["smoke"]:
         raise SystemExit(f"{directory} is a smoke run (--limit {config_file['limit']}), not a trained prior")
-    config = PriorConfig.from_dict(payload["model_config"])
-    table = candidate_table(load_candidates(instructions), config.airports, config.candidate_slots)
-    if not np.array_equal(table, payload["state"]["candidates"].numpy()):
-        raise SystemExit("the prior's candidate runways are not the artefact's")
-    model = Prior(config, torch.as_tensor(table))
-    model.load_state_dict(payload["state"], strict=True)
-    model.eval()
+    if not (directory / "readout.json").exists():
+        raise SystemExit(f"{directory} holds no val readout: it is not a chosen prior (prior_select)")
     readout = json.loads((directory / "readout.json").read_text(encoding="utf-8"))
-    return model, config_file, readout, file_sha256(checkpoint)
+    return model, config_file, readout, file_sha256(directory / "checkpoint.pt")
 
 
 @torch.no_grad()
@@ -98,7 +85,7 @@ def predictions(model: Prior, split: Split) -> list[dict[str, Any]]:
     out: list[dict[str, Any] | None] = [None] * len(split.flights)
     for indices in batches(split.flights, TrainConfig().tokens_per_batch, None):
         batch = to_batch(split, indices, torch.device("cpu"))
-        logits = model(batch["features"], batch["in_force"], batch["since"], batch["airport"], batch["padding"])
+        logits = batch_logits(model, batch)
         for b, i in enumerate(indices):
             rows = split.flights[i].rows
             columns, nll = [], []
@@ -109,9 +96,10 @@ def predictions(model: Prior, split: Split) -> list[dict[str, Any]]:
                 truth = log_p.gather(1, target[:, None])[:, 0]
                 nll.append(float(-truth.sum()) / rows)
                 # a word's probability given that one is said; the runway head's slots past the airport's candidates
-                # are masked to -inf and never ranked
+                # are masked to -inf and never ranked (k: the most words any step can say — step 0's given columns
+                # can say one, their point mass, and rank the rest at probability 0)
                 said = torch.softmax(logit[:, 1:], dim=-1)
-                k = min(TOP_K, int(torch.isfinite(logit[0, 1:]).sum()))
+                k = min(TOP_K, int(torch.isfinite(logit[:, 1:]).sum(dim=1).max()))
                 top_p, top = said.topk(k, dim=-1)
                 columns.append({"k": k, "changeP": _round(1.0 - log_p[:, 0].exp()), "words": top.flatten().tolist(),
                                 "wordsP": _round(top_p.flatten()), "truthP": _round(truth.exp())})
@@ -191,7 +179,8 @@ def main(argv: list[str] | None = None) -> int:
                   "feedforward": model_config.feedforward, "dropout": model_config.dropout,
                   "airports": list(model_config.airports), "classes": list(model_config.classes)},
         "train": asdict(TrainConfig(**config_file["train"])),
-        "method": "teacher-forced: each step sees the truth sentence's words before it",
+        "method": (f"teacher-forced: each step sees the truth sentence's words before it; inputs {model_config.inputs}; "
+                   "step 0 asks only the runway — the other columns are the hand-over's words, given (probability 1)"),
     }
     title = f"Prior {prior_dir.name} · its predictions at each step of the truth sentence (teacher-forced)"
     built = {}
@@ -200,9 +189,9 @@ def main(argv: list[str] | None = None) -> int:
         located = base_flights(base, flights, sentences)
         split = Split([Flight(signal.dataset_id, model_config.airports.index(code),
                               *flight_steps(signal, sentences["words"][sentences["offsets"][k]: sentences["offsets"][k + 1]],
-                                            geometries[code]))
+                                            geometries[code], INPUT_SETS[model_config.inputs]))
                        for signal, k in located],
-                      model_config.airports, model.candidates.numpy(), model_config.classes)
+                      model_config.airports, model.candidates.numpy(), model_config.classes, model_config.inputs)
         per_flight = predictions(model, split)
         payloads = [{"flightKey": item["flightKey"], "datasetId": item["datasetId"], **values}
                     for item, values in zip(base.sample["flights"], per_flight)]

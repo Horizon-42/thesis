@@ -1,5 +1,6 @@
-"""Training the prior (prior design §4): teacher forcing on the train split, early stopping on the val split's
-negative log-likelihood per step, the best state kept."""
+"""Training the prior (prior design §4): teacher forcing on the training flights, early stopping on the val split's
+negative log-likelihood per step, the best state kept. The loss is the six columns' cross entropy summed over the
+entries the prior is asked for (`model.predicted_entries`: at step 0 only the runway), per real step."""
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import torch
 from torch import nn
 
 from ts_transformer.prior.data import Split, batches
-from ts_transformer.prior.model import Prior
+from ts_transformer.prior.model import Prior, predicted_entries
 
 
 @dataclass(frozen=True)
@@ -29,26 +30,36 @@ class TrainConfig:
 
 
 def to_batch(split: Split, indices: Sequence[int], device: torch.device) -> dict[str, torch.Tensor]:
-    """The flights at ``indices``, padded to the longest: features, in_force, since, targets, airport, padding."""
+    """The flights at ``indices``, padded to the longest and to the split's candidate slots: features, relative,
+    in_force, since, targets, airport, padding."""
     flights = [split.flights[i] for i in indices]
     rows = max(f.rows for f in flights)
+    slots = split.candidates.shape[1]
     features = np.zeros((len(flights), rows, flights[0].features.shape[1]), dtype=np.float32)
+    relative = np.zeros((len(flights), rows, slots, flights[0].relative.shape[2]), dtype=np.float32)
     in_force = np.zeros((len(flights), rows, 6), dtype=np.int64)
     since = np.zeros((len(flights), rows, 6), dtype=np.float32)
     targets = np.zeros((len(flights), rows, 6), dtype=np.int64)
     padding = np.ones((len(flights), rows), dtype=bool)
     for b, f in enumerate(flights):
         features[b, : f.rows], in_force[b, : f.rows], since[b, : f.rows] = f.features, f.in_force, f.since
+        relative[b, : f.rows, : f.relative.shape[1]] = f.relative
         targets[b, : f.rows], padding[b, : f.rows] = f.targets, False
-    tensors = {"features": features, "in_force": in_force, "since": since, "targets": targets, "padding": padding,
-               "airport": np.array([f.airport for f in flights], dtype=np.int64)}
+    tensors = {"features": features, "relative": relative, "in_force": in_force, "since": since, "targets": targets,
+               "padding": padding, "airport": np.array([f.airport for f in flights], dtype=np.int64)}
     return {name: torch.as_tensor(value, device=device) for name, value in tensors.items()}
 
 
+def batch_logits(model: Prior, batch: dict[str, torch.Tensor]) -> list[torch.Tensor]:
+    return model(batch["features"], batch["relative"], batch["in_force"], batch["since"], batch["airport"],
+                 batch["padding"])
+
+
 def column_nll(logits: list[torch.Tensor], targets: torch.Tensor, padding: torch.Tensor) -> torch.Tensor:
-    """Summed negative log-likelihood per column over the real steps: [6]."""
-    real = ~padding
-    return torch.stack([nn.functional.cross_entropy(logit[real], targets[..., c][real], reduction="sum")
+    """Summed negative log-likelihood per column over the entries the prior is asked for: [6]."""
+    asked = predicted_entries(padding)
+    return torch.stack([nn.functional.cross_entropy(logit[asked[..., c]], targets[..., c][asked[..., c]],
+                                                    reduction="sum")
                         for c, logit in enumerate(logits)])
 
 
@@ -59,8 +70,7 @@ def evaluate(model: Prior, split: Split, config: TrainConfig, device: torch.devi
     total, steps = torch.zeros(6, dtype=torch.float64, device=device), 0
     for indices in batches(split.flights, config.tokens_per_batch, None):
         batch = to_batch(split, indices, device)
-        logits = model(batch["features"], batch["in_force"], batch["since"], batch["airport"], batch["padding"])
-        total += column_nll(logits, batch["targets"], batch["padding"]).double()
+        total += column_nll(batch_logits(model, batch), batch["targets"], batch["padding"]).double()
         steps += int((~batch["padding"]).sum())
     per_column = (total / steps).cpu().numpy()
     return {"nll_per_step": float(per_column.sum()), "per_column": per_column.tolist(), "steps": steps}
@@ -81,9 +91,8 @@ def train(model: Prior, train_split: Split, val_split: Split, config: TrainConfi
         total, steps = 0.0, 0
         for indices in batches(train_split.flights, config.tokens_per_batch, rng):
             batch = to_batch(train_split, indices, device)
-            logits = model(batch["features"], batch["in_force"], batch["since"], batch["airport"], batch["padding"])
             real = int((~batch["padding"]).sum())
-            loss = column_nll(logits, batch["targets"], batch["padding"]).sum() / real
+            loss = column_nll(batch_logits(model, batch), batch["targets"], batch["padding"]).sum() / real
             optimiser.zero_grad(set_to_none=True)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm)
