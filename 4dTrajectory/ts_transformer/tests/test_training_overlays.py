@@ -312,3 +312,58 @@ def test_the_prior_export_predicts_the_set_under_the_checkpoint_it_names(tmp_pat
     assert [f["rows"] for f in payload["flights"]] == [f["rows"] for f in sample["flights"]]
     manifest = json.loads((training / export.OVERLAYS_FILE).read_text(encoding="utf-8"))
     assert [item["id"] for item in manifest["overlays"]] == ["pr_test"]
+
+
+# ---- the prior's runner end to end, on a synthetic artefact and an untrained checkpoint (every write in tmp_path)
+def _prior_dir(directory, artefact):
+    """A prior directory as `prior_train` writes one, holding a small untrained network of ``artefact``'s spec."""
+    from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA
+    from ts_transformer.instructions.artefact import load_candidates, load_spec, spec_labeller_source
+
+    one = load_spec(artefact)
+    geometries = load_candidates(artefact)
+    airports = tuple(sorted(geometries))
+    slots = max(len(g.candidates) for g in geometries.values())
+    config = PriorConfig(classes=column_classes(Words(one), slots), airports=airports, candidate_slots=slots, d_model=32,
+                         layers=2, heads=4, feedforward=64, dropout=0.0)
+    torch.manual_seed(0)
+    model = Prior(config, torch.as_tensor(prior_data.candidate_table(geometries, airports, slots)))
+    directory.mkdir()
+    torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": config.to_dict(), "train_config": {},
+                "state": model.state_dict(), "spec_sha256": one.sha256}, directory / "checkpoint.pt")
+    (directory / "config.json").write_text(json.dumps({
+        "schema": PRIOR_CHECKPOINT_SCHEMA, "written_utc": "2026-09-24T00:00:00+00:00", "parameters": 1, "limit": None,
+        "smoke": False, "git": {"head": "test", "dirty": False}, "train": {},
+        "instructions": {"labeller_source_sha256": spec_labeller_source(artefact)}}))
+    per_column = {name: {"nll_per_step": 0.1, "change_steps": 1, "mean_change_probability_where_changed": 0.5,
+                         "top1_given_change": 0.5, "top5_given_change": 1.0, "false_change_share_where_kept": 0.0}
+                  for name in COLUMNS}
+    scores = {**{name: 0.2 for name in COLUMNS}, "all": 1.2}
+    (directory / "readout.json").write_text(json.dumps({
+        "split": "val", "best_epoch": 1, "baselines": {"repeat": scores, "previous word": scores},
+        "model": {"steps": 10, "nll_per_step": 0.6, "perplexity_per_step": 1.8, "per_column": per_column}}))
+
+
+def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_second(tmp_path):
+    from ts_transformer.tests.test_instruction_training_export import _artefact, _run, _straight, _vectored
+
+    flights = [_vectored("KXXX:V1_09_abc123_20260101T000000Z"), _straight("KXXX:S1_09_abc124_20260101T000100Z")]
+    _artefact(tmp_path / "artefact", flights)
+    assert _run(tmp_path) == 0                                            # the set, as the Training export writes it
+    _prior_dir(tmp_path / "prior", tmp_path / "artefact")
+    args = ["--prior", str(tmp_path / "prior"), "--instructions", str(tmp_path / "artefact"),
+            "--airports-root", str(tmp_path / "airports"), "--set", "instruction_v2", "--airport", "KXXX"]
+    assert prior_export.main(args) == 0
+    training = tmp_path / "airports" / "KXXX" / "training"
+    payload = json.loads((training / "prior_prior" / "prior.json").read_text(encoding="utf-8"))
+    sample = json.loads((training / "instruction_v2" / "sample.json").read_text(encoding="utf-8"))
+    assert payload["schema"] == prior_export.SCHEMA and payload["base"]["setId"] == "instruction_v2"
+    assert payload["base"]["sampleWrittenUtc"] == sample["writtenUtc"]
+    assert [f["flightKey"] for f in payload["flights"]] == [f["flightKey"] for f in sample["flights"]]
+    assert [f["rows"] for f in payload["flights"]] == [f["rows"] for f in sample["flights"]]
+    assert all(math.isfinite(f["nllPerStep"]) for f in payload["flights"])
+    assert payload["readout"]["baselines"]["previousWord"]["all"] == 1.2
+    manifest = json.loads((training / export.OVERLAYS_FILE).read_text(encoding="utf-8"))
+    assert [(o["id"], o["kind"], o["base"]) for o in manifest["overlays"]] == [("prior_prior", export.KIND_PRIOR, "instruction_v2")]
+    with pytest.raises(SystemExit):   # never overwritten
+        prior_export.main(args)
