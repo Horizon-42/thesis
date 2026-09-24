@@ -287,7 +287,9 @@ filed under CAMPAIGN's `intents.json` entry (blocked without one), with the repl
 and the CZML split every `EXECUTOR_GROUPS_PER_CZML` (500) flights; the preflight requires the records' summary to be this
 spec's and split's, of this airport only, and as many as `replay.json`'s recorded flights; an existing category is
 refused. Its manifest (`ts-executor-publication-v1`, under `<output-root>/executor/<run>/<ICAO>/<split>/`) is passed by
-the checkpoint refresh and the publication index. Checkpoint flags are refused in this mode.
+the checkpoint refresh and the publication index. Checkpoint flags are refused in this mode. **Order**: publish only once
+the frontend the users run carries `sentence` in `EXPERIMENT_HORIZON_MODES` — a category of it under an older mirror empties
+that airport's whole picker (AV6).
 
 Tests: `tests/test_training_overlays.py` (the verdict mapping on synthetic flights against `word_results`, the prior's
 predictions on a small untrained network, the overlay helpers' refusals, the frontend mirrors, and both `main()` on the

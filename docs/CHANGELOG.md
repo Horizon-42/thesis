@@ -1,5 +1,36 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-24 — 发布执行器的 val 回放与先验的第一次训练：Training 的叠加层
+
+用户要求把执行器（阶段 4 的 val 回放）和先验（阶段 5 的第一次训练）的结果发布到前端，用能重跑的脚本发布，前端缺的
+读取和显示一起做。分支 `dev-publish-executor-prior`（基于 `0e842e2d`），提交 `49a81d93`（代码、测试、参考文档）、
+`b7acb11f`（在浏览器里看到的两处表格问题）；没有合并。
+
+- **叠加层**：别的模型对一个 Training 集合里这些航班做了什么，写在集合旁边：每个机场新增 `training/overlays.json`
+  （`aeroviz-training-overlays-v1`），每个叠加层一个文件，按集合 id、样本的写出时刻、规格 sha 和逐架航班绑定到它所画的
+  集合，对不上整份拒读；`index.json` 不动。
+- **执行器**（`run_ts.py executor_training_export`，`aeroviz-training-executor-v1`）：正式回放的 `replay.json` 只记了每架航班
+  各类词合不合格的列表、没有记是哪一条词，所以用正式规格把集合里的航班重新飞一遍、判一遍，把判定对回每条词，并要求
+  每架都与正式回放那一行一致。前端：句子条每条词左端一个判定点和一行结局，航班列表的结局，读数窗口里执行器按自己的
+  时钟飞出的航迹和三张图，三维的执行器航迹，面板里回放的门表。
+- **先验**（`run_ts.py prior_training_export`，`aeroviz-training-prior-v1`）：教师强制推断，每步每列说词的概率、若说词最可能的
+  3 个词、真值的概率；这条推断路径在全部 val 航班上复现 `readout.json` 的每步负对数似然到 1e-9。前端：Prior predictions
+  窗口，面板里的读数表（每列先验与两个基线）。
+- **发布**：在 `49a81d93`（干净）发布到五个机场的 `instruction_v2`，198 架被飞，188 架落地；`check-publication --server`
+  0 个错误，浏览器里 KRDU、KSMF 逐项看过（`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §2.6 的表）。
+- **Experiments 里的执行器回放**：根目录发布器新增 `--executor-replay` 模式（按规格命名、挂在 `intents.json` 的
+  `executor_val_replay_20260924` 下、用回放自己的 evaluation 报告），前端镜像 `EXPERIMENT_HORIZON_MODES` 加上 `sentence`。
+  **还没有发布**：合并之前发布会让 `dev-two-tier` 前端的选择器变空；回放里替代动力学组按 A320 飞，要不要放进去由用户定。
+- **与 `dev-two-tier` 的关系**：`dev-two-tier` 同一天改成样本 v6、信号 v2、执行器不再用 A320 代替（`9fb1b137`）。在那份代码上，
+  正式执行器规格和 `v2_20260924` 产物都打不开，v5 的 `instruction_v2` 集合和这些叠加层都按名字拒读；所以发布只能在本分支的
+  代码上做。合并后要重新看到执行器和先验，需要新的句子产物、Training v6 集合、新的执行器规格与回放、先验，再用这两个
+  runner 生成叠加层。
+- **发现**：执行器规格的源码 sha 在主工作区会把 geokit 算进去（在工作树里不算），正式规格在主工作区被拒绝
+  （`docs/code-health-followups.md`）；执行器导出要在工作树里跑。
+- 测试：ts 全套 1361 通过（审查修正前）；`test_training_overlays.py`、发布器、前端镜像等 85 条（修正后）；前端 Vitest
+  90 个文件 701 条；`tsc`、`npm run build`、`typecheck:scripts` 无错。opus 代码审查一轮，11 项发现中 1–11 都已处理
+  （Experiments 的发布顺序与执行器导出须在合并前跑，见上两条）。
+
 ### 2026-09-24 — Training：默认只画看得懂的——开关分开、图例、保持判定弱的标注
 
 用户："转大弯依然让人困惑，蓝色部分是啥，橙色部分又是啥？只有最慢和最快转弯速率这两条曲线是可以理解的"。

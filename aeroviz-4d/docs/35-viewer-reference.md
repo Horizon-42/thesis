@@ -323,6 +323,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   一个（`experiment_executor_v2_20260924_2674ab8c71a9_val`），挂在 `intents.json` 的 `executor_val_replay_20260924` 下。
 - 这些记录的 `horizon_mode` 是 `sentence`（飞完整句话），比较 CZML 的生成器把它写进类别的 `experiment.horizonMode`；前端的
   `EXPERIMENT_HORIZON_MODES` 在 `config.HORIZON_MODES` 之后加上它（`test_frontend_mirrors.py` 钉住，与
-  `executor_replay.HORIZON` 比对）。不加的话，一个这样的类别就会让整个机场的选择器变空（AV6）。
+  `executor_replay.HORIZON` 比对）。不加的话，一个这样的类别就会让整个机场的选择器变空（AV6）。所以**先合并这个镜像，
+  再发布**：正在运行的前端还不认 `sentence` 时发布，它的选择器立刻变空。
 - 类别里是这个机场全部被飞的航班，自己机型动力学和 A320 替代动力学两组都在；标签写出两组各多少架，参数表写出规格 sha
   和每个参数。第一个周期就动力学失败的航班没有记录，不在类别里（参数表写出有几架）。
