@@ -16,9 +16,9 @@ The rule (written into §8.3 before the runs):
 Variant 0 (the first version's fitted inputs) takes no part: it measures the future those inputs carry — its gap to
 the others in the probability of a change on the steps where one is said is written beside the choice.
 
-``--leader`` prints the leader's name and stops (the queue trains its replicate next). Otherwise writes
-``choice.json`` into the campaign and the chosen run's ``readout.json`` — val, the model and the two baselines counted
-from that run's own training flights; each refused if it exists.
+``--leader`` prints the leader's name and stops (the queue trains its replicate next). Otherwise reads val once on the
+chosen run, then writes ``choice.json`` into the campaign and the chosen run's ``readout.json`` — val, the model and the
+two baselines counted from that run's own training flights; refused if either exists.
 
     python run_ts.py prior_select --campaign 4dTrajectory/outputs/POOLED/prior/<campaign> [--leader]
 """
@@ -107,6 +107,7 @@ def run_row(run: dict[str, Any]) -> dict[str, Any]:
             "nll_from_step1_per_step": model["nll_from_step1_per_step"],
             "step0_runway_top1": model["step0_runway"]["top1"], "step0_runway_top2": model["step0_runway"]["top2"],
             "step0_runway_nll_per_flight": model["step0_runway"]["nll_per_flight"],
+            "step0_runway_by_handover_approach": model["step0_runway"]["by_handover_approach"],
             "per_column": {name: {key: model["per_column"][name][key]
                                   for key in ("nll_from_step1_per_step", "mean_change_probability_where_changed",
                                               "top1_given_change", "false_change_share_where_kept")}
@@ -152,11 +153,6 @@ def main(argv: list[str] | None = None) -> int:
     chosen = runs[(rule["chosen"], args.seed)]
     if (campaign / "choice.json").exists() or (chosen["directory"] / "readout.json").exists():
         parser.error(f"{campaign / 'choice.json'} or the chosen run's readout.json exists; neither is overwritten")
-    write_json_atomic(campaign / "choice.json", {
-        "schema": CHOICE_SCHEMA, "written_utc": utc_now(), "seed": args.seed, "replicate_seed": args.replicate_seed,
-        **rule, "chosen_directory": chosen["directory"].name,
-        "runs": [run_row(run) for _, run in sorted(runs.items())],
-        "future_information": {"variant": FUTURE_VARIANT, "minus": future_gap(runs, args.seed)}, "git": git})
     print(f"leader {rule['leader']}, seed line {rule['seed_line']:.4f}, within it {rule['within_seed_line']} → "
           f"{rule['chosen']}", flush=True)
 
@@ -182,6 +178,12 @@ def main(argv: list[str] | None = None) -> int:
                "airport_runway_reference": baselines.airport_runway_reference(val_split),
                "best_epoch": chosen["readout"]["best_epoch"], "chosen_by": str(campaign / "choice.json"),
                "elapsed_s": time.perf_counter() - started}
+    # both files after the readout: a run that stops before it leaves neither, and can simply be run again
+    write_json_atomic(campaign / "choice.json", {
+        "schema": CHOICE_SCHEMA, "written_utc": utc_now(), "seed": args.seed, "replicate_seed": args.replicate_seed,
+        **rule, "chosen_directory": chosen["directory"].name,
+        "runs": [run_row(run) for _, run in sorted(runs.items())],
+        "future_information": {"variant": FUTURE_VARIANT, "minus": future_gap(runs, args.seed)}, "git": git})
     write_json_atomic(chosen["directory"] / "readout.json", readout)
     print_readout(readout)
     print(f"→ {chosen['directory'] / 'readout.json'}")

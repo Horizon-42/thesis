@@ -124,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
 
     model_config = PriorConfig(classes=train_split.classes, airports=train_split.airports,
                                candidate_slots=train_split.candidates.shape[1], inputs=args.inputs)
+    torch.manual_seed(config.seed)                                              # the initial weights are the seed's
     model = Prior(model_config, torch.as_tensor(train_split.candidates)).to(device)
     parameters = sum(p.numel() for p in model.parameters())
     print(f"model {parameters} parameters", flush=True)
@@ -165,6 +166,10 @@ def print_readout(readout: dict[str, Any]) -> None:
     step0 = model["step0_runway"]
     print(f"  step 0 runway: top1 {step0['top1']:.3f}  top2 {step0['top2']:.3f}  NLL/flight {step0['nll_per_flight']:.3f}"
           f"  (each airport's own frequency: top1 {readout['airport_runway_reference']['top1']:.3f})")
+    for name, part in step0["by_handover_approach"].items():
+        reference = readout["airport_runway_reference"]["by_handover_approach"][name]
+        print(f"    handed over {name}: {part['flights']} flights, top1 {part['top1']:.3f} (own frequency "
+              f"{reference['top1']:.3f})")
     for name, column in model["per_column"].items():
         print(f"  {name:9s} nll {column['nll_per_step']:.4f}  from step 1 {column['nll_from_step1_per_step']:.4f}  "
               f"changes {column['change_steps']:7d}  P(change) {column['mean_change_probability_where_changed']:.3f}  "

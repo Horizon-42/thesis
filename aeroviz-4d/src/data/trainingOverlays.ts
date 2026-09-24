@@ -54,7 +54,7 @@ export const TRAINING_EXECUTOR_STATUSES = [
 ] as const;
 export type TrainingExecutorStatus = (typeof TRAINING_EXECUTOR_STATUSES)[number];
 /** MIRROR of `prior_training_export.SCHEMA`. */
-export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v1";
+export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v2";
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 

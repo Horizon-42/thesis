@@ -56,8 +56,9 @@ from ts_transformer.prior.train import TrainConfig, batch_logits, to_batch
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_PRIOR_SCHEMA`); the reader refuses anything else by
-#: name. A name changes with its file's shape, on both sides, in one change.
-SCHEMA = "aeroviz-training-prior-v1"
+#: name. A name changes with its file's shape or meaning, on both sides, in one change. v2 (2026-09-24, the prior's
+#: second version): the same shape; step 0's given columns are their point mass and the readout is on the new basis.
+SCHEMA = "aeroviz-training-prior-v2"
 PAYLOAD_FILE = "prior.json"
 RUNNER = "ts_transformer.experiments.prior_training_export"
 TOP_K = 3

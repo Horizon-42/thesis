@@ -1,10 +1,11 @@
 """The prior's readout (prior design §5; the second version's basis §8.3): at step 0 only the runway counts — the
 other columns are the hand-over's, given (`model.predicted_entries`) — and from step 1 every column.
 
-Per column, over the entries the prior is asked for: the negative log-likelihood per step (and its part from step 1
-on); the steps where a word is said (the probability of a change, the value's top-1 / top-5); the steps where none is
-(a change wrongly the most likely class). The runway's choice at step 0 on its own: its likelihood per flight, top-1
-and top-2, per airport. The same likelihood under two baselines counted from the training flights:
+Per column, over the entries the prior is asked for: the negative log-likelihood per step (over every step; and per
+step from step 1 on, over those steps only); the steps where a word is said (the probability of a change, the value's
+top-1 / top-5); the steps where none is (a change wrongly the most likely class). The runway's choice at step 0 on its
+own: its likelihood per flight, top-1 and top-2, per airport and by the hand-over's approach word (`HANDOVER_APPROACH`).
+The same likelihood under two baselines counted from the training flights:
 
 - repeat: a column changes with its training frequency (from step 1 on; add-one smoothed), to a value with its
   training frequency among changes;
@@ -22,12 +23,18 @@ from typing import Any
 import numpy as np
 import torch
 
-from ts_transformer.instructions.words import COLUMNS, RUNWAY
+from ts_transformer.instructions.words import (
+    APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, APPROACH_NOT_CLEARED, COLUMNS, RUNWAY,
+)
 from ts_transformer.prior.data import Split, batches
 from ts_transformer.prior.model import Prior, predicted_entries
 from ts_transformer.prior.train import TrainConfig, batch_logits, to_batch
 
 TOP_K = 5
+#: The step-0 runway is read apart by the hand-over's approach word: a flight already cleared at the hand-over was
+#: labelled against its landed runway's corridor (the clearance names the runway), so there the condition carries the
+#: answer; the flights not yet cleared are the prior's real choice (§8.8).
+HANDOVER_APPROACH = {APPROACH_NOT_CLEARED: "not cleared", APPROACH_CLEARED: "cleared", APPROACH_GO_AROUND: "go-around"}
 
 
 def _stacked(split: Split) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -40,6 +47,16 @@ def _stacked(split: Split) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 def _smoothed(counts: np.ndarray) -> np.ndarray:
     return (counts + 1.0) / (counts.sum() + len(counts))
+
+
+def _handover_approach(split: Split) -> np.ndarray:
+    """Each flight's approach word at the hand-over (its step-0 condition)."""
+    return np.array([f.in_force[0, APPROACH] - 1 for f in split.flights])
+
+
+def _top1_by(hits: np.ndarray, keys: np.ndarray, names: dict[int, str]) -> dict[str, dict[str, Any]]:
+    return {name: {"flights": int((keys == key).sum()), "top1": float(hits[keys == key].mean())}
+            for key, name in names.items() if (keys == key).any()}
 
 
 @dataclass(frozen=True)
@@ -97,8 +114,8 @@ class Baselines:
         probability = self.airport_runway[airport, chosen]
         hit = self.airport_runway[airport].argmax(axis=1) == chosen
         return {"nll_per_flight": float(-np.log(probability).mean()), "top1": float(hit.mean()),
-                "per_airport": {code: {"flights": int((airport == a).sum()), "top1": float(hit[airport == a].mean())}
-                                for a, code in enumerate(split.airports) if (airport == a).any()}}
+                "per_airport": _top1_by(hit, airport, dict(enumerate(split.airports))),
+                "by_handover_approach": _top1_by(hit, _handover_approach(split), HANDOVER_APPROACH)}
 
 
 @torch.no_grad()
@@ -109,7 +126,7 @@ def model_readout(model: Prior, split: Split, config: TrainConfig, device: torch
     steps = 0
     change_steps, change_prob, top1, top_k = np.zeros(6), np.zeros(6), np.zeros(6), np.zeros(6)
     kept_steps, false_change = np.zeros(6), np.zeros(6)
-    runway_nll, runway_hits, runway_top2, runway_airport = [], [], [], []
+    runway_nll, runway_hits, runway_top2, runway_airport, runway_approach = [], [], [], [], []
     for indices in batches(split.flights, config.tokens_per_batch, None):
         batch = to_batch(split, indices, device)
         logits = batch_logits(model, batch)
@@ -139,20 +156,22 @@ def model_readout(model: Prior, split: Split, config: TrainConfig, device: torch
         runway_hits += (best[:, 0] == target).tolist()
         runway_top2 += (best == target[:, None]).any(dim=1).tolist()
         runway_airport += batch["airport"].tolist()
+        runway_approach += (batch["in_force"][:, 0, APPROACH] - 1).tolist()
+    later_steps = steps - len(split.flights)                                     # the steps from step 1 on
     per_column = {}
     for c, name in enumerate(COLUMNS):
-        per_column[name] = {"nll_per_step": nll[c] / steps, "nll_from_step1_per_step": nll_later[c] / steps,
+        per_column[name] = {"nll_per_step": nll[c] / steps, "nll_from_step1_per_step": nll_later[c] / later_steps,
                             "change_steps": int(change_steps[c]),
                             "mean_change_probability_where_changed": change_prob[c] / change_steps[c],
                             "top1_given_change": top1[c] / change_steps[c],
                             f"top{TOP_K}_given_change": top_k[c] / change_steps[c],
                             "false_change_share_where_kept": false_change[c] / kept_steps[c]}
-    hits, airport = np.array(runway_hits), np.array(runway_airport)
+    hits = np.array(runway_hits)
     step0 = {"flights": len(hits), "nll_per_flight": float(np.mean(runway_nll)), "top1": float(hits.mean()),
              "top2": float(np.mean(runway_top2)),
-             "per_airport": {code: {"flights": int((airport == a).sum()), "top1": float(hits[airport == a].mean())}
-                             for a, code in enumerate(split.airports) if (airport == a).any()}}
+             "per_airport": _top1_by(hits, np.array(runway_airport), dict(enumerate(split.airports))),
+             "by_handover_approach": _top1_by(hits, np.array(runway_approach), HANDOVER_APPROACH)}
     return {"steps": steps, "flights": len(split.flights), "nll_per_step": float(nll.sum() / steps),
             "perplexity_per_step": float(np.exp(nll.sum() / steps)),
-            "nll_from_step1_per_step": float(nll_later.sum() / steps), "per_column": per_column,
+            "nll_from_step1_per_step": float(nll_later.sum() / later_steps), "per_column": per_column,
             "step0_runway": step0}

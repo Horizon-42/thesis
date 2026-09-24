@@ -239,6 +239,38 @@ def test_the_candidates_order_changes_only_the_order_of_the_runway_scores():
             assert torch.allclose(after[c], logits[c], atol=1e-5)
 
 
+def test_a_padded_candidate_slot_adds_nothing():
+    model = _model(slots=3, valid=2)
+    batch = _inputs(model)
+    logits = _run(model, batch)
+    noisy = dict(batch)
+    noisy["relative"] = batch["relative"].clone()
+    noisy["relative"][:, :, 2] += 5.0 * torch.randn_like(noisy["relative"][:, :, 2])
+    for before, after in zip(logits, _run(model, noisy)):
+        assert torch.equal(torch.isinf(before), torch.isinf(after))
+        assert torch.allclose(before[torch.isfinite(before)], after[torch.isfinite(after)], atol=1e-6)
+
+
+def test_the_rule_takes_the_fewest_inputs_within_the_seed_line_of_the_leader():
+    from ts_transformer.experiments.prior_select import choose
+
+    def runs(nll, replicate):
+        out = {(name, 1337): {"readout": {"model": {"nll_per_step": value}}} for name, value in nll.items()}
+        leader = min(nll, key=nll.get)
+        out[(leader, 2024)] = {"readout": {"model": {"nll_per_step": replicate}}}
+        return out
+
+    # V2d leads by 0.010; its seeds differ by 0.012: V1d (0.008 behind) is inside the line, V1 (0.013) is not
+    rule = choose(runs({"V1": 0.513, "V1d": 0.508, "V2": 0.505, "V2d": 0.500}, 0.512), 1337, 2024)
+    assert rule["leader"] == "V2d" and rule["seed_line"] == pytest.approx(0.012)
+    assert rule["within_seed_line"] == ["V1d", "V2", "V2d"] and rule["chosen"] == "V1d"
+    # a seed line of zero keeps the leader
+    assert choose(runs({"V1": 0.513, "V1d": 0.508, "V2": 0.505, "V2d": 0.500}, 0.500), 1337, 2024)["chosen"] == "V2d"
+    with pytest.raises(SystemExit, match="no replicate"):
+        choose({key: value for key, value in runs({"V1": 1, "V1d": 1, "V2": 1, "V2d": 0.5}, 0.5).items()
+                if key[1] == 1337}, 1337, 2024)
+
+
 def test_the_baselines_count_changes_and_values_from_train_and_the_runway_alone_at_step_0():
     classes = (3, 3, 4, 3, 3, 3)
     targets = np.zeros((4, 6), dtype=np.int16)
@@ -283,11 +315,11 @@ def _artefact(directory):
 
     items = {"train": flights("T", 12), "val": flights("V", 4)}
     write_signals(directory, items, {"note": "test"})
-    write_candidates(directory, {"KXXX": instruction_airport()})
+    write_candidates(directory, {"KXXX": _two_runways()})
     write_spec(directory, one, {"n": 1}, {"labeller_source_sha256": labeller_source_sha256(),
                                           "git": {"head": "test", "dirty": False}})
     for split, signals in items.items():
-        readings = [read_flight(flight, instruction_airport(), one) for flight in signals]
+        readings = [read_flight(flight, _two_runways(), one) for flight in signals]
         assert all(reading.words is not None for reading in readings)
         write_sentences(directory, split, one, readings, list(range(len(signals))))
     return one
@@ -321,7 +353,11 @@ def test_the_runners_train_every_variant_choose_by_the_rule_and_read_val_once(tm
     assert len(choice["runs"]) == 6 and set(choice["future_information"]["minus"]) == set(prior_data.CHOOSABLE)
     readout = json.loads((campaign / choice["chosen_directory"] / "readout.json").read_text())
     assert readout["split"] == "val" and readout["model"]["flights"] == 4
-    assert readout["model"]["step0_runway"]["top1"] == 1.0                # one candidate
+    step0 = readout["model"]["step0_runway"]
+    assert readout["model"]["per_column"]["runway"]["change_steps"] == 4 == step0["flights"]
+    assert 0.0 <= step0["top1"] <= step0["top2"] == 1.0                  # two candidates: the second pick is certain
+    handed = step0["by_handover_approach"]
+    assert sum(part["flights"] for part in handed.values()) == 4 and set(handed) <= {"not cleared", "cleared"}
     assert sum(1 for path in campaign.glob("*/readout.json")) == 1        # val is read once, on the chosen run
     with pytest.raises(SystemExit):
         prior_select.main(["--campaign", str(campaign), "--device", "cpu"])   # never twice

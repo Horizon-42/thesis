@@ -93,6 +93,8 @@ def train(model: Prior, train_split: Split, val_split: Split, config: TrainConfi
             batch = to_batch(train_split, indices, device)
             real = int((~batch["padding"]).sum())
             loss = column_nll(batch_logits(model, batch), batch["targets"], batch["padding"]).sum() / real
+            if not torch.isfinite(loss):
+                raise FloatingPointError(f"epoch {epoch}: the loss is {float(loss)} (a label under a -inf mask?)")
             optimiser.zero_grad(set_to_none=True)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), config.clip_norm)
@@ -101,6 +103,8 @@ def train(model: Prior, train_split: Split, val_split: Split, config: TrainConfi
             total += float(loss.detach()) * real
             steps += real
         val = evaluate(model, val_split, config, device)
+        if not np.isfinite(val["nll_per_step"]):
+            raise FloatingPointError(f"epoch {epoch}: the val NLL is {val['nll_per_step']}")
         row = {"epoch": epoch, "train_nll_per_step": total / steps, "val_nll_per_step": val["nll_per_step"],
                "val_per_column": val["per_column"], "seconds": time.perf_counter() - started}
         history.append(row)
