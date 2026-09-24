@@ -3,10 +3,16 @@
 Every variant reads the SAME train sample (`replay.draw_flights`: ``--per-airport`` flights of each airport flown on
 their own type's dynamics, a seeded permutation) with the labeller under its own spec, and the executor flies each
 sentence from row 0 (`replay.fly_sentences`: the track word clock, the capture, the full dynamics). The executor's
-parameters are the formal spec's (``--executor``) and are HELD FIXED: the comparison varies the heading reading
-alone. The spec's executor source hash is not required to match — the labeller changed under it, the executor did
-not — and the vocabulary values other than the heading reading's are the base spec's (``--base-spec``, measured on
-the same flights' signals; its sha is recorded).
+parameters are the formal spec's (``--executor``) and are HELD FIXED. The spec's executor source hash is not
+required to match: this code moved it (the judge and replay were refactored, the laws did not change), and the
+labeller changed under it. The vocabulary values are the base spec's (``--base-spec``, the previous vocabulary's spec
+file, measured on the same flights' signals; its schema and sha are checked and recorded), except the heading
+reading's and the heading tolerance, which follows the grid by the spec's own rule (half a step plus
+`measure.HEADING_WANDER_ALLOWANCE_DEG`: 4.5° on 5°, 3.0° on 2°).
+
+What differs between the variants besides the heading words: the clearance goes with the last heading word
+(`join_row`), and the "unspecified" speed is placed from the clearance, so the speed column moves with the reading
+too; every row records both.
 
 The variants (`VARIANTS`): ``H1`` — the holds reading (§3.2, instruction-v2's); ``H3-<step>-L<lead>`` — the per-step
 reading (§10.1) at a heading step of 5° or 2°, merged with a band of half a step, labelled ``lead`` seconds early.
@@ -19,7 +25,9 @@ graded HERE, by this evaluation code, over the sampled flights' own observed rec
 records linked read-only under ``--out``, rostered from its ``approach/summary.json``): the harvest's stored report may
 predate a change of the evaluation's methodology, and the pairing needs one grading on both sides. The stratum (straight-in /
 vectored) is the H1 reading's for every variant, so the strata hold the same flights. The headline table is over
-the flights every variant labelled; each variant's refusals are listed beside it.
+the flights every variant labelled; each variant's refusals are listed beside it, and one line per variant counts
+every drawn flight with a refusal as a failure. One more group is read on its own: the flights whose H1 reading
+inserts an intercept of 90° or more (a continuous turn onto the final, §10.1's problem).
 
     python run_ts.py heading_reading_compare \\
         --signals 4dTrajectory/outputs/POOLED/instruction_language/v3_20260924 \\
@@ -30,6 +38,7 @@ the flights every variant labelled; each variant's refusals are listed beside it
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 from collections import Counter, defaultdict
@@ -49,6 +58,7 @@ from ts_transformer.experiments.executor_replay import (
 )
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.instructions.labeller.read import Reading, read_flight
+from ts_transformer.instructions.measure import HEADING_WANDER_ALLOWANCE_DEG
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.readout import STRATA, flight_record
 from ts_transformer.instructions.spec import READING_RULE, VocabularySpec
@@ -59,6 +69,10 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_sta
 
 COMPARE_SCHEMA = "ts-heading-reading-compare-v1"
 SPLIT = "train"
+#: The previous vocabulary's spec file (instruction-v2's), read for its measured values only.
+BASE_SPEC_SCHEMA = "ts-instruction-spec-v3"
+#: The group read on its own: an H1 intercept turn at least this large (§10.1).
+ONTO_FINAL_TURN_DEG = 90.0
 
 
 @dataclass(frozen=True)
@@ -84,6 +98,11 @@ def base_spec(path: Path) -> tuple[VocabularySpec, str]:
     """The base spec's values under this code's reading rule, with the heading reading of instruction-v2 (holds),
     and the base file's sha: every value the labeller measured stays the base file's."""
     record = json.loads(path.read_text(encoding="utf-8"))
+    if record["schema"] != BASE_SPEC_SCHEMA:
+        raise ValueError(f"{path} is a {record['schema']} file, not {BASE_SPEC_SCHEMA}")
+    canonical = json.dumps(record["spec"], sort_keys=True, separators=(",", ":"))
+    if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != record["sha256"]:
+        raise ValueError(f"{path}: the stored sha does not match its spec")
     values = dict(record["spec"])
     values.pop("reading_rule")
     values.update(heading_reading="holds", heading_lead_s=0.0, heading_band_deg=values["heading_step_deg"] / 2,
@@ -93,6 +112,7 @@ def base_spec(path: Path) -> tuple[VocabularySpec, str]:
 
 def variant_spec(base: VocabularySpec, variant: Variant) -> VocabularySpec:
     return replace(base, heading_reading=variant.reading, heading_step_deg=variant.step_deg,
+                   heading_tolerance_deg=variant.step_deg / 2 + HEADING_WANDER_ALLOWANCE_DEG,
                    heading_lead_s=variant.lead_s, heading_band_deg=variant.step_deg / 2)
 
 
@@ -101,15 +121,34 @@ def heading_words(reading: Reading) -> int:
     return sum(1 for item in reading.instructions if item.column == HEADING and item.row > 0)
 
 
+def onto_final_turn_deg(reading: Reading) -> float:
+    """The largest intercept turn the H1 reading inserted (0 when none): the continuous turn onto the final."""
+    return max((abs(t["turn_deg"]) for t in reading.checks["turns"] if t["kind"] == "intercept"), default=0.0)
+
+
+def tag_rows(rows: list[dict[str, Any]], dataset_ids: list[str], h1: dict[int, Reading]) -> None:
+    """Give each flown row its sample index — by its dataset id: `fly_variant` returns the rows grouped by airport,
+    not in sample order — and the H1 reading's stratum and inserted intercept turn."""
+    index = {dataset_id: k for k, dataset_id in enumerate(dataset_ids)}
+    for row in rows:
+        k = index[row["dataset_id"]]
+        reading = h1.get(k)
+        row["sample_index"] = k
+        row["stratum"] = "refused by H1" if reading is None else flight_record(reading)["stratum"]
+        row["h1_intercept_turn_deg"] = None if reading is None else onto_final_turn_deg(reading)
+
+
 def distances(batch: replay.Batch, flown: Any, outcomes: list[Outcome]) -> list[tuple[float, float]]:
     """Per flight, the mean and the largest horizontal distance between the flown and the observed flight at the
-    sentence rows both reach, time-aligned from row 0 (`replay.flight_alignment`'s rows)."""
+    sentence rows both reach, time-aligned from row 0 (`replay.flight_alignment`'s rows); a dynamics failure is read
+    to the row before it, as its record is (`executor_forecast`)."""
     out = []
     for j, ended in enumerate(outcomes):
         observed, reading = batch.signals[j], batch.readings[j]
         step_rows = int(round((observed.time_s[1] - observed.time_s[0]) / flown.cycle_s))
-        track = flown_track(flown.states[j, : ended.end_row + 1].cpu().numpy(), batch.geometries[j])
-        rows = min(len(reading.words), ended.end_row // step_rows + 1)
+        end = ended.end_row - 1 if ended.outcome == "dynamics_failure" else ended.end_row
+        track = flown_track(flown.states[j, : end + 1].cpu().numpy(), batch.geometries[j])
+        rows = min(len(reading.words), end // step_rows + 1)
         at = np.arange(rows) * step_rows
         gap = np.hypot(track["e"][at] - observed.e_m[:rows], track["n"][at] - observed.n_m[:rows])
         out.append((float(gap.mean()), float(gap.max())))
@@ -164,7 +203,8 @@ def fly_variant(batch: replay.Batch, params: Any, words: Words, *, chunk: int, d
                     "dataset_id": reading.dataset_id, "flight_key": series.scenario.source["flight_key"],
                     "airport": airport, "outcome": ended.outcome, "crossing": ended.crossing,
                     "heading_words": heading_words(reading), "capture_row": reading.capture_row,
-                    "join_row": reading.join_row, "rows": len(reading.words), "recorded": recorded,
+                    "join_row": reading.join_row, "unspecified_row": reading.unspecified_row,
+                    "rows": len(reading.words), "recorded": recorded,
                     "mean_horizontal_m": gaps[j][0], "max_horizontal_m": gaps[j][1],
                     "landing_time_minus_observed_s": aligned[j]["landing_time_minus_observed_s"]})
             del flown
@@ -206,23 +246,62 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+GROUPS = ("all", *STRATA, "onto final", "not onto final")
+
+
+def in_group(row: dict[str, Any], group: str) -> bool:
+    """`GROUPS`: every flight, an H1 stratum, or whether the H1 reading inserted an intercept of `ONTO_FINAL_TURN_DEG`
+    or more (a continuous turn onto the final)."""
+    if group == "all":
+        return True
+    if group in STRATA:
+        return row["stratum"] == group
+    onto = row["h1_intercept_turn_deg"] is not None and row["h1_intercept_turn_deg"] >= ONTO_FINAL_TURN_DEG
+    return onto if group == "onto final" else not onto
+
+
+def over_drawn(rows: list[dict[str, Any]], drawn: int, observed_passes: int) -> dict[str, Any]:
+    """Every drawn flight, a flight the variant's labeller refused counted as a failure: landed, and the replays that
+    pass where the observed flight passes."""
+    return {"drawn": drawn, "landed": sum(r["outcome"] == "landed" for r in rows) / drawn,
+            "replay_passes_where_observed_passes": sum(r["replay_verdict"] == "pass" == r["observed_verdict"]
+                                                       for r in rows) / observed_passes}
+
+
+def clearance_shift(rows: list[dict[str, Any]], h1_rows: list[dict[str, Any]], common: set[int]) -> dict[str, Any]:
+    """Against H1 on the common flights: how many rows later the clearance and the "unspecified" speed are said."""
+    h1 = {r["sample_index"]: r for r in h1_rows}
+    pairs = [(r, h1[r["sample_index"]]) for r in rows if r["sample_index"] in common]
+    return {"join_row_minus_h1": _percentiles([r["join_row"] - o["join_row"] for r, o in pairs]),
+            "unspecified_row_minus_h1": _percentiles([r["unspecified_row"] - o["unspecified_row"] for r, o in pairs])}
+
+
 def render(result: dict[str, Any]) -> str:
     lines = [f"heading readings on {result['sample']['flights']} {SPLIT} flights ({result['common_flights']} labelled "
              "by every variant); executor params held at the formal spec's", ""]
-    head = (f"{'variant':10s} {'stratum':12s} {'n':>5s} {'landed':>7s} {'eval':>6s}  {'mean dist p50/p90 km':>21s}  "
+    head = (f"{'variant':10s} {'group':14s} {'n':>5s} {'landed':>7s} {'eval':>6s}  {'mean dist p50/p90 km':>21s}  "
             f"{'max dist p50/p90 km':>20s}  {'hdg words p50':>13s}  {'steps w/ word':>13s}")
     lines.append(head)
-    for name, by_stratum in result["common"].items():
-        for stratum, s in by_stratum.items():
+    for name, by_group in result["common"].items():
+        for stratum, s in by_group.items():
             if not s["flights"]:
                 continue
             mean, largest, words = s["mean_horizontal_m"], s["max_horizontal_m"], s["heading_words_per_flight"]
             evaluation = s["replay_passes_where_observed_passes"]
-            lines.append(f"{name:10s} {stratum:12s} {s['flights']:5d} {100 * s['landed']:6.1f}% "
+            lines.append(f"{name:10s} {stratum:14s} {s['flights']:5d} {100 * s['landed']:6.1f}% "
                          f"{'—' if evaluation is None else f'{100 * evaluation:5.1f}%'}  "
                          f"{mean['p50'] / 1000:9.2f} / {mean['p90'] / 1000:5.2f}     "
                          f"{largest['p50'] / 1000:8.2f} / {largest['p90'] / 1000:5.2f}      {words['p50']:9.0f}      "
-                         f"{100 * s['share_of_pre_capture_steps_with_a_heading_word']:9.1f}%")
+                         + ("        —" if s["share_of_pre_capture_steps_with_a_heading_word"] is None else
+                            f"{100 * s['share_of_pre_capture_steps_with_a_heading_word']:9.1f}%"))
+    lines += ["", "every drawn flight, a refusal counted as a failure:"]
+    for name, d in result["over_drawn"].items():
+        lines.append(f"  {name:10s} landed {100 * d['landed']:5.1f}%  eval {100 * d['replay_passes_where_observed_passes']:5.1f}%")
+    lines += ["", "clearance and unspecified speed, rows later than H1 (p10/p50/p90):"]
+    for name, shift in result["clearance_shift"].items():
+        j, u = shift["join_row_minus_h1"], shift["unspecified_row_minus_h1"]
+        lines.append(f"  {name:10s} clearance {j['p10']:+.0f}/{j['p50']:+.0f}/{j['p90']:+.0f}  "
+                     f"unspecified {u['p10']:+.0f}/{u['p50']:+.0f}/{u['p90']:+.0f}")
     lines += ["", "refused by the labeller, per variant: " + json.dumps(result["refused"])]
     return "\n".join(lines)
 
@@ -280,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         refused[variant.name] = dict(reasons.most_common())
         print(f"{variant.name}: {len(readings[variant.name])} labelled, {sum(reasons.values())} refused, "
               f"{time.perf_counter() - started:.0f}s", flush=True)
-    strata = {k: flight_record(reading)["stratum"] for k, reading in readings["H1"].items()}
+    dataset_ids = [flight.dataset_id for flight in drawn.signals]
 
     rows: dict[str, list[dict[str, Any]]] = {}
     for variant in variants:
@@ -289,12 +368,13 @@ def main(argv: list[str] | None = None) -> int:
         batch = replay.batch_of(drawn, keep, [readings[variant.name][k] for k in keep])
         flown_rows = fly_variant(batch, params, Words(spec), chunk=args.chunk, device=device,
                                  records=out / "records" / variant.name, observed_reports=observed_reports)
-        for k, row in zip(keep, flown_rows):
-            row["sample_index"], row["stratum"] = k, strata.get(k, "refused by H1")
+        tag_rows(flown_rows, dataset_ids, readings["H1"])
         rows[variant.name] = flown_rows
         print(f"{variant.name}: flown and graded, {time.perf_counter() - started:.0f}s", flush=True)
 
     common = set.intersection(*(set(readings[v.name]) for v in variants))
+    observed_passes = sum(row["verdict"] == "pass" for report in observed_reports.values()
+                          for row in report["trajectories"])
     result = {
         "schema": COMPARE_SCHEMA, "written_utc": utc_now(), "git": git_state(),
         "signals": str(signals_dir), "base_spec": {"path": str(resolve(args.base_spec)), "sha256": base_sha},
@@ -303,9 +383,10 @@ def main(argv: list[str] | None = None) -> int:
         "sample": drawn.description,
         "variants": {v.name: {**asdict(v), "spec_sha256": variant_spec(base, v).sha256} for v in variants},
         "refused": refused, "common_flights": len(common),
-        "common": {v.name: {stratum: summarise([r for r in rows[v.name] if r["sample_index"] in common
-                                                and (stratum == "all" or r["stratum"] == stratum)])
-                            for stratum in ("all", *STRATA)} for v in variants},
+        "common": {v.name: {group: summarise([r for r in rows[v.name] if r["sample_index"] in common and in_group(r, group)])
+                            for group in GROUPS} for v in variants},
+        "over_drawn": {v.name: over_drawn(rows[v.name], len(drawn.signals), observed_passes) for v in variants},
+        "clearance_shift": {v.name: clearance_shift(rows[v.name], rows["H1"], common) for v in variants},
         "by_airport": {v.name: {airport: {stratum: summarise([r for r in rows[v.name] if r["sample_index"] in common
                                                              and r["airport"] == airport and r["stratum"] == stratum])
                                           for stratum in STRATA}
