@@ -402,10 +402,20 @@ export default function useTrainingTrackLayer(): void {
   // panel publishes a new selection only for a new flight or a reloaded set, never for a switch.
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || mode !== "training" || !trainingSelection) return;
-    const { lon, lat, altitudeHaeM } = trainingSelection.flight.signals;
-    // The sentence bar and the dock cover a third of the canvas: leave the track room beside them.
-    frameTrajectoryCamera(viewer, lon.map((value, row) => ({ lon: value, lat: lat[row], altM: altitudeHaeM[row] })),
-      { margin: FRAME_MARGIN });
+    const { flight } = trainingSelection;
+    const { lon, lat, altitudeHaeM } = flight.signals;
+    // The track and every turn region: a big turn's slowest bound reaches kilometres past the track,
+    // and selecting the word later should not find its envelope off screen. The regions lie on the
+    // ground; the track's lowest point stands in for it.
+    const ground = Math.min(...altitudeHaeM);
+    const regions = [
+      ...flight.envelopes.heading.flatMap((item) => (item.turn === null ? [] : [item.turn.region])),
+      ...(flight.envelopes.approach.captureTurn === null ? [] : [flight.envelopes.approach.captureTurn.turn.region]),
+    ];
+    frameTrajectoryCamera(viewer, [
+      ...lon.map((value, row) => ({ lon: value, lat: lat[row], altM: altitudeHaeM[row] })),
+      ...regions.flatMap((line) => line.lon.map((value, point) => ({ lon: value, lat: line.lat[point], altM: ground }))),
+    ], { margin: FRAME_MARGIN });  // the sentence bar and the dock cover a third of the canvas
   }, [viewer, mode, trainingSelection]);
 
   // THE SELECTED WORD: the column's word in force at the cursor. Keyed on the word's issue row, so a

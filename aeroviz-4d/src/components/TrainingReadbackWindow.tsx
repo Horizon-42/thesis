@@ -481,7 +481,8 @@ export default function TrainingReadbackWindow({
               {flown.map(({ which, row }) => (
                 <g key={`flown-${which}`} className="training-readback-flown" aria-label={`the turn flown ${which} at step ${row}`}>
                   <circle cx={at(row).x} cy={at(row).y} r={3.6} fill={TRAINING_WORD_COLOR} stroke="black" strokeWidth={0.8} />
-                  <text x={at(row).x + 6} y={at(row).y - 6} className="training-readback-path-label" fill={TRAINING_WORD_COLOR}>
+                  {/* below the point: a heading word's issue label sits above it, and the turn often starts there */}
+                  <text x={at(row).x + 6} y={at(row).y + 13} className="training-readback-path-label" fill={TRAINING_WORD_COLOR}>
                     turn flown {which} · step {row}
                   </text>
                 </g>
