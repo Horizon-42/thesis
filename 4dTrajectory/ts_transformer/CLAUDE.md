@@ -150,6 +150,12 @@ of the package, not a migration in progress.
   labelling and measuring; a sentence's words align with the FIRST `len(words)` rows of its
   signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
   from every runway end the harvest builds; the labeller and the display share one hold funnel) (C30).
+- **No A320 stand-in; a flight is dropped only where dynamics are used** (2026-09-24):
+  `aircraft_filter` ∈ `all-flights` (every flight, one without dynamics kept with no aircraft and
+  mass NaN — state output, the labeller) | `modelled` (control) | `openap-direct`; the default is BY
+  NEED, resolved at construction and required in a stored config; control refuses `all-flights`;
+  anything needing dynamics asks `scenario.dynamics(purpose)`; predict skips and counts flights
+  without; every filter tags its directory (the bare name was the retired `all`) (C31).
 
 ## Current defaults and their status
 

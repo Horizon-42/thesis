@@ -2,7 +2,9 @@
 
 The flights are the live harvest's eligible arrivals, split by `data.splits` (the outer test
 split's tracks are never opened), built by the ts data plane (`build_series` + `usable_series`
-under the default `TSConfig`, so the population and preprocessing are the models' own) and
+under the default `TSConfig`, so the population and preprocessing are the models' own; its
+state output keeps every flight, `all-flights`, those whose type has no aircraft dynamics
+included, since the labeller reads kinematics only) and
 projected into each airport's frame (`instructions.signals`). The candidates are each manifest's
 published runway geometry; beside them go every runway end the harvest builds, from the
 configuration and CIFP the harvest and the evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`,
@@ -23,6 +25,7 @@ from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
 
+from aircraft.performance_index import performance_index_identity
 from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
 from trajectory_data_process.harvest.airports import load_airport
 from ts_transformer.config import TSConfig
@@ -36,11 +39,13 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, discove
 
 CHUNK = 500
 CONFIG_FIELDS = ("dt_s", "seq_len", "aircraft_filter", "coordinate_frame", "resolved_split_seed",
-                 "val_fraction", "test_fraction", "aircraft_type")
+                 "val_fraction", "test_fraction")
 
 
-def _build(geometry_data: dict[str, Any], manifest: str, keys: list[str]) -> tuple[list[Any], dict[str, Any], int]:
-    """One chunk of one airport: flight dicts → series → usable series → signals."""
+def _build(geometry_data: dict[str, Any], manifest: str, keys: list[str]) -> tuple[list[Any], dict[str, Any], int, Counter, Counter]:
+    """One chunk of one airport: flight dicts → series → usable series → signals, with the
+    types and the flights without aircraft dynamics counted over the USABLE series (the ones
+    that become signals; the build report's counts include flights `usable_series` drops)."""
     from ts_transformer.data.dataset import build_series, load_flight_dicts
     from ts_transformer.instructions.signals import signals_from_series
     from ts_transformer.training.train import usable_series
@@ -48,9 +53,13 @@ def _build(geometry_data: dict[str, Any], manifest: str, keys: list[str]) -> tup
     config = TSConfig()
     geometry = AirportGeometry.from_dict(geometry_data)
     flights = load_flight_dicts([manifest], include_flight_keys=set(keys), verbose=False)
-    built, report = build_series(flights, config, aircraft_type=config.aircraft_type)
+    built, report = build_series(flights, config)
     usable = usable_series(built, config, verbose=False)
-    return [signals_from_series(item, geometry) for item in usable], report.to_dict(), len(built) - len(usable)
+    typecodes = Counter(str(item.scenario.source["resolved_typecode"] or "unresolved") for item in usable)
+    without_dynamics = Counter(str(item.scenario.source["no_dynamics_reason"])
+                               for item in usable if not item.scenario.has_dynamics)
+    return ([signals_from_series(item, geometry) for item in usable], report.to_dict(), len(built) - len(usable),
+            typecodes, without_dynamics)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -92,15 +101,17 @@ def main(argv: list[str] | None = None) -> int:
     collected: dict[str, list[Any]] = {split: [] for split in SPLITS}
     skipped: dict[str, Counter] = {split: Counter() for split in SPLITS}
     typecodes: Counter = Counter()
+    without_dynamics: Counter = Counter()
     unusable: Counter = Counter()
     with ProcessPoolExecutor(max_workers=args.workers, mp_context=get_context("spawn")) as pool:
         futures = [(split, airport, pool.submit(_build, geometry_data[airport], manifest, chunk))
                    for split, airport, manifest, chunk in jobs]
         for done, (split, airport, future) in enumerate(futures, start=1):
-            signals, report, short = future.result()
+            signals, report, short, chunk_typecodes, chunk_without_dynamics = future.result()
             collected[split] += signals
             skipped[split].update(report["skipped"])
-            typecodes.update(report["selected_typecodes"])
+            typecodes.update(chunk_typecodes)
+            without_dynamics.update(chunk_without_dynamics)
             unusable[split] += short
             if done % 10 == 0 or done == len(futures):
                 print(f"  {done}/{len(futures)} chunks, {sum(len(v) for v in collected.values())} flights, "
@@ -126,6 +137,10 @@ def main(argv: list[str] | None = None) -> int:
         "test_flights_not_opened": len(keys["test"]),
         "limit_per_airport_and_split": args.limit or None,
         "typecodes": dict(typecodes.most_common()),
+        # The labeller reads kinematics only, so a flight whose type has no dynamics is kept
+        # (`all-flights`); how many, and why, against the index that decided it.
+        "without_dynamics": dict(without_dynamics.most_common()),
+        "performance_index": performance_index_identity(),
     }
     write_signals(out, collected, record)
     write_candidates(out, geometries)

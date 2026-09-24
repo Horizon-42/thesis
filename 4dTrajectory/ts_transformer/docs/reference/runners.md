@@ -231,7 +231,8 @@ beside `spec.json`. ~6 s per 1,500 flights for the data pass in one process. `ex
 then τ_ψ, p, the γ̇ factor, each delay ± 4 s, one at a time); a delay below 0 is a `probe` (a word acting before it
 is said) and never a spec value; writes `sensitivity.json` into a new directory (default beside the spec).
 `executor_replay --instructions --executor --split {train,val} --out <new dir> [--per-airport 0 = every flight]
-[--seed] [--chunk 500]` is the §11 readout: own-dynamics flights gated, a stand-in's reported; each airport flown in
+[--seed] [--chunk 500]` is the §11 readout: own-dynamics flights gated, a stand-in's (the performance index's
+substitute) reported, a flight without aircraft dynamics counted (C31); each airport flown in
 chunks, judged, written as control-path prediction records (`records/<ICAO>/`, the plant contract's law resolving
 the newtons) that `python -m evaluation` grades; its verdicts are paired with the harvest's observed
 `approach/evaluation_report.json` by `flight_key`; `replay.json` holds every flight's row and the gate table (per

@@ -66,6 +66,7 @@ from ts_transformer.config import (
     PREDICTION_CONTROL,
     TSConfig,
     control_recipe_overrides,
+    default_aircraft_filter,
 )
 
 
@@ -204,7 +205,6 @@ META_FIELDS = (
     "val_fraction",
     "test_fraction",
     "aircraft_filter",
-    "aircraft_type",
     "coordinate_frame",
     "target_conditioning",
     "state_position_reference",
@@ -299,7 +299,6 @@ _ABBREV = {
     "n_segments": "N",
     "seq_len": "L",
     "aircraft_filter": "fleet",
-    "aircraft_type": "type",
     "coordinate_frame": "frame",
     "target_conditioning": "target",
     "intent_conditioning": "intent",
@@ -431,7 +430,7 @@ SETTING_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "control_gradient_clip_norm",
     )),
     ("Data & anchors", (
-        "split_seed", "val_fraction", "test_fraction", "aircraft_filter", "aircraft_type",
+        "split_seed", "val_fraction", "test_fraction", "aircraft_filter",
         "coordinate_frame", "state_position_reference", "reference_velocity_source",
         "random_train_anchor", "random_train_anchor_sampling", "random_train_anchor_l1_share",
         "random_train_anchor_min_future_s", "training_cohort_min_future_s", "anchor_floor_index",
@@ -490,6 +489,8 @@ def _default_for(field: str, config: Mapping[str, Any]) -> Any:
     if field == "n_segments":
         model = config.get("model")
         return DEFAULT_N_SEGMENTS_BY_MODEL.get(model, _DEFAULTS[field])
+    if field == "aircraft_filter":     # by need: the output decides (config.default_aircraft_filter)
+        return default_aircraft_filter(config["prediction_output"])
     return _DEFAULTS[field]
 
 

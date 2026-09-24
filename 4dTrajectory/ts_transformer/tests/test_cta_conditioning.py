@@ -255,11 +255,57 @@ def test_predict_writes_every_directory_through_one_emitter():
     assert module_source.count("write_batch(") == 1
 
 
-def test_predict_records_the_aircraft_type_it_built_the_series_under_and_refuses_a_pooled_airport(tmp_path: Path, monkeypatch):
-    """Review C-5: `--aircraft-type X` built the series under X but the config written
-    beside the records (and the run name) recorded the checkpoint's type. Review C-19:
-    repeated `--data` with `--airport` re-homes another airport's flights; train refused
-    it, predict did not."""
+def test_predict_skips_flights_without_aircraft_dynamics_and_counts_them(tmp_path: Path, monkeypatch):
+    """A state checkpoint (``all-flights``) trains on a flight whose type has no dynamics;
+    its evaluation record would need a mass, so predict skips it and states the count in
+    summary.json, never flies it as another type."""
+    import ts_transformer.cli.predict as predict_module
+    from flight_scenarios.identity import flight_key
+    from flight_scenarios.runway_target import find_threshold
+    from ts_transformer.config import AIRCRAFT_FILTER_ALL_FLIGHTS
+    from ts_transformer.data.splits import split_name_for_dataset_id
+    config = TSConfig(prediction_output=PREDICTION_STATE, seq_len=8, d_model=16, n_heads=4, d_ff=32,
+                      e_layers=1, device="cpu", horizon_mode="normalized", epochs=1, patience=1,
+                      batch_size=8, dropout=0.0)
+    assert config.aircraft_filter == AIRCRAFT_FILTER_ALL_FLIGHTS
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=12, seed=3)
+    series, _report = build_series(flights, config, airport=AIRPORT)
+    val_keys = [item.flight_id for item in series if split_name_for_dataset_id(item.dataset_id, config) == "val"]
+    assert len(val_keys) >= 2
+    excluded = {val_keys[0]}
+    threshold = find_threshold(AIRPORT, RUNWAY)
+    for index, flight in enumerate(flights):
+        if flight_key(flight, index) in excluded:
+            flight["type"] = "PC12"      # a propeller type the performance index excludes
+            # A synthetic flight's target comes from its airframe's approach envelope; one
+            # without an airframe needs the published target, as every harvested arrival has.
+            flight["runway_target"] = {
+                "lat": threshold["lat"], "lon": threshold["lon"],
+                "elevation_msl_m": threshold["elevation_m"], "course_deg": threshold["heading_deg"],
+                "threshold_crossing_height_m": 15.24, "published_glidepath_deg": 3.0,
+            }
+    series, report = build_series(flights, config, airport=AIRPORT)
+    assert report.without_dynamics == {"aircraft 'PC12' is excluded by the performance index: "
+                                       "propeller aircraft (user decision 2026-09-23)": 1}
+    assert [item.flight_id for item in series if not item.scenario.has_dynamics] == [val_keys[0]]
+    provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                  "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
+    train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
+    monkeypatch.setattr(predict_module, "provenance_from_args", lambda _args: provenance)
+    monkeypatch.setattr(predict_module, "load_flight_dicts", lambda _path, include_flight_keys=None: flights)
+    assert ts_cli.main([
+        "predict", "--checkpoint", str(tmp_path / "run" / "checkpoint.pt"),
+        "--data", str(tmp_path / "manifest.json"), "--airport", AIRPORT,
+        "--output-dir", str(tmp_path / "pred"), "--split", "val", "--device", "cpu",
+    ]) == 0
+    summary = json.loads((tmp_path / "pred" / "summary.json").read_text())
+    assert summary["skipped"] == {"no_aircraft_dynamics": 1}
+    assert len(summary["results"]) == len(val_keys) - 1
+
+
+def test_predict_refuses_an_airport_override_on_pooled_data(tmp_path: Path, monkeypatch):
+    """Review C-19: repeated `--data` with `--airport` re-homes another airport's flights;
+    train refused it, predict did not."""
     import ts_transformer.cli.predict as predict_module
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=8, seed=3)
     config = _config()
@@ -269,18 +315,30 @@ def test_predict_records_the_aircraft_type_it_built_the_series_under_and_refuses
     train(series, config, output_dir=tmp_path / "run", data_provenance=provenance, verbose=False)
     monkeypatch.setattr(predict_module, "provenance_from_args", lambda _args: provenance)
     monkeypatch.setattr(predict_module, "load_flight_dicts", lambda _path, include_flight_keys=None: flights)
-    assert config.aircraft_type != "B738"
-    assert ts_cli.main([
-        "predict", "--checkpoint", str(tmp_path / "run" / "checkpoint.pt"),
-        "--data", str(tmp_path / "manifest.json"), "--airport", AIRPORT,
-        "--output-dir", str(tmp_path / "pred"), "--split", "val", "--device", "cpu",
-        "--aircraft-type", "B738",
-    ]) == 0
-    summary = json.loads((tmp_path / "pred" / "summary.json").read_text())
-    assert summary["config"]["aircraft_type"] == "B738"
     with pytest.raises(SystemExit):
         ts_cli.main([
             "predict", "--checkpoint", str(tmp_path / "run" / "checkpoint.pt"),
             "--data", str(tmp_path / "a.json"), "--data", str(tmp_path / "b.json"),
             "--airport", AIRPORT, "--output-dir", str(tmp_path / "pooled"), "--split", "val",
         ])
+
+
+def test_a_checkpoint_is_refused_under_another_performance_index(tmp_path: Path, monkeypatch):
+    """Under `all-flights` / `modelled` the performance index decides which airframe every
+    flight is flown as; a checkpoint rebuilt under another index would fly other aircraft."""
+    import ts_transformer.training.train as train_module
+    from ts_transformer.config import AIRCRAFT_FILTER_OPENAP_DIRECT
+    provenance = {"schema_version": ARRIVAL_DATA_PROVENANCE_SCHEMA,
+                  "manifests": [{"airport": AIRPORT, "arrival_manifest_sha256": "a" * 64, "source_records": []}]}
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=8, seed=3)
+    for name, aircraft_filter in (("state", None), ("direct", AIRCRAFT_FILTER_OPENAP_DIRECT)):
+        config = TSConfig(prediction_output=PREDICTION_STATE, seq_len=8, d_model=16, n_heads=4, d_ff=32,
+                          e_layers=1, device="cpu", horizon_mode="normalized", epochs=1, patience=1,
+                          batch_size=8, dropout=0.0, aircraft_filter=aircraft_filter)
+        series, _report = build_series(flights, config, airport=AIRPORT)
+        train(series, config, output_dir=tmp_path / name, data_provenance=provenance, verbose=False)
+    load_checkpoint(tmp_path / "state" / "checkpoint.pt")
+    monkeypatch.setattr(train_module, "performance_index_identity", lambda: {"sha256": "0" * 64, "types": 1})
+    with pytest.raises(ValueError, match="trained under performance index"):
+        load_checkpoint(tmp_path / "state" / "checkpoint.pt")
+    load_checkpoint(tmp_path / "direct" / "checkpoint.pt")      # openap-direct bypasses the index

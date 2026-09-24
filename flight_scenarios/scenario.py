@@ -31,6 +31,25 @@ from aircraft.query_aircraft_parameters import (
 
 AIRCRAFT_PROVIDERS = ("auto", "openap")
 
+#: The mass and target speed of a scenario WITHOUT dynamics: unknown, never a stand-in. Such a
+#: scenario exists only for trajectory-only consumers (ts state series, the instruction
+#: labeller); anything that needs dynamics asks :meth:`FlightScenario.dynamics`, which refuses.
+UNKNOWN_WITHOUT_DYNAMICS = math.nan
+
+
+class NoAircraftDynamics(KeyError):
+    """The flight's aircraft has no dynamics the model may fly: no ICAO type, a type the
+    performance index excludes, or a type nothing models. Batch layers that need dynamics
+    drop the flight and name ``typecode`` and ``reason``; nothing is flown in its place."""
+
+    def __init__(self, typecode: str | None, reason: str, flight_id: Any = None) -> None:
+        super().__init__(f"no aircraft dynamics for flight {flight_id!r} (type {typecode}): {reason}")
+        self.typecode = typecode
+        self.reason = reason
+
+    def __str__(self) -> str:          # KeyError would quote the message
+        return str(self.args[0])
+
 
 def aircraft_for_code(aircraft_id: str, *, provider: str = "auto") -> Aircraft:
     """Resolve an aircraft code (e.g. ``"A320"``) to an :class:`Aircraft`.
@@ -100,10 +119,28 @@ class FlightScenario:
     """
 
     initial: GeodeticState
-    aircraft: Aircraft
-    aero: AeroParams
+    #: ``None`` (with ``aero``) for a scenario WITHOUT dynamics: its masses and target speed
+    #: are then `UNKNOWN_WITHOUT_DYNAMICS`; built only on request
+    #: (``build_scenario(..., require_dynamics=False)``) for trajectory-only consumers.
+    aircraft: Aircraft | None
+    aero: AeroParams | None
     source: dict[str, Any] = field(default_factory=dict)
     target: GeodeticState | None = None
+
+    @property
+    def has_dynamics(self) -> bool:
+        return self.aircraft is not None
+
+    def dynamics(self, purpose: str) -> tuple[Aircraft, AeroParams]:
+        """``(aircraft, aero)`` for a consumer that needs them; a scenario without dynamics
+        raises, naming ``purpose``, instead of being computed on unknown numbers."""
+        if self.aircraft is None or self.aero is None:
+            raise NoAircraftDynamics(
+                self.source.get("resolved_typecode"),
+                f"{purpose} needs aircraft dynamics; {self.source.get('no_dynamics_reason')}",
+                self.source.get("flight_key") or self.source.get("id"),
+            )
+        return self.aircraft, self.aero
 
     def to_dict(self) -> dict[str, Any]:
         # The aircraft is stored by code (presets are the source of truth); aero params
@@ -111,8 +148,8 @@ class FlightScenario:
         return {
             "initial": asdict(self.initial),
             "target": asdict(self.target) if self.target is not None else None,
-            "aircraft_code": self.aircraft.code,
-            "aero": asdict(self.aero),
+            "aircraft_code": self.aircraft.code if self.aircraft is not None else None,
+            "aero": asdict(self.aero) if self.aero is not None else None,
             "source": self.source,
         }
 
@@ -132,11 +169,12 @@ class FlightScenario:
         stored aero, and is refused.
         """
         target = data.get("target")
+        code = data["aircraft_code"]
         scenario = cls(
             initial=GeodeticState(**data["initial"]),
             target=GeodeticState(**target) if target is not None else None,
-            aircraft=aircraft_for_code(data["aircraft_code"]),
-            aero=AeroParams(**data["aero"]),
+            aircraft=aircraft_for_code(code) if code is not None else None,
+            aero=AeroParams(**data["aero"]) if code is not None else None,
             source=data.get("source", {}),
         )
         built_with = scenario.source.get("performance_index_sha256")
@@ -147,7 +185,8 @@ class FlightScenario:
                 "would be re-resolved under different decisions — regenerate it with "
                 "prepare_scenario_inputs.py"
             )
-        if scenario.target is not None and scenario.source["target_source"] == "runway_threshold":
+        if (scenario.has_dynamics and scenario.target is not None
+                and scenario.source["target_source"] == "runway_threshold"):
             expected = scenario.aircraft.approach.reference_speed_ms(scenario.target.m)
             if not math.isclose(scenario.target.V, expected, rel_tol=1e-9):
                 raise ValueError(

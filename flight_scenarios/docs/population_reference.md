@@ -122,11 +122,19 @@ gets a new ID here and ONE new line in the index.**
   refuses a scenario built under another index or none (its code would be re-resolved into another airframe
   under its stored aero), so EVERY scenario file prepared before 2026-09-24 — threshold and fitted-ADS-B —
   must be regenerated before a re-solve.
-- **No A320 by default.** `_resolve_aircraft` raises `NoAircraftDynamics(typecode, reason)` when nothing
-  flies the type and no fallback was passed; `dataset.build_scenario_dataset` drops such flights and names
-  them in `<scenarios>.selection.json` (`excluded_no_dynamics`, schema `flight-scenarios-selection-v2`); the
-  CLI has no `--aircraft-type` any more. The explicit fallback parameter remains for the ts `all` filter
-  (`TSConfig.aircraft_type`, recorded in every checkpoint) until the user decides that filter's future.
+- **No A320, ever.** `_resolve_aircraft` raises `NoAircraftDynamics(typecode, reason)` when nothing
+  flies the type; `dataset.build_scenario_dataset` drops such flights and names them in
+  `<scenarios>.selection.json` (`excluded_no_dynamics`, schema `flight-scenarios-selection-v2`); the CLI has
+  no `--aircraft-type` any more, and `build_scenario` no fallback parameter (retired 2026-09-24 with the ts
+  `all` filter, the last caller; user: "去掉 all 的 A320 回退").
+- **Scenarios without dynamics, for trajectory-only consumers** (user decision 2026-09-24, "按需丢弃": drop
+  a flight only where dynamics are used). `build_scenario(..., require_dynamics=False)` returns, for a flight
+  without dynamics, a scenario with `aircraft = aero = None`, masses and target V `UNKNOWN_WITHOUT_DYNAMICS`
+  (NaN) and `source["no_dynamics_reason"]`; its target position, heading and glidepath come from the
+  published runway target only (a synthetic flight without an airframe has none and raises). A consumer that
+  needs dynamics calls `scenario.dynamics(purpose)`, which raises `NoAircraftDynamics` naming the purpose —
+  never computes on NaN. The ts data plane is the one caller (`aircraft_filter = all-flights`, the state
+  output and the instruction labeller); the optimizer and the scenario files keep requiring dynamics.
 - **Audit**: `source["performance_index_decision"]` (own / substitute / exclude / None);
   `dynamics_source` is `aircraft-performance-index-v1` for an own-parameter type.
 - **Observed records** (`resolve_airframe`): the mass is returned only when the model flies the type as

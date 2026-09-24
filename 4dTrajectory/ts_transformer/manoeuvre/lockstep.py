@@ -263,8 +263,9 @@ def reference_verdicts(series: FlightSeries, forecast: Forecast) -> dict[str, An
          "V": float(g[3]), "psi": float(g[4]), "gamma": float(g[5]), "m": float(g[6])}
         for t, g in zip(np.cumsum(forecast.sample_durations_s), forecast.geodetic_values, strict=True)
     ]
-    controls = required_controls(rows, series.scenario.aircraft, aero=series.scenario.aero)
-    summary = flyability_summary(controls, aircraft_code=str(series.scenario.aircraft.code))
+    aircraft, aero = series.scenario.dynamics("the lockstep's flyability verdict")
+    controls = required_controls(rows, aircraft, aero=aero)
+    summary = flyability_summary(controls, aircraft_code=str(aircraft.code))
     return {
         "fully_flyable": bool(summary["fully_flyable"]), "violations": dict(summary["violations"]),
         "established": bool(forecast.truncated_at_threshold),

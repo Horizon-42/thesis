@@ -82,3 +82,11 @@ def test_a_scenario_built_under_another_performance_index_is_refused():
     with pytest.raises(ValueError, match="performance index"):
         FlightScenario.from_dict(stale)
 
+
+def test_a_scenario_without_dynamics_round_trips_as_one():
+    scen = _sample_scenario()
+    scen.aircraft = None
+    scen.aero = None
+    restored = FlightScenario.from_dict(scen.to_dict())
+    assert restored.aircraft is None and restored.aero is None and not restored.has_dynamics
+

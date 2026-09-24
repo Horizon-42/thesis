@@ -335,7 +335,7 @@ def test_train_then_predict_produces_a_gradeable_batch(tmp_path, model_name):
             "validation_common_grid_points": 64,
         "horizon_mode": HORIZON_NORMALIZED,
         "prediction_output": "state",
-        "aircraft_filter": "all",
+        "aircraft_filter": "all-flights",
         "pred_len": config.pred_len,
         "full_horizon_steps": config.full_horizon_steps,
         "lr_scheduler": {

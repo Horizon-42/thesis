@@ -204,11 +204,12 @@ def test_control_random_anchor_candidates_require_airborne_stall_margin():
     values[:, ch.IDX["edot"]] = [
         0.0, stall_speed, 1.11 * stall_speed, 2.0 * stall_speed,
     ]
+    aero = SimpleNamespace(S=100.0, Cl_max=2.0)
     series = SimpleNamespace(
         values=values,
         scenario=SimpleNamespace(
             initial=SimpleNamespace(m=60_000.0),
-            aero=SimpleNamespace(S=100.0, Cl_max=2.0),
+            dynamics=lambda _purpose: (None, aero),
         ),
     )
 

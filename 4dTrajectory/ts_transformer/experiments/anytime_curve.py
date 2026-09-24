@@ -336,7 +336,6 @@ def cohort_series(arm: Arm, grid: Grid) -> list:
     built, report = build_series(
         load_flight_dicts(arm.manifests, include_flight_keys=set(wanted), verbose=False),
         arm.config,
-        aircraft_type=arm.config.aircraft_type,
     )
     print(f"  {report.format()}", flush=True)
     by_id = {

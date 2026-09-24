@@ -37,7 +37,6 @@ from ts_transformer.repo_layout import (
 )
 
 from ts_transformer.config import (
-    AIRCRAFT_FILTER_ALL,
     AIRCRAFT_FILTERS,
     COORDINATE_FRAMES_AVAILABLE,
     CHECKPOINT_SELECTION_COMMON_GRID_ADE,
@@ -67,6 +66,7 @@ from ts_transformer.config import (
     PREDICTION_STATE,
     TSConfig,
     control_recipe,
+    default_aircraft_filter,
     uses_control_dynamics,
 )
 from ts_transformer.training.cross_validation import (  # noqa: E402
@@ -261,7 +261,9 @@ def _control_gradient_clip_tag(max_norm: float) -> str:
 
 
 def _aircraft_filter_tag(aircraft_filter: str) -> str:
-    return "" if aircraft_filter == AIRCRAFT_FILTER_ALL else "_openap_direct"
+    # Every filter names itself: the bare name belongs to the retired `all` filter (the A320
+    # fallback, 2026-09-24), whose directories and categories a new run must never reuse.
+    return "_" + aircraft_filter.replace("-", "_")
 
 
 HORIZON_TAGS = {
@@ -311,8 +313,7 @@ class TrainingPlan:
         seed: int | None = None,
         split_seed: int | None = None,
         device: str | None = None,
-        aircraft_type: str | None = None,
-        aircraft_filter: str = AIRCRAFT_FILTER_ALL,
+        aircraft_filter: str | None = None,
         coordinate_frame: str = "enu",
         batch_size: str = "2048",
         cv_folds: int = 3,
@@ -349,8 +350,11 @@ class TrainingPlan:
         self.seed = seed
         self.split_seed = split_seed
         self.device = device
-        self.aircraft_type = aircraft_type
-        self.aircraft_filter = aircraft_filter
+        # None = by need (`config.default_aircraft_filter`), resolved here so the tag, the
+        # CLI argument and the checkpoint check all read the same filter.
+        self.aircraft_filter = (
+            default_aircraft_filter(prediction_output) if aircraft_filter is None else aircraft_filter
+        )
         self.coordinate_frame = coordinate_frame
         self.batch_size = batch_size
         self.cv_folds = cv_folds
@@ -395,7 +399,7 @@ class TrainingPlan:
                 prediction_output, control_state_duration_gradient
             )
             + _control_gradient_clip_tag(control_gradient_clip_norm)
-            + _aircraft_filter_tag(aircraft_filter)
+            + _aircraft_filter_tag(self.aircraft_filter)
             + _frame_tag(coordinate_frame)
             + _anchor_tag(random_train_anchor)
             + _training_cohort_tag(training_cohort_min_future_s)
@@ -472,8 +476,6 @@ class TrainingPlan:
             args += ["--split-seed", str(self.split_seed)]
         if self.device is not None:
             args += ["--device", self.device]
-        if self.aircraft_type is not None:
-            args += ["--aircraft-type", self.aircraft_type]
         args += ["--aircraft-filter", self.aircraft_filter]
         args += [
         ]
@@ -706,8 +708,6 @@ class TrainingPlan:
             overrides["split_seed"] = self.split_seed
         if self.device is not None:
             overrides["device"] = self.device
-        if self.aircraft_type is not None:
-            overrides["aircraft_type"] = self.aircraft_type
         if self.control_rollout_dt is not None:
             overrides["control_rollout_integrator_dt_s"] = self.control_rollout_dt
         if self.batch_size != "auto":
@@ -1016,7 +1016,7 @@ def run_training(
                 )
         print(
             f"   runtime   : batch={batch}, device={config.device}, seed={config.seed}, "
-            f"aircraft={config.aircraft_type}, aircraft_filter={config.aircraft_filter}"
+            f"aircraft_filter={config.aircraft_filter}"
         )
 
     _run_steps(
@@ -1116,12 +1116,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--split-seed", type=int, default=None)
     parser.add_argument("--device", default=None)
-    parser.add_argument("--aircraft-type", default=None)
     parser.add_argument(
         "--aircraft-filter",
         choices=AIRCRAFT_FILTERS,
-        default=AIRCRAFT_FILTER_ALL,
-        help="fleet contract (openap-direct excludes synonyms, presets and fallbacks)",
+        default=None,
+        help="which flights a run keeps (default: by need -- all-flights for state output, "
+             "modelled for control; openap-direct keeps native OpenAP types only)",
     )
     parser.add_argument("--coordinate-frame", choices=COORDINATE_FRAMES_AVAILABLE, default="enu")
     parser.add_argument("--batch-size", default="2048",
@@ -1269,7 +1269,6 @@ def main() -> None:
             seed=args.seed,
             split_seed=args.split_seed,
             device=args.device,
-            aircraft_type=args.aircraft_type,
             aircraft_filter=args.aircraft_filter,
             coordinate_frame=args.coordinate_frame,
             batch_size=args.batch_size,

@@ -1,6 +1,7 @@
 """End-to-end build wiring: manifest arrival + aircraft -> FlightScenario."""
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -57,10 +58,21 @@ def test_build_scenario_resolves_aircraft_from_icao24():
     assert scen.target.longitude == FLIGHT["waypoints"][-1][1]
 
 
-def test_build_scenario_falls_back_to_aircraft_type_when_icao24_unresolvable():
-    flight = {**FLIGHT, "icao24": None}  # no transponder address -> use the explicit fallback
-    scen = build_scenario(flight, "A320")
-    assert scen.aircraft is A320
+def test_a_trajectory_only_build_keeps_a_flight_without_dynamics_and_says_so():
+    # No transponder address and no declared type: nothing flies it, and nothing stands in.
+    flight = {**FLIGHT, "icao24": None}
+    with pytest.raises(NoAircraftDynamics):
+        build_scenario(flight)
+    scen = build_scenario(flight, require_dynamics=False)
+    assert scen.aircraft is None and scen.aero is None and not scen.has_dynamics
+    assert math.isnan(scen.initial.m) and math.isnan(scen.target.m)
+    assert scen.source["dynamics_typecode"] is None
+    assert scen.source["landing_aero"] is None
+    assert scen.source["no_dynamics_reason"]
+    # The trajectory is intact: position and kinematics come from the track.
+    assert scen.initial.longitude == FLIGHT["waypoints"][0][1]
+    with pytest.raises(NoAircraftDynamics, match="the optimizer needs aircraft dynamics"):
+        scen.dynamics("the optimizer")
 
 
 def test_build_scenario_records_identity_and_dynamics_provenance():
@@ -77,8 +89,7 @@ def test_build_scenario_records_identity_and_dynamics_provenance():
     assert scen.source["typecode_standard"] == "ICAO Doc 8643"
     assert scen.source["dynamics_typecode"] == "B739"
     assert scen.source["dynamics_source"].startswith("openap")
-    assert scen.source["aircraft_fallback_used"] is False
-    assert scen.source["aircraft_fallback_reason"] is None
+    assert scen.source["no_dynamics_reason"] is None
 
 
 def test_build_scenario_flies_an_index_type_with_its_own_parameters():
@@ -92,7 +103,7 @@ def test_build_scenario_flies_an_index_type_with_its_own_parameters():
     assert scen.source["dynamics_source"] == PERFORMANCE_INDEX_SCHEMA
     assert scen.source["dynamics_surrogate_typecode"] is None
     assert scen.source["performance_index_decision"] == "own"
-    assert scen.source["aircraft_fallback_used"] is False
+    assert scen.source["no_dynamics_reason"] is None
 
 
 def test_build_scenario_flies_a_substitute_under_its_own_code_keeping_the_identity():
@@ -107,20 +118,25 @@ def test_build_scenario_flies_a_substitute_under_its_own_code_keeping_the_identi
     assert scen.source["dynamics_surrogate_typecode"] == "A332"
     assert scen.source["performance_index_decision"] == "substitute"
     assert scen.source["performance_index_sha256"] == performance_index_identity()["sha256"]
-    assert scen.source["aircraft_fallback_used"] is False
 
 
-def test_an_excluded_type_raises_by_name_unless_a_fallback_is_given():
-    flight = {**FLIGHT, "type": "PC12", "icao24": None}
+def test_an_excluded_type_raises_by_name_or_builds_without_dynamics():
+    flight = {**FLIGHT, "type": "PC12", "icao24": None, "arr_airport": "KRDU"}
     with pytest.raises(NoAircraftDynamics) as caught:
         build_scenario(flight)
     assert caught.value.typecode == "PC12" and "propeller" in caught.value.reason
+    assert "propeller" in str(caught.value) and not str(caught.value).startswith("'")
 
-    scen = build_scenario(flight, "A320")          # the explicit fallback (ts `all` filter)
-    assert scen.aircraft is A320
+    scen = build_scenario(flight, require_dynamics=False, target_from_threshold=True)
+    assert scen.aircraft is None
+    assert scen.source["resolved_typecode"] == "PC12"
     assert scen.source["performance_index_decision"] == "exclude"
-    assert scen.source["aircraft_fallback_used"] is True
-    assert "propeller" in scen.source["aircraft_fallback_reason"]
+    assert "propeller" in scen.source["no_dynamics_reason"]
+    # The published target's geometry is there; its speed is unknown, never a stand-in.
+    assert (scen.target.latitude, scen.target.longitude) == (
+        FLIGHT["runway_target"]["lat"], FLIGHT["runway_target"]["lon"]
+    )
+    assert math.isnan(scen.target.V)
 
 
 def test_build_scenario_raises_when_unresolvable_and_no_fallback():
@@ -180,7 +196,7 @@ def test_build_scenario_target_from_threshold():
 
 def test_build_scenario_target_from_threshold_falls_back_when_unknown():
     flight = {**FLIGHT, "arr_airport": "KRDU", "runway": "99X"}  # no such threshold
-    scen = build_scenario(flight, "A320", target_from_threshold=True)
+    scen = build_scenario(flight, target_from_threshold=True)
     assert scen.source["target_source"] == "runway_threshold"
 
 

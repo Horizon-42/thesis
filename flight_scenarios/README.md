@@ -92,7 +92,6 @@ from flight_scenarios import build_scenarios_from_arrivals, load_scenarios
 
 scenarios = build_scenarios_from_arrivals(
     "trajectory_data_process/outputs/harvest/KRDU/arrivals/manifest.json",
-    aircraft_type="A320",
     airport="KRDU",
     target_from_threshold=True,
 )

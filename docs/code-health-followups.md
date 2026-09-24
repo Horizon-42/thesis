@@ -6,6 +6,24 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## Three ts ablation runners write into fixed directories that carry no aircraft filter (2026-09-24)
+
+**Verified** (code review of the A320-fallback removal): `experiments/kinematic_ablation.py:514`,
+`experiments/history_ablation.py:509` and `experiments/overfit_diagnostic.py` name their output
+directory without the aircraft filter and create it with `mkdir(exist_ok=True)`. A rerun today
+(default `all-flights`) would write into the directory the retired `all` run left, e.g.
+`4dTrajectory/outputs/POOLED/ts_itransformer_kinematic_weight_ablation`. The pipeline's
+directories carry the filter tag (C31); these three do not. The overwrite-on-rerun itself is
+older than the change.
+
+**Judgement**: give them the filter tag (or refuse an existing directory, as
+`coordinate_ablation` does through `refuse_repeated_test`) the next time one of them is run.
+Also: four arm declarations under `4dTrajectory/ts_transformer/docs/experiments/`
+(`airport_frame_arms.json`, `airport_frame_seed2024_arms.json`, `final_constraint_arms.json`,
+`state_v2_anchor_relative_arms.json`) set `"aircraft_filter": "all"` and `closure_p1c_arms.json`
+sets `"aircraft_type"`; they are records of finished campaigns and now fail by name at
+`arm_config` if re-run.
+
 ## `build_runway_config.py` can no longer rebuild `runway_thresholds.json` (2026-09-20)
 
 **Verified** — the generator writes `name` / `length_ft` / `surface` / `thresholds` per runway.

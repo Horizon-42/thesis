@@ -504,7 +504,7 @@ def test_pipeline_carries_and_names_scaled_transport_chart_dynamics():
     assert config.control_dynamics_backend == (
         CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY
     )
-    assert plan.train_dir.name.endswith("_stcv")
+    assert "stcv" in plan.train_dir.name.split("_")
     assert "scaled_transport_chart_velocity" in prediction.category
     assert "@scaled-transport-chart-velocity" in prediction.label
 

@@ -187,7 +187,9 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV19 · Training 只读一份词表：`instruction-v2`，规格 `103a6eae6b90`
 
-`src/data/trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v5`、读法
+`src/data/trainingSample.ts` 钉住并逐项核对：样本格式名 `aeroviz-training-sample-v6`（2026-09-24：v5 的形状，
+但航班的 `typecode` 是它自己的 ICAO 机型，身份没解析出来时为 null，界面显示 "type unknown"；v5 写的是动力学飞的
+机型，没有动力学的机型一律写 A320）、读法
 `TRAINING_READING_RULE = "instruction-v2"`、规格 sha 全文 `TRAINING_SPEC_SHA256`、六列的名字和顺序
 `TRAINING_COLUMNS`（跑道、进近、航向、高度、下降角、速度，与 `instructions/words.COLUMNS` 相同，列是按位置读的）、
 "不变" `TRAINING_UNCHANGED = -1`、标注器会写的发令原因 `TRAINING_WORD_KINDS`。对不上就整份拒读并报出是哪一项，

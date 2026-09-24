@@ -22,7 +22,7 @@ import torch
 from ts_transformer.autopilot.flights import FlightInputs
 from ts_transformer.config import (
     CONTROL_DYNAMICS_POINT_MASS, CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY, CONTROL_THRUST_FRACTION,
-    PREDICTION_CONTROL, TSConfig,
+    PREDICTION_CONTROL, TSConfig, default_aircraft_filter,
 )
 from ts_transformer.outputs.dynamics.rollout import rollout_control_endpoints
 
@@ -30,6 +30,8 @@ from ts_transformer.outputs.dynamics.rollout import rollout_control_endpoints
 EXECUTOR_DYNAMICS = replace(
     TSConfig(),
     prediction_output=PREDICTION_CONTROL,
+    # A control config keeps only flights with dynamics (C31); the rollout never reads the filter.
+    aircraft_filter=default_aircraft_filter(PREDICTION_CONTROL),
     control_dynamics_model=CONTROL_DYNAMICS_POINT_MASS,
     control_dynamics_backend=CONTROL_DYNAMICS_SCALED_TRANSPORT_CHART_VELOCITY,
     control_thrust_parameterization=CONTROL_THRUST_FRACTION,

@@ -106,6 +106,21 @@ def test_a_stored_arm_is_resumed_only_when_complete_and_unchanged(tmp_path):
     assert (arm / "checkpoint.pt").exists() and (arm / "history.json").exists()
 
 
+def test_an_arm_trained_under_the_retired_all_filter_is_refused_at_resume(tmp_path):
+    """An arm that names no aircraft filter trains under the by-need default (C31); the
+    stored `all` (the A320 fallback) differs from it and is refused by name at resume."""
+    config, declared = runner.arm_config(ARMS["base"], {"coordinate_frame": "airport-enu"})
+    assert "aircraft_filter" not in declared
+    resume = runner.resume_declaration(config, declared)
+    assert resume["aircraft_filter"] == config.aircraft_filter
+    arm = tmp_path / "A"
+    arm.mkdir()
+    (arm / "history.json").write_text(json.dumps({"config": {**declared, "aircraft_filter": "all"}}))
+    assert "aircraft_filter" in runner.stale_arm_error("A", arm, resume, None)
+    (arm / "history.json").write_text(json.dumps({"config": resume}))
+    assert runner.stale_arm_error("A", arm, resume, None) is None
+
+
 def test_a_field_added_after_an_arm_trained_reads_as_the_default_it_flew(tmp_path):
     """Review of 2026-09-14 (M1, blocker): `control_thrust_parameterization` is pinned by
     every named recipe, and no history.json written before it carries it. Read as None, the

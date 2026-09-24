@@ -5,6 +5,7 @@ Split from `test_ts_transformer.py` on 2026-09-10 (review §4.6).
 
 import importlib.util
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,7 +24,11 @@ import ts_transformer.cli.common as cli_common  # noqa: E402
 import ts_transformer.cli.train as cli_train  # noqa: E402
 import ts_transformer.inference.evaluation_protocol as evaluation_protocol  # noqa: E402
 import ts_transformer.training.experiment_index as experiment_index  # noqa: E402
+from flight_scenarios import NoAircraftDynamics  # noqa: E402
+from flight_scenarios.runway_target import find_threshold  # noqa: E402
 from ts_transformer.config import (
+    AIRCRAFT_FILTER_ALL_FLIGHTS,
+    AIRCRAFT_FILTER_MODELLED,
     AIRCRAFT_FILTER_OPENAP_DIRECT,
     CONTROL_RECIPE_SIMPLE_V3,
     PREDICTION_CONTROL,
@@ -328,7 +333,38 @@ def test_predict_cli_refuses_test_without_explicit_release(tmp_path, capsys):
     assert info.value.code == 2 and "--split test is sealed" in capsys.readouterr().err
 
 
-def test_openap_direct_filter_rejects_synonym_before_scenario_fallback():
+@pytest.mark.parametrize("aircraft_filter, kept, without_dynamics, rejected", [
+    # every flight; the excluded type kept WITHOUT dynamics, never flown as another type
+    (AIRCRAFT_FILTER_ALL_FLIGHTS, 3, 1, 0),
+    # only the flights the model can fly; the excluded type dropped by name
+    (AIRCRAFT_FILTER_MODELLED, 2, 0, 1),
+])
+def test_the_aircraft_filter_keeps_or_drops_a_type_without_dynamics(aircraft_filter, kept, without_dynamics, rejected):
+    flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=3, seed=3)
+    threshold = find_threshold(AIRPORT, RUNWAY)
+    flights[1] = {**flights[1], "type": "PC12", "runway_target": {
+        "lat": threshold["lat"], "lon": threshold["lon"], "elevation_msl_m": threshold["elevation_m"],
+        "course_deg": threshold["heading_deg"], "threshold_crossing_height_m": 15.24,
+        "published_glidepath_deg": 3.0,
+    }}
+    series, report = build_series(flights, TSConfig(aircraft_filter=aircraft_filter), airport=AIRPORT)
+
+    reason = "aircraft 'PC12' is excluded by the performance index: propeller aircraft (user decision 2026-09-23)"
+    assert len(series) == kept
+    assert report.without_dynamics == ({reason: 1} if without_dynamics else {})
+    assert report.rejected_aircraft == ({f"no aircraft dynamics: {reason}": 1} if rejected else {})
+    for item in series:
+        if item.scenario.has_dynamics:
+            assert item.scenario.aircraft.code == "A320"
+        else:
+            # no aircraft, no mass -- and anything needing dynamics is refused by name
+            assert item.scenario.source["resolved_typecode"] == "PC12"
+            assert math.isnan(item.scenario.initial.m)
+            with pytest.raises(NoAircraftDynamics, match="the flyability report needs aircraft dynamics"):
+                item.scenario.dynamics("the flyability report")
+
+
+def test_openap_direct_filter_rejects_a_synonym_before_the_scenario_is_built():
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=2, seed=3)
     flights[1] = {**flights[1], "type": "A306"}
     config = TSConfig(aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT)

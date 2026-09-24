@@ -95,11 +95,6 @@ PREDICT_CONFIG_FLAGS: dict[str, str] = {
     # ...and the third deliberate short name: the arm files spell `--trombone-surplus`, and
     # the field is `trombone_surplus_reference` because "reference" is what it names.
     "trombone_surplus_reference": "--trombone-surplus",
-    # The shared data flag (`common.add_data_args`): predicting under another airframe
-    # builds the series under IT (target Vref, crossing height), so the config the run
-    # writes beside its records must say so too (review C-5: until 2026-09-09 the summary
-    # and the run name recorded the checkpoint's type).
-    "aircraft_type": "--aircraft-type",
 }
 _unknown = [name for name in PREDICT_CONFIG_FLAGS if name not in {f.name for f in fields(TSConfig)}]
 if _unknown:  # fail at import, like cli.common's list: a renamed field must rename here too
@@ -296,7 +291,8 @@ def add_cli_arguments(parser: argparse.ArgumentParser) -> None:
 class PredictOptions:
     """The flag combinations `predict` accepts, checked ONCE by :func:`parse_predict_options`
     (review §4.4): what every forecast is asked (`forecast`), which oracle and diagnostic arms
-    are decoded beside the top-1 records, and the cohort the CTA offset skipped."""
+    are decoded beside the top-1 records, and the flights it skipped (no aircraft dynamics,
+    or a CTA offset leaving too little future)."""
 
     forecast: ForecastOptions
     cta_from_quantiles: bool
@@ -379,13 +375,6 @@ def load_predict_checkpoint(args: argparse.Namespace, parser: argparse.ArgumentP
     device = resolve_device(args.device)
     model = model.to(device)
 
-    if args.aircraft_type and args.aircraft_type != config.aircraft_type:
-        print(f"  WARNING: predicting with --aircraft-type {args.aircraft_type}, but the "
-              f"checkpoint was trained with {config.aircraft_type} — the ENU frames and "
-              f"gate targets will differ from the ones the normalizer was fit under")
-        # The series are built under this type below; the config written beside the
-        # records (and the run name) must carry it, not the checkpoint's (review C-5).
-        config = replace(config, aircraft_type=args.aircraft_type)
     return model, config, normalizer, payload, current_provenance, device
 
 
@@ -430,7 +419,7 @@ def load_predict_series(args, config, parser, payload, current_provenance):
 def parse_predict_options(args, config, parser, series):
     """Every flag-combination rule of `predict`, in one place; returns the options, the
     config restamped with what this run overrides (the hook and its gains, `cta=self-q`),
-    and the series the CTA offset keeps."""
+    and the series it keeps: those with aircraft dynamics, then those the CTA offset keeps."""
     gains = {
         field: getattr(args, flag[2:].replace("-", "_"))
         for field, flag in PREDICT_CONFIG_FLAGS.items()
@@ -531,6 +520,19 @@ def parse_predict_options(args, config, parser, series):
     if args.latent_samples < 0 or args.latent_random < 0:
         parser.error("--latent-samples and --latent-random must be non-negative")
     skipped: dict[str, int] = {}
+    # A flight kept WITHOUT aircraft dynamics (`all-flights`, a state checkpoint) has no mass,
+    # and an evaluation record's states carry one (written with allow_nan=False), as does the
+    # flyability check: such a flight is not predicted here, and the count is stated in
+    # summary.json. Training's validation metrics still score every flight.
+    with_dynamics = [item for item in series if item.scenario.has_dynamics]
+    if len(with_dynamics) < len(series):
+        skipped["no_aircraft_dynamics"] = len(series) - len(with_dynamics)
+        if not with_dynamics:
+            parser.error(f"none of the {len(series)} flight(s) has aircraft dynamics, which the "
+                         "evaluation records need")
+        print(f"  {skipped['no_aircraft_dynamics']} of {len(series)} flight(s) have no aircraft "
+              "dynamics (their type is excluded or unmodelled): not predicted, stated in summary.json")
+        series = with_dynamics
     if args.cta_offset_s:
         # A counterfactual CTA that leaves less than the package's minimum remaining future
         # is not a plausible arrival time (truth durations start at ~21 s, so −90 s would ask
@@ -863,7 +865,7 @@ def report_predictions(sets: PredictionSets, series, options: PredictOptions, *,
     flyability = report_for_records(
         [record.eval_record["states"] for record in records],
         [record.reference_record["states"] for record in records],
-        [s.scenario.aircraft for s in series],
+        [s.scenario.dynamics("the flyability report")[0] for s in series],
     )
     (output_dir / "flyability_report.json").write_text(
         json.dumps(flyability, indent=2), encoding="utf-8")

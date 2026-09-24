@@ -89,7 +89,7 @@ def airport_reference_point(
 def threshold_target_state(
     airport: str | None,
     runway: str | None,
-    aircraft: Aircraft,
+    aircraft: Aircraft | None,
     *,
     mass_kg: float,
     published_target: dict[str, Any] | None = None,
@@ -97,8 +97,10 @@ def threshold_target_state(
     """A target state at the runway threshold, or ``None`` if the threshold is unknown.
 
     Position = threshold lat/lon at ``elevation + threshold_crossing_height``; ``V`` = the
-    aircraft's reference approach speed (Vref); ``psi`` = the runway heading (in the model's
-    math-ENU convention); ``gamma`` = the coded glidepath descent (negative).
+    aircraft's reference approach speed (Vref) at ``mass_kg``; ``psi`` = the runway heading (in
+    the model's math-ENU convention); ``gamma`` = the coded glidepath descent (negative).
+    Without an aircraft (a scenario without dynamics) ``V`` is unknown (NaN) and only the
+    published target can be used -- the synthetic fallback below needs the aircraft's envelope.
     """
     if published_target is not None:
         tch = published_target.get("threshold_crossing_height_m")
@@ -111,6 +113,8 @@ def threshold_target_state(
         course_deg = float(published_target["course_deg"])
         glidepath_deg = float(glidepath)
     else:
+        if aircraft is None:
+            raise ValueError("a target without an aircraft needs the published runway target")
         # Kept for synthetic/in-memory scenarios. Canonical harvested arrivals always
         # carry ``runway_target`` decoded from the CIFP.
         threshold = find_threshold(airport, runway)
@@ -131,7 +135,7 @@ def threshold_target_state(
         latitude=lat,
         longitude=lon,
         altitude=altitude,
-        V=aircraft.approach.reference_speed_ms(mass_kg),
+        V=aircraft.approach.reference_speed_ms(mass_kg) if aircraft is not None else math.nan,
         psi=psi,
         gamma=math.radians(-glidepath_deg),
         m=mass_kg,

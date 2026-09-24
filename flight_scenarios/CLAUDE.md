@@ -130,19 +130,19 @@ Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-
 
 - **Types without a native model are decided by `aircraft/performance_index.json`** (2026-09-24):
   preset → index row (own parameters / a substitute flown under ITS code / excluded) → OpenAP-direct;
-  OpenAP synonyms are never flown under their own code; nothing flies as an A320 unless a caller passes
-  the explicit fallback (only the ts `all` filter does). The batch layer drops and names flights with no
-  dynamics (`excluded_no_dynamics`, selection schema v2) (FS6).
+  OpenAP synonyms are never flown under their own code; nothing flies as a stand-in (the A320 fallback is
+  gone). The batch layer drops and names flights with no dynamics (`excluded_no_dynamics`, selection schema
+  v2); a trajectory-only consumer asks `build_scenario(..., require_dynamics=False)` and gets a scenario
+  WITHOUT dynamics (aircraft/aero `None`, mass and target V NaN), from which anything needing dynamics must
+  ask `scenario.dynamics(purpose)` — it raises `NoAircraftDynamics` by name (FS6).
 - **`"type": "UNK"` on every harvested arrival does NOT mean the batch is single-type.**
   `_resolve_aircraft` (`flight_scenarios/build.py`, mirrored in `ts_transformer/data/dataset.py`)
-  tries declared type → **`icao24` via the OpenAP lookup** → the explicit fallback, and the
-  icao24 path recovers the REAL airframe for most flights: **20 distinct types** across 400 KRDU
-  arrivals (A320 224, B738 38, E75L 25, CRJ9 23, … A333, GLF6, C550). Anything assuming one
-  airframe per batch is wrong — that is exactly how the flyability check first shipped, grading
-  ~44% of flights against an A320. The fallback (`--aircraft-type`, train default `A320`) is a
-  `TSConfig` field, so it is recorded in the checkpoint and predict defaults to the train-time
-  value; overriding it at predict shifts the ENU frames and the target Vref/threshold-crossing
-  height the gates measure against, so it WARNS.
+  tries declared type → **`icao24` via the identity resolver**, and the icao24 path recovers the
+  REAL airframe for most flights: **20 distinct types** across 400 KRDU arrivals (A320 224, B738
+  38, E75L 25, CRJ9 23, … A333, GLF6, C550). Anything assuming one airframe per batch is wrong —
+  that is exactly how the flyability check first shipped, grading ~44% of flights against an
+  A320. The `--aircraft-type` fallback that flew every unresolved type as an A320 was retired on
+  2026-09-24 (ts: `aircraft_filter`, see FS6).
 - **FAA registry → ICAO type: a documented model beats every heuristic** (2026-09-23).
   `aircraft/faa_icao_crosswalk.json` (TCDS / FSB report / JO 7360.1K + Doc 8643, one row per
   certificated model listing every registry spelling) overrides the name matcher and the OpenSky

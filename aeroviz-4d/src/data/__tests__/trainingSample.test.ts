@@ -53,11 +53,20 @@ describe("parseTrainingSample", () => {
   // ── refused by name ─────────────────────────────────────────────────────
   it("refuses a sample of an earlier format by its schema name, whatever vocabulary it carries", () => {
     // v2: the box vocabulary's sample; v3: instruction-v1's, and instruction-v2's before its change of
-    // shape got a name of its own. Both are superseded names, so they are written out here.
-    for (const schema of ["aeroviz-training-sample-v2", "aeroviz-training-sample-v3"]) {
+    // shape got a name of its own; v4: instruction-v2's before the heading wedge; v5: with the flown type
+    // (an A320 for every type without dynamics). All are superseded names, so they are written out here.
+    for (const schema of ["aeroviz-training-sample-v2", "aeroviz-training-sample-v3", "aeroviz-training-sample-v4",
+                          "aeroviz-training-sample-v5"]) {
       expect(refusal((raw) => { raw.schema = schema; })).toContain(
         `schema is "${schema}", expected "${TRAINING_SAMPLE_SCHEMA}" — a sample of another format is not read`);
     }
+  });
+
+  it("reads a flight whose type is unresolved as null, and refuses an empty type", () => {
+    const raw: any = mockSample();
+    raw.flights[1].typecode = null;
+    expect(parsed(raw).flights[1].typecode).toBeNull();
+    expect(refusal((sample) => { sample.flights[0].typecode = ""; })).toContain("typecode");
   });
 
   it("refuses another reading rule and another spec by name", () => {

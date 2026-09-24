@@ -81,7 +81,7 @@ def rebuild_cohort(payload: dict[str, Any], config: TSConfig, keys: Sequence[str
     manifests = checkpoint_manifests(payload)
     require_matching_data_provenance(payload, checkpoint_data_provenance(payload, manifests))
     built, report = build_series(
-        load_flight_dicts(manifests, include_flight_keys=set(keys), verbose=False), config, aircraft_type=config.aircraft_type,
+        load_flight_dicts(manifests, include_flight_keys=set(keys), verbose=False), config,
     )
     print(f"  {report.format()}", flush=True)
     by_id = {item.dataset_id: item for item in usable_series(built, config, verbose=False)}

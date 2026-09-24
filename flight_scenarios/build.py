@@ -5,8 +5,8 @@ Orchestration only — it wires the pieces together:
     CZML-input flight ──► initial_state_from_track ──► GeodeticState
     declared type / ICAO24 ──► ICAO Doc 8643 identity ─┐
                                                       ├─► preset / performance index / OpenAP
-      (no dynamics: NoAircraftDynamics, or an explicit ┘      Aircraft ─► AeroParams
-       caller fallback -- only the ts `all` filter passes one)
+      (no dynamics: NoAircraftDynamics, or on request a ┘      Aircraft ─► AeroParams
+       scenario without dynamics for trajectory-only use)
     => FlightScenario(initial, aircraft, aero, source)
 """
 
@@ -26,7 +26,9 @@ from .fitted_approach import UnusableFittedApproach, fit_flight_final_approach
 from .identity import flight_key
 from .runway_target import threshold_target_state
 from .scenario import (
+    UNKNOWN_WITHOUT_DYNAMICS,
     FlightScenario,
+    NoAircraftDynamics,
     aircraft_dynamics_source,
     aircraft_dynamics_surrogate_typecode,
     aircraft_for_code,
@@ -36,7 +38,6 @@ from .start_state import DEFAULT_WINDOW_S, final_state_from_track, initial_state
 
 def build_scenario(
     flight: dict[str, Any],
-    aircraft_type: str | None = None,
     *,
     airport: str | None = None,
     mass_kg: float | None = None,
@@ -44,6 +45,7 @@ def build_scenario(
     target_from_threshold: bool = False,
     target_from_fitted_adsb: bool = False,
     aircraft_provider: str = "auto",
+    require_dynamics: bool = True,
 ) -> FlightScenario:
     """Build one :class:`FlightScenario` from a single CZML-input ``flight`` dict.
 
@@ -51,10 +53,13 @@ def build_scenario(
     runway, waypoints: [[t, lon, lat, alt], ...], ...}``. Identity is resolved separately
     from performance: declared designators and registry results are validated against ICAO
     Doc 8643, then ``scenario.aircraft_for_code`` picks the dynamics (a preset, the performance
-    index's decision, or the type's own OpenAP model). Without dynamics the build raises
-    :class:`NoAircraftDynamics`, unless ``aircraft_type`` names an explicit fallback to fly
-    instead; it never overwrites the audited real identity. ``mass_kg`` defaults to the selected
-    dynamics model's landing mass (these are approach scenarios).
+    index's decision, or the type's own OpenAP model); no type is ever flown as another by
+    default. Without dynamics the build raises :class:`NoAircraftDynamics` -- unless
+    ``require_dynamics=False``: a trajectory-only consumer (ts state series, the instruction
+    labeller) then gets a scenario WITHOUT dynamics, whose aircraft and aero are ``None`` and whose
+    masses and target speed are `UNKNOWN_WITHOUT_DYNAMICS`, with ``source["no_dynamics_reason"]``.
+    ``mass_kg`` defaults to the selected dynamics model's landing mass (these are approach
+    scenarios).
 
     ``target_from_threshold`` chooses the published runway endpoint.  The mutually exclusive
     ``target_from_fitted_adsb`` chooses the OLS-extrapolated flown threshold crossing:
@@ -78,10 +83,15 @@ def build_scenario(
     )
     flight = flight_to_msl(flight)
     aircraft_selection = _resolve_aircraft(
-        flight, aircraft_type, aircraft_provider=aircraft_provider
+        flight, aircraft_provider=aircraft_provider, require_dynamics=require_dynamics
     )
     aircraft = aircraft_selection.aircraft
-    mass = mass_kg if mass_kg is not None else aircraft.landing_mass
+    if mass_kg is not None:
+        mass = mass_kg
+    elif aircraft is not None:
+        mass = aircraft.landing_mass
+    else:
+        mass = UNKNOWN_WITHOUT_DYNAMICS
     arr_airport = airport or flight.get("arr_airport")
 
     waypoints = flight["waypoints"]
@@ -116,7 +126,7 @@ def build_scenario(
         target_source = "fitted_adsb_crossing"
     if target is None:
         target = final_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
-    aero = aero_params_for_aircraft(aircraft)
+    aero = aero_params_for_aircraft(aircraft) if aircraft is not None else None
 
     source = {
         "id": flight.get("id"),
@@ -155,10 +165,9 @@ def build_scenario(
         # AeroParams the optimizer and replay fly with, so the gate judges the record
         # against the model that produced it). Producer-supplied like hae_minus_msl_m:
         # a computed record without this block grades speed-indeterminate, loudly.
-        "landing_aero": {
-            "wing_area_m2": aero.S,
-            "cl_max_landing": aero.Cl_max,
-        },
+        "landing_aero": (
+            {"wing_area_m2": aero.S, "cl_max_landing": aero.Cl_max} if aero is not None else None
+        ),
         **aircraft_selection.audit_fields(),
     }
     return FlightScenario(initial=initial, aircraft=aircraft, aero=aero, source=source, target=target)
@@ -166,7 +175,6 @@ def build_scenario(
 
 def build_scenarios_from_arrivals(
     arrivals: str | Path | list[dict[str, Any]],
-    aircraft_type: str | None = None,
     *,
     airport: str | None = None,
     mass_kg: float | None = None,
@@ -179,14 +187,14 @@ def build_scenarios_from_arrivals(
 
     ``arrivals`` may be an airport harvest root, ``arrivals/manifest.json``, or an
     already-loaded list. Each flight's identity is resolved from its own declared type or
-    ``icao24`` (so a mixed-fleet file gets per-flight types); ``aircraft_type`` is only the
-    dynamics fallback. ``airport`` and ``target_from_threshold`` are forwarded to
+    ``icao24`` (so a mixed-fleet file gets per-flight types). ``airport`` and
+    ``target_from_threshold`` are forwarded to
     :func:`build_scenario`.
     """
     flights = load_model_arrivals(arrivals)
     return [
         build_scenario(
-            flight, aircraft_type, airport=airport, mass_kg=mass_kg, window_s=window_s,
+            flight, airport=airport, mass_kg=mass_kg, window_s=window_s,
             target_from_threshold=target_from_threshold,
             target_from_fitted_adsb=target_from_fitted_adsb,
             aircraft_provider=aircraft_provider,
@@ -195,26 +203,11 @@ def build_scenarios_from_arrivals(
     ]
 
 
-class NoAircraftDynamics(KeyError):
-    """The flight's aircraft has no dynamics the model may fly: no ICAO type, a type the
-    performance index excludes, or a type nothing models. Batch layers drop the flight and
-    name ``typecode`` and ``reason``; nothing is flown in its place."""
-
-    def __init__(self, typecode: str | None, reason: str, flight_id: Any = None) -> None:
-        super().__init__(f"no aircraft dynamics for flight {flight_id!r} (type {typecode}): {reason}")
-        self.typecode = typecode
-        self.reason = reason
-
-    def __str__(self) -> str:          # KeyError would quote the message
-        return str(self.args[0])
-
-
 @dataclass(frozen=True, slots=True)
 class _AircraftSelection:
-    aircraft: Aircraft
+    aircraft: Aircraft | None           # None: no dynamics (only when not required)
     identity: AircraftIdentity
-    fallback_used: bool
-    fallback_reason: str | None
+    no_dynamics_reason: str | None
     provider: str
 
     def audit_fields(self) -> dict[str, Any]:
@@ -232,12 +225,14 @@ class _AircraftSelection:
             "registry_manufacturer": identity.manufacturer,
             "registry_model": identity.model,
             "faa_model_code": identity.faa_model_code,
-            "dynamics_typecode": self.aircraft.code,
-            "dynamics_source": aircraft_dynamics_source(
-                self.aircraft.code, provider=self.provider
+            "dynamics_typecode": self.aircraft.code if self.aircraft is not None else None,
+            "dynamics_source": (
+                aircraft_dynamics_source(self.aircraft.code, provider=self.provider)
+                if self.aircraft is not None else None
             ),
-            "dynamics_surrogate_typecode": aircraft_dynamics_surrogate_typecode(
-                self.aircraft.code, provider=self.provider
+            "dynamics_surrogate_typecode": (
+                aircraft_dynamics_surrogate_typecode(self.aircraft.code, provider=self.provider)
+                if self.aircraft is not None else None
             ),
             # What the performance index decided for the identity's type (own / substitute /
             # exclude), or None when the type is flown natively or the provider bypasses it.
@@ -248,8 +243,8 @@ class _AircraftSelection:
                 else None
             ),
             "performance_index_sha256": performance_index_identity()["sha256"],
-            "aircraft_fallback_used": self.fallback_used,
-            "aircraft_fallback_reason": self.fallback_reason,
+            # Why the scenario carries no dynamics (a trajectory-only build), else None.
+            "no_dynamics_reason": self.no_dynamics_reason,
         }
 
 
@@ -289,11 +284,11 @@ def resolve_airframe(
 
 def _resolve_aircraft(
     flight: dict[str, Any],
-    fallback_type: str | None,
     *,
     aircraft_provider: str = "auto",
+    require_dynamics: bool = True,
 ) -> _AircraftSelection:
-    """Resolve identity first, then obtain OpenAP/preset dynamics independently."""
+    """Resolve identity first, then the dynamics; no type is flown as another by default."""
     resolver = get_default_identity_resolver()
     identity = resolver.resolve(
         declared_type=flight.get("type"),
@@ -309,28 +304,17 @@ def _resolve_aircraft(
             return _AircraftSelection(
                 aircraft=aircraft,
                 identity=identity,
-                fallback_used=False,
-                fallback_reason=None,
+                no_dynamics_reason=None,
                 provider=aircraft_provider,
             )
 
-    if not fallback_type:
-        raise NoAircraftDynamics(
-            identity.typecode, failure or "identity has no ICAO typecode", flight.get("id")
-        )
-
-    fallback_code = resolver.catalog.normalize_typecode(fallback_type)
-    try:
-        aircraft = aircraft_for_code(fallback_code, provider=aircraft_provider)
-    except KeyError as exc:
-        raise KeyError(
-            f"fallback aircraft {fallback_code!r} has no usable dynamics: {exc}"
-        ) from None
+    reason = failure or "identity has no ICAO typecode"
+    if require_dynamics:
+        raise NoAircraftDynamics(identity.typecode, reason, flight.get("id"))
     return _AircraftSelection(
-        aircraft=aircraft,
+        aircraft=None,
         identity=identity,
-        fallback_used=True,
-        fallback_reason=failure or "identity has no ICAO typecode",
+        no_dynamics_reason=reason,
         provider=aircraft_provider,
     )
 

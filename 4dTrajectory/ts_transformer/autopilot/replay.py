@@ -3,10 +3,11 @@ the flight and the verdicts — shared by the spec's measurements, the sensitivi
 
 Who is flown (§11), by `group_of`: an identified type that publishes an approach speed ("unspecified" is
 flown at it) is flown — on its own dynamics (`OWN`: the identified type is the dynamics type) or on a
-stand-in's (`STAND_IN`, reported, never gated: its errors are the stand-in's aerodynamics, and its
-"unspecified" speed is its type's as published, unscaled — the flight's mass is the stand-in's,
-`flight_approach_ias_mps`); a flight with no identified type, or whose type publishes no approach speed, is
-counted, not flown. The sample is a seeded
+stand-in's (`STAND_IN`: the airframe `aircraft/performance_index.json` substitutes for it, reported, never
+gated: its errors are the stand-in's aerodynamics, and its "unspecified" speed is its type's as published,
+unscaled — the flight's mass is the stand-in's, `flight_approach_ias_mps`); a flight with no identified
+type, with no aircraft dynamics (the index excludes its type, or nothing models it; since 2026-09-24 never
+an A320 in its place, C31), or whose type publishes no approach speed, is counted, not flown. The sample is a seeded
 permutation of a split's labelled flights, read in order until each airport holds ``per_airport`` flights of
 the asked groups (0: every one) — the pool, the count read and the exclusions are returned with it.
 
@@ -88,6 +89,10 @@ def group_of(series: FlightSeries) -> str:
     identified = source["resolved_typecode"]
     if identified is None:
         return "no identified type"
+    if not series.scenario.has_dynamics:
+        # the performance index excludes the type, or nothing models it: the signals keep the flight
+        # (`all-flights`), but there is no airframe to fly it on (C31)
+        return "no aircraft dynamics"
     if math.isnan(approach_speed_ias_mps(identified, None)):
         return "type publishes no approach speed"
     return OWN if identified == source["dynamics_typecode"] else STAND_IN

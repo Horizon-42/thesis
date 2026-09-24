@@ -416,4 +416,54 @@ sentence ends before its landing — since `instruction-v2` the harvest's and th
 the spacing to a parallel runway — `airport.landing_cross_limit_m`, a MIRROR of the harvest's
 `_runway_bracket_cross_limit`, checked equal on every runway — and within its 100 m above the threshold). The
 first such crossing is the landing; a flight that comes back ahead of the threshold after it is refused
-(`read.admit`, the one gate the labeller, the measurements and the figures share).
+(`read.admit`, the one gate the labeller, the measurements and the figures share). Since signals v2
+(2026-09-24) a flight's `typecode` is its OWN ICAO type (`source["resolved_typecode"]`) or null when its
+identity is unresolved — v1 carried the type the dynamics flew, an A320 for every type without dynamics
+— and the default `TSConfig` keeps flights without aircraft dynamics (C31); the frontend sample moved to
+`aeroviz-training-sample-v6` with it (v5's shape plus the nullable type).
+
+### C31 · the aircraft filter: drop a flight only where dynamics are used
+
+2026-09-24 (user decisions: "去掉 all 的 A320 回退", then "ts 用2 按需丢弃"). The retired `all` filter
+flew every type without dynamics as an A320 (`TSConfig.aircraft_type`, default `A320`); both are gone
+and a stored config carrying them is refused by name (`RETIRED_AIRCRAFT_FILTER`,
+`RETIRED_FALLBACK_FIELD`; the field is dropped only under `openap-direct`, which never read it).
+`config.AIRCRAFT_FILTERS`:
+
+| filter | keeps | for |
+|---|---|---|
+| `all-flights` | every flight; one whose type has no dynamics (the performance index excludes it, or nothing models it, or its identity is unresolved) is kept as a scenario WITHOUT dynamics — no aircraft, mass NaN — and counted in `BuildReport.without_dynamics` | state output, the instruction labeller (kinematics only) |
+| `modelled` | the flights the aircraft model can fly (preset, performance index own/substitute, OpenAP-direct); the rest rejected by name (`rejected_aircraft`) | control output |
+| `openap-direct` | ICAO types OpenAP models under their own designator | unchanged |
+
+**The default is by need**: `aircraft_filter=None` resolves at construction to
+`config.default_aircraft_filter(prediction_output)` — `all-flights` for state, `modelled` for control —
+so a stored config always names a value, and `aircraft_filter` is a REQUIRED serialized field (the
+default moved; a config without it would read today's). `_validate_cross` refuses control output
+under `all-flights` (its inverse-dynamics labels need mass, wing area and thrust). Everything that
+needs dynamics asks `scenario.dynamics(purpose)`, which raises `NoAircraftDynamics` naming the purpose:
+the control rollout's context, supervision and anchor gate, the lockstep verdict, the flyability
+report. `predict` skips a flight without dynamics (its evaluation record's states carry a mass and are
+written with `allow_nan=False`) and states the count in `summary["skipped"]["no_aircraft_dynamics"]`;
+training's validation metrics still score every flight. `data_selection.json` (schema
+`ts-data-selection-v3-performance-index`) records the performance index's sha256, and so does every
+checkpoint (`payload["performance_index"]`): `load_checkpoint` refuses one trained under another index
+unless its filter is `openap-direct` (which bypasses the index), as `FlightScenario.from_dict` refuses a
+saved scenario — a rebuilt cohort would otherwise be flown as other aircraft. `BuildReport` counts
+`selected_typecodes` and `without_dynamics` on BUILT series only, and `instruction_signals` over the
+usable ones. Where a new config is derived from a stored one of another output: the control-basis
+oracle reads a state seed's cohort under `modelled` (the flights the seed's predict scored); the
+frame-ablation resume check compares the filter an arm trains under today
+(`frame_ablation.resume_declaration`), so an arm trained under `all` is refused at resume. The executor
+(`autopilot/`) builds its flights under the default (`all-flights`, the signals' own build) and flies only
+those with dynamics: `replay.group_of` counts a flight without them ("no aircraft dynamics"), and its
+`STAND_IN` group is now the performance index's substitutes only (`rollout_context` asks
+`scenario.dynamics`); its plant's control config names `modelled`.
+
+Every filter tags its pipeline directory and category (`_all_flights`, `_modelled`, `_openap_direct`):
+the bare name belonged to `all`, whose outputs a new run must never overwrite. Run names read the
+by-need default, so neither default shows a `fleet` item.
+
+Size (the 2026-09-24 census of the eligible roster, before the build's own skips): train 50,693 flights,
+of which 46,260 (91.3 %) have dynamics and 36,294 (71.6 %) are OpenAP-direct; 4,433 have none (3,821
+excluded by the index, 612 unresolved identity). Val 10,635 / 9,668 / 7,574. Test sealed.

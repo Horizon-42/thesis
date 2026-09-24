@@ -468,3 +468,14 @@ def test_the_fingerprint_reads_the_eligibility_roster_exactly_when_the_checkpoin
     assert seen["rosters"] == [manifests[0].resolve().parent / "lateral_pass_eligibility.json"]
     provenance_module.checkpoint_data_provenance(payload(None), manifests)
     assert seen["rosters"] is None
+
+
+def test_a_state_seed_is_read_under_the_modelled_filter():
+    """A state reference arm keeps flights without aircraft dynamics (`all-flights`); the
+    control fit needs dynamics, so it rebuilds the cohort under `modelled` -- the flights that
+    arm's own predict scored. `openap-direct` is kept."""
+    from ts_transformer.config import AIRCRAFT_FILTER_MODELLED, AIRCRAFT_FILTER_OPENAP_DIRECT, TSConfig
+    config = runner.basis_config(TSConfig().to_dict(), 8, "cpu")
+    assert config.prediction_output == "control" and config.aircraft_filter == AIRCRAFT_FILTER_MODELLED
+    direct = TSConfig(aircraft_filter=AIRCRAFT_FILTER_OPENAP_DIRECT).to_dict()
+    assert runner.basis_config(direct, 8, "cpu").aircraft_filter == AIRCRAFT_FILTER_OPENAP_DIRECT

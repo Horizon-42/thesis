@@ -188,7 +188,7 @@ def evaluate_clock_variants(
                 "dataset_id": item.dataset_id,
                 "airport": airport,
                 "runway": f"{airport}/{runway}",
-                "aircraft_type": item.scenario.aircraft.code,
+                "aircraft_type": item.scenario.source["resolved_typecode"],
                 "trajectory_type": route_types[index],
                 "true_final_time_s": true_duration_s[index],
                 "predicted_final_time_s": predicted_total[index],
@@ -250,7 +250,6 @@ def main() -> None:
     all_series, build_report = build_series(
         load_flight_dicts(manifests, include_flight_keys=set(validation_keys)),
         config,
-        aircraft_type=config.aircraft_type,
     )
     print(build_report.format(), flush=True)
     all_series = usable_series(all_series, config, verbose=False)

@@ -63,12 +63,8 @@ def run_cli(
             f"first missing key: {missing[0]!r}"
         )
     selected_flights = [indexed_flights[key] for key in wanted]
-    series, report = build_series(
-        selected_flights,
-        config,
-        aircraft_type=config.aircraft_type,
-    )
-    print(f"  aircraft   {config.aircraft_type} (checkpoint training fallback)")
+    series, report = build_series(selected_flights, config)
+    print(f"  aircraft   filter {config.aircraft_filter}")
     print(report.format())
     indexed_series = {item.dataset_id: item for item in series}
     missing = [key for key in wanted if key not in indexed_series]

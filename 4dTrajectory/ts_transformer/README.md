@@ -1125,11 +1125,12 @@ point that later work may choose to extend, but none is an accident:
 - **The declared aircraft type is `"UNK"` for all 3747 harvested flights** (`czml_export`
   hardcodes it), but `_resolve_aircraft` recovers the real airframe from `icao24` via the
   OpenAP lookup — 20 distinct types across 400 KRDU arrivals (A320 224, B738 38, E75L 25,
-  B737 25, CRJ9 23, …). Only genuinely unresolvable flights use the `--aircraft-type`
-  fallback. **A batch is a real fleet, so nothing may assume one airframe for it** — the
-  flyability check first shipped doing exactly that and graded ~44% of flights against an
-  A320's `Cl_max` and max thrust. What is still missing is coverage checking: how often the
-  fallback is actually hit is not reported per batch.
+  B737 25, CRJ9 23, …). **A batch is a real fleet, so nothing may assume one airframe for
+  it** — the flyability check first shipped doing exactly that and graded ~44% of flights
+  against an A320's `Cl_max` and max thrust. The `--aircraft-type` fallback that flew every
+  unresolved or unmodelled type as an A320 was retired on 2026-09-24: `aircraft_filter`
+  (`all-flights` / `modelled` / `openap-direct`, default by need) decides which flights a run
+  keeps, and every build report counts the ones kept without dynamics or dropped (C31).
 - **`prediction_output=control`, including the frozen `control_recipe_name=simple-v1`, has
   no published accuracy results.** A month of dated experiments (2026-07-27 → 2026-08-16)
   converged the recipe design and rejected several alternatives (direct/uniform duration

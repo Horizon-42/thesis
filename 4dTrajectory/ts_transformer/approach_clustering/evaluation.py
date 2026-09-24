@@ -42,11 +42,7 @@ def compare_checkpoints(
             reference_config = config.to_dict()
         elif config.to_dict() != reference_config:
             raise ValueError("A/B/C checkpoints do not use the same model recipe")
-        series, report = build_series(
-            flights,
-            config,
-            aircraft_type=config.aircraft_type,
-        )
+        series, report = build_series(flights, config)
         if {item.dataset_id for item in series} != validation_ids:
             raise ValueError(f"{label} could not rebuild the full comparison cohort")
         ordered = sorted(series, key=lambda item: item.dataset_id)

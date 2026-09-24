@@ -138,6 +138,7 @@ def test_a_retired_output_field_is_dropped_at_its_old_default_and_named_anywhere
     from ts_transformer.config import (
         PREDICTION_CONTROL,
         RETIRED_CONSTANT_FIELDS,
+        RETIRED_FALLBACK_FIELD,
         RETIRED_FIELD_NAMES,
         RETIRED_OUTPUT_FIELDS,
         RETIRED_SERIALIZED_FIELDS,
@@ -151,7 +152,8 @@ def test_a_retired_output_field_is_dropped_at_its_old_default_and_named_anywhere
     assert not (retired.keys() & set(RETIRED_CONSTANT_FIELDS))
     assert RETIRED_FIELD_NAMES == (
         set(RETIRED_SERIALIZED_FIELDS) | set(RETIRED_CONSTANT_FIELDS) | retired.keys()
-    ), "the flat set the CLI reads must cover all three kinds"
+        | {RETIRED_FALLBACK_FIELD}
+    ), "the flat set the CLI reads must cover every kind (the A320 fallback is the fourth)"
 
     stored = TSConfig(prediction_output=PREDICTION_CONTROL).to_dict()
     at_defaults = {**stored, **retired}
@@ -210,3 +212,46 @@ def test_the_config_grid_tolerance_mirrors_the_row_tolerance():
     from ts_transformer.data.time_grids import ROW_TOLERANCE_S
     assert config._GRID_TOLERANCE_S == ROW_TOLERANCE_S
 
+
+
+# ── the aircraft filter: drop a flight only where dynamics are used (2026-09-24) ──
+
+def test_the_default_aircraft_filter_is_decided_by_the_output_and_stored_as_a_value():
+    from ts_transformer.config import (
+        AIRCRAFT_FILTER_ALL_FLIGHTS, AIRCRAFT_FILTER_MODELLED, PREDICTION_CONTROL,
+    )
+    assert TSConfig().aircraft_filter == AIRCRAFT_FILTER_ALL_FLIGHTS
+    assert TSConfig(prediction_output=PREDICTION_CONTROL).aircraft_filter == AIRCRAFT_FILTER_MODELLED
+    assert TSConfig().to_dict()["aircraft_filter"] == AIRCRAFT_FILTER_ALL_FLIGHTS
+
+
+def test_a_control_output_refuses_a_filter_that_keeps_flights_without_dynamics():
+    from ts_transformer.config import AIRCRAFT_FILTER_ALL_FLIGHTS, PREDICTION_CONTROL
+    with pytest.raises(ValueError, match="inverse-dynamics labels need every flight's aircraft dynamics"):
+        TSConfig(prediction_output=PREDICTION_CONTROL, aircraft_filter=AIRCRAFT_FILTER_ALL_FLIGHTS)
+
+
+def test_a_stored_config_of_the_retired_a320_fallback_is_refused_by_name():
+    from ts_transformer.config import (
+        AIRCRAFT_FILTER_MODELLED, AIRCRAFT_FILTER_OPENAP_DIRECT, RETIRED_AIRCRAFT_FILTER,
+        RETIRED_FALLBACK_FIELD,
+    )
+    stored = TSConfig().to_dict()
+    with pytest.raises(ValueError, match=f"aircraft_filter={RETIRED_AIRCRAFT_FILTER!r} is retired"):
+        TSConfig.from_dict({**stored, "aircraft_filter": RETIRED_AIRCRAFT_FILTER,
+                            RETIRED_FALLBACK_FIELD: "A320"})
+    # under a filter that would have flown it, the fallback is refused...
+    with pytest.raises(ValueError, match="the fallback is retired"):
+        TSConfig.from_dict({**stored, "aircraft_filter": AIRCRAFT_FILTER_MODELLED,
+                            RETIRED_FALLBACK_FIELD: "A320"})
+    # ...under openap-direct it was never read, so it is dropped
+    direct = {**stored, "aircraft_filter": AIRCRAFT_FILTER_OPENAP_DIRECT, RETIRED_FALLBACK_FIELD: "A320"}
+    assert RETIRED_FALLBACK_FIELD not in TSConfig.from_dict(direct).to_dict()
+
+
+def test_a_stored_config_must_name_its_aircraft_filter():
+    # The default moved (2026-09-24); a config without the field would read today's.
+    stored = TSConfig().to_dict()
+    del stored["aircraft_filter"]
+    with pytest.raises(ValueError, match="missing aircraft_filter"):
+        TSConfig.from_dict(stored)

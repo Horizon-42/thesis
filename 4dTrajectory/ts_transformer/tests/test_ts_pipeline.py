@@ -96,8 +96,7 @@ def test_final_training_prints_the_resolved_config_before_the_command(
         "+ final_time/600s; future velocity derived from position"
     ) in output
     assert (
-        "runtime   : batch=2048, device=auto, seed=29, aircraft=A320, "
-        "aircraft_filter=all"
+        "runtime   : batch=2048, device=auto, seed=29, aircraft_filter=all-flights"
     ) in output
     assert output.index("config    :") < output.index("[1/1 final train")
 
@@ -839,6 +838,20 @@ def test_coordinate_ablation_refuses_repeated_or_partial_test(tmp_path):
 
 
 
+def test_every_aircraft_filter_names_its_directory_and_the_default_is_by_need(tmp_path, monkeypatch):
+    """The bare directory name belongs to the retired `all` filter (the A320 fallback): a new
+    run must never write into it, so every filter carries its own tag."""
+    monkeypatch.setattr(pipeline, "OPT_OUTPUTS_ROOT", tmp_path / "outputs")
+    state = pipeline.TrainingPlan(("KRDU",), "itransformer", training_mode="per-airport")
+    control = pipeline.TrainingPlan(("KRDU",), "itransformer", training_mode="per-airport",
+                                    prediction_output=pipeline.PREDICTION_CONTROL)
+    direct = pipeline.TrainingPlan(("KRDU",), "itransformer", training_mode="per-airport",
+                                   aircraft_filter="openap-direct")
+    assert state.aircraft_filter == "all-flights" and state.train_dir.name.endswith("_all_flights")
+    assert control.aircraft_filter == "modelled" and "_modelled" in control.train_dir.name
+    assert direct.train_dir.name.endswith("_openap_direct")
+
+
 def test_the_lag_and_point_mass_cells_are_distinct_and_resolve_their_model(tmp_path, monkeypatch):
     """Review A-1. `control_dynamics_model` was emitted to the training subprocess but
     missing from both rebuilt override dicts (so a lag cell was rebuilt as point-mass:
@@ -855,7 +868,7 @@ def test_the_lag_and_point_mass_cells_are_distinct_and_resolve_their_model(tmp_p
     lag = pipeline.TrainingPlan(("KRDU",), "itransformer", control_dynamics_model=CONTROL_DYNAMICS_FIRST_ORDER_LAG, **common)
 
     assert point_mass.train_dir != lag.train_dir
-    assert lag.train_dir.name.endswith("_lag") and not point_mass.train_dir.name.endswith("_lag")
+    assert "lag" in lag.train_dir.name.split("_") and "lag" not in point_mass.train_dir.name.split("_")
     for plan, model in ((point_mass, CONTROL_DYNAMICS_POINT_MASS), (lag, CONTROL_DYNAMICS_FIRST_ORDER_LAG)):
         assert plan._expected_cv_base_config()["control_dynamics_model"] == model
         assert plan.resolved_train_config(use_best_config=False)[0].control_dynamics_model == model

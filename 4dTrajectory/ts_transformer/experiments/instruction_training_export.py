@@ -65,10 +65,12 @@ from ts_transformer.repo_layout import REPO_ROOT
 #: name, so these move together. A name changes with its file's shape, on both sides, in the same
 #: change. Sample v5 is `instruction-v2`'s shape: a turn bounded by rate (the fastest turn on time
 #: and the slowest begun late, in plan AND as the heading against time — no turn band), the judged
-#: hold (`holdCheck`), the landing limits in the vocabulary and per candidate. The index keeps its
-#: v1 shape: sets of every vocabulary sit in it.
+#: hold (`holdCheck`), the landing limits in the vocabulary and per candidate. Sample v6
+#: (2026-09-24) is v5 with a flight's ``typecode`` its own ICAO type or null (identity unresolved),
+#: from signals v2; v5 carried the type the dynamics flew, an A320 for every type without
+#: dynamics. The index keeps its v1 shape: sets of every vocabulary sit in it.
 INDEX_SCHEMA = "aeroviz-training-index-v1"
-SAMPLE_SCHEMA = "aeroviz-training-sample-v5"
+SAMPLE_SCHEMA = "aeroviz-training-sample-v6"
 KIND_READBACK = "vocabulary-readback"
 INDEX_FILE = "index.json"
 SAMPLE_FILE = "sample.json"

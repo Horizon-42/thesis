@@ -155,7 +155,7 @@ export default function TrainingSentenceBar() {
       <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} />
       <header className="training-sentence-head">
         <strong>{flight.callsign}</strong>
-        <span>{flight.typecode}</span>
+        <span>{flight.typecode ?? "type unknown"}</span>
         <span>runway {flight.runway}</span>
         <span>{flight.stratum}</span>
         <span>

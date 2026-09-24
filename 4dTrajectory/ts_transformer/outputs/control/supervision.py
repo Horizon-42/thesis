@@ -67,6 +67,7 @@ def reference_control_supervision(
             "reference_controls": np.zeros((n_segments, 3), dtype=np.float64),
             "reference_control_weight": np.zeros(n_segments, dtype=np.float64),
         }
+    aircraft, aero = series.scenario.dynamics("the inverse-dynamics control labels")
     mass_kg = float(series.scenario.initial.m)
     anchor_time = float(series.times[anchor])
     times = series.times[anchor:] - anchor_time
@@ -78,7 +79,6 @@ def reference_control_supervision(
          for _t, s in samples],
         dtype=np.float64,
     )
-    aero = series.scenario.aero
     contract = control_contract(config.control_thrust_parameterization)
     inverted = segment_controls(
         states,
@@ -88,7 +88,7 @@ def reference_control_supervision(
             [aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall],
             dtype=np.float64,
         ),
-        max_thrust_n=float(series.scenario.aircraft.engine.max_thrust_total_n),
+        max_thrust_n=float(aircraft.engine.max_thrust_total_n),
         control_lower=contract.lower_array,
         control_upper=contract.upper_array,
         n_segments=n_segments,

@@ -57,7 +57,7 @@ def rebuild_series(directory: Path, signals: Sequence[FlightSignals]) -> list[Fl
                              f"(sha256 {recorded[airport][:12]} recorded)")
         keys = {item.dataset_id for item in signals if item.airport == airport}
         flights = load_flight_dicts([manifest], include_flight_keys=keys, verbose=False)
-        series, _report = build_series(flights, config, aircraft_type=config.aircraft_type)
+        series, _report = build_series(flights, config)
         built.update({item.dataset_id: item for item in series})
     missing = [item.dataset_id for item in signals if item.dataset_id not in built]
     if missing:

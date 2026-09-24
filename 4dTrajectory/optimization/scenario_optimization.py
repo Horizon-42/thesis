@@ -244,7 +244,7 @@ def optimize_scenario(
     """
     initial = scenario.initial
     target = scenario.target
-    aircraft = scenario.aircraft
+    aircraft, aero = scenario.dynamics("the optimizer")
     if target is None:
         raise ValueError(
             "scenario has no target state; build scenarios with flight_scenarios (its "
@@ -253,7 +253,7 @@ def optimize_scenario(
 
     # Run the optimizer (initial -> target). Floor the velocity at a stall margin (not Vref)
     # so observed touchdown-speed targets are admissible.
-    min_speed_ms = _STALL_MARGIN * _stall_speed_ms(initial.m, scenario.aero)
+    min_speed_ms = _STALL_MARGIN * _stall_speed_ms(initial.m, aero)
     # Default fitting is Hermite-Simpson (4th order), matching the constrained path and
     # the frontend default. Trapezoidal (2nd order) produced node-feasible plans whose
     # TRUE-dynamics replays drifted km-scale on aggressive min-time floor-riding solves —
@@ -1220,8 +1220,8 @@ def _iaf_setup(scenario: FlightScenario, procedure_root: str | Path, airport: st
     if not paths:
         raise ValueError(f"no IAF->runway paths in the procedure for {apt} {runway}")
     _require_procedure_threshold_agrees(target, paths)
-    aircraft = scenario.aircraft
-    min_speed_ms = _STALL_MARGIN * _stall_speed_ms(scenario.initial.m, scenario.aero)
+    aircraft, aero = scenario.dynamics("the optimizer")
+    min_speed_ms = _STALL_MARGIN * _stall_speed_ms(scenario.initial.m, aero)
     return target, paths, aircraft, min_speed_ms
 
 

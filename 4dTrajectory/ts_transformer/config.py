@@ -198,12 +198,39 @@ def intent_channel_names(intent_conditioning: str) -> tuple[str, ...]:
     )
 
 
-AIRCRAFT_FILTER_ALL = "all"
+# Which flights a dataset keeps, by the dynamics the model can fly for their aircraft (user
+# decision 2026-09-24: drop a flight only where dynamics are used; never fly a stand-in type).
+# ``all-flights``: every flight. A flight whose type has no dynamics (the performance index
+# excludes it, or nothing models it) is kept WITHOUT dynamics -- its scenario carries no aircraft
+# and unknown mass -- which only a trajectory-only run may do: state output, the instruction
+# labeller. Everything that needs dynamics (flyability, exported evaluation records, lockstep)
+# skips such a flight and counts it. ``modelled``: only flights the aircraft model can fly (a
+# preset, the performance index's own-parameter or substitute decision, OpenAP-direct); the
+# rest are dropped by name -- what a control-output run needs. ``openap-direct``: only types
+# OpenAP models under their own designator. The retired ``all`` filter flew every type without
+# dynamics as an A320 (`RETIRED_FALLBACK_FIELD`); its configs no longer load.
+AIRCRAFT_FILTER_ALL_FLIGHTS = "all-flights"
+AIRCRAFT_FILTER_MODELLED = "modelled"
 AIRCRAFT_FILTER_OPENAP_DIRECT = "openap-direct"
-AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL, AIRCRAFT_FILTER_OPENAP_DIRECT)
+AIRCRAFT_FILTERS = (AIRCRAFT_FILTER_ALL_FLIGHTS, AIRCRAFT_FILTER_MODELLED, AIRCRAFT_FILTER_OPENAP_DIRECT)
+#: The filters whose every kept flight has dynamics.
+AIRCRAFT_FILTERS_WITH_DYNAMICS = (AIRCRAFT_FILTER_MODELLED, AIRCRAFT_FILTER_OPENAP_DIRECT)
+
+RETIRED_AIRCRAFT_FILTER = "all"
+
 PREDICTION_STATE = "state"
 PREDICTION_CONTROL = "control"
 PREDICTION_OUTPUTS = (PREDICTION_STATE, PREDICTION_CONTROL)
+
+
+def default_aircraft_filter(prediction_output: str) -> str:
+    """The filter a config gets when it names none: drop a flight only where dynamics are
+    used. A control output is supervised through the dynamics (``modelled``); a state output
+    reads kinematics only (``all-flights``)."""
+    return (AIRCRAFT_FILTER_MODELLED if prediction_output == PREDICTION_CONTROL
+            else AIRCRAFT_FILTER_ALL_FLIGHTS)
+
+
 # Retired outputs (2026-09-18, `docs/2026-09-18_manoeuvre_token_plan.zh.md` §5): the closure
 # arm (scene design P1.c), the plan-and-guidance head (design v5) and the two-tier v2
 # segment-plan layer. Their code is under archive/ and their checkpoints no longer load;
@@ -528,13 +555,11 @@ DEFAULT_RANDOM_TRAIN_ANCHOR_MIN_FUTURE_S = 60.0
 DEFAULT_VALIDATION_COMMON_GRID_POINTS = 64
 DEFAULT_CONTROL_DURATION_UNIFORM_FLOOR = 0.8
 
-# Fallback aircraft when a flight dict has no resolvable type or usable performance model.
-# Not cosmetic: it sets the target state's Vref and threshold-crossing height — the ENU
-# frame and the state the evaluation gates judge — which is why the resolved value is a
-# config field (serialised into every checkpoint) and predict defaults to the checkpoint's
-# value, not to this constant. Strict OpenAP-direct experiments reject those rows before
-# scenario construction and therefore never use this fallback.
-DEFAULT_AIRCRAFT_TYPE = "A320"
+# The retired A320 fallback (user decision 2026-09-24): the field every checkpoint before that
+# date stores. Under `openap-direct` nothing read it (those rows were rejected before scenario
+# construction), so `from_dict` drops it; under the retired `all` filter it flew every type
+# without dynamics as that aircraft, which this build cannot reproduce, so it is refused.
+RETIRED_FALLBACK_FIELD = "aircraft_type"
 
 
 # The three actuator constants, named once. simple-v1-lag deliberately leaves them open
@@ -871,10 +896,12 @@ RETIRED_OUTPUT_FIELDS: dict[str, dict[str, Any]] = {
 }
 
 #: Every field name a stored config may still carry that the contract no longer declares —
-#: the three retirement kinds as one set, so a reader that only needs "was this retired?"
-#: (the CLI's `--config-overrides` message) cannot learn about two kinds and miss the third.
+#: every retirement kind as one set, so a reader that only needs "was this retired?"
+#: (the CLI's `--config-overrides` message) cannot learn about some kinds and miss another
+#: (the fourth, 2026-09-24: the A320 fallback, `RETIRED_FALLBACK_FIELD`).
 RETIRED_FIELD_NAMES: frozenset[str] = (
-    frozenset(RETIRED_SERIALIZED_FIELDS)
+    frozenset({RETIRED_FALLBACK_FIELD})
+    | frozenset(RETIRED_SERIALIZED_FIELDS)
     | frozenset(RETIRED_CONSTANT_FIELDS)
     | frozenset(name for names in RETIRED_OUTPUT_FIELDS.values() for name in names)
 )
@@ -981,7 +1008,6 @@ def control_simple_v1_overrides() -> dict[str, Any]:
         "seq_len": 60,
         "n_segments": 64,
         "channels": ("e", "n", "u", "edot", "ndot", "udot"),
-        "aircraft_type": "A320",
         "aircraft_filter": AIRCRAFT_FILTER_OPENAP_DIRECT,
         "coordinate_frame": "enu",
         "reference_velocity_source": REFERENCE_VELOCITY_TRACK_FIT,
@@ -1082,7 +1108,7 @@ def control_simple_v1_overrides() -> dict[str, Any]:
 # Serialized fields a checkpoint MUST carry. Absence is an error rather than a default:
 # taking this build's default would silently restate the recipe an artifact was trained
 # under. The control list applies only to control-output checkpoints.
-REQUIRED_SERIALIZED_FIELDS = ("channels", "reference_velocity_source")
+REQUIRED_SERIALIZED_FIELDS = ("channels", "reference_velocity_source", "aircraft_filter")
 REQUIRED_SERIALIZED_CONTROL_FIELDS = (
     "control_duration_parameterization",
     "control_duration_uniform_floor",
@@ -1158,7 +1184,6 @@ class CohortSpec:
     dt_s: float
     seq_len: int
     channels: tuple[str, ...]
-    aircraft_type: str
     aircraft_filter: str
     coordinate_frame: str
     target_conditioning: str
@@ -2035,14 +2060,15 @@ class TSConfig:
     full_horizon_steps: int = DEFAULT_PRED_LEN_FULL
     window_horizon_steps: int = DEFAULT_PRED_LEN_WINDOW
     channels: tuple[str, ...] = CHANNELS
-    # The aircraft-type fallback the series were built with (target Vref / TCH -> the ENU
-    # frame and the gate target). In the config so the checkpoint records it and predict
-    # rebuilds series with the SAME frames the normalizer stats were fit under.
-    aircraft_type: str = DEFAULT_AIRCRAFT_TYPE
-    # Data-selection contract. ``openap-direct`` means: resolve identity to an ICAO Doc
-    # 8643 designator, then retain it only when OpenAP has a native model under that exact
-    # designator. OpenAP synonyms, presets and the fallback above are excluded.
-    aircraft_filter: str = AIRCRAFT_FILTER_ALL
+    # Data-selection contract (`AIRCRAFT_FILTERS`). ``openap-direct`` means: resolve identity to
+    # an ICAO Doc 8643 designator, then retain it only when OpenAP has a native model under that
+    # exact designator (presets and the performance index are bypassed). ``modelled`` keeps every
+    # flight the aircraft model can fly and drops the rest; ``all-flights`` keeps every flight,
+    # those without dynamics marked so (state output only). Nothing flies as a stand-in type.
+    # ``None`` = by need (user decision 2026-09-24, "drop only where dynamics are used"):
+    # `default_aircraft_filter` of the output, resolved at construction, so a stored config
+    # always names the filter it ran under.
+    aircraft_filter: str | None = None
     # ``runway-aligned`` rotates the horizontal plane so every threshold course points
     # along the first axis. It keeps the six-channel tensor shape while removing a major
     # source of cross-airport orientation variance. ``airport-enu`` moves the ANCHOR to
@@ -2413,6 +2439,10 @@ class TSConfig:
         for name in SEQUENCE_FIELDS:
             object.__setattr__(self, name, tuple(getattr(self, name)))
         _require_member("prediction_output", self.prediction_output, PREDICTION_OUTPUTS)
+        if self.aircraft_filter is None:
+            object.__setattr__(
+                self, "aircraft_filter", default_aircraft_filter(self.prediction_output)
+            )
         self._validate_ownership()
         cohort = CohortSpec(**_own(CohortSpec, self))
         backbone = BackboneSpec(**_own(BackboneSpec, self))
@@ -2499,6 +2529,16 @@ class TSConfig:
     def _validate_cross(self) -> None:
         """The rules that read TWO views. Each names the pair it binds; a rule inside one
         view lives on that view's dataclass."""
+        # cohort × output — a control output is supervised by inverse dynamics (mass, wing
+        # area, thrust), so every flight it trains on needs them: a filter that keeps flights
+        # without dynamics is for trajectory-only (state) runs.
+        if (self.prediction_output == PREDICTION_CONTROL
+                and self.aircraft_filter not in AIRCRAFT_FILTERS_WITH_DYNAMICS):
+            raise ValueError(
+                f"prediction_output='control' with aircraft_filter={self.aircraft_filter!r}: its "
+                "inverse-dynamics labels need every flight's aircraft dynamics; use one of "
+                f"{AIRCRAFT_FILTERS_WITH_DYNAMICS}"
+            )
         # training × output — a scheduler that watches the objective must watch a
         # COMPARABLE objective. Two things move the number under the model's feet, and
         # under either the plateau scheduler could halve the learning rate straight through
@@ -2711,6 +2751,21 @@ class TSConfig:
                 f"serialized config is missing {', '.join(sorted(missing))}; "
                 "regenerate the derived checkpoint"
             )
+        # The A320 fallback (`RETIRED_FALLBACK_FIELD`) and the `all` filter that read it.
+        if data.get("aircraft_filter") == RETIRED_AIRCRAFT_FILTER:
+            raise ValueError(
+                f"aircraft_filter={RETIRED_AIRCRAFT_FILTER!r} is retired (2026-09-24): it flew every "
+                f"type without dynamics as {data.get(RETIRED_FALLBACK_FIELD)!r}; this build drops "
+                "those flights instead, so this artifact cannot be reproduced"
+            )
+        if RETIRED_FALLBACK_FIELD in data:
+            if data.get("aircraft_filter") != AIRCRAFT_FILTER_OPENAP_DIRECT:
+                raise ValueError(
+                    f"serialized config sets {RETIRED_FALLBACK_FIELD}={data[RETIRED_FALLBACK_FIELD]!r} "
+                    "under a filter that flew it for unmodelled types; the fallback is retired "
+                    "(2026-09-24) and this build cannot reproduce that artifact"
+                )
+            data.pop(RETIRED_FALLBACK_FIELD)     # unread under openap-direct
         # A retired PLAN value is named before the retired-constant sweep below: the archived
         # L1 / L1b arms carry `plan_conditioning_dropout=0.5` beside it, and the constant's
         # refusal would otherwise fire first and point nowhere.

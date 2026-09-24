@@ -63,7 +63,7 @@ from ts_transformer.experiments.support import REPO_ROOT, TS_SCRIPT, arm_config,
 from ts_transformer.repo_layout import HARVEST_ROOT
 
 
-from ts_transformer.config import absent_field_defaults  # noqa: E402
+from ts_transformer.config import TSConfig, absent_field_defaults  # noqa: E402
 from ts_transformer.data.development_cohorts import development_cohort_audit, load_development_cohort  # noqa: E402
 from ts_transformer.run_naming import run_display_name, run_slug  # noqa: E402
 
@@ -98,6 +98,13 @@ def recorded_cohort(record: dict) -> dict | None:
     selection when it was handed none at all."""
     selection = record.get("data_selection") or {}
     return selection["development_cohort"] if "development_cohort" in selection else None
+
+
+def resume_declaration(config: TSConfig, declared: dict) -> dict:
+    """What a stored arm must agree with to be resumed: its declared overrides, plus the
+    aircraft filter it trains under today -- resolved BY NEED when the arm names none (C31), so
+    an arm trained under the retired `all` is refused at resume, not at its first replay."""
+    return {**declared, "aircraft_filter": config.aircraft_filter}
 
 
 def stale_arm_error(key: str, train_dir: Path, declared: dict, development_cohort: Path | None) -> str | None:
@@ -359,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
         trained_arms += 1
         produced[(campaign / key / "checkpoint.pt").resolve()] = key
         config, declared = arm_config(base, arm.get("overrides", {}))
-        stale = stale_arm_error(key, campaign / key, declared, cohorts[key])
+        stale = stale_arm_error(key, campaign / key, resume_declaration(config, declared), cohorts[key])
         if stale:
             parser.error(stale)
         config_path = campaign / key / "config.json"
