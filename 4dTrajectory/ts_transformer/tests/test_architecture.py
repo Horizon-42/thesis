@@ -725,10 +725,11 @@ def test_only_the_runners_reach_the_executor_for_now():
 
 
 PRIOR = TS_DIR / "prior"
-#: The prior sits on the instruction language (framework document §2): it reads the words and the artefact, and the
-#: day split the artefact was dealt by (its landing context leaves the sealed test days out), never the executor, a
-#: model of the prediction paths, the training plane or a runner.
-PRIOR_MAY_IMPORT = ("prior.", "instructions.", "data.day_split", "io_utils", "repo_layout")
+#: The prior sits on the instruction language (framework document §2): it reads the words and the artefact, the day
+#: split the artefact was dealt by (its landing context leaves the sealed test days out) and the causal runway rules
+#: its first-step runway is read against (`data.runway_context`, design §8) — never the executor, a model of the
+#: prediction paths, the training plane or a runner.
+PRIOR_MAY_IMPORT = ("prior.", "instructions.", "data.day_split", "data.runway_context", "io_utils", "repo_layout")
 
 
 def test_the_prior_reads_only_the_instruction_language():

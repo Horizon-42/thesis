@@ -37,18 +37,27 @@ def _roster(tmp_path, rows):
 
 def test_the_landing_context_leaves_out_test_days_other_runways_and_non_landings(tmp_path):
     days = fixture_days()
-    rows = [{"outcome": "assigned", "runway": "09", "landing_time_utc": landing_on("train")},
-            {"outcome": "assigned", "runway": "27", "landing_time_utc": landing_on("val")},
-            {"outcome": "assigned", "runway": "09", "landing_time_utc": landing_on("test")},
-            {"outcome": "assigned", "runway": "18", "landing_time_utc": landing_on("train")},
-            {"outcome": "not_landing", "runway": None, "landing_time_utc": None}]
-    landings, sealed = context_landings(_roster(tmp_path, rows), ["09", "27"], days)
-    assert sealed == 1 and {r: len(t) for r, t in landings.by_runway.items()} == {"09": 1, "27": 1}
+    rows = [{"outcome": "assigned", "runway": "09", "landing_time_utc": landing_on("train"), "flight_key": "a"},
+            {"outcome": "assigned", "runway": "27", "landing_time_utc": landing_on("val"), "flight_key": "b"},
+            {"outcome": "assigned", "runway": "09", "landing_time_utc": landing_on("test"), "flight_key": "c"},
+            {"outcome": "assigned", "runway": "18", "landing_time_utc": landing_on("train"), "flight_key": "d"},
+            {"outcome": "not_landing", "runway": None, "landing_time_utc": None, "flight_key": "e"}]
+    pool = context_landings(_roster(tmp_path, rows), ["09", "27"], days)
+    landings = pool.landings()
+    assert pool.sealed == 1 and {r: len(t) for r, t in landings.by_runway.items()} == {"09": 1, "27": 1}
+    assert context_landings(_roster(tmp_path, rows[:1]), ["09", "27"], days).landings().by_runway["27"].tolist() == []
+    assert [r.split for r in pool.records] == sorted(["train", "val"], key=lambda s: landing_on(s))
     assert landings.times_s.tolist() == sorted(np.concatenate(list(landings.by_runway.values())).tolist())
     t = utc_s(landing_on("train"))
     # strictly before t: the landing at t itself is not yet seen; one second later it is
     assert landings.count_before(np.array([t, t + 1.0, t + CONTEXT_WINDOW_S + 1.0]), CONTEXT_WINDOW_S).tolist() == [0, 1, 0]
     assert landings.count_before(np.array([t + 1.0]), CONTEXT_WINDOW_S, "27").tolist() == [0]
+    with pytest.raises(KeyError):                                     # not a candidate
+        landings.count_before(np.array([t + 1.0]), CONTEXT_WINDOW_S, "18")
+    since = landings.since_last(np.array([t, t + 5.0]), "09")
+    assert np.isnan(since[0]) and since[1] == 5.0
+    empty = context_landings(_roster(tmp_path, rows[:1]), ["09", "27"], days).landings()
+    assert np.isnan(empty.since_last(np.array([t + 5.0]), "27")).all()
 
 
 def test_a_flight_is_present_from_its_entry_to_its_last_sentence_row():
@@ -133,7 +142,8 @@ def test_the_census_runner_reads_the_train_days_of_an_artefact(tmp_path, monkeyp
     write_spec(directory, spec, {"n": 1}, {"labeller_source_sha256": labeller_source_sha256(),
                                            "git": {"head": "test", "dirty": False}})
     write_sentences(directory, "train", spec, [read_flight(flights[0], instruction_airport(), spec)], [0])
-    roster = _roster(tmp_path, [{"outcome": "assigned", "runway": "09", "landing_time_utc": landing_on("test")}])
+    roster = _roster(tmp_path, [{"outcome": "assigned", "runway": "09", "landing_time_utc": landing_on("test"),
+                                 "flight_key": "t"}])
     monkeypatch.setattr(prior_scene_census, "tracks_manifest_path", lambda code: roster)
     assert prior_scene_census.main(["--instructions", str(directory), "--out", str(tmp_path / "census")]) == 0
     census = json.loads((tmp_path / "census" / "census.json").read_text(encoding="utf-8"))

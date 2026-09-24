@@ -1,7 +1,8 @@
 /**
- * The prior's window: at the cursor, per column, the truth, its probability and the prior's ranked words; along
- * the flight, a strip per column with a tick at every word the truth says after step 0, teal where the prior's most
- * likely word is that word and red where it is another.
+ * The prior's window: at the cursor, per column, the truth, its probability and the prior's ranked words (nothing
+ * before the first predicted step: observed only); along the flight, a strip per column with a tick at every word the
+ * truth says after the first predicted step, teal where the prior's most likely word is that word and red where it is
+ * another.
  */
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
@@ -48,10 +49,16 @@ describe("TrainingPriorWindow", () => {
     expect(speed.textContent).toMatch(/unchanged \(in force: 110 m\/s\)/);
   });
 
-  it("ticks each word the truth says after step 0, teal where the prior ranked it first and red where not", () => {
+  it("reads nothing before the first predicted step: the prior only observes there", () => {
+    open(2);   // step 1
+    const table = screen.getByRole("table", { name: "The prior at step 1" });
+    expect(within(table).getByText("heading").closest("tr")!.textContent).toMatch(/observed only — the prior speaks from step 4/);
+  });
+
+  it("ticks each word the truth says after the first predicted step, teal where ranked first and red where not", () => {
     open();
     const ticks = [...document.body.querySelectorAll(".training-prior-tick line")];
-    // the vectored flight's words after step 0: heading at 8 and 10, the clearance, altitude and angle at 20, speed at 30
+    // the vectored flight's words after step 4: heading at 8 and 10, the clearance, altitude and angle at 20, speed at 30
     expect(ticks).toHaveLength(6);
     const red = ticks.filter((line) => line.getAttribute("stroke") === TRAINING_OUTSIDE_COLOR);
     expect(red).toHaveLength(1);

@@ -37,34 +37,84 @@ def utc_s(value: str) -> float:
 
 @dataclass(frozen=True)
 class Landings:
-    """One airport's context landings (epoch seconds, sorted): all of them, and by runway."""
+    """One airport's context landings (epoch seconds, sorted): all of them, and by candidate runway (every candidate,
+    one with no landing empty)."""
 
     times_s: np.ndarray
     by_runway: Mapping[str, np.ndarray]
 
+    def _on(self, runway: str | None) -> np.ndarray:
+        return self.times_s if runway is None else self.by_runway[runway]
+
     def count_before(self, t_s: np.ndarray, window_s: float, runway: str | None = None) -> np.ndarray:
         """Landings in ``[t - window, t)`` — strictly before ``t`` — on ``runway`` (any runway when None)."""
-        times = self.times_s if runway is None else self.by_runway[runway]
+        times = self._on(runway)
         t = np.asarray(t_s, dtype=np.float64)
         return np.searchsorted(times, t, side="left") - np.searchsorted(times, t - window_s, side="left")
 
+    def without(self, time_s: float, runway: str) -> Landings:
+        """These landings less one: a flight's own, which must be here (a flight never counts its own landing — the
+        roster's landing time is whole seconds, and a sentence's last rows can fall after it)."""
+        on_runway = self.by_runway[runway]
+        where = np.flatnonzero(on_runway == time_s)
+        overall = np.flatnonzero(self.times_s == time_s)
+        if not len(where):
+            raise ValueError(f"no landing on {runway} at {time_s} in the context pool: the flight's own must be there")
+        return Landings(np.delete(self.times_s, overall[0]),
+                        {**self.by_runway, runway: np.delete(on_runway, where[0])})
 
-def context_landings(tracks_manifest: Path, runways: Iterable[str], days: DaySplit) -> tuple[Landings, int]:
+    def since_last(self, t_s: np.ndarray, runway: str) -> np.ndarray:
+        """Seconds from the last landing on ``runway`` strictly before ``t``; NaN where there is none."""
+        times = self._on(runway)
+        t = np.asarray(t_s, dtype=np.float64)
+        index = np.searchsorted(times, t, side="left") - 1
+        if not len(times):
+            return np.full(t.shape, np.nan)
+        return np.where(index >= 0, t - times[np.maximum(index, 0)], np.nan)
+
+
+@dataclass(frozen=True)
+class LandingRecord:
+    """One context landing: when (epoch seconds), on which runway, which flight, on a day of which split."""
+
+    time_s: float
+    runway: str
+    flight_key: str
+    split: str
+
+
+@dataclass(frozen=True)
+class LandingPool:
+    """One airport's context landings on its candidate runways, sorted by time, and how many sealed test-day landings
+    were left out."""
+
+    runways: tuple[str, ...]
+    records: tuple[LandingRecord, ...]
+    sealed: int
+
+    def landings(self) -> Landings:
+        return Landings(np.array([r.time_s for r in self.records], dtype=np.float64),
+                        {runway: np.array([r.time_s for r in self.records if r.runway == runway], dtype=np.float64)
+                         for runway in self.runways})
+
+
+def context_landings(tracks_manifest: Path, runways: Iterable[str], days: DaySplit) -> LandingPool:
     """The tracks roster's assigned landings on ``runways`` (the airport's candidates), minus every landing on a
-    sealed test day — returned with how many were left out. The same pool as runway intent's
-    (`data.runway_context.build_airport_context`): each landing's runway and time, whether or not the flight is
-    an eligible arrival."""
-    kept: dict[str, list[float]] = {runway: [] for runway in runways}
+    sealed test day. The same pool as runway intent's (`data.runway_context.build_airport_context`): each landing's
+    runway and time, whether or not the flight is an eligible arrival."""
+    wanted = tuple(runways)
+    kept: list[LandingRecord] = []
     sealed = 0
     for row in json.loads(Path(tracks_manifest).read_text(encoding="utf-8"))["records"]:
-        if row["outcome"] != "assigned" or row["runway"] not in kept:
+        if row["outcome"] != "assigned" or row["runway"] not in wanted:
             continue
-        if days.split_of(landing_day(row["landing_time_utc"])) == "test":
+        split = days.split_of(landing_day(row["landing_time_utc"]))
+        if split == "test":
             sealed += 1
             continue
-        kept[row["runway"]].append(utc_s(row["landing_time_utc"]))
-    by_runway = {runway: np.sort(np.array(times, dtype=np.float64)) for runway, times in kept.items()}
-    return Landings(np.sort(np.concatenate(list(by_runway.values()))), by_runway), sealed
+        kept.append(LandingRecord(utc_s(row["landing_time_utc"]), row["runway"], row["flight_key"], split))
+    kept.sort(key=lambda record: (record.time_s, record.flight_key))
+    return LandingPool(wanted, tuple(kept), sealed)
 
 
 @dataclass(frozen=True)

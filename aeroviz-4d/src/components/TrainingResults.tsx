@@ -72,6 +72,8 @@ export function TrainingExecutorGate({ overlay }: { overlay: TrainingExecutorOve
 export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverlay }) {
   const { readout } = overlay;
   const nll = (value: number) => value.toFixed(4);
+  const percent = (value: number | null, digits = 1) => (value === null ? "—" : `${(value * 100).toFixed(digits)}%`);
+  const runway = readout.firstStepRunway;
   return (
     <details className="training-results" aria-label="The prior's readout">
       <summary>The prior's {readout.split} readout · {nll(readout.model.nllPerStep)} per step against {nll(readout.baselines.repeat.all)} / {nll(readout.baselines.previousWord.all)}</summary>
@@ -84,10 +86,12 @@ export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverla
           {TRAINING_COLUMNS.map((column) => {
             const own = readout.model.perColumn[column];
             const title =
+              `first predicted step: its most likely word is the truth's ${percent(own.firstStepTop1)}; after it, ` +
               `${own.changeSteps.toLocaleString("en")} steps where the truth says a word: the prior gives a word ` +
-              `${own.changeProbabilityWhereChanged.toFixed(3)} on average there; its most likely word is the one said ` +
-              `${(own.top1GivenChange * 100).toFixed(1)}% of the time, among its first five ${(own.top5GivenChange * 100).toFixed(1)}%; ` +
-              `on the steps where nothing is said it says a word ${(own.falseChangeShareWhereKept * 100).toFixed(2)}% of the time`;
+              `${own.changeProbabilityWhereChanged === null ? "—" : own.changeProbabilityWhereChanged.toFixed(3)} on average there; ` +
+              `its most likely word is the one said ${percent(own.top1GivenChange)} of the time, among its first five ` +
+              `${percent(own.top5GivenChange)}; on the steps where nothing is said it says a word ` +
+              `${percent(own.falseChangeShareWhereKept, 2)} of the time`;
             return (
               <tr key={column} title={title}>
                 <th scope="row">{COLUMN_LABEL[column]}</th>
@@ -106,8 +110,10 @@ export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverla
         </tbody>
       </table>
       <p className="training-results-note">
-        {readout.steps.toLocaleString("en")} {readout.split} steps (2 s each), best epoch {readout.bestEpoch}; teacher-forced — every
-        step sees the truth sentence before it. The baselines are counted from train: "repeat" says a word with the column's
+        {readout.steps.toLocaleString("en")} predicted {readout.split} steps (2 s each), best epoch {readout.bestEpoch}; teacher-forced — every
+        step sees the truth sentence before it. The runway at the first predicted step: prior {percent(runway.model.top1)} right
+        ({percent(runway.model.direction)} in the right direction), each airport's own frequency {percent(runway.airportFrequency.top1)},{" "}
+        {Object.entries(runway.rules).map(([rule, part]) => `${rule.split("_")[0]} ${percent(part.top1)}`).join(", ")}. The baselines are counted from train: "repeat" says a word with the column's
         train frequency, the word by its train frequency; "previous word" the word by its train frequency after the column's
         previous word. Prior {overlay.prior.checkpointSha256.slice(0, 12)}: {overlay.prior.parameters.toLocaleString("en")}{" "}
         parameters, d {overlay.prior.model.dModel}, {overlay.prior.model.layers} layers, {overlay.prior.model.heads} heads.

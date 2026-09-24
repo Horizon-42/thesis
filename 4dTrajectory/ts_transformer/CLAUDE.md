@@ -341,9 +341,10 @@ its val readout; the executor export runs from a worktree — the spec's hash co
 root publisher's `--executor-replay` files the replay's records under Experiments (R13).
 `heading_reading_compare` (ARCHIVED 2026-09-24 with the holds reading) flew one train sample under every heading reading at
 fixed executor parameters, pairing evaluation with the observed flights graded by the same code (vocabulary design §10.1) (R14).
-**The prior's second version** (2026-09-24): `prior_train` (one input-set variant, trained without the train-internal
-selection set, read on it; checkpoint `ts-prior-checkpoint-v2`) → `prior_select` (the §8.7 rule, then the ONE val readout on the
-chosen run); step 0 asks only the runway, the other columns are the hand-over's words, given (R15).
+**The prior** (third version, 2026-09-24): `prior_train` (one variant — landing context, ordered heads — on single-aircraft
+scenes of the day split's train days, read on the select days; checkpoint `ts-prior-checkpoint-v3`) → `prior_select` (the
+rule of readouts §4, then the ONE val readout on the chosen run); the first `N_LOOK` = 8 rows are observed only, the first
+predicted step says every column, inputs are only what is known before the step (R15).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

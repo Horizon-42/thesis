@@ -150,9 +150,10 @@ def main(argv: list[str] | None = None) -> int:
     rosters: dict[str, Any] = {}
     for code in sorted(by_airport):
         roster = tracks_manifest_path(code)
-        landings, sealed = context_landings(roster, [c.ident for c in candidates[code].candidates], days)
+        pool = context_landings(roster, [c.ident for c in candidates[code].candidates], days)
+        landings = pool.landings()
         rosters[code] = {"tracks_manifest": str(roster), "sha256": file_sha256(roster), "landings_kept": len(landings.times_s),
-                         "sealed_test_day_landings_left_out": sealed}
+                         "sealed_test_day_landings_left_out": pool.sealed}
         airports[code] = census_airport(by_airport[code]["speaking"], by_airport[code]["background"], landings, test_spans)
         airports[code]["flights"] = {"speaking": len(by_airport[code]["speaking"]),
                                      "background": len(by_airport[code]["background"])}

@@ -288,11 +288,13 @@ repository — outside from a worktree (as when the spec was measured), inside f
 refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 flights on CPU.
 
 `prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v3 --airport
-ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v2` since the prior's second version: the same shape, step 0's given columns written as
-their point mass and the readout on the new basis — v1 is refused by name): the checkpoint is refused
-unless it is `ts-prior-checkpoint-v2` of the artefact's spec and labeller, not a smoke run, its candidate table equal to
-the artefact's and its state loading whole; inference is teacher-forced over the stored sentence (`prior.data.flight_steps`),
-as it was trained and read out. Per flight, column and step: `changeP` (1 − P(unchanged)), the `k` most likely words given
+ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v3` since the prior's third
+version: the per-step arrays cover the predicted steps only, from `firstPredictedRow` = `N_LOOK`; null change metrics for a
+column that never changes after the first step; the first-step runway beside the airport frequency and the rules — older
+names are refused): the checkpoint is refused unless `prior_train.load_prior` opens it on the artefact (spec, labeller,
+day split, candidate table, a whole state), it is not a smoke run and today's tracks rosters are the ones it trained with
+(the landing context); inference is teacher-forced over the stored sentence (`prior.data.flight_record`), as it was trained
+and read out. Per flight, column and predicted step: `changeP` (1 − P(unchanged)), the `k` most likely words given
 a word is said (`TOP_K` 3, fewer where the column has fewer values: an airport's candidate runways) and their
 probabilities, `truthP`; each flight's NLL per step in all and per column, computed before rounding
 (`PROBABILITY_DIGITS` 4). The val `readout.json` travels unchanged. The inference path reproduces `readout.json`'s val NLL
@@ -343,28 +345,26 @@ find their flight by dataset id (`tag_rows`: `fly_variant` returns them grouped 
 failure. Writes `compare.json` (`ts-heading-reading-compare-v1`), `compare.md`, `records/<variant>/<ICAO>/`,
 `observed/<ICAO>/` into a NEW directory. The measurement of 2026-09-24: `outputs/POOLED/analyses/heading_reading_20260924/`.
 
-### R15 · the prior's second version: `prior_train` → `prior_select` (prior design §8)
+### R15 · the prior: `prior_train` → `prior_select` (prior design §7–§9, step 1)
 
-2026-09-24. `prior_train --instructions <artefact> --inputs V0|V1|V1d|V2|V2d --out <campaign>/<inputs>_s<seed> [--seed N]
-[--selection-share 0.1] [--selection-seed 1337] [--device cuda] [--limit N]` trains ONE variant (`prior.data.INPUT_SETS`)
-on the artefact's train split less the train-internal selection set (`prior.data.selection_ids`: per airport in name order,
-`round(share · n)` flights by one seeded generator over its sorted dataset ids), early-stops on val (per-epoch NLL only),
-and reads the selection set: `selection_readout.json` (the model per column over the entries it is asked for — step 0 asks
-only the runway, `prior.model.predicted_entries` — the step-0 runway top-1 / top-2 per airport and by the hand-over's
-approach word (a flight cleared at the hand-over was labelled against its landed runway: there the condition carries the
-answer, prior design §8.6), the two baselines counted
-from its own training flights on the same basis, each airport's own runway frequency as a step-0 reference). Also
-`checkpoint.pt` (`ts-prior-checkpoint-v2`: `model_config.inputs`, the selection record), `config.json`, `selection.json`
-(`ts-prior-selection-v1`, the ids), `history.json`. A clean tree unless `--limit` (SMOKE: the first N flights of each
-split). Never reads val beyond early stopping. `prior_select --campaign <dir> [--seed 1337] [--replicate-seed 2024]
-[--leader]` reads every run under the campaign (all one comparison — artefact, selection sha, training settings but the
-seed, smoke limit, commit — and this code that commit), prints the leader (`--leader`, for the queue to train its
-replicate) or applies §8.7's rule: the leader among `CHOOSABLE` at the seed, the seed line from its replicate, the fewest
-added inputs within the line; reads val once on the chosen run and only then writes `choice.json` (`ts-prior-choice-v1`: every run's row, the rule's numbers, V0 minus each
-choosable variant in P(change) and top-1 per column) and the chosen run's val `readout.json` (the ONE val readout, baselines
-recounted from that run's training flights) — neither is ever overwritten. `prior_training_export` (R13) opens only a
-`ts-prior-checkpoint-v2` run holding that `readout.json`. Tests: `tests/test_prior.py` (both runners end to end on a
-synthetic artefact, every write in `tmp_path`).
+2026-09-24, the third version. `prior_train --instructions <artefact split by day> --variant full|no-context|unordered
+--out <campaign>/<variant>_s<seed> [--seed N] [--device cuda] [--limit N] [TrainConfig fields]` trains ONE variant
+(`prior.data.VARIANTS`: the landing context in the candidates' vectors, the ordered heads) on single-aircraft scenes of the
+artefact's train split, early-stops on val (per-epoch NLL per predicted step only) and reads the SELECT split (its own
+operating days): `selection_readout.json` — per column the NLL per predicted step (all; after the first), the first
+predicted step's top-1, after it P(change) / top-1 / top-5 where a word is said (null for a column that never changes
+there, the runway) and false changes; the first-step runway's top-1 / top-2, by direction and side, established on the
+final at `N_LOOK` or not, per airport (`prior.readout.runway_breakdown`), beside each airport's own runway frequency and the
+causal rules B0 / B1 / B3 (`prior.readout.runway_rules`: the tracks roster's landings less the sealed test days, the
+artefact's entry sectors, B0's majority from train-day landings); the two baselines counted from its own training
+flights. Also `checkpoint.pt` (`ts-prior-checkpoint-v3`), `config.json` (the artefact's spec, labeller and day split, the
+tracks rosters' sha256, `n_look`, the git state), `history.json`. A clean tree unless `--limit` (SMOKE: the first N flights
+of each split). `prior_select --campaign <dir> [--seed 1337] [--replicate-seed 2024]` reads every run (one comparison:
+artefact, rosters, training settings but the seed, smoke limit, commit — and this code that commit), applies the rule
+(readouts doc §4): the leader at the seed, the seed line = |full at the seed − full at the replicate|, the first of
+`PREFERENCE` (no-context, full, unordered) within the line; reads val ONCE on the chosen run and only then writes
+`choice.json` (`ts-prior-choice-v2`) and the chosen run's `readout.json` — neither is ever overwritten. Tests:
+`tests/test_prior.py` (both runners end to end on a synthetic artefact and tracks roster, every write in `tmp_path`).
 
 ### R16 · `run_ts.py prior_scene_census` — the scene prior's step 0 (prior design §9)
 

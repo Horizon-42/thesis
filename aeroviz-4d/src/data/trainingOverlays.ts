@@ -54,7 +54,7 @@ export const TRAINING_EXECUTOR_STATUSES = [
 ] as const;
 export type TrainingExecutorStatus = (typeof TRAINING_EXECUTOR_STATUSES)[number];
 /** MIRROR of `prior_training_export.SCHEMA`. */
-export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v2";
+export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v3";
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -181,16 +181,17 @@ export interface TrainingExecutorOverlay {
   flights: TrainingExecutorFlight[];
 }
 
-/** The prior at one column of one flight, step by step. */
+/** The prior at one column of one flight, predicted step by predicted step (from `firstPredictedRow`). */
 export interface TrainingPriorColumn {
   /** How many words are ranked at each step (fewer than asked when the column has fewer values). */
   k: number;
-  /** The probability that a word is said at the step. */
+  /** The probability that a word is said at the step (1 at the first predicted step, which says every column). */
   changeP: number[];
   /** Row-major, `k` per step: the most likely words GIVEN that one is said, and their probabilities. */
   words: number[];
   wordsP: number[];
-  /** The probability of what the truth sentence says at the step (a word, or unchanged). */
+  /** The probability of what the truth sentence says at the step (a word, or unchanged; at the first predicted step
+   *  the word in force there). */
   truthP: number[];
 }
 
@@ -198,6 +199,9 @@ export interface TrainingPriorFlight {
   flightKey: string;
   datasetId: string;
   rows: number;
+  /** The first step the prior speaks at; the rows before it are only observed and carry no prediction. */
+  firstPredictedRow: number;
+  /** Per predicted step. */
   nllPerStep: number;
   columnNllPerStep: number[];
   /** In `TRAINING_COLUMNS` order. */
@@ -207,10 +211,20 @@ export interface TrainingPriorFlight {
 export interface TrainingPriorColumnReadout {
   nllPerStep: number;
   changeSteps: number;
-  changeProbabilityWhereChanged: number;
-  top1GivenChange: number;
-  top5GivenChange: number;
+  /** The first predicted step's word: how often the prior's most likely one is the truth's. */
+  firstStepTop1: number;
+  /** After the first predicted step, where the truth says a word; null for a column that never changes there. */
+  changeProbabilityWhereChanged: number | null;
+  top1GivenChange: number | null;
+  top5GivenChange: number | null;
   falseChangeShareWhereKept: number;
+}
+
+/** The first predicted step's runway: right, in the right landing direction, and right within it. */
+export interface TrainingPriorRunwayReadout {
+  top1: number;
+  direction: number;
+  sideGivenDirection: number | null;
 }
 
 export interface TrainingPriorReadout {
@@ -220,6 +234,12 @@ export interface TrainingPriorReadout {
   model: { nllPerStep: number; perplexityPerStep: number; perColumn: Record<TrainingColumn, TrainingPriorColumnReadout> };
   /** Negative log-likelihood per step per column, and `all`. */
   baselines: { repeat: Record<TrainingColumn | "all", number>; previousWord: Record<TrainingColumn | "all", number> };
+  /** The prior's first-step runway beside each airport's own runway frequency and the causal rules (B0, B1, B3). */
+  firstStepRunway: {
+    model: TrainingPriorRunwayReadout;
+    airportFrequency: TrainingPriorRunwayReadout;
+    rules: Record<string, TrainingPriorRunwayReadout>;
+  };
 }
 
 export interface TrainingPriorOverlay {
@@ -250,14 +270,17 @@ export function executorWordAt(flight: TrainingExecutorFlight, row: number, colu
   return flight.words.find((word) => word.row === row && word.column === index) ?? null;
 }
 
-/** What the prior gives one column at one step: a word's probability, the ranked words, the truth's probability. */
+/** What the prior gives one column at one step: a word's probability, the ranked words, the truth's probability;
+ *  null at a step before the first predicted one (observed only). */
 export function priorStep(flight: TrainingPriorFlight, column: TrainingColumn, row: number) {
+  if (row < flight.firstPredictedRow) return null;
+  const at = row - flight.firstPredictedRow;
   const values = flight.columns[TRAINING_COLUMNS.indexOf(column)];
   const ranked = Array.from({ length: values.k }, (_, rank) => ({
-    value: values.words[row * values.k + rank],
-    p: values.wordsP[row * values.k + rank],
+    value: values.words[at * values.k + rank],
+    p: values.wordsP[at * values.k + rank],
   }));
-  return { changeP: values.changeP[row], truthP: values.truthP[row], ranked };
+  return { changeP: values.changeP[at], truthP: values.truthP[at], ranked };
 }
 
 /** The flight's words the executor judged, and how many of them it flew inside their envelopes. */
@@ -707,22 +730,24 @@ export function parseTrainingExecutorOverlay(raw: unknown, sample: TrainingSampl
 
 function parsePriorFlight(item: Reader, flight: TrainingFlight, sample: TrainingSample): TrainingPriorFlight {
   const rows = item.integer("rows", flight.rows, flight.rows);
+  const firstPredictedRow = item.integer("firstPredictedRow", 0, rows - 1);
+  const steps = rows - firstPredictedRow;
   const list = item.list("columns");
   if (list.length !== TRAINING_COLUMNS.length) item.fail(`holds ${list.length} columns, expected ${TRAINING_COLUMNS.length}`);
   const columns = TRAINING_COLUMNS.map((name, index) => {
     const column = Reader.of(list[index], item.at(`columns[${index}] (${name})`));
     const values = trainingClassCount(sample.vocabulary, sample.candidates, name);
     const k = column.integer("k", 1, values);
-    const words = column.numbers("words", rows * k);
+    const words = column.numbers("words", steps * k);
     const wrong = words.findIndex((value) => !Number.isInteger(value) || value < 0 || value >= values);
     if (wrong >= 0) column.fail(`words[${wrong}] is ${words[wrong]}, not one of the column's ${values} values`);
     return {
-      k, words, wordsP: column.probabilities("wordsP", rows * k), changeP: column.probabilities("changeP", rows),
-      truthP: column.probabilities("truthP", rows),
+      k, words, wordsP: column.probabilities("wordsP", steps * k), changeP: column.probabilities("changeP", steps),
+      truthP: column.probabilities("truthP", steps),
     };
   });
   return {
-    flightKey: flight.flightKey, datasetId: flight.datasetId, rows,
+    flightKey: flight.flightKey, datasetId: flight.datasetId, rows, firstPredictedRow,
     nllPerStep: item.number("nllPerStep"), columnNllPerStep: item.numbers("columnNllPerStep", TRAINING_COLUMNS.length), columns,
   };
 }
@@ -742,11 +767,17 @@ function parseReadout(reader: Reader): TrainingPriorReadout {
     const column = Reader.of(value, where);
     return {
       nllPerStep: column.number("nllPerStep"), changeSteps: column.integer("changeSteps", 0, Number.MAX_SAFE_INTEGER),
-      changeProbabilityWhereChanged: column.number("changeProbabilityWhereChanged"),
-      top1GivenChange: column.number("top1GivenChange"), top5GivenChange: column.number("top5GivenChange"),
+      firstStepTop1: column.number("firstStepTop1"),
+      changeProbabilityWhereChanged: column.nullableNumber("changeProbabilityWhereChanged"),
+      top1GivenChange: column.nullableNumber("top1GivenChange"), top5GivenChange: column.nullableNumber("top5GivenChange"),
       falseChangeShareWhereKept: column.number("falseChangeShareWhereKept"),
     };
   }, false) as Record<TrainingColumn, TrainingPriorColumnReadout>;
+  const runway = reader.child("firstStepRunway");
+  const readRunway = (value: unknown, where: string): TrainingPriorRunwayReadout => {
+    const part = Reader.of(value, where);
+    return { top1: part.number("top1"), direction: part.number("direction"), sideGivenDirection: part.nullableNumber("sideGivenDirection") };
+  };
   return {
     split: reader.string("split"),
     steps: reader.integer("steps", 1, Number.MAX_SAFE_INTEGER),
@@ -755,6 +786,11 @@ function parseReadout(reader: Reader): TrainingPriorReadout {
     baselines: {
       repeat: parseColumnScores(baselines, "repeat", asNumber, true) as Record<TrainingColumn | "all", number>,
       previousWord: parseColumnScores(baselines, "previousWord", asNumber, true) as Record<TrainingColumn | "all", number>,
+    },
+    firstStepRunway: {
+      model: readRunway(runway.raw("model"), runway.at("model")),
+      airportFrequency: readRunway(runway.raw("airportFrequency"), runway.at("airportFrequency")),
+      rules: runway.record("rules", readRunway),
     },
   };
 }

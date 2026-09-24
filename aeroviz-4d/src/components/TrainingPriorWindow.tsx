@@ -4,11 +4,14 @@
  * The prior's predictions for one flight, against its truth sentence (`data/trainingOverlays.ts`). Design:
  * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.6.
  *
- *  • AT THE CURSOR: per column, what the truth sentence does at this step (a word, or nothing), the probability the
- *    prior gives that, the probability it gives a word being said at all, and — were one said — its most likely words.
- *  • ALONG THE FLIGHT: one strip per column — the probability of a word being said (the column's colour) and the
- *    probability of the truth (grey), step by step; a tick at every word the truth sentence says after step 0, in the
- *    executor's teal when the prior's most likely word there is the word said, red when it is another.
+ *  • AT THE CURSOR: per column, what the truth sentence does at this step (a word, or nothing; at the first predicted
+ *    step the word in force, which the prior must say), the probability the prior gives that, the probability it gives
+ *    a word being said at all, and — were one said — its most likely words. Before the first predicted step the prior
+ *    only observes: nothing to read.
+ *  • ALONG THE FLIGHT: one strip per column from the first predicted step — the probability of a word being said (the
+ *    column's colour) and the probability of the truth (grey), step by step; a tick at every word the truth sentence
+ *    says after the first predicted step, in the executor's teal when the prior's most likely word there is the word
+ *    said, red when it is another.
  *
  * TEACHER-FORCED: every step sees the truth sentence's words before it — this is how the prior was trained and read
  * out, not a sentence it says on its own. Nothing is recomputed: every probability is the exporter's.
@@ -74,8 +77,12 @@ export default function TrainingPriorWindow({
   const height = TRAINING_COLUMNS.length * (STRIP_H + STRIP_GAP) + AXIS_H;
   const stripTop = (index: number) => index * (STRIP_H + STRIP_GAP) + 4;
   const y = (index: number, p: number) => stripTop(index) + (1 - p) * STRIP_H;
+  const first = predicted.firstPredictedRow;
   const polyline = (index: number, values: number[]) =>
-    values.map((value, step) => `${x(step * vocabulary.stepS)},${y(index, value)}`).join(" ");
+    values.map((value, step) => `${x((first + step) * vocabulary.stepS)},${y(index, value)}`).join(" ");
+  // at the first predicted step the prior says every column's word in force; after it, the sentence's own words
+  const truthOf = (name: TrainingColumn, at: number) =>
+    at === first ? flight.words.inForce[TRAINING_COLUMNS.indexOf(name)][at] : truthAt(flight, name, at);
 
   return createPortal(
     <div className="training-readback-backdrop">
@@ -88,7 +95,7 @@ export default function TrainingPriorWindow({
           <strong>Prior predictions</strong>
           <span>{flight.callsign}</span>
           <span>runway {flight.runway}</span>
-          <span title="negative log-likelihood of this flight's truth sentence under the prior, per 2 s step">
+          <span title="negative log-likelihood of this flight's truth sentence under the prior, per predicted 2 s step">
             this flight {predicted.nllPerStep.toFixed(3)} nats per step · {readout.split}: prior {readout.model.nllPerStep.toFixed(4)},
             repeat {readout.baselines.repeat.all.toFixed(4)}, previous word {readout.baselines.previousWord.all.toFixed(4)}
           </span>
@@ -109,28 +116,38 @@ export default function TrainingPriorWindow({
           <tbody>
             {TRAINING_COLUMNS.map((name) => {
               const step = priorStep(predicted, name, row);
-              const truth = truthAt(flight, name, row);
-              const inForce = flight.words.inForce[TRAINING_COLUMNS.indexOf(name)][row];
               const selected = name === column;
+              const cells = (() => {
+                if (step === null) {
+                  return <td colSpan={4} className="training-prior-muted">observed only — the prior speaks from step {first}</td>;
+                }
+                const truth = truthOf(name, row);
+                const inForce = flight.words.inForce[TRAINING_COLUMNS.indexOf(name)][row];
+                return (
+                  <>
+                    <td>
+                      {truth === TRAINING_UNCHANGED
+                        ? <>unchanged <span className="training-prior-muted">(in force: {label(name, inForce)})</span></>
+                        : <>says <b>{label(name, truth)}</b></>}
+                    </td>
+                    <td>{p3(step.truthP)}</td>
+                    <td>{p3(step.changeP)}</td>
+                    <td>
+                      {step.ranked.map(({ value, p }, rank) => (
+                        <span key={rank} className="training-prior-word"
+                          style={value === truth ? { color: TRAINING_EXECUTOR_COLOR, fontWeight: 600 } : undefined}>
+                          {rank ? " · " : ""}{label(name, value)} {p3(p)}
+                        </span>
+                      ))}
+                    </td>
+                  </>
+                );
+              })();
               return (
                 <tr key={name} className={selected ? "selected" : undefined} onClick={() => onColumnChange(name)}
                   style={selected ? { outline: `1px solid ${TRAINING_WORD_COLOR}` } : undefined}>
                   <th scope="row" style={{ color: TRAINING_COLUMN_COLOR[name] }}>{name}</th>
-                  <td>
-                    {truth === TRAINING_UNCHANGED
-                      ? <>unchanged <span className="training-prior-muted">(in force: {label(name, inForce)})</span></>
-                      : <>says <b>{label(name, truth)}</b></>}
-                  </td>
-                  <td>{p3(step.truthP)}</td>
-                  <td>{p3(step.changeP)}</td>
-                  <td>
-                    {step.ranked.map(({ value, p }, rank) => (
-                      <span key={rank} className="training-prior-word"
-                        style={value === truth ? { color: TRAINING_EXECUTOR_COLOR, fontWeight: 600 } : undefined}>
-                        {rank ? " · " : ""}{label(name, value)} {p3(p)}
-                      </span>
-                    ))}
-                  </td>
+                  {cells}
                 </tr>
               );
             })}
@@ -148,7 +165,7 @@ export default function TrainingPriorWindow({
           {TRAINING_COLUMNS.map((name, index) => {
             const values = predicted.columns[index];
             const colour = TRAINING_COLUMN_COLOR[name];
-            const words = trainingColumnRuns(flight, name).filter((run) => run.row > 0);
+            const words = trainingColumnRuns(flight, name).filter((run) => run.row > first);
             return (
               <g key={name} aria-label={`${name} strip`}>
                 <rect x={GUTTER} y={stripTop(index)} width={plotW} height={STRIP_H}
@@ -162,7 +179,7 @@ export default function TrainingPriorWindow({
                 <polyline points={polyline(index, values.changeP)} fill="none" stroke={colour} strokeWidth={1.4}
                   className="training-prior-change" />
                 {words.map((run) => {
-                  const step = priorStep(predicted, name, run.row);
+                  const step = priorStep(predicted, name, run.row)!;             // run.row > first: predicted
                   const right = step.ranked[0]?.value === run.value;
                   const at = x(run.row * vocabulary.stepS);
                   return (
@@ -193,9 +210,10 @@ export default function TrainingPriorWindow({
           <span>
             Teacher-forced: at every step the prior sees the flight so far and the truth sentence's words before the step —
             how it was trained and read out ({readout.split}, best epoch {readout.bestEpoch}); it is not the prior speaking a
-            sentence of its own. In each strip, <b style={{ color: TRAINING_COLUMN_COLOR.heading }}>——</b> the probability of a
+            sentence of its own. The first {first} steps are only observed; at step {first} the prior says every column's word
+            in force. In each strip, <b style={{ color: TRAINING_COLUMN_COLOR.heading }}>——</b> the probability of a
             word being said at the step (0 at the strip's foot, 1 at its top), <b style={{ color: TRAINING_RAW_COLOR }}>——</b> the
-            probability of what the truth sentence does there; a tick marks each word the truth says after step 0 —{" "}
+            probability of what the truth sentence does there; a tick marks each word the truth says after step {first} —{" "}
             <b style={{ color: TRAINING_EXECUTOR_COLOR }}>teal</b> when the prior's most likely word there is that word,{" "}
             <b style={{ color: TRAINING_OUTSIDE_COLOR }}>red</b> when it is another. Move the pointer to read a step; click a
             strip or a row to select its column.

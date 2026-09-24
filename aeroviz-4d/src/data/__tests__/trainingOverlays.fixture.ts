@@ -122,28 +122,35 @@ export function mockExecutorOverlay(): Record<string, unknown> {
   };
 }
 
-/** The prior at one flight: a word said with 0.6 where the truth says one (1 at step 0), else 0.01; the truth's word
- *  ranked first — but for `wrong`, the steps whose second-ranked word is the truth. */
+/** The first predicted step of the mock prior (the exporter's is `prior.scene.N_LOOK`; any row before the first word
+ *  the tests read will do). */
+export const MOCK_FIRST_PREDICTED_ROW = 4;
+
+/** The prior at one flight, from `MOCK_FIRST_PREDICTED_ROW`: every column said there (probability 1, the truth at
+ *  0.5); after it a word said with 0.6 where the truth says one, else 0.01; the truth's word ranked first — but for
+ *  `wrong`, the steps whose second-ranked word is the truth. */
 function priorFlight(key: string, events: Array<{ row: number; column: number; value: number }>, wrong: Set<string>) {
   const values = [2, 3, 72, 182, 6, 48];
   return {
-    flightKey: key, datasetId: `KXXX:${key}`, rows: MOCK_ROWS, nllPerStep: 0.25, columnNllPerStep: [0.01, 0.02, 0.08, 0.05, 0.04, 0.05],
+    flightKey: key, datasetId: `KXXX:${key}`, rows: MOCK_ROWS, firstPredictedRow: MOCK_FIRST_PREDICTED_ROW, nllPerStep: 0.25,
+    columnNllPerStep: [0.01, 0.02, 0.08, 0.05, 0.04, 0.05],
     columns: TRAINING_COLUMNS.map((_, column) => {
       const k = Math.min(3, values[column]);
       const changeP: number[] = [];
       const truthP: number[] = [];
       const words: number[] = [];
       const wordsP: number[] = [];
-      for (let row = 0; row < MOCK_ROWS; row += 1) {
+      for (let row = MOCK_FIRST_PREDICTED_ROW; row < MOCK_ROWS; row += 1) {
         const said = events.find((event) => event.row === row && event.column === column);
-        const change = row === 0 ? 1 : said ? 0.6 : 0.01;
+        const opening = row === MOCK_FIRST_PREDICTED_ROW;
+        const change = opening ? 1 : said ? 0.6 : 0.01;
         changeP.push(change);
         const first = said ? said.value : 0;
         const ranked = wrong.has(`${row}:${column}`) ? [(first + 1) % values[column], first] : [first, (first + 1) % values[column]];
         if (k === 3) ranked.push((first + 2) % values[column]);
         words.push(...ranked);
         wordsP.push(...(k === 3 ? [0.5, 0.3, 0.1] : [0.7, 0.3]));
-        truthP.push(said ? change * (wrong.has(`${row}:${column}`) ? 0.3 : 0.5) : 1 - change);
+        truthP.push(opening ? 0.5 : said ? change * (wrong.has(`${row}:${column}`) ? 0.3 : 0.5) : 1 - change);
       }
       return { k, changeP, words, wordsP, truthP };
     }),
@@ -152,10 +159,13 @@ function priorFlight(key: string, events: Array<{ row: number; column: number; v
 
 export function mockPriorOverlay(): Record<string, unknown> {
   const sample = mockSample() as { flights: Array<{ flightKey: string; words: { events: Array<{ row: number; column: number; value: number }> } }> };
-  const perColumn = Object.fromEntries(TRAINING_COLUMNS.map((column) => [column, {
-    nllPerStep: 0.03, changeSteps: 100, changeProbabilityWhereChanged: 0.6, top1GivenChange: 0.7, top5GivenChange: 0.9,
-    falseChangeShareWhereKept: 0.001,
-  }]));
+  const perColumn = Object.fromEntries(TRAINING_COLUMNS.map((column) => [column, column === "runway"
+    // the runway never changes after the first predicted step: no change metrics
+    ? { nllPerStep: 0.002, changeSteps: 0, firstStepTop1: 0.81, changeProbabilityWhereChanged: null, top1GivenChange: null,
+        top5GivenChange: null, falseChangeShareWhereKept: 0 }
+    : { nllPerStep: 0.03, changeSteps: 100, firstStepTop1: 0.6, changeProbabilityWhereChanged: 0.6, top1GivenChange: 0.7,
+        top5GivenChange: 0.9, falseChangeShareWhereKept: 0.001 }]));
+  const runway = (top1: number) => ({ top1, direction: 0.95, sideGivenDirection: top1 / 0.95 });
   const scores = (all: number) => ({ ...Object.fromEntries(TRAINING_COLUMNS.map((column) => [column, all / 6])), all });
   return {
     schema: TRAINING_PRIOR_SCHEMA,
@@ -173,6 +183,8 @@ export function mockPriorOverlay(): Record<string, unknown> {
       split: "val", steps: 2053004, bestEpoch: 25,
       model: { nllPerStep: 0.1778, perplexityPerStep: 1.1946, perColumn },
       baselines: { repeat: scores(0.3444), previousWord: scores(0.326) },
+      firstStepRunway: { model: runway(0.81), airportFrequency: runway(0.57),
+                         rules: { B0_majority: runway(0.57), B1_active_config: runway(0.74), B3_same_sector_last: runway(0.7) } },
     },
     columns: [...TRAINING_COLUMNS],
     flights: sample.flights.map((flight, index) =>

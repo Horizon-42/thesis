@@ -19,7 +19,9 @@ import {
   TRAINING_PRIOR_SCHEMA,
 } from "../trainingOverlays";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
-import { EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlays, mockPriorOverlay } from "./trainingOverlays.fixture";
+import {
+  EXECUTOR_ID, MOCK_FIRST_PREDICTED_ROW, PRIOR_ID, mockExecutorOverlay, mockOverlays, mockPriorOverlay,
+} from "./trainingOverlays.fixture";
 
 function sample(): TrainingSample {
   const parsed = parseTrainingSample(mockSample());
@@ -200,12 +202,18 @@ describe("parseTrainingPriorOverlay", () => {
     const parsed = parseTrainingPriorOverlay(mockPriorOverlay(), sample());
     if (!parsed.ok) throw new Error(parsed.problem);
     const flight = parsed.value.flights[0];
-    const turn = priorStep(flight, "heading", 10);
+    const turn = priorStep(flight, "heading", 10)!;
     expect(turn.changeP).toBeCloseTo(0.6);
     expect(turn.ranked.map((item) => item.value)).toEqual([WORD.heading180 + 1, WORD.heading180, WORD.heading180 + 2]);
-    // the runway column has two candidates, so two words are ranked
-    expect(priorStep(flight, "runway", 0).ranked).toHaveLength(2);
+    // the first predicted step says every column; the runway column has two candidates, so two words are ranked
+    const opening = priorStep(flight, "runway", MOCK_FIRST_PREDICTED_ROW)!;
+    expect(opening.changeP).toBe(1);
+    expect(opening.ranked).toHaveLength(2);
+    // before it the prior only observes
+    expect(priorStep(flight, "heading", MOCK_FIRST_PREDICTED_ROW - 1)).toBeNull();
     expect(parsed.value.readout.baselines.previousWord.all).toBeCloseTo(0.326);
+    expect(parsed.value.readout.model.perColumn.runway.top1GivenChange).toBeNull();
+    expect(parsed.value.readout.firstStepRunway.rules.B1_active_config.top1).toBeCloseTo(0.74);
   });
 
   it("reads the truth at a step off the sentence, unchanged where it says nothing", () => {
@@ -231,5 +239,10 @@ describe("parseTrainingPriorOverlay", () => {
 
   it("refuses a readout missing a column's baseline", () => {
     expect(priorRefusal((raw) => { delete raw.readout.baselines.repeat.speed; })).toMatch(/repeat has no speed/);
+  });
+
+  it("refuses per-step arrays that do not cover the predicted steps exactly", () => {
+    expect(priorRefusal((raw) => { raw.flights[0].firstPredictedRow = 3; })).toMatch(/words has 112 values, expected 114/);
+    expect(priorRefusal((raw) => { raw.flights[0].firstPredictedRow = 60; })).toMatch(/firstPredictedRow is 60/);
   });
 });
