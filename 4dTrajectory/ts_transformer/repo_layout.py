@@ -35,6 +35,11 @@ def arrival_manifest_path(airport: str, harvest_root: Path = HARVEST_ROOT) -> Pa
     return harvest_root / airport.upper() / "arrivals" / "manifest.json"
 
 
+def tracks_manifest_path(airport: str, harvest_root: Path = HARVEST_ROOT) -> Path:
+    """The harvest's tracks manifest (every outcome) for ``airport`` under ``harvest_root``."""
+    return harvest_root / airport.upper() / "tracks" / "manifest.json"
+
+
 def checkpoint_arrival_manifests(
     payload: dict[str, Any], harvest_root: Path = HARVEST_ROOT
 ) -> list[Path]:

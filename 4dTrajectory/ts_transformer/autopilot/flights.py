@@ -68,10 +68,10 @@ def rebuild_series(directory: Path, signals: Sequence[FlightSignals]) -> list[Fl
 
 
 def require_same_flight(series: FlightSeries, signals: FlightSignals, geometry: AirportGeometry) -> None:
-    """The rebuilt flight reproduces the stored signals: the same runway and aircraft, every row of
+    """The rebuilt flight reproduces the stored signals: the same runway, aircraft and clock, every row of
     every field."""
     again = signals_from_series(series, geometry)
-    for name in ("runway", "typecode"):
+    for name in ("runway", "typecode", "entry_time_utc", "landing_time_utc"):
         if getattr(again, name) != getattr(signals, name):
             raise ValueError(f"{signals.dataset_id}: the rebuilt flight's {name} is {getattr(again, name)!r}, "
                              f"the stored signals' {getattr(signals, name)!r}")

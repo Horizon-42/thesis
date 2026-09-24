@@ -115,12 +115,27 @@ def fly_legs(legs, track0, altitude0, end_e, end_n):
     return e - e[-1] + end_e, n - n[-1] + end_n, altitude, track, speed
 
 
-def instruction_flight(e, n, altitude, track, speed, dataset_id="KXXX:test"):
-    """`FlightSignals` for a synthetic flight onto `instruction_airport`'s runway 09."""
+def fixture_days():
+    """The fixtures' day split (`data.day_split`): twenty June days, dealt with the real seed —
+    3 test, 3 val, 2 select, 12 train."""
+    from ts_transformer.data.day_split import DAY_SPLIT_SEED, split_days
+
+    return split_days([f"2026-06-{day:02d}" for day in range(1, 21)], DAY_SPLIT_SEED)
+
+
+def landing_on(split: str) -> str:
+    """A landing time (ISO UTC, midday) on the first `fixture_days` day of ``split``."""
+    return f"{fixture_days().days[split][0]}T12:00:00Z"
+
+
+def instruction_flight(e, n, altitude, track, speed, dataset_id="KXXX:test", split="train"):
+    """`FlightSignals` for a synthetic flight onto `instruction_airport`'s runway 09, landing on a
+    `fixture_days` day of ``split``."""
     import numpy as np
 
     from ts_transformer.instructions.signals import FlightSignals
 
     t = np.arange(len(e)) * INSTRUCTION_STEP_S
-    return FlightSignals(dataset_id, "KXXX", "09", "A320", t, e, n, altitude, track, speed,
-                         np.gradient(altitude, INSTRUCTION_STEP_S))
+    landing = landing_on(split)
+    return FlightSignals(dataset_id, "KXXX", "09", "A320", landing.replace("T12:", "T11:"), landing, t, e, n,
+                         altitude, track, speed, np.gradient(altitude, INSTRUCTION_STEP_S))

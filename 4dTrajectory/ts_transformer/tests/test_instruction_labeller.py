@@ -19,7 +19,7 @@ from ts_transformer.instructions.words import (
     UNCHANGED, Words,
 )
 from ts_transformer.tests.support import (
-    INSTRUCTION_STEP_S, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
+    INSTRUCTION_STEP_S, fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
 )
 
 def columns(reading, column):
@@ -290,8 +290,9 @@ def test_the_labels_runner_maps_each_sentence_to_its_signals_row(tmp_path, monke
     slow = (*good[:4], np.full(len(good[0]), 10.0))                     # impossible ground speed
     flights = {"train": [instruction_flight(*good, dataset_id="KXXX:a"), instruction_flight(*slow, dataset_id="KXXX:b"),
                          instruction_flight(*good, dataset_id="KXXX:c")],
-               "val": [instruction_flight(*good, dataset_id="KXXX:d")]}
-    write_signals(tmp_path, flights, {"note": "test"})
+               "select": [instruction_flight(*good, dataset_id="KXXX:e", split="select")],
+               "val": [instruction_flight(*good, dataset_id="KXXX:d", split="val")]}
+    write_signals(tmp_path, flights, {"note": "test"}, fixture_days())
     write_candidates(tmp_path, {"KXXX": instruction_airport()})
     write_spec(tmp_path, spec(), {"n": 1}, {"labeller_source_sha256": labeller_source_sha256(),
                                             "git": {"head": "test", "dirty": False}})
@@ -303,5 +304,6 @@ def test_the_labels_runner_maps_each_sentence_to_its_signals_row(tmp_path, monke
     assert [r["dataset_id"] for r in labels["train"]["labelled"]] == ["KXXX:a", "KXXX:c"]
     assert [(r["dataset_id"], r["reason"]) for r in labels["train"]["refused"]] == [("KXXX:b", "impossible ground speed")]
     assert load_sentences(tmp_path, "val", spec())["signal_index"].tolist() == [0]
+    assert [r["dataset_id"] for r in labels["select"]["labelled"]] == ["KXXX:e"]
 
 

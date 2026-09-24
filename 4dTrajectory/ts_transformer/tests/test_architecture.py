@@ -662,9 +662,9 @@ def test_every_new_run_vocabulary_is_actually_refused(tmp_path, capsys):
 
 INSTRUCTIONS = TS_DIR / "instructions"
 #: The second layer's language sits below every model (framework document §2): inside the
-#: package it reads only the torch-free data-plane modules its signals come through, itself and
-#: the plain utilities.
-INSTRUCTIONS_MAY_IMPORT = {"data.channels", "data.coordinate_frames", "io_utils"}
+#: package it reads only the torch-free data-plane modules its signals come through, the day split
+#: that deals them (`data.day_split`), itself and the plain utilities.
+INSTRUCTIONS_MAY_IMPORT = {"data.channels", "data.coordinate_frames", "data.day_split", "io_utils"}
 
 
 def test_the_instructions_package_sits_below_the_models():
@@ -725,9 +725,10 @@ def test_only_the_runners_reach_the_executor_for_now():
 
 
 PRIOR = TS_DIR / "prior"
-#: The prior sits on the instruction language (framework document §2): it reads the words and the artefact, never
-#: the executor, a model of the prediction paths, the training plane or a runner.
-PRIOR_MAY_IMPORT = ("prior.", "instructions.", "io_utils", "repo_layout")
+#: The prior sits on the instruction language (framework document §2): it reads the words and the artefact, and the
+#: day split the artefact was dealt by (its landing context leaves the sealed test days out), never the executor, a
+#: model of the prediction paths, the training plane or a runner.
+PRIOR_MAY_IMPORT = ("prior.", "instructions.", "data.day_split", "io_utils", "repo_layout")
 
 
 def test_the_prior_reads_only_the_instruction_language():

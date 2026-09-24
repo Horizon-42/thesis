@@ -157,10 +157,13 @@ def _limits(flown: Flown, index: int, states: np.ndarray, end_row: int) -> dict[
 
 
 def flown_signals(track: dict[str, np.ndarray], end_row: int, reference: FlightSignals, step_rows: int) -> FlightSignals:
-    """What was flown up to ``end_row``, at the sentence's step (every ``step_rows`` cycles)."""
+    """What was flown up to ``end_row``, at the sentence's step (every ``step_rows`` cycles). Its clock and day
+    are the observed flight's (the flight starts at the same entry; its landing time names the day, not the replay's
+    own landing)."""
     rows = np.arange(0, end_row + 1, step_rows)
     return FlightSignals(dataset_id=reference.dataset_id, airport=reference.airport, runway=reference.runway,
-                         typecode=reference.typecode, time_s=rows * (reference.time_s[1] - reference.time_s[0]) / step_rows,
+                         typecode=reference.typecode, entry_time_utc=reference.entry_time_utc,
+                         landing_time_utc=reference.landing_time_utc, time_s=rows * (reference.time_s[1] - reference.time_s[0]) / step_rows,
                          e_m=track["e"][rows], n_m=track["n"][rows], altitude_m=track["height"][rows],
                          track_deg=track["track"][rows], ground_speed_mps=track["ground_speed"][rows],
                          vertical_rate_mps=track["vertical_rate"][rows])

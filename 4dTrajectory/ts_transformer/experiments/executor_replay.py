@@ -51,6 +51,7 @@ from ts_transformer.data.dataset import FlightSeries
 from ts_transformer.data.lateral_eligibility import default_evaluation_report_path
 from ts_transformer.inference.export import build_prediction_record, observed_series_metrics, write_batch
 from ts_transformer.inference.forecast import Forecast
+from ts_transformer.instructions.artefact import SPLITS
 from ts_transformer.instructions.readout import STRATA, flight_record
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.envelope import control_contract
@@ -216,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
-    parser.add_argument("--split", choices=("train", "val"), required=True)
+    parser.add_argument("--split", choices=SPLITS, required=True)
     parser.add_argument("--per-airport", type=int, default=0, help="0: every labelled flight of the split")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--chunk", type=int, default=500)
@@ -228,8 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     out = args.out if args.out.is_absolute() else REPO_ROOT / args.out
     if out.exists():
         parser.error(f"{out} exists; a readout is never overwritten")
-    if args.split == "val" and git_state()["dirty"]:
-        parser.error("the val replay (stage 4) runs from a clean tree")
+    if args.split != "train" and git_state()["dirty"]:
+        parser.error(f"the {args.split} replay (stage 4) runs from a clean tree")
     params, record, words = replay.open_executor(executor, instructions)
     spec = words.spec
     started = time.perf_counter()

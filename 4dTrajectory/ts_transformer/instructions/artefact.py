@@ -1,6 +1,7 @@
 """The sentence artefact on disk (framework document §3): one directory, written once.
 
-``signals_<split>.npz`` + ``signals.json``   the per-step signals and where they came from
+``signals_<split>.npz`` + ``signals.json``   the per-step signals, where they came from, and the day split
+                                             (`data.day_split`) that dealt them — test days are never here
 ``spec.json`` + ``measurements.json``        the vocabulary spec (with its sha) and the numbers behind it
 ``candidates.json``                          every airport's candidate runways and runway ends (its geometry)
 ``sentences_<split>.npz`` + ``labels.json``  the sentences, and every flight's outcome
@@ -22,6 +23,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from final_approach import crossing
+from ts_transformer.data.day_split import DEVELOPMENT_SPLITS, DaySplit, landing_day
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.labeller.read import Reading
 from ts_transformer.instructions.signals import SIGNALS_SCHEMA, FlightSignals, pack_signals, unpack_signals
@@ -30,7 +32,9 @@ from ts_transformer.io_utils import write_json_atomic
 
 SENTENCES_SCHEMA = "ts-instruction-sentences-v2"
 CANDIDATES_SCHEMA = "ts-instruction-candidates-v2"
-SPLITS = ("train", "val")
+#: The splits an artefact holds: the development operating days (the internal selection set is its
+#: own split, so no reader carves it out of train by another rule).
+SPLITS = DEVELOPMENT_SPLITS
 
 
 def _fresh(path: Path) -> Path:
@@ -39,21 +43,52 @@ def _fresh(path: Path) -> Path:
     return path
 
 
-def write_signals(directory: Path, items: dict[str, Sequence[FlightSignals]], record: dict[str, Any]) -> None:
+def _require_split_days(days: DaySplit, split: str, flights: Sequence[FlightSignals]) -> None:
+    """Every flight lands on a day of ``split``; a test day's flight is refused by name (`SealedDay`)."""
+    for flight in flights:
+        found = days.development_split(landing_day(flight.landing_time_utc))
+        if found != split:
+            raise ValueError(f"{flight.dataset_id} lands on a {found} day, not a {split} day")
+
+
+def write_signals(directory: Path, items: dict[str, Sequence[FlightSignals]], record: dict[str, Any],
+                  days: DaySplit) -> None:
+    """``items``: split → flights, every flight on a day ``days`` deals to that split — all checked before the
+    first file is written."""
+    for split, flights in items.items():
+        if split not in SPLITS:
+            raise ValueError(f"an instruction artefact holds the splits {SPLITS}, not {split!r}")
+        _require_split_days(days, split, flights)
     splits = {}
     for split, flights in items.items():
         arrays, meta = pack_signals(flights)
         np.savez_compressed(_fresh(directory / f"signals_{split}.npz"), **arrays)
         splits[split] = {"flights": meta}
-    write_json_atomic(_fresh(directory / "signals.json"), {"schema": SIGNALS_SCHEMA, **record, "splits": splits})
+    write_json_atomic(_fresh(directory / "signals.json"),
+                      {"schema": SIGNALS_SCHEMA, **record, "day_split": days.to_dict(), "splits": splits})
 
 
-def load_signals(directory: Path, split: str) -> list[FlightSignals]:
+def _signals_record(directory: Path) -> dict[str, Any]:
     record = json.loads((directory / "signals.json").read_text(encoding="utf-8"))
     if record["schema"] != SIGNALS_SCHEMA:
         raise ValueError(f"{directory / 'signals.json'} is not a {SIGNALS_SCHEMA} file")
+    return record
+
+
+def load_day_split(directory: Path) -> DaySplit:
+    """The day split that dealt the artefact's flights."""
+    return DaySplit.from_dict(_signals_record(directory)["day_split"])
+
+
+def load_signals(directory: Path, split: str) -> list[FlightSignals]:
+    """One split's flights; each is checked to land on a day of that split."""
+    if split not in SPLITS:
+        raise ValueError(f"an instruction artefact holds the splits {SPLITS}, not {split!r}")
+    record = _signals_record(directory)
     with np.load(directory / f"signals_{split}.npz") as arrays:
-        return unpack_signals({name: arrays[name] for name in arrays.files}, record["splits"][split]["flights"])
+        flights = unpack_signals({name: arrays[name] for name in arrays.files}, record["splits"][split]["flights"])
+    _require_split_days(DaySplit.from_dict(record["day_split"]), split, flights)
+    return flights
 
 
 def write_candidates(directory: Path, geometries: dict[str, AirportGeometry]) -> None:

@@ -28,6 +28,7 @@ from flight_scenarios.identity import flight_key
 from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon
 
 from ts_transformer.data.dataset import load_flight_dicts
+from ts_transformer.data.day_split import parse_utc
 
 #: Inbound courses this close are one landing direction (the parallel-sibling rule of
 #: `experiments.runway_hypotheses.parallel_sibling`).
@@ -42,12 +43,6 @@ ENTRY_SECTORS = 8
 #: (KMSY 20: 2 of 4,147 arrivals), and a wind rule blind to that measures the runway's
 #: existence, not the configuration (first KMSY readout, 2026-09-13: 55 % against B1's 97 %).
 WIND_MIN_GROUP_SHARE = 0.05
-
-#: An OPERATING day starts at the overnight traffic minimum, not at UTC midnight: at these US
-#: airports 22Z–03Z carries 27–33 % of arrivals, so a UTC-midnight cut splits the evening session
-#: and puts one session's flights in two day folds (R1 review, 2026-09-13; the quietest hours are
-#: 07–11Z — 03:00–07:00 EDT, 00:00–04:00 PDT).
-OPERATIONAL_DAY_SHIFT = timedelta(hours=9)
 
 RULES = (
     "B0_majority",
@@ -92,15 +87,6 @@ def bearing_sector(lon: float, lat: float, ref_lon: float, ref_lat: float) -> in
     """Which of the `ENTRY_SECTORS` bearing sectors (from the reference point) a position is in."""
     bearing = course_deg(ref_lon, ref_lat, lon, lat)
     return int(bearing // (360.0 / ENTRY_SECTORS)) % ENTRY_SECTORS
-
-
-def parse_utc(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-
-
-def operational_day(time: datetime) -> str:
-    """The operating day a UTC time belongs to (see `OPERATIONAL_DAY_SHIFT`), ISO date."""
-    return (time - OPERATIONAL_DAY_SHIFT).date().isoformat()
 
 
 @dataclass(frozen=True)

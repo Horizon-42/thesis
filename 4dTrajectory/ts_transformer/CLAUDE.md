@@ -151,6 +151,10 @@ of the package, not a migration in progress.
   signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
   from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
   `envelope.heading_words_inside`, since `instruction-v3`) (C30).
+- **The two-tier line splits BY OPERATING DAY** (2026-09-24): a flight's day = its landing day (UTC − 9 h); the
+  90-day deal (14 test / 14 val / 9 select / 53 train) is COMMITTED (`data/day_split_20260924.json`) and a harvest
+  with other days is refused; test days are sealed — never opened, labelled, counted as context or put in a scene;
+  the instruction artefact refuses a test-day flight on write and read (C32).
 - **No A320 stand-in; a flight is dropped only where dynamics are used** (2026-09-24):
   `aircraft_filter` ∈ `all-flights` (every flight, one without dynamics kept with no aircraft and
   mass NaN — state output, the labeller) | `modelled` (control) | `openap-direct`; the default is BY

@@ -391,13 +391,15 @@ four runners that restated it import it).
 2026-09-23 (the instruction labeller, `docs/2026-09-23_two_tier_framework.zh.md` §3). An artefact
 directory under `4dTrajectory/outputs/POOLED/instruction_language/<name>/` is written by the four
 runners in order and never overwritten (`instructions.artefact._fresh` refuses an existing file):
-`signals_{train,val}.npz` + `signals.json` (the flights, from the live harvest's eligible arrivals,
-split by `data.splits` — the test split's tracks are never opened — built by `build_series` +
-`usable_series` under the default `TSConfig`, so the population is the models'), `candidates.json`
+`signals_{train,select,val}.npz` + `signals.json` (the flights, from the live harvest's eligible arrivals,
+split BY OPERATING DAY (C32) — a test day's tracks are never opened, and `write_signals` / `load_signals` refuse
+a test-day flight or one filed under another split; each flight carries `entry_time_utc` (row 0) and
+`landing_time_utc` — built by `build_series` + `usable_series` under the default `TSConfig`, so the population
+is the models'), `candidates.json`
 (each airport's candidate runways: the arrival manifest's `runway_targets`, the FAA CIFP runway
 geometry the modeling target is built from; position, elevation, true course only — never the
 published glidepath or TCH — and every runway end the harvest builds, which the landing rule reads),
-`spec.json` + `measurements.json`, `sentences_{train,val}.npz` + `labels.json` + `readout.{json,md}`.
+`spec.json` + `measurements.json`, `sentences_{train,select,val}.npz` + `labels.json` + `readout.{json,md}`.
 Every file code reads back carries its format's name (`SIGNALS_SCHEMA`, `CANDIDATES_SCHEMA`,
 `SPEC_SCHEMA`, `SENTENCES_SCHEMA`) and is refused under any other; **a name changes with its file's
 shape**, in the same change (2026-09-24, the user's rule). The spec's sha covers every word, grid,
@@ -467,3 +469,19 @@ by-need default, so neither default shows a `fleet` item.
 Size (the 2026-09-24 census of the eligible roster, before the build's own skips): train 50,693 flights,
 of which 46,260 (91.3 %) have dynamics and 36,294 (71.6 %) are OpenAP-direct; 4,433 have none (3,821
 excluded by the index, 612 unresolved identity). Val 10,635 / 9,668 / 7,574. Test sealed.
+
+### C32 · the two-tier line splits by operating day, dealt once and committed; test days are sealed
+
+2026-09-24 (`docs/2026-09-24_prior_design.zh.md` §3.3). `data/day_split.py`: an operating day is the UTC date
+9 h earlier (`OPERATIONAL_DAY_SHIFT`, the overnight traffic minimum); a flight's day is its LANDING day (the one time
+both the arrivals and the tracks roster carry; 20 of 72,247 eligible arrivals enter and land on different days).
+The days are dealt by COUNT over sha256(seed:day): round-half-up 15 % test, 15 % val, 1/7 of the rest `select`
+(the internal model-selection set), the remainder train — 14 / 14 / 9 / 53 of the 90 days, seed 1337. A count deal
+depends on the whole list (7 more days move a development day into test, 16 a test day out), so it is made ONCE and
+committed: `data/day_split_20260924.json` (`pinned_day_split`); `instruction_signals` refuses a harvest whose days
+differ — extending the split is a decision that keeps these test days sealed, never a re-deal. `DaySplit.from_dict`
+re-deals the recorded list and refuses a mismatch; `split_of` refuses a day not in the list; `development_split`
+refuses a test day by name (`SealedDay`). Sealed means: no test-day flight's track is opened, labelled, counted in the
+landing context (`prior.scene.context_landings`) or put in a scene. The per-flight split (`data.splits`) stays the
+other ts models'; a cross-model comparison uses the flights both hold out (1,458: on a test day AND in the flight
+split's test).
