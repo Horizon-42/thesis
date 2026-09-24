@@ -48,6 +48,12 @@ export const TRAINING_TUBE_COLOR = TRAINING_COLUMN_COLOR.altitude;
 /** A speed word's transition and band — the speed column's own colour. */
 export const TRAINING_SPEED_COLOR = TRAINING_COLUMN_COLOR.speed;
 
+/** How opaque each envelope's fill is in the 3D scene at rest, and when it is the selected word's —
+ *  one table, so the legend's swatches are the scene's. */
+export const TRAINING_ENVELOPE_ALPHA = {
+  turn: 0.16, turnEnd: 0.4, funnel: 0.18, corridor: 0.3, tube: 0.28, selected: 0.45,
+} as const;
+
 /** Every candidate runway (the pointer's choices) — and the one pointed at. */
 export const TRAINING_CANDIDATE_COLOR = "#94a3b8";
 export const TRAINING_DESIGNATED_COLOR = TRAINING_COLUMN_COLOR.runway;

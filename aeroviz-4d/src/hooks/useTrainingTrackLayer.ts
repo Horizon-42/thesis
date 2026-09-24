@@ -7,17 +7,19 @@
  *  • THE TRACK, in 3D, at its ellipsoid height (the exporter converted MSL once: h = H + N), and its
  *    GROUND TRACE draped under it: the lateral envelopes lie on the ground, and from any oblique
  *    view the airborne line is displaced from them — the trace is what they are read against.
- *  • THE LATERAL ENVELOPES on the ground (`trainingLayers.lateral`): each heading word's turn
- *    region, where its turn may end (a parallelogram, drawn darker) and its hold funnel, the
- *    capture turn, and the capture corridor with its centreline. They
- *    bound positions in plan only — the vertical is the tubes' business — so they are draped on
- *    the terrain rather than floated at some height the words do not give them. A ground polygon
- *    carries no outline, so each has a draped EDGE styled as the plan view strokes it: a turn region
- *    and a funnel red where the labeller's check failed, a funnel dashed where its hold is not
- *    judged, the capture turn dashed (red if its check failed).
- *  • THE TURN PATHS (`trainingLayers.turnPaths`): the fastest and the slowest turn of every turn
- *    region, draped, in the region's verdict colour (the fastest runs along its edge); the slowest
- *    dashed where it does not finish before the flight ends — as the plan view draws them.
+ *  • THE LATERAL ENVELOPES on the ground, each behind its own switch. They bound positions in plan
+ *    only — the vertical is the tubes' business — so they are draped on the terrain rather than
+ *    floated at some height the words do not give them. A ground polygon carries no outline, so each
+ *    has a draped EDGE styled as the plan view strokes it.
+ *    – THE TURNS (`turnPaths`, on by default): the fastest and the slowest turn of every heading
+ *      word and of the capture turn, in their verdict colour (red: the check failed; the slowest
+ *      dashed where it does not finish before the flight ends), and where the turn may end between
+ *      them (a parallelogram, drawn darker — after a big turn, a long thin stripe).
+ *    – THE TURN REGIONS (`turnRegions`, off by default): the area between the two turns.
+ *    – THE HOLD FUNNELS (`holdFunnels`, off by default): red where rows fell outside, dashed where
+ *      the hold is not judged, dotted where it is judged but its funnel starts wider than
+ *      `TRAINING_WEAK_HOLD_WIDTH_M` (a weak check).
+ *    – THE CAPTURE CORRIDOR (`corridor`) and its centreline.
  *  • THE ALTITUDE TUBES (`trainingLayers.vertical`): one Cesium wall per altitude word, over the
  *    aircraft's own ground track, between the tube's lower and upper edge (both HAE, exported), and
  *    the two edges as lines — ±25 m is a sliver under the track from any distance; the lines are not.
@@ -52,6 +54,7 @@ import {
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_DESIGNATED_COLOR,
+  TRAINING_ENVELOPE_ALPHA,
   TRAINING_FUNNEL_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TRACE_COLOR,
@@ -61,6 +64,7 @@ import {
 } from "../utils/trainingWordColors";
 import {
   rowAtTime,
+  trainingWeakHold,
   trainingWordAt,
   trainingWordLabel,
   type TrainingAltitudeTube,
@@ -79,6 +83,7 @@ export const TRAINING_ENTITY = {
   turnEnd: (index: number) => `training-turn-end-${index}`,
   funnel: (index: number) => `training-funnel-${index}`,
   captureTurn: "training-capture-turn",
+  captureTurnEnd: "training-capture-turn-end",
   /** A turn region's fastest or slowest turn (`id` is the region's). */
   path: (id: string, which: "fast" | "slow") => `${id}-${which}`,
   corridor: "training-corridor",
@@ -101,8 +106,7 @@ export const TRAINING_ENTITY = {
   focusFlown: (which: "starts" | "ends") => `training-focus-flown-${which}`,
 } as const;
 
-/** How opaque each envelope's fill is at rest, and when it is the selected word's. */
-const ALPHA = { turn: 0.16, turnEnd: 0.4, funnel: 0.18, corridor: 0.3, tube: 0.28, selected: 0.45 } as const;
+const ALPHA = TRAINING_ENVELOPE_ALPHA;
 /** An envelope's edge, at rest and when it is the selected word's (px). */
 const EDGE_WIDTH = 1.5;
 const EDGE_SELECTED_WIDTH = 3;
@@ -156,7 +160,7 @@ export function trainingFocusEntities(
     case "approach": {
       const turn = TRAINING_ENTITY.captureTurn;
       return word.event.kind === "clear"
-        ? [turn, TRAINING_ENTITY.path(turn, "fast"), TRAINING_ENTITY.path(turn, "slow"),
+        ? [turn, TRAINING_ENTITY.path(turn, "fast"), TRAINING_ENTITY.path(turn, "slow"), TRAINING_ENTITY.captureTurnEnd,
           TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]
         : [];
     }
@@ -178,7 +182,7 @@ export function trainingEnvelopeEntities(flight: TrainingFlight): string[] {
   return [
     ...flight.envelopes.heading.flatMap((_, index) =>
       [TRAINING_ENTITY.turn(index), TRAINING_ENTITY.turnEnd(index), TRAINING_ENTITY.funnel(index)]),
-    TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis,
+    TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.captureTurnEnd, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis,
     ...flight.envelopes.altitude.map((_, index) => TRAINING_ENTITY.tube(index)),
   ];
 }
@@ -217,6 +221,9 @@ export default function useTrainingTrackLayer(): void {
       viewer.entities.add(options);
     };
     const dash = (css: string) => new Cesium.PolylineDashMaterialProperty({ color: colour(css, 0.85) });
+    /** Short dots (3 px on, 3 px off: the 16-bit pattern over 24 px), told apart from the dashes (8 on,
+     *  8 off): a judged hold whose funnel starts too wide to say much. */
+    const dot = (css: string) => new Cesium.PolylineDashMaterialProperty({ color: colour(css, 0.85), dashLength: 24, dashPattern: 0x3333 });
     const groundLine = (id: string, degrees: number[], width: number, material: Cesium.Color | Cesium.MaterialProperty,
       name?: string) =>
       add({
@@ -224,10 +231,10 @@ export default function useTrainingTrackLayer(): void {
         name,
         polyline: { positions: Cesium.Cartesian3.fromDegreesArray(degrees), clampToGround: true, width, material },
       });
-    /** A draped region and its edge; the edge carries the verdict (`edge` colour, dashed or not). */
+    /** A draped region and its edge; the edge carries the verdict (`edge` colour and line style). */
     const ground = (
       id: string, line: TrainingPlanLine, css: string, alpha: number, name: string,
-      edge: { css: string; dashed: boolean } = { css, dashed: false },
+      edge: { css: string; style: "solid" | "dashed" | "dotted" } = { css, style: "solid" },
     ) => {
       add({
         id,
@@ -238,7 +245,8 @@ export default function useTrainingTrackLayer(): void {
           classificationType: Cesium.ClassificationType.BOTH,
         },
       });
-      groundLine(TRAINING_ENTITY.edge(id), planRingDegrees(line), EDGE_WIDTH, edge.dashed ? dash(edge.css) : colour(edge.css));
+      const style = { solid: () => colour(edge.css), dashed: () => dash(edge.css), dotted: () => dot(edge.css) }[edge.style];
+      groundLine(TRAINING_ENTITY.edge(id), planRingDegrees(line), EDGE_WIDTH, style());
     };
     const verdict = (ok: boolean, css: string) => (ok ? css : TRAINING_OUTSIDE_COLOR);
 
@@ -263,33 +271,50 @@ export default function useTrainingTrackLayer(): void {
       });
     }
 
-    if (trainingLayers.lateral) {
+    const capture = envelopes.approach.captureTurn;
+    const headingOk = (item: (typeof envelopes.heading)[number]) =>
+      item.check === null || (item.check.progressOk && item.check.rateOk);
+    if (trainingLayers.corridor) {
       ground(TRAINING_ENTITY.corridor, envelopes.approach.corridor.outline, TRAINING_CORRIDOR_COLOR, ALPHA.corridor,
         "The capture corridor");
       groundLine(TRAINING_ENTITY.corridorAxis, planDegrees(envelopes.approach.corridor.axis), 2, colour(TRAINING_CORRIDOR_COLOR));
+    }
+    if (trainingLayers.turnRegions) {
       envelopes.heading.forEach((item, index) => {
         if (item.turn) {
-          const turnOk = item.check === null || (item.check.progressOk && item.check.rateOk);
           ground(TRAINING_ENTITY.turn(index), item.turn.region, TRAINING_TURN_COLOR, ALPHA.turn,
-            `Turn region, heading word ${index + 1}`, { css: verdict(turnOk, TRAINING_TURN_COLOR), dashed: false });
-          ground(TRAINING_ENTITY.turnEnd(index), item.turn.end, TRAINING_TURN_COLOR, ALPHA.turnEnd,
-            `Where the turn of heading word ${index + 1} may end`);
-        }
-        if (item.funnel) {
-          const hold = item.holdCheck;
-          ground(TRAINING_ENTITY.funnel(index), item.funnel.outline, TRAINING_FUNNEL_COLOR, ALPHA.funnel,
-            `Hold funnel, heading word ${index + 1}`,
-            { css: verdict(hold === null || hold.inside === hold.rows, TRAINING_FUNNEL_COLOR), dashed: hold === null });
+            `Turn region, heading word ${index + 1}`, { css: verdict(headingOk(item), TRAINING_TURN_COLOR), style: "solid" });
         }
       });
-      const capture = envelopes.approach.captureTurn;
       if (capture) {
         ground(TRAINING_ENTITY.captureTurn, capture.turn.region, TRAINING_TURN_COLOR, ALPHA.turn / 2, "The capture turn",
-          { css: verdict(capture.check.progressOk && capture.check.rateOk, TRAINING_TURN_COLOR), dashed: true });
+          { css: verdict(capture.check.progressOk && capture.check.rateOk, TRAINING_TURN_COLOR), style: "dashed" });
       }
+    }
+    if (trainingLayers.holdFunnels) {
+      envelopes.heading.forEach((item, index) => {
+        if (!item.funnel) return;
+        const hold = item.holdCheck;
+        ground(TRAINING_ENTITY.funnel(index), item.funnel.outline, TRAINING_FUNNEL_COLOR, ALPHA.funnel,
+          `Hold funnel, heading word ${index + 1}`, {
+            css: verdict(hold === null || hold.inside === hold.rows, TRAINING_FUNNEL_COLOR),
+            style: hold === null ? "dashed" : trainingWeakHold(item) ? "dotted" : "solid",
+          });
+      });
     }
 
     if (trainingLayers.turnPaths) {
+      // where each turn may end: between the fastest and the slowest turn's ends
+      envelopes.heading.forEach((item, index) => {
+        if (item.turn) {
+          ground(TRAINING_ENTITY.turnEnd(index), item.turn.end, TRAINING_TURN_COLOR, ALPHA.turnEnd,
+            `Where the turn of heading word ${index + 1} may end`);
+        }
+      });
+      if (capture) {
+        ground(TRAINING_ENTITY.captureTurnEnd, capture.turn.end, TRAINING_TURN_COLOR, ALPHA.turnEnd,
+          "Where the capture turn may end");
+      }
       const paths = (id: string, turn: TrainingTurnRegion, ok: boolean, name: string) => {
         const css = verdict(ok, TRAINING_TURN_COLOR);
         const fastest = planDegrees(turn.fastPath);
@@ -302,12 +327,8 @@ export default function useTrainingTrackLayer(): void {
         }
       };
       envelopes.heading.forEach((item, index) => {
-        if (item.turn) {
-          paths(TRAINING_ENTITY.turn(index), item.turn, item.check === null || (item.check.progressOk && item.check.rateOk),
-            `heading word ${index + 1}`);
-        }
+        if (item.turn) paths(TRAINING_ENTITY.turn(index), item.turn, headingOk(item), `heading word ${index + 1}`);
       });
-      const capture = envelopes.approach.captureTurn;
       if (capture) paths(TRAINING_ENTITY.captureTurn, capture.turn, capture.check.progressOk && capture.check.rateOk, "the capture turn");
     }
 
@@ -445,8 +466,11 @@ export default function useTrainingTrackLayer(): void {
     };
     const recolour = (graphics: Cesium.PolylineGraphics, colourOf: (own: Cesium.Color) => Cesium.Color, width?: number) => {
       const own = (graphics.material.getValue(time) as { color: Cesium.Color }).color;
-      repaint(graphics, graphics.material instanceof Cesium.PolylineDashMaterialProperty
-        ? new Cesium.PolylineDashMaterialProperty({ color: colourOf(own) })
+      const material = graphics.material;
+      repaint(graphics, material instanceof Cesium.PolylineDashMaterialProperty
+        ? new Cesium.PolylineDashMaterialProperty({
+          color: colourOf(own), dashLength: material.dashLength, dashPattern: material.dashPattern,
+        })
         : new Cesium.ColorMaterialProperty(colourOf(own)), width);
     };
     const yellowLine = (graphics: Cesium.PolylineGraphics, width?: number) => recolour(graphics, () => selectedEdge, width);
@@ -504,7 +528,9 @@ export default function useTrainingTrackLayer(): void {
       });
     }
     const { lon, lat, altitudeHaeM } = focusFlight.signals;
-    const tag = (text: string) => ({
+    // Path labels sit below-right of their point, the flown turn's above-right: the fastest turn
+    // usually ends near where the turn was flown to, and the two would overprint.
+    const tag = (text: string, below: boolean) => ({
       text,
       font: "600 12px sans-serif",
       fillColor: selectedEdge,
@@ -512,7 +538,7 @@ export default function useTrainingTrackLayer(): void {
       outlineWidth: 3,
       style: Cesium.LabelStyle.FILL_AND_OUTLINE,
       horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-      pixelOffset: new Cesium.Cartesian2(10, 0),
+      pixelOffset: new Cesium.Cartesian2(10, below ? 12 : -8),
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     });
     // The selected turn's two paths, named where they end (on the ground, with them).
@@ -530,7 +556,7 @@ export default function useTrainingTrackLayer(): void {
         viewer.entities.add({
           id: TRAINING_ENTITY.focusPathLabel(which),
           position: Cesium.Cartesian3.fromDegrees(line.lon[end], line.lat[end]),
-          label: { ...tag(names[which]), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
+          label: { ...tag(names[which], true), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND },
         });
       }
     }
@@ -550,7 +576,7 @@ export default function useTrainingTrackLayer(): void {
             outlineWidth: 2,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
-          label: tag(`turn flown ${which} · step ${row}`),
+          label: tag(`turn flown ${which} · step ${row}`, false),
         });
       }
     }

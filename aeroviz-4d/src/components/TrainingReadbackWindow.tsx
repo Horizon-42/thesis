@@ -56,6 +56,8 @@ import {
   formatSeconds,
   rowAtTime,
   trainingKindLabel,
+  trainingWeakHold,
+  TRAINING_WEAK_HOLD_WIDTH_M,
   trainingWordAt,
   trainingWordLabel,
   TRAINING_COLUMN_INDEX,
@@ -176,12 +178,9 @@ export default function TrainingReadbackWindow({
   // ── the plan view: the track, the threshold and the selected word's envelope decide the frame ──
   const km = (metres: number) => metres / 1000;
   const focusOutlines: TrainingPlanLine[] = [
-    ...(layers.lateral && focusHeading !== null
-      ? [focusHeading.turn?.region, focusHeading.turn?.end, focusHeading.funnel?.outline]
-        .filter((line): line is TrainingPlanLine => line !== undefined)
-      : layers.lateral && focusTurn !== null ? [focusTurn.region] : []),
-    // the paths alone reach as far when the regions are switched off
-    ...(layers.turnPaths && focusTurn !== null ? [focusTurn.fastPath, focusTurn.slowPath] : []),
+    ...(layers.turnPaths && focusTurn !== null ? [focusTurn.fastPath, focusTurn.slowPath, focusTurn.end] : []),
+    ...(layers.turnRegions && focusTurn !== null ? [focusTurn.region] : []),
+    ...(layers.holdFunnels && focusHeading?.funnel ? [focusHeading.funnel.outline] : []),
   ];
   const frameE = [...signals.eM, designated.thresholdEM, ...envelopes.approach.corridor.axis.eM,
     ...focusOutlines.flatMap((line) => line.eM)].map(km);
@@ -213,9 +212,9 @@ export default function TrainingReadbackWindow({
   ];
   const headingValues = [
     ...signals.smoothed.trackDeg, ...signals.raw.trackDeg,
-    ...(layers.lateral ? envelopes.heading.flatMap((item) => item.holdBandDeg ?? []) : []),
-    ...(layers.lateral || layers.turnPaths ? turns.flatMap(({ turn }) => turn.headingRegion.deg) : []),
-    ...(layers.lateral ? envelopes.approach.courseBandDeg : []),
+    ...envelopes.heading.flatMap((item) => item.holdBandDeg ?? []),
+    ...(layers.turnRegions || layers.turnPaths ? turns.flatMap(({ turn }) => turn.headingRegion.deg) : []),
+    ...(layers.corridor ? envelopes.approach.courseBandDeg : []),
   ];
   const [hLow, hHigh] = extent(headingValues);
   const altitudeValues = [
@@ -344,8 +343,7 @@ export default function TrainingReadbackWindow({
                 );
               })}
 
-              {layers.lateral ? (
-                <>
+              {layers.corridor ? (
                   <polygon
                     className="training-readback-corridor"
                     points={points(envelopes.approach.corridor.outline)}
@@ -362,6 +360,7 @@ export default function TrainingReadbackWindow({
                       {vocabulary.corridorCourseToleranceDeg}° — every one of its {envelopes.approach.corridor.rows} rows inside
                     </title>
                   </polygon>
+              ) : null}
                   {envelopes.heading.map((item, index) => {
                     const selected = focused("heading", index);
                     const failed = item.check !== null && !(item.check.progressOk && item.check.rateOk);
@@ -369,8 +368,7 @@ export default function TrainingReadbackWindow({
                     const holdFailed = hold !== null && hold.inside < hold.rows;
                     return (
                       <g key={`plan-heading-${index}`} aria-label={`heading word ${index + 1} envelope`} opacity={recede(selected)}>
-                        {item.turn ? (
-                          <>
+                        {item.turn !== null && layers.turnRegions ? (
                             <polygon
                               className="training-readback-turn"
                               points={points(item.turn.region)}
@@ -387,6 +385,8 @@ export default function TrainingReadbackWindow({
                                 {item.turn.slowFinished ? "" : " — the slowest turn does not finish before the flight ends"}
                               </title>
                             </polygon>
+                        ) : null}
+                        {item.turn !== null && layers.turnPaths ? (
                             <polygon
                               className="training-readback-turn-end"
                               points={points(item.turn.end)}
@@ -400,16 +400,15 @@ export default function TrainingReadbackWindow({
                                 ends, and both moved by a start up to {item.turn.startDelayMaxS} s late
                               </title>
                             </polygon>
-                          </>
                         ) : null}
-                        {item.funnel ? (
+                        {item.funnel !== null && layers.holdFunnels ? (
                           <polygon
                             className="training-readback-funnel"
                             points={points(item.funnel.outline)}
                             fill={TRAINING_FUNNEL_COLOR}
                             fillOpacity={selected ? 0.3 : 0.1}
                             stroke={selected ? TRAINING_WORD_COLOR : holdFailed ? TRAINING_OUTSIDE_COLOR : TRAINING_FUNNEL_COLOR}
-                            strokeDasharray={hold === null ? "4 3" : undefined}
+                            strokeDasharray={hold === null ? "4 3" : trainingWeakHold(item) ? "1 3" : undefined}
                             strokeWidth={selected ? 1.4 : 0.7}
                           >
                             <title>
@@ -419,13 +418,17 @@ export default function TrainingReadbackWindow({
                               {hold === null
                                 ? "not judged by the labeller (after a turn under the lowest rate's threshold, or a slowest turn that does not finish)"
                                 : `${hold.inside} of ${hold.rows} hold rows inside`}
+                              {trainingWeakHold(item)
+                                ? ` — it starts ${((2 * item.funnel.startHalfWidthM) / 1000).toFixed(1)} km wide, everywhere the turn ` +
+                                  "may have ended: a weak check"
+                                : ""}
                             </title>
                           </polygon>
                         ) : null}
                       </g>
                     );
                   })}
-                  {capture ? (
+                  {capture !== null && layers.turnRegions ? (
                     <polygon
                       className="training-readback-capture-turn"
                       points={points(capture.turn.region)}
@@ -440,8 +443,19 @@ export default function TrainingReadbackWindow({
                       <title>the capture turn onto the course {designated.courseDeg.toFixed(1)}°</title>
                     </polygon>
                   ) : null}
-                </>
-              ) : null}
+                  {capture !== null && layers.turnPaths ? (
+                    <polygon
+                      className="training-readback-turn-end"
+                      points={points(capture.turn.end)}
+                      fill={TRAINING_TURN_COLOR}
+                      fillOpacity={approachFocused ? 0.55 : 0.35}
+                      stroke={approachFocused ? TRAINING_WORD_COLOR : TRAINING_TURN_COLOR}
+                      strokeWidth={approachFocused ? 1.2 : 0.8}
+                      opacity={recede(approachFocused)}
+                    >
+                      <title>where the capture turn may end</title>
+                    </polygon>
+                  ) : null}
 
               {/* the fastest and the slowest turn of every turn region, in the region's verdict colour
                   (they run along its edge); the slowest dashed where it does not finish */}
@@ -467,11 +481,12 @@ export default function TrainingReadbackWindow({
               ) : null}
               {/* the selected turn's two paths, named where they end */}
               {focusTurn !== null && layers.turnPaths ? (
+                // right of each end: the fastest's above its point, the slowest's level with it
                 [
-                  { line: focusTurn.fastPath, text: `fastest: ≤ ${focusTurn.rateMaxDegS}°/s, ≤ ${focusTurn.bankMaxDeg}° bank` },
-                  { line: focusTurn.slowPath, text: `slowest: ${focusTurn.rateMinDegS}°/s, begun ${focusTurn.startDelayMaxS} s late` },
-                ].filter(({ line }) => line.eM.length >= 2).map(({ line, text }) => (
-                  <text key={text} x={pathEnd(line).x + 5} y={pathEnd(line).y + 4} className="training-readback-path-label"
+                  { line: focusTurn.fastPath, dy: -6, text: `fastest: ≤ ${focusTurn.rateMaxDegS}°/s, ≤ ${focusTurn.bankMaxDeg}° bank` },
+                  { line: focusTurn.slowPath, dy: 4, text: `slowest: ${focusTurn.rateMinDegS}°/s, begun ${focusTurn.startDelayMaxS} s late` },
+                ].filter(({ line }) => line.eM.length >= 2).map(({ line, dy, text }) => (
+                  <text key={text} x={pathEnd(line).x + 6} y={pathEnd(line).y + dy} className="training-readback-path-label"
                     fill={TRAINING_WORD_COLOR}>
                     {text}
                   </text>
@@ -481,8 +496,10 @@ export default function TrainingReadbackWindow({
               {flown.map(({ which, row }) => (
                 <g key={`flown-${which}`} className="training-readback-flown" aria-label={`the turn flown ${which} at step ${row}`}>
                   <circle cx={at(row).x} cy={at(row).y} r={3.6} fill={TRAINING_WORD_COLOR} stroke="black" strokeWidth={0.8} />
-                  {/* below the point: a heading word's issue label sits above it, and the turn often starts there */}
-                  <text x={at(row).x + 6} y={at(row).y + 13} className="training-readback-path-label" fill={TRAINING_WORD_COLOR}>
+                  {/* LEFT of the point: a heading word's issue label sits above-right of it (the turn often
+                      starts there), and the fastest turn's name right of where the turn ends */}
+                  <text x={at(row).x - 6} y={at(row).y + (which === "starts" ? 4 : 14)} textAnchor="end"
+                    className="training-readback-path-label" fill={TRAINING_WORD_COLOR}>
                     turn flown {which} · step {row}
                   </text>
                 </g>
@@ -545,6 +562,9 @@ export default function TrainingReadbackWindow({
                   `${heading.check.rateMinApplies ? "" : `; under ${vocabulary.turnRateMinFromDeg}°, the lowest rate not judged`})`
                 : " · in force at entry, no turn"}
               {heading.holdCheck ? ` · its hold: ${heading.holdCheck.inside}/${heading.holdCheck.rows} rows in the funnel` : ""}
+              {trainingWeakHold(heading)
+                ? ` — a weak check: the funnel starts ${((2 * heading.funnel!.startHalfWidthM) / 1000).toFixed(1)} km wide`
+                : ""}
               {cursorRow >= flight.captureRow ? " · captured: the corridor holds" : ""}
             </text>
             <defs>
@@ -553,11 +573,9 @@ export default function TrainingReadbackWindow({
               </clipPath>
             </defs>
             <g clipPath="url(#training-heading-clip)">
-            {layers.lateral ? (
-              <>
                 {envelopes.heading.map((item, index) => (
                   <g key={`heading-band-${index}`} opacity={recede(focused("heading", index))}>
-                    {item.turn !== null ? (
+                    {item.turn !== null && layers.turnRegions ? (
                       <polygon
                         className="training-readback-turn-band"
                         points={profilePoints(item.turn.headingRegion)}
@@ -587,7 +605,7 @@ export default function TrainingReadbackWindow({
                     ) : null}
                   </g>
                 ))}
-                {capture ? (
+                {capture !== null && layers.turnRegions ? (
                   <polygon
                     className="training-readback-capture-band"
                     points={profilePoints(capture.turn.headingRegion)}
@@ -598,6 +616,7 @@ export default function TrainingReadbackWindow({
                     <title>the capture turn onto the course, between its fastest and its slowest turn</title>
                   </polygon>
                 ) : null}
+                {layers.corridor ? (
                 <rect
                   className="training-readback-course-band"
                   x={rowX(flight.captureRow)} width={Math.max(rowX(last) - rowX(flight.captureRow), 1)}
@@ -609,8 +628,7 @@ export default function TrainingReadbackWindow({
                 >
                   <title>after the capture: the course ±{vocabulary.corridorCourseToleranceDeg}°</title>
                 </rect>
-              </>
-            ) : null}
+                ) : null}
             {/* the fastest and the slowest turn as the heading against time: the plan's two paths */}
             {layers.turnPaths ? turns.map(({ key, turn, name, selected, ok }) => {
               const stroke = selected ? TRAINING_WORD_COLOR : ok ? TRAINING_TURN_COLOR : TRAINING_OUTSIDE_COLOR;
@@ -837,7 +855,9 @@ export default function TrainingReadbackWindow({
             the track: select the word to frame it, name its two turns and mark where the turn was actually flown ·{" "}
             <b style={{ color: TRAINING_FUNNEL_COLOR }}>▩</b> its hold funnel — that parallelogram swept along the target,
             widening by the distance flown × tan {vocabulary.headingToleranceDeg}°; the labeller counts the hold's rows in it
-            (dashed: a hold it does not judge) ·{" "}
+            (dashed: a hold it does not judge; dotted: judged, but the funnel starts over{" "}
+            {TRAINING_WEAK_HOLD_WIDTH_M / 1000} km wide — everywhere the turn may have ended — a weak check). The turn
+            regions and the funnels have switches of their own, off at first ·{" "}
             <b style={{ color: TRAINING_CORRIDOR_COLOR }}>▩</b> the capture corridor — {vocabulary.corridorHalfWidthM} m at the
             threshold, widening {vocabulary.corridorWideningDeg}° outward, course ±{vocabulary.corridorCourseToleranceDeg}°.
           </span>

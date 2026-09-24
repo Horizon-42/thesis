@@ -520,6 +520,20 @@ export function trainingWordAt(
   return { ...runs[index], index };
 }
 
+/**
+ * A READOUT THRESHOLD, not an envelope value: a judged hold whose funnel starts wider than this is
+ * marked as a WEAK check. The funnel starts across everywhere its turn may have ended — after a big
+ * turn that stretches from the fastest turn's end to the slowest's, 12–18 km at KRDU — so "every row
+ * inside" then says little about how the heading was held. The labeller's verdict is unchanged;
+ * the views only say how much it constrains.
+ */
+export const TRAINING_WEAK_HOLD_WIDTH_M = 2000;
+
+/** Is this heading word's hold judged against a funnel that starts wider than the threshold? */
+export function trainingWeakHold(item: TrainingHeadingEnvelope): boolean {
+  return item.holdCheck !== null && item.funnel !== null && 2 * item.funnel.startHalfWidthM > TRAINING_WEAK_HOLD_WIDTH_M;
+}
+
 /** The flight's verdicts, counted from the labeller's own checks. */
 export function trainingVerdicts(flight: TrainingFlight) {
   // The parts of a split turn share ONE check: count each turn once, by where it departed.
@@ -539,6 +553,7 @@ export function trainingVerdicts(flight: TrainingFlight) {
     holdsJudged: holds.length,
     holdsContained: holds.filter((hold) => hold.inside === hold.rows).length,
     holdsNotJudged: flight.envelopes.heading.filter((item) => item.funnel !== null && item.holdCheck === null).length,
+    holdsWeak: flight.envelopes.heading.filter(trainingWeakHold).length,
     captureTurn: flight.envelopes.approach.captureTurn?.check ?? null,
     altitudeWords: tubes.length,
     altitudeContained: tubes.filter((tube) => tube.check.contained).length,

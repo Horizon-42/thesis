@@ -8,7 +8,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 const { appState, setTrainingSelection, setTrainingLayer, fetchMock } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
-    trainingLayers: { lateral: true, vertical: true, candidates: true, turnPaths: true },
+    trainingLayers: { turnPaths: true, turnRegions: false, holdFunnels: false, corridor: true, vertical: true, candidates: true },
   },
   setTrainingSelection: vi.fn(),
   setTrainingLayer: vi.fn(),
@@ -126,8 +126,10 @@ describe("TrainingPanel", () => {
       await screen.findByText("TST1");
       fireEvent.click(screen.getByLabelText(/vertical: the altitude tubes/));
       expect(setTrainingLayer).toHaveBeenCalledWith("vertical", false);
-      fireEvent.click(screen.getByLabelText(/turn paths: the fastest and the slowest turn/));
+      fireEvent.click(screen.getByLabelText(/turns: the fastest and the slowest, and where each may end/));
       expect(setTrainingLayer).toHaveBeenCalledWith("turnPaths", false);
+      fireEvent.click(screen.getByLabelText(/hold funnels: where a hold may fly after its turn/));
+      expect(setTrainingLayer).toHaveBeenCalledWith("holdFunnels", true);
     });
 
     it("states the draw it came from", async () => {

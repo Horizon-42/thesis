@@ -72,7 +72,7 @@ describe("useTrainingTrackLayer helpers", () => {
     expect(at("altitude", 15)).toEqual([TRAINING_ENTITY.tube(0)]);
     const capture = TRAINING_ENTITY.captureTurn;
     expect(at("approach", 15)).toEqual([capture, TRAINING_ENTITY.path(capture, "fast"), TRAINING_ENTITY.path(capture, "slow"),
-      TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]);
+      TRAINING_ENTITY.captureTurnEnd, TRAINING_ENTITY.corridor, TRAINING_ENTITY.corridorAxis]);
     expect(at("approach", 5)).toEqual([]);   // "not cleared" bounds nothing
     expect(at("runway", 5)).toEqual([TRAINING_ENTITY.runway("09"), TRAINING_ENTITY.centreline("09")]);
     expect(at("angle", 30)).toEqual([]);

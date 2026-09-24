@@ -6,12 +6,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-const { appState } = vi.hoisted(() => ({
-  appState: {
-    trainingSelection: null as unknown,
-    trainingLayers: { lateral: true, vertical: true, candidates: true, turnPaths: true },
-  },
-}));
+const { appState, DEFAULT_LAYERS } = vi.hoisted(() => {
+  const DEFAULT_LAYERS = { turnPaths: true, turnRegions: false, holdFunnels: false, corridor: true, vertical: true, candidates: true };
+  return { DEFAULT_LAYERS, appState: { trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS } } };
+});
 
 vi.mock("../../context/AppContext", async () => {
   const { useState } = await import("react");
@@ -39,6 +37,7 @@ function select(position = 0) {
 describe("TrainingSentenceBar", () => {
   beforeEach(() => {
     appState.trainingSelection = null;
+    appState.trainingLayers = { ...DEFAULT_LAYERS };
   });
 
   it("draws nothing until a flight is selected", () => {
@@ -79,7 +78,7 @@ describe("TrainingSentenceBar", () => {
   it("reads out the labeller's verdicts", () => {
     select();
     render(<TrainingSentenceBar />);
-    expect(screen.getByText(/turns 1\/1 monotone, 1\/1 rate · holds 1\/2 in their funnel · capture turn ✓ ✓ · altitude 1\/2 · speed 1\/1/)).toBeTruthy();
+    expect(screen.getByText(/turns 1\/1 monotone, 1\/1 rate · holds 1\/2 in their funnel \(1 weak: the funnel starts over 2 km wide\) · capture turn ✓ ✓ · altitude 1\/2 · speed 1\/1/)).toBeTruthy();
     select(1);
     render(<TrainingSentenceBar />);
     expect(screen.getByText(/capture turn none \(on the final at entry\)/)).toBeTruthy();
@@ -118,6 +117,21 @@ describe("TrainingSentenceBar", () => {
     // the selected word, clicked again, clears the selection
     fireEvent.click(screen.getByLabelText(/^altitude descend to land/));
     expect(pressed()).toEqual([]);
+  });
+
+  it("carries a legend of what is drawn: only the switches that are on, and it folds away", () => {
+    select();
+    render(<TrainingSentenceBar />);
+    const legend = screen.getByLabelText("What the 3D scene shows");
+    expect(legend.textContent).toMatch(/where the turn may end: between the two turns' ends/);
+    expect(legend.textContent).not.toMatch(/hold funnel/);          // off by default
+    expect(legend.textContent).not.toMatch(/turn region/);
+    fireEvent.click(screen.getByText("Legend ▾"));
+    expect(legend.textContent).not.toMatch(/where the turn may end/);
+    appState.trainingLayers = { ...appState.trainingLayers, holdFunnels: true };
+    render(<TrainingSentenceBar />);
+    expect(screen.getAllByLabelText("What the 3D scene shows")[1].textContent)
+      .toMatch(/a judged hold whose funnel starts over 2 km wide: a weak check/);
   });
 
   it("opens the read-back check", () => {

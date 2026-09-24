@@ -14,7 +14,9 @@ import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import type { TrainingLayers } from "../../context/AppContext";
 import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 
-const ALL: TrainingLayers = { lateral: true, vertical: true, candidates: true, turnPaths: true };
+const ALL: TrainingLayers = {
+  turnPaths: true, turnRegions: true, holdFunnels: true, corridor: true, vertical: true, candidates: true,
+};
 
 function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: TrainingColumn | null = null) {
   const parsed = parseTrainingSample(mockSample());
@@ -47,8 +49,8 @@ describe("TrainingReadbackWindow", () => {
   it("draws the plan view's envelopes: one turn region per turn, a funnel per hold, the corridor, the capture turn", () => {
     open();
     expect(count(".training-readback-turn")).toBe(1);
-    // where the turn may end: its own four-cornered polygon, and the fastest and slowest turns
-    expect(count(".training-readback-turn-end")).toBe(1);
+    // where the turn may end — the heading word's and the capture turn's — four corners each
+    expect(count(".training-readback-turn-end")).toBe(2);
     expect(document.body.querySelector(".training-readback-turn-end")!.getAttribute("points")!.split(" ")).toHaveLength(4);
     // the fastest and the slowest turn of the heading word's turn and of the capture turn
     expect(count(".training-readback-turn-path")).toBe(4);
@@ -58,14 +60,15 @@ describe("TrainingReadbackWindow", () => {
     expect(count(".training-readback-candidate")).toBe(2);
   });
 
-  it("draws the turn paths by their own switch, whatever the lateral switch says", () => {
+  it("draws the turns, with where they may end, by their own switch, whatever the regions' switch says", () => {
     open({ ...ALL, turnPaths: false });
-    expect(count(".training-readback-turn-path")).toBe(0);
+    expect(count(".training-readback-turn-path") + count(".training-readback-turn-end")).toBe(0);
     expect(count(".training-readback-turn")).toBe(1);
     cleanup();
-    open({ ...ALL, lateral: false });
+    open({ ...ALL, turnRegions: false });
     expect(count(".training-readback-turn-path")).toBe(4);
-    expect(count(".training-readback-turn")).toBe(0);
+    expect(count(".training-readback-turn-end")).toBe(2);
+    expect(count(".training-readback-turn") + count(".training-readback-capture-turn")).toBe(0);
   });
 
   it("keeps the designated runway when the other candidates are switched off", () => {
@@ -78,8 +81,11 @@ describe("TrainingReadbackWindow", () => {
     open();
     const funnels = [...document.body.querySelectorAll(".training-readback-funnel")];
     expect(funnels.map((funnel) => funnel.textContent)).toEqual([
-      expect.stringMatching(/11 of 11 hold rows inside/), expect.stringMatching(/4 of 5 hold rows inside/),
+      expect.stringMatching(/11 of 11 hold rows inside$/),
+      expect.stringMatching(/4 of 5 hold rows inside — it starts 12\.4 km wide, everywhere the turn may have ended: a weak check/),
     ]);
+    // a weak check is dotted; a strong one solid
+    expect(funnels.map((funnel) => funnel.getAttribute("stroke-dasharray"))).toEqual([null, "1 3"]);
     const raw: any = mockSample();
     raw.flights[0].envelopes.heading[0].holdCheck = null;
     const parsed = parseTrainingSample(raw);
@@ -92,12 +98,14 @@ describe("TrainingReadbackWindow", () => {
     expect(screen.getAllByText(/not judged by the labeller/).length).toBeGreaterThan(0);
   });
 
-  it("switches the lateral envelopes off in the plan view AND on the heading chart", () => {
-    open({ ...ALL, lateral: false });
+  it("switches each envelope off in the plan view AND on the heading chart", () => {
+    open({ ...ALL, turnRegions: false, holdFunnels: false, corridor: false });
     for (const selector of [".training-readback-turn", ".training-readback-funnel", ".training-readback-corridor",
-                            ".training-readback-turn-band", ".training-readback-hold-band", ".training-readback-course-band"]) {
+                            ".training-readback-turn-band", ".training-readback-capture-band", ".training-readback-course-band"]) {
       expect(count(selector)).toBe(0);
     }
+    // the hold's heading band is the heading tolerance, not the funnel: it stays
+    expect(count(".training-readback-hold-band")).toBe(2);
   });
 
   it("draws a turn on the heading chart as the heading between its fastest and slowest turn", () => {
@@ -114,6 +122,10 @@ describe("TrainingReadbackWindow", () => {
     open({ ...ALL, turnPaths: false });
     expect(count(".training-readback-turn-heading")).toBe(0);
     expect(count(".training-readback-turn-band")).toBe(1);
+    cleanup();
+    open({ ...ALL, turnRegions: false });
+    expect(count(".training-readback-turn-band")).toBe(0);
+    expect(count(".training-readback-turn-heading")).toBe(4);
   });
 
   it("draws the heading chart's bands from the exporter's numbers", () => {
@@ -202,7 +214,7 @@ describe("TrainingReadbackWindow", () => {
     expect(screen.getByText(/framed on the track\s+and the selected word's envelope/)).toBeTruthy();
     // the regions switched off, the selected turn's paths still frame the plan
     cleanup();
-    open({ ...ALL, lateral: false }, 0, 22, "heading");
+    open({ ...ALL, turnRegions: false, holdFunnels: false }, 0, 22, "heading");
     expect(screen.getByText(/framed on the track\s+and the selected word's envelope/)).toBeTruthy();
     // with nothing selected nothing recedes and nothing is named
     cleanup();

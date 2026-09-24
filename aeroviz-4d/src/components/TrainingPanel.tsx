@@ -21,10 +21,11 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useApp } from "../context/AppContext";
+import { useApp, type TrainingLayers } from "../context/AppContext";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
   TRAINING_CANDIDATE_COLOR,
+  TRAINING_CORRIDOR_COLOR,
   TRAINING_FUNNEL_COLOR,
   TRAINING_TUBE_COLOR,
   TRAINING_TURN_COLOR,
@@ -42,6 +43,16 @@ import {
   type TrainingSample,
   type TrainingSetEntry,
 } from "../data/trainingSample";
+
+/** The Draw switches, in drawing order: what each shows, in its own colour. */
+const LAYER_SWITCHES: Array<{ layer: keyof TrainingLayers; colour: string; text: string }> = [
+  { layer: "turnPaths", colour: TRAINING_TURN_COLOR, text: "turns: the fastest and the slowest, and where each may end" },
+  { layer: "turnRegions", colour: TRAINING_TURN_COLOR, text: "turn regions: the area between the two turns" },
+  { layer: "holdFunnels", colour: TRAINING_FUNNEL_COLOR, text: "hold funnels: where a hold may fly after its turn" },
+  { layer: "corridor", colour: TRAINING_CORRIDOR_COLOR, text: "the capture corridor" },
+  { layer: "vertical", colour: TRAINING_TUBE_COLOR, text: "vertical: the altitude tubes" },
+  { layer: "candidates", colour: TRAINING_CANDIDATE_COLOR, text: "every candidate runway" },
+];
 
 type IndexState =
   | { status: "loading" }
@@ -238,38 +249,16 @@ export default function TrainingPanel() {
 
           <fieldset className="training-layers">
             <legend>Draw</legend>
-            <label style={{ color: TRAINING_FUNNEL_COLOR }}>
-              <input
-                type="checkbox"
-                checked={trainingLayers.lateral}
-                onChange={(event) => setTrainingLayer("lateral", event.target.checked)}
-              />
-              lateral: turn regions, hold funnels, the capture corridor
-            </label>
-            <label style={{ color: TRAINING_TURN_COLOR }}>
-              <input
-                type="checkbox"
-                checked={trainingLayers.turnPaths}
-                onChange={(event) => setTrainingLayer("turnPaths", event.target.checked)}
-              />
-              turn paths: the fastest and the slowest turn
-            </label>
-            <label style={{ color: TRAINING_TUBE_COLOR }}>
-              <input
-                type="checkbox"
-                checked={trainingLayers.vertical}
-                onChange={(event) => setTrainingLayer("vertical", event.target.checked)}
-              />
-              vertical: the altitude tubes
-            </label>
-            <label style={{ color: TRAINING_CANDIDATE_COLOR }}>
-              <input
-                type="checkbox"
-                checked={trainingLayers.candidates}
-                onChange={(event) => setTrainingLayer("candidates", event.target.checked)}
-              />
-              every candidate runway
-            </label>
+            {LAYER_SWITCHES.map(({ layer, colour, text }) => (
+              <label key={layer} style={{ color: colour }}>
+                <input
+                  type="checkbox"
+                  checked={trainingLayers[layer]}
+                  onChange={(event) => setTrainingLayer(layer, event.target.checked)}
+                />
+                {text}
+              </label>
+            ))}
             {/* TWO EMPTY SLOTS, on purpose: neither exists yet, and nothing is drawn in their
                 place. They arrive with the executor (stage 3) and the prior (stage 5). */}
             <label className="training-slot" title="The executor is being designed (stage 3): nothing to replay yet.">

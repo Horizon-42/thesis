@@ -261,15 +261,22 @@ interface TrainingSessionState {
 }
 
 export interface TrainingLayers {
-  /** The lateral envelopes: turn regions, hold funnels, the capture turn and the corridor. */
-  lateral: boolean;
+  /** The turns themselves (heading words and the capture turn): the fastest and the slowest turn,
+   *  in plan and as the heading against time, and where the turn may end between them. */
+  turnPaths: boolean;
+  /** The turn regions — the area between a turn's fastest and slowest turn, in plan and on the
+   *  heading chart. Off by default: after a big turn it is a crescent kilometres across that the
+   *  two turns alone already bound. */
+  turnRegions: boolean;
+  /** The hold funnels: where a hold may fly after its turn. Off by default: after a big turn the
+   *  funnel starts as wide as everywhere the turn may have ended. */
+  holdFunnels: boolean;
+  /** The capture corridor, its centreline, and the course band after the capture. */
+  corridor: boolean;
   /** The vertical envelopes: the altitude words' tubes (and, on the speed chart, the bands). */
   vertical: boolean;
   /** Every candidate runway with its extended centreline — the runway pointer's choices. */
   candidates: boolean;
-  /** The fastest and the slowest turn of each turn region (heading words and the capture turn): the
-   *  two paths the region lies between. A switch of its own, like the candidates: the regions stay. */
-  turnPaths: boolean;
 }
 
 /**
@@ -372,7 +379,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [trainingFlightKey]);
   const [trainingColumn, setTrainingColumn] = useState<TrainingColumn | null>(null);
   const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({
-    lateral: true, vertical: true, candidates: true, turnPaths: true,
+    turnPaths: true, turnRegions: false, holdFunnels: false, corridor: true, vertical: true, candidates: true,
   });
   const setTrainingLayer = useCallback((layer: keyof TrainingLayers, on: boolean) => {
     setTrainingLayers((current) => ({ ...current, [layer]: on }));

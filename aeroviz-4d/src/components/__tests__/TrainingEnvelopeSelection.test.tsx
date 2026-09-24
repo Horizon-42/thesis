@@ -29,7 +29,8 @@ vi.mock("../../utils/fetchJson", () => ({
   }),
 }));
 
-async function setup(position = 0, edit: (raw: any) => void = () => undefined) {
+/** The regions and the funnels are off by default; most tests look at every envelope. */
+async function setup(position = 0, edit: (raw: any) => void = () => undefined, everyEnvelope = true) {
   const raw = mockSample();
   edit(raw);
   const parsed = parseTrainingSample(raw);
@@ -48,6 +49,10 @@ async function setup(position = 0, edit: (raw: any) => void = () => undefined) {
     useLayoutEffect(() => {
       app.setViewer(viewer);
       app.setMode("training");
+      if (everyEnvelope) {
+        app.setTrainingLayer("turnRegions", true);
+        app.setTrainingLayer("holdFunnels", true);
+      }
       app.setTrainingSelection(selection);
     }, []);
     return <TrainingSentenceBar />;
@@ -96,7 +101,8 @@ describe("Training envelopes in the 3D scene", () => {
     const { heading } = scene.selection.flight.envelopes;
     const failed = heading.findIndex((item) => item.holdCheck !== null && item.holdCheck.inside < item.holdCheck.rows);
     const passed = heading.findIndex((item) => item.holdCheck !== null && item.holdCheck.inside === item.holdCheck.rows);
-    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(failed)))).toEqual(scene.css(TRAINING_OUTSIDE_COLOR));
+    // (this failed hold is also a weak one: dotted, at the dash lines' opacity)
+    expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(failed)))).toEqual(scene.css(TRAINING_OUTSIDE_COLOR, 0.85));
     expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(passed)))).toEqual(scene.css(TRAINING_FUNNEL_COLOR));
     // a tube with rows outside is edged in the verdict colour, not its own
     const tubes = scene.selection.flight.envelopes.altitude;
@@ -129,6 +135,9 @@ describe("Training envelopes in the 3D scene", () => {
     expect(scene.colourOf(TRAINING_ENTITY.turn(1))).toEqual(scene.css(TRAINING_TURN_COLOR, 0.45));
     expect(scene.colourOf(TRAINING_ENTITY.funnel(1))).toEqual(scene.css(TRAINING_FUNNEL_COLOR, 0.45));
     expect(scene.colourOf(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))).toEqual(scene.css(TRAINING_WORD_COLOR));
+    // the weak hold's edge keeps its dots when it is lit
+    const lit = scene.entities.getById(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))!.polyline!.material as Cesium.PolylineDashMaterialProperty;
+    expect(lit.dashPattern!.getValue(Cesium.JulianDate.now())).toBe(0x3333);
     expect(scene.colourOf(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"))).toEqual(scene.css(TRAINING_WORD_COLOR));
     // the altitude word in force at the same step is another column's: never lit, and it recedes
     // with every other word's envelope, keeping its hue
@@ -234,17 +243,45 @@ describe("Training envelopes in the 3D scene", () => {
   it("frames the selected flight once, not on a switch", async () => {
     const scene = await setup();
     expect(scene.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1);
-    act(() => scene.app().setTrainingLayer("lateral", false));
+    act(() => scene.app().setTrainingLayer("corridor", false));
     expect(scene.camera.flyToBoundingSphere).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws, by default, the turns and where they end — not the regions between them, nor the funnels", async () => {
+    const scene = await setup(0, () => undefined, false);
+    for (const id of [TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "fast"), TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "slow"),
+      TRAINING_ENTITY.turnEnd(1), TRAINING_ENTITY.captureTurnEnd, TRAINING_ENTITY.corridor, TRAINING_ENTITY.tube(0)]) {
+      expect(scene.entities.getById(id), id).toBeDefined();
+    }
+    for (const id of [TRAINING_ENTITY.turn(1), TRAINING_ENTITY.captureTurn, TRAINING_ENTITY.funnel(0), TRAINING_ENTITY.funnel(1)]) {
+      expect(scene.entities.getById(id), id).toBeUndefined();
+    }
+  });
+
+  it("dots the edge of a judged hold whose funnel starts too wide to say much", async () => {
+    const scene = await setup();
+    const now = Cesium.JulianDate.now();
+    // the fixture's second hold starts 12.4 km wide; the first is a cone from a point
+    const wide = scene.entities.getById(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(1)))!.polyline!.material;
+    expect(wide).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
+    expect((wide as Cesium.PolylineDashMaterialProperty).dashPattern!.getValue(now)).toBe(0x3333);
+    expect(scene.entities.getById(TRAINING_ENTITY.edge(TRAINING_ENTITY.funnel(0)))!.polyline!.material)
+      .toBeInstanceOf(Cesium.ColorMaterialProperty);
   });
 
   it("follows the switches, and leaves nothing behind outside Training", async () => {
     const scene = await setup();
     act(() => scene.app().setTrainingLayer("turnPaths", false));
     expect(scene.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "fast"))).toBeUndefined();
+    expect(scene.entities.getById(TRAINING_ENTITY.turnEnd(1))).toBeUndefined();   // where it ends goes with the turns
     expect(scene.entities.getById(TRAINING_ENTITY.turn(1))).toBeDefined();   // the region stays
     act(() => scene.app().setTrainingLayer("turnPaths", true));
-    act(() => scene.app().setTrainingLayer("lateral", false));
+    act(() => scene.app().setTrainingLayer("turnRegions", false));
+    expect(scene.entities.getById(TRAINING_ENTITY.turn(1))).toBeUndefined();
+    expect(scene.entities.getById(TRAINING_ENTITY.funnel(1))).toBeDefined();
+    act(() => scene.app().setTrainingLayer("holdFunnels", false));
+    expect(scene.entities.getById(TRAINING_ENTITY.funnel(1))).toBeUndefined();
+    act(() => scene.app().setTrainingLayer("corridor", false));
     expect(scene.entities.getById(TRAINING_ENTITY.corridor)).toBeUndefined();
     // the paths have a switch of their own
     expect(scene.entities.getById(TRAINING_ENTITY.path(TRAINING_ENTITY.turn(1), "fast"))).toBeDefined();

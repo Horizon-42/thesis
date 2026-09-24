@@ -118,10 +118,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   cursor → `trainingWordAt`; only that column's word lights up (its own envelope in its own hue with a yellow
   edge, and its in-force rows), in the sentence bar, the read-back window and 3D alike; every other word's
   envelope recedes (× 0.3) and the plan view frames the selected envelope (AV21).
-- Training in 3D: the lateral envelopes are draped on the ground with a draped edge carrying the verdict, under
-  the track's ground trace; the fastest / slowest turn paths have their own switch (`turnPaths`); the tubes are
-  walls in exported HAE with edge lines; a selected flight is framed once; the altitude chart's axis is the
-  distance flown (AV22).
+- Training in 3D: the plan envelopes are draped on the ground with a draped edge carrying the verdict, under the
+  track's ground trace; each has its own switch and by DEFAULT only the turns (fastest / slowest + where they may
+  end) and the corridor are drawn — turn regions and hold funnels are off; a hold whose funnel starts wider than
+  `TRAINING_WEAK_HOLD_WIDTH_M` is dotted (a weak check); a legend lists what is on; the tubes are walls in exported
+  HAE with edge lines; a selected flight is framed once; the altitude chart's axis is the distance flown (AV22).
 - **A turn is bounded by RATE**: its region lies between the fastest (4.7°/s, ≤ 32° bank) and the slowest
   (0.5°/s, up to 10.5 s late) turn, it may end in a parallelogram, and the hold funnel swept from that
   parallelogram is exactly what the labeller judges (`holdCheck`; dashed = not judged); the two turn paths are

@@ -6078,3 +6078,48 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   line-height: 1.35;
   color: #e8b06a;
 }
+
+/* What each colour of the Training 3D scene is: above the sentence bar, in the scene's lower right
+   corner (the bar is positioned, so this sits just above it). */
+.training-legend {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  max-width: 380px;
+  padding: 5px 8px 6px;
+  border: 1px solid rgba(103, 232, 249, 0.2);
+  border-radius: 6px;
+  background: rgba(15, 19, 30, 0.9);
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: rgba(224, 230, 240, 0.78);
+}
+
+.training-legend-toggle {
+  display: block;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 10.5px;
+  color: rgba(103, 232, 249, 0.85);
+  cursor: pointer;
+}
+
+.training-legend ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.training-legend li {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin-top: 2px;
+}
+
+.training-legend-swatch {
+  flex: none;
+  margin-top: 2px;
+}

@@ -27,6 +27,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
+import TrainingLegend from "./TrainingLegend";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import {
   TRAINING_COLUMN_COLOR,
@@ -36,6 +37,7 @@ import {
 import {
   formatSeconds,
   rowAtTime,
+  TRAINING_WEAK_HOLD_WIDTH_M,
   trainingColumnRuns,
   trainingKindLabel,
   trainingVerdicts,
@@ -150,6 +152,7 @@ export default function TrainingSentenceBar() {
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar">
+      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} />
       <header className="training-sentence-head">
         <strong>{flight.callsign}</strong>
         <span>{flight.typecode}</span>
@@ -165,7 +168,12 @@ export default function TrainingSentenceBar() {
         >
           turns {verdicts.turnsProgressOk}/{verdicts.turns} monotone, {verdicts.turnsRateOk}/{verdicts.turns} rate ·
           holds {verdicts.holdsContained}/{verdicts.holdsJudged} in their funnel
-          {verdicts.holdsNotJudged ? ` (${verdicts.holdsNotJudged} not judged)` : ""} ·
+          {verdicts.holdsNotJudged || verdicts.holdsWeak
+            ? ` (${[
+              verdicts.holdsNotJudged ? `${verdicts.holdsNotJudged} not judged` : "",
+              verdicts.holdsWeak ? `${verdicts.holdsWeak} weak: the funnel starts over ${TRAINING_WEAK_HOLD_WIDTH_M / 1000} km wide` : "",
+            ].filter(Boolean).join("; ")})`
+            : ""} ·
           capture turn {capture === null ? "none (on the final at entry)" : `${tick(capture.progressOk)} ${tick(capture.rateOk)}`} ·
           altitude {verdicts.altitudeContained}/{verdicts.altitudeWords} · speed {verdicts.speedContained}/{verdicts.speedWords}
         </span>
