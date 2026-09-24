@@ -12,8 +12,10 @@ The gates (§11), per airport and stratum (`instructions.readout`: straight-in /
 flights only (the stand-in group is reported, with no verdict): (1) landed on the pointed runway ≥ `GATE_SHARE`;
 (2) words inside their envelopes ≥ `GATE_SHARE`, counted per word judged (`replay.word_results`; a word the flown
 track never reached, or one the judge did not judge, is reported, not counted); (3) of the flights whose observed
-track passes evaluation, the replays that pass too ≥ `GATE_SHARE` — the observed verdicts are the harvest's own
-report, refused unless it is the same evaluation schema and methodology as the replay's. Reported beside them:
+track passes evaluation, the replays that pass too ≥ `GATE_SHARE` — the observed verdicts are graded HERE by this
+evaluation code over the drawn flights' own observed records (`observed_verdicts`: the harvest's record files linked
+read-only under ``--out/observed/<ICAO>``, rostered from its ``approach/summary.json``), so both sides are one grading
+whatever the harvest's stored report was graded with (2026-09-24: the speed gate's law changed after it was written). Reported beside them:
 outcomes, word failures, limits, the distance to the observed track.
 
 Stage 4 of the framework is the VAL replay and waits for the user's go-ahead; it runs from a clean tree.
@@ -130,11 +132,23 @@ def evaluate_records(records: Path) -> dict[str, Any]:
     return json.loads(report.read_text(encoding="utf-8"))
 
 
-def observed_report(airport: str) -> dict[str, Any]:
-    report = json.loads(default_evaluation_report_path(arrival_manifest_path(airport)).read_text(encoding="utf-8"))
-    if report["subject"] != "observed":
-        raise ValueError(f"{airport}: the harvest's approach report is not an observed report")
-    return report
+def observed_verdicts(airport: str, flight_keys: set[str], directory: Path) -> dict[str, Any]:
+    """The observed records of ``flight_keys`` graded by this evaluation code: the harvest's own record files linked
+    (read-only) into ``directory/records``, rostered by a ``summary.json`` cut from the harvest's, and evaluated
+    there. Returns the evaluation report."""
+    approach = default_evaluation_report_path(arrival_manifest_path(airport)).parent
+    summary = json.loads((approach / "summary.json").read_text(encoding="utf-8"))
+    if summary["subject"] != "observed":
+        raise ValueError(f"{approach / 'summary.json'} is not an observed batch")
+    rows = [row for row in summary["results"] if row["flight_key"] in flight_keys]
+    missing = flight_keys - {row["flight_key"] for row in rows}
+    if missing:
+        raise ValueError(f"{airport}: {len(missing)} flight(s) have no observed record, e.g. {sorted(missing)[:3]}")
+    (directory / "records").mkdir(parents=True)
+    for row in rows:
+        (directory / row["eval_file"]).symlink_to(approach / row["eval_file"])
+    write_json_atomic(directory / "summary.json", {**summary, "total": len(rows), "results": rows})
+    return evaluate_records(directory)
 
 
 def require_same_grading(replayed: dict[str, Any], observed: dict[str, Any], airport: str) -> None:
@@ -221,13 +235,9 @@ def main(argv: list[str] | None = None) -> int:
     by_airport: dict[str, list[int]] = defaultdict(list)
     for j, flight in enumerate(batch.signals):
         by_airport[flight.airport].append(j)
-    observed_reports = {airport: observed_report(airport) for airport in by_airport}
-    for airport, members in by_airport.items():
-        verdicts = {row["flight_key"] for row in observed_reports[airport]["trajectories"]}
-        missing = [batch.series[j].scenario.source["flight_key"] for j in members
-                   if batch.series[j].scenario.source["flight_key"] not in verdicts]
-        if missing:
-            raise ValueError(f"{airport}: {len(missing)} flight(s) have no observed verdict, e.g. {missing[:3]}")
+    observed_reports = {airport: observed_verdicts(airport, {batch.series[j].scenario.source["flight_key"] for j in members},
+                                                   out / "observed" / airport)
+                        for airport, members in sorted(by_airport.items())}
     for airport, members in sorted(by_airport.items()):
         observed = {row["flight_key"]: row["verdict"] for row in observed_reports[airport]["trajectories"]}
         flown_rows, graded = fly_airport(batch, members, params, words, chunk=args.chunk,
