@@ -351,7 +351,11 @@ compatibility rules as a decode mask via `instructions.grammar`) and the stepped
 same row are the reference (R17). The speaker encodes row by row (`Prior.extend`). **The landing
 reward** (`prior_landing_reward`, design §9.3): free sentences, 1 for landing in the airport's landing direction, each
 compared with its flight's others; advantage-weighted NLL + the KL to the frozen start + the teacher-forced data term
-(`train.RewardTuner`, dropout off), the round chosen on select within guards (R19).
+(`train.RewardTuner`, dropout off), the round chosen on select within guards (R19). **The glidepath lower edge** (post-training design §3): `prior/procedure.py` (floor = the
+published glidepath − 60 m inside the FAF and the LPV cone, nowhere else — the RNAV floors outside the FAF disagree with
+10–14 % of the recorded tracks); `prior_free_generation --glidepath-mask` masks the altitude column and stops a sentence at
+the first flown step below it (outcome `below_glidepath`, schema v2); `prior_procedure_check` measures it on labelled data
+before training (R20).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

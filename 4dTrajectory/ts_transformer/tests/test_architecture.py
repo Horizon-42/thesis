@@ -725,11 +725,15 @@ def test_only_the_runners_reach_the_executor_for_now():
 
 
 PRIOR = TS_DIR / "prior"
-#: The prior sits on the instruction language (framework document §2): it reads the words and the artefact, the day
-#: split the artefact was dealt by (its landing context leaves the sealed test days out) and the causal runway rules
-#: its first-step runway is read against (`data.runway_context`, design §8) — never the executor, a model of the
-#: prediction paths, the training plane or a runner.
+#: The prior sits on the instruction language (framework document §2): inside this package it reads the words and the
+#: artefact, the day split the artefact was dealt by (its landing context leaves the sealed test days out) and the causal
+#: runway rules its first-step runway is read against (`data.runway_context`, design §8) — never the executor, a model
+#: of the prediction paths, the training plane or a runner. Outside it, the glidepath lower edge (`prior/procedure.py`,
+#: post-training design §3) reads the coded approach, the harvest's runway data and the LPV cone
+#: (`PROCEDURE_MAY_IMPORT_OUTSIDE`) and stays torch-free.
 PRIOR_MAY_IMPORT = ("prior.", "instructions.", "data.day_split", "data.runway_context", "io_utils", "repo_layout")
+PROCEDURE_MAY_IMPORT_OUTSIDE = {"evaluation.cli", "flight_scenarios.fas_geometry", "flight_scenarios.procedure_final",
+                                "trajectory_data_process.harvest.airports"}
 
 
 def test_the_prior_reads_only_the_instruction_language():
@@ -744,6 +748,17 @@ def test_the_prior_reads_only_the_instruction_language():
             allowed = any((name == item[:-1] or name.startswith(item)) if item.endswith(".") else
                           (name == item or name.startswith(item + ".")) for item in PRIOR_MAY_IMPORT)
             assert allowed, f"{rel} imports {name}"
+
+
+def test_the_glidepath_edge_reads_only_the_procedure_sources_and_no_torch():
+    groups = {p.name for p in TS_DIR.iterdir() if (p / "__init__.py").is_file()} | {p.stem for p in TS_DIR.glob("*.py")}
+    for name in _imported_names(PRIOR / "procedure.py"):
+        top = name.split(".")[0]
+        assert top != "torch", f"prior/procedure.py imports {name}"
+        if top in groups or top in {"__future__", "math", "dataclasses", "typing", "numpy"}:
+            continue
+        assert any(name == allowed or name.startswith(allowed + ".") for allowed in PROCEDURE_MAY_IMPORT_OUTSIDE), \
+            f"prior/procedure.py imports {name}"
 
 
 def test_only_the_runners_reach_the_prior_for_now():

@@ -399,7 +399,7 @@ may be non-finite), and the readout cuts each flight's words at its end — and 
 factor. Readout per group (all, strata, airport × stratum): outcome shares, first runway = observed, landed on the
 observed runway, landing time − observed, words said per column after the first step, runway changes, go-arounds,
 cleared at the end (and among the timeouts), the probability the prior put on what the grammar forbade (approach, angle).
-Writes `generation.json` (`ts-prior-free-generation-v1`, every flight row) and `sentences.npz`; val only from a clean
+Writes `generation.json` (every flight row) and `sentences.npz`; val only from a clean
 tree. The executor spec must be this executor code's (`replay.open_executor`). ~36 s for 50 flights × (1 + 2) loops.
 Since `Prior.extend` (2026-09-25) the speaker encodes row by row: the probabilities differ from a whole re-encode by
 ~1e-6, so a re-run of the readouts recorded before it (`v3_freegen_20260925/{select,val}_400x4`) may flip a draw — the
@@ -410,7 +410,30 @@ new code dumped on the same seeds — free generation and the select split's inp
 numpy's element-wise functions on this i7-14700, AVX2 without AVX-512, give the same bits whatever the array's length),
 and a 16-flight × 8-sentence chunk takes 10.0 s instead of 26.6 s. Splitting a round across processes would change the
 random draws each chunk gets — not done.
+`--glidepath-mask` (2026-09-25, post-training design §3): each flight's candidates' finals (`prior.procedure`, the glidepath
+less 60 m inside the FAF and the LPV cone) mask the speaker's altitude column (`Speaker(finals=...)`: a level below the
+floor less half a step, "descend to land" from below it, "unchanged" on a word that no longer holds — for the runway just
+sampled; the masked probability is recorded as `forbidden_mass.altitude`), and every sentence, the labelled reference's
+too, ends at the first flown step whose end state is more than the track tolerance (half a step + the tube's margin)
+below the edge (`glidepath_stops`, read off the flown states at the step boundaries after the flight — where an in-loop
+check would have stopped it), outcome `below_glidepath` (`BELOW_GLIDEPATH`, not the judge's). Without the flag the run is
+draw for draw the one before it (40 select sentences checked). `generation.json` is `ts-prior-free-generation-v2` since:
+the outcome shares carry `below_glidepath` and the record `glidepath_mask`.
 
+
+### R20 · `run_ts.py prior_procedure_check` — the glidepath lower edge on labelled data (post-training design §3.6)
+
+2026-09-25. `prior_procedure_check --instructions <artefact> --executor <executor spec dir> [--split train]
+[--replay-per-airport 400] [--seed 1337] [--chunk 64] --out <new dir>` reads every labelled flight of the split
+(`labelled_rows`: a sentence's rows are its signals' first rows, contract C30) and counts, for the candidates' finals
+(`prior.procedure.published_procedures`): the labelled altitude words the mask would forbid where the prior would say them
+(the word in force at `N_LOOK`, then every one said; levels and "descend to land" apart), the later steps whose word in
+force it would make the prior replace, the tracks with a row more than the track tolerance below the edge (with the
+depth at each one's deepest row); then flies `--replay-per-airport` flights per airport (own dynamics, `replay.draw`) on
+their labelled words from `N_LOOK` as free generation's reference does, and counts the flights `glidepath_stops` stops
+(at the stop: distance to go, depth, the altitude word heard; the outcome is the judge's). Pass (`passes`, written
+before the run, user 2026-09-25): ≤ 1 % of the words forbidden and ≤ 3 % of the replays stopped. Writes `check.json`
+(`ts-prior-procedure-check-v1`); from a clean tree, never over an existing directory.
 
 ### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)
 

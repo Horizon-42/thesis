@@ -22,6 +22,12 @@ removed is recorded (`forbidden`): how much of the grammar it has learned.
 a runway change once it has been cleared (since the last go-around) or has captured the line (executor design §4.6) —
 stricter than the vocabulary's rule, which allows it with the approach changed in the same step; the stricter rule wins,
 so the listener never hears what it refuses. A flight the caller marks inactive (its flight is over) says nothing.
+
+**The glidepath lower edge is a mask on the altitude column** where the caller gives each flight its candidates' finals
+(`procedure.RunwayProcedure`, post-training design §3.4): at the aircraft's position, for the runway just sampled, a level
+below the floor, "descend to land" from below it and "unchanged" on a word that no longer holds there are removed
+(`procedure.altitude_word_allowed`); the probability on them is recorded like the grammar's. Without finals nothing is
+masked there and the speaker is the one above, draw for draw.
 """
 
 from __future__ import annotations
@@ -39,6 +45,7 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, rows_inputs
 from ts_transformer.prior.model import Prior, self_edges
+from ts_transformer.prior.procedure import RunwayProcedure, altitude_word_allowed
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 
 
@@ -48,9 +55,10 @@ class Speaker:
 
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  landings: Mapping[str, Landings] | None, words: Words, *, max_rows: int, generator: torch.Generator,
-                 temperature: float = 1.0) -> None:
+                 temperature: float = 1.0, finals: Sequence[Sequence[RunwayProcedure]] | None = None) -> None:
         """``landings``: each airport's landing context (`data.airport_landings`), None for a variant without it;
-        ``max_rows``: the most rows any flight will have (the model's position table must hold them)."""
+        ``max_rows``: the most rows any flight will have (the model's position table must hold them); ``finals``: each
+        flight's candidates' finals, in the pointer's order, to mask the altitude column by (None: no such mask)."""
         if VARIANTS[model.config.variant].landing_context != (landings is not None):
             raise ValueError(f"variant {model.config.variant} and the landing context given disagree")
         if max_rows > model.config.max_rows:
@@ -59,6 +67,14 @@ class Speaker:
         self.words = words
         #: per step: the probability the model put, before the mask, on what the mask removed — [B] per column
         self.forbidden: dict[int, list[np.ndarray]] = {RUNWAY: [], APPROACH: [], ANGLE: []}
+        self.finals = None if finals is None else [tuple(f) for f in finals]
+        if self.finals is not None:
+            if len(self.finals) != len(flights):
+                raise ValueError(f"{len(self.finals)} flights' finals for {len(flights)} flights")
+            for finals_b, geometry in zip(self.finals, self.geometries):
+                if tuple(f.candidate for f in finals_b) != geometry.candidates:
+                    raise ValueError(f"{geometry.code}: the finals are not its candidates', in the pointer's order")
+            self.forbidden[ALTITUDE] = []
         device = model.candidates.device
         count, slots = len(flights), model.config.candidate_slots
         width = len(VARIANTS[model.config.variant].relative_features)
@@ -162,6 +178,8 @@ class Speaker:
         not asked about (the model already masks it)."""
         spec = self.words.spec
         out = np.ones((len(chosen), classes), dtype=bool)
+        if column == ALTITUDE:
+            return self._above_the_glidepath(chosen, opening, classes)
         if column == RUNWAY:
             if not opening:
                 # the runway in force is not said again (the labeller drops a word equal to the one in force, and a
@@ -183,6 +201,22 @@ class Speaker:
                 if column == ANGLE and not opening and step[ALTITUDE] == UNCHANGED and k == 0:
                     continue                                 # nothing said in either column: nothing to check
                 out[b, k] = step_allowed(in_force, step, height, spec, self.words)
+        return out
+
+
+    def _above_the_glidepath(self, chosen: np.ndarray, opening: bool, classes: int) -> np.ndarray:
+        """``[B, classes]``: the altitude classes the glidepath lower edge allows each flight at its newest row, for the
+        runway in force after this step's runway column; "unchanged" (class 0) only where the word in force still holds
+        (at the first predicted step it is not asked about)."""
+        row, out = self.rows - 1, np.ones((len(chosen), classes), dtype=bool)
+        every = np.arange(classes - 1)
+        for b in range(len(chosen)):
+            runway = chosen[b, RUNWAY] - 1 if chosen[b, RUNWAY] > 0 else self.value[b, RUNWAY] - 1
+            final = self.finals[b][runway]
+            at = (self.e[b, row], self.n[b, row], self.h[b, row])
+            out[b, 1:] = altitude_word_allowed(final, every, *at, self.words)
+            if not opening:
+                out[b, 0] = bool(altitude_word_allowed(final, np.array([self.value[b, ALTITUDE] - 1]), *at, self.words)[0])
         return out
 
 
