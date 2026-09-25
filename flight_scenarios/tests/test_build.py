@@ -194,10 +194,16 @@ def test_build_scenario_target_from_threshold():
     assert scen.target.V == scen.aircraft.approach.reference_speed_ms(scen.target.m)
 
 
-def test_build_scenario_target_from_threshold_falls_back_when_unknown():
+def test_the_published_runway_target_decides_the_threshold_whatever_the_runway_label():
     flight = {**FLIGHT, "arr_airport": "KRDU", "runway": "99X"}  # no such threshold
     scen = build_scenario(flight, target_from_threshold=True)
     assert scen.source["target_source"] == "runway_threshold"
+
+
+def test_a_threshold_target_that_cannot_be_built_is_refused_not_the_track_end():
+    no_tch = {**FLIGHT, "runway_target": {**FLIGHT["runway_target"], "threshold_crossing_height_m": None}}
+    with pytest.raises(ValueError, match="no threshold target for KRDU runway"):
+        build_scenario({**no_tch, "arr_airport": "KRDU"}, target_from_threshold=True)
 
 
 # ── CLI discovery (one manifest per airport) ─────────────────────────────────

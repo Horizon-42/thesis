@@ -24,25 +24,23 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 from typing import Any, Iterator
 
 import numpy as np
 
-from trajectory_data_process.harvest.store import HarvestPaths, read_manifest, require_source_timed_manifest
+from trajectory_data_process.harvest.store import (
+    OUTCOME_ASSIGNED,
+    HarvestPaths,
+    read_manifest,
+    require_source_timed_manifest,
+)
+from trajectory_data_process.harvest.utc import parse_iso_utc_s
 
 SCENE_INDEX_SCHEMA = "scene-index-v1"
 INDEX_NAME = "scene_index.json"
-OUTCOME_ASSIGNED = "assigned"       # mirror of harvest.classify's outcome name (a string in the roster)
-
-
-def parse_utc_s(text: str) -> float:
-    """Epoch seconds of an ISO-8601 UTC stamp (``…Z``), millisecond precision kept."""
-    return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
 
 
 @dataclass(frozen=True)
@@ -112,14 +110,14 @@ def _manifest_sha256(paths: HarvestPaths) -> str:
 def _iter_track_times(paths: HarvestPaths, rows: list[dict[str, Any]]) -> Iterator[IndexEntry]:
     for row in rows:
         track = json.loads((paths.tracks / row["file"]).read_text(encoding="utf-8"))
-        start = parse_utc_s(track["start_time_utc"])
+        start = parse_iso_utc_s(track["start_time_utc"])
         landing = row.get("landing_time_utc")
         yield IndexEntry(
             flight_key=row["flight_key"], file=row["file"], outcome=row["outcome"],
             runway=row.get("runway"), icao24=row["icao24"], callsign=row.get("callsign"),
             start_utc_s=start, end_utc_s=start + float(track["duration_s"]),
             n_samples=len(track["samples"]),
-            landing_utc_s=parse_utc_s(landing) if isinstance(landing, str) else None,
+            landing_utc_s=parse_iso_utc_s(landing) if isinstance(landing, str) else None,
         )
 
 

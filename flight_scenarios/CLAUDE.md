@@ -14,25 +14,32 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   and the 8260.58D gates are orthometric. The gap is the geoid undulation N ≈ −25 to −33 m over
   the US (KRDU −33.53). Uncorrected, real completed airline landings scored **1.8 % on the
   gates** (18/996 KRDU) and the vertical gate passed ~0 %. Converted once at this seam by
-  `flight_scenarios/datum.py` (EGM96 via pyproj).
+  `flight_scenarios/datum.flight_to_msl`, which subtracts the flight's RUNWAY's CIFP offset
+  `runway_target["hae_minus_msl_m"]` (HAE minus MSL elevation of the threshold: KRDU 05L −32.0 m) —
+  one runway-local constant per flight, NOT EGM96 (−33.53 m there; 1.5 m apart). The measurements
+  above were taken with EGM96. `datum.geoid_undulation_m` (EGM96 via pyproj) is a different tool:
+  the Training view's MSL → HAE for executor-flown tracks (backend `autopilot_segment`,
+  `executor_training_export`).
 - **Do NOT move this into the harvest**: CZML positions are consumed by Cesium as metres above
   the ellipsoid (`aeroviz-4d/src/types/czml.d.ts`) and are CORRECT as recorded — converting at
   the source fixes modeling and breaks the viewer by the same 33 m.
-- The conversion is keyed on `altitude_source` (hence idempotent) and reaches THREE ingest paths
-  — `load_model_arrivals`, `build_scenario`, and `ts_transformer/data/dataset.py` (which reads bare
-  waypoints and so cannot self-protect); unknown/missing sources RAISE rather than defaulting,
-  and `"synthetic"` is already-MSL.
+- The conversion is keyed on `altitude_source` (hence idempotent) and reaches FOUR ingest paths
+  — `load_model_arrivals`, `build_scenario`, `ts_transformer/data/dataset.py` (which reads bare
+  waypoints and so cannot self-protect) and the harvest's observed records
+  (`harvest/observed.observed_record`, since 2026-09-25); unknown/missing sources RAISE rather than
+  defaulting, and `"synthetic"` is already-MSL. `HAE_ALTITUDE_SOURCE` is a MIRROR of
+  `harvest.store.ALTITUDE_SOURCE` (the harvest imports `datum`, so importing back would cycle),
+  pinned by `tests/test_datum.py`.
 - **The seam is symmetric on the way OUT**: modeling records (`*_states.json`, predictions) are
   MSL, and `build_scenario_comparison_czml._states_to_waypoints` — the single point every
-  record-derived entity flows through — converts MSL→HAE via `aeroviz-4d/python/vertical_datum.py`
-  (a deliberate MIRROR of `flight_scenarios/datum.py`, same KRDU N = −33.53 pin + ballpark probe;
-  the modeling tree must not be imported there). The observed reference bypasses it (deep-copied
+  record-derived entity flows through — adds the record's own `source.hae_minus_msl_m` back (the
+  same runway offset, so the round trip is exact). The observed reference bypasses it (deep-copied
   from `trajectories.czml`, already HAE).
 - Records are MSL by ASSUMPTION, not by tag — pre-datum-fix HAE-era artifacts are discarded
   wholesale (user decision); feeding one through the builder would double-shift it ~33.5 m low.
-- **PROJ trap**: with the EGM96 grid missing and network off, pyproj silently returns a
-  "ballpark" no-op vertical transform — a correction that looks applied and does nothing;
-  `_geoid_transformer()` probes a known undulation and raises.
+- **PROJ trap** (for `geoid_undulation_m`): with the EGM96 grid missing and network off, pyproj
+  silently returns a "ballpark" no-op vertical transform — a correction that looks applied and does
+  nothing; `_geoid_transformer()` probes a known undulation and raises.
 
 ## Flight identity
 
@@ -78,7 +85,8 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
 
 ## Population: who gets into a dataset
 
-Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-09-16; FS5–FS6 added 2026-09-24).
+Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-09-16; FS5–FS6 added 2026-09-24;
+FS7–FS9 2026-09-25).
 
 - **`build_scenarios_from_arrivals` is strict; `dataset.build_scenario_dataset` is the batch
   layer**: a flight with no usable fitted final approach (~0.08 % of the roster) raises
@@ -93,6 +101,20 @@ Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-
   both; `source["landing_aero"]` is provenance only, no longer read (FS3).
 - **`source["flight_key"]` is populated here** — only when the flight has an `id`, since the
   fallback would be a list index this function does not have (FS4).
+- **A threshold target that cannot be built is refused**, never replaced by the track end
+  (`build_scenario(target_from_threshold=True)`, 2026-09-25): on manifest input it cannot happen —
+  the arrivals loader requires the TCH and glidepath, and no roster, live or frozen, has a flight
+  without them (FS7).
+- **The ts and optimizer populations are different flights and nothing joins them**: ts keeps what
+  `UnusableFittedApproach` drops, applies its own aircraft filter and the lateral-pass roster; the
+  optimizer applies the per-runway cap. Per-airport rates across the two are over different flights
+  (FS8).
+
+## Scene context
+
+- **`scene_context` (no live consumer)**: a track that landed by t₀ is a landing, never a neighbour; a
+  neighbour not closing on the threshold has no ETA; two samples at one time are refused; the
+  membership constants are mirrors pinned to ts `final_approach_geometry`; `hour_utc` is UTC (FS9).
 
 ## Crossing span (observed records say where their crossing lives)
 
@@ -114,7 +136,7 @@ Full text: `docs/population_reference.md` (FS1–FS4, moved there verbatim 2026-
   `harvest.airports.Runway.lat/lon` prefers the CIFP Path Point LTP where an LPV procedure
   exists. Measured KRDU 05L: **6.69 m apart** (35.8745003/−78.802002 vs
   35.87444889/−78.80196361), and elevation 111.86 vs 111.80 m. The real pipeline is consistent
-  (`arrivals._runway_target(runway)` copies the CIFP-resolved `Runway`, so scenario targets are
+  (`arrivals.runway_target(runway)` copies the CIFP-resolved `Runway`, so scenario targets are
   bit-identical to the evaluation context), but `ts_transformer/data/synthetic.py` builds on the NASR
   point — which is why its test context pins the NASR coordinates explicitly.
   `evaluation.arrival._require_target_agrees_with_runway_data` now catches any such mix at 1 cm.

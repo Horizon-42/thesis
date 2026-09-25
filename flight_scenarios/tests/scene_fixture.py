@@ -1,12 +1,13 @@
 """A tiny synthetic harvest (tracks roster + track files) for the scene data plane's tests."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
 
-from trajectory_data_process.harvest.store import TRACK_SCHEMA_VERSION, HarvestPaths
+from trajectory_data_process.harvest.store import ALTITUDE_DATUM, ALTITUDE_SOURCE, TRACK_SCHEMA_VERSION, HarvestPaths
+from trajectory_data_process.harvest.utc import iso_utc, iso_utc_ms
 
 AIRPORT = "KRDU"
 RUNWAY = "05L"
@@ -25,10 +26,6 @@ def chart_to_latlon(e_m: float, n_m: float) -> tuple[float, float]:
 
 def axes_to_chart(d_m: float, xt_m: float) -> tuple[float, float]:
     return -d_m * math.cos(PSI) + xt_m * math.sin(PSI), -d_m * math.sin(PSI) - xt_m * math.cos(PSI)
-
-
-def _iso(t: float) -> str:
-    return datetime.fromtimestamp(t, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def straight_samples(start_utc: float, end_utc: float, d_start: float, d_end: float, xt: float, alt: float,
@@ -56,10 +53,10 @@ def write_harvest(root: Path, tracks: list[dict]) -> HarvestPaths:
         relative = f"{t['outcome']}/{key}.json"
         record = {
             "flight_key": key, "icao24": t["icao24"], "callsign": t["callsign"], "outcome": t["outcome"],
-            "runway": t["runway"], "landing_time_utc": _iso(landing)[:19] + "Z" if landing else None,
+            "runway": t["runway"], "landing_time_utc": iso_utc(landing) if landing else None,
             "landing_sample_index": len(t["samples"]) - 1 if landing else None,
-            "start_time_utc": _iso(t["start_utc"]), "duration_s": float(t["samples"][-1][0]),
-            "max_sample_gap_s": 5.0, "altitude_source": "opensky_history_geoaltitude_m", "altitude_datum": "hae",
+            "start_time_utc": iso_utc_ms(t["start_utc"]), "duration_s": float(t["samples"][-1][0]),
+            "max_sample_gap_s": 5.0, "altitude_source": ALTITUDE_SOURCE, "altitude_datum": ALTITUDE_DATUM,
             "assignment": {"outcome": t["outcome"], "runway": t["runway"]}, "observed_threshold_event": None,
             "samples": t["samples"], "reported_ground_speeds_m_s": [None] * len(t["samples"]),
         }

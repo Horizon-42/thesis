@@ -1,7 +1,6 @@
 """The scene context: who is around the ego at t₀, with only what was observable then."""
 from __future__ import annotations
 
-from dataclasses import replace
 import math
 from pathlib import Path
 import sys
@@ -15,7 +14,9 @@ for path in (REPO_ROOT, REPO_ROOT / "geokit" / "src", str(Path(__file__).resolve
         sys.path.insert(0, str(path))
 
 from geokit import compass_bearing_to_math_enu_rad  # noqa: E402
-from scene_fixture import PSI, RUNWAY, T0, TARGET, axes_to_chart, chart_to_latlon, standard_scene  # noqa: E402
+from scene_fixture import (  # noqa: E402
+    PSI, RUNWAY, T0, TARGET, axes_to_chart, chart_to_latlon, standard_scene, straight_samples, write_harvest,
+)
 from trajectory_data_process.scene_index import build_scene_index  # noqa: E402
 import flight_scenarios.scene_context as sc  # noqa: E402
 
@@ -24,7 +25,7 @@ def _ego_kwargs(keys):
     e, n = axes_to_chart(15_000.0, 0.0)
     lat, lon = chart_to_latlon(e, n)
     return dict(ego_flight_key=keys["EGO1"], ego_runway=RUNWAY, ego_target=TARGET, t0_utc_s=T0,
-                ego_lat=lat, ego_lon=lon, ego_alt_hae_m=TARGET["elevation_hae_m"] + 800.0, ego_ground_speed_mps=80.0)
+                ego_lat=lat, ego_lon=lon, ego_ground_speed_mps=80.0)
 
 
 def test_runway_axes_match_the_ts_chart_convention():
@@ -57,6 +58,7 @@ def test_the_scene_reads_the_past_only(tmp_path):
     # C: on the downwind, outbound — not established, far by ETA.
     c = by_key[keys["DWIND"]].observed
     assert not c.established and abs(c.xt_m - 8_000.0) < 50.0 and math.cos(c.heading_rad - PSI) < -0.9
+    assert c.eta_s == math.inf                          # flying away from the threshold: no ETA
     # Nearest to the ego first.
     assert [nb.flight_key for nb in scene.neighbours] == sorted(by_key, key=lambda k: by_key[k].distance_to_ego_m)
     # The future lives in future_label only: A's landing time is after t₀ and is not in Observed.
@@ -125,3 +127,74 @@ def test_the_scalars_count_everyone_in_the_radius_not_only_the_kept_entities(tmp
     assert len(cut.neighbours) == 1 and len(full.neighbours) == 2
     assert cut.scalars == full.scalars                  # the N_MAX cut is for the tensors only
     assert cut.in_radius == full.in_radius == 2
+
+
+def test_the_membership_mirrors_match_the_ts_geometry():
+    sys.path.insert(0, str(REPO_ROOT / "4dTrajectory"))
+    from ts_transformer.geometry import final_approach_geometry as fag
+
+    assert (sc.MEMBERSHIP_K, sc.MEMBERSHIP_FLOOR_M, sc.ALIGNMENT_MAX_DEG) == (
+        fag.MEMBERSHIP_K, fag.MEMBERSHIP_FLOOR_M, fag.ALIGNMENT_MAX_DEG
+    )
+
+
+def _scene_with(tmp_path, *others, ego_d_m=15_000.0):
+    """The ego inbound on the centreline, at ``ego_d_m`` at T0, plus ``others`` (fixture track dicts)."""
+    ego = dict(callsign="EGO1", icao24="e00001", outcome="assigned", runway=RUNWAY, landing_utc=T0 + 300.0,
+               start_utc=T0 - 130.0, samples=straight_samples(T0 - 130.0, T0 + 300.0,
+                                                              ego_d_m + 130.0 * 70.0, 0.0, 0.0, 900.0))
+    paths = write_harvest(tmp_path, [ego, *others])
+    index = build_scene_index(paths, verbose=False)
+    keys = {entry.callsign: entry.flight_key for entry in index.entries}
+    e, n = axes_to_chart(ego_d_m, 0.0)
+    lat, lon = chart_to_latlon(e, n)
+    scene = sc.scene_context(paths, index, ego_flight_key=keys["EGO1"], ego_runway=RUNWAY, ego_target=TARGET,
+                             t0_utc_s=T0, ego_lat=lat, ego_lon=lon, ego_ground_speed_mps=70.0)
+    return scene, keys
+
+
+def test_a_neighbour_that_landed_just_before_t0_is_a_landing_not_a_neighbour(tmp_path):
+    landed = dict(callsign="JUSTIN", icao24="a00009", outcome="assigned", runway=RUNWAY, landing_utc=T0 - 30.0,
+                  start_utc=T0 - 200.0, samples=straight_samples(T0 - 200.0, T0 - 30.0, 12_000.0, 0.0, 0.0, 400.0))
+    scene, keys = _scene_with(tmp_path, landed)
+    # Its last samples are 30 s old and inside the window, but its landing is the past: it
+    # enters the scalars only, and never as a lead at ETA ≈ 0.
+    assert scene.neighbours == () and scene.candidates_in_window == 0
+    assert scene.scalars.since_last_landing_same_runway_s == pytest.approx(30.0)
+    assert scene.scalars.landings_recent_same_runway == 1
+    assert scene.scalars.ahead_by_eta == 0 and scene.scalars.lead_eta_s is None
+
+
+def test_an_airborne_neighbour_on_the_parallel_final_is_not_established_on_the_ego_s(tmp_path):
+    # 05R's final, 1,000 m right of 05L's centreline, inbound 8 km out at T0.
+    parallel = dict(callsign="PARLL", icao24="a0000a", outcome="assigned", runway="05R", landing_utc=T0 + 120.0,
+                    start_utc=T0 - 120.0, samples=straight_samples(T0 - 120.0, T0 + 120.0, 16_000.0, 0.0,
+                                                                   1_000.0, 600.0))
+    scene, keys = _scene_with(tmp_path, parallel)
+    (nb,) = scene.neighbours
+    assert nb.flight_key == keys["PARLL"] and nb.observed.xt_m == pytest.approx(1_000.0, abs=5.0)
+    assert not nb.observed.established and scene.scalars.established_on_ego_final == 0
+    # Closing on the threshold and nearer: it is ahead by ETA whatever runway it lands on.
+    assert nb.observed.eta_s < scene.ego_eta_s and scene.scalars.ahead_by_eta == 1
+
+
+def test_an_established_ego_counts_only_the_aircraft_between_it_and_the_threshold_as_ahead(tmp_path):
+    ahead = dict(callsign="AHEAD", icao24="a0000b", outcome="assigned", runway=RUNWAY, landing_utc=T0 + 40.0,
+                 start_utc=T0 - 100.0, samples=straight_samples(T0 - 100.0, T0 + 40.0, 9_800.0, 0.0, 0.0, 300.0))
+    behind = dict(callsign="BEHIND", icao24="a0000c", outcome="assigned", runway=RUNWAY, landing_utc=T0 + 200.0,
+                  start_utc=T0 - 100.0, samples=straight_samples(T0 - 100.0, T0 + 200.0, 21_000.0, 0.0, 0.0, 800.0))
+    scene, keys = _scene_with(tmp_path, ahead, behind, ego_d_m=5_000.0)
+    by_key = {nb.flight_key: nb.observed for nb in scene.neighbours}
+    assert by_key[keys["AHEAD"]].established and by_key[keys["BEHIND"]].established
+    assert scene.scalars.established_on_ego_final == 2 and scene.scalars.ahead_by_eta == 1
+    assert scene.scalars.lead_eta_s == pytest.approx(by_key[keys["AHEAD"]].eta_s)
+
+
+def test_two_samples_at_one_time_are_refused_not_floored(tmp_path):
+    samples = straight_samples(T0 - 100.0, T0 + 40.0, 9_800.0, 0.0, 0.0, 300.0)
+    last_before_t0 = max(i for i, row in enumerate(samples) if row[0] <= 100.0)
+    samples[last_before_t0][0] = samples[last_before_t0 - 1][0]
+    twin = dict(callsign="TWIN", icao24="a0000d", outcome="assigned", runway=RUNWAY, landing_utc=T0 + 40.0,
+                start_utc=T0 - 100.0, samples=samples)
+    with pytest.raises(ValueError, match="two samples 0 s apart"):
+        _scene_with(tmp_path, twin)

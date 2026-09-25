@@ -1,5 +1,14 @@
 """Vertical datum at the data -> modeling seam: observed ADS-B altitude is NOT MSL.
 
+WHAT RUNS: ``flight_to_msl`` subtracts the flight's runway's CIFP offset,
+``runway_target["hae_minus_msl_m"]`` (the runway record's HAE minus MSL elevation: KRDU
+05L -32.0 m), from every altitude of the track -- one runway-local constant per flight, not
+a per-point geoid model (EGM96 would give -33.53 m there). Records carry the offset as
+``source.hae_minus_msl_m``, and the comparison CZML adds exactly that back on the way out.
+``geoid_undulation_m`` (EGM96 via pyproj) is NOT this conversion: it serves the Training
+view's exports of executor-flown tracks (``aeroviz_backend.autopilot_segment``,
+``executor_training_export``).
+
 OpenSky's ``geoaltitude`` -- the only altitude the harvest keeps (``altitude_source:
 "opensky_history_geoaltitude_m"``) -- is GNSS geometric altitude, i.e. height above the
 WGS84 **ellipsoid** (HAE). Everything the modeling plane measures it against is **mean sea
@@ -9,7 +18,8 @@ level** (orthometric): runway threshold elevations, CIFP procedure altitudes, an
     h_HAE = H_MSL + N          =>          H_MSL = h_HAE - N
 
 N is roughly -25 to -33 m over the continental US, so an uncorrected observed track sits
-about 30 m BELOW its own approach. Measured on 996 KRDU arrivals whose fitted glidepath is
+about 30 m BELOW its own approach (the history below was measured with EGM96's N; the
+runway offset that replaced it differs by ~1.5 m). Measured on 996 KRDU arrivals whose fitted glidepath is
 a textbook 3.08 deg: the extrapolated threshold crossing came out 29.2 m low and the
 vertical gate passed 0.5 % of real, completed airline landings. KRDU's lowest observed
 sample confirms the mechanism independently -- 99.1 m, against a field elevation of
@@ -40,7 +50,9 @@ import functools
 import os
 from typing import Any, Iterable, Sequence
 
-# Source tag written by ``trajectory_data_process.harvest.store``.
+# MIRROR of ``trajectory_data_process.harvest.store.ALTITUDE_SOURCE`` (the tag the harvest
+# writes). Not imported: the harvest package imports this module, so a top-level import
+# would cycle; ``tests/test_datum.py`` pins the two equal.
 HAE_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m"
 # What this module rewrites it to, so the conversion is visible and non-repeatable.
 MSL_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_local_msl_cifp_threshold"
@@ -56,7 +68,8 @@ _MSL_CRS = "EPSG:4326+5773"
 
 @functools.cache
 def _geoid_transformer():
-    """The EGM96 transformer, built once (a raising build is not cached, so it retries).
+    """The EGM96 transformer behind ``geoid_undulation_m``, built once (a raising build is not
+    cached, so it retries). Not used by ``flight_to_msl`` (see the module docstring).
 
     ``pyproj`` needs the EGM96 grid (``us_nga_egm96_15.tif``). Without it PROJ silently
     falls back to a "ballpark" no-op that returns the input unchanged -- which would look
@@ -92,28 +105,13 @@ def _geoid_transformer():
 
 
 def geoid_undulation_m(lats: Sequence[float], lons: Sequence[float]) -> list[float]:
-    """EGM96 geoid undulation N = h_HAE - H_MSL, metres, one per point."""
+    """EGM96 geoid undulation N = h_HAE - H_MSL, metres, one per point.
+
+    The Training view's MSL -> HAE for executor-flown tracks; the modeling seam converts with
+    the runway's CIFP offset instead (``flight_to_msl``)."""
     _, _, msl_of_zero = _geoid_transformer().transform(list(lons), list(lats), [0.0] * len(lats))
     # Transforming HAE 0 gives -N, so N is its negation.
     return [-z for z in msl_of_zero]
-
-
-def waypoints_to_msl(waypoints: Iterable[Sequence[float]]) -> list[list[float]]:
-    """``[t, lon, lat, alt_HAE]`` -> ``[t, lon, lat, alt_MSL]``, altitudes only.
-
-    The altitudes are transformed directly: EGM96's N depends only on (lat, lon), so the
-    transform of ``alt_HAE`` IS ``alt_HAE - N``, with no intermediate undulation list and
-    no sign flip to get wrong (``geoid_undulation_m`` stays as the diagnostic API).
-    """
-    rows = [list(w) for w in waypoints]
-    if not rows:
-        return rows
-    _, _, msl = _geoid_transformer().transform(
-        [r[1] for r in rows], [r[2] for r in rows], [r[3] for r in rows]
-    )
-    for row, alt in zip(rows, msl):
-        row[3] = alt
-    return rows
 
 
 def _runway_offset(flight: dict[str, Any]) -> float:

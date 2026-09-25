@@ -131,6 +131,16 @@ def test_reads_the_skeleton_up_to_the_threshold_with_its_transitions(tmp_path):
     assert all(fix.speed_max_mps is None for fix in transition.fixes)
 
 
+def test_a_threshold_the_cifp_codes_without_an_elevation_reads_as_unknown_not_sea_level(tmp_path):
+    import json
+
+    path = _write_skeleton_document(tmp_path, "KXYZ", "09")
+    document = json.loads(path.read_text())
+    document["runway"]["threshold"]["elevationFt"] = None  # KMSY RW20's two procedures
+    path.write_text(json.dumps(document))
+    assert procedure_skeleton("KXYZ", "09", root=tmp_path).threshold_elevation_m is None
+
+
 def test_the_final_stops_at_the_mapt_even_when_the_document_names_no_threshold_fix(tmp_path):
     path = _write_skeleton_document(tmp_path, "KXYZ", "09")
     document = json.loads(path.read_text())

@@ -98,8 +98,6 @@ def build_scenario(
     # The optimizer flies initial -> target. The initial state is the start of the observed
     # track; the target is either the track end or the runway threshold (see below).
     initial = initial_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
-    target_source = "track_end"
-    target = None
     if target_from_threshold:
         target = threshold_target_state(
             arr_airport,
@@ -108,8 +106,15 @@ def build_scenario(
             mass_kg=mass,
             published_target=flight.get("runway_target"),
         )
-        if target is not None:
-            target_source = "runway_threshold"
+        if target is None:
+            # Never on manifest input: the arrivals loader refuses a runway_target without
+            # its TCH and glidepath. Anything else asked for a threshold it cannot have.
+            raise ValueError(
+                f"flight {flight.get('id')!r} has no threshold target for {arr_airport} runway "
+                f"{flight.get('runway')!r}: its runway_target lacks the TCH or glidepath, or "
+                "the runway is not in the threshold table"
+            )
+        target_source = "runway_threshold"
     elif target_from_fitted_adsb:
         fitted = fitted_hae
         if fitted is None:
@@ -124,8 +129,9 @@ def build_scenario(
             ),
         )
         target_source = "fitted_adsb_crossing"
-    if target is None:
+    else:
         target = final_state_from_track(waypoints, mass_kg=mass, window_s=window_s)
+        target_source = "track_end"
     aero = aero_params_for_aircraft(aircraft) if aircraft is not None else None
 
     source = {

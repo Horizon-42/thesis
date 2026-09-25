@@ -125,8 +125,8 @@ _TRAIL_TIME_S = 300
 #
 # Serialized precision for `cartographicDegrees`. A MIRROR of the record contract's
 # `evaluation_export.STATE_DECIMALS` (t/lat/lon/alt) — this package is standalone frontend
-# tooling and must not import the modeling tree, same rule as `flight_identity.py` and
-# `vertical_datum.py`. Position arrays are 96% of a comparison CZML and were written at
+# tooling and must not import the modeling tree, same rule as `flight_identity.py`.
+# Position arrays are 96% of a comparison CZML and were written at
 # full float repr: rounding halves the file for a 1.1 mm shift, which is nine orders below
 # anything visible on a globe. Time is left exact for the same reason the record contract
 # leaves it exact — CZML sample offsets must stay strictly increasing. Change these

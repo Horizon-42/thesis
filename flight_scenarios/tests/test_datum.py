@@ -133,5 +133,11 @@ class SeamTest(unittest.TestCase):
         self.assertNotIn("json.loads(Path(observed_tracks)", body)
 
 
+    def test_the_hae_tag_mirrors_the_one_the_harvest_writes(self) -> None:
+        from trajectory_data_process.harvest.store import ALTITUDE_SOURCE
+
+        self.assertEqual(HAE_ALTITUDE_SOURCE, ALTITUDE_SOURCE)
+
+
 if __name__ == "__main__":
     unittest.main()

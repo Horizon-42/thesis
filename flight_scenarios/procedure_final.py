@@ -135,7 +135,8 @@ class ProcedureSkeleton:
     runway: str                     # ``05L``
     threshold_lat_deg: float
     threshold_lon_deg: float
-    threshold_elevation_m: float
+    #: MSL; None when the CIFP codes no elevation on the threshold fix (KMSY RW20's two procedures).
+    threshold_elevation_m: float | None
     glidepath_angle_deg: float | None
     threshold_crossing_height_m: float | None
     final: ProcedureBranch
@@ -251,13 +252,14 @@ def procedure_skeleton(
     profile = profiles[0] if profiles else {}
     gpa = profile.get("glidepathAngleDeg")
     tch = profile.get("thresholdCrossingHeightFt")
+    elevation_ft = threshold["elevationFt"]
     return ProcedureSkeleton(
         procedure_uid=str(document["procedureUid"]),
         airport=airport.upper(),
         runway=runway.upper(),
         threshold_lat_deg=float(threshold["lat"]),
         threshold_lon_deg=float(threshold["lon"]),
-        threshold_elevation_m=float(threshold.get("elevationFt") or 0.0) * FT_M,
+        threshold_elevation_m=float(elevation_ft) * FT_M if elevation_ft is not None else None,
         glidepath_angle_deg=float(gpa) if gpa is not None else None,
         threshold_crossing_height_m=float(tch) * FT_M if tch is not None else None,
         final=ProcedureBranch(

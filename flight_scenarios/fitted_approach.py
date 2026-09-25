@@ -61,7 +61,7 @@ class FittedApproach:
     crossing_time_s: float | None
 
     def target_state(
-        self, *, mass_kg: float, hae_minus_msl_m: float = 0.0
+        self, *, mass_kg: float, hae_minus_msl_m: float
     ) -> GeodeticState:
         """Return the fitted position and approach kinematics in the modeling MSL datum.
 

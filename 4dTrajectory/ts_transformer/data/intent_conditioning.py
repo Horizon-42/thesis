@@ -52,13 +52,14 @@ from __future__ import annotations
 import json
 from bisect import bisect_left
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
 import numpy as np
 import torch
 
+from trajectory_data_process.harvest.store import OUTCOME_ASSIGNED
+from trajectory_data_process.harvest.utc import parse_iso_utc_s
 from ts_transformer.data.channels import POSITION_IDX
 # The mode and channel names live in config (beside ``input_channels``) because
 # final_approach_geometry imports config: defining them here would close a cycle.
@@ -81,9 +82,6 @@ LEAD_ETA_CLIP_S = 1800.0
 # The remaining-time channel is scaled by the config's ``final_time_scale_s`` — it IS the
 # quantity that scale was defined for (the duration head's target).
 
-# Mirror of the harvest's outcome literal (trajectory_data_process/harvest/arrivals.py
-# selects the roster with ``row["outcome"] != "assigned"``; it names no constant).
-TRACK_OUTCOME_ASSIGNED = "assigned"
 
 
 @dataclass(frozen=True)
@@ -138,11 +136,6 @@ def truth_join_point(series: "FlightSeries") -> np.ndarray:
 
 # ── The lead aircraft ────────────────────────────────────────────────────────
 
-def parse_utc(text: str) -> float:
-    """POSIX seconds of a harvest ``...Z`` timestamp (the harvest CLI's own idiom)."""
-    return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-
-
 def lead_landings(
     manifest: dict[str, Any], *, manifest_path: str | Path, flight_keys: Iterable[str]
 ) -> dict[str, LeadLanding]:
@@ -160,10 +153,10 @@ def lead_landings(
     # seconds and the same index reads the text.
     landings: dict[str, list[tuple[float, str]]] = {}
     for row in source["records"]:
-        if row["outcome"] != TRACK_OUTCOME_ASSIGNED:
+        if row["outcome"] != OUTCOME_ASSIGNED:
             continue
         landings.setdefault(row["runway"], []).append(
-            (parse_utc(row["landing_time_utc"]), row["landing_time_utc"])
+            (parse_iso_utc_s(row["landing_time_utc"]), row["landing_time_utc"])
         )
     for rows in landings.values():
         rows.sort()
@@ -178,7 +171,7 @@ def lead_landings(
             continue
         runway = row["runway"]
         before = bisect_left(
-            seconds_by_runway.get(runway, []), parse_utc(row["landing_time_utc"])
+            seconds_by_runway.get(runway, []), parse_iso_utc_s(row["landing_time_utc"])
         )
         leads[key] = LeadLanding(landings[runway][before - 1][1] if before else None)
     return leads
@@ -206,8 +199,8 @@ def lead_eta_s(series: "FlightSeries", *, anchor_time_s: float) -> float:
         raise ValueError(
             f"flight {series.flight_id}: lead ETA needs the arrival record's entry_time_utc"
         )
-    anchor = parse_utc(entry) + anchor_time_s
-    eta = parse_utc(series.lead_landing.landing_time_utc) - anchor
+    anchor = parse_iso_utc_s(entry) + anchor_time_s
+    eta = parse_iso_utc_s(series.lead_landing.landing_time_utc) - anchor
     return float(np.clip(eta, -LEAD_ETA_CLIP_S, LEAD_ETA_CLIP_S))
 
 

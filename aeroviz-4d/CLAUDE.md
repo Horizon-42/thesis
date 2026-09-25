@@ -1,9 +1,10 @@
 # aeroviz-4d — React + CesiumJS viewer (and its Python CZML tooling)
 
 Frontend app plus `aeroviz-4d/python/` (CZML generation, comparison-CZML builder).
-The Python tooling here **must not import the modeling tree**; the two files that duplicate
-modeling logic (`python/vertical_datum.py`, `python/flight_identity.py`) are declared MIRRORS —
-see `flight_scenarios/CLAUDE.md` before touching either.
+The Python tooling here **must not import the modeling tree**; the file that duplicates
+modeling logic (`python/flight_identity.py`) is a declared MIRROR — see `flight_scenarios/CLAUDE.md`
+before touching it. (The EGM96 mirror `python/vertical_datum.py` had no caller and was deleted on
+2026-09-25: the comparison CZML adds each record's own `source.hae_minus_msl_m` back.)
 
 **Gotchas, the colour contract and the CZML split are indexed below**: each line ends in the ID
 of its full text in `docs/35-viewer-reference.md` (moved there verbatim 2026-09-16, with a dated

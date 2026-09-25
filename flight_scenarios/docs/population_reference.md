@@ -148,3 +148,51 @@ gets a new ID here and ONE new line in the index.**
   it. It does now — but only when the flight has an `id`, since `flight_key`'s fallback is
   the caller's list index and this function does not have one; a key built on the wrong index
   would disagree with the record filename `_scenario_filename` derives.
+
+### FS7 · A threshold target that cannot be built is refused (2026-09-25)
+
+- `build_scenario(..., target_from_threshold=True)` used to fall back SILENTLY to the track's last
+  sample (`target_source="track_end"`) when `threshold_target_state` returned None — a published
+  `runway_target` without its TCH or glidepath, or (no published target) a runway missing from
+  `runway_thresholds.json`. It now raises by name. On manifest input the branch cannot bind:
+  `harvest.arrivals` refuses a `runway_target` without `threshold_crossing_height_m` /
+  `published_glidepath_deg` at load, and no roster on disk — the five live v7 ones and the five frozen
+  v5 ones — has a flight on such a runway (checked 2026-09-25). ts `data/dataset.py`'s
+  `scenario.target is None` skip was dead before and stays dead (that file is frozen by the executor's
+  code identity; left as is). `threshold_target_state` itself still returns None — the refusal is the
+  scenario builder's.
+
+### FS8 · The ts and optimizer populations are different flights (2026-09-23 review, #12)
+
+- Nothing joins them, and per-airport rates computed on the two are over different flights:
+  - **ts** (`ts_transformer/data/dataset.build_series`) targets the published threshold, so it never
+    fits the final approach and KEEPS the flights `flight_scenarios` drops as `UnusableFittedApproach`
+    (9 of 9 tested built on 2026-09-23; 3 of them end 35–55 m short of the threshold with no crossing
+    row); it applies its own `aircraft_filter` (`openap-direct` / `modelled` / `all-flights`) and,
+    where a runner asks for it, the lateral-pass roster (`lateral_pass_eligibility.json`).
+  - **the optimizer** (`prepare_scenario_inputs.py` → `dataset.build_scenario_dataset`) applies the
+    per-runway cap (FS2) and drops flights without dynamics or a usable fit (FS1, FS6); it reads no
+    lateral roster.
+- A comparison of the two must first intersect on `flight_key` (FS4) and say what it dropped.
+
+## Scene context
+
+### FS9 · `scene_context` — what a neighbour is, and what is not measured (2026-09-25)
+
+- No live consumer (the scene encoder was not built: the L4 gate failed on the measurement the plane was
+  built for). What it guarantees, pinned by `tests/test_scene_context.py`:
+  - **A track that landed by t₀ is a landing, not a neighbour** — even with its last samples inside the
+    window. It enters the landing scalars only; before 2026-09-25 it entered both and, at ETA ≈ 0,
+    became the "lead".
+  - **A neighbour not closing on the threshold has no ETA** (`eta_s = inf`), so an outbound aircraft is
+    never "ahead"; the ETA is otherwise straight-line distance over a two-sample finite difference, the
+    ego's over the caller's ground speed — proxies, not along-path times.
+  - **Two samples at one time are refused by name** (the `max(dt, 1e-3)` floor turned a duplicate into
+    a 1000× speed; 0 of the 436,643 stored tracks has one).
+  - The on-final membership constants are MIRRORS of ts `geometry/final_approach_geometry` (not
+    importable here), pinned to it by a test; `hour_utc` / `weekday` are UTC, not local time
+    (pooled over airports they conflate time zones — stated, not converted).
+  - The ego's position needs no altitude (`chart_axes`); the `ego_alt_hae_m` argument nothing read is
+    gone. The roster's outcome name and the UTC parser are imported (`harvest.store.OUTCOME_ASSIGNED`,
+    `harvest.utc.parse_iso_utc_s`), as in ts `data/intent_conditioning`.
+

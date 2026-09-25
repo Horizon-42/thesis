@@ -10,7 +10,7 @@ time AND its eventual runway / outcome are the future. What a neighbour contribu
 what its samples up to t₀ show — position and velocity in the ego's threshold chart,
 height above the ego's threshold (HAE minus the threshold's HAE elevation: a relative
 height, no datum conversion), distance to that threshold, an ETA from its current
-ground speed, whether it is established on the ego runway's final (the on-final
+ground speed (none -- infinite -- while it is not closing on the threshold), whether it is established on the ego runway's final (the on-final
 membership: inside the full-scale cone floored at 500 m, aligned within 30°, upstream)
 and its order ahead of the ego by ETA. Landed aircraft (landing ≤ t₀, the past) enter
 only the scalars: time since the last landing on the ego's runway, landings in the last
@@ -27,17 +27,18 @@ cache sized for one airport's cohort pass.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 import math
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
 from final_approach.frame import RunwayFrame, TrackPoint
 from trajectory_data_process.harvest.store import HarvestPaths, read_track_view
-from trajectory_data_process.scene_index import IndexEntry, SceneIndex, parse_utc_s
+from trajectory_data_process.harvest.utc import parse_iso_utc_s
+from trajectory_data_process.scene_index import IndexEntry, SceneIndex
 
 from .fas_geometry import course_halfwidth_m, fas_course_geometry
 
@@ -48,7 +49,7 @@ RECENT_LANDINGS_S = 1_800.0
 SPEED_FLOOR_MPS = 1.0
 # Mirrors of 4dTrajectory/ts_transformer/geometry/final_approach_geometry.py's membership rule
 # (MEMBERSHIP_K, MEMBERSHIP_FLOOR_M, ALIGNMENT_MAX_DEG): that package is not importable
-# from here; tests/test_scene_context.py on the ts side pins the two to each other.
+# from here; flight_scenarios/tests/test_scene_context.py pins the two to each other.
 MEMBERSHIP_K = 1.0
 MEMBERSHIP_FLOOR_M = 500.0
 ALIGNMENT_MAX_DEG = 30.0
@@ -71,6 +72,12 @@ def runway_axes(frame: RunwayFrame, lat: float, lon: float, alt_hae_m: float) ->
     return -p.along_m, p.cross_m, p.height_m
 
 
+def chart_axes(frame: RunwayFrame, lat: float, lon: float) -> tuple[float, float]:
+    """``(d, xt)`` alone: the frame's along / cross never read the altitude, so none is asked for."""
+    d, xt, _ = runway_axes(frame, lat, lon, frame.elevation_m)
+    return d, xt
+
+
 def on_final(d: float, xt: float, heading_error_rad: float) -> bool:
     """The on-final membership at one sample: upstream, inside the floored full-scale
     cone, heading within ``ALIGNMENT_MAX_DEG`` of the inbound course."""
@@ -87,10 +94,11 @@ class Observed:
     height_m: np.ndarray       # [M] above the ego's threshold (HAE − HAE)
     d_m: float                 # at the last sample
     xt_m: float
-    ground_speed_mps: float    # from the last two samples (position-derived, like the ego's)
+    ground_speed_mps: float    # from the last two samples (position-derived; the ego's is the caller's)
     heading_rad: float         # math-ENU
     distance_to_threshold_m: float
-    eta_s: float               # distance / ground speed (the closing rate is not assumed)
+    eta_s: float               # distance / ground speed while closing on the threshold (the closing
+                               # rate is not assumed); math.inf while not closing (never "ahead")
     established: bool          # on the ego runway's final at the last sample
     age_s: float               # t₀ − last sample time
 
@@ -123,6 +131,8 @@ class Scalars:
     ahead_by_eta: int
     lead_eta_s: float | None            # the nearest ETA ahead of the ego's (established or not)
     lead_gap_s: float | None            # ego ETA − that lead's ETA
+    # UTC, not the airport's local time: pooled over airports these conflate time zones
+    # (stated, not converted -- a consumer that wants local time converts per airport).
     hour_utc: float
     weekday: int
 
@@ -153,10 +163,10 @@ class _Reader:
         """``(absolute_utc_s [M], samples [M, 4] as t, lon, lat, alt_hae)`` of a track."""
         track = self._view(entry.file)
         samples = np.asarray(track["samples"], dtype=np.float64)
-        return parse_utc_s(track["start_time_utc"]) + samples[:, 0], samples
+        return parse_iso_utc_s(track["start_time_utc"]) + samples[:, 0], samples
 
 
-def _observed(frame: RunwayFrame, course_rad: float, utc: np.ndarray, samples: np.ndarray,
+def _observed(frame: RunwayFrame, course_rad: float, entry: IndexEntry, utc: np.ndarray, samples: np.ndarray,
               t0: float, window_s: float) -> Observed | None:
     keep = (utc <= t0) & (utc >= t0 - window_s)
     if keep.sum() < 2:
@@ -166,14 +176,19 @@ def _observed(frame: RunwayFrame, course_rad: float, utc: np.ndarray, samples: n
     d, xt, height = axes[:, 0], axes[:, 1], axes[:, 2]
     e, n = -d * math.cos(course_rad) + xt * math.sin(course_rad), -d * math.sin(course_rad) - xt * math.cos(course_rad)
     dt = utc[-1] - utc[-2]
-    ve, vn = (e[-1] - e[-2]) / max(dt, 1e-3), (n[-1] - n[-2]) / max(dt, 1e-3)
+    if not dt > 0.0:
+        # Never on the stored harvest (0 of 436,643 tracks, 2026-09-25): a reconstructed track's
+        # times strictly increase. A floor here would turn a duplicate into a 1000x speed.
+        raise ValueError(f"track {entry.flight_key!r}: two samples {dt:g} s apart at {utc[-1]:.3f}")
+    ve, vn = (e[-1] - e[-2]) / dt, (n[-1] - n[-2]) / dt
     speed = max(math.hypot(ve, vn), SPEED_FLOOR_MPS)
     heading = math.atan2(vn, ve)
     distance = math.hypot(e[-1], n[-1])
+    closing = distance < math.hypot(e[-2], n[-2])
     return Observed(
         t_rel_s=utc - t0, e_m=e, n_m=n, height_m=height, d_m=float(d[-1]), xt_m=float(xt[-1]),
         ground_speed_mps=speed, heading_rad=heading, distance_to_threshold_m=distance,
-        eta_s=distance / speed, established=on_final(float(d[-1]), float(xt[-1]), heading - course_rad),
+        eta_s=distance / speed if closing else math.inf, established=on_final(float(d[-1]), float(xt[-1]), heading - course_rad),
         age_s=float(t0 - utc[-1]),
     )
 
@@ -188,7 +203,6 @@ def scene_context(
     t0_utc_s: float,
     ego_lat: float,
     ego_lon: float,
-    ego_alt_hae_m: float,
     ego_ground_speed_mps: float,
     window_s: float = WINDOW_S,
     radius_m: float = RADIUS_M,
@@ -197,13 +211,17 @@ def scene_context(
 ) -> SceneContext:
     """The scene at t₀: see the module docstring for what enters and what does not.
 
-    ``t0_utc_s`` is on the TRACK clock: ``parse_utc_s(arrival["entry_time_utc"]) +
+    ``t0_utc_s`` is on the TRACK clock: ``parse_iso_utc_s(arrival["entry_time_utc"]) +
     series.times[anchor]`` (the arrival slice's entry, plus the ts window's anchor offset).
     A track's ``start_time_utc`` is a median 45 s (p90 76 s, max 577 s) EARLIER than the
     arrival's entry at KRDU — the repo's two-window trap — and a t₀ 45 s early is a
     different 120 s scene that reads as model noise, never as a bug. The ego must be a
     rostered track (a wrong key would make the ego its own neighbour) and t₀ must lie
     inside its own sampled span; both are checked here.
+
+    The ego's ETA is its distance over ``ego_ground_speed_mps`` (the caller's estimate, e.g. the
+    series' smoothed speed at the anchor); a neighbour's is its distance over a two-sample finite
+    difference. Both are straight-line proxies, not along-path times.
     """
     ego_entry = index.entry(ego_flight_key)          # KeyError: not a rostered track
     if not ego_entry.start_utc_s <= t0_utc_s <= ego_entry.end_utc_s:
@@ -214,15 +232,20 @@ def scene_context(
     reader = reader or _Reader(paths)
     frame = ego_frame(ego_runway, ego_target)
     course_rad = math.radians(90.0 - float(ego_target["course_deg"]))      # compass → math-ENU
-    d_ego, xt_ego, _ = runway_axes(frame, ego_lat, ego_lon, ego_alt_hae_m)
+    d_ego, xt_ego = chart_axes(frame, ego_lat, ego_lon)
     e_ego, n_ego = -d_ego * math.cos(course_rad) + xt_ego * math.sin(course_rad), -d_ego * math.sin(course_rad) - xt_ego * math.cos(course_rad)
     ego_eta = math.hypot(e_ego, n_ego) / max(ego_ground_speed_mps, SPEED_FLOOR_MPS)
 
-    candidates = [e for e in index.airborne_at(t0_utc_s, window_s) if e.flight_key != ego_flight_key]
+    # A track that landed by t₀ is the past: it enters the landing scalars only, even while its
+    # last samples are still inside the window (it would otherwise read as a lead at ETA ≈ 0).
+    candidates = [
+        e for e in index.airborne_at(t0_utc_s, window_s)
+        if e.flight_key != ego_flight_key and not (e.landing_utc_s is not None and e.landing_utc_s <= t0_utc_s)
+    ]
     neighbours: list[Neighbour] = []
     for entry in candidates:
         utc, samples = reader.samples(entry)
-        observed = _observed(frame, course_rad, utc, samples, t0_utc_s, window_s)
+        observed = _observed(frame, course_rad, entry, utc, samples, t0_utc_s, window_s)
         if observed is None or observed.distance_to_threshold_m > radius_m:
             continue
         neighbours.append(Neighbour(
