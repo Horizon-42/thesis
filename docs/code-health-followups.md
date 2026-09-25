@@ -67,7 +67,7 @@ Trajectory (`fd9f205f`, `1d8630c0`), Observe's sample count planning loads per k
 | 18. `runway`-mode solves pile up at the window's upper edge | resolved | targets published V_ref (`88893126`); records solved before keep it until re-solved | — |
 | 20. two copies of the point-mass inversion and the OLS slope | open | neither folded onto `aircraft/kinematics.py` | no: same formula; only a degenerate-fit slope could differ |
 | 19. speed anchors calibrated on wind-contaminated ground speeds | resolved | the gate reads published speeds | — |
-| 21. single-valued FAA approach-speed rows for multi-flap types | open | no reduced-flap rows | **yes — executor**: the executor's approach speed for E75L, B737, A319, E170, E190 flights; the gate too |
+| 21. single-valued FAA approach-speed rows for multi-flap types | open, **blocked on a source** | no primary document publishes a reduced-flap V_REF at MLW for any of the five (searched 2026-09-25, `docs/literature/approach_speeds_reduced_flap/`); the entry's premise is doubtful — see the entry | **yes — executor**: the executor's approach speed for E75L, B737, A319, E170, E190 flights (25 % of the prior's train flights); the gate too |
 | 22. four types publish no minimum operating mass | partly | LJ45 closed (`d5acb04f`); GLF5, C25A, C525 remain | gate only: the speed gate's mass range; the executor scales by √(m / MALW), not by the minimum |
 | 23. the optimizer's velocity floor and V_ref target come from the stall model | partly | target fixed; the floor is still 1.10 × stall | no: the optimizer |
 | 19. `control_basis_oracle --checkpoint` fingerprints without the roster | resolved | `e8df12f` | — |
@@ -793,6 +793,15 @@ for the same types is 6–7 kt higher. Rule A keeps the FAA value. The fix is a 
 reduced-flap V_ref at MALW for each (manufacturer FCOM/QRH excerpt or an FSB report) added as
 `approach_speed_max_kt` with its source in `aircraft/reference_speeds.json` +
 `docs/reference_speeds/README.md` — a data change, no code. Do not widen the window instead.
+
+**Searched 2026-09-25 — no source** (`docs/literature/approach_speeds_reduced_flap/`, 22 documents: Airbus/Boeing/Embraer
+airport-planning documents, FAA/EASA/Transport Canada evaluation reports, TCDS, NTSB dockets, ANP): none publishes a
+reduced-flap V_REF at MLW for any of the five; the Airbus AC gives the A319's CONF FULL value only (126 kt at 62,500 kg),
+Boeing a 737-700 132 kt with no flap stated. **The premise is doubtful** (*judgement*, from verified text): the FAA ACD's
+data dictionary (note 2) CALCULATES the second speed when a report gives two categories and one speed, 14 CFR 97.3 bounds
+category C below 141 kt, and every Boeing dual row in `reference_speeds.json` (B37M, B38M, B39M, B738, B739, B788, B789)
+has a lower value of exactly 140 kt — the category edge, not a flap setting. Before any speed window is built on those
+dual rows, re-check their "flap reading" notes; for the five types here, nothing to add until a primary source appears.
 
 ## 22. Four types publish no minimum operating mass (GLF5, C25A, LJ45, C525)
 
