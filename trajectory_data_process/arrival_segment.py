@@ -197,7 +197,12 @@ def truncate_flights(
 
 
 def _entry_time_utc(start_time_utc: str, entry_offset_s: float) -> str:
-    """Absolute ring-entry time: the track start plus the first kept sample's offset."""
+    """Absolute ring-entry time: the track start plus the first kept sample's offset.
+
+    The millisecond stamp of ``harvest.utc.iso_utc_ms``, computed here in exact datetime
+    arithmetic rather than through a float epoch (a round trip can move a millisecond, and
+    ``entry_time_utc`` is in the arrival roster); not imported, because the harvest package
+    imports this module (a MIRROR of that format: change them together)."""
     start = datetime.fromisoformat(start_time_utc.replace("Z", "+00:00"))
     entry = (start + timedelta(seconds=entry_offset_s)).astimezone(timezone.utc)
     return entry.isoformat(timespec="milliseconds").replace("+00:00", "Z")

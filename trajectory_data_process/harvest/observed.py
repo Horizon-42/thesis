@@ -48,6 +48,8 @@ from trajectory_data_process.harvest.altitude_filter import (
     FILTER_SCHEMA_VERSION,
 )
 from trajectory_data_process.harvest.store import (
+    OUTCOME_NOT_LANDING,
+    OUTCOMES,
     HarvestPaths,
     integrity_audits,
     read_manifest,
@@ -115,8 +117,8 @@ def observed_record(
         )
     require_current_threshold_event(event, runway)
 
-    # H_MSL = h_HAE - N, applied once, here, by the seam's own conversion (the runway's
-    # CIFP offset; a track not tagged HAE is refused, never converted twice).
+    # H_MSL = h_HAE - N, applied once, here, by the seam's own conversion (the runway's CIFP
+    # offset, keyed on the track's altitude_source: an unknown or legacy tag is refused).
     waypoints = flight_to_msl({
         "id": track["flight_key"],
         "altitude_source": track["altitude_source"],
@@ -317,13 +319,13 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
     (``sources_without_integrity_audit``): its denominator covers the audited ones only.
     """
     statuses, excluded_outcomes, unaudited = _availability_inputs(source)
-    candidates = [status for outcome, status in statuses if outcome != "not_landing"]
+    candidates = [status for outcome, status in statuses if outcome != OUTCOME_NOT_LANDING]
     estimated = sum(status == "estimated" for status in candidates)
     excluded_not_landing = (
-        sum(outcome == "not_landing" for outcome, _ in statuses)
-        + sum(outcome == "not_landing" for outcome in excluded_outcomes)
+        sum(outcome == OUTCOME_NOT_LANDING for outcome, _ in statuses)
+        + sum(outcome == OUTCOME_NOT_LANDING for outcome in excluded_outcomes)
     )
-    integrity_excluded_candidates = sum(outcome != "not_landing" for outcome in excluded_outcomes)
+    integrity_excluded_candidates = sum(outcome != OUTCOME_NOT_LANDING for outcome in excluded_outcomes)
     denominator = len(candidates) + integrity_excluded_candidates
     return {
         "denominator": "arrival_candidates_excluding_not_landing",
@@ -337,7 +339,8 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-CANDIDATE_OUTCOMES = ("assigned", "ambiguous", "unassignable")
+# Arrival candidates: every roster outcome but ``not_landing``.
+CANDIDATE_OUTCOMES = tuple(outcome for outcome in OUTCOMES if outcome != OUTCOME_NOT_LANDING)
 
 
 def _availability_inputs(
@@ -355,7 +358,7 @@ def _availability_inputs(
         if not isinstance(row, dict):
             raise ValueError(f"track manifest record {index} must be an object")
         outcome = row.get("outcome")
-        if outcome == "not_landing":
+        if outcome == OUTCOME_NOT_LANDING:
             statuses.append((outcome, None))
             continue
         if outcome not in CANDIDATE_OUTCOMES:
@@ -380,7 +383,7 @@ def _availability_inputs(
                     f"source_integrity exclusion {index} must be an object"
                 )
             outcome = excluded.get("source_outcome")
-            if outcome != "not_landing" and outcome not in CANDIDATE_OUTCOMES:
+            if outcome != OUTCOME_NOT_LANDING and outcome not in CANDIDATE_OUTCOMES:
                 raise ValueError(
                     f"source_integrity exclusion {index} has invalid source_outcome "
                     f"{outcome!r}"

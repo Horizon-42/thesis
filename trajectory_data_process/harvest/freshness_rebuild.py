@@ -24,6 +24,7 @@ from trajectory_data_process.harvest.reclassify import (
     _validate_source_manifest,
     source_timed_track_from_metadata,
 )
+from trajectory_data_process.harvest.staging import freshness_prefix
 from trajectory_data_process.harvest.store import (
     TRACK_SCHEMA_VERSION,
     HarvestPaths,
@@ -103,7 +104,7 @@ def rebuild_fresh_tracks(
 
     destination.root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
-        prefix=f".{destination.code}-freshness-", dir=destination.root
+        prefix=freshness_prefix(destination.code), dir=destination.root
     ) as temporary:
         staged = HarvestPaths(Path(temporary), destination.code)
         manifest = write_tracks(

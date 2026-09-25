@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from trajectory_data_process.harvest.__main__ import main
 from trajectory_data_process.harvest.staging import (
     RECORDS_PREVIOUS_PREFIX,
     RECORDS_STAGING_PREFIX,
+    TRACKS_BACKUP_PREFIX,
+    freshness_prefix,
     merge_prefix,
     reclassify_prefix,
     staging_leftovers,
@@ -19,6 +23,8 @@ def _leftovers(paths: HarvestPaths) -> list:
         paths.approach / f"{RECORDS_PREVIOUS_PREFIX}b",
         paths.root / f"{reclassify_prefix(paths.code)}c",
         paths.root / f"{merge_prefix(paths.code)}d",
+        paths.root / f"{freshness_prefix(paths.code)}e",
+        paths.airport / f"{TRACKS_BACKUP_PREFIX}reclassify-f",
     ]
     for path in made:
         (path / "records").mkdir(parents=True)
@@ -50,4 +56,19 @@ def test_the_cli_removes_them_and_leaves_the_live_trees(tmp_path, capsys):
     assert not any(path.exists() for path in made)
     assert all(path.exists() for path in other)
     assert (paths.approach / "records").is_dir() and paths.tracks.is_dir()
-    assert "removed 4 staging leftover(s)" in capsys.readouterr().out
+    assert "removed 6 staging leftover(s)" in capsys.readouterr().out
+
+
+def test_a_moved_aside_tracks_tree_is_kept_while_tracks_is_missing(tmp_path, capsys):
+    paths = HarvestPaths(tmp_path, "KAAA")
+    made = _leftovers(paths)                    # no tracks/: a kill between the swap's two renames
+    args = ["--airport", "KAAA", "--output", str(tmp_path), "--remove-staging-leftovers",
+            "--frontend-data", str(tmp_path / "frontend"), "--adsb-metadata", str(tmp_path / "adsb")]
+
+    with pytest.raises(SystemExit, match="may be the only copy of the stored tracks"):
+        main(args)
+    assert all(path.exists() for path in made)
+
+    paths.tracks.mkdir()
+    assert main(args) == 0
+    assert not any(path.exists() for path in made)

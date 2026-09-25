@@ -51,7 +51,11 @@ from trajectory_data_process.harvest.runner import (
     harvest_airport,
 )
 from trajectory_data_process.harvest.reclassify import reclassify_stored_tracks
-from trajectory_data_process.harvest.staging import remove_staging_leftovers, staging_leftovers
+from trajectory_data_process.harvest.staging import (
+    orphaned_tracks_backups,
+    remove_staging_leftovers,
+    staging_leftovers,
+)
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -180,7 +184,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     paths = HarvestPaths(root=args.output, code=code)
     if args.remove_staging_leftovers:
-        removed = remove_staging_leftovers(paths)
+        try:
+            removed = remove_staging_leftovers(paths)
+        except ValueError as error:
+            raise SystemExit(f"[harvest] {error}") from error
         print(f"[harvest] {code}: removed {len(removed)} staging leftover(s)"
               + "".join(f"\n  {path}" for path in removed))
         return 0
@@ -344,6 +351,9 @@ def _note_staging_leftovers(paths: HarvestPaths) -> None:
         print(f"[harvest] {len(leftovers)} staging leftover(s) from a killed harvest in {paths.root} "
               f"(readers ignore them; --remove-staging-leftovers removes them when no other harvest "
               f"writes this root):" + "".join(f"\n  {path}" for path in leftovers))
+    for backup in orphaned_tracks_backups(paths, leftovers):
+        print(f"[harvest] {paths.tracks} is MISSING: {backup} may be the only copy of the stored tracks; "
+              f"restore it by renaming it to {paths.tracks.name}/")
 
 
 # Provenance keys of a tracks/ tree that is NOT one download window: a merge of several

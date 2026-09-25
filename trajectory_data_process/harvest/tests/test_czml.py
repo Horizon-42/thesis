@@ -102,7 +102,7 @@ def _censored_track(**event_fields):
     }
 
 
-def test_extrapolated_tail_starts_at_the_closest_support_sample_and_is_timed_as_the_record():
+def test_extrapolated_tail_starts_at_the_closest_support_sample_and_is_timed_by_the_record_s_trapezoid():
     start_speed = haversine_m(35.0010, -78.0, 35.0015, -78.0) / 1.0
 
     tail = _extrapolated_waypoints(_censored_track(crossing_ground_speed_m_s=50.0))

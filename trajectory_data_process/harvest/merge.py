@@ -11,7 +11,6 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from trajectory_data_process.harvest.airports import Airport
 from trajectory_data_process.harvest.reclassify import (
@@ -22,12 +21,12 @@ from trajectory_data_process.harvest.reclassify import (
 from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
     ALTITUDE_SOURCE,
+    OUTCOMES,
     HarvestPaths,
     integrity_audits,
 )
-from trajectory_data_process.harvest.staging import merge_prefix
+from trajectory_data_process.harvest.staging import merge_prefix, replace_tracks_directory
 from trajectory_data_process.harvest.utc import now_iso_utc
-_BUCKETS = ("assigned", "ambiguous", "unassignable", "not_landing")
 
 
 def merge_stored_tracks(
@@ -89,7 +88,7 @@ def merge_stored_tracks(
             metadata_lookup_many=metadata_lookup_many,
             jobs=jobs,
         )
-        _replace_tracks_directory(staged.tracks, destination.tracks)
+        replace_tracks_directory(staged.tracks, destination.tracks, kind="merge")
 
     _invalidate_local_views(destination)
     return manifest
@@ -121,7 +120,7 @@ def _validate_source(source: HarvestPaths, airport: str) -> dict[str, Any]:
     if not isinstance(rows, list) or manifest.get("total") != len(rows):
         raise ValueError(f"{source.manifest}: invalid records roster")
 
-    counts = {bucket: 0 for bucket in _BUCKETS}
+    counts = {bucket: 0 for bucket in OUTCOMES}
     per_runway: dict[str, int] = {}
     entries: list[dict[str, Any]] = []
     local_keys: set[str] = set()
@@ -177,7 +176,7 @@ def _validate_row(source: HarvestPaths, row: Any, index: int) -> dict[str, Any]:
         raise ValueError(f"{source.manifest}: record {index} lacks flight_key")
     if not isinstance(relative_value, str) or not relative_value:
         raise ValueError(f"{source.manifest}: record {index} lacks file")
-    if outcome not in _BUCKETS:
+    if outcome not in OUTCOMES:
         raise ValueError(f"{source.manifest}: record {index} has invalid outcome {outcome!r}")
     if row.get("runway") is not None and not isinstance(row.get("runway"), str):
         raise ValueError(f"{source.manifest}: record {index} has invalid runway")
@@ -274,7 +273,7 @@ def _write_manifest(
     records: list[dict[str, Any]],
     provenance: dict[str, Any],
 ) -> dict[str, Any]:
-    counts = {bucket: 0 for bucket in _BUCKETS}
+    counts = {bucket: 0 for bucket in OUTCOMES}
     per_runway: dict[str, int] = {}
     for row in records:
         counts[row["outcome"]] += 1
@@ -307,17 +306,6 @@ def _strict_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{path}: expected a JSON object")
     return value
-
-
-def _replace_tracks_directory(staged: Path, destination: Path) -> None:
-    backup = destination.parent / f".tracks-before-merge-{uuid4().hex}"
-    destination.replace(backup)
-    try:
-        staged.replace(destination)
-    except Exception:
-        backup.replace(destination)
-        raise
-    shutil.rmtree(backup)
 
 
 def _invalidate_local_views(paths: HarvestPaths) -> None:

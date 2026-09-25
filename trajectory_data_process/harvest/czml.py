@@ -273,10 +273,12 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
             "closest support sample; run --reclassify-existing"
         )
     # The tail starts where the event's extrapolation is measured from -- the closest
-    # support sample, which can lie after the fit's last sample -- and is timed as the
-    # observed record's fitted crossing row is (`crossing_span`): the extrapolation over
-    # the mean of the start's speed and the event's crossing ground speed (the start's
-    # speed again when the event fitted none).
+    # support sample, which can lie after the fit's last sample -- and is timed by the
+    # observed record's trapezoid (`crossing_span`): the extrapolation over the mean of the
+    # start's speed and the event's crossing ground speed (the start's speed again when the
+    # event fitted none). The start's speed here is a finite difference to the previous
+    # sample, not the record's fitted V, so the two crossing times differ slightly (KRDU:
+    # median 0.14 s, max 4.7 s); nothing reads the tail's time.
     start = samples[support]
     previous = samples[support - 1] if support > 0 else None
     dt = float(start[0]) - float(previous[0]) if previous is not None else 0.0
@@ -290,7 +292,8 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
             f"{support} (dt {dt:g} s, distance {distance:g} m) to time the censored tail"
         )
     start_speed = distance / dt
-    crossing_speed = float(event.get("crossing_ground_speed_m_s") or start_speed)
+    fitted_speed = event.get("crossing_ground_speed_m_s")
+    crossing_speed = float(fitted_speed) if fitted_speed is not None else start_speed
     extrapolation = float(event["extrapolation_distance_m"])
     if not math.isfinite(extrapolation) or extrapolation <= 0.0:
         raise ValueError(

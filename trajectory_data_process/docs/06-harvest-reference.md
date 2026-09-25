@@ -28,8 +28,8 @@ gets a new ID here and ONE new line in the index.**
 
 - **The record's HAE → MSL step is `flight_scenarios.datum.flight_to_msl` (2026-09-25)**, fed the
   runway as a `runway_target` (`arrivals.runway_target`, the arrivals' own); it used to subtract the
-  same CIFP offset by hand. Same numbers (1,500 real records compared byte for byte), and a track not
-  tagged HAE is now refused instead of converted.
+  same CIFP offset by hand. Same numbers (1,500 real records compared byte for byte); the step is keyed
+  on the track's `altitude_source`, so an unknown or legacy tag is refused (every stored track is HAE).
 
 - **Observed evaluation records carry a `crossing_span` and their resolved airframe's
   stall facts (2026-08-24)** — `harvest/observed.py` marks the event's direct bracket or
@@ -461,14 +461,20 @@ in with `summary.json` only on success.
 
 - Every rewrite stages beside the real tree and swaps it in: the observed records
   (`approach/.records-staging-*`, the previous records moved aside as `approach/.records-previous-*`),
-  a reclassification (`<root>/.<ICAO>-reclassify-*`) and a merge (`<root>/.<ICAO>-merge-*`). A SIGKILL
-  mid-write leaves them (the v5 root held a 170 MB `.KSJC-reclassify-*` from 2026-08-24). Readers
-  follow the rosters and never see them; they cost disk only.
-- The prefixes live in `harvest/staging.py` (the writers take them from there). Nothing removes a
-  leftover unasked — there is no harvest lock, so a sweep could delete another run's live staging:
-  every harvest run ends by listing the airport's leftovers, and
+  a reclassification, a merge or a freshness rebuild (`<root>/.<ICAO>-reclassify-*`, `-merge-*`,
+  `-freshness-*`), and the swap of a reclassified or merged `tracks/` (the old tree moved aside as
+  `<ICAO>/.tracks-before-reclassify-*` / `-merge-*`, then deleted — a long `rmtree` over a whole tracks
+  tree). A SIGKILL mid-write leaves them (the v5 root held a 170 MB `.KSJC-reclassify-*` from
+  2026-08-24). Readers follow the rosters and never see them; they cost disk only.
+- The prefixes and the one `tracks/` swap (`replace_tracks_directory`, shared by reclassify and merge)
+  live in `harvest/staging.py`. Nothing removes a leftover unasked — there is no harvest lock, so a
+  sweep could delete another run's live staging: every harvest run ends by listing the airport's
+  leftovers, and
   `python -m trajectory_data_process.harvest --airport <ICAO> --output <root> --remove-staging-leftovers`
   removes them and exits. Run it only when no other harvest writes that root.
+- **A moved-aside `tracks/` is never removed while `tracks/` is missing**: a kill between the swap's
+  two renames leaves it the only copy of the stored tracks. The run's notice says so, and the removal
+  refuses (removing nothing) until it is renamed back to `tracks/`.
 
 ### TD26 · the observed CZML's censored tail starts at the closest support sample (2026-09-25)
 
@@ -477,9 +483,11 @@ in with `summary.json` only on success.
   (`source_sample_range[1]`). The drawn tail (`harvest/czml._extrapolated_waypoints`) used to start
   at the fit's last sample, so its crossing could come before the last supporting sample (1,871 of
   7,827 censored KRDU flights, 2026-09-23); on the live root the start moves in 12,958 of 25,064
-  censored flights. It now starts at the support sample and is timed as the observed record's fitted
-  crossing row (`flight_scenarios.crossing_span`): the extrapolation over the mean of the start's
-  speed (finite difference to the previous sample) and the event's `crossing_ground_speed_m_s`, the
-  start's speed again when the event fitted none. The silent 70 m/s fallback is gone: a start without
+  censored flights. It now starts at the support sample and is timed by the observed record's
+  trapezoid (`flight_scenarios.crossing_span`): the extrapolation over the mean of the start's speed
+  and the event's `crossing_ground_speed_m_s`, the start's speed again when the event fitted none. The
+  start's speed is a finite difference to the previous sample, not the record's fitted V, so the two
+  crossing times differ slightly (1,500 KRDU flights: median 0.14 s, p95 1.08 s, max 4.69 s); the
+  start sample itself was the record's last row in all 1,500. The silent 70 m/s fallback is gone: a start without
   a speed refuses the flight by name (none of the 25,064 does). Viewer only — nothing reads the tail's
   time.

@@ -19,3 +19,8 @@ def iso_utc_ms(time_s: float) -> str:
 def now_iso_utc() -> str:
     """This moment, as `iso_utc`."""
     return iso_utc(datetime.now(tz=timezone.utc).timestamp())
+
+
+def parse_iso_utc_s(text: str) -> float:
+    """Epoch seconds of either stamp above (``…Z``), millisecond precision kept."""
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()

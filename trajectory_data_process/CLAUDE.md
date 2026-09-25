@@ -28,8 +28,8 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
   `arrivals/manifest.json` rosters only assigned, CIFP-targeted, final-entry-cropped model
   inputs and records every exclusion. Scenario, optimizer-reference, and TS loaders follow that
   roster and never glob, so an orphan/rejected/stale JSON cannot enter a model split.
-- The observed CZML's censored tail starts at the closest support sample and is timed as the
-  record's fitted crossing row; a start without a speed refuses the flight (TD26).
+- The observed CZML's censored tail starts at the closest support sample and is timed by the
+  record's trapezoid (finite-difference start speed); a start without a speed refuses the flight (TD26).
 - The threshold event's `crossing_ground_speed_m_s` is GROUND speed (direct: interpolated at the
   bracket; censored: OLS over the same kept samples as the position fit), optional on read;
   evaluation judges the observed baseline on it as a STATED proxy (TD1).
@@ -100,5 +100,6 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
 - A merge keeps every source's exclusion audits, flattened, in `provenance.merge.sources`
   (`store.integrity_audits` reads them), and a plain download REFUSES a merged/rebuilt root (it
   used to clear `tracks/` in place) (TD24).
-- A killed harvest's staging directories are listed at the end of every run and removed only by
-  `--remove-staging-leftovers` (no lock: never swept automatically) (TD25).
+- A killed harvest's staging directories (`harvest/staging.py`) are listed at the end of every run and
+  removed only by `--remove-staging-leftovers` (no lock: never swept automatically); a moved-aside
+  `tracks/` is kept while `tracks/` is missing (TD25).

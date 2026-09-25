@@ -6,14 +6,12 @@ import hashlib
 import json
 import math
 import re
-import shutil
 import tempfile
 from concurrent.futures import Executor, ProcessPoolExecutor
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
-from uuid import uuid4
 
 from final_approach import LandingScreen
 
@@ -23,7 +21,7 @@ from trajectory_data_process.harvest.airports import (
 )
 from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
 from trajectory_data_process.harvest.classify import ClassifiedTrack, classify_track
-from trajectory_data_process.harvest.staging import reclassify_prefix
+from trajectory_data_process.harvest.staging import reclassify_prefix, replace_tracks_directory
 from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
     ALTITUDE_SOURCE,
@@ -134,7 +132,7 @@ def reclassify_stored_tracks(
                 f"reclassification produced {manifest['total']} records from "
                 f"{source['total']} source records"
             )
-        _replace_tracks_directory(staged.tracks, paths.tracks)
+        replace_tracks_directory(staged.tracks, paths.tracks, kind="reclassify")
     return manifest
 
 
@@ -404,12 +402,3 @@ def _strict_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _replace_tracks_directory(staged: Path, destination: Path) -> None:
-    backup = destination.parent / f".tracks-before-reclassify-{uuid4().hex}"
-    destination.replace(backup)
-    try:
-        staged.replace(destination)
-    except Exception:
-        backup.replace(destination)
-        raise
-    shutil.rmtree(backup)

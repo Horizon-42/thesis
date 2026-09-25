@@ -51,7 +51,11 @@ TRACK_SCHEMA_VERSION = "harvest-tracks-v2-source-timing"
 ALTITUDE_SOURCE = "opensky_history_geoaltitude_m"
 ALTITUDE_DATUM = "hae"
 
-_BUCKETS = ("assigned", "ambiguous", "unassignable", "not_landing")
+# The roster's four outcomes (one bucket each). ``assigned``: one runway, the bucket every model
+# input comes from; ``not_landing``: outside the arrival population.
+OUTCOME_ASSIGNED = "assigned"
+OUTCOME_NOT_LANDING = "not_landing"
+OUTCOMES = (OUTCOME_ASSIGNED, "ambiguous", "unassignable", OUTCOME_NOT_LANDING)
 
 
 @dataclass(frozen=True)
@@ -161,7 +165,7 @@ def write_tracks(
     """
     _clear(paths.tracks)
     roster: list[dict[str, Any]] = []
-    counts: dict[str, int] = {b: 0 for b in _BUCKETS}
+    counts: dict[str, int] = {b: 0 for b in OUTCOMES}
     per_runway: dict[str, int] = {}
     seen_flight_keys: set[str] = set()
     source_integrity_complete = True
