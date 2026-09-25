@@ -27,7 +27,7 @@ import {
 } from "../useTrainingTrackLayer";
 import { parseTrainingSample, trainingWordAt, type TrainingSelection } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { mockExecutorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay } from "../../data/trainingOverlays";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
@@ -56,9 +56,11 @@ describe("useTrainingTrackLayer helpers", () => {
   it("flattens the executor's flown track at its ellipsoid height", () => {
     const parsed = parseTrainingSample(mockSample());
     if (!parsed.ok) throw new Error(parsed.problem);
-    const overlay = parseTrainingExecutorOverlay(mockExecutorOverlay(), parsed.value);
+    const overlay = parseTrainingExecutorOverlay(mockExecutorOverlay(), mockOverlayEntry(EXECUTOR_ID), parsed.value);
     if (!overlay.ok) throw new Error(overlay.problem);
-    const track = overlay.value.flights[0].track!;
+    const flown = overlay.value.flights[0];
+    if (!flown.flown) throw new Error("the fixture's first flight is flown");
+    const { track } = flown;
     const positions = executorTrackPositions(track);
     expect(positions).toHaveLength(track.lon.length * 3);
     expect(positions.slice(0, 3)).toEqual([track.lon[0], track.lat[0], track.altitudeHaeM[0]]);

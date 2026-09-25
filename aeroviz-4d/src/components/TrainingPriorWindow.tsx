@@ -30,6 +30,7 @@ import {
 import {
   formatSeconds,
   rowAtTime,
+  TRAINING_COLUMN_INDEX,
   TRAINING_COLUMNS,
   TRAINING_UNCHANGED,
   trainingColumnRuns,
@@ -39,7 +40,7 @@ import {
   type TrainingFlight,
   type TrainingVocabulary,
 } from "../data/trainingSample";
-import { priorStep, truthAt, type TrainingPriorView } from "../data/trainingOverlays";
+import { priorStep, type TrainingPriorView } from "../data/trainingOverlays";
 
 const WIDTH = 960;
 const GUTTER = 84;
@@ -80,9 +81,6 @@ export default function TrainingPriorWindow({
   const first = predicted.firstPredictedRow;
   const polyline = (index: number, values: number[]) =>
     values.map((value, step) => `${x((first + step) * vocabulary.stepS)},${y(index, value)}`).join(" ");
-  // at the first predicted step the prior says every column's word in force; after it, the sentence's own words
-  const truthOf = (name: TrainingColumn, at: number) =>
-    at === first ? flight.words.inForce[TRAINING_COLUMNS.indexOf(name)][at] : truthAt(flight, name, at);
 
   return createPortal(
     <div className="training-readback-backdrop">
@@ -115,14 +113,14 @@ export default function TrainingPriorWindow({
           </thead>
           <tbody>
             {TRAINING_COLUMNS.map((name) => {
-              const step = priorStep(predicted, name, row);
+              const step = priorStep(flight, predicted, name, row);
               const selected = name === column;
               const cells = (() => {
                 if (step === null) {
                   return <td colSpan={4} className="training-prior-muted">observed only — the prior speaks from step {first}</td>;
                 }
-                const truth = truthOf(name, row);
-                const inForce = flight.words.inForce[TRAINING_COLUMNS.indexOf(name)][row];
+                const { truth } = step;
+                const inForce = flight.words.inForce[TRAINING_COLUMN_INDEX[name]][row];
                 return (
                   <>
                     <td>
@@ -179,7 +177,7 @@ export default function TrainingPriorWindow({
                 <polyline points={polyline(index, values.changeP)} fill="none" stroke={colour} strokeWidth={1.4}
                   className="training-prior-change" />
                 {words.map((run) => {
-                  const step = priorStep(predicted, name, run.row)!;             // run.row > first: predicted
+                  const step = priorStep(flight, predicted, name, run.row)!;             // run.row > first: predicted
                   const right = step.ranked[0]?.value === run.value;
                   const at = x(run.row * vocabulary.stepS);
                   return (

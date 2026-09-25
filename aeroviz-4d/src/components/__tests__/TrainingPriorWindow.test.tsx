@@ -11,13 +11,13 @@ import TrainingPriorWindow from "../TrainingPriorWindow";
 import { parseTrainingSample, type TrainingColumn } from "../../data/trainingSample";
 import { parseTrainingPriorOverlay } from "../../data/trainingOverlays";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import { PRIOR_ID, mockOverlayEntry, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
 import { TRAINING_EXECUTOR_COLOR, TRAINING_OUTSIDE_COLOR } from "../../utils/trainingWordColors";
 
 function open(cursorS = 0, column: TrainingColumn | null = null) {
   const sample = parseTrainingSample(mockSample());
   if (!sample.ok) throw new Error(sample.problem);
-  const prior = parseTrainingPriorOverlay(mockPriorOverlay(), sample.value);
+  const prior = parseTrainingPriorOverlay(mockPriorOverlay(), mockOverlayEntry(PRIOR_ID), sample.value);
   if (!prior.ok) throw new Error(prior.problem);
   const onCursorChange = vi.fn();
   const onColumnChange = vi.fn();

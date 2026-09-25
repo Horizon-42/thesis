@@ -8,10 +8,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import TrainingReadbackWindow, { extent, rowAtDistance, runsOf } from "../TrainingReadbackWindow";
+import TrainingReadbackWindow, { extent } from "../TrainingReadbackWindow";
 import { parseTrainingSample, type TrainingColumn } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { mockExecutorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay, type TrainingExecutorFlight } from "../../data/trainingOverlays";
 import type { TrainingLayers } from "../../context/AppContext";
 import { parseTrainingAutopilot, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
@@ -24,7 +24,7 @@ const ALL: TrainingLayers = { headingBands: true, corridor: true, vertical: true
 function executorFlight(position = 0): TrainingExecutorFlight {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
-  const overlay = parseTrainingExecutorOverlay(mockExecutorOverlay(), parsed.value);
+  const overlay = parseTrainingExecutorOverlay(mockExecutorOverlay(), mockOverlayEntry(EXECUTOR_ID), parsed.value);
   if (!overlay.ok) throw new Error(overlay.problem);
   return overlay.value.flights[position];
 }
@@ -139,8 +139,15 @@ describe("TrainingReadbackWindow", () => {
   it("draws one tube per altitude word, and the row the labeller counted outside in red", () => {
     open();
     expect(count(".training-readback-tube")).toBe(2);
-    expect(chart("Altitude chart").querySelectorAll(".training-readback-outside")).toHaveLength(1);
+    // one row outside is a segment on to the next row: a one-point polyline would draw nothing
+    const outside = [...chart("Altitude chart").querySelectorAll(".training-readback-outside")];
+    expect(outside).toHaveLength(1);
+    expect(outside[0].getAttribute("points")!.split(" ")).toHaveLength(2);
     expect(screen.getByLabelText(/angle word descent 3 \(3\.06°\) at step 20/)).toBeTruthy();
+    // switched off with the tubes it belongs to
+    cleanup();
+    open({ ...ALL, vertical: false });
+    expect(chart("Altitude chart").querySelectorAll(".training-readback-outside")).toHaveLength(0);
   });
 
   it("draws each speed word's transition and band, and 'unspecified' as the pilot's own", () => {
@@ -193,8 +200,9 @@ describe("TrainingReadbackWindow", () => {
 
   it("says so when the executor's flight ended within its first step", () => {
     const flown = executorFlight(0);
-    const point = Object.fromEntries(Object.entries(flown.track!).map(([key, values]) => [key, values.slice(0, 1)]));
-    open(ALL, 0, 0, null, { ...flown, outcome: "dynamics_failure", track: point as typeof flown.track });
+    if (!flown.flown) throw new Error("the fixture's first flight is flown");
+    const point = Object.fromEntries(Object.entries(flown.track).map(([key, values]) => [key, (values as number[]).slice(0, 1)]));
+    open(ALL, 0, 0, null, { ...flown, outcome: "dynamics_failure", track: point as unknown as typeof flown.track });
     expect(screen.getByLabelText("Executor replay").textContent).toMatch(/dynamics failure on own dynamics within its first step/);
     expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);
     expect(count(".training-readback-executor-band")).toBe(0);
@@ -253,14 +261,6 @@ describe("helpers", () => {
   it("pads an extent and never returns a zero-wide one", () => {
     expect(extent([0, 100])).toEqual([-8, 108]);
     expect(extent([5, 5])).toEqual([4, 6]);
-  });
-
-  it("finds the runs of a flag", () => {
-    expect(runsOf([false, true, true, false, true])).toEqual([[1, 2], [4, 4]]);
-  });
-
-  it("finds the row at a distance flown", () => {
-    expect(rowAtDistance([0, 100, 200, 300], 250)).toBe(2);
   });
 });
 

@@ -8,7 +8,6 @@ import { parseTrainingSample, TRAINING_UNCHANGED, type TrainingSample } from "..
 import {
   parseTrainingAutopilot,
   requestTrainingAutopilot,
-  sameAutopilotRequest,
   segmentWords,
   TRAINING_AUTOPILOT_PATH,
   TRAINING_AUTOPILOT_SCHEMA,
@@ -62,6 +61,8 @@ describe("parseTrainingAutopilot", () => {
     expect(segment.word.heading).toMatchObject({ firstRow: 10, stopRow: 12, inside: [true, true] });
     expect(segment.track.tS[0]).toBe(16);
     expect(segment.judgedTrackDeg).toHaveLength(5);
+    // the 2 s step is two of the 1 s cycles: the judged step k is the track's point 2k
+    expect(segment.executor.stepCycles).toBe(2);
     // the next heading word, said at step 10, is among the words told
     expect(segment.segment.told.some((word) => word.row === 10 && word.column === 2)).toBe(true);
   });
@@ -103,8 +104,41 @@ describe("parseTrainingAutopilot", () => {
       .toMatch(/is not judged and says no reason/);
   });
 
+  it("refuses a heading band past the segment's stop, and a verdict its band's rows do not allow", () => {
+    // the segment stops at step 12, where the next heading word's rows begin: its band may not run on to 13
+    expect(refusal((raw) => {
+      raw.word.heading.stopRow = 13; raw.word.heading.inside = [1, 1, 1];
+      raw.word.checks[0] = { ...raw.word.checks[0], inside: 3, rows: 3 };
+    })).toMatch(/stopRow is 13, not in 10…12/);
+    // inside with no row judged
+    expect(refusal((raw) => {
+      raw.word.heading.stopRow = 10; raw.word.heading.inside = [];
+      raw.word.checks[0] = { ...raw.word.checks[0], inside: 0, rows: 0 };
+    })).toMatch(/is inside with no row judged/);
+    // "no check" with rows judged
+    expect(refusal((raw) => { raw.word.status = "no check"; raw.word.checks = []; raw.word.reason = "none"; }))
+      .toMatch(/is no check, but 2 of its rows were judged/);
+  });
+
+  it("refuses a word judged, or a band drawn, on a flown track the gate refused", () => {
+    expect(refusal((raw) => { raw.end.refused = "too short"; })).toMatch(/is inside, but the gate refused the flown track \(too short\)/);
+    expect(refusal((raw) => {
+      raw.end.refused = "too short";
+      raw.word = { ...raw.word, status: "not judged", checks: [], reason: "the gate refused it" };
+    })).toMatch(/carries a heading band, but the gate refused the flown track/);
+    const set = sample();
+    const request = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
+    const raw = mockAutopilotAnswer(set, request);
+    raw.end.refused = "too short";
+    raw.word = { status: "not judged", checks: [], reason: "the gate refused it", heading: null };
+    raw.judgedTrackDeg = null;
+    const parsed = parseTrainingAutopilot(raw, request, set);
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.word.status).toBe("not judged");
+  });
+
   it("refuses an end that does not match the segment", () => {
-    expect(refusal((raw) => { raw.end.reason = "somewhere"; })).toMatch(/reason is somewhere/);
+    expect(refusal((raw) => { raw.end.reason = "somewhere"; })).toMatch(/end\.reason is "somewhere", not one of segment_end, landed/);
     expect(refusal((raw) => { raw.end.offsetFromObserved = null; })).toMatch(/offsetFromObserved is given exactly when/);
     expect(refusal((raw) => { raw.end.reachedSegmentEnd = null; })).toMatch(/says nothing of whether the segment's end was reached/);
   });
@@ -113,17 +147,8 @@ describe("parseTrainingAutopilot", () => {
     expect(refusal((raw) => { raw.track.tS[0] = 0; })).toMatch(/starts at 0 s, not at step 8 \(16 s\)/);
     expect(refusal((raw) => { raw.track.bankRightDeg.push(0); })).toMatch(/bankRightDeg has 9 values, expected 8/);
     expect(refusal((raw) => { raw.timing.cycles = 3; })).toMatch(/3 cycles flown, but the track holds 9 states/);
-    expect(refusal((raw) => { delete raw.timing.flyS; })).toMatch(/timing: flyS is undefined, not a number/);
-  });
-});
-
-describe("the same request", () => {
-  it("is the same set, flight and segment", () => {
-    const set = sample();
-    const a = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
-    expect(sameAutopilotRequest(a, { ...a })).toBe(true);
-    expect(sameAutopilotRequest(a, { ...a, row: 10 })).toBe(false);
-    expect(sameAutopilotRequest(a, { ...a, column: "speed" })).toBe(false);
+    expect(refusal((raw) => { delete raw.timing.flyS; })).toMatch(/timing\.flyS is undefined, not a number/);
+    expect(refusal((raw) => { raw.track.tS = raw.track.tS.slice(0, 1); })).toMatch(/holds 1 states: a flown segment is at least one cycle/);
   });
 });
 

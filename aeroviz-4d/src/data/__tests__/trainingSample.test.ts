@@ -8,7 +8,7 @@ import {
   parseTrainingIndex,
   parseTrainingSample,
   rowAtTime,
-  trainingBandOutsideSpans,
+  outsideSpans,
   trainingColumnRuns,
   trainingWordAt,
   trainingSetRefusal,
@@ -117,7 +117,7 @@ describe("parseTrainingSample", () => {
   it("refuses a word issued for a reason the labeller does not name — the holds reading's kinds included", () => {
     for (const kind of ["guess", "turn", "turn-split", "intercept"]) {
       expect(refusal((raw) => { raw.flights[0].words.events[6].kind = kind; }))
-        .toMatch(new RegExp(`events\\[6\\]: kind is ${kind}, not one of the labeller's initial, per-step`));
+        .toMatch(new RegExp(`events\\[6\\]\\.kind is "${kind}", not one of initial, per-step`));
     }
   });
 
@@ -154,19 +154,24 @@ describe("parseTrainingSample", () => {
       .toMatch(/envelopes\.approach\.captureTurn is not an object/);
   });
 
-  it("refuses a heading band whose rows are not a lead after its word, or run past the next word's or the clearance", () => {
+  it("refuses a heading band whose rows are not a lead after its word, or do not end at the next word's or the clearance", () => {
     expect(refusal((raw) => { Object.assign(raw.flights[0].envelopes.heading[1], { firstRow: 9, inside: [1, 1, 1] }); }))
       .toMatch(/heading\[1\]: firstRow is 9, but a word told at step 8 is judged from 10 \(the 4 s lead\)/);
     // past the next word's first row
     expect(refusal((raw) => {
       const item = raw.flights[0].envelopes.heading[1];
       item.stopRow = 13; item.inside = [1, 1, 1]; item.check = { rows: 3, inside: 3 };
-    })).toMatch(/heading\[1\]: stopRow is 13, not in 10…12/);
+    })).toMatch(/heading\[1\]: stopRow is 13, but this word's rows end at 12/);
+    // short of it: a band cut early, its check counting the rows it kept
+    expect(refusal((raw) => {
+      const item = raw.flights[0].envelopes.heading[1];
+      item.stopRow = 11; item.inside = [1]; item.check = { rows: 1, inside: 1 };
+    })).toMatch(/heading\[1\]: stopRow is 11, but this word's rows end at 12/);
     // past the clearance
     expect(refusal((raw) => {
       const item = raw.flights[0].envelopes.heading[2];
       item.stopRow = 21; item.inside.push(1); item.check = { rows: 9, inside: 8 };
-    })).toMatch(/heading\[2\]: stopRow is 21, not in 12…20/);
+    })).toMatch(/heading\[2\]: stopRow is 21, but this word's rows end at 20/);
   });
 
   it("refuses a heading band's verdicts that are not one per row, or that its check does not count", () => {
@@ -259,7 +264,7 @@ describe("the index", () => {
     expect(trainingSetRefusal({ ...current, vocabularySha256: "9".repeat(64) }))
       .toContain(`spec 999999999999 is not the ${TRAINING_READING_RULE} spec`);
     expect(trainingSetRefusal({ ...current, kind: "prior-generated" }))
-      .toContain(`no prior is trained on ${TRAINING_READING_RULE} yet`);
+      .toContain("this reader opens only vocabulary-readback sets");
   });
 
   it("greys out one malformed entry without emptying the manifest", () => {
@@ -314,14 +319,15 @@ describe("reading a sentence", () => {
     expect(rowAtTime(flight.signals.tS, 21)).toBe(10);
   });
 
-  it("draws a band's rows outside on to the next row, so one row outside is a segment", () => {
-    const band = { firstRow: 12, stopRow: 17, targetOnTrackDeg: 180, bandDeg: [175.5, 184.5] as [number, number],
-      inside: [false, true, true, false, false] };
-    expect(trainingBandOutsideSpans(band, 59)).toEqual([[12, 13], [15, 17]]);
+  it("draws rows outside on to the next row, so one row outside is a segment", () => {
+    const inside = [false, true, true, false, false];
+    expect(outsideSpans(inside, 12, 59)).toEqual([[12, 13], [15, 17]]);
     // at the line's end, back to the row before
-    expect(trainingBandOutsideSpans(band, 16)).toEqual([[12, 13], [15, 16]]);
-    expect(trainingBandOutsideSpans({ ...band, firstRow: 16, stopRow: 17, inside: [false] }, 16)).toEqual([[15, 16]]);
-    expect(trainingBandOutsideSpans({ ...band, inside: band.inside.map(() => true) }, 59)).toEqual([]);
+    expect(outsideSpans(inside, 12, 16)).toEqual([[12, 13], [15, 16]]);
+    expect(outsideSpans([false], 16, 16)).toEqual([[15, 16]]);
+    expect(outsideSpans(inside.map(() => true), 12, 59)).toEqual([]);
+    // a tube outside on one row: a segment to the next row, never a point
+    expect(outsideSpans([true, true, true, true, true, false, true], 0, 59)).toEqual([[5, 6]]);
   });
 
   it("counts the labeller's verdicts: heading words judged apart from those with no row of their own", () => {

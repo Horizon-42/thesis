@@ -32,6 +32,7 @@ import {
   parseTrainingIndex,
   parseTrainingSample,
   trainingSetRefusal,
+  type TrainingIndex,
   type TrainingSample,
   type TrainingSetEntry,
 } from "../data/trainingSample";
@@ -40,7 +41,10 @@ import {
   parseTrainingOverlays,
   parseTrainingPriorOverlay,
   type TrainingOverlayEntry,
+  type TrainingOverlayKind,
+  type TrainingOverlays,
 } from "../data/trainingOverlays";
+import type { Parsed } from "../data/trainingReader";
 
 export interface PublicationFinding {
   level: "error" | "warn";
@@ -222,6 +226,12 @@ export function checkComparisonIndex(
 
 // ── the Training export ──────────────────────────────────────────────────────
 
+/** A Training check's findings and what it read (null when it did not), so each file is parsed once. */
+export interface TrainingChecked<T> {
+  findings: PublicationFinding[];
+  value: T | null;
+}
+
 /**
  * The Training manifest as the panel reads it.
  *
@@ -230,16 +240,17 @@ export function checkComparisonIndex(
  * by design, which means a half-written export is easy to publish and never notice. The check is
  * what notices — naming the entry and the field.
  */
-export function checkTrainingIndex(manifest: unknown): PublicationFinding[] {
+export function checkTrainingIndex(manifest: unknown): TrainingChecked<TrainingIndex> {
   const parsed = parseTrainingIndex(manifest);
   if (!parsed.ok) {
-    return [{ level: "error", message: `training/index.json is not a manifest: ${parsed.problem}` }];
+    return { findings: [{ level: "error", message: `training/index.json is not a manifest: ${parsed.problem}` }], value: null };
   }
-  return parsed.value.rejected.map((item) => ({
+  const findings = parsed.value.rejected.map((item) => ({
     level: "error" as const,
     category: item.id,
     message: `the panel would grey this entry out: ${item.problem}`,
   }));
+  return { findings, value: parsed.value };
 }
 
 /**
@@ -255,23 +266,29 @@ export function checkTrainingSetRefusal(entry: TrainingSetEntry): PublicationFin
 }
 
 /** One readable set's sample file, through the panel's own reader. */
-export function checkTrainingSample(setId: string, sample: unknown): PublicationFinding[] {
+export function checkTrainingSample(setId: string, sample: unknown): TrainingChecked<TrainingSample> {
   const parsed = parseTrainingSample(sample);
-  return parsed.ok ? [] : [{ level: "error", category: setId, message: `sample.json: ${parsed.problem}` }];
+  return parsed.ok
+    ? { findings: [], value: parsed.value }
+    : { findings: [{ level: "error", category: setId, message: `sample.json: ${parsed.problem}` }], value: null };
 }
 
 /**
  * What the manifest promises against what the sample holds. The two files are written by one run
  * of the exporter, so a disagreement means they came from different runs.
  */
-export function checkTrainingSetAgrees(entry: TrainingSetEntry, sample: TrainingSample): PublicationFinding[] {
+export function checkTrainingSetAgrees(
+  entry: TrainingSetEntry, sample: TrainingSample, airport: string,
+): PublicationFinding[] {
   const findings: PublicationFinding[] = [];
   const pairs: Array<[string, string | number, string | number]> = [
+    ["airport", airport, sample.airport],
     ["setId", entry.id, sample.setId],
     ["flights", entry.flights, sample.flights.length],
     ["vocabularySha256", entry.vocabularySha256, sample.vocabulary.specSha256],
     ["runwaySha256", entry.runwaySha256, sample.candidatesSha256],
     ["readingRule", entry.readingRule, sample.vocabulary.readingRule],
+    ["cohort.split", entry.cohort.split, sample.cohort.split],
     ["cohort.perStratum", entry.cohort.perStratum, sample.cohort.perStratum],
     ["cohort.seed", entry.cohort.seed, sample.cohort.seed],
   ];
@@ -286,13 +303,24 @@ export function checkTrainingSetAgrees(entry: TrainingSetEntry, sample: Training
 // ── the Training overlays ────────────────────────────────────────────────────
 
 /** The overlays manifest as the panel reads it: an entry it rejects is shown as a problem, so it is an error here. */
-export function checkTrainingOverlays(manifest: unknown): PublicationFinding[] {
+export function checkTrainingOverlays(manifest: unknown): TrainingChecked<TrainingOverlays> {
   const parsed = parseTrainingOverlays(manifest);
-  if (!parsed.ok) return [{ level: "error", message: `training/overlays.json is not a manifest: ${parsed.problem}` }];
-  return parsed.value.rejected.map((item) => ({
+  if (!parsed.ok) {
+    return { findings: [{ level: "error", message: `training/overlays.json is not a manifest: ${parsed.problem}` }], value: null };
+  }
+  const findings = parsed.value.rejected.map((item) => ({
     level: "error" as const, category: item.id, message: `the panel would reject this overlay: ${item.problem}`,
   }));
+  return { findings, value: parsed.value };
 }
+
+/** The panel's reader for each kind of overlay: a kind added to the list needs its reader here, or this does not
+ *  compile. */
+const OVERLAY_READERS: Record<TrainingOverlayKind,
+  (payload: unknown, entry: TrainingOverlayEntry, sample: TrainingSample) => Parsed<{ flights: unknown[] }>> = {
+  "executor-replay": parseTrainingExecutorOverlay,
+  "prior-prediction": parseTrainingPriorOverlay,
+};
 
 /**
  * One overlay's file through the panel's own reader, against the sample of the set it is drawn over — and that
@@ -309,9 +337,7 @@ export function checkTrainingOverlay(
       message: `drawn over ${entry.base}'s sample ${entry.baseSampleSha256.slice(0, 12)}, the file on disk is ${sampleSha256.slice(0, 12)}`,
     });
   }
-  const parsed = entry.kind === "executor-replay"
-    ? parseTrainingExecutorOverlay(payload, sample)
-    : parseTrainingPriorOverlay(payload, sample);
+  const parsed = OVERLAY_READERS[entry.kind](payload, entry, sample);
   if (!parsed.ok) findings.push({ level: "error", category: entry.id, message: `${entry.file}: ${parsed.problem}` });
   else if (parsed.value.flights.length !== entry.flights) {
     findings.push({ level: "error", category: entry.id, message: `the manifest says ${entry.flights} flights, ${entry.file} holds ${parsed.value.flights.length}` });

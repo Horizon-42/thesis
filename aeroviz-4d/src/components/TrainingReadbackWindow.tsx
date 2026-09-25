@@ -66,7 +66,7 @@ import {
 import {
   formatSeconds,
   rowAtTime,
-  trainingBandOutsideSpans,
+  outsideSpans,
   trainingKindLabel,
   trainingWordAt,
   trainingWordLabel,
@@ -101,26 +101,6 @@ export function extent(values: number[]): [number, number] {
   if (high === low) return [low - 1, high + 1];
   const pad = (high - low) * 0.08;
   return [low - pad, high + pad];
-}
-
-/** The contiguous runs of `true` in a per-row flag, as inclusive [first, last] pairs. */
-export function runsOf(flags: boolean[]): Array<[number, number]> {
-  const runs: Array<[number, number]> = [];
-  let start: number | null = null;
-  flags.forEach((flag, index) => {
-    if (flag && start === null) start = index;
-    if (!flag && start !== null) {
-      runs.push([start, index - 1]);
-      start = null;
-    }
-  });
-  if (start !== null) runs.push([start, flags.length - 1]);
-  return runs;
-}
-
-/** The row whose horizontal distance flown is nearest at or before `metres`. */
-export function rowAtDistance(distanceM: number[], metres: number): number {
-  return rowAtTime(distanceM, metres);
 }
 
 const tick = (ok: boolean) => (ok ? "✓" : "✗");
@@ -164,12 +144,11 @@ export default function TrainingReadbackWindow({
   const { tS } = signals;
   const last = flight.rows - 1;
   // the executor's flown track, drawn on its own clock (and not at all without two points)
-  const flownTrack = executor?.track && executor.track.tS.length >= 2 ? executor.track : null;
+  const flown = executor?.flown && executor.track.tS.length >= 2 ? executor : null;
+  const flownTrack = flown?.track ?? null;
   // its heading words' bands, on the flown track as its judge read it
-  const flownBands = flownTrack && executor?.judgedTrackDeg
-    ? executor.words.flatMap((word) => (word.heading === null ? [] : [word.heading]))
-    : [];
-  const judgedTrack = flownTrack ? executor?.judgedTrackDeg ?? null : null;
+  const judgedTrack = flown?.judgedTrackDeg ?? null;
+  const flownBands = flown && judgedTrack ? flown.words.flatMap((word) => (word.heading === null ? [] : [word.heading])) : [];
   // the live executor's segment (and not at all without two points); its judged track's step k is the flight's
   // step `row + k`, the flown track's point k × (step / cycle)
   const live = autopilot && autopilot.track.tS.length >= 2 ? autopilot : null;
@@ -181,7 +160,7 @@ export default function TrainingReadbackWindow({
   const liveStepRows = live ? Math.round(vocabulary.stepS / live.executor.cycleS) : 1;
   /** The live segment's rows outside its heading band, as [first, last] judged steps. */
   const liveOutside = live && liveBand && liveJudged && layers.headingBands
-    ? trainingBandOutsideSpans(liveBand, live.segment.row + liveJudged.length - 1)
+    ? outsideSpans(liveBand.inside, liveBand.firstRow, live.segment.row + liveJudged.length - 1)
       .map(([first, lastRow]) => [first - live.segment.row, lastRow - live.segment.row] as [number, number])
     : [];
   const plotW = width - GUTTER - PAD_R;
@@ -429,7 +408,7 @@ export default function TrainingReadbackWindow({
                 </polyline>
               ) : null}
               {/* the rows a heading word's band judged outside */}
-              {layers.headingBands ? envelopes.heading.flatMap((item, index) => trainingBandOutsideSpans(item, last).map(([first, lastRow]) => (
+              {layers.headingBands ? envelopes.heading.flatMap((item, index) => outsideSpans(item.inside, item.firstRow, last).map(([first, lastRow]) => (
                 <polyline key={`plan-heading-out-${index}-${first}`} className="training-readback-outside"
                   points={planRows(first, lastRow)} fill="none" stroke={TRAINING_OUTSIDE_COLOR}
                   strokeWidth={2.4} strokeLinecap="round" />
@@ -442,7 +421,7 @@ export default function TrainingReadbackWindow({
                     <title>the executor's flown track — the truth sentence flown from row 0</title>
                   </polyline>
                   {layers.headingBands && judgedTrack ? flownBands.flatMap((band, index) =>
-                    trainingBandOutsideSpans(band, judgedTrack.length - 1).map(([first, lastStep]) => (
+                    outsideSpans(band.inside, band.firstRow, judgedTrack.length - 1).map(([first, lastStep]) => (
                       <polyline key={`plan-executor-out-${index}-${first}`} className="training-readback-executor-outside"
                         points={flownPlanRows(first, lastStep)} fill="none"
                         stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2.4} strokeLinecap="round" />
@@ -451,7 +430,7 @@ export default function TrainingReadbackWindow({
                     width={7} height={7} fill={TRAINING_EXECUTOR_COLOR} stroke="black" strokeWidth={0.6} />
                   <text x={px(km(flownTrack.eM[flownTrack.eM.length - 1])) + 6} y={py(km(flownTrack.nM[flownTrack.nM.length - 1])) + 12}
                     className="training-readback-path-label" fill={TRAINING_EXECUTOR_COLOR}>
-                    executor: {(executor!.outcome ?? "").replace(/_/g, " ")}
+                    executor: {flown!.outcome.replace(/_/g, " ")}
                   </text>
                 </g>
               ) : null}
@@ -623,14 +602,14 @@ export default function TrainingReadbackWindow({
             {column === "heading" ? focusTrace(signals.smoothed.trackDeg, rowX, yHeading) : null}
             {liveTrack ? liveTrace(liveTrack.tS, liveTrack.trackDeg, xTime, yHeading, "the autopilot's track over the selected segment") : null}
             {/* the rows each band judged outside: the observed track's, and the executor's as its judge read it */}
-            {layers.headingBands ? envelopes.heading.flatMap((item, index) => trainingBandOutsideSpans(item, last).map(([first, lastRow]) => (
+            {layers.headingBands ? envelopes.heading.flatMap((item, index) => outsideSpans(item.inside, item.firstRow, last).map(([first, lastRow]) => (
               <polyline key={`heading-out-${index}-${first}`} className="training-readback-outside"
                 points={Array.from({ length: lastRow - first + 1 }, (_, offset) => first + offset)
                   .map((row) => `${rowX(row)},${yHeading(signals.smoothed.trackDeg[row])}`).join(" ")}
                 fill="none" stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2} />
             ))) : null}
             {layers.headingBands && judgedTrack ? flownBands.flatMap((band, index) =>
-              trainingBandOutsideSpans(band, judgedTrack.length - 1).map(([first, lastStep]) => (
+              outsideSpans(band.inside, band.firstRow, judgedTrack.length - 1).map(([first, lastStep]) => (
                 <polyline key={`executor-out-${index}-${first}`} className="training-readback-executor-outside"
                   points={Array.from({ length: lastStep - first + 1 }, (_, offset) => first + offset)
                     .map((step) => `${xTime(flownTrack!.tS[step])},${yHeading(judgedTrack[step])}`).join(" ")}
@@ -649,9 +628,9 @@ export default function TrainingReadbackWindow({
           {/* ── altitude against distance flown ───────────────────────────── */}
           <svg className="training-readback-svg" width={width} height={CHART_H} viewBox={`0 0 ${width} ${CHART_H}`}
             aria-label="Altitude chart"
-            onMouseMove={(event) => onCursorChange(tS[rowAtDistance(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))])}
+            onMouseMove={(event) => onCursorChange(tS[rowAtTime(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))])}
             onClick={(event) => {
-              onCursorChange(tS[rowAtDistance(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))]);
+              onCursorChange(tS[rowAtTime(signals.smoothed.distanceM, distanceAtX(event.nativeEvent.offsetX))]);
               onColumnChange("altitude");
             }}>
             <text x={GUTTER} y={11} className="training-readback-title">
@@ -709,16 +688,16 @@ export default function TrainingReadbackWindow({
             {column === "altitude" || column === "angle" ? focusTrace(signals.smoothed.altitudeM, rowXDistance, yAltitude) : null}
             {liveTrack ? liveTrace(liveTrack.distanceM, liveTrack.altitudeM, xDistance, yAltitude,
               "the autopilot's altitude over the selected segment, against the distance flown") : null}
-            {envelopes.altitude.flatMap((item, index) =>
-              runsOf(item.inside.map((ok) => !ok)).map(([first, lastOut]) => (
+            {layers.vertical ? envelopes.altitude.flatMap((item, index) =>
+              outsideSpans(item.inside, item.row, last).map(([first, lastRow]) => (
                 <polyline
                   key={`altitude-out-${index}-${first}`}
                   className="training-readback-outside"
-                  points={signals.smoothed.altitudeM.slice(item.row + first, item.row + lastOut + 1)
-                    .map((value, offset) => `${rowXDistance(item.row + first + offset)},${yAltitude(value)}`).join(" ")}
+                  points={signals.smoothed.altitudeM.slice(first, lastRow + 1)
+                    .map((value, offset) => `${rowXDistance(first + offset)},${yAltitude(value)}`).join(" ")}
                   fill="none" stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2}
                 />
-              )))}
+              ))) : null}
             <line x1={rowXDistance(cursorRow)} x2={rowXDistance(cursorRow)} y1={plotTop} y2={plotTop + plotH}
               className="training-readback-cursor-line" />
             <line x1={GUTTER} x2={GUTTER + plotW} y1={plotTop + plotH} y2={plotTop + plotH} className="training-readback-axis" />
@@ -795,17 +774,17 @@ export default function TrainingReadbackWindow({
             {flownTrack ? flownTrace(flownTrack.tS, flownTrack.groundSpeedMps, xTime, ySpeed, "the executor's ground speed, on its own clock") : null}
             {column === "speed" ? focusTrace(signals.smoothed.groundSpeedMps, rowX, ySpeed) : null}
             {liveTrack ? liveTrace(liveTrack.tS, liveTrack.groundSpeedMps, xTime, ySpeed, "the autopilot's ground speed over the selected segment") : null}
-            {envelopes.speed.flatMap((span, index) =>
+            {layers.vertical ? envelopes.speed.flatMap((span, index) =>
               span.arrivalRow === null || span.bandInside === null ? [] :
-                runsOf(span.bandInside.map((ok) => !ok)).map(([first, lastOut]) => (
+                outsideSpans(span.bandInside, span.arrivalRow, last).map(([first, lastRow]) => (
                   <polyline
                     key={`speed-out-${index}-${first}`}
                     className="training-readback-outside"
-                    points={signals.smoothed.groundSpeedMps.slice(span.arrivalRow! + first, span.arrivalRow! + lastOut + 1)
-                      .map((value, offset) => `${rowX(span.arrivalRow! + first + offset)},${ySpeed(value)}`).join(" ")}
+                    points={signals.smoothed.groundSpeedMps.slice(first, lastRow + 1)
+                      .map((value, offset) => `${rowX(first + offset)},${ySpeed(value)}`).join(" ")}
                     fill="none" stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2}
                   />
-                )))}
+                ))) : null}
             <line x1={rowX(flight.joinRow)} x2={rowX(flight.joinRow)} y1={plotTop} y2={plotTop + plotH}
               stroke={TRAINING_COLUMN_COLOR.approach} strokeDasharray="3 3">
               <title>cleared at step {flight.joinRow}</title>
@@ -823,9 +802,9 @@ export default function TrainingReadbackWindow({
                 : !executor.flown
                   ? `not flown: ${executor.group}.`
                   : flownTrack === null
-                    ? `${(executor.outcome ?? "").replace(/_/g, " ")} on ${executor.group} within its first step: no flown ` +
+                    ? `${executor.outcome.replace(/_/g, " ")} on ${executor.group} within its first step: no flown ` +
                       "track to draw."
-                  : `${(executor.outcome ?? "").replace(/_/g, " ")} on ${executor.group}; dashed teal: its flown track, ` +
+                  : `${executor.outcome.replace(/_/g, " ")} on ${executor.group}; dashed teal: its flown track, ` +
                     "and its heading, altitude and ground speed on its own clock and its own distance flown. It flies at its " +
                     "own pace from row 0, each word said where the observed aircraft heard it, so its lines do not line up " +
                     "with the observed ones in time. Its heading words' bands are the teal outlines on the heading chart, " +

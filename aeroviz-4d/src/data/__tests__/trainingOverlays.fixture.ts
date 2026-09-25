@@ -11,9 +11,11 @@
 
 import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256 } from "../trainingSample";
 import {
+  parseTrainingOverlays,
   TRAINING_EXECUTOR_SCHEMA,
   TRAINING_OVERLAYS_SCHEMA,
   TRAINING_PRIOR_SCHEMA,
+  type TrainingOverlayEntry,
 } from "../trainingOverlays";
 import { MOCK_ROWS, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
 
@@ -38,6 +40,13 @@ export function mockOverlays(): Record<string, unknown> {
     airport: "KXXX",
     overlays: [entry(EXECUTOR_ID, "executor-replay", "executor.json"), entry(PRIOR_ID, "prior-prediction", "prior.json")],
   };
+}
+
+/** The manifest entry that lists overlay ``id`` (`mockOverlays`), as the reader parses it. */
+export function mockOverlayEntry(id: string): TrainingOverlayEntry {
+  const parsed = parseTrainingOverlays(mockOverlays());
+  if (!parsed.ok) throw new Error(parsed.problem);
+  return parsed.value.overlays.find((item) => item.id === id)!;
 }
 
 const check = (name: string, ok: boolean, inside: number | null = null, rows: number | null = null) => ({ name, ok, inside, rows });
@@ -126,10 +135,12 @@ export function mockExecutorOverlay(): Record<string, unknown> {
  *  the tests read will do). */
 export const MOCK_FIRST_PREDICTED_ROW = 4;
 
-/** The prior at one flight, from `MOCK_FIRST_PREDICTED_ROW`: every column said there (probability 1, the truth at
- *  0.5); after it a word said with 0.6 where the truth says one, else 0.01; the truth's word ranked first — but for
- *  `wrong`, the steps whose second-ranked word is the truth. */
-function priorFlight(key: string, events: Array<{ row: number; column: number; value: number }>, wrong: Set<string>) {
+/** The prior at one flight, from `MOCK_FIRST_PREDICTED_ROW`: every column said there (probability 1), the word in
+ *  force ranked first; after it a word said with 0.6 where the truth says one, else 0.01; the truth's word ranked first
+ *  — but for `wrong`, the steps whose second-ranked word is the truth. The truth's probability is the word's times the
+ *  change's, as the prior's own factorisation gives it. */
+function priorFlight(key: string, events: Array<{ row: number; column: number; value: number }>, inForce: number[][],
+  wrong: Set<string>) {
   const values = [2, 3, 72, 182, 6, 48];
   return {
     flightKey: key, datasetId: `KXXX:${key}`, rows: MOCK_ROWS, firstPredictedRow: MOCK_FIRST_PREDICTED_ROW, nllPerStep: 0.25,
@@ -145,12 +156,13 @@ function priorFlight(key: string, events: Array<{ row: number; column: number; v
         const opening = row === MOCK_FIRST_PREDICTED_ROW;
         const change = opening ? 1 : said ? 0.6 : 0.01;
         changeP.push(change);
-        const first = said ? said.value : 0;
+        const first = opening ? inForce[column][row] : said ? said.value : 0;
         const ranked = wrong.has(`${row}:${column}`) ? [(first + 1) % values[column], first] : [first, (first + 1) % values[column]];
         if (k === 3) ranked.push((first + 2) % values[column]);
         words.push(...ranked);
-        wordsP.push(...(k === 3 ? [0.5, 0.3, 0.1] : [0.7, 0.3]));
-        truthP.push(opening ? 0.5 : said ? change * (wrong.has(`${row}:${column}`) ? 0.3 : 0.5) : 1 - change);
+        const p = k === 3 ? [0.5, 0.3, 0.1] : [0.7, 0.3];
+        wordsP.push(...p);
+        truthP.push(opening || said ? change * p[wrong.has(`${row}:${column}`) ? 1 : 0] : 1 - change);
       }
       return { k, changeP, words, wordsP, truthP };
     }),
@@ -158,7 +170,9 @@ function priorFlight(key: string, events: Array<{ row: number; column: number; v
 }
 
 export function mockPriorOverlay(): Record<string, unknown> {
-  const sample = mockSample() as { flights: Array<{ flightKey: string; words: { events: Array<{ row: number; column: number; value: number }> } }> };
+  const sample = mockSample() as {
+    flights: Array<{ flightKey: string; words: { events: Array<{ row: number; column: number; value: number }>; inForce: number[][] } }>;
+  };
   const perColumn = Object.fromEntries(TRAINING_COLUMNS.map((column) => [column, column === "runway"
     // the runway never changes after the first predicted step: no change metrics
     ? { nllPerStep: 0.002, changeSteps: 0, firstStepTop1: 0.81, changeProbabilityWhereChanged: null, top1GivenChange: null,
@@ -188,6 +202,6 @@ export function mockPriorOverlay(): Record<string, unknown> {
     },
     columns: [...TRAINING_COLUMNS],
     flights: sample.flights.map((flight, index) =>
-      priorFlight(flight.flightKey, flight.words.events, index === 0 ? new Set(["10:2"]) : new Set())),
+      priorFlight(flight.flightKey, flight.words.events, flight.words.inForce, index === 0 ? new Set(["10:2"]) : new Set())),
   };
 }

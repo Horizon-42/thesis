@@ -28,23 +28,25 @@
  * SI units only: metres, m/s, degrees, seconds.
  */
 
+import { asNumber, attempt, Reader, type Parsed } from "./trainingReader";
 import {
-  Reader,
-  Refusal,
-  asNumber,
-  attempt,
+  readCrossing,
+  readJudgedBand,
+  readWordVerdict,
+  type TrainingCrossing,
   type TrainingExecutorCheck,
 } from "./trainingOverlays";
 import { TRAINING_AUTOPILOT_COLOR, TRAINING_AUTOPILOT_OUTSIDE_COLOR } from "../utils/trainingWordColors";
 import {
-  headingBandProblem,
   trainingColumnRuns,
+  TRAINING_COLUMN_INDEX,
   TRAINING_COLUMNS,
-  type Parsed,
   type TrainingColumn,
   type TrainingFlight,
   type TrainingHeadingBand,
   type TrainingSample,
+  type TrainingVocabulary,
+  type TrainingWordRun,
 } from "./trainingSample";
 
 /** MIRROR of `aeroviz_backend/autopilot_segment.py` `SCHEMA`: the backend's answer; anything else is refused by name. */
@@ -127,6 +129,8 @@ export interface TrainingAutopilotSegment {
     sourceSha256: string;
     wordClock: string;
     cycleS: number;
+    /** Control cycles per sentence step: the track's point `k * stepCycles` is the flight's step `segment.row + k`. */
+    stepCycles: number;
     timeoutFactor: number;
   };
   artefact: string;
@@ -155,7 +159,7 @@ export interface TrainingAutopilotSegment {
     /** At the segment's end: the executor minus the observed aircraft where the next word was said. */
     offsetFromObserved: { horizontalM: number; aboveM: number; groundSpeedMps: number } | null;
     flownS: number;
-    crossing: { crossM: number; heightM: number; atS: number } | null;
+    crossing: TrainingCrossing | null;
     /** Why the labeller's gate refused the flown segment (nothing is then judged). */
     refused: string | null;
   };
@@ -209,12 +213,6 @@ export function autopilotColour(segment: TrainingAutopilotSegment): string {
   return segment.word.status === "outside" ? TRAINING_AUTOPILOT_OUTSIDE_COLOR : TRAINING_AUTOPILOT_COLOR;
 }
 
-/** The same request: the same set, flight and segment. */
-export function sameAutopilotRequest(a: TrainingAutopilotRequest, b: TrainingAutopilotRequest): boolean {
-  return a.airport === b.airport && a.setId === b.setId && a.flightKey === b.flightKey && a.column === b.column
-    && a.row === b.row;
-}
-
 /** The words the sentence says for a segment, as the backend lists what it told: the six in force at its first step,
  *  then every word said before its end, by step then column. */
 export function segmentWords(flight: TrainingFlight, row: number, endRow: number): Array<{ row: number; column: number; value: number }> {
@@ -228,29 +226,88 @@ export function segmentWords(flight: TrainingFlight, row: number, endRow: number
 
 function parseTrack(reader: Reader, row: number, stepS: number): TrainingAutopilotTrack {
   const tS = reader.numbers("tS");
-  if (tS.length < 1) reader.fail("tS is empty");
+  if (tS.length < 2) reader.fail(`holds ${tS.length} states: a flown segment is at least one cycle`);
   if (Math.abs(tS[0] - row * stepS) > 1e-3) reader.fail(`starts at ${tS[0]} s, not at step ${row} (${row * stepS} s)`);
   if (tS.some((value, index) => index > 0 && value <= tS[index - 1])) reader.fail("tS does not run forward");
   const n = tS.length;
-  const cycles = Math.max(n - 1, 0);
   return {
     tS, eM: reader.numbers("eM", n), nM: reader.numbers("nM", n), lon: reader.numbers("lon", n), lat: reader.numbers("lat", n),
     altitudeM: reader.numbers("altitudeM", n), altitudeHaeM: reader.numbers("altitudeHaeM", n),
     groundSpeedMps: reader.numbers("groundSpeedMps", n), verticalRateMps: reader.numbers("verticalRateMps", n),
     trackDeg: reader.numbers("trackDeg", n), distanceM: reader.numbers("distanceM", n),
-    thrustFraction: reader.numbers("thrustFraction", cycles), bankRightDeg: reader.numbers("bankRightDeg", cycles),
-    loadFactor: reader.numbers("loadFactor", cycles),
+    thrustFraction: reader.numbers("thrustFraction", n - 1), bankRightDeg: reader.numbers("bankRightDeg", n - 1),
+    loadFactor: reader.numbers("loadFactor", n - 1),
   };
 }
 
-function parseChecks(word: Reader): TrainingExecutorCheck[] {
-  return word.list("checks").map((check, position) => {
-    const item = Reader.of(check, word.at(`checks[${position}]`));
-    return {
-      name: item.string("name"), ok: item.boolean("ok"),
-      inside: item.nullableInteger("inside", 0, Number.MAX_SAFE_INTEGER), rows: item.nullableInteger("rows", 0, Number.MAX_SAFE_INTEGER),
-    };
-  });
+/** The segment the answer flew: the run on screen that was asked for, stopped where its envelope ends, told the words
+ *  the sentence bar shows for it. */
+function readSegment(
+  segment: Reader, request: TrainingAutopilotRequest, flight: TrainingFlight, vocabulary: TrainingVocabulary,
+): TrainingAutopilotSegment["segment"] {
+  const column = segment.oneOf("column", TRAINING_COLUMNS);
+  const row = segment.integer("row", 0, flight.rows - 1);
+  if (column !== request.column || row !== request.row) {
+    segment.fail(`is ${column} from step ${row}, but ${request.column} from step ${request.row} was asked for`);
+  }
+  const run: TrainingWordRun | undefined = trainingColumnRuns(flight, column).find((item) => item.row === row);
+  if (run === undefined) segment.fail(`no ${column} word is said at step ${row} of the sentence on screen`);
+  const endRow = segment.integer("endRow", row + 1, flight.rows);
+  if (endRow !== run.endRow) segment.fail(`ends at step ${endRow}, but the word on screen is in force to step ${run.endRow}`);
+  const stopRow = segment.integer("stopRow", row + 1, flight.rows);
+  const toLanding = segment.boolean("toLanding");
+  const stop = segmentStopRow(flight, column, endRow, vocabulary.headingLeadRows);
+  if (stopRow !== stop || toLanding !== (stopRow === flight.rows)) {
+    segment.fail(`stops at step ${stopRow}${toLanding ? " (to the landing)" : ""}, but this word's envelope ends at step ${stop}`);
+  }
+  const told = segment.children("told").map((word) => ({
+    row: word.integer("row", 0, flight.rows - 1), column: word.integer("column", 0, TRAINING_COLUMNS.length - 1),
+    value: word.count("value"),
+  }));
+  const shown = segmentWords(flight, row, stopRow);
+  const same = told.length === shown.length && told.every((word, index) =>
+    word.row === shown[index].row && word.column === shown[index].column && word.value === shown[index].value);
+  if (!same) {
+    segment.fail(`told the executor ${told.length} words that are not the ${shown.length} the sentence shows for this ` +
+      "segment: the backend flew another reading of this flight");
+  }
+  return { column, row, endRow, stopRow, toLanding, observedS: segment.number("observedS"), told };
+}
+
+/** How the flight ended: at its segment's end (with its offset from the observed aircraft there), or the judge's
+ *  outcome — to the landing, only the latter. */
+function readEnd(end: Reader, toLanding: boolean): TrainingAutopilotSegment["end"] {
+  const reason = end.oneOf("reason", [TRAINING_AUTOPILOT_SEGMENT_END, ...TRAINING_AUTOPILOT_OUTCOMES]);
+  const reachedSegmentEnd = end.nullableBoolean("reachedSegmentEnd");
+  if ((reachedSegmentEnd === null) !== toLanding) {
+    end.fail(toLanding ? "the column's last word is flown to its outcome, not to a segment end"
+      : "says nothing of whether the segment's end was reached");
+  }
+  if (reason === TRAINING_AUTOPILOT_SEGMENT_END && reachedSegmentEnd !== true) end.fail("ended at a segment end it did not reach");
+  const offset = end.nullableChild("offsetFromObserved");
+  if ((offset !== null) !== (reason === TRAINING_AUTOPILOT_SEGMENT_END)) {
+    end.fail("offsetFromObserved is given exactly when the flight ended at its segment's end");
+  }
+  const crossing = end.nullableChild("crossing");
+  return {
+    reason, reachedSegmentEnd,
+    offsetFromObserved: offset === null ? null : {
+      horizontalM: offset.number("horizontalM"), aboveM: offset.number("aboveM"), groundSpeedMps: offset.number("groundSpeedMps"),
+    },
+    flownS: end.number("flownS"),
+    crossing: crossing === null ? null : readCrossing(crossing),
+    refused: end.nullableString("refused"),
+  };
+}
+
+function readTiming(timing: Reader, states: number): TrainingAutopilotSegment["timing"] {
+  const cycles = timing.count("cycles");
+  if (states - 1 > cycles) timing.fail(`${cycles} cycles flown, but the track holds ${states} states`);
+  return {
+    waitS: timing.number("waitS"), setupS: timing.number("setupS"), openS: timing.number("openS"),
+    flightKept: timing.boolean("flightKept"), prepareS: timing.number("prepareS"), flyS: timing.number("flyS"), cycles,
+    judgeS: timing.number("judgeS"), answerS: timing.number("answerS"), computeS: timing.number("computeS"),
+  };
 }
 
 /** Parse the backend's answer against the request and the flight on screen — all or nothing. */
@@ -258,12 +315,13 @@ export function parseTrainingAutopilot(
   raw: unknown, request: TrainingAutopilotRequest, sample: TrainingSample,
 ): Parsed<TrainingAutopilotSegment> {
   return attempt(() => {
-    const answer = Reader.of(raw, "the autopilot's answer");
+    const answer: Reader = Reader.of(raw, "the autopilot's answer");
     if (answer.raw("schema") !== TRAINING_AUTOPILOT_SCHEMA) {
       answer.fail(`schema is ${JSON.stringify(answer.raw("schema"))}, expected ${JSON.stringify(TRAINING_AUTOPILOT_SCHEMA)}`);
     }
+    const { vocabulary } = sample;
     const flight = sample.flights.find((item) => item.flightKey === request.flightKey);
-    if (flight === undefined) throw new Refusal(`the set ${sample.setId} has no flight ${request.flightKey}`);
+    if (flight === undefined) answer.fail(`the set ${sample.setId} has no flight ${request.flightKey}`);
     const echo = {
       airport: answer.string("airport"), setId: answer.string("setId"), flightKey: answer.string("flightKey"),
       datasetId: answer.string("datasetId"),
@@ -274,135 +332,50 @@ export function parseTrainingAutopilot(
         `${flight.datasetId} was asked for`);
     }
     const vocabularySpecSha256 = answer.string("vocabularySpecSha256");
-    if (vocabularySpecSha256 !== sample.vocabulary.specSha256) {
-      answer.fail(`flew vocabulary ${vocabularySpecSha256.slice(0, 12)}, the set on screen is ${sample.vocabulary.specSha256.slice(0, 12)}`);
+    if (vocabularySpecSha256 !== vocabulary.specSha256) {
+      answer.fail(`flew vocabulary ${vocabularySpecSha256.slice(0, 12)}, the set on screen is ${vocabulary.specSha256.slice(0, 12)}`);
     }
-
-    // ── the segment: the run on screen, and the words it shows ──
-    const segmentReader = answer.child("segment");
-    const column = segmentReader.string("column");
-    const row = segmentReader.integer("row", 0, flight.rows - 1);
-    if (column !== request.column || row !== request.row) {
-      segmentReader.fail(`is ${column} from step ${row}, but ${request.column} from step ${request.row} was asked for`);
-    }
-    const run = trainingColumnRuns(flight, request.column).find((item) => item.row === row);
-    if (run === undefined) segmentReader.fail(`no ${column} word is said at step ${row} of the sentence on screen`);
-    const endRow = segmentReader.integer("endRow", row + 1, flight.rows);
-    if (endRow !== run!.endRow) segmentReader.fail(`ends at step ${endRow}, but the word on screen is in force to step ${run!.endRow}`);
-    const stopRow = segmentReader.integer("stopRow", row + 1, flight.rows);
-    const toLanding = segmentReader.boolean("toLanding");
-    const stop = segmentStopRow(flight, request.column, endRow, sample.vocabulary.headingLeadRows);
-    if (stopRow !== stop || toLanding !== (stopRow === flight.rows)) {
-      segmentReader.fail(`stops at step ${stopRow}${toLanding ? " (to the landing)" : ""}, but this word's envelope ends at ` +
-        `step ${stop}`);
-    }
-    const told = segmentReader.list("told").map((item, position) => {
-      const word = Reader.of(item, segmentReader.at(`told[${position}]`));
-      return { row: word.integer("row", 0, flight.rows - 1), column: word.integer("column", 0, 5), value: word.integer("value", 0, Number.MAX_SAFE_INTEGER) };
-    });
-    const shown = segmentWords(flight, row, stopRow);
-    const same = told.length === shown.length && told.every((word, index) =>
-      word.row === shown[index].row && word.column === shown[index].column && word.value === shown[index].value);
-    if (!same) {
-      segmentReader.fail(`told the executor ${told.length} words that are not the ${shown.length} the sentence shows for this ` +
-        "segment: the backend flew another reading of this flight");
-    }
-
-    // ── the flight ──
+    const segment = readSegment(answer.child("segment"), request, flight, vocabulary);
     const executor = answer.child("executor");
     const cycleS = executor.number("cycleS");
-    const stepRows = sample.vocabulary.stepS / cycleS;
-    if (!Number.isInteger(stepRows) || stepRows < 1) executor.fail(`a ${cycleS} s cycle does not divide the ${sample.vocabulary.stepS} s step`);
-    const track = parseTrack(answer.child("track"), row, sample.vocabulary.stepS);
-    const end = answer.child("end");
-    const reason = end.string("reason");
-    if (reason !== TRAINING_AUTOPILOT_SEGMENT_END && !(TRAINING_AUTOPILOT_OUTCOMES as readonly string[]).includes(reason)) {
-      end.fail(`reason is ${reason}, not ${TRAINING_AUTOPILOT_SEGMENT_END} nor one of ${TRAINING_AUTOPILOT_OUTCOMES.join(", ")}`);
-    }
-    const reachedSegmentEnd = end.nullableBoolean("reachedSegmentEnd");
-    if ((reachedSegmentEnd === null) !== toLanding) {
-      end.fail(toLanding ? "the column's last word is flown to its outcome, not to a segment end"
-        : "says nothing of whether the segment's end was reached");
-    }
-    if (reason === TRAINING_AUTOPILOT_SEGMENT_END && reachedSegmentEnd !== true) end.fail("ended at a segment end it did not reach");
-    const offset = end.nullableChild("offsetFromObserved");
-    if ((offset !== null) !== (reason === TRAINING_AUTOPILOT_SEGMENT_END)) {
-      end.fail("offsetFromObserved is given exactly when the flight ended at its segment's end");
-    }
-    const crossing = end.nullableChild("crossing");
-    const refused = end.nullableString("refused");
+    const stepCycles = vocabulary.stepS / cycleS;
+    if (!Number.isInteger(stepCycles) || stepCycles < 1) executor.fail(`a ${cycleS} s cycle does not divide the ${vocabulary.stepS} s step`);
+    const track = parseTrack(answer.child("track"), segment.row, vocabulary.stepS);
+    const end = readEnd(answer.child("end"), segment.toLanding);
 
-    // ── the selected word's verdict ──
+    // ── the selected word's verdict: a heading word's band and the track its judge read come together ──
     const word = answer.child("word");
-    const status = word.string("status");
-    if (!(TRAINING_AUTOPILOT_STATUSES as readonly string[]).includes(status)) {
-      word.fail(`status is ${status}, not one of ${TRAINING_AUTOPILOT_STATUSES.join(", ")}`);
-    }
-    const checks = parseChecks(word);
-    const judged = status === "inside" || status === "outside";
-    if (judged && (checks.length === 0 || (status === "inside") !== checks.every((check) => check.ok))) {
-      word.fail(`is ${status}, but its checks say ${checks.map((check) => `${check.name} ${check.ok}`).join(", ") || "nothing"}`);
-    }
-    const wordReason = word.nullableString("reason");
-    if (!judged && wordReason === null) word.fail(`is ${status} and says no reason`);
+    const verdict = readWordVerdict(word, TRAINING_AUTOPILOT_STATUSES, end.refused);
     const judgedTrackDeg = answer.nullableNumbers("judgedTrackDeg");
-    // a heading word's band and the track its judge read come together, and only for a heading word
     if ((word.raw("heading") !== null) !== (judgedTrackDeg !== null)) word.fail("a heading band comes with the track its judge read");
-    if (judgedTrackDeg !== null && request.column !== "heading") word.fail(`a ${request.column} word carries a heading band`);
+    if (judgedTrackDeg !== null && segment.column !== "heading") word.fail(`a ${segment.column} word carries a heading band`);
+    if (judgedTrackDeg !== null && end.refused !== null) word.fail("carries a heading band, but the gate refused the flown track");
     let heading: TrainingHeadingBand | null = null;
     if (judgedTrackDeg !== null) {
       const misplaced = judgedTrackDeg.findIndex((_, step) =>
-        !(Math.abs(track.tS[step * stepRows] - (row + step) * sample.vocabulary.stepS) <= 1e-3));
+        !(Math.abs(track.tS[step * stepCycles] - (segment.row + step) * vocabulary.stepS) <= 1e-3));
       if (misplaced >= 0) answer.fail(`judgedTrackDeg's step ${misplaced} is not a step of the flown track`);
-      const band = word.child("heading");
-      const firstRow = band.integer("firstRow", 0, Number.MAX_SAFE_INTEGER);
-      const stopRow = band.integer("stopRow", firstRow, Number.MAX_SAFE_INTEGER);
-      const bandDeg = band.numbers("bandDeg", 2);
-      heading = {
-        firstRow, stopRow, targetOnTrackDeg: band.number("targetOnTrackDeg"), bandDeg: [bandDeg[0], bandDeg[1]],
-        inside: band.flags("inside", stopRow - firstRow),
-      };
-      const envelope = flight.envelopes.heading.find((item) => item.row === row);
-      if (envelope === undefined) band.fail(`the sentence on screen has no heading word at step ${row}`);
-      const problem = headingBandProblem(heading, row, envelope!.targetDeg, sample.vocabulary, row + judgedTrackDeg.length);
-      if (problem !== null) band.fail(problem);
-      const rows = heading.inside.length;
-      const counted = heading.inside.filter(Boolean).length;
-      if (rows > 0 && !checks.some((check) => check.rows === rows && check.inside === counted)) {
-        word.fail(`its band counts ${counted} of ${rows} rows inside, and no check says so`);
-      }
+      // its rows end by the segment's stop — the next heading word's rows begin there — and by the track its judge read
+      const stopBy = Math.min(segment.stopRow, segment.row + judgedTrackDeg.length);
+      heading = readJudgedBand(word, verdict, segment.row, vocabulary.headingTargetsDeg[flight.words.inForce[TRAINING_COLUMN_INDEX.heading][segment.row]],
+        vocabulary, stopBy);
     }
     const limits = answer.child("limits");
-    const timing = answer.child("timing");
-    const cycles = timing.integer("cycles", 0, Number.MAX_SAFE_INTEGER);
-    if (track.tS.length - 1 > cycles) timing.fail(`${cycles} cycles flown, but the track holds ${track.tS.length} states`);
     return {
       ...echo,
       computedUtc: answer.string("computedUtc"),
-      timing: {
-        waitS: timing.number("waitS"), setupS: timing.number("setupS"), openS: timing.number("openS"),
-        flightKept: timing.boolean("flightKept"), prepareS: timing.number("prepareS"), flyS: timing.number("flyS"), cycles,
-        judgeS: timing.number("judgeS"), answerS: timing.number("answerS"), computeS: timing.number("computeS"),
-      },
+      timing: readTiming(answer.child("timing"), track.tS.length),
       executor: {
         spec: executor.string("spec"), specSha256: executor.string("specSha256"), sourceSha256: executor.string("sourceSha256"),
-        wordClock: executor.string("wordClock"), cycleS, timeoutFactor: executor.number("timeoutFactor"),
+        wordClock: executor.string("wordClock"), cycleS, stepCycles, timeoutFactor: executor.number("timeoutFactor"),
       },
       artefact: answer.string("artefact"),
       vocabularySpecSha256,
       group: answer.string("group"),
-      segment: { column: request.column, row, endRow, stopRow, toLanding, observedS: segmentReader.number("observedS"), told },
-      end: {
-        reason, reachedSegmentEnd,
-        offsetFromObserved: offset === null ? null : {
-          horizontalM: offset.number("horizontalM"), aboveM: offset.number("aboveM"), groundSpeedMps: offset.number("groundSpeedMps"),
-        },
-        flownS: end.number("flownS"),
-        crossing: crossing === null ? null : { crossM: crossing.number("crossM"), heightM: crossing.number("heightM"), atS: crossing.number("atS") },
-        refused,
-      },
-      word: { status: status as TrainingAutopilotStatus, checks, reason: wordReason, heading },
-      limits: { cycles: limits.integer("cycles", 0, Number.MAX_SAFE_INTEGER), bound: limits.record("bound", asNumber) },
+      segment,
+      end,
+      word: { status: verdict.status, checks: verdict.checks, reason: verdict.reason, heading },
+      limits: { cycles: limits.count("cycles"), bound: limits.record("bound", asNumber) },
       track,
       judgedTrackDeg,
     };

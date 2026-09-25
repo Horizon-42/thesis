@@ -33,6 +33,7 @@
  */
 
 import { fetchJson } from "../utils/fetchJson";
+import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
 
 /** MIRROR of the exporter's `INDEX_SCHEMA`. The index keeps this shape across vocabularies:
  *  every set, current or superseded, is listed in it. */
@@ -52,8 +53,9 @@ export const TRAINING_READING_RULE = "instruction-v3";
 export const TRAINING_SPEC_SHA256 = "145d6911e75b02f61697cda79f7a5b9fe7de948e55c12199c5a1df081a2d5bd5";
 /** MIRROR of the exporter's `KIND_READBACK`: the one kind of set this reader opens. */
 export const TRAINING_READABLE_SET_KIND = "vocabulary-readback";
-/** The set kinds the manifest may list. A `prior-generated` set has no contract under this
- *  vocabulary yet — no prior is trained — so it is listed and refused by name. */
+/** The set kinds the manifest may list. A `prior-generated` set (the segment prior's generated sentences) has no
+ *  contract under this vocabulary — the instruction prior is drawn as an overlay over a read-back set
+ *  (`trainingOverlays.ts`) — so it is listed and refused by name. */
 export const TRAINING_SET_KINDS = ["vocabulary-readback", "prior-generated"] as const;
 export type TrainingSetKind = (typeof TRAINING_SET_KINDS)[number];
 
@@ -74,9 +76,9 @@ export const TRAINING_WORD_KINDS = [
 ] as const;
 export type TrainingWordKind = (typeof TRAINING_WORD_KINDS)[number];
 
-export const TRAINING_COLUMN_INDEX: Record<TrainingColumn, number> = {
-  runway: 0, approach: 1, heading: 2, altitude: 3, angle: 4, speed: 5,
-};
+export const TRAINING_COLUMN_INDEX = Object.fromEntries(
+  TRAINING_COLUMNS.map((column, index) => [column, index]),
+) as Record<TrainingColumn, number>;
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -372,8 +374,6 @@ export interface TrainingSelection {
   flight: TrainingFlight;
 }
 
-export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
-
 // ── reading a word ───────────────────────────────────────────────────────────
 
 /** The class count of a column; the runway pointer's is the airport's candidate count. */
@@ -499,150 +499,6 @@ export function trainingVerdicts(flight: TrainingFlight) {
   };
 }
 
-// ── small checkers ───────────────────────────────────────────────────────────
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function str(source: Record<string, unknown>, key: string): string | null {
-  const value = source[key];
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function finite(source: Record<string, unknown>, key: string): number | null {
-  const value = source[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function numberArray(value: unknown): number[] | null {
-  if (!Array.isArray(value)) return null;
-  for (const item of value) {
-    if (typeof item !== "number" || !Number.isFinite(item)) return null;
-  }
-  return value as number[];
-}
-
-class Refusal extends Error {}
-
-/** Reads one object, naming the path of every field it refuses. */
-class Reader {
-  constructor(private readonly source: Record<string, unknown>, readonly where: string) {}
-
-  static of(value: unknown, where: string): Reader {
-    if (!isRecord(value)) throw new Refusal(`${where} is not an object`);
-    return new Reader(value, where);
-  }
-
-  fail(message: string): never {
-    throw new Refusal(`${this.where}: ${message}`);
-  }
-
-  at(key: string): string {
-    return `${this.where}.${key}`;
-  }
-
-  raw(key: string): unknown {
-    return this.source[key];
-  }
-
-  child(key: string): Reader {
-    return Reader.of(this.source[key], this.at(key));
-  }
-
-  nullableChild(key: string): Reader | null {
-    return this.source[key] === null ? null : this.child(key);
-  }
-
-  string(key: string): string {
-    const value = str(this.source, key);
-    if (value === null) throw new Refusal(`${this.at(key)} is ${JSON.stringify(this.source[key])}, not a non-empty string`);
-    return value;
-  }
-
-  nullableString(key: string): string | null {
-    return this.source[key] === null ? null : this.string(key);
-  }
-
-  number(key: string): number {
-    const value = finite(this.source, key);
-    if (value === null) throw new Refusal(`${this.at(key)} is ${JSON.stringify(this.source[key])}, not a number`);
-    return value;
-  }
-
-  nullableNumber(key: string): number | null {
-    return this.source[key] === null ? null : this.number(key);
-  }
-
-  integer(key: string, low: number, high: number): number {
-    const value = this.number(key);
-    if (!Number.isInteger(value) || value < low || value > high) {
-      throw new Refusal(`${this.at(key)} is ${value}, not a whole number in ${low}…${high}`);
-    }
-    return value;
-  }
-
-  /** A whole number of at least ``low`` — a count, with no upper bound to pretend to. */
-  count(key: string, low: number): number {
-    const value = this.number(key);
-    if (!Number.isInteger(value) || value < low) {
-      throw new Refusal(`${this.at(key)} is ${value}, not a whole number of at least ${low}`);
-    }
-    return value;
-  }
-
-  nullableInteger(key: string, low: number, high: number): number | null {
-    return this.source[key] === null ? null : this.integer(key, low, high);
-  }
-
-  boolean(key: string): boolean {
-    const value = this.source[key];
-    if (typeof value !== "boolean") throw new Refusal(`${this.at(key)} is ${JSON.stringify(value)}, not true/false`);
-    return value;
-  }
-
-  numbers(key: string, length?: number): number[] {
-    const values = numberArray(this.source[key]);
-    if (values === null) throw new Refusal(`${this.at(key)} is missing or not a list of numbers`);
-    if (length !== undefined && values.length !== length) {
-      throw new Refusal(`${this.at(key)} has ${values.length} values, expected ${length}`);
-    }
-    return values;
-  }
-
-  flags(key: string, length: number): boolean[] {
-    return this.numbers(key, length).map((value, index) => {
-      if (value !== 0 && value !== 1) throw new Refusal(`${this.at(key)}[${index}] is ${value}, not 0/1`);
-      return value === 1;
-    });
-  }
-
-  /** An ascending [low, high] pair. */
-  range(key: string): [number, number] {
-    const values = this.numbers(key, 2);
-    if (values[0] > values[1]) throw new Refusal(`${this.at(key)} is inverted: ${values[0]} above ${values[1]}`);
-    return [values[0], values[1]];
-  }
-
-  nullableRange(key: string): [number, number] | null {
-    return this.source[key] === null ? null : this.range(key);
-  }
-
-  strings(key: string): string[] {
-    const value = this.source[key];
-    if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && item.length > 0)) {
-      throw new Refusal(`${this.at(key)} is missing or not a list of names`);
-    }
-    return value as string[];
-  }
-
-  list(key: string): unknown[] {
-    const value = this.source[key];
-    if (!Array.isArray(value)) throw new Refusal(`${this.at(key)} is missing or not a list`);
-    return value;
-  }
-}
-
 function parsePlanLine(reader: Reader, key: string, minimum: number): TrainingPlanLine {
   const line = reader.child(key);
   const eM = line.numbers("eM");
@@ -653,58 +509,34 @@ function parsePlanLine(reader: Reader, key: string, minimum: number): TrainingPl
 
 // ── the index ────────────────────────────────────────────────────────────────
 
-function parseSetEntry(raw: unknown, position: number): TrainingSetEntry {
-  const id = isRecord(raw) && str(raw, "id") ? (raw.id as string) : `sets[${position}]`;
-  const entry = Reader.of(raw, `set ${id}`);
-  const kind = entry.string("kind");
-  if (!(TRAINING_SET_KINDS as readonly string[]).includes(kind)) {
-    entry.fail(`kind is ${JSON.stringify(kind)}, expected one of ${TRAINING_SET_KINDS.join(", ")}`);
-  }
-  const flights = entry.number("flights");
-  if (!Number.isInteger(flights) || flights < 0) entry.fail(`flights is ${flights}, not a count`);
-  const cohort = entry.child("cohort");
-  const perStratum = cohort.number("perStratum");
-  if (!Number.isInteger(perStratum) || perStratum <= 0) cohort.fail(`perStratum is ${perStratum}, not a positive count`);
+function parseCohort(cohort: Reader): TrainingCohort {
+  return {
+    split: cohort.string("split"), perStratum: cohort.count("perStratum", 1), seed: cohort.number("seed"),
+    drawnFrom: cohort.string("drawnFrom"),
+  };
+}
+
+function parseSetEntry(entry: Reader): TrainingSetEntry {
   return {
     id: entry.string("id"),
-    kind: kind as TrainingSetKind,
+    kind: entry.oneOf("kind", TRAINING_SET_KINDS),
     title: entry.string("title"),
     file: entry.string("file"),
     vocabularySha256: entry.string("vocabularySha256"),
     runwaySha256: entry.string("runwaySha256"),
     readingRule: entry.string("readingRule"),
-    flights,
-    cohort: {
-      split: cohort.string("split"),
-      perStratum,
-      seed: cohort.number("seed"),
-      drawnFrom: cohort.string("drawnFrom"),
-    },
+    flights: entry.count("flights"),
+    cohort: parseCohort(entry.child("cohort")),
   };
 }
 
 /** Parse the manifest. A bad entry is rejected on its own; only a manifest that is not a
  *  manifest at all fails the whole call. */
 export function parseTrainingIndex(raw: unknown): Parsed<TrainingIndex> {
-  if (!isRecord(raw)) return { ok: false, problem: "the manifest is not an object" };
-  if (raw.schema !== TRAINING_INDEX_SCHEMA) {
-    return { ok: false, problem: `schema is ${JSON.stringify(raw.schema)}, expected ${JSON.stringify(TRAINING_INDEX_SCHEMA)}` };
-  }
-  const airport = str(raw, "airport");
-  if (airport === null) return { ok: false, problem: "airport is missing" };
-  if (!Array.isArray(raw.sets)) return { ok: false, problem: "sets is not an array" };
-  const sets: TrainingSetEntry[] = [];
-  const rejected: Array<{ id: string; problem: string }> = [];
-  raw.sets.forEach((item, position) => {
-    try {
-      sets.push(parseSetEntry(item, position));
-    } catch (error) {
-      if (!(error instanceof Refusal)) throw error;
-      const id = isRecord(item) && str(item, "id") ? (item.id as string) : `sets[${position}]`;
-      rejected.push({ id, problem: error.message });
-    }
-  });
-  return { ok: true, value: { airport, sets, rejected } };
+  const manifest = parseManifest(raw, { name: "manifest", schema: TRAINING_INDEX_SCHEMA, listKey: "sets", entryName: "set" },
+    parseSetEntry);
+  if (!manifest.ok) return manifest;
+  return { ok: true, value: { airport: manifest.value.airport, sets: manifest.value.entries, rejected: manifest.value.rejected } };
 }
 
 /**
@@ -725,7 +557,8 @@ export function trainingSetRefusal(entry: TrainingSetEntry): string | null {
     );
   }
   if (entry.kind !== TRAINING_READABLE_SET_KIND) {
-    return `a ${entry.kind} set: no prior is trained on ${TRAINING_READING_RULE} yet, so this reader has no contract for its words`;
+    return `a ${entry.kind} set: this reader opens only ${TRAINING_READABLE_SET_KIND} sets (the prior is drawn over one, ` +
+      "as an overlay)";
   }
   return null;
 }
@@ -741,10 +574,7 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
   if (sha !== TRAINING_SPEC_SHA256) {
     reader.fail(`specSha256 is ${sha.slice(0, 12)}, and this reader is written for spec ${TRAINING_SPEC_SHA256.slice(0, 12)}`);
   }
-  const columns = reader.strings("columns");
-  if (columns.join(",") !== TRAINING_COLUMNS.join(",")) {
-    reader.fail(`columns are [${columns.join(", ")}], expected [${TRAINING_COLUMNS.join(", ")}] in that order`);
-  }
+  reader.sameNames("columns", TRAINING_COLUMNS);
   if (reader.number("unchanged") !== TRAINING_UNCHANGED) {
     reader.fail(`unchanged is ${reader.raw("unchanged")}, expected ${TRAINING_UNCHANGED}`);
   }
@@ -760,8 +590,7 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
   const headingTargetsDeg = reader.numbers("headingTargetsDeg");
   const altitudeTargetsM = reader.numbers("altitudeTargetsM");
   const speedTargetsMps = reader.numbers("speedTargetsMps");
-  const angleClasses = reader.list("angleClasses").map((item, index) => {
-    const angle = Reader.of(item, reader.at(`angleClasses[${index}]`));
+  const angleClasses = reader.children("angleClasses").map((angle, index) => {
     if (angle.number("value") !== index) angle.fail(`value is ${angle.raw("value")}, expected ${index}: the table is in class order`);
     return {
       value: index, name: angle.string("name"), nominalDeg: angle.number("nominalDeg"),
@@ -834,8 +663,7 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
 }
 
 function parseCandidates(reader: Reader, vocabulary: TrainingVocabulary): TrainingCandidate[] {
-  const candidates = reader.list("candidates").map((item, index) => {
-    const candidate = Reader.of(item, reader.at(`candidates[${index}]`));
+  const candidates = reader.children("candidates").map((candidate, index) => {
     if (candidate.number("index") !== index) candidate.fail(`index is ${candidate.raw("index")}, expected ${index}`);
     // A parallel runway can only tighten the landing's limit, never loosen it.
     const landingCrossLimitM = candidate.number("landingCrossLimitM");
@@ -911,18 +739,13 @@ function parseSignals(reader: Reader, rows: number, stepS: number): TrainingSign
 function parseWords(
   reader: Reader, rows: number, counts: number[],
 ): { events: TrainingWordEvent[]; inForce: number[][] } {
-  const events = reader.list("events").map((item, index) => {
-    const event = Reader.of(item, reader.at(`events[${index}]`));
+  const events = reader.children("events").map((event) => {
     const column = event.integer("column", 0, TRAINING_COLUMNS.length - 1);
-    const kind = event.string("kind");
-    if (!(TRAINING_WORD_KINDS as readonly string[]).includes(kind)) {
-      event.fail(`kind is ${kind}, not one of the labeller's ${TRAINING_WORD_KINDS.join(", ")}`);
-    }
     return {
       row: event.integer("row", 0, rows - 1),
       column,
       value: event.integer("value", 0, counts[column] - 1),
-      kind: kind as TrainingWordKind,
+      kind: event.oneOf("kind", TRAINING_WORD_KINDS),
     };
   });
   events.forEach((event, index) => {
@@ -940,11 +763,10 @@ function parseWords(
   const inForce = reader.list("inForce");
   if (inForce.length !== TRAINING_COLUMNS.length) reader.fail(`inForce has ${inForce.length} columns, expected ${TRAINING_COLUMNS.length}`);
   const table = inForce.map((values, column) => {
-    const parsed = numberArray(values);
-    if (parsed === null || parsed.length !== rows) {
-      reader.fail(`inForce.${TRAINING_COLUMNS[column]} is not ${rows} numbers, one per step`);
+    if (!Array.isArray(values) || values.length !== rows || !values.every((value) => Number.isInteger(value))) {
+      reader.fail(`inForce.${TRAINING_COLUMNS[column]} is not ${rows} whole numbers, one per step`);
     }
-    return parsed;
+    return values as number[];
   });
   // The per-row table is the events filled forward — two spellings of one sentence.
   TRAINING_COLUMNS.forEach((name, column) => {
@@ -974,22 +796,32 @@ function matchWord(item: Reader, event: TrainingWordEvent | undefined, index: nu
 }
 
 /**
+ * Where a heading band's rows end: EXACTLY at ``stop`` — the sample's own words, whose stop the reader knows (the next
+ * heading word's row plus the lead, never past the clearance: `envelope.heading_word_rows`) — or BY it: a band the
+ * executor's judge drew on flown rows, which end where its own clearance, capture or track do.
+ */
+export type TrainingBandStop = { exactly: number } | { by: number };
+
+/**
  * What is wrong with a heading word's band by the bookkeeping alone, or null: its first row is the word's own plus the
- * lead, its rows run forward and end by ``lastStop`` (the next word's first row, or the clearance) — or it has none
- * when the lead carries it there — one verdict per row, and the band is the word's target ± the vocabulary's
- * tolerance on some branch. Which rows it ends at is the exporter's (`envelope.heading_word_rows`), not recomputed
- * here. The executor's overlay checks its words' bands with it, against its own flown rows.
+ * lead, its rows run forward and end at (or by) its stop — or it has none when the lead carries it there — one
+ * verdict per row, and the band is the word's target ± the vocabulary's tolerance on some branch.
  */
 export function headingBandProblem(
-  band: TrainingHeadingBand, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, lastStop: number,
+  band: TrainingHeadingBand, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, stop: TrainingBandStop,
 ): string | null {
   const first = wordRow + vocabulary.headingLeadRows;
   if (band.firstRow !== first) {
     return `firstRow is ${band.firstRow}, but a word told at step ${wordRow} is judged from ${first} (the ` +
       `${vocabulary.headingLeadS} s lead)`;
   }
-  const stopMax = Math.max(band.firstRow, lastStop);
-  if (!(band.firstRow <= band.stopRow && band.stopRow <= stopMax)) return `stopRow is ${band.stopRow}, not in ${band.firstRow}…${stopMax}`;
+  if ("exactly" in stop) {
+    const expected = Math.max(first, stop.exactly);
+    if (band.stopRow !== expected) return `stopRow is ${band.stopRow}, but this word's rows end at ${expected}`;
+  } else {
+    const stopMax = Math.max(first, stop.by);
+    if (!(band.firstRow <= band.stopRow && band.stopRow <= stopMax)) return `stopRow is ${band.stopRow}, not in ${band.firstRow}…${stopMax}`;
+  }
   if (band.inside.length !== band.stopRow - band.firstRow) {
     return `inside holds ${band.inside.length} verdicts for the ${band.stopRow - band.firstRow} rows judged`;
   }
@@ -1006,27 +838,30 @@ export function headingBandProblem(
 }
 
 /**
- * The rows a band judged outside, as inclusive [first, last] row spans to DRAW on a line of rows `0..lastRow`: each
- * run of rows outside on to the next row, so that one row outside is a segment (back to the row before it at the
- * line's end). One rule for the read-back window and the 3D scene; the verdicts are the band's own.
+ * The rows judged outside, as inclusive [first, last] row spans to DRAW on a line of rows `0..lastRow`: ``inside``
+ * holds one verdict per row from ``firstRow``, and each run of rows outside is carried on to the next row, so that one
+ * row outside is a segment (back to the row before it at the line's end) — never a single point, which draws nothing.
+ * One rule for every verdict drawn red — a heading band's rows, a tube's, a speed band's — in the read-back window and
+ * the 3D scene alike; the verdicts are the file's own.
  */
-export function trainingBandOutsideSpans(band: TrainingHeadingBand, lastRow: number): Array<[number, number]> {
+export function outsideSpans(inside: boolean[], firstRow: number, lastRow: number): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
   let start: number | null = null;
-  band.inside.forEach((ok, offset) => {
+  inside.forEach((ok, offset) => {
     if (!ok && start === null) start = offset;
-    const closes = start !== null && (ok || offset === band.inside.length - 1);
+    const closes = start !== null && (ok || offset === inside.length - 1);
     if (!closes) return;
-    const first = band.firstRow + start!;
-    const last = Math.min(band.firstRow + (ok ? offset - 1 : offset) + 1, lastRow);
+    const first = firstRow + start!;
+    const last = Math.min(firstRow + (ok ? offset - 1 : offset) + 1, lastRow);
     spans.push(last > first ? [first, last] : [Math.max(first - 1, 0), first]);
     start = null;
   });
   return spans.filter(([first, last]) => last > first);
 }
 
-function readHeadingBand(
-  item: Reader, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, lastStop: number,
+/** A heading word's band as a file writes it, checked by `headingBandProblem`. */
+export function readHeadingBand(
+  item: Reader, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, stop: TrainingBandStop,
 ): TrainingHeadingBand {
   const firstRow = item.integer("firstRow", 0, Number.MAX_SAFE_INTEGER);
   const stopRow = item.integer("stopRow", firstRow, Number.MAX_SAFE_INTEGER);
@@ -1034,27 +869,26 @@ function readHeadingBand(
     firstRow, stopRow, targetOnTrackDeg: item.number("targetOnTrackDeg"), bandDeg: item.range("bandDeg"),
     inside: item.flags("inside", stopRow - firstRow),
   };
-  const problem = headingBandProblem(band, wordRow, targetDeg, vocabulary, lastStop);
+  const problem = headingBandProblem(band, wordRow, targetDeg, vocabulary, stop);
   if (problem !== null) item.fail(problem);
   return band;
 }
 
 function parseHeading(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, joinRow: number) {
   const words = eventsOf(events, "heading");
-  const list = reader.list("heading");
+  const list = reader.children("heading");
   if (list.length !== words.length) reader.fail(`heading holds ${list.length} envelopes for ${words.length} heading words`);
-  return list.map((raw, index): TrainingHeadingEnvelope => {
-    const item = Reader.of(raw, reader.at(`heading[${index}]`));
+  return list.map((item, index): TrainingHeadingEnvelope => {
     matchWord(item, words[index], index, "heading");
     const word = words[index];
     const targetDeg = item.number("targetDeg");
     if (targetDeg !== vocabulary.headingTargetsDeg[word.value]) {
       item.fail(`targetDeg is ${targetDeg}, but word ${word.value} is ${vocabulary.headingTargetsDeg[word.value]}°`);
     }
-    // A word's rows end by the next word's first row, and never past the clearance.
+    // A word's rows end at the next word's first row, and never past the clearance (`envelope.heading_word_rows`).
     const next = words[index + 1];
-    const lastStop = next === undefined ? joinRow : Math.min(next.row + vocabulary.headingLeadRows, joinRow);
-    const band = readHeadingBand(item, word.row, targetDeg, vocabulary, lastStop);
+    const stop = next === undefined ? joinRow : Math.min(next.row + vocabulary.headingLeadRows, joinRow);
+    const band = readHeadingBand(item, word.row, targetDeg, vocabulary, { exactly: stop });
     // THE CHECK counts exactly the drawn rows and their verdicts.
     const check = item.child("check");
     const rows = check.integer("rows", band.stopRow - band.firstRow, band.stopRow - band.firstRow);
@@ -1116,10 +950,9 @@ function parseApproach(reader: Reader, flight: { rows: number; captureRow: numbe
 
 function parseAltitude(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, rows: number) {
   const words = eventsOf(events, "altitude");
-  const list = reader.list("altitude");
+  const list = reader.children("altitude");
   if (list.length !== words.length) reader.fail(`altitude holds ${list.length} tubes for ${words.length} altitude words`);
-  return list.map((raw, index): TrainingAltitudeTube => {
-    const item = Reader.of(raw, reader.at(`altitude[${index}]`));
+  return list.map((item, index): TrainingAltitudeTube => {
     matchWord(item, words[index], index, "altitude");
     const endRow = index + 1 < words.length ? words[index + 1].row : rows;
     if (item.number("endRow") !== endRow) item.fail(`endRow is ${item.raw("endRow")}, but the next altitude word opens at ${endRow}`);
@@ -1153,10 +986,9 @@ function parseAltitude(reader: Reader, events: TrainingWordEvent[], vocabulary: 
 
 function parseAngle(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary) {
   const words = eventsOf(events, "angle");
-  const list = reader.list("angle");
+  const list = reader.children("angle");
   if (list.length !== words.length) reader.fail(`angle holds ${list.length} entries for ${words.length} angle words`);
-  return list.map((raw, index): TrainingAngleWord => {
-    const item = Reader.of(raw, reader.at(`angle[${index}]`));
+  return list.map((item, index): TrainingAngleWord => {
     matchWord(item, words[index], index, "angle");
     const measuredDeg = item.nullableNumber("measuredDeg");
     if ((measuredDeg === null) !== (words[index].value === vocabulary.angleLevelValue)) {
@@ -1168,10 +1000,9 @@ function parseAngle(reader: Reader, events: TrainingWordEvent[], vocabulary: Tra
 
 function parseSpeed(reader: Reader, events: TrainingWordEvent[], vocabulary: TrainingVocabulary, rows: number) {
   const words = eventsOf(events, "speed");
-  const list = reader.list("speed");
+  const list = reader.children("speed");
   if (list.length !== words.length) reader.fail(`speed holds ${list.length} spans for ${words.length} speed words`);
-  return list.map((raw, index): TrainingSpeedSpan => {
-    const item = Reader.of(raw, reader.at(`speed[${index}]`));
+  return list.map((item, index): TrainingSpeedSpan => {
     matchWord(item, words[index], index, "speed");
     const row = words[index].row;
     const endRow = index + 1 < words.length ? words[index + 1].row : rows;
@@ -1185,9 +1016,13 @@ function parseSpeed(reader: Reader, events: TrainingWordEvent[], vocabulary: Tra
       for (const key of ["arrivalRow", "transitionLowerMps", "transitionUpperMps", "bandMps", "bandInside", "check"]) {
         if (item.raw(key) !== null) item.fail(`${key} is given for "unspecified", which has only the range`);
       }
+      const rangeMps = item.range("rangeMps");
+      if (rangeMps.some((bound, end) => Math.abs(bound - vocabulary.speedRangeMps[end]) > 1e-3)) {
+        item.fail(`rangeMps is [${rangeMps.join(", ")}], not the vocabulary's speed range [${vocabulary.speedRangeMps.join(", ")}]`);
+      }
       return {
         row, endRow, value, kind: words[index].kind, targetMps: null, arrivalRow: null, transitionLowerMps: null,
-        transitionUpperMps: null, bandMps: null, bandInside: null, check: null, rangeMps: item.range("rangeMps"),
+        transitionUpperMps: null, bandMps: null, bandInside: null, check: null, rangeMps,
       };
     }
     if (item.raw("rangeMps") !== null) item.fail("rangeMps is given for a target, which has a band instead");
@@ -1222,19 +1057,14 @@ function parseSpeed(reader: Reader, events: TrainingWordEvent[], vocabulary: Tra
   });
 }
 
-function parseFlight(
-  raw: unknown, position: number, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[],
-): TrainingFlight {
-  const key = isRecord(raw) && str(raw, "flightKey") ? (raw.flightKey as string) : `flights[${position}]`;
-  const flight = Reader.of(raw, `flight ${key}`);
+function parseFlight(flight: Reader, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[]): TrainingFlight {
   const rows = flight.count("rows", 2);
   const runwayIndex = flight.integer("runwayIndex", 0, candidates.length - 1);
   const runway = flight.string("runway");
   if (runway !== candidates[runwayIndex].ident) {
     flight.fail(`runway is ${runway}, but candidate ${runwayIndex} is ${candidates[runwayIndex].ident}`);
   }
-  const stratum = flight.string("stratum");
-  if (!(TRAINING_STRATA as readonly string[]).includes(stratum)) flight.fail(`stratum is ${stratum}, not one of ${TRAINING_STRATA.join(", ")}`);
+  const stratum = flight.oneOf("stratum", TRAINING_STRATA);
   const counts = TRAINING_COLUMNS.map((column) => trainingClassCount(vocabulary, candidates, column));
   const words = parseWords(flight.child("words"), rows, counts);
   const pointer = words.events.find((event) => event.row === 0 && event.column === TRAINING_COLUMN_INDEX.runway)!;
@@ -1261,7 +1091,7 @@ function parseFlight(
     typecode: flight.nullableString("typecode"),
     runway,
     runwayIndex,
-    stratum: stratum as TrainingStratum,
+    stratum,
     rows,
     captureRow,
     joinRow,
@@ -1282,42 +1112,41 @@ function parseFlight(
 /** Parse one sample set — all or nothing: a flight the reader cannot trust would be drawn
  *  beside real ones with no way to tell. */
 export function parseTrainingSample(raw: unknown): Parsed<TrainingSample> {
-  if (!isRecord(raw)) return { ok: false, problem: "the sample is not an object" };
-  if (raw.schema !== TRAINING_SAMPLE_SCHEMA) {
-    return {
-      ok: false,
-      problem: `schema is ${JSON.stringify(raw.schema)}, expected ${JSON.stringify(TRAINING_SAMPLE_SCHEMA)} — a sample of another format is not read: re-export the set`,
-    };
-  }
-  try {
-    const sample = new Reader(raw, "sample");
+  return attempt(() => {
+    const sample = Reader.of(raw, "sample");
+    if (sample.raw("schema") !== TRAINING_SAMPLE_SCHEMA) {
+      sample.fail(`schema is ${JSON.stringify(sample.raw("schema"))}, expected ${JSON.stringify(TRAINING_SAMPLE_SCHEMA)} — ` +
+        "a sample of another format is not read: re-export the set");
+    }
     const vocabulary = parseVocabulary(sample.child("vocabulary"));
     const candidates = parseCandidates(sample, vocabulary);
+    const airport = sample.string("airport");
     const cohort = sample.child("cohort");
     const frame = sample.child("airportFrame");
-    const flights = sample.list("flights").map((item, position) => parseFlight(item, position, vocabulary, candidates));
+    if (frame.string("code") !== airport) frame.fail(`code is ${frame.raw("code")}, but the sample is ${airport}'s`);
+    const flights = sample.list("flights").map((item, position) => {
+      const key = Reader.of(item, `sample.flights[${position}]`).string("flightKey");
+      return parseFlight(Reader.of(item, `flight ${key}`), vocabulary, candidates);
+    });
+    // a flight is its key everywhere — the picker, the overlays, the live executor's request
+    const seen = new Set<string>();
+    for (const flight of flights) {
+      if (seen.has(flight.flightKey)) sample.fail(`flight ${flight.flightKey} is listed twice`);
+      seen.add(flight.flightKey);
+    }
     return {
-      ok: true,
-      value: {
-        setId: sample.string("setId"),
-        airport: sample.string("airport"),
-        writtenUtc: sample.string("writtenUtc"),
-        cohort: {
-          split: cohort.string("split"), perStratum: cohort.number("perStratum"), seed: cohort.number("seed"),
-          drawnFrom: cohort.string("drawnFrom"), pool: cohort.number("pool"), read: cohort.number("read"),
-        },
-        vocabulary,
-        airportFrame: { code: frame.string("code"), lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
-        candidatesSha256: sample.string("candidatesSha256"),
-        centrelineLengthM: sample.number("centrelineLengthM"),
-        candidates,
-        flights,
-      },
+      setId: sample.string("setId"),
+      airport,
+      writtenUtc: sample.string("writtenUtc"),
+      cohort: { ...parseCohort(cohort), pool: cohort.count("pool"), read: cohort.count("read") },
+      vocabulary,
+      airportFrame: { code: airport, lat: frame.number("lat"), lon: frame.number("lon"), elevationM: frame.number("elevationM") },
+      candidatesSha256: sample.string("candidatesSha256"),
+      centrelineLengthM: sample.number("centrelineLengthM"),
+      candidates,
+      flights,
     };
-  } catch (error) {
-    if (error instanceof Refusal) return { ok: false, problem: error.message };
-    throw error;
-  }
+  });
 }
 
 // ── where the files live ─────────────────────────────────────────────────────
@@ -1332,8 +1161,8 @@ export function trainingIndexPath(airportCode: string): string {
   return `${trainingDirectory(airportCode)}/index.json`;
 }
 
-/** A set's sample file. `file` is relative to the airport's Training directory. */
-export function trainingSamplePath(airportCode: string, file: string): string {
+/** A file the manifests list — a set's sample, an overlay — relative to the airport's Training directory. */
+export function trainingFilePath(airportCode: string, file: string): string {
   return `${trainingDirectory(airportCode)}/${file}`;
 }
 
@@ -1342,5 +1171,5 @@ export async function fetchTrainingIndex(airportCode: string): Promise<Parsed<Tr
 }
 
 export async function fetchTrainingSample(airportCode: string, file: string): Promise<Parsed<TrainingSample>> {
-  return parseTrainingSample(await fetchJson<unknown>(trainingSamplePath(airportCode, file)));
+  return parseTrainingSample(await fetchJson<unknown>(trainingFilePath(airportCode, file)));
 }

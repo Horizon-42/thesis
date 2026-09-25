@@ -13,7 +13,7 @@ import * as Cesium from "cesium";
 import { AppProvider, useApp } from "../../context/AppContext";
 import { parseTrainingSample } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { mockExecutorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay } from "../../data/trainingOverlays";
 import useTrainingTrackLayer, { TRAINING_ENTITY } from "../../hooks/useTrainingTrackLayer";
 import {
@@ -41,7 +41,7 @@ async function setup(position = 0, edit: (raw: any) => void = () => undefined, e
   const selection = {
     vocabulary: parsed.value.vocabulary, candidates: parsed.value.candidates, flight: parsed.value.flights[position],
   };
-  const read = parseTrainingExecutorOverlay(mockExecutorOverlay(), parsed.value);
+  const read = parseTrainingExecutorOverlay(mockExecutorOverlay(), mockOverlayEntry(EXECUTOR_ID), parsed.value);
   if (!read.ok) throw new Error(read.problem);
   const overlay = read.value;
   const entities = new Cesium.EntityCollection();

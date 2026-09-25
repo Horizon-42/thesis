@@ -41,7 +41,7 @@ export function TrainingExecutorGate({ overlay }: { overlay: TrainingExecutorOve
     <details className="training-results" aria-label="The executor's replay gate">
       <summary>The executor's {overlay.replay.split} replay gate · spec {overlay.executor.specSha256.slice(0, 12)}</summary>
       {Object.entries(overlay.gate).map(([group, places]) => {
-        const notGated = places[airport]?.all?.notGated ?? null;
+        const { notGated } = places.here.all;
         return (
           <table key={group} className="training-results-table">
             <caption>
@@ -51,9 +51,11 @@ export function TrainingExecutorGate({ overlay }: { overlay: TrainingExecutorOve
               <tr><th scope="col" /><th scope="col">flights</th><th scope="col">landed</th><th scope="col">words</th><th scope="col">eval.</th></tr>
             </thead>
             <tbody>
-              {STRATA.flatMap((stratum) => (places[airport]?.[stratum]
-                ? [<GateRow key={`${airport}-${stratum}`} name={stratum} cell={places[airport][stratum]} />] : []))}
-              {places.all?.all ? <GateRow name="all airports" cell={places.all.all} /> : null}
+              {STRATA.flatMap((stratum) => {
+                const cell = places.here[stratum];
+                return cell ? [<GateRow key={`${airport}-${stratum}`} name={stratum} cell={cell} />] : [];
+              })}
+              <GateRow name="all airports" cell={places.all.all} />
             </tbody>
           </table>
         );
@@ -62,7 +64,7 @@ export function TrainingExecutorGate({ overlay }: { overlay: TrainingExecutorOve
         landed: on the pointed runway, as the harvest and evaluation judge a landing · words: of the words the judge
         judged, those flown inside their envelopes, each envelope re-drawn from where the executor was told the word ·
         eval.: evaluation paired — of the flights whose observed track passes evaluation, the replays that pass too. Every
-        flyable {overlay.replay.split} flight was flown ({String(overlay.replay.drawn.flights ?? "?")}); the table is the
+        flyable {overlay.replay.split} flight was flown ({overlay.replay.drawn.flights.toLocaleString("en")}); the table is the
         formal replay's, written {overlay.replay.writtenUtc.slice(0, 16).replace("T", " ")} UTC.
       </p>
     </details>

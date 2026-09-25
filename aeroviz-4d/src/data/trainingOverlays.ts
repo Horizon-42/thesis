@@ -18,21 +18,25 @@
  * probability is the prior's own. The reader checks bookkeeping — lengths, ranges, the binding — and hands numbers to
  * the views.
  *
- * NO COMPATIBILITY: the three schemas are pinned below and anything else is refused by name.
+ * NO COMPATIBILITY: the three schemas are pinned below and anything else is refused by name. A payload is bound to the
+ * manifest entry that listed it (its id and set) and to the sample on screen (its set, time of writing, spec and
+ * airport), or refused whole.
  *
  * SI units only: metres, m/s, degrees, seconds.
  */
 
 import { fetchJson } from "../utils/fetchJson";
+import { asNumber, attempt, parseManifest, Reader, recordOf, type Parsed } from "./trainingReader";
 import {
-  headingBandProblem,
+  readHeadingBand,
   TRAINING_COLUMN_INDEX,
   TRAINING_COLUMNS,
   TRAINING_SPEC_SHA256,
+  TRAINING_STRATA,
   TRAINING_UNCHANGED,
   trainingClassCount,
   trainingDirectory,
-  type Parsed,
+  trainingFilePath,
   type TrainingColumn,
   type TrainingFlight,
   type TrainingHeadingBand,
@@ -125,33 +129,50 @@ export interface TrainingExecutorTrack {
   distanceM: number[];
 }
 
-export interface TrainingExecutorFlight {
+/** At the threshold: metres right of the centreline and above the threshold, and when. */
+export interface TrainingCrossing {
+  crossM: number;
+  heightM: number;
+  atS: number;
+}
+
+/** A flight of the set the replay does not fly: `group` says why. */
+export interface TrainingExecutorUnflown {
   flightKey: string;
   datasetId: string;
-  /** "own dynamics" / "stand-in dynamics", or why the replay does not fly it. */
   group: string;
-  flown: boolean;
-  outcome: string | null;
-  flewTheSentence: boolean | null;
-  endS: number | null;
-  /** At the threshold: metres right of the centreline and above the threshold, and when. */
-  crossing: { crossM: number; heightM: number; atS: number } | null;
-  /** Why the labeller's gate refused the flown track (nothing is then judged). */
+  flown: false;
+}
+
+export interface TrainingExecutorFlown {
+  flightKey: string;
+  datasetId: string;
+  /** "own dynamics" or "stand-in dynamics". */
+  group: string;
+  flown: true;
+  outcome: string;
+  flewTheSentence: boolean;
+  endS: number;
+  crossing: TrainingCrossing | null;
+  /** Why the labeller's gate refused the flown track (no word is then judged). */
   refused: string | null;
   /** The formal replay's evaluation verdicts: the flown track's and the observed one's. */
-  evaluation: { replay: string; observed: string } | null;
-  alignment: { meanHorizontalDistanceM: number; meanVerticalDistanceM: number; landingTimeMinusObservedS: number | null } | null;
-  limits: { cycles: number; bound: Record<string, number> } | null;
-  counts: { wordsJudged: number; wordsInside: number; headingWordsNotJudged: number } | null;
-  track: TrainingExecutorTrack | null;
+  evaluation: { replay: string; observed: string };
+  alignment: { meanHorizontalDistanceM: number; meanVerticalDistanceM: number; landingTimeMinusObservedS: number | null };
+  limits: { cycles: number; bound: Record<string, number> };
+  /** The judge's own counts: the words it judged, those inside (checked against the words' own verdicts). */
+  counts: { wordsJudged: number; wordsInside: number; headingWordsNotJudged: number };
+  track: TrainingExecutorTrack;
   /** The flown track as the judge read it — the labeller's gate: smoothed, cut at the landing — every sentence step
    *  from row 0 (its step k is `track.tS[k]`, checked), on the same branch as `track.trackDeg`; null when the gate
-   *  refused it, and for a dynamics failure (its judge read the failed state, which `track` leaves out: its words keep
-   *  their statuses and checks, and draw no band). */
+   *  refused it, and for a dynamics failure (the exporter draws no band there: its words keep their statuses and
+   *  checks). */
   judgedTrackDeg: number[] | null;
-  /** One per word of the base flight's sentence, in its event order; empty when not flown. */
+  /** One per word of the base flight's sentence, in its event order. */
   words: TrainingExecutorWord[];
 }
+
+export type TrainingExecutorFlight = TrainingExecutorUnflown | TrainingExecutorFlown;
 
 export interface TrainingGateCell {
   flights: number;
@@ -167,15 +188,19 @@ export interface TrainingGateCell {
   outcomes: Record<string, number>;
 }
 
-/** group → place (the airport, or "all") → stratum ("straight-in", "vectored", "all"). */
-export type TrainingGateTable = Record<string, Record<string, Record<string, TrainingGateCell>>>;
+/** One group's cells per stratum ("straight-in", "vectored" — each when the group has such flights — and "all"). */
+export type TrainingGateStrata = Partial<Record<(typeof TRAINING_STRATA)[number], TrainingGateCell>> & { all: TrainingGateCell };
+
+/** group → place → its strata: at the overlay's airport (`here`) and at all airports (`all`). */
+export type TrainingGateTable = Record<string, { here: TrainingGateStrata; all: TrainingGateStrata }>;
 
 export interface TrainingExecutorOverlay {
   overlayId: string;
   airport: string;
   base: TrainingOverlayBase;
   executor: { specSha256: string; wordClock: string; cycleS: number; params: Array<{ name: string; value: number | string }> };
-  replay: { split: string; writtenUtc: string; gateShare: number; drawn: Record<string, unknown> };
+  /** `drawn`: how many flights the formal replay drew (every flyable one of its split). */
+  replay: { split: string; writtenUtc: string; gateShare: number; drawn: { flights: number } };
   gate: TrainingGateTable;
   /** The base set's flights, in its order. */
   flights: TrainingExecutorFlight[];
@@ -213,9 +238,11 @@ export interface TrainingPriorColumnReadout {
   changeSteps: number;
   /** The first predicted step's word: how often the prior's most likely one is the truth's. */
   firstStepTop1: number;
-  /** After the first predicted step, where the truth says a word; null for a column that never changes there. */
+  /** After the first predicted step, where the truth says a word; null exactly for a column that never changes there
+   *  (`changeSteps` 0). */
   changeProbabilityWhereChanged: number | null;
   top1GivenChange: number | null;
+  /** MIRROR of `prior.readout.TOP_K` (5): the truth among the prior's five most likely words. */
   top5GivenChange: number | null;
   falseChangeShareWhereKept: number;
 }
@@ -266,25 +293,38 @@ export interface TrainingPriorView {
 
 /** The executor's verdict on the word at (row, column) of the sentence, if the flight was flown. */
 export function executorWordAt(flight: TrainingExecutorFlight, row: number, column: TrainingColumn): TrainingExecutorWord | null {
-  const index = TRAINING_COLUMNS.indexOf(column);
+  if (!flight.flown) return null;
+  const index = TRAINING_COLUMN_INDEX[column];
   return flight.words.find((word) => word.row === row && word.column === index) ?? null;
 }
 
-/** What the prior gives one column at one step: a word's probability, the ranked words, the truth's probability;
- *  null at a step before the first predicted one (observed only). */
-export function priorStep(flight: TrainingPriorFlight, column: TrainingColumn, row: number) {
-  if (row < flight.firstPredictedRow) return null;
-  const at = row - flight.firstPredictedRow;
-  const values = flight.columns[TRAINING_COLUMNS.indexOf(column)];
+/** The value the truth sentence gives a column at a step: its word, or `TRAINING_UNCHANGED`. */
+export function truthAt(flight: TrainingFlight, column: TrainingColumn, row: number): number {
+  const index = TRAINING_COLUMN_INDEX[column];
+  return flight.words.events.find((event) => event.row === row && event.column === index)?.value ?? TRAINING_UNCHANGED;
+}
+
+/** What the prior's `truthP` is the probability of at a predicted step: at the FIRST predicted step, which says every
+ *  column, the word in force there; after it, what the truth sentence says (a word, or `TRAINING_UNCHANGED`). */
+export function priorTruthAt(flight: TrainingFlight, predicted: TrainingPriorFlight, column: TrainingColumn, row: number): number {
+  return row === predicted.firstPredictedRow ? flight.words.inForce[TRAINING_COLUMN_INDEX[column]][row] : truthAt(flight, column, row);
+}
+
+/** What the prior gives one column at one step: a word's probability, the ranked words, the truth (`priorTruthAt`) and
+ *  its probability; null at a step before the first predicted one (observed only). */
+export function priorStep(flight: TrainingFlight, predicted: TrainingPriorFlight, column: TrainingColumn, row: number) {
+  if (row < predicted.firstPredictedRow) return null;
+  const at = row - predicted.firstPredictedRow;
+  const values = predicted.columns[TRAINING_COLUMN_INDEX[column]];
   const ranked = Array.from({ length: values.k }, (_, rank) => ({
     value: values.words[at * values.k + rank],
     p: values.wordsP[at * values.k + rank],
   }));
-  return { changeP: values.changeP[at], truthP: values.truthP[at], ranked };
+  return { changeP: values.changeP[at], truth: priorTruthAt(flight, predicted, column, row), truthP: values.truthP[at], ranked };
 }
 
 /** The flight's words the executor judged, and how many of them it flew inside their envelopes. */
-export function executorWordCounts(flight: TrainingExecutorFlight) {
+export function executorWordCounts(flight: TrainingExecutorFlown) {
   const statuses = flight.words.map((word) => word.status);
   return {
     inside: statuses.filter((status) => status === "inside").length,
@@ -295,183 +335,26 @@ export function executorWordCounts(flight: TrainingExecutorFlight) {
   };
 }
 
-// ── small checkers ───────────────────────────────────────────────────────────
-
-/** A field refused by name: the readers below (and `trainingAutopilot.ts`) throw it, `attempt` turns it into a problem. */
-export class Refusal extends Error {}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Reads one object, naming the path of every field it refuses. */
-export class Reader {
-  constructor(private readonly source: Record<string, unknown>, readonly where: string) {}
-
-  static of(value: unknown, where: string): Reader {
-    if (!isRecord(value)) throw new Refusal(`${where} is not an object`);
-    return new Reader(value, where);
-  }
-
-  fail(message: string): never {
-    throw new Refusal(`${this.where}: ${message}`);
-  }
-
-  at(key: string): string {
-    return `${this.where}.${key}`;
-  }
-
-  raw(key: string): unknown {
-    return this.source[key];
-  }
-
-  child(key: string): Reader {
-    return Reader.of(this.source[key], this.at(key));
-  }
-
-  nullableChild(key: string): Reader | null {
-    return this.source[key] === null ? null : this.child(key);
-  }
-
-  string(key: string): string {
-    const value = this.source[key];
-    if (typeof value !== "string" || value.length === 0) this.fail(`${key} is ${JSON.stringify(value)}, not a non-empty string`);
-    return value;
-  }
-
-  nullableString(key: string): string | null {
-    return this.source[key] === null ? null : this.string(key);
-  }
-
-  number(key: string): number {
-    const value = this.source[key];
-    if (typeof value !== "number" || !Number.isFinite(value)) this.fail(`${key} is ${JSON.stringify(value)}, not a number`);
-    return value;
-  }
-
-  nullableNumber(key: string): number | null {
-    return this.source[key] === null ? null : this.number(key);
-  }
-
-  integer(key: string, low: number, high: number): number {
-    const value = this.number(key);
-    if (!Number.isInteger(value) || value < low || value > high) this.fail(`${key} is ${value}, not a whole number in ${low}…${high}`);
-    return value;
-  }
-
-  nullableInteger(key: string, low: number, high: number): number | null {
-    return this.source[key] === null ? null : this.integer(key, low, high);
-  }
-
-  boolean(key: string): boolean {
-    const value = this.source[key];
-    if (typeof value !== "boolean") this.fail(`${key} is ${JSON.stringify(value)}, not true/false`);
-    return value;
-  }
-
-  nullableBoolean(key: string): boolean | null {
-    return this.source[key] === null ? null : this.boolean(key);
-  }
-
-  numbers(key: string, length?: number): number[] {
-    const value = this.source[key];
-    if (!Array.isArray(value) || !value.every((item) => typeof item === "number" && Number.isFinite(item))) {
-      this.fail(`${key} is missing or not a list of numbers`);
-    }
-    if (length !== undefined && value.length !== length) this.fail(`${key} has ${value.length} values, expected ${length}`);
-    return value as number[];
-  }
-
-  nullableNumbers(key: string): number[] | null {
-    return this.source[key] === null ? null : this.numbers(key);
-  }
-
-  flags(key: string, length: number): boolean[] {
-    return this.numbers(key, length).map((value, index) => {
-      if (value !== 0 && value !== 1) this.fail(`${key}[${index}] is ${value}, not 0/1`);
-      return value === 1;
-    });
-  }
-
-  /** Probabilities: numbers in [0, 1]. */
-  probabilities(key: string, length: number): number[] {
-    const values = this.numbers(key, length);
-    const outside = values.findIndex((value) => value < 0 || value > 1);
-    if (outside >= 0) this.fail(`${key}[${outside}] is ${values[outside]}, not a probability`);
-    return values;
-  }
-
-  list(key: string): unknown[] {
-    const value = this.source[key];
-    if (!Array.isArray(value)) this.fail(`${key} is missing or not a list`);
-    return value;
-  }
-
-  record<T>(key: string, read: (value: unknown, where: string) => T): Record<string, T> {
-    return recordOf(this.source[key], this.at(key), read);
-  }
-}
-
-/** An object whose every value is read by ``read``, keyed as it is. */
-function recordOf<T>(value: unknown, where: string, read: (value: unknown, where: string) => T): Record<string, T> {
-  if (!isRecord(value)) throw new Refusal(`${where} is not an object`);
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, read(item, `${where}.${key}`)]));
-}
-
-export function asNumber(value: unknown, where: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) throw new Refusal(`${where} is ${JSON.stringify(value)}, not a number`);
-  return value;
-}
-
-export function attempt<T>(read: () => T): Parsed<T> {
-  try {
-    return { ok: true, value: read() };
-  } catch (error) {
-    if (error instanceof Refusal) return { ok: false, problem: error.message };
-    throw error;
-  }
-}
-
 // ── the manifest ─────────────────────────────────────────────────────────────
 
-function parseEntry(raw: unknown, position: number): TrainingOverlayEntry {
-  const id = isRecord(raw) && typeof raw.id === "string" && raw.id ? raw.id : `overlays[${position}]`;
-  const entry = Reader.of(raw, `overlay ${id}`);
-  const kind = entry.string("kind");
-  if (!(TRAINING_OVERLAY_KINDS as readonly string[]).includes(kind)) {
-    entry.fail(`kind is ${JSON.stringify(kind)}, expected one of ${TRAINING_OVERLAY_KINDS.join(", ")}`);
-  }
+function parseEntry(entry: Reader): TrainingOverlayEntry {
   return {
     id: entry.string("id"),
-    kind: kind as TrainingOverlayKind,
+    kind: entry.oneOf("kind", TRAINING_OVERLAY_KINDS),
     base: entry.string("base"),
     baseSampleSha256: entry.string("baseSampleSha256"),
     title: entry.string("title"),
     file: entry.string("file"),
-    flights: entry.integer("flights", 0, Number.MAX_SAFE_INTEGER),
+    flights: entry.count("flights"),
   };
 }
 
 /** Parse the overlays manifest. A bad entry is rejected on its own; only a manifest that is not one fails the call. */
 export function parseTrainingOverlays(raw: unknown): Parsed<TrainingOverlays> {
-  if (!isRecord(raw)) return { ok: false, problem: "the overlays manifest is not an object" };
-  if (raw.schema !== TRAINING_OVERLAYS_SCHEMA) {
-    return { ok: false, problem: `schema is ${JSON.stringify(raw.schema)}, expected ${JSON.stringify(TRAINING_OVERLAYS_SCHEMA)}` };
-  }
-  if (typeof raw.airport !== "string" || !raw.airport) return { ok: false, problem: "airport is missing" };
-  if (!Array.isArray(raw.overlays)) return { ok: false, problem: "overlays is not an array" };
-  const overlays: TrainingOverlayEntry[] = [];
-  const rejected: Array<{ id: string; problem: string }> = [];
-  raw.overlays.forEach((item, position) => {
-    try {
-      overlays.push(parseEntry(item, position));
-    } catch (error) {
-      if (!(error instanceof Refusal)) throw error;
-      const id = isRecord(item) && typeof item.id === "string" && item.id ? item.id : `overlays[${position}]`;
-      rejected.push({ id, problem: error.message });
-    }
-  });
-  return { ok: true, value: { airport: raw.airport, overlays, rejected } };
+  const manifest = parseManifest(raw,
+    { name: "overlays manifest", schema: TRAINING_OVERLAYS_SCHEMA, listKey: "overlays", entryName: "overlay" }, parseEntry);
+  if (!manifest.ok) return manifest;
+  return { ok: true, value: { airport: manifest.value.airport, overlays: manifest.value.entries, rejected: manifest.value.rejected } };
 }
 
 /** The overlays of one kind drawn over a set, in the manifest's order (the latest listed last). */
@@ -481,8 +364,12 @@ export function trainingOverlaysOf(overlays: TrainingOverlays, setId: string, ki
 
 // ── the binding ──────────────────────────────────────────────────────────────
 
-/** The payload's own account of its set, against the sample the panel loaded. */
-function parseBase(reader: Reader, sample: TrainingSample): TrainingOverlayBase {
+/** The payload's own account of itself, against the manifest entry that listed it and the sample the panel loaded. */
+function parseBase(reader: Reader, entry: TrainingOverlayEntry, sample: TrainingSample): TrainingOverlayBase {
+  const overlayId = reader.string("overlayId");
+  if (overlayId !== entry.id) reader.fail(`overlayId is ${overlayId}, but the manifest lists it as ${entry.id}`);
+  const airport = reader.string("airport");
+  if (airport !== sample.airport) reader.fail(`is drawn at ${airport}, but the loaded sample is ${sample.airport}'s`);
   const base = reader.child("base");
   const found = {
     setId: base.string("setId"),
@@ -491,6 +378,10 @@ function parseBase(reader: Reader, sample: TrainingSample): TrainingOverlayBase 
     specSha256: base.string("specSha256"),
   };
   if (found.specSha256 !== TRAINING_SPEC_SHA256) base.fail(`specSha256 is ${found.specSha256.slice(0, 12)}, not ${TRAINING_SPEC_SHA256.slice(0, 12)}`);
+  if (found.setId !== entry.base || found.sampleSha256 !== entry.baseSampleSha256) {
+    base.fail(`is set ${found.setId} (sample ${found.sampleSha256.slice(0, 12)}), but the manifest lists it over set ` +
+      `${entry.base} (sample ${entry.baseSampleSha256.slice(0, 12)})`);
+  }
   if (found.setId !== sample.setId || found.sampleWrittenUtc !== sample.writtenUtc) {
     base.fail(
       `drawn over set ${found.setId} as written ${found.sampleWrittenUtc}, but the loaded sample is ${sample.setId} as ` +
@@ -514,6 +405,53 @@ function eachFlight<T>(reader: Reader, sample: TrainingSample, read: (item: Read
   });
 }
 
+// ── what the executor's judge says of a word (the replay's and the live executor's) ──
+
+export function readCrossing(reader: Reader): TrainingCrossing {
+  return { crossM: reader.number("crossM"), heightM: reader.number("heightM"), atS: reader.number("atS") };
+}
+
+/**
+ * A word's verdict as the executor's judge gives it — one rule for the replay's words and the live executor's: a word
+ * inside or outside carries its checks and they decide it (inside exactly when every one passed); any other status
+ * says why instead; and when the labeller's gate refused the flown track (``refused``), no word is judged at all.
+ */
+export function readWordVerdict<S extends string>(word: Reader, statuses: readonly S[], refused: string | null) {
+  const status = word.oneOf("status", statuses);
+  const checks: TrainingExecutorCheck[] = word.children("checks").map((check) => ({
+    name: check.string("name"), ok: check.boolean("ok"), inside: check.nullableCount("inside"), rows: check.nullableCount("rows"),
+  }));
+  const judged = status === "inside" || status === "outside";
+  if (judged && (checks.length === 0 || (status === "inside") !== checks.every((check) => check.ok))) {
+    word.fail(`is ${status}, but its checks say ${checks.map((check) => `${check.name} ${check.ok}`).join(", ") || "nothing"}`);
+  }
+  const reason = word.nullableString("reason");
+  if (!judged && reason === null) word.fail(`is ${status} and says no reason`);
+  if (judged && refused !== null) word.fail(`is ${status}, but the gate refused the flown track (${refused}): nothing is judged`);
+  return { status, checks, reason, judged };
+}
+
+/**
+ * A heading word the judge judged on flown rows: its band (`readHeadingBand`, its rows ending BY ``stopBy`` — the
+ * judge's own clearance, capture and track end are not the reader's to know) and what the band says of its verdict:
+ * a check counts exactly its flags; a word with no row judged is not judged — or outside, when the executor left it
+ * to intercept the final on its own, which fails it whatever its rows; a word with rows judged is inside or outside.
+ */
+export function readJudgedBand(
+  word: Reader, verdict: { status: string; checks: TrainingExecutorCheck[]; judged: boolean }, flownRow: number,
+  targetDeg: number, vocabulary: TrainingVocabulary, stopBy: number,
+): TrainingHeadingBand {
+  const band = readHeadingBand(word.child("heading"), flownRow, targetDeg, vocabulary, { by: stopBy });
+  const rows = band.inside.length;
+  if (rows === 0 && verdict.status !== "not judged" && verdict.status !== "outside") word.fail(`is ${verdict.status} with no row judged`);
+  if (rows > 0 && !verdict.judged) word.fail(`is ${verdict.status}, but ${rows} of its rows were judged`);
+  const counted = band.inside.filter(Boolean).length;
+  if (rows > 0 && !verdict.checks.some((check) => check.rows === rows && check.inside === counted)) {
+    word.fail(`its band counts ${counted} of ${rows} rows inside, and no check says so`);
+  }
+  return band;
+}
+
 // ── the executor ─────────────────────────────────────────────────────────────
 
 function parseTrack(reader: Reader): TrainingExecutorTrack {
@@ -529,98 +467,45 @@ function parseTrack(reader: Reader): TrainingExecutorTrack {
   };
 }
 
-/** A heading word's band on the flown rows: its bookkeeping (`headingBandProblem`), within the rows the judge read. */
-function parseExecutorBand(
-  word: Reader, flownRow: number, targetDeg: number, vocabulary: TrainingVocabulary, judgedRows: number,
-): TrainingHeadingBand {
-  const band = word.child("heading");
-  const firstRow = band.integer("firstRow", 0, Number.MAX_SAFE_INTEGER);
-  const stopRow = band.integer("stopRow", firstRow, Number.MAX_SAFE_INTEGER);
-  const bandDeg = band.numbers("bandDeg", 2);
-  const parsed: TrainingHeadingBand = {
-    firstRow, stopRow, targetOnTrackDeg: band.number("targetOnTrackDeg"), bandDeg: [bandDeg[0], bandDeg[1]],
-    inside: band.flags("inside", stopRow - firstRow),
-  };
-  // the judge's rows end by the flown track it read, never past it
-  const problem = headingBandProblem(parsed, flownRow, targetDeg, vocabulary, judgedRows);
-  if (problem !== null) band.fail(problem);
-  return parsed;
-}
-
 function parseExecutorWords(
-  reader: Reader, flight: TrainingFlight, vocabulary: TrainingVocabulary, judgedRows: number | null,
+  reader: Reader, flight: TrainingFlight, vocabulary: TrainingVocabulary, judgedRows: number | null, refused: string | null,
 ): TrainingExecutorWord[] {
-  const list = reader.list("words");
+  const list = reader.children("words");
   const events = flight.words.events;
   if (list.length !== events.length) reader.fail(`judges ${list.length} words, the sentence says ${events.length}`);
-  return list.map((raw, index) => {
-    // typed, so that a `word.fail(...)` statement narrows what it guards
-    const word: Reader = Reader.of(raw, reader.at(`words[${index}]`));
+  return list.map((word, index) => {
     const event = events[index];
     if (word.number("row") !== event.row || word.number("column") !== event.column || word.number("value") !== event.value) {
       word.fail(`is (${word.raw("row")}, ${word.raw("column")}, ${word.raw("value")}), but the sentence's word ${index} is ` +
         `(${event.row}, ${event.column}, ${event.value})`);
     }
-    const status = word.string("status");
-    if (!(TRAINING_EXECUTOR_STATUSES as readonly string[]).includes(status)) {
-      word.fail(`status is ${status}, not one of ${TRAINING_EXECUTOR_STATUSES.join(", ")}`);
-    }
-    const checks = word.list("checks").map((check, position) => {
-      const item = Reader.of(check, word.at(`checks[${position}]`));
-      return {
-        name: item.string("name"), ok: item.boolean("ok"),
-        inside: item.nullableInteger("inside", 0, Number.MAX_SAFE_INTEGER), rows: item.nullableInteger("rows", 0, Number.MAX_SAFE_INTEGER),
-      };
-    });
-    // a judged word carries its checks and they decide it; any other status says why instead
-    const judged = status === "inside" || status === "outside";
-    if (judged && (checks.length === 0 || (status === "inside") !== checks.every((check) => check.ok))) {
-      word.fail(`is ${status}, but its checks say ${checks.map((check) => `${check.name} ${check.ok}`).join(", ") || "nothing"}`);
-    }
-    const reason = word.nullableString("reason");
-    if (!judged && reason === null) word.fail(`is ${status} and says no reason`);
-    const flownRow = word.nullableInteger("flownRow", 0, Number.MAX_SAFE_INTEGER);
+    const verdict = readWordVerdict(word, TRAINING_EXECUTOR_STATUSES, refused);
+    const flownRow = word.nullableCount("flownRow");
     // A HEADING WORD THE JUDGE JUDGED — told on a step of the flown track it read — carries its band on the flown rows,
-    // and no other word does: judged when it has rows (a check counting exactly its flags), not judged when it has none
-    // (the lead carries them past the clearance, the capture or the track's end) — unless the executor left it to
-    // intercept the final on its own, which fails it whatever its rows.
+    // and no other word does.
     const banded = event.column === TRAINING_COLUMN_INDEX.heading && flownRow !== null && judgedRows !== null
       && flownRow < judgedRows;
     if ((word.raw("heading") !== null) !== banded) {
       word.fail(banded ? "is a heading word the judge judged on the flown track, and carries no band"
         : "carries a heading band, but it is not a heading word the judge judged on a flown track");
     }
-    let heading: TrainingHeadingBand | null = null;
-    if (banded) {
-      heading = parseExecutorBand(word, flownRow!, flight.envelopes.heading.find((item) => item.row === event.row)!.targetDeg,
-        vocabulary, judgedRows!);
-      const rows = heading.inside.length;
-      const counted = heading.inside.filter(Boolean).length;
-      if (rows > 0 && !checks.some((check) => check.rows === rows && check.inside === counted)) {
-        word.fail(`its band counts ${counted} of ${rows} rows inside, and no check says so`);
-      }
-      if (rows === 0 && status !== "not judged" && status !== "outside") word.fail(`is ${status} with no row judged`);
-      if (rows > 0 && !judged) word.fail(`is ${status}, but ${rows} of its rows were judged`);
-    }
+    const heading = banded
+      ? readJudgedBand(word, verdict, flownRow!, vocabulary.headingTargetsDeg[event.value], vocabulary, judgedRows!)
+      : null;
     return {
-      row: event.row, column: event.column, value: event.value, status: status as TrainingExecutorStatus,
-      flownRow, heading, checks, reason,
+      row: event.row, column: event.column, value: event.value, status: verdict.status, flownRow, heading,
+      checks: verdict.checks, reason: verdict.reason,
     };
   });
 }
 
 function parseExecutorFlight(item: Reader, flight: TrainingFlight, vocabulary: TrainingVocabulary): TrainingExecutorFlight {
-  const flown = item.boolean("flown");
-  const base = { flightKey: flight.flightKey, datasetId: flight.datasetId, group: item.string("group"), flown };
-  if (!flown) {
-    if (item.list("words").length !== 0 || item.raw("track") !== null || item.raw("outcome") !== null
-        || item.raw("judgedTrackDeg") !== null) {
-      item.fail("is not flown, yet carries a track, an outcome or words");
-    }
-    return {
-      ...base, outcome: null, flewTheSentence: null, endS: null, crossing: null, refused: null, evaluation: null,
-      alignment: null, limits: null, counts: null, track: null, judgedTrackDeg: null, words: [],
-    };
+  const base = { flightKey: flight.flightKey, datasetId: flight.datasetId, group: item.string("group") };
+  if (!item.boolean("flown")) {
+    const carried = ["outcome", "flewTheSentence", "endS", "crossing", "refused", "evaluation", "alignment", "limits", "counts",
+      "track", "judgedTrackDeg"].filter((key) => item.raw(key) !== null);
+    if (carried.length > 0 || item.list("words").length !== 0) item.fail(`is not flown, yet carries ${carried.join(", ") || "words"}`);
+    return { ...base, flown: false };
   }
   const crossing = item.nullableChild("crossing");
   const evaluation = item.child("evaluation");
@@ -644,22 +529,26 @@ function parseExecutorFlight(item: Reader, flight: TrainingFlight, vocabulary: T
       item.fail(`judgedTrackDeg's step ${misplaced} is not the flown track's point ${misplaced} (${track.tS[misplaced]} s)`);
     }
   }
-  const words = parseExecutorWords(item, flight, vocabulary, judgedTrackDeg === null ? null : judgedTrackDeg.length);
-  const judged = words.filter((word) => word.status === "inside" || word.status === "outside").length;
-  // the judge counts the heading word left to intercept the final on its own once more when its band also had rows
-  // judged: the one word with two checks, its band's and that one
-  const twice = words.filter((word) => word.column === TRAINING_COLUMN_INDEX.heading && word.checks.length === 2).length;
-  const wordsJudged = counts.integer("wordsJudged", 0, Number.MAX_SAFE_INTEGER);
+  const words = parseExecutorWords(item, flight, vocabulary, judgedTrackDeg === null ? null : judgedTrackDeg.length, refused);
+  // The judge's counts, from the words' own verdicts. It counts the heading word left to intercept the final on its own
+  // once more when its band also had rows judged — the one word with two checks, its band's and that one — and inside
+  // once when the band's check passed.
+  const twice = words.filter((word) => word.column === TRAINING_COLUMN_INDEX.heading && word.checks.length === 2);
+  const judged = words.filter((word) => word.status === "inside" || word.status === "outside").length + twice.length;
+  const inside = words.filter((word) => word.status === "inside").length + twice.filter((word) => word.checks[0].ok).length;
+  const wordsJudged = counts.count("wordsJudged");
   const wordsInside = counts.integer("wordsInside", 0, wordsJudged);
-  if (wordsJudged !== judged + twice) {
-    counts.fail(`says ${wordsJudged} words judged, but ${judged} words carry a verdict${twice ? ` (one counted twice)` : ""}`);
+  if (wordsJudged !== judged || wordsInside !== inside) {
+    counts.fail(`says ${wordsInside} of ${wordsJudged} words inside, but the words' own verdicts give ${inside} of ${judged}` +
+      `${twice.length ? " (one counted twice)" : ""}`);
   }
   return {
     ...base,
+    flown: true,
     outcome,
     flewTheSentence: item.boolean("flewTheSentence"),
     endS: item.number("endS"),
-    crossing: crossing === null ? null : { crossM: crossing.number("crossM"), heightM: crossing.number("heightM"), atS: crossing.number("atS") },
+    crossing: crossing === null ? null : readCrossing(crossing),
     refused,
     evaluation: { replay: evaluation.string("replay"), observed: evaluation.string("observed") },
     alignment: {
@@ -667,8 +556,8 @@ function parseExecutorFlight(item: Reader, flight: TrainingFlight, vocabulary: T
       meanVerticalDistanceM: alignment.number("meanVerticalDistanceM"),
       landingTimeMinusObservedS: alignment.nullableNumber("landingTimeMinusObservedS"),
     },
-    limits: { cycles: limits.integer("cycles", 0, Number.MAX_SAFE_INTEGER), bound: limits.record("bound", asNumber) },
-    counts: { wordsJudged, wordsInside, headingWordsNotJudged: counts.integer("headingWordsNotJudged", 0, Number.MAX_SAFE_INTEGER) },
+    limits: { cycles: limits.count("cycles"), bound: limits.record("bound", asNumber) },
+    counts: { wordsJudged, wordsInside, headingWordsNotJudged: counts.count("headingWordsNotJudged") },
     track,
     judgedTrackDeg,
     words,
@@ -681,47 +570,69 @@ function parseGateCell(value: unknown, where: string): TrainingGateCell {
   const notGated = cell.nullableString("notGated");
   if ((clears === null) === (notGated === null)) cell.fail("a cell is gated (clears) or says why not (notGated), one of the two");
   return {
-    flights: cell.integer("flights", 0, Number.MAX_SAFE_INTEGER),
-    landed: cell.nullableNumber("landed"),
-    wordsJudged: cell.integer("wordsJudged", 0, Number.MAX_SAFE_INTEGER),
-    wordsInside: cell.nullableNumber("wordsInside"),
-    observedPasses: cell.integer("observedPasses", 0, Number.MAX_SAFE_INTEGER),
-    evaluationPaired: cell.nullableNumber("evaluationPaired"),
+    flights: cell.count("flights"),
+    landed: cell.nullableShare("landed"),
+    wordsJudged: cell.count("wordsJudged"),
+    wordsInside: cell.nullableShare("wordsInside"),
+    observedPasses: cell.count("observedPasses"),
+    evaluationPaired: cell.nullableShare("evaluationPaired"),
     clears: clears === null ? null : { landed: clears.boolean("landed"), words: clears.boolean("words"), evaluation: clears.boolean("evaluation") },
     notGated,
     outcomes: cell.record("outcomes", asNumber),
   };
 }
 
-/** Parse an executor overlay against the sample it is drawn over — all or nothing. */
-export function parseTrainingExecutorOverlay(raw: unknown, sample: TrainingSample): Parsed<TrainingExecutorOverlay> {
-  if (!isRecord(raw)) return { ok: false, problem: "the executor overlay is not an object" };
-  if (raw.schema !== TRAINING_EXECUTOR_SCHEMA) {
-    return { ok: false, problem: `schema is ${JSON.stringify(raw.schema)}, expected ${JSON.stringify(TRAINING_EXECUTOR_SCHEMA)}` };
-  }
+/** The formal replay's gate table: each group at the overlay's airport and at all airports, each with its "all" cell and
+ *  a cell for each stratum it has flights of. */
+function parseGate(overlay: Reader, airport: string): TrainingGateTable {
+  const strataOf = (value: unknown, where: string): TrainingGateStrata => {
+    const cells = recordOf(value, where, parseGateCell);
+    const unknown = Object.keys(cells).filter((name) => name !== "all" && !(TRAINING_STRATA as readonly string[]).includes(name));
+    if (unknown.length > 0 || cells.all === undefined) {
+      Reader.of(value, where).fail(`holds ${Object.keys(cells).join(", ")}: expected "all" and any of ${TRAINING_STRATA.join(", ")}`);
+    }
+    return cells as TrainingGateStrata;
+  };
+  return overlay.record("gate", (group, where) => {
+    const places = Reader.of(group, where);
+    const names = Object.keys(recordOf(group, where, (value) => value));
+    if (names.length !== 2 || !names.includes(airport) || !names.includes("all")) {
+      places.fail(`holds ${names.join(", ")}: expected ${airport} and all`);
+    }
+    return { here: strataOf(places.raw(airport), places.at(airport)), all: strataOf(places.raw("all"), places.at("all")) };
+  });
+}
+
+/** Parse an executor overlay against the manifest entry that listed it and the sample it is drawn over — all or
+ *  nothing. */
+export function parseTrainingExecutorOverlay(
+  raw: unknown, entry: TrainingOverlayEntry, sample: TrainingSample,
+): Parsed<TrainingExecutorOverlay> {
   return attempt(() => {
-    const overlay = new Reader(raw, "executor overlay");
+    const overlay = Reader.of(raw, "executor overlay");
+    if (overlay.raw("schema") !== TRAINING_EXECUTOR_SCHEMA) {
+      overlay.fail(`schema is ${JSON.stringify(overlay.raw("schema"))}, expected ${JSON.stringify(TRAINING_EXECUTOR_SCHEMA)}`);
+    }
+    const base = parseBase(overlay, entry, sample);
     const executor = overlay.child("executor");
     const replay = overlay.child("replay");
-    // group → place → stratum → cell
-    const gate = overlay.record("gate", (group, where) =>
-      recordOf(group, where, (place, placeWhere) => recordOf(place, placeWhere, parseGateCell)));
     return {
-      overlayId: overlay.string("overlayId"),
-      airport: overlay.string("airport"),
-      base: parseBase(overlay, sample),
+      overlayId: entry.id,
+      airport: sample.airport,
+      base,
       executor: {
         specSha256: executor.string("specSha256"), wordClock: executor.string("wordClock"), cycleS: executor.number("cycleS"),
-        params: executor.list("params").map((row, index) => {
-          const param = Reader.of(row, executor.at(`params[${index}]`));
+        params: executor.children("params").map((param) => {
           const value = param.raw("value");
           if (typeof value !== "number" && typeof value !== "string") param.fail(`value is ${JSON.stringify(value)}`);
           return { name: param.string("name"), value: value as number | string };
         }),
       },
-      replay: { split: replay.string("split"), writtenUtc: replay.string("writtenUtc"), gateShare: replay.number("gateShare"),
-                drawn: replay.record("drawn", (value) => value) },
-      gate,
+      replay: {
+        split: replay.string("split"), writtenUtc: replay.string("writtenUtc"), gateShare: replay.share("gateShare"),
+        drawn: { flights: replay.child("drawn").count("flights") },
+      },
+      gate: parseGate(overlay, sample.airport),
       flights: eachFlight(overlay, sample, (item, flight) => parseExecutorFlight(item, flight, sample.vocabulary)),
     };
   });
@@ -729,28 +640,49 @@ export function parseTrainingExecutorOverlay(raw: unknown, sample: TrainingSampl
 
 // ── the prior ────────────────────────────────────────────────────────────────
 
+/** Probabilities rounded by the exporter (`prior_training_export.PROBABILITY_DIGITS`, 4): two of them multiplied and
+ *  compared with a third agree to within this. */
+const PROBABILITY_SLACK = 2e-4;
+
 function parsePriorFlight(item: Reader, flight: TrainingFlight, sample: TrainingSample): TrainingPriorFlight {
   const rows = item.integer("rows", flight.rows, flight.rows);
   const firstPredictedRow = item.integer("firstPredictedRow", 0, rows - 1);
   const steps = rows - firstPredictedRow;
   const list = item.list("columns");
   if (list.length !== TRAINING_COLUMNS.length) item.fail(`holds ${list.length} columns, expected ${TRAINING_COLUMNS.length}`);
-  const columns = TRAINING_COLUMNS.map((name, index) => {
-    const column = Reader.of(list[index], item.at(`columns[${index}] (${name})`));
-    const values = trainingClassCount(sample.vocabulary, sample.candidates, name);
-    const k = column.integer("k", 1, values);
-    const words = column.numbers("words", steps * k);
-    const wrong = words.findIndex((value) => !Number.isInteger(value) || value < 0 || value >= values);
-    if (wrong >= 0) column.fail(`words[${wrong}] is ${words[wrong]}, not one of the column's ${values} values`);
-    return {
-      k, words, wordsP: column.probabilities("wordsP", steps * k), changeP: column.probabilities("changeP", steps),
-      truthP: column.probabilities("truthP", steps),
-    };
-  });
-  return {
+  const predicted: TrainingPriorFlight = {
     flightKey: flight.flightKey, datasetId: flight.datasetId, rows, firstPredictedRow,
-    nllPerStep: item.number("nllPerStep"), columnNllPerStep: item.numbers("columnNllPerStep", TRAINING_COLUMNS.length), columns,
+    nllPerStep: item.number("nllPerStep"), columnNllPerStep: item.numbers("columnNllPerStep", TRAINING_COLUMNS.length),
+    columns: TRAINING_COLUMNS.map((name, index) => {
+      const column = Reader.of(list[index], item.at(`columns[${index}] (${name})`));
+      const values = trainingClassCount(sample.vocabulary, sample.candidates, name);
+      const k = column.integer("k", 1, values);
+      const words = column.numbers("words", steps * k);
+      const wrong = words.findIndex((value) => !Number.isInteger(value) || value < 0 || value >= values);
+      if (wrong >= 0) column.fail(`words[${wrong}] is ${words[wrong]}, not one of the column's ${values} values`);
+      const changeP = column.probabilities("changeP", steps);
+      // the first predicted step says every column: "unchanged" is not a word there
+      if (Math.abs(changeP[0] - 1) > PROBABILITY_SLACK) column.fail(`changeP at the first predicted step is ${changeP[0]}, not 1`);
+      return { k, words, wordsP: column.probabilities("wordsP", steps * k), changeP, truthP: column.probabilities("truthP", steps) };
+    }),
   };
+  // The truth's probability is the prior's word probability times its change probability — the one rule that ties the
+  // truth the exporter scored to the one this reader shows (`priorTruthAt`): checked wherever the truth is ranked.
+  TRAINING_COLUMNS.forEach((name, index) => {
+    const values = predicted.columns[index];
+    for (let row = firstPredictedRow; row < rows; row += 1) {
+      const at = row - firstPredictedRow;
+      const truth = priorTruthAt(flight, predicted, name, row);
+      const rank = values.words.slice(at * values.k, (at + 1) * values.k).indexOf(truth);
+      const expected = truth === TRAINING_UNCHANGED ? 1 - values.changeP[at]
+        : rank >= 0 ? values.changeP[at] * values.wordsP[at * values.k + rank] : null;
+      if (expected !== null && Math.abs(values.truthP[at] - expected) > PROBABILITY_SLACK) {
+        item.fail(`columns[${index}] (${name}).truthP at step ${row} is ${values.truthP[at]}, but the prior gives the truth ` +
+          `there (${truth === TRAINING_UNCHANGED ? "unchanged" : `word ${truth}`}) ${expected.toFixed(4)}`);
+      }
+    }
+  });
+  return predicted;
 }
 
 function parseColumnScores<T>(reader: Reader, key: string, read: (value: unknown, where: string) => T, withAll: boolean) {
@@ -764,25 +696,30 @@ function parseColumnScores<T>(reader: Reader, key: string, read: (value: unknown
 function parseReadout(reader: Reader): TrainingPriorReadout {
   const model = reader.child("model");
   const baselines = reader.child("baselines");
-  const perColumn = parseColumnScores(model, "perColumn", (value, where) => {
+  const perColumn = parseColumnScores(model, "perColumn", (value, where): TrainingPriorColumnReadout => {
     const column = Reader.of(value, where);
+    const changeSteps = column.count("changeSteps");
+    const changed = {
+      changeProbabilityWhereChanged: column.nullableShare("changeProbabilityWhereChanged"),
+      top1GivenChange: column.nullableShare("top1GivenChange"), top5GivenChange: column.nullableShare("top5GivenChange"),
+    };
+    // the change metrics are counted over the steps where the truth says a word: none, when there are none
+    const absent = Object.entries(changed).filter(([, share]) => (share === null) !== (changeSteps === 0)).map(([name]) => name);
+    if (absent.length > 0) column.fail(`${absent.join(", ")} ${changeSteps === 0 ? "given" : "absent"} with ${changeSteps} change steps`);
     return {
-      nllPerStep: column.number("nllPerStep"), changeSteps: column.integer("changeSteps", 0, Number.MAX_SAFE_INTEGER),
-      firstStepTop1: column.number("firstStepTop1"),
-      changeProbabilityWhereChanged: column.nullableNumber("changeProbabilityWhereChanged"),
-      top1GivenChange: column.nullableNumber("top1GivenChange"), top5GivenChange: column.nullableNumber("top5GivenChange"),
-      falseChangeShareWhereKept: column.number("falseChangeShareWhereKept"),
+      nllPerStep: column.number("nllPerStep"), changeSteps, firstStepTop1: column.share("firstStepTop1"), ...changed,
+      falseChangeShareWhereKept: column.share("falseChangeShareWhereKept"),
     };
   }, false) as Record<TrainingColumn, TrainingPriorColumnReadout>;
   const runway = reader.child("firstStepRunway");
   const readRunway = (value: unknown, where: string): TrainingPriorRunwayReadout => {
     const part = Reader.of(value, where);
-    return { top1: part.number("top1"), direction: part.number("direction"), sideGivenDirection: part.nullableNumber("sideGivenDirection") };
+    return { top1: part.share("top1"), direction: part.share("direction"), sideGivenDirection: part.nullableShare("sideGivenDirection") };
   };
   return {
     split: reader.string("split"),
-    steps: reader.integer("steps", 1, Number.MAX_SAFE_INTEGER),
-    bestEpoch: reader.integer("bestEpoch", 1, Number.MAX_SAFE_INTEGER),
+    steps: reader.count("steps", 1),
+    bestEpoch: reader.count("bestEpoch", 1),
     model: { nllPerStep: model.number("nllPerStep"), perplexityPerStep: model.number("perplexityPerStep"), perColumn },
     baselines: {
       repeat: parseColumnScores(baselines, "repeat", asNumber, true) as Record<TrainingColumn | "all", number>,
@@ -796,27 +733,24 @@ function parseReadout(reader: Reader): TrainingPriorReadout {
   };
 }
 
-/** Parse a prior overlay against the sample it is drawn over — all or nothing. */
-export function parseTrainingPriorOverlay(raw: unknown, sample: TrainingSample): Parsed<TrainingPriorOverlay> {
-  if (!isRecord(raw)) return { ok: false, problem: "the prior overlay is not an object" };
-  if (raw.schema !== TRAINING_PRIOR_SCHEMA) {
-    return { ok: false, problem: `schema is ${JSON.stringify(raw.schema)}, expected ${JSON.stringify(TRAINING_PRIOR_SCHEMA)}` };
-  }
+/** Parse a prior overlay against the manifest entry that listed it and the sample it is drawn over — all or nothing. */
+export function parseTrainingPriorOverlay(raw: unknown, entry: TrainingOverlayEntry, sample: TrainingSample): Parsed<TrainingPriorOverlay> {
   return attempt(() => {
-    const overlay = new Reader(raw, "prior overlay");
-    const columns = overlay.list("columns");
-    if (columns.join(",") !== TRAINING_COLUMNS.join(",")) {
-      overlay.fail(`columns are [${columns.join(", ")}], expected [${TRAINING_COLUMNS.join(", ")}] in that order`);
+    const overlay = Reader.of(raw, "prior overlay");
+    if (overlay.raw("schema") !== TRAINING_PRIOR_SCHEMA) {
+      overlay.fail(`schema is ${JSON.stringify(overlay.raw("schema"))}, expected ${JSON.stringify(TRAINING_PRIOR_SCHEMA)}`);
     }
+    overlay.sameNames("columns", TRAINING_COLUMNS);
+    const base = parseBase(overlay, entry, sample);
     const prior = overlay.child("prior");
     const model = prior.child("model");
     return {
-      overlayId: overlay.string("overlayId"),
-      airport: overlay.string("airport"),
-      base: parseBase(overlay, sample),
+      overlayId: entry.id,
+      airport: sample.airport,
+      base,
       prior: {
-        checkpointSha256: prior.string("checkpointSha256"), parameters: prior.integer("parameters", 1, Number.MAX_SAFE_INTEGER),
-        model: { dModel: model.number("dModel"), layers: model.number("layers"), heads: model.number("heads") },
+        checkpointSha256: prior.string("checkpointSha256"), parameters: prior.count("parameters", 1),
+        model: { dModel: model.count("dModel", 1), layers: model.count("layers", 1), heads: model.count("heads", 1) },
         method: prior.string("method"),
       },
       readout: parseReadout(overlay.child("readout")),
@@ -825,20 +759,10 @@ export function parseTrainingPriorOverlay(raw: unknown, sample: TrainingSample):
   });
 }
 
-/** The value the truth sentence gives a column at a step: its word, or `TRAINING_UNCHANGED`. */
-export function truthAt(flight: TrainingFlight, column: TrainingColumn, row: number): number {
-  const index = TRAINING_COLUMNS.indexOf(column);
-  return flight.words.events.find((event) => event.row === row && event.column === index)?.value ?? TRAINING_UNCHANGED;
-}
-
 // ── where the files live ─────────────────────────────────────────────────────
 
 export function trainingOverlaysPath(airportCode: string): string {
   return `${trainingDirectory(airportCode)}/overlays.json`;
-}
-
-export function trainingOverlayPath(airportCode: string, file: string): string {
-  return `${trainingDirectory(airportCode)}/${file}`;
 }
 
 export async function fetchTrainingOverlays(airportCode: string): Promise<Parsed<TrainingOverlays>> {
@@ -848,11 +772,11 @@ export async function fetchTrainingOverlays(airportCode: string): Promise<Parsed
 export async function fetchTrainingExecutorOverlay(
   airportCode: string, entry: TrainingOverlayEntry, sample: TrainingSample,
 ): Promise<Parsed<TrainingExecutorOverlay>> {
-  return parseTrainingExecutorOverlay(await fetchJson<unknown>(trainingOverlayPath(airportCode, entry.file)), sample);
+  return parseTrainingExecutorOverlay(await fetchJson<unknown>(trainingFilePath(airportCode, entry.file)), entry, sample);
 }
 
 export async function fetchTrainingPriorOverlay(
   airportCode: string, entry: TrainingOverlayEntry, sample: TrainingSample,
 ): Promise<Parsed<TrainingPriorOverlay>> {
-  return parseTrainingPriorOverlay(await fetchJson<unknown>(trainingOverlayPath(airportCode, entry.file)), sample);
+  return parseTrainingPriorOverlay(await fetchJson<unknown>(trainingFilePath(airportCode, entry.file)), entry, sample);
 }

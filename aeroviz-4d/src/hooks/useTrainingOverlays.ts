@@ -25,7 +25,8 @@ import {
   type TrainingOverlays,
   type TrainingPriorOverlay,
 } from "../data/trainingOverlays";
-import type { Parsed, TrainingSample } from "../data/trainingSample";
+import type { Parsed } from "../data/trainingReader";
+import type { TrainingSample } from "../data/trainingSample";
 
 export type OverlaysManifestState =
   | { status: "loading" }

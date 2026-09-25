@@ -71,8 +71,8 @@ import {
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import {
+  outsideSpans,
   rowAtTime,
-  trainingBandOutsideSpans,
   trainingWordAt,
   trainingWordLabel,
   type TrainingAltitudeTube,
@@ -214,10 +214,10 @@ export function trainingBandGround(lon: number[], lat: number[], band: TrainingH
   return groundRows(lon, lat, band.firstRow, Math.min(band.stopRow, lon.length - 1));
 }
 
-/** The rows a band judged outside, each as a line on the ground (`trainingBandOutsideSpans`: one row outside on to the
- *  next, so it is a segment). */
+/** The rows a band judged outside, each as a line on the ground (`outsideSpans`: one row outside on to the next, so it
+ *  is a segment). */
 export function trainingBandOutsideGround(lon: number[], lat: number[], band: TrainingHeadingBand): number[][] {
-  return trainingBandOutsideSpans(band, lon.length - 1).map(([first, last]) => groundRows(lon, lat, first, last));
+  return outsideSpans(band.inside, band.firstRow, lon.length - 1).map(([first, last]) => groundRows(lon, lat, first, last));
 }
 
 /**
@@ -279,7 +279,7 @@ export default function useTrainingTrackLayer(): void {
       ? trainingExecutor?.flight ?? null : null;
   const headingBands = trainingLayers.headingBands;
   useEffect(() => {
-    if (!isCesiumViewerUsable(viewer) || executorFlight === null || executorFlight.track === null) return;
+    if (!isCesiumViewerUsable(viewer) || executorFlight === null || !executorFlight.flown) return;
     const track = executorFlight.track;
     const added: string[] = [];
     const add = (options: Cesium.Entity.ConstructorOptions & { id: string }) => {
@@ -338,7 +338,7 @@ export default function useTrainingTrackLayer(): void {
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
-        text: `executor: ${(executorFlight.outcome ?? "").replace(/_/g, " ")}`,
+        text: `executor: ${executorFlight.outcome.replace(/_/g, " ")}`,
         font: "600 12px sans-serif",
         fillColor: colour(TRAINING_EXECUTOR_COLOR),
         outlineColor: Cesium.Color.BLACK,

@@ -180,10 +180,10 @@ function readable() {
 describe("the Training export's checks", () => {
   it("passes a manifest and a readable sample that agree", () => {
     const { entry, sample } = readable();
-    expect(checkTrainingIndex(mockIndex())).toEqual([]);
-    expect(checkTrainingSample(SET_ID, mockSample())).toEqual([]);
+    expect(checkTrainingIndex(mockIndex()).findings).toEqual([]);
+    expect(checkTrainingSample(SET_ID, mockSample()).findings).toEqual([]);
     expect(checkTrainingSetRefusal(entry)).toEqual([]);
-    expect(checkTrainingSetAgrees(entry, sample)).toEqual([]);
+    expect(checkTrainingSetAgrees(entry, sample, "KXXX")).toEqual([]);
   });
 
   // A set of a superseded vocabulary is refused on purpose: a WARNING naming why, not an error.
@@ -199,7 +199,7 @@ describe("the Training export's checks", () => {
   it("names the entry and the field when the panel would grey an entry out", () => {
     const index = mockIndex() as any;
     index.sets.push({ ...index.sets[1], id: "half_written", kind: "not-a-kind" });
-    const findings = checkTrainingIndex(index);
+    const { findings } = checkTrainingIndex(index);
     expect(findings).toHaveLength(1);
     expect(findings[0].category).toBe("half_written");
     expect(findings[0].message).toContain("not-a-kind");
@@ -208,7 +208,8 @@ describe("the Training export's checks", () => {
   it("names the field when a readable sample is wrong", () => {
     const sample = mockSample() as any;
     sample.flights[0].envelopes.speed[0].check.bandInside = 7;
-    const findings = checkTrainingSample(SET_ID, sample);
+    const { findings, value } = checkTrainingSample(SET_ID, sample);
+    expect(value).toBeNull();
     expect(findings[0].category).toBe(SET_ID);
     expect(findings[0].message).toContain("says 7 band rows inside");
   });
@@ -223,11 +224,15 @@ describe("the Training export's checks", () => {
       ["flights", 40],
       ["id", "another_set"],
     ] as const) {
-      const findings = checkTrainingSetAgrees({ ...entry, [field]: value }, sample);
+      const findings = checkTrainingSetAgrees({ ...entry, [field]: value }, sample, "KXXX");
       expect(findings, field).toHaveLength(1);
     }
-    const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } }, sample);
+    const reseeded = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, seed: 7 } }, sample, "KXXX");
     expect(reseeded[0].message).toContain("cohort.seed");
+    const resplit = checkTrainingSetAgrees({ ...entry, cohort: { ...entry.cohort, split: "test" } }, sample, "KXXX");
+    expect(resplit[0].message).toContain("cohort.split");
+    // a sample filed under another airport's directory
+    expect(checkTrainingSetAgrees(entry, sample, "KYYY")[0].message).toContain("airport: the manifest says KYYY");
   });
 });
 
@@ -246,7 +251,7 @@ describe("the Training overlays' checks", () => {
 
   it("passes both overlays read against the sample whose sha they recorded", () => {
     const [executor, prior] = entries();
-    expect(checkTrainingOverlays(mockOverlays())).toEqual([]);
+    expect(checkTrainingOverlays(mockOverlays()).findings).toEqual([]);
     expect(checkTrainingOverlay(executor, mockExecutorOverlay(), sample(), MOCK_SAMPLE_SHA)).toEqual([]);
     expect(checkTrainingOverlay(prior, mockPriorOverlay(), sample(), MOCK_SAMPLE_SHA)).toEqual([]);
   });
@@ -254,7 +259,7 @@ describe("the Training overlays' checks", () => {
   it("names an overlay the panel would reject", () => {
     const raw: any = mockOverlays();
     raw.overlays[1].flights = -1;
-    expect(checkTrainingOverlays(raw)).toEqual([expect.objectContaining({ level: "error", category: "prior_test" })]);
+    expect(checkTrainingOverlays(raw).findings).toEqual([expect.objectContaining({ level: "error", category: "prior_test" })]);
   });
 
   it("is an error when the set's sample on disk is not the one the overlay was drawn over", () => {

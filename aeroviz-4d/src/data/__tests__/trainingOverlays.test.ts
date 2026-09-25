@@ -12,15 +12,18 @@ import {
   parseTrainingOverlays,
   parseTrainingPriorOverlay,
   priorStep,
+  priorTruthAt,
   trainingOverlaysOf,
   truthAt,
   TRAINING_EXECUTOR_SCHEMA,
   TRAINING_OVERLAYS_SCHEMA,
   TRAINING_PRIOR_SCHEMA,
+  type TrainingExecutorFlight,
+  type TrainingExecutorFlown,
 } from "../trainingOverlays";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
 import {
-  EXECUTOR_ID, MOCK_FIRST_PREDICTED_ROW, PRIOR_ID, mockExecutorOverlay, mockOverlays, mockPriorOverlay,
+  EXECUTOR_ID, MOCK_FIRST_PREDICTED_ROW, PRIOR_ID, mockExecutorOverlay, mockOverlayEntry, mockOverlays, mockPriorOverlay,
 } from "./trainingOverlays.fixture";
 
 function sample(): TrainingSample {
@@ -29,10 +32,18 @@ function sample(): TrainingSample {
   return parsed.value;
 }
 
+const entry = mockOverlayEntry;
+
+/** The fixture's flown flight, as the reader types it. */
+function flownOf(flight: TrainingExecutorFlight): TrainingExecutorFlown {
+  if (!flight.flown) throw new Error(`${flight.flightKey} is not flown`);
+  return flight;
+}
+
 function executorRefusal(change: (raw: any) => void): string {
   const raw: any = mockExecutorOverlay();
   change(raw);
-  const result = parseTrainingExecutorOverlay(raw, sample());
+  const result = parseTrainingExecutorOverlay(raw, entry(EXECUTOR_ID), sample());
   if (result.ok) throw new Error("the change was accepted");
   return result.problem;
 }
@@ -40,7 +51,7 @@ function executorRefusal(change: (raw: any) => void): string {
 function priorRefusal(change: (raw: any) => void): string {
   const raw: any = mockPriorOverlay();
   change(raw);
-  const result = parseTrainingPriorOverlay(raw, sample());
+  const result = parseTrainingPriorOverlay(raw, entry(PRIOR_ID), sample());
   if (result.ok) throw new Error("the change was accepted");
   return result.problem;
 }
@@ -72,9 +83,10 @@ describe("parseTrainingOverlays", () => {
 
 describe("parseTrainingExecutorOverlay", () => {
   it("reads the flown flight word by word and the one not flown as such", () => {
-    const parsed = parseTrainingExecutorOverlay(mockExecutorOverlay(), sample());
+    const parsed = parseTrainingExecutorOverlay(mockExecutorOverlay(), entry(EXECUTOR_ID), sample());
     if (!parsed.ok) throw new Error(parsed.problem);
-    const [vectored, straight] = parsed.value.flights;
+    const [flown, straight] = parsed.value.flights;
+    const vectored = flownOf(flown);
     expect(vectored.flightKey).toBe(VECTORED_KEY);
     expect(executorWordCounts(vectored)).toEqual({ inside: 5, outside: 2, notJudged: 0, notReached: 0, superseded: 0 });
     expect(executorWordAt(vectored, 20, "approach")?.status).toBe("outside");
@@ -86,10 +98,12 @@ describe("parseTrainingExecutorOverlay", () => {
     expect(turned.heading!.inside.filter((ok) => !ok)).toHaveLength(1);
     expect(executorWordAt(vectored, 20, "approach")?.heading).toBeNull();
     expect(vectored.judgedTrackDeg).toHaveLength(49);
-    expect(straight).toMatchObject({ flightKey: STRAIGHT_KEY, flown: false, group: "no identified type", track: null,
-      judgedTrackDeg: null, words: [] });
-    expect(parsed.value.gate["own dynamics"].KXXX.all.clears).toEqual({ landed: true, words: false, evaluation: true });
-    expect(parsed.value.gate["stand-in dynamics"].KXXX.all.notGated).toMatch(/stand-in/);
+    expect(straight).toEqual({ flightKey: STRAIGHT_KEY, datasetId: `KXXX:${STRAIGHT_KEY}`, flown: false, group: "no identified type" });
+    expect(executorWordAt(straight, 0, "runway")).toBeNull();
+    expect(parsed.value.gate["own dynamics"].here.all.clears).toEqual({ landed: true, words: false, evaluation: true });
+    expect(parsed.value.gate["stand-in dynamics"].here.all.notGated).toMatch(/stand-in/);
+    expect(parsed.value.gate["own dynamics"].all.vectored?.landed).toBeCloseTo(0.9);
+    expect(parsed.value.replay.drawn).toEqual({ flights: 3 });
   });
 
   it("refuses another schema by name — v1's turns and holds included", () => {
@@ -120,9 +134,9 @@ describe("parseTrainingExecutorOverlay", () => {
     Object.assign(raw.flights[0].words[6].heading, { stopRow: 10, inside: [] });
     raw.flights[0].counts.wordsJudged = 6;
     raw.flights[0].counts.wordsInside = 4;
-    const parsed = parseTrainingExecutorOverlay(raw, sample());
+    const parsed = parseTrainingExecutorOverlay(raw, entry(EXECUTOR_ID), sample());
     if (!parsed.ok) throw new Error(parsed.problem);
-    expect(parsed.value.flights[0].words[6]).toMatchObject({ status: "not judged", heading: { firstRow: 10, stopRow: 10, inside: [] } });
+    expect(flownOf(parsed.value.flights[0]).words[6]).toMatchObject({ status: "not judged", heading: { firstRow: 10, stopRow: 10, inside: [] } });
   });
 
   it("refuses a judged track given with the gate refusing it or the dynamics failing, or missing otherwise", () => {
@@ -137,9 +151,9 @@ describe("parseTrainingExecutorOverlay", () => {
     raw.flights[0].outcome = "dynamics_failure";
     raw.flights[0].judgedTrackDeg = null;
     for (const word of raw.flights[0].words) word.heading = null;
-    const parsed = parseTrainingExecutorOverlay(raw, sample());
+    const parsed = parseTrainingExecutorOverlay(raw, entry(EXECUTOR_ID), sample());
     if (!parsed.ok) throw new Error(parsed.problem);
-    expect(parsed.value.flights[0].words.filter((word) => word.status === "outside")).toHaveLength(2);
+    expect(flownOf(parsed.value.flights[0]).words.filter((word) => word.status === "outside")).toHaveLength(2);
   });
 
   it("refuses a judged track whose steps are not the flown track's points", () => {
@@ -152,17 +166,20 @@ describe("parseTrainingExecutorOverlay", () => {
       .toMatch(/words\[6\]: is a heading word the judge judged on the flown track, and carries no band/);
   });
 
-  it("refuses a judged count that is not one per verdict, the word left to intercept on its own once more", () => {
+  it("refuses counts that are not the words' own verdicts, the word left to intercept on its own once more", () => {
     expect(executorRefusal((raw) => { raw.flights[0].counts.wordsJudged = 8; raw.flights[0].counts.wordsInside = 5; }))
-      .toMatch(/says 8 words judged, but 7 words carry a verdict/);
+      .toMatch(/says 5 of 8 words inside, but the words' own verdicts give 5 of 7/);
+    expect(executorRefusal((raw) => { raw.flights[0].counts.wordsInside = 4; }))
+      .toMatch(/says 4 of 7 words inside, but the words' own verdicts give 5 of 7/);
     // left to intercept the final on its own: that word's two checks, counted twice
     const raw: any = mockExecutorOverlay();
     const word = raw.flights[0].words[6];
     word.status = "outside";
     word.checks.push({ name: "held until the capture — left for 3 cycles to intercept the final on its own", ok: false, inside: null, rows: null });
+    // judged twice — its band, inside, and the intercept, not — and counted inside once
     raw.flights[0].counts.wordsJudged = 8;
-    raw.flights[0].counts.wordsInside = 4;
-    const parsed = parseTrainingExecutorOverlay(raw, sample());
+    raw.flights[0].counts.wordsInside = 5;
+    const parsed = parseTrainingExecutorOverlay(raw, entry(EXECUTOR_ID), sample());
     if (!parsed.ok) throw new Error(parsed.problem);
   });
 
@@ -181,36 +198,53 @@ describe("parseTrainingExecutorOverlay", () => {
   });
 
   it("refuses a status it does not know, and a verdict its own checks contradict", () => {
-    expect(executorRefusal((raw) => { raw.flights[0].words[2].status = "maybe"; })).toMatch(/status is maybe/);
+    expect(executorRefusal((raw) => { raw.flights[0].words[2].status = "maybe"; })).toMatch(/status is "maybe", not one of inside/);
     expect(executorRefusal((raw) => { raw.flights[0].words[8].status = "inside"; }))
       .toMatch(/is inside, but its checks say .*corridor held to the landing false/);
     expect(executorRefusal((raw) => { raw.flights[0].words[0].reason = null; })).toMatch(/is no check and says no reason/);
   });
 
   it("refuses a flight that is not flown yet carries a track", () => {
-    expect(executorRefusal((raw) => { raw.flights[1].track = raw.flights[0].track; })).toMatch(/is not flown, yet carries a track/);
+    expect(executorRefusal((raw) => { raw.flights[1].track = raw.flights[0].track; })).toMatch(/is not flown, yet carries track/);
   });
 
-  it("refuses a gate cell that is both gated and not", () => {
+  it("refuses a word judged on a flown track the gate refused", () => {
+    expect(executorRefusal((raw) => { raw.flights[0].refused = "too short"; raw.flights[0].judgedTrackDeg = null; }))
+      .toMatch(/is inside, but the gate refused the flown track \(too short\)/);
+  });
+
+  it("refuses a gate cell that is both gated and not, a table not of this airport and all, and a share above 1", () => {
     expect(executorRefusal((raw) => { raw.gate["own dynamics"].KXXX.all.notGated = "why"; }))
       .toMatch(/gated \(clears\) or says why not/);
+    expect(executorRefusal((raw) => { raw.gate["own dynamics"].KYYY = raw.gate["own dynamics"].KXXX; delete raw.gate["own dynamics"].KXXX; }))
+      .toMatch(/holds all, KYYY: expected KXXX and all/);
+    expect(executorRefusal((raw) => { delete raw.gate["own dynamics"].KXXX.all; })).toMatch(/expected "all" and any of straight-in/);
+    expect(executorRefusal((raw) => { raw.gate["own dynamics"].KXXX.all.landed = 1.2; })).toMatch(/landed is 1.2, not a share/);
+    expect(executorRefusal((raw) => { raw.replay.drawn = {}; })).toMatch(/drawn\.flights is undefined, not a number/);
+  });
+
+  it("refuses an overlay the manifest lists under another id or set, or drawn at another airport", () => {
+    expect(executorRefusal((raw) => { raw.overlayId = "another"; })).toMatch(/overlayId is another, but the manifest lists it as executor_test/);
+    expect(executorRefusal((raw) => { raw.base.sampleSha256 = "6".repeat(64); })).toMatch(/but the manifest lists it over set/);
+    expect(executorRefusal((raw) => { raw.airport = "KYYY"; })).toMatch(/is drawn at KYYY, but the loaded sample is KXXX's/);
   });
 });
 
 describe("parseTrainingPriorOverlay", () => {
   it("reads each step's words and probabilities for every column", () => {
-    const parsed = parseTrainingPriorOverlay(mockPriorOverlay(), sample());
+    const parsed = parseTrainingPriorOverlay(mockPriorOverlay(), entry(PRIOR_ID), sample());
     if (!parsed.ok) throw new Error(parsed.problem);
     const flight = parsed.value.flights[0];
-    const turn = priorStep(flight, "heading", 10)!;
+    const truth = sample().flights[0];
+    const turn = priorStep(truth, flight, "heading", 10)!;
     expect(turn.changeP).toBeCloseTo(0.6);
     expect(turn.ranked.map((item) => item.value)).toEqual([WORD.heading180 + 1, WORD.heading180, WORD.heading180 + 2]);
     // the first predicted step says every column; the runway column has two candidates, so two words are ranked
-    const opening = priorStep(flight, "runway", MOCK_FIRST_PREDICTED_ROW)!;
+    const opening = priorStep(truth, flight, "runway", MOCK_FIRST_PREDICTED_ROW)!;
     expect(opening.changeP).toBe(1);
     expect(opening.ranked).toHaveLength(2);
     // before it the prior only observes
-    expect(priorStep(flight, "heading", MOCK_FIRST_PREDICTED_ROW - 1)).toBeNull();
+    expect(priorStep(truth, flight, "heading", MOCK_FIRST_PREDICTED_ROW - 1)).toBeNull();
     expect(parsed.value.readout.baselines.previousWord.all).toBeCloseTo(0.326);
     expect(parsed.value.readout.model.perColumn.runway.top1GivenChange).toBeNull();
     expect(parsed.value.readout.firstStepRunway.rules.B1_active_config.top1).toBeCloseTo(0.74);
@@ -220,6 +254,39 @@ describe("parseTrainingPriorOverlay", () => {
     const flight = sample().flights[0];
     expect(truthAt(flight, "heading", 10)).toBe(WORD.heading180);
     expect(truthAt(flight, "heading", 11)).toBe(TRAINING_UNCHANGED);
+  });
+
+  it("takes the truth at the first predicted step to be the word in force there, which the prior must say", () => {
+    const parsed = parseTrainingPriorOverlay(mockPriorOverlay(), entry(PRIOR_ID), sample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const truth = sample().flights[0];
+    // nothing is said at step 4: the heading in force there is 270°, said at step 0
+    expect(truthAt(truth, "heading", MOCK_FIRST_PREDICTED_ROW)).toBe(TRAINING_UNCHANGED);
+    expect(priorTruthAt(truth, parsed.value.flights[0], "heading", MOCK_FIRST_PREDICTED_ROW)).toBe(WORD.heading270);
+    const opening = priorStep(truth, parsed.value.flights[0], "heading", MOCK_FIRST_PREDICTED_ROW)!;
+    expect(opening.truth).toBe(WORD.heading270);
+    expect(opening.ranked[0].value).toBe(WORD.heading270);
+    expect(opening.truthP).toBeCloseTo(opening.ranked[0].p);
+  });
+
+  it("refuses a first predicted step that may say nothing, and a truth's probability the prior's own do not give", () => {
+    expect(priorRefusal((raw) => { raw.flights[0].columns[2].changeP[0] = 0.2; }))
+      .toMatch(/heading\): changeP at the first predicted step is 0.2, not 1/);
+    expect(priorRefusal((raw) => { raw.flights[0].columns[2].truthP[0] = 0.3; }))
+      .toMatch(/truthP at step 4 is 0.3, but the prior gives the truth there \(word 54\) 0.5000/);
+    expect(priorRefusal((raw) => { raw.flights[0].columns[2].truthP[1] = 0.5; }))
+      .toMatch(/truthP at step 5 is 0.5, but the prior gives the truth there \(unchanged\) 0.9900/);
+  });
+
+  it("refuses readout shares outside [0, 1], change metrics without change steps, and an unnamed rule", () => {
+    expect(priorRefusal((raw) => { raw.readout.model.perColumn.heading.top1GivenChange = 1.7; })).toMatch(/top1GivenChange is 1.7, not a share/);
+    expect(priorRefusal((raw) => { raw.readout.model.perColumn.runway.top1GivenChange = 0.5; }))
+      .toMatch(/top1GivenChange given with 0 change steps/);
+    expect(priorRefusal((raw) => { raw.readout.model.perColumn.heading.top5GivenChange = null; }))
+      .toMatch(/top5GivenChange absent with 100 change steps/);
+    expect(priorRefusal((raw) => { raw.readout.firstStepRunway.rules[""] = raw.readout.firstStepRunway.rules.B0_majority; }))
+      .toMatch(/rules has an empty key/);
+    expect(priorRefusal((raw) => { raw.readout.firstStepRunway.model.top1 = 1.7; })).toMatch(/model\.top1 is 1.7, not a share/);
   });
 
   it("refuses another schema by name, and columns out of order", () => {

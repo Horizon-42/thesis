@@ -135,17 +135,17 @@ export function executorVerdictText(word: TrainingExecutorWord): string {
 export function executorSummary(flight: TrainingExecutorFlight): string {
   if (!flight.flown) return `the executor: not flown — ${flight.group}`;
   const counts = executorWordCounts(flight);
-  const outcome = (flight.outcome ?? "").replace(/_/g, " ");
+  const outcome = flight.outcome.replace(/_/g, " ");
   const crossing = flight.crossing === null ? ""
     : ` ${Math.abs(flight.crossing.crossM).toFixed(1)} m ${flight.crossing.crossM >= 0 ? "right" : "left"} of the centreline, ` +
       `${flight.crossing.heightM.toFixed(1)} m above the threshold at ${formatSeconds(flight.crossing.atS)} s`;
   const refused = flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`;
   // the judge's own tally, as the replay gate counts it (the word left to intercept the final on its own counts twice)
-  const { wordsInside, wordsJudged } = flight.counts!;
+  const { wordsInside, wordsJudged } = flight.counts;
   return `the executor (${flight.group}): ${outcome}${crossing} · ${wordsInside}/${wordsJudged} words ` +
     `inside their envelopes${counts.notJudged ? `, ${counts.notJudged} not judged` : ""}` +
     `${counts.notReached ? `, ${counts.notReached} not reached` : ""}${counts.superseded ? `, ${counts.superseded} superseded` : ""}` +
-    ` · evaluation ${flight.evaluation?.replay} (observed ${flight.evaluation?.observed})${refused}`;
+    ` · evaluation ${flight.evaluation.replay} (observed ${flight.evaluation.observed})${refused}`;
 }
 
 /** The dot a word's executor verdict draws: filled for a verdict, hollow for none; none for a word with no check. */
@@ -225,7 +225,7 @@ export default function TrainingSentenceBar() {
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar">
-      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.track != null}
+      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.flown === true}
         autopilotTrack={autopilotSegment !== null} />
       <header className="training-sentence-head">
         <strong>{flight.callsign}</strong>

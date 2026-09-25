@@ -131,8 +131,8 @@ function OverlaySwitch<T>({ state, colour, text, setId, airport }: {
 /** What the flight list says of a flight's replay: its outcome, and its words inside of those judged. */
 export function executorTag(flight: TrainingExecutorFlight): { text: string; ok: boolean; title: string } {
   if (!flight.flown) return { text: "not flown", ok: false, title: `the replay does not fly it: ${flight.group}` };
-  const { wordsInside, wordsJudged } = flight.counts!;
-  const outcome = (flight.outcome ?? "").replace(/_/g, " ");
+  const { wordsInside, wordsJudged } = flight.counts;
+  const outcome = flight.outcome.replace(/_/g, " ");
   return {
     text: `${outcome} · ${wordsInside}/${wordsJudged}`,
     ok: flight.outcome === "landed" && wordsInside === wordsJudged,

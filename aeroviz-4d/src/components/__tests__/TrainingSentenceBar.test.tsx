@@ -34,7 +34,7 @@ vi.mock("../../context/AppContext", async () => {
 import TrainingSentenceBar, { spacedLabels } from "../TrainingSentenceBar";
 import { parseTrainingSample, TRAINING_COLUMNS } from "../../data/trainingSample";
 import { MOCK_ROWS, mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { mockExecutorOverlay, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import { EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlayEntry, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay } from "../../data/trainingOverlays";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
@@ -44,8 +44,8 @@ import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/
 function overlays(position = 0) {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
-  const executor = parseTrainingExecutorOverlay(mockExecutorOverlay(), parsed.value);
-  const prior = parseTrainingPriorOverlay(mockPriorOverlay(), parsed.value);
+  const executor = parseTrainingExecutorOverlay(mockExecutorOverlay(), mockOverlayEntry(EXECUTOR_ID), parsed.value);
+  const prior = parseTrainingPriorOverlay(mockPriorOverlay(), mockOverlayEntry(PRIOR_ID), parsed.value);
   if (!executor.ok || !prior.ok) throw new Error("the overlay fixtures do not read");
   appState.trainingExecutor = { overlay: executor.value, flight: executor.value.flights[position] };
   appState.trainingPrior = { overlay: prior.value, flight: prior.value.flights[position] };

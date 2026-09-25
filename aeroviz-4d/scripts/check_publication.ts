@@ -50,8 +50,7 @@ import {
   indexCzmlFiles,
   type PublicationFinding,
 } from "../src/utils/checkPublication";
-import { parseTrainingIndex, parseTrainingSample, type TrainingSample } from "../src/data/trainingSample";
-import { parseTrainingOverlays } from "../src/data/trainingOverlays";
+import { parseTrainingSample, type TrainingSample } from "../src/data/trainingSample";
 
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUBLISHED_ROOT = path.join(FRONTEND_ROOT, "public", "data", "airports");
@@ -111,6 +110,17 @@ function parseArgs(argv: string[]): Options {
 
 function readJson(file: string): unknown {
   return JSON.parse(readFileSync(file, "utf8"));
+}
+
+/** A file read once: its JSON and its bytes' sha256 (the overlays record their set's sample by it). */
+function readJsonAndSha256(file: string): { value: unknown; sha256: string } {
+  const bytes = readFileSync(file);
+  return { value: JSON.parse(bytes.toString("utf8")), sha256: createHash("sha256").update(bytes).digest("hex") };
+}
+
+/** Why a file is not readable JSON, as a finding's detail. */
+function unreadable(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -181,9 +191,9 @@ async function checkTraining(root: string, airport: string, server: string | nul
       findings: [{ level: "error", message: `training/index.json is not readable JSON: ${detail}` }],
     };
   }
-  findings.push(...checkTrainingIndex(manifest));
-  const parsed = parseTrainingIndex(manifest);
-  if (!parsed.ok) return { listed: 0, trainingSets: 0, readableTrainingSets: 0, findings };
+  const index = checkTrainingIndex(manifest);
+  findings.push(...index.findings);
+  if (index.value === null) return { listed: 0, trainingSets: 0, readableTrainingSets: 0, findings };
 
   const serverRoot = server ? `${server}/data/airports/${airport}/training` : null;
   let readable = 0;
@@ -194,7 +204,7 @@ async function checkTraining(root: string, airport: string, server: string | nul
     if (problem) findings.push({ level: "error", message: `server: training/index.json ${problem}` });
   }
 
-  for (const entry of parsed.value.sets) {
+  for (const entry of index.value.sets) {
     const sampleFile = path.join(trainingDir, entry.file);
     if (!existsSync(sampleFile)) {
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is listed but missing on disk` });
@@ -208,20 +218,19 @@ async function checkTraining(root: string, airport: string, server: string | nul
       continue;
     }
     // A truncated file is the commonest shape of a half-written export: name the set and go on.
-    let sample: unknown;
+    let file: { value: unknown; sha256: string };
     try {
-      sample = readJson(sampleFile);
+      file = readJsonAndSha256(sampleFile);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${detail}` });
+      findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${unreadable(error)}` });
       continue;
     }
-    findings.push(...checkTrainingSample(entry.id, sample));
-    const read = parseTrainingSample(sample);
-    if (read.ok) {
+    const read = checkTrainingSample(entry.id, file.value);
+    findings.push(...read.findings);
+    if (read.value !== null) {
       readable += 1;
-      findings.push(...checkTrainingSetAgrees(entry, read.value));
-      samples.set(entry.id, { sample: read.value, sha256: createHash("sha256").update(readFileSync(sampleFile)).digest("hex") });
+      findings.push(...checkTrainingSetAgrees(entry, read.value, airport));
+      samples.set(entry.id, { sample: read.value, sha256: file.sha256 });
     }
     if (serverRoot) {
       const problem = await served(`${serverRoot}/${entry.file}`, "json");
@@ -235,7 +244,7 @@ async function checkTraining(root: string, airport: string, server: string | nul
     }
   }
   const overlays = await checkOverlays(trainingDir, samples, serverRoot, findings);
-  return { listed: 0, trainingSets: parsed.value.sets.length, readableTrainingSets: readable, ...overlays, findings };
+  return { listed: 0, trainingSets: index.value.sets.length, readableTrainingSets: readable, ...overlays, findings };
 }
 
 /**
@@ -253,18 +262,18 @@ async function checkOverlays(
   try {
     manifest = readJson(manifestFile);
   } catch (error) {
-    findings.push({ level: "error", message: `training/overlays.json is not readable JSON: ${error instanceof Error ? error.message : String(error)}` });
+    findings.push({ level: "error", message: `training/overlays.json is not readable JSON: ${unreadable(error)}` });
     return { overlays: 0, readableOverlays: 0 };
   }
-  findings.push(...checkTrainingOverlays(manifest));
-  const parsed = parseTrainingOverlays(manifest);
-  if (!parsed.ok) return { overlays: 0, readableOverlays: 0 };
+  const overlays = checkTrainingOverlays(manifest);
+  findings.push(...overlays.findings);
+  if (overlays.value === null) return { overlays: 0, readableOverlays: 0 };
   if (serverRoot) {
     const problem = await served(`${serverRoot}/overlays.json`, "json");
     if (problem) findings.push({ level: "error", message: `server: training/overlays.json ${problem}` });
   }
   let readable = 0;
-  for (const entry of parsed.value.overlays) {
+  for (const entry of overlays.value.overlays) {
     const base = samples.get(entry.base);
     if (!base) {
       findings.push({ level: "warn", category: entry.id, message: `drawn over ${entry.base}, a set the panel does not read` });
@@ -275,7 +284,15 @@ async function checkOverlays(
       findings.push({ level: "error", category: entry.id, message: `${entry.file} is listed but missing on disk` });
       continue;
     }
-    const found = checkTrainingOverlay(entry, readJson(file), base.sample, base.sha256);
+    // a truncated overlay is named and passed over, as a truncated sample is: the airports after it are still checked
+    let payload: unknown;
+    try {
+      payload = readJson(file);
+    } catch (error) {
+      findings.push({ level: "error", category: entry.id, message: `${entry.file} is not readable JSON: ${unreadable(error)}` });
+      continue;
+    }
+    const found = checkTrainingOverlay(entry, payload, base.sample, base.sha256);
     findings.push(...found);
     if (!found.length) readable += 1;
     if (serverRoot) {
@@ -290,7 +307,7 @@ async function checkOverlays(
       }
     }
   }
-  return { overlays: parsed.value.overlays.length, readableOverlays: readable };
+  return { overlays: overlays.value.overlays.length, readableOverlays: readable };
 }
 
 async function checkAirport(root: string, airport: string, server: string | null): Promise<AirportReport> {
