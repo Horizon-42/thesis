@@ -23,9 +23,11 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
   segment's stop (`fly_until`); never a replay record or overlay; the answer carries per-part wall-clock `timing`. The spec is the ONE under
   `4dTrajectory/outputs/POOLED/executor/` that `replay.open_executor` accepts for the set's artefact, or it is refused
   naming each (looked up again when a spec is added, moved or rewritten). A bad request is 400 (`errors.RequestRefused`), a set
-  or flight not listed 404 (`errors.NotListed`), a flight the data cannot fly (no aircraft dynamics) 422 (`errors.NotFlyable`;
-  `errors` is stdlib-only so the server maps them without torch), anything else 500 with its reason. Built lazily on the first request (torch + ts_transformer, ~470 MB); one flight at a time; the last 8
-  rebuilt flights cached. Full text: `aeroviz-4d/docs/35-viewer-reference.md` AV26.
+  or flight not listed 404 (`errors.NotListed`), superseded by a later request from the same page 409 (`errors.Superseded`: every
+  request names its page, `clientId`, and its number there, `seq`; the page's lower-numbered ones still waiting are not
+  flown, one flying stops before its next cycle, one arriving late is refused — the page's numbers decide, not arrival), a flight the data cannot fly (no aircraft dynamics) 422 (`errors.NotFlyable`; `errors` is stdlib-only so the server
+  maps them without torch), anything else 500 with its reason. Built lazily on the first request (torch + ts_transformer,
+  ~470 MB); one flight at a time; the last 8 rebuilt flights cached. Full text: `aeroviz-4d/docs/35-viewer-reference.md` AV26.
 
 ## Observed tracks have TWO windows — the comparison overlay must use the model one
 

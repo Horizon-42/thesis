@@ -144,10 +144,13 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   by the sentence's stop (the executor may hear the next word late); started by the sentence bar's "▶ Fly" (or a band
   click, "Fly on band click" on); the pick and the cursor belong to the flight on screen (`trainingSelectionKey`) and reset
   with it; one short status line (word · inside/outside · "N s flown in M ms"); blue `#2563eb` inside its envelope, the
-  whole line a loud red `#ff2d2d` outside (`autopilotColour`), never the replay's teal; backend 400 / 404 / 422 / 500 (AV26).
+  whole line a loud red `#ff2d2d` outside (`autopilotColour`), never the replay's teal; each request names its page
+  and its number there (`clientId`, `seq`): a later one from the same page supersedes the earlier still waiting or flying
+  (409), so clicking through bands flies only the last; backend 400 / 404 / 409 / 422 / 500 (AV26).
 - **Training's code: one reader (`data/trainingReader.ts`) for every Training file; shared wording in `data/trainingText.ts`;
   the read-back is a pure model + four charts + a window shell (`components/training/`); the 3D scene is
-  `scene/trainingEntities.ts`, built once per flight — Draw switches set `show`, they rebuild nothing** (AV27).
+  `scene/trainingEntities.ts`, built once per flight — Draw switches set `show`, they rebuild nothing**; a reading given only
+  in a tooltip is also page text behind an ⓘ (`training/NotesToggle.tsx`) (AV27).
 
 ## Comparison CZML colour contract
 

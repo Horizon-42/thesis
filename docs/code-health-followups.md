@@ -78,10 +78,6 @@ hand. Missing: a word said exactly at `N_LOOK`, two words of one column inside t
 agreement with the sample's `words.inForce`. No `aeroviz-training-prior-v3` overlay is on disk yet, so the frontend's
 new check has met only the fixture.
 
-**11. `TRAINING_STRATA` is not pinned** — *verified*. `trainingSample.ts`'s `TRAINING_STRATA` mirrors
-`instructions.readout.STRATA` and no Python test reads it (the sample's other mirrors are pinned by
-`test_instruction_training_export.py`; the live executor's by `aeroviz_backend/tests/test_autopilot_segment.py::MirrorTest`).
-
 ## Three ts ablation runners write into fixed directories that carry no aircraft filter (2026-09-24)
 
 **Verified** (code review of the A320-fallback removal): `experiments/kinematic_ablation.py:514`,
