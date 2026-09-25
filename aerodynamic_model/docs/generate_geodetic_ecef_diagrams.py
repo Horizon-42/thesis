@@ -261,8 +261,8 @@ def diagram_coordinate_system() -> str:
     p = add(s, mul(VISUAL_H_OVER_A, n))
     pts = wire_points() + [(0, 0, 0), (1.45, 0, 0), (0, 1.45, 0), (0, 0, 1.35), s, p]
     svg = Svg(900, 560, "WGS 84 ellipsoid and ECEF axes generated from formulas", pts)
-    svg.text_xy("生成式 3D 图：WGS 84 椭球、大地坐标与 ECEF", 30, 36, "title")
-    svg.text_xy("教学点 φ=53.809394°，λ=35°；h 箭头沿精确法线方向放大显示", 30, 58, "subtitle")
+    svg.text_xy("WGS 84 ellipsoid, geodetic coordinates and ECEF", 30, 36, "title")
+    svg.text_xy("Teaching point φ=53.809394°, λ=35°; the h arrow is exaggerated along the exact normal", 30, 58, "subtitle")
     draw_wire(svg)
     svg.line((0, 0, 0), (1.45, 0, 0), "axis", True)
     svg.line((0, 0, 0), (0, 1.45, 0), "axis", True)
@@ -275,12 +275,12 @@ def diagram_coordinate_system() -> str:
     svg.text("X", (1.45, 0, 0), 8, 4)
     svg.text("Y", (0, 1.45, 0), 6, 8)
     svg.text("Z", (0, 0, 1.35), 8, -2)
-    svg.text("O 地心", (0, 0, 0), 6, 16, "small")
+    svg.text("O (Earth centre)", (0, 0, 0), 6, 16, "small")
     svg.text("P(φ, λ, h)", p, 8, -6, "teal")
-    svg.text("S 椭球面法线脚点", s, 10, 14, "orange")
+    svg.text("S (foot of normal on ellipsoid)", s, 10, 14, "orange")
     svg.text("h·n̂", add(s, mul(VISUAL_H_OVER_A * 0.55, n)), 10, -8, "orange")
-    svg.text("子午线 λ", geodetic_surface_unit(0.45, TEACHING_LAMBDA), 8, -4, "indigo")
-    svg.text("赤道", geodetic_surface_unit(0, 2.25), 4, 16, "orange")
+    svg.text("meridian λ", geodetic_surface_unit(0.45, TEACHING_LAMBDA), 8, -4, "indigo")
+    svg.text("equator", geodetic_surface_unit(0, 2.25), 4, 16, "orange")
     return svg.render()
 
 
@@ -328,8 +328,8 @@ def diagram_pz_section_geometry() -> str:
     )
 
     svg = Svg(940, 620, "p-z section geometry for WGS 84 ellipsoid", pts, pad=44)
-    svg.text_xy("生成式 3D 图：p-z 剖面、纬度剖面与 p 的形状", 30, 36, "title")
-    svg.text_xy("p = sqrt(x²+y²) 是到 Z 轴的水平距离；固定 λ 的子午半剖面才是推导里的 (p,z) 剖面", 30, 58, "subtitle")
+    svg.text_xy("The p-z section, the latitude section and the shape of p", 30, 36, "title")
+    svg.text_xy("p = sqrt(x²+y²): horizontal distance to the Z axis", 30, 58, "subtitle")
     polygon_points(svg, meridian_half_plane, "plane")
     draw_wire(svg)
     for ring in cylinder_circles:
@@ -345,10 +345,11 @@ def diagram_pz_section_geometry() -> str:
     svg.text("Z axis", (0, 0, z_max), 10, -4)
     svg.text("S", s, 10, -8, "orange")
     svg.text("p_S", add(axis_at_z, mul(0.52, sub(s, axis_at_z))), 8, -8, "teal")
-    svg.text("固定 λ：子午 / 经度半剖面", geodetic_surface_unit(0.08, lam), 12, -10, "indigo")
-    svg.text("固定 z=z_S：纬度圈 / 水平剖面", (p_s * cos(lam + 1.25), p_s * sin(lam + 1.25), z_s), 10, 8, "orange")
-    svg.text("固定 p=p_S：圆柱面", (p_s * cos(lam - 1.45), p_s * sin(lam - 1.45), 0.0), -40, 18, "teal")
-    svg.text_xy("结论：推导中的 (p,z) 是固定经度 λ 的子午半剖面；纬度剖面是水平圆；固定 p 在 3D 中是绕 Z 轴的圆柱面。", 44, 574, "formula")
+    svg.text("fixed λ: meridian half-plane", geodetic_surface_unit(0.08, lam), 12, -10, "indigo")
+    svg.text("fixed z=z_S: parallel / horizontal section", (p_s * cos(lam + 1.25), p_s * sin(lam + 1.25), z_s), 10, 8, "orange")
+    svg.text("fixed p=p_S: cylinder", (p_s * cos(lam - 1.45), p_s * sin(lam - 1.45), 0.0), -40, 18, "teal")
+    svg.text_xy("(p,z) is the meridian half-plane at fixed λ; a latitude section is a horizontal circle;", 44, 566, "formula")
+    svg.text_xy("fixed p is, in 3D, a cylinder around the Z axis.", 44, 586, "formula")
     return svg.render()
 
 
@@ -392,8 +393,8 @@ def diagram_latitudes() -> str:
     rx, ry = p_s, -z_s
     tangent = (-sin(phi), -cos(phi))
     out = svg_2d_header(width, height, "Geodetic latitude and geocentric latitude")
-    out.append('<text class="title" x="30" y="36">精确剖面图：大地纬度 φ 与地心纬度 ψ</text>')
-    out.append(f'<text class="subtitle" x="30" y="58">WGS 84 真实扁率；φ={TEACHING_PHI_DEG:.6f}°，ψ={degrees(psi):.6f}°，差值={TEACHING_PHI_DEG - degrees(psi):.6f}°</text>')
+    out.append('<text class="title" x="30" y="36">Geodetic latitude φ vs geocentric latitude ψ</text>')
+    out.append(f'<text class="subtitle" x="30" y="58">True WGS 84 flattening; φ={TEACHING_PHI_DEG:.6f}°, ψ={degrees(psi):.6f}°, difference={TEACHING_PHI_DEG - degrees(psi):.6f}°</text>')
     out.append(f'<ellipse class="ellipse" cx="{cx}" cy="{cy}" rx="{scale}" ry="{scale * b:.1f}"/>')
     out.append(f'<line class="axis" x1="{cx - 310}" y1="{cy}" x2="{cx + 335}" y2="{cy}"/>')
     out.append(f'<line class="axis" x1="{cx}" y1="{cy + 285}" x2="{cx}" y2="{cy - 300}"/>')
@@ -406,14 +407,14 @@ def diagram_latitudes() -> str:
     out.append(f'<text class="label" x="{cx + 342}" y="{cy + 6}">p</text>')
     out.append(f'<text class="label" x="{cx + 10}" y="{cy - 303}">z</text>')
     out.append(f'<text class="small" x="{cx + 8}" y="{cy + 18}">O</text>')
-    out.append(f'<text class="orange" x="{sx + nx * 100 + 8:.1f}" y="{sy + ny * 100:.1f}">椭球法线 n̂</text>')
-    out.append(f'<text class="indigo" x="{cx + rx * scale * 0.45:.1f}" y="{cy + ry * scale * 0.45 - 8:.1f}">地心方向</text>')
+    out.append(f'<text class="orange" x="{sx + nx * 100 + 8:.1f}" y="{sy + ny * 100:.1f}">ellipsoid normal n̂</text>')
+    out.append(f'<text class="indigo" x="{cx + rx * scale * 0.45:.1f}" y="{cy + ry * scale * 0.45 - 8:.1f}">geocentric</text>')
     out.append(f'<text class="label" x="{sx + 10:.1f}" y="{sy - 8:.1f}">S(p_S,z_S)</text>')
     out.append(f'<text class="small" x="{sx + 10:.1f}" y="{cy - 8:.1f}">p_S</text>')
     out.append(f'<text class="small" x="{sx + 8:.1f}" y="{(sy + cy) / 2:.1f}">z_S</text>')
     out.append(f'<text class="indigo" x="{cx + 120}" y="{cy - 28}">ψ = atan2(z_S,p_S)</text>')
-    out.append(f'<text class="orange" x="{cx + 300}" y="{cy - 100}">φ = 法线角</text>')
-    out.append(f'<text class="formula" x="42" y="512">tan ψ = z_S/p_S；tan φ = z_S / ((1-e²)p_S)。球体 e²=0 时二者才相同。</text>')
+    out.append(f'<text class="orange" x="{cx + 300}" y="{cy - 100}">φ = normal angle</text>')
+    out.append(f'<text class="formula" x="42" y="512">tan ψ = z_S/p_S;  tan φ = z_S/((1-e²)p_S).  They coincide only for a sphere (e²=0).</text>')
     out.append("</svg>")
     return "\n".join(out)
 
@@ -458,8 +459,8 @@ def diagram_tangent_slope_dp() -> str:
 .delta { stroke: #007c89; stroke-width: 2.4; marker-end: url(#arrow); }
 .delta-z { stroke: #b65b13; stroke-width: 2.4; marker-end: url(#arrow); }
 </style>""")
-    out.append('<text class="title" x="30" y="36">推导图：dz/dp 中的 p 是剖面水平坐标</text>')
-    out.append('<text class="subtitle" x="30" y="58">在子午剖面里，p = sqrt(x²+y²)，表示点到 Z 轴的水平距离；S 附近令 Δp 逐渐趋近 0，割线斜率趋近切线斜率。</text>')
+    out.append('<text class="title" x="30" y="36">Derivation: the p in dz/dp is the horizontal coordinate of the section</text>')
+    out.append('<text class="subtitle" x="30" y="58">In the meridian section p = sqrt(x²+y²), the horizontal distance to the Z axis; as Δp → 0 near S, the secant slope tends to the tangent slope.</text>')
     out.append(f'<polyline class="ellipse" fill="none" points="{" ".join(curve_points)}"/>')
     out.append(f'<line class="axis" x1="{cx}" y1="{cy + 150}" x2="{cx}" y2="{cy - 290}"/>')
     out.append(f'<line class="axis" x1="{cx - 20}" y1="{cy}" x2="{cx + 565}" y2="{cy}"/>')
@@ -475,15 +476,15 @@ def diagram_tangent_slope_dp() -> str:
     out.append(f'<circle class="point" cx="{s2x:.1f}" cy="{s2y:.1f}" r="5"/>')
     out.append(f'<text class="label" x="{cx + 575}" y="{cy + 5}">p</text>')
     out.append(f'<text class="label" x="{cx + 10}" y="{cy - 292}">z</text>')
-    out.append(f'<text class="small" x="{cx + 6}" y="{cy + 18}">O / Z 轴穿出剖面的位置</text>')
+    out.append(f'<text class="small" x="{cx + 6}" y="{cy + 18}">O (Z axis)</text>')
     out.append(f'<text class="orange" x="{sx + 10:.1f}" y="{sy - 12:.1f}">S(p_S,z_S)</text>')
     out.append(f'<text class="teal" x="{s2x + 10:.1f}" y="{s2y + 5:.1f}">S′(p_S+Δp,z_S+Δz)</text>')
     out.append(f'<text class="small" x="{sx - 5:.1f}" y="{cy + 22:.1f}">p_S</text>')
     out.append(f'<text class="small" x="{s2x - 12:.1f}" y="{cy + 38:.1f}">p_S+Δp</text>')
     out.append(f'<text class="teal" x="{(sx + hx) / 2 - 6:.1f}" y="{hy + 42:.1f}">Δp</text>')
     out.append(f'<text class="orange" x="{hx + 25:.1f}" y="{(hy + s2y) / 2 + 5:.1f}">Δz</text>')
-    out.append(f'<text class="indigo" x="{tangent_x1 + 8:.1f}" y="{tangent_y1 + 4:.1f}">切线 slope = (dz/dp)|S</text>')
-    out.append(f'<text class="formula" x="42" y="512">割线斜率 = Δz/Δp；令 Δp → 0 后得到导数 (dz/dp)|S。它是切线斜率，不是曲率。</text>')
+    out.append(f'<text class="indigo" x="{tangent_x1 + 8:.1f}" y="{tangent_y1 + 4:.1f}">tangent slope = (dz/dp)|S</text>')
+    out.append(f'<text class="formula" x="42" y="512">Secant slope = Δz/Δp; as Δp → 0 it becomes (dz/dp)|S, the tangent slope (not the curvature).</text>')
     return "\n".join(out + ["</svg>"])
 
 
@@ -519,9 +520,9 @@ def diagram_curvature_radii() -> str:
         + [s, center_nu, center_m, add(s, mul(0.42, east)), add(s, mul(0.42, north)), add(s, mul(0.46, n_out))]
     )
     svg = Svg(900, 600, "Meridian and prime vertical radii of curvature", pts, pad=42)
-    svg.text_xy("生成式 3D 图：南北与东西方向曲率半径", 30, 36, "title")
+    svg.text_xy("North-south and east-west radii of curvature", 30, 36, "title")
     svg.text_xy(
-        f"教学点 φ={TEACHING_PHI_DEG:.6f}°；M={meridian * WGS84_A_M:,.3f} m，ν={nu * WGS84_A_M:,.3f} m",
+        f"Teaching point φ={TEACHING_PHI_DEG:.6f}°; M={meridian * WGS84_A_M:,.3f} m, ν={nu * WGS84_A_M:,.3f} m",
         30,
         58,
         "subtitle",
@@ -540,13 +541,13 @@ def diagram_curvature_radii() -> str:
     svg.circle(center_m, 5.0, "surface")
     svg.circle(center_nu, 5.0, "surface")
     svg.text("S", s, 8, -8, "teal")
-    svg.text("north tangent：南北方向", add(s, mul(0.42, north)), 10, -4, "indigo")
-    svg.text("east tangent：东西方向", add(s, mul(0.42, east)), 10, 12, "teal")
+    svg.text("north tangent (north-south)", add(s, mul(0.42, north)), 10, -4, "indigo")
+    svg.text("east tangent (east-west)", add(s, mul(0.42, east)), 10, 12, "teal")
     svg.text("outward normal n̂", add(s, mul(0.46, n_out)), 10, -6, "orange")
-    svg.text("M 子午圈曲率半径", add(s, mul(0.48, n_in)), -152, 8, "indigo")
-    svg.text("ν 卯酉圈曲率半径", add(s, mul(0.75, n_in)), 10, -8, "orange")
-    svg.text_xy("M：meridian radius of curvature，沿南北方向的法截线曲率半径。", 44, 540, "formula")
-    svg.text_xy("ν/N：prime vertical radius of curvature，沿东西方向的法截线曲率半径；不是地心半径。", 44, 564, "formula")
+    svg.text("M meridian radius", add(s, mul(0.48, n_in)), -140, 8, "indigo")
+    svg.text("ν prime-vertical radius", add(s, mul(0.75, n_in)), 10, -8, "orange")
+    svg.text_xy("M: meridian radius of curvature, of the normal section in the north-south direction.", 44, 540, "formula")
+    svg.text_xy("ν/N: prime-vertical radius of curvature, of the east-west normal section; not the geocentric radius.", 44, 564, "formula")
     return svg.render()
 
 
@@ -567,14 +568,14 @@ def diagram_prime_vertical_projection() -> str:
 .arc { fill: none; stroke: #3d58a8; stroke-width: 1.8; }
 .panel-box { fill: none; stroke: #d8e1e8; stroke-width: 1.2; }
 </style>""")
-    out.append('<text class="title" x="30" y="36">图解：为什么 κ_circle 和 κ_prime vertical 不一样</text>')
+    out.append('<text class="title" x="30" y="36">Why κ_circle and κ_prime vertical differ</text>')
     out.append(
-        f'<text class="subtitle" x="30" y="58">同一教学点 φ={TEACHING_PHI_DEG:.6f}°；投影因子 cosφ={cos_phi:.4f}。纬线圆曲率先是水平向内，再投影到椭球法线方向。</text>'
+        f'<text class="subtitle" x="30" y="58">Teaching point φ={TEACHING_PHI_DEG:.6f}°; projection factor cosφ={cos_phi:.4f}. The parallel’s curvature points horizontally inward, then is projected onto the normal.</text>'
     )
     out.append('<rect class="panel-box" x="30" y="86" width="410" height="410" rx="8"/>')
     out.append('<rect class="panel-box" x="500" y="86" width="410" height="410" rx="8"/>')
-    out.append('<text class="panel-title" x="50" y="116">A. 纬线圆的空间曲率</text>')
-    out.append('<text class="panel-title" x="520" y="116">B. 把曲率投影到椭球法线</text>')
+    out.append('<text class="panel-title" x="50" y="116">A. Space curvature of the parallel</text>')
+    out.append('<text class="panel-title" x="520" y="116">B. Projecting it onto the ellipsoid normal</text>')
 
     # Left panel: top-down view of the parallel circle at z=z_S.
     cx, cy, radius = 235.0, 300.0, 150.0
@@ -594,7 +595,7 @@ def diagram_prime_vertical_projection() -> str:
     out.append(f'<line class="kcircle" x1="{sx:.1f}" y1="{sy:.1f}" x2="{sx + kx * k_len:.1f}" y2="{sy + ky * k_len:.1f}"/>')
     out.append(f'<circle class="surface" cx="{sx:.1f}" cy="{sy:.1f}" r="6.2"/>')
     out.append(f'<circle class="point" cx="{cx:.1f}" cy="{cy:.1f}" r="4.8"/>')
-    out.append(f'<text class="small" x="{cx - 20:.1f}" y="{cy + 24:.1f}">Z 轴</text>')
+    out.append(f'<text class="small" x="{cx - 20:.1f}" y="{cy + 24:.1f}">Z axis</text>')
     out.append(f'<text class="orange" x="{sx + 10:.1f}" y="{sy - 6:.1f}">S</text>')
     out.append(f'<text class="indigo" x="{(cx + sx) / 2 + 6:.1f}" y="{(cy + sy) / 2 - 8:.1f}">ρ = ν cosφ</text>')
     out.append(f'<text class="teal" x="{sx + kx * k_len - 92:.1f}" y="{sy + ky * k_len - 10:.1f}">κ_circle = 1/ρ</text>')
@@ -619,14 +620,14 @@ def diagram_prime_vertical_projection() -> str:
     end = (ox - arc_r * cos_phi, oy + arc_r * sin_phi)
     out.append(f'<path class="arc" d="M {start[0]:.1f},{start[1]:.1f} A {arc_r:.1f},{arc_r:.1f} 0 0 0 {end[0]:.1f},{end[1]:.1f}"/>')
     out.append(f'<text class="indigo" x="{ox - 62:.1f}" y="{oy + 36:.1f}">φ</text>')
-    out.append(f'<text class="teal" x="{q_end[0] - 4:.1f}" y="{q_end[1] - 14:.1f}">水平向内 q̂</text>')
-    out.append(f'<text class="orange" x="{normal_end[0] - 32:.1f}" y="{normal_end[1] + 22:.1f}">向内法线 -n̂</text>')
-    out.append(f'<text class="orange" x="{proj_end[0] - 52:.1f}" y="{proj_end[1] - 12:.1f}">投影长度 = |κ_circle| cosφ</text>')
+    out.append(f'<text class="teal" x="{q_end[0] - 4:.1f}" y="{q_end[1] - 14:.1f}">horizontal inward q̂</text>')
+    out.append(f'<text class="orange" x="{normal_end[0] - 32:.1f}" y="{normal_end[1] + 22:.1f}">inward normal -n̂</text>')
+    out.append(f'<text class="orange" x="{proj_end[0] - 52:.1f}" y="{proj_end[1] - 12:.1f}">projection = |κ_circle| cosφ</text>')
     out.append(f'<text class="small" x="{ox + 10:.1f}" y="{oy + 22:.1f}">S</text>')
 
-    out.append(f'<text class="formula" x="48" y="532">左图：纬线圆作为空间曲线，曲率 κ_circle 水平指向 Z 轴，|κ_circle|=1/ρ=1/(νcosφ)。</text>')
-    out.append(f'<text class="formula" x="48" y="556">右图：东西方向法曲率只取 κ_circle 在椭球法线方向的分量；q̂·(-n̂)=cosφ。</text>')
-    out.append(f'<text class="formula" x="48" y="580">所以 κ_prime vertical = κ_circle cosφ = 1/ν，曲率半径 R_prime vertical = ν。</text>')
+    out.append(f'<text class="formula" x="48" y="532">A: as a space curve the parallel has curvature κ_circle pointing to the Z axis, |κ_circle|=1/ρ=1/(νcosφ).</text>')
+    out.append(f'<text class="formula" x="48" y="556">B: the east-west normal curvature keeps only the component of κ_circle along the normal; q̂·(-n̂)=cosφ.</text>')
+    out.append(f'<text class="formula" x="48" y="580">Hence κ_prime vertical = κ_circle cosφ = 1/ν, and the radius of curvature R_prime vertical = ν.</text>')
     out.append("</svg>")
     return "\n".join(out)
 
@@ -640,8 +641,8 @@ def diagram_forward() -> str:
     y_comp = (0.0, p[1], 0.0)
     pts = wire_points() + [(0, 0, 0), (1.45, 0, 0), (0, 1.45, 0), (0, 0, 1.35), s, p, q, x_comp, y_comp]
     svg = Svg(900, 580, "Forward conversion geodetic to ECEF", pts)
-    svg.text_xy("生成式 3D 坐标变换：大地坐标 → ECEF", 30, 36, "title")
-    svg.text_xy("P = S + h·n̂；S 和 n̂ 由 φ、λ、WGS 84 椭球精确计算", 30, 58, "subtitle")
+    svg.text_xy("Geodetic → ECEF", 30, 36, "title")
+    svg.text_xy("P = S + h·n̂; S and n̂ exact from φ, λ, WGS 84", 30, 58, "subtitle")
     draw_wire(svg)
     for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
         svg.line((0, 0, 0), end, "axis", True)
@@ -674,8 +675,8 @@ def diagram_inverse() -> str:
     q = (p[0], p[1], 0.0)
     pts = wire_points() + [(0, 0, 0), (1.45, 0, 0), (0, 1.45, 0), (0, 0, 1.35), s, p, q]
     svg = Svg(900, 580, "Inverse conversion ECEF to geodetic", pts)
-    svg.text_xy("生成式 3D 坐标变换：ECEF → 大地坐标", 30, 36, "title")
-    svg.text_xy("已知 P(X,Y,Z)，先求 Q 和 λ，再寻找使 P-S 平行 n̂ 的椭球法线脚点 S", 30, 58, "subtitle")
+    svg.text_xy("ECEF → geodetic", 30, 36, "title")
+    svg.text_xy("Given P: find Q and λ, then S with P-S ∥ n̂", 30, 58, "subtitle")
     draw_wire(svg)
     for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
         svg.line((0, 0, 0), end, "axis", True)
@@ -687,13 +688,13 @@ def diagram_inverse() -> str:
     svg.circle(p, 6.6, "point")
     svg.circle(q, 5.2, "surface")
     svg.circle(s, 5.8, "surface")
-    svg.text("已知 P(X,Y,Z)", p, 8, -6, "teal")
+    svg.text("given P(X,Y,Z)", p, 8, -6, "teal")
     svg.text("Q=(X,Y,0)", q, 8, 14, "teal")
-    svg.text("S 法线脚点", s, 8, 16, "orange")
+    svg.text("S foot of normal", s, 8, 16, "orange")
     svg.text("h=(P-S)·n̂", add(s, mul(VISUAL_H_OVER_A * 0.55, n)), 10, -8, "orange")
     svg.text("λ=atan2(Y,X)", q, 20, -18, "teal")
     svg.text_xy("p=sqrt(X²+Y²)", 44, 520, "formula")
-    svg.text_xy("φ 通过迭代或 Bowring 公式求得；h 是 P-S 在法线方向上的有符号长度", 44, 544, "formula")
+    svg.text_xy("φ from iteration or Bowring's formula; h is the signed length of P-S along the normal", 44, 544, "formula")
     return svg.render()
 
 
@@ -724,8 +725,8 @@ def diagram_iterative_inverse_atan2() -> str:
     init_angle_end = (cx + 42 * cos(phi_initial), cy - 42 * sin(phi_initial))
 
     out = svg_2d_header(width, height, "Iterative inverse latitude and atan2")
-    out.append('<text class="title" x="30" y="36">方法 A 图解：为什么纬度 φ 可以写成 atan2</text>')
-    out.append('<text class="subtitle" x="30" y="58">在固定经度 λ 的 (p,z) 子午半剖面里，把非线性项先当作“竖直边修正量”</text>')
+    out.append('<text class="title" x="30" y="36">Method A: why latitude φ can be written as atan2</text>')
+    out.append('<text class="subtitle" x="30" y="58">In the (p,z) meridian half-plane at fixed λ, treat the nonlinear term as a correction to the vertical side</text>')
     out.append(f'<ellipse class="ellipse" cx="{cx}" cy="{cy}" rx="{scale}" ry="{scale * b:.1f}"/>')
     out.append(f'<line class="axis" x1="{cx - 145}" y1="{cy}" x2="{cx + 585}" y2="{cy}"/>')
     out.append(f'<line class="axis" x1="{cx}" y1="{cy + 170}" x2="{cx}" y2="{cy - 330}"/>')
@@ -750,12 +751,12 @@ def diagram_iterative_inverse_atan2() -> str:
     out.append(f'<text class="orange" x="{sx - 20:.1f}" y="{sy + 30:.1f}">S</text>')
     out.append(f'<text class="label" x="{px + 18:.1f}" y="{py + 38:.1f}">P(p,Z)</text>')
     out.append(f'<text class="indigo" x="{pcx + 22:.1f}" y="{pcy - 34:.1f}">Cₙ=(p, Z+e²νₙ sinφₙ)</text>')
-    out.append(f'<text class="orange" x="{px + 42:.1f}" y="{(py + pcy) / 2 - 10:.1f}">竖直修正 e²νₙ sinφₙ</text>')
-    out.append(f'<text class="small" x="{cx + (p * scale) * 0.45:.1f}" y="{cy + 22:.1f}">水平边 p</text>')
+    out.append(f'<text class="orange" x="{px + 42:.1f}" y="{(py + pcy) / 2 - 10:.1f}">vertical correction e²νₙ sinφₙ</text>')
+    out.append(f'<text class="small" x="{cx + (p * scale) * 0.45:.1f}" y="{cy + 22:.1f}">horizontal side p</text>')
     out.append(f'<text class="indigo" x="{cx + 72}" y="{cy - 70}">φₙ₊₁ = atan2(z_c,n, p)</text>')
-    out.append(f'<text class="small" x="{init_x + 34:.1f}" y="{init_y + 58:.1f}">初值角：atan2(Z, p(1-e²))</text>')
-    out.append('<text class="formula" x="42" y="555">由 Z = p tanφ - e²ν sinφ 得到：p tanφ = Z + e²ν sinφ。</text>')
-    out.append('<text class="formula" x="42" y="579">令 z_c,n = Z + e²ν_n sinφ_n，则 tanφ_{n+1}=z_c,n/p，所以 φ_{n+1}=atan2(z_c,n,p)。</text>')
+    out.append(f'<text class="small" x="{init_x + 34:.1f}" y="{init_y + 58:.1f}">initial angle: atan2(Z, p(1-e²))</text>')
+    out.append('<text class="formula" x="42" y="555">From Z = p tanφ - e²ν sinφ:  p tanφ = Z + e²ν sinφ.</text>')
+    out.append('<text class="formula" x="42" y="579">Let z_c,n = Z + e²ν_n sinφ_n; then tanφ_{n+1} = z_c,n/p, so φ_{n+1} = atan2(z_c,n, p).</text>')
     out.append("</svg>")
     return "\n".join(out)
 
@@ -773,8 +774,8 @@ def diagram_height() -> str:
     h_px = 120
     px, py = sx + n[0] * h_px, sy + n[1] * h_px
     out = svg_2d_header(width, height, "Ellipsoidal height along the normal")
-    out.append('<text class="title" x="30" y="36">精确高度示意：h 沿法线，不沿地心半径</text>')
-    out.append('<text class="subtitle" x="30" y="58">剖面使用 WGS 84 真实扁率；h 箭头沿同一法线方向可视化放大</text>')
+    out.append('<text class="title" x="30" y="36">h is along the normal, not the radius</text>')
+    out.append('<text class="subtitle" x="30" y="58">True WGS 84 flattening; h arrow exaggerated</text>')
     out.append(f'<ellipse class="ellipse" cx="{cx}" cy="{cy}" rx="{scale}" ry="{scale * b:.1f}"/>')
     out.append(f'<line class="axis" x1="{cx - 310}" y1="{cy}" x2="{cx + 335}" y2="{cy}"/>')
     out.append(f'<line class="axis" x1="{cx}" y1="{cy + 245}" x2="{cx}" y2="{cy - 280}"/>')
@@ -782,13 +783,13 @@ def diagram_height() -> str:
     out.append(f'<line class="normal" x1="{sx:.1f}" y1="{sy:.1f}" x2="{px:.1f}" y2="{py:.1f}"/>')
     out.append(f'<circle class="surface" cx="{sx:.1f}" cy="{sy:.1f}" r="6"/>')
     out.append(f'<circle class="point" cx="{px:.1f}" cy="{py:.1f}" r="7"/>')
-    out.append(f'<text class="small" x="{cx + 8}" y="{cy + 18}">O 地心</text>')
-    out.append(f'<text class="orange" x="{sx + 10:.1f}" y="{sy + 16:.1f}">S：椭球面法线脚点</text>')
+    out.append(f'<text class="small" x="{cx + 8}" y="{cy + 18}">O (Earth centre)</text>')
+    out.append(f'<text class="orange" x="{sx + 10:.1f}" y="{sy + 16:.1f}">S: foot of normal on the ellipsoid</text>')
     out.append(f'<text class="label" x="{px + 10:.1f}" y="{py - 6:.1f}">P</text>')
-    out.append(f'<text class="orange" x="{(sx + px) / 2 + 8:.1f}" y="{(sy + py) / 2 - 8:.1f}">h = |P-S|，方向为 n̂</text>')
-    out.append(f'<text class="indigo" x="{(cx + px) / 2 - 40:.1f}" y="{(cy + py) / 2 - 10:.1f}">r = ||P||，不是 h</text>')
-    out.append('<text class="formula" x="42" y="462">P = S + h·n̂；n̂=(cosφcosλ, cosφsinλ, sinφ)。只有球面或赤道/极点等特殊情况，法线才与地心方向重合。</text>')
-    out.append('<text class="formula" x="42" y="488">海拔/正高 H 还需要大地水准面起伏 N：常用约定 h = H + N。</text>')
+    out.append(f'<text class="orange" x="{(sx + px) / 2 + 8:.1f}" y="{(sy + py) / 2 - 8:.1f}">h = |P-S|, direction n̂</text>')
+    out.append(f'<text class="indigo" x="{(cx + px) / 2 - 40:.1f}" y="{(cy + py) / 2 - 10:.1f}">r = ||P||, not h</text>')
+    out.append('<text class="formula" x="42" y="462">P = S + h·n̂;  n̂ = (cosφcosλ, cosφsinλ, sinφ). The normal is radial only on a sphere or at the equator/poles.</text>')
+    out.append('<text class="formula" x="42" y="488">Orthometric height H also needs the geoid undulation N; the usual convention is h = H + N.</text>')
     out.append("</svg>")
     return "\n".join(out)
 
@@ -830,8 +831,8 @@ def diagram_local_tangent_enu() -> str:
         ]
     )
     svg = Svg(940, 640, "WGS 84 geodetic to local tangent ENU", pts, pad=44)
-    svg.text_xy("生成式 3D 坐标变换：WGS 84 → 本地切平面 ENU", 30, 36, "title")
-    svg.text_xy("O_L 为本地原点；east/north/up 由 φ₀、λ₀ 精确计算；局部偏移为可视化放大", 30, 58, "subtitle")
+    svg.text_xy("WGS 84 → local tangent-plane ENU", 30, 36, "title")
+    svg.text_xy("O_L: local origin; E/N/U exact from φ₀, λ₀", 30, 58, "subtitle")
     draw_wire(svg)
     for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
         svg.line((0, 0, 0), end, "axis", True)
@@ -856,7 +857,7 @@ def diagram_local_tangent_enu() -> str:
     svg.text("E east", add(origin, mul(0.44, east)), 10, -6, "teal")
     svg.text("N north", add(origin, mul(0.40, north)), 8, -5, "indigo")
     svg.text("U up", add(origin, mul(0.34, up)), 10, -6, "orange")
-    svg.text("投影到本地三轴", p_en, 8, 16, "small")
+    svg.text("projection", p_en, 8, 16, "small")
     svg.text_xy("[E,N,U]^T = [ê^T; n̂^T; û^T] · Δr", 44, 568, "formula")
     svg.text_xy("ê=(-sinλ₀, cosλ₀, 0)，û=(cosφ₀cosλ₀, cosφ₀sinλ₀, sinφ₀)，n̂=û×ê", 44, 592, "formula")
     return svg.render()
@@ -888,8 +889,8 @@ def diagram_enu_basis_derivation() -> str:
         ]
     )
     svg = Svg(940, 640, "ENU basis vectors derived at a WGS 84 local origin", pts, pad=44)
-    svg.text_xy("生成式 3D 图：ENU 三个单位轴从本地原点 O_L 导出", 30, 36, "title")
-    svg.text_xy("ê₀ 沿纬线向东；û₀ 是椭球外法线；n̂ₙ,₀ = û₀ × ê₀；ê₀ × n̂ₙ,₀ = û₀，所以 ENU 是右手系", 30, 58, "subtitle")
+    svg.text_xy("The ENU unit vectors at the local origin O_L", 30, 36, "title")
+    svg.text_xy("ê₀ east; û₀ outward normal; n̂ₙ,₀ = û₀ × ê₀", 30, 58, "subtitle")
     draw_wire(svg)
     for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
         svg.line((0, 0, 0), end, "axis", True)

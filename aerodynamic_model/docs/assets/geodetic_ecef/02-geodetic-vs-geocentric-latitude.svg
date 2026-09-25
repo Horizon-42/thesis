@@ -19,8 +19,8 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .indigo { fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 </style>
-<text class="title" x="30" y="36">精确剖面图：大地纬度 φ 与地心纬度 ψ</text>
-<text class="subtitle" x="30" y="58">WGS 84 真实扁率；φ=53.809394°，ψ=53.625811°，差值=0.183584°</text>
+<text class="title" x="30" y="36">Geodetic latitude φ vs geocentric latitude ψ</text>
+<text class="subtitle" x="30" y="58">True WGS 84 flattening; φ=53.809394°, ψ=53.625811°, difference=0.183584°</text>
 <ellipse class="ellipse" cx="410" cy="305" rx="255" ry="254.1"/>
 <line class="axis" x1="100" y1="305" x2="745" y2="305"/>
 <line class="axis" x1="410" y1="590" x2="410" y2="5"/>
@@ -33,12 +33,12 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <text class="label" x="752" y="311">p</text>
 <text class="label" x="420" y="2">z</text>
 <text class="small" x="418" y="323">O</text>
-<text class="orange" x="627.9" y="19.4">椭球法线 n̂</text>
-<text class="indigo" x="477.9" y="204.8">地心方向</text>
+<text class="orange" x="627.9" y="19.4">ellipsoid normal n̂</text>
+<text class="indigo" x="477.9" y="204.8">geocentric</text>
 <text class="label" x="570.9" y="92.1">S(p_S,z_S)</text>
 <text class="small" x="570.9" y="297.0">p_S</text>
 <text class="small" x="568.9" y="202.6">z_S</text>
 <text class="indigo" x="530" y="277">ψ = atan2(z_S,p_S)</text>
-<text class="orange" x="710" y="205">φ = 法线角</text>
-<text class="formula" x="42" y="512">tan ψ = z_S/p_S；tan φ = z_S / ((1-e²)p_S)。球体 e²=0 时二者才相同。</text>
+<text class="orange" x="710" y="205">φ = normal angle</text>
+<text class="formula" x="42" y="512">tan ψ = z_S/p_S;  tan φ = z_S/((1-e²)p_S).  They coincide only for a sphere (e²=0).</text>
 </svg>

@@ -26,12 +26,12 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 </style>
 <rect width="980" height="620" fill="#fbfdff"/>
-<text class="title" x="34" y="42">主方案：每步临时 x/y/z 增量，再转回 WGS84 位置</text>
-<text class="subtitle" x="34" y="66">x/y/z 是相对当前 origin 的单步局部坐标；φ/λ/h 是跨步骤保存的全局位置状态</text>
+<text class="title" x="34" y="42">Main scheme: temporary x/y/z increment per step, then back to WGS84</text>
+<text class="subtitle" x="34" y="66">x/y/z are single-step local coordinates about the current origin; φ/λ/h is the global state kept across steps</text>
 <rect class="accent" x="48" y="112" width="402" height="350" rx="10"/>
 <rect class="warn" x="530" y="112" width="402" height="350" rx="10"/>
-<text class="label" x="76" y="148">本步临时 local x/y/z</text>
-<text class="label" x="558" y="148">跨步骤 WGS84 φ/λ/h</text>
+<text class="label" x="76" y="148">local x/y/z</text>
+<text class="label" x="558" y="148">WGS84 φ/λ/h (across steps)</text>
 <line class="east" x1="244.0" y1="318.0" x2="394.0" y2="318.0"/>
 <line class="north" x1="244.0" y1="318.0" x2="244.0" y2="168.0"/>
 <circle class="surface" cx="244.0" cy="318.0" r="6"/>
@@ -42,8 +42,8 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <text class="indigo" x="216.0" y="156.0">y / N meters</text>
 <text class="orange" x="216.0" y="346.0">O₀</text>
 <text class="label" x="348.0" y="230.0">Δp_local(x,y,z)</text>
-<text class="formula" x="78" y="414">每步开始：x=y=z=0</text>
-<text class="formula" x="78" y="438">每步结束：只取本步 x,y,z 增量</text>
+<text class="formula" x="78" y="414">step start: x=y=z=0</text>
+<text class="formula" x="78" y="438">step end: take only this step’s x,y,z</text>
 <ellipse class="helper" cx="730.0" cy="338.0" rx="155.0" ry="118.0"/>
 <path class="helper" d="M 593.0,266.0 C 690.0,248.0 770.0,284.0 867.0,266.0"/>
 <path class="helper" d="M 593.0,302.0 C 690.0,284.0 770.0,320.0 867.0,302.0"/>
@@ -59,9 +59,9 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <path class="arrow" d="M 660.0,372.0 C 712.0,312.0 746.0,284.0 778.0,292.0"/>
 <text class="orange" x="614.0" y="404.0">P_k(φ_k,λ_k,h_k)</text>
 <text class="label" x="796.0" y="288.0">P_next(φ,λ,h)</text>
-<text class="formula" x="558" y="184">权威位置：φ, λ, h 或 ECEF r</text>
-<text class="formula" x="558" y="208">下一步用新 φ,λ,h 重建 ê,n̂,û</text>
-<text class="formula" x="80" y="526">本步转换：r₁ = r₀ + x ê₀ + y n̂₀ + z û₀，再做 ECEF→WGS84。</text>
-<text class="formula" x="80" y="554">速度转换：v_ECEF → 投影到新 ê,n̂,û → 新 V,ψ,γ。</text>
-<text class="formula" x="80" y="582">Δφ/Δλ 公式是一阶近似；主方案保留 x/y 增量并走 ECEF 反算。</text>
+<text class="formula" x="558" y="184">authoritative: φ, λ, h or ECEF r</text>
+<text class="formula" x="558" y="208">next step rebuilds ê,n̂,û from new φ,λ,h</text>
+<text class="formula" x="80" y="526">Step update: r₁ = r₀ + x ê₀ + y n̂₀ + z û₀, then ECEF→WGS84.</text>
+<text class="formula" x="80" y="554">Velocity: v_ECEF → project onto new ê,n̂,û → new V,ψ,γ.</text>
+<text class="formula" x="80" y="582">The Δφ/Δλ formula is first-order; the main scheme uses the ECEF inverse.</text>
 </svg>

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420" role="img" aria-labelledby="title">
-  <title id="title">位置方程 Step 2：ψ 分解水平速度</title>
+  <title id="title">Position equations, step 2: split horizontal V by ψ</title>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L9,3.5 L0,7 Z" fill="#233143"/>
@@ -40,5 +40,5 @@
     .violet { fill: #7b3f93; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .red { fill: #b7352d; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   </style>
-  <rect class="panel" x="26.0" y="26.0" width="928.0" height="368.0"/><text class="title" x="54.0" y="66.0">位置方程 Step 2：ψ 分解水平速度</text><ellipse class="soft" cx="508.0" cy="250.0" rx="238.0" ry="124.0"/><line class="horizon" x1="334.0" y1="300.0" x2="754.0" y2="300.0"/><line class="component" x1="334.0" y1="300.0" x2="334.0" y2="80.0"/><text class="small" x="752.0" y="320.0">X</text><text class="small" x="312.0" y="76.0">Y</text><line class="axis" x1="334.0" y1="300.0" x2="564.7" y2="155.9" marker-end="url(#arrow)"/><text class="label" x="576.7" y="159.9">Vh = V cosγ</text><line class="component" x1="334.0" y1="300.0" x2="564.7" y2="300.0" marker-end="url(#arrow)"/><text class="blue" x="460.0" y="290.0">Vh cosψ</text><line class="component" x1="564.7" y1="300.0" x2="564.7" y2="155.9" marker-end="url(#arrow)"/><text class="blue" x="574.7" y="262.0">Vh sinψ</text><path class="bank" d="M410,300 A76,76 0 0,0 398,262"/><text class="violet" x="418.0" y="276.0">ψ</text>
+  <rect class="panel" x="26.0" y="26.0" width="928.0" height="368.0"/><text class="title" x="54.0" y="66.0">Position equations, step 2: split horizontal V by ψ</text><ellipse class="soft" cx="508.0" cy="250.0" rx="238.0" ry="124.0"/><line class="horizon" x1="334.0" y1="300.0" x2="754.0" y2="300.0"/><line class="component" x1="334.0" y1="300.0" x2="334.0" y2="80.0"/><text class="small" x="752.0" y="320.0">X</text><text class="small" x="312.0" y="76.0">Y</text><line class="axis" x1="334.0" y1="300.0" x2="564.7" y2="155.9" marker-end="url(#arrow)"/><text class="label" x="576.7" y="159.9">Vh = V cosγ</text><line class="component" x1="334.0" y1="300.0" x2="564.7" y2="300.0" marker-end="url(#arrow)"/><text class="blue" x="460.0" y="290.0">Vh cosψ</text><line class="component" x1="564.7" y1="300.0" x2="564.7" y2="155.9" marker-end="url(#arrow)"/><text class="blue" x="574.7" y="262.0">Vh sinψ</text><path class="bank" d="M410,300 A76,76 0 0,0 398,262"/><text class="violet" x="418.0" y="276.0">ψ</text>
 </svg>

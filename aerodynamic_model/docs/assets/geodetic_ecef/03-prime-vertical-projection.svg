@@ -28,19 +28,19 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 .arc { fill: none; stroke: #3d58a8; stroke-width: 1.8; }
 .panel-box { fill: none; stroke: #d8e1e8; stroke-width: 1.2; }
 </style>
-<text class="title" x="30" y="36">图解：为什么 κ_circle 和 κ_prime vertical 不一样</text>
-<text class="subtitle" x="30" y="58">同一教学点 φ=53.809394°；投影因子 cosφ=0.5905。纬线圆曲率先是水平向内，再投影到椭球法线方向。</text>
+<text class="title" x="30" y="36">Why κ_circle and κ_prime vertical differ</text>
+<text class="subtitle" x="30" y="58">Teaching point φ=53.809394°; projection factor cosφ=0.5905. The parallel’s curvature points horizontally inward, then is projected onto the normal.</text>
 <rect class="panel-box" x="30" y="86" width="410" height="410" rx="8"/>
 <rect class="panel-box" x="500" y="86" width="410" height="410" rx="8"/>
-<text class="panel-title" x="50" y="116">A. 纬线圆的空间曲率</text>
-<text class="panel-title" x="520" y="116">B. 把曲率投影到椭球法线</text>
+<text class="panel-title" x="50" y="116">A. Space curvature of the parallel</text>
+<text class="panel-title" x="520" y="116">B. Projecting it onto the ellipsoid normal</text>
 <circle class="parallel-circle" cx="235.0" cy="300.0" r="150.0"/>
 <line class="radius" x1="235.0" y1="300.0" x2="357.9" y2="214.0"/>
 <line class="tangent" x1="385.4" y1="253.3" x2="330.3" y2="174.6"/>
 <line class="kcircle" x1="357.9" y1="214.0" x2="282.5" y2="266.7"/>
 <circle class="surface" cx="357.9" cy="214.0" r="6.2"/>
 <circle class="point" cx="235.0" cy="300.0" r="4.8"/>
-<text class="small" x="215.0" y="324.0">Z 轴</text>
+<text class="small" x="215.0" y="324.0">Z axis</text>
 <text class="orange" x="367.9" y="208.0">S</text>
 <text class="indigo" x="302.4" y="249.0">ρ = ν cosφ</text>
 <text class="teal" x="190.5" y="256.7">κ_circle = 1/ρ</text>
@@ -54,11 +54,11 @@ svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
 <circle class="point" cx="675.0" cy="392.0" r="4.8"/>
 <path class="arc" d="M 691.0,310.0 A 44.0,44.0 0 0 0 709.0,345.5"/>
 <text class="indigo" x="673.0" y="346.0">φ</text>
-<text class="teal" x="559.0" y="296.0">水平向内 q̂</text>
-<text class="orange" x="601.4" y="470.8">向内法线 -n̂</text>
-<text class="orange" x="623.0" y="380.0">投影长度 = |κ_circle| cosφ</text>
+<text class="teal" x="559.0" y="296.0">horizontal inward q̂</text>
+<text class="orange" x="601.4" y="470.8">inward normal -n̂</text>
+<text class="orange" x="623.0" y="380.0">projection = |κ_circle| cosφ</text>
 <text class="small" x="745.0" y="332.0">S</text>
-<text class="formula" x="48" y="532">左图：纬线圆作为空间曲线，曲率 κ_circle 水平指向 Z 轴，|κ_circle|=1/ρ=1/(νcosφ)。</text>
-<text class="formula" x="48" y="556">右图：东西方向法曲率只取 κ_circle 在椭球法线方向的分量；q̂·(-n̂)=cosφ。</text>
-<text class="formula" x="48" y="580">所以 κ_prime vertical = κ_circle cosφ = 1/ν，曲率半径 R_prime vertical = ν。</text>
+<text class="formula" x="48" y="532">A: as a space curve the parallel has curvature κ_circle pointing to the Z axis, |κ_circle|=1/ρ=1/(νcosφ).</text>
+<text class="formula" x="48" y="556">B: the east-west normal curvature keeps only the component of κ_circle along the normal; q̂·(-n̂)=cosφ.</text>
+<text class="formula" x="48" y="580">Hence κ_prime vertical = κ_circle cosφ = 1/ν, and the radius of curvature R_prime vertical = ν.</text>
 </svg>
