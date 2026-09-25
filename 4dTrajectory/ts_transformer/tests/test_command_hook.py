@@ -3,18 +3,11 @@ backends without actuator states refuse it."""
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
-TS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR.parent, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_BACKENDS, CONTROL_DYNAMICS_FIRST_ORDER_LAG,

@@ -17,18 +17,11 @@ same flight model in another coordinate, and for nothing stored to move:
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
-TS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TS_DIR.parents[1]
-for path in (REPO_ROOT, TS_DIR.parent):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, heading_rate_rad_s  # noqa: E402
 from ts_transformer.backbone.adapters import build_model  # noqa: E402

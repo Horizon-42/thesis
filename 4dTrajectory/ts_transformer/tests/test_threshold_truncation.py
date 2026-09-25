@@ -26,19 +26,12 @@ vectored arm were read on a window that ended out on the downwind.
 from __future__ import annotations
 
 import math
-import sys
 from dataclasses import replace
-from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
-TS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR.parent, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 from ts_transformer.data.channels import IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402

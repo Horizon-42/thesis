@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import numpy as np
 import torch
 
 
-TS_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(TS_ROOT.parent), str(REPO_ROOT)]
 
 import ts_transformer.cli.benchmark_batch as batch_benchmark  # noqa: E402
 import ts_transformer.data.channels as channels  # noqa: E402

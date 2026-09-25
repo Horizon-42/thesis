@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 
-TS_DIR = Path(__file__).resolve().parents[1]
-if str(TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(TS_DIR.parent))
 
 from ts_transformer.config import TSConfig  # noqa: E402
 from ts_transformer.data.reference_velocity import (  # noqa: E402

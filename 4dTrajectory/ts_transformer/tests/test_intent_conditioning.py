@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,11 +11,6 @@ import numpy as np
 import pytest
 import torch
 
-_TS_DIR = Path(__file__).resolve().parents[1]
-_REPO_ROOT = _TS_DIR.parents[1]
-for path in (_TS_DIR.parent, _REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 import ts_transformer.data.channels as ch  # noqa: E402
 import ts_transformer.data.dataset as dataset_module  # noqa: E402

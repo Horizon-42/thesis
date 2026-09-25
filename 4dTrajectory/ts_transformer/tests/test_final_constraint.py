@@ -13,9 +13,6 @@ import torch
 
 TS_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR.parent, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 import ts_transformer.data.channels as ch  # noqa: E402
 import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402

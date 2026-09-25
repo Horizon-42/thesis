@@ -8,18 +8,11 @@ retired vocabulary value still NAMES a stored run and no longer BUILDS one.
 from __future__ import annotations
 
 import math
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
-TS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR.parent, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402
 from ts_transformer.config import (  # noqa: E402

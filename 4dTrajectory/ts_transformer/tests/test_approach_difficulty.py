@@ -10,18 +10,11 @@ axes would silently mean two different things across an ablation.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from types import SimpleNamespace
-import sys
 
 import numpy as np
 import pytest
 
-TS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TS_DIR.parents[1]
-for path in (REPO_ROOT, TS_DIR.parent):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 from aerodynamic_model.common import GeodeticState  # noqa: E402
 from ts_transformer.data.approach_difficulty import (  # noqa: E402

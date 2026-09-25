@@ -4,17 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
 
-TS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(__file__).resolve().parents[3]
-for path in (TS_DIR.parent, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 import ts_transformer.data.data_provenance as data_provenance  # noqa: E402
 import ts_transformer.experiments.pipeline as run_ts_pipeline  # noqa: E402

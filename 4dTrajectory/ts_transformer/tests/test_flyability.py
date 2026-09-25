@@ -12,17 +12,9 @@ against the observed tracks rather than an absolute rate.
 """
 
 import math
-import sys
-from pathlib import Path
 
 import pytest
 
-_TS_DIR = Path(__file__).resolve().parents[1]
-if str(_TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(_TS_DIR.parent))
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
 from aircraft.aircraft_sets import AIRCRAFT_PRESETS  # noqa: E402

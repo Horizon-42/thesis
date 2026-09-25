@@ -15,18 +15,11 @@ inverse drifts from its RHS fails the tolerance.
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
-import sys
 
 import numpy as np
 import pytest
 import torch
 
-TS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TS_DIR.parents[1]
-for path in (REPO_ROOT, TS_DIR.parent):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,

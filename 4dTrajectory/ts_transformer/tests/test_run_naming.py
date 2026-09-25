@@ -1,13 +1,8 @@
 """The canonical run-name grammar: output · backbone · dynamics · loss · meta."""
 
-import sys
-from pathlib import Path
 
 import pytest
 
-_TS_DIR = Path(__file__).resolve().parents[1]
-if str(_TS_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(_TS_DIR.parent))
 
 from ts_transformer.config import (  # noqa: E402
     CONTROL_DYNAMICS_FIRST_ORDER_LAG,

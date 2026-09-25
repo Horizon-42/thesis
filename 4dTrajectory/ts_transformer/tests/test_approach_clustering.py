@@ -11,8 +11,6 @@ import numpy as np
 import pytest
 
 TS_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path[:0] = [str(TS_ROOT.parent), str(REPO_ROOT)]
 
 from ts_transformer.approach_clustering import evaluation as clustering_evaluation
 from ts_transformer.approach_clustering.artifacts import write_clustering_artifacts

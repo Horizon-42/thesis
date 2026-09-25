@@ -247,12 +247,12 @@ def main(argv: list[str] | None = None) -> int:
         table = []
         for label, b in blocks.items():
             table.append([
-                label, cfa._fmt(b["ade_mean_m"]), cfa._fmt(b["fde_mean_m"]), cfa._fmt(b["fde_median_m"]),
+                label, cfa.fmt(b["ade_mean_m"]), cfa.fmt(b["fde_mean_m"]), cfa.fmt(b["fde_median_m"]),
                 *gm.geometry_table_cells(b),
-                cfa._fmt(b["endpoint_cross_track_median_m"]), cfa._fmt(b["endpoint_cross_track_abs_p95_m"]),
-                cfa._fmt(b["first_step_offset_median_m"]),
+                cfa.fmt(b["endpoint_cross_track_median_m"]), cfa.fmt(b["endpoint_cross_track_abs_p95_m"]),
+                cfa.fmt(b["first_step_offset_median_m"]),
                 f"{b['coverage']:.1%}", f"{b['lateral_violation_rate']:.1%}", f"{b['flights_any_lateral']:.1%}",
-                f"{cfa._fmt(b['lateral_excess_max_mean_m'])}/{cfa._fmt(b['lateral_excess_max_p95_m'])}",
+                f"{cfa.fmt(b['lateral_excess_max_mean_m'])}/{cfa.fmt(b['lateral_excess_max_p95_m'])}",
                 f"{b['vertical_violation_rate']:.1%}", f"{b['flights_any_vertical']:.1%}",
                 f"{b['lateral_hinge_mean']:.3f}/{b['vertical_hinge_mean']:.3f}",
                 str(b["claimed_rows"]), f"{b['claimed_lateral_violation_rate']:.1%}",

@@ -7,17 +7,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 import json
-from pathlib import Path
-import sys
 
 import numpy as np
 import pytest
 
-TS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = TS_DIR.parents[1]
-for path in (TS_DIR.parent, REPO_ROOT, REPO_ROOT / "geokit" / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
 
