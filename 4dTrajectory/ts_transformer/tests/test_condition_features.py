@@ -48,7 +48,7 @@ from ts_transformer.outputs.conditioning import (
     condition_names,
     condition_vector,
 )
-from ts_transformer.outputs.control.forecast import _dynamics_batch
+from ts_transformer.outputs.control.forecast import dynamics_batch
 from ts_transformer.outputs.control.supervision import probe_dynamics
 from ts_transformer.outputs.dynamics.context import dynamics_arrays
 from ts_transformer.run_naming import run_display_name, run_parameter_rows, run_slug
@@ -167,24 +167,10 @@ def test_the_batch_context_and_the_forecast_write_the_configured_set():
     batch = unpack_batch(windows.batch(np.arange(len(series))))
     dynamics = batch[5]
     assert np.array_equal(dynamics["condition"].numpy(), expected)
-    forecast = _dynamics_batch(series, config.seq_len - 1, torch.device("cpu"), config)
+    forecast = dynamics_batch(series, config.seq_len - 1, torch.device("cpu"), config)
     assert np.array_equal(forecast["condition"].numpy(), expected)
-    raw = _dynamics_batch(series, config.seq_len - 1, torch.device("cpu"), _config())
+    raw = dynamics_batch(series, config.seq_len - 1, torch.device("cpu"), _config())
     assert not np.array_equal(raw["condition"].numpy(), expected)
-
-
-def test_the_predictability_report_feeds_the_model_the_configured_set():
-    """`batch_dynamics_tensors` builds the rows the report runs the model on, apart from the
-    forecast's own batch — so it is a call site of its own (review N1)."""
-    from ts_transformer.experiments.predictability_report import batch_dynamics_tensors
-
-    config = _config(**RATIOS)
-    series = _series(config)
-    report = batch_dynamics_tensors(series, config, torch.device("cpu"))
-    forecast = _dynamics_batch(series, config.seq_len - 1, torch.device("cpu"), config)
-    assert torch.equal(report["condition"], forecast["condition"])
-    raw = batch_dynamics_tensors(series, _config(), torch.device("cpu"))
-    assert not torch.equal(raw["condition"], report["condition"])
 
 
 def test_a_ratios_checkpoint_comes_back_reading_ratios(tmp_path):
@@ -212,8 +198,8 @@ def test_a_ratios_checkpoint_comes_back_reading_ratios(tmp_path):
     metadata = json.loads((tmp_path / "checkpoint_metadata.json").read_text())
     assert loaded.control_condition_features == CONTROL_CONDITION_FEATURES_RATIOS
     assert metadata["control_recipe"]["condition_features"] == CONTROL_CONDITION_FEATURES_RATIOS
-    rows = _dynamics_batch(series, loaded.seq_len - 1, torch.device("cpu"), loaded)
-    expected = _dynamics_batch(series, config.seq_len - 1, torch.device("cpu"), config)
+    rows = dynamics_batch(series, loaded.seq_len - 1, torch.device("cpu"), loaded)
+    expected = dynamics_batch(series, config.seq_len - 1, torch.device("cpu"), config)
     assert torch.equal(rows["condition"], expected["condition"])
     assert model.condition_encoder[0].in_features == CONDITION_WIDTH
 

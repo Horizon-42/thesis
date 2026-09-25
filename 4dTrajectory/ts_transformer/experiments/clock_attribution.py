@@ -23,6 +23,7 @@ import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.repo_layout import checkpoint_arrival_manifests  # noqa: E402
 import ts_transformer.experiments.predictability_report as common_report  # noqa: E402
 from ts_transformer.config import PREDICTION_CONTROL, default_anchor  # noqa: E402
+from ts_transformer.outputs.control.forecast import dynamics_batch  # noqa: E402
 from ts_transformer.outputs.dynamics.rollout import rollout_control_endpoints  # noqa: E402
 from ts_transformer.data.data_provenance import (  # noqa: E402
     checkpoint_data_provenance,
@@ -110,7 +111,7 @@ def evaluate_clock_variants(
         for start in range(0, len(series), batch_size):
             stop = min(start + batch_size, len(series))
             batch_series = series[start:stop]
-            dynamics = common_report.batch_dynamics_tensors(batch_series, run.config, device)
+            dynamics = dynamics_batch(batch_series, default_anchor(run.config), device, run.config)
             output = run.model(torch.from_numpy(histories[start:stop]).to(device), dynamics)
             variants = duration_variants(
                 output.segment_durations,

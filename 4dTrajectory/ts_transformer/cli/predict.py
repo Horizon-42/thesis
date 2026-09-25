@@ -342,6 +342,18 @@ def _cut_at_threshold(forecasts, series, truncate_at_threshold: bool):
     ]
 
 
+def _emit(records: list, metrics: list, batch_series, forecasts, *, start: int, config: TSConfig, split: str) -> None:
+    """One batch's forecasts as records and observed metrics, in flight order: the one emission every record set of a
+    predict run goes through (the main records, the latent modes / random / shuffled arms, the posterior, the fan
+    leaves), so a per-record step is threaded through all of them or none."""
+    for offset, (item, forecast) in enumerate(zip(batch_series, forecasts, strict=True)):
+        records.append(build_prediction_record(
+            item, forecast, index=start + offset, model_name=config.model, horizon_mode=config.horizon_mode,
+            split=split,
+        ))
+        metrics.append(observed_series_metrics(item, forecast, points=config.validation_common_grid_points))
+
+
 def _fan_forecast(model, series, config, normalizer, device, options: PredictOptions, leaf: FanLeaf):
     """One leaf's decode — the batch flown to the arrival time this leaf names."""
     return forecast_approaches(
@@ -632,16 +644,9 @@ def predict_sets(model, series, config, normalizer, device, options: PredictOpti
                 samples=options.latent_samples, seed=options.latent_seed + start, device=device,
                 cta_offset_s=options.forecast.cta_offset_s,
             )):
-                for offset, (s, forecast) in enumerate(zip(
-                    batch_series, _cut_at_threshold(mode_forecasts, batch_series, options.forecast.truncate_at_threshold), strict=True
-                )):
-                    mode_records[index].append(build_prediction_record(
-                        s, forecast, index=start + offset, model_name=config.model,
-                        horizon_mode=config.horizon_mode, split=split,
-                    ))
-                    mode_metrics[index].append(observed_series_metrics(
-                        s, forecast, points=config.validation_common_grid_points,
-                    ))
+                _emit(mode_records[index], mode_metrics[index], batch_series,
+                      _cut_at_threshold(mode_forecasts, batch_series, options.forecast.truncate_at_threshold),
+                      start=start, config=config, split=split)
         if options.latent_random:
             for index, random_forecasts in enumerate(random_latent_forecasts(
                 model, batch_series, config, normalizer,
@@ -649,31 +654,17 @@ def predict_sets(model, series, config, normalizer, device, options: PredictOpti
                 seed=options.latent_seed + LATENT_RANDOM_SEED_OFFSET + start, device=device,
                 cta_offset_s=options.forecast.cta_offset_s,
             )):
-                for offset, (s, forecast) in enumerate(zip(
-                    batch_series, _cut_at_threshold(random_forecasts, batch_series, options.forecast.truncate_at_threshold), strict=True
-                )):
-                    random_records[index].append(build_prediction_record(
-                        s, forecast, index=start + offset, model_name=config.model,
-                        horizon_mode=config.horizon_mode, split=split,
-                    ))
-                    random_metrics[index].append(observed_series_metrics(
-                        s, forecast, points=config.validation_common_grid_points,
-                    ))
+                _emit(random_records[index], random_metrics[index], batch_series,
+                      _cut_at_threshold(random_forecasts, batch_series, options.forecast.truncate_at_threshold),
+                      start=start, config=config, split=split)
         if options.latent_shuffle:
-            for offset, (s, forecast) in enumerate(zip(batch_series, _cut_at_threshold(
+            _emit(shuffled_records, shuffled_metrics, batch_series, _cut_at_threshold(
                 shuffled_latent_forecasts(
                     model, batch_series, config, normalizer,
                     seed=options.latent_seed + start, device=device,
                     cta_offset_s=options.forecast.cta_offset_s,
                 ), batch_series, options.forecast.truncate_at_threshold,
-            ), strict=True)):
-                shuffled_records.append(build_prediction_record(
-                    s, forecast, index=start + offset, model_name=config.model,
-                    horizon_mode=config.horizon_mode, split=split,
-                ))
-                shuffled_metrics.append(observed_series_metrics(
-                    s, forecast, points=config.validation_common_grid_points,
-                ))
+            ), start=start, config=config, split=split)
         if options.z_from_posterior:
             forecasts = _cut_at_threshold(posterior_latent_forecasts(
                 model, batch_series, config, normalizer, device=device, cta_offset_s=options.forecast.cta_offset_s,
@@ -712,16 +703,8 @@ def predict_sets(model, series, config, normalizer, device, options: PredictOpti
                         model, batch_series, config, normalizer, device, options, leaf
                     )
                 )
-                for offset, (item, forecast) in enumerate(
-                    zip(batch_series, leaf_forecasts, strict=True)
-                ):
-                    fan_records.setdefault(leaf.directory, []).append(build_prediction_record(
-                        item, forecast, index=start + offset, model_name=config.model,
-                        horizon_mode=config.horizon_mode, split=split,
-                    ))
-                    fan_metrics.setdefault(leaf.directory, []).append(observed_series_metrics(
-                        item, forecast, points=config.validation_common_grid_points,
-                    ))
+                _emit(fan_records.setdefault(leaf.directory, []), fan_metrics.setdefault(leaf.directory, []),
+                      batch_series, leaf_forecasts, start=start, config=config, split=split)
         else:
             forecasts = forecast_approaches(
                 model,
@@ -731,22 +714,7 @@ def predict_sets(model, series, config, normalizer, device, options: PredictOpti
                 device=device,
                 options=options.forecast,
             )
-        for offset, (s, forecast) in enumerate(
-            zip(batch_series, forecasts, strict=True)
-        ):
-            records.append(build_prediction_record(
-                s,
-                forecast,
-                index=start + offset,
-                model_name=config.model,
-                horizon_mode=config.horizon_mode,
-                split=split,
-            ))
-            flight_metrics.append(observed_series_metrics(
-                s,
-                forecast,
-                points=config.validation_common_grid_points,
-            ))
+        _emit(records, flight_metrics, batch_series, forecasts, start=start, config=config, split=split)
 
     return PredictionSets(
         records=records,

@@ -67,11 +67,12 @@ def record_newton_controls(
     )
 
 
-def _dynamics_batch(
+def dynamics_batch(
     series: Sequence[FlightSeries], anchor: int, device: torch.device,
     config: TSConfig, cta_offset_s: float = 0.0, cta_s: np.ndarray | None = None,
 ) -> dict[str, torch.Tensor]:
-    """The per-flight context, plus the CTA when the decoder takes one.
+    """The per-flight context, plus the CTA when the decoder takes one — the batch every control-path forward pass
+    outside training is run on (the forecast here, `predictability_report`, `clock_attribution`).
 
     Two sources, and which one it is decides whether the run READS THE FUTURE: under
     ``given`` the CTA is the truth duration + ``cta_offset_s`` (the counterfactual a
@@ -169,7 +170,7 @@ def forecast_control_batch(
     if histories is None:
         histories = history_batch(series, config, normalizer, anchor)
     if dynamics is None:
-        dynamics = _dynamics_batch(series, anchor, device, config, cta_offset_s, cta_s)
+        dynamics = dynamics_batch(series, anchor, device, config, cta_offset_s, cta_s)
     prediction = _control_prediction_batch(model, histories, dynamics, device, latent=latent)
     cta = (
         dynamics["cta_s"].detach().cpu().numpy().astype(np.float64)
@@ -373,7 +374,7 @@ def _latent_batch(
         anchor,
         device,
         history_batch(series, config, normalizer, anchor),
-        _dynamics_batch(series, anchor, device, config, cta_offset_s),
+        dynamics_batch(series, anchor, device, config, cta_offset_s),
     )
 
 

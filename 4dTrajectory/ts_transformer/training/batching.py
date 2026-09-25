@@ -71,7 +71,11 @@ def _probe_training_step(config: TSConfig, batch_size: int, device: torch.device
         context = output_strategy.probe_context(batch_size, device, config)
         dense_supervision = output_strategy.probe_dense_supervision(batch_size, device, config)
         optimizer.zero_grad()
-        prediction = output_strategy.probe_prediction(model_forward(model, x, context))
+        # the future as the training loop hands it over (`train.fit_model`): a model that consumes it (the latent
+        # control model's posterior encoder and its KL) builds the graph it trains, every other model ignores it
+        prediction = output_strategy.probe_prediction(
+            model_forward(model, x, context, future=(target, target_final_time_s))
+        )
         control_diagnostics = output_strategy.training_diagnostics(config)
         if control_diagnostics is not None:
             control_diagnostics.record_prediction(prediction, context)

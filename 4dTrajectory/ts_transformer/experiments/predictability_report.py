@@ -48,6 +48,7 @@ from ts_transformer.data.data_provenance import (  # noqa: E402
     require_matching_data_provenance,
 )
 from ts_transformer.data.dataset import FlightSeries, build_series, load_flight_dicts  # noqa: E402
+from ts_transformer.outputs.control.forecast import dynamics_batch  # noqa: E402
 from ts_transformer.outputs.dynamics.context import dynamics_arrays  # noqa: E402
 from ts_transformer.outputs.envelope import ControlContract, control_contract  # noqa: E402
 from ts_transformer.training.fixed_anchor_validation import (  # noqa: E402
@@ -186,24 +187,6 @@ _NODE_PREDICTORS = {
 }
 
 
-def batch_dynamics_tensors(
-    series: Sequence[FlightSeries], config: TSConfig, device: torch.device
-) -> dict[str, torch.Tensor]:
-    """Build the exact per-flight conditioning/rollout tensors used by training."""
-    anchor = default_anchor(config)
-    rows = [
-        dynamics_arrays(
-            item, anchor, parameterization=config.control_thrust_parameterization,
-            condition_features=config.control_condition_features,
-        )
-        for item in series
-    ]
-    return {
-        name: torch.from_numpy(np.stack([row[name] for row in rows])).to(device)
-        for name in rows[0]
-    }
-
-
 def predict_batch_nodes(
     run: LoadedRun,
     histories: torch.Tensor,
@@ -218,7 +201,7 @@ def predict_batch_nodes(
 ]:
     """Return physical nodes, their clock, and the optional sparse control schedule."""
     if uses_control_dynamics(run.config.prediction_output):
-        dynamics = batch_dynamics_tensors(series, run.config, device)
+        dynamics = dynamics_batch(series, default_anchor(run.config), device, run.config)
         output = run.model(histories, dynamics)
         points = run.config.validation_common_grid_points
         progress = torch.arange(
