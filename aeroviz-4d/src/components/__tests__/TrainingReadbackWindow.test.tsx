@@ -17,7 +17,7 @@ import { parseTrainingExecutorOverlay, type TrainingExecutorFlight } from "../..
 import type { TrainingLayers } from "../../context/AppContext";
 import { parseTrainingAutopilot, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
 import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
+import { failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
 import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 
 const ALL: TrainingLayers = { headingBands: true, corridor: true, vertical: true, candidates: true };
@@ -30,11 +30,14 @@ function executorFlight(position = 0): TrainingExecutorFlight {
   return overlay.value.flights[position];
 }
 
-function autopilotSegment(): TrainingAutopilotSegment {
+/** The heading 225° word's segment, flown; ``failedWithStates``: its dynamics failing, that many states kept. */
+function autopilotSegment(failedWithStates: number | null = null): TrainingAutopilotSegment {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
   const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
-  const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
+  const raw = mockAutopilotAnswer(parsed.value, request);
+  const answer = parseTrainingAutopilot(failedWithStates === null ? raw : failedAnswer(raw, failedWithStates), request,
+    mockSelection(parsed.value, request));
   if (!answer.ok) throw new Error(answer.problem);
   return answer.value;
 }
@@ -278,6 +281,30 @@ describe("the live executor in the read-back check", () => {
     cleanup();
     open(ALL, 0, 60, "speed", null, autopilotSegment());
     expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/^Autopilot — heading 225° from step 8/);
+  });
+
+  it("shows what every line and colour is behind ⓘ, as text", () => {
+    cleanup();
+    open(ALL, 0, 16, "heading", executorFlight(0), autopilotSegment());
+    fireEvent.click(screen.getByRole("button", { name: "What the lines and colours are" }));
+    const notes = screen.getByRole("note", { name: "What the lines and colours are" }).textContent!;
+    expect(notes).toMatch(/heading band.*a heading word's band: its target ± the tolerance/);
+    expect(notes).toMatch(/Executor replay.*Its flown track, and its heading, altitude and ground speed on its own clock/);
+    expect(notes).toMatch(/Autopilot.*The picked word's segment, flown by the executor when it was picked/);
+  });
+
+  it("says so when its dynamics failed in its first cycle, and draws nothing", () => {
+    cleanup();
+    open(ALL, 0, 16, "heading", null, autopilotSegment(1));
+    expect(count("polyline.training-readback-autopilot")).toBe(0);
+    expect(count("rect.training-readback-autopilot-band")).toBe(0);
+    expect(screen.getByLabelText("The autopilot, live").textContent)
+      .toBe("Autopilot — heading 225° from step 8 · not judged · no line to draw: it ended in its first cycle");
+    // failed later, it has its line, and the band on the rows its judge read
+    cleanup();
+    open(ALL, 0, 16, "heading", null, autopilotSegment(7));
+    expect(count("polyline.training-readback-autopilot")).toBe(4);
+    expect(count("rect.training-readback-autopilot-band")).toBe(1);
   });
 
   it("says nothing of it when there is none", () => {

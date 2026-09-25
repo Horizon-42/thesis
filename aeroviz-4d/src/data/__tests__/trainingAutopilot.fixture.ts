@@ -87,3 +87,33 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
     judgedTrackDeg: judged ? Array.from({ length: judgedSteps }, () => 225) : null,
   };
 }
+
+/** ``answer`` (a heading word's, `mockAutopilotAnswer`) as a dynamics failure after ``states`` − 1 cycles: the failed
+ *  state left out of the track, as the backend leaves it; its band on the rows its judge read before the failure — with
+ *  one state, none: the gate refuses a track that short, and the word is not judged. */
+export function failedAnswer(answer: Record<string, any>, states: number): Record<string, any> {
+  const track = answer.track;
+  const cycles = track.tS.length - 1;
+  // the judged steps are every `stepCycles`-th point of the track, from its first
+  const stepCycles = answer.judgedTrackDeg === null ? null : cycles / (answer.judgedTrackDeg.length - 1);
+  for (const key of Object.keys(track)) {
+    // a state per point, or a command per cycle between them
+    track[key] = track[key].slice(0, track[key].length === cycles ? states - 1 : states);
+  }
+  answer.timing.cycles = states;                     // the failed cycle is counted
+  answer.limits.cycles = states;
+  answer.end = { reason: "dynamics_failure", reachedSegmentEnd: false, offsetFromObserved: null, flownS: states - 1,
+    crossing: null, refused: states === 1 ? "the flown track is too short to judge" : null };
+  if (states === 1) {
+    answer.word = { status: "not judged", checks: [], reason: "the gate refused the flown track", heading: null };
+    answer.judgedTrackDeg = null;
+    return answer;
+  }
+  const steps = Math.floor((states - 1) / stepCycles!) + 1;   // the judged steps among the states kept
+  answer.judgedTrackDeg = answer.judgedTrackDeg.slice(0, steps);
+  const band = answer.word.heading;
+  band.stopRow = Math.max(band.firstRow, Math.min(band.stopRow, answer.segment.row + steps));
+  band.inside = band.inside.slice(0, band.stopRow - band.firstRow);
+  answer.word.checks[0] = { ...answer.word.checks[0], inside: band.inside.filter(Boolean).length, rows: band.inside.length };
+  return answer;
+}

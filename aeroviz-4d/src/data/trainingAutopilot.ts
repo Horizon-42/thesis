@@ -61,6 +61,15 @@ export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[numbe
 /** MIRROR of `autopilot_segment/payload.py` `SEGMENT_END`: the flight reached the point where its word's envelope ends. */
 export const TRAINING_AUTOPILOT_SEGMENT_END = "segment_end" as const;
 export const TRAINING_AUTOPILOT_PATH = "/autopilot/segment";
+/** This page, as the backend knows it: a request from the same page supersedes an older one still waiting or flying there
+ *  (HTTP 409), so clicking through bands never queues segments nobody is looking at. One per page load: 128 random bits
+ *  in hex — `getRandomValues`, not `randomUUID`, which exists only in a secure context, and the app is opened over plain
+ *  http from other machines. */
+export const TRAINING_AUTOPILOT_CLIENT_ID = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)),
+  (byte) => byte.toString(16).padStart(2, "0")).join("");
+/** The page's requests, numbered in the order it makes them (`seq`): the backend flies only the page's highest, whatever
+ *  order they happen to arrive in. */
+let requestSeq = 0;
 
 /** What the Training view asks for: the clicked word's segment of the selected flight. */
 export interface TrainingAutopilotRequest {
@@ -469,7 +478,8 @@ export async function requestTrainingAutopilot(
   let response: Response;
   try {
     response = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal,
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...request, clientId: TRAINING_AUTOPILOT_CLIENT_ID, seq: (requestSeq += 1) }), signal,
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;

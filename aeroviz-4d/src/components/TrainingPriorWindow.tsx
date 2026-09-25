@@ -41,6 +41,7 @@ import { priorStep, type TrainingPriorView } from "../data/trainingOverlays";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import TrainingWindow from "./training/TrainingWindow";
 import { ChartFrame } from "./training/chartKit";
+import NotesToggle from "./training/NotesToggle";
 
 const DEFAULT_W = 960;
 const MIN_W = 420;
@@ -86,6 +87,12 @@ export default function TrainingPriorWindow({
   };
   const y = (index: number, p: number) => stripTop(index) + (1 - p) * STRIP_H;
   const first = predicted.firstPredictedRow;
+  const teacherForced = `Teacher-forced: at every step the prior sees the flight so far and the truth sentence's words before ` +
+    `the step — how it was trained and read out (${readout.split}, best epoch ${readout.bestEpoch}); not a sentence of its own. ` +
+    `The first ${first} steps are only observed; at step ${first} it says every column's word in force.`;
+  const likelihood = `The negative log-likelihood of this flight's truth sentence under the prior, per predicted ` +
+    `${formatSeconds(vocabulary.stepS)} s step: ${predicted.nllPerStep.toFixed(3)} nats; ${readout.split} as a whole: ` +
+    `${readout.model.nllPerStep.toFixed(4)}.`;
   const polyline = (index: number, values: number[]) =>
     values.map((value, step) => `${x((first + step) * vocabulary.stepS)},${y(index, value)}`).join(" ");
 
@@ -95,8 +102,7 @@ export default function TrainingPriorWindow({
       chips={<>
         <span>{flight.callsign}</span>
         <span>runway {flight.runway}</span>
-        <span title={`the negative log-likelihood of this flight's truth sentence under the prior, per predicted ` +
-          `${formatSeconds(vocabulary.stepS)} s step; ${readout.split} as a whole: ${readout.model.nllPerStep.toFixed(4)}`}>
+        <span title={likelihood}>
           this flight {predicted.nllPerStep.toFixed(3)} nats per step
         </span>
       </>}>
@@ -202,16 +208,17 @@ export default function TrainingPriorWindow({
         </ChartFrame>
       </div>
 
-      <footer className="training-readback-legend"
-        title={`Teacher-forced: at every step the prior sees the flight so far and the truth sentence's words before the step ` +
-          `— how it was trained and read out (${readout.split}, best epoch ${readout.bestEpoch}); not a sentence of its own. ` +
-          `The first ${first} steps are only observed; at step ${first} it says every column's word in force.`}>
+      <footer className="training-readback-legend" title={teacherForced}>
         <span>
           <b style={{ color: TRAINING_COLUMN_COLOR.heading }}>——</b> P(a word said) ·{" "}
           <b style={{ color: TRAINING_RAW_COLOR }}>——</b> P(the truth) · a tick at each word said after step {first}:{" "}
           <b style={{ color: TRAINING_EXECUTOR_COLOR }}>teal</b> the prior's first choice, <b style={{ color: TRAINING_OUTSIDE_COLOR }}>red</b>{" "}
           another · teacher-forced
         </span>
+        <NotesToggle label="How to read the prior">
+          <p>{teacherForced}</p>
+          <p>{likelihood}</p>
+        </NotesToggle>
       </footer>
     </TrainingWindow>
   );

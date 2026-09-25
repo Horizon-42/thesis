@@ -8,7 +8,7 @@
  *    by side, the SIMULATED flight (beside the observed aircraft's) and the COMPUTATION (the backend's, beside the
  *    browser's round trip); the checks behind the verdict; everything else — how it ended, the limits that bound, the
  *    computation part by part, the spec and code — folded into Details. "Replay in 3D" flies the same answer out again;
- *    flying it anew is the sentence bar's button;
+ *    flying it anew is the sentence bar's button — and a refusal's "Fly again", since the word selected may have moved;
  *  • in the sentence bar (`TrainingAutopilotStatus`): one line — the word, the verdict, "N s flown in M ms", and how the
  *    flight ended only when it ended badly.
  *
@@ -23,6 +23,7 @@ import {
   autopilotHasLine,
   autopilotOnScreen,
   autopilotWord,
+  nextPick,
   TRAINING_AUTOPILOT_SEGMENT_END,
   type TrainingAutopilotSegment,
   type TrainingAutopilotView,
@@ -106,7 +107,7 @@ export function TrainingAutopilotStatus({ view, selection }: { view: TrainingAut
 }
 
 export default function TrainingAutopilotCard() {
-  const { trainingSelection: selection, trainingAutopilot, replayTrainingAutopilot } = useApp();
+  const { trainingSelection: selection, trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick } = useApp();
   const view = autopilotOnScreen(trainingAutopilot, selection);
   if (view === null || selection === null) return null;
   const word = autopilotWord(view.request, selection);
@@ -114,7 +115,14 @@ export default function TrainingAutopilotCard() {
     return <p className="training-autopilot-note" role="status">Flying {word} from step {view.request.row} …</p>;
   }
   if (view.status === "failed") {
-    return <ProblemBox title={`The autopilot did not fly ${word} from step ${view.request.row}.`} detail={view.problem} />;
+    return (
+      <ProblemBox title={`The autopilot did not fly ${word} from step ${view.request.row}.`} detail={view.problem}>
+        <button type="button" className="training-autopilot-button"
+          onClick={() => setTrainingPick(nextPick(trainingPick, view.request.column, view.request.row))}>
+          Fly again
+        </button>
+      </ProblemBox>
+    );
   }
   const { segment } = view;
   const { end } = segment;

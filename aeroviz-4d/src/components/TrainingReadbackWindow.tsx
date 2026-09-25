@@ -54,6 +54,7 @@ import { TRAINING_OUTCOME_TAG, TRAINING_VERDICT_TEXT } from "../data/trainingTex
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import TrainingWindow from "./training/TrainingWindow";
 import { SwatchIcon, type Swatch } from "./training/chartKit";
+import NotesToggle, { NotesList } from "./training/NotesToggle";
 import { readbackModel, type ReadbackModel } from "./training/readbackModel";
 import ReadbackPlan from "./training/ReadbackPlan";
 import ReadbackHeading from "./training/ReadbackHeading";
@@ -133,6 +134,11 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
   const live = props.autopilot;
   const liveWord = live === null ? null
     : m.label(live.segment.column, flight.words.inForce[TRAINING_COLUMN_INDEX[live.segment.column]][live.segment.row]);
+  const liveTitle = "The picked word's segment, flown by the executor when it was picked, from the observed state where the " +
+    "word was said — its track, altitude (against the distance flown, from the observed aircraft's there) and ground speed " +
+    "on the flight's own clock." + (m.liveBand ? " Its heading band is the outline on the heading chart, as its judge read " +
+    "the flown segment, its rows outside red." : "");
+  const swatches = footerSwatches(m);
 
   return (
     <TrainingWindow title="Read-back check" closeLabel="Close the read-back check" cursorS={cursorS} cursorRow={m.cursorRow}
@@ -156,11 +162,7 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
               </p>
             ) : null}
             {live !== null ? (
-              <p className="training-readback-slot" aria-label="The autopilot, live"
-                title={"The picked word's segment, flown by the executor when it was picked, from the observed state where " +
-                  "the word was said — its track, altitude (against the distance flown, from the observed aircraft's there) " +
-                  "and ground speed on the flight's own clock." + (m.liveBand ? " Its heading band is the outline on the " +
-                  "heading chart, as its judge read the flown segment, its rows outside red." : "")}>
+              <p className="training-readback-slot" aria-label="The autopilot, live" title={liveTitle}>
                 <strong style={{ color: autopilotColour(live) }}>Autopilot</strong> — {live.segment.column} {liveWord} from step{" "}
                 {live.segment.row} · {TRAINING_VERDICT_TEXT[live.word.status]} ·{" "}
                 {m.live === null ? "no line to draw: it ended in its first cycle"
@@ -172,12 +174,19 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
       </div>
 
       <footer className="training-readback-legend">
-        {footerSwatches(m).map((item) => (
+        {swatches.map((item) => (
           <span key={item.key} title={item.title}>
             <SwatchIcon swatch={item.swatch} /> {item.text}
           </span>
         ))}
         <span className="training-readback-hint">hover to read · click a chart to select its column</span>
+        <NotesToggle label="What the lines and colours are">
+          <NotesList items={[
+            ...swatches.map((item) => ({ key: item.key, name: <><SwatchIcon swatch={item.swatch} /> {item.text}</>, text: item.title })),
+            ...(replay !== null ? [{ key: "replay-slot", name: "Executor replay", text: replay.title }] : []),
+            ...(live !== null ? [{ key: "autopilot-slot", name: "Autopilot", text: liveTitle }] : []),
+          ]} />
+        </NotesToggle>
       </footer>
     </TrainingWindow>
   );

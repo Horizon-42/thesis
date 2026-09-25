@@ -139,6 +139,47 @@ describe("parseTrainingExecutorOverlay", () => {
     expect(flownOf(parsed.value.flights[0]).words[6]).toMatchObject({ status: "not judged", heading: { firstRow: 10, stopRow: 10, inside: [] } });
   });
 
+  it("reads a word the executor never heard, or heard only after the next one of its column, as such — with no band", () => {
+    // as the exporter settles them: the 225° word superseded (said on the 180° word's flown step), the 180° word heard
+    // after the flown track's last step — or never
+    const heard = (flownRow: number | null) => {
+      const raw: any = mockExecutorOverlay();
+      Object.assign(raw.flights[0].words[6], { status: "superseded", flownRow: null, heading: null, checks: [],
+        reason: "said on the flown step of the next heading word, which flew instead" });
+      Object.assign(raw.flights[0].words[7], { status: "not reached", flownRow, heading: null, checks: [],
+        reason: "said after the flown track's last step" });
+      Object.assign(raw.flights[0].counts, { wordsJudged: 5, wordsInside: 4 });
+      return raw;
+    };
+    for (const flownRow of [null, 49]) {
+      const parsed = parseTrainingExecutorOverlay(heard(flownRow), entry(EXECUTOR_ID), sample());
+      if (!parsed.ok) throw new Error(parsed.problem);
+      const flown = flownOf(parsed.value.flights[0]);
+      expect(executorWordCounts(flown)).toEqual({ inside: 4, outside: 1, notJudged: 0, notReached: 1, superseded: 1 });
+      expect(executorWordAt(flown, 10, "heading")).toMatchObject({ status: "not reached", flownRow, heading: null });
+      expect(executorWordAt(flown, 8, "heading")).toMatchObject({ status: "superseded", flownRow: null, heading: null });
+    }
+    const refused = (change: (raw: any) => void) => {
+      const raw = heard(49);
+      change(raw);
+      const result = parseTrainingExecutorOverlay(raw, entry(EXECUTOR_ID), sample());
+      if (result.ok) throw new Error("the change was accepted");
+      return result.problem;
+    };
+    // a band past the judged track's end, or on a word never heard, is not the judge's
+    const bands: any = mockExecutorOverlay();
+    expect(refused((raw) => { raw.flights[0].words[7].heading = bands.flights[0].words[7].heading; }))
+      .toMatch(/words\[7\]: carries a heading band, but it is not a heading word the judge judged/);
+    expect(refused((raw) => { raw.flights[0].words[6].heading = bands.flights[0].words[6].heading; }))
+      .toMatch(/words\[6\]: carries a heading band, but it is not a heading word the judge judged/);
+    // heard on a flown step, it has rows of its own: superseded it is not
+    expect(refused((raw) => { raw.flights[0].words[6].flownRow = 8; }))
+      .toMatch(/words\[6\]: is a heading word the judge judged on the flown track, and carries no band/);
+    expect(refused((raw) => { raw.flights[0].words[6].reason = null; })).toMatch(/words\[6\]: is superseded and says no reason/);
+    expect(refused((raw) => { raw.flights[0].counts.wordsJudged = 7; }))
+      .toMatch(/says 4 of 7 words inside, but the words' own verdicts give 4 of 5/);
+  });
+
   it("refuses a judged track given with the gate refusing it or the dynamics failing, or missing otherwise", () => {
     expect(executorRefusal((raw) => { raw.flights[0].judgedTrackDeg = null; }))
       .toMatch(/judgedTrackDeg is absent for a flight judged on its flown track/);
@@ -287,6 +328,10 @@ describe("parseTrainingPriorOverlay", () => {
     expect(priorRefusal((raw) => { raw.readout.firstStepRunway.rules[""] = raw.readout.firstStepRunway.rules.B0_majority; }))
       .toMatch(/rules has an empty key/);
     expect(priorRefusal((raw) => { raw.readout.firstStepRunway.model.top1 = 1.7; })).toMatch(/model\.top1 is 1.7, not a share/);
+    // the rules by name: a rule the readout does not have, or one missing
+    expect(priorRefusal((raw) => { raw.readout.firstStepRunway.rules.B9_guess = raw.readout.firstStepRunway.rules.B0_majority; }))
+      .toMatch(/rules are B0_majority, B1_active_config, B3_same_sector_last, B9_guess, expected/);
+    expect(priorRefusal((raw) => { delete raw.readout.firstStepRunway.rules.B1_active_config; })).toMatch(/rules are B0_majority, B3_same/);
   });
 
   it("refuses another schema by name, and columns out of order", () => {

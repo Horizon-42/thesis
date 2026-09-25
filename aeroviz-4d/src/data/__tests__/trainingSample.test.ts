@@ -222,6 +222,50 @@ describe("parseTrainingSample", () => {
       .toMatch(/contained is true, with the transition failed/);
   });
 
+  it("reads a speed span the next word cut before its band was reached: the transition to the cut, no band", () => {
+    // as the labeller leaves it: the target never reached in the span, judged on its transition alone
+    const cut = (raw: any) => {
+      const span = raw.flights[0].envelopes.speed[0];
+      Object.assign(span, {
+        arrivalRow: null, bandInside: null,
+        transitionLowerMps: Array.from({ length: 30 }, () => 104), transitionUpperMps: Array.from({ length: 30 }, () => 116),
+      });
+      Object.assign(span.check, { arrivalRows: 30, cutBeforeArrival: true, bandRows: 0, bandInside: 0, contained: true });
+    };
+    const raw: any = mockSample();
+    cut(raw);
+    const span = parsed(raw).flights[0].envelopes.speed[0];
+    expect(span).toMatchObject({ arrivalRow: null, bandInside: null, check: { cutBeforeArrival: true, bandRows: 0, contained: true } });
+    expect(span.transitionLowerMps).toHaveLength(30);
+    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].bandInside = []; }))
+      .toMatch(/speed\[0\]: bandInside is given, but the band is never reached/);
+    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].arrivalRow = 29; }))
+      .toMatch(/speed\[0\]: arrivalRow is given exactly when the band is reached before the next word/);
+    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].transitionLowerMps.pop(); }))
+      .toMatch(/speed\[0\]\.transitionLowerMps/);
+    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].check.arrivalRows = 29; }))
+      .toMatch(/arrivalRows is 29, not a whole number in 30…30/);
+    expect(refusal((raw) => { cut(raw); raw.flights[0].envelopes.speed[0].check.contained = false; }))
+      .toMatch(/contained is false, with the transition ok and 0 of 0 band rows inside/);
+  });
+
+  it("reads a sentence cut at the threshold crossing, the crossing a row past the last", () => {
+    const crossed = (raw: any) => {
+      Object.assign(raw.flights[0].envelopes.approach.landing, {
+        cutAtCrossing: true, crossing: { row: MOCK_ROWS, eM: 0, nM: 1.5, lon: -78, lat: 35 },
+      });
+    };
+    const raw: any = mockSample();
+    crossed(raw);
+    expect(parsed(raw).flights[0].envelopes.approach.landing).toMatchObject({ cutAtCrossing: true, crossing: { row: MOCK_ROWS, nM: 1.5 } });
+    expect(refusal((raw) => { crossed(raw); raw.flights[0].envelopes.approach.landing.crossing.row = MOCK_ROWS - 1; }))
+      .toMatch(new RegExp(`crossing\\.row is ${MOCK_ROWS - 1}, not a whole number in ${MOCK_ROWS}…${MOCK_ROWS}`));
+    expect(refusal((raw) => { crossed(raw); raw.flights[0].envelopes.approach.landing.crossing = null; }))
+      .toMatch(/the crossing row is given exactly when the sentence was cut at it/);
+    expect(refusal((raw) => { crossed(raw); raw.flights[0].envelopes.approach.landing.cutAtCrossing = false; }))
+      .toMatch(/the crossing row is given exactly when the sentence was cut at it/);
+  });
+
   it("refuses a capture turn that is not the clearance's to the capture's, or one a flight on the final has", () => {
     expect(refusal((raw) => { raw.flights[0].envelopes.approach.captureTurn.startRow = 19; }))
       .toMatch(/captureTurn\.startRow is 19, not a whole number in 20…20/);

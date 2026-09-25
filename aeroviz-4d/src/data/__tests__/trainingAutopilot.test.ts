@@ -6,15 +6,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseTrainingSample, TRAINING_UNCHANGED, type TrainingSample } from "../trainingSample";
 import {
+  autopilotHasLine,
   parseTrainingAutopilot,
   requestTrainingAutopilot,
   segmentWords,
+  TRAINING_AUTOPILOT_CLIENT_ID,
   TRAINING_AUTOPILOT_PATH,
   TRAINING_AUTOPILOT_SCHEMA,
   TRAINING_AUTOPILOT_SEGMENT_END,
 } from "../trainingAutopilot";
 import { VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "./trainingAutopilot.fixture";
+import { failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "./trainingAutopilot.fixture";
 
 function sample(): TrainingSample {
   const parsed = parseTrainingSample(mockSample());
@@ -75,6 +77,29 @@ describe("parseTrainingAutopilot", () => {
     expect(parsed.value.segment).toMatchObject({ toLanding: true, endRow: 60, stopRow: 60 });
     expect(parsed.value.end).toMatchObject({ reason: "landed", reachedSegmentEnd: null });
     expect(parsed.value.word.status).toBe("no check");
+  });
+
+  it("reads a dynamics failure: the rows its judge read before it failed, or one state and nothing judged", () => {
+    const set = sample();
+    const request = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
+    const read = (states: number) => {
+      const parsed = parseTrainingAutopilot(failedAnswer(mockAutopilotAnswer(set, request), states), request, mockSelection(set, request));
+      if (!parsed.ok) throw new Error(parsed.problem);
+      return parsed.value;
+    };
+    // failed in its 7th cycle: six cycles kept, the judged steps 0–3 (points 0, 2, 4, 6), the band to step 12
+    const late = read(7);
+    expect(late.end).toMatchObject({ reason: "dynamics_failure", reachedSegmentEnd: false, offsetFromObserved: null });
+    expect(late.track.tS).toHaveLength(7);
+    expect(late.judgedTrackDeg).toHaveLength(4);
+    expect(late.word.heading).toMatchObject({ firstRow: 10, stopRow: 12, inside: [true, true] });
+    expect(autopilotHasLine(late)).toBe(true);
+    // failed in its first cycle: the state it started from, nothing to draw, the word not judged
+    const first = read(1);
+    expect(first.track.tS).toEqual([16]);
+    expect(first.track.bankRightDeg).toEqual([]);
+    expect(first.word).toMatchObject({ status: "not judged", heading: null });
+    expect(autopilotHasLine(first)).toBe(false);
   });
 
   it("refuses another schema by name", () => {
@@ -165,7 +190,7 @@ describe("parseTrainingAutopilot", () => {
 describe("requestTrainingAutopilot", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("posts the request to the backend's segment path", async () => {
+  it("posts the request to the backend's segment path, named and numbered by this page", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) }));
     vi.stubGlobal("fetch", fetchMock);
     const request = mockAutopilotRequest(sample(), VECTORED_KEY, "heading", 8);
@@ -173,7 +198,21 @@ describe("requestTrainingAutopilot", () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(`http://backend.test${TRAINING_AUTOPILOT_PATH}`);
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body as string)).toEqual(request);
+    const sent = JSON.parse(init.body as string);
+    expect(sent).toEqual({ ...request, clientId: TRAINING_AUTOPILOT_CLIENT_ID, seq: sent.seq });
+    expect(TRAINING_AUTOPILOT_CLIENT_ID).toMatch(/^[0-9a-f]{32}$/);
+    // numbered in the page's own order: the backend flies the highest
+    await requestTrainingAutopilot("http://backend.test/", request);
+    const [, next] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(JSON.parse(next.body as string).seq).toBe(sent.seq + 1);
+  });
+
+  it("names the page where randomUUID is missing — a page opened over plain http from another machine", async () => {
+    const real = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: real.getRandomValues.bind(real) });
+    vi.resetModules();
+    const reloaded = await import("../trainingAutopilot");
+    expect(reloaded.TRAINING_AUTOPILOT_CLIENT_ID).toMatch(/^[0-9a-f]{32}$/);
   });
 
   it("names the backend's refusal, an answer that is not JSON, and a backend that did not answer", async () => {

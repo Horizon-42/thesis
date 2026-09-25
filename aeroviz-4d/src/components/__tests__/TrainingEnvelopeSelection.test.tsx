@@ -14,7 +14,7 @@ import { AppProvider, useApp } from "../../context/AppContext";
 import { parseTrainingSample, trainingSelectionOf } from "../../data/trainingSample";
 import { VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
+import { failedAnswer, mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
 import { parseTrainingExecutorOverlay } from "../../data/trainingOverlays";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import useTrainingTrackLayer from "../../hooks/useTrainingTrackLayer";
@@ -284,6 +284,17 @@ describe("Training envelopes in the 3D scene", () => {
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotAircraft)!.position).toBeInstanceOf(Cesium.ConstantPositionProperty);
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotGround)).toBeDefined();
       expect(scene.colourOf(TRAINING_ENTITY.autopilotOutside(0))).toEqual(scene.css(TRAINING_OUTSIDE_COLOR));
+      // "Replay in 3D": the same answer flown out anew — what the landing drew goes, and nothing is added twice
+      const ids = () => scene.entities.values.map((entity) => entity.id).filter((id) => id.startsWith("training-autopilot")).sort();
+      const landed = ids();
+      act(() => scene.app().replayTrainingAutopilot());
+      const replayed = scene.entities.getById(TRAINING_ENTITY.autopilotTrack)!.polyline!;
+      expect(replayed.positions).toBeInstanceOf(Cesium.CallbackProperty);
+      expect(scene.entities.getById(TRAINING_ENTITY.autopilotGround)).toBeUndefined();
+      expect(scene.entities.getById(TRAINING_ENTITY.autopilotOutside(0))).toBeUndefined();
+      act(() => vi.advanceTimersByTime(1100));
+      expect(ids()).toEqual(landed);
+      expect(scene.colourOf(TRAINING_ENTITY.autopilotOutside(0))).toEqual(scene.css(TRAINING_OUTSIDE_COLOR));
       // its rows outside go with the bands' switch
       act(() => scene.app().setTrainingLayer("headingBands", false));
       expect(scene.shown(TRAINING_ENTITY.autopilotOutside(0))).toBe(false);
@@ -293,6 +304,17 @@ describe("Training envelopes in the 3D scene", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("draws nothing for a segment whose dynamics failed in its first cycle", async () => {
+    const scene = await setup();
+    const request = mockAutopilotRequest(scene.sample, VECTORED_KEY, "heading", 8);
+    const answer = parseTrainingAutopilot(failedAnswer(mockAutopilotAnswer(scene.sample, request), 1), request, scene.selection);
+    if (!answer.ok) throw new Error(answer.problem);
+    act(() => scene.app().setTrainingAutopilot({ status: "ready", request, segment: answer.value, playedAt: Date.now(),
+      roundTripS: 0.2 }));
+    expect(scene.entities.values.filter((entity) => entity.id.startsWith("training-autopilot"))).toHaveLength(0);
+    scene.unmount();
   });
 
   it("stops a fly-out that has not landed when the flight changes, and drapes nothing after", async () => {

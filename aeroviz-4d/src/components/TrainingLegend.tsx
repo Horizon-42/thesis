@@ -23,6 +23,7 @@ import {
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
 import { SwatchIcon, type Swatch } from "./training/chartKit";
+import NotesToggle, { NotesList } from "./training/NotesToggle";
 
 export default function TrainingLegend({ layers, vocabulary, executorTrack, autopilotColour }: {
   layers: TrainingLayers;
@@ -65,14 +66,19 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
         {open ? "Legend ▾" : "Legend ▸"}
       </button>
       {open ? (
-        <ul>
-          {rows.filter((row) => row.shown).map((row) => (
-            <li key={row.key} title={row.title}>
-              <SwatchIcon swatch={row.swatch} />
-              <span>{row.text}</span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul>
+            {rows.filter((row) => row.shown).map((row) => (
+              <li key={row.key} title={row.title}>
+                <SwatchIcon swatch={row.swatch} />
+                <span>{row.text}</span>
+              </li>
+            ))}
+          </ul>
+          <NotesToggle label="What each line in 3D is">
+            <NotesList items={rows.filter((row) => row.shown).map((row) => ({ key: row.key, name: row.text, text: row.title }))} />
+          </NotesToggle>
+        </>
       ) : null}
     </aside>
   );

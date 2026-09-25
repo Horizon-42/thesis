@@ -66,9 +66,13 @@ describe("TrainingPriorWindow", () => {
     expect(ticks.filter((line) => line.getAttribute("stroke") === TRAINING_EXECUTOR_COLOR)).toHaveLength(5);
   });
 
-  it("states the flight's likelihood, the readout's in its tooltip", () => {
+  it("states the flight's likelihood, the readout's in its tooltip and behind ⓘ", () => {
     open();
-    expect(screen.getByText("this flight 0.250 nats per step").getAttribute("title")).toMatch(/val as a whole: 0\.1778$/);
+    expect(screen.getByText("this flight 0.250 nats per step").getAttribute("title")).toMatch(/val as a whole: 0\.1778\.$/);
+    fireEvent.click(screen.getByRole("button", { name: "How to read the prior" }));
+    const notes = screen.getByRole("note", { name: "How to read the prior" }).textContent!;
+    expect(notes).toMatch(/Teacher-forced: at every step the prior sees the flight so far/);
+    expect(notes).toMatch(/val as a whole: 0\.1778\./);
   });
 
   it("reads the first predicted step's truth as the word in force, which the prior must say", () => {

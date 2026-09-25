@@ -1,18 +1,19 @@
 /**
  * The live executor's card in the Training panel: nothing before a word is flown, a refusal with its reason, and a
  * flown segment written out — the word it flew, its verdict first, the two times, the rest in Details — with "Replay
- * in 3D", which asks the backend nothing.
+ * in 3D", which asks the backend nothing; a refusal's "Fly again" picks the word anew.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-const { appState, replayTrainingAutopilot } = vi.hoisted(() => ({
-  appState: { trainingAutopilot: null as unknown, trainingSelection: null as unknown },
+const { appState, replayTrainingAutopilot, setTrainingPick } = vi.hoisted(() => ({
+  appState: { trainingAutopilot: null as unknown, trainingSelection: null as unknown, trainingPick: null as unknown },
   replayTrainingAutopilot: vi.fn(),
+  setTrainingPick: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
-  useApp: () => ({ ...appState, replayTrainingAutopilot }),
+  useApp: () => ({ ...appState, replayTrainingAutopilot, setTrainingPick }),
 }));
 
 import TrainingAutopilotCard from "../TrainingAutopilotCard";
@@ -20,7 +21,7 @@ import { parseTrainingSample, type TrainingSample } from "../../data/trainingSam
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { formatElapsed } from "../../data/trainingText";
 import { VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
+import { failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
 
 function sample(): TrainingSample {
   const parsed = parseTrainingSample(mockSample());
@@ -36,7 +37,9 @@ describe("TrainingAutopilotCard", () => {
     set = sample();
     appState.trainingAutopilot = null;
     appState.trainingSelection = mockSelection(set, request());
+    appState.trainingPick = null;
     replayTrainingAutopilot.mockClear();
+    setTrainingPick.mockClear();
   });
 
   it("shows nothing before a word is flown", () => {
@@ -48,6 +51,30 @@ describe("TrainingAutopilotCard", () => {
     appState.trainingAutopilot = { status: "failed", request: request(), problem: "the backend refused (400): 0 executor specs" };
     render(<TrainingAutopilotCard />);
     expect(screen.getByRole("alert").textContent).toMatch(/did not fly heading 225° from step 8.*0 executor specs/);
+  });
+
+  it("flies a refused word again — the word asked for, whichever the bar has selected since", () => {
+    appState.trainingAutopilot = { status: "failed", request: request(), problem: "the backend did not answer" };
+    appState.trainingPick = { column: "heading", row: 8, attempt: 2 };
+    const { rerender } = render(<TrainingAutopilotCard />);
+    fireEvent.click(screen.getByRole("button", { name: "Fly again" }));
+    expect(setTrainingPick).toHaveBeenCalledWith({ column: "heading", row: 8, attempt: 3 });
+    // the pick has moved on to another word since: that word is not flown, the refused one is
+    setTrainingPick.mockClear();
+    appState.trainingPick = { column: "altitude", row: 20, attempt: 0 };
+    rerender(<TrainingAutopilotCard />);
+    fireEvent.click(screen.getByRole("button", { name: "Fly again" }));
+    expect(setTrainingPick).toHaveBeenCalledWith({ column: "heading", row: 8, attempt: 0 });
+  });
+
+  it("says how a flight that failed in its first cycle ended, and offers nothing to replay", () => {
+    const asked = request();
+    const answer = parseTrainingAutopilot(failedAnswer(mockAutopilotAnswer(set, asked), 1), asked, mockSelection(set, asked));
+    if (!answer.ok) throw new Error(answer.problem);
+    appState.trainingAutopilot = { status: "ready", request: asked, segment: answer.value, playedAt: 1, roundTripS: 0.5 };
+    render(<TrainingAutopilotCard />);
+    expect(document.querySelector(".training-autopilot-ended")!.textContent).toMatch(/^The flight left the dynamics/);
+    expect(screen.queryByRole("button", { name: "Replay in 3D" })).toBeNull();
   });
 
   it("shows nothing for another flight's answer", () => {

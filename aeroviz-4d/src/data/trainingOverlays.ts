@@ -64,6 +64,9 @@ export const TRAINING_EXECUTOR_OUTCOMES = [
   "landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout", "dynamics_failure",
 ] as const;
 export type TrainingExecutorOutcome = (typeof TRAINING_EXECUTOR_OUTCOMES)[number];
+/** MIRROR of `prior.readout.RULES`: the causal rules the first-step runway readout sets the prior beside (B0, B1, B3;
+ *  pinned by the backend's `test_autopilot_segment.MirrorTest`). */
+export const TRAINING_PRIOR_RULES = ["B0_majority", "B1_active_config", "B3_same_sector_last"] as const;
 /** MIRROR of `prior_training_export.SCHEMA`. */
 export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v3";
 
@@ -268,7 +271,8 @@ export interface TrainingPriorReadout {
   model: { nllPerStep: number; perplexityPerStep: number; perColumn: Record<TrainingColumn, TrainingPriorColumnReadout> };
   /** Negative log-likelihood per step per column, and `all`. */
   baselines: { repeat: Record<TrainingColumn | "all", number>; previousWord: Record<TrainingColumn | "all", number> };
-  /** The prior's first-step runway beside each airport's own runway frequency and the causal rules (B0, B1, B3). */
+  /** The prior's first-step runway beside each airport's own runway frequency and the causal rules
+   *  (`TRAINING_PRIOR_RULES`). */
   firstStepRunway: {
     model: TrainingPriorRunwayReadout;
     airportFrequency: TrainingPriorRunwayReadout;
@@ -729,6 +733,12 @@ function parseReadout(reader: Reader): TrainingPriorReadout {
     };
   }, false) as Record<TrainingColumn, TrainingPriorColumnReadout>;
   const runway = reader.child("firstStepRunway");
+  // the rules by name: the readout's own, no more and no fewer
+  const rules = Object.keys(runway.record("rules", (value) => value)).sort();
+  const expected = [...TRAINING_PRIOR_RULES].sort();
+  if (rules.length !== expected.length || rules.some((rule, index) => rule !== expected[index])) {
+    runway.fail(`rules are ${rules.join(", ")}, expected ${TRAINING_PRIOR_RULES.join(", ")}`);
+  }
   const readRunway = (value: unknown, where: string): TrainingPriorRunwayReadout => {
     const part = Reader.of(value, where);
     return { top1: part.share("top1"), direction: part.share("direction"), sideGivenDirection: part.nullableShare("sideGivenDirection") };

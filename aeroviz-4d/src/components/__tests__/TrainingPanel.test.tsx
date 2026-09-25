@@ -171,6 +171,15 @@ describe("TrainingPanel", () => {
         .toMatch(/each altitude word's tube, and on the speed chart each speed word's transition and band/);
     });
 
+    it("says in its ⓘ what each switch shows and which overlays are over the set, as text", async () => {
+      render(<TrainingPanel />);
+      await screen.findByText("TST1");
+      fireEvent.click(screen.getByRole("button", { name: "What does this panel show?" }));
+      const about = document.querySelector(".training-notes-list")!.textContent!;
+      expect(about).toMatch(/Altitude tubes \+ speed bandseach altitude word's tube, and on the speed chart each speed word's/);
+      expect(about).toMatch(/Fly on band clickOn: clicking a word's band in the sentence bar flies its segment at once/);
+    });
+
     it("states the draw it came from, in full in its tooltip", async () => {
       render(<TrainingPanel />);
       const note = await screen.findByText(/^2 flights · val, 1 per stratum/);

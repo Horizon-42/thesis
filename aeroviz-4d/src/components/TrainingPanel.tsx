@@ -31,6 +31,7 @@ import useTrainingAutopilot from "../hooks/useTrainingAutopilot";
 import TrainingAutopilotCard from "./TrainingAutopilotCard";
 import TrainingVocabularyNotes from "./TrainingVocabularyNotes";
 import ProblemBox from "./training/ProblemBox";
+import { NotesList } from "./training/NotesToggle";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
   TRAINING_AUTOPILOT_COLOR,
@@ -67,6 +68,9 @@ const LAYER_SWITCHES: Array<{ layer: keyof TrainingLayers; colour: string; text:
   { layer: "candidates", colour: TRAINING_CANDIDATE_COLOR, text: "Other candidate runways",
     title: "every runway the runway pointer can point at; the designated one is always drawn" },
 ];
+
+/** What the live executor's switch does. */
+const FLY_ON_CLICK = "On: clicking a word's band in the sentence bar flies its segment at once. Off: only the bar's Fly button does.";
 
 type IndexState =
   | { status: "loading" }
@@ -283,6 +287,12 @@ export default function TrainingPanel() {
             {sample ? sample.vocabulary.stepS : "—"} s step — with what every word allows: a heading word's band over the
             rows it is judged on, the capture turn and corridor, the altitude tube, the speed band.
           </p>
+          <NotesList items={[
+            ...LAYER_SWITCHES.map(({ layer, text, title }) => ({ key: layer, name: text, text: title })),
+            { key: "autopilot", name: "Fly on band click",
+              text: FLY_ON_CLICK },
+            ...[...overlays.executor.entries, ...overlays.prior.entries].map((item) => ({ key: item.id, name: item.id, text: item.title })),
+          ]} />
           {sample ? <TrainingVocabularyNotes sample={sample} /> : null}
         </>
       ) : null}
@@ -348,7 +358,7 @@ export default function TrainingPanel() {
               <fieldset className="training-layers training-autopilot-section" aria-label="Autopilot (live)">
                 <legend style={{ color: TRAINING_AUTOPILOT_COLOR }}>Autopilot (live)</legend>
                 <label style={{ color: TRAINING_AUTOPILOT_COLOR }}
-                  title="On: clicking a word's band in the sentence bar flies its segment at once. Off: only the bar's Fly button does.">
+                  title={FLY_ON_CLICK}>
                   <input type="checkbox" checked={trainingAutopilotAuto} onChange={(event) => setTrainingAutopilotAuto(event.target.checked)} />
                   Fly on band click
                 </label>

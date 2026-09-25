@@ -11,7 +11,7 @@
  * overlay is dropped.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
@@ -65,33 +65,37 @@ function useOverlayKind<T extends { flights: Array<{ flightKey: string }> }>(
       ? trainingOverlaysOf(manifest.overlays, sample.setId, kind) : []),
     [manifest, sample, kind, airport],
   );
-  const [chosen, setChosen] = useState<string | null>(null);
-  const entry = entries.find((item) => item.id === chosen) ?? entries[entries.length - 1] ?? null;
+  // the overlay chosen among several belongs to the set it was chosen over: another set or airport starts at the latest
+  const scope = sample && airport ? `${airport}/${sample.setId}` : null;
+  const [chosen, setChosen] = useState<{ scope: string | null; id: string } | null>(null);
+  const choose = useCallback((id: string) => setChosen({ scope, id }), [scope]);
+  const chosenId = chosen !== null && chosen.scope === scope ? chosen.id : null;
+  const entry = entries.find((item) => item.id === chosenId) ?? entries[entries.length - 1] ?? null;
   const [shown, setShown] = useState<boolean>(true);
-  // One download per overlay and sample: switching off and on again reuses it.
+  // One download per overlay and sample: switching off and on again reuses it — unless it failed, which switching off and
+  // on again tries anew (a file rewritten since is read). Only the latest download's answer is kept: one started before it,
+  // for this overlay or another, answers into nothing, even when it is the same file asked for again.
   const [loaded, setLoaded] = useState<{ key: string; load: OverlayLoad<T> } | null>(null);
   const key = entry && sample && airport ? `${airport}/${entry.id}@${sample.writtenUtc}` : null;
-  const requested = useRef<string | null>(null);
+  const requested = useRef<{ key: string } | null>(null);
 
   useEffect(() => {
-    if (!shown || key === null || !entry || !sample || !airport || requested.current === key) return;
-    requested.current = key;
+    if (!shown || key === null || !entry || !sample || !airport || requested.current?.key === key) return;
+    const request = { key };
+    requested.current = request;
     setLoaded({ key, load: { status: "loading" } });
+    const settle = (load: OverlayLoad<T>) => {
+      if (requested.current !== request) return;
+      if (load.status !== "ready") requested.current = null;
+      setLoaded({ key, load });
+    };
     fetcher(airport, entry, sample)
-      .then((parsed) => {
-        setLoaded((current) => (current?.key !== key ? current : {
-          key, load: parsed.ok ? { status: "ready", overlay: parsed.value } : { status: "invalid", problem: parsed.problem },
-        }));
-      })
-      .catch((error: unknown) => {
-        setLoaded((current) => (current?.key !== key ? current : {
-          key, load: { status: "invalid", problem: error instanceof Error ? error.message : String(error) },
-        }));
-      });
+      .then((parsed) => settle(parsed.ok ? { status: "ready", overlay: parsed.value } : { status: "invalid", problem: parsed.problem }))
+      .catch((error: unknown) => settle({ status: "invalid", problem: error instanceof Error ? error.message : String(error) }));
   }, [shown, key, entry, sample, airport, fetcher]);
 
   const load: OverlayLoad<T> = loaded !== null && loaded.key === key ? loaded.load : { status: "idle" };
-  return { kind, entries, entry, choose: setChosen, shown, setShown, load };
+  return { kind, entries, entry, choose, shown, setShown, load };
 }
 
 export default function useTrainingOverlays(airport: string | null, sample: TrainingSample | null, flightKey: string | null) {

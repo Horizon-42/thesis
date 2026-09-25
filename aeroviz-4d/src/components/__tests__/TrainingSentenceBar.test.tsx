@@ -286,6 +286,10 @@ describe("TrainingSentenceBar", () => {
       .toMatch(/from 4 s after it is said to the next word's, where the track must stay within ±4\.5° of it/);
     expect(legend.textContent).toMatch(/capture turn/);
     expect(legend.textContent).not.toMatch(/funnel|turn region|autopilot/);
+    // each row's full reading, as text behind ⓘ
+    fireEvent.click(screen.getByRole("button", { name: "What each line in 3D is" }));
+    expect(screen.getByRole("note", { name: "What each line in 3D is" }).textContent)
+      .toMatch(/heading word: judged rowsa heading word's judged rows, on the ground: from 4 s after it is said/);
     appState.trainingLayers = { ...appState.trainingLayers, headingBands: false };
     render(<TrainingSentenceBar />);
     const other = screen.getAllByLabelText("What the 3D scene shows")[1];
