@@ -13,6 +13,7 @@ import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256 } from "../trainingSample";
 import {
   parseTrainingOverlays,
   TRAINING_EXECUTOR_SCHEMA,
+  TRAINING_GENERATION_SCHEMA,
   TRAINING_OVERLAYS_SCHEMA,
   TRAINING_PRIOR_SCHEMA,
   type TrainingOverlayEntry,
@@ -203,5 +204,104 @@ export function mockPriorOverlay(): Record<string, unknown> {
     columns: [...TRAINING_COLUMNS],
     flights: sample.flights.map((flight, index) =>
       priorFlight(flight.flightKey, flight.words.events, flight.words.inForce, index === 0 ? new Set(["10:2"]) : new Set())),
+  };
+}
+
+// ── the models' own sentences ────────────────────────────────────────────────
+
+export const BASE_MODEL_ID = "generation_base";
+export const POST_TRAINED_ID = "generation_post";
+/** The row a model first speaks at in these fixtures (the rows before are observed only). */
+export const MOCK_GENERATION_FIRST_ROW = 4;
+
+/** The fixture's manifest with the two models' sentences listed beside the executor and the prior. */
+export function mockOverlaysWithGenerations(): Record<string, unknown> {
+  const manifest = mockOverlays() as { overlays: unknown[] };
+  const entry = (id: string) => ({
+    id, kind: "prior-generation", base: SET_ID, baseSampleSha256: MOCK_SAMPLE_SHA, title: `the ${id} test overlay`,
+    file: `${id}/generation.json`, flights: 2, source: { runner: "test" },
+  });
+  return { ...manifest, overlays: [...manifest.overlays, entry(BASE_MODEL_ID), entry(POST_TRAINED_ID)] };
+}
+
+/** The manifest entry of a generation overlay (`mockOverlaysWithGenerations`), as the reader parses it. */
+export function mockGenerationEntry(id: string): TrainingOverlayEntry {
+  const parsed = parseTrainingOverlays(mockOverlaysWithGenerations());
+  if (!parsed.ok) throw new Error(parsed.problem);
+  return parsed.value.overlays.find((item) => item.id === id)!;
+}
+
+/** A flown track from the first predicted row's time to ``endS``, every 2 s step (the last point where it ended). */
+function generatedTrack(endS: number) {
+  const tS: number[] = [];
+  for (let at = MOCK_GENERATION_FIRST_ROW * 2; at < endS; at += 2) tS.push(at);
+  tS.push(endS);
+  return {
+    tS, lon: tS.map((at) => -78.8 + at * 1e-4), lat: tS.map(() => 35.87), altitudeM: tS.map((at) => 1200 - at * 5),
+    altitudeHaeM: tS.map((at) => 1167 - at * 5), groundSpeedMps: tS.map(() => 70),
+  };
+}
+
+const opening = (runway: number) => [
+  { row: MOCK_GENERATION_FIRST_ROW, column: 0, value: runway },
+  { row: MOCK_GENERATION_FIRST_ROW, column: 1, value: WORD.notCleared },
+  { row: MOCK_GENERATION_FIRST_ROW, column: 2, value: WORD.heading270 },
+  { row: MOCK_GENERATION_FIRST_ROW, column: 3, value: WORD.altitude1110 },
+  { row: MOCK_GENERATION_FIRST_ROW, column: 4, value: WORD.level },
+  { row: MOCK_GENERATION_FIRST_ROW, column: 5, value: WORD.speed110 },
+];
+
+/**
+ * A model's own sentences over the fixture's set: the VECTORED flight flown twice — sample 1 turns to 225° at step 12 and
+ * 180° at 16, clears the flight at 24 (descend to land, descent 3), leaves the speed at 40 and lands at 110 s; sample 2
+ * turns to 235° at 12, points at the other runway (27) from 30 with a turn to 090° there, never clears it and times out
+ * at 150 s, past the observed flight's 120 s — and the STRAIGHT-IN one not flown (stand-in dynamics). ``postTrained``:
+ * the round that names its start model.
+ */
+export function mockGenerationOverlay(id: string, postTrained = false): Record<string, unknown> {
+  const landed = {
+    sample: 0, outcome: "landed", endS: 110, crossing: { crossM: -1.2, heightM: 16.5, atS: 109.8 }, firstRunway: 0, lastRunway: 0,
+    runwayChanges: 0, goArounds: 0, clearedAtEnd: true, forbiddenMass: { runway: 0, approach: 0, angle: 0.0004 }, rows: 56,
+    events: [...opening(WORD.runway09), { row: 12, column: 2, value: WORD.heading225 }, { row: 16, column: 2, value: WORD.heading180 },
+      { row: 24, column: 1, value: WORD.cleared }, { row: 24, column: 3, value: WORD.land }, { row: 24, column: 4, value: WORD.descent3 },
+      { row: 40, column: 5, value: WORD.unspecified }],
+    track: generatedTrack(110),
+  };
+  const timedOut = {
+    sample: 1, outcome: "timeout", endS: 150, crossing: null, firstRunway: 0, lastRunway: 1, runwayChanges: 1, goArounds: 0,
+    clearedAtEnd: false, forbiddenMass: { runway: 0.001, approach: 0, angle: 0 }, rows: 76,
+    events: [...opening(WORD.runway09), { row: 12, column: 2, value: 47 }, { row: 30, column: 0, value: 1 },
+      { row: 30, column: 2, value: WORD.heading090 }],
+    track: generatedTrack(150),
+  };
+  const cells = (all: number) => ({ all: { flights: 800, landed: all }, "straight-in": { flights: 500, landed: all + 0.03 },
+    vectored: { flights: 300, landed: all - 0.05 } });
+  return {
+    schema: TRAINING_GENERATION_SCHEMA,
+    overlayId: id,
+    airport: "KXXX",
+    writtenUtc: "2026-09-25T00:00:00+00:00",
+    producedBy: { runner: "test" },
+    base: mockBase(),
+    model: {
+      label: postTrained ? "post-trained" : "base model", checkpointSha256: "9".repeat(64), variant: "full",
+      trainedAt: { head: "test", dirty: false },
+      fineTuning: postTrained ? { schema: "ts-prior-landing-reward-v1", round: 1, from: "4dTrajectory/outputs/POOLED/prior/base" } : null,
+    },
+    generation: {
+      samples: 2, temperature: 1, seed: 1337, firstPredictedRow: MOCK_GENERATION_FIRST_ROW, stepS: 2,
+      executor: { specSha256: "e".repeat(64), wordClock: "track", cycleS: 1, timeoutFactor: 1.5 },
+    },
+    readout: {
+      split: "val", writtenUtc: "2026-09-25T00:00:00+00:00", seed: 1337, drawn: { flights: 200, perAirport: 40 },
+      prior: { here: cells(postTrained ? 0.95 : 0.85), all: cells(postTrained ? 0.97 : 0.9) },
+      labelled: { here: { all: { flights: 40, landed: 1 }, "straight-in": null, vectored: null },
+                  all: { all: { flights: 200, landed: 0.999 }, "straight-in": null, vectored: null } },
+    },
+    columns: [...TRAINING_COLUMNS],
+    flights: [
+      { flightKey: VECTORED_KEY, datasetId: `KXXX:${VECTORED_KEY}`, group: "own dynamics", flown: true, samples: [landed, timedOut] },
+      { flightKey: STRAIGHT_KEY, datasetId: `KXXX:${STRAIGHT_KEY}`, group: "stand-in dynamics", flown: false, samples: [] },
+    ],
   };
 }

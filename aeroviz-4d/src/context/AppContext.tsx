@@ -46,7 +46,9 @@ import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerrain";
 import type { ObservedVerdictFilter } from "../data/observedTracks";
 import { trainingSelectionKey, type TrainingColumn, type TrainingSelection } from "../data/trainingSample";
-import type { TrainingExecutorView, TrainingPriorView } from "../data/trainingOverlays";
+import type {
+  TrainingExecutorView, TrainingGenerationView, TrainingPriorView, TrainingSource,
+} from "../data/trainingOverlays";
 import type { TrainingAutopilotView, TrainingPick } from "../data/trainingAutopilot";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
@@ -278,6 +280,20 @@ interface TrainingSessionState {
   trainingPrior: TrainingPriorView | null;
   setTrainingPrior: (view: TrainingPriorView | null) => void;
   /**
+   * THE PRIOR'S OWN SENTENCES over the selected flight (`TrainingGenerationView`): one view per model whose sentences
+   * are published for the open set and loaded, in the manifest's order; empty when there are none.
+   */
+  trainingGenerations: TrainingGenerationView[];
+  setTrainingGenerations: (views: TrainingGenerationView[]) => void;
+  /**
+   * WHICH SENTENCE THE VIEWS READ: null for the truth — the labelled sentence of the observed flight — or one sample of
+   * one model's own. Chosen in the sentence bar (its tabs and sample buttons) or the panel. It is kept across flights and
+   * sets — reading one model's sentences flight after flight is the point — and a flight it has nothing for reads the
+   * truth (`generationOnScreen`). The truth's track is drawn in 3D whichever is read.
+   */
+  trainingSource: TrainingSource | null;
+  setTrainingSource: (source: TrainingSource | null) => void;
+  /**
    * THE EXECUTOR, LIVE (`data/trainingAutopilot.ts`): the selected word's segment of the selected flight, flown by the
    * backend when a word is picked (`trainingPick`) — in flight, failed, or flown; null otherwise.
    */
@@ -439,6 +455,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
   const [trainingExecutor, setTrainingExecutor] = useState<TrainingExecutorView | null>(null);
   const [trainingPrior, setTrainingPrior] = useState<TrainingPriorView | null>(null);
+  const [trainingGenerations, setTrainingGenerations] = useState<TrainingGenerationView[]>([]);
+  const [trainingSource, setTrainingSource] = useState<TrainingSource | null>(null);
   const [trainingAutopilot, setTrainingAutopilot] = useState<TrainingAutopilotView | null>(null);
   const replayTrainingAutopilot = useCallback(() => {
     setTrainingAutopilot((view) => (view?.status === "ready" ? { ...view, playedAt: Date.now() } : view));
@@ -682,6 +700,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingExecutor,
     trainingPrior,
     setTrainingPrior,
+    trainingGenerations,
+    setTrainingGenerations,
+    trainingSource,
+    setTrainingSource,
     trainingAutopilot,
     setTrainingAutopilot,
     replayTrainingAutopilot,
@@ -690,7 +712,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     trainingAutopilotAuto,
     setTrainingAutopilotAuto,
   }), [trainingSelection, trainingColumn, trainingLayers, setTrainingLayer, trainingExecutor, trainingPrior,
-    trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick, trainingAutopilotAuto]);
+    trainingGenerations, trainingSource, trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick,
+    trainingAutopilotAuto]);
   const trainingCursorState: TrainingCursorState = useMemo(() => ({ trainingCursorS, setTrainingCursorS }),
     [trainingCursorS, setTrainingCursorS]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({

@@ -7,19 +7,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
-const { setTrainingExecutor, setTrainingPrior } = vi.hoisted(() => ({
+const { setTrainingExecutor, setTrainingPrior, setTrainingGenerations } = vi.hoisted(() => ({
   setTrainingExecutor: vi.fn(),
   setTrainingPrior: vi.fn(),
+  setTrainingGenerations: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
-  useApp: () => ({ setTrainingExecutor, setTrainingPrior }),
+  useApp: () => ({ setTrainingExecutor, setTrainingPrior, setTrainingGenerations }),
 }));
 
 import useTrainingOverlays from "../useTrainingOverlays";
 import { parseTrainingSample, type TrainingSample } from "../../data/trainingSample";
 import { STRAIGHT_KEY, VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { EXECUTOR_ID, mockExecutorOverlay, mockOverlays, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
+import {
+  BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays, mockOverlaysWithGenerations,
+  mockPriorOverlay,
+} from "../../data/__tests__/trainingOverlays.fixture";
 
 const OVERLAYS = "data/airports/KXXX/training/overlays.json";
 const EXECUTOR = `data/airports/KXXX/training/${EXECUTOR_ID}/executor.json`;
@@ -41,6 +45,7 @@ describe("useTrainingOverlays", () => {
   beforeEach(() => {
     setTrainingExecutor.mockClear();
     setTrainingPrior.mockClear();
+    setTrainingGenerations.mockClear();
     files = {
       [OVERLAYS]: mockOverlays(), [EXECUTOR]: mockExecutorOverlay(),
       "data/airports/KXXX/training/prior_test/prior.json": mockPriorOverlay(),
@@ -66,6 +71,23 @@ describe("useTrainingOverlays", () => {
     manifest.overlays.unshift({ ...manifest.overlays[0], id: "executor_older", file: "executor_older/executor.json" });
     return manifest;
   };
+
+  it("downloads every model's own sentences published for the set, with no switch, and publishes them for the selected flight", async () => {
+    files[OVERLAYS] = mockOverlaysWithGenerations();
+    files[`data/airports/KXXX/training/${BASE_MODEL_ID}/generation.json`] = mockGenerationOverlay(BASE_MODEL_ID);
+    files[`data/airports/KXXX/training/${POST_TRAINED_ID}/generation.json`] = { ...mockGenerationOverlay(POST_TRAINED_ID, true), schema: "x" };
+    const set = sample();
+    const { result, rerender, unmount } = renderHook(({ key }) => useTrainingOverlays("KXXX", set, key), { initialProps: { key: VECTORED_KEY } });
+    await waitFor(() => expect(result.current.generations.map(({ load }) => load.status)).toEqual(["ready", "invalid"]));
+    // one that cannot be read says why and is not published; the other is, for the selected flight
+    await waitFor(() => expect(last(setTrainingGenerations).map((view: any) => [view.overlay.overlayId, view.flight.flightKey]))
+      .toEqual([[BASE_MODEL_ID, VECTORED_KEY]]));
+    rerender({ key: STRAIGHT_KEY });
+    await waitFor(() => expect(last(setTrainingGenerations)[0].flight.flightKey).toBe(STRAIGHT_KEY));
+    expect(downloads(`${BASE_MODEL_ID}/generation.json`)).toBe(1);
+    unmount();
+    expect(last(setTrainingGenerations)).toEqual([]);
+  });
 
   it("publishes each overlay for the selected flight, and follows the selection", async () => {
     const set = sample();

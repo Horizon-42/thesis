@@ -8,15 +8,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const {
   appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
-  setTrainingAutopilotAuto, fetchMock,
+  setTrainingAutopilotAuto, setTrainingGenerations, setTrainingSource, fetchMock,
 } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
     trainingLayers: { headingBands: true, corridor: true, vertical: true, candidates: true },
     // no word selected: the live executor asks for nothing
     trainingSelection: null, trainingColumn: null, trainingAutopilot: null, trainingPick: null,
-    trainingAutopilotAuto: true,
+    trainingAutopilotAuto: true, trainingSource: null as unknown,
   },
+  setTrainingGenerations: vi.fn(),
+  setTrainingSource: vi.fn(),
   setTrainingSelection: vi.fn(),
   setTrainingLayer: vi.fn(),
   setTrainingExecutor: vi.fn(),
@@ -29,14 +31,15 @@ const {
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     ...appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
-    setTrainingAutopilotAuto,
+    setTrainingAutopilotAuto, setTrainingGenerations, setTrainingSource,
   }),
 }));
 
 import TrainingPanel from "../TrainingPanel";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
-  EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlays, mockPriorOverlay,
+  BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
+  mockOverlaysWithGenerations, mockPriorOverlay,
 } from "../../data/__tests__/trainingOverlays.fixture";
 
 function jsonResponse(body: unknown) {
@@ -77,6 +80,8 @@ describe("TrainingPanel", () => {
     setTrainingLayer.mockClear();
     setTrainingExecutor.mockClear();
     setTrainingPrior.mockClear();
+    setTrainingSource.mockClear();
+    appState.trainingSource = null;
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -161,8 +166,8 @@ describe("TrainingPanel", () => {
       const prior = screen.getByLabelText("Prior predictions") as HTMLInputElement;
       expect(replay.disabled && prior.disabled).toBe(true);
       expect(replay.checked || prior.checked).toBe(false);
-      // the commands fold away under "none published"
-      expect(screen.getAllByText("none published")).toHaveLength(2);
+      // the commands fold away under "none published" — the two switches' and the models' own sentences'
+      expect(screen.getAllByText("none published")).toHaveLength(3);
       expect(screen.getByText(new RegExp(`run_ts\\.py executor_training_export .*--set ${SET_ID} --airport KXXX`)).closest("details")).not.toBeNull();
       expect(screen.getByText(new RegExp(`run_ts\\.py prior_training_export .*--set ${SET_ID} --airport KXXX`))).toBeTruthy();
       await waitFor(() => expect(lastOf(setTrainingExecutor)).toBeNull());
@@ -256,6 +261,86 @@ describe("TrainingPanel", () => {
       expect(screen.getByText(/the set was re-exported after the overlay/)).toBeTruthy();
       await waitFor(() => expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY));
     });
+  });
+
+  describe("with the models' own sentences over the set", () => {
+    const BASE_PATH = `data/airports/KXXX/training/${BASE_MODEL_ID}/generation.json`;
+    const POST_PATH = `data/airports/KXXX/training/${POST_TRAINED_ID}/generation.json`;
+    beforeEach(() => serve({
+      [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlaysWithGenerations(),
+      [EXECUTOR_PATH]: mockExecutorOverlay(), [PRIOR_PATH]: mockPriorOverlay(),
+      [BASE_PATH]: mockGenerationOverlay(BASE_MODEL_ID), [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID, true),
+    }));
+
+    it("lists each beside the truth as the sentence read, with how many of its samples landed on this set", async () => {
+      render(<TrainingPanel hidden={false} />);
+      const group = await screen.findByRole("radiogroup", { name: "Which sentence is read" });
+      await waitFor(() => expect(group.textContent).toMatch(/base model 1\/2 landed/));
+      expect(group.textContent).toMatch(/truth \(labelled\)/);
+      expect(group.textContent).toMatch(/post-trained 1\/2 landed/);
+      expect((screen.getByLabelText(/truth \(labelled\)/) as HTMLInputElement).checked).toBe(true);
+      fireEvent.click(screen.getByLabelText(/^post-trained/));
+      expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: POST_TRAINED_ID, sample: 0 });
+    });
+
+    it("marks each flight with the chosen model's samples, filled where its flight landed", async () => {
+      appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
+      render(<TrainingPanel hidden={false} />);
+      const marks = await screen.findByText("●○");
+      expect(marks.getAttribute("title")).toBe("1 of 2 of the model's sentences landed: #1 landed, #2 timed out");
+      const unflown = [...document.querySelectorAll(".training-flight-samples")].find((item) => item.textContent === "—");
+      expect(unflown?.getAttribute("title")).toBe("the model's sentences do not fly it: stand-in dynamics");
+    });
+
+    it("folds how each model's samples landed, beside its formal readout here and at every airport, under the switches", async () => {
+      render(<TrainingPanel hidden={false} />);
+      expect(await screen.findByText(/The models' own sentences, landed · base model 50% \(val 90\.0%\) · post-trained 50% \(val 97\.0%\)/)).toBeTruthy();
+      expect(screen.getAllByText("val · KXXX")).toHaveLength(2);
+      expect(screen.getAllByText("val · all airports")).toHaveLength(2);
+      expect(screen.getByText(/^base model: 2 samples a flight at temperature 1 \(seed 1337\)/)).toBeTruthy();
+    });
+
+    it("reads a model that flies none of the set's flights without failing: nothing to count", async () => {
+      const none: any = mockGenerationOverlay(BASE_MODEL_ID);
+      none.flights[0] = { ...none.flights[0], flown: false, group: "stand-in dynamics", samples: [] };
+      serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlaysWithGenerations(),
+              [BASE_PATH]: none, [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID, true) });
+      render(<TrainingPanel hidden={false} />);
+      expect(await screen.findByText(/The models' own sentences, landed · base model — \(val 90\.0%\)/)).toBeTruthy();
+    });
+
+    it("checks the truth when the model chosen is not one of this set's", async () => {
+      appState.trainingSource = { overlayId: "another_sets_model", sample: 0 };
+      render(<TrainingPanel hidden={false} />);
+      await screen.findByRole("radiogroup", { name: "Which sentence is read" });
+      expect((screen.getByLabelText(/truth \(labelled\)/) as HTMLInputElement).checked).toBe(true);
+    });
+
+    it("says why a model's sentences cannot be read, and asks again on Retry", async () => {
+      const broken: any = mockGenerationOverlay(BASE_MODEL_ID);
+      broken.schema = "aeroviz-training-generation-v0";
+      const files: Record<string, unknown> = {
+        [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlaysWithGenerations(),
+        [BASE_PATH]: broken, [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID, true),
+      };
+      serve(files);
+      render(<TrainingPanel hidden={false} />);
+      expect(await screen.findByText(`Overlay ${BASE_MODEL_ID} cannot be read.`)).toBeTruthy();
+      files[BASE_PATH] = mockGenerationOverlay(BASE_MODEL_ID);
+      serve(files);
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => expect(screen.queryByText(`Overlay ${BASE_MODEL_ID} cannot be read.`)).toBeNull());
+      const group = screen.getByRole("radiogroup", { name: "Which sentence is read" });
+      await waitFor(() => expect(group.textContent).toMatch(/base model 1\/2 landed/));
+    });
+  });
+
+  it("says no model's sentences are published, and names the command that writes them", async () => {
+    serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlays() });
+    render(<TrainingPanel hidden={false} />);
+    await screen.findByText("TST1");
+    expect(screen.getByText("Model sentences")).toBeTruthy();
+    expect(screen.getAllByText(/prior_generation_training_export/).length).toBe(1);
   });
 
   it("names the field when a readable set fails, and leaves the manifest standing", async () => {

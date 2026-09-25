@@ -574,12 +574,25 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 /* Training task (docs/36-2026-09-20-training-module.zh.md): the panel, the sentence bar, the read-back and prior
    windows, the 3D legend. The panel renders flat inside the dock card, like ControlPanel above. */
 .training-panel {
+  /* it fills the dock (the list takes what is left) and never shrinks below its content: the dock scrolls instead */
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   color: #e0e6f0;
   font-family: "Inter", "Segoe UI", sans-serif;
   font-size: 13px;
+}
+
+/* While the sentence bar is up, the docks end ABOVE it — the bar spans the full width, so they would otherwise run under
+   it. Its height is its own measure (`--training-bar-height`, set by the bar as it resizes); the bottom padding that
+   cleared Cesium's clock dial is the bar's to cover now. */
+.workbench:has(> .training-sentence-bar) > .cesium-overlay-container {
+  padding-bottom: calc(36px + var(--training-bar-height, 200px) + 8px);
+}
+
+.workbench:has(> .training-sentence-bar) .left-overlay-panel-stack {
+  padding-bottom: 0;
 }
 
 /* kept mounted in the other tasks (WorkbenchLeftDock): the display above would otherwise override `hidden` */
@@ -784,22 +797,23 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-flight-list {
   list-style: none;
   margin: 0;
-  padding: 0;
-  /* The prose folds away, so the list gets the height back. */
-  max-height: 40vh;
+  padding: 0 2px 0 0;
+  /* the height left over in the dock, never under about five two-line rows (the dock scrolls below that) */
+  flex: 1 1 0;
+  min-height: 176px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .training-flight-list button {
   width: 100%;
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   gap: 6px;
   align-items: baseline;
-  padding: 4px 6px;
+  padding: 3px 6px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: rgba(23, 32, 58, 0.55);
@@ -832,6 +846,60 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-flight-list button.active .training-flight-stratum,
 .training-flight-list button.active .training-flight-events {
   color: rgba(255, 255, 255, 0.8);
+}
+
+/* The chosen model's samples of a flight: one mark each, filled where the flight landed. */
+.training-flight-samples {
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+/* Which sentence is read: the truth, or a model's own (`ModelSentences`). */
+.training-models {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  border: 1px solid #2a3552;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.training-models-title {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(224, 230, 240, 0.55);
+}
+
+.training-model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.training-model input {
+  margin: 0;
+}
+
+.training-model-swatch {
+  flex: none;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.training-model-swatch-truth {
+  background: #e2e8f0;
+}
+
+.training-model-count {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  color: rgba(224, 230, 240, 0.65);
 }
 
 /* The executor's outcome under each flight: a line of its own, in its verdict's colour. */
@@ -1207,6 +1275,89 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .workbench--presentation .training-sentence-bar {
   display: none;
+}
+
+/* The sentence read (the bar's tabs) and a model's samples: a segmented control each. */
+.training-source-tabs,
+.training-sample-buttons {
+  display: inline-flex;
+  align-self: center;
+}
+
+.training-source-tab,
+.training-sample-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: -1px;
+  padding: 2px 9px;
+  border: 1px solid #3a4a6a;
+  background: #17203a;
+  color: rgba(224, 230, 240, 0.75);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.training-source-tab:first-child,
+.training-sample-button:first-child {
+  margin-left: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.training-source-tab:last-child,
+.training-sample-button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.training-source-tab:only-child,
+.training-sample-button:only-child {
+  border-radius: 4px;
+}
+
+.training-source-tab:hover,
+.training-sample-button:hover {
+  background: #2a3550;
+}
+
+.training-source-tab[aria-pressed="true"] {
+  position: relative;
+  background: #243152;
+  border-color: #e2e8f0;
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.training-source-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.training-sample-button {
+  padding: 2px 7px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  color: #fca5a5;
+}
+
+.training-sample-button.landed {
+  color: #e0e6f0;
+}
+
+.training-sample-button[aria-pressed="true"] {
+  position: relative;
+  font-weight: 600;
+}
+
+/* the span a model only observed, and the truth's ticks under its rows, are read, not clicked */
+.training-sentence-observed,
+.training-sentence-truth-tick {
+  pointer-events: none;
+}
+
+.training-sentence-observed-label {
+  fill: rgba(203, 213, 225, 0.7);
+  font-size: 10px;
+  font-style: italic;
 }
 
 .training-sentence-readback-button {

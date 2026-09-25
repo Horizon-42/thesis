@@ -21,6 +21,14 @@
  *
  * Over the open set it offers the OVERLAYS published for it (`useTrainingOverlays`): the executor's replay and the
  * prior's predictions, each behind its own switch; a set with none says so and folds away the command that writes one.
+ * And THE MODELS' OWN SENTENCES (`prior-generation`): each model published for the set is a line of "Model sentences" —
+ * its colour, its name, how many of its samples landed on this set — which chooses it as the sentence read
+ * (`trainingSource`, as the sentence bar's tabs do); while one is chosen, each flight in the list shows its samples,
+ * filled where the flight landed.
+ *
+ * THE DOCK ENDS ABOVE THE SENTENCE BAR (the bar measures itself, `--training-bar-height`): the flight list takes the
+ * height left over — never less than a few rows, the dock scrolling below that — so the switches under it are never
+ * covered.
  * And THE EXECUTOR, LIVE (`useTrainingAutopilot`): a word picked — the sentence bar's Fly button, or a band clicked
  * while its switch is on — is flown by the backend now, never read from an overlay (`TrainingAutopilotCard`).
  */
@@ -42,10 +50,17 @@ import {
   TRAINING_HEADING_BAND_COLOR,
   TRAINING_OUTSIDE_COLOR,
   TRAINING_TUBE_COLOR,
+  trainingModelColour,
 } from "../utils/trainingWordColors";
-import { trainingOverlaysPath, type TrainingExecutorFlight } from "../data/trainingOverlays";
+import {
+  generationLanded,
+  trainingOverlaysPath,
+  type TrainingExecutorFlight,
+  type TrainingGenerationFlight,
+} from "../data/trainingOverlays";
 import { TRAINING_OUTCOME_TAG } from "../data/trainingText";
-import { TrainingExecutorGate, TrainingPriorReadout } from "./TrainingResults";
+import { TrainingExecutorGate, TrainingGenerationReadout, TrainingPriorReadout } from "./TrainingResults";
+import type { GenerationItem } from "../hooks/useTrainingOverlays";
 import {
   fetchTrainingIndex,
   fetchTrainingSample,
@@ -55,6 +70,7 @@ import {
   trainingVerdicts,
   type TrainingIndex,
   type TrainingSample,
+  type TrainingFlight,
   type TrainingSetEntry,
 } from "../data/trainingSample";
 
@@ -96,6 +112,9 @@ const TRAINING_OVERLAY_COMMAND = {
   "executor-replay": "python run_ts.py executor_training_export --executor <spec dir> --replay <spec dir>/replay-val " +
     "--instructions <artefact> --airports-root aeroviz-4d/public/data/airports --set ",
   "prior-prediction": "python run_ts.py prior_training_export --prior <prior dir> --instructions <artefact> " +
+    "--airports-root aeroviz-4d/public/data/airports --set ",
+  "prior-generation": "python run_ts.py prior_generation_training_export --prior <prior dir> --label <its name> " +
+    "--instructions <artefact> --executor <executor spec dir> --readout <its val free generation> " +
     "--airports-root aeroviz-4d/public/data/airports --set ",
 } as const;
 
@@ -145,6 +164,80 @@ function ExecutorTag({ flight }: { flight: TrainingExecutorFlight }) {
   );
 }
 
+/** A flight's samples of the chosen model, one mark each: filled where the flight landed, hollow where it did not. */
+function SampleMarks({ flight, colour }: { flight: TrainingGenerationFlight; colour: string }) {
+  if (!flight.flown) {
+    return <span className="training-flight-samples" title={`the model's sentences do not fly it: ${flight.group}`}>—</span>;
+  }
+  const landed = flight.samples.filter((item) => item.outcome === "landed").length;
+  return (
+    <span className="training-flight-samples" style={{ color: colour }}
+      title={`${landed} of ${flight.samples.length} of the model's sentences landed: ` +
+        flight.samples.map((item) => `#${item.sample + 1} ${TRAINING_OUTCOME_TAG[item.outcome]}`).join(", ")}>
+      {flight.samples.map((item) => (item.outcome === "landed" ? "●" : "○")).join("")}
+    </span>
+  );
+}
+
+/** THE MODELS' OWN SENTENCES published for the set: each a line that chooses it as the sentence read (from its first
+ *  sample); the truth first — and checked when the chosen model is not one of this set's. */
+function ModelSentences({ items, setId, airport, flights }: {
+  items: GenerationItem[]; setId: string; airport: string; flights: TrainingFlight[];
+}) {
+  const { trainingSource, setTrainingSource } = useApp();
+  if (items.length === 0) {
+    return (
+      <div className="training-models">
+        <span className="training-slot">Model sentences</span>
+        <details className="training-overlay-note">
+          <summary>none published</summary>
+          <code>{TRAINING_OVERLAY_COMMAND["prior-generation"]}{setId} --airport {airport}</code>
+        </details>
+      </div>
+    );
+  }
+  const chosen = items.some(({ entry }) => entry.id === trainingSource?.overlayId) ? trainingSource!.overlayId : null;
+  return (
+    <div className="training-models" role="radiogroup" aria-label="Which sentence is read">
+      <span className="training-models-title">Sentences read</span>
+      <label className="training-model">
+        <input type="radio" name="training-source" checked={chosen === null} onChange={() => setTrainingSource(null)} />
+        <span className="training-model-swatch training-model-swatch-truth" />
+        truth (labelled)
+      </label>
+      {items.map(({ entry, load, retry }) => {
+        const overlay = load.status === "ready" ? load.overlay : null;
+        const count = overlay === null ? null : generationLanded(overlay, flights).all;
+        return (
+          <div key={entry.id}>
+            <label className="training-model" title={entry.title}
+              style={overlay === null ? undefined : { color: trainingModelColour(overlay.model) }}>
+              <input type="radio" name="training-source" checked={chosen === entry.id} disabled={overlay === null}
+                onChange={() => setTrainingSource({ overlayId: entry.id, sample: 0 })} />
+              <span className="training-model-swatch"
+                style={overlay === null ? undefined : { background: trainingModelColour(overlay.model) }} />
+              {overlay?.model.label ?? entry.id}
+              {count !== null ? (
+                <span className="training-model-count" title={`of the ${count.flights} sentences it said over the set's flights ` +
+                  "(each flown by the executor from its first predicted step), those that landed"}>
+                  {" "}{Math.round(count.landed * count.flights)}/{count.flights} landed
+                </span>
+              ) : null}
+              {load.status === "loading" || load.status === "idle" ? <span className="training-overlay-note" role="status"> loading …</span> : null}
+            </label>
+            {load.status === "invalid" ? (
+              <>
+                <ProblemBox title={`Overlay ${entry.id} cannot be read.`} detail={load.problem} />
+                <button type="button" className="training-sentence-readback-button" onClick={retry}>Retry</button>
+              </>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function EmptyState({ airport }: { airport: string }) {
   return (
     <div className="training-empty" role="status">
@@ -166,6 +259,7 @@ function EmptyState({ airport }: { airport: string }) {
 export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const {
     activeAirportCode, setTrainingSelection, trainingLayers, setTrainingLayer, trainingAutopilotAuto, setTrainingAutopilotAuto,
+    trainingSource,
   } = useApp();
   const airport = activeAirportCode || "—";
 
@@ -248,6 +342,15 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
     () => new Map((executorOverlay?.flights ?? []).map((flight) => [flight.flightKey, flight])),
     [executorOverlay],
   );
+  // the model whose sentences are read, when it is loaded for this set: its samples beside each flight
+  const readModel = useMemo(() => {
+    const item = overlays.generations.find(({ entry }) => entry.id === trainingSource?.overlayId);
+    return item?.load.status === "ready" ? item.load.overlay : null;
+  }, [overlays.generations, trainingSource]);
+  const readFlights = useMemo(
+    () => new Map((readModel?.flights ?? []).map((flight) => [flight.flightKey, flight])),
+    [readModel],
+  );
 
   // Keep the selection on the same flight across a reload when it is still there; otherwise the first, so the
   // sentence bar is never blank beside a list.
@@ -292,7 +395,8 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
             ...LAYER_SWITCHES.map(({ layer, text, title }) => ({ key: layer, name: text, text: title })),
             { key: "autopilot", name: "Fly on band click",
               text: FLY_ON_CLICK },
-            ...[...overlays.executor.entries, ...overlays.prior.entries].map((item) => ({ key: item.id, name: item.id, text: item.title })),
+            ...[...overlays.executor.entries, ...overlays.prior.entries, ...overlays.generations.map(({ entry }) => entry)]
+              .map((item) => ({ key: item.id, name: item.id, text: item.title })),
           ]} />
           {sample ? <TrainingVocabularyNotes sample={sample} /> : null}
         </>
@@ -340,6 +444,7 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
               <ul className="training-flight-list">
                 {sample.flights.map((flight) => {
                   const replay = executorFlights.get(flight.flightKey);
+                  const read = readFlights.get(flight.flightKey);
                   return (
                     <li key={flight.flightKey}>
                       <button type="button" className={flight.flightKey === flightKey ? "active" : undefined}
@@ -348,12 +453,17 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
                         <span className="training-flight-runway">{flight.runway}</span>
                         <span className="training-flight-stratum">{flight.stratum}</span>
                         <span className="training-flight-events">{trainingVerdicts(flight).instructionsAfterStep0} words</span>
+                        {read !== undefined && readModel !== null
+                          ? <SampleMarks flight={read} colour={trainingModelColour(readModel.model)} /> : null}
                         {replay !== undefined ? <ExecutorTag flight={replay} /> : null}
                       </button>
                     </li>
                   );
                 })}
               </ul>
+
+              {/* THE MODELS' OWN SENTENCES: which sentence every view reads */}
+              <ModelSentences items={overlays.generations} setId={sample.setId} airport={airport} flights={sample.flights} />
 
               {/* THE EXECUTOR, LIVE: flown by the backend when a word is picked, never read from an overlay */}
               <fieldset className="training-layers training-autopilot-section" aria-label="Autopilot (live)">
@@ -395,6 +505,10 @@ export default function TrainingPanel({ hidden }: { hidden: boolean }) {
           )) : null}
           {executorOverlay ? <TrainingExecutorGate overlay={executorOverlay} /> : null}
           {priorOverlay && sample ? <TrainingPriorReadout overlay={priorOverlay} stepS={sample.vocabulary.stepS} /> : null}
+          {sample && overlays.generations.some(({ load }) => load.status === "ready") ? (
+            <TrainingGenerationReadout flights={sample.flights}
+              overlays={overlays.generations.flatMap(({ load }) => (load.status === "ready" ? [load.overlay] : []))} />
+          ) : null}
         </>
       ) : null}
     </section>

@@ -95,7 +95,7 @@ export function bandRect(x0: number, x1: number, yTop: number, yBottom: number) 
 }
 
 export type Swatch =
-  | { kind: "line"; colour: string; dash?: string }
+  | { kind: "line"; colour: string; dash?: string; opacity?: number }
   | { kind: "area"; colour: string; opacity: number; dash?: string };
 
 /** What a colour is drawn as, for a legend. */
@@ -103,7 +103,8 @@ export function SwatchIcon({ swatch }: { swatch: Swatch }) {
   return (
     <svg className="training-legend-swatch" width={22} height={10} aria-hidden="true">
       {swatch.kind === "line" ? (
-        <line x1={1} x2={21} y1={5} y2={5} stroke={swatch.colour} strokeWidth={2.2} strokeDasharray={swatch.dash} />
+        <line x1={1} x2={21} y1={5} y2={5} stroke={swatch.colour} strokeWidth={2.2} strokeDasharray={swatch.dash}
+          strokeOpacity={swatch.opacity} />
       ) : (
         <rect x={1} y={1} width={20} height={8} fill={swatch.colour} fillOpacity={swatch.opacity} stroke={swatch.colour}
           strokeWidth={1.2} strokeDasharray={swatch.dash} />

@@ -7,15 +7,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-const { appState, DEFAULT_LAYERS, setTrainingPick } = vi.hoisted(() => {
+const { appState, DEFAULT_LAYERS, setTrainingPick, setTrainingSource } = vi.hoisted(() => {
   const DEFAULT_LAYERS = { headingBands: true, corridor: true, vertical: true, candidates: true };
   return {
     DEFAULT_LAYERS,
     setTrainingPick: vi.fn(),
+    setTrainingSource: vi.fn(),
     appState: {
       mode: "training", trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
       trainingExecutor: null as unknown, trainingPrior: null as unknown, trainingAutopilot: null as unknown,
       trainingPick: null as unknown, trainingAutopilotAuto: true,
+      trainingGenerations: [] as unknown[], trainingSource: null as unknown,
     },
   };
 });
@@ -25,7 +27,7 @@ vi.mock("../../context/AppContext", async () => {
   return {
     useApp: () => {
       const [trainingColumn, setTrainingColumn] = useState<string | null>(null);
-      return { ...appState, trainingColumn, setTrainingColumn, setTrainingPick };
+      return { ...appState, trainingColumn, setTrainingColumn, setTrainingPick, setTrainingSource };
     },
     useTrainingCursor: () => {
       const [trainingCursorS, setTrainingCursorS] = useState(0);
@@ -38,7 +40,10 @@ import TrainingSentenceBar, { spacedLabels } from "../TrainingSentenceBar";
 import { parseTrainingSample, trainingSelectionOf, TRAINING_COLUMNS } from "../../data/trainingSample";
 import { MOCK_ROWS, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlayEntry, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
-import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay } from "../../data/trainingOverlays";
+import { parseTrainingExecutorOverlay, parseTrainingGenerationOverlay, parseTrainingPriorOverlay } from "../../data/trainingOverlays";
+import {
+  BASE_MODEL_ID, POST_TRAINED_ID, mockGenerationEntry, mockGenerationOverlay,
+} from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
 import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
@@ -52,6 +57,19 @@ function overlays(position = 0) {
   if (!executor.ok || !prior.ok) throw new Error("the overlay fixtures do not read");
   appState.trainingExecutor = { overlay: executor.value, flight: executor.value.flights[position] };
   appState.trainingPrior = { overlay: prior.value, flight: prior.value.flights[position] };
+}
+
+/** Publish both models' own sentences over the selected flight, as the panel does (``change``: of each raw payload). */
+function generations(position = 0, change: (raw: any) => void = () => undefined) {
+  const parsed = parseTrainingSample(mockSample());
+  if (!parsed.ok) throw new Error(parsed.problem);
+  appState.trainingGenerations = [[BASE_MODEL_ID, false], [POST_TRAINED_ID, true]].map(([id, post]) => {
+    const raw = mockGenerationOverlay(id as string, post as boolean);
+    change(raw);
+    const overlay = parseTrainingGenerationOverlay(raw, mockGenerationEntry(id as string), parsed.value);
+    if (!overlay.ok) throw new Error(overlay.problem);
+    return { overlay: overlay.value, flight: overlay.value.flights[position] };
+  });
 }
 
 function select(position = 0) {
@@ -70,7 +88,125 @@ describe("TrainingSentenceBar", () => {
     appState.trainingAutopilot = null;
     appState.trainingPick = null;
     appState.trainingAutopilotAuto = true;
+    appState.trainingGenerations = [];
+    appState.trainingSource = null;
     setTrainingPick.mockClear();
+    setTrainingSource.mockClear();
+  });
+
+  it("offers the models' own sentences as tabs beside the truth, each choosing the sentence read", () => {
+    select();
+    render(<TrainingSentenceBar />);
+    expect(screen.queryByRole("group", { name: "Which sentence is read" })).toBeNull();      // none published: no tabs
+    generations();
+    render(<TrainingSentenceBar />);
+    const groups = screen.getAllByRole("group", { name: "Which sentence is read" });
+    const tabs = groups[groups.length - 1];
+    const names = [...tabs.querySelectorAll("button")].map((button) => button.textContent);
+    expect(names).toEqual(["Truth", "base model", "post-trained"]);
+    expect(tabs.querySelector("button")!.getAttribute("aria-pressed")).toBe("true");
+    const post = screen.getAllByRole("button", { name: "post-trained" });
+    fireEvent.click(post[post.length - 1]);
+    expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: POST_TRAINED_ID, sample: 0 });
+  });
+
+  it("starts another model at its first sample, whichever sample the last one was read at", () => {
+    select();
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
+    render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByRole("button", { name: "post-trained" }));
+    expect(setTrainingSource).toHaveBeenLastCalledWith({ overlayId: POST_TRAINED_ID, sample: 0 });
+  });
+
+  it("offers the truth's windows only on its tab: they read the truth, not the model's words", () => {
+    select();
+    overlays();
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.queryByRole("button", { name: "Read-back" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Prior" })).toBeNull();
+  });
+
+  it("shades the rows a model spoke on after its flight ended — not the part of its last step past the end", () => {
+    select();
+    // the second sample crossed the threshold without the capture at 150 s — the executor flies on after it — and the
+    // model spoke on for 15 steps
+    generations(0, (raw) => {
+      Object.assign(raw.flights[0].samples[1], { outcome: "crossed_without_capture", crossing: { crossM: 80, heightM: 30, atS: 149.6 },
+        rows: 90 });
+    });
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
+    const { unmount } = render(<TrainingSentenceBar />);
+    expect(screen.getByLabelText("after 150 s: the flight had ended; the model spoke on to where the executor stopped")).toBeTruthy();
+    unmount();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.queryByLabelText(/^after .* the flight had ended/)).toBeNull();          // 110 s, its step ends at 112 s
+  });
+
+  it("draws a model's sample hatched, over the span it only observed, with the truth's words ticked under each row", () => {
+    select();
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    // the model's words, said by it — never the labeller's kinds
+    expect(screen.getByLabelText(/^heading 225° — said by base model at step 12 \(24 s\), in force to 32 s$/)).toBeTruthy();
+    expect(screen.queryByLabelText(/— the heading the track reaches a lead later/)).toBeNull();
+    expect(document.querySelectorAll(".training-sentence-hatch").length).toBe(document.querySelectorAll(".training-sentence-band.model").length);
+    expect(document.querySelectorAll(".training-sentence-band.model").length).toBe(12);          // its twelve words
+    expect(screen.getByLabelText("steps 0–3: observed only, the model speaks from step 4")).toBeTruthy();
+    // a tick under a row wherever the truth says a word of that column after step 0
+    const truth = (appState.trainingSelection as { flight: { words: { events: Array<{ row: number }> } } }).flight.words.events;
+    expect(document.querySelectorAll(".training-sentence-truth-tick").length).toBe(truth.filter((event) => event.row > 0).length);
+    // its own moments: its clearance, its end, and where the observed flight's sentence ends
+    expect(screen.getByLabelText("base model cleared the flight to join the final at 48 s")).toBeTruthy();
+    expect(screen.getByLabelText("base model's flight landed at 110 s")).toBeTruthy();
+    expect(screen.getByLabelText("the observed flight's sentence ends at 120 s")).toBeTruthy();
+    // how the sample ended, and no truth-only chip or button
+    expect(screen.getByText("#1: landed on 09 at 110 s (observed 120 s)")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "▶ Fly" })).toBeNull();
+    expect(screen.queryByText(/^heading \d+\/\d+ · capture/)).toBeNull();
+  });
+
+  it("numbers a model's samples, marking the ones whose flight did not land, and reads the one chosen", () => {
+    select();
+    generations();
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
+    render(<TrainingSentenceBar />);
+    const samples = screen.getByRole("group", { name: "base model's samples" });
+    expect([...samples.querySelectorAll("button")].map((button) => [button.textContent, button.getAttribute("aria-pressed")]))
+      .toEqual([["1", "false"], ["2 ✗", "true"]]);
+    expect(screen.getByText("#2: timed out, pointing at 27 at 150 s (observed 120 s)")).toBeTruthy();
+    // its rows run past the observed flight's: the axis runs on to its end
+    expect(screen.getByText("152 s")).toBeTruthy();
+    fireEvent.click(samples.querySelector("button")!);
+    expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: BASE_MODEL_ID, sample: 0 });
+  });
+
+  it("keeps the truth's own axis under its tab, never stretched by a model's sample it does not show", () => {
+    select();
+    generations();
+    render(<TrainingSentenceBar />);
+    expect(screen.getByText("120 s")).toBeTruthy();
+    expect(screen.queryByText("152 s")).toBeNull();
+  });
+
+  it("says so, and reads the truth, for a flight the chosen model's sentences do not fly", () => {
+    select(1);
+    generations(1);
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.getByText("base model: not flown (stand-in dynamics) — the truth is shown")).toBeTruthy();
+    // the truth is drawn with its whole header: the labeller's verdicts, and the Fly button for its words
+    expect(screen.getByText(/^heading \d+\/\d+ · capture/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "▶ Fly" })).toBeTruthy();
+    expect((document.querySelector(".training-sentence-bar") as HTMLElement).style.borderColor).toBe("");
+    // the straight-in flight's opening words: cleared at entry, the other five in force
+    expect(screen.getAllByLabelText(/— in force at entry \(step 0\), issued at step 0/).length).toBe(5);
+    expect(screen.getByLabelText(/^approach cleared — cleared to join the final, issued at step 0/)).toBeTruthy();
+    expect(document.querySelectorAll(".training-sentence-band.model")).toHaveLength(0);
   });
 
   it("picks a band's word for the live executor when the band is clicked, and clears it on a second click", () => {

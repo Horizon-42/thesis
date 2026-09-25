@@ -3,7 +3,8 @@
  * ------------------------
  * The selected Training flight in the 3D scene: its track, and the envelopes its sentence allows. Design:
  * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`. The pieces are `scene/trainingEntities.ts`; the executor's
- * replay and the live executor are `useTrainingExecutorLayers`, called from here.
+ * replay and the live executor are `useTrainingExecutorLayers`, a model's own sentence `useTrainingGenerationLayers`,
+ * both called from here. The truth — this track and its sentence's envelopes — is drawn whichever sentence is read.
  *
  *  • THE TRACK, in 3D, at its ellipsoid height (the exporter converted MSL once: h = H + N), and its GROUND TRACE draped
  *    under it: the lateral envelopes lie on the ground, and from any oblique view the airborne line is displaced from
@@ -27,7 +28,8 @@
  * BUILT ONCE PER FLIGHT: a Draw switch shows or hides its entities and rebuilds nothing — the draped layers would
  * otherwise be re-draped on every switch, and the runways drawn first would land on top of the envelopes they sit under.
  *
- * THE SELECTED WORD (`trainingColumn`, its word in force at the cursor) is the only thing highlighted: its own envelope
+ * THE SELECTED WORD (`trainingColumn`, its word in force at the cursor — of the truth; a model's sentence read paints its
+ * own, `useTrainingGenerationLayers`) is the only thing highlighted: its own envelope
  * turns yellow (a line) or keeps its hue deepened with a yellow edge (a fill); the rows it is in force are drawn yellow
  * over the track, and its issue is marked with its name. Every other word's envelope recedes (its colours faded). Moving
  * the cursor within one word repaints nothing. Selecting a flight frames it once; the cursor never moves the camera.
@@ -86,6 +88,8 @@ import {
   type EntityOptions,
 } from "../scene/trainingEntities";
 import useTrainingExecutorLayers from "./useTrainingExecutorLayers";
+import useTrainingGenerationLayers from "./useTrainingGenerationLayers";
+import { generationOnScreen } from "../data/trainingOverlays";
 
 const ALPHA = TRAINING_ENVELOPE_ALPHA;
 /** An envelope's edge, at rest and when it is the selected word's (px). */
@@ -309,7 +313,7 @@ function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column:
 }
 
 export default function useTrainingTrackLayer(): void {
-  const { viewer, mode, trainingSelection, trainingLayers, trainingColumn } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers, trainingColumn, trainingGenerations, trainingSource } = useApp();
   const { trainingCursorS } = useTrainingCursor();
   const selection = mode === "training" ? trainingSelection : null;
 
@@ -346,8 +350,9 @@ export default function useTrainingTrackLayer(): void {
   }, [viewer, selection]);
 
   // THE SELECTED WORD: the column's word in force at the cursor. Keyed on the word's issue row, so a cursor moving inside
-  // one word repaints nothing.
-  const focusRow = selection !== null && trainingColumn !== null
+  // one word repaints nothing. Only the truth's: a model's sentence read paints its own word on its own track.
+  const modelRead = generationOnScreen(trainingGenerations, trainingSource, selection)?.sentence ?? null;
+  const focusRow = selection !== null && trainingColumn !== null && modelRead === null
     ? trainingWordAt(selection.flight, trainingColumn, rowAtTime(selection.flight.signals.tS, trainingCursorS)).row
     : null;
   useEffect(() => {
@@ -359,4 +364,5 @@ export default function useTrainingTrackLayer(): void {
   }, [viewer, selection, trainingColumn, focusRow]);
 
   useTrainingExecutorLayers();
+  useTrainingGenerationLayers();
 }

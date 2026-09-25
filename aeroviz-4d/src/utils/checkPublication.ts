@@ -38,6 +38,7 @@ import {
 } from "../data/trainingSample";
 import {
   parseTrainingExecutorOverlay,
+  parseTrainingGenerationOverlay,
   parseTrainingOverlays,
   parseTrainingPriorOverlay,
   type TrainingOverlayEntry,
@@ -320,6 +321,7 @@ const OVERLAY_READERS: Record<TrainingOverlayKind,
   (payload: unknown, entry: TrainingOverlayEntry, sample: TrainingSample) => Parsed<{ flights: unknown[] }>> = {
   "executor-replay": parseTrainingExecutorOverlay,
   "prior-prediction": parseTrainingPriorOverlay,
+  "prior-generation": parseTrainingGenerationOverlay,
 };
 
 /**

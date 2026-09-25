@@ -197,12 +197,27 @@ export interface TrainingCandidate {
   runway: TrainingPlanLine;
 }
 
-export interface TrainingWordEvent {
+/** One word of a sentence: the step it is said at, its column (`TRAINING_COLUMNS` order) and its value. */
+export interface TrainingSentenceEvent {
   row: number;
   column: number;
   value: number;
-  /** Why the labeller issued it. */
+}
+
+/** A word of the TRUTH sentence: the labeller says why it issued it. */
+export interface TrainingWordEvent extends TrainingSentenceEvent {
   kind: TrainingWordKind;
+}
+
+/**
+ * A SENTENCE, as the sentence bar draws it: its words in (row, column) order over the rows it covers, opening at
+ * ``firstRow`` with every column said. The truth's opens at step 0 (`trainingTruthSentence`); a model's own opens at its
+ * first predicted row — the rows before are observed only (`trainingOverlays.TrainingGeneratedSentence`).
+ */
+export interface TrainingSentence<E extends TrainingSentenceEvent = TrainingSentenceEvent> {
+  rows: number;
+  firstRow: number;
+  events: E[];
 }
 
 /** The labeller's check of the capture turn: monotone progress toward the course, its rate inside the range. */
@@ -389,6 +404,25 @@ export function trainingSelectionOf(sample: TrainingSample, flight: TrainingFlig
 
 // ── reading a word ───────────────────────────────────────────────────────────
 
+/** MIRROR of `instruction_training_export.APPROACH_NAMES[APPROACH_CLEARED]`: the approach word that clears the flight to
+ *  join the final. */
+export const TRAINING_APPROACH_CLEARED = "cleared";
+
+/** MIRROR of `instruction_training_export.APPROACH_NAMES[APPROACH_GO_AROUND]`: the approach word that sends the flight
+ *  around. */
+export const TRAINING_APPROACH_GO_AROUND = "go-around";
+
+/** The approach column's value that clears the flight (the set's own table names it; the vocabulary reader refuses a
+ *  table without it). */
+export function trainingClearedValue(vocabulary: TrainingVocabulary): number {
+  return vocabulary.approachClasses.indexOf(TRAINING_APPROACH_CLEARED);
+}
+
+/** The approach column's value that sends the flight around (as `trainingClearedValue`). */
+export function trainingGoAroundValue(vocabulary: TrainingVocabulary): number {
+  return vocabulary.approachClasses.indexOf(TRAINING_APPROACH_GO_AROUND);
+}
+
 /** The class count of a column; the runway pointer's is the airport's candidate count. */
 export function trainingClassCount(
   vocabulary: TrainingVocabulary, candidates: TrainingCandidate[], column: TrainingColumn,
@@ -457,23 +491,43 @@ export function formatSeconds(seconds: number): string {
 }
 
 /** One word of a column and the rows it is in force: from its issue to the next word of its column. */
-export interface TrainingWordRun {
+export interface TrainingWordRun<E extends TrainingSentenceEvent = TrainingWordEvent> {
   row: number;
   endRow: number;
   value: number;
-  event: TrainingWordEvent;
+  event: E;
 }
 
-/** The runs of one column: the value in force from each of its issue rows to the next. */
-export function trainingColumnRuns(flight: TrainingFlight, column: TrainingColumn): TrainingWordRun[] {
+/** The flight's truth sentence, as a sentence. */
+export function trainingTruthSentence(flight: TrainingFlight): TrainingSentence<TrainingWordEvent> {
+  return { rows: flight.rows, firstRow: 0, events: flight.words.events };
+}
+
+/** The runs of one column of a sentence: the value in force from each of its issue rows to the next. */
+export function sentenceColumnRuns<E extends TrainingSentenceEvent>(
+  sentence: TrainingSentence<E>, column: TrainingColumn,
+): TrainingWordRun<E>[] {
   const index = TRAINING_COLUMN_INDEX[column];
-  const events = flight.words.events.filter((event) => event.column === index);
+  const events = sentence.events.filter((event) => event.column === index);
   return events.map((event, position) => ({
     row: event.row,
-    endRow: position + 1 < events.length ? events[position + 1].row : flight.rows,
+    endRow: position + 1 < events.length ? events[position + 1].row : sentence.rows,
     value: event.value,
     event,
   }));
+}
+
+/** The runs of one column of the flight's truth sentence. */
+export function trainingColumnRuns(flight: TrainingFlight, column: TrainingColumn): TrainingWordRun[] {
+  return sentenceColumnRuns(trainingTruthSentence(flight), column);
+}
+
+/** The word of one column of a sentence in force at a row, or null before the sentence opens (a model's, over the rows
+ *  it only observed) or after it ends. */
+export function sentenceWordAt<E extends TrainingSentenceEvent>(
+  sentence: TrainingSentence<E>, column: TrainingColumn, row: number,
+): TrainingWordRun<E> | null {
+  return sentenceColumnRuns(sentence, column).find((run) => run.row <= row && row < run.endRow) ?? null;
 }
 
 /**
@@ -600,6 +654,8 @@ function parseVocabulary(reader: Reader): TrainingVocabulary {
     speed: counts.count("speed", 1),
   };
   const approachClasses = reader.strings("approachClasses");
+  const unnamed = [TRAINING_APPROACH_CLEARED, TRAINING_APPROACH_GO_AROUND].filter((name) => !approachClasses.includes(name));
+  if (unnamed.length > 0) reader.fail(`approachClasses [${approachClasses.join(", ")}] name no "${unnamed.join('", "')}" word`);
   const headingTargetsDeg = reader.numbers("headingTargetsDeg");
   const altitudeTargetsM = reader.numbers("altitudeTargetsM");
   const speedTargetsMps = reader.numbers("speedTargetsMps");

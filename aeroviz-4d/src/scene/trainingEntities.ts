@@ -56,6 +56,14 @@ export const TRAINING_ENTITY = {
   autopilotStart: "training-autopilot-start",
   autopilotGround: "training-autopilot-ground",
   autopilotOutside: (run: number) => `training-autopilot-outside-${run}`,
+  /** The model sentence read: each of its samples' flown tracks, the one read's ground trace, where it ended, where it
+   *  said its heading words and the clearance (by the word's place in its events), and its selected word. */
+  modelTrack: (sample: number) => `training-model-track-${sample}`,
+  modelGround: "training-model-ground",
+  modelEnd: "training-model-end",
+  modelIssue: (index: number) => `training-model-issue-${index}`,
+  modelFocusStretch: "training-model-focus-stretch",
+  modelFocusIssue: "training-model-focus-issue",
 } as const;
 
 /** A heading word's judged rows and the capture turn on the ground (px): wider than the ground trace they lie on. */

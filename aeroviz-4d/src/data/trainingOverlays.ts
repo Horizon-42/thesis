@@ -2,9 +2,12 @@
  * trainingOverlays.ts
  * -------------------
  * What another model makes of a Training set's own flights, drawn over the set: the EXECUTOR's replay (the truth
- * sentence flown from row 0 — its track, its outcome and every word's verdict) and the PRIOR's predictions (at every
- * step of the truth sentence, what it gives each column). Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`
- * §2.6 and §4.6; the writers: `experiments/executor_training_export.py`, `experiments/prior_training_export.py`.
+ * sentence flown from row 0 — its track, its outcome and every word's verdict), the PRIOR's predictions (at every
+ * step of the truth sentence, what it gives each column) and the prior's OWN SENTENCES (free generation: the words it
+ * said from its first predicted step, the executor flying them, how each flight ended — several samples a flight).
+ * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §2.6, §4.6 and §4.7; the writers:
+ * `experiments/executor_training_export.py`, `experiments/prior_training_export.py`,
+ * `experiments/prior_generation_training_export.py`.
  *
  * AN OVERLAY IS A FILE BESIDE ITS SET, NEVER INSIDE IT. `training/overlays.json` lists them, each naming the set it
  * is drawn over (`base`) and that set's sample by its sha256; the payload repeats the set id, the sample's time of
@@ -18,7 +21,7 @@
  * probability is the prior's own. The reader checks bookkeeping — lengths, ranges, the binding — and hands numbers to
  * the views.
  *
- * NO COMPATIBILITY: the three schemas are pinned below and anything else is refused by name. A payload is bound to the
+ * NO COMPATIBILITY: the four schemas are pinned below and anything else is refused by name. A payload is bound to the
  * manifest entry that listed it (its id and set) and to the sample on screen (its set, time of writing, spec and
  * airport), or refused whole.
  *
@@ -26,7 +29,7 @@
  */
 
 import { fetchJson } from "../utils/fetchJson";
-import { asNumber, attempt, parseManifest, Reader, recordOf, type Parsed } from "./trainingReader";
+import { asNumber, attempt, parseManifest, Reader, recordOf, Refusal, type Parsed } from "./trainingReader";
 import {
   readHeadingBand,
   TRAINING_COLUMN_INDEX,
@@ -35,20 +38,25 @@ import {
   TRAINING_STRATA,
   TRAINING_UNCHANGED,
   trainingClassCount,
+  trainingClearedValue,
   trainingDirectory,
+  trainingGoAroundValue,
   trainingFilePath,
   type TrainingColumn,
   type TrainingFlight,
   type TrainingHeadingBand,
+  type TrainingStratum,
   type TrainingSample,
   type TrainingSelection,
+  type TrainingSentence,
+  type TrainingSentenceEvent,
   type TrainingVocabulary,
 } from "./trainingSample";
 
 /** MIRROR of the exporter's `OVERLAYS_SCHEMA` (`instruction_training_export.py`): the manifest of overlays. */
 export const TRAINING_OVERLAYS_SCHEMA = "aeroviz-training-overlays-v1";
 /** MIRROR of `OVERLAY_KINDS`: what an overlay can be. */
-export const TRAINING_OVERLAY_KINDS = ["executor-replay", "prior-prediction"] as const;
+export const TRAINING_OVERLAY_KINDS = ["executor-replay", "prior-prediction", "prior-generation"] as const;
 export type TrainingOverlayKind = (typeof TRAINING_OVERLAY_KINDS)[number];
 /** MIRROR of `executor_training_export.SCHEMA`: v2 (instruction-v3) gives each heading word judged its band and a
  *  verdict per row, and each flight judged its flown track as the judge read it; v1 (turns and holds) is refused. */
@@ -69,6 +77,11 @@ export type TrainingExecutorOutcome = (typeof TRAINING_EXECUTOR_OUTCOMES)[number
 export const TRAINING_PRIOR_RULES = ["B0_majority", "B1_active_config", "B3_same_sector_last"] as const;
 /** MIRROR of `prior_training_export.SCHEMA`. */
 export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v3";
+/** MIRROR of `prior_generation_training_export.SCHEMA`: the prior's own sentences, flown. */
+export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v1";
+/** MIRROR of `ts_transformer.autopilot.judge.CROSSINGS`: the outcomes read at a crossing of the threshold, which carry
+ *  where it was crossed; no other outcome does. */
+export const TRAINING_CROSSING_OUTCOMES: readonly TrainingExecutorOutcome[] = ["landed", "crossed_without_capture", "crossed_off_runway"];
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -289,6 +302,96 @@ export interface TrainingPriorOverlay {
   flights: TrainingPriorFlight[];
 }
 
+/** The executor's flight of one of the prior's own sentences, every sentence step on the flight's own clock (``tS``
+ *  from the first predicted row's time) to its outcome's row. */
+export interface TrainingGeneratedTrack {
+  tS: number[];
+  lon: number[];
+  lat: number[];
+  altitudeM: number[];
+  altitudeHaeM: number[];
+  groundSpeedMps: number[];
+}
+
+/** ONE sentence the prior said over a flight (one sample), flown by the executor: its words from the first predicted row
+ *  on (the rows before are observed only; the first predicted row says every column), and how the flight ended. Its
+ *  words run to where the EXECUTOR stopped, which is after ``endS`` for two outcomes the judge reads earlier (crossing
+ *  without the capture, the stall cut-off): the rows after the end are the model still speaking to a flight that is
+ *  over — counted as the formal readout counts them, shaded in the bar. */
+export interface TrainingGeneratedSentence extends TrainingSentence {
+  sample: number;
+  outcome: TrainingExecutorOutcome;
+  /** When the flight ended, on the flight's own clock. */
+  endS: number;
+  crossing: TrainingCrossing | null;
+  /** The runway pointed at the first predicted step and at the end (candidate indices). */
+  firstRunway: number;
+  lastRunway: number;
+  runwayChanges: number;
+  goArounds: number;
+  clearedAtEnd: boolean;
+  /** Per column the speaker masks (`prior.generate.Speaker.forbidden`, named by column): the mean probability a step the
+   *  prior put on what the masks removed. */
+  forbiddenMass: Record<string, number>;
+  track: TrainingGeneratedTrack;
+}
+
+/** A flight of the set the val readout does not fly (not on its own dynamics): `group` says why. */
+export interface TrainingGenerationFlight {
+  flightKey: string;
+  datasetId: string;
+  group: string;
+  flown: boolean;
+  /** One per sample, in sample order; none when not flown. */
+  samples: TrainingGeneratedSentence[];
+}
+
+/** The landed share of the prior's sentences (and of the labelled words flown from the same row), in all and per
+ *  approach kind, as the formal val free generation counted them. */
+/** "all", and each approach kind (null where there was no flight of it). */
+export type TrainingGenerationReadoutCells = { all: TrainingGenerationCell } & Record<TrainingStratum, TrainingGenerationCell | null>;
+
+/** The same counted over a set's own flights — where "all" too is null when the model flies none of them. */
+export type TrainingGenerationSetCells = Record<"all" | TrainingStratum, TrainingGenerationCell | null>;
+
+export interface TrainingGenerationCell {
+  flights: number;
+  landed: number;
+}
+
+export interface TrainingGenerationOverlay {
+  overlayId: string;
+  airport: string;
+  base: TrainingOverlayBase;
+  model: {
+    /** What the views call it. */
+    label: string;
+    checkpointSha256: string;
+    variant: string;
+    /** A post-trained round's method, round and start model; null for a prior trained on data alone. */
+    fineTuning: { schema: string; round: number; from: string } | null;
+  };
+  generation: {
+    samples: number;
+    temperature: number;
+    seed: number;
+    /** The first row the prior speaks at; every sentence opens there. */
+    firstPredictedRow: number;
+    executor: { specSha256: string; wordClock: string; cycleS: number; timeoutFactor: number };
+  };
+  /** The prior's formal val free generation, when the exporter was given it. */
+  readout: {
+    split: string;
+    writtenUtc: string;
+    /** ``perAirport`` 0: every flight of the split. */
+    drawn: { flights: number; perAirport: number };
+    /** At the overlay's airport, and over every airport the readout drew. */
+    prior: { here: TrainingGenerationReadoutCells; all: TrainingGenerationReadoutCells };
+    labelled: { here: TrainingGenerationReadoutCells; all: TrainingGenerationReadoutCells };
+  } | null;
+  flights: TrainingGenerationFlight[];
+}
+
 /** What the views draw for the selected flight: its overlay's own data, and the flight's entry. */
 export interface TrainingExecutorView {
   overlay: TrainingExecutorOverlay;
@@ -300,11 +403,22 @@ export interface TrainingPriorView {
   flight: TrainingPriorFlight;
 }
 
+export interface TrainingGenerationView {
+  overlay: TrainingGenerationOverlay;
+  flight: TrainingGenerationFlight;
+}
+
+/** WHICH SENTENCE the views read: the truth's (null) or one sample of a model's own (`TrainingGenerationView`). */
+export interface TrainingSource {
+  overlayId: string;
+  sample: number;
+}
+
 // ── reading one step ─────────────────────────────────────────────────────────
 
 /** An overlay's view if it is of the flight on screen — drawn over its set, at its airport — else null: in the render
  *  after a switch, the view still published is the last flight's (a flight key alone repeats across sets). */
-export function overlayOnScreen<V extends TrainingExecutorView | TrainingPriorView>(
+export function overlayOnScreen<V extends TrainingExecutorView | TrainingPriorView | TrainingGenerationView>(
   view: V | null, selection: TrainingSelection | null,
 ): V | null {
   if (view === null || selection === null) return null;
@@ -342,6 +456,47 @@ export function priorStep(flight: TrainingFlight, predicted: TrainingPriorFlight
     p: values.wordsP[at * values.k + rank],
   }));
   return { changeP: values.changeP[at], truth: priorTruthAt(flight, predicted, column, row), truthP: values.truthP[at], ranked };
+}
+
+/** The model sentence the views read: the chosen overlay's view of the flight on screen and its chosen sample — ``sentence``
+ *  null for a flight its readout does not fly (every flown flight holds every sample: the reader checks it) — or null for
+ *  the truth (no source, or an overlay not published for the set on screen). */
+export function generationOnScreen(
+  views: TrainingGenerationView[], source: TrainingSource | null, selection: TrainingSelection | null,
+): { view: TrainingGenerationView; sentence: TrainingGeneratedSentence | null } | null {
+  if (source === null) return null;
+  const view = views.map((item) => overlayOnScreen(item, selection)).find((item) => item?.overlay.overlayId === source.overlayId);
+  if (!view) return null;
+  // a sample number chosen over an overlay of the same id with more samples (another airport's) reads this one's last
+  const { samples } = view.flight;
+  return { view, sentence: samples.length === 0 ? null : samples[Math.min(source.sample, samples.length - 1)] };
+}
+
+/** The row of a model's sentence at a flight time — past its last row when the cursor is (the observed flight may last
+ *  longer): no word is in force there. */
+export function generatedRowAt(stepS: number, seconds: number): number {
+  return Math.max(Math.floor(seconds / stepS), 0);
+}
+
+/** The samples of a model that landed over the set's flights it flies: in all and per approach kind (``flights``: the
+ *  set's, in its order — the overlay's are the same) — a count of the samples on screen, nothing recomputed. */
+export function generationLanded(overlay: TrainingGenerationOverlay, flights: TrainingFlight[]): TrainingGenerationSetCells {
+  const count = (keep: (index: number) => boolean): TrainingGenerationCell | null => {
+    const said = overlay.flights.flatMap((flight, index) => (keep(index) ? flight.samples : []));
+    return said.length === 0 ? null
+      : { flights: said.length, landed: said.filter((item) => item.outcome === "landed").length / said.length };
+  };
+  const strata = Object.fromEntries(TRAINING_STRATA.map((stratum) => [stratum, count((index) => flights[index].stratum === stratum)]));
+  return { all: count(() => true), ...strata } as TrainingGenerationSetCells;
+}
+
+/** Where a sentence's track shows a word in force: its points from the word's row to the next word's (point k is row
+ *  ``firstRow + k``; the last point may end part-way through a step), or null when the flight ended before the word. */
+export function generatedTrackRows(sentence: TrainingGeneratedSentence, firstRow: number, row: number, endRow: number) {
+  const last = sentence.track.tS.length - 1;
+  const first = row - firstRow;
+  if (first > last) return null;
+  return { first, last: Math.min(endRow - firstRow, last) };
 }
 
 /** The flight's words the executor judged, and how many of them it flew inside their envelopes. */
@@ -786,6 +941,170 @@ export function parseTrainingPriorOverlay(raw: unknown, entry: TrainingOverlayEn
   });
 }
 
+// ── the prior's own sentences ────────────────────────────────────────────────
+
+/** Tolerance on the exporter's rounded times (3 decimals). */
+const TIME_SLACK = 2e-3;
+
+/** The flown track: point k at the first predicted row's time plus k steps — the views place a word at point
+ *  ``row − firstRow`` — but the last, which may end part-way through its step. */
+function parseGeneratedTrack(reader: Reader, firstS: number, stepS: number): TrainingGeneratedTrack {
+  const tS = reader.numbers("tS");
+  if (tS.length < 1 || Math.abs(tS[0] - firstS) > TIME_SLACK) reader.fail(`does not start at the first predicted row (${firstS} s)`);
+  if (tS.some((value, index) => index > 0 && value <= tS[index - 1])) reader.fail("tS does not run forward");
+  const n = tS.length;
+  const offStep = tS.findIndex((value, index) => index < n - 1 && Math.abs(value - (firstS + index * stepS)) > TIME_SLACK);
+  if (offStep >= 0) reader.fail(`tS[${offStep}] is ${tS[offStep]} s, not the step at ${firstS + offStep * stepS} s`);
+  if (n > 1 && tS[n - 1] - tS[n - 2] > stepS + TIME_SLACK) reader.fail(`its last point is more than a step after the one before`);
+  return {
+    tS, lon: reader.numbers("lon", n), lat: reader.numbers("lat", n), altitudeM: reader.numbers("altitudeM", n),
+    altitudeHaeM: reader.numbers("altitudeHaeM", n), groundSpeedMps: reader.numbers("groundSpeedMps", n),
+  };
+}
+
+/** One sample: its words — in (row, column) order, from the first predicted row, which says every column — and its end,
+ *  its crossing and its track bound to each other: a crossing exactly for an outcome read at one, the track to the end
+ *  (a dynamics failure's to the row before the failed state), the runway pointed first and last the sentence's own. */
+function parseGeneratedSentence(
+  item: Reader, index: number, firstRow: number, stepS: number, cycleS: number, sample: TrainingSample,
+): TrainingGeneratedSentence {
+  item.integer("sample", index, index);
+  const rows = item.integer("rows", firstRow + 1, Number.MAX_SAFE_INTEGER);
+  const counts = TRAINING_COLUMNS.map((column) => trainingClassCount(sample.vocabulary, sample.candidates, column));
+  const events: TrainingSentenceEvent[] = item.children("events").map((event) => {
+    const column = event.integer("column", 0, TRAINING_COLUMNS.length - 1);
+    return { row: event.integer("row", firstRow, rows - 1), column, value: event.integer("value", 0, counts[column] - 1) };
+  });
+  events.forEach((event, at) => {
+    const previous = events[at - 1];
+    if (previous && (previous.row > event.row || (previous.row === event.row && previous.column >= event.column))) {
+      item.fail(`events are not in (row, column) order at ${at}: one cell, one word`);
+    }
+  });
+  const opening = events.filter((event) => event.row === firstRow).length;
+  if (opening !== TRAINING_COLUMNS.length) item.fail(`the first predicted row (${firstRow}) says ${opening} columns, not all six`);
+  // its bookkeeping is its words': the runways pointed first and last and the changes between them, the go-around words,
+  // and whether the last approach word clears the flight (`prior_free_generation.flight_rows` counts them so)
+  const said = (column: TrainingColumn) => events.filter((event) => event.column === TRAINING_COLUMN_INDEX[column]).map((event) => event.value);
+  const runways = said("runway");
+  const approach = said("approach");
+  const runwayCount = counts[TRAINING_COLUMN_INDEX.runway];
+  const firstRunway = item.integer("firstRunway", 0, runwayCount - 1);
+  const lastRunway = item.integer("lastRunway", 0, runwayCount - 1);
+  if (firstRunway !== runways[0] || lastRunway !== runways[runways.length - 1]) {
+    item.fail(`points at runways ${firstRunway} → ${lastRunway}, but its words say ${runways[0]} → ${runways[runways.length - 1]}`);
+  }
+  const runwayChanges = item.count("runwayChanges");
+  const goArounds = item.count("goArounds");
+  const clearedAtEnd = item.boolean("clearedAtEnd");
+  const expected = {
+    runwayChanges: runways.filter((value, at) => at > 0 && value !== runways[at - 1]).length,
+    goArounds: approach.filter((value) => value === trainingGoAroundValue(sample.vocabulary)).length,
+    clearedAtEnd: approach[approach.length - 1] === trainingClearedValue(sample.vocabulary),
+  };
+  const found = { runwayChanges, goArounds, clearedAtEnd };
+  const differ = (Object.keys(expected) as Array<keyof typeof expected>).filter((key) => found[key] !== expected[key]);
+  if (differ.length > 0) item.fail(differ.map((key) => `${key} is ${found[key]}, its words give ${expected[key]}`).join("; "));
+  const outcome = item.oneOf("outcome", TRAINING_EXECUTOR_OUTCOMES);
+  const endS = item.number("endS");
+  const crossingReader = item.nullableChild("crossing");
+  const crossing = crossingReader === null ? null : readCrossing(crossingReader);
+  if ((crossing !== null) !== TRAINING_CROSSING_OUTCOMES.includes(outcome)) {
+    item.fail(`is ${outcome} ${crossing === null ? "with no crossing" : "and carries a crossing"}`);
+  }
+  const firstS = firstRow * stepS;
+  if (endS < firstS || endS > rows * stepS + TIME_SLACK) item.fail(`ends at ${endS} s, outside its rows ${firstS}…${rows * stepS} s`);
+  const track = parseGeneratedTrack(item.child("track"), firstS, stepS);
+  const trackEnd = track.tS[track.tS.length - 1];
+  // the track stops at the outcome's state — a dynamics failure's at the state before it
+  const expectedEnd = outcome === "dynamics_failure" ? endS - cycleS : endS;
+  if (Math.abs(trackEnd - expectedEnd) > TIME_SLACK) item.fail(`its track ends at ${trackEnd} s, not at ${expectedEnd} s (${outcome})`);
+  const forbiddenMass = item.record("forbiddenMass", (value, where) => {
+    const share = asNumber(value, where);
+    if (share < 0 || share > 1) throw new Refusal(`${where} is ${share}, not a probability`);
+    return share;
+  });
+  const unknown = Object.keys(forbiddenMass).filter((name) => !(TRAINING_COLUMNS as readonly string[]).includes(name));
+  if (unknown.length > 0) item.fail(`forbiddenMass names ${unknown.join(", ")}: not columns`);
+  return {
+    sample: index, rows, firstRow, events, outcome, endS, crossing, firstRunway, lastRunway,
+    runwayChanges, goArounds, clearedAtEnd, forbiddenMass,
+    track,
+  };
+}
+
+/** A readout's cells: "all", and each approach kind — null where the draw held no flight of it. */
+function parseGenerationCells(reader: Reader): TrainingGenerationReadoutCells {
+  const read = (cell: Reader) => ({ flights: cell.count("flights", 1), landed: cell.share("landed") });
+  const strata = Object.fromEntries(TRAINING_STRATA.map((stratum) => {
+    const cell = reader.nullableChild(stratum);
+    return [stratum, cell === null ? null : read(cell)];
+  }));
+  return { all: read(reader.child("all")), ...strata } as TrainingGenerationReadoutCells;
+}
+
+/** The cells at the overlay's airport and over every airport. */
+function parsePlaces(reader: Reader) {
+  return { here: parseGenerationCells(reader.child("here")), all: parseGenerationCells(reader.child("all")) };
+}
+
+/** Parse a generation overlay against the manifest entry that listed it and the sample it is drawn over — all or
+ *  nothing. */
+export function parseTrainingGenerationOverlay(
+  raw: unknown, entry: TrainingOverlayEntry, sample: TrainingSample,
+): Parsed<TrainingGenerationOverlay> {
+  return attempt(() => {
+    const overlay = Reader.of(raw, "generation overlay");
+    if (overlay.raw("schema") !== TRAINING_GENERATION_SCHEMA) {
+      overlay.fail(`schema is ${JSON.stringify(overlay.raw("schema"))}, expected ${JSON.stringify(TRAINING_GENERATION_SCHEMA)}`);
+    }
+    overlay.sameNames("columns", TRAINING_COLUMNS);
+    const base = parseBase(overlay, entry, sample);
+    const model = overlay.child("model");
+    const tuning = model.nullableChild("fineTuning");
+    const generation = overlay.child("generation");
+    const stepS = generation.number("stepS");
+    if (stepS !== sample.vocabulary.stepS) generation.fail(`stepS is ${stepS}, the set's step ${sample.vocabulary.stepS}`);
+    const samples = generation.count("samples", 1);
+    const firstPredictedRow = generation.count("firstPredictedRow");
+    const executor = generation.child("executor");
+    const cycleS = executor.number("cycleS");
+    const readout = overlay.nullableChild("readout");
+    return {
+      overlayId: entry.id,
+      airport: sample.airport,
+      base,
+      model: {
+        label: model.string("label"), checkpointSha256: model.string("checkpointSha256"), variant: model.string("variant"),
+        fineTuning: tuning === null ? null
+          : { schema: tuning.string("schema"), round: tuning.count("round"), from: tuning.string("from") },
+      },
+      generation: {
+        samples, temperature: generation.number("temperature"), seed: generation.number("seed"), firstPredictedRow,
+        executor: { specSha256: executor.string("specSha256"), wordClock: executor.string("wordClock"), cycleS,
+          timeoutFactor: executor.number("timeoutFactor") },
+      },
+      readout: readout === null ? null : {
+        split: readout.string("split"), writtenUtc: readout.string("writtenUtc"),
+        drawn: { flights: readout.child("drawn").count("flights", 1), perAirport: readout.child("drawn").count("perAirport", 0) },
+        prior: parsePlaces(readout.child("prior")), labelled: parsePlaces(readout.child("labelled")),
+      },
+      flights: eachFlight(overlay, sample, (item, flight) => {
+        const flown = item.boolean("flown");
+        const list = item.children("samples");
+        if (flown ? list.length !== samples : list.length !== 0) {
+          item.fail(`is ${flown ? "" : "not "}flown and holds ${list.length} samples${flown ? `, not ${samples}` : ""}`);
+        }
+        if (firstPredictedRow >= flight.rows) item.fail(`has ${flight.rows} rows: the prior speaks from row ${firstPredictedRow}`);
+        return {
+          flightKey: flight.flightKey, datasetId: flight.datasetId, group: item.string("group"), flown,
+          samples: list.map((one, index) => parseGeneratedSentence(one, index, firstPredictedRow, stepS, cycleS, sample)),
+        };
+      }),
+    };
+  });
+}
+
 // ── where the files live ─────────────────────────────────────────────────────
 
 export function trainingOverlaysPath(airportCode: string): string {
@@ -806,4 +1125,10 @@ export async function fetchTrainingPriorOverlay(
   airportCode: string, entry: TrainingOverlayEntry, sample: TrainingSample,
 ): Promise<Parsed<TrainingPriorOverlay>> {
   return parseTrainingPriorOverlay(await fetchJson<unknown>(trainingFilePath(airportCode, entry.file)), entry, sample);
+}
+
+export async function fetchTrainingGenerationOverlay(
+  airportCode: string, entry: TrainingOverlayEntry, sample: TrainingSample,
+): Promise<Parsed<TrainingGenerationOverlay>> {
+  return parseTrainingGenerationOverlay(await fetchJson<unknown>(trainingFilePath(airportCode, entry.file)), entry, sample);
 }

@@ -11,6 +11,10 @@
 
 import type { TrainingColumn } from "../data/trainingSample";
 
+/** The sentence bar's surface — every colour here is validated against it; `index.css` draws `.training-sentence-bar` in it
+ *  at 0.94 opacity (MIRROR: CSS cannot import it). The bar shades with it. */
+export const TRAINING_SURFACE_COLOR = "#0f131e";
+
 /** One colour per column, in `TRAINING_COLUMNS` order.
  *
  *  Speed is a purple (2026-09-24): its amber was the selection's yellow to the eye (OKLab ΔE 3.4).
@@ -79,3 +83,22 @@ export const TRAINING_AUTOPILOT_COLOR = "#2563eb";
  *  louder than the per-row `TRAINING_OUTSIDE_COLOR`, because it is the answer to the question the flight was flown for
  *  (the user, 2026-09-25). The validator puts it ΔE 41.6 from the autopilot blue (29.0 under CVD), contrast ≥ 3:1. */
 export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = "#ff2d2d";
+
+/** THE PRIOR'S OWN SENTENCES (`trainingOverlays.TrainingGenerationOverlay`): each model in one colour — its tab in the
+ *  sentence bar, its flown tracks in 3D, its samples in the flight list — by ROLE: the base model (trained on data alone)
+ *  and a post-trained round. The truth is the observed track's own near-white (`TRAINING_TRACE_COLOR`), always drawn.
+ *  The palette above leaves two hue regions free (2026-09-25, the dataviz validator's OKLab ΔE on the bar's surface
+ *  #0f131e): fuchsia is ≥ 14.4 from every colour drawn in 3D (nearest: the approach pink, a marker there) and 9.2 from
+ *  the speed purple, which draws nothing in 3D; lime is ≥ 9.5 from every colour (nearest: the corridor's translucent
+ *  fill on the ground, and the runway green), contrast ≥ 5:1 both. The two are never drawn together (the bar reads one
+ *  model at a time), and ΔE 60 apart. */
+export const TRAINING_BASE_MODEL_COLOR = "#d946ef";
+export const TRAINING_POST_TRAINED_COLOR = "#a3e635";
+
+/** How opaque a model's samples other than the one read are drawn in 3D (thin), and in the legend. */
+export const TRAINING_OTHER_SAMPLE_ALPHA = 0.35;
+
+/** A model's colour by its role: post-trained when it names the round it was tuned in. */
+export function trainingModelColour(model: { fineTuning: unknown | null }): string {
+  return model.fineTuning === null ? TRAINING_BASE_MODEL_COLOR : TRAINING_POST_TRAINED_COLOR;
+}

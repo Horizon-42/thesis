@@ -1,14 +1,26 @@
 /**
  * TrainingResults.tsx
  * -------------------
- * The two readouts behind the Training overlays, as plain tables in the Training panel: the executor's replay gate
- * (the formal val replay's own table, for this airport and all airports) and the prior's val readout (per column,
- * against the two baselines). Both are copied from the artefacts by the exporters; nothing here is recomputed.
+ * The readouts behind the Training overlays, as plain tables in the Training panel: the executor's replay gate
+ * (the formal val replay's own table, for this airport and all airports), the prior's val readout (per column,
+ * against the two baselines) and the models' own sentences (how many landed: on this set's flights, counted from the
+ * samples on screen, beside each model's formal val free generation). The formal numbers are copied from the artefacts
+ * by the exporters; the only thing counted here is the set's own samples.
  */
 
-import { formatSeconds, TRAINING_COLUMNS, TRAINING_STRATA } from "../data/trainingSample";
-import type { TrainingExecutorOverlay, TrainingGateCell, TrainingPriorOverlay } from "../data/trainingOverlays";
+import { formatSeconds, TRAINING_COLUMNS, TRAINING_STRATA, type TrainingFlight } from "../data/trainingSample";
+import {
+  generationLanded,
+  type TrainingExecutorOverlay,
+  type TrainingGateCell,
+  type TrainingGenerationCell,
+  type TrainingGenerationOverlay,
+  type TrainingGenerationReadoutCells,
+  type TrainingGenerationSetCells,
+  type TrainingPriorOverlay,
+} from "../data/trainingOverlays";
 import { checkMark, shortSha } from "../data/trainingText";
+import { trainingModelColour } from "../utils/trainingWordColors";
 
 function share(value: number | null): string {
   return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
@@ -119,6 +131,77 @@ export function TrainingPriorReadout({ overlay, stepS }: { overlay: TrainingPrio
         frequency after the column's word in force. Prior {shortSha(overlay.prior.checkpointSha256)}: {overlay.prior.parameters.toLocaleString("en")}{" "}
         parameters, d {overlay.prior.model.dModel}, {overlay.prior.model.layers} layers, {overlay.prior.model.heads} heads.
       </p>
+    </details>
+  );
+}
+
+/** A landed share and its count. */
+function landedText(cell: TrainingGenerationCell | null): string {
+  return cell === null ? "—" : `${(cell.landed * 100).toFixed(1)}% of ${cell.flights.toLocaleString("en")}`;
+}
+
+const READ_STRATA = ["all", ...TRAINING_STRATA] as const;
+
+/** One row of the table: a label and a cell per approach kind. */
+function CellsRow({ name, cells }: { name: string; cells: TrainingGenerationReadoutCells | TrainingGenerationSetCells }) {
+  return (
+    <tr>
+      <td>{name}</td>
+      {READ_STRATA.map((key) => <td key={key}>{landedText(cells[key])}</td>)}
+    </tr>
+  );
+}
+
+/** How a model's sentences were drawn and flown, in one line. */
+function drawnText(overlay: TrainingGenerationOverlay): string {
+  const { generation, readout } = overlay;
+  return `${overlay.model.label}: ${generation.samples} samples a flight at temperature ${generation.temperature} (seed ` +
+    `${generation.seed}), flown by executor spec ${shortSha(generation.executor.specSha256)} until it was done or ` +
+    `${generation.executor.timeoutFactor}× the observed remaining time ran out` +
+    (readout === null ? "; no formal readout given" : `; its formal readout drew ${readout.drawn.flights.toLocaleString("en")} ` +
+      `${readout.split} flights (${readout.drawn.perAirport === 0 ? "every flight" : `${readout.drawn.perAirport} an airport`}), ` +
+      `written ${readout.writtenUtc.slice(0, 16).replace("T", " ")} UTC`) + ".";
+}
+
+export function TrainingGenerationReadout({ overlays, flights }: { overlays: TrainingGenerationOverlay[]; flights: TrainingFlight[] }) {
+  const summary = overlays.map((overlay) => {
+    const own = generationLanded(overlay, flights).all;
+    return `${overlay.model.label} ${own === null ? "—" : `${(own.landed * 100).toFixed(0)}%`}` +
+      (overlay.readout === null ? "" : ` (${overlay.readout.split} ${(overlay.readout.prior.all.all.landed * 100).toFixed(1)}%)`);
+  }).join(" · ");
+  const airport = overlays[0].airport;
+  return (
+    <details className="training-results" aria-label="The models' own sentences">
+      <summary>The models' own sentences, landed · {summary}</summary>
+      <table className="training-results-table">
+        <caption>landed: each sample on this set's flights, and in the model's formal free generation</caption>
+        <thead>
+          <tr><th scope="col" />{READ_STRATA.map((key) => <th key={key} scope="col">{key}</th>)}</tr>
+        </thead>
+        {overlays.map((overlay) => (
+          <tbody key={overlay.overlayId}>
+            <tr><th scope="rowgroup" colSpan={READ_STRATA.length + 1} style={{ color: trainingModelColour(overlay.model) }}>
+              {overlay.model.label}
+            </th></tr>
+            <CellsRow name="this set" cells={generationLanded(overlay, flights)} />
+            {overlay.readout !== null ? (
+              <>
+                <CellsRow name={`${overlay.readout.split} · ${airport}`} cells={overlay.readout.prior.here} />
+                <CellsRow name={`${overlay.readout.split} · all airports`} cells={overlay.readout.prior.all} />
+                <CellsRow name={`labelled words · ${airport}`} cells={overlay.readout.labelled.here} />
+                <CellsRow name="labelled words · all" cells={overlay.readout.labelled.all} />
+              </>
+            ) : null}
+          </tbody>
+        ))}
+      </table>
+      <p className="training-results-note">
+        Each model speaks from its first predicted step (the steps before are observed), a sentence of its own, and the
+        executor flies each step as it is said. Landed: on the runway pointed at the end, as the executor's judge reads a
+        landing. Only flights on their own aircraft dynamics are flown, as in the formal readout. "labelled words": the
+        truth sentence flown the same way from the same step — how far the executor alone gets.
+      </p>
+      {overlays.map((overlay) => <p key={overlay.overlayId} className="training-results-note">{drawnText(overlay)}</p>)}
     </details>
   );
 }

@@ -68,21 +68,28 @@ TOP_K = 3
 PROBABILITY_DIGITS = 4
 
 
-def open_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], dict[str, Any], str]:
-    """The prior at ``directory`` on CPU, in eval mode, with its config and readout files and its checkpoint's
-    sha256 — refused unless `prior_train.load_prior` opens it on ``instructions``, it is not a smoke run, it holds
-    a val readout (`prior_select` writes one, on the chosen variant only) and — for a variant that reads the landing
-    context — today's tracks rosters are its own (by sha256, wherever the checkout is)."""
+def open_trained_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], str]:
+    """The prior at ``directory`` on CPU, in eval mode, with its config file and its checkpoint's sha256 — refused
+    unless `prior_train.load_prior` opens it on ``instructions``, it is not a smoke run and — for a variant that reads
+    the landing context — today's tracks rosters are its own (by sha256, wherever the checkout is). Every exporter of
+    a prior opens it here (this one, `prior_generation_training_export`)."""
     model, _, config_file = load_prior(directory, instructions)
     if (VARIANTS[model.config.variant].landing_context
             and roster_digests(roster_record(rosters(instructions))) != roster_digests(config_file["tracks_rosters"])):
         raise SystemExit(f"the tracks rosters changed since {directory} was trained (its landing context)")
     if config_file["smoke"]:
         raise SystemExit(f"{directory} is a smoke run (--limit {config_file['limit']}), not a trained prior")
+    return model, config_file, file_sha256(directory / "checkpoint.pt")
+
+
+def open_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], dict[str, Any], str]:
+    """`open_trained_prior`, and its val readout — refused unless it holds one (`prior_select` writes one, on the
+    chosen variant only)."""
+    model, config_file, checkpoint_sha = open_trained_prior(directory, instructions)
     if not (directory / "readout.json").exists():
         raise SystemExit(f"{directory} holds no val readout: it is not a chosen prior (prior_select)")
     readout = json.loads((directory / "readout.json").read_text(encoding="utf-8"))
-    return model, config_file, readout, file_sha256(directory / "checkpoint.pt")
+    return model, config_file, readout, checkpoint_sha
 
 
 @torch.no_grad()

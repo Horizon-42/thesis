@@ -23,7 +23,7 @@ from ts_transformer.instructions.artefact import (
 from ts_transformer.instructions.labeller.read import admit, read_flight
 from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.spec import READING_RULE
-from ts_transformer.instructions.words import COLUMNS, HEADING, UNCHANGED, Words, wrap180
+from ts_transformer.instructions.words import APPROACH_CLEARED, APPROACH_GO_AROUND, COLUMNS, HEADING, UNCHANGED, Words, wrap180
 from ts_transformer.repo_layout import REPO_ROOT
 from ts_transformer.tests.support import (
     fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
@@ -95,6 +95,8 @@ def test_the_contract_is_the_frontend_reader_s():
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_COLUMNS"))) == COLUMNS
     assert int(_ts_constant("TRAINING_UNCHANGED")) == UNCHANGED
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_WORD_KINDS"))) == export.WORD_KINDS
+    assert json.loads(_ts_constant("TRAINING_APPROACH_CLEARED")) == export.APPROACH_NAMES[APPROACH_CLEARED]
+    assert json.loads(_ts_constant("TRAINING_APPROACH_GO_AROUND")) == export.APPROACH_NAMES[APPROACH_GO_AROUND]
 
 
 # ---- display geometry

@@ -26,6 +26,7 @@ import torch
 from ts_transformer.autopilot.replay import word_results
 from ts_transformer.experiments import executor_training_export as executor_export
 from ts_transformer.experiments import instruction_training_export as export
+from ts_transformer.experiments import prior_generation_training_export as generation_export
 from ts_transformer.experiments import prior_training_export as prior_export
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import (
@@ -323,6 +324,10 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
     assert json.loads(_ts_constant("TRAINING_EXECUTOR_SCHEMA")) == executor_export.SCHEMA
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_EXECUTOR_STATUSES"))) == executor_export.STATUSES
     assert json.loads(_ts_constant("TRAINING_PRIOR_SCHEMA")) == prior_export.SCHEMA
+    assert json.loads(_ts_constant("TRAINING_GENERATION_SCHEMA")) == generation_export.SCHEMA
+    # the outcomes read at a crossing of the threshold, which alone carry where it was crossed
+    from ts_transformer.autopilot.judge import CROSSINGS
+    assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_CROSSING_OUTCOMES"))) == CROSSINGS
 
 
 # ---- the prior's runner end to end, on a synthetic artefact and an untrained checkpoint (every write in tmp_path)
