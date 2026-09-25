@@ -62,10 +62,6 @@ from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import flown_track, outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import published_crossing_heights
-from ts_transformer.experiments.instruction_training_export import (
-    KIND_GENERATION, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays, serialise_overlay,
-    write_overlay,
-)
 from ts_transformer.experiments.prior_free_generation import (
     GENERATION_SCHEMA, _physics, flight_rows, limits_s, speak_and_fly,
 )
@@ -76,12 +72,16 @@ from ts_transformer.instructions.artefact import load_candidates, load_sentences
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.readout import STRATA
 from ts_transformer.instructions.signals import FlightSignals
+from ts_transformer.instructions.training_files import (
+    KIND_GENERATION, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
+    require_overlays_unchanged, rounded, serialise, write_overlay,
+)
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK
-from ts_transformer.repo_layout import REPO_ROOT, git_state
+from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_GENERATION_SCHEMA`); the reader refuses anything else
 #: by name. A name changes with its file's shape or meaning, on both sides, in one change.
@@ -94,15 +94,11 @@ OUTPUTS_MARK = "4dTrajectory/outputs/"
 EVERY_FLIGHT = "every labelled flight"
 
 
-def _r(values: Any, digits: int) -> list[float]:
-    return [round(float(value), digits) for value in np.asarray(values, dtype=np.float64).ravel()]
-
-
 def outputs_path(path: str | Path) -> str:
     """A path read from ``4dTrajectory/outputs/`` on — the same artefact from any checkout (worktrees link the tree)."""
     text = Path(path).as_posix()
     if OUTPUTS_MARK not in text:
-        raise SystemExit(f"{text} is not under {OUTPUTS_MARK}")
+        raise ValueError(f"{text} is not under {OUTPUTS_MARK}")
     return text[text.rindex(OUTPUTS_MARK):]
 
 
@@ -113,7 +109,7 @@ def readout_block(generation: dict[str, Any], prior_dir: Path, executor_sha256: 
     (``all``), of the prior's sentences and of the labelled words flown from the same row — refused unless it is this
     prior's, on this executor spec and artefact, val, with these samples and this temperature."""
     if generation["schema"] != GENERATION_SCHEMA:
-        raise SystemExit(f"the readout is a {generation['schema']} file, not {GENERATION_SCHEMA}")
+        raise ValueError(f"the readout is a {generation['schema']} file, not {GENERATION_SCHEMA}")
     wanted = {"prior": outputs_path(prior_dir), "executor": executor_sha256,
               "instructions": outputs_path(instructions), "split": SPLIT, "n_look": N_LOOK, "samples": samples,
               "temperature": temperature}
@@ -123,7 +119,7 @@ def readout_block(generation: dict[str, Any], prior_dir: Path, executor_sha256: 
              "temperature": generation["temperature"]}
     differ = {key: (found[key], wanted[key]) for key in wanted if found[key] != wanted[key]}
     if differ:
-        raise SystemExit("the readout is not this prior's val free generation: " +
+        raise ValueError("the readout is not this prior's val free generation: " +
                          ", ".join(f"{key} {theirs!r}, expected {ours!r}" for key, (theirs, ours) in differ.items()))
 
     def cells(source: str, prefix: str | None) -> dict[str, Any]:
@@ -133,13 +129,13 @@ def readout_block(generation: dict[str, Any], prior_dir: Path, executor_sha256: 
         keys = {"all": "all" if prefix is None else prefix,
                 **{stratum: stratum if prefix is None else f"{prefix} {stratum}" for stratum in STRATA}}
         if keys["all"] not in part:
-            raise SystemExit(f"the readout counted no {source} flight at {prefix}")
+            raise ValueError(f"the readout counted no {source} flight at {prefix}")
         return {name: ({"flights": part[key]["flights"], "landed": part[key]["outcomes"]["landed"]} if key in part else None)
                 for name, key in keys.items()}
 
     per_airport = generation["drawn"]["per_airport"]
     if not (isinstance(per_airport, int) or per_airport == EVERY_FLIGHT):
-        raise SystemExit(f"the readout's draw names {per_airport!r} flights an airport")
+        raise ValueError(f"the readout's draw names {per_airport!r} flights an airport")
     return {"split": generation["split"], "writtenUtc": generation["written_utc"], "seed": generation["seed"],
             # the draw's size per airport; 0 = every labelled flight of the split
             "drawn": {"flights": generation["drawn"]["flights"], "perAirport": 0 if per_airport == EVERY_FLIGHT else per_airport},
@@ -160,10 +156,10 @@ def track_payload(flown: Flown, index: int, end_row: int, outcome: str, geometry
         rows.append(end)
     track = flown_track(states[rows], geometry)
     lat, lon, height = states[rows, LAT], states[rows, LON], states[rows, ALT]
-    undulation = np.asarray(geoid_undulation_m(list(lat), list(lon)), dtype=np.float64)
-    return {"tS": _r(start_s + np.asarray(rows) * flown.cycle_s, 3), "lon": _r(lon, 7), "lat": _r(lat, 7),
-            "altitudeM": _r(height, 2), "altitudeHaeM": _r(height + undulation, 2),
-            "groundSpeedMps": _r(track["ground_speed"], 3)}
+    undulation = geoid_undulation_m(lat, lon)
+    return {"tS": rounded(start_s + np.asarray(rows) * flown.cycle_s, 3), "lon": rounded(lon, 7), "lat": rounded(lat, 7),
+            "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + undulation, 2),
+            "groundSpeedMps": rounded(track["ground_speed"], 3)}
 
 
 def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarray, geometry: AirportGeometry,
@@ -210,7 +206,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         reading = read_flight(signals[j], geometry, spec, words)
         k = located[j][1]
         if not np.array_equal(reading.words, sentences["words"][sentences["offsets"][k]: sentences["offsets"][k + 1]]):
-            raise SystemExit(f"{signals[j].dataset_id}: the re-read sentence differs from the stored one")
+            raise ValueError(f"{signals[j].dataset_id}: the re-read sentence differs from the stored one")
         readings.append(reading)
     by_flight: dict[int, list[dict[str, Any]]] = {j: [] for j in flyable}
     if flyable:
@@ -288,12 +284,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         existing[code] = read_overlays(training, code, overlay_id)
         bases[code] = open_base_set(training, code, args.set, spec)
 
-    def relative(path: Path) -> str:
-        return path.relative_to(REPO_ROOT).as_posix() if path.is_relative_to(REPO_ROOT) else path.as_posix()
-
-    source = {"runner": RUNNER, "prior": relative(prior_dir), "executor": relative(executor),
-              "instructions": relative(instructions),
-              "readout": None if args.readout is None else relative(resolved(args.readout)), "git": git_state()}
+    source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "executor": repo_relative(executor),
+              "instructions": repo_relative(instructions),
+              "readout": None if args.readout is None else repo_relative(resolved(args.readout)), "git": git_state()}
     # a post-trained round's config names its method, round and start model (`prior_landing_reward` writes the key);
     # a prior trained on data alone (`prior_train`) has none
     tuning = config_file["fine_tuning"] if "fine_tuning" in config_file else None
@@ -318,13 +311,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                    "producedBy": source, "base": bases[code].block, "model": model_block, "generation": generation,
                    "readout": readouts[code], "columns": list(COLUMNS), "flights": payloads}
         entry = overlay_entry(overlay_id, KIND_GENERATION, bases[code], title, PAYLOAD_FILE, len(payloads), source)
-        built[code] = (serialise_overlay(payload), entry)
+        built[code] = (serialise(payload), entry)
         said = [s for item in payloads for s in item["samples"]]
         landed = sum(s["outcome"] == "landed" for s in said)
         print(f"  {code}: {sum(item['flown'] for item in payloads)} of {len(payloads)} flights flown, {landed} of "
               f"{len(said)} samples landed; {time.perf_counter() - started:.0f} s", flush=True)
+    # no airport is written while another's manifest changed since the start (each write checks its own again)
+    for code in airports:
+        require_overlays_unchanged(root / code / "training", code, overlay_id, existing[code])
     for code, (text, entry) in built.items():
-        out = write_overlay(root / code / "training", code, overlay_id, entry, text, existing[code])
+        out = write_overlay(root / code / "training", code, entry, text, existing[code])
         print(f"  {code}: {out.stat().st_size / 1e6:.1f} MB → {out}", flush=True)
     return 0
 

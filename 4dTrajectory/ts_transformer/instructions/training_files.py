@@ -1,6 +1,6 @@
 """The files of the frontend's Training module: the sets an airport's index lists, the overlays drawn over them, and the
 checks every writer and reader of them shares (the runners `instruction_training_export`, `executor_training_export`,
-`prior_training_export`, and the backend's live executor).
+`prior_training_export`, `prior_generation_training_export`, and the backend's live executor).
 
 Not a runner, and torch-free: everything here raises `ValueError` (a set that is not listed: `NotListed`, one of
 them), never `SystemExit` — a server thread would let that escape its handler and drop the request

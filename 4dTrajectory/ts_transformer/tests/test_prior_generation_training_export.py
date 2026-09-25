@@ -129,9 +129,9 @@ def test_the_readout_is_this_prior_s_val_free_generation_at_the_airport_and_pool
     assert block["labelled"]["here"] == {"all": {"flights": 10, "landed": 1.0}, "straight-in": None, "vectored": None}
     assert block["drawn"] == {"flights": 20, "perAirport": 20} and block["split"] == "val"
     assert _block(_generation(drawn={"flights": 900, "per_airport": export.EVERY_FLIGHT}))["drawn"]["perAirport"] == 0
-    with pytest.raises(SystemExit, match="counted no prior flight at KZZZ"):
+    with pytest.raises(ValueError, match="counted no prior flight at KZZZ"):
         _block(_generation(), airport="KZZZ")
-    with pytest.raises(SystemExit, match="names 'some' flights an airport"):
+    with pytest.raises(ValueError, match="names 'some' flights an airport"):
         _block(_generation(drawn={"flights": 20, "per_airport": "some"}))
 
 
@@ -149,17 +149,17 @@ def test_the_every_flight_phrase_is_the_draw_s_own():
 ])
 def test_a_readout_of_another_prior_spec_split_or_draw_is_refused_by_name(change, name):
     generation = _generation(**change.pop("generation", {}))
-    with pytest.raises(SystemExit, match=rf"\b{name} "):
+    with pytest.raises(ValueError, match=rf"\b{name} "):
         _block(generation, **change)
 
 
 def test_a_readout_of_another_schema_is_refused_by_name_before_it_is_read():
-    with pytest.raises(SystemExit, match="is a ts-prior-free-generation-v0 file"):
+    with pytest.raises(ValueError, match="is a ts-prior-free-generation-v0 file"):
         _block({"schema": "ts-prior-free-generation-v0"})
 
 
 def test_a_path_outside_the_outputs_tree_names_itself():
-    with pytest.raises(SystemExit, match="is not under 4dTrajectory/outputs/"):
+    with pytest.raises(ValueError, match="is not under 4dTrajectory/outputs/"):
         export.outputs_path("/elsewhere/prior/full_s1337")
     assert export.outputs_path(PRIOR) == "4dTrajectory/outputs/POOLED/prior/v3_step1_20260924/full_s1337"
 
@@ -175,7 +175,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
 
     from ts_transformer.autopilot import spec as executor_spec
     from ts_transformer.autopilot.flights import FlightInputs
-    from ts_transformer.experiments import instruction_training_export as sets
+    from ts_transformer.instructions import training_files as sets
     from ts_transformer.experiments import prior_train
     from ts_transformer.instructions.artefact import labeller_source_sha256
     from ts_transformer.tests.test_autopilot import _params, _physics
