@@ -147,10 +147,6 @@ gets a new ID here and ONE new line in the index.**
   THIS OpenAP cache (an `openap` run flies the OpenAP A320, not the preset), `auto` for a preset
   (`PRESET_DYNAMICS_SOURCE`) or a performance-index row; any other label — another OpenAP cache's too — is
   refused by name. The readout scripts use it instead of assuming `openap`, which raised on an own-parameter type.
-- **The OpenAP caches are schema-checked** (2026-09-25): `aircraft.query_aircraft_parameters.load_json`
-  refuses `openap_aircraft_parameters.json` / `aircraft_id_lookup.json` whose `schema_version` is not
-  `OPENAP_PARAMETERS_SCHEMA` / `identity.OPENSKY_LOOKUP_SCHEMA` (the builder writes both from those
-  constants; the parameters file's used to be a literal `1`).
 
 ### FS4 · `source["flight_key"]` is populated here
 

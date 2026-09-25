@@ -27,14 +27,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from aircraft.identity import OPENSKY_LOOKUP_PATH, OPENSKY_LOOKUP_SCHEMA
-from aircraft.query_aircraft_parameters import OPENAP_PARAMETERS_SCHEMA, PARAMETERS_PATH
+from aircraft.identity import OPENSKY_LOOKUP_SCHEMA
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AIRCRAFT_DATABASE = REPO_ROOT / "data" / "AIRCRAFT" / "aircraftDatabase.csv"
-PARAMETERS_OUTPUT = PARAMETERS_PATH
-LOOKUP_OUTPUT = OPENSKY_LOOKUP_PATH
+PARAMETERS_OUTPUT = Path(__file__).resolve().parent / "openap_aircraft_parameters.json"
+LOOKUP_OUTPUT = Path(__file__).resolve().parent / "aircraft_id_lookup.json"
 
 METADATA_FIELDS = [
     "icao24",
@@ -331,7 +330,7 @@ def build_parameter_database(csv_path: Path) -> tuple[dict[str, Any], dict[str, 
         }
 
     parameters = {
-        "schema_version": OPENAP_PARAMETERS_SCHEMA,
+        "schema_version": 1,
         "generated_at_utc": now_utc(),
         "source": {
             "aircraft_database_csv": source_path(csv_path),
