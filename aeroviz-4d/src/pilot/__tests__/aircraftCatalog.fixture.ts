@@ -41,3 +41,8 @@ export const B77W_CONFIG: PilotAircraftConfig = {
   finalApproachGlideAngleDeg: 3,
   thresholdCrossingHeightM: 15,
 };
+
+/** The A320 as a RANGE preset would come (V_ref,lo below V_ref at the Pilot mass: the target above the range's lower
+ *  end). No type is one today; it is here for the reader and the panel, which must keep the target and the lower end
+ *  apart — the single-valued entries above cannot tell a code that swaps them from one that does not. */
+export const A320_RANGE_CONFIG: PilotAircraftConfig = { ...A320_CONFIG, terminalSpeedMinKt: 140 };

@@ -12,7 +12,7 @@ import type {
   PilotSimulationMode,
 } from "../../pilot/pilotClient";
 import PilotPanel from "../PilotPanel";
-import { A320_CONFIG as a320Config } from "../../pilot/__tests__/aircraftCatalog.fixture";
+import { A320_CONFIG as a320Config, A320_RANGE_CONFIG } from "../../pilot/__tests__/aircraftCatalog.fixture";
 
 
 const mocks = vi.hoisted(() => ({
@@ -353,6 +353,8 @@ describe("PilotPanel trajectory play mode", () => {
   });
 
   it("opens trajectory play from pilot mode and submits runway-target optimization", async () => {
+    // a range preset: its target (the speeds below) is not its range's lower end, so neither can stand in for the other
+    mocks.fetchPilotAircraftConfigs.mockResolvedValue([A320_RANGE_CONFIG]);
     render(<PilotPanel />);
 
     expect(await screen.findByText("A320")).toBeTruthy();
@@ -603,7 +605,9 @@ describe("PilotPanel trajectory play mode", () => {
     expect(edit.disabled).toBe(false);                     // the runways are there: the editor is asked for
     fireEvent.click(edit);
     expect(screen.queryByLabelText("Target state setup")).toBeNull();
-    expect((screen.getByRole("button", { name: "Optimize" }) as HTMLButtonElement).disabled).toBe(true);
+    const optimize = screen.getByRole("button", { name: "Optimize" }) as HTMLButtonElement;
+    expect(optimize.disabled).toBe(true);
+    fireEvent.click(optimize);
     expect(mocks.runTrajectoryOptimization).not.toHaveBeenCalled();
   });
 

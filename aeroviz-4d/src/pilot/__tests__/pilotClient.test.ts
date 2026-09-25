@@ -7,7 +7,7 @@ import {
   type PilotAircraftConfig,
   type PilotResetState,
 } from "../pilotClient";
-import { A320_CONFIG, B77W_CONFIG } from "./aircraftCatalog.fixture";
+import { A320_CONFIG, A320_RANGE_CONFIG, B77W_CONFIG } from "./aircraftCatalog.fixture";
 
 const state: PilotResetState = {
   lon: -114.0203,
@@ -191,12 +191,13 @@ describe("pilotClient", () => {
   });
 
   it("loads aircraft configs from the backend simulation namespace", async () => {
-    const payload = { ok: true, aircraft: aircraftConfigs };
-    const fetchMock = mockFetch(payload);
+    // a range preset among them: the target and the range's lower end are read into their own fields
+    const catalog = [...aircraftConfigs, { ...A320_RANGE_CONFIG, code: "A32R" }];
+    const fetchMock = mockFetch({ ok: true, aircraft: catalog });
 
     const result = await fetchPilotAircraftConfigs();
 
-    expect(result).toEqual(aircraftConfigs);
+    expect(result).toEqual(catalog);
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8765/simulation/aircraft",
     );

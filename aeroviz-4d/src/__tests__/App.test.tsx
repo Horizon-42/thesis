@@ -55,6 +55,7 @@ describe("App", () => {
   beforeEach(() => {
     counts.shell = 0;
     counts.scene = 0;
+    cursor.set = null;
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true, headers: { get: () => "application/json" },
       text: async () => JSON.stringify({ defaultAirport: "KRDU", airports: [{ code: "KRDU", name: "Raleigh-Durham", lat: 35.88, lon: -78.79 }] }),
@@ -68,6 +69,7 @@ describe("App", () => {
     await waitFor(() => expect(cursor.set).not.toBeNull());
     await act(async () => undefined);
     const before = { ...counts };
+    expect(before.shell).toBeGreaterThan(0);               // the shell is counted: its renders are seen at all
     act(() => cursor.set!(12));
     act(() => cursor.set!(24));
     expect(counts.scene).toBe(before.scene + 2);
