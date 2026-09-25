@@ -58,6 +58,11 @@ export function crossingText(crossing: TrainingCrossing): string {
     `${crossing.heightM.toFixed(1)} m above the threshold`;
 }
 
+/** An ISO time in UTC as the views show it, to the second: "2026-09-25 14:13:59 UTC". */
+export function formatUtc(iso: string): string {
+  return `${iso.slice(0, 19).replace("T", " ")} UTC`;
+}
+
 /** A sha as the views show it: its first 12 characters. */
 export function shortSha(sha: string): string {
   return sha.slice(0, 12);

@@ -34,6 +34,7 @@ from ts_transformer.instructions.labeller.read import Reading, admit, read_fligh
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import Words
 
+from aeroviz_backend.autopilot_segment.errors import NotFlyable
 from aeroviz_backend.autopilot_segment.segment import Segment, segment_of, segment_reading, segment_signals
 
 DEVICE = torch.device("cpu")
@@ -75,7 +76,7 @@ def open_flight(artefact: Path, split: str, dataset_id: str, words: Words) -> Fl
     (series,) = rebuild_series(artefact, [flight])
     group = replay.group_of(series)
     if group not in (replay.OWN, replay.STAND_IN):
-        raise ValueError(f"{dataset_id} cannot be flown: {group}")
+        raise NotFlyable(f"{dataset_id} cannot be flown: {group}")
     observed = admit(flight, geometry, spec)
     return FlightContext(signals=flight, series=series, reading=reading, geometry=geometry,
                          crossing_heights=published_crossing_heights(geometry), group=group,

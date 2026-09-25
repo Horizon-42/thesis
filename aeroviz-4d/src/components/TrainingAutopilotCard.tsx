@@ -32,6 +32,7 @@ import {
   checkText,
   crossingText,
   formatElapsed,
+  formatUtc,
   shortSha,
   TRAINING_OUTCOME_TEXT,
   TRAINING_VERDICT_TEXT,
@@ -167,7 +168,7 @@ export default function TrainingAutopilotCard() {
         <p>
           {segment.group} · spec {shortSha(segment.executor.specSha256)} ({segment.executor.spec}) · executor
           code {shortSha(segment.executor.sourceSha256)} · words said on the {segment.executor.wordClock} clock ·
-          computed at {segment.computedUtc}
+          computed at {formatUtc(segment.computedUtc)}
         </p>
       </details>
       {autopilotHasLine(segment) ? (

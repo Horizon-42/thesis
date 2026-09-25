@@ -2,7 +2,7 @@
  * trainingAutopilot.ts
  * --------------------
  * THE EXECUTOR, LIVE: one word's segment of the selected Training flight, flown by the backend at the moment it is
- * asked (`POST /autopilot/segment`, `aeroviz_backend/autopilot_segment.py`). Design:
+ * asked (`POST /autopilot/segment`, the `aeroviz_backend/autopilot_segment/` package). Design:
  * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.7.
  *
  * A SEGMENT is the band the sentence bar draws and the user CLICKED: one column's word from the step it is said to the

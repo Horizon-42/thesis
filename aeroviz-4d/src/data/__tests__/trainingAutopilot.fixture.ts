@@ -1,6 +1,6 @@
 /**
  * The backend's answer to `POST /autopilot/segment` for a flight of the mock sample (`trainingSample.fixture.ts`), built
- * by hand in the shape `aeroviz_backend/autopilot_segment.py` writes. The contract literals (schema, the segment end) are
+ * by hand in the shape `aeroviz_backend/autopilot_segment/payload.py` writes. The contract literals (schema, the segment end) are
  * IMPORTED from the reader, never restated; the words told are the sentence's own (`segmentWords`).
  *
  * The flown track is a straight line at 1 s cycles from the segment's first step to its stop (`segmentStopRow`: a

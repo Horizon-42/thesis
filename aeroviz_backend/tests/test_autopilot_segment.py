@@ -4,6 +4,7 @@ service's lookups and caches, the endpoint's statuses, and the frontend's copies
 readings and verdicts only — nothing here opens an artefact, a spec or the frontend's data."""
 
 import json
+import os
 import re
 import unittest
 from dataclasses import replace
@@ -17,7 +18,7 @@ import torch
 
 from aeroviz_backend.autopilot_segment import fly as fly_module, payload as payload_module
 from aeroviz_backend.autopilot_segment.backend import FLIGHT_CACHE_SIZE, AutopilotSegmentBackend
-from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused
+from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused
 from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment, fly_batch_until, fly_until
 from aeroviz_backend.autopilot_segment.payload import SCHEMA, SEGMENT_END, heading_facts, segment_payload, track_payload
 from aeroviz_backend.autopilot_segment.segment import segment_of, segment_reading, segment_signals, told_words
@@ -263,7 +264,16 @@ class SetupTest(unittest.TestCase):
     charts, approach speeds, parameters, words, time limit and word clock — with its own stepper in place of `fly`."""
 
     def test_the_executor_is_set_up_as_the_replay_sets_it_up(self):
-        batch = SimpleNamespace(inputs=lambda device: "the inputs", readings=[SimpleNamespace(words=np.zeros((7, 6)))],
+        calls: dict[str, list] = {"inputs": [], "sentences": [], "runways": [], "charts": []}
+
+        def recorder(name, value):
+            def record(*args, **kwargs):
+                calls[name].append((args, kwargs))
+                return value
+            return record
+
+        grid = np.arange(42).reshape(7, 6)
+        batch = SimpleNamespace(inputs=recorder("inputs", "the inputs"), readings=[SimpleNamespace(words=grid)],
                                 geometries=["the geometry"], crossing_heights=[(15.0,)], approach_ias_mps=[70.0])
         params, words = SimpleNamespace(timeout_factor=1.5), SimpleNamespace(spec=SimpleNamespace(step_s=2.0))
         recorded = {}
@@ -279,11 +289,11 @@ class SetupTest(unittest.TestCase):
             return recorder
 
         clock = mock.Mock(return_value="the clock")
-        with mock.patch.object(fly_module, "Sentences", lambda grids, words, device: "the sentences"), \
-                mock.patch("ts_transformer.autopilot.replay.Sentences", lambda grids, words, device: "the sentences"), \
+        with mock.patch.object(fly_module, "Sentences", recorder("sentences", "the sentences")), \
+                mock.patch("ts_transformer.autopilot.replay.Sentences", recorder("sentences", "the sentences")), \
                 mock.patch("ts_transformer.autopilot.replay.word_clock", clock), \
-                mock.patch.object(fly_module.Runways, "of", lambda *args, **kwargs: ("runways", args, sorted(kwargs))), \
-                mock.patch.object(fly_module.AirportCharts, "of", lambda *args, **kwargs: ("charts", args, sorted(kwargs))), \
+                mock.patch.object(fly_module.Runways, "of", recorder("runways", "the runways")), \
+                mock.patch.object(fly_module.AirportCharts, "of", recorder("charts", "the charts")), \
                 mock.patch.object(fly_module, "Executor", record("executor", stops=False)), \
                 mock.patch.object(fly_module, "fly_until", record("fly_until")), \
                 mock.patch("ts_transformer.autopilot.replay.fly", record("fly")):
@@ -297,6 +307,14 @@ class SetupTest(unittest.TestCase):
         self.assertTrue(torch.equal(ias, fly_ias))
         self.assertEqual(rest, fly_rest)
         self.assertTrue(torch.equal(kwargs["time_limit_s"], fly_kwargs["time_limit_s"]))
+        # every piece built from the same arguments on both paths (the grids compared as arrays)
+        for name in ("inputs", "runways", "charts"):
+            self.assertEqual(len(calls[name]), 2, name)
+            self.assertEqual(calls[name][0], calls[name][1], name)
+        (ours, our_kwargs), (theirs, their_kwargs) = calls["sentences"]
+        self.assertEqual(len(ours[0]), 1)
+        np.testing.assert_array_equal(ours[0][0], theirs[0][0])
+        self.assertEqual((ours[1:], our_kwargs), (theirs[1:], their_kwargs))
         # the word clock: asked for once by each, the same way, and handed to the stepper as to `fly`
         self.assertEqual(clock.call_args_list[0], clock.call_args_list[1])
         self.assertEqual(recorded["fly_until"][0][1:3], ("the sentences", "the clock"))
@@ -346,14 +364,21 @@ class WordVerdictTest(unittest.TestCase):
         segment = segment_of(reading(), HEADING, 3, LEAD)
         run = flown([float(c) for c in range(10)], 9)
         # the next heading word, at the segment's step 3, is heard at cycle 6 (2 s steps of 1 s cycles)
-        off = torch.zeros(1, 10, dtype=torch.bool)
-        off[0, [2, 7, 8]] = True
-        run = replace(run, modes={**run.modes, "intercepting_off_word": off})
-        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
-                              verdict=Verdict("timeout", 9, None, {}, {}, flown_rows=10), reached_end=True, fly_s=0.0,
-                              judge_s=0.0)
         judged = SimpleNamespace(smoothed=SimpleNamespace(track_deg=np.zeros(5)))
-        self.assertEqual(heading_facts(result, judged, SPEC), HeadingFacts(off_word_cycles=1, judged_rows=5))
+
+        def facts(cycles: list[int], end_row: int) -> HeadingFacts:
+            off = torch.zeros(1, 10, dtype=torch.bool)
+            off[0, cycles] = True
+            result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None,
+                                  flown=replace(run, modes={**run.modes, "intercepting_off_word": off}),
+                                  verdict=Verdict("timeout", end_row, None, {}, {}, flown_rows=end_row + 1),
+                                  reached_end=True, fly_s=0.0, judge_s=0.0)
+            return heading_facts(result, judged, SPEC)
+
+        # cycle 5 is the word's last; cycle 6 is the next heading word's first
+        self.assertEqual(facts([5, 6], end_row=9), HeadingFacts(off_word_cycles=1, judged_rows=5))
+        # and none at or past the outcome: an outcome at state row 4 leaves cycles 0–3 flown, so of 3, 4 and 5 only 3 counts
+        self.assertEqual(facts([3, 4, 5], end_row=4).off_word_cycles, 1)
 
     def test_the_clearance_is_its_capture_turn_and_corridor(self):
         segment = segment_of(reading(), APPROACH, 5, LEAD)
@@ -489,6 +514,35 @@ class PayloadTest(unittest.TestCase):
         self.assertIsNone(body["word"]["heading"])
         self.assertEqual(body["limits"], {"cycles": 8, "bound": {"bank_rate": 2, "bank_cap": 0}})
 
+    def test_a_heading_word_carries_its_band_on_the_flown_rows_a_dynamics_failures_too(self):
+        segment = segment_of(reading(), HEADING, 3, LEAD)            # said at step 3, its target 60°, stopped at 8
+        cycles = 12
+        states = torch.zeros(1, cycles + 1, 7, dtype=torch.float64)
+        states[0, :, LAT] = 35.0
+        states[0, :, LON] = -78.0 + torch.arange(cycles + 1, dtype=torch.float64) * 90.0 / (111320.0 * 0.8191520)
+        states[0, :, ALT], states[0, :, SPEED_STATE], states[0, :, MASS] = 890.0, 95.0, 60000.0
+        run = replace(flown([float(c) for c in range(cycles)], cycles - 1), states=states)
+        judged = {"heading": [{"row": 0, "rows": 4, "inside": 4}], "capture_turn": None, "intercepting_off_word_cycles": 0,
+                  "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0}, "vertical": [], "speed": []}
+        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
+                              verdict=Verdict("dynamics_failure", cycles, None, {"cycles": {"cycles": cycles}}, judged,
+                                              flown_rows=cycles + 1),
+                              reached_end=False, fly_s=0.1, judge_s=0.01)
+        context = FlightContext(signals=signals10(), series=None, reading=reading(), geometry=geometry(),
+                                crossing_heights=(15.0,), group="own dynamics", approach_ias_mps=70.0,
+                                observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10))
+        # the flown track as its judge read it: seven steps, all on the word's 60°
+        admitted = SimpleNamespace(smoothed=SimpleNamespace(track_deg=np.full(7, 60.0)))
+        with mock.patch.object(payload_module, "read_flown", lambda *args, **kwargs: admitted):
+            body = segment_payload(result, context, SimpleNamespace(spec=SPEC, speed_mps=WORDS.speed_mps))
+        band = body["word"]["heading"]
+        self.assertEqual((band["firstRow"], band["stopRow"], band["inside"]), (5, 9, [1, 1, 1, 1]))
+        self.assertEqual(band["targetOnTrackDeg"], 60.0)
+        self.assertEqual(len(body["judgedTrackDeg"]), 7)
+        self.assertEqual((body["word"]["status"], body["end"]["reason"]), ("inside", "dynamics_failure"))
+        # the failed state is left out of the track, and the judged steps are among its points
+        self.assertEqual(len(body["track"]["tS"]), cycles)
+
     def test_an_event_before_the_stop_is_the_end_and_has_no_offset(self):
         body = self.answer(reached=False, outcome="ground_contact")
         self.assertEqual((body["end"]["reason"], body["end"]["offsetFromObserved"]), ("ground_contact", None))
@@ -566,6 +620,12 @@ class BackendTest(unittest.TestCase):
                 self.assertEqual(opened, ["one"])                     # kept while nothing changed
                 (root / "one").rename(root / "two")
                 self.assertEqual(backend.executor_for(Path(tmp) / "artefact")[0].name, "two")
+                self.assertEqual(opened, ["one", "two"])
+                # rewritten in place: a new time of writing
+                stat = (root / "two" / "spec.json").stat()
+                os.utime(root / "two" / "spec.json", ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+                backend.executor_for(Path(tmp) / "artefact")
+                self.assertEqual(opened, ["one", "two", "two"])
                 (root / "three").mkdir()
                 (root / "three" / "spec.json").write_text("{}")
                 with self.assertRaisesRegex(ValueError, r"2 executor specs .* \(\['three', 'two'\]\); one is needed"):
@@ -618,6 +678,7 @@ class EndpointTest(unittest.TestCase):
         post = lambda error: self.app(FakeAutopilot(error)).handle_post("/autopilot/segment", {})[:2]  # noqa: E731
         self.assertEqual(post(RequestRefused("no 'row'")), (400, {"ok": False, "error": "no 'row'"}))
         self.assertEqual(post(NotListed("no set")), (404, {"ok": False, "error": "no set"}))
+        self.assertEqual(post(NotFlyable("no aircraft dynamics")), (422, {"ok": False, "error": "no aircraft dynamics"}))
         # a listed flight the backend could not fly — a spec refused, a re-read that differs, a file gone — is its fault
         self.assertEqual(post(ValueError("2 executor specs")), (500, {"ok": False, "error": "ValueError: 2 executor specs"}))
         self.assertEqual(post(FileNotFoundError("npz")), (500, {"ok": False, "error": "FileNotFoundError: npz"}))

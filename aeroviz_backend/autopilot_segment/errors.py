@@ -7,5 +7,10 @@ class RequestRefused(ValueError):
     column, an airport that is not an airport code, a step that says no word of it (HTTP 400)."""
 
 
+class NotFlyable(ValueError):
+    """A listed flight the executor cannot fly by the data's own account — no aircraft dynamics for its type (HTTP 422);
+    the formal replay does not fly it either."""
+
+
 class NotListed(LookupError):
     """A set or a flight the request names that the airport's Training files do not list (HTTP 404)."""
