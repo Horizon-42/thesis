@@ -7,7 +7,6 @@ class is the one door the spine reaches it through.
 
 from __future__ import annotations
 
-import math
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Sequence
 
@@ -42,7 +41,7 @@ from ts_transformer.data.fixed_dt_supervision import (
     cache_fixed_dt_supervision_rows,
     pack_fixed_dt_supervision_rows,
 )
-from ts_transformer.geometry.flyability import G as GRAVITY_MPS2
+from aircraft.aero_params import stall_speed_ms
 from ts_transformer.backbone.adapters import build_state_forecaster
 from ts_transformer.outputs.base import ForecastOptions, OutputStrategy, Replay, WindowContext
 from ts_transformer.outputs.control.basis_fit import FittedTeacherTable, load_fitted_teacher
@@ -88,7 +87,6 @@ if TYPE_CHECKING:
 
 # ── the anchor domain ────────────────────────────────────────────────────────
 
-SEA_LEVEL_DENSITY_KG_M3 = 1.225
 #: The airborne floor a train anchor must clear; the same 1.10 × stall margin the
 #: optimisation counterpart and the envelope's speed floor use.
 CONTROL_ANCHOR_STALL_MARGIN = 1.10
@@ -111,14 +109,9 @@ def airborne_control_candidates(series: FlightSeries, anchors: Sequence[int]) ->
     )
     scenario = series.scenario
     _aircraft, aero = scenario.dynamics("the control anchor's stall-speed gate")
-    stall_speed = math.sqrt(
-        2.0 * float(scenario.initial.m) * GRAVITY_MPS2
-        / (
-            SEA_LEVEL_DENSITY_KG_M3
-            * float(aero.S)
-            * float(aero.Cl_max)
-        )
-    )
+    # the repository's one stall model (the optimizer's floor and evaluation's speed gate call it too); the same
+    # arithmetic as the inline formula it replaced, bit for bit, so the policy selects the same anchors
+    stall_speed = stall_speed_ms(float(scenario.initial.m), wing_area_m2=float(aero.S), cl_max=float(aero.Cl_max))
     return candidate_indices[
         observed_speed >= CONTROL_ANCHOR_STALL_MARGIN * stall_speed
     ].tolist()

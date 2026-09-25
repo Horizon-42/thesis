@@ -66,9 +66,8 @@ CONDITION_FEATURE_SETS: dict[str, tuple[Channel, ...]] = {
         _MASS,
         # Already O(1): 0.31–0.42 over the cohort's types at landing mass.
         ("thrust_to_weight", lambda mass_kg, thrust_n, _aero: thrust_n / (mass_kg * GRAVITY_M_S2)),
-        # The repository's one stall-speed definition (the optimizer's floor and evaluation's
-        # gate call it too; `outputs.control.strategy.airborne_control_candidates` still
-        # restates it — docs/code-health-followups.md §35).
+        # The repository's one stall-speed definition (the optimizer's floor, evaluation's gate and
+        # the control path's anchor gate, `strategy.airborne_control_candidates`, call it too).
         ("stall_speed_100mps", lambda mass_kg, _thrust, aero: stall_speed_ms(
             mass_kg, wing_area_m2=aero.S, cl_max=aero.Cl_max) / 100.0),
         *_POLAR,
