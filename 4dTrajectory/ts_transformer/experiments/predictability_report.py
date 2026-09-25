@@ -38,7 +38,7 @@ import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
 from ts_transformer.repo_layout import checkpoint_arrival_manifests  # noqa: E402
 from ts_transformer.data.channels import POSITION_IDX  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
-    HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
+    CTA_CONDITIONING_OFF, HORIZON_FULL, HORIZON_NORMALIZED, HORIZON_WINDOW, TSConfig,
     default_anchor, uses_control_dynamics,
 )
 
@@ -1017,6 +1017,14 @@ code{{background:#edf1f3;padding:.1em .3em}} .meta{{font-size:.9rem;color:var(--
     (output / "report.html").write_text(document, encoding="utf-8")
 
 
+def require_no_given_cta(config: TSConfig, path: Path) -> None:
+    """The reports run a control model on `forecast.dynamics_batch`, which hands a CTA-conditioned decoder the TRUTH
+    duration (C11): its numbers would be the oracle's, not a prediction's — refused by name."""
+    if config.cta_conditioning != CTA_CONDITIONING_OFF:
+        raise ValueError(f"{path} is a cta_conditioning={config.cta_conditioning!r} checkpoint: its decoder would be "
+                         "handed the truth duration, so this report would read the future")
+
+
 def load_runs(specifications: Sequence[tuple[str, Path]]) -> list[LoadedRun]:
     labels: set[str] = set()
     runs = []
@@ -1025,6 +1033,7 @@ def load_runs(specifications: Sequence[tuple[str, Path]]) -> list[LoadedRun]:
             raise ValueError(f"duplicate checkpoint label {label!r}")
         labels.add(label)
         model, config, normalizer, payload = load_checkpoint(path)
+        require_no_given_cta(config, path)
         runs.append(LoadedRun(label, path, model, config, normalizer, payload))
     return runs
 

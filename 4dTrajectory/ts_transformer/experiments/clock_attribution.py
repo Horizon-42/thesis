@@ -236,6 +236,7 @@ def main() -> None:
     model, config, normalizer, payload = load_checkpoint(checkpoint)
     if config.prediction_output != PREDICTION_CONTROL:
         parser.error("clock attribution requires a control-output checkpoint")
+    common_report.require_no_given_cta(config, checkpoint)
     run = common_report.LoadedRun("control", checkpoint, model, config, normalizer, payload)
 
     provenance = payload["data_provenance"]

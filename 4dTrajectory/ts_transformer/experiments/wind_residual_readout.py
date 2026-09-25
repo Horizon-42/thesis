@@ -17,7 +17,7 @@ Per flight of one prediction directory (``summary.json``-rostered):
   final_speed_residual_ms  the same over the last FINAL_WINDOW_S before the true crossing
   final_time_error_s     predicted - true duration (the summary row's number)
   endpoint_along_track_m predicted endpoint along the runway course, + past the threshold
-                         (``compare_frame_arms.endpoint_geometry``)
+                         (``inference.arm_readout.endpoint_geometry``)
 
 Per stratum (``approach_difficulty.strata_masks``): n, headwind quantiles, and for each
 residual the OLS slope on the headwind with its 95 % interval, Pearson r and R^2, plus

@@ -565,10 +565,10 @@ def run_width_study(
     reference_dir, summary, cohort_keys, compact_of, masks, coverage = cohort(args, out)
     device = resolve_device(args.device)
     base_config = basis_config(summary["config"], max(segment_counts), args.device)
+    manifest = reference_manifest(summary, airport)
     # Every refusal this mode can make has been made; claim the immutable directory before
     # the expensive work rather than at the top, so a rejected invocation leaves nothing.
     out.mkdir(parents=True, exist_ok=False)
-    manifest = reference_manifest(summary, airport)
     series, series_keys = build_cohort_series(cohort_keys, compact_of, airport, base_config, manifest)
     anchor = default_anchor(base_config)
     normalizer = Normalizer.fit(series, balance_airports_and_flights=True)
