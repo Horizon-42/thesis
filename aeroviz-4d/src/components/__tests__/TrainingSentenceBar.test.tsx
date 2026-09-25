@@ -89,9 +89,9 @@ describe("TrainingSentenceBar", () => {
     unmount();
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, parsed.value);
     if (!answer.ok) throw new Error(answer.problem);
-    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0 };
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
     render(<TrainingSentenceBar />);
-    expect(screen.getByText(/the autopilot \(live\): heading 225°, steps 8–10, flown on to step 12 — reached the point a lead after the next heading word was said, where this word's band ends after 8 s \(observed 8 s\); the word: inside · computed in 0\.42 s/)).toBeTruthy();
+    expect(screen.getByText(/the autopilot \(live\): heading 225°, steps 8–10, flown on to step 12 — reached the point a lead after the next heading word was said, where this word's band ends; the word: inside · simulated 8\.00 s of flight \(observed 8\.00 s\) · computed in 1\.24 s/)).toBeTruthy();
   });
 
   it("marks each word with the executor's verdict, and none where a word has no check of its own", () => {

@@ -897,6 +897,40 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-weight: 600;
 }
 
+/* The two times the live executor is read by: the simulated flight and the computation, side by side. */
+.training-autopilot-times {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+
+.training-autopilot-time {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 6px;
+  border: 1px solid #2a3552;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.training-autopilot-time-label {
+  font-size: 10px;
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-autopilot-time-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #e0e6f0;
+}
+
+.training-autopilot-time-note {
+  font-size: 10px;
+  color: rgba(224, 230, 240, 0.55);
+}
+
 .training-autopilot-checks {
   margin: 0 0 3px;
   padding-left: 14px;

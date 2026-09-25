@@ -47,13 +47,14 @@ export default function useTrainingAutopilot(
     }
     const request = JSON.parse(key) as TrainingAutopilotRequest;
     const controller = new AbortController();
+    const sent = performance.now();
     setTrainingAutopilot({ status: "flying", request });
     requestTrainingAutopilot(backendUrl, request, controller.signal)
       .then((raw) => {
         if (controller.signal.aborted) return;
         const parsed = parseTrainingAutopilot(raw, request, sample);
         setTrainingAutopilot(parsed.ok
-          ? { status: "ready", request, segment: parsed.value, playedAt: Date.now() }
+          ? { status: "ready", request, segment: parsed.value, playedAt: Date.now(), roundTripS: (performance.now() - sent) / 1000 }
           : { status: "failed", request, problem: parsed.problem });
       })
       .catch((error: unknown) => {

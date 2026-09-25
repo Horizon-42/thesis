@@ -169,11 +169,14 @@ export function autopilotFlownAt(track: TrainingAutopilotTrack, flownS: number):
   return { index, fraction: (target - track.tS[index]) / (track.tS[index + 1] - track.tS[index]) };
 }
 
-/** The aircraft's label at a flown point: the playback's speed-up, ground speed, geometric MSL height and bank (the
- *  command of the cycle it is in; none after the last). */
+/** The aircraft's label at a flown point: the simulated time flown so far of the whole, the playback's speed-up, ground
+ *  speed, geometric MSL height and bank (the command of the cycle it is in; none after the last). */
 export function autopilotAircraftLabel(track: TrainingAutopilotTrack, index: number, speedup: number): string {
   const bank = track.bankRightDeg[Math.min(index, track.bankRightDeg.length - 1)] ?? 0;
-  return `autopilot ×${speedup.toFixed(0)} · ${track.groundSpeedMps[index].toFixed(0)} m/s · ${track.altitudeM[index].toFixed(0)} m · bank ` +
+  const flownS = track.tS[index] - track.tS[0];
+  const totalS = track.tS[track.tS.length - 1] - track.tS[0];
+  return `autopilot ${flownS.toFixed(0)} / ${totalS.toFixed(0)} s simulated ×${speedup.toFixed(0)} · ` +
+    `${track.groundSpeedMps[index].toFixed(0)} m/s · ${track.altitudeM[index].toFixed(0)} m · bank ` +
     `${Math.abs(bank).toFixed(0)}°${Math.abs(bank) < 0.5 ? "" : bank > 0 ? " R" : " L"}`;
 }
 
@@ -404,10 +407,11 @@ export default function useTrainingTrackLayer(): void {
       label: {
         text: new Cesium.CallbackProperty(() => autopilotAircraftLabel(track, now().index, speedup), false),
         font: "600 12px sans-serif",
-        fillColor: colour(TRAINING_AUTOPILOT_COLOR),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 3,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        // white on the autopilot's blue: the simulated clock must read over any terrain
+        fillColor: Cesium.Color.WHITE,
+        showBackground: true,
+        backgroundColor: colour(TRAINING_AUTOPILOT_COLOR, 0.85),
+        style: Cesium.LabelStyle.FILL,
         pixelOffset: new Cesium.Cartesian2(0, -20),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },

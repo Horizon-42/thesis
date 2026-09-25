@@ -112,6 +112,8 @@ describe("parseTrainingAutopilot", () => {
   it("refuses a track that does not start at the segment's step or run forward", () => {
     expect(refusal((raw) => { raw.track.tS[0] = 0; })).toMatch(/starts at 0 s, not at step 8 \(16 s\)/);
     expect(refusal((raw) => { raw.track.bankRightDeg.push(0); })).toMatch(/bankRightDeg has 9 values, expected 8/);
+    expect(refusal((raw) => { raw.timing.cycles = 3; })).toMatch(/3 cycles flown, but the track holds 9 states/);
+    expect(refusal((raw) => { delete raw.timing.flyS; })).toMatch(/timing: flyS is undefined, not a number/);
   });
 });
 

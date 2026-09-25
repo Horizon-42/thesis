@@ -171,6 +171,6 @@ describe("the live executor in 3D", () => {
   it("plays a segment at least 8× and never longer than 20 s, and says how fast", () => {
     expect(autopilotPlaybackSpeedup(60)).toBe(AUTOPILOT_PLAYBACK_MIN_SPEEDUP);
     expect(autopilotPlaybackSpeedup(600)).toBe(600 / AUTOPILOT_PLAYBACK_MAX_S);
-    expect(autopilotAircraftLabel(track(), 1, 8)).toBe("autopilot ×8 · 110 m/s · 1110 m · bank 12° L");
+    expect(autopilotAircraftLabel(track(), 1, 8)).toBe("autopilot 1 / 8 s simulated ×8 · 110 m/s · 1110 m · bank 12° L");
   });
 });

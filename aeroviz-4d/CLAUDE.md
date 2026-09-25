@@ -137,10 +137,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 - **Training's live executor flies the CLICKED word's segment on the backend, every time** (`POST /autopilot/segment`,
-  `aeroviz-autopilot-segment-v1`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
+  `aeroviz-autopilot-segment-v2`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
   where its envelope ends (the next word of its column; a heading word's a lead later; the sentence's end: to the landing),
-  the executor code untouched and cut afterwards by its own word clock; the answer is refused unless the words it told are
-  the sentence bar's for that segment; blue `#2563eb`, never the replay's teal (AV26).
+  the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
+  words it told are the sentence bar's for that segment; the simulated flight time and the computation time are shown side
+  by side; blue `#2563eb`, never the replay's teal (AV26).
 
 ## Comparison CZML colour contract
 

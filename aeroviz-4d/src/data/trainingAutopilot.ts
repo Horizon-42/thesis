@@ -13,8 +13,9 @@
  * outcome. Only the selected word is judged, by the executor's judge.
  *
  * NOTHING IS PRECOMPUTED: no replay record, no overlay. Every request is flown again by the executor code the backend
- * runs, under the executor spec written by that code for the set's vocabulary; the answer says which spec, which code,
- * and how long it took.
+ * runs — its stepper, one control cycle at a time, stopped at the segment's stop — under the executor spec written by
+ * that code for the set's vocabulary; the answer says which spec, which code, how many cycles were flown and how long
+ * each part took (`timing`), and the view adds the browser's round trip.
  *
  * THE ANSWER IS BOUND TO THE FLIGHT ON SCREEN, or refused whole: the same set, flight and segment (its end is the
  * run's, its stop the word's envelope's), the same vocabulary spec, and the words the executor was told are the words the
@@ -46,7 +47,7 @@ import {
 } from "./trainingSample";
 
 /** MIRROR of `aeroviz_backend/autopilot_segment.py` `SCHEMA`: the backend's answer; anything else is refused by name. */
-export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v1";
+export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v2";
 /** MIRROR of `autopilot_segment.STATUSES`: the selected word's verdict. */
 export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
 export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
@@ -97,10 +98,27 @@ export interface TrainingAutopilotSegment {
   flightKey: string;
   datasetId: string;
   computedUtc: string;
-  /** How long the backend took to answer, once it began: the flight rebuilt (unless cached), flown and judged. */
-  computeS: number;
-  /** How long it waited first for the flight before it (the backend flies one at a time). */
-  waitS: number;
+  /** Wall-clock seconds on the backend: the wait, then the parts that add up to `computeS`. */
+  timing: {
+    /** Waiting for the flight before it (the backend flies one at a time). */
+    waitS: number;
+    /** The set and the executor spec found. */
+    setupS: number;
+    /** The flight rebuilt from the data plane — or kept from an earlier request (`flightKept`). */
+    openS: number;
+    flightKept: boolean;
+    /** The segment set up for the executor (its sentence, clock and physics). */
+    prepareS: number;
+    /** The executor flying its `cycles` control cycles — what was computed, which may run past the judged outcome. */
+    flyS: number;
+    cycles: number;
+    /** The judge. */
+    judgeS: number;
+    /** The answer written. */
+    answerS: number;
+    /** The whole request once it began. */
+    computeS: number;
+  };
   executor: {
     spec: string;
     specSha256: string;
@@ -157,8 +175,10 @@ export interface TrainingAutopilotSegment {
 export type TrainingAutopilotView =
   | { status: "flying"; request: TrainingAutopilotRequest }
   | { status: "failed"; request: TrainingAutopilotRequest; problem: string }
-  /** `playedAt`: when the 3D scene last began flying it out (a replay sets a new one). */
-  | { status: "ready"; request: TrainingAutopilotRequest; segment: TrainingAutopilotSegment; playedAt: number };
+  /** `playedAt`: when the 3D scene last began flying it out (a replay sets a new one); `roundTripS`: the browser's wait,
+   *  from the request sent to the answer read. */
+  | { status: "ready"; request: TrainingAutopilotRequest; segment: TrainingAutopilotSegment; playedAt: number;
+      roundTripS: number };
 
 /** Where a word's segment stops: where its own envelope ends — the step the next word of its column is said, and for a
  *  heading word a lead later (it is judged from a lead after it is said to a lead after the next heading word is) —
@@ -331,11 +351,17 @@ export function parseTrainingAutopilot(
       }
     }
     const limits = answer.child("limits");
+    const timing = answer.child("timing");
+    const cycles = timing.integer("cycles", 0, Number.MAX_SAFE_INTEGER);
+    if (track.tS.length - 1 > cycles) timing.fail(`${cycles} cycles flown, but the track holds ${track.tS.length} states`);
     return {
       ...echo,
       computedUtc: answer.string("computedUtc"),
-      computeS: answer.number("computeS"),
-      waitS: answer.number("waitS"),
+      timing: {
+        waitS: timing.number("waitS"), setupS: timing.number("setupS"), openS: timing.number("openS"),
+        flightKept: timing.boolean("flightKept"), prepareS: timing.number("prepareS"), flyS: timing.number("flyS"), cycles,
+        judgeS: timing.number("judgeS"), answerS: timing.number("answerS"), computeS: timing.number("computeS"),
+      },
       executor: {
         spec: executor.string("spec"), specSha256: executor.string("specSha256"), sourceSha256: executor.string("sourceSha256"),
         wordClock: executor.string("wordClock"), cycleS, timeoutFactor: executor.number("timeoutFactor"),

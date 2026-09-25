@@ -2,9 +2,12 @@
  * TrainingAutopilotCard.tsx
  * -------------------------
  * The live executor's answer for the selected word (`trainingAutopilot`, `data/trainingAutopilot.ts`), in the Training
- * panel: which segment was flown, how it ended, the word's verdict with its checks, the limits that bound, and which
- * executor spec and code flew it and how long that took — with "Fly again" (a new request) and "Replay in 3D" (the scene
- * flies the same answer out again). `autopilotSummary` is its one-line form, for the sentence bar.
+ * panel. At its head, side by side, the two times it is read by: the SIMULATED flight (the seconds of flight the
+ * executor flew, beside the observed aircraft's over the same steps, and its control cycles) and the COMPUTATION (the
+ * backend's seconds, broken down: waiting, the flight rebuilt or kept, the executor, the judge; and the browser's round
+ * trip). Then which segment was flown, how it ended, the word's verdict with its checks, the limits that bound, and which
+ * executor spec and code flew it — with "Fly again" (a new request) and "Replay in 3D" (the scene flies the same answer
+ * out again). `autopilotSummary` is its one-line form, for the sentence bar.
  *
  * Every number is the backend's; this card writes them out.
  */
@@ -18,7 +21,6 @@ import {
   type TrainingAutopilotView,
 } from "../data/trainingAutopilot";
 import {
-  formatSeconds,
   trainingWordLabel,
   TRAINING_COLUMN_INDEX,
   type TrainingCandidate,
@@ -68,6 +70,30 @@ export function autopilotEndText(segment: TrainingAutopilotSegment): string {
   return `${OUTCOME_TEXT[end.reason as (typeof TRAINING_AUTOPILOT_OUTCOMES)[number]]}${crossing}`;
 }
 
+/** A duration as the times read: milliseconds under a second, then seconds (two decimals under ten, one above) —
+ *  the unit chosen after rounding, so 0.9996 s reads "1.00 s", never "1000 ms". */
+export function formatDuration(seconds: number): string {
+  const ms = Math.round(seconds * 1000);
+  if (ms < 1000) return `${ms} ms`;
+  return Math.round(seconds * 100) < 1000 ? `${seconds.toFixed(2)} s` : `${seconds.toFixed(1)} s`;
+}
+
+/** The computation, part by part — the backend's parts add up to its total — then the wait before it and the round trip. */
+export function autopilotTimingText(segment: TrainingAutopilotSegment, roundTripS: number): string {
+  const { timing } = segment;
+  return [
+    `executor ${formatDuration(timing.flyS)} (${timing.cycles} cycles of ${segment.executor.cycleS} s computed)`,
+    `judge ${formatDuration(timing.judgeS)}`,
+    timing.flightKept ? `flight kept from an earlier request (${formatDuration(timing.openS)})`
+      : `flight rebuilt ${formatDuration(timing.openS)}`,
+    `set and spec ${formatDuration(timing.setupS)}`,
+    `segment set up ${formatDuration(timing.prepareS)}`,
+    `answer ${formatDuration(timing.answerS)}`,
+    ...(timing.waitS >= 0.05 ? [`waited ${formatDuration(timing.waitS)} for the flight before it`] : []),
+    `round trip ${formatDuration(roundTripS)}`,
+  ].join(" · ");
+}
+
 /** The sentence bar's line: what is being flown, or what was. */
 export function autopilotSummary(
   view: TrainingAutopilotView, flight: TrainingFlight, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[],
@@ -76,9 +102,9 @@ export function autopilotSummary(
   if (view.status === "flying") return `the autopilot (live): flying ${word} from step ${view.request.row} …`;
   if (view.status === "failed") return `the autopilot (live): ${word} from step ${view.request.row} not flown — ${view.problem}`;
   const { segment } = view;
-  return `the autopilot (live): ${word}, ${autopilotSpanText(segment.segment)} — ${autopilotEndText(segment)} after ` +
-    `${formatSeconds(segment.end.flownS)} s (observed ${formatSeconds(segment.segment.observedS)} s); the word: ` +
-    `${segment.word.status} · computed in ${segment.computeS.toFixed(2)} s`;
+  return `the autopilot (live): ${word}, ${autopilotSpanText(segment.segment)} — ${autopilotEndText(segment)}; the word: ` +
+    `${segment.word.status} · simulated ${formatDuration(segment.end.flownS)} of flight (observed ` +
+    `${formatDuration(segment.segment.observedS)}) · computed in ${formatDuration(segment.timing.computeS)}`;
 }
 
 export default function TrainingAutopilotCard({ flight, vocabulary, candidates, selected, flyAgain }: {
@@ -116,10 +142,24 @@ export default function TrainingAutopilotCard({ flight, vocabulary, candidates, 
       <p className="training-autopilot-title" style={{ color: TRAINING_AUTOPILOT_COLOR }}>
         {word}, {autopilotSpanText(segment.segment)}
       </p>
+      <div className="training-autopilot-times">
+        <div className="training-autopilot-time" aria-label="Simulated flight time">
+          <span className="training-autopilot-time-label">Simulated flight</span>
+          <span className="training-autopilot-time-value">{formatDuration(end.flownS)}</span>
+          <span className="training-autopilot-time-note">
+            observed {formatDuration(segment.segment.observedS)} · {segment.limits.cycles} cycles
+          </span>
+        </div>
+        <div className="training-autopilot-time" aria-label="Computation time">
+          <span className="training-autopilot-time-label">Computed in</span>
+          <span className="training-autopilot-time-value">{formatDuration(segment.timing.computeS)}</span>
+          <span className="training-autopilot-time-note">on the backend · round trip {formatDuration(view.roundTripS)}</span>
+        </div>
+      </div>
+      <p className="training-autopilot-meta">{autopilotTimingText(segment, view.roundTripS)}</p>
       <p>
         From the observed state at step {segment.segment.row}, told the six words in force there and then the sentence's
-        words as the observed aircraft heard them: {autopilotEndText(segment)} after {formatSeconds(end.flownS)} s (the observed
-        aircraft: {formatSeconds(segment.segment.observedS)} s).
+        words as the observed aircraft heard them: {autopilotEndText(segment)}.
         {end.offsetFromObserved === null ? "" : ` There it was ${end.offsetFromObserved.horizontalM.toFixed(0)} m from the ` +
           `observed aircraft, ${Math.abs(end.offsetFromObserved.aboveM).toFixed(0)} m ${end.offsetFromObserved.aboveM >= 0
             ? "above" : "below"} it, ${Math.abs(end.offsetFromObserved.groundSpeedMps).toFixed(1)} m/s ` +
@@ -146,7 +186,6 @@ export default function TrainingAutopilotCard({ flight, vocabulary, candidates, 
       <p className="training-autopilot-meta">
         {segment.group} · spec {segment.executor.specSha256.slice(0, SHA_SHOWN)} ({segment.executor.spec}) · executor code{" "}
         {segment.executor.sourceSha256.slice(0, SHA_SHOWN)} · words said on the {segment.executor.wordClock} clock · computed
-        in {segment.computeS.toFixed(2)} s{segment.waitS >= 0.05 ? ` after waiting ${segment.waitS.toFixed(2)} s for the flight before it` : ""}{" "}
         at {segment.computedUtc}
       </p>
       <div className="training-autopilot-buttons">

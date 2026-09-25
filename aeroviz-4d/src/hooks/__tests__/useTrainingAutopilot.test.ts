@@ -69,6 +69,8 @@ describe("useTrainingAutopilot", () => {
     await waitFor(() => expect(last().status).toBe("ready"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(last().segment.segment).toMatchObject({ row: 8, endRow: 10, stopRow: 12 });
+    // the browser's own wait, beside the backend's timing
+    expect(last().roundTripS).toBeGreaterThanOrEqual(0);
   });
 
   it("asks again for another pick and on fly again, never for the cursor moving", async () => {

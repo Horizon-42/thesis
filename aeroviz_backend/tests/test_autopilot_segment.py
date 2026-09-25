@@ -16,8 +16,7 @@ from aeroviz_backend.autopilot_segment import (
     AutopilotSegmentBackend,
     FlightContext,
     FlownSegment,
-    cut,
-    end_cycle,
+    fly_until,
     segment_of,
     segment_reading,
     segment_signals,
@@ -27,6 +26,7 @@ from aeroviz_backend.autopilot_segment import (
     word_verdict,
 )
 from aeroviz_backend.http_server import AeroVizBackendApp
+from ts_transformer.autopilot.sentence import row_at
 from ts_transformer.autopilot.executor import LIMITS, MODES, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED as SPEED_STATE
 from ts_transformer.autopilot.judge import Verdict
@@ -142,23 +142,121 @@ def flown(sentence_s: list[float], done_cycle: int) -> Flown:
                  cycle_s=1.0)
 
 
-class EndTest(unittest.TestCase):
-    def test_the_segment_ends_on_the_first_cycle_that_starts_a_step_the_clock_puts_at_its_end(self):
-        # the time clock: step 3 starts at cycle 6
-        self.assertEqual(end_cycle(flown([float(c) for c in range(10)], 9), 3, 2.0), 6)
-        # a clock that runs ahead: a step is heard only on a cycle that starts one (cycles 0, 2, 4), as the judge reads it
-        self.assertEqual(end_cycle(flown([0.0, 0.5, 1.2, 3.9, 4.2, 6.0], 5), 2, 2.0), 4)
+class FakeExecutor:
+    """The stepper's surface `fly_until` drives: cycles flown, a done flag after ``done_after`` cycles."""
 
-    def test_a_flight_that_ends_before_its_segment_does_not_reach_it(self):
-        self.assertIsNone(end_cycle(flown([float(c) for c in range(10)], 5), 3, 2.0))
+    def __init__(self, cycles: int, done_after: int | None = None) -> None:
+        self.cycles, self.step_rows, self.count, self.heard = cycles, 2, 0, []
+        self.done_after = done_after
+        self.done = torch.zeros(1, dtype=torch.bool)
 
-    def test_a_cut_flight_ends_at_the_cut(self):
-        short = cut(flown([float(c) for c in range(10)], 9), 6)
-        self.assertEqual(tuple(short.states.shape), (1, 7, 7))
-        self.assertEqual(tuple(short.commands.shape), (1, 6, 3))
-        self.assertEqual(tuple(short.sentence_s.shape), (1, 6))
-        self.assertTrue(all(value.shape == (1, 6) for value in {**short.limits, **short.modes}.values()))
-        self.assertEqual(int(short.done_cycle[0]), 5)
+    def now(self):
+        return None
+
+    def cycle(self, force, sentence_s):
+        self.heard.append(float(force))
+        self.count += 1
+        self.done = torch.tensor([self.done_after is not None and self.count >= self.done_after])
+
+
+class FakeClock:
+    def __init__(self, times: list[float]) -> None:
+        self.times = times
+
+    def now(self, cycle, state):
+        return torch.tensor([self.times[cycle]], dtype=torch.float64)
+
+
+class FakeSentences:
+    def at(self, heard_s):
+        return heard_s[0]
+
+
+class StopTest(unittest.TestCase):
+    def test_it_stops_before_the_first_cycle_that_starts_a_step_the_clock_puts_at_the_stop(self):
+        executor = FakeExecutor(cycles=10)
+        # the time clock: step 3 starts at cycle 6, which is never flown
+        self.assertTrue(fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, 3))
+        self.assertEqual(executor.count, 6)
+        # the words of each step are heard on the cycle that starts it, as `executor.fly` hears them
+        self.assertEqual(executor.heard, [0.0, 0.0, 2.0, 2.0, 4.0, 4.0])
+
+    def test_a_clock_that_runs_ahead_stops_on_a_cycle_that_starts_a_step(self):
+        executor = FakeExecutor(cycles=6)
+        # cycle 3 reads step 1.95 but starts no step; cycle 4 starts one at step 2.1
+        self.assertTrue(fly_until(executor, FakeSentences(), FakeClock([0.0, 0.5, 1.2, 3.9, 4.2, 6.0]), 2.0, 2))
+        self.assertEqual(executor.count, 4)
+
+    def test_a_flight_done_first_or_out_of_cycles_does_not_reach_its_stop(self):
+        done = FakeExecutor(cycles=10, done_after=3)
+        self.assertFalse(fly_until(done, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, 3))
+        self.assertEqual(done.count, 3)
+        short = FakeExecutor(cycles=4)
+        self.assertFalse(fly_until(short, FakeSentences(), FakeClock([float(c) for c in range(4)]), 2.0, 3))
+        self.assertEqual(short.count, 4)
+
+    def test_without_a_stop_it_flies_to_the_outcome(self):
+        executor = FakeExecutor(cycles=10, done_after=7)
+        self.assertIsNone(fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, None))
+        self.assertEqual(executor.count, 7)
+
+
+class StepperTest(unittest.TestCase):
+    """`fly_until` IS `executor.fly` up to its stop — the real executor on a synthetic downwind, base and final (the
+    executor tests' own flight): without a stop state for state, with one the whole flight cut at the first cycle that
+    starts a step the clock puts at the stop. If `fly`'s loop changes, this fails before the copy goes stale."""
+
+    def setUp(self):
+        from ts_transformer.instructions.labeller.read import read_flight
+        from ts_transformer.instructions.words import Words
+        from ts_transformer.tests import test_autopilot as executor_tests
+        from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec
+
+        self.spec, geometry = instruction_spec(), instruction_airport()
+        self.words, self.params = Words(self.spec), executor_tests._params()
+        self.signals = instruction_flight(*fly_legs(executor_tests.DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+        self.grid = read_flight(self.signals, geometry, self.spec, self.words).words
+        self.physics = executor_tests._physics(self.signals, geometry)
+        self.limit = torch.tensor([len(self.grid) * self.spec.step_s * self.params.timeout_factor], dtype=torch.float64)
+
+    def clock(self, name: str):
+        from ts_transformer.autopilot.sentence import TimeClock, TrackClock
+        if name == "time":
+            return TimeClock(self.params.cycle_s)
+        rows = len(self.grid)
+        return TrackClock.of([self.signals.e_m[:rows]], [self.signals.n_m[:rows]], self.spec.step_s, self.params.cycle_s,
+                             device=torch.device("cpu"))
+
+    def fly(self, name: str, stop: int | None):
+        from ts_transformer.autopilot.executor import Executor, fly
+        from ts_transformer.autopilot.sentence import Sentences
+        inputs, runways, charts, approach = self.physics
+        sentences = lambda: Sentences([self.grid], self.words, device=torch.device("cpu"))  # noqa: E731
+        whole = fly(inputs, sentences(), self.clock(name), runways, charts, approach, self.params, self.words,
+                    time_limit_s=self.limit)
+        executor = Executor(inputs, runways, charts, approach, self.params, self.words, time_limit_s=self.limit)
+        reached = fly_until(executor, sentences(), self.clock(name), self.spec.step_s, stop)
+        return whole, executor.flown(), reached, executor.step_rows
+
+    def test_without_a_stop_it_is_executor_fly_state_for_state(self):
+        for name in ("time", "track"):
+            whole, stepped, reached, _ = self.fly(name, None)
+            self.assertIsNone(reached)
+            self.assertTrue(torch.equal(stepped.states, whole.states), name)
+            self.assertTrue(torch.equal(stepped.commands, whole.commands), name)
+            self.assertTrue(torch.equal(stepped.done_cycle, whole.done_cycle), name)
+            self.assertTrue(torch.equal(stepped.sentence_s, whole.sentence_s), name)
+
+    def test_with_a_stop_it_is_executor_fly_cut_where_the_clock_first_starts_a_step_there(self):
+        for name in ("time", "track"):
+            stop = 20
+            whole, stepped, reached, step_rows = self.fly(name, stop)
+            self.assertTrue(reached)
+            starts = row_at(whole.sentence_s[0].numpy(), self.spec.step_s)[::step_rows]
+            cycle = int(np.searchsorted(starts, stop)) * step_rows
+            self.assertEqual(stepped.commands.shape[1], cycle, name)
+            self.assertTrue(torch.equal(stepped.states, whole.states[:, : cycle + 1]), name)
+            self.assertTrue(torch.equal(stepped.commands, whole.commands[:, :cycle]), name)
 
 
 SPEC = SimpleNamespace(heading_lead_s=4.0, heading_tolerance_deg=4.5)
@@ -249,7 +347,8 @@ class TrackTest(unittest.TestCase):
         run = replace_flown(base, states=states, commands=commands)
         segment = segment_of(reading(), HEADING, 3, LEAD)
         result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
-                              verdict=Verdict(outcome, cycles, None, {}, None, flown_rows=cycles + 1), reached_end=True)
+                              verdict=Verdict(outcome, cycles, None, {}, None, flown_rows=cycles + 1), reached_end=True,
+                              fly_s=0.1, judge_s=0.01)
         # the observed smoothed track reads 450° (one turn up) and has flown 1200 m by step 3
         context = FlightContext(signals=None, series=None, reading=reading(), geometry=geometry(), crossing_heights=(15.0,),
                                 group="own dynamics", approach_ias_mps=70.0,

@@ -12,9 +12,10 @@ column is said (``endRow``), or to the sentence's end — the band the sentence 
 - flies to where the selected word's own envelope ends (``stopRow``): the point where the next word of its column was
   said (``endRow``) — for a HEADING word a lead later, since a heading word is judged from a lead after it is said to a
   lead after the next heading word is (vocabulary design §10.1), so the next heading word is told at ``endRow`` as in the
-  sentence and its first lead is flown. The flight ends at the first step its word clock reaches ``stopRow``; the words
-  said there never act. When ``stopRow`` is the sentence's end, it is flown on to its outcome as the replay flies a whole
-  sentence (a landing, a failure, or the time limit: the segment's steps × the spec's timeout factor).
+  sentence and its first lead is flown. The flight stops before the first cycle that starts a step its word clock puts
+  at or past ``stopRow`` — where a word said there would be heard, so none is. When ``stopRow`` is the sentence's end, it is
+  flown on to its outcome as the replay flies a whole sentence (a landing, a failure, or the time limit: the segment's
+  steps × the spec's timeout factor).
 
 Only the selected word is judged, by the executor's own judge on what was flown (`autopilot.judge.judge`): the
 segment's sentence is the one the executor was told, renumbered from the segment's first step, so each word's
@@ -22,12 +23,13 @@ envelope is drawn from where the executor was told it — the selected word's fr
 
 NOTHING HERE IS PRECOMPUTED, AND THE EXECUTOR IS USED AS IT IS. Every request rebuilds the flight from the arrival
 manifest its artefact recorded (`flights.rebuild_series` refuses a moved manifest or a rebuilt flight that differs
-from the stored signals), re-reads it with the labeller (it must give the stored sentence), and flies it with
-`replay.fly_sentences` — the replay's own composition of the cycle loop, the word clock, the runways and the charts —
-under the one executor spec written by this code for this artefact's vocabulary (`replay.open_executor`). The loop
-is not stepped or changed: it flies past the segment's end and the flight is cut there afterwards, from the word
-clock it recorded (`Flown.sentence_s`, read with `sentence.row_at` as `judge.words_said` reads it). No replay record
-and no Training overlay is read.
+from the stored signals; the last few rebuilt flights are kept), re-reads it with the labeller (it must give the stored
+sentence), and flies it with the executor's own stepper (`executor.Executor`, one control cycle at a time) under the one
+executor spec written by this code for this artefact's vocabulary (`replay.open_executor`), driven exactly as
+`executor.fly` drives it — the spec's word clock read before each cycle, a step's words heard on the cycle that starts
+it (`sentence.row_at`, as `judge.words_said` reads the clock) — and stopped at the segment's stop: nothing past it is
+flown. No replay record and no Training overlay is read. The answer says how long each part took and how many cycles
+were flown.
 
 Which flight: the request names a Training set (``airport``, ``setId``) and a flight of it (``flightKey``); the set's
 sample (under the frontend's airports root) names the artefact it was exported from and the split it was drawn from.
@@ -54,13 +56,14 @@ import torch
 from aeroviz_backend.paths import REPO_ROOT
 from flight_scenarios.datum import geoid_undulation_m
 from ts_transformer.autopilot import replay
-from ts_transformer.autopilot.executor import Flown
+from ts_transformer.autopilot.executor import Executor, Flown
 from ts_transformer.autopilot.flights import rebuild_series
-from ts_transformer.autopilot.frame import ALT, LAT, LON
+from ts_transformer.autopilot.frame import ALT, LAT, LON, AirportCharts
 from ts_transformer.autopilot.judge import Verdict, flown_track, judge, read_flown
+from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import published_crossing_heights
-from ts_transformer.autopilot.sentence import row_at
+from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock, row_at
 from ts_transformer.data.dataset import FlightSeries, series_from_row
 from ts_transformer.experiments.instruction_training_export import KIND_READBACK
 from ts_transformer.instructions import display
@@ -75,7 +78,7 @@ from ts_transformer.instructions.words import (
 
 #: MIRROR of `aeroviz-4d/src/data/trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SCHEMA`); the reader refuses anything
 #: else by name. A name changes with the payload's shape, on both sides, in one change.
-SCHEMA = "aeroviz-autopilot-segment-v1"
+SCHEMA = "aeroviz-autopilot-segment-v2"
 #: MIRROR of `trainingAutopilot.ts` (`TRAINING_AUTOPILOT_STATUSES`): the selected word's verdict.
 STATUSES = ("inside", "outside", "not judged", "no check")
 INSIDE, OUTSIDE, NOT_JUDGED, NO_CHECK = STATUSES
@@ -168,24 +171,22 @@ def segment_signals(signals: FlightSignals, segment: Segment) -> FlightSignals:
     return replace(signals, **{name: getattr(signals, name)[segment.row: stop] for name in ROW_FIELDS})
 
 
-def end_cycle(flown: Flown, steps: int, step_s: float) -> int | None:
-    """The cycle at whose start the word clock first reaches step ``steps`` of the segment — where the executor would
-    hear a word said there (`judge.words_said`'s reading of the clock: a word is heard on a cycle that starts a step) —
-    or None when the flight ended before it."""
-    flown_cycles = int(flown.done_cycle[0]) + 1
-    step_rows = int(round(step_s / flown.cycle_s))
-    starts = row_at(flown.sentence_s[0, :flown_cycles].cpu().numpy(), step_s)[::step_rows]
-    cycle = int(np.searchsorted(starts, steps)) * step_rows
-    return cycle if cycle < flown_cycles else None
-
-
-def cut(flown: Flown, cycles: int) -> Flown:
-    """The first ``cycles`` cycles of a one-flight batch, ended there (states: ``cycles + 1`` rows)."""
-    return Flown(states=flown.states[:, : cycles + 1], commands=flown.commands[:, :cycles],
-                 wanted=flown.wanted[:, :cycles], limits={name: value[:, :cycles] for name, value in flown.limits.items()},
-                 modes={name: value[:, :cycles] for name, value in flown.modes.items()},
-                 done_cycle=torch.full_like(flown.done_cycle, cycles - 1), sentence_s=flown.sentence_s[:, :cycles],
-                 cycle_s=flown.cycle_s)
+def fly_until(executor: Executor, sentences: Sentences, clock: TimeClock | DistanceClock | TrackClock, step_s: float,
+              stop_steps: int | None) -> bool | None:
+    """Drive ``executor`` one cycle at a time exactly as `executor.fly` does — the word clock read before each cycle,
+    a step's words heard on the cycle that starts it — and stop before the first cycle that starts a step the clock puts
+    at or past ``stop_steps`` (where a word said there would be heard). True when it got there; False when the flight was
+    done or out of cycles first; None without a stop (flown to its outcome)."""
+    for cycle in range(executor.cycles):
+        sentence_s = clock.now(cycle, executor.now())
+        if cycle % executor.step_rows == 0:
+            if stop_steps is not None and int(row_at(sentence_s, step_s)[0]) >= stop_steps:
+                return True
+            step_start_s = sentence_s
+        executor.cycle(sentences.at(step_start_s), sentence_s)
+        if bool(executor.done.all()):
+            break
+    return None if stop_steps is None else False
 
 
 def _check(name: str, ok: bool, inside: int | None = None, rows: int | None = None) -> dict[str, Any]:
@@ -323,30 +324,42 @@ class FlownSegment:
     segment: Segment
     reading: Reading                 # the segment's
     signals: FlightSignals           # the observed rows its clock read
-    flown: Flown                     # cut at its end when it reached it
+    flown: Flown                     # to its stop, or its outcome
     verdict: Verdict
     reached_end: bool | None         # None when flown to its outcome (``stop_row`` is the sentence's end)
+    fly_s: float                     # wall time the executor took, and the judge
+    judge_s: float
 
 
 def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, column: int, row: int) -> FlownSegment:
     """``column``'s word said at ``row`` flown from the observed state there (module docstring), and judged."""
-    spec = words.spec
+    spec, f64 = words.spec, torch.float64
     segment = segment_of(context.reading, column, row, spec.rows_exact(spec.heading_lead_s))
     reading = segment_reading(context.reading, segment)
     signals = segment_signals(context.signals, segment)
     batch = replay.Batch(signals=[signals], series=[series_from_row(context.series, row)], readings=[reading],
                          geometries=[context.geometry], crossing_heights=[context.crossing_heights],
                          approach_ias_mps=[context.approach_ias_mps], groups=[context.group], drawn={})
-    flown = replay.fly_sentences(batch, params, words, device=DEVICE)
-    reached = None
-    if not segment.to_landing:
-        end = end_cycle(flown, segment.stop_row - segment.row, spec.step_s)
-        reached = end is not None
-        if reached:
-            flown = cut(flown, end)
+    started = time.perf_counter()
+    # MIRROR of `replay.fly_sentences`' setup (its time limit, runways, charts and approach speeds), with the executor
+    # stepped here (`fly_until`) in place of `executor.fly`: pinned against it by `test_autopilot_segment.StepperTest`
+    executor = Executor(batch.inputs(DEVICE),
+                        Runways.of(batch.geometries, batch.crossing_heights, dtype=f64, device=DEVICE),
+                        AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
+                        torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
+                        time_limit_s=torch.tensor([len(reading.words) * spec.step_s * params.timeout_factor], dtype=f64,
+                                                  device=DEVICE))
+    reached = fly_until(executor, Sentences([reading.words], words, device=DEVICE),
+                        replay.word_clock(batch, params, spec.step_s, DEVICE), spec.step_s,
+                        None if segment.to_landing else segment.stop_row - segment.row)
+    flown = executor.flown()
+    if reached:
+        # stopped by the segment, not done by the executor: it ends with the last cycle flown
+        flown = replace(flown, done_cycle=torch.full_like(flown.done_cycle, executor.count - 1))
+    flown_at = time.perf_counter()
     verdict = judge(flown, 0, context.geometry, reading.runway_index, reading, signals, spec, words)
     return FlownSegment(segment=segment, reading=reading, signals=signals, flown=flown, verdict=verdict,
-                        reached_end=reached)
+                        reached_end=reached, fly_s=flown_at - started, judge_s=time.perf_counter() - flown_at)
 
 
 # ── the payload ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -523,16 +536,17 @@ class AutopilotSegmentBackend:
             self._executors[artefact] = usable[0]
         return self._executors[artefact]
 
-    def flight(self, artefact: Path, split: str, dataset_id: str, words: Words) -> FlightContext:
+    def flight(self, artefact: Path, split: str, dataset_id: str, words: Words) -> tuple[FlightContext, bool]:
+        """The flight rebuilt, and whether it was kept from an earlier request."""
         key = (artefact, dataset_id)
         if key in self._flights:
             self._flights.move_to_end(key)
-            return self._flights[key]
+            return self._flights[key], True
         context = open_flight(artefact, split, dataset_id, words)
         self._flights[key] = context
         while len(self._flights) > FLIGHT_CACHE_SIZE:
             self._flights.popitem(last=False)
-        return context
+        return context, False
 
     def fly(self, payload: dict[str, Any]) -> dict[str, Any]:
         airport = str(_field(payload, "airport", "the request"))
@@ -553,15 +567,26 @@ class AutopilotSegmentBackend:
                 raise FileNotFoundError(f"Training set {set_id} at {airport} has no flight {flight_key}")
             dataset_id = flights[0]["datasetId"]
             directory, params, record, words = self.executor_for(artefact)
-            context = self.flight(artefact, split, dataset_id, words)
+            opening = time.perf_counter()
+            context, kept = self.flight(artefact, split, dataset_id, words)
+            opened = time.perf_counter()
             result = fly_segment(context, params, words, COLUMNS.index(column_name), row)
+            answering = time.perf_counter()
             body = segment_payload(result, context, params, words)
-            elapsed = time.perf_counter() - started
+            finished = time.perf_counter()
         return {
             "ok": True, "schema": SCHEMA, "airport": airport, "setId": set_id, "flightKey": flight_key,
-            "datasetId": dataset_id, "computedUtc": _utc_now(), "computeS": round(elapsed, 3),
-            # how long it waited for the flight before it (one flight at a time)
-            "waitS": round(started - asked, 3),
+            "datasetId": dataset_id, "computedUtc": _utc_now(),
+            # wall-clock seconds on the backend: waiting for the flight before it (one at a time); then, adding up to
+            # ``computeS``: the set and the executor spec found, the flight rebuilt (or kept), the segment set up, the
+            # executor's cycles (``cycles`` of them: what was computed, which may run past the judged outcome), the judge,
+            # and the answer written
+            "timing": {"waitS": round(started - asked, 3), "setupS": round(opening - started, 3),
+                       "openS": round(opened - opening, 3), "flightKept": kept,
+                       "prepareS": round(answering - opened - result.fly_s - result.judge_s, 3),
+                       "flyS": round(result.fly_s, 3), "cycles": int(result.flown.commands.shape[1]),
+                       "judgeS": round(result.judge_s, 3), "answerS": round(finished - answering, 3),
+                       "computeS": round(finished - started, 3)},
             "executor": {"spec": directory.relative_to(REPO_ROOT).as_posix() if directory.is_relative_to(REPO_ROOT)
                          else directory.as_posix(),
                          "specSha256": record["sha256"], "sourceSha256": record["source"]["executor_source_sha256"],

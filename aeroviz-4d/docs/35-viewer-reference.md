@@ -337,17 +337,22 @@ that divergence is a known open item (see the README's "Future Improvements").
 ### AV26 · Training 的实时执行器：选中一个词，后端现飞它的一段
 
 - 用途是验证执行器，所以**每次选中都现飞**：`POST /autopilot/segment`（`aeroviz_backend/autopilot_segment.py`），不读执行器的
-  正式回放，也不读叠加层。执行器代码原样使用、不改一行（它的源码 sha 绑着每份执行器规格）；后端调用 `replay.fly_sentences`
-  整段飞完，再按它记下的词钟（`Flown.sentence_s`）在段尾截断——不需要执行器能逐步推进。
+  正式回放，也不读叠加层。执行器代码原样使用、不改一行（它的源码 sha 绑着每份执行器规格）；后端用执行器的单步接口
+  `Executor` 按 `executor.fly` 的方式一个周期一个周期地飞（`fly_until`），在词钟把一个开始一步的周期放到段尾之前停下，段尾之后
+  什么也不飞——与"飞满时限再截断"逐位相同。
 - 一段 = 句子条上**被点击**的一个色块（`trainingPick`；游标不触发，图表悬停会移动游标）：从词说出的一步飞到它的包络结束的
   `stopRow`——同列下一个词说出的一步，航向词再加一个提前量（它的带判到下一个航向词说出后一个提前量，下一个航向词照句子说出）；
-  到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。初态是观测飞机在那一步的状态（`series_from_row`），第 0 步是那一步
+  到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。初态是观测飞机在那一步的状态（`flight_inputs(anchor=row)`），第 0 步是那一步
   六列生效的词，之后是段内的词，每条在执行器到了观测飞机听到它的位置时说。
 - 规格：`outputs/POOLED/executor/*/spec.json` 里恰好一份由现在的执行器代码、为这个集合所属产物的词表写的
   （`replay.open_executor`）；否则拒绝并列出每一份的原因。集合的产物与划分从样本的 `producedBy.artefact` / `cohort.split` 读。
 - 前端把答复绑到屏幕上这一段：同一架航班、`endRow` 是色块的终点、词表规格相同、**告诉执行器的词就是句子条这一段显示的词**；
-  对不上整份拒读。答复格式 `aeroviz-autopilot-segment-v1` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
-  名也是镜像）。
+  对不上整份拒读。答复格式 `aeroviz-autopilot-segment-v2` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
+  名也是镜像）；它带 `timing`（后端墙钟：等待；加起来等于总计的各项——集合与规格、重建航班或沿用、准备这一段、执行器与算了的周期数、判定、
+  写答复），前端加上浏览器往返时间。单步飞法由 `test_autopilot_segment.StepperTest` 钉住：真实执行器上，不设段尾时与
+  `executor.fly` 逐周期相同，设了段尾时等于它在词钟首次把一个开始一步的周期放到段尾处截断。
+- 显示两个时间：结果卡顶部并排"模拟飞行时间"（对照观测、周期数）与"计算用时"（后端；往返），句子条摘要也写两者，三维飞机
+  标签走模拟时钟"已飞 / 全段 s simulated"。
 - 画法：蓝 `#2563eb`，与执行器回放的青色分开；三维里飞机按加速的实际时间把这一段飞出来（至少 8 倍、不超过 20 s，
   CallbackProperty，不碰 `viewer.clock`），读数窗口里四张图各一条蓝线，从观测线上说词的那一点出发。
 - 后端第一次收到这个请求时才载入 torch 与 ts_transformer（常驻内存约多 470 MB）；一次一段（锁），重建过的航班留最近 8 架。
