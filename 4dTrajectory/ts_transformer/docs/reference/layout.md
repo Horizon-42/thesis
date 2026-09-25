@@ -443,9 +443,10 @@ it — `prior/`, `closed_loop/`, `constraints/` — are in the framework documen
 **Note (2026-09-25):** `instructions/training_files.py` holds the frontend's Training files — the index, the sets,
 the overlays manifest, their schemas (mirrored by `aeroviz-4d/src/data/training*.ts`) and the checks every writer and
 reader shares (`check_readback`, `open_base_set`, `require_stored_sentence`, `words_in_force`, `band_payload`,
-`require_unchanged`). It was the runner `instruction_training_export`, which two runners and the backend imported;
-now nothing imports a runner for it, and everything in it raises `ValueError` (a runner's `main` turns that into
-`parser.error`; the backend answers it), never `SystemExit`, which a server thread would let escape its handler.
+`require_index_unchanged` / `require_overlays_unchanged`). It was the runner `instruction_training_export`, which two
+runners and the backend imported; now nothing imports a runner for it, and everything in it raises `ValueError` (a
+runner lets it propagate with its traceback; the backend answers it), never `SystemExit`, which a server thread would
+let escape its handler.
 
 ### L31 · `autopilot/`: the executor, flying the words through the shared dynamics
 

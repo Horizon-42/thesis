@@ -1,6 +1,6 @@
 """The Training overlays — another model's output drawn over an exported set's own flights: the executor's replay
 (`experiments/executor_training_export.py`), the prior's predictions (`experiments/prior_training_export.py`) and the
-overlay manifest they share (`experiments/instruction_training_export.py`).
+overlay manifest they share (`instructions/training_files.py`).
 
 Each word's executor verdict is rebuilt from the judge on synthetic flights and must give back the judge's own count;
 the prior's per-step predictions come from a small untrained network; the manifest's refusals are exercised on files in
@@ -253,7 +253,7 @@ def test_the_prior_s_first_predicted_truth_is_the_word_in_force_the_sample_shows
 def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema=files.SAMPLE_SCHEMA):
     one = spec()
     sample = {"schema": schema, "setId": "set_a", "airport": "KXXX", "writtenUtc": "2026-09-24T00:00:00+00:00",
-              "vocabulary": {"specSha256": one.sha256}, "cohort": {"split": files.SPLIT},
+              "vocabulary": {"specSha256": one.sha256, "readingRule": rule}, "cohort": {"split": files.SPLIT},
               "flights": [{"datasetId": "KXXX:F_09_abc_20260101T000000Z", "flightKey": "F_09_abc_20260101T000000Z",
                            "rows": 3, "words": {"events": [{"row": 0, "column": 0, "value": 0},
                                                            {"row": 2, "column": 2, "value": 18}]}}]}
@@ -391,7 +391,7 @@ def _prior_dir(directory, artefact, roster):
         "airport_runway_frequency": runway, "rules": {"B1_active_config": runway}}))
 
 
-def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_second(tmp_path, monkeypatch, capsys):
+def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_second(tmp_path, monkeypatch):
     from ts_transformer.experiments import prior_train
     from ts_transformer.tests.test_instruction_training_export import SET_ID, _artefact, _run, _straight, _vectored
 
@@ -429,8 +429,8 @@ def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_sec
     monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: elsewhere)
     assert prior_export.main([*args, "--overlay-id", "moved"]) == 0
     elsewhere.write_text(json.dumps({"records": own, "note": "changed"}), encoding="utf-8")
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="rosters changed"):
         prior_export.main([*args, "--overlay-id", "another"])
-    assert "rosters changed" in capsys.readouterr().err
-    with pytest.raises(SystemExit):   # never overwritten
+    elsewhere.write_bytes(roster.read_bytes())
+    with pytest.raises(ValueError, match="exists; an overlay is never overwritten"):
         prior_export.main(args)

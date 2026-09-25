@@ -59,9 +59,8 @@ from ts_transformer.instructions.readout import STRATA, VECTORED_TURN_DEG, fligh
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import READING_RULE, VocabularySpec
 from ts_transformer.instructions.training_files import (
-    INDEX_FILE, KIND_READBACK, SAMPLE_FILE, SAMPLE_SCHEMA, SPLIT, WORD_KINDS, band_payload, read_index,
-    require_stored_sentence,
-    require_unchanged, rounded, serialise, stored_sentence, words_in_force, write_set,
+    KIND_READBACK, SAMPLE_FILE, SAMPLE_SCHEMA, SPLIT, WORD_KINDS, band_payload, read_index, require_index_unchanged,
+    require_stored_sentence, rounded, serialise, stored_sentence, words_in_force, write_set,
 )
 from ts_transformer.instructions.words import (
     ANGLE_LEVEL, APPROACH_CLEARED, APPROACH_GO_AROUND, APPROACH_NOT_CLEARED, COLUMNS, UNCHANGED, Words,
@@ -187,12 +186,9 @@ def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, 
     if unknown:
         raise ValueError(f"{signals.dataset_id}: the labeller issued word kinds {unknown}, which the export "
                          f"contract (WORD_KINDS) does not name")
-    # the capture's distance before the threshold, as the labeller's check measured it and as the display's corridor
-    # draws it: written twice (the flight's, the corridor's), so one value
+    # the capture's distance before the threshold: the labeller's check and the display's corridor read the same row of
+    # the same admitted flight, so the file's two fields (the flight's, the corridor's) are written from one value
     capture_before_m = round(float(reading.checks["capture_before_threshold_m"]), 1)
-    if capture_before_m != round(envelopes.corridor.before_threshold_m, 1):
-        raise ValueError(f"{signals.dataset_id}: the labeller's capture is {capture_before_m} m before the threshold, "
-                         f"the display's corridor {envelopes.corridor.before_threshold_m:.1f} m")
     events = [{"row": item.row, "column": item.column, "value": item.value, "kind": item.kind}
               for item in sorted(reading.instructions, key=lambda item: (item.row, item.column))]
     capture = envelopes.capture_turn
@@ -339,10 +335,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(set(airports)) != len(airports):
         parser.error(f"an airport is named twice in {airports}")
     started = time.perf_counter()
-    try:
-        export(directory, root, airports, args.per_stratum, args.seed, args.set_id, args.title)
-    except ValueError as error:
-        parser.error(str(error))
+    export(directory, root, airports, args.per_stratum, args.seed, args.set_id, args.title)
     print(f"  done in {time.perf_counter() - started:.0f} s", flush=True)
     return 0
 
@@ -412,7 +405,7 @@ def export(directory: Path, root: Path, airports: list[str], per_stratum: int, s
         built[code] = (serialise(sample), entry, counts)
     # no airport is written while another's index changed since the start (each write checks its own again)
     for code in airports:
-        require_unchanged(root / code / "training", code, set_id, existing[code], manifest=INDEX_FILE)
+        require_index_unchanged(root / code / "training", code, set_id, existing[code])
     for code, (text, entry, counts) in built.items():
         out = write_set(root / code / "training", code, entry, text, existing[code])
         print(f"  {code}: {entry['flights']} flights ({per_stratum} per stratum; {counts['read']} of "

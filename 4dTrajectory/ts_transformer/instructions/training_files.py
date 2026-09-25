@@ -4,13 +4,14 @@ checks every writer and reader of them shares (the runners `instruction_training
 
 Not a runner, and torch-free: everything here raises `ValueError` (a set that is not listed: `NotListed`, one of
 them), never `SystemExit` — a server thread would let that escape its handler and drop the request
-unanswered. A runner's ``main`` turns them into ``parser.error``.
+unanswered. A runner lets it propagate, with its traceback.
 
 **A set** (`KIND_READBACK`): ``<airport>/training/<set-id>/sample.json`` (`SAMPLE_SCHEMA`), listed in
 ``<airport>/training/index.json`` (`INDEX_SCHEMA`). **An overlay** — another model's output on a set's own flights —
 ``<airport>/training/<overlay-id>/<file>``, listed in ``<airport>/training/overlays.json`` (`OVERLAYS_SCHEMA`) with the
 set it is drawn over and that set's sample sha256. A set or an overlay is never overwritten, and a manifest is
-rewritten only when it is still what the run read at its start (`require_unchanged`): another export that wrote it
+rewritten only when it is still what the run read at its start (`require_index_unchanged`,
+`require_overlays_unchanged`): another export that wrote it
 meanwhile would otherwise lose its entry.
 """
 
@@ -130,8 +131,10 @@ def index_sets(payload: dict[str, Any], path: Path, airport: str) -> list[dict[s
 def listed_set(payload: dict[str, Any], path: Path, airport: str, set_id: str) -> dict[str, Any]:
     """The index entry of set ``set_id`` (`NotListed` when the index does not list it)."""
     listed = [item for item in index_sets(payload, path, airport) if item["id"] == set_id]
-    if len(listed) != 1:
+    if not listed:
         raise NotListed(f"{path} lists no set {set_id}")
+    if len(listed) > 1:
+        raise ValueError(f"{path} lists set {set_id} {len(listed)} times")
     return listed[0]
 
 
@@ -144,10 +147,10 @@ def check_readback(entry: dict[str, Any], sample: dict[str, Any], file: Path, ai
                          f"{KIND_READBACK} set of {READING_RULE}")
     if sample["schema"] != SAMPLE_SCHEMA:
         raise ValueError(f"{file} is a {sample['schema']} file, not {SAMPLE_SCHEMA}: re-export the set first")
-    found = (sample["setId"], sample["airport"], sample["cohort"]["split"])
-    if found != (entry["id"], airport, SPLIT):
-        raise ValueError(f"{file} holds set {found[0]} at {found[1]}, split {found[2]}; expected {entry['id']} at "
-                         f"{airport}, split {SPLIT}")
+    found = (sample["setId"], sample["airport"], sample["cohort"]["split"], sample["vocabulary"]["readingRule"])
+    if found != (entry["id"], airport, SPLIT, READING_RULE):
+        raise ValueError(f"{file} holds set {found[0]} at {found[1]}, split {found[2]}, read under {found[3]}; expected "
+                         f"{entry['id']} at {airport}, split {SPLIT}, {READING_RULE}")
 
 
 def read_index(training: Path, airport: str, set_id: str) -> list[dict[str, Any]]:
@@ -255,20 +258,25 @@ def _write_text_atomic(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
-def require_unchanged(training: Path, airport: str, new_id: str, existing: list[dict[str, Any]], *,
-                      manifest: str) -> None:
-    """The manifest (`INDEX_FILE` or `OVERLAYS_FILE`) is still what ``existing`` read at the start of the run:
-    another export that wrote it meanwhile would lose its entry to ``[*existing, new]``. A run checks EVERY airport
-    before it writes any, and each write checks again."""
-    now = read_index(training, airport, new_id) if manifest == INDEX_FILE else read_overlays(training, airport, new_id)
-    if now != existing:
-        raise ValueError(f"{training / manifest} changed since this run read it; run the export again")
+def require_index_unchanged(training: Path, airport: str, set_id: str, existing: list[dict[str, Any]]) -> None:
+    """The index is still what ``existing`` read at the start of the run: another export that wrote it meanwhile
+    would lose its set to ``[*existing, new]``. A run checks EVERY airport before it writes any, and each write checks
+    again."""
+    if read_index(training, airport, set_id) != existing:
+        raise ValueError(f"{training / INDEX_FILE} changed since this run read it; run the export again")
+
+
+def require_overlays_unchanged(training: Path, airport: str, overlay_id: str, existing: list[dict[str, Any]]) -> None:
+    """The overlays manifest is still what ``existing`` read at the start of the run (`require_index_unchanged`'s
+    rule, for overlays)."""
+    if read_overlays(training, airport, overlay_id) != existing:
+        raise ValueError(f"{training / OVERLAYS_FILE} changed since this run read it; run the export again")
 
 
 def write_set(training: Path, airport: str, entry: dict[str, Any], text: str, existing: list[dict[str, Any]]) -> Path:
     """A set's sample (``text``, `serialise`'s) in a directory of its own (refused if it exists), then the index with
-    it added (`require_unchanged`)."""
-    require_unchanged(training, airport, entry["id"], existing, manifest=INDEX_FILE)
+    it added (`require_index_unchanged`)."""
+    require_index_unchanged(training, airport, entry["id"], existing)
     out = training / entry["file"]
     out.parent.mkdir(parents=True)
     _write_text_atomic(out, text)
@@ -279,8 +287,8 @@ def write_set(training: Path, airport: str, entry: dict[str, Any], text: str, ex
 
 def write_overlay(training: Path, airport: str, entry: dict[str, Any], text: str, existing: list[dict[str, Any]]) -> Path:
     """An overlay's file (``text``, `serialise`'s) in a directory of its own (refused if it exists), then the overlays
-    manifest with it added (`require_unchanged`)."""
-    require_unchanged(training, airport, entry["id"], existing, manifest=OVERLAYS_FILE)
+    manifest with it added (`require_overlays_unchanged`)."""
+    require_overlays_unchanged(training, airport, entry["id"], existing)
     out = training / entry["file"]
     out.parent.mkdir()
     _write_text_atomic(out, text)

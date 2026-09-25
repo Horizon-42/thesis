@@ -223,7 +223,7 @@ def test_the_export_draws_both_strata_and_adds_its_set_to_the_index(tmp_path):
     assert len(sample["vocabulary"]["angleClasses"]) == counts["angle"]
 
     # a second run refuses: the set's directory exists
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="exists; an export is never overwritten"):
         _run(tmp_path)
 
 
@@ -285,20 +285,19 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
     assert sample["centrelineLengthM"] % 1000 == 0
 
 
-def test_a_flight_whose_stored_sentence_differs_from_its_reading_stops_the_export(tmp_path, capsys):
+def test_a_flight_whose_stored_sentence_differs_from_its_reading_stops_the_export(tmp_path):
     flights = [_straight(_key("S1")), _vectored(_key("V1"))]
     one = spec()
     readings = [read_flight(flight, instruction_airport(), one) for flight in flights]
     readings[1].words = readings[1].words.copy()
     readings[1].words[3, HEADING] = 0                                  # a word the flight never said
     _artefact(tmp_path / "artefact", flights, readings)
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="V1_09_abc123_20260101T000000Z: re-read heading word"):
         _run(tmp_path)
-    assert "V1_09_abc123_20260101T000000Z: re-read heading word" in capsys.readouterr().err
     assert not (tmp_path / "airports" / "KXXX" / "training" / SET_ID).exists()
 
 
-def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path, monkeypatch, capsys):
+def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path, monkeypatch):
     """Every airport is built before any is written: a flight the export stops on leaves no set anywhere."""
     _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))], also=("KYYY",))
     calls = []
@@ -311,50 +310,47 @@ def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path,
 
     real = export.draw
     monkeypatch.setattr(export, "draw", refuse_on_second)
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="stopped at the second airport"):
         export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
                      "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])
-    assert "stopped at the second airport" in capsys.readouterr().err
     assert calls == [1, 1] and not (tmp_path / "airports").exists()
 
 
-def test_an_index_already_listing_the_set_is_refused_before_anything_is_written(tmp_path, capsys):
+def test_an_index_already_listing_the_set_is_refused_before_anything_is_written(tmp_path):
     _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))])
     training = tmp_path / "airports" / "KXXX" / "training"
     training.mkdir(parents=True)
     listed = {"schema": files.INDEX_SCHEMA, "writtenUtc": "x", "airport": "KXXX",
               "sets": [{"id": SET_ID}]}
     (training / "index.json").write_text(json.dumps(listed), encoding="utf-8")
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="already lists set " + SET_ID):
         _run(tmp_path)
-    assert "already lists set " + SET_ID in capsys.readouterr().err
     assert json.loads((training / "index.json").read_text(encoding="utf-8")) == listed
     assert not (training / SET_ID).exists()
 
 
-def test_a_set_is_written_only_while_every_airport_s_index_is_what_the_run_read(tmp_path, monkeypatch, capsys):
-    """Another export listed a set at the FIRST airport while this one was building the second: no airport is written
-    (adding to the old list would drop that set), the other export's index is left as it wrote it."""
+def test_a_set_is_written_only_while_every_airport_s_index_is_what_the_run_read(tmp_path, monkeypatch):
+    """Another export listed a set at the LATER airport while this one was building it: no airport is written — the
+    earlier one's index did not change, but the run checks every airport before it writes any — and the other
+    export's index is left as it wrote it."""
     _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))], also=("KYYY",))
     real = export.draw
-    other = {"schema": files.INDEX_SCHEMA, "writtenUtc": "x", "airport": "KXXX", "sets": [{"id": "other"}]}
+    other = {"schema": files.INDEX_SCHEMA, "writtenUtc": "x", "airport": "KYYY", "sets": [{"id": "other"}]}
 
     def another_export_meanwhile(code, *args, **kwargs):
-        if code == "KYYY":                          # KXXX is built by now; its index is written under this run
-            training = tmp_path / "airports" / "KXXX" / "training"
+        if code == "KYYY":                          # read at the start as having no index; written under this run
+            training = tmp_path / "airports" / "KYYY" / "training"
             training.mkdir(parents=True)
             (training / files.INDEX_FILE).write_text(json.dumps(other), encoding="utf-8")
             code = "KXXX"                           # the synthetic artefact's flights all land at KXXX
         return real(code, *args, **kwargs)
 
     monkeypatch.setattr(export, "draw", another_export_meanwhile)
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="changed since this run read it"):
         export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
                      "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])
-    assert "changed since this run read it" in capsys.readouterr().err
-    assert json.loads((tmp_path / "airports" / "KXXX" / "training" / files.INDEX_FILE).read_text()) == other
-    assert not (tmp_path / "airports" / "KXXX" / "training" / SET_ID).exists()
-    assert not (tmp_path / "airports" / "KYYY").exists()
+    assert not (tmp_path / "airports" / "KXXX").exists()
+    assert json.loads((tmp_path / "airports" / "KYYY" / "training" / files.INDEX_FILE).read_text()) == other
 
 
 def test_the_sample_is_written_compact(tmp_path):

@@ -79,8 +79,8 @@ from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.training_files import (
-    KIND_EXECUTOR, OVERLAYS_FILE, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry,
-    read_overlays, require_stored_sentence, require_unchanged, rounded, serialise, stored_sentence, write_overlay,
+    KIND_EXECUTOR, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
+    require_overlays_unchanged, require_stored_sentence, rounded, serialise, stored_sentence, write_overlay,
 )
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, COLUMNS, HEADING, RUNWAY, SPEED, Words,
@@ -477,11 +477,8 @@ def main(argv: list[str] | None = None) -> int:
     airports = [code.upper() for code in args.airport]
     if len(set(airports)) != len(airports):
         parser.error(f"an airport is named twice in {airports}")
-    try:
-        export(executor, replay_dir, instructions, root, airports, args.set, args.overlay_id or f"executor_{executor.name}",
-               torch.device(args.device))
-    except ValueError as error:
-        parser.error(str(error))
+    export(executor, replay_dir, instructions, root, airports, args.set, args.overlay_id or f"executor_{executor.name}",
+           torch.device(args.device))
     return 0
 
 
@@ -537,7 +534,7 @@ def export(executor: Path, replay_dir: Path, instructions: Path, root: Path, air
               f"{time.perf_counter() - started:.0f} s", flush=True)
     # no airport is written while another's manifest changed since the start (each write checks its own again)
     for code in airports:
-        require_unchanged(root / code / "training", code, overlay_id, existing[code], manifest=OVERLAYS_FILE)
+        require_overlays_unchanged(root / code / "training", code, overlay_id, existing[code])
     for code, (text, entry) in built.items():
         out = write_overlay(root / code / "training", code, entry, text, existing[code])
         print(f"  {code}: {out.stat().st_size / 1e6:.1f} MB → {out}", flush=True)

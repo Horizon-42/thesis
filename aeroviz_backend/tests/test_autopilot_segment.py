@@ -627,7 +627,8 @@ class BackendTest(unittest.TestCase):
     def test_only_a_sample_of_this_vocabulary_drawn_from_the_exports_split_is_flown(self):
         for change, refusal in [({"schema": "aeroviz-training-sample-v6"}, "is a aeroviz-training-sample-v6 file"),
                                 ({"reading_rule": "instruction-v2"}, "set of instruction-v2, not"),
-                                ({"cohort": {"split": "test"}}, "split test; expected a_set at KXXX, split val")]:
+                                ({"cohort": {"split": "test"}}, "split test, read under instruction-v3; expected"),
+                                ({"vocabulary": {"readingRule": "instruction-v2"}}, "read under instruction-v2; expected")]:
             with TemporaryDirectory() as tmp:
                 self.write_set(Path(tmp), **change)
                 backend = AutopilotSegmentBackend(airports_root=Path(tmp), executor_root=Path(tmp) / "none")

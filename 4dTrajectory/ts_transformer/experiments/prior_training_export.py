@@ -47,8 +47,8 @@ from ts_transformer.experiments.prior_train import (
 )
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec
 from ts_transformer.instructions.training_files import (
-    KIND_PRIOR, OVERLAYS_FILE, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
-    require_unchanged, serialise, stored_sentence, write_overlay,
+    KIND_PRIOR, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays, require_overlays_unchanged,
+    serialise, stored_sentence, write_overlay,
 )
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import file_sha256, utc_now
@@ -171,10 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     airports = [code.upper() for code in args.airport]
     if len(set(airports)) != len(airports):
         parser.error(f"an airport is named twice in {airports}")
-    try:
-        export(prior_dir, instructions, root, airports, args.set, args.overlay_id or f"prior_{prior_dir.name}")
-    except ValueError as error:
-        parser.error(str(error))
+    export(prior_dir, instructions, root, airports, args.set, args.overlay_id or f"prior_{prior_dir.name}")
     return 0
 
 
@@ -240,7 +237,7 @@ def export(prior_dir: Path, instructions: Path, root: Path, airports: list[str],
               f"{readout['model']['nll_per_step']:.4f}); {time.perf_counter() - started:.0f} s", flush=True)
     # no airport is written while another's manifest changed since the start (each write checks its own again)
     for code in airports:
-        require_unchanged(root / code / "training", code, overlay_id, existing[code], manifest=OVERLAYS_FILE)
+        require_overlays_unchanged(root / code / "training", code, overlay_id, existing[code])
     for code, (text, entry) in built.items():
         out = write_overlay(root / code / "training", code, entry, text, existing[code])
         print(f"  {code}: {out.stat().st_size / 1e6:.1f} MB → {out}", flush=True)
