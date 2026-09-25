@@ -171,8 +171,8 @@ change you are making go in `docs/code-health-followups.md` instead.
   load-coordinated; `predict --command-hook barrier --hook-saturation soft`) applied to the
   `simple-v3` baseline without retraining improves pooled FDE 12 % / 7 % with no flight worse
   by 1 km; no arm that trained THROUGH a hook (six, two hooks, two airports) beat its
-  predict-time counterpart; the nominal-law hook needs its thrust held to the unhooked rollout's speed and is the
-  vertical complement. → `4dTrajectory/ts_transformer/docs/2026-09-06_control_hooks_results.zh.md`
+  predict-time counterpart. (The nominal-law hook measured there as the vertical complement is archived since T2,
+  2026-09-07: not a live option.) → `4dTrajectory/ts_transformer/docs/2026-09-06_control_hooks_results.zh.md`
 - ts_transformer: KRDU run DONE (three generations, quote current artifacts only); gate-pass
   conclusion needs re-deriving after the datum fix; only KRDU trained; flyability measured but
   not fixed; single-aircraft + deterministic by scope. **All control-output checkpoints are

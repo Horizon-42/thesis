@@ -19,12 +19,8 @@
 # to scripts/activate_aeroviz_env.sh; see CLAUDE.md "Environment" for why the env is
 # probed for casadi rather than trusted by name.
 #
-# Expected result: aeroviz-4d/python exits 0. Modeling+backend exits 1 on ONE known,
-# pre-existing, unrelated failure —
-#   4dTrajectory/optimization/collocation/tests/test_optimizer.py
-#     ::test_fixed_time_objective_weights_control_effort_at_one
-#   TypeError: only 0-dimensional arrays can be converted to Python scalars
-# (a numpy scalar-conversion deprecation). Anything beyond that one is a real regression.
+# Expected result: both suites exit 0 (since 2026-09-25: the numpy-2 test and the reference-record fixture that
+# failed before are fixed). Any failure is a real regression, and the exit code says so.
 
 set -uo pipefail
 

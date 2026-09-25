@@ -65,7 +65,7 @@ python run_ts.py pipeline --airport KRDU
 conda run -n aeroviz python clean_pipeline_data.py --airport KRDU --dry-run
 conda run -n aeroviz python clean_pipeline_data.py --airport KRDU
 
-./run_all_tests.sh                   # both suites in one pytest process (env via the resolver)
+./run_all_tests.sh                   # every Python suite, two pytest runs (env via the resolver); exit 0 expected
 ./start_aeroviz_fullstack.sh         # supervisor: frontend + backend
 cd aeroviz-4d && npm run dev         # frontend only — more commands in aeroviz-4d/CLAUDE.md
 ```

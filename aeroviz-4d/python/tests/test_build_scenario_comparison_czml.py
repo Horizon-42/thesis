@@ -537,7 +537,9 @@ def test_prediction_accuracy_stats_publishes_existing_ade_and_fde():
 
 def test_evaluation_batch_stats_excludes_only_per_flight_details():
     report = {
-        "schema_version": "terminal-approach-evaluation-v2",
+        # Not a real report version: the builder copies it through without reading it (a pass-through is
+        # what is pinned below), so no producer's version is restated here.
+        "schema_version": "any-report-version",
         "total": 10,
         "solved": 9,
         "solve_rate": 0.9,
@@ -552,6 +554,7 @@ def test_evaluation_batch_stats_excludes_only_per_flight_details():
         "trajectories": [{"file": "one_eval.json"}],
     }
     stats = evaluation_batch_stats(report)
+    assert stats["schemaVersion"] == "any-report-version"
     assert stats["solveRate"] == 0.9
     assert stats["indeterminate"] == 4
     assert stats["verdictCounts"]["fail"] == 2

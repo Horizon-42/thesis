@@ -136,7 +136,7 @@ qualified name (`from ts_transformer.data.dataset import build_series`).
 | `__main__.py` / `cli/` | the subcommand table, and one module per subcommand (`train`, `cross_validate`, `evaluate_fit`, `freeze`, `predict`, plus `common`) — each exposes `HELP` / `add_cli_arguments()` / `run_cli()` |
 | `data/synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `backbone/vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
-| `outputs/control/` (package: strategy, supervision, forecast, envelope, heads, conditioning, latent, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — module-by-module live/ablation-only/orphan status and the full call graph are in [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), not repeated here |
+| `outputs/control/` (package: strategy, supervision, forecast, envelope, heads, conditioning, latent, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — the package itself is the live module list (layout: `docs/reference/layout.md` L6, L23); [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) keeps the design history, and its module table and call graph describe the teacher chain archived in T2 |
 
 ## Running it
 
@@ -1140,4 +1140,4 @@ point that later work may choose to extend, but none is an accident:
   the state-output results above are published. The paired teacher CV meant to produce that
   table is archived with its campaign (`archive/oracle_teacher_2026_08/`). See
   [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) for
-  the full design history and current module-by-module status.
+  the full design history (its module-by-module table describes the teacher chain archived in T2).
