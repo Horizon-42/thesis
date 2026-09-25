@@ -1,4 +1,4 @@
-# 两层模型：阶段记录（更新于 2026-09-25 19:20 UTC）
+# 两层模型：阶段记录（更新于 2026-09-25 19:45 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、正在进行的事、
 接下来按什么顺序做。设计本身在各自的设计文档里，这里只给结论、指路和实现计划；历史看 git 和 `docs/CHANGELOG.md`。
@@ -149,12 +149,16 @@ unordered → full（2024）→ `prior_select`（选择 + 一次验证集读数�
 - `dev-two-tier`（主检出 `/home/supercomputing/studys/thesis`）：先验第三版的全部代码都已合并——第 0、1 步和单机自由生成（`4205e186`），
   CAT-K（`e760ab1d`，已归档）、按落地强化（`e8ee1373`）、闭环提速（`002998fb`）、CAT-K 归档（`e5f18692`），合并提交 `7e1e2df0`。执行器代码与
   `4205e186` 逐字节相同，规格用 `executor/v7_20260925`。
-- 还在的工作树：
-  - `.claude/worktrees/prior-rl`（`dev-prior-rl`）——**按落地强化的正式运行正从这里跑**，运行结束（含验证集读数）之前不能动；
-  - `.claude/worktrees/prior-v3`（`dev-prior-v3`）、`.claude/worktrees/prior-fast`（`dev-prior-fast`）——已合并，可以删（等用户点头）；
-  - `.claude/worktrees/prior-v2`（`dev-prior-v2`）、`manoeuvre-runs`、`two-tier-pub`、`two-tier-runs`——更早的，不动。
-- 产物里记的提交都可达：`e760ab1d`、`e8ee1373` 在合并历史里；变基之前的提交有标签 `runs/prior-v2-feeb7ce3`、`runs/prior-v3-step0-67e0e5c9`、
-  `runs/prior-v3-step1-47c7b790`。
+- 还在的工作树（2026-09-25 清理后，用户同意）：
+  - `.claude/worktrees/prior-rl`（`dev-prior-rl`，已合并）——**按落地强化的正式运行正从这里跑**，运行结束（含验证集读数）后删掉它和分支；
+  - `.claude/worktrees/frontend-followups`（`dev-frontend-followups`）——另一个 agent 的前端工作，不动。
+- 已删：工作树 `prior-v3`、`prior-fast`、`prior-v2`、`manoeuvre-runs`、`two-tier-runs`、`two-tier-pub`、`/home/supercomputing/studys/thesis-l2`，分支
+  `dev-prior-v3`、`dev-prior-fast`、`dev-prior-v2`、`dev-l2`、`dev-leg-ctrl`（都已合并或提交都在 `dev-two-tier` 历史里，删之前先断开数据链接）。
+- 没合并、和先验这条线无关、保留：`wip-r32-leg-timing`（跑道意图 R3.2 的半成品）、`dev-cifp-runway-thresholds`（harvest 取 CIFP 入口的修复），
+  各 1 个没合并的提交。
+- 产物里记的提交都可达：`e760ab1d`、`e8ee1373`、`47c7b790` 在合并历史里；变基之前的提交只靠标签可达，**标签不能删**：
+  `runs/prior-v2-feeb7ce3`（第二版那批训练，`prior/v2_20260924/`）、`runs/prior-v3-step0-67e0e5c9`（第 0 步：句子产物 v4、执行器 v6、普查）；
+  `runs/prior-v3-step1-47c7b790` 已在历史里（多余，保留无害）；`archive/freegen-readout`（旧词表时代的自由生成，9 月 23 日归档时留的）。
 
 ---
 
