@@ -133,6 +133,11 @@ def anchors_for_bin(series: Sequence[FlightSeries], profiles: Sequence[np.ndarra
     Insertion order is the cohort's order, and a flight with no admissible anchor is
     ABSENT rather than present with a sentinel — every consumer's coverage count is then
     just ``len(...)``.
+
+    The truth's end admission reads is the SUPERVISION rows' (``dataset.truth_duration_s``: the observed track closed
+    to the threshold). The displacement readouts (`inference.receding`, `experiments.lead_time_error`) read the
+    OBSERVED rows, which stop a median 6 s / 380 m short at KRDU — so a flight admitted with ``min_future_s`` of truth
+    can have less readable truth; those readouts count it (``truth_shorter_than_horizon``) rather than raise.
     """
     anchors: dict[int, int] = {}
     for index, (item, profile) in enumerate(zip(series, profiles, strict=True)):

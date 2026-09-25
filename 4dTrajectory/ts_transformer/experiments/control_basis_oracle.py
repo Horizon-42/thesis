@@ -114,9 +114,9 @@ from ts_transformer.geometry.metrics import common_physical_time_flight_metrics 
 from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
 from ts_transformer.geometry.physical_criteria import fixed_dt_position_ade_m  # noqa: E402
 from ts_transformer.outputs.control.heads import ControlPrediction  # noqa: E402
-from ts_transformer.training.train import load_checkpoint, usable_series  # noqa: E402
+from ts_transformer.training.train import load_checkpoint, load_checkpoint_payload, usable_series  # noqa: E402
 import ts_transformer.experiments.pipeline as pipeline  # noqa: E402
-from ts_transformer.repo_layout import checkpoint_arrival_manifests  # noqa: E402
+from ts_transformer.repo_layout import checkpoint_arrival_manifest, checkpoint_arrival_manifests  # noqa: E402
 from dataclasses import fields  # noqa: F401  (read off this module by its tests / sibling runners)
 
 RESULT_SCHEMA = "l0-control-basis-oracle-v1"
@@ -262,10 +262,18 @@ def cohort(args: argparse.Namespace, out: Path):
     return reference_dir, summary, keys, compact_of, masks, coverage
 
 
-def build_cohort_series(keys: list[str], compact_of: dict[str, str], airport: str, config: TSConfig):
-    """The built series and their readout keys, in the SERIES' order (not the cohort's)."""
+def reference_manifest(summary: dict, airport: str) -> Path:
+    """The arrival manifest the reference arm's checkpoint trained on, found by the digest it recorded (C29) — the live
+    harvest's, or a frozen generation's: a reference trained on an older harvest is rebuilt from ITS slices, never from
+    today's."""
+    checkpoint = Path(summary["checkpoint"])
+    checkpoint = checkpoint if checkpoint.is_absolute() else REPO_ROOT / checkpoint
+    return checkpoint_arrival_manifest(load_checkpoint_payload(checkpoint), airport)
+
+
+def build_cohort_series(keys: list[str], compact_of: dict[str, str], airport: str, config: TSConfig, manifest: Path):
+    """The built series and their readout keys, in the SERIES' order (not the cohort's), from ``manifest``."""
     wanted = {compact_of[key] for key in keys}
-    manifest = pipeline.arrival_manifest_path(airport)
     flights = load_flight_dicts(
         [manifest],
         include_flight_keys={f"{airport}:{compact}" for compact in wanted},
@@ -275,7 +283,7 @@ def build_cohort_series(keys: list[str], compact_of: dict[str, str], airport: st
     if report.built != len(wanted):
         raise RuntimeError(f"built {report.built} of {len(wanted)} flights:\n{report.format()}")
     key_of_compact = {compact: key for key, compact in compact_of.items()}
-    return series, [key_of_compact[item.flight_id] for item in series], manifest
+    return series, [key_of_compact[item.flight_id] for item in series]
 
 
 # ── one batch of the fit, shared by both modes ──────────────────────────────
@@ -560,9 +568,8 @@ def run_width_study(
     # Every refusal this mode can make has been made; claim the immutable directory before
     # the expensive work rather than at the top, so a rejected invocation leaves nothing.
     out.mkdir(parents=True, exist_ok=False)
-    series, series_keys, manifest = build_cohort_series(
-        cohort_keys, compact_of, airport, base_config
-    )
+    manifest = reference_manifest(summary, airport)
+    series, series_keys = build_cohort_series(cohort_keys, compact_of, airport, base_config, manifest)
     anchor = default_anchor(base_config)
     normalizer = Normalizer.fit(series, balance_airports_and_flights=True)
     print(f"{airport}: {len(series)} flights of {coverage['scored_rows']} scored, "

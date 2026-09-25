@@ -72,7 +72,9 @@ def mean_displacement_to(series: FlightSeries, forecast: Forecast, origin_index:
                          *, grid_dt_s: float = 1.0) -> float:
     """ADE[0, horizon]: the mean 3D chart displacement between ``forecast`` and the observed track
     on the ``grid_dt_s`` grid from the origin to ``horizon_s`` INCLUSIVE — `lead_time_error`'s
-    accounting (the t=0 point, identically zero, is in the mean). Both must reach the horizon."""
+    accounting (the t=0 point, identically zero, is in the mean). Both must reach the horizon.
+    The truth is the OBSERVED rows (``series.times`` / ``values``), not the supervision rows the anchor sets admit a
+    flight on (`anchor_grid.anchors_for_bin`: the track closed to the threshold) — the two ends of the truth."""
     grid = np.arange(0.0, horizon_s + ROW_TOLERANCE_S, grid_dt_s)
     origin_time = float(series.times[origin_index])
     if origin_time + grid[-1] > float(forecast.times[-1]) + ROW_TOLERANCE_S:
@@ -101,7 +103,8 @@ def displacement_at(series: FlightSeries, forecast: Forecast, origin_index: int,
     standing in before its first row) and the observed track at absolute ``time_s``; None
     when either ends before it. With ``hold_forecast_end`` the forecast's LAST row stands in
     past its end — a plan that says it arrived is at the threshold, and a reading past that
-    claim measures the claim — so only the truth's end makes the reading absent."""
+    claim measures the claim — so only the truth's end makes the reading absent. The truth's end is the OBSERVED
+    rows' (as `mean_displacement_to`'s), which can come before the supervision rows' the anchor was admitted on."""
     truth_times = np.asarray(series.times, dtype=np.float64)
     if time_s > float(truth_times[-1]) + ROW_TOLERANCE_S:
         return None

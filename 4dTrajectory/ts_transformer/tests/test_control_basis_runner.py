@@ -176,7 +176,7 @@ def _patch_data_plane(monkeypatch, flights, tmp_path):
     manifest = tmp_path / "manifest.json"
     indexed = {dataset_flight_key(flight, index): flight
                for index, flight in enumerate(flights)}
-    monkeypatch.setattr(runner.pipeline, "arrival_manifest_path", lambda _airport: manifest)
+    monkeypatch.setattr(runner, "checkpoint_arrival_manifest", lambda _payload, _airport: manifest)
     monkeypatch.setattr(
         runner, "checkpoint_arrival_manifests",
         lambda payload, _root: [manifest] * len(payload["data_provenance"]["manifests"]),
@@ -413,7 +413,7 @@ def test_the_table_does_not_depend_on_the_order_the_cohort_arrived_in(
 
 def test_the_width_study_still_runs_end_to_end(monkeypatch, tmp_path, trained_checkpoint):
     """The ADE(N) mode shares the batch mechanics with the teacher and must keep working."""
-    flights, _checkpoint, payload = trained_checkpoint
+    flights, checkpoint, payload = trained_checkpoint
     _patch_data_plane(monkeypatch, flights, tmp_path)
     reference = tmp_path / "reference"
     reference.mkdir()
@@ -424,7 +424,7 @@ def test_the_width_study_still_runs_end_to_end(monkeypatch, tmp_path, trained_ch
         "established_at_anchor": bool(index % 2), "remaining_path_m": 20_000.0,
     } for index, flight in enumerate(flights[:4])]
     (reference / "summary.json").write_text(json.dumps(
-        {"config": payload["config"], "split": "val", "results": rows}
+        {"config": payload["config"], "split": "val", "checkpoint": str(checkpoint), "results": rows}
     ))
 
     out = tmp_path / "l0"

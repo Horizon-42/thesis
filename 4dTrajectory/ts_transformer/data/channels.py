@@ -33,8 +33,9 @@ across the branch cut that ``psi`` is not.
 frames share one constant; ``metres_per_deg_lon`` is that times ``cos(lat)``).
 The flat form itself deviates from a true tangent-plane ENU by up to ~40 m at the ring edge
 (the ``e·n·tanφ/R`` cross term — zero on the pure east/north axes), and ``u = Δalt``
-ignores the ~49 m curvature drop there deliberately: the channel is height above the
-THRESHOLD, not tangent-plane z. None of that reaches the metrics: predictions, references
+ignores the ~49 m curvature drop there deliberately: the channel is height above the frame's
+origin — the RUNWAY TARGET, the threshold elevation plus its published threshold crossing height
+(`frame_for_state(scenario.target)`) — not tangent-plane z. None of that reaches the metrics: predictions, references
 and the loss all live in the SAME projection, so the systematic distortion cancels; what
 survives on a measured displacement is the local scale distortion (~0.2% at the ring edge,
 → 0 at the threshold, where the gates judge). Matching the existing frame is what matters —
