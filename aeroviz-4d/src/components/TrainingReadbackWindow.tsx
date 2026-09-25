@@ -35,6 +35,11 @@
  * track as its judge read it; its other words are judged on envelopes re-drawn from where it was told them (the
  * sentence bar's dots).
  *
+ * THE EXECUTOR, LIVE, when the backend has flown the selected word's segment (`autopilot`): solid blue, from where the
+ * word was said, on the flight's own clock and distance axis — it starts where the observed aircraft was, so its lines
+ * begin on the observed ones and part from them as it flies at its own pace. A selected heading word's band is drawn as
+ * its judge read it (a blue outline, red when a row is outside), with those rows red on its flown track.
+ *
  * It renders through a PORTAL into `document.body` (AV7): `.flight-ops-panel` carries a
  * `backdrop-filter`, which would make a `position: fixed` descendant position against it.
  */
@@ -43,6 +48,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TrainingLayers } from "../context/AppContext";
 import {
+  TRAINING_AUTOPILOT_COLOR,
   TRAINING_CANDIDATE_COLOR,
   TRAINING_CAPTURE_TURN_COLOR,
   TRAINING_COLUMN_COLOR,
@@ -73,6 +79,7 @@ import {
   type TrainingVocabulary,
 } from "../data/trainingSample";
 import type { TrainingExecutorFlight } from "../data/trainingOverlays";
+import type { TrainingAutopilotSegment } from "../data/trainingAutopilot";
 
 const GUTTER = 64;
 const PAD_R = 16;
@@ -131,10 +138,13 @@ export interface TrainingReadbackWindowProps {
   onClose: () => void;
   /** The executor's replay of this flight, when its overlay is on; null otherwise. */
   executor?: TrainingExecutorFlight | null;
+  /** The selected word's segment, flown live (`trainingAutopilot`, ready); null otherwise. */
+  autopilot?: TrainingAutopilotSegment | null;
 }
 
 export default function TrainingReadbackWindow({
   flight, vocabulary, candidates, layers, cursorS, onCursorChange, column, onColumnChange, onClose, executor = null,
+  autopilot = null,
 }: TrainingReadbackWindowProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number>(DEFAULT_W);
@@ -160,6 +170,18 @@ export default function TrainingReadbackWindow({
     ? executor.words.flatMap((word) => (word.heading === null ? [] : [word.heading]))
     : [];
   const judgedTrack = flownTrack ? executor?.judgedTrackDeg ?? null : null;
+  // the live executor's segment (and not at all without two points); its judged track's step k is the flight's
+  // step `row + k`, the flown track's point k × (step / cycle)
+  const live = autopilot && autopilot.track.tS.length >= 2 ? autopilot : null;
+  const liveTrack = live?.track ?? null;
+  const liveBand = live?.word.heading ?? null;
+  const liveJudged = live?.judgedTrackDeg ?? null;
+  const liveStepRows = live ? Math.round(vocabulary.stepS / live.executor.cycleS) : 1;
+  /** The live segment's rows outside its heading band, as [first, last] judged steps. */
+  const liveOutside = live && liveBand && liveJudged && layers.headingBands
+    ? trainingBandOutsideSpans(liveBand, live.segment.row + liveJudged.length - 1)
+      .map(([first, lastRow]) => [first - live.segment.row, lastRow - live.segment.row] as [number, number])
+    : [];
   const plotW = width - GUTTER - PAD_R;
   const cursorRow = rowAtTime(tS, cursorS);
   const designated = candidates[flight.runwayIndex];
@@ -181,7 +203,8 @@ export default function TrainingReadbackWindow({
   const judged = (band: TrainingHeadingBand) => band.stopRow > band.firstRow;
 
   // ── time charts share one x: the observed flight's, or longer when the executor flew longer ──
-  const endS = Math.max(tS[last], flownTrack ? flownTrack.tS[flownTrack.tS.length - 1] : 0);
+  const endS = Math.max(tS[last], flownTrack ? flownTrack.tS[flownTrack.tS.length - 1] : 0,
+    liveTrack ? liveTrack.tS[liveTrack.tS.length - 1] : 0);
   const xTime = (seconds: number) => GUTTER + (seconds / endS) * plotW;
   // The cursor is the observed flight's time: past its end (where only the executor's lines run) it stays at the end.
   const timeAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * endS, 0), tS[last]);
@@ -190,8 +213,10 @@ export default function TrainingReadbackWindow({
 
   // ── the plan view: the track and the threshold decide the frame ──
   const km = (metres: number) => metres / 1000;
-  const frameE = [...signals.eM, designated.thresholdEM, ...envelopes.approach.corridor.axis.eM, ...(flownTrack?.eM ?? [])].map(km);
-  const frameN = [...signals.nM, designated.thresholdNM, ...envelopes.approach.corridor.axis.nM, ...(flownTrack?.nM ?? [])].map(km);
+  const frameE = [...signals.eM, designated.thresholdEM, ...envelopes.approach.corridor.axis.eM, ...(flownTrack?.eM ?? []),
+    ...(liveTrack?.eM ?? [])].map(km);
+  const frameN = [...signals.nM, designated.thresholdNM, ...envelopes.approach.corridor.axis.nM, ...(flownTrack?.nM ?? []),
+    ...(liveTrack?.nM ?? [])].map(km);
   const [eLow, eHigh] = extent(frameE);
   const [nLow, nHigh] = extent(frameN);
   const planScale = Math.min((plotW - 12) / (eHigh - eLow), (PLAN_H - 30) / (nHigh - nLow));
@@ -218,18 +243,20 @@ export default function TrainingReadbackWindow({
     ...(layers.corridor ? [...envelopes.approach.courseBandDeg, ...(capture ? [capture.courseOnTrackDeg] : [])] : []),
     ...(flownTrack?.trackDeg ?? []), ...(judgedTrack ?? []),
     ...(layers.headingBands ? flownBands.flatMap((band) => (judged(band) ? band.bandDeg : [])) : []),
+    ...(liveTrack?.trackDeg ?? []), ...(liveJudged ?? []),
+    ...(layers.headingBands && liveBand && judged(liveBand) ? liveBand.bandDeg : []),
   ];
   const [hLow, hHigh] = extent(headingValues);
   const altitudeValues = [
     ...signals.smoothed.altitudeM, ...signals.raw.altitudeM, designated.elevationM,
     ...(layers.vertical ? envelopes.altitude.flatMap((tube) => [...tube.lowerM, ...tube.upperM]) : []),
-    ...(flownTrack?.altitudeM ?? []),
+    ...(flownTrack?.altitudeM ?? []), ...(liveTrack?.altitudeM ?? []),
   ];
   const [aLow, aHigh] = extent(altitudeValues);
   const speedValues = [
     ...signals.smoothed.groundSpeedMps, ...signals.raw.groundSpeedMps,
     ...(layers.vertical ? envelopes.speed.flatMap((span) => [...(span.bandMps ?? []), ...(span.transitionLowerMps ?? []), ...(span.transitionUpperMps ?? [])]) : []),
-    ...(flownTrack?.groundSpeedMps ?? []),
+    ...(flownTrack?.groundSpeedMps ?? []), ...(liveTrack?.groundSpeedMps ?? []),
   ];
   const [sLow, sHigh] = extent(speedValues);
   const plotTop = 18;
@@ -240,7 +267,8 @@ export default function TrainingReadbackWindow({
   const yAltitude = yOf(aLow, aHigh);
   const ySpeed = yOf(sLow, sHigh);
   const distanceEnd = Math.max(signals.smoothed.distanceM[last],
-    flownTrack ? flownTrack.distanceM[flownTrack.distanceM.length - 1] : 0);
+    flownTrack ? flownTrack.distanceM[flownTrack.distanceM.length - 1] : 0,
+    liveTrack ? liveTrack.distanceM[liveTrack.distanceM.length - 1] : 0);
   const xDistance = (metres: number) => GUTTER + (metres / distanceEnd) * plotW;
   const distanceAtX = (x: number) => Math.min(Math.max(((x - GUTTER) / plotW) * distanceEnd, 0), distanceEnd);
 
@@ -276,6 +304,13 @@ export default function TrainingReadbackWindow({
   const flownTrace = (along: number[], values: number[], xOf: (value: number) => number, y: (value: number) => number, name: string) => (
     <polyline points={values.map((value, index) => `${xOf(along[index])},${y(value)}`).join(" ")} fill="none"
       stroke={TRAINING_EXECUTOR_COLOR} strokeWidth={1.4} strokeDasharray="5 3" className="training-readback-executor">
+      <title>{name}</title>
+    </polyline>
+  );
+  /** The live segment's values against the flight's time (or distance): one solid blue line. */
+  const liveTrace = (along: number[], values: number[], xOf: (value: number) => number, y: (value: number) => number, name: string) => (
+    <polyline points={values.map((value, index) => `${xOf(along[index])},${y(value)}`).join(" ")} fill="none"
+      stroke={TRAINING_AUTOPILOT_COLOR} strokeWidth={1.8} className="training-readback-autopilot">
       <title>{name}</title>
     </polyline>
   );
@@ -423,6 +458,22 @@ export default function TrainingReadbackWindow({
                   stroke={TRAINING_WORD_COLOR} strokeWidth={3} strokeOpacity={0.9} strokeLinecap="round"
                   className="training-readback-focus" />
               ) : null}
+              {liveTrack ? (
+                <g aria-label="the autopilot's flown segment">
+                  <polyline points={liveTrack.eM.map((e, index) => `${px(km(e))},${py(km(liveTrack.nM[index]))}`).join(" ")}
+                    fill="none" stroke={TRAINING_AUTOPILOT_COLOR} strokeWidth={1.8} className="training-readback-autopilot">
+                    <title>the autopilot's flown segment — from where the selected word was said, flown live</title>
+                  </polyline>
+                  {liveOutside.map(([first, lastStep]) => (
+                    <polyline key={`plan-autopilot-out-${first}`} className="training-readback-autopilot-outside"
+                      points={Array.from({ length: (lastStep - first) * liveStepRows + 1 }, (_, offset) => first * liveStepRows + offset)
+                        .map((index) => `${px(km(liveTrack.eM[index]))},${py(km(liveTrack.nM[index]))}`).join(" ")}
+                      fill="none" stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2.4} strokeLinecap="round" />
+                  ))}
+                  <circle cx={px(km(liveTrack.eM[liveTrack.eM.length - 1]))} cy={py(km(liveTrack.nM[liveTrack.nM.length - 1]))} r={4}
+                    fill={TRAINING_AUTOPILOT_COLOR} stroke="black" strokeWidth={0.6} />
+                </g>
+              ) : null}
               {envelopes.heading.map((item, index) => {
                 const point = at(item.row);
                 const name = `heading ${label("heading", item.value)} issued at step ${item.row} — ${trainingKindLabel(item.kind)}`;
@@ -543,11 +594,32 @@ export default function TrainingReadbackWindow({
                   y={yHeading(band.bandDeg[1])} height={yHeading(band.bandDeg[0]) - yHeading(band.bandDeg[1])}
                   fill="none" stroke={band.inside.every(Boolean) ? TRAINING_EXECUTOR_COLOR : TRAINING_OUTSIDE_COLOR} strokeWidth={0.8} />
               ) : null) : null}
+              {/* the live segment's heading band, as its judge read it */}
+              {layers.headingBands && liveBand && judged(liveBand) ? (
+                <rect className="training-readback-autopilot-band"
+                  x={xTime(liveBand.firstRow * vocabulary.stepS)}
+                  width={Math.max(xTime(liveBand.stopRow * vocabulary.stepS) - xTime(liveBand.firstRow * vocabulary.stepS), 1)}
+                  y={yHeading(liveBand.bandDeg[1])} height={yHeading(liveBand.bandDeg[0]) - yHeading(liveBand.bandDeg[1])}
+                  fill="none" stroke={liveBand.inside.every(Boolean) ? TRAINING_AUTOPILOT_COLOR : TRAINING_OUTSIDE_COLOR}
+                  strokeWidth={1.1}>
+                  <title>
+                    the autopilot's band for the selected heading word, judged at steps {liveBand.firstRow}–{liveBand.stopRow - 1}
+                    {" "}of its flown segment: {liveBand.inside.filter(Boolean).length} of {liveBand.inside.length} rows inside
+                  </title>
+                </rect>
+              ) : null}
             </g>
             {trace(signals.raw.trackDeg, rowX, yHeading, TRAINING_RAW_COLOR, true)}
             {trace(signals.smoothed.trackDeg, rowX, yHeading, TRAINING_TRACE_COLOR, false)}
             {flownTrack ? flownTrace(flownTrack.tS, flownTrack.trackDeg, xTime, yHeading, "the executor's track, on its own clock") : null}
+            {live && liveJudged ? liveOutside.map(([first, lastStep]) => (
+              <polyline key={`autopilot-out-${first}`} className="training-readback-autopilot-outside"
+                points={Array.from({ length: lastStep - first + 1 }, (_, offset) => first + offset)
+                  .map((step) => `${xTime((live.segment.row + step) * vocabulary.stepS)},${yHeading(liveJudged[step])}`).join(" ")}
+                fill="none" stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2} strokeDasharray="3 2" />
+            )) : null}
             {column === "heading" ? focusTrace(signals.smoothed.trackDeg, rowX, yHeading) : null}
+            {liveTrack ? liveTrace(liveTrack.tS, liveTrack.trackDeg, xTime, yHeading, "the autopilot's track over the selected segment") : null}
             {/* the rows each band judged outside: the observed track's, and the executor's as its judge read it */}
             {layers.headingBands ? envelopes.heading.flatMap((item, index) => trainingBandOutsideSpans(item, last).map(([first, lastRow]) => (
               <polyline key={`heading-out-${index}-${first}`} className="training-readback-outside"
@@ -633,6 +705,8 @@ export default function TrainingReadbackWindow({
             {trace(signals.smoothed.altitudeM, rowXDistance, yAltitude, TRAINING_TRACE_COLOR, false)}
             {flownTrack ? flownTrace(flownTrack.distanceM, flownTrack.altitudeM, xDistance, yAltitude, "the executor's altitude, against its own distance flown") : null}
             {column === "altitude" || column === "angle" ? focusTrace(signals.smoothed.altitudeM, rowXDistance, yAltitude) : null}
+            {liveTrack ? liveTrace(liveTrack.distanceM, liveTrack.altitudeM, xDistance, yAltitude,
+              "the autopilot's altitude over the selected segment, against the distance flown") : null}
             {envelopes.altitude.flatMap((item, index) =>
               runsOf(item.inside.map((ok) => !ok)).map(([first, lastOut]) => (
                 <polyline
@@ -718,6 +792,7 @@ export default function TrainingReadbackWindow({
             {trace(signals.smoothed.groundSpeedMps, rowX, ySpeed, TRAINING_TRACE_COLOR, false)}
             {flownTrack ? flownTrace(flownTrack.tS, flownTrack.groundSpeedMps, xTime, ySpeed, "the executor's ground speed, on its own clock") : null}
             {column === "speed" ? focusTrace(signals.smoothed.groundSpeedMps, rowX, ySpeed) : null}
+            {liveTrack ? liveTrace(liveTrack.tS, liveTrack.groundSpeedMps, xTime, ySpeed, "the autopilot's ground speed over the selected segment") : null}
             {envelopes.speed.flatMap((span, index) =>
               span.arrivalRow === null || span.bandInside === null ? [] :
                 runsOf(span.bandInside.map((ok) => !ok)).map(([first, lastOut]) => (
@@ -755,6 +830,16 @@ export default function TrainingReadbackWindow({
                     "from where IT was told each word plus the lead, its rows outside them red (dashed: on the flown track " +
                     "as its judge read it); its other words are judged on envelopes re-drawn from where it was told them — " +
                     "the sentence bar's dots — not on the observed flight's drawn here."}
+            </div>
+            <div className="training-readback-slot" aria-label="The autopilot, live">
+              <strong style={{ color: TRAINING_AUTOPILOT_COLOR }}>The autopilot, live</strong> —{" "}
+              {live === null
+                ? "select a word (with the panel's switch on) and the executor flies its segment now; its lines appear here."
+                : `solid blue: the selected ${live.segment.column} word's segment, flown by the executor when it was selected, ` +
+                  `from the observed state at step ${live.segment.row} — its track, altitude (against the distance flown, from ` +
+                  "the observed aircraft's there) and ground speed on the flight's own clock, so they start on the observed " +
+                  "lines and part from them as it flies at its own pace." +
+                  (liveBand ? " Its heading band is the blue outline, as its judge read the flown segment, its rows outside red." : "")}
             </div>
           </div>
         </div>

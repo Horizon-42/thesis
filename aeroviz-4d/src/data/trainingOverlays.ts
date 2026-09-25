@@ -297,14 +297,15 @@ export function executorWordCounts(flight: TrainingExecutorFlight) {
 
 // ── small checkers ───────────────────────────────────────────────────────────
 
-class Refusal extends Error {}
+/** A field refused by name: the readers below (and `trainingAutopilot.ts`) throw it, `attempt` turns it into a problem. */
+export class Refusal extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Reads one object, naming the path of every field it refuses. */
-class Reader {
+export class Reader {
   constructor(private readonly source: Record<string, unknown>, readonly where: string) {}
 
   static of(value: unknown, where: string): Reader {
@@ -417,12 +418,12 @@ function recordOf<T>(value: unknown, where: string, read: (value: unknown, where
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, read(item, `${where}.${key}`)]));
 }
 
-function asNumber(value: unknown, where: string): number {
+export function asNumber(value: unknown, where: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Refusal(`${where} is ${JSON.stringify(value)}, not a number`);
   return value;
 }
 
-function attempt<T>(read: () => T): Parsed<T> {
+export function attempt<T>(read: () => T): Parsed<T> {
   try {
     return { ok: true, value: read() };
   } catch (error) {

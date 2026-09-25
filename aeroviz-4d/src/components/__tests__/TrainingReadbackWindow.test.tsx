@@ -14,6 +14,9 @@ import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { mockExecutorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay, type TrainingExecutorFlight } from "../../data/trainingOverlays";
 import type { TrainingLayers } from "../../context/AppContext";
+import { parseTrainingAutopilot, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
+import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
+import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
 import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 
 const ALL: TrainingLayers = { headingBands: true, corridor: true, vertical: true, candidates: true };
@@ -26,8 +29,17 @@ function executorFlight(position = 0): TrainingExecutorFlight {
   return overlay.value.flights[position];
 }
 
+function autopilotSegment(): TrainingAutopilotSegment {
+  const parsed = parseTrainingSample(mockSample());
+  if (!parsed.ok) throw new Error(parsed.problem);
+  const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
+  const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, parsed.value);
+  if (!answer.ok) throw new Error(answer.problem);
+  return answer.value;
+}
+
 function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: TrainingColumn | null = null,
-  executor: TrainingExecutorFlight | null = null) {
+  executor: TrainingExecutorFlight | null = null, autopilot: TrainingAutopilotSegment | null = null) {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
   const onCursorChange = vi.fn();
@@ -44,6 +56,7 @@ function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: T
       onColumnChange={onColumnChange}
       onClose={() => undefined}
       executor={executor}
+      autopilot={autopilot}
     />,
   );
   return { onCursorChange, onColumnChange };
@@ -248,5 +261,23 @@ describe("helpers", () => {
 
   it("finds the row at a distance flown", () => {
     expect(rowAtDistance([0, 100, 200, 300], 250)).toBe(2);
+  });
+});
+
+describe("the live executor in the read-back check", () => {
+  it("draws its segment on the plan, heading, altitude and speed charts, with the selected heading word's band", () => {
+    cleanup();
+    open(ALL, 0, 16, "heading", null, autopilotSegment());
+    // plan, heading, altitude, speed
+    expect(count("polyline.training-readback-autopilot")).toBe(4);
+    expect(count("rect.training-readback-autopilot-band")).toBe(1);
+    expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/solid blue: the selected heading word's segment/);
+  });
+
+  it("says how to get one when there is none", () => {
+    cleanup();
+    open(ALL, 0, 16, "heading");
+    expect(count("polyline.training-readback-autopilot")).toBe(0);
+    expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/select a word/);
   });
 });

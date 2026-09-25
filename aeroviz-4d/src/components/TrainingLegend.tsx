@@ -12,6 +12,7 @@ import { useState } from "react";
 import type { TrainingLayers } from "../context/AppContext";
 import type { TrainingVocabulary } from "../data/trainingSample";
 import {
+  TRAINING_AUTOPILOT_COLOR,
   TRAINING_CAPTURE_TURN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_ENVELOPE_ALPHA,
@@ -38,10 +39,12 @@ function SwatchIcon({ swatch }: { swatch: Swatch }) {
   );
 }
 
-export default function TrainingLegend({ layers, vocabulary, executorTrack = false }: {
+export default function TrainingLegend({ layers, vocabulary, executorTrack = false, autopilotTrack = false }: {
   layers: TrainingLayers; vocabulary: TrainingVocabulary;
   /** The executor's flown track is drawn (its overlay is on and the flight was flown). */
   executorTrack?: boolean;
+  /** The live executor's flown segment is drawn (`trainingAutopilot`). */
+  autopilotTrack?: boolean;
 }) {
   const [open, setOpen] = useState<boolean>(true);
   const rows: Array<{ key: string; swatch: Swatch; text: string; shown: boolean }> = [
@@ -63,6 +66,10 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack = fal
     { key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: executorTrack,
       text: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0" +
         (layers.headingBands ? "; red on its ground trace: its rows outside the heading word it was told" : "") },
+    { key: "autopilot", swatch: { kind: "line", colour: TRAINING_AUTOPILOT_COLOR }, shown: autopilotTrack,
+      text: "blue: the selected word's segment, flown live by the executor from where the word was said — the aircraft " +
+        "flies it out, then the whole segment stays (dashed on the ground)" +
+        (layers.headingBands ? "; red on its ground trace: its rows outside the selected heading word" : "") },
   ];
 
   return (

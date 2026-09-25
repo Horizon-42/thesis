@@ -108,8 +108,8 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 
 - **Training reads ONE vocabulary: `instruction-v3`** — the sample schema (`aeroviz-training-sample-v7` since
   2026-09-24: heading words as per-row bands, no turn regions / funnels; a format name changes with its file's shape, both
-  sides in one change), the reading rule, the spec sha (STILL instruction-v2's `103a6eae6b90` until the v3 spec is written:
-  every v3 set is refused by it until then), the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
+  sides in one change), the reading rule, the spec sha (`145d6911e75b` since 2026-09-25: the day-split `v4_20260924` artefact
+  today's executor flies — the flight-split `instruction_v3` set is refused by it; current set `instruction_v3_day_split`), the six columns IN ORDER and the labeller's word kinds are pinned mirrors,
   refused by name; `training/index.json` keeps its v1 schema across vocabularies, so a set of another vocabulary
   (`instruction_v1`, `instruction_v2`) stays listed and is refused from the manifest alone, never downloaded
   (`check-publication`: a warning) (AV19).
@@ -136,6 +136,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   its lines and bands run on its own clock; the prior is teacher-forced (AV24).
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
+- **Training's live executor flies the CLICKED word's segment on the backend, every time** (`POST /autopilot/segment`,
+  `aeroviz-autopilot-segment-v1`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
+  where its envelope ends (the next word of its column; a heading word's a lead later; the sentence's end: to the landing),
+  the executor code untouched and cut afterwards by its own word clock; the answer is refused unless the words it told are
+  the sentence bar's for that segment; blue `#2563eb`, never the replay's teal (AV26).
 
 ## Comparison CZML colour contract
 

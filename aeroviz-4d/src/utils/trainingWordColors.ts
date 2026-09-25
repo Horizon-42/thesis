@@ -68,3 +68,10 @@ export const TRAINING_OUTSIDE_COLOR = "#f87171";
  *  the funnel blue 12.3, the corridor green 13.8) and 53 from the bar's surface (#0f131e); every candidate hue
  *  between them sat under 10 from one of the columns. */
 export const TRAINING_EXECUTOR_COLOR = "#14b8a6";
+
+/** THE EXECUTOR FLOWN LIVE: the selected word's segment, flown by the backend when it is selected
+ *  (`trainingAutopilot.ts`) — the replay's teal would read as the precomputed replay. Royal blue (2026-09-25): the dataviz
+ *  validator on the bar's surface (#0f131e) puts it ≥ 21.8 OKLab ΔE from every colour above under normal vision (nearest:
+ *  the speed purple) and ≥ 9.3 under simulated colour blindness, contrast ≥ 3:1; the violet #7c3aed passed too (17.3 /
+ *  12.5) but sits in the speed column's hue. */
+export const TRAINING_AUTOPILOT_COLOR = "#2563eb";

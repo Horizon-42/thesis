@@ -871,6 +871,62 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   user-select: text;
 }
 
+/* The live executor: the selected word's segment, flown by the backend when it is selected. */
+.training-autopilot-note {
+  margin: 0 0 0 20px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: rgba(224, 230, 240, 0.55);
+}
+
+.training-autopilot-card {
+  margin: 2px 0 0 20px;
+  padding: 4px 8px;
+  border-left: 2px solid #2563eb;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #d6deea;
+  overflow-wrap: anywhere;
+}
+
+.training-autopilot-card p {
+  margin: 0 0 3px;
+}
+
+.training-autopilot-title {
+  font-weight: 600;
+}
+
+.training-autopilot-checks {
+  margin: 0 0 3px;
+  padding-left: 14px;
+}
+
+.training-autopilot-meta {
+  font-size: 10px;
+  color: rgba(224, 230, 240, 0.55);
+}
+
+.training-autopilot-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.training-autopilot-button {
+  background: #2a3550;
+  border: 1px solid #3a4a6a;
+  border-radius: 4px;
+  color: #c8d8ec;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.training-autopilot-button:hover {
+  background: #3a4f78;
+}
+
 /* The readouts behind the overlays: the executor's gate table, the prior's readout. */
 .training-results {
   margin-top: 6px;
@@ -1242,7 +1298,8 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 .training-sentence-executor,
-.training-sentence-prior {
+.training-sentence-prior,
+.training-sentence-autopilot {
   font-size: 11px;
 }
 

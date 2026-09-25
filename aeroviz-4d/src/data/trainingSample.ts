@@ -3,7 +3,7 @@
  * -----------------
  * The Training module's data contract: the manifest of exported sets, and one set's flights
  * under the instruction vocabulary (`instruction-v3`: the heading read step by step, vocabulary design §10.1; spec
- * `0b4ea75be36d`, `4dTrajectory/outputs/POOLED/instruction_language/v3_20260924/`).
+ * `145d6911e75b`, measured on the day split's training days, `4dTrajectory/outputs/POOLED/instruction_language/v4_20260924/`).
  * Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the words:
  * `4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`.
  *
@@ -47,8 +47,9 @@ export const TRAINING_SAMPLE_SCHEMA = "aeroviz-training-sample-v7";
 /** MIRROR of `instructions.spec.READING_RULE`: what a word MEANS, which no field can say. */
 export const TRAINING_READING_RULE = "instruction-v3";
 /** MIRROR of the spec's sha: a new vocabulary is a new sha, and this reader is bound to the one it was written for
- *  (`v3_20260924/spec.json`, instruction-v3, measured at 05c5cd80). */
-export const TRAINING_SPEC_SHA256 = "0b4ea75be36d8b214f04cbcdfdc33a77c5ec0b36e40194e5ddfda18e5de97791";
+ *  (`v4_20260924/spec.json`, instruction-v3 re-measured on the operating-day split's training days, 2026-09-25 — the
+ *  artefact today's executor code flies; the flight-split `v3_20260924` spec `0b4ea75be36d` is refused by name). */
+export const TRAINING_SPEC_SHA256 = "145d6911e75b02f61697cda79f7a5b9fe7de948e55c12199c5a1df081a2d5bd5";
 /** MIRROR of the exporter's `KIND_READBACK`: the one kind of set this reader opens. */
 export const TRAINING_READABLE_SET_KIND = "vocabulary-readback";
 /** The set kinds the manifest may list. A `prior-generated` set has no contract under this

@@ -199,9 +199,10 @@ that divergence is a known open item (see the README's "Future Improvements").
 `SAMPLE_SCHEMA`、`INDEX_SCHEMA`、`KIND_READBACK`、`WORD_KINDS`，以及 `spec.READING_RULE`、`words.COLUMNS`、
 `words.UNCHANGED`）由 `tests/test_instruction_training_export.py` 与 TypeScript 源码逐字比对。
 
-**规格 sha 还是 `instruction-v2` 的**（`103a6eae6b90`）：`instruction-v3` 的规格还没写。所以现在每个 v3 集合都会因为
-规格 sha 不对被按名字拒读（`check-publication` 报出），v2 的集合因为读法不对被拒读。写 v3 规格的那一次改动把这个值
-换成新规格的 sha，测试的样本通过 import 跟着走。
+**规格 sha 是 `145d6911e75b`**（2026-09-25）：`instruction-v3` 按运行日划分后在新训练集上重新测量的规格
+（`instruction_language/v4_20260924`），现在的执行器代码只飞这份产物。按航班划分的 `v3_20260924`（`0b4ea75be36d`）上
+导出的 `instruction_v3` 集合和它上面的叠加层因为规格 sha 不对被按名字拒读（`check-publication` 报出）；现行集合是
+`instruction_v3_day_split`。测试的样本通过 import 跟着走。
 
 格式名跟着文件的形状走（用户 2026-09-24 的规定）：样本或索引的字段一有增、删、改名，两边的格式名在同一次改动里
 一起换新名字，盘上的集合重新导出；不为旧文件还能读、或"现在没人读错"而保留旧名字。样本格式名不对就整份拒读，
@@ -332,3 +333,22 @@ that divergence is a known open item (see the README's "Future Improvements").
   再发布**：正在运行的前端还不认 `sentence` 时发布，它的选择器立刻变空。
 - 类别里是这个机场全部被飞的航班，自己机型动力学和 A320 替代动力学两组都在；标签写出两组各多少架，参数表写出规格 sha
   和每个参数。第一个周期就动力学失败的航班没有记录，不在类别里（参数表写出有几架）。
+
+### AV26 · Training 的实时执行器：选中一个词，后端现飞它的一段
+
+- 用途是验证执行器，所以**每次选中都现飞**：`POST /autopilot/segment`（`aeroviz_backend/autopilot_segment.py`），不读执行器的
+  正式回放，也不读叠加层。执行器代码原样使用、不改一行（它的源码 sha 绑着每份执行器规格）；后端调用 `replay.fly_sentences`
+  整段飞完，再按它记下的词钟（`Flown.sentence_s`）在段尾截断——不需要执行器能逐步推进。
+- 一段 = 句子条上**被点击**的一个色块（`trainingPick`；游标不触发，图表悬停会移动游标）：从词说出的一步飞到它的包络结束的
+  `stopRow`——同列下一个词说出的一步，航向词再加一个提前量（它的带判到下一个航向词说出后一个提前量，下一个航向词照句子说出）；
+  到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。初态是观测飞机在那一步的状态（`series_from_row`），第 0 步是那一步
+  六列生效的词，之后是段内的词，每条在执行器到了观测飞机听到它的位置时说。
+- 规格：`outputs/POOLED/executor/*/spec.json` 里恰好一份由现在的执行器代码、为这个集合所属产物的词表写的
+  （`replay.open_executor`）；否则拒绝并列出每一份的原因。集合的产物与划分从样本的 `producedBy.artefact` / `cohort.split` 读。
+- 前端把答复绑到屏幕上这一段：同一架航班、`endRow` 是色块的终点、词表规格相同、**告诉执行器的词就是句子条这一段显示的词**；
+  对不上整份拒读。答复格式 `aeroviz-autopilot-segment-v1` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
+  名也是镜像）。
+- 画法：蓝 `#2563eb`，与执行器回放的青色分开；三维里飞机按加速的实际时间把这一段飞出来（至少 8 倍、不超过 20 s，
+  CallbackProperty，不碰 `viewer.clock`），读数窗口里四张图各一条蓝线，从观测线上说词的那一点出发。
+- 后端第一次收到这个请求时才载入 torch 与 ts_transformer（常驻内存约多 470 MB）；一次一段（锁），重建过的航班留最近 8 架。
+  后端不热更新：改了这部分要重启后端。

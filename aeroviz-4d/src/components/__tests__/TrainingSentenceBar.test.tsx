@@ -7,13 +7,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-const { appState, DEFAULT_LAYERS } = vi.hoisted(() => {
+const { appState, DEFAULT_LAYERS, setTrainingPick } = vi.hoisted(() => {
   const DEFAULT_LAYERS = { headingBands: true, corridor: true, vertical: true, candidates: true };
   return {
     DEFAULT_LAYERS,
+    setTrainingPick: vi.fn(),
     appState: {
       trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
-      trainingExecutor: null as unknown, trainingPrior: null as unknown,
+      trainingExecutor: null as unknown, trainingPrior: null as unknown, trainingAutopilot: null as unknown,
     },
   };
 });
@@ -24,7 +25,7 @@ vi.mock("../../context/AppContext", async () => {
     useApp: () => {
       const [trainingCursorS, setTrainingCursorS] = useState(0);
       const [trainingColumn, setTrainingColumn] = useState<string | null>(null);
-      return { ...appState, trainingCursorS, setTrainingCursorS, trainingColumn, setTrainingColumn };
+      return { ...appState, trainingCursorS, setTrainingCursorS, trainingColumn, setTrainingColumn, setTrainingPick };
     },
   };
 });
@@ -34,6 +35,9 @@ import { parseTrainingSample, TRAINING_COLUMNS } from "../../data/trainingSample
 import { MOCK_ROWS, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { mockExecutorOverlay, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay } from "../../data/trainingOverlays";
+import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
+import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
+import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
 
 /** Publish the fixture's overlays for the selected flight, as the panel does. */
 function overlays(position = 0) {
@@ -60,6 +64,34 @@ describe("TrainingSentenceBar", () => {
     appState.trainingLayers = { ...DEFAULT_LAYERS };
     appState.trainingExecutor = null;
     appState.trainingPrior = null;
+    appState.trainingAutopilot = null;
+    setTrainingPick.mockClear();
+  });
+
+  it("picks a band's word for the live executor when the band is clicked, and clears it on a second click", () => {
+    select();
+    render(<TrainingSentenceBar />);
+    const band = screen.getByLabelText(/^heading 225° .* issued at step 8 /);
+    fireEvent.click(band);
+    expect(setTrainingPick).toHaveBeenLastCalledWith({ flightKey: VECTORED_KEY, column: "heading", row: 8 });
+    fireEvent.click(band);
+    expect(setTrainingPick).toHaveBeenLastCalledWith(null);
+  });
+
+  it("reads out the live executor's segment: flying, then how it ended and the word's verdict", () => {
+    select();
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
+    appState.trainingAutopilot = { status: "flying", request };
+    const { unmount } = render(<TrainingSentenceBar />);
+    expect(screen.getByText("the autopilot (live): flying heading 225° from step 8 …")).toBeTruthy();
+    unmount();
+    const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, parsed.value);
+    if (!answer.ok) throw new Error(answer.problem);
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0 };
+    render(<TrainingSentenceBar />);
+    expect(screen.getByText(/the autopilot \(live\): heading 225°, steps 8–10, flown on to step 12 — reached the point a lead after the next heading word was said, where this word's band ends after 8 s \(observed 8 s\); the word: inside · computed in 0\.42 s/)).toBeTruthy();
   });
 
   it("marks each word with the executor's verdict, and none where a word has no check of its own", () => {

@@ -28,6 +28,11 @@
  * left (teal inside its envelope, red outside, hollow grey not judged, not reached or superseded; none for
  * a word with no check of its own) and its outcome in the header; the PRIOR's likelihood of this flight in
  * the header, with the button that opens its window (`TrainingPriorWindow`).
+ *
+ * THE EXECUTOR, LIVE (`trainingAutopilot`): clicking a band also PICKS its word for the live executor (`trainingPick`;
+ * clicking it again clears the pick) — the one place a flight is asked for, never the cursor; the header's line reads
+ * out the segment as the backend is flying it or flew it (`TrainingAutopilotCard.autopilotSummary`); its lines go to the
+ * read-back window.
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
@@ -35,7 +40,9 @@ import { useApp } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
+import { autopilotSummary } from "./TrainingAutopilotCard";
 import {
+  TRAINING_AUTOPILOT_COLOR,
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
@@ -153,7 +160,7 @@ export default function TrainingSentenceBar() {
     trainingSelection, trainingLayers,
     trainingCursorS: cursorS, setTrainingCursorS: setCursorS,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
-    trainingExecutor, trainingPrior,
+    trainingExecutor, trainingPrior, trainingAutopilot, setTrainingPick,
   } = useApp();
   const frameRef = useRef<HTMLDivElement>(null);
   const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
@@ -203,10 +210,13 @@ export default function TrainingSentenceBar() {
   // the overlays are published for the selected flight; a stale one (a flight switch in flight) is not drawn
   const executor = trainingExecutor?.flight.flightKey === flight.flightKey ? trainingExecutor.flight : null;
   const prior = trainingPrior?.flight.flightKey === flight.flightKey ? trainingPrior : null;
+  const autopilot = trainingAutopilot?.request.flightKey === flight.flightKey ? trainingAutopilot : null;
+  const autopilotSegment = autopilot?.status === "ready" ? autopilot.segment : null;
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar">
-      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.track != null} />
+      <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.track != null}
+        autopilotTrack={autopilotSegment !== null} />
       <header className="training-sentence-head">
         <strong>{flight.callsign}</strong>
         <span>{flight.typecode ?? "type unknown"}</span>
@@ -236,6 +246,13 @@ export default function TrainingSentenceBar() {
             title="The negative log-likelihood of this flight's truth sentence under the prior (teacher-forced), per 2 s step.">
             the prior: {prior.flight.nllPerStep.toFixed(3)} nats per step here ({prior.overlay.readout.split}{" "}
             {prior.overlay.readout.model.nllPerStep.toFixed(4)})
+          </span>
+        ) : null}
+        {autopilot ? (
+          <span className="training-sentence-autopilot" role={autopilot.status === "flying" ? "status" : undefined}
+            style={{ color: autopilot.status === "failed" ? TRAINING_OUTSIDE_COLOR : TRAINING_AUTOPILOT_COLOR }}
+            title="The selected word's segment, flown by the executor on the backend when it was selected (the panel's switch).">
+            {autopilotSummary(autopilot, flight, vocabulary, candidates)}
           </span>
         ) : null}
         <span className="training-sentence-cursor-readout">
@@ -325,10 +342,12 @@ export default function TrainingSentenceBar() {
                   const choose = () => {
                     if (selected) {
                       setFocusColumn(null);
+                      setTrainingPick(null);
                       return;
                     }
                     setFocusColumn(column);
                     setCursorS(timeOf(run.row));
+                    setTrainingPick({ flightKey: flight.flightKey, column, row: run.row });
                   };
                   return (
                     <g
@@ -471,6 +490,7 @@ export default function TrainingSentenceBar() {
           onColumnChange={setFocusColumn}
           onClose={() => setReadbackOpen(false)}
           executor={executor}
+          autopilot={autopilotSegment}
         />
       ) : null}
       {priorOpen && prior ? (

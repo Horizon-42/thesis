@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import threading
 import time
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -30,6 +31,7 @@ class AeroVizBackendApp:
         optimization_backend: OptimizationBackend | None = None,
         dynamics_comparison_backend: DynamicsComparisonBackend | None = None,
         observed_trajectory_backend: ObservedTrajectoryBackend | None = None,
+        autopilot_segment_backend: Any = None,
     ) -> None:
         # The simulation endpoints run in-process (they are high-frequency and use
         # only casadi function evaluation, not the crash-prone NLP construction).
@@ -47,6 +49,19 @@ class AeroVizBackendApp:
         self.observed_trajectory_backend = (
             observed_trajectory_backend or ObservedTrajectoryBackend()
         )
+        # The Training view's live executor (`autopilot_segment`) is built on its first
+        # request: it imports torch and the ts_transformer package (~470 MB resident),
+        # which no other endpoint needs. Tests inject their own.
+        self._autopilot_segment_backend = autopilot_segment_backend
+        self._autopilot_segment_lock = threading.Lock()
+
+    def autopilot_segment_backend(self) -> Any:
+        with self._autopilot_segment_lock:
+            if self._autopilot_segment_backend is None:
+                from aeroviz_backend.autopilot_segment import AutopilotSegmentBackend
+
+                self._autopilot_segment_backend = AutopilotSegmentBackend()
+            return self._autopilot_segment_backend
 
     def handle_get(self, path: str) -> tuple[int, Any]:
         parsed = urlsplit(path)
@@ -111,6 +126,12 @@ class AeroVizBackendApp:
             return 200, self.dynamics_comparison_backend.average(payload), None
         if path == "/dynamics-comparison/history/clear":
             return 200, self.dynamics_comparison_backend.clear(payload), None
+        if path == "/autopilot/segment":
+            # the executor flies one word's segment of a Training flight, live
+            try:
+                return 200, self.autopilot_segment_backend().fly(payload), None
+            except FileNotFoundError as exc:
+                return 404, {"ok": False, "error": str(exc)}, None
         return 404, {"ok": False, "error": "not found"}, None
 
 

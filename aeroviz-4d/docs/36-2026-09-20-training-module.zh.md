@@ -2,7 +2,7 @@
 
 前端的 **Training** 任务页（顶栏 Observe 右边）把第二层模型的"语言"画出来：一架到达航班被读成了
 哪一句指令，这句话里每个词允许飞机在哪里（词的包络，也就是"飞行盒"），航迹有没有待在里面。
-它不训练模型，不调后端，不写磁盘，只读导出好的 JSON。
+它不训练模型，不写磁盘；除了 §4.7 的"实时执行器"（选中一个词，后端现飞这一段）之外不调后端，只读导出好的 JSON。
 
 词表本身的定义见 `4dTrajectory/ts_transformer/docs/2026-09-23_instruction_vocabulary_design.zh.md`
 （下文简称"词表设计"）。本文只写前端这一侧：数据怎么来、每个词画成什么、界面上有什么。
@@ -13,11 +13,12 @@
 
 | 项 | 内容 |
 |---|---|
-| 词表 | 读法 `instruction-v3`（航向词按步读，词表设计 §10.1）。**v3 的规格还没写**：前端钉住的规格 sha `TRAINING_SPEC_SHA256` 仍是 `instruction-v2` 的 `103a6eae6b90`，所以现在任何 v3 集合都会按规格 sha 被拒读；写 v3 规格的那一次改动（另一个会话，分支 `dev-vocab-v3`）把它换成新 sha |
+| 词表 | 读法 `instruction-v3`（航向词按步读，词表设计 §10.1）。前端钉住的规格 sha `TRAINING_SPEC_SHA256` 是 **`145d6911e75b`**（2026-09-25：按运行日划分后在新训练集上重新测量，产物 `4dTrajectory/outputs/POOLED/instruction_language/v4_20260924/`）——现在的执行器代码只飞这份产物（执行器规格 `v6_20260924`）。按航班划分的 `v3_20260924`（规格 `0b4ea75be36d`）上导出的 `instruction_v3` 集合和画在它上面的 `executor_v5_20260924` 叠加层从此按规格 sha 拒读 |
 | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v2`（2026-09-24 先验第二版：形状没变，第 0 步已知的五列是点质量、读数口径是第 0 步只算跑道） |
-| 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/data/trainingOverlays.ts`（叠加层的契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/hooks/useTrainingOverlays.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
+| 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/data/trainingOverlays.ts`（叠加层的契约与读取）、`src/data/trainingAutopilot.ts`（实时执行器的契约与请求，§4.7）、`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotCard}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/hooks/useTrainingOverlays.ts`、`src/hooks/useTrainingAutopilot.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
 | 分支 | v3 的导出与界面在 `dev-vocab-v3-frontend`（从 `dev-vocab-v3` 的 `ba77d65c` 分出）：代码与测试 `8f7a8640`，文档在其后一个提交；用户合并 |
-| 发布 | **v3 还没有任何集合**（没有 v3 产物可导）。盘上现有的 `instruction_v2` 集合（样本 v5）和画在上面的执行器 / 先验叠加层（执行器 v1）都按名字拒读：集合按读法，叠加层按所画集合与格式名。它们的发布记录见仓库 `docs/CHANGELOG.md` 2026-09-24 各条 |
+| 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。上面还没有叠加层（执行器 v6 的验证集回放、先验第三版的导出都没发布到它上面）；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md` |
+| 实时执行器 | 后端 `POST /autopilot/segment`（`aeroviz_backend/autopilot_segment.py`）：在句子条上点一个词，执行器从观测飞机说这个词时的状态飞这个词的一段（到它的包络结束之处：同列下一个词说出的地方，航向词再往后一个提前量；到了句子末尾就飞到落地），只判这个词。执行器代码一行不改；每次都重新飞，不读任何回放或叠加层（§4.7）。用哪份执行器规格由后端按"现在的执行器代码接受的那一份"自动找：`dev-two-tier` 上是 `v6_20260924`；`dev-prior-v3`（执行器改成可逐步推进）合并后自动换成 `v7_20260925`，已在它的代码上试飞过（KRDU 三段，与 v6 的结果相同）。2026-09-25 在五个机场 200 架航班上逐段试飞 3,032 段：无异常，1,904 段飞到段尾、1,128 段落地；唯一的拒绝是没有机型动力学的航班（252 段，正式回放同样不飞）；每段耗时中位数 0.39 s、最长 3.6 s |
 | 测试 | Python：`tests/test_instruction_training_export.py` 11 条、`tests/test_training_overlays.py` 12 条（合成航班，写入全在 `tmp_path`，与 TypeScript 常量逐字比对）；ts 全套 1360 通过、14 条失败（都在 `test_autopilot.py`，是另一个会话正在改的执行器，改之前同样失败）；前端 Vitest 90 个文件 710 条；`tsc`、`npm run build`、`npm run typecheck:scripts` 无错。没有浏览器核对（没有 v3 数据可看） |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`、`instruction_v2`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 
@@ -321,6 +322,65 @@ python run_ts.py prior_training_export \
   的词就是它为青色，否则红色。鼠标移动改游标，点一行或一条带选中那一列。**这是教师强制的读法**：每一步都看到真值句子
   在它之前的词，不是先验自己说出一句话；先验自己说、执行器接着飞，是下一步（先验设计 §9）。
 
+### 4.7 实时执行器：选中一个词，现飞它的一段
+
+**用途**：验证执行器本身——任何一个词，交给执行器从真实的那一刻接着飞，看它飞成什么样、这个词判不判得过。**必须现算**：
+每次选中都由后端重新飞一遍，不读执行器的正式回放、不读叠加层（用户 2026-09-25 的要求）。
+
+**一段是什么**：句子条上的一个色块——某一列的一个词，从它说出的那一步 `row` 到同一列下一个词说出的那一步 `endRow`
+（这一列的最后一个词：到句子结束）。**飞到这个词的包络结束的地方 `stopRow`**：一般就是 `endRow`；航向词是 `endRow` 再加一个
+提前量（4 s，2 步），因为航向词的航向带本来就从它说出后一个提前量判到下一个航向词说出后一个提前量（词表设计 §10.1）——只飞到
+`endRow` 的话，每个航向词都少判最后几行，只持续一步的航向词（约占四成）根本没有行可判。多飞的这一个提前量里，下一个航向词
+照句子在 `endRow` 说出，执行器开始转向它，和整句回放里一样。`stopRow` 不超过句子末尾。
+
+**怎么飞**（后端 `aeroviz_backend/autopilot_segment.py`，执行器 `4dTrajectory/ts_transformer/autopilot/` 原样使用）：
+
+1. 初态是观测飞机在 `row` 这一步的真实状态：数据平面把这架航班"从第 `row` 行开始看"（`dataset.series_from_row`），执行器
+   照常从它的第一行起飞（`rollout_context`）。
+2. 执行器的第 0 步是 `row` 这一步六列生效的词（句子的第 0 步本来就是"飞机此刻正在做的事"，执行器设计 §2.4），之后是句子里
+   `row` 之后、`stopRow` 之前的词，每条词在执行器飞到观测飞机听到它的位置时说（规格的词钟 `track`，执行器设计 §11）。
+3. `stopRow` 不是句子末尾：句子后面补一个不说任何词的一步（`stopRow` 本身），执行器按平常的时限（这一段的步数 × 1.5）飞，飞完
+   后在词钟第一次走到 `stopRow` 的那个周期截断——在那里说的词不会起作用。执行器的循环不改、不逐步推进：多飞的部分直接丢掉。
+   先到了别的结局（碰地、动力学失败、时限）就按结局报。
+4. `stopRow` 是句子末尾（例如跑道指针、许可之后的航向、"未指定"速度）：像回放一样飞到落地或失败。句子最后一步才说的词
+   没有可飞的一步，按名字拒绝。
+5. 判定用执行器自己的判决（`judge.judge`），读的是这一段的句子（从 `row` 起重新编号），所以每个词的包络从执行器听到它的
+   地方重新画——选中的词就从观测飞机说它时的那个状态画。只报选中这个词：航向词 = 它的航向带在飞出航段上逐行在不在
+   ±容差内（离开航向词去自己切入航道的，记为出界）；许可 = 截获转弯的单调与转弯率 / 坡度、走廊进入与保持；高度词 = 它的
+   管子；下降角词 = 它作为锚点的每一根管子；速度词 = 过渡与速度带；跑道指针、"未许可"、"未指定"没有自己的检查。
+
+**用哪份执行器规格**：后端在 `4dTrajectory/outputs/POOLED/executor/*/spec.json` 里找**恰好一份**由现在这份执行器代码写、
+测的是这个集合所属产物的词表的规格（`replay.open_executor` 的全部核对）；没有或不止一份就拒绝并列出每一份的原因。集合的
+产物与划分从集合自己的样本文件（`producedBy.artefact`、`cohort.split`）读；航班从到达清单重建，必须与产物里存的信号逐行
+一致、重读出的句子与存的相同。重建过的航班在后端内存里留最近 8 架（重建要约 1 s）；飞与判每次都重新做。
+
+**返回什么**（`aeroviz-autopilot-segment-v1`，前端 `trainingAutopilot.ts` 镜像）：用的规格、执行器代码的 sha、词钟、耗时；
+这一段（列、`row`、`endRow`、是否飞到落地、观测飞机飞这一段用的时间、告诉执行器的每一个词）；结局（到了段尾 / 判决的结局、
+飞了多久、到段尾时与观测飞机在那一步的水平距离、高度差、地速差、越过入口的偏离）；选中词的判定与检查、航向词的航向带
+与判决读到的航迹；每个周期（1 s）的航迹（机场坐标、经纬度、MSL 与椭球高、地速、垂直速度、航迹角、飞过的距离）和指令
+（推力比例、坡度、载荷因数）。航迹的时间从航班第 0 步起算、距离从观测飞机在 `row` 处已飞过的距离起算、航迹角放在观测平滑
+航迹在 `row` 处的分支上，所以它和观测的线画在同一套坐标上。
+
+**前端的核对**：答复必须是这个机场、这个集合、这架航班、这一段（`endRow` 等于句子条上这个色块的终点），词表规格等于集合的，
+**告诉执行器的词必须正好是句子条上这一段显示的词**（`row` 处六列生效的词 + 段内说的每个词），航向带过 `headingBandProblem`
+的核对。对不上整份拒读，说出是哪一项。
+
+**界面**：
+
+- 左侧面板 Draw 里的开关 **the autopilot, live**（默认开）。开着时，**在句子条上点一个色块**就立刻请求这一段（`trainingPick`）；
+  只有点击才请求——游标不请求，因为图表上悬停就会移动游标，而飞出的线正是要悬停着看的。换一个词、或再点一次取消后再选，
+  就再飞一次；"Fly again" 手动再飞；换了航班，上一架的选择不再飞。开关下面是结果卡：飞的是哪个词、哪几步（航向词写出多飞到
+  哪一步），结局与用时（对照观测），到段尾时离观测飞机多远，词的判定和每一项检查，哪些限制起了作用，用的规格、代码 sha、
+  词钟、耗时（以及排在前一段后面等了多久：后端一次只飞一段）。后端没开、拒绝、答复对不上时说清楚原因。
+- 句子条头部一行：正在飞 / 飞完的摘要。
+- 三维：一架飞机从说这个词的地方把这一段"飞出来"（按实际时间加速，至少 8 倍、整段不超过 20 s，标签写出倍数、地速、高度、
+  坡度），身后的线随之变长；飞完后整段保留，地面投影为虚线，航向词出界的行在地面投影上画红。"Replay in 3D" 重放同一个
+  答复，不再请求。不用共享的 Cesium 时钟。
+- 读数核对窗口：平面图、航向图、高度图（对飞过的距离）、速度图各一条蓝色实线，从观测线上的那一点出发；选中的是航向词时
+  画出判决读到的航向带（蓝框，有出界行时红框）和出界的行。
+
+颜色：蓝 `#2563eb`（`TRAINING_AUTOPILOT_COLOR`），和执行器回放的青色分开——回放是事先算好的，这个是现飞的。
+
 ---
 
 ## 5 核对
@@ -339,7 +399,7 @@ python run_ts.py prior_training_export \
 
 ## 6 不做什么
 
-1. 不在界面上改词、重飞。重飞要执行器。
+1. 不在界面上改词。重飞只有 §4.7 一种：后端的执行器飞选中那个词的一段；前端不算任何飞行。
 2. 不录入人工核对的判定。那属于带 sha 的产物，不属于浏览器本地存储。
 3. 不浏览全体航班。导出是抽样，规则写在文件里、界面上照录。
 4. 不改 Observe 和比较视图。
@@ -358,6 +418,6 @@ python run_ts.py prior_training_export \
   `TRAINING_PRIOR_SCHEMA`）同理，由 `test_training_overlays.py` 逐字比对。
 - 集合重新导出后，画在它上面的叠加层会被按名字拒读（样本的写出时刻变了）：重新生成叠加层，用新的叠加层 id。
 - 长期事实一行写进 `aeroviz-4d/CLAUDE.md` 的索引，全文写进 `aeroviz-4d/docs/35-viewer-reference.md`
-  （AV19–AV25）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11；叠加层 R13）。
+  （AV19–AV26）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11；叠加层 R13）。
 - 词表的读法再换（例如 §10.2 的高度词）时，逐项检查本文 §2.3、§3、§4 里写到词的地方，与 `display.py` 同一次改动。
 - 日志式记录写进仓库的 `docs/CHANGELOG.md`。

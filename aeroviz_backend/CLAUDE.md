@@ -17,6 +17,13 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
   casadi load-factor controls (fake 8–11 km "drift").
 - Playback drift guard: `playbackDriftM` on every optimize response; stderr WARNING above
   `PLAYBACK_DRIFT_WARN_M = 50`.
+- **`POST /autopilot/segment`** (`autopilot_segment.py`, the Training view's live executor): flies one word's segment
+  of a Training flight (to where the word's envelope ends: a heading word's a lead past the next heading word) with
+  `ts_transformer.autopilot` AS IS — `replay.fly_sentences` over the segment's sentence, cut afterwards at its word
+  clock's stop; never a replay record or overlay. The spec is the ONE under
+  `4dTrajectory/outputs/POOLED/executor/` that `replay.open_executor` accepts for the set's artefact, or it is refused
+  naming each. Built lazily on the first request (torch + ts_transformer, ~470 MB); one flight at a time; the last 8
+  rebuilt flights cached. Full text: `aeroviz-4d/docs/35-viewer-reference.md` AV26.
 
 ## Observed tracks have TWO windows — the comparison overlay must use the model one
 

@@ -38,6 +38,14 @@
  * flown rows outside the heading word it was told, red on its ground trace (its judge's own row verdicts): entities
  * of their own, so switching it redraws nothing else and never moves the camera.
  *
+ * THE EXECUTOR, LIVE (`trainingAutopilot`, ready): the selected word's segment as the backend flew it — an aircraft
+ * flies it out from where the word was said (`autopilotPlaybackSpeedup` × real time — at least 8×, faster for a segment
+ * that would take more than 20 s — from the moment the answer arrived or "Replay in 3D" was pressed), its line growing
+ * behind it and labelled with the speed-up, its ground speed, height and bank; the whole flown line stays, and when the flight is done its ground trace is draped dashed, with — for a heading
+ * word, with the heading bands on — its judged rows outside the word red. The aircraft's position is a
+ * CallbackProperty read on each frame (the viewer renders continuously), not a time-sampled entity: `viewer.clock`
+ * belongs to Observe.
+ *
  * STATIC ENTITIES, NOT TIME-SAMPLED ONES: a time-dynamic entity would drive the shared
  * `viewer.clock`, which belongs to Observe's playback.
  */
@@ -48,6 +56,7 @@ import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import {
+  TRAINING_AUTOPILOT_COLOR,
   TRAINING_CANDIDATE_COLOR,
   TRAINING_CAPTURE_TURN_COLOR,
   TRAINING_COLUMN_COLOR,
@@ -75,6 +84,7 @@ import {
   type TrainingWordRun,
 } from "../data/trainingSample";
 import type { TrainingExecutorFlight, TrainingExecutorTrack } from "../data/trainingOverlays";
+import type { TrainingAutopilotTrack, TrainingAutopilotView } from "../data/trainingAutopilot";
 
 export const TRAINING_ENTITY = {
   track: "training-track",
@@ -103,7 +113,23 @@ export const TRAINING_ENTITY = {
   executorGround: "training-executor-ground",
   executorEnd: "training-executor-end",
   executorOutside: (run: number) => `training-executor-outside-${run}`,
+  /** The live executor's segment: its flown line, the aircraft flying it out, where it began, its ground trace (once
+   *  flown) and its rows outside the selected heading word. */
+  autopilotTrack: "training-autopilot-track",
+  autopilotAircraft: "training-autopilot-aircraft",
+  autopilotStart: "training-autopilot-start",
+  autopilotGround: "training-autopilot-ground",
+  autopilotOutside: (run: number) => `training-autopilot-outside-${run}`,
 } as const;
+
+/** How much faster than real time the live executor's aircraft flies its segment out in 3D: at least this ... */
+export const AUTOPILOT_PLAYBACK_MIN_SPEEDUP = 8;
+/** ... and fast enough that no segment takes longer than this, in seconds (the label says the speed-up). */
+export const AUTOPILOT_PLAYBACK_MAX_S = 20;
+
+export function autopilotPlaybackSpeedup(flownS: number): number {
+  return Math.max(AUTOPILOT_PLAYBACK_MIN_SPEEDUP, flownS / AUTOPILOT_PLAYBACK_MAX_S);
+}
 
 const ALPHA = TRAINING_ENVELOPE_ALPHA;
 /** An envelope's edge, at rest and when it is the selected word's (px). */
@@ -125,6 +151,30 @@ export function trainingTrackPositions(flight: TrainingFlight): number[] {
 /** The executor's flown track as Cesium's [lon, lat, height, …] — at its ellipsoid height, as the exporter wrote it. */
 export function executorTrackPositions(track: TrainingExecutorTrack): number[] {
   return track.lon.flatMap((value, index) => [value, track.lat[index], track.altitudeHaeM[index]]);
+}
+
+/** The live executor's flown segment as Cesium's [lon, lat, height, …] — at its ellipsoid height, as the backend wrote it. */
+export function autopilotTrackPositions(track: TrainingAutopilotTrack): number[] {
+  return track.lon.flatMap((value, index) => [value, track.lat[index], track.altitudeHaeM[index]]);
+}
+
+/** Where the live executor is ``flownS`` seconds into its segment: the last point at or before it and the fraction of
+ *  the way to the next (1 at and past the segment's end). */
+export function autopilotFlownAt(track: TrainingAutopilotTrack, flownS: number): { index: number; fraction: number } {
+  const target = track.tS[0] + Math.max(flownS, 0);
+  const last = track.tS.length - 1;
+  if (target >= track.tS[last]) return { index: last, fraction: 1 };
+  let index = 0;
+  while (index + 1 < last && track.tS[index + 1] <= target) index += 1;
+  return { index, fraction: (target - track.tS[index]) / (track.tS[index + 1] - track.tS[index]) };
+}
+
+/** The aircraft's label at a flown point: the playback's speed-up, ground speed, geometric MSL height and bank (the
+ *  command of the cycle it is in; none after the last). */
+export function autopilotAircraftLabel(track: TrainingAutopilotTrack, index: number, speedup: number): string {
+  const bank = track.bankRightDeg[Math.min(index, track.bankRightDeg.length - 1)] ?? 0;
+  return `autopilot ×${speedup.toFixed(0)} · ${track.groundSpeedMps[index].toFixed(0)} m/s · ${track.altitudeM[index].toFixed(0)} m · bank ` +
+    `${Math.abs(bank).toFixed(0)}°${Math.abs(bank) < 0.5 ? "" : bank > 0 ? " R" : " L"}`;
 }
 
 /** A plan line as Cesium's flat [lon, lat, …]. */
@@ -217,7 +267,8 @@ export function trainingFocusStretch(flight: TrainingFlight, word: TrainingWordR
 const colour = (css: string, alpha = 1) => Cesium.Color.fromCssColorString(css).withAlpha(alpha);
 
 export default function useTrainingTrackLayer(): void {
-  const { viewer, mode, trainingSelection, trainingLayers, trainingCursorS, trainingColumn, trainingExecutor } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers, trainingCursorS, trainingColumn, trainingExecutor,
+    trainingAutopilot } = useApp();
 
   // THE EXECUTOR'S REPLAY of the selected flight, drawn and removed on its own.
   const executorFlight: TrainingExecutorFlight | null =
@@ -301,6 +352,106 @@ export default function useTrainingTrackLayer(): void {
       viewer.scene.requestRender();
     };
   }, [viewer, executorFlight, headingBands]);
+
+  // THE EXECUTOR, LIVE: the selected word's segment, flown out, then kept whole.
+  const autopilot: Extract<TrainingAutopilotView, { status: "ready" }> | null =
+    mode === "training" && trainingAutopilot?.status === "ready"
+      && trainingAutopilot.request.flightKey === trainingSelection?.flight.flightKey ? trainingAutopilot : null;
+  const stepS = trainingSelection?.vocabulary.stepS ?? null;
+  useEffect(() => {
+    if (!isCesiumViewerUsable(viewer) || autopilot === null || stepS === null) return;
+    const { segment, playedAt } = autopilot;
+    const track = segment.track;
+    if (track.lon.length < 2) return;
+    const added: string[] = [];
+    const add = (options: Cesium.Entity.ConstructorOptions & { id: string }) => {
+      added.push(options.id);
+      viewer.entities.add(options);
+    };
+    const positions = Cesium.Cartesian3.fromDegreesArrayHeights(autopilotTrackPositions(track));
+    const last = positions.length - 1;
+    const flownS = track.tS[last] - track.tS[0];
+    const speedup = autopilotPlaybackSpeedup(flownS);
+    const now = () => autopilotFlownAt(track, ((Date.now() - playedAt) / 1000) * speedup);
+    const aircraftAt = ({ index, fraction }: { index: number; fraction: number }) => (index === last
+      ? positions[last] : Cesium.Cartesian3.lerp(positions[index], positions[index + 1], fraction, new Cesium.Cartesian3()));
+    add({
+      id: TRAINING_ENTITY.autopilotTrack,
+      name: "The autopilot's flown segment",
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => {
+          const at = now();
+          return at.index === last ? positions : [...positions.slice(0, at.index + 1), aircraftAt(at)];
+        }, false),
+        width: 4,
+        material: colour(TRAINING_AUTOPILOT_COLOR),
+        depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: colour(TRAINING_AUTOPILOT_COLOR, 0.55) }),
+      },
+    });
+    add({
+      id: TRAINING_ENTITY.autopilotStart,
+      name: "Where the autopilot took over: the observed state as the selected word was said",
+      position: positions[0],
+      point: { pixelSize: 8, color: colour(TRAINING_AUTOPILOT_COLOR), outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    });
+    add({
+      id: TRAINING_ENTITY.autopilotAircraft,
+      name: "The autopilot's aircraft",
+      position: new Cesium.CallbackPositionProperty(() => aircraftAt(now()), false),
+      point: { pixelSize: 12, color: colour(TRAINING_AUTOPILOT_COLOR), outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: {
+        text: new Cesium.CallbackProperty(() => autopilotAircraftLabel(track, now().index, speedup), false),
+        font: "600 12px sans-serif",
+        fillColor: colour(TRAINING_AUTOPILOT_COLOR),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -20),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    // once flown out: the ground trace, and the judged rows outside the selected heading word
+    const drape = () => {
+      if (!isCesiumViewerUsable(viewer)) return;
+      add({
+        id: TRAINING_ENTITY.autopilotGround,
+        name: "The autopilot's ground trace",
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArray(track.lon.flatMap((lon, index) => [lon, track.lat[index]])),
+          clampToGround: true,
+          width: 2,
+          material: new Cesium.PolylineDashMaterialProperty({ color: colour(TRAINING_AUTOPILOT_COLOR, 0.6) }),
+        },
+      });
+      const band = segment.word.heading;
+      const judged = segment.judgedTrackDeg;
+      if (headingBands && band !== null && judged !== null) {
+        // the judged steps are every (step / cycle)-th flown point; the band's rows are the flight's
+        const every = Math.round(stepS / segment.executor.cycleS);
+        const lon = track.lon.filter((_, index) => index % every === 0).slice(0, judged.length);
+        const lat = track.lat.filter((_, index) => index % every === 0).slice(0, judged.length);
+        const shifted = { ...band, firstRow: band.firstRow - segment.segment.row, stopRow: band.stopRow - segment.segment.row };
+        trainingBandOutsideGround(lon, lat, shifted).forEach((degrees, run) => add({
+          id: TRAINING_ENTITY.autopilotOutside(run),
+          name: "The autopilot off the selected heading word",
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArray(degrees), clampToGround: true, width: GROUND_ROWS_WIDTH,
+            material: colour(TRAINING_OUTSIDE_COLOR),
+          },
+        }));
+      }
+    };
+    const remaining = playedAt + (flownS / speedup) * 1000 - Date.now();
+    const timer = remaining > 0 ? window.setTimeout(drape, remaining) : null;
+    if (timer === null) drape();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      if (!isCesiumViewerUsable(viewer)) return;
+      for (const id of added) viewer.entities.removeById(id);
+    };
+  }, [viewer, autopilot, stepS, headingBands]);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer)) return;

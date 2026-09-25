@@ -7,6 +7,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  autopilotAircraftLabel,
+  autopilotFlownAt,
+  autopilotPlaybackSpeedup,
+  autopilotTrackPositions,
+  AUTOPILOT_PLAYBACK_MAX_S,
+  AUTOPILOT_PLAYBACK_MIN_SPEEDUP,
   executorTrackPositions,
   planDegrees,
   planRingDegrees,
@@ -23,6 +29,9 @@ import { parseTrainingSample, trainingWordAt, type TrainingSelection } from "../
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { mockExecutorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay } from "../../data/trainingOverlays";
+import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
+import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
+import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
 
 function selection(position = 0): TrainingSelection {
   const parsed = parseTrainingSample(mockSample());
@@ -131,5 +140,37 @@ describe("useTrainingTrackLayer helpers", () => {
     // the last word runs to the last row
     const last = trainingWordAt(item, "altitude", 30);
     expect(trainingFocusStretch(item, last)).toEqual(trainingTrackPositions(item).slice(20 * 3));
+  });
+});
+
+describe("the live executor in 3D", () => {
+  function track() {
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
+    const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, parsed.value);
+    if (!answer.ok) throw new Error(answer.problem);
+    return answer.value.track;
+  }
+
+  it("flattens the flown segment at its ellipsoid height", () => {
+    const flown = track();
+    expect(autopilotTrackPositions(flown).slice(0, 3)).toEqual([flown.lon[0], flown.lat[0], flown.altitudeHaeM[0]]);
+  });
+
+  it("finds the aircraft between two flown points, and at the last from the segment's end on", () => {
+    const flown = track();                                    // 16 … 24 s, one point a second
+    expect(autopilotFlownAt(flown, 0)).toEqual({ index: 0, fraction: 0 });
+    expect(autopilotFlownAt(flown, 2.5)).toEqual({ index: 2, fraction: 0.5 });
+    expect(autopilotFlownAt(flown, 4)).toEqual({ index: 4, fraction: 0 });
+    expect(autopilotFlownAt(flown, 8)).toEqual({ index: 8, fraction: 1 });
+    expect(autopilotFlownAt(flown, 99)).toEqual({ index: 8, fraction: 1 });
+    expect(autopilotFlownAt(flown, -3)).toEqual({ index: 0, fraction: 0 });
+  });
+
+  it("plays a segment at least 8× and never longer than 20 s, and says how fast", () => {
+    expect(autopilotPlaybackSpeedup(60)).toBe(AUTOPILOT_PLAYBACK_MIN_SPEEDUP);
+    expect(autopilotPlaybackSpeedup(600)).toBe(600 / AUTOPILOT_PLAYBACK_MAX_S);
+    expect(autopilotAircraftLabel(track(), 1, 8)).toBe("autopilot ×8 · 110 m/s · 1110 m · bank 12° L");
   });
 });

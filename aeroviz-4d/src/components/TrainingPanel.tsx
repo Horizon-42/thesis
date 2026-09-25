@@ -19,13 +19,20 @@
  * flight's truth sentence and the prior's predictions over it, each behind its own switch, with their readouts —
  * the replay's gate table and the prior's val readout — folded below the switches. A set with none says so and names
  * the command that writes one; nothing is drawn in its place.
+ *
+ * And THE EXECUTOR, LIVE (`useTrainingAutopilot`, on at first): the selected word's segment is flown by the backend
+ * when it is selected — not read from any overlay — and its answer is shown below the switches
+ * (`TrainingAutopilotCard`) and drawn in the sentence bar, the read-back window and 3D.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { useApp, type TrainingLayers } from "../context/AppContext";
 import useTrainingOverlays, { type OverlayKindState } from "../hooks/useTrainingOverlays";
+import useTrainingAutopilot from "../hooks/useTrainingAutopilot";
+import TrainingAutopilotCard from "./TrainingAutopilotCard";
 import { isMissingJsonAsset } from "../utils/fetchJson";
 import {
+  TRAINING_AUTOPILOT_COLOR,
   TRAINING_CANDIDATE_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
@@ -160,6 +167,7 @@ export default function TrainingPanel() {
   const [sampleState, setSampleState] = useState<SampleState>({ status: "idle" });
   const [flightKey, setFlightKey] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState<boolean>(false);
+  const [autopilotOn, setAutopilotOn] = useState<boolean>(true);
 
   // ── the manifest ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -229,6 +237,7 @@ export default function TrainingPanel() {
   const overlays = useTrainingOverlays(activeAirportCode || null, sample, flightKey);
   const executorOverlay = overlays.executor.shown && overlays.executor.load.status === "ready" ? overlays.executor.load.overlay : null;
   const priorOverlay = overlays.prior.shown && overlays.prior.load.status === "ready" ? overlays.prior.load.overlay : null;
+  const autopilot = useTrainingAutopilot(autopilotOn, activeAirportCode || null, sample);
   const executorFlights = useMemo(
     () => new Map((executorOverlay?.flights ?? []).map((flight) => [flight.flightKey, flight])),
     [executorOverlay],
@@ -332,6 +341,19 @@ export default function TrainingPanel() {
                   text="the executor's replay: its flown track and each word's verdict" />
                 <OverlaySwitch state={overlays.prior} colour={TRAINING_EXECUTOR_COLOR} setId={sample.setId} airport={airport}
                   text="the prior's predictions at each step (teacher-forced)" />
+                {/* THE EXECUTOR, LIVE: flown by the backend when a word is selected, never read from an overlay */}
+                <div className="training-overlay-switch">
+                  <label style={{ color: TRAINING_AUTOPILOT_COLOR }}>
+                    <input type="checkbox" checked={autopilotOn} onChange={(event) => setAutopilotOn(event.target.checked)} />
+                    the autopilot, live: fly the selected word's segment now
+                  </label>
+                  {autopilotOn ? (
+                    <TrainingAutopilotCard
+                      flight={sample.flights.find((item) => item.flightKey === flightKey) ?? null}
+                      vocabulary={sample.vocabulary} candidates={sample.candidates}
+                      selected={autopilot.selected} flyAgain={autopilot.flyAgain} />
+                  ) : null}
+                </div>
               </>
             ) : null}
           </fieldset>
