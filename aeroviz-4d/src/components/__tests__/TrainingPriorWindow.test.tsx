@@ -66,9 +66,20 @@ describe("TrainingPriorWindow", () => {
     expect(ticks.filter((line) => line.getAttribute("stroke") === TRAINING_EXECUTOR_COLOR)).toHaveLength(5);
   });
 
-  it("states the flight's likelihood beside the readout's", () => {
+  it("states the flight's likelihood, the readout's in its tooltip", () => {
     open();
-    expect(screen.getByText(/this flight 0\.250 nats per step · val: prior 0\.1778, repeat 0\.3444, previous word 0\.3260/)).toBeTruthy();
+    expect(screen.getByText("this flight 0.250 nats per step").getAttribute("title")).toMatch(/val as a whole: 0\.1778$/);
+  });
+
+  it("reads the first predicted step's truth as the word in force, which the prior must say", () => {
+    open(8);   // step 4: nothing is said there; the heading in force is 270°, said at step 0
+    const table = screen.getByRole("table", { name: "The prior at step 4" });
+    const heading = within(table).getByText("heading").closest("tr")!;
+    expect(heading.textContent).toMatch(/says 270°/);
+    expect(heading.textContent).toMatch(/^headingsays 270°0\.5001\.000/);    // P(truth) its word's, P(a word) 1
+    const first = heading.querySelector(".training-prior-word") as HTMLElement;
+    expect(first.textContent).toBe("270° 0.500");
+    expect(first.style.color).toBe("rgb(20, 184, 166)");                        // the truth, highlighted
   });
 
   it("selects a column from its row", () => {

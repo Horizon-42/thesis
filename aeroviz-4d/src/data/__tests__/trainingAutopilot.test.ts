@@ -14,7 +14,7 @@ import {
   TRAINING_AUTOPILOT_SEGMENT_END,
 } from "../trainingAutopilot";
 import { VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest } from "./trainingAutopilot.fixture";
+import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "./trainingAutopilot.fixture";
 
 function sample(): TrainingSample {
   const parsed = parseTrainingSample(mockSample());
@@ -29,7 +29,7 @@ function refusal(change: (raw: any) => void, request = HEADING_225): string {
   const asked = mockAutopilotRequest(set, VECTORED_KEY, request.column, request.row);
   const raw = mockAutopilotAnswer(set, asked);
   change(raw);
-  const result = parseTrainingAutopilot(raw, asked, set);
+  const result = parseTrainingAutopilot(raw, asked, mockSelection(set, asked));
   if (result.ok) throw new Error("the change was accepted");
   return result.problem;
 }
@@ -51,7 +51,7 @@ describe("parseTrainingAutopilot", () => {
   it("reads a heading word's segment, bound to the flight on screen", () => {
     const set = sample();
     const request = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
-    const parsed = parseTrainingAutopilot(mockAutopilotAnswer(set, request), request, set);
+    const parsed = parseTrainingAutopilot(mockAutopilotAnswer(set, request), request, mockSelection(set, request));
     if (!parsed.ok) throw new Error(parsed.problem);
     const segment = parsed.value;
     // a heading word is flown a lead past the next heading word, where its band ends
@@ -70,7 +70,7 @@ describe("parseTrainingAutopilot", () => {
   it("reads a column's last word, flown to its outcome", () => {
     const set = sample();
     const request = mockAutopilotRequest(set, VECTORED_KEY, "runway", 0);
-    const parsed = parseTrainingAutopilot(mockAutopilotAnswer(set, request), request, set);
+    const parsed = parseTrainingAutopilot(mockAutopilotAnswer(set, request), request, mockSelection(set, request));
     if (!parsed.ok) throw new Error(parsed.problem);
     expect(parsed.value.segment).toMatchObject({ toLanding: true, endRow: 60, stopRow: 60 });
     expect(parsed.value.end).toMatchObject({ reason: "landed", reachedSegmentEnd: null });
@@ -104,12 +104,22 @@ describe("parseTrainingAutopilot", () => {
       .toMatch(/is not judged and says no reason/);
   });
 
-  it("refuses a heading band past the segment's stop, and a verdict its band's rows do not allow", () => {
-    // the segment stops at step 12, where the next heading word's rows begin: its band may not run on to 13
+  it("refuses a heading band past the track its judge read, and a verdict its band's rows do not allow", () => {
+    // five judged steps from step 8: its rows end by step 13 — on the executor's own steps, which may run past the
+    // sentence's stop (12) when it hears the next heading word late
     expect(refusal((raw) => {
-      raw.word.heading.stopRow = 13; raw.word.heading.inside = [1, 1, 1];
-      raw.word.checks[0] = { ...raw.word.checks[0], inside: 3, rows: 3 };
-    })).toMatch(/stopRow is 13, not in 10…12/);
+      raw.word.heading.stopRow = 14; raw.word.heading.inside = [1, 1, 1, 1];
+      raw.word.checks[0] = { ...raw.word.checks[0], inside: 4, rows: 4 };
+    })).toMatch(/stopRow is 14, not in 10…13/);
+    const set = sample();
+    const request = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
+    const lagging = mockAutopilotAnswer(set, request);
+    lagging.word.heading.stopRow = 13;
+    lagging.word.heading.inside = [1, 1, 1];
+    lagging.word.checks[0] = { ...lagging.word.checks[0], inside: 3, rows: 3 };
+    const parsed = parseTrainingAutopilot(lagging, request, mockSelection(set, request));
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.word.heading).toMatchObject({ firstRow: 10, stopRow: 13 });
     // inside with no row judged
     expect(refusal((raw) => {
       raw.word.heading.stopRow = 10; raw.word.heading.inside = [];
@@ -132,7 +142,7 @@ describe("parseTrainingAutopilot", () => {
     raw.end.refused = "too short";
     raw.word = { status: "not judged", checks: [], reason: "the gate refused it", heading: null };
     raw.judgedTrackDeg = null;
-    const parsed = parseTrainingAutopilot(raw, request, set);
+    const parsed = parseTrainingAutopilot(raw, request, mockSelection(set, request));
     if (!parsed.ok) throw new Error(parsed.problem);
     expect(parsed.value.word.status).toBe("not judged");
   });
@@ -148,7 +158,7 @@ describe("parseTrainingAutopilot", () => {
     expect(refusal((raw) => { raw.track.bankRightDeg.push(0); })).toMatch(/bankRightDeg has 9 values, expected 8/);
     expect(refusal((raw) => { raw.timing.cycles = 3; })).toMatch(/3 cycles flown, but the track holds 9 states/);
     expect(refusal((raw) => { delete raw.timing.flyS; })).toMatch(/timing\.flyS is undefined, not a number/);
-    expect(refusal((raw) => { raw.track.tS = raw.track.tS.slice(0, 1); })).toMatch(/holds 1 states: a flown segment is at least one cycle/);
+    expect(refusal((raw) => { raw.track.tS = []; })).toMatch(/tS is empty/);
   });
 });
 

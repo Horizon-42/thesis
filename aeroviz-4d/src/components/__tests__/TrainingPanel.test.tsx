@@ -146,11 +146,13 @@ describe("TrainingPanel", () => {
     it("with no overlay published, keeps both switches off and names the commands that write them", async () => {
       render(<TrainingPanel />);
       await screen.findByText("TST1");
-      const replay = screen.getByLabelText(/the executor's replay/) as HTMLInputElement;
-      const prior = screen.getByLabelText(/the prior's predictions/) as HTMLInputElement;
+      const replay = screen.getByLabelText("Executor replay") as HTMLInputElement;
+      const prior = screen.getByLabelText("Prior predictions") as HTMLInputElement;
       expect(replay.disabled && prior.disabled).toBe(true);
       expect(replay.checked || prior.checked).toBe(false);
-      expect(screen.getByText(new RegExp(`run_ts\\.py executor_training_export .*--set ${SET_ID} --airport KXXX`))).toBeTruthy();
+      // the commands fold away under "none published"
+      expect(screen.getAllByText("none published")).toHaveLength(2);
+      expect(screen.getByText(new RegExp(`run_ts\\.py executor_training_export .*--set ${SET_ID} --airport KXXX`)).closest("details")).not.toBeNull();
       expect(screen.getByText(new RegExp(`run_ts\\.py prior_training_export .*--set ${SET_ID} --airport KXXX`))).toBeTruthy();
       await waitFor(() => expect(lastOf(setTrainingExecutor)).toBeNull());
     });
@@ -158,17 +160,21 @@ describe("TrainingPanel", () => {
     it("switches the envelopes everywhere through the shared layers", async () => {
       render(<TrainingPanel />);
       await screen.findByText("TST1");
-      fireEvent.click(screen.getByLabelText(/vertical: the altitude tubes/));
+      fireEvent.click(screen.getByLabelText("Altitude tubes + speed bands"));
       expect(setTrainingLayer).toHaveBeenCalledWith("vertical", false);
-      fireEvent.click(screen.getByLabelText(/heading words: each word's band over the rows it is judged on/));
+      fireEvent.click(screen.getByLabelText("Heading bands"));
       expect(setTrainingLayer).toHaveBeenCalledWith("headingBands", false);
-      fireEvent.click(screen.getByLabelText(/the capture: its turn and the corridor/));
+      fireEvent.click(screen.getByLabelText("Capture turn + corridor"));
       expect(setTrainingLayer).toHaveBeenCalledWith("corridor", false);
+      // what each shows is its tooltip
+      expect(screen.getByLabelText("Altitude tubes + speed bands").closest("label")!.getAttribute("title"))
+        .toMatch(/each altitude word's tube, and on the speed chart each speed word's transition and band/);
     });
 
-    it("states the draw it came from", async () => {
+    it("states the draw it came from, in full in its tooltip", async () => {
       render(<TrainingPanel />);
-      expect(await screen.findByText(/2 flights · a test draw\./)).toBeTruthy();
+      const note = await screen.findByText(/^2 flights · val, 1 per stratum/);
+      expect(note.getAttribute("title")).toMatch(/a test draw/);
     });
   });
 
@@ -204,7 +210,7 @@ describe("TrainingPanel", () => {
     it("stops publishing an overlay switched off", async () => {
       render(<TrainingPanel />);
       await waitFor(() => expect(lastOf(setTrainingExecutor)?.flight.flightKey).toBe(VECTORED_KEY));
-      fireEvent.click(screen.getByLabelText(/the executor's replay/));
+      fireEvent.click(screen.getByLabelText("Executor replay"));
       await waitFor(() => expect(lastOf(setTrainingExecutor)).toBeNull());
       expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY);
     });

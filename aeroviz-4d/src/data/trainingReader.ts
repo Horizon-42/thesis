@@ -15,7 +15,7 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
 /** A field refused by name. */
 export class Refusal extends Error {}
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -204,11 +204,6 @@ export function recordOf<T>(value: unknown, where: string, read: (value: unknown
 
 export function asNumber(value: unknown, where: string): number {
   if (!isNumber(value)) throw new Refusal(`${where} is ${JSON.stringify(value)}, not a number`);
-  return value;
-}
-
-export function asCount(value: unknown, where: string): number {
-  if (!isNumber(value) || !Number.isInteger(value) || value < 0) throw new Refusal(`${where} is ${JSON.stringify(value)}, not a count`);
   return value;
 }
 

@@ -1,48 +1,44 @@
 /**
  * TrainingSentenceBar.tsx
  * -----------------------
- * The sentence as a picture: the six columns as six rows — runway pointer, approach, heading,
- * altitude, angle, speed, in the vocabulary's order — against the flight's own time. Design:
- * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
+ * The sentence as a picture: the six columns as six rows — runway pointer, approach, heading, altitude, angle, speed, in
+ * the vocabulary's order — against the flight's own time. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
- * A BAND IS A WORD IN FORCE, from the step it was issued to the step the next word of its column
- * replaces it. Step 0 carries all six columns, so every row opens with a band at 0; after that a
- * column is "unchanged" until its next word, and most steps say nothing at all. The tick at a
- * band's left edge is the issue itself; the numbers along the top count the steps that say
- * anything, and the header counts the silent ones.
+ * A BAND IS A WORD IN FORCE, from the step it was issued to the step the next word of its column replaces it. Step 0
+ * carries all six columns, so every row opens with a band at 0; after that a column is "unchanged" until its next word,
+ * and most steps say nothing at all. The tick at a band's left edge is the issue itself; the numbers along the top are
+ * the steps that say anything. The three moments that are not words — the clearance, the capture of the final and the
+ * speed becoming "unspecified" — are dashed lines across the rows.
  *
- * The three moments that are not words — the clearance, the capture of the final and the speed
- * becoming "unspecified" — are marked as lines across the rows. The header reads out the
- * labeller's own verdicts; nothing here recomputes one.
+ * THE HEADER IS SHORT: the callsign (its type, stratum and counts in its tooltip), the runway, one chip of the labeller's
+ * own verdicts, one of the executor's replay when it is on, the live executor's line, the cursor, and the buttons —
+ * Fly, Read-back, Prior, and ⓘ for the notes. Every chip carries its full reading in its tooltip.
  *
- * The cursor is in flight time and is moved by clicking a band or a step number: what it
- * reports is the artefact's own step, never a rounded pixel. It does NOT drive `viewer.clock`:
- * Training loads no CZML, and the clock belongs to Observe's playback.
+ * The cursor is in flight time and is moved by clicking a band or a step number: what it reports is the artefact's own
+ * step, never a rounded pixel. It does NOT drive `viewer.clock`: Training loads no CZML, and the clock belongs to
+ * Observe's playback.
  *
- * ONE COLUMN IS HIGHLIGHTED, NEVER A STEP. Clicking a band selects its word class
- * (`trainingColumn`) and puts the cursor at its issue; every view then highlights that column's word
- * in force at the cursor, and only it. The other columns' words at the same step are not "the same
- * moment" — their runs begin and end elsewhere. Clicking the selected band again clears it.
+ * ONE COLUMN IS HIGHLIGHTED, NEVER A STEP. Clicking a band selects its word class (`trainingColumn`) and puts the cursor
+ * at its issue; every view then highlights that column's word in force at the cursor, and only it. Clicking the selected
+ * band again clears it.
  *
- * THE OVERLAYS, when the panel publishes them: the EXECUTOR's verdict on each word as a dot at the band's
- * left (teal inside its envelope, red outside, hollow grey not judged, not reached or superseded; none for
- * a word with no check of its own) and its outcome in the header; the PRIOR's likelihood of this flight in
- * the header, with the button that opens its window (`TrainingPriorWindow`).
+ * THE OVERLAYS, when the panel publishes them: the EXECUTOR's verdict on each word as a dot at the band's left (teal
+ * inside its envelope, red outside, hollow grey not judged, not reached or superseded; none for a word with no check of
+ * its own); the PRIOR's window behind its button (`TrainingPriorWindow`). One window is open at a time.
  *
- * THE EXECUTOR, LIVE (`trainingAutopilot`): the header's "▶ Fly this segment" button PICKS the selected word for the
- * live executor (`trainingPick`; "↻ Fly again" once it has flown), and so does clicking a band while the panel's switch is
- * on (`trainingAutopilotAuto`; clicking the selected band again clears the pick) — never the cursor. The header's line
- * reads out the segment as the backend is flying it or flew it (`TrainingAutopilotCard.autopilotSummary`); its lines go to
- * the read-back window. The line says the word, whether it flew inside its envelope and the two times, no more
- * (`TrainingAutopilotStatus`); the panel's card says the rest.
+ * THE EXECUTOR, LIVE (`trainingAutopilot`): the Fly button PICKS the selected word for the live executor (`trainingPick`;
+ * "↻ Fly again" once it has flown), and so does clicking a band while the panel's switch is on (`trainingAutopilotAuto`;
+ * clicking the selected band again clears the pick) — never the cursor. Its line (`TrainingAutopilotStatus`) names the
+ * word it flew, whether it stayed inside its envelope and the two times.
  */
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useApp } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
 import { TrainingAutopilotStatus } from "./TrainingAutopilotCard";
+import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import {
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
@@ -51,10 +47,11 @@ import {
   TRAINING_RAW_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
-import { nextPick } from "../data/trainingAutopilot";
+import { autopilotColour, autopilotOnScreen, nextPick } from "../data/trainingAutopilot";
 import {
   executorWordAt,
   executorWordCounts,
+  overlayOnScreen,
   type TrainingExecutorFlight,
   type TrainingExecutorWord,
 } from "../data/trainingOverlays";
@@ -63,12 +60,13 @@ import {
   rowAtTime,
   trainingColumnRuns,
   trainingKindLabel,
-  trainingWordAt,
   trainingVerdicts,
+  trainingWordAt,
   trainingWordLabel,
   TRAINING_COLUMNS,
-  type TrainingColumn,
+  type TrainingFlight,
 } from "../data/trainingSample";
+import { checkMark, checkText, crossingText, TRAINING_COLUMN_LABEL, TRAINING_OUTCOME_TAG } from "../data/trainingText";
 
 // One SVG unit is one pixel: the bar is as wide as the dock and always VIEW_H tall.
 const GUTTER = 96;
@@ -85,20 +83,10 @@ const LABEL_MIN_W = 40;
 const STEP_LABEL_GAP = 14;
 const TICK_LABEL_GAP = 34;
 
-const ROW_LABEL: Record<TrainingColumn, string> = {
-  runway: "Runway",
-  approach: "Approach",
-  heading: "Heading",
-  altitude: "Altitude",
-  angle: "Angle",
-  speed: "Speed",
-};
-
 /**
- * Which of these ascending x positions may carry a text label: greedy from the left, keeping one
- * only when it clears the last kept by `minGap`. With `keepLast` the last position is always
- * kept, evicting the previous keeper if they would collide. The label is dropped, never the
- * step: its hit area and tooltip stay.
+ * Which of these ascending x positions may carry a text label: greedy from the left, keeping one only when it clears the
+ * last kept by `minGap`. With `keepLast` the last position is always kept, evicting the previous keeper if they would
+ * collide. The label is dropped, never the step: its hit area and tooltip stay.
  */
 export function spacedLabels(xs: number[], minGap: number, keepLast = false): boolean[] {
   const keep = xs.map(() => false);
@@ -124,28 +112,47 @@ export function spacedLabels(xs: number[], minGap: number, keepLast = false): bo
 }
 
 /** A word's executor verdict as the band's tooltip reads it. */
-export function executorVerdictText(word: TrainingExecutorWord): string {
-  const checks = word.checks.map((check) =>
-    `${check.name} ${check.ok ? "✓" : "✗"}${check.rows === null ? "" : ` (${check.inside}/${check.rows})`}`).join(", ");
+function executorVerdictText(word: TrainingExecutorWord): string {
+  const checks = word.checks.map(checkText).join(", ");
   const told = word.flownRow === null ? "" : `, told at its step ${word.flownRow}`;
   return `the executor: ${word.status}${told}${checks ? ` — ${checks}` : ""}${word.reason ? ` — ${word.reason}` : ""}`;
 }
 
-/** The header's line on the executor's replay of this flight. */
-export function executorSummary(flight: TrainingExecutorFlight): string {
-  if (!flight.flown) return `the executor: not flown — ${flight.group}`;
+/** The replay's chip — its outcome and its words inside of those judged — and its full reading, for the tooltip. */
+function replayChip(flight: TrainingExecutorFlight): { text: string; ok: boolean; title: string } {
+  if (!flight.flown) return { text: "replay: not flown", ok: false, title: `the executor's replay does not fly it: ${flight.group}` };
   const counts = executorWordCounts(flight);
-  const outcome = flight.outcome.replace(/_/g, " ");
-  const crossing = flight.crossing === null ? ""
-    : ` ${Math.abs(flight.crossing.crossM).toFixed(1)} m ${flight.crossing.crossM >= 0 ? "right" : "left"} of the centreline, ` +
-      `${flight.crossing.heightM.toFixed(1)} m above the threshold at ${formatSeconds(flight.crossing.atS)} s`;
-  const refused = flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`;
   // the judge's own tally, as the replay gate counts it (the word left to intercept the final on its own counts twice)
   const { wordsInside, wordsJudged } = flight.counts;
-  return `the executor (${flight.group}): ${outcome}${crossing} · ${wordsInside}/${wordsJudged} words ` +
-    `inside their envelopes${counts.notJudged ? `, ${counts.notJudged} not judged` : ""}` +
-    `${counts.notReached ? `, ${counts.notReached} not reached` : ""}${counts.superseded ? `, ${counts.superseded} superseded` : ""}` +
-    ` · evaluation ${flight.evaluation.replay} (observed ${flight.evaluation.observed})${refused}`;
+  const title = `The executor (${flight.group}) flew this sentence from row 0, each word said where the observed aircraft ` +
+    `heard it: ${TRAINING_OUTCOME_TAG[flight.outcome]}` +
+    (flight.crossing === null ? "" : `, ${crossingText(flight.crossing)} at ${formatSeconds(flight.crossing.atS)} s`) +
+    ` · ${wordsInside}/${wordsJudged} words inside their envelopes, each re-drawn from where the executor was told it` +
+    (counts.notJudged ? `, ${counts.notJudged} not judged` : "") + (counts.notReached ? `, ${counts.notReached} not reached` : "") +
+    (counts.superseded ? `, ${counts.superseded} superseded` : "") +
+    ` · evaluation ${flight.evaluation.replay} (observed ${flight.evaluation.observed})` +
+    (flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`);
+  return {
+    text: `replay: ${TRAINING_OUTCOME_TAG[flight.outcome]} · ${wordsInside}/${wordsJudged}`,
+    ok: flight.outcome === "landed" && wordsInside === wordsJudged, title,
+  };
+}
+
+/** The labeller's verdicts in one chip, and what each count leaves out, for the tooltip. */
+function verdictChip(flight: TrainingFlight): { text: string; title: string } {
+  const verdicts = trainingVerdicts(flight);
+  const capture = verdicts.captureTurn;
+  const captureText = capture === null ? "—"
+    : capture.progressOk && capture.rateOk ? "✓"
+      : `✗ ${[capture.progressOk ? null : "monotone", capture.rateOk ? null : "rate"].filter(Boolean).join(", ")}`;
+  return {
+    text: `heading ${verdicts.headingContained}/${verdicts.headingJudged} · capture ${captureText} · altitude ` +
+      `${verdicts.altitudeContained}/${verdicts.altitudeWords} · speed ${verdicts.speedContained}/${verdicts.speedWords}`,
+    title: "The labeller's own checks of this flight's envelopes (Reading.checks): heading words inside their bands" +
+      (verdicts.headingNotJudged ? ` (${verdicts.headingNotJudged} more with no row of their own: the lead reaches the clearance)` : "") +
+      `; the capture turn ${capture === null ? "— none, on the final at entry" : `monotone ${checkMark(capture.progressOk)}, rate ` +
+        `and bank ${checkMark(capture.rateOk)}`}; altitude tubes held; speed words held.`,
+  };
 }
 
 /** The dot a word's executor verdict draws: filled for a verdict, hollow for none; none for a word with no check. */
@@ -160,31 +167,18 @@ function verdictMark(status: TrainingExecutorWord["status"]): { fill: string; st
 
 export default function TrainingSentenceBar() {
   const {
-    trainingSelection, trainingLayers,
+    trainingSelection: selection, trainingLayers,
     trainingCursorS: cursorS, setTrainingCursorS: setCursorS,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
     trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick, trainingAutopilotAuto,
   } = useApp();
-  const frameRef = useRef<HTMLDivElement>(null);
-  const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
-  const [readbackOpen, setReadbackOpen] = useState<boolean>(false);
-  const [priorOpen, setPriorOpen] = useState<boolean>(false);
+  const [frame, frameW] = useMeasuredWidth(MIN_PLOT_W + GUTTER + PAD_R, DEFAULT_PLOT_W + GUTTER + PAD_R);
+  const [openWindow, setOpenWindow] = useState<"readback" | "prior" | null>(null);
   const [notesOpen, setNotesOpen] = useState<boolean>(false);
-  const flightKey = trainingSelection?.flight.flightKey ?? null;
 
-  useLayoutEffect(() => {
-    const node = frameRef.current;
-    if (!node) return;
-    const measure = () => setPlotW(Math.max(node.clientWidth - GUTTER - PAD_R, MIN_PLOT_W));
-    measure();
-    if (typeof ResizeObserver === "undefined") return;   // jsdom has no layout to observe
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [flightKey]);
-
-  if (!trainingSelection) return null;
-  const { flight, vocabulary, candidates } = trainingSelection;
+  if (!selection) return null;
+  const { flight, vocabulary, candidates } = selection;
+  const plotW = frameW - GUTTER - PAD_R;
   const { tS } = flight.signals;
   // Step r covers [r·step, (r+1)·step): the axis ends where the last step does.
   const endS = flight.rows * vocabulary.stepS;
@@ -192,6 +186,7 @@ export default function TrainingSentenceBar() {
   const xFor = (seconds: number) => GUTTER + (seconds / endS) * plotW;
   const verdicts = trainingVerdicts(flight);
   const cursorRow = rowAtTime(tS, cursorS);
+  const toggle = (name: "readback" | "prior") => setOpenWindow((open) => (open === name ? null : name));
 
   // The steps that SAY something, numbered; step 0 is the opening and is always complete.
   const issueRows = [...new Set(flight.words.events.map((event) => event.row))].sort((a, b) => a - b);
@@ -199,135 +194,96 @@ export default function TrainingSentenceBar() {
   const tickRows = [...issueRows, flight.rows];
   const tickShown = spacedLabels(tickRows.map((row) => xFor(timeOf(row))), TICK_LABEL_GAP, true);
   const markers = [
-    { row: flight.joinRow, label: "cleared", title: `cleared to join the final at ${formatSeconds(timeOf(flight.joinRow))} s` },
-    {
-      row: flight.captureRow, label: "captured",
+    { row: flight.joinRow, key: "cleared", colour: TRAINING_COLUMN_COLOR.approach,
+      title: `cleared to join the final at ${formatSeconds(timeOf(flight.joinRow))} s` },
+    { row: flight.captureRow, key: "captured", colour: TRAINING_CORRIDOR_COLOR,
       title: `the final captured at ${formatSeconds(timeOf(flight.captureRow))} s, ` +
-        `${(flight.captureBeforeThresholdM / 1000).toFixed(1)} km before the threshold`,
-    },
-    { row: flight.unspecifiedRow, label: "speed unspecified", title: `speed left to the pilot from ${formatSeconds(timeOf(flight.unspecifiedRow))} s` },
+        `${(flight.captureBeforeThresholdM / 1000).toFixed(1)} km before the threshold` },
+    { row: flight.unspecifiedRow, key: "unspecified", colour: TRAINING_COLUMN_COLOR.speed,
+      title: `speed left to the pilot from ${formatSeconds(timeOf(flight.unspecifiedRow))} s` },
   ];
-  const tick = (ok: boolean) => (ok ? "✓" : "✗");
-  const capture = verdicts.captureTurn;
   const landing = flight.envelopes.approach.landing;
-  // the overlays are published for the selected flight; a stale one (a flight switch in flight) is not drawn
-  const executor = trainingExecutor?.flight.flightKey === flight.flightKey ? trainingExecutor.flight : null;
-  const prior = trainingPrior?.flight.flightKey === flight.flightKey ? trainingPrior : null;
-  const autopilot = trainingAutopilot?.request.flightKey === flight.flightKey ? trainingAutopilot : null;
-  const autopilotSegment = autopilot?.status === "ready" ? autopilot.segment : null;
-  // the button: the selected word's segment, and what the live executor is doing with it
+  // the overlays and the live executor, when they are of the flight on screen (not the last one's, in flight)
+  const executor = overlayOnScreen(trainingExecutor, selection)?.flight ?? null;
+  const prior = overlayOnScreen(trainingPrior, selection);
+  const autopilot = autopilotOnScreen(trainingAutopilot, selection);
+  const replay = executor === null ? null : replayChip(executor);
+  const verdictsChip = verdictChip(flight);
+  // the Fly button: the selected word's segment, and what the live executor is doing with it
   const focusRun = focusColumn === null ? null : trainingWordAt(flight, focusColumn, cursorRow);
-  const pickedHere = focusRun !== null && trainingPick !== null && trainingPick.flightKey === flight.flightKey
-    && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
+  const pickedHere = focusRun !== null && trainingPick !== null && trainingPick.column === focusColumn
+    && trainingPick.row === focusRun.row;
   const flyingHere = pickedHere && autopilot?.status === "flying";
-  const flyLabel = focusRun === null ? "▶ Fly a segment — select a word first"
-    : flyingHere ? "Flying …" : pickedHere && autopilot !== null ? "↻ Fly again" : "▶ Fly this segment";
+  const flyLabel = flyingHere ? "Flying …" : pickedHere && autopilot !== null ? "↻ Fly again" : "▶ Fly";
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar">
       <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.flown === true}
-        autopilotTrack={autopilotSegment !== null} />
+        autopilotColour={autopilot?.status === "ready" ? autopilotColour(autopilot.segment) : null} />
       <header className="training-sentence-head">
-        <strong>{flight.callsign}</strong>
-        <span>{flight.typecode ?? "type unknown"}</span>
-        <span>runway {flight.runway}</span>
-        <span>{flight.stratum}</span>
-        <span>
-          {flight.rows} steps · {verdicts.instructionsAfterStep0} words after step 0 ·{" "}
-          {verdicts.silentSteps} of {flight.rows - 1} later steps silent
-        </span>
-        <span
-          className="training-sentence-arrival"
-          title="The labeller's own checks of this flight's envelopes (Reading.checks)."
-        >
-          heading {verdicts.headingContained}/{verdicts.headingJudged} in their bands
-          {verdicts.headingNotJudged ? ` (${verdicts.headingNotJudged} with no row of their own: the lead reaches the clearance)` : ""} ·
-          capture turn {capture === null ? "none (on the final at entry)" : `${tick(capture.progressOk)} ${tick(capture.rateOk)}`} ·
-          altitude {verdicts.altitudeContained}/{verdicts.altitudeWords} · speed {verdicts.speedContained}/{verdicts.speedWords}
-        </span>
-        {executor ? (
-          <span className="training-sentence-executor" style={{ color: TRAINING_EXECUTOR_COLOR }}
-            title="The executor flew this sentence from row 0, each word said where the observed aircraft heard it; its verdicts are the judge's, each word's envelope re-drawn from where the executor was told it.">
-            {executorSummary(executor)}
+        <strong title={`${flight.typecode ?? "type unknown"} · ${flight.stratum} · ${flight.rows} steps · ` +
+          `${verdicts.instructionsAfterStep0} words after step 0 · ${verdicts.silentSteps} of ${flight.rows - 1} later steps silent`}>
+          {flight.callsign}
+        </strong>
+        <span className="training-chip">runway {flight.runway}</span>
+        <span className="training-chip" title={verdictsChip.title}>{verdictsChip.text}</span>
+        {replay !== null ? (
+          <span className="training-chip training-sentence-executor" title={replay.title}
+            style={{ color: replay.ok ? TRAINING_EXECUTOR_COLOR : executor!.flown ? TRAINING_OUTSIDE_COLOR : TRAINING_RAW_COLOR }}>
+            {replay.text}
           </span>
         ) : null}
-        {prior ? (
-          <span className="training-sentence-prior"
-            title="The negative log-likelihood of this flight's truth sentence under the prior (teacher-forced), per 2 s step.">
-            the prior: {prior.flight.nllPerStep.toFixed(3)} nats per step here ({prior.overlay.readout.split}{" "}
-            {prior.overlay.readout.model.nllPerStep.toFixed(4)})
-          </span>
-        ) : null}
-        {autopilot ? (
-          <TrainingAutopilotStatus view={autopilot} flight={flight} vocabulary={vocabulary} candidates={candidates} />
-        ) : null}
-        <span className="training-sentence-cursor-readout">
-          t = {formatSeconds(cursorS)} s · step {cursorRow}
-        </span>
-        <button
-          type="button"
-          className="training-autopilot-fly"
-          disabled={focusRun === null || flyingHere}
+        {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection} /> : null}
+        <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
+        <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere}
           title={focusRun === null
-            ? "Click a band to select a word; the executor then flies that word's segment from where it was said."
+            ? "Select a word (click its band): the executor then flies that word's segment from where it was said."
             : `The executor flies ${focusColumn} from step ${focusRun.row} now, on the backend, from the observed state there.`}
-          onClick={() => setTrainingPick(nextPick(trainingPick, flight.flightKey, focusColumn!, focusRun!.row))}
-        >
+          onClick={() => setTrainingPick(nextPick(trainingPick, focusColumn!, focusRun!.row))}>
           {flyLabel}
         </button>
-        <button
-          type="button"
-          className="training-sentence-readback-button"
-          onClick={() => setReadbackOpen((open) => !open)}
-        >
-          {readbackOpen ? "Close read-back check" : "Read-back check"}
+        <button type="button" className="training-sentence-readback-button" aria-pressed={openWindow === "readback"}
+          title="The sentence against its track, envelope by envelope" onClick={() => toggle("readback")}>
+          Read-back
         </button>
         {prior ? (
-          <button type="button" className="training-sentence-readback-button" onClick={() => setPriorOpen((open) => !open)}>
-            {priorOpen ? "Close prior predictions" : "Prior predictions"}
+          <button type="button" className="training-sentence-readback-button" aria-pressed={openWindow === "prior"}
+            title={`What the prior gives each column at each step (teacher-forced) — this flight ` +
+              `${prior.flight.nllPerStep.toFixed(3)} nats per step, ${prior.overlay.readout.split} ` +
+              `${prior.overlay.readout.model.nllPerStep.toFixed(4)}`}
+            onClick={() => toggle("prior")}>
+            Prior
           </button>
         ) : null}
+        <button type="button" className="training-sentence-notes-toggle" aria-expanded={notesOpen}
+          aria-label={notesOpen ? "Hide the notes" : "How to read the bar"} onClick={() => setNotesOpen((open) => !open)}>
+          ⓘ
+        </button>
       </header>
 
-      <div className="training-sentence-frame" ref={frameRef}>
-        <svg
-          className="training-sentence-svg"
-          width={GUTTER + plotW + PAD_R}
-          height={VIEW_H}
-          viewBox={`0 0 ${GUTTER + plotW + PAD_R} ${VIEW_H}`}
-          role="img"
-          aria-label={`The sentence of ${flight.callsign} on runway ${flight.runway}`}
-        >
+      <div className="training-sentence-frame" ref={frame}>
+        <svg className="training-sentence-svg" width={GUTTER + plotW + PAD_R} height={VIEW_H}
+          viewBox={`0 0 ${GUTTER + plotW + PAD_R} ${VIEW_H}`} role="group"
+          aria-label={`The sentence of ${flight.callsign} on runway ${flight.runway}`}>
           {/* the steps that say something: numbers along the top, each a button */}
           {issueRows.map((row, index) => {
             const left = index === 0 ? GUTTER : xFor((timeOf(issueRows[index - 1]) + timeOf(row)) / 2);
-            const right = index === issueRows.length - 1
-              ? GUTTER + plotW
-              : xFor((timeOf(row) + timeOf(issueRows[index + 1])) / 2);
+            const right = index === issueRows.length - 1 ? GUTTER + plotW : xFor((timeOf(row) + timeOf(issueRows[index + 1])) / 2);
             const words = flight.words.events.filter((event) => event.row === row);
-            const name =
-              `Step ${row} at ${formatSeconds(timeOf(row))} s: ` +
-              words.map((event) => `${TRAINING_COLUMNS[event.column]} ${trainingWordLabel(vocabulary, candidates, TRAINING_COLUMNS[event.column], event.value)}`).join(", ");
+            const name = `Step ${row} at ${formatSeconds(timeOf(row))} s: ` + words.map((event) =>
+              `${TRAINING_COLUMNS[event.column]} ${trainingWordLabel(vocabulary, candidates, TRAINING_COLUMNS[event.column], event.value)}`).join(", ");
             return (
-              <g
-                key={`step-${row}`}
-                role="button"
-                tabIndex={0}
-                aria-label={name}
-                className="training-sentence-event"
+              <g key={`step-${row}`} role="button" tabIndex={0} aria-label={name} className="training-sentence-event"
                 onClick={() => setCursorS(timeOf(row))}
                 onKeyDown={(keyEvent) => {
                   if (keyEvent.key === "Enter" || keyEvent.key === " ") setCursorS(timeOf(row));
-                }}
-              >
+                }}>
                 <title>{name}</title>
                 <rect x={left} y={2} width={Math.max(right - left, 1)} height={HEAD_H - 6} fill="transparent" />
                 <line x1={xFor(timeOf(row))} x2={xFor(timeOf(row))} y1={HEAD_H - 6} y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
                   className="training-sentence-event-line" />
                 {stepShown[index] ? (
-                  <text x={xFor(timeOf(row))} y={HEAD_H - 9} textAnchor="middle" className="training-sentence-event-number">
-                    {row}
-                  </text>
+                  <text x={xFor(timeOf(row))} y={HEAD_H - 9} textAnchor="middle" className="training-sentence-event-number">{row}</text>
                 ) : null}
               </g>
             );
@@ -339,11 +295,10 @@ export default function TrainingSentenceBar() {
             const selectedColumn = column === focusColumn;
             return (
               <g key={column} aria-label={`${column} row`}>
-                <rect x={GUTTER} y={y} width={plotW} height={ROW_H}
-                  className={`training-sentence-row-bg${position % 2 ? " odd" : ""}`} />
+                <rect x={GUTTER} y={y} width={plotW} height={ROW_H} className={`training-sentence-row-bg${position % 2 ? " odd" : ""}`} />
                 <text x={GUTTER - 8} y={y + ROW_H / 2 + 4} textAnchor="end" className="training-sentence-row-label"
                   style={selectedColumn ? { fill: TRAINING_WORD_COLOR, fontWeight: 600 } : undefined}>
-                  {ROW_LABEL[column]}
+                  {TRAINING_COLUMN_LABEL[column]}
                 </text>
                 {trainingColumnRuns(flight, column).map((run) => {
                   const x = xFor(timeOf(run.row));
@@ -351,8 +306,7 @@ export default function TrainingSentenceBar() {
                   const label = trainingWordLabel(vocabulary, candidates, column, run.value);
                   const verdict = executor === null ? null : executorWordAt(executor, run.row, column);
                   const mark = verdict === null ? null : verdictMark(verdict.status);
-                  const title =
-                    `${column} ${label} — ${trainingKindLabel(run.event.kind)}, issued at step ${run.row} ` +
+                  const title = `${column} ${label} — ${trainingKindLabel(run.event.kind)}, issued at step ${run.row} ` +
                     `(${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s` +
                     (verdict === null ? "" : `\n${executorVerdictText(verdict)}`);
                   const selected = selectedColumn && run.row <= cursorRow && cursorRow < run.endRow;
@@ -364,34 +318,18 @@ export default function TrainingSentenceBar() {
                     }
                     setFocusColumn(column);
                     setCursorS(timeOf(run.row));
-                    if (trainingAutopilotAuto) setTrainingPick(nextPick(trainingPick, flight.flightKey, column, run.row));
+                    if (trainingAutopilotAuto) setTrainingPick(nextPick(trainingPick, column, run.row));
                   };
                   return (
-                    <g
-                      key={`${column}-${run.row}`}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={title}
-                      aria-pressed={selected}
-                      className="training-sentence-band"
-                      onClick={choose}
+                    <g key={`${column}-${run.row}`} role="button" tabIndex={0} aria-label={title} aria-pressed={selected}
+                      className="training-sentence-band" onClick={choose}
                       onKeyDown={(keyEvent) => {
                         if (keyEvent.key === "Enter" || keyEvent.key === " ") choose();
-                      }}
-                    >
+                      }}>
                       <title>{title}</title>
-                      <rect
-                        x={x + 1}
-                        y={y + 4}
-                        width={Math.max(width - 2, 1)}
-                        height={ROW_H - 8}
-                        rx={3}
-                        fill={colour}
-                        fillOpacity={selected ? 0.4 : 0.16}
-                        stroke={selected ? TRAINING_WORD_COLOR : colour}
-                        strokeOpacity={selected ? 1 : 0.6}
-                        strokeWidth={selected ? 2 : 1}
-                      />
+                      <rect x={x + 1} y={y + 4} width={Math.max(width - 2, 1)} height={ROW_H - 8} rx={3} fill={colour}
+                        fillOpacity={selected ? 0.4 : 0.16} stroke={selected ? TRAINING_WORD_COLOR : colour}
+                        strokeOpacity={selected ? 1 : 0.6} strokeWidth={selected ? 2 : 1} className="training-sentence-band-fill" />
                       {/* the issue itself */}
                       <rect x={x} y={y + 2} width={2} height={ROW_H - 4} fill={colour} className="training-sentence-issue" />
                       {/* the executor's verdict on this word */}
@@ -413,115 +351,56 @@ export default function TrainingSentenceBar() {
 
           {/* the moments that are not words */}
           {markers.map((marker) => (
-            <g key={marker.label} aria-label={marker.title}>
+            <g key={marker.key} aria-label={marker.title}>
               <title>{marker.title}</title>
-              <line
-                x1={xFor(timeOf(marker.row))}
-                x2={xFor(timeOf(marker.row))}
-                y1={HEAD_H}
-                y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
-                stroke={TRAINING_CORRIDOR_COLOR}
-                strokeDasharray="3 3"
-                className="training-sentence-marker"
-              />
+              <line x1={xFor(timeOf(marker.row))} x2={xFor(timeOf(marker.row))} y1={HEAD_H} y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
+                stroke={marker.colour} strokeDasharray="3 3" className="training-sentence-marker" />
             </g>
           ))}
 
           <line x1={GUTTER} x2={GUTTER + plotW} y1={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
             y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H} className="training-sentence-axis" />
-          {tickRows.map((row, index) =>
-            tickShown[index] ? (
-              <text
-                key={`tick-${row}`}
-                x={xFor(timeOf(row))}
-                y={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 15}
-                textAnchor={index === tickRows.length - 1 ? "end" : "middle"}
-                className="training-sentence-tick"
-              >
-                {index === tickRows.length - 1 ? `${formatSeconds(timeOf(row))} s` : formatSeconds(timeOf(row))}
-              </text>
-            ) : null,
-          )}
-          <line
-            x1={xFor(cursorS)}
-            x2={xFor(cursorS)}
-            y1={HEAD_H - 8}
-            y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4}
-            className="training-sentence-cursor"
-          />
+          {tickRows.map((row, index) => (tickShown[index] ? (
+            <text key={`tick-${row}`} x={xFor(timeOf(row))} y={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 15}
+              textAnchor={index === tickRows.length - 1 ? "end" : "middle"} className="training-sentence-tick">
+              {index === tickRows.length - 1 ? `${formatSeconds(timeOf(row))} s` : formatSeconds(timeOf(row))}
+            </text>
+          ) : null))}
+          <line x1={xFor(cursorS)} x2={xFor(cursorS)} y1={HEAD_H - 8} y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 4}
+            className="training-sentence-cursor" />
         </svg>
       </div>
 
-      <footer className="training-sentence-legend">
-        <span>
-          A band is a WORD IN FORCE, from the step it was issued (the tick at its left edge) to the
-          next word of its column; step 0 gives all six. Click a band to select that word: it alone
-          is highlighted here, in the read-back check and in 3D (click it again to clear). The dashed
-          lines mark the clearance, the capture of the final and where the speed is left to the pilot.
-          <button
-            type="button"
-            className="training-sentence-notes-toggle"
-            aria-expanded={notesOpen}
-            onClick={() => setNotesOpen((open) => !open)}
-          >
-            {notesOpen ? "Fewer notes" : "More notes"}
-          </button>
-        </span>
-        {notesOpen ? (
-          <>
+      {notesOpen ? (
+        <footer className="training-sentence-legend">
+          <span>
+            A band is a word in force, from the tick where it was issued to the next word of its column; step 0 gives all
+            six. Click a band to select its word — here, in the read-back check and in 3D — and again to clear it. The
+            dashed lines: the clearance, the capture of the final, the speed left to the pilot.
+          </span>
+          <span>
+            The sentence ends {(landing.lastRowBeforeThresholdM / 1000).toFixed(2)} km before the threshold
+            {landing.cutAtCrossing ? ", cut before the last passage of the threshold" : ", where the data ends"}.
+          </span>
+          {executor !== null ? (
             <span>
-              Runway is a POINTER at one of {candidates.length} candidate thresholds (
-              {candidates.map((candidate) => candidate.ident).join(", ")}); heading is an absolute ground
-              track, read step by step: a new word wherever the track {vocabulary.headingLeadS} s later
-              reaches another {vocabulary.headingTargetsDeg[1] - vocabulary.headingTargetsDeg[0]}° cell, so a
-              turn is a run of words at the pace it was flown; altitude a geometric MSL target or "descend to
-              land"; angle the class of the descent (or level, or climb); speed a ground speed or "unspecified".
+              The executor's verdict on a word, at its band's left: <b style={{ color: TRAINING_EXECUTOR_COLOR }}>●</b> inside,{" "}
+              <b style={{ color: TRAINING_OUTSIDE_COLOR }}>●</b> outside, ○ not judged, not reached or superseded; none for a
+              word with no check of its own — judged on envelopes re-drawn from where the executor was told the word.
             </span>
-            <span>
-              The sentence ends before the landing: its last step is{" "}
-              {(landing.lastRowBeforeThresholdM / 1000).toFixed(2)} km before the threshold
-              {landing.cutAtCrossing ? ", cut before the last passage of the threshold" : ", where the data ends"}.
-            </span>
-            <span>
-              With the executor's replay on, a dot at a band's left edge is the executor's verdict on that word:{" "}
-              <b style={{ color: TRAINING_EXECUTOR_COLOR }}>●</b> flown inside its envelope,{" "}
-              <b style={{ color: TRAINING_OUTSIDE_COLOR }}>●</b> outside, ○ not judged, not reached or superseded (the
-              tooltip says which and why); a word with no check of its own (the runway pointer, an angle word, "not
-              cleared", "unspecified") has none. The executor is judged against each word's envelope re-drawn from where
-              IT was told the word — a heading word on its flown track from then plus the lead — not the observed
-              flight's. With the prior's predictions on, "Prior predictions" shows what it gives each column at each step.
-            </span>
-          </>
-        ) : null}
-      </footer>
-
-      {readbackOpen ? (
-        <TrainingReadbackWindow
-          flight={flight}
-          vocabulary={vocabulary}
-          candidates={candidates}
-          layers={trainingLayers}
-          cursorS={cursorS}
-          onCursorChange={setCursorS}
-          column={focusColumn}
-          onColumnChange={setFocusColumn}
-          onClose={() => setReadbackOpen(false)}
-          executor={executor}
-          autopilot={autopilotSegment}
-        />
+          ) : null}
+        </footer>
       ) : null}
-      {priorOpen && prior ? (
-        <TrainingPriorWindow
-          flight={flight}
-          vocabulary={vocabulary}
-          candidates={candidates}
-          prior={prior}
-          cursorS={cursorS}
-          onCursorChange={setCursorS}
-          column={focusColumn}
-          onColumnChange={setFocusColumn}
-          onClose={() => setPriorOpen(false)}
-        />
+
+      {openWindow === "readback" ? (
+        <TrainingReadbackWindow flight={flight} vocabulary={vocabulary} candidates={candidates} layers={trainingLayers}
+          cursorS={cursorS} onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn}
+          onClose={() => setOpenWindow(null)} executor={executor}
+          autopilot={autopilot?.status === "ready" ? autopilot.segment : null} />
+      ) : null}
+      {openWindow === "prior" && prior ? (
+        <TrainingPriorWindow flight={flight} vocabulary={vocabulary} candidates={candidates} prior={prior} cursorS={cursorS}
+          onCursorChange={setCursorS} column={focusColumn} onColumnChange={setFocusColumn} onClose={() => setOpenWindow(null)} />
       ) : null}
     </section>
   );

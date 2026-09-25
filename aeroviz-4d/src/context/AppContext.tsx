@@ -45,7 +45,7 @@ import { fetchJson } from "../utils/fetchJson";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerrain";
 import type { ObservedVerdictFilter } from "../data/observedTracks";
-import type { TrainingColumn, TrainingSelection } from "../data/trainingSample";
+import { trainingSelectionKey, type TrainingColumn, type TrainingSelection } from "../data/trainingSample";
 import type { TrainingExecutorView, TrainingPriorView } from "../data/trainingOverlays";
 import type { TrainingAutopilotView, TrainingPick } from "../data/trainingAutopilot";
 
@@ -276,10 +276,13 @@ interface TrainingSessionState {
    */
   trainingAutopilot: TrainingAutopilotView | null;
   setTrainingAutopilot: (view: TrainingAutopilotView | null) => void;
+  /** Fly the answer out again in 3D (a new `playedAt`); nothing when there is no answer. */
+  replayTrainingAutopilot: () => void;
   /**
    * THE WORD THE LIVE EXECUTOR FLIES: set only by a CLICK — the sentence bar's "Fly this segment" button, or a band
    * clicked while `trainingAutopilotAuto` is on — and cleared by clicking the selected band again; never by the cursor,
-   * which the charts move on hover. A pick of another flight is not flown.
+   * which the charts move on hover. It belongs to the flight on screen (`trainingSelectionKey`) and is reset with it, as
+   * the cursor is: another flight, another set, leaving Training and coming back all start with nothing picked.
    */
   trainingPick: TrainingPick | null;
   setTrainingPick: (pick: TrainingPick | null) => void;
@@ -387,18 +390,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [airport, setAirport] = useState<AirportConfig | null>(null);
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(null);
   const [trainingSelection, setTrainingSelection] = useState<TrainingSelection | null>(null);
-  const [trainingCursor, setTrainingCursor] = useState<{ flightKey: string | null; atS: number }>({
-    flightKey: null, atS: 0,
-  });
-  const trainingFlightKey = trainingSelection?.flight.flightKey ?? null;
-  // Reset before consumers paint a new flight with the previous flight's time.
-  if (trainingCursor.flightKey !== trainingFlightKey) {
-    setTrainingCursor({ flightKey: trainingFlightKey, atS: 0 });
-  }
-  const trainingCursorS = trainingCursor.flightKey === trainingFlightKey ? trainingCursor.atS : 0;
+  // The cursor and the pick belong to the flight on screen, and are reset with it before any consumer paints the new
+  // flight with the last one's time or flies the last one's word.
+  const trainingScope = trainingSelectionKey(trainingSelection);
+  const [trainingCursor, setTrainingCursor] = useState<{ scope: string | null; atS: number }>({ scope: null, atS: 0 });
+  if (trainingCursor.scope !== trainingScope) setTrainingCursor({ scope: trainingScope, atS: 0 });
+  const trainingCursorS = trainingCursor.scope === trainingScope ? trainingCursor.atS : 0;
   const setTrainingCursorS = useCallback((atS: number) => {
-    setTrainingCursor({ flightKey: trainingFlightKey, atS });
-  }, [trainingFlightKey]);
+    setTrainingCursor({ scope: trainingScope, atS });
+  }, [trainingScope]);
+  const [trainingPicked, setTrainingPicked] = useState<{ scope: string | null; pick: TrainingPick | null }>({
+    scope: null, pick: null,
+  });
+  if (trainingPicked.scope !== trainingScope) setTrainingPicked({ scope: trainingScope, pick: null });
+  const trainingPick = trainingPicked.scope === trainingScope ? trainingPicked.pick : null;
+  const setTrainingPick = useCallback((pick: TrainingPick | null) => {
+    setTrainingPicked({ scope: trainingScope, pick });
+  }, [trainingScope]);
   const [trainingColumn, setTrainingColumn] = useState<TrainingColumn | null>(null);
   const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({
     headingBands: true, corridor: true, vertical: true, candidates: true,
@@ -409,7 +417,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trainingExecutor, setTrainingExecutor] = useState<TrainingExecutorView | null>(null);
   const [trainingPrior, setTrainingPrior] = useState<TrainingPriorView | null>(null);
   const [trainingAutopilot, setTrainingAutopilot] = useState<TrainingAutopilotView | null>(null);
-  const [trainingPick, setTrainingPick] = useState<TrainingPick | null>(null);
+  const replayTrainingAutopilot = useCallback(() => {
+    setTrainingAutopilot((view) => (view?.status === "ready" ? { ...view, playedAt: Date.now() } : view));
+  }, []);
   const [trainingAutopilotAuto, setTrainingAutopilotAuto] = useState<boolean>(true);
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
@@ -652,12 +662,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingPrior,
     trainingAutopilot,
     setTrainingAutopilot,
+    replayTrainingAutopilot,
     trainingPick,
     setTrainingPick,
     trainingAutopilotAuto,
     setTrainingAutopilotAuto,
   }), [trainingSelection, trainingCursorS, setTrainingCursorS, trainingColumn, trainingLayers, setTrainingLayer,
-    trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, trainingAutopilotAuto]);
+    trainingExecutor, trainingPrior, trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick,
+    trainingAutopilotAuto]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,

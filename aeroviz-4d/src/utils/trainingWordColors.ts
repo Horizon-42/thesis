@@ -2,7 +2,7 @@
  * trainingWordColors.ts
  * ---------------------
  * The Training views' one palette. The sentence bar, the read-back charts and the 3D scene must
- * agree about what "the heading colour" or "a funnel" looks like — two copies of a hex string is
+ * agree about what "the heading colour" or "a heading band" looks like — two copies of a hex string is
  * how they stop agreeing.
  *
  * Only colours that CARRY MEANING live here; the panel's chrome is styled by class in
@@ -65,7 +65,7 @@ export const TRAINING_OUTSIDE_COLOR = "#f87171";
 
 /** THE EXECUTOR's flown track and its verdicts "inside" (the replay of the truth sentence, `trainingOverlays.ts`).
  *  Teal (2026-09-24): OKLab ΔE on the palette above is ≥ 11.9 from every colour here (nearest: the raw grey 11.9,
- *  the funnel blue 12.3, the corridor green 13.8) and 53 from the bar's surface (#0f131e); every candidate hue
+ *  the heading band's blue 12.3, the corridor green 13.8) and 53 from the bar's surface (#0f131e); every candidate hue
  *  between them sat under 10 from one of the columns. */
 export const TRAINING_EXECUTOR_COLOR = "#14b8a6";
 

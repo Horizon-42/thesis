@@ -15,11 +15,16 @@ import {
   TRAINING_AUTOPILOT_SEGMENT_END,
   type TrainingAutopilotRequest,
 } from "../trainingAutopilot";
-import { trainingColumnRuns, type TrainingSample } from "../trainingSample";
+import { trainingColumnRuns, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";
 
 export function mockAutopilotRequest(sample: TrainingSample, flightKey: string, column: TrainingAutopilotRequest["column"],
   row: number): TrainingAutopilotRequest {
   return { airport: sample.airport, setId: sample.setId, flightKey, column, row };
+}
+
+/** The flight on screen that ``request`` asks about: its selection. */
+export function mockSelection(sample: TrainingSample, request: TrainingAutopilotRequest): TrainingSelection {
+  return trainingSelectionOf(sample, sample.flights.find((item) => item.flightKey === request.flightKey)!);
 }
 
 /** A consistent answer for ``request`` over ``sample``; ``cycles`` flown (to the segment's end unless it is the last word). */

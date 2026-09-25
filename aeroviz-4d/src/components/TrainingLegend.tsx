@@ -1,19 +1,17 @@
 /**
  * TrainingLegend.tsx
  * ------------------
- * What each colour in the Training 3D scene is — one line per thing drawn, only for the switches
- * that are on. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.4.
+ * What each colour in the Training 3D scene is — one short line per thing drawn, only for what is on, the full reading
+ * in each line's tooltip. Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.4.
  *
- * It sits above the sentence bar, in the scene's lower right corner, and folds away. The read-back
- * window has its own legend in its footer; the colours are the same (`trainingWordColors.ts`).
+ * It sits above the sentence bar, in the scene's lower right corner, folded until it is opened. The read-back window
+ * has its own swatches; the colours are the same (`trainingWordColors.ts`).
  */
 
 import { useState } from "react";
 import type { TrainingLayers } from "../context/AppContext";
 import type { TrainingVocabulary } from "../data/trainingSample";
 import {
-  TRAINING_AUTOPILOT_COLOR,
-  TRAINING_AUTOPILOT_OUTSIDE_COLOR,
   TRAINING_CAPTURE_TURN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_ENVELOPE_ALPHA,
@@ -24,54 +22,41 @@ import {
   TRAINING_TUBE_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
+import { SwatchIcon, type Swatch } from "./training/chartKit";
 
-type Swatch = { kind: "line"; colour: string; dash?: string } | { kind: "area"; colour: string; opacity: number; dash?: string };
-
-function SwatchIcon({ swatch }: { swatch: Swatch }) {
-  return (
-    <svg className="training-legend-swatch" width={22} height={10} aria-hidden="true">
-      {swatch.kind === "line" ? (
-        <line x1={1} x2={21} y1={5} y2={5} stroke={swatch.colour} strokeWidth={2.2} strokeDasharray={swatch.dash} />
-      ) : (
-        <rect x={1} y={1} width={20} height={8} fill={swatch.colour} fillOpacity={swatch.opacity} stroke={swatch.colour}
-          strokeWidth={1.2} strokeDasharray={swatch.dash} />
-      )}
-    </svg>
-  );
-}
-
-export default function TrainingLegend({ layers, vocabulary, executorTrack = false, autopilotTrack = false }: {
-  layers: TrainingLayers; vocabulary: TrainingVocabulary;
+export default function TrainingLegend({ layers, vocabulary, executorTrack, autopilotColour }: {
+  layers: TrainingLayers;
+  vocabulary: TrainingVocabulary;
   /** The executor's flown track is drawn (its overlay is on and the flight was flown). */
-  executorTrack?: boolean;
-  /** The live executor's flown segment is drawn (`trainingAutopilot`). */
-  autopilotTrack?: boolean;
+  executorTrack: boolean;
+  /** The colour the live executor's segment is drawn in (`autopilotColour`), or null when none is drawn. */
+  autopilotColour: string | null;
 }) {
-  const [open, setOpen] = useState<boolean>(true);
-  const rows: Array<{ key: string; swatch: Swatch; text: string; shown: boolean }> = [
-    { key: "track", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, shown: true,
-      text: "the track (and, faint on the ground, its ground trace)" },
+  const [open, setOpen] = useState<boolean>(false);
+  const rows: Array<{ key: string; swatch: Swatch; text: string; title: string; shown: boolean }> = [
+    { key: "track", swatch: { kind: "line", colour: TRAINING_TRACE_COLOR }, shown: true, text: "the track",
+      title: "the observed track, and — faint on the ground — its ground trace" },
     { key: "heading", swatch: { kind: "line", colour: TRAINING_HEADING_BAND_COLOR }, shown: layers.headingBands,
-      text: `a heading word's judged rows, on the ground: from ${vocabulary.headingLeadS} s after it is said to the next ` +
+      text: "heading word: judged rows",
+      title: `a heading word's judged rows, on the ground: from ${vocabulary.headingLeadS} s after it is said to the next ` +
         `word's, where the track must stay within ±${vocabulary.headingToleranceDeg}° of it` },
     { key: "capture-turn", swatch: { kind: "line", colour: TRAINING_CAPTURE_TURN_COLOR, dash: "4 3" }, shown: layers.corridor,
-      text: "the capture turn's rows on the ground: from the clearance onto the course" },
-    { key: "corridor", swatch: { kind: "area", colour: TRAINING_CORRIDOR_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.corridor }, shown: layers.corridor,
-      text: "the capture corridor to the threshold" },
+      text: "capture turn", title: "the capture turn's rows on the ground: from the clearance onto the course" },
+    { key: "corridor", swatch: { kind: "area", colour: TRAINING_CORRIDOR_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.corridor },
+      shown: layers.corridor, text: "capture corridor", title: "the capture corridor to the threshold" },
     { key: "tube", swatch: { kind: "area", colour: TRAINING_TUBE_COLOR, opacity: TRAINING_ENVELOPE_ALPHA.tube }, shown: layers.vertical,
-      text: `an altitude word's tube, ±${vocabulary.altitudeToleranceM} m` },
-    { key: "outside", swatch: { kind: "line", colour: TRAINING_OUTSIDE_COLOR }, shown: true,
-      text: "red: the labeller's check failed (rows outside a heading band or a tube, a capture turn)" },
-    { key: "selected", swatch: { kind: "line", colour: TRAINING_WORD_COLOR }, shown: true,
-      text: "yellow: the selected word — its envelope and the rows it is in force; the rest fades" },
-    { key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: executorTrack,
-      text: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0" +
-        (layers.headingBands ? "; red on its ground trace: its rows outside the heading word it was told" : "") },
-    { key: "autopilot", swatch: { kind: "line", colour: TRAINING_AUTOPILOT_COLOR }, shown: autopilotTrack,
-      text: "blue: the picked word's segment, flown live by the executor, inside the word's envelope (dashed on the ground)" },
-    { key: "autopilot-outside", swatch: { kind: "line", colour: TRAINING_AUTOPILOT_OUTSIDE_COLOR }, shown: autopilotTrack,
-      text: "red: the same when the word flew outside its envelope" +
-        (layers.headingBands ? "; its heading rows outside, red on the ground trace" : "") },
+      text: `altitude tube ±${vocabulary.altitudeToleranceM} m`, title: "an altitude word's tube, between its lower and upper edge" },
+    { key: "outside", swatch: { kind: "line", colour: TRAINING_OUTSIDE_COLOR }, shown: true, text: "outside a check",
+      title: "red: the labeller's check failed — rows outside a heading band or a tube, a capture turn" },
+    { key: "selected", swatch: { kind: "line", colour: TRAINING_WORD_COLOR }, shown: true, text: "selected word",
+      title: "yellow: the selected word — its envelope and the rows it is in force; the rest fades" },
+    { key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: executorTrack, text: "executor replay",
+      title: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0; red on its " +
+        "ground trace: its rows outside the heading word it was told" },
+    { key: "autopilot", swatch: { kind: "line", colour: autopilotColour ?? TRAINING_TRACE_COLOR }, shown: autopilotColour !== null,
+      text: "autopilot segment",
+      title: "the picked word's segment, flown live by the executor (dashed on the ground): blue inside the word's " +
+        "envelope, red outside it" },
   ];
 
   return (
@@ -82,7 +67,7 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack = fal
       {open ? (
         <ul>
           {rows.filter((row) => row.shown).map((row) => (
-            <li key={row.key}>
+            <li key={row.key} title={row.title}>
               <SwatchIcon swatch={row.swatch} />
               <span>{row.text}</span>
             </li>

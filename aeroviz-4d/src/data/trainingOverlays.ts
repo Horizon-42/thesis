@@ -41,6 +41,7 @@ import {
   type TrainingFlight,
   type TrainingHeadingBand,
   type TrainingSample,
+  type TrainingSelection,
   type TrainingVocabulary,
 } from "./trainingSample";
 
@@ -57,6 +58,12 @@ export const TRAINING_EXECUTOR_STATUSES = [
   "inside", "outside", "not judged", "not reached", "superseded", "no check",
 ] as const;
 export type TrainingExecutorStatus = (typeof TRAINING_EXECUTOR_STATUSES)[number];
+/** MIRROR of `ts_transformer.autopilot.judge.OUTCOMES`: how the executor's flight ended — the replay's, and the live
+ *  executor's when it flew on to the landing. */
+export const TRAINING_EXECUTOR_OUTCOMES = [
+  "landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout", "dynamics_failure",
+] as const;
+export type TrainingExecutorOutcome = (typeof TRAINING_EXECUTOR_OUTCOMES)[number];
 /** MIRROR of `prior_training_export.SCHEMA`. */
 export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v3";
 
@@ -150,7 +157,7 @@ export interface TrainingExecutorFlown {
   /** "own dynamics" or "stand-in dynamics". */
   group: string;
   flown: true;
-  outcome: string;
+  outcome: TrainingExecutorOutcome;
   flewTheSentence: boolean;
   endS: number;
   crossing: TrainingCrossing | null;
@@ -290,6 +297,16 @@ export interface TrainingPriorView {
 }
 
 // ── reading one step ─────────────────────────────────────────────────────────
+
+/** An overlay's view if it is of the flight on screen — drawn over its set, at its airport — else null: in the render
+ *  after a switch, the view still published is the last flight's (a flight key alone repeats across sets). */
+export function overlayOnScreen<V extends TrainingExecutorView | TrainingPriorView>(
+  view: V | null, selection: TrainingSelection | null,
+): V | null {
+  if (view === null || selection === null) return null;
+  return view.overlay.airport === selection.airport && view.overlay.base.setId === selection.setId
+    && view.flight.flightKey === selection.flight.flightKey ? view : null;
+}
 
 /** The executor's verdict on the word at (row, column) of the sentence, if the flight was flown. */
 export function executorWordAt(flight: TrainingExecutorFlight, row: number, column: TrainingColumn): TrainingExecutorWord | null {
@@ -514,7 +531,7 @@ function parseExecutorFlight(item: Reader, flight: TrainingFlight, vocabulary: T
   const counts = item.child("counts");
   const track = parseTrack(item.child("track"));
   const refused = item.nullableString("refused");
-  const outcome = item.string("outcome");
+  const outcome = item.oneOf("outcome", TRAINING_EXECUTOR_OUTCOMES);
   // the judge's reading of the flown track is drawn exactly when the labeller's gate let it through and the dynamics
   // did not fail inside it; its step k is the exported track's point k
   const judgedTrackDeg = item.nullableNumbers("judgedTrackDeg");

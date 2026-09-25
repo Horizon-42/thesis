@@ -118,6 +118,15 @@ function readJsonAndSha256(file: string): { value: unknown; sha256: string } {
   return { value: JSON.parse(bytes.toString("utf8")), sha256: createHash("sha256").update(bytes).digest("hex") };
 }
 
+/** A served file's JSON, or why it is not JSON (a truncated body is named, and the run goes on). */
+async function servedJson(url: string): Promise<{ ok: true; value: unknown } | { ok: false; problem: string }> {
+  try {
+    return { ok: true, value: await (await fetch(url)).json() as unknown };
+  } catch (error) {
+    return { ok: false, problem: `not readable JSON: ${unreadable(error)}` };
+  }
+}
+
 /** Why a file is not readable JSON, as a finding's detail. */
 function unreadable(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -237,8 +246,8 @@ async function checkTraining(root: string, airport: string, server: string | nul
       if (problem) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file} ${problem}` });
       else {
         // HTTP 200 is not "it loads": the SERVED body goes through the same reader.
-        const body = await (await fetch(`${serverRoot}/${entry.file}`)).json() as unknown;
-        const answered = parseTrainingSample(body);
+        const body = await servedJson(`${serverRoot}/${entry.file}`);
+        const answered = body.ok ? parseTrainingSample(body.value) : body;
         if (!answered.ok) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file}: ${answered.problem}` });
       }
     }
@@ -300,10 +309,10 @@ async function checkOverlays(
       if (problem) findings.push({ level: "error", category: entry.id, message: `server: ${entry.file} ${problem}` });
       else {
         // the SERVED body through the same reader
-        const body = await (await fetch(`${serverRoot}/${entry.file}`)).json() as unknown;
-        for (const finding of checkTrainingOverlay(entry, body, base.sample, base.sha256)) {
-          findings.push({ ...finding, message: `server: ${finding.message}` });
-        }
+        const body = await servedJson(`${serverRoot}/${entry.file}`);
+        const found = body.ok ? checkTrainingOverlay(entry, body.value, base.sample, base.sha256)
+          : [{ level: "error" as const, category: entry.id, message: `${entry.file}: ${body.problem}` }];
+        for (const finding of found) findings.push({ ...finding, message: `server: ${finding.message}` });
       }
     }
   }

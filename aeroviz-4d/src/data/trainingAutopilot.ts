@@ -33,18 +33,21 @@ import {
   readCrossing,
   readJudgedBand,
   readWordVerdict,
+  TRAINING_EXECUTOR_OUTCOMES,
   type TrainingCrossing,
+  type TrainingExecutorOutcome,
   type TrainingExecutorCheck,
 } from "./trainingOverlays";
 import { TRAINING_AUTOPILOT_COLOR, TRAINING_AUTOPILOT_OUTSIDE_COLOR } from "../utils/trainingWordColors";
 import {
   trainingColumnRuns,
+  trainingWordLabel,
   TRAINING_COLUMN_INDEX,
   TRAINING_COLUMNS,
   type TrainingColumn,
   type TrainingFlight,
   type TrainingHeadingBand,
-  type TrainingSample,
+  type TrainingSelection,
   type TrainingVocabulary,
   type TrainingWordRun,
 } from "./trainingSample";
@@ -55,11 +58,7 @@ export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v2";
 export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
 export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
 /** MIRROR of `autopilot_segment.SEGMENT_END`: the flight reached the point where the next word of its column was said. */
-export const TRAINING_AUTOPILOT_SEGMENT_END = "segment_end";
-/** MIRROR of `ts_transformer.autopilot.judge.OUTCOMES`: how a flight that did not end at its segment's end ended. */
-export const TRAINING_AUTOPILOT_OUTCOMES = [
-  "landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout", "dynamics_failure",
-] as const;
+export const TRAINING_AUTOPILOT_SEGMENT_END = "segment_end" as const;
 export const TRAINING_AUTOPILOT_PATH = "/autopilot/segment";
 
 /** What the Training view asks for: the clicked word's segment of the selected flight. */
@@ -152,8 +151,8 @@ export interface TrainingAutopilotSegment {
     told: Array<{ row: number; column: number; value: number }>;
   };
   end: {
-    /** `TRAINING_AUTOPILOT_SEGMENT_END`, or the judge's outcome. */
-    reason: string;
+    /** `TRAINING_AUTOPILOT_SEGMENT_END`, or the judge's outcome (`TRAINING_EXECUTOR_OUTCOMES`). */
+    reason: typeof TRAINING_AUTOPILOT_SEGMENT_END | TrainingExecutorOutcome;
     /** null for a column's last word. */
     reachedSegmentEnd: boolean | null;
     /** At the segment's end: the executor minus the observed aircraft where the next word was said. */
@@ -192,25 +191,87 @@ export function segmentStopRow(flight: TrainingFlight, column: TrainingColumn, e
   return Math.min(endRow + (column === "heading" ? headingLeadRows : 0), flight.rows);
 }
 
-/** THE WORD THE LIVE EXECUTOR FLIES (`trainingPick`): the flight, the word's column and the step it is said at, and
- *  which attempt at it — a new attempt at the same word flies it again. */
+/** THE WORD THE LIVE EXECUTOR FLIES (`trainingPick`) — of the flight on screen, which the pick belongs to and is reset
+ *  with (`AppContext`): the word's column and the step it is said at, and which attempt at it — a new attempt at the
+ *  same word flies it again. */
 export interface TrainingPick {
-  flightKey: string;
   column: TrainingColumn;
   row: number;
   attempt: number;
 }
 
-/** The pick that flies ``column``'s word said at ``row`` of ``flightKey`` now: a new attempt when it is the word picked
- *  already, else its first. */
-export function nextPick(current: TrainingPick | null, flightKey: string, column: TrainingColumn, row: number): TrainingPick {
-  const same = current !== null && current.flightKey === flightKey && current.column === column && current.row === row;
-  return { flightKey, column, row, attempt: same ? current!.attempt + 1 : 0 };
+/** The pick that flies ``column``'s word said at ``row`` now: a new attempt when it is the word picked already, else its
+ *  first. */
+export function nextPick(current: TrainingPick | null, column: TrainingColumn, row: number): TrainingPick {
+  const same = current !== null && current.column === column && current.row === row;
+  return { column, row, attempt: same ? current.attempt + 1 : 0 };
+}
+
+/** The live executor's view if it is of the flight on screen — its airport, set and flight — else null: in the render
+ *  after a switch, the view still published is the last flight's, and is not drawn. */
+export function autopilotOnScreen(
+  view: TrainingAutopilotView | null, selection: TrainingSelection | null,
+): TrainingAutopilotView | null {
+  if (view === null || selection === null) return null;
+  const { request } = view;
+  return request.airport === selection.airport && request.setId === selection.setId
+    && request.flightKey === selection.flight.flightKey ? view : null;
+}
+
+/** The word a request flies, as the sentence reads it: "heading 270°" — the word said at its step, whichever word the
+ *  views have selected since. */
+export function autopilotWord(request: TrainingAutopilotRequest, selection: TrainingSelection): string {
+  const value = selection.flight.words.inForce[TRAINING_COLUMN_INDEX[request.column]][request.row];
+  return `${request.column} ${trainingWordLabel(selection.vocabulary, selection.candidates, request.column, value)}`;
 }
 
 /** The colour a flown segment is drawn in, everywhere: red when the selected word flew outside its envelope. */
 export function autopilotColour(segment: TrainingAutopilotSegment): string {
   return segment.word.status === "outside" ? TRAINING_AUTOPILOT_OUTSIDE_COLOR : TRAINING_AUTOPILOT_COLOR;
+}
+
+// ── flying it out in 3D ──────────────────────────────────────────────────────
+
+/** How much faster than real time the live executor's aircraft flies its segment out in 3D: at least this ... */
+export const AUTOPILOT_PLAYBACK_MIN_SPEEDUP = 8;
+/** ... and fast enough that no segment takes longer than this, in seconds (the aircraft's label says the speed-up). */
+export const AUTOPILOT_PLAYBACK_MAX_S = 20;
+
+export function autopilotPlaybackSpeedup(flownS: number): number {
+  return Math.max(AUTOPILOT_PLAYBACK_MIN_SPEEDUP, flownS / AUTOPILOT_PLAYBACK_MAX_S);
+}
+
+/** Where the live executor is ``flownS`` seconds into its segment: the last point at or before it and the fraction of
+ *  the way to the next (1 at and past the segment's end). */
+export function autopilotFlownAt(track: TrainingAutopilotTrack, flownS: number): { index: number; fraction: number } {
+  const target = track.tS[0] + Math.max(flownS, 0);
+  const last = track.tS.length - 1;
+  if (target >= track.tS[last]) return { index: last, fraction: 1 };
+  let index = 0;
+  while (index + 1 < last && track.tS[index + 1] <= target) index += 1;
+  return { index, fraction: (target - track.tS[index]) / (track.tS[index + 1] - track.tS[index]) };
+}
+
+/** The aircraft's label at a flown point: the simulated time flown so far of the whole, the playback's speed-up, ground
+ *  speed, geometric MSL height and bank — the command of the cycle it is in, the last cycle's at the end. */
+export function autopilotAircraftLabel(track: TrainingAutopilotTrack, index: number, speedup: number): string {
+  const bank = track.bankRightDeg[Math.min(index, track.bankRightDeg.length - 1)];
+  const flownS = track.tS[index] - track.tS[0];
+  const totalS = track.tS[track.tS.length - 1] - track.tS[0];
+  return `autopilot ${flownS.toFixed(0)} / ${totalS.toFixed(0)} s simulated ×${speedup.toFixed(0)} · ` +
+    `${track.groundSpeedMps[index].toFixed(0)} m/s · ${track.altitudeM[index].toFixed(0)} m · bank ` +
+    `${Math.abs(bank).toFixed(0)}°${Math.abs(bank) < 0.5 ? "" : bank > 0 ? " R" : " L"}`;
+}
+
+/** The flown segment at the flight's steps — the points the judge read (every `stepCycles`-th) — from its first step:
+ *  their longitudes and latitudes, as many as the judged track (a heading word's), for its rows outside to be drawn on. */
+export function autopilotJudgedPoints(segment: TrainingAutopilotSegment): { lon: number[]; lat: number[] } {
+  const steps = segment.judgedTrackDeg?.length ?? 0;
+  const every = segment.executor.stepCycles;
+  return {
+    lon: Array.from({ length: steps }, (_, step) => segment.track.lon[step * every]),
+    lat: Array.from({ length: steps }, (_, step) => segment.track.lat[step * every]),
+  };
 }
 
 /** The words the sentence says for a segment, as the backend lists what it told: the six in force at its first step,
@@ -226,7 +287,8 @@ export function segmentWords(flight: TrainingFlight, row: number, endRow: number
 
 function parseTrack(reader: Reader, row: number, stepS: number): TrainingAutopilotTrack {
   const tS = reader.numbers("tS");
-  if (tS.length < 2) reader.fail(`holds ${tS.length} states: a flown segment is at least one cycle`);
+  // one state is an answer too: a dynamics failure in the first cycle keeps only the state it started from
+  if (tS.length < 1) reader.fail("tS is empty");
   if (Math.abs(tS[0] - row * stepS) > 1e-3) reader.fail(`starts at ${tS[0]} s, not at step ${row} (${row * stepS} s)`);
   if (tS.some((value, index) => index > 0 && value <= tS[index - 1])) reader.fail("tS does not run forward");
   const n = tS.length;
@@ -277,7 +339,7 @@ function readSegment(
 /** How the flight ended: at its segment's end (with its offset from the observed aircraft there), or the judge's
  *  outcome — to the landing, only the latter. */
 function readEnd(end: Reader, toLanding: boolean): TrainingAutopilotSegment["end"] {
-  const reason = end.oneOf("reason", [TRAINING_AUTOPILOT_SEGMENT_END, ...TRAINING_AUTOPILOT_OUTCOMES]);
+  const reason = end.oneOf("reason", [TRAINING_AUTOPILOT_SEGMENT_END, ...TRAINING_EXECUTOR_OUTCOMES] as const);
   const reachedSegmentEnd = end.nullableBoolean("reachedSegmentEnd");
   if ((reachedSegmentEnd === null) !== toLanding) {
     end.fail(toLanding ? "the column's last word is flown to its outcome, not to a segment end"
@@ -310,18 +372,26 @@ function readTiming(timing: Reader, states: number): TrainingAutopilotSegment["t
   };
 }
 
+/** What the Training view asks the backend for: the picked word's segment of the flight on screen. */
+export function trainingAutopilotRequest(selection: TrainingSelection, pick: TrainingPick): TrainingAutopilotRequest {
+  return { airport: selection.airport, setId: selection.setId, flightKey: selection.flight.flightKey, column: pick.column,
+    row: pick.row };
+}
+
 /** Parse the backend's answer against the request and the flight on screen — all or nothing. */
 export function parseTrainingAutopilot(
-  raw: unknown, request: TrainingAutopilotRequest, sample: TrainingSample,
+  raw: unknown, request: TrainingAutopilotRequest, selection: TrainingSelection,
 ): Parsed<TrainingAutopilotSegment> {
   return attempt(() => {
     const answer: Reader = Reader.of(raw, "the autopilot's answer");
     if (answer.raw("schema") !== TRAINING_AUTOPILOT_SCHEMA) {
       answer.fail(`schema is ${JSON.stringify(answer.raw("schema"))}, expected ${JSON.stringify(TRAINING_AUTOPILOT_SCHEMA)}`);
     }
-    const { vocabulary } = sample;
-    const flight = sample.flights.find((item) => item.flightKey === request.flightKey);
-    if (flight === undefined) answer.fail(`the set ${sample.setId} has no flight ${request.flightKey}`);
+    const { vocabulary, flight } = selection;
+    if (request.airport !== selection.airport || request.setId !== selection.setId || request.flightKey !== flight.flightKey) {
+      answer.fail(`answers ${request.airport} ${request.setId} ${request.flightKey}, but ${selection.airport} ` +
+        `${selection.setId} ${flight.flightKey} is on screen`);
+    }
     const echo = {
       airport: answer.string("airport"), setId: answer.string("setId"), flightKey: answer.string("flightKey"),
       datasetId: answer.string("datasetId"),
@@ -355,10 +425,11 @@ export function parseTrainingAutopilot(
       const misplaced = judgedTrackDeg.findIndex((_, step) =>
         !(Math.abs(track.tS[step * stepCycles] - (segment.row + step) * vocabulary.stepS) <= 1e-3));
       if (misplaced >= 0) answer.fail(`judgedTrackDeg's step ${misplaced} is not a step of the flown track`);
-      // its rows end by the segment's stop — the next heading word's rows begin there — and by the track its judge read
-      const stopBy = Math.min(segment.stopRow, segment.row + judgedTrackDeg.length);
-      heading = readJudgedBand(word, verdict, segment.row, vocabulary.headingTargetsDeg[flight.words.inForce[TRAINING_COLUMN_INDEX.heading][segment.row]],
-        vocabulary, stopBy);
+      // Its rows are FLOWN steps, and end by the track its judge read: where the executor heard the next heading word
+      // (plus the lead) is its own step, not the sentence's — lagging the observed aircraft on the track clock, it hears
+      // it later — so the segment's stop, a sentence step, does not bound them.
+      const targetDeg = vocabulary.headingTargetsDeg[flight.words.inForce[TRAINING_COLUMN_INDEX.heading][segment.row]];
+      heading = readJudgedBand(word, verdict, segment.row, targetDeg, vocabulary, segment.row + judgedTrackDeg.length);
     }
     const limits = answer.child("limits");
     return {

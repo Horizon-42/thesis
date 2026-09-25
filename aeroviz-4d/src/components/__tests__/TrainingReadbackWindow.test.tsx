@@ -16,7 +16,7 @@ import { parseTrainingExecutorOverlay, type TrainingExecutorFlight } from "../..
 import type { TrainingLayers } from "../../context/AppContext";
 import { parseTrainingAutopilot, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
 import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
+import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
 import { TRAINING_WORD_COLOR } from "../../utils/trainingWordColors";
 
 const ALL: TrainingLayers = { headingBands: true, corridor: true, vertical: true, candidates: true };
@@ -33,7 +33,7 @@ function autopilotSegment(): TrainingAutopilotSegment {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
   const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
-  const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, parsed.value);
+  const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
   if (!answer.ok) throw new Error(answer.problem);
   return answer.value;
 }
@@ -62,8 +62,8 @@ function open(layers: TrainingLayers = ALL, position = 0, cursorS = 0, column: T
   return { onCursorChange, onColumnChange };
 }
 
-/** The elements stroked in the selected word's colour. */
-const yellow = () => [...document.body.querySelectorAll(`[stroke="${TRAINING_WORD_COLOR}"]`)];
+/** The elements the charts stroke in the selected word's colour (the footer's swatch is not a chart's). */
+const yellow = () => [...document.body.querySelectorAll(`.training-readback-frame [stroke="${TRAINING_WORD_COLOR}"]`)];
 
 /** The window renders through a portal into `document.body`. */
 const count = (selector: string) => document.body.querySelectorAll(selector).length;
@@ -176,9 +176,9 @@ describe("TrainingReadbackWindow", () => {
     expect(screen.getByText(/captured: the corridor holds/)).toBeTruthy();
   });
 
-  it("draws no executor without its replay, and says so", () => {
+  it("draws no executor without its replay, and says nothing of it", () => {
     open();
-    expect(screen.getByLabelText("Executor replay").textContent).toMatch(/off, or not published for this set/);
+    expect(screen.queryByLabelText("Executor replay")).toBeNull();
     expect(document.body.querySelectorAll(".training-readback-executor")).toHaveLength(0);
   });
 
@@ -271,13 +271,32 @@ describe("the live executor in the read-back check", () => {
     // plan, heading, altitude, speed
     expect(count("polyline.training-readback-autopilot")).toBe(4);
     expect(count("rect.training-readback-autopilot-band")).toBe(1);
-    expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/solid blue: the selected heading word's segment/);
+    // one line, naming the word it flew — whichever word is selected now
+    expect(screen.getByLabelText("The autopilot, live").textContent)
+      .toBe("Autopilot — heading 225° from step 8 · ✓ inside its envelope · solid blue");
+    cleanup();
+    open(ALL, 0, 60, "speed", null, autopilotSegment());
+    expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/^Autopilot — heading 225° from step 8/);
   });
 
-  it("says how to get one when there is none", () => {
+  it("says nothing of it when there is none", () => {
     cleanup();
     open(ALL, 0, 16, "heading");
     expect(count("polyline.training-readback-autopilot")).toBe(0);
-    expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/select a word/);
+    expect(screen.queryByLabelText("The autopilot, live")).toBeNull();
+  });
+
+  it("closes on Escape from the moment it opens: the window takes the focus", () => {
+    cleanup();
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const onClose = vi.fn();
+    render(<TrainingReadbackWindow flight={parsed.value.flights[0]} vocabulary={parsed.value.vocabulary}
+      candidates={parsed.value.candidates} layers={ALL} cursorS={0} onCursorChange={() => undefined} column={null}
+      onColumnChange={() => undefined} onClose={onClose} executor={null} autopilot={null} />);
+    const dialog = screen.getByRole("dialog", { name: "Read-back check" });
+    expect(document.activeElement).toBe(dialog);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(onClose).toHaveBeenCalled();
   });
 });

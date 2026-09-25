@@ -367,11 +367,24 @@ export interface TrainingSample {
   flights: TrainingFlight[];
 }
 
-/** What the panel publishes for the sentence bar, the read-back window and the 3D layer. */
+/** What the panel publishes for the sentence bar, the read-back window and the 3D layer: the flight on screen, with the
+ *  set and airport it is read from — a flight key alone repeats across the sets of one airport. */
 export interface TrainingSelection {
+  airport: string;
+  setId: string;
   vocabulary: TrainingVocabulary;
   candidates: TrainingCandidate[];
   flight: TrainingFlight;
+}
+
+/** The flight on screen as one identity — the cursor and the live executor's pick belong to it and reset with it. */
+export function trainingSelectionKey(selection: TrainingSelection | null): string | null {
+  return selection === null ? null : `${selection.airport}/${selection.setId}/${selection.flight.flightKey}`;
+}
+
+/** The selection of one flight of a sample. */
+export function trainingSelectionOf(sample: TrainingSample, flight: TrainingFlight): TrainingSelection {
+  return { airport: sample.airport, setId: sample.setId, vocabulary: sample.vocabulary, candidates: sample.candidates, flight };
 }
 
 // ── reading a word ───────────────────────────────────────────────────────────
@@ -807,7 +820,7 @@ export type TrainingBandStop = { exactly: number } | { by: number };
  * lead, its rows run forward and end at (or by) its stop — or it has none when the lead carries it there — one
  * verdict per row, and the band is the word's target ± the vocabulary's tolerance on some branch.
  */
-export function headingBandProblem(
+function headingBandProblem(
   band: TrainingHeadingBand, wordRow: number, targetDeg: number, vocabulary: TrainingVocabulary, stop: TrainingBandStop,
 ): string | null {
   const first = wordRow + vocabulary.headingLeadRows;

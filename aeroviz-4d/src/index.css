@@ -571,10 +571,8 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   backdrop-filter: none;
 }
 
-/* Training task (docs/36-2026-09-20-training-module.zh.md). T1 styles the panel
-   shell and its empty state; the sentence bar and the read-back window get their
-   own blocks when they land (T4a / T4b). Renders flat inside the dock card, like
-   ControlPanel above. */
+/* Training task (docs/36-2026-09-20-training-module.zh.md): the panel, the sentence bar, the read-back and prior
+   windows, the 3D legend. The panel renders flat inside the dock card, like ControlPanel above. */
 .training-panel {
   display: flex;
   flex-direction: column;
@@ -674,7 +672,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 10.5px;
 }
 
-/* T4a: the panel's loaded states, and the full-width sentence bar. */
 .training-note {
   margin: 0;
   font-size: 11.5px;
@@ -719,9 +716,8 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   padding: 4px 6px;
 }
 
-/* The two lines a SENTENCE draws, each switchable. The measured track has no
-   switch — it is what the other two are read against — so there are two boxes
-   here and not three. */
+/* The Draw switches and the live executor's section. The observed track has no switch: it is what every envelope is
+   read against. */
 .training-layers {
   display: flex;
   flex-direction: column;
@@ -748,7 +744,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   cursor: pointer;
 }
 
-.training-layers input[disabled] + span,
 .training-layers label:has(input[disabled]) {
   color: rgba(224, 230, 240, 0.35);
   cursor: default;
@@ -796,7 +791,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-flight-list button {
   width: 100%;
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 6px;
   align-items: baseline;
   padding: 4px 6px;
@@ -871,6 +866,10 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   user-select: text;
 }
 
+.training-overlay-note summary {
+  cursor: pointer;
+}
+
 /* The live executor: the selected word's segment, flown by the backend when it is selected. */
 .training-autopilot-note {
   margin: 0 0 0 20px;
@@ -921,7 +920,10 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: rgba(224, 230, 240, 0.7);
 }
 
+/* A long refusal is cut to one line; its tooltip holds all of it. */
 .training-sentence-autopilot-failed {
+  display: inline-block;
+  vertical-align: bottom;
   max-width: 60ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -965,17 +967,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-autopilot-checks {
   margin: 0 0 3px;
   padding-left: 14px;
-}
-
-.training-autopilot-meta {
-  font-size: 10px;
-  color: rgba(224, 230, 240, 0.55);
-}
-
-.training-autopilot-buttons {
-  display: flex;
-  gap: 6px;
-  margin-top: 2px;
 }
 
 .training-autopilot-button {
@@ -1098,6 +1089,15 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   color: #e0e6f0;
 }
 
+/* One fact in the header: its full reading is its tooltip. */
+.training-chip {
+  padding: 0 6px;
+  border: 1px solid rgba(224, 230, 240, 0.14);
+  border-radius: 9px;
+  white-space: nowrap;
+  cursor: default;
+}
+
 .training-sentence-cursor-readout {
   margin-left: auto;
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
@@ -1139,9 +1139,9 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   cursor: pointer;
 }
 
-.training-sentence-band:hover rect,
+.training-sentence-band:hover .training-sentence-band-fill,
 .training-sentence-event:hover text {
-  fill-opacity: 0.34;
+  fill-opacity: 0.3;
 }
 
 .training-sentence-event-line {
@@ -1186,14 +1186,14 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 .training-sentence-notes-toggle {
-  margin-left: 6px;
-  padding: 0 5px;
-  border: 1px solid rgba(103, 232, 249, 0.25);
-  border-radius: 3px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
   background: none;
-  color: rgba(103, 232, 249, 0.8);
+  color: rgba(103, 232, 249, 0.85);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 13px;
+  line-height: 1.2;
 }
 
 .training-sentence-notes-toggle:hover {
@@ -1204,10 +1204,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   display: none;
 }
 
-/* T4b: the read-back check window. Portalled into document.body (AV7), so it is
-   positioned against the viewport rather than against `.flight-ops-panel`'s
-   backdrop-filtered box. It is NOT modal: the sentence bar and the flight list
-   stay usable behind it, because reading one against the other is the point. */
 .training-sentence-readback-button {
   background: #2a3550;
   border: 1px solid #3a4a6a;
@@ -1218,10 +1214,14 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   padding: 3px 8px;
 }
 
-.training-sentence-readback-button:hover {
+.training-sentence-readback-button:hover,
+.training-sentence-readback-button[aria-pressed="true"] {
   background: #3a4f78;
 }
 
+/* The Training windows (the read-back check, the prior). Portalled into document.body (AV7), so they are positioned
+   against the viewport rather than against `.flight-ops-panel`'s backdrop-filtered box. NOT modal: the sentence bar
+   and the flight list stay usable behind, because reading one against the other is the point. */
 .training-readback-backdrop {
   position: fixed;
   inset: 0;
@@ -1287,15 +1287,13 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   cursor: crosshair;
 }
 
-.training-readback-title {
-  fill: rgba(224, 230, 240, 0.62);
+/* A chart's caption: HTML above its SVG, so a long reading wraps instead of being clipped. */
+.training-readback-caption {
+  margin: 6px 0 1px;
+  padding-left: 64px;
   font-size: 10.5px;
-}
-
-.training-readback-trace {
-  fill: none;
-  stroke: #cbd5e1;
-  stroke-width: 1.2;
+  line-height: 1.35;
+  color: rgba(224, 230, 240, 0.62);
 }
 
 .training-readback-candidate-label {
@@ -1333,22 +1331,21 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
-/* The executor's replay, said in words beside the charts: what its dashed teal lines are, or why
-   there are none — never placeholder data. */
+/* The executor's lines, said in one line each below the charts — only when they are drawn; what they are is the
+   line's tooltip. */
 .training-readback-slots {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   margin: 6px 0 2px;
 }
 
 .training-readback-slot {
-  flex: 1;
-  padding: 6px 8px;
-  border: 1px dashed rgba(224, 230, 240, 0.28);
-  border-radius: 4px;
-  font-size: 10.5px;
+  margin: 0;
+  font-size: 11px;
   line-height: 1.45;
-  color: rgba(224, 230, 240, 0.55);
+  color: rgba(224, 230, 240, 0.7);
+  cursor: default;
 }
 
 .training-slot {
@@ -1391,14 +1388,28 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 11px;
 }
 
+/* A window's footer: one row of swatches, each explained in its tooltip. */
 .training-readback-legend {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  margin-top: 6px;
   font-size: 10.5px;
   line-height: 1.45;
-  color: rgba(224, 230, 240, 0.55);
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-readback-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+}
+
+.training-readback-hint {
+  margin-left: auto;
+  color: rgba(224, 230, 240, 0.45);
 }
 
 .czml-status {
@@ -6348,7 +6359,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   position: absolute;
   right: 0;
   bottom: calc(100% + 6px);
-  max-width: 380px;
+  max-width: 260px;
   padding: 5px 8px 6px;
   border: 1px solid rgba(103, 232, 249, 0.2);
   border-radius: 6px;
@@ -6378,8 +6389,9 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 .training-legend li {
   display: flex;
   gap: 6px;
-  align-items: flex-start;
+  align-items: center;
   margin-top: 2px;
+  cursor: default;
 }
 
 .training-legend-swatch {

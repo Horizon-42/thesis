@@ -6,40 +6,36 @@
  * against the two baselines). Both are copied from the artefacts by the exporters; nothing here is recomputed.
  */
 
-import { TRAINING_COLUMNS, TRAINING_STRATA } from "../data/trainingSample";
+import { formatSeconds, TRAINING_COLUMNS, TRAINING_STRATA } from "../data/trainingSample";
 import type { TrainingExecutorOverlay, TrainingGateCell, TrainingPriorOverlay } from "../data/trainingOverlays";
-
-const STRATA = [...TRAINING_STRATA, "all"] as const;
-const COLUMN_LABEL: Record<(typeof TRAINING_COLUMNS)[number], string> = {
-  runway: "runway", approach: "approach", heading: "heading", altitude: "altitude", angle: "angle", speed: "speed",
-};
+import { checkMark, shortSha } from "../data/trainingText";
 
 function share(value: number | null): string {
   return value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
-function mark(ok: boolean | undefined): string {
-  return ok === undefined ? "" : ok ? " ✓" : " ✗";
-}
-
 function GateRow({ name, cell }: { name: string; cell: TrainingGateCell }) {
+  // a gated cell marks each share it clears or not; a cell reported but not gated marks none
+  const mark = (key: "landed" | "words" | "evaluation") => (cell.clears === null ? "" : ` ${checkMark(cell.clears[key])}`);
   return (
     <tr>
       <th scope="row">{name}</th>
       <td>{cell.flights.toLocaleString("en")}</td>
-      <td>{share(cell.landed)}{mark(cell.clears?.landed)}</td>
-      <td>{share(cell.wordsInside)}{mark(cell.clears?.words)}</td>
-      <td>{share(cell.evaluationPaired)}{mark(cell.clears?.evaluation)}</td>
+      <td>{share(cell.landed)}{mark("landed")}</td>
+      <td>{share(cell.wordsInside)}{mark("words")}</td>
+      <td>{share(cell.evaluationPaired)}{mark("evaluation")}</td>
     </tr>
   );
 }
+
+const STRATA = [...TRAINING_STRATA, "all"] as const;
 
 export function TrainingExecutorGate({ overlay }: { overlay: TrainingExecutorOverlay }) {
   const airport = overlay.airport;
   const gateShare = `${(overlay.replay.gateShare * 100).toFixed(0)} %`;
   return (
     <details className="training-results" aria-label="The executor's replay gate">
-      <summary>The executor's {overlay.replay.split} replay gate · spec {overlay.executor.specSha256.slice(0, 12)}</summary>
+      <summary>The executor's {overlay.replay.split} replay gate · spec {shortSha(overlay.executor.specSha256)}</summary>
       {Object.entries(overlay.gate).map(([group, places]) => {
         const { notGated } = places.here.all;
         return (
@@ -71,7 +67,7 @@ export function TrainingExecutorGate({ overlay }: { overlay: TrainingExecutorOve
   );
 }
 
-export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverlay }) {
+export function TrainingPriorReadout({ overlay, stepS }: { overlay: TrainingPriorOverlay; stepS: number }) {
   const { readout } = overlay;
   const nll = (value: number) => value.toFixed(4);
   const percent = (value: number | null, digits = 1) => (value === null ? "—" : `${(value * 100).toFixed(digits)}%`);
@@ -91,12 +87,13 @@ export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverla
               `first predicted step: its most likely word is the truth's ${percent(own.firstStepTop1)}; after it, ` +
               `${own.changeSteps.toLocaleString("en")} steps where the truth says a word: the prior gives a word ` +
               `${own.changeProbabilityWhereChanged === null ? "—" : own.changeProbabilityWhereChanged.toFixed(3)} on average there; ` +
+              // "first five": MIRROR of `prior.readout.TOP_K` (5), the readout's `top5GivenChange`
               `its most likely word is the one said ${percent(own.top1GivenChange)} of the time, among its first five ` +
               `${percent(own.top5GivenChange)}; on the steps where nothing is said it says a word ` +
               `${percent(own.falseChangeShareWhereKept, 2)} of the time`;
             return (
               <tr key={column} title={title}>
-                <th scope="row">{COLUMN_LABEL[column]}</th>
+                <th scope="row">{column}</th>
                 <td>{nll(own.nllPerStep)}</td>
                 <td>{nll(readout.baselines.repeat[column])}</td>
                 <td>{nll(readout.baselines.previousWord[column])}</td>
@@ -112,12 +109,14 @@ export function TrainingPriorReadout({ overlay }: { overlay: TrainingPriorOverla
         </tbody>
       </table>
       <p className="training-results-note">
-        {readout.steps.toLocaleString("en")} predicted {readout.split} steps (2 s each), best epoch {readout.bestEpoch}; teacher-forced — every
+        {readout.steps.toLocaleString("en")} predicted {readout.split} steps ({formatSeconds(stepS)} s each), best epoch {readout.bestEpoch}; teacher-forced — every
         step sees the truth sentence before it. The runway at the first predicted step: prior {percent(runway.model.top1)} right
         ({percent(runway.model.direction)} in the right direction), each airport's own frequency {percent(runway.airportFrequency.top1)},{" "}
-        {Object.entries(runway.rules).map(([rule, part]) => `${rule.split("_")[0]} ${percent(part.top1)}`).join(", ")}. The baselines are counted from train: "repeat" says a word with the column's
-        train frequency, the word by its train frequency; "previous word" the word by its train frequency after the column's
-        previous word. Prior {overlay.prior.checkpointSha256.slice(0, 12)}: {overlay.prior.parameters.toLocaleString("en")}{" "}
+        {Object.entries(runway.rules).map(([rule, part]) => `${rule.split("_")[0]} ${percent(part.top1)}`).join(", ")}. The baselines are
+        counted from train. At the first predicted step, where every column is said, both give each column's word its train
+        frequency at that step (the runway: its airport's own frequency over its candidates); after it, "repeat" says a word
+        with the column's train frequency, the word by its frequency among changes; "previous word" the word by its train
+        frequency after the column's word in force. Prior {shortSha(overlay.prior.checkpointSha256)}: {overlay.prior.parameters.toLocaleString("en")}{" "}
         parameters, d {overlay.prior.model.dModel}, {overlay.prior.model.layers} layers, {overlay.prior.model.heads} heads.
       </p>
     </details>

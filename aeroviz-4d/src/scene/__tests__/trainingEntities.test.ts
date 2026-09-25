@@ -1,19 +1,13 @@
 /**
- * The 3D layer's plumbing: the exporter's coordinates handed to Cesium unchanged — the track at
- * its ellipsoid height, a plan line as [lon, lat, …], a tube as a wall over the track's own rows, a
- * heading word's judged rows and its rows outside on the ground — and what ONE selected word lights
- * up: its own column's envelope and the rows it is in force.
+ * The Training 3D scene's pieces (`scene/trainingEntities.ts`): the exporter's coordinates handed to Cesium unchanged —
+ * the track at its ellipsoid height, a plan line as [lon, lat, …], a tube as a wall over the track's own rows, a heading
+ * word's judged rows and its rows outside on the ground — what ONE selected word lights up (its own column's envelope
+ * and the rows it is in force), and the live executor's fly-out (`data/trainingAutopilot.ts`).
  */
 import { describe, expect, it } from "vitest";
 
 import {
-  autopilotAircraftLabel,
-  autopilotFlownAt,
-  autopilotPlaybackSpeedup,
-  autopilotTrackPositions,
-  AUTOPILOT_PLAYBACK_MAX_S,
-  AUTOPILOT_PLAYBACK_MIN_SPEEDUP,
-  executorTrackPositions,
+  lonLatHeights,
   planDegrees,
   planRingDegrees,
   trainingBandGround,
@@ -21,33 +15,39 @@ import {
   trainingEnvelopeEntities,
   trainingFocusEntities,
   trainingFocusStretch,
-  trainingTrackPositions,
   trainingTubeWall,
   TRAINING_ENTITY,
-} from "../useTrainingTrackLayer";
-import { parseTrainingSample, trainingWordAt, type TrainingSelection } from "../../data/trainingSample";
+} from "../trainingEntities";
+import {
+  autopilotAircraftLabel,
+  autopilotFlownAt,
+  autopilotJudgedPoints,
+  autopilotPlaybackSpeedup,
+  AUTOPILOT_PLAYBACK_MAX_S,
+  AUTOPILOT_PLAYBACK_MIN_SPEEDUP,
+} from "../../data/trainingAutopilot";
+import { parseTrainingSample, trainingSelectionOf, trainingWordAt, type TrainingSelection } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
 import { parseTrainingExecutorOverlay } from "../../data/trainingOverlays";
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { VECTORED_KEY } from "../../data/__tests__/trainingSample.fixture";
-import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
+import { mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
 
 function selection(position = 0): TrainingSelection {
   const parsed = parseTrainingSample(mockSample());
   if (!parsed.ok) throw new Error(parsed.problem);
-  const { vocabulary, candidates, flights } = parsed.value;
-  return { vocabulary, candidates, flight: flights[position] };
+  return trainingSelectionOf(parsed.value, parsed.value.flights[position]);
 }
 
 function flight(position = 0) {
   return selection(position).flight;
 }
 
-describe("useTrainingTrackLayer helpers", () => {
+describe("the Training scene's pieces", () => {
   it("flattens the track to lon, lat and its ellipsoid height, never the MSL altitude", () => {
     const item = flight();
-    const positions = trainingTrackPositions(item);
+    const positions = lonLatHeights(item.signals);
     expect(positions).toHaveLength(item.rows * 3);
     expect(positions.slice(0, 3)).toEqual([item.signals.lon[0], item.signals.lat[0], item.signals.altitudeHaeM[0]]);
     expect(positions[2]).not.toBe(item.signals.smoothed.altitudeM[0]);
@@ -61,7 +61,7 @@ describe("useTrainingTrackLayer helpers", () => {
     const flown = overlay.value.flights[0];
     if (!flown.flown) throw new Error("the fixture's first flight is flown");
     const { track } = flown;
-    const positions = executorTrackPositions(track);
+    const positions = lonLatHeights(track);
     expect(positions).toHaveLength(track.lon.length * 3);
     expect(positions.slice(0, 3)).toEqual([track.lon[0], track.lat[0], track.altitudeHaeM[0]]);
     expect(positions[2]).not.toBe(track.altitudeM[0]);
@@ -138,26 +138,34 @@ describe("useTrainingTrackLayer helpers", () => {
   it("draws the rows a word is in force, on to the next word's issue", () => {
     const item = flight();
     const altitude = trainingWordAt(item, "altitude", 5);
-    expect(trainingFocusStretch(item, altitude)).toEqual(trainingTrackPositions(item).slice(0, 21 * 3));
+    expect(trainingFocusStretch(item, altitude)).toEqual(lonLatHeights(item.signals).slice(0, 21 * 3));
     // the last word runs to the last row
     const last = trainingWordAt(item, "altitude", 30);
-    expect(trainingFocusStretch(item, last)).toEqual(trainingTrackPositions(item).slice(20 * 3));
+    expect(trainingFocusStretch(item, last)).toEqual(lonLatHeights(item.signals).slice(20 * 3));
   });
 });
 
 describe("the live executor in 3D", () => {
-  function track() {
+  function segment() {
     const parsed = parseTrainingSample(mockSample());
     if (!parsed.ok) throw new Error(parsed.problem);
     const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
-    const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, parsed.value);
+    const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, mockSelection(parsed.value, request));
     if (!answer.ok) throw new Error(answer.problem);
-    return answer.value.track;
+    return answer.value;
   }
+  const track = () => segment().track;
 
   it("flattens the flown segment at its ellipsoid height", () => {
     const flown = track();
-    expect(autopilotTrackPositions(flown).slice(0, 3)).toEqual([flown.lon[0], flown.lat[0], flown.altitudeHaeM[0]]);
+    expect(lonLatHeights(flown).slice(0, 3)).toEqual([flown.lon[0], flown.lat[0], flown.altitudeHaeM[0]]);
+  });
+
+  it("finds the judged steps among the flown points: every step's worth of cycles", () => {
+    const flown = segment();                                 // 1 s cycles, 2 s steps: points 0, 2, 4, 6, 8
+    const { lon, lat } = autopilotJudgedPoints(flown);
+    expect(lon).toEqual([0, 2, 4, 6, 8].map((index) => flown.track.lon[index]));
+    expect(lat).toHaveLength(flown.judgedTrackDeg!.length);
   });
 
   it("finds the aircraft between two flown points, and at the last from the segment's end on", () => {
