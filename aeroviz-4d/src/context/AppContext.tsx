@@ -47,7 +47,7 @@ import type { AirportLocalTerrainSourceKind } from "../terrain/airportLocalTerra
 import type { ObservedVerdictFilter } from "../data/observedTracks";
 import type { TrainingColumn, TrainingSelection } from "../data/trainingSample";
 import type { TrainingExecutorView, TrainingPriorView } from "../data/trainingOverlays";
-import type { TrainingAutopilotRequest, TrainingAutopilotView } from "../data/trainingAutopilot";
+import type { TrainingAutopilotView, TrainingPick } from "../data/trainingAutopilot";
 
 // ── Layer names ──────────────────────────────────────────────────────────────
 // Extend this union if you add new data layers.
@@ -272,16 +272,20 @@ interface TrainingSessionState {
   setTrainingPrior: (view: TrainingPriorView | null) => void;
   /**
    * THE EXECUTOR, LIVE (`data/trainingAutopilot.ts`): the selected word's segment of the selected flight, flown by the
-   * backend when the word is selected and the panel's switch is on — in flight, failed, or flown; null otherwise.
+   * backend when a word is picked (`trainingPick`) — in flight, failed, or flown; null otherwise.
    */
   trainingAutopilot: TrainingAutopilotView | null;
   setTrainingAutopilot: (view: TrainingAutopilotView | null) => void;
   /**
-   * THE WORD THE LIVE EXECUTOR FLIES: set only by a CLICK on a band of the sentence bar (and cleared by clicking it again)
-   * — never by the cursor, which the charts move on hover. A pick of another flight is not flown.
+   * THE WORD THE LIVE EXECUTOR FLIES: set only by a CLICK — the sentence bar's "Fly this segment" button, or a band
+   * clicked while `trainingAutopilotAuto` is on — and cleared by clicking the selected band again; never by the cursor,
+   * which the charts move on hover. A pick of another flight is not flown.
    */
-  trainingPick: Pick<TrainingAutopilotRequest, "flightKey" | "column" | "row"> | null;
-  setTrainingPick: (pick: Pick<TrainingAutopilotRequest, "flightKey" | "column" | "row"> | null) => void;
+  trainingPick: TrainingPick | null;
+  setTrainingPick: (pick: TrainingPick | null) => void;
+  /** A band clicked flies its word at once (the panel's switch, on at first); off, only the button flies. */
+  trainingAutopilotAuto: boolean;
+  setTrainingAutopilotAuto: (on: boolean) => void;
 }
 
 export interface TrainingLayers {
@@ -405,8 +409,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trainingExecutor, setTrainingExecutor] = useState<TrainingExecutorView | null>(null);
   const [trainingPrior, setTrainingPrior] = useState<TrainingPriorView | null>(null);
   const [trainingAutopilot, setTrainingAutopilot] = useState<TrainingAutopilotView | null>(null);
-  const [trainingPick, setTrainingPick] =
-    useState<Pick<TrainingAutopilotRequest, "flightKey" | "column" | "row"> | null>(null);
+  const [trainingPick, setTrainingPick] = useState<TrainingPick | null>(null);
+  const [trainingAutopilotAuto, setTrainingAutopilotAuto] = useState<boolean>(true);
   const [selectedRunway, setSelectedRunway] = useState<string | null>(null);
   const [trajectoryDataSource, setTrajectoryDataSource] =
     useState<Cesium.CzmlDataSource | null>(null);
@@ -650,8 +654,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingAutopilot,
     trainingPick,
     setTrainingPick,
+    trainingAutopilotAuto,
+    setTrainingAutopilotAuto,
   }), [trainingSelection, trainingCursorS, setTrainingCursorS, trainingColumn, trainingLayers, setTrainingLayer,
-    trainingExecutor, trainingPrior, trainingAutopilot, trainingPick]);
+    trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, trainingAutopilotAuto]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,

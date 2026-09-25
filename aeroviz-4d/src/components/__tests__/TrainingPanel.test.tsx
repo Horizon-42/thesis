@@ -7,25 +7,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const {
-  appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot, fetchMock,
+  appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
+  setTrainingAutopilotAuto, fetchMock,
 } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
     trainingLayers: { headingBands: true, corridor: true, vertical: true, candidates: true },
     // no word selected: the live executor asks for nothing
-    trainingSelection: null, trainingColumn: null, trainingCursorS: 0, trainingAutopilot: null,
+    trainingSelection: null, trainingColumn: null, trainingCursorS: 0, trainingAutopilot: null, trainingPick: null,
+    trainingAutopilotAuto: true,
   },
   setTrainingSelection: vi.fn(),
   setTrainingLayer: vi.fn(),
   setTrainingExecutor: vi.fn(),
   setTrainingPrior: vi.fn(),
   setTrainingAutopilot: vi.fn(),
+  setTrainingAutopilotAuto: vi.fn(),
   fetchMock: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     ...appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
+    setTrainingAutopilotAuto,
   }),
 }));
 

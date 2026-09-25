@@ -40,7 +40,8 @@
  *
  * THE EXECUTOR, LIVE (`trainingAutopilot`, ready): the selected word's segment as the backend flew it — an aircraft
  * flies it out from where the word was said (`autopilotPlaybackSpeedup` × real time — at least 8×, faster for a segment
- * that would take more than 20 s — from the moment the answer arrived or "Replay in 3D" was pressed), its line growing
+ * that would take more than 20 s — from the moment the answer arrived or "Replay in 3D" was pressed), in blue — or a
+ * loud red when the selected word flew outside its envelope (`autopilotColour`) — its line growing
  * behind it and labelled with the speed-up, its ground speed, height and bank; the whole flown line stays, and when the flight is done its ground trace is draped dashed, with — for a heading
  * word, with the heading bands on — its judged rows outside the word red. The aircraft's position is a
  * CallbackProperty read on each frame (the viewer renders continuously), not a time-sampled entity: `viewer.clock`
@@ -56,7 +57,6 @@ import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import {
-  TRAINING_AUTOPILOT_COLOR,
   TRAINING_CANDIDATE_COLOR,
   TRAINING_CAPTURE_TURN_COLOR,
   TRAINING_COLUMN_COLOR,
@@ -84,7 +84,7 @@ import {
   type TrainingWordRun,
 } from "../data/trainingSample";
 import type { TrainingExecutorFlight, TrainingExecutorTrack } from "../data/trainingOverlays";
-import type { TrainingAutopilotTrack, TrainingAutopilotView } from "../data/trainingAutopilot";
+import { autopilotColour, type TrainingAutopilotTrack, type TrainingAutopilotView } from "../data/trainingAutopilot";
 
 export const TRAINING_ENTITY = {
   track: "training-track",
@@ -371,6 +371,8 @@ export default function useTrainingTrackLayer(): void {
       added.push(options.id);
       viewer.entities.add(options);
     };
+    // blue, or red when the selected word flew outside its envelope: the line, its ground trace, the aircraft and its label
+    const hue = autopilotColour(segment);
     const positions = Cesium.Cartesian3.fromDegreesArrayHeights(autopilotTrackPositions(track));
     const last = positions.length - 1;
     const flownS = track.tS[last] - track.tS[0];
@@ -387,22 +389,22 @@ export default function useTrainingTrackLayer(): void {
           return at.index === last ? positions : [...positions.slice(0, at.index + 1), aircraftAt(at)];
         }, false),
         width: 4,
-        material: colour(TRAINING_AUTOPILOT_COLOR),
-        depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: colour(TRAINING_AUTOPILOT_COLOR, 0.55) }),
+        material: colour(hue),
+        depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: colour(hue, 0.55) }),
       },
     });
     add({
       id: TRAINING_ENTITY.autopilotStart,
       name: "Where the autopilot took over: the observed state as the selected word was said",
       position: positions[0],
-      point: { pixelSize: 8, color: colour(TRAINING_AUTOPILOT_COLOR), outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5,
+      point: { pixelSize: 8, color: colour(hue), outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5,
         disableDepthTestDistance: Number.POSITIVE_INFINITY },
     });
     add({
       id: TRAINING_ENTITY.autopilotAircraft,
       name: "The autopilot's aircraft",
       position: new Cesium.CallbackPositionProperty(() => aircraftAt(now()), false),
-      point: { pixelSize: 12, color: colour(TRAINING_AUTOPILOT_COLOR), outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
+      point: { pixelSize: 12, color: colour(hue), outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
         disableDepthTestDistance: Number.POSITIVE_INFINITY },
       label: {
         text: new Cesium.CallbackProperty(() => autopilotAircraftLabel(track, now().index, speedup), false),
@@ -410,7 +412,7 @@ export default function useTrainingTrackLayer(): void {
         // white on the autopilot's blue: the simulated clock must read over any terrain
         fillColor: Cesium.Color.WHITE,
         showBackground: true,
-        backgroundColor: colour(TRAINING_AUTOPILOT_COLOR, 0.85),
+        backgroundColor: colour(hue, 0.85),
         style: Cesium.LabelStyle.FILL,
         pixelOffset: new Cesium.Cartesian2(0, -20),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -426,7 +428,7 @@ export default function useTrainingTrackLayer(): void {
           positions: Cesium.Cartesian3.fromDegreesArray(track.lon.flatMap((lon, index) => [lon, track.lat[index]])),
           clampToGround: true,
           width: 2,
-          material: new Cesium.PolylineDashMaterialProperty({ color: colour(TRAINING_AUTOPILOT_COLOR, 0.6) }),
+          material: new Cesium.PolylineDashMaterialProperty({ color: colour(hue, 0.6) }),
         },
       });
       const band = segment.word.heading;

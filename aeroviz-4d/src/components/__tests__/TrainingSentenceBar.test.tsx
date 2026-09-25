@@ -15,6 +15,7 @@ const { appState, DEFAULT_LAYERS, setTrainingPick } = vi.hoisted(() => {
     appState: {
       trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
       trainingExecutor: null as unknown, trainingPrior: null as unknown, trainingAutopilot: null as unknown,
+      trainingPick: null as unknown, trainingAutopilotAuto: true,
     },
   };
 });
@@ -65,6 +66,8 @@ describe("TrainingSentenceBar", () => {
     appState.trainingExecutor = null;
     appState.trainingPrior = null;
     appState.trainingAutopilot = null;
+    appState.trainingPick = null;
+    appState.trainingAutopilotAuto = true;
     setTrainingPick.mockClear();
   });
 
@@ -73,25 +76,74 @@ describe("TrainingSentenceBar", () => {
     render(<TrainingSentenceBar />);
     const band = screen.getByLabelText(/^heading 225° .* issued at step 8 /);
     fireEvent.click(band);
-    expect(setTrainingPick).toHaveBeenLastCalledWith({ flightKey: VECTORED_KEY, column: "heading", row: 8 });
+    expect(setTrainingPick).toHaveBeenLastCalledWith({ flightKey: VECTORED_KEY, column: "heading", row: 8, attempt: 0 });
     fireEvent.click(band);
     expect(setTrainingPick).toHaveBeenLastCalledWith(null);
   });
 
-  it("reads out the live executor's segment: flying, then how it ended and the word's verdict", () => {
+  it("flies the selected word from its Fly button — the only way with the panel's switch off", () => {
+    select();
+    appState.trainingAutopilotAuto = false;
+    render(<TrainingSentenceBar />);
+    const fly = screen.getByRole("button", { name: "▶ Fly a segment — select a word first" }) as HTMLButtonElement;
+    expect(fly.disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
+    expect(setTrainingPick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "▶ Fly this segment" }));
+    expect(setTrainingPick).toHaveBeenLastCalledWith({ flightKey: VECTORED_KEY, column: "heading", row: 8, attempt: 0 });
+  });
+
+  it("offers to fly the same segment again once it has flown, and waits while it flies", () => {
+    select();
+    const parsed = parseTrainingSample(mockSample());
+    if (!parsed.ok) throw new Error(parsed.problem);
+    const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
+    appState.trainingPick = { flightKey: VECTORED_KEY, column: "heading", row: 8, attempt: 2 };
+    appState.trainingAutopilot = { status: "flying", request };
+    const { unmount } = render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
+    expect((screen.getByRole("button", { name: "Flying …" }) as HTMLButtonElement).disabled).toBe(true);
+    unmount();
+    const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, parsed.value);
+    if (!answer.ok) throw new Error(answer.problem);
+    appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
+    render(<TrainingSentenceBar />);
+    fireEvent.click(screen.getByLabelText(/^heading 225° .* issued at step 8 /));
+    setTrainingPick.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "↻ Fly again" }));
+    expect(setTrainingPick).toHaveBeenLastCalledWith({ flightKey: VECTORED_KEY, column: "heading", row: 8, attempt: 3 });
+  });
+
+  it("reads out the live executor's segment in one short line: the word, its verdict, the two times", () => {
     select();
     const parsed = parseTrainingSample(mockSample());
     if (!parsed.ok) throw new Error(parsed.problem);
     const request = mockAutopilotRequest(parsed.value, VECTORED_KEY, "heading", 8);
     appState.trainingAutopilot = { status: "flying", request };
     const { unmount } = render(<TrainingSentenceBar />);
-    expect(screen.getByText("the autopilot (live): flying heading 225° from step 8 …")).toBeTruthy();
+    expect(screen.getByText("Autopilot · flying heading 225° …")).toBeTruthy();
     unmount();
     const answer = parseTrainingAutopilot(mockAutopilotAnswer(parsed.value, request), request, parsed.value);
     if (!answer.ok) throw new Error(answer.problem);
     appState.trainingAutopilot = { status: "ready", request, segment: answer.value, playedAt: 0, roundTripS: 0.5 };
+    const { unmount: done } = render(<TrainingSentenceBar />);
+    const line = document.querySelector(".training-sentence-autopilot")!;
+    expect(line.textContent).toBe("Autopilot · heading 225° · ✓ inside its envelope · 8.00 s flown in 1.24 s");
+    expect((line.querySelector("strong") as HTMLElement).style.color).toBe("rgb(37, 99, 235)");
+    done();
+    // outside its envelope: the verdict in the loud red
+    const outside = mockAutopilotAnswer(parsed.value, request);
+    outside.word.status = "outside";
+    outside.word.checks[0].ok = false;
+    outside.word.checks[0].inside = 1;
+    outside.word.heading.inside[1] = 0;
+    const flown = parseTrainingAutopilot(outside, request, parsed.value);
+    if (!flown.ok) throw new Error(flown.problem);
+    appState.trainingAutopilot = { status: "ready", request, segment: flown.value, playedAt: 0, roundTripS: 0.5 };
     render(<TrainingSentenceBar />);
-    expect(screen.getByText(/the autopilot \(live\): heading 225°, steps 8–10, flown on to step 12 — reached the point a lead after the next heading word was said, where this word's band ends; the word: inside · simulated 8\.00 s of flight \(observed 8\.00 s\) · computed in 1\.24 s/)).toBeTruthy();
+    const red = document.querySelector(".training-sentence-autopilot strong") as HTMLElement;
+    expect(red.textContent).toBe("✗ outside its envelope");
+    expect(red.style.color).toBe("rgb(255, 45, 45)");
   });
 
   it("marks each word with the executor's verdict, and none where a word has no check of its own", () => {

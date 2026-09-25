@@ -140,8 +140,9 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   `aeroviz-autopilot-segment-v2`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
   where its envelope ends (the next word of its column; a heading word's a lead later; the sentence's end: to the landing),
   the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
-  words it told are the sentence bar's for that segment; the simulated flight time and the computation time are shown side
-  by side; blue `#2563eb`, never the replay's teal (AV26).
+  words it told are the sentence bar's for that segment; started by the sentence bar's "▶ Fly this segment" (or a band
+  click, the panel's switch on); one short status line (word · inside/outside · "N s flown in M ms"); blue `#2563eb`
+  inside its envelope, the whole line a loud red `#ff2d2d` outside (`autopilotColour`), never the replay's teal (AV26).
 
 ## Comparison CZML colour contract
 

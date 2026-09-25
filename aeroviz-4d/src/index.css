@@ -895,6 +895,37 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .training-autopilot-title {
   font-weight: 600;
+  color: #c8d8ec;
+}
+
+/* The verdict: the answer the flight was flown for, read first. */
+.training-autopilot-verdict {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.training-autopilot-reason {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-autopilot-details summary {
+  cursor: pointer;
+  font-size: 10.5px;
+  color: rgba(224, 230, 240, 0.6);
+}
+
+.training-autopilot-details p {
+  font-size: 10.5px;
+  color: rgba(224, 230, 240, 0.7);
+}
+
+.training-sentence-autopilot-failed {
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The two times the live executor is read by: the simulated flight and the computation, side by side. */
@@ -959,6 +990,29 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 
 .training-autopilot-button:hover {
   background: #3a4f78;
+}
+
+/* The sentence bar's "Fly this segment": the live executor's start, in its own blue. */
+.training-autopilot-fly {
+  background: #2563eb;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+.training-autopilot-fly:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.training-autopilot-fly:disabled {
+  background: #1e2a44;
+  border-color: #2f3f63;
+  color: rgba(224, 230, 240, 0.55);
+  cursor: default;
 }
 
 /* The readouts behind the overlays: the executor's gate table, the prior's readout. */

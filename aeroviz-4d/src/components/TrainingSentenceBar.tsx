@@ -29,10 +29,12 @@
  * a word with no check of its own) and its outcome in the header; the PRIOR's likelihood of this flight in
  * the header, with the button that opens its window (`TrainingPriorWindow`).
  *
- * THE EXECUTOR, LIVE (`trainingAutopilot`): clicking a band also PICKS its word for the live executor (`trainingPick`;
- * clicking it again clears the pick) — the one place a flight is asked for, never the cursor; the header's line reads
- * out the segment as the backend is flying it or flew it (`TrainingAutopilotCard.autopilotSummary`); its lines go to the
- * read-back window.
+ * THE EXECUTOR, LIVE (`trainingAutopilot`): the header's "▶ Fly this segment" button PICKS the selected word for the
+ * live executor (`trainingPick`; "↻ Fly again" once it has flown), and so does clicking a band while the panel's switch is
+ * on (`trainingAutopilotAuto`; clicking the selected band again clears the pick) — never the cursor. The header's line
+ * reads out the segment as the backend is flying it or flew it (`TrainingAutopilotCard.autopilotSummary`); its lines go to
+ * the read-back window. The line says the word, whether it flew inside its envelope and the two times, no more
+ * (`TrainingAutopilotStatus`); the panel's card says the rest.
  */
 
 import { useLayoutEffect, useRef, useState } from "react";
@@ -40,9 +42,8 @@ import { useApp } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
-import { autopilotSummary } from "./TrainingAutopilotCard";
+import { TrainingAutopilotStatus } from "./TrainingAutopilotCard";
 import {
-  TRAINING_AUTOPILOT_COLOR,
   TRAINING_COLUMN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_EXECUTOR_COLOR,
@@ -50,6 +51,7 @@ import {
   TRAINING_RAW_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
+import { nextPick } from "../data/trainingAutopilot";
 import {
   executorWordAt,
   executorWordCounts,
@@ -61,6 +63,7 @@ import {
   rowAtTime,
   trainingColumnRuns,
   trainingKindLabel,
+  trainingWordAt,
   trainingVerdicts,
   trainingWordLabel,
   TRAINING_COLUMNS,
@@ -160,7 +163,7 @@ export default function TrainingSentenceBar() {
     trainingSelection, trainingLayers,
     trainingCursorS: cursorS, setTrainingCursorS: setCursorS,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
-    trainingExecutor, trainingPrior, trainingAutopilot, setTrainingPick,
+    trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick, trainingAutopilotAuto,
   } = useApp();
   const frameRef = useRef<HTMLDivElement>(null);
   const [plotW, setPlotW] = useState<number>(DEFAULT_PLOT_W);
@@ -212,6 +215,13 @@ export default function TrainingSentenceBar() {
   const prior = trainingPrior?.flight.flightKey === flight.flightKey ? trainingPrior : null;
   const autopilot = trainingAutopilot?.request.flightKey === flight.flightKey ? trainingAutopilot : null;
   const autopilotSegment = autopilot?.status === "ready" ? autopilot.segment : null;
+  // the button: the selected word's segment, and what the live executor is doing with it
+  const focusRun = focusColumn === null ? null : trainingWordAt(flight, focusColumn, cursorRow);
+  const pickedHere = focusRun !== null && trainingPick !== null && trainingPick.flightKey === flight.flightKey
+    && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
+  const flyingHere = pickedHere && autopilot?.status === "flying";
+  const flyLabel = focusRun === null ? "▶ Fly a segment — select a word first"
+    : flyingHere ? "Flying …" : pickedHere && autopilot !== null ? "↻ Fly again" : "▶ Fly this segment";
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar">
@@ -249,15 +259,22 @@ export default function TrainingSentenceBar() {
           </span>
         ) : null}
         {autopilot ? (
-          <span className="training-sentence-autopilot" role={autopilot.status === "flying" ? "status" : undefined}
-            style={{ color: autopilot.status === "failed" ? TRAINING_OUTSIDE_COLOR : TRAINING_AUTOPILOT_COLOR }}
-            title="The selected word's segment, flown by the executor on the backend when it was selected (the panel's switch).">
-            {autopilotSummary(autopilot, flight, vocabulary, candidates)}
-          </span>
+          <TrainingAutopilotStatus view={autopilot} flight={flight} vocabulary={vocabulary} candidates={candidates} />
         ) : null}
         <span className="training-sentence-cursor-readout">
           t = {formatSeconds(cursorS)} s · step {cursorRow}
         </span>
+        <button
+          type="button"
+          className="training-autopilot-fly"
+          disabled={focusRun === null || flyingHere}
+          title={focusRun === null
+            ? "Click a band to select a word; the executor then flies that word's segment from where it was said."
+            : `The executor flies ${focusColumn} from step ${focusRun.row} now, on the backend, from the observed state there.`}
+          onClick={() => setTrainingPick(nextPick(trainingPick, flight.flightKey, focusColumn!, focusRun!.row))}
+        >
+          {flyLabel}
+        </button>
         <button
           type="button"
           className="training-sentence-readback-button"
@@ -347,7 +364,7 @@ export default function TrainingSentenceBar() {
                     }
                     setFocusColumn(column);
                     setCursorS(timeOf(run.row));
-                    setTrainingPick({ flightKey: flight.flightKey, column, row: run.row });
+                    if (trainingAutopilotAuto) setTrainingPick(nextPick(trainingPick, flight.flightKey, column, run.row));
                   };
                   return (
                     <g

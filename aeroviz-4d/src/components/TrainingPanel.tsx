@@ -20,9 +20,10 @@
  * the replay's gate table and the prior's val readout — folded below the switches. A set with none says so and names
  * the command that writes one; nothing is drawn in its place.
  *
- * And THE EXECUTOR, LIVE (`useTrainingAutopilot`, on at first): the selected word's segment is flown by the backend
- * when it is selected — not read from any overlay — and its answer is shown below the switches
- * (`TrainingAutopilotCard`) and drawn in the sentence bar, the read-back window and 3D.
+ * And THE EXECUTOR, LIVE (`useTrainingAutopilot`), in its own section above Draw: a word picked — the sentence bar's
+ * "Fly this segment" button, or a band clicked while this section's switch is on — is flown by the backend now, not read
+ * from any overlay; its answer is shown here (`TrainingAutopilotCard`) and drawn in the sentence bar, the read-back window
+ * and 3D.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -159,7 +160,9 @@ function EmptyState({ airport }: { airport: string }) {
 }
 
 export default function TrainingPanel() {
-  const { activeAirportCode, setTrainingSelection, trainingLayers, setTrainingLayer } = useApp();
+  const {
+    activeAirportCode, setTrainingSelection, trainingLayers, setTrainingLayer, trainingAutopilotAuto, setTrainingAutopilotAuto,
+  } = useApp();
   const airport = activeAirportCode || "—";
 
   const [indexState, setIndexState] = useState<IndexState>({ status: "loading" });
@@ -167,7 +170,6 @@ export default function TrainingPanel() {
   const [sampleState, setSampleState] = useState<SampleState>({ status: "idle" });
   const [flightKey, setFlightKey] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState<boolean>(false);
-  const [autopilotOn, setAutopilotOn] = useState<boolean>(true);
 
   // ── the manifest ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -237,7 +239,7 @@ export default function TrainingPanel() {
   const overlays = useTrainingOverlays(activeAirportCode || null, sample, flightKey);
   const executorOverlay = overlays.executor.shown && overlays.executor.load.status === "ready" ? overlays.executor.load.overlay : null;
   const priorOverlay = overlays.prior.shown && overlays.prior.load.status === "ready" ? overlays.prior.load.overlay : null;
-  const autopilot = useTrainingAutopilot(autopilotOn, activeAirportCode || null, sample);
+  useTrainingAutopilot(activeAirportCode || null, sample);
   const executorFlights = useMemo(
     () => new Map((executorOverlay?.flights ?? []).map((flight) => [flight.flightKey, flight])),
     [executorOverlay],
@@ -322,6 +324,21 @@ export default function TrainingPanel() {
           ) : null}
           {entry ? <p className="training-note">{entry.title}</p> : null}
 
+          {/* THE EXECUTOR, LIVE: flown by the backend when a word is picked, never read from an overlay */}
+          {sample ? (
+            <fieldset className="training-layers training-autopilot-section" aria-label="Autopilot (live)">
+              <legend style={{ color: TRAINING_AUTOPILOT_COLOR }}>Autopilot (live)</legend>
+              <label style={{ color: TRAINING_AUTOPILOT_COLOR }}>
+                <input type="checkbox" checked={trainingAutopilotAuto}
+                  onChange={(event) => setTrainingAutopilotAuto(event.target.checked)} />
+                fly a word's segment as soon as its band is clicked
+              </label>
+              <TrainingAutopilotCard
+                flight={sample.flights.find((item) => item.flightKey === flightKey) ?? null}
+                vocabulary={sample.vocabulary} candidates={sample.candidates} />
+            </fieldset>
+          ) : null}
+
           <fieldset className="training-layers">
             <legend>Draw</legend>
             {LAYER_SWITCHES.map(({ layer, colour, text }) => (
@@ -341,19 +358,6 @@ export default function TrainingPanel() {
                   text="the executor's replay: its flown track and each word's verdict" />
                 <OverlaySwitch state={overlays.prior} colour={TRAINING_EXECUTOR_COLOR} setId={sample.setId} airport={airport}
                   text="the prior's predictions at each step (teacher-forced)" />
-                {/* THE EXECUTOR, LIVE: flown by the backend when a word is selected, never read from an overlay */}
-                <div className="training-overlay-switch">
-                  <label style={{ color: TRAINING_AUTOPILOT_COLOR }}>
-                    <input type="checkbox" checked={autopilotOn} onChange={(event) => setAutopilotOn(event.target.checked)} />
-                    the autopilot, live: fly the selected word's segment now
-                  </label>
-                  {autopilotOn ? (
-                    <TrainingAutopilotCard
-                      flight={sample.flights.find((item) => item.flightKey === flightKey) ?? null}
-                      vocabulary={sample.vocabulary} candidates={sample.candidates}
-                      selected={autopilot.selected} flyAgain={autopilot.flyAgain} />
-                  ) : null}
-                </div>
               </>
             ) : null}
           </fieldset>

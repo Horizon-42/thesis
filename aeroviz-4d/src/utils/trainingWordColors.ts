@@ -75,3 +75,7 @@ export const TRAINING_EXECUTOR_COLOR = "#14b8a6";
  *  the speed purple) and ≥ 9.3 under simulated colour blindness, contrast ≥ 3:1; the violet #7c3aed passed too (17.3 /
  *  12.5) but sits in the speed column's hue. */
 export const TRAINING_AUTOPILOT_COLOR = "#2563eb";
+/** The live executor's segment when the selected word flew OUTSIDE its envelope: the whole flown line turns this red —
+ *  louder than the per-row `TRAINING_OUTSIDE_COLOR`, because it is the answer to the question the flight was flown for
+ *  (the user, 2026-09-25). The validator puts it ΔE 41.6 from the autopilot blue (29.0 under CVD), contrast ≥ 3:1. */
+export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = "#ff2d2d";

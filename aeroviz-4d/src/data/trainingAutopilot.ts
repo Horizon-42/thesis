@@ -35,6 +35,7 @@ import {
   attempt,
   type TrainingExecutorCheck,
 } from "./trainingOverlays";
+import { TRAINING_AUTOPILOT_COLOR, TRAINING_AUTOPILOT_OUTSIDE_COLOR } from "../utils/trainingWordColors";
 import {
   headingBandProblem,
   trainingColumnRuns,
@@ -185,6 +186,27 @@ export type TrainingAutopilotView =
  *  never past the sentence's end. MIRROR of the backend's `segment_of`. */
 export function segmentStopRow(flight: TrainingFlight, column: TrainingColumn, endRow: number, headingLeadRows: number): number {
   return Math.min(endRow + (column === "heading" ? headingLeadRows : 0), flight.rows);
+}
+
+/** THE WORD THE LIVE EXECUTOR FLIES (`trainingPick`): the flight, the word's column and the step it is said at, and
+ *  which attempt at it — a new attempt at the same word flies it again. */
+export interface TrainingPick {
+  flightKey: string;
+  column: TrainingColumn;
+  row: number;
+  attempt: number;
+}
+
+/** The pick that flies ``column``'s word said at ``row`` of ``flightKey`` now: a new attempt when it is the word picked
+ *  already, else its first. */
+export function nextPick(current: TrainingPick | null, flightKey: string, column: TrainingColumn, row: number): TrainingPick {
+  const same = current !== null && current.flightKey === flightKey && current.column === column && current.row === row;
+  return { flightKey, column, row, attempt: same ? current!.attempt + 1 : 0 };
+}
+
+/** The colour a flown segment is drawn in, everywhere: red when the selected word flew outside its envelope. */
+export function autopilotColour(segment: TrainingAutopilotSegment): string {
+  return segment.word.status === "outside" ? TRAINING_AUTOPILOT_OUTSIDE_COLOR : TRAINING_AUTOPILOT_COLOR;
 }
 
 /** The same request: the same set, flight and segment. */

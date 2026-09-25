@@ -256,7 +256,7 @@ def word_verdict(verdict: Verdict, segment: Segment, spec: Any, words: Words) ->
 
         checks = [_check(f"in the tube of the altitude word {named(tube['target_m'])}", tube["contained"], tube["inside"],
                          tube["rows"]) for tube in judged["vertical"]]
-        return _settled(checks, "an angle word re-anchors its altitude words' tubes: judged in each tube it is in force over")
+        return _settled(checks, "judged in the altitude tubes it anchors")
     if column == SPEED:
         if words.speed_mps(word.value) is None:
             return _no_check("the pilot's own speed: no band to hold")

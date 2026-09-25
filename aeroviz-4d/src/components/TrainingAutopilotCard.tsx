@@ -1,23 +1,29 @@
 /**
  * TrainingAutopilotCard.tsx
  * -------------------------
- * The live executor's answer for the selected word (`trainingAutopilot`, `data/trainingAutopilot.ts`), in the Training
- * panel. At its head, side by side, the two times it is read by: the SIMULATED flight (the seconds of flight the
- * executor flew, beside the observed aircraft's over the same steps, and its control cycles) and the COMPUTATION (the
- * backend's seconds, broken down: waiting, the flight rebuilt or kept, the executor, the judge; and the browser's round
- * trip). Then which segment was flown, how it ended, the word's verdict with its checks, the limits that bound, and which
- * executor spec and code flew it — with "Fly again" (a new request) and "Replay in 3D" (the scene flies the same answer
- * out again). `autopilotSummary` is its one-line form, for the sentence bar.
+ * The live executor's answer for the picked word (`trainingAutopilot`, `data/trainingAutopilot.ts`), kept short:
+ *
+ *  • in the Training panel (`TrainingAutopilotCard`): the word and its steps; THE VERDICT — did the flown segment stay
+ *    inside the word's envelope — in the segment's own colour (red when outside, `autopilotColour`); the two times side
+ *    by side, the SIMULATED flight (beside the observed aircraft's) and the COMPUTATION (the backend's, beside the
+ *    browser's round trip); the checks behind the verdict; everything else — how it ended, the limits that bound, the
+ *    computation part by part, the spec and code — folded into Details. "Fly again" asks anew, "Replay in 3D" flies the
+ *    same answer out again;
+ *  • in the sentence bar (`TrainingAutopilotStatus`): one line — the word, the verdict, "N s flown in M ms", and how the
+ *    flight ended only when it ended badly.
  *
  * Every number is the backend's; this card writes them out.
  */
 
 import { useApp } from "../context/AppContext";
-import { TRAINING_AUTOPILOT_COLOR, TRAINING_OUTSIDE_COLOR } from "../utils/trainingWordColors";
+import { TRAINING_OUTSIDE_COLOR } from "../utils/trainingWordColors";
 import {
+  autopilotColour,
+  nextPick,
   TRAINING_AUTOPILOT_OUTCOMES,
   TRAINING_AUTOPILOT_SEGMENT_END,
   type TrainingAutopilotSegment,
+  type TrainingAutopilotStatus,
   type TrainingAutopilotView,
 } from "../data/trainingAutopilot";
 import {
@@ -40,6 +46,14 @@ const OUTCOME_TEXT: Record<(typeof TRAINING_AUTOPILOT_OUTCOMES)[number], string>
   dynamics_failure: "left the dynamics (a non-finite state, no airspeed or a stall)",
 };
 
+/** The verdict, as it is read first. */
+export const VERDICT_TEXT: Record<TrainingAutopilotStatus, string> = {
+  inside: "✓ inside its envelope",
+  outside: "✗ outside its envelope",
+  "not judged": "not judged",
+  "no check": "no envelope of its own",
+};
+
 /** The selected word, as the sentence reads it: "heading 270°". */
 export function autopilotWordText(
   view: TrainingAutopilotView, flight: TrainingFlight, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[],
@@ -55,6 +69,11 @@ export function autopilotSpanText(segment: TrainingAutopilotSegment["segment"]):
   if (segment.toLanding) return `step ${segment.row} to the landing`;
   const on = segment.stopRow === segment.endRow ? "" : `, flown on to step ${segment.stopRow}`;
   return `steps ${segment.row}–${segment.endRow}${on}`;
+}
+
+/** The flight ended short of what it was flown to: neither at its segment's stop nor landed. */
+export function autopilotEndedBadly(segment: TrainingAutopilotSegment): boolean {
+  return segment.end.reason !== TRAINING_AUTOPILOT_SEGMENT_END && segment.end.reason !== "landed";
 }
 
 /** How it ended, in words. */
@@ -94,32 +113,49 @@ export function autopilotTimingText(segment: TrainingAutopilotSegment, roundTrip
   ].join(" · ");
 }
 
-/** The sentence bar's line: what is being flown, or what was. */
-export function autopilotSummary(
-  view: TrainingAutopilotView, flight: TrainingFlight, vocabulary: TrainingVocabulary, candidates: TrainingCandidate[],
-): string {
+/** The sentence bar's line: the word, the verdict in the segment's colour, the two times — and how the flight ended only
+ *  when it ended badly. */
+export function TrainingAutopilotStatus({ view, flight, vocabulary, candidates }: {
+  view: TrainingAutopilotView; flight: TrainingFlight; vocabulary: TrainingVocabulary; candidates: TrainingCandidate[];
+}) {
   const word = autopilotWordText(view, flight, vocabulary, candidates);
-  if (view.status === "flying") return `the autopilot (live): flying ${word} from step ${view.request.row} …`;
-  if (view.status === "failed") return `the autopilot (live): ${word} from step ${view.request.row} not flown — ${view.problem}`;
+  if (view.status === "flying") {
+    return <span className="training-sentence-autopilot" role="status">Autopilot · flying {word} …</span>;
+  }
+  if (view.status === "failed") {
+    return (
+      <span className="training-sentence-autopilot training-sentence-autopilot-failed" title={view.problem}
+        style={{ color: TRAINING_OUTSIDE_COLOR }}>
+        Autopilot · {word} not flown — {view.problem}
+      </span>
+    );
+  }
   const { segment } = view;
-  return `the autopilot (live): ${word}, ${autopilotSpanText(segment.segment)} — ${autopilotEndText(segment)}; the word: ` +
-    `${segment.word.status} · simulated ${formatDuration(segment.end.flownS)} of flight (observed ` +
-    `${formatDuration(segment.segment.observedS)}) · computed in ${formatDuration(segment.timing.computeS)}`;
+  return (
+    <span className="training-sentence-autopilot">
+      Autopilot · {word} ·{" "}
+      <strong style={{ color: autopilotColour(segment) }}>{VERDICT_TEXT[segment.word.status]}</strong>
+      {autopilotEndedBadly(segment) ? (
+        <span style={{ color: TRAINING_OUTSIDE_COLOR }}> · {autopilotEndText(segment)}</span>
+      ) : null}
+      {" "}· {formatDuration(segment.end.flownS)} flown in {formatDuration(segment.timing.computeS)}
+    </span>
+  );
 }
 
-export default function TrainingAutopilotCard({ flight, vocabulary, candidates, selected, flyAgain }: {
-  flight: TrainingFlight | null; vocabulary: TrainingVocabulary; candidates: TrainingCandidate[]; selected: boolean;
-  flyAgain: () => void;
+export default function TrainingAutopilotCard({ flight, vocabulary, candidates }: {
+  flight: TrainingFlight | null; vocabulary: TrainingVocabulary; candidates: TrainingCandidate[];
 }) {
-  const { trainingAutopilot: view, setTrainingAutopilot } = useApp();
-  if (!selected || view === null || flight === null || view.request.flightKey !== flight.flightKey) {
+  const { trainingAutopilot: view, setTrainingAutopilot, trainingPick, setTrainingPick } = useApp();
+  if (view === null || flight === null || view.request.flightKey !== flight.flightKey) {
     return (
       <p className="training-autopilot-note">
-        Click a word's band in the sentence bar and the executor flies that word's segment now, from where the observed
-        aircraft was when the word was said.
+        Select a word in the sentence bar (click its band) and press <b>▶ Fly this segment</b> above it: the executor flies
+        that word's segment now, from where the observed aircraft was when the word was said.
       </p>
     );
   }
+  const flyAgain = () => setTrainingPick(nextPick(trainingPick, view.request.flightKey, view.request.column, view.request.row));
   const word = autopilotWordText(view, flight, vocabulary, candidates);
   if (view.status === "flying") {
     return <p className="training-autopilot-note" role="status">Flying {word} from step {view.request.row} …</p>;
@@ -135,41 +171,30 @@ export default function TrainingAutopilotCard({ flight, vocabulary, candidates, 
   }
   const { segment } = view;
   const { end } = segment;
-  const verdictColour = segment.word.status === "outside" ? TRAINING_OUTSIDE_COLOR : TRAINING_AUTOPILOT_COLOR;
+  const colour = autopilotColour(segment);
   const bound = Object.entries(segment.limits.bound).filter(([, cycles]) => cycles > 0);
   return (
-    <section className="training-autopilot-card" aria-label="The autopilot, live">
-      <p className="training-autopilot-title" style={{ color: TRAINING_AUTOPILOT_COLOR }}>
-        {word}, {autopilotSpanText(segment.segment)}
+    <section className="training-autopilot-card" aria-label="The autopilot, live" style={{ borderLeftColor: colour }}>
+      <p className="training-autopilot-title">{word} · {autopilotSpanText(segment.segment)}</p>
+      <p className="training-autopilot-verdict" style={{ color: colour }}>
+        {VERDICT_TEXT[segment.word.status]}
+        {segment.word.reason === null ? "" : <span className="training-autopilot-reason"> — {segment.word.reason}</span>}
       </p>
+      {autopilotEndedBadly(segment) ? (
+        <p className="training-autopilot-ended" style={{ color: TRAINING_OUTSIDE_COLOR }}>The flight {autopilotEndText(segment)}.</p>
+      ) : null}
       <div className="training-autopilot-times">
         <div className="training-autopilot-time" aria-label="Simulated flight time">
           <span className="training-autopilot-time-label">Simulated flight</span>
           <span className="training-autopilot-time-value">{formatDuration(end.flownS)}</span>
-          <span className="training-autopilot-time-note">
-            observed {formatDuration(segment.segment.observedS)} · {segment.limits.cycles} cycles
-          </span>
+          <span className="training-autopilot-time-note">observed {formatDuration(segment.segment.observedS)}</span>
         </div>
         <div className="training-autopilot-time" aria-label="Computation time">
           <span className="training-autopilot-time-label">Computed in</span>
           <span className="training-autopilot-time-value">{formatDuration(segment.timing.computeS)}</span>
-          <span className="training-autopilot-time-note">on the backend · round trip {formatDuration(view.roundTripS)}</span>
+          <span className="training-autopilot-time-note">round trip {formatDuration(view.roundTripS)}</span>
         </div>
       </div>
-      <p className="training-autopilot-meta">{autopilotTimingText(segment, view.roundTripS)}</p>
-      <p>
-        From the observed state at step {segment.segment.row}, told the six words in force there and then the sentence's
-        words as the observed aircraft heard them: {autopilotEndText(segment)}.
-        {end.offsetFromObserved === null ? "" : ` There it was ${end.offsetFromObserved.horizontalM.toFixed(0)} m from the ` +
-          `observed aircraft, ${Math.abs(end.offsetFromObserved.aboveM).toFixed(0)} m ${end.offsetFromObserved.aboveM >= 0
-            ? "above" : "below"} it, ${Math.abs(end.offsetFromObserved.groundSpeedMps).toFixed(1)} m/s ` +
-          `${end.offsetFromObserved.groundSpeedMps >= 0 ? "faster" : "slower"}.`}
-        {end.refused === null ? "" : ` The labeller's gate refused the flown segment: ${end.refused}.`}
-      </p>
-      <p>
-        The word: <strong style={{ color: verdictColour }}>{segment.word.status}</strong>
-        {segment.word.reason === null ? "" : ` — ${segment.word.reason}`}
-      </p>
       {segment.word.checks.length ? (
         <ul className="training-autopilot-checks">
           {segment.word.checks.map((check) => (
@@ -179,15 +204,28 @@ export default function TrainingAutopilotCard({ flight, vocabulary, candidates, 
           ))}
         </ul>
       ) : null}
-      <p className="training-autopilot-meta">
-        {segment.limits.cycles} cycles of {segment.executor.cycleS} s
-        {bound.length ? `; limits bound: ${bound.map(([name, cycles]) => `${name.replace(/_/g, " ")} ${cycles}`).join(", ")}` : "; no limit bound"}
-      </p>
-      <p className="training-autopilot-meta">
-        {segment.group} · spec {segment.executor.specSha256.slice(0, SHA_SHOWN)} ({segment.executor.spec}) · executor code{" "}
-        {segment.executor.sourceSha256.slice(0, SHA_SHOWN)} · words said on the {segment.executor.wordClock} clock · computed
-        at {segment.computedUtc}
-      </p>
+      <details className="training-autopilot-details">
+        <summary>Details</summary>
+        <p>
+          From the observed state at step {segment.segment.row}, told the six words in force there and then the sentence's
+          words as the observed aircraft heard them: {autopilotEndText(segment)}.
+          {end.offsetFromObserved === null ? "" : ` There it was ${end.offsetFromObserved.horizontalM.toFixed(0)} m from the ` +
+            `observed aircraft, ${Math.abs(end.offsetFromObserved.aboveM).toFixed(0)} m ${end.offsetFromObserved.aboveM >= 0
+              ? "above" : "below"} it, ${Math.abs(end.offsetFromObserved.groundSpeedMps).toFixed(1)} m/s ` +
+            `${end.offsetFromObserved.groundSpeedMps >= 0 ? "faster" : "slower"}.`}
+          {end.refused === null ? "" : ` The labeller's gate refused the flown segment: ${end.refused}.`}
+        </p>
+        <p>
+          {segment.limits.cycles} cycles of {segment.executor.cycleS} s judged
+          {bound.length ? `; limits bound: ${bound.map(([name, cycles]) => `${name.replace(/_/g, " ")} ${cycles}`).join(", ")}` : "; no limit bound"}.
+        </p>
+        <p>Computed: {autopilotTimingText(segment, view.roundTripS)}.</p>
+        <p>
+          {segment.group} · spec {segment.executor.specSha256.slice(0, SHA_SHOWN)} ({segment.executor.spec}) · executor
+          code {segment.executor.sourceSha256.slice(0, SHA_SHOWN)} · words said on the {segment.executor.wordClock} clock ·
+          computed at {segment.computedUtc}
+        </p>
+      </details>
       <div className="training-autopilot-buttons">
         <button type="button" className="training-autopilot-button" onClick={flyAgain}>Fly again</button>
         <button type="button" className="training-autopilot-button"

@@ -1,16 +1,17 @@
 /**
- * useTrainingAutopilot: a PICKED word (a click on a band) is flown by the backend when it is picked — once per pick,
- * never for the cursor, again on "fly again" — and only the current pick's answer is ever published.
+ * useTrainingAutopilot: a PICKED word (the Fly button, or a band clicked with the switch on) is flown by the backend when
+ * it is picked — once per pick and attempt, never for the cursor — and only the current pick's answer is ever published.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
 import { parseTrainingSample, type TrainingSample } from "../../data/trainingSample";
+import { nextPick } from "../../data/trainingAutopilot";
 import { STRAIGHT_KEY, VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
 
 const { appState, setTrainingAutopilot } = vi.hoisted(() => ({
-  appState: { trainingSelection: null as unknown, trainingPick: null as unknown, trainingCursorS: 0 },
+  appState: { trainingSelection: null as unknown, trainingPick: null as any, trainingCursorS: 0 },
   setTrainingAutopilot: vi.fn(),
 }));
 
@@ -55,7 +56,7 @@ describe("useTrainingAutopilot", () => {
   const last = () => setTrainingAutopilot.mock.calls[setTrainingAutopilot.mock.calls.length - 1][0];
 
   it("asks for nothing until a word is picked, whatever the cursor does", () => {
-    const { rerender } = renderHook(() => useTrainingAutopilot(true, "KXXX", set, BACKEND));
+    const { rerender } = renderHook(() => useTrainingAutopilot("KXXX", set, BACKEND));
     appState.trainingCursorS = 22;
     rerender();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -63,8 +64,8 @@ describe("useTrainingAutopilot", () => {
   });
 
   it("flies the picked word's segment and publishes the answer", async () => {
-    appState.trainingPick = { flightKey: VECTORED_KEY, column: "heading", row: 8 };
-    renderHook(() => useTrainingAutopilot(true, "KXXX", set, BACKEND));
+    appState.trainingPick = nextPick(null, VECTORED_KEY, "heading", 8);
+    renderHook(() => useTrainingAutopilot("KXXX", set, BACKEND));
     expect(last()).toMatchObject({ status: "flying", request: mockAutopilotRequest(set, VECTORED_KEY, "heading", 8) });
     await waitFor(() => expect(last().status).toBe("ready"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -73,17 +74,19 @@ describe("useTrainingAutopilot", () => {
     expect(last().roundTripS).toBeGreaterThanOrEqual(0);
   });
 
-  it("asks again for another pick and on fly again, never for the cursor moving", async () => {
-    appState.trainingPick = { flightKey: VECTORED_KEY, column: "heading", row: 8 };
-    const { rerender, result } = renderHook(() => useTrainingAutopilot(true, "KXXX", set, BACKEND));
+  it("asks again for another pick and for a new attempt at the same one, never for the cursor moving", async () => {
+    appState.trainingPick = nextPick(null, VECTORED_KEY, "heading", 8);
+    const { rerender } = renderHook(() => useTrainingAutopilot("KXXX", set, BACKEND));
     await waitFor(() => expect(last().status).toBe("ready"));
     appState.trainingCursorS = 40;                         // hovering a chart
     rerender();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    appState.trainingPick = { flightKey: VECTORED_KEY, column: "heading", row: 10 };
+    appState.trainingPick = nextPick(appState.trainingPick, VECTORED_KEY, "heading", 10);
     rerender();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    act(() => result.current.flyAgain());
+    appState.trainingPick = nextPick(appState.trainingPick, VECTORED_KEY, "heading", 10);   // "Fly again"
+    expect(appState.trainingPick.attempt).toBe(1);
+    rerender();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(last().status).toBe("ready"));
     expect(last().request.row).toBe(10);
@@ -94,9 +97,9 @@ describe("useTrainingAutopilot", () => {
     fetchMock.mockImplementationOnce((url: string, init: RequestInit) => new Promise((resolve) => {
       answerFirst = () => resolve(answering(set)(url, init));
     }));
-    appState.trainingPick = { flightKey: VECTORED_KEY, column: "heading", row: 8 };
-    const { rerender } = renderHook(() => useTrainingAutopilot(true, "KXXX", set, BACKEND));
-    appState.trainingPick = { flightKey: VECTORED_KEY, column: "heading", row: 10 };
+    appState.trainingPick = nextPick(null, VECTORED_KEY, "heading", 8);
+    const { rerender } = renderHook(() => useTrainingAutopilot("KXXX", set, BACKEND));
+    appState.trainingPick = nextPick(appState.trainingPick, VECTORED_KEY, "heading", 10);
     rerender();
     await waitFor(() => expect(last().status).toBe("ready"));
     expect(last().request.row).toBe(10);
@@ -105,16 +108,16 @@ describe("useTrainingAutopilot", () => {
   });
 
   it("does not fly a pick of another flight", () => {
-    appState.trainingPick = { flightKey: STRAIGHT_KEY, column: "heading", row: 0 };
-    renderHook(() => useTrainingAutopilot(true, "KXXX", set, BACKEND));
+    appState.trainingPick = nextPick(null, STRAIGHT_KEY, "heading", 0);
+    renderHook(() => useTrainingAutopilot("KXXX", set, BACKEND));
     expect(fetchMock).not.toHaveBeenCalled();
     expect(last()).toBeNull();
   });
 
   it("publishes the refusal when the backend refuses, or the answer is not the segment on screen", async () => {
-    appState.trainingPick = { flightKey: VECTORED_KEY, column: "heading", row: 8 };
+    appState.trainingPick = nextPick(null, VECTORED_KEY, "heading", 8);
     fetchMock.mockImplementationOnce(async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ ok: false, error: "no spec" }) }));
-    const { result } = renderHook(() => useTrainingAutopilot(true, "KXXX", set, BACKEND));
+    const { rerender } = renderHook(() => useTrainingAutopilot("KXXX", set, BACKEND));
     await waitFor(() => expect(last().status).toBe("failed"));
     expect(last().problem).toMatch(/no spec/);
     fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
@@ -122,14 +125,18 @@ describe("useTrainingAutopilot", () => {
       answer.segment.endRow = 11;
       return { ok: true, status: 200, text: async () => JSON.stringify(answer) };
     });
-    act(() => result.current.flyAgain());
-    await waitFor(() => expect(last().status).toBe("failed"));
-    expect(last().problem).toMatch(/ends at step 11/);
+    appState.trainingPick = nextPick(appState.trainingPick, VECTORED_KEY, "heading", 8);
+    rerender();
+    await waitFor(() => expect(last().problem ?? "").toMatch(/ends at step 11/));
   });
+});
 
-  it("asks nothing with its switch off", () => {
-    appState.trainingPick = { flightKey: VECTORED_KEY, column: "heading", row: 8 };
-    renderHook(() => useTrainingAutopilot(false, "KXXX", set, BACKEND));
-    expect(fetchMock).not.toHaveBeenCalled();
+describe("nextPick", () => {
+  it("is a new attempt at the word picked already, and a first attempt at any other", () => {
+    const first = nextPick(null, VECTORED_KEY, "heading", 8);
+    expect(first).toEqual({ flightKey: VECTORED_KEY, column: "heading", row: 8, attempt: 0 });
+    expect(nextPick(first, VECTORED_KEY, "heading", 8).attempt).toBe(1);
+    expect(nextPick(first, VECTORED_KEY, "heading", 10).attempt).toBe(0);
+    expect(nextPick(first, STRAIGHT_KEY, "heading", 8).attempt).toBe(0);
   });
 });

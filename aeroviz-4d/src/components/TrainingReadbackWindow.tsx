@@ -79,7 +79,7 @@ import {
   type TrainingVocabulary,
 } from "../data/trainingSample";
 import type { TrainingExecutorFlight } from "../data/trainingOverlays";
-import type { TrainingAutopilotSegment } from "../data/trainingAutopilot";
+import { autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
 
 const GUTTER = 64;
 const PAD_R = 16;
@@ -173,6 +173,8 @@ export default function TrainingReadbackWindow({
   // the live executor's segment (and not at all without two points); its judged track's step k is the flight's
   // step `row + k`, the flown track's point k × (step / cycle)
   const live = autopilot && autopilot.track.tS.length >= 2 ? autopilot : null;
+  // blue, or red when the selected word flew outside its envelope
+  const liveColour = live === null ? TRAINING_AUTOPILOT_COLOR : autopilotColour(live);
   const liveTrack = live?.track ?? null;
   const liveBand = live?.word.heading ?? null;
   const liveJudged = live?.judgedTrackDeg ?? null;
@@ -307,10 +309,10 @@ export default function TrainingReadbackWindow({
       <title>{name}</title>
     </polyline>
   );
-  /** The live segment's values against the flight's time (or distance): one solid blue line. */
+  /** The live segment's values against the flight's time (or distance): one solid line in its verdict's colour. */
   const liveTrace = (along: number[], values: number[], xOf: (value: number) => number, y: (value: number) => number, name: string) => (
     <polyline points={values.map((value, index) => `${xOf(along[index])},${y(value)}`).join(" ")} fill="none"
-      stroke={TRAINING_AUTOPILOT_COLOR} strokeWidth={1.8} className="training-readback-autopilot">
+      stroke={liveColour} strokeWidth={1.8} className="training-readback-autopilot">
       <title>{name}</title>
     </polyline>
   );
@@ -461,7 +463,7 @@ export default function TrainingReadbackWindow({
               {liveTrack ? (
                 <g aria-label="the autopilot's flown segment">
                   <polyline points={liveTrack.eM.map((e, index) => `${px(km(e))},${py(km(liveTrack.nM[index]))}`).join(" ")}
-                    fill="none" stroke={TRAINING_AUTOPILOT_COLOR} strokeWidth={1.8} className="training-readback-autopilot">
+                    fill="none" stroke={liveColour} strokeWidth={1.8} className="training-readback-autopilot">
                     <title>the autopilot's flown segment — from where the selected word was said, flown live</title>
                   </polyline>
                   {liveOutside.map(([first, lastStep]) => (
@@ -471,7 +473,7 @@ export default function TrainingReadbackWindow({
                       fill="none" stroke={TRAINING_OUTSIDE_COLOR} strokeWidth={2.4} strokeLinecap="round" />
                   ))}
                   <circle cx={px(km(liveTrack.eM[liveTrack.eM.length - 1]))} cy={py(km(liveTrack.nM[liveTrack.nM.length - 1]))} r={4}
-                    fill={TRAINING_AUTOPILOT_COLOR} stroke="black" strokeWidth={0.6} />
+                    fill={liveColour} stroke="black" strokeWidth={0.6} />
                 </g>
               ) : null}
               {envelopes.heading.map((item, index) => {
@@ -835,7 +837,8 @@ export default function TrainingReadbackWindow({
               <strong style={{ color: TRAINING_AUTOPILOT_COLOR }}>The autopilot, live</strong> —{" "}
               {live === null
                 ? "select a word (with the panel's switch on) and the executor flies its segment now; its lines appear here."
-                : `solid blue: the selected ${live.segment.column} word's segment, flown by the executor when it was selected, ` +
+                : `solid ${live.word.status === "outside" ? "red — outside its envelope" : "blue"}: the selected ` +
+                  `${live.segment.column} word's segment, flown by the executor when it was picked, ` +
                   `from the observed state at step ${live.segment.row} — its track, altitude (against the distance flown, from ` +
                   "the observed aircraft's there) and ground speed on the flight's own clock, so they start on the observed " +
                   "lines and part from them as it flies at its own pace." +

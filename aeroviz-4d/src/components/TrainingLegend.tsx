@@ -13,6 +13,7 @@ import type { TrainingLayers } from "../context/AppContext";
 import type { TrainingVocabulary } from "../data/trainingSample";
 import {
   TRAINING_AUTOPILOT_COLOR,
+  TRAINING_AUTOPILOT_OUTSIDE_COLOR,
   TRAINING_CAPTURE_TURN_COLOR,
   TRAINING_CORRIDOR_COLOR,
   TRAINING_ENVELOPE_ALPHA,
@@ -67,9 +68,10 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack = fal
       text: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0" +
         (layers.headingBands ? "; red on its ground trace: its rows outside the heading word it was told" : "") },
     { key: "autopilot", swatch: { kind: "line", colour: TRAINING_AUTOPILOT_COLOR }, shown: autopilotTrack,
-      text: "blue: the selected word's segment, flown live by the executor from where the word was said — the aircraft " +
-        "flies it out, then the whole segment stays (dashed on the ground)" +
-        (layers.headingBands ? "; red on its ground trace: its rows outside the selected heading word" : "") },
+      text: "blue: the picked word's segment, flown live by the executor, inside the word's envelope (dashed on the ground)" },
+    { key: "autopilot-outside", swatch: { kind: "line", colour: TRAINING_AUTOPILOT_OUTSIDE_COLOR }, shown: autopilotTrack,
+      text: "red: the same when the word flew outside its envelope" +
+        (layers.headingBands ? "; its heading rows outside, red on the ground trace" : "") },
   ];
 
   return (
