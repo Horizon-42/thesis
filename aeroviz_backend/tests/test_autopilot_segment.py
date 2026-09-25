@@ -18,9 +18,11 @@ import torch
 
 from aeroviz_backend.autopilot_segment import fly as fly_module, payload as payload_module
 from aeroviz_backend.autopilot_segment.backend import FLIGHT_CACHE_SIZE, AutopilotSegmentBackend
-from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused
+from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment, fly_batch_until, fly_until
-from aeroviz_backend.autopilot_segment.payload import SCHEMA, SEGMENT_END, heading_facts, segment_payload, track_payload
+from aeroviz_backend.autopilot_segment.payload import (
+    SCHEMA, SEGMENT_END, band_cut_by_stop, heading_facts, segment_payload, track_payload,
+)
 from aeroviz_backend.autopilot_segment.segment import segment_of, segment_reading, segment_signals, told_words
 from aeroviz_backend.autopilot_segment.verdict import STATUSES, HeadingFacts, selected_heading, word_verdict
 from aeroviz_backend.http_server import AeroVizBackendApp
@@ -36,6 +38,8 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, RUNWAY, SPEED, UNCHANGED
 
 U = UNCHANGED
+#: No newer request ever comes in.
+NEVER = lambda: False  # noqa: E731
 #: The heading lead in steps (4 s at 2 s a step), as `fly_segment` passes it.
 LEAD = 2
 
@@ -176,7 +180,7 @@ class StopTest(unittest.TestCase):
     def test_it_stops_before_the_first_cycle_that_starts_a_step_the_clock_puts_at_the_stop(self):
         executor = FakeExecutor(cycles=10)
         # the time clock: step 3 starts at cycle 6, which is never flown
-        self.assertTrue(fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, 3))
+        self.assertTrue(fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, 3, NEVER))
         self.assertEqual(executor.count, 6)
         # the words of each step are heard on the cycle that starts it, as `executor.fly` hears them
         self.assertEqual(executor.heard, [0.0, 0.0, 2.0, 2.0, 4.0, 4.0])
@@ -184,20 +188,27 @@ class StopTest(unittest.TestCase):
     def test_a_clock_that_runs_ahead_stops_on_a_cycle_that_starts_a_step(self):
         executor = FakeExecutor(cycles=6)
         # cycle 3 reads step 1.95 but starts no step; cycle 4 starts one at step 2.1
-        self.assertTrue(fly_until(executor, FakeSentences(), FakeClock([0.0, 0.5, 1.2, 3.9, 4.2, 6.0]), 2.0, 2))
+        self.assertTrue(fly_until(executor, FakeSentences(), FakeClock([0.0, 0.5, 1.2, 3.9, 4.2, 6.0]), 2.0, 2, NEVER))
         self.assertEqual(executor.count, 4)
 
     def test_a_flight_done_first_or_out_of_cycles_does_not_reach_its_stop(self):
         done = FakeExecutor(cycles=10, done_after=3)
-        self.assertFalse(fly_until(done, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, 3))
+        self.assertFalse(fly_until(done, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, 3, NEVER))
         self.assertEqual(done.count, 3)
         short = FakeExecutor(cycles=4)
-        self.assertFalse(fly_until(short, FakeSentences(), FakeClock([float(c) for c in range(4)]), 2.0, 3))
+        self.assertFalse(fly_until(short, FakeSentences(), FakeClock([float(c) for c in range(4)]), 2.0, 3, NEVER))
         self.assertEqual(short.count, 4)
+
+    def test_a_newer_request_stops_it_before_the_next_cycle(self):
+        executor = FakeExecutor(cycles=10)
+        asked = iter([False, False, True])
+        with self.assertRaisesRegex(Superseded, "stopped after 2 cycles"):
+            fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, None, lambda: next(asked))
+        self.assertEqual(executor.count, 2)
 
     def test_without_a_stop_it_flies_to_the_outcome(self):
         executor = FakeExecutor(cycles=10, done_after=7)
-        self.assertFalse(fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, None))
+        self.assertFalse(fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, None, NEVER))
         self.assertEqual(executor.count, 7)
 
 
@@ -235,7 +246,7 @@ class StepperTest(unittest.TestCase):
         whole = fly(inputs, sentences(), self.clock(name), runways, charts, approach, self.params, self.words,
                     time_limit_s=self.limit)
         executor = Executor(inputs, runways, charts, approach, self.params, self.words, time_limit_s=self.limit)
-        reached = fly_until(executor, sentences(), self.clock(name), self.spec.step_s, stop)
+        reached = fly_until(executor, sentences(), self.clock(name), self.spec.step_s, stop, NEVER)
         return whole, executor.flown(), reached, executor.step_rows
 
     def test_without_a_stop_it_is_executor_fly_state_for_state(self):
@@ -298,7 +309,7 @@ class SetupTest(unittest.TestCase):
                 mock.patch.object(fly_module, "fly_until", record("fly_until")), \
                 mock.patch("ts_transformer.autopilot.replay.fly", record("fly")):
             with self.assertRaises(Stop):
-                fly_batch_until(batch, params, words, None)
+                fly_batch_until(batch, params, words, None, NEVER)
             with self.assertRaises(Stop):
                 fly_module.replay.fly_sentences(batch, params, words, device=fly_module.DEVICE)
         (inputs, runways, charts, ias, *rest), kwargs = recorded["executor"]
@@ -543,6 +554,40 @@ class PayloadTest(unittest.TestCase):
         # the failed state is left out of the track, and the judged steps are among its points
         self.assertEqual(len(body["track"]["tS"]), cycles)
 
+    def test_a_heading_band_the_stop_cut_short_is_refused_and_one_it_did_not_is_not(self):
+        def cut(clock_s: list[float], lead: int, band_rows: int, judged_rows: int, outcome: str = "timeout"):
+            """Fly the heading word said at step 3 (the next one at the segment's step 3) to its stop as `fly_until`
+            flies it, on ``clock_s``; its judge's band (``band_rows`` from the lead) and the track it read
+            (``judged_rows``: one row a flown step through the last state)."""
+            segment = segment_of(reading(), HEADING, 3, lead)
+            executor = FakeExecutor(cycles=len(clock_s))
+            reached = fly_until(executor, FakeSentences(), FakeClock(clock_s), SPEC.step_s, segment.stop_row - 3, NEVER)
+            judged = {"heading": [{"row": 0, "rows": band_rows, "inside": band_rows}], "capture_turn": None,
+                      "intercepting_off_word_cycles": 0,
+                      "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0}, "vertical": [], "speed": []}
+            result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None,
+                                  flown=flown(executor.heard, executor.count - 1),
+                                  verdict=Verdict(outcome, executor.count, None, {}, judged, flown_rows=executor.count + 1),
+                                  reached_end=reached, fly_s=0.0, judge_s=0.0)
+            spec = SimpleNamespace(**{**vars(SPEC), "heading_lead_s": lead * SPEC.step_s})
+            return reached, executor.count, band_cut_by_stop(result, judged_rows, spec)
+
+        # the time clock: the next word heard at cycle 6 (flown step 3), the stop at cycle 10; the band ends at step 5
+        # of a 6-step track
+        self.assertEqual(cut([float(c) for c in range(20)], 2, 3, 6), (True, 10, False))
+        # the track clock at its cap, a step a cycle: heard at cycle 4 (step 2), stopped at cycle 6; the band ends at
+        # step 4, the track's last — exactly where it should
+        self.assertEqual(cut([2.0 * c for c in range(20)], 2, 2, 4), (True, 6, False))
+        # a clock with no cap (the distance clock) jumps past the next word to the stop within one step: the word is
+        # never heard, and the band runs to the track's end, short of where it should end
+        jump = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 11.0, 12.0, 13.0, 14.0]
+        self.assertEqual(cut(jump, 2, 2, 4), (True, 6, True))
+        # ... unless an event ended the flight there (the executor flies on past an uncaptured crossing): the judge
+        # judged it to the event
+        self.assertEqual(cut(jump, 2, 2, 4, "crossed_without_capture"), (True, 6, False))
+        # a three-step lead on the track clock: heard at cycle 4 (step 2), its lead ends at step 5, the track at 4
+        self.assertEqual(cut([2.0 * c for c in range(20)], 3, 1, 4), (True, 6, True))
+
     def test_an_event_before_the_stop_is_the_end_and_has_no_offset(self):
         body = self.answer(reached=False, outcome="ground_contact")
         self.assertEqual((body["end"]["reason"], body["end"]["offsetFromObserved"]), ("ground_contact", None))
@@ -642,13 +687,80 @@ class BackendTest(unittest.TestCase):
 
     def test_a_request_names_a_column_and_an_integer_step(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
-        request = {"airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading", "row": 3}
+        request = {"clientId": "page", "seq": 1, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading", "row": 3}
         with self.assertRaisesRegex(RequestRefused, "none of"):
             backend.fly({**request, "column": "track"})
         with self.assertRaisesRegex(RequestRefused, "integer step"):
             backend.fly({**request, "row": 3.0})
         with self.assertRaisesRegex(RequestRefused, "no 'row'"):
             backend.fly({key: value for key, value in request.items() if key != "row"})
+        with self.assertRaisesRegex(RequestRefused, "no 'clientId'"):
+            backend.fly({key: value for key, value in request.items() if key != "clientId"})
+        for seq in (-1, 1.0, True):
+            with self.assertRaisesRegex(RequestRefused, "seq must be the page's request number"):
+                backend.fly({**request, "seq": seq})
+
+    def test_a_page_s_later_request_supersedes_its_earlier_ones_whatever_order_they_arrive_in(self):
+        backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
+        request = {"clientId": "page", "seq": 2, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading",
+                   "row": 3}
+        with self.assertRaises(NotListed):                     # it goes on (and finds no Training export here)
+            backend.fly(request)
+        # the page's request 1 arrives after its request 2: refused at once
+        with self.assertRaisesRegex(Superseded, "request 2 came in before its request 1"):
+            backend.fly({**request, "seq": 1})
+        # another page's numbers are its own
+        with self.assertRaises(NotListed):
+            backend.fly({**request, "clientId": "another page", "seq": 1})
+
+    def test_a_later_request_supersedes_one_still_waiting(self):
+        backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
+        request = {"clientId": "page", "seq": 1, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading",
+                   "row": 3}
+
+        class Flying:
+            """Another segment flying: while this request waits for it, the page sends ``newer_from``'s request 2."""
+
+            def __init__(self, newer_from: str) -> None:
+                self.newer_from = newer_from
+
+            def __enter__(self):
+                backend._claim(self.newer_from, 2)
+
+            def __exit__(self, *exc):
+                return False
+
+        backend._lock = Flying("page")
+        with self.assertRaisesRegex(Superseded, "while this one waited"):
+            backend.fly(request)
+        # another page's request does not
+        backend._latest.clear()
+        backend._lock = Flying("another page")
+        with self.assertRaises(NotListed):
+            backend.fly(request)
+
+    def test_the_flight_is_asked_each_cycle_whether_a_later_request_came_in(self):
+        backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
+        request = {"clientId": "page", "seq": 1, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading",
+                   "row": 3}
+        asked: list[bool] = []
+
+        def flying(context, params, words, column, row, superseded):
+            asked.append(superseded())
+            backend._claim("another page", 7)                  # another page's request: not this page's
+            asked.append(superseded())
+            backend._claim("page", 2)                          # this page's next click
+            asked.append(superseded())
+            raise Superseded("stopped")
+
+        sample = {"flights": [{"flightKey": "F", "datasetId": "KXXX:F"}]}
+        with mock.patch.object(backend, "training_set", lambda airport, set_id: (Path("a"), "val", sample)), \
+                mock.patch.object(backend, "executor_for", lambda artefact: (Path("e"), None, {}, None)), \
+                mock.patch.object(backend, "flight", lambda artefact, split, key, words: (None, False)), \
+                mock.patch("aeroviz_backend.autopilot_segment.backend.fly_segment", flying):
+            with self.assertRaises(Superseded):
+                backend.fly(request)
+        self.assertEqual(asked, [False, False, True])
 
 
 class FakeAutopilot:
@@ -679,6 +791,7 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(post(RequestRefused("no 'row'")), (400, {"ok": False, "error": "no 'row'"}))
         self.assertEqual(post(NotListed("no set")), (404, {"ok": False, "error": "no set"}))
         self.assertEqual(post(NotFlyable("no aircraft dynamics")), (422, {"ok": False, "error": "no aircraft dynamics"}))
+        self.assertEqual(post(Superseded("a newer request")), (409, {"ok": False, "error": "a newer request"}))
         # a listed flight the backend could not fly — a spec refused, a re-read that differs, a file gone — is its fault
         self.assertEqual(post(ValueError("2 executor specs")), (500, {"ok": False, "error": "ValueError: 2 executor specs"}))
         self.assertEqual(post(FileNotFoundError("npz")), (500, {"ok": False, "error": "FileNotFoundError: npz"}))
@@ -693,8 +806,9 @@ def ts_constant(path: Path, name: str):
 
 
 class MirrorTest(unittest.TestCase):
-    """The frontend's copies of this module's names (`trainingAutopilot.ts`) and of the judge's outcomes
-    (`trainingOverlays.ts`): one name on both sides, or the reader refuses every answer."""
+    """The frontend's copies of this module's names (`trainingAutopilot.ts`), of the judge's outcomes and the prior
+    readout's rules (`trainingOverlays.ts`) and of the strata (`trainingSample.ts`): one name on both sides, or the reader
+    refuses every file that carries it."""
 
     def test_the_frontend_reader_mirrors_the_backends_names(self):
         from ts_transformer.autopilot.judge import OUTCOMES
@@ -703,6 +817,13 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(ts_constant(data / "trainingAutopilot.ts", "TRAINING_AUTOPILOT_STATUSES"), list(STATUSES))
         self.assertEqual(ts_constant(data / "trainingAutopilot.ts", "TRAINING_AUTOPILOT_SEGMENT_END"), SEGMENT_END)
         self.assertEqual(ts_constant(data / "trainingOverlays.ts", "TRAINING_EXECUTOR_OUTCOMES"), list(OUTCOMES))
+
+    def test_the_frontend_reader_mirrors_the_training_files_names_no_other_test_pins(self):
+        from ts_transformer.instructions.readout import STRATA
+        from ts_transformer.prior.readout import RULES
+        data = REPO_ROOT / "aeroviz-4d" / "src" / "data"
+        self.assertEqual(ts_constant(data / "trainingSample.ts", "TRAINING_STRATA"), list(STRATA))
+        self.assertEqual(ts_constant(data / "trainingOverlays.ts", "TRAINING_PRIOR_RULES"), list(RULES))
 
 
 if __name__ == "__main__":

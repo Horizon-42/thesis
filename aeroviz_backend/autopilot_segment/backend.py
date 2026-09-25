@@ -1,4 +1,8 @@
-"""``POST /autopilot/segment``: which set, which spec, the rebuilt flights kept, one flight flown at a time.
+"""``POST /autopilot/segment``: which set, which spec, the rebuilt flights kept, one flight flown at a time — and only
+each page's latest request: a page (``clientId``) numbers its requests (``seq``, rising), and a request of a higher number
+supersedes the page's lower ones (`Superseded`) — one still waiting is not flown, one flying stops before its next cycle,
+one that arrives after it is refused at once — so clicking through bands never queues segments nobody is looking at.
+The page's own numbers decide, not the order requests happen to arrive in.
 
 Which flight: the request names a Training set (``airport``, ``setId``) and a flight of it (``flightKey``); the set's
 sample (under the frontend's airports root) names the artefact it was exported from and the split it was drawn from.
@@ -24,7 +28,7 @@ from ts_transformer.instructions.words import COLUMNS, Words
 from ts_transformer.io_utils import utc_now
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, OPT_OUTPUTS_ROOT, REPO_ROOT
 
-from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused
+from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import FlightContext, fly_segment, open_flight
 from aeroviz_backend.autopilot_segment.payload import SCHEMA, segment_payload
 
@@ -44,13 +48,16 @@ def _field(record: dict[str, Any], name: str) -> Any:
 
 
 class AutopilotSegmentBackend:
-    """``fly(payload)`` for ``POST /autopilot/segment``: ``{airport, setId, flightKey, column, row}``."""
+    """``fly(payload)`` for ``POST /autopilot/segment``: ``{clientId, seq, airport, setId, flightKey, column, row}``."""
 
     def __init__(self, *, airports_root: Path = COMPARISON_AIRPORTS_ROOT,
                  executor_root: Path = DEFAULT_EXECUTOR_ROOT) -> None:
         self.airports_root = Path(airports_root)
         self.executor_root = Path(executor_root)
         self._lock = threading.Lock()
+        # each page's highest request number (`clientId` → `seq`): a lower one waiting or flying is superseded by it
+        self._latest: dict[str, int] = {}
+        self._claims = threading.Lock()
         # an artefact's spec, with the spec files it was chosen among (their paths and times of writing)
         self._executors: dict[Path, tuple[tuple[tuple[Path, int], ...], tuple[Path, ExecutorParams, dict[str, Any], Words]]] = {}
         self._flights: OrderedDict[tuple[Path, str], FlightContext] = OrderedDict()
@@ -119,7 +126,16 @@ class AutopilotSegmentBackend:
             self._flights.popitem(last=False)
         return context, False
 
+    def _claim(self, client: str, seq: int) -> None:
+        """Make ``seq`` the page's latest request — unless the page already sent a later one."""
+        with self._claims:
+            if client in self._latest and seq <= self._latest[client]:
+                raise Superseded(f"this page's request {self._latest[client]} came in before its request {seq}")
+            self._latest[client] = seq
+
     def fly(self, payload: dict[str, Any]) -> dict[str, Any]:
+        client = str(_field(payload, "clientId"))
+        seq = _field(payload, "seq")
         airport = str(_field(payload, "airport"))
         set_id = str(_field(payload, "setId"))
         flight_key = str(_field(payload, "flightKey"))
@@ -129,8 +145,14 @@ class AutopilotSegmentBackend:
             raise RequestRefused(f"column {column_name!r} is none of {COLUMNS}")
         if not isinstance(row, int) or isinstance(row, bool):
             raise RequestRefused(f"row must be an integer step, got {row!r}")
+        if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+            raise RequestRefused(f"seq must be the page's request number, a whole number, got {seq!r}")
+        self._claim(client, seq)
+        superseded = lambda: self._latest[client] != seq  # noqa: E731 — read each cycle
         asked = time.perf_counter()
         with self._lock:
+            if superseded():
+                raise Superseded("a newer request from this page came in while this one waited")
             started = time.perf_counter()
             artefact, split, sample = self.training_set(airport, set_id)
             flights = [item for item in sample["flights"] if item["flightKey"] == flight_key]
@@ -141,7 +163,7 @@ class AutopilotSegmentBackend:
             opening = time.perf_counter()
             context, kept = self.flight(artefact, split, dataset_id, words)
             opened = time.perf_counter()
-            result = fly_segment(context, params, words, COLUMNS.index(column_name), row)
+            result = fly_segment(context, params, words, COLUMNS.index(column_name), row, superseded)
             answering = time.perf_counter()
             body = segment_payload(result, context, words)
             finished = time.perf_counter()

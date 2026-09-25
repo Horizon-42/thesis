@@ -12,6 +12,7 @@ data plane's flight first seen there, `dataset.series_from_row`).
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from ts_transformer.instructions.labeller.read import Reading, admit, read_fligh
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import Words
 
-from aeroviz_backend.autopilot_segment.errors import NotFlyable
+from aeroviz_backend.autopilot_segment.errors import NotFlyable, Superseded
 from aeroviz_backend.autopilot_segment.segment import Segment, segment_of, segment_reading, segment_signals
 
 DEVICE = torch.device("cpu")
@@ -86,12 +87,15 @@ def open_flight(artefact: Path, split: str, dataset_id: str, words: Words) -> Fl
 
 
 def fly_until(executor: Executor, sentences: Sentences, clock: TimeClock | DistanceClock | TrackClock, step_s: float,
-              stop_steps: int | None) -> bool:
+              stop_steps: int | None, superseded: Callable[[], bool]) -> bool:
     """Drive ``executor`` one cycle at a time exactly as `executor.fly` does — the word clock read before each cycle,
     a step's words heard on the cycle that starts it — and stop before the first cycle that starts a step the clock puts
     at or past ``stop_steps`` (where a word said there would be heard); without a stop, fly to the outcome. Whether it
-    stopped there (False: the flight was done or out of cycles first, or there was no stop)."""
+    stopped there (False: the flight was done or out of cycles first, or there was no stop). Raises `Superseded`, before
+    any cycle, as soon as ``superseded()`` says a newer request came in."""
     for cycle in range(executor.cycles):
+        if superseded():
+            raise Superseded(f"a newer request came in: stopped after {cycle} cycles")
         sentence_s = clock.now(cycle, executor.now())
         if cycle % executor.step_rows == 0:
             if stop_steps is not None and int(row_at(sentence_s, step_s)[0]) >= stop_steps:
@@ -112,8 +116,8 @@ def segment_batch(context: FlightContext, segment: Segment) -> replay.Batch:
                         groups=[context.group], drawn={})
 
 
-def fly_batch_until(batch: replay.Batch, params: ExecutorParams, words: Words, stop_steps: int | None
-                    ) -> tuple[Flown, bool, float]:
+def fly_batch_until(batch: replay.Batch, params: ExecutorParams, words: Words, stop_steps: int | None,
+                    superseded: Callable[[], bool]) -> tuple[Flown, bool, float]:
     """``batch``'s one sentence flown to ``stop_steps`` (or its outcome): the flown record, whether it stopped there,
     and the executor's own wall time. The setup is `replay.fly_sentences`' — its time limit, runways, charts, approach
     speeds and word clock — with the executor stepped here (`fly_until`) in place of `executor.fly`: the setup is pinned
@@ -129,7 +133,7 @@ def fly_batch_until(batch: replay.Batch, params: ExecutorParams, words: Words, s
     sentences = Sentences([reading.words], words, device=DEVICE)
     clock = replay.word_clock(batch, params, spec.step_s, DEVICE)
     started = time.perf_counter()
-    reached = fly_until(executor, sentences, clock, spec.step_s, stop_steps)
+    reached = fly_until(executor, sentences, clock, spec.step_s, stop_steps, superseded)
     fly_s = time.perf_counter() - started
     flown = executor.flown()
     if reached:
@@ -150,12 +154,14 @@ class FlownSegment:
     judge_s: float
 
 
-def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, column: int, row: int) -> FlownSegment:
+def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, column: int, row: int,
+                superseded: Callable[[], bool]) -> FlownSegment:
     """``column``'s word said at ``row`` flown from the observed state there, and judged."""
     spec = words.spec
     segment = segment_of(context.reading, column, row, spec.rows_exact(spec.heading_lead_s))
     batch = segment_batch(context, segment)
-    flown, reached, fly_s = fly_batch_until(batch, params, words, None if segment.to_landing else segment.stop_row - segment.row)
+    flown, reached, fly_s = fly_batch_until(batch, params, words, None if segment.to_landing else segment.stop_row - segment.row,
+                                            superseded)
     (reading,), (signals,) = batch.readings, batch.signals
     started = time.perf_counter()
     verdict = judge(flown, 0, context.geometry, reading.runway_index, reading, signals, spec, words)

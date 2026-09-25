@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused
+from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
 from aeroviz_backend.dynamics_comparison_backend import DynamicsComparisonBackend
 from aeroviz_backend.isolated_backend import (
     IsolatedDynamicsComparisonBackend,
@@ -129,14 +129,16 @@ class AeroVizBackendApp:
             return 200, self.dynamics_comparison_backend.clear(payload), None
         if path == "/autopilot/segment":
             # the executor flies one word's segment of a Training flight, live: a request the view cannot make is a
-            # 400, a set or flight not listed a 404, a flight the data cannot fly a 422, and anything else that stops a
-            # listed flight a 500 with its reason
+            # 400, a set or flight not listed a 404, one a newer request from the same page superseded a 409, a flight
+            # the data cannot fly a 422, and anything else that stops a listed flight a 500 with its reason
             try:
                 return 200, self.autopilot_segment_backend().fly(payload), None
             except RequestRefused as exc:
                 return 400, {"ok": False, "error": str(exc)}, None
             except NotListed as exc:
                 return 404, {"ok": False, "error": str(exc)}, None
+            except Superseded as exc:
+                return 409, {"ok": False, "error": str(exc)}, None
             except NotFlyable as exc:
                 return 422, {"ok": False, "error": str(exc)}, None
             except Exception as exc:
@@ -169,7 +171,8 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
                 self.path,
                 payload,
             )
-            self._send_json(response_payload, status=status)
+            if not self._send_json(response_payload, status=status):
+                return
             if optimization_started_at is not None:
                 self._log_optimization_done(
                     status,
@@ -311,14 +314,24 @@ class AeroVizRequestHandler(BaseHTTPRequestHandler):
             raise ValueError("request body must be a JSON object")
         return parsed
 
-    def _send_json(self, payload: Any, status: int = 200) -> None:
+    def _send_json(self, payload: Any, status: int = 200) -> bool:
+        """Answer; False when the page had closed the connection first (logged as that, on one line)."""
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self._send_cors_headers()
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        except (BrokenPipeError, ConnectionResetError):
+            # The page closed the connection before the answer: it aborts a request it no longer waits for (the
+            # Training view's live executor, on every newer click). Nobody is there to answer; not an error of ours.
+            self._finish_live_log_line()
+            sys.stderr.write(f"[aeroviz-backend] client gone status={status} method={self.command} path={self.path}\n")
+            sys.stderr.flush()
+            return False
 
     def _send_empty(self, status: int) -> None:
         self.send_response(status)

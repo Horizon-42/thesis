@@ -1,6 +1,8 @@
+import contextlib
+import io
 import unittest
 
-from aeroviz_backend.http_server import AeroVizBackendApp
+from aeroviz_backend.http_server import AeroVizBackendApp, AeroVizRequestHandler
 
 
 class TestAeroVizBackendApp(unittest.TestCase):
@@ -216,6 +218,37 @@ class TestAeroVizBackendApp(unittest.TestCase):
 
         self.assertEqual(get_status, 404)
         self.assertEqual(post_status, 404)
+
+
+class TestAeroVizRequestHandler(unittest.TestCase):
+    def test_a_page_that_closed_the_connection_first_is_one_log_line_not_an_error(self):
+        # the Training view aborts a live-executor request a newer click superseded: the 409 finds the socket closed
+        for gone in (BrokenPipeError, ConnectionResetError):
+            body = b'{"clientId": "page", "seq": 1}'
+            handler = AeroVizRequestHandler.__new__(AeroVizRequestHandler)
+            handler.app = SupersedingApp()
+            handler.request_version, handler.command, handler.path = "HTTP/1.1", "POST", "/autopilot/segment"
+            handler.requestline, handler.client_address = "POST /autopilot/segment HTTP/1.1", ("page", 0)
+            handler.headers = {"Content-Length": str(len(body))}
+            handler.rfile, handler.wfile = io.BytesIO(body), ClosedSocket(gone)
+            log = io.StringIO()
+            with contextlib.redirect_stderr(log):
+                handler.do_POST()
+            self.assertEqual(log.getvalue().splitlines(),
+                             ["[aeroviz-backend] client gone status=409 method=POST path=/autopilot/segment"])
+
+
+class SupersedingApp:
+    def handle_post(self, path, payload):
+        return 409, {"ok": False, "error": "a newer request came in"}, None
+
+
+class ClosedSocket:
+    def __init__(self, error: type[OSError]) -> None:
+        self.error = error
+
+    def write(self, data: bytes) -> int:
+        raise self.error()
 
 
 class FakeSimulationBackend:

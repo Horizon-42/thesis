@@ -12,5 +12,10 @@ class NotFlyable(ValueError):
     the formal replay does not fly it either."""
 
 
+class Superseded(RuntimeError):
+    """A newer request from the same page came in: this one is not flown, or stops flying (HTTP 409) — the page has
+    already dropped it, and the backend flies one segment at a time, so it would only hold the newer one up."""
+
+
 class NotListed(LookupError):
     """A set or a flight the request names that the airport's Training files do not list (HTTP 404)."""

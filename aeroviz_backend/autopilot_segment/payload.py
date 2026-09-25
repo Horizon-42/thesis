@@ -80,6 +80,32 @@ def heading_facts(result: FlownSegment, judged: Admitted, spec: Any) -> HeadingF
     return HeadingFacts(off_word_cycles=off, judged_rows=len(judged.smoothed.track_deg))
 
 
+def ended_at_stop(result: FlownSegment) -> bool:
+    """The segment's stop ended the flight: it got there, and no event (a crossing, a dynamics failure, ground contact)
+    ended it first — the executor flies on past an uncaptured crossing, so getting there is not enough."""
+    return result.reached_end is True and result.verdict.outcome == "timeout"
+
+
+def band_cut_by_stop(result: FlownSegment, judged_rows: int, spec: Any) -> bool:
+    """The selected heading word's band was cut by the segment's stop. The stop is counted on the SENTENCE's steps
+    (`fly_until`: the word clock at the next heading word's step plus the lead), the band on FLOWN steps (the judge: to a
+    lead after the executor heard the next heading word). With the time and track clocks they agree — those move at most
+    one sentence step a cycle, a step is two cycles and the lead two steps — but the distance clock has no such cap: it
+    can jump past the next heading word to the stop in one cycle (the word never heard), or hear it on a step's first
+    cycle and reach the stop on the next. Then the band runs to the track's end (``judged_rows``) short of where it
+    should end. Only a flight the stop ended can be cut: one an event ended is judged to the event."""
+    if not ended_at_stop(result):
+        return False
+    lead = spec.rows_exact(spec.heading_lead_s)
+    band_stop = lead + selected_heading(result.verdict.words)["rows"]
+    said = words_said(result.flown, 0, result.reading, spec)
+    step_rows = int(round(spec.step_s / result.flown.cycle_s))
+    heard = [cycle for word, cycle in zip(result.reading.instructions, said.cycles)
+             if word.column == HEADING and word.row > 0 and cycle < said.n_cycles]
+    needs = min(heard) // step_rows + lead if heard else None
+    return band_stop == judged_rows and (needs is None or needs > judged_rows)
+
+
 def heading_payload(result: FlownSegment, judged: Admitted, spec: Any, shift: float) -> tuple[dict[str, Any], list[float]]:
     """A selected heading word's band over the rows its judge judged on the flown track, each row's verdict
     (`display.heading_band`, refused unless it gives back the judge's count), and that track as the judge read it — both
@@ -105,6 +131,10 @@ def segment_payload(result: FlownSegment, context: FlightContext, words: Words) 
     band = judged_track = facts = None
     if segment.column == HEADING and verdict.words is not None:
         judged = read_flown(flown, 0, verdict.outcome, verdict.end_row, context.geometry, result.signals, spec)
+        if band_cut_by_stop(result, len(judged.smoothed.track_deg), spec):
+            raise ValueError(f"the heading word said at step {segment.row} was stopped at step {segment.stop_row} before its "
+                             "band ended: the segment's stop is counted on the sentence's steps and the band on the flown "
+                             "ones, and this executor spec lets them part — the stop needs to move to the flown axis")
         facts = heading_facts(result, judged, spec)
         band, judged_track = heading_payload(result, judged, spec, shift)
     word = {**word_verdict(verdict, segment, spec, words, facts), "heading": band}
@@ -114,7 +144,7 @@ def segment_payload(result: FlownSegment, context: FlightContext, words: Words) 
         observed_s = (segment.stop_row - segment.row) * spec.step_s
     crossing = verdict.crossing
     # the judge's outcome, unless the flight simply reached the segment's end (no event before it)
-    reason = SEGMENT_END if result.reached_end and verdict.outcome == "timeout" else verdict.outcome
+    reason = SEGMENT_END if ended_at_stop(result) else verdict.outcome
     offset = None
     if reason == SEGMENT_END:
         # where the executor was when its clock put it at the observed aircraft's point of the segment's stop
