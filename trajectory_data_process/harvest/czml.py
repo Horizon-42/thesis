@@ -75,6 +75,12 @@ class RenderedObserved:
     flights_with_altitude_outliers: int
 
 
+def track_flight_id(track: dict[str, Any]) -> str:
+    """A stored track's ``id``: the callsign (else the icao24) as its ``flight_key`` was built from it — blanks
+    removed, at most 16 characters. Every record and entity naming the track by ``id`` writes this one."""
+    return (track["callsign"] or track["icao24"]).replace(" ", "")[:16]
+
+
 def czml_input_flight(track: dict[str, Any]) -> dict[str, Any]:
     """One stored track in the czml-input shape ``generate_czml`` consumes.
 
@@ -85,7 +91,7 @@ def czml_input_flight(track: dict[str, Any]) -> dict[str, Any]:
     address, and it would look like an empty report rather than an error.
     """
     return {
-        "id": (track["callsign"] or track["icao24"]).replace(" ", "")[:16],
+        "id": track_flight_id(track),
         "callsign": track["callsign"],
         "type": "UNK",
         "icao24": track["icao24"],

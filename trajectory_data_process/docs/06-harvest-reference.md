@@ -30,6 +30,10 @@ gets a new ID here and ONE new line in the index.**
   runway as a `runway_target` (`arrivals.runway_target`, the arrivals' own); it used to subtract the
   same CIFP offset by hand. Same numbers (1,500 real records compared byte for byte); the step is keyed
   on the track's `altitude_source`, so an unknown or legacy tag is refused (every stored track is HAE).
+- **The record's `source.id` is the id its `flight_key` was built from (2026-09-25)**: `czml.track_flight_id` — the
+  callsign (else the icao24) with blanks removed, at most 16 characters — as the observed CZML's entity is named; it
+  was the raw callsign, so 10 fleet tracks (e.g. `'0  YP'`) carried an `id` that `flight_scenarios.flight_key` could not
+  rebuild their key from. Records change only when regenerated.
 
 - **Observed evaluation records carry a `crossing_span` and their resolved airframe's
   stall facts (2026-08-24)** — `harvest/observed.py` marks the event's direct bracket or

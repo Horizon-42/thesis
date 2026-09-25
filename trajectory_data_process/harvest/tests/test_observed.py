@@ -300,3 +300,16 @@ def test_a_failed_observed_rebuild_leaves_the_previous_records_and_summary(tmp_p
     assert sorted(p.name for p in (paths.approach / "records").iterdir()) == ["A_eval.json"]
     assert (paths.approach / observed.SUMMARY_NAME).read_bytes() == summary_before
     assert sorted(p.name for p in paths.approach.iterdir()) == ["records", observed.SUMMARY_NAME]
+
+
+def test_the_observed_record_s_id_is_the_one_its_flight_key_was_built_from(monkeypatch):
+    """A callsign with blanks (the fleet holds such, e.g. ``'0  YP'``) is written as the flight_key's id, not raw."""
+    from flight_scenarios.identity import flight_key
+    from trajectory_data_process.harvest import observed as observed_module
+
+    track, runway = _estimated_track_and_runway()
+    track = {**track, "callsign": "0  YP", "flight_key": "0YP_18_abc123_20260812T000000Z"}
+    monkeypatch.setattr(observed_module, "resolve_airframe", lambda icao24, aircraft_provider: None)
+    source = observed_record(track, runway)["source"]
+    assert source["id"] == "0YP"
+    assert flight_key(source, 0) == track["flight_key"]

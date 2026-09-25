@@ -44,6 +44,7 @@ from trajectory_data_process.harvest.airports import (
     Runway,
 )
 from trajectory_data_process.harvest.arrivals import runway_target
+from trajectory_data_process.harvest.czml import track_flight_id
 from trajectory_data_process.harvest.altitude_filter import (
     DEFAULT_POLICY,
     FILTER_SCHEMA_VERSION,
@@ -169,7 +170,7 @@ def observed_record(
         states = states + appended_rows
     return {
         "source": {
-            "id": track["callsign"] or track["icao24"],
+            "id": track_flight_id(track),
             "subject": "observed",
             "arr_airport": runway.airport,
             "flight_key": track["flight_key"],
