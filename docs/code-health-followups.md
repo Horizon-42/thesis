@@ -4,7 +4,98 @@ Findings noticed while working elsewhere, recorded rather than fixed on the spot
 change that surfaced them stays reviewable. Nothing here is a live bug unless it says so.
 
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
-tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
+tell how much re-checking it needs. **Keep the status table below current**: a new entry adds a row; when an
+entry is fixed or dismissed, its row says so (with the commit) and the entry itself is deleted.
+
+## Status of every entry (verified against the code 2026-09-25)
+
+Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`: **41 open, 13
+partly, 18 resolved, 5 obsolete** (the code it is about was archived). *open*: the problem is still
+in the code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
+*obsolete*: the code is gone. Rows follow the entries' order below; note the two sets of numbers (§19–§21 each appear
+twice). Also found and fixed on `dev-frontend-followups`, never entered below: the terrain preload's tile counts and the
+range ring radius re-rendering the app (`f73015df`, `1d8630c0`), the Pilot catalog failure hidden on entering
+Trajectory (`fd9f205f`, `1d8630c0`), Observe's sample count planning loads per keystroke (`3a4aea81`, `d57f7fc7`).
+
+| Entry | Status | What remains, or what resolved it |
+|---|---|---|
+| Training review 1 — every chart hover re-renders the whole app | resolved | cursor in its own context, 3D layer a leaf (`eac9c60a`); entry removed |
+| Training review 2 — leaving Training throws its session away | resolved | panel kept mounted, session per airport (`bab2d5fe`, `2a368296`); entry removed |
+| Training review 3 — `instruction_training_export.py` is runner and library | open | helpers still raise `SystemExit`; the backend still repeats `open_base_set`'s checks (`backend.py:73-95`) |
+| Training review 4 — race on `training/index.json` | open | index written without re-reading (`:606-607`); the write loop is still not all-or-nothing |
+| Training review 5 — replay draws no heading band for a dynamics failure | open | export still skips it (`executor_training_export.py:225-226`); no v3 overlay schema |
+| Training review 6 — replay's off-word intercept count covers the whole flight | open | export and live backend can still show different counts |
+| Training review 7 — three strictnesses of "the re-read sentence is the stored one" | open | no shared `require_stored_sentence` |
+| Training review 8 — duplication across the exporters and the backend | open | all eight copies remain (a third `_git_state` at `instruction_spec.py:91`) |
+| Training review 9 — smaller exporter points | open | all four remain (`indent=2`, dead branch, unpinned params, two `captureBeforeThresholdM`) |
+| Training review 10 — the prior's first predicted step has no exporter-side test | open | one case only; no prior-v3 overlay on disk |
+| Training review 11 — `TRAINING_STRATA` not pinned | resolved | pinned by the backend's `MirrorTest` (2026-09-25); entry removed |
+| Three ts ablation runners write into filter-less directories (09-24) | open | a rerun would still overwrite; the arm files refuse by name as recorded |
+| `build_runway_config.py` cannot rebuild `runway_thresholds.json` (09-20) | open | no NASR width / plate-minima source |
+| Two suites fail at HEAD (09-20) | partly | the download test is fixed (`803605e0`); `test_optimizer.py:361` (numpy 2) and `test_write_reference_records_from_observed_tracks` still fail |
+| ts: the closed-loop training's EXECUTOR side is not written (09-18) | obsolete | the trained executor it would retrain is archived; left: the dead hook `outputs/base.py:115` and a stale docstring (`strategy.py:176-178`) |
+| ts: the manoeuvre runners repeat an argument skeleton (09-18) | obsolete | five of six runners archived (`79f871f1`) |
+| ts: `predictability_report` builds its own dynamics rows (09-18) | partly | the `plan_z` crash cannot happen; the copy remains and never adds `cta_s` |
+| ts: `lead_landings` reads outer-test-hash landings (09-13) | open | still the owner's call |
+| ts: two dead loss helpers (09-07) | open | both remain with test-only callers (its correction on `DYNAMICS_CONDITION_NAMES` is resolved) |
+| ts: `train_only_diagnostics` is one unreferenced helper (09-07) | resolved | module deleted (`dddee9ae`) |
+| ts: `experiments.pipeline`'s flags no longer match the ones it emits (09-07) | open | old flag names at `pipeline.py:1145/1169` |
+| 1. two byte-identical `_iso` | open | still two, plus a third inline at `harvest/merge.py:284` |
+| 2. `summary_row` writes explicit JSON nulls | open | unchanged |
+| 3. `source_event_availability` re-validates its manifest | open | unchanged (judgement) |
+| 4. stale schema fixture in the comparison-CZML tests | open | fixture pins v2; the report is v9 |
+| 5. `trajectory_data_process/tests` has 12 pre-existing failures | partly | all 12 fixed; the numpy `test_optimizer` failure remains |
+| 6. `write_arrival_records` clears its output directory | open | still deletes the roster — now deliberate and a root Open Items hazard; `--observed-only` avoids it |
+| `run_all_tests.sh` has 13 pre-existing failures | partly | 11 fixed; the numpy test and the `arr_airport` test still fail; the exit code still says nothing; the script header is stale |
+| 7. `roster_context_keys` leaks a raw FileNotFoundError | resolved | `records.py:298-300` |
+| 8. `record_from_dict` does not enforce increasing `t` | resolved | `records.py:138-142` |
+| 9. `arrival.py` restates `STATE_KEYS` | resolved | imported (`arrival.py:37`) |
+| 10. empty `evaluate_batch` reports `mixed` | resolved | reports `empty` (`metrics.py:689-694`) |
+| 11. last-sample kinematics under event names | partly | speed and heading now from the crossing; `final_time_s` still the last sample |
+| 12. `_reference_aggregate` unweighted mean of means | open | the comment is still missing |
+| 13. eleven `test_ts_pipeline.py` reuse-guard failures | resolved | fixtures fixed (`ed708dea`, `803605e0`) |
+| 14. A320-family speed windows exclude most crossings | resolved | superseded: the gate uses published VREF (`53ae8e80`); its residuals are obsolete |
+| 2026-09-03 — 14 pre-existing failures in `trajectory_data_process/tests` | resolved | all 14 fixed; the suite is still not green for the two failures above |
+| ts: reusable measurement code lives in `docs/` (09-07) | partly | conftest done; package runners still import `docs/` scripts; 18 `sys.path` preambles; hubs not migrated |
+| ts: the auto-batch probe measures a smaller graph than a latent run | open | **worse than logged**: with `latent_dim > 0` and `--batch-size auto` the probe now raises (`latent.py:275`) |
+| scene data plane: review leftovers (09-07) | partly | (10) and (13) obsolete (archived); (7)-(9), (11), (12), (14) and the three test gaps open — `scene_context` has no live consumer |
+| ts: T2 leftovers (09-07) | partly | `needs_reference` resolved; `chart_scale=None` and the transport-chart entry points open; the open-items and README pointers half done |
+| 15. KRDU 14's arrivals render as "indeterminate" | open | needs the backend and a UX decision |
+| 16. observed record without `landing_aero` cannot say why | resolved | removed with the v9 gate |
+| 17. `require_matching_runway_data` has no production caller | open | still dead code |
+| 18. `runway`-mode solves pile up at the window's upper edge | resolved | targets published V_ref (`88893126`); records solved before keep it until re-solved |
+| 20. two copies of the point-mass inversion and the OLS slope | open | neither folded onto `aircraft/kinematics.py` |
+| 19. speed anchors calibrated on wind-contaminated ground speeds | resolved | the gate reads published speeds |
+| 21. single-valued FAA approach-speed rows for multi-flap types | open | no reduced-flap rows |
+| 22. four types publish no minimum operating mass | partly | LJ45 closed (`d5acb04f`); GLF5, C25A, C525 remain |
+| 23. the optimizer's velocity floor and V_ref target come from the stall model | partly | target fixed; the floor is still 1.10 × stall |
+| 19. `control_basis_oracle --checkpoint` fingerprints without the roster | resolved | `e8df12f` |
+| 20. `random_train_anchor=True` raises before the first epoch | resolved | `7e947bb5`, with a test |
+| 21. the drawn "Lookback" is the whole pre-anchor track | open | no `lookbackSamples` record field yet |
+| 24. OpenSky typecodes absent from Doc 8643 | open | no alias table (the FAA crosswalk may cover some US airframes) |
+| 25. 1,164 FAA airframes without an unambiguous typecode | partly | crosswalk `750daafb`: 2,737 → 914 unresolved; no third source; foreign rows unhandled |
+| 26. `config.seq_len - 1` at sites that have `default_anchor` | resolved | `9d12b114`, `e2e1c84d` |
+| 27. `cli/predict.py` builds records at near-identical sites | open | five copies remain |
+| 28. bank inversion and load coordination in two hook modules | partly | coordination shared (`87f46cc6`); the inversion and its 0.5 lift floor still twice |
+| 29. barrier's load coordination perturbs ungated rows | open | no guard at `barrier_filter.py:198` |
+| 30. rolled-window table encoded once per window set | obsolete | plan head archived (`9dbb4921`) |
+| 31. drop-stretch branch lays probes on the stretch | obsolete | archived with the plan head |
+| 32. instruction-leg speed points keyed in the head's path-to-go | obsolete | archived with the plan head |
+| 33. readers compare stored configs field by field | open | unchanged; its suggested fix (absent fields as defaults) now clashes with the no-compatibility rule |
+| 34. thrust-fraction speed floor inert by a rounding accident | open | the structural form not adopted for thrust-fraction |
+| 35. the anchor-eligibility gate restates the stall speed | open | still inline with its own 1.225 |
+| 36. `batch_dynamics_tensors` duplicates the forecast's batch | open | a guard test exists; the copy remains |
+| 37. specific-force constants not in any checkpoint's identity | open | unguarded; its suggested fix also clashes with the no-compatibility rule |
+| 38. formulas left restated outside the contract rows | partly | `VerticalChannel` resolved; `CONTROL_NAMES` 3 → 2; guidance loop, lag credit ×5, cos γ ×3 remain |
+| 39. specific-force speed floor holds sin γ at the hold's start | open | unchanged |
+| 40. two definitions of "the truth's end" | open | both conventions remain |
+| ts: `EXPERIMENTS_MAIN` lives outside `repo_layout` (09-23) | open | not moved (the `HARVEST_ROOT` part is resolved) |
+| Review of trajectory_data_process + flight_scenarios (09-23), #1–#22 | open | 21 of 22 open; #17 partly (the named staging leftover is gone, nothing cleans such leftovers) |
+| `test_write_reference_records_from_observed_tracks` fails (09-23) | open | the fixture still lacks `arr_airport` |
+| `THRESHOLD_SPEED_GATE.md` §3.3 quotes an unsourced +5/−0 kt margin (09-23) | open | neither sourced nor removed |
+| B77W preset `landing_mass` 19 % above its MALW (09-24) | open | presets still have no `max_landing_kg` |
+| Pilot frontend tests use a 145 / 135 / 155 kt fixture (09-24) | resolved | real catalog fixture + a range preset (`3d0fc579`, `d2323adf`); entry removed |
+| Performance index: stage-2 review leftovers (09-24) | open | all six bullets unchanged (three are judgement) |
 
 ## Training module review: what it found outside the module (2026-09-25)
 

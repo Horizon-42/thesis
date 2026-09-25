@@ -212,7 +212,8 @@ Maintenance convention:
   must fire unprompted.
 - Code-health findings noticed **outside** the change you are making go in
   **`docs/code-health-followups.md`** (deferred, one entry each, marked verified vs judgement) —
-  not into the change, and not into Open Items unless they block something.
+  not into the change, and not into Open Items unless they block something. Each entry has a row in
+  the status table at the top of that file; fixing one flips its row (with the commit) and deletes the entry.
 - **A subsystem `CLAUDE.md` is an INDEX, not a store** (2026-09-16: the tree's CLAUDE.md files
   had reached 221 KB, the ts one 118 KB). One line per contract/gotcha/default, ending in an ID;
   the full text — measurements, history, runner manuals — lives in that subsystem's reference doc
