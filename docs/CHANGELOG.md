@@ -1,5 +1,12 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-25 — 后训练第二阶段第 0 步：下滑道下沿在训练集上过了
+
+- `dev-post-train` `3cb1fe72`：`prior/procedure.py`（下滑道 − 60 m，只在 FAF 以内、LPV 扇形里）、`Speaker(finals=)` 屏蔽高度列、
+  `glidepath_stops` 与结局 `below_glidepath`、`prior_free_generation --glidepath-mask`、runner `prior_procedure_check`（R20）。未合并。
+- 训练集：标注的高度词被屏蔽 0.09 %、重飞被结束 2.50 %（线 1 % / 3 %）。内部选择集开着屏蔽自由生成：先验说词落地 95.7 → 92.1 %，
+  全部来自航迹检查（执行器飞"下降至落地"时下沉），屏蔽本身几乎不起作用（读数文档 §8.2）。
+
 ### 2026-09-25 — 前端：审查新发现的三条也修掉
 
 分支 `dev-frontend-followups`（同上一条），用户合并。
