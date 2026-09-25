@@ -6,14 +6,6 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
-## Observe: the sample-count field re-plans the trajectory loads on every keystroke (2026-09-25)
-
-**Verified by reading** (review of `dev-frontend-followups` `7617884a`). `aeroviz-4d/src/components/ControlPanel.tsx`
-(~L435) sets `trajectorySampleCount` on every keystroke, and `App.tsx` (`planObservedTracks`, ~L42/~L62) and
-`useComparisonTrajectoryLayer.ts` (~L279, ~L472) plan the trajectory loads from it — typing "200" plans loads for 2, 20
-and 200. **Judgement**: hold a draft while typing and commit it on blur / Enter, as the range ring's text field does
-(`LayersDrawer.tsx`).
-
 ## Training module review: what it found outside the module (2026-09-25)
 
 The whole-module review of the Training view (frontend `aeroviz-4d/src/{data,hooks,components,scene}/training*`, the
