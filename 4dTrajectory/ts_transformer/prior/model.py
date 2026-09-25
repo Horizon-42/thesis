@@ -27,12 +27,18 @@ together fit each other; unordered, every head reads the hidden state alone. The
 ``g · W · c_j`` (its input, the candidate's vector of the step), beside an "unchanged" score, softmaxed over the
 airport's candidates (padded slots −inf). **The first predicted step** (row `scene.N_LOOK`) says every column: its
 "unchanged" is masked. Rows before it are never asked.
+
+**Row by row** (`Prior.extend`): every layer reads a row and the rows before it only, so a speaker that adds one row a
+step keeps each layer's keys and values of the rows it has (`Past`, allocated once for every row it will hold and
+written in place) and encodes only the new row — the same arithmetic as encoding every row again (`encode` is `extend`
+from nothing), to about 1e-6 in the attention's summation order.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass
+from typing import NamedTuple
 
 import torch
 from torch import nn
@@ -84,6 +90,23 @@ def self_edges(batch: int, aircraft: int, rows: int, device: torch.device) -> to
     return eye.expand(batch, rows, aircraft, aircraft, 1).contiguous()
 
 
+class Past(NamedTuple):
+    """A layer's time-attention keys and values (``[B·A, heads, capacity, d / heads]``) and which aircraft-steps are
+    present (``[B·A, capacity]``), of which the first ``rows`` are encoded."""
+
+    keys: torch.Tensor
+    values: torch.Tensor
+    present: torch.Tensor
+    rows: int
+
+    @classmethod
+    def nothing(cls, scenes: int, heads: int, head: int, capacity: int, like: torch.Tensor) -> Past:
+        """No rows yet, room for ``capacity``, for ``scenes`` = B·A aircraft (``like``: a tensor on the device, of the
+        dtype)."""
+        return cls(like.new_zeros((scenes, heads, capacity, head)), like.new_zeros((scenes, heads, capacity, head)),
+                   torch.zeros((scenes, capacity), dtype=torch.bool, device=like.device), 0)
+
+
 class SceneLayer(nn.Module):
     """Time attention → aircraft attention (edge bias + edge value) → feed-forward."""
 
@@ -107,14 +130,29 @@ class SceneLayer(nn.Module):
     def forward(self, x: torch.Tensor, present: torch.Tensor, edges: torch.Tensor) -> torch.Tensor:
         """``x`` [B, A, T, d], ``present`` [B, A, T] bool, ``edges`` [B, T, A, A, E]."""
         batch, aircraft, rows, d = x.shape
+        return self.extend(x, present, edges, Past.nothing(batch * aircraft, self.heads, d // self.heads, rows, x))[0]
+
+    def extend(self, x: torch.Tensor, present: torch.Tensor, edges: torch.Tensor, past: Past
+               ) -> tuple[torch.Tensor, Past]:
+        """The rows ``x`` [B, A, R, d] that follow the ``past`` ones (``present`` [B, A, R], ``edges``
+        [B, R, A, A, E]), written into the past in place: ``(the rows out, the past with them)``."""
+        batch, aircraft, rows, d = x.shape
         head = d // self.heads
+        start, end = past.rows, past.rows + rows
+        if end > past.keys.shape[2]:
+            raise ValueError(f"{end} rows, the past holds {past.keys.shape[2]}")
         # along time: each aircraft's present steps up to this one, and always this one
         y = self.time_norm(x).reshape(batch * aircraft, rows, d)
         q, k, v = self.time_qkv(y).reshape(batch * aircraft, rows, 3, self.heads, head).permute(2, 0, 3, 1, 4)
-        steps = torch.arange(rows, device=x.device)
-        keys = present.reshape(batch * aircraft, 1, rows) | (steps[:, None] == steps[None, :])
-        allowed = (steps[None, :] <= steps[:, None]) & keys                     # [B·A, T, T]: query, key
-        y = functional.scaled_dot_product_attention(q, k, v, attn_mask=allowed[:, None],
+        past.keys[:, :, start:end], past.values[:, :, start:end] = k, v
+        past.present[:, start:end] = present.reshape(batch * aircraft, rows)
+        past = past._replace(rows=end)
+        steps = torch.arange(end, device=x.device)
+        queries = steps[start:, None]
+        keys = past.present[:, None, :end] | (steps[None, :] == queries)
+        allowed = (steps[None, :] <= queries) & keys                            # [B·A, R, T]: query, key
+        y = functional.scaled_dot_product_attention(q, past.keys[:, :, :end], past.values[:, :, :end],
+                                                    attn_mask=allowed[:, None],
                                                     dropout_p=self.attention_dropout if self.training else 0.0)
         y = self.time_out(y.transpose(1, 2).reshape(batch, aircraft, rows, d))
         x = x + self.dropout(y.masked_fill(~present[..., None], 0.0))
@@ -131,7 +169,7 @@ class SceneLayer(nn.Module):
         read = read + torch.einsum("bthij,btijhc->btihc", weights,
                                    self.edge_value(edges).reshape(batch, rows, aircraft, aircraft, self.heads, head))
         x = x + self.dropout(self.out(read.reshape(batch, rows, aircraft, d)).transpose(1, 2))
-        return x + self.dropout(self.feedforward(self.feedforward_norm(x)))
+        return x + self.dropout(self.feedforward(self.feedforward_norm(x))), past
 
 
 class Prior(nn.Module):
@@ -171,6 +209,32 @@ class Prior(nn.Module):
                since: torch.Tensor, airport: torch.Tensor, present: torch.Tensor, edges: torch.Tensor
                ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """``(h [B, A, T, d], tokens [B, A, T, slots, d], valid [B, slots])``."""
+        x, tokens, valid = self._rows(features, relative, static, in_force, since, airport, 0)
+        for layer in self.layers:
+            x = layer(x, present, edges)
+        return self.norm(x), tokens, valid
+
+    def no_past(self, scenes: int, capacity: int) -> list[Past]:
+        """Every layer's `Past` before the first row, room for ``capacity`` rows, for ``scenes`` = B·A aircraft."""
+        return [Past.nothing(scenes, self.config.heads, self.config.d_model // self.config.heads, capacity,
+                             self.no_runway) for _ in self.layers]
+
+    def extend(self, features: torch.Tensor, relative: torch.Tensor, static: torch.Tensor, in_force: torch.Tensor,
+               since: torch.Tensor, airport: torch.Tensor, present: torch.Tensor, edges: torch.Tensor,
+               past: list[Past]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[Past]]:
+        """`encode` of the rows that follow the ``past`` ones (`no_past` before the first), row by row: ``(h, tokens,
+        valid, the past with these rows)``."""
+        x, tokens, valid = self._rows(features, relative, static, in_force, since, airport, past[0].rows)
+        after = []
+        for layer, before in zip(self.layers, past):
+            x, kept = layer.extend(x, present, edges, before)
+            after.append(kept)
+        return self.norm(x), tokens, valid, after
+
+    def _rows(self, features: torch.Tensor, relative: torch.Tensor, static: torch.Tensor, in_force: torch.Tensor,
+              since: torch.Tensor, airport: torch.Tensor, start: int
+              ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """The first layer's input of rows ``start …``, their candidate tokens, the valid slots."""
         batch, aircraft, rows, slots = relative.shape[:4]
         table = self.candidates[airport]                                          # [B, slots, features]
         valid = table[..., -1] > 0.5                                              # [B, slots]
@@ -185,10 +249,8 @@ class Prior(nn.Module):
         x = x + self.pool(tokens.sum(dim=3))
         if self.static is not None:
             x = x + self.static(static)[:, :, None, :]
-        x = x + self.airport(airport)[:, None, None, :] + self.position(torch.arange(rows, device=x.device))
-        for layer in self.layers:
-            x = layer(x, present, edges)
-        return self.norm(x), tokens, valid
+        return x + self.airport(airport)[:, None, None, :] + self.position(
+            torch.arange(start, start + rows, device=x.device)), tokens, valid
 
     @staticmethod
     def _runway(pointer: torch.Tensor, tokens: torch.Tensor, project: nn.Module, none: torch.Tensor) -> torch.Tensor:

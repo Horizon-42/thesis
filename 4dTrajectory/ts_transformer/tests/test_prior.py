@@ -181,7 +181,12 @@ def _flight(identifier, airport, rows=ROWS, width=len(prior_data.STEP_FEATURES),
     targets[N_LOOK] = target
     return Flight(identifier, airport, np.zeros((rows, width), np.float32),
                   np.zeros((rows, 2, len(prior_data.RELATIVE_FEATURES)), np.float32), np.zeros(0, np.float32),
-                  np.zeros((rows, 6), np.int16), np.zeros((rows, 6), np.float32), targets, 0.0, 0, 0.0, established)
+                  np.zeros((rows, 6), np.int16), np.zeros((rows, 6), np.float32), targets, _asked(rows), 0.0, 0, 0.0,
+                  established)
+
+
+def _asked(rows):
+    return (np.arange(rows) >= N_LOOK)[:, None].repeat(6, axis=1)
 
 
 def test_batches_hold_every_flight_once_under_the_token_budget():
@@ -260,7 +265,7 @@ def test_the_first_predicted_step_says_every_column_and_the_rows_before_it_are_n
     assert torch.isfinite(runway[N_LOOK:, 1:3]).all() and torch.isinf(runway[:, 3]).all()   # the empty slot never
     asked = asked_entries(batch["present"])
     assert not asked[0, 0, :N_LOOK].any() and asked[0, 0, N_LOOK:].all()
-    nll = column_nll(logits, batch["targets"], batch["present"])
+    nll = column_nll(logits, batch["targets"], batch["present"], torch.ones_like(batch["targets"], dtype=torch.bool))
     for c in range(6):
         expected = sum(float(-torch.log_softmax(logits[c][0, 0, t], dim=-1)[batch["targets"][0, 0, t, c]])
                        for t in range(N_LOOK, ROWS))
@@ -369,7 +374,7 @@ def test_the_baselines_count_the_first_step_and_the_changes_after_it_from_train(
     in_force[N_LOOK + 1:] = 1
     in_force[N_LOOK + 3, HEADING] = 3
     flight = Flight("F", 0, np.zeros((rows, 9), np.float32), np.zeros((rows, 2, 6), np.float32), np.zeros(0, np.float32),
-                    in_force, np.zeros((rows, 6), np.float32), targets, 0.0, 0, 0.0, True)
+                    in_force, np.zeros((rows, 6), np.float32), targets, _asked(rows), 0.0, 0, 0.0, True)
     table = np.zeros((1, 2, len(prior_data.CANDIDATE_FEATURES)), np.float32)
     table[0, :, -1] = 1.0
     split = Split([flight], ("KXXX",), table, (("09", "27"),), ((90.0, 270.0),), classes, "full")
@@ -581,3 +586,31 @@ def test_the_rule_prefers_fewer_inputs_then_ordered_heads_within_the_seed_line()
                 if key[1] == 1337}, 1337, 2024)
     with pytest.raises(SystemExit, match="no seed line"):
         choose(runs({"full": 1, "no-context": 1, "unordered": 1}, 1), 1337, 1337)
+
+
+def test_a_flight_s_rows_are_the_same_whichever_flights_they_are_computed_with():
+    """`data.rows_inputs` of several flights of one airport, together, is each flight's own `row_inputs` bit for bit —
+    the speaker computes an airport's flights together (`prior.generate.Speaker`)."""
+    geometry = _two_runways()
+    flights = [_signals(ROWS + 4 + k) for k in range(3)]
+    rows = ROWS + 4
+    e = np.stack([f.e_m[:rows] + 37.0 * k for k, f in enumerate(flights)])
+    north = np.stack([f.n_m[:rows] - 11.0 * k for k, f in enumerate(flights)])
+    height = np.stack([f.altitude_m[:rows] + 5.0 * k for k, f in enumerate(flights)])
+    entry = np.array([utc_s(f.entry_time_utc) + 60.0 * k for k, f in enumerate(flights)])
+    clock = entry[0] + flights[0].time_s[:rows]
+    contexts = [_landings(times_09=[clock[0] - 60.0 - 100.0 * k, clock[N_LOOK + 1]], times_27=[clock[2]])
+                for k in range(3)]
+    def bits(values):
+        return np.ascontiguousarray(values).view(np.uint32)             # the sign of a zero counts too
+
+    for first in (0, N_LOOK, rows - 1):
+        for context in (contexts, None):
+            together = prior_data.rows_inputs(e, north, height, flights[0].time_s[:rows], entry, first, geometry,
+                                              context)
+            for k in range(3):
+                alone = prior_data.row_inputs(e[k], north[k], height[k], flights[0].time_s[:rows], float(entry[k]),
+                                              first, geometry, None if context is None else context[k])
+                assert np.array_equal(bits(together[0][k]), bits(alone[0]))
+                assert np.array_equal(bits(together[1][k]), bits(alone[1]))
+        assert together[1].shape[-1] == len(prior_data.RELATIVE_FEATURES)

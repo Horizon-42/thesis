@@ -26,7 +26,8 @@ A flight's row ``t`` (2 s) gives the model only what a controller could know bef
 
 and asks for the step's six words (``targets``: 0 = unchanged, else the word + 1) from row ``N_LOOK`` on: at the
 first predicted step every column's word in force there (none may be "unchanged": the model masks it), after it the
-sentence's words as written.
+sentence's words as written. ``asked`` says which of them the loss counts: every column from row ``N_LOOK`` on for a
+labelled flight; a closed-loop sentence (`chain_record`) is given its own.
 """
 
 from __future__ import annotations
@@ -101,7 +102,8 @@ class Flight:
     static: np.ndarray         # [len(STATIC_FEATURES)] float32
     in_force: np.ndarray       # [N, 6] int16
     since: np.ndarray          # [N, 6] float32
-    targets: np.ndarray        # [N, 6] int16; rows before N_LOOK are never asked
+    targets: np.ndarray        # [N, 6] int16; the heads read the earlier columns' (teacher forcing)
+    asked: np.ndarray          # [N, 6] bool: the targets the loss counts (never a row before N_LOOK)
     #: For the runway rules at the first predicted step (§8): its time (epoch seconds), the entry sector the flight
     #: came in from (its row 0), its past direction of motion (compass degrees).
     first_step_s: float
@@ -161,47 +163,63 @@ def entry_sector(signals: FlightSignals, geometry: AirportGeometry) -> int:
 def _motion(e: np.ndarray, north: np.ndarray, height: np.ndarray, time_s: np.ndarray
             ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(ground speed, direction of motion (compass degrees), vertical rate)`` of each row from the displacement since
-    the row before; the first row given has none (zeros)."""
+    the row before, along the last axis (rows; a leading axis, flights); the first row given has none (zeros)."""
     dt = np.diff(time_s)
-    de, dn = np.diff(e), np.diff(north)
-    return (np.concatenate(([0.0], np.hypot(de, dn) / dt)), np.concatenate(([0.0], np.degrees(np.arctan2(de, dn)))),
-            np.concatenate(([0.0], np.diff(height) / dt)))
+    de, dn = np.diff(e, axis=-1), np.diff(north, axis=-1)
+    none = np.zeros(e.shape[:-1] + (1,))
+    return (np.concatenate((none, np.hypot(de, dn) / dt), axis=-1),
+            np.concatenate((none, np.degrees(np.arctan2(de, dn))), axis=-1),
+            np.concatenate((none, np.diff(height, axis=-1) / dt), axis=-1))
 
 
-def row_inputs(e: np.ndarray, north: np.ndarray, height: np.ndarray, time_s: np.ndarray, entry_s: float, first: int,
-               geometry: AirportGeometry, context: Landings | None) -> tuple[np.ndarray, np.ndarray]:
-    """``(features [m − first, step], relative [m − first, K, relative])`` of rows ``first … m − 1`` of a flight whose
-    positions so far are ``e``, ``north``, ``height`` at ``time_s`` (rows 0 … m − 1; ``entry_s``: the epoch time of
-    row 0). A row reads itself and the row before it (its motion), and the landings before its time — so rows can be
-    added one at a time, as the prior speaks (`prior.generate`), and come out as the whole flight's. ``context``: the
-    flight's landing context, its own landing already left out (`flight_steps`); None for a variant without it."""
+def rows_inputs(e: np.ndarray, north: np.ndarray, height: np.ndarray, time_s: np.ndarray, entry_s: np.ndarray,
+                first: int, geometry: AirportGeometry, contexts: Sequence[Landings] | None
+                ) -> tuple[np.ndarray, np.ndarray]:
+    """``(features [F, m − first, step], relative [F, m − first, K, relative])`` of rows ``first … m − 1`` of ``F``
+    flights of one airport whose positions so far are ``e``, ``north``, ``height`` (``[F, m]``) at ``time_s`` (``[m]``,
+    the same rows for all; ``entry_s`` ``[F]``: each flight's epoch time of row 0). A row reads itself and the row before
+    it (its motion), and the landings before its time — so rows can be added one at a time, as the prior speaks
+    (`prior.generate`), and come out as the whole flight's; every value is computed element by element, so a flight's
+    rows are the same whichever flights it is computed with. ``contexts``: each flight's landing context, its own landing
+    already left out (`own_context`); None for a variant without it."""
     low, origin = max(first - 1, 0), time_s[0]
-    e, north, height, time_s = e[low:], north[low:], height[low:], time_s[low:]
+    e, north, height, time_s = e[:, low:], north[:, low:], height[:, low:], time_s[low:]
     speed, motion, climb = _motion(e, north, height, time_s)
-    flag = (np.arange(low, low + len(e)) == 0).astype(np.float64)       # row 0 has no row before it
+    flag = (np.arange(low, low + e.shape[1]) == 0).astype(np.float64)   # row 0 has no row before it
     radians = np.radians(motion)
-    features = np.column_stack([e / POSITION_SCALE_M, north / POSITION_SCALE_M, height / HEIGHT_SCALE_M,
-                                (time_s - origin) / TIME_SCALE_S, speed / SPEED_SCALE_MPS, np.sin(radians) * (1.0 - flag),
-                                np.cos(radians) * (1.0 - flag), climb / VERTICAL_RATE_SCALE_MPS, flag])
-    clock = entry_s + time_s
-    width = len(RELATIVE_FEATURES) + (len(CONTEXT_FEATURES) if context is not None else 0)
-    relative = np.zeros((len(e), len(geometry.candidates), width))
+    features = np.stack([e / POSITION_SCALE_M, north / POSITION_SCALE_M, height / HEIGHT_SCALE_M,
+                         np.broadcast_to((time_s - origin) / TIME_SCALE_S, e.shape), speed / SPEED_SCALE_MPS,
+                         np.sin(radians) * (1.0 - flag), np.cos(radians) * (1.0 - flag),
+                         climb / VERTICAL_RATE_SCALE_MPS, np.broadcast_to(flag, e.shape)], axis=-1)
+    clock = entry_s[:, None] + time_s
+    width = len(RELATIVE_FEATURES) + (len(CONTEXT_FEATURES) if contexts is not None else 0)
+    relative = np.zeros(e.shape + (len(geometry.candidates), width))
     for k, candidate in enumerate(geometry.candidates):
         place = relative_to_runway(e, north, motion, height, candidate)
         off = np.radians(place.track_minus_course_deg)
         parts = [np.arcsinh(place.before_threshold_m / RELATIVE_SCALE_M),
                  np.arcsinh(place.right_of_course_m / RELATIVE_SCALE_M),
                  place.height_above_threshold_m / HEIGHT_SCALE_M,
-                 np.sin(off) * (1.0 - flag), np.cos(off) * (1.0 - flag), flag]
-        if context is not None:
-            since = context.since_last(clock, candidate.ident)
+                 np.sin(off) * (1.0 - flag), np.cos(off) * (1.0 - flag), np.broadcast_to(flag, e.shape)]
+        if contexts is not None:
+            since = np.stack([context.since_last(clock[f], candidate.ident) for f, context in enumerate(contexts)])
+            count = np.stack([context.count_before(clock[f], CONTEXT_WINDOW_S, candidate.ident)
+                              for f, context in enumerate(contexts)])
             none = np.isnan(since)
-            parts += [np.log1p(context.count_before(clock, CONTEXT_WINDOW_S, candidate.ident)),
-                      np.where(none, 0.0, np.log1p(np.nan_to_num(since) / 60.0) / LANDING_SINCE_SCALE),
+            parts += [np.log1p(count), np.where(none, 0.0, np.log1p(np.nan_to_num(since) / 60.0) / LANDING_SINCE_SCALE),
                       none.astype(np.float64)]
-        relative[:, k] = np.column_stack(parts)
+        relative[:, :, k] = np.stack(parts, axis=-1)
     keep = slice(first - low, None)
-    return features[keep].astype(np.float32), relative[keep].astype(np.float32)
+    return features[:, keep].astype(np.float32), relative[:, keep].astype(np.float32)
+
+
+def row_inputs(e: np.ndarray, north: np.ndarray, height: np.ndarray, time_s: np.ndarray, entry_s: float, first: int,
+               geometry: AirportGeometry, context: Landings | None) -> tuple[np.ndarray, np.ndarray]:
+    """`rows_inputs` of one flight: ``(features [m − first, step], relative [m − first, K, relative])``; ``context``:
+    its landing context (its own landing left out, `flight_steps`), None for a variant without it."""
+    features, relative = rows_inputs(e[None], north[None], height[None], time_s, np.array([entry_s]), first, geometry,
+                                     None if context is None else [context])
+    return features[0], relative[0]
 
 
 def step_inputs(signals: FlightSignals, n: int, geometry: AirportGeometry, context: Landings | None
@@ -217,17 +235,23 @@ def own_context(signals: FlightSignals, landings: Landings) -> Landings:
     return landings.without(utc_s(signals.landing_time_utc), signals.runway)
 
 
+def issued_rows(grid: np.ndarray) -> np.ndarray:
+    """The row each row's word in force was said at (``grid``'s step 0 writes every column)."""
+    if (grid[0] == UNCHANGED).any():
+        raise ValueError("step 0 does not write every column")
+    rows = np.arange(len(grid))[:, None]
+    return np.maximum.accumulate(np.where(grid != UNCHANGED, rows, 0), axis=0)
+
+
 def sentence_steps(grid: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(in_force, since, targets)`` of one sentence (``[N, 6]``, the artefact's words; N > `N_LOOK`)."""
     n = len(grid)
     if n <= N_LOOK:
         raise ValueError(f"a sentence of {n} rows has no predicted step (N_LOOK = {N_LOOK})")
     grid = grid.astype(np.int64)
-    if (grid[0] == UNCHANGED).any():
-        raise ValueError("step 0 does not write every column")
     written = grid != UNCHANGED
     rows = np.arange(n)[:, None]
-    issued = np.maximum.accumulate(np.where(written, rows, 0), axis=0)   # the row each row's word in force was said
+    issued = issued_rows(grid)
     filled = np.take_along_axis(grid, issued, axis=0)                    # the word in force at each row
     targets = np.zeros((n, 6), dtype=np.int16)
     targets[N_LOOK] = filled[N_LOOK] + 1                                 # the first predicted step says them all
@@ -252,18 +276,56 @@ def flight_steps(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeom
     return (features, relative, np.zeros(len(STATIC_FEATURES), dtype=np.float32), *sentence_steps(grid))
 
 
-def flight_record(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeometry, landings: Landings | None,
-                  airport: int, capture_row: int) -> Flight:
-    """One labelled flight as the prior reads it: its steps (`flight_steps`), and what the runway rules and the
-    readout need — the first predicted step's time, the entry sector, the past direction of motion there, whether the
-    labeller's capture row (the final corridor to the end) is at or before it."""
-    steps = flight_steps(signals, grid, geometry, landings)
+def _first_step(signals: FlightSignals, geometry: AirportGeometry, capture_row: int) -> dict[str, float | int | bool]:
+    """What the runway rules and the readout need of a flight (`Flight`): the first predicted step's time, the entry
+    sector, the past direction of motion there, whether the labeller's capture row (the final corridor to the end) is
+    at or before it — all observed."""
     _, motion, _ = _motion(signals.e_m[: N_LOOK + 1], signals.n_m[: N_LOOK + 1], signals.altitude_m[: N_LOOK + 1],
                            signals.time_s[: N_LOOK + 1])
-    return Flight(signals.dataset_id, airport, *steps,
-                  first_step_s=utc_s(signals.entry_time_utc) + float(signals.time_s[N_LOOK]),
-                  sector=entry_sector(signals, geometry), course_deg=float(motion[N_LOOK]) % 360.0,
-                  established=bool(capture_row <= N_LOOK))
+    return {"first_step_s": utc_s(signals.entry_time_utc) + float(signals.time_s[N_LOOK]),
+            "sector": entry_sector(signals, geometry), "course_deg": float(motion[N_LOOK]) % 360.0,
+            "established": bool(capture_row <= N_LOOK)}
+
+
+def _asked_from_first_step(rows: int) -> np.ndarray:
+    asked = np.zeros((rows, 6), dtype=bool)
+    asked[N_LOOK:] = True
+    return asked
+
+
+def flight_record(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeometry, landings: Landings | None,
+                  airport: int, capture_row: int) -> Flight:
+    """One labelled flight as the prior reads it: its steps (`flight_steps`), every column asked from the first
+    predicted step on, and what the runway rules and the readout need (`_first_step`)."""
+    features, relative, static, in_force, since, targets = flight_steps(signals, grid, geometry, landings)
+    return Flight(signals.dataset_id, airport, features, relative, static, in_force, since, targets,
+                  _asked_from_first_step(len(grid)), **_first_step(signals, geometry, capture_row))
+
+
+def chain_record(signals: FlightSignals, e: np.ndarray, north: np.ndarray, height: np.ndarray, said: np.ndarray,
+                 classes: np.ndarray, asked: np.ndarray, geometry: AirportGeometry, landings: Landings | None,
+                 airport: int, capture_row: int, step_s: float) -> Flight:
+    """One closed-loop sentence as the prior reads it: the rows it read — the positions ``e``, ``north``, ``height``
+    (``[N_LOOK + steps]``: observed to the first predicted step, then where the executor flew), on the vocabulary's
+    step from row 0, and the words it said (``said``, ``[steps, 6]`` from row `N_LOOK`) as the words said so far — and
+    the targets given for its steps (``classes``, ``asked``; design §9.3: its own words, every column). The same rows a
+    speaker (`prior.generate.Speaker`) built as it spoke."""
+    rows = N_LOOK + len(said)
+    if not (len(e) == len(north) == len(height) == rows and classes.shape == asked.shape == said.shape):
+        raise ValueError(f"{signals.dataset_id}: a sentence of {len(said)} steps has {len(e)} rows and targets "
+                         f"{classes.shape}")
+    context = own_context(signals, landings) if landings is not None else None
+    features, relative = row_inputs(e, north, height, np.arange(rows) * step_s, utc_s(signals.entry_time_utc), 0,
+                                    geometry, context)
+    grid = np.full((rows, 6), UNCHANGED, dtype=np.int64)
+    grid[0], grid[N_LOOK:] = said[0], said                   # the prior said its first step at row N_LOOK
+    in_force, since, _ = sentence_steps(grid)
+    targets = np.zeros((rows, 6), dtype=np.int16)
+    targets[N_LOOK:] = classes
+    mask = np.zeros((rows, 6), dtype=bool)
+    mask[N_LOOK:] = asked
+    return Flight(signals.dataset_id, airport, features, relative, np.zeros(len(STATIC_FEATURES), dtype=np.float32),
+                  in_force, since, targets, mask, **_first_step(signals, geometry, capture_row))
 
 
 def airport_landings(directory: Path, tracks: Mapping[str, Path]) -> dict[str, Landings]:

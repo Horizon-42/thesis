@@ -91,40 +91,67 @@ def _physics(batch: replay.Batch, device: torch.device) -> tuple[Runways, Airpor
             torch.tensor(batch.approach_ias_mps, dtype=f64, device=device))
 
 
+class ClosedLoop:
+    """A batch of flights flown from their first predicted step (``inputs``: the executor's state there) with the prior
+    speaking, a step at a time (`step`): the speaker reads where the executor is, says the step's words, and the
+    executor flies the step (its cycles). A flight the executor is done with hears nothing more and its row is frozen;
+    one it has cleared or captured keeps its runway. Each flight flies until the executor is done with it or its time
+    limit (``limits``, seconds)."""
+
+    def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
+                 inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
+                 limits: Sequence[float], words: Words, params: ExecutorParams, landings: Any, *,
+                 generator: torch.Generator, temperature: float) -> None:
+        step_s, device = words.spec.step_s, inputs.initial_state.device
+        self.step_s, self.params, self.device = step_s, params, device
+        self.executor = Executor(inputs, runways, charts, approach_ias_mps, params, words,
+                                 time_limit_s=torch.tensor(limits, dtype=torch.float64, device=device))
+        self.speaker = Speaker(model, flights, geometries, landings, words,
+                               max_rows=rows_for(max(limits) + step_s, step_s), generator=generator,
+                               temperature=temperature)
+        self.spoken = Spoken(len(limits), words, device=device)
+        self.max_steps = rows_for(max(limits), step_s) - N_LOOK
+
+    @property
+    def steps(self) -> int:
+        return self.spoken.steps
+
+    @property
+    def running(self) -> bool:
+        executor = self.executor
+        return self.steps < self.max_steps and not (bool(executor.done.all()) or executor.count == executor.cycles)
+
+    def step(self) -> None:
+        executor, speaker, count = self.executor, self.speaker, len(self.executor.done)
+        done = executor.done.cpu().numpy()
+        if self.steps:
+            now = executor.now()
+            speaker.append(now.e_m.cpu().numpy(), now.n_m.cpu().numpy(), now.height_m.cpu().numpy(), frozen=done)
+        # a flight that is done hears nothing more; one the executor has cleared or captured keeps its runway
+        said = speaker.speak(active=~done, runway_locked=executor.runway_locked.cpu().numpy())
+        heard = torch.full((count,), self.steps * self.step_s, dtype=torch.float64, device=self.device)
+        self.spoken.say(np.where(said > 0, said - 1, UNCHANGED))
+        for _ in range(executor.step_rows):
+            if executor.count == executor.cycles:
+                break
+            executor.cycle(self.spoken.at(heard), torch.full((count,), executor.count * self.params.cycle_s,
+                                                             dtype=torch.float64, device=self.device))
+
+
 def speak_and_fly(model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                   inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
                   limits: Sequence[float], words: Words, params: ExecutorParams, landings: Any, *,
                   generator: torch.Generator, temperature: float
                   ) -> tuple[Flown, np.ndarray, dict[int, np.ndarray], Speaker]:
-    """Fly ``flights`` from their first predicted step (``inputs``: the executor's state there) with the prior
-    speaking, each until the executor is done with it or its time limit (``limits``, seconds); ``(what was flown, the
-    words said [B, steps, 6] with UNCHANGED where a column says nothing, the probability the prior put on what the
-    masks removed [B, steps] per masked column, the speaker — the rows it read)``."""
-    step_s, device = words.spec.step_s, inputs.initial_state.device
-    executor = Executor(inputs, runways, charts, approach_ias_mps, params, words,
-                        time_limit_s=torch.tensor(limits, dtype=torch.float64, device=device))
-    speaker = Speaker(model, flights, geometries, landings, words, max_rows=rows_for(max(limits) + step_s, step_s),
-                      generator=generator, temperature=temperature)
-    spoken = Spoken(len(limits), words, device=device)
-    count = len(limits)
-    for step in range(rows_for(max(limits), step_s) - N_LOOK):
-        done = executor.done.cpu().numpy()
-        if step:
-            now = executor.now()
-            speaker.append(now.e_m.cpu().numpy(), now.n_m.cpu().numpy(), now.height_m.cpu().numpy(), frozen=done)
-        # a flight that is done hears nothing more; one the executor has cleared or captured keeps its runway
-        said = speaker.speak(active=~done, runway_locked=executor.runway_locked.cpu().numpy())
-        spoken.say(np.where(said > 0, said - 1, UNCHANGED))
-        heard = torch.full((count,), step * step_s, dtype=torch.float64, device=device)
-        for _ in range(executor.step_rows):
-            if executor.count == executor.cycles:
-                break
-            executor.cycle(spoken.at(heard), torch.full((count,), executor.count * params.cycle_s,
-                                                        dtype=torch.float64, device=device))
-        if bool(executor.done.all()) or executor.count == executor.cycles:
-            break
-    return (executor.flown(), spoken.sentences(),
-            {column: np.stack(masses, axis=1) for column, masses in speaker.forbidden.items()}, speaker)
+    """`ClosedLoop` run to its end: ``(what was flown, the words said [B, steps, 6] with UNCHANGED where a column says
+    nothing, the probability the prior put on what the masks removed [B, steps] per masked column, the speaker — the
+    rows it read)``."""
+    loop = ClosedLoop(model, flights, geometries, inputs, runways, charts, approach_ias_mps, limits, words, params,
+                      landings, generator=generator, temperature=temperature)
+    while loop.running:
+        loop.step()
+    return (loop.executor.flown(), loop.spoken.sentences(),
+            {column: np.stack(masses, axis=1) for column, masses in loop.speaker.forbidden.items()}, loop.speaker)
 
 
 def fly_reference(batch: replay.Batch, words: Words, params: ExecutorParams, *, device: torch.device) -> Flown:
@@ -146,6 +173,12 @@ def fly_reference(batch: replay.Batch, words: Words, params: ExecutorParams, *, 
                time_limit_s=torch.tensor(limits_s(batch, params, step_s), dtype=torch.float64, device=device))
 
 
+def steps_said(flown: Flown, index: int, steps: int, step_rows: int) -> int:
+    """How many of the ``steps`` a flight's sentence said count: up to the step whose cycles ended the flight (a
+    finished flight says nothing more)."""
+    return min(steps, int(flown.done_cycle[index]) // step_rows + 1)
+
+
 def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], words: Words, source: str,
                 samples: Sequence[int | None], forbidden: dict[int, np.ndarray] | None) -> list[dict[str, Any]]:
     """One row per flight: its outcome and what was said (``samples``: each flight's sample number, None for the
@@ -155,7 +188,7 @@ def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], 
     step_rows = round(words.spec.step_s / flown.cycle_s)
     for j, (reading, grid, sample) in enumerate(zip(batch.readings, grids, samples)):
         # the steps said up to the flight's end: the step whose cycles ended it (later ones said nothing)
-        steps = min(len(grid), int(flown.done_cycle[j]) // step_rows + 1)
+        steps = steps_said(flown, j, len(grid), step_rows)
         grid = np.asarray(grid)[:steps]
         runway = grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED]
         outcome = outcome_of(flown, j, batch.geometries[j], int(runway[-1]), words.spec)
@@ -175,6 +208,23 @@ def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], 
             "words_after_first": {name: int(said_after_first[c]) for c, name in enumerate(COLUMNS)},
         })
     return rows
+
+
+def prior_rows(model: Prior, batch: replay.Batch, words: Words, params: ExecutorParams, landings: Any,
+               samples: int, *, generator: torch.Generator, temperature: float
+               ) -> tuple[list[dict[str, Any]], list[np.ndarray]]:
+    """Every flight of ``batch`` flown ``samples`` times with the prior speaking (the executor on CPU): its
+    `flight_rows` and the sentences said."""
+    cpu = torch.device("cpu")
+    repeated = replay.subset(batch, [j for j in range(len(batch.readings)) for _ in range(samples)])
+    runways, charts, approach = _physics(repeated, cpu)
+    flown, said, forbidden, _ = speak_and_fly(model, repeated.signals, repeated.geometries,
+                                              flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways,
+                                              charts, approach, limits_s(repeated, params, words.spec.step_s), words,
+                                              params, landings, generator=generator, temperature=temperature)
+    grids = [said[j] for j in range(len(said))]
+    return (flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden),
+            grids)
 
 
 def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -257,15 +307,9 @@ def main(argv: list[str] | None = None) -> int:
         rows += flight_rows(part, fly_reference(part, words, params, device=cpu),
                             [reference_grid(r.words) for r in part.readings], words, "labelled",
                             [None] * len(part.readings), None)
-        repeated = replay.subset(part, [j for j in range(len(part.readings)) for _ in range(args.samples)])
-        runways, charts, approach = _physics(repeated, cpu)
-        flown, said, forbidden, _ = speak_and_fly(model, repeated.signals, repeated.geometries,
-                                    flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways, charts,
-                                    approach, limits_s(repeated, params, words.spec.step_s), words, params, landings,
-                                    generator=generator, temperature=args.temperature)
-        grids = [said[j] for j in range(len(said))]
-        rows += flight_rows(repeated, flown, grids, words, "prior", [j % args.samples for j in range(len(grids))],
-                            forbidden)
+        said, grids = prior_rows(model, part, words, params, landings, args.samples, generator=generator,
+                                 temperature=args.temperature)
+        rows += said
         sentences += grids
         done = start + len(part.readings)
         print(f"  {done}/{len(order)} flights, {time.perf_counter() - started:.0f}s", flush=True)

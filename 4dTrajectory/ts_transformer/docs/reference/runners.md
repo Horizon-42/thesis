@@ -401,4 +401,36 @@ observed runway, landing time − observed, words said per column after the firs
 cleared at the end (and among the timeouts), the probability the prior put on what the grammar forbade (approach, angle).
 Writes `generation.json` (`ts-prior-free-generation-v1`, every flight row) and `sentences.npz`; val only from a clean
 tree. The executor spec must be this executor code's (`replay.open_executor`). ~36 s for 50 flights × (1 + 2) loops.
+Since `Prior.extend` (2026-09-25) the speaker encodes row by row: the probabilities differ from a whole re-encode by
+~1e-6, so a re-run of the readouts recorded before it (`v3_freegen_20260925/{select,val}_400x4`) may flip a draw — the
+same model re-read at this code is not bit for bit the recorded one. Since 2026-09-25 (`dev-prior-fast`) the speaker builds
+a step's rows for all the flights of one airport geometry together (`data.rows_inputs`, element by element; `row_inputs`
+is its one-flight case) and writes them to the model's inputs in one copy: bit for bit the per-flight result (old and
+new code dumped on the same seeds — free generation and the select split's inputs — 21/21 arrays identical;
+numpy's element-wise functions on this i7-14700, AVX2 without AVX-512, give the same bits whatever the array's length),
+and a 16-flight × 8-sentence chunk takes 10.0 s instead of 26.6 s. Splitting a round across processes would change the
+random draws each chunk gets — not done.
 
+
+### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)
+
+### R19 · `run_ts.py prior_landing_reward` — the landing reward (prior design §9.3)
+
+2026-09-25. `prior_landing_reward --prior <the step-1 run> --instructions <artefact> --executor
+<executor spec dir> --out <new dir> [--rounds 8] [--per-airport 400] [--samples 8] [--select-per-airport 200]
+[--select-samples 2] [--learning-rate 1e-5] [--warmup-steps 20] [--weight-decay 0.01] [--clip-norm 1]
+[--tokens-per-batch 16384] [--kl-weight 0.04] [--data-weight 1] [--seed 1337] [--chunk 32] [--device cuda] [--smoke]`.
+Each round draws `--per-airport` train-day flights (own dynamics, seed + round; repeats counted) and flies each
+`--samples` times with the prior speaking as in free generation (`speak_and_fly`, temperature 1). A sentence's reward
+(`prior.landing_reward`) is 1 when the executor's judge lands it on a runway in the airport's landing direction at the
+first predicted step — the candidates landed on in the 30 min before (the input's landing pool, the flight's own left out,
+no test day) and those within 90° of them; any runway with no landing in the window — else 0; its advantage is the reward
+less its flight's mean (not divided by the spread). Only flights whose sentences differ are trained on. One pass of
+`train.RewardTuner` over this round's sentences only: advantage × the NLL of the sentence's own words (per step, dropout
+off, the unmasked distribution) + `--kl-weight` × the sample estimate of the KL to the frozen start model + `--data-weight`
+× a teacher-forced batch of the train split per update (a round with no flight to train on is refused by name). The select readout (`select_readout`) is free generation on the select days in batches of 64 flights (`SELECT_CHUNK`), the same flights and seed every round, the teacher-forced NLL, and the share landed against the landing direction. `choice.json`: among
+the rounds within the guards of round 0 (landed on the observed runway ≥ round 0's − 0.02, heading words per flight ≤
+1.2 × round 0's; a round that landed nothing is excluded), the highest select landed share, the earliest within 0.015. Writes `config.json`,
+`round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, readout.json}` (a round
+directory is a prior run `prior_free_generation` reads — the val readout, once), `history.json`, `choice.json`; from a
+clean tree unless `--smoke`. Val and the sealed test days are never read.
