@@ -1,4 +1,4 @@
-# 两层模型：阶段记录（更新于 2026-09-25 19:05 UTC）
+# 两层模型：阶段记录（更新于 2026-09-25 19:20 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、正在进行的事、
 接下来按什么顺序做。设计本身在各自的设计文档里，这里只给结论、指路和实现计划；历史看 git 和 `docs/CHANGELOG.md`。
@@ -144,18 +144,17 @@ unordered → full（2024）→ `prior_select`（选择 + 一次验证集读数�
 
 ---
 
-## 4 代码、分支、工作树（2026-09-24 23:40 UTC）
+## 4 代码、分支、工作树（2026-09-25 19:20 UTC）
 
-- `dev-two-tier`（主检出 `/home/supercomputing/studys/thesis`）：只加了文档提交（本条记录所在的提交）。含词表第三版、只用词表的执行器、
-  新的前端 Training 视图、先验第三版设计与读数。
-- `dev-prior-v2`（`.claude/worktrees/prior-v2`）：第二版代码，已变基到 `dev-two-tier`（`56f5cec6`，3 个提交），ts 全套 1,384 通过。
-  它整个包含在 `dev-prior-v3` 里，不用单独合并。
-- `dev-prior-v3`（`.claude/worktrees/prior-v3`，`47c7b790`）= `dev-two-tier` 的 `a5dff836` + 第二版 3 个提交 + 第 0 步 `297c3e10` + 测试夹具
-  `a9f4caab` + 第 1 步 `47c7b790`。**等用户合并**（队列跑完之后；`dev-two-tier` 在它之后只多了文档提交，合并时先把 `dev-prior-v3` 变基到
-  `dev-two-tier` 上，或用合并提交）。数据目录已软链到主检出。
-- 变基之前的提交留了标签，产物里记的 git head 仍能找到：`runs/prior-v2-feeb7ce3`（第二版队列的代码）、`runs/prior-v3-step0-67e0e5c9`
-  （第 0 步正式链的代码）。
-- 其他工作树（`manoeuvre-runs`、`two-tier-pub`、`two-tier-runs`，游离 HEAD）是更早的，不动。
+- `dev-two-tier`（主检出 `/home/supercomputing/studys/thesis`）：先验第三版的全部代码都已合并——第 0、1 步和单机自由生成（`4205e186`），
+  CAT-K（`e760ab1d`，已归档）、按落地强化（`e8ee1373`）、闭环提速（`002998fb`）、CAT-K 归档（`e5f18692`），合并提交 `7e1e2df0`。执行器代码与
+  `4205e186` 逐字节相同，规格用 `executor/v7_20260925`。
+- 还在的工作树：
+  - `.claude/worktrees/prior-rl`（`dev-prior-rl`）——**按落地强化的正式运行正从这里跑**，运行结束（含验证集读数）之前不能动；
+  - `.claude/worktrees/prior-v3`（`dev-prior-v3`）、`.claude/worktrees/prior-fast`（`dev-prior-fast`）——已合并，可以删（等用户点头）；
+  - `.claude/worktrees/prior-v2`（`dev-prior-v2`）、`manoeuvre-runs`、`two-tier-pub`、`two-tier-runs`——更早的，不动。
+- 产物里记的提交都可达：`e760ab1d`、`e8ee1373` 在合并历史里；变基之前的提交有标签 `runs/prior-v2-feeb7ce3`、`runs/prior-v3-step0-67e0e5c9`、
+  `runs/prior-v3-step1-47c7b790`。
 
 ---
 
@@ -210,14 +209,14 @@ unordered → full（2024）→ `prior_select`（选择 + 一次验证集读数�
 5. **单机闭环监督微调（CAT-K）——失败，不采用**（用户 2026-09-25 确认；设计 §9.2 只留原因，读数文档 §6，`docs/CHANGELOG.md`）。当时的做法：方案写在先验设计 §9.2（按段挑分支的 CAT-K：每架 4 个分支各自由先验采样说词，每 10 步留下
    离观测最近的一个；目标是标注的词、按链上已生效的词重新定；从 `full_s1337` 起，只用链上的数据，8 轮、每轮 4,000 架，选择集自由生成
    落地率选轮，验证集读一次），取值在 §10 标"建议"。代码 `dev-prior-v3` `e760ab1d`（分支复制 `take`、逐行编码 `Prior.extend`、重新定目标
-   `prior/relabel.py`、runner `prior_closed_loop`，R18；opus 审查无严重缺陷，6 条意见都已改；ts 全套 1,421 通过；**等用户合并**）。执行器
+   `prior/relabel.py`、runner `prior_closed_loop`，R18；opus 审查无严重缺陷，6 条意见都已改；ts 全套 1,421 通过；**已合并**（`7e1e2df0`，2026-09-25））。执行器
    源码指纹变了，新规格 `executor/v8_20260925`（内容 sha 仍是 `0d6a68a92c6f`）。**正式运行 13:10 UTC 起**：`outputs/POOLED/prior/v3_sft_20260925/run.sh`
    （进程号 `run.pid`，日志 `run.log`）→ `catk_s1337/`（8 轮，约 5 小时），然后选定那一轮的验证集读数 `val_kept_400x4/`，以及同一代码上
    微调前模型的验证集重读 `val_before_400x4/`（逐行编码与整段编码差约 1e-6，旧读数不能逐位重现）。
 6. **按落地强化**（设计 §9.3，用户 2026-09-25 同意"先跑 CAT-K，再做这一步"）：从 CAT-K 选定的一轮起，自由生成每架 8 句，落地且落在
    机场此刻的落地方向上得 1，同一架航班的几句互相比（GRPO），加拉回起点模型的项和 teacher forcing 数据项；取值按 §10 的"建议"。
    用户让在等 CAT-K 时开发（"尽量不要干等"）：代码在新工作树 `.claude/worktrees/prior-rl`（分支 `dev-prior-rl`，`e8ee1373`，基于
-   `dev-prior-v3`；opus 审查无严重缺陷，8 条意见已处理；ts 全套 1,428 通过；**等用户合并**）。**正式运行 15:18 UTC 起，与 CAT-K 同时跑**
+   `dev-prior-v3`；opus 审查无严重缺陷，8 条意见已处理；ts 全套 1,428 通过；**已合并**（`7e1e2df0`，2026-09-25））。**正式运行 15:18 UTC 起，与 CAT-K 同时跑**
    （每批 128 个闭环控制显存）：`outputs/POOLED/prior/v3_rl_20260925/run.sh`（`run.pid`、`run.log`）→ `grpo_s1337/`（从第 1 步的模型起：
    CAT-K 第 1–4 轮没有一轮高出第 0 轮 1.5 个百分点以上），然后选定那一轮的验证集读数 `val_kept_400x4/`。
    **CAT-K 跑完（17:31 UTC，读数文档 §6）**：选中第 1 轮；验证集 93.1 %（同一代码上的微调前 90.2 %，与旧读数逐句相同），但全部来自直线进近
@@ -225,7 +224,7 @@ unordered → full（2024）→ `prior_select`（选择 + 一次验证集读数�
    原因：链离观测越飞越远（100 s 偏 460 m、220 s 偏 1 km），按时间对齐的标注在链上不成立。
 7. **闭环提速（逐位不变）**：工作树 `.claude/worktrees/prior-fast`，分支 `dev-prior-fast` `002998fb`（基于 `dev-prior-rl`）：说话器按机场成批算
    每步的输入（`data.rows_inputs`，`row_inputs` 是它的单架情形），一次拷到 GPU；新旧代码同一种子逐位比对 29/29 相同（自由生成、CAT-K
-   链、内部选择集输入），opus 审查无缺陷；16 架 × 8 句一块 26.6 s → 10.0 s；**等用户合并**。多进程并行会改变每块的随机数，没做（用户：
+   链、内部选择集输入），opus 审查无缺陷；16 架 × 8 句一块 26.6 s → 10.0 s；**已合并**（`7e1e2df0`，2026-09-25）。多进程并行会改变每块的随机数，没做（用户：
    优化不能改变结果）。**CAT-K 的代码已归档**（用户 2026-09-25）：`dev-prior-fast` `e5f18692`，`archive/closed_loop_sft_2026_09/`；执行器代码回到
    `4205e186` 逐字节相同，所以规格用 `executor/v7_20260925`（v8 只配 `take` 那版代码，不再能打开）；自由生成与内部选择集输入逐位不变（21/21）。
    三个分支的合并顺序：`dev-prior-v3` → `dev-prior-rl` → `dev-prior-fast`（后一个都基于前一个），合完就是最终状态。
