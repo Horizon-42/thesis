@@ -190,7 +190,7 @@ for sid in sorted(used):
 
 payload = {
     "schema": PERFORMANCE_INDEX_SCHEMA,
-    "generated": "2026-09-24",
+    "generated": "2026-09-26",
     "decisions": REPORT,
     "sources": sources,
     "types": types,
