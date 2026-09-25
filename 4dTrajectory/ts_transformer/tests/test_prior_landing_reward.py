@@ -132,7 +132,7 @@ def test_the_reward_term_raises_a_better_sentence_s_words_and_lowers_a_worse_one
     def nll_after(advantage: float) -> float:
         model = _model(words)
         RewardTuner(model, _model(words), config, CPU, seed=0).one_pass(
-            split.subset([0]), np.array([advantage]), split)
+            split.subset([0]), np.array([advantage]), None)
         with torch.no_grad():
             b = to_batch(split, [0], CPU)
             return float(flight_nll(batch_logits(model, b), b["targets"], b["present"], b["asked"])[0])
@@ -148,9 +148,11 @@ def test_the_reward_term_raises_a_better_sentence_s_words_and_lowers_a_worse_one
                         seed=0).one_pass(split.subset([0]), np.array([1.0]), split)
     assert first["kl_mean"] == pytest.approx(0.0, abs=1e-7)
     with pytest.raises(ValueError, match="advantages for"):
-        RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split, np.zeros(1), split)
+        RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split, np.zeros(1), None)
+    with pytest.raises(ValueError, match="a data split goes with a data term"):   # and only with one
+        RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split, np.zeros(3), split)
     with pytest.raises(ValueError, match="no sentence to train on"):
-        RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split.subset([]), np.zeros(0), split)
+        RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split.subset([]), np.zeros(0), None)
 
 
 def test_the_round_kept_is_the_best_within_the_guards():

@@ -418,7 +418,12 @@ too, ends at the first flown step whose end state is more than the track toleran
 below the edge (`glidepath_stops`, read off the flown states at the step boundaries after the flight — where an in-loop
 check would have stopped it), outcome `below_glidepath` (`BELOW_GLIDEPATH`, not the judge's). Without the flag the run is
 draw for draw the one before it (40 select sentences checked). `generation.json` is `ts-prior-free-generation-v2` since:
-the outcome shares carry `below_glidepath` and the record `glidepath_mask`.
+the outcome shares carry `below_glidepath` and the record `glidepath_mask`. `--augment-seed S` (post-training design §4): every drawn flight is
+flown from an augmented start (`prior.augment`: rotated about the airport ±15°, raised ±150 m, sped up ±5 %, one draw a
+flight with seed S until plausible — the start's altitude inside its airport's train-day 1–99 % range at the first
+predicted step, its airspeed above the executor's stall floor; `AUGMENT_TRIES` = 10, a flight none fits is left out and
+counted); the labelled words are not flown then (they belong to the source's start). `generation.json` is
+`ts-prior-free-generation-v3` since: it records `augment_seed`, `augmented_left_out` and each flight's augmentation.
 
 
 ### R20 · `run_ts.py prior_procedure_check` — the glidepath lower edge on labelled data (post-training design §3.6)
@@ -434,6 +439,24 @@ their labelled words from `N_LOOK` as free generation's reference does, and coun
 (at the stop: distance to go, depth, the altitude word heard; the outcome is the judge's). Pass (`passes`, written
 before the run, user 2026-09-25): ≤ 1 % of the words forbidden and ≤ 3 % of the replays stopped. Writes `check.json`
 (`ts-prior-procedure-check-v1`); from a clean tree, never over an existing directory.
+
+### R21 · `run_ts.py prior_augmented_reward` — post-training stage 2 (post-training design §3–§5)
+
+2026-09-26. `prior_augmented_reward --prior <the first stage's kept round> --base <the data-only step-1 run>
+--instructions <artefact> --executor <spec> --out <new dir> [--rounds 8] [--per-airport 400] [--samples 8]
+[--select-per-airport 200] [--select-samples 2] [--seed 1337] [--chunk 32] [--learning-rate 1e-5] [--kl-weight 0.04] …
+[--smoke]`. Each round draws a pool of 1.25 × `--per-airport` train-day flights (own dynamics), moves each by a fresh
+augmentation until plausible (`prior_free_generation.augmented_starts`) and keeps each airport's first `--per-airport` (the augmentations' own random stream, seeded with (seed, round), apart
+from the pool's draw; `sentences.json` records per airport the starts, the mean draws a start and the share redrawn, and
+the sources given up — the readout of design §4.3);
+flies each start `--samples` times with the glidepath lower edge (mask + stop); rewards as the first stage (a stopped
+sentence earns 0); one pass of `RewardTuner` with NO data term and the pull to the BASE model, both scored under the
+masks each sentence was said under (`Speaker.allowed` → `train.allowed_tensors`). Select readouts with the edge: the
+real starts (same flights and seed every round) and one fixed augmented start per flight (seed + 7919; a flight none
+fits is left out and counted, never replaced; the augmentations are in `config.json`), plus the teacher-forced NLL. `choice.json`: among the rounds within round 0's guards (real landed ≥ − 0.01, landed on the observed
+runway ≥ − 0.02, heading words ≤ 1.2 ×, teacher-forced NLL ≤ 1.1 ×), the highest augmented landed share, the earliest
+within 0.015. Writes like R19 (`ts-prior-augmented-reward-v1`); val is read afterwards with `prior_free_generation
+--glidepath-mask` (real starts, and `--augment-seed` for augmented ones).
 
 ### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)
 

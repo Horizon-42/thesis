@@ -75,6 +75,10 @@ class Speaker:
                 if tuple(f.candidate for f in finals_b) != geometry.candidates:
                     raise ValueError(f"{geometry.code}: the finals are not its candidates', in the pointer's order")
             self.forbidden[ALTITUDE] = []
+        #: per step: the classes each masked column allowed, bit-packed ([B, ⌈classes / 8⌉] uint8, little-endian bits;
+        #: `allowed_classes` unpacks them) — what a trainer scoring a sentence under the distribution it was sampled from
+        #: needs (post-training design §5)
+        self.allowed: dict[int, list[np.ndarray]] = {column: [] for column in self.forbidden}
         device = model.candidates.device
         count, slots = len(flights), model.config.candidate_slots
         width = len(VARIANTS[model.config.variant].relative_features)
@@ -158,8 +162,9 @@ class Speaker:
             logit = model.logits(h, tokens, valid, chosen, first)[c][:, 0, 0].double()
             probability = torch.softmax(logit / self.temperature, dim=-1)
             if c in self.forbidden:
-                allowed = torch.as_tensor(self._allowed(c, chosen[:, 0, 0].cpu().numpy(), opening, logit.shape[1],
-                                                        runway_locked), device=device)
+                allowed_np = self._allowed(c, chosen[:, 0, 0].cpu().numpy(), opening, logit.shape[1], runway_locked)
+                self.allowed[c].append(np.packbits(allowed_np, axis=1, bitorder="little"))
+                allowed = torch.as_tensor(allowed_np, device=device)
                 self.forbidden[c].append((probability * ~allowed).sum(dim=1).cpu().numpy())
                 probability = torch.softmax((logit / self.temperature).masked_fill(~allowed, float("-inf")), dim=-1)
             chosen[:, 0, 0, c] = torch.multinomial(probability, 1, generator=self.generator)[:, 0]
@@ -218,6 +223,11 @@ class Speaker:
             if not opening:
                 out[b, 0] = bool(altitude_word_allowed(final, np.array([self.value[b, ALTITUDE] - 1]), *at, self.words)[0])
         return out
+
+
+def allowed_classes(packed: np.ndarray, classes: int) -> np.ndarray:
+    """``Speaker.allowed``'s bit-packed rows back to ``[..., classes]`` bool."""
+    return np.unpackbits(packed, axis=-1, count=classes, bitorder="little").astype(bool)
 
 
 def rows_for(remaining_s: float, step_s: float) -> int:

@@ -229,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
     if git["dirty"] and not args.smoke:
         parser.error("the tree has uncommitted changes; a fine-tuning run is made at a commit")
     config = RewardConfig(**{f: getattr(args, f) for f in asdict(RewardConfig())})
+    if config.data_weight == 0.0:
+        parser.error("the first stage trains beside the data: --data-weight > 0 (the second stage, "
+                     "prior_augmented_reward, is the one without it)")
     started = time.perf_counter()
     device = torch.device(args.device)
     params, record, words = replay.open_executor(executor_dir, instructions)
