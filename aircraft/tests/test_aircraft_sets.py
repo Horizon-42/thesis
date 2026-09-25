@@ -150,5 +150,19 @@ class TestConstruct(unittest.TestCase):
         self.assertAlmostEqual(aircraft.approach.final_segment_min_m, nm_to_m(4.0))
 
 
+def test_an_openap_cache_of_another_schema_is_refused(tmp_path, monkeypatch):
+    import json
+
+    import pytest
+
+    import aircraft.query_aircraft_parameters as qap
+
+    cache = tmp_path / "openap_aircraft_parameters.json"
+    cache.write_text(json.dumps({"schema_version": qap.OPENAP_PARAMETERS_SCHEMA + 1, "typecodes": {}}))
+    monkeypatch.setitem(qap._CACHE_SCHEMAS, cache, qap.OPENAP_PARAMETERS_SCHEMA)
+    with pytest.raises(ValueError, match="rebuild it"):
+        qap.load_json(cache)
+
+
 if __name__ == "__main__":
     unittest.main()

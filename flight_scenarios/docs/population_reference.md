@@ -139,7 +139,17 @@ gets a new ID here and ONE new line in the index.**
   `dynamics_source` is `aircraft-performance-index-v1` for an own-parameter type.
 - **Observed records** (`resolve_airframe`): the mass is returned only when the model flies the type as
   itself (preset, OpenAP-direct, index own); a substituted or excluded type keeps its type and gets no mass.
-  Observed records change only when regenerated (with the user's permission).
+  Observed records change only when regenerated (with the user's permission). Since 2026-09-25 the observed
+  record's `mass_source` is that mass's `dynamics_source` label (`aircraft_preset` / the index's schema /
+  the OpenAP label); it read `openap_landing_mass` for all three before.
+- **Reading a record back** (2026-09-25): `scenario.aircraft_provider_of(source["dynamics_source"])` is the
+  provider that resolves a record's `dynamics_typecode` to the aircraft it flew (`openap` for an OpenAP-flown
+  record — an `openap` run flies the OpenAP A320, not the preset — else `auto`); the readout scripts use it
+  instead of assuming `openap`, which raised on an own-parameter type.
+- **The OpenAP caches are schema-checked** (2026-09-25): `aircraft.query_aircraft_parameters.load_json`
+  refuses `openap_aircraft_parameters.json` / `aircraft_id_lookup.json` whose `schema_version` is not
+  `OPENAP_PARAMETERS_SCHEMA` / `identity.OPENSKY_LOOKUP_SCHEMA` (the builder writes both from those
+  constants; the parameters file's used to be a literal `1`).
 
 ### FS4 · `source["flight_key"]` is populated here
 

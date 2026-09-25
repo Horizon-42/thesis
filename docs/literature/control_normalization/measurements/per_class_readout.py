@@ -25,7 +25,7 @@ ROOT = str(Path(__file__).resolve().parents[4])
 sys.path.insert(0, ROOT)
 sys.path.insert(0, ROOT + "/4dTrajectory")
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
-from flight_scenarios.scenario import aircraft_for_code  # noqa: E402
+from flight_scenarios.scenario import aircraft_for_code, aircraft_provider_of  # noqa: E402
 from ts_transformer.config import CONTROL_THRUST_FRACTION  # noqa: E402
 from ts_transformer.outputs.dynamics.inverse import actual_controls  # noqa: E402
 
@@ -48,7 +48,7 @@ def flight_row(pred_dir: Path, row):
     ev = json.loads((pred_dir / row["eval_file"]).read_text())
     st = json.loads((pred_dir / row["states_file"]).read_text())
     code = ev["source"]["dynamics_typecode"]
-    ac = aircraft_for_code(code, provider="openap")
+    ac = aircraft_for_code(code, provider=aircraft_provider_of(ev["source"]["dynamics_source"]))
     tmax = ac.engine.max_thrust_total_n
     pred = st["predicted_states"]
     obs = [s for s in st["observed_states"] if s["t"] >= 0.0]

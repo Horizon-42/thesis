@@ -34,6 +34,7 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from flight_scenarios.build import resolve_airframe
+from flight_scenarios.scenario import aircraft_dynamics_source
 from flight_scenarios.crossing_span import CROSSING_SPAN_KEY, crossing_span_from_event
 from flight_scenarios.datum import MSL_ALTITUDE_SOURCE, flight_to_msl
 from flight_scenarios.start_state import state_samples_from_track
@@ -108,7 +109,9 @@ def observed_record(
         if mass_kg is None:
             mass_kg, mass_source = NOMINAL_MASS_KG, "nominal"
         else:
-            mass_source = "openap_landing_mass"
+            # Where the type's own landing mass came from: a preset, the performance index's
+            # own-parameter row, or OpenAP (resolve_airframe resolves with the default provider).
+            mass_source = aircraft_dynamics_source(aircraft_type)
     event = track.get("observed_threshold_event")
     if not isinstance(event, dict):
         raise ValueError(

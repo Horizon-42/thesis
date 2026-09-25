@@ -17,6 +17,7 @@ import torch
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from aerodynamic_model.torch_lag_dynamics import (
+    UNSCALED_CHART,
     PathAngleLaw,
     SpecificForceLaw,
     lag_rhs,
@@ -42,7 +43,7 @@ AIRFRAMES = (
 def _lag_state(airframe, *, speed=85.0, gamma=-0.05, actuators):
     aero, mass, _thrust = airframe
     geodetic = torch.tensor([[35.95, -78.75, 900.0, speed, 1.1, gamma, mass]], dtype=torch.float64)
-    scale = lag_state_scale(None, FRAME)
+    scale = lag_state_scale(UNSCALED_CHART, FRAME)
     state = lag_state_from_geodetic(
         geodetic, torch.tensor([actuators], dtype=torch.float64), FRAME, scale
     )
@@ -134,7 +135,7 @@ def test_a_constant_target_settles_on_the_commanded_path_angle():
         query_offsets_s=queries,
         query_valid=torch.ones_like(queries, dtype=torch.bool),
         control_law=PathAngleLaw(MIN_FRACTION, TAU_GAMMA, *LOAD_BOX),
-        integrator_dt_s=0.1,
+        integrator_dt_s=0.1, chart_scale=UNSCALED_CHART,
     )
     speed = dense.query_states[0, :, 3:6].norm(dim=-1)
     gamma = torch.asin(dense.query_states[0, :, 5] / speed)
@@ -213,6 +214,7 @@ def test_the_path_angle_step_compiles_and_backpropagates_on_cuda():
 
     def args(device):
         return dict(
+            chart_scale=UNSCALED_CHART,
             initial_geodetic_states=torch.tensor(
                 [[35.95, -78.75, 2000.0, 85.0, 1.1, math.radians(-2.0), mass]],
                 dtype=torch.float64, device=device,
@@ -260,6 +262,7 @@ def test_a_batch_flies_flight_by_flight():
     )
     queries = torch.arange(5.0, 60.0, 5.0, dtype=torch.float64).expand(2, -1).contiguous()
     kwargs = dict(
+        chart_scale=UNSCALED_CHART,
         segment_durations_s=torch.full((2, 4), 15.0, dtype=torch.float64),
         aero_params=torch.tensor([aero_a, aero_b], dtype=torch.float64),
         frame_params=FRAME.expand(2, -1),

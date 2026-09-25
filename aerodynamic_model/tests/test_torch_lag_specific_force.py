@@ -18,6 +18,7 @@ import torch
 
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2, flight_aerodynamics
 from aerodynamic_model.torch_lag_dynamics import (
+    UNSCALED_CHART,
     THRUST_FRACTION_LAW,
     SpecificForceLaw,
     lag_rhs,
@@ -52,7 +53,7 @@ def _geodetic(airframe, *, speed=85.0, gamma=-0.05, altitude=900.0):
 
 def _lag_state(airframe, *, speed=85.0, gamma=-0.05, altitude=900.0, actuators):
     geodetic = _geodetic(airframe, speed=speed, gamma=gamma, altitude=altitude)
-    scale = lag_state_scale(None, FRAME)
+    scale = lag_state_scale(UNSCALED_CHART, FRAME)
     state = lag_state_from_geodetic(
         geodetic, torch.tensor([actuators], dtype=torch.float64), FRAME, scale
     )
@@ -146,6 +147,7 @@ def _schedule(n_segments=6):
 def _rollout_args(controls, device="cpu"):
     aero, mass, thrust = AIRFRAMES[1]
     return dict(
+        chart_scale=UNSCALED_CHART,
         initial_geodetic_states=torch.tensor(
             [[35.95, -78.75, 900.0, 85.0, 1.1, -0.05, mass]], dtype=torch.float64, device=device
         ),

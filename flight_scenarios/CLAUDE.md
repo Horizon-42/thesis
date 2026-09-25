@@ -157,6 +157,8 @@ FS7–FS9 2026-09-25).
   v2); a trajectory-only consumer asks `build_scenario(..., require_dynamics=False)` and gets a scenario
   WITHOUT dynamics (aircraft/aero `None`, mass and target V NaN), from which anything needing dynamics must
   ask `scenario.dynamics(purpose)` — it raises `NoAircraftDynamics` by name (FS6).
+- A record resolves back to the aircraft it flew with `aircraft_provider_of(source["dynamics_source"])`,
+  never an assumed provider; the OpenAP caches are read with their `schema_version` checked (FS6).
 - **`"type": "UNK"` on every harvested arrival does NOT mean the batch is single-type.**
   `_resolve_aircraft` (`flight_scenarios/build.py`, mirrored in `ts_transformer/data/dataset.py`)
   tries declared type → **`icao24` via the identity resolver**, and the icao24 path recovers the

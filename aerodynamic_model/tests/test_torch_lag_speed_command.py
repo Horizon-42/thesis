@@ -16,6 +16,7 @@ import pytest
 import torch
 
 from aerodynamic_model.torch_lag_dynamics import (
+    UNSCALED_CHART,
     SpecificForceLaw,
     SpeedCommandLaw,
     THRUST_FRACTION_LAW,
@@ -42,7 +43,7 @@ AIRFRAMES = (
 def _lag_state(airframe, *, speed=85.0, gamma=-0.05, actuators):
     aero, mass, _thrust = airframe
     geodetic = torch.tensor([[35.95, -78.75, 900.0, speed, 1.1, gamma, mass]], dtype=torch.float64)
-    scale = lag_state_scale(None, FRAME)
+    scale = lag_state_scale(UNSCALED_CHART, FRAME)
     state = lag_state_from_geodetic(geodetic, torch.tensor([actuators], dtype=torch.float64), FRAME, scale)
     return state, torch.tensor([aero], dtype=torch.float64), scale
 
@@ -87,6 +88,7 @@ def test_where_the_clamp_binds_the_loop_flies_the_thrust_fractions_bound(airfram
 def _rollout_args(commands, *, speed=85.0, device="cpu"):
     aero, mass, thrust = AIRFRAMES[1]
     return dict(
+        chart_scale=UNSCALED_CHART,
         initial_geodetic_states=torch.tensor(
             [[35.95, -78.75, 900.0, speed, 1.1, -0.05, mass]], dtype=torch.float64, device=device
         ),
@@ -123,6 +125,7 @@ def _two_flights():
     commands = torch.zeros((2, 4, 3), dtype=torch.float64)
     commands[..., 2] = 1.0
     return dict(
+        chart_scale=UNSCALED_CHART,
         initial_geodetic_states=torch.tensor(
             [[35.95, -78.75, 900.0, 80.0, 1.1, -0.05, mass], [35.95, -78.75, 900.0, 95.0, 1.1, -0.05, mass]],
             dtype=torch.float64,

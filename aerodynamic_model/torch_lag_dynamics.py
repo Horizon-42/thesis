@@ -95,6 +95,8 @@ from aerodynamic_model.torch_transport_chart_dynamics import (
 LAG_ACTUATOR_NAMES = ("thrust_fraction", "bank_rad", "load_factor")
 LAG_STATE_NAMES = (*TRANSPORT_CHART_STATE_NAMES, *LAG_ACTUATOR_NAMES)
 CHART_WIDTH = len(TRANSPORT_CHART_STATE_NAMES)
+# The physical chart: every chart state divided by 1 (what a caller passes to fly unscaled).
+UNSCALED_CHART = (1.0,) * CHART_WIDTH
 # Actuator states are dimensionless, radians, (speed-command) m/s or (path-angle) radians;
 # a fixed-step RK4 is invariant to a linear rescaling of a state, so only the chart half is
 # rescaled.
@@ -513,10 +515,10 @@ def _require_last_dim(tensor: torch.Tensor, expected: int, name: str) -> None:
 
 
 def lag_state_scale(
-    chart_scale: tuple[float, ...] | None, reference: torch.Tensor
+    chart_scale: tuple[float, ...], reference: torch.Tensor
 ) -> torch.Tensor:
-    """Return the ``[10]`` divisor for the augmented state, ones when unscaled."""
-    chart = (1.0,) * CHART_WIDTH if chart_scale is None else tuple(chart_scale)
+    """Return the ``[10]`` divisor for the augmented state (``UNSCALED_CHART``: the physical chart)."""
+    chart = tuple(chart_scale)
     if len(chart) != CHART_WIDTH:
         raise ValueError(f"chart scale must contain {CHART_WIDTH} values")
     return reference.new_tensor((*chart, *UNIT_ACTUATOR_SCALE))
@@ -735,7 +737,7 @@ def rollout_piecewise_constant(
     max_thrust_n: torch.Tensor,
     *,
     control_law: LagControlLaw = THRUST_FRACTION_LAW,
-    chart_scale: tuple[float, ...] | None = None,
+    chart_scale: tuple[float, ...],
     integrator_dt_s: float = 0.5,
     max_steps_per_segment: int = 4096,
 ) -> torch.Tensor:
@@ -772,7 +774,7 @@ def rollout_piecewise_constant_hooked(
     *,
     control_law: LagControlLaw = THRUST_FRACTION_LAW,
     track_reference: bool = False,
-    chart_scale: tuple[float, ...] | None = None,
+    chart_scale: tuple[float, ...],
     integrator_dt_s: float = 0.5,
     max_steps_per_segment: int = 4096,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -812,7 +814,7 @@ def rollout_piecewise_constant_at_times(
     query_valid: torch.Tensor,
     *,
     control_law: LagControlLaw = THRUST_FRACTION_LAW,
-    chart_scale: tuple[float, ...] | None = None,
+    chart_scale: tuple[float, ...],
     segment_valid: torch.Tensor | None = None,
     integrator_dt_s: float = 0.5,
     max_total_steps: int = 65536,

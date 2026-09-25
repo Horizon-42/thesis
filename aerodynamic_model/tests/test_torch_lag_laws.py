@@ -22,6 +22,7 @@ import pytest
 import torch
 
 from aerodynamic_model.torch_lag_dynamics import (
+    UNSCALED_CHART,
     THRUST_FRACTION_LAW,
     PathAngleLaw,
     SpecificForceLaw,
@@ -89,7 +90,7 @@ def test_every_law_flies_the_rollout_it_flew_before_the_laws_shared_an_rhs(name)
         torch.tensor([[35.95, -78.75, 900.0, 85.0, 1.1, -0.05, MASS]], dtype=torch.float64),
         commands[:, 0], commands, torch.full((1, 6), 10.0, dtype=torch.float64),
         torch.tensor([AERO], dtype=torch.float64), FRAME, TAU,
-        torch.tensor([THRUST], dtype=torch.float64), control_law=law,
+        torch.tensor([THRUST], dtype=torch.float64), control_law=law, chart_scale=UNSCALED_CHART,
     )
     assert ends[0, -1].tolist() == pytest.approx(golden, rel=1e-12, abs=1e-12)
 
@@ -101,7 +102,7 @@ def test_a_laws_compile_entry_points_fly_that_law(name):
     law = LAWS[name]
     geodetic = torch.tensor([[35.95, -78.75, 900.0, 85.0, 1.1, -0.05, MASS]], dtype=torch.float64)
     actuators = torch.tensor([[0.1, 0.2, -0.04]], dtype=torch.float64)
-    scale = lag_state_scale(None, FRAME)
+    scale = lag_state_scale(UNSCALED_CHART, FRAME)
     state = lag_state_from_geodetic(geodetic, actuators, FRAME, scale)
     commands = torch.tensor([[0.15, 0.1, -0.05]], dtype=torch.float64)
     aero = torch.tensor([AERO], dtype=torch.float64)
@@ -201,7 +202,7 @@ def test_the_path_loop_keeps_the_path_when_the_bank_moves():
             torch.tensor([[-0.05, 0.0, math.radians(-3.0)]], dtype=torch.float64), commands,
             torch.full((1, 6), 10.0, dtype=torch.float64), torch.tensor([AERO], dtype=torch.float64), FRAME, TAU,
             torch.tensor([THRUST], dtype=torch.float64), queries, torch.ones_like(queries, dtype=torch.bool),
-            control_law=law, integrator_dt_s=0.1,
+            control_law=law, integrator_dt_s=0.1, chart_scale=UNSCALED_CHART,
         )
         velocity = dense.query_states[0, :, 3:6]
         paths.append(torch.asin(velocity[:, 2] / velocity.norm(dim=-1)))

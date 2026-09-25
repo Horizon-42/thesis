@@ -98,6 +98,13 @@ def aircraft_dynamics_source(aircraft_code: str, *, provider: str = "auto") -> s
     return openap_source_label()
 
 
+def aircraft_provider_of(dynamics_source: str) -> str:
+    """The provider that resolves a record's ``dynamics_typecode`` back to the aircraft it flew,
+    from the record's ``dynamics_source`` (``aircraft_dynamics_source``'s label): ``openap`` for an
+    OpenAP-flown record (an ``openap`` run flies the OpenAP A320, not the preset), else ``auto``."""
+    return "openap" if dynamics_source == openap_source_label() else "auto"
+
+
 def aircraft_dynamics_surrogate_typecode(
     aircraft_code: str, *, provider: str = "auto"
 ) -> str | None:

@@ -446,7 +446,11 @@ def rollout_piecewise_constant(
     integrator_dt_s: float = 0.5,
     max_steps_per_segment: int = 4096,
 ) -> torch.Tensor:
-    """Return transport-chart segment endpoints ``[B,N,7]``."""
+    """Return transport-chart segment endpoints ``[B,N,7]``.
+
+    No production caller (the lag and scaled kernels have their own rollouts): kept, with its dense
+    twin below, as the physical-chart reference the scaled chart is checked against
+    (``tests/test_torch_dynamics.py``)."""
     initial_chart = geodetic_to_transport_chart_state(
         initial_geodetic_states, frame_params
     )
@@ -475,7 +479,8 @@ def rollout_piecewise_constant_at_times(
     integrator_dt_s: float = 0.5,
     max_total_steps: int = 65536,
 ) -> DenseControlRollout:
-    """Return exact event-aligned query and endpoint transport-chart states."""
+    """Return exact event-aligned query and endpoint transport-chart states (no production caller:
+    the scaled chart's test reference, as ``rollout_piecewise_constant`` above)."""
     initial_chart = geodetic_to_transport_chart_state(
         initial_geodetic_states, frame_params
     )

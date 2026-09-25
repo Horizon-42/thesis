@@ -246,7 +246,8 @@ def test_observed_record_names_the_resolved_airframe_type_and_omits_it_when_unre
     )
     record = observed_record(track, runway)
     assert record["source"]["aircraft_type"] == "A320"
-    assert record["source"]["mass_source"] == "openap_landing_mass"
+    # The A320 is a preset: its landing mass is the preset's, and the label says so.
+    assert record["source"]["mass_source"] == "aircraft_preset"
     assert "landing_aero" not in record["source"]
     assert all(state["m"] == 64_500.0 for state in record["states"])
 

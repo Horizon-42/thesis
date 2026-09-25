@@ -23,7 +23,7 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "4dTrajectory"))
 from aerodynamic_model.torch_dynamics import GRAVITY_MPS2  # noqa: E402
 from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
-from flight_scenarios.scenario import aircraft_for_code  # noqa: E402
+from flight_scenarios.scenario import aircraft_for_code, aircraft_provider_of  # noqa: E402
 from ts_transformer.config import (  # noqa: E402
     CONTROL_SPECIFIC_FORCE,
     CONTROL_THRUST_FRACTION,
@@ -46,7 +46,8 @@ PERCENTILES = (0.1, 0.5, 1, 5, 50, 95, 99, 99.5, 99.9)
 def flight_rows(pred_dir: Path, row: dict) -> tuple[np.ndarray, ...]:
     ev = json.loads((pred_dir / row["eval_file"]).read_text())
     st = json.loads((pred_dir / row["states_file"]).read_text())
-    aircraft = aircraft_for_code(ev["source"]["dynamics_typecode"], provider="openap")
+    aircraft = aircraft_for_code(ev["source"]["dynamics_typecode"],
+                                 provider=aircraft_provider_of(ev["source"]["dynamics_source"]))
     aero = aero_params_for_aircraft(aircraft)
     aero_row = np.array([aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall])
     max_thrust = aircraft.engine.max_thrust_total_n
