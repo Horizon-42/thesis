@@ -38,7 +38,7 @@ import { attempt, parseManifest, Reader, type Parsed } from "./trainingReader";
 /** MIRROR of the exporter's `INDEX_SCHEMA`. The index keeps this shape across vocabularies:
  *  every set, current or superseded, is listed in it. */
 export const TRAINING_INDEX_SCHEMA = "aeroviz-training-index-v1";
-/** MIRROR of the exporter's `SAMPLE_SCHEMA` (`instruction_training_export.py`). The name changes
+/** MIRROR of the exporter's `SAMPLE_SCHEMA` (`ts_transformer/instructions/training_files.py`). The name changes
  *  with the file's shape, on both sides, in the same change: v7 is `instruction-v3`'s sample — a
  *  heading word is its band over its judged rows with a verdict per row, the capture turn its rows
  *  and its check, and there are no turn regions, hold funnels, split parts or inserted intercepts;

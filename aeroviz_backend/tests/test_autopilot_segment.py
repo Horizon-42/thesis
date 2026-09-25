@@ -596,14 +596,16 @@ class PayloadTest(unittest.TestCase):
 
 
 class BackendTest(unittest.TestCase):
-    def write_set(self, root: Path, kind: str = "vocabulary-readback", **sample) -> None:
-        from ts_transformer.experiments.instruction_training_export import SAMPLE_SCHEMA
+    def write_set(self, root: Path, kind: str = "vocabulary-readback", reading_rule: str | None = None, **sample) -> None:
+        """A set's index and sample as `instruction_training_export` writes them (the fields the checks read)."""
+        from ts_transformer.instructions.training_files import INDEX_SCHEMA, SAMPLE_SCHEMA
         from ts_transformer.instructions.spec import READING_RULE
         training = root / "KXXX" / "training"
         (training / "a_set").mkdir(parents=True)
-        (training / "index.json").write_text(json.dumps({"sets": [{"id": "a_set", "kind": kind, "file": "a_set/sample.json"}]}))
+        (training / "index.json").write_text(json.dumps({"schema": INDEX_SCHEMA, "airport": "KXXX", "sets": [
+            {"id": "a_set", "kind": kind, "readingRule": reading_rule or READING_RULE, "file": "a_set/sample.json"}]}))
         (training / "a_set" / "sample.json").write_text(json.dumps({
-            "schema": SAMPLE_SCHEMA, "vocabulary": {"readingRule": READING_RULE},
+            "schema": SAMPLE_SCHEMA, "setId": "a_set", "airport": "KXXX", "vocabulary": {"readingRule": READING_RULE},
             "producedBy": {"artefact": "4dTrajectory/outputs/POOLED/instruction_language/an_artefact"},
             "cohort": {"split": "val"}, "flights": [{"flightKey": "F_23R_abc_T", "datasetId": "KXXX:F_23R_abc_T"}],
             **sample}))
@@ -614,7 +616,7 @@ class BackendTest(unittest.TestCase):
             backend = AutopilotSegmentBackend(airports_root=Path(tmp), executor_root=Path(tmp) / "none")
             artefact, split, sample = backend.training_set("KXXX", "a_set")
             self.assertEqual((artefact.parts[-2:], split), (("instruction_language", "an_artefact"), "val"))
-            with self.assertRaisesRegex(NotListed, "no Training set 'another_set'"):
+            with self.assertRaisesRegex(NotListed, "lists no set another_set"):
                 backend.training_set("KXXX", "another_set")
             with self.assertRaisesRegex(NotListed, "KYYY has no Training export"):
                 backend.training_set("KYYY", "a_set")
@@ -623,9 +625,9 @@ class BackendTest(unittest.TestCase):
                 backend.training_set("../KXXX", "a_set")
 
     def test_only_a_sample_of_this_vocabulary_drawn_from_the_exports_split_is_flown(self):
-        for change, refusal in [({"schema": "aeroviz-training-sample-v6"}, "is a aeroviz-training-sample-v6 sample"),
-                                ({"vocabulary": {"readingRule": "instruction-v2"}}, "read under instruction-v2"),
-                                ({"cohort": {"split": "test"}}, "drawn from test, not the val split")]:
+        for change, refusal in [({"schema": "aeroviz-training-sample-v6"}, "is a aeroviz-training-sample-v6 file"),
+                                ({"reading_rule": "instruction-v2"}, "set of instruction-v2, not"),
+                                ({"cohort": {"split": "test"}}, "split test; expected a_set at KXXX, split val")]:
             with TemporaryDirectory() as tmp:
                 self.write_set(Path(tmp), **change)
                 backend = AutopilotSegmentBackend(airports_root=Path(tmp), executor_root=Path(tmp) / "none")

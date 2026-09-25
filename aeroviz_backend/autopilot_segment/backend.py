@@ -22,8 +22,7 @@ from typing import Any
 
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.experiments.instruction_training_export import KIND_READBACK, SAMPLE_SCHEMA, SPLIT
-from ts_transformer.instructions.spec import READING_RULE
+from ts_transformer.instructions import training_files
 from ts_transformer.instructions.words import COLUMNS, Words
 from ts_transformer.io_utils import utc_now
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, OPT_OUTPUTS_ROOT, REPO_ROOT
@@ -72,28 +71,21 @@ class AutopilotSegmentBackend:
 
     def training_set(self, airport: str, set_id: str) -> tuple[Path, str, dict[str, Any]]:
         """The set's artefact (absolute), the split its flights were drawn from, and its sample — refused by name
-        unless it is a read-back set of this vocabulary, drawn from the split the Training export draws from."""
+        unless it is a read-back set the Training export writes (`training_files.check_readback`, the exporters' own
+        check, on this backend's cached copies of the files)."""
         if not AIRPORT_CODE.fullmatch(airport):
             raise RequestRefused(f"airport {airport!r} is not an airport code")
         training = self.airports_root / airport / "training"
-        if not (training / "index.json").is_file():
+        index = training / training_files.INDEX_FILE
+        if not index.is_file():
             raise NotListed(f"{airport} has no Training export")
-        entries = [entry for entry in self._json(training / "index.json")["sets"] if entry["id"] == set_id]
-        if len(entries) != 1:
-            raise NotListed(f"{airport} lists no Training set {set_id!r}")
-        (entry,) = entries
-        if entry["kind"] != KIND_READBACK:
-            raise ValueError(f"Training set {set_id} is a {entry['kind']} set: only a {KIND_READBACK} set's flights are "
-                             "labelled flights of an instruction artefact")
+        try:
+            entry = training_files.listed_set(self._json(index), index, airport, set_id)
+        except training_files.NotListed as error:
+            raise NotListed(str(error)) from None
         sample = self._json(training / entry["file"])
-        rule = sample["vocabulary"]["readingRule"]
-        if sample["schema"] != SAMPLE_SCHEMA or rule != READING_RULE:
-            raise ValueError(f"Training set {set_id} is a {sample['schema']} sample read under {rule}: this backend flies "
-                             f"{SAMPLE_SCHEMA} samples of {READING_RULE}")
-        split = sample["cohort"]["split"]
-        if split != SPLIT:
-            raise ValueError(f"Training set {set_id} was drawn from {split}, not the {SPLIT} split the export draws from")
-        return REPO_ROOT / sample["producedBy"]["artefact"], split, sample
+        training_files.check_readback(entry, sample, training / entry["file"], airport)
+        return REPO_ROOT / sample["producedBy"]["artefact"], training_files.SPLIT, sample
 
     def executor_for(self, artefact: Path) -> tuple[Path, ExecutorParams, dict[str, Any], Words]:
         """The one executor spec written by this code for ``artefact``'s vocabulary (`replay.open_executor`); refused,

@@ -10,7 +10,7 @@ module: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`).
         --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 
 Per airport, writes ``<airports-root>/<ICAO>/training/<overlay-id>/executor.json`` (schema `SCHEMA`; refused if the
-directory exists) and adds the overlay to ``training/overlays.json`` (`instruction_training_export.OVERLAYS_SCHEMA`;
+directory exists) and adds the overlay to ``training/overlays.json`` (`instructions.training_files.OVERLAYS_SCHEMA`;
 refused if it lists the id already). The set (``--set``) must be a read-back set of the executor's vocabulary drawn
 from val, and the replay (``--replay``) the formal val replay of this spec (`executor_replay`).
 
@@ -55,7 +55,7 @@ import argparse
 import json
 import math
 import time
-from dataclasses import asdict
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -65,15 +65,12 @@ import torch
 from flight_scenarios.datum import geoid_undulation_m
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Flown
+from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.flights import rebuild_series
 from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
 from ts_transformer.autopilot.runway_data import published_crossing_heights
 from ts_transformer.experiments.executor_replay import REPLAY_SCHEMA
-from ts_transformer.experiments.instruction_training_export import (
-    KIND_EXECUTOR, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
-    serialise_overlay, write_overlay,
-)
 from ts_transformer.instructions import display
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
@@ -81,11 +78,15 @@ from ts_transformer.instructions.labeller.read import Admitted, Reading, read_fl
 from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
+from ts_transformer.instructions.training_files import (
+    KIND_EXECUTOR, OVERLAYS_FILE, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry,
+    read_overlays, require_stored_sentence, require_unchanged, rounded, serialise, stored_sentence, write_overlay,
+)
 from ts_transformer.instructions.words import (
-    ALTITUDE, ANGLE, APPROACH, APPROACH_CLEARED, COLUMNS, HEADING, RUNWAY, SPEED, Words,
+    ALTITUDE, ANGLE, APPROACH, COLUMNS, HEADING, RUNWAY, SPEED, Words,
 )
 from ts_transformer.io_utils import utc_now
-from ts_transformer.repo_layout import REPO_ROOT, git_state
+from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_EXECUTOR_SCHEMA`, `TRAINING_EXECUTOR_STATUSES`);
 #: the reader refuses anything else by name. A name changes with its file's shape, on both sides, in one change: v2
@@ -102,19 +103,15 @@ CROSSING_TOLERANCE = 1e-9
 
 
 def no_check_reason(word: Instruction) -> str:
-    """Why the judge checks a word against no envelope of its own (`checkable` is false)."""
+    """Why the judge checks a word against no envelope of its own (`checkable` is false). An approach word that is not
+    the clearance is a "not cleared" (a truth sentence writes a clearance, a step-0 one too, as kind ``clear``)."""
     if word.column == RUNWAY:
         return "the runway pointer: judged by the landing, the flight's outcome"
     if word.column == APPROACH:
-        return ("cleared at entry: the judge checks the capture and the corridor for a clearance said after step 0"
-                if word.value == APPROACH_CLEARED else "not cleared: no envelope of its own")
+        return "not cleared: no envelope of its own"
     if word.column == ANGLE:
         return "re-anchors its altitude word's tube: judged there"
     return "the pilot's own speed: no band to hold"
-
-
-def _r(values: Any, digits: int) -> list[float]:
-    return [round(float(value), digits) for value in np.asarray(values, dtype=np.float64).ravel()]
 
 
 def _cell(word: Instruction) -> tuple[int, int]:
@@ -321,13 +318,13 @@ def track_payload(flown: Flown, index: int, verdict: Verdict, geometry: AirportG
     if rows[-1] != end:
         rows.append(end)
     lat, lon, height = states[rows, LAT], states[rows, LON], states[rows, ALT]
-    undulation = np.asarray(geoid_undulation_m(list(lat), list(lon)), dtype=np.float64)
+    undulation = geoid_undulation_m(lat, lon)
     distance = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(track["e"]), np.diff(track["n"])))))
     heading = track["track"][rows] + shift_deg
-    return {"tS": _r(np.asarray(rows) * flown.cycle_s, 3), "eM": _r(track["e"][rows], 1), "nM": _r(track["n"][rows], 1),
-            "lon": _r(lon, 7), "lat": _r(lat, 7), "altitudeM": _r(height, 2), "altitudeHaeM": _r(height + undulation, 2),
-            "groundSpeedMps": _r(track["ground_speed"][rows], 3), "trackDeg": _r(heading, 3),
-            "distanceM": _r(distance[rows], 1)}
+    return {"tS": rounded(np.asarray(rows) * flown.cycle_s, 3), "eM": rounded(track["e"][rows], 1), "nM": rounded(track["n"][rows], 1),
+            "lon": rounded(lon, 7), "lat": rounded(lat, 7), "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + undulation, 2),
+            "groundSpeedMps": rounded(track["ground_speed"][rows], 3), "trackDeg": rounded(heading, 3),
+            "distanceM": rounded(distance[rows], 1)}
 
 
 def gate_block(gates: dict[str, Any], airport: str) -> dict[str, Any]:
@@ -368,19 +365,19 @@ def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index:
             math.isclose(verdict.crossing[key], formal_crossing[key], rel_tol=CROSSING_TOLERANCE, abs_tol=CROSSING_TOLERANCE)
             for key in formal_crossing)))
     if (verdict.outcome, verdict.flew_the_sentence) != (formal["outcome"], formal["flew_the_sentence"]) or not same_crossing:
-        raise SystemExit(f"{dataset_id}: re-flown {verdict.outcome} {verdict.crossing}, the formal replay holds "
+        raise ValueError(f"{dataset_id}: re-flown {verdict.outcome} {verdict.crossing}, the formal replay holds "
                          f"{formal['outcome']} {formal_crossing} — this is not the replay's flight")
     if not (ours == theirs == formal["words"]):
-        raise SystemExit(f"{dataset_id}: the words judged differ — rebuilt {ours}, judge {theirs}, formal {formal['words']}")
+        raise ValueError(f"{dataset_id}: the words judged differ — rebuilt {ours}, judge {theirs}, formal {formal['words']}")
     if counted is not None and not (not_judged == counted[1] == formal["heading_words_not_judged"]):
-        raise SystemExit(f"{dataset_id}: heading words not judged {not_judged}, judge {counted[1]}, formal "
+        raise ValueError(f"{dataset_id}: heading words not judged {not_judged}, judge {counted[1]}, formal "
                          f"{formal['heading_words_not_judged']}")
     statuses = [entry["status"] for entry in verdicts]
     if verdict.words is not None and statuses.count("not reached") != formal["words_not_reached"]:
-        raise SystemExit(f"{dataset_id}: {statuses.count('not reached')} words not reached, the formal replay counts "
+        raise ValueError(f"{dataset_id}: {statuses.count('not reached')} words not reached, the formal replay counts "
                          f"{formal['words_not_reached']}")
     if statuses.count("superseded") != formal["words_superseded_before_flown"]:
-        raise SystemExit(f"{dataset_id}: {statuses.count('superseded')} words superseded, the formal replay counts "
+        raise ValueError(f"{dataset_id}: {statuses.count('superseded')} words superseded, the formal replay counts "
                          f"{formal['words_superseded_before_flown']}")
     crossing = verdict.crossing
     return {
@@ -401,7 +398,7 @@ def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index:
                    "wordsInside": 0 if judged is None else sum(ok for _, ok in judged),
                    "headingWordsNotJudged": not_judged},
         "track": track_payload(flown, index, verdict, geometry, spec, shift),
-        "judgedTrackDeg": None if judged_track is None else _r(judged_track, 3),
+        "judgedTrackDeg": None if judged_track is None else rounded(judged_track, 3),
         "words": verdicts,
     }
 
@@ -419,18 +416,16 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
     readings = []
     for j in flyable:
         reading = read_flight(signals[j], geometry, spec, words)
-        grid = sentences["words"][sentences["offsets"][located[j][1]]: sentences["offsets"][located[j][1] + 1]]
-        if not np.array_equal(reading.words, grid):
-            raise SystemExit(f"{signals[j].dataset_id}: the re-read sentence differs from the stored one")
+        require_stored_sentence(signals[j].dataset_id, reading, stored_sentence(sentences, located[j][1]))
         if signals[j].dataset_id not in formal:
-            raise SystemExit(f"{signals[j].dataset_id} is flown by the replay's rule but has no row in the formal replay")
+            raise ValueError(f"{signals[j].dataset_id} is flown by the replay's rule but has no row in the formal replay")
         if formal[signals[j].dataset_id]["group"] != groups[j]:
-            raise SystemExit(f"{signals[j].dataset_id} flies on {groups[j]} here, on {formal[signals[j].dataset_id]['group']} "
+            raise ValueError(f"{signals[j].dataset_id} flies on {groups[j]} here, on {formal[signals[j].dataset_id]['group']} "
                              "in the formal replay")
         readings.append(reading)
     for j, group in enumerate(groups):
         if j not in flyable and signals[j].dataset_id in formal:
-            raise SystemExit(f"{signals[j].dataset_id} is not flown here ({group}) but has a row in the formal replay")
+            raise ValueError(f"{signals[j].dataset_id} is not flown here ({group}) but has a row in the formal replay")
     batch = replay.Batch(signals=[signals[j] for j in flyable], series=[series[j] for j in flyable], readings=readings,
                          geometries=[geometry] * len(flyable),
                          crossing_heights=[published_crossing_heights(geometry)] * len(flyable),
@@ -447,6 +442,18 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         else:
             out.append(flight_payload(item, groups[j], None, 0, None, None, signals[j], geometry, spec, words, None))
     return out
+
+
+def params_rows(params: ExecutorParams) -> list[dict[str, Any]]:
+    """The executor's parameters as the reader takes them — ``{name, value}`` rows, each value a number or a string
+    (`trainingOverlays.ts`); any other value is refused by name rather than written for the reader to refuse."""
+    rows = []
+    for field in fields(params):
+        value = getattr(params, field.name)
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise ValueError(f"executor parameter {field.name} = {value!r} is neither a number nor a string")
+        rows.append({"name": field.name, "value": value})
+    return rows
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -470,16 +477,27 @@ def main(argv: list[str] | None = None) -> int:
     airports = [code.upper() for code in args.airport]
     if len(set(airports)) != len(airports):
         parser.error(f"an airport is named twice in {airports}")
-    overlay_id = args.overlay_id or f"executor_{executor.name}"
+    try:
+        export(executor, replay_dir, instructions, root, airports, args.set, args.overlay_id or f"executor_{executor.name}",
+               torch.device(args.device))
+    except ValueError as error:
+        parser.error(str(error))
+    return 0
+
+
+def export(executor: Path, replay_dir: Path, instructions: Path, root: Path, airports: list[str], set_id: str,
+           overlay_id: str, device: torch.device) -> None:
+    """The overlay ``overlay_id`` over set ``set_id`` at every airport of ``airports``: every airport re-flown and
+    every refusal made before anything is written; then each airport's file and overlays manifest."""
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor, instructions)
     spec = words.spec
     formal = json.loads((replay_dir / "replay.json").read_text(encoding="utf-8"))
     if formal["schema"] != REPLAY_SCHEMA:
-        parser.error(f"{replay_dir / 'replay.json'} is a {formal['schema']} file, not {REPLAY_SCHEMA}")
+        raise ValueError(f"{replay_dir / 'replay.json'} is a {formal['schema']} file, not {REPLAY_SCHEMA}")
     if (formal["executor_spec_sha256"], formal["split"]) != (record["sha256"], SPLIT):
-        parser.error(f"{replay_dir} is the {formal['split']} replay of spec {formal['executor_spec_sha256'][:12]}, not "
-                     f"the {SPLIT} replay of {record['sha256'][:12]}")
+        raise ValueError(f"{replay_dir} is the {formal['split']} replay of spec {formal['executor_spec_sha256'][:12]}, not "
+                         f"the {SPLIT} replay of {record['sha256'][:12]}")
     rows = {row["dataset_id"]: row for row in formal["flights"]}
     geometries = load_candidates(instructions)
     flights = load_signals(instructions, SPLIT)
@@ -489,53 +507,40 @@ def main(argv: list[str] | None = None) -> int:
     for code in airports:
         training = root / code / "training"
         if (training / overlay_id).exists():
-            parser.error(f"{training / overlay_id} exists; an overlay is never overwritten")
+            raise ValueError(f"{training / overlay_id} exists; an overlay is never overwritten")
         existing[code] = read_overlays(training, code, overlay_id)
-        bases[code] = open_base_set(training, code, args.set, spec)
+        bases[code] = open_base_set(training, code, set_id, spec)
 
-    def relative(path: Path) -> str:
-        return path.relative_to(REPO_ROOT).as_posix() if path.is_relative_to(REPO_ROOT) else path.as_posix()
-
-    git = git_state()
-    source = {"runner": RUNNER, "executor": relative(executor), "replay": relative(replay_dir),
-              "instructions": relative(instructions), "git": git}
+    source = {"runner": RUNNER, "executor": repo_relative(executor), "replay": repo_relative(replay_dir),
+              "instructions": repo_relative(instructions), "git": git_state()}
     title = (f"Executor · spec {record['sha256'][:12]} · the truth sentence flown from row 0, each word said where the "
              f"observed aircraft heard it (word clock {params.word_clock})")
     built = {}
     for code in airports:
         payloads = build_airport(bases[code], flights, sentences, instructions, geometries[code], params, words, rows,
-                                 torch.device(args.device))
+                                 device)
         flown = [item for item in payloads if item["flown"]]
         payload = {
             "schema": SCHEMA, "overlayId": overlay_id, "airport": code, "writtenUtc": utc_now(), "producedBy": source,
             "base": bases[code].block,
             "executor": {"specSha256": record["sha256"], "wordClock": params.word_clock, "cycleS": params.cycle_s,
-                         "params": [{"name": name, "value": value} for name, value in _flat(asdict(params))]},
+                         "params": params_rows(params)},
             "replay": {"split": formal["split"], "writtenUtc": formal["written_utc"], "gateShare": formal["gate_share"],
                        "drawn": formal["drawn"], "git": formal["git"]},
             "gate": gate_block(formal["gates"], code),
             "flights": payloads,
         }
         entry = overlay_entry(overlay_id, KIND_EXECUTOR, bases[code], title, PAYLOAD_FILE, len(payloads), source)
-        built[code] = (serialise_overlay(payload), entry)
+        built[code] = (serialise(payload), entry)
         landed = sum(item["outcome"] == "landed" for item in flown)
         print(f"  {code}: {len(flown)} of {len(payloads)} flights flown ({landed} landed), each its formal replay row; "
               f"{time.perf_counter() - started:.0f} s", flush=True)
+    # no airport is written while another's manifest changed since the start (each write checks its own again)
+    for code in airports:
+        require_unchanged(root / code / "training", code, overlay_id, existing[code], manifest=OVERLAYS_FILE)
     for code, (text, entry) in built.items():
-        out = write_overlay(root / code / "training", code, overlay_id, entry, text, existing[code])
+        out = write_overlay(root / code / "training", code, entry, text, existing[code])
         print(f"  {code}: {out.stat().st_size / 1e6:.1f} MB → {out}", flush=True)
-    return 0
-
-
-def _flat(values: dict[str, Any], prefix: str = "") -> list[tuple[str, Any]]:
-    """A nested parameter dict as ``(dotted name, value)`` rows, in its order."""
-    rows: list[tuple[str, Any]] = []
-    for name, value in values.items():
-        if isinstance(value, dict):
-            rows += _flat(value, f"{prefix}{name}.")
-        else:
-            rows.append((f"{prefix}{name}", value))
-    return rows
 
 
 if __name__ == "__main__":

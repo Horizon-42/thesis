@@ -195,9 +195,12 @@ that divergence is a known open item (see the README's "Future Improvements").
 六列的名字和顺序 `TRAINING_COLUMNS`（跑道、进近、航向、高度、下降角、速度，与 `instructions/words.COLUMNS` 相同，
 列是按位置读的）、"不变" `TRAINING_UNCHANGED = -1`、标注器会写的发令原因 `TRAINING_WORD_KINDS`（`initial`、
 `per-step`、`clear`、`target`、`step`、`angle`、`unspecified`；v2 的 `turn`、`turn-split`、`intercept` 按名字拒读）。
-对不上就整份拒读并报出是哪一项，不做兼容分支。Python 一侧的对应常量（`instruction_training_export.py` 的
+对不上就整份拒读并报出是哪一项，不做兼容分支。Python 一侧的对应常量（`instructions/training_files.py` 的
 `SAMPLE_SCHEMA`、`INDEX_SCHEMA`、`KIND_READBACK`、`WORD_KINDS`，以及 `spec.READING_RULE`、`words.COLUMNS`、
 `words.UNCHANGED`）由 `tests/test_instruction_training_export.py` 与 TypeScript 源码逐字比对。
+（2026-09-25 起，Training 文件的结构、各导出器与后端共用的检查都在 `instructions/training_files.py`：不是 runner、不依赖 torch、
+只抛 `ValueError`；三个导出器和后端的实时执行器都从这里导入。索引与叠加清单在写入前逐个机场确认"仍是本次运行开头读到的样子"，
+任何一个被别的导出改过就一个都不写。）
 
 **规格 sha 是 `145d6911e75b`**（2026-09-25）：`instruction-v3` 按运行日划分后在新训练集上重新测量的规格
 （`instruction_language/v4_20260924`），现在的执行器代码只飞这份产物。按航班划分的 `v3_20260924`（`0b4ea75be36d`）上

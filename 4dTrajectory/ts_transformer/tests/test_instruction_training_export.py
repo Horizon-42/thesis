@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from ts_transformer.experiments import instruction_training_export as export
+from ts_transformer.instructions import training_files as files
 from ts_transformer.instructions import display, envelope
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
@@ -88,13 +89,13 @@ def _ts_constant(name: str) -> str:
 def test_the_contract_is_the_frontend_reader_s():
     """The schema names, the reading rule, the six columns IN ORDER and "unchanged" are one
     contract across the two languages; each side refuses the other's file by name if they part."""
-    assert json.loads(_ts_constant("TRAINING_INDEX_SCHEMA")) == export.INDEX_SCHEMA
-    assert json.loads(_ts_constant("TRAINING_SAMPLE_SCHEMA")) == export.SAMPLE_SCHEMA
+    assert json.loads(_ts_constant("TRAINING_INDEX_SCHEMA")) == files.INDEX_SCHEMA
+    assert json.loads(_ts_constant("TRAINING_SAMPLE_SCHEMA")) == files.SAMPLE_SCHEMA
     assert json.loads(_ts_constant("TRAINING_READING_RULE")) == READING_RULE
-    assert json.loads(_ts_constant("TRAINING_READABLE_SET_KIND")) == export.KIND_READBACK
+    assert json.loads(_ts_constant("TRAINING_READABLE_SET_KIND")) == files.KIND_READBACK
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_COLUMNS"))) == COLUMNS
     assert int(_ts_constant("TRAINING_UNCHANGED")) == UNCHANGED
-    assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_WORD_KINDS"))) == export.WORD_KINDS
+    assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_WORD_KINDS"))) == files.WORD_KINDS
     assert json.loads(_ts_constant("TRAINING_APPROACH_CLEARED")) == export.APPROACH_NAMES[APPROACH_CLEARED]
     assert json.loads(_ts_constant("TRAINING_APPROACH_GO_AROUND")) == export.APPROACH_NAMES[APPROACH_GO_AROUND]
 
@@ -196,12 +197,12 @@ def test_the_export_draws_both_strata_and_adds_its_set_to_the_index(tmp_path):
     old = {"id": "box_v3", "kind": "vocabulary-readback", "title": "old", "file": "box_v3/sample.json",
            "vocabularySha256": "a" * 64, "runwaySha256": "b" * 64, "readingRule": "box-v3", "flights": 40,
            "cohort": {"split": "val", "perStratum": 20, "seed": 1337, "drawnFrom": "old"}, "source": {"any": 1}}
-    (training / "index.json").write_text(json.dumps({"schema": export.INDEX_SCHEMA, "writtenUtc": "x",
+    (training / "index.json").write_text(json.dumps({"schema": files.INDEX_SCHEMA, "writtenUtc": "x",
                                                       "airport": "KXXX", "sets": [old]}), encoding="utf-8")
     assert _run(tmp_path) == 0
 
     index = json.loads((training / "index.json").read_text(encoding="utf-8"))
-    assert index["schema"] == export.INDEX_SCHEMA and index["sets"][0] == old          # the old set, untouched
+    assert index["schema"] == files.INDEX_SCHEMA and index["sets"][0] == old          # the old set, untouched
     entry = index["sets"][1]
     assert entry["id"] == SET_ID and entry["readingRule"] == READING_RULE
     assert entry["vocabularySha256"] == one.sha256
@@ -209,7 +210,7 @@ def test_the_export_draws_both_strata_and_adds_its_set_to_the_index(tmp_path):
     assert entry["flights"] == 2 and entry["cohort"]["perStratum"] == 1 and "4 labelled val flights" in entry["cohort"]["drawnFrom"]
 
     sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
-    assert sample["schema"] == export.SAMPLE_SCHEMA and sample["vocabulary"]["specSha256"] == one.sha256
+    assert sample["schema"] == files.SAMPLE_SCHEMA and sample["vocabulary"]["specSha256"] == one.sha256
     assert sample["vocabulary"]["columns"] == list(COLUMNS)
     assert sample["vocabulary"]["headingLeadS"] == one.heading_lead_s
     assert not {"headingMaxTurnDeg", "turnStartDelayMaxS"} & set(sample["vocabulary"])
@@ -284,19 +285,20 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
     assert sample["centrelineLengthM"] % 1000 == 0
 
 
-def test_a_flight_whose_stored_sentence_differs_from_its_reading_stops_the_export(tmp_path):
+def test_a_flight_whose_stored_sentence_differs_from_its_reading_stops_the_export(tmp_path, capsys):
     flights = [_straight(_key("S1")), _vectored(_key("V1"))]
     one = spec()
     readings = [read_flight(flight, instruction_airport(), one) for flight in flights]
     readings[1].words = readings[1].words.copy()
     readings[1].words[3, HEADING] = 0                                  # a word the flight never said
     _artefact(tmp_path / "artefact", flights, readings)
-    with pytest.raises(SystemExit, match="V1_09_abc123_20260101T000000Z: re-read heading word"):
+    with pytest.raises(SystemExit):
         _run(tmp_path)
+    assert "V1_09_abc123_20260101T000000Z: re-read heading word" in capsys.readouterr().err
     assert not (tmp_path / "airports" / "KXXX" / "training" / SET_ID).exists()
 
 
-def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path, monkeypatch):
+def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path, monkeypatch, capsys):
     """Every airport is built before any is written: a flight the export stops on leaves no set anywhere."""
     _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))], also=("KYYY",))
     calls = []
@@ -304,25 +306,58 @@ def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path,
     def refuse_on_second(*args, **kwargs):
         calls.append(1)
         if len(calls) == 2:
-            raise SystemExit("stopped at the second airport")
+            raise ValueError("stopped at the second airport")
         return real(*args, **kwargs)
 
     real = export.draw
     monkeypatch.setattr(export, "draw", refuse_on_second)
-    with pytest.raises(SystemExit, match="stopped at the second airport"):
+    with pytest.raises(SystemExit):
         export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
                      "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])
+    assert "stopped at the second airport" in capsys.readouterr().err
     assert calls == [1, 1] and not (tmp_path / "airports").exists()
 
 
-def test_an_index_already_listing_the_set_is_refused_before_anything_is_written(tmp_path):
+def test_an_index_already_listing_the_set_is_refused_before_anything_is_written(tmp_path, capsys):
     _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))])
     training = tmp_path / "airports" / "KXXX" / "training"
     training.mkdir(parents=True)
-    listed = {"schema": export.INDEX_SCHEMA, "writtenUtc": "x", "airport": "KXXX",
+    listed = {"schema": files.INDEX_SCHEMA, "writtenUtc": "x", "airport": "KXXX",
               "sets": [{"id": SET_ID}]}
     (training / "index.json").write_text(json.dumps(listed), encoding="utf-8")
-    with pytest.raises(SystemExit, match="already lists set " + SET_ID):
+    with pytest.raises(SystemExit):
         _run(tmp_path)
+    assert "already lists set " + SET_ID in capsys.readouterr().err
     assert json.loads((training / "index.json").read_text(encoding="utf-8")) == listed
     assert not (training / SET_ID).exists()
+
+
+def test_a_set_is_written_only_while_every_airport_s_index_is_what_the_run_read(tmp_path, monkeypatch, capsys):
+    """Another export listed a set at the FIRST airport while this one was building the second: no airport is written
+    (adding to the old list would drop that set), the other export's index is left as it wrote it."""
+    _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))], also=("KYYY",))
+    real = export.draw
+    other = {"schema": files.INDEX_SCHEMA, "writtenUtc": "x", "airport": "KXXX", "sets": [{"id": "other"}]}
+
+    def another_export_meanwhile(code, *args, **kwargs):
+        if code == "KYYY":                          # KXXX is built by now; its index is written under this run
+            training = tmp_path / "airports" / "KXXX" / "training"
+            training.mkdir(parents=True)
+            (training / files.INDEX_FILE).write_text(json.dumps(other), encoding="utf-8")
+            code = "KXXX"                           # the synthetic artefact's flights all land at KXXX
+        return real(code, *args, **kwargs)
+
+    monkeypatch.setattr(export, "draw", another_export_meanwhile)
+    with pytest.raises(SystemExit):
+        export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
+                     "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])
+    assert "changed since this run read it" in capsys.readouterr().err
+    assert json.loads((tmp_path / "airports" / "KXXX" / "training" / files.INDEX_FILE).read_text()) == other
+    assert not (tmp_path / "airports" / "KXXX" / "training" / SET_ID).exists()
+    assert not (tmp_path / "airports" / "KYYY").exists()
+
+
+def test_the_sample_is_written_compact(tmp_path):
+    _artefact(tmp_path / "artefact", [_straight(_key("S1")), _vectored(_key("V1"))])
+    assert _run(tmp_path) == 0
+    assert "\n" not in (tmp_path / "airports" / "KXXX" / "training" / SET_ID / files.SAMPLE_FILE).read_text()

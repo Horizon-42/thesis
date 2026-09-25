@@ -53,7 +53,7 @@ import {
   type TrainingVocabulary,
 } from "./trainingSample";
 
-/** MIRROR of the exporter's `OVERLAYS_SCHEMA` (`instruction_training_export.py`): the manifest of overlays. */
+/** MIRROR of the exporter's `OVERLAYS_SCHEMA` (`ts_transformer/instructions/training_files.py`): the manifest of overlays. */
 export const TRAINING_OVERLAYS_SCHEMA = "aeroviz-training-overlays-v1";
 /** MIRROR of `OVERLAY_KINDS`: what an overlay can be. */
 export const TRAINING_OVERLAY_KINDS = ["executor-replay", "prior-prediction", "prior-generation"] as const;

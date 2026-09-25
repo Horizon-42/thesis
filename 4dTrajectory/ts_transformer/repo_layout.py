@@ -108,6 +108,12 @@ def discover_k_airports(harvest_root: Path = HARVEST_ROOT) -> list[str]:
     )
 
 
+def repo_relative(path: Path) -> str:
+    """How a written artefact names a path: relative to the repository when it is inside it (so the name is the same
+    from any checkout), else as given."""
+    return path.relative_to(REPO_ROOT).as_posix() if path.is_relative_to(REPO_ROOT) else path.as_posix()
+
+
 def git_state() -> dict[str, Any]:
     """The repository's HEAD and whether the working tree differs from it — what a formal artefact records
     about the code that wrote it."""

@@ -25,9 +25,9 @@ import torch
 
 from ts_transformer.autopilot.replay import word_results
 from ts_transformer.experiments import executor_training_export as executor_export
-from ts_transformer.experiments import instruction_training_export as export
 from ts_transformer.experiments import prior_generation_training_export as generation_export
 from ts_transformer.experiments import prior_training_export as prior_export
+from ts_transformer.instructions import training_files as files
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import (
     APPROACH, APPROACH_CLEARED, COLUMNS, HEADING, RUNWAY, UNCHANGED, Words, wrap180,
@@ -228,15 +228,36 @@ def test_the_prior_ranks_words_given_one_is_said_and_keeps_the_flights_likelihoo
     assert sum(item["columnNllPerStep"]) == pytest.approx(item["nllPerStep"], abs=1e-5)
 
 
+def test_the_prior_s_first_predicted_truth_is_the_word_in_force_the_sample_shows():
+    """The first predicted step says every column, so its truth is the word in force there (`words_in_force`, what the
+    sample's ``words.inForce`` holds): a word said exactly at N_LOOK is that word, and of two words of one column said
+    while the prior only observes, the later."""
+    from ts_transformer.prior.train import to_batch
+
+    words = Words(spec())
+    classes = column_classes(words, 2)
+    candidates = torch.as_tensor(prior_data.candidate_table({"KXXX": instruction_airport()}, ("KXXX",), 2))
+    grid = np.full((ROWS, 6), UNCHANGED, dtype=np.int16)
+    grid[0] = [0, 0, words.heading_index(270.0), words.altitude_index(1200.0), 0, words.speed_index(100.0)]
+    grid[2, HEADING] = words.heading_index(225.0)
+    grid[5, HEADING] = words.heading_index(200.0)                        # the later of two in the observed rows
+    grid[N_LOOK, 5] = words.speed_index(90.0)                             # said exactly at the first predicted step
+    split = Split(_flights(words, grid), ("KXXX",), candidates.numpy(), (("09",),), ((90.0,),), classes, "no-context")
+    targets = to_batch(split, [0], torch.device("cpu"))["targets"][0, 0, N_LOOK].numpy()
+    in_force = files.words_in_force(grid)[N_LOOK]
+    assert in_force[HEADING] == words.heading_index(200.0) and in_force[5] == words.speed_index(90.0)
+    assert list(targets) == [int(value) + 1 for value in in_force]         # class = value + 1 (0: unchanged)
+
+
 # ---- the manifest and the set an overlay is drawn over
-def _base_files(training, *, kind=export.KIND_READBACK, rule=READING_RULE, schema=export.SAMPLE_SCHEMA):
+def _base_files(training, *, kind=files.KIND_READBACK, rule=READING_RULE, schema=files.SAMPLE_SCHEMA):
     one = spec()
     sample = {"schema": schema, "setId": "set_a", "airport": "KXXX", "writtenUtc": "2026-09-24T00:00:00+00:00",
-              "vocabulary": {"specSha256": one.sha256}, "cohort": {"split": export.SPLIT},
+              "vocabulary": {"specSha256": one.sha256}, "cohort": {"split": files.SPLIT},
               "flights": [{"datasetId": "KXXX:F_09_abc_20260101T000000Z", "flightKey": "F_09_abc_20260101T000000Z",
                            "rows": 3, "words": {"events": [{"row": 0, "column": 0, "value": 0},
                                                            {"row": 2, "column": 2, "value": 18}]}}]}
-    index = {"schema": export.INDEX_SCHEMA, "airport": "KXXX",
+    index = {"schema": files.INDEX_SCHEMA, "airport": "KXXX",
              "sets": [{"id": "set_a", "kind": kind, "readingRule": rule, "vocabularySha256": one.sha256,
                        "file": "set_a/sample.json"}]}
     (training / "set_a").mkdir(parents=True)
@@ -248,66 +269,67 @@ def _base_files(training, *, kind=export.KIND_READBACK, rule=READING_RULE, schem
 def test_an_overlay_is_drawn_only_over_a_set_this_reader_reads(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = export.open_base_set(training, "KXXX", "set_a", spec())
+    base = files.open_base_set(training, "KXXX", "set_a", spec())
     raw = (training / "set_a" / "sample.json").read_bytes()
     assert base.block["sampleSha256"] == hashlib.sha256(raw).hexdigest()
     assert base.block["sampleWrittenUtc"] == "2026-09-24T00:00:00+00:00"
-    with pytest.raises(SystemExit, match="lists no set other"):
-        export.open_base_set(training, "KXXX", "other", spec())
+    with pytest.raises(ValueError, match="lists no set other"):
+        files.open_base_set(training, "KXXX", "other", spec())
     for change, message in ((dict(kind="prior-generated"), "prior-generated set"), (dict(rule="instruction-v1"), "instruction-v1"),
                             (dict(schema="aeroviz-training-sample-v4"), "re-export the set first")):
         shutil.rmtree(training)
         _base_files(training, **change)
-        with pytest.raises(SystemExit, match=message):
-            export.open_base_set(training, "KXXX", "set_a", spec())
+        with pytest.raises(ValueError, match=message):
+            files.open_base_set(training, "KXXX", "set_a", spec())
 
 
 def test_the_set_s_flights_must_carry_the_artefact_s_own_sentences(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = export.open_base_set(training, "KXXX", "set_a", spec())
+    base = files.open_base_set(training, "KXXX", "set_a", spec())
     signals = [instruction_flight(*fly_legs([(3, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0),
                                   dataset_id="KXXX:F_09_abc_20260101T000000Z")]
     grid = np.full((3, 6), UNCHANGED, dtype=np.int64)
     grid[0, 0], grid[2, 2] = 0, 18
     sentences = {"signal_index": np.array([0]), "offsets": np.array([0, 3]), "words": grid,
                  **{name: np.array([0]) for name in ("runway_index", "capture_row", "join_row", "unspecified_row")}}
-    assert [k for _, k in export.base_flights(base, signals, sentences)] == [0]
+    assert [k for _, k in files.base_flights(base, signals, sentences)] == [0]
     grid[2, 2] = 19
-    with pytest.raises(SystemExit, match="is not the one set set_a shows"):
-        export.base_flights(base, signals, sentences)
-    with pytest.raises(SystemExit, match="has no labelled sentence"):
-        export.base_flights(base, [replace(signals[0], dataset_id="KXXX:another")], sentences)
+    with pytest.raises(ValueError, match="is not the one set set_a shows"):
+        files.base_flights(base, signals, sentences)
+    with pytest.raises(ValueError, match="has no labelled sentence"):
+        files.base_flights(base, [replace(signals[0], dataset_id="KXXX:another")], sentences)
 
 
 def test_an_overlay_is_added_beside_its_set_and_never_overwritten(tmp_path):
     training = tmp_path / "KXXX" / "training"
     _base_files(training)
-    base = export.open_base_set(training, "KXXX", "set_a", spec())
-    assert export.read_overlays(training, "KXXX", "ov_1") == []
-    entry = export.overlay_entry("ov_1", export.KIND_EXECUTOR, base, "a title", "executor.json", 1, {"runner": "test"})
+    base = files.open_base_set(training, "KXXX", "set_a", spec())
+    assert files.read_overlays(training, "KXXX", "ov_1") == []
+    entry = files.overlay_entry("ov_1", files.KIND_EXECUTOR, base, "a title", "executor.json", 1, {"runner": "test"})
     with pytest.raises(ValueError):                                     # a payload that cannot be written stops the build
-        export.serialise_overlay({"values": [float("nan")]})
-    out = export.write_overlay(training, "KXXX", "ov_1", entry, export.serialise_overlay({"schema": "x", "values": [1, 2, 3]}),
-                               [])
+        files.serialise({"values": [float("nan")]})
+    out = files.write_overlay(training, "KXXX", entry, files.serialise({"schema": "x", "values": [1, 2, 3]}), [])
     assert out == training / "ov_1" / "executor.json"
     assert "\n" not in out.read_text(encoding="utf-8")                    # compact: its arrays are long
-    manifest = json.loads((training / export.OVERLAYS_FILE).read_text(encoding="utf-8"))
-    assert manifest["schema"] == export.OVERLAYS_SCHEMA and [item["id"] for item in manifest["overlays"]] == ["ov_1"]
+    manifest = json.loads((training / files.OVERLAYS_FILE).read_text(encoding="utf-8"))
+    assert manifest["schema"] == files.OVERLAYS_SCHEMA and [item["id"] for item in manifest["overlays"]] == ["ov_1"]
     assert manifest["overlays"][0]["baseSampleSha256"] == base.sha256 and manifest["overlays"][0]["base"] == "set_a"
-    with pytest.raises(SystemExit, match="already lists overlay ov_1"):
-        export.read_overlays(training, "KXXX", "ov_1")
+    with pytest.raises(ValueError, match="already lists overlay ov_1"):
+        files.read_overlays(training, "KXXX", "ov_1")
+    (training / "ov_9").mkdir()                                            # an overlay's directory is never reused
+    ninth = files.overlay_entry("ov_9", files.KIND_PRIOR, base, "t", "prior.json", 1, {})
     with pytest.raises(FileExistsError):
-        export.write_overlay(training, "KXXX", "ov_2", entry, "{}", export.read_overlays(training, "KXXX", "ov_2"))
+        files.write_overlay(training, "KXXX", ninth, "{}", files.read_overlays(training, "KXXX", "ov_9"))
     # another export wrote the manifest since this run read it: adding to the old list would drop its entry
-    second = export.overlay_entry("ov_2", export.KIND_PRIOR, base, "t", "prior.json", 1, {})
-    with pytest.raises(SystemExit, match="changed since this run read it"):
-        export.write_overlay(training, "KXXX", "ov_2", second, "{}", [])
+    second = files.overlay_entry("ov_2", files.KIND_PRIOR, base, "t", "prior.json", 1, {})
+    with pytest.raises(ValueError, match="changed since this run read it"):
+        files.write_overlay(training, "KXXX", second, "{}", [])
     assert not (training / "ov_2").exists()
-    with pytest.raises(SystemExit, match="is KXXX's overlays, not KYYY's"):
-        export.read_overlays(training, "KYYY", "ov_2")
+    with pytest.raises(ValueError, match="is KXXX's overlays, not KYYY's"):
+        files.read_overlays(training, "KYYY", "ov_2")
     with pytest.raises(ValueError, match="unknown overlay kind"):
-        export.overlay_entry("ov_3", "free-generation", base, "t", "f.json", 1, {})
+        files.overlay_entry("ov_3", "free-generation", base, "t", "f.json", 1, {})
 
 
 # ---- the frontend's mirrors
@@ -319,8 +341,8 @@ def _ts_constant(name: str) -> str:
 
 
 def test_the_frontend_reader_mirrors_the_exporters_names():
-    assert json.loads(_ts_constant("TRAINING_OVERLAYS_SCHEMA")) == export.OVERLAYS_SCHEMA
-    assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_OVERLAY_KINDS"))) == export.OVERLAY_KINDS
+    assert json.loads(_ts_constant("TRAINING_OVERLAYS_SCHEMA")) == files.OVERLAYS_SCHEMA
+    assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_OVERLAY_KINDS"))) == files.OVERLAY_KINDS
     assert json.loads(_ts_constant("TRAINING_EXECUTOR_SCHEMA")) == executor_export.SCHEMA
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_EXECUTOR_STATUSES"))) == executor_export.STATUSES
     assert json.loads(_ts_constant("TRAINING_PRIOR_SCHEMA")) == prior_export.SCHEMA
@@ -369,7 +391,7 @@ def _prior_dir(directory, artefact, roster):
         "airport_runway_frequency": runway, "rules": {"B1_active_config": runway}}))
 
 
-def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_second(tmp_path, monkeypatch):
+def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_second(tmp_path, monkeypatch, capsys):
     from ts_transformer.experiments import prior_train
     from ts_transformer.tests.test_instruction_training_export import SET_ID, _artefact, _run, _straight, _vectored
 
@@ -397,8 +419,8 @@ def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_sec
     assert payload["readout"]["baselines"]["previousWord"]["all"] == 1.2
     assert payload["readout"]["model"]["perColumn"]["runway"]["top1GivenChange"] is None
     assert payload["readout"]["firstStepRunway"]["rules"]["B1_active_config"]["sideGivenDirection"] == 0.5
-    manifest = json.loads((training / export.OVERLAYS_FILE).read_text(encoding="utf-8"))
-    assert [(o["id"], o["kind"], o["base"]) for o in manifest["overlays"]] == [("prior_prior", export.KIND_PRIOR, SET_ID)]
+    manifest = json.loads((training / files.OVERLAYS_FILE).read_text(encoding="utf-8"))
+    assert [(o["id"], o["kind"], o["base"]) for o in manifest["overlays"]] == [("prior_prior", files.KIND_PRIOR, SET_ID)]
     # the landing context is read from today's rosters, known by their bytes: the same roster at another path (the
     # main checkout after the merge, the prior trained in a worktree) is the same; one that changed is refused
     elsewhere = tmp_path / "elsewhere" / "tracks.json"
@@ -407,7 +429,8 @@ def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_sec
     monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: elsewhere)
     assert prior_export.main([*args, "--overlay-id", "moved"]) == 0
     elsewhere.write_text(json.dumps({"records": own, "note": "changed"}), encoding="utf-8")
-    with pytest.raises(SystemExit, match="rosters changed"):
+    with pytest.raises(SystemExit):
         prior_export.main([*args, "--overlay-id", "another"])
+    assert "rosters changed" in capsys.readouterr().err
     with pytest.raises(SystemExit):   # never overwritten
         prior_export.main(args)

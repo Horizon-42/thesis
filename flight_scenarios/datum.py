@@ -50,6 +50,8 @@ import functools
 import os
 from typing import Any, Iterable, Sequence
 
+import numpy as np
+
 # MIRROR of ``trajectory_data_process.harvest.store.ALTITUDE_SOURCE`` (the tag the harvest
 # writes). Not imported: the harvest package imports this module, so a top-level import
 # would cycle; ``tests/test_datum.py`` pins the two equal.
@@ -104,14 +106,14 @@ def _geoid_transformer():
     return transformer
 
 
-def geoid_undulation_m(lats: Sequence[float], lons: Sequence[float]) -> list[float]:
-    """EGM96 geoid undulation N = h_HAE - H_MSL, metres, one per point.
+def geoid_undulation_m(lats: Sequence[float], lons: Sequence[float]) -> np.ndarray:
+    """EGM96 geoid undulation N = h_HAE - H_MSL, metres, one per point (float64).
 
     The Training view's MSL -> HAE for executor-flown tracks; the modeling seam converts with
     the runway's CIFP offset instead (``flight_to_msl``)."""
     _, _, msl_of_zero = _geoid_transformer().transform(list(lons), list(lats), [0.0] * len(lats))
     # Transforming HAE 0 gives -N, so N is its negation.
-    return [-z for z in msl_of_zero]
+    return -np.asarray(msl_of_zero, dtype=np.float64)
 
 
 def _runway_offset(flight: dict[str, Any]) -> float:

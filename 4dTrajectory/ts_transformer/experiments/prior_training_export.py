@@ -10,7 +10,7 @@ Training module: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`).
         --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
 
 Per airport, writes ``<airports-root>/<ICAO>/training/<overlay-id>/prior.json`` (schema `SCHEMA`; refused if the
-directory exists) and adds the overlay to ``training/overlays.json`` (`instruction_training_export.OVERLAYS_SCHEMA`;
+directory exists) and adds the overlay to ``training/overlays.json`` (`instructions.training_files.OVERLAYS_SCHEMA`;
 refused if it lists the id already). The set (``--set``) must be a read-back set of the prior's vocabulary drawn from
 val — flights the prior never trained on.
 
@@ -42,20 +42,21 @@ from typing import Any
 
 import torch
 
-from ts_transformer.experiments.instruction_training_export import (
-    KIND_PRIOR, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays, serialise_overlay, write_overlay,
-)
 from ts_transformer.experiments.prior_train import (
     PRIOR_CHECKPOINT_SCHEMA, load_prior, roster_digests, roster_record, rosters,
 )
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec
+from ts_transformer.instructions.training_files import (
+    KIND_PRIOR, OVERLAYS_FILE, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
+    require_unchanged, serialise, stored_sentence, write_overlay,
+)
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import file_sha256, utc_now
 from ts_transformer.prior.data import VARIANTS, Split, airport_landings, batches, flight_record, runway_names
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.prior.train import TrainConfig, batch_logits, to_batch
-from ts_transformer.repo_layout import REPO_ROOT, git_state
+from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_PRIOR_SCHEMA`); the reader refuses anything else by
 #: name. A name changes with its file's shape or meaning, on both sides, in one change. v3 (2026-09-24, the prior's
@@ -76,9 +77,9 @@ def open_trained_prior(directory: Path, instructions: Path) -> tuple[Prior, dict
     model, _, config_file = load_prior(directory, instructions)
     if (VARIANTS[model.config.variant].landing_context
             and roster_digests(roster_record(rosters(instructions))) != roster_digests(config_file["tracks_rosters"])):
-        raise SystemExit(f"the tracks rosters changed since {directory} was trained (its landing context)")
+        raise ValueError(f"the tracks rosters changed since {directory} was trained (its landing context)")
     if config_file["smoke"]:
-        raise SystemExit(f"{directory} is a smoke run (--limit {config_file['limit']}), not a trained prior")
+        raise ValueError(f"{directory} is a smoke run (--limit {config_file['limit']}), not a trained prior")
     return model, config_file, file_sha256(directory / "checkpoint.pt")
 
 
@@ -87,7 +88,7 @@ def open_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, An
     chosen variant only)."""
     model, config_file, checkpoint_sha = open_trained_prior(directory, instructions)
     if not (directory / "readout.json").exists():
-        raise SystemExit(f"{directory} holds no val readout: it is not a chosen prior (prior_select)")
+        raise ValueError(f"{directory} holds no val readout: it is not a chosen prior (prior_select)")
     readout = json.loads((directory / "readout.json").read_text(encoding="utf-8"))
     return model, config_file, readout, checkpoint_sha
 
@@ -170,13 +171,22 @@ def main(argv: list[str] | None = None) -> int:
     airports = [code.upper() for code in args.airport]
     if len(set(airports)) != len(airports):
         parser.error(f"an airport is named twice in {airports}")
-    overlay_id = args.overlay_id or f"prior_{prior_dir.name}"
+    try:
+        export(prior_dir, instructions, root, airports, args.set, args.overlay_id or f"prior_{prior_dir.name}")
+    except ValueError as error:
+        parser.error(str(error))
+    return 0
+
+
+def export(prior_dir: Path, instructions: Path, root: Path, airports: list[str], set_id: str, overlay_id: str) -> None:
+    """The overlay ``overlay_id`` over set ``set_id`` at every airport of ``airports``: every airport predicted and
+    every refusal made before anything is written; then each airport's file and overlays manifest."""
     started = time.perf_counter()
     model, config_file, readout, checkpoint_sha = open_prior(prior_dir, instructions)
     spec = load_spec(instructions)
     missing = [code for code in airports if code not in model.config.airports]
     if missing:
-        parser.error(f"the prior knows no airport {missing} ({list(model.config.airports)})")
+        raise ValueError(f"the prior knows no airport {missing} ({list(model.config.airports)})")
     geometries = load_candidates(instructions)
     context = VARIANTS[model.config.variant].landing_context
     landings = airport_landings(instructions, rosters(instructions)) if context else {}
@@ -187,14 +197,12 @@ def main(argv: list[str] | None = None) -> int:
     for code in airports:
         training = root / code / "training"
         if (training / overlay_id).exists():
-            parser.error(f"{training / overlay_id} exists; an overlay is never overwritten")
+            raise ValueError(f"{training / overlay_id} exists; an overlay is never overwritten")
         existing[code] = read_overlays(training, code, overlay_id)
-        bases[code] = open_base_set(training, code, args.set, spec)
+        bases[code] = open_base_set(training, code, set_id, spec)
 
-    def relative(path: Path) -> str:
-        return path.relative_to(REPO_ROOT).as_posix() if path.is_relative_to(REPO_ROOT) else path.as_posix()
-
-    source = {"runner": RUNNER, "prior": relative(prior_dir), "instructions": relative(instructions), "git": git_state()}
+    source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "instructions": repo_relative(instructions),
+              "git": git_state()}
     model_config = model.config
     prior_block = {
         "checkpointSha256": checkpoint_sha, "schema": PRIOR_CHECKPOINT_SCHEMA, "specSha256": spec.sha256,
@@ -212,9 +220,9 @@ def main(argv: list[str] | None = None) -> int:
     for code in airports:
         base = bases[code]
         located = base_flights(base, flights, sentences)
-        split = Split([flight_record(signal, sentences["words"][sentences["offsets"][k]: sentences["offsets"][k + 1]],
-                                     geometries[code], landings[code] if context else None,
-                                     model_config.airports.index(code), int(sentences["capture_row"][k]))
+        split = Split([flight_record(signal, stored_sentence(sentences, k)["words"], geometries[code],
+                                     landings[code] if context else None, model_config.airports.index(code),
+                                     int(sentences["capture_row"][k]))
                        for signal, k in located],
                       model_config.airports, model.candidates.numpy(), *runway_names(geometries, model_config.airports),
                       model_config.classes, model_config.variant)
@@ -225,15 +233,17 @@ def main(argv: list[str] | None = None) -> int:
                    "producedBy": source, "base": base.block, "prior": prior_block, "readout": readout_block(readout),
                    "columns": list(COLUMNS), "flights": payloads}
         entry = overlay_entry(overlay_id, KIND_PRIOR, base, title, PAYLOAD_FILE, len(payloads), source)
-        built[code] = (serialise_overlay(payload), entry)
+        built[code] = (serialise(payload), entry)
         steps = sum(item["rows"] - item["firstPredictedRow"] for item in payloads)
         nll = sum(item["nllPerStep"] * (item["rows"] - item["firstPredictedRow"]) for item in payloads) / steps
         print(f"  {code}: {len(payloads)} flights, {steps} predicted steps, NLL {nll:.4f} per step (val "
               f"{readout['model']['nll_per_step']:.4f}); {time.perf_counter() - started:.0f} s", flush=True)
+    # no airport is written while another's manifest changed since the start (each write checks its own again)
+    for code in airports:
+        require_unchanged(root / code / "training", code, overlay_id, existing[code], manifest=OVERLAYS_FILE)
     for code, (text, entry) in built.items():
-        out = write_overlay(root / code / "training", code, overlay_id, entry, text, existing[code])
+        out = write_overlay(root / code / "training", code, entry, text, existing[code])
         print(f"  {code}: {out.stat().st_size / 1e6:.1f} MB → {out}", flush=True)
-    return 0
 
 
 if __name__ == "__main__":

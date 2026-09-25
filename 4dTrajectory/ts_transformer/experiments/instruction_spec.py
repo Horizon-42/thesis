@@ -18,7 +18,6 @@ git state) and ``measurements.json`` into the signals directory (never over an e
 from __future__ import annotations
 
 import argparse
-import subprocess
 import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
@@ -34,7 +33,7 @@ from ts_transformer.instructions.artefact import labeller_source_sha256, load_ca
 from ts_transformer.instructions.labeller.read import admit
 from ts_transformer.instructions.labeller.records import Refused
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.repo_layout import REPO_ROOT
+from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 CHUNK = 1000
 
@@ -86,12 +85,6 @@ def _grid_table(grid_rows: dict[str, list[list[float]]], grids: dict[float, floa
         table[f"{step:g}"] = {"tolerance_deg": tolerance, "classes": int(round(360 / step)),
                               "heading_words_per_flight": measure.percentiles(words)}
     return table
-
-
-def _git_state() -> dict[str, Any]:
-    def git(*args: str) -> str:
-        return subprocess.run(["git", *args], cwd=REPO_ROOT, check=True, capture_output=True, text=True).stdout.strip()
-    return {"head": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain"))}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -186,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     if labeller_source_sha256() != labeller:
         raise SystemExit("the labeller's code changed while the spec was being measured; measure again")
-    source = {"labeller_source_sha256": labeller, "git": _git_state()}
+    source = {"labeller_source_sha256": labeller, "git": git_state()}
     write_spec(directory, spec, measurements, source)
     print(f"spec {spec.sha256[:12]}:")
     for name, value in measured.to_dict().items():

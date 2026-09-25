@@ -33,6 +33,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
 from ts_transformer.instructions.labeller.read import Reading, admit, read_flight
 from ts_transformer.instructions.signals import FlightSignals
+from ts_transformer.instructions.training_files import require_stored_sentence, stored_sentence
 from ts_transformer.instructions.words import Words
 
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, Superseded
@@ -68,12 +69,9 @@ def open_flight(artefact: Path, split: str, dataset_id: str, words: Words) -> Fl
     stored = {int(value): k for k, value in enumerate(sentences["signal_index"])}
     if index not in stored:
         raise ValueError(f"{dataset_id} has no stored sentence in {artefact.name}")
-    k = stored[index]
     geometry = load_candidates(artefact)[flight.airport]
     reading = read_flight(flight, geometry, spec, words)
-    grid = sentences["words"][sentences["offsets"][k]: sentences["offsets"][k + 1]]
-    if not np.array_equal(reading.words, grid) or reading.runway_index != int(sentences["runway_index"][k]):
-        raise ValueError(f"{dataset_id}: the re-read sentence differs from the stored one")
+    require_stored_sentence(dataset_id, reading, stored_sentence(sentences, stored[index]))
     (series,) = rebuild_series(artefact, [flight])
     group = replay.group_of(series)
     if group not in (replay.OWN, replay.STAND_IN):

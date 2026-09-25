@@ -18,6 +18,7 @@ from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
 from ts_transformer.instructions import display
 from ts_transformer.instructions.labeller.read import Admitted
+from ts_transformer.instructions.training_files import band_payload, rounded
 from ts_transformer.instructions.words import COLUMNS, HEADING, Words
 
 from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment
@@ -31,10 +32,6 @@ SCHEMA = "aeroviz-autopilot-segment-v2"
 #: (`judge.OUTCOMES`, mirrored by `trainingOverlays.ts`'s `TRAINING_EXECUTOR_OUTCOMES`). MIRROR of `trainingAutopilot.ts`
 #: (`TRAINING_AUTOPILOT_SEGMENT_END`).
 SEGMENT_END = "segment_end"
-
-
-def _r(values: Any, digits: int) -> list[float]:
-    return [round(float(value), digits) for value in np.asarray(values, dtype=np.float64).ravel()]
 
 
 def end_state_row(verdict: Verdict) -> int:
@@ -52,20 +49,20 @@ def track_payload(result: FlownSegment, context: FlightContext, step_s: float) -
     states = flown.states[0, : last + 1].cpu().numpy()
     track = flown_track(states, context.geometry)
     lat, lon, height = states[:, LAT], states[:, LON], states[:, ALT]
-    undulation = np.asarray(geoid_undulation_m(list(lat), list(lon)), dtype=np.float64)
+    undulation = geoid_undulation_m(lat, lon)
     distance = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(track["e"]), np.diff(track["n"])))))
     shift = 360.0 * round((float(context.observed_track_deg[row]) - float(track["track"][0])) / 360.0)
     commands = flown.commands[0, :last].cpu().numpy()
     return {
-        "tS": _r(row * step_s + np.arange(len(states)) * flown.cycle_s, 3),
-        "eM": _r(track["e"], 1), "nM": _r(track["n"], 1), "lon": _r(lon, 7), "lat": _r(lat, 7),
-        "altitudeM": _r(height, 2), "altitudeHaeM": _r(height + undulation, 2),
-        "groundSpeedMps": _r(track["ground_speed"], 3), "verticalRateMps": _r(track["vertical_rate"], 3),
-        "trackDeg": _r(track["track"] + shift, 3),
-        "distanceM": _r(float(context.observed_distance_m[row]) + distance, 1),
+        "tS": rounded(row * step_s + np.arange(len(states)) * flown.cycle_s, 3),
+        "eM": rounded(track["e"], 1), "nM": rounded(track["n"], 1), "lon": rounded(lon, 7), "lat": rounded(lat, 7),
+        "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + undulation, 2),
+        "groundSpeedMps": rounded(track["ground_speed"], 3), "verticalRateMps": rounded(track["vertical_rate"], 3),
+        "trackDeg": rounded(track["track"] + shift, 3),
+        "distanceM": rounded(float(context.observed_distance_m[row]) + distance, 1),
         # the commands each cycle flew (one fewer than the states): the dynamics' bank turns left when positive
-        "thrustFraction": _r(commands[:, 0], 4), "bankRightDeg": _r(-np.degrees(commands[:, 1]), 3),
-        "loadFactor": _r(commands[:, 2], 4),
+        "thrustFraction": rounded(commands[:, 0], 4), "bankRightDeg": rounded(-np.degrees(commands[:, 1]), 3),
+        "loadFactor": rounded(commands[:, 2], 4),
     }, shift
 
 
@@ -118,10 +115,8 @@ def heading_payload(result: FlownSegment, judged: Admitted, spec: Any, shift: fl
     band = display.heading_band(track, 0, float(word.info["target_deg"]), first, first + check["rows"],
                                 spec.heading_tolerance_deg, check)
     row = result.segment.row
-    return ({"firstRow": row + band.first_row, "stopRow": row + band.stop_row,
-             "targetOnTrackDeg": round(band.target_on_track_deg, 3), "bandDeg": _r(band.band_deg, 3),
-             "inside": [int(value) for value in band.inside]},
-            _r(track, 3))
+    # the exporters' band, its rows moved from the segment's to the flight's
+    return ({**band_payload(band), "firstRow": row + band.first_row, "stopRow": row + band.stop_row}, rounded(track, 3))
 
 
 def segment_payload(result: FlownSegment, context: FlightContext, words: Words) -> dict[str, Any]:
