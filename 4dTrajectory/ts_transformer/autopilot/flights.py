@@ -85,15 +85,16 @@ def require_same_flight(series: FlightSeries, signals: FlightSignals, geometry: 
 class FlightInputs:
     """The batch's physical context, float64, one row per flight."""
 
-    initial_state: torch.Tensor     # [B,7] geodetic, the flight's row 0
+    initial_state: torch.Tensor     # [B,7] geodetic, at the row the flight is flown from
     aero_params: torch.Tensor       # [B,6]
     frame_params: torch.Tensor      # [B,4] the chart the rollout integrates in
     max_thrust_n: torch.Tensor      # [B]
 
 
-def flight_inputs(series: Sequence[FlightSeries], *, device: torch.device) -> FlightInputs:
-    """`rollout_context` at each flight's first row."""
-    rows = [rollout_context(item, 0) for item in series]
+def flight_inputs(series: Sequence[FlightSeries], *, device: torch.device, anchor: int = 0) -> FlightInputs:
+    """`rollout_context` at each flight's row ``anchor`` — its first (a replay flies the sentence from row 0), or where
+    a closed loop starts (the prior's first predicted step)."""
+    rows = [rollout_context(item, anchor) for item in series]
 
     def stack(key: str) -> torch.Tensor:
         return torch.as_tensor(np.stack([row[key] for row in rows]), dtype=torch.float64, device=device)

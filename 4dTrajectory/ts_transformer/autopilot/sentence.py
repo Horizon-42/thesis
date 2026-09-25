@@ -90,6 +90,32 @@ def _filled(grid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.take_along_axis(grid, issued, axis=0), issued
 
 
+class WordTables:
+    """Each column's word values as the laws read them (headings, altitudes, angles, speeds), and a step's words in
+    force → `WordsNow` — shared by whole sentences (`Sentences`) and sentences said a step at a time (`Spoken`)."""
+
+    def __init__(self, words: Words, *, device: torch.device) -> None:
+        self.words = words
+
+        def table(entries: list[float]) -> torch.Tensor:
+            return torch.as_tensor(np.asarray(entries, dtype=np.float64), device=device)
+
+        self.heading = table([words.heading_deg(i) for i in range(words.n_heading)])
+        self.altitude = table([words.altitude_m(i) if i != words.altitude_land else math.nan
+                               for i in range(words.altitude_land + 1)])
+        self.angle = table([words.angle_deg(i) for i in range(words.n_descent + 2)])
+        self.speed = table([words.speed_mps(i) if i != words.speed_unspecified else math.nan
+                            for i in range(words.speed_unspecified + 1)])
+
+    def now(self, value: torch.Tensor, issued: torch.Tensor) -> WordsNow:
+        """``value`` / ``issued``: ``[B, 6]``, the word in force per column and the step it was written at."""
+        return WordsNow(
+            runway=value[:, RUNWAY], approach=value[:, APPROACH], heading_deg=self.heading[value[:, HEADING]],
+            altitude_m=self.altitude[value[:, ALTITUDE]], land=value[:, ALTITUDE] == self.words.altitude_land,
+            angle_class=value[:, ANGLE], angle_deg=self.angle[value[:, ANGLE]], speed_mps=self.speed[value[:, SPEED]],
+            unspecified=value[:, SPEED] == self.words.speed_unspecified, issued_step=issued)
+
+
 class Sentences:
     """A batch's sentences (``grids``: each ``[N_i, 6]``, the artefact's word grid), looked up at any sentence time."""
 
@@ -105,32 +131,52 @@ class Sentences:
         self.value = torch.as_tensor(value, device=device)
         self.issued = torch.as_tensor(issued, device=device)
         self.rows = torch.as_tensor([len(grid) for grid in grids], device=device)
-
-        def table(entries: list[float]) -> torch.Tensor:
-            return torch.as_tensor(np.asarray(entries, dtype=np.float64), device=device)
-
-        self.heading = table([words.heading_deg(i) for i in range(words.n_heading)])
-        self.altitude = table([words.altitude_m(i) if i != words.altitude_land else math.nan
-                               for i in range(words.altitude_land + 1)])
-        self.angle = table([words.angle_deg(i) for i in range(words.n_descent + 2)])
-        self.speed = table([words.speed_mps(i) if i != words.speed_unspecified else math.nan
-                            for i in range(words.speed_unspecified + 1)])
+        self.tables = WordTables(words, device=device)
 
     def at(self, heard_s: torch.Tensor) -> WordsNow:
         """The words in force at each flight's sentence time ``[B]`` — the one of the last cycle that started a row
         (module docstring)."""
         batch = torch.arange(len(self.rows), device=self.rows.device)
-        value, issued = [], []
         row = torch.minimum(row_at(heard_s, self.step_s).clamp(min=0), self.rows - 1)
-        for column in range(6):
-            value.append(self.value[batch, row, column])
-            issued.append(self.issued[batch, row, column])
-        v = torch.stack(value, dim=1)
-        return WordsNow(
-            runway=v[:, RUNWAY], approach=v[:, APPROACH], heading_deg=self.heading[v[:, HEADING]],
-            altitude_m=self.altitude[v[:, ALTITUDE]], land=v[:, ALTITUDE] == self.words.altitude_land,
-            angle_class=v[:, ANGLE], angle_deg=self.angle[v[:, ANGLE]], speed_mps=self.speed[v[:, SPEED]],
-            unspecified=v[:, SPEED] == self.words.speed_unspecified, issued_step=torch.stack(issued, dim=1))
+        return self.tables.now(self.value[batch, row], self.issued[batch, row])
+
+
+class Spoken:
+    """Sentences said a step at a time (a closed loop: the speaker says a step, the executor flies it). `say` writes
+    the next step's words — the first step every column, each later one a word or `UNCHANGED` per column — and `at`
+    reads the words in force as `Sentences.at` does: the executor always hears the step just said."""
+
+    def __init__(self, batch: int, words: Words, *, device: torch.device) -> None:
+        self.step_s, self.device = words.spec.step_s, device
+        self.tables = WordTables(words, device=device)
+        self.value = torch.zeros((batch, 6), dtype=torch.long, device=device)
+        self.issued = torch.zeros((batch, 6), dtype=torch.long, device=device)
+        self.grid: list[np.ndarray] = []             # the steps said, each [B, 6] (UNCHANGED where nothing)
+
+    @property
+    def steps(self) -> int:
+        return len(self.grid)
+
+    def say(self, row: np.ndarray) -> None:
+        """The next step's words, ``[B, 6]``; the first step must write every column."""
+        row = np.asarray(row, dtype=np.int64)
+        written = torch.as_tensor(row != UNCHANGED, device=self.device)
+        if not self.grid and not bool(written.all()):
+            raise ValueError("a sentence's step 0 must write every column")
+        words = torch.as_tensor(row, device=self.device)
+        self.value = torch.where(written, words, self.value)
+        self.issued = torch.where(written, torch.full_like(self.issued, self.steps), self.issued)
+        self.grid.append(row)
+
+    def at(self, heard_s: torch.Tensor) -> WordsNow:
+        rows = row_at(heard_s, self.step_s)
+        if bool((rows != self.steps - 1).any()):
+            raise ValueError(f"heard at rows {sorted(set(rows.tolist()))}, but the step just said is {self.steps - 1}")
+        return self.tables.now(self.value, self.issued)
+
+    def sentences(self) -> np.ndarray:
+        """``[B, steps, 6]``: every step said."""
+        return np.stack(self.grid, axis=1)
 
 
 class TimeClock:

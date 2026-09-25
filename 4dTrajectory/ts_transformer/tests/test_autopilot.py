@@ -305,21 +305,12 @@ def _params(**changes):
     return replace(base, **changes)
 
 
-def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=None, clock="time", vocabulary=None):
-    """Read ``signals`` with the labeller (or take ``reading``), fly its sentence (or ``grid``) from row 0 on ``clock``
-    (`sentence.CLOCKS`), judge it; the A320's published approach speed unless ``approach_ias`` is given; the test
-    vocabulary unless ``vocabulary`` is."""
-    from ts_transformer.autopilot.executor import fly
-    from ts_transformer.autopilot.judge import judge
+def _physics(signals, geometry, approach_ias=None):
+    """One A320 flight flown from ``signals``' row 0 onto ``geometry``'s runway 0: ``(inputs, runways, charts,
+    approach IAS)`` — its published approach speed unless ``approach_ias`` is given."""
     from ts_transformer.autopilot.lateral import Runways
     from ts_transformer.autopilot.speed import approach_speed_ias_mps
-    from ts_transformer.instructions.labeller.read import read_flight
 
-    one = vocabulary or spec()
-    words, geometry = Words(one), instruction_airport()
-    params = params or _params()
-    reading = read_flight(signals, geometry, one, words) if reading is None else reading
-    grid = reading.words if grid is None else grid
     aircraft = aircraft_for_code("A320")
     aero, mass = aero_params_for_aircraft(aircraft), 62000.0
     lat, lon = geometry.frame.latlon_from_horizontal(signals.e_m[0], signals.n_m[0])
@@ -333,6 +324,25 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=No
         aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=F64),
         frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=F64),
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
+    return (inputs, Runways.of([geometry], [crossing_heights(geometry)], dtype=F64, device=CPU),
+            AirportCharts.of([geometry], dtype=F64, device=CPU),
+            torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias], dtype=F64))
+
+
+def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=None, clock="time", vocabulary=None):
+    """Read ``signals`` with the labeller (or take ``reading``), fly its sentence (or ``grid``) from row 0 on ``clock``
+    (`sentence.CLOCKS`), judge it; the A320's published approach speed unless ``approach_ias`` is given; the test
+    vocabulary unless ``vocabulary`` is."""
+    from ts_transformer.autopilot.executor import fly
+    from ts_transformer.autopilot.judge import judge
+    from ts_transformer.instructions.labeller.read import read_flight
+
+    one = vocabulary or spec()
+    words, geometry = Words(one), instruction_airport()
+    params = params or _params()
+    reading = read_flight(signals, geometry, one, words) if reading is None else reading
+    grid = reading.words if grid is None else grid
+    inputs, runways, charts, approach = _physics(signals, geometry, approach_ias)
     limit = len(grid) * one.step_s * params.timeout_factor
     rows = len(grid)
     clocks = {"time": lambda: TimeClock(params.cycle_s),
@@ -340,13 +350,44 @@ def _fly_sentence(signals, grid=None, params=None, approach_ias=None, reading=No
                                              device=CPU),
               "distance": lambda: DistanceClock.of([signals.e_m[:rows]], [signals.n_m[:rows]], one.step_s,
                                                    params.cycle_s, device=CPU)}
-    flown = fly(inputs, Sentences([grid], words, device=CPU), clocks[clock](),
-                Runways.of([geometry], [crossing_heights(geometry)], dtype=F64, device=CPU),
-                AirportCharts.of([geometry], dtype=F64, device=CPU),
-                torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias],
-                             dtype=F64), params, words,
+    flown = fly(inputs, Sentences([grid], words, device=CPU), clocks[clock](), runways, charts, approach, params, words,
                 time_limit_s=torch.tensor([limit], dtype=F64))
     return flown, judge(flown, 0, geometry, 0, reading, signals, one, words), reading
+
+
+def test_a_sentence_said_a_step_at_a_time_is_flown_as_the_whole_sentence():
+    """A closed loop's executor (`Executor` stepped by hand, the words `Spoken` a step at a time) flies what `fly`
+    flies from the whole sentence on the time clock — state for state."""
+    from ts_transformer.autopilot.executor import Executor, fly
+    from ts_transformer.autopilot.sentence import Spoken
+    from ts_transformer.instructions.labeller.read import read_flight
+
+    one, geometry = spec(), instruction_airport()
+    words, params = Words(one), _params()
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    grid = read_flight(signals, geometry, one, words).words
+    inputs, runways, charts, approach = _physics(signals, geometry)
+    limit = torch.tensor([len(grid) * one.step_s * params.timeout_factor], dtype=F64)
+    whole = fly(inputs, Sentences([grid], words, device=CPU), TimeClock(params.cycle_s), runways, charts, approach,
+                params, words, time_limit_s=limit)
+    executor = Executor(inputs, runways, charts, approach, params, words, time_limit_s=limit)
+    spoken = Spoken(1, words, device=CPU)
+    last = grid[-1:].copy()
+    last[:] = UNCHANGED                                      # after the sentence every word stays in force
+    for step in range(executor.cycles // executor.step_rows + 1):
+        spoken.say(grid[step: step + 1] if step < len(grid) else last)
+        for _ in range(executor.step_rows):
+            if executor.count < executor.cycles and not bool(executor.done.all()):
+                executor.cycle(spoken.at(torch.tensor([step * one.step_s], dtype=F64)),
+                               torch.tensor([executor.count * params.cycle_s], dtype=F64))
+    stepped = executor.flown()
+    assert torch.equal(stepped.states, whole.states) and torch.equal(stepped.done_cycle, whole.done_cycle)
+    assert torch.equal(stepped.commands, whole.commands)
+    # the executor hears only the step just said, and a first step must say every column
+    with pytest.raises(ValueError, match="the step just said"):
+        spoken.at(torch.tensor([0.0], dtype=F64))
+    with pytest.raises(ValueError, match="step 0 must write every column"):
+        Spoken(1, words, device=CPU).say(last)
 
 
 # a 90° left turn as flown: rolled into and out of over 4 s each, steady at 2.25°/s (4.5° a 2 s row), the data's typical

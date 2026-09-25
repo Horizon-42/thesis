@@ -344,7 +344,11 @@ fixed executor parameters, pairing evaluation with the observed flights graded b
 **The prior** (third version, 2026-09-24): `prior_train` (one variant — landing context, ordered heads — on single-aircraft
 scenes of the day split's train days, read on the select days; checkpoint `ts-prior-checkpoint-v3`) → `prior_select` (the
 rule of readouts §4, then the ONE val readout on the chosen run); the first `N_LOOK` = 8 rows are observed only, the first
-predicted step says every column, inputs are only what is known before the step (R15).
+predicted step says every column, inputs are only what is known before the step (R15). **Free generation**
+(`prior_free_generation`, design §9.1): the prior speaks (`prior.generate.Speaker`, column order, the vocabulary's
+compatibility rules as a decode mask via `instructions.grammar`) and the stepped executor (`autopilot.executor.Executor`,
+`sentence.Spoken`; `fly()` is its loop, flights unchanged state for state) flies each step; the labelled words from the
+same row are the reference (R17).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

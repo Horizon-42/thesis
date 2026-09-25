@@ -380,3 +380,25 @@ nearest one's gap is recorded), whether the airport had a landing on a candidate
 often that window reaches back into a test day; and the segments the flights chain into by overlapping time. Only
 train-day flights are in the scene index (a step near 09Z misses the adjacent day's neighbours); departures and
 overflights are in no scene. Records each tracks roster's sha256. Writes `census.json`.
+
+### R17 · `run_ts.py prior_free_generation` — the prior speaks, the executor flies (prior design §9.1)
+
+2026-09-25. `prior_free_generation --prior <chosen run> --instructions <artefact> --executor <executor spec dir> --split
+select|val [--per-airport N] [--samples 4] [--temperature 1] [--seed 1337] [--chunk 64] [--device cuda] --out <new dir>`
+draws the split's flights on their own dynamics (`replay.draw`, seeded), and flies each from the observed state at the
+prior's first predicted step (`flight_inputs(..., anchor=N_LOOK)`): `--samples` times with the prior speaking —
+`prior.generate.Speaker` samples a step's six words in column order (temperature `--temperature`) from the positions so far
+(observed to `N_LOOK`, then the executor's), the landings before the step and its own words, with the vocabulary's
+compatibility rules as a mask (`instructions.grammar.step_allowed`: the labeller's own check), and the executor
+(`autopilot.executor.Executor`, stepped, `autopilot.sentence.Spoken`) flies the step; the runway column is masked by the
+executor's own rule where it would refuse a change (`Executor.runway_locked`: cleared since the last go-around, or captured
+— stricter than the vocabulary's), a flight the executor is done with says nothing and its row is frozen (a failed state
+may be non-finite), and the readout cuts each flight's words at its end — and once with the labelled words
+(the words in force at `N_LOOK`, then the sentence, on the spec's clock over the observed rows from there). Outcomes by
+`judge.outcome_of` against the runway pointed at the end; time limit = observed remaining time × the spec's timeout
+factor. Readout per group (all, strata, airport × stratum): outcome shares, first runway = observed, landed on the
+observed runway, landing time − observed, words said per column after the first step, runway changes, go-arounds,
+cleared at the end (and among the timeouts), the probability the prior put on what the grammar forbade (approach, angle).
+Writes `generation.json` (`ts-prior-free-generation-v1`, every flight row) and `sentences.npz`; val only from a clean
+tree. The executor spec must be this executor code's (`replay.open_executor`). ~36 s for 50 flights × (1 + 2) loops.
+
