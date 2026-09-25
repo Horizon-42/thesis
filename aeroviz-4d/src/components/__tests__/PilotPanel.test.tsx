@@ -592,13 +592,17 @@ describe("PilotPanel trajectory play mode", () => {
     expect(mocks.setApproachViewOpen).toHaveBeenCalledWith(true);
   });
 
-  it("says why when the aircraft catalog does not load, and offers no target speed to edit or optimize", async () => {
+  it("says why when the aircraft catalog does not load — in every mode — and offers no target speed to edit or optimize", async () => {
     mocks.fetchPilotAircraftConfigs.mockRejectedValue(new Error("the backend at http://backend.test did not answer"));
     render(<PilotPanel />);
 
-    expect((await screen.findByRole("alert")).textContent).toMatch(/did not answer/);
+    const why = /The aircraft catalog did not load: the backend at http:\/\/backend\.test did not answer/;
+    expect((await screen.findByRole("alert")).textContent).toMatch(why);
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     const targetSummary = await screen.findByLabelText("Target aircraft state summary");
+    // entering Trajectory clears the panel's one-shot error, never why there is no aircraft
+    await waitFor(() => expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalled());
+    expect(screen.getAllByRole("alert").some((alert) => why.test(alert.textContent ?? ""))).toBe(true);
     // no aircraft: no target speed, so the target editor (its speed range is the aircraft's) is not drawn
     expect(within(targetSummary).getByText("— (no aircraft)")).toBeTruthy();
     const edit = within(targetSummary).getByRole("button", { name: "Edit" }) as HTMLButtonElement;

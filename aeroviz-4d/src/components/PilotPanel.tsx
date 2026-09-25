@@ -224,6 +224,9 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   const [isFollowing, setIsFollowing] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Why the aircraft catalog did not load: held apart from `error`, which every action clears, so it stays on screen
+  // for as long as there is no aircraft — in the very modes whose target reads "— (no aircraft)".
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [aircraftConfigs, setAircraftConfigs] = useState<PilotAircraftConfig[]>([]);
   const [simulationMode, setSimulationMode] =
     useState<PilotSimulationMode>(DEFAULT_SIMULATION_MODE);
@@ -676,12 +679,12 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       .then((configs) => {
         if (cancelled) return;
         setAircraftConfigs(configs);
-        setError(null);
+        setCatalogError(null);
       })
       .catch((configError: unknown) => {
         if (cancelled) return;
         setAircraftConfigs([]);
-        setError(toErrorMessage(configError));
+        setCatalogError(toErrorMessage(configError));
       });
 
     return () => {
@@ -2445,6 +2448,9 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
         </>
       )}
 
+      {catalogError ? (
+        <div className="pilot-error" role="alert">The aircraft catalog did not load: {catalogError}</div>
+      ) : null}
       {error ? <div className="pilot-error" role="alert">{error}</div> : null}
 
       {activeMode === "comparison" && isChartsOpen && chartMode === "average" && averagedComparison ? (
