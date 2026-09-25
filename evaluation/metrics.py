@@ -98,6 +98,13 @@ METHODOLOGY: dict[str, Any] = {
             "assignment fit for a right-censored pass; no evaluation refit"
         ),
         "terminal_plane_tolerance_m": TERMINAL_PLANE_TOLERANCE_M,
+        # The row's final_time_s is the record's own (never recomputed), and it is NOT the
+        # crossing's time for an observed subject.
+        "final_time_s": (
+            "the record's final_time_s: a computed record's terminal state (its crossing); "
+            "an observed record's last MEASURED sample, not its crossing -- a censored "
+            "crossing is the inferred row appended after it, a direct bracket precedes it"
+        ),
     },
     "uncertainty": {
         "verdict_rule": "point_estimate_against_inclusive_component_bounds",
@@ -800,6 +807,10 @@ def _observed_availability(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _reference_aggregate(comparisons: list[ReferenceComparison]) -> dict[str, Any] | None:
+    """The batch view of the per-flight reference comparisons. ``path_*.mean`` is the mean of
+    the per-flight means -- every flight weighs the same whatever its resample count (fixed at
+    101 today, so it equals the pooled mean); a variable-N resample would change the metric's
+    meaning, not only its value. The per-flight p95 has no batch counterpart."""
     if not comparisons:
         return None
     deltas = [item.flight_time_delta_s for item in comparisons]

@@ -75,6 +75,10 @@ gets a new ID here and ONE new line in the index.**
 - Batch metrics: solve/success rates, lateral mean/p95/max, vertical spreads, flight times;
   path-shape deviation vs reference = both paths resampled at 101 fractions of their own
   horizontal arc length.
+- **Note (2026-09-25):** the batch `reference.path_*` means are means of the per-flight means —
+  every flight weighs the same whatever its resample count (fixed at 101, so today it equals the
+  pooled mean; a variable-N resample would change the metric's meaning). The per-flight p95 has no
+  batch counterpart. Stated in `metrics._reference_aggregate`'s docstring.
 
 ### EV5 · the read side is manifest-only
 
@@ -155,6 +159,11 @@ gets a new ID here and ONE new line in the index.**
 **Correction (2026-09-18):** that `ValueError` now names `--observed-only` (the rebuild that
 leaves `arrivals/` and the lateral roster alone); it said `--evaluate-only` when this text was
 written — follow-up #41, fixed.
+
+**Note (2026-09-25):** the report says it too — `methodology.event.final_time_s`: a computed
+record's `final_time_s` is its terminal state (the crossing), an observed record's is its last
+MEASURED sample, not the crossing (a censored crossing is the appended row after it, a direct
+bracket precedes it). The row's `speed_ms` / `heading_rad` are the crossing's for both subjects.
 
 ### EV10 · an observed track's `states[-1]` is not its arrival
 

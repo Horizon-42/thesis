@@ -49,8 +49,9 @@ fact gets a new ID there and one line here.
 
 - Observed grading is the SAME state interpolation as computed grading: `source.crossing_span`
   (`measured_bracket` / `fitted_tail`, `final_approach.crossing`) says where the crossing lives;
-  `final_time_s` stays on the last MEASURED row; an estimated event on a record without a span is
-  stale and raises (the harvest's `--observed-only` rebuilds it) (EV9).
+  `final_time_s` stays on the last MEASURED row (the report's `methodology.event.final_time_s` says
+  so); an estimated event on a record without a span is stale and raises (the harvest's
+  `--observed-only` rebuilds it) (EV9).
 - **An observed track's `states[-1]` is NOT its arrival** (966/996 KRDU tracks end a median 325 m
   short, airborne) — grading the final state measures where coverage stopped (EV10).
 - ADS-B altitude is quantised to 25 ft = 7.62 m, so a single sample cannot resolve a crossing;

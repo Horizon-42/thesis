@@ -152,15 +152,18 @@ by evaluation either.
   **down to landing** — an approach that leaves the window below that height requires
   a go-around — so the window is valid *at* the threshold, not only at 1,000 ft.
 - **FAA AC 91-79B** ("Aircraft Landing Performance and Runway Excursion Mitigation")
-  treats excess threshold-crossing speed as a primary overrun factor and quotes a
-  threshold-crossing airspeed margin of **+5/−0 kt** around the target for the
-  performance data to be valid; Boeing/Airbus FCTM guidance targets V_REF + additives
-  (typically +5 kt) at the threshold.
+  treats excess threshold-crossing speed as an overrun factor; its only threshold-speed
+  rule is §5.2.2 "Excess Airspeed": V_REF "plus wind and gust additives, should be
+  maintained until 50 ft over the runway threshold" (saved:
+  `docs/regulation/FAA_AC_91-79B_2023.pdf`, dated 8/28/23).
   https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_91-79B_FAA.pdf
-  The gate deliberately uses the *wider* ALAR window, not the FCTM ±5 kt target:
+  (Corrected 2026-09-25: this bullet used to quote a "+5/−0 kt" crossing margin from the AC
+  and a "typically +5 kt" FCTM target; neither is in the saved AC and no FCTM is on disk, so
+  both are removed — the window below never rested on them.)
+  The gate deliberately uses the *wider* ALAR window, not a narrow V_REF-plus-a-few-knots target:
   the model flies no wind and no gust additives, so its legitimate crossing speeds
-  span [V_REF, V_REF + real-world additive range], and a ±5 kt gate would grade the
-  absence of a wind model rather than the trajectory. +20 kt is the widest bound any
+  span [V_REF, V_REF + real-world additive range], and a gate a few knots wide would grade
+  the absence of a wind model rather than the trajectory. +20 kt is the widest bound any
   of the cited operational sources call acceptable.
 - The window is **inclusive** at both edges, matching the point-estimate rule the
   other two components use (`methodology.uncertainty.verdict_rule`).
@@ -437,7 +440,7 @@ bucket for both), which is the 737 family's "fast" cluster in one line.
 | A per-type anchor CALIBRATED on the observed corrected airspeeds ("plan B") | circular as a ground-truth test; kept only as the fallback for a type with no published entry, which the current fleet does not need (all 40 types are in the FAA table) |
 | A three-valued verdict (pass / marginal / fail) with a declared ±5 kt on the estimate | the evaluation is the foundation every model result is judged on; a probabilistic verdict defers the question instead of answering it — the fix was the window, not the verdict (owner decision 2026-09-07) |
 | An observed window framed at the harvest's assumed airframe mass | the flight's mass is not measured; framing at an assumption fails real flights for being lighter or heavier than assumed — the type's published mass range is the determinate statement |
-| FCTM-style V_REF ± 5 kt target | grades the absence of a wind/additive model, not the trajectory |
+| A V_REF ± a-few-knots target (FCTM-style; no FCTM on disk) | grades the absence of a wind/additive model, not the trajectory |
 | Gate observed subjects with a widened window | still measures wind + a non-crossing sample; a wider bound that "usually passes" is an inert bound |
 | Composite-only reporting (no per-component result) | consumers (ts lateral-eligibility precedent) need per-component access; `speed_result` is serialized like `lateral_result` |
 | Scale both bounds with `√n` | the upper edge is an energy criterion defined at 1 g; measured, it only flips records piled against that edge (§3.5) |
@@ -505,7 +508,8 @@ bucket for both), which is the 737 family's "fast" cluster in one line.
    if unstabilized below. Flight Safety Digest, Aug–Nov 2000.
    https://flightsafety.org/wp-content/uploads/2016/09/alar_bn7-1stablizedappr.pdf
 4. FAA AC 91-79B "Aircraft Landing Performance and Runway Excursion Mitigation" —
-   threshold-crossing speed margin +5/−0 kt; excess speed/TCH as overrun factors.
+   §5.2.2: V_REF plus wind and gust additives until 50 ft over the threshold; excess
+   speed/TCH as overrun factors. Saved: `docs/regulation/FAA_AC_91-79B_2023.pdf`.
    https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_91-79B_FAA.pdf
 5. EASA CS-25 (CS-25.125) — the same 1.23 V_SR0 landing reference-speed floor.
    https://www.easa.europa.eu/en/document-library/certification-specifications/cs-25-amendment-28
