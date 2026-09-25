@@ -157,9 +157,6 @@ by evaluation either.
   maintained until 50 ft over the runway threshold" (saved:
   `docs/regulation/FAA_AC_91-79B_2023.pdf`, dated 8/28/23).
   https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_91-79B_FAA.pdf
-  (Corrected 2026-09-25: this bullet used to quote a "+5/−0 kt" crossing margin from the AC
-  and a "typically +5 kt" FCTM target; neither is in the saved AC and no FCTM is on disk, so
-  both are removed — the window below never rested on them.)
   The gate deliberately uses the *wider* ALAR window, not a narrow V_REF-plus-a-few-knots target:
   the model flies no wind and no gust additives, so its legitimate crossing speeds
   span [V_REF, V_REF + real-world additive range], and a gate a few knots wide would grade

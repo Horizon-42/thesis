@@ -27,14 +27,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from aircraft.identity import OPENSKY_LOOKUP_SCHEMA
-from aircraft.query_aircraft_parameters import OPENAP_PARAMETERS_SCHEMA
+from aircraft.identity import OPENSKY_LOOKUP_PATH, OPENSKY_LOOKUP_SCHEMA
+from aircraft.query_aircraft_parameters import OPENAP_PARAMETERS_SCHEMA, PARAMETERS_PATH
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AIRCRAFT_DATABASE = REPO_ROOT / "data" / "AIRCRAFT" / "aircraftDatabase.csv"
-PARAMETERS_OUTPUT = Path(__file__).resolve().parent / "openap_aircraft_parameters.json"
-LOOKUP_OUTPUT = Path(__file__).resolve().parent / "aircraft_id_lookup.json"
+PARAMETERS_OUTPUT = PARAMETERS_PATH
+LOOKUP_OUTPUT = OPENSKY_LOOKUP_PATH
 
 METADATA_FIELDS = [
     "icao24",

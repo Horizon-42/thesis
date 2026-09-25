@@ -143,9 +143,10 @@ gets a new ID here and ONE new line in the index.**
   record's `mass_source` is that mass's `dynamics_source` label (`aircraft_preset` / the index's schema /
   the OpenAP label); it read `openap_landing_mass` for all three before.
 - **Reading a record back** (2026-09-25): `scenario.aircraft_provider_of(source["dynamics_source"])` is the
-  provider that resolves a record's `dynamics_typecode` to the aircraft it flew (`openap` for an OpenAP-flown
-  record — an `openap` run flies the OpenAP A320, not the preset — else `auto`); the readout scripts use it
-  instead of assuming `openap`, which raised on an own-parameter type.
+  provider that resolves a record's `dynamics_typecode` to the aircraft it flew: `openap` for a record flown by
+  THIS OpenAP cache (an `openap` run flies the OpenAP A320, not the preset), `auto` for a preset
+  (`PRESET_DYNAMICS_SOURCE`) or a performance-index row; any other label — another OpenAP cache's too — is
+  refused by name. The readout scripts use it instead of assuming `openap`, which raised on an own-parameter type.
 - **The OpenAP caches are schema-checked** (2026-09-25): `aircraft.query_aircraft_parameters.load_json`
   refuses `openap_aircraft_parameters.json` / `aircraft_id_lookup.json` whose `schema_version` is not
   `OPENAP_PARAMETERS_SCHEMA` / `identity.OPENSKY_LOOKUP_SCHEMA` (the builder writes both from those

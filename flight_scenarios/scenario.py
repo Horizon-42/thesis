@@ -88,11 +88,15 @@ def _index_own(code: str) -> bool:
     return entry is not None and entry.decision == "own"
 
 
+#: `aircraft_dynamics_source`'s label for a hand-tuned preset.
+PRESET_DYNAMICS_SOURCE = "aircraft_preset"
+
+
 def aircraft_dynamics_source(aircraft_code: str, *, provider: str = "auto") -> str:
     """Return the provider label used for a resolved scenario aircraft (the FLOWN code)."""
     code = aircraft_code.strip().upper()
     if provider == "auto" and code in AIRCRAFT_PRESETS:
-        return "aircraft_preset"
+        return PRESET_DYNAMICS_SOURCE
     if provider == "auto" and _index_own(code):
         return PERFORMANCE_INDEX_SCHEMA
     return openap_source_label()
@@ -100,9 +104,16 @@ def aircraft_dynamics_source(aircraft_code: str, *, provider: str = "auto") -> s
 
 def aircraft_provider_of(dynamics_source: str) -> str:
     """The provider that resolves a record's ``dynamics_typecode`` back to the aircraft it flew,
-    from the record's ``dynamics_source`` (``aircraft_dynamics_source``'s label): ``openap`` for an
-    OpenAP-flown record (an ``openap`` run flies the OpenAP A320, not the preset), else ``auto``."""
-    return "openap" if dynamics_source == openap_source_label() else "auto"
+    from the record's ``dynamics_source`` (``aircraft_dynamics_source``'s label): ``openap`` for a
+    record flown by THIS OpenAP cache (an ``openap`` run flies the OpenAP A320, not the preset),
+    ``auto`` for a preset or a performance-index row. Any other label — another OpenAP cache's
+    included — is refused: that record's aircraft is not the one this code would rebuild."""
+    if dynamics_source == openap_source_label():
+        return "openap"
+    if dynamics_source in (PRESET_DYNAMICS_SOURCE, PERFORMANCE_INDEX_SCHEMA):
+        return "auto"
+    raise ValueError(f"dynamics_source {dynamics_source!r} is none of this code's ({openap_source_label()!r}, "
+                     f"{PRESET_DYNAMICS_SOURCE!r}, {PERFORMANCE_INDEX_SCHEMA!r}): its aircraft cannot be rebuilt")
 
 
 def aircraft_dynamics_surrogate_typecode(

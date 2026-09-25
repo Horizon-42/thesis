@@ -242,7 +242,7 @@ def test_observed_record_names_the_resolved_airframe_type_and_omits_it_when_unre
     track, runway = _estimated_track_and_runway()
     monkeypatch.setattr(
         observed_module, "resolve_airframe",
-        lambda icao24: (64_500.0, "A320") if icao24 == track["icao24"] else None,
+        lambda icao24, aircraft_provider: (64_500.0, "A320") if icao24 == track["icao24"] else None,
     )
     record = observed_record(track, runway)
     assert record["source"]["aircraft_type"] == "A320"
@@ -254,13 +254,13 @@ def test_observed_record_names_the_resolved_airframe_type_and_omits_it_when_unre
     # A type OpenAP does not model (most bizjets and GA, the A220, the CRJ7): the
     # identity still names it -- that is all the gate needs -- and the states carry
     # the nominal mass, said so.
-    monkeypatch.setattr(observed_module, "resolve_airframe", lambda icao24: (None, "E55P"))
+    monkeypatch.setattr(observed_module, "resolve_airframe", lambda icao24, aircraft_provider: (None, "E55P"))
     record = observed_record(track, runway)
     assert record["source"]["aircraft_type"] == "E55P"
     assert record["source"]["mass_source"] == "nominal"
     assert all(state["m"] == observed_module.NOMINAL_MASS_KG for state in record["states"])
 
-    monkeypatch.setattr(observed_module, "resolve_airframe", lambda icao24: None)
+    monkeypatch.setattr(observed_module, "resolve_airframe", lambda icao24, aircraft_provider: None)
     record = observed_record(track, runway)
     assert "aircraft_type" not in record["source"]
     assert record["source"]["mass_source"] == "nominal"

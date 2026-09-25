@@ -70,6 +70,8 @@ from trajectory_data_process.harvest.threshold_event import require_current_thre
 # loudly: judging an unknown airframe against an invented window would be false
 # precision.
 NOMINAL_MASS_KG = 60_000.0
+# The provider an observed record's airframe is resolved with, and its mass labelled by: one value for both.
+AIRCRAFT_PROVIDER = "auto"
 
 RECORDS_DIR = "records"
 SUMMARY_NAME = "summary.json"
@@ -103,7 +105,7 @@ def observed_record(
     aircraft_type: str | None = None
     mass_source = "explicit"
     if mass_kg is None:
-        resolved = resolve_airframe(track.get("icao24"))
+        resolved = resolve_airframe(track.get("icao24"), aircraft_provider=AIRCRAFT_PROVIDER)
         if resolved is not None:
             mass_kg, aircraft_type = resolved
         if mass_kg is None:
@@ -111,7 +113,7 @@ def observed_record(
         else:
             # Where the type's own landing mass came from: a preset, the performance index's
             # own-parameter row, or OpenAP (resolve_airframe resolves with the default provider).
-            mass_source = aircraft_dynamics_source(aircraft_type)
+            mass_source = aircraft_dynamics_source(aircraft_type, provider=AIRCRAFT_PROVIDER)
     event = track.get("observed_threshold_event")
     if not isinstance(event, dict):
         raise ValueError(

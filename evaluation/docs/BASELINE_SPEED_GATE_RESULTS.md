@@ -285,8 +285,7 @@ marginal count (estimate within its ±5 kt of a bound; `speed_margin_ms` /
 - Three candidate explanations for the 737 "fast" cluster, none decidable from the
   gate alone: the bucket's landing Cl_max 2.7 is low for the 737NG/MAX (the same
   correction §8 made for Airbus), 737 crews fly V_ref + 15–20 kt to the threshold
-  (well above what AC 91-79B §5.2.2 asks — V_ref plus wind and gust additives to 50 ft;
-  a "+5/−0 kt" margin once quoted here is not in the AC, corrected 2026-09-25),
+  (well above what AC 91-79B §5.2.2 asks — V_ref plus wind and gust additives to 50 ft),
   or the tower's 10 m wind understates the headwind at 50 ft (a log-profile factor of
   ~1.1–1.2 pushes the same way). Type-specific published V_ref tables at typical
   landing mass would separate the first from the other two.
