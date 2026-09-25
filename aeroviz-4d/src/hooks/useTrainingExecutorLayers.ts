@@ -30,6 +30,7 @@ import {
   autopilotAircraftLabel,
   autopilotColour,
   autopilotFlownAt,
+  autopilotHasLine,
   autopilotJudgedPoints,
   autopilotOnScreen,
   autopilotPlaybackSpeedup,
@@ -158,7 +159,7 @@ export default function useTrainingExecutorLayers(): void {
   const flown = replay?.flown ? replay : null;
   const live = autopilotOnScreen(trainingAutopilot, selection);
   // a segment of one state (a dynamics failure in its first cycle) has no line to fly out: the card and the status say so
-  const ready = live?.status === "ready" && live.segment.track.tS.length >= 2 ? live : null;
+  const ready = live?.status === "ready" && autopilotHasLine(live.segment) ? live : null;
   const { headingBands } = trainingLayers;
   // the rows outside a heading word, the replay's and the live executor's, shown with the bands' switch
   const bandsShown = useRef(headingBands);

@@ -52,12 +52,13 @@ import {
   type TrainingWordRun,
 } from "./trainingSample";
 
-/** MIRROR of `aeroviz_backend/autopilot_segment.py` `SCHEMA`: the backend's answer; anything else is refused by name. */
+/** MIRROR of `aeroviz_backend/autopilot_segment/payload.py` `SCHEMA`: the backend's answer; anything else is refused by
+ *  name (the backend's `MirrorTest` pins these four). */
 export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v2";
-/** MIRROR of `autopilot_segment.STATUSES`: the selected word's verdict. */
+/** MIRROR of `autopilot_segment/verdict.py` `STATUSES`: the selected word's verdict. */
 export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
 export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
-/** MIRROR of `autopilot_segment.SEGMENT_END`: the flight reached the point where the next word of its column was said. */
+/** MIRROR of `autopilot_segment/payload.py` `SEGMENT_END`: the flight reached the point where its word's envelope ends. */
 export const TRAINING_AUTOPILOT_SEGMENT_END = "segment_end" as const;
 export const TRAINING_AUTOPILOT_PATH = "/autopilot/segment";
 
@@ -223,6 +224,12 @@ export function autopilotOnScreen(
 export function autopilotWord(request: TrainingAutopilotRequest, selection: TrainingSelection): string {
   const value = selection.flight.words.inForce[TRAINING_COLUMN_INDEX[request.column]][request.row];
   return `${request.column} ${trainingWordLabel(selection.vocabulary, selection.candidates, request.column, value)}`;
+}
+
+/** The flown segment has a line to draw: two states or more (a dynamics failure in its first cycle keeps one — the
+ *  card and the status still say what happened; the charts and 3D have nothing to draw). */
+export function autopilotHasLine(segment: TrainingAutopilotSegment): boolean {
+  return segment.track.tS.length >= 2;
 }
 
 /** The colour a flown segment is drawn in, everywhere: red when the selected word flew outside its envelope. */

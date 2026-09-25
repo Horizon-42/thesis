@@ -47,7 +47,7 @@ import {
   TRAINING_RAW_COLOR,
   TRAINING_WORD_COLOR,
 } from "../utils/trainingWordColors";
-import { autopilotColour, autopilotOnScreen, nextPick } from "../data/trainingAutopilot";
+import { autopilotColour, autopilotHasLine, autopilotOnScreen, nextPick } from "../data/trainingAutopilot";
 import {
   executorWordAt,
   executorWordCounts,
@@ -133,8 +133,8 @@ function replayChip(flight: TrainingExecutorFlight): { text: string; ok: boolean
     ` · evaluation ${flight.evaluation.replay} (observed ${flight.evaluation.observed})` +
     (flight.refused === null ? "" : ` · its track refused by the labeller's gate: ${flight.refused}`);
   return {
-    text: `replay: ${TRAINING_OUTCOME_TAG[flight.outcome]} · ${wordsInside}/${wordsJudged}`,
-    ok: flight.outcome === "landed" && wordsInside === wordsJudged, title,
+    text: `replay: ${TRAINING_OUTCOME_TAG[flight.outcome]} · ${wordsInside}/${wordsJudged}${flight.refused === null ? "" : " · refused"}`,
+    ok: flight.outcome === "landed" && wordsInside === wordsJudged && flight.refused === null, title,
   };
 }
 
@@ -209,6 +209,8 @@ export default function TrainingSentenceBar() {
   const autopilot = autopilotOnScreen(trainingAutopilot, selection);
   const replay = executor === null ? null : replayChip(executor);
   const verdictsChip = verdictChip(flight);
+  const flightFacts = `${flight.typecode ?? "type unknown"} · ${flight.stratum} · ${flight.rows} steps · ` +
+    `${verdicts.instructionsAfterStep0} words after step 0 · ${verdicts.silentSteps} of ${flight.rows - 1} later steps silent`;
   // the Fly button: the selected word's segment, and what the live executor is doing with it
   const focusRun = focusColumn === null ? null : trainingWordAt(flight, focusColumn, cursorRow);
   const pickedHere = focusRun !== null && trainingPick !== null && trainingPick.column === focusColumn
@@ -219,12 +221,9 @@ export default function TrainingSentenceBar() {
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar">
       <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.flown === true}
-        autopilotColour={autopilot?.status === "ready" ? autopilotColour(autopilot.segment) : null} />
+        autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null} />
       <header className="training-sentence-head">
-        <strong title={`${flight.typecode ?? "type unknown"} · ${flight.stratum} · ${flight.rows} steps · ` +
-          `${verdicts.instructionsAfterStep0} words after step 0 · ${verdicts.silentSteps} of ${flight.rows - 1} later steps silent`}>
-          {flight.callsign}
-        </strong>
+        <strong title={flightFacts}>{flight.callsign}</strong>
         <span className="training-chip">runway {flight.runway}</span>
         <span className="training-chip" title={verdictsChip.title}>{verdictsChip.text}</span>
         {replay !== null ? (
@@ -373,9 +372,12 @@ export default function TrainingSentenceBar() {
 
       {notesOpen ? (
         <footer className="training-sentence-legend">
+          <span>{flight.callsign}: {flightFacts} · {verdictsChip.title}</span>
+          {replay !== null ? <span>{replay.title}</span> : null}
           <span>
             A band is a word in force, from the tick where it was issued to the next word of its column; step 0 gives all
-            six. Click a band to select its word — here, in the read-back check and in 3D — and again to clear it. The
+            six. Click a band to select its word — here, in the read-back check and in 3D — and again to clear it; ▶ Fly
+            flies the selected word's segment live (a band click does too, with the panel's "Fly on band click" on). The
             dashed lines: the clearance, the capture of the final, the speed left to the pilot.
           </span>
           <span>

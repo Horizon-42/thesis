@@ -59,7 +59,7 @@ export const TRAINING_EXECUTOR_STATUSES = [
 ] as const;
 export type TrainingExecutorStatus = (typeof TRAINING_EXECUTOR_STATUSES)[number];
 /** MIRROR of `ts_transformer.autopilot.judge.OUTCOMES`: how the executor's flight ended — the replay's, and the live
- *  executor's when it flew on to the landing. */
+ *  executor's when it flew on to the landing (pinned by the backend's `test_autopilot_segment.MirrorTest`). */
 export const TRAINING_EXECUTOR_OUTCOMES = [
   "landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout", "dynamics_failure",
 ] as const;

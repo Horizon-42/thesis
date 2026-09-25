@@ -23,7 +23,7 @@ import {
   type TrainingVocabulary,
 } from "../../data/trainingSample";
 import type { TrainingExecutorFlight } from "../../data/trainingOverlays";
-import { autopilotColour, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
+import { autopilotColour, autopilotHasLine, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
 
 export const GUTTER = 64;
 export const PAD_R = 16;
@@ -81,7 +81,7 @@ export function readbackModel({ flight, vocabulary, candidates, layers, cursorS,
 
   // ── the live segment (not drawn without two points: a dynamics failure in its first cycle keeps one); its judged
   // step k is the flight's step `row + k`, the flown track's point k × `stepCycles` ──
-  const live = autopilot && autopilot.track.tS.length >= 2 ? autopilot : null;
+  const live = autopilot !== null && autopilotHasLine(autopilot) ? autopilot : null;
   const liveColour = live === null ? TRAINING_AUTOPILOT_COLOR : autopilotColour(live);
   const liveBand = live?.word.heading ?? null;
   const liveJudged = live?.judgedTrackDeg ?? null;

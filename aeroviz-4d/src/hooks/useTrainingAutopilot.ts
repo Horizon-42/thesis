@@ -44,8 +44,9 @@ export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEN
     setTrainingAutopilot({ status: "flying", request });
     requestTrainingAutopilot(backendUrl, request, controller.signal)
       .then((raw) => {
-        if (controller.signal.aborted || selection.current === null) return;
-        const parsed = parseTrainingAutopilot(raw, request, selection.current);
+        if (controller.signal.aborted) return;
+        // not aborted: the pick, and so the flight on screen, is the one asked about
+        const parsed = parseTrainingAutopilot(raw, request, selection.current!);
         setTrainingAutopilot(parsed.ok
           ? { status: "ready", request, segment: parsed.value, playedAt: Date.now(), roundTripS: (performance.now() - sent) / 1000 }
           : { status: "failed", request, problem: parsed.problem });

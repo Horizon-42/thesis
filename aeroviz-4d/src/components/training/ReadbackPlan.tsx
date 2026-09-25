@@ -37,7 +37,7 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
   const endOf = (line: { eM: number[]; nM: number[] }) => ({ x: px(line.eM[line.eM.length - 1]), y: py(line.nM[line.nM.length - 1]) });
 
   return (
-    <ChartFrame label="Plan view" width={m.width} height={PLAN_H}
+    <ChartFrame captionIndent={GUTTER} label="Plan view" width={m.width} height={PLAN_H}
       caption="plan view · km east × km north of the airport's reference point, framed on the track">
       <defs>
         <clipPath id={clip}>

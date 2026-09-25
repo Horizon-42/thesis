@@ -49,7 +49,7 @@ import {
   type TrainingVocabulary,
 } from "../data/trainingSample";
 import type { TrainingExecutorFlight } from "../data/trainingOverlays";
-import type { TrainingAutopilotSegment } from "../data/trainingAutopilot";
+import { autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
 import { TRAINING_OUTCOME_TAG, TRAINING_VERDICT_TEXT } from "../data/trainingText";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import TrainingWindow from "./training/TrainingWindow";
@@ -59,8 +59,6 @@ import ReadbackPlan from "./training/ReadbackPlan";
 import ReadbackHeading from "./training/ReadbackHeading";
 import ReadbackAltitude from "./training/ReadbackAltitude";
 import ReadbackSpeed from "./training/ReadbackSpeed";
-
-export { extent } from "./training/readbackModel";
 
 const DEFAULT_W = 980;
 const MIN_W = 420;
@@ -131,7 +129,8 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
   const [frame, width] = useMeasuredWidth(MIN_W, DEFAULT_W);
   const m = readbackModel({ ...props, width });
   const replay = executor === null ? null : replaySlot(m, executor);
-  const live = m.live;
+  // the live answer is named whether or not it has a line to draw (`m.live`)
+  const live = props.autopilot;
   const liveWord = live === null ? null
     : m.label(live.segment.column, flight.words.inForce[TRAINING_COLUMN_INDEX[live.segment.column]][live.segment.row]);
 
@@ -162,8 +161,10 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
                   "the word was said — its track, altitude (against the distance flown, from the observed aircraft's there) " +
                   "and ground speed on the flight's own clock." + (m.liveBand ? " Its heading band is the outline on the " +
                   "heading chart, as its judge read the flown segment, its rows outside red." : "")}>
-                <strong style={{ color: m.liveColour }}>Autopilot</strong> — {live.segment.column} {liveWord} from step{" "}
-                {live.segment.row} · {TRAINING_VERDICT_TEXT[live.word.status]} · solid {live.word.status === "outside" ? "red" : "blue"}
+                <strong style={{ color: autopilotColour(live) }}>Autopilot</strong> — {live.segment.column} {liveWord} from step{" "}
+                {live.segment.row} · {TRAINING_VERDICT_TEXT[live.word.status]} ·{" "}
+                {m.live === null ? "no line to draw: it ended in its first cycle"
+                  : `solid ${live.word.status === "outside" ? "red" : "blue"}`}
               </p>
             ) : null}
           </div>

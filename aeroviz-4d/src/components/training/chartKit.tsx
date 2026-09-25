@@ -15,10 +15,12 @@ function pointerAt(event: MouseEvent<SVGSVGElement>): { x: number; y: number } {
   return { x: event.clientX - box.left, y: event.clientY - box.top };
 }
 
-/** A chart: its caption above, the SVG below; hovering calls ``onPointer``, a click ``onPick``. */
-export function ChartFrame({ label, caption, width, height, onPointer, onPick, children }: {
+/** A chart: its caption above (indented to the plot's left edge), the SVG below; hovering calls ``onPointer``, a click
+ *  ``onPick``. */
+export function ChartFrame({ label, caption, captionIndent = 0, width, height, onPointer, onPick, children }: {
   label: string;
   caption?: ReactNode;
+  captionIndent?: number;
   width: number;
   height: number;
   onPointer?: (x: number, y: number) => void;
@@ -27,7 +29,7 @@ export function ChartFrame({ label, caption, width, height, onPointer, onPick, c
 }) {
   return (
     <>
-      {caption === undefined ? null : <p className="training-readback-caption">{caption}</p>}
+      {caption === undefined ? null : <p className="training-readback-caption" style={{ paddingLeft: captionIndent }}>{caption}</p>}
       <svg className="training-readback-svg" width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-label={label}
         onMouseMove={onPointer && ((event) => {
           const { x, y } = pointerAt(event);
@@ -70,17 +72,18 @@ export function VLine({ x, top, bottom, className, stroke, dash, title }: {
 }
 
 /** Points as an SVG `points` attribute. */
-export function pointsOf(xs: number[], ys: number[]): string {
+function pointsOf(xs: number[], ys: number[]): string {
   return xs.map((x, index) => `${x},${ys[index]}`).join(" ");
 }
 
-/** A line through points. */
-export function Line({ xs, ys, stroke, width, className, dash, opacity, title }: {
-  xs: number[]; ys: number[]; stroke: string; width: number; className?: string; dash?: string; opacity?: number; title?: string;
+/** A line through points; its ends square unless ``round`` (a round cap would close a dash's gaps). */
+export function Line({ xs, ys, stroke, width, className, dash, opacity, round, title }: {
+  xs: number[]; ys: number[]; stroke: string; width: number; className?: string; dash?: string; opacity?: number;
+  round?: boolean; title?: string;
 }) {
   return (
     <polyline points={pointsOf(xs, ys)} fill="none" stroke={stroke} strokeWidth={width} strokeDasharray={dash}
-      strokeOpacity={opacity} strokeLinecap="round" className={className}>
+      strokeOpacity={opacity} strokeLinecap={round ? "round" : undefined} className={className}>
       {title === undefined ? null : <title>{title}</title>}
     </polyline>
   );

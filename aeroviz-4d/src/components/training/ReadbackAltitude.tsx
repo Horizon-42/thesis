@@ -32,7 +32,7 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
   const rowsOf = (first: number, count: number) => m.rows(first, first + count - 1);
 
   return (
-    <ChartFrame label="Altitude chart" width={m.width} height={CHART_H} onPointer={pick}
+    <ChartFrame captionIndent={GUTTER} label="Altitude chart" width={m.width} height={CHART_H} onPointer={pick}
       onPick={(x) => {
         pick(x);
         onColumnChange("altitude");
@@ -90,7 +90,7 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
       ) : null}
       {(m.column === "altitude" || m.column === "angle") && m.focusRows.length >= 2 ? (
         <Line xs={m.focusRows.map(rowXDistance)} ys={m.focusRows.map((row) => yAltitude(signals.smoothed.altitudeM[row]))}
-          stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} className="training-readback-focus" />
+          stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} round className="training-readback-focus" />
       ) : null}
       {m.live ? (
         <Line xs={m.live.track.distanceM.map(xDistance)} ys={m.live.track.altitudeM.map(yAltitude)} stroke={m.liveColour}

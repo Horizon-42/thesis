@@ -28,7 +28,7 @@ export default function ReadbackSpeed({ m, onCursorChange, onColumnChange }: {
   const pick = (x: number) => onCursorChange(m.timeAtX(x));
 
   return (
-    <ChartFrame label="Speed chart" width={m.width} height={CHART_H} onPointer={pick}
+    <ChartFrame captionIndent={GUTTER} label="Speed chart" width={m.width} height={CHART_H} onPointer={pick}
       onPick={(x) => {
         pick(x);
         onColumnChange("speed");
@@ -88,7 +88,7 @@ export default function ReadbackSpeed({ m, onCursorChange, onColumnChange }: {
       ) : null}
       {m.column === "speed" && m.focusRows.length >= 2 ? (
         <Line xs={m.focusRows.map(rowX)} ys={m.focusRows.map((row) => ySpeed(signals.smoothed.groundSpeedMps[row]))}
-          stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} className="training-readback-focus" />
+          stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} round className="training-readback-focus" />
       ) : null}
       {m.live ? (
         <Line xs={m.live.track.tS.map(xTime)} ys={m.live.track.groundSpeedMps.map(ySpeed)} stroke={m.liveColour} width={1.8}

@@ -20,6 +20,7 @@ import { useApp } from "../context/AppContext";
 import { TRAINING_OUTSIDE_COLOR } from "../utils/trainingWordColors";
 import {
   autopilotColour,
+  autopilotHasLine,
   autopilotOnScreen,
   autopilotWord,
   TRAINING_AUTOPILOT_SEGMENT_END,
@@ -169,7 +170,9 @@ export default function TrainingAutopilotCard() {
           computed at {segment.computedUtc}
         </p>
       </details>
-      <button type="button" className="training-autopilot-button" onClick={replayTrainingAutopilot}>Replay in 3D</button>
+      {autopilotHasLine(segment) ? (
+        <button type="button" className="training-autopilot-button" onClick={replayTrainingAutopilot}>Replay in 3D</button>
+      ) : null}
     </section>
   );
 }

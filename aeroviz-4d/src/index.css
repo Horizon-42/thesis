@@ -1290,7 +1290,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 /* A chart's caption: HTML above its SVG, so a long reading wraps instead of being clipped. */
 .training-readback-caption {
   margin: 6px 0 1px;
-  padding-left: 64px;
   font-size: 10.5px;
   line-height: 1.35;
   color: rgba(224, 230, 240, 0.62);
@@ -1383,7 +1382,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
 }
 
 .training-sentence-executor,
-.training-sentence-prior,
 .training-sentence-autopilot {
   font-size: 11px;
 }

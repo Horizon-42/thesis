@@ -53,10 +53,10 @@ export default function TrainingLegend({ layers, vocabulary, executorTrack, auto
     { key: "executor", swatch: { kind: "line", colour: TRAINING_EXECUTOR_COLOR }, shown: executorTrack, text: "executor replay",
       title: "teal: the executor's flown track (dashed on the ground), the truth sentence flown from row 0; red on its " +
         "ground trace: its rows outside the heading word it was told" },
-    { key: "autopilot", swatch: { kind: "line", colour: autopilotColour ?? TRAINING_TRACE_COLOR }, shown: autopilotColour !== null,
-      text: "autopilot segment",
+    ...(autopilotColour === null ? [] : [{ key: "autopilot", swatch: { kind: "line", colour: autopilotColour } as Swatch,
+      shown: true, text: "autopilot segment",
       title: "the picked word's segment, flown live by the executor (dashed on the ground): blue inside the word's " +
-        "envelope, red outside it" },
+        "envelope, red outside it" }]),
   ];
 
   return (

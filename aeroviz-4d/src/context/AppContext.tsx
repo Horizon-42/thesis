@@ -396,8 +396,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [trainingCursor, setTrainingCursor] = useState<{ scope: string | null; atS: number }>({ scope: null, atS: 0 });
   if (trainingCursor.scope !== trainingScope) setTrainingCursor({ scope: trainingScope, atS: 0 });
   const trainingCursorS = trainingCursor.scope === trainingScope ? trainingCursor.atS : 0;
+  // a setter captured before the flight changed is of the last flight: it writes nothing
   const setTrainingCursorS = useCallback((atS: number) => {
-    setTrainingCursor({ scope: trainingScope, atS });
+    setTrainingCursor((current) => (current.scope === trainingScope ? { scope: trainingScope, atS } : current));
   }, [trainingScope]);
   const [trainingPicked, setTrainingPicked] = useState<{ scope: string | null; pick: TrainingPick | null }>({
     scope: null, pick: null,
@@ -405,7 +406,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   if (trainingPicked.scope !== trainingScope) setTrainingPicked({ scope: trainingScope, pick: null });
   const trainingPick = trainingPicked.scope === trainingScope ? trainingPicked.pick : null;
   const setTrainingPick = useCallback((pick: TrainingPick | null) => {
-    setTrainingPicked({ scope: trainingScope, pick });
+    setTrainingPicked((current) => (current.scope === trainingScope ? { scope: trainingScope, pick } : current));
   }, [trainingScope]);
   const [trainingColumn, setTrainingColumn] = useState<TrainingColumn | null>(null);
   const [trainingLayers, setTrainingLayers] = useState<TrainingLayers>({

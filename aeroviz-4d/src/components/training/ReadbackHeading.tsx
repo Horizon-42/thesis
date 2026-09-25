@@ -54,7 +54,7 @@ export default function ReadbackHeading({ m, onCursorChange, onColumnChange }: {
   const pick = (x: number) => onCursorChange(m.timeAtX(x));
 
   return (
-    <ChartFrame label="Heading chart" caption={caption} width={m.width} height={CHART_H} onPointer={pick}
+    <ChartFrame captionIndent={GUTTER} label="Heading chart" caption={caption} width={m.width} height={CHART_H} onPointer={pick}
       onPick={(x) => {
         pick(x);
         onColumnChange("heading");
@@ -142,7 +142,7 @@ export default function ReadbackHeading({ m, onCursorChange, onColumnChange }: {
       )) : null}
       {m.column === "heading" && m.focusRows.length >= 2 ? (
         <Line xs={m.focusRows.map(rowX)} ys={m.focusRows.map((row) => yHeading(signals.smoothed.trackDeg[row]))}
-          stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} className="training-readback-focus" />
+          stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} round className="training-readback-focus" />
       ) : null}
       {m.live ? (
         <Line xs={m.live.track.tS.map(xTime)} ys={m.live.track.trackDeg.map(yHeading)} stroke={m.liveColour} width={1.8}

@@ -8,7 +8,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import TrainingReadbackWindow, { extent } from "../TrainingReadbackWindow";
+import TrainingReadbackWindow from "../TrainingReadbackWindow";
+import { extent } from "../training/readbackModel";
 import { parseTrainingSample, type TrainingColumn } from "../../data/trainingSample";
 import { mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
