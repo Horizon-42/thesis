@@ -94,7 +94,6 @@ import math
 
 import torch
 
-from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from ts_transformer.config import TSConfig
 from ts_transformer.outputs.constraints.gates import on_final_weight, runway_axes_view
 from ts_transformer.outputs.constraints.saturation import (
@@ -102,6 +101,9 @@ from ts_transformer.outputs.constraints.saturation import (
     SATURATION_SOFTNESS_RAD,
     soft_max,
     soft_min,
+)
+from ts_transformer.outputs.constraints.turning import (
+    bank_for_heading_change, committed_turn, coordinated_load, lag_effective_s, turn_scale,
 )
 from ts_transformer.outputs.constraints.vertical import VerticalChannel
 from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
@@ -146,7 +148,7 @@ class BarrierFilter:
         # produce the part of the turn the hold has not already committed to — and the
         # corridor barriers are evaluated where the aircraft will be when the command
         # first bites (the current velocity carried for τ_eff), not where it is now.
-        tau_eff = self.bank_lag_s * (1.0 - torch.exp(-hold / self.bank_lag_s))
+        tau_eff = lag_effective_s(self.bank_lag_s, hold)
         d_lead = view.d - view.ground_speed * view.cos_align * tau_eff
         xt_lead = view.xt - view.ground_speed * torch.sin(view.heading_error) * tau_eff
         halfwidth_lead = corridor_halfwidth(d_lead)
@@ -171,19 +173,16 @@ class BarrierFilter:
         heading_change_min = -heading_gain * hold * (view.heading_error - lower)
         heading_change_max = heading_gain * hold * (upper - view.heading_error)
         actuators = state.actuators.to(view.d.dtype)
-        committed = torch.tan(actuators[:, 1]) * tau_eff
-        # The vertical lift factor n·cos μ being flown sets the turn rate a bank produces
-        # (the coordination below keeps the commanded one, so the two agree once the
-        # actuators settle); the load the contract's law resolves from the actuator state, so
-        # the bounds stay a function of the state alone. Floored well below any flown value.
-        lift = (self.vertical.flown_load(state, actuators) * torch.cos(actuators[:, 1])).clamp(min=0.5)
-        scale = view.ground_speed / (GRAVITY_MPS2 * lift)
+        committed = committed_turn(actuators, tau_eff)
+        # The vertical lift factor n·cos μ being flown sets the turn rate a bank produces (the
+        # coordination below keeps the commanded one, so the two agree once the actuators settle).
+        scale = turn_scale(view.ground_speed, self.vertical, state, actuators)
         bank, load = command[:, 1], command[:, 2]
-        tan_min = (scale * heading_change_min - committed) / (hold - tau_eff)
-        tan_max = (scale * heading_change_max - committed) / (hold - tau_eff)
         # Both bounds into the envelope (min ≤ max survives, so the interval cannot invert).
-        bank_min = torch.atan(tan_min).to(dtype).clamp(-MAX_BANK_RAD, MAX_BANK_RAD)
-        bank_max = torch.atan(tan_max).to(dtype).clamp(-MAX_BANK_RAD, MAX_BANK_RAD)
+        bank_min = bank_for_heading_change(heading_change_min, scale, committed, hold, tau_eff).to(dtype).clamp(
+            -MAX_BANK_RAD, MAX_BANK_RAD)
+        bank_max = bank_for_heading_change(heading_change_max, scale, committed, hold, tau_eff).to(dtype).clamp(
+            -MAX_BANK_RAD, MAX_BANK_RAD)
         if self.hard:
             bounded = torch.minimum(torch.maximum(bank, bank_min), bank_max)
         else:
@@ -194,8 +193,8 @@ class BarrierFilter:
             # hard gate, and the hard gate is the trombone's complement.
             weight = weight * on_final_weight(view, hard=True).to(dtype)
         filtered = (bank + weight * (bounded - bank)).clamp(min=-MAX_BANK_RAD, max=MAX_BANK_RAD)
-        # Keep the vertical lift component the network paired with its vertical command.
-        coordinated = self.vertical.keep_lift(load, bank, filtered)
+        # Keep the vertical lift component the network paired with its vertical command, where the bank moved.
+        coordinated = coordinated_load(self.vertical, load, bank, filtered)
         change = (filtered - bank).abs().detach()
         gated = (weight > 0.5).detach()
         counts = torch.stack((

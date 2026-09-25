@@ -207,7 +207,6 @@ import math
 
 import torch
 
-from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
 from ts_transformer.config import TROMBONE_SURPLUS_REFERENCE_ROLLOUT, TSConfig
 from ts_transformer.outputs.constraints.gates import on_final_weight, runway_axes_view
 from ts_transformer.outputs.constraints.saturation import (
@@ -218,6 +217,9 @@ from ts_transformer.outputs.constraints.saturation import (
 )
 from ts_transformer.outputs.constraints.speed_floor import floor_speed
 from ts_transformer.outputs.dynamics.hooks import HOOK_STEPS_KEY, RolloutStateView
+from ts_transformer.outputs.constraints.turning import (
+    bank_for_heading_change, committed_turn, coordinated_load, lag_effective_s, turn_scale,
+)
 from ts_transformer.outputs.constraints.vertical import VerticalChannel
 from ts_transformer.outputs.envelope import MAX_BANK_RAD
 from ts_transformer.geometry.final_approach_geometry import (
@@ -406,19 +408,15 @@ class Trombone:
         target = beeline + torch.where(outbound, self._side, -self._side) * offset
 
         # ── the bank that turns onto it, over a hold, through a lagging actuator ──────
-        tau_eff = self.bank_lag_s * (1.0 - torch.exp(-hold / self.bank_lag_s))
+        tau_eff = lag_effective_s(self.bank_lag_s, hold)
         actuators = state.actuators.to(real)
-        committed = torch.tan(actuators[:, 1]) * tau_eff
+        committed = committed_turn(actuators, tau_eff)
         # The vertical lift factor being flown sets the turn rate a bank produces; the
-        # coordination below keeps the commanded one, so the two agree once the actuators
-        # settle. Floored well below any flown value, as the barrier floors it.
-        lift = (self.vertical.flown_load(state, actuators) * torch.cos(actuators[:, 1])).clamp(min=0.5)
-        scale = view.ground_speed / (GRAVITY_MPS2 * lift)
+        # coordination below keeps the commanded one, so the two agree once the actuators settle.
+        scale = turn_scale(view.ground_speed, self.vertical, state, actuators)
         change = target - view.heading_error
         change = torch.atan2(torch.sin(change), torch.cos(change))
-        demand = torch.atan(
-            (scale * change - committed) / (hold - tau_eff)
-        ).to(dtype)
+        demand = bank_for_heading_change(change, scale, committed, hold, tau_eff).to(dtype)
         cap = torch.full_like(demand, TURN_BANK_MAX_RAD)
         if self.hard:
             turn = torch.minimum(torch.maximum(demand, -cap), cap)
@@ -434,12 +432,9 @@ class Trombone:
             ramp = torch.tanh((surplus.clamp(min=0.0) / ENGAGE_SCALE_M) ** 2)
             weight = (engaged.to(real) * ramp).to(dtype)
         filtered = (bank + weight * (turn - bank)).clamp(min=-MAX_BANK_RAD, max=MAX_BANK_RAD)
-        # Keep the vertical lift component the network paired with its load factor — but only
-        # where the bank actually moved. `(load * cos b) / cos b` is NOT the identity in IEEE
-        # (measured: it differs by an ULP for ~40 % of operand pairs), and a hook that is
-        # supposed to be inert must not perturb the load of a row it never touched: the
-        # arm-vs-arm "to the bit" comparison is exactly what that inertness is for.
-        coordinated = torch.where(filtered == bank, load, self.vertical.keep_lift(load, bank, filtered))
+        # Keep the vertical lift component the network paired with its load factor, where the bank moved
+        # (the arm-vs-arm "to the bit" comparison is what the untouched rows are for).
+        coordinated = coordinated_load(self.vertical, load, bank, filtered)
 
         moved = (filtered - bank).abs().detach()
         engaged_f = engaged.to(torch.float64)

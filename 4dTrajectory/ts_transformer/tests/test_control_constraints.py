@@ -2010,3 +2010,22 @@ def test_under_the_path_angle_contract_the_trombone_prices_the_loop_load_and_kee
     assert torch.allclose(pa[:, 1], sf[:, 1], rtol=1e-12, atol=0.0)
     assert not torch.allclose(pa[:, 1], one_g[:, 1], rtol=1e-6, atol=0.0)
     assert torch.equal(pa[:, 2], command[:, 2])
+
+
+@pytest.mark.parametrize("saturation", [HOOK_SATURATION_SOFT, HOOK_SATURATION_HARD])
+def test_the_barrier_leaves_the_load_of_a_row_it_did_not_move_to_the_bit(saturation):
+    """`(n cos μ) / cos μ` is not the identity in IEEE: a row whose bank the barrier did not move keeps its load exactly
+    (`turning.coordinated_load`), as the trombone's does — off the final the hard barrier is inert."""
+    loads = torch.linspace(0.8, 1.4, 257, dtype=torch.float64)
+    rows = [_view([40_000.0], [9_000.0], heading_error_rad=0.4) for _ in range(len(loads))]
+    view = RolloutStateView(chart=torch.cat([r.chart for r in rows]), actuators=torch.cat([r.actuators for r in rows]),
+                            duration_s=torch.cat([r.duration_s for r in rows]),
+                            remaining_s=torch.cat([r.remaining_s for r in rows]), reference=None)
+    command = _command(torch.linspace(-0.4, 0.4, len(loads), dtype=torch.float64))
+    command[:, 2] = loads
+    config = _hook_config(control_command_hook=CONTROL_HOOK_BARRIER, control_hook_saturation=saturation)
+    hard = saturation == HOOK_SATURATION_HARD
+    out = BarrierFilter(config, _context(len(loads)), hard=hard)(view, command, 0)
+    unmoved = out[:, 1] == command[:, 1]
+    assert bool(unmoved.all()) if hard else True          # the hard gate is shut this far out; the soft one leaks
+    assert torch.equal(out[unmoved, 2], command[unmoved, 2])

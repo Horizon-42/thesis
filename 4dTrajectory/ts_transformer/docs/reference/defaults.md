@@ -194,6 +194,14 @@ Two rules that cost real trajectories when missed: a hook that changes the bank 
 re-coordinate the load factor**, and every rate gain must be `min(gain, 1/Δt)` because the
 command is HELD.
 
+**Note (2026-09-25):** the barrier and the trombone command through ONE inversion,
+`outputs/constraints/turning.py` — the lag credit `τ_eff = τ(1 − e^{−dt/τ})`, the flown lift factor floored at
+`LIFT_FLOOR` = 0.5, `bank_for_heading_change`, and `coordinated_load`, which re-coordinates the load only on a row whose
+bank moved. The trombone's outputs are bit-identical to before; the barrier's bank is too, and its load now stays
+untouched on rows it did not move — it moved them by up to one ULP before (`(n cos μ)/cos μ ≠ n` in IEEE), measured
+on 4,000 random states (173 rows hard, 73 soft, never more than 1 ULP). Published barrier runs
+(`control_hooks_v2_20260906`) were not re-run: a re-run differs from them by those ULPs.
+
 ### H2 · a hook acts through the controls — the speed floor (L3.d)
 
 **A hook acts THROUGH the controls, never on the state.** The speed floor (L3.d) is the second
