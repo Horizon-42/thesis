@@ -13,8 +13,8 @@ from ts_transformer.data.runway_context import (
     bearing_sector,
     direction_groups,
     load_metar,
-    operational_day,
 )
+from ts_transformer.data.day_split import operational_day
 
 T0 = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 COURSES = {"05L": 45.0, "05R": 45.0, "23L": 225.0, "23R": 225.0}

@@ -14,7 +14,7 @@
 | 项 | 内容 |
 |---|---|
 | 词表 | 读法 `instruction-v3`（航向词按步读，词表设计 §10.1）。**v3 的规格还没写**：前端钉住的规格 sha `TRAINING_SPEC_SHA256` 仍是 `instruction-v2` 的 `103a6eae6b90`，所以现在任何 v3 集合都会按规格 sha 被拒读；写 v3 规格的那一次改动（另一个会话，分支 `dev-vocab-v3`）把它换成新 sha |
-| 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v1`（形状没变） |
+| 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v2`（2026-09-24 先验第二版：形状没变，第 0 步已知的五列是点质量、读数口径是第 0 步只算跑道） |
 | 前端代码 | `src/data/trainingSample.ts`（数据契约与读取）、`src/data/trainingOverlays.ts`（叠加层的契约与读取）、`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend}.tsx`、`src/hooks/useTrainingTrackLayer.ts`、`src/hooks/useTrainingOverlays.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
 | 分支 | v3 的导出与界面在 `dev-vocab-v3-frontend`（从 `dev-vocab-v3` 的 `ba77d65c` 分出）：代码与测试 `8f7a8640`，文档在其后一个提交；用户合并 |
 | 发布 | **v3 还没有任何集合**（没有 v3 产物可导）。盘上现有的 `instruction_v2` 集合（样本 v5）和画在上面的执行器 / 先验叠加层（执行器 v1）都按名字拒读：集合按读法，叠加层按所画集合与格式名。它们的发布记录见仓库 `docs/CHANGELOG.md` 2026-09-24 各条 |
@@ -156,9 +156,10 @@ python run_ts.py prior_training_export \
   的航班不画带**：判决读到了失败的那个状态（可能不是有限值），而导出的航迹有意不含它；这些航班的词照样有判决的状态和检查，
   只是没有航向带和判决读到的航迹。回放不飞的航班（没有识别出机型、机型没有公开进近速度）
   列出原因，没有航迹。飞出的航迹每 2 s 一点，到结局那一行，带 MSL 与椭球高；还附上这个机场与全部机场的回放门表。
-- **先验**（`prior.json`，`aeroviz-training-prior-v1`）：检查点必须是这份产物的规格与标注器训练的、不是冒烟试跑、候选跑道表
-  与产物相同、状态整份载入。推断用教师强制（每一步看到真值句子在它之前的词），与训练和读数时一样；这条推断路径在全部
-  10,540 架 val 航班上复现 `readout.json` 的每步负对数似然到 1e-9。每架航班每列每步：说一个词的概率、若说一个词最可能的
+- **先验**（`prior.json`，`aeroviz-training-prior-v3`；第三版起前 `firstPredictedRow`（= 8）行只观察、没有预测，每列每步的数组
+  从第一个预测步开始；第一个预测步六列都要说；跑道在第一个预测步之后不再换，它的"换词"指标为空）：检查点必须是这份产物的规格、
+  标注器与运行日划分训练的、不是冒烟试跑、候选跑道表与产物相同、状态整份载入，并且今天的航迹清单与训练时的相同（落地情况从它读）。推断用教师强制（每一步看到真值句子在它之前的词），与训练和读数时一样；第三版的先验导出时，要核对这条推断
+  路径在 val 航班上复现 `readout.json` 的每步负对数似然（第二版核对过：10,540 架，差 1e-9 以内）。每架航班每列每个预测步：说一个词的概率、若说一个词最可能的
   3 个词（列的取值少于 3 个时更少，例如一个机场的候选跑道）及其概率、真值的概率；每架航班每步的负对数似然（总的和
   分列的，四舍五入前算）。val 的读数随文件一起走，原样照抄。
 - **绑定与核对**：叠加层自己写出所画集合的 id、样本的写出时刻、规格 sha；前端逐项核对，并核对每架航班的键、执行器的

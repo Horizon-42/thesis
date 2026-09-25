@@ -31,12 +31,11 @@ from typing import Any
 
 from ts_transformer.experiments.support import REPO_ROOT
 
+from ts_transformer.data.day_split import operational_day, parse_utc  # noqa: E402
 from ts_transformer.data.runway_context import (  # noqa: E402
     RULES,
     ContextLanding,
     build_airport_context,
-    operational_day,
-    parse_utc,
 )
 from ts_transformer.data.runway_features import ENTRY, anchors, track_course_at  # noqa: E402
 from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
@@ -59,7 +58,7 @@ FLIP_MAX_GAP = timedelta(hours=3)
 
 def day_fold(day: str, config: Any) -> str:
     """A day-blocked split with the checkpoint's own seed and fractions (plan §6, D1); ``day``
-    is an OPERATING day (`runway_context.operational_day`)."""
+    is an OPERATING day (`day_split.operational_day`)."""
     digest = hashlib.sha256(f"{config.resolved_split_seed}:day:{day}".encode()).digest()
     fraction = int.from_bytes(digest[:8], "big") / 2**64
     if fraction < config.test_fraction:

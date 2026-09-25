@@ -181,9 +181,11 @@ The no-token executor's own axes — lookback L × segment Δ, `docs/experiments
 ### R10 · the instruction labeller: `instruction_signals` → `instruction_spec` → `instruction_labels` → `instruction_figures`
 
 2026-09-23 (`docs/2026-09-23_instruction_vocabulary_design.zh.md` §3, §7–§8; artefact contract C30).
-`instruction_signals --out <new dir> [--airports …] [--workers N] [--limit N]` reads the train and
-val flights of every harvested airport (process pool, 500 keys per chunk, spawn), writes the signals
-and `candidates.json`; `--limit` is a SMOKE option recorded in `signals.json`. `instruction_spec --dir`
+`instruction_signals --out <new dir> [--airports …] [--workers N] [--limit N]` deals the eligible arrivals by the
+committed day split (C32; refused when the harvest's days are not its days), reads the train, select and val flights
+(process pool, 500 keys per chunk, spawn) — a test day's flight is only counted from the roster, with how many of
+them the per-flight split also holds out — and writes the signals (with the day split) and `candidates.json`;
+`--limit` is a SMOKE option recorded in `signals.json`. `instruction_spec --dir`
 measures on TRAIN only, and only on the flights and rows the labeller admits (`read.admit`; the
 refusals are counted in `measurements.json` `not_admitted`) — pass A with `measure.provisional_spec()`
 (the mean turn rate of turns ≥ `turn_rate_min_from_deg`, the rate and bank of their rows, speed transition accelerations, the course error on
@@ -191,7 +193,7 @@ the last 1.5 km flown, the move-piece angles for the descent classes, and the tr
 for the bands the two CHOSEN tolerances are read against: `sensitivity`), pass B with the measured
 course tolerance (the aligned final's offsets by distance, the heading grid comparison on the rows
 before it) — and writes `spec.json` (`measure.SUGGESTED` + `MeasuredValues`, the labeller source
-hash, the git state; the rules in `measurements.json`). `instruction_labels --dir` reads train and
+hash, the git state; the rules in `measurements.json`). `instruction_labels --dir` reads train, select and
 val with that spec — refusing a spec measured by other code — and writes the sentences, `labels.json`
 and the readout. `instruction_figures --dir
 [--count 24] [--seed 1337]` draws a seeded half straight-in / half vectored sample of VAL flights into
@@ -286,10 +288,14 @@ repository — outside from a worktree (as when the spec was measured), inside f
 refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 flights on CPU.
 
 `prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v3 --airport
-ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v1`): the checkpoint is refused
-unless it is `ts-prior-checkpoint-v1` of the artefact's spec and labeller, not a smoke run, its candidate table equal to
-the artefact's and its state loading whole; inference is teacher-forced over the stored sentence (`prior.data.flight_steps`),
-as it was trained and read out. Per flight, column and step: `changeP` (1 − P(unchanged)), the `k` most likely words given
+ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v3` since the prior's third
+version: the per-step arrays cover the predicted steps only, from `firstPredictedRow` = `N_LOOK`; null change metrics for a
+column that never changes after the first step; the first-step runway beside the airport frequency and the rules — older
+names are refused): the checkpoint is refused unless `prior_train.load_prior` opens it on the artefact (spec, labeller,
+day split, candidate table, a whole state), it is not a smoke run and — for a variant that reads the landing context —
+today's tracks rosters are the ones it trained with, by sha256 (`prior_train.roster_digests`; never the path, which is
+the checkout's: a prior trained in a worktree is exported from the main checkout); inference is teacher-forced over the stored sentence (`prior.data.flight_record`), as it was trained
+and read out. Per flight, column and predicted step: `changeP` (1 − P(unchanged)), the `k` most likely words given
 a word is said (`TOP_K` 3, fewer where the column has fewer values: an airport's candidate runways) and their
 probabilities, `truthP`; each flight's NLL per step in all and per column, computed before rounding
 (`PROBABILITY_DIGITS` 4). The val `readout.json` travels unchanged. The inference path reproduces `readout.json`'s val NLL
@@ -339,3 +345,38 @@ find their flight by dataset id (`tag_rows`: `fly_variant` returns them grouped 
 "onto final" (an H1 inserted intercept ≥ 90°). Also one line per variant over every drawn flight, a refusal counted as a
 failure. Writes `compare.json` (`ts-heading-reading-compare-v1`), `compare.md`, `records/<variant>/<ICAO>/`,
 `observed/<ICAO>/` into a NEW directory. The measurement of 2026-09-24: `outputs/POOLED/analyses/heading_reading_20260924/`.
+
+### R15 · the prior: `prior_train` → `prior_select` (prior design §7–§9, step 1)
+
+2026-09-24, the third version. `prior_train --instructions <artefact split by day> --variant full|no-context|unordered
+--out <campaign>/<variant>_s<seed> [--seed N] [--device cuda] [--limit N] [TrainConfig fields]` trains ONE variant
+(`prior.data.VARIANTS`: the landing context in the candidates' vectors, the ordered heads) on single-aircraft scenes of the
+artefact's train split, early-stops on val (per-epoch NLL per predicted step only) and reads the SELECT split (its own
+operating days): `selection_readout.json` — per column the NLL per predicted step (all; after the first), the first
+predicted step's top-1, after it P(change) / top-1 / top-5 where a word is said (null for a column that never changes
+there, the runway) and false changes; the first-step runway's top-1 / top-2, by direction and side, established on the
+final at `N_LOOK` or not, per airport (`prior.readout.runway_breakdown`), beside each airport's own runway frequency and the
+causal rules B0 / B1 / B3 (`prior.readout.runway_rules`: the tracks roster's landings less the sealed test days, the
+artefact's entry sectors, B0's majority from train-day landings); the two baselines counted from its own training
+flights. Also `checkpoint.pt` (`ts-prior-checkpoint-v3`), `config.json` (the artefact's spec, labeller and day split, the
+tracks rosters' sha256, `n_look`, the git state), `history.json`. A clean tree unless `--limit` (SMOKE: the first N flights
+of each split). `prior_select --campaign <dir> [--seed 1337] [--replicate-seed 2024]` reads every run (one comparison:
+artefact, rosters, training settings but the seed, smoke limit, commit — and this code that commit), applies the rule
+(readouts doc §4): the leader at the seed, the seed line = |full at the seed − full at the replicate|, the first of
+`PREFERENCE` (no-context, full, unordered) within the line; reads val ONCE on the chosen run and only then writes
+`choice.json` (`ts-prior-choice-v2`) and the chosen run's `readout.json` — neither is ever overwritten. Tests:
+`tests/test_prior.py` (both runners end to end on a synthetic artefact and tracks roster, every write in `tmp_path`).
+
+### R16 · `run_ts.py prior_scene_census` — the scene prior's step 0 (prior design §9)
+
+2026-09-24. `prior_scene_census --instructions <artefact split by day> --out <new dir>` reads the TRAIN days only:
+the split sizes from `signals.json` (days, flights, test-day flights and how many the flight split also holds out);
+sentence lengths, how many have no predicted step (≤ `prior.scene.N_LOOK` rows), the share captured at row `N_LOOK`
+(`capture_row` ≤ `N_LOOK`) and cleared before it (`join_row` < `N_LOOK`); per predicted step (rows `N_LOOK`…end): the other aircraft in the
+scene with a sentence and without one (background: refused by the labeller), whether a LEADER is there (design §8: lands
+earlier on the same observed runway and is at most `LEADER_RANGE_M` = 10 km closer to its threshold, straight-line; the
+nearest one's gap is recorded), whether the airport had a landing on a candidate runway in the previous `CONTEXT_WINDOW_S`
+(30 min; the tracks roster's assigned landings minus the sealed test days, `prior.scene.context_landings`) and how
+often that window reaches back into a test day; and the segments the flights chain into by overlapping time. Only
+train-day flights are in the scene index (a step near 09Z misses the adjacent day's neighbours); departures and
+overflights are in no scene. Records each tracks roster's sha256. Writes `census.json`.

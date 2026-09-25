@@ -1,7 +1,7 @@
-"""Instruction labeller, step 3: read every train and val flight into its sentence with the
-spec of step 2, and write the sentences and the readout (vocabulary design §7).
+"""Instruction labeller, step 3: read every flight of every split (train, select, val) into its sentence
+with the spec of step 2, and write the sentences and the readout (vocabulary design §7).
 
-Writes ``sentences_{train,val}.npz``, ``labels.json``, ``readout.json`` and ``readout.md``
+Writes ``sentences_{train,select,val}.npz``, ``labels.json``, ``readout.json`` and ``readout.md``
 into the signals directory (never over an existing file). The candidate runways are the
 artefact's own ``candidates.json`` (written with the signals).
 
@@ -67,7 +67,7 @@ def render(summary: dict[str, Any], spec: VocabularySpec) -> str:
     for split in SPLITS:
         s = summary[split]
         lines.append(f"| {split} | {s['labelled']} | {s['refused']} |")
-    lines += ["", "拒绝原因（train + val）：", ""]
+    lines += ["", f"拒绝原因（{' + '.join(SPLITS)}）：", ""]
     reasons: dict[str, int] = {}
     for split in SPLITS:
         for reason, count in summary[split]["refusal_reasons"].items():
@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args(argv)
     directory = args.dir if args.dir.is_absolute() else REPO_ROOT / args.dir
-    for name in ("sentences_train.npz", "sentences_val.npz", "labels.json", "readout.json", "readout.md"):
+    for name in (*(f"sentences_{split}.npz" for split in SPLITS), "labels.json", "readout.json", "readout.md"):
         if (directory / name).exists():
             parser.error(f"{directory / name} exists; an instruction artefact is never overwritten")
     started = time.perf_counter()

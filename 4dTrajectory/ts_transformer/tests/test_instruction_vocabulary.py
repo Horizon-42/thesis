@@ -18,7 +18,7 @@ from ts_transformer.data.channels import channels_from_states
 from ts_transformer.instructions import envelope, measure
 from ts_transformer.instructions.airport import AirportGeometry, airport_geometry, relative_to_runway
 from ts_transformer.instructions.artefact import (
-    CANDIDATES_SCHEMA, labeller_source_sha256, load_candidates, load_sentences, load_signals, load_spec,
+    CANDIDATES_SCHEMA, labeller_source_sha256, load_candidates, load_day_split, load_sentences, load_signals, load_spec,
     require_current_labeller,
     write_candidates, write_sentences, write_signals, write_spec,
 )
@@ -29,7 +29,10 @@ from ts_transformer.instructions.spec import SPEC_SCHEMA, VocabularySpec
 from ts_transformer.instructions.words import (
     ANGLE_LEVEL, Words, compass_from_math_rad, math_rad_from_compass, wrap180,
 )
-from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec
+from ts_transformer.data.day_split import SealedDay
+from ts_transformer.tests.support import (
+    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec, landing_on,
+)
 
 
 @pytest.fixture
@@ -174,7 +177,8 @@ def _series(geometry, target_psi: float):
     lat0, lon0 = frame.latlon_from_horizontal(0.0, 0.0)
     target = GeodeticState(latitude=lat0, longitude=lon0, altitude=100.0, V=70.0, psi=target_psi, gamma=0.0, m=6.0e4)
     # A GLF4 is flown as its substitute CRJ9 (aircraft/performance_index.json).
-    scenario = SimpleNamespace(source={"runway": "09", "resolved_typecode": "GLF4"}, target=target,
+    scenario = SimpleNamespace(source={"runway": "09", "resolved_typecode": "GLF4", "entry_time_utc": "2026-06-01T11:58:00.5Z",
+                                       "landing_time_utc": "2026-06-01T12:00:00Z"}, target=target,
                                initial=samples[0][1], aircraft=SimpleNamespace(code="CRJ9"))
     return SimpleNamespace(airport="KXXX", dataset_id="KXXX:turn", scenario=scenario, times=times, values=values,
                            frame=frame), samples
@@ -196,6 +200,8 @@ def test_signals_from_a_series_are_an_unwrapped_compass_track_in_the_airport_fra
     series, samples = _series(geometry, float(math_rad_from_compass(90.0)))
     flight = signals_from_series(series, geometry)
     assert flight.runway == "09" and flight.typecode == "GLF4"     # its own type, not the flown one
+    # its absolute clock: row 0 at the arrival slice's entry, and the landing that names its day
+    assert (flight.entry_time_utc, flight.landing_time_utc) == ("2026-06-01T11:58:00.5Z", "2026-06-01T12:00:00Z")
     assert flight.track_deg.tolist() == pytest.approx([350.0 + 2.0 * row for row in range(11)], abs=1e-6)
     assert flight.ground_speed_mps.tolist() == pytest.approx([70.0 * math.cos(math.radians(3.0))] * 11)
     assert flight.vertical_rate_mps.tolist() == pytest.approx([70.0 * math.sin(math.radians(3.0))] * 11)
@@ -338,18 +344,20 @@ def test_the_measurements_read_only_the_admitted_rows(geometry):
 
 
 # ---- artefact
-def _signals(identifier: str, rows: int) -> FlightSignals:
+def _signals(identifier: str, rows: int, split: str = "train") -> FlightSignals:
     t = np.arange(rows) * 2.0
-    return FlightSignals(identifier, "KXXX", "09", "A320", t, -t * 70.0, np.zeros(rows), np.full(rows, 500.0),
-                         np.full(rows, 90.0), np.full(rows, 70.0), np.zeros(rows))
+    return FlightSignals(identifier, "KXXX", "09", "A320", "2026-06-01T11:00:00Z", landing_on(split), t, -t * 70.0,
+                         np.zeros(rows), np.full(rows, 500.0), np.full(rows, 90.0), np.full(rows, 70.0), np.zeros(rows))
 
 
 def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_path, geometry):
-    flights = {"train": [_signals("KXXX:a", 5), _signals("KXXX:b", 7)], "val": [_signals("KXXX:c", 4)]}
-    write_signals(tmp_path, flights, {"note": "test"})
+    flights = {"train": [_signals("KXXX:a", 5), _signals("KXXX:b", 7)], "val": [_signals("KXXX:c", 4, "val")]}
+    write_signals(tmp_path, flights, {"note": "test"}, fixture_days())
     back = load_signals(tmp_path, "train")
     assert [f.dataset_id for f in back] == ["KXXX:a", "KXXX:b"]
     assert back[1].e_m.tolist() == flights["train"][1].e_m.tolist()
+    assert (back[1].entry_time_utc, back[1].landing_time_utc) == ("2026-06-01T11:00:00Z", landing_on("train"))
+    assert load_day_split(tmp_path) == fixture_days()
     write_candidates(tmp_path, {"KXXX": geometry})
     assert load_candidates(tmp_path)["KXXX"] == geometry
     # a candidates file without this schema's name (the runway ends came with it) is refused by name
@@ -389,6 +397,33 @@ def test_the_artefact_round_trips_and_refuses_overwrites_and_other_specs(tmp_pat
     (other / "sentences_train.npz").write_bytes((tmp_path / "sentences_train.npz").read_bytes())
     with pytest.raises(ValueError, match="not the one that measured the spec"):
         load_sentences(other, "train", one)
+
+
+def test_the_artefact_holds_development_days_only_and_each_flight_on_its_own_split(tmp_path):
+    # a flight landing on a sealed test day is refused on the way in, by name
+    with pytest.raises(SealedDay, match="sealed test day"):
+        write_signals(tmp_path / "a", {"train": [_signals("KXXX:a", 5, "test")]}, {"note": "test"}, fixture_days())
+    # so is a flight filed under a split its day is not dealt to
+    with pytest.raises(ValueError, match="lands on a val day, not a train day"):
+        write_signals(tmp_path / "b", {"train": [_signals("KXXX:a", 5, "val")]}, {"note": "test"}, fixture_days())
+    # and on the way out: a file edited to hold a test-day flight is refused when read
+    (tmp_path / "c").mkdir()
+    write_signals(tmp_path / "c", {"train": [_signals("KXXX:a", 5)]}, {"note": "test"}, fixture_days())
+    record = json.loads((tmp_path / "c" / "signals.json").read_text(encoding="utf-8"))
+    record["splits"]["train"]["flights"][0]["landing_time_utc"] = landing_on("test")
+    (tmp_path / "c" / "signals.json").write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(SealedDay):
+        load_signals(tmp_path / "c", "train")
+    with pytest.raises(ValueError, match="holds the splits"):
+        load_signals(tmp_path / "c", "test")
+    # every split is checked before the first file is written: nothing is left half-written
+    (tmp_path / "d").mkdir()
+    with pytest.raises(ValueError, match="holds the splits"):
+        write_signals(tmp_path / "d", {"train": [_signals("KXXX:a", 5)], "test": []}, {"note": "test"}, fixture_days())
+    with pytest.raises(ValueError, match="not a train day"):
+        write_signals(tmp_path / "d", {"val": [_signals("KXXX:v", 5, "val")], "train": [_signals("KXXX:a", 5, "val")]},
+                      {"note": "test"}, fixture_days())
+    assert not any((tmp_path / "d").iterdir())
 
 
 def test_the_labeller_hash_covers_the_labelling_code_only():

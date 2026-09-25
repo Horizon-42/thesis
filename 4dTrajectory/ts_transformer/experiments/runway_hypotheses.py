@@ -71,7 +71,8 @@ from geokit import METRES_PER_DEG_LAT, metres_per_deg_lon  # noqa: E402
 from ts_transformer.data.lateral_eligibility import default_lateral_pass_roster_path  # noqa: E402
 from ts_transformer.backbone.adapters import resolve_device  # noqa: E402
 from ts_transformer.data.runway_context import RULES as CONTEXT_RULES  # noqa: E402
-from ts_transformer.data.runway_context import build_airport_context, parse_utc  # noqa: E402
+from ts_transformer.data.day_split import parse_utc  # noqa: E402
+from ts_transformer.data.runway_context import build_airport_context  # noqa: E402
 from ts_transformer.data.splits import split_name_for_dataset_id  # noqa: E402
 from ts_transformer.training.train import load_checkpoint  # noqa: E402
 from flight_scenarios.identity import flight_key  # noqa: E402

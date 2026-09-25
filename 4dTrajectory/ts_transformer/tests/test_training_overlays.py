@@ -32,10 +32,13 @@ from ts_transformer.instructions.words import (
     APPROACH, APPROACH_CLEARED, COLUMNS, HEADING, RUNWAY, UNCHANGED, Words, wrap180,
 )
 from ts_transformer.prior import data as prior_data
-from ts_transformer.prior.data import Flight, Split, column_classes, flight_steps
+from ts_transformer.prior.data import Split, column_classes, flight_record
 from ts_transformer.prior.model import Prior, PriorConfig
+from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT
-from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec as spec
+from ts_transformer.tests.support import (
+    fly_legs, instruction_airport, instruction_flight, instruction_spec as spec, landing_on,
+)
 from ts_transformer.tests.test_autopilot import DOWNWIND_BASE_FINAL, _fly_sentence, _params
 
 TRAINING_OVERLAYS_TS = REPO_ROOT / "aeroviz-4d" / "src" / "data" / "trainingOverlays.ts"
@@ -173,41 +176,54 @@ def test_a_dynamics_failure_keeps_its_verdicts_and_draws_no_band():
     assert [(w["status"], w["checks"]) for w in words] == [(w["status"], w["checks"]) for w in judged_words]
 
 
-# ---- the prior: predictions per step
-def _flights(words):
-    grid = np.full((6, 6), UNCHANGED, dtype=np.int16)
-    grid[0] = [0, 0, words.heading_index(270.0), words.altitude_index(1200.0), 0, words.speed_index(100.0)]
-    grid[3, HEADING] = words.heading_index(180.0)
-    grid[5, 5] = words.speed_unspecified
-    signals = instruction_flight(*fly_legs([(10, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0))
-    return [Flight(f"F{n}", 0, *flight_steps(signals, grid, instruction_airport())) for n in range(2)]
+# ---- the prior: predictions per predicted step
+ROWS = N_LOOK + 6
+
+
+def _flights(words, grid):
+    signals = instruction_flight(*fly_legs([(ROWS + 4, 0.0, 90.0, 0.0)], 270.0, 900.0, -5000.0, 300.0))
+    return [flight_record(signals, grid, instruction_airport(), None, 0, ROWS) for _ in range(2)]
 
 
 def test_the_prior_ranks_words_given_one_is_said_and_keeps_the_flights_likelihood():
     words = Words(spec())
     classes = column_classes(words, 2)
-    candidates = torch.zeros(1, 2, len(prior_data.CANDIDATE_FEATURES))
-    candidates[0, 0, -1] = 1.0                                           # one real candidate, one empty slot
+    candidates = torch.as_tensor(prior_data.candidate_table({"KXXX": instruction_airport()}, ("KXXX",), 2))
     torch.manual_seed(0)
-    model = Prior(PriorConfig(classes=classes, airports=("KXXX",), candidate_slots=2, d_model=32, layers=2, heads=4,
-                              feedforward=64, dropout=0.0), candidates).eval()
-    flights = _flights(words)
-    out = prior_export.predictions(model, Split(flights, ("KXXX",), candidates.numpy(), classes))
-    assert [item["rows"] for item in out] == [6, 6]
+    model = Prior(PriorConfig(classes=classes, airports=("KXXX",), candidate_slots=2, variant="no-context", d_model=32,
+                              layers=2, heads=4, feedforward=64, dropout=0.0), candidates).eval()
+    grid = np.full((ROWS, 6), UNCHANGED, dtype=np.int16)
+    grid[0] = [0, 0, words.heading_index(270.0), words.altitude_index(1200.0), 0, words.speed_index(100.0)]
+    grid[3, HEADING] = words.heading_index(225.0)                          # said while the prior only observes
+    grid[N_LOOK + 2, HEADING] = words.heading_index(180.0)
+    grid[N_LOOK + 4, 5] = words.speed_unspecified
+    split = Split(_flights(words, grid), ("KXXX",), candidates.numpy(), (("09",),), ((90.0,),), classes, "no-context")
+    out = prior_export.predictions(model, split)
+    predicted = ROWS - N_LOOK
+    assert [(item["rows"], item["firstPredictedRow"]) for item in out] == [(ROWS, N_LOOK)] * 2
     item = out[0]
     assert len(item["columns"]) == len(COLUMNS)
     # the runway head ranks only the airport's one candidate, never the masked slot
     assert item["columns"][RUNWAY]["k"] == 1 and set(item["columns"][RUNWAY]["words"]) == {0}
     for column, values in enumerate(item["columns"]):
         k = values["k"]
-        assert len(values["words"]) == len(values["wordsP"]) == 6 * k
-        assert len(values["changeP"]) == len(values["truthP"]) == 6
+        assert values["changeP"][0] == 1.0                              # the first predicted step says every column
+        assert len(values["words"]) == len(values["wordsP"]) == predicted * k
+        assert len(values["changeP"]) == len(values["truthP"]) == predicted
         assert all(0 <= value < classes[column] - 1 for value in values["words"])
-        ranked = np.asarray(values["wordsP"]).reshape(6, k)
+        ranked = np.asarray(values["wordsP"]).reshape(predicted, k)
         assert (np.diff(ranked, axis=1) <= 1e-9).all()                 # most likely first
-    # the flight's likelihood is its truth's, per step; the columns add up to it
+    # the first predicted step's truth is the word in force there — the one said in the observed rows included
+    from ts_transformer.prior.train import batch_logits, to_batch
+    with torch.no_grad():
+        logits = batch_logits(model, to_batch(split, [0], torch.device("cpu")))
+    for column in range(6):
+        in_force = int(grid[3, column] if column == HEADING else grid[0, column])
+        expected = float(torch.softmax(logits[column][0, 0, N_LOOK].double(), dim=-1)[in_force + 1])
+        assert item["columns"][column]["truthP"][0] == pytest.approx(round(expected, prior_export.PROBABILITY_DIGITS))
+    # the flight's likelihood is its truth's, per predicted step; the columns add up to it
     truth = np.array([item["columns"][c]["truthP"] for c in range(6)])
-    assert -np.log(truth).sum() / 6 == pytest.approx(item["nllPerStep"], rel=1e-2)
+    assert -np.log(truth).sum() / predicted == pytest.approx(item["nllPerStep"], rel=1e-2)
     assert sum(item["columnNllPerStep"]) == pytest.approx(item["nllPerStep"], abs=1e-5)
 
 
@@ -310,17 +326,18 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
 
 
 # ---- the prior's runner end to end, on a synthetic artefact and an untrained checkpoint (every write in tmp_path)
-def _prior_dir(directory, artefact):
-    """A prior directory as `prior_train` writes one, holding a small untrained network of ``artefact``'s spec."""
-    from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA
-    from ts_transformer.instructions.artefact import load_candidates, load_spec, spec_labeller_source
+def _prior_dir(directory, artefact, roster):
+    """A prior directory as `prior_train` writes one, holding a small untrained network of ``artefact``'s spec, trained
+    with the tracks roster ``roster``."""
+    from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, roster_record
+    from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_spec, spec_labeller_source
 
     one = load_spec(artefact)
     geometries = load_candidates(artefact)
     airports = tuple(sorted(geometries))
     slots = max(len(g.candidates) for g in geometries.values())
-    config = PriorConfig(classes=column_classes(Words(one), slots), airports=airports, candidate_slots=slots, d_model=32,
-                         layers=2, heads=4, feedforward=64, dropout=0.0)
+    config = PriorConfig(classes=column_classes(Words(one), slots), airports=airports, candidate_slots=slots,
+                         variant="full", d_model=32, layers=2, heads=4, feedforward=64, dropout=0.0)
     torch.manual_seed(0)
     model = Prior(config, torch.as_tensor(prior_data.candidate_table(geometries, airports, slots)))
     directory.mkdir()
@@ -329,23 +346,36 @@ def _prior_dir(directory, artefact):
     (directory / "config.json").write_text(json.dumps({
         "schema": PRIOR_CHECKPOINT_SCHEMA, "written_utc": "2026-09-24T00:00:00+00:00", "parameters": 1, "limit": None,
         "smoke": False, "git": {"head": "test", "dirty": False}, "train": {},
-        "instructions": {"labeller_source_sha256": spec_labeller_source(artefact)}}))
-    per_column = {name: {"nll_per_step": 0.1, "change_steps": 1, "mean_change_probability_where_changed": 0.5,
-                         "top1_given_change": 0.5, "top5_given_change": 1.0, "false_change_share_where_kept": 0.0}
+        "tracks_rosters": roster_record({code: roster for code in airports}),
+        "instructions": {"labeller_source_sha256": spec_labeller_source(artefact),
+                         "day_split": load_day_split(artefact).to_dict()}}))
+    per_column = {name: {"nll_per_step": 0.1, "change_steps": 1, "first_step_top1": 0.5,
+                         "mean_change_probability_where_changed": 0.5, "top1_given_change": 0.5,
+                         "top5_given_change": 1.0, "false_change_share_where_kept": 0.0}
                   for name in COLUMNS}
+    per_column["runway"].update(change_steps=0, mean_change_probability_where_changed=None, top1_given_change=None,
+                                top5_given_change=None)
     scores = {**{name: 0.2 for name in COLUMNS}, "all": 1.2}
+    runway = {"top1": 0.5, "direction": 1.0, "side_given_direction": 0.5}
     (directory / "readout.json").write_text(json.dumps({
         "split": "val", "best_epoch": 1, "baselines": {"repeat": scores, "previous word": scores},
-        "model": {"steps": 10, "nll_per_step": 0.6, "perplexity_per_step": 1.8, "per_column": per_column}}))
+        "model": {"steps": 10, "nll_per_step": 0.6, "perplexity_per_step": 1.8, "per_column": per_column,
+                  "first_step_runway": runway},
+        "airport_runway_frequency": runway, "rules": {"B1_active_config": runway}}))
 
 
-def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_second(tmp_path):
+def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_second(tmp_path, monkeypatch):
+    from ts_transformer.experiments import prior_train
     from ts_transformer.tests.test_instruction_training_export import SET_ID, _artefact, _run, _straight, _vectored
 
     flights = [_vectored("KXXX:V1_09_abc123_20260101T000000Z"), _straight("KXXX:S1_09_abc124_20260101T000100Z")]
     _artefact(tmp_path / "artefact", flights)
     assert _run(tmp_path) == 0                                            # the set, as the Training export writes it
-    _prior_dir(tmp_path / "prior", tmp_path / "artefact")
+    roster = tmp_path / "tracks.json"
+    own = [{"outcome": "assigned", "runway": "09", "flight_key": "own", "landing_time_utc": landing_on("val")}]
+    roster.write_text(json.dumps({"records": own}), encoding="utf-8")
+    monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: roster)
+    _prior_dir(tmp_path / "prior", tmp_path / "artefact", roster)
     args = ["--prior", str(tmp_path / "prior"), "--instructions", str(tmp_path / "artefact"),
             "--airports-root", str(tmp_path / "airports"), "--set", SET_ID, "--airport", "KXXX"]
     assert prior_export.main(args) == 0
@@ -356,9 +386,23 @@ def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_sec
     assert payload["base"]["sampleWrittenUtc"] == sample["writtenUtc"]
     assert [f["flightKey"] for f in payload["flights"]] == [f["flightKey"] for f in sample["flights"]]
     assert [f["rows"] for f in payload["flights"]] == [f["rows"] for f in sample["flights"]]
+    assert all(f["firstPredictedRow"] == N_LOOK and len(f["columns"][0]["changeP"]) == f["rows"] - N_LOOK
+               for f in payload["flights"])
     assert all(math.isfinite(f["nllPerStep"]) for f in payload["flights"])
     assert payload["readout"]["baselines"]["previousWord"]["all"] == 1.2
+    assert payload["readout"]["model"]["perColumn"]["runway"]["top1GivenChange"] is None
+    assert payload["readout"]["firstStepRunway"]["rules"]["B1_active_config"]["sideGivenDirection"] == 0.5
     manifest = json.loads((training / export.OVERLAYS_FILE).read_text(encoding="utf-8"))
     assert [(o["id"], o["kind"], o["base"]) for o in manifest["overlays"]] == [("prior_prior", export.KIND_PRIOR, SET_ID)]
+    # the landing context is read from today's rosters, known by their bytes: the same roster at another path (the
+    # main checkout after the merge, the prior trained in a worktree) is the same; one that changed is refused
+    elsewhere = tmp_path / "elsewhere" / "tracks.json"
+    elsewhere.parent.mkdir()
+    elsewhere.write_bytes(roster.read_bytes())
+    monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: elsewhere)
+    assert prior_export.main([*args, "--overlay-id", "moved"]) == 0
+    elsewhere.write_text(json.dumps({"records": own, "note": "changed"}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="rosters changed"):
+        prior_export.main([*args, "--overlay-id", "another"])
     with pytest.raises(SystemExit):   # never overwritten
         prior_export.main(args)

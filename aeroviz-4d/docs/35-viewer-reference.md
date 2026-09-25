@@ -297,7 +297,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   种类（`executor-replay` / `prior-prediction`）、画在哪个集合上（`base`）、那个集合的样本文件的 sha256、文件位置
   （`training/<叠加层 id>/executor.json` 或 `prior.json`）。集合的索引 `index.json` 不动。写它们的是
   `run_ts.py executor_training_export` 和 `prior_training_export`（ts 的 R13）。
-- **绑定**：叠加层文件（`aeroviz-training-executor-v2` / `aeroviz-training-prior-v1`）自己写出所画集合的 id、样本的写出
+- **绑定**：叠加层文件（`aeroviz-training-executor-v2` / `aeroviz-training-prior-v3`）自己写出所画集合的 id、样本的写出
   时刻和规格 sha，每架航班按集合的顺序一架一条；执行器的每条词与句子的词逐条对应（步、列、值），先验每架的步数等于
   句子的步数。`trainingOverlays.ts` 逐项核对，对不上就整份拒读、说出是哪一项——例如集合按同一个 id 重新导出过，
   样本的写出时刻就不同，叠加层被拒读（"the set was re-exported after the overlay"）。`check-publication` 另外核对

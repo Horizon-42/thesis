@@ -25,7 +25,9 @@ from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.spec import READING_RULE
 from ts_transformer.instructions.words import COLUMNS, HEADING, UNCHANGED, Words, wrap180
 from ts_transformer.repo_layout import REPO_ROOT
-from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec as spec
+from ts_transformer.tests.support import (
+    fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec,
+)
 
 #: The set the exporter names after the reading rule by default.
 SET_ID = READING_RULE.replace("-", "_")
@@ -45,11 +47,11 @@ def _key(callsign: str) -> str:
 
 
 def _vectored(identifier: str):
-    return instruction_flight(*fly_legs(VECTORED, 270.0, 1110.0, -400.0, 0.0), dataset_id=identifier)
+    return instruction_flight(*fly_legs(VECTORED, 270.0, 1110.0, -400.0, 0.0), dataset_id=identifier, split="val")
 
 
 def _straight(identifier: str):
-    return instruction_flight(*fly_legs(STRAIGHT, 90.0, 1200.0, -300.0, 0.0), dataset_id=identifier)
+    return instruction_flight(*fly_legs(STRAIGHT, 90.0, 1200.0, -300.0, 0.0), dataset_id=identifier, split="val")
 
 
 def _artefact(directory, flights, readings=None, also=()):
@@ -58,7 +60,7 @@ def _artefact(directory, flights, readings=None, also=()):
     flights' own readings unless ``readings`` replaces them)."""
     one = spec()
     directory.mkdir(parents=True)
-    write_signals(directory, {"val": flights}, {"note": "test"})
+    write_signals(directory, {"val": flights}, {"note": "test"}, fixture_days())
     geometries = {"KXXX": instruction_airport()}
     for code in also:
         geometries[code] = AirportGeometry.from_dict({**instruction_airport().to_dict(), "code": code})

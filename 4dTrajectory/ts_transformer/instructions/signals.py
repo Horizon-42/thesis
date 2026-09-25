@@ -21,9 +21,11 @@ from ts_transformer.data.channels import states_from_channels
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.words import compass_from_math_rad, wrap180
 
-#: v2 (2026-09-24): ``typecode`` is the flight's own ICAO type (``None`` when its identity is
-#: unresolved); v1 carried the type the dynamics flew, an A320 for every type without dynamics.
-SIGNALS_SCHEMA = "ts-instruction-signals-v2"
+#: v3 (2026-09-24): every flight carries its absolute clock — ``entry_time_utc`` (row 0) and
+#: ``landing_time_utc`` (its operating day, `data.day_split`) — so flights can be put side by side
+#: in scenes and dealt to splits by day. ``typecode`` is the flight's own ICAO type (``None`` when
+#: its identity is unresolved).
+SIGNALS_SCHEMA = "ts-instruction-signals-v3"
 
 #: The per-row arrays, in storage order.
 ROW_FIELDS = ("time_s", "e_m", "n_m", "altitude_m", "track_deg", "ground_speed_mps", "vertical_rate_mps")
@@ -35,6 +37,10 @@ class FlightSignals:
     airport: str
     runway: str
     typecode: str | None          # the flight's ICAO type; None = identity unresolved
+    #: ISO UTC of row 0 (``time_s`` = 0): the arrival slice's entry, its first kept sample — NOT the
+    #: track's ``start_time_utc``, which is a median 45 s earlier (the repo's two-window trap)
+    entry_time_utc: str
+    landing_time_utc: str         # ISO UTC; the flight's operating day is this one's (`data.day_split`)
     time_s: np.ndarray            # [N] seconds from the built flight's first row, uniform step
     e_m: np.ndarray               # [N] airport frame, metres
     n_m: np.ndarray
@@ -80,6 +86,8 @@ def signals_from_series(series: Any, geometry: AirportGeometry) -> FlightSignals
         airport=series.airport,
         runway=runway,
         typecode=series.scenario.source["resolved_typecode"],
+        entry_time_utc=series.scenario.source["entry_time_utc"],
+        landing_time_utc=series.scenario.source["landing_time_utc"],
         time_s=np.asarray(series.times, dtype=np.float64),
         e_m=np.asarray(e, dtype=np.float64),
         n_m=np.asarray(n, dtype=np.float64),
@@ -98,7 +106,8 @@ def pack_signals(items: Sequence[FlightSignals]) -> tuple[dict[str, np.ndarray],
         arrays[name] = (np.concatenate([getattr(item, name) for item in items]) if items
                         else np.zeros(0)).astype(np.float64)
     meta = [{"dataset_id": item.dataset_id, "airport": item.airport, "runway": item.runway,
-             "typecode": item.typecode} for item in items]
+             "typecode": item.typecode, "entry_time_utc": item.entry_time_utc,
+             "landing_time_utc": item.landing_time_utc} for item in items]
     return arrays, meta
 
 
