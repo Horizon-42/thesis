@@ -21,7 +21,6 @@ from ts_transformer.data.dataset import (
     window_anchors,
 )
 from ts_transformer.data.synthetic import synthetic_arrivals
-from ts_transformer.training.objective import masked_mse
 
 AIRPORT, RUNWAY = "KRDU", "05L"
 
@@ -213,19 +212,6 @@ def test_vectorized_interpolation_matches_the_scalar_reference():
 
     assert target.numpy() == pytest.approx(expected_target)
     assert weights.numpy() == pytest.approx(expected_weights)
-
-
-def test_masked_mse_ignores_padded_steps():
-    # Two horizon steps, one of them padding. A huge error hidden in the padded step must
-    # not move the loss at all — otherwise every short approach trains the model to
-    # reproduce its own zero padding and forecast tails collapse toward the threshold.
-    predicted = torch.tensor([[[1.0], [999.0]]])
-    target = torch.tensor([[[0.0], [0.0]]])
-    mask = torch.tensor([[[1.0], [0.0]]])
-    assert float(masked_mse(predicted, target, mask)) == pytest.approx(1.0)
-
-    all_valid = torch.tensor([[[1.0], [1.0]]])
-    assert float(masked_mse(predicted, target, all_valid)) > 1.0
 
 
 def test_fitted_tail_supervises_position_only_and_keeps_observed_inputs_separate():

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import ts_transformer.experiments.pipeline as pipeline
-from ts_transformer.experiments.support import EXPERIMENTS_MAIN
+from ts_transformer.repo_layout import EXPERIMENTS_MAIN
 
 
 def _airports(value: str) -> tuple[str, ...]:

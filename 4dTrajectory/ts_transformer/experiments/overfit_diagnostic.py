@@ -358,6 +358,8 @@ def main(argv: list[str] | None = None) -> int:
         REPO_ROOT / "4dTrajectory" / "outputs" / "POOLED" /
         "ts_itransformer_small_sample_overfit"
     )
+    if output_dir.exists():
+        parser.error(f"{output_dir} exists: a finished run is never written over; pass a new --output-dir")
     print(
         f"small-sample overfit diagnostic: airports={','.join(airports)}, "
         f"samples={args.samples_per_airport}/airport, epochs={args.epochs}, "

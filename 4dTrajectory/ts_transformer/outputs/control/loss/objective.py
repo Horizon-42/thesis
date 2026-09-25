@@ -10,7 +10,7 @@ import torch
 
 from aerodynamic_model.torch_dynamics import heading_rate_rad_s
 from ts_transformer.data.batch_contract import LossComponents
-from ts_transformer.data.channels import IDX, POSITION_IDX, VELOCITY_IDX
+from ts_transformer.data.channels import POSITION_IDX, VELOCITY_IDX
 from ts_transformer.config import (
     CONTROL_DURATION_FACTORIZED,
     CONTROL_DURATION_UNIFORM,
@@ -33,7 +33,6 @@ from ts_transformer.outputs.control.heads import ControlPrediction
 from ts_transformer.outputs.control.loss.components import ControlStateLossResult, control_tracking_loss_terms
 from ts_transformer.outputs.control.loss.fixed_dt import fixed_dt_control_state_loss
 from ts_transformer.outputs.duration_heads import pinball_duration_loss
-from ts_transformer.data.time_grids import batch_time_grid
 
 
 CONTROL_LOSS_COMPONENT_NAMES = ("state", "final_time", "kinematic", "terminal")
@@ -184,68 +183,6 @@ class ControlLossTerms:
             + self.terminal
             + sum(self.extras.values(), self.state.new_zeros(()))
         )
-
-
-def position_velocity_consistency_loss(
-    normalized_anchor_state: torch.Tensor,
-    normalized_states: torch.Tensor,
-    target_final_time_s: torch.Tensor,
-    normalizer: Normalizer,
-    *,
-    config: TSConfig | None = None,
-    state_weights: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Per-flight displacement implied by position versus integrated velocity.
-
-    State predictions are standardized channel-wise, so the positions and velocities are
-    decoded before differencing. The displacement residual is divided by each fitted
-    position scale. Unlike dividing finite-difference velocity by velocity scale, this does
-    not make the position gradient grow as ``1 / dt`` when N increases. Ground-truth
-    duration defines ``dt`` during training, so the time head cannot shrink this loss.
-    """
-    _batch_size, n_segments, _channels = normalized_states.shape
-    normalized_states = torch.cat(
-        (normalized_anchor_state.unsqueeze(1), normalized_states), dim=1
-    )
-    position_indices = list(POSITION_IDX)
-    velocity_indices = [IDX["edot"], IDX["ndot"], IDX["udot"]]
-    dtype, device = normalized_states.dtype, normalized_states.device
-    position_mean = torch.as_tensor(
-        normalizer.mean[position_indices], dtype=dtype, device=device
-    )
-    position_scale = torch.as_tensor(
-        normalizer.std[position_indices], dtype=dtype, device=device
-    )
-    velocity_mean = torch.as_tensor(
-        normalizer.mean[velocity_indices], dtype=dtype, device=device
-    )
-    velocity_scale = torch.as_tensor(
-        normalizer.std[velocity_indices], dtype=dtype, device=device
-    )
-
-    positions = (
-        normalized_states[..., position_indices] * position_scale + position_mean
-    )
-    velocities = (
-        normalized_states[..., velocity_indices] * velocity_scale + velocity_mean
-    )
-    if config is None:
-        durations = (target_final_time_s / n_segments).to(dtype=dtype).view(-1, 1)
-        durations = durations.expand(-1, n_segments)
-        active = torch.ones_like(durations, dtype=torch.bool)
-    else:
-        durations, active = batch_time_grid(target_final_time_s.to(dtype=dtype), config)
-    if state_weights is not None:
-        active = active & (state_weights.sum(dim=-1) > 0.0)
-    interval_velocity = 0.5 * (velocities[:, 1:] + velocities[:, :-1])
-    displacement_residual = (
-        positions[:, 1:] - positions[:, :-1]
-        - interval_velocity * durations.unsqueeze(-1)
-    )
-    normalized_residual = displacement_residual / position_scale
-    squared = normalized_residual.square() * active.unsqueeze(-1)
-    denominator = (active.sum(dim=1) * len(position_indices)).clamp(min=1)
-    return squared.sum(dim=(1, 2)) / denominator
 
 
 def control_state_supervision_prediction(

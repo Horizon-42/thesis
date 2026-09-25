@@ -24,6 +24,9 @@ TS_SCRIPT = TS_DIR / "__main__.py"
 #: The runners' CLI (`python run_ts.py <runner>`), for a runner that spawns another runner — NOT
 #: `TS_SCRIPT`, which knows only train / predict / … and refuses a runner's name.
 RUN_TS = REPO_ROOT / "run_ts.py"
+#: The runners' dispatcher itself (`experiments/__main__.py`, what `RUN_TS` hands a runner's name to), for a runner
+#: that spawns one of its own steps in a subprocess (`experiments.cv`).
+EXPERIMENTS_MAIN = TS_DIR / "experiments" / "__main__.py"
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 OPT_OUTPUTS_ROOT = REPO_ROOT / "4dTrajectory" / "outputs"
 COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"

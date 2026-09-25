@@ -107,18 +107,19 @@ class WindowContext:
 
     def row(self, i: int, epoch_seed: int | None = None) -> dict[str, np.ndarray] | None:
         """The context row of window ``i``. ``epoch_seed`` is given by the TRAINING iterator
-        only (`iter_batches(shuffle=True)`): a path whose row has a per-epoch draw (the
-        manoeuvre token's position inside its span, two-tier v3 B-dev2) reads it; a cached or
-        validation row is built without one."""
+        only (`iter_batches(shuffle=True)`): a path whose row has a per-epoch draw would read it
+        (the manoeuvre token's, two-tier v3 B-dev2, did; archived 2026-09-20 — no live path draws);
+        a cached or validation row is built without one."""
         return None
 
     def override(self, i: int, epoch_seed: int) -> tuple[np.ndarray, dict[str, np.ndarray]] | None:
         """A TRAINING draw's substitute for window ``i`` this epoch, or None: the NORMALIZED
         ``[L, C]`` window that replaces the observed one (the set's conditioning is added
         by `batch`) and the context row that goes with it. Only the training iterator asks
-        (`iter_batches(shuffle=True)` passes the epoch's seed); the plan path answers with
-        one of the flight's rolled windows at its share (design v5.2), every other path
-        with nothing."""
+        (`iter_batches(shuffle=True)` passes the epoch's seed). Every live path answers None: the
+        plan path, which answered with one of the flight's rolled windows (design v5.2), is archived
+        (2026-09-18). The hook stays because `data/dataset.py` asks it, and that file is part of the
+        executor's code identity (`autopilot.spec.executor_source_sha256`)."""
         return None
 
     def dense(

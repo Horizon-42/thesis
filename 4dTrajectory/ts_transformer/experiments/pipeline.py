@@ -487,8 +487,6 @@ class TrainingPlan:
             "--control-dynamics-model",
             self.control_dynamics_model,
         ]
-        # The pipeline's own flag names predate the 2026-09-07 rename that made every
-        # ts_transformer flag match its TSConfig field; only the emitted flag changed.
         args += ["--control-state-supervision-clock", self.control_state_clock]
         args += ["--control-state-loss-grid", self.control_state_loss_grid]
         args += ["--control-state-objective", self.control_state_objective]
@@ -1142,7 +1140,7 @@ def main() -> None:
         default=CONTROL_DYNAMICS_POINT_MASS,
     )
     parser.add_argument(
-        "--control-state-clock",
+        "--control-state-supervision-clock",
         choices=CONTROL_STATE_CLOCKS,
         default=CONTROL_STATE_CLOCK_PREDICTED,
     )
@@ -1166,7 +1164,7 @@ def main() -> None:
         type=float,
         default=0.0,
     )
-    parser.add_argument("--control-rollout-dt", type=float, default=None)
+    parser.add_argument("--control-rollout-integrator-dt-s", type=float, default=None)
     parser.add_argument("--cv-folds", type=int, default=3)
     parser.add_argument(
         "--cv-parameters",
@@ -1284,12 +1282,12 @@ def main() -> None:
             control_duration_parameterization=args.control_duration_parameterization,
             control_dynamics_backend=args.control_dynamics_backend,
             control_dynamics_model=args.control_dynamics_model,
-            control_state_clock=args.control_state_clock,
+            control_state_clock=args.control_state_supervision_clock,
             control_state_loss_grid=args.control_state_loss_grid,
             control_state_objective=args.control_state_objective,
             control_state_duration_gradient=args.control_state_duration_gradient,
             control_gradient_clip_norm=args.control_gradient_clip_norm,
-            control_rollout_dt=args.control_rollout_dt,
+            control_rollout_dt=args.control_rollout_integrator_dt_s,
         )
         if not run_training(
             training,

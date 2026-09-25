@@ -17,8 +17,7 @@ from ts_transformer.geometry.metrics import (
 )
 from ts_transformer.outputs.state.model import StatePrediction
 from ts_transformer.outputs.state.loss import state_prediction_loss_components
-from ts_transformer.training.objective import masked_mse, prediction_loss
-from ts_transformer.outputs.control.loss.objective import position_velocity_consistency_loss
+from ts_transformer.training.objective import prediction_loss
 
 
 def _identity_normalizer() -> Normalizer:
@@ -26,13 +25,6 @@ def _identity_normalizer() -> Normalizer:
         mean=np.zeros(len(ch.CHANNELS), dtype=np.float64),
         std=np.ones(len(ch.CHANNELS), dtype=np.float64),
     )
-
-
-def test_channel_weighted_mse_ignores_fitted_velocity_placeholders():
-    predicted = torch.zeros((1, 1, len(ch.CHANNELS)))
-    target = torch.tensor([[[1.0, 1.0, 1.0, 999.0, 999.0, 999.0]]])
-    weights = torch.tensor([[[1 / 3, 1 / 3, 1 / 3, 0.0, 0.0, 0.0]]])
-    assert float(masked_mse(predicted, target, weights)) == pytest.approx(1.0)
 
 
 def test_prediction_loss_adds_scaled_final_time_error():
@@ -248,94 +240,6 @@ def test_state_velocity_is_derived_from_the_same_piecewise_linear_position_curve
     assert derived[:, list(ch.POSITION_IDX)] == pytest.approx(
         predicted[:, list(ch.POSITION_IDX)]
     )
-
-
-def test_position_velocity_consistency_loss_is_zero_for_integrated_motion():
-    anchor = torch.zeros((1, len(ch.CHANNELS)))
-    anchor[0, ch.IDX["edot"]] = 1.0
-    states = torch.zeros((1, 3, len(ch.CHANNELS)))
-    states[0, :, ch.IDX["e"]] = torch.tensor([1.0, 2.0, 3.0])
-    states[0, :, ch.IDX["edot"]] = 1.0
-
-    loss = position_velocity_consistency_loss(
-        anchor,
-        states,
-        torch.tensor([3.0]),
-        _identity_normalizer(),
-    )
-
-    assert loss.tolist() == pytest.approx([0.0])
-
-
-def test_position_velocity_consistency_loss_uses_physical_channel_scales():
-    normalizer = Normalizer(
-        mean=np.array([10.0, 20.0, 30.0, 5.0, 6.0, 7.0]),
-        std=np.array([2.0, 3.0, 4.0, 8.0, 9.0, 10.0]),
-    )
-    states = torch.zeros((1, 3, len(ch.CHANNELS)))
-    # One normalized e increment is 2 m. With dt=0.25 s it equals the decoded
-    # edot=8 m/s represented by (8 - mean 5) / std 8.
-    states[0, :, ch.IDX["e"]] = torch.tensor([0.0, 1.0, 2.0])
-    states[0, :, ch.IDX["edot"]] = (8.0 - 5.0) / 8.0
-    states[0, :, ch.IDX["ndot"]] = (0.0 - 6.0) / 9.0
-    states[0, :, ch.IDX["udot"]] = (0.0 - 7.0) / 10.0
-    anchor = states[:, 0].clone()
-    anchor[0, ch.IDX["e"]] = -1.0
-
-    loss = position_velocity_consistency_loss(
-        anchor,
-        states,
-        torch.tensor([0.75]),
-        normalizer,
-    )
-
-    assert loss.tolist() == pytest.approx([0.0], abs=1e-12)
-
-
-def test_position_velocity_consistency_normalizes_displacement_by_position_scale():
-    normalizer = Normalizer(
-        mean=np.zeros(len(ch.CHANNELS)),
-        std=np.array([100.0, 200.0, 300.0, 2.0, 4.0, 5.0]),
-    )
-    anchor = torch.zeros((1, len(ch.CHANNELS)))
-    states = torch.zeros((1, 1, len(ch.CHANNELS)))
-    states[0, 0, ch.IDX["e"]] = 0.1  # 10 m displacement, zero predicted velocity.
-
-    loss = position_velocity_consistency_loss(
-        anchor,
-        states,
-        torch.tensor([1.0]),
-        normalizer,
-    )
-
-    assert loss.tolist() == pytest.approx([(10.0 / 100.0) ** 2 / 3.0])
-
-
-def test_full_kinematic_loss_uses_dt_and_short_final_segment():
-    config = TSConfig(
-        horizon_mode=HORIZON_FULL,
-        full_horizon_steps=3,
-        dt_s=2.0,
-    )
-    normalizer = _identity_normalizer()
-    anchor = torch.zeros((1, len(ch.CHANNELS)))
-    states = torch.zeros((1, 3, len(ch.CHANNELS)))
-    states[0, :, ch.IDX["e"]] = torch.tensor([2.0, 3.0, 999.0])
-    states[0, :2, ch.IDX["edot"]] = 1.0
-    anchor[0, ch.IDX["edot"]] = 1.0
-    weights = torch.zeros_like(states)
-    weights[0, :2, list(ch.POSITION_IDX)] = 1.0
-
-    loss = position_velocity_consistency_loss(
-        anchor,
-        states,
-        torch.tensor([3.0]),
-        normalizer,
-        config=config,
-        state_weights=weights,
-    )
-
-    assert loss.tolist() == pytest.approx([0.0], abs=1e-12)
 
 
 def test_state_loss_has_one_explicit_physical_output_endpoint_task():

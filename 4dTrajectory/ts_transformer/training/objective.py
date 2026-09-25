@@ -1,7 +1,7 @@
 """The training objective: what a prediction is scored against, and how.
 
 What every path shares is built here — the procedure penalty and its dual multipliers,
-`masked_mse`, the batch movers — and the dispatch that hands a batch to the configured
+the batch movers — and the dispatch that hands a batch to the configured
 path's own objective (`outputs/<path>/loss`). It is deliberately NOT part of the training
 loop: `train.fit_model` is
 one consumer, and the batch-size probe (`batching`), the capacity-ceiling runner and the
@@ -54,17 +54,6 @@ def move_fixed_dt_supervision(
     device: torch.device,
 ) -> FixedDTControlSupervision | None:
     return None if supervision is None else supervision.to(device)
-
-
-def masked_mse(predicted: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """Weighted MSE over supervised channel values only.
-
-    All three tensors use ``[B,N,C]``. Measured rows weight all channels equally, while
-    fitted rows weight position only.
-    """
-    error = (predicted - target) ** 2 * mask
-    denominator = mask.sum()
-    return error.sum() / denominator.clamp(min=1.0)
 
 
 @dataclass

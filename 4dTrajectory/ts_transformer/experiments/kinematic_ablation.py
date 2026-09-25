@@ -513,6 +513,8 @@ def main(argv: list[str] | None = None) -> int:
         REPO_ROOT / "4dTrajectory" / "outputs" / "POOLED" /
         f"ts_{args.model}_kinematic_weight_ablation"
     )
+    if output_dir.exists():
+        parser.error(f"{output_dir} exists: a finished run is never written over; pass a new --output-dir")
     base_n_segments = args.n_segments or TSConfig(model=args.model).n_segments
     n_segment_candidates = args.n_segment_candidates or (base_n_segments,)
     d_model_candidates = args.d_model_candidates or (args.d_model,)

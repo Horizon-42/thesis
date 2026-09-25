@@ -35,14 +35,10 @@ if TYPE_CHECKING:
     from ts_transformer.inference.forecast import Forecast
 
 __all__ = [
-    "EXPERIMENTS_MAIN", "REPO_ROOT", "RUN_TS", "TS_DIR", "TS_SCRIPT",
+    "REPO_ROOT", "RUN_TS", "TS_DIR", "TS_SCRIPT",
     "arm_config", "checkpoint_manifests", "declaration_base", "forecast_geometry", "parse_airports", "rebuild_cohort",
     "series_digest",
 ]
-
-#: The runners' own entry point, for a runner that spawns another runner.
-EXPERIMENTS_MAIN = TS_DIR / "experiments" / "__main__.py"
-
 
 def declaration_base(declaration: dict[str, Any]) -> dict[str, Any]:
     """The settings every arm of an arm declaration starts from: ``"base"``, laid over a named

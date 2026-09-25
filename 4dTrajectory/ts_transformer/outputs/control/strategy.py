@@ -174,7 +174,8 @@ class ControlContext(WindowContext):
     def row(self, i: int, epoch_seed: int | None = None) -> dict[str, np.ndarray]:
         """The window's context row. ``epoch_seed`` is the TRAINING iterator's per-epoch seed
         (`dataset.TrajectoryWindows.batch`) — a per-flight, per-epoch draw this path may make
-        inside a row; nothing draws on it today, and the closed-loop retraining will."""
+        inside a row; this path draws none (the closed-loop retraining that would have is archived with
+        the trained executor, 2026-09-20)."""
         return self._rows[i] if self._rows is not None else self._build_row(i)
 
     def _build_row(self, i: int) -> dict[str, np.ndarray]:

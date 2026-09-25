@@ -508,6 +508,8 @@ def main(argv: list[str] | None = None) -> int:
         pipeline.OPT_OUTPUTS_ROOT / "POOLED" /
         f"ts_{args.model}_normalized_time_history_length_ablation"
     )).resolve()
+    if output_dir.exists():
+        parser.error(f"{output_dir} exists: a finished run is never written over; pass a new --output-dir")
     maximum_l = max(args.seq_lens)
     common_anchor_index = maximum_l - 1
     print(f"history-length ablation: L={','.join(map(str, args.seq_lens))}")
