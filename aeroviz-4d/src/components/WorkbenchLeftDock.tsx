@@ -10,10 +10,12 @@
  * Procedures is NOT a task — the procedure panel is rendered separately (gated on
  * `proceduresOpen`) so it can coexist with whichever task is active.
  *
- * TRAINING KEEPS ITS SESSION: from the first time it is opened, the TrainingPanel stays mounted — hidden in the other
+ * TRAINING KEEPS ITS SESSION at the airport it was opened at: the TrainingPanel stays mounted — hidden in the other
  * tasks — so leaving Training and coming back finds the same set, flight, word and live answer, and downloads nothing
- * again (the index, the sample — KRDU's is 6 MB — and the overlays). Its views draw only in Training (the sentence bar
- * and the 3D layers read `mode`).
+ * again (the index, the sample — KRDU's is 6 MB — and the overlays). Another airport opened in another task drops it
+ * (the panel is unmounted: a hidden panel would otherwise download each airport's Training files in the background);
+ * the next visit to Training opens that airport's afresh. Its views draw only in Training (the sentence bar and the 3D
+ * layers read `mode`).
  */
 
 import { useState, type ReactNode } from "react";
@@ -60,9 +62,11 @@ export default function WorkbenchLeftDock({
   observedVerdicts,
   observedEvaluation,
 }: WorkbenchLeftDockProps) {
-  const { mode, setMode } = useApp();
-  const [trainingOpened, setTrainingOpened] = useState<boolean>(mode === "training");
-  if (mode === "training" && !trainingOpened) setTrainingOpened(true);
+  const { mode, setMode, activeAirportCode } = useApp();
+  // the airport whose Training session is kept: taken on entering Training, dropped when another airport is opened
+  const [trainingAirport, setTrainingAirport] = useState<string | null>(null);
+  if (mode === "training" && trainingAirport !== activeAirportCode) setTrainingAirport(activeAirportCode);
+  if (mode !== "training" && trainingAirport !== null && trainingAirport !== activeAirportCode) setTrainingAirport(null);
 
   let task: ReactNode = null;
   if (mode === "fly" || mode === "optimize" || mode === "compare") {
@@ -85,7 +89,7 @@ export default function WorkbenchLeftDock({
   return (
     <div className="workbench-left-dock">
       {task}
-      {trainingOpened ? <TrainingPanel key="training" hidden={mode !== "training"} /> : null}
+      {trainingAirport !== null ? <TrainingPanel key={`training:${trainingAirport}`} hidden={mode !== "training"} /> : null}
     </div>
   );
 }

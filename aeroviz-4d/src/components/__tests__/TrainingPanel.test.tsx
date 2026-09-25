@@ -105,6 +105,17 @@ describe("TrainingPanel", () => {
   describe("with an export", () => {
     beforeEach(() => serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample() }));
 
+    it("keeps its session while hidden in another task: the panel hides, nothing is torn down", async () => {
+      const { container, rerender } = render(<TrainingPanel hidden={false} />);
+      expect(await screen.findByText("TST1")).toBeTruthy();
+      rerender(<TrainingPanel hidden />);
+      expect((container.querySelector("section.training-panel") as HTMLElement).hidden).toBe(true);
+      expect(setTrainingSelection).not.toHaveBeenLastCalledWith(null);
+      rerender(<TrainingPanel hidden={false} />);
+      expect((container.querySelector("section.training-panel") as HTMLElement).hidden).toBe(false);
+      expect(screen.getByText("TST1")).toBeTruthy();
+    });
+
     it("opens on the set it can read, not the first one listed, and downloads only that", async () => {
       render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText("TST1")).toBeTruthy();

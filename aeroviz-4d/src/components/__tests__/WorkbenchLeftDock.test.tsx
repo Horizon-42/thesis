@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 const { appState, setMode, trainingMounts } = vi.hoisted(() => ({
-  appState: { mode: "observe" as string },
+  appState: { mode: "observe" as string, activeAirportCode: "KRDU" },
   setMode: vi.fn(),
   trainingMounts: { count: 0 },
 }));
@@ -41,6 +41,7 @@ function renderDock() {
 describe("WorkbenchLeftDock", () => {
   beforeEach(() => {
     appState.mode = "observe";
+    appState.activeAirportCode = "KRDU";
     trainingMounts.count = 0;
     vi.clearAllMocks();
   });
@@ -84,6 +85,33 @@ describe("WorkbenchLeftDock", () => {
     expect(screen.queryByText("CONTROL_PANEL")).toBeNull();
     // one session: mounted once, never again
     expect(trainingMounts.count).toBe(1);
+  });
+
+  it("keeps the Training session only at the airport it was opened at", () => {
+    const { rerender } = renderDock();
+    const show = (mode: string, airport = appState.activeAirportCode) => {
+      appState.mode = mode;
+      appState.activeAirportCode = airport;
+      rerender(<WorkbenchLeftDock flightIds={["a", "b", "c"]} flightSummaries={{}} />);
+    };
+    show("training");
+    show("observe");
+    expect(screen.getByText("TRAINING_PANEL").hidden).toBe(true);
+    // another airport opened in another task: the session is dropped — nothing of Training loads in the background
+    show("observe", "KSMF");
+    expect(screen.queryByText("TRAINING_PANEL")).toBeNull();
+    // ... and not picked up again on returning to the first airport outside Training
+    show("observe", "KRDU");
+    expect(screen.queryByText("TRAINING_PANEL")).toBeNull();
+    expect(trainingMounts.count).toBe(1);
+    // the next visit opens the airport's session afresh
+    show("training");
+    expect(screen.getByText("TRAINING_PANEL").hidden).toBe(false);
+    expect(trainingMounts.count).toBe(2);
+    // another airport opened in Training: that airport's session
+    show("training", "KSMF");
+    expect(screen.getByText("TRAINING_PANEL").hidden).toBe(false);
+    expect(trainingMounts.count).toBe(3);
   });
 
   it("drives the PilotPanel sub-mode for fly / optimize / compare", () => {
