@@ -129,8 +129,8 @@ def test_the_scalars_count_everyone_in_the_radius_not_only_the_kept_entities(tmp
     assert cut.in_radius == full.in_radius == 2
 
 
-def test_the_membership_mirrors_match_the_ts_geometry():
-    sys.path.insert(0, str(REPO_ROOT / "4dTrajectory"))
+def test_the_membership_mirrors_match_the_ts_geometry(monkeypatch):
+    monkeypatch.syspath_prepend(str(REPO_ROOT / "4dTrajectory"))
     from ts_transformer.geometry import final_approach_geometry as fag
 
     assert (sc.MEMBERSHIP_K, sc.MEMBERSHIP_FLOOR_M, sc.ALIGNMENT_MAX_DEG) == (
@@ -139,7 +139,8 @@ def test_the_membership_mirrors_match_the_ts_geometry():
 
 
 def _scene_with(tmp_path, *others, ego_d_m=15_000.0):
-    """The ego inbound on the centreline, at ``ego_d_m`` at T0, plus ``others`` (fixture track dicts)."""
+    """The scene at T0 for an ego placed at ``ego_d_m`` on the centreline (the position passed in; the
+    ego's own track only has to span T0), plus ``others`` (fixture track dicts)."""
     ego = dict(callsign="EGO1", icao24="e00001", outcome="assigned", runway=RUNWAY, landing_utc=T0 + 300.0,
                start_utc=T0 - 130.0, samples=straight_samples(T0 - 130.0, T0 + 300.0,
                                                               ego_d_m + 130.0 * 70.0, 0.0, 0.0, 900.0))
@@ -178,7 +179,7 @@ def test_an_airborne_neighbour_on_the_parallel_final_is_not_established_on_the_e
     assert nb.observed.eta_s < scene.ego_eta_s and scene.scalars.ahead_by_eta == 1
 
 
-def test_an_established_ego_counts_only_the_aircraft_between_it_and_the_threshold_as_ahead(tmp_path):
+def test_an_ego_on_the_final_counts_only_the_aircraft_between_it_and_the_threshold_as_ahead(tmp_path):
     ahead = dict(callsign="AHEAD", icao24="a0000b", outcome="assigned", runway=RUNWAY, landing_utc=T0 + 40.0,
                  start_utc=T0 - 100.0, samples=straight_samples(T0 - 100.0, T0 + 40.0, 9_800.0, 0.0, 0.0, 300.0))
     behind = dict(callsign="BEHIND", icao24="a0000c", outcome="assigned", runway=RUNWAY, landing_utc=T0 + 200.0,

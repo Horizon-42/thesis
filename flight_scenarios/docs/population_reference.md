@@ -165,11 +165,13 @@ gets a new ID here and ONE new line in the index.**
 ### FS8 · The ts and optimizer populations are different flights (2026-09-23 review, #12)
 
 - Nothing joins them, and per-airport rates computed on the two are over different flights:
-  - **ts** (`ts_transformer/data/dataset.build_series`) targets the published threshold, so it never
-    fits the final approach and KEEPS the flights `flight_scenarios` drops as `UnusableFittedApproach`
-    (9 of 9 tested built on 2026-09-23; 3 of them end 35–55 m short of the threshold with no crossing
-    row); it applies its own `aircraft_filter` (`openap-direct` / `modelled` / `all-flights`) and,
-    where a runner asks for it, the lateral-pass roster (`lateral_pass_eligibility.json`).
+  - **ts** (`ts_transformer/data/dataset.build_series`) targets the published threshold; it fits the
+    final approach too (`fit_flight_final_approach`, for the crossing trim), but a flight with no
+    usable fit only skips that trim and is never dropped — so ts KEEPS the flights `flight_scenarios`
+    drops as `UnusableFittedApproach` (9 of 9 tested built on 2026-09-23; 3 of them end 35–55 m short
+    of the threshold with no crossing row). A change to the fitter therefore does reach ts data. It
+    applies its own `aircraft_filter` (`openap-direct` / `modelled` / `all-flights`) and, where a
+    runner asks for it, the lateral-pass roster (`lateral_pass_eligibility.json`).
   - **the optimizer** (`prepare_scenario_inputs.py` → `dataset.build_scenario_dataset`) applies the
     per-runway cap (FS2) and drops flights without dynamics or a usable fit (FS1, FS6); it reads no
     lateral roster.
@@ -193,6 +195,7 @@ gets a new ID here and ONE new line in the index.**
     importable here), pinned to it by a test; `hour_utc` / `weekday` are UTC, not local time
     (pooled over airports they conflate time zones — stated, not converted).
   - The ego's position needs no altitude (`chart_axes`); the `ego_alt_hae_m` argument nothing read is
-    gone. The roster's outcome name and the UTC parser are imported (`harvest.store.OUTCOME_ASSIGNED`,
+    gone (the archived `archive/scene_encoder_2026_09/run_ts_scene_explainability.py` still passes it
+    and would raise if run — archived code is not edited). The roster's outcome name and the UTC parser are imported (`harvest.store.OUTCOME_ASSIGNED`,
     `harvest.utc.parse_iso_utc_s`), as in ts `data/intent_conditioning`.
 

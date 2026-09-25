@@ -319,7 +319,8 @@ CIFP HAE 的情况下仍依赖外部 EGM96 grid，并把 OurAirports/EGM96 与 F
 随后只接受转换后的 MSL flight。于是 `--target-from-fitted-adsb` 本来可以在 HAE 内完成的
 拟合，被强制依赖 pyproj + EGM96 grid。
 
-反向边界 [`aeroviz-4d/python/vertical_datum.py`](../aeroviz-4d/python/vertical_datum.py)
+反向边界 `aeroviz-4d/python/vertical_datum.py`（2026-09-25 已删除：没有调用方；比较 CZML
+改为加回每条 record 自己的 `source.hae_minus_msl_m`）
 又使用同一 grid 把 modeling MSL 转回 Cesium HAE。这个对称设计内部一致，但建立在
 “所有 modeling MSL 都是 EGM96 height”的假设上；它没有利用 scenario 已知的 runway
 CIFP datum。
@@ -469,5 +470,4 @@ CIFP 完全一致，只借用格网的相对空间梯度。该模式必须显式
    [`trajectory_data_process/README.md`](../trajectory_data_process/README.md)
 9. 当前 HAE→MSL 实现：
    [`flight_scenarios/datum.py`](../flight_scenarios/datum.py)
-10. 当前 MSL→HAE 实现：
-   [`aeroviz-4d/python/vertical_datum.py`](../aeroviz-4d/python/vertical_datum.py)
+10. 当时的 MSL→HAE 实现：`aeroviz-4d/python/vertical_datum.py`（2026-09-25 已删除，见上）
