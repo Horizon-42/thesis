@@ -364,6 +364,18 @@ that divergence is a known open item (see the README's "Future Improvements").
   已发布的选择在别的任务里仍然在，所以**画 Training 的东西必须看 `mode`**：句子条与三维图层只在 `mode === "training"` 时画。
   回到 Training 时三维重建、相机再取景一次；飞完的实时答复按 `playedAt` 计时，直接画成落地后的样子。
 
+### AV29 · 频繁变化的值各有自己的 context，`useApp` 不读（2026-09-25）
+
+- `useApp()` 把 `AppContext.tsx` 的八个 context 一起展开，任何一个变了，约 50 个调用它的组件都重新渲染。所以**每次鼠标移动、每个
+  瓦片、滑块的每一步都会变的值，各放进自己的 context，用自己的 hook 读**，`useApp` 不展开它们；写它们的 setter 仍在原来的
+  context 里（setter 不变，写的一方不会因此重渲染）。现在有三个：Training 的游标（`useTrainingCursor`，AV28），本地地形预加载的
+  瓦片计数（`useAirportLocalTerrainProgress`，只有 HUD 读；`AirportLocalTerrainState` 不再带计数，按阶段——加载、预加载、可用、
+  出错——才写一次，`airportLocalTerrainPhaseState`；换机场时计数归零；加载地形的 hook 自己不存计数；HUD 的文字是纯函数
+  `localTerrainLabel`），测距环的半径（`useRangeRingRadiusKm`，测距环图层与 Layers 抽屉的滑块读）。
+- 读这类值的组件要么本身就是显示它的（句子条、HUD、抽屉），要么是什么也不渲染的叶子（`TrainingScene`）；**不要在 `FlightApp` 这样的
+  外壳里读**。`AppContext.test.tsx` 对三者各钉住"变了只重渲染它的读者、不重渲染 `useApp` 的读者"，`App.test.tsx` 钉住外壳不跟着游标动。
+- 实测（KSTL，浏览器）：HUD 从 Preload 0/41 逐个数到 36/41 再到 Active，整个界面不再跟着每个瓦片重渲染。
+
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
 - 根目录的发布器 `--executor-replay` 把执行器的 val 回放记录（和 ts 预测同一个记录契约）发布成 Experiments 类别，每个机场

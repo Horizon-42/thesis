@@ -43,7 +43,10 @@ python -m pytest python/tests/ --cov=. --cov-report=html
 
 Global state lives in `AppContext` (context + useState, no Redux). Key state: `viewer` (CesiumJS
 Viewer instance), `airport` config, `selectedFlightId`, `layers` visibility toggles,
-`playbackSpeed`. Components read context via `useApp()`.
+`playbackSpeed`. Components read context via `useApp()`, which spreads EVERY context — so **a value that changes
+per mousemove, tile or slider step is its own context with its own hook, never in what `useApp` spreads**: the
+Training cursor (`useTrainingCursor`), the local terrain's tile counts (`useAirportLocalTerrainProgress`), the range
+ring radius (`useRangeRingRadiusKm`); read them only where they are shown or in a leaf (AV29).
 
 CesiumJS logic is encapsulated in custom hooks:
 - `useCesiumViewer` — initializes Viewer, loads airport.json, sets camera

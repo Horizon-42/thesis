@@ -1,5 +1,23 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-25 — 前端：审查新发现的三条也修掉
+
+分支 `dev-frontend-followups`（同上一条），用户合并。
+
+- **本地地形预加载不再让整个应用逐瓦片重渲染**：瓦片计数原来在 `useApp()` 展开的地形状态里，预加载每暖好一个瓦片（KSTL 41 个，
+  别的机场上百）所有 `useApp` 的组件都重渲染一次。计数拆成自己的 context（`useAirportLocalTerrainProgress`，只有 HUD 读），地形状态
+  只在阶段变化时写（加载、预加载、可用、出错）。加载地形的 hook 也不再自己存一份计数（审查：没人读它，却让 `CesiumViewer` 逐瓦片
+  重渲染）；HUD 的 "Local" 一行抽成纯函数 `localTerrainLabel`，单独有测试。
+- **拖动测距环滑块不再让整个应用每一步都重渲染**：半径拆成自己的 context（`useRangeRingRadiusKm`，测距环图层与抽屉读）。
+- **Pilot：机型目录没加载成功的原因一直显示**：原来它是面板的一次性错误，一进 Trajectory（以及 RNAV 候选加载成功）就被清掉，
+  正是目标速度写着 "— (no aircraft)"、Optimize 灰掉的地方看不到原因；现在是单独的状态，只要没有机型就显示，旁边有 **Retry**
+  （原来只能重新载入页面或切到别的任务再回来）。失败时不再把机型列表重设为新的空数组——那会触发整套重置，把用户在等待时设好的
+  东西清掉（审查发现）。
+- 规则写成 AV29：频繁变化的值各有自己的 context，`useApp` 不读；读它们的是显示它的组件或叶子组件。
+- 审查又发现、记进 followups 的：Observe 的采样数输入框每敲一个键就重新规划一次轨迹加载。
+- 测试：前端 97 个文件 786 条通过，`tsc` 与 `typecheck:scripts` 无错；浏览器核对：HUD 在 KSTL 从 Preload 0/41 数到 Active、
+  测距环改到 8 km 重画、停掉后端后 Fly 与 Optimize 都写着目录没加载成功的原因，后端起来后按 Retry 机型就出现。
+
 ### 2026-09-25 — 前端：修掉 code-health-followups 里纯前端的三条
 
 分支 `dev-frontend-followups`，用户合并。

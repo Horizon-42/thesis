@@ -6,28 +6,13 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
-## Pilot: the aircraft catalog's failure is cleared on entering Trajectory (2026-09-26)
+## Observe: the sample-count field re-plans the trajectory loads on every keystroke (2026-09-25)
 
-**Verified by reading** (review of `dev-frontend-followups` `0de09764`). When `GET /simulation/aircraft` fails, PilotPanel
-shows why (`setError`, `role="alert"`), but `openTrajectoryMode` (`aeroviz-4d/src/components/PilotPanel.tsx` ~L1054) and a
-successful RNAV-candidate load (~L753) both call `setError(null)` — so in the very mode whose target reads
-"— (no aircraft)" and whose Optimize is disabled, the reason is gone. **Judgement**: hold the catalog's failure in its own
-state, shown while there is no aircraft, apart from the one-shot `error` the other actions clear. The panel's test pins
-the alert at mount only.
-
-## Two more values re-render every `useApp` consumer (2026-09-26)
-
-**Verified by reading** (the review of the Training cursor split, `dev-frontend-followups` `0ee1d083`). `useApp()` spreads
-all eight contexts, so a value that changes often in any of them re-renders the whole app:
-- `SceneState.airportLocalTerrain` (`aeroviz-4d/src/context/AppContext.tsx` ~L470, its memo ~L588) is set on every
-  tile-preload progress callback (`useAirportLocalTerrainLayer.ts` ~L165 and ~L217): while the local terrain preloads,
-  every consumer re-renders once per tile.
-- `SceneState.rangeRingRadiusKm` is set on every step of the range slider (`LayersDrawer.tsx` ~L152): dragging it
-  re-renders the app per step (user-driven and bounded).
-Checked and fine: the HUD's camera readout (local state, 10 Hz), the bottom bar's and the approach view's clock ticks
-(local, guarded / throttled), the Pilot sim loop's readouts (local), `pilotTransport` (republished only on a state
-change). **Judgement**: the terrain progress deserves its own context (as the Training cursor got), or a progress
-readout held locally by its one reader; the slider can stay.
+**Verified by reading** (review of `dev-frontend-followups` `7617884a`). `aeroviz-4d/src/components/ControlPanel.tsx`
+(~L435) sets `trajectorySampleCount` on every keystroke, and `App.tsx` (`planObservedTracks`, ~L42/~L62) and
+`useComparisonTrajectoryLayer.ts` (~L279, ~L472) plan the trajectory loads from it — typing "200" plans loads for 2, 20
+and 200. **Judgement**: hold a draft while typing and commit it on blur / Enter, as the range ring's text field does
+(`LayersDrawer.tsx`).
 
 ## Training module review: what it found outside the module (2026-09-25)
 
