@@ -106,7 +106,7 @@ it merges (24, the B77W preset, review #14 and #21, the performance index's B722
 | The native stall-margin range after the preset masses moved (09-26) | fixed on a branch | re-judged by the rule (user 2026-09-26) on branch `dev-training-followups` `fde40395`: E545, E550 → C550, B733 → exclude | **yes — executor**: E545 / E550 flights fly as C550 |
 | OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | open | sources compared (entry); awaits the user's choice, and the FAA's B737 cell is wrong either way | **yes — executor**: those types' mass and approach speed |
 | An alias-resolved identity is not recorded as one (09-26) | open | unchanged | no: provenance only, the types are the same |
-| The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | open | new; see the entry | no: the Training view's exports (a re-export) |
+| The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | open | scope checked (entry): four writers, only the current set re-exportable | no: the Training view's exports (a re-export) |
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
 | ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | open | new; dev-post-train's file, left untouched | no: a document |
 
@@ -531,6 +531,16 @@ and the live executor's (`aeroviz_backend/autopilot_segment/payload.track_payloa
 they were measured at. Consistent within the view, 1.5 m off the observed layer and the terrain. Fix: carry the runway's
 offset into the exports (the sample has `candidates[].elevationM`; the offset is the artefact's per-runway datum) and
 drop `geoid_undulation_m`; it changes every exported sample and overlay (a re-export).
+
+**Scope, checked 2026-09-26.** A fourth writer does the same: `prior_generation_training_export` (the generation
+overlays). Display only — the exports are no training input; `altitudeM` (MSL) is unchanged, only `altitudeHaeM` /
+the tube's `lowerHaeM` / `upperHaeM` move. On disk (`public/data/airports/<ICAO>/training/`, all five airports): the
+four instruction sets, the executor and generation overlays, and the archived exporter's `box`, `box_v3`,
+`v15_nomerge_noposition` (`altHaeM`, also EGM96); the prior-prediction overlays hold no height but pin their base set's
+SHA-256, so they follow their base. Re-exportable by today's code: only `instruction_v3_day_split` and its four overlays
+(current labeller, executor spec `v7_20260925`). The older sets and overlays are refused by today's code (labeller
+v1–v3, executor specs v2 / v5), and the archived exporter is never edited: keep them as published or withdraw them —
+the user's call.
 
 ## `evaluation.metrics.READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (2026-09-25)
 
