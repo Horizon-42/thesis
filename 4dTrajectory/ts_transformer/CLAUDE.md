@@ -338,7 +338,9 @@ readout through evaluation, paired with the observed verdicts; val = stage 4, on
 OVERLAYS beside a Training set (`training/overlays.json`; every re-flown flight must reproduce its formal replay row — a
 heading word's verdict is the judge's per-row band result, exported with its band, overlay v2 — the prior's path reproduces
 its val readout; the executor export runs from a worktree — the spec's hash counts `geokit` from the main checkout), and the
-root publisher's `--executor-replay` files the replay's records under Experiments (R13).
+root publisher's `--executor-replay` files the replay's records under Experiments (R13). `prior_generation_training_export`
+(2026-09-26) writes a model's OWN sentences over a set — free generation's own loop, `--samples` a flight, words + flown
+track + outcome, the formal val readout bound by prior / spec / artefact (R13).
 `heading_reading_compare` (ARCHIVED 2026-09-24 with the holds reading) flew one train sample under every heading reading at
 fixed executor parameters, pairing evaluation with the observed flights graded by the same code (vocabulary design §10.1) (R14).
 **The prior** (third version, 2026-09-24): `prior_train` (one variant — landing context, ordered heads — on single-aircraft

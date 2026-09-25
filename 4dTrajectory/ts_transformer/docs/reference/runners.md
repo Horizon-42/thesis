@@ -287,6 +287,28 @@ and limits, and the replay's gate table for the airport and all airports. **Run 
 repository — outside from a worktree (as when the spec was measured), inside from the main checkout, where the spec is
 refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 flights on CPU.
 
+`prior_generation_training_export --prior <prior dir> --label <its name> --instructions <artefact> --executor <spec dir>
+[--readout <its val free generation>] --airports-root … --set <a read-back set> --airport ICAO [--airport …] [--samples 4]
+[--temperature 1.0] [--seed 1337] [--overlay-id generation_<parent>_<name>]` (2026-09-26, schema
+`aeroviz-training-generation-v1`, kind `prior-generation`; the frontend side AV31): the model's OWN sentences over the set's
+flights — `prior_free_generation.speak_and_fly` on the flights its val readout flies (own dynamics; the rest listed with their
+group), `--samples` each, one CPU generator seeded once and drawn in the order the airports are named (so a re-run is
+identical); per sample the words as events on the flight's own rows (from `N_LOOK`), `flight_rows`' outcome and bookkeeping
+(the outcome read again by `judge.outcome_of` must agree), the crossing, the forbidden mass per masked column, and the flown
+track every 2 s on the flight's clock to the outcome's row (a dynamics failure's to the row before) in MSL and HAE. No per-word
+verdicts (they would judge the executor, not the model). The words run to where the EXECUTOR stopped (`flight_rows`' count),
+which follows `endS` for a crossing without the capture and the stall cut-off (`Executor.finished` stops at neither): written
+as the formal readout counts them, shaded by the frontend. `--readout` copies the model's formal val free generation landed
+shares (all / straight-in / vectored, null where the draw had none) at the payload's airport (`here`) and pooled (`all`),
+refused unless it is this prior (path from `4dTrajectory/outputs/` on), this executor spec (content sha), artefact, val,
+`N_LOOK`, samples and temperature, and its draw's per-airport count is a number or `EVERY_FLIGHT` (the draw's phrase, pinned
+against `replay.py`). The checkpoint: `prior_training_export.open_trained_prior` (shared with `prior_training_export`); a
+post-trained round's `fine_tuning` block is carried as `model.fineTuning` (the frontend colours by it). The executor spec must be one this code opens
+(2026-09-26: `v7_20260925`; `v8` holds the same content sha but was written by code that still had the archived CAT-K). ~2 min a
+model for five airports of 40 flights on CPU, 1.2–1.9 MB an airport; a re-run is identical. Tests:
+`tests/test_prior_generation_training_export.py` (the pieces, and `main` end to end on a synthetic artefact with stand-in
+series).
+
 `prior_training_export --prior <prior dir> --instructions <artefact> --airports-root … --set instruction_v3 --airport
 ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-training-prior-v3` since the prior's third
 version: the per-step arrays cover the predicted steps only, from `firstPredictedRow` = `N_LOOK`; null change metrics for a

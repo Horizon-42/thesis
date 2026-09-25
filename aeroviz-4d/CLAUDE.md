@@ -159,6 +159,13 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   the workbench). The Training panel stays mounted after a visit (`hidden` in other tasks), so its session
   survives a task switch at the same airport (another airport opened elsewhere drops it — no background download) —
   anything drawing Training state must check `mode`** (AV28).
+- **The Training docks end ABOVE the sentence bar**: the bar publishes its measured height as `--training-bar-height` on
+  `.workbench`, `.workbench:has(> .training-sentence-bar)` pads the overlay container by it; the flight list takes the leftover
+  dock height (min ~5 two-line rows), the dock scrolls past that (AV30).
+- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v1`, written by ts
+  `prior_generation_training_export`): `trainingSource` (null = truth, or `{overlayId, sample}`) picks the sentence the bar,
+  the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are hatched + dash-edged with the truth's issues
+  ticked under each row; colour by role — base `#d946ef`, post-trained `#a3e635` (`trainingModelColour`) (AV31).
 
 ## Comparison CZML colour contract
 

@@ -376,6 +376,41 @@ that divergence is a known open item (see the README's "Future Improvements").
   外壳里读**。`AppContext.test.tsx` 对三者各钉住"变了只重渲染它的读者、不重渲染 `useApp` 的读者"，`App.test.tsx` 钉住外壳不跟着游标动。
 - 实测（KSTL，浏览器）：HUD 从 Preload 0/41 逐个数到 36/41 再到 Active，整个界面不再跟着每个瓦片重渲染。
 
+### AV30 · Training 的左栏停在句子条上面；航班列表占剩下的高度（2026-09-26）
+
+- 句子条横跨整个宽度，原来左栏一直伸到底，下半截（Draw 的开关、叠加层）被它盖住。现在句子条用 `ResizeObserver` 量自己的高度，
+  写到它所在的 `.workbench` 上（`--training-bar-height`，句子条卸下时删掉）；`index.css` 里
+  `.workbench:has(> .training-sentence-bar) > .cesium-overlay-container` 的底边距改成 36 px（句子条离底的距离）+ 句子条高 + 8 px，
+  左右两侧的面板因此都在它上面结束；原来给 Cesium 时钟盘留的底边距（`left-overlay-panel-stack` 的 92 px）这时归零——那一块本来就被
+  句子条盖着。
+- 左栏里 `TrainingPanel` 是 `flex: 1 0 auto`（填满左栏、不比内容矮），航班列表 `flex: 1 1 0; min-height: 176px`：列表拿剩下的高度，
+  最少约五个两行的条目（执行器回放打开时每条两行）或九个一行的；内容再多时整个左栏滚动，列表下面的开关不会被挤掉，也不会被句子条盖住。
+- 在演示模式里句子条隐藏但仍挂着，变量留着；两侧面板那时也隐藏，没有影响。
+
+### AV31 · Training 读模型自己说的句子：`prior-generation` 叠加层（2026-09-26）
+
+- 导出：`python run_ts.py prior_generation_training_export`（ts R13）——先验说、执行器飞，和正式自由生成读数同一条路径
+  （`prior_free_generation.speak_and_fly`）；每架航班 `--samples` 个样本；只飞自己机型有动力学的航班。文件
+  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v1`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
+  由 `test_training_overlays.py` 逐字比对），清单里的种类 `prior-generation`（清单格式不变，还是 v1：不认识的种类只拒这一条）。
+- 每个样本：事件（行、列、值，行是航班自己的步号，从 `firstPredictedRow` = 8 起、第一步六列都说）、结局、结束时刻、越过入口
+  （只随 `TRAINING_CROSSING_OUTCOMES` = `judge.CROSSINGS` 出现）、首末跑道、换跑道与复飞词数、结束时是否许可、屏蔽拿掉的概率
+  （按列名的记录，列只能是六列之一——不镜像哪几列被屏蔽，后训练在加高度列的屏蔽）、航迹（航班自己的时钟，每点一步、最后一点
+  可以不满一步，到结束时刻；动力学失败的早一个周期；MSL 与椭球高）。换跑道次数、复飞词数、结束时是否许可要和词对得上。读取器
+  逐项核对这些账，对不上整份拒读（`trainingGeneration.test.ts`）。词写到执行器停下处，可能在结束时刻之后（越过入口没截获、失速
+  截断）：照正式读数的数法写出，句子条把多说了一整步以上的那段涂暗。正式读数分这个机场与全部机场两份（`readout.prior.here/all`）。
+- 读哪一句是 `AppContext.trainingSource`（null = 真值；或 `{overlayId, sample}`），句子条的标签页和左栏的 Sentences read 共用；换航班
+  保留。`generationOnScreen` 找出屏幕上这架航班的那个样本；模型不飞这架航班时回到真值。**真值总是画**，模型的东西只在读它时画。
+- 区分：模型的带斜线 + 虚线边框，前 8 步灰斜纹 "observed"，每行底边白色短竖线是真值在这一列说词的地方；颜色按角色——base 模型
+  品红 `#d946ef`、后训练黄绿 `#a3e635`（`trainingModelColour`，按有没有 `fineTuning`），配色校验的数写在 `trainingWordColors.ts`。
+- 三维（`useTrainingGenerationLayers`）：读的样本实线、贴地虚线、结束标签、它说航向词和许可的点（模型的颜色）；其余样本细线
+  半透明（`TRAINING_OTHER_SAMPLE_ALPHA`）。选中的词画在模型飞出的航迹上，真值的包络不淡化（`useTrainingTrackLayer` 读模型时不画
+  真值的选中）。
+- 模型的许可与复飞用集合进近词表里的 "cleared" / "go-around"（`TRAINING_APPROACH_CLEARED` / `TRAINING_APPROACH_GO_AROUND`，
+  导出器 `APPROACH_NAMES` 的镜像，`test_instruction_training_export.py` 钉住；样本读取器拒绝没有它们的词表）。
+- 换模型从第 1 个样本开始；模型不飞的航班画真值连同真值的整个头部；Read-back / Prior 两个窗口读真值，只在读真值时给出。
+  左栏只留当前集合的模型下载，读不了的有 Retry（`useGenerationOverlays`）。
+
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
 - 根目录的发布器 `--executor-replay` 把执行器的 val 回放记录（和 ts 预测同一个记录契约）发布成 Experiments 类别，每个机场

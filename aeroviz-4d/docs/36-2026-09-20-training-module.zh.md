@@ -14,12 +14,12 @@
 | 项 | 内容 |
 |---|---|
 | 词表 | 读法 `instruction-v3`（航向词按步读，词表设计 §10.1）。前端钉住的规格 sha `TRAINING_SPEC_SHA256` 是 **`145d6911e75b`**（2026-09-25：按运行日划分后在新训练集上重新测量，产物 `4dTrajectory/outputs/POOLED/instruction_language/v4_20260924/`）——现在的执行器代码只飞这份产物（执行器规格 `v6_20260924`）。按航班划分的 `v3_20260924`（规格 `0b4ea75be36d`）上导出的 `instruction_v3` 集合和画在它上面的 `executor_v5_20260924` 叠加层从此按规格 sha 拒读 |
-| 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v2`（2026-09-24 先验第二版：形状没变，第 0 步已知的五列是点质量、读数口径是第 0 步只算跑道） |
-| 前端代码 | 数据：`src/data/trainingReader.ts`（三种文件共用的一个读取器：逐字段读，读不了就说出字段路径）、`trainingSample.ts`（集合与样本的契约）、`trainingOverlays.ts`（叠加层的契约）、`trainingAutopilot.ts`（实时执行器的契约、请求与三维回放的计算，§4.7）、`trainingText.ts`（各视图共用的措辞：结局、检查、越过入口、sha、时长）。视图：`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotCard,VocabularyNotes}.tsx`，读数窗口拆在 `src/components/training/`（`readbackModel.ts` 一次算好所有比例尺，四张图 `Readback{Plan,Heading,Altitude,Speed}.tsx`，画图小件 `chartKit.tsx`，两个浮动窗口共用的外壳 `TrainingWindow.tsx`，`ProblemBox.tsx`）。三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、几种线与点）、`src/hooks/useTrainingTrackLayer.ts`（观测航班；由什么也不渲染的叶子组件 `src/components/TrainingScene.tsx` 调用，游标变了只有它重渲染，§4.5）、`useTrainingExecutorLayers.ts`（回放与实时执行器）。另有 `useTrainingOverlays.ts`、`useTrainingAutopilot.ts`、`useMeasuredWidth.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
-| 分支 | v3 的导出与界面在 `dev-vocab-v3-frontend`（从 `dev-vocab-v3` 的 `ba77d65c` 分出）：代码与测试 `8f7a8640`，文档在其后一个提交；用户合并 |
-| 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。上面还没有叠加层（执行器 v6 的验证集回放、先验第三版的导出都没发布到它上面）；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md` |
+| 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v3`，模型自己说的句子 `aeroviz-training-generation-v1`（`prior_generation_training_export`，§2.7） |
+| 前端代码 | 数据：`src/data/trainingReader.ts`（三种文件共用的一个读取器：逐字段读，读不了就说出字段路径）、`trainingSample.ts`（集合与样本的契约）、`trainingOverlays.ts`（叠加层的契约）、`trainingAutopilot.ts`（实时执行器的契约、请求与三维回放的计算，§4.7）、`trainingText.ts`（各视图共用的措辞：结局、检查、越过入口、sha、时长）。视图：`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotCard,VocabularyNotes}.tsx`，读数窗口拆在 `src/components/training/`（`readbackModel.ts` 一次算好所有比例尺，四张图 `Readback{Plan,Heading,Altitude,Speed}.tsx`，画图小件 `chartKit.tsx`，两个浮动窗口共用的外壳 `TrainingWindow.tsx`，`ProblemBox.tsx`）。三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、几种线与点）、`src/hooks/useTrainingTrackLayer.ts`（观测航班；由什么也不渲染的叶子组件 `src/components/TrainingScene.tsx` 调用，游标变了只有它重渲染，§4.5）、`useTrainingExecutorLayers.ts`（回放与实时执行器）、`useTrainingGenerationLayers.ts`（模型自己说的句子，§4.8）。另有 `useTrainingOverlays.ts`、`useTrainingAutopilot.ts`、`useMeasuredWidth.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
+| 分支 | 左栏停在句子条上面、模型自己说的句子（§2.7、§4.8）：`dev-training-sentences`（工作树 `.claude/worktrees/training-sentences`，从 `dev-two-tier` 的 `7e1b45f9` 分出），用户合并 |
+| 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。**模型自己说的句子**（§2.7、§4.8）：base 模型（`prior/v3_step1_20260924/full_s1337`）和按落地奖励后训练的第 1 轮（`prior/v3_rl_20260925/grpo_s1337/round_01`）各一份，每架 4 个样本，执行器规格 `v7_20260925`；在分支 `dev-training-sentences` 上导出到工作树自己的机场目录核对过，**写进真正的 `public/data` 要等用户同意**（写共享产物）。在这 40 × 5 架里按自己机型动力学能飞的 180 架 × 4 个样本上：base 模型落地 652/720（90.6 %），后训练 694/720（96.4 %）；两者正式 val 读数 90.2 % / 97.2 %。执行器 v6 的验证集回放、先验第三版的教师强制预测都还没发布到这个集合上；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md` |
 | 实时执行器 | 后端 `POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包）：在句子条上点一个词，执行器从观测飞机说这个词时的状态飞这个词的一段（到它的包络结束之处：同列下一个词说出的地方，航向词再往后一个提前量；到了句子末尾就飞到落地），只判这个词。执行器代码一行不改，用它的单步接口 `Executor` 一个控制周期一个周期地飞，到段尾就停；每次都重新飞，不读任何回放或叠加层（§4.7）。用哪份执行器规格由后端按"现在的执行器代码接受的那一份"自动找：现在是 `v7_20260925`。界面上并排给出模拟飞行时间与计算用时。2026-09-25 在五个机场 200 架航班上逐段试飞 3,032 段：无异常，1,904 段飞到段尾、1,128 段落地；唯一的拒绝是没有机型动力学的航班（252 段，正式回放同样不飞）；每段耗时中位数 0.39 s、最长 3.6 s。单步飞法与"飞满时限再截断"逐位相同（216 段，状态与结束周期一致）。同一页面的新请求取代它还在排队或正在飞的旧请求（409），连点几个色块只飞最后一个。整模块审查之后又在同样 200 架航班的全部 3,526 个航向词上试飞：3,230 段飞成（3,037 段在包络内飞到段尾、143 段在包络内落地、49 段不判、1 段出界），296 段机型没有动力学；"带被段尾截短"的拒绝一次也没有出现（§4.7） |
-| 测试 | 2026-09-25（纯前端的 followups 修完之后）：前端 Vitest 97 个文件 788 条（含 `App.test.tsx`：移动游标时外壳不重渲染），`tsc` 与 `npm run typecheck:scripts` 无错；后端 `aeroviz_backend/tests` 149 条全部通过（实时执行器 42 条，含与 `replay.fly_sentences` 逐个参数的装配比对、与前端常量的逐字比对、同一页面编号大的请求取代编号小的、带被段尾截短的拒绝（用 `fly_until` 真实飞出的几种情况）；审查用六个改坏的版本试过，每个都被测出来）；ts 的 `test_instruction_training_export.py`、`test_training_overlays.py`、`test_frontend_mirrors.py` 通过。补上的测试：回放里"没说到"与"被取代"的词、速度段在到达速度带之前被下一个词截断、句子在越过入口处截断、"Replay in 3D" 重放不重复添加实体、第一个周期就动力学失败的答复（读取、结果卡、读数窗口、三维）、结果卡的 Fly again、叠加层下拉按机场与集合记住所选、下载失败后关开重下。`npm run check-publication` 五个机场无错；五个执行器叠加层（画在按航班划分的旧集合上）在内存里换掉规格钉住值后按新读取器读过一遍，全部通过。浏览器（5174 / 8766 测试栈）核对过：选词、现飞、状态行、读数窗口、Escape、图例、换航班再回来不重飞 |
+| 测试 | 2026-09-26（左栏与模型自己说的句子，分支 `dev-training-sentences`）：前端 Vitest 98 个文件 822 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts 全套 1,434 条通过（新导出器 `test_prior_generation_training_export.py` 16 条，含在合成产物上端到端跑 `main`：集合顺序、自己动力学的航班各飞 3 个样本且各自从自己第 8 行的状态起飞、不飞的航班、清单、重跑逐字相同、不覆盖）。两轮 opus 审查（第一轮 8 条应改 + 11 条小处全部改掉，第二轮确认并补了一个没有航班可数时的崩溃与一个未钉住的镜像）。`check-publication --airports-root` 对工作树的镜像目录：五个机场各 4 个叠加层对照集合读过，0 错误。浏览器（5174）核对过：左栏停在句子条上面、标签页与样本、模型不飞的航班、结束之后涂暗（KMSY DAL8784 后训练第 2 个样本：325 s 越过入口没截获，模型一直说到 650 s）、三维模型航迹、图例 |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`、`instruction_v2`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 
 ---
@@ -169,6 +169,58 @@ python run_ts.py prior_training_export \
 2026-09-24 画在 `instruction_v2` 集合上的执行器（规格 `2674ab8c71a9`）与先验（`prior/v1_20260924`）叠加层的发布与
 核对记在 `docs/CHANGELOG.md`；它们按名字拒读，v3 的叠加层要等 v3 的执行器规格、回放和先验。
 
+### 2.7 模型自己说的句子（`prior-generation`）
+
+§2.6 的先验预测是教师强制的：每一步都看着真值句子。这里是**模型自己说一整句**——先验设计 §9.1 的单机自由生成——
+写在集合旁边，也是一种叠加层：
+
+```bash
+# 执行器规格要选现在的执行器代码接受的那一份（今天是 v7_20260925；v8 与它内容 sha 相同 0d6a68a92c6f，
+# 只是写它的代码里还有后来归档掉的 CAT-K，源码 sha 不同）
+python run_ts.py prior_generation_training_export \
+    --prior 4dTrajectory/outputs/POOLED/prior/v3_step1_20260924/full_s1337 --label "base model" \
+    --instructions 4dTrajectory/outputs/POOLED/instruction_language/v4_20260924 \
+    --executor 4dTrajectory/outputs/POOLED/executor/v7_20260925 \
+    --readout 4dTrajectory/outputs/POOLED/prior/v3_freegen_20260925/val_400x4 \
+    --airports-root aeroviz-4d/public/data/airports --set instruction_v3_day_split \
+    --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
+# 后训练的一轮：--prior …/v3_rl_20260925/grpo_s1337/round_01 --label "post-trained"
+#               --readout …/v3_rl_20260925/val_kept_400x4
+```
+
+- **怎么生成**：和正式的自由生成读数一模一样（`prior_free_generation.speak_and_fly`）。前 `N_LOOK`（= 8）行是观测；执行器从
+  第 8 行观测飞机的状态起飞，先验在第 8 行把六列都说一遍，之后每 2 s 一步：先读执行器飞到哪了，按列的顺序采样这一步的词
+  （词表的相容规则、执行器已许可或已截获后不许换跑道，这两样作解码屏蔽），执行器马上照着飞这一步。飞到执行器判它结束
+  （落地、越过入口、触地、动力学失败）或超时（观测剩余时间的 1.5 倍）为止。每架航班采 `--samples`（默认 4）个样本，温度 1，
+  种子 1337，一个随机数发生器按机场的先后顺序往下用。**只飞正式读数也飞的航班**：自己机型有动力学的（`replay.OWN`）；别的
+  （替代动力学、没有动力学、没识别出机型）列出原因，没有样本。结局是执行器判决给的（`judge.outcome_of`，按最后所指的跑道）。
+- **每个样本写什么**（`generation.json`，`aeroviz-training-generation-v1`）：说出的词，写成和真值句子一样的事件（行、列、值），
+  行号就是这架航班自己的步号（第一个事件在第 8 行，六列都在）；结局、结束时刻、越过入口的偏离与高度差（只有越过入口的
+  三种结局才有）、第一步与最后所指的跑道、换跑道次数、复飞词数、结束时是否已许可、屏蔽拿掉的概率（跑道 / 进近 / 下降角
+  三列，每步平均）；执行器飞出的航迹，每 2 s 一点，**用这架航班自己的时钟**（从第 8 行的 16 s 起），到结局那一行（动力学失败的
+  到它前一行：失败的那个状态可能不是有限值），带 MSL 与椭球高（h = H + N）和地速。**不带逐词判定**：判决说的是执行器有没有
+  飞在先验所说的词的包络里，不是先验说得好不好；先验的答案是落没落地。
+- **词写到执行器停下的地方，航迹写到结局**：`flight_rows` 把一句话数到执行器认为这架飞完的那一步。有两种结局判决读得比执行器
+  停得早——越过入口但没截获、失速截断（执行器的"飞完"不含这两种）——这时样本的最后几个词在结束时刻之后。照正式读数的数法
+  原样写出（结束时所指的跑道就从这些词读），界面把结束之后的那段涂暗（§4.8）。
+- **模型是谁**：`--label`（界面上的名字）、检查点 sha256、变体、训练时的提交；后训练的一轮还有 `fineTuning`（方法、第几轮、
+  从哪个模型起步——检查点配置里 `prior_landing_reward` 写的那一项；只用数据训练的 base 模型没有这一项，为 null）。界面按有没有
+  这一项给颜色（§4.8）。
+- **正式读数**（`--readout`，可选）：这个模型的正式 val 自由生成（`generation.json`）里先验与"标注的词"两行的落地比例（全部、
+  直线进近、被引导；某一类没有航班时写 null），**这个机场的一份和全部机场合起来的一份**，原样照抄（读数的抽样说"every labelled
+  flight"时写 0；别的写法拒绝）；要求它确实是这个检查点（路径从 `4dTrajectory/outputs/` 往后比：
+  读数是在工作树里跑的，工作树的 outputs 就是同一棵树）、同一份执行器规格（内容 sha）、同一份句子产物、val、`n_look`、
+  样本数与温度都相同，否则按名字拒绝。
+- **检查点**：`prior_train.load_prior` 能在这份产物上打开（规格、标注器、运行日划分、候选跑道表、整份状态）、不是冒烟试跑、
+  今天的航迹清单与训练时相同（落地情况从它读，按 sha256 比）。
+- **绑定与核对**：与 §2.6 相同（集合 id、样本写出时刻、规格 sha，逐架航班的键）；另外逐个样本核对自己的账：事件按
+  (行, 列) 递增且在自己的行数以内、第一个预测步六列都说、首末跑道就是自己的跑道词、越过入口只随那三种结局出现、航迹从第 8 行的
+  时刻开始、除最后一点外每点正好一步（界面按"第 k 点 = 第 8 + k 行"放词）、最后一点离前一点不超过一步、在结束时刻结束（动力学
+  失败的早一个周期）；换跑道次数、复飞词数、结束时是否许可与它自己的词对得上；样本数等于声明的数；飞了的航班恰好有这么多样本，
+  没飞的一个也没有。集合的进近词表必须有"cleared"与"go-around"（`TRAINING_APPROACH_CLEARED` / `TRAINING_APPROACH_GO_AROUND`
+  是导出器 `APPROACH_NAMES` 的镜像，由 `test_instruction_training_export.py` 钉住）。
+- 导出时间：CPU 上每个模型五个机场约 2 分钟，每机场每模型 1.2–1.9 MB。
+
 ---
 
 ## 3 每个词画成什么（飞行盒）
@@ -223,12 +275,23 @@ python run_ts.py prior_training_export \
 
 ### 4.1 左侧面板
 
-从上到下：集合、航班列表、实时执行器、Draw、叠加层的读数表。要读一次就够的东西都收在标题旁的 ⓘ 后面，列表不被挤。
+从上到下：集合、航班列表、读哪一句（Sentences read）、实时执行器、Draw、叠加层的读数表。要读一次就够的东西都收在标题旁的
+ⓘ 后面，列表不被挤。
+
+**左栏停在句子条上面**（用户 2026-09-25：左栏原来一直伸到底，被全宽的句子条盖住下半截）：句子条量自己的高度，写到工作台的
+`--training-bar-height` 上，句子条在的时候（`.workbench:has(> .training-sentence-bar)`）左右两侧的面板都在它上面 8 px 处结束，
+原来给 Cesium 时钟盘留的底边距让给句子条。**航班列表占左栏剩下的高度**，最少约五个条目（执行器回放打开时每条两行）；左栏装不下时整个左栏滚动，
+不压列表、也不盖住下面的开关。
 
 - 集合下拉：能读的集合；别的词表的集合也列着，后面写"— refused"，选中时显示按名字拒读的原因，不下载。
 - 一行短说明"40 flights · val, 20 per stratum"，抽样规则全文（原文照录文件里的规则）和集合标题在它的提示里。
-- 航班列表：呼号、跑道、分组、第 0 步之后的词数排在一行；执行器的回放打开时，下面一行它的结局和合格的词数（全在包络里且
-  落地为青色，否则红色）。
+- 航班列表：呼号、跑道、分组、第 0 步之后的词数排在一行；正在读某个模型的句子时，同一行末尾是它在这架航班上的每个
+  样本（模型的颜色，● 落地、○ 没落地；模型不飞这架航班时写"—"，原因在提示里）——哪些航班模型说得不好一眼能看出来；
+  执行器的回放打开时，下面一行它的结局和合格的词数（全在包络里且落地为青色，否则红色）。
+- **Sentences read**：读哪一句——"truth (labelled)"，以及集合上发布了的每个模型（它的颜色、名字、在这个集合上落地的样本数，
+  如"116/136 landed"）。与句子条的标签页是同一个选择（§4.8）；选中的模型不在这个集合上时，勾的是真值。读不了的模型写出原因，
+  下面一个 **Retry** 重新下载。只留当前集合的下载（它们比别的叠加层大），换集合就丢掉。没有发布时一个可展开的
+  "none published"，里面是生成命令。
 - **Autopilot (live)**：一个开关 **Fly on band click** 和实时执行器的结果卡（§4.7）；没飞过时只有开关。
 - **Draw**，开关名字短，说明在提示里：**Heading bands**（每个航向词被判的那几行上的航向带、那一段地面投影、出界的行）、
   **Capture turn + corridor**（截获转弯、走廊、中线、截获后的航道带）、**Altitude tubes + speed bands**（管子，以及速度图上的
@@ -237,8 +300,11 @@ python run_ts.py prior_training_export \
   就灰掉，旁边一个可展开的 "none published"，里面是生成它的命令。同一种有几个时给一个下拉，默认最后列出的；选中的那一个只
   属于这个机场的这个集合——换机场或集合回到最后列出的那个，换回来恢复。叠加层下载失败（取不到或读不了）时写出原因，把它的开关
   关掉再打开就重新下载（文件在这之间重写过，读到的是新的）；下载成功的，开关多少次都只下载一次。
-- 最下面折叠着回放的门表（这个机场按进近方式分、全部机场，自己机型动力学进门、替代动力学只报）和先验的读数表（每列：
-  先验、两个基线、换词步上说词的概率、第一名命中率；基线在第一个预测步怎么给也写明了）。
+- 最下面折叠着回放的门表（这个机场按进近方式分、全部机场，自己机型动力学进门、替代动力学只报）、先验的读数表（每列：
+  先验、两个基线、换词步上说词的概率、第一名命中率；基线在第一个预测步怎么给也写明了），和**模型自己说的句子落地了多少**：
+  每个模型一组——"这个集合"（从屏幕上的样本数出来，全部 / 直线进近 / 被引导）、正式 val 读数的这个机场与全部机场、"标注的词"
+  的这个机场与全部机场（真值句子从同一步交给执行器飞，看执行器自己能飞到哪）——下面每个模型一行说明它怎么抽样、用哪份执行器
+  规格、正式读数抽了多少架；折叠时的标题就是结论，如"base model 85% (val 90.2%) · post-trained 96% (val 97.2%)"。
 - ⓘ 展开：这个模块读什么；每个 Draw 开关、**Fly on band click** 和每个叠加层画的是什么（这些平时只在开关的提示里）；
   词表的说明（`TrainingVocabularyNotes`）——读法、sha、每列类别数、各项容差（航向的提前量与容差，
   截获转弯的开始判据、转弯率与坡度，每条跑道的落地横向界限）、下降角类、平滑窗口。这些数只在这里写一次；句子条、读数窗口和
@@ -249,6 +315,8 @@ python run_ts.py prior_training_export \
 ### 4.2 句子条（底部，全宽）
 
 - 六行，顺序同词表：跑道、进近、航向、高度、下降角、速度。横轴是这架飞机自己的时间。
+- **读哪一句**：头部最前面的标签页——**Truth**，以及集合上发布了的每个模型（名字前一个它颜色的圆点）；选中模型时，标签页
+  后面是它的样本按钮 1、2、3、4（没落地的带 ✗），整条句子条的边框换成模型的颜色。模型的句子怎么画见 §4.8；下面说的是真值。
 - 一条带 = 一个生效中的词，从发令的那一步到同一列下一个词；带左端的小竖条就是发令。第 0 步六行都从 0
   开始。顶上的数字是"说了话的步"。
 - 许可（进近列的颜色）、截获（走廊的绿）、速度转为"未指定"（速度列的颜色）三处用虚线标出——它们不是词。
@@ -260,7 +328,8 @@ python run_ts.py prior_training_export \
   结束、回放的点是什么意思，以及上面各小块的完整读法）。
 - 点一条带：选中它这一列（词类），游标移到它的发令步；再点一次取消。点步号只移游标，选中的列不变。
   只有选中那一列在游标处生效的词亮（黄边、加深），列名变黄——别的列在同一步生效的词不亮（§4.5）。
-- 读数核对窗口和先验窗口同一时间只开一个：开一个就关掉另一个。
+- 读数核对窗口和先验窗口同一时间只开一个：开一个就关掉另一个。两个窗口读的都是真值句子，所以只在读真值时给出（读模型时
+  按钮不出现，开着的窗口收起，回到 Truth 再出现）——否则同一时刻会亮两个不同的词。
 - 执行器的回放打开时：每条词左端一个点——青 = 飞在自己的包络里，红 = 出界，空心灰 = 不判 / 没说到 / 被取代，没有自己
   检查的词不画；悬停写出每项检查与原因（航向词：从它听到的那一步加提前量起，多少行在 ±4.5° 以内）。
 
@@ -308,6 +377,9 @@ python run_ts.py prior_training_export \
   包络上面。回放和实时执行器各自一组实体，开关它们不动别的。
 - 执行器的回放打开时：它飞出的航迹（青色，椭球高）、贴地的虚线投影、它出界的行（红，贴地，跟 "heading words" 开关）、
   终点和结局标签，图例加一行；开关它不重新取景。
+- **读某个模型的句子时**（§4.8）：真值照画不动；另画这个模型在这架航班上的全部样本——正在读的那一个用模型的颜色实线
+  （椭球高）、贴地虚线投影、结束处的标签（"base model #2: timed out"）、它说出每个航向词和许可的位置（都用模型的颜色，
+  与真值用列颜色的发令点分开）；其余样本细线、半透明——同一架航班上模型会说出哪几种走法，一眼能看到。图例加两行。
 - 静态实体，不接 CZML，不动 `viewer.clock`。
 
 ### 4.5 共享游标与高亮
@@ -334,6 +406,9 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
 | 速度 | 三维里没有；地速图上它的过渡和速度带（或"未指定"段） | |
 
 每个词还把它生效的那几行画成黄色：三维与平面图的航迹上，以及画它那个信号的图上；三维在发令处加黄点和词名。
+**读模型的句子时**，选中的是模型的词：句子条上它的带变黄，三维里它生效的那一段画在**模型飞出的航迹**上（加黄点和词名），
+真值的包络不淡化——它们是真值的词，不是这个词的。模型的步号可以超过观测航班的最后一步（超时的样本飞得更久），游标按
+2 s 一步换算成模型句子的行。
 选中的包络：线（航向词的地面段、截获转弯）变黄；面（走廊、管子）保留本色加深、边线变黄。游标在同一个词里移动时三维
 什么都不重画；换词只改材质和线宽，不重建几何。
 
@@ -458,6 +533,31 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
 比标出界行的 `#f87171` 更响；配色校验：与蓝的色差 41.6、色觉异常下 29.0）——三维的航迹、地面投影、飞机与标签、读数图的线、
 结果卡的判定与左边框都一起变（`autopilotColour`）。
 
+### 4.8 模型自己说的句子：和真值怎么区分
+
+用户 2026-09-25 的要求："先验模型产出的词序列要和 ground truth 词序列在视觉上有区分"，并建议底部看板可以切换查看，三维里
+真值总是显示、颜色和模型的不同，模型产出按选中的模型来。落实如下：
+
+- **一次只读一句**：句子条头部的标签页（和左栏的 Sentences read 是同一个选择，`AppContext.trainingSource`）。换模型从它的第 1 个
+  样本开始；选中的模型与样本在换航班时保留——一架一架地看同一个模型是常用的读法；模型不飞的航班（替代动力学等）写明
+  "not flown (…) — the truth is shown"，句子条画真值，连同真值的整个头部（标注器判定、回放、实时执行器、▶ Fly）。
+- **模型的词和真值的词一眼分得开**：
+  - 模型的每个带在列颜色上加一层**斜线**，边框是**虚线**；真值的带是实心实线。斜线和虚线不靠颜色，色觉异常也分得开。
+  - 模型只观测、还没开口的前 8 步画成灰色斜纹，写 "observed"。
+  - 每一行底边上，**真值在这一列说词的地方一根白色短竖线**：模型换词的位置和真值换词的位置在同一行里对照，不必来回切换。
+  - 虚线：模型许可的时刻（进近的颜色）、观测航班句子结束的时刻（白）；实线：模型的航班结束的时刻（模型的颜色）。结束之后模型
+    还说了至少一整步的（越过入口没截获、失速截断之后执行器还在飞，§2.7），那一段涂暗，写 "after the end"。
+  - 头部的小块换成这个样本的结局："#1: landed on 23R at 263 s (observed 306 s)"，没落地的红色；完整读法（说了多少词、越过入口
+    的偏离、首末跑道、换跑道、结束时是否许可、屏蔽拿掉的概率）在提示里。▶ Fly 只飞真值的词，读模型时不出现；标注器的判定小块、
+    回放小块也只属于真值。
+  - 横轴：观测航班的长度；读的样本飞得更久（超时的样本最长到观测剩余时间的 1.5 倍）时延长到它结束。读真值时不会被没显示的
+    样本压扁；游标停在超出真值的地方时，回到 Truth 画在轴的末端。游标越过模型句子的最后一行时，这一列没有生效的词，不亮。
+- **颜色按角色给**（`trainingModelColour`）：base 模型（只用数据训练）品红 `#d946ef`，后训练的一轮黄绿 `#a3e635`；真值用观测
+  航迹本来的近白色 `#e2e8f0`，总是画。两种颜色是配色校验器在句子条底色 `#0f131e` 上找到的仅剩的两个空色区：品红与三维里
+  画出来的每种颜色 OKLab 色差 ≥ 14.4（最近的是进近的粉，三维里只是一个点），与速度紫 9.2（速度在三维里不画）；黄绿与每种
+  颜色 ≥ 9.5（最近的是贴地半透明的走廊绿和跑道绿）；对比度都 ≥ 5:1。两个模型从不同时画，彼此色差 60。
+- **三维**见 §4.4 最后一条；读真值时一个模型的东西也不画。
+
 ---
 
 ## 5 核对
@@ -469,7 +569,7 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
 - 加 `--server <地址>`：同样的文件从正在运行的开发服务器取，JSON 必须是 JSON（不是 SPA 回退页），能读的
   样本**把服务器返回的内容再用读取函数读一遍**——HTTP 200 不等于"能加载"。
 - 加 `--airports-root <目录>`：核对另一个目录（例如导出到临时目录的试跑），不能和 `--server` 同用。
-- 叠加层：`overlays.json` 用前端自己的读取函数读，每个叠加层对照它所画集合的样本读一遍，并核对盘上样本文件的 sha256 是
+- 叠加层（包括模型自己说的句子）：`overlays.json` 用前端自己的读取函数读，每个叠加层对照它所画集合的样本读一遍，并核对盘上样本文件的 sha256 是
   叠加层记下的那一个（集合重新导出过就报错）；画在界面不读的集合上的叠加层记为警告。加 `--server` 时服务器返回的叠加层
   也再读一遍。每种叠加层用它自己的读取函数（新加一种而没给读取函数，编译不过）。
 
@@ -491,11 +591,12 @@ context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（�
   `trainingSample.ts` 的钉住值、测试、`aeroviz-4d/CLAUDE.md` 与 `35-viewer-reference.md` 的对应条目和本文。
 - 格式名跟着文件的形状走：样本或索引的字段一有增、删、改名，Python 的 `SAMPLE_SCHEMA` / `INDEX_SCHEMA` 和
   TypeScript 的 `TRAINING_SAMPLE_SCHEMA` / `TRAINING_INDEX_SCHEMA` 在同一次改动里一起换新名字，盘上的集合重新导出；
-  不为"旧文件还能读"或"现在没人读错"保留旧名字。叠加层的三个格式名（`OVERLAYS_SCHEMA`、`executor_training_export.SCHEMA`、
-  `prior_training_export.SCHEMA` 与 `trainingOverlays.ts` 里的 `TRAINING_OVERLAYS_SCHEMA`、`TRAINING_EXECUTOR_SCHEMA`、
-  `TRAINING_PRIOR_SCHEMA`）同理，由 `test_training_overlays.py` 逐字比对。
+  不为"旧文件还能读"或"现在没人读错"保留旧名字。叠加层的四个格式名（`OVERLAYS_SCHEMA`、`executor_training_export.SCHEMA`、
+  `prior_training_export.SCHEMA`、`prior_generation_training_export.SCHEMA` 与 `trainingOverlays.ts` 里的
+  `TRAINING_OVERLAYS_SCHEMA`、`TRAINING_EXECUTOR_SCHEMA`、`TRAINING_PRIOR_SCHEMA`、`TRAINING_GENERATION_SCHEMA`）和叠加层的
+  种类列表同理，由 `test_training_overlays.py` 逐字比对。清单里出现界面不认识的种类时只拒这一条，别的照读。
 - 集合重新导出后，画在它上面的叠加层会被按名字拒读（样本的写出时刻变了）：重新生成叠加层，用新的叠加层 id。
 - 长期事实一行写进 `aeroviz-4d/CLAUDE.md` 的索引，全文写进 `aeroviz-4d/docs/35-viewer-reference.md`
-  （AV19–AV27）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11；叠加层 R13）。
+  （AV19–AV31）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11；叠加层 R13）。
 - 词表的读法再换（例如 §10.2 的高度词）时，逐项检查本文 §2.3、§3、§4 里写到词的地方，与 `display.py` 同一次改动。
 - 日志式记录写进仓库的 `docs/CHANGELOG.md`。
