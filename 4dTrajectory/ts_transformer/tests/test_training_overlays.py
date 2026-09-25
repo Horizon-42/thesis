@@ -194,6 +194,7 @@ def test_the_prior_ranks_words_given_one_is_said_and_keeps_the_flights_likelihoo
                               layers=2, heads=4, feedforward=64, dropout=0.0), candidates).eval()
     grid = np.full((ROWS, 6), UNCHANGED, dtype=np.int16)
     grid[0] = [0, 0, words.heading_index(270.0), words.altitude_index(1200.0), 0, words.speed_index(100.0)]
+    grid[3, HEADING] = words.heading_index(225.0)                          # said while the prior only observes
     grid[N_LOOK + 2, HEADING] = words.heading_index(180.0)
     grid[N_LOOK + 4, 5] = words.speed_unspecified
     split = Split(_flights(words, grid), ("KXXX",), candidates.numpy(), (("09",),), ((90.0,),), classes, "no-context")
@@ -212,6 +213,14 @@ def test_the_prior_ranks_words_given_one_is_said_and_keeps_the_flights_likelihoo
         assert all(0 <= value < classes[column] - 1 for value in values["words"])
         ranked = np.asarray(values["wordsP"]).reshape(predicted, k)
         assert (np.diff(ranked, axis=1) <= 1e-9).all()                 # most likely first
+    # the first predicted step's truth is the word in force there — the one said in the observed rows included
+    from ts_transformer.prior.train import batch_logits, to_batch
+    with torch.no_grad():
+        logits = batch_logits(model, to_batch(split, [0], torch.device("cpu")))
+    for column in range(6):
+        in_force = int(grid[3, column] if column == HEADING else grid[0, column])
+        expected = float(torch.softmax(logits[column][0, 0, N_LOOK].double(), dim=-1)[in_force + 1])
+        assert item["columns"][column]["truthP"][0] == pytest.approx(round(expected, prior_export.PROBABILITY_DIGITS))
     # the flight's likelihood is its truth's, per predicted step; the columns add up to it
     truth = np.array([item["columns"][c]["truthP"] for c in range(6)])
     assert -np.log(truth).sum() / predicted == pytest.approx(item["nllPerStep"], rel=1e-2)
@@ -385,8 +394,14 @@ def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_sec
     assert payload["readout"]["firstStepRunway"]["rules"]["B1_active_config"]["sideGivenDirection"] == 0.5
     manifest = json.loads((training / export.OVERLAYS_FILE).read_text(encoding="utf-8"))
     assert [(o["id"], o["kind"], o["base"]) for o in manifest["overlays"]] == [("prior_prior", export.KIND_PRIOR, SET_ID)]
-    # the landing context is read from today's rosters: one that changed since the training is refused
-    roster.write_text(json.dumps({"records": own, "note": "moved"}), encoding="utf-8")
+    # the landing context is read from today's rosters, known by their bytes: the same roster at another path (the
+    # main checkout after the merge, the prior trained in a worktree) is the same; one that changed is refused
+    elsewhere = tmp_path / "elsewhere" / "tracks.json"
+    elsewhere.parent.mkdir()
+    elsewhere.write_bytes(roster.read_bytes())
+    monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: elsewhere)
+    assert prior_export.main([*args, "--overlay-id", "moved"]) == 0
+    elsewhere.write_text(json.dumps({"records": own, "note": "changed"}), encoding="utf-8")
     with pytest.raises(SystemExit, match="rosters changed"):
         prior_export.main([*args, "--overlay-id", "another"])
     with pytest.raises(SystemExit):   # never overwritten

@@ -45,7 +45,9 @@ import torch
 from ts_transformer.experiments.instruction_training_export import (
     KIND_PRIOR, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays, serialise_overlay, write_overlay,
 )
-from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, roster_record, rosters
+from ts_transformer.experiments.prior_train import (
+    PRIOR_CHECKPOINT_SCHEMA, load_prior, roster_digests, roster_record, rosters,
+)
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals, load_spec
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import file_sha256, utc_now
@@ -69,9 +71,11 @@ PROBABILITY_DIGITS = 4
 def open_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], dict[str, Any], str]:
     """The prior at ``directory`` on CPU, in eval mode, with its config and readout files and its checkpoint's
     sha256 — refused unless `prior_train.load_prior` opens it on ``instructions``, it is not a smoke run, it holds
-    a val readout (`prior_select` writes one, on the chosen variant only) and today's tracks rosters are its own."""
+    a val readout (`prior_select` writes one, on the chosen variant only) and — for a variant that reads the landing
+    context — today's tracks rosters are its own (by sha256, wherever the checkout is)."""
     model, _, config_file = load_prior(directory, instructions)
-    if roster_record(rosters(instructions)) != config_file["tracks_rosters"]:
+    if (VARIANTS[model.config.variant].landing_context
+            and roster_digests(roster_record(rosters(instructions))) != roster_digests(config_file["tracks_rosters"])):
         raise SystemExit(f"the tracks rosters changed since {directory} was trained (its landing context)")
     if config_file["smoke"]:
         raise SystemExit(f"{directory} is a smoke run (--limit {config_file['limit']}), not a trained prior")
@@ -129,6 +133,7 @@ def readout_block(readout: dict[str, Any]) -> dict[str, Any]:
                                        "firstStepTop1": values["first_step_top1"],
                                        "changeProbabilityWhereChanged": values["mean_change_probability_where_changed"],
                                        "top1GivenChange": values["top1_given_change"],
+                                       # MIRROR of `prior.readout.TOP_K` (5): the frontend's "top5GivenChange"
                                        "top5GivenChange": values["top5_given_change"],
                                        "falseChangeShareWhereKept": values["false_change_share_where_kept"]}
                                 for name, values in model["per_column"].items()}},
@@ -166,8 +171,8 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         parser.error(f"the prior knows no airport {missing} ({list(model.config.airports)})")
     geometries = load_candidates(instructions)
-    landings = airport_landings(instructions, rosters(instructions))
     context = VARIANTS[model.config.variant].landing_context
+    landings = airport_landings(instructions, rosters(instructions)) if context else {}
     flights = load_signals(instructions, SPLIT)
     sentences = load_sentences(instructions, SPLIT, spec)
     bases: dict[str, BaseSet] = {}

@@ -33,7 +33,7 @@ from typing import Any
 import torch
 
 from ts_transformer.experiments.prior_train import (
-    PRIOR_CHECKPOINT_SCHEMA, load_prior, print_readout, roster_record, rosters, splits,
+    PRIOR_CHECKPOINT_SCHEMA, load_prior, print_readout, roster_digests, roster_record, rosters, splits,
 )
 from ts_transformer.instructions.artefact import load_spec
 from ts_transformer.instructions.words import COLUMNS, Words
@@ -67,7 +67,8 @@ def read_runs(campaign: Path) -> dict[tuple[str, int], dict[str, Any]]:
 
     def identity(config: dict[str, Any]) -> str:
         train = {name: value for name, value in config["train"].items() if name != "seed"}
-        return json.dumps([config["instructions"], config["tracks_rosters"], train, config["limit"], config["git"]],
+        return json.dumps([config["instructions"], roster_digests(config["tracks_rosters"]), train, config["limit"],
+                           config["git"]],
                           sort_keys=True)
 
     for run in runs.values():
@@ -135,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     instructions = Path(config["instructions"]["directory"])
     model, payload, _ = load_prior(chosen["directory"], instructions)
     tracks = rosters(instructions)
-    if roster_record(tracks) != config["tracks_rosters"]:
+    if roster_digests(roster_record(tracks)) != roster_digests(config["tracks_rosters"]):
         raise SystemExit("the tracks rosters changed since the runs were trained")
     device = torch.device(args.device)
     model.to(device)

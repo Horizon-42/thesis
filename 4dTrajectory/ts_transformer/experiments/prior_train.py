@@ -55,7 +55,14 @@ def rosters(instructions: Path) -> dict[str, Path]:
 
 
 def roster_record(tracks: Mapping[str, Path]) -> dict[str, Any]:
+    """Each roster's path (where it was read — informational) and sha256 (its identity)."""
     return {code: {"path": str(path), "sha256": file_sha256(path)} for code, path in sorted(tracks.items())}
+
+
+def roster_digests(record: Mapping[str, Any]) -> dict[str, str]:
+    """A `roster_record`'s identity: each airport's roster sha256. Never the path, which is the checkout's: a prior
+    trained in a worktree is read from the main checkout after the merge, the same bytes at another path."""
+    return {code: entry["sha256"] for code, entry in record.items()}
 
 
 def load_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], dict[str, Any]]:

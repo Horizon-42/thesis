@@ -292,8 +292,9 @@ ICAO [--airport …] [--overlay-id prior_<prior dir name>]` (schema `aeroviz-tra
 version: the per-step arrays cover the predicted steps only, from `firstPredictedRow` = `N_LOOK`; null change metrics for a
 column that never changes after the first step; the first-step runway beside the airport frequency and the rules — older
 names are refused): the checkpoint is refused unless `prior_train.load_prior` opens it on the artefact (spec, labeller,
-day split, candidate table, a whole state), it is not a smoke run and today's tracks rosters are the ones it trained with
-(the landing context); inference is teacher-forced over the stored sentence (`prior.data.flight_record`), as it was trained
+day split, candidate table, a whole state), it is not a smoke run and — for a variant that reads the landing context —
+today's tracks rosters are the ones it trained with, by sha256 (`prior_train.roster_digests`; never the path, which is
+the checkout's: a prior trained in a worktree is exported from the main checkout); inference is teacher-forced over the stored sentence (`prior.data.flight_record`), as it was trained
 and read out. Per flight, column and predicted step: `changeP` (1 − P(unchanged)), the `k` most likely words given
 a word is said (`TOP_K` 3, fewer where the column has fewer values: an airport's candidate runways) and their
 probabilities, `truthP`; each flight's NLL per step in all and per column, computed before rounding
