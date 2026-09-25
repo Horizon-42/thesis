@@ -28,11 +28,11 @@ import torch
 
 from ts_transformer.autopilot import inverse
 from ts_transformer.autopilot.flights import FlightInputs
-from ts_transformer.autopilot.frame import AirportCharts, read_state
+from ts_transformer.autopilot.frame import AirportCharts, Kinematics, read_state
 from ts_transformer.autopilot.lateral import Lateral, Runways, relative
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.plant import Plant
-from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock
+from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock, WordsNow
 from ts_transformer.autopilot.speed import Speed
 from ts_transformer.autopilot.vertical import Vertical
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, HEADING, Words
@@ -61,81 +61,105 @@ class Flown:
     cycle_s: float
 
 
+class Executor:
+    """The executor's cycle over a batch, one cycle at a time: `fly` runs it over whole sentences, a closed loop
+    interleaves it with the speaker (the prior says a step's words, the executor flies the step). The words of a cycle
+    are given to `cycle`; everything else — the laws' state, the bank, what is recorded — lives here."""
+
+    def __init__(self, inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
+                 params: ExecutorParams, words: Words, *, time_limit_s: torch.Tensor) -> None:
+        spec = words.spec
+        params.check(spec)
+        self.params, self.words, self.runways, self.charts = params, words, runways, charts
+        self.inputs, self.time_limit_s = inputs, time_limit_s
+        batch = len(time_limit_s)
+        self.cycles = int(math.ceil(float(time_limit_s.max()) / params.cycle_s))
+        device = inputs.initial_state.device
+        self.plant = Plant(inputs)
+        self.lateral = Lateral(batch, params, spec, device)
+        self.vertical = Vertical(batch, params, words, device)
+        self.speed = Speed(approach_ias_mps, spec)
+        self.state = inputs.initial_state
+        self.bank = torch.zeros(batch, dtype=self.state.dtype, device=device)
+        self.states, self.commands, self.wanted = [self.state], [], []
+        self.limits: dict[str, list[torch.Tensor]] = {name: [] for name in LIMITS}
+        self.modes: dict[str, list[torch.Tensor]] = {name: [] for name in MODES}
+        self.sentence_times: list[torch.Tensor] = []
+        self.step_rows = int(round(spec.step_s / params.cycle_s))
+        self.done = torch.zeros(batch, dtype=torch.bool, device=device)
+        self.done_cycle = torch.full((batch,), self.cycles - 1, dtype=torch.long, device=device)
+        self.count = 0                                   # cycles flown
+
+    def now(self) -> Kinematics:
+        """The batch's state at the start of the next cycle."""
+        return read_state(self.state, self.charts)
+
+    def cycle(self, force: WordsNow, sentence_s: torch.Tensor) -> None:
+        """Fly one cycle under the words ``force``, at sentence time ``sentence_s`` (recorded)."""
+        params, cycle = self.params, self.count
+        now = self.now()
+        self.sentence_times.append(sentence_s)
+        bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
+        track_rate, lateral_modes = self.lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],
+                                                      force.approach, force.runway, self.runways, self.bank, bank_rate,
+                                                      cycle * params.cycle_s)
+        e0, n0, course, elevation, crossing = self.runways.pointed(force.runway)
+        before, right, _off = relative(now, e0, n0, course)
+        gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force.altitude_m, force.land,
+                                                        force.angle_class, force.angle_deg,
+                                                        force.issued_step[:, [ALTITUDE, ANGLE]], before, elevation,
+                                                        crossing, torch.hypot(before, right), self.lateral.captured,
+                                                        lateral_modes["go_around"])
+        attitude = inverse.attitude(now, track_rate, gamma_rate, self.bank,
+                                    bank_cap_rad=math.radians(self.words.spec.turn_bank_max_deg),
+                                    bank_rate_rad_s=bank_rate, cycle_s=params.cycle_s)
+        accel, accel_wanted, speed_modes = self.speed.rate(now, force.speed_mps, force.unspecified,
+                                                           lateral_modes["go_around"], attitude.load_factor,
+                                                           self.inputs.aero_params, torch.hypot(before, right))
+        thrust = inverse.thrust(now, accel, attitude.load_factor, self.inputs.aero_params, self.inputs.max_thrust_n)
+        self.bank = attitude.bank_rad
+        command = torch.stack((thrust.fraction, self.bank, attitude.load_factor), dim=1)
+        self.state = self.plant.step(self.state, command, params.cycle_s)
+
+        self.states.append(self.state)
+        self.commands.append(command)
+        self.wanted.append(torch.stack((track_rate, gamma_wanted, accel_wanted), dim=1))
+        for name, value in {**attitude.binds, **thrust.binds, **speed_modes,
+                            "path_rate_limited": vertical_modes["path_rate_limited"]}.items():
+            self.limits[name].append(value)
+        for name, value in {**lateral_modes, "level_captured": vertical_modes["level_captured"],
+                            "aim_left_tube": vertical_modes["aim_left_tube"]}.items():
+            self.modes[name].append(value)
+
+        after = read_state(self.state, self.charts)
+        before, _right, _off = relative(after, e0, n0, course)
+        finished = ((self.lateral.captured & (before <= 0.0)) | ((before > 0.0) & (after.height_m < elevation))
+                    | ~torch.isfinite(self.state).all(dim=1) | (after.speed_mps <= 0.0)
+                    | ((cycle + 1) * params.cycle_s >= self.time_limit_s))
+        self.done_cycle = torch.where(finished & ~self.done, cycle, self.done_cycle)
+        self.done = self.done | finished
+        self.count += 1
+
+    def flown(self) -> Flown:
+        def stack(rows: list[torch.Tensor]) -> torch.Tensor:
+            return torch.stack(rows, dim=1)
+
+        return Flown(states=stack(self.states), commands=stack(self.commands), wanted=stack(self.wanted),
+                     limits={name: stack(rows) for name, rows in self.limits.items()},
+                     modes={name: stack(rows) for name, rows in self.modes.items()},
+                     done_cycle=self.done_cycle, sentence_s=stack(self.sentence_times), cycle_s=self.params.cycle_s)
+
+
 def fly(inputs: FlightInputs, sentences: Sentences, clock: TimeClock | DistanceClock | TrackClock, runways: Runways,
         charts: AirportCharts, approach_ias_mps: torch.Tensor, params: ExecutorParams, words: Words, *,
         time_limit_s: torch.Tensor) -> Flown:
     """Fly every flight's sentence, its words said on ``clock``, until each is done or its time limit."""
-    spec = words.spec
-    params.check(spec)
-    batch = len(time_limit_s)
-    cycles = int(math.ceil(float(time_limit_s.max()) / params.cycle_s))
-    device = inputs.initial_state.device
-    plant = Plant(inputs)
-    lateral = Lateral(batch, params, spec, device)
-    vertical = Vertical(batch, params, words, device)
-    speed = Speed(approach_ias_mps, spec)
-
-    state = inputs.initial_state
-    bank = torch.zeros(batch, dtype=state.dtype, device=device)
-    states, commands, wanted = [state], [], []
-    limits: dict[str, list[torch.Tensor]] = {name: [] for name in LIMITS}
-    modes: dict[str, list[torch.Tensor]] = {name: [] for name in MODES}
-    sentence_times = []
-    step_rows = int(round(spec.step_s / params.cycle_s))
-    done = torch.zeros(batch, dtype=torch.bool, device=device)
-    done_cycle = torch.full((batch,), cycles - 1, dtype=torch.long, device=device)
-    for cycle in range(cycles):
-        now = read_state(state, charts)
-        sentence_s = clock.now(cycle, now)
-        if cycle % step_rows == 0:
+    executor = Executor(inputs, runways, charts, approach_ias_mps, params, words, time_limit_s=time_limit_s)
+    for cycle in range(executor.cycles):
+        sentence_s = clock.now(cycle, executor.now())
+        if cycle % executor.step_rows == 0:
             step_start_s = sentence_s                  # every word is heard once a step (`sentence`)
-        force = sentences.at(step_start_s)
-        sentence_times.append(sentence_s)
-        bank_rate = math.inf if cycle == 0 else math.radians(params.bank_rate_deg_s)
-        track_rate, lateral_modes = lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],
-                                                 force.approach, force.runway, runways, bank, bank_rate,
-                                                 cycle * params.cycle_s)
-        e0, n0, course, elevation, crossing = runways.pointed(force.runway)
-        before, right, _off = relative(now, e0, n0, course)
-        gamma_rate, gamma_wanted, vertical_modes = vertical.rate(now, force.altitude_m, force.land,
-                                                   force.angle_class, force.angle_deg,
-                                                   force.issued_step[:, [ALTITUDE, ANGLE]], before, elevation,
-                                                   crossing, torch.hypot(before, right), lateral.captured,
-                                                   lateral_modes["go_around"])
-        attitude = inverse.attitude(now, track_rate, gamma_rate, bank, bank_cap_rad=math.radians(spec.turn_bank_max_deg),
-                                    bank_rate_rad_s=bank_rate, cycle_s=params.cycle_s)
-        accel, accel_wanted, speed_modes = speed.rate(now, force.speed_mps, force.unspecified,
-                                                      lateral_modes["go_around"], attitude.load_factor,
-                                                      inputs.aero_params, torch.hypot(before, right))
-        thrust = inverse.thrust(now, accel, attitude.load_factor, inputs.aero_params, inputs.max_thrust_n)
-        bank = attitude.bank_rad
-        command = torch.stack((thrust.fraction, bank, attitude.load_factor), dim=1)
-        state = plant.step(state, command, params.cycle_s)
-
-        states.append(state)
-        commands.append(command)
-        wanted.append(torch.stack((track_rate, gamma_wanted, accel_wanted), dim=1))
-        for name, value in {**attitude.binds, **thrust.binds, **speed_modes,
-                            "path_rate_limited": vertical_modes["path_rate_limited"]}.items():
-            limits[name].append(value)
-        for name, value in {**lateral_modes, "level_captured": vertical_modes["level_captured"],
-                            "aim_left_tube": vertical_modes["aim_left_tube"]}.items():
-            modes[name].append(value)
-
-        after = read_state(state, charts)
-        before, _right, _off = relative(after, e0, n0, course)
-        finished = ((lateral.captured & (before <= 0.0)) | ((before > 0.0) & (after.height_m < elevation))
-                    | ~torch.isfinite(state).all(dim=1) | (after.speed_mps <= 0.0)
-                    | ((cycle + 1) * params.cycle_s >= time_limit_s))
-        done_cycle = torch.where(finished & ~done, cycle, done_cycle)
-        done = done | finished
-        if bool(done.all()):
+        executor.cycle(sentences.at(step_start_s), sentence_s)
+        if bool(executor.done.all()):
             break
-
-    def stack(rows: list[torch.Tensor]) -> torch.Tensor:
-        return torch.stack(rows, dim=1)
-
-    return Flown(states=stack(states), commands=stack(commands), wanted=stack(wanted),
-                 limits={name: stack(rows) for name, rows in limits.items()},
-                 modes={name: stack(rows) for name, rows in modes.items()},
-                 done_cycle=done_cycle, sentence_s=stack(sentence_times), cycle_s=params.cycle_s)
+    return executor.flown()
