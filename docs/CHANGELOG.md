@@ -1,5 +1,14 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — 后训练第二阶段：扩充起点与训练的代码
+
+- `dev-post-train` `00c9cc0e`（未合并）：`prior/augment.py`（绕机场转 ±15°、高度 ±150 m、速度 ±5 %，前 8 行的位置和高度以第 8 行为中心
+  拉伸，执行器初始状态同一个变换）；`prior_free_generation.augmented_starts`（第 8 行高度在机场训练集 1–99 % 之间、空速不低于执行器失速
+  下限，最多抽 10 次）与 `--augment-seed`，`generation.json` 升为 `ts-prior-free-generation-v3`；`Speaker.allowed` 记下每步屏蔽后允许的词，
+  `RewardTuner` 在它上面重新归一打分、可以不带数据项；runner `prior_augmented_reward`（R21）：奖励项 + 拉回 base 模型，护栏选轮，每机场的
+  重抽与放弃读数。`prior_landing_reward` 的 `--data-weight 0` 现在报错（第一阶段必须有数据项）。
+- opus 审查的问题已改；ts 全套 1,447 通过；冒烟跑通。正式训练等用户点头（后训练设计 §0、§8）。
+
 ### 2026-09-25 — 后训练第二阶段第 0 步：下滑道下沿在训练集上过了
 
 - `dev-post-train` `3cb1fe72`：`prior/procedure.py`（下滑道 − 60 m，只在 FAF 以内、LPV 扇形里）、`Speaker(finals=)` 屏蔽高度列、
