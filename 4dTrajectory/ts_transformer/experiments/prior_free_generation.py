@@ -96,8 +96,7 @@ class ClosedLoop:
     speaking, a step at a time (`step`): the speaker reads where the executor is, says the step's words, and the
     executor flies the step (its cycles). A flight the executor is done with hears nothing more and its row is frozen;
     one it has cleared or captured keeps its runway. Each flight flies until the executor is done with it or its time
-    limit (``limits``, seconds). `take` re-forms the batch from some of its flights (a closed loop's branches,
-    `prior_closed_loop`)."""
+    limit (``limits``, seconds)."""
 
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
@@ -112,9 +111,6 @@ class ClosedLoop:
                                temperature=temperature)
         self.spoken = Spoken(len(limits), words, device=device)
         self.max_steps = rows_for(max(limits), step_s) - N_LOOK
-        #: the executor's state when each step was said ([B] each): cleared (since the last go-around), captured
-        self.cleared: list[np.ndarray] = []
-        self.captured: list[np.ndarray] = []
 
     @property
     def steps(self) -> int:
@@ -131,11 +127,8 @@ class ClosedLoop:
         if self.steps:
             now = executor.now()
             speaker.append(now.e_m.cpu().numpy(), now.n_m.cpu().numpy(), now.height_m.cpu().numpy(), frozen=done)
-        cleared, captured = executor.lateral.cleared.cpu().numpy(), executor.lateral.captured.cpu().numpy()
         # a flight that is done hears nothing more; one the executor has cleared or captured keeps its runway
         said = speaker.speak(active=~done, runway_locked=executor.runway_locked.cpu().numpy())
-        self.cleared.append(cleared)
-        self.captured.append(captured)
         heard = torch.full((count,), self.steps * self.step_s, dtype=torch.float64, device=self.device)
         self.spoken.say(np.where(said > 0, said - 1, UNCHANGED))
         for _ in range(executor.step_rows):
@@ -143,16 +136,6 @@ class ClosedLoop:
                 break
             executor.cycle(self.spoken.at(heard), torch.full((count,), executor.count * self.params.cycle_s,
                                                              dtype=torch.float64, device=self.device))
-
-    def take(self, index: np.ndarray) -> None:
-        """Keep the flights at ``index`` (the executor's, the speaker's and the words said): a flight taken twice flies
-        on as two copies of itself."""
-        rows = torch.as_tensor(index, device=self.device)
-        self.executor.take(rows)
-        self.spoken.take(rows)
-        self.speaker.take(np.asarray(index))
-        self.cleared = [row[index] for row in self.cleared]
-        self.captured = [row[index] for row in self.captured]
 
 
 def speak_and_fly(model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],

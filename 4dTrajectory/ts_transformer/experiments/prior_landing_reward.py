@@ -12,20 +12,20 @@ Each round:
 3. **one pass** over those sentences (`train.RewardTuner`: the advantage-weighted NLL of each sentence's own words,
    the pull to the frozen start model, the teacher-forced data term on the train days), from the previous round's
    weights (round 1: ``--prior``) — only the sentences of this round (they must come from the weights being trained);
-4. **the readout on the select days**: as `prior_closed_loop`'s (free generation, the same flights, seed and batches
-   every round — round 0 of a run from the step-1 prior reproduces §9.2's round 0; the teacher-forced NLL), and the share
-   landed on a runway against the landing direction.
+4. **the readout on the select days** (`select_readout`): free generation on ``--select-per-airport`` flights ×
+   ``--select-samples`` sentences, the same flights, seed and batches every round (round 0 is the start model); the
+   teacher-forced NLL; and the share landed on a runway against the landing direction.
 
 The round kept (``choice.json``): among the rounds whose select readout keeps the guards — landed on the observed runway
 at most `GUARD_RUNWAY_DROP` below round 0's share, heading words per flight at most `GUARD_HEADING_GROWTH` × round 0's —
-the one with the highest landed share, the earliest within `prior_closed_loop.TIE_SHARE` of it. Val is not read here:
+the one with the highest landed share, the earliest within `TIE_SHARE` of it. Val is not read here:
 a round directory is a prior run `prior_free_generation` reads, once.
 
 Writes into ``--out`` (a new directory, from a clean tree unless ``--smoke``): ``config.json``, ``round_00/readout.json``,
 ``round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, readout.json}``, ``history.json``,
 ``choice.json``.
 
-    python run_ts.py prior_landing_reward --prior <the §9.2 round kept, or the step-1 run> \\
+    python run_ts.py prior_landing_reward --prior <the step-1 run> \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v4_20260924 \\
         --executor 4dTrajectory/outputs/POOLED/executor/<spec> --out 4dTrajectory/outputs/POOLED/prior/<name>
 """
@@ -46,9 +46,8 @@ import torch
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.flights import flight_inputs
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.experiments.prior_closed_loop import TIE_SHARE, select_readout
 from ts_transformer.experiments.prior_free_generation import (
-    _physics, flight_rows, limits_s, speak_and_fly, steps_said,
+    _physics, flight_rows, grouped, limits_s, prior_rows, speak_and_fly, steps_said,
 )
 from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
 from ts_transformer.instructions.artefact import load_spec
@@ -58,15 +57,18 @@ from ts_transformer.prior.data import VARIANTS, Flight, Split, airport_landings,
 from ts_transformer.prior.landing_reward import LANDED, group_advantages, landing_direction, rewards
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK, Landings
-from ts_transformer.prior.train import RewardConfig, RewardTuner
+from ts_transformer.prior.train import RewardConfig, RewardTuner, TrainConfig, evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 LANDING_REWARD_SCHEMA = "ts-prior-landing-reward-v1"
+#: Two rounds' select landed shares closer than this are a tie (about two binomial standard deviations over 2,000
+#: sentences at 90 %).
+TIE_SHARE = 0.015
 #: The guards a round kept must keep (design §9.3, §10), against round 0 on the same select flights and seed.
 GUARD_RUNWAY_DROP = 0.02
 GUARD_HEADING_GROWTH = 1.2
-#: Select flights a batch of the readout — `prior_closed_loop`'s default chunk, so that the shared generator hands out
-#: the same samples and round 0 reproduces §9.2's round 0 for the same model.
+#: Select flights a batch of the readout: the one generator hands each batch its samples in turn, so the batches are part
+#: of the readout (64, as in every select readout of the prior's closed loop).
 SELECT_CHUNK = 64
 
 
@@ -105,6 +107,21 @@ def speak_sentences(model: Prior, batch: replay.Batch, samples: int, words: Word
         cut.append(grids[j][:steps])
     return Sentences(np.repeat(np.arange(count), samples), positions, cut, [r["outcome"] for r in rows],
                      np.array([r["last_runway"] for r in rows]), np.array([r["observed_runway"] for r in rows]))
+
+
+def select_readout(model: Prior, batch: replay.Batch, select: Split, words: Words, params: ExecutorParams,
+                   landings: Mapping[str, Landings] | None, *, samples: int, seed: int, chunk: int,
+                   device: torch.device) -> dict[str, Any]:
+    """Free generation on the select flights (the same flights and seed every round) and the teacher-forced NLL."""
+    model.eval()
+    generator = torch.Generator(device=device).manual_seed(seed)
+    order = sorted(range(len(batch.readings)), key=lambda j: len(batch.readings[j].words))
+    rows: list[dict[str, Any]] = []
+    for start in range(0, len(order), chunk):
+        part = replay.subset(batch, order[start: start + chunk])
+        rows += prior_rows(model, part, words, params, landings, samples, generator=generator, temperature=1.0)[0]
+    return {"free_generation": grouped(rows),
+            "teacher_forced": evaluate(model, select, TrainConfig(), device), "flights": rows}
 
 
 def join(parts: Sequence[Sentences], offsets: Sequence[int]) -> Sentences:
@@ -183,7 +200,7 @@ def guarded_choice(history: Sequence[Mapping[str, Any]]) -> tuple[int, list[int]
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
-    parser.add_argument("--prior", type=Path, required=True, help="the start: the §9.2 round kept, or the step-1 run")
+    parser.add_argument("--prior", type=Path, required=True, help="the start: the step-1 run (prior_select's choice)")
     parser.add_argument("--instructions", type=Path, required=True)
     parser.add_argument("--executor", type=Path, required=True, help="the executor spec directory")
     parser.add_argument("--out", type=Path, required=True, help="a new directory")

@@ -348,10 +348,7 @@ predicted step says every column, inputs are only what is known before the step 
 (`prior_free_generation`, design §9.1): the prior speaks (`prior.generate.Speaker`, column order, the vocabulary's
 compatibility rules as a decode mask via `instructions.grammar`) and the stepped executor (`autopilot.executor.Executor`,
 `sentence.Spoken`; `fly()` is its loop, flights unchanged state for state) flies each step; the labelled words from the
-same row are the reference (R17). **Closed-loop fine-tuning** (`prior_closed_loop`, design §9.2): CAT-K by segments — each
-flight flown in branches, the one closest to the observed flight kept every 10 steps (`take` on the executor, `Spoken`,
-`Speaker`), targets = the labelled words aligned to the label's own words (`prior.relabel`), one pass a round over every
-chain so far (`train.FineTuner`), the round chosen on select; the speaker encodes row by row (`Prior.extend`) (R18). **The landing
+same row are the reference (R17). The speaker encodes row by row (`Prior.extend`). **The landing
 reward** (`prior_landing_reward`, design §9.3): free sentences, 1 for landing in the airport's landing direction, each
 compared with its flight's others; advantage-weighted NLL + the KL to the frozen start + the teacher-forced data term
 (`train.RewardTuner`, dropout off), the round chosen on select within guards (R19).

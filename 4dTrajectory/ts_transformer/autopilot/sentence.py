@@ -168,12 +168,6 @@ class Spoken:
         self.issued = torch.where(written, torch.full_like(self.issued, self.steps), self.issued)
         self.grid.append(row)
 
-    def take(self, index: torch.Tensor) -> None:
-        """Keep the sentences at ``index`` (a closed loop's branches)."""
-        self.value, self.issued = self.value[index], self.issued[index]
-        rows = index.cpu().numpy()
-        self.grid = [row[rows] for row in self.grid]
-
     def at(self, heard_s: torch.Tensor) -> WordsNow:
         rows = row_at(heard_s, self.step_s)
         if bool((rows != self.steps - 1).any()):

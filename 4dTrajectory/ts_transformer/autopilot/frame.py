@@ -53,9 +53,6 @@ class AirportCharts:
                    lon0_deg=column([g.frame.lon0 for g in geometries]),
                    m_per_deg_lon=column([g.frame.m_per_deg_lon for g in geometries]))
 
-    def take(self, index: torch.Tensor) -> AirportCharts:
-        return AirportCharts(self.lat0_deg[index], self.lon0_deg[index], self.m_per_deg_lon[index])
-
     def horizontal(self, lat_deg: torch.Tensor, lon_deg: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return (lon_deg - self.lon0_deg) * self.m_per_deg_lon, (lat_deg - self.lat0_deg) * METRES_PER_DEG_LAT
 

@@ -54,18 +54,11 @@ def speed_change_mps2(spec: VocabularySpec) -> float:
 
 
 class Speed:
-    #: The state kept per flight (`take`).
-    PER_FLIGHT = ("approach_ias_mps",)
-
     def __init__(self, approach_ias_mps: torch.Tensor, spec: VocabularySpec) -> None:
         self.approach_ias_mps = approach_ias_mps
         self.band_mps, self.accel_max_mps2 = spec.speed_tolerance_mps, spec.speed_accel_max_mps2
         self.pace_mps2 = speed_change_mps2(spec)
         self.margin = EXECUTOR_DYNAMICS.control_speed_floor_margin
-
-    def take(self, index: torch.Tensor) -> None:
-        """Keep the flights at ``index`` (a closed loop's branches, `Executor.take`)."""
-        self.approach_ias_mps = self.approach_ias_mps[index]
 
     def rate(self, state: Kinematics, speed_mps: torch.Tensor, unspecified: torch.Tensor, go_around: torch.Tensor,
              load_factor: torch.Tensor, aero_params: torch.Tensor,

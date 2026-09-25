@@ -25,7 +25,7 @@ from ts_transformer.prior.train import (
 from ts_transformer.tests.support import instruction_airport
 from ts_transformer.tests.test_autopilot import _params
 from ts_transformer.tests.test_prior import _landings, _signals, _two_runways
-from ts_transformer.tests.test_prior_closed_loop import _flight, _model
+from ts_transformer.tests.test_prior_speaker import _flight, _model, _repeated
 
 CPU = torch.device("cpu")
 
@@ -58,7 +58,8 @@ def _sentences(samples=3, seed=2):
     words, params = Words(one), _params()
     index = torch.zeros(samples, dtype=torch.long)
     flown, said, _, speaker = speak_and_fly(_model(words), [signals] * samples, [geometry] * samples,
-                                            inputs.take(index), runways.take(index), charts.take(index),
+                                            _repeated(inputs, index), _repeated(runways, index),
+                                            _repeated(charts, index),
                                             approach[index], [40.0] * samples, words, params, None,
                                             generator=torch.Generator().manual_seed(seed), temperature=1.0)
     steps = [steps_said(flown, j, said.shape[1], round(one.step_s / flown.cycle_s)) for j in range(samples)]

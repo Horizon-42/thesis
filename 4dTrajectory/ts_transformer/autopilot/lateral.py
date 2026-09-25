@@ -138,10 +138,6 @@ class Runways:
                    course_deg=table("course_deg"), elevation_m=table("elevation_m"),
                    crossing_height_m=padded([list(heights) for heights in crossing_heights]))
 
-    def take(self, index: torch.Tensor) -> Runways:
-        return Runways(self.threshold_e_m[index], self.threshold_n_m[index], self.course_deg[index],
-                       self.elevation_m[index], self.crossing_height_m[index])
-
     def pointed(self, index: torch.Tensor) -> tuple[torch.Tensor, ...]:
         """``(threshold e, threshold n, course, elevation, crossing height)`` of each flight's pointed runway."""
         rows = index[:, None]
@@ -186,10 +182,6 @@ class Lateral:
     """The batch's lateral state — the heading word in force measured from its own predecessors, cleared,
     captured, tracking — and law."""
 
-    #: The state kept per flight (`take`); ``runway`` and ``word_deg`` are None before the first cycle.
-    PER_FLIGHT = ("captured", "tracking", "cleared", "runway", "word_deg", "word_step", "heard_s", "track_unwrapped",
-                  "target_unwrapped", "last_track")
-
     def __init__(self, batch: int, params: ExecutorParams, spec: VocabularySpec, device: torch.device) -> None:
         self.params, self.spec = params, spec
         self.captured = torch.zeros(batch, dtype=torch.bool, device=device)
@@ -203,12 +195,6 @@ class Lateral:
         self.track_unwrapped = torch.zeros(batch, dtype=torch.float64, device=device)
         self.target_unwrapped = torch.zeros(batch, dtype=torch.float64, device=device)
         self.last_track = torch.zeros(batch, dtype=torch.float64, device=device)
-
-    def take(self, index: torch.Tensor) -> None:
-        """Keep the flights at ``index`` (a closed loop's branches, `Executor.take`)."""
-        for name in self.PER_FLIGHT:
-            value = getattr(self, name)
-            setattr(self, name, None if value is None else value[index])
 
     def tightest_rad_s(self, state: Kinematics) -> torch.Tensor:
         """The turn rate the vocabulary's bank limit gives at this speed."""

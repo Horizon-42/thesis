@@ -46,11 +46,6 @@ class Speaker:
     """A batch of flights the prior speaks to, all at the same row: rows 0 … `N_LOOK` observed, one more row per
     `append`. `speak` samples the six words of the newest row."""
 
-    #: What `take` keeps per flight (arrays, tensors and lists, first axis the flight); the masses the masks removed
-    #: (`forbidden`, one entry per step) are taken with them.
-    PER_FLIGHT = ("geometries", "contexts", "entry_s", "e", "n", "h", "features", "relative", "in_force", "since",
-                  "airport", "static", "value", "said_row")
-
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  landings: Mapping[str, Landings] | None, words: Words, *, max_rows: int, generator: torch.Generator,
                  temperature: float = 1.0) -> None:
@@ -111,20 +106,6 @@ class Speaker:
             features[index], relative[index, :, : r.shape[2]] = f, r
         self.features[:, 0, first:rows] = torch.as_tensor(features, device=self.features.device)
         self.relative[:, 0, first:rows] = torch.as_tensor(relative, device=self.relative.device)
-
-    def take(self, index: np.ndarray) -> None:
-        """Keep the flights at ``index`` — a closed loop's branches: a flight taken twice is spoken to on as two copies
-        of itself, each with the rows it read and the words it said."""
-        rows = torch.as_tensor(index, device=self.features.device)
-        for layer, past in enumerate(self.past):                # one layer at a time: one copy alive at once
-            self.past[layer] = past.take(rows)
-        for name in self.PER_FLIGHT:
-            value = getattr(self, name)
-            if isinstance(value, list):
-                setattr(self, name, [value[i] for i in index])
-            else:
-                setattr(self, name, value[rows] if isinstance(value, torch.Tensor) else value[index])
-        self.forbidden = {column: [mass[index] for mass in masses] for column, masses in self.forbidden.items()}
 
     def append(self, e: np.ndarray, n: np.ndarray, height: np.ndarray, frozen: np.ndarray) -> None:
         """The next row's position of every flight, ``[B]`` each (after at least one `speak`); a ``frozen`` flight (its

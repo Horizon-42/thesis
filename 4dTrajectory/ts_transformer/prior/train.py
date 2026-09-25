@@ -5,8 +5,7 @@ asked there (`Flight.asked`), per such step — a column left out drops from the
 closed-loop batch weighs a step the same whichever of its columns are asked. Design §9 step 1: every scene is one
 flight.
 
-Closed-loop fine-tuning (design §9.2) takes the same step on chains (`FineTuner`): one pass at a time, from the weights
-it is given, at its own learning rate. The landing reward (design §9.3, `RewardTuner`) weighs each sentence the prior
+The landing reward (design §9.3, `RewardTuner`) weighs each sentence the prior
 said by its advantage, keeps the model near a frozen reference and trains on the data beside it."""
 
 from __future__ import annotations
@@ -180,52 +179,9 @@ def train(model: Prior, train_split: Split, val_split: Split, config: TrainConfi
 
 
 @dataclass(frozen=True)
-class FineTuneConfig:
-    """Closed-loop fine-tuning's optimiser (design §9.2, §10): AdamW, a third of pretraining's learning rate."""
-
-    learning_rate: float = 1e-4
-    weight_decay: float = 0.01
-    warmup_steps: int = 100
-    clip_norm: float = 1.0
-    tokens_per_batch: int = 16_384
-
-
-class FineTuner:
-    """The model's optimiser across closed-loop rounds: `one_pass` trains one pass over the flights it is given (in
-    length buckets, shuffled), the optimiser's state and the warm-up carried from pass to pass. The seed sets the batch
-    order and dropout."""
-
-    def __init__(self, model: Prior, config: FineTuneConfig, device: torch.device, *, seed: int) -> None:
-        torch.manual_seed(seed)
-        self.model, self.config, self.device = model, config, device
-        self.rng = np.random.default_rng(seed)
-        self.optimiser = torch.optim.AdamW(model.parameters(), lr=config.learning_rate,
-                                           weight_decay=config.weight_decay)
-        self.schedule = torch.optim.lr_scheduler.LambdaLR(
-            self.optimiser, lambda step: min(1.0, (step + 1) / config.warmup_steps))
-        self.passes = 0
-
-    def one_pass(self, split: Split) -> dict[str, Any]:
-        """One pass over ``split``: its negative log-likelihood per aircraft-step as trained, and what it took."""
-        self.passes += 1
-        self.model.train()
-        started = time.perf_counter()
-        total, steps, count = 0.0, 0, 0
-        for indices in batches(split.flights, self.config.tokens_per_batch, self.rng):
-            loss, speaks = _step(self.model, to_batch(split, indices, self.device), self.optimiser, self.schedule,
-                                 self.config.clip_norm, f"pass {self.passes}")
-            total += loss * speaks
-            steps += speaks
-            count += 1
-        self.model.eval()
-        return {"nll_per_step": total / steps, "steps": steps, "batches": count,
-                "seconds": time.perf_counter() - started}
-
-
-@dataclass(frozen=True)
 class RewardConfig:
-    """The landing reward's optimiser and weights (design §9.3, §10): a tenth of §9.2's learning rate (the reward term's
-    gradient is noisy), a pull to the reference of 0.04, the data term at 1."""
+    """The landing reward's optimiser and weights (design §9.3, §10): a thirtieth of pretraining's learning rate (the
+    reward term's gradient is noisy), a pull to the reference of 0.04, the data term at 1."""
 
     learning_rate: float = 1e-5
     weight_decay: float = 0.01

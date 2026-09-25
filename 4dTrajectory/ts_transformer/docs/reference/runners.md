@@ -401,45 +401,22 @@ observed runway, landing time − observed, words said per column after the firs
 cleared at the end (and among the timeouts), the probability the prior put on what the grammar forbade (approach, angle).
 Writes `generation.json` (`ts-prior-free-generation-v1`, every flight row) and `sentences.npz`; val only from a clean
 tree. The executor spec must be this executor code's (`replay.open_executor`). ~36 s for 50 flights × (1 + 2) loops.
-Since `Prior.extend` (2026-09-25, R18) the speaker encodes row by row: the probabilities differ from a whole re-encode by
+Since `Prior.extend` (2026-09-25) the speaker encodes row by row: the probabilities differ from a whole re-encode by
 ~1e-6, so a re-run of the readouts recorded before it (`v3_freegen_20260925/{select,val}_400x4`) may flip a draw — the
 same model re-read at this code is not bit for bit the recorded one. Since 2026-09-25 (`dev-prior-fast`) the speaker builds
 a step's rows for all the flights of one airport geometry together (`data.rows_inputs`, element by element; `row_inputs`
 is its one-flight case) and writes them to the model's inputs in one copy: bit for bit the per-flight result (old and
-new code dumped on the same seeds — free generation, CAT-K chains, the select split's inputs — 29/29 arrays identical;
+new code dumped on the same seeds — free generation and the select split's inputs — 21/21 arrays identical;
 numpy's element-wise functions on this i7-14700, AVX2 without AVX-512, give the same bits whatever the array's length),
 and a 16-flight × 8-sentence chunk takes 10.0 s instead of 26.6 s. Splitting a round across processes would change the
 random draws each chunk gets — not done.
 
 
-### R18 · `run_ts.py prior_closed_loop` — closed-loop supervised fine-tuning of the prior (prior design §9.2)
-
-2026-09-25. `prior_closed_loop --prior <chosen run> --instructions <artefact> --executor <executor spec dir> --out <new dir>
-[--rounds 8] [--per-airport 800] [--select-per-airport 200] [--select-samples 2] [--branches 4] [--segment-steps 10]
-[--window 5] [--temperature 1] [--learning-rate 1e-4] [--warmup-steps 100] [--weight-decay 0.01] [--clip-norm 1]
-[--tokens-per-batch 16384] [--seed 1337] [--chunk 64] [--device cuda] [--smoke]` — CAT-K by segments. Each round draws
-`--per-airport` train-day flights (own dynamics, `replay.draw` with seed + round, so rounds may share flights: counted as
-`repeated_flights`) and flies each in `--branches` branches of `prior_free_generation.ClosedLoop` (the prior speaking
-exactly as in free generation); every `--segment-steps` steps the branch closest (3D metres) to the observed flight at that
-row is kept and copied into the others (`Executor.take`, `Spoken.take`, `Speaker.take` — every per-flight field, the laws'
-state, the records and the model's cached keys and values); a branch the executor finished other than by crossing the
-threshold captured is passed over while another branch flies. The chain's targets are the labelled words aligned to the
-label's own words (`prior.relabel`, `--window`; a clearance the label has in force is asked for until the chain gives it,
-the handover's too); its rows are the rows the speaker read (`data.chain_record`). One pass
-(`train.FineTuner`, AdamW, optimiser state carried across rounds) over every chain so far, then free generation on the
-select days (the same flights and seed every round; round 0 = the prior before fine-tuning) and the teacher-forced NLL
-there. `choice.json` keeps the round with the highest select landed share, the earliest within `TIE_SHARE` (0.015) of it.
-Writes `config.json`, `round_00/readout.json`, `round_<k>/{chains.npz, chains.json, checkpoint.pt, config.json,
-readout.json}` (a round directory is a prior run `prior_free_generation` reads — the val readout, once), `history.json`,
-`choice.json`; from a clean tree unless `--smoke`. Val and the sealed test days are never read. Cost (2026-09-25): one
-chunk of 64 flights × 4 branches ≈ 30 s (the speaker encodes row by row, `Prior.extend`; each layer's keys and values
-allocated once for the chunk's longest flight and written in place), ≈ 31 min a 4,000-flight round.
-The executor's source hash moves with `take`: write a new executor spec (same content sha) at the commit before a
-formal run.
+### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)
 
 ### R19 · `run_ts.py prior_landing_reward` — the landing reward (prior design §9.3)
 
-2026-09-25. `prior_landing_reward --prior <the §9.2 round kept, or the step-1 run> --instructions <artefact> --executor
+2026-09-25. `prior_landing_reward --prior <the step-1 run> --instructions <artefact> --executor
 <executor spec dir> --out <new dir> [--rounds 8] [--per-airport 400] [--samples 8] [--select-per-airport 200]
 [--select-samples 2] [--learning-rate 1e-5] [--warmup-steps 20] [--weight-decay 0.01] [--clip-norm 1]
 [--tokens-per-batch 16384] [--kl-weight 0.04] [--data-weight 1] [--seed 1337] [--chunk 32] [--device cuda] [--smoke]`.
@@ -451,7 +428,7 @@ no test day) and those within 90° of them; any runway with no landing in the wi
 less its flight's mean (not divided by the spread). Only flights whose sentences differ are trained on. One pass of
 `train.RewardTuner` over this round's sentences only: advantage × the NLL of the sentence's own words (per step, dropout
 off, the unmasked distribution) + `--kl-weight` × the sample estimate of the KL to the frozen start model + `--data-weight`
-× a teacher-forced batch of the train split per update (a round with no flight to train on is refused by name). The select readout is `prior_closed_loop`'s, in the same batches of 64 flights (`SELECT_CHUNK`: round 0 from the step-1 prior reproduces §9.2's round 0), plus the share landed against the landing direction. `choice.json`: among
+× a teacher-forced batch of the train split per update (a round with no flight to train on is refused by name). The select readout (`select_readout`) is free generation on the select days in batches of 64 flights (`SELECT_CHUNK`), the same flights and seed every round, the teacher-forced NLL, and the share landed against the landing direction. `choice.json`: among
 the rounds within the guards of round 0 (landed on the observed runway ≥ round 0's − 0.02, heading words per flight ≤
 1.2 × round 0's; a round that landed nothing is excluded), the highest select landed share, the earliest within 0.015. Writes `config.json`,
 `round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, readout.json}` (a round

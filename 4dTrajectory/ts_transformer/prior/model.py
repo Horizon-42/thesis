@@ -106,10 +106,6 @@ class Past(NamedTuple):
         return cls(like.new_zeros((scenes, heads, capacity, head)), like.new_zeros((scenes, heads, capacity, head)),
                    torch.zeros((scenes, capacity), dtype=torch.bool, device=like.device), 0)
 
-    def take(self, index: torch.Tensor) -> Past:
-        """The scenes at ``index`` (single-aircraft scenes: B·A = B)."""
-        return Past(self.keys[index], self.values[index], self.present[index], self.rows)
-
 
 class SceneLayer(nn.Module):
     """Time attention → aircraft attention (edge bias + edge value) → feed-forward."""

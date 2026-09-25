@@ -27,8 +27,7 @@ A flight's row ``t`` (2 s) gives the model only what a controller could know bef
 and asks for the step's six words (``targets``: 0 = unchanged, else the word + 1) from row ``N_LOOK`` on: at the
 first predicted step every column's word in force there (none may be "unchanged": the model masks it), after it the
 sentence's words as written. ``asked`` says which of them the loss counts: every column from row ``N_LOOK`` on for a
-labelled flight; a closed-loop chain (design §9.2, `chain_record`) leaves out the columns `prior.relabel` could not
-ask for.
+labelled flight; a closed-loop sentence (`chain_record`) is given its own.
 """
 
 from __future__ import annotations
@@ -244,12 +243,6 @@ def issued_rows(grid: np.ndarray) -> np.ndarray:
     return np.maximum.accumulate(np.where(grid != UNCHANGED, rows, 0), axis=0)
 
 
-def in_force_words(grid: np.ndarray) -> np.ndarray:
-    """``[N, 6]``: the word in force at each row of a sentence (``[N, 6]``, step 0 writing every column)."""
-    grid = np.asarray(grid, dtype=np.int64)
-    return np.take_along_axis(grid, issued_rows(grid), axis=0)
-
-
 def sentence_steps(grid: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(in_force, since, targets)`` of one sentence (``[N, 6]``, the artefact's words; N > `N_LOOK`)."""
     n = len(grid)
@@ -312,14 +305,14 @@ def flight_record(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeo
 def chain_record(signals: FlightSignals, e: np.ndarray, north: np.ndarray, height: np.ndarray, said: np.ndarray,
                  classes: np.ndarray, asked: np.ndarray, geometry: AirportGeometry, landings: Landings | None,
                  airport: int, capture_row: int, step_s: float) -> Flight:
-    """One closed-loop chain (design §9.2) as the prior reads it: the rows it read — the positions ``e``, ``north``,
-    ``height`` (``[N_LOOK + steps]``: observed to the first predicted step, then where the executor flew), on the
-    vocabulary's step from row 0, and the words the chain said (``said``, ``[steps, 6]`` from row `N_LOOK`) as the
-    words said so far — and the targets `prior.relabel` read for its steps (``classes``, ``asked``). The same rows a
-    speaker (`prior.generate.Speaker`) built as it spoke on the chain."""
+    """One closed-loop sentence as the prior reads it: the rows it read — the positions ``e``, ``north``, ``height``
+    (``[N_LOOK + steps]``: observed to the first predicted step, then where the executor flew), on the vocabulary's
+    step from row 0, and the words it said (``said``, ``[steps, 6]`` from row `N_LOOK`) as the words said so far — and
+    the targets given for its steps (``classes``, ``asked``; design §9.3: its own words, every column). The same rows a
+    speaker (`prior.generate.Speaker`) built as it spoke."""
     rows = N_LOOK + len(said)
     if not (len(e) == len(north) == len(height) == rows and classes.shape == asked.shape == said.shape):
-        raise ValueError(f"{signals.dataset_id}: a chain of {len(said)} steps has {len(e)} rows and targets "
+        raise ValueError(f"{signals.dataset_id}: a sentence of {len(said)} steps has {len(e)} rows and targets "
                          f"{classes.shape}")
     context = own_context(signals, landings) if landings is not None else None
     features, relative = row_inputs(e, north, height, np.arange(rows) * step_s, utc_s(signals.entry_time_utc), 0,
