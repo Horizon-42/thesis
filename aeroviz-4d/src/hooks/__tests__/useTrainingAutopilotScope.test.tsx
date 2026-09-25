@@ -44,9 +44,14 @@ describe("the live executor's pick", () => {
     await waitFor(() => expect(app.trainingAutopilot?.status).toBe("ready"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     act(() => cursor.setTrainingCursorS(40));
+    expect(cursor.trainingCursorS).toBe(40);
+    const lastFlightsSetter = cursor.setTrainingCursorS;
 
     // another flight, then back: nothing picked, nothing flown, the cursor at the start
     act(() => app.setTrainingSelection(straight));
+    // the last flight's setter, called late (a chart's handler of the flight before): it writes nothing on this one
+    act(() => lastFlightsSetter(55));
+    expect(cursor.trainingCursorS).toBe(0);
     act(() => app.setTrainingSelection(vectored));
     expect(app.trainingPick).toBeNull();
     expect(app.trainingAutopilot).toBeNull();

@@ -11,14 +11,15 @@ import { nextPick } from "../../data/trainingAutopilot";
 import { VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
 
-const { appState, setTrainingAutopilot } = vi.hoisted(() => ({
-  appState: { trainingSelection: null as unknown, trainingPick: null as any, trainingCursorS: 0 },
+const { appState, cursor, setTrainingAutopilot } = vi.hoisted(() => ({
+  appState: { trainingSelection: null as unknown, trainingPick: null as any },
+  cursor: { trainingCursorS: 0 },
   setTrainingAutopilot: vi.fn(),
 }));
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({ ...appState, setTrainingAutopilot }),
-  useTrainingCursor: () => ({ trainingCursorS: appState.trainingCursorS, setTrainingCursorS: () => undefined }),
+  useTrainingCursor: () => ({ trainingCursorS: cursor.trainingCursorS, setTrainingCursorS: () => undefined }),
 }));
 
 import useTrainingAutopilot from "../useTrainingAutopilot";
@@ -46,7 +47,7 @@ describe("useTrainingAutopilot", () => {
     set = sample();
     appState.trainingSelection = trainingSelectionOf(set, set.flights.find((item) => item.flightKey === VECTORED_KEY)!);
     appState.trainingPick = null;
-    appState.trainingCursorS = 0;
+    cursor.trainingCursorS = 0;
     setTrainingAutopilot.mockClear();
     fetchMock = vi.fn(answering(set));
     vi.stubGlobal("fetch", fetchMock);
@@ -58,7 +59,7 @@ describe("useTrainingAutopilot", () => {
 
   it("asks for nothing until a word is picked, whatever the cursor does", () => {
     const { rerender } = renderHook(() => useTrainingAutopilot(BACKEND));
-    appState.trainingCursorS = 22;
+    cursor.trainingCursorS = 22;
     rerender();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(last()).toBeNull();
@@ -79,7 +80,7 @@ describe("useTrainingAutopilot", () => {
     appState.trainingPick = nextPick(null, "heading", 8);
     const { rerender } = renderHook(() => useTrainingAutopilot(BACKEND));
     await waitFor(() => expect(last().status).toBe("ready"));
-    appState.trainingCursorS = 40;                         // hovering a chart
+    cursor.trainingCursorS = 40;                         // hovering a chart
     rerender();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     appState.trainingPick = nextPick(appState.trainingPick, "heading", 10);
