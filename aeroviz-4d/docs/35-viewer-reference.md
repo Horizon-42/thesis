@@ -233,7 +233,9 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV21 · Training 的游标与高亮
 
-`AppContext.trainingCursorS`（航班内的秒数）由句子条、读数核对窗口和三维图层共用；换航班时游标归零。
+`AppContext.trainingCursorS`（航班内的秒数）由句子条、读数核对窗口和三维图层共用。游标和实时执行器的选择（`trainingPick`）
+属于屏幕上这架航班——`trainingSelectionKey`：机场 / 集合 / 航班（航班键在同一机场的不同集合里会重复）——换航班、换集合、离开
+Training 再回来都归零 / 清空；在换之前拿到的设置函数写不进新航班（2026-09-25，整模块审查：旧的选择会在换回来时被重新飞）。
 
 **高亮的是选中的一个词，不是一步**（用户 2026-09-24）。`AppContext.trainingColumn` 是选中的词类（六列之一，或
 没有），高亮的是这一列在游标处生效的那个词（`trainingWordAt`），别的列在同一步生效的词一概不亮——它们的起止
@@ -323,6 +325,23 @@ that divergence is a known open item (see the README's "Future Improvements").
   （列的颜色）、真值的概率（灰），真值在第 0 步之后说的每个词一根竖线——先验排第一的词就是它为青色，否则红色。**这是
   教师强制的读法**：每一步都看到真值句子在它之前的词，不是先验自己说出的句子。
 
+### AV27 · Training 模块的代码结构（2026-09-25 整模块审查后）
+
+- **一个读取器**（`src/data/trainingReader.ts`：`Reader`、`Refusal`、`attempt`、`Parsed`、清单的骨架 `parseManifest`）读三种
+  文件：集合与样本（`trainingSample.ts`）、叠加层（`trainingOverlays.ts`）、实时执行器的答复（`trainingAutopilot.ts`）。拒读
+  的信息带字段路径（`sample.flights[3].signals.tS has 40 values, expected 41`）。镜像常量仍在原文件里（Python 测试按文件路径
+  用正则读它们）。
+- 共用的读法各写一次：航向带（`readHeadingBand`：样本的带**正好**结束在 `heading_word_rows` 算的那一行，回放与实时执行器的带
+  **不超过**它们判决读到的飞出航迹）、一个词的判定（`readWordVerdict`、`readJudgedBand`）、越过入口（`readCrossing`）、出界的
+  行（`outsideSpans`，读数窗口与三维共用）。执行器没飞的航班是它自己的类型（`TrainingExecutorUnflown`）。
+- 各视图的措辞在 `src/data/trainingText.ts`（判决的结局、检查、越过入口、sha、时长），回放和实时执行器不再各说各的。
+- 读数窗口 = 纯函数的模型（`training/readbackModel.ts`，所有比例尺与范围）+ 四张图 + 画图小件（`chartKit.tsx`）+ 与先验窗口共用
+  的外壳（`TrainingWindow.tsx`）；图宽由 `useMeasuredWidth` 量。
+- 三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、线与点的几种画法、`entityGroup`）；观测航班的场景一架航班只建一次，
+  Draw 开关只改 `show`；回放与实时执行器在 `useTrainingExecutorLayers.ts`；三维回放的计算（倍数、位置、标签）在
+  `trainingAutopilot.ts`，不用 Cesium 就能测。
+- 实时执行器与叠加层的视图只在"属于屏幕上这架航班"时画（`autopilotOnScreen`、`overlayOnScreen`：机场、集合、航班都对上）。
+
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
 - 根目录的发布器 `--executor-replay` 把执行器的 val 回放记录（和 ts 预测同一个记录契约）发布成 Experiments 类别，每个机场
@@ -336,28 +355,38 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV26 · Training 的实时执行器：选中一个词，后端现飞它的一段
 
-- 用途是验证执行器，所以**每次选中都现飞**：`POST /autopilot/segment`（`aeroviz_backend/autopilot_segment.py`），不读执行器的
+- 用途是验证执行器，所以**每次选中都现飞**：`POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包：`segment`、
+  `verdict`、`fly`、`payload`、`backend`、`errors`），不读执行器的
   正式回放，也不读叠加层。执行器代码原样使用、不改一行（它的源码 sha 绑着每份执行器规格）；后端用执行器的单步接口
   `Executor` 按 `executor.fly` 的方式一个周期一个周期地飞（`fly_until`），在词钟把一个开始一步的周期放到段尾之前停下，段尾之后
   什么也不飞——与"飞满时限再截断"逐位相同。
-- 启动：选中一个词后按句子条头部的 **▶ Fly this segment**（飞完变 **↻ Fly again**，同一选择的新一次尝试），或在面板
-  "Autopilot (live)" 一栏的开关开着时直接点色块；只有点击才请求（`trainingPick`），游标不触发，图表悬停会移动游标。
+- 启动：选中一个词后按句子条头部的 **▶ Fly**（飞完变 **↻ Fly again**，同一选择的新一次尝试），或在面板 "Autopilot (live)"
+  一栏的 **Fly on band click** 开着时直接点色块；只有点击才请求（`trainingPick`），游标不触发，图表悬停会移动游标。
 - 一段 = 被选中的那个色块：从词说出的一步飞到它的包络结束的
   `stopRow`——同列下一个词说出的一步，航向词再加一个提前量（它的带判到下一个航向词说出后一个提前量，下一个航向词照句子说出）；
   到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。初态是观测飞机在那一步的状态（`flight_inputs(anchor=row)`），第 0 步是那一步
   六列生效的词，之后是段内的词，每条在执行器到了观测飞机听到它的位置时说。
 - 规格：`outputs/POOLED/executor/*/spec.json` 里恰好一份由现在的执行器代码、为这个集合所属产物的词表写的
-  （`replay.open_executor`）；否则拒绝并列出每一份的原因。集合的产物与划分从样本的 `producedBy.artefact` / `cohort.split` 读。
+  （`replay.open_executor`）；否则拒绝并列出每一份的原因；那个目录里的规格一有增、删、移动或改写就重新找。集合必须是这个词表的
+  样本格式与读法、从 val 抽的；产物与划分从样本的 `producedBy.artefact` / `cohort.split` 读。
+- 状态码：请求不对（缺字段、列名、不是机场代码的机场、那一步没说这列的词）400（`RequestRefused`）；集合或航班没列出 404
+  （`NotListed`）；机型没有动力学、按数据飞不了 422（`NotFlyable`）；其余列出了却飞不了 500，写出原因。
+- 航向词的判定：它生效期间（下一个航向词被听到之前）执行器离开它自己去切入航道的，不管有没有可判的行都记为出界；动力学失败时
+  航向带照样画（判决读的是失败状态之前的行，航迹保留了这些行）。
 - 前端把答复绑到屏幕上这一段：同一架航班、`endRow` 是色块的终点、词表规格相同、**告诉执行器的词就是句子条这一段显示的词**；
+  航向带的行是执行器自己飞过的步，以判决读到的飞出航迹为界、不以句子段尾为界（执行器可能晚听到下一个航向词）；
   对不上整份拒读。答复格式 `aeroviz-autopilot-segment-v2` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
   名也是镜像）；它带 `timing`（后端墙钟：等待；加起来等于总计的各项——集合与规格、重建航班或沿用、准备这一段、执行器与算了的周期数、判定、
-  写答复），前端加上浏览器往返时间。单步飞法由 `test_autopilot_segment.StepperTest` 钉住：真实执行器上，不设段尾时与
-  `executor.fly` 逐周期相同，设了段尾时等于它在词钟首次把一个开始一步的周期放到段尾处截断。
+  写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里），前端加上浏览器往返时间。单步飞法由
+  `test_autopilot_segment.StepperTest` 钉住：真实执行器上，不设段尾时与 `executor.fly` 逐周期相同，设了段尾时等于它在词钟首次把
+  一个开始一步的周期放到段尾处截断；装配由 `SetupTest` 钉住（与 `replay.fly_sentences` 的输入、跑道、图、进近速度、时限、词钟
+  相同）；前端的四个镜像名由 `MirrorTest` 钉住。
 - 显示：句子条一行只写词、**在不在包络内**、"N s flown in M ms"（飞得不好时加怎么结束的）；结果卡第一行是判定，然后并排
   "模拟飞行时间"（对照观测）与"计算用时"（往返），检查项，其余收进 Details；三维飞机标签走模拟时钟"已飞 / 全段 s simulated"。
 - **颜色按判定**：在包络内蓝 `#2563eb`，飞出包络整条换成醒目的红 `#ff2d2d`（`autopilotColour`：三维航迹、地面投影、飞机与
   标签、读数图的线、结果卡）。
 - 画法：与执行器回放的青色分开；三维里飞机按加速的实际时间把这一段飞出来（至少 8 倍、不超过 20 s，
-  CallbackProperty，不碰 `viewer.clock`），读数窗口里四张图各一条蓝线，从观测线上说词的那一点出发。
+  CallbackProperty，不碰 `viewer.clock`；飞完换成静态属性，不再每帧重建，被地形挡住的部分也画成虚线），读数窗口里四张图
+  各一条蓝线，从观测线上说词的那一点出发。只有一个状态的答复（第一个周期就动力学失败）没有线可画（`autopilotHasLine`）。
 - 后端第一次收到这个请求时才载入 torch 与 ts_transformer（常驻内存约多 470 MB）；一次一段（锁），重建过的航班留最近 8 架。
   后端不热更新：改了这部分要重启后端。

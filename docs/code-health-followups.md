@@ -6,6 +6,82 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## Training module review: what it found outside the module (2026-09-25)
+
+The whole-module review of the Training view (frontend `aeroviz-4d/src/{data,hooks,components,scene}/training*`, the
+live executor's backend `aeroviz_backend/autopilot_segment/`; branch `dev-autopilot-live`) fixed what was inside. These
+are outside it — the app shell, the exporters, the prior — and are recorded, not changed.
+
+**1. Every chart hover re-renders the whole app** — *verified (mechanism), judgement (cost)*. `useApp()`
+(`aeroviz-4d/src/context/AppContext.tsx`, ~L704) reads all eight contexts, so every consumer subscribes to all of them;
+`trainingCursorS` changes on every mousemove over a Training chart, and `FlightApp` (`App.tsx:37`) calls `useApp` and
+`useTrainingTrackLayer()`, so each move re-renders the shell, both docks, the flight list, the HUD and the other layers'
+hook bodies (~50 `useApp` consumers). Fix: a cursor-only context with its own hook that `useApp` does not spread, and the
+3D layer mounted in a leaf `<TrainingScene/>` (both are needed: `FlightApp` itself subscribes).
+
+**2. Leaving Training throws its session away** — *verified (mechanism), judgement (whether intended)*.
+`WorkbenchLeftDock.tsx:70-75` unmounts `TrainingPanel` on every mode switch; coming back re-downloads and re-parses the
+index, the sample (KRDU's 6 MB) and the overlays, and resets the flight to the first and the camera. (The live
+executor's pick no longer re-flies: it is scoped to the flight on screen since this review.) Fix: hoist the session
+(index, sample, overlays, flight) into a provider above the mode switch, or keep the panel mounted and hidden.
+
+**3. `instruction_training_export.py` is a runner AND the Training files' library** — *verified*. It holds the schemas,
+`KIND_*`, `SPLIT`, `stored_sentence` / `reread`, `open_base_set`, `read_overlays`, `write_overlay`; two runners and the
+backend import it (the backend: `KIND_READBACK`, `SAMPLE_SCHEMA`, `SPLIT`), against "nothing imports a runner". Its
+helpers raise `SystemExit`, which is not an `Exception`: from a server thread it would escape the handler and drop the
+request unanswered — why the backend re-implements `open_base_set`'s checks instead of calling it. Fix: a torch-free,
+non-runner `ts_transformer/instructions/training_files.py` raising `ValueError`; each `main()` turns those into
+`parser.error`.
+
+**4. A race on `training/index.json`** — *verified by reading*. `instruction_training_export.py:550-555` reads the index
+at the start and writes `[*existing, entry]` after every airport is built, minutes later, without reading it again: a
+set another export added meanwhile is dropped. `write_overlay` guards exactly this for `overlays.json` (`:508`). The
+write loop is not all-or-nothing either, against its docstring (`:563`). Fix: one "append the entry, refuse if the file
+changed" helper for both manifests.
+
+**5. The replay draws no heading band for a dynamics failure, on a false premise** — *verified by reading*.
+`executor_training_export.py:44-45` / `:225-226`, the TS rule `drawn = refused === null && outcome !== "dynamics_failure"`
+(`trainingOverlays.ts`) and `test_training_overlays.py::test_a_dynamics_failure_keeps_its_verdicts_and_draws_no_band`
+say "the judge read the failed state"; `judge.read_flown` reads to `end_row − 1` for a dynamics failure, and the
+exported track holds those rows. The live executor draws the band since this review. Fix: a new overlay schema name
+(`aeroviz-training-executor-v3`) on both sides that draws it, and a test with a real failure instead of a relabelled
+outcome.
+
+**6. The replay's "left to intercept the final on its own" counts the whole flight** — *verified by reading,
+judgement*. The export fails the heading word in force at the FIRST off-word cycle and reports the flight's total count;
+the live executor (since this review) counts only the cycles its word was in force. The two agree on which word fails
+and may differ on the number shown. Fix, if wanted: count per word in the export too.
+
+**7. Three strictnesses of "the re-read sentence is the stored one"** — *verified*. The executor export compares the
+words grid only (`:421-424`); `replay.draw` and the live executor's `open_flight` compare the words and the runway index;
+the instruction export also compares the capture, clearance and "unspecified" rows. Fix: one shared
+`require_stored_sentence`.
+
+**8. Duplication across the three exporters and the backend** — *verified*. `_r` (three copies), `_git_state` (a verbatim
+copy of `repo_layout.git_state`), the repo-relative path written three ways, the stored-sentence slice inlined twice
+although `stored_sentence` exists, the geoid-undulation wrapper three times, the two overlay `main()`s one skeleton, and
+"the words in force" computed three ways plus the TS copy (`flight_payload`, `prior.data.sentence_steps`,
+`autopilot.sentence._filled`). The backend keeps its own `_check` / `end_state_row` / chart shift rather than import a
+runner (item 3).
+
+**9. Smaller exporter points** — *verified*. `sample.json` is written with `indent=2` (one number per line in a
+multi-MB file; the overlays are compact for that reason; no schema change needed). The `no_check_reason` "cleared at
+entry" branch (`executor_training_export.py:108-110`) cannot be reached for truth sentences (a step-0 clearance is
+written as kind "clear"; checked on all five `instruction_v3_day_split` samples). Unpinned: the executor `params`
+values the TS reader accepts only as numbers or strings; `captureBeforeThresholdM` written from two sources (the
+labeller's check and the display corridor) and never compared.
+
+**10. The prior's first predicted step has no exporter-side test** — *verified*. The frontend now reads the truth there
+as the word in force (`trainingOverlays.priorTruthAt`) and checks `truthP = changeP × wordsP` and `changeP = 1` on every
+file; `test_training_overlays.py:188` covers one word said inside the observation window with the value written by
+hand. Missing: a word said exactly at `N_LOOK`, two words of one column inside the window (the later must win), and
+agreement with the sample's `words.inForce`. No `aeroviz-training-prior-v3` overlay is on disk yet, so the frontend's
+new check has met only the fixture.
+
+**11. `TRAINING_STRATA` is not pinned** — *verified*. `trainingSample.ts`'s `TRAINING_STRATA` mirrors
+`instructions.readout.STRATA` and no Python test reads it (the sample's other mirrors are pinned by
+`test_instruction_training_export.py`; the live executor's by `aeroviz_backend/tests/test_autopilot_segment.py::MirrorTest`).
+
 ## Three ts ablation runners write into fixed directories that carry no aircraft filter (2026-09-24)
 
 **Verified** (code review of the A320-fallback removal): `experiments/kinematic_ablation.py:514`,
