@@ -27,11 +27,15 @@ from pathlib import Path
 from typing import Any
 
 from aircraft.aircraft_sets import Aircraft, Approach, Drag, Engine, Geometry, Mass, class_procedure
+from aircraft.identity import OPENSKY_LOOKUP_PATH, OPENSKY_LOOKUP_SCHEMA
 from aircraft.reference_speeds import reference_speed
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PARAMETERS_PATH = SCRIPT_DIR / "openap_aircraft_parameters.json"
-LOOKUP_PATH = SCRIPT_DIR / "aircraft_id_lookup.json"
+LOOKUP_PATH = OPENSKY_LOOKUP_PATH
+#: The OpenAP parameter cache's schema (`build_openap_aircraft_database` writes it). The id lookup's is
+#: `identity.OPENSKY_LOOKUP_SCHEMA` — the one the identity resolver checks too.
+OPENAP_PARAMETERS_SCHEMA = 1
 
 
 class AircraftLookupError(LookupError):
@@ -48,9 +52,15 @@ def normalize_id(value: str | None) -> str:
 
 @lru_cache(maxsize=None)
 def load_json(path: Path) -> dict[str, Any]:
-    """Load + cache a JSON file (the OpenAP cache is large and read once per aircraft)."""
+    """Load + cache one of the two OpenAP caches (large, read once per aircraft), refusing a schema this code does not
+    read — the parameter cache's `OPENAP_PARAMETERS_SCHEMA`, the id lookup's `identity.OPENSKY_LOOKUP_SCHEMA`."""
+    expected = {PARAMETERS_PATH: OPENAP_PARAMETERS_SCHEMA, LOOKUP_PATH: OPENSKY_LOOKUP_SCHEMA}[path]
     with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        payload = json.load(handle)
+    if payload.get("schema_version") != expected:
+        raise ValueError(f"{path} has schema {payload.get('schema_version')!r}, not {expected}; rebuild it "
+                         f"(aircraft.build_openap_aircraft_database)")
+    return payload
 
 
 def resolve_typecode(aircraft_id: str, parameters: dict[str, Any], lookup: dict[str, Any]) -> tuple[str, str]:

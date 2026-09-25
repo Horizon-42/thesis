@@ -114,9 +114,22 @@ class TestLandingMass(unittest.TestCase):
         self.assertEqual(aircraft.landing_mass, 66000.0)
 
     def test_falls_back_to_fraction_of_mtow(self):
-        # A320 preset carries no max_landing_kg -> 0.85 * MTOW.
-        self.assertAlmostEqual(A320.landing_mass, 0.85 * 78000.0)
-        self.assertLess(A320.landing_mass, A320.mass.max_takeoff_kg)
+        # an airframe that carries no max_landing_kg (an OpenAP type without mlw_kg) -> 0.85 * MTOW
+        aircraft = Aircraft(
+            code="X", name="X", category="x",
+            geometry=Geometry(wing_area_m2=122.6),
+            mass=Mass(max_takeoff_kg=78000.0),
+            engine=Engine(count=2, max_thrust_n_each=120000.0),
+            approach=A320.approach,
+        )
+        self.assertAlmostEqual(aircraft.landing_mass, 0.85 * 78000.0)
+
+    def test_a_preset_lands_at_its_published_malw(self):
+        # the mass its published approach speed is scaled from (code-health follow-up: the B77W was 19 % above it)
+        for preset in AIRCRAFT_PRESETS.values():
+            self.assertEqual(preset.landing_mass, preset.approach.speeds.malw_kg)
+            self.assertLess(preset.landing_mass, preset.mass.max_takeoff_kg)
+        self.assertEqual(AIRCRAFT_PRESETS["B77W"].landing_mass, 251290.0)     # FAA ACD MALW 554,000 lb
 
 
 class TestFrozen(unittest.TestCase):
@@ -152,3 +165,22 @@ class TestConstruct(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOpenapCacheSchema(unittest.TestCase):
+    """The OpenAP caches are refused on a schema this code does not read (code-health review #21)."""
+
+    def test_a_cache_of_another_schema_is_refused_by_name(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        import aircraft.query_aircraft_parameters as query
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "openap_aircraft_parameters.json"
+            path.write_text(json.dumps({"schema_version": query.OPENAP_PARAMETERS_SCHEMA + 1, "typecodes": {}}))
+            with mock.patch.object(query, "PARAMETERS_PATH", path):
+                with self.assertRaisesRegex(ValueError, "rebuild it"):
+                    query.load_json(path)

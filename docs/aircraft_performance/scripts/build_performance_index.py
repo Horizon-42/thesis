@@ -4,12 +4,17 @@ Run after final_mapping.py (see the report's §11). Decisions (user, 2026-09-23/
 mass, wing area and thrust; a substitute airframe where the analysis found one; exclude the rest
 (propeller aircraft, rotorcraft/military, no FAA approach speed, no same-class airframe).
 OpenAP synonym types the analysis kept become explicit substitutes by their OpenAP surrogate.
+An own type carries no landing mass (schema v2, 2026-09-26): it lands at its published MALW, the mass its
+approach speed is scaled from (aircraft/reference_speeds.json).
 """
 import csv
 import json
 from collections import Counter
 
-from _paths import CODE, LIT, WORK
+from _paths import CODE, LIT, WORK, use_repo_code
+
+use_repo_code()
+from aircraft.performance_index import PERFORMANCE_INDEX_SCHEMA  # noqa: E402
 
 OUT = CODE / "aircraft/performance_index.json"
 LB = 0.45359237
@@ -60,11 +65,10 @@ def own_from_facts(t):
         "decision": "own",
         "name": a["Model_FAA"],
         "mtow_kg": round(num(a["MTOW_lb"]) * LB),
-        "mlw_kg": round(num(a["MALW_lb"]) * LB),
         "wing_area_m2": num(f["wing_area_m2"]),
         "engines": int(f["n_engines"]),
         "max_thrust_n_each": round(num(f["rated_takeoff_thrust_kN_each"]) * 1000.0, 1),
-        "sources": {"mass": "faa_acd_2024_10", "wing_area": f["wing_area_source"],
+        "sources": {"mtow": "faa_acd_2024_10", "wing_area": f["wing_area_source"],
                     "thrust": f["thrust_source"]},
     }
 
@@ -77,12 +81,11 @@ def own_from_ps(t):
         "decision": "own",
         "name": f"{p['Manufacturer']} {p['Type']}",
         "mtow_kg": round(num(p["MTOM_kg"])),
-        "mlw_kg": round(num(p["MLM_kg"])),
         "wing_area_m2": num(p["Sref_m2"]),
         "engines": engines,
         # nominal_F00_ISA_kn is summed over all engines (PSAircraftEngineParams docstring)
         "max_thrust_n_each": round(num(p["nominal_F00_ISA_kn"]) * 1000.0 / engines, 1),
-        "sources": {"mass": PS_SOURCE, "wing_area": PS_SOURCE, "thrust": PS_SOURCE},
+        "sources": {"mtow": PS_SOURCE, "wing_area": PS_SOURCE, "thrust": PS_SOURCE},
     }
 
 
@@ -186,7 +189,7 @@ for sid in sorted(used):
                         "url": s["url"], "local_path": s["local_path"], "sha256": s["sha256"]}
 
 payload = {
-    "schema": "aircraft-performance-index-v1",
+    "schema": PERFORMANCE_INDEX_SCHEMA,
     "generated": "2026-09-24",
     "decisions": REPORT,
     "sources": sources,

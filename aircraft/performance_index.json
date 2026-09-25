@@ -1,5 +1,5 @@
 {
- "schema": "aircraft-performance-index-v1",
+ "schema": "aircraft-performance-index-v2",
  "generated": "2026-09-24",
  "decisions": "docs/aircraft_performance/2026-09-23_missing_performance_substitution.zh.md",
  "sources": {
@@ -239,12 +239,11 @@
    "decision": "own",
    "name": "Airbus A300B4-200",
    "mtow_kg": 165000,
-   "mlw_kg": 135333,
    "wing_area_m2": 260.0,
    "engines": 2,
    "max_thrust_n_each": 233100.0,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -258,12 +257,11 @@
    "decision": "own",
    "name": "Airbus A330-900",
    "mtow_kg": 242000,
-   "mlw_kg": 191000,
    "wing_area_m2": 374.0,
    "engines": 2,
    "max_thrust_n_each": 327800.0,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -337,12 +335,11 @@
    "decision": "own",
    "name": "Boeing 717-200",
    "mtow_kg": 53524,
-   "mlw_kg": 45359,
    "wing_area_m2": 92.97,
    "engines": 2,
    "max_thrust_n_each": 95330.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_211_i3",
     "thrust": "easa_tcds_e_023_i1"
    }
@@ -351,12 +348,11 @@
    "decision": "own",
    "name": "Boeing 727-200",
    "mtow_kg": 83820,
-   "mlw_kg": 71600,
    "wing_area_m2": 157.9,
    "engines": 3,
    "max_thrust_n_each": 67918.8,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -370,12 +366,11 @@
    "decision": "own",
    "name": "Boeing B737-500",
    "mtow_kg": 60555,
-   "mlw_kg": 49895,
    "wing_area_m2": 103.7,
    "engines": 2,
    "max_thrust_n_each": 93650.0,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -384,12 +379,11 @@
    "decision": "own",
    "name": "Boeing B757-300",
    "mtow_kg": 122470,
-   "mlw_kg": 101610,
    "wing_area_m2": 189.0,
    "engines": 2,
    "max_thrust_n_each": 178981.0,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -403,12 +397,11 @@
    "decision": "own",
    "name": "Boeing B767-400ER",
    "mtow_kg": 204116,
-   "mlw_kg": 158757,
    "wing_area_m2": 283.3,
    "engines": 2,
    "max_thrust_n_each": 256397.9,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -421,12 +414,11 @@
    "decision": "own",
    "name": "Boeing B787-10",
    "mtow_kg": 254011,
-   "mlw_kg": 201848,
    "wing_area_m2": 377.0,
    "engines": 2,
    "max_thrust_n_each": 344280.0,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -435,12 +427,11 @@
    "decision": "own",
    "name": "Airbus A220-100",
    "mtow_kg": 63095,
-   "mlw_kg": 54200,
    "wing_area_m2": 112.3,
    "engines": 2,
    "max_thrust_n_each": 108540.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "airbus_a220_acp_i013",
     "thrust": "easa_tcds_im_e_090_i10"
    }
@@ -449,12 +440,11 @@
    "decision": "own",
    "name": "Airbus A220-300",
    "mtow_kg": 70900,
-   "mlw_kg": 60600,
    "wing_area_m2": 112.3,
    "engines": 2,
    "max_thrust_n_each": 108540.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "airbus_a220_acp_i013",
     "thrust": "easa_tcds_im_e_090_i10"
    }
@@ -569,12 +559,11 @@
    "decision": "own",
    "name": "Cessna Citation CJ3",
    "mtow_kg": 6291,
-   "mlw_kg": 5783,
    "wing_area_m2": 27.32,
    "engines": 2,
    "max_thrust_n_each": 12540.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_078_i19",
     "thrust": "easa_tcds_im_e_016_i13"
    }
@@ -583,12 +572,11 @@
    "decision": "own",
    "name": "Cessna Citation CJ4",
    "mtow_kg": 7761,
-   "mlw_kg": 7103,
    "wing_area_m2": 30.67,
    "engines": 2,
    "max_thrust_n_each": 16100.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_078_i19",
     "thrust": "easa_tcds_im_e_016_i13"
    }
@@ -597,12 +585,11 @@
    "decision": "own",
    "name": "Cessna Citation M2",
    "mtow_kg": 4853,
-   "mlw_kg": 4491,
    "wing_area_m2": 22.3,
    "engines": 2,
    "max_thrust_n_each": 8741.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_078_i19",
     "thrust": "easa_tcds_im_a_078_i19"
    }
@@ -666,12 +653,11 @@
    "decision": "own",
    "name": "Cessna Citation V/Ultra/Encore",
    "mtow_kg": 7394,
-   "mlw_kg": 6895,
    "wing_area_m2": 31.83,
    "engines": 2,
    "max_thrust_n_each": 13545.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_207_i10",
     "thrust": "faa_tcds_e45ne_orig"
    }
@@ -680,12 +666,11 @@
    "decision": "own",
    "name": "Cessna Excel/XLS",
    "mtow_kg": 9163,
-   "mlw_kg": 8482,
    "wing_area_m2": 34.4,
    "engines": 2,
    "max_thrust_n_each": 18320.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_207_i10",
     "thrust": "easa_tcds_im_e_013_i3"
    }
@@ -699,12 +684,11 @@
    "decision": "own",
    "name": "Cessna Citation Sovereign",
    "mtow_kg": 13744,
-   "mlw_kg": 12292,
    "wing_area_m2": 47.93,
    "engines": 2,
    "max_thrust_n_each": 25670.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_033_i9",
     "thrust": "easa_tcds_im_e_051_i4"
    }
@@ -713,12 +697,11 @@
    "decision": "own",
    "name": "Cessna Citation Latitude",
    "mtow_kg": 13971,
-   "mlw_kg": 12508,
    "wing_area_m2": 50.4,
    "engines": 2,
    "max_thrust_n_each": 26270.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_033_i9",
     "thrust": "easa_tcds_im_e_051_i4"
    }
@@ -727,12 +710,11 @@
    "decision": "own",
    "name": "Cessna Citation Longitude",
    "mtow_kg": 17917,
-   "mlw_kg": 15195,
    "wing_area_m2": 49.91,
    "engines": 2,
    "max_thrust_n_each": 34040.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_620_i3",
     "thrust": "easa_tcds_im_e_058_i10"
    }
@@ -745,12 +727,11 @@
    "decision": "own",
    "name": "Cessna Citation X",
    "mtow_kg": 16375,
-   "mlw_kg": 14424,
    "wing_area_m2": 48.96,
    "engines": 2,
    "max_thrust_n_each": 30080.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_097_i3",
     "thrust": "easa_tcds_im_e_044_i5"
    }
@@ -771,12 +752,11 @@
    "decision": "own",
    "name": "Bombardier (Canadair) Challenger 300",
    "mtow_kg": 17622,
-   "mlw_kg": 15309,
    "wing_area_m2": 48.5,
    "engines": 2,
    "max_thrust_n_each": 30730.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_080_i11",
     "thrust": "easa_tcds_im_e_058_i10"
    }
@@ -785,12 +765,11 @@
    "decision": "own",
    "name": "Bombardier Challenger 350",
    "mtow_kg": 18416,
-   "mlw_kg": 15490,
    "wing_area_m2": 48.5,
    "engines": 2,
    "max_thrust_n_each": 33390.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_080_i11",
     "thrust": "easa_tcds_im_e_058_i10"
    }
@@ -822,12 +801,11 @@
    "decision": "own",
    "name": "canadair CRJ-700",
    "mtow_kg": 34019,
-   "mlw_kg": 30391,
    "wing_area_m2": 70.61,
    "engines": 2,
    "max_thrust_n_each": 56360.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "bombardier_crj700_apm_r15",
     "thrust": "easa_tcds_im_e_053_i4"
    }
@@ -868,12 +846,11 @@
    "decision": "own",
    "name": "Embraer EMB-135LR",
    "mtow_kg": 20000,
-   "mlw_kg": 18500,
    "wing_area_m2": 51.18,
    "engines": 2,
    "max_thrust_n_each": 33050.0,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -897,12 +874,11 @@
    "decision": "own",
    "name": "Embraer EMB-545 Legacy 450",
    "mtow_kg": 16204,
-   "mlw_kg": 14750,
    "wing_area_m2": 44.85,
    "engines": 2,
    "max_thrust_n_each": 29530.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_526_i12",
     "thrust": "easa_tcds_im_a_526_i12"
    }
@@ -911,12 +887,11 @@
    "decision": "own",
    "name": "Legacy 500/Praetor 600",
    "mtow_kg": 17400,
-   "mlw_kg": 15660,
    "wing_area_m2": 44.85,
    "engines": 2,
    "max_thrust_n_each": 31750.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_526_i12",
     "thrust": "easa_tcds_im_a_526_i12"
    }
@@ -925,12 +900,11 @@
    "decision": "own",
    "name": "Embraer Phenom 300",
    "mtow_kg": 8150,
-   "mlw_kg": 7568,
    "wing_area_m2": 28.5,
    "engines": 2,
    "max_thrust_n_each": 14946.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_158_i11",
     "thrust": "easa_tcds_im_e_048_i4"
    }
@@ -939,12 +913,11 @@
    "decision": "own",
    "name": "Embraer 175 short wing",
    "mtow_kg": 37500,
-   "mlw_kg": 34000,
    "wing_area_m2": 72.72,
    "engines": 2,
    "max_thrust_n_each": 62500.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_001_i13",
     "thrust": "easa_tcds_im_e_053_i4"
    }
@@ -974,12 +947,11 @@
    "decision": "own",
    "name": "Dassault Falcon 2000",
    "mtow_kg": 19232,
-   "mlw_kg": 17826,
    "wing_area_m2": 49.0,
    "engines": 2,
    "max_thrust_n_each": 31150.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_a_008_i13",
     "thrust": "easa_tcds_im_e_057_i6"
    }
@@ -1189,12 +1161,11 @@
    "decision": "own",
    "name": "Boeing MD-82",
    "mtow_kg": 67812,
-   "mlw_kg": 58967,
    "wing_area_m2": 112.3,
    "engines": 2,
    "max_thrust_n_each": 92740.0,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -1203,12 +1174,11 @@
    "decision": "own",
    "name": "Boeing MD-83",
    "mtow_kg": 72575,
-   "mlw_kg": 63276,
    "wing_area_m2": 112.3,
    "engines": 2,
    "max_thrust_n_each": 96520.0,
    "sources": {
-    "mass": "pycontrails_ps_20250328",
+    "mtow": "pycontrails_ps_20250328",
     "wing_area": "pycontrails_ps_20250328",
     "thrust": "pycontrails_ps_20250328"
    }
@@ -1315,12 +1285,11 @@
    "decision": "own",
    "name": "Raytheon Premier 1/390 Premier 1",
    "mtow_kg": 5670,
-   "mlw_kg": 5262,
    "wing_area_m2": 22.9,
    "engines": 2,
    "max_thrust_n_each": 10230.0,
    "sources": {
-    "mass": "faa_acd_2024_10",
+    "mtow": "faa_acd_2024_10",
     "wing_area": "easa_tcds_im_a_073_i2",
     "thrust": "easa_tcds_im_e_016_i13"
    }

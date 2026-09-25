@@ -42,7 +42,7 @@ class Geometry:
 @dataclass(frozen=True, slots=True)
 class Mass:
     max_takeoff_kg: float                        # OpenAP mtow_kg
-    max_landing_kg: float | None = None          # OpenAP mlw_kg
+    max_landing_kg: float | None = None          # a preset / own type: its published MALW; an OpenAP type: mlw_kg
     operating_empty_kg: float | None = None      # OpenAP oew_kg
     max_fuel_kg: float | None = None             # OpenAP maximum_fuel_capacity_kg
 
@@ -140,7 +140,9 @@ class Aircraft:
         """Representative mass on approach/landing (kg) — the initial mass for approach
         scenarios fed to the simulator and optimizer.
 
-        Max-landing weight when OpenAP provides it, else a typical fraction of MTOW. NOT
+        The max-landing weight when the airframe has one (the published MALW the approach speed is
+        scaled from for a preset or a performance-index type; OpenAP's ``mlw_kg`` for an OpenAP type),
+        else a typical fraction of MTOW. NOT
         MTOW: a landing aircraft is much lighter, and using MTOW inflates the stall speed so
         realistic approach speeds become infeasible. Computed (``@property``), so the rule
         lives in one place and is easy to change.
@@ -189,14 +191,15 @@ def published_speeds(typecode: str) -> ReferenceSpeed:
     return speeds
 
 
-# ── Presets (hand-tuned airframe and procedure values; speeds are the published ones) ──
+# ── Presets (hand-tuned airframe and procedure values; speeds and the landing mass are the published ones: the landing
+#    mass is the MALW the published approach speed is scaled from, `ReferenceSpeed.vref_kt`) ──
 
 A320 = Aircraft(
     code="A320",
     name="Airbus A320-200",
     category="narrow_body",
     geometry=Geometry(wing_area_m2=122.6),
-    mass=Mass(max_takeoff_kg=78000.0),
+    mass=Mass(max_takeoff_kg=78000.0, max_landing_kg=published_speeds("A320").malw_kg),
     engine=Engine(count=2, max_thrust_n_each=120000.0),   # 240000 N total
     approach=Approach(
         speeds=published_speeds("A320"),
@@ -214,7 +217,7 @@ B77W = Aircraft(
     name="Boeing 777-300ER",
     category="wide_body",
     geometry=Geometry(wing_area_m2=436.8),
-    mass=Mass(max_takeoff_kg=351530.0),
+    mass=Mass(max_takeoff_kg=351530.0, max_landing_kg=published_speeds("B77W").malw_kg),
     engine=Engine(count=2, max_thrust_n_each=513000.0),   # 1026000 N total
     approach=Approach(
         speeds=published_speeds("B77W"),
@@ -232,7 +235,7 @@ C172 = Aircraft(
     name="Cessna 172",
     category="general_aviation",
     geometry=Geometry(wing_area_m2=16.2),
-    mass=Mass(max_takeoff_kg=1157.0),
+    mass=Mass(max_takeoff_kg=1157.0, max_landing_kg=published_speeds("C172").malw_kg),
     engine=Engine(count=1, max_thrust_n_each=3200.0),
     approach=Approach(
         speeds=published_speeds("C172"),
