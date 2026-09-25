@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AppProvider, useApp } from "../AppContext";
+import { AppProvider, useApp, useTrainingCursor } from "../AppContext";
 
 const fetchMock = vi.fn();
 
@@ -139,5 +139,31 @@ describe("AppContext", () => {
     expect(result.current.activeAirportCode).toBe("CYVR");
     expect(result.current.mode).toBe("optimize");
     expect(result.current.proceduresOpen).toBe(true);
+  });
+  it("moves the Training cursor without re-rendering what reads only useApp", async () => {
+    // the cursor follows the mouse over a chart: the app shell and every other consumer of useApp must not follow it
+    const renders = { app: 0, cursor: 0 };
+    let app!: ReturnType<typeof useApp>;
+    let cursor!: ReturnType<typeof useTrainingCursor>;
+    function ReadsApp() {
+      app = useApp();
+      renders.app += 1;
+      return null;
+    }
+    function ReadsCursor() {
+      cursor = useTrainingCursor();
+      renders.cursor += 1;
+      return null;
+    }
+    render(<AppProvider><ReadsApp /><ReadsCursor /></AppProvider>);
+    await waitFor(() => expect(app.airports).toHaveLength(2));
+    await act(async () => undefined);
+    const before = { ...renders };
+    act(() => cursor.setTrainingCursorS(12));
+    act(() => cursor.setTrainingCursorS(24));
+    expect(cursor.trainingCursorS).toBe(24);
+    expect(renders.cursor).toBe(before.cursor + 2);
+    expect(renders.app).toBe(before.app);
+    expect("trainingCursorS" in app).toBe(false);
   });
 });

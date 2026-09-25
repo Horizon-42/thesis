@@ -31,6 +31,8 @@
  * turns yellow (a line) or keeps its hue deepened with a yellow edge (a fill); the rows it is in force are drawn yellow
  * over the track, and its issue is marked with its name. Every other word's envelope recedes (its colours faded). Moving
  * the cursor within one word repaints nothing. Selecting a flight frames it once; the cursor never moves the camera.
+ * It reads the cursor, which moves on every hover over a chart: call it from a leaf (`TrainingScene`), never from the
+ * app shell, or every hover re-renders the whole workbench.
  *
  * STATIC ENTITIES, NOT TIME-SAMPLED ONES: a time-dynamic entity would drive the shared `viewer.clock`, which belongs to
  * Observe's playback.
@@ -38,7 +40,7 @@
 
 import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
-import { useApp, type TrainingLayers } from "../context/AppContext";
+import { useApp, useTrainingCursor, type TrainingLayers } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { frameTrajectoryCamera } from "../utils/frameTrajectoryCamera";
 import {
@@ -307,7 +309,8 @@ function paintFocus(viewer: Cesium.Viewer, selection: TrainingSelection, column:
 }
 
 export default function useTrainingTrackLayer(): void {
-  const { viewer, mode, trainingSelection, trainingLayers, trainingCursorS, trainingColumn } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers, trainingColumn } = useApp();
+  const { trainingCursorS } = useTrainingCursor();
   const selection = mode === "training" ? trainingSelection : null;
 
   // The flight's scene, built once per flight; the ids each switch shows, for the effect below.

@@ -33,7 +33,7 @@
  */
 
 import { useState } from "react";
-import { useApp } from "../context/AppContext";
+import { useApp, useTrainingCursor } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
 import TrainingPriorWindow from "./TrainingPriorWindow";
 import TrainingReadbackWindow from "./TrainingReadbackWindow";
@@ -168,10 +168,10 @@ function verdictMark(status: TrainingExecutorWord["status"]): { fill: string; st
 export default function TrainingSentenceBar() {
   const {
     trainingSelection: selection, trainingLayers,
-    trainingCursorS: cursorS, setTrainingCursorS: setCursorS,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
     trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick, trainingAutopilotAuto,
   } = useApp();
+  const { trainingCursorS: cursorS, setTrainingCursorS: setCursorS } = useTrainingCursor();
   const [frame, frameW] = useMeasuredWidth(MIN_PLOT_W + GUTTER + PAD_R, DEFAULT_PLOT_W + GUTTER + PAD_R);
   const [openWindow, setOpenWindow] = useState<"readback" | "prior" | null>(null);
   const [notesOpen, setNotesOpen] = useState<boolean>(false);

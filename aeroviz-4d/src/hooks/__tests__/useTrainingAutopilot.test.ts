@@ -18,6 +18,7 @@ const { appState, setTrainingAutopilot } = vi.hoisted(() => ({
 
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({ ...appState, setTrainingAutopilot }),
+  useTrainingCursor: () => ({ trainingCursorS: appState.trainingCursorS, setTrainingCursorS: () => undefined }),
 }));
 
 import useTrainingAutopilot from "../useTrainingAutopilot";

@@ -10,7 +10,7 @@ import { useLayoutEffect } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import * as Cesium from "cesium";
-import { AppProvider, useApp } from "../../context/AppContext";
+import { AppProvider, useApp, useTrainingCursor } from "../../context/AppContext";
 import { parseTrainingSample, trainingSelectionOf } from "../../data/trainingSample";
 import { VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
@@ -49,8 +49,10 @@ async function setup(position = 0, edit: (raw: any) => void = () => undefined, e
   const camera = { heading: 0, flyToBoundingSphere: vi.fn() };
   const viewer = { entities, scene: {}, camera, isDestroyed: () => false } as unknown as Cesium.Viewer;
   let app: ReturnType<typeof useApp>;
+  let cursor: ReturnType<typeof useTrainingCursor>;
   function Scene() {
     app = useApp();
+    cursor = useTrainingCursor();
     useTrainingTrackLayer();
     useLayoutEffect(() => {
       app.setViewer(viewer);
@@ -69,7 +71,8 @@ async function setup(position = 0, edit: (raw: any) => void = () => undefined, e
   };
   const css = (value: string, alpha = 1) => Cesium.Color.fromCssColorString(value).withAlpha(alpha);
   const shown = (id: string) => entities.getById(id)!.show;
-  return { ...view, entities, selection, sample: parsed.value, camera, colourOf, css, shown, app: () => app! };
+  return { ...view, entities, selection, sample: parsed.value, camera, colourOf, css, shown, app: () => app!,
+    cursor: () => cursor! };
 }
 
 const band = (name: RegExp) => screen.getByLabelText(name);
@@ -206,7 +209,7 @@ describe("Training envelopes in the 3D scene", () => {
     const scene = await setup();
     fireEvent.click(band(DESCEND_TO_LAND));
     const marker = scene.entities.getById(TRAINING_ENTITY.focusIssue);
-    act(() => scene.app().setTrainingCursorS(80));
+    act(() => scene.cursor().setTrainingCursorS(80));
     expect(scene.entities.getById(TRAINING_ENTITY.focusIssue)).toBe(marker);
   });
 

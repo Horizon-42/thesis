@@ -242,9 +242,6 @@ interface ApproachViewSessionState {
 interface TrainingSessionState {
   trainingSelection: TrainingSelection | null;
   setTrainingSelection: (selection: TrainingSelection | null) => void;
-  /** Flight-relative time shared by the sentence bar, the read-back charts and the 3D scene. */
-  trainingCursorS: number;
-  setTrainingCursorS: (atS: number) => void;
   /**
    * THE SELECTED WORD CLASS (a column), or null. What every view highlights is ONE word: this
    * column's word in force at the cursor — never the other columns' words at the same step, whose
@@ -361,6 +358,17 @@ interface WorkbenchUiState {
   setPilotTransport: (transport: PilotTransport | null) => void;
 }
 
+/**
+ * THE TRAINING CURSOR: flight-relative time shared by the sentence bar, the read-back charts and the 3D scene. It moves
+ * on every mousemove over a chart, so it is a context of its own that `useApp` does NOT read: only what draws the cursor
+ * (`useTrainingCursor`) re-renders when it moves, never the ~50 other consumers of `useApp` or the app shell. It belongs
+ * to the flight on screen and is reset with it (`trainingSelectionKey`).
+ */
+interface TrainingCursorState {
+  trainingCursorS: number;
+  setTrainingCursorS: (atS: number) => void;
+}
+
 interface AppState extends
   SceneState,
   AirportSessionState,
@@ -380,6 +388,7 @@ const ProcedureSessionContext = createContext<ProcedureSessionState | null>(null
 const PlaybackContext = createContext<PlaybackState | null>(null);
 const ApproachViewSessionContext = createContext<ApproachViewSessionState | null>(null);
 const TrainingSessionContext = createContext<TrainingSessionState | null>(null);
+const TrainingCursorContext = createContext<TrainingCursorState | null>(null);
 const WorkbenchUiContext = createContext<WorkbenchUiState | null>(null);
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -651,8 +660,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const trainingSessionState: TrainingSessionState = useMemo(() => ({
     trainingSelection,
     setTrainingSelection,
-    trainingCursorS,
-    setTrainingCursorS,
     trainingColumn,
     setTrainingColumn,
     trainingLayers,
@@ -668,9 +675,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrainingPick,
     trainingAutopilotAuto,
     setTrainingAutopilotAuto,
-  }), [trainingSelection, trainingCursorS, setTrainingCursorS, trainingColumn, trainingLayers, setTrainingLayer,
-    trainingExecutor, trainingPrior, trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick,
-    trainingAutopilotAuto]);
+  }), [trainingSelection, trainingColumn, trainingLayers, setTrainingLayer, trainingExecutor, trainingPrior,
+    trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick, trainingAutopilotAuto]);
+  const trainingCursorState: TrainingCursorState = useMemo(() => ({ trainingCursorS, setTrainingCursorS }),
+    [trainingCursorS, setTrainingCursorS]);
   const workbenchUiState: WorkbenchUiState = useMemo(() => ({
     mode,
     setMode,
@@ -695,7 +703,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
               <ApproachViewSessionContext.Provider value={approachViewSessionState}>
                 <TrainingSessionContext.Provider value={trainingSessionState}>
                   <WorkbenchUiContext.Provider value={workbenchUiState}>
-                    {children}
+                    <TrainingCursorContext.Provider value={trainingCursorState}>
+                      {children}
+                    </TrainingCursorContext.Provider>
                   </WorkbenchUiContext.Provider>
                 </TrainingSessionContext.Provider>
               </ApproachViewSessionContext.Provider>
@@ -748,4 +758,11 @@ export function useApp(): AppState {
     ...trainingSessionState,
     ...workbenchUiState,
   };
+}
+
+/** The Training cursor (`TrainingCursorState`): only for what draws it — the sentence bar and the 3D scene's leaf. */
+export function useTrainingCursor(): TrainingCursorState {
+  const cursor = useContext(TrainingCursorContext);
+  if (!cursor) throw new Error("useTrainingCursor() was called outside of <AppProvider>.");
+  return cursor;
 }

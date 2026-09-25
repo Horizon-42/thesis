@@ -14,7 +14,7 @@ const {
     activeAirportCode: "KXXX" as string,
     trainingLayers: { headingBands: true, corridor: true, vertical: true, candidates: true },
     // no word selected: the live executor asks for nothing
-    trainingSelection: null, trainingColumn: null, trainingCursorS: 0, trainingAutopilot: null, trainingPick: null,
+    trainingSelection: null, trainingColumn: null, trainingAutopilot: null, trainingPick: null,
     trainingAutopilotAuto: true,
   },
   setTrainingSelection: vi.fn(),

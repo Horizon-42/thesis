@@ -11,7 +11,7 @@ vi.mock("../../utils/fetchJson", () => ({
   fetchJson: vi.fn().mockResolvedValue({ defaultAirport: "KXXX", airports: [{ code: "KXXX", name: "Test field", lat: 35, lon: -78 }] }),
 }));
 
-import { AppProvider, useApp } from "../../context/AppContext";
+import { AppProvider, useApp, useTrainingCursor } from "../../context/AppContext";
 import useTrainingAutopilot from "../useTrainingAutopilot";
 import { nextPick } from "../../data/trainingAutopilot";
 import { parseTrainingSample, trainingSelectionOf } from "../../data/trainingSample";
@@ -30,8 +30,10 @@ describe("the live executor's pick", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
     let app!: ReturnType<typeof useApp>;
+    let cursor!: ReturnType<typeof useTrainingCursor>;
     function Harness() {
       app = useApp();
+      cursor = useTrainingCursor();
       useTrainingAutopilot("http://backend.test");
       return null;
     }
@@ -41,14 +43,14 @@ describe("the live executor's pick", () => {
     act(() => app.setTrainingPick(nextPick(null, "heading", 8)));
     await waitFor(() => expect(app.trainingAutopilot?.status).toBe("ready"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    act(() => app.setTrainingCursorS(40));
+    act(() => cursor.setTrainingCursorS(40));
 
     // another flight, then back: nothing picked, nothing flown, the cursor at the start
     act(() => app.setTrainingSelection(straight));
     act(() => app.setTrainingSelection(vectored));
     expect(app.trainingPick).toBeNull();
     expect(app.trainingAutopilot).toBeNull();
-    expect(app.trainingCursorS).toBe(0);
+    expect(cursor.trainingCursorS).toBe(0);
     // another set with the same flight key
     act(() => app.setTrainingPick(nextPick(null, "heading", 8)));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));

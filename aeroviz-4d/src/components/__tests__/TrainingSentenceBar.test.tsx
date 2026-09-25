@@ -24,9 +24,12 @@ vi.mock("../../context/AppContext", async () => {
   const { useState } = await import("react");
   return {
     useApp: () => {
-      const [trainingCursorS, setTrainingCursorS] = useState(0);
       const [trainingColumn, setTrainingColumn] = useState<string | null>(null);
-      return { ...appState, trainingCursorS, setTrainingCursorS, trainingColumn, setTrainingColumn, setTrainingPick };
+      return { ...appState, trainingColumn, setTrainingColumn, setTrainingPick };
+    },
+    useTrainingCursor: () => {
+      const [trainingCursorS, setTrainingCursorS] = useState(0);
+      return { trainingCursorS, setTrainingCursorS };
     },
   };
 });
