@@ -1,5 +1,57 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-25 — code-health-followups：不影响训练的问题全部修掉（多个 package）
+
+分支 `dev-followups-no-training`（worktree），每个 package 一组提交、一次 opus 审查，审查意见随后修掉；
+逐条状态见 `docs/code-health-followups.md` 开头的表。
+**训练链的代码身份没动**：执行器源码哈希 `d3ff8929…`、标注器源码哈希 `55f6f0bc…` 每组提交后都核对过，冻结文件（`autopilot/`、
+标注器、`dataset.py` 等）一个字节没改；`build_series` 的输出不变（`intent_conditioning` 改动在全部 115,224 个航班上核对过）。
+没有重跑任何评估、harvest 或导出，磁盘上的产物一个没改。
+
+- **trajectory_data_process（harvest）**：UTC 格式只定义一次（`harvest/utc.py`）；`source_event_availability` 先校验清单、
+  再只做计数（10 份清单结果不变）；CZML 截尾从最近的支撑样本开始、按记录的梯形规则计时，去掉静默的 70 m/s；
+  `GROUND_START_AGL_M` 的注释按 v7 重新测量（"空带"已不空：直升机和低飞轻型机两侧都有）；`--rerender-czml` 拒绝试验性的
+  过滤策略；落地筛选的来源记录全部字段；被杀掉的 harvest 留下的暂存目录每次运行都列出、只由 `--remove-staging-leftovers`
+  删除（`tracks/` 缺失时绝不删它的备份）；观测记录的 HAE→MSL 走 `flight_to_msl`（1,500 条真实记录逐字节一致）、
+  `source.id` 与 `flight_key` 用同一个写法、质量来源标签写明来自哪一个动力学模型。
+- **flight_scenarios**：垂直基准文档写明实际运行的是跑道 CIFP 偏差而不是 EGM96，删掉没人用的 `waypoints_to_msl` 与前端的
+  `vertical_datum.py`；阈值目标建不出来时拒绝，而不是悄悄用航迹终点；`fitted_approach` 的偏差参数必填、程序阈值没有标高时
+  写 None 而不是 0；`scene_context`：落地时刻在 t₀ 之前的航班算"已落地"而不是邻机（它会以 ETA≈0 被当成前机）、远离跑道的
+  邻机没有 ETA、同一时刻两个样本直接拒绝，补了三条缺的测试；FS7–FS9 写进 `population_reference.md`。
+- **evaluation**：报告的 `methodology.event` 写明观测记录的 `final_time_s` 是最后一个实测样本、不是过线时刻；
+  `THRESHOLD_SPEED_GATE.md` 去掉 AC 91-79B 里并不存在的 "+5/−0 kt"（原文 §5.2.2 已核对）。
+- **4dTrajectory/optimization**：`summary_row` 的身份字段必填、`callsign` 可选且不写 null；参考记录按 `flight_key` 查找；
+  numpy 2 的测试与 `arr_airport` 夹具修好——优化器测试 162/162 全过。
+- **aircraft / aerodynamic_model**：记录反查飞机用它自己的 `dynamics_source`（未知标签直接拒绝）；lag 内核的 `chart_scale`
+  必填（唯一的生产调用方一直传它）。OpenAP 缓存的 schema 核对（#21）本分支做过又撤回：`dev-training-followups`（`dcbf6388`，
+  随重建合并）在同样三个文件里做了同一件事，留给它，免得合并时冲突。
+- **ts_transformer（不含冻结文件与 dev-post-train 的文件）**：
+  - Training 文件的结构与检查独立成 `instructions/training_files.py`（不是 runner、不依赖 torch、只抛 `ValueError`），
+    四个导出器（含上游新加的 `prior_generation_training_export`，变基时一并改过来）和后端共用；清单只在"仍是开头读到的样子"时改写，所有机场先核对再写；"重读得到的就是存储的句子"只有一种写法；
+    `sample.json` 紧凑写出；先验第一预测步的真值有了导出侧测试。
+  - 三个消融 runner 拒绝已存在的输出目录；删掉两个没人调用的损失函数；`pipeline` 的两个参数名与 `TSConfig` 字段一致；
+    `EXPERIMENTS_MAIN` 进 `repo_layout`；runner 不再导入 `docs/` 脚本（`inference/arm_readout.py`）；15 个测试文件去掉多余的
+    `sys.path` 前导。
+  - `dynamics_batch` 公开，`predictability_report` 与 `clock_attribution` 不再各留一份；`--batch-size auto` 的探测把"未来"
+    交给潜变量模型（原来会直接报错）；`cli/predict.py` 六处记录生成合为一处。
+  - 拦截器与长号机动共用一个倾角反解（`outputs/constraints/turning.py`）：长号逐位不变；拦截器的倾角逐位不变，
+    它没动倾角的行负载系数也不再动（原来最多差 1 ULP；已发表的 `control_hooks_v2_20260906` 没重跑）。
+  - 锚点门限调用 `stall_speed_ms`（20 万组逐位一致）；宽度研究按检查点记录的摘要找回它训练用的 harvest；两种"真值终点"在
+    读取处写明。
+- **全量测试**（`run_all_tests.sh`，变基到当前 `dev-two-tier` 之后）：2,452 + 158 条通过，两组都退出 0。第一次跑出两条失败，
+  都已修掉——`test_channel_contract` 的合成航班没有机场也没有公布的跑道
+  目标，场景构建器现在拒绝找不到的阈值（原来悄悄用航迹终点），测试改为带上公布的目标，仍然检验机场坐标系需要到达机场；
+  `test_reclassify` 比较串行与并行的清单时把写入时刻（整秒）也当成了内容，跨秒就失败（本分支之前就会）。
+- **根目录**：`run_all_tests.sh` 不再有已知失败，退出码重新有意义；`open-items.md` 与 ts README 不再把已归档的名义律 hook、
+  教师链模块表当作现行的。
+- **没修的（写进 `docs/code-health-followups.md` 状态表）**：冻结文件里的（§17、#15h、§20 的 flyability、§34、§37、§39、§38
+  的冻结部分、#13 的 `dataset.py` 部分、`autopilot/replay.draw` 自己的句子比对）、会改变 `build_series` 的（§20、#10、#14）、
+  下次下载才会变的 harvest 输出（#1–#4、#6）、需要重新导出或重新发布的（Training 审查 5、6，§21，#9、#11）、需要用户决定或
+  外部数据的（§15 KRDU 14、`lead_landings`、§23、`build_runway_config.py`、60 t 的观测质量回退、#15e 训练运行是否记录
+  `usable_series` 剔除的航班）。新发现并记录的：Training 视图用 EGM96 把执行器/观测轨迹换回椭球高（比跑道 CIFP 偏差低约
+  1.5 m）；`evaluation.metrics.READABLE_REPORT_SCHEMA_VERSIONS` 同时读 v6–v9（ts 的横向资格名单在用，属于训练数据面）；
+  `ts docs/reference/runners.md:260` 还说共用函数在 `instruction_training_export`（dev-post-train 的文件，没改）。
+
 ### 2026-09-26 — Training：左栏不再被句子条盖住；模型自己说的句子上了前端
 
 分支 `dev-training-sentences`（工作树 `.claude/worktrees/training-sentences`，从 `dev-two-tier` `7e1b45f9` 分出），用户合并。
