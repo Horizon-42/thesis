@@ -29,7 +29,7 @@ from ts_transformer.prior.data import (
 )
 from ts_transformer.prior.model import EDGE_FEATURES, Prior, PriorConfig, asked_entries, self_edges
 from ts_transformer.prior.readout import Baselines, runway_breakdown
-from ts_transformer.prior.scene import CONTEXT_WINDOW_S, N_LOOK, Landings, utc_s
+from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 from ts_transformer.prior.train import column_nll
 from ts_transformer.tests.support import (
     fixture_days, fly_legs, instruction_airport, instruction_flight, instruction_spec as spec, landing_on,
@@ -400,6 +400,73 @@ def test_the_runway_breakdown_reads_direction_then_side():
     assert out["by_establishment"] == {"established": {"flights": 2, "top1": 0.5},
                                        "not established": {"flights": 2, "top1": 0.5}}
     assert out["direction_by_establishment"]["not established"]["top1"] == 0.5
+
+
+def test_a_speaker_builds_the_rows_training_builds_from_the_same_positions_and_words():
+    """`prior.generate.Speaker`, given the observed positions row by row, feeds the model exactly the rows
+    `data.flight_steps` builds from those positions and the words it said (its first step as row 0's words)."""
+    from ts_transformer.prior.generate import Speaker
+
+    rows = ROWS + 6
+    signals, geometry = _signals(rows), _two_runways()
+    clock = utc_s(signals.entry_time_utc) + signals.time_s[:rows]
+    landings = _landings(times_09=[clock[0] - 60.0, clock[N_LOOK + 3]], times_27=[clock[2]])
+    model = _model(slots=3, valid=2)
+    speaker = Speaker(model, [signals], [geometry], {"KXXX": landings}, Words(spec()), max_rows=rows,
+                      generator=torch.Generator().manual_seed(0))
+    on, off = np.array([True]), np.array([False])
+    with pytest.raises(ValueError, match="after the first predicted step was said"):
+        speaker.append(signals.e_m[[N_LOOK + 1]], signals.n_m[[N_LOOK + 1]], signals.altitude_m[[N_LOOK + 1]], off)
+    said = [speaker.speak(on, off)[0]]
+    assert (said[0] > 0).all()                                           # the first predicted step says every column
+    for t in range(N_LOOK + 1, rows):
+        speaker.append(signals.e_m[[t]], signals.n_m[[t]], signals.altitude_m[[t]], off)
+        said.append(speaker.speak(on, off)[0])
+    grid = np.full((rows, 6), UNCHANGED, dtype=np.int64)
+    grid[0] = said[0] - 1
+    grid[N_LOOK + 1:] = np.where(np.array(said[1:]) > 0, np.array(said[1:]) - 1, UNCHANGED)
+    features, relative, _, in_force, since, _ = flight_steps(signals, grid, geometry, landings)
+    assert np.allclose(speaker.features[0, 0, :rows].numpy(), features, atol=1e-6)
+    assert np.allclose(speaker.relative[0, 0, :rows, :2].numpy(), relative, atol=1e-6)
+    assert (speaker.relative[0, 0, :rows, 2:] == 0).all()                # the model's empty slot
+    assert np.array_equal(speaker.in_force[0, 0, :rows].numpy(), in_force)
+    assert np.allclose(speaker.since[0, 0, :rows].numpy(), since, atol=1e-6)
+    # the same seed says the same words
+    again = Speaker(model, [signals], [geometry], {"KXXX": landings}, Words(spec()), max_rows=rows,
+                    generator=torch.Generator().manual_seed(0))
+    assert np.array_equal(again.speak(on, off)[0], said[0])
+    with pytest.raises(ValueError, match="landing context given disagree"):
+        Speaker(model, [signals], [geometry], None, Words(spec()), max_rows=rows, generator=torch.Generator())
+
+
+def test_a_speaker_keeps_a_locked_runway_says_nothing_when_done_and_freezes_a_finished_flight():
+    """The runway column: never the runway in force again, no other where the listener locks it; an inactive flight says
+    nothing; a frozen flight's row repeats its last position (its state may be non-finite)."""
+    from ts_transformer.prior.generate import Speaker
+
+    rows = ROWS + 40
+    signals, geometry = _signals(rows), _two_runways()
+    model = _model(variant="no-context", slots=3, valid=2)
+    speaker = Speaker(model, [signals] * 8, [geometry] * 8, None, Words(spec()), max_rows=rows + 1,
+                      generator=torch.Generator().manual_seed(1))
+    active, locked = np.ones(8, dtype=bool), np.arange(8) < 4
+    speaker.speak(active, np.zeros(8, dtype=bool))
+    changed = False
+    for t in range(N_LOOK + 1, rows):
+        before = speaker.value[:, RUNWAY].copy()
+        speaker.append(signals.e_m[[t] * 8], signals.n_m[[t] * 8], signals.altitude_m[[t] * 8], np.zeros(8, dtype=bool))
+        said = speaker.speak(active, locked)
+        assert (said[locked, RUNWAY] == 0).all()                         # locked: no runway word at all
+        assert not ((said[:, RUNWAY] > 0) & (said[:, RUNWAY] == before)).any()   # never the one in force again
+        changed |= bool((said[~locked, RUNWAY] > 0).any())
+    assert changed                                   # the untrained model does change runways where it may
+    assert all(mass[locked].min() > 0 for mass in speaker.forbidden[RUNWAY][1:])   # what the lock removed, recorded
+    # done: says nothing, its row frozen at its last position whatever the listener reports
+    done = np.arange(8) == 0
+    speaker.append(np.full(8, np.nan), np.full(8, np.nan), np.full(8, np.nan), np.ones(8, dtype=bool))
+    said = speaker.speak(~done, np.zeros(8, dtype=bool))
+    assert (said[0] == 0).all()
+    assert np.isfinite(speaker.e[:, speaker.rows - 1]).all() and speaker.e[0, speaker.rows - 1] == speaker.e[0, speaker.rows - 2]
 
 
 # ---- the runners end to end, on a synthetic artefact (every write in tmp_path)

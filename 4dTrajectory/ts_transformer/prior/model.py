@@ -73,6 +73,11 @@ def asked_entries(present: torch.Tensor) -> torch.Tensor:
     return present & (rows >= N_LOOK)
 
 
+def first_step_rows(rows: int, device: torch.device) -> torch.Tensor:
+    """``[rows]`` bool: the row that is the first predicted step (`N_LOOK`), of rows 0 … rows − 1."""
+    return torch.arange(rows, device=device) == N_LOOK
+
+
 def self_edges(batch: int, aircraft: int, rows: int, device: torch.device) -> torch.Tensor:
     """``[B, T, A, A, len(EDGE_FEATURES)]`` of scenes with no relation but each aircraft's to itself."""
     eye = torch.eye(aircraft, device=device)[None, None, :, :, None]
@@ -193,12 +198,12 @@ class Prior(nn.Module):
         said = tokens.gather(3, index)[..., 0, :]
         return torch.where(pointer[..., None] > 0, project(said), none)
 
-    def logits(self, h: torch.Tensor, tokens: torch.Tensor, valid: torch.Tensor, chosen: torch.Tensor
-               ) -> list[torch.Tensor]:
-        """Six logits tensors ``[B, A, T, classes]``; ``chosen`` [B, A, T, 6] are the classes the columns choose at
-        each step (the truth in teacher forcing), read by the later columns' heads when the heads are ordered."""
-        rows = h.shape[2]
-        first = torch.arange(rows, device=h.device) == N_LOOK                    # the first predicted step
+    def logits(self, h: torch.Tensor, tokens: torch.Tensor, valid: torch.Tensor, chosen: torch.Tensor,
+               first: torch.Tensor) -> list[torch.Tensor]:
+        """Six logits tensors ``[B, A, T, classes]`` of the rows of ``h`` (``[B, A, T, d]``); ``chosen`` [B, A, T, 6]
+        are the classes the columns choose at each step (the truth in teacher forcing, the ones already sampled when
+        the prior speaks), read by the later columns' heads when the heads are ordered; ``first`` [T] bool: which rows
+        are the first predicted step (`first_step_rows`), where "unchanged" is masked."""
         out, g = [], h
         for c, name in enumerate(COLUMNS):
             if c == RUNWAY:
@@ -225,4 +230,4 @@ class Prior(nn.Module):
         ``in_force`` / ``chosen`` [B, A, T, 6] long, ``since`` [B, A, T, 6], ``airport`` [B] long, ``present``
         [B, A, T] bool, ``edges`` [B, T, A, A, E] → six logits tensors [B, A, T, classes]."""
         h, tokens, valid = self.encode(features, relative, static, in_force, since, airport, present, edges)
-        return self.logits(h, tokens, valid, chosen)
+        return self.logits(h, tokens, valid, chosen, first_step_rows(h.shape[2], h.device))

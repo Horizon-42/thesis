@@ -94,6 +94,12 @@ class Executor:
         """The batch's state at the start of the next cycle."""
         return read_state(self.state, self.charts)
 
+    @property
+    def runway_locked(self) -> torch.Tensor:
+        """``[B]`` bool: flights whose runway pointer may not change now — cleared since the last go-around, or captured
+        (executor design §4.6; `Lateral.rate` refuses the change) — for a speaker that must not say it."""
+        return self.lateral.cleared | self.lateral.captured
+
     def cycle(self, force: WordsNow, sentence_s: torch.Tensor) -> None:
         """Fly one cycle under the words ``force``, at sentence time ``sentence_s`` (recorded)."""
         params, cycle = self.params, self.count

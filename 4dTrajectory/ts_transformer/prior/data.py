@@ -158,50 +158,63 @@ def entry_sector(signals: FlightSignals, geometry: AirportGeometry) -> int:
     return int(bearing // (360.0 / ENTRY_SECTORS)) % ENTRY_SECTORS
 
 
-def _past_motion(signals: FlightSignals, n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """``(ground speed, direction of motion (compass degrees), vertical rate, first row)`` of rows ``0..n-1`` from
-    the displacement since the row before; row 0 has none (zeros, flag 1)."""
-    dt = np.diff(signals.time_s[:n])
-    de, dn = np.diff(signals.e_m[:n]), np.diff(signals.n_m[:n])
-    speed = np.concatenate(([0.0], np.hypot(de, dn) / dt))
-    direction = np.concatenate(([0.0], np.degrees(np.arctan2(de, dn))))
-    climb = np.concatenate(([0.0], np.diff(signals.altitude_m[:n]) / dt))
-    first = np.zeros(n)
-    first[0] = 1.0
-    return speed, direction, climb, first
+def _motion(e: np.ndarray, north: np.ndarray, height: np.ndarray, time_s: np.ndarray
+            ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(ground speed, direction of motion (compass degrees), vertical rate)`` of each row from the displacement since
+    the row before; the first row given has none (zeros)."""
+    dt = np.diff(time_s)
+    de, dn = np.diff(e), np.diff(north)
+    return (np.concatenate(([0.0], np.hypot(de, dn) / dt)), np.concatenate(([0.0], np.degrees(np.arctan2(de, dn)))),
+            np.concatenate(([0.0], np.diff(height) / dt)))
 
 
-def step_inputs(signals: FlightSignals, n: int, geometry: AirportGeometry, landings: Landings | None
-                ) -> tuple[np.ndarray, np.ndarray]:
-    """``(features [n, step], relative [n, K, relative])`` of the first ``n`` rows of ``signals``; the landing context
-    when ``landings`` is given (the variant has it) — the airport's landings less the flight's own."""
-    e, north, height = signals.e_m[:n], signals.n_m[:n], signals.altitude_m[:n]
-    speed, motion, climb, first = _past_motion(signals, n)
+def row_inputs(e: np.ndarray, north: np.ndarray, height: np.ndarray, time_s: np.ndarray, entry_s: float, first: int,
+               geometry: AirportGeometry, context: Landings | None) -> tuple[np.ndarray, np.ndarray]:
+    """``(features [m − first, step], relative [m − first, K, relative])`` of rows ``first … m − 1`` of a flight whose
+    positions so far are ``e``, ``north``, ``height`` at ``time_s`` (rows 0 … m − 1; ``entry_s``: the epoch time of
+    row 0). A row reads itself and the row before it (its motion), and the landings before its time — so rows can be
+    added one at a time, as the prior speaks (`prior.generate`), and come out as the whole flight's. ``context``: the
+    flight's landing context, its own landing already left out (`flight_steps`); None for a variant without it."""
+    low, origin = max(first - 1, 0), time_s[0]
+    e, north, height, time_s = e[low:], north[low:], height[low:], time_s[low:]
+    speed, motion, climb = _motion(e, north, height, time_s)
+    flag = (np.arange(low, low + len(e)) == 0).astype(np.float64)       # row 0 has no row before it
     radians = np.radians(motion)
     features = np.column_stack([e / POSITION_SCALE_M, north / POSITION_SCALE_M, height / HEIGHT_SCALE_M,
-                                (signals.time_s[:n] - signals.time_s[0]) / TIME_SCALE_S,
-                                speed / SPEED_SCALE_MPS, np.sin(radians) * (1.0 - first),
-                                np.cos(radians) * (1.0 - first), climb / VERTICAL_RATE_SCALE_MPS, first])
-    clock = utc_s(signals.entry_time_utc) + signals.time_s[:n]
-    if landings is not None:
-        landings = landings.without(utc_s(signals.landing_time_utc), signals.runway)
-    width = len(RELATIVE_FEATURES) + (len(CONTEXT_FEATURES) if landings is not None else 0)
-    relative = np.zeros((n, len(geometry.candidates), width))
+                                (time_s - origin) / TIME_SCALE_S, speed / SPEED_SCALE_MPS, np.sin(radians) * (1.0 - flag),
+                                np.cos(radians) * (1.0 - flag), climb / VERTICAL_RATE_SCALE_MPS, flag])
+    clock = entry_s + time_s
+    width = len(RELATIVE_FEATURES) + (len(CONTEXT_FEATURES) if context is not None else 0)
+    relative = np.zeros((len(e), len(geometry.candidates), width))
     for k, candidate in enumerate(geometry.candidates):
         place = relative_to_runway(e, north, motion, height, candidate)
         off = np.radians(place.track_minus_course_deg)
         parts = [np.arcsinh(place.before_threshold_m / RELATIVE_SCALE_M),
                  np.arcsinh(place.right_of_course_m / RELATIVE_SCALE_M),
                  place.height_above_threshold_m / HEIGHT_SCALE_M,
-                 np.sin(off) * (1.0 - first), np.cos(off) * (1.0 - first), first]
-        if landings is not None:
-            since = landings.since_last(clock, candidate.ident)
+                 np.sin(off) * (1.0 - flag), np.cos(off) * (1.0 - flag), flag]
+        if context is not None:
+            since = context.since_last(clock, candidate.ident)
             none = np.isnan(since)
-            parts += [np.log1p(landings.count_before(clock, CONTEXT_WINDOW_S, candidate.ident)),
+            parts += [np.log1p(context.count_before(clock, CONTEXT_WINDOW_S, candidate.ident)),
                       np.where(none, 0.0, np.log1p(np.nan_to_num(since) / 60.0) / LANDING_SINCE_SCALE),
                       none.astype(np.float64)]
         relative[:, k] = np.column_stack(parts)
-    return features.astype(np.float32), relative.astype(np.float32)
+    keep = slice(first - low, None)
+    return features[keep].astype(np.float32), relative[keep].astype(np.float32)
+
+
+def step_inputs(signals: FlightSignals, n: int, geometry: AirportGeometry, context: Landings | None
+                ) -> tuple[np.ndarray, np.ndarray]:
+    """`row_inputs` of the first ``n`` rows of ``signals``."""
+    return row_inputs(signals.e_m[:n], signals.n_m[:n], signals.altitude_m[:n], signals.time_s[:n],
+                      utc_s(signals.entry_time_utc), 0, geometry, context)
+
+
+def own_context(signals: FlightSignals, landings: Landings) -> Landings:
+    """The airport's landings less the flight's own: a flight never counts its own landing (the roster's landing time is
+    whole seconds, and a sentence's last rows can fall after it)."""
+    return landings.without(utc_s(signals.landing_time_utc), signals.runway)
 
 
 def sentence_steps(grid: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -230,10 +243,12 @@ def sentence_steps(grid: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray
 def flight_steps(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeometry, landings: Landings | None
                  ) -> tuple[np.ndarray, ...]:
     """``(features, relative, static, in_force, since, targets)`` of one flight's sentence ``grid`` over its signals'
-    first ``len(grid)`` rows."""
+    first ``len(grid)`` rows; ``landings``: the airport's landing context (its own left out here), None for a variant
+    without it."""
     if signals.airport != geometry.code:
         raise ValueError(f"{signals.dataset_id} lands at {signals.airport}, not {geometry.code}")
-    features, relative = step_inputs(signals, len(grid), geometry, landings)
+    context = own_context(signals, landings) if landings is not None else None
+    features, relative = step_inputs(signals, len(grid), geometry, context)
     return (features, relative, np.zeros(len(STATIC_FEATURES), dtype=np.float32), *sentence_steps(grid))
 
 
@@ -243,7 +258,8 @@ def flight_record(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeo
     readout need — the first predicted step's time, the entry sector, the past direction of motion there, whether the
     labeller's capture row (the final corridor to the end) is at or before it."""
     steps = flight_steps(signals, grid, geometry, landings)
-    _, motion, _, _ = _past_motion(signals, N_LOOK + 1)
+    _, motion, _ = _motion(signals.e_m[: N_LOOK + 1], signals.n_m[: N_LOOK + 1], signals.altitude_m[: N_LOOK + 1],
+                           signals.time_s[: N_LOOK + 1])
     return Flight(signals.dataset_id, airport, *steps,
                   first_step_s=utc_s(signals.entry_time_utc) + float(signals.time_s[N_LOOK]),
                   sector=entry_sector(signals, geometry), course_deg=float(motion[N_LOOK]) % 360.0,
