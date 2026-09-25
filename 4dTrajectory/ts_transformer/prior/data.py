@@ -26,7 +26,9 @@ A flight's row ``t`` (2 s) gives the model only what a controller could know bef
 
 and asks for the step's six words (``targets``: 0 = unchanged, else the word + 1) from row ``N_LOOK`` on: at the
 first predicted step every column's word in force there (none may be "unchanged": the model masks it), after it the
-sentence's words as written.
+sentence's words as written. ``asked`` says which of them the loss counts: every column from row ``N_LOOK`` on for a
+labelled flight; a closed-loop chain (design §9.2, `chain_record`) leaves out the columns `prior.relabel` could not
+ask for.
 """
 
 from __future__ import annotations
@@ -101,7 +103,8 @@ class Flight:
     static: np.ndarray         # [len(STATIC_FEATURES)] float32
     in_force: np.ndarray       # [N, 6] int16
     since: np.ndarray          # [N, 6] float32
-    targets: np.ndarray        # [N, 6] int16; rows before N_LOOK are never asked
+    targets: np.ndarray        # [N, 6] int16; the heads read the earlier columns' (teacher forcing)
+    asked: np.ndarray          # [N, 6] bool: the targets the loss counts (never a row before N_LOOK)
     #: For the runway rules at the first predicted step (§8): its time (epoch seconds), the entry sector the flight
     #: came in from (its row 0), its past direction of motion (compass degrees).
     first_step_s: float
@@ -217,17 +220,29 @@ def own_context(signals: FlightSignals, landings: Landings) -> Landings:
     return landings.without(utc_s(signals.landing_time_utc), signals.runway)
 
 
+def issued_rows(grid: np.ndarray) -> np.ndarray:
+    """The row each row's word in force was said at (``grid``'s step 0 writes every column)."""
+    if (grid[0] == UNCHANGED).any():
+        raise ValueError("step 0 does not write every column")
+    rows = np.arange(len(grid))[:, None]
+    return np.maximum.accumulate(np.where(grid != UNCHANGED, rows, 0), axis=0)
+
+
+def in_force_words(grid: np.ndarray) -> np.ndarray:
+    """``[N, 6]``: the word in force at each row of a sentence (``[N, 6]``, step 0 writing every column)."""
+    grid = np.asarray(grid, dtype=np.int64)
+    return np.take_along_axis(grid, issued_rows(grid), axis=0)
+
+
 def sentence_steps(grid: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(in_force, since, targets)`` of one sentence (``[N, 6]``, the artefact's words; N > `N_LOOK`)."""
     n = len(grid)
     if n <= N_LOOK:
         raise ValueError(f"a sentence of {n} rows has no predicted step (N_LOOK = {N_LOOK})")
     grid = grid.astype(np.int64)
-    if (grid[0] == UNCHANGED).any():
-        raise ValueError("step 0 does not write every column")
     written = grid != UNCHANGED
     rows = np.arange(n)[:, None]
-    issued = np.maximum.accumulate(np.where(written, rows, 0), axis=0)   # the row each row's word in force was said
+    issued = issued_rows(grid)
     filled = np.take_along_axis(grid, issued, axis=0)                    # the word in force at each row
     targets = np.zeros((n, 6), dtype=np.int16)
     targets[N_LOOK] = filled[N_LOOK] + 1                                 # the first predicted step says them all
@@ -252,18 +267,56 @@ def flight_steps(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeom
     return (features, relative, np.zeros(len(STATIC_FEATURES), dtype=np.float32), *sentence_steps(grid))
 
 
-def flight_record(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeometry, landings: Landings | None,
-                  airport: int, capture_row: int) -> Flight:
-    """One labelled flight as the prior reads it: its steps (`flight_steps`), and what the runway rules and the
-    readout need — the first predicted step's time, the entry sector, the past direction of motion there, whether the
-    labeller's capture row (the final corridor to the end) is at or before it."""
-    steps = flight_steps(signals, grid, geometry, landings)
+def _first_step(signals: FlightSignals, geometry: AirportGeometry, capture_row: int) -> dict[str, float | int | bool]:
+    """What the runway rules and the readout need of a flight (`Flight`): the first predicted step's time, the entry
+    sector, the past direction of motion there, whether the labeller's capture row (the final corridor to the end) is
+    at or before it — all observed."""
     _, motion, _ = _motion(signals.e_m[: N_LOOK + 1], signals.n_m[: N_LOOK + 1], signals.altitude_m[: N_LOOK + 1],
                            signals.time_s[: N_LOOK + 1])
-    return Flight(signals.dataset_id, airport, *steps,
-                  first_step_s=utc_s(signals.entry_time_utc) + float(signals.time_s[N_LOOK]),
-                  sector=entry_sector(signals, geometry), course_deg=float(motion[N_LOOK]) % 360.0,
-                  established=bool(capture_row <= N_LOOK))
+    return {"first_step_s": utc_s(signals.entry_time_utc) + float(signals.time_s[N_LOOK]),
+            "sector": entry_sector(signals, geometry), "course_deg": float(motion[N_LOOK]) % 360.0,
+            "established": bool(capture_row <= N_LOOK)}
+
+
+def _asked_from_first_step(rows: int) -> np.ndarray:
+    asked = np.zeros((rows, 6), dtype=bool)
+    asked[N_LOOK:] = True
+    return asked
+
+
+def flight_record(signals: FlightSignals, grid: np.ndarray, geometry: AirportGeometry, landings: Landings | None,
+                  airport: int, capture_row: int) -> Flight:
+    """One labelled flight as the prior reads it: its steps (`flight_steps`), every column asked from the first
+    predicted step on, and what the runway rules and the readout need (`_first_step`)."""
+    features, relative, static, in_force, since, targets = flight_steps(signals, grid, geometry, landings)
+    return Flight(signals.dataset_id, airport, features, relative, static, in_force, since, targets,
+                  _asked_from_first_step(len(grid)), **_first_step(signals, geometry, capture_row))
+
+
+def chain_record(signals: FlightSignals, e: np.ndarray, north: np.ndarray, height: np.ndarray, said: np.ndarray,
+                 classes: np.ndarray, asked: np.ndarray, geometry: AirportGeometry, landings: Landings | None,
+                 airport: int, capture_row: int, step_s: float) -> Flight:
+    """One closed-loop chain (design §9.2) as the prior reads it: the rows it read — the positions ``e``, ``north``,
+    ``height`` (``[N_LOOK + steps]``: observed to the first predicted step, then where the executor flew), on the
+    vocabulary's step from row 0, and the words the chain said (``said``, ``[steps, 6]`` from row `N_LOOK`) as the
+    words said so far — and the targets `prior.relabel` read for its steps (``classes``, ``asked``). The same rows a
+    speaker (`prior.generate.Speaker`) built as it spoke on the chain."""
+    rows = N_LOOK + len(said)
+    if not (len(e) == len(north) == len(height) == rows and classes.shape == asked.shape == said.shape):
+        raise ValueError(f"{signals.dataset_id}: a chain of {len(said)} steps has {len(e)} rows and targets "
+                         f"{classes.shape}")
+    context = own_context(signals, landings) if landings is not None else None
+    features, relative = row_inputs(e, north, height, np.arange(rows) * step_s, utc_s(signals.entry_time_utc), 0,
+                                    geometry, context)
+    grid = np.full((rows, 6), UNCHANGED, dtype=np.int64)
+    grid[0], grid[N_LOOK:] = said[0], said                   # the prior said its first step at row N_LOOK
+    in_force, since, _ = sentence_steps(grid)
+    targets = np.zeros((rows, 6), dtype=np.int16)
+    targets[N_LOOK:] = classes
+    mask = np.zeros((rows, 6), dtype=bool)
+    mask[N_LOOK:] = asked
+    return Flight(signals.dataset_id, airport, features, relative, np.zeros(len(STATIC_FEATURES), dtype=np.float32),
+                  in_force, since, targets, mask, **_first_step(signals, geometry, capture_row))
 
 
 def airport_landings(directory: Path, tracks: Mapping[str, Path]) -> dict[str, Landings]:

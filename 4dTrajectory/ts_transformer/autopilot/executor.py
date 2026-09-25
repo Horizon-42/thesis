@@ -66,6 +66,12 @@ class Executor:
     interleaves it with the speaker (the prior says a step's words, the executor flies the step). The words of a cycle
     are given to `cycle`; everything else — the laws' state, the bank, what is recorded — lives here."""
 
+    #: What `take` keeps per flight: the tensors (`PER_FLIGHT`), the flights' context (`CONTEXT`, each with its own
+    #: `take`), the laws' state, and the records (`HISTORIES`, one entry per cycle).
+    PER_FLIGHT = ("time_limit_s", "state", "bank", "done", "done_cycle")
+    CONTEXT = ("inputs", "runways", "charts")
+    HISTORIES = ("states", "commands", "wanted", "limits", "modes", "sentence_times")
+
     def __init__(self, inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
                  params: ExecutorParams, words: Words, *, time_limit_s: torch.Tensor) -> None:
         spec = words.spec
@@ -99,6 +105,25 @@ class Executor:
         """``[B]`` bool: flights whose runway pointer may not change now — cleared since the last go-around, or captured
         (executor design §4.6; `Lateral.rate` refuses the change) — for a speaker that must not say it."""
         return self.lateral.cleared | self.lateral.captured
+
+    def take(self, index: torch.Tensor) -> None:
+        """Keep the flights at ``index`` — a closed loop's branches: a flight taken twice flies on as two copies of
+        itself, each copy the flight it was taken from in every respect (its laws' state and its records too)."""
+        for name in self.PER_FLIGHT:
+            setattr(self, name, getattr(self, name)[index])
+        for name in self.CONTEXT:
+            setattr(self, name, getattr(self, name).take(index))
+        self.plant = Plant(self.inputs)
+        for law in (self.lateral, self.vertical, self.speed):
+            law.take(index)
+
+        def taken(rows: list[torch.Tensor]) -> list[torch.Tensor]:
+            return list(torch.stack(rows, dim=1)[index].unbind(dim=1)) if rows else []
+
+        self.states, self.commands, self.wanted, self.sentence_times = map(
+            taken, (self.states, self.commands, self.wanted, self.sentence_times))
+        self.limits = {name: taken(rows) for name, rows in self.limits.items()}
+        self.modes = {name: taken(rows) for name, rows in self.modes.items()}
 
     def cycle(self, force: WordsNow, sentence_s: torch.Tensor) -> None:
         """Fly one cycle under the words ``force``, at sentence time ``sentence_s`` (recorded)."""

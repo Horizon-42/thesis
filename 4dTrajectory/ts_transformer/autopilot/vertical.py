@@ -56,6 +56,9 @@ TUBE_MARGIN_SHARE = 0.5
 class Vertical:
     """The batch's vertical state (which target it has captured) and law."""
 
+    #: The state kept per flight (`take`).
+    PER_FLIGHT = ("captured", "issued", "left_tube", "flown_m", "anchor_m", "anchor_height_m")
+
     def __init__(self, batch: int, params: ExecutorParams, words: Words, device: torch.device) -> None:
         spec = words.spec
         self.params, self.words = params, words
@@ -77,6 +80,11 @@ class Vertical:
         self.flown_m = torch.zeros(batch, dtype=torch.float64, device=device)
         self.anchor_m = torch.zeros(batch, dtype=torch.float64, device=device)
         self.anchor_height_m = torch.full((batch,), math.nan, dtype=torch.float64, device=device)
+
+    def take(self, index: torch.Tensor) -> None:
+        """Keep the flights at ``index`` (a closed loop's branches, `Executor.take`)."""
+        for name in self.PER_FLIGHT:
+            setattr(self, name, getattr(self, name)[index])
 
     def rate_limit(self, state: Kinematics) -> torch.Tensor:
         """γ̇_max, rad/s, at each flight's airspeed."""

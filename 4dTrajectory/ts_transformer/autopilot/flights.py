@@ -90,6 +90,11 @@ class FlightInputs:
     frame_params: torch.Tensor      # [B,4] the chart the rollout integrates in
     max_thrust_n: torch.Tensor      # [B]
 
+    def take(self, index: torch.Tensor) -> FlightInputs:
+        """The flights at ``index`` (a closed loop's branches, `Executor.take`)."""
+        return FlightInputs(self.initial_state[index], self.aero_params[index], self.frame_params[index],
+                            self.max_thrust_n[index])
+
 
 def flight_inputs(series: Sequence[FlightSeries], *, device: torch.device, anchor: int = 0) -> FlightInputs:
     """`rollout_context` at each flight's row ``anchor`` — its first (a replay flies the sentence from row 0), or where

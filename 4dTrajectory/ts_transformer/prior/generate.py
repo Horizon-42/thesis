@@ -8,7 +8,8 @@ the words said. No executor here: the prior never reads it (framework document �
 
 The inputs are built row by row with the training data's own functions (`data.row_inputs`, the words said as
 `data.sentence_steps` shifts them), so a speaker's rows are the rows `data.flight_steps` builds from the same positions
-and words — the tests hold it to that.
+and words — the tests hold it to that. The model encodes them row by row too (`Prior.extend`: each layer's keys and
+values of the rows already read are kept), the arithmetic of encoding them all again.
 
 **The vocabulary's compatibility rules are a mask** (vocabulary design §2.1, §2.5: "checked in labelling, a mask in
 decoding"): a runway changed under a clearance takes the approach with it; the altitude and descent-angle classes in
@@ -43,6 +44,11 @@ from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 class Speaker:
     """A batch of flights the prior speaks to, all at the same row: rows 0 … `N_LOOK` observed, one more row per
     `append`. `speak` samples the six words of the newest row."""
+
+    #: What `take` keeps per flight (arrays, tensors and lists, first axis the flight); the masses the masks removed
+    #: (`forbidden`, one entry per step) are taken with them.
+    PER_FLIGHT = ("geometries", "contexts", "entry_s", "e", "n", "h", "features", "relative", "in_force", "since",
+                  "airport", "static", "value", "said_row")
 
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  landings: Mapping[str, Landings] | None, words: Words, *, max_rows: int, generator: torch.Generator,
@@ -80,6 +86,8 @@ class Speaker:
         self.static = torch.zeros((count, 1, 0), device=device)
         self.rows = N_LOOK + 1
         self._inputs(0)
+        # the rows the model has encoded, and each layer's keys and values of them (`Prior.extend`)
+        self.encoded, self.past = 0, model.no_past(count, max_rows)
         # the words said: the class in force per column (0: none yet) and the row it was said at
         self.value = np.zeros((count, 6), dtype=np.int64)
         self.said_row = np.zeros((count, 6), dtype=np.int64)
@@ -92,6 +100,20 @@ class Speaker:
                                             self.contexts[b])
             self.features[b, 0, first: self.rows] = torch.as_tensor(features)
             self.relative[b, 0, first: self.rows, : relative.shape[1]] = torch.as_tensor(relative)
+
+    def take(self, index: np.ndarray) -> None:
+        """Keep the flights at ``index`` — a closed loop's branches: a flight taken twice is spoken to on as two copies
+        of itself, each with the rows it read and the words it said."""
+        rows = torch.as_tensor(index, device=self.features.device)
+        for layer, past in enumerate(self.past):                # one layer at a time: one copy alive at once
+            self.past[layer] = past.take(rows)
+        for name in self.PER_FLIGHT:
+            value = getattr(self, name)
+            if isinstance(value, list):
+                setattr(self, name, [value[i] for i in index])
+            else:
+                setattr(self, name, value[rows] if isinstance(value, torch.Tensor) else value[index])
+        self.forbidden = {column: [mass[index] for mass in masses] for column, masses in self.forbidden.items()}
 
     def append(self, e: np.ndarray, n: np.ndarray, height: np.ndarray, frozen: np.ndarray) -> None:
         """The next row's position of every flight, ``[B]`` each (after at least one `speak`); a ``frozen`` flight (its
@@ -113,11 +135,13 @@ class Speaker:
         """``[B, 6]``: the classes sampled at the newest row (0: unchanged, else the word + 1), each column given the
         ones before it; an inactive flight says nothing (all 0); a flight whose runway is locked says no other runway."""
         model, rows, device = self.model, self.rows, self.features.device
-        count = len(self.geometries)
-        present = torch.ones((count, 1, rows), dtype=torch.bool, device=device)
-        h, tokens, valid = model.encode(self.features[:, :, :rows], self.relative[:, :, :rows], self.static,
-                                        self.in_force[:, :, :rows], self.since[:, :, :rows], self.airport, present,
-                                        self_edges(count, 1, rows, device))
+        count, new = len(self.geometries), slice(self.encoded, self.rows)
+        present = torch.ones((count, 1, rows - self.encoded), dtype=torch.bool, device=device)
+        h, tokens, valid, self.past = model.extend(self.features[:, :, new], self.relative[:, :, new], self.static,
+                                                   self.in_force[:, :, new], self.since[:, :, new], self.airport,
+                                                   present, self_edges(count, 1, rows - self.encoded, device),
+                                                   self.past)
+        self.encoded = rows
         h, tokens = h[:, :, -1:], tokens[:, :, -1:]
         opening = rows - 1 == N_LOOK
         first = torch.tensor([opening], device=device)
