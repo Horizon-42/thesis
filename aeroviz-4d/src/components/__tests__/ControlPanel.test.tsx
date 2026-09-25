@@ -90,6 +90,7 @@ const {
       appState.comparisonCategories = [];
       appState.comparisonLegend = { kinds: [], statuses: [], status: "idle" };
       appState.observedVerdictFilter = "all";
+      appState.trajectorySampleCount = 0;
     },
     toggleLayer: vi.fn(),
     setPlaybackSpeed: vi.fn(),
@@ -180,17 +181,40 @@ describe("ControlPanel", () => {
     // typing 200: the loads it plans must not be planned for 2 and 20 on the way
     for (const typed of ["", "2", "20", "200"]) fireEvent.change(field, { target: { value: typed } });
     expect(setTrajectorySampleCount).not.toHaveBeenCalled();
+    // not applied yet, and it says so
+    expect(screen.getByText("Enter to apply · Esc to keep 50")).toBeTruthy();
     fireEvent.blur(field);
     expect(setTrajectorySampleCount.mock.calls).toEqual([[200]]);
-    // cleared and Enter: all tracks (0); a negative count is all tracks too
+    // cleared and Enter: all tracks (0)
     fireEvent.change(field, { target: { value: "" } });
     fireEvent.keyDown(field, { key: "Enter" });
     expect(setTrajectorySampleCount).toHaveBeenLastCalledWith(0);
     expect(field.value).toBe("0");
+    expect(setTrajectorySampleCount).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the sample count for what is not a count, and drops a draft on Escape", () => {
+    appState.layers.trajectories = true;
+    appState.trajectorySampleCount = 50;
+    render(<ControlPanel />);
+    const field = screen.getByLabelText("Sample count (0 = all)") as HTMLInputElement;
+    // a negative count, and what the browser cannot read ("20o" in Firefox: its value is "", `badInput` set) — neither
+    // is "all tracks", which would load every one
     fireEvent.change(field, { target: { value: "-5" } });
     fireEvent.blur(field);
-    expect(setTrajectorySampleCount).toHaveBeenLastCalledWith(0);
-    expect(setTrajectorySampleCount).toHaveBeenCalledTimes(3);
+    expect(field.value).toBe("50");
+    Object.defineProperty(field, "validity", { configurable: true, value: { badInput: true } });
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(field.value).toBe("50");
+    Object.defineProperty(field, "validity", { configurable: true, value: { badInput: false } });
+    fireEvent.change(field, { target: { value: "7" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(field.value).toBe("50");
+    expect(screen.queryByText(/Enter to apply/)).toBeNull();
+    fireEvent.blur(field);
+    expect(setTrajectorySampleCount).not.toHaveBeenCalledWith(0);
+    expect(setTrajectorySampleCount).not.toHaveBeenCalledWith(7);
   });
 
   // ── Constraint-scoped procedure display (Feature A) ──────────────────────────

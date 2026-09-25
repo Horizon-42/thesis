@@ -2291,6 +2291,13 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   padding-right: 2.25rem;
 }
 
+/* a field whose value is a draft not yet applied (the sample count: it plans the trajectory loads) */
+.control-panel-pending-hint {
+  margin: -6px 0 8px;
+  font-size: 11px;
+  color: rgba(250, 204, 21, 0.85);
+}
+
 .control-panel-terrain-details {
   display: grid;
   gap: 4px;

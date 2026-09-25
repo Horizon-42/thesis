@@ -82,14 +82,21 @@ export default function ControlPanel({
   } = useApp();
   // The sample count plans the trajectory loads (the observed tracks and the comparison's references), so it is a draft
   // while typed and committed when the field is left or Enter is pressed — typing "200" must not plan loads for 2 and 20
-  // on the way. Nothing else writes the count, so the draft needs no syncing back.
+  // on the way. Nothing else writes the count, so the draft needs no syncing back. A cleared field is 0 (all tracks);
+  // what the browser cannot read as a number ("-", "1e", a typo — its value is then "") or a negative count is refused,
+  // the count kept: 0 would load every track. Escape drops the draft.
   const [sampleCountDraft, setSampleCountDraft] = useState<string>(() => String(trajectorySampleCount));
-  const commitSampleCount = () => {
+  const commitSampleCount = (field: HTMLInputElement) => {
     const parsed = Number.parseInt(sampleCountDraft, 10);
-    const count = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    if (field.validity.badInput || parsed < 0) {
+      setSampleCountDraft(String(trajectorySampleCount));
+      return;
+    }
+    const count = Number.isFinite(parsed) ? parsed : 0;
     setSampleCountDraft(String(count));
     setTrajectorySampleCount(count);
   };
+  const sampleCountPending = sampleCountDraft !== String(trajectorySampleCount);
   const { categories: comparisonCategories } = useComparisonCategories(activeAirportCode);
   const drawableComparisonCategories = comparisonCategories.filter(
     isDrawableComparisonCategory,
@@ -443,12 +450,16 @@ export default function ControlPanel({
                 className="control-panel-airport-selector-input"
                 value={sampleCountDraft}
                 onChange={(event) => setSampleCountDraft(event.target.value)}
-                onBlur={commitSampleCount}
+                onBlur={(event) => commitSampleCount(event.currentTarget)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") commitSampleCount();
+                  if (event.key === "Enter") commitSampleCount(event.currentTarget);
+                  if (event.key === "Escape") setSampleCountDraft(String(trajectorySampleCount));
                 }}
               />
             </label>
+            {sampleCountPending ? (
+              <p className="control-panel-pending-hint">Enter to apply · Esc to keep {trajectorySampleCount}</p>
+            ) : null}
             {trajectoryComparison && activeComparisonCategory ? (
               <div
                 className="control-panel-comparison-kinds"
