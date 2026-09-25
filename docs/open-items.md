@@ -141,12 +141,6 @@ change you are making go in `docs/code-health-followups.md` instead.
     canonical `speedMaxKt` field is ready).
   - HSL linear-solver hook dormant (free MA27 measured slower than MUMPS); revisit with an MA57
     academic license.
-  - **Pre-existing numpy failure in `collocation/tests/test_optimizer.py::test_fixed_time_objective_weights_control_effort_at_one`
-    is BACK (2026-07-21).** `float(np.array(grad(x0))[0])` raises
-    `TypeError: only 0-dimensional arrays can be converted to Python scalars` under numpy 2.x. It
-    went green on 2026-07-20 and failed again on 07-21 with no optimizer change in between, so it
-    tracks the numpy version, not the code. Verified unrelated to any working-tree change by
-    re-running with the tree stashed. Modeling suite is otherwise 588 pass.
 - Optimizer quality, measured 2026-08-19 and NOT fixed: on 120 random KRDU `runway` flights,
   **15 of 120 (12.5 %) fail only because the replay stops 1–10 m short of the threshold
   plane** (`event_status: not_reached` → lateral/vertical indeterminate → fail). Recovering

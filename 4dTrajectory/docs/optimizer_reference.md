@@ -100,6 +100,9 @@ gets a new ID here and ONE new line in the index.**
   `optimization-references-v3-shared-tracks` hashes the track alongside the record; the store
   is swept against the UNION of all sibling reference dirs, never one dataset's roster (that
   would delete the other's tracks).
+- **Note (2026-09-25):** `write_reference_records` finds each scenario's observed flight by
+  `flight_key` (`flight_scenarios.identity`, the key its filenames already are); it matched on
+  `(id, icao24, landing_time_utc)` before — the same flights, one identity fewer.
 
 ### O11 · stale-artifact hygiene (write side)
 
@@ -115,6 +118,12 @@ gets a new ID here and ONE new line in the index.**
   (`REFERENCE_CACHE_SCHEMA`, `file_sha256`, `observed_track_path`) are single-sourced in
   `optimization/evaluation_export.py` — the pipeline runner imports them (its restated
   mirror is gone).
+- **Note (2026-09-25):** `summary_row` reads the scenario source's identity fields as REQUIRED
+  (`ROW_REQUIRED_SOURCE_FIELDS`: `id`, `icao24`, `landing_time_utc`, `arr_airport`, `runway`,
+  `target_source` — a missing or null one is refused by name) and `callsign` as OPTIONAL (the key
+  is absent when the flight has none). It used to write every field as `source.get(name)`, so a
+  missing field became an explicit JSON null, which a reader's `row.get(key, default)` reads as
+  null. Nothing on disk changes; the optimizer's and ts's writers build every row through it.
 
 ### O12 · stale design docs kept on purpose
 

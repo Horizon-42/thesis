@@ -36,7 +36,10 @@ def _scenario(*, target: GeodeticState | None) -> FlightScenario:
         initial=initial,
         aircraft=A320,
         aero=aero_params_for_aircraft(A320),
-        source={"id": "AFR074", "runway": "05L"},
+        # A scenario source as build_scenario writes it for a harvested arrival.
+        source={"id": "AFR074", "callsign": "AFR074", "icao24": "ad7f04",
+                "landing_time_utc": "2026-06-18T21:37:36Z", "arr_airport": "KRDU", "runway": "05L",
+                "target_source": "runway_threshold"},
         target=target,
     )
 
@@ -122,7 +125,11 @@ def test_scenario_optimization_serialization():
 
 def test_scenario_filename():
     # No icao24 / landing time in source -> falls back to the plain id_runway base.
-    assert so._scenario_filename(_scenario(target=None), 0) == "AFR074_05L_states.json"
+    bare = _scenario(target=None)
+    bare.source.pop("icao24")
+    bare.source.pop("landing_time_utc")
+    assert so._scenario_filename(bare, 0) == "AFR074_05L_states.json"
+    assert so._scenario_filename(_scenario(target=None), 0) == "AFR074_05L_ad7f04_20260618T213736Z_states.json"
 
 
 def test_scenario_filename_shares_the_ts_transformer_identity():
@@ -261,7 +268,7 @@ def test_resume_rejects_records_from_a_different_configuration(monkeypatch, tmp_
     so.optimize_scenarios([scenario], output_dir=tmp_path, jobs=1, resume=True,
                           max_iterations=500)
     assert solves["n"] == 2
-    record = json.loads((tmp_path / "AFR074_05L_eval.json").read_text(encoding="utf-8"))
+    record = json.loads((tmp_path / "AFR074_05L_ad7f04_20260618T213736Z_eval.json").read_text(encoding="utf-8"))
     assert record["optimization_config"]["max_iterations"] == 500
 
 
@@ -286,7 +293,7 @@ def test_resume_re_solves_a_record_flown_to_another_target(monkeypatch, tmp_path
     moved = replace(target, V=target.V - 4.6)
     so.optimize_scenarios([_scenario(target=moved)], output_dir=tmp_path, jobs=1, resume=True)
     assert solves["n"] == 2
-    record = json.loads((tmp_path / "AFR074_05L_eval.json").read_text(encoding="utf-8"))
+    record = json.loads((tmp_path / "AFR074_05L_ad7f04_20260618T213736Z_eval.json").read_text(encoding="utf-8"))
     assert record["target_state"]["V"] == pytest.approx(moved.V)
 
 
@@ -389,7 +396,7 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
     # the kinematics this test pins. The conversion itself is covered by
     # flight_scenarios/tests/test_datum.py, including a seam test seat-belting the fact that
     # write_reference_records reads through load_model_arrivals.
-    flight = {"id": "AFR074", "icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z",
+    flight = {"id": "AFR074", "runway": "05L", "icao24": "ad7f04", "landing_time_utc": "2026-06-18T21:37:36Z",
               "altitude_source": "synthetic", "waypoints": waypoints}
     target = GeodeticState(35.62, -78.5, 1850.0, 100.0, math.pi / 2, -0.1, 60000.0)
     scenario = _scenario(target=target)
@@ -436,6 +443,7 @@ def test_write_reference_records_from_observed_tracks(tmp_path):
 def test_reference_records_reuse_a_matching_canonical_source(monkeypatch, tmp_path):
     flight = {
         "id": "AFR074",
+        "runway": "05L",
         "icao24": "ad7f04",
         "landing_time_utc": "2026-06-18T21:37:36Z",
         "altitude_source": "synthetic",
@@ -476,6 +484,7 @@ def test_reference_records_reuse_a_matching_canonical_source(monkeypatch, tmp_pa
 def test_reference_cache_rebuilds_when_a_record_changes(monkeypatch, tmp_path):
     flight = {
         "id": "AFR074",
+        "runway": "05L",
         "icao24": "ad7f04",
         "landing_time_utc": "2026-06-18T21:37:36Z",
         "altitude_source": "synthetic",
@@ -530,10 +539,10 @@ def test_batch_embeds_reference_pointers(monkeypatch, tmp_path):
     monkeypatch.setattr(so, "optimize_scenario", fake_optimize_scenario)
     so.optimize_scenarios(scenarios, output_dir=tmp_path, jobs=1, references_dir="references")
 
-    solved = json.loads((tmp_path / "AFR074_05L_eval.json").read_text(encoding="utf-8"))
-    failed = json.loads((tmp_path / "BAD001_05L_eval.json").read_text(encoding="utf-8"))
-    assert solved["reference_file"] == "references/AFR074_05L_reference_eval.json"
-    assert failed["reference_file"] == "references/BAD001_05L_reference_eval.json"
+    solved = json.loads((tmp_path / "AFR074_05L_ad7f04_20260618T213736Z_eval.json").read_text(encoding="utf-8"))
+    failed = json.loads((tmp_path / "BAD001_05L_ad7f04_20260618T213736Z_eval.json").read_text(encoding="utf-8"))
+    assert solved["reference_file"] == "references/AFR074_05L_ad7f04_20260618T213736Z_reference_eval.json"
+    assert failed["reference_file"] == "references/BAD001_05L_ad7f04_20260618T213736Z_reference_eval.json"
 
 
 def test_require_usable_rollout_rejects_first_step_truncation():

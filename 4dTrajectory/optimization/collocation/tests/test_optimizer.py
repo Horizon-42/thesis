@@ -358,7 +358,7 @@ def test_fixed_time_objective_weights_control_effort_at_one():
     def dcost_dthrust0(fixed_duration):
         nlp, *_bounds, x0, _layout = opt._build(init, target, 150.0, fixed_duration=fixed_duration)
         grad = ca.Function("g", [nlp["x"]], [ca.gradient(nlp["f"], nlp["x"])])
-        return abs(float(np.array(grad(x0))[0]))       # ∂/∂ thrust of phase 0, segment 0
+        return abs(float(np.array(grad(x0))[0, 0]))    # ∂/∂ thrust of phase 0, segment 0 (a column)
 
     assert dcost_dthrust0(150.0) == pytest.approx(dcost_dthrust0(None) * 1000.0, rel=1e-6)
 

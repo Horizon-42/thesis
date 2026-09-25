@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -869,9 +868,8 @@ def write_reference_records(
     """One reference eval record per scenario, from its OBSERVED track.
 
     ``observed_tracks`` is the harvest arrival manifest the scenarios came from.
-    Each scenario's flight is looked up in it by its full
-    identity ``(id, icao24, landing_time_utc)`` — the same key the output
-    filenames disambiguate on. The track becomes a reference record in the
+    Each scenario's flight is looked up in it by its ``flight_key``
+    (``flight_scenarios.identity``) — the same key the output filenames are. The track becomes a reference record in the
     evaluation contract (per-sample kinematics via
     ``flight_scenarios.state_samples_from_track``, EMPTY controls, the SAME target
     the optimizer flies to), written under ``<output_dir>/<references_dir>/`` and
@@ -934,9 +932,7 @@ def write_reference_records(
     # from ellipsoidal (HAE) to MSL. Reading the file directly here would put the reference
     # record ~30 m below the scenario built from the identical track.
     flights = load_model_arrivals(observed_tracks)
-    by_identity = {
-        (f.get("id"), f.get("icao24"), f.get("landing_time_utc")): f for f in flights
-    }
+    by_key = {flight_key(f, 0): f for f in flights}
     out.mkdir(parents=True, exist_ok=True)
     # Fresh reference set = fresh directory: references from an earlier run over a
     # different flight set would otherwise accumulate (same stale-record class as
@@ -960,12 +956,10 @@ def write_reference_records(
                 f"scenario {src.get('id')!r} has no target state; build scenarios with "
                 "flight_scenarios (its build_scenario populates target) first."
             )
-        identity = (src.get("id"), src.get("icao24"), src.get("landing_time_utc"))
-        flight = by_identity.get(identity)
+        key = flight_key(src, index)
+        flight = by_key.get(key)
         if flight is None:
-            raise ValueError(
-                f"no observed flight in the reference-tracks file for identity {identity}"
-            )
+            raise ValueError(f"no observed flight in the reference-tracks file for flight_key {key!r}")
         timed_states = state_samples_from_track(
             flight["waypoints"], mass_kg=scenario.initial.m,
             window_s=float(src.get("window_s") or DEFAULT_WINDOW_S),

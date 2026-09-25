@@ -7,7 +7,7 @@ one for anything torch-side.
 **This file is an index**: each line ends in the ID of its full text in
 `docs/optimizer_reference.md` (`O` gotchas, `K` defaults; moved there verbatim 2026-09-16). A new
 fact gets a new ID there and one line here. Open items (KRDU RW32, per-leg RNP, CIFP speed
-restrictions, HSL, the numpy test failure): repo `docs/open-items.md`, "Optimizer".
+restrictions, HSL): repo `docs/open-items.md`, "Optimizer".
 
 ## Gotchas (recurring, verified)
 
@@ -35,11 +35,12 @@ restrictions, HSL, the numpy test failure): repo `docs/open-items.md`, "Optimize
   resumable (O9).
 - Reference records point at ONE shared observed track through `states_ref`
   (`optimization-references-v3-shared-tracks`); the store is swept against the UNION of sibling
-  reference dirs, never one dataset's roster (O10).
+  reference dirs, never one dataset's roster; a scenario finds its observed flight by `flight_key` (O10).
 - Write-side hygiene: stale records are swept at batch start; publication writes immutable
   generation-suffixed files, commits via `comparison_index.json`, then prunes; filename suffixes,
   `REFERENCES_DIR`, `summary_row` and the reference cache contract are single-sourced in
-  `optimization/evaluation_export.py` (O11).
+  `optimization/evaluation_export.py`; a summary row's identity fields are required (refused when
+  null), `callsign` optional (absent, never null) (O11).
 - `docs/direct_collocation_hermite_simpson.zh.md` §5 and `geodetic_dynamics_transport.zh.html`
   describe the OLD HS-planner + RK4-polish pipeline (kept, historically inaccurate) (O12).
 

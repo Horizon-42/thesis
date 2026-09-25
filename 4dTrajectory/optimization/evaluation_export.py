@@ -244,6 +244,15 @@ def _subject(value: str) -> str:
     return value
 
 
+# The roster row's identity, read off the scenario's source. REQUIRED: every scenario a writer
+# rosters names its flight (id is the callsign and repeats daily, so the landing time is part of
+# WHICH flight) and its target; a missing or null one is refused, never written as null.
+# OPTIONAL: present only when the flight has it -- a row never carries an explicit null for it
+# (a reader's ``row.get(key, default)`` would read that null, not the default).
+ROW_REQUIRED_SOURCE_FIELDS = ("id", "icao24", "landing_time_utc", "arr_airport", "runway", "target_source")
+ROW_OPTIONAL_SOURCE_FIELDS = ("callsign",)
+
+
 def summary_row(
     source: dict[str, Any],
     *,
@@ -260,16 +269,12 @@ def summary_row(
     record shapes — and both writers (the optimizer batch and ``ts_transformer``) build
     their rows through it. Writers may add columns on top; they must not rename these.
     """
+    missing = [name for name in ROW_REQUIRED_SOURCE_FIELDS if source.get(name) is None]
+    if missing:
+        raise ValueError(f"flight {source.get('id')!r}: a summary row needs source {missing}")
     return {
-        "id": source.get("id"),
-        "callsign": source.get("callsign"),
-        "icao24": source.get("icao24"),
-        # Part of the flight's identity, not an extra: id is the callsign and repeats
-        # daily, so without the landing time a row cannot name WHICH flight it is.
-        "landing_time_utc": source.get("landing_time_utc"),
-        "arr_airport": source.get("arr_airport"),
-        "runway": source.get("runway"),
-        "target_source": source.get("target_source"),
+        **{name: source[name] for name in ROW_REQUIRED_SOURCE_FIELDS},
+        **{name: source[name] for name in ROW_OPTIONAL_SOURCE_FIELDS if source.get(name) is not None},
         "status": status,
         "states_file": states_file,
         "eval_file": eval_file,
