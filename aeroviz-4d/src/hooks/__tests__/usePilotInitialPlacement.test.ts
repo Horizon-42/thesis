@@ -134,6 +134,7 @@ import {
   pickPilotPlacementPosition,
   usePilotInitialPlacement,
 } from "../usePilotInitialPlacement";
+import { A320_CONFIG } from "../../pilot/__tests__/aircraftCatalog.fixture";
 
 describe("pickPilotPlacementPosition", () => {
   it("uses scene depth picking when available", () => {
@@ -286,23 +287,7 @@ describe("usePilotInitialPlacement", () => {
             altM: 111.86,
             psiDeg: 45,
           },
-          aircraft: {
-            code: "A320",
-            name: "Airbus A320-200",
-            category: "narrow_body",
-            massKg: 78000,
-            wingAreaM2: 122.6,
-            maxThrustN: 240000,
-            approachThrustGuessN: 40000,
-            terminalSpeedKt: 145,
-            terminalSpeedMinKt: 135,
-            terminalSpeedMaxKt: 155,
-            finalApproachMinNm: 5,
-            finalApproachMaxNm: 10,
-            finalApproachLateralHalfWidthNm: 0.8,
-            finalApproachGlideAngleDeg: 3,
-            thresholdCrossingHeightM: 15,
-          },
+          aircraft: A320_CONFIG,
         },
         onPositionChange: vi.fn(),
         onFinish: vi.fn(),

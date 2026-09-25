@@ -7,6 +7,7 @@ import {
   type PilotAircraftConfig,
   type PilotResetState,
 } from "../pilotClient";
+import { A320_CONFIG, B77W_CONFIG } from "./aircraftCatalog.fixture";
 
 const state: PilotResetState = {
   lon: -114.0203,
@@ -26,42 +27,7 @@ const control: PilotControls = {
   loadFactor: 1.2,
 };
 
-const aircraftConfigs: PilotAircraftConfig[] = [
-  {
-    code: "A320",
-    name: "Airbus A320-200",
-    category: "narrow_body",
-    massKg: 78000,
-    wingAreaM2: 122.6,
-    maxThrustN: 240000,
-    approachThrustGuessN: 40000,
-    terminalSpeedKt: 145,
-    terminalSpeedMinKt: 135,
-    terminalSpeedMaxKt: 155,
-    finalApproachMinNm: 5,
-    finalApproachMaxNm: 10,
-    finalApproachLateralHalfWidthNm: 0.8,
-    finalApproachGlideAngleDeg: 3,
-    thresholdCrossingHeightM: 15,
-  },
-  {
-    code: "B77W",
-    name: "Boeing 777-300ER",
-    category: "wide_body",
-    massKg: 351530,
-    wingAreaM2: 436.8,
-    maxThrustN: 1026000,
-    approachThrustGuessN: 140000,
-    terminalSpeedKt: 155,
-    terminalSpeedMinKt: 145,
-    terminalSpeedMaxKt: 165,
-    finalApproachMinNm: 6,
-    finalApproachMaxNm: 12,
-    finalApproachLateralHalfWidthNm: 1,
-    finalApproachGlideAngleDeg: 3,
-    thresholdCrossingHeightM: 15,
-  },
-];
+const aircraftConfigs: PilotAircraftConfig[] = [A320_CONFIG, B77W_CONFIG];
 
 const snapshot = {
   ok: true,

@@ -12,24 +12,8 @@ import type {
   PilotSimulationMode,
 } from "../../pilot/pilotClient";
 import PilotPanel from "../PilotPanel";
+import { A320_CONFIG as a320Config } from "../../pilot/__tests__/aircraftCatalog.fixture";
 
-const a320Config = {
-  code: "A320",
-  name: "Airbus A320-200",
-  category: "narrow_body",
-  massKg: 78000,
-  wingAreaM2: 122.6,
-  maxThrustN: 240000,
-  approachThrustGuessN: 40000,
-  terminalSpeedKt: 145,
-  terminalSpeedMinKt: 135,
-  terminalSpeedMaxKt: 155,
-  finalApproachMinNm: 5,
-  finalApproachMaxNm: 10,
-  finalApproachLateralHalfWidthNm: 0.8,
-  finalApproachGlideAngleDeg: 3,
-  thresholdCrossingHeightM: 15,
-};
 
 const mocks = vi.hoisted(() => ({
   airport: { code: "KRDU", lon: -78.7873, lat: 35.878659, height: 15000 },
@@ -604,6 +588,23 @@ describe("PilotPanel trajectory play mode", () => {
 
     expect(mocks.setSelectedRunway).toHaveBeenCalledWith("05L");
     expect(mocks.setApproachViewOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("says why when the aircraft catalog does not load, and offers no target speed to edit or optimize", async () => {
+    mocks.fetchPilotAircraftConfigs.mockRejectedValue(new Error("the backend at http://backend.test did not answer"));
+    render(<PilotPanel />);
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(/did not answer/);
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    const targetSummary = await screen.findByLabelText("Target aircraft state summary");
+    // no aircraft: no target speed, so the target editor (its speed range is the aircraft's) is not drawn
+    expect(within(targetSummary).getByText("— (no aircraft)")).toBeTruthy();
+    const edit = within(targetSummary).getByRole("button", { name: "Edit" }) as HTMLButtonElement;
+    expect(edit.disabled).toBe(false);                     // the runways are there: the editor is asked for
+    fireEvent.click(edit);
+    expect(screen.queryByLabelText("Target state setup")).toBeNull();
+    expect((screen.getByRole("button", { name: "Optimize" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.runTrajectoryOptimization).not.toHaveBeenCalled();
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {
