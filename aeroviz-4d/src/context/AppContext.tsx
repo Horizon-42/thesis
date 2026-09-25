@@ -279,7 +279,8 @@ interface TrainingSessionState {
    * THE WORD THE LIVE EXECUTOR FLIES: set only by a CLICK — the sentence bar's "Fly this segment" button, or a band
    * clicked while `trainingAutopilotAuto` is on — and cleared by clicking the selected band again; never by the cursor,
    * which the charts move on hover. It belongs to the flight on screen (`trainingSelectionKey`) and is reset with it, as
-   * the cursor is: another flight, another set, leaving Training and coming back all start with nothing picked.
+   * the cursor is: another flight or another set starts with nothing picked. Leaving Training and coming back keeps
+   * both, with the flight: the Training session outlives a task switch (`WorkbenchLeftDock`).
    */
   trainingPick: TrainingPick | null;
   setTrainingPick: (pick: TrainingPick | null) => void;

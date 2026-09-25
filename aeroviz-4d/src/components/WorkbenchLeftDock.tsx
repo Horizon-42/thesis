@@ -9,8 +9,14 @@
  *
  * Procedures is NOT a task — the procedure panel is rendered separately (gated on
  * `proceduresOpen`) so it can coexist with whichever task is active.
+ *
+ * TRAINING KEEPS ITS SESSION: from the first time it is opened, the TrainingPanel stays mounted — hidden in the other
+ * tasks — so leaving Training and coming back finds the same set, flight, word and live answer, and downloads nothing
+ * again (the index, the sample — KRDU's is 6 MB — and the overlays). Its views draw only in Training (the sentence bar
+ * and the 3D layers read `mode`).
  */
 
+import { useState, type ReactNode } from "react";
 import { useApp, type WorkbenchMode } from "../context/AppContext";
 import ControlPanel from "./ControlPanel";
 import type {
@@ -55,32 +61,31 @@ export default function WorkbenchLeftDock({
   observedEvaluation,
 }: WorkbenchLeftDockProps) {
   const { mode, setMode } = useApp();
+  const [trainingOpened, setTrainingOpened] = useState<boolean>(mode === "training");
+  if (mode === "training" && !trainingOpened) setTrainingOpened(true);
 
+  let task: ReactNode = null;
   if (mode === "fly" || mode === "optimize" || mode === "compare") {
-    return (
-      <div className="workbench-left-dock">
-        <PilotPanel
-          mode={MODE_TO_PILOT[mode]}
-          onRequestMode={(next) => setMode(PILOT_TO_MODE[next])}
-        />
-      </div>
+    task = (
+      <PilotPanel
+        mode={MODE_TO_PILOT[mode]}
+        onRequestMode={(next) => setMode(PILOT_TO_MODE[next])}
+      />
+    );
+  } else if (mode === "observe") {
+    task = (
+      <>
+        <ControlPanel observedVerdicts={observedVerdicts} />
+        <FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />
+        <EvaluationSummary observedEvaluation={observedEvaluation} />
+      </>
     );
   }
 
-  if (mode === "training") {
-    return (
-      <div className="workbench-left-dock">
-        <TrainingPanel />
-      </div>
-    );
-  }
-
-  // observe
   return (
     <div className="workbench-left-dock">
-      <ControlPanel observedVerdicts={observedVerdicts} />
-      <FlightTable flightIds={flightIds} flightSummaries={flightSummaries} />
-      <EvaluationSummary observedEvaluation={observedEvaluation} />
+      {task}
+      {trainingOpened ? <TrainingPanel key="training" hidden={mode !== "training"} /> : null}
     </div>
   );
 }

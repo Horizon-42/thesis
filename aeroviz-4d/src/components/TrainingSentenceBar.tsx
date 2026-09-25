@@ -167,7 +167,7 @@ function verdictMark(status: TrainingExecutorWord["status"]): { fill: string; st
 
 export default function TrainingSentenceBar() {
   const {
-    trainingSelection: selection, trainingLayers,
+    mode, trainingSelection: selection, trainingLayers,
     trainingColumn: focusColumn, setTrainingColumn: setFocusColumn,
     trainingExecutor, trainingPrior, trainingAutopilot, trainingPick, setTrainingPick, trainingAutopilotAuto,
   } = useApp();
@@ -176,7 +176,8 @@ export default function TrainingSentenceBar() {
   const [openWindow, setOpenWindow] = useState<"readback" | "prior" | null>(null);
   const [notesOpen, setNotesOpen] = useState<boolean>(false);
 
-  if (!selection) return null;
+  // the Training session outlives a task switch (the panel stays mounted): the bar draws only in Training
+  if (!selection || mode !== "training") return null;
   const { flight, vocabulary, candidates } = selection;
   const plotW = frameW - GUTTER - PAD_R;
   const { tS } = flight.signals;

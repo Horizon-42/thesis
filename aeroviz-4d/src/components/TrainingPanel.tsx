@@ -5,7 +5,8 @@
  * instruction vocabulary (`TRAINING_READING_RULE`). Design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`.
  *
  * It owns the only fetch and publishes the selected flight through `trainingSelection`, which the sentence bar, the
- * read-back window and the 3D layer draw.
+ * read-back window and the 3D layer draw. The dock keeps it mounted from its first visit on, only ``hidden`` in the
+ * other tasks (`WorkbenchLeftDock`): its session — set, sample, flight, overlays, live answer — outlives a task switch.
  *
  * The states all name what failed:
  *   ① no `index.json`                → the path, the command, the dev-server restart (AV5)
@@ -162,7 +163,7 @@ function EmptyState({ airport }: { airport: string }) {
   );
 }
 
-export default function TrainingPanel() {
+export default function TrainingPanel({ hidden }: { hidden: boolean }) {
   const {
     activeAirportCode, setTrainingSelection, trainingLayers, setTrainingLayer, trainingAutopilotAuto, setTrainingAutopilotAuto,
   } = useApp();
@@ -268,7 +269,7 @@ export default function TrainingPanel() {
   useEffect(() => () => setTrainingSelection(null), [setTrainingSelection]);
 
   return (
-    <section className="training-panel" aria-label="Training">
+    <section className="training-panel" aria-label="Training" hidden={hidden}>
       <header className="training-panel-header">
         <h2>Training</h2>
         {/* Everything read ONCE — what the module is, the vocabulary, the shas — folds away, so the flight list keeps

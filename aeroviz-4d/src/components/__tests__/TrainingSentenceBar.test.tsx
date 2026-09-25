@@ -13,7 +13,7 @@ const { appState, DEFAULT_LAYERS, setTrainingPick } = vi.hoisted(() => {
     DEFAULT_LAYERS,
     setTrainingPick: vi.fn(),
     appState: {
-      trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
+      mode: "training", trainingSelection: null as unknown, trainingLayers: { ...DEFAULT_LAYERS },
       trainingExecutor: null as unknown, trainingPrior: null as unknown, trainingAutopilot: null as unknown,
       trainingPick: null as unknown, trainingAutopilotAuto: true,
     },
@@ -62,6 +62,7 @@ function select(position = 0) {
 
 describe("TrainingSentenceBar", () => {
   beforeEach(() => {
+    appState.mode = "training";
     appState.trainingSelection = null;
     appState.trainingLayers = { ...DEFAULT_LAYERS };
     appState.trainingExecutor = null;
@@ -199,6 +200,16 @@ describe("TrainingSentenceBar", () => {
   it("draws nothing until a flight is selected", () => {
     const { container } = render(<TrainingSentenceBar />);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("draws nothing outside Training, though the flight stays selected (the session outlives a task switch)", () => {
+    select();
+    appState.mode = "observe";
+    const { container, rerender } = render(<TrainingSentenceBar />);
+    expect(container.innerHTML).toBe("");
+    appState.mode = "training";
+    rerender(<TrainingSentenceBar />);
+    expect(screen.getByText("Heading")).toBeTruthy();
   });
 
   it("draws the six columns in the vocabulary's order", () => {

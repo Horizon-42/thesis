@@ -582,6 +582,11 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   font-size: 13px;
 }
 
+/* kept mounted in the other tasks (WorkbenchLeftDock): the display above would otherwise override `hidden` */
+.training-panel[hidden] {
+  display: none;
+}
+
 .training-panel-header {
   display: flex;
   align-items: baseline;

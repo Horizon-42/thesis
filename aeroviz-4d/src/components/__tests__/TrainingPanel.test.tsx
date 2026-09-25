@@ -89,7 +89,7 @@ describe("TrainingPanel", () => {
     beforeEach(() => serve({}));
 
     it("names the airport, the path it reads and the command that writes it", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText(/No Training export for KXXX yet/)).toBeTruthy();
       expect(screen.getByText(INDEX_PATH)).toBeTruthy();
       expect(screen.getByText(/run_ts\.py instruction_training_export .*--airport KXXX/)).toBeTruthy();
@@ -97,7 +97,7 @@ describe("TrainingPanel", () => {
 
     // AV5: vite does not watch public/data, so a directory created after boot is the SPA fallback.
     it("warns that the dev server must be restarted after the first export", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText(/restart the dev server/i)).toBeTruthy();
     });
   });
@@ -106,7 +106,7 @@ describe("TrainingPanel", () => {
     beforeEach(() => serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample() }));
 
     it("opens on the set it can read, not the first one listed, and downloads only that", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText("TST1")).toBeTruthy();
       expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe(SET_ID);
       const fetched = fetchMock.mock.calls.map(([url]) => url);
@@ -117,7 +117,7 @@ describe("TrainingPanel", () => {
     });
 
     it("publishes the flight with the vocabulary and the candidate runways", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       await waitFor(() => expect(lastPublished()?.flight.flightKey).toBe(VECTORED_KEY));
       expect(lastPublished().candidates.map((c: any) => c.ident)).toEqual(["09", "27"]);
       fireEvent.click(screen.getByText("TST2"));
@@ -125,7 +125,7 @@ describe("TrainingPanel", () => {
     });
 
     it("refuses a superseded set BY NAME from the manifest alone, without downloading it", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       await screen.findByText("TST1");
       fireEvent.change(screen.getByRole("combobox"), { target: { value: "box_v3" } });
       expect(await screen.findByText(/read under box-v3, a superseded vocabulary/)).toBeTruthy();
@@ -134,7 +134,7 @@ describe("TrainingPanel", () => {
     });
 
     it("marks the refused sets in the chooser", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       await screen.findByText("TST1");
       const options = [...(screen.getByRole("combobox") as HTMLSelectElement).options].map((option) => option.text);
       expect(options.find((text) => text.startsWith("box_v3"))).toMatch(/box-v3 — refused/);
@@ -144,7 +144,7 @@ describe("TrainingPanel", () => {
     });
 
     it("with no overlay published, keeps both switches off and names the commands that write them", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       await screen.findByText("TST1");
       const replay = screen.getByLabelText("Executor replay") as HTMLInputElement;
       const prior = screen.getByLabelText("Prior predictions") as HTMLInputElement;
@@ -158,7 +158,7 @@ describe("TrainingPanel", () => {
     });
 
     it("switches the envelopes everywhere through the shared layers", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       await screen.findByText("TST1");
       fireEvent.click(screen.getByLabelText("Altitude tubes + speed bands"));
       expect(setTrainingLayer).toHaveBeenCalledWith("vertical", false);
@@ -172,7 +172,7 @@ describe("TrainingPanel", () => {
     });
 
     it("says in its ⓘ what each switch shows and which overlays are over the set, as text", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       await screen.findByText("TST1");
       fireEvent.click(screen.getByRole("button", { name: "What does this panel show?" }));
       const about = document.querySelector(".training-notes-list")!.textContent!;
@@ -181,7 +181,7 @@ describe("TrainingPanel", () => {
     });
 
     it("states the draw it came from, in full in its tooltip", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       const note = await screen.findByText(/^2 flights · val, 1 per stratum/);
       expect(note.getAttribute("title")).toMatch(/a test draw/);
     });
@@ -194,7 +194,7 @@ describe("TrainingPanel", () => {
     }));
 
     it("publishes both for the selected flight, and follows the selection", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       await waitFor(() => expect(lastOf(setTrainingExecutor)?.flight.flightKey).toBe(VECTORED_KEY));
       await waitFor(() => expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY));
       fireEvent.click(screen.getByText("TST2"));
@@ -203,13 +203,13 @@ describe("TrainingPanel", () => {
     });
 
     it("says under each flight what the executor made of it", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText("landed · 5/7")).toBeTruthy();
       expect(screen.getByText("not flown")).toBeTruthy();
     });
 
     it("folds the replay's gate table and the prior's readout under the switches", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText(/The executor's val replay gate · spec 777777777777/)).toBeTruthy();
       expect(screen.getByText(/The prior's val readout · 0\.1778 per step against 0\.3444 \/ 0\.3260/)).toBeTruthy();
       expect(screen.getByText(/own dynamics at KXXX — gated, each share ≥ 95 %/)).toBeTruthy();
@@ -217,7 +217,7 @@ describe("TrainingPanel", () => {
     });
 
     it("stops publishing an overlay switched off", async () => {
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       await waitFor(() => expect(lastOf(setTrainingExecutor)?.flight.flightKey).toBe(VECTORED_KEY));
       fireEvent.click(screen.getByLabelText("Executor replay"));
       await waitFor(() => expect(lastOf(setTrainingExecutor)).toBeNull());
@@ -225,10 +225,10 @@ describe("TrainingPanel", () => {
     });
 
     it("never fetches the last airport's overlay under the next airport's path", async () => {
-      const { rerender } = render(<TrainingPanel />);
+      const { rerender } = render(<TrainingPanel hidden={false} />);
       await waitFor(() => expect(lastOf(setTrainingExecutor)?.flight.flightKey).toBe(VECTORED_KEY));
       appState.activeAirportCode = "KYYY";
-      rerender(<TrainingPanel />);
+      rerender(<TrainingPanel hidden={false} />);
       await waitFor(() => expect(fetchMock.mock.calls.map(([url]) => url)).toContain("data/airports/KYYY/training/index.json"));
       const fetched = fetchMock.mock.calls.map(([url]) => url as string);
       expect(fetched.filter((url) => url.startsWith("data/airports/KYYY/training/executor_test"))).toEqual([]);
@@ -240,7 +240,7 @@ describe("TrainingPanel", () => {
       stale.base.sampleWrittenUtc = "2026-09-01T00:00:00+00:00";
       serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlays(), [EXECUTOR_PATH]: stale,
               [PRIOR_PATH]: mockPriorOverlay() });
-      render(<TrainingPanel />);
+      render(<TrainingPanel hidden={false} />);
       expect(await screen.findByText(`Overlay ${EXECUTOR_ID} cannot be read.`)).toBeTruthy();
       expect(screen.getByText(/the set was re-exported after the overlay/)).toBeTruthy();
       await waitFor(() => expect(lastOf(setTrainingPrior)?.flight.flightKey).toBe(VECTORED_KEY));
@@ -251,7 +251,7 @@ describe("TrainingPanel", () => {
     const broken: any = mockSample();
     broken.flights[0].envelopes.altitude[0].check.inside = 3;
     serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: broken });
-    render(<TrainingPanel />);
+    render(<TrainingPanel hidden={false} />);
     expect(await screen.findByText(new RegExp(`Set ${SET_ID} cannot be read`))).toBeTruthy();
     expect(screen.getByText(/says 3 rows inside, but the tube's own flags count 20/)).toBeTruthy();
     expect(screen.getByRole("combobox")).toBeTruthy();
@@ -261,7 +261,7 @@ describe("TrainingPanel", () => {
     const index: any = mockIndex();
     delete index.sets[0].title;
     serve({ [INDEX_PATH]: index, [SAMPLE_PATH]: mockSample() });
-    render(<TrainingPanel />);
+    render(<TrainingPanel hidden={false} />);
     expect(await screen.findByText(/Entry box_v3 was rejected/)).toBeTruthy();
     expect(await screen.findByText("TST1")).toBeTruthy();
   });

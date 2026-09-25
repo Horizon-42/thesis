@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-const { appState, setMode } = vi.hoisted(() => ({
+const { appState, setMode, trainingMounts } = vi.hoisted(() => ({
   appState: { mode: "observe" as string },
   setMode: vi.fn(),
+  trainingMounts: { count: 0 },
 }));
 
 vi.mock("../../context/AppContext", () => ({
@@ -19,7 +20,17 @@ vi.mock("../EvaluationSummary", () => ({ default: () => <div>EVAL_SUMMARY</div> 
 vi.mock("../PilotPanel", () => ({
   default: ({ mode }: { mode: string }) => <div>PILOT:{mode}</div>,
 }));
-vi.mock("../TrainingPanel", () => ({ default: () => <div>TRAINING_PANEL</div> }));
+vi.mock("../TrainingPanel", async () => {
+  const { useEffect } = await import("react");
+  return {
+    default: ({ hidden }: { hidden: boolean }) => {
+      useEffect(() => {
+        trainingMounts.count += 1;
+      }, []);
+      return <div hidden={hidden}>TRAINING_PANEL</div>;
+    },
+  };
+});
 
 import WorkbenchLeftDock from "../WorkbenchLeftDock";
 
@@ -30,6 +41,7 @@ function renderDock() {
 describe("WorkbenchLeftDock", () => {
   beforeEach(() => {
     appState.mode = "observe";
+    trainingMounts.count = 0;
     vi.clearAllMocks();
   });
 
@@ -50,6 +62,28 @@ describe("WorkbenchLeftDock", () => {
     expect(screen.queryByText("CONTROL_PANEL")).toBeNull();
     expect(screen.queryByText(/FLIGHTS:/)).toBeNull();
     expect(screen.queryByText(/PILOT:/)).toBeNull();
+  });
+
+  it("mounts the TrainingPanel on its first visit and keeps it, hidden, in the other tasks", () => {
+    const { rerender } = renderDock();
+    // never opened: nothing of Training is mounted (nothing downloaded)
+    expect(screen.queryByText("TRAINING_PANEL")).toBeNull();
+    const show = (mode: string) => {
+      appState.mode = mode;
+      rerender(<WorkbenchLeftDock flightIds={["a", "b", "c"]} flightSummaries={{}} />);
+    };
+    show("training");
+    expect(screen.getByText("TRAINING_PANEL").hidden).toBe(false);
+    for (const mode of ["observe", "fly", "compare"]) {
+      show(mode);
+      expect(screen.getByText("TRAINING_PANEL").hidden).toBe(true);
+    }
+    expect(screen.getByText("PILOT:comparison")).toBeTruthy();
+    show("training");
+    expect(screen.getByText("TRAINING_PANEL").hidden).toBe(false);
+    expect(screen.queryByText("CONTROL_PANEL")).toBeNull();
+    // one session: mounted once, never again
+    expect(trainingMounts.count).toBe(1);
   });
 
   it("drives the PilotPanel sub-mode for fly / optimize / compare", () => {
