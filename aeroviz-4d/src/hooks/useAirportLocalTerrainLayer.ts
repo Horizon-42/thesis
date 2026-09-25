@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
-import { useApp } from "../context/AppContext";
+import { NO_TERRAIN_TILES, useApp } from "../context/AppContext";
 import { airportLocalTerrainMetadataUrl } from "../terrain/airportLocalTerrain";
 import {
   loadAirportLocalTerrain,
@@ -9,7 +9,7 @@ import {
 } from "../terrain/airportLocalTerrain";
 import {
   applyLocalTerrainStreamingSettings,
-  airportLocalTerrainProgressState,
+  airportLocalTerrainPhaseState,
   buildLocalTerrainActivationPlan,
   captureTerrainProviderRestorePoint,
   disabledAirportLocalTerrainState,
@@ -57,11 +57,15 @@ export interface UseAirportLocalTerrainLayerOptions {
  *
  * Returns metadata and loading status so callers can display terrain info if desired.
  * On cleanup, restores the previous terrain provider.
+ *
+ * It publishes the terrain's STATE only when its phase changes (loading, preloading, active, error) and its tile
+ * COUNTS on every tile (`setAirportLocalTerrainProgress`): every `useApp` consumer reads the state, only the HUD the
+ * counts.
  */
 export function useAirportLocalTerrainLayer(
   options: UseAirportLocalTerrainLayerOptions = {},
 ): AirportLocalTerrainLayerState {
-  const { viewer, activeAirportCode, setAirportLocalTerrain } = useApp();
+  const { viewer, activeAirportCode, setAirportLocalTerrain, setAirportLocalTerrainProgress } = useApp();
   const enabled = options.enabled ?? true;
   const backgroundPreload = options.backgroundPreload ?? false;
   const maximumScreenSpaceError =
@@ -99,6 +103,7 @@ export function useAirportLocalTerrainLayer(
           ? missingAirportLocalTerrainState(activeAirportCode || null)
           : disabledAirportLocalTerrainState(activeAirportCode || null),
       );
+      setAirportLocalTerrainProgress(NO_TERRAIN_TILES);
       return;
     }
 
@@ -114,10 +119,11 @@ export function useAirportLocalTerrainLayer(
       totalTiles: 0,
       error: null,
     });
-    setAirportLocalTerrain(airportLocalTerrainProgressState({
+    setAirportLocalTerrain(airportLocalTerrainPhaseState({
       status: "loading",
       airportCode: activeAirportCode,
     }));
+    setAirportLocalTerrainProgress(NO_TERRAIN_TILES);
 
     let terrainPromise = terrainCacheRef.current.get(metadataUrl);
     if (!terrainPromise) {
@@ -139,14 +145,13 @@ export function useAirportLocalTerrainLayer(
           totalTiles: activationPlan.focusedTiles.length,
           error: null,
         });
-        setAirportLocalTerrain(airportLocalTerrainProgressState({
+        setAirportLocalTerrain(airportLocalTerrainPhaseState({
           status: "preloading",
           airportCode: activeAirportCode,
           heightRange: activationPlan.heightRange,
           metadata,
-          loadedTiles: 0,
-          totalTiles: activationPlan.focusedTiles.length,
         }));
+        setAirportLocalTerrainProgress({ loadedTiles: 0, totalTiles: activationPlan.focusedTiles.length });
 
         await terrain.preloadTiles({
           tiles: activationPlan.focusedTiles,
@@ -162,14 +167,7 @@ export function useAirportLocalTerrainLayer(
               totalTiles,
               error: null,
             });
-            setAirportLocalTerrain(airportLocalTerrainProgressState({
-              status: "preloading",
-              airportCode: activeAirportCode,
-              heightRange: activationPlan.heightRange,
-              metadata,
-              loadedTiles,
-              totalTiles,
-            }));
+            setAirportLocalTerrainProgress({ loadedTiles, totalTiles });
           },
         });
 
@@ -191,14 +189,13 @@ export function useAirportLocalTerrainLayer(
           totalTiles: activeTotalTiles,
           error: null,
         });
-        setAirportLocalTerrain(airportLocalTerrainProgressState({
+        setAirportLocalTerrain(airportLocalTerrainPhaseState({
           status: "active",
           airportCode: activeAirportCode,
           heightRange: activationPlan.heightRange,
           metadata,
-          loadedTiles: activeLoadedTiles,
-          totalTiles: activeTotalTiles,
         }));
+        setAirportLocalTerrainProgress({ loadedTiles: activeLoadedTiles, totalTiles: activeTotalTiles });
 
         if (backgroundPreload) {
           void terrain.preloadTiles({
@@ -214,14 +211,7 @@ export function useAirportLocalTerrainLayer(
                   totalTiles,
                 };
               });
-              setAirportLocalTerrain(airportLocalTerrainProgressState({
-                status: "active",
-                airportCode: activeAirportCode,
-                heightRange: activationPlan.heightRange,
-                metadata,
-                loadedTiles,
-                totalTiles,
-              }));
+              setAirportLocalTerrainProgress({ loadedTiles, totalTiles });
             },
           }).catch((error) => {
             if (cancelled) return;
@@ -242,6 +232,7 @@ export function useAirportLocalTerrainLayer(
             error: null,
           });
           setAirportLocalTerrain(missingAirportLocalTerrainState(activeAirportCode));
+          setAirportLocalTerrainProgress(NO_TERRAIN_TILES);
           return;
         }
 
@@ -257,11 +248,12 @@ export function useAirportLocalTerrainLayer(
           totalTiles: 0,
           error: message,
         });
-        setAirportLocalTerrain(airportLocalTerrainProgressState({
+        setAirportLocalTerrain(airportLocalTerrainPhaseState({
           status: "error",
           airportCode: activeAirportCode,
           error: message,
         }));
+        setAirportLocalTerrainProgress(NO_TERRAIN_TILES);
       });
 
     return () => {
@@ -283,6 +275,7 @@ export function useAirportLocalTerrainLayer(
     maximumScreenSpaceError,
     activeAirportCode,
     setAirportLocalTerrain,
+    setAirportLocalTerrainProgress,
   ]);
 
   return state;

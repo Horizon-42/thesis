@@ -19,8 +19,6 @@ function localTerrainState(
     sourceCrsName: "EPSG:4326 geographic degrees",
     minimumHeightM: 0.7,
     maximumHeightM: 50.7,
-    loadedTiles: 1428,
-    totalTiles: 1428,
     error: null,
     ...overrides,
   };

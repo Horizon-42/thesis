@@ -87,10 +87,20 @@ export interface AirportLocalTerrainState {
   sourceCrsName: string | null;
   minimumHeightM: number | null;
   maximumHeightM: number | null;
-  loadedTiles: number;
-  totalTiles: number;
   error: string | null;
 }
+
+/**
+ * THE LOCAL TERRAIN'S TILE COUNTS, apart from its state: they change on every tile the preload warms (hundreds per
+ * airport), so they are a context of their own that `useApp` does not read — only the HUD, which shows them
+ * (`useAirportLocalTerrainProgress`), re-renders with them. The state above changes only when the terrain's phase does.
+ */
+export interface AirportLocalTerrainProgress {
+  loadedTiles: number;
+  totalTiles: number;
+}
+
+export const NO_TERRAIN_TILES: AirportLocalTerrainProgress = { loadedTiles: 0, totalTiles: 0 };
 
 function airportLocalTerrainStateForLayer(
   airportCode: string | null,
@@ -107,8 +117,6 @@ function airportLocalTerrainStateForLayer(
     sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
-    loadedTiles: 0,
-    totalTiles: 0,
     error: null,
   };
 }
@@ -126,12 +134,14 @@ interface SceneState {
   layers: Record<LayerKey, boolean>;
   toggleLayer: (key: LayerKey) => void;
 
-  /** Status of the active airport-scoped local high-resolution terrain source */
+  /** Status of the active airport-scoped local high-resolution terrain source; set when its phase changes */
   airportLocalTerrain: AirportLocalTerrainState;
   setAirportLocalTerrain: (state: AirportLocalTerrainState) => void;
+  /** Its tile counts, set on every tile; read with `useAirportLocalTerrainProgress` (not here: see its type) */
+  setAirportLocalTerrainProgress: (progress: AirportLocalTerrainProgress) => void;
 
-  /** Radius (km) of the airport-centred range ring drawn by the `rangeRing` layer */
-  rangeRingRadiusKm: number;
+  /** Sets the radius (km) of the airport-centred range ring drawn by the `rangeRing` layer. The radius itself moves on
+   *  every step of the drawer's slider: read it with `useRangeRingRadiusKm`, which `useApp` does not spread. */
   setRangeRingRadiusKm: (km: number) => void;
 }
 
@@ -390,6 +400,8 @@ const PlaybackContext = createContext<PlaybackState | null>(null);
 const ApproachViewSessionContext = createContext<ApproachViewSessionState | null>(null);
 const TrainingSessionContext = createContext<TrainingSessionState | null>(null);
 const TrainingCursorContext = createContext<TrainingCursorState | null>(null);
+const AirportLocalTerrainProgressContext = createContext<AirportLocalTerrainProgress | null>(null);
+const RangeRingRadiusContext = createContext<number | null>(null);
 const WorkbenchUiContext = createContext<WorkbenchUiState | null>(null);
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -479,10 +491,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
-    loadedTiles: 0,
-    totalTiles: 0,
     error: null,
   });
+  const [airportLocalTerrainProgress, setAirportLocalTerrainProgress] =
+    useState<AirportLocalTerrainProgress>(NO_TERRAIN_TILES);
 
   // Keep heavyweight analysis layers opt-in. Local terrain and RNAV procedure
   // geometry can allocate hundreds of MB once loaded, so startup should show the
@@ -580,6 +592,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAirportLocalTerrain(
         airportLocalTerrainStateForLayer(normalizedCode, layers.airportLocalTerrain),
       );
+      setAirportLocalTerrainProgress(NO_TERRAIN_TILES);
       setAirport(null);
       setActiveAirportCodeState(normalizedCode);
     },
@@ -593,9 +606,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toggleLayer,
     airportLocalTerrain,
     setAirportLocalTerrain,
-    rangeRingRadiusKm,
+    setAirportLocalTerrainProgress,
     setRangeRingRadiusKm,
-  }), [airportLocalTerrain, layers, rangeRingRadiusKm, setViewer, toggleLayer, viewer]);
+  }), [airportLocalTerrain, layers, setViewer, toggleLayer, viewer]);
   const airportSessionState: AirportSessionState = useMemo(() => ({
     airports,
     activeAirportCode,
@@ -705,7 +718,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 <TrainingSessionContext.Provider value={trainingSessionState}>
                   <WorkbenchUiContext.Provider value={workbenchUiState}>
                     <TrainingCursorContext.Provider value={trainingCursorState}>
-                      {children}
+                      <AirportLocalTerrainProgressContext.Provider value={airportLocalTerrainProgress}>
+                        <RangeRingRadiusContext.Provider value={rangeRingRadiusKm}>
+                          {children}
+                        </RangeRingRadiusContext.Provider>
+                      </AirportLocalTerrainProgressContext.Provider>
                     </TrainingCursorContext.Provider>
                   </WorkbenchUiContext.Provider>
                 </TrainingSessionContext.Provider>
@@ -766,4 +783,18 @@ export function useTrainingCursor(): TrainingCursorState {
   const cursor = useContext(TrainingCursorContext);
   if (!cursor) throw new Error("useTrainingCursor() was called outside of <AppProvider>.");
   return cursor;
+}
+
+/** The local terrain's tile counts (`AirportLocalTerrainProgress`): only for what shows them — the HUD. */
+export function useAirportLocalTerrainProgress(): AirportLocalTerrainProgress {
+  const progress = useContext(AirportLocalTerrainProgressContext);
+  if (!progress) throw new Error("useAirportLocalTerrainProgress() was called outside of <AppProvider>.");
+  return progress;
+}
+
+/** The range ring's radius (km): only for what draws it — the ring layer and the drawer's slider. */
+export function useRangeRingRadiusKm(): number {
+  const radiusKm = useContext(RangeRingRadiusContext);
+  if (radiusKm === null) throw new Error("useRangeRingRadiusKm() was called outside of <AppProvider>.");
+  return radiusKm;
 }

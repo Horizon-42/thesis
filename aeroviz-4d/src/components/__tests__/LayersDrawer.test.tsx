@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
-const { appState, toggleLayer, setLayersDrawerOpen } = vi.hoisted(() => {
+const { appState, rangeRing, toggleLayer, setLayersDrawerOpen } = vi.hoisted(() => {
   const defaultLayers = {
     satelliteImagery: true,
     terrain: false,
@@ -28,18 +28,17 @@ const { appState, toggleLayer, setLayersDrawerOpen } = vi.hoisted(() => {
     sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
-    loadedTiles: 0,
-    totalTiles: 0,
     error: null,
   };
   const appState: any = {
     layers: { ...defaultLayers },
     airportLocalTerrain: { ...defaultAirportLocalTerrain },
-    rangeRingRadiusKm: 5,
     layersDrawerOpen: true,
   };
   return {
     appState,
+    // the ring's radius is its own context (it moves on every slider step), read through its own hook
+    rangeRing: { radiusKm: 5 },
     toggleLayer: vi.fn(),
     setLayersDrawerOpen: vi.fn(),
   };
@@ -52,6 +51,7 @@ vi.mock("../../context/AppContext", () => ({
     setRangeRingRadiusKm: vi.fn(),
     setLayersDrawerOpen,
   }),
+  useRangeRingRadiusKm: () => rangeRing.radiusKm,
 }));
 
 import LayersDrawer from "../LayersDrawer";
@@ -118,8 +118,6 @@ describe("LayersDrawer", () => {
       sourceCrsName: "EPSG:26917 / UTM zone 17 projected metres",
       minimumHeightM: 89,
       maximumHeightM: 243,
-      loadedTiles: 12,
-      totalTiles: 12,
       error: null,
     };
 

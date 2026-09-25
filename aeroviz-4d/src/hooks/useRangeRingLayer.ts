@@ -22,7 +22,7 @@
 
 import { useEffect, useRef } from "react";
 import * as Cesium from "cesium";
-import { useApp } from "../context/AppContext";
+import { useApp, useRangeRingRadiusKm } from "../context/AppContext";
 import type { AirportConfig } from "../data/airportData";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 
@@ -70,7 +70,8 @@ function formatRadius(radiusKm: number): string {
 }
 
 export function useRangeRingLayer(): void {
-  const { viewer, airport, layers, rangeRingRadiusKm } = useApp();
+  const { viewer, airport, layers } = useApp();
+  const rangeRingRadiusKm = useRangeRingRadiusKm();
   const outlineRef = useRef<Cesium.Entity | null>(null);
   const labelRef = useRef<Cesium.Entity | null>(null);
 

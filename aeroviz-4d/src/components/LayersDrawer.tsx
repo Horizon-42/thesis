@@ -9,7 +9,7 @@
  * All toggles go through AppContext — this never touches Cesium directly.
  */
 
-import { useApp, type LayerKey } from "../context/AppContext";
+import { useApp, useRangeRingRadiusKm, type LayerKey } from "../context/AppContext";
 import { useEffect, useRef, useState } from "react";
 
 /** Human-readable names for each layer toggle in this drawer. */
@@ -94,11 +94,11 @@ export default function LayersDrawer() {
     layers,
     toggleLayer,
     airportLocalTerrain,
-    rangeRingRadiusKm,
     setRangeRingRadiusKm,
     layersDrawerOpen,
     setLayersDrawerOpen,
   } = useApp();
+  const rangeRingRadiusKm = useRangeRingRadiusKm();
 
   // The range-ring radius field keeps its own draft string so the user can fully clear
   // it without each keystroke being clamped back to the minimum. We sync the draft from

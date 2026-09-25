@@ -341,12 +341,11 @@ export function airportLocalTerrainState(
   };
 }
 
-export function airportLocalTerrainProgressState(args: {
+/** The terrain's state in one phase of loading it (its tile counts are apart: `AirportLocalTerrainProgress`). */
+export function airportLocalTerrainPhaseState(args: {
   status: Extract<AirportLocalTerrainState["status"], "loading" | "preloading" | "active" | "error">;
   airportCode: string;
   heightRange?: TerrainHeightRange | null;
-  loadedTiles?: number;
-  totalTiles?: number;
   metadata?: AirportLocalTerrainMetadata | null;
   error?: string | null;
 }): AirportLocalTerrainState {
@@ -356,8 +355,6 @@ export function airportLocalTerrainProgressState(args: {
     ...airportLocalTerrainMetadataStateFields(args.metadata),
     minimumHeightM: args.heightRange?.minimumHeightM ?? null,
     maximumHeightM: args.heightRange?.maximumHeightM ?? null,
-    loadedTiles: args.loadedTiles ?? 0,
-    totalTiles: args.totalTiles ?? 0,
     error: args.error ?? null,
   });
 }
@@ -376,8 +373,6 @@ export function missingAirportLocalTerrainState(
     sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
-    loadedTiles: 0,
-    totalTiles: 0,
     error: null,
   };
 }
@@ -396,8 +391,6 @@ export function disabledAirportLocalTerrainState(
     sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
-    loadedTiles: 0,
-    totalTiles: 0,
     error: null,
   };
 }

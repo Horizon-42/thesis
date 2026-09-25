@@ -2,7 +2,13 @@ import type { ReactNode } from "react";
 import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AppProvider, useApp, useTrainingCursor } from "../AppContext";
+import {
+  AppProvider,
+  useAirportLocalTerrainProgress,
+  useApp,
+  useRangeRingRadiusKm,
+  useTrainingCursor,
+} from "../AppContext";
 
 const fetchMock = vi.fn();
 
@@ -165,5 +171,44 @@ describe("AppContext", () => {
     expect(renders.cursor).toBe(before.cursor + 2);
     expect(renders.app).toBe(before.app);
     expect("trainingCursorS" in app).toBe(false);
+  });
+  it("moves the terrain's tile counts and the range ring's radius without re-rendering what reads only useApp", async () => {
+    // the counts move on every tile the preload warms, the radius on every step of its slider
+    const renders = { app: 0, progress: 0, ring: 0 };
+    let app!: ReturnType<typeof useApp>;
+    let progress!: ReturnType<typeof useAirportLocalTerrainProgress>;
+    let radiusKm!: number;
+    function ReadsApp() {
+      app = useApp();
+      renders.app += 1;
+      return null;
+    }
+    function ReadsProgress() {
+      progress = useAirportLocalTerrainProgress();
+      renders.progress += 1;
+      return null;
+    }
+    function ReadsRing() {
+      radiusKm = useRangeRingRadiusKm();
+      renders.ring += 1;
+      return null;
+    }
+    render(<AppProvider><ReadsApp /><ReadsProgress /><ReadsRing /></AppProvider>);
+    await waitFor(() => expect(app.airports).toHaveLength(2));
+    await act(async () => undefined);
+    const before = { ...renders };
+    expect(before.app).toBeGreaterThan(0);
+    act(() => app.setAirportLocalTerrainProgress({ loadedTiles: 3, totalTiles: 10 }));
+    act(() => app.setAirportLocalTerrainProgress({ loadedTiles: 4, totalTiles: 10 }));
+    act(() => app.setRangeRingRadiusKm(7.5));
+    expect(progress).toEqual({ loadedTiles: 4, totalTiles: 10 });
+    expect(radiusKm).toBe(7.5);
+    expect(renders.progress).toBe(before.progress + 2);
+    expect(renders.ring).toBe(before.ring + 1);
+    expect(renders.app).toBe(before.app);
+    expect("airportLocalTerrainProgress" in app || "rangeRingRadiusKm" in app).toBe(false);
+    // another airport: its terrain starts with no tile counted
+    act(() => app.setActiveAirportCode("CYVR"));
+    expect(progress).toEqual({ loadedTiles: 0, totalTiles: 0 });
   });
 });

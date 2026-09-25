@@ -42,8 +42,6 @@ const {
     sourceCrsName: null,
     minimumHeightM: null,
     maximumHeightM: null,
-    loadedTiles: 0,
-    totalTiles: 0,
     error: null,
   };
   const appState: any = {

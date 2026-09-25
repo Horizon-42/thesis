@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
-import { useApp } from "../context/AppContext";
+import { useAirportLocalTerrainProgress, useApp } from "../context/AppContext";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const HDG_STEP   = 15;  // degrees per heading button click
@@ -78,6 +78,7 @@ interface CamState {
 
 export default function HUD() {
   const { viewer, airport, airportLocalTerrain, setSelectedFlightId } = useApp();
+  const { loadedTiles, totalTiles } = useAirportLocalTerrainProgress();
   const [cam, setCam] = useState<CamState | null>(null);
   const [lighting, setLighting] = useState(true);
   const [exaggeration, setExaggeration] = useState(1);
@@ -322,14 +323,9 @@ export default function HUD() {
   const localTerrainLabel = (() => {
     switch (airportLocalTerrain.status) {
       case "active":
-        return airportLocalTerrain.totalTiles > 0 &&
-          airportLocalTerrain.loadedTiles < airportLocalTerrain.totalTiles
-          ? `Active ${airportLocalTerrain.loadedTiles}/${airportLocalTerrain.totalTiles}`
-          : "Active";
+        return totalTiles > 0 && loadedTiles < totalTiles ? `Active ${loadedTiles}/${totalTiles}` : "Active";
       case "preloading":
-        return airportLocalTerrain.totalTiles > 0
-          ? `Preload ${airportLocalTerrain.loadedTiles}/${airportLocalTerrain.totalTiles}`
-          : "Preloading";
+        return totalTiles > 0 ? `Preload ${loadedTiles}/${totalTiles}` : "Preloading";
       case "loading":
         return "Loading";
       case "missing":

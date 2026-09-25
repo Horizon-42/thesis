@@ -5,6 +5,7 @@ import { JsonFetchError } from "../../utils/fetchJson";
 const {
   loadAirportLocalTerrain,
   setAirportLocalTerrain,
+  setAirportLocalTerrainProgress,
   mockViewer,
   getActiveAirportCode,
   setActiveAirportCode,
@@ -72,6 +73,7 @@ const {
     });
   });
   const setAirportLocalTerrain = vi.fn();
+  const setAirportLocalTerrainProgress = vi.fn();
   const mockViewer = {
     scene: {
       terrainProvider: { _tag: "world-terrain" } as any,
@@ -92,6 +94,7 @@ const {
   return {
     loadAirportLocalTerrain,
     setAirportLocalTerrain,
+    setAirportLocalTerrainProgress,
     mockViewer,
     getActiveAirportCode: () => activeAirportCode,
     setActiveAirportCode: (airportCode: string) => {
@@ -124,7 +127,9 @@ vi.mock("../../context/AppContext", () => ({
     viewer: mockViewer,
     activeAirportCode: getActiveAirportCode(),
     setAirportLocalTerrain,
+    setAirportLocalTerrainProgress,
   }),
+  NO_TERRAIN_TILES: { loadedTiles: 0, totalTiles: 0 },
 }));
 
 import { useAirportLocalTerrainLayer } from "../useAirportLocalTerrainLayer";
@@ -141,6 +146,7 @@ describe("useAirportLocalTerrainLayer", () => {
     mockViewer.scene.globe.depthTestAgainstTerrain = false;
     mockViewer.scene.requestRender.mockClear();
     setAirportLocalTerrain.mockClear();
+    setAirportLocalTerrainProgress.mockClear();
     loadAirportLocalTerrain.mockClear();
     preloadTilesByAirport.CYVR.mockClear();
     preloadTilesByAirport.KSJC.mockClear();
@@ -204,6 +210,15 @@ describe("useAirportLocalTerrainLayer", () => {
     expect(mockViewer.scene.globe.depthTestAgainstTerrain).toBe(true);
     await waitFor(() => expect(result.current.loadedTiles).toBe(1));
     expect(result.current.totalTiles).toBe(1);
+    // the state is published once per phase; the tile counts, which move on every tile, apart from it
+    expect(setAirportLocalTerrain.mock.calls.map(([state]) => state.status)).toEqual(["loading", "preloading", "active"]);
+    expect(setAirportLocalTerrainProgress.mock.calls.map(([progress]) => progress)).toEqual([
+      { loadedTiles: 0, totalTiles: 0 },                       // loading
+      { loadedTiles: 0, totalTiles: 1 },                       // preloading: the focused tile
+      { loadedTiles: 0, totalTiles: 1 },                       // ... a tile's progress
+      { loadedTiles: 1, totalTiles: 1 },                       // ... and the next
+      { loadedTiles: 1, totalTiles: 1 },                       // active
+    ]);
     expect(setAirportLocalTerrain).toHaveBeenLastCalledWith({
       status: "active",
       airportCode: "CYVR",
@@ -215,8 +230,6 @@ describe("useAirportLocalTerrainLayer", () => {
       sourceCrsName: "EPSG:26910 / UTM zone 10 projected metres",
       minimumHeightM: -9,
       maximumHeightM: 243.8,
-      loadedTiles: 1,
-      totalTiles: 1,
       error: null,
     });
   });
@@ -259,8 +272,6 @@ describe("useAirportLocalTerrainLayer", () => {
       sourceCrsName: "EPSG:4326 geographic degrees",
       minimumHeightM: 0.7,
       maximumHeightM: 50.7,
-      loadedTiles: 1,
-      totalTiles: 1,
       error: null,
     });
   });
@@ -290,9 +301,8 @@ describe("useAirportLocalTerrainLayer", () => {
       sourceCrsName: null,
       minimumHeightM: null,
       maximumHeightM: null,
-      loadedTiles: 0,
-      totalTiles: 0,
       error: null,
     });
+    expect(setAirportLocalTerrainProgress).toHaveBeenLastCalledWith({ loadedTiles: 0, totalTiles: 0 });
   });
 });
