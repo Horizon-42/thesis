@@ -342,8 +342,8 @@
         <span class="en" lang="en">This page explains one thing clearly: how the point-mass dynamics written in a flat ENU tangent plane (<code>make_dynamics_model</code>) become, step by step, the continuous dynamics written directly in geodetic coordinates \((\text{lat},\text{lon},h)\) (<code>make_geodetic_dynamics_model</code>). The bridge between them is the per-step re-anchored ENU stepper (<code>make_geo_step_from_enu_integrator</code>). The goal is not to copy formulas, but to see what each coordinate transformation actually does in three-dimensional space.</span>
       </p>
       <p class="source-note">
-        前置阅读：同项目的 <a href="../../aerodrome_model/docs/geodetic-ecef-coordinates-teaching.html">《WGS 84 大地、ECEF 与本地切平面坐标教学文档》</a>（讲清楚 ENU 这个“坐标系”本身）。本页接着讲“在这个坐标系里放动力学方程，并把它升级到整颗椭球”。下面三幅三维图都是用真实 WGS 84 参数在浏览器里实时计算的，可以拖动滑块互动；为了肉眼可见，球体曲率和高度差做了夸张，但读数全部按真实公式给出。
-        <span class="en" lang="en">Prerequisite: the sibling document <a href="../../aerodrome_model/docs/geodetic-ecef-coordinates-teaching.html">“WGS 84 Geodetic, ECEF, and Local Tangent Plane.”</a> That page defines the ENU coordinate system itself; this page puts dynamics equations inside that system and then upgrades them to the whole ellipsoid. The three 3D figures below are computed live in the browser from real WGS 84 parameters and respond to the sliders. Curvature and height gaps are exaggerated so they are visible by eye, but every numeric readout uses the exact formula.</span>
+        前置阅读：同项目的 <a href="geodetic-ecef-coordinates-teaching.html">《WGS 84 大地、ECEF 与本地切平面坐标教学文档》</a>（讲清楚 ENU 这个“坐标系”本身）。本页接着讲“在这个坐标系里放动力学方程，并把它升级到整颗椭球”。下面三幅三维图都是用真实 WGS 84 参数在浏览器里实时计算的，可以拖动滑块互动；为了肉眼可见，球体曲率和高度差做了夸张，但读数全部按真实公式给出。
+        <span class="en" lang="en">Prerequisite: the sibling document <a href="geodetic-ecef-coordinates-teaching.html">“WGS 84 Geodetic, ECEF, and Local Tangent Plane.”</a> That page defines the ENU coordinate system itself; this page puts dynamics equations inside that system and then upgrades them to the whole ellipsoid. The three 3D figures below are computed live in the browser from real WGS 84 parameters and respond to the sliders. Curvature and height gaps are exaggerated so they are visible by eye, but every numeric readout uses the exact formula.</span>
       </p>
 
       <div class="top-grid" aria-label="学习目标 / Learning goals">
@@ -1836,7 +1836,7 @@ a_{\text{vert}}\approx g\,(1-\cos\theta)\approx \tfrac12 g\,\theta^2
           <article class="card">
             <h3>继续学习与相关源文件<span class="en" lang="en">Further Reading and Related Sources</span></h3>
             <ul>
-              <li>前置：<a href="../../aerodrome_model/docs/geodetic-ecef-coordinates-teaching.html">WGS 84 / ECEF / 本地切平面教学</a><span class="en" lang="en">Prerequisite: WGS 84 / ECEF / local tangent plane teaching doc.</span></li>
+              <li>前置：<a href="geodetic-ecef-coordinates-teaching.html">WGS 84 / ECEF / 本地切平面教学</a><span class="en" lang="en">Prerequisite: WGS 84 / ECEF / local tangent plane teaching doc.</span></li>
               <li>相关：<a href="surface_frame_wgs84_propagation.html">surface_frame_wgs84_propagation.html</a>（表面框架传播）<span class="en" lang="en">Related: surface-frame WGS 84 propagation.</span></li>
               <li>源码：<code>aerodynamic_model/casadi_simulator.py</code>（三个模型都在这里）<span class="en" lang="en">Source: all three models live in casadi_simulator.py.</span></li>
               <li>验证脚本：<code>4dTrajectory/optimization/geodetic_vs_reanchored_error.py</code>、<code>dynamics_comparison_30km.py</code><span class="en" lang="en">Validation scripts.</span></li>
