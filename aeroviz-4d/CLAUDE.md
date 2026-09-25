@@ -151,6 +151,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   the read-back is a pure model + four charts + a window shell (`components/training/`); the 3D scene is
   `scene/trainingEntities.ts`, built once per flight — Draw switches set `show`, they rebuild nothing**; a reading given only
   in a tooltip is also page text behind an ⓘ (`training/NotesToggle.tsx`) (AV27).
+- **The Training cursor is its own context (`useTrainingCursor`), which `useApp` does not read — it moves on every chart
+  hover; read it only in leaves (`TrainingScene` runs the 3D layer; never a hook in `FlightApp`, or every hover re-renders
+  the workbench). The Training panel stays mounted after a visit (`hidden` in other tasks), so its session
+  survives a task switch at the same airport (another airport opened elsewhere drops it — no background download) —
+  anything drawing Training state must check `mode`** (AV28).
 
 ## Comparison CZML colour contract
 

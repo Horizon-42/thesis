@@ -6,24 +6,38 @@ change that surfaced them stays reviewable. Nothing here is a live bug unless it
 Each entry states what was **verified** versus what is **judgement**, so a later reader can
 tell how much re-checking it needs. Delete an entry when it is fixed or dismissed.
 
+## Pilot: the aircraft catalog's failure is cleared on entering Trajectory (2026-09-26)
+
+**Verified by reading** (review of `dev-frontend-followups` `0de09764`). When `GET /simulation/aircraft` fails, PilotPanel
+shows why (`setError`, `role="alert"`), but `openTrajectoryMode` (`aeroviz-4d/src/components/PilotPanel.tsx` ~L1054) and a
+successful RNAV-candidate load (~L753) both call `setError(null)` — so in the very mode whose target reads
+"— (no aircraft)" and whose Optimize is disabled, the reason is gone. **Judgement**: hold the catalog's failure in its own
+state, shown while there is no aircraft, apart from the one-shot `error` the other actions clear. The panel's test pins
+the alert at mount only.
+
+## Two more values re-render every `useApp` consumer (2026-09-26)
+
+**Verified by reading** (the review of the Training cursor split, `dev-frontend-followups` `0ee1d083`). `useApp()` spreads
+all eight contexts, so a value that changes often in any of them re-renders the whole app:
+- `SceneState.airportLocalTerrain` (`aeroviz-4d/src/context/AppContext.tsx` ~L470, its memo ~L588) is set on every
+  tile-preload progress callback (`useAirportLocalTerrainLayer.ts` ~L165 and ~L217): while the local terrain preloads,
+  every consumer re-renders once per tile.
+- `SceneState.rangeRingRadiusKm` is set on every step of the range slider (`LayersDrawer.tsx` ~L152): dragging it
+  re-renders the app per step (user-driven and bounded).
+Checked and fine: the HUD's camera readout (local state, 10 Hz), the bottom bar's and the approach view's clock ticks
+(local, guarded / throttled), the Pilot sim loop's readouts (local), `pilotTransport` (republished only on a state
+change). **Judgement**: the terrain progress deserves its own context (as the Training cursor got), or a progress
+readout held locally by its one reader; the slider can stay.
+
 ## Training module review: what it found outside the module (2026-09-25)
 
 The whole-module review of the Training view (frontend `aeroviz-4d/src/{data,hooks,components,scene}/training*`, the
 live executor's backend `aeroviz_backend/autopilot_segment/`; branch `dev-autopilot-live`) fixed what was inside. These
 are outside it — the app shell, the exporters, the prior — and are recorded, not changed.
 
-**1. Every chart hover re-renders the whole app** — *verified (mechanism), judgement (cost)*. `useApp()`
-(`aeroviz-4d/src/context/AppContext.tsx`, ~L704) reads all eight contexts, so every consumer subscribes to all of them;
-`trainingCursorS` changes on every mousemove over a Training chart, and `FlightApp` (`App.tsx:37`) calls `useApp` and
-`useTrainingTrackLayer()`, so each move re-renders the shell, both docks, the flight list, the HUD and the other layers'
-hook bodies (~50 `useApp` consumers). Fix: a cursor-only context with its own hook that `useApp` does not spread, and the
-3D layer mounted in a leaf `<TrainingScene/>` (both are needed: `FlightApp` itself subscribes).
-
-**2. Leaving Training throws its session away** — *verified (mechanism), judgement (whether intended)*.
-`WorkbenchLeftDock.tsx:70-75` unmounts `TrainingPanel` on every mode switch; coming back re-downloads and re-parses the
-index, the sample (KRDU's 6 MB) and the overlays, and resets the flight to the first and the camera. (The live
-executor's pick no longer re-flies: it is scoped to the flight on screen since this review.) Fix: hoist the session
-(index, sample, overlays, flight) into a provider above the mode switch, or keep the panel mounted and hidden.
+Resolved since and removed (numbers kept, the items refer to each other): **1** a chart hover re-rendered the whole app,
+**2** leaving Training threw its session away (both 2026-09-26, branch `dev-frontend-followups`: the cursor is its own
+context, the 3D layer a leaf, the panel stays mounted), **11** `TRAINING_STRATA` unpinned (2026-09-25).
 
 **3. `instruction_training_export.py` is a runner AND the Training files' library** — *verified*. It holds the schemas,
 `KIND_*`, `SPLIT`, `stored_sentence` / `reread`, `open_base_set`, `read_overlays`, `write_overlay`; two runners and the
@@ -1184,14 +1198,6 @@ sqrt(m / MALW) law then extrapolates its 149 kt to 162.5 kt at that mass (176.2 
 panel's MTOW). The A320 preset (66.3 t vs 66.0 t) and C172 (983 kg vs 1,157 kg) are closer. Giving the
 presets `max_landing_kg` from their published row would fix it, but it moves the preset masses, the
 analysis's native stall-margin range (B77W is its lower end) and the 2 B77W arrivals' scenarios.
-
-## Pilot frontend tests still use a 145 / 135 / 155 kt catalog fixture (2026-09-24)
-
-**Verified** (same review). `PilotPanel.test.tsx`, `pilotClient.test.ts`, `PilotInitialStateOverlay.test.tsx`
-and `usePilotInitialPlacement.test.ts` feed a catalog the backend can no longer produce for a
-single-valued preset (its `terminalSpeedMinKt` equals `terminalSpeedKt`), and nothing tests the
-panel when the catalog fails to load (the target editor is then not rendered and the summary reads
-"— (no aircraft)"). The tests pass; they just no longer look like the real catalog.
 
 ## Performance index: points the stage-2 review left for later (2026-09-24)
 

@@ -15,11 +15,11 @@
 |---|---|
 | 词表 | 读法 `instruction-v3`（航向词按步读，词表设计 §10.1）。前端钉住的规格 sha `TRAINING_SPEC_SHA256` 是 **`145d6911e75b`**（2026-09-25：按运行日划分后在新训练集上重新测量，产物 `4dTrajectory/outputs/POOLED/instruction_language/v4_20260924/`）——现在的执行器代码只飞这份产物（执行器规格 `v6_20260924`）。按航班划分的 `v3_20260924`（规格 `0b4ea75be36d`）上导出的 `instruction_v3` 集合和画在它上面的 `executor_v5_20260924` 叠加层从此按规格 sha 拒读 |
 | 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v2`（2026-09-24 先验第二版：形状没变，第 0 步已知的五列是点质量、读数口径是第 0 步只算跑道） |
-| 前端代码 | 数据：`src/data/trainingReader.ts`（三种文件共用的一个读取器：逐字段读，读不了就说出字段路径）、`trainingSample.ts`（集合与样本的契约）、`trainingOverlays.ts`（叠加层的契约）、`trainingAutopilot.ts`（实时执行器的契约、请求与三维回放的计算，§4.7）、`trainingText.ts`（各视图共用的措辞：结局、检查、越过入口、sha、时长）。视图：`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotCard,VocabularyNotes}.tsx`，读数窗口拆在 `src/components/training/`（`readbackModel.ts` 一次算好所有比例尺，四张图 `Readback{Plan,Heading,Altitude,Speed}.tsx`，画图小件 `chartKit.tsx`，两个浮动窗口共用的外壳 `TrainingWindow.tsx`，`ProblemBox.tsx`）。三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、几种线与点）、`src/hooks/useTrainingTrackLayer.ts`（观测航班）、`useTrainingExecutorLayers.ts`（回放与实时执行器）。另有 `useTrainingOverlays.ts`、`useTrainingAutopilot.ts`、`useMeasuredWidth.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
+| 前端代码 | 数据：`src/data/trainingReader.ts`（三种文件共用的一个读取器：逐字段读，读不了就说出字段路径）、`trainingSample.ts`（集合与样本的契约）、`trainingOverlays.ts`（叠加层的契约）、`trainingAutopilot.ts`（实时执行器的契约、请求与三维回放的计算，§4.7）、`trainingText.ts`（各视图共用的措辞：结局、检查、越过入口、sha、时长）。视图：`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotCard,VocabularyNotes}.tsx`，读数窗口拆在 `src/components/training/`（`readbackModel.ts` 一次算好所有比例尺，四张图 `Readback{Plan,Heading,Altitude,Speed}.tsx`，画图小件 `chartKit.tsx`，两个浮动窗口共用的外壳 `TrainingWindow.tsx`，`ProblemBox.tsx`）。三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、几种线与点）、`src/hooks/useTrainingTrackLayer.ts`（观测航班；由什么也不渲染的叶子组件 `src/components/TrainingScene.tsx` 调用，游标变了只有它重渲染，§4.5）、`useTrainingExecutorLayers.ts`（回放与实时执行器）。另有 `useTrainingOverlays.ts`、`useTrainingAutopilot.ts`、`useMeasuredWidth.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
 | 分支 | v3 的导出与界面在 `dev-vocab-v3-frontend`（从 `dev-vocab-v3` 的 `ba77d65c` 分出）：代码与测试 `8f7a8640`，文档在其后一个提交；用户合并 |
 | 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。上面还没有叠加层（执行器 v6 的验证集回放、先验第三版的导出都没发布到它上面）；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md` |
 | 实时执行器 | 后端 `POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包）：在句子条上点一个词，执行器从观测飞机说这个词时的状态飞这个词的一段（到它的包络结束之处：同列下一个词说出的地方，航向词再往后一个提前量；到了句子末尾就飞到落地），只判这个词。执行器代码一行不改，用它的单步接口 `Executor` 一个控制周期一个周期地飞，到段尾就停；每次都重新飞，不读任何回放或叠加层（§4.7）。用哪份执行器规格由后端按"现在的执行器代码接受的那一份"自动找：现在是 `v7_20260925`。界面上并排给出模拟飞行时间与计算用时。2026-09-25 在五个机场 200 架航班上逐段试飞 3,032 段：无异常，1,904 段飞到段尾、1,128 段落地；唯一的拒绝是没有机型动力学的航班（252 段，正式回放同样不飞）；每段耗时中位数 0.39 s、最长 3.6 s。单步飞法与"飞满时限再截断"逐位相同（216 段，状态与结束周期一致）。同一页面的新请求取代它还在排队或正在飞的旧请求（409），连点几个色块只飞最后一个。整模块审查之后又在同样 200 架航班的全部 3,526 个航向词上试飞：3,230 段飞成（3,037 段在包络内飞到段尾、143 段在包络内落地、49 段不判、1 段出界），296 段机型没有动力学；"带被段尾截短"的拒绝一次也没有出现（§4.7） |
-| 测试 | 2026-09-25（整模块审查的遗留项补完之后）：前端 Vitest 95 个文件 774 条，`tsc` 与 `npm run typecheck:scripts` 无错；后端 `aeroviz_backend/tests` 149 条全部通过（实时执行器 42 条，含与 `replay.fly_sentences` 逐个参数的装配比对、与前端常量的逐字比对、同一页面编号大的请求取代编号小的、带被段尾截短的拒绝（用 `fly_until` 真实飞出的几种情况）；审查用六个改坏的版本试过，每个都被测出来）；ts 的 `test_instruction_training_export.py`、`test_training_overlays.py`、`test_frontend_mirrors.py` 通过。补上的测试：回放里"没说到"与"被取代"的词、速度段在到达速度带之前被下一个词截断、句子在越过入口处截断、"Replay in 3D" 重放不重复添加实体、第一个周期就动力学失败的答复（读取、结果卡、读数窗口、三维）、结果卡的 Fly again、叠加层下拉按机场与集合记住所选、下载失败后关开重下。`npm run check-publication` 五个机场无错；五个执行器叠加层（画在按航班划分的旧集合上）在内存里换掉规格钉住值后按新读取器读过一遍，全部通过。浏览器（5174 / 8766 测试栈）核对过：选词、现飞、状态行、读数窗口、Escape、图例、换航班再回来不重飞 |
+| 测试 | 2026-09-25（纯前端的 followups 修完之后）：前端 Vitest 96 个文件 781 条（含 `App.test.tsx`：移动游标时外壳不重渲染），`tsc` 与 `npm run typecheck:scripts` 无错；后端 `aeroviz_backend/tests` 149 条全部通过（实时执行器 42 条，含与 `replay.fly_sentences` 逐个参数的装配比对、与前端常量的逐字比对、同一页面编号大的请求取代编号小的、带被段尾截短的拒绝（用 `fly_until` 真实飞出的几种情况）；审查用六个改坏的版本试过，每个都被测出来）；ts 的 `test_instruction_training_export.py`、`test_training_overlays.py`、`test_frontend_mirrors.py` 通过。补上的测试：回放里"没说到"与"被取代"的词、速度段在到达速度带之前被下一个词截断、句子在越过入口处截断、"Replay in 3D" 重放不重复添加实体、第一个周期就动力学失败的答复（读取、结果卡、读数窗口、三维）、结果卡的 Fly again、叠加层下拉按机场与集合记住所选、下载失败后关开重下。`npm run check-publication` 五个机场无错；五个执行器叠加层（画在按航班划分的旧集合上）在内存里换掉规格钉住值后按新读取器读过一遍，全部通过。浏览器（5174 / 8766 测试栈）核对过：选词、现飞、状态行、读数窗口、Escape、图例、换航班再回来不重飞 |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`、`instruction_v2`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 
 ---
@@ -303,6 +303,7 @@ python run_ts.py prior_training_export \
   画的颜色（蓝或红）。
 - 候选跑道与延长中线贴地；航向词发令点、许可、截获点、句子结束处。
 - 选中一架航班时相机取景一次，框住航迹（留 1.5 倍余量，句子条和左栏遮住一部分画面）；之后相机归用户，游标从不动它。
+  离开 Training 再回来时再取景一次（别的任务动过相机）。
 - **一架航班的实体只建一次**：Draw 的开关只显示 / 隐藏对应的实体，不重建——贴地的东西不必每次重新贴，先画的跑道也不会跑到
   包络上面。回放和实时执行器各自一组实体，开关它们不动别的。
 - 执行器的回放打开时：它飞出的航迹（青色，椭球高）、贴地的虚线投影、它出界的行（红，贴地，跟 "heading words" 开关）、
@@ -311,9 +312,15 @@ python run_ts.py prior_training_export \
 
 ### 4.5 共享游标与高亮
 
-`AppContext.trainingCursorS`（游标）和 `AppContext.trainingColumn`（选中的词类）由句子条、读数窗口和三维共用。
-**游标和实时执行器的选择属于屏幕上这架航班**（`trainingSelectionKey`：机场 / 集合 / 航班）：换航班、换集合、离开 Training
-再回来，游标回到 0、选择清空——不会有上一架的词被重新飞。词类的选择保留（它是偏好，不属于哪架航班）。
+游标（`useTrainingCursor`）和 `AppContext.trainingColumn`（选中的词类）由句子条、读数窗口和三维共用。**游标是单独的一个
+context，`useApp` 不读它**：鼠标在图上移动时，只有句子条（连同两个窗口）和三维的叶子组件 `TrainingScene` 重新渲染，整个界面
+不跟着动（原来每移动一下，外壳、两侧面板、航班列表、HUD 都重新渲染一遍）。
+**游标和实时执行器的选择属于屏幕上这架航班**（`trainingSelectionKey`：机场 / 集合 / 航班）：换航班、换集合，游标回到 0、
+选择清空——不会有上一架的词被重新飞；换之前拿到的设置函数写不进新航班。词类的选择保留（它是偏好，不属于哪架航班）。
+**离开 Training 再回来，一切照旧**：面板打开后就一直挂着，在别的任务里只是隐藏（`WorkbenchLeftDock`）——集合、航班、
+选中的词、游标、实时执行器的答复（飞完的直接画成落地的样子）都在，什么也不重新下载（原来要重新下载索引、样本——KRDU 的
+6 MB——和叠加层，航班回到第一架）。句子条和三维只在 Training 里画。**会话只属于打开它的那个机场**：在别的任务里换了机场，
+会话就丢掉，下次进 Training 为那时的机场重新打开——隐藏的面板不在后台为别的机场下载任何东西。
 **高亮的是一个词，不是一步**（用户 2026-09-24）：选中那一列在游标处生效的词（`trainingWordAt`）。同一步上
 别的列的词不亮——各列的词起止不同，一起亮会把没对齐的几段画成同一时刻。
 

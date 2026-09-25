@@ -233,9 +233,10 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 ### AV21 · Training 的游标与高亮
 
-`AppContext.trainingCursorS`（航班内的秒数）由句子条、读数核对窗口和三维图层共用。游标和实时执行器的选择（`trainingPick`）
-属于屏幕上这架航班——`trainingSelectionKey`：机场 / 集合 / 航班（航班键在同一机场的不同集合里会重复）——换航班、换集合、离开
-Training 再回来都归零 / 清空；在换之前拿到的设置函数写不进新航班（2026-09-25，整模块审查：旧的选择会在换回来时被重新飞）。
+游标（航班内的秒数，`useTrainingCursor`，AV28）由句子条、读数核对窗口和三维图层共用。游标和实时执行器的选择（`trainingPick`）
+属于屏幕上这架航班——`trainingSelectionKey`：机场 / 集合 / 航班（航班键在同一机场的不同集合里会重复）——换航班、换集合都归零 /
+清空；在换之前拿到的设置函数写不进新航班（2026-09-25，整模块审查：旧的选择会在换回来时被重新飞）。离开 Training 再回来则都
+保留（AV28）。
 
 **高亮的是选中的一个词，不是一步**（用户 2026-09-24）。`AppContext.trainingColumn` 是选中的词类（六列之一，或
 没有），高亮的是这一列在游标处生效的那个词（`trainingWordAt`），别的列在同一步生效的词一概不亮——它们的起止
@@ -347,6 +348,21 @@ Training 再回来都归零 / 清空；在换之前拿到的设置函数写不�
   键盘能到、读屏能读。
 - 集合与叠加层里的名字镜像（`TRAINING_STRATA` ↔ `instructions.readout.STRATA`，`TRAINING_PRIOR_RULES` ↔ `prior.readout.RULES`）
   由后端的 `MirrorTest` 逐字比对；样本的其余镜像由 `test_instruction_training_export.py` 钉住。
+
+### AV28 · Training 的游标只让读它的组件重渲染；Training 的会话跨任务保留（2026-09-26）
+
+- `useApp()` 把八个 context 一起展开，所以任何一个变了，所有调用它的组件（约 50 个）都重新渲染。游标在图上每次鼠标移动都变，
+  所以它是**单独的一个 context**（`TrainingCursorContext`，只能用 `useTrainingCursor()` 读），`useApp` 不读它；读游标的只有
+  `TrainingSentenceBar` 和 `useTrainingTrackLayer`。后者由**叶子组件** `src/components/TrainingScene.tsx`（什么也不渲染）调用，
+  不在 `FlightApp` 里——放回外壳，每次悬停整个工作台就又跟着重渲染。`src/__tests__/App.test.tsx` 钉住这一点（移动游标时
+  `FlightApp` 不重渲染），`AppContext.test.tsx` 钉住 `useApp` 的读者不重渲染。
+- `WorkbenchLeftDock` 在进入 Training 时挂上 `TrainingPanel`（记下当时的机场），之后一直挂着，在别的任务里只加 `hidden`
+  （`.training-panel[hidden] { display: none }`——面板自己的 `display: flex` 会盖过这个属性）。所以面板的会话——索引、集合、
+  样本、航班、叠加层、实时执行器——跨任务保留，回来时什么也不重新下载。**会话只属于打开它的那个机场**：在别的任务里换了机场，
+  面板就卸下（它的清理把选择与叠加层清空），回到原机场也不再挂上，下次进 Training 为当时的机场重新打开；在 Training 里换机场，
+  面板按机场重新挂上（`key`）。否则隐藏的面板会在后台为每个打开过的机场下载 Training 文件（审查发现，样本还下载两次）。
+  已发布的选择在别的任务里仍然在，所以**画 Training 的东西必须看 `mode`**：句子条与三维图层只在 `mode === "training"` 时画。
+  回到 Training 时三维重建、相机再取景一次；飞完的实时答复按 `playedAt` 计时，直接画成落地后的样子。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 
