@@ -5,6 +5,7 @@
     python -m trajectory_data_process.harvest --airport KRDU --reclassify-existing
     python -m trajectory_data_process.harvest --airport KRDU \
         --merge-source trajectory_data_process/outputs/harvest-may-2026
+    python -m trajectory_data_process.harvest --airport KRDU --remove-staging-leftovers
 
 The measured samples and their assignment-produced threshold events live in ``tracks/``.
 ``arrivals/`` and ``approach/`` are regenerable views, so ``--evaluate-only`` rebuilds
@@ -50,6 +51,7 @@ from trajectory_data_process.harvest.runner import (
     harvest_airport,
 )
 from trajectory_data_process.harvest.reclassify import reclassify_stored_tracks
+from trajectory_data_process.harvest.staging import remove_staging_leftovers, staging_leftovers
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -137,6 +139,14 @@ def build_parser() -> argparse.ArgumentParser:
             "and write a new --output staging root; source data are never modified"
         ),
     )
+    mode.add_argument(
+        "--remove-staging-leftovers",
+        action="store_true",
+        help=(
+            "remove the staging directories a killed harvest left in --output for this airport "
+            "(every run lists them) and exit; run it only when no other harvest writes --output"
+        ),
+    )
     parser.add_argument("--no-cache", action="store_true", help="bypass the history query cache")
     mode.add_argument(
         "--full-redownload",
@@ -169,6 +179,11 @@ def main(argv: list[str] | None = None) -> int:
             "mode writes into its --output, and a frozen generation is never written"
         )
     paths = HarvestPaths(root=args.output, code=code)
+    if args.remove_staging_leftovers:
+        removed = remove_staging_leftovers(paths)
+        print(f"[harvest] {code}: removed {len(removed)} staging leftover(s)"
+              + "".join(f"\n  {path}" for path in removed))
+        return 0
     downloading = not (
         args.evaluate_only or args.observed_only or args.reclassify_existing
         or args.merge_source or args.rebuild_fresh_from
@@ -191,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{completed['provenance'].get('given_up', [])}). "
                 "Use --full-redownload to download it again."
             )
+            _note_staging_leftovers(paths)
             return 0
     if args.full_redownload:
         clear_harvest_checkpoint(paths)
@@ -317,7 +333,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[harvest] published observed category -> {published}")
 
     _print_digest(code, manifest, summary, report)
+    _note_staging_leftovers(paths)
     return 0
+
+
+def _note_staging_leftovers(paths: HarvestPaths) -> None:
+    """List what killed harvests left behind; removing it is ``--remove-staging-leftovers``' job."""
+    leftovers = staging_leftovers(paths)
+    if leftovers:
+        print(f"[harvest] {len(leftovers)} staging leftover(s) from a killed harvest in {paths.root} "
+              f"(readers ignore them; --remove-staging-leftovers removes them when no other harvest "
+              f"writes this root):" + "".join(f"\n  {path}" for path in leftovers))
 
 
 # Provenance keys of a tracks/ tree that is NOT one download window: a merge of several

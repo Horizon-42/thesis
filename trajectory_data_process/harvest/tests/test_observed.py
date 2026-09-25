@@ -13,6 +13,7 @@ from trajectory_data_process.harvest.airports import (
     threshold_frame_fingerprint,
     threshold_frame_snapshot,
 )
+from trajectory_data_process.harvest.store import ALTITUDE_SOURCE
 from trajectory_data_process.harvest.observed import (
     observed_record,
     source_event_availability,
@@ -46,6 +47,7 @@ def test_observed_record_rejects_event_from_a_different_runway_cycle():
     }
     track = {
         "flight_key": "TEST_18_abc123_20260812T000000Z",
+        "altitude_source": ALTITUDE_SOURCE,
         "callsign": "TEST",
         "icao24": "abc123",
         "landing_time_utc": "2026-08-12T00:00:00Z",
@@ -73,6 +75,7 @@ def test_observed_record_preserves_a_current_unavailable_event_for_indeterminate
     }
     track = {
         "flight_key": "TEST_18_abc123_20260812T000000Z",
+        "altitude_source": ALTITUDE_SOURCE,
         "callsign": "TEST",
         "icao24": "abc123",
         "landing_time_utc": "2026-08-12T00:00:00Z",
@@ -112,6 +115,7 @@ def _estimated_track_and_runway() -> tuple[dict, Runway]:
     }
     track = {
         "flight_key": "TEST_18_abc123_20260812T000000Z",
+        "altitude_source": ALTITUDE_SOURCE,
         "callsign": "TEST",
         "icao24": "abc123",
         "landing_time_utc": "2026-08-12T00:00:00Z",

@@ -28,6 +28,8 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
   `arrivals/manifest.json` rosters only assigned, CIFP-targeted, final-entry-cropped model
   inputs and records every exclusion. Scenario, optimizer-reference, and TS loaders follow that
   roster and never glob, so an orphan/rejected/stale JSON cannot enter a model split.
+- The observed CZML's censored tail starts at the closest support sample and is timed as the
+  record's fitted crossing row; a start without a speed refuses the flight (TD26).
 - The threshold event's `crossing_ground_speed_m_s` is GROUND speed (direct: interpolated at the
   bracket; censored: OLS over the same kept samples as the position fit), optional on read;
   evaluation judges the observed baseline on it as a STATED proxy (TD1).
@@ -74,14 +76,15 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
   `samples[i][3]` changes, a row is never dropped (TD12).
 - Audit/republish: `python -m trajectory_data_process.altitude_outliers [--rerender-czml]`; stored
   `observed_threshold_event`s were fitted from raw samples — only `--reclassify-existing`
-  re-derives those (TD13).
+  re-derives those; `--rerender-czml` with a trial policy is refused (readers apply the default) (TD13).
 
 ## Constants
 
 - Outlier filter (`harvest/altitude_filter.py`, single source; `AltitudePolicy`):
   `half_window = 2`, `min_deviation_m = 100.0`, `max_vertical_rate_m_s = 25.0` (TD14).
 - Arrival truncation (`arrival_segment.py`): `ENTRY_RADIUS_KM = 25`, `ENTRY_HYSTERESIS_SAMPLES = 3`,
-  `LOCAL_START_RADIUS_KM = 5`, `GROUND_START_AGL_M = 100` (in an empty band of the fleet);
+  `LOCAL_START_RADIUS_KM = 5`, `GROUND_START_AGL_M = 100` (empty band on v5; on v7 NOT —
+  helicopters and light aircraft flying low straddle it, 93.1 m excluded vs 114.9 m kept);
   `field_elevation_m` is REQUIRED — the waypoints are HAE (TD15).
 - Arrival manifest schema: `harvest-arrivals-v7-measured-crossing-in-slice` — a measured
   crossing is inside its slice (the slice ends on the bracket's post-crossing sample; the landing
@@ -97,3 +100,5 @@ finish its write — confirm the process is gone (`kill -0`) before rebuilding d
 - A merge keeps every source's exclusion audits, flattened, in `provenance.merge.sources`
   (`store.integrity_audits` reads them), and a plain download REFUSES a merged/rebuilt root (it
   used to clear `tracks/` in place) (TD24).
+- A killed harvest's staging directories are listed at the end of every run and removed only by
+  `--remove-staging-leftovers` (no lock: never swept automatically) (TD25).

@@ -264,11 +264,9 @@ def harvest_airport(
                 "radius_km": plan.radius_km,
                 "target_per_runway": plan.target_per_runway,
                 "given_up": sorted(given_up),
-                "landing_screen": {
-                    "threshold_radius_m": plan.screen.threshold_radius_m,
-                    "max_height_m": plan.screen.max_height_m,
-                    "descent_margin_m": plan.screen.descent_margin_m,
-                },
+                # every field of the screen, as the checkpoint records it: a hand-listed copy once dropped
+                # max_crossing_height_m
+                "landing_screen": asdict(plan.screen),
             },
         )
     clear_harvest_checkpoint(paths)

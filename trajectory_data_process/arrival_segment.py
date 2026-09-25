@@ -53,14 +53,19 @@ ENTRY_HYSTERESIS_SAMPLES = 3
 LOCAL_START_RADIUS_KM = 5.0
 # A segment whose FIRST sample is this close to the landing runway's elevation
 # began on a runway: it contains a takeoff and is not a terminal-area arrival.
-# Measured over the 42 725 rostered arrivals of the five-airport fleet, the
-# first-sample height above the landing runway is bimodal with an EMPTY band
-# either side of this value: 75 flights at or below 82.1 m (every one of them within
-# 2 km of a satellite field — KRHV/KPAO/KNUQ at KSJC, KSAC/KMCC at KSMF, KNEW at
-# KMSY) and then nothing until 175.3 m, an airborne arrival 11 km from the
-# nearest field. Altitude alone decides it: reported ground speed does NOT
-# separate the two populations, because a jet at rotation still reads 71–80 m/s
-# while on the runway, squarely inside the approach-speed range.
+# Chosen on the v5 roster (42 725 arrivals, 2026-08): the first-sample height above
+# the landing runway was bimodal with an EMPTY band either side of this value -- 75
+# flights at or below 82.1 m, every one within 2 km of a satellite field
+# (KRHV/KPAO/KNUQ at KSJC, KSAC/KMCC at KSMF, KNEW at KMSY), then nothing until
+# 175.3 m. Altitude alone decides it: reported ground speed does NOT separate the
+# two populations, because a jet at rotation still reads 71-80 m/s while on the
+# runway, squarely inside the approach-speed range.
+# Re-measured on the v7 roster (72 574 arrivals, 114 exclusions, 2026-09-25) the band
+# is NO LONGER EMPTY: exclusions reach 93.1 m and rostered arrivals start from
+# 114.9 m, and the flights on both sides of the value are helicopters (ZEUS*, KRDU 32)
+# and light aircraft flying low 10-20 km out, not takeoffs. Near 100 m this test
+# separates low cruising from high, and the exclusion's "begins on the ground" is
+# wrong for them (TD15).
 GROUND_START_AGL_M = 100.0
 
 

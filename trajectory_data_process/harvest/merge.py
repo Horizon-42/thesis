@@ -25,6 +25,8 @@ from trajectory_data_process.harvest.store import (
     HarvestPaths,
     integrity_audits,
 )
+from trajectory_data_process.harvest.staging import merge_prefix
+from trajectory_data_process.harvest.utc import now_iso_utc
 _BUCKETS = ("assigned", "ambiguous", "unassignable", "not_landing")
 
 
@@ -71,7 +73,7 @@ def merge_stored_tracks(
 
     destination.root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
-        prefix=f".{destination.code}-merge-", dir=destination.root
+        prefix=merge_prefix(destination.code), dir=destination.root
     ) as temporary:
         staged = HarvestPaths(Path(temporary), destination.code)
         _stage_records(staged, validated)
@@ -281,7 +283,7 @@ def _write_manifest(
             per_runway[runway] = per_runway.get(runway, 0) + 1
     manifest = {
         "airport": staged.code,
-        "written_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "written_utc": now_iso_utc(),
         "altitude_source": ALTITUDE_SOURCE,
         "altitude_datum": ALTITUDE_DATUM,
         "counts": counts,

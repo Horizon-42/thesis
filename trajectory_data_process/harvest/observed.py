@@ -35,13 +35,14 @@ from uuid import uuid4
 
 from flight_scenarios.build import resolve_airframe
 from flight_scenarios.crossing_span import CROSSING_SPAN_KEY, crossing_span_from_event
-from flight_scenarios.datum import MSL_ALTITUDE_SOURCE
+from flight_scenarios.datum import MSL_ALTITUDE_SOURCE, flight_to_msl
 from flight_scenarios.start_state import state_samples_from_track
 
 from trajectory_data_process.harvest.airports import (
     Airport,
     Runway,
 )
+from trajectory_data_process.harvest.arrivals import runway_target
 from trajectory_data_process.harvest.altitude_filter import (
     DEFAULT_POLICY,
     FILTER_SCHEMA_VERSION,
@@ -53,6 +54,7 @@ from trajectory_data_process.harvest.store import (
     read_track_view,
     require_source_timed_manifest,
 )
+from trajectory_data_process.harvest.staging import RECORDS_PREVIOUS_PREFIX, RECORDS_STAGING_PREFIX
 from trajectory_data_process.harvest.threshold_event import require_current_threshold_event
 
 # Fallback mass for the state samples when the airframe's type has no OpenAP/preset
@@ -113,11 +115,14 @@ def observed_record(
         )
     require_current_threshold_event(event, runway)
 
-    # H_MSL = h_HAE - N, applied once, here.
-    waypoints = [
-        [t, lon, lat, alt_hae - runway.hae_minus_msl_m]
-        for t, lon, lat, alt_hae in track["samples"]
-    ]
+    # H_MSL = h_HAE - N, applied once, here, by the seam's own conversion (the runway's
+    # CIFP offset; a track not tagged HAE is refused, never converted twice).
+    waypoints = flight_to_msl({
+        "id": track["flight_key"],
+        "altitude_source": track["altitude_source"],
+        "runway_target": runway_target(runway),
+        "waypoints": track["samples"],
+    })["waypoints"]
     samples = state_samples_from_track(waypoints, mass_kg=mass_kg)
     states = [
         {
@@ -208,7 +213,7 @@ def write_observed_records(
     require_source_timed_manifest(source, path=paths.manifest)
     availability = source_event_availability(source)
     records_dir = paths.approach / RECORDS_DIR
-    staging = paths.approach / f".{RECORDS_DIR}-staging-{uuid4().hex}"
+    staging = paths.approach / f"{RECORDS_STAGING_PREFIX}{uuid4().hex}"
     staging.mkdir(parents=True)
     try:
         summary = _write_observed_batch(
@@ -220,7 +225,7 @@ def write_observed_records(
     summary_path = paths.approach / SUMMARY_NAME
     staged_summary = summary_path.with_suffix(summary_path.suffix + ".tmp")
     staged_summary.write_text(json.dumps(summary, indent=1, allow_nan=False), encoding="utf-8")
-    previous = paths.approach / f".{RECORDS_DIR}-previous-{uuid4().hex}"
+    previous = paths.approach / f"{RECORDS_PREVIOUS_PREFIX}{uuid4().hex}"
     if records_dir.exists():
         records_dir.replace(previous)
     staging.replace(records_dir)
@@ -311,50 +316,14 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
     from harvests that did not all carry an exclusion audit says how many did not
     (``sources_without_integrity_audit``): its denominator covers the audited ones only.
     """
-    records = source.get("records")
-    if not isinstance(records, list) or source.get("total") != len(records):
-        raise ValueError("track manifest has an invalid records roster")
-    candidates = []
-    excluded_not_landing = 0
-    for index, row in enumerate(records):
-        if not isinstance(row, dict):
-            raise ValueError(f"track manifest record {index} must be an object")
-        outcome = row.get("outcome")
-        if outcome == "not_landing":
-            excluded_not_landing += 1
-            continue
-        if outcome not in ("assigned", "ambiguous", "unassignable"):
-            raise ValueError(f"track manifest record {index} has invalid outcome {outcome!r}")
-        status = row.get("event_status")
-        if status not in ("estimated", "unavailable"):
-            raise ValueError(
-                f"track manifest record {index} lacks event_status; run "
-                "--reclassify-existing"
-            )
-        candidates.append(status)
+    statuses, excluded_outcomes, unaudited = _availability_inputs(source)
+    candidates = [status for outcome, status in statuses if outcome != "not_landing"]
     estimated = sum(status == "estimated" for status in candidates)
-    integrity_excluded_candidates = 0
-    audits, unaudited = integrity_audits(source)
-    for integrity in audits:
-        if not isinstance(integrity, dict) or not isinstance(
-            integrity.get("excluded"), list
-        ):
-            raise ValueError("track manifest has invalid source_integrity exclusions")
-        for index, excluded in enumerate(integrity["excluded"]):
-            if not isinstance(excluded, dict):
-                raise ValueError(
-                    f"source_integrity exclusion {index} must be an object"
-                )
-            outcome = excluded.get("source_outcome")
-            if outcome == "not_landing":
-                excluded_not_landing += 1
-            elif outcome in ("assigned", "ambiguous", "unassignable"):
-                integrity_excluded_candidates += 1
-            else:
-                raise ValueError(
-                    f"source_integrity exclusion {index} has invalid source_outcome "
-                    f"{outcome!r}"
-                )
+    excluded_not_landing = (
+        sum(outcome == "not_landing" for outcome, _ in statuses)
+        + sum(outcome == "not_landing" for outcome in excluded_outcomes)
+    )
+    integrity_excluded_candidates = sum(outcome != "not_landing" for outcome in excluded_outcomes)
     denominator = len(candidates) + integrity_excluded_candidates
     return {
         "denominator": "arrival_candidates_excluding_not_landing",
@@ -366,6 +335,58 @@ def source_event_availability(source: dict[str, Any]) -> dict[str, Any]:
         "source_integrity_excluded_candidates": integrity_excluded_candidates,
         "sources_without_integrity_audit": unaudited,
     }
+
+
+CANDIDATE_OUTCOMES = ("assigned", "ambiguous", "unassignable")
+
+
+def _availability_inputs(
+    source: dict[str, Any],
+) -> tuple[list[tuple[str, str | None]], list[str], int]:
+    """The tracks roster read once, at this boundary: each record's ``(outcome, event_status)``,
+    the outcome of every candidate an exclusion audit removed, and how many harvests carried no
+    audit. The roster is a FILE (stale or hand-edited), so its shape is checked here and the
+    derivation above only counts."""
+    records = source.get("records")
+    if not isinstance(records, list) or source.get("total") != len(records):
+        raise ValueError("track manifest has an invalid records roster")
+    statuses: list[tuple[str, str | None]] = []
+    for index, row in enumerate(records):
+        if not isinstance(row, dict):
+            raise ValueError(f"track manifest record {index} must be an object")
+        outcome = row.get("outcome")
+        if outcome == "not_landing":
+            statuses.append((outcome, None))
+            continue
+        if outcome not in CANDIDATE_OUTCOMES:
+            raise ValueError(f"track manifest record {index} has invalid outcome {outcome!r}")
+        status = row.get("event_status")
+        if status not in ("estimated", "unavailable"):
+            raise ValueError(
+                f"track manifest record {index} lacks event_status; run "
+                "--reclassify-existing"
+            )
+        statuses.append((outcome, status))
+    audits, unaudited = integrity_audits(source)
+    excluded_outcomes: list[str] = []
+    for integrity in audits:
+        if not isinstance(integrity, dict) or not isinstance(
+            integrity.get("excluded"), list
+        ):
+            raise ValueError("track manifest has invalid source_integrity exclusions")
+        for index, excluded in enumerate(integrity["excluded"]):
+            if not isinstance(excluded, dict):
+                raise ValueError(
+                    f"source_integrity exclusion {index} must be an object"
+                )
+            outcome = excluded.get("source_outcome")
+            if outcome != "not_landing" and outcome not in CANDIDATE_OUTCOMES:
+                raise ValueError(
+                    f"source_integrity exclusion {index} has invalid source_outcome "
+                    f"{outcome!r}"
+                )
+            excluded_outcomes.append(outcome)
+    return statuses, excluded_outcomes, unaudited
 
 
 

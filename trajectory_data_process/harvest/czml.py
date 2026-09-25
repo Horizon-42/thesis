@@ -261,29 +261,42 @@ def _extrapolated_waypoints(track: dict[str, Any]) -> list[list[float]] | None:
             f"{method!r}/{observability!r}"
         )
     fit_range = event.get("source_sample_range")
-    anchor = track.get("landing_sample_index")
+    support = event["diagnostics"]["closest_support_sample_index"]
     if (
         not isinstance(fit_range, list) or len(fit_range) != 2
         or not all(isinstance(value, int) and not isinstance(value, bool) for value in fit_range)
-        or not isinstance(anchor, int) or isinstance(anchor, bool)
-        or not (0 <= fit_range[0] <= fit_range[1] <= anchor < len(samples))
+        or not isinstance(support, int) or isinstance(support, bool)
+        or not (0 <= fit_range[0] <= fit_range[1] <= support < len(samples))
     ):
         raise ValueError(
-            f"track {track.get('flight_key')!r} has invalid event source range or "
-            "landing_sample_index; run --reclassify-existing"
+            f"track {track.get('flight_key')!r} has an invalid event source range or "
+            "closest support sample; run --reclassify-existing"
         )
-    start_index = fit_range[1]
-    start = samples[start_index]
-    previous = samples[start_index - 1] if start_index > 0 else samples[start_index]
-    dt = float(start[0]) - float(previous[0])
-    distance = haversine_m(float(previous[2]), float(previous[1]), float(start[2]), float(start[1]))
-    speed_ms = distance / dt if dt > 0.0 and distance > 0.0 else 70.0
+    # The tail starts where the event's extrapolation is measured from -- the closest
+    # support sample, which can lie after the fit's last sample -- and is timed as the
+    # observed record's fitted crossing row is (`crossing_span`): the extrapolation over
+    # the mean of the start's speed and the event's crossing ground speed (the start's
+    # speed again when the event fitted none).
+    start = samples[support]
+    previous = samples[support - 1] if support > 0 else None
+    dt = float(start[0]) - float(previous[0]) if previous is not None else 0.0
+    distance = (
+        haversine_m(float(previous[2]), float(previous[1]), float(start[2]), float(start[1]))
+        if previous is not None else 0.0
+    )
+    if not (dt > 0.0 and distance > 0.0):
+        raise ValueError(
+            f"track {track.get('flight_key')!r}: no speed at the closest support sample "
+            f"{support} (dt {dt:g} s, distance {distance:g} m) to time the censored tail"
+        )
+    start_speed = distance / dt
+    crossing_speed = float(event.get("crossing_ground_speed_m_s") or start_speed)
     extrapolation = float(event["extrapolation_distance_m"])
     if not math.isfinite(extrapolation) or extrapolation <= 0.0:
         raise ValueError(
             f"track {track.get('flight_key')!r} has invalid censored extrapolation"
         )
-    end_t = float(start[0]) + extrapolation / speed_ms
+    end_t = float(start[0]) + extrapolation / ((start_speed + crossing_speed) / 2.0)
     crossing = [
         round(float(event["threshold_crossing_lon"]), 7),
         round(float(event["threshold_crossing_lat"]), 7),

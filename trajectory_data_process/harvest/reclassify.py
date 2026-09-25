@@ -23,6 +23,7 @@ from trajectory_data_process.harvest.airports import (
 )
 from trajectory_data_process.harvest.adsb_metadata import AdsbStateMetadata
 from trajectory_data_process.harvest.classify import ClassifiedTrack, classify_track
+from trajectory_data_process.harvest.staging import reclassify_prefix
 from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
     ALTITUDE_SOURCE,
@@ -106,7 +107,7 @@ def reclassify_stored_tracks(
         else nullcontext(None)
     )
     with tempfile.TemporaryDirectory(
-        prefix=f".{paths.code}-reclassify-", dir=paths.root
+        prefix=reclassify_prefix(paths.code), dir=paths.root
     ) as temporary, executor_context as executor:
         staged = HarvestPaths(Path(temporary), paths.code)
         manifest = write_tracks(

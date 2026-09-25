@@ -26,6 +26,11 @@ gets a new ID here and ONE new line in the index.**
 
 ### TD2 · observed evaluation records carry `crossing_span` and the resolved airframe
 
+- **The record's HAE → MSL step is `flight_scenarios.datum.flight_to_msl` (2026-09-25)**, fed the
+  runway as a `runway_target` (`arrivals.runway_target`, the arrivals' own); it used to subtract the
+  same CIFP offset by hand. Same numbers (1,500 real records compared byte for byte), and a track not
+  tagged HAE is now refused instead of converted.
+
 - **Observed evaluation records carry a `crossing_span` and their resolved airframe's
   stall facts (2026-08-24)** — `harvest/observed.py` marks the event's direct bracket or
   appends the one inferred crossing row (built by `flight_scenarios.crossing_span`), so
@@ -227,6 +232,11 @@ reclassification a `--merge-source` runs.
   (reads `tracks/`, writes only `public/data`). **Not covered:** stored
   `observed_threshold_event`s were fitted from raw samples during assignment — 17 outliers land
   inside one, and only `--reclassify-existing` re-derives those.
+- **`--rerender-czml` renders the default policy only (2026-09-25).** Every reader of a track view
+  (`store.read_track_view`, the arrivals and the observed CZML) applies `DEFAULT_POLICY`, so a CZML
+  rendered under an audit's trial policy (`--half-window`, `--min-deviation-m`,
+  `--max-vertical-rate-m-s`) would publish repairs no model input saw. The CLI refuses the
+  combination by name: audit with the trial policy, rerender without it.
 
 ## Constants
 
@@ -253,6 +263,18 @@ reclassification a `--merge-source` runs.
   waypoint rows are HAE and a silently MSL reference would shift the test by the geoid
   separation (~33 m) without failing. `harvest/arrivals.py` asserts the datum once, at the
   boundary.
+
+**Re-measured on the v7 roster (2026-09-25): the band is no longer empty.** Over the 72,574
+rostered arrivals and the 114 `takeoff_in_segment` exclusions of the live root (read-only, the
+exclusions' first samples recomputed with `arrival_segment`): the exclusions reach **93.1 m**
+(`ZEUS14_32_ae7488_20260521T191843Z`, 20 km out; then 91.0 m, `N5264V`, 19 km out) and the rostered
+arrivals start from **114.9 m** (`N5306U_30R_a6b3aa_20260826T024539Z`, 9.7 km out; then 116.0 m,
+`ZEUS11_32_…`, 20 km; 138.8 m, `ZEUS21_32_…`, 19 km); 3 rostered arrivals start in [100, 150) m, 9
+in [150, 200) m. The flights on both sides of 100 m are helicopters (ZEUS\*, KRDU 32 — the new
+download brought them) and light aircraft flying low 10–20 km out, not takeoffs: there the test
+separates low cruising from high, and the exclusion reason's "begins on the ground at a field" is
+wrong for them. The constant is unchanged (changing it moves the roster, hence every ts split); the
+comment at `arrival_segment.GROUND_START_AGL_M` states both measurements.
 
 ### TD16 · arrival manifest schema
 
@@ -434,3 +456,30 @@ in with `summary.json` only on success.
 - `download_landings.py` imports the harvest CLI's defaults; its own copy had drifted to CIFP
   260319, and the 2026-08-22..09-22 download (`outputs/new_data_9_22`) was stamped with that cycle
   (the merge re-derives every event under 260806).
+
+### TD25 · staging leftovers are listed by every run and removed only on request (2026-09-25)
+
+- Every rewrite stages beside the real tree and swaps it in: the observed records
+  (`approach/.records-staging-*`, the previous records moved aside as `approach/.records-previous-*`),
+  a reclassification (`<root>/.<ICAO>-reclassify-*`) and a merge (`<root>/.<ICAO>-merge-*`). A SIGKILL
+  mid-write leaves them (the v5 root held a 170 MB `.KSJC-reclassify-*` from 2026-08-24). Readers
+  follow the rosters and never see them; they cost disk only.
+- The prefixes live in `harvest/staging.py` (the writers take them from there). Nothing removes a
+  leftover unasked — there is no harvest lock, so a sweep could delete another run's live staging:
+  every harvest run ends by listing the airport's leftovers, and
+  `python -m trajectory_data_process.harvest --airport <ICAO> --output <root> --remove-staging-leftovers`
+  removes them and exits. Run it only when no other harvest writes that root.
+
+### TD26 · the observed CZML's censored tail starts at the closest support sample (2026-09-25)
+
+- A right-censored event's `extrapolation_distance_m` is measured from
+  `diagnostics.closest_support_sample_index`, which can lie AFTER the fit's last sample
+  (`source_sample_range[1]`). The drawn tail (`harvest/czml._extrapolated_waypoints`) used to start
+  at the fit's last sample, so its crossing could come before the last supporting sample (1,871 of
+  7,827 censored KRDU flights, 2026-09-23); on the live root the start moves in 12,958 of 25,064
+  censored flights. It now starts at the support sample and is timed as the observed record's fitted
+  crossing row (`flight_scenarios.crossing_span`): the extrapolation over the mean of the start's
+  speed (finite difference to the previous sample) and the event's `crossing_ground_speed_m_s`, the
+  start's speed again when the event fitted none. The silent 70 m/s fallback is gone: a start without
+  a speed refuses the flight by name (none of the 25,064 does). Viewer only — nothing reads the tail's
+  time.

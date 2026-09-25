@@ -19,7 +19,9 @@ artifacts that were published before it existed.
 WHAT --rerender-czml DOES AND DOES NOT COVER
 --------------------------------------------
 It runs the pipeline's own renderer, so the entity ids, packet shape and clock cannot
-drift from a full harvest. Batch comparison CZMLs resolve their white observed reference
+drift from a full harvest. It renders the repair EVERY reader applies (``DEFAULT_POLICY``), so it
+refuses to run beside a trial policy (``--min-deviation-m`` / ``--max-vertical-rate-m-s`` /
+``--half-window`` set to anything else): the viewer must show what the model data read. Batch comparison CZMLs resolve their white observed reference
 by entity id inside this same canonical file, so they follow it without being rebuilt.
 
 Training data needs NO rebuild either: ``load_arrival_flights`` filters on the way out, so
@@ -38,7 +40,6 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,7 @@ from trajectory_data_process.harvest.altitude_filter import (
 from trajectory_data_process.harvest.arrivals import ARRIVALS_DIR, MANIFEST_NAME
 from trajectory_data_process.harvest.czml import DEFAULT_FRONTEND_DATA, render_observed_czml
 from trajectory_data_process.harvest.store import HarvestPaths, read_manifest
+from trajectory_data_process.harvest.utc import now_iso_utc
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_HARVEST_ROOT = REPO_ROOT / "trajectory_data_process/outputs/harvest"
@@ -223,7 +225,7 @@ def _report(audits: list[AirportAudit], *, policy: AltitudePolicy, outcomes: tup
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "filter_schema_version": FILTER_SCHEMA_VERSION,
-        "generated_utc": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_utc": now_iso_utc(),
         "harvest_root": str(harvest_root),
         "policy": policy.to_dict(),
         "outcomes": list(outcomes),
@@ -260,7 +262,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="write the full per-track audit to this path")
     parser.add_argument("--rerender-czml", action="store_true",
                         help="republish public/data/<ICAO>/trajectories.czml through the "
-                             "filter; stored tracks are still never modified")
+                             "filter every reader applies (the default policy only); stored "
+                             "tracks are still never modified")
     parser.add_argument("--frontend-data", type=Path, default=DEFAULT_FRONTEND_DATA)
     parser.add_argument("--multiplier", type=int, default=None,
                         help="optional CZML clock multiplier")
@@ -270,7 +273,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     harvest_root = args.harvest_root.resolve()
     if not harvest_root.is_dir():
         raise SystemExit(f"harvest root not found: {harvest_root}")
@@ -280,6 +284,11 @@ def main(argv: list[str] | None = None) -> int:
         min_deviation_m=args.min_deviation_m,
         max_vertical_rate_m_s=args.max_vertical_rate_m_s,
     )
+    if args.rerender_czml and policy != DEFAULT_POLICY:
+        # the renderer reads every track through the repair the readers apply (store.read_track_view): a CZML
+        # published under a trial policy would show the viewer another track than the model data read
+        parser.error(f"--rerender-czml renders the default policy {DEFAULT_POLICY.to_dict()}, which every reader "
+                     f"applies; this audit asks for {policy.to_dict()} — audit with it, rerender without it")
     outcomes = tuple(args.outcomes) if args.outcomes else ("assigned",)
     codes = _select_airports(harvest_root, args.airports)
 

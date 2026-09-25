@@ -34,12 +34,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from trajectory_data_process.harvest.altitude_filter import filtered_track
 from trajectory_data_process.harvest.classify import ClassifiedTrack
+from trajectory_data_process.harvest.utc import iso_utc_ms, now_iso_utc
 
 TRACKS_DIR = "tracks"
 APPROACH_DIR = "approach"
@@ -117,7 +117,7 @@ def track_record(classified: ClassifiedTrack) -> dict[str, Any]:
         "runway": classified.runway,
         "landing_time_utc": classified.landing_time_utc,
         "landing_sample_index": classified.landing_sample_index,
-        "start_time_utc": _iso_precise(track.start_s),
+        "start_time_utc": iso_utc_ms(track.start_s),
         "duration_s": round(track.end_s - track.start_s, 3),
         "max_sample_gap_s": round(track.max_gap_s, 3),
         "altitude_source": ALTITUDE_SOURCE,
@@ -204,7 +204,7 @@ def write_tracks(
     manifest = {
         "schema_version": TRACK_SCHEMA_VERSION,
         "airport": paths.code,
-        "written_utc": _iso(datetime.now(tz=timezone.utc).timestamp()),
+        "written_utc": now_iso_utc(),
         "altitude_source": ALTITUDE_SOURCE,
         "altitude_datum": ALTITUDE_DATUM,
         "counts": counts,
@@ -307,16 +307,6 @@ def _clear(directory: Path) -> None:
         path.unlink()
     for path in sorted((p for p in directory.rglob("*") if p.is_dir()), reverse=True):
         path.rmdir()
-
-
-def _iso(time_s: float) -> str:
-    return datetime.fromtimestamp(time_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _iso_precise(time_s: float) -> str:
-    return datetime.fromtimestamp(time_s, tz=timezone.utc).isoformat(
-        timespec="milliseconds"
-    ).replace("+00:00", "Z")
 
 
 def _round(value: float | None) -> float | None:

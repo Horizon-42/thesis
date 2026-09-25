@@ -26,7 +26,6 @@ the arrival crop merely because its discrete ADS-B sample happened to lie closer
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from final_approach import (
     Assignment,
@@ -46,6 +45,7 @@ from trajectory_data_process.harvest.threshold_event import (
     select_observed_threshold_bracket,
 )
 from trajectory_data_process.harvest.tracks import Sample, Track
+from trajectory_data_process.harvest.utc import iso_utc
 
 
 @dataclass(frozen=True)
@@ -92,7 +92,7 @@ class ClassifiedTrack:
                 "id": (self.track.callsign or self.track.icao24).replace(" ", "")[:16],
                 "runway": self.runway or self.outcome,
                 "icao24": self.track.icao24,
-                "landing_time_utc": self.landing_time_utc or _iso(self.track.end_s),
+                "landing_time_utc": self.landing_time_utc or iso_utc(self.track.end_s),
             },
             index=0,
         )
@@ -186,7 +186,7 @@ def classify_track(
         track=track,
         assignment=assignment,
         landing_time_utc=(
-            _iso(track.samples[landing_sample_index].time_s)
+            iso_utc(track.samples[landing_sample_index].time_s)
             if landing_sample_index is not None
             else None
         ),
@@ -264,6 +264,3 @@ def _landing_sample_index(
         key=lambda index: frame.distance_m(_track_point(track.samples[index])),
     )
 
-
-def _iso(time_s: float) -> str:
-    return datetime.fromtimestamp(time_s, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

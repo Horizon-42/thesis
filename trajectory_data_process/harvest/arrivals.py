@@ -50,6 +50,7 @@ from trajectory_data_process.harvest.czml import czml_input_flight, verify_ident
 from trajectory_data_process.harvest.generations import is_frozen_arrival_manifest
 from trajectory_data_process.harvest.store import (
     ALTITUDE_DATUM,
+    ALTITUDE_SOURCE,
     HarvestPaths,
     read_manifest,
     require_source_timed_manifest,
@@ -143,7 +144,7 @@ def write_arrival_records(
         # Indices are into the SOURCE array and stay valid: the filter replaces altitudes
         # and never adds or drops a row.
         flight["arr_airport"] = airport.code
-        flight["runway_target"] = _runway_target(runway)
+        flight["runway_target"] = runway_target(runway)
         verify_identity(flight, track["flight_key"])
 
         arrivals, locals_, takeoffs = truncate_flights(
@@ -184,7 +185,7 @@ def write_arrival_records(
         arrival = arrivals[0]
         first_sample_index = int(arrival["cut_samples"])
         last_sample_index = anchor
-        runway_targets.setdefault(runway.ident, _runway_target(runway))
+        runway_targets.setdefault(runway.ident, runway_target(runway))
         roster.append(
             {
                 "flight_key": row["flight_key"],
@@ -284,7 +285,7 @@ def load_arrival_flights(
             "(harvest.generations). Rebuild it from its tracks -- --evaluate-only, after "
             "--reclassify-existing when its threshold events are stale (TD16, TD23)"
         )
-    if manifest.get("altitude_source") != "opensky_history_geoaltitude_m":
+    if manifest.get("altitude_source") != ALTITUDE_SOURCE:
         raise ValueError(
             f"{manifest_path} has unsupported altitude_source "
             f"{manifest.get('altitude_source')!r}; perform a full re-harvest"
@@ -451,7 +452,8 @@ def _anchor_index(track: dict[str, Any], runway: Runway) -> int:
     )
 
 
-def _runway_target(runway: Runway) -> dict[str, Any]:
+def runway_target(runway: Runway) -> dict[str, Any]:
+    """The runway as a flight's ``runway_target`` (its CIFP position and vertical contract)."""
     return {
         "lat": runway.lat,
         "lon": runway.lon,

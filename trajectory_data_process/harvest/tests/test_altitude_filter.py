@@ -147,6 +147,17 @@ def _harvest_with_a_spike(tmp_path) -> tuple[HarvestPaths, dict]:
     return paths, row
 
 
+def test_a_czml_rerender_under_a_trial_policy_is_refused(tmp_path, capsys):
+    # the viewer's CZML must show the repair every reader applies; a trial policy is for the audit only
+    from trajectory_data_process import altitude_outliers
+
+    with pytest.raises(SystemExit):
+        altitude_outliers.main(["--harvest-root", str(tmp_path), "--airport", "KXXX", "--min-deviation-m", "50",
+                                "--rerender-czml", "--frontend-data", str(tmp_path / "frontend")])
+    assert "--rerender-czml renders the default policy" in capsys.readouterr().err
+    assert not (tmp_path / "frontend").exists()
+
+
 def test_the_observed_czml_layer_renders_repaired_altitudes(tmp_path):
     paths, _ = _harvest_with_a_spike(tmp_path)
 
