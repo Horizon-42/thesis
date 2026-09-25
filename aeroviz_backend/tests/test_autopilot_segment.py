@@ -1,31 +1,29 @@
 """The live executor segment (`aeroviz_backend.autopilot_segment`): which segment a selected word is, what the executor
-is told, where the flight is cut, and which of the judge's results is the selected word's. Synthetic readings and
-verdicts only — nothing here opens an artefact, a spec or the frontend's data."""
+is told, where the flight is stopped, which of the judge's results is the selected word's, the answer written, the
+service's lookups and caches, the endpoint's statuses, and the frontend's copies of this module's names. Synthetic
+readings and verdicts only — nothing here opens an artefact, a spec or the frontend's data."""
 
 import json
+import re
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 import torch
 
-from aeroviz_backend.autopilot_segment import (
-    SEGMENT_END,
-    AutopilotSegmentBackend,
-    FlightContext,
-    FlownSegment,
-    fly_until,
-    segment_of,
-    segment_reading,
-    segment_signals,
-    selected_heading,
-    told_words,
-    track_payload,
-    word_verdict,
-)
+from aeroviz_backend.autopilot_segment import fly as fly_module, payload as payload_module
+from aeroviz_backend.autopilot_segment.backend import FLIGHT_CACHE_SIZE, AutopilotSegmentBackend
+from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused
+from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment, fly_batch_until, fly_until
+from aeroviz_backend.autopilot_segment.payload import SCHEMA, SEGMENT_END, heading_facts, segment_payload, track_payload
+from aeroviz_backend.autopilot_segment.segment import segment_of, segment_reading, segment_signals, told_words
+from aeroviz_backend.autopilot_segment.verdict import STATUSES, HeadingFacts, selected_heading, word_verdict
 from aeroviz_backend.http_server import AeroVizBackendApp
+from aeroviz_backend.paths import REPO_ROOT
 from ts_transformer.autopilot.sentence import row_at
 from ts_transformer.autopilot.executor import LIMITS, MODES, Flown
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED as SPEED_STATE
@@ -51,10 +49,10 @@ def reading() -> Reading:
         Instruction(ALTITUDE, 7, 0, "initial"),
         Instruction(ANGLE, 0, 0, "initial"),
         Instruction(SPEED, 4, 0, "initial"),
-        Instruction(HEADING, 12, 3, "track", {"target_deg": 60.0}),
+        Instruction(HEADING, 12, 3, "per-step", {"target_deg": 60.0}),
         Instruction(ALTITUDE, 5, 4, "target"),
         Instruction(APPROACH, 1, 5, "clear"),
-        Instruction(HEADING, 14, 6, "track", {"target_deg": 70.0}),
+        Instruction(HEADING, 14, 6, "per-step", {"target_deg": 70.0}),
         Instruction(ANGLE, 2, 7, "target"),
         Instruction(SPEED, 3, 8, "target"),
     ]
@@ -82,9 +80,9 @@ class SegmentTest(unittest.TestCase):
                                                      [U, U, U, U, 2, U],
                                                      [U] * 6])
         self.assertEqual([(w.column, w.row, w.value, w.kind) for w in segment.instructions],
-                         [(RUNWAY, 0, 1, "initial"), (APPROACH, 0, 0, "initial"), (HEADING, 0, 12, "track"),
+                         [(RUNWAY, 0, 1, "initial"), (APPROACH, 0, 0, "initial"), (HEADING, 0, 12, "per-step"),
                           (ALTITUDE, 0, 7, "initial"), (ANGLE, 0, 0, "initial"), (SPEED, 0, 4, "initial"),
-                          (ALTITUDE, 1, 5, "target"), (APPROACH, 2, 1, "clear"), (HEADING, 3, 14, "track"),
+                          (ALTITUDE, 1, 5, "target"), (APPROACH, 2, 1, "clear"), (HEADING, 3, 14, "per-step"),
                           (ANGLE, 4, 2, "target")])
         # the selected word keeps its own diagnostics (the heading word's target)
         self.assertEqual(segment.instructions[HEADING].info["target_deg"], 60.0)
@@ -105,16 +103,17 @@ class SegmentTest(unittest.TestCase):
         self.assertTrue(segment_reading(reading(), segment).cut_at_crossing)
 
     def test_a_segment_starts_only_where_its_word_is_said_and_has_a_step_to_fly(self):
-        with self.assertRaisesRegex(ValueError, "no heading word is said at step 4"):
+        # a request the view cannot make: answered as one (HTTP 400)
+        with self.assertRaisesRegex(RequestRefused, "no heading word is said at step 4"):
             segment_of(reading(), HEADING, 4, LEAD)
-        with self.assertRaisesRegex(ValueError, "not a step"):
+        with self.assertRaisesRegex(RequestRefused, "not a step"):
             segment_of(reading(), HEADING, 10, LEAD)
-        with self.assertRaisesRegex(ValueError, "not one of the six"):
+        with self.assertRaisesRegex(RequestRefused, "not one of the six"):
             segment_of(reading(), 6, 0, LEAD)
         last = reading()
         last.words[9, SPEED] = 9
         last.instructions.append(Instruction(SPEED, 9, 9, "unspecified"))
-        with self.assertRaisesRegex(ValueError, "the sentence's last, has no step after it to fly"):
+        with self.assertRaisesRegex(RequestRefused, "the sentence's last, has no step after it to fly"):
             segment_of(last, SPEED, 9, LEAD)
 
     def test_the_segments_reading_and_observed_rows_are_renumbered_from_its_first_step(self):
@@ -197,7 +196,7 @@ class StopTest(unittest.TestCase):
 
     def test_without_a_stop_it_flies_to_the_outcome(self):
         executor = FakeExecutor(cycles=10, done_after=7)
-        self.assertIsNone(fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, None))
+        self.assertFalse(fly_until(executor, FakeSentences(), FakeClock([float(c) for c in range(10)]), 2.0, None))
         self.assertEqual(executor.count, 7)
 
 
@@ -241,7 +240,7 @@ class StepperTest(unittest.TestCase):
     def test_without_a_stop_it_is_executor_fly_state_for_state(self):
         for name in ("time", "track"):
             whole, stepped, reached, _ = self.fly(name, None)
-            self.assertIsNone(reached)
+            self.assertFalse(reached)
             self.assertTrue(torch.equal(stepped.states, whole.states), name)
             self.assertTrue(torch.equal(stepped.commands, whole.commands), name)
             self.assertTrue(torch.equal(stepped.done_cycle, whole.done_cycle), name)
@@ -259,7 +258,54 @@ class StepperTest(unittest.TestCase):
             self.assertTrue(torch.equal(stepped.commands, whole.commands[:, :cycle]), name)
 
 
-SPEC = SimpleNamespace(heading_lead_s=4.0, heading_tolerance_deg=4.5)
+class SetupTest(unittest.TestCase):
+    """`fly_batch_until` sets the executor up as `replay.fly_sentences` sets up `executor.fly` — the same inputs, runways,
+    charts, approach speeds, parameters, words, time limit and word clock — with its own stepper in place of `fly`."""
+
+    def test_the_executor_is_set_up_as_the_replay_sets_it_up(self):
+        batch = SimpleNamespace(inputs=lambda device: "the inputs", readings=[SimpleNamespace(words=np.zeros((7, 6)))],
+                                geometries=["the geometry"], crossing_heights=[(15.0,)], approach_ias_mps=[70.0])
+        params, words = SimpleNamespace(timeout_factor=1.5), SimpleNamespace(spec=SimpleNamespace(step_s=2.0))
+        recorded = {}
+
+        class Stop(Exception):
+            pass
+
+        def record(name, stops=True):
+            def recorder(*args, **kwargs):
+                recorded[name] = (args, kwargs)
+                if stops:
+                    raise Stop
+            return recorder
+
+        clock = mock.Mock(return_value="the clock")
+        with mock.patch.object(fly_module, "Sentences", lambda grids, words, device: "the sentences"), \
+                mock.patch("ts_transformer.autopilot.replay.Sentences", lambda grids, words, device: "the sentences"), \
+                mock.patch("ts_transformer.autopilot.replay.word_clock", clock), \
+                mock.patch.object(fly_module.Runways, "of", lambda *args, **kwargs: ("runways", args, sorted(kwargs))), \
+                mock.patch.object(fly_module.AirportCharts, "of", lambda *args, **kwargs: ("charts", args, sorted(kwargs))), \
+                mock.patch.object(fly_module, "Executor", record("executor", stops=False)), \
+                mock.patch.object(fly_module, "fly_until", record("fly_until")), \
+                mock.patch("ts_transformer.autopilot.replay.fly", record("fly")):
+            with self.assertRaises(Stop):
+                fly_batch_until(batch, params, words, None)
+            with self.assertRaises(Stop):
+                fly_module.replay.fly_sentences(batch, params, words, device=fly_module.DEVICE)
+        (inputs, runways, charts, ias, *rest), kwargs = recorded["executor"]
+        (fly_inputs, _sentences, _clock, fly_runways, fly_charts, fly_ias, *fly_rest), fly_kwargs = recorded["fly"]
+        self.assertEqual((inputs, runways, charts), (fly_inputs, fly_runways, fly_charts))
+        self.assertTrue(torch.equal(ias, fly_ias))
+        self.assertEqual(rest, fly_rest)
+        self.assertTrue(torch.equal(kwargs["time_limit_s"], fly_kwargs["time_limit_s"]))
+        # the word clock: asked for once by each, the same way, and handed to the stepper as to `fly`
+        self.assertEqual(clock.call_args_list[0], clock.call_args_list[1])
+        self.assertEqual(recorded["fly_until"][0][1:3], ("the sentences", "the clock"))
+        self.assertEqual((_sentences, _clock), ("the sentences", "the clock"))
+
+
+SPEC = SimpleNamespace(heading_lead_s=4.0, heading_tolerance_deg=4.5, step_s=2.0, rows_exact=lambda seconds: int(round(seconds / 2.0)))
+#: A heading word's flown facts: never left to intercept on its own, twelve rows judged.
+HELD = HeadingFacts(off_word_cycles=0, judged_rows=12)
 WORDS = SimpleNamespace(speed_mps=lambda value: None if value == 9 else 60.0 + value)
 
 
@@ -275,29 +321,55 @@ class WordVerdictTest(unittest.TestCase):
         segment = segment_of(reading(), HEADING, 3, LEAD)
         # the next heading word, told at the segment's step 3, has no row of its own in it
         inside = word_verdict(verdict(heading=[{"row": 0, "rows": 4, "inside": 4}, {"row": 3, "rows": 0, "inside": 0}]),
-                              segment, SPEC, WORDS)
-        outside = word_verdict(verdict(heading=[{"row": 0, "rows": 4, "inside": 3}]), segment, SPEC, WORDS)
-        unjudged = word_verdict(verdict(heading=[{"row": 0, "rows": 0, "inside": 0}]), segment, SPEC, WORDS)
-        left = word_verdict(verdict(heading=[{"row": 0, "rows": 4, "inside": 4}], intercepting_off_word_cycles=3),
-                            segment, SPEC, WORDS)
-        self.assertEqual([inside["status"], outside["status"], unjudged["status"], left["status"]],
-                         ["inside", "outside", "not judged", "outside"])
+                              segment, SPEC, WORDS, HELD)
+        outside = word_verdict(verdict(heading=[{"row": 0, "rows": 4, "inside": 3}]), segment, SPEC, WORDS, HELD)
+        unjudged = word_verdict(verdict(heading=[{"row": 0, "rows": 0, "inside": 0}]), segment, SPEC, WORDS, HELD)
+        self.assertEqual([inside["status"], outside["status"], unjudged["status"]], ["inside", "outside", "not judged"])
         self.assertEqual((outside["checks"][0]["inside"], outside["checks"][0]["rows"]), (3, 4))
+        self.assertRegex(unjudged["reason"], "at or past the clearance the executor was told or its capture")
+        # its rows begin past the flown track its judge read
+        short = word_verdict(verdict(heading=[{"row": 0, "rows": 0, "inside": 0}]), segment, SPEC, WORDS,
+                             HeadingFacts(off_word_cycles=0, judged_rows=2))
+        self.assertRegex(short["reason"], "past the end of the flown track its judge read")
+
+    def test_a_heading_word_left_to_intercept_the_final_on_its_own_fails_whatever_its_rows(self):
+        segment = segment_of(reading(), HEADING, 3, LEAD)
+        left = HeadingFacts(off_word_cycles=3, judged_rows=12)
+        with_rows = word_verdict(verdict(heading=[{"row": 0, "rows": 4, "inside": 4}]), segment, SPEC, WORDS, left)
+        # the common case: the last heading word before the clearance, whose lead carries its rows past it
+        without_rows = word_verdict(verdict(heading=[{"row": 0, "rows": 0, "inside": 0}]), segment, SPEC, WORDS, left)
+        self.assertEqual((with_rows["status"], len(with_rows["checks"])), ("outside", 2))
+        self.assertEqual((without_rows["status"], [check["ok"] for check in without_rows["checks"]]), ("outside", [False]))
+        self.assertRegex(without_rows["checks"][0]["name"], "left for 3 cycles to intercept the final on its own")
+
+    def test_the_cycles_left_to_intercept_are_the_selected_words_only_before_the_next_heading_word_is_heard(self):
+        segment = segment_of(reading(), HEADING, 3, LEAD)
+        run = flown([float(c) for c in range(10)], 9)
+        # the next heading word, at the segment's step 3, is heard at cycle 6 (2 s steps of 1 s cycles)
+        off = torch.zeros(1, 10, dtype=torch.bool)
+        off[0, [2, 7, 8]] = True
+        run = replace(run, modes={**run.modes, "intercepting_off_word": off})
+        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
+                              verdict=Verdict("timeout", 9, None, {}, {}, flown_rows=10), reached_end=True, fly_s=0.0,
+                              judge_s=0.0)
+        judged = SimpleNamespace(smoothed=SimpleNamespace(track_deg=np.zeros(5)))
+        self.assertEqual(heading_facts(result, judged, SPEC), HeadingFacts(off_word_cycles=1, judged_rows=5))
 
     def test_the_clearance_is_its_capture_turn_and_corridor(self):
         segment = segment_of(reading(), APPROACH, 5, LEAD)
         judged = word_verdict(verdict(capture_turn={"progress_ok": True, "rate_ok": True},
                                       corridor={"cleared": True, "entered": True, "rows": 5, "inside": 4}),
-                              segment, SPEC, WORDS)
+                              segment, SPEC, WORDS, None)
         self.assertEqual(judged["status"], "outside")
         self.assertEqual([check["ok"] for check in judged["checks"]], [True, True, True, False])
-        self.assertEqual(word_verdict(verdict(), segment_of(reading(), APPROACH, 0, LEAD), SPEC, WORDS)["status"], "no check")
+        self.assertEqual(word_verdict(verdict(), segment_of(reading(), APPROACH, 0, LEAD), SPEC, WORDS, None)["status"],
+                         "no check")
 
     def test_an_altitude_word_is_its_tube_and_an_angle_word_every_tube_it_anchors(self):
         tubes = [{"row": 0, "rows": 3, "inside": 3, "contained": True, "target_m": 210.0},
                  {"row": 2, "rows": 5, "inside": 4, "contained": False, "target_m": None}]
-        altitude = word_verdict(verdict(vertical=tubes[:1]), segment_of(reading(), ALTITUDE, 4, LEAD), SPEC, WORDS)
-        angle = word_verdict(verdict(vertical=tubes), segment_of(reading(), ANGLE, 7, LEAD), SPEC, WORDS)
+        altitude = word_verdict(verdict(vertical=tubes[:1]), segment_of(reading(), ALTITUDE, 4, LEAD), SPEC, WORDS, None)
+        angle = word_verdict(verdict(vertical=tubes), segment_of(reading(), ANGLE, 7, LEAD), SPEC, WORDS, None)
         self.assertEqual(altitude["status"], "inside")
         self.assertEqual(angle["status"], "outside")
         self.assertEqual([check["ok"] for check in angle["checks"]], [True, False])
@@ -307,16 +379,17 @@ class WordVerdictTest(unittest.TestCase):
     def test_a_speed_word_is_its_transition_and_band_and_the_pilots_own_speed_has_none(self):
         span = {"row": 0, "transition_ok": True, "cut_before_arrival": False, "band_rows": 4, "band_inside": 4,
                 "contained": True}
-        self.assertEqual(word_verdict(verdict(speed=[span]), segment_of(reading(), SPEED, 8, LEAD), SPEC, WORDS)["status"],
-                         "inside")
+        self.assertEqual(word_verdict(verdict(speed=[span]), segment_of(reading(), SPEED, 8, LEAD), SPEC, WORDS,
+                                      None)["status"], "inside")
         own = reading()
         own.words[8, SPEED] = 9
         own.instructions[-1] = Instruction(SPEED, 9, 8, "unspecified")
-        self.assertEqual(word_verdict(verdict(), segment_of(own, SPEED, 8, LEAD), SPEC, WORDS)["status"], "no check")
+        self.assertEqual(word_verdict(verdict(), segment_of(own, SPEED, 8, LEAD), SPEC, WORDS, None)["status"], "no check")
 
     def test_a_flown_segment_the_gate_refuses_judges_nothing(self):
         refused = Verdict("timeout", 12, None, {}, None, flown_rows=13, refused="too short")
-        self.assertEqual(word_verdict(refused, segment_of(reading(), HEADING, 3, LEAD), SPEC, WORDS)["status"], "not judged")
+        self.assertEqual(word_verdict(refused, segment_of(reading(), HEADING, 3, LEAD), SPEC, WORDS, None)["status"],
+                         "not judged")
 
     def test_the_selected_heading_word_is_the_one_told_at_step_0(self):
         judged = {"heading": [{"row": 3, "rows": 0, "inside": 0}, {"row": 0, "rows": 5, "inside": 2}]}
@@ -344,7 +417,7 @@ class TrackTest(unittest.TestCase):
         base = flown([float(c) for c in range(cycles)], cycles - 1)
         commands = torch.zeros(1, cycles, 3, dtype=torch.float64)
         commands[0, :, 1] = np.radians(10.0)
-        run = replace_flown(base, states=states, commands=commands)
+        run = replace(base, states=states, commands=commands)
         segment = segment_of(reading(), HEADING, 3, LEAD)
         result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
                               verdict=Verdict(outcome, cycles, None, {}, None, flown_rows=cycles + 1), reached_end=True,
@@ -371,19 +444,70 @@ class TrackTest(unittest.TestCase):
         self.assertEqual(len(track["thrustFraction"]), 3)
 
 
-def replace_flown(base: Flown, **changes) -> Flown:
-    from dataclasses import replace
-    return replace(base, **changes)
+def signals10() -> FlightSignals:
+    rows = np.arange(10, dtype=np.float64)
+    return FlightSignals(dataset_id="KXXX:test", airport="KXXX", runway="09", typecode="A320",
+                         entry_time_utc="2026-09-01T00:00:00Z", landing_time_utc="2026-09-01T00:05:00Z",
+                         time_s=2.0 * rows, e_m=100.0 * rows, n_m=0.0 * rows, altitude_m=np.full(10, 900.0),
+                         track_deg=np.full(10, 90.0), ground_speed_mps=np.full(10, 100.0), vertical_rate_mps=0.0 * rows)
+
+
+class PayloadTest(unittest.TestCase):
+    """The answer for a segment flown to its stop: the reason (`SEGMENT_END` exactly when it got there before any
+    event), where it was against the observed aircraft there, the observed time over the same steps, the flown time."""
+
+    def answer(self, reached: bool, outcome: str = "timeout"):
+        segment = segment_of(reading(), ALTITUDE, 0, LEAD)           # steps 0–4, stopped at 4
+        cycles = 8
+        states = torch.zeros(1, cycles + 1, 7, dtype=torch.float64)
+        states[0, :, LAT] = 35.0
+        states[0, :, LON] = -78.0 + torch.arange(cycles + 1, dtype=torch.float64) * 90.0 / (111320.0 * 0.8191520)
+        states[0, :, ALT], states[0, :, SPEED_STATE], states[0, :, MASS] = 890.0, 95.0, 60000.0
+        run = replace(flown([float(c) for c in range(cycles)], cycles - 1), states=states)
+        judged = {"heading": [], "capture_turn": None, "intercepting_off_word_cycles": 0,
+                  "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0},
+                  "vertical": [{"row": 0, "rows": 4, "inside": 4, "contained": True, "target_m": 1110.0}], "speed": []}
+        limits = {"cycles": {"cycles": cycles}, "bank_rate": {"cycles": 2}, "bank_cap": {"cycles": 0}}
+        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
+                              verdict=Verdict(outcome, cycles, None, limits, judged, flown_rows=cycles + 1),
+                              reached_end=reached, fly_s=0.1, judge_s=0.01)
+        context = FlightContext(signals=signals10(), series=None, reading=reading(), geometry=geometry(),
+                                crossing_heights=(15.0,), group="own dynamics", approach_ias_mps=70.0,
+                                observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10))
+        words = SimpleNamespace(spec=SPEC, speed_mps=WORDS.speed_mps)
+        return segment_payload(result, context, words)
+
+    def test_a_segment_that_got_to_its_stop_ends_there_and_says_where_it_was_against_the_observed_aircraft(self):
+        body = self.answer(reached=True)
+        self.assertEqual(body["end"]["reason"], SEGMENT_END)
+        self.assertEqual((body["end"]["flownS"], body["segment"]["observedS"], body["end"]["reachedSegmentEnd"]), (8.0, 8.0, True))
+        # the flown end, 8 × 90 m east at 890 m, 95 m/s; the observed aircraft at step 4: 400 m east at 900 m, 100 m/s
+        self.assertAlmostEqual(body["end"]["offsetFromObserved"]["horizontalM"], 320.0, delta=1.0)
+        self.assertEqual((body["end"]["offsetFromObserved"]["aboveM"], body["end"]["offsetFromObserved"]["groundSpeedMps"]),
+                         (-10.0, -5.0))
+        self.assertEqual(body["word"]["status"], "inside")
+        self.assertIsNone(body["word"]["heading"])
+        self.assertEqual(body["limits"], {"cycles": 8, "bound": {"bank_rate": 2, "bank_cap": 0}})
+
+    def test_an_event_before_the_stop_is_the_end_and_has_no_offset(self):
+        body = self.answer(reached=False, outcome="ground_contact")
+        self.assertEqual((body["end"]["reason"], body["end"]["offsetFromObserved"]), ("ground_contact", None))
+        # out of cycles before the stop: the time limit, not the segment's end
+        self.assertEqual(self.answer(reached=False)["end"]["reason"], "timeout")
 
 
 class BackendTest(unittest.TestCase):
-    def write_set(self, root: Path, kind: str = "vocabulary-readback") -> None:
+    def write_set(self, root: Path, kind: str = "vocabulary-readback", **sample) -> None:
+        from ts_transformer.experiments.instruction_training_export import SAMPLE_SCHEMA
+        from ts_transformer.instructions.spec import READING_RULE
         training = root / "KXXX" / "training"
         (training / "a_set").mkdir(parents=True)
         (training / "index.json").write_text(json.dumps({"sets": [{"id": "a_set", "kind": kind, "file": "a_set/sample.json"}]}))
         (training / "a_set" / "sample.json").write_text(json.dumps({
+            "schema": SAMPLE_SCHEMA, "vocabulary": {"readingRule": READING_RULE},
             "producedBy": {"artefact": "4dTrajectory/outputs/POOLED/instruction_language/an_artefact"},
-            "cohort": {"split": "val"}, "flights": [{"flightKey": "F_23R_abc_T", "datasetId": "KXXX:F_23R_abc_T"}]}))
+            "cohort": {"split": "val"}, "flights": [{"flightKey": "F_23R_abc_T", "datasetId": "KXXX:F_23R_abc_T"}],
+            **sample}))
 
     def test_a_set_names_its_artefact_and_split(self):
         with TemporaryDirectory() as tmp:
@@ -391,8 +515,23 @@ class BackendTest(unittest.TestCase):
             backend = AutopilotSegmentBackend(airports_root=Path(tmp), executor_root=Path(tmp) / "none")
             artefact, split, sample = backend.training_set("KXXX", "a_set")
             self.assertEqual((artefact.parts[-2:], split), (("instruction_language", "an_artefact"), "val"))
-            with self.assertRaises(FileNotFoundError):
+            with self.assertRaisesRegex(NotListed, "no Training set 'another_set'"):
                 backend.training_set("KXXX", "another_set")
+            with self.assertRaisesRegex(NotListed, "KYYY has no Training export"):
+                backend.training_set("KYYY", "a_set")
+            # the airport is a path segment: only an airport code is one
+            with self.assertRaisesRegex(RequestRefused, "not an airport code"):
+                backend.training_set("../KXXX", "a_set")
+
+    def test_only_a_sample_of_this_vocabulary_drawn_from_the_exports_split_is_flown(self):
+        for change, refusal in [({"schema": "aeroviz-training-sample-v6"}, "is a aeroviz-training-sample-v6 sample"),
+                                ({"vocabulary": {"readingRule": "instruction-v2"}}, "read under instruction-v2"),
+                                ({"cohort": {"split": "test"}}, "drawn from test, not the val split")]:
+            with TemporaryDirectory() as tmp:
+                self.write_set(Path(tmp), **change)
+                backend = AutopilotSegmentBackend(airports_root=Path(tmp), executor_root=Path(tmp) / "none")
+                with self.assertRaisesRegex(ValueError, refusal):
+                    backend.training_set("KXXX", "a_set")
 
     def test_only_a_readback_sets_flights_are_flown(self):
         with TemporaryDirectory() as tmp:
@@ -409,14 +548,46 @@ class BackendTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, r"0 executor specs .* Refused: \[.old: .*is not a ts-executor-spec"):
                 backend.executor_for(Path(tmp) / "artefact")
 
+    def test_the_spec_is_chosen_again_when_a_spec_is_added_moved_or_rewritten(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "executor"
+            (root / "one").mkdir(parents=True)
+            (root / "one" / "spec.json").write_text("{}")
+            backend = AutopilotSegmentBackend(airports_root=Path(tmp), executor_root=root)
+            opened = []
+
+            def open_executor(directory, artefact):
+                opened.append(directory.name)
+                return "params", {"sha256": directory.name}, "words"
+
+            with mock.patch("ts_transformer.autopilot.replay.open_executor", open_executor):
+                self.assertEqual(backend.executor_for(Path(tmp) / "artefact")[0].name, "one")
+                backend.executor_for(Path(tmp) / "artefact")
+                self.assertEqual(opened, ["one"])                     # kept while nothing changed
+                (root / "one").rename(root / "two")
+                self.assertEqual(backend.executor_for(Path(tmp) / "artefact")[0].name, "two")
+                (root / "three").mkdir()
+                (root / "three" / "spec.json").write_text("{}")
+                with self.assertRaisesRegex(ValueError, r"2 executor specs .* \(\['three', 'two'\]\); one is needed"):
+                    backend.executor_for(Path(tmp) / "artefact")
+
+    def test_a_rebuilt_flight_is_kept_for_the_next_requests_and_the_oldest_let_go(self):
+        backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
+        with mock.patch("aeroviz_backend.autopilot_segment.backend.open_flight", lambda artefact, split, key, words: key):
+            self.assertEqual(backend.flight(Path("a"), "val", "K:0", None), ("K:0", False))
+            self.assertEqual(backend.flight(Path("a"), "val", "K:0", None), ("K:0", True))
+            for index in range(1, FLIGHT_CACHE_SIZE + 1):
+                backend.flight(Path("a"), "val", f"K:{index}", None)
+            self.assertEqual(backend.flight(Path("a"), "val", "K:0", None), ("K:0", False))
+
     def test_a_request_names_a_column_and_an_integer_step(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
         request = {"airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading", "row": 3}
-        with self.assertRaisesRegex(ValueError, "none of"):
+        with self.assertRaisesRegex(RequestRefused, "none of"):
             backend.fly({**request, "column": "track"})
-        with self.assertRaisesRegex(ValueError, "integer step"):
+        with self.assertRaisesRegex(RequestRefused, "integer step"):
             backend.fly({**request, "row": 3.0})
-        with self.assertRaisesRegex(ValueError, "no 'row'"):
+        with self.assertRaisesRegex(RequestRefused, "no 'row'"):
             backend.fly({key: value for key, value in request.items() if key != "row"})
 
 
@@ -443,11 +614,34 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual((status, payload["end"]["reason"], event), (200, SEGMENT_END, None))
         self.assertEqual(autopilot.calls, [{"row": 3}])
 
-    def test_a_set_or_flight_that_is_not_there_is_a_404_and_a_refusal_is_raised(self):
-        status, payload, _ = self.app(FakeAutopilot(FileNotFoundError("no set"))).handle_post("/autopilot/segment", {})
-        self.assertEqual((status, payload), (404, {"ok": False, "error": "no set"}))
-        with self.assertRaisesRegex(ValueError, "refused"):
-            self.app(FakeAutopilot(ValueError("refused"))).handle_post("/autopilot/segment", {})
+    def test_a_bad_request_is_a_400_a_set_or_flight_not_listed_a_404_and_anything_else_a_500_with_its_reason(self):
+        post = lambda error: self.app(FakeAutopilot(error)).handle_post("/autopilot/segment", {})[:2]  # noqa: E731
+        self.assertEqual(post(RequestRefused("no 'row'")), (400, {"ok": False, "error": "no 'row'"}))
+        self.assertEqual(post(NotListed("no set")), (404, {"ok": False, "error": "no set"}))
+        # a listed flight the backend could not fly — a spec refused, a re-read that differs, a file gone — is its fault
+        self.assertEqual(post(ValueError("2 executor specs")), (500, {"ok": False, "error": "ValueError: 2 executor specs"}))
+        self.assertEqual(post(FileNotFoundError("npz")), (500, {"ok": False, "error": "FileNotFoundError: npz"}))
+
+
+def ts_constant(path: Path, name: str):
+    """A `export const NAME = …` of a frontend file, as JSON."""
+    match = re.search(rf"export const {name} = (\[[^\]]*\]|\"[^\"]*\")", path.read_text(encoding="utf-8"))
+    if match is None:
+        raise AssertionError(f"{path.name} has no {name}")
+    return json.loads(re.sub(r",\s*\]", "]", match.group(1)))
+
+
+class MirrorTest(unittest.TestCase):
+    """The frontend's copies of this module's names (`trainingAutopilot.ts`) and of the judge's outcomes
+    (`trainingOverlays.ts`): one name on both sides, or the reader refuses every answer."""
+
+    def test_the_frontend_reader_mirrors_the_backends_names(self):
+        from ts_transformer.autopilot.judge import OUTCOMES
+        data = REPO_ROOT / "aeroviz-4d" / "src" / "data"
+        self.assertEqual(ts_constant(data / "trainingAutopilot.ts", "TRAINING_AUTOPILOT_SCHEMA"), SCHEMA)
+        self.assertEqual(ts_constant(data / "trainingAutopilot.ts", "TRAINING_AUTOPILOT_STATUSES"), list(STATUSES))
+        self.assertEqual(ts_constant(data / "trainingAutopilot.ts", "TRAINING_AUTOPILOT_SEGMENT_END"), SEGMENT_END)
+        self.assertEqual(ts_constant(data / "trainingOverlays.ts", "TRAINING_EXECUTOR_OUTCOMES"), list(OUTCOMES))
 
 
 if __name__ == "__main__":

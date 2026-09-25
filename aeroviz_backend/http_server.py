@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused
 from aeroviz_backend.dynamics_comparison_backend import DynamicsComparisonBackend
 from aeroviz_backend.isolated_backend import (
     IsolatedDynamicsComparisonBackend,
@@ -58,7 +59,7 @@ class AeroVizBackendApp:
     def autopilot_segment_backend(self) -> Any:
         with self._autopilot_segment_lock:
             if self._autopilot_segment_backend is None:
-                from aeroviz_backend.autopilot_segment import AutopilotSegmentBackend
+                from aeroviz_backend.autopilot_segment.backend import AutopilotSegmentBackend
 
                 self._autopilot_segment_backend = AutopilotSegmentBackend()
             return self._autopilot_segment_backend
@@ -127,11 +128,16 @@ class AeroVizBackendApp:
         if path == "/dynamics-comparison/history/clear":
             return 200, self.dynamics_comparison_backend.clear(payload), None
         if path == "/autopilot/segment":
-            # the executor flies one word's segment of a Training flight, live
+            # the executor flies one word's segment of a Training flight, live: a request the view cannot make is a
+            # 400, a set or flight not listed a 404, and anything else that stops a listed flight a 500 with its reason
             try:
                 return 200, self.autopilot_segment_backend().fly(payload), None
-            except FileNotFoundError as exc:
+            except RequestRefused as exc:
+                return 400, {"ok": False, "error": str(exc)}, None
+            except NotListed as exc:
                 return 404, {"ok": False, "error": str(exc)}, None
+            except Exception as exc:
+                return 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, None
         return 404, {"ok": False, "error": "not found"}, None
 
 
