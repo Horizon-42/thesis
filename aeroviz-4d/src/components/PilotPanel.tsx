@@ -227,6 +227,8 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
   // Why the aircraft catalog did not load: held apart from `error`, which every action clears, so it stays on screen
   // for as long as there is no aircraft — in the very modes whose target reads "— (no aircraft)".
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  // the catalog is asked for once per mount, and again by the alert's Retry (the backend may come up after the page)
+  const [catalogAttempt, setCatalogAttempt] = useState<number>(0);
   const [aircraftConfigs, setAircraftConfigs] = useState<PilotAircraftConfig[]>([]);
   const [simulationMode, setSimulationMode] =
     useState<PilotSimulationMode>(DEFAULT_SIMULATION_MODE);
@@ -683,14 +685,15 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       })
       .catch((configError: unknown) => {
         if (cancelled) return;
-        setAircraftConfigs([]);
+        // the list stays as it is (empty: it is set only on success) — a new empty array would re-run the reset
+        // effect keyed on it and wipe what the user set up while the catalog was asked for
         setCatalogError(toErrorMessage(configError));
       });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [catalogAttempt]);
 
   useEffect(() => {
     if (!activeAirportCode) {
@@ -2449,7 +2452,10 @@ export default function PilotPanel({ mode: controlledMode, onRequestMode }: Pilo
       )}
 
       {catalogError ? (
-        <div className="pilot-error" role="alert">The aircraft catalog did not load: {catalogError}</div>
+        <div className="pilot-error" role="alert">
+          The aircraft catalog did not load: {catalogError}{" "}
+          <button type="button" onClick={() => setCatalogAttempt((attempt) => attempt + 1)}>Retry</button>
+        </div>
       ) : null}
       {error ? <div className="pilot-error" role="alert">{error}</div> : null}
 

@@ -11,7 +11,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as Cesium from "cesium";
-import { useAirportLocalTerrainProgress, useApp } from "../context/AppContext";
+import {
+  useAirportLocalTerrainProgress,
+  useApp,
+  type AirportLocalTerrainProgress,
+  type AirportLocalTerrainState,
+} from "../context/AppContext";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const HDG_STEP   = 15;  // degrees per heading button click
@@ -76,9 +81,30 @@ interface CamState {
   lon:      number;  // decimal degrees
 }
 
+/** The HUD's "Local" line: the local terrain's phase, and while tiles are still warming, how many of how many. */
+export function localTerrainLabel(
+  status: AirportLocalTerrainState["status"], { loadedTiles, totalTiles }: AirportLocalTerrainProgress,
+): string {
+  switch (status) {
+    case "active":
+      return totalTiles > 0 && loadedTiles < totalTiles ? `Active ${loadedTiles}/${totalTiles}` : "Active";
+    case "preloading":
+      return totalTiles > 0 ? `Preload ${loadedTiles}/${totalTiles}` : "Preloading";
+    case "loading":
+      return "Loading";
+    case "missing":
+      return "Missing";
+    case "error":
+      return "Error";
+    case "disabled":
+    default:
+      return "Off";
+  }
+}
+
 export default function HUD() {
   const { viewer, airport, airportLocalTerrain, setSelectedFlightId } = useApp();
-  const { loadedTiles, totalTiles } = useAirportLocalTerrainProgress();
+  const terrainProgress = useAirportLocalTerrainProgress();
   const [cam, setCam] = useState<CamState | null>(null);
   const [lighting, setLighting] = useState(true);
   const [exaggeration, setExaggeration] = useState(1);
@@ -320,23 +346,6 @@ export default function HUD() {
   const hdgLabel = Math.round(cam.heading).toString().padStart(3, "0") + "°";
   const terrainLoadLabel =
     terrainTilesRemaining > 0 ? `Refining ${terrainTilesRemaining}` : "Ready";
-  const localTerrainLabel = (() => {
-    switch (airportLocalTerrain.status) {
-      case "active":
-        return totalTiles > 0 && loadedTiles < totalTiles ? `Active ${loadedTiles}/${totalTiles}` : "Active";
-      case "preloading":
-        return totalTiles > 0 ? `Preload ${loadedTiles}/${totalTiles}` : "Preloading";
-      case "loading":
-        return "Loading";
-      case "missing":
-        return "Missing";
-      case "error":
-        return "Error";
-      case "disabled":
-      default:
-        return "Off";
-    }
-  })();
 
   return (
     <div className="hud">
@@ -465,7 +474,7 @@ export default function HUD() {
             }
             title={airportLocalTerrain.error ?? airportLocalTerrain.sourceLabel ?? undefined}
           >
-            {localTerrainLabel}
+            {localTerrainLabel(airportLocalTerrain.status, terrainProgress)}
           </span>
         </div>
       </div>

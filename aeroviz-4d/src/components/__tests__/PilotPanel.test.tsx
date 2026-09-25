@@ -80,6 +80,8 @@ vi.mock("../../hooks/useDynamicsComparisonPlayback", () => ({
 
 vi.mock("../../pilot/dynamicsComparisonClient", () => ({
   runDynamicsComparison: mocks.runDynamicsComparison,
+  // the Compare tab asks how many comparisons are kept when it opens
+  fetchDynamicsComparisonHistoryCount: async () => 0,
 }));
 
 vi.mock("../../pilot/workerSessionClient", () => ({
@@ -600,9 +602,12 @@ describe("PilotPanel trajectory play mode", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(why);
     fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
     const targetSummary = await screen.findByLabelText("Target aircraft state summary");
-    // entering Trajectory clears the panel's one-shot error, never why there is no aircraft
+    // entering Trajectory — and the RNAV candidates loading there — clear the panel's one-shot error, never why there
+    // is no aircraft
     await waitFor(() => expect(mocks.fetchRnavInitialFixCandidates).toHaveBeenCalled());
-    expect(screen.getAllByRole("alert").some((alert) => why.test(alert.textContent ?? ""))).toBe(true);
+    await act(async () => undefined);
+    const shown = () => screen.getAllByRole("alert").some((alert) => why.test(alert.textContent ?? ""));
+    expect(shown()).toBe(true);
     // no aircraft: no target speed, so the target editor (its speed range is the aircraft's) is not drawn
     expect(within(targetSummary).getByText("— (no aircraft)")).toBeTruthy();
     const edit = within(targetSummary).getByRole("button", { name: "Edit" }) as HTMLButtonElement;
@@ -613,6 +618,18 @@ describe("PilotPanel trajectory play mode", () => {
     expect(optimize.disabled).toBe(true);
     fireEvent.click(optimize);
     expect(mocks.runTrajectoryOptimization).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(shown()).toBe(true);
+
+    // the backend is up now: Retry asks again, and the aircraft is there
+    mocks.fetchPilotAircraftConfigs.mockResolvedValue([a320Config]);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryAllByRole("alert").some((alert) => why.test(alert.textContent ?? ""))).toBe(false));
+    expect(mocks.fetchPilotAircraftConfigs).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Trajectory" }));
+    const loaded = await screen.findByLabelText("Target aircraft state summary");
+    await waitFor(() => expect(within(loaded).queryByText("— (no aircraft)")).toBeNull());
+    expect(within(loaded).getByText(/ m\/s$/)).toBeTruthy();
   });
 
   it("clamps trajectory target speed and heading to threshold constraints", async () => {

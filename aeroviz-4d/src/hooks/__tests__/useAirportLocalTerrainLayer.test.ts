@@ -122,14 +122,14 @@ vi.mock("../../terrain/airportLocalTerrain", () => ({
   loadAirportLocalTerrain,
 }));
 
-vi.mock("../../context/AppContext", () => ({
+vi.mock("../../context/AppContext", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../context/AppContext")>()),
   useApp: () => ({
     viewer: mockViewer,
     activeAirportCode: getActiveAirportCode(),
     setAirportLocalTerrain,
     setAirportLocalTerrainProgress,
   }),
-  NO_TERRAIN_TILES: { loadedTiles: 0, totalTiles: 0 },
 }));
 
 import { useAirportLocalTerrainLayer } from "../useAirportLocalTerrainLayer";
@@ -208,8 +208,6 @@ describe("useAirportLocalTerrainLayer", () => {
     expect(mockViewer.scene.globe.preloadSiblings).toBe(false);
     expect(mockViewer.scene.globe.preloadAncestors).toBe(true);
     expect(mockViewer.scene.globe.depthTestAgainstTerrain).toBe(true);
-    await waitFor(() => expect(result.current.loadedTiles).toBe(1));
-    expect(result.current.totalTiles).toBe(1);
     // the state is published once per phase; the tile counts, which move on every tile, apart from it
     expect(setAirportLocalTerrain.mock.calls.map(([state]) => state.status)).toEqual(["loading", "preloading", "active"]);
     expect(setAirportLocalTerrainProgress.mock.calls.map(([progress]) => progress)).toEqual([
@@ -238,12 +236,43 @@ describe("useAirportLocalTerrainLayer", () => {
     const { result } = renderHook(() => useAirportLocalTerrainLayer({ backgroundPreload: true }));
 
     await waitFor(() => expect(result.current.status).toBe("active"));
-    await waitFor(() => expect(result.current.loadedTiles).toBe(12));
+    // active with the focused tile of twelve, then counted on through the background warm
+    await waitFor(() => expect(setAirportLocalTerrainProgress).toHaveBeenLastCalledWith({ loadedTiles: 12, totalTiles: 12 }));
+    expect(setAirportLocalTerrainProgress).toHaveBeenCalledWith({ loadedTiles: 1, totalTiles: 12 });
 
     expect(preloadTilesByAirport.CYVR).toHaveBeenCalledWith(
       expect.objectContaining({ concurrency: 4 }),
     );
-    expect(result.current.totalTiles).toBe(12);
+  });
+
+  it("counts no tile of an airport it has left", async () => {
+    let staleProgress: ((progress: { loadedTiles: number; totalTiles: number }) => void) | null = null;
+    preloadTilesByAirport.CYVR.mockImplementationOnce(({ onProgress }: { onProgress: typeof staleProgress }) => {
+      staleProgress = onProgress;
+      return new Promise(() => undefined);                   // still warming when the airport changes
+    });
+    const { rerender } = renderHook(() => useAirportLocalTerrainLayer());
+    await waitFor(() => expect(staleProgress).not.toBeNull());
+    setActiveAirportCode("KSJC");
+    rerender();
+    await waitFor(() => expect(mockViewer.scene.terrainProvider).toBe(providerByAirport.KSJC));
+    const counted = setAirportLocalTerrainProgress.mock.calls.length;
+    staleProgress!({ loadedTiles: 5, totalTiles: 1 });
+    expect(setAirportLocalTerrainProgress.mock.calls.length).toBe(counted);
+  });
+
+  it("says why the terrain did not load, and counts no tile — though some were warmed first", async () => {
+    preloadTilesByAirport.CYVR.mockImplementationOnce(({ onProgress }: { onProgress: (progress: object) => void }) => {
+      onProgress({ loadedTiles: 1, totalTiles: 1 });
+      return Promise.reject(new Error("a height tile did not decode"));
+    });
+    const { result } = renderHook(() => useAirportLocalTerrainLayer());
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(setAirportLocalTerrain).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: "error", airportCode: "CYVR", error: "a height tile did not decode",
+    }));
+    expect(setAirportLocalTerrainProgress).toHaveBeenCalledWith({ loadedTiles: 1, totalTiles: 1 });
+    expect(setAirportLocalTerrainProgress).toHaveBeenLastCalledWith({ loadedTiles: 0, totalTiles: 0 });
   });
 
   it("loads a separate cached provider per active airport", async () => {

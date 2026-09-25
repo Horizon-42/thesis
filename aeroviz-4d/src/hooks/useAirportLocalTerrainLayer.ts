@@ -26,10 +26,9 @@ export type AirportLocalTerrainLayerStatus = "idle" | "loading" | "preloading" |
 export interface AirportLocalTerrainLayerState {
   status: AirportLocalTerrainLayerStatus;
   metadata: AirportLocalTerrainMetadata | null;
-  /** The loaded terrain provider, or null if not yet loaded / disabled. */
+  /** The loaded terrain provider, or null if not yet loaded / disabled. Its tile counts are the app's
+   *  (`useAirportLocalTerrainProgress`), not kept here: they move on every tile. */
   provider: Cesium.CustomHeightmapTerrainProvider | null;
-  loadedTiles: number;
-  totalTiles: number;
   error: string | null;
 }
 
@@ -78,8 +77,6 @@ export function useAirportLocalTerrainLayer(
     status: "idle",
     metadata: null,
     provider: null,
-    loadedTiles: 0,
-    totalTiles: 0,
     error: null,
   });
 
@@ -94,8 +91,6 @@ export function useAirportLocalTerrainLayer(
         status: "idle",
         metadata: null,
         provider: null,
-        loadedTiles: 0,
-        totalTiles: 0,
         error: null,
       });
       setAirportLocalTerrain(
@@ -115,8 +110,6 @@ export function useAirportLocalTerrainLayer(
       status: "loading",
       metadata: null,
       provider: null,
-      loadedTiles: 0,
-      totalTiles: 0,
       error: null,
     });
     setAirportLocalTerrain(airportLocalTerrainPhaseState({
@@ -141,8 +134,6 @@ export function useAirportLocalTerrainLayer(
           status: "preloading",
           metadata,
           provider: null,
-          loadedTiles: 0,
-          totalTiles: activationPlan.focusedTiles.length,
           error: null,
         });
         setAirportLocalTerrain(airportLocalTerrainPhaseState({
@@ -159,14 +150,6 @@ export function useAirportLocalTerrainLayer(
           signal: preloadAbortController.signal,
           onProgress: ({ loadedTiles, totalTiles }) => {
             if (cancelled) return;
-            setState({
-              status: "preloading",
-              metadata,
-              provider: null,
-              loadedTiles,
-              totalTiles,
-              error: null,
-            });
             setAirportLocalTerrainProgress({ loadedTiles, totalTiles });
           },
         });
@@ -185,8 +168,6 @@ export function useAirportLocalTerrainLayer(
           status: "active",
           metadata,
           provider,
-          loadedTiles: activeLoadedTiles,
-          totalTiles: activeTotalTiles,
           error: null,
         });
         setAirportLocalTerrain(airportLocalTerrainPhaseState({
@@ -203,14 +184,6 @@ export function useAirportLocalTerrainLayer(
             signal: preloadAbortController.signal,
             onProgress: ({ loadedTiles, totalTiles }) => {
               if (cancelled) return;
-              setState((current) => {
-                if (current.status !== "active") return current;
-                return {
-                  ...current,
-                  loadedTiles,
-                  totalTiles,
-                };
-              });
               setAirportLocalTerrainProgress({ loadedTiles, totalTiles });
             },
           }).catch((error) => {
@@ -227,8 +200,6 @@ export function useAirportLocalTerrainLayer(
             status: "idle",
             metadata: null,
             provider: null,
-            loadedTiles: 0,
-            totalTiles: 0,
             error: null,
           });
           setAirportLocalTerrain(missingAirportLocalTerrainState(activeAirportCode));
@@ -244,8 +215,6 @@ export function useAirportLocalTerrainLayer(
           status: "error",
           metadata: null,
           provider: null,
-          loadedTiles: 0,
-          totalTiles: 0,
           error: message,
         });
         setAirportLocalTerrain(airportLocalTerrainPhaseState({
