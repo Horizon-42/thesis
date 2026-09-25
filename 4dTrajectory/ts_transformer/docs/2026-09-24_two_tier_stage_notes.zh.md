@@ -29,7 +29,8 @@
 | 句子产物（上一版） | `outputs/POOLED/instruction_language/v3_20260924/` | 按航班划分、信号 `ts-instruction-signals-v2`；新代码按格式名拒绝读它；第二版先验用它训练 |
 | 第三版第 0 步普查 | `outputs/POOLED/prior/v3_census_20260924/census.json` | 读数文档 §3 |
 | 执行器正式产物 | `outputs/POOLED/executor/v6_20260924/` | 规格 `0d6a68a92c6f`（与 v5 逐字节相同），`replay-train/`、`replay-val/`（新划分，每格都过门） |
-| 执行器上一版产物 | `outputs/POOLED/executor/v5_20260924/` | 同一规格在旧句子产物上，`replay-train/`、`sensitivity-train-400-seed1337/` |
+| 执行器上一版产物 | `outputs/POOLED/executor/v5_20260924/` | 同一规格在旧句子产物上，`replay-train/`、`sensitivity-train-400-seed1337/`、`replay-val/`（2026-09-25 为前端补跑：旧按航班划分的验证集，自己的动力学 9,113 架，每格都过门；从 `prior-v2` 工作树跑，那里的代码与 v5 规格同源） |
+| 前端执行器叠加层 | `aeroviz-4d/public/data/airports/<ICAO>/training/executor_v5_20260924/executor.json` | 画在 `instruction_v3` 集上（2026-09-25，用户要求）；磁盘校验 0 错误；正在跑的 vite 在它之前启动，要重启才看得到 |
 | 旧的执行器产物 | `outputs/POOLED/executor/{v2,v3,v4}_20260924/` | 已被 v5 取代，**留着不删**（用户 2026-09-24）。v2 的验证集回放门是早期的记录 |
 | 先验第一版 | `outputs/POOLED/prior/v1_20260924/` | 读数在读数文档 §1 |
 | 先验第二版 | `outputs/POOLED/prior/v2_20260924/` | 队列 22:24 UTC 跑完；选中 V2d（`choice.json`），读数文档 §2 |
