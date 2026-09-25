@@ -171,6 +171,28 @@ describe("ControlPanel", () => {
     expect(toggleLayer).toHaveBeenCalledWith("trajectories");
   });
 
+  it("commits the sample count when the field is left or Enter is pressed, never on each keystroke", () => {
+    appState.layers.trajectories = true;
+    appState.trajectorySampleCount = 50;
+    render(<ControlPanel />);
+    const field = screen.getByLabelText("Sample count (0 = all)") as HTMLInputElement;
+    expect(field.value).toBe("50");
+    // typing 200: the loads it plans must not be planned for 2 and 20 on the way
+    for (const typed of ["", "2", "20", "200"]) fireEvent.change(field, { target: { value: typed } });
+    expect(setTrajectorySampleCount).not.toHaveBeenCalled();
+    fireEvent.blur(field);
+    expect(setTrajectorySampleCount.mock.calls).toEqual([[200]]);
+    // cleared and Enter: all tracks (0); a negative count is all tracks too
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(setTrajectorySampleCount).toHaveBeenLastCalledWith(0);
+    expect(field.value).toBe("0");
+    fireEvent.change(field, { target: { value: "-5" } });
+    fireEvent.blur(field);
+    expect(setTrajectorySampleCount).toHaveBeenLastCalledWith(0);
+    expect(setTrajectorySampleCount).toHaveBeenCalledTimes(3);
+  });
+
   // ── Constraint-scoped procedure display (Feature A) ──────────────────────────
   it("auto-opens the procedure display for a constrained category + runway, without touching the runway", async () => {
     appState.layers.trajectories = true;

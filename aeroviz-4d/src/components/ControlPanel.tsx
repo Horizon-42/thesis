@@ -80,6 +80,16 @@ export default function ControlPanel({
     observedVerdictFilter,
     setObservedVerdictFilter,
   } = useApp();
+  // The sample count plans the trajectory loads (the observed tracks and the comparison's references), so it is a draft
+  // while typed and committed when the field is left or Enter is pressed — typing "200" must not plan loads for 2 and 20
+  // on the way. Nothing else writes the count, so the draft needs no syncing back.
+  const [sampleCountDraft, setSampleCountDraft] = useState<string>(() => String(trajectorySampleCount));
+  const commitSampleCount = () => {
+    const parsed = Number.parseInt(sampleCountDraft, 10);
+    const count = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    setSampleCountDraft(String(count));
+    setTrajectorySampleCount(count);
+  };
   const { categories: comparisonCategories } = useComparisonCategories(activeAirportCode);
   const drawableComparisonCategories = comparisonCategories.filter(
     isDrawableComparisonCategory,
@@ -431,10 +441,11 @@ export default function ControlPanel({
                 min={0}
                 step={1}
                 className="control-panel-airport-selector-input"
-                value={trajectorySampleCount}
-                onChange={(event) => {
-                  const parsed = Number.parseInt(event.target.value, 10);
-                  setTrajectorySampleCount(Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
+                value={sampleCountDraft}
+                onChange={(event) => setSampleCountDraft(event.target.value)}
+                onBlur={commitSampleCount}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") commitSampleCount();
                 }}
               />
             </label>
