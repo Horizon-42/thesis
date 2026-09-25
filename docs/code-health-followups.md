@@ -101,8 +101,8 @@ it merges (24, the B77W preset, review #14 and #21, the performance index's B722
 | B77W preset `landing_mass` 19 % above its MALW (09-24) | fixed on a branch | every preset lands at its published MALW (B77W 251.3 t, A320 66.0 t, C172 1,111 kg) on branch `dev-training-followups` `dcbf6388`, merged with the rebuild after post-training stage 2 (user 2026-09-25) | **yes — executor**: B77W flights' mass and approach speed (√(m / MALW)) |
 | Pilot frontend tests use a 145 / 135 / 155 kt fixture (09-24) | resolved | real catalog fixture + a range preset (`3d0fc579`, `d2323adf`); entry removed | — |
 | Performance index: stage-2 review leftovers (09-24) | partly | B722's mass fixed (own types land at the published MALW, index schema v2) on branch `dev-training-followups` `dcbf6388`, merged with the rebuild after post-training stage 2 (user 2026-09-25); the observed mass label, the two readout scripts and the MD88 / LJ35 / GLF3 judgements unchanged | **yes — executor**: B722's mass, MD88 → B737, LJ35 → B737 and GLF3 → B763 change what those flights fly; the mass label, the 60 t observed fallback and the readout scripts: no |
-| The native stall-margin range after the preset masses moved (09-26) | open | the index's decisions are still the 09-24 ones | **yes — executor**, if the rule is re-applied: B733, E550 and E545 would change decision |
-| OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | open | unchanged | **yes — executor**: those types' mass and approach speed |
+| The native stall-margin range after the preset masses moved (09-26) | fixed on a branch | re-judged by the rule (user 2026-09-26) on branch `dev-training-followups` `fde40395`: E545, E550 → C550, B733 → exclude | **yes — executor**: E545 / E550 flights fly as C550 |
+| OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | open | sources compared (entry); awaits the user's choice, and the FAA's B737 cell is wrong either way | **yes — executor**: those types' mass and approach speed |
 | An alias-resolved identity is not recorded as one (09-26) | open | unchanged | no: provenance only, the types are the same |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
@@ -1327,6 +1327,10 @@ E550 (1.153) and E545 (1.167), both own-parameter rows. `final_mapping.py:154` a
 types' margins at Poll–Schumann's own landing mass. At the rebuild: either re-apply the rule (those three change decision)
 or state that the range is frozen at the 09-24 analysis. The analysis document carries a dated note saying so.
 
+**Fixed on branch `dev-training-followups` `fde40395`** (user 2026-09-26: re-apply the rule): E545 and E550 own →
+substitute C550, B733 → exclude; the same three change whether or not the OpenAP-direct types also move to the MALW.
+`scripts/rebuild_inputs.py` reproduces all 199 stored verdicts in its 2026-09-24 mode. Delete this entry when it merges.
+
 ## OpenAP-direct types land at OpenAP's MLW, not the published MALW (2026-09-26)
 
 **Verified** (opus review of `dev-training-followups`). The branch makes every preset and own-parameter index type land
@@ -1334,6 +1338,22 @@ at the published MALW its approach speed is scaled from; an OpenAP-direct type s
 differs from the FAA MALW by C550 +11.1 %, E145 +3.2 %, B752 +2.7 %, A319 +2.5 % (above) and B737 −11.3 %, B37M −9.2 %,
 B744 −8.9 %, B763 −6.3 % (below). If "landing mass = the MALW the speed is scaled from" is to hold for every modelled
 type, decide it before the rebuild (it moves those types' mass and approach speed).
+
+**Sources compared** (2026-09-26, manufacturer excerpts in `docs/reference_speeds/excerpts/`). The published figure is
+the FAA Aircraft Characteristics Database 2024-10 `MALW_lb`, one row per ICAO designator; its `Approach_Speed_knot` is
+defined AT that MALW (data dictionary row 14), so the pair belongs together. OpenAP 2.4's `mlw` is one model per
+designator (the file names it: "Boeing 737-700", "Boeing 767-300"…) with no per-value citation. Three kinds of gap:
+- one designator, two variants or weight options, both published: B763 (Boeing 767-300 136,077 kg — OpenAP; -300ER
+  145,149 — FAA), A319 (Airbus WV 61,000 — FAA; 62,500 — OpenAP); B744 and E145 look the same but no manufacturer
+  document is on disk;
+- OpenAP's figure is not the type's: C550 6,804 kg (FAA TCDS A22CE Rev 74 p.6: Model 550 lands at 12,700 / 13,500 lb =
+  5,761 / 6,123 kg; OpenAP's is ≈ its own MTOW), B38M 66,300 (Boeing 737-8: 68,174 / 69,308; 66,300 is a 737-800
+  figure), B37M 60,000 (Boeing 737 MAX ACAP 2.1.1, 737-7: 63,911 / 66,043), A20N 66,000 (Airbus A320neo 67,400; 66,000 is the A320ceo's),
+  B752 92,200 (Boeing 757-200 89,811 / 95,254; 92,254 is the 757-200PF freighter's);
+- the FAA's figure is wrong: B737 — the row is "Boeing 737-700" but its MALW 145,600 lb (66,043 kg) is the 737-7
+  (MAX 7)'s; Boeing's 737-700 lands at 58,059 / 58,604 kg (737NG ACAP 2.1.2), and OpenAP's 58,600 is right. The
+  provenance README already calls this row "doubly suspect"; B739's FAA cell was replaced by Boeing's for the same
+  reason. Replacing B737's MALW moves its approach-speed anchor (130 kt then sits at 58.6 t) and so the speed gate.
 
 ## An alias-resolved identity is not recorded as one (2026-09-26)
 
