@@ -430,3 +430,24 @@ chunk of 64 flights × 4 branches ≈ 30 s (the speaker encodes row by row, `Pri
 allocated once for the chunk's longest flight and written in place), ≈ 31 min a 4,000-flight round.
 The executor's source hash moves with `take`: write a new executor spec (same content sha) at the commit before a
 formal run.
+
+### R19 · `run_ts.py prior_landing_reward` — the landing reward (prior design §9.3)
+
+2026-09-25. `prior_landing_reward --prior <the §9.2 round kept, or the step-1 run> --instructions <artefact> --executor
+<executor spec dir> --out <new dir> [--rounds 8] [--per-airport 400] [--samples 8] [--select-per-airport 200]
+[--select-samples 2] [--learning-rate 1e-5] [--warmup-steps 20] [--weight-decay 0.01] [--clip-norm 1]
+[--tokens-per-batch 16384] [--kl-weight 0.04] [--data-weight 1] [--seed 1337] [--chunk 32] [--device cuda] [--smoke]`.
+Each round draws `--per-airport` train-day flights (own dynamics, seed + round; repeats counted) and flies each
+`--samples` times with the prior speaking as in free generation (`speak_and_fly`, temperature 1). A sentence's reward
+(`prior.landing_reward`) is 1 when the executor's judge lands it on a runway in the airport's landing direction at the
+first predicted step — the candidates landed on in the 30 min before (the input's landing pool, the flight's own left out,
+no test day) and those within 90° of them; any runway with no landing in the window — else 0; its advantage is the reward
+less its flight's mean (not divided by the spread). Only flights whose sentences differ are trained on. One pass of
+`train.RewardTuner` over this round's sentences only: advantage × the NLL of the sentence's own words (per step, dropout
+off, the unmasked distribution) + `--kl-weight` × the sample estimate of the KL to the frozen start model + `--data-weight`
+× a teacher-forced batch of the train split per update (a round with no flight to train on is refused by name). The select readout is `prior_closed_loop`'s, in the same batches of 64 flights (`SELECT_CHUNK`: round 0 from the step-1 prior reproduces §9.2's round 0), plus the share landed against the landing direction. `choice.json`: among
+the rounds within the guards of round 0 (landed on the observed runway ≥ round 0's − 0.02, heading words per flight ≤
+1.2 × round 0's; a round that landed nothing is excluded), the highest select landed share, the earliest within 0.015. Writes `config.json`,
+`round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, readout.json}` (a round
+directory is a prior run `prior_free_generation` reads — the val readout, once), `history.json`, `choice.json`; from a
+clean tree unless `--smoke`. Val and the sealed test days are never read.

@@ -6,14 +6,15 @@ closed-loop batch weighs a step the same whichever of its columns are asked. Des
 flight.
 
 Closed-loop fine-tuning (design §9.2) takes the same step on chains (`FineTuner`): one pass at a time, from the weights
-it is given, at its own learning rate."""
+it is given, at its own learning rate. The landing reward (design §9.3, `RewardTuner`) weighs each sentence the prior
+said by its advantage, keeps the model near a frozen reference and trains on the data beside it."""
 
 from __future__ import annotations
 
 import copy
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
 import numpy as np
 import torch
@@ -78,6 +79,34 @@ def column_nll(logits: list[torch.Tensor], targets: torch.Tensor, present: torch
         entries = speaks & asked[..., c]
         columns.append(nn.functional.cross_entropy(logit[entries], targets[..., c][entries], reduction="sum"))
     return torch.stack(columns)
+
+
+def flight_nll(logits: list[torch.Tensor], targets: torch.Tensor, present: torch.Tensor,
+               asked: torch.Tensor) -> torch.Tensor:
+    """`column_nll` per scene rather than per column: ``[B]``, summed over the scene's asked cells."""
+    speaks = asked_entries(present)
+    total = logits[0].new_zeros(len(targets))
+    for c, logit in enumerate(logits):
+        entries = speaks & asked[..., c]
+        nll = nn.functional.cross_entropy(logit[entries], targets[..., c][entries], reduction="none")
+        total = total.index_add(0, entries.nonzero()[:, 0], nll)
+    return total
+
+
+def flight_kl(logits: list[torch.Tensor], reference: list[torch.Tensor], targets: torch.Tensor, present: torch.Tensor,
+              asked: torch.Tensor) -> torch.Tensor:
+    """``[B]``: how far the model is from the ``reference`` on each scene's own words, summed over its asked cells —
+    per cell ``exp(r − p) − (r − p) − 1`` of the two log-probabilities of the word (an estimate of the KL divergence
+    from the samples, ≥ 0, GRPO's)."""
+    speaks = asked_entries(present)
+    total = logits[0].new_zeros(len(targets))
+    for c, (logit, fixed) in enumerate(zip(logits, reference)):
+        entries = speaks & asked[..., c]
+        word = targets[..., c][entries][:, None]
+        gap = (torch.log_softmax(fixed[entries], dim=-1).gather(1, word)
+               - torch.log_softmax(logit[entries], dim=-1).gather(1, word))[:, 0]
+        total = total.index_add(0, entries.nonzero()[:, 0], torch.exp(gap) - gap - 1.0)
+    return total
 
 
 def batch_nll(model: Prior, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, int]:
@@ -191,3 +220,93 @@ class FineTuner:
         self.model.eval()
         return {"nll_per_step": total / steps, "steps": steps, "batches": count,
                 "seconds": time.perf_counter() - started}
+
+
+@dataclass(frozen=True)
+class RewardConfig:
+    """The landing reward's optimiser and weights (design §9.3, §10): a tenth of §9.2's learning rate (the reward term's
+    gradient is noisy), a pull to the reference of 0.04, the data term at 1."""
+
+    learning_rate: float = 1e-5
+    weight_decay: float = 0.01
+    warmup_steps: int = 20
+    clip_norm: float = 1.0
+    tokens_per_batch: int = 16_384          # half the sentences said, half the data
+    kl_weight: float = 0.04
+    data_weight: float = 1.0
+
+
+class RewardTuner:
+    """The model's optimiser across landing-reward rounds (design §9.3). `one_pass` goes once over the sentences of a
+    round — each a flight the prior spoke to, its words as targets, with its advantage — in length buckets, shuffled;
+    every update pairs a batch of them with a batch of teacher-forced data flights:
+
+        loss = mean over sentences of (advantage × the NLL of its own words, per step)
+             + kl_weight × mean over sentences of (`flight_kl` to the frozen reference, per step)
+             + data_weight × the data batch's NLL per step (pretraining's loss)
+
+    — minimising the first term raises the words of a sentence that did better than its flight's others and lowers the
+    words of one that did worse.
+
+    The sentences' words are scored under the model's unmasked distribution (the masks removed ~0.06 % a step, readouts
+    §5) with dropout off — the distribution they were sampled from, so the pull to the reference measures how far the
+    weights moved and not dropout's noise (at the first update it is 0); one pass, no importance ratio (the sentences
+    come from the weights at the start of the pass). The seed sets the batch order."""
+
+    def __init__(self, model: Prior, reference: Prior, config: RewardConfig, device: torch.device, *, seed: int) -> None:
+        torch.manual_seed(seed)
+        self.model, self.reference, self.config, self.device = model, reference.eval(), config, device
+        for parameter in reference.parameters():
+            parameter.requires_grad_(False)
+        self.rng = np.random.default_rng(seed)
+        self.optimiser = torch.optim.AdamW(model.parameters(), lr=config.learning_rate,
+                                           weight_decay=config.weight_decay)
+        self.schedule = torch.optim.lr_scheduler.LambdaLR(
+            self.optimiser, lambda step: min(1.0, (step + 1) / config.warmup_steps))
+        self.passes = 0
+        self._data: Iterator[list[int]] = iter(())
+
+    def _data_batch(self, data: Split) -> list[int]:
+        """The next batch of data flights, the data reshuffled whenever it runs out."""
+        indices = next(self._data, None)
+        if indices is None:
+            self._data = batches(data.flights, self.config.tokens_per_batch // 2, self.rng)
+            indices = next(self._data)
+        return indices
+
+    def one_pass(self, sentences: Split, advantages: np.ndarray, data: Split) -> dict[str, Any]:
+        """One pass over ``sentences`` (``advantages``: one per sentence) beside ``data``: the mean of each term as
+        trained, and what it took."""
+        if len(advantages) != len(sentences.flights):
+            raise ValueError(f"{len(advantages)} advantages for {len(sentences.flights)} sentences")
+        if not sentences.flights:
+            raise ValueError("no sentence to train on: no flight's sentences differ in reward")
+        self.passes += 1
+        self.model.eval()
+        started = time.perf_counter()
+        sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
+        count = 0
+        for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
+            batch = to_batch(sentences, indices, self.device)
+            logits = batch_logits(self.model, batch)
+            with torch.no_grad():
+                reference = batch_logits(self.reference, batch)
+            steps = asked_entries(batch["present"]).sum(dim=(1, 2)).to(logits[0].dtype)
+            advantage = torch.as_tensor(advantages[indices], dtype=logits[0].dtype, device=self.device)
+            reward = (advantage * flight_nll(logits, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
+            kl = (flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
+            nll, speaks = batch_nll(self.model, to_batch(data, self._data_batch(data), self.device))
+            data_loss = nll.sum() / speaks
+            loss = reward + self.config.kl_weight * kl + self.config.data_weight * data_loss
+            if not torch.isfinite(loss):
+                raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")
+            self.optimiser.zero_grad(set_to_none=True)
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.model.parameters(), self.config.clip_norm)
+            self.optimiser.step()
+            self.schedule.step()
+            for name, value in (("reward", reward), ("kl", kl), ("data", data_loss)):
+                sums[name] += float(value.detach())
+            count += 1
+        return {**{f"{name}_mean": value / count for name, value in sums.items()}, "batches": count,
+                "sentences": len(sentences.flights), "seconds": time.perf_counter() - started}

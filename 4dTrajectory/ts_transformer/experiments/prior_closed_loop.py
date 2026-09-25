@@ -50,7 +50,9 @@ from ts_transformer.autopilot.frame import AirportCharts, read_state
 from ts_transformer.autopilot.judge import OUTCOMES, outcome_of
 from ts_transformer.autopilot.lateral import Runways, relative
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.experiments.prior_free_generation import ClosedLoop, _physics, grouped, limits_s, prior_rows
+from ts_transformer.experiments.prior_free_generation import (
+    ClosedLoop, _physics, grouped, limits_s, prior_rows, steps_said,
+)
 from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
 from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_spec
@@ -157,7 +159,7 @@ def fly_chains(model: Prior, flights: Sequence[FlightSignals], geometries: Seque
     speaker = loop.speaker
     positions, sentences, outcomes, cleared_out, captured_out = [], [], [], [], []
     for b in range(count):
-        steps = min(said.shape[1], int(flown.done_cycle[b]) // step_rows + 1)
+        steps = steps_said(flown, b, said.shape[1], step_rows)
         rows = N_LOOK + steps
         positions.append(np.column_stack((speaker.e[b, :rows], speaker.n[b, :rows], speaker.h[b, :rows])))
         sentences.append(said[b, :steps])

@@ -190,6 +190,12 @@ def fly_reference(batch: replay.Batch, words: Words, params: ExecutorParams, *, 
                time_limit_s=torch.tensor(limits_s(batch, params, step_s), dtype=torch.float64, device=device))
 
 
+def steps_said(flown: Flown, index: int, steps: int, step_rows: int) -> int:
+    """How many of the ``steps`` a flight's sentence said count: up to the step whose cycles ended the flight (a
+    finished flight says nothing more)."""
+    return min(steps, int(flown.done_cycle[index]) // step_rows + 1)
+
+
 def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], words: Words, source: str,
                 samples: Sequence[int | None], forbidden: dict[int, np.ndarray] | None) -> list[dict[str, Any]]:
     """One row per flight: its outcome and what was said (``samples``: each flight's sample number, None for the
@@ -199,7 +205,7 @@ def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], 
     step_rows = round(words.spec.step_s / flown.cycle_s)
     for j, (reading, grid, sample) in enumerate(zip(batch.readings, grids, samples)):
         # the steps said up to the flight's end: the step whose cycles ended it (later ones said nothing)
-        steps = min(len(grid), int(flown.done_cycle[j]) // step_rows + 1)
+        steps = steps_said(flown, j, len(grid), step_rows)
         grid = np.asarray(grid)[:steps]
         runway = grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED]
         outcome = outcome_of(flown, j, batch.geometries[j], int(runway[-1]), words.spec)
