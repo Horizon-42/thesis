@@ -198,6 +198,7 @@ def test_parallel_reclassification_is_byte_identical_to_serial(tmp_path):
     assert parallel["provenance"]["reclassification"].pop("jobs") == 2
     for manifest in (serial, parallel):
         manifest["provenance"]["reclassification"].pop("completed_utc")
+        manifest.pop("written_utc")      # when each was written (whole seconds): not content
     assert serial == parallel
     for row in serial["records"]:
         assert (serial_paths.tracks / row["file"]).read_bytes() == \

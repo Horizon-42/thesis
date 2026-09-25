@@ -24,6 +24,7 @@ from ts_transformer.data.dataset import FixedAnchorTrajectoryWindows, Normalizer
 from ts_transformer.inference.forecast import forecast_approach
 from ts_transformer.backbone.adapters import build_model
 from ts_transformer.data.synthetic import synthetic_arrivals
+from flight_scenarios.runway_target import find_threshold
 from ts_transformer.tests.support import fake_data_provenance
 from ts_transformer.training.train import load_checkpoint, train
 
@@ -269,6 +270,13 @@ def test_airport_enu_series_differ_from_threshold_enu_only_by_the_anchor():
 def test_airport_enu_needs_the_arrival_airport():
     flights = synthetic_arrivals(AIRPORT, RUNWAY, n_flights=1, seed=3)
     flights[0]["arr_airport"] = None
+    # The threshold target comes from the flight's own published runway target (a real arrival's always does), so the
+    # refusal below is the airport frame's and not the scenario builder's (which refuses a threshold it cannot find).
+    threshold = find_threshold(AIRPORT, RUNWAY)
+    flights[0]["runway_target"] = {
+        "lat": threshold["lat"], "lon": threshold["lon"], "elevation_msl_m": threshold["elevation_m"],
+        "course_deg": threshold["heading_deg"], "threshold_crossing_height_m": 15.0, "published_glidepath_deg": 3.0,
+    }
     with pytest.raises(ValueError, match="needs the arrival airport"):
         build_series(flights, TSConfig(coordinate_frame="airport-enu"))
     series, report = build_series(
