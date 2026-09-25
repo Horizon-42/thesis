@@ -27,6 +27,7 @@ so the listener never hears what it refuses. A flight the caller marks inactive 
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -36,7 +37,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.grammar import step_allowed
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
-from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, row_inputs
+from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, rows_inputs
 from ts_transformer.prior.model import Prior, self_edges
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 
@@ -93,13 +94,23 @@ class Speaker:
         self.said_row = np.zeros((count, 6), dtype=np.int64)
 
     def _inputs(self, first: int) -> None:
-        """Rows ``first`` … ``rows − 1``'s features and candidate relations (`data.row_inputs`)."""
+        """Rows ``first`` … ``rows − 1``'s features and candidate relations (`data.rows_inputs`), the flights of one
+        airport geometry together, written to the model's inputs in one copy."""
+        rows = self.rows
+        features = np.zeros((len(self.geometries), rows - first, self.features.shape[-1]), dtype=np.float32)
+        relative = np.zeros((len(self.geometries), rows - first) + tuple(self.relative.shape[3:]), dtype=np.float32)
+        airports: dict[int, list[int]] = defaultdict(list)
         for b, geometry in enumerate(self.geometries):
-            features, relative = row_inputs(self.e[b, : self.rows], self.n[b, : self.rows], self.h[b, : self.rows],
-                                            self.time_s[: self.rows], self.entry_s[b], first, geometry,
-                                            self.contexts[b])
-            self.features[b, 0, first: self.rows] = torch.as_tensor(features)
-            self.relative[b, 0, first: self.rows, : relative.shape[1]] = torch.as_tensor(relative)
+            airports[id(geometry)].append(b)
+        for members in airports.values():
+            index = np.array(members)
+            contexts = self.contexts[members[0]]
+            f, r = rows_inputs(self.e[index, :rows], self.n[index, :rows], self.h[index, :rows], self.time_s[:rows],
+                               np.array(self.entry_s)[index], first, self.geometries[members[0]],
+                               None if contexts is None else [self.contexts[b] for b in members])
+            features[index], relative[index, :, : r.shape[2]] = f, r
+        self.features[:, 0, first:rows] = torch.as_tensor(features, device=self.features.device)
+        self.relative[:, 0, first:rows] = torch.as_tensor(relative, device=self.relative.device)
 
     def take(self, index: np.ndarray) -> None:
         """Keep the flights at ``index`` — a closed loop's branches: a flight taken twice is spoken to on as two copies

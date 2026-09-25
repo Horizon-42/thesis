@@ -403,7 +403,13 @@ Writes `generation.json` (`ts-prior-free-generation-v1`, every flight row) and `
 tree. The executor spec must be this executor code's (`replay.open_executor`). ~36 s for 50 flights × (1 + 2) loops.
 Since `Prior.extend` (2026-09-25, R18) the speaker encodes row by row: the probabilities differ from a whole re-encode by
 ~1e-6, so a re-run of the readouts recorded before it (`v3_freegen_20260925/{select,val}_400x4`) may flip a draw — the
-same model re-read at this code is not bit for bit the recorded one.
+same model re-read at this code is not bit for bit the recorded one. Since 2026-09-25 (`dev-prior-fast`) the speaker builds
+a step's rows for all the flights of one airport geometry together (`data.rows_inputs`, element by element; `row_inputs`
+is its one-flight case) and writes them to the model's inputs in one copy: bit for bit the per-flight result (old and
+new code dumped on the same seeds — free generation, CAT-K chains, the select split's inputs — 29/29 arrays identical;
+numpy's element-wise functions on this i7-14700, AVX2 without AVX-512, give the same bits whatever the array's length),
+and a 16-flight × 8-sentence chunk takes 10.0 s instead of 26.6 s. Splitting a round across processes would change the
+random draws each chunk gets — not done.
 
 
 ### R18 · `run_ts.py prior_closed_loop` — closed-loop supervised fine-tuning of the prior (prior design §9.2)
