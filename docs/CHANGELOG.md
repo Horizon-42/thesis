@@ -1,5 +1,12 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-25 — 按落地强化跑完：验证集 90.2 → 97.2 %，采用
+
+- `outputs/POOLED/prior/v3_rl_20260925/`（代码 `e8ee1373`）：8 轮，按规则选中第 1 轮；验证集先验说词落地 base 模型 90.2 → 97.2 %，被引导
+  航班 83.3 → 93.9 %（CAT-K 81.0 %），teacher forcing 负对数似然不变。读数文档 §7；后训练设计 §0。
+- 用户确认后训练第二阶段的全部取值（LPV 取下滑道下沿、拉回 base 模型；"base 模型"= 只用数据训出的 `v3_step1_20260924/full_s1337`）。
+- 工作树 `prior-rl` 与已合并的分支 `dev-prior-rl` 删除；新工作树 `post-train`（`dev-post-train`）做第二阶段第 0 步。
+
 ### 2026-09-25 — 后训练设计文档：程序高度的硬约束与起始状态扩充（设计，未实现）
 
 - 新文档 `4dTrajectory/ts_transformer/docs/2026-09-25_post_training_design.zh.md`：后训练的全部内容从先验设计搬过来（先验设计
