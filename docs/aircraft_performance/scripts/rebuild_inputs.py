@@ -5,13 +5,15 @@ read the index's own decisions (§11). This script rebuilds every WORK input fin
 table 2026-09-23_substitution_table.csv (per-type train/val counts, status and OpenAP surrogate as the analysis saw
 them) and the FAA table, and recomputes the two mass-dependent inputs with the current code:
   pool.json               every native airframe's model stall speed at its landing mass (the native range, r_sub)
-  synonym_current.json    each OpenAP synonym flown with OpenAP's copy of its surrogate's parameters (r_now)
+  synonym_current.json    each OpenAP synonym flown with OpenAP's copy of its surrogate's wing and MTOW, at the
+                          surrogate's landing mass (r_now)
 MODE:
-  current     the code's landing masses (since 2026-09-26: presets and own types at the published MALW)
-  2026-09-24  presets at 0.85 x MTOW, as the analysis ran; final_mapping.py then reproduces every verdict of the
-              stored table (one display column differs, C56X's stall_margin_now: the table was re-rendered after
-              the index existed, and its own-parameter verdict comes before that margin is read)
-  malw        what-if: every native airframe and synonym surrogate at its published MALW
+  current     the code's landing masses (since 2026-09-26: every modelled airframe at its published MALW)
+  2026-09-24  as the analysis ran: presets at 0.85 x MTOW, OpenAP airframes at OpenAP's MLW; final_mapping.py then
+              reproduces every verdict of the table as committed in 88893126 (the table in the tree is the 2026-09-26
+              re-judge, whose E545 / E550 verdicts differ; one display column differs, C56X's stall_margin_now:
+              the table was re-rendered after the index existed, and its own-parameter verdict comes before that
+              margin is read)
 Run after read_acd.py: python rebuild_inputs.py MODE (writes into AERO_SUB_WORK).
 """
 import csv
@@ -19,7 +21,7 @@ import json
 import math
 import sys
 
-from _paths import CODE, OUT, WORK, use_repo_code
+from _paths import OUT, WORK, use_repo_code
 
 use_repo_code()
 from aircraft.aero_params import aero_params_for_aircraft, stall_speed_ms  # noqa: E402
@@ -28,22 +30,24 @@ from aircraft.query_aircraft_parameters import PARAMETERS_PATH, load_json, opena
 from flight_scenarios.scenario import aircraft_for_code  # noqa: E402
 
 MODE = sys.argv[1]
-assert MODE in ("current", "2026-09-24", "malw"), MODE
+assert MODE in ("current", "2026-09-24"), MODE
 MS_TO_KT = 1 / 0.514444
 KT, G, RHO0 = 0.514444, 9.81, 1.225
 table = list(csv.DictReader(open(OUT / "2026-09-23_substitution_table.csv")))
-ref = json.loads((CODE / "aircraft/reference_speeds.json").read_text())["types"]
+params = load_json(PARAMETERS_PATH)["typecodes"]
 acd = {}
 for r in json.load(open(WORK / "acd.json")):
     acd.setdefault(r["ICAO_Code"], r)
 
 
 def landing_mass(code, aircraft):
-    if MODE == "malw":
-        return ref[code]["malw_kg"] if code in ref else aircraft.landing_mass
-    if MODE == "2026-09-24" and code in AIRCRAFT_PRESETS:
-        return 0.85 * aircraft.mass.max_takeoff_kg
+    if MODE == "2026-09-24":
+        return 0.85 * aircraft.mass.max_takeoff_kg if code in AIRCRAFT_PRESETS else openap_mlw(code)
     return aircraft.landing_mass
+
+
+def openap_mlw(code):
+    return params[code]["parameters"]["mass"]["mlw_kg"]
 
 
 # census counts (only the per-type train / val counts are read)
@@ -70,14 +74,13 @@ def cl_max_rule(code, mtow_kg):  # final_mapping.py's mirror of aero_params
 
 
 # synonyms as flown: OpenAP's copy of the surrogate's parameters under the synonym's code
-params = load_json(PARAMETERS_PATH)["typecodes"]
 syn_now = {}
 for r in table:
     if not r["status_now"].startswith("OpenAP"):
         continue
     t, surrogate = r["typecode"], r["status_now"].split()[-1]
     p = params[t]["parameters"]
-    m = ref[surrogate]["malw_kg"] if MODE == "malw" else p["mass"]["mlw_kg"]
+    m = p["mass"]["mlw_kg"] if MODE == "2026-09-24" else aircraft_for_code(surrogate).landing_mass
     s, mtow = p["geometry"]["wing_area_m2"], p["mass"]["mtow_kg"]
     syn_now[t] = {"vs_kt": math.sqrt(2 * m * G / (RHO0 * s * cl_max_rule(t, mtow))) / KT}
 (WORK / "synonym_current.json").write_text(json.dumps(syn_now))

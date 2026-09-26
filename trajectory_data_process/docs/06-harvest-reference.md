@@ -34,8 +34,9 @@ gets a new ID here and ONE new line in the index.**
   (`flight_scenarios.resolve_airframe`, the scenarios' own resolver) to write
   `source.aircraft_type` — the ICAO type the baseline speed gate looks its PUBLISHED
   approach-speed window up by (v9) — **whenever the identity resolves, dynamics or
-  not**: the states' mass is the type's OpenAP landing mass when OpenAP models the
-  type, else `NOMINAL_MASS_KG` (`source.mass_source` = `openap_landing_mass` /
+  not**: the states' mass is the type's landing mass when the model flies the type (its
+  published MALW since 2026-09-26 — the label below still says OpenAP, a code-health follow-up),
+  else `NOMINAL_MASS_KG` (`source.mass_source` = `openap_landing_mass` /
   `nominal` / `explicit`; the gate never reads an observed record's mass). Until
   2026-09-08 the type was written only when OpenAP had dynamics, which silently
   dropped 9,056 of the 10,541 untyped observed rows (BCS3 1,582, E55P 719, CRJ7 674,

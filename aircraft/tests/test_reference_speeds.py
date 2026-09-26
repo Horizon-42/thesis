@@ -80,6 +80,10 @@ def test_the_packaged_table_covers_the_fleet_and_pins_verified_values():
     crj9 = reference_speed("CRJ9")
     assert (crj9.approach_speed_min_kt, crj9.approach_speed_max_kt) == (132.0, 141.0)
     assert crj9.min_mass_kg == pytest.approx(20_412.0) and crj9.min_mass_kind == "MFW"
+    # the two FAA cells that are wrong carry Boeing's figure instead (the provenance README's B739 and B737 rows)
+    for code, malw in (("B739", 71_350.0), ("B737", 58_604.0)):
+        row = reference_speed(code)
+        assert (row.malw_kg, row.malw_source) == (malw, "boeing_737ng_acap_rev_c"), code
     for code in ("B38M", "B737", "B739", "A319", "A321", "A21N", "B39M", "A20N", "C56X", "B763", "B752"):
         assert reference_speed(code) is not None, code
     assert reference_speed("ZZZZ") is None

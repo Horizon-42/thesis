@@ -220,7 +220,7 @@
   "A124": {
    "decision": "substitute",
    "substitute": "B744",
-   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.35, same FAA approach category"
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.29, same FAA approach category"
   },
   "A306": {
    "decision": "substitute",
@@ -289,7 +289,7 @@
   "ASTR": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.267 (A320 0.25), stall margin 1.56; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.267 (A320 0.25), stall margin 1.65; the stall margin is outside the native range (accepted and noted, the analysis's rule 6); thrust-to-weight not checked (no primary thrust)"
   },
   "AT43": {
    "decision": "exclude",
@@ -382,7 +382,7 @@
   "B762": {
    "decision": "substitute",
    "substitute": "B763",
-   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.23, same FAA approach category"
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.19, same FAA approach category"
   },
   "B764": {
    "decision": "own",
@@ -471,7 +471,7 @@
   "BE40": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.271 (A320 0.513), stall margin 1.49"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.271 (A320 0.513), stall margin 1.57"
   },
   "BE55": {
    "decision": "exclude",
@@ -544,7 +544,7 @@
   "C25A": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.49, same FAA approach category"
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.57, same FAA approach category"
   },
   "C25B": {
    "decision": "own",
@@ -628,17 +628,17 @@
   "C501": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.4; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.47; thrust-to-weight not checked (no primary thrust)"
   },
   "C510": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.517), stall margin 1.37; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.517), stall margin 1.44; thrust-to-weight not checked (no primary thrust)"
   },
   "C525": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.41, same FAA approach category"
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.48, same FAA approach category"
   },
   "C560": {
    "decision": "own",
@@ -854,22 +854,22 @@
   "E35L": {
    "decision": "substitute",
    "substitute": "E145",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.185), stall margin 1.22; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.185), stall margin 1.24; thrust-to-weight not checked (no primary thrust)"
   },
   "E50P": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.098 (A320 0.615), stall margin 1.3; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.098 (A320 0.615), stall margin 1.37; thrust-to-weight not checked (no primary thrust)"
   },
   "E545": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.227 (A320 0.576), stall margin 1.45"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.227 (A320 0.576), stall margin 1.53"
   },
   "E550": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.264 (A320 0.541), stall margin 1.47"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.264 (A320 0.541), stall margin 1.55"
   },
   "E55P": {
    "decision": "own",
@@ -900,7 +900,7 @@
   "EA50": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.286 (A320 0.804), stall margin 1.19; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.286 (A320 0.804), stall margin 1.25; thrust-to-weight not checked (no primary thrust)"
   },
   "EC20": {
    "decision": "exclude",
@@ -943,27 +943,27 @@
   "FA10": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.4; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.47; thrust-to-weight not checked (no primary thrust)"
   },
   "FA20": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.4; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.038 (A320 0.48), stall margin 1.47; thrust-to-weight not checked (no primary thrust)"
   },
   "FA50": {
    "decision": "substitute",
    "substitute": "E145",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.185), stall margin 1.22; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.185), stall margin 1.24; thrust-to-weight not checked (no primary thrust)"
   },
   "FA7X": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.019 (A320 0.537), stall margin 1.36; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.019 (A320 0.537), stall margin 1.43; thrust-to-weight not checked (no primary thrust)"
   },
   "FA8X": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.019 (A320 0.498), stall margin 1.38; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.019 (A320 0.498), stall margin 1.46; thrust-to-weight not checked (no primary thrust)"
   },
   "G150": {
    "decision": "substitute",
@@ -977,7 +977,7 @@
   "G280": {
    "decision": "substitute",
    "substitute": "E170",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.068 (A320 0.347), stall margin 1.24"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.068 (A320 0.347), stall margin 1.23"
   },
   "GA5C": {
    "decision": "substitute",
@@ -1014,7 +1014,7 @@
   "GL7T": {
    "decision": "substitute",
    "substitute": "E170",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.017 (A320 0.295), stall margin 1.24"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.017 (A320 0.295), stall margin 1.23"
   },
   "GLEX": {
    "decision": "substitute",
@@ -1024,7 +1024,7 @@
   "GLF3": {
    "decision": "substitute",
    "substitute": "B763",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.058), stall margin 1.27; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.0 (A320 0.058), stall margin 1.23; thrust-to-weight not checked (no primary thrust)"
   },
   "GLF4": {
    "decision": "substitute",
@@ -1071,7 +1071,7 @@
   "HDJT": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.111 (A320 0.406), stall margin 1.45; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.111 (A320 0.406), stall margin 1.53; thrust-to-weight not checked (no primary thrust)"
   },
   "HUSK": {
    "decision": "exclude",
@@ -1084,7 +1084,7 @@
   "LJ31": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.267 (A320 0.25), stall margin 1.56; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.267 (A320 0.25), stall margin 1.65; the stall margin is outside the native range (accepted and noted, the analysis's rule 6); thrust-to-weight not checked (no primary thrust)"
   },
   "LJ35": {
    "decision": "substitute",
@@ -1094,7 +1094,7 @@
   "LJ40": {
    "decision": "substitute",
    "substitute": "E145",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.016 (A320 0.201), stall margin 1.21; thrust-to-weight not checked (no primary thrust)"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.016 (A320 0.201), stall margin 1.23; thrust-to-weight not checked (no primary thrust)"
   },
   "LJ45": {
    "decision": "substitute",
@@ -1109,7 +1109,7 @@
   "LJ60": {
    "decision": "substitute",
    "substitute": "E170",
-   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.144 (A320 0.422), stall margin 1.24"
+   "basis": "nearest airframe of the same propulsion class and FAA approach category: similarity distance 0.144 (A320 0.422), stall margin 1.23"
   },
   "M20P": {
    "decision": "exclude",
@@ -1130,7 +1130,7 @@
   "MD11": {
    "decision": "substitute",
    "substitute": "B773",
-   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.34, same FAA approach category"
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.33, same FAA approach category"
   },
   "MD82": {
    "decision": "own",
@@ -1250,7 +1250,7 @@
   "PC24": {
    "decision": "substitute",
    "substitute": "C550",
-   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.4, same FAA approach category"
+   "basis": "OpenAP 2.4's own synonym, kept by the analysis: stall margin 1.47, same FAA approach category"
   },
   "PC7": {
    "decision": "exclude",
@@ -1317,7 +1317,7 @@
   "SU95": {
    "decision": "substitute",
    "substitute": "E170",
-   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.39, same FAA approach category"
+   "basis": "OpenAP 2.4's own synonym, no observed flights; kept by the analysis rule: stall margin 1.38, same FAA approach category"
   },
   "SW4": {
    "decision": "exclude",

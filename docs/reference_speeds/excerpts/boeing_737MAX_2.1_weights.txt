@@ -66,3 +66,17 @@ REV K                                     July 2025                             
                            Copyright © 2025 Boeing. All Rights Reserved.
                                       737-10 INFORMATION IS PRELIMINARY
 
+Added 2026-09-26 -- section 2.1.1 (737-7), printed page 2-2, verbatim (pdftotext -layout), the weight rows only; read
+to show that the FAA row 'Boeing 737-700' (B737) carries the 737-7's MAX DESIGN LANDING WEIGHT 145,600 lb:
+
+2.1.1 General Characteristics: Model 737-7
+
+  CHARACTERISTICS             UNITS                   MODEL 737-7
+ MAX DESIGN              POUNDS                    145,500       177,500
+   TAXI WEIGHT           KILOGRAMS                 65,997        80,512
+ MAX DESIGN              POUNDS                    145,000       177,000
+   TAKEOFF WEIGHT        KILOGRAMS                 65,770        80,285
+ MAX DESIGN              POUNDS                    140,900       145,600
+   LANDING WEIGHT        KILOGRAMS                 63,911        66,043
+ MAX DESIGN              POUNDS                    134,000       138,700
+   ZERO FUEL WEIGHT      KILOGRAMS                 60,781        62,913

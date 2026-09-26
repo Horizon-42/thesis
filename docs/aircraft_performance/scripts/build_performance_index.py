@@ -103,6 +103,8 @@ for t, r in sorted(mapping.items()):
     elif v.startswith("surrogate"):
         basis = (f"nearest airframe of the same propulsion class and FAA approach category: "
                  f"similarity distance {r['d']} (A320 {r['d_a320']}), stall margin {r['r_sub']}")
+        if "outside native range" in v:
+            basis += "; the stall margin is outside the native range (accepted and noted, the analysis's rule 6)"
         if not r.get("tw_checked"):
             basis += "; thrust-to-weight not checked (no primary thrust)"
         types[t] = {"decision": "substitute", "substitute": r["sub"], "basis": basis}

@@ -21,11 +21,6 @@ from geokit import kt_to_ms, nm_to_m
 
 from aircraft.reference_speeds import ReferenceSpeed, reference_speed
 
-# Used by ``Aircraft.landing_mass`` when no max-landing weight is known: a typical
-# landing/take-off weight ratio (e.g. A320 66 t / 78 t ≈ 0.85).
-_LANDING_MASS_FRACTION_OF_MTOW = 0.85
-
-
 # ── Nested groups ─────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +37,7 @@ class Geometry:
 @dataclass(frozen=True, slots=True)
 class Mass:
     max_takeoff_kg: float                        # OpenAP mtow_kg
-    max_landing_kg: float | None = None          # a preset / own type: its published MALW; an OpenAP type: mlw_kg
+    max_landing_kg: float                        # the published MALW its approach speed is quoted at (reference_speeds)
     operating_empty_kg: float | None = None      # OpenAP oew_kg
     max_fuel_kg: float | None = None             # OpenAP maximum_fuel_capacity_kg
 
@@ -140,16 +135,13 @@ class Aircraft:
         """Representative mass on approach/landing (kg) — the initial mass for approach
         scenarios fed to the simulator and optimizer.
 
-        The max-landing weight when the airframe has one (the published MALW the approach speed is
-        scaled from for a preset or a performance-index type; OpenAP's ``mlw_kg`` for an OpenAP type),
-        else a typical fraction of MTOW. NOT
-        MTOW: a landing aircraft is much lighter, and using MTOW inflates the stall speed so
-        realistic approach speeds become infeasible. Computed (``@property``), so the rule
-        lives in one place and is easy to change.
+        The published MALW (``aircraft/reference_speeds.json``) for every airframe the model flies —
+        preset, performance-index own type and OpenAP type alike (2026-09-26): the mass the published
+        approach speed is quoted at, so the speed and the mass come from one row. NOT MTOW: a landing
+        aircraft is much lighter, and using MTOW inflates the stall speed so realistic approach speeds
+        become infeasible. Computed (``@property``), so the rule lives in one place.
         """
-        if self.mass.max_landing_kg is not None:
-            return float(self.mass.max_landing_kg)
-        return _LANDING_MASS_FRACTION_OF_MTOW * self.mass.max_takeoff_kg
+        return float(self.mass.max_landing_kg)
 
 
 # The approach PROCEDURE defaults (not the speeds) of a maximum take-off weight's class, for the

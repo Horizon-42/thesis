@@ -125,7 +125,9 @@ def get_aircraft_parameters(aircraft_id: str) -> Aircraft:
         ),
         mass=Mass(
             max_takeoff_kg=mass["mtow_kg"],
-            max_landing_kg=mass.get("mlw_kg"),
+            # the published MALW its approach speed is quoted at, not OpenAP's mlw_kg (one designator, one OpenAP model;
+            # five of OpenAP's are another model's figure — code-health follow-ups, 2026-09-26)
+            max_landing_kg=speeds.malw_kg,
             operating_empty_kg=mass.get("oew_kg"),
             max_fuel_kg=mass.get("maximum_fuel_capacity_kg"),
         ),
