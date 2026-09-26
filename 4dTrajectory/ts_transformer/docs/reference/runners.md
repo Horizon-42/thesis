@@ -551,7 +551,9 @@ the one that said them — ε = `--clip-ratio` 0.2, per step, dropout off, the u
 readouts §15: without it a pass's stale sentences pushed "unchanged" down until the model ran from the base) +
 `--kl-weight` × the sample estimate of the KL to the frozen reference + `--data-weight` × a teacher-forced batch of the
 train split per update (a round with no flight to train on is refused by name); each pass records the share of words
-clipped (`clipped_share`). The select readout (`select_readout`) is free generation on the select days in batches of 64 flights (`SELECT_CHUNK`), the same flights and seed every round, the teacher-forced NLL, and the share landed against the landing direction. `choice.json`: among
+whose ratio left the interval (`clipped_share`, per batch `clipped_trace`: PPO's clip fraction). The pass's
+`reward_mean` is the surrogate's loss (≈ −words a step × the mean advantage plus the words' movement), not comparable
+with the advantage-weighted NLL of the runs before the clipped ratio. The select readout (`select_readout`) is free generation on the select days in batches of 64 flights (`SELECT_CHUNK`), the same flights and seed every round, the teacher-forced NLL, and the share landed against the landing direction. `choice.json`: among
 the rounds within the guards of round 0 (landed on the observed runway ≥ round 0's − 0.02, heading words per flight ≤
 1.2 × round 0's; a round that landed nothing is excluded), the highest select landed share, the earliest within 0.015. Writes `config.json`,
 `round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, readout.json}` (a round

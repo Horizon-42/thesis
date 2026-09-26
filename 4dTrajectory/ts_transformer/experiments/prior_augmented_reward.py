@@ -16,8 +16,9 @@ Each round:
 3. **rewards** — as the first stage (`prior.landing_reward`: 1 for landing in the airport's landing direction — the
    source flight's, its day and time kept), so a stopped sentence earns 0; each sentence's advantage is its reward less
    its start's mean; only starts whose sentences differ are trained on;
-4. **one pass** (`train.RewardTuner`, the first stage's recipe, design §5): the advantage × the NLL of each sentence's own
-   words and ``--kl-weight`` × the pull to the BASE model (``--base``: the data-only model every post-training stage pulls
+4. **one pass** (`train.RewardTuner`, the first stage's recipe, design §5): the clipped-ratio surrogate over each
+   sentence's own words against the model that said them (`train.flight_surrogate`, ε ``--clip-ratio``) and
+   ``--kl-weight`` × the pull to the BASE model (``--base``: the data-only model every post-training stage pulls
    back to), both under the masks the sentence was said under, and ``--data-weight`` × the teacher-forced NLL of a batch
    of train-day flights (their ADS-B rows and labelled words) with every update; every round records its model's
    distance to the base on its fresh sentences before the pass, the real starts' and the augmented ones' apart;
@@ -460,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         log(f"round {round_number}: one pass over {len(flights)} sentences, reward term {passed['reward_mean']:.4f}, "
             f"KL to the base at the start real {start_distance['real']:.4f} augmented "
             f"{start_distance['augmented']:.4f}, {passed['kl_mean']:.4f} in the pass (max {passed['kl_max']:.4f}), "
-            f"data NLL {passed['data_mean']:.4f}, words clipped {passed['clipped_share']:.4f}")
+            f"data NLL {passed['data_mean']:.4f}, words outside the clip {passed['clipped_share']:.4f}")
         torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
                     "train_config": start_config["train"], "state": copy.deepcopy(model.state_dict()),
                     "spec_sha256": spec.sha256}, directory / "checkpoint.pt")

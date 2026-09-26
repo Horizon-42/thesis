@@ -329,7 +329,11 @@ class RewardTuner:
     def one_pass(self, sentences: Split, advantages: np.ndarray, data: Split,
                  allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> dict[str, Any]:
         """One pass over ``sentences`` (``advantages``: one per sentence; ``allowed``: the masks each was said under,
-        `allowed_tensors`) beside ``data``: the mean of each term as trained, and what it took."""
+        `allowed_tensors`) beside ``data``: the mean of each term as trained, and what it took — the reward term's mean is
+        the surrogate's loss, about −(words a step) × the batches' mean advantage plus how far the words moved (not the
+        advantage-weighted NLL the term was before the clipped ratio); ``clipped_share`` / ``clipped_trace`` count the
+        words whose ratio left the clip interval (PPO's clip fraction: an upper bound on the words whose gradient was
+        cut), over the pass and per batch."""
         if len(advantages) != len(sentences.flights):
             raise ValueError(f"{len(advantages)} advantages for {len(sentences.flights)} sentences")
         if allowed is not None and len(allowed) != len(sentences.flights):
@@ -344,7 +348,7 @@ class RewardTuner:
         for parameter in start.parameters():
             parameter.requires_grad_(False)
         sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
-        count, trace, clipped, words = 0, [], 0, 0
+        count, trace, clipped_trace, clipped, words = 0, [], [], 0, 0
         for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
             batch, logits, (reference, sampled_from), steps = self._scored(sentences, indices, allowed,
                                                                             (self.reference, start))
@@ -354,6 +358,7 @@ class RewardTuner:
                                                                      self.config.clip_ratio)
             reward = (surrogate / steps).mean()
             clipped, words = clipped + batch_clipped, words + batch_words
+            clipped_trace.append(batch_clipped / batch_words)
             kl = (flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
             nll, speaks = batch_nll(self.model, to_batch(data, self._data_batch(data), self.device))
             data_loss = nll.sum() / speaks
@@ -371,4 +376,4 @@ class RewardTuner:
             trace.append(float(kl.detach()))
         return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace),
                 "batches": count, "sentences": len(sentences.flights), "seconds": time.perf_counter() - started,
-                "kl_trace": trace, "clipped_share": clipped / words}
+                "kl_trace": trace, "clipped_share": clipped / words, "clipped_trace": clipped_trace}

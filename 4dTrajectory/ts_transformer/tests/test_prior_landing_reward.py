@@ -189,6 +189,16 @@ def test_the_clipped_surrogate_starts_as_the_weighted_nll_and_stops_pushing_past
         assert clipped == words_n
         loss.sum().backward()
         assert (logits[0].grad.abs().sum() > 0) == pushes
+    # a word whose probability has already halved: a worse sentence stops pushing it down, a better one pulls it back up
+    lowered = [s.clone() for s in start]
+    for m in lowered:
+        m[..., 1] -= math.log(2.0) + 0.5
+    for a, pushes in ((-1.0, False), (1.0, True)):
+        logits = [m.clone().requires_grad_(True) for m in lowered]
+        loss, clipped, words = flight_surrogate(logits, start, targets, present, asked, torch.tensor([a]), 0.2)
+        assert clipped == words_n
+        loss.sum().backward()
+        assert (logits[0].grad.abs().sum() > 0) == pushes
 
 
 def test_a_clip_outside_zero_and_one_is_refused():
@@ -204,7 +214,26 @@ def test_a_pass_records_the_share_of_words_clipped():
     config = RewardConfig(learning_rate=1e-3, warmup_steps=1, kl_weight=0.0, data_weight=0.0)
     passed = RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split.subset([0]), np.array([1.0]),
                                                                                   split)
-    assert passed["clipped_share"] == 0.0                   # one batch: the model is still its start at the update
+    assert passed["clipped_share"] == 0.0 and passed["clipped_trace"] == [0.0]   # one batch: still the start
+    # several batches at a large rate: the later ones score against the pass's start, which the updates do not move
+    model = _model(words)
+    before = {k: v.clone() for k, v in model.state_dict().items()}
+    tuner = RewardTuner(model, _model(words), RewardConfig(learning_rate=0.05, warmup_steps=1, kl_weight=0.0,
+                                                          data_weight=0.0, tokens_per_batch=2 * split.flights[0].rows),
+                        CPU, seed=0)
+    starts = []
+    original = tuner._scored
+
+    def spy(sentences, indices, allowed, fixed):
+        starts.append({k: v.clone() for k, v in fixed[1].state_dict().items()})
+        return original(sentences, indices, allowed, fixed)
+
+    tuner._scored = spy
+    passed = tuner.one_pass(split, np.array([1.0, -1.0, 0.5]), split)
+    assert passed["batches"] == 3 and passed["clipped_share"] > 0.0 and passed["clipped_trace"][0] == 0.0
+    for state in starts:                                    # every batch's denominator is the weights before the pass
+        assert all(torch.equal(state[k], before[k]) for k in before)
+    assert any(not torch.equal(model.state_dict()[k], before[k]) for k in before)
 
 
 def test_the_round_kept_is_the_best_within_the_guards():

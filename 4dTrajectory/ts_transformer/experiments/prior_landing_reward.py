@@ -9,8 +9,9 @@ Each round:
 2. **rewards** — 1 where the executor's judge has the sentence landed on a runway in the airport's landing direction at
    the time (`prior.landing_reward.landing_direction`), else 0; each sentence's advantage is its reward less its
    flight's mean. Only flights whose sentences differ are trained on (the others' advantages are all 0);
-3. **one pass** over those sentences (`train.RewardTuner`: the advantage-weighted NLL of each sentence's own words,
-   the pull to the frozen start model, the teacher-forced data term on the train days), from the previous round's
+3. **one pass** over those sentences (`train.RewardTuner`: the clipped-ratio surrogate over each sentence's own words
+   against the model that said them, `train.flight_surrogate`, ε ``--clip-ratio``; the pull to the frozen reference; the
+   teacher-forced data term on the train days), from the previous round's
    weights (round 1: ``--prior``) — only the sentences of this round (they must come from the weights being trained);
 4. **the readout on the select days** (`select_readout`): free generation on ``--select-per-airport`` flights ×
    ``--select-samples`` sentences, the same flights, seed and batches every round (round 0 is the start model); the
@@ -322,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
                                       data.classes, variant), advantages[keep], data)
         log(f"round {round_number}: one pass over {len(flights)} sentences, reward term {passed['reward_mean']:.4f}, "
             f"KL {passed['kl_mean']:.4f}, data NLL {passed['data_mean']:.4f}, "
-            f"words clipped {passed['clipped_share']:.4f}")
+            f"words outside the clip {passed['clipped_share']:.4f}")
         torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
                     "train_config": start_config["train"], "state": copy.deepcopy(model.state_dict()),
                     "spec_sha256": spec.sha256}, directory / "checkpoint.pt")
