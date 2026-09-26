@@ -308,7 +308,18 @@ landing 起，切入前加了两条硬约束（决断高度、跌破入口高度
    仓库根目录下 `PYTHONPATH=.:4dTrajectory python 4dTrajectory/outputs/POOLED/prior/procedure_masks_stamp_20260927/stamp.py --write --record
    4dTrajectory/outputs/POOLED/prior/procedure_masks_stamp_<日期>`（`--record` 相对仓库根目录；先不带 `--write` 演练）补它的 8 轮（用户已同意这一步）。以后拿 landing 和第二阶段的轮次比验证集，landing 要点名 `--procedure-masks
    procedure-altitudes-v2`（它自己的是"无"）；这次运行结尾的验证集读数由工作树 `stage2-restart` 的旧代码跑，两者都开着程序高度，不受影响。
-1. **第二阶段带截断的比，在跑**（`outputs/POOLED/prior/v3_stage2_clip_20260926/`，run.pid，从工作树 `stage2-restart` `735edc69` 跑，与合并后的代码
+1. **跑完之后的顺序**（用户 2026-09-26："按这个顺序来，跑完先做诊断"）：
+   (a) 补这次运行 8 轮的记录（上面第 0 条）；
+   (b) **先做诊断**——真实起点落地为什么降（选择集第 0 轮 96.4 % → 第 5 轮 94.9 %，同一批航班逐句比：88 句落地变失败、58 句反过来，
+       多出的失败集中在被引导航班，越过入口偏在跑道外 9 → 35、超时 48 → 60；失败句子里航向词说得更密，落地的句子几乎没变）。脚本
+       `/home/supercomputing/.claude/jobs/51eaaa9b/tmp/lineup/diagnose.py`（已写好、CPU 冒烟跑过）：拷进
+       `outputs/POOLED/prior/v3_stage2_lineup_diagnosis_20260927/`，GPU 空了以后从仓库根目录跑；它按选择集读数原样重跑第 0、5 轮的真实起点
+       （同样的航班、种子、批次、设备），逐句核对与存下的读数一致，再读航迹：对到别的跑道、中线来回穿越、过头多远、比观测多转了多少、
+       航向词在第一次穿越中线前后的密度、结束时的位置。不训练；
+   (c) 两种解释（真实起点训练信号少、被拉回 base；扩充起点上学的多转弯搬到真实起点）要靠对照实验分开，做不做、做哪种由用户定；
+   (d) 用户问过给航向词加奖励：我建议先不加（多出来的航向词主要在失败句子里，奖励已经在罚），诊断之后再定；要加的话只罚超过
+       源航班标注词数的部分、小权重、写进后训练设计 §5、做对照，不在这次运行中途改。
+2. **第二阶段带截断的比，在跑**（`outputs/POOLED/prior/v3_stage2_clip_20260926/`，run.pid，从工作树 `stage2-restart` `735edc69` 跑，与合并后的代码
    相同）：第 0–2 轮见 §4.4；还剩 6 轮（每轮约 35 分钟），然后 `choice.json` 选轮、验证集读一次（`val_kept_400x4`、`val_kept_aug_400x4`，与 landing
    的 `val_stage1{,_aug}_400x4` 并排），预计 2026-09-27 01–02 UTC 跑完。盯法：`command grep -E "round [0-9]+: (select|one pass)|KEPT|DONE|Traceback"
    run.log`；每轮看护栏（尤其扩充起点的航向词）和这一遍离 base 的最大值。跑完：写先验读数 §17（各轮表、选中的一轮、验证集并排、MVA 读数是否
