@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **16 open, 9 partly, 4 fixed on a branch, 50 resolved or dismissed, 5 obsolete**. *open*: the problem is still in the
+(the right-hand column): **17 open, 8 partly, 4 fixed on a branch, 51 resolved or dismissed, 5 obsolete**. *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -107,9 +107,10 @@ it merges (24, the B77W preset, review #14 and #21, the performance index's B722
 | OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | fixed on a branch | every modelled airframe lands at its published MALW, B737's MALW from Boeing (user 2026-09-26) on branch `dev-training-followups` `d3d83716` | **yes — executor**: those types' mass and approach speed |
 | An alias-resolved identity is not recorded as one (09-26) | open | unchanged | no: provenance only, the types are the same |
 | A ts checkpoint does not record where its landing masses came from (09-26) | open | needs the user's decision (a payload change) | no for the two-tier chain (its artefacts record the aircraft tables); yes for any control-path checkpoint replayed after the rebuild |
-| The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | partly | the three exporters add the flight's runway offset (`0b1fe50a`); `instruction_v3_day_split` and its four overlays re-exported (2026-09-26, `check-publication` 0 errors); the live executor and the deletion of `geoid_undulation_m` on branch `dev-training-view-live-datum` `c110ea86`, after `dev-model-autopilot` merges; the older sets kept as published (user) | no: the Training view's exports |
+| The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | resolved | every writer adds the flight's runway offset — the exporters (`0b1fe50a`), the live executor (`c708a497`, `2a64d3f4`); `geoid_undulation_m` deleted; `instruction_v3_day_split` and its four overlays re-exported (`check-publication` 0 errors); the older sets kept as published with EGM96 heights (user 2026-09-26; `aeroviz-4d/docs/36-…` §2.3); entry removed | — |
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
 | ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | open | new; dev-post-train's file, left untouched | no: a document |
+| `aeroviz-4d/python/requirements.txt` still lists `pyproj` (09-26) | open | new; see the entry | no: a requirements list |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -542,43 +543,6 @@ artefact records the aircraft tables and is rebuilt.
 like a direct designator (`direct_designator` / `opensky_icao24_validated`); nothing in the identity says an alias was
 applied. Recording it changes the identity payload, so it needs its own schema name.
 
-## The Training view draws executor and observed tracks with EGM96, not the runway's offset (2026-09-25)
-
-**Verified by reading** (found fixing #8). `flight_scenarios.datum.flight_to_msl` converts a track to MSL with its
-runway's CIFP offset (`hae_minus_msl_m`: KRDU 05L −32.0 m), and the comparison CZML adds that same offset back. The
-Training view's exports go the other way with EGM96 (`geoid_undulation_m`: −33.53 m there): the observed signals
-(`instruction_training_export.Globe.undulation_m`), the executor replay's track (`executor_training_export.track_payload`)
-and the live executor's (`aeroviz_backend/autopilot_segment/payload.track_payload`) are drawn ~1.5 m below the height
-they were measured at. Consistent within the view, 1.5 m off the observed layer and the terrain. Fix: carry the runway's
-offset into the exports (the sample has `candidates[].elevationM`; the offset is the artefact's per-runway datum) and
-drop `geoid_undulation_m`; it changes every exported sample and overlay (a re-export).
-
-**Scope, checked 2026-09-26.** A fourth writer does the same: `prior_generation_training_export` (the generation
-overlays). Display only — the exports are no training input; `altitudeM` (MSL) is unchanged, only `altitudeHaeM` /
-the tube's `lowerHaeM` / `upperHaeM` move. On disk (`public/data/airports/<ICAO>/training/`, all five airports): the
-four instruction sets, the executor and generation overlays, and the archived exporter's `box`, `box_v3`,
-`v15_nomerge_noposition` (`altHaeM`, also EGM96); the prior-prediction overlays hold no height but pin their base set's
-SHA-256, so they follow their base. Re-exportable by today's code: only `instruction_v3_day_split` and its four overlays
-(current labeller, executor spec `v7_20260925`). The older sets and overlays are refused by today's code (labeller
-v1–v3, executor specs v2 / v5), and the archived exporter is never edited: keep them as published or withdraw them —
-the user's call.
-
-**Fixed for the exporters 2026-09-26** (`0b1fe50a`; the user: fix it, re-export the current set, keep the older ones
-as published; nothing may touch training or training-related development).
-`instructions.training_files.runway_hae_minus_msl_m(artefact, airport, manifest)` reads each runway's `hae_minus_msl_m`
-from the arrival manifest the artefact's signals recorded (the bytes it parses are the bytes whose sha256 it checks, as
-`rebuild_series` checks it) — the numbers `flight_to_msl` subtracted — and the three exporters add the flight's own
-runway's. Reviewed (opus): the same offset in and out, checked on 12 rebuilt flights and on all 72,574 manifest rows;
-its low findings fixed. **Re-exported** into a staging root with the recorded arguments and order (CPU only, 4
-threads, nice 19, beside a running post-training job), compared leaf by leaf with the published files, then swapped
-in: words, outcomes, verdicts and landings identical (base 652/720 samples landed, post-trained 694/720, the executor
-188 flown, all landed); the heights moved −1.16 to +3.10 m (KRDU up to +3.10, KSJC down to −0.98); one prior
-probability's fourth decimal differs (KSMF, 0.8712 vs 0.8713: a CPU thread count changes the summation order);
-`check-publication` 0 errors on disk and served. **Left:** the backend's live executor still adds EGM96 — its change
-and the deletion of `geoid_undulation_m` are branch `dev-training-view-live-datum` `c110ea86`, held because
-`dev-model-autopilot` rewrites the same payload lines and still calls it; rebase after that merges. The older sets
-stay as published with EGM96 heights (noted in `aeroviz-4d/docs/36-…` §2.3).
-
 ## `evaluation.metrics.READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (2026-09-25)
 
 **Verified by reading.** `READABLE_REPORT_SCHEMA_VERSIONS` accepts v6, v7, v8 and v9 for a consumer that reads only the
@@ -593,3 +557,9 @@ on the training data plane.
 are `instructions/training_files.py` (layout L30's note). The file belongs to branch `dev-post-train`, so it was not
 edited; one line to change when that branch has merged.
 
+## `aeroviz-4d/python/requirements.txt` still lists `pyproj` (2026-09-26)
+
+**Verified** (opus review of `c708a497`). Its last importer, `flight_scenarios.datum.geoid_undulation_m` (the EGM96
+grid), was deleted 2026-09-26; no live `.py` imports `pyproj` (the archived exporter under
+`ts_transformer/archive/instruction_vocabulary_2026_09/` still names the deleted function and is not live). The file is a
+loose list, not the environment spec (`docs/environment.md`): drop the line, or say what it is for.

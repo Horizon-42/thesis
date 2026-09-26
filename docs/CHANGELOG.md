@@ -1,5 +1,14 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — Training 视图的高度（续）：后端现飞也按跑道差值；`geoid_undulation_m` 删除
+
+接上一条"暂缓"的部分：`dev-model-autopilot` 合并后，分支 `dev-training-view-live-datum` 变基上去（`c708a497`，审查修改
+`2a64d3f4`）。后端现飞（真值句子和模型自己的句子两种段）的椭球高改加航班自己跑道的差值（`FlightContext.hae_minus_msl_m`，
+打开航班时由 `training_files.runway_hae_minus_msl_m` 读出）；唯一的冲突在 `payload.py`，保留 `dev-model-autopilot` 从所选词
+那一周期起切段的写法。`flight_scenarios.datum.geoid_undulation_m` 与它的 pyproj 变换失去最后的调用方，删除——现行代码里不再有
+大地水准面模型。opus 审查无严重问题：在真实航班上，真值段的高度差恒为该跑道的差值，模型句子现飞与已导出的生成层逐点一致
+（0.000 m）。训练链哈希不变；与 `dev-post-train`、`dev-training-followups` 试合并不产生新冲突。主后端重启后生效。
+
 ### 2026-09-26 — Training：模型说的词也交给实时执行器飞；模型的带不再画斜线；模型结束处写时间
 
 分支 `dev-model-autopilot`，2026-09-26 合并进 `dev-two-tier`（`46af94fd`），后端（8765）与前端（5173）已重启。
