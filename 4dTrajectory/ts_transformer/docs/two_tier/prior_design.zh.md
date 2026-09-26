@@ -226,7 +226,7 @@
 
 4. **说话时程序屏蔽必须给**：`Speaker`、`ClosedLoop`、`speak_and_fly` 的 `procedure_masks` 参数没有默认值（原来的 `finals=None`
    就是"忘了传就不开"的来源）。通常传 `loaded.procedure_masks`；要用别的，写 `ProcedureMasks.build(名字们, 各机场几何)`（空的也要这样
-   明确写），并在读数里记下"用的"和"模型自己的"。`Speaker` 里两层分开：词表规则写在它自己里面，永远算；程序屏蔽是传进来的对象，
+   明确写），日志写明用的是不是模型自己的。`Speaker` 里两层分开：词表规则写在它自己里面，永远算；程序屏蔽是传进来的对象，
    每套自己保存每架飞机要跟踪的状态（程序高度：每条候选跑道切入没有、切入前跌破没有），`Speaker` 把各套允许的词与词表规则允许的
    求交集。屏蔽之前放在被拿掉的词上的概率仍按列合在一起记（与现在的读数格式相同）；训练用的"这一步允许哪些词"也是合在一起的
    （句子就是在这个分布下采的）。
@@ -237,10 +237,10 @@
    |---|---|---|
    | `prior_train`（第 1 步，base） | 不说话 | 写空列表：teacher forcing 训练，它的自由生成读数都只开词表规则（§9.1） |
    | `prior_landing_reward`（第一阶段，landing） | 本阶段定的：空（后训练设计 §2），runner 里一个常数 | 每一轮写空列表 |
-   | `prior_augmented_reward`（第二阶段，augmented） | 本阶段定的：`procedure-altitudes-v2`（后训练设计 §3），runner 里一个常数 | 每一轮写它；运行的 `config.json` 另记起点模型自己的（landing：空），第 0 轮的读数就是起点在本阶段屏蔽下的读数 |
-   | `prior_free_generation` | 默认模型自己的（`--procedure-masks own`）；换成别的：`none`，或逗号隔开的名字 | 不写模型；读数记 `procedure_masks: {used, own}`（schema `ts-prior-free-generation-v5`）。用的里有程序高度，就同时按下滑道下沿结束句子、读切入前的三项（与原来的 `--procedure-masks` 相同） |
+   | `prior_augmented_reward`（第二阶段，augmented） | 本阶段定的：`procedure-altitudes-v2`（后训练设计 §3），runner 里一个常数 | 每一轮写它；第 0 轮的读数是起点模型（landing，自己的是空）在本阶段屏蔽下的读数 |
+   | `prior_free_generation` | 默认模型自己的（`--procedure-masks own`）；换成别的：`none`，或逗号隔开的名字 | 不写模型。读数格式不变（`ts-prior-free-generation-v4`）：`procedure_masks` 仍记开没开程序高度，模型自己的在它的目录里，日志写明两者是否相同——不换 schema，已有的读数照样能用。开着程序高度，就同时按下滑道下沿结束句子、读切入前的三项（与原来相同） |
    | `prior_generation_training_export`（训练视图） | 明确传空（它现在就这样飞，行为不变） | 不写。按模型自己的屏蔽导出，要等导出格式能带上"低于下滑道下沿"的结束（`docs/code-health-followups.md` 已有一条，属于前端那边的分支） |
-   | `prior_procedure_check`（标注数据，不是模型） | 明确 `procedure-altitudes-v2` | 不写 |
+   | `prior_procedure_check`（标注数据，不是模型） | 直接用程序高度的规则和数据（`procedure.published_procedures`）：它检查的是规则本身 | 不写 |
    | 后端的模型航迹（`aeroviz_backend/autopilot_segment`） | 不说话，重飞导出的词 | — |
 
 6. **现有模型补记录**（一次性；往产物目录里加一个文件，不改任何现有字节，**要用户同意再写**）。按每个目录 `config.json` 里记的训练
@@ -255,16 +255,19 @@
    | `v3_augmented_20260926`、`v3_augbudget*_20260926`、`v3_augdata_20260926` | 第二阶段 v1–v3，规则是已退役的 `procedure-altitudes-v1` | 不补：打不开来说话，它们的读数都在盘上 |
 
    `data_sha256` 用补记录时盘上的数据算；这些数据在这些模型训练之后没有改过（跑道数据 `runway_thresholds.json` 最后一次提交
-   2026-09-20，CIFP `CIFP_260806`，`procedure-details` 文件 2026-07 以后没动），补记录时再核对一遍修改时间，写进脚本的记录。
-   代码合并之后、补记录之前，所有模型都打不开，所以两件事紧挨着做。
+   `bc45455f` 2026-09-20，CIFP `CIFP_260806` 文件 2026-07-16，`procedure-details` 61 个文件最新 2026-07-03），脚本运行时再打印一遍。
+   句子产物 v4 与 v5 的候选跑道算出的摘要相同（`275cae1a…`），用哪份打开都一样。演练（只列不写）：补 25 个目录（base 等 4 个、
+   landing 各轮 8 个、CAT-K 8 个、停掉的重启 2 轮、带截断的运行已有的 3 轮），跳过 17 个（v1/v2 旧格式 7 个、退役规则 10 个）；带截断的
+   运行跑完后再演练一次，它后面几轮也补上。代码合并之后、补记录之前，所有模型都打不开，所以两件事紧挨着做。
 
-7. **测试**：记录的往返与每一种拒绝；只开词表规则时说出的词与原来 `finals=None` 逐位相同，开程序高度时与原来传 `finals` 逐位相同
-   （同样的种子，重构不改结果）；三个训练 runner 写出的记录名字对；自由生成默认用模型自己的、换了的时候读数里记下；数据摘要对任何一个
-   字段的改动敏感。
+7. **测试与核对**：记录的往返与每一种拒绝；数据摘要对任何一个字段的改动敏感、与机场顺序无关；自由生成默认用模型自己的、
+   `none` 和点名的也对；不给程序屏蔽时说话器只屏蔽词表的三列；`prior_train` 写出的记录是空（`tests/test_prior_masks.py`、
+   `test_prior.py`）。**重构不改结果**，在真实数据上核对过：landing 模型、同样的种子、选择集，旧代码与新代码各跑自由生成——真实起点
+   关着和开着程序高度各 50 句，扩充起点开着 200 句（高度列每步被屏蔽的概率 1.4e-4，1.5 % 的句子被下沿结束）——句子和读数逐位相同。
 
 8. **与另一个会话的分支 `dev-training-rounds` 的关系**：它改了训练视图的导出，并按自由生成读数的 `procedure_masks: false` 字段拒绝
-   "开了程序屏蔽的读数"；这里把那个字段换成 `procedure_masks: {used, own}`（新 schema），导出里 `speak_and_fly` 的调用也要多传一个参数。
-   两个分支谁后合并，谁把这两处对上。
+   "开了程序屏蔽的读数"——读数格式没变，这条照样成立；这里只在导出的 `speak_and_fly` 调用里多传了 `procedure_masks=ProcedureMasks.none()`，
+   两个分支谁后合并，谁把这一处对上。
 
 ## 6 模型
 
