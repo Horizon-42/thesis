@@ -141,7 +141,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 - **Training's live executor flies the CLICKED word's segment on the backend, every time** (`POST /autopilot/segment`,
-  `aeroviz-autopilot-segment-v2`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
+  `aeroviz-autopilot-segment-v3`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
   where its envelope ends (the next word of its column; a heading word's a lead later; the sentence's end: to the landing),
   the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
   words it told are the sentence bar's for that segment; a heading band is bounded by the FLOWN track its judge read, never
@@ -150,7 +150,11 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   with it; one short status line (word · inside/outside · "N s flown in M ms"); blue `#2563eb` inside its envelope, the
   whole line a loud red `#ff2d2d` outside (`autopilotColour`), never the replay's teal; each request names its page
   and its number there (`clientId`, `seq`): a later one from the same page supersedes the earlier still waiting or flying
-  (409), so clicking through bands flies only the last; backend 400 / 404 / 409 / 422 / 500 (AV26).
+  (409), so clicking through bands flies only the last; backend 400 / 404 / 409 / 422 / 500. A MODEL's word (the bar reading
+  a sample) is asked WITH its sentence and flown as its free generation flew it — the whole sentence from the observed state at
+  `firstRow`, each word at its own step (`TimeClock`), the generation's time limit, judged on the model's runway — so it IS the
+  exported sample's flight (the card checks point by point: 0.000 m over 104 segments, 2026-09-26); `source` echoed, no observed
+  time or offset (AV26).
 - **Training's code: one reader (`data/trainingReader.ts`) for every Training file; shared wording in `data/trainingText.ts`;
   the read-back is a pure model + four charts + a window shell (`components/training/`); the 3D scene is
   `scene/trainingEntities.ts`, built once per flight — Draw switches set `show`, they rebuild nothing**; a reading given only
@@ -165,8 +169,10 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   dock height (min ~5 two-line rows), the dock scrolls past that (AV30).
 - **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v1`, written by ts
   `prior_generation_training_export`): `trainingSource` (null = truth, or `{overlayId, sample}`) picks the sentence the bar,
-  the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are hatched + dash-edged with the truth's issues
-  ticked under each row; colour by role — base `#d946ef`, post-trained `#a3e635` (`trainingModelColour`) (AV31).
+  the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are FLAT like the truth's (hatching cluttered the
+  bar — the user, 2026-09-26): the frame says whose (border, a strip down the rows, tab, chip in its colour), the truth's issues
+  ticked under each row, its flight's end time written on the axis in its colour; colour by role — base `#d946ef`,
+  post-trained `#a3e635` (`trainingModelColour`) (AV31).
 
 ## Comparison CZML colour contract
 

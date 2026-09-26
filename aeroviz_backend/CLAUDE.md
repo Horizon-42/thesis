@@ -27,7 +27,10 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
   request names its page, `clientId`, and its number there, `seq`; the page's lower-numbered ones still waiting are not
   flown, one flying stops before its next cycle, one arriving late is refused — the page's numbers decide, not arrival), a flight the data cannot fly (no aircraft dynamics) 422 (`errors.NotFlyable`; `errors` is stdlib-only so the server
   maps them without torch), anything else 500 with its reason. Built lazily on the first request (torch + ts_transformer,
-  ~470 MB); one flight at a time; the last 8 rebuilt flights cached. Full text: `aeroviz-4d/docs/35-viewer-reference.md` AV26.
+  ~470 MB); one flight at a time; the last 8 rebuilt flights cached. A request with a `sentence` (a model's sample) flies
+  that sentence as `prior_free_generation` flew it — from the observed state at its first step, the time clock, the
+  generation's time limit (`fly.model_time_limit_s` MIRRORS `limits_s`), the model's runway — and so re-flies the exported
+  sample exactly. Full text: `aeroviz-4d/docs/35-viewer-reference.md` AV26.
 
 ## Observed tracks have TWO windows — the comparison overlay must use the model one
 

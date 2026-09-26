@@ -406,14 +406,18 @@ that divergence is a known open item (see the README's "Future Improvements").
   截断）：照正式读数的数法写出，句子条把多说了一整步以上的那段涂暗。正式读数分这个机场与全部机场两份（`readout.prior.here/all`）。
 - 读哪一句是 `AppContext.trainingSource`（null = 真值；或 `{overlayId, sample}`），句子条的标签页和左栏的 Sentences read 共用；换航班
   保留。`generationOnScreen` 找出屏幕上这架航班的那个样本；模型不飞这架航班时回到真值。**真值总是画**，模型的东西只在读它时画。
-- 区分：模型的带斜线 + 虚线边框，前 8 步灰斜纹 "observed"，每行底边白色短竖线是真值在这一列说词的地方；颜色按角色——base 模型
-  品红 `#d946ef`、后训练黄绿 `#a3e635`（`trainingModelColour`，按有没有 `fineTuning`），配色校验的数写在 `trainingWordColors.ts`。
+- 区分靠框不靠带：模型的带和真值的一样平涂（斜线 + 虚线边框让看板太乱，用户 2026-09-26），句子条边框、各行左边的竖色条
+  （`training-sentence-model-strip`）、标签页、样本小块是模型的颜色；前 8 步淡灰底 "observed"，每行底边白色短竖线是真值在这一列
+  说词的地方；模型航班结束的实线下面，时间轴上用模型的颜色写出结束时刻（`training-sentence-model-end`，总是写；离它太近的刻度
+  让开，写在轴末端时右对齐）。颜色按角色——base 模型品红 `#d946ef`、后训练黄绿 `#a3e635`（`trainingModelColour`，按有没有
+  `fineTuning`），配色校验的数写在 `trainingWordColors.ts`。
 - 三维（`useTrainingGenerationLayers`）：读的样本实线、贴地虚线、结束标签、它说航向词和许可的点（模型的颜色）；其余样本细线
   半透明（`TRAINING_OTHER_SAMPLE_ALPHA`）。选中的词画在模型飞出的航迹上，真值的包络不淡化（`useTrainingTrackLayer` 读模型时不画
   真值的选中）。
 - 模型的许可与复飞用集合进近词表里的 "cleared" / "go-around"（`TRAINING_APPROACH_CLEARED` / `TRAINING_APPROACH_GO_AROUND`，
   导出器 `APPROACH_NAMES` 的镜像，`test_instruction_training_export.py` 钉住；样本读取器拒绝没有它们的词表）。
 - 换模型从第 1 个样本开始；模型不飞的航班画真值连同真值的整个头部；Read-back / Prior 两个窗口读真值，只在读真值时给出。
+  ▶ Fly 两边都有：模型的词交给实时执行器飞（AV26 "模型的词"），模型航班结束之后说的词灰着。
   左栏只留当前集合的模型下载，读不了的有 Retry（`useGenerationOverlays`）。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
@@ -436,6 +440,18 @@ that divergence is a known open item (see the README's "Future Improvements").
   什么也不飞——与"飞满时限再截断"逐位相同。
 - 启动：选中一个词后按句子条头部的 **▶ Fly**（飞完变 **↻ Fly again**，同一选择的新一次尝试），或在面板 "Autopilot (live)"
   一栏的 **Fly on band click** 开着时直接点色块；只有点击才请求（`trainingPick`），游标不触发，图表悬停会移动游标。
+- **模型的词**（句子条读模型的样本时）：请求带上这句话（`sentence`：`overlayId`、`sample`、`firstRow`、`rows`、`events`，
+  `trainingAutopilotRequest` 从屏幕上的样本取，`useTrainingAutopilot`），后端把整句从观测飞机在 `firstRow` 的状态照自由生成的
+  飞法重飞（`segment.model_segment` / `fly.fly_segment`）：每个词在它说出的那一步听到（`TimeClock`）、时限 = 观测从 `firstRow`
+  起剩下的时间 × 超时倍数（`fly.model_time_limit_s`，`prior_free_generation.limits_s` 的镜像，测试钉住）、判决按模型指的跑道；
+  答复只给从词那一步起的航迹与判定。执行器是确定的，所以这就是导出样本自己的飞行：结果卡逐点比（`autopilotSampleGap`，两者都
+  有点的时刻，水平与高度取大），2026-09-26 KRDU / KMSY 两个模型各 4 架 × 2 个样本、104 段最大差 0.000 m；测试
+  `FreeGenerationTest` 让 `speak_and_fly` 自己的循环（照稿说话的说话者代替先验）和后端的飞法在真实执行器上逐状态比。只飞自己机型
+  动力学的航班；词说出时或之前航班已结束的按名字拒绝（400，与前端 `row·step < endS` 同一个条件）；说在句子最后一步的词飞到
+  结局（模型的最后一步不是落地）；句子步数不超过时限下能说的（`model_steps_max` = `rows_for`）。下降角词：判决读的句子在它那一步
+  重说生效的高度词（`judged_reading`），管子从它那一步起判，与真值相同；第二次许可不判（判决读第一次的截获）。答复 `source`
+  写明飞的哪一句，前端核对；`observedS` 为 null，`offsetFromObserved` 只有真值有；`limits` 是整段重飞的，卡片写明。
+  模型许可之后又说的航向词照判决原样判到航迹末尾（执行器在飞航道），读作出界——模型句子的读法，判决不改。
 - 一段 = 被选中的那个色块：从词说出的一步飞到它的包络结束的
   `stopRow`——同列下一个词说出的一步，航向词再加一个提前量（它的带判到下一个航向词说出后一个提前量，下一个航向词照句子说出）；
   到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。初态是观测飞机在那一步的状态（`flight_inputs(anchor=row)`），第 0 步是那一步
@@ -458,7 +474,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   下一个航向词总放得下；会截短的是没有上限的距离词钟一步越过下一个词、或更长的提前量——2026-09-25 全部 3,526 个航向词试飞，0 次。
 - 前端把答复绑到屏幕上这一段：同一架航班、`endRow` 是色块的终点、词表规格相同、**告诉执行器的词就是句子条这一段显示的词**；
   航向带的行是执行器自己飞过的步，以判决读到的飞出航迹为界、不以句子段尾为界（执行器可能晚听到下一个航向词）；
-  对不上整份拒读。答复格式 `aeroviz-autopilot-segment-v2` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
+  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v3` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
   名也是镜像）；它带 `timing`（后端墙钟：等待；加起来等于总计的各项——集合与规格、重建航班或沿用、准备这一段、执行器与算了的周期数、判定、
   写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里），前端加上浏览器往返时间。单步飞法由
   `test_autopilot_segment.StepperTest` 钉住：真实执行器上，不设段尾时与 `executor.fly` 逐周期相同，设了段尾时等于它在词钟首次把
