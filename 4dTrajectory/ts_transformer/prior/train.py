@@ -248,19 +248,23 @@ class RewardConfig:
 #: the gain `BUDGET_GAIN_UP` over the target (× 1.22 an update at most: ten-fold in ~12) and `BUDGET_GAIN_DOWN` under it,
 #: and never below the weight it started at. A symmetric gain of 0.05 with no floor let a model under budget for its first
 #: hundred updates drop the pull to a tenth and then run twenty times past the target before the pull recovered
-#: (readouts §9). A pass ends at a batch farther than `BUDGET_STOP` × the larger of the target and the pass's own first
-#: distance (a pass that starts past the target is not frozen: its pull brings it back).
+#: (readouts §9). The controller and the stop read the distance SMOOTHED over the pass's batches (an exponential average,
+#: each batch weighing `BUDGET_SMOOTHING`, started at the pass's start distance): a pass's batches are length groups whose
+#: distance varies about four-fold, and single batches tripped the stop on no drift and pushed the pull up on noise
+#: (readouts §9). A pass ends where the smoothed distance passes `BUDGET_STOP` × the larger of the target and the pass's
+#: start distance (a pass that starts past the target is not frozen: its pull brings it back).
 BUDGET_GAIN_UP = 0.2
 BUDGET_GAIN_DOWN = 0.05
 BUDGET_ERROR_CLIP = 1.0
 BUDGET_STOP = 3.0
+BUDGET_SMOOTHING = 0.1
 
 
 @dataclass(frozen=True)
 class KlBudget:
     """How far from the reference the model may be (the pull's own measure, `RewardTuner.distance`, per predicted step
-    summed over its asked cells): the pull's weight is raised fast while a batch is farther than ``target``, lowered
-    slowly while it is nearer, never below ``floor``."""
+    summed over its asked cells): the pull's weight is raised fast while the smoothed distance is farther than
+    ``target``, lowered slowly while it is nearer, never below ``floor``."""
 
     target: float
     floor: float
@@ -269,9 +273,9 @@ class KlBudget:
         error = min(max(distance / self.target - 1.0, -BUDGET_ERROR_CLIP), BUDGET_ERROR_CLIP)
         return max(self.floor, weight * math.exp((BUDGET_GAIN_UP if error > 0.0 else BUDGET_GAIN_DOWN) * error))
 
-    def stops(self, distance: float, first: float) -> bool:
-        """Whether a pass whose first batch was ``first`` from the reference ends at a batch ``distance`` away."""
-        return distance > BUDGET_STOP * max(self.target, first)
+    def stops(self, smoothed: float, start: float) -> bool:
+        """Whether a pass that started ``start`` from the reference ends where its smoothed distance is ``smoothed``."""
+        return smoothed > BUDGET_STOP * max(self.target, start)
 
 
 class RewardTuner:
@@ -296,7 +300,8 @@ class RewardTuner:
 
     The pull's weight starts at ``config.kl_weight``; with a ``budget`` (`KlBudget`, the second stage) it is adjusted
     after every update from that batch's distance and carried across passes, otherwise it stays fixed (the first
-    stage)."""
+    stage). A budgeted pass is given its ``start_distance`` (`distance` on its own sentences just before it), which the
+    smoothed distance starts from."""
 
     def __init__(self, model: Prior, reference: Prior, config: RewardConfig, device: torch.device, *, seed: int) -> None:
         if config.kl_estimate not in KL_ESTIMATES:
@@ -361,7 +366,8 @@ class RewardTuner:
         return float(np.mean(means))
 
     def one_pass(self, sentences: Split, advantages: np.ndarray, data: Split | None,
-                 allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> dict[str, Any]:
+                 allowed: Sequence[Mapping[int, np.ndarray]] | None = None,
+                 start_distance: float | None = None) -> dict[str, Any]:
         """One pass over ``sentences`` (``advantages``: one per sentence; ``allowed``: the masks each was said under,
         `allowed_tensors`) beside ``data``: the mean of each term as trained, and what it took."""
         if len(advantages) != len(sentences.flights):
@@ -372,21 +378,26 @@ class RewardTuner:
             raise ValueError("a data split goes with a data term, and only with one")
         if not sentences.flights:
             raise ValueError("no sentence to train on: no flight's sentences differ in reward")
+        if (self.budget is None) != (start_distance is None):
+            raise ValueError("a budgeted pass needs its start distance (`distance` just before it), and only it")
         self.passes += 1
         self.model.eval()
         started = time.perf_counter()
         sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
-        count, weight_start, trace, stopped = 0, self.kl_weight, {"kl": [], "weight": []}, None
+        count, weight_start, stopped = 0, self.kl_weight, None
+        trace: dict[str, list[float]] = {"kl": [], "smoothed": [], "weight": []}
+        smoothed = start_distance
         for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
             batch, logits, reference, steps = self._scored(sentences, indices, allowed)
             advantage = torch.as_tensor(advantages[indices], dtype=logits[0].dtype, device=self.device)
             reward = (advantage * flight_nll(logits, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
             kl = self._kl(batch, logits, reference, steps)
-            if self.budget is not None and self.budget.stops(float(kl.detach()), trace["kl"][0] if trace["kl"] else
-                                                             float(kl.detach())):
-                # this batch is past the budget's stop: no update from it, the pass ends
-                stopped = {"batch": count, "distance": float(kl.detach())}
-                break
+            if self.budget is not None:
+                smoothed = (1.0 - BUDGET_SMOOTHING) * smoothed + BUDGET_SMOOTHING * float(kl.detach())
+                if self.budget.stops(smoothed, start_distance):
+                    # past the budget's stop: no update from this batch, the pass ends
+                    stopped = {"batch": count, "distance": float(kl.detach()), "smoothed": smoothed}
+                    break
             if data is None:
                 data_loss = torch.zeros((), device=self.device)
             else:
@@ -406,7 +417,8 @@ class RewardTuner:
             trace["kl"].append(float(kl.detach()))
             trace["weight"].append(self.kl_weight)
             if self.budget is not None:
-                self.kl_weight = self.budget.adjusted(self.kl_weight, trace["kl"][-1])
+                trace["smoothed"].append(smoothed)
+                self.kl_weight = self.budget.adjusted(self.kl_weight, smoothed)
         return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace["kl"]),
                 "kl_weight_start": weight_start, "kl_weight_end": self.kl_weight, "batches": count,
                 "sentences": len(sentences.flights), "seconds": time.perf_counter() - started,
