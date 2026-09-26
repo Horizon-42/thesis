@@ -16,7 +16,7 @@
 | 项 | 状态 |
 |---|---|
 | 设计 | 用户 2026-09-24 已确认全部取值（§10）；机型这一版不加，模型留一个"每架飞机的静态属性"接口（§4.5）。运动与方向差两块输入按第二版的比较结果都给（读数文档 §2） |
-| 代码 | 第 0、1 步和单机自由生成已实现并合并进 `dev-two-tier`（第 0 步 `297c3e10`，第 1 步 `47c7b790`，自由生成 `0bbe6abf`）。第 1 步是单机：每架航班一个场景，模型已按 §6 带飞机轴（本步只有一架）。按落地强化（后训练设计 §2，`e8ee1373`）、闭环提速（逐位不变，`002998fb`）和 CAT-K 的归档（`e5f18692`）已合并进 `dev-two-tier`（`7e1e2df0`）。闭环监督微调（CAT-K）不采用（后训练设计 §6），代码已归档（`dev-prior-fast` `e5f18692`，`archive/closed_loop_sft_2026_09/`）；后训练第二阶段的代码（下滑道下沿屏蔽、扩充起点，后训练设计 §3–§5）连同会影响训练的代码健康修复已合并进 `dev-two-tier`（`acb93b55`，2026-09-26）；合并后的代码拒绝执行器规格 v7，现行句子产物 `instruction_language/v5_20260926`、执行器规格 `executor/v9_20260926` |
+| 代码 | 第 0、1 步和单机自由生成已实现并合并进 `dev-two-tier`（第 0 步 `297c3e10`，第 1 步 `47c7b790`，自由生成 `0bbe6abf`）。第 1 步是单机：每架航班一个场景，模型已按 §6 带飞机轴（本步只有一架）。按落地强化（后训练设计 §2，`e8ee1373`）、闭环提速（逐位不变，`002998fb`）和 CAT-K 的归档（`e5f18692`）已合并进 `dev-two-tier`（`7e1e2df0`）。闭环监督微调（CAT-K）不采用（后训练设计 §6），代码已归档（`dev-prior-fast` `e5f18692`，`archive/closed_loop_sft_2026_09/`）；后训练第二阶段的代码（下滑道下沿屏蔽、扩充起点，后训练设计 §3–§5）连同会影响训练的代码健康修复已合并进 `dev-two-tier`（`acb93b55`，2026-09-26）；程序屏蔽跟着模型走、与词表规则分开（§5.1）在分支 `dev-procedure-masks`（`038b772f`，已审查，待用户合并，合并后要补现有模型的记录）；合并后的代码拒绝执行器规格 v7，现行句子产物 `instruction_language/v5_20260926`、执行器规格 `executor/v9_20260926` |
 | 训练与读数 | 第 0 步（划分、重测规格、重建句子产物、普查）：读数文档 §3。第 1 步：选中 full（候选跑道带落地情况、各列按顺序输出），验证集每个预测步 0.2643，**§9 第 1 步的门过了**：每列都赢两个基线；还没建立在五边上的航班上，第一步跑道 81.5 %，B1 69.6 %、B3 72.1 %（读数文档 §4）。单机自由生成：先验说的词落地 89.3 %（内部选择集）、90.2 %（验证集，只读一次），标注的词 100 % / 99.9 %；门先只记录（用户 2026-09-25）（读数文档 §5）。**闭环监督微调（CAT-K）失败，不采用**（后训练设计 §6，读数文档 §6）。按落地强化（后训练设计 §2）完成、采用：验证集先验说词落地 90.2 → 97.2 %（被引导 83.3 → 93.9 %），teacher forcing 负对数似然不变（读数文档 §7）。第二阶段不采用（后训练设计 §0）。在重建后的执行器 v9 上重读验证集：第一阶段模型 97.2 %（与 v7 相同），base 89.7 %（读数文档 §11）；base 不重训（用户 2026-09-26）。以前按航班划分的两次训练（读数文档 §1、§2）不作本设计的对照 |
 | 下一步 | 等用户决定：后训练第二阶段换一种做法再试，或以第一阶段模型为当前结果进入 §9 第 2 步（M1：25 km 范围里看不看得到交互）。后训练全部写在[后训练设计](post_training_design.zh.md) |
 
@@ -254,11 +254,13 @@
    | `v3_stage2_restart_20260926/aug_s1337/round_01…02`、`v3_stage2_clip_20260926/aug_s1337/round_01…08`（等它跑完） | 第二阶段 v4、v5 | `procedure-altitudes-v2` |
    | `v3_augmented_20260926`、`v3_augbudget*_20260926`、`v3_augdata_20260926` | 第二阶段 v1–v3，规则是已退役的 `procedure-altitudes-v1` | 不补：打不开来说话，它们的读数都在盘上 |
 
-   `data_sha256` 用补记录时盘上的数据算；这些数据在这些模型训练之后没有改过（跑道数据 `runway_thresholds.json` 最后一次提交
+   后训练的一轮只在它那次运行结束后才补（运行目录里有 `choice.json`，或整次运行有 `STOPPED.txt`），还在跑的跳过，以后再跑一次脚本补上。
+   所有模型都用现行句子产物 `v5_20260926` 打开核对（v4 与 v5 的候选跑道完全相同）。`data_sha256` 用补记录时盘上的数据算，浮点数先取到 1e-6
+   （这些数经过坐标投影和三角函数，换一台机器最后一位可能不同）；这些数据在这些模型训练之后没有改过（跑道数据 `runway_thresholds.json` 最后一次提交
    `bc45455f` 2026-09-20，CIFP `CIFP_260806` 文件 2026-07-16，`procedure-details` 61 个文件最新 2026-07-03），脚本运行时再打印一遍。
-   句子产物 v4 与 v5 的候选跑道算出的摘要相同（`275cae1a…`），用哪份打开都一样。演练（只列不写）：补 25 个目录（base 等 4 个、
-   landing 各轮 8 个、CAT-K 8 个、停掉的重启 2 轮、带截断的运行已有的 3 轮），跳过 17 个（v1/v2 旧格式 7 个、退役规则 10 个）；带截断的
-   运行跑完后再演练一次，它后面几轮也补上。代码合并之后、补记录之前，所有模型都打不开，所以两件事紧挨着做。
+   演练（只列不写，2026-09-27）：补 22 个目录（base 等 4 个、landing 各轮 8 个、CAT-K 8 个、停掉的重启 2 轮），跳过 21 个（v1/v2 旧格式
+   7 个、退役规则 10 个、带截断的运行还在跑的 4 轮）；带截断的运行跑完后再跑一次，补它的 8 轮。写的时候脚本先把自己复制进
+   `outputs/POOLED/prior/procedure_masks_stamp_<日期>/`，日志也放那里。代码合并之后、补记录之前，所有模型都打不开，所以两件事紧挨着做。
 
 7. **测试与核对**：记录的往返与每一种拒绝；数据摘要对任何一个字段的改动敏感、与机场顺序无关；自由生成默认用模型自己的、
    `none` 和点名的也对；不给程序屏蔽时说话器只屏蔽词表的三列；`prior_train` 写出的记录是空（`tests/test_prior_masks.py`、
@@ -267,7 +269,24 @@
 
 8. **与另一个会话的分支 `dev-training-rounds` 的关系**：它改了训练视图的导出，并按自由生成读数的 `procedure_masks: false` 字段拒绝
    "开了程序屏蔽的读数"——读数格式没变，这条照样成立；这里只在导出的 `speak_and_fly` 调用里多传了 `procedure_masks=ProcedureMasks.none()`，
-   两个分支谁后合并，谁把这一处对上。
+   两个分支谁后合并，谁把这一处对上。审查后导出也拒绝开着程序高度的读数，改法与那个分支同一处、逐字相同；试合并：代码文件都自动合并，
+   只有 `docs/CHANGELOG.md` 与 `docs/code-health-followups.md` 两处文字冲突。
+
+**关键代码**（分支 `dev-procedure-masks` `038b772f`，路径相对 `4dTrajectory/ts_transformer/`）：
+
+| 什么 | 在哪 |
+|---|---|
+| 屏蔽集的名字与记录文件 | `prior/masks.py:34`（`MASKS_SCHEMA`）、`:37`（`PROCEDURE_ALTITUDES`）、`:39`（`SETS`） |
+| 数据摘要 | `prior/masks.py:55` `finals_sha256` |
+| 一个模型说话用的程序屏蔽 | `prior/masks.py:64` `ProcedureMasks`（`:85` `build`、`:104` `speaking`） |
+| 写、读记录 | `prior/masks.py:112` `write_masks`、`:124` `read_masks` |
+| 程序高度五条规则连同切入与跌破 | `prior/procedure.py:173` `AltitudeMasks`（`:196` `track`、`:205` `allowed`） |
+| 说话器：词表规则在里面，程序屏蔽传进来 | `prior/generate.py:60` `VOCABULARY_COLUMNS`、`:80`、`:193` `_allowed`、`:207` `_vocabulary_allowed` |
+| 打开模型连同它的程序屏蔽 | `experiments/prior_train.py:71` `LoadedPrior`、`:80` `load_prior`、`:170`（base 写"无"） |
+| 自由生成的选择 | `experiments/prior_free_generation.py:389` `procedure_masks_named`、`:396` `mva_charts`、`:495` `--procedure-masks` |
+| 两个阶段各自的屏蔽 | `experiments/prior_landing_reward.py:70`、`:344`；`experiments/prior_augmented_reward.py:90`、`:485` |
+| 训练视图导出 | `experiments/prior_generation_training_export.py:117`（拒绝开着程序高度的读数）、`:231`（明确不开） |
+| 测试 | `tests/test_prior_masks.py`；两个阶段交给说话器和读数的屏蔽：`tests/test_prior_landing_reward.py`、`tests/test_prior_augmented_reward.py` |
 
 ## 6 模型
 
