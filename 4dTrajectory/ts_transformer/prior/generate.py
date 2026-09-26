@@ -11,6 +11,9 @@ The inputs are built row by row with the training data's own functions (`data.ro
 and words — the tests hold it to that. The model encodes them row by row too (`Prior.extend`: each layer's keys and
 values of the rows already read are kept), the arithmetic of encoding them all again.
 
+Two kinds of mask take words away, kept apart (prior design §5.1): the vocabulary's rules, which the speaker applies
+itself to every model, and the procedure's masks, which it is given — the ones the model was trained under.
+
 **The vocabulary's compatibility rules are a mask** (vocabulary design §2.1, §2.5: "checked in labelling, a mask in
 decoding"): a runway changed under a clearance takes the approach with it; the altitude and descent-angle classes in
 force must agree at the aircraft's altitude ("descend to land" with a descent class). The approach column is masked
@@ -23,14 +26,15 @@ a runway change once it has been cleared (since the last go-around) or has captu
 stricter than the vocabulary's rule, which allows it with the approach changed in the same step; the stricter rule wins,
 so the listener never hears what it refuses. A flight the caller marks inactive (its flight is over) says nothing.
 
-**The procedure's altitudes are a mask on the altitude and descent-angle columns** where the caller gives each flight
-its candidates' finals (`procedure.RunwayProcedure`, post-training design §3.4): for the runway just sampled, at the
-aircraft's position and with the approach word just sampled, the altitude words the glidepath lower edge, the decision
-altitude and "no climbing back" forbid — and "unchanged" on a word that no longer holds — are removed
-(`procedure.altitude_word_allowed`), and the climb class where the climb is barred (`procedure.angle_word_allowed`). Where
-each flight has joined each candidate's final and whether it has dipped under its entry height before that
-(`procedure.pre_join`) is kept row by row. The probability on what is removed is recorded like the grammar's. Without
-finals nothing is masked there and the speaker is the one above, draw for draw.
+**The procedure's masks** (`masks.ProcedureMasks`: none, or named sets a post-training stage trained under — a model's
+own come with it, `experiments.prior_train.load_prior`) are given, never defaulted. The procedure's altitudes
+(`procedure.AltitudeMasks`, post-training design §3.4) mask the altitude and descent-angle columns: for the runway just
+sampled, at the aircraft's position and with the approach word just sampled, the altitude words the glidepath lower
+edge, the decision altitude and "no climbing back" forbid — and "unchanged" on a word that no longer holds — and the climb
+class where the climb is barred; each set keeps what it tracks row by row (the altitudes: where each flight has joined
+each candidate's final and whether it has dipped under its entry height before that). A column's allowed classes are what
+the vocabulary's rules and every set masking it allow together; the probability on what they remove is recorded per
+column. With none, the speaker is the vocabulary's alone.
 """
 
 from __future__ import annotations
@@ -47,11 +51,13 @@ from ts_transformer.instructions.grammar import step_allowed
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, rows_inputs
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior, self_edges
-from ts_transformer.prior.procedure import (
-    RunwayProcedure, altitude_word_allowed, angle_word_allowed, climb_barred, word_tolerance_m,
-)
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
+
+#: The columns the vocabulary's rules mask: the runway (not said again, the lock), the approach and the descent angle
+#: (`instructions.grammar.step_allowed`).
+VOCABULARY_COLUMNS = (RUNWAY, APPROACH, ANGLE)
 
 
 class Speaker:
@@ -60,27 +66,22 @@ class Speaker:
 
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  landings: Mapping[str, Landings] | None, words: Words, *, max_rows: int, generator: torch.Generator,
-                 temperature: float = 1.0, finals: Sequence[Sequence[RunwayProcedure]] | None = None) -> None:
+                 procedure_masks: ProcedureMasks, temperature: float = 1.0) -> None:
         """``landings``: each airport's landing context (`data.airport_landings`), None for a variant without it;
-        ``max_rows``: the most rows any flight will have (the model's position table must hold them); ``finals``: each
-        flight's candidates' finals, in the pointer's order, to mask the altitude and descent-angle columns by
-        (`procedure`'s rules 1–5; None: no such mask)."""
+        ``max_rows``: the most rows any flight will have (the model's position table must hold them);
+        ``procedure_masks``: the procedure's masks it speaks under, over the vocabulary's rules (`masks`)."""
         if VARIANTS[model.config.variant].landing_context != (landings is not None):
             raise ValueError(f"variant {model.config.variant} and the landing context given disagree")
         if max_rows > model.config.max_rows:
             raise ValueError(f"{max_rows} rows, the model's positions end at {model.config.max_rows}")
         self.model, self.geometries, self.generator, self.temperature = model, list(geometries), generator, temperature
         self.words = words
-        #: per step: the probability the model put, before the mask, on what the mask removed — [B] per column
-        self.forbidden: dict[int, list[np.ndarray]] = {RUNWAY: [], APPROACH: [], ANGLE: []}
-        self.finals = None if finals is None else [tuple(f) for f in finals]
-        if self.finals is not None:
-            if len(self.finals) != len(flights):
-                raise ValueError(f"{len(self.finals)} flights' finals for {len(flights)} flights")
-            for finals_b, geometry in zip(self.finals, self.geometries):
-                if tuple(f.candidate for f in finals_b) != geometry.candidates:
-                    raise ValueError(f"{geometry.code}: the finals are not its candidates', in the pointer's order")
-            self.forbidden[ALTITUDE] = []
+        #: each set of the procedure's masks on these flights (`ProcedureMasks.speaking`)
+        self.procedure = procedure_masks.speaking(self.geometries, words)
+        masked = list(VOCABULARY_COLUMNS)
+        masked += [c for rules in self.procedure for c in rules.columns if c not in masked]
+        #: per step: the probability the model put, before the masks, on what they removed — [B] per masked column
+        self.forbidden: dict[int, list[np.ndarray]] = {column: [] for column in masked}
         #: per step: the classes each masked column allowed, bit-packed ([B, ⌈classes / 8⌉] uint8, little-endian bits;
         #: `allowed_classes` unpacks them) — what a trainer scoring a sentence under the distribution it was sampled from
         #: needs (post-training design §5)
@@ -108,17 +109,8 @@ class Speaker:
         self.static = torch.zeros((count, 1, 0), device=device)
         self.rows = N_LOOK + 1
         self._inputs(0)
-        if self.finals is not None:
-            # per flight and candidate, as of the newest row: joined its final; dipped under its entry height before that
-            # (`procedure.pre_join`, kept a row at a time); the flights sharing one airport's finals go together
-            width = max(len(f) for f in self.finals)
-            self.joined = np.zeros((count, width), dtype=bool)
-            self.dipped = np.zeros((count, width), dtype=bool)
-            self.final_groups: dict[tuple[int, ...], list[int]] = defaultdict(list)
-            for b, finals_b in enumerate(self.finals):
-                self.final_groups[tuple(map(id, finals_b))].append(b)
-            for row in range(self.rows):
-                self._track(row)
+        for row in range(self.rows):
+            self._track(row)
         # the rows the model has encoded, and each layer's keys and values of them (`Prior.extend`)
         self.encoded, self.past = 0, model.no_past(count, max_rows)
         # the words said: the class in force per column (0: none yet) and the row it was said at
@@ -145,14 +137,9 @@ class Speaker:
         self.relative[:, 0, first:rows] = torch.as_tensor(relative, device=self.relative.device)
 
     def _track(self, row: int) -> None:
-        """Every flight's `joined` and `dipped` taken on to ``row`` (`procedure.pre_join`, one row at a time)."""
-        tolerance = word_tolerance_m(self.words.spec)
-        for members in self.final_groups.values():
-            index = np.array(members)
-            e, n, h = self.e[index, row], self.n[index, row], self.h[index, row]
-            for r, final in enumerate(self.finals[members[0]]):
-                self.joined[index, r] |= final.inside(e, n)
-                self.dipped[index, r] |= (h < final.entry_m - tolerance) & ~self.joined[index, r]
+        """What each set of the procedure's masks tracks, taken on to ``row``."""
+        for rules in self.procedure:
+            rules.track(self.e[:, row], self.n[:, row], self.h[:, row])
 
     def append(self, e: np.ndarray, n: np.ndarray, height: np.ndarray, frozen: np.ndarray) -> None:
         """The next row's position of every flight, ``[B]`` each (after at least one `speak`); a ``frozen`` flight (its
@@ -165,8 +152,7 @@ class Speaker:
         self.h[:, row] = np.where(frozen, self.h[:, row - 1], height)
         self.rows += 1
         self._inputs(row)
-        if self.finals is not None:
-            self._track(row)
+        self._track(row)
         # the words in force at the row before, as the prior said them (`data.sentence_steps`)
         self.in_force[:, 0, row] = torch.as_tensor(self.value)
         self.since[:, 0, row] = torch.as_tensor(np.log1p(row - self.said_row) / SINCE_SCALE, dtype=torch.float32)
@@ -207,13 +193,24 @@ class Speaker:
     def _allowed(self, column: int, chosen: np.ndarray, opening: bool, classes: int,
                  runway_locked: np.ndarray) -> np.ndarray:
         """``[B, classes]``: the classes of ``column`` each flight may say after the columns before it (``chosen``:
-        this step's classes so far, [B, 6]) — the runway: another runway, or none where locked; the approach and the
-        angle: what the grammar allows. At the first predicted step every column is said, so "unchanged" (class 0) is
-        not asked about (the model already masks it)."""
+        this step's classes so far, [B, 6]) — what the vocabulary's rules (`_vocabulary_allowed`) and every set of the
+        procedure's masks masking the column allow together."""
+        out = (self._vocabulary_allowed(column, chosen, opening, classes, runway_locked)
+               if column in VOCABULARY_COLUMNS else np.ones((len(chosen), classes), dtype=bool))
+        row = self.rows - 1
+        at = (self.e[:, row], self.n[:, row], self.h[:, row])
+        for rules in self.procedure:
+            if column in rules.columns:
+                out &= rules.allowed(column, chosen, self.value, at, opening, classes)
+        return out
+
+    def _vocabulary_allowed(self, column: int, chosen: np.ndarray, opening: bool, classes: int,
+                            runway_locked: np.ndarray) -> np.ndarray:
+        """The vocabulary's rules on ``column`` (one of `VOCABULARY_COLUMNS`): the runway — another runway, or none
+        where locked; the approach and the angle — what the grammar allows. At the first predicted step every column
+        is said, so "unchanged" (class 0) is not asked about (the model already masks it)."""
         spec = self.words.spec
         out = np.ones((len(chosen), classes), dtype=bool)
-        if column == ALTITUDE:
-            return self._procedure_altitude(chosen, opening, classes)
         if column == RUNWAY:
             if not opening:
                 # the runway in force is not said again (the labeller drops a word equal to the one in force, and a
@@ -235,33 +232,6 @@ class Speaker:
                 if column == ANGLE and not opening and step[ALTITUDE] == UNCHANGED and k == 0:
                     continue                                 # nothing said in either column: nothing to check
                 out[b, k] = step_allowed(in_force, step, height, spec, self.words)
-        if column == ANGLE and self.finals is not None:
-            barred = np.array([self._final_state(chosen, b)[3] for b in range(len(chosen))])
-            out[:, 1:] &= angle_word_allowed(np.arange(classes - 1)[None, :], barred[:, None], self.words)
-        return out
-
-
-    def _final_state(self, chosen: np.ndarray, b: int) -> tuple[RunwayProcedure, bool, bool, bool]:
-        """Flight ``b``'s ``(final, joined, dipped, climb barred)`` at its newest row, for the runway and the approach in
-        force after this step's columns so far (``chosen``)."""
-        in_force = np.where(chosen[b] > 0, chosen[b], self.value[b]) - 1
-        runway = int(in_force[RUNWAY])
-        joined, dipped = bool(self.joined[b, runway]), bool(self.dipped[b, runway])
-        return self.finals[b][runway], joined, dipped, bool(climb_barred(joined, dipped, in_force[APPROACH]))
-
-    def _procedure_altitude(self, chosen: np.ndarray, opening: bool, classes: int) -> np.ndarray:
-        """``[B, classes]``: the altitude classes the procedure's altitudes allow each flight at its newest row, for the
-        runway and approach in force after this step's columns so far; "unchanged" (class 0) only where the word in
-        force still holds (at the first predicted step it is not asked about)."""
-        row, out = self.rows - 1, np.ones((len(chosen), classes), dtype=bool)
-        every = np.arange(classes - 1)
-        for b in range(len(chosen)):
-            final, joined, _, barred = self._final_state(chosen, b)
-            at = (self.e[b, row], self.n[b, row], self.h[b, row])
-            out[b, 1:] = altitude_word_allowed(final, every, *at, self.words, joined=joined, barred=barred)
-            if not opening:
-                out[b, 0] = bool(altitude_word_allowed(final, np.array([self.value[b, ALTITUDE] - 1]), *at, self.words,
-                                                       joined=joined, barred=barred)[0])
         return out
 
 

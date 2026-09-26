@@ -20,7 +20,7 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
 from ts_transformer.experiments import prior_procedure_check
 from ts_transformer.experiments.prior_free_generation import (
-    BELOW_GLIDEPATH, ProcedureMasks, flight_rows, glidepath_stops, in_force, sentence_pre_join, speak_and_fly,
+    BELOW_GLIDEPATH, flight_rows, glidepath_stops, in_force, sentence_pre_join, speak_and_fly,
 )
 from ts_transformer.experiments.prior_procedure_check import (
     MAX_FORBIDDEN_WORDS, MAX_STOPPED_REPLAYS, check_labelled, labelled_rows, passes,
@@ -33,9 +33,10 @@ from ts_transformer.instructions.words import (
 )
 from ts_transformer.prior import procedure
 from ts_transformer.prior.generate import Speaker
+from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks
 from ts_transformer.prior.mva import MvaChart
 from ts_transformer.prior.procedure import (
-    GLIDEPATH_BELOW_M, THRESHOLD_TOLERANCE_M, RunwayProcedure, airport_procedures, altitude_word_allowed,
+    GLIDEPATH_BELOW_M, THRESHOLD_TOLERANCE_M, AltitudeMasks, RunwayProcedure, airport_procedures, altitude_word_allowed,
     angle_word_allowed, below_floor, climb_barred, pre_join, pre_join_readout, runway_procedure, track_tolerance_m,
     word_tolerance_m,
 )
@@ -53,6 +54,11 @@ RUNWAY_09 = instruction_airport().candidates[0]                   # threshold at
 
 #: A chart with no sector: no point has an MVA.
 NO_CHART = MvaChart("none", ())
+
+
+def _altitudes(geometry, *finals: RunwayProcedure) -> ProcedureMasks:
+    """The procedure's altitudes over ``finals`` — ``geometry``'s candidates', in the pointer's order."""
+    return ProcedureMasks((PROCEDURE_ALTITUDES,), {geometry.code: tuple(finals)})
 
 
 def _final(crossing_m: float = 115.0, candidate: RunwayCandidate = RUNWAY_09, faf_d_m: float = FAF_D_M,
@@ -239,8 +245,7 @@ def test_a_labelled_flight_s_rows_are_its_signals_first_rows(monkeypatch):
     monkeypatch.setattr(prior_procedure_check, "load_signals", lambda directory, split: flights)
     monkeypatch.setattr(prior_procedure_check, "load_sentences", lambda directory, split, spec: sentences)
     monkeypatch.setattr(prior_procedure_check, "load_candidates", lambda directory: {"KXXX": instruction_airport()})
-    masks = ProcedureMasks({"KXXX": (_final(),)}, {"KXXX": NO_CHART})
-    pooled = labelled_rows("train", None, words, masks)[("KXXX", 0)]
+    pooled = labelled_rows("train", None, words, {"KXXX": (_final(),)}, {"KXXX": NO_CHART})[("KXXX", 0)]
     assert pooled["e"].tolist() == [*(np.arange(rows) + 100.0), *np.arange(rows)]      # sentence 0 is signal 1
     assert pooled["h"].tolist() == [501.0] * rows + [500.0] * rows
     assert pooled["flight"].tolist() == [0] * rows + [1] * rows and pooled["row"].tolist() == [*range(rows)] * 2
@@ -336,12 +341,14 @@ def test_the_speaker_masks_the_altitude_column_by_the_runway_just_sampled_and_th
     floor = float(wide.floor_m(np.array([e]), np.array([n]))[0])
     assert floor > signals.altitude_m[N_LOOK] + 200.0
     speaker = Speaker(_prior_model(variant="no-context"), [signals] * 2, [geometry] * 2, None, words,
-                      max_rows=N_LOOK + 3, generator=torch.Generator().manual_seed(0), finals=[(wide, nowhere)] * 2)
+                      max_rows=N_LOOK + 3, generator=torch.Generator().manual_seed(0),
+                      procedure_masks=_altitudes(geometry, wide, nowhere))
+    unlocked = np.zeros(2, dtype=bool)
     classes = words.n_altitude_levels + 2
     chosen = np.zeros((2, 6), dtype=np.int64)
     chosen[:, RUNWAY] = [1, 2]                                    # this step's runway: 09, then 27
     chosen[:, APPROACH] = 1 + APPROACH_CLEARED
-    out = speaker._procedure_altitude(chosen, True, classes)
+    out = speaker._allowed(ALTITUDE, chosen, True, classes, unlocked)
     levels = np.arange(words.n_altitude_levels) * words.spec.altitude_step_m
     assert np.array_equal(out[0, 1:-1], levels >= floor - word_tolerance_m(words.spec))
     assert not out[0, -1] and out[0, 0]                          # below the edge: no landing; "unchanged" not asked
@@ -350,23 +357,24 @@ def test_the_speaker_masks_the_altitude_column_by_the_runway_just_sampled_and_th
     speaker.value[:, RUNWAY] = 1
     speaker.value[:, ALTITUDE] = [1 + words.altitude_index(600.0), 1 + words.altitude_index(3000.0)]
     speaker.value[:, APPROACH] = 1 + APPROACH_CLEARED
-    later = speaker._procedure_altitude(np.zeros((2, 6), dtype=np.int64), False, classes)
+    later = speaker._allowed(ALTITUDE, np.zeros((2, 6), dtype=np.int64), False, classes, unlocked)
     assert later[:, 0].tolist() == [False, True]
     with pytest.raises(ValueError, match="flights' finals"):
-        Speaker(_prior_model(variant="no-context"), [signals] * 2, [geometry] * 2, None, words, max_rows=N_LOOK + 3,
-                generator=torch.Generator(), finals=[(wide, nowhere)])
+        AltitudeMasks([(wide, nowhere)], [geometry] * 2, words)
     with pytest.raises(ValueError, match="in the pointer's order"):
         Speaker(_prior_model(variant="no-context"), [signals] * 2, [geometry] * 2, None, words, max_rows=N_LOOK + 3,
-                generator=torch.Generator(), finals=[(nowhere, wide)] * 2)
+                generator=torch.Generator(), procedure_masks=_altitudes(geometry, nowhere, wide))
 
 
-def _closed_loop(finals, seed: int = 2):
+def _closed_loop(finals: tuple[RunwayProcedure, ...] | None, seed: int = 2):
+    """One flight's closed loop under the procedure's altitudes over its airport's ``finals`` (None: under none)."""
     one, geometry, signals, (inputs, runways, charts, approach) = _flight()
     words = Words(one)
+    masks = ProcedureMasks.none() if finals is None else _altitudes(geometry, *finals)
     flown, said, forbidden, speaker = speak_and_fly(_speaker_model(words), [signals], [geometry], inputs, runways,
                                                     charts, approach, [200.0], words, _params(), None,
                                                     generator=torch.Generator().manual_seed(seed), temperature=1.0,
-                                                    finals=finals)
+                                                    procedure_masks=masks)
     return one, geometry, signals, words, flown, said[0], forbidden, speaker
 
 
@@ -375,12 +383,13 @@ def test_a_closed_loop_speaks_above_the_edge_and_stops_at_the_first_step_that_en
     # Under the entry height from the start, it may not climb before the join: the untrained model's draws with seed 8
     # take it into the cone (step 65), most seeds' do not
     final = _final(crossing_m=2_000.0, faf_d_m=12_000.0, decision_m=-1_000.0)
-    one, geometry, signals, words, flown, grid, forbidden, speaker = _closed_loop([(final,)], seed=8)
+    one, geometry, signals, words, flown, grid, forbidden, speaker = _closed_loop((final,), seed=8)
     assert forbidden[ALTITUDE].shape == (1, len(grid)) and forbidden[ALTITUDE].max() > 0
     force = in_force(grid)
     joined, dipped = pre_join(final, speaker.e[0], speaker.n[0], speaker.h[0], one)
     # the speaker's state, kept a row at a time, is the function's over its rows
-    assert (speaker.joined[0, 0], speaker.dipped[0, 0]) == (joined[speaker.rows - 1], dipped[speaker.rows - 1])
+    altitudes = speaker.procedure[0]
+    assert (altitudes.joined[0, 0], altitudes.dipped[0, 0]) == (joined[speaker.rows - 1], dipped[speaker.rows - 1])
     for k in range(len(grid)):                                   # every word in force was allowed where it was said from
         row = N_LOOK + k
         barred = climb_barred(joined[row], dipped[row], force[k, APPROACH])
@@ -407,7 +416,7 @@ def test_a_closed_loop_speaks_above_the_edge_and_stops_at_the_first_step_that_en
 
 def test_an_edge_that_never_binds_leaves_the_closed_loop_draw_for_draw_as_without_one():
     low = _final(crossing_m=-5_000.0, faf_d_m=12_000.0)
-    *_, flown, grid, forbidden, _ = _closed_loop([(low,)])
+    *_, flown, grid, forbidden, _ = _closed_loop((low,))
     *_, flown_bare, grid_bare, forbidden_bare, _ = _closed_loop(None)
     assert np.array_equal(grid, grid_bare) and torch.equal(flown.states, flown_bare.states)
     assert ALTITUDE not in forbidden_bare and not forbidden[ALTITUDE].any()
@@ -490,24 +499,26 @@ def test_the_speaker_masks_the_climb_once_the_observed_rows_dipped_under_the_ent
     nowhere = _final(candidate=geometry.candidates[1], crossing_m=110.0, faf_d_m=0.0, decision_m=-1_000.0)
     assert high.entry_m > h + 100.0
     speaker = Speaker(_prior_model(variant="no-context"), [signals], [geometry], None, words, max_rows=N_LOOK + 3,
-                      generator=torch.Generator().manual_seed(0), finals=[(high, nowhere)])
+                      generator=torch.Generator().manual_seed(0), procedure_masks=_altitudes(geometry, high, nowhere))
+    unlocked = np.zeros(1, dtype=bool)
     rows = N_LOOK + 1
     joined, dipped = pre_join(high, speaker.e[0, :rows], speaker.n[0, :rows], speaker.h[0, :rows], spec)
-    assert speaker.joined[0, 0] == joined[-1] and speaker.dipped[0, 0] == dipped[-1]
+    altitudes = speaker.procedure[0]
+    assert altitudes.joined[0, 0] == joined[-1] and altitudes.dipped[0, 0] == dipped[-1]
     assert not joined[-1] and dipped[-1]
     classes = words.n_altitude_levels + 2
     chosen = np.zeros((1, 6), dtype=np.int64)
     chosen[0, RUNWAY], chosen[0, APPROACH] = 1, 1 + APPROACH_CLEARED
-    out = speaker._procedure_altitude(chosen, True, classes)
+    out = speaker._allowed(ALTITUDE, chosen, True, classes, unlocked)
     levels = np.arange(words.n_altitude_levels) * spec.altitude_step_m
     tolerance = word_tolerance_m(spec)
     assert np.array_equal(out[0, 1:-1], (levels <= h + tolerance) & (levels >= high.decision_m - tolerance))
     assert out[0, -1]                                         # "descend to land" stays
     chosen[0, HEADING], chosen[0, ALTITUDE] = 1, 1 + words.altitude_index(h)     # the columns before the angle
-    angle = speaker._allowed(ANGLE, chosen, True, words.angle_climb + 2, np.zeros(1, dtype=bool))
+    angle = speaker._allowed(ANGLE, chosen, True, words.angle_climb + 2, unlocked)
     assert not angle[0, 1 + words.angle_climb]
     chosen[0, APPROACH] = 1 + APPROACH_GO_AROUND              # a go-around may climb
-    assert speaker._procedure_altitude(chosen, True, classes)[0, 1:-1][levels > h + 100.0].all()
+    assert speaker._allowed(ALTITUDE, chosen, True, classes, unlocked)[0, 1:-1][levels > h + 100.0].all()
 
 
 def test_the_readout_before_the_join_reads_the_dip_the_decision_altitude_and_the_mva_where_not_cleared():

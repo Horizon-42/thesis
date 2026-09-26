@@ -29,6 +29,9 @@ A flown row more than the track tolerance (the word tolerance plus the tube's ma
 the flight (§3.5); rules 3 and 4 need no such check (the executor holds a level to its tube, and under "descend to land"
 it keeps above the glidepath's extension less the edge), and are read out instead (`pre_join_readout`).
 
+`AltitudeMasks` keeps the rules on a batch of flights the prior speaks to (`generate.Speaker`): one set of the
+procedure's masks (`masks.PROCEDURE_ALTITUDES`), kept apart from the vocabulary's rules the speaker applies itself.
+
 The FAF is the coded RNAV(GPS) approach's (`flight_scenarios.procedure_final.procedure_skeleton`); the glidepath is the
 runway's published one (the harvest's runway data — threshold crossing height and glidepath angle, the executor's
 crossing point, `autopilot.runway_data`); the DA is the harvest's too. Positions are the airport frame
@@ -38,6 +41,7 @@ crossing point, `autopilot.runway_data`); the DA is the harvest's too. Positions
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -49,7 +53,9 @@ from flight_scenarios.procedure_final import DEFAULT_PROCEDURE_ROOT, procedure_s
 from trajectory_data_process.harvest.airports import Runway, load_airport
 from ts_transformer.instructions.airport import AirportGeometry, RunwayCandidate, relative_to_runway
 from ts_transformer.instructions.spec import VocabularySpec
-from ts_transformer.instructions.words import APPROACH_GO_AROUND, APPROACH_NOT_CLEARED, Words
+from ts_transformer.instructions.words import (
+    ALTITUDE, ANGLE, APPROACH, APPROACH_GO_AROUND, APPROACH_NOT_CLEARED, RUNWAY, Words,
+)
 
 # MIRRORS of the optimizer's constants (its packages are not on this one's import path);
 # `tests/test_prior_procedure.py` asserts each equal to its owner.
@@ -162,6 +168,72 @@ def altitude_word_allowed(procedure: RunwayProcedure, word: np.ndarray, e: np.nd
 def angle_word_allowed(word: np.ndarray, barred: np.ndarray, words: Words) -> np.ndarray:
     """Rule 4 for descent-angle words (`Words` indices): the climb class is not said where the climb is barred."""
     return (np.asarray(word) != words.angle_climb) | ~np.asarray(barred)
+
+
+class AltitudeMasks:
+    """Rules 1–5 on the altitude and descent-angle columns of a batch of flights the prior speaks to, all at the same
+    row: each flight's candidates' finals (in the pointer's order) and, as of the newest row, where it has joined each
+    and dipped under its entry height before that (`pre_join`, taken on a row at a time by `track`). The flights sharing
+    one airport's finals go together."""
+
+    #: The columns these rules mask.
+    columns = (ALTITUDE, ANGLE)
+
+    def __init__(self, finals: Sequence[Sequence[RunwayProcedure]], geometries: Sequence[AirportGeometry],
+                 words: Words) -> None:
+        self.finals = [tuple(f) for f in finals]
+        if len(self.finals) != len(geometries):
+            raise ValueError(f"{len(self.finals)} flights' finals for {len(geometries)} flights")
+        for finals_b, geometry in zip(self.finals, geometries):
+            if tuple(f.candidate for f in finals_b) != geometry.candidates:
+                raise ValueError(f"{geometry.code}: the finals are not its candidates', in the pointer's order")
+        self.words = words
+        width = max(len(f) for f in self.finals)
+        self.joined = np.zeros((len(self.finals), width), dtype=bool)
+        self.dipped = np.zeros((len(self.finals), width), dtype=bool)
+        self.groups: dict[tuple[int, ...], list[int]] = defaultdict(list)
+        for b, finals_b in enumerate(self.finals):
+            self.groups[tuple(map(id, finals_b))].append(b)
+
+    def track(self, e: np.ndarray, n: np.ndarray, h: np.ndarray) -> None:
+        """Every flight's `joined` and `dipped` taken on to its next row, at ``(e, n)`` and height ``h`` ([B] each)."""
+        tolerance = word_tolerance_m(self.words.spec)
+        for members in self.groups.values():
+            index = np.array(members)
+            for r, final in enumerate(self.finals[members[0]]):
+                self.joined[index, r] |= final.inside(e[index], n[index])
+                self.dipped[index, r] |= (h[index] < final.entry_m - tolerance) & ~self.joined[index, r]
+
+    def allowed(self, column: int, chosen: np.ndarray, value: np.ndarray, at: tuple[np.ndarray, np.ndarray, np.ndarray],
+                opening: bool, classes: int) -> np.ndarray:
+        """``[B, classes]``: the classes of ``column`` (one of `columns`) each flight may say at its newest row
+        (``at``: its position and height there, [B] each), for the runway and approach in force after this step's
+        columns so far (``chosen``: this step's classes, [B, 6], 0 unchanged; ``value``: the classes in force before the
+        step, 0 none yet). The altitude: rules 1–4 on every word, and "unchanged" (class 0) only where the word in force
+        still passes them (rule 5; at the first predicted step it is not asked about — the model already masks it). The
+        angle: the climb class not where the climb is barred (rule 4)."""
+        out = np.ones((len(chosen), classes), dtype=bool)
+        if column == ANGLE:
+            barred = np.array([self._final_state(chosen, value, b)[3] for b in range(len(chosen))])
+            out[:, 1:] = angle_word_allowed(np.arange(classes - 1)[None, :], barred[:, None], self.words)
+            return out
+        every = np.arange(classes - 1)
+        for b in range(len(chosen)):
+            final, joined, _, barred = self._final_state(chosen, value, b)
+            here = (at[0][b], at[1][b], at[2][b])
+            out[b, 1:] = altitude_word_allowed(final, every, *here, self.words, joined=joined, barred=barred)
+            if not opening:
+                out[b, 0] = bool(altitude_word_allowed(final, np.array([value[b, ALTITUDE] - 1]), *here, self.words,
+                                                       joined=joined, barred=barred)[0])
+        return out
+
+    def _final_state(self, chosen: np.ndarray, value: np.ndarray, b: int) -> tuple[RunwayProcedure, bool, bool, bool]:
+        """Flight ``b``'s ``(final, joined, dipped, climb barred)`` at its newest row, for the runway and the approach in
+        force after this step's columns so far."""
+        in_force = np.where(chosen[b] > 0, chosen[b], value[b]) - 1
+        runway = int(in_force[RUNWAY])
+        joined, dipped = bool(self.joined[b, runway]), bool(self.dipped[b, runway])
+        return self.finals[b][runway], joined, dipped, bool(climb_barred(joined, dipped, in_force[APPROACH]))
 
 
 def below_floor(procedure: RunwayProcedure, e: np.ndarray, n: np.ndarray, h: np.ndarray, spec: VocabularySpec

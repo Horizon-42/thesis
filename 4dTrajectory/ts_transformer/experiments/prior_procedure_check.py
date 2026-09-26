@@ -39,16 +39,17 @@ import torch
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.experiments.prior_free_generation import (
-    PRE_JOIN_LINES, ProcedureMasks, _mva, flight_rows, fly_reference, glidepath_stops, in_force, procedure_masks,
-    reference_grid,
+    PRE_JOIN_LINES, _mva, flight_rows, fly_reference, glidepath_stops, in_force, reference_grid,
 )
 from ts_transformer.instructions.artefact import SPLITS, load_candidates, load_sentences, load_signals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.prior import mva
+from ts_transformer.prior.mva import MvaChart, airport_charts
 from ts_transformer.prior.procedure import (
     GLIDEPATH_BELOW_M, RunwayProcedure, angle_word_allowed, below_floor, climb_allowed, climb_barred,
-    decision_allowed, glidepath_allowed, pre_join, pre_join_readout, track_tolerance_m, word_tolerance_m,
+    decision_allowed, glidepath_allowed, pre_join, pre_join_readout, published_procedures, track_tolerance_m,
+    word_tolerance_m,
 )
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, git_state
@@ -59,12 +60,13 @@ MAX_FORBIDDEN_WORDS = 0.01
 MAX_STOPPED_REPLAYS = 0.03
 
 
-def labelled_rows(split: str, instructions: Path, words: Words, masks: ProcedureMasks
-                  ) -> dict[tuple[str, int], dict[str, np.ndarray]]:
+def labelled_rows(split: str, instructions: Path, words: Words, finals: dict[str, tuple[RunwayProcedure, ...]],
+                  charts: dict[str, MvaChart]) -> dict[tuple[str, int], dict[str, np.ndarray]]:
     """Every labelled flight's sentence rows, pooled by ``(airport, runway index)``: position, height, the altitude and
     descent-angle words in force and the ones said, the approach word in force, where the flight had joined its
     runway's final and dipped under its entry height (`procedure.pre_join`), the row and the flight — and, one per
-    flight, its observed readouts before the join (`procedure.pre_join_readout`, under ``"pre_join"``)."""
+    flight, its observed readouts before the join (`procedure.pre_join_readout`, under ``"pre_join"``). ``finals``: each
+    airport's candidates' (`procedure.published_procedures`); ``charts``: each airport's MVA chart."""
     signals = load_signals(instructions, split)
     sentences = load_sentences(instructions, split, words.spec)
     geometries = load_candidates(instructions)
@@ -73,13 +75,12 @@ def labelled_rows(split: str, instructions: Path, words: Words, masks: Procedure
         flight = signals[int(index)]
         grid = sentences["words"][sentences["offsets"][k]: sentences["offsets"][k + 1]].astype(np.int64)
         count, runway = len(grid), int(sentences["runway_index"][k])
-        finals = masks.finals[flight.airport]
+        airport = finals[flight.airport]
         e, n, h = flight.e_m[:count], flight.n_m[:count], flight.altitude_m[:count]
         force = in_force(grid)
-        joined, dipped = pre_join(finals[runway], e, n, h, words.spec)
-        readout = pre_join_readout(finals, force[:, RUNWAY], force[:, APPROACH], e, n, h,
-                                   _mva(masks.charts[flight.airport], geometries[flight.airport], e, n), N_LOOK,
-                                   words.spec)
+        joined, dipped = pre_join(airport[runway], e, n, h, words.spec)
+        readout = pre_join_readout(airport, force[:, RUNWAY], force[:, APPROACH], e, n, h,
+                                   _mva(charts[flight.airport], geometries[flight.airport], e, n), N_LOOK, words.spec)
         groups[(flight.airport, runway)].append({
             "e": e, "n": n, "h": h, "in_force": force[:, ALTITUDE], "said": grid[:, ALTITUDE],
             "angle_in_force": force[:, ANGLE], "angle_said": grid[:, ANGLE], "approach": force[:, APPROACH],
@@ -128,8 +129,8 @@ def check_labelled(rows: dict[str, np.ndarray], procedure: RunwayProcedure, word
     }
 
 
-def check_replays(batch: replay.Batch, procedures: ProcedureMasks, words: Words, params: Any, chunk: int
-                  ) -> list[dict[str, Any]]:
+def check_replays(batch: replay.Batch, procedures: dict[str, tuple[RunwayProcedure, ...]], words: Words, params: Any,
+                  chunk: int) -> list[dict[str, Any]]:
     """Each flight of ``batch`` flown on its labelled words from the first predicted step: its outcome and stratum, and
     whether a flown step sank below its floor (`glidepath_stops`; at the stop: its distance to go, depth, altitude word).
     The outcome is the executor's judge's — the one the flight would have had without the stop."""
@@ -140,7 +141,7 @@ def check_replays(batch: replay.Batch, procedures: ProcedureMasks, words: Words,
         flown = fly_reference(part, words, params, device=cpu)
         grids = [reference_grid(r.words) for r in part.readings]
         rows = flight_rows(part, flown, grids, words, "labelled", [None] * len(grids), None)
-        finals = [procedures.finals[g.code] for g in part.geometries]
+        finals = [procedures[g.code] for g in part.geometries]
         stops = glidepath_stops(flown, grids, part.geometries, finals, words)
         step_rows = round(spec.step_s / flown.cycle_s)
         for j, (reading, grid, row) in enumerate(zip(part.readings, grids, rows)):
@@ -222,15 +223,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the check runs from a clean tree")
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor_dir, instructions)
-    procedures = procedure_masks(load_candidates(instructions))
-    finals = procedures.finals
+    geometries = load_candidates(instructions)
+    finals = published_procedures(geometries)
+    charts = airport_charts(sorted(geometries))
     labelled = {f"{airport} {finals[airport][runway].ident}": check_labelled(rows, finals[airport][runway], words)
-                for (airport, runway), rows in sorted(labelled_rows(args.split, instructions, words,
-                                                                    procedures).items())}
+                for (airport, runway), rows in sorted(labelled_rows(args.split, instructions, words, finals,
+                                                                    charts).items())}
     print(f"labelled {args.split} flights read, {time.perf_counter() - started:.0f}s", flush=True)
     batch = replay.draw(instructions, args.split, words.spec, words, per_airport=args.replay_per_airport,
                         seed=args.seed)
-    replays = check_replays(batch, procedures, words, params, args.chunk)
+    replays = check_replays(batch, finals, words, params, args.chunk)
     summary = summarise(labelled, replays)
     passed = passes(summary)
     out.mkdir(parents=True)

@@ -156,6 +156,8 @@ of the package, not a migration in progress.
   module it imports directly — `config`, `data.dataset`, `outputs.envelope`, …), the vocabulary and the labeller: a byte
   changed in a hashed file, a comment included, makes the current code refuse every stored spec (C33). **A prior belongs to
   one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
+  **A prior speaks under the procedure's masks it was trained under**: named sets, recorded beside its checkpoint
+  (`procedure_masks.json`, `prior/masks.py`), read by `load_prior`; the vocabulary's rules apart, always on (C35).
 - **The two-tier line splits BY OPERATING DAY** (2026-09-24): a flight's day = its landing day (UTC − 9 h); the
   90-day deal (14 test / 14 val / 9 select / 53 train) is COMMITTED (`data/day_split_20260924.json`) and a harvest
   with other days is refused; test days are sealed — never opened, labelled, counted as context or put in a scene;
@@ -364,7 +366,8 @@ start — without it a pass's stale sentences ran the model from the base, reado
 the teacher-forced data term (`train.RewardTuner`, dropout off), the round chosen on select within guards (R19). **The procedure's altitudes** (post-training design §3): `prior/procedure.py` (the glidepath lower edge = the
 published glidepath − 60 m inside the FAF and the LPV cone, nowhere else — the RNAV floors outside the FAF disagree with
 10–14 % of the recorded tracks); before the join (the first row inside that region) the published DA, and no climbing back
-once under the entry height (2026-09-26); `prior_free_generation --procedure-masks` masks the altitude and angle columns,
+once under the entry height (2026-09-26), the set `procedure-altitudes-v2` (C35); under it `prior_free_generation`
+masks the altitude and angle columns,
 stops a sentence at the first flown step below the edge (outcome `below_glidepath`) and reads each sentence before the
 join beside the observed track (under the DA, climbing back, under the FAA MVA — `prior/mva.py`, a readout only; schema
 v4); `prior_procedure_check` measures them on labelled data before training (R20). **Post-training stage 2**

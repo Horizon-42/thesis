@@ -759,7 +759,7 @@ def test_the_glidepath_edge_reads_only_the_procedure_sources_and_no_torch():
     for name in _imported_names(PRIOR / "procedure.py"):
         top = name.split(".")[0]
         assert top != "torch", f"prior/procedure.py imports {name}"
-        if top in groups or top in {"__future__", "math", "dataclasses", "typing", "numpy"}:
+        if top in groups or top in {"__future__", "collections", "math", "dataclasses", "typing", "numpy"}:
             continue
         assert any(name == allowed or name.startswith(allowed + ".") for allowed in PROCEDURE_MAY_IMPORT_OUTSIDE), \
             f"prior/procedure.py imports {name}"

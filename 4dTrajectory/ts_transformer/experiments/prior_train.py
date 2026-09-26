@@ -11,7 +11,8 @@ the rosters' sha256 are recorded.
 Writes into ``--out`` (a new directory, never over an existing one; a clean tree unless ``--limit``, a SMOKE option
 that reads only the first flights of each split and says so in ``config.json``): ``checkpoint.pt`` (the best state,
 the model config, the train config, schema `PRIOR_CHECKPOINT_SCHEMA`), ``config.json`` (the artefact, its spec,
-labeller and day split, the rosters, the git state), ``history.json`` (every epoch) and ``selection_readout.json``.
+labeller and day split, the rosters, the git state), ``procedure_masks.json`` (none: teacher forcing speaks under no
+procedure's masks, `prior.masks`), ``history.json`` (every epoch) and ``selection_readout.json``.
 
     python run_ts.py prior_train --variant full --seed 1337 \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v4_20260924 \\
@@ -25,7 +26,7 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, NamedTuple
 
 import numpy as np
 import torch
@@ -37,6 +38,7 @@ from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.words import Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, Split, airport_landings, candidate_table, load_split
+from ts_transformer.prior.masks import ProcedureMasks, read_masks, write_masks
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.readout import TOP_K, Baselines, full_readout, runway_rules
 from ts_transformer.prior.scene import CONTEXT_WINDOW_S, N_LOOK
@@ -47,6 +49,7 @@ from ts_transformer.repo_layout import REPO_ROOT, git_state, tracks_manifest_pat
 #: N_LOOK says every column; the words said so far shifted by a step; the landing context; ordered heads; the aircraft
 #: axis and its attention. v2 is not opened.
 PRIOR_CHECKPOINT_SCHEMA = "ts-prior-checkpoint-v3"
+RUNNER = "ts_transformer.experiments.prior_train"
 
 
 def rosters(instructions: Path) -> dict[str, Path]:
@@ -65,10 +68,20 @@ def roster_digests(record: Mapping[str, Any]) -> dict[str, str]:
     return {code: entry["sha256"] for code, entry in record.items()}
 
 
-def load_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], dict[str, Any]]:
-    """The prior at ``directory`` on CPU, in eval mode, with its checkpoint payload and ``config.json`` — refused unless
-    it is a `PRIOR_CHECKPOINT_SCHEMA` checkpoint of ``instructions``' spec, labeller and day split whose candidate table
-    is the artefact's and whose state loads whole."""
+class LoadedPrior(NamedTuple):
+    """A prior as `load_prior` opens it."""
+
+    model: Prior
+    payload: dict[str, Any]              # the checkpoint's
+    config: dict[str, Any]               # its ``config.json``
+    procedure_masks: ProcedureMasks      # the ones it was trained under, built — what it speaks under (`prior.masks`)
+
+
+def load_prior(directory: Path, instructions: Path) -> LoadedPrior:
+    """The prior at ``directory`` on CPU, in eval mode, with its checkpoint payload, ``config.json`` and the procedure's
+    masks it was trained under (`masks.read_masks`, built for the artefact's airports) — refused unless it is a
+    `PRIOR_CHECKPOINT_SCHEMA` checkpoint of ``instructions``' spec, labeller and day split whose candidate table is the
+    artefact's and whose state loads whole, and its record of the procedure's masks holds on today's code and data."""
     payload = torch.load(directory / "checkpoint.pt", map_location="cpu", weights_only=True)
     config_file = json.loads((directory / "config.json").read_text(encoding="utf-8"))
     spec = load_spec(instructions)
@@ -82,13 +95,14 @@ def load_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, An
     if config_file["instructions"]["day_split"] != load_day_split(instructions).to_dict():
         raise SystemExit(f"the prior was trained on another day split than {instructions}'s")
     config = PriorConfig.from_dict(payload["model_config"])
-    table = candidate_table(load_candidates(instructions), config.airports, config.candidate_slots)
+    geometries = load_candidates(instructions)
+    table = candidate_table(geometries, config.airports, config.candidate_slots)
     if not np.array_equal(table, payload["state"]["candidates"].numpy()):
         raise SystemExit("the prior's candidate runways are not the artefact's")
     model = Prior(config, torch.as_tensor(table))
     model.load_state_dict(payload["state"], strict=True)
     model.eval()
-    return model, payload, config_file
+    return LoadedPrior(model, payload, config_file, read_masks(directory, geometries))
 
 
 def splits(instructions: Path, spec: VocabularySpec, words: Words, variant: str, tracks: Mapping[str, Path],
@@ -153,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         "tracks_rosters": roster_record(tracks),
         "flights": {name: len(s.flights) for name, s in data.items()},
         "limit": args.limit, "smoke": args.limit is not None, "git": git})
+    write_masks(out, ProcedureMasks.none(), writer=RUNNER, git=git)
     write_json_atomic(out / "history.json", {"epochs": history})
     best_epoch = min(history, key=lambda row: row["val_nll_per_step"])["epoch"]
     readout = {"split": "select", **full_readout(model, data["select"], baselines, rules, config, device),

@@ -79,6 +79,7 @@ from ts_transformer.instructions.training_files import (
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now
 from ts_transformer.prior.data import VARIANTS, airport_landings
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
@@ -220,10 +221,13 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         repeated = replay.subset(batch, [n for n in range(len(flyable)) for _ in range(samples)])
         runways, charts, approach = _physics(repeated, cpu)
         limits = limits_s(repeated, params, spec.step_s, augmented=False)
+        # the vocabulary's rules alone, whatever the model's own procedure's masks: the payload cannot yet carry a
+        # sentence the glidepath lower edge stopped (docs/code-health-followups.md, prior design §5.1)
         flown, said, forbidden, _ = speak_and_fly(model, repeated.signals, repeated.geometries,
                                                   flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways,
                                                   charts, approach, limits, words, params, landings,
-                                                  generator=generator, temperature=temperature)
+                                                  generator=generator, temperature=temperature,
+                                                  procedure_masks=ProcedureMasks.none())
         grids = [said[i] for i in range(len(said))]
         rows = flight_rows(repeated, flown, grids, words, "prior", [i % samples for i in range(len(grids))], forbidden)
         for i, row in enumerate(rows):

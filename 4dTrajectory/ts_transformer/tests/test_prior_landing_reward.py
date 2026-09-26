@@ -20,6 +20,7 @@ from ts_transformer.instructions.words import UNCHANGED, Words
 from ts_transformer.prior import data as prior_data
 from ts_transformer.prior.data import Split, column_classes
 from ts_transformer.prior.landing_reward import LANDED, group_advantages, landing_direction, rewards
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.scene import CONTEXT_WINDOW_S, N_LOOK, utc_s
 from ts_transformer.prior.train import (
     RewardConfig, RewardTuner, batch_logits, column_nll, flight_kl, flight_nll, flight_surrogate, to_batch,
@@ -63,7 +64,8 @@ def _sentences(samples=3, seed=2):
                                             _repeated(inputs, index), _repeated(runways, index),
                                             _repeated(charts, index),
                                             approach[index], [40.0] * samples, words, params, None,
-                                            generator=torch.Generator().manual_seed(seed), temperature=1.0)
+                                            generator=torch.Generator().manual_seed(seed), temperature=1.0,
+                                            procedure_masks=ProcedureMasks.none())
     steps = [steps_said(flown, j, said.shape[1], round(one.step_s / flown.cycle_s)) for j in range(samples)]
     reading = read_flight(signals, geometry, one, words)
     batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[geometry], vertical_paths=[],

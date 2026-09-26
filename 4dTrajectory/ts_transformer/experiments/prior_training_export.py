@@ -74,7 +74,7 @@ def open_trained_prior(directory: Path, instructions: Path) -> tuple[Prior, dict
     unless `prior_train.load_prior` opens it on ``instructions``, it is not a smoke run and — for a variant that reads
     the landing context — today's tracks rosters are its own (by sha256, wherever the checkout is). Every exporter of
     a prior opens it here (this one, `prior_generation_training_export`)."""
-    model, _, config_file = load_prior(directory, instructions)
+    model, _, config_file, _ = load_prior(directory, instructions)
     if (VARIANTS[model.config.variant].landing_context
             and roster_digests(roster_record(rosters(instructions))) != roster_digests(config_file["tracks_rosters"])):
         raise ValueError(f"the tracks rosters changed since {directory} was trained (its landing context)")

@@ -14,6 +14,7 @@ from ts_transformer.experiments.prior_free_generation import speak_and_fly
 from ts_transformer.instructions.words import ALTITUDE, SPEED, Words
 from ts_transformer.prior import data as prior_data
 from ts_transformer.prior.data import Split, chain_record, column_classes
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.prior.train import column_nll, to_batch
@@ -49,7 +50,8 @@ def test_a_chain_s_training_rows_are_the_rows_the_prior_read_on_it():
     words, params = Words(one), _params()
     model = _model(words)
     _, said, _, speaker = speak_and_fly(model, [signals], [geometry], inputs, runways, charts, approach, [60.0], words,
-                                        params, None, generator=torch.Generator().manual_seed(2), temperature=1.0)
+                                        params, None, generator=torch.Generator().manual_seed(2), temperature=1.0,
+                                        procedure_masks=ProcedureMasks.none())
     said = said[0]
     rows = N_LOOK + len(said)
     classes = np.ones((len(said), 6), dtype=np.int64)
@@ -71,7 +73,7 @@ def test_the_loss_counts_only_the_asked_columns():
     words, params = Words(one), _params()
     _, said, _, speaker = speak_and_fly(_model(words), [signals], [geometry], inputs, runways, charts, approach, [40.0],
                                         words, params, None, generator=torch.Generator().manual_seed(2),
-                                        temperature=1.0)
+                                        temperature=1.0, procedure_masks=ProcedureMasks.none())
     said = said[0]
     rows = N_LOOK + len(said)
     asked = np.ones((len(said), 6), dtype=bool)

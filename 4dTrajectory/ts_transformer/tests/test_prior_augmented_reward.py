@@ -23,7 +23,7 @@ from ts_transformer.experiments.prior_augmented_reward import (
     round_starts, speak_starts, word_distance,
 )
 from ts_transformer.experiments.prior_free_generation import (
-    AUGMENT_TRIES, BELOW_GLIDEPATH, ProcedureMasks, augmented_inputs, augmented_starts, limits_s, speak_and_fly,
+    AUGMENT_TRIES, BELOW_GLIDEPATH, augmented_inputs, augmented_starts, limits_s, speak_and_fly,
 )
 from ts_transformer.experiments.prior_landing_reward import sentence_flights
 from ts_transformer.instructions.labeller.read import read_flight
@@ -39,7 +39,7 @@ from ts_transformer.prior.train import (
 )
 from ts_transformer.tests.test_autopilot import _params
 from ts_transformer.tests.test_prior_landing_reward import _sentences, _split
-from ts_transformer.tests.test_prior_procedure import NO_CHART, _final
+from ts_transformer.tests.test_prior_procedure import _altitudes, _final
 from ts_transformer.tests.test_prior_speaker import _flight, _model, _repeated
 
 CPU = torch.device("cpu")
@@ -164,8 +164,7 @@ def test_augmented_sentences_read_the_moved_rows_carry_their_masks_and_train_und
     # an edge high above the start and wide enough to bind wherever the moved start takes the aircraft
     final = _final(crossing_m=1_500.0, faf_d_m=40_000.0, cone=FasCourseGeometry(40_000.0, 41_000.0, 80_000.0))
     model = _model(words)
-    masks = ProcedureMasks({geometry.code: (final,)}, {geometry.code: NO_CHART})
-    sentences = speak_starts(model, batch, [MOVE], samples, words, _params(), None, masks,
+    sentences = speak_starts(model, batch, [MOVE], samples, words, _params(), None, _altitudes(geometry, final),
                              generator=torch.Generator().manual_seed(2))
     moved = augment_signals(signals, MOVE)
     assert sentences.flight.tolist() == [0] * samples
@@ -199,7 +198,7 @@ def test_the_trainer_scores_a_sentence_under_the_masks_it_was_said_under():
     final = _final(crossing_m=2_000.0, faf_d_m=12_000.0)            # an edge that binds on the final
     _, said, _, speaker = speak_and_fly(model, [signals], [geometry], inputs, runways, charts, approach, [200.0], words,
                                         _params(), None, generator=torch.Generator().manual_seed(2), temperature=1.0,
-                                        finals=[(final,)])
+                                        procedure_masks=_altitudes(geometry, final))
     grid = said[0]
     assert set(speaker.allowed) == {RUNWAY, APPROACH, ANGLE, ALTITUDE}
     packed = {c: np.stack(steps, axis=1)[0] for c, steps in speaker.allowed.items()}
@@ -261,9 +260,8 @@ def test_a_real_start_flies_its_own_rows_on_the_spec_s_limit_and_an_augmented_on
     reading = read_flight(signals, geometry, one, words)
     batch = replay.Batch(signals=[signals] * 2, series=[None] * 2, readings=[reading] * 2, geometries=[geometry] * 2,
                          vertical_paths=[()] * 2, approach_ias_mps=[0.0] * 2, groups=["own"] * 2, drawn={})
-    masks = ProcedureMasks({geometry.code: (_final(),)}, {geometry.code: NO_CHART})
     with pytest.raises(StopIteration):
-        speak_starts(_model(words), batch, [None, MOVE], 1, words, _params(), None, masks,
+        speak_starts(_model(words), batch, [None, MOVE], 1, words, _params(), None, _altitudes(geometry, _final()),
                      generator=torch.Generator().manual_seed(0))
     assert heard["flights"][0] is signals and np.allclose(heard["flights"][1].e_m, augment_signals(signals, MOVE).e_m)
     own = limits_s(replay.subset(batch, [0]), _params(), one.step_s, augmented=False)[0]

@@ -18,11 +18,14 @@ approach kind, with the runways pointed (first and last), the time to the end ag
 the words said per column, runway changes and go-arounds. Writes ``generation.json`` and ``sentences.npz`` (the words
 the prior said) into a NEW directory; the val split only from a clean tree.
 
-``--procedure-masks`` (post-training design §3): the procedure's altitudes — the glidepath lower edge inside the FAF,
-the decision altitude and no climbing back before the join — mask the prior's altitude and descent-angle columns
-(`prior.generate.Speaker`), and every sentence — the prior's and the labelled one — ends at the first flown step more
-than the track tolerance below the glidepath lower edge (`glidepath_stops`), its outcome `BELOW_GLIDEPATH` whatever the
-executor made of the rest. The check reads the flown states at the step boundaries after the flight, which is where an
+The prior speaks under the vocabulary's rules and the procedure's masks it was trained under (`prior.masks`, prior
+design §5.1; its directory records them, `prior_train.load_prior` reads them) — ``--procedure-masks own``, the default;
+``none`` or a comma-separated list of sets (`masks.SETS`) speaks under others instead, and the log says so. Under the
+procedure's altitudes (post-training design §3) — the glidepath lower edge inside the FAF, the decision altitude and no
+climbing back before the join — the prior's altitude and descent-angle columns are masked (`prior.generate.Speaker`),
+and every sentence — the prior's and the labelled one — ends at the first flown step more than the track tolerance below
+the glidepath lower edge (`glidepath_stops`), its outcome `BELOW_GLIDEPATH` whatever the executor made of the rest; the
+readout records ``procedure_masks`` true. The check reads the flown states at the step boundaries after the flight, which is where an
 in-loop check would have stopped it: what a stopped flight flies afterwards is discarded. Each of the prior's sentences
 and each flight's observed track are read before the join (`procedure.pre_join_readout`): under the DA, climbing back
 after the dip, under the MVA (`prior.mva`, a readout only).
@@ -77,8 +80,9 @@ from ts_transformer.prior.augment import Augmentation, augment_signals, augment_
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.generate import Speaker, rows_for
 from ts_transformer.prior.model import Prior
+from ts_transformer.prior.masks import SETS, ProcedureMasks
 from ts_transformer.prior.mva import MvaChart, airport_charts
-from ts_transformer.prior.procedure import RunwayProcedure, below_floor, pre_join_readout, published_procedures
+from ts_transformer.prior.procedure import RunwayProcedure, below_floor, pre_join_readout
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
@@ -186,21 +190,19 @@ class ClosedLoop:
     speaking, a step at a time (`step`): the speaker reads where the executor is, says the step's words, and the
     executor flies the step (its cycles). A flight the executor is done with hears nothing more and its row is frozen;
     one it has cleared or captured keeps its runway. Each flight flies until the executor is done with it or its time
-    limit (``limits``, seconds). ``finals``: each flight's candidates' finals, the procedure's masks on the speaker's
-    altitude and descent-angle columns (`prior.procedure`; None: no mask)."""
+    limit (``limits``, seconds). ``procedure_masks``: the procedure's masks the speaker speaks under (`prior.masks`)."""
 
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
                  limits: Sequence[float], words: Words, params: ExecutorParams, landings: Any, *,
-                 generator: torch.Generator, temperature: float,
-                 finals: Sequence[Sequence[RunwayProcedure]] | None = None) -> None:
+                 generator: torch.Generator, temperature: float, procedure_masks: ProcedureMasks) -> None:
         step_s, device = words.spec.step_s, inputs.initial_state.device
         self.step_s, self.params, self.device = step_s, params, device
         self.executor = Executor(inputs, runways, charts, approach_ias_mps, params, words,
                                  time_limit_s=torch.tensor(limits, dtype=torch.float64, device=device))
         self.speaker = Speaker(model, flights, geometries, landings, words,
                                max_rows=rows_for(max(limits) + step_s, step_s), generator=generator,
-                               temperature=temperature, finals=finals)
+                               procedure_masks=procedure_masks, temperature=temperature)
         self.spoken = Spoken(len(limits), words, device=device)
         self.max_steps = rows_for(max(limits), step_s) - N_LOOK
 
@@ -233,14 +235,13 @@ class ClosedLoop:
 def speak_and_fly(model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                   inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
                   limits: Sequence[float], words: Words, params: ExecutorParams, landings: Any, *,
-                  generator: torch.Generator, temperature: float,
-                  finals: Sequence[Sequence[RunwayProcedure]] | None = None
+                  generator: torch.Generator, temperature: float, procedure_masks: ProcedureMasks
                   ) -> tuple[Flown, np.ndarray, dict[int, np.ndarray], Speaker]:
     """`ClosedLoop` run to its end: ``(what was flown, the words said [B, steps, 6] with UNCHANGED where a column says
     nothing, the probability the prior put on what the masks removed [B, steps] per masked column, the speaker — the
     rows it read)``."""
     loop = ClosedLoop(model, flights, geometries, inputs, runways, charts, approach_ias_mps, limits, words, params,
-                      landings, generator=generator, temperature=temperature, finals=finals)
+                      landings, generator=generator, temperature=temperature, procedure_masks=procedure_masks)
     while loop.running:
         loop.step()
     return (loop.executor.flown(), loop.spoken.sentences(),
@@ -385,27 +386,27 @@ def observed_pre_join(signals: FlightSignals, reading: Reading, finals: Sequence
                             _mva(chart, geometry, e, n), N_LOOK, words.spec)
 
 
-class ProcedureMasks(NamedTuple):
-    """What the procedure's masks and readouts read (design §3): each airport's candidates' finals and its MVA chart."""
+def procedure_masks_named(choice: str, own: ProcedureMasks, geometries: dict[str, AirportGeometry]) -> ProcedureMasks:
+    """The procedure's masks a readout speaks under: ``own`` (the model's), ``none``, or the comma-separated sets named."""
+    if choice == "own":
+        return own
+    return ProcedureMasks.build(() if choice == "none" else choice.split(","), geometries)
 
-    finals: dict[str, tuple[RunwayProcedure, ...]]
-    charts: dict[str, MvaChart]
 
-
-def procedure_masks(geometries: dict[str, AirportGeometry]) -> ProcedureMasks:
-    """The published finals (`procedure.published_procedures`) and the MVA charts (`mva.airport_charts`)."""
-    return ProcedureMasks(published_procedures(geometries), airport_charts(sorted(geometries)))
+def mva_charts(procedure_masks: ProcedureMasks, codes: Sequence[str]) -> dict[str, MvaChart]:
+    """The airports' MVA charts (`mva.airport_charts`) the readouts before the join read — under the procedure's
+    altitudes; none without them."""
+    return airport_charts(sorted(codes)) if procedure_masks.altitudes else {}
 
 
 def prior_rows(model: Prior, batch: replay.Batch, words: Words, params: ExecutorParams, landings: Any,
-               samples: int, *, generator: torch.Generator, temperature: float,
-               procedures: ProcedureMasks | None = None,
-               augmentations: Sequence[Augmentation] | None = None
+               samples: int, *, generator: torch.Generator, temperature: float, procedure_masks: ProcedureMasks,
+               charts: dict[str, MvaChart], augmentations: Sequence[Augmentation] | None = None
                ) -> tuple[list[dict[str, Any]], list[np.ndarray]]:
-    """Every flight of ``batch`` flown ``samples`` times with the prior speaking (the executor on CPU): its
-    `flight_rows` and the sentences said; ``procedures``: the procedure's masks, the glidepath lower edge's stop and the
-    readouts before the join (None: none of them); ``augmentations``: each flight's, flown from its augmented start
-    (None: its own)."""
+    """Every flight of ``batch`` flown ``samples`` times with the prior speaking under ``procedure_masks`` (the executor
+    on CPU): its `flight_rows` and the sentences said. Under the procedure's altitudes, the glidepath lower edge's stop and
+    the readouts before the join (``charts``: `mva_charts`); ``augmentations``: each flight's, flown from its augmented
+    start (None: its own)."""
     cpu = torch.device("cpu")
     index = [j for j in range(len(batch.readings)) for _ in range(samples)]
     repeated = replay.subset(batch, index)
@@ -415,12 +416,13 @@ def prior_rows(model: Prior, batch: replay.Batch, words: Words, params: Executor
         moves = [augmentations[j] for j in index]
         repeated = replace(repeated, signals=[augment_signals(s, a) for s, a in zip(repeated.signals, moves)])
         inputs = augmented_inputs(inputs, repeated.geometries, moves)
-    runways, charts, approach = _physics(repeated, cpu)
-    finals = None if procedures is None else [procedures.finals[g.code] for g in repeated.geometries]
+    runways, executor_charts, approach = _physics(repeated, cpu)
+    finals = ([procedure_masks.finals[g.code] for g in repeated.geometries] if procedure_masks.altitudes else None)
     limits = limits_s(repeated, params, words.spec.step_s, augmented=augmentations is not None)
     flown, said, forbidden, speaker = speak_and_fly(model, repeated.signals, repeated.geometries, inputs, runways,
-                                                    charts, approach, limits, words, params, landings,
-                                                    generator=generator, temperature=temperature, finals=finals)
+                                                    executor_charts, approach, limits, words, params, landings,
+                                                    generator=generator, temperature=temperature,
+                                                    procedure_masks=procedure_masks)
     grids = [said[j] for j in range(len(said))]
     stops = None if finals is None else glidepath_stops(flown, grids, repeated.geometries, finals, words)
     if stops is not None:
@@ -428,9 +430,9 @@ def prior_rows(model: Prior, batch: replay.Batch, words: Words, params: Executor
             grids[j][stops.row[j] + 1:] = UNCHANGED          # the speaker went on; nothing after the stop was said
     rows = flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden,
                        stops)
-    if procedures is not None:
+    if finals is not None:
         for j, row in enumerate(rows):
-            geometry, chart = repeated.geometries[j], procedures.charts[repeated.geometries[j].code]
+            geometry, chart = repeated.geometries[j], charts[repeated.geometries[j].code]
             row["pre_join"] = sentence_pre_join(grids[j], row["steps_said"], speaker.e[j], speaker.n[j], speaker.h[j],
                                                 finals[j], chart, geometry, words)
             row["pre_join_observed"] = observed_pre_join(observed[j], repeated.readings[j], finals[j], chart,
@@ -490,9 +492,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--chunk", type=int, default=64, help="flights a batch (× samples closed loops)")
-    parser.add_argument("--procedure-masks", action="store_true",
-                        help="the procedure's altitudes mask the altitude and descent-angle columns, the glidepath lower "
-                             "edge stops a sentence below it, and the sentences are read before the join")
+    parser.add_argument("--procedure-masks", default="own",
+                        help=f"the procedure's masks the prior speaks under: own (the ones it was trained under), none, "
+                             f"or a comma-separated list of {list(SETS)}; under the procedure's altitudes the glidepath "
+                             f"lower edge also stops a sentence below it and the sentences are read before the join")
     parser.add_argument("--augment-seed", type=int, default=None,
                         help="fly every flight from an augmented start drawn with this seed (post-training design §4)")
     parser.add_argument("--device", default="cuda", help="the prior's; the executor flies on CPU")
@@ -510,9 +513,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the val readout runs from a clean tree")
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor_dir, instructions)
-    model, _, prior_config = load_prior(prior_dir, instructions)
+    model, _, prior_config, own_masks = load_prior(prior_dir, instructions)
     if prior_config["smoke"]:
         parser.error(f"{prior_dir} is a smoke run")
+    geometries = load_candidates(instructions)
+    procedure_masks = procedure_masks_named(args.procedure_masks, own_masks, geometries)
+    print(f"the procedure's masks: {list(procedure_masks.names) or 'none'}"
+          + (" (the model's own)" if procedure_masks.names == own_masks.names else
+             f" — NOT the model's own ({list(own_masks.names) or 'none'})"), flush=True)
     model.to(torch.device(args.device))
     landings = (airport_landings(instructions, rosters(instructions))
                 if VARIANTS[model.config.variant].landing_context else None)
@@ -531,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"augmented starts: {len(kept)} ({left_out} with no plausible draw left out)", flush=True)
     sources = ("prior",) if augmentations is not None else ("labelled", "prior")
 
-    procedures = procedure_masks(load_candidates(instructions)) if args.procedure_masks else None
+    charts = mva_charts(procedure_masks, list(geometries))
     cpu = torch.device("cpu")
     generator = torch.Generator(device=torch.device(args.device)).manual_seed(args.seed)
     order = sorted(range(len(batch.readings)), key=lambda j: len(batch.readings[j].words))
@@ -543,12 +551,12 @@ def main(argv: list[str] | None = None) -> int:
         if augmentations is None:
             reference = fly_reference(part, words, params, device=cpu)
             labelled = [reference_grid(r.words) for r in part.readings]
-            stops = (None if procedures is None else
-                     glidepath_stops(reference, labelled, part.geometries,
-                                     [procedures.finals[g.code] for g in part.geometries], words))
+            stops = (glidepath_stops(reference, labelled, part.geometries,
+                                     [procedure_masks.finals[g.code] for g in part.geometries], words)
+                     if procedure_masks.altitudes else None)
             rows += flight_rows(part, reference, labelled, words, "labelled", [None] * len(part.readings), None, stops)
         said, grids = prior_rows(model, part, words, params, landings, args.samples, generator=generator,
-                                 temperature=args.temperature, procedures=procedures,
+                                 temperature=args.temperature, procedure_masks=procedure_masks, charts=charts,
                                  augmentations=None if augmentations is None else [augmentations[j] for j in chunk])
         rows += said
         sentences += grids
@@ -569,7 +577,7 @@ def main(argv: list[str] | None = None) -> int:
         "executor": {"directory": str(executor_dir), "sha256": record["sha256"]},
         "instructions": str(instructions), "split": args.split, "drawn": batch.drawn, "n_look": N_LOOK,
         "samples": args.samples, "temperature": args.temperature, "seed": args.seed,
-        "procedure_masks": args.procedure_masks,
+        "procedure_masks": procedure_masks.altitudes,
         "timeout_factor": {"real": params.timeout_factor, "augmented": augment.TIMEOUT_FACTOR},
         "mva": {"charts_date": mva.CHARTS_DATE, "chart": mva.CHART, "facility": mva.FACILITY},
         "augment_seed": args.augment_seed, "augmented_left_out": left_out,

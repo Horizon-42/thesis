@@ -16,6 +16,7 @@ from ts_transformer.instructions.grammar import step_allowed
 from ts_transformer.instructions.words import ANGLE, APPROACH, HEADING, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior import data as prior_data
 from ts_transformer.prior.data import column_classes
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior, PriorConfig
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec as spec
@@ -37,7 +38,8 @@ def _speak(seed: int):
     inputs, runways, charts, approach = _physics(start, geometry)
     flown, said, forbidden, speaker = speak_and_fly(model, [signals], [geometry], inputs, runways, charts, approach,
                                                     [60.0], words, params, None,
-                                                    generator=torch.Generator().manual_seed(seed), temperature=1.0)
+                                                    generator=torch.Generator().manual_seed(seed), temperature=1.0,
+                                                    procedure_masks=ProcedureMasks.none())
     return flown, said, geometry, one, inputs, forbidden, signals, speaker
 
 

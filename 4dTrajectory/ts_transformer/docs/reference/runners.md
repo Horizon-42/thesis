@@ -383,7 +383,7 @@ final at `N_LOOK` or not, per airport (`prior.readout.runway_breakdown`), beside
 causal rules B0 / B1 / B3 (`prior.readout.runway_rules`: the tracks roster's landings less the sealed test days, the
 artefact's entry sectors, B0's majority from train-day landings); the two baselines counted from its own training
 flights. Also `checkpoint.pt` (`ts-prior-checkpoint-v3`), `config.json` (the artefact's spec, labeller and day split, the
-tracks rosters' sha256, `n_look`, the git state), `history.json`. A clean tree unless `--limit` (SMOKE: the first N flights
+tracks rosters' sha256, `n_look`, the git state), `procedure_masks.json` (none, C35), `history.json`. A clean tree unless `--limit` (SMOKE: the first N flights
 of each split). `prior_select --campaign <dir> [--seed 1337] [--replicate-seed 2024]` reads every run (one comparison:
 artefact, rosters, training settings but the seed, smoke limit, commit — and this code that commit), applies the rule
 (readouts doc §4): the leader at the seed, the seed line = |full at the seed − full at the replicate|, the first of
@@ -434,14 +434,16 @@ new code dumped on the same seeds — free generation and the select split's inp
 numpy's element-wise functions on this i7-14700, AVX2 without AVX-512, give the same bits whatever the array's length),
 and a 16-flight × 8-sentence chunk takes 10.0 s instead of 26.6 s. Splitting a round across processes would change the
 random draws each chunk gets — not done.
-`--procedure-masks` (2026-09-26, post-training design §3; was `--glidepath-mask`, the edge alone, 2026-09-25): each
-flight's candidates' finals (`prior.procedure`) mask the speaker's altitude and descent-angle columns
-(`Speaker(finals=...)`, for the runway and approach just sampled): inside the FAF and the LPV cone a level below the
+`--procedure-masks` (2026-09-26, post-training design §3; was `--glidepath-mask`, the edge alone, 2026-09-25): the
+procedure's masks the prior speaks under — `own` (the default: the ones its directory records, C35), `none`, or a
+comma-separated list of sets; the log says whether they are the model's own. Under `procedure-altitudes-v2` each flight's
+candidates' finals (`prior.procedure`) mask the speaker's altitude and descent-angle columns
+(`Speaker(procedure_masks=...)` → `procedure.AltitudeMasks`, for the runway and approach just sampled): inside the FAF and the LPV cone a level below the
 glidepath less 60 m less half a step and "descend to land" from below it; before the join (the first row inside that
 region) a level below the published DA less half a step; once a row before the join was under the entry height (the
 glidepath at the FAF) less half a step and no go-around is in force, a level more than half a step above the aircraft and
 the climb class; "unchanged" (altitude) on a word that no longer holds. The speaker keeps each flight's join and dip per
-candidate a row at a time (`Speaker.joined` / `dipped`, the running form of `procedure.pre_join`); the masked
+candidate a row at a time (`AltitudeMasks.joined` / `dipped`, the running form of `procedure.pre_join`); the masked
 probability is recorded per column (`forbidden_mass`). Every sentence, the labelled reference's too, ends at the first
 flown step whose end state is more than the track tolerance (half a step + the tube's margin) below the glidepath lower
 edge (`glidepath_stops`, read off the flown states at the step boundaries after the flight — where an in-loop check would
@@ -449,8 +451,8 @@ have stopped it), outcome `below_glidepath` (`BELOW_GLIDEPATH`, not the judge's)
 Each prior sentence and each flight's observed track are read before the join (`procedure.pre_join_readout`, rows from
 `N_LOOK`: the most under the DA, the most climbed after the dip, the most under the FAA MVA where not cleared —
 `prior.mva`, FUS3 charts under `repo_layout.MVA_ROOT`), counted in each summary's `pre_join` past the track tolerance
-(DA, MVA) and an altitude step (climb), said beside observed. Without the flag the run is draw for draw the one before it
-(40 select sentences checked). `generation.json` is `ts-prior-free-generation-v4` since 2026-09-26 (`procedure_masks`, the
+(DA, MVA) and an altitude step (climb), said beside observed; `generation.json`'s `procedure_masks` says whether the
+altitudes were on. Without them the run is draw for draw the one before it (40 select sentences checked). `generation.json` is `ts-prior-free-generation-v4` since 2026-09-26 (`procedure_masks`, the
 time-limit factors per start kind, the MVA chart read, the prior rows' `pre_join` / `pre_join_observed` — the climb read
 only inside a stretch of barred rows from `N_LOOK`, restarting after a go-around); v2 added `below_glidepath` and
 `glidepath_mask`. `--augment-seed S` (post-training design §4): every drawn flight is
@@ -467,7 +469,7 @@ recorded `augment_seed`, `augmented_left_out` and each flight's augmentation.
 2026-09-25 (the edge), 2026-09-26 (the rules before the join). `prior_procedure_check --instructions <artefact> --executor
 <executor spec dir> [--split train] [--replay-per-airport 400] [--seed 1337] [--chunk 64] --out <new dir>` reads every
 labelled flight of the split (`labelled_rows`: a sentence's rows are its signals' first rows, contract C30; its runway
-throughout) and counts, for the candidates' finals (`prior_free_generation.procedure_masks`): the labelled altitude and
+throughout) and counts, for the candidates' finals (`procedure.published_procedures`): the labelled altitude and
 descent-angle words the masks would forbid where the prior would say them (the word in force at `N_LOOK`, then every one
 said), rule by rule — the edge (levels and "descend to land" apart), the DA, no climbing back (levels and the climb class
 apart) — the later steps whose altitude word in force they would make the prior replace, the tracks with a row more than
@@ -490,7 +492,8 @@ of the rest each is moved by a fresh augmentation until plausible (`prior_free_g
 airport's first `--augmented-per-airport` are kept (`round_starts`; the augmentations' own random stream, seeded with
 (seed, round), apart from the pool's draw; `sentences.json` records per airport the starts, the mean draws a start and the
 share redrawn, and the sources given up — the readout of design §4.3 — and the reward by start kind); flies each start
-`--samples` times under the procedure's masks and the edge's stop (`speak_starts`; a real start's time limit the spec's, an
+`--samples` times under the stage's procedure's masks (`STAGE_PROCEDURE_MASKS`: `procedure-altitudes-v2`, whatever the
+start model's own; every round's `procedure_masks.json` records them, C35) and the edge's stop (`speak_starts`; a real start's time limit the spec's, an
 augmented one's `augment.TIMEOUT_FACTOR`); rewards as the first stage (a stopped sentence earns 0); one pass of `RewardTuner` with the FIRST STAGE'S RECIPE (design §5): the reward term and
 `--kl-weight` (0.04) × the pull to the BASE model, both scored under the masks each sentence was said under
 (`Speaker.allowed` → `train.allowed_tensors`), and `--data-weight` (1, refused at 0) × the teacher-forced NLL of a batch
@@ -510,8 +513,9 @@ each sentence's second predicted step to its end, `labelled_words` — than roun
 landed share, the earliest within 0.015. Writes like R19 (`ts-prior-augmented-reward-v5`, the clipped ratio as R19; v4 — the
 same without it — is the stopped restart of readouts §15; v3 — augmented starts only, the
 edge alone, the guard on the real starts — is readouts §10's run; v1 — no data term, a fixed pull, the NLL and heading
-guards — and v2 — no data term, a KL budget — are the stopped runs of readouts §9); val is read afterwards with
-`prior_free_generation --procedure-masks` (real starts, and `--augment-seed` for augmented ones).
+guards — and v2 — no data term, a KL budget — are the stopped runs of readouts §9; v1–v3 trained under
+`procedure-altitudes-v1`, which the code no longer has); val is read afterwards with `prior_free_generation` under the kept
+round's own masks (real starts, and `--augment-seed` for augmented ones).
 
 ### R22 · `run_ts.py prior_glidepath_diagnosis` — why the labelled replays sink below the glidepath lower edge (prior readouts §12)
 
@@ -556,7 +560,8 @@ whose ratio left the interval (`clipped_share`, per batch `clipped_trace`: PPO's
 with the advantage-weighted NLL of the runs before the clipped ratio. The select readout (`select_readout`) is free generation on the select days in batches of 64 flights (`SELECT_CHUNK`), the same flights and seed every round, the teacher-forced NLL, and the share landed against the landing direction. `choice.json`: among
 the rounds within the guards of round 0 (landed on the observed runway ≥ round 0's − 0.02, heading words per flight ≤
 1.2 × round 0's; a round that landed nothing is excluded), the highest select landed share, the earliest within 0.015. Writes `config.json`,
-`round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, readout.json}` (a round
-directory is a prior run `prior_free_generation` reads — the val readout, once), `history.json`, `choice.json`; from a
+`round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, procedure_masks.json,
+readout.json}` (the stage's masks: none, C35; a round directory is a prior run `prior_free_generation` reads — the val
+readout, once), `history.json`, `choice.json`; from a
 clean tree unless `--smoke`. Val and the sealed test days are never read. `ts-prior-landing-reward-v3` since the clipped
 ratio (v2: advantage × the NLL, no ratio — the adopted landing model's run).

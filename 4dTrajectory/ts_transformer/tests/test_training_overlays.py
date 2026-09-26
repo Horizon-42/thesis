@@ -369,6 +369,7 @@ def _prior_dir(directory, artefact, roster):
     with the tracks roster ``roster``."""
     from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, roster_record
     from ts_transformer.instructions.artefact import load_candidates, load_day_split, load_spec, spec_labeller_source
+    from ts_transformer.prior.masks import ProcedureMasks, write_masks
 
     one = load_spec(artefact)
     geometries = load_candidates(artefact)
@@ -381,6 +382,7 @@ def _prior_dir(directory, artefact, roster):
     directory.mkdir()
     torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": config.to_dict(), "train_config": {},
                 "state": model.state_dict(), "spec_sha256": one.sha256}, directory / "checkpoint.pt")
+    write_masks(directory, ProcedureMasks.none(), writer="test", git={"head": "test", "dirty": False})
     (directory / "config.json").write_text(json.dumps({
         "schema": PRIOR_CHECKPOINT_SCHEMA, "written_utc": "2026-09-24T00:00:00+00:00", "parameters": 1, "limit": None,
         "smoke": False, "git": {"head": "test", "dirty": False}, "train": {},

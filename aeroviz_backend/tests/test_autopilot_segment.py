@@ -1296,6 +1296,7 @@ class FreeGenerationTest(unittest.TestCase):
         from ts_transformer.experiments import prior_free_generation as generation
         from ts_transformer.instructions.labeller.read import read_flight
         from ts_transformer.instructions.words import Words
+        from ts_transformer.prior.masks import ProcedureMasks
         from ts_transformer.tests import test_autopilot as executor_tests
         from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec
 
@@ -1322,7 +1323,8 @@ class FreeGenerationTest(unittest.TestCase):
 
         with mock.patch.object(generation, "Speaker", ScriptedSpeaker):
             spoken, said, _, _ = generation.speak_and_fly(None, [], [], inputs, runways, charts, approach, [limit], words,
-                                                          params, None, generator=None, temperature=1.0)
+                                                          params, None, generator=None, temperature=1.0,
+                                                          procedure_masks=ProcedureMasks.none())
         step_rows = int(round(spec.step_s / params.cycle_s))
         grid = said[0][: generation.steps_said(spoken, 0, said.shape[1], step_rows)]
         executor = Executor(inputs, runways, charts, approach, params, words,

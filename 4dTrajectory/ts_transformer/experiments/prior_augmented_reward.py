@@ -9,8 +9,9 @@ Each round:
    with a plausible augmentation (`prior.augment`: rotated about the airport, raised, sped up;
    `prior_free_generation.augmented_starts`) fly from it — a flight none of `AUGMENT_TRIES` draws fits gives way to the
    pool's next (`round_starts`);
-2. **sentences** — each start flown ``--samples`` times with the prior speaking under the grammar's and the procedure's
-   masks (`Speaker(finals=…)`, which records what each step's masks allowed), each sentence ending at the first flown
+2. **sentences** — each start flown ``--samples`` times with the prior speaking under the vocabulary's rules and this
+   stage's procedure's masks (`STAGE_PROCEDURE_MASKS`, the procedure's altitudes, whatever the start model's own; the
+   speaker records what each step's masks allowed), each sentence ending at the first flown
    step below the glidepath lower edge (`glidepath_stops`, outcome ``below_glidepath``); a real start's time limit is
    the executor spec's, an augmented one's `augment.TIMEOUT_FACTOR` × its source's observed remaining time;
 3. **rewards** — as the first stage (`prior.landing_reward`: 1 for landing in the airport's landing direction — the
@@ -34,7 +35,8 @@ no farther from the labelled words (the ratio's |ln|; an augmented start's are i
 ln `GUARD_WORD_GROWTH` — the highest augmented-start landed share, the earliest within `TIE_SHARE`. The teacher-forced
 NLL is recorded, not a guard (the data term holds it). Val is not read here. Writes into ``--out`` (a new directory, from a clean tree unless
 ``--smoke``): ``config.json``, ``round_00/readout.json``, ``round_<k>/{sentences.npz, sentences.json, checkpoint.pt,
-config.json, readout.json}``, ``history.json``, ``choice.json``.
+config.json, procedure_masks.json, readout.json}`` (each round's model speaks under this stage's masks, `prior.masks`),
+``history.json``, ``choice.json``.
 
     python run_ts.py prior_augmented_reward --prior <the first stage's kept round> --base <the step-1 run> \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v5_20260926 \\
@@ -59,8 +61,8 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.flights import flight_inputs
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.experiments.prior_free_generation import (
-    PRE_JOIN_LINES, AugmentedStarts, ProcedureMasks, _physics, augmented_inputs, augmented_starts, flight_rows,
-    glidepath_stops, grouped, limits_s, prior_rows, procedure_masks, speak_and_fly, start_altitude_windows,
+    PRE_JOIN_LINES, AugmentedStarts, _physics, augmented_inputs, augmented_starts, flight_rows, glidepath_stops,
+    grouped, limits_s, mva_charts, prior_rows, speak_and_fly, start_altitude_windows,
 )
 from ts_transformer.experiments.prior_landing_reward import (
     GUARD_HEADING_GROWTH, GUARD_RUNWAY_DROP, SELECT_CHUNK, TIE_SHARE, Sentences, against_the_direction,
@@ -74,12 +76,18 @@ from ts_transformer.prior import mva
 from ts_transformer.prior.augment import LIMITS, TIMEOUT_FACTOR, Augmentation, augment_signals
 from ts_transformer.prior.data import VARIANTS, Split, airport_landings, load_split
 from ts_transformer.prior.landing_reward import group_advantages, landing_direction, rewards
+from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks, write_masks
 from ts_transformer.prior.model import Prior
+from ts_transformer.prior.mva import MvaChart
 from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig, RewardTuner, TrainConfig, evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 AUGMENTED_REWARD_SCHEMA = "ts-prior-augmented-reward-v5"
+RUNNER = "ts_transformer.experiments.prior_augmented_reward"
+#: The procedure's masks this stage speaks, trains and reads out under (post-training design §3), and every round's
+#: model is recorded with (`prior.masks`).
+STAGE_PROCEDURE_MASKS = (PROCEDURE_ALTITUDES,)
 #: The pool a round draws its starts from, × the starts it needs: a flight with no plausible augmentation gives way to
 #: the pool's next.
 POOL_FACTOR = 1.25
@@ -104,11 +112,11 @@ class MaskedSentences(Sentences):
 
 
 def speak_starts(model: Prior, batch: replay.Batch, moves: Sequence[Augmentation | None], samples: int, words: Words,
-                 params: ExecutorParams, landings: Mapping[str, Landings] | None, procedures: ProcedureMasks, *,
+                 params: ExecutorParams, landings: Mapping[str, Landings] | None, procedure_masks: ProcedureMasks, *,
                  generator: torch.Generator) -> MaskedSentences:
     """Every flight of ``batch`` flown ``samples`` times from its start — its augmented one where ``moves`` gives one,
-    its own where None — with the prior speaking under the procedure's masks, each sentence cut at its end or its stop
-    (the executor on CPU)."""
+    its own where None — with the prior speaking under ``procedure_masks`` (the procedure's altitudes among them), each
+    sentence cut at its end or its stop (the executor on CPU)."""
     cpu = torch.device("cpu")
     count = len(batch.readings)
     index = [j for j in range(count) for _ in range(samples)]
@@ -118,13 +126,14 @@ def speak_starts(model: Prior, batch: replay.Batch, moves: Sequence[Augmentation
                                           for s, m in zip(repeated.signals, each)])
     inputs = augmented_inputs(flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), repeated.geometries, each)
     runways, charts, approach = _physics(repeated, cpu)
-    finals = [procedures.finals[g.code] for g in repeated.geometries]
+    finals = [procedure_masks.finals[g.code] for g in repeated.geometries]
     own = limits_s(repeated, params, words.spec.step_s, augmented=False)
     augmented = limits_s(repeated, params, words.spec.step_s, augmented=True)
     limits = [own[j] if m is None else augmented[j] for j, m in enumerate(each)]
     flown, said, forbidden, speaker = speak_and_fly(model, repeated.signals, repeated.geometries, inputs, runways,
                                                     charts, approach, limits, words, params, landings,
-                                                    generator=generator, temperature=1.0, finals=finals)
+                                                    generator=generator, temperature=1.0,
+                                                    procedure_masks=procedure_masks)
     grids = [said[j] for j in range(len(said))]
     stops = glidepath_stops(flown, grids, repeated.geometries, finals, words)
     rows = flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden,
@@ -196,9 +205,9 @@ def augmentation_summary(batch: replay.Batch, starts: AugmentedStarts, keep: Seq
 
 
 def select_rows(model: Prior, batch: replay.Batch, moves: Sequence[Augmentation] | None, words: Words,
-                params: ExecutorParams, landings: Mapping[str, Landings] | None, procedures: ProcedureMasks, *,
-                samples: int, seed: int, device: torch.device) -> list[dict[str, Any]]:
-    """Free generation under the procedure's masks on ``batch`` (from its augmented starts when ``moves`` are given), in
+                params: ExecutorParams, landings: Mapping[str, Landings] | None, procedure_masks: ProcedureMasks,
+                charts: dict[str, MvaChart], *, samples: int, seed: int, device: torch.device) -> list[dict[str, Any]]:
+    """Free generation under ``procedure_masks`` on ``batch`` (from its augmented starts when ``moves`` are given), in
     batches of `SELECT_CHUNK` flights by sentence length, one generator seeded with ``seed``."""
     generator = torch.Generator(device=device).manual_seed(seed)
     order = sorted(range(len(batch.readings)), key=lambda j: len(batch.readings[j].words))
@@ -206,7 +215,7 @@ def select_rows(model: Prior, batch: replay.Batch, moves: Sequence[Augmentation]
     for start in range(0, len(order), SELECT_CHUNK):
         chunk = order[start: start + SELECT_CHUNK]
         rows += prior_rows(model, replay.subset(batch, chunk), words, params, landings, samples, generator=generator,
-                           temperature=1.0, procedures=procedures,
+                           temperature=1.0, procedure_masks=procedure_masks, charts=charts,
                            augmentations=None if moves is None else [moves[j] for j in chunk])[0]
     return rows
 
@@ -299,8 +308,8 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device(args.device)
     params, record, words = replay.open_executor(executor_dir, instructions)
     spec = load_spec(instructions)
-    model, _, start_config = load_prior(prior_dir, instructions)
-    base, _, base_config = load_prior(base_dir, instructions)
+    model, _, start_config, _ = load_prior(prior_dir, instructions)
+    base, _, base_config, _ = load_prior(base_dir, instructions)
     for directory, loaded in ((prior_dir, start_config), (base_dir, base_config)):
         if loaded["smoke"]:
             parser.error(f"{directory} is a smoke run")
@@ -311,7 +320,9 @@ def main(argv: list[str] | None = None) -> int:
     variant = model.config.variant
     every_landing = airport_landings(instructions, rosters(instructions))
     landings = every_landing if VARIANTS[variant].landing_context else None
-    procedures = procedure_masks(load_candidates(instructions))
+    geometries = load_candidates(instructions)
+    procedures = ProcedureMasks.build(STAGE_PROCEDURE_MASKS, geometries)
+    charts = mva_charts(procedures, list(geometries))
     windows = start_altitude_windows(instructions)
     select_batch = replay.draw(instructions, "select", spec, words, per_airport=args.select_per_airport,
                                seed=args.seed)
@@ -358,9 +369,9 @@ def main(argv: list[str] | None = None) -> int:
 
     def read_select(round_number: int) -> dict[str, Any]:
         model.eval()
-        real = select_rows(model, select_batch, None, words, params, landings, procedures,
+        real = select_rows(model, select_batch, None, words, params, landings, procedures, charts,
                            samples=args.select_samples, seed=args.seed, device=device)
-        augmented = select_rows(model, select_augmented, select_moves, words, params, landings, procedures,
+        augmented = select_rows(model, select_augmented, select_moves, words, params, landings, procedures, charts,
                                 samples=args.select_samples, seed=args.seed, device=device)
         readout = {"real": grouped(real), "augmented": grouped(augmented),
                    "real_landed_against_the_direction": against_the_direction(real, select_directions),
@@ -469,6 +480,7 @@ def main(argv: list[str] | None = None) -> int:
             **start_config, "written_utc": utc_now(), "git": git, "smoke": args.smoke,
             "fine_tuning": {"schema": AUGMENTED_REWARD_SCHEMA, "from": str(prior_dir), "base": str(base_dir),
                             "round": round_number, "optimiser": asdict(config), "samples": args.samples}})
+        write_masks(directory, procedures, writer=RUNNER, git=git)
         readout = read_select(round_number)
         write_json_atomic(directory / "readout.json", readout)
         history.append(history_row(round_number, readout, train_pass=passed,

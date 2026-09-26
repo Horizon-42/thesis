@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = chosen["config"]
     instructions = Path(config["instructions"]["directory"])
-    model, payload, _ = load_prior(chosen["directory"], instructions)
+    model, payload, _, _ = load_prior(chosen["directory"], instructions)
     tracks = rosters(instructions)
     if roster_digests(roster_record(tracks)) != roster_digests(config["tracks_rosters"]):
         raise SystemExit("the tracks rosters changed since the runs were trained")

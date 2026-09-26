@@ -508,3 +508,19 @@ spec is written and the train replay gate re-run (v7 → v9 on 2026-09-26 came t
 unless its vocabulary spec sha, the labeller source sha and the day split recorded in `config.json` are those of the
 sentence artefact it is opened with, its candidate-runway table equals the artefact's, and its state loads whole
 (`strict=True`). A new artefact under the same spec and labeller (v4 → v5 on 2026-09-26) opens every stored prior.
+
+### C35 · a prior speaks under the procedure's masks it was trained under, recorded beside its checkpoint
+
+2026-09-26 (`prior/masks.py`; prior design §5.1). Two kinds of mask take words away when the prior speaks, kept apart: the
+vocabulary's rules (the grammar, the runway not said again, the listener's lock) are the speaker's own, always on, bound
+through the spec sha (C34); the procedure's masks belong to the post-training stage and are NAMED SETS with a version
+(`masks.SETS`: `procedure-altitudes-v2`, post-training design §3.4; `procedure-altitudes-v1`, the edge alone, retired at
+`181295fc`). Every runner that writes a prior's `checkpoint.pt` writes `procedure_masks.json` beside it
+(`ts-prior-procedure-masks-v1`: the sets, each with the sha256 of the data it reads — for the altitudes every
+`RunwayProcedure` field — and the checkpoint's sha256): `prior_train` and `prior_landing_reward` none,
+`prior_augmented_reward` `procedure-altitudes-v2` (each runner's `STAGE_PROCEDURE_MASKS`). `load_prior` returns the model's
+own built for the artefact's airports (`LoadedPrior.procedure_masks`) and refuses a directory without the record, another
+schema, another checkpoint beside it, a set this code does not implement, or procedure data other than the record's.
+`Speaker` / `ClosedLoop` / `speak_and_fly` take `procedure_masks` with no default; `prior_free_generation` uses the model's
+own unless `--procedure-masks none|<sets>` says otherwise. A change to what a set allows is a new name, the old one deleted
+— a model trained under a set the code no longer has is refused, never spoken under the new rules.

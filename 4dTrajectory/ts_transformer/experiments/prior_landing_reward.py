@@ -5,7 +5,8 @@ Each round:
 
 1. **sentences** — ``--per-airport`` flights of the train days (their own dynamics, the replay gate's group; drawn with
    the round's seed, so rounds may share flights — counted) are each flown ``--samples`` times from their first predicted
-   step with the prior speaking, exactly as in free generation (`prior_free_generation.speak_and_fly`);
+   step with the prior speaking, exactly as in free generation (`prior_free_generation.speak_and_fly`), under the
+   vocabulary's rules and this stage's procedure's masks — none (`STAGE_PROCEDURE_MASKS`, post-training design §2);
 2. **rewards** — 1 where the executor's judge has the sentence landed on a runway in the airport's landing direction at
    the time (`prior.landing_reward.landing_direction`), else 0; each sentence's advantage is its reward less its
    flight's mean. Only flights whose sentences differ are trained on (the others' advantages are all 0);
@@ -23,8 +24,8 @@ the one with the highest landed share, the earliest within `TIE_SHARE` of it. Va
 a round directory is a prior run `prior_free_generation` reads, once.
 
 Writes into ``--out`` (a new directory, from a clean tree unless ``--smoke``): ``config.json``, ``round_00/readout.json``,
-``round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, readout.json}``, ``history.json``,
-``choice.json``.
+``round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, procedure_masks.json, readout.json}`` (each
+round's model speaks under this stage's masks, `prior.masks`), ``history.json``, ``choice.json``.
 
     python run_ts.py prior_landing_reward --prior <the step-1 run> \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v4_20260924 \\
@@ -51,17 +52,22 @@ from ts_transformer.experiments.prior_free_generation import (
     _physics, flight_rows, grouped, limits_s, prior_rows, speak_and_fly, steps_said,
 )
 from ts_transformer.experiments.prior_train import PRIOR_CHECKPOINT_SCHEMA, load_prior, rosters
-from ts_transformer.instructions.artefact import load_spec
+from ts_transformer.instructions.artefact import load_candidates, load_spec
 from ts_transformer.instructions.words import UNCHANGED, Words
 from ts_transformer.io_utils import file_sha256, utc_now, write_json_atomic
 from ts_transformer.prior.data import VARIANTS, Flight, Split, airport_landings, chain_record, load_split
 from ts_transformer.prior.landing_reward import LANDED, group_advantages, landing_direction, rewards
+from ts_transformer.prior.masks import ProcedureMasks, write_masks
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig, RewardTuner, TrainConfig, evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 LANDING_REWARD_SCHEMA = "ts-prior-landing-reward-v3"
+RUNNER = "ts_transformer.experiments.prior_landing_reward"
+#: The procedure's masks this stage speaks, trains and reads out under (post-training design §2: none — the vocabulary's
+#: rules alone), and every round's model is recorded with (`prior.masks`).
+STAGE_PROCEDURE_MASKS: tuple[str, ...] = ()
 #: Two rounds' select landed shares closer than this are a tie (about two binomial standard deviations over 2,000
 #: sentences at 90 %).
 TIE_SHARE = 0.015
@@ -86,8 +92,10 @@ class Sentences:
 
 
 def speak_sentences(model: Prior, batch: replay.Batch, samples: int, words: Words, params: ExecutorParams,
-                    landings: Mapping[str, Landings] | None, *, generator: torch.Generator) -> Sentences:
-    """Every flight of ``batch`` flown ``samples`` times with the prior speaking (the executor on CPU)."""
+                    landings: Mapping[str, Landings] | None, procedure_masks: ProcedureMasks, *,
+                    generator: torch.Generator) -> Sentences:
+    """Every flight of ``batch`` flown ``samples`` times with the prior speaking under ``procedure_masks`` (none of the
+    procedure's altitudes: nothing stops a sentence) (the executor on CPU)."""
     cpu = torch.device("cpu")
     count = len(batch.readings)
     repeated = replay.subset(batch, [j for j in range(count) for _ in range(samples)])
@@ -96,7 +104,8 @@ def speak_sentences(model: Prior, batch: replay.Batch, samples: int, words: Word
     flown, said, forbidden, speaker = speak_and_fly(model, repeated.signals, repeated.geometries,
                                                     flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways,
                                                     charts, approach, limits, words, params, landings,
-                                                    generator=generator, temperature=1.0)
+                                                    generator=generator, temperature=1.0,
+                                                    procedure_masks=procedure_masks)
     grids = [said[j] for j in range(len(said))]
     rows = flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden)
     step_rows = round(words.spec.step_s / flown.cycle_s)
@@ -112,16 +121,18 @@ def speak_sentences(model: Prior, batch: replay.Batch, samples: int, words: Word
 
 
 def select_readout(model: Prior, batch: replay.Batch, select: Split, words: Words, params: ExecutorParams,
-                   landings: Mapping[str, Landings] | None, *, samples: int, seed: int, chunk: int,
-                   device: torch.device) -> dict[str, Any]:
-    """Free generation on the select flights (the same flights and seed every round) and the teacher-forced NLL."""
+                   landings: Mapping[str, Landings] | None, procedure_masks: ProcedureMasks, *, samples: int, seed: int,
+                   chunk: int, device: torch.device) -> dict[str, Any]:
+    """Free generation on the select flights under ``procedure_masks`` (none of the procedure's altitudes; the same
+    flights and seed every round) and the teacher-forced NLL."""
     model.eval()
     generator = torch.Generator(device=device).manual_seed(seed)
     order = sorted(range(len(batch.readings)), key=lambda j: len(batch.readings[j].words))
     rows: list[dict[str, Any]] = []
     for start in range(0, len(order), chunk):
         part = replay.subset(batch, order[start: start + chunk])
-        rows += prior_rows(model, part, words, params, landings, samples, generator=generator, temperature=1.0)[0]
+        rows += prior_rows(model, part, words, params, landings, samples, generator=generator, temperature=1.0,
+                           procedure_masks=procedure_masks, charts={})[0]
     return {"free_generation": grouped(rows),
             "teacher_forced": evaluate(model, select, TrainConfig(), device), "flights": rows}
 
@@ -237,11 +248,12 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device(args.device)
     params, record, words = replay.open_executor(executor_dir, instructions)
     spec = load_spec(instructions)
-    model, _, start_config = load_prior(prior_dir, instructions)
+    model, _, start_config, _ = load_prior(prior_dir, instructions)
     if start_config["smoke"]:
         parser.error(f"{prior_dir} is a smoke run")
     model.to(device)
     reference = copy.deepcopy(model)
+    procedures = ProcedureMasks.build(STAGE_PROCEDURE_MASKS, load_candidates(instructions))
     variant = model.config.variant
     every_landing = airport_landings(instructions, rosters(instructions))
     landings = every_landing if VARIANTS[variant].landing_context else None
@@ -267,8 +279,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{line}  [{time.perf_counter() - started:.0f}s]", flush=True)
 
     def read_select(round_number: int) -> dict[str, Any]:
-        readout = select_readout(model, select_batch, select, words, params, landings, samples=args.select_samples,
-                                 seed=args.seed, chunk=SELECT_CHUNK, device=device)
+        readout = select_readout(model, select_batch, select, words, params, landings, procedures,
+                                 samples=args.select_samples, seed=args.seed, chunk=SELECT_CHUNK, device=device)
         readout["landed_against_the_direction"] = against_the_direction(readout["flights"], select_directions)
         part = readout["free_generation"]["all"]
         log(f"round {round_number}: select landed {part['outcomes']['landed']:.3f}  TF NLL "
@@ -305,7 +317,7 @@ def main(argv: list[str] | None = None) -> int:
         model.eval()
         starts = list(range(0, len(order), args.chunk))
         sentences = join([speak_sentences(model, replay.subset(batch, list(range(s, min(s + args.chunk, len(order))))),
-                                          args.samples, words, params, landings, generator=generator)
+                                          args.samples, words, params, landings, procedures, generator=generator)
                           for s in starts], starts)
         directions = [landing_direction(signals, geometry, every_landing[signals.airport])
                       for signals, geometry in zip(batch.signals, batch.geometries)]
@@ -331,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
             **start_config, "written_utc": utc_now(), "git": git, "smoke": args.smoke,
             "fine_tuning": {"schema": LANDING_REWARD_SCHEMA, "from": str(prior_dir), "round": round_number,
                             "optimiser": asdict(config), "samples": args.samples}})
+        write_masks(directory, procedures, writer=RUNNER, git=git)
         readout = read_select(round_number)
         write_json_atomic(directory / "readout.json", readout)
         history.append(history_row(round_number, readout, train_pass=passed,

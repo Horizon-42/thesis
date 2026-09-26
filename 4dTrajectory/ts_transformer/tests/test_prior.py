@@ -27,6 +27,7 @@ from ts_transformer.prior import data as prior_data
 from ts_transformer.prior.data import (
     VARIANTS, Flight, Split, batches, column_classes, flight_steps, load_split, sentence_steps,
 )
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import EDGE_FEATURES, Prior, PriorConfig, asked_entries, self_edges
 from ts_transformer.prior.readout import Baselines, runway_breakdown
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
@@ -418,7 +419,7 @@ def test_a_speaker_builds_the_rows_training_builds_from_the_same_positions_and_w
     landings = _landings(times_09=[clock[0] - 60.0, clock[N_LOOK + 3]], times_27=[clock[2]])
     model = _model(slots=3, valid=2)
     speaker = Speaker(model, [signals], [geometry], {"KXXX": landings}, Words(spec()), max_rows=rows,
-                      generator=torch.Generator().manual_seed(0))
+                      generator=torch.Generator().manual_seed(0), procedure_masks=ProcedureMasks.none())
     on, off = np.array([True]), np.array([False])
     with pytest.raises(ValueError, match="after the first predicted step was said"):
         speaker.append(signals.e_m[[N_LOOK + 1]], signals.n_m[[N_LOOK + 1]], signals.altitude_m[[N_LOOK + 1]], off)
@@ -438,10 +439,11 @@ def test_a_speaker_builds_the_rows_training_builds_from_the_same_positions_and_w
     assert np.allclose(speaker.since[0, 0, :rows].numpy(), since, atol=1e-6)
     # the same seed says the same words
     again = Speaker(model, [signals], [geometry], {"KXXX": landings}, Words(spec()), max_rows=rows,
-                    generator=torch.Generator().manual_seed(0))
+                    generator=torch.Generator().manual_seed(0), procedure_masks=ProcedureMasks.none())
     assert np.array_equal(again.speak(on, off)[0], said[0])
     with pytest.raises(ValueError, match="landing context given disagree"):
-        Speaker(model, [signals], [geometry], None, Words(spec()), max_rows=rows, generator=torch.Generator())
+        Speaker(model, [signals], [geometry], None, Words(spec()), max_rows=rows, generator=torch.Generator(),
+                procedure_masks=ProcedureMasks.none())
 
 
 def test_a_speaker_keeps_a_locked_runway_says_nothing_when_done_and_freezes_a_finished_flight():
@@ -453,7 +455,7 @@ def test_a_speaker_keeps_a_locked_runway_says_nothing_when_done_and_freezes_a_fi
     signals, geometry = _signals(rows), _two_runways()
     model = _model(variant="no-context", slots=3, valid=2)
     speaker = Speaker(model, [signals] * 8, [geometry] * 8, None, Words(spec()), max_rows=rows + 1,
-                      generator=torch.Generator().manual_seed(1))
+                      generator=torch.Generator().manual_seed(1), procedure_masks=ProcedureMasks.none())
     active, locked = np.ones(8, dtype=bool), np.arange(8) < 4
     speaker.speak(active, np.zeros(8, dtype=bool))
     changed = False
@@ -543,6 +545,9 @@ def test_the_runners_train_every_variant_choose_by_the_rule_and_read_val_once(tm
 
     config = json.loads((campaign / "full_s1337" / "config.json").read_text())
     assert config["smoke"] and config["flights"] == {"train": 12, "select": 4, "val": 4}
+    # teacher forcing speaks under no procedure's masks: every run records none, bound to its checkpoint
+    masks = json.loads((campaign / "full_s1337" / "procedure_masks.json").read_text())
+    assert masks["sets"] == [] and masks["written_by"] == prior_train.RUNNER
     assert config["instructions"]["day_split"] == fixture_days().to_dict() and set(config["tracks_rosters"]) == {"KXXX"}
     selection = json.loads((campaign / "full_s1337" / "selection_readout.json").read_text())
     assert selection["split"] == "select" and selection["model"]["flights"] == 4
