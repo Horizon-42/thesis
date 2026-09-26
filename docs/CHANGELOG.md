@@ -1,5 +1,12 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — 按合并后的代码重建：句子产物 v5、执行器规格 v9
+
+- `outputs/POOLED/rebuild_20260926/`（工作树 `rebuild`，`dev-two-tier` `786d7aec`）：`instruction_language/v5_20260926` 与 v4 的词表规格
+  指纹相同（`145d6911e75b`），两边都标注的航班句子逐位相同，训练 / 选择 / 验证各多标注 1 架（没拟合的航班只认五边上的穿越，截断位置变了）；
+  `executor/v9_20260926` 参数指纹不变（`0d6a68a92c6f`），训练集回放门落地 99.7 %、词在包络内 98.0 %、评估通过 98.1 %（旧代码 99.8 / 97.9 /
+  98.2 %）。后端的实时执行器按"当前代码接受的那一份规格"自己挑，重启后用 v9。
+
 ### 2026-09-26 — 后训练第二阶段和影响训练的遗留问题合进 dev-two-tier
 
 - 合并提交 `acb93b55`（经 `dev-post-train-merged` `911001e9`）：第二阶段（下滑道下沿、扩充起点、runner `prior_augmented_reward` 与第一阶段
