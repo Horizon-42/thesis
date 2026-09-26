@@ -507,7 +507,8 @@ observed tracks', plus the teacher-forced NLL (recorded only). `choice.json`: am
 each of approach / heading / altitude / angle / speed the words a flight says after its first step no farther from the
 LABELLED words — the select flights', an augmented start's its source's; |ln(said / labelled)|, the labelled counted from
 each sentence's second predicted step to its end, `labelled_words` — than round 0 plus ln 1.2), the highest augmented
-landed share, the earliest within 0.015. Writes like R19 (`ts-prior-augmented-reward-v4`; v3 — augmented starts only, the
+landed share, the earliest within 0.015. Writes like R19 (`ts-prior-augmented-reward-v5`, the clipped ratio as R19; v4 — the
+same without it — is the stopped restart of readouts §15; v3 — augmented starts only, the
 edge alone, the guard on the real starts — is readouts §10's run; v1 — no data term, a fixed pull, the NLL and heading
 guards — and v2 — no data term, a KL budget — are the stopped runs of readouts §9); val is read afterwards with
 `prior_free_generation --procedure-masks` (real starts, and `--augment-seed` for augmented ones).
@@ -544,11 +545,16 @@ Each round draws `--per-airport` train-day flights (own dynamics, seed + round; 
 first predicted step — the candidates landed on in the 30 min before (the input's landing pool, the flight's own left out,
 no test day) and those within 90° of them; any runway with no landing in the window — else 0; its advantage is the reward
 less its flight's mean (not divided by the spread). Only flights whose sentences differ are trained on. One pass of
-`train.RewardTuner` over this round's sentences only: advantage × the NLL of the sentence's own words (per step, dropout
-off, the unmasked distribution) + `--kl-weight` × the sample estimate of the KL to the frozen start model + `--data-weight`
-× a teacher-forced batch of the train split per update (a round with no flight to train on is refused by name). The select readout (`select_readout`) is free generation on the select days in batches of 64 flights (`SELECT_CHUNK`), the same flights and seed every round, the teacher-forced NLL, and the share landed against the landing direction. `choice.json`: among
+`train.RewardTuner` over this round's sentences only: the clipped surrogate over the sentence's own words
+(`train.flight_surrogate`: per word −min(r·A, clip(r, 1 − ε, 1 + ε)·A), r against the model frozen at the pass's start —
+the one that said them — ε = `--clip-ratio` 0.2, per step, dropout off, the unmasked distribution; since 2026-09-26,
+readouts §15: without it a pass's stale sentences pushed "unchanged" down until the model ran from the base) +
+`--kl-weight` × the sample estimate of the KL to the frozen reference + `--data-weight` × a teacher-forced batch of the
+train split per update (a round with no flight to train on is refused by name); each pass records the share of words
+clipped (`clipped_share`). The select readout (`select_readout`) is free generation on the select days in batches of 64 flights (`SELECT_CHUNK`), the same flights and seed every round, the teacher-forced NLL, and the share landed against the landing direction. `choice.json`: among
 the rounds within the guards of round 0 (landed on the observed runway ≥ round 0's − 0.02, heading words per flight ≤
 1.2 × round 0's; a round that landed nothing is excluded), the highest select landed share, the earliest within 0.015. Writes `config.json`,
 `round_00/readout.json`, `round_<k>/{sentences.npz, sentences.json, checkpoint.pt, config.json, readout.json}` (a round
 directory is a prior run `prior_free_generation` reads — the val readout, once), `history.json`, `choice.json`; from a
-clean tree unless `--smoke`. Val and the sealed test days are never read.
+clean tree unless `--smoke`. Val and the sealed test days are never read. `ts-prior-landing-reward-v3` since the clipped
+ratio (v2: advantage × the NLL, no ratio — the adopted landing model's run).

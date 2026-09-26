@@ -5,9 +5,10 @@ asked there (`Flight.asked`), per such step — a column left out drops from the
 closed-loop batch weighs a step the same whichever of its columns are asked. Design §9 step 1: every scene is one
 flight.
 
-The landing reward (post-training design §2, `RewardTuner`) weighs each sentence the prior said by its advantage,
-keeps the model near a frozen reference and trains on the data beside it; its second stage (§5) scores each sentence
-under the masks it was said under (`allowed_tensors`) and drops the data term."""
+The landing reward (post-training design §2, `RewardTuner`) weighs each word the prior said by its sentence's advantage
+through PPO / GRPO's clipped ratio against the model the sentences were sampled from, keeps the model near a frozen
+reference and trains on the data beside it; its second stage (§5) scores each sentence under the masks it was said under
+(`allowed_tensors`)."""
 
 from __future__ import annotations
 
@@ -111,6 +112,32 @@ def flight_kl(logits: list[torch.Tensor], reference: list[torch.Tensor], targets
     return total
 
 
+def flight_surrogate(logits: list[torch.Tensor], start: list[torch.Tensor], targets: torch.Tensor,
+                     present: torch.Tensor, asked: torch.Tensor, advantage: torch.Tensor, clip: float
+                     ) -> tuple[torch.Tensor, int, int]:
+    """``([B] the clipped surrogate's loss summed over each scene's asked words, the words clipped, the words)``: per word
+    −min(r·A, clip(r, 1 − clip, 1 + clip)·A), r the word's probability under ``logits`` over its probability under
+    ``start`` (the model the sentence was sampled from), A the scene's advantage (post-training design §2). With the
+    model still the start (r = 1) its gradient is the advantage-weighted NLL's; a word whose probability has already moved
+    by more than ``clip`` in its advantage's direction adds no gradient. A word is counted clipped where r left the
+    interval."""
+    speaks = asked_entries(present)
+    total = logits[0].new_zeros(len(targets))
+    clipped, words = 0, 0
+    for c, (logit, fixed) in enumerate(zip(logits, start)):
+        entries = speaks & asked[..., c]
+        scene = entries.nonzero()[:, 0]
+        word = targets[..., c][entries][:, None]
+        ratio = torch.exp(torch.log_softmax(logit[entries], dim=-1).gather(1, word)[:, 0]
+                          - torch.log_softmax(fixed[entries], dim=-1).gather(1, word)[:, 0])
+        a = advantage[scene]
+        surrogate = torch.minimum(ratio * a, torch.clamp(ratio, 1.0 - clip, 1.0 + clip) * a)
+        total = total.index_add(0, scene, -surrogate)
+        clipped += int(((ratio - 1.0).abs() > clip).sum())
+        words += len(ratio)
+    return total, clipped, words
+
+
 def allowed_tensors(allowed: Sequence[Mapping[int, np.ndarray]], rows: int, classes: Sequence[int],
                     device: torch.device) -> list[torch.Tensor | None]:
     """Per column, ``[B, 1, rows, classes]`` bool: what the speaker's masks let each sentence say at each of its steps
@@ -206,8 +233,10 @@ def train(model: Prior, train_split: Split, val_split: Split, config: TrainConfi
 @dataclass(frozen=True)
 class RewardConfig:
     """The landing reward's optimiser and weights (post-training design §2, §5, §8), both stages: a thirtieth of
-    pretraining's learning rate (the reward term's gradient is noisy), a pull to the reference of 0.04, the data term at 1
-    (the runners refuse 0: without it the pull alone could not hold the second stage, readouts §9)."""
+    pretraining's learning rate (the reward term's gradient is noisy), the reward term's ratio clipped at 0.2 (without it
+    the stale sentences of a pass pushed "unchanged" down until the model ran from the base, readouts §15), a pull to the
+    reference of 0.04, the data term at 1 (the runners refuse 0: without it the pull alone could not hold the second
+    stage, readouts §9)."""
 
     learning_rate: float = 1e-5
     weight_decay: float = 0.01
@@ -216,6 +245,11 @@ class RewardConfig:
     tokens_per_batch: int = 16_384          # half the sentences said, half the data
     kl_weight: float = 0.04
     data_weight: float = 1.0
+    clip_ratio: float = 0.2
+
+    def __post_init__(self) -> None:
+        if not 0.0 < self.clip_ratio < 1.0:
+            raise ValueError(f"clip_ratio {self.clip_ratio}: the ratio's interval [1 − c, 1 + c] needs 0 < c < 1")
 
 
 class RewardTuner:
@@ -223,18 +257,20 @@ class RewardTuner:
     round — each a flight the prior spoke to, its words as targets, with its advantage — in length buckets, shuffled;
     every update pairs a batch of them with a batch of teacher-forced data flights:
 
-        loss = mean over sentences of (advantage × the NLL of its own words, per step)
+        loss = mean over sentences of (`flight_surrogate`: the clipped ratio's loss over its own words, per step)
              + kl_weight × mean over sentences of (`flight_kl` to the frozen reference, per step)
              + data_weight × the data batch's NLL per step (pretraining's loss)
 
     — minimising the first term raises the words of a sentence that did better than its flight's others and lowers the
-    words of one that did worse.
+    words of one that did worse, each word only until its probability has moved by ``clip_ratio`` from the model the
+    sentences were sampled from (frozen at the pass's start: every sentence of a pass comes from it). Without the clip the
+    later updates of a pass kept pushing on stale sentences and the model ran from the base (readouts §15).
 
     The sentences' words are scored with dropout off — the distribution they were sampled from, so the pull to the
     reference measures how far the weights moved and not dropout's noise — under the masks they were said under when
     ``allowed`` is given (the second stage, post-training design §5: the model and the reference renormalised over the
     same allowed classes), unmasked otherwise (the first stage: the masks removed ~0.06 % a step, readouts §5); one pass,
-    no importance ratio (the sentences come from the weights at the start of the pass). Every update draws a data batch
+    the ratio taken against the weights at the pass's start. Every update draws a data batch
     (a ``data_weight`` of 0 only zeroes its term — tests isolating the others). The seed sets the batch order. `distance` measures the pull's own
     quantity on a set of sentences without updating (a round's model on its fresh sentences, before its pass)."""
 
@@ -259,20 +295,21 @@ class RewardTuner:
             indices = next(self._data)
         return indices
 
-    def _scored(self, sentences: Split, indices: Sequence[int],
-                allowed: Sequence[Mapping[int, np.ndarray]] | None
-                ) -> tuple[dict[str, torch.Tensor], list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
-        """A batch of sentences, the model's and the reference's logits over it (renormalised under the masks the
-        sentences were said under when ``allowed`` is given) and each sentence's asked steps."""
+    def _scored(self, sentences: Split, indices: Sequence[int], allowed: Sequence[Mapping[int, np.ndarray]] | None,
+                fixed: Sequence[Prior]) -> tuple[dict[str, torch.Tensor], list[torch.Tensor],
+                                                 list[list[torch.Tensor]], torch.Tensor]:
+        """A batch of sentences, the model's logits over it and each of the ``fixed`` models' (no gradient; the
+        reference, the pass's start), all renormalised under the masks the sentences were said under when ``allowed``
+        is given, and each sentence's asked steps."""
         batch = to_batch(sentences, indices, self.device)
         logits = batch_logits(self.model, batch)
         with torch.no_grad():
-            reference = batch_logits(self.reference, batch)
+            others = [batch_logits(model, batch) for model in fixed]
         if allowed is not None:
             masks = allowed_tensors([allowed[i] for i in indices], batch["targets"].shape[2],
                                     [logit.shape[-1] for logit in logits], self.device)
-            logits, reference = masked(logits, masks), masked(reference, masks)
-        return batch, logits, reference, asked_entries(batch["present"]).sum(dim=(1, 2)).to(logits[0].dtype)
+            logits, others = masked(logits, masks), [masked(other, masks) for other in others]
+        return batch, logits, others, asked_entries(batch["present"]).sum(dim=(1, 2)).to(logits[0].dtype)
 
     def distance(self, sentences: Split, allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> float:
         """How far the model is from the reference on ``sentences``, without updating: the pull's own measure (the mean
@@ -284,7 +321,7 @@ class RewardTuner:
         means = []
         with torch.no_grad():
             for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, None):
-                batch, logits, reference, steps = self._scored(sentences, indices, allowed)
+                batch, logits, (reference,), steps = self._scored(sentences, indices, allowed, (self.reference,))
                 means.append(float((flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"])
                                     / steps).mean()))
         return float(np.mean(means))
@@ -302,12 +339,21 @@ class RewardTuner:
         self.passes += 1
         self.model.eval()
         started = time.perf_counter()
+        # the model the pass's sentences were sampled from, frozen: the clipped ratio's denominator
+        start = copy.deepcopy(self.model).eval()
+        for parameter in start.parameters():
+            parameter.requires_grad_(False)
         sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
-        count, trace = 0, []
+        count, trace, clipped, words = 0, [], 0, 0
         for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
-            batch, logits, reference, steps = self._scored(sentences, indices, allowed)
+            batch, logits, (reference, sampled_from), steps = self._scored(sentences, indices, allowed,
+                                                                            (self.reference, start))
             advantage = torch.as_tensor(advantages[indices], dtype=logits[0].dtype, device=self.device)
-            reward = (advantage * flight_nll(logits, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
+            surrogate, batch_clipped, batch_words = flight_surrogate(logits, sampled_from, batch["targets"],
+                                                                     batch["present"], batch["asked"], advantage,
+                                                                     self.config.clip_ratio)
+            reward = (surrogate / steps).mean()
+            clipped, words = clipped + batch_clipped, words + batch_words
             kl = (flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
             nll, speaks = batch_nll(self.model, to_batch(data, self._data_batch(data), self.device))
             data_loss = nll.sum() / speaks
@@ -325,4 +371,4 @@ class RewardTuner:
             trace.append(float(kl.detach()))
         return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace),
                 "batches": count, "sentences": len(sentences.flights), "seconds": time.perf_counter() - started,
-                "kl_trace": trace}
+                "kl_trace": trace, "clipped_share": clipped / words}

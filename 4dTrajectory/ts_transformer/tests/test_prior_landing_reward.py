@@ -3,6 +3,8 @@ comparison, the loss terms, the trainer's direction and the guarded choice."""
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 import torch
@@ -20,7 +22,7 @@ from ts_transformer.prior.data import Split, column_classes
 from ts_transformer.prior.landing_reward import LANDED, group_advantages, landing_direction, rewards
 from ts_transformer.prior.scene import CONTEXT_WINDOW_S, N_LOOK, utc_s
 from ts_transformer.prior.train import (
-    RewardConfig, RewardTuner, batch_logits, column_nll, flight_kl, flight_nll, to_batch,
+    RewardConfig, RewardTuner, batch_logits, column_nll, flight_kl, flight_nll, flight_surrogate, to_batch,
 )
 from ts_transformer.tests.support import instruction_airport
 from ts_transformer.tests.test_autopilot import _params
@@ -151,6 +153,58 @@ def test_the_reward_term_raises_a_better_sentence_s_words_and_lowers_a_worse_one
         RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split, np.zeros(1), split)
     with pytest.raises(ValueError, match="no sentence to train on"):
         RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split.subset([]), np.zeros(0), split)
+
+
+def _cells(steps: int, classes: int = 5):
+    """One scene, one aircraft, ``steps`` spoken steps from the first predicted row, every column asked: targets class 1."""
+    rows = N_LOOK + steps
+    present = torch.ones((1, 1, rows), dtype=torch.bool)
+    asked = torch.ones((1, 1, rows, 6), dtype=torch.bool)
+    targets = torch.ones((1, 1, rows, 6), dtype=torch.long)
+    start = [torch.zeros((1, 1, rows, classes)) for _ in range(6)]
+    return present, asked, targets, start
+
+
+def test_the_clipped_surrogate_starts_as_the_weighted_nll_and_stops_pushing_past_the_clip():
+    present, asked, targets, start = _cells(3)
+    words_n = 6 * 3
+    # at the start (the model is the one the sentence was sampled from): the loss is −A per word, its gradient A × NLL's
+    for a in (1.0, -0.5):
+        advantage = torch.tensor([a])
+        logits = [s.clone().requires_grad_(True) for s in start]
+        loss, clipped, words = flight_surrogate(logits, start, targets, present, asked, advantage, 0.2)
+        assert float(loss[0].detach()) == pytest.approx(-a * words_n) and (clipped, words) == (0, words_n)
+        loss.sum().backward()
+        twin = [s.clone().requires_grad_(True) for s in start]
+        (advantage * flight_nll(twin, targets, present, asked)).sum().backward()
+        for g, h in zip(logits, twin):
+            assert torch.allclose(g.grad, h.grad, atol=1e-6)
+    # a word whose probability has already doubled: a better sentence (A > 0) stops pushing it, a worse one pulls it back
+    moved = [s.clone() for s in start]
+    for m in moved:
+        m[..., 1] += math.log(2.0) + 0.5
+    for a, pushes in ((1.0, False), (-1.0, True)):
+        logits = [m.clone().requires_grad_(True) for m in moved]
+        loss, clipped, words = flight_surrogate(logits, start, targets, present, asked, torch.tensor([a]), 0.2)
+        assert clipped == words_n
+        loss.sum().backward()
+        assert (logits[0].grad.abs().sum() > 0) == pushes
+
+
+def test_a_clip_outside_zero_and_one_is_refused():
+    for clip in (0.0, 1.0, -0.1):
+        with pytest.raises(ValueError, match="clip_ratio"):
+            RewardConfig(clip_ratio=clip)
+
+
+def test_a_pass_records_the_share_of_words_clipped():
+    one, geometry, batch, sentences = _sentences()
+    words = Words(one)
+    split = _split(sentence_flights(batch, sentences, np.arange(3), ("KXXX",), one.step_s, None), words)
+    config = RewardConfig(learning_rate=1e-3, warmup_steps=1, kl_weight=0.0, data_weight=0.0)
+    passed = RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split.subset([0]), np.array([1.0]),
+                                                                                  split)
+    assert passed["clipped_share"] == 0.0                   # one batch: the model is still its start at the update
 
 
 def test_the_round_kept_is_the_best_within_the_guards():

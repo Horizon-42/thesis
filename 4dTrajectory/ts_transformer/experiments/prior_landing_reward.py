@@ -60,7 +60,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig, RewardTuner, TrainConfig, evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-LANDING_REWARD_SCHEMA = "ts-prior-landing-reward-v2"
+LANDING_REWARD_SCHEMA = "ts-prior-landing-reward-v3"
 #: Two rounds' select landed shares closer than this are a tie (about two binomial standard deviations over 2,000
 #: sentences at 90 %).
 TIE_SHARE = 0.015
@@ -321,7 +321,8 @@ def main(argv: list[str] | None = None) -> int:
         passed = tuner.one_pass(Split(flights, data.airports, data.candidates, data.runways, data.courses,
                                       data.classes, variant), advantages[keep], data)
         log(f"round {round_number}: one pass over {len(flights)} sentences, reward term {passed['reward_mean']:.4f}, "
-            f"KL {passed['kl_mean']:.4f}, data NLL {passed['data_mean']:.4f}")
+            f"KL {passed['kl_mean']:.4f}, data NLL {passed['data_mean']:.4f}, "
+            f"words clipped {passed['clipped_share']:.4f}")
         torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
                     "train_config": start_config["train"], "state": copy.deepcopy(model.state_dict()),
                     "spec_sha256": spec.sha256}, directory / "checkpoint.pt")

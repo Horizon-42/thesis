@@ -78,7 +78,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig, RewardTuner, TrainConfig, evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-AUGMENTED_REWARD_SCHEMA = "ts-prior-augmented-reward-v4"
+AUGMENTED_REWARD_SCHEMA = "ts-prior-augmented-reward-v5"
 #: The pool a round draws its starts from, × the starts it needs: a flight with no plausible augmentation gives way to
 #: the pool's next.
 POOL_FACTOR = 1.25
@@ -460,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
         log(f"round {round_number}: one pass over {len(flights)} sentences, reward term {passed['reward_mean']:.4f}, "
             f"KL to the base at the start real {start_distance['real']:.4f} augmented "
             f"{start_distance['augmented']:.4f}, {passed['kl_mean']:.4f} in the pass (max {passed['kl_max']:.4f}), "
-            f"data NLL {passed['data_mean']:.4f}")
+            f"data NLL {passed['data_mean']:.4f}, words clipped {passed['clipped_share']:.4f}")
         torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
                     "train_config": start_config["train"], "state": copy.deepcopy(model.state_dict()),
                     "spec_sha256": spec.sha256}, directory / "checkpoint.pt")
