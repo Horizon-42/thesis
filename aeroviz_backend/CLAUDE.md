@@ -18,7 +18,8 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
 - Playback drift guard: `playbackDriftM` on every optimize response; stderr WARNING above
   `PLAYBACK_DRIFT_WARN_M = 50`.
 - **`POST /autopilot/segment`** (the `autopilot_segment/` package, the Training view's live executor): flies one word's segment
-  of a Training flight (to where the word's envelope ends: a heading word's a lead past the next heading word) with
+  of a Training flight (to where the word's envelope ends: a heading word's a lead past the next heading word — the answer's
+  `segment.nextWordHeardS`, from the judge's `words_said`, says where the executor heard it: the views draw the rest as a tail) with
   `ts_transformer.autopilot` AS IS — its stepper `Executor`, driven as `executor.fly` drives it and stopped at the
   segment's stop (`fly_until`); never a replay record or overlay; the answer carries per-part wall-clock `timing`. The spec is the ONE under
   `4dTrajectory/outputs/POOLED/executor/` that `replay.open_executor` accepts for the set's artefact, or it is refused

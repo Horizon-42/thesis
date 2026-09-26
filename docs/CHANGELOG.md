@@ -1,5 +1,12 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — Training：实时执行器飞航向词多出的那一截画成淡色虚线尾巴
+
+- 用户看到选中转弯词让执行器现飞时"总会多飞出一段"：那是设计上的提前量——航向词判到下一个航向词说出后 4 s，执行器必须飞到
+  那里；这 4 s 里飞机已经在转向下一个词。飞法与判定不改，只改画法：答复 `aeroviz-autopilot-segment-v4` 多一个
+  `segment.nextWordHeardS`（执行器听到同列下一个词的时刻，`payload.next_word_heard_s`，按判决的 `words_said`），前端从那一点起在
+  三维、四张读数图上画淡色虚线的尾巴，图例与结果卡写出它是什么。分支 `dev-heading-lead-tail`（Training 模块文档 §4.7，AV26）。
+
 ### 2026-09-26 — 执行器设计文档按实现重写、去掉日期；下滑道下沿诊断
 
 - `4dTrajectory/ts_transformer/docs/2026-09-23_executor_design.zh.md` 改名为 `executor_design.zh.md`（用户：设计文档名字不带日期），

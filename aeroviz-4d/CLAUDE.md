@@ -141,8 +141,9 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 - **Training's live executor flies the CLICKED word's segment on the backend, every time** (`POST /autopilot/segment`,
-  `aeroviz-autopilot-segment-v3`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
-  where its envelope ends (the next word of its column; a heading word's a lead later; the sentence's end: to the landing),
+  `aeroviz-autopilot-segment-v4`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
+  where its envelope ends (the next word of its column; a heading word's a lead later — drawn as a faded, dashed TAIL from
+  where the executor heard the next heading word, `nextWordHeardS` / `autopilotRunAndTail`; the sentence's end: to the landing),
   the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
   words it told are the sentence bar's for that segment; a heading band is bounded by the FLOWN track its judge read, never
   by the sentence's stop (the executor may hear the next word late); started by the sentence bar's "▶ Fly" (or a band

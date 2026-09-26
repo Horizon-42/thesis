@@ -454,7 +454,10 @@ that divergence is a known open item (see the README's "Future Improvements").
   模型许可之后又说的航向词照判决原样判到航迹末尾（执行器在飞航道），读作出界——模型句子的读法，判决不改。
 - 一段 = 被选中的那个色块：从词说出的一步飞到它的包络结束的
   `stopRow`——同列下一个词说出的一步，航向词再加一个提前量（它的带判到下一个航向词说出后一个提前量，下一个航向词照句子说出）；
-  到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。初态是观测飞机在那一步的状态（`flight_inputs(anchor=row)`），第 0 步是那一步
+  到了句子末尾就飞到落地，句子最后一步说的词按名字拒绝。**航向词多飞的那一截画成尾巴**：从执行器听到同列下一个词的周期
+  （答复的 `segment.nextWordHeardS`，按判决的 `words_said`；前端 `tailFrom` 是它在航迹上的下标，`autopilotRunAndTail` 切开）起，
+  三维与四张读数图都画淡色虚线（`AUTOPILOT_TAIL_OPACITY` 0.45、`AUTOPILOT_TAIL_DASH`），图例与结果卡写出它是什么——飞机已在飞下一个
+  词，评判还算这个词（用户 2026-09-26 看成"多飞了一段"）。初态是观测飞机在那一步的状态（`flight_inputs(anchor=row)`），第 0 步是那一步
   六列生效的词，之后是段内的词，每条在执行器到了观测飞机听到它的位置时说。
 - 规格：`outputs/POOLED/executor/*/spec.json` 里恰好一份由现在的执行器代码、为这个集合所属产物的词表写的
   （`replay.open_executor`）；否则拒绝并列出每一份的原因；那个目录里的规格一有增、删、移动或改写就重新找。集合必须是这个词表的
@@ -474,7 +477,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   下一个航向词总放得下；会截短的是没有上限的距离词钟一步越过下一个词、或更长的提前量——2026-09-25 全部 3,526 个航向词试飞，0 次。
 - 前端把答复绑到屏幕上这一段：同一架航班、`endRow` 是色块的终点、词表规格相同、**告诉执行器的词就是句子条这一段显示的词**；
   航向带的行是执行器自己飞过的步，以判决读到的飞出航迹为界、不以句子段尾为界（执行器可能晚听到下一个航向词）；
-  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v3` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
+  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v4` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
   名也是镜像）；它带 `timing`（后端墙钟：等待；加起来等于总计的各项——集合与规格、重建航班或沿用、准备这一段、执行器与算了的周期数、判定、
   写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里），前端加上浏览器往返时间。单步飞法由
   `test_autopilot_segment.StepperTest` 钉住：真实执行器上，不设段尾时与 `executor.fly` 逐周期相同，设了段尾时等于它在词钟首次把
