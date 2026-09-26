@@ -300,6 +300,30 @@ def test_observed_threshold_crossing_does_not_depend_on_a_fitted_tail(monkeypatc
     assert series[0].supervision_values[-1, ch.IDX["n"]] == pytest.approx(0.0, abs=1e-6)
 
 
+def test_without_a_fit_only_a_crossing_on_the_final_counts():
+    """Contract C3 on observed rows (code-health follow-up 14): a flight without a fit is scanned from row 1, and a
+    plane pass abeam — or on the final's course line but flown across it — is not its arrival."""
+    from ts_transformer.data.coordinate_frames import AirportENUFrame
+
+    frame = AirportENUFrame(lat0=35.0, lon0=-78.0, alt0=0.0, code="KXXX")
+    # runway course north (math 90°): 3 km abeam flying north through the plane, then around onto the final
+    abeam = [(3_000.0, n) for n in np.arange(-2_000.0, 1_001.0, 500.0)]
+    final = [(0.0, n) for n in np.arange(-3_000.0, 301.0, 300.0)]
+    rows = np.array([(e, n, 500.0) for e, n in abeam + final])
+    times = np.arange(len(rows)) * 10.0
+    kwargs = dict(target_chart=np.zeros(3), runway_heading_rad=math.pi / 2, fitted=None)
+    crossing_time, values = dataset_module._observed_threshold_crossing(times, rows, frame, **kwargs)
+    assert crossing_time > times[len(abeam)] and values[0] == pytest.approx(0.0) and values[1] == pytest.approx(0.0)
+    # the abeam pass alone never lands
+    assert dataset_module._observed_threshold_crossing(times[: len(abeam)], rows[: len(abeam)], frame, **kwargs) is None
+    # inside the cone at the threshold but flown 55° across the course: not the arrival; the same pass down the course is
+    across = np.array([(-160.0, -120.0, 50.0), (-60.0, -50.0, 40.0), (40.0, 20.0, 30.0), (140.0, 90.0, 20.0)])
+    along = across.copy()
+    along[:, 0] = 20.0
+    assert dataset_module._observed_threshold_crossing(times[:4], across, frame, **kwargs) is None
+    assert dataset_module._observed_threshold_crossing(times[:4], along, frame, **kwargs) is not None
+
+
 def test_observed_and_fitted_threshold_crossings_share_the_terminal_weight_contract():
     """Review 2026-09-09 A-3: the crossing used to be supervised under two contracts chosen
     by ADS-B coverage — an observed one flat at 1/C with no terminal emphasis, a fitted one

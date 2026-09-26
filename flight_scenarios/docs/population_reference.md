@@ -101,7 +101,7 @@ gets a new ID here and ONE new line in the index.**
 ### FS6 · Types without a native model are decided by the performance index; none flies as an A320 by default
 
 - **Order** (`scenario.aircraft_for_code`, provider `auto`): a hand-tuned preset; else the row of
-  `aircraft/performance_index.json` (schema `aircraft-performance-index-v1`, loader
+  `aircraft/performance_index.json` (schema `aircraft-performance-index-v2`, loader
   `aircraft/performance_index.py`); else the type's own OpenAP model if OpenAP models it DIRECTLY and it
   has a published approach speed. OpenAP synonyms are no longer flown with their surrogate's data under
   their own code (`get_aircraft_parameters` refuses them); B3XM (no FAA speed) is refused. Provider
@@ -136,7 +136,8 @@ gets a new ID here and ONE new line in the index.**
   never computes on NaN. The ts data plane is the one caller (`aircraft_filter = all-flights`, the state
   output and the instruction labeller); the optimizer and the scenario files keep requiring dynamics.
 - **Audit**: `source["performance_index_decision"]` (own / substitute / exclude / None);
-  `dynamics_source` is `aircraft-performance-index-v1` for an own-parameter type.
+  `dynamics_source` is `aircraft-performance-index-v2` for an own-parameter type (v1 before 2026-09-26, when the
+  own rows' landing mass became the published MALW).
 - **Observed records** (`resolve_airframe`): the mass is returned only when the model flies the type as
   itself (preset, OpenAP-direct, index own); a substituted or excluded type keeps its type and gets no mass.
   Observed records change only when regenerated (with the user's permission). Since 2026-09-25 the observed

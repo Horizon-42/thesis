@@ -103,7 +103,7 @@ class TestPublishedApproachSpeed(unittest.TestCase):
 
 
 class TestLandingMass(unittest.TestCase):
-    def test_uses_max_landing_kg_when_set(self):
+    def test_landing_mass_is_the_max_landing_weight(self):
         aircraft = Aircraft(
             code="X", name="X", category="x",
             geometry=Geometry(wing_area_m2=122.6),
@@ -113,10 +113,18 @@ class TestLandingMass(unittest.TestCase):
         )
         self.assertEqual(aircraft.landing_mass, 66000.0)
 
-    def test_falls_back_to_fraction_of_mtow(self):
-        # A320 preset carries no max_landing_kg -> 0.85 * MTOW.
-        self.assertAlmostEqual(A320.landing_mass, 0.85 * 78000.0)
-        self.assertLess(A320.landing_mass, A320.mass.max_takeoff_kg)
+    def test_every_modelled_airframe_lands_at_its_published_malw(self):
+        # the mass its published approach speed is quoted at (code-health follow-ups: the B77W preset was 19 % above
+        # it; OpenAP's C550, B38M, B37M, A20N and B752 figures are another model's)
+        for preset in AIRCRAFT_PRESETS.values():
+            self.assertEqual(preset.landing_mass, preset.approach.speeds.malw_kg)
+            self.assertLess(preset.landing_mass, preset.mass.max_takeoff_kg)
+        self.assertEqual(AIRCRAFT_PRESETS["B77W"].landing_mass, 251290.0)     # FAA ACD MALW 554,000 lb
+        for code in openap_direct_typecodes():
+            aircraft = get_aircraft_parameters(code)
+            self.assertEqual(aircraft.landing_mass, aircraft.approach.speeds.malw_kg, code)
+        self.assertEqual(get_aircraft_parameters("C550").landing_mass, 6123.0)   # FAA ACD MALW 13,500 lb (OpenAP 6,804)
+        self.assertEqual(get_aircraft_parameters("B737").landing_mass, 58604.0)  # Boeing 737-700 (the FAA cell is the 737-7's)
 
 
 class TestFrozen(unittest.TestCase):
@@ -132,7 +140,7 @@ class TestConstruct(unittest.TestCase):
             name="Test",
             category="test",
             geometry=Geometry(wing_area_m2=100.0),
-            mass=Mass(max_takeoff_kg=50000.0),
+            mass=Mass(max_takeoff_kg=50000.0, max_landing_kg=45800.0),
             engine=Engine(count=2, max_thrust_n_each=100000.0),
             approach=Approach(
                 speeds=reference_speed("E190"),
@@ -152,3 +160,22 @@ class TestConstruct(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOpenapCacheSchema(unittest.TestCase):
+    """The OpenAP caches are refused on a schema this code does not read (code-health review #21)."""
+
+    def test_a_cache_of_another_schema_is_refused_by_name(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        import aircraft.query_aircraft_parameters as query
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "openap_aircraft_parameters.json"
+            path.write_text(json.dumps({"schema_version": query.OPENAP_PARAMETERS_SCHEMA + 1, "typecodes": {}}))
+            with mock.patch.object(query, "PARAMETERS_PATH", path):
+                with self.assertRaisesRegex(ValueError, "rebuild it"):
+                    query.load_json(path)

@@ -636,9 +636,9 @@
    "approach_speed_max_kt": 130,
    "approach_speed_source": "faa_acd_2024_10",
    "approach_speed_note": "AAC validated by Flight Standardization Board (FSB) report.",
-   "malw_kg": 66043,
-   "malw_source": "faa_acd_2024_10",
-   "malw_note": "MALW_lb 145,600",
+   "malw_kg": 58604,
+   "malw_source": "boeing_737ng_acap_rev_c",
+   "malw_note": "ANOMALY: the FAA row (Boeing 737-700) reads MALW_lb 145,600 (66,043 kg), which is the 737-7 (MAX 7) MAX DESIGN LANDING WEIGHT (Boeing D6-38A004 Rev K 2.1.1) and no 737-700 figure. Boeing D6-58325-7 Rev C section 2.1.2 gives the 737-700 129,200 lb = 58,604 kg in the weight variant whose MAX DESIGN TAKEOFF WEIGHT 154,500 lb is the FAA row's MTOW; that value is used here instead of the FAA cell (user 2026-09-26).",
    "min_mass_kg": 37648,
    "min_mass_kind": "OEW",
    "min_mass_source": "boeing_737ng_acap_rev_c",
@@ -651,7 +651,7 @@
     {
      "source": "boeing_737ng_acap_rev_c",
      "mlw_kg": 58604,
-     "note": "2.1.2 Model 737-700 MAX DESIGN LANDING WEIGHT 129,200 lb (58,604 kg), highest weight variant - the FAA MALW of 145,600 lb matches no published 737-700 or BBJ landing weight; no approach speed is published"
+     "note": "2.1.2 Model 737-700 MAX DESIGN LANDING WEIGHT 129,200 lb (58,604 kg), the weight variant whose MAX DESIGN TAKEOFF WEIGHT 154,500 lb is the FAA row's MTOW; the FAA MALW of 145,600 lb is the 737-7's (D6-38A004 Rev K 2.1.1, as the FAA B37M row carries), so this figure is the one carried as malw_kg since 2026-09-26; no approach speed is published"
     }
    ]
   },

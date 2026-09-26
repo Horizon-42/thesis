@@ -132,7 +132,7 @@ def test_the_reward_term_raises_a_better_sentence_s_words_and_lowers_a_worse_one
     def nll_after(advantage: float) -> float:
         model = _model(words)
         RewardTuner(model, _model(words), config, CPU, seed=0).one_pass(
-            split.subset([0]), np.array([advantage]), split)
+            split.subset([0]), np.array([advantage]), split)          # the data term weighed 0: the reward term alone
         with torch.no_grad():
             b = to_batch(split, [0], CPU)
             return float(flight_nll(batch_logits(model, b), b["targets"], b["present"], b["asked"])[0])

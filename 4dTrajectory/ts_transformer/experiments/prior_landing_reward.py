@@ -60,7 +60,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig, RewardTuner, TrainConfig, evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-LANDING_REWARD_SCHEMA = "ts-prior-landing-reward-v1"
+LANDING_REWARD_SCHEMA = "ts-prior-landing-reward-v2"
 #: Two rounds' select landed shares closer than this are a tie (about two binomial standard deviations over 2,000
 #: sentences at 90 %).
 TIE_SHARE = 0.015
@@ -229,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     if git["dirty"] and not args.smoke:
         parser.error("the tree has uncommitted changes; a fine-tuning run is made at a commit")
     config = RewardConfig(**{f: getattr(args, f) for f in asdict(RewardConfig())})
+    if config.data_weight == 0.0:
+        parser.error("the landing reward trains beside the data: --data-weight > 0")
     started = time.perf_counter()
     device = torch.device(args.device)
     params, record, words = replay.open_executor(executor_dir, instructions)

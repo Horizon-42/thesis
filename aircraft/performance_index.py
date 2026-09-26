@@ -5,10 +5,12 @@ fleet shows is decided ONCE, in ``performance_index.json`` beside this module, b
 ``docs/aircraft_performance/2026-09-23_missing_performance_substitution.zh.md`` (user decisions
 2026-09-23/24), instead of being flown as an A320:
 
-* ``own``        -- the type's own landing mass, wing area and installed thrust from primary
+* ``own``        -- the type's own maximum take-off mass, wing area and installed thrust from primary
                     documents (type-certificate data sheets, the FAA Aircraft Characteristics
                     Database, the Poll-Schumann parameter file), each with a source id; its
-                    approach speed is its own published row (``aircraft/reference_speeds.json``).
+                    approach speed is its own published row (``aircraft/reference_speeds.json``), and so is
+                    its landing mass: that row's MALW, the mass the published speed is scaled from (one
+                    source for the two — the Poll-Schumann file's B722 landing mass was 5.2 % above it).
 * ``substitute`` -- the airframe that flies most like it (same propulsion class and FAA approach
                     category, nearest approach speed and thrust-to-weight); the model flies THAT
                     airframe, under its own code, so its mass, speed and gate all belong together.
@@ -46,14 +48,14 @@ from aircraft.aircraft_sets import (
 )
 from aircraft.query_aircraft_parameters import PARAMETERS_PATH, load_json, openap_support_kind
 
-PERFORMANCE_INDEX_SCHEMA = "aircraft-performance-index-v1"
+PERFORMANCE_INDEX_SCHEMA = "aircraft-performance-index-v2"
 PERFORMANCE_INDEX_PATH = Path(__file__).with_name("performance_index.json")
 
 Decision = Literal["own", "substitute", "exclude"]
 _DECISIONS = ("own", "substitute", "exclude")
-_OWN_KEYS = frozenset({"decision", "name", "mtow_kg", "mlw_kg", "wing_area_m2", "engines",
+_OWN_KEYS = frozenset({"decision", "name", "mtow_kg", "wing_area_m2", "engines",
                        "max_thrust_n_each", "sources"})
-_SOURCE_FACTS = ("mass", "wing_area", "thrust")
+_SOURCE_FACTS = ("mtow", "wing_area", "thrust")
 
 
 @dataclass(frozen=True)
@@ -82,9 +84,9 @@ def _own(typecode: str, row: Mapping[str, Any], sources: Mapping[str, Any]) -> I
     if set(row) != _OWN_KEYS:
         raise ValueError(f"{where}: keys {sorted(row)} != {sorted(_OWN_KEYS)}")
     mtow = _positive(row["mtow_kg"], f"{where}.mtow_kg")
-    mlw = _positive(row["mlw_kg"], f"{where}.mlw_kg")
-    if mlw > mtow:
-        raise ValueError(f"{where}: mlw_kg {mlw} above mtow_kg {mtow}")
+    speeds = published_speeds(typecode)
+    if speeds.malw_kg > mtow:
+        raise ValueError(f"{where}: the published MALW {speeds.malw_kg} is above mtow_kg {mtow}")
     engines = row["engines"]
     if isinstance(engines, bool) or not isinstance(engines, int) or engines < 1:
         raise ValueError(f"{where}.engines must be a positive integer, got {engines!r}")
@@ -96,13 +98,14 @@ def _own(typecode: str, row: Mapping[str, Any], sources: Mapping[str, Any]) -> I
         name=str(row["name"]),
         category="performance_index",
         geometry=Geometry(wing_area_m2=_positive(row["wing_area_m2"], f"{where}.wing_area_m2")),
-        mass=Mass(max_takeoff_kg=mtow, max_landing_kg=mlw),
+        mass=Mass(max_takeoff_kg=mtow, max_landing_kg=speeds.malw_kg),
         engine=Engine(count=engines,
                       max_thrust_n_each=_positive(row["max_thrust_n_each"], f"{where}.max_thrust_n_each")),
-        approach=Approach(speeds=published_speeds(typecode), **class_procedure(mtow)),
+        approach=Approach(speeds=speeds, **class_procedure(mtow)),
     )
     return IndexEntry(typecode, "own", aircraft, None,
-                      "own parameters: " + ", ".join(f"{f} {cited[f]}" for f in _SOURCE_FACTS))
+                      "own parameters: " + ", ".join(f"{f} {cited[f]}" for f in _SOURCE_FACTS)
+                      + f", landing mass {speeds.malw_source} (the published MALW)")
 
 
 def _entry(typecode: str, row: Mapping[str, Any], sources: Mapping[str, Any]) -> IndexEntry:

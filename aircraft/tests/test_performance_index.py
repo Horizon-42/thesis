@@ -67,18 +67,32 @@ def test_excluded_types_say_why():
     ({"decision": "keep"}, "decision must be one of"),
     ({"decision": "substitute", "substitute": "BCS3", "basis": "x"}, "not a preset or OpenAP-direct"),
     ({"decision": "exclude"}, "an exclude row has keys"),
-    ({"decision": "own", "name": "x", "mtow_kg": 1.0, "mlw_kg": 2.0, "wing_area_m2": 1.0,
+    ({"decision": "own", "name": "x", "mtow_kg": 1.0, "wing_area_m2": 1.0,          # E55P's published MALW is 7,568 kg
       "engines": 2, "max_thrust_n_each": 1.0,
-      "sources": {"mass": "faa_acd_2024_10", "wing_area": "faa_acd_2024_10", "thrust": "faa_acd_2024_10"}},
-     "above mtow_kg"),
-    ({"decision": "own", "name": "x", "mtow_kg": 2.0, "mlw_kg": 1.0, "wing_area_m2": 1.0,
+      "sources": {"mtow": "faa_acd_2024_10", "wing_area": "faa_acd_2024_10", "thrust": "faa_acd_2024_10"}},
+     "published MALW .* above mtow_kg"),
+    ({"decision": "own", "name": "x", "mtow_kg": 10_000.0, "wing_area_m2": 1.0,
       "engines": 2, "max_thrust_n_each": 1.0,
-      "sources": {"mass": "nowhere", "wing_area": "faa_acd_2024_10", "thrust": "faa_acd_2024_10"}},
+      "sources": {"mtow": "nowhere", "wing_area": "faa_acd_2024_10", "thrust": "faa_acd_2024_10"}},
      "must name a listed source"),
+    ({"decision": "own", "name": "x", "mtow_kg": 10_000.0, "mlw_kg": 7_000.0, "wing_area_m2": 1.0,
+      "engines": 2, "max_thrust_n_each": 1.0,
+      "sources": {"mtow": "faa_acd_2024_10", "wing_area": "faa_acd_2024_10", "thrust": "faa_acd_2024_10"}},
+     "keys"),                                            # the landing mass is the published row's, never the index's
 ])
 def test_a_malformed_row_is_refused(tmp_path, row, message):
     with pytest.raises(ValueError, match=message):
         load_performance_index(_write(tmp_path, {"E55P": row}))
+
+
+def test_an_own_type_lands_at_its_published_malw_the_mass_its_approach_speed_is_scaled_from():
+    from aircraft.reference_speeds import reference_speed
+
+    for code in ("B722", "E135", "A30B", "BCS3"):
+        entry = index_entry(code)
+        assert entry.decision == "own"
+        assert entry.aircraft.landing_mass == reference_speed(code).malw_kg
+    assert index_entry("B722").aircraft.landing_mass == 68039.0     # FAA ACD MALW 150,000 lb (Poll-Schumann had 71.6 t)
 
 
 def test_a_row_for_a_natively_flown_airframe_is_refused(tmp_path):

@@ -5,22 +5,25 @@ asked there (`Flight.asked`), per such step — a column left out drops from the
 closed-loop batch weighs a step the same whichever of its columns are asked. Design §9 step 1: every scene is one
 flight.
 
-The landing reward (design §9.3, `RewardTuner`) weighs each sentence the prior
-said by its advantage, keeps the model near a frozen reference and trains on the data beside it."""
+The landing reward (post-training design §2, `RewardTuner`) weighs each sentence the prior said by its advantage,
+keeps the model near a frozen reference and trains on the data beside it; its second stage (§5) scores each sentence
+under the masks it was said under (`allowed_tensors`) and drops the data term."""
 
 from __future__ import annotations
 
 import copy
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Iterator, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
 from torch import nn
 
 from ts_transformer.prior.data import Split, batches
+from ts_transformer.prior.generate import allowed_classes
 from ts_transformer.prior.model import Prior, asked_entries, self_edges
+from ts_transformer.prior.scene import N_LOOK
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,28 @@ def flight_kl(logits: list[torch.Tensor], reference: list[torch.Tensor], targets
     return total
 
 
+def allowed_tensors(allowed: Sequence[Mapping[int, np.ndarray]], rows: int, classes: Sequence[int],
+                    device: torch.device) -> list[torch.Tensor | None]:
+    """Per column, ``[B, 1, rows, classes]`` bool: what the speaker's masks let each sentence say at each of its steps
+    (``allowed``: per sentence, the masked columns' bit-packed classes a step, `Speaker.allowed`, from the first
+    predicted step's row on), everything elsewhere; None for a column no mask touched."""
+    out: list[torch.Tensor | None] = []
+    for c, count in enumerate(classes):
+        if c not in allowed[0]:
+            out.append(None)
+            continue
+        dense = np.ones((len(allowed), 1, rows, count), dtype=bool)
+        for b, masks in enumerate(allowed):
+            dense[b, 0, N_LOOK: N_LOOK + len(masks[c])] = allowed_classes(masks[c], count)
+        out.append(torch.as_tensor(dense, device=device))
+    return out
+
+
+def masked(logits: list[torch.Tensor], allowed: Sequence[torch.Tensor | None]) -> list[torch.Tensor]:
+    """The logits with what the masks removed at -inf: the log-softmax is then the masked, renormalised distribution."""
+    return [logit if a is None else logit.masked_fill(~a, float("-inf")) for logit, a in zip(logits, allowed)]
+
+
 def batch_nll(model: Prior, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, int]:
     """``(summed NLL per column [6], the aircraft-steps the prior speaks at)`` of one batch."""
     nll = column_nll(batch_logits(model, batch), batch["targets"], batch["present"], batch["asked"])
@@ -180,8 +205,9 @@ def train(model: Prior, train_split: Split, val_split: Split, config: TrainConfi
 
 @dataclass(frozen=True)
 class RewardConfig:
-    """The landing reward's optimiser and weights (design §9.3, §10): a thirtieth of pretraining's learning rate (the
-    reward term's gradient is noisy), a pull to the reference of 0.04, the data term at 1."""
+    """The landing reward's optimiser and weights (post-training design §2, §5, §8), both stages: a thirtieth of
+    pretraining's learning rate (the reward term's gradient is noisy), a pull to the reference of 0.04, the data term at 1
+    (the runners refuse 0: without it the pull alone could not hold the second stage, readouts §9)."""
 
     learning_rate: float = 1e-5
     weight_decay: float = 0.01
@@ -204,10 +230,13 @@ class RewardTuner:
     — minimising the first term raises the words of a sentence that did better than its flight's others and lowers the
     words of one that did worse.
 
-    The sentences' words are scored under the model's unmasked distribution (the masks removed ~0.06 % a step, readouts
-    §5) with dropout off — the distribution they were sampled from, so the pull to the reference measures how far the
-    weights moved and not dropout's noise (at the first update it is 0); one pass, no importance ratio (the sentences
-    come from the weights at the start of the pass). The seed sets the batch order."""
+    The sentences' words are scored with dropout off — the distribution they were sampled from, so the pull to the
+    reference measures how far the weights moved and not dropout's noise — under the masks they were said under when
+    ``allowed`` is given (the second stage, post-training design §5: the model and the reference renormalised over the
+    same allowed classes), unmasked otherwise (the first stage: the masks removed ~0.06 % a step, readouts §5); one pass,
+    no importance ratio (the sentences come from the weights at the start of the pass). Every update draws a data batch
+    (a ``data_weight`` of 0 only zeroes its term — tests isolating the others). The seed sets the batch order. `distance` measures the pull's own
+    quantity on a set of sentences without updating (a round's model on its fresh sentences, before its pass)."""
 
     def __init__(self, model: Prior, reference: Prior, config: RewardConfig, device: torch.device, *, seed: int) -> None:
         torch.manual_seed(seed)
@@ -230,24 +259,53 @@ class RewardTuner:
             indices = next(self._data)
         return indices
 
-    def one_pass(self, sentences: Split, advantages: np.ndarray, data: Split) -> dict[str, Any]:
-        """One pass over ``sentences`` (``advantages``: one per sentence) beside ``data``: the mean of each term as
-        trained, and what it took."""
+    def _scored(self, sentences: Split, indices: Sequence[int],
+                allowed: Sequence[Mapping[int, np.ndarray]] | None
+                ) -> tuple[dict[str, torch.Tensor], list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
+        """A batch of sentences, the model's and the reference's logits over it (renormalised under the masks the
+        sentences were said under when ``allowed`` is given) and each sentence's asked steps."""
+        batch = to_batch(sentences, indices, self.device)
+        logits = batch_logits(self.model, batch)
+        with torch.no_grad():
+            reference = batch_logits(self.reference, batch)
+        if allowed is not None:
+            masks = allowed_tensors([allowed[i] for i in indices], batch["targets"].shape[2],
+                                    [logit.shape[-1] for logit in logits], self.device)
+            logits, reference = masked(logits, masks), masked(reference, masks)
+        return batch, logits, reference, asked_entries(batch["present"]).sum(dim=(1, 2)).to(logits[0].dtype)
+
+    def distance(self, sentences: Split, allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> float:
+        """How far the model is from the reference on ``sentences``, without updating: the pull's own measure (the mean
+        over sentences of `flight_kl` per predicted step) averaged over the pass's batches (the same length groups, in
+        length order — a pass only shuffles them; the pass's generator is not touched)."""
+        if not sentences.flights:
+            raise ValueError("no sentence to measure the distance on")
+        self.model.eval()
+        means = []
+        with torch.no_grad():
+            for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, None):
+                batch, logits, reference, steps = self._scored(sentences, indices, allowed)
+                means.append(float((flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"])
+                                    / steps).mean()))
+        return float(np.mean(means))
+
+    def one_pass(self, sentences: Split, advantages: np.ndarray, data: Split,
+                 allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> dict[str, Any]:
+        """One pass over ``sentences`` (``advantages``: one per sentence; ``allowed``: the masks each was said under,
+        `allowed_tensors`) beside ``data``: the mean of each term as trained, and what it took."""
         if len(advantages) != len(sentences.flights):
             raise ValueError(f"{len(advantages)} advantages for {len(sentences.flights)} sentences")
+        if allowed is not None and len(allowed) != len(sentences.flights):
+            raise ValueError(f"{len(allowed)} sentences' masks for {len(sentences.flights)} sentences")
         if not sentences.flights:
             raise ValueError("no sentence to train on: no flight's sentences differ in reward")
         self.passes += 1
         self.model.eval()
         started = time.perf_counter()
         sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
-        count = 0
+        count, trace = 0, []
         for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
-            batch = to_batch(sentences, indices, self.device)
-            logits = batch_logits(self.model, batch)
-            with torch.no_grad():
-                reference = batch_logits(self.reference, batch)
-            steps = asked_entries(batch["present"]).sum(dim=(1, 2)).to(logits[0].dtype)
+            batch, logits, reference, steps = self._scored(sentences, indices, allowed)
             advantage = torch.as_tensor(advantages[indices], dtype=logits[0].dtype, device=self.device)
             reward = (advantage * flight_nll(logits, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
             kl = (flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
@@ -264,5 +322,7 @@ class RewardTuner:
             for name, value in (("reward", reward), ("kl", kl), ("data", data_loss)):
                 sums[name] += float(value.detach())
             count += 1
-        return {**{f"{name}_mean": value / count for name, value in sums.items()}, "batches": count,
-                "sentences": len(sentences.flights), "seconds": time.perf_counter() - started}
+            trace.append(float(kl.detach()))
+        return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace),
+                "batches": count, "sentences": len(sentences.flights), "seconds": time.perf_counter() - started,
+                "kl_trace": trace}

@@ -55,6 +55,23 @@ class TypecodeMatch:
     standard: str = ICAO_STANDARD
 
 
+#: Codes OpenSky's aircraft database files a type under that ICAO Doc 8643 does not list (code-health follow-up 24),
+#: each with the snapshot's (manufacturer, model) row it stands for — the designator is read from that row, never typed
+#: here. What a code stands for is OpenSky's own model name for it (``data/AIRCRAFT/aircraftDatabase.csv``, 2026-07):
+#: H900 "Hawker 900XP", CL61 "Challenger 601", G450 "G450", G650 "G650" / "G650 ER", F2EX "Falcon 2000EX (EASy)",
+#: F2LX "Falcon 2000LX (S)". The criterion: the code's model is the snapshot row's model or a variant of it (a suffix
+#: on the same airframe name), and the same file already files that variant under the row's designator elsewhere
+#: (Hawker 900XP 113 × under H25B; Falcon 2000EX 300+ × and 2000LX 40+ × under F2TH). Left out: AS29 (gliders).
+MARKETING_ALIASES: dict[str, tuple[str, str]] = {
+    "F2EX": ("DASSAULT", "Falcon 2000"),
+    "F2LX": ("DASSAULT", "Falcon 2000"),
+    "H900": ("HAWKER BEECHCRAFT", "Hawker 900"),
+    "CL61": ("CANADAIR", "CL-600 Challenger 601"),
+    "G450": ("GULFSTREAM AEROSPACE", "G-4X Gulfstream G450"),
+    "G650": ("GULFSTREAM AEROSPACE", "G-6 Gulfstream G650"),
+}
+
+
 class IcaoTypeDesignatorCatalog:
     """An immutable view of one versioned ICAO Doc 8643 snapshot."""
 
@@ -123,10 +140,27 @@ class IcaoTypeDesignatorCatalog:
         return self._by_record.get((manufacturer, model), frozenset())
 
     def normalize_typecode(self, typecode: str) -> str:
+        """The ICAO designator ``typecode`` names: itself when the snapshot lists it, the designator of the snapshot
+        row a `MARKETING_ALIASES` code stands for, else ``KeyError``."""
         normalized = typecode.strip().upper()
+        if normalized in MARKETING_ALIASES:
+            return self.alias_target(normalized)
         if normalized not in self._by_typecode:
             raise KeyError(f"typecode {normalized!r} is not present in {ICAO_STANDARD}")
         return normalized
+
+    def alias_target(self, alias: str) -> str:
+        """The designator the snapshot gives the model a `MARKETING_ALIASES` code stands for; refused when the snapshot
+        lists the alias itself (the table's premise is that it does not — the real designator would be overridden),
+        or names that model under other than exactly one designator."""
+        if alias in self._by_typecode:
+            raise KeyError(f"alias {alias!r} is itself a designator in {ICAO_STANDARD}; drop it from MARKETING_ALIASES")
+        manufacturer, model = MARKETING_ALIASES[alias]
+        targets = self.record_typecodes(manufacturer, model)
+        if len(targets) != 1:
+            raise KeyError(f"alias {alias!r}: {ICAO_STANDARD} names ({manufacturer!r}, {model!r}) under "
+                           f"{sorted(targets)}, not one designator")
+        return next(iter(targets))
 
     def match_faa_model(self, manufacturer: str, model: str) -> TypecodeMatch | None:
         """Map an FAA certificated model only when the ICAO result is unambiguous.
