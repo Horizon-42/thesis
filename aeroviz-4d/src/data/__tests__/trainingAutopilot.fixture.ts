@@ -72,7 +72,7 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
     timing: { waitS: 0, setupS: 0.02, openS: 0.91, flightKept: false, prepareS: 0.01, flyS: 0.21, cycles, judgeS: 0.06,
               answerS: 0.03, computeS: 1.24 },
     executor: { spec: "4dTrajectory/outputs/POOLED/executor/test", specSha256: "9".repeat(64), sourceSha256: "8".repeat(64),
-      wordClock: "track", cycleS: 1, timeoutFactor: 1.5 },
+      wordClock: model === null ? "track" : "time", cycleS: 1, timeoutFactor: 1.5 },
     artefact: "4dTrajectory/outputs/POOLED/instruction_language/test",
     vocabularySpecSha256: sample.vocabulary.specSha256,
     group: "own dynamics",

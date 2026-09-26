@@ -98,7 +98,7 @@ def word_verdict(verdict: Verdict, segment: Segment, spec: Any, words: Words, he
                              "turn and corridor)")
         if any(item.column == APPROACH and item.kind == "clear" and item.row < step for item in segment.instructions):
             return _not_judged("a clearance after an earlier one in the model's flown sentence: the judge reads the "
-                               "flight's first capture turn and corridor, the earlier clearance's")
+                               "flight's first capture turn and corridor, which need not be this clearance's")
         corridor, capture = judged["corridor"], judged["capture_turn"]
         checks = ([_check("captured the final", False)] if capture is None else
                   [_check("capture turn monotone", capture["progress_ok"]),
@@ -117,8 +117,11 @@ def word_verdict(verdict: Verdict, segment: Segment, spec: Any, words: Words, he
         def named(target_m: float | None) -> str:
             return "descend to land" if target_m is None else f"{target_m:.0f} m"
 
+        tubes = [tube for tube in judged["vertical"] if tube["row"] >= step]
+        if not tubes or tubes[0]["row"] != step:
+            raise ValueError(f"the judge read no tube from the angle word's step {step}: it has nothing to be judged in")
         checks = [_check(f"in the tube of the altitude word {named(tube['target_m'])}", tube["contained"], tube["inside"],
-                         tube["rows"]) for tube in judged["vertical"] if tube["row"] >= step]
+                         tube["rows"]) for tube in tubes]
         return _settled(checks, "judged in the altitude tubes it anchors")
     if column == SPEED:
         if words.speed_mps(word.value) is None:

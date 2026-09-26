@@ -4,6 +4,7 @@ service's lookups and caches, the endpoint's statuses, and the frontend's copies
 readings and verdicts only — nothing here opens an artefact, a spec or the frontend's data."""
 
 import json
+import math
 import os
 import re
 import unittest
@@ -781,6 +782,37 @@ class BackendTest(unittest.TestCase):
                 backend.fly(request)
         self.assertEqual(asked, [False, False, True])
 
+    def test_a_models_sentence_is_read_under_its_time_limit_flown_and_answered_on_the_time_clock(self):
+        backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
+        params = SimpleNamespace(word_clock="track", cycle_s=1.0, timeout_factor=1.5)
+        words = SimpleNamespace(**vars(MODEL_WORDS), spec=SimpleNamespace(sha256="v" * 64))
+        context = SimpleNamespace(geometry=geometry2(), reading=SimpleNamespace(words=np.zeros((20, 6))), group="own dynamics")
+        record = {"sha256": "s" * 64, "source": {"executor_source_sha256": "c" * 64}}
+        flown_with = []
+
+        def flying(context_, params_, words_, column, row, superseded, model):
+            flown_with.append(model)
+            return SimpleNamespace(fly_s=0.0, judge_s=0.0, flown=SimpleNamespace(commands=torch.zeros(1, 3, 3)))
+
+        sample = {"flights": [{"flightKey": "F", "datasetId": "KXXX:F"}]}
+        answers = []
+        with mock.patch.object(backend, "training_set", lambda airport, set_id: (Path("a"), "val", sample)), \
+                mock.patch.object(backend, "executor_for", lambda artefact: (Path("e"), params, record, words)), \
+                mock.patch.object(backend, "flight", lambda artefact, split, key, words_: (context, False)), \
+                mock.patch("aeroviz_backend.autopilot_segment.backend.fly_segment", flying), \
+                mock.patch("aeroviz_backend.autopilot_segment.backend.segment_payload", lambda *args: {}):
+            for seq, sentence in enumerate((model_record(), None), start=1):
+                answers.append(backend.fly({"clientId": "page", "seq": seq, "airport": "KXXX", "setId": "a_set",
+                                            "flightKey": "F", "column": "heading", "row": 10, "sentence": sentence}))
+            # over the steps its time limit lets it say (12 observed steps left from step 8 × 1.5: 19): refused by name
+            with self.assertRaisesRegex(RequestRefused, "lets it say 19"):
+                backend.fly({"clientId": "page", "seq": 3, "airport": "KXXX", "setId": "a_set", "flightKey": "F",
+                             "column": "heading", "row": 10, "sentence": model_record(rows=8 + 20)})
+        model, truth = flown_with
+        self.assertEqual((model.overlay_id, model.sample, model.first_row, model.rows), ("generation_x", 2, 8, 18))
+        self.assertIsNone(truth)
+        self.assertEqual([answer["executor"]["wordClock"] for answer in answers], ["time", "track"])
+
 
 class FakeAutopilot:
     def __init__(self, error: Exception | None = None) -> None:
@@ -855,7 +887,8 @@ class ModelSegmentTest(unittest.TestCase):
     def test_a_sentence_that_is_not_one_is_refused_by_name(self):
         record = model_record()
         cases = [
-            (dict(firstRow=20), "not a step of the observed flight"),
+            (dict(firstRow=9, events=[{**event, "row": 9} for event in record["events"][:6]]),
+             "starts at step 9, not the prior's first predicted step 8"),
             (dict(rows=8), "not after its first step"),
             (dict(events=[*record["events"][1:], record["events"][0]]), "not in (step, column) order"),
             (dict(events=record["events"][1:]), "does not say every column"),
@@ -872,6 +905,9 @@ class ModelSegmentTest(unittest.TestCase):
             with self.subTest(change=list(change)), self.assertRaisesRegex(RequestRefused, re.escape(message)):
                 self.sentence(**change)
         self.assertEqual(self.sentence(rows=8 + 19).rows, 27)
+        with self.assertRaisesRegex(RequestRefused, "leave none to fly after the sentence's first"):
+            model_sentence(model_record(rows=9, events=record["events"][:6]), MODEL_WORDS, runways=2, observed_rows=9,
+                           timeout_factor=1.5)
         with self.assertRaisesRegex(RequestRefused, "has no"):
             model_sentence({"overlayId": "x"}, MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
 
@@ -922,14 +958,17 @@ class ModelSegmentTest(unittest.TestCase):
         self.assertEqual({w.info["target_deg"] for w in words if w.column == HEADING}, {50.0, 60.0, 70.0})
         self.assertTrue(all(w.kind == "said" for w in words if w.column != APPROACH or w.value != 1))
 
-    def test_a_models_reading_points_at_the_runway_in_force_where_its_segment_stops(self):
-        before = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)       # stops at 16: after the change
-        after = model_segment(self.sentence(), APPROACH, 12, LEAD, MODEL_WORDS)       # to the outcome
-        signals = signals10()
-        self.assertEqual(model_reading(signals, before, MODEL_WORDS).runway_index, 1)
-        early = model_segment(self.sentence(), HEADING, 8, LEAD, MODEL_WORDS)         # stops at 12: before it
-        self.assertEqual(model_reading(signals, early, MODEL_WORDS).runway_index, 0)
-        reading_ = model_reading(signals, after, MODEL_WORDS)
+    def test_a_models_reading_points_at_the_runway_its_sentence_points_at_last(self):
+        """The runway its free generation's outcome was read on, so a segment ends where the sample did — even one that
+        stops before the change (27 from step 15)."""
+        sentence, signals = self.sentence(), signals10()
+        before = model_segment(sentence, HEADING, 10, LEAD, MODEL_WORDS)       # stops at 16: after the change
+        early = model_segment(sentence, HEADING, 8, LEAD, MODEL_WORDS)         # stops at 12: before it
+        after = model_segment(sentence, APPROACH, 12, LEAD, MODEL_WORDS)       # to the outcome
+        self.assertEqual(sentence.last_runway, 1)
+        self.assertEqual([model_reading(signals, segment, sentence, MODEL_WORDS).runway_index for segment in (before, early, after)],
+                         [1, 1, 1])
+        reading_ = model_reading(signals, after, sentence, MODEL_WORDS)
         self.assertEqual((reading_.join_row, reading_.unspecified_row), (4, 8))
 
     def test_a_models_time_limit_is_its_free_generations(self):
@@ -961,7 +1000,7 @@ class ModelSegmentTest(unittest.TestCase):
                         key=lambda event: (event["row"], event["column"]))
         sentence = self.sentence(events=events)
         angle = model_segment(sentence, ANGLE, 11, LEAD, MODEL_WORDS)
-        flown_reading = model_reading(signals10(), angle, MODEL_WORDS)
+        flown_reading = model_reading(signals10(), angle, sentence, MODEL_WORDS)
         judged = judged_reading(flown_reading, angle)
         added = [word for word in judged.instructions if word not in flown_reading.instructions]
         self.assertEqual([(w.column, w.value, w.row, w.kind) for w in added], [(ALTITUDE, 7, 3, "in force")])
@@ -971,13 +1010,44 @@ class ModelSegmentTest(unittest.TestCase):
         self.assertIs(judged_reading(segment_reading(reading(), truth), truth).instructions,
                       segment_reading(reading(), truth).instructions)
         first = model_segment(sentence, ANGLE, 8, LEAD, MODEL_WORDS)
-        self.assertEqual(len(judged_reading(model_reading(signals10(), first, MODEL_WORDS), first).instructions),
+        self.assertEqual(len(judged_reading(model_reading(signals10(), first, sentence, MODEL_WORDS), first).instructions),
                          len(first.instructions))
         # the tubes before the word's step are other angle words': the verdict reads the ones from it on
         tubes = [{"row": 0, "rows": 3, "inside": 1, "contained": False, "target_m": 1110.0},
                  {"row": 3, "rows": 4, "inside": 4, "contained": True, "target_m": 1110.0}]
         body = word_verdict(verdict(vertical=tubes), angle, SPEC, WORDS, None)
         self.assertEqual((body["status"], [check["rows"] for check in body["checks"]]), ("inside", [4]))
+
+    def test_the_labellers_own_tube_check_judges_a_models_angle_word_from_its_step(self):
+        """The labeller's `tube_checks` on a flight level at 1200 m for five steps, then down at 3°: the model said 600 m
+        and level at its first step (8), 3° at 13. On what was flown, one tube from step 8 — its five level rows outside
+        the 600 m level band count against the 3° word; on what its judge reads, the 3° word's own tube from step 13,
+        every row inside."""
+        from ts_transformer.instructions.labeller.vertical import tube_checks
+        from ts_transformer.instructions.words import ANGLE_LEVEL, Words
+        from ts_transformer.tests.support import instruction_spec
+
+        spec = instruction_spec()
+        words = Words(spec)
+        events = [{"row": 8, "column": column, "value": value}
+                  for column, value in enumerate([0, 0, 18, words.altitude_index(600.0), ANGLE_LEVEL, 10])]
+        events.append({"row": 13, "column": ANGLE, "value": words.angle_index(3.0)})
+        sentence = model_sentence(model_record(rows=28, events=events), words, runways=1, observed_rows=40, timeout_factor=1.5)
+        segment = model_segment(sentence, ANGLE, 13, LEAD, words)            # to the outcome: 20 steps from step 8
+        flown_reading = model_reading(signals10(), segment, sentence, words)
+        distance = 200.0 * np.arange(20)
+        altitude = np.where(np.arange(20) < 5, 1200.0, 1200.0 - (distance - distance[5]) * math.tan(math.radians(3.0)))
+
+        def read(reading_: Reading) -> list[tuple]:
+            return [(tube["row"], tube["rows"], tube["inside"], tube["contained"])
+                    for tube in tube_checks(reading_.instructions, distance, altitude, spec, words)]
+
+        self.assertEqual(read(flown_reading), [(0, 20, 15, False)])
+        judged = judged_reading(flown_reading, segment)
+        self.assertEqual(read(judged), [(0, 5, 0, False), (5, 15, 15, True)])
+        body = word_verdict(verdict(vertical=tube_checks(judged.instructions, distance, altitude, spec, words)), segment, SPEC,
+                            WORDS, None)
+        self.assertEqual((body["status"], [(check["inside"], check["rows"]) for check in body["checks"]]), ("inside", [(15, 15)]))
 
     def test_a_models_second_clearance_is_not_judged_on_the_first_ones_capture(self):
         record = model_record()
@@ -1004,7 +1074,8 @@ class ModelSegmentTest(unittest.TestCase):
         off[0, 3:14] = True
         judged = verdict(heading=[{"row": 0, "rows": 2, "inside": 2}, {"row": 2, "rows": 4, "inside": 4},
                                   {"row": 6, "rows": 0, "inside": 0}])
-        result = FlownSegment(segment=segment, reading=model_reading(signals10(), segment, MODEL_WORDS), signals=None,
+        result = FlownSegment(segment=segment, reading=model_reading(signals10(), segment, self.sentence(), MODEL_WORDS),
+                              signals=None,
                               model=self.sentence(), flown=replace(run, modes={**run.modes, "intercepting_off_word": off}),
                               verdict=replace(judged, end_row=16), reached_end=True, fly_s=0.0, judge_s=0.0)
         admitted = SimpleNamespace(smoothed=SimpleNamespace(track_deg=np.full(9, 60.0)))
@@ -1052,7 +1123,9 @@ class ModelFlightTest(unittest.TestCase):
                              geometry=geometry2(), crossing_heights=(15.0, 15.0), group=group, approach_ias_mps=70.0,
                              observed_track_deg=np.full(20, 90.0), observed_distance_m=200.0 * rows)
 
-    def fly(self, column: int, row: int, end_row: int, group: str = "own dynamics", events: list | None = None):
+    def fly(self, column: int, row: int, end_row: int, group: str = "own dynamics", events: list | None = None,
+            read_rows: int | None = None):
+        """``read_rows``: the rows the judge read through the labeller's gate — None, a gate that refused the track."""
         record = model_record() if events is None else model_record(events=events)
         sentence = model_sentence(record, MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
         asked = {}
@@ -1063,13 +1136,16 @@ class ModelFlightTest(unittest.TestCase):
 
         def judge(run, index, geometry, runway_index, judged, signals, spec, words):
             asked.update(runway_index=runway_index, judged=judged, runway=signals.runway)
-            return Verdict("timeout", end_row, None, {}, None, flown_rows=end_row + 1, refused="not read here")
+            return (Verdict("timeout", end_row, None, {}, None, flown_rows=end_row + 1, refused="not read here")
+                    if read_rows is None else replace(verdict(), end_row=end_row, flown_rows=end_row + 1))
 
         words = SimpleNamespace(**vars(MODEL_WORDS), spec=SPEC)
         params = SimpleNamespace(timeout_factor=1.5, cycle_s=1.0)
+        admitted = SimpleNamespace(signals=SimpleNamespace(n_rows=read_rows))
         with mock.patch.object(fly_module, "segment_batch", lambda *args: None), \
                 mock.patch.object(fly_module, "fly_batch_until", fly_batch_until), \
-                mock.patch.object(fly_module, "judge", judge):
+                mock.patch.object(fly_module, "judge", judge), \
+                mock.patch.object(fly_module, "read_flown", lambda *args: admitted):
             result = fly_module.fly_segment(self.context(group), params, words, column, row, NEVER, sentence)
         return result, asked
 
@@ -1083,8 +1159,8 @@ class ModelFlightTest(unittest.TestCase):
         self.assertEqual((asked["model_limit_s"], asked["stop_steps"]), (36.0, 8))
         self.assertEqual((asked["runway_index"], asked["runway"]), (1, "27"))
         self.assertIs(result.reading, asked["judged"])          # a heading word: judged on what was flown
-        _, early = self.fly(HEADING, 8, 12)                      # stopped at 12: before the change
-        self.assertEqual((early["runway_index"], early["runway"]), (0, "09"))
+        _, early = self.fly(HEADING, 8, 12)                      # stopped at 12, before the change: the sentence's last too
+        self.assertEqual((early["runway_index"], early["runway"]), (1, "27"))
 
     def test_an_angle_word_is_judged_on_its_tube_from_its_step(self):
         record = model_record()
@@ -1100,6 +1176,15 @@ class ModelFlightTest(unittest.TestCase):
             self.fly(HEADING, 10, end_row=4)
         result, _ = self.fly(HEADING, 10, end_row=5)
         self.assertEqual(result.segment.word_step, 2)
+
+    def test_a_word_past_where_the_labellers_gate_cut_the_flown_track_is_refused(self):
+        """The gate cuts a flown track at a landing passage it finds on the 2 s rows, which can come before the outcome
+        read every cycle: the heading word at the flown sentence's step 2 is judged on three rows read, not on two."""
+        with self.assertRaisesRegex(RequestRefused, "cuts the model's flown track at a landing passage after step 9, before "
+                                                    "it said this word at step 10"):
+            self.fly(HEADING, 10, end_row=16, read_rows=2)
+        result, _ = self.fly(HEADING, 10, end_row=16, read_rows=3)
+        self.assertEqual(result.segment.row, 10)
 
     def test_the_drive_is_the_time_clock_under_the_given_limit(self):
         """`fly_batch_until` for a model: its stepper handed the time clock (the spec's word clock not even asked for)
@@ -1186,6 +1271,11 @@ class FreeGenerationTest(unittest.TestCase):
         self.assertTrue(torch.equal(again.states[:, : cycles + 1], spoken.states[:, : cycles + 1]))
         self.assertTrue(torch.equal(again.commands[:, :cycles], spoken.commands[:, :cycles]))
         self.assertTrue(torch.equal(again.sentence_s[:, :cycles], spoken.sentence_s[:, :cycles]))
+        # and what the judge reads of the flight besides its states: the modes and the limits that bound, cycle by cycle
+        for name in (*again.modes, *again.limits):
+            ours = (again.modes if name in again.modes else again.limits)[name]
+            theirs = (spoken.modes if name in spoken.modes else spoken.limits)[name]
+            self.assertTrue(torch.equal(ours[:, :cycles], theirs[:, :cycles]), name)
 
 
 class MirrorTest(unittest.TestCase):

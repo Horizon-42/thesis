@@ -30,7 +30,7 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Executor, Flown
 from ts_transformer.autopilot.flights import rebuild_series
 from ts_transformer.autopilot.frame import AirportCharts
-from ts_transformer.autopilot.judge import Verdict, judge
+from ts_transformer.autopilot.judge import Verdict, judge, read_flown
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import published_crossing_heights
@@ -123,6 +123,11 @@ def segment_batch(context: FlightContext, segment: Segment, reading: Reading, si
                         groups=[context.group], drawn={})
 
 
+#: The word clock a model's sentence is flown on, whatever the spec's (`ExecutorParams.word_clock`): its free generation's,
+#: every word heard at its own step (`TimeClock`, `fly_batch_until`).
+MODEL_WORD_CLOCK = "time"
+
+
 def model_time_limit_s(context: FlightContext, first_row: int, params: ExecutorParams, step_s: float) -> float:
     """A model's flight's time limit: the observed flight's remaining time from the sentence's first step × the spec's
     timeout factor. MIRROR of `experiments.prior_free_generation.limits_s` (a runner the backend does not import; pinned
@@ -187,7 +192,7 @@ def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, co
             raise RequestRefused(f"a model's sentences are flown on the flight's own dynamics only, as its free generation "
                                  f"flies them: this flight flies on {context.group}")
         segment = model_segment(model, column, row, lead, words)
-        reading = model_reading(context.signals, segment, words)
+        reading = model_reading(context.signals, segment, model, words)
         # the judge reads the flown track against the runway the MODEL points at (the observed rows name the observed one)
         signals = replace(segment_signals(context.signals, segment),
                           runway=context.geometry.candidates[reading.runway_index].ident)
@@ -203,6 +208,13 @@ def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, co
     if model is not None and verdict.end_row <= segment.word_step * int(round(spec.step_s / flown.cycle_s)):
         raise RequestRefused(f"the model's flight had ended ({verdict.outcome}, {verdict.end_row * flown.cycle_s:g} s after "
                              f"step {segment.start_row}) by the time it said this word at step {row}")
+    if model is not None and verdict.words is not None:
+        # the judge reads the flown track through the labeller's gate, which cuts it at a landing passage it finds on the
+        # sentence's 2 s rows — which can come before the outcome read every cycle: a word past the cut was never judged
+        read = read_flown(flown, 0, verdict.outcome, verdict.end_row, context.geometry, signals, spec).signals.n_rows
+        if segment.word_step >= read:
+            raise RequestRefused(f"the labeller's gate cuts the model's flown track at a landing passage after step "
+                                 f"{segment.start_row + read - 1}, before it said this word at step {row}")
     return FlownSegment(segment=segment, reading=reading, signals=signals, model=model, flown=flown, verdict=verdict,
                         reached_end=None if segment.to_landing else reached, fly_s=fly_s,
                         judge_s=time.perf_counter() - started)

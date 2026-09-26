@@ -199,20 +199,28 @@ describe("TrainingSentenceBar", () => {
     expect(setTrainingPick).toHaveBeenLastCalledWith({ source, column: "heading", row: 12, attempt: 0 });
   });
 
-  it("offers nothing to fly for a word a model said after its flight ended", () => {
+  it("offers nothing to fly for a word a model said as or after its flight ended — the backend refuses the same words", () => {
     select();
-    // the first sample speaks on for three steps past its landing at 110 s: a speed word at step 58 (116 s)
+    // the first sample speaks on past its landing at 110 s: level at step 55 (110 s, the end itself), a speed word at
+    // step 58 (116 s)
     generations(0, (raw) => {
       const landed = raw.flights[0].samples[0];
-      Object.assign(landed, { rows: 60, events: [...landed.events, { row: 58, column: 5, value: WORD.speed110 }] });
+      Object.assign(landed, { rows: 60, events: [...landed.events, { row: 55, column: 4, value: WORD.level },
+        { row: 58, column: 5, value: WORD.speed110 }] });
     });
     appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
     render(<TrainingSentenceBar />);
-    fireEvent.click(screen.getByLabelText(/^speed 110 m\/s — said by base model at step 58/));
-    expect(setTrainingPick).not.toHaveBeenCalled();
-    const fly = screen.getByRole("button", { name: "▶ Fly" }) as HTMLButtonElement;
-    expect(fly.disabled).toBe(true);
-    expect(fly.title).toBe("The model said this word after its flight had ended (110 s): there is no flight to fly.");
+    for (const label of [/^angle level — said by base model at step 55/, /^speed 110 m\/s — said by base model at step 58/]) {
+      fireEvent.click(screen.getByLabelText(label));
+      expect(setTrainingPick).not.toHaveBeenCalled();
+      const fly = screen.getByRole("button", { name: "▶ Fly" }) as HTMLButtonElement;
+      expect(fly.disabled).toBe(true);
+      expect(fly.title).toBe("The model said this word after its flight had ended (110 s): there is no flight to fly.");
+    }
+    // a step before the end is flown
+    fireEvent.click(screen.getByLabelText(/^speed unspecified — said by base model at step 40/));
+    expect(setTrainingPick).toHaveBeenLastCalledWith({ source: { overlayId: BASE_MODEL_ID, sample: 0 }, column: "speed", row: 40,
+      attempt: 0 });
   });
 
   it("numbers a model's samples, marking the ones whose flight did not land, and reads the one chosen", () => {

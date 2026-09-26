@@ -154,6 +154,7 @@ describe("TrainingAutopilotCard", () => {
     expect(details).not.toMatch(/from the observed aircraft/);
     // the executor's limits count over the whole re-flight, and say so
     expect(details).toMatch(/cycles of 1 s judged — the model's whole flight from its first step \(4\), not only this word's segment/);
+    expect(details).toMatch(/words said on the time clock/);
     unmount();
     // a live flight off the sample: the backend's executor is not the one that flew it
     const moved = onSampleLine(mockAutopilotAnswer(set, asked));

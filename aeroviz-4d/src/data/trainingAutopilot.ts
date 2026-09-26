@@ -164,6 +164,7 @@ export interface TrainingAutopilotSegment {
     specSha256: string;
     /** The executor code the spec was written by — the code that flew this (the backend refuses any other). */
     sourceSha256: string;
+    /** The word clock this flight was flown on: the spec's for the truth's words, "time" for a model's sentence. */
     wordClock: string;
     cycleS: number;
     /** Control cycles per sentence step: the track's point `k * stepCycles` is the flight's step `segment.row + k`. */

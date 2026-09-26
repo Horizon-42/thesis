@@ -31,6 +31,7 @@ from ts_transformer.instructions.signals import ROW_FIELDS, FlightSignals
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, APPROACH_CLEARED, COLUMNS, HEADING, RUNWAY, SPEED, UNCHANGED, Words,
 )
+from ts_transformer.prior.scene import N_LOOK
 
 from aeroviz_backend.autopilot_segment.errors import RequestRefused
 
@@ -69,6 +70,13 @@ class ModelSentence:
     rows: int
     grid: np.ndarray                # [rows - first_row, 6], UNCHANGED where a column says nothing; row 0 complete
 
+    @property
+    def last_runway(self) -> int:
+        """The runway the sentence points at last: the one its free generation's outcome is read on
+        (`prior_free_generation.flight_rows`)."""
+        said = self.grid[:, RUNWAY][self.grid[:, RUNWAY] != UNCHANGED]
+        return int(said[-1])
+
 
 def _int(value: object, what: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
@@ -87,7 +95,8 @@ def model_steps_max(observed_rows: int, first_row: int, timeout_factor: float) -
 def model_sentence(record: object, words: Words, runways: int, observed_rows: int, timeout_factor: float) -> ModelSentence:
     """A model's sentence from the request's ``sentence`` (``{overlayId, sample, firstRow, rows, events}``), refused by
     name unless its words are the vocabulary's, in (step, column) order, from a first step inside the observed flight
-    that says every column, over no more steps than its flight can say (`model_steps_max`)."""
+    that says every column — the prior's first predicted step (`N_LOOK`), where the free generation starts and which
+    its time limit counts from — over no more steps than its flight can say (`model_steps_max`)."""
     if not isinstance(record, dict):
         raise RequestRefused(f"the sentence must be an object, got {record!r}")
     missing = [key for key in ("overlayId", "sample", "firstRow", "rows", "events") if key not in record]
@@ -98,8 +107,10 @@ def model_sentence(record: object, words: Words, runways: int, observed_rows: in
         raise RequestRefused(f"the sentence's overlayId must be a string, got {overlay_id!r}")
     sample = _int(record["sample"], "the sentence's sample")
     first, rows = _int(record["firstRow"], "the sentence's firstRow"), _int(record["rows"], "the sentence's rows")
-    if not 0 <= first < observed_rows:
-        raise RequestRefused(f"the sentence's first step {first} is not a step of the observed flight's {observed_rows}")
+    if first != N_LOOK:
+        raise RequestRefused(f"the sentence starts at step {first}, not the prior's first predicted step {N_LOOK}")
+    if first > observed_rows - 2:
+        raise RequestRefused(f"the observed flight's {observed_rows} steps leave none to fly after the sentence's first, {first}")
     if rows <= first:
         raise RequestRefused(f"the sentence ends at step {rows}, not after its first step {first}")
     most = model_steps_max(observed_rows, first, timeout_factor)
@@ -205,15 +216,15 @@ def model_segment(sentence: ModelSentence, column: int, row: int, lead_rows: int
                    grid=flown, instructions=sentence_instructions(flown, words))
 
 
-def model_reading(signals: FlightSignals, segment: Segment, words: Words) -> Reading:
+def model_reading(signals: FlightSignals, segment: Segment, sentence: ModelSentence, words: Words) -> Reading:
     """The reading the executor flies and its judge reads for a model's segment: its words from the sentence's first
-    step; the runway it points at when its segment stops (the landing is judged on it). A `Reading`'s clearance,
-    capture and "unspecified" rows are the labeller's findings on an observed flight, which a model's sentence has none
-    of — the judge reads the words — so they are the sentence's own: where it first clears, never captures, first leaves
-    the speed."""
+    step; the runway the whole sentence points at last (`ModelSentence.last_runway`) — the landing is judged on it, as
+    its free generation judged the sample's, so a segment ends where the sample did. A `Reading`'s clearance, capture and
+    "unspecified" rows are the labeller's findings on an observed flight, which a model's sentence has none of — the
+    judge reads the words — so they are the sentence's own: where it first clears, never captures, first leaves the
+    speed."""
     grid = segment.grid
-    runway = grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED]
-    return Reading(dataset_id=signals.dataset_id, airport=signals.airport, runway_index=int(runway[-1]), words=grid,
+    return Reading(dataset_id=signals.dataset_id, airport=signals.airport, runway_index=sentence.last_runway, words=grid,
                    instructions=segment.instructions, capture_row=len(grid), join_row=_first(grid[:, APPROACH] == APPROACH_CLEARED),
                    unspecified_row=_first(grid[:, SPEED] == words.speed_unspecified), cut_at_crossing=False, checks={})
 

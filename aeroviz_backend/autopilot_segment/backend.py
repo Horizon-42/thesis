@@ -31,7 +31,7 @@ from ts_transformer.io_utils import utc_now
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, OPT_OUTPUTS_ROOT, REPO_ROOT
 
 from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
-from aeroviz_backend.autopilot_segment.fly import FlightContext, fly_segment, open_flight
+from aeroviz_backend.autopilot_segment.fly import MODEL_WORD_CLOCK, FlightContext, fly_segment, open_flight
 from aeroviz_backend.autopilot_segment.payload import SCHEMA, segment_payload
 from aeroviz_backend.autopilot_segment.segment import model_sentence
 
@@ -180,10 +180,11 @@ class AutopilotSegmentBackend:
                        "flyS": round(result.fly_s, 3), "cycles": int(result.flown.commands.shape[1]),
                        "judgeS": round(result.judge_s, 3), "answerS": round(finished - answering, 3),
                        "computeS": round(finished - started, 3)},
-            # the spec and the artefact by name: their shas say which (the spec's is its record's)
+            # the spec and the artefact by name: their shas say which (the spec's is its record's); the word clock
+            # this flight was flown on — the spec's for the truth, the time clock for a model's sentence
             "executor": {"spec": directory.name, "specSha256": record["sha256"],
                          "sourceSha256": record["source"]["executor_source_sha256"],
-                         "wordClock": params.word_clock, "cycleS": params.cycle_s,
+                         "wordClock": params.word_clock if model is None else MODEL_WORD_CLOCK, "cycleS": params.cycle_s,
                          "timeoutFactor": params.timeout_factor},
             "artefact": artefact.name,
             "vocabularySpecSha256": words.spec.sha256,
