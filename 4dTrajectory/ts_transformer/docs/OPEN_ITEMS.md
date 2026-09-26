@@ -316,7 +316,7 @@ were NOT made without the owner:
   published frontend categories carry the old label until relabelled — 109 publisher-managed
   (`publish_ts_experiment_trajectories.py --refresh-labels-only`, once per publication root:
   `KRDU/`, `KSJC/`, `POOLED/experiment_predictions`, `POOLED/checkpoint_publications`) and 23
-  hand-published `ts_*` keys (`docs/relabel_published_categories.py`); labels only, no CZML,
+  hand-published `ts_*` keys (`archive/publication_oneoffs_2026_08/relabel_published_categories.py`); labels only, no CZML,
   records, keys or directories. Owner-run, one pass.
 - **C-4, the duration floor under `uniform`.** `control_duration_uniform_floor` is read by the
   `factorized` head only, but its default is 0.8 and every recipe pins 0.0, so 88 stored
@@ -614,13 +614,13 @@ the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure outp
   effect); PatchTST and the other three airports.
 - **Final-approach constraint campaign DONE 2026-09-04/05 (`final_constraint_20260904`, KRDU +
   KSJC, 3 predict-only + 5 trained arms per airport; report
-  `docs/2026-09-05_final_constraint_results.zh.md`, readout `docs/compare_constraint_arms.py`).**
+  `docs/2026-09-05_final_constraint_results.zh.md`, readout `experiments/compare_constraint_arms.py`).**
   Bounded output adopted as candidate default (see the config entry above); penalty vetoed;
   projection kept as deployment fallback. Not done: making `corridor-bounded` THE default
   (decide together with the state-v3 continuity term, which addresses the start of the path
   the corridor does not), PatchTST, control output.
 - **Procedure constraints in the learned model (2026-09-04 design + measurement):**
-  measured on every 3rd rostered arrival (`docs/measure_procedure_adherence.py`) that **0.0 %**
+  measured on every 3rd rostered arrival (`archive/procedure_census_2026_09/measure_procedure_adherence.py`) that **0.0 %**
   of observed KRDU/KSJC flights pass an off-axis IAF of their runway's RNAV(GPS) procedure,
   that 85–97 % (KRDU) / 38–83 % (KSJC) are established in the k=0.5 LPV cone by the FAF,
   and that once established 87–99 % of samples sit inside the cone and the −60/+120 m
@@ -672,7 +672,7 @@ the `2026-09-07_control_training_review` P0/P1 objective fixes. The closure outp
   5–22 m pooled ADE across seeds, the airport arms up to 107 m — read every margin against
   that. Runner `run_ts.py frame_ablation` (state arms, val split, resumable, no CV, no CZML;
   `--experiment-id` runs refuse a dirty worktree at EVERY arm start), readout
-  `docs/compare_frame_arms.py`, results
+  `experiments/compare_frame_arms.py`, results
   `docs/2026-09-03_airport_frame_ablation_results.md`. Not done: PatchTST A/B, control
   output, a KSJC cohort with enough 30R/12L flights to test the parallel pair there.
 - **The KRDU run is DONE (three generations; current = 2026-07-20 B3)** — artifacts in

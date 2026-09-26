@@ -26,7 +26,7 @@ lag that carries the rest of the ADE. ``--geometry-truth`` picks the truth those
 against (default ``closed``: the observed rows closed to the threshold at
 ``true_final_time_s``; ``observed`` reproduces the Phase 0 diagnostics' convention).
 
-    python 4dTrajectory/ts_transformer/docs/compare_frame_arms.py <campaign-dir> [...]
+    python run_ts.py compare_frame_arms <campaign-dir> [...]
         [--json out.json] [--geometry-truth closed|observed]
 """
 from __future__ import annotations
@@ -34,18 +34,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
-TS_DIR = Path(__file__).resolve().parents[1]
-for path in (REPO, REPO / "geokit" / "src", TS_DIR.parent):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
-from ts_transformer.data.approach_difficulty import strata_masks  # noqa: E402
-from ts_transformer.inference.arm_readout import (  # noqa: E402
+import ts_transformer.geometry.geometric_metrics as gm
+from ts_transformer.data.approach_difficulty import strata_masks
+from ts_transformer.repo_layout import REPO_ROOT
+from ts_transformer.inference.arm_readout import (
     fmt, load_arm, print_table,
 )
 
@@ -65,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     for campaign in args.campaigns:
         root = Path(campaign)
         if not root.is_absolute():
-            root = REPO / campaign
+            root = REPO_ROOT / campaign
         for pred_dir in sorted(root.glob("*_pred_*")):
             if (pred_dir / "summary.json").is_file():
                 rows = load_arm(pred_dir, geometry_truth=args.geometry_truth)

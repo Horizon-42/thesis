@@ -28,7 +28,7 @@ Next to ADE/FDE every stratum table also prints the time-free geometry columns f
 along-path lag); ``--geometry-truth`` picks their truth (default ``closed``; ``observed``
 reproduces the Phase 0 diagnostics' chamfer).
 
-    python compare_constraint_arms.py A=<A_pred_val> proj=<A_project_on_final_pred_val> ...
+    python run_ts.py compare_constraint_arms A=<A_pred_val> proj=<A_project_on_final_pred_val> ...
         [--json out.json] [--geometry-truth closed|observed]
 """
 
@@ -37,23 +37,16 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 
-HERE = Path(__file__).resolve().parent
-TS_DIR = HERE.parent
-REPO_ROOT = TS_DIR.parents[1]
-for path in (HERE, TS_DIR.parent, REPO_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-
-import compare_frame_arms as cfa  # noqa: E402
-import ts_transformer.geometry.final_approach_geometry as fag  # noqa: E402
-import ts_transformer.geometry.geometric_metrics as gm  # noqa: E402
-from ts_transformer.config import PROCEDURE_LATERAL_SCALE_M, PROCEDURE_VERTICAL_SCALE_M  # noqa: E402
+import ts_transformer.experiments.compare_frame_arms as cfa
+import ts_transformer.geometry.final_approach_geometry as fag
+import ts_transformer.geometry.geometric_metrics as gm
+from ts_transformer.config import PROCEDURE_LATERAL_SCALE_M, PROCEDURE_VERTICAL_SCALE_M
+from ts_transformer.repo_layout import REPO_ROOT
 
 # The hinge scales the penalty arm trains with (one source: config's constants).
 LATERAL_SCALE_M = PROCEDURE_LATERAL_SCALE_M

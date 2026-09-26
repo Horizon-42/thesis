@@ -1052,7 +1052,7 @@ use it for NEW run/category directories; existing directories are historical rec
 are never renamed. Relabeling already-published categories is metadata-only:
 `publish_ts_experiment_trajectories.py --refresh-labels-only` re-derives every
 publisher-managed category label from its stored manifest, and
-`docs/relabel_published_categories.py` was the 2026-08-24 one-off for the legacy
+`archive/publication_oneoffs_2026_08/relabel_published_categories.py` was the 2026-08-24 one-off for the legacy
 hand-published `ts_*` categories.
 
 ## Vendored code

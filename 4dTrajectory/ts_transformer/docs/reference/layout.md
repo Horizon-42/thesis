@@ -325,6 +325,8 @@ in to keep them self-contained) and are OFF the import path:
 - `archive/executor_vocabulary_only_2026_09/` — the executor parameters that came from data or flown checks (L31).
 - `archive/closed_loop_sft_2026_09/` — closed-loop supervised fine-tuning of the prior (CAT-K; not adopted), with its
   design sections.
+- `archive/publication_oneoffs_2026_08/`, `archive/procedure_census_2026_09/` (with its report),
+  `archive/bank_wiggle_figures_2026_08/` — the one-off scripts that used to sit in `docs/` (L20).
 
 `tests/test_architecture.py` asserts nothing live imports the archive — package modules,
 `tests/`, the runners and `run_ts.py` alike — and that no `__init__.py` makes it importable.
@@ -335,9 +337,12 @@ A finished one-off driver belongs there, not beside the live runners.
 **Measurement code is CODE.** Reusable logic goes in the package with tests
 (`outputs/control/basis_fit.py`, `geometry/geometric_metrics.py`, `approach_difficulty.strata_masks`);
 a runnable experiment goes in `experiments/<name>.py` behind `python run_ts.py <name>`;
-**`docs/` holds documents**. The `docs/*.py` scripts predate this rule and are a layout
-defect, not a pattern to copy (`docs/code-health-followups.md`) — do not add to them, and
-move what you touch. `tests/conftest.py` already puts the package's PARENT on `sys.path`,
+**`docs/` holds documents** — no `.py` under it (`tests/test_architecture.py::test_docs_holds_no_python`). The
+thirteen `docs/*.py` scripts that predated this rule were moved on 2026-09-26: the readouts still worth running
+became runners (`score_control_arms`, `compare_control_arms_paired`, `compare_control_arms_stratified`,
+`compare_frame_arms`, `compare_constraint_arms`, `specific_force_teacher_distribution`, `trace_architecture`), the
+one-offs went to `archive/publication_oneoffs_2026_08/`, `archive/procedure_census_2026_09/` and
+`archive/bank_wiggle_figures_2026_08/` (L19). `tests/conftest.py` already puts the package's PARENT on `sys.path`,
 so a new test file needs no path preamble.
 
 ### L21 · `tests/` one file per topic, `tests/support.py`
@@ -441,7 +446,7 @@ and slugs moved (75 gain a spelled token, 71 only move their folded `+N more` co
 hash), 0 changed loadability, and 132 published frontend categories carried the old label:
 109 publisher-managed ones (`publish_ts_experiment_trajectories.py --refresh-labels-only`,
 run once per publication root) and 23 hand-published `ts_*` ones
-(`docs/relabel_published_categories.py`) — labels only; no CZML, records, keys or directories
+(`archive/publication_oneoffs_2026_08/relabel_published_categories.py`) — labels only; no CZML, records, keys or directories
 move. Only `device` and the never-set backbone knobs stay excused.
 **On-disk run/category directories are historical record — never rename them.** Grammar,
 fallbacks and the relabel tooling: `docs/ENGINEERING_NOTES.md`.

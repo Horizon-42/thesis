@@ -66,7 +66,6 @@ def _module_files() -> list[Path]:
         if "__pycache__" not in path.parts
         and "vendor" not in path.parts
         and "tests" not in path.parts
-        and "docs" not in path.parts
         and "archive" not in path.parts
     ]
 
@@ -135,14 +134,19 @@ def _package_module_names() -> set[str]:
 
 
 def _flat_import_candidates() -> list[Path]:
-    """Everything that imports the package and is RUN: the modules, the tests, the docs
-    scripts, the experiment runners and the `run_ts.py` door."""
+    """Everything that imports the package and is RUN: the modules, the tests, the experiment
+    runners and the `run_ts.py` door."""
     return [
         *_archive_import_candidates(),
-        *sorted((TS_DIR / "docs").glob("*.py")),
         REPO_ROOT / "publish_ts_experiment_trajectories.py",
         REPO_ROOT / "run_ts.py",
     ]
+
+
+def test_docs_holds_no_python():
+    """`docs/` holds documents (L20): measurement code is a runner under `experiments/` or package code with tests,
+    and a finished one-off goes to `archive/`. The thirteen scripts that sat there were moved on 2026-09-26."""
+    assert sorted((TS_DIR / "docs").rglob("*.py")) == []
 
 
 def test_no_module_is_imported_by_its_flat_name():

@@ -259,7 +259,7 @@ existing directory. Tests: `tests/test_autopilot.py` (every write into `tmp_path
 AV24–AV25). Two runners write OVERLAYS beside a Training set (R11), never into it: a file of their own schema under
 `<root>/<ICAO>/training/<overlay-id>/`, listed in the airport's `training/overlays.json` (`OVERLAYS_SCHEMA`
 `aeroviz-training-overlays-v1`, one entry per overlay: its kind, the set it is drawn over, that set's sample sha256, the
-file). The index (`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instruction_training_export`
+file). The index (`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instructions/training_files.py`
 (`open_base_set`: the set must be a read-back of this reading rule and spec under this `SAMPLE_SCHEMA`, drawn from val;
 `base_flights`: each of its flights found in the artefact, its stored sentence equal to the set's events;
 `read_overlays` / `write_overlay`: an id listed or a directory existing is refused; the payload is written compact).

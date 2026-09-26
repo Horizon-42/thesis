@@ -5,7 +5,7 @@ Arms are trained on the same split with the same seed, so per-flight differences
 paired and a sign test is the honest summary: an aggregate that moves because a handful
 of flights moved a long way is a different claim from one that moves on most flights.
 
-    python 4dTrajectory/ts_transformer/docs/compare_control_arms_paired.py <a_pred_dir> <b_pred_dir>
+    python run_ts.py compare_control_arms_paired <a_pred_dir> <b_pred_dir>
 """
 from __future__ import annotations
 
@@ -16,12 +16,9 @@ import sys
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO))
-sys.path.insert(0, str(REPO / "4dTrajectory"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ts_transformer.config import CONTROL_THRUST_FRACTION  # noqa: E402
-from ts_transformer.outputs.dynamics.inverse import actual_controls  # noqa: E402
+from ts_transformer.config import CONTROL_THRUST_FRACTION
+from ts_transformer.outputs.dynamics.inverse import actual_controls
+from ts_transformer.repo_layout import REPO_ROOT
 
 AERO = np.array([122.6, 2.7, 0.023, 0.0334, 0.8, 0.2])
 MAX_THRUST_N = 240_000.0
@@ -87,11 +84,12 @@ def per_flight(pred_dir: Path) -> dict[str, dict]:
     return out
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     if len(argv) != 2:
         print(__doc__)
         return 2
-    a, b = (Path(p if Path(p).is_absolute() else REPO / p) for p in argv)
+    a, b = (Path(p if Path(p).is_absolute() else REPO_ROOT / p) for p in argv)
     left, right = per_flight(a), per_flight(b)
     shared = sorted(set(left) & set(right))
     if not shared:
@@ -126,4 +124,4 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    raise SystemExit(main())

@@ -12,11 +12,10 @@ rather than derived on paper.
 
 Usage (from the repo root, with the thesis env active)::
 
-    source scripts/activate_aeroviz_env.sh && aeroviz_activate_env
-    export PYTHONPATH=$PWD:$PWD/4dTrajectory/ts_transformer
-    python 4dTrajectory/ts_transformer/docs/trace_architecture.py
+    python run_ts.py trace_architecture [--embed] [--table]
 
-Writes ``arch_<model>_normalized_time.svg`` next to this file, plus a layer table on stdout.
+Writes ``arch_<model>_normalized_time*.svg`` beside the two tutorials (``TUTORIALS``), plus a layer
+table on stdout; ``--embed`` splices the overview into them.
 
 **Shape-bookkeeping nodes.** A traced graph contains nodes that only read a tensor's shape
 (``getattr(x, 'shape')`` and the ``getitem``s that unpack it) so a later ``reshape`` can be
@@ -38,9 +37,10 @@ import torch.fx as fx
 from torch.fx.passes.shape_prop import ShapeProp
 
 from ts_transformer.config import TSConfig
+from ts_transformer.repo_layout import TS_DIR
 from ts_transformer.backbone.adapters import build_model, parameter_count
 
-HERE = Path(__file__).resolve().parent
+TUTORIALS = TS_DIR / "docs"
 
 # Sentinel colours swapped for CSS custom properties after rendering, so the embedded SVG
 # follows the document's light/dark theme instead of baking graphviz's palette.
@@ -401,7 +401,7 @@ def embed(name: str, marker: str, svg_path: Path) -> str:
     Keeping this a scripted step rather than a paste means regenerating the figure and
     updating the document are one command, so the two cannot drift apart.
     """
-    doc = HERE / DOC_OF[name]
+    doc = TUTORIALS / DOC_OF[name]
     html = doc.read_text()
     start, end = f"<!-- {marker}:{name}:start -->", f"<!-- {marker}:{name}:end -->"
     if start not in html or end not in html:
@@ -434,13 +434,13 @@ def main() -> None:
         # The full graph ships twice: a standalone file (concrete colours, for opening in a
         # browser tab where page CSS cannot reach it) and an inline copy (CSS variables, so
         # the embedded version follows the document's theme).
-        out = HERE / f"arch_{name}_normalized_time.svg"
+        out = TUTORIALS / f"arch_{name}_normalized_time.svg"
         render(dot_src, out, inline=False)
-        full_inline = HERE / f"arch_{name}_normalized_time_full_inline.svg"
+        full_inline = TUTORIALS / f"arch_{name}_normalized_time_full_inline.svg"
         render(dot_src, full_inline, inline=True)
 
         overview_dot = build_collapsed_dot(model, example, title)
-        overview = HERE / f"arch_{name}_normalized_time_overview.svg"
+        overview = TUTORIALS / f"arch_{name}_normalized_time_overview.svg"
         render(overview_dot, overview, inline=True)
 
         if args.embed:

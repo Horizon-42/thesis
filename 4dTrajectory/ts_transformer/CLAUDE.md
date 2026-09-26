@@ -226,7 +226,7 @@ of the package, not a migration in progress.
 
 - **Seed noise on the control path is ~125 m of pooled ADE, not 30 m** (2026-09-08: `B1_point_matched` seeds 1337/2024 = 1248/1373 m around native32's 1322; duration MAE spread ~1 s). The 30 m line came from two-seed STATE arms. A single-seed control-arm ADE difference below ~125 m is not evidence; a gate on it needs a second seed (early stopping off, as A0.b's p180) or must be read against this line. Straight-in FDE and duration MAE spreads are smaller (~0.9 s MAE) but still single-seed unless replicated. **The same config re-trained at the 2026-09-15 code as a pair (`sf_n4/N4_twin` / `_s2024`, 180 / 168 epochs) differs by only 30 m of pooled ADE and 16 m of straight-in FDE p50.** The stored pair's 125 m came with an early stop at 143 epochs, so the line may be inflated by convergence. Keep 125 m as the conservative line until more converged pairs are measured (specific-force design §7.3).
 - **Bank skill is read against the random-flight floor and the same-runway twin ceiling that
-  `docs/score_control_arms.py` prints per arm — never against 1.0**, which is unreachable.
+  `experiments/score_control_arms.py` (`run_ts.py score_control_arms`) prints per arm — never against 1.0**, which is unreachable.
 - **Flyability: read the DELTA against observed tracks, never the absolute rate** — the polar is
   clean-configuration, real approaches are flown dirty, and on REAL tracks it first scored
   0/149. **Flyability alone is not a quality metric**: the WORSE predictor scores higher on it in
@@ -287,8 +287,8 @@ of the package, not a migration in progress.
 - A dynamics backend is a ROW keyed by the model × backend pair (L18).
 - `archive/` is off the import path (asserted by `tests/test_architecture.py`); finished one-off
   drivers belong there (L19).
-- Measurement code is CODE — package + tests, or `experiments/`; `docs/` holds documents; do not
-  add `docs/*.py` (L20).
+- Measurement code is CODE — package + tests, or `experiments/`; `docs/` holds documents and no `.py`
+  (tested) (L20).
 - `tests/` is one file per topic; shared fixtures in `tests/support.py` (L21).
 - A module belongs under `outputs/control/` only if EVERY consumer is control-specific (L23);
   import direction rules, all enforced by `tests/test_architecture.py` (L24). **Between paths**: the

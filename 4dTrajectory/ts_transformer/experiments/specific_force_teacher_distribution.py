@@ -9,7 +9,7 @@ It prints the percentiles of all four, how often each teacher leaves its box, an
 of the n_x teacher a candidate box would cut.
 
     conda activate aeroviz
-    python 4dTrajectory/ts_transformer/docs/specific_force_teacher_distribution.py \
+    python run_ts.py specific_force_teacher_distribution \
         4dTrajectory/outputs/KRDU/experiments/b1_quantile_20260907/B1_point_matched_pred_val
 """
 import json
@@ -18,20 +18,18 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO))
-sys.path.insert(0, str(REPO / "4dTrajectory"))
-from aerodynamic_model.torch_dynamics import GRAVITY_MPS2  # noqa: E402
-from aircraft.aero_params import aero_params_for_aircraft  # noqa: E402
-from flight_scenarios.scenario import aircraft_for_code, aircraft_provider_of  # noqa: E402
-from ts_transformer.config import (  # noqa: E402
+from aerodynamic_model.torch_dynamics import GRAVITY_MPS2
+from aircraft.aero_params import aero_params_for_aircraft
+from flight_scenarios.scenario import aircraft_for_code, aircraft_provider_of
+from ts_transformer.config import (
     CONTROL_SPECIFIC_FORCE,
     CONTROL_THRUST_FRACTION,
     TSConfig,
     recipe_settings,
 )
-from ts_transformer.outputs.dynamics.inverse import _drag_force, commanded_controls  # noqa: E402
-from ts_transformer.outputs.envelope import (  # noqa: E402
+from ts_transformer.outputs.dynamics.inverse import _drag_force, commanded_controls
+from ts_transformer.repo_layout import REPO_ROOT
+from ts_transformer.outputs.envelope import (
     MAX_THRUST_FRACTION,
     MIN_THRUST_FRACTION,
     SPECIFIC_FORCE_CONTRACT,
@@ -67,7 +65,12 @@ def flight_rows(pred_dir: Path, row: dict) -> tuple[np.ndarray, ...]:
     return sample(delta[:, 0]), sample(n_x[:, 0]), sample(floor), sample(ceiling)
 
 
-def main(pred_dir: Path) -> None:
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) != 1:
+        print(__doc__)
+        return 2
+    pred_dir = Path(argv[0]) if Path(argv[0]).is_absolute() else REPO_ROOT / argv[0]
     summary = json.loads((pred_dir / "summary.json").read_text())
     columns = list(zip(*(flight_rows(pred_dir, row) for row in summary["results"]
                          if row["status"] == "solved")))
@@ -91,4 +94,4 @@ def main(pred_dir: Path) -> None:
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]))
+    raise SystemExit(main())

@@ -226,7 +226,7 @@ stamped `experiment.label` and falls back to composing from metadata for pre-lab
 publishes. Relabeling published categories is metadata-only and never touches
 records/checkpoints: `publish_ts_experiment_trajectories.py --refresh-labels-only`
 (publisher-managed, from stored publication manifests) and
-`docs/relabel_published_categories.py` (the 2026-08-24 one-off for legacy `ts_*` keys).
+`archive/publication_oneoffs_2026_08/relabel_published_categories.py` (the 2026-08-24 one-off for legacy `ts_*` keys).
 **On-disk run/category directories are historical record — never rename them**;
 `run_slug()` is the grammar's filesystem form for FUTURE directories.
 Worked vocabulary — every KSJC label expanded, slot by slot, with the campaigns'
@@ -381,7 +381,7 @@ meaning and codebase pointers: `docs/2026-08-24_ksjc_result_labels_explained.md`
   flights — the turn onto final); the model concentrates its bank into a single mode too, but a
   nearly orthogonal one (alignment 0.062). It learned that banking happens, never when.
   **Always read bank skill against the floor and the same-runway twin ceiling that
-  `docs/score_control_arms.py` now prints per arm — never against 1.0**, which is unreachable
+  `experiments/score_control_arms.py` (`run_ts.py score_control_arms`) now prints per arm — never against 1.0**, which is unreachable
   because the entry state only partly determines the future. Doing so inverts the earlier
   loss-design reading: the velocity dose frozen into `simple-v2` is the only one below the floor.
   Measured on 1404 KRDU validation flights, `simple-v3` takes per-flight bank skill 0.124 →

@@ -11,7 +11,7 @@ they share a flight set, so the mix is identical and the aggregate is fair — b
 which kind of approach an arm won or lost on. A dose that helps only the straight-in majority
 and hurts every vectored arrival reads as a small net gain.
 
-    python .../compare_control_arms_stratified.py <campaign-dir> [...]
+    python run_ts.py compare_control_arms_stratified <campaign-dir> [...]
 """
 from __future__ import annotations
 
@@ -21,12 +21,9 @@ import sys
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO))
-sys.path.insert(0, str(REPO / "4dTrajectory"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ts_transformer.data.approach_difficulty import STRATUM_ESTABLISHED, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks  # noqa: E402
-from score_control_arms import _imitation_dose  # noqa: E402
+from ts_transformer.data.approach_difficulty import STRATUM_ESTABLISHED, STRATUM_STRAIGHT_IN, STRATUM_VECTORED, strata_masks
+from ts_transformer.experiments.score_control_arms import _imitation_dose
+from ts_transformer.repo_layout import REPO_ROOT
 
 
 
@@ -47,7 +44,8 @@ def arm_rows(pred_dir: Path) -> dict[str, dict]:
     return rows
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     if not argv:
         print(__doc__)
         return 2
@@ -55,7 +53,7 @@ def main(argv: list[str]) -> int:
     for campaign in argv:
         root = Path(campaign)
         if not root.is_absolute():
-            root = REPO / campaign
+            root = REPO_ROOT / campaign
         for pred_dir in sorted(root.glob("*_pred_*")):
             if (pred_dir / "summary.json").is_file():
                 rows = arm_rows(pred_dir)
@@ -101,7 +99,7 @@ def _dose_of(argv: list[str], arm: str) -> float:
     for campaign in argv:
         root = Path(campaign)
         if not root.is_absolute():
-            root = REPO / campaign
+            root = REPO_ROOT / campaign
         pred = root / f"{arm}_pred_val"
         if pred.is_dir():
             return _imitation_dose(pred)
@@ -109,4 +107,4 @@ def _dose_of(argv: list[str], arm: str) -> float:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    raise SystemExit(main())

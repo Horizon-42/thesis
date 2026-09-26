@@ -11,9 +11,9 @@ from pathlib import Path
 import subprocess
 import sys
 
-TS_DIR = Path(__file__).resolve().parents[1]
-DOCS = TS_DIR / "docs"
-SCRIPT = DOCS / "compare_control_arms_stratified.py"
+from ts_transformer.repo_layout import RUN_TS
+
+RUNNER = [sys.executable, str(RUN_TS), "compare_control_arms_stratified"]
 
 
 def _write_arm(campaign: Path, name: str, straight_ade: float, vectored_ade: float,
@@ -52,7 +52,7 @@ def test_a_wash_in_aggregate_is_split_apart_by_stratum(tmp_path):
     _write_arm(campaign, "high", straight_ade=300.0, vectored_ade=900.0, weight=64.0)
 
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(campaign)],
+        [*RUNNER, str(campaign)],
         capture_output=True, text=True, check=True,
     )
     out = result.stdout
@@ -84,7 +84,7 @@ def test_it_says_so_when_the_covariates_are_missing(tmp_path):
     }))
 
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(campaign)], capture_output=True, text=True
+        [*RUNNER, str(campaign)], capture_output=True, text=True
     )
     assert result.returncode == 1
     assert "no arms with difficulty covariates" in result.stdout
