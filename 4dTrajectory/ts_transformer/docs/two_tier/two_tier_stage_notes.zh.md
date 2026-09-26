@@ -244,7 +244,7 @@ landing 起，切入前加了两条硬约束（决断高度、跌破入口高度
   代码相同），**运行期间不要改它**；跑完再问用户删工作树和分支（删前先 unlink 数据软链接）。
 - **工作树 `executor-glidepath`、分支 `dev-executor-glidepath`**：已快进合并（`9557315d`），v10 的重读从它跑过；已删（用户 2026-09-26）——
   `v3_reread_v10_20260926/run.sh`、`v3_stage2_step0_v10_20260926/run.sh` 写的是它的路径，只作记录，不能照原样重跑。另一个会话整理 ts 文档的分支 `docs-reorg` 已合并进 dev-two-tier（用户 2026-09-26）：设计文档移到 `docs/two_tier/`（读数在 `docs/two_tier/readouts/`），`docs/` 里的脚本变成 runner 或归档，入口 `docs/README.md`；执行器指纹里的代码引用的十份记录和 `autopilot/__init__.py` 的路径等下一版执行器规格一起改（`docs/code-health-followups.md`）。它的工作树和分支已删（用户 2026-09-26）。
-- **分支 `dev-procedure-masks`（工作树 `.claude/worktrees/procedure-masks`，`f26f9d56`，可快进合并）**：程序屏蔽跟着模型走、与词表规则分开
+- **分支 `dev-procedure-masks`（工作树 `.claude/worktrees/procedure-masks`，一个功能提交加一个审查修复提交，可快进合并）**：程序屏蔽跟着模型走、与词表规则分开
   （先验设计 §5.1，契约 C35）。每个模型目录多一个 `procedure_masks.json`，`load_prior` 一起读出，说话器的程序屏蔽必须给；自由生成
   `--procedure-masks` 默认用模型自己的（`none` 或点名换）。重构前后逐位相同（真实起点开关各 50 句、扩充起点 200 句）；ts 全套通过；opus 审查
   没有必须修的，建议项已修。**合并之后、补记录之前所有先验都打不开**：补记录脚本 `/home/supercomputing/.claude/jobs/51eaaa9b/tmp/stamp.py`（演练：
