@@ -29,7 +29,7 @@ frontend reads. Solver internals and defaults live in `4dTrajectory/CLAUDE.md`.
   maps them without torch), anything else 500 with its reason. Built lazily on the first request (torch + ts_transformer,
   ~470 MB); one flight at a time; the last 8 rebuilt flights cached. A request with a `sentence` (a model's sample) flies
   that sentence as `prior_free_generation` flew it — from the observed state at its first step, the time clock, the
-  generation's time limit (`fly.model_time_limit_s` MIRRORS `limits_s`), the model's runway — and so re-flies the exported
+  generation's time limit (`fly.model_time_limit_s` MIRRORS `limits_s`), the sentence's last runway — and so re-flies the exported
   sample exactly. Full text: `aeroviz-4d/docs/35-viewer-reference.md` AV26.
 
 ## Observed tracks have TWO windows — the comparison overlay must use the model one

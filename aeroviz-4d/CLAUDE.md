@@ -152,7 +152,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   and its number there (`clientId`, `seq`): a later one from the same page supersedes the earlier still waiting or flying
   (409), so clicking through bands flies only the last; backend 400 / 404 / 409 / 422 / 500. A MODEL's word (the bar reading
   a sample) is asked WITH its sentence and flown as its free generation flew it — the whole sentence from the observed state at
-  `firstRow`, each word at its own step (`TimeClock`), the generation's time limit, judged on the model's runway — so it IS the
+  `firstRow`, each word at its own step (`TimeClock`), the generation's time limit, judged on the sentence's last runway — so it IS the
   exported sample's flight (the card checks point by point: 0.000 m over 104 segments, 2026-09-26); `source` echoed, no observed
   time or offset (AV26).
 - **Training's code: one reader (`data/trainingReader.ts`) for every Training file; shared wording in `data/trainingText.ts`;

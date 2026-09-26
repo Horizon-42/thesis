@@ -2,7 +2,7 @@
 
 ### 2026-09-26 — Training：模型说的词也交给实时执行器飞；模型的带不再画斜线；模型结束处写时间
 
-分支 `dev-model-autopilot`（工作树 `.claude/worktrees/training-sentences`，从 `dev-two-tier` `00d8b3c8` 分出），用户合并；合并后
+分支 `dev-model-autopilot`（工作树 `.claude/worktrees/training-sentences`，在 `dev-two-tier` `ee5c8af1` 之上），用户合并；合并后
 后端与前端都要重启。
 
 - **斜线去掉**（用户：词表看板里模型的词段画斜线，整个画面变得杂乱）：模型的带和真值的一样平涂；说明"这是模型的句子"的是框——
@@ -23,9 +23,14 @@
   改成同一个条件（原来差一个周期，在越过入口的那个周期会是 500）；**第二次许可**不判并写明原因；`overlayId` 必须是字符串、
   句子步数不超过时限下能说的；卡片写明限制计数是整段重飞的；三维起点的名字分真值与模型；句子条的来源与 `sourceOnScreen` 共用
   一个 `sourceOf`；结束时刻标签与刻度的避让按对齐方式算。
-- 测试：前端 98 个文件 834 条、`tsc`、`typecheck:scripts` 通过；后端 `aeroviz_backend/tests` 168 条通过（新增 `ModelSegmentTest`
-  13 条、`ModelFlightTest` 5 条，`FreeGenerationTest`：`speak_and_fly` 自己的循环照稿说话，和后端的飞法在真实执行器上逐状态
-  相同）。浏览器（工作树的 5174 前端 + 8766 后端）核对：两个模型的词都飞成，与样本 0.00 m；真值标签页不显示模型的答复；无控制台错误。
+- 第二轮 opus 审查（没有必须改的）后改的：判决没读到的模型词（标注器的门把飞出的航迹截在 2 s 行上的着陆通过处，可能早于每周期
+  读出的结局）按名字拒绝，下降角词找不到自己那一步的管子就报错（原来会说"在包络内"）；判决用句子最后指的跑道（与导出样本的结局
+  同一条）；句子的开口一步钉在 `N_LOOK`；第二次许可的说明改准；答复的 `executor.wordClock` 写这次飞用的词钟（模型是时间词钟）。
+- 测试：前端 98 个文件 834 条、`tsc`、`typecheck:scripts` 通过；后端 `aeroviz_backend/tests` 171 条通过（`ModelSegmentTest`
+  14 条，含用标注器自己的 `tube_checks` 核对下降角词的管子；`ModelFlightTest` 6 条；`BackendTest` 一条走通模型请求；
+  `FreeGenerationTest`：`speak_and_fly` 自己的循环照稿说话，和后端的飞法在真实执行器上逐状态、逐周期的模式与限制都相同）。
+  变基到 dev-two-tier 之后在真实数据上重飞 104 段，与样本最大差 0.000 m。浏览器（工作树的 5174 前端 + 8766 后端）核对：两个模型的
+  词都飞成，与样本 0.00 m；下降角词按自己那一步的管子判；真值标签页不显示模型的答复；无控制台错误。
 
 ### 2026-09-26 — Training 视图的高度：导出器按航班所落跑道的差值换回椭球高，不再用 EGM96；现行集合重导
 
