@@ -275,8 +275,7 @@ def test_a_real_start_flies_its_own_rows_on_the_spec_s_limit_and_an_augmented_on
 def test_the_real_starts_are_each_airport_s_first_flights_of_the_pool():
     pool = SimpleNamespace(signals=[SimpleNamespace(airport=a) for a in "AABBABB"])
     assert real_starts(pool, 2) == [0, 1, 2, 3]
-    with pytest.raises(ValueError, match="too few flights for the real starts"):
-        real_starts(pool, 4)
+    assert real_starts(pool, 1) == [0, 2]
 
 
 def test_a_round_takes_each_airport_s_first_plausible_starts_from_its_pool():

@@ -63,7 +63,8 @@ class Speaker:
                  temperature: float = 1.0, finals: Sequence[Sequence[RunwayProcedure]] | None = None) -> None:
         """``landings``: each airport's landing context (`data.airport_landings`), None for a variant without it;
         ``max_rows``: the most rows any flight will have (the model's position table must hold them); ``finals``: each
-        flight's candidates' finals, in the pointer's order, to mask the altitude column by (None: no such mask)."""
+        flight's candidates' finals, in the pointer's order, to mask the altitude and descent-angle columns by
+        (`procedure`'s rules 1–5; None: no such mask)."""
         if VARIANTS[model.config.variant].landing_context != (landings is not None):
             raise ValueError(f"variant {model.config.variant} and the landing context given disagree")
         if max_rows > model.config.max_rows:

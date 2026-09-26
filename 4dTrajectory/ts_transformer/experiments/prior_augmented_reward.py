@@ -150,17 +150,14 @@ def join(parts: Sequence[MaskedSentences], offsets: Sequence[int]) -> MaskedSent
 
 
 def real_starts(pool: replay.Batch, per_airport: int) -> list[int]:
-    """The pool's first ``per_airport`` flights of each airport, in the pool's order: the real starts; refused when an
-    airport's pool runs short."""
+    """The pool's first ``per_airport`` flights of each airport, in the pool's order: the real starts (the pool holds
+    more than that of every airport — `replay.draw` refuses one that is short)."""
     taken: Counter = Counter()
     keep: list[int] = []
     for j, signals in enumerate(pool.signals):
         if taken[signals.airport] < per_airport:
             taken[signals.airport] += 1
             keep.append(j)
-    short = {code: per_airport - n for code, n in taken.items() if n < per_airport}
-    if short:
-        raise ValueError(f"the pool holds too few flights for the real starts: {short} short")
     return keep
 
 
@@ -450,14 +447,16 @@ def main(argv: list[str] | None = None) -> int:
         flights = sentence_flights(augmented, sentences, keep, model.config.airports, spec.step_s, landings)
         split = Split(flights, data.airports, data.candidates, data.runways, data.courses, data.classes, variant)
         allowed = [sentences.allowed[s] for s in keep]
-        # the model's distance to the base on its own fresh sentences, before the pass, the real starts' and the
-        # augmented ones' apart (design §5)
-        start_distance = {}
+        # the model's distance to the base on the fresh sentences it is about to train on (the starts with a contrast),
+        # before the pass, the real starts' and the augmented ones' apart (design §5)
+        start_distance, measured_on = {}, {}
         for side, mask in (("real", ~is_augmented[keep]), ("augmented", is_augmented[keep])):
             members = np.flatnonzero(mask)
             start_distance[side] = tuner.distance(replace(split, flights=[flights[i] for i in members]),
                                                   [allowed[i] for i in members])
-        passed = {**tuner.one_pass(split, advantages[keep], data, allowed), "distance_at_start": start_distance}
+            measured_on[side] = len(members)
+        passed = {**tuner.one_pass(split, advantages[keep], data, allowed), "distance_at_start": start_distance,
+                  "distance_sentences": measured_on}
         log(f"round {round_number}: one pass over {len(flights)} sentences, reward term {passed['reward_mean']:.4f}, "
             f"KL to the base at the start real {start_distance['real']:.4f} augmented "
             f"{start_distance['augmented']:.4f}, {passed['kl_mean']:.4f} in the pass (max {passed['kl_max']:.4f}), "

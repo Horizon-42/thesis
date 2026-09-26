@@ -451,7 +451,9 @@ Each prior sentence and each flight's observed track are read before the join (`
 `prior.mva`, FUS3 charts under `repo_layout.MVA_ROOT`), counted in each summary's `pre_join` past the track tolerance
 (DA, MVA) and an altitude step (climb), said beside observed. Without the flag the run is draw for draw the one before it
 (40 select sentences checked). `generation.json` is `ts-prior-free-generation-v4` since 2026-09-26 (`procedure_masks`, the
-rows' `pre_join` / `pre_join_observed`); v2 added `below_glidepath` and `glidepath_mask`. `--augment-seed S` (post-training design §4): every drawn flight is
+time-limit factors per start kind, the MVA chart read, the prior rows' `pre_join` / `pre_join_observed` — the climb read
+only inside a stretch of barred rows from `N_LOOK`, restarting after a go-around); v2 added `below_glidepath` and
+`glidepath_mask`. `--augment-seed S` (post-training design §4): every drawn flight is
 flown from an augmented start (`prior.augment`: rotated about the airport ±15°, raised ±150 m, sped up ±5 %, one draw a
 flight with seed S until plausible — the start's altitude inside its airport's train-day 1–99 % range at the first
 predicted step, its airspeed above the executor's stall floor; `AUGMENT_TRIES` = 10, a flight none fits is left out and
@@ -495,8 +497,9 @@ augmented one's `augment.TIMEOUT_FACTOR`); rewards as the first stage (a stopped
 of train-day flights (their ADS-B rows and labelled words) with every update. Without the data term the pull alone
 either let the model leave the data (a fixed 0.04) or, driven by a KL budget, swung between that and erasing the first
 stage (four runs, readouts §9). Every round records its model's distance to the base on its fresh sentences before the
-pass, the real starts' sentences and the augmented ones' apart (`RewardTuner.distance`, `distance_at_start.{real,
-augmented}`), and the pass's per-batch distance (`kl_trace`). Select readouts under the masks: the real starts (same
+pass — on the sentences it trains on (the starts with a contrast), the real starts' and the augmented ones' apart
+(`RewardTuner.distance`, `distance_at_start.{real,augmented}`, `distance_sentences` their counts) — and the pass's
+per-batch distance (`kl_trace`). Select readouts under the masks: the real starts (same
 flights and seed every round) and one fixed augmented start per flight (seed + 7919; a flight none fits is left out and
 counted, never replaced; the augmentations are in `config.json`), each with its readouts before the join beside the
 observed tracks', plus the teacher-forced NLL (recorded only). `choice.json`: among the rounds within round 0's guards

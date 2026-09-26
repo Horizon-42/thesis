@@ -70,7 +70,7 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import (
     APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, COLUMNS, RUNWAY, UNCHANGED, Words,
 )
-from ts_transformer.prior import augment
+from ts_transformer.prior import augment, mva
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.constraints.speed_floor import stall_speed_mps
 from ts_transformer.prior.augment import Augmentation, augment_signals, augment_state, draw
@@ -186,8 +186,8 @@ class ClosedLoop:
     speaking, a step at a time (`step`): the speaker reads where the executor is, says the step's words, and the
     executor flies the step (its cycles). A flight the executor is done with hears nothing more and its row is frozen;
     one it has cleared or captured keeps its runway. Each flight flies until the executor is done with it or its time
-    limit (``limits``, seconds). ``finals``: each flight's candidates' finals, the glidepath lower edge's mask on the
-    speaker's altitude column (None: no mask)."""
+    limit (``limits``, seconds). ``finals``: each flight's candidates' finals, the procedure's masks on the speaker's
+    altitude and descent-angle columns (`prior.procedure`; None: no mask)."""
 
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
@@ -322,13 +322,12 @@ def glidepath_stops(flown: Flown, grids: Sequence[np.ndarray], geometries: Seque
 
 def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], words: Words, source: str,
                 samples: Sequence[int | None], forbidden: dict[int, np.ndarray] | None,
-                stops: GlidepathStops | None = None,
-                pre_join: Sequence[tuple[dict[str, Any], dict[str, Any]]] | None = None) -> list[dict[str, Any]]:
+                stops: GlidepathStops | None = None) -> list[dict[str, Any]]:
     """One row per flight: its outcome and what was said (``samples``: each flight's sample number, None for the
     labelled words; ``forbidden``: the prior's probability on what the masks forbid, per step, over the steps
     before the flight's end; ``stops``: `glidepath_stops`, None without the glidepath lower edge — a stopped sentence
-    ends at the row its stopping step flew, its outcome `BELOW_GLIDEPATH`; ``pre_join``: each flight's readouts before
-    the join, flown and observed (`sentence_pre_join`, `observed_pre_join`), None without the procedure's masks)."""
+    ends at the row its stopping step flew, its outcome `BELOW_GLIDEPATH`). The readouts before the join are the prior's
+    sentences' alone, added by `prior_rows` under the procedure's masks."""
     rows = []
     step_rows = round(words.spec.step_s / flown.cycle_s)
     for j, (reading, grid, sample) in enumerate(zip(batch.readings, grids, samples)):
@@ -354,8 +353,6 @@ def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], 
             "forbidden_mass": ({COLUMNS[c]: float(mass[j, :steps].mean()) for c, mass in forbidden.items()}
                                if forbidden is not None else None),
             "words_after_first": {name: int(said_after_first[c]) for c, name in enumerate(COLUMNS)},
-            "pre_join": None if pre_join is None else pre_join[j][0],
-            "pre_join_observed": None if pre_join is None else pre_join[j][1],
         })
     return rows
 
@@ -465,7 +462,7 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
                                      for column in rows[0]["forbidden_mass"]} if rows[0]["forbidden_mass"] else None),
         "pre_join": ({f"{side}_{key}": sum(r[field][key] for r in rows) / count
                       for side, field in (("said", "pre_join"), ("observed", "pre_join_observed"))
-                      for key in PRE_JOIN_LINES} if rows[0]["pre_join"] is not None else None),
+                      for key in PRE_JOIN_LINES} if "pre_join" in rows[0] else None),
     }
 
 
@@ -573,6 +570,8 @@ def main(argv: list[str] | None = None) -> int:
         "instructions": str(instructions), "split": args.split, "drawn": batch.drawn, "n_look": N_LOOK,
         "samples": args.samples, "temperature": args.temperature, "seed": args.seed,
         "procedure_masks": args.procedure_masks,
+        "timeout_factor": {"real": params.timeout_factor, "augmented": augment.TIMEOUT_FACTOR},
+        "mva": {"charts_date": mva.CHARTS_DATE, "chart": mva.CHART, "facility": mva.FACILITY},
         "augment_seed": args.augment_seed, "augmented_left_out": left_out,
         "augmentations": None if augmentations is None else [
             {"dataset_id": s.dataset_id, **asdict(a)} for s, a in zip(batch.signals, augmentations)],

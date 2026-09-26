@@ -561,3 +561,31 @@ def test_a_sentence_is_read_before_the_join_on_the_rows_the_speaker_read_with_th
     deep = sentence_pre_join(grid, steps, e, n, h, (final,), chart, geometry, words)
     assert deep["mva_under_m"] == pytest.approx(1_000.0 - h[N_LOOK]) and deep["under_mva"] == (
         1_000.0 - h[N_LOOK] > track_tolerance_m(spec))
+
+
+def test_a_climb_is_read_only_inside_a_stretch_of_barred_rows_from_the_first_predicted_step():
+    """The observed rows before the first predicted step set the dip but their climb is not the prior's; a go-around's
+    climb ends the stretch, and the next one starts from where it resumes."""
+    spec = instruction_spec()
+    final = _final(decision_m=-1_000.0)
+    entry = final.entry_m
+    d = np.linspace(30_000.0, 20_000.0, N_LOOK + 6)            # never joins
+    e, n = _approach(d)
+    runway = np.zeros(len(d), dtype=np.int64)
+    cleared = np.full(len(d), APPROACH_CLEARED)
+    mva = np.full(len(d), np.nan)
+    # the observed rows climb from well under the entry height; from the first predicted step the aircraft only descends
+    h = np.concatenate([np.linspace(entry - 400.0, entry - 200.0, N_LOOK), entry - 190.0 - 10.0 * np.arange(6)])
+    got = pre_join_readout((final,), runway, cleared, e, n, h, mva, N_LOOK, spec)
+    assert got["climb_after_dip_m"] == pytest.approx(0.0) and not got["climbed_after_dip"]
+    # a go-around between two barred stretches: its climb is not read, the next stretch starts where it resumes
+    h = np.full(len(d), entry - 300.0)
+    h[N_LOOK + 2: N_LOOK + 4] = entry - 100.0                   # climbing under the go-around
+    h[N_LOOK + 4:] = [entry - 90.0, entry - 80.0]               # then 10 m more after it
+    around = cleared.copy()
+    around[N_LOOK + 2: N_LOOK + 4] = APPROACH_GO_AROUND
+    got = pre_join_readout((final,), runway, around, e, n, h, mva, N_LOOK, spec)
+    assert got["climb_after_dip_m"] == pytest.approx(10.0) and not got["climbed_after_dip"]
+    # the same climb with no go-around is read
+    got = pre_join_readout((final,), runway, cleared, e, n, h, mva, N_LOOK, spec)
+    assert got["climb_after_dip_m"] == pytest.approx(220.0) and got["climbed_after_dip"]

@@ -171,13 +171,24 @@ def below_floor(procedure: RunwayProcedure, e: np.ndarray, n: np.ndarray, h: np.
     return ~np.isnan(floor) & (np.asarray(h, dtype=np.float64) < floor - track_tolerance_m(spec)), floor
 
 
+def _stretch_lowest(h: np.ndarray, barred: np.ndarray) -> np.ndarray:
+    """At each ``barred`` row the lowest height since its stretch of consecutive barred rows began (inf elsewhere)."""
+    out = np.full(len(h), np.inf)
+    lowest = np.inf
+    for row in range(len(h)):
+        lowest = min(lowest, h[row]) if barred[row] else np.inf
+        out[row] = lowest
+    return out
+
+
 def pre_join_readout(finals: Sequence[RunwayProcedure], runway: np.ndarray, approach: np.ndarray, e: np.ndarray,
                      n: np.ndarray, h: np.ndarray, mva: np.ndarray, first: int, spec: VocabularySpec
                      ) -> dict[str, float | bool | None]:
     """One flight's readouts before the join (design §3.5, §3.7) over its rows ``first`` … (the earlier ones only set
     where it joined and dipped): at each row the runway (``runway``: pointers into ``finals``) and the approach word in
     force, the position, height and MVA (NaN off the chart). The most a row fell under the DA and under the MVA (the
-    MVA only where not cleared), and the most a row rose above its lowest since the dip where the climb was barred;
+    MVA only where not cleared), and the most a row rose above the lowest row of its stretch of barred rows (rows from
+    ``first`` where rule 4 applies; a stretch restarts after a go-around, and nothing flown before ``first`` counts);
     each None without such a row, and each against its line — the track tolerance under the DA and the MVA, an
     altitude step up after the dip."""
     runway, approach, h = np.asarray(runway), np.asarray(approach), np.asarray(h, dtype=np.float64)
@@ -191,8 +202,8 @@ def pre_join_readout(finals: Sequence[RunwayProcedure], runway: np.ndarray, appr
         rows = (runway == pointer) & (np.arange(count) >= first)
         before |= rows & ~joined
         decision = np.where(rows & ~joined, final.decision_m - h, decision)
-        lowest = np.minimum.accumulate(np.where(dipped, h, np.inf))
-        climb = np.where(rows & climb_barred(joined, dipped, approach), h - lowest, climb)
+        barred = rows & climb_barred(joined, dipped, approach)
+        climb = np.where(barred, h - _stretch_lowest(h, barred), climb)
     vectored = before & (approach == APPROACH_NOT_CLEARED) & np.isfinite(np.asarray(mva, dtype=np.float64))
     under_mva = np.where(vectored, np.asarray(mva, dtype=np.float64) - h, np.nan)
 
