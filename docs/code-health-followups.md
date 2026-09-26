@@ -119,6 +119,7 @@ added three entries (the rows after the performance index's).
 | The Training export and the live model flight fly a model without the procedure's masks (09-26) | open | new; see the entry | no: the Training view's exports and the backend (a stage-2 model is used with the masks on) |
 | The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (09-26) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts change) |
 | `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
+| `instructions/grammar.py` is outside the labeller sha (09-26) | open | new; see the entry | **yes — every sentence artefact and prior**: adding it to the hash changes the labeller sha they record; do it with the next vocabulary spec |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -553,3 +554,10 @@ the comments would make the current code refuse executor spec v10. `4dTrajectory
 ten and where each goes. With the next executor spec: `git mv` them, fix those comments (and `autopilot/__init__.py`,
 `envelope.py:110/118`, the entries above), re-write the spec and re-run the train replay gate.
 
+## `instructions/grammar.py` is outside the labeller sha (2026-09-26)
+
+**Verified** (`instructions/artefact.py` `LABELLER_MODULES`, `dev-two-tier` `f4a63bca`). The vocabulary's compatibility
+rules the prior's speaker masks by (`grammar.step_allowed`, prior design §5.1) live in `instructions/grammar.py`, which is
+not among the files the labeller sha covers; a change to it alone would change what every model may say with no identity
+moving. Unchanged since it was written (`0bbe6abf`, 2026-09-25). Adding it to `LABELLER_MODULES` changes the labeller sha
+every sentence artefact and every prior's `config.json` records, so it waits for the next vocabulary spec (judgement).
