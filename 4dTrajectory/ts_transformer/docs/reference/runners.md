@@ -446,17 +446,30 @@ before the run, user 2026-09-25): ≤ 1 % of the words forbidden and ≤ 3 % of 
 --instructions <artefact> --executor <spec> --out <new dir> [--rounds 8] [--per-airport 400] [--samples 8]
 [--select-per-airport 200] [--select-samples 2] [--seed 1337] [--chunk 32] [--learning-rate 1e-5] [--kl-weight 0.04] …
 [--smoke]`. Each round draws a pool of 1.25 × `--per-airport` train-day flights (own dynamics), moves each by a fresh
-augmentation until plausible (`prior_free_generation.augmented_starts`) and keeps each airport's first `--per-airport` (the augmentations' own random stream, seeded with (seed, round), apart
-from the pool's draw; `sentences.json` records per airport the starts, the mean draws a start and the share redrawn, and
-the sources given up — the readout of design §4.3);
+augmentation until plausible (`prior_free_generation.augmented_starts`) and keeps each airport's first `--per-airport`
+(the augmentations' own random stream, seeded with (seed, round), apart from the pool's draw; `sentences.json` records per
+airport the starts, the mean draws a start and the share redrawn, and the sources given up — the readout of design §4.3);
 flies each start `--samples` times with the glidepath lower edge (mask + stop); rewards as the first stage (a stopped
 sentence earns 0); one pass of `RewardTuner` with NO data term and the pull to the BASE model, both scored under the
-masks each sentence was said under (`Speaker.allowed` → `train.allowed_tensors`). Select readouts with the edge: the
-real starts (same flights and seed every round) and one fixed augmented start per flight (seed + 7919; a flight none
-fits is left out and counted, never replaced; the augmentations are in `config.json`), plus the teacher-forced NLL. `choice.json`: among the rounds within round 0's guards (real landed ≥ − 0.01, landed on the observed
-runway ≥ − 0.02, heading words ≤ 1.2 ×, teacher-forced NLL ≤ 1.1 ×), the highest augmented landed share, the earliest
-within 0.015. Writes like R19 (`ts-prior-augmented-reward-v1`); val is read afterwards with `prior_free_generation
---glidepath-mask` (real starts, and `--augment-seed` for augmented ones).
+masks each sentence was said under (`Speaker.allowed` → `train.allowed_tensors`). The pull measures the distance
+EXACTLY (`kl_estimate` "exact", `train.flight_exact_kl`: the KL over each cell's allowed words, per predicted step summed
+over its cells) — the sampled-words estimate grows inside a pass as the pass pushes a sentence's own words down (the
+first stage's kept round: 0.107 inside its pass, ~0.01 on fresh sentences). **The pull's weight follows a KL budget**
+(`train.KlBudget`, design §5): before round 1's pass the start's distance to the base on that round's trained sentences
+D₀ is measured (`RewardTuner.distance`: the mean over the pass's batches, the statistic the controller holds) and written
+to `budget.json`; the target is D₀ + `BUDGET_DELTA` (0.01); every update multiplies the weight (from `--kl-weight`,
+refused unless positive) by exp(`BUDGET_GAIN` 0.05 × the batch's relative distance error cut at ± 1), carried across
+rounds; every round records its model's distance before the pass (`distance_at_start`) and the pass's per-batch distance
+and weight (`trace`). Select readouts with the edge: the real starts (same flights and seed every round) and one
+fixed augmented start per flight (seed + 7919; a flight none fits is left out and counted, never replaced; the
+augmentations are in `config.json`), plus the teacher-forced NLL (recorded only). `choice.json`: among the rounds within
+round 0's guards (real landed ≥ − 0.01, landed on the observed runway ≥ − 0.02, and in each of approach / heading /
+altitude / angle / speed the words a flight says after its first step no farther from the select flights' LABELLED words
+— |ln(said / labelled)|, the labelled counted from each sentence's second predicted step to its end, `labelled_words` —
+than round 0 plus ln 1.2), the highest augmented landed share, the earliest within 0.015. Writes like R19
+(`ts-prior-augmented-reward-v2`; v1 — a fixed pull, the NLL and heading guards — is the stopped
+`v3_augmented_20260926` run, readouts §9); val is read afterwards with `prior_free_generation --glidepath-mask` (real
+starts, and `--augment-seed` for augmented ones).
 
 ### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)
 

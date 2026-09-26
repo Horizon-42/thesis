@@ -356,7 +356,10 @@ published glidepath − 60 m inside the FAF and the LPV cone, nowhere else — t
 10–14 % of the recorded tracks); `prior_free_generation --glidepath-mask` masks the altitude column and stops a sentence at
 the first flown step below it (outcome `below_glidepath`, schema v2); `prior_procedure_check` measures it on labelled data
 before training (R20). **Post-training stage 2** (`prior_augmented_reward`, R21): augmented starts (`prior.augment`),
-the edge, the terminal reward and the pull to the base model only, scored under the masks each sentence was said under.
+the edge, the terminal reward and the pull to the base model only, scored under the masks each sentence was said under;
+the pull measures the distance exactly (`flight_exact_kl`), its weight follows a KL budget (`train.KlBudget`: the
+start's distance + 0.01), and the rounds are guarded by words per flight against the labelled words, not by the
+teacher-forced NLL.
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 

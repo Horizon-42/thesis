@@ -12,6 +12,7 @@ under the masks it was said under (`allowed_tensors`) and drops the data term.""
 from __future__ import annotations
 
 import copy
+import math
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator, Mapping, Sequence
@@ -109,6 +110,29 @@ def flight_kl(logits: list[torch.Tensor], reference: list[torch.Tensor], targets
                - torch.log_softmax(logit[entries], dim=-1).gather(1, word))[:, 0]
         total = total.index_add(0, entries.nonzero()[:, 0], torch.exp(gap) - gap - 1.0)
     return total
+
+
+def flight_exact_kl(logits: list[torch.Tensor], reference: list[torch.Tensor], present: torch.Tensor,
+                    asked: torch.Tensor) -> torch.Tensor:
+    """``[B]``: how far the model is from the ``reference`` on each scene's asked cells, exactly — per cell the KL
+    divergence Σ_k p_k (log p_k − log q_k) over the column's whole vocabulary (what masks removed, at -inf in both, adds
+    nothing), summed. Unlike `flight_kl` it does not depend on which word was said, so it does not grow when a pass
+    pushes a sentence's own words down: it is the same quantity on fresh sentences and on a pass's aging ones."""
+    speaks = asked_entries(present)
+    total = logits[0].new_zeros(present.shape[0])
+    for c, (logit, fixed) in enumerate(zip(logits, reference)):
+        entries = speaks & asked[..., c]
+        log_p, log_q = torch.log_softmax(logit[entries], dim=-1), torch.log_softmax(fixed[entries], dim=-1)
+        kept = torch.isfinite(log_p)
+        cell = (log_p.exp() * (log_p.masked_fill(~kept, 0.0) - log_q.masked_fill(~kept, 0.0))).sum(dim=-1)
+        total = total.index_add(0, entries.nonzero()[:, 0], cell)
+    return total
+
+
+#: How the pull measures the distance to the reference: ``sampled-words`` — `flight_kl`, GRPO's estimate from each
+#: sentence's own words (the first stage); ``exact`` — `flight_exact_kl` (the second stage, whose KL budget needs a
+#: measure that means the same inside a pass as on fresh sentences, post-training design §5).
+KL_ESTIMATES = ("sampled-words", "exact")
 
 
 def allowed_tensors(allowed: Sequence[Mapping[int, np.ndarray]], rows: int, classes: Sequence[int],
@@ -216,6 +240,27 @@ class RewardConfig:
     tokens_per_batch: int = 16_384          # half the sentences said, half the data
     kl_weight: float = 0.04
     data_weight: float = 1.0
+    kl_estimate: str = "sampled-words"      # `KL_ESTIMATES`
+
+
+#: The KL budget's controller (post-training design §5, Ziegler et al. 2019's adaptive KL coefficient): each update
+#: multiplies the pull's weight by exp(gain × the batch's relative distance error, cut at ± `BUDGET_ERROR_CLIP`) — a
+#: distance held above the target raises it ten-fold in about 46 updates (a round is ~220).
+BUDGET_GAIN = 0.05
+BUDGET_ERROR_CLIP = 1.0
+
+
+@dataclass(frozen=True)
+class KlBudget:
+    """How far from the reference the model may be (the pull's own measure, `RewardTuner.distance`, per predicted step
+    summed over its asked cells): the pull's weight is raised while a batch is farther than ``target`` and lowered while
+    it is nearer."""
+
+    target: float
+
+    def adjusted(self, weight: float, distance: float) -> float:
+        error = min(max(distance / self.target - 1.0, -BUDGET_ERROR_CLIP), BUDGET_ERROR_CLIP)
+        return weight * math.exp(BUDGET_GAIN * error)
 
 
 class RewardTuner:
@@ -224,7 +269,8 @@ class RewardTuner:
     every update pairs a batch of them with a batch of teacher-forced data flights:
 
         loss = mean over sentences of (advantage × the NLL of its own words, per step)
-             + kl_weight × mean over sentences of (`flight_kl` to the frozen reference, per step)
+             + kl_weight × mean over sentences of (the distance to the frozen reference, per step: `flight_kl`, or
+               `flight_exact_kl` under ``kl_estimate`` "exact")
              + data_weight × the data batch's NLL per step (pretraining's loss)
 
     — minimising the first term raises the words of a sentence that did better than its flight's others and lowers the
@@ -235,9 +281,15 @@ class RewardTuner:
     ``allowed`` is given (the second stage, post-training design §5: the model and the reference renormalised over the
     same allowed classes), unmasked otherwise (the first stage: the masks removed ~0.06 % a step, readouts §5); one pass,
     no importance ratio (the sentences come from the weights at the start of the pass). Without a data term
-    (``data_weight`` 0) there is no data split. The seed sets the batch order."""
+    (``data_weight`` 0) there is no data split. The seed sets the batch order.
+
+    The pull's weight starts at ``config.kl_weight``; with a ``budget`` (`KlBudget`, the second stage) it is adjusted
+    after every update from that batch's distance and carried across passes, otherwise it stays fixed (the first
+    stage)."""
 
     def __init__(self, model: Prior, reference: Prior, config: RewardConfig, device: torch.device, *, seed: int) -> None:
+        if config.kl_estimate not in KL_ESTIMATES:
+            raise ValueError(f"kl_estimate {config.kl_estimate!r} is not one of {KL_ESTIMATES}")
         torch.manual_seed(seed)
         self.model, self.reference, self.config, self.device = model, reference.eval(), config, device
         for parameter in reference.parameters():
@@ -248,6 +300,8 @@ class RewardTuner:
         self.schedule = torch.optim.lr_scheduler.LambdaLR(
             self.optimiser, lambda step: min(1.0, (step + 1) / config.warmup_steps))
         self.passes = 0
+        self.kl_weight = config.kl_weight
+        self.budget: KlBudget | None = None
         self._data: Iterator[list[int]] = iter(())
 
     def _data_batch(self, data: Split) -> list[int]:
@@ -257,6 +311,43 @@ class RewardTuner:
             self._data = batches(data.flights, self.config.tokens_per_batch // 2, self.rng)
             indices = next(self._data)
         return indices
+
+    def _scored(self, sentences: Split, indices: Sequence[int],
+                allowed: Sequence[Mapping[int, np.ndarray]] | None
+                ) -> tuple[dict[str, torch.Tensor], list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
+        """A batch of sentences, the model's and the reference's logits over it (renormalised under the masks the
+        sentences were said under when ``allowed`` is given) and each sentence's asked cells."""
+        batch = to_batch(sentences, indices, self.device)
+        logits = batch_logits(self.model, batch)
+        with torch.no_grad():
+            reference = batch_logits(self.reference, batch)
+        if allowed is not None:
+            masks = allowed_tensors([allowed[i] for i in indices], batch["targets"].shape[2],
+                                    [logit.shape[-1] for logit in logits], self.device)
+            logits, reference = masked(logits, masks), masked(reference, masks)
+        return batch, logits, reference, asked_entries(batch["present"]).sum(dim=(1, 2)).to(logits[0].dtype)
+
+    def _kl(self, batch: dict[str, torch.Tensor], logits: list[torch.Tensor], reference: list[torch.Tensor],
+            steps: torch.Tensor) -> torch.Tensor:
+        """The batch's distance to the reference: the mean over its sentences of the configured estimate
+        (`KL_ESTIMATES`) per predicted step (summed over the step's asked cells)."""
+        if self.config.kl_estimate == "exact":
+            kl = flight_exact_kl(logits, reference, batch["present"], batch["asked"])
+        else:
+            kl = flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"])
+        return (kl / steps).mean()
+
+    def distance(self, sentences: Split, allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> float:
+        """How far the model is from the reference on ``sentences``, without updating: the pull's own measure (`_kl`)
+        averaged over the pass's batches (the same length groups a pass makes, in length order — a pass only shuffles
+        them), so it is the statistic the budget's controller holds."""
+        if not sentences.flights:
+            raise ValueError("no sentence to measure the distance on")
+        self.model.eval()
+        with torch.no_grad():
+            means = [float(self._kl(*self._scored(sentences, indices, allowed)))
+                     for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, None)]
+        return float(np.mean(means))
 
     def one_pass(self, sentences: Split, advantages: np.ndarray, data: Split | None,
                  allowed: Sequence[Mapping[int, np.ndarray]] | None = None) -> dict[str, Any]:
@@ -274,26 +365,18 @@ class RewardTuner:
         self.model.eval()
         started = time.perf_counter()
         sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
-        count = 0
+        count, weight_start, trace = 0, self.kl_weight, {"kl": [], "weight": []}
         for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
-            batch = to_batch(sentences, indices, self.device)
-            logits = batch_logits(self.model, batch)
-            with torch.no_grad():
-                reference = batch_logits(self.reference, batch)
-            if allowed is not None:
-                masks = allowed_tensors([allowed[i] for i in indices], batch["targets"].shape[2],
-                                        [logit.shape[-1] for logit in logits], self.device)
-                logits, reference = masked(logits, masks), masked(reference, masks)
-            steps = asked_entries(batch["present"]).sum(dim=(1, 2)).to(logits[0].dtype)
+            batch, logits, reference, steps = self._scored(sentences, indices, allowed)
             advantage = torch.as_tensor(advantages[indices], dtype=logits[0].dtype, device=self.device)
             reward = (advantage * flight_nll(logits, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
-            kl = (flight_kl(logits, reference, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
+            kl = self._kl(batch, logits, reference, steps)
             if data is None:
                 data_loss = torch.zeros((), device=self.device)
             else:
                 nll, speaks = batch_nll(self.model, to_batch(data, self._data_batch(data), self.device))
                 data_loss = nll.sum() / speaks
-            loss = reward + self.config.kl_weight * kl + self.config.data_weight * data_loss
+            loss = reward + self.kl_weight * kl + self.config.data_weight * data_loss
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"pass {self.passes}: the loss is {float(loss)}")
             self.optimiser.zero_grad(set_to_none=True)
@@ -304,5 +387,11 @@ class RewardTuner:
             for name, value in (("reward", reward), ("kl", kl), ("data", data_loss)):
                 sums[name] += float(value.detach())
             count += 1
-        return {**{f"{name}_mean": value / count for name, value in sums.items()}, "batches": count,
-                "sentences": len(sentences.flights), "seconds": time.perf_counter() - started}
+            trace["kl"].append(float(kl.detach()))
+            trace["weight"].append(self.kl_weight)
+            if self.budget is not None:
+                self.kl_weight = self.budget.adjusted(self.kl_weight, trace["kl"][-1])
+        return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace["kl"]),
+                "kl_weight_start": weight_start, "kl_weight_end": self.kl_weight, "batches": count,
+                "sentences": len(sentences.flights), "seconds": time.perf_counter() - started,
+                "trace": trace}
