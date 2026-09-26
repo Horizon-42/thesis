@@ -154,8 +154,9 @@ unordered → full（2024）→ `prior_select`（选择 + 一次验证集读数�
   - `.claude/worktrees/frontend-followups`（`dev-frontend-followups`）——另一个 agent 的前端工作，不动。
 - 已删：工作树 `prior-rl`（运行结束后，20:30 UTC）、`prior-v3`、`prior-fast`、`prior-v2`、`manoeuvre-runs`、`two-tier-runs`、`two-tier-pub`、`/home/supercomputing/studys/thesis-l2`，分支
   `dev-prior-rl`、`dev-prior-v3`、`dev-prior-fast`、`dev-prior-v2`、`dev-l2`、`dev-leg-ctrl`（都已合并或提交都在 `dev-two-tier` 历史里，删之前先断开数据链接）。
-- 没合并、和先验这条线无关、保留：`wip-r32-leg-timing`（跑道意图 R3.2 的半成品）、`dev-cifp-runway-thresholds`（harvest 取 CIFP 入口的修复），
-  各 1 个没合并的提交。
+- 没合并、和先验这条线无关、保留：`wip-r32-leg-timing`（跑道意图 R3.2 没采纳的第三种改法，1 个没合并的提交，远端也有；
+  跑道意图计划 §18.2 引用它备查）。`dev-cifp-runway-thresholds`（harvest 取 CIFP 入口的修复）已被 `803605e0`（TD21）取代，
+  2026-09-26 删除。
 - 产物里记的提交都可达：`e760ab1d`、`e8ee1373`、`47c7b790` 在合并历史里；变基之前的提交只靠标签可达，**标签不能删**：
   `runs/prior-v2-feeb7ce3`（第二版那批训练，`prior/v2_20260924/`）、`runs/prior-v3-step0-67e0e5c9`（第 0 步：句子产物 v4、执行器 v6、普查）；
   `runs/prior-v3-step1-47c7b790` 已在历史里（多余，保留无害）；`archive/freegen-readout`（旧词表时代的自由生成，9 月 23 日归档时留的）。
