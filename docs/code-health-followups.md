@@ -114,6 +114,7 @@ added three entries (the rows after the performance index's).
 | `autopilot/__init__.py` names the executor design by its old file name (09-26) | resolved | renamed with the executor's glidepath floor (`9557315d`, spec v10); entry removed | — |
 | The land law leaves a shallow final class's tube near the threshold on some profiles (09-26) | open | new; see the entry | **yes — executor** (a law change is a new spec) |
 | No mode reports when the executor's glidepath floor binds (09-26) | open | new; see the entry | **yes — executor** (adds a Flown mode; the backend payload reads the modes) |
+| The Training export and the live model flight fly a model without the procedure's masks (09-26) | open | new; see the entry | no: the Training view's exports and the backend (a stage-2 model is used with the masks on) |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -506,3 +507,13 @@ glidepath's lower edge) sets the aim without a mode of its own: `aim_left_tube` 
 a word it pushes out of its tube as "altitude word outside its tube". A `glidepath_floor` mode (MODES, judge, summary)
 would make its cost readable; it changes the Flown modes the backend's payload reads, so it waits for the next executor
 spec and a quiet frontend.
+
+## The Training export and the live model flight fly a model without the procedure's masks (2026-09-26)
+
+**Verified** (opus review of `dev-stage2-restart` `181295fc`). `prior_generation_training_export` (`speak_and_fly` with no
+`finals`) and the backend's live model flight fly a prior's own sentences with the grammar's masks only. Post-training
+design §3.1 says a model trained under the procedure's masks is used with them on, and its val readout is read that way
+(`prior_free_generation --procedure-masks`); publishing a stage-2 round as the export stands would show unmasked
+trajectories beside a masked readout. The fix passes `procedure_masks(...).finals` to the export's loop (and a
+`--procedure-masks` flag, recorded in the overlay), and the same to the backend's `fly.py`; it changes the Training
+overlay's payload (a new schema) and needs the user's OK to re-export.

@@ -1,5 +1,20 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — 后训练第二阶段重启：切入前两条硬约束、MVA 只作读数、真实 / 扩充起点各半
+
+- 用户定配方（"1 B, 2 各一半 3 可以 4 放宽 5 可以"）：切入前不低于跑道公布的决断高度 DA；跌破入口高度（下滑道在 FAF 处的高度）− 15 m
+  之后到切入不许再爬升（复飞除外）；MVA（FAA 最低引导高度，AIXM 下载到 `data/MVA/2026-09-26/`，出处 `docs/literature/minimum_vectoring_altitude/`）
+  只作读数——切入前 28.5 % 的真实航迹低于它 40 m 以上，许可前也有 8.4 %（KSJC 24.3 %）；每轮真实 / 扩充起点各一半；说话方式护栏两边都看；
+  扩充起点时限 1.5 → 2 倍（3 倍探针：1.5 / 2 / 3 倍能落地 85.6 / 87.2 / 88.3 %）；每轮分两边记离 base 的距离。后训练设计 §3–§5（`8b74b082`），
+  先验读数 §14（`07527d85`：v10 上第一阶段模型选择集真实起点 96.2 %、扩充起点 85.3 %）。
+- 代码在分支 `dev-stage2-restart`（`181295fc` + 审查修复 `65fddc04`）：`prior/procedure.py` 切入、跌破、每条规则一个函数、切入前的读数；
+  `prior/generate.py` 说话器逐行记每条候选跑道的切入与跌破、按四条规则屏蔽高度列和下降角列；`prior/mva.py`（AIXM 读取，numpy 点在多边形里，
+  与 shapely 逐点一致）；`prior_free_generation --procedure-masks`（原 `--glidepath-mask`，schema v4）；`prior_augmented_reward`（schema v4）；
+  `prior_procedure_check`（v2，每条规则分开数）。opus 审查没有必须修的，六个小项都修了。ts 全套 1,494 通过；执行器源码指纹不变（v10 照开）。
+- 第 0 步正式检查与第二阶段正式运行排成一个队列（`outputs/POOLED/prior/v3_stage2_restart_20260926/queue.sh`，17:01 UTC 起；第 0 步不过线
+  训练不开跑）。
+- 新的代码健康遗留：Training 导出和后端实时飞模型的句子时不开程序屏蔽。
+
 ### 2026-09-26 — 执行器 v10：下降至落地不低于下滑道下沿
 
 - 用户定：执行器多读被指跑道公布的下滑角（与 TCH 同一条 CIFP 记录），"下降至落地"在入口前不低于下滑道 − 60 m（后训练检查的下沿），
