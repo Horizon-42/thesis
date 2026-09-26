@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-fetch every source used by README.md (URLs as of 2026-09-14). One curl per file.
+# Re-fetch every source used by README.md (URLs as of 2026-09-14; the section 2.9 lines checked 2026-09-27). One curl per file.
 # PDFs are gitignored (root .gitignore has *.pdf); the HTML pages are the text copies.
 # NOT fetched here (cross-linked instead): the 7110.65BB consolidated PDF, 7210.3EE, the AIM,
 # ICAO Doc 9643 (SOIR) and the Erzberger-Itoh NASA TP. Run ../runway_assignment/download.sh.
@@ -24,6 +24,16 @@ curl -sSL -A "$UA" -o papers/7110.65BB_chap3_section_10_Arrival_Procedures_and_S
 curl -sSL -A "$UA" -o papers/7110.65BB_chap5_section_5_Radar_Separation.html              "$ATC/chap5_section_5.html"
 curl -sSL -A "$UA" -o papers/7110.65BB_chap5_section_9_Radar_Arrivals.html                "$ATC/chap5_section_9.html"
 curl -sSL -A "$UA" -o papers/7110.65BB_chap7_section_4_Approaches.html                    "$ATC/chap7_section_4.html"
+# added 2026-09-27 for README section 2.9 (vertical separation and how it combines with radar minima)
+curl -sSL -A "$UA" -o papers/7110.65BB_chap1_section_2_Terms_of_Reference.html            "$ATC/chap1_section_2.html"
+curl -sSL -A "$UA" -o papers/7110.65BB_chap2_section_7_Altimeter_Settings.html            "$ATC/chap2_section_7.html"
+curl -sSL -A "$UA" -o papers/7110.65BB_chap4_section_5_Altitude_Assignment_and_Verification.html "$ATC/chap4_section_5.html"
+curl -sSL -A "$UA" -o papers/7110.65BB_chap4_section_8_Approach_Clearance_Procedures.html "$ATC/chap4_section_8.html"
+curl -sSL -A "$UA" -o papers/7110.65BB_chap5_section_1_Radar_General.html                 "$ATC/chap5_section_1.html"
+curl -sSL -A "$UA" -o papers/7110.65BB_chap5_section_2_Beacon_ADS-B_Systems.html          "$ATC/chap5_section_2.html"
+curl -sSL -A "$UA" -o papers/7110.65BB_chap5_section_14_STARS_Terminal.html               "$ATC/chap5_section_14.html"
+curl -sSL -A "$UA" -o papers/7110.65BB_chap7_section_2_Visual_Separation.html             "$ATC/chap7_section_2.html"
+curl -sSL -A "$UA" -o papers/7110.65BB_chap7_section_9_Class_B_Service_Area.html          "$ATC/chap7_section_9.html"
 
 # --- JO 7210.3EE (Change 3), Pilot/Controller Glossary (Change 3), US AIP GEN 1.7 ----------
 curl -sSL -A "$UA" -o papers/7210.3EE_index.html                     "$FOA/"
@@ -33,6 +43,8 @@ curl -sSL -A "$UA" -o papers/PCG_glossary-a.html                     "$PCG/gloss
 curl -sSL -A "$UA" -o papers/PCG_glossary-c.html                     "$PCG/glossary-c.html"
 curl -sSL -A "$UA" -o papers/PCG_glossary-p.html                     "$PCG/glossary-p.html"
 curl -sSL -A "$UA" -o papers/PCG_glossary-s.html                     "$PCG/glossary-s.html"
+curl -sSL -A "$UA" -o papers/PCG_glossary-l.html                     "$PCG/glossary-l.html"
+curl -sSL -A "$UA" -o papers/PCG_glossary-v.html                     "$PCG/glossary-v.html"
 curl -sSL -A "$UA" -o papers/US_AIP_index.html                       "$AIP/index.html"
 curl -sSL -A "$UA" -o papers/US_AIP_GEN_1.7_Differences_from_ICAO.html "$AIP/part1_gen_section_1.7.html"
 
@@ -54,6 +66,10 @@ curl -sSL -A "$UA" -o papers/FAA_N_JO_7360.7_Change_to_7360.1_eff2025-10-14.pdf 
 curl -sSL -A "$UA" -o papers/FAA_JO_7110.308E_Simultaneous_Dependent_Approaches_CSPR_eff2023-10-05.pdf "$ORD/JO_7110.308E_Simultaneous_Dependent_Approaches_to_CSPR.pdf"
 curl -sSL -A "$UA" -o papers/FAA_JO_7110.110B_DCIA_with_CRDA_eff2017-11-17.pdf "$ORD/FAA_Order_JO_7110.110B_Dependent_Converging_Instrument_Approaches_(DCIA)_with_Converging_Runway_Display_Aid_(CRDA).pdf"
 curl -sSL -A "$UA" -o papers/FAA_JO_7110.663A_MCPRS_with_CRDA_eff2024-03-01.pdf "$ORD/2023-01-30_Order_7110.663A_MCPRS-CRDA_FINAL.pdf"
+# occurrence reporting / quality assurance (README section 2.9): what the FAA counts as a loss of separation
+curl -sSL -A "$UA" -o papers/FAA_JO_7210.632A_ATO_Occurrence_Reporting_w_Chg1-2_eff2022-04-01.pdf "$ORD/FAA_Order_JO_7210.632A_with_CHG_1_and_CHG_2_updated_link.pdf"
+curl -sSL -A "$UA" -o papers/FAA_JO_7210.632A_Chg3_eff2026-06-26.pdf "$ORD/JO_7210.632A_CHG_3.pdf"
+curl -sSL -A "$UA" -o papers/FAA_JO_7210.633A_ATO_Quality_Assurance_w_Chg1_eff2021-09-01.pdf "$ORD/JO_7210.633A_ATO_Quality_Assurance_with_CHG_1.pdf"
 
 # --- international and secondary -------------------------------------------------------------
 curl -sSL -A "$UA" -o papers/EUROCONTROL_RECAT-EU_Edition_2.0_2024-11-08.pdf "https://www.eurocontrol.int/sites/default/files/2024-12/eurocontrol-recat-eu-edition-2-0.pdf"

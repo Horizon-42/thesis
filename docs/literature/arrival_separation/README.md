@@ -24,7 +24,7 @@ How to read it:
 
 ## At a glance
 
-| item | state (2026-09-14) |
+| item | state (2026-09-14; vertical separation, §2.9: 2026-09-27) |
 |---|---|
 | Edition in force | **FAA Order JO 7110.65BB, Change 3, effective 2026-07-09**. Basic 2025-02-20, Chg 1 2025-08-07, Chg 2 2026-01-22. Six notices are listed against it (§1.1) |
 | CWT (A–I) | **Merged into 7110.65BB by Change 2 (2026-01-22), for terminal facilities only.** It sits in 5-5-4 g/h as TBL 5-5-1 and 5-5-2. JO 7110.126B is canceled. En route keeps the legacy classes in 5-5-4 f |
@@ -32,6 +32,7 @@ How to read it:
 | Same runway | Runway clear before the threshold (3-10-3). 3 mi radar (5-5-4 a/b). 2.5 NM within 10 NM with average ROT ≤ 50 s (5-5-4 j, 7210.3EE 10-4-14). Wake at the threshold (5-5-4 h) |
 | Parallels | < 2,500 ft is one runway for wake (5-5-4 h NOTE), except the JO 7110.308E list (STL listed, SJC not). Dependent diagonal 1.0 / 1.5 / 2 NM at 2,500–3,600 / 3,600–8,300 / 8,300–9,000 ft (5-9-6). Independent from 3,600 ft (5-9-7), 3,100 ft with HUR, PRM below 4,300 ft (5-9-8) |
 | Intersecting / converging | 3-10-4, 7210.3EE 10-4-12 (SCIA), JO 7110.110B (DCIA with CRDA) |
+| Vertical separation | **1,000 ft (304.8 m) up to and including FL 410** (4-5-1 a). "Aircraft not laterally separated, may be vertically separated" (5-5-5): the radar minimum **or** 1,000 ft. On the same final the text names only radar and wake minima (5-9-6 a5, 5-9-7 a4). Altitude means indicated (barometric) MSL, not geometric (1-2-1 j). No FAA text defines "loss of separation" in numbers (§2.9) |
 | ICAO Doc 4444 | **Not freely available** (ICAO Store, USD 442). Paragraph numbers come from the US AIP GEN 1.7, an ICAO APAC paper and SKYbrary; values from EUROCONTROL RECAT-EU Table 1 and SKYbrary (§3.1) |
 | RECAT-EU | EUROCONTROL Edition 2.0 (2024-11-08): six categories A–F and an arrival distance matrix (§3.3) |
 | Not verified | Per-airport chart and facility authorizations, and FAA-published centerline separations (§5) |
@@ -46,15 +47,17 @@ anchor on it.
 
 | document | edition / effective | what was read | local copy |
 |---|---|---|---|
-| **JO 7110.65BB *Air Traffic Control*** | Basic 02/20/2025; Change 1 08/07/2025; Change 2 01/22/2026; **Change 3 07/09/2026**. The HTML index states "Effective: 7/9/2026 Change: Change 3" | 2-1-19/20, 3-9-6…3-9-9, 3-10-3/3-10-4, 5-5-4, 5-9-5…5-9-11, 7-4-4, Explanation of Changes | `papers/7110.65BB_*.html` (7 sections + index); PDF: `../runway_assignment/official/FAA_Order_JO_7110.65BB_Air_Traffic_Control_w_Chg1-3_2026-07-09.pdf` (927 pp.) |
+| **JO 7110.65BB *Air Traffic Control*** | Basic 02/20/2025; Change 1 08/07/2025; Change 2 01/22/2026; **Change 3 07/09/2026**. The HTML index states "Effective: 7/9/2026 Change: Change 3" | 2-1-19/20, 3-9-6…3-9-9, 3-10-3/3-10-4, 5-5-4, 5-9-5…5-9-11, 7-4-4, Explanation of Changes. **Added 2026-09-27 (§2.9):** 1-2-1, 2-7-3, 4-5-1, 4-8-5, 5-1-4, 5-2-15, 5-5-1, 5-5-5…5-5-7, 5-9-1, 5-14-4, 7-2-1, 7-9-4 | `papers/7110.65BB_*.html` (16 sections + index); PDF: `../runway_assignment/official/FAA_Order_JO_7110.65BB_Air_Traffic_Control_w_Chg1-3_2026-07-09.pdf` (927 pp.) |
 | JO 7110.65BB **Basic** (superseded) | 02/20/2025 | 5-5-4 f/g/i, the legacy **terminal** wake minima that Change 2 replaced | `papers/FAA_JO_7110.65BB_Basic_eff2025-02-20_EXCERPT_5-5-4_legacy_wake.pdf` (PDF pp. 1, 310–314) |
-| Pilot/Controller Glossary (P/CG) | Change 3, effective 7/9/26 (HTML index) | AIRCRAFT CLASSES, AIRCRAFT WAKE CATEGORIES, CLOSE PARALLEL RUNWAYS, SIDESTEP MANEUVER, SIMULTANEOUS … APPROACHES, PRM APPROACH, ATPA | `papers/PCG_glossary-{a,c,p,s}.html`, `PCG_index.html` |
+| Pilot/Controller Glossary (P/CG) | Change 3, effective 7/9/26 (HTML index) | AIRCRAFT CLASSES, AIRCRAFT WAKE CATEGORIES, CLOSE PARALLEL RUNWAYS, SIDESTEP MANEUVER, SIMULTANEOUS … APPROACHES, PRM APPROACH, ATPA. Added 2026-09-27: ALTITUDE, AUTOMATIC ALTITUDE REPORTING, LATERAL SEPARATION, SEPARATION, SEPARATION MINIMA, VERTICAL SEPARATION | `papers/PCG_glossary-{a,c,l,p,s,v}.html`, `PCG_index.html` |
 | JO 7210.3EE *Facility Operation and Administration* | Change 3, effective 7/9/2026 | 10-4-10…10-4-14 | `papers/7210.3EE_chap10_section_4_Services.html`; PDF in `../runway_assignment/official/` |
 | **JO 7360.1K *Aircraft Type Designators*** | 06/12/2025 | Ch. 2 (column definitions), Appendix A (the decode table with the CWT column) | `papers/FAA_JO_7360.1K_…_EXCERPT.pdf` (PDF pp. 1–121 = front matter + all of Appendix A); `papers/FAA_JO_7360.1K_AppendixA_categories_parsed.csv` |
 | N JO 7360.7 (GENOT 25/41) | effective 10/14/2025, cancels 10/14/2026 | Adds one new type: Electra EL-2 ("EL2"), CWT I | `papers/FAA_N_JO_7360.7_…pdf` |
 | **JO 7110.308E** *Simultaneous Dependent Approaches to Closely Spaced Parallel Runways* | 10/05/2023 (still listed as current on the publications page) | All of it; Appendix A lists STL | `papers/FAA_JO_7110.308E_…pdf` |
 | JO 7110.110B *Dependent Converging Instrument Approaches (DCIA) with CRDA* | 11/17/2017 | ¶1–10 | `papers/FAA_JO_7110.110B_…pdf` |
 | JO 7110.663A *Merging, Converging, Parallel Route Sequencing (MCPRS) with CRDA* | 03/01/2024 | ¶1–8 | `papers/FAA_JO_7110.663A_…pdf` |
+| JO 7210.632A *Air Traffic Organization Occurrence Reporting* (read 2026-09-27) | Basic 10/01/2020; Chg 1 09/01/2021; Chg 2 04/01/2022; Chg 3 06/26/2026 (the FAA orders page lists it "Active"; Chg 3 changes only App. A-4, GPS/GNSS MORs) | ¶7 Definitions; App. A ¶2 *Airborne Loss of Separation* (PDF p. 14, printed A-1) | `papers/FAA_JO_7210.632A_ATO_Occurrence_Reporting_w_Chg1-2_eff2022-04-01.pdf`, `papers/FAA_JO_7210.632A_Chg3_eff2026-06-26.pdf` |
+| JO 7210.633A *ATO Quality Assurance* (read 2026-09-27) | Basic 10/01/2020; Chg 1 09/01/2021 (listed "Active") | ¶5, ¶7 Definitions | `papers/FAA_JO_7210.633A_ATO_Quality_Assurance_w_Chg1_eff2021-09-01.pdf` |
 | US AIP, GEN 1.7 *Differences from ICAO …* | AIP Amendment 1, effective 07/09/2026 | The PANS-ATM (Doc 4444, 16th ed.) difference rows | `papers/US_AIP_GEN_1.7_Differences_from_ICAO.html`, `US_AIP_index.html` |
 
 Change documents and notices in force against 7110.65BB. Sources: the publications page
@@ -87,7 +90,7 @@ Control (CERAP) with Combined Control Facility (CCF) in TBL 1-2-1 and paragraph 
 
 | file there | what it adds here |
 |---|---|
-| `official/FAA_Order_JO_7110.65BB_…_w_Chg1-3_2026-07-09.pdf` | The PDF pages cited below: 3-10-3 pp. 202–204; 3-10-4 pp. 204–207; 5-5-4 pp. 326–330 (TBL 5-5-1/5-5-2 on pp. 329–330); 5-9-5…5-9-11 pp. 360–370; 7-4-4 pp. 439–440; P/CG A-8/A-9 pp. 646–647; Change 2 CWT statement p. 14 |
+| `official/FAA_Order_JO_7110.65BB_…_w_Chg1-3_2026-07-09.pdf` | The PDF pages cited below: 3-10-3 pp. 202–204; 3-10-4 pp. 204–207; 5-5-4 pp. 326–330 (TBL 5-5-1/5-5-2 on pp. 329–330); 5-9-5…5-9-11 pp. 360–370; 7-4-4 pp. 439–440; P/CG A-8/A-9 pp. 646–647; Change 2 CWT statement p. 14. For §2.9: 1-2-1 p. 45; 2-7-3 p. 126; 4-5-1 p. 257; 4-8-5 p. 290; 5-1-4 p. 297; 5-2-15 p. 305; 5-5-5 p. 330; 5-5-6/5-5-7 p. 331; 5-9-1 p. 355; 5-9-7 d7 p. 365; 5-9-9 a1 NOTE p. 366; 7-2-1 p. 431; 7-9-4 p. 458; P/CG ALTITUDE p. 651, LATERAL SEPARATION p. 714, SEPARATION MINIMA p. 756, VERTICAL SEPARATION p. 779 |
 | `official/FAA_Order_JO_7210.3EE_…pdf` | 10-4-10 p. 294, 10-4-12 p. 297, 10-4-14 p. 300 |
 | `official/FAA_AIM_…pdf` | **5-4-14** Simultaneous Dependent Approaches (pp. 434–435, printed 5-4-42/43), quoted in §2.6–2.7; 5-4-15/16 independent and PRM; 5-4-19 side-step; **7-4-9** Air Traffic Wake Turbulence Separations (p. 613), see §5 |
 | `official/ICAO_Doc_9643_SOIR_…pdf` | The parallel-runway operating modes and ICAO's spacing thresholds (§3.2) |
@@ -370,6 +373,125 @@ Notes on the table:
 | P/CG | definition | SIMULTANEOUS (CONVERGING) DEPENDENT APPROACHES: "…approaches to runways or missed approach courses that intersect where required minimum spacing between the aircraft on each final approach course is required." |
 | 7-4-4 c4 (visual) | | "Intersecting and converging runways. Visual approaches may be conducted simultaneously with visual or instrument approaches to other runways, provided:" |
 
+### 2.9 Vertical separation, and how it combines with the radar minima (read 2026-09-27)
+
+Why: the multi-aircraft design (`4dTrajectory/ts_transformer/docs/two_tier/multi_aircraft_design.zh.md`
+§3.1–3.2) counts a loss of separation when horizontal < S_h **and** vertical < 1,000 ft (304.8 m). This
+section holds the text for the vertical half and for the "and". Quotes are from the Change 3 HTML; the
+subparagraph letters are from the PDF, because the HTML prints its lists without letters. PDF pages are in
+§1.3.
+
+**The vertical minimum**
+
+| ¶ | rule | quote |
+|---|---|---|
+| 4-5-1 | general IFR minima | "Separate instrument flight rules (IFR) aircraft using the following minima between altitudes:" |
+| **4-5-1 a** | **1,000 ft (304.8 m)** | "Up to and including FL 410- 1,000 feet." |
+| 4-5-1 b | non-RVSM, 2,000 ft (609.6 m) | "Apply 2,000 feet at or above FL 290 between non-RVSM aircraft and all other aircraft at or above FL 290." |
+| 4-5-1 c | above FL 410, 2,000 ft | "Above FL 410- 2,000 feet, except:" c1 "In oceanic airspace, above FL 450 between a supersonic and any other aircraft- 4,000 feet." c2 "Above FL 600 between military aircraft- 5,000 feet." |
+| P/CG | definitions | VERTICAL SEPARATION: "Separation between aircraft expressed in units of vertical distance." SEPARATION MINIMA: "The minimum longitudinal, lateral, or vertical distances by which aircraft are spaced through the application of air traffic control procedures." |
+| 1-2-1 i, k | word meanings | "'Approved separation' means separation in accordance with the applicable minima in this order." "'Miles' means nautical miles unless otherwise specified…" |
+
+(Reading) Our arrivals are inside 25 km of the airport and far below FL 290, so only 4-5-1 a applies:
+1,000 ft. RVSM is not a separate value here. Between FL 290 and FL 410 it is the 1,000 ft of item a, and
+item b gives 2,000 ft to non-RVSM aircraft.
+
+**How the radar minima and vertical separation combine**
+
+| ¶ | rule | quote |
+|---|---|---|
+| 5-5-1 b1 | radar separation applies to | "Radar separation may be applied between:" "Radar identified aircraft." |
+| 5-5-4 | radar minima (§2.2, §2.3) | "Separate aircraft by the following minima:" The paragraph states only horizontal distances and gives no vertical alternative. Its wake items carry their own vertical geometry (5-5-4 g1, below) |
+| **5-5-5** | **vertical in place of lateral** | "Aircraft not laterally separated, may be vertically separated by one of the following methods:" |
+| 5-5-5 a | method a (REFERENCE 4-5-1) | "Assign altitudes to aircraft, provided valid Mode C altitude information is monitored and the applicable separation minima is maintained at all times." |
+| 5-5-5 b | method b, vacated altitude | "Assign an altitude to an aircraft after the aircraft previously at that altitude has been issued a climb/descent clearance and is observed (valid Mode C), or reports leaving the altitude." |
+| 5-5-5 b NOTE 2 | b may go below 4-5-1 | "It is possible that the separation minima described in paragraph 4-5-1 … might not always be maintained using subparagraph b." |
+| **5-9-6 a1**, 5-9-7 a1 (§2.6); **5-9-9 a1** | turn-on, stated as either/or | "Provide a minimum of 1,000 feet vertical or a minimum of 3 miles radar separation between aircraft during turn on." (5-9-9 a1: "…during turn-on to final approaches.") |
+| 5-9-1 b | opposite base legs | "Provide a minimum of 1,000 feet vertical separation between aircraft on opposite base legs unless another form of approved separation is established during turn-on to final approach." |
+| 5-9-7 d7 | the moment both are lost | "Communications transfer to the tower controller's frequency must be completed prior to losing 1,000 feet vertical or 3 miles radar separation between aircraft." |
+| 5-9-9 a1 NOTE; b5 (SOIA) | | "Communications transfer … must be completed prior to losing vertical separation between aircraft." / "The NTZ begins prior to the point where adjacent inbound aircraft first lose vertical separation…" |
+| 5-1-4 b | merging targets | "Issue traffic information to the aircraft listed in subparagraph a whose targets appear likely to merge unless the aircraft are separated by more than the appropriate vertical separation minima." |
+| 7-9-4 a | Class B | "Standard IFR services to IFR aircraft." (b2's "500 feet vertical separation" is VFR vs VFR/IFR only; so are 7-7-3 b and 7-8-3 b) |
+| P/CG | LATERAL SEPARATION | "The lateral spacing of aircraft at the same altitude by requiring operation on different routes or in different geographical locations." |
+
+**On final: what replaces or overrides the either/or**
+
+| ¶ | rule | quote |
+|---|---|---|
+| **5-9-6 a5**; 5-9-7 a4, b4; 5-9-9 a2 | same final: the text names radar only | "Provide the minimum approved radar separation between aircraft on the same final approach course." (5-9-7, 5-9-9: "…minimum applicable radar separation…") |
+| 5-9-5 a | who, on the same final | "Radar final controllers ensure that established separation is maintained between aircraft under their control and other aircraft established on the same final approach course." |
+| 5-5-4 g1 | airborne wake, vertical built in | "When following an aircraft conducting an instrument approach and/or operating within 2,500 feet and less than 1,000 feet below the flight path of a Category A, B, C, or D aircraft." (g2: "…and/or less than 500 feet below a Category E aircraft.") |
+| 5-5-4 h | wake at the threshold | a distance "at the time the preceding aircraft is over the landing threshold" (§2.3). No vertical alternative is stated |
+| 2-1-19 b | to touchdown | "The separation minima must continue to touchdown for all IFR aircraft not making a visual approach or maintaining visual separation." |
+| 5-5-7 a3; b, b6 | passing or diverging | Terminal: after passing, "all other approved separation may be discontinued", but "the requirements of paragraph 5-5-4, Minima, subparagraph g must be applied when wake turbulence separation is required." b: "Vertical separation between aircraft may be discontinued when they are on opposite courses…" |
+| 7-2-1 | visual separation | "Visual separation may be applied when other approved separation is assured before and after the application of visual separation." "Visual separation is not authorized when the lead aircraft is a super." |
+| 7-2-1 a1(e) | tower-applied | "The use of tower-applied visual separation is not authorized when wake turbulence separation is required." |
+| 4-8-5 | vertical by the procedure's altitudes | "When vertical separation will be provided from other aircraft by pilot adherence to the prescribed maximum, minimum, or mandatory altitudes, the controller may omit specifying the altitude in the approach clearance." |
+
+No paragraph was found that explicitly forbids vertical separation between two aircraft on the same final
+or on a common glidepath. None was found that permits it there either, beyond the general 5-5-5.
+
+**What the FAA counts as a loss of separation**
+
+| source | quote |
+|---|---|
+| 7210.632A App. A ¶2 a | "Any suspected loss of radar separation involving instrument flight rules (IFR) aircraft, except as the result of compression on final approach." |
+| 7210.632A App. A ¶2 NOTE | "Loss of separation on final approach will be closely monitored using electronic detection and assessed for risk and corrective action identified through the Quality Assurance and Quality Control processes." |
+| 7210.632A ¶7 g | NMAC: "…a possibility of collision occurs as a result of proximity of less than 500 feet to another aircraft…" |
+| 7210.633A ¶7 c | "Closest Proximity. The smallest lateral distance between two airborne aircraft with the associated vertical value." (¶5: the revision "removes … Separation Conformance") |
+
+Neither order defines "loss of separation" with numbers. They use the term and point to the 7110.65 minima.
+
+**Which altitude is compared** (the design compares geometric MSL heights from ADS-B)
+
+| ¶ | rule | quote |
+|---|---|---|
+| **1-2-1 j** | altitude in this order | "'Altitude' means indicated altitude mean sea level (MSL), flight level (FL), or both." |
+| P/CG ALTITUDE c | indicated altitude | "The altitude as shown by an altimeter. On a pressure or barometric altimeter it is altitude as shown uncorrected for instrument error and uncompensated for variation from standard atmospheric conditions." |
+| 2-7-3 c NOTE 1 | what the scope shows | "Altitude reporting transponders transmit the pressure altitude (Flight Level) of the aircraft. … ATC automation applies the current altimeter setting to the pressure altitude received and displays the altitude of the aircraft above mean sea level (MSL)." |
+| P/CG AUTOMATIC ALTITUDE REPORTING | resolution | "…responds to Mode C interrogations by transmitting the aircraft's altitude in 100‐foot increments." |
+| 5-2-15 b1 | tolerance | "Consider an altitude readout valid when:" "It varies less than 300 feet from the pilot reported altitude, or" |
+| 5-5-6 a; 5-14-4 f3 | Mode C not usable | "Do not use Mode C to effect vertical separation with an aircraft on a cruise clearance, contact approach…" / "Do not use Mode C to effect vertical separation within a Mosaic radar configuration." |
+
+**Answers for the design (§3.1–3.2), text first and then reading**
+
+- **Text.** The radar minima (5-5-4) and the vertical minimum (4-5-1 a, 1,000 ft) are alternatives:
+  "Aircraft not laterally separated, may be vertically separated" (5-5-5). The turn-on paragraphs say it
+  outright: "1,000 feet vertical or … 3 miles radar separation" (5-9-6 a1, 5-9-7 a1, 5-9-9 a1). No FAA text
+  read defines "loss of separation" in numbers. 7210.632A reports a "loss of radar separation" and
+  7210.633A measures an encounter as the smallest lateral distance "with the associated vertical value".
+- **Reading.** Two IFR aircraft are separated when either the applicable horizontal minimum or 1,000 ft
+  vertical holds. A loss is therefore **horizontal < S_h and vertical < 1,000 ft**, which is the design's
+  rule. The text supports it with these limits:
+  1. **S_h is the applicable minimum, not always 3 mi**: 5 mi at 40 mi or more from the antenna, with ISR
+     or in STARS multi-sensor (5-5-4 a2, b2, c); 2.5 NM only under 5-5-4 j; the wake tables; the 1.0 / 1.5 /
+     2 NM diagonals; nothing between independent finals once established (§2.2–2.7).
+  2. **The P/CG's "lateral separation" is spacing "at the same altitude"** by different routes or places.
+     5-5-5's "laterally separated" is taken here to include the radar minima of 5-5-4, which are the only
+     horizontal minima in Chapter 5.
+  3. **On the same final the vertical gate should not be applied.** 5-9-6 a5, 5-9-7 a4 and 5-9-9 a2 name
+     only radar separation for the same final. The threshold wake check (5-5-4 h) is a distance with no
+     vertical alternative. 5-5-4 g1 applies TBL 5-5-1 to a follower "following an aircraft conducting an
+     instrument approach and/or" within 2,500 ft and less than 1,000 ft below. We read the "and/or" to mean
+     that a follower on an instrument approach gets the wake minimum whatever the vertical gap.
+  4. **Glidepath arithmetic (ours).** On a common 3° glidepath the follower is higher by
+     tan 3° × 1,852 m = 97.1 m (318 ft) per NM of spacing. That gives 955 ft at 3 NM and 1,592 ft at 5 NM,
+     and the gap reaches 1,000 ft at 3.14 NM (5,816 m). With an "and vertical < 1,000 ft" gate, two
+     aircraft on the path between 3.14 NM and S_h apart are always 1,000 ft or more apart vertically, so
+     they are never flagged. Every wake cell of 3.5 NM or more is therefore enforced only up to 3.14 NM.
+     The 3 mi radar check still works, but only barely (955 < 1,000 ft). This assumes both aircraft are
+     exactly on the path.
+  5. **Legitimate closer pairs in observed data.** These are visual separation and visual approaches
+     (7-2-1; 2-1-19 b), passing or diverging (5-5-7), and the vacated-altitude method of 5-5-5 b (NOTE 2).
+     7210.632A also excludes "compression on final approach" from mandatory reporting. It still calls that
+     a loss of radar separation, but monitors it separately.
+- **Altitude reference, reading.** ATC's 1,000 ft is between barometric altitudes: pressure altitude
+  corrected with the altimeter setting (2-7-3 NOTE 1), shown in 100 ft steps and valid within 300 ft
+  (5-2-15 b1). It is not geometric height. Two aircraft at the same place and time share the altimeter
+  setting and most of the temperature error, so the *difference* should be close to the geometric
+  difference. The text gives no number for this, and it was not measured. ADS-B also carries the
+  transponder's pressure altitude; whether our harvest keeps it was not checked here.
+
 ## 3. International counterparts
 
 ### 3.1 ICAO Doc 4444 (PANS-ATM)
@@ -568,6 +690,12 @@ annotated for simultaneous approaches, PRM or offset approaches, HUR, FMA, CTRDs
 15. **No text gives a diagonal minimum below 2,500 ft outside 7110.308E and SOIA.** "Single runway
     separation" for that case is stated only in the pilot-side AIM 5-4-14 e. The controller order says
     only "single runway" for wake (5-5-4 h NOTE).
+16. **No numeric definition of "loss of separation"** was found in 7110.65BB, 7210.632A or 7210.633A
+    (§2.9). The cancelled JO 7210.632 (2011) was not read. The "and" rule in §2.9 is our reading of 5-5-5.
+17. **ICAO vertical separation** (Doc 4444 Ch. 5) was not read. The only ICAO vertical value quoted in this
+    folder is SOIR's turn-on "300 m (1 000 ft)" (§3.2).
+18. **Barometric vs geometric height** (§2.9): the text sets the minimum on indicated (barometric) MSL
+    altitude. How far that differs from the ADS-B geometric height at our airports was not measured.
 
 ## 6. Layout
 
@@ -575,9 +703,10 @@ annotated for simultaneous approaches, PRM or offset approaches, HUR, FMA, CTRDs
 |---|---|
 | `README.md` | this index |
 | `download.sh` | re-fetches everything in `papers/`, cuts the two PDF excerpts with ghostscript, and regenerates the parsed 7360.1K CSV. It does not fetch the `../runway_assignment/` files |
-| `papers/7110.65BB_*.html` | 7110.65BB Change 3 sections: 0-0 (Explanation of Changes), 2-1, 3-9, 3-10, 5-5, 5-9, 7-4, plus the index |
+| `papers/7110.65BB_*.html` | 7110.65BB Change 3 sections: 0-0 (Explanation of Changes), 2-1, 3-9, 3-10, 5-5, 5-9, 7-4; for §2.9 also 1-2, 2-7, 4-5, 4-8, 5-1, 5-2, 5-14, 7-2, 7-9; plus the index |
 | `papers/7210.3EE_*.html` | 7210.3EE Change 3, Ch. 10 Sec. 4, plus the index |
-| `papers/PCG_*.html` | P/CG Change 3: letters A, C, P, S, plus the index |
+| `papers/PCG_*.html` | P/CG Change 3: letters A, C, L, P, S, V, plus the index |
+| `papers/FAA_JO_7210.632A_…pdf`, `papers/FAA_JO_7210.633A_…pdf` | occurrence reporting and quality assurance (§2.9) |
 | `papers/FAA_atpubs_publications_index.html`, `FAA_at_notices_*.html` | edition, change and notice evidence |
 | `papers/FAA_JO_7110.65BB_Basic_…_EXCERPT_5-5-4_legacy_wake.pdf` | superseded legacy terminal wake text |
 | `papers/FAA_JO_7360.1K_…_EXCERPT.pdf`, `…_AppendixA_categories_parsed.csv` | type → CWT / weight / ICAO WTC / SRS |
@@ -591,7 +720,8 @@ annotated for simultaneous approaches, PRM or offset approaches, HUR, FMA, CTRDs
 ## 7. Constraints for the R3 scheduler
 
 What a scheduler over several runways would have to enforce, per the text, with sources. **Status**:
-- **T**: the value is quoted above from primary text read on 2026-09-14.
+- **T**: the value is quoted above from primary text read on 2026-09-14 (rows 20–25, §2.9: read on
+  2026-09-27).
 - **T+R**: the value is in the text, but the way a scheduler applies it is our reading. Examples are
   turning distance into time with a groundspeed (as Erzberger & Itoh §2.2 do), treating a pair as
   "adjacent", or combining several minima by taking the maximum.
@@ -620,3 +750,9 @@ All distances are in NM at the stated point.
 | 17 | Go-around from a reduced-separation pair | Controllers must re-establish approved separation | 5-9-11 | T (not a scheduling constraint) |
 | 18 | Visual conditions | For parallels < 2,500 ft, visual approaches with pilot-applied visual separation; no overtaking where wake separation is required. The runway_intent plan measured parallel-runway gaps down to 22–51 s at p5 in our data | 7-4-4 c1 (N JO 7110.805) | T for the rule. **Share of our flights flown visually: N** |
 | 19 | Legacy alternative (en route, or the pre-2026 terminal rule) | Super/Heavy/B757/Large/Small minima of §2.4 | 5-5-4 f (Chg 3); Basic 5-5-4 f/g | T (superseded in terminal) |
+| 20 | General vertical minimum | 1,000 ft (304.8 m) up to and including FL 410. 2,000 ft above FL 410, or at and above FL 290 for a non-RVSM aircraft | 4-5-1 a–c | T |
+| 21 | Radar or vertical | Two IFR aircraft are separated when the applicable horizontal minimum (rows 1–4, 8–13) **or** 1,000 ft vertical holds; at turn-on, "1,000 feet vertical or … 3 miles radar" | 5-5-5; 5-9-6 a1, 5-9-7 a1, 5-9-9 a1; 5-9-1 b | T for the either/or. **Loss = horizontal < S_h and vertical < 1,000 ft: T+R** (no text read defines loss in numbers) |
+| 22 | Same final: no vertical gate | Only radar minima are named for the same final approach course, and the threshold wake check is distance only. A follower on an instrument approach gets TBL 5-5-1 whatever its height ("and/or"). On a 3° path a gate of vertical < 1,000 ft stops biting at 3.14 NM | 5-9-6 a5, 5-9-7 a4, 5-9-9 a2; 5-5-4 g1, h; 2-1-19 b | T+R (no text explicitly forbids vertical separation on a common final; the 3.14 NM is our arithmetic) |
+| 23 | Airborne wake geometry | TBL 5-5-1 applies within 2,500 ft and less than 1,000 ft below an A–D leader, or less than 500 ft below E, or when following an instrument approach | 5-5-4 g1, g2 | T (same as row 4) |
+| 24 | Altitude reference | Indicated (barometric) MSL altitude from Mode C: 100 ft steps, valid within 300 ft of the pilot's report | 1-2-1 j; 2-7-3 c NOTE 1; 5-2-15 b1; P/CG | T. Checking it with geometric ADS-B heights: T+R. Size of the difference at our airports: N |
+| 25 | Legitimate exceptions | Visual separation and visual approaches; passing or diverging; the vacated-altitude method (may dip below 1,000 ft); compression on final is monitored, not an MOR | 7-2-1; 2-1-19 b; 5-5-7; 5-5-5 b NOTE 2; 7210.632A App. A ¶2 | T. **Share of our pairs under each: N** |
