@@ -1,4 +1,4 @@
-# 两层模型：阶段记录（更新于 2026-09-26 20:15 UTC）
+# 两层模型：阶段记录（更新于 2026-09-26 21:30 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、接下来按什么顺序做。
 设计本身在各自的设计文档里，这里只给结论和指路；历史看 git 和 `docs/CHANGELOG.md`。
@@ -6,16 +6,14 @@
 路径都相对 `4dTrajectory/`（`outputs/…`）或 `4dTrajectory/ts_transformer/`（`docs/…`、包名），除非写明是仓库根目录。
 
 **模型的名字**（用户 2026-09-26，英文）：**base**（只用数据，`prior/v3_step1_20260924/full_s1337`）→ **landing**（base 按落地强化，第一阶段采用，
-`prior/v3_rl_20260925/grpo_s1337/round_01`）→ **augmented**（landing 在扩充起点上、开着程序高度屏蔽再强化，第二阶段，
-`prior/v3_stage2_restart_20260926/aug_s1337/round_NN`，某一轮叫 augmented r*k*）。拉回项总是拉回 base。
+`prior/v3_rl_20260925/grpo_s1337/round_01`）→ **augmented**（landing 在扩充起点上、开着程序高度屏蔽再强化，第二阶段；现行运行
+`prior/v3_stage2_clip_20260926/aug_s1337/round_NN`，某一轮叫 augmented r*k*）。拉回项总是拉回 base。
 
-**一句话现状**：先验（管制员语言模型，每 2 s 说一行六列词）会说话、执行器照着飞。第一阶段后训练（按落地强化）采用，验证集落地
-97.2 %；第二阶段（下滑道下沿屏蔽 + 扩充起点）试了五种做法都没有明确提升，不采用；随后按合并后的代码重建了句子产物和执行器，
-第一阶段模型在新执行器上结果不变。第二阶段检查里照标注的词被判低于下滑道下沿的，查明是执行器的飞法、不是词（先验读数 §12）；
-执行器改为"下降至落地"在入口前不低于公布下滑道的下沿（v10，§2），第一阶段模型开着检查验证集 94.0 → 97.2 %（先验读数 §13）。
-**第二阶段带截断的比重新在跑**（19:45 UTC 起，§9）：上一次重启第 2 轮一遍之内离 base 冲出去，原因查明是奖励项不带重要性比和截断
-（离线检查里截断的比把漂移完全压住，先验读数 §15）；训练器已加截断（两个阶段共用）。另两件诊断：MVA 超标的一大半来自扩充本身，
-模型对公平对照 1.7 倍（§14）；说一条跑道、飞到平行的另一条上是超时、奖励本来就是 0（§16），判定的两处改进列入下一版执行器规格。
+**一句话现状**：先验（管制员语言模型，每 2 s 说一行六列词）会说话、执行器（v10）照着飞。第一阶段后训练（按落地强化）采用 = **landing**，
+验证集落地 97.2 %。**第二阶段正在跑**（`outputs/POOLED/prior/v3_stage2_clip_20260926/`，19:45 UTC 起，预计 2026-09-27 01–02 UTC 跑完）：从
+landing 起，切入前加了两条硬约束（决断高度、跌破入口高度后不爬升），每轮真实 / 扩充起点各半，奖励项加了**截断的比**（PPO / GRPO，ε = 0.2）。
+截断之前的那次重启在第 2 轮一遍之内离 base 冲出去、用户叫停（先验读数 §15）；加截断后第 1、2 轮一遍之内都平（最大 0.021 / 0.016），第 2 轮
+扩充起点落地 87.5 → 89.7 %、真实起点 96.4 → 95.7 %，所有护栏都过（§4.4）。代码都已合并进 dev-two-tier（第二阶段 `4b2521c6`，文档整理 `60cf127f`）。
 
 ---
 
@@ -28,7 +26,7 @@
 | 3 执行器 | **完成，只用词表**，词表以外只读被指跑道公布的 TCH 和下滑角（"下降至落地"入口前不低于下滑道下沿）；每种机型按公布的最大着陆重量飞（§2）。现行规格 `outputs/POOLED/executor/v10_20260926/` | `docs/two_tier/executor_design.zh.md`（2026-09-26 按实现重写，§14 关键代码索引）；包 `autopilot/`（`README.md`） |
 | 4 回放门 | v10 训练集每格都过（落地 99.74 %、词在包络内 97.83 %、evaluation 98.41 %）；验证集回放门最后一次跑在 v6 上（落地 99.9 %、词 98.0 %、evaluation 98.6 %），v9、v10 上没重跑验证集回放门 | 执行器设计 §11 |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
-| 6 后训练 | 第一阶段**采用**：`prior/v3_rl_20260925/grpo_s1337/round_01`；闭环监督微调（CAT-K）不采用；第二阶段上一版不采用（§4），**按新配方重启中**（§9） | `docs/two_tier/post_training_design.zh.md`；读数文档 §6–§11 |
+| 6 后训练 | 第一阶段**采用**（landing，`prior/v3_rl_20260925/grpo_s1337/round_01`）；闭环监督微调（CAT-K）不采用；第二阶段上一版不采用（§4.3），**新配方 + 截断的比在跑**（§4.4、§9） | `docs/two_tier/post_training_design.zh.md`；读数文档（`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`）§6–§16 |
 | 7 多机 | 没开始；按场景做的设计已在先验设计 §3、§9 第 2–5 步 | 先验设计 |
 | 前端 / 后端 | Training 视图有按运行日划分的集和叠加层；后端在执行器 v10 合并（`9557315d`）之前启动，**重启后才用 v10**（§7） | §7 |
 
@@ -44,7 +42,9 @@
 | 句子产物 | `outputs/POOLED/instruction_language/v5_20260926/` | 2026-09-26 重建（§5）；与 v4 同一规格、同一标注器 |
 | 执行器规格 | `outputs/POOLED/executor/v10_20260926/`（`replay-train/`） | 参数指纹 `0d6a68a92c6f`（与 v5–v9 相同），源码指纹 `2f0feee44d61`（`9557315d`）；现行代码拒绝 v9 及以前 |
 | base 模型 | `outputs/POOLED/prior/v3_step1_20260924/full_s1337/` | 只用数据训出，`ts-prior-checkpoint-v3`；对 v5 照样能加载（同一规格）。**不重训**（用户 2026-09-26） |
-| 第一阶段模型（采用） | `outputs/POOLED/prior/v3_rl_20260925/grpo_s1337/round_01/` | 第二阶段的起点 |
+| landing（第一阶段，采用） | `outputs/POOLED/prior/v3_rl_20260925/grpo_s1337/round_01/` | 第二阶段的起点 |
+| **第二阶段（在跑）** | `outputs/POOLED/prior/v3_stage2_clip_20260926/`（`run.sh`、`run.pid`、`run.log`；`aug_s1337/{config,history}.json`、`round_NN/`，跑完有 `choice.json` 与 `val_{kept,stage1}{,_aug}_400x4/`） | §4.4；第 0 步用 `v3_stage2_restart_20260926/stage0_check_train/check.json`（屏蔽没改） |
+| MVA 图 | 仓库 `data/MVA/2026-09-26/{MSY,RDU,NCT,T75}_MVA_{FUS3,FUS5}.{xml,pdf}`（不进 git） | 出处 `docs/literature/minimum_vectoring_altitude/`；读取 `prior/mva.py` |
 | v10 上的诊断与验证集读数 | `outputs/POOLED/prior/v3_reread_v10_20260926/`（`diagnosis_train_400`、`val_{stage1,base}{,_masked}_400x4`） | 读数文档 §13，`run.sh` |
 | v9 上的验证集读数 | `outputs/POOLED/prior/v3_reread_v9_20260926/val_{stage1,base}{,_masked}_400x4/` | 读数文档 §11，`run.sh` |
 | 重建脚本 | `outputs/POOLED/rebuild_20260926/run.sh` | 信号 → 规格 → 标注 → 执行器规格 → 训练集回放 |
@@ -65,6 +65,10 @@
 | `v3_augdata_20260926` | 第二阶段带数据项（`STOPPED.txt`；`val.sh` → `val_{kept,stage1}{,_aug}_400x4`） | §10 |
 | `v3_stage2_step0_v10_20260926` | 重启前：v10 上的第 0 轮（`select_{stage1,base}{,_aug}_200x2`）、3 倍时限探针、切入前高度的探索性普查脚本 | §14 |
 | `v3_glidepath_diagnosis_20260926` | 照标注的词重飞为什么低于下滑道下沿（`run.sh` → `train_400/diagnosis.json`，v5 / v9） | §12 |
+| `v3_stage2_restart_20260926` | 第二阶段重启（没有截断）：`stage0_check_train`（第 0 步，过线）、`aug_s1337` 第 0–2 轮，`STOPPED.txt`（用户叫停） | §15 |
+| `v3_mva_diagnosis_20260926` | MVA 诊断（只读）：`mva_diagnosis.py`（按运行器重飞第 0 轮扩充起点，逐句复现）、`labelled_replay.py` | §14 |
+| `v3_drift_diagnosis_20260926` | 一轮内漂移：`word_drift.py`、`own_word_drift.py`（哪些词在漂），`offline_check/`（A 现在的损失 / B 截断 / C 截断 + 精确 KL，只能在 `65fddc04` 上重跑） | §15 |
+| `v3_runway_mismatch_diagnosis_20260926` | 说一条跑道、飞到平行的另一条上（MXY1067 等，只读） | §16 |
 
 旧的句子产物 `instruction_language/v1–v4`（v4 现行代码仍能打开，前端 Training 集建在它上面）、执行器 `executor/v2–v8`（v2–v4 被 v5 取代、
 留着不删，用户 2026-09-24；v5 / v6 是回放门的记录；v7 是第一、二阶段所有运行用的；v8 只配已归档的 CAT-K 代码）都不删。
@@ -172,6 +176,36 @@
   似然拴得住，但模型在自己的闭环里照样漂走，扩充起点的收益最多两个百分点，还多说航向词。现行代码里数据项是必需的（runner 拒绝
   `--data-weight` ≤ 0）。
 
+### 4.4 第二阶段重启：新配方 + 截断的比（2026-09-26，在跑）
+
+- **配方**（后训练设计 §2–§5；用户："1 B, 2 各一半 3 可以 4 放宽 5 可以"，"yes, start"）：从 landing 起、拉回 base。屏蔽（§3）= FAF 以内扇形里
+  的下滑道下沿 + 切入前不低于跑道公布的 DA + 跌破入口高度（下滑道在 FAF 处的高度）− 15 m 之后到切入不许爬升（复飞除外）；MVA 只作读数。
+  每轮每机场 200 真实 + 200 扩充起点 × 8 句；扩充起点时限 × 2.0（真实 × 1.5）；护栏（落地、落在观测跑道上、五列词数）真实和扩充起点都看；
+  每轮分真实 / 扩充记离 base 的距离。**奖励项 = 截断的比**：每个词 −min(r·优势, clip(r, 0.8, 1.2)·优势)，r 对一遍开始时冻结的模型（采这些
+  句子的那个）；两个阶段共用这个训练器（landing 是在它之前训出的）。
+- **第 0 步**（`v3_stage2_restart_20260926/stage0_check_train`，训练集 44,363 句）：标注的高度词和下降角词被屏蔽 0.22 %，重飞被结束 0.20 %
+  ——过线（1 % / 3 %）。观测航迹切入前：低于 DA 0 %、跌破后又爬升 0.80 %、未许可时低于 MVA 8.4 %。
+- **没有截断的那次重启**（`v3_stage2_restart_20260926`，读数 §15）：r1 被扩充起点航向词护栏排除（0.47 > 0.41）；r2 这一遍从第 39 批起离 base
+  冲出去（平均 0.45、最大 5.96），许可 / 航向 / 高度 / 速度四列都超；用户叫停。漂的是"不变"的概率流向航向词、"许可"、速度词，只在模型自己
+  说话时出现。**原因**：奖励项是没有重要性比和截断的 REINFORCE（同组比较，GRPO 的优势，但没有 GRPO 的截断），一遍约 150 次更新都用
+  旧句子，没落地的句子把"不变"一路往下压。**离线检查**（同一批 16,000 句从 augmented r1 各过一遍）：现在的损失复现了开头（最大 0.38），
+  截断的比一直平（最大 0.043，只截断 0.1 % 的词），再加精确 KL 没有额外好处。
+- **带截断的运行**（`v3_stage2_clip_20260926`，选择集每机场 200 × 2；护栏线 = 第 0 轮 + 0.18）：
+
+  | 轮 | 真实起点落地 | 扩充起点落地（超时） | 落在观测跑道 | 这一遍离 base 平均 / 最大，截断的词 | 词数离标注，扩充（许可 / 航向 / 高度 / 下降角 / 速度） | 扩充每架航向词 | 低于 MVA，扩充（观测 6.2 %） |
+  |---|---|---|---|---|---|---|---|
+  | 0 = landing | 96.4 % | 87.5 %（8.9 %） | 83.5 % | — | 0.21 / 0.23 / 0.06 / 0.11 / 0.15 | 19.0 | 25.4 % |
+  | 1 | 95.9 % | 86.9 %（8.4 %） | 82.7 % | 0.0098 / 0.021，0.20 % | 0.21 / 0.26 / 0.02 / 0.19 / 0.15 | 19.6 | 23.4 % |
+  | 2 | 95.7 % | **89.7 %**（6.7 %） | 84.1 % | 0.0083 / 0.016，0.07 % | 0.23 / 0.29 / 0.05 / 0.20 / 0.16 | 20.3 | 22.5 % |
+
+  每轮都过全部护栏；扩充起点的航向词每轮多一点（离标注 0.23 → 0.29，线 0.41），要盯。跑完写先验读数 §17。
+- **同时查完的**：
+  - **MVA**（读数 §14）：执行器照标注的词飞与观测一样（5.7 对 6.4 %），不是执行器；扩充本身把对照抬到 15.1 %（真实航迹跟起点一样转、升），
+    模型对它 1.7 倍，多出的部分是在五边之外说"下降至落地"；按模型自己的许可定窗口的读数能被"早说许可"钻空子，若作奖励要换窗口。
+  - **说一条跑道、飞到平行的另一条上**（MXY1067，读数 §16）：判定是超时，奖励本来就是 0；landing 验证集 10 / 8,000 句（0.12 %）；原因是航向词
+    把飞机带到平行跑道、许可太晚。判定的两处改进（过另一条跑道的入口作自己的结局；落地横向判据收紧到约 107 m）列入下一版执行器规格。
+  - **哪些词在漂**（读数 §15）：在真实航班的标注语境下几乎不动（数据项守着），只在模型自己说话时漂。
+
 ---
 
 ## 5 重建与新执行器上的重读（2026-09-26）
@@ -194,23 +228,27 @@
 
 ---
 
-## 6 代码、分支、工作树（2026-09-26 16:00 UTC）
+## 6 代码、分支、工作树（2026-09-26 21:30 UTC）
 
 - **`dev-two-tier`**（主检出 `/home/supercomputing/studys/thesis`）：两层模型的全部代码都在这里。关键合并：
   `7e1e2df0`（先验第三版、按落地强化、闭环提速、CAT-K 归档）、`acb93b55`（第二阶段代码 + 会影响训练的代码健康修复 + 落地质量）。
   第二阶段的代码留在包里（`prior/augment.py`、`prior/procedure.py`，runner `prior_augmented_reward`、`prior_procedure_check`，
   `prior_free_generation --glidepath-mask` / `--augment-seed`），第二阶段没采用不等于删代码。`649d5e62`：下滑道下沿的诊断 runner
-  `prior_glidepath_diagnosis`（R22，先验读数 §12）。`9557315d`：执行器的下滑道下限（v10）。
+  `prior_glidepath_diagnosis`（R22，先验读数 §12）。`9557315d`：执行器的下滑道下限（v10）。`4b2521c6`：第二阶段重启（切入前屏蔽、
+  MVA 读数、各半、截断的比）。`60cf127f`：另一个会话的 ts 文档整理（`docs-reorg`）。现行 runner 的参数名：`prior_free_generation
+  --procedure-masks`（原 `--glidepath-mask`）、`--augment-seed`；`prior_augmented_reward --real-per-airport 200 --augmented-per-airport 200
+  --clip-ratio 0.2`；schema：自由生成 v4、按落地强化 v3、第二阶段 v5、第 0 步检查 v2。
 - **分支 `dev-stage2-restart` 已合并进 dev-two-tier**（用户 2026-09-26，合并提交 `4b2521c6`，不是快进：两边改的文件不重叠）：第二阶段重启的
   代码——切入前两条规则、MVA 读数、真实 / 扩充各半、扩充起点时限 2 倍、护栏两边都看、离 base 的距离分两边、奖励项截断的比（后训练设计 §2–§5）；
   两轮 opus 审查没有必须修的；ts 全套 1,498 通过。**工作树 `stage2-restart` 还在用**：带截断的第二阶段正在从它跑（`735edc69`，与合并后的
   代码相同），**运行期间不要改它**；跑完再问用户删工作树和分支（删前先 unlink 数据软链接）。
 - **工作树 `executor-glidepath`、分支 `dev-executor-glidepath`**：已快进合并（`9557315d`），v10 的重读从它跑过；已删（用户 2026-09-26）——
   `v3_reread_v10_20260926/run.sh`、`v3_stage2_step0_v10_20260926/run.sh` 写的是它的路径，只作记录，不能照原样重跑。另一个会话整理 ts 文档的分支 `docs-reorg` 已合并进 dev-two-tier（用户 2026-09-26）：设计文档移到 `docs/two_tier/`（读数在 `docs/two_tier/readouts/`），`docs/` 里的脚本变成 runner 或归档，入口 `docs/README.md`；执行器指纹里的代码引用的十份记录和 `autopilot/__init__.py` 的路径等下一版执行器规格一起改（`docs/code-health-followups.md`）。它的工作树和分支已删（用户 2026-09-26）。
+- **工作树 `training-rounds`（分支 `dev-training-rounds`，`f90a306c`）**：不是这边建的，另一个会话的，不要动。
 - **本地分支**：`dev-two-tier`、`main`、`wip-r32-leg-timing`（跑道意图 R3.2 没采纳的第三种改法，远端也有；跑道意图计划 §18.2 引用它
   备查，保留）。2026-09-26 删掉的：工作树 `post-train`、`rebuild`、`training-sentences` 及分支 `dev-post-train`、`dev-training-followups`、
   `dev-post-train-merged`、`dev-rebuild`、`dev-model-autopilot`、`dev-training-sentences`，工作树 `glidepath-diagnosis` 及分支
-  `dev-glidepath-diagnosis`（都已合并）、`dev-cifp-runway-thresholds`
+  `dev-glidepath-diagnosis`、`docs-reorg`、`dev-executor-glidepath`（都已合并）、`dev-cifp-runway-thresholds`
   （被 `803605e0` 取代）。
 - **标签不能删**（产物里记的提交只靠它们可达）：`runs/prior-v2-feeb7ce3`、`runs/prior-v3-step0-67e0e5c9`、`runs/prior-v3-step1-47c7b790`、
   `archive/freegen-readout`。
@@ -238,6 +276,10 @@
   模型的比例超过观测的 1.2 倍再回来找用户（用户选 B）。
 - **第二阶段配方**（2026-09-26，用户："1 B, 2 各一半 3 可以 4 放宽 5 可以"）：每轮真实 / 扩充起点各一半；说话方式护栏真实和扩充起点
   都看；扩充起点时限放宽到 2 倍（3 倍探针定的）；后几轮的漂移不凭猜测改配方，每轮分真实 / 扩充记离 base 的距离。
+- **奖励项加截断的比**（2026-09-26，用户"yes, start"）：两个阶段共用；离线检查确认它压住一轮内的漂移。
+- **模型的名字用英文**（2026-09-26）：base → landing → augmented（augmented r*k*）。
+- **航向提前量的消融和判定的两处改进**放到第二阶段之后、下一版执行器规格一起做（2026-09-26）。
+- **合并**：`dev-stage2-restart`、`docs-reorg` 都已按用户要求合并进 dev-two-tier（2026-09-26）；合并前先在临时工作树里试合并、确认不影响实验。
 - **先验训练始终第一优先**，执行器的问题不能拖住它。
 - **先验第三版**：输入只给那一刻知道的，**模型不能看到未来信息**（2026-09-26 再确认）；测试集按运行日另封，**测试集运行日的数据在训练阶段
   一点都不碰**（不读信号、不标注、不进落地统计和场景、不参与任何取值）；多机按场景；机型不加、留接口。
@@ -254,10 +296,12 @@
 
 ## 9 下一步
 
-1. **第二阶段带截断的比，在跑**（用户 2026-09-26："yes, start"）：`outputs/POOLED/prior/v3_stage2_clip_20260926/`（`run.sh`，run.pid，19:45 UTC 起，
-   分支 `dev-stage2-restart` `735edc69`：训练器加截断的比 ε = 0.2（`0aa8fcc9`）+ 审查修小项；opus 审查没有必须修的；ts 全套 1,498 通过）。
-   从 landing 起、配方同重启；第 0 步沿用重启的检查（屏蔽没改）。8 轮，然后验证集读一次（与 landing 并排）。跑完写先验读数 §17；
-   分支已合并（`4b2521c6`）。
+1. **第二阶段带截断的比，在跑**（`outputs/POOLED/prior/v3_stage2_clip_20260926/`，run.pid，从工作树 `stage2-restart` `735edc69` 跑，与合并后的代码
+   相同）：第 0–2 轮见 §4.4；还剩 6 轮（每轮约 35 分钟），然后 `choice.json` 选轮、验证集读一次（`val_kept_400x4`、`val_kept_aug_400x4`，与 landing
+   的 `val_stage1{,_aug}_400x4` 并排），预计 2026-09-27 01–02 UTC 跑完。盯法：`command grep -E "round [0-9]+: (select|one pass)|KEPT|DONE|Traceback"
+   run.log`；每轮看护栏（尤其扩充起点的航向词）和这一遍离 base 的最大值。跑完：写先验读数 §17（各轮表、选中的一轮、验证集并排、MVA 读数是否
+   超过观测的 1.2 倍——超过要回来找用户），更新后训练设计 §0 与本记录；问用户删工作树 `stage2-restart` 和分支（先 unlink 数据软链接）；
+   发布到前端（Training 叠加层）要用户同意，且导出现在不开程序屏蔽（`docs/code-health-followups.md`），发布前要先改导出。
 2. **航向提前量 L 的消融**（用户 2026-09-26："第二阶段跑完再做，顺便查滚转率的出处"）：
    - 问题：L = 4 s（词表 `heading_lead_s`）的依据是 09-24 在旧航向律下的 0 / 4 / 6 s 对比；航向律改成"听到后正好 L 秒到达"之后，
      τ_ψ = L、p = 32° ÷ L 都从它推出，现行执行器下没量过；p = 8°/s 对客机可能偏快（执行器设计 §16 第 7 条）。
@@ -296,13 +340,14 @@ python -u run_ts.py instruction_labels --dir <新句子产物>
 python -u run_ts.py executor_spec --instructions <句子产物> --dir <新执行器> --word-clock track
 python -u run_ts.py executor_replay --instructions <句子产物> --executor <执行器> --split train --per-airport 400 --out <执行器>/replay-train
 
-# 自由生成读数（验证集只在定稿后读一次；--glidepath-mask 开屏蔽，--augment-seed 1337 用扩充起点）
+# 自由生成读数（验证集只在定稿后读一次；--procedure-masks 开程序高度屏蔽并读切入前的读数，--augment-seed 1337 用扩充起点）
 python -u run_ts.py prior_free_generation --prior $S1 $VAL --out <目录>/val_stage1_400x4
 
 # 后训练
 python -u run_ts.py prior_landing_reward --prior $B --instructions $I --executor $E --out <目录>/grpo_s1337 --chunk 16
 python -u run_ts.py prior_procedure_check --instructions $I --executor $E --out <目录>/check_train
 python -u run_ts.py prior_augmented_reward --prior $S1 --base $B --instructions $I --executor $E --out <目录>/aug_s1337
+#   （默认：每机场 200 真实 + 200 扩充 × 8 句，8 轮，--clip-ratio 0.2；第 0 步检查要先过线，见 v3_stage2_clip_20260926/run.sh）
 ```
 
 - 长任务写成脚本（`chmod +x`，脚本里 `echo $$ > run.pid`），`nohup setsid` 分离运行，用 Monitor 按进程号盯；一次验证集读数
