@@ -135,8 +135,8 @@ MODEL_WORD_CLOCK = "time"
 
 def model_time_limit_s(context: FlightContext, first_row: int, params: ExecutorParams, step_s: float) -> float:
     """A model's flight's time limit: the observed flight's remaining time from the sentence's first step × the spec's
-    timeout factor. MIRROR of `experiments.prior_free_generation.limits_s` (a runner the backend does not import; pinned
-    by `test_autopilot_segment.ModelSegmentTest`)."""
+    timeout factor. MIRROR of `experiments.prior_free_generation.limits_s` for a real start (``augmented=False``; a runner
+    the backend does not import; pinned by `test_autopilot_segment.ModelSegmentTest`)."""
     return (len(context.reading.words) - first_row) * step_s * params.timeout_factor
 
 

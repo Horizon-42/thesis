@@ -18,16 +18,20 @@ approach kind, with the runways pointed (first and last), the time to the end ag
 the words said per column, runway changes and go-arounds. Writes ``generation.json`` and ``sentences.npz`` (the words
 the prior said) into a NEW directory; the val split only from a clean tree.
 
-``--glidepath-mask`` (post-training design §3): the final approach's glidepath lower edge masks the prior's altitude
-column (`prior.generate.Speaker`), and every sentence — the prior's and the labelled one — ends at the first flown step
-more than the track tolerance below the edge (`glidepath_stops`), its outcome `BELOW_GLIDEPATH` whatever the executor
-made of the rest. The check reads the flown states at the step boundaries after the flight, which is where an in-loop
-check would have stopped it: what a stopped flight flies afterwards is discarded.
+``--procedure-masks`` (post-training design §3): the procedure's altitudes — the glidepath lower edge inside the FAF,
+the decision altitude and no climbing back before the join — mask the prior's altitude and descent-angle columns
+(`prior.generate.Speaker`), and every sentence — the prior's and the labelled one — ends at the first flown step more
+than the track tolerance below the glidepath lower edge (`glidepath_stops`), its outcome `BELOW_GLIDEPATH` whatever the
+executor made of the rest. The check reads the flown states at the step boundaries after the flight, which is where an
+in-loop check would have stopped it: what a stopped flight flies afterwards is discarded. Each of the prior's sentences
+and each flight's observed track are read before the join (`procedure.pre_join_readout`): under the DA, climbing back
+after the dip, under the MVA (`prior.mva`, a readout only).
 
 ``--augment-seed`` (post-training design §4): every drawn flight is flown from an augmented start instead of its own
 (`prior.augment`: rotated about the airport, raised, sped up — one augmentation a flight, drawn with that seed until it is
 plausible, `augmented_starts`); a flight with no plausible draw in `AUGMENT_TRIES` is left out and counted. The labelled
-words are not flown then: they belong to the source flight's own start.
+words are not flown then: they belong to the source flight's own start. An augmented start's time limit is its source's
+observed remaining time × `augment.TIMEOUT_FACTOR` (design §4.5).
 
     python run_ts.py prior_free_generation --prior 4dTrajectory/outputs/POOLED/prior/<campaign>/<chosen run> \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/v4_20260924 \\
@@ -66,27 +70,31 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import (
     APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, COLUMNS, RUNWAY, UNCHANGED, Words,
 )
+from ts_transformer.prior import augment, mva
 from ts_transformer.io_utils import utc_now, write_json_atomic
 from ts_transformer.outputs.constraints.speed_floor import stall_speed_mps
 from ts_transformer.prior.augment import Augmentation, augment_signals, augment_state, draw
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.generate import Speaker, rows_for
 from ts_transformer.prior.model import Prior
-from ts_transformer.prior.procedure import RunwayProcedure, below_floor, published_procedures
+from ts_transformer.prior.mva import MvaChart, airport_charts
+from ts_transformer.prior.procedure import RunwayProcedure, below_floor, pre_join_readout, published_procedures
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-GENERATION_SCHEMA = "ts-prior-free-generation-v3"
+GENERATION_SCHEMA = "ts-prior-free-generation-v4"
 #: The outcome of a sentence that took its aircraft below the glidepath lower edge (post-training design §3.5): not the
 #: executor's judge's — the runner's, over the judge's outcomes.
 BELOW_GLIDEPATH = "below_glidepath"
 FREE_OUTCOMES = (*OUTCOMES, BELOW_GLIDEPATH)
 
 
-def limits_s(batch: replay.Batch, params: ExecutorParams, step_s: float) -> list[float]:
+def limits_s(batch: replay.Batch, params: ExecutorParams, step_s: float, *, augmented: bool) -> list[float]:
     """Each flight's time limit from the first predicted step: its sentence's remaining rows × the step × the timeout
-    factor (the replay gate's convention, `replay.fly_sentences`)."""
-    return [(len(r.words) - N_LOOK) * step_s * params.timeout_factor for r in batch.readings]
+    factor — the executor spec's (the replay gate's convention, `replay.fly_sentences`), or an ``augmented`` start's
+    (`augment.TIMEOUT_FACTOR`, design §4.5)."""
+    factor = augment.TIMEOUT_FACTOR if augmented else params.timeout_factor
+    return [(len(r.words) - N_LOOK) * step_s * factor for r in batch.readings]
 
 
 def observed_remaining_s(reading: Reading, step_s: float) -> float:
@@ -152,10 +160,13 @@ def augmented_starts(signals: Sequence[FlightSignals], inputs: FlightInputs, rng
 
 
 def augmented_inputs(inputs: FlightInputs, geometries: Sequence[AirportGeometry],
-                     augmentations: Sequence[Augmentation]) -> FlightInputs:
-    """The executor's states at the first predicted step moved by each flight's augmentation (`augment_state`)."""
+                     augmentations: Sequence[Augmentation | None]) -> FlightInputs:
+    """The executor's states at the first predicted step moved by each flight's augmentation (`augment_state`); a flight
+    whose augmentation is None keeps its own."""
     state = inputs.initial_state.clone()
     for j, (geometry, augmentation) in enumerate(zip(geometries, augmentations)):
+        if augmentation is None:
+            continue
         row = state[j]
         moved = augment_state(float(row[LAT]), float(row[LON]), float(row[ALT]), float(row[SPEED]), float(row[PSI]),
                               geometry, augmentation)
@@ -175,8 +186,8 @@ class ClosedLoop:
     speaking, a step at a time (`step`): the speaker reads where the executor is, says the step's words, and the
     executor flies the step (its cycles). A flight the executor is done with hears nothing more and its row is frozen;
     one it has cleared or captured keeps its runway. Each flight flies until the executor is done with it or its time
-    limit (``limits``, seconds). ``finals``: each flight's candidates' finals, the glidepath lower edge's mask on the
-    speaker's altitude column (None: no mask)."""
+    limit (``limits``, seconds). ``finals``: each flight's candidates' finals, the procedure's masks on the speaker's
+    altitude and descent-angle columns (`prior.procedure`; None: no mask)."""
 
     def __init__(self, model: Prior, flights: Sequence[FlightSignals], geometries: Sequence[AirportGeometry],
                  inputs: FlightInputs, runways: Runways, charts: AirportCharts, approach_ias_mps: torch.Tensor,
@@ -252,7 +263,8 @@ def fly_reference(batch: replay.Batch, words: Words, params: ExecutorParams, *, 
     runways, charts, approach = _physics(batch, device)
     return fly(flight_inputs(batch.series, device=device, anchor=N_LOOK), Sentences(grids, words, device=device), clock,
                runways, charts, approach, params, words,
-               time_limit_s=torch.tensor(limits_s(batch, params, step_s), dtype=torch.float64, device=device))
+               time_limit_s=torch.tensor(limits_s(batch, params, step_s, augmented=False), dtype=torch.float64,
+                                         device=device))
 
 
 def steps_said(flown: Flown, index: int, steps: int, step_rows: int) -> int:
@@ -314,7 +326,8 @@ def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], 
     """One row per flight: its outcome and what was said (``samples``: each flight's sample number, None for the
     labelled words; ``forbidden``: the prior's probability on what the masks forbid, per step, over the steps
     before the flight's end; ``stops``: `glidepath_stops`, None without the glidepath lower edge — a stopped sentence
-    ends at the row its stopping step flew, its outcome `BELOW_GLIDEPATH`)."""
+    ends at the row its stopping step flew, its outcome `BELOW_GLIDEPATH`). The readouts before the join are the prior's
+    sentences' alone, added by `prior_rows` under the procedure's masks."""
     rows = []
     step_rows = round(words.spec.step_s / flown.cycle_s)
     for j, (reading, grid, sample) in enumerate(zip(batch.readings, grids, samples)):
@@ -344,35 +357,85 @@ def flight_rows(batch: replay.Batch, flown: Flown, grids: Sequence[np.ndarray], 
     return rows
 
 
+def _mva(chart: MvaChart, geometry: AirportGeometry, e: np.ndarray, n: np.ndarray) -> np.ndarray:
+    lat, lon = geometry.frame.latlon_from_horizontal(np.asarray(e), np.asarray(n))
+    return chart.at(np.asarray(lon), np.asarray(lat))
+
+
+def sentence_pre_join(grid: np.ndarray, steps: int, e: np.ndarray, n: np.ndarray, h: np.ndarray,
+                      finals: Sequence[RunwayProcedure], chart: MvaChart, geometry: AirportGeometry,
+                      words: Words) -> dict[str, Any]:
+    """A sentence's readouts before the join (`procedure.pre_join_readout`) over the rows the speaker read: the observed
+    ones up to the first predicted step, then one a step it said (``steps``); a row's words are the ones in force as
+    its step was said (the first step's before it)."""
+    rows = N_LOOK + steps
+    force = in_force(np.asarray(grid)[:steps])[np.clip(np.arange(rows) - N_LOOK, 0, steps - 1)]
+    return pre_join_readout(finals, force[:, RUNWAY], force[:, APPROACH], e[:rows], n[:rows], h[:rows],
+                            _mva(chart, geometry, e[:rows], n[:rows]), N_LOOK, words.spec)
+
+
+def observed_pre_join(signals: FlightSignals, reading: Reading, finals: Sequence[RunwayProcedure], chart: MvaChart,
+                      geometry: AirportGeometry, words: Words) -> dict[str, Any]:
+    """The observed track's readouts before the join (`procedure.pre_join_readout`): its labelled sentence's rows
+    (contract C30: the signals' first rows), the labelled words in force at each."""
+    rows = len(reading.words)
+    force = in_force(reading.words)
+    e, n = signals.e_m[:rows], signals.n_m[:rows]
+    return pre_join_readout(finals, force[:, RUNWAY], force[:, APPROACH], e, n, signals.altitude_m[:rows],
+                            _mva(chart, geometry, e, n), N_LOOK, words.spec)
+
+
+class ProcedureMasks(NamedTuple):
+    """What the procedure's masks and readouts read (design §3): each airport's candidates' finals and its MVA chart."""
+
+    finals: dict[str, tuple[RunwayProcedure, ...]]
+    charts: dict[str, MvaChart]
+
+
+def procedure_masks(geometries: dict[str, AirportGeometry]) -> ProcedureMasks:
+    """The published finals (`procedure.published_procedures`) and the MVA charts (`mva.airport_charts`)."""
+    return ProcedureMasks(published_procedures(geometries), airport_charts(sorted(geometries)))
+
+
 def prior_rows(model: Prior, batch: replay.Batch, words: Words, params: ExecutorParams, landings: Any,
                samples: int, *, generator: torch.Generator, temperature: float,
-               procedures: dict[str, tuple[RunwayProcedure, ...]] | None = None,
+               procedures: ProcedureMasks | None = None,
                augmentations: Sequence[Augmentation] | None = None
                ) -> tuple[list[dict[str, Any]], list[np.ndarray]]:
     """Every flight of ``batch`` flown ``samples`` times with the prior speaking (the executor on CPU): its
-    `flight_rows` and the sentences said; ``procedures`` (each airport's candidates' finals): the glidepath lower edge,
-    a mask and a stop (None: neither); ``augmentations``: each flight's, flown from its augmented start (None: its own)."""
+    `flight_rows` and the sentences said; ``procedures``: the procedure's masks, the glidepath lower edge's stop and the
+    readouts before the join (None: none of them); ``augmentations``: each flight's, flown from its augmented start
+    (None: its own)."""
     cpu = torch.device("cpu")
     index = [j for j in range(len(batch.readings)) for _ in range(samples)]
     repeated = replay.subset(batch, index)
+    observed = repeated.signals                          # the source flights' own tracks, before any augmentation
     inputs = flight_inputs(repeated.series, device=cpu, anchor=N_LOOK)
     if augmentations is not None:
         moves = [augmentations[j] for j in index]
         repeated = replace(repeated, signals=[augment_signals(s, a) for s, a in zip(repeated.signals, moves)])
         inputs = augmented_inputs(inputs, repeated.geometries, moves)
     runways, charts, approach = _physics(repeated, cpu)
-    finals = None if procedures is None else [procedures[g.code] for g in repeated.geometries]
-    flown, said, forbidden, _ = speak_and_fly(model, repeated.signals, repeated.geometries, inputs, runways,
-                                              charts, approach, limits_s(repeated, params, words.spec.step_s), words,
-                                              params, landings, generator=generator, temperature=temperature,
-                                              finals=finals)
+    finals = None if procedures is None else [procedures.finals[g.code] for g in repeated.geometries]
+    limits = limits_s(repeated, params, words.spec.step_s, augmented=augmentations is not None)
+    flown, said, forbidden, speaker = speak_and_fly(model, repeated.signals, repeated.geometries, inputs, runways,
+                                                    charts, approach, limits, words, params, landings,
+                                                    generator=generator, temperature=temperature, finals=finals)
     grids = [said[j] for j in range(len(said))]
     stops = None if finals is None else glidepath_stops(flown, grids, repeated.geometries, finals, words)
     if stops is not None:
         for j in np.flatnonzero(stops.step >= 0):
             grids[j][stops.row[j] + 1:] = UNCHANGED          # the speaker went on; nothing after the stop was said
-    return (flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden,
-                        stops), grids)
+    rows = flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden,
+                       stops)
+    if procedures is not None:
+        for j, row in enumerate(rows):
+            geometry, chart = repeated.geometries[j], procedures.charts[repeated.geometries[j].code]
+            row["pre_join"] = sentence_pre_join(grids[j], row["steps_said"], speaker.e[j], speaker.n[j], speaker.h[j],
+                                                finals[j], chart, geometry, words)
+            row["pre_join_observed"] = observed_pre_join(observed[j], repeated.readings[j], finals[j], chart,
+                                                         geometry, words)
+    return rows, grids
 
 
 def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -397,7 +460,14 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "timeouts_cleared": (sum(r["cleared_at_end"] for r in timeouts) / len(timeouts) if timeouts else None),
         "forbidden_mass_per_step": ({column: float(np.mean([r["forbidden_mass"][column] for r in rows]))
                                      for column in rows[0]["forbidden_mass"]} if rows[0]["forbidden_mass"] else None),
+        "pre_join": ({f"{side}_{key}": sum(r[field][key] for r in rows) / count
+                      for side, field in (("said", "pre_join"), ("observed", "pre_join_observed"))
+                      for key in PRE_JOIN_LINES} if "pre_join" in rows[0] else None),
     }
+
+
+#: The readouts before the join counted in a summary (`procedure.pre_join_readout`): the shares past each line.
+PRE_JOIN_LINES = ("under_decision", "climbed_after_dip", "under_mva")
 
 
 def grouped(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -420,8 +490,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--chunk", type=int, default=64, help="flights a batch (× samples closed loops)")
-    parser.add_argument("--glidepath-mask", action="store_true",
-                        help="the glidepath lower edge masks the altitude column and stops a sentence below it")
+    parser.add_argument("--procedure-masks", action="store_true",
+                        help="the procedure's altitudes mask the altitude and descent-angle columns, the glidepath lower "
+                             "edge stops a sentence below it, and the sentences are read before the join")
     parser.add_argument("--augment-seed", type=int, default=None,
                         help="fly every flight from an augmented start drawn with this seed (post-training design §4)")
     parser.add_argument("--device", default="cuda", help="the prior's; the executor flies on CPU")
@@ -460,7 +531,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"augmented starts: {len(kept)} ({left_out} with no plausible draw left out)", flush=True)
     sources = ("prior",) if augmentations is not None else ("labelled", "prior")
 
-    procedures = published_procedures(load_candidates(instructions)) if args.glidepath_mask else None
+    procedures = procedure_masks(load_candidates(instructions)) if args.procedure_masks else None
     cpu = torch.device("cpu")
     generator = torch.Generator(device=torch.device(args.device)).manual_seed(args.seed)
     order = sorted(range(len(batch.readings)), key=lambda j: len(batch.readings[j].words))
@@ -474,7 +545,7 @@ def main(argv: list[str] | None = None) -> int:
             labelled = [reference_grid(r.words) for r in part.readings]
             stops = (None if procedures is None else
                      glidepath_stops(reference, labelled, part.geometries,
-                                     [procedures[g.code] for g in part.geometries], words))
+                                     [procedures.finals[g.code] for g in part.geometries], words))
             rows += flight_rows(part, reference, labelled, words, "labelled", [None] * len(part.readings), None, stops)
         said, grids = prior_rows(model, part, words, params, landings, args.samples, generator=generator,
                                  temperature=args.temperature, procedures=procedures,
@@ -498,7 +569,9 @@ def main(argv: list[str] | None = None) -> int:
         "executor": {"directory": str(executor_dir), "sha256": record["sha256"]},
         "instructions": str(instructions), "split": args.split, "drawn": batch.drawn, "n_look": N_LOOK,
         "samples": args.samples, "temperature": args.temperature, "seed": args.seed,
-        "glidepath_mask": args.glidepath_mask,
+        "procedure_masks": args.procedure_masks,
+        "timeout_factor": {"real": params.timeout_factor, "augmented": augment.TIMEOUT_FACTOR},
+        "mva": {"charts_date": mva.CHARTS_DATE, "chart": mva.CHART, "facility": mva.FACILITY},
         "augment_seed": args.augment_seed, "augmented_left_out": left_out,
         "augmentations": None if augmentations is None else [
             {"dataset_id": s.dataset_id, **asdict(a)} for s, a in zip(batch.signals, augmentations)],
@@ -514,6 +587,8 @@ def main(argv: list[str] | None = None) -> int:
                       f"{part['first_runway_observed']:.3f}  cleared at the end {part['cleared_at_end']:.3f}")
         if readout[source]["all"]["forbidden_mass_per_step"]:
             print(f"  forbidden by the masks, mean probability a step: {readout[source]['all']['forbidden_mass_per_step']}")
+        if readout[source]["all"]["pre_join"]:
+            print(f"  before the join (said / observed): {readout[source]['all']['pre_join']}")
     print(f"landed samples per flight (of {args.samples}): {dict(sorted(spread.items()))}")
     print(f"→ {out}")
     return 0

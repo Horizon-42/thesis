@@ -219,10 +219,11 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         cpu = torch.device("cpu")
         repeated = replay.subset(batch, [n for n in range(len(flyable)) for _ in range(samples)])
         runways, charts, approach = _physics(repeated, cpu)
+        limits = limits_s(repeated, params, spec.step_s, augmented=False)
         flown, said, forbidden, _ = speak_and_fly(model, repeated.signals, repeated.geometries,
                                                   flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways,
-                                                  charts, approach, limits_s(repeated, params, spec.step_s), words,
-                                                  params, landings, generator=generator, temperature=temperature)
+                                                  charts, approach, limits, words, params, landings,
+                                                  generator=generator, temperature=temperature)
         grids = [said[i] for i in range(len(said))]
         rows = flight_rows(repeated, flown, grids, words, "prior", [i % samples for i in range(len(grids))], forbidden)
         for i, row in enumerate(rows):

@@ -19,17 +19,19 @@ from ts_transformer.autopilot.frame import ALT, LAT, LON, MASS, PSI, SPEED, comp
 from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.experiments import prior_augmented_reward as runner
 from ts_transformer.experiments.prior_augmented_reward import (
-    GUARD_HEADING_GROWTH, GUARD_WORD_COLUMNS, augmentation_summary, guarded_choice, labelled_words, round_starts,
-    speak_augmented, word_distance,
+    GUARD_HEADING_GROWTH, GUARD_WORD_COLUMNS, augmentation_summary, guarded_choice, labelled_words, real_starts,
+    round_starts, speak_starts, word_distance,
 )
 from ts_transformer.experiments.prior_free_generation import (
-    AUGMENT_TRIES, BELOW_GLIDEPATH, augmented_inputs, augmented_starts, speak_and_fly,
+    AUGMENT_TRIES, BELOW_GLIDEPATH, ProcedureMasks, augmented_inputs, augmented_starts, limits_s, speak_and_fly,
 )
 from ts_transformer.experiments.prior_landing_reward import sentence_flights
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.outputs.constraints.speed_floor import stall_speed_mps
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
-from ts_transformer.prior.augment import Augmentation, Limits, augment_signals, augment_state, draw, rotate
+from ts_transformer.prior.augment import (
+    TIMEOUT_FACTOR, Augmentation, Limits, augment_signals, augment_state, draw, rotate,
+)
 from ts_transformer.prior.generate import allowed_classes
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.prior.train import (
@@ -37,7 +39,7 @@ from ts_transformer.prior.train import (
 )
 from ts_transformer.tests.test_autopilot import _params
 from ts_transformer.tests.test_prior_landing_reward import _sentences, _split
-from ts_transformer.tests.test_prior_procedure import _final
+from ts_transformer.tests.test_prior_procedure import NO_CHART, _final
 from ts_transformer.tests.test_prior_speaker import _flight, _model, _repeated
 
 CPU = torch.device("cpu")
@@ -98,6 +100,10 @@ def test_the_observed_rows_and_the_executor_s_state_move_alike():
     lat, lon, *_ = augment_state(float(inputs.initial_state[0, LAT]), float(inputs.initial_state[0, LON]), 0.0, 1.0,
                                  0.0, geometry, Augmentation(0.0, 0.0, 1.0))
     assert (lat, lon) == pytest.approx((float(inputs.initial_state[0, LAT]), float(inputs.initial_state[0, LON])))
+    # a real start among augmented ones keeps its own state
+    both = augmented_inputs(_repeated(inputs, torch.zeros(2, dtype=torch.long)), [geometry] * 2, [MOVE, None])
+    assert torch.equal(both.initial_state[1], inputs.initial_state[0])
+    assert torch.equal(both.initial_state[0], state)
 
 
 def _floor(inputs, altitude_m):
@@ -158,8 +164,9 @@ def test_augmented_sentences_read_the_moved_rows_carry_their_masks_and_train_und
     # an edge high above the start and wide enough to bind wherever the moved start takes the aircraft
     final = _final(crossing_m=1_500.0, faf_d_m=40_000.0, cone=FasCourseGeometry(40_000.0, 41_000.0, 80_000.0))
     model = _model(words)
-    sentences = speak_augmented(model, batch, [MOVE], samples, words, _params(), None, {geometry.code: (final,)},
-                                generator=torch.Generator().manual_seed(2))
+    masks = ProcedureMasks({geometry.code: (final,)}, {geometry.code: NO_CHART})
+    sentences = speak_starts(model, batch, [MOVE], samples, words, _params(), None, masks,
+                             generator=torch.Generator().manual_seed(2))
     moved = augment_signals(signals, MOVE)
     assert sentences.flight.tolist() == [0] * samples
     for position, said, allowed in zip(sentences.positions, sentences.said, sentences.allowed):
@@ -237,6 +244,40 @@ def test_masks_that_allow_every_word_score_as_no_masks():
         RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split, np.zeros(3), split, everything[:1])
 
 
+def test_a_real_start_flies_its_own_rows_on_the_spec_s_limit_and_an_augmented_one_on_the_longer_limit(monkeypatch):
+    one, geometry, signals, (inputs, runways, charts, approach) = _flight()
+    words = Words(one)
+    index = torch.zeros(2, dtype=torch.long)
+    monkeypatch.setattr(runner, "flight_inputs", lambda series, device, anchor: _repeated(inputs, index))
+    monkeypatch.setattr(runner, "_physics", lambda batch, device: (_repeated(runways, index), _repeated(charts, index),
+                                                                   approach[index]))
+    heard = {}
+
+    def listen(model, flights, geometries, inputs_, runways_, charts_, approach_, limits, *rest, **options):
+        heard.update(flights=flights, limits=limits, state=inputs_.initial_state)
+        raise StopIteration
+
+    monkeypatch.setattr(runner, "speak_and_fly", listen)
+    reading = read_flight(signals, geometry, one, words)
+    batch = replay.Batch(signals=[signals] * 2, series=[None] * 2, readings=[reading] * 2, geometries=[geometry] * 2,
+                         vertical_paths=[()] * 2, approach_ias_mps=[0.0] * 2, groups=["own"] * 2, drawn={})
+    masks = ProcedureMasks({geometry.code: (_final(),)}, {geometry.code: NO_CHART})
+    with pytest.raises(StopIteration):
+        speak_starts(_model(words), batch, [None, MOVE], 1, words, _params(), None, masks,
+                     generator=torch.Generator().manual_seed(0))
+    assert heard["flights"][0] is signals and np.allclose(heard["flights"][1].e_m, augment_signals(signals, MOVE).e_m)
+    own = limits_s(replay.subset(batch, [0]), _params(), one.step_s, augmented=False)[0]
+    assert heard["limits"] == pytest.approx([own, own * TIMEOUT_FACTOR / _params().timeout_factor])
+    assert torch.equal(heard["state"][0], inputs.initial_state[0])
+    assert not torch.equal(heard["state"][1], inputs.initial_state[0])
+
+
+def test_the_real_starts_are_each_airport_s_first_flights_of_the_pool():
+    pool = SimpleNamespace(signals=[SimpleNamespace(airport=a) for a in "AABBABB"])
+    assert real_starts(pool, 2) == [0, 1, 2, 3]
+    assert real_starts(pool, 1) == [0, 2]
+
+
 def test_a_round_takes_each_airport_s_first_plausible_starts_from_its_pool():
     pool = SimpleNamespace(signals=[SimpleNamespace(airport=a) for a in "AABBABB"])
     moves = [MOVE, None, MOVE, MOVE, MOVE, None, MOVE]
@@ -249,10 +290,14 @@ def test_a_round_takes_each_airport_s_first_plausible_starts_from_its_pool():
 LABELLED = {"runway": 0.0, "approach": 0.7, "heading": 15.0, "altitude": 0.6, "angle": 2.6, "speed": 1.9}
 
 
-def _row(round_number, real, augmented, runway=0.85, **words):
+BOTH = {"real": LABELLED, "augmented": LABELLED}
+
+
+def _row(round_number, real, augmented, runway=0.85, augmented_words=None, **words):
     said = {**{c: v for c, v in LABELLED.items()}, "angle": 2.0, **words}
     return {"round": round_number, "real_landed": real, "augmented_landed": augmented, "select_tf_nll": 0.28,
-            "real": {"landed_on_observed_runway": runway, "words_after_first_per_flight": said}}
+            "real": {"landed_on_observed_runway": runway, "words_after_first_per_flight": said},
+            "augmented": {"words_after_first_per_flight": {**said, **(augmented_words or {})}}}
 
 
 def test_the_choice_keeps_the_best_augmented_round_within_round_0_s_guards():
@@ -261,9 +306,13 @@ def test_the_choice_keeps_the_best_augmented_round_within_round_0_s_guards():
                _row(3, 0.93, 0.95, approach=0.7 * margin * 1.01),                           # 3: talks unlike the labels
                _row(4, 0.93, 0.87, angle=2.6 * 1.3 * margin * 0.99),     # angle: 2.0 → 1.3 × off at round 0, within
                _row(5, 0.93, 0.95, angle=2.0 / margin * 0.99),                              # 5: angle farther below
-               _row(6, 0.93, 0.95, heading=0.0)]                                            # 6: stopped saying headings
-    kept, excluded = guarded_choice(history, LABELLED)
-    assert excluded == [2, 3, 5, 6] and kept == 1              # 4 is within the tie of 1: the earlier
+               _row(6, 0.93, 0.95, heading=0.0),                                            # 6: stopped saying headings
+               _row(7, 0.93, 0.95, augmented_words={"heading": 15.0 * margin * 1.01})]      # 7: augmented talks more
+    kept, excluded = guarded_choice(history, BOTH)
+    assert excluded == [2, 3, 5, 6, 7] and kept == 1           # 4 is within the tie of 1: the earlier
+    # an augmented start's words are read against its source flights' labels, not the real starts'
+    sources = {"real": LABELLED, "augmented": {**LABELLED, "heading": 15.0 * margin * 1.01}}
+    assert guarded_choice(history, sources)[1] == [2, 3, 5, 6]
 
 
 def test_the_word_guard_reads_the_labelled_sentences_after_their_first_step():

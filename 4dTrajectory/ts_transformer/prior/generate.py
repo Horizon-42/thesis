@@ -23,11 +23,14 @@ a runway change once it has been cleared (since the last go-around) or has captu
 stricter than the vocabulary's rule, which allows it with the approach changed in the same step; the stricter rule wins,
 so the listener never hears what it refuses. A flight the caller marks inactive (its flight is over) says nothing.
 
-**The glidepath lower edge is a mask on the altitude column** where the caller gives each flight its candidates' finals
-(`procedure.RunwayProcedure`, post-training design §3.4): at the aircraft's position, for the runway just sampled, a level
-below the floor, "descend to land" from below it and "unchanged" on a word that no longer holds there are removed
-(`procedure.altitude_word_allowed`); the probability on them is recorded like the grammar's. Without finals nothing is
-masked there and the speaker is the one above, draw for draw.
+**The procedure's altitudes are a mask on the altitude and descent-angle columns** where the caller gives each flight
+its candidates' finals (`procedure.RunwayProcedure`, post-training design §3.4): for the runway just sampled, at the
+aircraft's position and with the approach word just sampled, the altitude words the glidepath lower edge, the decision
+altitude and "no climbing back" forbid — and "unchanged" on a word that no longer holds — are removed
+(`procedure.altitude_word_allowed`), and the climb class where the climb is barred (`procedure.angle_word_allowed`). Where
+each flight has joined each candidate's final and whether it has dipped under its entry height before that
+(`procedure.pre_join`) is kept row by row. The probability on what is removed is recorded like the grammar's. Without
+finals nothing is masked there and the speaker is the one above, draw for draw.
 """
 
 from __future__ import annotations
@@ -45,7 +48,9 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
 from ts_transformer.prior.data import SINCE_SCALE, STEP_FEATURES, VARIANTS, own_context, rows_inputs
 from ts_transformer.prior.model import Prior, self_edges
-from ts_transformer.prior.procedure import RunwayProcedure, altitude_word_allowed
+from ts_transformer.prior.procedure import (
+    RunwayProcedure, altitude_word_allowed, angle_word_allowed, climb_barred, word_tolerance_m,
+)
 from ts_transformer.prior.scene import N_LOOK, Landings, utc_s
 
 
@@ -58,7 +63,8 @@ class Speaker:
                  temperature: float = 1.0, finals: Sequence[Sequence[RunwayProcedure]] | None = None) -> None:
         """``landings``: each airport's landing context (`data.airport_landings`), None for a variant without it;
         ``max_rows``: the most rows any flight will have (the model's position table must hold them); ``finals``: each
-        flight's candidates' finals, in the pointer's order, to mask the altitude column by (None: no such mask)."""
+        flight's candidates' finals, in the pointer's order, to mask the altitude and descent-angle columns by
+        (`procedure`'s rules 1–5; None: no such mask)."""
         if VARIANTS[model.config.variant].landing_context != (landings is not None):
             raise ValueError(f"variant {model.config.variant} and the landing context given disagree")
         if max_rows > model.config.max_rows:
@@ -102,6 +108,17 @@ class Speaker:
         self.static = torch.zeros((count, 1, 0), device=device)
         self.rows = N_LOOK + 1
         self._inputs(0)
+        if self.finals is not None:
+            # per flight and candidate, as of the newest row: joined its final; dipped under its entry height before that
+            # (`procedure.pre_join`, kept a row at a time); the flights sharing one airport's finals go together
+            width = max(len(f) for f in self.finals)
+            self.joined = np.zeros((count, width), dtype=bool)
+            self.dipped = np.zeros((count, width), dtype=bool)
+            self.final_groups: dict[tuple[int, ...], list[int]] = defaultdict(list)
+            for b, finals_b in enumerate(self.finals):
+                self.final_groups[tuple(map(id, finals_b))].append(b)
+            for row in range(self.rows):
+                self._track(row)
         # the rows the model has encoded, and each layer's keys and values of them (`Prior.extend`)
         self.encoded, self.past = 0, model.no_past(count, max_rows)
         # the words said: the class in force per column (0: none yet) and the row it was said at
@@ -127,6 +144,16 @@ class Speaker:
         self.features[:, 0, first:rows] = torch.as_tensor(features, device=self.features.device)
         self.relative[:, 0, first:rows] = torch.as_tensor(relative, device=self.relative.device)
 
+    def _track(self, row: int) -> None:
+        """Every flight's `joined` and `dipped` taken on to ``row`` (`procedure.pre_join`, one row at a time)."""
+        tolerance = word_tolerance_m(self.words.spec)
+        for members in self.final_groups.values():
+            index = np.array(members)
+            e, n, h = self.e[index, row], self.n[index, row], self.h[index, row]
+            for r, final in enumerate(self.finals[members[0]]):
+                self.joined[index, r] |= final.inside(e, n)
+                self.dipped[index, r] |= (h < final.entry_m - tolerance) & ~self.joined[index, r]
+
     def append(self, e: np.ndarray, n: np.ndarray, height: np.ndarray, frozen: np.ndarray) -> None:
         """The next row's position of every flight, ``[B]`` each (after at least one `speak`); a ``frozen`` flight (its
         flight is over — its state may no longer be finite) repeats its last row."""
@@ -138,6 +165,8 @@ class Speaker:
         self.h[:, row] = np.where(frozen, self.h[:, row - 1], height)
         self.rows += 1
         self._inputs(row)
+        if self.finals is not None:
+            self._track(row)
         # the words in force at the row before, as the prior said them (`data.sentence_steps`)
         self.in_force[:, 0, row] = torch.as_tensor(self.value)
         self.since[:, 0, row] = torch.as_tensor(np.log1p(row - self.said_row) / SINCE_SCALE, dtype=torch.float32)
@@ -184,7 +213,7 @@ class Speaker:
         spec = self.words.spec
         out = np.ones((len(chosen), classes), dtype=bool)
         if column == ALTITUDE:
-            return self._above_the_glidepath(chosen, opening, classes)
+            return self._procedure_altitude(chosen, opening, classes)
         if column == RUNWAY:
             if not opening:
                 # the runway in force is not said again (the labeller drops a word equal to the one in force, and a
@@ -206,22 +235,33 @@ class Speaker:
                 if column == ANGLE and not opening and step[ALTITUDE] == UNCHANGED and k == 0:
                     continue                                 # nothing said in either column: nothing to check
                 out[b, k] = step_allowed(in_force, step, height, spec, self.words)
+        if column == ANGLE and self.finals is not None:
+            barred = np.array([self._final_state(chosen, b)[3] for b in range(len(chosen))])
+            out[:, 1:] &= angle_word_allowed(np.arange(classes - 1)[None, :], barred[:, None], self.words)
         return out
 
 
-    def _above_the_glidepath(self, chosen: np.ndarray, opening: bool, classes: int) -> np.ndarray:
-        """``[B, classes]``: the altitude classes the glidepath lower edge allows each flight at its newest row, for the
-        runway in force after this step's runway column; "unchanged" (class 0) only where the word in force still holds
-        (at the first predicted step it is not asked about)."""
+    def _final_state(self, chosen: np.ndarray, b: int) -> tuple[RunwayProcedure, bool, bool, bool]:
+        """Flight ``b``'s ``(final, joined, dipped, climb barred)`` at its newest row, for the runway and the approach in
+        force after this step's columns so far (``chosen``)."""
+        in_force = np.where(chosen[b] > 0, chosen[b], self.value[b]) - 1
+        runway = int(in_force[RUNWAY])
+        joined, dipped = bool(self.joined[b, runway]), bool(self.dipped[b, runway])
+        return self.finals[b][runway], joined, dipped, bool(climb_barred(joined, dipped, in_force[APPROACH]))
+
+    def _procedure_altitude(self, chosen: np.ndarray, opening: bool, classes: int) -> np.ndarray:
+        """``[B, classes]``: the altitude classes the procedure's altitudes allow each flight at its newest row, for the
+        runway and approach in force after this step's columns so far; "unchanged" (class 0) only where the word in
+        force still holds (at the first predicted step it is not asked about)."""
         row, out = self.rows - 1, np.ones((len(chosen), classes), dtype=bool)
         every = np.arange(classes - 1)
         for b in range(len(chosen)):
-            runway = chosen[b, RUNWAY] - 1 if chosen[b, RUNWAY] > 0 else self.value[b, RUNWAY] - 1
-            final = self.finals[b][runway]
+            final, joined, _, barred = self._final_state(chosen, b)
             at = (self.e[b, row], self.n[b, row], self.h[b, row])
-            out[b, 1:] = altitude_word_allowed(final, every, *at, self.words)
+            out[b, 1:] = altitude_word_allowed(final, every, *at, self.words, joined=joined, barred=barred)
             if not opening:
-                out[b, 0] = bool(altitude_word_allowed(final, np.array([self.value[b, ALTITUDE] - 1]), *at, self.words)[0])
+                out[b, 0] = bool(altitude_word_allowed(final, np.array([self.value[b, ALTITUDE] - 1]), *at, self.words,
+                                                       joined=joined, barred=barred)[0])
         return out
 
 

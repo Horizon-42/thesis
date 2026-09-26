@@ -9,8 +9,9 @@ Each round:
 2. **rewards** — 1 where the executor's judge has the sentence landed on a runway in the airport's landing direction at
    the time (`prior.landing_reward.landing_direction`), else 0; each sentence's advantage is its reward less its
    flight's mean. Only flights whose sentences differ are trained on (the others' advantages are all 0);
-3. **one pass** over those sentences (`train.RewardTuner`: the advantage-weighted NLL of each sentence's own words,
-   the pull to the frozen start model, the teacher-forced data term on the train days), from the previous round's
+3. **one pass** over those sentences (`train.RewardTuner`: the clipped-ratio surrogate over each sentence's own words
+   against the model that said them, `train.flight_surrogate`, ε ``--clip-ratio``; the pull to the frozen reference; the
+   teacher-forced data term on the train days), from the previous round's
    weights (round 1: ``--prior``) — only the sentences of this round (they must come from the weights being trained);
 4. **the readout on the select days** (`select_readout`): free generation on ``--select-per-airport`` flights ×
    ``--select-samples`` sentences, the same flights, seed and batches every round (round 0 is the start model); the
@@ -60,7 +61,7 @@ from ts_transformer.prior.scene import N_LOOK, Landings
 from ts_transformer.prior.train import RewardConfig, RewardTuner, TrainConfig, evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-LANDING_REWARD_SCHEMA = "ts-prior-landing-reward-v2"
+LANDING_REWARD_SCHEMA = "ts-prior-landing-reward-v3"
 #: Two rounds' select landed shares closer than this are a tie (about two binomial standard deviations over 2,000
 #: sentences at 90 %).
 TIE_SHARE = 0.015
@@ -91,10 +92,11 @@ def speak_sentences(model: Prior, batch: replay.Batch, samples: int, words: Word
     count = len(batch.readings)
     repeated = replay.subset(batch, [j for j in range(count) for _ in range(samples)])
     runways, charts, approach = _physics(repeated, cpu)
+    limits = limits_s(repeated, params, words.spec.step_s, augmented=False)
     flown, said, forbidden, speaker = speak_and_fly(model, repeated.signals, repeated.geometries,
                                                     flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways,
-                                                    charts, approach, limits_s(repeated, params, words.spec.step_s),
-                                                    words, params, landings, generator=generator, temperature=1.0)
+                                                    charts, approach, limits, words, params, landings,
+                                                    generator=generator, temperature=1.0)
     grids = [said[j] for j in range(len(said))]
     rows = flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden)
     step_rows = round(words.spec.step_s / flown.cycle_s)
@@ -320,7 +322,8 @@ def main(argv: list[str] | None = None) -> int:
         passed = tuner.one_pass(Split(flights, data.airports, data.candidates, data.runways, data.courses,
                                       data.classes, variant), advantages[keep], data)
         log(f"round {round_number}: one pass over {len(flights)} sentences, reward term {passed['reward_mean']:.4f}, "
-            f"KL {passed['kl_mean']:.4f}, data NLL {passed['data_mean']:.4f}")
+            f"KL {passed['kl_mean']:.4f}, data NLL {passed['data_mean']:.4f}, "
+            f"words outside the clip {passed['clipped_share']:.4f}")
         torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
                     "train_config": start_config["train"], "state": copy.deepcopy(model.state_dict()),
                     "spec_sha256": spec.sha256}, directory / "checkpoint.pt")

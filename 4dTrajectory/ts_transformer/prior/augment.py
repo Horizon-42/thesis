@@ -43,6 +43,9 @@ class Limits:
 
 
 LIMITS = Limits()
+#: An augmented start's time limit from the first predicted step: its source flight's observed remaining time × this
+#: (design §4.5; a real start's is the executor spec's ``timeout_factor``, 1.5).
+TIMEOUT_FACTOR = 2.0
 
 
 def draw(rng: np.random.Generator, limits: Limits = LIMITS) -> Augmentation:

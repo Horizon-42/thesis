@@ -352,16 +352,20 @@ compatibility rules as a decode mask via `instructions.grammar`) and the stepped
 `sentence.Spoken`; `fly()` is its loop, flights unchanged state for state) flies each step; the labelled words from the
 same row are the reference (R17). The speaker encodes row by row (`Prior.extend`). **The landing
 reward** (`prior_landing_reward`, design §9.3): free sentences, 1 for landing in the airport's landing direction, each
-compared with its flight's others; advantage-weighted NLL + the KL to the frozen start + the teacher-forced data term
-(`train.RewardTuner`, dropout off), the round chosen on select within guards (R19). **The glidepath lower edge** (post-training design §3): `prior/procedure.py` (floor = the
+compared with its flight's others; the clipped-ratio surrogate (PPO/GRPO, ε 0.2, against the model frozen at the pass's
+start — without it a pass's stale sentences ran the model from the base, readouts §15) + the KL to the frozen reference +
+the teacher-forced data term (`train.RewardTuner`, dropout off), the round chosen on select within guards (R19). **The procedure's altitudes** (post-training design §3): `prior/procedure.py` (the glidepath lower edge = the
 published glidepath − 60 m inside the FAF and the LPV cone, nowhere else — the RNAV floors outside the FAF disagree with
-10–14 % of the recorded tracks); `prior_free_generation --glidepath-mask` masks the altitude column and stops a sentence at
-the first flown step below it (outcome `below_glidepath`, schema v2); `prior_procedure_check` measures it on labelled data
-before training (R20). **Post-training stage 2** (`prior_augmented_reward`, R21): augmented starts (`prior.augment`),
-the edge, the terminal reward, scored under the masks each sentence was said under;
+10–14 % of the recorded tracks); before the join (the first row inside that region) the published DA, and no climbing back
+once under the entry height (2026-09-26); `prior_free_generation --procedure-masks` masks the altitude and angle columns,
+stops a sentence at the first flown step below the edge (outcome `below_glidepath`) and reads each sentence before the
+join beside the observed track (under the DA, climbing back, under the FAA MVA — `prior/mva.py`, a readout only; schema
+v4); `prior_procedure_check` measures them on labelled data before training (R20). **Post-training stage 2**
+(`prior_augmented_reward`, R21): half real, half augmented starts (`prior.augment`, time limit × 2.0), the masks, the
+terminal reward, scored under the masks each sentence was said under;
 the first stage's loss (reward + 0.04 × the pull to the base model + 1 × the teacher-forced data term — without the data
 term the pull alone could not hold it, readouts §9), and the rounds are guarded by words per flight against the
-labelled words, not by the teacher-forced NLL. **Why the labelled replays sink below the edge** (`prior_glidepath_diagnosis`, R22): the
+labelled words on both start kinds, not by the teacher-forced NLL. **Why the labelled replays sink below the edge** (`prior_glidepath_diagnosis`, R22): the
 executor against the observed aircraft cycle by cycle, the height given up by word, and a one-line what-if of the vertical
 law run in-process (readouts §12).
 

@@ -30,6 +30,9 @@ EXPERIMENTS_MAIN = TS_DIR / "experiments" / "__main__.py"
 HARVEST_ROOT = REPO_ROOT / "trajectory_data_process" / "outputs" / "harvest"
 OPT_OUTPUTS_ROOT = REPO_ROOT / "4dTrajectory" / "outputs"
 COMPARISON_AIRPORTS_ROOT = REPO_ROOT / "aeroviz-4d" / "public" / "data" / "airports"
+#: The FAA minimum vectoring altitude charts, one directory per download date (git-ignored; fetched by
+#: `docs/literature/minimum_vectoring_altitude/download.sh`).
+MVA_ROOT = REPO_ROOT / "data" / "MVA"
 CZML_SCRIPT = REPO_ROOT / "aeroviz-4d" / "python" / "build_scenario_comparison_czml.py"
 
 

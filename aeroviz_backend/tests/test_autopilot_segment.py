@@ -1040,7 +1040,8 @@ class ModelSegmentTest(unittest.TestCase):
         context = FlightContext(signals=None, series=None, reading=truth, geometry=None, vertical_paths=(), group="own dynamics",
                                 approach_ias_mps=70.0, observed_track_deg=None, observed_distance_m=None,
                                 hae_minus_msl_m=-32.0)
-        self.assertEqual(fly_module.model_time_limit_s(context, N_LOOK, params, 2.0), limits_s(batch, params, 2.0)[0])
+        self.assertEqual(fly_module.model_time_limit_s(context, N_LOOK, params, 2.0),
+                         limits_s(batch, params, 2.0, augmented=False)[0])
 
     def test_a_model_word_is_its_own_step_s_result_in_the_judges_verdict(self):
         segment = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)
