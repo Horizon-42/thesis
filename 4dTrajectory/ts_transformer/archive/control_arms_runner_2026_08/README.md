@@ -9,11 +9,11 @@ The train → predict → evaluate → publish driver for a set of control arms 
 JSON file (`{"base_recipe": …, "arms": [{"key", "label", "overrides"}]}`). It drove the
 bank-wiggle investigation (`docs/2026-08-19_control_bank_wiggle_diagnosis.zh.md`) and the
 KSJC imitation-weight ladder (`docs/experiments/imitation_ksjc_v5_*.json`,
-`docs/experiments/RESUME_ksjc_v5_ladder.md`).
+`docs/history/2026-08_control_path/RESUME_ksjc_v5_ladder.md`).
 
 ## Why it is archived
 
-`docs/2026-09-07_package_audit_plan.zh.md` T4-27 scheduled it: `run_ts_frame_ablation.py`
+`docs/history/2026-09_package_reviews/2026-09-07_package_audit_plan.zh.md` T4-27 scheduled it: `run_ts_frame_ablation.py`
 does the same job, its `main` having grown from this one, and it has since gained everything
 this lacked — resume (it skips steps whose output already exists, which is why the KSJC
 ladder needed a hand-written RESUME document), a free-disk pre-check, per-arm run names and

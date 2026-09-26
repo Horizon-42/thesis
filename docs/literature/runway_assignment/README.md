@@ -184,7 +184,7 @@ go-around as the only escape, or can the runway be switched mid-approach? **Quot
 
 ## Related thesis documents
 
-- `4dTrajectory/ts_transformer/docs/2026-09-03_airport_frame_ablation_results.md`
-- `4dTrajectory/ts_transformer/docs/2026-09-03_runway_hypothesis_expansion.md`
+- `4dTrajectory/ts_transformer/docs/history/2026-09_frames/2026-09-03_airport_frame_ablation_results.md`
+- `4dTrajectory/ts_transformer/docs/history/2026-09_frames/2026-09-03_runway_hypothesis_expansion.md`
 - `4dTrajectory/ts_transformer/docs/2026-09-03_krdu_nw_endpoint_bias.md`
-- `4dTrajectory/ts_transformer/docs/2026-09-03_state_v2_anchor_relative_results.md`
+- `4dTrajectory/ts_transformer/docs/history/2026-09_frames/2026-09-03_state_v2_anchor_relative_results.md`

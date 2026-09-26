@@ -8,7 +8,7 @@ refused, plan §3.4).
 
 Gates T / X / P / E / S belonged to the intent-code second layer and are ARCHIVED 2026-09-20
 (`archive/manoeuvre_codes_2026_09/gates_manoeuvre.py`, a verbatim copy; their numbers in
-`docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11).
+`archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11).
 
 Every number is a module constant here, named where it comes from; the readers pass the
 lockstep artefacts (`experiments/manoeuvre_lockstep.py` payloads) keyed by seed.

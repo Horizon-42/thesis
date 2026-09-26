@@ -1,5 +1,5 @@
 """Stage 5 of the two-tier framework: the prior, an autoregressive model of the instruction words
-(``docs/2026-09-24_prior_design.zh.md``).
+(``docs/two_tier/prior_design.zh.md``).
 
 At each 2 s step of a scene (the aircraft at one airport at one time; one aircraft in design §9 step 1) it reads
 only what is known before the step — positions, the airport's earlier landings, the words it has said — and writes

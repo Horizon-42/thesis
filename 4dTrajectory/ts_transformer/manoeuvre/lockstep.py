@@ -8,7 +8,7 @@ flight ends, ``crossed``) or the flight's budget runs out (``horizon``). The int
 protocols C / A / A-truth — the truth's code, the prior's top-1 on the flown history, the
 prior's top-1 on the truth history — are ARCHIVED 2026-09-20
 (`archive/manoeuvre_codes_2026_09/`, README there; their readings:
-`docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11).
+`archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11).
 
 The first prediction is made at the executor's fixed anchor, L−1 (`config.default_anchor`: no floor
 under v3 — the first row with a complete lookback, L seconds after entry). The second reading of

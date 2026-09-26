@@ -7,13 +7,13 @@ index line in CLAUDE.md that ends in its ID; find one with `grep -n '^### C7 ·'
 
 **Maintenance: when a fact here changes, edit it HERE and keep its index line true; a new fact
 gets a new ID here and ONE new line in the index.** Measurements and campaign evidence still
-belong in `docs/ENGINEERING_NOTES.md` / the design documents, status in `docs/OPEN_ITEMS.md`.
+belong in `docs/reference/ENGINEERING_NOTES.md` / the design documents, status in `docs/history/OPEN_ITEMS_2026-09-18.md`.
 
 **2026-09-18:** the main line's 2026-09-14…09-17 additions to that CLAUDE.md (the control
 contracts, the two-tier axes and traps) were placed here the same way when this branch was
 rebased — same rule, new IDs.
 
-## Traps (one line each; evidence in `docs/ENGINEERING_NOTES.md`)
+## Traps (one line each; evidence in `docs/reference/ENGINEERING_NOTES.md`)
 
 ### T18 · a stored config lacks every field added after it trained
 
@@ -78,7 +78,7 @@ rebased — same rule, new IDs.
   the plan experts in `experiments/runway_intent_r2.py`, now `archive/plan_head_2026_09/runway_intent/`: +55-79 m of mean FDE against the known
   runway, plan §16). Quote ADE/FDE as runway-given. What the label is worth and why the backbone cannot learn it implicitly: the
   2026-09-03 frame ablation and runway-hypothesis docs; the plan to predict it (runway head +
-  per-runway experts + multi-runway scheduling): `docs/2026-09-13_runway_intent_plan.zh.md`.
+  per-runway experts + multi-runway scheduling): `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md`.
 
 ### T2 · a candidate-symmetric runway head carries no per-runway constant
 
@@ -182,10 +182,10 @@ rebased — same rule, new IDs.
 
 | doing this | read first |
 |---|---|
-| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (R0 §11: direction solved by context, the parallel SIDE is the problem; R1 §13: a per-runway head wins the side at KRDU / KSMF by 23–32 points and fails on configurations its training days lack; R1.1b §15: the candidate-symmetric `r11_lift` keeps the gain and survives KSJC's closure days; R2 §16: its pick flown end to end costs +55-79 m of FDE against the known runway (B1 +400-470 m), never-lock adopted; R3 §17: the multi-runway scheduler under the FAA minima keeps the runway intent with 0 conflicts but barely binds — its delays do not improve arrival times, ETA error is the size of the minimum — and the flown closure loses time between asks; R4 not triggered). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
+| predicting the landing runway (runway intent), multi-runway scheduling | `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` (R0 §11: direction solved by context, the parallel SIDE is the problem; R1 §13: a per-runway head wins the side at KRDU / KSMF by 23–32 points and fails on configurations its training days lack; R1.1b §15: the candidate-symmetric `r11_lift` keeps the gain and survives KSJC's closure days; R2 §16: its pick flown end to end costs +55-79 m of FDE against the known runway (B1 +400-470 m), never-lock adopted; R3 §17: the multi-runway scheduler under the FAA minima keeps the runway intent with 0 conflicts but barely binds — its delays do not improve arrival times, ETA error is the size of the minimum — and the flown closure loses time between asks; R4 not triggered). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
 
 ### W2 · the two-tier model — which document to read (moved from the "Where to go next" table)
 
 | doing this | read first |
 |---|---|
-| building or reading the two-tier model (a prior that says controller-like words, an executor that flies them) | **`docs/2026-09-24_two_tier_stage_notes.zh.md`** — where every stage stands, the artefacts, the user's decisions, the next step. The design: `docs/2026-09-23_two_tier_framework.zh.md` (layers, packages, gates), `docs/2026-09-23_instruction_vocabulary_design.zh.md` (the words, envelopes, labeller, values), `docs/executor_design.zh.md`, `docs/2026-09-24_prior_design.zh.md`, `docs/2026-09-25_post_training_design.zh.md`; readouts in `docs/2026-09-24_prior_readouts.zh.md`. SUPERSEDED, only their measurements citable: the 09-16 feasibility doc, plan v2 (`2026-09-17_two_tier_plan_v2.zh.md` §10–§12), the intent-code plan and readouts (`2026-09-18_manoeuvre_token_*.zh.md`, readouts §9–§11 read through v3 §10 item 1), plan v3 and its stage A (`2026-09-18_two_tier_plan_v3*.zh.md`, `…_v3_results.zh.md`; stage A's no-token closed loop is still live code, R8), the instruction-v2 labels readout (`2026-09-23_instruction_labels_readout.zh.md`) |
+| building or reading the two-tier model (a prior that says controller-like words, an executor that flies them) | **`docs/two_tier/two_tier_stage_notes.zh.md`** — where every stage stands, the artefacts, the user's decisions, the next step. The design: `docs/two_tier/two_tier_framework.zh.md` (layers, packages, gates), `docs/two_tier/instruction_vocabulary_design.zh.md` (the words, envelopes, labeller, values), `docs/two_tier/executor_design.zh.md`, `docs/two_tier/prior_design.zh.md`, `docs/two_tier/post_training_design.zh.md`; readouts in `docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`. SUPERSEDED, only their measurements citable: the 09-16 feasibility doc, plan v2 (`2026-09-17_two_tier_plan_v2.zh.md` §10–§12), the intent-code plan and readouts (`2026-09-18_manoeuvre_token_*.zh.md`, readouts §9–§11 read through v3 §10 item 1), plan v3 and its stage A (`2026-09-18_two_tier_plan_v3*.zh.md`, `…_v3_results.zh.md`; stage A's no-token closed loop is still live code, R8), the instruction-v2 labels readout (`2026-09-23_instruction_labels_readout.zh.md`) |

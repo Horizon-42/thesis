@@ -1,6 +1,6 @@
 """Runway-intent R1 readout: the five airports' `runway_intent_r1.json` in one table set, and the §11.4 gates applied mechanically.
 
-Plan `docs/2026-09-13_runway_intent_plan.zh.md` §11.4 (the gates) and §13 (the results). Written to
+Plan `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §11.4 (the gates) and §13 (the results). Written to
 the campaign folder as `readout.md` / `readout.json`.
 
     python run_ts.py runway_intent_r1_readout \\

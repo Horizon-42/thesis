@@ -1,6 +1,6 @@
 """Runway-intent R0: how well causal context alone names the landing runway (no model, no training).
 
-Plan `docs/2026-09-13_runway_intent_plan.zh.md` §7 R0. For every validation flight of a
+Plan `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §7 R0. For every validation flight of a
 checkpoint's split and at several points of its approach — the entry to the arrival slice, then
 the first sample with at most D km of flown path left, for each D of a remaining-path grid — the
 causal baseline rules of `data.runway_context` (B0 majority, B1 active configuration, B2 B1

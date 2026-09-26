@@ -18,3 +18,5 @@ Their tests are archived beside them, unmodified (`tests/`); they do not run. Th
 The `PREDICTION_SEGMENT_PLAN` name survives only in `config.PREDICTION_OUTPUTS_RETIRED`, and a
 stored config carrying it is refused at load. `control_horizon_s` (fixed rollout horizon) and
 `inference/receding.py` stayed live: the new executor uses both.
+
+**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the two-tier feasibility study (`2026-09-16_two_tier_transformer_feasibility.zh.md`) and the T0c / T1a arm declarations; plan v2 itself stays in `docs/` (cited by path from `config.py`, which the executor source hash covers).

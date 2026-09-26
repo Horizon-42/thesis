@@ -7,7 +7,7 @@ index line in CLAUDE.md that ends in its ID; find one with `grep -n '^### C7 ·'
 
 **Maintenance: when a fact here changes, edit it HERE and keep its index line true; a new fact
 gets a new ID here and ONE new line in the index.** Measurements and campaign evidence still
-belong in `docs/ENGINEERING_NOTES.md` / the design documents, status in `docs/OPEN_ITEMS.md`.
+belong in `docs/reference/ENGINEERING_NOTES.md` / the design documents, status in `docs/history/OPEN_ITEMS_2026-09-18.md`.
 
 **2026-09-18:** the main line's 2026-09-14…09-17 additions to that CLAUDE.md (the control
 contracts, the two-tier axes and traps) were placed here the same way when this branch was
@@ -54,13 +54,13 @@ point of the package, not a migration in progress.
   dynamics of its own (22 % fully flyable); the P1.d tracker that flew it with the point-mass
   rollout (`outputs/control/constraints/closure_tracking.py`, `predict --closure-track`) is RETIRED —
   code DELETED 2026-09-07, its numbers (+10.5 m of ADE, 92 % fully flyable) kept as history in
-  `docs/2026-09-06_closure_p1d_tracking_results.zh.md`. Do not rebuild it.
+  `archive/closure_2026_09/docs/2026-09-06_closure_p1d_tracking_results.zh.md`. Do not rebuild it.
 
 ### P4.a · `plan` — plan-and-guidance, the lockstep, "no fix ahead"
 
 **RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
 
-- **`plan`** — the plan-and-guidance path (design v5, `docs/2026-09-09_plan_and_guidance_design.md`;
+- **`plan`** — the plan-and-guidance path (design v5, `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md`;
   step 3 built 2026-09-11): the network predicts the OPERATING PARAMETERS and the NEXT
   INSTRUCTION at any anchor (`outputs/plan/labels.TARGETS`: `T`, `V_mid`, `d_decel`,
   `V_final`, `h_capture`, `d_join`, the remaining path; the next fix ahead / across the

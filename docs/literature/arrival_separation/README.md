@@ -1,7 +1,7 @@
 # Arrival separation: the US rules a multi-runway arrival scheduler must honour, with ICAO and RECAT-EU beside them (2026-09-14)
 
 Why this folder exists: R3 of the runway-intent plan
-(`4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md` §17) assigns every arrival a
+(`4dTrajectory/ts_transformer/docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §17) assigns every arrival a
 (runway, landing time) over several open runways. Its constraints are same-runway spacing, closely spaced
 parallels treated as one runway, dependent diagonal spacing, independent parallels and intersecting
 runways. They have to come from the regulation text, not from memory. This folder holds that text, quoted

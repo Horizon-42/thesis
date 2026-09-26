@@ -108,7 +108,7 @@ def _read_bound_release(
     # here — both are functions of the payload this digest just proved identical, so a
     # check on them could never fire (review C-7). What the digest does NOT bind is the
     # DIRECTORY: a checkpoint copied elsewhere has no ledger beside it and `create_test_release`
-    # would freeze it afresh — an open protocol decision, recorded in docs/OPEN_ITEMS.md.
+    # would freeze it afresh — an open protocol decision (C-7), recorded in the repository's docs/open-items.md.
     if release.get("checkpoint_sha256") != file_sha256(checkpoint):
         raise TestReleaseError("test release is bound to a different checkpoint")
     if not isinstance(release.get("claims"), list):

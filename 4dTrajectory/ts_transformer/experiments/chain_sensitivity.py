@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Chain sensitivity (T0(b)): a control checkpoint re-asked on its OWN rollout every Δ seconds.
 
-Two-tier feasibility (`docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §4.2, §10.1):
+Two-tier feasibility (`archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §4.2, §10.1):
 a short-horizon layer chained without new observations obeys ``e_k <= ε + L·e_(k-1)``, and
 whether the chain beats the one-shot forecast depends on L — how the model's error answers
 an error already in its history. This runner measures it on a stored checkpoint, with no

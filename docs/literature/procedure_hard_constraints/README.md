@@ -7,7 +7,7 @@ row) and `control` (bounded controls flown through a differentiable point-mass r
 HARD constraint, after a soft penalty was vetoed on both paths and a CBF safety filter that
 works at predict time made the network lazy when trained through. The assessment that reads
 these papers against that evidence is
-`4dTrajectory/ts_transformer/docs/2026-09-08_hard_constraints_survey_and_integration_plan.md`
+`4dTrajectory/ts_transformer/docs/history/2026-09_constraints/2026-09-08_hard_constraints_survey_and_integration_plan.md`
 (§3 survey with formulas, §4 plan).
 
 The PDFs are **not tracked in git** (root `.gitignore` has `*.pdf`); `./download.sh` re-fetches

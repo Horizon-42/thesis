@@ -1,6 +1,6 @@
 # Archived: the scene encoder's data plane and its explainability readout (2026-09-05 → 09-07)
 
-A **completed** line of the scene design (`docs/2026-09-05_scene_phase0_results.zh.md`;
+A **completed** line of the scene design (`archive/scene_encoder_2026_09/docs/2026-09-05_scene_phase0_results.zh.md`;
 `docs/2026-09-07_latent_intent_design.zh.md` §L4), kept in the repository as the record
 behind its numbers and taken off the import path. Nothing here runs against the current
 package; the files are left exactly as they were taken (archive convention:
@@ -23,9 +23,11 @@ package; the files are left exactly as they were taken (archive convention:
 
 The L4 gate FAILED: scene entity features added nothing to the join-distance prediction
 (R² 0.37 against 0.38 ego-only), and the observable lead ETA correlated 0.11 with the lead's
-true landing time, so the scene encoder was never built (`docs/OPEN_ITEMS.md`, L4 row).
+true landing time, so the scene encoder was never built (`docs/history/OPEN_ITEMS_2026-09-18.md`, L4 row).
 The `intent_conditioning=truth-*` oracles the Phase 0 instrument used are FROZEN in
 `config.INTENT_CONDITIONINGS_AVAILABLE` (2026-09-09, package review §5): their stored arms
 load, no new oracle arm trains.
 
 Taken from `dev-pkg-review` at the commit that created this directory (2026-09-09).
+
+**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the scene design and its Phase 0 readout (`2026-09-07_scene_join_anchor_design.zh.discard.md`, `2026-09-05_scene_phase0_results.zh.md`) and the Phase 0 arm declaration.

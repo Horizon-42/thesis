@@ -7,7 +7,7 @@ index line in CLAUDE.md that ends in its ID; find one with `grep -n '^### C7 ·'
 
 **Maintenance: when a fact here changes, edit it HERE and keep its index line true; a new fact
 gets a new ID here and ONE new line in the index.** Measurements and campaign evidence still
-belong in `docs/ENGINEERING_NOTES.md` / the design documents, status in `docs/OPEN_ITEMS.md`.
+belong in `docs/reference/ENGINEERING_NOTES.md` / the design documents, status in `docs/history/OPEN_ITEMS_2026-09-18.md`.
 
 **2026-09-18:** the main line's 2026-09-14…09-17 additions to that CLAUDE.md (the control
 contracts, the two-tier axes and traps) were placed here the same way when this branch was
@@ -60,7 +60,7 @@ rebased — same rule, new IDs.
 
 - **The control head has FOUR contracts — `control_thrust_parameterization` — and each is ONE row**
   (2026-09-14 → 09-16; `docs/2026-09-14_specific_force_control_design.md`; the one-row structure:
-  `docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11):
+  `archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11):
   - **`thrust-fraction`** (the default, every stored run, pinned by every named recipe) is the
     box below. **`specific-force`** makes the first column `n_x = (T − D)/W` (box `[−0.20, 0.23]` g,
     neutral −0.05; the lag RHS re-solves `T = clamp(W·a_x + D, −0.2·T_max, T_max)` at EVERY RK4
@@ -391,7 +391,7 @@ four runners that restated it import it).
 
 ### C30 · the instruction sentence artefact: one spec sha, written once, rows aligned with the signals
 
-2026-09-23 (the instruction labeller, `docs/2026-09-23_two_tier_framework.zh.md` §3). An artefact
+2026-09-23 (the instruction labeller, `docs/two_tier/two_tier_framework.zh.md` §3). An artefact
 directory under `4dTrajectory/outputs/POOLED/instruction_language/<name>/` is written by the four
 runners in order and never overwritten (`instructions.artefact._fresh` refuses an existing file):
 `signals_{train,select,val}.npz` + `signals.json` (the flights, from the live harvest's eligible arrivals,
@@ -475,7 +475,7 @@ excluded by the index, 612 unresolved identity). Val 10,635 / 9,668 / 7,574. Tes
 
 ### C32 · the two-tier line splits by operating day, dealt once and committed; test days are sealed
 
-2026-09-24 (`docs/2026-09-24_prior_design.zh.md` §3.3). `data/day_split.py`: an operating day is the UTC date
+2026-09-24 (`docs/two_tier/prior_design.zh.md` §3.3). `data/day_split.py`: an operating day is the UTC date
 9 h earlier (`OPERATIONAL_DAY_SHIFT`, the overnight traffic minimum); a flight's day is its LANDING day (the one time
 both the arrivals and the tracks roster carry; 20 of 72,247 eligible arrivals enter and land on different days).
 The days are dealt by COUNT over sha256(seed:day): round-half-up 15 % test, 15 % val, 1/7 of the rest `select`

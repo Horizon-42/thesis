@@ -591,7 +591,7 @@ find $A -type d \( -name records -o -name '*_pred_val' \) -prune -exec rm -rf {}
 | `docs/literature/arrival_separation/README.md` | 间隔规则的出处（掩码用） |
 | `docs/literature/hierarchical_prediction/README.md` | 两层结构的文献与反证 |
 | `docs/reference/contracts.md`（C1、C12、C26）、`traps.md`（T1、T4） | 通道、conformal 绑定、数据身份、跑道已知、运行日划分 |
-| `docs/ENGINEERING_NOTES.md`、`docs/OPEN_ITEMS.md` | 证据与状态 |
+| `docs/reference/ENGINEERING_NOTES.md`、`docs/history/OPEN_ITEMS_2026-09-18.md` | 证据与状态 |
 
 ### 7.3 术语索引
 

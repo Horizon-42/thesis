@@ -4,7 +4,7 @@ from when it flew it.
 The package's ADE/FDE compare positions at the same TRUE time (``metrics.py``), so a
 prediction that flies the right path at the wrong speed is charged the full along-path
 displacement — on vectored flights that timing term dominates (Phase 0: the truth path
-with a naive speed profile still scores 1.3 km; docs/2026-09-05_scene_phase0_results.zh.md).
+with a naive speed profile still scores 1.3 km; archive/scene_encoder_2026_09/docs/2026-09-05_scene_phase0_results.zh.md).
 The readouts therefore print both families side by side, and the scene design doc (§一)
 rules that a conclusion drawn from one family alone does not count.
 

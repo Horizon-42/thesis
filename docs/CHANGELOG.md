@@ -1,5 +1,22 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — ts_transformer docs reorganised (branch `docs-reorg`)
+
+- **Current designs brought up to the code**: two-tier framework (status, packages — no `closed_loop/` / `constraints/`
+  group —, artefact files, operating-day split), instruction vocabulary design rewritten to `instruction-v3` / spec
+  `145d6911e75b` (section numbers kept: hashed labeller / executor code cites §10.1), post-training §3.4 (executor v9),
+  prior design §3.3; `reference/` archived entries marked, new L32 / C33 / C34; ts `CLAUDE.md` routes to current documents.
+- **No code in `docs/`**: the thirteen `docs/*.py` became seven runners (`score_control_arms`, `compare_*`,
+  `specific_force_teacher_distribution`, `trace_architecture`; outputs byte-identical to the originals on real campaigns)
+  and three archives (`publication_oneoffs_2026_08`, `procedure_census_2026_09`, `bank_wiggle_figures_2026_08`);
+  `test_docs_holds_no_python`.
+- **Layout**: `docs/two_tier/` (current, undated designs; `readouts/`), `docs/reference/` (+ `ENGINEERING_NOTES.md`),
+  `docs/tutorials/`, `docs/history/<line>/` (finished lines, basenames kept, `history/README.md` one row each), documents
+  of archived code in `archive/<name>/docs/`; entry point `docs/README.md`. `OPEN_ITEMS.md` retired to
+  `history/OPEN_ITEMS_2026-09-18.md`, its open decisions (N7′, C-4, C-7, C-9) moved to `docs/open-items.md`.
+  Ten dated records stay in `docs/` because executor-fingerprinted code cites them by path (C33); they move with the
+  next executor spec.
+
 ### 2026-09-26 — Training：实时执行器飞航向词多出的那一截画成淡色虚线尾巴
 
 - 用户看到选中转弯词让执行器现飞时"总会多飞出一段"：那是设计上的提前量——航向词判到下一个航向词说出后 4 s，执行器必须飞到

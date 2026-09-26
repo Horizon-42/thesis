@@ -25,7 +25,7 @@ Development scope: the checkpoint's validation split only; the co-temporal conte
 is the development roster (train + validation) and only landings BEFORE the ego flight's
 terminal-ring entry time.
 
-v4 (runway-intent R0, `docs/2026-09-13_runway_intent_plan.zh.md` §7): the causal baseline rules
+v4 (runway-intent R0, `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §7): the causal baseline rules
 B0–B4 of `data.runway_context` join the selectors, each read at the FORECAST anchor's wall-clock
 time over its own pool (every flight whose split hash is outer-test excluded — see
 `build_airport_context`); and a PLAN checkpoint is accepted — its candidates are the runways

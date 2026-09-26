@@ -1,6 +1,6 @@
 """Runway-intent R1.1: a candidate-symmetric runway head against R1's per-runway head, on the same samples.
 
-Plan `docs/2026-09-13_runway_intent_plan.zh.md` §14 (the design and the gates, written before this
+Plan `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §14 (the design and the gates, written before this
 ran), after §13: R1's head keeps one column per runway, so "the recent landings went to X" is learned
 for each X from the training days alone, and it read the raw wind and the time of day as a
 fingerprint of the usual configuration — on KSJC's two 30L-closure days it read 55-57 % against B1's

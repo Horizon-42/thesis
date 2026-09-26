@@ -66,18 +66,30 @@ change you are making go in `docs/code-health-followups.md` instead.
   cleaner to protect them while the regeneration is pending, or to do the regeneration and then
   release them — the user's call, because it decides whether those records are still needed.
 
-- **Two-tier — PAUSED 2026-09-18 01:00 by the user; the handover is
-  `4dTrajectory/ts_transformer/docs/2026-09-17_two_tier_plan_v2.zh.md` §13** (state, how to resume, the
-  decision list). Results: gate L1 FAIL (all contracts, with and without the token-using recipe), gate L2
-  PASS on the segments axis at seq_len 61 / 91 / 121, gate E2E FAIL on every contract; the usable formal
-  recipe is pa + masking 0 + smoothness off (`L1c_pa_*`: E2E ADE ~1270 / fully flyable 0.99 / straight-in
-  established 0.97–0.99), whose two misses are both vectored (ADE ~3050–3130 > 2745, established 0.04–0.09).
-  A longer L2 lookback improves the open-loop vectored 60–120 s waypoints by a third but not the closed loop
-  (§12.3 hypothesis: the longer window reads more of the tracker's own flown rows). Open: the B121 E2E died in
-  the arc-length geometry on a <2-point truth segment (§12.4, unfixed); no records were written for L1b/L1c/
-  L2c/L2d (publishing needs a re-run); the full test suite has not run since 40b19b9; 13d5367 (review fixes)
-  is unreviewed. Nothing is running; the runs worktree must be moved to the latest commit before any launch.
+- **Two-tier model: status lives in `4dTrajectory/ts_transformer/docs/two_tier/two_tier_stage_notes.zh.md`**
+  (every stage, the current artefacts, the user's decisions, the next step). The 2026-09-18 pause of plan v2 is over:
+  v2 and v3 were superseded by the controller-word design (`docs/two_tier/two_tier_framework.zh.md`).
 
+- **ts one-tier paths — the decisions still open** (moved 2026-09-26 from the retired ts `OPEN_ITEMS.md`, now
+  `4dTrajectory/ts_transformer/docs/history/OPEN_ITEMS_2026-09-18.md`, which keeps the full one-tier history):
+  - **N7′ adoption is the user's call** (`control_thrust_parameterization=specific-force+path-angle`, defaults row D27:
+    passes every pre-registered gate on both seeds; one regression, vectored FDE p50 +625 / +704 m, unexplained).
+  - **C-4, the duration floor under `uniform`.** `control_duration_uniform_floor` is read by the
+    `factorized` head only, but its default is 0.8 and every recipe pins 0.0, so 88 stored
+    `uniform` runs carry a non-default inert value and a refusal would stop them loading. It
+    stays a field on `DurationSpec` after the §4.3 split (2026-09-10): a `Factorized(floor)`
+    variant would refuse the `0.0` every recipe pins under `uniform`, i.e. every recipe. A custom
+    `uniform` run can still wear `duration-floor=`; retiring the pin is a recipe-version change.
+  - **C-7, the test-release ledger is bound to the DIRECTORY.** `test_release.json` sits beside
+    `checkpoint.pt`; a copy of the checkpoint elsewhere can be frozen and released again. The fix
+    is a registry keyed by the checkpoint digest outside the run directory — where it lives and
+    how tests isolate it is the decision. No ledger exists on disk today, so it costs nothing
+    whenever it is made.
+  - **C-9, `cv_results.json` misnames the selection metric as a loss.** `mean_/std_val_macro_loss`
+    at the candidate level hold the SELECTION value (ADE, metres); the fold rows' `best_val_macro_loss`
+    is the loss. Renaming means a schema bump, after which the two stored files (2026-08-16
+    `POOLED/ts_patchtst_normalized_time`, 2026-08-18 `KSJC/experiments/cv_tau_bank_20260818`)
+    are no longer reusable by `--skip-cv`. The writer says so in a comment; nothing renamed.
 
 - **The v5 re-roster is DONE (verified on disk 2026-09-03):** all five
   `outputs/harvest/<ICAO>/arrivals/manifest.json` are `harvest-arrivals-v5-takeoff-excluded`
@@ -157,7 +169,7 @@ change you are making go in `docs/code-health-followups.md` instead.
   1.5 % → 12–15 %, minority runway pulled ~600 m), feeding the target's coordinates as input
   channels (`target_conditioning="channels"`) does not undo it, and the "route stability"
   gain for vectored flights did not survive a second seed. Keep `enu`. →
-  `4dTrajectory/ts_transformer/docs/2026-09-03_airport_frame_ablation_results.md`
+  `4dTrajectory/ts_transformer/docs/history/2026-09_frames/2026-09-03_airport_frame_ablation_results.md`
 - ts_transformer: **the final-approach corridor as a bounded output works; as a penalty it does
   not (2026-09-05).** `state_position_reference="corridor-bounded"` improves pooled FDE on all
   four runs (KRDU/KSJC × two seeds) without triggering the pre-registered veto (a vectored
@@ -165,7 +177,7 @@ change you are making go in `docs/code-health-followups.md` instead.
   runway-scale hinge penalty diverges under dual ascent and costs accuracy at parity; the
   row-by-row on-final projection recovers most of B's KRDU FDE gain post hoc but not its
   violation rate, and the FAF-gated projection wrecks vectored flights. →
-  `4dTrajectory/ts_transformer/docs/2026-09-05_final_constraint_results.zh.md`
+  `4dTrajectory/ts_transformer/docs/history/2026-09_constraints/2026-09-05_final_constraint_results.zh.md`
 - ts_transformer: **control-output constraint = a predict-time safety layer, measured
   2026-09-06 on KRDU + KSJC.** The v2 barrier command hook (lag-aware, lead-position margins,
   load-coordinated; `predict --command-hook barrier --hook-saturation soft`) applied to the

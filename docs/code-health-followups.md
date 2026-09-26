@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **18 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted 2026-09-26). *open*: the problem is still in the
+(the right-hand column): **20 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted 2026-09-26). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -65,6 +65,7 @@ added three entries (the rows after the performance index's).
 | 2026-09-03 — 14 pre-existing failures in `trajectory_data_process/tests` | resolved | all fixed; entry removed | — |
 | ts: reusable measurement code lives in `docs/` (09-07) | resolved | runners import `inference/arm_readout.py`, 15 test preambles removed (`3f38f8af`); the thirteen `docs/*.py` moved on branch `docs-reorg` (2026-09-26): seven became runners, six went to three archives, `test_docs_holds_no_python` guards it (L20); entry removed; the tests' `sys.path` lines are the next row | — |
 | ts: five test files still touch `sys.path` (09-26) | open | new; see the entry | no: tests |
+| ts: ten dated records stay in the `docs/` root because hashed code cites them by path (09-26) | open | new; see the entry | **yes — executor**: the path edits change the executor source hash; do them with the next executor spec |
 | ts: the auto-batch probe measures a smaller graph than a latent run | resolved | the probe hands a latent model the future, as training does (`b10b1d68`); entry removed | — |
 | scene data plane: review leftovers (09-07) | resolved | (7)–(9), (12), (14) and the three test gaps fixed, (11) documented, a landed-before-t₀ neighbour no longer a lead (`96d299d1`, `50412e71`); (10), (13) obsolete; entry removed | — |
 | ts: T2 leftovers (09-07) | resolved | `chart_scale` required (`6c363ef9`); the transport-chart rollouts kept as the scaled chart's test reference; the pointers demoted (`06801fe7`); entry removed | — |
@@ -333,7 +334,7 @@ It is the owner's call.
 ## 38. Formulas the control-contract refactor left restated outside the contract rows (2026-09-16)
 
 Found by the sf-n7 architecture review before the merge; out of the refactor's scope
-(`4dTrajectory/ts_transformer/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11.2), recorded so they
+(`4dTrajectory/ts_transformer/archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11.2), recorded so they
 are not rediscovered.
 
 **Verified** (code read, 2026-09-16):
@@ -478,7 +479,7 @@ loose list, not the environment spec (`docs/environment.md`): drop the line, or 
 
 ## `autopilot/__init__.py` names the executor design by its old file name (2026-09-26)
 
-**Verified.** The design was renamed `docs/2026-09-23_executor_design.zh.md` → `docs/executor_design.zh.md` (the user,
+**Verified.** The design was renamed `docs/2026-09-23_executor_design.zh.md` → `docs/two_tier/executor_design.zh.md` (the user,
 2026-09-26: design documents carry no date). The package docstring still names the old file. Every `.py` of
 `autopilot/` is in the executor source hash (`spec.executor_source_files`), so editing the docstring makes the current code
 refuse executor spec v9 — change it together with the next executor change (new spec + train replay gate).
@@ -498,4 +499,13 @@ change it together with the next executor change, as the `autopilot/__init__.py`
 `test_guidance_skeleton_mirrors`, `test_import_boundaries` and `test_prior_procedure` add to `sys.path`; three of them add
 `4dTrajectory/optimization`, which `tests/conftest.py` does not. **Judgement**: move that one path into `conftest.py` and
 drop the per-file lines, or say in each why it stays.
+
+## ts: ten dated records stay in the `docs/` root because hashed code cites them by path (2026-09-26)
+
+**Verified.** The docs reorganisation (branch `docs-reorg`) moved every finished record into `docs/history/` or
+`archive/<line>/docs/`, except ten that `ts_transformer/config.py`, `outputs/envelope.py` and
+`outputs/constraints/speed_floor.py` cite by path — all three in the executor source hash (contract C33), so correcting
+the comments would make the current code refuse executor spec v9. `4dTrajectory/ts_transformer/docs/README.md` lists the
+ten and where each goes. With the next executor spec: `git mv` them, fix those comments (and `autopilot/__init__.py`,
+`envelope.py:110/118`, the entries above), re-write the spec and re-run the train replay gate.
 

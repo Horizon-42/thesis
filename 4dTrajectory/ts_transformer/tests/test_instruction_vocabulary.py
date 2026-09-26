@@ -1,5 +1,5 @@
 """The instruction vocabulary's parts: the spec, the words, the candidate runways, the envelopes,
-the piecewise fit, the measurements and the artefact (design: docs/2026-09-23_instruction_vocabulary_design.zh.md)."""
+the piecewise fit, the measurements and the artefact (design: docs/two_tier/instruction_vocabulary_design.zh.md)."""
 
 from __future__ import annotations
 

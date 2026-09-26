@@ -11,8 +11,8 @@ metrics, anchor grid, command hooks (`defaults.md`), `L` layout (`layout.md`), `
 That text was moved there verbatim on 2026-09-16 (this file had reached 118 KB),
 and the 09-14…09-17 additions were placed there the same way on 09-18. The evidence
 behind each line — measurements, campaign results, the causes already ruled out — lives in
-`docs/ENGINEERING_NOTES.md` for the one-tier paths up to 2026-09-10, and in the design and readout
-documents the line names after that; **the two-tier model's status is `docs/2026-09-24_two_tier_stage_notes.zh.md`**;
+`docs/reference/ENGINEERING_NOTES.md` for the one-tier paths up to 2026-09-10, and in the design and readout
+documents the line names after that; **the two-tier model's status is `docs/two_tier/two_tier_stage_notes.zh.md`**;
 mechanism and result tables of the one-tier paths in the package `README.md`; history in the repo's
 `docs/CHANGELOG.md` (2026-07-19, 07-20 ×2; the move itself: 2026-09-16).
 Read the notes before designing an experiment or touching the loss, rollout or output layer.
@@ -49,7 +49,7 @@ of the package, not a migration in progress.
   code under `archive/{closure,plan_head,two_tier_v2}_2026_09/` (a README each), stored checkpoints
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
-  `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
+  `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
 - **`manoeuvre` — the SECOND LAYER's line; the second layer itself is not built.** The
   **intent-code** layer (a learned FSQ code per segment, the executor conditioned on it, a causal
   prior over codes) is **ARCHIVED 2026-09-20**: `archive/manoeuvre_codes_2026_09/` (README there;
@@ -57,7 +57,7 @@ of the package, not a migration in progress.
   `gates_manoeuvre.py`, the `manoeuvre_*` runners and `two_tier_b_queue`). Why: plan v3 §10's
   audit — both layers trained on truth and only ever evaluated closed-loop, and the truth codes
   were indexed by time, not by where the executor was. Numbers:
-  `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
+  `archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
   `4dTrajectory/outputs/KRDU/experiments/{two_tier_v3_b_20260919,manoeuvre_tok_20260918}` +
   `outputs/codebooks/` — read them through §10 item 1 (open-loop-trained executors). `plan_conditioning`
   keeps ONLY `off`; `manoeuvre-code` is refused at load by name (`PLAN_CONDITIONINGS_RETIRED`).
@@ -372,7 +372,7 @@ labelled words, not by the teacher-forced NLL. **Why the labelled replays sink b
 executor against the observed aircraft cycle by cycle, the height given up by word, and a one-line what-if of the vertical
 law run in-process (readouts §12).
 
-## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
+## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
 - **A stored config lacks every field added after it trained — read the absence as `from_dict`
   does** (`config.absent_field_defaults`), never as `None` (T18).
@@ -418,13 +418,14 @@ law run in-process (readouts §12).
 
 | doing this | read first |
 |---|---|
-| picking up the two-tier model (the current line) | `docs/2026-09-24_two_tier_stage_notes.zh.md` (status, artefacts, decisions, next step), then W2 |
-| designing a one-tier experiment / changing loss, rollout, output layer | `docs/ENGINEERING_NOTES.md` (evidence up to 2026-09-10) |
-| checking what a one-tier campaign settled | `docs/OPEN_ITEMS.md` (up to 2026-09-18) and the defaults table above |
-| putting the procedure constraint into TRAINING as a hard constraint, or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` §3 — a literature survey with formulas; its H0–H6 plan was never built (papers in repo `docs/literature/procedure_hard_constraints/`). The two-tier model's procedure constraint is a decode mask: post-training design §3 |
+| finding any document (what is current, what is history, where the archived lines' documents went) | `docs/README.md` |
+| picking up the two-tier model (the current line) | `docs/two_tier/two_tier_stage_notes.zh.md` (status, artefacts, decisions, next step), then W2 |
+| designing a one-tier experiment / changing loss, rollout, output layer | `docs/reference/ENGINEERING_NOTES.md` (evidence up to 2026-09-10) |
+| checking what a one-tier campaign settled | `docs/history/OPEN_ITEMS_2026-09-18.md` (up to 2026-09-18) and the defaults table above |
+| putting the procedure constraint into TRAINING as a hard constraint, or the lazy-network / gate question | `docs/history/2026-09_constraints/2026-09-08_hard_constraints_survey_and_integration_plan.md` §3 — a literature survey with formulas; its H0–H6 plan was never built (papers in repo `docs/literature/procedure_hard_constraints/`). The two-tier model's procedure constraint is a decode mask: post-training design §3 |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
-| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | the stage notes, then **`docs/2026-09-23_two_tier_framework.zh.md`** (layers, packages, artefacts, gates), **`docs/2026-09-23_instruction_vocabulary_design.zh.md`** (the words, envelopes, labeller, values), **`docs/executor_design.zh.md`**, **`docs/2026-09-24_prior_design.zh.md`**, **`docs/2026-09-25_post_training_design.zh.md`**; readouts `docs/2026-09-24_prior_readouts.zh.md`. Plans v2 / v3, the intent-code plan and the 09-16 feasibility doc are SUPERSEDED — only their measurements are citable: W2 |
+| predicting the landing runway (runway intent), multi-runway scheduling | `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
+| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | the stage notes, then **`docs/two_tier/two_tier_framework.zh.md`** (layers, packages, artefacts, gates), **`docs/two_tier/instruction_vocabulary_design.zh.md`** (the words, envelopes, labeller, values), **`docs/two_tier/executor_design.zh.md`**, **`docs/two_tier/prior_design.zh.md`**, **`docs/two_tier/post_training_design.zh.md`**; readouts `docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`. Plans v2 / v3, the intent-code plan and the 09-16 feasibility doc are SUPERSEDED — only their measurements are citable: W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

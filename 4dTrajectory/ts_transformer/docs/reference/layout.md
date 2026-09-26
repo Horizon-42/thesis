@@ -7,7 +7,7 @@ index line in CLAUDE.md that ends in its ID; find one with `grep -n '^### C7 ·'
 
 **Maintenance: when a fact here changes, edit it HERE and keep its index line true; a new fact
 gets a new ID here and ONE new line in the index.** Measurements and campaign evidence still
-belong in `docs/ENGINEERING_NOTES.md` / the design documents, status in `docs/OPEN_ITEMS.md`.
+belong in `docs/reference/ENGINEERING_NOTES.md` / the design documents, status in `docs/history/OPEN_ITEMS_2026-09-18.md`.
 
 **2026-09-18:** the main line's 2026-09-14…09-17 additions to that CLAUDE.md (the control
 contracts, the two-tier axes and traps) were placed here the same way when this branch was
@@ -128,7 +128,7 @@ rollout needs is not one path's** (2026-09-10, the plan-and-guidance path's firs
 
 **The
 plan-and-guidance path is `outputs/plan/`** (2026-09-10,
-`docs/2026-09-09_plan_and_guidance_design.md`, built in its §9 order): `skeleton` (the coded
+`archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md`, built in its §9 order): `skeleton` (the coded
 approach in the flight's chart — `flight_scenarios.procedure_final.procedure_skeleton` read
 through `runway_skeleton`: the fixes in runway axes about `target_chart`, the FAF, the
 transitions' legs, the floor and ceiling coded at the next fix ahead, the optimizer's 150 m
@@ -342,7 +342,9 @@ thirteen `docs/*.py` scripts that predated this rule were moved on 2026-09-26: t
 became runners (`score_control_arms`, `compare_control_arms_paired`, `compare_control_arms_stratified`,
 `compare_frame_arms`, `compare_constraint_arms`, `specific_force_teacher_distribution`, `trace_architecture`), the
 one-offs went to `archive/publication_oneoffs_2026_08/`, `archive/procedure_census_2026_09/` and
-`archive/bank_wiggle_figures_2026_08/` (L19). `tests/conftest.py` already puts the package's PARENT on `sys.path`,
+`archive/bank_wiggle_figures_2026_08/` (L19). How `docs/` itself is organised — `two_tier/` (current designs, undated,
+rewritten in place; `readouts/` dated), `reference/`, `experiments/`, `tutorials/`, `history/` (finished lines whose code
+is live, basenames kept), the documents of archived code under `archive/<name>/docs/` — is `docs/README.md`. `tests/conftest.py` already puts the package's PARENT on `sys.path`,
 so a new test file needs no path preamble.
 
 ### L21 · `tests/` one file per topic, `tests/support.py`
@@ -449,7 +451,7 @@ run once per publication root) and 23 hand-published `ts_*` ones
 (`archive/publication_oneoffs_2026_08/relabel_published_categories.py`) — labels only; no CZML, records, keys or directories
 move. Only `device` and the never-set backbone knobs stay excused.
 **On-disk run/category directories are historical record — never rename them.** Grammar,
-fallbacks and the relabel tooling: `docs/ENGINEERING_NOTES.md`.
+fallbacks and the relabel tooling: `docs/reference/ENGINEERING_NOTES.md`.
 
 ### L27 · `run_parameter_rows` and `experiment.intent`
 
@@ -495,7 +497,7 @@ let escape its handler.
 
 ### L31 · `autopilot/`: the executor, flying the words through the shared dynamics
 
-2026-09-24 (`docs/executor_design.zh.md`). Stage 3 of the two-tier framework: `frame`
+2026-09-24 (`docs/two_tier/executor_design.zh.md`). Stage 3 of the two-tier framework: `frame`
 (the dynamics' geodetic rows read the way the words read a flight — airport frame, compass track,
 geometric MSL height; a positive bank turns LEFT), `sentence` (the word in force per column per
 control cycle; a word takes effect when it is said, no delay), `flights` (a labelled flight rebuilt from the
@@ -521,7 +523,7 @@ runners consume it (`test_only_the_runners_reach_the_executor_for_now`).
 
 ### L32 · `prior/`: the prior, saying the words
 
-2026-09-24 (`docs/2026-09-24_prior_design.zh.md`, `docs/2026-09-25_post_training_design.zh.md`). Stage 5 of the two-tier
+2026-09-24 (`docs/two_tier/prior_design.zh.md`, `docs/two_tier/post_training_design.zh.md`). Stage 5 of the two-tier
 framework: `data` (the sentence artefact as training data, one flight at a time, only what is known before each step),
 `scene` (scenes and the airport's landing context, sealed test days left out), `model` (causal attention over steps,
 attention between the aircraft of one step, the six column heads in order, the runway column a pointer over the

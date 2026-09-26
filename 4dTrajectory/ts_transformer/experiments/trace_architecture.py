@@ -40,7 +40,7 @@ from ts_transformer.config import TSConfig
 from ts_transformer.repo_layout import TS_DIR
 from ts_transformer.backbone.adapters import build_model, parameter_count
 
-TUTORIALS = TS_DIR / "docs"
+TUTORIALS = TS_DIR / "docs" / "tutorials"
 
 # Sentinel colours swapped for CSS custom properties after rendering, so the embedded SVG
 # follows the document's light/dark theme instead of baking graphviz's palette.

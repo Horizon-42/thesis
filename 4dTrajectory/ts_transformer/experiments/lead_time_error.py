@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Displacement error against LEAD TIME from the anchor, per stratum, off stored records.
 
-Two-tier feasibility (`docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §3): the
+Two-tier feasibility (`archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §3): the
 premise "a short-horizon model has a much lower ADE" is a statement about how a
 prediction's error GROWS with the lead time, and that curve is already on disk — every
 `predict` directory stores the predicted states and the observed states of each flight on
