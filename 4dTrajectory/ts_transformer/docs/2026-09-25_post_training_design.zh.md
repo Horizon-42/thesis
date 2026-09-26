@@ -8,8 +8,13 @@
 [先验的读数](2026-09-24_prior_readouts.zh.md)；词和执行器见[指令词表设计](2026-09-23_instruction_vocabulary_design.zh.md)、
 [执行器设计](executor_design.zh.md)。本文只写现行的设计；设计是怎么改过来的，看 git 历史和 `docs/CHANGELOG.md`。
 
-**base 模型**：先验第 1 步只用数据（teacher forcing）训出的模型 `outputs/POOLED/prior/v3_step1_20260924/full_s1337`，没做过任何后训练。
-各阶段的拉回项都拉回它（用户 2026-09-25 定名）。
+**模型的名字**（用户 2026-09-25 定 base，2026-09-26 要求其余也用简短的英文名，避免称呼混淆）：
+
+| 名字 | 是什么 | 目录（`outputs/POOLED/prior/`） |
+|---|---|---|
+| **base** | 先验第 1 步只用数据（teacher forcing）训出的模型，没做过任何后训练；各阶段的拉回项都拉回它 | `v3_step1_20260924/full_s1337` |
+| **landing** | base 按落地强化（第一阶段，§2，采用） | `v3_rl_20260925/grpo_s1337/round_01` |
+| **augmented** | landing 在扩充起点上、开着程序高度屏蔽再强化（第二阶段，§3–§5，训练中）；某一轮叫 augmented r*k* | `v3_stage2_restart_20260926/aug_s1337/round_NN` |
 
 文中路径都相对 `4dTrajectory/`（`outputs/…`、`optimization/…`）或 `4dTrajectory/ts_transformer/`（`docs/…` 和包名），仓库根目录的
 写明。
