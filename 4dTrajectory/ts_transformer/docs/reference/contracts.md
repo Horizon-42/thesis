@@ -488,3 +488,23 @@ refuses a test day by name (`SealedDay`). Sealed means: no test-day flight's tra
 landing context (`prior.scene.context_landings`) or put in a scene. The per-flight split (`data.splits`) stays the
 other ts models'; a cross-model comparison uses the flights both hold out (1,458: on a test day AND in the flight
 split's test).
+
+### C33 · the executor spec: written once, bound to the executor code, the vocabulary and the labeller
+
+2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`; executor design §12). An executor spec is a directory written once
+(`spec.json` + `measurements.json`, an existing file refuses): the parameters under their own sha, the vocabulary spec sha
+it was measured against, and `source`: `executor_source_sha256` over `executor_source_files` (every `autopilot/` module
+but `spec.py`, plus every repository module they import directly — `ts_transformer.config`, `data.dataset`,
+`outputs.envelope`, `outputs.dynamics.*`, `outputs.constraints.speed_floor`, `geometry.flyability`, `geokit`, …, labelled
+by module name so the hash is the same from any checkout) and the labeller's source sha. `replay.open_executor` refuses a
+spec of another schema (`ts-executor-spec-v5`), of other executor code, of another vocabulary, or of another labeller.
+**So a byte changed in any hashed file — a comment included — makes the current code refuse every stored spec**: a new
+spec is written and the train replay gate re-run (v7 → v9 on 2026-09-26 came that way).
+
+### C34 · a prior checkpoint belongs to one sentence artefact
+
+2026-09-24 (`experiments/prior_train.py` `load_prior`). A prior is `checkpoint.pt` + `config.json` under
+`ts-prior-checkpoint-v3`, written by `prior_train`, `prior_landing_reward` and `prior_augmented_reward` alike. It is refused
+unless its vocabulary spec sha, the labeller source sha and the day split recorded in `config.json` are those of the
+sentence artefact it is opened with, its candidate-runway table equals the artefact's, and its state loads whole
+(`strict=True`). A new artefact under the same spec and labeller (v4 → v5 on 2026-09-26) opens every stored prior.

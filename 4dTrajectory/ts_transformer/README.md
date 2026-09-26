@@ -64,15 +64,15 @@ kept where they are labelled as such, because two design decisions were made on 
 data and the real run either confirmed or corrected them.
 
 **Scope:** `prediction_output=state` remains the purely kinematic, single-aircraft baseline
-used by the recorded experiments below. `prediction_output=control` (and the separate
-`control-mixture` strategy) is a checkpointed architecture that adds per-flight aircraft
+used by the recorded experiments below. `prediction_output=control` is a checkpointed architecture that adds per-flight aircraft
 conditioning and a differentiable dynamics rollout. See
 [the output architecture](#state-baseline-and-dynamics-constrained-control-output).
 `control_recipe_name` selects between `custom` (every historical control ablation axis,
 still supported and validated) and `simple-v1` (a frozen, minimal recipe — construction
-rejects any field that drifts from it). The full ablation matrix, call graph, oracle-teacher
-warm-start pipeline, and a module-by-module live/ablation-only/orphan census live in
-[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md); this
+rejects any field that drifts from it). The control path's design history (ablation matrix, call graph,
+the archived oracle-teacher pipeline) is
+[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) — a superseded record of the
+2026-08-16 code, not the live module list (that is the package itself and `docs/reference/`); this
 README states only what a reader needs to run and interpret it.
 
 ## Glossary
@@ -136,7 +136,7 @@ qualified name (`from ts_transformer.data.dataset import build_series`).
 | `__main__.py` / `cli/` | the subcommand table, and one module per subcommand (`train`, `cross_validate`, `evaluate_fit`, `freeze`, `predict`, plus `common`) — each exposes `HELP` / `add_cli_arguments()` / `run_cli()` |
 | `data/synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `backbone/vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
-| `outputs/control/` (package: strategy, supervision, forecast, envelope, heads, conditioning, latent, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — the package itself is the live module list (layout: `docs/reference/layout.md` L6, L23); [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) keeps the design history, and its module table and call graph describe the teacher chain archived in T2 |
+| `outputs/control/` (package: strategy, supervision, forecast, envelope, heads, conditioning, latent, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — the package itself is the live module list (layout: `docs/reference/layout.md` L6, L23); [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) keeps the design history, and its module table and call graph describe the teacher chain archived in T2 |
 
 ## Running it
 
@@ -674,15 +674,10 @@ parameterization, validation selection, command hook — registries, each a
 concrete point in that space (uniform duration, absolute controls, the
 `scaled-transport-chart-velocity` dynamics backend, a minimal "true-time-position" tracking
 objective, every auxiliary loss weight zeroed); `TSConfig.__post_init__` raises if any of its
-fields drift from the frozen values. A third prediction output, `control-mixture`
-(`prediction_output=control-mixture`), trains `K` independent control experts plus a
-history-only deployable selector on a best-of-K hindsight objective — a first attempt at the
-"deterministic point prediction" limitation in
-[Deliberate scope](#deliberate-scope--not-bugs-do-not-fix-without-deciding-to). All of this —
-the objective/backend/duration/clock registries, the exact call graph, and which of the
-`outputs/control/` package's modules are live on the default path vs. ablation-only vs. genuinely
-unwired — is in
-[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
+fields drift from the frozen values. (A third output, `control-mixture` — `K` control experts plus a
+deployable selector — was deleted on 2026-08-18.) The registries' design history is in
+[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md), a superseded record; the live
+registries are `config.py` and `docs/reference/`.
 
 Control mode currently requires `--horizon-mode normalized`. It needs no inverse-control
 labels. Uniform truth nodes are interpolated onto `cumsum(segment_durations)` before the
@@ -1105,9 +1100,9 @@ point that later work may choose to extend, but none is an accident:
   toward generative/probabilistic terminal models (CVAE, diffusion) precisely because runway
   configuration and vectoring make the future genuinely multimodal; these two models cannot
   represent that, and a point prediction is the honest baseline against which they are measured.
-  `prediction_output=control-mixture` (K independent control experts + a deployable selector,
-  best-of-K training) is a first, still-evaluated attempt at this specifically for the control
-  output — see [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
+  A first attempt for the control output, `prediction_output=control-mixture` (K control experts + a deployable
+  selector), was deleted on 2026-08-18; the two-tier model (a prior that samples several sentences per flight) is where
+  multimodality is now addressed (`docs/2026-09-24_two_tier_stage_notes.zh.md`).
 
 ## Known gaps — actual unfinished work
 

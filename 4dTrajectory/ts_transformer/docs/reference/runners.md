@@ -306,7 +306,7 @@ refused unless it is this prior (path from `4dTrajectory/outputs/` on), this exe
 `N_LOOK`, samples and temperature, and its draw's per-airport count is a number or `EVERY_FLIGHT` (the draw's phrase, pinned
 against `replay.py`). The checkpoint: `prior_training_export.open_trained_prior` (shared with `prior_training_export`); a
 post-trained round's `fine_tuning` block is carried as `model.fineTuning` (the frontend colours by it). The executor spec must be one this code opens
-(2026-09-26: `v7_20260925`; `v8` holds the same content sha but was written by code that still had the archived CAT-K). ~2 min a
+(since the 2026-09-26 rebuild: `v9_20260926`; the code refuses `v7` and `v8`, C33). ~2 min a
 model for five airports of 40 flights on CPU, 1.2–1.9 MB an airport; a re-run is identical. Tests:
 `tests/test_prior_generation_training_export.py` (the pieces, and `main` end to end on a synthetic artefact with stand-in
 series).
@@ -346,7 +346,7 @@ to end on a synthetic artefact and checkpoint — every write into `tmp_path`) a
 `2674ab8c71a9`, prior `v1_20260924`, over the v5 `instruction_v2` sets) was made at `a320d1bd` on
 `dev-publish-executor-prior`, where tests also ran both `main()` on those artefacts; since 9fb1b137 (signals v2, sample v6,
 no A320 stand-in) neither the artefact nor the spec opens, so the next publication needs the next generation — since
-2026-09-24 an `instruction-v3` artefact, Training v7 sets (R11), an executor spec (`ts-executor-spec-v4`) and replay
+2026-09-24 an `instruction-v3` artefact, Training v7 sets (R11), an executor spec (then `ts-executor-spec-v4`, now `-v5`) and replay
 (`ts-executor-replay-v3`) measured by this code, a prior trained on the new sentences; and the frontend's
 `TRAINING_SPEC_SHA256` moved to the v3 spec's sha, or every v7 set is refused.
 

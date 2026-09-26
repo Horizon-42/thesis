@@ -11,9 +11,10 @@ metrics, anchor grid, command hooks (`defaults.md`), `L` layout (`layout.md`), `
 That text was moved there verbatim on 2026-09-16 (this file had reached 118 KB),
 and the 09-14…09-17 additions were placed there the same way on 09-18. The evidence
 behind each line — measurements, campaign results, the causes already ruled out — lives in
-`docs/ENGINEERING_NOTES.md`; status and next steps in `docs/OPEN_ITEMS.md`; mechanism and result
-tables in the package `README.md`; history in the repo's `docs/CHANGELOG.md` (2026-07-19,
-07-20 ×2; the move itself: 2026-09-16).
+`docs/ENGINEERING_NOTES.md` for the one-tier paths up to 2026-09-10, and in the design and readout
+documents the line names after that; **the two-tier model's status is `docs/2026-09-24_two_tier_stage_notes.zh.md`**;
+mechanism and result tables of the one-tier paths in the package `README.md`; history in the repo's
+`docs/CHANGELOG.md` (2026-07-19, 07-20 ×2; the move itself: 2026-09-16).
 Read the notes before designing an experiment or touching the loss, rollout or output layer.
 
 **Maintenance: a new fact goes into its `docs/reference/` file under a new ID, and this index
@@ -151,6 +152,10 @@ of the package, not a migration in progress.
   signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
   from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
   `envelope.heading_words_inside`, since `instruction-v3`) (C30).
+- **An executor spec is bound to the executor's source** (`executor_source_sha256` over `autopilot/` and every repository
+  module it imports directly — `config`, `data.dataset`, `outputs.envelope`, …), the vocabulary and the labeller: a byte
+  changed in a hashed file, a comment included, makes the current code refuse every stored spec (C33). **A prior belongs to
+  one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
 - **The two-tier line splits BY OPERATING DAY** (2026-09-24): a flight's day = its landing day (UTC − 9 h); the
   90-day deal (14 test / 14 val / 9 select / 53 train) is COMMITTED (`data/day_split_20260924.json`) and a harvest
   with other days is refused; test days are sealed — never opened, labelled, counted as context or put in a scene;
@@ -292,7 +297,9 @@ of the package, not a migration in progress.
   layer's language — vocabulary, signals, envelopes, labeller, artefact; torch-free, below every
   model, consumed by the runners and the executor (L30). **`autopilot/`** (2026-09-24): the executor —
   flies the words through the control path's point-mass dynamics one 1 s cycle at a time (that backend
-  runs no hooks), exact inverse, limits in order; imports no model, training or path package (L31).
+  runs no hooks), exact inverse, limits in order; imports no model, training or path package (L31). **`prior/`**
+  (2026-09-24): the prior — data, scenes, model, training, the speaker, the glidepath edge; reads only the instruction
+  language, the day split and `data.runway_context`, never the executor; only the runners join the two (L32).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;
@@ -411,12 +418,13 @@ law run in-process (readouts §12).
 
 | doing this | read first |
 |---|---|
-| designing an experiment / changing loss, rollout, output layer | `docs/ENGINEERING_NOTES.md` |
-| picking up work, checking what a campaign settled | `docs/OPEN_ITEMS.md` |
-| putting the procedure constraint into TRAINING as a hard constraint (either path), or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` (survey with formulas + H0–H6 plan; papers in repo `docs/literature/procedure_hard_constraints/`) |
+| picking up the two-tier model (the current line) | `docs/2026-09-24_two_tier_stage_notes.zh.md` (status, artefacts, decisions, next step), then W2 |
+| designing a one-tier experiment / changing loss, rollout, output layer | `docs/ENGINEERING_NOTES.md` (evidence up to 2026-09-10) |
+| checking what a one-tier campaign settled | `docs/OPEN_ITEMS.md` (up to 2026-09-18) and the defaults table above |
+| putting the procedure constraint into TRAINING as a hard constraint, or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` §3 — a literature survey with formulas; its H0–H6 plan was never built (papers in repo `docs/literature/procedure_hard_constraints/`). The two-tier model's procedure constraint is a decode mask: post-training design §3 |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
 | predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/2026-09-18_two_tier_plan_v3.zh.md`** — the OVERVIEW (intent, outline, the metric and readout protocol §3, the framework §4, the 2026-09-20 audit §10) and its stage A document **`…_v3_A.zh.md`** (the no-token executor's (L, Δ) grid, run). **The second layer now**: **`docs/2026-09-23_two_tier_framework.zh.md`** (layers, packages, artefact, stage gates), **`docs/2026-09-23_instruction_vocabulary_design.zh.md`** (the words, envelopes, labelling rules, values) and **`docs/2026-09-23_instruction_labels_readout.zh.md`** (the labeller's readout on the five-airport development set). The intent-CODE version (`2026-09-18_manoeuvre_token_plan.zh.md` + its readouts `…_results.zh.md`), the two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12; the code readouts §9–§11, read through v3 §10 item 1): W2 |
+| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | the stage notes, then **`docs/2026-09-23_two_tier_framework.zh.md`** (layers, packages, artefacts, gates), **`docs/2026-09-23_instruction_vocabulary_design.zh.md`** (the words, envelopes, labeller, values), **`docs/executor_design.zh.md`**, **`docs/2026-09-24_prior_design.zh.md`**, **`docs/2026-09-25_post_training_design.zh.md`**; readouts `docs/2026-09-24_prior_readouts.zh.md`. Plans v2 / v3, the intent-code plan and the 09-16 feasibility doc are SUPERSEDED — only their measurements are citable: W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

@@ -11,6 +11,12 @@ anything below — several entries exist specifically to stop a cause being re-t
 Result reports and design docs live beside this file in `docs/`; mechanism and result tables in
 the package `README.md`; history in the repo's `docs/CHANGELOG.md`.
 
+**Coverage: the one-tier prediction paths (`state`, `control`) up to 2026-09-10.** Later evidence — the latent,
+quantile, anytime and ETA lines after 09-10, the control contracts (D25–D27), the day split, the aircraft filter, and
+the whole two-tier model — lives in the design and readout documents the `docs/reference/` entries name; the two-tier
+model's status is `docs/2026-09-24_two_tier_stage_notes.zh.md`. Module paths below are as of the entry's date; the
+package was regrouped by plane on 2026-09-10 (`docs/reference/layout.md` L2).
+
 ---
 
 ## Config & constants (`config.py` is the single source)
@@ -48,7 +54,7 @@ Everything below is serialised into every checkpoint.
   it removes the first-step translation (KRDU straight-in lateral miss +204 → +21 m, FDE
   643 → 492 m) but gives up the absolute output's implicit "end at the origin" prior —
   KRDU vectored FDE +350 m on both seeds, endpoint lateral p95 ×1.4 — so it is NOT the
-  default. The two parametrizations are two priors; the next candidate must keep both.
+  default, and since then VETOED: stored configs load, new runs cannot select it (D2). The two parametrizations are two priors; the next candidate must keep both.
 - **`state_position_reference="corridor-bounded"` (state-v1 + the final-approach corridor by
   construction, measured 2026-09-04/05, ADOPTED as a candidate default —
   `docs/2026-09-05_final_constraint_results.zh.md`).** `StateOutputLayer` decodes with the
@@ -427,7 +433,7 @@ meaning and codebase pointers: `docs/2026-08-24_ksjc_result_labels_explained.md`
   `dataset.reference_control_supervision` on the training-only `_dynamics_arrays` path;
   **`dynamics_arrays()` itself must stay free of it** because forecast/predict call it and there
   is no future to invert there. Each channel is divided by half its box width
-  (`control.envelope.CONTROL_HALF_WIDTH`), which on KRDU splits the term 57 / 41 / 2 % across
+  (`outputs/envelope.py` `CONTROL_HALF_WIDTH`), which on KRDU splits the term 57 / 41 / 2 % across
   thrust / bank / load — on KSJC it is 82 / 18 / 1, one reason KRDU is the better testbed.
   Calibration convention: at the converged KRDU baseline (`state` = 0.0417, unweighted term
   0.0308) **w = 1.36 is 1× the position term**.
@@ -438,6 +444,7 @@ meaning and codebase pointers: `docs/2026-08-24_ksjc_result_labels_explained.md`
 - **`random_train_anchor=True` + the imitation term is a performance cliff.**
   `FixedAnchorTrajectoryWindows` caches `_dynamics_arrays` once, so the per-flight inverse is paid
   at construction; `RandomAnchorTrajectoryWindows` does not override it, so the inverse would be
-  recomputed per sample per epoch. No current recipe uses random anchors, so this is a note, not a
-  guard.
+  recomputed per sample per epoch. No recipe used random anchors when this was written, so it is a note,
+  not a guard (the random-anchor arms A0 / A2b ran on 2026-09-07/08 without the imitation term; the dynamics
+  arrays now live in `outputs/dynamics/context.py` and `outputs/control/supervision.py`).
 

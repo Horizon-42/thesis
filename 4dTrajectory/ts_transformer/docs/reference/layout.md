@@ -30,11 +30,16 @@ moves — every module keeps its name and content, only its directory changed):
 | `data/` | the data plane: `dataset`, `splits`, `data_provenance`, `channels`, `coordinate_frames`, `time_grids`, `anchor_grid` / `anchor_strata`, `lateral_eligibility`, `reference_velocity`, `target_conditioning` / `intent_conditioning`, `synthetic`, `development_cohorts`, `approach_difficulty`, `fixed_dt_supervision`, `batch_contract` |
 | `geometry/` | final-approach geometry and the metrics read off a trajectory: `final_approach_geometry`, `arc_length_geometry`, `geometric_metrics`, `metrics`, `flyability`, `physical_criteria`, `terminal_state_loss` |
 | `backbone/` | `adapters` (the one interface over the two vendored networks, formerly `models.py`) and `vendor/` |
-| `outputs/` | one package per prediction path behind one strategy (§4.2): `state/`, `closure/`, `control/`, `plan/`; `base`, the lazy registry, `duration_heads` |
+| `outputs/` | one package per prediction path behind one strategy (§4.2): `state/`, `control/`; the rule guidance `guidance/` (L8); what every rollout shares: `dynamics/`, `constraints/`, `envelope`, `conditioning`; `base`, the lazy registry, `duration_heads` (`closure/` and `plan/` archived 2026-09-18, L19) |
 | `training/` | `train`, `validation`, `fixed_anchor_validation`, `objective`, `batching`, `cross_validation`, `training_performance`, `experiment_index` |
 | `inference/` | `forecast`, `calibration`, `export`, `evaluation_protocol`, `intent_explainability`, `build_multiflight_capacity_report` |
 | `cli/` | one module per subcommand, `common`, and `benchmark_batch` (formerly `batch_benchmark.py`) |
 | `experiments/` | the runners, behind `run_ts.py <name>` |
+| `instructions/` | the two-tier model's language: vocabulary, signals, envelopes, labeller, artefact (L30) |
+| `autopilot/` | the executor that flies the words (L31) |
+| `prior/` | the prior that says the words (L32) |
+| `manoeuvre/` | the no-token closed loop of two-tier v3 stage A (L29) |
+| `approach_clustering/` | the approach-cohort tooling behind `approach-cohorts` |
 | top level | `config`, `run_naming`, `io_utils`, `repo_layout`, `__main__` — what every plane reads |
 
 A group's `__init__.py` re-exports nothing: a group is a directory, not a namespace, and
@@ -119,6 +124,8 @@ rollout needs is not one path's** (2026-09-10, the plan-and-guidance path's firs
 
 ### L7 · `outputs/plan/` — skeleton and extractors
 
+**ARCHIVED 2026-09-18** — the plan head, its extractors and oracle runners are under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
+
 **The
 plan-and-guidance path is `outputs/plan/`** (2026-09-10,
 `docs/2026-09-09_plan_and_guidance_design.md`, built in its §9 order): `skeleton` (the coded
@@ -132,6 +139,8 @@ band); `run_ts.py plan_extractors` measures them over a checkpoint's cohort with
 baseline the design's veto reads (the KRDU numbers are its §12.1).
 
 ### L8 · `outputs/plan/guidance/` — the route and its six measured rules
+
+**Live, moved**: lifted to `outputs/guidance/` on 2026-09-18 (`route`, `controller`, `timing`, `skeleton`); read `outputs/plan/guidance/` and `outputs/plan/` below as `outputs/guidance/`. `fly_plans` went to the archive with the plan head.
 
 **The guidance layer is
 `outputs/plan/guidance/`** (step 2): `route` lays a plan's route in the chart — the held
@@ -159,6 +168,8 @@ length CLOSER than the shortest path and never longer than it by over `HOLD_TOLE
 
 ### L9 · `controller.PlanGuidance` — the one plan hook; the hold is at most ~3 s
 
+**Live, moved**: lifted to `outputs/guidance/` on 2026-09-18 (`route`, `controller`, `timing`, `skeleton`); read `outputs/plan/guidance/` and `outputs/plan/` below as `outputs/guidance/`. `fly_plans` went to the archive with the plan head.
+
 `controller.PlanGuidance` is the one `CommandHook` that flies it on the lagged rollout: an
 L1 look-ahead tracker with the route's curvature fed forward (bank), the height profile to
 the capture height and the glidepath (load factor), the corridor barrier composed on the
@@ -175,6 +186,8 @@ shorter — `planHoldS` on the record says which): at 7 s the tracker oscillated
 the final.
 
 ### L10 · fixed-K fly-by waypoints, each with the truth's speed at its turn
+
+**ARCHIVED 2026-09-18** — the plan head, its extractors and oracle runners are under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
 
 **The fixed-K fly-by waypoints are the route representation that reproduces a
 vectored path** (step 2b, 2026-09-11, §12.3): `PlanLabels.waypoints` — up to `MAX_WAYPOINTS`
@@ -198,6 +211,8 @@ radius; a turn's end point is ambiguous about the leg heading.
 
 ### L11 · `run_ts.py plan_oracle` — every flight's own plan, graded twice
 
+**ARCHIVED 2026-09-18** — the plan head, its extractors and oracle runners are under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
+
 `run_ts.py plan_oracle`
 flies every flight's OWN plan (the
 design's step 2 ceiling; §12.2) and grades it twice, as a prediction and as a reference —
@@ -219,6 +234,8 @@ time-free reading of one forecast against its truth, `experiments/support.foreca
 
 ### L13 · the plan head: strategy, labels, model, the rolled flight
 
+**ARCHIVED 2026-09-18** — the plan head, its extractors and oracle runners are under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
+
 The
 strategy (`outputs/plan/strategy.py`), the `PlanOutput` view (two loss weights) and
 `PREDICTION_PLAN` ARE the plan head (step 3, 2026-09-11): `labels.py` turns a label set into
@@ -234,6 +251,8 @@ statistics and, on a plan checkpoint, the single-step reading (HEAD columns).
 
 ### L14 · the oracle's vertical verdict
 
+**ARCHIVED 2026-09-18** — the plan head, its extractors and oracle runners are under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
+
 **The
 oracle's vertical verdict binds the glidepath window inside the FAF only and the coded
 floor before it, and grades the truth's own rows beside every flight** (the truth fails
@@ -241,6 +260,8 @@ the pre-FAF floor on 29 % of smoke flights — vectored aircraft are assigned al
 below the coded IF floor — so no share there is a gate).
 
 ### L15 · the closure and state path packages
+
+**The closure half is ARCHIVED 2026-09-18** (`archive/closure_2026_09/`); the state path below is live.
 
 The closure
 path is `outputs/closure/{strategy,model,geometry,profile,forecast}`; the state path is
@@ -291,6 +312,19 @@ in to keep them self-contained) and are OFF the import path:
   its L4-gate readout (`run_ts_scene_explainability.py`) and its test. The L4 gate failed and
   the encoder was never built; `inference/intent_explainability.py` stays live for the Phase 0
   diagnostics.
+- `archive/control_arms_runner_2026_08/` — `run_ts_control_arms.py`, the first arm-campaign runner (superseded by
+  `experiments/frame_ablation.py`).
+- `archive/flight_model_paired_2026_09/` — the one-shot paired comparison of the two flight models (D4's record).
+- `archive/closure_2026_09/` — the `closure` prediction path (P3, L15).
+- `archive/plan_head_2026_09/` — the `plan` head, its extractors, oracle runners and the runway-intent R2/R3 runners
+  (P4, L7, L10–L14).
+- `archive/two_tier_v2_2026_09/` — the `segment-plan` path, the short-horizon readout and the tracker lockstep (P9, T21).
+- `archive/manoeuvre_codes_2026_09/` — the intent-code second layer (L29, C28, R7, R9).
+- `archive/instruction_vocabulary_2026_09/` — the event-sequence / box vocabulary second layer, with its design documents.
+- `archive/heading_reading_2026_09/` — the heading-reading comparison (R14; vocabulary design §10.1).
+- `archive/executor_vocabulary_only_2026_09/` — the executor parameters that came from data or flown checks (L31).
+- `archive/closed_loop_sft_2026_09/` — closed-loop supervised fine-tuning of the prior (CAT-K; not adopted), with its
+  design sections.
 
 `tests/test_architecture.py` asserts nothing live imports the archive — package modules,
 `tests/`, the runners and `run_ts.py` alike — and that no `__init__.py` makes it importable.
@@ -340,6 +374,8 @@ them with the state path, and filing them under the control path would claim an 
 that does not exist.
 
 ### L28 · direction BETWEEN paths (the control path may read the plan path)
+
+**ARCHIVED 2026-09-18** with the plan head and `plan_token.py` (`archive/plan_head_2026_09/`, `archive/manoeuvre_codes_2026_09/`). **Live now**: the guidance layer never imports the control path (`test_the_guidance_layer_never_imports_the_control_path`). The text below describes the archived code and is kept as its record.
 
 **Direction between paths**: the control path may read the plan path (two-tier T1's plan token, `outputs/control/plan_token.py`, fuses the plan head's label), never the reverse (`test_the_plan_path_never_imports_the_control_path`).
 
@@ -435,10 +471,12 @@ and the display share), the piecewise fit, the labeller (`labeller/`: `records`,
 the readout and the eye-check figures. Torch-free; inside the package it imports only
 `data.channels`, `data.coordinate_frames` and `io_utils` (outside it: `flight_scenarios`,
 `aerodynamic_model.common`, `geokit`, numpy)
-(`tests/test_architecture.py::test_the_instructions_package_sits_below_the_models`), and until the
-prior exists only the runners and the executor (`autopilot/`, L31) consume it
-(`test_only_the_runners_and_the_executor_reach_the_instructions_package`). The planned groups above
-it — `prior/`, `closed_loop/`, `constraints/` — are in the framework document §2.
+(`tests/test_architecture.py::test_the_instructions_package_sits_below_the_models`), and only the runners, the
+executor (`autopilot/`, L31) and the prior (`prior/`, L32) consume it
+(`test_only_the_runners_the_executor_and_the_prior_reach_the_instructions_package`). `grammar` asks the labeller's
+compatibility rules of one step at a time — the prior's decode mask; `display` and `training_files` serve the
+frontend (below). No `closed_loop/` or `constraints/` group exists: the closed loop is the runners joining
+`prior.generate` and `autopilot.executor`, the glidepath lower edge is `prior/procedure.py` (framework document §2).
 
 **Note (2026-09-25):** `instructions/training_files.py` holds the frontend's Training files — the index, the sets,
 the overlays manifest, their schemas (mirrored by `aeroviz-4d/src/data/training*.ts`) and the checks every writer and
@@ -455,7 +493,7 @@ let escape its handler.
 2026-09-24 (`docs/executor_design.zh.md`). Stage 3 of the two-tier framework: `frame`
 (the dynamics' geodetic rows read the way the words read a flight — airport frame, compass track,
 geometric MSL height; a positive bank turns LEFT), `sentence` (the word in force per column per
-control cycle, each column's delay after its step), `flights` (a labelled flight rebuilt from the
+control cycle; a word takes effect when it is said, no delay), `flights` (a labelled flight rebuilt from the
 recorded manifest with `build_series`, refused unless it reproduces the stored signals row for row;
 its physical context is `outputs.dynamics.context.rollout_context` at row 0), `plant` (one cycle of
 the control path's point-mass scaled-chart dynamics through `rollout_control_endpoints` — that
@@ -465,10 +503,9 @@ backend runs no command hooks, so the executor steps it cycle by cycle, the same
 constraints on them), `executor` (the cycle loop, `fly`), `judge` (the three-layer verdict, with the
 labeller's own checks), `replay` (who is flown — own dynamics or a stand-in's, the performance index's
 substitute; a flight without aircraft dynamics is counted, never flown, C31 — drawing, flying and reading
-a batch), `derive` (method A: τ_ψ and p from the vocabulary), `measure` (the data values the vocabulary does not
-settle yet — the speed changes' pace and the landing aim — torch-free for the runner's workers) and `spec`
-(`ts-executor-spec-v4` since 2026-09-24: the parameters written once with their sha and the executor's source hash,
-`executor_source_files`; a replay refuses a spec measured by other code, `replay.open_executor`). Method B (`observe`,
+a batch), `derive` (method A: every parameter from the vocabulary), `runway_data` (each candidate runway's published TCH, the
+one runway datum beyond the vocabulary) and `spec` (`ts-executor-spec-v5`: the parameters written once with their sha
+and the executor's source hash, `executor_source_files`; C33). Method B (`observe`,
 the word delays) and method A's flown checks are archived (`archive/executor_vocabulary_only_2026_09/`: the executor
 takes no information beyond the vocabulary, the user's rule of 2026-09-24). It may import the data plane
 (`data.dataset`), the shared dynamics and geometry, and `instructions/`; never
@@ -476,3 +513,17 @@ takes no information beyond the vocabulary, the user's rule of 2026-09-24). It m
 `outputs.guidance`, `outputs.state`
 (`tests/test_architecture.py::test_the_executor_flies_through_the_shared_dynamics_only`); only the
 runners consume it (`test_only_the_runners_reach_the_executor_for_now`).
+
+### L32 · `prior/`: the prior, saying the words
+
+2026-09-24 (`docs/2026-09-24_prior_design.zh.md`, `docs/2026-09-25_post_training_design.zh.md`). Stage 5 of the two-tier
+framework: `data` (the sentence artefact as training data, one flight at a time, only what is known before each step),
+`scene` (scenes and the airport's landing context, sealed test days left out), `model` (causal attention over steps,
+attention between the aircraft of one step, the six column heads in order, the runway column a pointer over the
+candidates), `train` (teacher forcing; `RewardTuner` for the landing reward), `generate` (the `Speaker`: column order,
+`instructions.grammar` as the decode mask), `readout`, `landing_reward`, `procedure` (the glidepath lower edge, torch-free)
+and `augment` (augmented starts, post-training stage 2, not adopted, kept). Inside the package it reads only the
+instruction language, the day split and `data.runway_context` — never the executor, a prediction-path model, the training
+plane or a runner (`tests/test_architecture.py::test_the_prior_reads_only_the_instruction_language`); only the runners
+consume it (`test_only_the_runners_reach_the_prior_for_now`), and they are what joins it to the executor. Its checkpoint
+contract is C34.

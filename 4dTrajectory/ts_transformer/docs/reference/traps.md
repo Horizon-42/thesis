@@ -42,6 +42,8 @@ rebased — same rule, new IDs.
 
 ### T21 · a tracker scored against the rule guidance must fly the guidance's budget
 
+**ARCHIVED 2026-09-18** with `tracker_lockstep` (`archive/two_tier_v2_2026_09/`). The text below describes the archived code and is kept as its record.
+
 - **A tracker scored against the rule guidance must be flown to the guidance's budget** (`tracker_lockstep`,
   two-tier §10.7): the guidance's rollout runs to `plan_oracle.closing_horizon_s(T)` = `T + max(30 s, 0.1·T)`
   and "established" is a crossing on the final inside it; a `cta=given` rollout ends exactly at its CTA, so
@@ -72,8 +74,8 @@ rebased — same rule, new IDs.
 
 - **Every ts number assumes the LANDED runway is known** — the threshold anchor (and the plan
   path's CIFP skeleton) is the harvest's final-approach runway, i.e. future information; no
-  trajectory path predicts the runway yet (the runway head is standalone; R2 flies its pick through
-  the plan experts in `experiments/runway_intent_r2.py`: +55-79 m of mean FDE against the known
+  prediction path predicts the runway (the two-tier prior's runway column does, for its own words) (the runway head is standalone; R2 flew its pick through
+  the plan experts in `experiments/runway_intent_r2.py`, now `archive/plan_head_2026_09/runway_intent/`: +55-79 m of mean FDE against the known
   runway, plan §16). Quote ADE/FDE as runway-given. What the label is worth and why the backbone cannot learn it implicitly: the
   2026-09-03 frame ablation and runway-hypothesis docs; the plan to predict it (runway head +
   per-runway experts + multi-runway scheduling): `docs/2026-09-13_runway_intent_plan.zh.md`.
@@ -186,4 +188,4 @@ rebased — same rule, new IDs.
 
 | doing this | read first |
 |---|---|
-| building or reading the two-tier model (L1 short-horizon control layer, L2 segment-token plan layer, L3 graph layer) | **`docs/2026-09-17_two_tier_plan_v2.zh.md`** — the current plan (the requirement verbatim, the eight decisions, gates L1 / L2 / E2E, the picks made without the user and why). The 09-16 feasibility doc is SUPERSEDED: its design (a whole-approach tracker under the instruction plan, T1a) is abandoned; only its measurements are citable — §2 (three evaluation protocols that must never be mixed: a 60 s ADE is low for EVERY model), §3 (error against lead time), §10.2 (the harvest holds no 10 min history), §10.4 (T0(b): open-loop chaining loses), §10.6 (T0(c): 238 s of history carries nothing), §11 (the contract refactor). Readouts: `run_ts.py short_horizon_readout`, `tracker_lockstep`, `two_tier_gates`, `lead_time_error`, `chain_sensitivity` |
+| building or reading the two-tier model (a prior that says controller-like words, an executor that flies them) | **`docs/2026-09-24_two_tier_stage_notes.zh.md`** — where every stage stands, the artefacts, the user's decisions, the next step. The design: `docs/2026-09-23_two_tier_framework.zh.md` (layers, packages, gates), `docs/2026-09-23_instruction_vocabulary_design.zh.md` (the words, envelopes, labeller, values), `docs/executor_design.zh.md`, `docs/2026-09-24_prior_design.zh.md`, `docs/2026-09-25_post_training_design.zh.md`; readouts in `docs/2026-09-24_prior_readouts.zh.md`. SUPERSEDED, only their measurements citable: the 09-16 feasibility doc, plan v2 (`2026-09-17_two_tier_plan_v2.zh.md` §10–§12), the intent-code plan and readouts (`2026-09-18_manoeuvre_token_*.zh.md`, readouts §9–§11 read through v3 §10 item 1), plan v3 and its stage A (`2026-09-18_two_tier_plan_v3*.zh.md`, `…_v3_results.zh.md`; stage A's no-token closed loop is still live code, R8), the instruction-v2 labels readout (`2026-09-23_instruction_labels_readout.zh.md`) |
