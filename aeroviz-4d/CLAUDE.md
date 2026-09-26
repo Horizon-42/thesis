@@ -168,12 +168,17 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **The Training docks end ABOVE the sentence bar**: the bar publishes its measured height as `--training-bar-height` on
   `.workbench`, `.workbench:has(> .training-sentence-bar)` pads the overlay container by it; the flight list takes the leftover
   dock height (min ~5 two-line rows), the dock scrolls past that (AV30).
-- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v1`, written by ts
+- **Training reads the models' OWN sentences** (`prior-generation` overlays, `aeroviz-training-generation-v2`, written by ts
   `prior_generation_training_export`): `trainingSource` (null = truth, or `{overlayId, sample}`) picks the sentence the bar,
   the panel and 3D read; the truth is ALWAYS drawn in 3D; a model's bands are FLAT like the truth's (hatching cluttered the
   bar — the user, 2026-09-26): the frame says whose (border, a strip down the rows, tab, chip in its colour), the truth's issues
-  ticked under each row, its flight's end time written on the axis in its colour; colour by role — base `#d946ef`,
-  post-trained `#a3e635` (`trainingModelColour`) (AV31).
+  ticked under each row, its flight's end time written on the axis in its colour (AV31).
+- **A model is NAMED, never labelled: base / landing / augmented + round** (`TRAINING_MODEL_NAMES`, a mirror of the exporter's
+  `MODEL_NAMES`; the payload's `model` block, refused unless base ⇔ no round ⇔ no `fineTuning`); `trainingModelGroups` is the ONE
+  grouping — by name in training order, then run, a run's rounds in order; a run named when its stage has two, a round exported
+  twice named by overlay id — and every view prints its `title` / `memberLabel`, never a name of its own; the bar: a tab per
+  model, the read model's rounds as `r1 r2 …` chips (a round keeps the sample number); colour by NAME (`TRAINING_MODEL_COLOR`:
+  base `#d946ef`, landing `#a3e635`, augmented `#b82e7a` — 3.3:1, a mark colour, not for running text) (AV32).
 
 ## Comparison CZML colour contract
 

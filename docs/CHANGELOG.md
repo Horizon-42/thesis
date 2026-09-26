@@ -1,5 +1,19 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — Training：多轮后训练之间切换，模型按名字认（branch `dev-training-rounds`）
+
+- 用户：Training 里只有 base 与"后训练"两种切换，多轮后训练的不同模型分不开。原因：导出器的载荷只带一个自由文字 `--label`
+  和"有没有 `fineTuning`"，所以每一轮、每个阶段都是同一个黄绿的 "post-trained"；第二阶段停掉重跑过，两次都有 r1。
+- 导出器 `prior_generation_training_export`：格式 `aeroviz-training-generation-v2`；去掉 `--label`，名字从检查点配置读——base，
+  或训练它的方法（`fine_tuning.schema` 去掉版本号）对应的 landing / augmented，加轮次、放各轮的 run、起步模型（从它自己的配置读）；
+  默认 id `generation_<名字>[_rNN]_<sha8>`。
+- 前端：读取器按名字读 `model` 块；`trainingModelGroups` 是唯一的分组；句子条每个模型一个标签页、读的模型的各轮 "r1 r2 …"（换轮
+  保留样本号，标签页回到上次读的那轮）；左栏按模型分组、每轮一行；结果表同序同名；颜色按名字，augmented 新增树莓红 `#b82e7a`。
+- 测试：Vitest 843 条；ts 相关 33 条。opus 审查 + 复核，必须改 2 条、应改 4 条全部改掉。KRDU 上 6 份真实导出（工作树镜像）
+  `check-publication` 0 错误。
+- **未做、等用户**：合并；已发布的两份 v1 模型句子合并后按名字拒读，需重新导出（执行器现在只接受 v10）并删掉旧条目；程序屏蔽要不要
+  趁这次一起补（`docs/code-health-followups.md`）。设计：`aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §2.7、§4.8，AV32。
+
 ### 2026-09-26 — 先验的程序屏蔽跟着模型走：词表规则与程序屏蔽分开
 
 - 用户：程序屏蔽词没有写在模型的配置里、没和模型绑定，每次都得手动保证传对；词表的语法规则不要和程序屏蔽混在一起（词表基本不变，程序

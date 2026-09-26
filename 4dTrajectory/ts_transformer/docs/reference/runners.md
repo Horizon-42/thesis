@@ -289,10 +289,11 @@ and limits, and the replay's gate table for the airport and all airports. **Run 
 repository — outside from a worktree (as when the spec was measured), inside from the main checkout, where the spec is
 refused (`docs/code-health-followups.md`, 2026-09-24). ~7 s per airport of 40 flights on CPU.
 
-`prior_generation_training_export --prior <prior dir> --label <its name> --instructions <artefact> --executor <spec dir>
-[--readout <its val free generation>] --airports-root … --set <a read-back set> --airport ICAO [--airport …] [--samples 4]
-[--temperature 1.0] [--seed 1337] [--overlay-id generation_<parent>_<name>]` (2026-09-26, schema
-`aeroviz-training-generation-v1`, kind `prior-generation`; the frontend side AV31): the model's OWN sentences over the set's
+`prior_generation_training_export --prior <prior dir, or one round of a post-training run> --instructions <artefact>
+--executor <spec dir> [--readout <its val free generation>] --airports-root … --set <a read-back set> --airport ICAO
+[--airport …] [--samples 4] [--temperature 1.0] [--seed 1337] [--overlay-id generation_<name>[_r<NN>]_<sha256, 8 digits>]`
+(2026-09-26, schema `aeroviz-training-generation-v2` since the models were named the same day — v1 carried a free `--label`;
+kind `prior-generation`; the frontend side AV31, AV32): the model's OWN sentences over the set's
 flights — `prior_free_generation.speak_and_fly` on the flights its val readout flies (own dynamics; the rest listed with their
 group), `--samples` each, one CPU generator seeded once and drawn in the order the airports are named (so a re-run is
 identical); per sample the words as events on the flight's own rows (from `N_LOOK`), `flight_rows`' outcome and bookkeeping
@@ -303,10 +304,20 @@ which follows `endS` for a crossing without the capture and the stall cut-off (`
 as the formal readout counts them, shaded by the frontend. `--readout` copies the model's formal val free generation landed
 shares (all / straight-in / vectored, null where the draw had none) at the payload's airport (`here`) and pooled (`all`),
 refused unless it is this prior (path from `4dTrajectory/outputs/` on), this executor spec (content sha), artefact, val,
-`N_LOOK`, samples and temperature, and its draw's per-airport count is a number or `EVERY_FLIGHT` (the draw's phrase, pinned
-against `replay.py`). The checkpoint: `prior_training_export.open_trained_prior` (shared with `prior_training_export`); a
-post-trained round's `fine_tuning` block is carried as `model.fineTuning` (the frontend colours by it). The executor spec must be one this code opens
-(since the 2026-09-26 rebuild: `v9_20260926`; the code refuses `v7` and `v8`, C33). ~2 min a
+`N_LOOK`, samples, temperature and NO procedure masks, and its draw's per-airport count is a number or `EVERY_FLIGHT` (the
+draw's phrase, pinned against `replay.py`). **The prior speaks under the grammar's masks only**, never the procedure's
+(the pre-join floor, no climb back, the glidepath's lower edge) that stage 2 (augmented) was trained and read out under
+(`docs/code-health-followups.md`, 2026-09-26): a readout drawn under them is refused and the frontend says so. The
+checkpoint: `prior_training_export.open_trained_prior` (shared with `prior_training_export`). **The model is named, not
+labelled** (`MODEL_NAMES` = base / landing / augmented, the post-training design's table; mirrored by the frontend's
+`TRAINING_MODEL_NAMES`): `model_identity` reads the config — no `fine_tuning` is `base`, else the method that post-trained it
+(`fine_tuning.schema` less its `-v<N>`: `METHOD_MODELS`, from `LANDING_REWARD_SCHEMA` / `AUGMENTED_REWARD_SCHEMA`; every version
+of a method is the same model; an unnamed method is refused — a new stage's name is agreed with the user first) and its
+round; `model_block` writes `{name, round, run (the directory holding the rounds; base: its own), checkpointSha256, variant,
+trainedAt, fineTuning: {schema, from, fromName, fromRound} | null}`, the start model named from its own `config.json`, read in
+the round's own outputs tree (`in_tree_of`: the rounds ran from worktrees). The frontend groups the overlays by name and run
+and switches between the rounds (AV32). The executor spec must be one this code opens
+(2026-09-26 evening: `v10_20260926`; the code refuses every earlier one, C33). ~2 min a
 model for five airports of 40 flights on CPU, 1.2–1.9 MB an airport; a re-run is identical. Tests:
 `tests/test_prior_generation_training_export.py` (the pieces, and `main` end to end on a synthetic artefact with stand-in
 series).

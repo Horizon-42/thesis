@@ -14,12 +14,12 @@
 | 项 | 内容 |
 |---|---|
 | 词表 | 读法 `instruction-v3`（航向词按步读，词表设计 §10.1）。前端钉住的规格 sha `TRAINING_SPEC_SHA256` 是 **`145d6911e75b`**（2026-09-25：按运行日划分后在新训练集上重新测量，产物 `4dTrajectory/outputs/POOLED/instruction_language/v4_20260924/`）——现在的执行器代码只飞这份产物（执行器规格 `v6_20260924`）。按航班划分的 `v3_20260924`（规格 `0b4ea75be36d`）上导出的 `instruction_v3` 集合和画在它上面的 `executor_v5_20260924` 叠加层从此按规格 sha 拒读 |
-| 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v3`，模型自己说的句子 `aeroviz-training-generation-v1`（`prior_generation_training_export`，§2.7） |
+| 导出 | `python run_ts.py instruction_training_export`（`4dTrajectory/ts_transformer/experiments/instruction_training_export.py`）；包络全部来自 `instructions/display.py`。样本格式 `aeroviz-training-sample-v7`，执行器叠加层 `aeroviz-training-executor-v2`，先验叠加层 `aeroviz-training-prior-v3`，模型自己说的句子 `aeroviz-training-generation-v2`（`prior_generation_training_export`，§2.7；v2 起模型按名字认：base / landing / augmented 加轮次） |
 | 前端代码 | 数据：`src/data/trainingReader.ts`（三种文件共用的一个读取器：逐字段读，读不了就说出字段路径）、`trainingSample.ts`（集合与样本的契约）、`trainingOverlays.ts`（叠加层的契约）、`trainingAutopilot.ts`（实时执行器的契约、请求与三维回放的计算，§4.7）、`trainingText.ts`（各视图共用的措辞：结局、检查、越过入口、sha、时长）。视图：`src/components/Training{Panel,SentenceBar,ReadbackWindow,PriorWindow,Results,Legend,AutopilotCard,VocabularyNotes}.tsx`，读数窗口拆在 `src/components/training/`（`readbackModel.ts` 一次算好所有比例尺，四张图 `Readback{Plan,Heading,Altitude,Speed}.tsx`，画图小件 `chartKit.tsx`，两个浮动窗口共用的外壳 `TrainingWindow.tsx`，`ProblemBox.tsx`）。三维：`src/scene/trainingEntities.ts`（实体 id、坐标展开、几种线与点）、`src/hooks/useTrainingTrackLayer.ts`（观测航班；由什么也不渲染的叶子组件 `src/components/TrainingScene.tsx` 调用，游标变了只有它重渲染，§4.5）、`useTrainingExecutorLayers.ts`（回放与实时执行器）、`useTrainingGenerationLayers.ts`（模型自己说的句子，§4.8）。另有 `useTrainingOverlays.ts`、`useTrainingAutopilot.ts`、`useMeasuredWidth.ts`、`src/utils/trainingWordColors.ts`、`src/utils/checkPublication.ts` 与 `scripts/check_publication.ts`；共享状态在 `src/context/AppContext.tsx` |
-| 分支 | 左栏停在句子条上面、模型自己说的句子（§2.7、§4.8）：`dev-training-sentences`，2026-09-26 合并进 `dev-two-tier`（`e87bfcf3`）。模型的词也交给实时执行器飞、模型的带不再画斜线、模型结束处写时间（§4.7、§4.8）：`dev-model-autopilot`，2026-09-26 合并进 `dev-two-tier`（`46af94fd`），后端与前端已重启。航向词多飞的那个提前量画成淡色虚线的尾巴（§4.7）：`dev-heading-lead-tail`，2026-09-26 合并进 `dev-two-tier`（`02c14001`），后端与前端已重启 |
-| 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。**模型自己说的句子**（§2.7、§4.8）：base 模型（`prior/v3_step1_20260924/full_s1337`）和按落地奖励后训练的第 1 轮（`prior/v3_rl_20260925/grpo_s1337/round_01`）各一份，每架 4 个样本，执行器规格 `v7_20260925`；2026-09-26 经用户同意发布到 `public/data`（每个机场 `generation_v3_step1_20260924_full_s1337`、`generation_grpo_s1337_round_01`），`check-publication` 五个机场 0 错误。在这 40 × 5 架里按自己机型动力学能飞的 180 架 × 4 个样本上：base 模型落地 652/720（90.6 %），后训练 694/720（96.4 %）；两者正式 val 读数 90.2 % / 97.2 %。同时发布了先验第三版（base 模型）的教师强制预测 `prior_v3_step1_20260924_full_s1337` 和执行器 v6 的验证集回放 `executor_v6_20260924`（规格 v7 打开，每架重飞都与正式回放那一行相同，200 架飞 188 架全部落地）；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md` |
+| 分支 | 左栏停在句子条上面、模型自己说的句子（§2.7、§4.8）：`dev-training-sentences`，2026-09-26 合并进 `dev-two-tier`（`e87bfcf3`）。模型的词也交给实时执行器飞、模型的带不再画斜线、模型结束处写时间（§4.7、§4.8）：`dev-model-autopilot`，2026-09-26 合并进 `dev-two-tier`（`46af94fd`），后端与前端已重启。航向词多飞的那个提前量画成淡色虚线的尾巴（§4.7）：`dev-heading-lead-tail`，2026-09-26 合并进 `dev-two-tier`（`02c14001`），后端与前端已重启。多轮后训练之间切换、模型按名字认（§2.7、§4.8）：`dev-training-rounds`（工作树 `.claude/worktrees/training-rounds`），未合并，等用户合并 |
+| 发布 | 现行集合 **`instruction_v3_day_split`**（2026-09-25，五个机场各 40 架新验证集航班，直线进近 / 被引导各 20，从 `v4_20260924` 导出）。**模型自己说的句子**（§2.7、§4.8）：base 模型（`prior/v3_step1_20260924/full_s1337`）和按落地奖励后训练的第 1 轮（`prior/v3_rl_20260925/grpo_s1337/round_01`）各一份，每架 4 个样本，执行器规格 `v7_20260925`；2026-09-26 经用户同意发布到 `public/data`（每个机场 `generation_v3_step1_20260924_full_s1337`、`generation_grpo_s1337_round_01`），`check-publication` 五个机场 0 错误。在这 40 × 5 架里按自己机型动力学能飞的 180 架 × 4 个样本上：base 模型落地 652/720（90.6 %），后训练 694/720（96.4 %）；两者正式 val 读数 90.2 % / 97.2 %。同时发布了先验第三版（base 模型）的教师强制预测 `prior_v3_step1_20260924_full_s1337` 和执行器 v6 的验证集回放 `executor_v6_20260924`（规格 v7 打开，每架重飞都与正式回放那一行相同，200 架飞 188 架全部落地）；实时执行器（§4.7）不需要叠加层。更早的集合与叠加层按名字拒读，发布记录见仓库 `docs/CHANGELOG.md`。**`dev-training-rounds` 合并之后，这两份 v1 的模型句子按名字拒读**（格式升到 v2），要用新导出器重新导出、并把旧的两条从各机场 `overlays.json` 和盘上删掉——改动已发布的数据，等用户同意 |
 | 实时执行器 | 后端 `POST /autopilot/segment`（`aeroviz_backend/autopilot_segment/` 包）：在句子条上点一个词，执行器从观测飞机说这个词时的状态飞这个词的一段（到它的包络结束之处：同列下一个词说出的地方，航向词再往后一个提前量；到了句子末尾就飞到落地），只判这个词。执行器代码一行不改，用它的单步接口 `Executor` 一个控制周期一个周期地飞，到段尾就停；每次都重新飞，不读任何回放或叠加层（§4.7）。用哪份执行器规格由后端按"现在的执行器代码接受的那一份"自动找：现在是 `v7_20260925`。界面上并排给出模拟飞行时间与计算用时。2026-09-25 在五个机场 200 架航班上逐段试飞 3,032 段：无异常，1,904 段飞到段尾、1,128 段落地；唯一的拒绝是没有机型动力学的航班（252 段，正式回放同样不飞）；每段耗时中位数 0.39 s、最长 3.6 s。单步飞法与"飞满时限再截断"逐位相同（216 段，状态与结束周期一致）。同一页面的新请求取代它还在排队或正在飞的旧请求（409），连点几个色块只飞最后一个。整模块审查之后又在同样 200 架航班的全部 3,526 个航向词上试飞：3,230 段飞成（3,037 段在包络内飞到段尾、143 段在包络内落地、49 段不判、1 段出界），296 段机型没有动力学；"带被段尾截短"的拒绝一次也没有出现（§4.7）。**模型说的词也能飞**：把模型的句子从它开口的那一步重新飞一遍，就是导出的那个样本自己的飞行——2026-09-26 在 KRDU、KMSY 两个模型各 4 架航班 × 2 个样本上飞了 104 段（每个样本前 4 个航向词或许可、最后一个高度词），与导出的航迹逐点比，最大差 0.000 m（§4.7 "模型的词"） |
-| 测试 | 2026-09-26（模型的词交给实时执行器，分支 `dev-model-autopilot`）：前端 Vitest 98 个文件 834 条，`tsc` 与 `npm run typecheck:scripts` 无错；后端 `aeroviz_backend/tests` 171 条（`test_autopilot_segment.py` 64 条：`ModelSegmentTest` 14 条——句子的读法与按名字拒绝（开口一步钉在 `N_LOOK`）、步数上限等于 `rows_for`、从模型开口的那一步飞、最后一步的词飞到结局、判决读的词、判决用句子最后的跑道、时限与 `prior_free_generation.limits_s` 相同、判定落在词自己的那一步、下降角词的管子从它那一步起（另用标注器自己的 `tube_checks` 在"平飞五步再 3° 下降"上核对）、第二次许可不判、航向词从自己那一步读、航迹从词的那一步切出；`ModelFlightTest` 6 条——只飞自己机型动力学、时间词钟与时限、判决用的跑道、下降角词判决读的句子、结束的那一步起拒绝、门截断之后的词拒绝；`BackendTest` 一条走通模型请求（按时限读句子、交给飞行、答复写时间词钟）；`FreeGenerationTest`——`speak_and_fly` 自己的循环照稿说话，与后端的飞法在真实执行器上逐状态、逐周期的模式与限制都相同）。opus 审查两轮：第一轮 1 条必须改（下降角词的管子）、3 条应改、若干小处；第二轮没有必须改的，1 条应改（判决没读到的词）与几处小处；全部改掉；浏览器（5174 前端 + 8766 后端，都从工作树起）：KRDU CMP466 base 模型第 1 个样本的 heading 045°（步 91–150，在包络内，与样本 0.00 m / 62 点）、后训练第 1 个样本的 heading 230°（飞到落地，与样本 0.00 m / 61 点）。2026-09-26（左栏与模型自己说的句子，分支 `dev-training-sentences`）：前端 Vitest 98 个文件 822 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts 全套 1,434 条通过（新导出器 `test_prior_generation_training_export.py` 16 条，含在合成产物上端到端跑 `main`：集合顺序、自己动力学的航班各飞 3 个样本且各自从自己第 8 行的状态起飞、不飞的航班、清单、重跑逐字相同、不覆盖）。两轮 opus 审查（第一轮 8 条应改 + 11 条小处全部改掉，第二轮确认并补了一个没有航班可数时的崩溃与一个未钉住的镜像）。`check-publication --airports-root` 对工作树的镜像目录：五个机场各 4 个叠加层对照集合读过，0 错误。浏览器（5174）核对过：左栏停在句子条上面、标签页与样本、模型不飞的航班、结束之后涂暗（KMSY DAL8784 后训练第 2 个样本：325 s 越过入口没截获，模型一直说到 650 s）、三维模型航迹、图例 |
+| 测试 | 2026-09-26（模型的词交给实时执行器，分支 `dev-model-autopilot`）：前端 Vitest 98 个文件 834 条，`tsc` 与 `npm run typecheck:scripts` 无错；后端 `aeroviz_backend/tests` 171 条（`test_autopilot_segment.py` 64 条：`ModelSegmentTest` 14 条——句子的读法与按名字拒绝（开口一步钉在 `N_LOOK`）、步数上限等于 `rows_for`、从模型开口的那一步飞、最后一步的词飞到结局、判决读的词、判决用句子最后的跑道、时限与 `prior_free_generation.limits_s` 相同、判定落在词自己的那一步、下降角词的管子从它那一步起（另用标注器自己的 `tube_checks` 在"平飞五步再 3° 下降"上核对）、第二次许可不判、航向词从自己那一步读、航迹从词的那一步切出；`ModelFlightTest` 6 条——只飞自己机型动力学、时间词钟与时限、判决用的跑道、下降角词判决读的句子、结束的那一步起拒绝、门截断之后的词拒绝；`BackendTest` 一条走通模型请求（按时限读句子、交给飞行、答复写时间词钟）；`FreeGenerationTest`——`speak_and_fly` 自己的循环照稿说话，与后端的飞法在真实执行器上逐状态、逐周期的模式与限制都相同）。opus 审查两轮：第一轮 1 条必须改（下降角词的管子）、3 条应改、若干小处；第二轮没有必须改的，1 条应改（判决没读到的词）与几处小处；全部改掉；浏览器（5174 前端 + 8766 后端，都从工作树起）：KRDU CMP466 base 模型第 1 个样本的 heading 045°（步 91–150，在包络内，与样本 0.00 m / 62 点）、后训练第 1 个样本的 heading 230°（飞到落地，与样本 0.00 m / 61 点）。2026-09-26（左栏与模型自己说的句子，分支 `dev-training-sentences`）：前端 Vitest 98 个文件 822 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts 全套 1,434 条通过（新导出器 `test_prior_generation_training_export.py` 16 条，含在合成产物上端到端跑 `main`：集合顺序、自己动力学的航班各飞 3 个样本且各自从自己第 8 行的状态起飞、不飞的航班、清单、重跑逐字相同、不覆盖）。两轮 opus 审查（第一轮 8 条应改 + 11 条小处全部改掉，第二轮确认并补了一个没有航班可数时的崩溃与一个未钉住的镜像）。`check-publication --airports-root` 对工作树的镜像目录：五个机场各 4 个叠加层对照集合读过，0 错误。浏览器（5174）核对过：左栏停在句子条上面、标签页与样本、模型不飞的航班、结束之后涂暗（KMSY DAL8784 后训练第 2 个样本：325 s 越过入口没截获，模型一直说到 650 s）、三维模型航迹、图例。2026-09-26（多轮后训练之间切换，分支 `dev-training-rounds`）：前端 Vitest 98 个文件 843 条，`tsc` 与 `npm run typecheck:scripts` 无错；ts `test_prior_generation_training_export.py` + `test_training_overlays.py` 33 条（名字按方法给、各版本同名、未知方法拒绝、起步模型从它自己的配置读、带程序屏蔽的读数拒绝、`MODEL_NAMES` 镜像、`model` 块字段逐个与 TS 接口比对）。opus 审查一轮 + 复核：2 条必须改（只有一轮的第二个 run 没写 run；同一轮导出两次会出现 "r"/"rnull" 按钮）、4 条应改，全部改掉。真实数据：KRDU 上用 v10 执行器导出了 6 份到工作树里的镜像目录（base、landing r1/r2、augmented r1 两个 run 各一份、restart 的 r2），`check-publication --airports-root` 0 错误 |
 | 盘上的旧集合 | `box`、`box_v3`、`prior_s1337_val`、`prior_s2024_val`、`instruction_v1`、`instruction_v2`（五个机场都有），`v15_nomerge_noposition`（只有 KRDU）。它们属于别的词表，仍在 `index.json` 里列着，界面按名字拒读、不下载。删不删由用户决定 |
 
 ---
@@ -179,17 +179,16 @@ python run_ts.py prior_training_export \
 写在集合旁边，也是一种叠加层：
 
 ```bash
-# 执行器规格要选现在的执行器代码接受的那一份（今天是 v7_20260925；v8 与它内容 sha 相同 0d6a68a92c6f，
-# 只是写它的代码里还有后来归档掉的 CAT-K，源码 sha 不同）
+# 执行器规格要选现在的执行器代码接受的那一份（2026-09-26 晚是 v10_20260926；更早的都按源码 sha 拒读）
 python run_ts.py prior_generation_training_export \
-    --prior 4dTrajectory/outputs/POOLED/prior/v3_step1_20260924/full_s1337 --label "base model" \
+    --prior 4dTrajectory/outputs/POOLED/prior/v3_step1_20260924/full_s1337 \
     --instructions 4dTrajectory/outputs/POOLED/instruction_language/v4_20260924 \
-    --executor 4dTrajectory/outputs/POOLED/executor/v7_20260925 \
-    --readout 4dTrajectory/outputs/POOLED/prior/v3_freegen_20260925/val_400x4 \
+    --executor 4dTrajectory/outputs/POOLED/executor/v10_20260926 \
     --airports-root aeroviz-4d/public/data/airports --set instruction_v3_day_split \
     --airport KMSY --airport KRDU --airport KSJC --airport KSMF --airport KSTL
-# 后训练的一轮：--prior …/v3_rl_20260925/grpo_s1337/round_01 --label "post-trained"
-#               --readout …/v3_rl_20260925/val_kept_400x4
+# 后训练的一轮：--prior …/v3_rl_20260925/grpo_s1337/round_01（landing r1），
+#               --prior …/v3_stage2_clip_20260926/aug_s1337/round_03（augmented r3）；每轮一次，名字从检查点读
+# --readout <它的正式 val 自由生成>：要求同一份执行器规格、不带程序屏蔽；现在盘上的读数都是更早的规格或带屏蔽，给不了
 ```
 
 - **怎么生成**：和正式的自由生成读数一模一样（`prior_free_generation.speak_and_fly`）。前 `N_LOOK`（= 8）行是观测；执行器从
@@ -207,14 +206,23 @@ python run_ts.py prior_generation_training_export \
 - **词写到执行器停下的地方，航迹写到结局**：`flight_rows` 把一句话数到执行器认为这架飞完的那一步。有两种结局判决读得比执行器
   停得早——越过入口但没截获、失速截断（执行器的"飞完"不含这两种）——这时样本的最后几个词在结束时刻之后。照正式读数的数法
   原样写出（结束时所指的跑道就从这些词读），界面把结束之后的那段涂暗（§4.8）。
-- **模型是谁**：`--label`（界面上的名字）、检查点 sha256、变体、训练时的提交；后训练的一轮还有 `fineTuning`（方法、第几轮、
-  从哪个模型起步——检查点配置里 `prior_landing_reward` 写的那一项；只用数据训练的 base 模型没有这一项，为 null）。界面按有没有
-  这一项给颜色（§4.8）。
-- **正式读数**（`--readout`，可选）：这个模型的正式 val 自由生成（`generation.json`）里先验与"标注的词"两行的落地比例（全部、
+- **模型是谁——按名字认，不写标签**：名字是用户定的（后训练设计开头的表）——**base**（只用数据训练）、**landing**（base 按落地
+  奖励后训练，第一阶段）、**augmented**（landing 在增广起点上再后训练，第二阶段），某一轮写成 "augmented r3"。导出器从检查点
+  配置读出名字：没有 `fine_tuning` 的是 base；有的按训练它的方法给名字（`fine_tuning.schema` 去掉版本号：
+  `ts-prior-landing-reward-vN` → landing，`ts-prior-augmented-reward-vN` → augmented；同一方法的各个版本是同一个模型，采纳的
+  landing 第 1 轮就是 v1 写的；没有名字的方法拒绝——新阶段的名字先和用户商定，再加进 `MODEL_NAMES`）。`model` 块：`name`、
+  `round`（base 为 null）、`run`（放各轮的那个目录，例如 `…/prior/v3_stage2_clip_20260926/aug_s1337`；base 是它自己的目录）、
+  检查点 sha256、变体、训练时的提交、`fineTuning`（方法的 schema、起步模型的路径，以及起步模型的名字和轮次——从起步模型自己的
+  配置读，所以界面能写"augmented r3，从 landing r1 起步"）。默认叠加层 id 是 `generation_<名字>[_rNN]_<检查点 sha256 前 8 位>`。
+  界面按名字给颜色、分组、切换轮次（§4.8）。
+- **只带语法屏蔽**：导出时模型说话只受词表的相容规则和跑道锁定约束，**不带**第二阶段训练时加的程序屏蔽（加入前的高度下限、
+  不许爬回、下滑道下边界）。所以 augmented 在这里说的句子和它训练、读数时的条件不同；导出器拒绝在程序屏蔽下画的正式读数，结果表
+  的说明写明这一点。补上程序屏蔽要改载荷（又一次换格式名）和后端，登记在仓库 `docs/code-health-followups.md`（2026-09-26）。
+- **正式读数**（`--readout`，可选）：这个模型的正式 val 自由生成（`generation.json`，`ts-prior-free-generation-v4`）里先验与"标注的词"两行的落地比例（全部、
   直线进近、被引导；某一类没有航班时写 null），**这个机场的一份和全部机场合起来的一份**，原样照抄（读数的抽样说"every labelled
   flight"时写 0；别的写法拒绝）；要求它确实是这个检查点（路径从 `4dTrajectory/outputs/` 往后比：
   读数是在工作树里跑的，工作树的 outputs 就是同一棵树）、同一份执行器规格（内容 sha）、同一份句子产物、val、`n_look`、
-  样本数与温度都相同，否则按名字拒绝。
+  样本数与温度都相同、没有程序屏蔽，否则按名字拒绝。
 - **检查点**：`prior_train.load_prior` 能在这份产物上打开（规格、标注器、运行日划分、候选跑道表、整份状态）、不是冒烟试跑、
   今天的航迹清单与训练时相同（落地情况从它读，按 sha256 比）。
 - **绑定与核对**：与 §2.6 相同（集合 id、样本写出时刻、规格 sha，逐架航班的键）；另外逐个样本核对自己的账：事件按
@@ -609,10 +617,23 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
     的状态行两边都有——模型的词照样交给执行器飞（§4.7 "模型的词"）。
   - 横轴：观测航班的长度；读的样本飞得更久（超时的样本最长到观测剩余时间的 1.5 倍）时延长到它结束。读真值时不会被没显示的
     样本压扁；游标停在超出真值的地方时，回到 Truth 画在轴的末端。游标越过模型句子的最后一行时，这一列没有生效的词，不亮。
-- **颜色按角色给**（`trainingModelColour`）：base 模型（只用数据训练）品红 `#d946ef`，后训练的一轮黄绿 `#a3e635`；真值用观测
-  航迹本来的近白色 `#e2e8f0`，总是画。两种颜色是配色校验器在句子条底色 `#0f131e` 上找到的仅剩的两个空色区：品红与三维里
-  画出来的每种颜色 OKLab 色差 ≥ 14.4（最近的是进近的粉，三维里只是一个点），与速度紫 9.2（速度在三维里不画）；黄绿与每种
-  颜色 ≥ 9.5（最近的是贴地半透明的走廊绿和跑道绿）；对比度都 ≥ 5:1。两个模型从不同时画，彼此色差 60。
+- **多轮后训练之间切换**（用户 2026-09-26："有 base 和 post-train 的切换，但没有多轮后训练的不同模型的切换"）：
+  - 句子条上**每个模型一个标签页**（Truth、base、landing、augmented，按训练顺序）。正在读的模型发布了不止一轮时，标签页旁边是它的
+    各轮 "r1 r2 …"；提示里写这一轮的全称（run、从哪个模型起步、方法）和这架航班上它的样本落地了几个。
+  - **换轮次保留样本号**：同一架航班、同一个样本号，一轮一轮地比。标签页回到这个模型上次读的那一轮（在句子条或左栏选的都算），
+    没读过的从第一轮开始；换模型从第 1 个样本开始。
+  - 左栏 Sentences read 按模型分组：只有一轮的模型一行；多轮的模型一行名字、下面每轮一行，带这一轮在本集合上的落地数，点哪行读哪轮。
+    底部结果表按同样的顺序和名字。
+  - 同一个模型有两次训练（例如第二阶段停掉后重跑，两次都有 r1）时，每个标签页和每行都写上 run 的实验目录（"augmented r1 ·
+    v3_stage2_clip_20260926"；同一实验目录里的两个种子才写全）；同一轮导出了两次（同一个检查点换了导出设置）时各自单列，用叠加层 id 区分。
+  - 分组、排序、起名只在 `trainingModelGroups` 一处；句子条、左栏、结果表、图例、三维标签都用它给的名字。
+- **颜色按名字给**（`TRAINING_MODEL_COLOR`，`trainingModelColour`）：base 品红 `#d946ef`，landing 黄绿 `#a3e635`，augmented 树莓红
+  `#b82e7a`；同一模型的各轮同色，轮次用文字说。真值用观测航迹本来的近白色 `#e2e8f0`，总是画。前两种是配色校验器在句子条底色
+  `#0f131e` 上找到的仅剩的两个空色区：品红与三维里画出来的每种颜色 OKLab 色差 ≥ 14.4（最近的是进近的粉，三维里只是一个点），与
+  速度紫 9.2（速度在三维里不画）；黄绿与每种颜色 ≥ 9.5（最近的是贴地半透明的走廊绿和跑道绿）；对比度都 ≥ 5:1。树莓红是在色相 ×
+  饱和度 × 亮度上搜索、对这套配色的每种颜色都算过之后最好的一个：正常视觉色差 ≥ 17.7（最近的是实时执行器的出界红；离品红 18.5），
+  模拟色盲 ≥ 11.6，但对比度只有 3.3:1——够画线、色块、边框和时间轴上的结束时刻，不够写正文，所以模型的名字和数字一律用正文颜色，
+  旁边放它的色块（左栏、结果表、样本小块都改成这样）。一次只读一个模型，两种模型的颜色从不同时画。
 - **三维**见 §4.4 最后一条；读真值时一个模型的东西也不画。
 
 ---
@@ -654,6 +675,6 @@ own flight — 0.00 m at most from sample #1 over 62 points"；差到 0.5 m 以�
   种类列表同理，由 `test_training_overlays.py` 逐字比对。清单里出现界面不认识的种类时只拒这一条，别的照读。
 - 集合重新导出后，画在它上面的叠加层会被按名字拒读（样本的写出时刻变了）：重新生成叠加层，用新的叠加层 id。
 - 长期事实一行写进 `aeroviz-4d/CLAUDE.md` 的索引，全文写进 `aeroviz-4d/docs/35-viewer-reference.md`
-  （AV19–AV31）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11；叠加层 R13）。
+  （AV19–AV32）。导出器的说明在 `4dTrajectory/ts_transformer/docs/reference/runners.md`（R11；叠加层 R13）。
 - 词表的读法再换（例如 §10.2 的高度词）时，逐项检查本文 §2.3、§3、§4 里写到词的地方，与 `display.py` 同一次改动。
 - 日志式记录写进仓库的 `docs/CHANGELOG.md`。

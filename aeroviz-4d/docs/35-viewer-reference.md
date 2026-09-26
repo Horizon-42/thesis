@@ -395,7 +395,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 
 - 导出：`python run_ts.py prior_generation_training_export`（ts R13）——先验说、执行器飞，和正式自由生成读数同一条路径
   （`prior_free_generation.speak_and_fly`）；每架航班 `--samples` 个样本；只飞自己机型有动力学的航班。文件
-  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v1`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
+  `training/<叠加层 id>/generation.json`，格式 `aeroviz-training-generation-v2`（Python `SCHEMA` 与 `TRAINING_GENERATION_SCHEMA`
   由 `test_training_overlays.py` 逐字比对），清单里的种类 `prior-generation`（清单格式不变，还是 v1：不认识的种类只拒这一条）。
 - 每个样本：事件（行、列、值，行是航班自己的步号，从 `firstPredictedRow` = 8 起、第一步六列都说）、结局、结束时刻、越过入口
   （只随 `TRAINING_CROSSING_OUTCOMES` = `judge.CROSSINGS` 出现）、首末跑道、换跑道与复飞词数、结束时是否许可、屏蔽拿掉的概率
@@ -408,8 +408,7 @@ that divergence is a known open item (see the README's "Future Improvements").
 - 区分靠框不靠带：模型的带和真值的一样平涂（斜线 + 虚线边框让看板太乱，用户 2026-09-26），句子条边框、各行左边的竖色条
   （`training-sentence-model-strip`）、标签页、样本小块是模型的颜色；前 8 步淡灰底 "observed"，每行底边白色短竖线是真值在这一列
   说词的地方；模型航班结束的实线下面，时间轴上用模型的颜色写出结束时刻（`training-sentence-model-end`，总是写；离它太近的刻度
-  让开，写在轴末端时右对齐）。颜色按角色——base 模型品红 `#d946ef`、后训练黄绿 `#a3e635`（`trainingModelColour`，按有没有
-  `fineTuning`），配色校验的数写在 `trainingWordColors.ts`。
+  让开，写在轴末端时右对齐）。颜色按模型的名字给（AV32），配色校验的数写在 `trainingWordColors.ts`。
 - 三维（`useTrainingGenerationLayers`）：读的样本实线、贴地虚线、结束标签、它说航向词和许可的点（模型的颜色）；其余样本细线
   半透明（`TRAINING_OTHER_SAMPLE_ALPHA`）。选中的词画在模型飞出的航迹上，真值的包络不淡化（`useTrainingTrackLayer` 读模型时不画
   真值的选中）。
@@ -418,6 +417,37 @@ that divergence is a known open item (see the README's "Future Improvements").
 - 换模型从第 1 个样本开始；模型不飞的航班画真值连同真值的整个头部；Read-back / Prior 两个窗口读真值，只在读真值时给出。
   ▶ Fly 两边都有：模型的词交给实时执行器飞（AV26 "模型的词"），模型航班结束之后说的词灰着。
   左栏只留当前集合的模型下载，读不了的有 Retry（`useGenerationOverlays`）。
+
+### AV32 · 模型按名字认：base / landing / augmented 加轮次，句子条上可以在各轮之间切换（2026-09-26）
+
+- 用户 2026-09-26：Training 里只能在 base 和"后训练"之间切换，多轮后训练的各个模型分不开。先验的模型名字是用户定的
+  （后训练设计开头的表）：**base**（只用数据训练）、**landing**（base 按落地奖励后训练，第一阶段）、**augmented**（landing
+  在增广起点上再后训练，第二阶段）；某一轮写成 "augmented r3"。
+- 导出器不再收 `--label`，名字从检查点的配置读出（`model_identity`）：没有 `fine_tuning` 就是 base；有的话，按训练它的方法
+  （`fine_tuning.schema` 去掉版本号 `-vN`，`METHOD_MODELS`）给名字，同一方法的各版本是同一个模型（采纳的 landing 第 1 轮是 v1 写的）；
+  没有名字的方法拒绝，新阶段的名字先和用户商定。载荷的 `model` 块：`name`、`round`（base 为 null）、`run`（放各轮的目录，
+  base 是它自己的目录）、检查点 sha256、变体、训练时的提交、`fineTuning`（方法的 schema、起步模型的路径 `from`，以及
+  起步模型的名字和轮次 `fromName` / `fromRound`——从起步模型自己的 `config.json` 读，在这一轮所在的 outputs 树里读，因为各轮是在
+  工作树里跑的）。默认叠加层 id `generation_<名字>[_rNN]_<检查点 sha256 前 8 位>`。格式因此升到 v2，v1 按名字拒读。
+- 读取器要求三者一致：base ⇔ 没有轮次 ⇔ 没有 `fineTuning`；起步模型是 base ⇔ 它没有轮次；`run` 必须在 `…/prior/` 下。名字的
+  列表 `TRAINING_MODEL_NAMES` 是导出器 `MODEL_NAMES` 的镜像，`model` 块的字段与 `model_block` 的输出逐个比对
+  （都在 `test_training_overlays.py`）。
+- **分组只有一处**：`trainingModelGroups`。按名字的训练顺序（base、landing、augmented），再按 run，一个 run 的各轮按轮次排。
+  同一个名字有两个 run（例如第二阶段停掉重跑过）时，每组都写上 run——写它的实验目录（"augmented r1 · v3_stage2_clip_20260926"），
+  两个 run 同在一个实验目录里（不同种子）时写全（"…/aug_s1337"）；同一个
+  run 的同一轮导出了两次（同一个检查点换了导出设置），各自单成一组，用叠加层 id 区分——不会出现两个一样的 "r3"。句子条、左栏、
+  结果表、图例都用它给的 `title` / `memberLabel`，不自己拼名字。
+- 句子条：每个模型一个标签页；正在读的模型发布了不止一轮时，标签页旁边是它的各轮 "r1 r2 …"，提示里写这一轮全称和这架航班上它的
+  样本落地了几个。换轮次**保留样本号**，同一架航班可以一轮一轮地比；标签页回到这个模型上次读的那一轮（在句子条或左栏选的都算），
+  没读过的从第一轮开始、从第 1 个样本开始。左栏 Sentences read 按模型分组，多轮的模型一行名字、下面每轮一行（带这一轮在本集合上的
+  落地数）。结果表按同样的顺序和名字。
+- 颜色按名字（`TRAINING_MODEL_COLOR`）：base 品红 `#d946ef`、landing 黄绿 `#a3e635`、augmented 树莓红 `#b82e7a`——配色校验器在
+  这套配色里能找到的最好的一个：和 Training 的每种颜色 OKLab 色差正常视觉 ≥ 17.7（最近的是实时执行器的出界红，离 base 18.5），
+  模拟色盲 ≥ 11.6；但对比度只有 3.3:1，所以只用在线、色块、边框和时间轴上的结束时刻（用户要这个时刻用模型的颜色写），名字和数字
+  用正文颜色，旁边放色块。同一模型的各轮同色，轮次用文字说。
+- **模型只在语法屏蔽下说话**（词表的相容规则、跑道锁定），不带程序屏蔽（加入前的高度下限、不许爬回、下滑道下边界）——augmented
+  是在程序屏蔽下训练和读数的。导出器拒绝在程序屏蔽下画的正式读数，结果表的说明写明这一点；修法见仓库
+  `docs/code-health-followups.md`（2026-09-26）。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 

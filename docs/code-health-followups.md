@@ -116,7 +116,7 @@ added three entries (the rows after the performance index's).
 | `autopilot/__init__.py` names the executor design by its old path (09-26) | open | renamed to `docs/executor_design.zh.md` with spec v10 (`9557315d`); the docs reorganisation then moved the design to `docs/two_tier/`; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
 | The land law leaves a shallow final class's tube near the threshold on some profiles (09-26) | open | new; see the entry | **yes — executor** (a law change is a new spec) |
 | No mode reports when the executor's glidepath floor binds (09-26) | open | new; see the entry | **yes — executor** (adds a Flown mode; the backend payload reads the modes) |
-| The Training export and the live model flight fly a model without the procedure's masks (09-26) | open | new; see the entry | no: the Training view's exports and the backend (a stage-2 model is used with the masks on) |
+| The Training export and the live model flight fly a model without the procedure's masks (09-26) | open | the model side is done (`dev-procedure-masks`: masks recorded with the model, used by default); the export still passes none explicitly and the Training view says so (`dev-training-rounds`); left: the overlay carrying a stopped sentence, the backend's stop — best folded into the generation-v2 re-export, the user's call | no: the Training view's exports and the backend (a stage-2 model is used with the masks on) |
 | The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (09-26) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts change) |
 | `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
 | `instructions/grammar.py` is outside the labeller sha (09-26) | open | new; see the entry | **yes — every sentence artefact and prior**: adding it to the hash changes the labeller sha they record; do it with the next vocabulary spec |
@@ -509,7 +509,9 @@ design §3.1 says a model trained under the procedure's masks is used with them 
 (`prior_free_generation --procedure-masks`); publishing a stage-2 round as the export stands would show unmasked
 trajectories beside a masked readout. The fix passes the model's own (`LoadedPrior.procedure_masks`) to the export's
 loop, applies the glidepath lower edge's stop and records both in the overlay, and the same in the backend's `fly.py`; it changes the Training
-overlay's payload (a new schema) and needs the user's OK to re-export.
+overlay's payload (a new schema) and needs the user's OK to re-export. 2026-09-26 (`dev-training-rounds`): the overlay moved
+to `aeroviz-training-generation-v2` (models named base / landing / augmented) and must be re-exported anyway; the masks
+could ride the same re-export. Until then the Training results say the models speak under the vocabulary's rules only.
 
 ## The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (2026-09-26)
 
