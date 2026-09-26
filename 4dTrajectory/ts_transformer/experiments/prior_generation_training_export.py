@@ -23,10 +23,10 @@ readout flies — their own dynamics (`replay.OWN`) — are flown; the rest of t
 outcome is the executor's judge's (`prior_free_generation.flight_rows`: `judge.outcome_of` on the runway pointed at the
 end). One generator, seeded, draws every sample of every airport in the order the airports are named.
 
-**The prior speaks under the grammar's masks only** (the vocabulary's compatibility rules, the listener's runway lock) —
-never the procedure's (`prior_free_generation.procedure_masks`: the pre-join floor, no climb back, the glidepath lower
-edge), which post-training stage 2 (augmented) was trained and read out under. The frontend says so; a readout drawn
-under the procedure's masks is refused.
+**The prior speaks under the vocabulary's rules alone** — never its own procedure's masks (`prior.masks`, recorded
+beside its checkpoint: none for base and landing, the procedure's altitudes for augmented), because this payload cannot
+yet carry a sentence the glidepath lower edge stopped (`docs/code-health-followups.md`). The frontend says so; a readout
+drawn under the procedure's masks is refused.
 
 **Which model it is, by name** (`MODEL_NAMES`, the post-training design's table): a prior trained on data alone is
 ``base``; a post-trained round is named by the method that trained it (`fine_tuning.schema` less its version,
@@ -377,7 +377,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                       "specSha256": record["sha256"], "wordClock": params.word_clock, "cycleS": params.cycle_s,
                       "timeoutFactor": params.timeout_factor}}
     title = (f"{name} · {prior_dir.parent.name}/{prior_dir.name} · its own sentences, {args.samples} a flight (the "
-             f"grammar's masks only), flown by executor spec {record['sha256'][:12]} from step {N_LOOK}")
+             f"vocabulary's rules only), flown by executor spec {record['sha256'][:12]} from step {N_LOOK}")
     generator = torch.Generator().manual_seed(args.seed)
     built = {}
     for code in airports:

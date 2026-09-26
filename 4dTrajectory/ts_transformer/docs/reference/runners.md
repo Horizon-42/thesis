@@ -305,7 +305,7 @@ as the formal readout counts them, shaded by the frontend. `--readout` copies th
 shares (all / straight-in / vectored, null where the draw had none) at the payload's airport (`here`) and pooled (`all`),
 refused unless it is this prior (path from `4dTrajectory/outputs/` on), this executor spec (content sha), artefact, val,
 `N_LOOK`, samples, temperature and NO procedure masks, and its draw's per-airport count is a number or `EVERY_FLIGHT` (the
-draw's phrase, pinned against `replay.py`). **The prior speaks under the grammar's masks only**, never the procedure's
+draw's phrase, pinned against `replay.py`). **The prior speaks under the vocabulary's rules only**, never its own procedure's masks (`prior.masks`, `ProcedureMasks.none()` passed explicitly: the payload cannot yet carry a stopped sentence), i.e. not the procedure's
 (the pre-join floor, no climb back, the glidepath's lower edge) that stage 2 (augmented) was trained and read out under
 (`docs/code-health-followups.md`, 2026-09-26): a readout drawn under them is refused and the frontend says so. The
 checkpoint: `prior_training_export.open_trained_prior` (shared with `prior_training_export`). **The model is named, not

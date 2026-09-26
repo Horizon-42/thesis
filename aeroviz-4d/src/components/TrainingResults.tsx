@@ -205,7 +205,7 @@ export function TrainingGenerationReadout({ overlays: published, flights }: { ov
         executor flies each step as it is said. Landed: on the runway pointed at the end, as the executor's judge reads a
         landing. Only flights on their own aircraft dynamics are flown, as in the formal readout. "labelled words": the
         truth sentence flown the same way from the same step — how far the executor alone gets. Every model speaks under
-        the grammar's masks only (the vocabulary's rules, the runway lock), never the procedure's (the floor before the
+        the vocabulary's rules only (its compatibility rules, the runway lock), never its procedure's masks (the floor before the
         join, no climbing back, the glidepath's lower edge), which augmented was post-trained under — so its formal
         readouts, drawn under those masks, are not shown beside it.
       </p>

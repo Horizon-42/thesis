@@ -215,9 +215,11 @@ python run_ts.py prior_generation_training_export \
   检查点 sha256、变体、训练时的提交、`fineTuning`（方法的 schema、起步模型的路径，以及起步模型的名字和轮次——从起步模型自己的
   配置读，所以界面能写"augmented r3，从 landing r1 起步"）。默认叠加层 id 是 `generation_<名字>[_rNN]_<检查点 sha256 前 8 位>`。
   界面按名字给颜色、分组、切换轮次（§4.8）。
-- **只带语法屏蔽**：导出时模型说话只受词表的相容规则和跑道锁定约束，**不带**第二阶段训练时加的程序屏蔽（加入前的高度下限、
-  不许爬回、下滑道下边界）。所以 augmented 在这里说的句子和它训练、读数时的条件不同；导出器拒绝在程序屏蔽下画的正式读数，结果表
-  的说明写明这一点。补上程序屏蔽要改载荷（又一次换格式名）和后端，登记在仓库 `docs/code-health-followups.md`（2026-09-26）。
+- **只带词表规则，暂不带模型自己的程序屏蔽**：程序屏蔽现在跟着模型走（`dev-procedure-masks`，先验设计 §5.1：模型目录里的
+  `procedure_masks.json`，base 和 landing 是"无"，augmented 是 `procedure-altitudes-v2`），自由生成默认就用模型自己的。只有这个
+  导出器明确传"无"：带程序高度时，句子会在飞到下滑道下边界以下的那一步被截停（结局 `below_glidepath`），而这份载荷、前端的结局
+  列表和后端的实时飞行都还不认这种截停。所以 augmented 在这里说的句子和它训练、读数时的条件不同（base、landing 不受影响）；导出器
+  拒绝在程序屏蔽下画的正式读数，结果表的说明写明这一点。补齐登记在仓库 `docs/code-health-followups.md`（2026-09-26）。
 - **正式读数**（`--readout`，可选）：这个模型的正式 val 自由生成（`generation.json`，`ts-prior-free-generation-v4`）里先验与"标注的词"两行的落地比例（全部、
   直线进近、被引导；某一类没有航班时写 null），**这个机场的一份和全部机场合起来的一份**，原样照抄（读数的抽样说"every labelled
   flight"时写 0；别的写法拒绝）；要求它确实是这个检查点（路径从 `4dTrajectory/outputs/` 往后比：
