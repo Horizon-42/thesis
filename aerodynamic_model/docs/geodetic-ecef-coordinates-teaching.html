@@ -725,6 +725,36 @@
             <span class="en" lang="en">This diagram is generated from the WGS 84 ellipsoid parameters, the reference point φ=53.809394°, λ=35°, and a fixed orthographic projection. O is the Earth’s center and S is the foot of the ellipsoid normal through P. P can be represented by geodetic coordinates (φ, λ, h) or by ECEF coordinates (X, Y, Z). The h arrow is exaggerated along the exact unit normal û only to make its direction visible; real near-ground heights are so small relative to the Earth’s radius that a true-scale drawing would make them almost invisible.</span>
           </figcaption>
         </figure>
+
+        <figure class="diagram" aria-labelledby="fig-frame-enu">
+          <img src="assets/geodetic_ecef/00a-frame-local-enu.svg" alt="本地 ENU 坐标系中的点 P / Point P in the local ENU frame">
+          <figcaption id="fig-frame-enu">
+            <strong>本地 ENU 坐标系中的点 P</strong>
+            <span class="en" lang="en"><strong>Point P in the local ENU frame</strong></span>
+            P 是一个带高度的点（不在地表），比参考点北 14°、东 26°，椭球高 h=0.30a；这三张图用的是同一个 P 和同一个地球。为了看清几何关系，偏移、高度和地球扁率都放大显示：椭球取 b/a=0.9（真实值约 0.9966），极轴 b 沿 Z 方向较短，即两极略扁、赤道略鼓，与真实地球一致。原点 O_L 取在参考点的椭球面上，图中只画出它所在的四分之一北半球。P′ 是 P 沿 û₀ 落到切平面上的垂足，E、N、U 分别是 P 在 ê₀、n̂₀、û₀ 三个轴上的投影。
+            <span class="en" lang="en">P is a point with height, not on the surface: 14° north and 26° east of the reference point, with ellipsoidal height h=0.30a. The three figures use the same P and the same Earth. To make the geometry visible, the offsets, the height and the flattening are exaggerated: the ellipsoid has b/a=0.9 (the true value is about 0.9966), with the shorter polar semi-axis b along Z, so the Earth is flattened at the poles and bulges at the equator, as the real one does. The origin O_L is the reference point on the ellipsoid, and only the quarter of the northern hemisphere containing it is drawn. P′ is the foot of P on the tangent plane along û₀, and E, N, U are the projections of P onto the ê₀, n̂₀, û₀ axes.</span>
+          </figcaption>
+        </figure>
+
+        <figure class="diagram" aria-labelledby="fig-frame-ecef">
+          <img src="assets/geodetic_ecef/00b-frame-ecef.svg" alt="ECEF 坐标系中的点 P / Point P in the ECEF frame">
+          <figcaption id="fig-frame-ecef">
+            <strong>ECEF 坐标系中的点 P</strong>
+            <span class="en" lang="en"><strong>Point P in the ECEF frame</strong></span>
+            与上图同一个 P、同一个地球。ECEF 是以地心 O 为原点、随地球转动的直角坐标系，P 由 (X, Y, Z) 表示；虚线把 P 投影到赤道平面上的 (X, Y, 0)。地球只画出朝向读者的一面，背面的赤道用淡虚线示意。
+            <span class="en" lang="en">The same P and the same Earth as in the previous figure. ECEF is the Earth-fixed Cartesian frame centered on the Earth’s center O; P is (X, Y, Z), and the dashed line projects it to (X, Y, 0) in the equatorial plane. Only the near side of the Earth is drawn; the far half of the equator is shown faint and dashed.</span>
+          </figcaption>
+        </figure>
+
+        <figure class="diagram" aria-labelledby="fig-frame-geodetic">
+          <img src="assets/geodetic_ecef/00c-frame-wgs84-geodetic.svg" alt="WGS 84 大地坐标系中的点 P / Point P in WGS 84 geodetic coordinates">
+          <figcaption id="fig-frame-geodetic">
+            <strong>WGS 84 大地坐标系中的点 P</strong>
+            <span class="en" lang="en"><strong>Point P in WGS 84 geodetic coordinates</strong></span>
+            与前两图同一个 P、同一个地球和同一个视角。a、b 是椭球的赤道半轴和极半轴。S 是 P 沿法线落到椭球面的垂足，h 沿法线量取；λ 在赤道平面内从 X 轴量起；φ 是法线与赤道平面的夹角。法线与赤道平面的交点不在 O，这正是大地纬度与地心纬度不同的原因。
+            <span class="en" lang="en">The same P, Earth and viewpoint as the previous two figures. a and b are the equatorial and polar semi-axes. S is the foot of the normal through P, and h is measured along that normal; λ is measured in the equatorial plane from the X axis; φ is the angle between the normal and the equatorial plane. The normal meets the equatorial plane away from O, which is exactly why geodetic and geocentric latitude differ.</span>
+          </figcaption>
+        </figure>
       </section>
 
       <section id="math">

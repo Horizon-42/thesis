@@ -467,8 +467,8 @@
       <section id="enu">
         <h2>3. 起点：平直 ENU 切平面里的点质量动力学<span class="en" lang="en">Start: Point-Mass Dynamics in a Flat ENU Tangent Plane</span></h2>
         <p class="section-intro">
-          前置文档已经把 ENU 这个坐标系定义清楚了：选一个原点 \(O_L\)，三根本地正交轴 \(\hat{\mathbf e}_0\)（东）、\(\hat{\mathbf n}_{N,0}\)（北）、\(\hat{\mathbf u}_0\)（天）。<code>make_dynamics_model</code> 就是<strong>在这块平面里写牛顿运动</strong>，状态 \((x,y,h,V,\psi,\gamma,m)\)。
-          <span class="en" lang="en">The prerequisite document already defined the ENU frame: pick an origin \(O_L\) and three local orthonormal axes \(\hat{\mathbf e}_0\) (East), \(\hat{\mathbf n}_{N,0}\) (North), \(\hat{\mathbf u}_0\) (Up). <code>make_dynamics_model</code> simply <strong>writes Newtonian motion inside that plane</strong>, with state \((x,y,h,V,\psi,\gamma,m)\).</span>
+          前置文档已经把 ENU 这个坐标系定义清楚了：选一个原点 \(O_L\)，三根本地正交轴 \(\hat{\mathbf e}_0\)（东）、\(\hat{\mathbf n}_0\)（北）、\(\hat{\mathbf u}_0\)（天）。<code>make_dynamics_model</code> 就是<strong>在这块平面里写牛顿运动</strong>，状态 \((x,y,h,V,\psi,\gamma,m)\)。
+          <span class="en" lang="en">The prerequisite document already defined the ENU frame: pick an origin \(O_L\) and three local orthonormal axes \(\hat{\mathbf e}_0\) (East), \(\hat{\mathbf n}_0\) (North), \(\hat{\mathbf u}_0\) (Up). <code>make_dynamics_model</code> simply <strong>writes Newtonian motion inside that plane</strong>, with state \((x,y,h,V,\psi,\gamma,m)\).</span>
         </p>
 
         <div class="grid-2">
@@ -988,8 +988,8 @@ R_M = WGS84_A * (1.0 - WGS84_E2) / denom**1.5  <span class="tok-com"># meridiona
             <strong>东向 → 经度率（用 \(R_N\)，理由完全不同）。</strong>向东 = 沿<strong>纬线圈</strong>（同一纬度的圆）走。一个半径为 \(p\) 的圆，走弧长 \(\delta E\) 转过的圆心角是 \(\delta\lambda=\delta E/p\)。于是只剩一个问题：<strong>纬线圈半径 \(p\)</strong>（= P 到自转轴的垂直距离）等于多少？
             <span class="en" lang="en"><strong>East → longitude rate (use \(R_N\); for a totally different reason).</strong> East = along the <strong>parallel</strong> (the circle of constant latitude). On a circle of radius \(p\), travelling arc \(\delta E\) sweeps a central angle \(\delta\lambda=\delta E/p\). So the only question left: what is the <strong>parallel radius \(p\)</strong> (the perpendicular distance from P to the spin axis)?</span>
             <p style="margin:8px 0 0">
-              答案<strong>第 5 节第 2 步早就算出来了</strong>：地表点 \(P\) 的水平坐标 \(x_0=N\cos\phi\)，其中 \(N=R_N=a/W\)（法线到自转轴的长度）。所以地表纬线圈半径 \(p_0=R_N\cos\phi\)。再加高度 \(h\)（沿法线 \(\hat{\mathbf n}\) 向外，\(\hat{\mathbf n}\) 的水平分量是 \(\cos\phi\)，多出 \(h\cos\phi\)）：
-              <span class="en" lang="en">The answer <strong>was already computed in Section 5 Step 2</strong>: the surface point \(P\)’s horizontal coordinate is \(x_0=N\cos\phi\), where \(N=R_N=a/W\) (the normal’s length to the spin axis). So the surface parallel radius is \(p_0=R_N\cos\phi\). Add height \(h\) (outward along \(\hat{\mathbf n}\), whose horizontal part is \(\cos\phi\), adding \(h\cos\phi\)):</span>
+              答案<strong>第 5 节第 2 步早就算出来了</strong>：地表点 \(P\) 的水平坐标 \(x_0=N\cos\phi\)，其中 \(N=R_N=a/W\)（法线到自转轴的长度）。所以地表纬线圈半径 \(p_0=R_N\cos\phi\)。再加高度 \(h\)（沿法线 \(\hat{\mathbf u}\) 向外，\(\hat{\mathbf u}\) 的水平分量是 \(\cos\phi\)，多出 \(h\cos\phi\)）：
+              <span class="en" lang="en">The answer <strong>was already computed in Section 5 Step 2</strong>: the surface point \(P\)’s horizontal coordinate is \(x_0=N\cos\phi\), where \(N=R_N=a/W\) (the normal’s length to the spin axis). So the surface parallel radius is \(p_0=R_N\cos\phi\). Add height \(h\) (outward along \(\hat{\mathbf u}\), whose horizontal part is \(\cos\phi\), adding \(h\cos\phi\)):</span>
             </p>
             <div class="formula"><span class="formula-line">\[
 p=(R_N+h)\cos\phi

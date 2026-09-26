@@ -211,6 +211,9 @@ class Svg:
     .teal {{ fill: #006f79; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     .orange {{ fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     .indigo {{ fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .hidden {{ fill: none; stroke: #8292a4; stroke-width: 1.2; stroke-dasharray: 4 5; opacity: .45; }}
+    .outline {{ fill: none; stroke: #207b84; stroke-width: 1.8; }}
+    .arc {{ fill: none; stroke: #3d58a8; stroke-width: 1.8; }}
   </style>
   {''.join(self.items)}
 </svg>
@@ -235,13 +238,16 @@ def wire_points() -> list[Vec3]:
 
 
 def draw_wire(svg: Svg) -> None:
+    """WGS 84 graticule, near side only; the far halves of the equator and the two
+    highlighted meridians are kept faint and dashed, and the silhouette closes the shape."""
     for phi_deg in (-60, -30, 30, 60):
-        svg.polyline(ellipsoid_lat(phi_deg * pi / 180.0), "wire")
+        surface_polyline(svg, ellipsoid_lat(phi_deg * pi / 180.0), "wire")
     for lam_deg in (45, 90, 135, 180, 225, 270, 315):
-        svg.polyline(ellipsoid_lon(lam_deg * pi / 180.0), "wire")
-    svg.polyline(ellipsoid_lat(0.0), "equator")
-    svg.polyline(ellipsoid_lon(0.0), "meridian")
-    svg.polyline(ellipsoid_lon(REFERENCE_LAMBDA), "meridian")
+        surface_polyline(svg, ellipsoid_lon(lam_deg * pi / 180.0), "wire")
+    surface_polyline(svg, ellipsoid_lat(0.0), "equator", "hidden")
+    surface_polyline(svg, ellipsoid_lon(0.0), "meridian", "hidden")
+    surface_polyline(svg, ellipsoid_lon(REFERENCE_LAMBDA), "meridian", "hidden")
+    svg.polyline(ellipsoid_outline(svg.camera), "outline")
 
 
 def tangent_plane_polygon(s: Vec3, phi: float, lam: float, size: float = 0.18) -> list[Vec3]:
@@ -283,7 +289,7 @@ def diagram_coordinate_system() -> str:
     svg.text("S", s, 12, 20, "orange")
     svg.text("h·û", add(s, mul(VISUAL_H_OVER_A * 0.5, n)), -50, -14, "orange")
     svg.text("meridian λ", geodetic_surface_unit(0.45, REFERENCE_LAMBDA), 10, 4, "indigo")
-    svg.text("equator", geodetic_surface_unit(0, 2.25), 4, 18, "orange")
+    svg.text("equator", geodetic_surface_unit(0, -0.6), 4, 20, "orange")
     return svg.render()
 
 
@@ -337,8 +343,8 @@ def diagram_pz_section_geometry() -> str:
         svg.polyline(ring, "wire")
     for line in cylinder_lines:
         svg.polyline(line, "helper")
-    svg.polyline(meridian_curve, "meridian")
-    svg.polyline(parallel_circle, "equator")
+    surface_polyline(svg, meridian_curve, "meridian", "hidden")
+    surface_polyline(svg, parallel_circle, "equator", "hidden")
     svg.line((0, 0, z_min), (0, 0, z_max), "axis", True)
     svg.line(axis_at_z, s, "component", True)
     svg.circle(s, 6.2, "surface")
@@ -864,6 +870,215 @@ def diagram_enu_basis_derivation() -> str:
     return svg.render()
 
 
+# The three frame figures (00a/00b/00c) put one point P, with height, in each frame.
+OVERVIEW_P_DPHI_DEG = 14.0
+OVERVIEW_P_DLAMBDA_DEG = 26.0
+OVERVIEW_P_H_OVER_A = 0.30
+# One Earth for all three figures: an oblate ellipsoid (short polar axis b along Z)
+# with the flattening exaggerated from the true b/a ≈ 0.9966 so the shape is visible.
+OVERVIEW_B_OVER_A = 0.90
+OVERVIEW_E2 = 1.0 - OVERVIEW_B_OVER_A**2
+# 00b and 00c share this low-elevation camera, so the same Earth looks identical in both.
+OVERVIEW_GLOBE_EYE = (cos(radians(12)) * cos(radians(-15)), cos(radians(12)) * sin(radians(-15)), sin(radians(12)))
+
+
+def overview_point() -> tuple[float, float, float]:
+    return (
+        REFERENCE_PHI + OVERVIEW_P_DPHI_DEG * pi / 180.0,
+        REFERENCE_LAMBDA + OVERVIEW_P_DLAMBDA_DEG * pi / 180.0,
+        OVERVIEW_P_H_OVER_A,
+    )
+
+
+def geodetic_to_ecef_unit(phi: float, lam: float, h: float, e2: float = WGS84_E2) -> Vec3:
+    nu = 1.0 / sqrt(1.0 - e2 * sin(phi) ** 2)
+    return (
+        (nu + h) * cos(phi) * cos(lam),
+        (nu + h) * cos(phi) * sin(lam),
+        ((1.0 - e2) * nu + h) * sin(phi),
+    )
+
+
+def overview_surface(phi: float, lam: float) -> Vec3:
+    return geodetic_to_ecef_unit(phi, lam, 0.0, OVERVIEW_E2)
+
+
+def arc3d(center: Vec3, radius: float, u: Vec3, v: Vec3, angle: float, samples: int = 40) -> list[Vec3]:
+    """Arc from direction u towards v (orthonormal) through `angle` radians."""
+    return [
+        add(center, add(mul(radius * cos(angle * i / (samples - 1)), u), mul(radius * sin(angle * i / (samples - 1)), v)))
+        for i in range(samples)
+    ]
+
+
+def facing_viewer(p: Vec3, camera: Camera, e2: float) -> bool:
+    """True where the ellipsoid surface at p faces the camera (outward normal ∝ (x, y, z/b²))."""
+    return dot((p[0], p[1], p[2] / (1.0 - e2)), camera.view) >= 0.0
+
+
+def surface_polyline(
+    svg: Svg, pts: Sequence[Vec3], cls: str, hidden_cls: str | None = None, e2: float = WGS84_E2
+) -> None:
+    """Draw a curve on the ellipsoid: the far-side runs are dropped, or drawn as hidden_cls."""
+    runs: list[tuple[bool, list[Vec3]]] = []
+    for p in pts:
+        vis = facing_viewer(p, svg.camera, e2)
+        if runs and runs[-1][0] == vis:
+            runs[-1][1].append(p)
+        else:
+            # Start the new run at the previous point so the two runs join up.
+            runs.append((vis, [runs[-1][1][-1], p] if runs else [p]))
+    for vis, run in runs:
+        if vis:
+            svg.polyline(run, cls)
+        elif hidden_cls:
+            svg.polyline(run, hidden_cls)
+
+
+def ellipsoid_outline(camera: Camera, e2: float = WGS84_E2, samples: int = 241) -> list[Vec3]:
+    """Silhouette under orthographic projection: for each screen direction d, the surface
+    point that extends furthest along d is diag(1, 1, b²)·d / sqrt(d·diag(1, 1, b²)·d)."""
+    b2 = 1.0 - e2
+    out = []
+    for i in range(samples):
+        t = 2.0 * pi * i / (samples - 1)
+        d = add(mul(cos(t), camera.x_axis), mul(sin(t), camera.y_axis))
+        md = (d[0], d[1], b2 * d[2])
+        out.append(mul(1.0 / sqrt(dot(d, md)), md))
+    return out
+
+
+def overview_globe(title: str) -> tuple[Svg, list[Vec3]]:
+    """The shared Earth of 00b/00c: front-side graticule, outline, equator, P's meridian."""
+    lam_p = overview_point()[1]
+    lat_lines = [[overview_surface(f * pi / 180.0, 2.0 * pi * i / 144) for i in range(145)] for f in (-60, -30, 30, 60)]
+    lon_lines = [[overview_surface(-pi / 2.0 + pi * i / 120, l * pi / 180.0) for i in range(121)] for l in range(0, 360, 30)]
+    equator = [overview_surface(0.0, 2.0 * pi * i / 144) for i in range(145)]
+    meridian = [overview_surface(-pi / 2.0 + pi * i / 120, lam_p) for i in range(121)]
+    camera = Camera(OVERVIEW_GLOBE_EYE)
+    outline = ellipsoid_outline(camera, OVERVIEW_E2)
+    ends = [(1.4, 0.0, 0.0), (0.0, 1.4, 0.0), (0.0, 0.0, 1.3)]
+    target = geodetic_to_ecef_unit(*overview_point(), OVERVIEW_E2)
+    svg = Svg(560, 460, title, outline + ends + [target], camera=camera)
+    for line in lat_lines + lon_lines:
+        surface_polyline(svg, line, "wire", e2=OVERVIEW_E2)
+    surface_polyline(svg, equator, "equator", "hidden", OVERVIEW_E2)
+    surface_polyline(svg, meridian, "meridian", "hidden", OVERVIEW_E2)
+    svg.polyline(outline, "outline")
+    for end, label in zip(ends, "XYZ"):
+        svg.line((0.0, 0.0, 0.0), end, "axis", True)
+        svg.text(label, end, 8, 4)
+    svg.text("O", (0.0, 0.0, 0.0), -20, 6)
+    return svg, ends
+
+
+def overview_enu_frame() -> str:
+    phi0, lam0 = REFERENCE_PHI, REFERENCE_LAMBDA
+    origin = overview_surface(phi0, lam0)
+    east, north, up = east_unit(lam0), north_unit(phi0, lam0), normal_unit(phi0, lam0)
+    target = geodetic_to_ecef_unit(*overview_point(), OVERVIEW_E2)
+    delta = sub(target, origin)
+    e_c, n_c, u_c = dot(delta, east), dot(delta, north), dot(delta, up)
+    assert min(e_c, n_c, u_c) > 0.0, "P must lie east, north and above O_L to draw the coordinate box"
+    # Coordinate box: P' is P dropped onto the tangent plane; its feet on the E and N axes.
+    foot_e = add(origin, mul(e_c, east))
+    foot_n = add(origin, mul(n_c, north))
+    p_plane = add(foot_e, mul(n_c, north))
+    foot_u = add(origin, mul(u_c, up))
+    axis_len = 1.35 * max(e_c, n_c, u_c)
+
+    # A quarter of the northern hemisphere: 90° of longitude centred on the origin.
+    lon_lo, lon_hi = lam0 - pi / 4.0, lam0 + pi / 4.0
+    meridians = [
+        [overview_surface(pi / 2.0 * i / 60, lon_lo + (lon_hi - lon_lo) * k / 6) for i in range(61)]
+        for k in range(7)
+    ]
+    parallels = [
+        [overview_surface(pi / 2.0 * j / 6, lon_lo + (lon_hi - lon_lo) * i / 60) for i in range(61)]
+        for j in range(6)
+    ]
+    # Large enough that P' falls inside the drawn plane (its N half-extent is 0.7 × size).
+    plane = tangent_plane_polygon(origin, phi0, lam0, size=1.08 * max(e_c, n_c / 0.7))
+    axes = [add(origin, mul(axis_len, v)) for v in (east, north, up)]
+    pts = [p for line in meridians + parallels for p in line] + plane + [target] + axes
+
+    svg = Svg(560, 460, "Local ENU frame on a quarter of the northern hemisphere", pts, camera=Camera(ENU_CAMERA_EYE))
+    for k, line in enumerate(meridians):
+        svg.polyline(line, "outline" if k in (0, 6) else "wire")
+    for j, line in enumerate(parallels):
+        svg.polyline(line, "outline" if j == 0 else "wire")
+    polygon_points(svg, plane, "plane")
+    svg.line(origin, axes[0], "east", True)
+    svg.line(origin, axes[1], "north", True)
+    svg.line(origin, axes[2], "normal", True)
+    svg.line(target, p_plane, "helper")
+    svg.line(p_plane, foot_e, "helper")
+    svg.line(p_plane, foot_n, "helper")
+    svg.line(target, foot_u, "helper")
+    for foot in (foot_e, foot_n, foot_u, p_plane):
+        svg.circle(foot, 3.2, "surface")
+    svg.circle(origin, 5.6, "surface")
+    svg.circle(target, 6.2, "point")
+    svg.text("E axis ê₀", axes[0], 8, 14, "teal")
+    svg.text("N axis n̂₀", axes[1], -34, -10, "indigo")
+    svg.text("U axis û₀", axes[2], -30, -10, "orange")
+    svg.text("O_L", origin, -32, 16, "orange")
+    svg.text("P(E, N, U)", target, 10, -8, "teal")
+    svg.text("P′", p_plane, 8, 16, "small")
+    svg.text("E", foot_e, 2, 20, "teal")
+    svg.text("N", foot_n, 8, 16, "indigo")
+    svg.text("U", foot_u, -18, 4, "orange")
+    return svg.render()
+
+
+def overview_ecef_frame() -> str:
+    svg, _ = overview_globe("ECEF frame centred on the Earth")
+    target = geodetic_to_ecef_unit(*overview_point(), OVERVIEW_E2)
+    q = (target[0], target[1], 0.0)
+    svg.line((0.0, 0.0, 0.0), target, "vector", True)
+    svg.line((target[0], 0.0, 0.0), q, "helper")
+    svg.line((0.0, target[1], 0.0), q, "helper")
+    svg.line(q, target, "helper")
+    svg.circle(q, 4.4, "surface")
+    svg.circle(target, 6.2, "point")
+    svg.text("P(X, Y, Z)", target, 10, -8, "teal")
+    svg.text("(X, Y, 0)", q, 8, 16, "small")
+    return svg.render()
+
+
+def overview_geodetic_frame() -> str:
+    phi, lam, h = overview_point()
+    nu = 1.0 / sqrt(1.0 - OVERVIEW_E2 * sin(phi) ** 2)
+    s = overview_surface(phi, lam)
+    n = normal_unit(phi, lam)
+    target = add(s, mul(h, n))
+    radial = (cos(lam), sin(lam), 0.0)
+    # The normal through S meets the equatorial plane at F = e²ν cosφ, not at the centre O.
+    f_point = mul(OVERVIEW_E2 * nu * cos(phi), radial)
+    b = OVERVIEW_B_OVER_A
+
+    svg, _ = overview_globe("WGS 84 geodetic coordinates on an oblate ellipsoid")
+    svg.line((0.0, 0.0, 0.0), radial, "helper")
+    svg.line(f_point, s, "helper")
+    svg.line(s, target, "normal", True)
+    svg.polyline(arc3d((0.0, 0.0, 0.0), 0.32, (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), lam), "arc")
+    svg.polyline(arc3d(f_point, 0.24, radial, (0.0, 0.0, 1.0), phi), "arc")
+    svg.circle(s, 4.8, "surface")
+    svg.circle(f_point, 3.6, "surface")
+    svg.circle(target, 6.2, "point")
+    # Semi-axes: a along X in the equatorial plane, b along Z.
+    svg.circle((1.0, 0.0, 0.0), 3.2, "surface")
+    svg.circle((0.0, 0.0, b), 3.2, "surface")
+    svg.text("a", (0.8, 0.0, 0.0), -20, 2)
+    svg.text("b", (0.0, 0.0, b * 0.5), -18, 4)
+    svg.text("λ", arc3d((0.0, 0.0, 0.0), 0.4, (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), lam / 2.0)[-1], -4, 6, "indigo")
+    svg.text("φ", arc3d(f_point, 0.3, radial, (0.0, 0.0, 1.0), phi / 2.0)[-1], 4, 4, "indigo")
+    svg.text("S", s, -20, 4, "orange")
+    svg.text("h", add(s, mul(0.5 * h, n)), -18, -2, "orange")
+    svg.text("P(φ, λ, h)", target, 10, -8, "teal")
+    return svg.render()
+
+
 def diagram_values_readme() -> str:
     phi = REFERENCE_PHI
     lam = REFERENCE_LAMBDA
@@ -895,6 +1110,7 @@ These SVG files are generated by `../generate_geodetic_ecef_diagrams.py`.
 - Visual height arrow: {VISUAL_H_OVER_A:.3f} a, used only to make the normal direction visible.
 - Tangent slope diagram delta p: 0.12 a, used only to show the limiting secant visually.
 - Local tangent ENU diagram visual offsets: E=0.45 a, N=0.30 a, U=0.22 a, used only to show the decomposition.
+- Frame figures 00a-00c: P at reference phi+{OVERVIEW_P_DPHI_DEG:g} deg, lambda+{OVERVIEW_P_DLAMBDA_DEG:g} deg, h={OVERVIEW_P_H_OVER_A:g} a (visual); all three use one ellipsoid with b/a={OVERVIEW_B_OVER_A:g} (flattening exaggerated).
 - EPSG example radial distance ||P|| for h=73.0 m: {epsg_r:.3f} m. This is not the ellipsoidal height.
 """
 
@@ -933,8 +1149,8 @@ def typeset_hats(svg: str) -> str:
     return _TEXT_RE.sub(one, svg)
 
 
-def fit_viewbox(svg: str) -> str:
-    """Crop the viewBox to the drawn geometry and (estimated) label extents."""
+def content_bbox(svg: str) -> tuple[float, float, float, float]:
+    """(x, y, width, height) of the drawn geometry and (estimated) label extents, plus margin."""
     xs: list[float] = []
     ys: list[float] = []
     for x1, y1, x2, y2 in re.findall(rf'x1="{_NUM}" y1="{_NUM}" x2="{_NUM}" y2="{_NUM}"', svg):
@@ -960,8 +1176,12 @@ def fit_viewbox(svg: str) -> str:
         xs += [float(x), float(x) + chars * AVG_CHAR_EM * px]
         ys += [float(y) - 0.95 * px, float(y) + 0.3 * px]
     m = FIT_MARGIN_PX
-    x0, y0 = min(xs) - m, min(ys) - m
-    w, h = max(xs) - min(xs) + 2 * m, max(ys) - min(ys) + 2 * m
+    return min(xs) - m, min(ys) - m, max(xs) - min(xs) + 2 * m, max(ys) - min(ys) + 2 * m
+
+
+def fit_viewbox(svg: str) -> str:
+    """Crop the viewBox to the drawn geometry and (estimated) label extents."""
+    x0, y0, w, h = content_bbox(svg)
     return re.sub(r'viewBox="[^"]+"', f'viewBox="{x0:.1f} {y0:.1f} {w:.1f} {h:.1f}"', svg, count=1)
 
 
@@ -974,6 +1194,9 @@ def write(path: Path, content: str) -> None:
 def main() -> None:
     ASSET_DIR.mkdir(parents=True, exist_ok=True)
     write(ASSET_DIR / "01-coordinate-systems.svg", diagram_coordinate_system())
+    write(ASSET_DIR / "00a-frame-local-enu.svg", overview_enu_frame())
+    write(ASSET_DIR / "00b-frame-ecef.svg", overview_ecef_frame())
+    write(ASSET_DIR / "00c-frame-wgs84-geodetic.svg", overview_geodetic_frame())
     write(ASSET_DIR / "02-pz-section-geometry.svg", diagram_pz_section_geometry())
     write(ASSET_DIR / "02-geodetic-vs-geocentric-latitude.svg", diagram_latitudes())
     write(ASSET_DIR / "03-curvature-radii.svg", diagram_curvature_radii())
