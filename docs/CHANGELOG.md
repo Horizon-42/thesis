@@ -1,5 +1,15 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — 后训练第二阶段和影响训练的遗留问题合进 dev-two-tier
+
+- 合并提交 `acb93b55`（经 `dev-post-train-merged` `911001e9`）：第二阶段（下滑道下沿、扩充起点、runner `prior_augmented_reward` 与第一阶段
+  同一个损失——奖励项 + 0.04 拉回 base + 数据项）和 `dev-training-followups`（所有机型落在公布的 MALW、B737 的 MALW 用波音的数、OpenSky
+  型号别名、OpenAP 缓存版本检查、没拟合的航班只认五边上的穿越、索引表按规则重判）。一处文档冲突（TD2）已合并。合并后 ts 测试
+  1,469 个、其他 683 个全过。
+- 正在跑的第二阶段 `v3_augdata_20260926` 在 `post-train` 工作树（`dev-post-train` `c07f5e09`）上，不受影响。合并后的代码拒绝执行器
+  规格 `v7_20260925`（指纹含 `data/dataset.py`），选择集 1,000 架里 711 架换了质量或进近速度：第二阶段之后按这份代码重建（执行器规格、
+  句子产物、回放门、先验）。
+
 ### 2026-09-26 — Training 视图的高度（续）：后端现飞也按跑道差值；`geoid_undulation_m` 删除
 
 接上一条"暂缓"的部分：`dev-model-autopilot` 合并后，分支 `dev-training-view-live-datum` 变基上去（`c708a497`，审查修改
