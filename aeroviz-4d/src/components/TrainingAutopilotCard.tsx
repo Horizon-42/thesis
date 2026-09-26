@@ -4,7 +4,8 @@
  * The live executor's answer for the picked word (`trainingAutopilot`, `data/trainingAutopilot.ts`), kept short:
  *
  *  • in the Training panel (`TrainingAutopilotCard`): the word and its steps; THE VERDICT — did the flown segment stay
- *    inside the word's envelope — in the segment's own colour (red when outside, `autopilotColour`); the two times side
+ *    inside the word's envelope — in the segment's own colour (red when outside, `autopilotColour`); what its faded,
+ *    dashed tail is, when it has one (`tailText`); the two times side
  *    by side, the SIMULATED flight (beside the observed aircraft's) and the COMPUTATION (the backend's, beside the
  *    browser's round trip); the checks behind the verdict; everything else — how it ended, the limits that bound, the
  *    computation part by part, the spec and code — folded into Details. "Replay in 3D" flies the same answer out again;
@@ -31,7 +32,7 @@ import {
   type TrainingAutopilotView,
 } from "../data/trainingAutopilot";
 import { sourceOnScreen } from "../data/trainingOverlays";
-import type { TrainingSelection } from "../data/trainingSample";
+import { formatSeconds, type TrainingSelection } from "../data/trainingSample";
 import {
   checkText,
   crossingText,
@@ -49,6 +50,19 @@ function spanText(segment: TrainingAutopilotSegment["segment"]): string {
   if (segment.toLanding) return `step ${segment.row} to the landing`;
   const on = segment.stopRow === segment.endRow ? "" : `, flown on to step ${segment.stopRow}`;
   return `steps ${segment.row}–${segment.endRow}${on}`;
+}
+
+/** What the tail drawn faded and dashed is (`autopilotRunAndTail`): the flight past where the executor heard the next
+ *  word of the column — a heading word's lead into the next heading word, flown because this word is judged to its
+ *  end. null without a tail. */
+function tailText(segment: TrainingAutopilotSegment): string | null {
+  const heardS = segment.segment.nextWordHeardS;
+  if (heardS === null) return null;
+  const { tS } = segment.track;
+  const tailS = Math.round((tS[tS.length - 1] - heardS) * 1000) / 1000;
+  return `Faded, dashed: the last ${formatSeconds(tailS)} s, past where it heard the next ` +
+    `${segment.segment.column} word (at ${formatSeconds(heardS)} s) — already turning to that word, still judged for this ` +
+    "one, whose band ends a lead after it.";
 }
 
 /** The flight ended short of what it was flown to: neither at its segment's stop nor landed. */
@@ -148,6 +162,7 @@ export default function TrainingAutopilotCard() {
       {endedBadly(segment) ? (
         <p className="training-autopilot-ended" style={{ color: TRAINING_OUTSIDE_COLOR }}>The flight {endText(segment)}.</p>
       ) : null}
+      {tailText(segment) === null ? null : <p className="training-autopilot-tail">{tailText(segment)}</p>}
       <div className="training-autopilot-times">
         <div className="training-autopilot-time" aria-label="Simulated flight time">
           <span className="training-autopilot-time-label">Simulated flight</span>

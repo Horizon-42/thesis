@@ -104,6 +104,10 @@ describe("TrainingAutopilotCard", () => {
     const verdict = document.querySelector(".training-autopilot-verdict") as HTMLElement;
     expect(verdict.textContent).toBe("✓ inside its envelope");
     expect(verdict.style.color).toBe("rgb(37, 99, 235)");
+    // what its faded, dashed tail is: the lead flown past the next heading word
+    expect(document.querySelector(".training-autopilot-tail")!.textContent).toBe("Faded, dashed: the last 4 s, past where " +
+      "it heard the next heading word (at 20 s) — already turning to that word, still judged for this one, whose band ends a " +
+      "lead after it.");
     // the two times, side by side: the simulated flight and the computation
     expect(screen.getByLabelText("Simulated flight time").textContent).toBe("Simulated flight8.00 sobserved 8.00 s");
     expect(screen.getByLabelText("Computation time").textContent).toBe("Computed in1.24 sround trip 500 ms");

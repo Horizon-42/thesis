@@ -22,7 +22,7 @@ from aeroviz_backend.autopilot_segment.backend import FLIGHT_CACHE_SIZE, Autopil
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment, fly_batch_until, fly_until
 from aeroviz_backend.autopilot_segment.payload import (
-    SCHEMA, SEGMENT_END, band_cut_by_stop, heading_facts, heading_payload, segment_payload, track_payload,
+    SCHEMA, SEGMENT_END, band_cut_by_stop, heading_facts, heading_payload, next_word_heard_s, segment_payload, track_payload,
 )
 from aeroviz_backend.autopilot_segment.segment import (
     ModelSentence, judged_reading, model_reading, model_segment, model_sentence, model_steps_max, segment_of,
@@ -544,6 +544,8 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual(body["word"]["status"], "inside")
         self.assertIsNone(body["word"]["heading"])
         self.assertEqual(body["limits"], {"cycles": 8, "bound": {"bank_rate": 2, "bank_cap": 0}})
+        # an altitude word's segment stops before the next altitude word is told: no tail
+        self.assertIsNone(body["segment"]["nextWordHeardS"])
 
     def test_a_heading_word_carries_its_band_on_the_flown_rows_a_dynamics_failures_too(self):
         segment = segment_of(reading(), HEADING, 3, LEAD)            # said at step 3, its target 60°, stopped at 8
@@ -574,6 +576,39 @@ class PayloadTest(unittest.TestCase):
         self.assertEqual((body["word"]["status"], body["end"]["reason"]), ("inside", "dynamics_failure"))
         # the failed state is left out of the track, and the judged steps are among its points
         self.assertEqual(len(body["track"]["tS"]), cycles)
+        # the next heading word (step 6, the segment's step 3) heard on cycle 6: the track's point at 6 s + 6 × 1 s
+        self.assertEqual(body["segment"]["nextWordHeardS"], 12.0)
+        self.assertIn(12.0, body["track"]["tS"])
+
+    def test_the_tail_starts_where_the_executor_heard_the_next_word_of_the_column(self):
+        def heard(sentence_s: list[float], outcome: str = "timeout", column: int = HEADING, row: int = 3,
+                  end_row: int | None = None):
+            """The heading word said at step 3 (the next at the segment's step 3), flown on ``sentence_s``; the judge's
+            outcome at ``end_row`` (the last cycle flown by default)."""
+            segment = segment_of(reading(), column, row, LEAD)
+            cycles = len(sentence_s)
+            ended = cycles if end_row is None else end_row
+            result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, model=None,
+                                  flown=flown(sentence_s, cycles - 1),
+                                  verdict=Verdict(outcome, ended, None, {}, None, flown_rows=ended + 1),
+                                  reached_end=True, fly_s=0.0, judge_s=0.0)
+            return next_word_heard_s(result, SPEC)
+
+        # the time clock: step 3 starts on cycle 6
+        self.assertEqual(heard([float(c) for c in range(10)]), 12.0)
+        # a clock lagging the time (the track clock behind the observed aircraft): step 3 is first read on cycle 8
+        self.assertEqual(heard([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 6.0, 7.0]), 14.0)
+        # never heard before the flight ended: no tail
+        self.assertIsNone(heard([float(c) for c in range(6)]))
+        # heard as a dynamics failure's failed state, which the track leaves out, or on the track's last point (nothing
+        # is flown past it): no tail
+        self.assertIsNone(heard([float(c) for c in range(8)], "dynamics_failure", end_row=6))
+        self.assertIsNone(heard([float(c) for c in range(8)], "dynamics_failure", end_row=7))
+        self.assertIsNone(heard([float(c) for c in range(8)], "ground_contact", end_row=6))
+        self.assertEqual(heard([float(c) for c in range(8)], "dynamics_failure", end_row=8), 12.0)
+        # the column's last heading word (step 6) has no next one; a word of another column stops before its next
+        self.assertIsNone(heard([float(c) for c in range(8)], row=6))
+        self.assertIsNone(heard([float(c) for c in range(10)], column=ALTITUDE, row=0))
 
     def test_a_heading_band_the_stop_cut_short_is_refused_and_one_it_did_not_is_not(self):
         def cut(clock_s: list[float], lead: int, band_rows: int, judged_rows: int, outcome: str = "timeout"):
@@ -942,6 +977,24 @@ class ModelSegmentTest(unittest.TestCase):
         self.assertEqual(told[0], {"row": 8, "column": RUNWAY, "value": 0})
         self.assertEqual([(w["row"], w["column"]) for w in told[6:]],
                          [(10, HEADING), (12, APPROACH), (14, HEADING), (15, RUNWAY)])
+
+    def test_a_models_tail_starts_where_its_flight_heard_its_next_heading_word(self):
+        """The heading word said at 10 (the flown sentence's step 2, its track from cycle 4), the next at 14 (step 6)."""
+        segment = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)
+        reading = model_reading(signals10(), segment, self.sentence(), MODEL_WORDS)
+
+        def heard(sentence_s: list[float]):
+            cycles = len(sentence_s)
+            result = FlownSegment(segment=segment, reading=reading, signals=None, model=self.sentence(),
+                                  flown=flown(sentence_s, cycles - 1),
+                                  verdict=Verdict("timeout", cycles, None, {}, None, flown_rows=cycles + 1),
+                                  reached_end=True, fly_s=0.0, judge_s=0.0)
+            return next_word_heard_s(result, SPEC)
+
+        # the time clock: step 6 starts on cycle 12, the track's point 8 from the word's cycle 4 — at 20 s + 8 s
+        self.assertEqual(heard([float(c) for c in range(16)]), 28.0)
+        # a clock three cycles behind: heard on cycle 16, at 32 s
+        self.assertEqual(heard([max(c - 3.0, 0.0) for c in range(20)]), 32.0)
 
     def test_a_models_columns_last_word_is_flown_to_its_outcome_and_a_word_it_did_not_say_is_refused(self):
         last = model_segment(self.sentence(), SPEED, 16, LEAD, MODEL_WORDS)

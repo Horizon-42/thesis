@@ -21,6 +21,7 @@ import {
 } from "../../utils/trainingWordColors";
 import { outsideSpans, trainingKindLabel } from "../../data/trainingSample";
 import { TRAINING_OUTCOME_TAG } from "../../data/trainingText";
+import AutopilotLine from "./AutopilotLine";
 import { ChartFrame } from "./chartKit";
 import { GUTTER, PLAN_H, type ReadbackModel } from "./readbackModel";
 
@@ -119,10 +120,8 @@ export default function ReadbackPlan({ m }: { m: ReadbackModel }) {
         ) : null}
         {m.live ? (
           <g aria-label="the autopilot's flown segment">
-            <polyline points={planPoints(m.live.track)} fill="none" stroke={m.liveColour} strokeWidth={1.8}
-              className="training-readback-autopilot">
-              <title>the autopilot's flown segment, from where its word was said</title>
-            </polyline>
+            <AutopilotLine m={m} x={(index) => px(m.live!.track.eM[index])} y={(index) => py(m.live!.track.nM[index])}
+              title="the autopilot's flown segment, from where its word was said" />
             {m.liveOutside.map(([first, lastStep]) => outside(`plan-autopilot-out-${first}`,
               planPoints(m.live!.track, rows(first * m.live!.executor.stepCycles, lastStep * m.live!.executor.stepCycles)),
               "training-readback-autopilot-outside"))}

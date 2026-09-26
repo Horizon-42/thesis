@@ -18,6 +18,7 @@ import {
 } from "../../utils/trainingWordColors";
 import { outsideSpans, rowAtTime, trainingWordAt } from "../../data/trainingSample";
 import { checkMark } from "../../data/trainingText";
+import AutopilotLine from "./AutopilotLine";
 import { Axis, ChartFrame, Line, VLine } from "./chartKit";
 import { CHART_H, distanceTicks, GUTTER, PLOT_H, PLOT_TOP, type ReadbackModel } from "./readbackModel";
 
@@ -93,8 +94,9 @@ export default function ReadbackAltitude({ m, onCursorChange, onColumnChange }: 
           stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} round className="training-readback-focus" />
       ) : null}
       {m.live ? (
-        <Line xs={m.live.track.distanceM.map(xDistance)} ys={m.live.track.altitudeM.map(yAltitude)} stroke={m.liveColour}
-          width={1.8} className="training-readback-autopilot" title="the autopilot's altitude over its segment, against the distance flown" />
+        <AutopilotLine m={m} x={(index) => xDistance(m.live!.track.distanceM[index])}
+          y={(index) => yAltitude(m.live!.track.altitudeM[index])}
+          title="the autopilot's altitude over its segment, against the distance flown" />
       ) : null}
       {layers.vertical ? envelopes.altitude.flatMap((item, index) => outsideSpans(item.inside, item.row, last)
         .map(([first, lastRow]) => (

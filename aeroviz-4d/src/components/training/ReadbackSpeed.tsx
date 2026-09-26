@@ -16,6 +16,7 @@ import {
 } from "../../utils/trainingWordColors";
 import { outsideSpans } from "../../data/trainingSample";
 import { checkMark } from "../../data/trainingText";
+import AutopilotLine from "./AutopilotLine";
 import { Axis, bandRect, ChartFrame, Line, VLine } from "./chartKit";
 import { CHART_H, GUTTER, PLOT_H, PLOT_TOP, timeTicks, type ReadbackModel } from "./readbackModel";
 
@@ -91,8 +92,8 @@ export default function ReadbackSpeed({ m, onCursorChange, onColumnChange }: {
           stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} round className="training-readback-focus" />
       ) : null}
       {m.live ? (
-        <Line xs={m.live.track.tS.map(xTime)} ys={m.live.track.groundSpeedMps.map(ySpeed)} stroke={m.liveColour} width={1.8}
-          className="training-readback-autopilot" title="the autopilot's ground speed over its segment" />
+        <AutopilotLine m={m} x={(index) => xTime(m.live!.track.tS[index])} y={(index) => ySpeed(m.live!.track.groundSpeedMps[index])}
+          title="the autopilot's ground speed over its segment" />
       ) : null}
       {layers.vertical ? envelopes.speed.flatMap((span, index) => (span.arrivalRow === null || span.bandInside === null ? []
         : outsideSpans(span.bandInside, span.arrivalRow, last).map(([first, lastRow]) => (

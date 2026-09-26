@@ -55,6 +55,8 @@ export const TRAINING_ENTITY = {
   autopilotAircraft: "training-autopilot-aircraft",
   autopilotStart: "training-autopilot-start",
   autopilotGround: "training-autopilot-ground",
+  autopilotTail: "training-autopilot-tail",
+  autopilotTailGround: "training-autopilot-tail-ground",
   autopilotOutside: (run: number) => `training-autopilot-outside-${run}`,
   /** The model sentence read: each of its samples' flown tracks, the one read's ground trace, where it ended, where it
    *  said its heading words and the clearance (by the word's place in its events), and its selected word. */

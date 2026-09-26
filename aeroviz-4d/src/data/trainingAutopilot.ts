@@ -65,7 +65,7 @@ import {
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/payload.py` `SCHEMA`: the backend's answer; anything else is refused by
  *  name (the backend's `MirrorTest` pins these four). */
-export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v3";
+export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v4";
 /** MIRROR of `autopilot_segment/verdict.py` `STATUSES`: the selected word's verdict. */
 export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
 export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
@@ -191,6 +191,12 @@ export interface TrainingAutopilotSegment {
     observedS: number | null;
     /** The words the executor was told, at the flight's steps, by step then column. */
     told: Array<{ row: number; column: number; value: number }>;
+    /** When the executor heard the next word of its column, as a time of `track.tS` (the flight's clock; a point of
+     *  it, never the first or the last): past it the aircraft flies that word — a heading word's segment goes on only
+     *  because the word is judged to a lead after it (to its outcome when the sentence ends within that lead). null when
+     *  nothing is flown past it: the column's last word, another column's word (it stops before the next is told), a
+     *  flight that ended before it heard it or on the cycle it did. */
+    nextWordHeardS: number | null;
   };
   end: {
     /** `TRAINING_AUTOPILOT_SEGMENT_END`, or the judge's outcome (`TRAINING_EXECUTOR_OUTCOMES`). */
@@ -216,6 +222,8 @@ export interface TrainingAutopilotSegment {
   track: TrainingAutopilotTrack;
   /** A heading word's flown segment as the judge read it: its step k is the flight's step `segment.row + k`. */
   judgedTrackDeg: number[] | null;
+  /** The track's point at `segment.nextWordHeardS`, where its tail begins; null without one. */
+  tailFrom: number | null;
 }
 
 /** What the panel publishes for the sentence bar, the read-back window and the 3D scene. */
@@ -305,6 +313,21 @@ export function autopilotSampleGap(segment: TrainingAutopilotSegment, sample: Tr
 export function autopilotHasLine(segment: TrainingAutopilotSegment): boolean {
   return segment.track.tS.length >= 2;
 }
+
+/** The flown track's points split where the executor heard the next word of the column (`tailFrom`): the word's own
+ *  RUN, from where it was said to there, and the TAIL past it, sharing that point — a heading word's lead into the next
+ *  heading word (on to the outcome when the sentence ends within it), flown only because the word is judged to a lead
+ *  after that word — drawn faded and dashed everywhere. No tail: every point is the run. */
+export function autopilotRunAndTail(segment: TrainingAutopilotSegment): { run: number[]; tail: number[] } {
+  const points = segment.track.tS.map((_, index) => index);
+  const from = segment.tailFrom;
+  return from === null ? { run: points, tail: [] } : { run: points.slice(0, from + 1), tail: points.slice(from) };
+}
+
+/** The tail's opacity, in the charts and in 3D, and its dash in the charts (3D dashes it Cesium's way, shorter than an
+ *  occluded line's). */
+export const AUTOPILOT_TAIL_OPACITY = 0.45;
+export const AUTOPILOT_TAIL_DASH = "4 3";
 
 /** The colour a flown segment is drawn in, everywhere: red when the selected word flew outside its envelope. */
 export function autopilotColour(segment: TrainingAutopilotSegment): string {
@@ -422,7 +445,11 @@ function readSegment(
   // a model's word has no observed counterpart; the truth's has the observed aircraft's time over the same steps
   if (request.sentence !== null && segment.raw("observedS") !== null) segment.fail("gives an observed time for a model's word");
   const observedS = request.sentence === null ? segment.number("observedS") : null;
-  return { column, row, endRow, stopRow, toLanding, observedS, told };
+  const nextWordHeardS = segment.nullableNumber("nextWordHeardS");
+  if (nextWordHeardS !== null && stopRow === endRow) {
+    segment.fail(`heard the next ${column} word at ${nextWordHeardS} s, but its segment stops before that word is told`);
+  }
+  return { column, row, endRow, stopRow, toLanding, observedS, told, nextWordHeardS };
 }
 
 /** How the flight ended: at its segment's end (with its offset from the observed aircraft there — the truth's only), or
@@ -521,6 +548,13 @@ export function parseTrainingAutopilot(
     if (!Number.isInteger(stepCycles) || stepCycles < 1) executor.fail(`a ${cycleS} s cycle does not divide the ${vocabulary.stepS} s step`);
     const track = parseTrack(answer.child("track"), segment.row, vocabulary.stepS);
     const end = readEnd(answer.child("end"), segment.toLanding, flownSource.kind === "truth");
+    const heardS = segment.nextWordHeardS;
+    const tailFrom = heardS === null ? null : track.tS.findIndex((time) => Math.abs(time - heardS) <= 1e-3);
+    if (tailFrom === -1) answer.fail(`the next ${segment.column} word was heard at ${heardS} s, not a point of the flown track`);
+    // heard on the word's own first point, or on the track's last (nothing flown past it: the backend says null)
+    if (tailFrom === 0 || tailFrom === track.tS.length - 1) {
+      answer.fail(`the next ${segment.column} word was heard at ${heardS} s, the flown track's ${tailFrom === 0 ? "first" : "last"} point`);
+    }
 
     // ── the selected word's verdict: a heading word's band and the track its judge read come together ──
     const word = answer.child("word");
@@ -559,6 +593,7 @@ export function parseTrainingAutopilot(
       limits: { cycles: limits.count("cycles"), bound: limits.record("bound", asNumber) },
       track,
       judgedTrackDeg,
+      tailFrom,
     };
   });
 }

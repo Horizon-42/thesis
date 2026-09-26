@@ -10,7 +10,10 @@
  *    it out from where the word was said (`autopilotPlaybackSpeedup` × real time — at least 8×, faster for a segment
  *    that would take more than 20 s — from the moment the answer arrived or "Replay in 3D" was pressed), in blue, or a
  *    loud red when the word flew outside its envelope (`autopilotColour`), its line growing behind it and labelled with
- *    the speed-up, its ground speed, height and bank. Once flown out the line, the aircraft and its label are made
+ *    the speed-up, its ground speed, height and bank — past where it heard the next word of the column (a heading word's
+ *    lead into the next heading word, `autopilotRunAndTail`) its line and ground trace go on faded and dashed, the TAIL.
+ *    The tail is dashed shorter than an occluded line's dash and fainter still where terrain hides it, so it never reads
+ *    as the run behind a hill. Once flown out the lines, the aircraft and its label are made
  *    static (a CallbackProperty is re-evaluated, and a dynamic polyline rebuilt, every frame; and only a static line
  *    draws its dashed depth-fail material), and its ground trace is draped dashed with — for a heading word — its judged
  *    rows outside the word red.
@@ -34,6 +37,8 @@ import {
   autopilotJudgedPoints,
   autopilotOnScreen,
   autopilotPlaybackSpeedup,
+  autopilotRunAndTail,
+  AUTOPILOT_TAIL_OPACITY,
   type TrainingAutopilotView,
 } from "../data/trainingAutopilot";
 import { TRAINING_OUTCOME_TAG } from "../data/trainingText";
@@ -51,6 +56,9 @@ import {
 } from "../scene/trainingEntities";
 
 type Ready = Extract<TrainingAutopilotView, { status: "ready" }>;
+
+/** The tail's dash in 3D, pixels: half Cesium's default (16), which an occluded line is drawn with. */
+const TAIL_DASH_PX = 8;
 
 /** Show or hide the entities of ``ids`` that are there. */
 function showEntities(viewer: Cesium.Viewer, ids: string[], shown: boolean): void {
@@ -100,11 +108,24 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
   const now = () => autopilotFlownAt(track, ((Date.now() - playedAt) / 1000) * speedup);
   const aircraftAt = ({ index, fraction }: { index: number; fraction: number }) => (index === last
     ? positions[last] : Cesium.Cartesian3.lerp(positions[index], positions[index + 1], fraction, new Cesium.Cartesian3()));
-  const line = group.add(airLine(TRAINING_ENTITY.autopilotTrack, "The autopilot's flown segment",
-    new Cesium.CallbackProperty(() => {
-      const at = now();
-      return at.index === last ? positions : [...positions.slice(0, at.index + 1), aircraftAt(at)];
-    }, false), hue, 4));
+  // the run solid to where the next word of the column was heard, the tail past it faded and dashed
+  const { run, tail } = autopilotRunAndTail(segment);
+  const runLast = run[run.length - 1];
+  const grown = (from: number, to: number) => new Cesium.CallbackProperty(() => {
+    const at = now();
+    if (at.index >= to) return positions.slice(from, to + 1);
+    return at.index < from ? [] : [...positions.slice(from, at.index + 1), aircraftAt(at)];
+  }, false);
+  const line = group.add(airLine(TRAINING_ENTITY.autopilotTrack, "The autopilot's flown segment", grown(0, runLast), hue, 4));
+  const tailLine = tail.length < 2 ? null : group.add({
+    id: TRAINING_ENTITY.autopilotTail,
+    name: `The autopilot past where it heard the next ${segment.segment.column} word: already flying that word, still judged for this one`,
+    polyline: {
+      positions: grown(runLast, last), width: 3,
+      material: new Cesium.PolylineDashMaterialProperty({ color: colour(hue, AUTOPILOT_TAIL_OPACITY), dashLength: TAIL_DASH_PX }),
+      depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: colour(hue, AUTOPILOT_TAIL_OPACITY / 2), dashLength: TAIL_DASH_PX }),
+    },
+  });
   group.add({
     id: TRAINING_ENTITY.autopilotStart,
     name: segment.source.kind === "truth" ? "Where the autopilot took over: the observed state as the word was said"
@@ -128,11 +149,17 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
   });
   const land = () => {
     if (!isCesiumViewerUsable(viewer)) return;
-    line.polyline!.positions = new Cesium.ConstantProperty(positions);
+    line.polyline!.positions = new Cesium.ConstantProperty(positions.slice(0, runLast + 1));
+    if (tailLine !== null) tailLine.polyline!.positions = new Cesium.ConstantProperty(positions.slice(runLast));
     aircraft.position = new Cesium.ConstantPositionProperty(positions[last]);
     aircraft.label!.text = new Cesium.ConstantProperty(autopilotAircraftLabel(track, last, speedup));
-    group.add(groundLine(TRAINING_ENTITY.autopilotGround, "The autopilot's ground trace", planDegrees(track), 2,
+    const on = (points: number[]) => ({ lon: points.map((index) => track.lon[index]), lat: points.map((index) => track.lat[index]) });
+    group.add(groundLine(TRAINING_ENTITY.autopilotGround, "The autopilot's ground trace", planDegrees(on(run)), 2,
       new Cesium.PolylineDashMaterialProperty({ color: colour(hue, 0.6) })));
+    if (tail.length >= 2) {
+      group.add(groundLine(TRAINING_ENTITY.autopilotTailGround, "The autopilot's ground trace past the next word", planDegrees(on(tail)), 2,
+        new Cesium.PolylineDashMaterialProperty({ color: colour(hue, 0.6 * AUTOPILOT_TAIL_OPACITY) })));
+    }
     const band = segment.word.heading;
     if (band === null) return;
     // the band's rows are the flight's; the judged points begin at the segment's first step

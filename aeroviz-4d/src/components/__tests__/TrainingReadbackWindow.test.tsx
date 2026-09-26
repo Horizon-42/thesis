@@ -275,9 +275,17 @@ describe("the live executor in the read-back check", () => {
     // plan, heading, altitude, speed
     expect(count("polyline.training-readback-autopilot")).toBe(4);
     expect(count("rect.training-readback-autopilot-band")).toBe(1);
+    // each goes on faded and dashed past where it heard the next heading word (20 s): the run's 5 points to it, the
+    // tail's 5 from it
+    expect(count("polyline.training-readback-autopilot-tail")).toBe(4);
+    const heading = screen.getByLabelText("Heading chart");
+    const points = (selector: string) => heading.querySelector(selector)!.getAttribute("points")!.split(" ").length;
+    expect([points("polyline.training-readback-autopilot"), points("polyline.training-readback-autopilot-tail")]).toEqual([5, 5]);
+    const tail = heading.querySelector("polyline.training-readback-autopilot-tail")!;
+    expect([tail.getAttribute("stroke-dasharray"), tail.getAttribute("stroke-opacity")]).toEqual(["4 3", "0.45"]);
     // one line, naming the word it flew — whichever word is selected now
     expect(screen.getByLabelText("The autopilot, live").textContent)
-      .toBe("Autopilot — heading 225° from step 8 · ✓ inside its envelope · solid blue");
+      .toBe("Autopilot — heading 225° from step 8 · ✓ inside its envelope · solid blue, then a faded dashed tail");
     cleanup();
     open(ALL, 0, 60, "speed", null, autopilotSegment());
     expect(screen.getByLabelText("The autopilot, live").textContent).toMatch(/^Autopilot — heading 225° from step 8/);

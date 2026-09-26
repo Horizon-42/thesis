@@ -9,6 +9,7 @@ import { parseTrainingSample, TRAINING_UNCHANGED, type TrainingSample } from "..
 import {
   autopilotHasLine,
   autopilotOnScreen,
+  autopilotRunAndTail,
   autopilotSampleGap,
   parseTrainingAutopilot,
   requestTrainingAutopilot,
@@ -18,6 +19,7 @@ import {
   TRAINING_AUTOPILOT_PATH,
   TRAINING_AUTOPILOT_SCHEMA,
   TRAINING_AUTOPILOT_SEGMENT_END,
+  type TrainingAutopilotRequest,
 } from "../trainingAutopilot";
 import { VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
 import {
@@ -34,7 +36,7 @@ function sample(): TrainingSample {
 
 const HEADING_225 = { column: "heading" as const, row: 8 };
 
-function refusal(change: (raw: any) => void, request = HEADING_225): string {
+function refusal(change: (raw: any) => void, request: { column: TrainingAutopilotRequest["column"]; row: number } = HEADING_225): string {
   const set = sample();
   const asked = mockAutopilotRequest(set, VECTORED_KEY, request.column, request.row);
   const raw = mockAutopilotAnswer(set, asked);
@@ -168,6 +170,29 @@ describe("parseTrainingAutopilot", () => {
     expect(segment.executor.stepCycles).toBe(2);
     // the next heading word, said at step 10, is among the words told
     expect(segment.segment.told.some((word) => word.row === 10 && word.column === 2)).toBe(true);
+    // ... heard at 20 s: the track's point 4, where the tail (the lead flown into it) begins, shared by both parts
+    expect([segment.segment.nextWordHeardS, segment.tailFrom]).toEqual([20, 4]);
+    expect(autopilotRunAndTail(segment)).toEqual({ run: [0, 1, 2, 3, 4], tail: [4, 5, 6, 7, 8] });
+  });
+
+  it("has no tail where the flight stops before the next word of its column is told", () => {
+    const set = sample();
+    for (const [column, row] of [["runway", 0], ["altitude", 0]] as const) {
+      const request = mockAutopilotRequest(set, VECTORED_KEY, column, row);
+      const parsed = parseTrainingAutopilot(mockAutopilotAnswer(set, request), request, mockSelection(set, request));
+      if (!parsed.ok) throw new Error(parsed.problem);
+      expect([parsed.value.segment.nextWordHeardS, parsed.value.tailFrom]).toEqual([null, null]);
+      expect(autopilotRunAndTail(parsed.value).tail).toEqual([]);
+    }
+  });
+
+  it("refuses a next word heard off the flown track, or by a segment that stops before it is told", () => {
+    expect(refusal((raw) => { raw.segment.nextWordHeardS = 20.5; })).toMatch(/heard at 20\.5 s, not a point of the flown track/);
+    // nothing flown past it, or heard where the word itself was
+    expect(refusal((raw) => { raw.segment.nextWordHeardS = 24; })).toMatch(/heard at 24 s, the flown track's last point/);
+    expect(refusal((raw) => { raw.segment.nextWordHeardS = 16; })).toMatch(/heard at 16 s, the flown track's first point/);
+    expect(refusal((raw) => { raw.segment.nextWordHeardS = 0; }, { column: "altitude", row: 0 }))
+      .toMatch(/heard the next altitude word at 0 s, but its segment stops before that word is told/);
   });
 
   it("reads a column's last word, flown to its outcome", () => {

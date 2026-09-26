@@ -4,8 +4,8 @@
  * IMPORTED from the reader, never restated; the words told are the sentence's own (`segmentWords`).
  *
  * The flown track is a straight line at 1 s cycles from the segment's first step to its stop (`segmentStopRow`: a
- * heading word's a lead past the next heading word); a heading word carries its band from its step plus the lead to the
- * next heading word's plus the lead, every row inside. A MODEL's word (`mockModelAutopilotRequest`, a sample of the
+ * heading word's a lead past the next heading word, heard on the time clock at its own step — the tail); a heading word
+ * carries its band from its step plus the lead to the next heading word's plus the lead, every row inside. A MODEL's word (`mockModelAutopilotRequest`, a sample of the
  * generation fixture) is answered the same way over the model's sentence, with no observed time and no offset from the
  * observed aircraft.
  */
@@ -81,6 +81,9 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
     segment: {
       column: request.column, row: run.row, endRow: run.endRow, stopRow, toLanding, observedS: model === null ? steps * stepS : null,
       told: segmentWords(request, flight, stopRow),
+      // a heading word flown on past the next heading word hears it at its step (one-second cycles from the word's step);
+      // heard on the track's last point, nothing is flown past it
+      nextWordHeardS: stopRow > run.endRow && run.endRow * stepS < tS[n - 1] ? run.endRow * stepS : null,
     },
     end: toLanding
       ? { reason: "landed", reachedSegmentEnd: null, offsetFromObserved: null, flownS: cycles,
@@ -132,6 +135,10 @@ export function failedAnswer(answer: Record<string, any>, states: number): Recor
   }
   answer.timing.cycles = states;                     // the failed cycle is counted
   answer.limits.cycles = states;
+  // a next word heard at or after the failure has nothing flown past it
+  if (answer.segment.nextWordHeardS !== null && answer.segment.nextWordHeardS >= track.tS[track.tS.length - 1]) {
+    answer.segment.nextWordHeardS = null;
+  }
   answer.end = { reason: "dynamics_failure", reachedSegmentEnd: false, offsetFromObserved: null, flownS: states - 1,
     crossing: null, refused: states === 1 ? "the flown track is too short to judge" : null };
   if (states === 1) {

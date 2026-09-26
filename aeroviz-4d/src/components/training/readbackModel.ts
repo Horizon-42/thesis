@@ -23,7 +23,7 @@ import {
   type TrainingVocabulary,
 } from "../../data/trainingSample";
 import type { TrainingExecutorFlight } from "../../data/trainingOverlays";
-import { autopilotColour, autopilotHasLine, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
+import { autopilotColour, autopilotHasLine, autopilotRunAndTail, type TrainingAutopilotSegment } from "../../data/trainingAutopilot";
 
 export const GUTTER = 64;
 export const PAD_R = 16;
@@ -83,6 +83,8 @@ export function readbackModel({ flight, vocabulary, candidates, layers, cursorS,
   // step k is the flight's step `row + k`, the flown track's point k × `stepCycles` ──
   const live = autopilot !== null && autopilotHasLine(autopilot) ? autopilot : null;
   const liveColour = live === null ? TRAINING_AUTOPILOT_COLOR : autopilotColour(live);
+  // its points drawn solid (the word's run) and faded (the tail past the next word of its column)
+  const { run: liveRun, tail: liveTail } = live === null ? { run: [], tail: [] } : autopilotRunAndTail(live);
   const liveBand = live?.word.heading ?? null;
   const liveJudged = live?.judgedTrackDeg ?? null;
   /** Its rows outside its heading band, as [first, last] judged steps. */
@@ -171,7 +173,7 @@ export function readbackModel({ flight, vocabulary, candidates, layers, cursorS,
   return {
     flight, vocabulary, candidates, layers, cursorS, column, last, cursorRow, designated, label, inForce,
     flown, flownTrack, judgedTrack, flownBands,
-    live, liveColour, liveBand, liveJudged, liveOutside,
+    live, liveColour, liveRun, liveTail, liveBand, liveJudged, liveOutside,
     focus, focused, approachFocused, recede, focusRows, capture, captureOk,
     width, plotW, endS, xTime, timeAtX, edge, rowX, flownEdge, distanceEnd, xDistance, distanceAtX, rowXDistance,
     px, py, planPoints, rows, at,

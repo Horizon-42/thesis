@@ -16,7 +16,7 @@ import { VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fi
 import { EXECUTOR_ID, mockExecutorOverlay, mockOverlayEntry } from "../../data/__tests__/trainingOverlays.fixture";
 import { failedAnswer, mockAutopilotAnswer, mockAutopilotRequest } from "../../data/__tests__/trainingAutopilot.fixture";
 import { parseTrainingExecutorOverlay } from "../../data/trainingOverlays";
-import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
+import { AUTOPILOT_TAIL_OPACITY, parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import useTrainingTrackLayer from "../../hooks/useTrainingTrackLayer";
 import { TRAINING_ENTITY } from "../../scene/trainingEntities";
 import {
@@ -280,12 +280,29 @@ describe("Training envelopes in the 3D scene", () => {
       expect(line.positions).toBeInstanceOf(Cesium.CallbackProperty);
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotAircraft)).toBeDefined();
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotGround)).toBeUndefined();
+      // in flight: before the split (heard at point 4) the run grows and the tail is empty; past it the run holds its
+      // five points and the tail grows from the split
+      const tailFlying = scene.entities.getById(TRAINING_ENTITY.autopilotTail)!.polyline!;
+      const flying = (property: Cesium.Property) => property.getValue(Cesium.JulianDate.now()) as Cesium.Cartesian3[];
+      act(() => vi.advanceTimersByTime(250));                // 2 s flown: at point 2
+      expect([flying(line.positions!).length, flying(tailFlying.positions!).length]).toEqual([4, 0]);
+      act(() => vi.advanceTimersByTime(450));                // 5.6 s flown: between points 5 and 6
+      expect([flying(line.positions!).length, flying(tailFlying.positions!).length]).toEqual([5, 3]);
       // 8 s flown at 8×: done after one second
-      act(() => vi.advanceTimersByTime(1100));
+      act(() => vi.advanceTimersByTime(400));
       expect(line.positions).toBeInstanceOf(Cesium.ConstantProperty);
-      expect(line.positions!.getValue(Cesium.JulianDate.now())).toHaveLength(answer.value.track.tS.length);
+      // the word's run solid to where it heard the next heading word; the tail past it (the lead) faded and dashed,
+      // sharing that point
+      const tailFrom = answer.value.tailFrom!;
+      expect(answer.value.track.tS[tailFrom]).toBe(answer.value.segment.nextWordHeardS);
+      expect(line.positions!.getValue(Cesium.JulianDate.now())).toHaveLength(tailFrom + 1);
+      const tail = scene.entities.getById(TRAINING_ENTITY.autopilotTail)!.polyline!;
+      expect(tail.positions!.getValue(Cesium.JulianDate.now())).toHaveLength(answer.value.track.tS.length - tailFrom);
+      expect(tail.material).toBeInstanceOf(Cesium.PolylineDashMaterialProperty);
+      expect(tail.material.getValue(Cesium.JulianDate.now()).color.alpha).toBeCloseTo(AUTOPILOT_TAIL_OPACITY);
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotAircraft)!.position).toBeInstanceOf(Cesium.ConstantPositionProperty);
       expect(scene.entities.getById(TRAINING_ENTITY.autopilotGround)).toBeDefined();
+      expect(scene.entities.getById(TRAINING_ENTITY.autopilotTailGround)).toBeDefined();
       expect(scene.colourOf(TRAINING_ENTITY.autopilotOutside(0))).toEqual(scene.css(TRAINING_OUTSIDE_COLOR));
       // "Replay in 3D": the same answer flown out anew — what the landing drew goes, and nothing is added twice
       const ids = () => scene.entities.values.map((entity) => entity.id).filter((id) => id.startsWith("training-autopilot")).sort();

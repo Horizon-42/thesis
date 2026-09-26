@@ -24,7 +24,9 @@
  * THE EXECUTOR'S REPLAY (`executor`, dashed teal) runs on its OWN clock and distance flown — it flies at its own pace,
  * so the axes hold both and nothing is aligned; its heading bands are drawn from where IT was told each word. THE LIVE
  * SEGMENT (`autopilot`, solid, blue or red by its verdict) starts where the observed aircraft was when its word was said,
- * on the flight's clock, so its lines begin on the observed ones and part from them. Each says what it is in one line
+ * on the flight's clock, so its lines begin on the observed ones and part from them; past where it heard the next word
+ * of its column (a heading word's lead into the next heading word) it goes on faded and dashed, its TAIL. Each says what
+ * it is in one line
  * below the charts, only when it is there.
  */
 
@@ -49,7 +51,7 @@ import {
   type TrainingVocabulary,
 } from "../data/trainingSample";
 import type { TrainingExecutorFlight } from "../data/trainingOverlays";
-import { autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
+import { AUTOPILOT_TAIL_DASH, AUTOPILOT_TAIL_OPACITY, autopilotColour, type TrainingAutopilotSegment } from "../data/trainingAutopilot";
 import { TRAINING_OUTCOME_TAG, TRAINING_VERDICT_TEXT } from "../data/trainingText";
 import useMeasuredWidth from "../hooks/useMeasuredWidth";
 import TrainingWindow from "./training/TrainingWindow";
@@ -122,6 +124,10 @@ function footerSwatches(m: ReadbackModel): Array<{ key: string; swatch: Swatch; 
       text: "executor replay", title: "the executor's replay, on its own clock" }] : []),
     ...(m.live ? [{ key: "autopilot", swatch: { kind: "line", colour: m.liveColour } as Swatch, text: "autopilot",
       title: "the picked word's segment, flown live" }] : []),
+    ...(m.liveTail.length >= 2 ? [{ key: "autopilot-tail",
+      swatch: { kind: "line", colour: m.liveColour, dash: AUTOPILOT_TAIL_DASH, opacity: AUTOPILOT_TAIL_OPACITY } as Swatch,
+      text: "autopilot tail",
+      title: "past where it heard the next word of the column: already flying that word, still judged for the picked one" }] : []),
   ];
 }
 
@@ -166,7 +172,7 @@ export default function TrainingReadbackWindow(props: TrainingReadbackWindowProp
                 <strong style={{ color: autopilotColour(live) }}>Autopilot</strong> — {live.segment.column} {liveWord} from step{" "}
                 {live.segment.row} · {TRAINING_VERDICT_TEXT[live.word.status]} ·{" "}
                 {m.live === null ? "no line to draw: it ended in its first cycle"
-                  : `solid ${live.word.status === "outside" ? "red" : "blue"}`}
+                  : `solid ${live.word.status === "outside" ? "red" : "blue"}${m.liveTail.length >= 2 ? ", then a faded dashed tail" : ""}`}
               </p>
             ) : null}
           </div>

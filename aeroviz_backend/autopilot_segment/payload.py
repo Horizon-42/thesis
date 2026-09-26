@@ -31,7 +31,7 @@ from aeroviz_backend.autopilot_segment.verdict import HeadingFacts, selected_hea
 
 #: MIRROR of `aeroviz-4d/src/data/trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SCHEMA`); the reader refuses anything
 #: else by name. A name changes with the payload's shape, on both sides, in one change.
-SCHEMA = "aeroviz-autopilot-segment-v3"
+SCHEMA = "aeroviz-autopilot-segment-v4"
 #: The end of a segment flown to its ``stopRow``: the executor reached it. Otherwise the end is the judge's outcome
 #: (`judge.OUTCOMES`, mirrored by `trainingOverlays.ts`'s `TRAINING_EXECUTOR_OUTCOMES`). MIRROR of `trainingAutopilot.ts`
 #: (`TRAINING_AUTOPILOT_SEGMENT_END`).
@@ -47,6 +47,28 @@ def word_cycle(result: FlownSegment, step_s: float) -> int:
     """The flown state the selected word's segment starts at: its step in the flown sentence, in cycles (0 for the
     truth's)."""
     return result.segment.word_step * int(round(step_s / result.flown.cycle_s))
+
+
+def next_word_heard_s(result: FlownSegment, spec: Any) -> float | None:
+    """When the executor heard the next word of the selected word's column, as a time of `track_payload`'s ``tS`` (the
+    flight's clock; a point of it, and never its last): past it the aircraft flies the next word, and a heading word's
+    segment flies on only because the word is judged to a lead after it (`segment.segment_of`) — to its outcome when the
+    sentence ends within that lead — so the views draw that stretch as the segment's tail. None when nothing is flown
+    past it: the column's last word; a word of another column (its segment stops before the next word of its column is
+    told); a flight that ended before it heard it, or on the cycle it did."""
+    segment = result.segment
+    told = [index for index, word in enumerate(result.reading.instructions)
+            if word.column == segment.column and word.row == segment.end_row - segment.start_row]
+    if not told:
+        return None
+    (index,) = told
+    said = words_said(result.flown, 0, result.reading, spec)
+    cycle = said.cycles[index]
+    # never heard (the judge's own rule), or heard on the track's last point — or a failed state it leaves out
+    if cycle >= said.n_cycles or cycle >= end_state_row(result.verdict):
+        return None
+    step_s = spec.step_s
+    return round(segment.row * step_s + (cycle - word_cycle(result, step_s)) * result.flown.cycle_s, 3)
 
 
 def track_payload(result: FlownSegment, context: FlightContext, step_s: float) -> tuple[dict[str, Any], float]:
@@ -175,6 +197,8 @@ def segment_payload(result: FlownSegment, context: FlightContext, words: Words) 
         "segment": {
             "column": COLUMNS[segment.column], "row": segment.row, "endRow": segment.end_row,
             "stopRow": segment.stop_row, "toLanding": segment.to_landing, "observedS": None if observed_s is None else round(observed_s, 3),
+            # where the flight goes on past the word's run (a heading word's lead): the views draw it as a faded tail
+            "nextWordHeardS": next_word_heard_s(result, spec),
             "told": told_words(segment),
         },
         "end": {

@@ -22,6 +22,7 @@ import {
 } from "../../utils/trainingWordColors";
 import { outsideSpans, trainingWordAt } from "../../data/trainingSample";
 import { checkMark } from "../../data/trainingText";
+import AutopilotLine from "./AutopilotLine";
 import { Axis, bandRect, ChartFrame, Line, VLine } from "./chartKit";
 import { CHART_H, GUTTER, judged, PLOT_H, PLOT_TOP, timeTicks, type ReadbackModel } from "./readbackModel";
 
@@ -145,8 +146,8 @@ export default function ReadbackHeading({ m, onCursorChange, onColumnChange }: {
           stroke={TRAINING_WORD_COLOR} width={2.6} opacity={0.9} round className="training-readback-focus" />
       ) : null}
       {m.live ? (
-        <Line xs={m.live.track.tS.map(xTime)} ys={m.live.track.trackDeg.map(yHeading)} stroke={m.liveColour} width={1.8}
-          className="training-readback-autopilot" title="the autopilot's track over its segment" />
+        <AutopilotLine m={m} x={(index) => xTime(m.live!.track.tS[index])} y={(index) => yHeading(m.live!.track.trackDeg[index])}
+          title="the autopilot's track over its segment" />
       ) : null}
       {/* the rows each band judged outside: the observed track's, and the executor's as its judge read it */}
       {layers.headingBands ? envelopes.heading.flatMap((item, index) => outsideSpans(item.inside, item.firstRow, last)
