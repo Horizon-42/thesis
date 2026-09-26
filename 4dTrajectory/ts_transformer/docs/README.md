@@ -7,7 +7,7 @@
 | 要做的事 | 读 |
 |---|---|
 | 接手两层模型（现行研究线） | [`two_tier/two_tier_stage_notes.zh.md`](two_tier/two_tier_stage_notes.zh.md)：每个阶段做到哪、现行产物、用户的决定、下一步 |
-| 两层模型的设计 | [`two_tier/two_tier_framework.zh.md`](two_tier/two_tier_framework.zh.md)（分层、包、产物、门）→ [`instruction_vocabulary_design`](two_tier/instruction_vocabulary_design.zh.md)（词、包络、标注器、取值）→ [`executor_design`](two_tier/executor_design.zh.md) → [`prior_design`](two_tier/prior_design.zh.md) → [`post_training_design`](two_tier/post_training_design.zh.md) |
+| 两层模型的设计 | [`two_tier/two_tier_framework.zh.md`](two_tier/two_tier_framework.zh.md)（分层、包、产物、门）→ [`instruction_vocabulary_design`](two_tier/instruction_vocabulary_design.zh.md)（词、包络、标注器、取值）→ [`executor_design`](two_tier/executor_design.zh.md) → [`prior_design`](two_tier/prior_design.zh.md) → [`post_training_design`](two_tier/post_training_design.zh.md) → [`multi_aircraft_design`](two_tier/multi_aircraft_design.zh.md)（多机：情境、扩充、间隔、排序；草稿） |
 | 两层模型的读数 | [`two_tier/readouts/2026-09-24_prior_readouts.zh.md`](two_tier/readouts/2026-09-24_prior_readouts.zh.md)（先验、后训练、重建后的重读）；词表第一版的读数 `two_tier/readouts/2026-09-23_instruction_labels_readout.zh.md`（记录） |
 | 包的契约、默认值、布局、runner、陷阱的全文 | [`reference/`](reference/)，按编号查（`grep -n '^### C7 ·' reference/*.md`）；单模型路径 2026-09-10 以前的证据在 [`reference/ENGINEERING_NOTES.md`](reference/ENGINEERING_NOTES.md) |
 | 发布一次实验 | [`experiments/intents.json`](experiments/intents.json)（没有条目，发布脚本拒绝）和代码仍在的实验的配置（`experiments/*_arms.json`） |

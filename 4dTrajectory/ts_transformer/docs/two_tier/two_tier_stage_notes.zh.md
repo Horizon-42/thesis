@@ -27,7 +27,7 @@ landing 起，切入前加了两条硬约束（决断高度、跌破入口高度
 | 4 回放门 | v10 训练集每格都过（落地 99.74 %、词在包络内 97.83 %、evaluation 98.41 %）；验证集回放门最后一次跑在 v6 上（落地 99.9 %、词 98.0 %、evaluation 98.6 %），v9、v10 上没重跑验证集回放门 | 执行器设计 §11 |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/two_tier/prior_design.zh.md`、`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md` §3–§5 |
 | 6 后训练 | 第一阶段**采用**（landing，`prior/v3_rl_20260925/grpo_s1337/round_01`）；闭环监督微调（CAT-K）不采用；第二阶段上一版不采用（§4.3），**新配方 + 截断的比在跑**（§4.4、§9） | `docs/two_tier/post_training_design.zh.md`；读数文档（`docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`）§6–§16 |
-| 7 多机 | 没开始；按场景做的设计已在先验设计 §3、§9 第 2–5 步 | 先验设计 |
+| 7 多机 | 设计草稿写好（2026-09-26），等用户确认；代码没开始，不碰正在跑的第二阶段 | `docs/two_tier/multi_aircraft_design.zh.md`（§9 是要用户定的事） |
 | 前端 / 后端 | Training 视图有按运行日划分的集和叠加层；后端在执行器 v10 合并（`9557315d`）之前启动，**重启后才用 v10**（§7） | §7 |
 
 ---
