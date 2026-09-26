@@ -194,7 +194,7 @@ function ModelLine({ overlay, text, chosen, flights, indent }: {
       <input type="radio" name="training-source" checked={chosen}
         onChange={() => setTrainingSource({ overlayId: overlay.overlayId, sample: 0 })} />
       {indent ? null : <span className="training-model-swatch" style={{ background: trainingModelColour(overlay.model) }} />}
-      {text}
+      <span className="training-model-name">{text}</span>
       {count !== null ? (
         <span className="training-model-count" title={`of the ${count.flights} sentences it said over the set's flights ` +
           "(each flown by the executor from its first predicted step), those that landed"}>
@@ -242,7 +242,7 @@ function ModelSentences({ items, setId, airport, flights }: {
         <div key={group.key} className="training-model-group" role="group" aria-label={`${group.title}: the rounds published`}>
           <span className="training-model training-model-heading">
             <span className="training-model-swatch" style={{ background: trainingModelColour(group) }} />
-            {group.title}
+            <span className="training-model-name">{group.title}</span>
           </span>
           {group.members.map((overlay) => (
             <ModelLine key={overlay.overlayId} overlay={overlay} text={`r${overlay.model.round}`}

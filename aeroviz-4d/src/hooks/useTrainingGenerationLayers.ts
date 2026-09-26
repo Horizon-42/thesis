@@ -29,7 +29,8 @@ import {
   generatedRowAt,
   generatedTrackRows,
   generationOnScreen,
-  trainingModelLabel,
+  overlayOnScreen,
+  trainingModelGroups,
   type TrainingGeneratedSentence,
   type TrainingGenerationView,
 } from "../data/trainingOverlays";
@@ -54,11 +55,10 @@ import {
 } from "../scene/trainingEntities";
 
 /** Every sample of the model over the flight, the one read solid, its ground trace, end and word issues. */
-function buildModel(viewer: Cesium.Viewer, view: TrainingGenerationView, read: TrainingGeneratedSentence,
+function buildModel(viewer: Cesium.Viewer, view: TrainingGenerationView, label: string, read: TrainingGeneratedSentence,
   selection: TrainingSelection): () => void {
   const group = entityGroup(viewer);
   const css = trainingModelColour(view.overlay.model);
-  const label = trainingModelLabel(view.overlay.model);
   for (const item of view.flight.samples) {
     if (item.sample === read.sample) continue;
     group.add({
@@ -120,14 +120,18 @@ export default function useTrainingGenerationLayers(): void {
   const shown = generationOnScreen(trainingGenerations, trainingSource, selection);
   const view = shown?.view ?? null;
   const read = shown?.sentence ?? null;
+  // named as the bar names it: the run or the overlay id said when another published model has the same name
+  const label = view === null ? null : trainingModelGroups(
+    trainingGenerations.flatMap((item) => overlayOnScreen(item, selection) ?? []), (item) => item.overlay,
+  ).find((group) => group.members.includes(view))!.memberLabel(view);
 
   useEffect(() => {
     if (!isCesiumViewerUsable(viewer) || view === null || read === null || selection === null) return;
-    const remove = buildModel(viewer, view, read, selection);
+    const remove = buildModel(viewer, view, label!, read, selection);
     return () => {
       if (isCesiumViewerUsable(viewer)) remove();
     };
-  }, [viewer, view, read, selection]);
+  }, [viewer, view, label, read, selection]);
 
   const word = read !== null && selection !== null && trainingColumn !== null
     ? sentenceWordAt(read, trainingColumn, generatedRowAt(selection.vocabulary.stepS, trainingCursorS)) : null;

@@ -255,9 +255,12 @@ describe("the models grouped for the views", () => {
     const restart = inRun(AUGMENTED_R1_ID, "restart_r1", "v3_restart/aug_s1");
     expect(named([...models([BASE_MODEL_ID, AUGMENTED_R2_ID, AUGMENTED_R1_ID]), restart])).toEqual([
       ["base", ["base"]],
-      ["augmented · v3_restart/aug_s1", ["augmented r1 · v3_restart/aug_s1"]],
-      ["augmented · v3_stage2/aug_s1", ["augmented r1 · v3_stage2/aug_s1", "augmented r2 · v3_stage2/aug_s1"]],
+      ["augmented · v3_restart", ["augmented r1 · v3_restart"]],
+      ["augmented · v3_stage2", ["augmented r1 · v3_stage2", "augmented r2 · v3_stage2"]],
     ]);
+    // two seeds of one campaign: the whole run
+    const seed = inRun(AUGMENTED_R1_ID, "seed_r1", "v3_stage2/aug_s2");
+    expect(named([read(AUGMENTED_R1_ID), seed]).map(([title]) => title)).toEqual(["augmented · v3_stage2/aug_s1", "augmented · v3_stage2/aug_s2"]);
     expect(trainingRunName("4dTrajectory/outputs/POOLED/prior/v3_rl/grpo_s1")).toBe("v3_rl/grpo_s1");
   });
 

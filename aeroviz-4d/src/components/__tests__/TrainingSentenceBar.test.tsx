@@ -40,7 +40,7 @@ import TrainingSentenceBar, { spacedLabels } from "../TrainingSentenceBar";
 import { parseTrainingSample, trainingSelectionOf, TRAINING_COLUMNS } from "../../data/trainingSample";
 import { MOCK_ROWS, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import { EXECUTOR_ID, PRIOR_ID, mockExecutorOverlay, mockOverlayEntry, mockPriorOverlay } from "../../data/__tests__/trainingOverlays.fixture";
-import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay } from "../../data/trainingOverlays";
+import { parseTrainingExecutorOverlay, parseTrainingPriorOverlay, type TrainingGenerationView } from "../../data/trainingOverlays";
 import {
   AUGMENTED_R1_ID, AUGMENTED_R2_ID, BASE_MODEL_ID, POST_TRAINED_ID, mockGenerationViews,
 } from "../../data/__tests__/trainingOverlays.fixture";
@@ -151,14 +151,14 @@ describe("TrainingSentenceBar", () => {
   it("names two runs of one stage by their runs, each a tab of its own even with one round", () => {
     select();
     generations(0, undefined, [AUGMENTED_R1_ID]);
-    const [clip] = appState.trainingGenerations;
+    const [clip] = appState.trainingGenerations as TrainingGenerationView[];
     const restart = { ...clip, overlay: { ...clip.overlay, overlayId: "restart_r1",
       model: { ...clip.overlay.model, run: "4dTrajectory/outputs/POOLED/prior/v3_restart/aug_s1" } } };
     appState.trainingGenerations = [clip, restart];
     render(<TrainingSentenceBar />);
     const tabs = screen.getByRole("group", { name: "Which sentence is read" });
     expect([...tabs.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
-      "Truth", "augmented r1 · v3_restart/aug_s1", "augmented r1 · v3_stage2/aug_s1"]);
+      "Truth", "augmented r1 · v3_restart", "augmented r1 · v3_stage2"]);
   });
 
   it("offers the truth's windows only on its tab: they read the truth, not the model's words", () => {

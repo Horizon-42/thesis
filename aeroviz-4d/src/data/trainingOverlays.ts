@@ -432,12 +432,20 @@ export function trainingRunName(run: string): string {
   return run.slice(run.indexOf(PRIOR_RUNS) + PRIOR_RUNS.length);
 }
 
+/** A run named as briefly as tells it from ``runs`` (its stage's others): its campaign directory
+ *  (``v3_stage2_clip_20260926``), or its whole name when two runs share that. */
+function shortRunName(run: string, runs: string[]): string {
+  const campaign = (item: string) => trainingRunName(item).split("/")[0];
+  return runs.filter((other) => campaign(other) === campaign(run)).length > 1 ? trainingRunName(run) : campaign(run);
+}
+
 /** Where every prior run lives, as the exporter writes ``run`` (from `4dTrajectory/outputs/` on). */
 const PRIOR_RUNS = "/prior/";
 
 /** One model of a set's published sentences — a name and the run its rounds come from — with every round published,
  *  each round once (base: its one member); ``title`` names it (its tab), ``memberLabel`` each member (its line, its
- *  table row, its legend). The run is said when another group has the same name (two runs of a stage). An overlay that
+ *  table row, its legend). The run is said — by its campaign directory, whole when that is shared — when another group
+ *  has the same name (two runs of a stage). An overlay that
  *  repeats a round already published for its run (the same checkpoint exported twice) is a group of its own, named
  *  with its overlay id — two "r3" would say nothing. */
 export interface TrainingModelGroup<T> {
@@ -470,8 +478,8 @@ export function trainingModelGroups<T>(items: T[], overlayOf: (item: T) => Train
   return ordered.map(({ key, members }) => {
     const { name, run } = modelOf(members[0]);
     const twin = repeated.has(roundKey(members[0]));
-    const runs = new Set(items.filter((item) => modelOf(item).name === name).map((item) => modelOf(item).run));
-    const qualifier = twin ? ` · ${overlayOf(members[0]).overlayId}` : runs.size > 1 ? ` · ${trainingRunName(run)}` : "";
+    const runs = [...new Set(items.filter((item) => modelOf(item).name === name).map((item) => modelOf(item).run))];
+    const qualifier = twin ? ` · ${overlayOf(members[0]).overlayId}` : runs.length > 1 ? ` · ${shortRunName(run, runs)}` : "";
     return {
       key, name, members, title: `${name}${qualifier}`,
       memberLabel: (member: T) => `${trainingModelLabel(modelOf(member))}${qualifier}`,

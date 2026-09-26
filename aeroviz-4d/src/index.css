@@ -918,6 +918,12 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   background: #e2e8f0;
 }
 
+/* a long name (a run said beside it) wraps; its count stays on the line */
+.training-model-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .training-model-count {
   margin-left: auto;
   white-space: nowrap;
