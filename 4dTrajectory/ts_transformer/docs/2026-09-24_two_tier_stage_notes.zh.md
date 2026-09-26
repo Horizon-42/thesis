@@ -186,16 +186,15 @@
 
 ## 6 代码、分支、工作树（2026-09-26 16:00 UTC）
 
-- **`dev-two-tier`**（主检出 `/home/supercomputing/studys/thesis`）：两层模型的全部代码都在这里。关键合并：
+- **`dev-two-tier`**（主检出 `/home/supercomputing/studys/thesis`，唯一的工作树）：两层模型的全部代码都在这里。关键合并：
   `7e1e2df0`（先验第三版、按落地强化、闭环提速、CAT-K 归档）、`acb93b55`（第二阶段代码 + 会影响训练的代码健康修复 + 落地质量）。
   第二阶段的代码留在包里（`prior/augment.py`、`prior/procedure.py`，runner `prior_augmented_reward`、`prior_procedure_check`，
   `prior_free_generation --glidepath-mask` / `--augment-seed`），第二阶段没采用不等于删代码。`649d5e62`：下滑道下沿的诊断 runner
   `prior_glidepath_diagnosis`（R22，先验读数 §12）。
-- **工作树 `glidepath-diagnosis`、分支 `dev-glidepath-diagnosis`**：已快进合并（`649d5e62`），留在盘上等用户同意再删（删前先 unlink
-  数据软链接）。
 - **本地分支**：`dev-two-tier`、`main`、`wip-r32-leg-timing`（跑道意图 R3.2 没采纳的第三种改法，远端也有；跑道意图计划 §18.2 引用它
   备查，保留）。2026-09-26 删掉的：工作树 `post-train`、`rebuild`、`training-sentences` 及分支 `dev-post-train`、`dev-training-followups`、
-  `dev-post-train-merged`、`dev-rebuild`、`dev-model-autopilot`、`dev-training-sentences`（都已合并）、`dev-cifp-runway-thresholds`
+  `dev-post-train-merged`、`dev-rebuild`、`dev-model-autopilot`、`dev-training-sentences`，工作树 `glidepath-diagnosis` 及分支
+  `dev-glidepath-diagnosis`（都已合并）、`dev-cifp-runway-thresholds`
   （被 `803605e0` 取代）。
 - **标签不能删**（产物里记的提交只靠它们可达）：`runs/prior-v2-feeb7ce3`、`runs/prior-v3-step0-67e0e5c9`、`runs/prior-v3-step1-47c7b790`、
   `archive/freegen-readout`。
