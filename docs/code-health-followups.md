@@ -12,17 +12,17 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **17 open, 8 partly, 4 fixed on a branch, 51 resolved or dismissed, 5 obsolete**. *open*: the problem is still in the
+(the right-hand column): **17 open, 8 partly, 55 resolved or dismissed, 5 obsolete**. *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
 twice). Also found and fixed on `dev-frontend-followups`, never entered below: the terrain preload's tile counts and the
 range ring radius re-rendering the app (`f73015df`, `1d8630c0`), the Pilot catalog failure hidden on entering
 Trajectory (`fd9f205f`, `1d8630c0`), Observe's sample count planning loads per keystroke (`3a4aea81`, `d57f7fc7`).
-Since (2026-09-26): the training-affecting ones fixed on branch `dev-training-followups` `dcbf6388` — not merged until the
-rebuild after post-training stage 2 (user 2026-09-25) — say "fixed on a branch" in their rows and keep their entries until
-it merges (24, the B77W preset, review #14 and #21, the performance index's B722 point); its review added three entries
-(the rows after the performance index's).
+Since (2026-09-26): the training-affecting ones fixed on branch `dev-training-followups` (`dcbf6388`, `fde40395`,
+`d3d83716`: 24, the B77W preset, review #14 and #21, the performance index's B722 point, the native stall-margin range,
+the OpenAP-direct landing mass) are merged into `dev-two-tier` (`acb93b55`, user 2026-09-26) ahead of the rebuild; its reviews
+added three entries (the rows after the performance index's).
 
 | Entry | Status | What remains, or what resolved it | Fix affects training / post-training? |
 |---|---|---|---|
@@ -79,7 +79,7 @@ it merges (24, the B77W preset, review #14 and #21, the performance index's B722
 | 19. `control_basis_oracle --checkpoint` fingerprints without the roster | resolved | `e8df12f`; entry removed | — |
 | 20. `random_train_anchor=True` raises before the first epoch | resolved | `7e947bb5`, with a test; entry removed | — |
 | 21. the drawn "Lookback" is the whole pre-anchor track | open | no `lookbackSamples` record field yet (a record-contract change + republishing) | no: the comparison CZML |
-| 24. OpenSky typecodes absent from Doc 8643 | fixed on a branch | `MARKETING_ALIASES` (H900, CL61, G450, G650, F2EX, F2LX; AS29 gliders left out) on branch `dev-training-followups` `dcbf6388`, merged with the rebuild after post-training stage 2 (user 2026-09-25) | **yes — data plane**: those flights would get a type, hence dynamics; the current sentence artefact refused for them until rebuilt |
+| 24. OpenSky typecodes absent from Doc 8643 | resolved | `MARKETING_ALIASES` (H900, CL61, G450, G650, F2EX, F2LX; AS29 gliders left out; `dcbf6388`, merged `acb93b55`); entry removed | — |
 | 25. 1,164 FAA airframes without an unambiguous typecode | partly | crosswalk `750daafb`: 2,737 → 914 unresolved; no third source; foreign rows unhandled | **yes — data plane**: as 24: types, hence dynamics, change |
 | 26. `config.seq_len - 1` at sites that have `default_anchor` | resolved | `9d12b114`, `e2e1c84d`; entry removed | — |
 | 27. `cli/predict.py` builds records at near-identical sites | resolved | one `_emit` (`b10b1d68`); entry removed | — |
@@ -97,14 +97,14 @@ it merges (24, the B77W preset, review #14 and #21, the performance index's B722
 | 39. specific-force speed floor holds sin γ at the hold's start | open | unchanged; `speed_floor.py` is frozen | no: command hooks; the executor runs none (but its file is frozen) |
 | 40. two definitions of "the truth's end" | resolved | each named where it is read (`57f1e386`); making them one is a decision that moves S1 numbers; entry removed | — |
 | ts: `EXPERIMENTS_MAIN` lives outside `repo_layout` (09-23) | resolved | moved (`59408197`); entry removed | — |
-| Review of trajectory_data_process + flight_scenarios (09-23), #1–#22 | partly | fixed #5, #7 (the comment), #8, #12 (documented), #13, #15a–d, f, g, i, j, #16, #17, #18, #22 (`3a91b07f`, `130a25cb`, `96d299d1`, `eec35792`, `57f1e386`, `f1c38875`); #14 and #21 fixed on branch `dev-training-followups` `dcbf6388` (merged with the rebuild); open #1–#4, #6, #9–#11, #15e, #15h, #19, #20 | **yes — data plane**: #14 (the crossing scan without a fit) and possibly #10 change `build_series`; #19, #20 change types; #1–#4, #6 re-harvest only; #15e what training runs write; the rest no |
+| Review of trajectory_data_process + flight_scenarios (09-23), #1–#22 | partly | fixed #5, #7 (the comment), #8, #12 (documented), #13, #15a–d, f, g, i, j, #16, #17, #18, #22 (`3a91b07f`, `130a25cb`, `96d299d1`, `eec35792`, `57f1e386`, `f1c38875`); #14 and #21 (`dcbf6388`, merged `acb93b55`); open #1–#4, #6, #9–#11, #15e, #15h, #19, #20 | **yes — data plane**: possibly #10 changes `build_series`; #19, #20 change types; #1–#4, #6 re-harvest only; #15e what training runs write; the rest no |
 | `test_write_reference_records_from_observed_tracks` fails (09-23) | resolved | the fixture carries a real scenario source (`eec35792`); entry removed | — |
 | `THRESHOLD_SPEED_GATE.md` §3.3 quotes an unsourced +5/−0 kt margin (09-23) | resolved | removed, AC 91-79B §5.2.2 quoted (`5f5aeea9`); entry removed | — |
-| B77W preset `landing_mass` 19 % above its MALW (09-24) | fixed on a branch | every preset lands at its published MALW (B77W 251.3 t, A320 66.0 t, C172 1,111 kg) on branch `dev-training-followups` `dcbf6388`, merged with the rebuild after post-training stage 2 (user 2026-09-25) | **yes — executor**: B77W flights' mass and approach speed (√(m / MALW)) |
+| B77W preset `landing_mass` 19 % above its MALW (09-24) | resolved | every preset lands at its published MALW (B77W 251.3 t, A320 66.0 t, C172 1,111 kg; `dcbf6388`, merged `acb93b55`); entry removed | — |
 | Pilot frontend tests use a 145 / 135 / 155 kt fixture (09-24) | resolved | real catalog fixture + a range preset (`3d0fc579`, `d2323adf`); entry removed | — |
-| Performance index: stage-2 review leftovers (09-24) | partly | the observed mass label and the readout scripts fixed (`6c363ef9`, `3c4a92a4`); B722's mass fixed on branch `dev-training-followups` `dcbf6388` (merged with the rebuild); the 60 t observed fallback and the MD88 / LJ35 / GLF3 judgements remain | **yes — executor**: B722's mass, MD88 → B737, LJ35 → B737 and GLF3 → B763 change what those flights fly; the 60 t fallback: no |
-| The native stall-margin range after the preset masses moved (09-26) | fixed on a branch | re-judged by the rule (user 2026-09-26) on branch `dev-training-followups` `fde40395`: E545, E550 → C550, B733 → exclude | **yes — executor**: E545 / E550 flights fly as C550 |
-| OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | fixed on a branch | every modelled airframe lands at its published MALW, B737's MALW from Boeing (user 2026-09-26) on branch `dev-training-followups` `d3d83716` | **yes — executor**: those types' mass and approach speed |
+| Performance index: stage-2 review leftovers (09-24) | partly | the observed mass label and the readout scripts fixed (`6c363ef9`, `3c4a92a4`); B722's mass fixed (`dcbf6388`, merged `acb93b55`); the 60 t observed fallback and the MD88 / LJ35 / GLF3 judgements remain | **yes — executor**: MD88 → B737, LJ35 → B737 and GLF3 → B763 change what those flights fly; the 60 t fallback: no |
+| The native stall-margin range after the preset masses moved (09-26) | resolved | re-judged by the rule (user 2026-09-26): E545, E550 → C550, B733 → exclude (`fde40395`, merged `acb93b55`); entry removed | — |
+| OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | resolved | every modelled airframe lands at its published MALW, B737's MALW from Boeing (user 2026-09-26; `d3d83716`, merged `acb93b55`); entry removed | — |
 | An alias-resolved identity is not recorded as one (09-26) | open | unchanged | no: provenance only, the types are the same |
 | A ts checkpoint does not record where its landing masses came from (09-26) | open | needs the user's decision (a payload change) | no for the two-tier chain (its artefacts record the aircraft tables); yes for any control-path checkpoint replayed after the rebuild |
 | The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | resolved | every writer adds the flight's runway offset — the exporters (`0b1fe50a`), the live executor (`c708a497`, `2a64d3f4`); `geoid_undulation_m` deleted; `instruction_v3_day_split` and its four overlays re-exported (`check-publication` 0 errors); the older sets kept as published with EGM96 heights (user 2026-09-26; `aeroviz-4d/docs/36-…` §2.3); entry removed | — |
@@ -288,16 +288,6 @@ republish of anything already written, since existing records lack the field. De
 it changes the contract and would restate every published prediction directory; documented at
 both ends (`LOOKBACK_COLOR`, `_lookback_states`) so nobody reads the line as the input window
 in the meantime.
-## 24. OpenSky typecodes absent from the Doc 8643 snapshot (H900, CL61, G450, F2EX, F2LX, G650, AS29)
-
-**Verified** (2026-09-08, 38 observed rows). The identity resolver rejects an OpenSky typecode
-the ICAO Doc 8643 snapshot does not list, and OpenSky uses a few marketing codes for which
-the ICAO designator is known (H900 → H25B, CL61 → CL60, G450 → GLF4, F2EX/F2LX → F2TH,
-G650 → GLF6). An alias table in `aircraft/icao_type_designators.py` (`normalize_typecode`),
-each entry with its source, would resolve them; do not accept unknown codes generally.
-
-**Fixed on branch `dev-training-followups` `dcbf6388`, merged with the rebuild after post-training stage 2 (user 2026-09-25)**: each alias names the snapshot row it stands for (the designator is read from it); an alias the
-snapshot lists itself is refused. Delete this entry when the branch merges.
 
 ## 25. 1,164 observed rows: FAA-registered airframes whose model has no unambiguous ICAO typecode
 
@@ -390,7 +380,7 @@ download clearing a merged root (TD24), `download_landings.py`'s drifted CIFP cy
 slice ending before its measured crossing and the 0–2 s early `entry_time_utc` (TD22), and the
 delete-then-build arrivals / observed writers (TD17). Fixed since by branch `dev-followups-no-training`
 (2026-09-25): #5, #7 (the comment re-measured), #8, #12 (documented, FS8), #13, #15a–d, f, g, i, j, #16, #17,
-#18, #22. What is left, one item each (numbers kept; #14 and #21 are fixed on branch `dev-training-followups`):
+#18, #22; and by `dev-training-followups` (`dcbf6388`, merged `acb93b55`): #14, #21. What is left, one item each (numbers kept):
 
 1. **Two duplicate-row policies in one store** — *verified in code, size unmeasured*.
    `history_store.py:99-110` (direct download) keeps the LAST of conflicting `(icao24, time)`
@@ -428,10 +418,6 @@ delete-then-build arrivals / observed writers (TD17). Fixed since by branch `dev
     first reception (FFT2440's arrival starts at t = 33.9 s), optimizer records at ring entry, ts
     records at the anchor (and keep the ring-entry `entry_time_utc`, `export.py:148`); the batch
     "flight times" are not comparable across subjects.
-14. **ts observed-crossing scan has no on-final check without a fit** — *judgement*. `dataset.py:680`:
-    with `fitted is None` the scan starts at row 1 with the plane test alone (contra C3). No
-    spurious cut seen on 9 tested flights. **Fixed on branch `dev-training-followups` `dcbf6388`, merged with the rebuild after post-training stage 2 (user 2026-09-25)**: 3 of the 44 unfitted flights were cut at a
-    pass off the final; the scan now reads `threshold_crossing_mask`.
 15. **Small nits — two left** (the rest fixed 2026-09-25): `train.usable_series` exclusions are printed only (#15e:
     recording them changes what every training run writes into its checkpoint metadata — a decision); `airports.py:354`
     `entry.get("elevation_m", 0.0)` (#15h: `harvest/airports.py` is frozen by the executor's code identity).
@@ -449,21 +435,6 @@ delete-then-build arrivals / observed writers (TD17). Fixed since by branch `dev
     flown in the summer are gone from the snapshot (deregistered). FAA's DEREG file plus CERT ISSUE DATE would let the resolver
     pick the registration valid on the flight date; that changes `resolve()`'s signature (a flight
     date), which touches flight_scenarios and the ts dataset.
-21. **The OpenAP caches are read without a schema check** — *verified by the 2026-09-23 identity
-    review*. `aircraft/query_aircraft_parameters.py:115-116` loads `aircraft_id_lookup.json` and
-    `openap_aircraft_parameters.json` without checking `schema_version`, and
-    `build_openap_aircraft_database.py` still writes the parameters file's version as a literal `1`
-    (the lookup's now comes from `identity.OPENSKY_LOOKUP_SCHEMA`). **Fixed on the same branch** (`load_json` refuses
-    another schema by name; the literal is `OPENAP_PARAMETERS_SCHEMA`).
-
-## B77W preset: `landing_mass` is 19 % above its published MALW (2026-09-24)
-
-**Verified** (review of the published-approach-speed change). The B77W preset carries no
-`max_landing_kg`, so `landing_mass` = 0.85 × 351,530 = 298.8 t against the FAA MALW of 251.3 t; the
-sqrt(m / MALW) law then extrapolates its 149 kt to 162.5 kt at that mass (176.2 kt at the Pilot
-panel's MTOW). **Fixed on branch `dev-training-followups` `dcbf6388`, merged with the rebuild after post-training stage 2 (user 2026-09-25)** — delete this entry when it merges. The A320 preset (66.3 t vs 66.0 t) and C172 (983 kg vs 1,157 kg) are closer. Giving the
-presets `max_landing_kg` from their published row would fix it, but it moves the preset masses, the
-analysis's native stall-margin range (B77W is its lower end) and the 2 B77W arrivals' scenarios.
 
 ## Performance index: points the stage-2 review left for later (2026-09-24)
 
@@ -473,58 +444,10 @@ Left:
 - A substituted type gets no mass, so its observed record falls back to the nominal 60 t (C25A/C525/PC24 6.8 t → 60 t).
   The gate never reads that mass; what mass an observed record of another airframe should carry is a judgement.
 - Index data worth a look (judgement): B722's Poll–Schumann landing mass is 5.2 % above its FAA MALW, so its
-  target is 136.4 kt against a published 133 kt (**fixed on the training follow-ups branch**: own types land at the
-  published MALW); MD88 flies as B737 because a substitute must be a native
+  target is 136.4 kt against a published 133 kt (fixed, `acb93b55`: own types land at the published MALW); MD88 flies as B737 because a substitute must be a native
   airframe and its PS synonym MD82 is an own-parameter row; the similarity distance has no mass term, so LJ35
   (6.5 t) flies as B737 and GLF3 as B763 (dynamically similar, by the method's definition).
 
-## The native stall-margin range after the preset masses moved (2026-09-26)
-
-**Verified** (numbers; opus review of `dev-training-followups`), **judgement** (what to do). The substitution analysis
-(`docs/aircraft_performance/`, 2026-09-24) accepts an OpenAP synonym or a surrogate only when its stall margin (FAA
-approach speed ÷ the model's 1 g stall speed at the landing mass) lies inside the NATIVE range of the modelled types.
-With the presets landing at their published MALW (the training follow-ups branch) that range moves from 1.134 (B77W) –
-1.623 to 1.182 (B734) – 1.623, and three decisions fall below the new lower edge: B733 kept on its B734 synonym (1.148),
-E550 (1.153) and E545 (1.167), both own-parameter rows. `final_mapping.py:154` also still computes the Poll–Schumann
-types' margins at Poll–Schumann's own landing mass. At the rebuild: either re-apply the rule (those three change decision)
-or state that the range is frozen at the 09-24 analysis. The analysis document carries a dated note saying so.
-
-**Fixed on branch `dev-training-followups` `fde40395`** (user 2026-09-26: re-apply the rule): E545 and E550 own →
-substitute C550, B733 → exclude; the same three change whether or not the OpenAP-direct types also move to the MALW.
-`scripts/rebuild_inputs.py` reproduces all 199 stored verdicts in its 2026-09-24 mode. Delete this entry when it merges.
-
-## OpenAP-direct types land at OpenAP's MLW, not the published MALW (2026-09-26)
-
-**Verified** (opus review of `dev-training-followups`). The branch makes every preset and own-parameter index type land
-at the published MALW its approach speed is scaled from; an OpenAP-direct type still lands at OpenAP's `mlw_kg`, which
-differs from the FAA MALW by C550 +11.1 %, E145 +3.2 %, B752 +2.7 %, A319 +2.5 % (above) and B737 −11.3 %, B37M −9.2 %,
-B744 −8.9 %, B763 −6.3 % (below). If "landing mass = the MALW the speed is scaled from" is to hold for every modelled
-type, decide it before the rebuild (it moves those types' mass and approach speed).
-
-**Sources compared** (2026-09-26, manufacturer excerpts in `docs/reference_speeds/excerpts/`). The published figure is
-the FAA Aircraft Characteristics Database 2024-10 `MALW_lb`, one row per ICAO designator; its `Approach_Speed_knot` is
-defined AT that MALW (data dictionary row 14), so the pair belongs together. OpenAP 2.4's `mlw` is one model per
-designator (the file names it: "Boeing 737-700", "Boeing 767-300"…) with no per-value citation. Three kinds of gap:
-- one designator, two variants or weight options, both published: B763 (Boeing 767-300 136,077 kg — OpenAP; -300ER
-  145,149 — FAA), A319 (Airbus WV 61,000 — FAA; 62,500 — OpenAP); B744 and E145 look the same but no manufacturer
-  document is on disk;
-- OpenAP's figure is not the type's: C550 6,804 kg (FAA TCDS A22CE Rev 74 p.6: Model 550 lands at 12,700 / 13,500 lb =
-  5,761 / 6,123 kg; OpenAP's is ≈ its own MTOW), B38M 66,300 (Boeing 737-8: 68,174 / 69,308; 66,300 is a 737-800
-  figure), B37M 60,000 (Boeing 737 MAX ACAP 2.1.1, 737-7: 63,911 / 66,043), A20N 66,000 (Airbus A320neo 67,400; 66,000 is the A320ceo's),
-  B752 92,200 (Boeing 757-200 89,811 / 95,254; 92,254 is the 757-200PF freighter's);
-- the FAA's figure is wrong: B737 — the row is "Boeing 737-700" but its MALW 145,600 lb (66,043 kg) is the 737-7
-  (MAX 7)'s; Boeing's 737-700 lands at 58,059 / 58,604 kg (737NG ACAP 2.1.2), and OpenAP's 58,600 is right. The
-  provenance README already calls this row "doubly suspect"; B739's FAA cell was replaced by Boeing's for the same
-  reason. Replacing B737's MALW moves its approach-speed anchor (130 kt then sits at 58.6 t) and so the speed gate.
-
-**Fixed on branch `dev-training-followups` `d3d83716`** (user 2026-09-26: both): OpenAP-direct types land at the published
-MALW, `Mass.max_landing_kg` is required and the 0.85 × MTOW fallback is gone; B737 carries Boeing's 58,604 kg. What moves
-(opus review): 17 OpenAP-direct types' masses by ≥ 1 % (B37M +10.1 %, B744 +9.8 %, C550 −10.0 %, B763 +6.7 %, …); B737's
-target speed at its landing mass 122.5 → 130 kt (the optimizer's runway target and the executor's unspecified speed), its
-observed gate's lower edge 98.2 → 104.2 kt (1 of 8,903 published B737 rows flips); the analysis's decisions do not change.
-Left as they are: the observed records' `mass_source` label still says `openap_landing_mass` (the performance-index entry
-above); `dynamics_source` for OpenAP-direct types stays `openap-<version>` although its mass changed (next entry).
-Delete this entry when the branch merges.
 
 ## A ts checkpoint does not record where its landing masses came from (2026-09-26)
 
