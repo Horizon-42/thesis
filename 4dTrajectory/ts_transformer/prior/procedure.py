@@ -182,9 +182,7 @@ class AltitudeMasks:
     def __init__(self, finals: Sequence[Sequence[RunwayProcedure]], geometries: Sequence[AirportGeometry],
                  words: Words) -> None:
         self.finals = [tuple(f) for f in finals]
-        if len(self.finals) != len(geometries):
-            raise ValueError(f"{len(self.finals)} flights' finals for {len(geometries)} flights")
-        for finals_b, geometry in zip(self.finals, geometries):
+        for finals_b, geometry in zip(self.finals, geometries, strict=True):
             if tuple(f.candidate for f in finals_b) != geometry.candidates:
                 raise ValueError(f"{geometry.code}: the finals are not its candidates', in the pointer's order")
         self.words = words

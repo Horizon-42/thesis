@@ -104,7 +104,7 @@ def _generation(**changes):
                                "full_s1337", "variant": "full"},
         "executor": {"directory": "/somewhere/executor/v7", "sha256": "e" * 64},
         "instructions": "/repo/.claude/worktrees/prior-v3/4dTrajectory/outputs/POOLED/instruction_language/v4_20260924",
-        "split": "val", "n_look": N_LOOK, "samples": 4, "temperature": 1.0,
+        "split": "val", "n_look": N_LOOK, "samples": 4, "temperature": 1.0, "procedure_masks": False,
         "drawn": {"flights": 20, "per_airport": 20},
         "readout": {"prior": part, "labelled": {"all": _cell(20, 1.0), "KXXX": _cell(10, 1.0), "KYYY": _cell(10, 1.0)}},
     }
@@ -147,6 +147,8 @@ def test_the_every_flight_phrase_is_the_draw_s_own():
     (dict(generation=dict(split="select")), "split"),
     (dict(samples=1), "samples"),
     (dict(temperature=0.7), "temperature"),
+    # the export speaks under the grammar's masks only: a readout under the procedure's is another generation
+    (dict(generation=dict(procedure_masks=True)), "procedure_masks"),
 ])
 def test_a_readout_of_another_prior_spec_split_or_draw_is_refused_by_name(change, name):
     generation = _generation(**change.pop("generation", {}))

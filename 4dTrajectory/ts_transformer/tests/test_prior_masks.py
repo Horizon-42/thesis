@@ -72,6 +72,8 @@ def test_the_digest_reads_every_field_of_every_final_whatever_the_airports_order
              replace(final, cone=replace(final.cone, course_width_m=final.cone.course_width_m + 1.0)),
              replace(final, candidate=replace(final.candidate, threshold_e_m=1.0))]
     assert all(finals_sha256({"KXXX": (m,)}) != digest for m in moved)
+    # the last bits a machine's trigonometry may move do not: floats are hashed to DIGEST_DECIMALS
+    assert finals_sha256({"KXXX": (replace(final, faf_d_m=final.faf_d_m * (1.0 + 1e-15)),)}) == digest
     other = {"KYYY": (_final(crossing_m=200.0),)}
     assert finals_sha256({**one, **other}) == finals_sha256({**other, **one})
 
@@ -107,6 +109,7 @@ def test_a_record_that_does_not_hold_on_today_s_code_and_data_is_refused(tmp_pat
     refused({**good, "schema": "ts-prior-procedure-masks-v0"}, "not ts-prior-procedure-masks-v1")
     refused({**good, "checkpoint_sha256": "0" * 64}, "another checkpoint")
     refused({**good, "sets": [{"name": "procedure-altitudes-v1", "data_sha256": None}]}, "does not implement")
+    refused({**good, "sets": good["sets"] * 2}, "more than once")
     path.write_text(json.dumps(good), encoding="utf-8")
     (directory / "checkpoint.pt").write_bytes(b"other weights")                 # the weights swapped under the record
     with pytest.raises(ValueError, match="another checkpoint"):

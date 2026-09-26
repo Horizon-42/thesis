@@ -20,7 +20,7 @@ from ts_transformer.autopilot.plant import EXECUTOR_DYNAMICS
 from ts_transformer.experiments import prior_augmented_reward as runner
 from ts_transformer.experiments.prior_augmented_reward import (
     GUARD_HEADING_GROWTH, GUARD_WORD_COLUMNS, augmentation_summary, guarded_choice, labelled_words, real_starts,
-    round_starts, speak_starts, word_distance,
+    round_starts, select_rows, speak_starts, word_distance,
 )
 from ts_transformer.experiments.prior_free_generation import (
     AUGMENT_TRIES, BELOW_GLIDEPATH, augmented_inputs, augmented_starts, limits_s, speak_and_fly,
@@ -39,7 +39,8 @@ from ts_transformer.prior.train import (
 )
 from ts_transformer.tests.test_autopilot import _params
 from ts_transformer.tests.test_prior_landing_reward import _sentences, _split
-from ts_transformer.tests.test_prior_procedure import _altitudes, _final
+from ts_transformer.prior.masks import PROCEDURE_ALTITUDES
+from ts_transformer.tests.test_prior_procedure import NO_CHART, _altitudes, _final
 from ts_transformer.tests.test_prior_speaker import _flight, _model, _repeated
 
 CPU = torch.device("cpu")
@@ -253,21 +254,45 @@ def test_a_real_start_flies_its_own_rows_on_the_spec_s_limit_and_an_augmented_on
     heard = {}
 
     def listen(model, flights, geometries, inputs_, runways_, charts_, approach_, limits, *rest, **options):
-        heard.update(flights=flights, limits=limits, state=inputs_.initial_state)
+        heard.update(flights=flights, limits=limits, state=inputs_.initial_state, masks=options["procedure_masks"])
         raise StopIteration
 
     monkeypatch.setattr(runner, "speak_and_fly", listen)
     reading = read_flight(signals, geometry, one, words)
     batch = replay.Batch(signals=[signals] * 2, series=[None] * 2, readings=[reading] * 2, geometries=[geometry] * 2,
                          vertical_paths=[()] * 2, approach_ias_mps=[0.0] * 2, groups=["own"] * 2, drawn={})
+    masks = _altitudes(geometry, _final())
     with pytest.raises(StopIteration):
-        speak_starts(_model(words), batch, [None, MOVE], 1, words, _params(), None, _altitudes(geometry, _final()),
+        speak_starts(_model(words), batch, [None, MOVE], 1, words, _params(), None, masks,
                      generator=torch.Generator().manual_seed(0))
+    assert heard["masks"] is masks                                   # the stage's, handed to the speaker
     assert heard["flights"][0] is signals and np.allclose(heard["flights"][1].e_m, augment_signals(signals, MOVE).e_m)
     own = limits_s(replay.subset(batch, [0]), _params(), one.step_s, augmented=False)[0]
     assert heard["limits"] == pytest.approx([own, own * TIMEOUT_FACTOR / _params().timeout_factor])
     assert torch.equal(heard["state"][0], inputs.initial_state[0])
     assert not torch.equal(heard["state"][1], inputs.initial_state[0])
+
+
+def test_the_second_stage_reads_out_under_its_own_procedure_s_masks(monkeypatch):
+    """The stage's masks are the procedure's altitudes, and the select readout speaks under the ones it is handed, with
+    the MVA charts beside them (the readouts before the join)."""
+    assert runner.STAGE_PROCEDURE_MASKS == (PROCEDURE_ALTITUDES,)
+    one, geometry, signals, _ = _flight()
+    words = Words(one)
+    heard = {}
+
+    def listen(*args, **options):
+        heard.update(options)
+        raise StopIteration
+
+    monkeypatch.setattr(runner, "prior_rows", listen)
+    reading = read_flight(signals, geometry, one, words)
+    batch = replay.Batch(signals=[signals], series=[None], readings=[reading], geometries=[geometry],
+                         vertical_paths=[()], approach_ias_mps=[0.0], groups=["own"], drawn={})
+    masks, charts = _altitudes(geometry, _final()), {geometry.code: NO_CHART}
+    with pytest.raises(StopIteration):
+        select_rows(_model(words), batch, None, words, _params(), None, masks, charts, samples=1, seed=0, device=CPU)
+    assert heard["procedure_masks"] is masks and heard["charts"] is charts
 
 
 def test_the_real_starts_are_each_airport_s_first_flights_of_the_pool():

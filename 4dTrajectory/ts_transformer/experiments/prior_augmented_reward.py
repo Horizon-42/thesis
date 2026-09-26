@@ -308,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device(args.device)
     params, record, words = replay.open_executor(executor_dir, instructions)
     spec = load_spec(instructions)
-    model, _, start_config, _ = load_prior(prior_dir, instructions)
+    model, _, start_config, start_masks = load_prior(prior_dir, instructions)
     base, _, base_config, _ = load_prior(base_dir, instructions)
     for directory, loaded in ((prior_dir, start_config), (base_dir, base_config)):
         if loaded["smoke"]:
@@ -404,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
                 "augmented": {k: v for k, v in augmented.items() if k != "outcomes"},
                 "augmented_outcomes": augmented["outcomes"], **more}
 
+    log(f"the stage's procedure's masks {list(procedures.names)}; the start's own "
+        f"{list(start_masks.names) or 'none'} (round 0 reads the start under the stage's)")
     directory = out / "round_00"
     directory.mkdir()
     readout = read_select(0)

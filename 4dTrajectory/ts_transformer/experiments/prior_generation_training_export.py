@@ -111,13 +111,14 @@ def readout_block(generation: dict[str, Any], prior_dir: Path, executor_sha256: 
     prior's, on this executor spec and artefact, val, with these samples and this temperature."""
     if generation["schema"] != GENERATION_SCHEMA:
         raise ValueError(f"the readout is a {generation['schema']} file, not {GENERATION_SCHEMA}")
+    # the export speaks under the grammar's masks only: a readout under the procedure's is another generation
     wanted = {"prior": outputs_path(prior_dir), "executor": executor_sha256,
               "instructions": outputs_path(instructions), "split": SPLIT, "n_look": N_LOOK, "samples": samples,
-              "temperature": temperature}
+              "temperature": temperature, "procedure_masks": False}
     found = {"prior": outputs_path(generation["prior"]["directory"]),
              "executor": generation["executor"]["sha256"], "instructions": outputs_path(generation["instructions"]),
              "split": generation["split"], "n_look": generation["n_look"], "samples": generation["samples"],
-             "temperature": generation["temperature"]}
+             "temperature": generation["temperature"], "procedure_masks": generation["procedure_masks"]}
     differ = {key: (found[key], wanted[key]) for key in wanted if found[key] != wanted[key]}
     if differ:
         raise ValueError("the readout is not this prior's val free generation: " +

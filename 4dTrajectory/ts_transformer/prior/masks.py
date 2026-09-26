@@ -39,11 +39,24 @@ PROCEDURE_ALTITUDES = "procedure-altitudes-v2"
 SETS = (PROCEDURE_ALTITUDES,)
 
 
+#: Decimals a float is rounded to before the digest: the finals are derived through the frame projection and
+#: trigonometry, whose last bits may differ between machines (1e-6 m, 1e-6 of a slope).
+DIGEST_DECIMALS = 6
+
+
+def _rounded(value: Any) -> Any:
+    if isinstance(value, float):
+        return round(value, DIGEST_DECIMALS)
+    if isinstance(value, dict):
+        return {key: _rounded(item) for key, item in value.items()}
+    return value
+
+
 def finals_sha256(finals: Mapping[str, Sequence[RunwayProcedure]]) -> str:
     """The digest of the data the procedure's altitudes read: every field of every airport's finals (the candidate's
     threshold, course, elevation and length, the glidepath at the threshold and its slope, the FAF's distance, the LPV
-    cone, the DA), airports in name order, each airport's in the pointer's order."""
-    data = {code: [asdict(final) for final in finals[code]] for code in sorted(finals)}
+    cone, the DA), each float to `DIGEST_DECIMALS`, airports in name order, each airport's in the pointer's order."""
+    data = {code: [_rounded(asdict(final)) for final in finals[code]] for code in sorted(finals)}
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -111,7 +124,7 @@ def write_masks(directory: Path, masks: ProcedureMasks, *, writer: str, git: Map
 def read_masks(directory: Path, geometries: Mapping[str, AirportGeometry]) -> ProcedureMasks:
     """The procedure's masks ``directory``'s model was trained under, built for the airports ``geometries`` on today's
     code and data — refused: no record, another schema, another checkpoint beside it, a set this code does not implement,
-    or data other than the set read when the record was written."""
+    sets not in the code's order once each, or data other than the set read when the record was written."""
     path = directory / MASKS_FILE
     if not path.exists():
         raise ValueError(f"{directory} records no procedure's masks ({MASKS_FILE}): which ones it was trained under is "
@@ -121,12 +134,15 @@ def read_masks(directory: Path, geometries: Mapping[str, AirportGeometry]) -> Pr
         raise ValueError(f"{path} is a {record['schema']} file, not {MASKS_SCHEMA}")
     if record["checkpoint_sha256"] != file_sha256(directory / "checkpoint.pt"):
         raise ValueError(f"{path} records another checkpoint than the one beside it")
-    recorded = {entry["name"]: entry["data_sha256"] for entry in record["sets"]}
-    retired = [name for name in recorded if name not in SETS]
+    names = [entry["name"] for entry in record["sets"]]
+    retired = [name for name in names if name not in SETS]
     if retired:
         raise ValueError(f"{directory} was trained under the procedure's masks {retired}, which this code does not "
                          f"implement ({list(SETS)}): it is not spoken under other rules")
-    masks = ProcedureMasks.build(list(recorded), geometries)
+    if names != [s for s in SETS if s in names]:
+        raise ValueError(f"{path} lists its sets {names} out of the code's order {list(SETS)} or more than once")
+    recorded = {entry["name"]: entry["data_sha256"] for entry in record["sets"]}
+    masks = ProcedureMasks.build(names, geometries)
     moved = [name for name, digest in masks.data_sha256().items() if recorded[name] != digest]
     if moved:
         raise ValueError(f"the data {moved} read changed since {directory} was trained (the procedures, the runway "

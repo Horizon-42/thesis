@@ -514,8 +514,10 @@ landed share, the earliest within 0.015. Writes like R19 (`ts-prior-augmented-re
 same without it — is the stopped restart of readouts §15; v3 — augmented starts only, the
 edge alone, the guard on the real starts — is readouts §10's run; v1 — no data term, a fixed pull, the NLL and heading
 guards — and v2 — no data term, a KL budget — are the stopped runs of readouts §9; v1–v3 trained under
-`procedure-altitudes-v1`, which the code no longer has); val is read afterwards with `prior_free_generation` under the kept
-round's own masks (real starts, and `--augment-seed` for augmented ones).
+`procedure-altitudes-v1`, which the code no longer has); val is read afterwards with `prior_free_generation` (real
+starts, and `--augment-seed` for augmented ones) under the stage's masks for every model compared: the kept round's own,
+and `--procedure-masks procedure-altitudes-v2` NAMED for the start model beside it (landing's own are none — by default it
+would be read under other masks than the round; so too a round 0 kept).
 
 ### R22 · `run_ts.py prior_glidepath_diagnosis` — why the labelled replays sink below the glidepath lower edge (prior readouts §12)
 

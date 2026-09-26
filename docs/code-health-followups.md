@@ -501,12 +501,14 @@ spec and a quiet frontend.
 
 ## The Training export and the live model flight fly a model without the procedure's masks (2026-09-26)
 
-**Verified** (opus review of `dev-stage2-restart` `181295fc`). `prior_generation_training_export` (`speak_and_fly` with no
-`finals`) and the backend's live model flight fly a prior's own sentences with the grammar's masks only. Post-training
+**Verified** (opus review of `dev-stage2-restart` `181295fc`; names updated with `dev-procedure-masks`, prior design §5.1).
+`prior_generation_training_export` (`speak_and_fly(..., procedure_masks=ProcedureMasks.none())`, explicitly — whatever the
+model's own, which `load_prior` now returns) and the backend's live model flight fly a prior's own sentences with the
+vocabulary's rules only. Post-training
 design §3.1 says a model trained under the procedure's masks is used with them on, and its val readout is read that way
 (`prior_free_generation --procedure-masks`); publishing a stage-2 round as the export stands would show unmasked
-trajectories beside a masked readout. The fix passes `procedure_masks(...).finals` to the export's loop (and a
-`--procedure-masks` flag, recorded in the overlay), and the same to the backend's `fly.py`; it changes the Training
+trajectories beside a masked readout. The fix passes the model's own (`LoadedPrior.procedure_masks`) to the export's
+loop, applies the glidepath lower edge's stop and records both in the overlay, and the same in the backend's `fly.py`; it changes the Training
 overlay's payload (a new schema) and needs the user's OK to re-export.
 
 ## The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (2026-09-26)

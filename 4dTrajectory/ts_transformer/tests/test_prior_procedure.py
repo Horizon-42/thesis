@@ -36,7 +36,7 @@ from ts_transformer.prior.generate import Speaker
 from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks
 from ts_transformer.prior.mva import MvaChart
 from ts_transformer.prior.procedure import (
-    GLIDEPATH_BELOW_M, THRESHOLD_TOLERANCE_M, AltitudeMasks, RunwayProcedure, airport_procedures, altitude_word_allowed,
+    GLIDEPATH_BELOW_M, THRESHOLD_TOLERANCE_M, RunwayProcedure, airport_procedures, altitude_word_allowed,
     angle_word_allowed, below_floor, climb_barred, pre_join, pre_join_readout, runway_procedure, track_tolerance_m,
     word_tolerance_m,
 )
@@ -359,8 +359,6 @@ def test_the_speaker_masks_the_altitude_column_by_the_runway_just_sampled_and_th
     speaker.value[:, APPROACH] = 1 + APPROACH_CLEARED
     later = speaker._allowed(ALTITUDE, np.zeros((2, 6), dtype=np.int64), False, classes, unlocked)
     assert later[:, 0].tolist() == [False, True]
-    with pytest.raises(ValueError, match="flights' finals"):
-        AltitudeMasks([(wide, nowhere)], [geometry] * 2, words)
     with pytest.raises(ValueError, match="in the pointer's order"):
         Speaker(_prior_model(variant="no-context"), [signals] * 2, [geometry] * 2, None, words, max_rows=N_LOOK + 3,
                 generator=torch.Generator(), procedure_masks=_altitudes(geometry, nowhere, wide))

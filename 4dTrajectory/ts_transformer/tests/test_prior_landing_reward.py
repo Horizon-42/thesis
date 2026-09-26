@@ -33,6 +33,35 @@ from ts_transformer.tests.test_prior_speaker import _flight, _model, _repeated
 CPU = torch.device("cpu")
 
 
+def test_the_first_stage_speaks_and_reads_out_under_no_procedure_s_masks(monkeypatch):
+    from ts_transformer.experiments import prior_landing_reward as runner
+
+    assert runner.STAGE_PROCEDURE_MASKS == ProcedureMasks.none()
+    one, geometry, signals, _ = _flight()
+    words = Words(one)
+    reading = read_flight(signals, geometry, one, words)
+    batch = replay.Batch(signals=[signals], series=[None], readings=[reading], geometries=[geometry],
+                         vertical_paths=[()], approach_ias_mps=[0.0], groups=["own"], drawn={})
+    heard = {}
+
+    def listen(*args, **options):
+        heard.update(options)
+        raise StopIteration
+
+    monkeypatch.setattr(runner, "flight_inputs", lambda series, device, anchor: None)
+    monkeypatch.setattr(runner, "_physics", lambda batch, device: (None, None, None))
+    monkeypatch.setattr(runner, "speak_and_fly", listen)
+    with pytest.raises(StopIteration):
+        runner.speak_sentences(_model(words), batch, 2, words, _params(), None, generator=torch.Generator())
+    assert heard["procedure_masks"] is runner.STAGE_PROCEDURE_MASKS
+    heard.clear()
+    monkeypatch.setattr(runner, "prior_rows", listen)
+    with pytest.raises(StopIteration):
+        runner.select_readout(_model(words), batch, None, words, _params(), None, samples=1, seed=0, chunk=1,
+                              device=CPU)
+    assert heard["procedure_masks"] is runner.STAGE_PROCEDURE_MASKS and heard["charts"] == {}
+
+
 def test_the_landing_direction_is_the_runways_landed_on_in_the_half_hour_before_and_their_parallels():
     signals, geometry = _signals(), _two_runways()                       # candidates 09 (090°) and 27 (270°)
     first = utc_s(signals.entry_time_utc) + float(signals.time_s[N_LOOK])
