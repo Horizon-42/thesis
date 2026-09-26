@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape
-from math import atan, atan2, cos, degrees, pi, sin, sqrt, tan
+import re
+import unicodedata
+from math import atan, atan2, cos, degrees, pi, radians, sin, sqrt, tan
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -22,11 +24,20 @@ WGS84_F = 1.0 / WGS84_INV_F
 WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
 WGS84_B_OVER_A = 1.0 - WGS84_F
 
-TEACHING_PHI_DEG = 53.809394444
-TEACHING_LAMBDA_DEG = 35.0
-TEACHING_PHI = TEACHING_PHI_DEG * pi / 180.0
-TEACHING_LAMBDA = TEACHING_LAMBDA_DEG * pi / 180.0
-VISUAL_H_OVER_A = 0.16
+REFERENCE_PHI_DEG = 53.809394444
+REFERENCE_LAMBDA_DEG = 35.0
+REFERENCE_PHI = REFERENCE_PHI_DEG * pi / 180.0
+REFERENCE_LAMBDA = REFERENCE_LAMBDA_DEG * pi / 180.0
+VISUAL_H_OVER_A = 0.26
+# Arrowhead size relative to the original 8x6 marker, in stroke widths.
+ARROW_SCALE = 0.62
+# Blank border kept around the drawing when the viewBox is fitted to it.
+FIT_MARGIN_PX = 14
+
+# The default camera looks almost along the local East axis at the reference point
+# (East projects to 0.39 of its length), so the ENU figures turn the eye to azimuth
+# -15°, elevation 25°, where E, N and U all project to >= 0.72 and Z stays upright.
+ENU_CAMERA_EYE = (cos(radians(25)) * cos(radians(-15)), cos(radians(25)) * sin(radians(-15)), sin(radians(25)))
 
 ASSET_DIR = Path(__file__).resolve().parent / "assets" / "geodetic_ecef"
 
@@ -123,7 +134,7 @@ class Svg:
         title: str,
         world_points: Sequence[Vec3],
         camera: Camera | None = None,
-        pad: int = 54,
+        pad: int = 30,
     ) -> None:
         self.width = width
         self.height = height
@@ -168,9 +179,6 @@ class Svg:
             f'<text class="{cls}" x="{x + dx:.1f}" y="{y + dy:.1f}">{escape(text)}</text>'
         )
 
-    def text_xy(self, text: str, x: float, y: float, cls: str = "label") -> None:
-        self.items.append(f'<text class="{cls}" x="{x:.1f}" y="{y:.1f}">{escape(text)}</text>')
-
     def raw(self, item: str) -> None:
         self.items.append(item)
 
@@ -178,14 +186,12 @@ class Svg:
         return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {self.width} {self.height}" role="img" aria-labelledby="title">
   <title id="title">{escape(self.title)}</title>
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+    <marker id="arrow" viewBox="0 0 8 6" markerWidth="{8 * ARROW_SCALE:g}" markerHeight="{6 * ARROW_SCALE:g}" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L8,3 L0,6 Z" fill="#263548"/>
     </marker>
   </defs>
   <style>
     svg {{ background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }}
-    .title {{ fill: #16212f; font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    .subtitle {{ fill: #5f6f7e; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     .wire {{ fill: none; stroke: #6aa7ad; stroke-width: 1.3; opacity: .58; }}
     .equator {{ fill: none; stroke: #b65b13; stroke-width: 2.2; }}
     .meridian {{ fill: none; stroke: #3d58a8; stroke-width: 2.0; }}
@@ -205,7 +211,6 @@ class Svg:
     .teal {{ fill: #006f79; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     .orange {{ fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     .indigo {{ fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    .formula {{ fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
   </style>
   {''.join(self.items)}
 </svg>
@@ -224,7 +229,7 @@ def wire_points() -> list[Vec3]:
     pts: list[Vec3] = []
     for phi_deg in (-60, -30, 0, 30, 60):
         pts.extend(ellipsoid_lat(phi_deg * pi / 180.0))
-    for lam_deg in (0, 45, 90, 135, 180, 225, 270, 315, TEACHING_LAMBDA_DEG):
+    for lam_deg in (0, 45, 90, 135, 180, 225, 270, 315, REFERENCE_LAMBDA_DEG):
         pts.extend(ellipsoid_lon(lam_deg * pi / 180.0))
     return pts
 
@@ -236,7 +241,7 @@ def draw_wire(svg: Svg) -> None:
         svg.polyline(ellipsoid_lon(lam_deg * pi / 180.0), "wire")
     svg.polyline(ellipsoid_lat(0.0), "equator")
     svg.polyline(ellipsoid_lon(0.0), "meridian")
-    svg.polyline(ellipsoid_lon(TEACHING_LAMBDA), "meridian")
+    svg.polyline(ellipsoid_lon(REFERENCE_LAMBDA), "meridian")
 
 
 def tangent_plane_polygon(s: Vec3, phi: float, lam: float, size: float = 0.18) -> list[Vec3]:
@@ -256,37 +261,35 @@ def polygon_points(svg: Svg, pts: Sequence[Vec3], cls: str) -> None:
 
 
 def diagram_coordinate_system() -> str:
-    s = geodetic_surface_unit(TEACHING_PHI, TEACHING_LAMBDA)
-    n = normal_unit(TEACHING_PHI, TEACHING_LAMBDA)
+    s = geodetic_surface_unit(REFERENCE_PHI, REFERENCE_LAMBDA)
+    n = normal_unit(REFERENCE_PHI, REFERENCE_LAMBDA)
     p = add(s, mul(VISUAL_H_OVER_A, n))
     pts = wire_points() + [(0, 0, 0), (1.45, 0, 0), (0, 1.45, 0), (0, 0, 1.35), s, p]
-    svg = Svg(900, 560, "WGS 84 ellipsoid and ECEF axes generated from formulas", pts)
-    svg.text_xy("WGS 84 ellipsoid, geodetic coordinates and ECEF", 30, 36, "title")
-    svg.text_xy("Teaching point φ=53.809394°, λ=35°; the h arrow is exaggerated along the exact normal", 30, 58, "subtitle")
+    svg = Svg(760, 600, "WGS 84 ellipsoid, geodetic coordinates and ECEF axes", pts)
     draw_wire(svg)
     svg.line((0, 0, 0), (1.45, 0, 0), "axis", True)
     svg.line((0, 0, 0), (0, 1.45, 0), "axis", True)
     svg.line((0, 0, 0), (0, 0, 1.35), "axis", True)
-    polygon_points(svg, tangent_plane_polygon(s, TEACHING_PHI, TEACHING_LAMBDA), "plane")
+    polygon_points(svg, tangent_plane_polygon(s, REFERENCE_PHI, REFERENCE_LAMBDA), "plane")
     svg.line((0, 0, 0), s, "vector", True)
     svg.line(s, p, "normal", True)
-    svg.circle(s, 5.8, "surface")
-    svg.circle(p, 6.6, "point")
-    svg.text("X", (1.45, 0, 0), 8, 4)
-    svg.text("Y", (0, 1.45, 0), 6, 8)
-    svg.text("Z", (0, 0, 1.35), 8, -2)
-    svg.text("O (Earth centre)", (0, 0, 0), 6, 16, "small")
-    svg.text("P(φ, λ, h)", p, 8, -6, "teal")
-    svg.text("S (foot of normal on ellipsoid)", s, 10, 14, "orange")
-    svg.text("h·n̂", add(s, mul(VISUAL_H_OVER_A * 0.55, n)), 10, -8, "orange")
-    svg.text("meridian λ", geodetic_surface_unit(0.45, TEACHING_LAMBDA), 8, -4, "indigo")
-    svg.text("equator", geodetic_surface_unit(0, 2.25), 4, 16, "orange")
+    svg.circle(s, 5.0, "surface")
+    svg.circle(p, 5.6, "point")
+    svg.text("X", (1.45, 0, 0), 6, 16)
+    svg.text("Y", (0, 1.45, 0), -2, -12)
+    svg.text("Z", (0, 0, 1.35), 10, 6)
+    svg.text("O", (0, 0, 0), -20, 6)
+    svg.text("P(φ, λ, h)", p, 12, -8, "teal")
+    svg.text("S", s, 12, 20, "orange")
+    svg.text("h·û", add(s, mul(VISUAL_H_OVER_A * 0.5, n)), -50, -14, "orange")
+    svg.text("meridian λ", geodetic_surface_unit(0.45, REFERENCE_LAMBDA), 10, 4, "indigo")
+    svg.text("equator", geodetic_surface_unit(0, 2.25), 4, 18, "orange")
     return svg.render()
 
 
 def diagram_pz_section_geometry() -> str:
-    phi = TEACHING_PHI
-    lam = TEACHING_LAMBDA
+    phi = REFERENCE_PHI
+    lam = REFERENCE_LAMBDA
     s = geodetic_surface_unit(phi, lam)
     radial = (cos(lam), sin(lam), 0.0)
     p_s = sqrt(s[0] * s[0] + s[1] * s[1])
@@ -327,9 +330,7 @@ def diagram_pz_section_geometry() -> str:
         + [(0, 0, z_min), (0, 0, z_max), s, axis_at_z, mul(1.22, radial)]
     )
 
-    svg = Svg(940, 620, "p-z section geometry for WGS 84 ellipsoid", pts, pad=44)
-    svg.text_xy("The p-z section, the latitude section and the shape of p", 30, 36, "title")
-    svg.text_xy("p = sqrt(x²+y²): horizontal distance to the Z axis", 30, 58, "subtitle")
+    svg = Svg(900, 600, "p-z section geometry for WGS 84 ellipsoid", pts)
     polygon_points(svg, meridian_half_plane, "plane")
     draw_wire(svg)
     for ring in cylinder_circles:
@@ -346,10 +347,8 @@ def diagram_pz_section_geometry() -> str:
     svg.text("S", s, 10, -8, "orange")
     svg.text("p_S", add(axis_at_z, mul(0.52, sub(s, axis_at_z))), 8, -8, "teal")
     svg.text("fixed λ: meridian half-plane", geodetic_surface_unit(0.08, lam), 12, -10, "indigo")
-    svg.text("fixed z=z_S: parallel / horizontal section", (p_s * cos(lam + 1.25), p_s * sin(lam + 1.25), z_s), 10, 8, "orange")
+    svg.text("fixed z=z_S: parallel / horizontal section", (p_s * cos(lam - 1.2), p_s * sin(lam - 1.2), z_s), -120, 24, "orange")
     svg.text("fixed p=p_S: cylinder", (p_s * cos(lam - 1.45), p_s * sin(lam - 1.45), 0.0), -40, 18, "teal")
-    svg.text_xy("(p,z) is the meridian half-plane at fixed λ; a latitude section is a horizontal circle;", 44, 566, "formula")
-    svg.text_xy("fixed p is, in 3D, a cylinder around the Z axis.", 44, 586, "formula")
     return svg.render()
 
 
@@ -357,24 +356,23 @@ def svg_2d_header(width: int, height: int, title: str) -> list[str]:
     return [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title">',
         f'<title id="title">{escape(title)}</title>',
-        '<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>',
+        f'<defs><marker id="arrow" viewBox="0 0 8 6" markerWidth="{8 * ARROW_SCALE:g}" markerHeight="{6 * ARROW_SCALE:g}" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#263548"/></marker></defs>',
         """<style>
 svg { background: linear-gradient(180deg, #fbfdff 0%, #f3f7fa 100%); }
-.title { fill: #16212f; font: 700 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.subtitle { fill: #5f6f7e; font: 500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .axis { stroke: #263548; stroke-width: 2.2; marker-end: url(#arrow); }
 .ellipse { fill: #e7f7f8; stroke: #207b84; stroke-width: 2.2; }
 .helper { stroke: #8292a4; stroke-width: 1.5; stroke-dasharray: 6 5; fill: none; }
 .normal { stroke: #b65b13; stroke-width: 2.7; marker-end: url(#arrow); }
 .radius { stroke: #3d58a8; stroke-width: 2.4; marker-end: url(#arrow); }
 .tangent { stroke: #3d58a8; stroke-width: 2.0; }
+.arc { fill: none; stroke: #3d58a8; stroke-width: 1.8; }
 .point { fill: #007c89; stroke: white; stroke-width: 2.0; }
 .surface { fill: #b65b13; stroke: white; stroke-width: 2.0; }
 .label { fill: #16212f; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .small { fill: #4b5d70; font: 500 12.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .orange { fill: #9a4c10; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.teal { fill: #006f79; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .indigo { fill: #314b99; font: 650 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.formula { fill: #263548; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 </style>""",
     ]
 
@@ -384,7 +382,7 @@ def diagram_latitudes() -> str:
     cx, cy = 410, 305
     scale = 255
     b = WGS84_B_OVER_A
-    phi = TEACHING_PHI
+    phi = REFERENCE_PHI
     p_s = nu_over_a(phi) * cos(phi)
     z_s = (1.0 - WGS84_E2) * nu_over_a(phi) * sin(phi)
     psi = atan2(z_s, p_s)
@@ -393,12 +391,18 @@ def diagram_latitudes() -> str:
     rx, ry = p_s, -z_s
     tangent = (-sin(phi), -cos(phi))
     out = svg_2d_header(width, height, "Geodetic latitude and geocentric latitude")
-    out.append('<text class="title" x="30" y="36">Geodetic latitude φ vs geocentric latitude ψ</text>')
-    out.append(f'<text class="subtitle" x="30" y="58">True WGS 84 flattening; φ={TEACHING_PHI_DEG:.6f}°, ψ={degrees(psi):.6f}°, difference={TEACHING_PHI_DEG - degrees(psi):.6f}°</text>')
     out.append(f'<ellipse class="ellipse" cx="{cx}" cy="{cy}" rx="{scale}" ry="{scale * b:.1f}"/>')
     out.append(f'<line class="axis" x1="{cx - 310}" y1="{cy}" x2="{cx + 335}" y2="{cy}"/>')
-    out.append(f'<line class="axis" x1="{cx}" y1="{cy + 285}" x2="{cx}" y2="{cy - 300}"/>')
+    out.append(f'<line class="axis" x1="{cx}" y1="{cy + scale * b + 20:.1f}" x2="{cx}" y2="{cy - 300}"/>')
     out.append(f'<line class="helper" x1="{sx:.1f}" y1="{sy:.1f}" x2="{sx:.1f}" y2="{cy:.1f}"/>')
+    # The normal through S meets the p axis at F; φ is the angle there, ψ the angle at O.
+    fx = sx - (cy - sy) * cos(phi) / sin(phi)
+    out.append(f'<line class="helper" x1="{fx:.1f}" y1="{cy:.1f}" x2="{sx:.1f}" y2="{sy:.1f}"/>')
+    for vx, radius, angle in ((cx, 62.0, psi), (fx, 46.0, phi)):
+        out.append(
+            f'<path class="arc" d="M {vx + radius:.1f},{cy:.1f} A {radius:.1f},{radius:.1f} 0 0 0 '
+            f'{vx + radius * cos(angle):.1f},{cy - radius * sin(angle):.1f}"/>'
+        )
     out.append(f'<line class="helper" x1="{cx:.1f}" y1="{sy:.1f}" x2="{sx:.1f}" y2="{sy:.1f}"/>')
     out.append(f'<line class="radius" x1="{cx}" y1="{cy}" x2="{sx:.1f}" y2="{sy:.1f}"/>')
     out.append(f'<line class="normal" x1="{sx:.1f}" y1="{sy:.1f}" x2="{sx + nx * 150:.1f}" y2="{sy + ny * 150:.1f}"/>')
@@ -407,14 +411,14 @@ def diagram_latitudes() -> str:
     out.append(f'<text class="label" x="{cx + 342}" y="{cy + 6}">p</text>')
     out.append(f'<text class="label" x="{cx + 10}" y="{cy - 303}">z</text>')
     out.append(f'<text class="small" x="{cx + 8}" y="{cy + 18}">O</text>')
-    out.append(f'<text class="orange" x="{sx + nx * 100 + 8:.1f}" y="{sy + ny * 100:.1f}">ellipsoid normal n̂</text>')
-    out.append(f'<text class="indigo" x="{cx + rx * scale * 0.45:.1f}" y="{cy + ry * scale * 0.45 - 8:.1f}">geocentric</text>')
+    out.append(f'<text class="orange" x="{sx + nx * 100 + 8:.1f}" y="{sy + ny * 100:.1f}">normal û</text>')
+    out.append(f'<text class="indigo" x="{cx + rx * scale * 0.5 + 10:.1f}" y="{cy + ry * scale * 0.5 + 20:.1f}">geocentric</text>')
     out.append(f'<text class="label" x="{sx + 10:.1f}" y="{sy - 8:.1f}">S(p_S,z_S)</text>')
     out.append(f'<text class="small" x="{sx + 10:.1f}" y="{cy - 8:.1f}">p_S</text>')
     out.append(f'<text class="small" x="{sx + 8:.1f}" y="{(sy + cy) / 2:.1f}">z_S</text>')
-    out.append(f'<text class="indigo" x="{cx + 120}" y="{cy - 28}">ψ = atan2(z_S,p_S)</text>')
-    out.append(f'<text class="orange" x="{cx + 300}" y="{cy - 100}">φ = normal angle</text>')
-    out.append(f'<text class="formula" x="42" y="512">tan ψ = z_S/p_S;  tan φ = z_S/((1-e²)p_S).  They coincide only for a sphere (e²=0).</text>')
+    # With the true flattening F = e²ν cosφ ≈ 25 km from O, so the two arcs are almost concentric.
+    out.append(f'<text class="indigo" x="{cx + 74 * cos(psi / 2):.1f}" y="{cy - 74 * sin(psi / 2) + 5:.1f}">ψ</text>')
+    out.append(f'<text class="orange" x="{fx + 30 * cos(phi / 2) - 4:.1f}" y="{cy - 30 * sin(phi / 2) + 5:.1f}">φ</text>')
     out.append("</svg>")
     return "\n".join(out)
 
@@ -424,10 +428,10 @@ def diagram_tangent_slope_dp() -> str:
     cx, cy = 230, 365
     scale = 255
     b = WGS84_B_OVER_A
-    phi = TEACHING_PHI
+    phi = REFERENCE_PHI
     p_s = nu_over_a(phi) * cos(phi)
     z_s = (1.0 - WGS84_E2) * nu_over_a(phi) * sin(phi)
-    delta_p = 0.055
+    delta_p = 0.12
     p_2 = p_s + delta_p
     z_2 = b * sqrt(1.0 - p_2 * p_2)
     delta_z = z_2 - z_s
@@ -440,7 +444,7 @@ def diagram_tangent_slope_dp() -> str:
     s2x, s2y = xy(p_2, z_2)
     hx, hy = xy(p_2, z_s)
     tx0 = p_s - 0.20
-    tx1 = p_s + 0.19
+    tx1 = p_s + 0.13
     ty0 = z_s + slope * (tx0 - p_s)
     ty1 = z_s + slope * (tx1 - p_s)
     tangent_x0, tangent_y0 = xy(tx0, ty0)
@@ -459,10 +463,8 @@ def diagram_tangent_slope_dp() -> str:
 .delta { stroke: #007c89; stroke-width: 2.4; marker-end: url(#arrow); }
 .delta-z { stroke: #b65b13; stroke-width: 2.4; marker-end: url(#arrow); }
 </style>""")
-    out.append('<text class="title" x="30" y="36">Derivation: the p in dz/dp is the horizontal coordinate of the section</text>')
-    out.append('<text class="subtitle" x="30" y="58">In the meridian section p = sqrt(x²+y²), the horizontal distance to the Z axis; as Δp → 0 near S, the secant slope tends to the tangent slope.</text>')
     out.append(f'<polyline class="ellipse" fill="none" points="{" ".join(curve_points)}"/>')
-    out.append(f'<line class="axis" x1="{cx}" y1="{cy + 150}" x2="{cx}" y2="{cy - 290}"/>')
+    out.append(f'<line class="axis" x1="{cx}" y1="{cy + 30}" x2="{cx}" y2="{cy - 290}"/>')
     out.append(f'<line class="axis" x1="{cx - 20}" y1="{cy}" x2="{cx + 565}" y2="{cy}"/>')
     out.append(f'<line class="helper" x1="{sx:.1f}" y1="{sy:.1f}" x2="{sx:.1f}" y2="{cy:.1f}"/>')
     out.append(f'<line class="helper" x1="{s2x:.1f}" y1="{s2y:.1f}" x2="{s2x:.1f}" y2="{cy:.1f}"/>')
@@ -477,14 +479,13 @@ def diagram_tangent_slope_dp() -> str:
     out.append(f'<text class="label" x="{cx + 575}" y="{cy + 5}">p</text>')
     out.append(f'<text class="label" x="{cx + 10}" y="{cy - 292}">z</text>')
     out.append(f'<text class="small" x="{cx + 6}" y="{cy + 18}">O (Z axis)</text>')
-    out.append(f'<text class="orange" x="{sx + 10:.1f}" y="{sy - 12:.1f}">S(p_S,z_S)</text>')
-    out.append(f'<text class="teal" x="{s2x + 10:.1f}" y="{s2y + 5:.1f}">S′(p_S+Δp,z_S+Δz)</text>')
-    out.append(f'<text class="small" x="{sx - 5:.1f}" y="{cy + 22:.1f}">p_S</text>')
-    out.append(f'<text class="small" x="{s2x - 12:.1f}" y="{cy + 38:.1f}">p_S+Δp</text>')
+    out.append(f'<text class="orange" x="{sx - 100:.1f}" y="{sy + 20:.1f}">S(p_S,z_S)</text>')
+    out.append(f'<text class="teal" x="{s2x + 12:.1f}" y="{s2y + 26:.1f}">S′(p_S+Δp, z_S+Δz)</text>')
+    out.append(f'<text class="small" x="{sx - 26:.1f}" y="{cy + 22:.1f}">p_S</text>')
+    out.append(f'<text class="small" x="{s2x - 4:.1f}" y="{cy + 22:.1f}">p_S+Δp</text>')
     out.append(f'<text class="teal" x="{(sx + hx) / 2 - 6:.1f}" y="{hy + 42:.1f}">Δp</text>')
     out.append(f'<text class="orange" x="{hx + 25:.1f}" y="{(hy + s2y) / 2 + 5:.1f}">Δz</text>')
-    out.append(f'<text class="indigo" x="{tangent_x1 + 8:.1f}" y="{tangent_y1 + 4:.1f}">tangent slope = (dz/dp)|S</text>')
-    out.append(f'<text class="formula" x="42" y="512">Secant slope = Δz/Δp; as Δp → 0 it becomes (dz/dp)|S, the tangent slope (not the curvature).</text>')
+    out.append(f'<text class="indigo" x="{tangent_x0 - 70:.1f}" y="{tangent_y0 - 12:.1f}">tangent slope = (dz/dp)|S</text>')
     return "\n".join(out + ["</svg>"])
 
 
@@ -500,8 +501,8 @@ def circle3d(center: Vec3, radius: float, u: Vec3, v: Vec3, samples: int = 145) 
 
 
 def diagram_curvature_radii() -> str:
-    phi = TEACHING_PHI
-    lam = TEACHING_LAMBDA
+    phi = REFERENCE_PHI
+    lam = REFERENCE_LAMBDA
     s = geodetic_surface_unit(phi, lam)
     n_out = normal_unit(phi, lam)
     n_in = mul(-1.0, n_out)
@@ -519,14 +520,7 @@ def diagram_curvature_radii() -> str:
         + north_circle
         + [s, center_nu, center_m, add(s, mul(0.42, east)), add(s, mul(0.42, north)), add(s, mul(0.46, n_out))]
     )
-    svg = Svg(900, 600, "Meridian and prime vertical radii of curvature", pts, pad=42)
-    svg.text_xy("North-south and east-west radii of curvature", 30, 36, "title")
-    svg.text_xy(
-        f"Teaching point φ={TEACHING_PHI_DEG:.6f}°; M={meridian * WGS84_A_M:,.3f} m, ν={nu * WGS84_A_M:,.3f} m",
-        30,
-        58,
-        "subtitle",
-    )
+    svg = Svg(900, 600, "Meridian and prime vertical radii of curvature", pts)
     draw_wire(svg)
     svg.polyline(north_circle, "north")
     svg.polyline(east_circle, "east")
@@ -540,21 +534,19 @@ def diagram_curvature_radii() -> str:
     svg.circle(s, 6.5, "point")
     svg.circle(center_m, 5.0, "surface")
     svg.circle(center_nu, 5.0, "surface")
-    svg.text("S", s, 8, -8, "teal")
+    svg.text("S", s, -22, 20, "teal")
     svg.text("north tangent (north-south)", add(s, mul(0.42, north)), 10, -4, "indigo")
     svg.text("east tangent (east-west)", add(s, mul(0.42, east)), 10, 12, "teal")
-    svg.text("outward normal n̂", add(s, mul(0.46, n_out)), 10, -6, "orange")
+    svg.text("normal û", add(s, mul(0.46, n_out)), 10, -6, "orange")
     svg.text("M meridian radius", add(s, mul(0.48, n_in)), -140, 8, "indigo")
     svg.text("ν prime-vertical radius", add(s, mul(0.75, n_in)), 10, -8, "orange")
-    svg.text_xy("M: meridian radius of curvature, of the normal section in the north-south direction.", 44, 540, "formula")
-    svg.text_xy("ν/N: prime-vertical radius of curvature, of the east-west normal section; not the geocentric radius.", 44, 564, "formula")
     return svg.render()
 
 
 def diagram_prime_vertical_projection() -> str:
     width, height = 940, 620
-    phi = TEACHING_PHI
-    lam = TEACHING_LAMBDA
+    phi = REFERENCE_PHI
+    lam = REFERENCE_LAMBDA
     cos_phi = cos(phi)
     sin_phi = sin(phi)
 
@@ -565,13 +557,8 @@ def diagram_prime_vertical_projection() -> str:
 .kcircle { stroke: #007c89; stroke-width: 3.0; marker-end: url(#arrow); fill: none; }
 .projection { stroke: #b65b13; stroke-width: 3.0; marker-end: url(#arrow); fill: none; }
 .normal-line { stroke: #b65b13; stroke-width: 2.4; marker-end: url(#arrow); fill: none; }
-.arc { fill: none; stroke: #3d58a8; stroke-width: 1.8; }
 .panel-box { fill: none; stroke: #d8e1e8; stroke-width: 1.2; }
 </style>""")
-    out.append('<text class="title" x="30" y="36">Why κ_circle and κ_prime vertical differ</text>')
-    out.append(
-        f'<text class="subtitle" x="30" y="58">Teaching point φ={TEACHING_PHI_DEG:.6f}°; projection factor cosφ={cos_phi:.4f}. The parallel’s curvature points horizontally inward, then is projected onto the normal.</text>'
-    )
     out.append('<rect class="panel-box" x="30" y="86" width="410" height="410" rx="8"/>')
     out.append('<rect class="panel-box" x="500" y="86" width="410" height="410" rx="8"/>')
     out.append('<text class="panel-title" x="50" y="116">A. Space curvature of the parallel</text>')
@@ -597,9 +584,9 @@ def diagram_prime_vertical_projection() -> str:
     out.append(f'<circle class="point" cx="{cx:.1f}" cy="{cy:.1f}" r="4.8"/>')
     out.append(f'<text class="small" x="{cx - 20:.1f}" y="{cy + 24:.1f}">Z axis</text>')
     out.append(f'<text class="orange" x="{sx + 10:.1f}" y="{sy - 6:.1f}">S</text>')
-    out.append(f'<text class="indigo" x="{(cx + sx) / 2 + 6:.1f}" y="{(cy + sy) / 2 - 8:.1f}">ρ = ν cosφ</text>')
-    out.append(f'<text class="teal" x="{sx + kx * k_len - 92:.1f}" y="{sy + ky * k_len - 10:.1f}">κ_circle = 1/ρ</text>')
-    out.append(f'<text class="small" x="{sx + tx * 34:.1f}" y="{sy + ty * 34 + 22:.1f}">east tangent</text>')
+    out.append(f'<text class="indigo" x="{(cx + sx) / 2 + 4:.1f}" y="{(cy + sy) / 2 + 26:.1f}">ρ = ν cosφ</text>')
+    out.append(f'<text class="teal" x="{sx + kx * k_len - 112:.1f}" y="{sy + ky * k_len - 12:.1f}">κ_circle = 1/ρ</text>')
+    out.append(f'<text class="small" x="{sx - tx * tangent_len / 2 + 6:.1f}" y="{sy - ty * tangent_len / 2 + 8:.1f}">east tangent</text>')
 
     # Right panel: local vector projection in the plane spanned by the inward radial direction and Z.
     ox, oy = 735.0, 310.0
@@ -621,28 +608,23 @@ def diagram_prime_vertical_projection() -> str:
     out.append(f'<path class="arc" d="M {start[0]:.1f},{start[1]:.1f} A {arc_r:.1f},{arc_r:.1f} 0 0 0 {end[0]:.1f},{end[1]:.1f}"/>')
     out.append(f'<text class="indigo" x="{ox - 62:.1f}" y="{oy + 36:.1f}">φ</text>')
     out.append(f'<text class="teal" x="{q_end[0] - 4:.1f}" y="{q_end[1] - 14:.1f}">horizontal inward q̂</text>')
-    out.append(f'<text class="orange" x="{normal_end[0] - 32:.1f}" y="{normal_end[1] + 22:.1f}">inward normal -n̂</text>')
-    out.append(f'<text class="orange" x="{proj_end[0] - 52:.1f}" y="{proj_end[1] - 12:.1f}">projection = |κ_circle| cosφ</text>')
+    out.append(f'<text class="orange" x="{normal_end[0] - 32:.1f}" y="{normal_end[1] + 22:.1f}">inward normal −û</text>')
+    out.append(f'<text class="orange" x="{proj_end[0] + 14:.1f}" y="{proj_end[1] + 4:.1f}">projection = |κ_circle| cosφ</text>')
     out.append(f'<text class="small" x="{ox + 10:.1f}" y="{oy + 22:.1f}">S</text>')
 
-    out.append(f'<text class="formula" x="48" y="532">A: as a space curve the parallel has curvature κ_circle pointing to the Z axis, |κ_circle|=1/ρ=1/(νcosφ).</text>')
-    out.append(f'<text class="formula" x="48" y="556">B: the east-west normal curvature keeps only the component of κ_circle along the normal; q̂·(-n̂)=cosφ.</text>')
-    out.append(f'<text class="formula" x="48" y="580">Hence κ_prime vertical = κ_circle cosφ = 1/ν, and the radius of curvature R_prime vertical = ν.</text>')
     out.append("</svg>")
     return "\n".join(out)
 
 
 def diagram_forward() -> str:
-    s = geodetic_surface_unit(TEACHING_PHI, TEACHING_LAMBDA)
-    n = normal_unit(TEACHING_PHI, TEACHING_LAMBDA)
+    s = geodetic_surface_unit(REFERENCE_PHI, REFERENCE_LAMBDA)
+    n = normal_unit(REFERENCE_PHI, REFERENCE_LAMBDA)
     p = add(s, mul(VISUAL_H_OVER_A, n))
     q = (p[0], p[1], 0.0)
     x_comp = (p[0], 0.0, 0.0)
     y_comp = (0.0, p[1], 0.0)
     pts = wire_points() + [(0, 0, 0), (1.45, 0, 0), (0, 1.45, 0), (0, 0, 1.35), s, p, q, x_comp, y_comp]
-    svg = Svg(900, 580, "Forward conversion geodetic to ECEF", pts)
-    svg.text_xy("Geodetic → ECEF", 30, 36, "title")
-    svg.text_xy("P = S + h·n̂; S and n̂ exact from φ, λ, WGS 84", 30, 58, "subtitle")
+    svg = Svg(900, 600, "Forward conversion geodetic to ECEF", pts)
     draw_wire(svg)
     for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
         svg.line((0, 0, 0), end, "axis", True)
@@ -660,23 +642,18 @@ def diagram_forward() -> str:
     svg.text("S(φ,λ,h=0)", s, 8, 16, "orange")
     svg.text("P", p, 9, -6, "teal")
     svg.text("Q=(X,Y,0)", q, 8, 14, "teal")
-    svg.text("h·n̂", add(s, mul(VISUAL_H_OVER_A * 0.55, n)), 10, -8, "orange")
+    svg.text("h·û", add(s, mul(VISUAL_H_OVER_A * 0.55, n)), -42, 2, "orange")
     svg.text("p=sqrt(X²+Y²)", q, 18, -8, "teal")
-    svg.text_xy("X=(ν+h)cosφcosλ", 44, 520, "formula")
-    svg.text_xy("Y=(ν+h)cosφsinλ", 44, 540, "formula")
-    svg.text_xy("Z=((1-e²)ν+h)sinφ", 44, 560, "formula")
     return svg.render()
 
 
 def diagram_inverse() -> str:
-    s = geodetic_surface_unit(TEACHING_PHI, TEACHING_LAMBDA)
-    n = normal_unit(TEACHING_PHI, TEACHING_LAMBDA)
+    s = geodetic_surface_unit(REFERENCE_PHI, REFERENCE_LAMBDA)
+    n = normal_unit(REFERENCE_PHI, REFERENCE_LAMBDA)
     p = add(s, mul(VISUAL_H_OVER_A, n))
     q = (p[0], p[1], 0.0)
     pts = wire_points() + [(0, 0, 0), (1.45, 0, 0), (0, 1.45, 0), (0, 0, 1.35), s, p, q]
-    svg = Svg(900, 580, "Inverse conversion ECEF to geodetic", pts)
-    svg.text_xy("ECEF → geodetic", 30, 36, "title")
-    svg.text_xy("Given P: find Q and λ, then S with P-S ∥ n̂", 30, 58, "subtitle")
+    svg = Svg(900, 600, "Inverse conversion ECEF to geodetic", pts)
     draw_wire(svg)
     for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
         svg.line((0, 0, 0), end, "axis", True)
@@ -688,13 +665,11 @@ def diagram_inverse() -> str:
     svg.circle(p, 6.6, "point")
     svg.circle(q, 5.2, "surface")
     svg.circle(s, 5.8, "surface")
-    svg.text("given P(X,Y,Z)", p, 8, -6, "teal")
+    svg.text("P(X,Y,Z)", p, 8, -6, "teal")
     svg.text("Q=(X,Y,0)", q, 8, 14, "teal")
-    svg.text("S foot of normal", s, 8, 16, "orange")
-    svg.text("h=(P-S)·n̂", add(s, mul(VISUAL_H_OVER_A * 0.55, n)), 10, -8, "orange")
+    svg.text("S", s, 8, 16, "orange")
+    svg.text("h=(P−S)·û", add(s, mul(VISUAL_H_OVER_A * 0.55, n)), -96, 2, "orange")
     svg.text("λ=atan2(Y,X)", q, 20, -18, "teal")
-    svg.text_xy("p=sqrt(X²+Y²)", 44, 520, "formula")
-    svg.text_xy("φ from iteration or Bowring's formula; h is the signed length of P-S along the normal", 44, 544, "formula")
     return svg.render()
 
 
@@ -702,7 +677,7 @@ def diagram_iterative_inverse_atan2() -> str:
     width, height = 940, 620
     cx, cy = 250, 400
     scale = 270
-    phi = TEACHING_PHI
+    phi = REFERENCE_PHI
     b = WGS84_B_OVER_A
     nu = nu_over_a(phi)
     p_s = nu * cos(phi)
@@ -725,11 +700,10 @@ def diagram_iterative_inverse_atan2() -> str:
     init_angle_end = (cx + 42 * cos(phi_initial), cy - 42 * sin(phi_initial))
 
     out = svg_2d_header(width, height, "Iterative inverse latitude and atan2")
-    out.append('<text class="title" x="30" y="36">Method A: why latitude φ can be written as atan2</text>')
-    out.append('<text class="subtitle" x="30" y="58">In the (p,z) meridian half-plane at fixed λ, treat the nonlinear term as a correction to the vertical side</text>')
-    out.append(f'<ellipse class="ellipse" cx="{cx}" cy="{cy}" rx="{scale}" ry="{scale * b:.1f}"/>')
-    out.append(f'<line class="axis" x1="{cx - 145}" y1="{cy}" x2="{cx + 585}" y2="{cy}"/>')
-    out.append(f'<line class="axis" x1="{cx}" y1="{cy + 170}" x2="{cx}" y2="{cy - 330}"/>')
+    # Only the upper-right quadrant carries the construction.
+    out.append(f'<path class="ellipse" d="M {cx + scale},{cy} A {scale},{scale * b:.1f} 0 0 0 {cx},{cy - scale * b:.1f} L {cx},{cy} Z"/>')
+    out.append(f'<line class="axis" x1="{cx - 20}" y1="{cy}" x2="{cx + 585}" y2="{cy}"/>')
+    out.append(f'<line class="axis" x1="{cx}" y1="{cy + 20}" x2="{cx}" y2="{cy - 330}"/>')
     out.append(f'<line class="helper" x1="{px:.1f}" y1="{py:.1f}" x2="{px:.1f}" y2="{cy:.1f}"/>')
     out.append(f'<line class="helper" x1="{cx:.1f}" y1="{py:.1f}" x2="{px:.1f}" y2="{py:.1f}"/>')
     out.append(f'<line class="helper" x1="{cx:.1f}" y1="{pcy:.1f}" x2="{pcx:.1f}" y2="{pcy:.1f}"/>')
@@ -753,10 +727,8 @@ def diagram_iterative_inverse_atan2() -> str:
     out.append(f'<text class="indigo" x="{pcx + 22:.1f}" y="{pcy - 34:.1f}">Cₙ=(p, Z+e²νₙ sinφₙ)</text>')
     out.append(f'<text class="orange" x="{px + 42:.1f}" y="{(py + pcy) / 2 - 10:.1f}">vertical correction e²νₙ sinφₙ</text>')
     out.append(f'<text class="small" x="{cx + (p * scale) * 0.45:.1f}" y="{cy + 22:.1f}">horizontal side p</text>')
-    out.append(f'<text class="indigo" x="{cx + 72}" y="{cy - 70}">φₙ₊₁ = atan2(z_c,n, p)</text>')
+    out.append(f'<text class="indigo" x="{cx + 110}" y="{cy - 40}">φₙ₊₁ = atan2(z_c,n, p)</text>')
     out.append(f'<text class="small" x="{init_x + 34:.1f}" y="{init_y + 58:.1f}">initial angle: atan2(Z, p(1-e²))</text>')
-    out.append('<text class="formula" x="42" y="555">From Z = p tanφ - e²ν sinφ:  p tanφ = Z + e²ν sinφ.</text>')
-    out.append('<text class="formula" x="42" y="579">Let z_c,n = Z + e²ν_n sinφ_n; then tanφ_{n+1} = z_c,n/p, so φ_{n+1} = atan2(z_c,n, p).</text>')
     out.append("</svg>")
     return "\n".join(out)
 
@@ -765,7 +737,7 @@ def diagram_height() -> str:
     width, height = 900, 520
     cx, cy = 380, 290
     scale = 250
-    phi = TEACHING_PHI
+    phi = REFERENCE_PHI
     b = WGS84_B_OVER_A
     p_s = nu_over_a(phi) * cos(phi)
     z_s = (1.0 - WGS84_E2) * nu_over_a(phi) * sin(phi)
@@ -774,8 +746,6 @@ def diagram_height() -> str:
     h_px = 120
     px, py = sx + n[0] * h_px, sy + n[1] * h_px
     out = svg_2d_header(width, height, "Ellipsoidal height along the normal")
-    out.append('<text class="title" x="30" y="36">h is along the normal, not the radius</text>')
-    out.append('<text class="subtitle" x="30" y="58">True WGS 84 flattening; h arrow exaggerated</text>')
     out.append(f'<ellipse class="ellipse" cx="{cx}" cy="{cy}" rx="{scale}" ry="{scale * b:.1f}"/>')
     out.append(f'<line class="axis" x1="{cx - 310}" y1="{cy}" x2="{cx + 335}" y2="{cy}"/>')
     out.append(f'<line class="axis" x1="{cx}" y1="{cy + 245}" x2="{cx}" y2="{cy - 280}"/>')
@@ -783,20 +753,18 @@ def diagram_height() -> str:
     out.append(f'<line class="normal" x1="{sx:.1f}" y1="{sy:.1f}" x2="{px:.1f}" y2="{py:.1f}"/>')
     out.append(f'<circle class="surface" cx="{sx:.1f}" cy="{sy:.1f}" r="6"/>')
     out.append(f'<circle class="point" cx="{px:.1f}" cy="{py:.1f}" r="7"/>')
-    out.append(f'<text class="small" x="{cx + 8}" y="{cy + 18}">O (Earth centre)</text>')
-    out.append(f'<text class="orange" x="{sx + 10:.1f}" y="{sy + 16:.1f}">S: foot of normal on the ellipsoid</text>')
+    out.append(f'<text class="small" x="{cx + 8}" y="{cy + 18}">O</text>')
+    out.append(f'<text class="orange" x="{sx + 14:.1f}" y="{sy + 4:.1f}">S</text>')
     out.append(f'<text class="label" x="{px + 10:.1f}" y="{py - 6:.1f}">P</text>')
-    out.append(f'<text class="orange" x="{(sx + px) / 2 + 8:.1f}" y="{(sy + py) / 2 - 8:.1f}">h = |P-S|, direction n̂</text>')
-    out.append(f'<text class="indigo" x="{(cx + px) / 2 - 40:.1f}" y="{(cy + py) / 2 - 10:.1f}">r = ||P||, not h</text>')
-    out.append('<text class="formula" x="42" y="462">P = S + h·n̂;  n̂ = (cosφcosλ, cosφsinλ, sinφ). The normal is radial only on a sphere or at the equator/poles.</text>')
-    out.append('<text class="formula" x="42" y="488">Orthometric height H also needs the geoid undulation N; the usual convention is h = H + N.</text>')
+    out.append(f'<text class="orange" x="{(sx + px) / 2 + 16:.1f}" y="{(sy + py) / 2 + 18:.1f}">h = |P−S| along û</text>')
+    out.append(f'<text class="indigo" x="{cx + 0.4 * (px - cx) + 16:.1f}" y="{cy + 0.4 * (py - cy) + 20:.1f}">r = ||P||, not h</text>')
     out.append("</svg>")
     return "\n".join(out)
 
 
 def diagram_local_tangent_enu() -> str:
-    phi0 = TEACHING_PHI
-    lam0 = TEACHING_LAMBDA
+    phi0 = REFERENCE_PHI
+    lam0 = REFERENCE_LAMBDA
     origin = geodetic_surface_unit(phi0, lam0)
     east = east_unit(lam0)
     north = north_unit(phi0, lam0)
@@ -804,9 +772,9 @@ def diagram_local_tangent_enu() -> str:
 
     # Visual offsets are intentionally larger than real local engineering
     # offsets so the ENU decomposition remains readable in a page-sized SVG.
-    east_len = 0.34
-    north_len = 0.22
-    up_len = 0.15
+    east_len = 0.45
+    north_len = 0.30
+    up_len = 0.22
     p_e = add(origin, mul(east_len, east))
     p_en = add(p_e, mul(north_len, north))
     target = add(p_en, mul(up_len, up))
@@ -825,14 +793,9 @@ def diagram_local_tangent_enu() -> str:
             p_e,
             p_en,
             target,
-            add(origin, mul(0.44, east)),
-            add(origin, mul(0.40, north)),
-            add(origin, mul(0.34, up)),
         ]
     )
-    svg = Svg(940, 640, "WGS 84 geodetic to local tangent ENU", pts, pad=44)
-    svg.text_xy("WGS 84 → local tangent-plane ENU", 30, 36, "title")
-    svg.text_xy("O_L: local origin; E/N/U exact from φ₀, λ₀", 30, 58, "subtitle")
+    svg = Svg(900, 600, "WGS 84 geodetic to local tangent ENU", pts, camera=Camera(ENU_CAMERA_EYE))
     draw_wire(svg)
     for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
         svg.line((0, 0, 0), end, "axis", True)
@@ -844,28 +807,22 @@ def diagram_local_tangent_enu() -> str:
     svg.line(origin, p_e, "east", True)
     svg.line(p_e, p_en, "north", True)
     svg.line(p_en, target, "normal", True)
-    svg.line(origin, add(origin, mul(0.44, east)), "east", True)
-    svg.line(origin, add(origin, mul(0.40, north)), "north", True)
-    svg.line(origin, add(origin, mul(0.34, up)), "normal", True)
     svg.circle(origin, 6.5, "surface")
     svg.circle(p_e, 4.8, "surface")
     svg.circle(p_en, 4.8, "surface")
     svg.circle(target, 7.0, "point")
     svg.text("O_L(φ₀,λ₀,h₀)", origin, 10, 16, "orange")
     svg.text("P(φ,λ,h)", target, 10, -8, "teal")
-    svg.text("Δr=P_ECEF-O_ECEF", delta_mid, 12, -8, "indigo")
-    svg.text("E east", add(origin, mul(0.44, east)), 10, -6, "teal")
-    svg.text("N north", add(origin, mul(0.40, north)), 8, -5, "indigo")
-    svg.text("U up", add(origin, mul(0.34, up)), 10, -6, "orange")
-    svg.text("projection", p_en, 8, 16, "small")
-    svg.text_xy("[E,N,U]^T = [ê^T; n̂^T; û^T] · Δr", 44, 568, "formula")
-    svg.text_xy("ê=(-sinλ₀, cosλ₀, 0)，û=(cosφ₀cosλ₀, cosφ₀sinλ₀, sinφ₀)，n̂=û×ê", 44, 592, "formula")
+    svg.text("Δr", delta_mid, -30, -4, "indigo")
+    svg.text("E ê₀", add(origin, mul(0.5, sub(p_e, origin))), -14, -10, "teal")
+    svg.text("N n̂₀", add(p_e, mul(0.5, sub(p_en, p_e))), 10, 6, "indigo")
+    svg.text("U û₀", add(p_en, mul(0.5, sub(target, p_en))), 10, 4, "orange")
     return svg.render()
 
 
 def diagram_enu_basis_derivation() -> str:
-    phi0 = TEACHING_PHI
-    lam0 = TEACHING_LAMBDA
+    phi0 = REFERENCE_PHI
+    lam0 = REFERENCE_LAMBDA
     origin = geodetic_surface_unit(phi0, lam0)
     east = east_unit(lam0)
     north = north_unit(phi0, lam0)
@@ -888,9 +845,7 @@ def diagram_enu_basis_derivation() -> str:
             u_end,
         ]
     )
-    svg = Svg(940, 640, "ENU basis vectors derived at a WGS 84 local origin", pts, pad=44)
-    svg.text_xy("The ENU unit vectors at the local origin O_L", 30, 36, "title")
-    svg.text_xy("ê₀ east; û₀ outward normal; n̂ₙ,₀ = û₀ × ê₀", 30, 58, "subtitle")
+    svg = Svg(900, 600, "ENU basis vectors derived at a WGS 84 local origin", pts, camera=Camera(ENU_CAMERA_EYE))
     draw_wire(svg)
     for end, label in [((1.45, 0, 0), "X"), ((0, 1.45, 0), "Y"), ((0, 0, 1.35), "Z")]:
         svg.line((0, 0, 0), end, "axis", True)
@@ -902,19 +857,16 @@ def diagram_enu_basis_derivation() -> str:
     svg.line(origin, u_end, "normal", True)
     svg.circle(origin, 6.6, "surface")
     svg.text("O_L(φ₀,λ₀,h₀)", origin, 10, 16, "orange")
-    svg.text("ê₀ East", e_end, 18, 22, "teal")
-    svg.text("n̂_N,0 North", n_end, -118, -12, "indigo")
-    svg.text("û₀ Up / normal", u_end, 18, -22, "orange")
-    svg.text("local tangent plane", add(origin, add(mul(-0.22, east), mul(0.18, north))), -54, -10, "small")
-    svg.text_xy("ê₀=(-sinλ₀, cosλ₀, 0)", 44, 552, "formula")
-    svg.text_xy("û₀=(cosφ₀cosλ₀, cosφ₀sinλ₀, sinφ₀)", 44, 576, "formula")
-    svg.text_xy("n̂_N,0=û₀×ê₀=(-sinφ₀cosλ₀, -sinφ₀sinλ₀, cosφ₀)；ê₀×n̂_N,0=û₀", 44, 600, "formula")
+    svg.text("ê₀ East", e_end, 8, 16, "teal")
+    svg.text("n̂₀ North", n_end, -40, -12, "indigo")
+    svg.text("û₀ Up / normal", u_end, 8, -8, "orange")
+    svg.text("local tangent plane", plane[3], 8, 22, "small")
     return svg.render()
 
 
 def diagram_values_readme() -> str:
-    phi = TEACHING_PHI
-    lam = TEACHING_LAMBDA
+    phi = REFERENCE_PHI
+    lam = REFERENCE_LAMBDA
     s = geodetic_surface_unit(phi, lam)
     n = normal_unit(phi, lam)
     psi = atan((1.0 - WGS84_E2) * tan(phi))
@@ -929,25 +881,93 @@ These SVG files are generated by `../generate_geodetic_ecef_diagrams.py`.
 - WGS 84 semi-major axis a: {WGS84_A_M:.1f} m
 - WGS 84 inverse flattening: {WGS84_INV_F:.12f}
 - WGS 84 first eccentricity squared e^2: {WGS84_E2:.14f}
-- Teaching latitude phi: {TEACHING_PHI_DEG:.9f} deg
-- Teaching longitude lambda: {TEACHING_LAMBDA_DEG:.9f} deg
-- Teaching surface point S/a: ({s[0]:.9f}, {s[1]:.9f}, {s[2]:.9f})
-- Teaching normal n-hat: ({n[0]:.9f}, {n[1]:.9f}, {n[2]:.9f})
-- Geocentric latitude psi at teaching latitude: {degrees(psi):.9f} deg
-- Meridian radius M at teaching latitude: {meridian_radius_over_a(phi) * WGS84_A_M:.3f} m
-- Prime vertical radius nu at teaching latitude: {nu_over_a(phi) * WGS84_A_M:.3f} m
+- Reference latitude phi: {REFERENCE_PHI_DEG:.9f} deg
+- Reference longitude lambda: {REFERENCE_LAMBDA_DEG:.9f} deg
+- Reference surface point S/a: ({s[0]:.9f}, {s[1]:.9f}, {s[2]:.9f})
+- Reference normal u-hat: ({n[0]:.9f}, {n[1]:.9f}, {n[2]:.9f})
+- Geocentric latitude psi at reference latitude: {degrees(psi):.9f} deg
+- Meridian radius M at reference latitude: {meridian_radius_over_a(phi) * WGS84_A_M:.3f} m
+- Prime vertical radius nu at reference latitude: {nu_over_a(phi) * WGS84_A_M:.3f} m
 - p-z section diagram: fixed lambda meridian half-section, z=z_S parallel circle, and p=p_S cylinder surface.
 - Prime vertical projection diagram: parallel-circle radius rho=nu*cos(phi), circle curvature, and normal-curvature projection factor cos(phi).
 - Iterative inverse atan2 diagram: fixed-longitude p-z section, corrected vertical leg Z+e^2*nu_n*sin(phi_n), and fixed-point latitude update.
 - ENU basis derivation diagram: east from parallel tangent, up from ellipsoid normal, north from u-hat cross e-hat.
 - Visual height arrow: {VISUAL_H_OVER_A:.3f} a, used only to make the normal direction visible.
-- Tangent slope diagram delta p: 0.055 a, used only to show the limiting secant visually.
-- Local tangent ENU diagram visual offsets: E=0.34 a, N=0.22 a, U=0.15 a, used only to show the decomposition.
+- Tangent slope diagram delta p: 0.12 a, used only to show the limiting secant visually.
+- Local tangent ENU diagram visual offsets: E=0.45 a, N=0.30 a, U=0.22 a, used only to show the decomposition.
 - EPSG example radial distance ||P|| for h=73.0 m: {epsg_r:.3f} m. This is not the ellipsoidal height.
 """
 
 
+# Font size (px) of every text class; widths are estimated from it to fit the viewBox.
+TEXT_CLASS_PX = {"label": 14.0, "small": 12.5, "teal": 14.0, "orange": 14.0, "indigo": 14.0, "panel-title": 16.0}
+AVG_CHAR_EM = 0.62  # bold sans-serif average advance; generous so labels never clip
+# A combining circumflex after a letter with no precomposed glyph (n̂, q̂) renders
+# shifted right in most fonts, so the hat is drawn as its own glyph centred on the
+# letter. Advances in em, measured in Chrome for the -apple-system labels: lowercase
+# n/q ≈ 0.60, modifier circumflex U+02C6 ≈ 0.49 (its ink already sits above x-height).
+HAT_BASE_EM = 0.60
+HAT_GLYPH_EM = 0.49
+
+_TEXT_RE = re.compile(r'<text class="([\w-]+)" x="([-\d.]+)" y="([-\d.]+)">(.*?)</text>')
+_NUM = r"(-?\d+(?:\.\d+)?)"
+
+
+def _hat_markup(content: str) -> str:
+    pieces = content.split("\u0302")
+    markup = pieces[0]
+    to_centre = -(HAT_BASE_EM + HAT_GLYPH_EM) / 2.0
+    back = (HAT_BASE_EM - HAT_GLYPH_EM) / 2.0
+    for rest in pieces[1:]:
+        markup += f'<tspan dx="{to_centre:.3f}em">\u02c6</tspan>'
+        if rest:
+            markup += f'<tspan dx="{back:.3f}em">{rest}</tspan>'
+    return markup
+
+
+def typeset_hats(svg: str) -> str:
+    def one(m: re.Match[str]) -> str:
+        content = unicodedata.normalize("NFC", m.group(4))
+        return f'<text class="{m.group(1)}" x="{m.group(2)}" y="{m.group(3)}">{_hat_markup(content)}</text>'
+
+    return _TEXT_RE.sub(one, svg)
+
+
+def fit_viewbox(svg: str) -> str:
+    """Crop the viewBox to the drawn geometry and (estimated) label extents."""
+    xs: list[float] = []
+    ys: list[float] = []
+    for x1, y1, x2, y2 in re.findall(rf'x1="{_NUM}" y1="{_NUM}" x2="{_NUM}" y2="{_NUM}"', svg):
+        xs += [float(x1), float(x2)]
+        ys += [float(y1), float(y2)]
+    for pts in re.findall(r'points="([^"]+)"', svg):
+        for pair in pts.split():
+            x, y = pair.split(",")
+            xs.append(float(x))
+            ys.append(float(y))
+    for cx, cy, r in re.findall(rf'cx="{_NUM}" cy="{_NUM}" r="{_NUM}"', svg):
+        xs += [float(cx) - float(r), float(cx) + float(r)]
+        ys += [float(cy) - float(r), float(cy) + float(r)]
+    for cx, cy, rx, ry in re.findall(rf'cx="{_NUM}" cy="{_NUM}" rx="{_NUM}" ry="{_NUM}"', svg):
+        xs += [float(cx) - float(rx), float(cx) + float(rx)]
+        ys += [float(cy) - float(ry), float(cy) + float(ry)]
+    for x, y, w, h in re.findall(rf'<rect[^>]* x="{_NUM}" y="{_NUM}" width="{_NUM}" height="{_NUM}"', svg):
+        xs += [float(x), float(x) + float(w)]
+        ys += [float(y), float(y) + float(h)]
+    for cls, x, y, content in _TEXT_RE.findall(svg):
+        px = TEXT_CLASS_PX[cls]
+        chars = sum(1 for c in content if not unicodedata.combining(c))
+        xs += [float(x), float(x) + chars * AVG_CHAR_EM * px]
+        ys += [float(y) - 0.95 * px, float(y) + 0.3 * px]
+    m = FIT_MARGIN_PX
+    x0, y0 = min(xs) - m, min(ys) - m
+    w, h = max(xs) - min(xs) + 2 * m, max(ys) - min(ys) + 2 * m
+    return re.sub(r'viewBox="[^"]+"', f'viewBox="{x0:.1f} {y0:.1f} {w:.1f} {h:.1f}"', svg, count=1)
+
+
 def write(path: Path, content: str) -> None:
+    if path.suffix == ".svg":
+        content = typeset_hats(fit_viewbox(content))
     path.write_text(content, encoding="utf-8")
 
 

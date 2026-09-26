@@ -555,7 +555,7 @@
         </div>
         <div class="tile">
           <strong>理解正算<span class="en" lang="en">Understand the forward conversion</span></strong>
-          <span>给定大地纬度 φ、大地经度 λ、椭球高 h，先算椭球面点 S 和单位法线 n̂，再用目标点 P = S + h·n̂ 分解到 X、Y、Z 三轴。<span class="en" lang="en">Given geodetic latitude φ, geodetic longitude λ, and ellipsoidal height h, first compute the surface point S and unit normal n̂, then decompose P = S + h·n̂ onto the X, Y, and Z axes.</span></span>
+          <span>给定大地纬度 φ、大地经度 λ、椭球高 h，先算椭球面点 S 和单位法线 û，再用目标点 P = S + h·û 分解到 X、Y、Z 三轴。<span class="en" lang="en">Given geodetic latitude φ, geodetic longitude λ, and ellipsoidal height h, first compute the surface point S and unit normal û, then decompose P = S + h·û onto the X, Y, and Z axes.</span></span>
         </div>
         <div class="tile">
           <strong>理解反算<span class="en" lang="en">Understand the inverse conversion</span></strong>
@@ -697,7 +697,7 @@
             <div class="var-list" aria-label="大地坐标变量 / Geodetic coordinate variables">
               <div><strong>φ</strong>：phi，大地纬度。它由椭球法线决定，不是从地心连线决定。<span class="en" lang="en">φ: phi, geodetic latitude. It is defined by the ellipsoid normal, not by the line from the Earth’s center.</span></div>
               <div><strong>λ</strong>：lambda，大地经度。通常以格林尼治子午面为零经度。<span class="en" lang="en">λ: lambda, geodetic longitude. It is usually measured from the Greenwich meridian plane.</span></div>
-              <div><strong>h</strong>：椭球高。先在椭球面上找到法线脚点 S，再沿 S 处单位法线 n̂ 到目标点 P 的有符号距离。<span class="en" lang="en">h: ellipsoidal height. First find the foot point S on the ellipsoid surface, then measure the signed distance from S to the target point P along the unit normal n̂ at S.</span></div>
+              <div><strong>h</strong>：椭球高。先在椭球面上找到法线脚点 S，再沿 S 处单位法线 û 到目标点 P 的有符号距离。<span class="en" lang="en">h: ellipsoidal height. First find the foot point S on the ellipsoid surface, then measure the signed distance from S to the target point P along the unit normal û at S.</span></div>
               <div><strong>datum/frame</strong>：基准或参考框架。这里默认都在 WGS 84 内部，不做基准变换。<span class="en" lang="en">datum/frame: the datum or reference frame. This page assumes everything stays inside WGS 84 and does not perform datum transformations.</span></div>
             </div>
           </article>
@@ -719,8 +719,10 @@
         <figure class="diagram" aria-labelledby="fig-ecef-title">
           <img src="assets/geodetic_ecef/01-coordinate-systems.svg" alt="WGS 84 椭球、大地坐标点、ECEF 坐标轴、法线和切平面的生成式三维示意图 / Generated 3D diagram of the WGS 84 ellipsoid, geodetic point, ECEF axes, normal, and tangent plane">
           <figcaption id="fig-ecef-title">
-            这张图由脚本按 WGS 84 椭球参数、教学点 φ=53.809394°、λ=35° 和固定正交投影生成。P 可以用大地坐标 (φ, λ, h) 表示，也可以用 ECEF 坐标 (X, Y, Z) 表示。图中的 h 箭头沿精确单位法线 n̂ 放大显示，只用于看清方向；真实近地高度相对地球半径太小，按比例绘制会几乎不可见。
-            <span class="en" lang="en">This diagram is generated from the WGS 84 ellipsoid parameters, the teaching point φ=53.809394° and λ=35°, and a fixed orthographic projection. P can be represented by geodetic coordinates (φ, λ, h) or by ECEF coordinates (X, Y, Z). The h arrow is enlarged along the exact unit normal n̂ only to make the direction visible; real near-ground heights are so small relative to the Earth’s radius that a true-scale drawing would make them almost invisible.</span>
+            <strong>WGS 84 椭球、大地坐标与 ECEF 坐标轴</strong>
+            <span class="en" lang="en"><strong>WGS 84 ellipsoid, geodetic coordinates and ECEF axes</strong></span>
+            这张图由脚本按 WGS 84 椭球参数、参考点 φ=53.809394°、λ=35° 和固定正交投影生成。O 是地心，S 是 P 沿椭球法线在椭球面上的垂足。P 可以用大地坐标 (φ, λ, h) 表示，也可以用 ECEF 坐标 (X, Y, Z) 表示。图中的 h 箭头沿精确单位法线 û 放大显示，只用于看清方向；真实近地高度相对地球半径太小，按比例绘制会几乎不可见。
+            <span class="en" lang="en">This diagram is generated from the WGS 84 ellipsoid parameters, the reference point φ=53.809394°, λ=35°, and a fixed orthographic projection. O is the Earth’s center and S is the foot of the ellipsoid normal through P. P can be represented by geodetic coordinates (φ, λ, h) or by ECEF coordinates (X, Y, Z). The h arrow is exaggerated along the exact unit normal û only to make its direction visible; real near-ground heights are so small relative to the Earth’s radius that a true-scale drawing would make them almost invisible.</span>
           </figcaption>
         </figure>
       </section>
@@ -904,6 +906,8 @@ p=\sqrt{x^2+y^2},\qquad
         <figure class="diagram" aria-labelledby="fig-pz-section-title">
           <img src="assets/geodetic_ecef/02-pz-section-geometry.svg" alt="p-z 剖面、纬度剖面和固定 p 圆柱面的生成式三维示意图 / Generated 3D diagram of the p-z section, latitude section, and constant-p cylinder">
           <figcaption id="fig-pz-section-title">
+            <strong>p-z 剖面、纬度剖面与 p 的几何含义</strong>
+            <span class="en" lang="en"><strong>The p-z section, the latitude section and the meaning of p</strong></span>
             这张图由脚本按 WGS 84 椭球生成。图中的 S 是选取的椭球表面点，\(p_S\) 是 S 到 Z 轴的水平距离，\(z_S\) 是 S 的竖直坐标。蓝色半平面是固定经度 \(\lambda\) 后得到的子午半剖面，也就是推导中真正使用的 \((p,z)\) 剖面；橙色圆是固定 \(z=z_S\) 的水平切片，属于纬度方向的圆；紫色线框表示固定 \(p=p_S\) 后在三维空间形成的圆柱面。
             <span class="en" lang="en">This diagram is generated from the WGS 84 ellipsoid. S is the selected ellipsoid surface point, \(p_S\) is the horizontal distance from S to the Z axis, and \(z_S\) is the vertical coordinate of S. The blue half-plane is the fixed-longitude \(\lambda\) meridian half-section, which is the actual \((p,z)\) section used in the derivation; the orange circle is the horizontal slice at \(z=z_S\), a latitude-direction circle; the purple wireframe shows the circular cylinder formed by holding \(p=p_S\) in three-dimensional space.</span>
           </figcaption>
@@ -976,16 +980,20 @@ M=\frac{a(1-e^2)}{\left(1-e^2\sin^2\phi\right)^{3/2}}
         <figure class="diagram" aria-labelledby="fig-curvature-title">
           <img src="assets/geodetic_ecef/03-curvature-radii.svg" alt="WGS 84 椭球点处子午圈曲率半径 M 和卯酉圈曲率半径 nu 的生成式三维示意图 / Generated 3D diagram of meridian radius of curvature M and prime vertical radius of curvature nu at a WGS 84 ellipsoid point">
           <figcaption id="fig-curvature-title">
-            这张图由脚本在同一教学点生成。南北切向对应子午圈曲率半径 M，东西切向对应卯酉圈曲率半径 ν/N；两者都是局部法截线的曲率半径。图中的虚线小圆用于提示密切圆概念，完整半径按公式计算并在图题中标出。
-            <span class="en" lang="en">This diagram is generated at the same teaching point. The north-south tangent corresponds to the meridian radius of curvature M, and the east-west tangent corresponds to the prime vertical radius of curvature ν/N; both are curvature radii of local normal sections. The dashed small circles hint at the osculating-circle concept; the full radii are computed from the formulas and shown in the diagram title.</span>
+            <strong>子午圈与卯酉圈曲率半径</strong>
+            <span class="en" lang="en"><strong>Meridian and prime-vertical radii of curvature</strong></span>
+            这张图由脚本在同一参考点 φ=53.809394° 生成。南北切向对应子午圈曲率半径 M，东西切向对应卯酉圈曲率半径 ν/N；两者都是局部法截线的曲率半径。图中的虚线小圆用于提示密切圆概念，完整半径按公式计算：M=6,377,103.198 m，ν=6,392,088.017 m。
+            <span class="en" lang="en">This diagram is generated at the same reference point, φ=53.809394°. The north-south tangent corresponds to the meridian radius of curvature M, and the east-west tangent corresponds to the prime vertical radius of curvature ν/N; both are curvature radii of local normal sections. The dashed small circles hint at the osculating-circle concept; the full radii are computed from the formulas: M=6,377,103.198 m and ν=6,392,088.017 m.</span>
           </figcaption>
         </figure>
 
         <figure class="diagram" aria-labelledby="fig-normal-title">
           <img src="assets/geodetic_ecef/02-geodetic-vs-geocentric-latitude.svg" alt="WGS 84 子午剖面中大地纬度和地心纬度的精确关系图 / Precise WGS 84 meridian-section diagram comparing geodetic latitude and geocentric latitude">
           <figcaption id="fig-normal-title">
-            这张剖面图使用 WGS 84 真实扁率计算。φ 是椭球法线与赤道平面的夹角，ψ 是地心连线与赤道平面的夹角。图中的 S(p_S,z_S) 表示椭球面点 S 在子午剖面中的坐标：p_S 是 S 到 Z 轴的水平距离，z_S 是 S 的竖直坐标。这里的 p_S、z_S 与下一段推导中的 p_S、z_S 是同一对量；它们都属于表面点 S，不是反算目标点 P 的 p。在教学纬度 φ=53.809394° 处，ψ=53.625811°，二者相差约 0.183584°。差异很小但会进入精密坐标转换公式。
-            <span class="en" lang="en">This section diagram uses the true WGS 84 flattening. φ is the angle between the ellipsoid normal and the equatorial plane, while ψ is the angle between the geocentric line and the equatorial plane. S(p_S,z_S) denotes the coordinates of ellipsoid surface point S in the meridian section: p_S is the horizontal distance from S to the Z axis, and z_S is its vertical coordinate. These p_S and z_S are the same pair used in the next derivation; they belong to surface point S, not to the inverse-conversion target point P. At the teaching latitude φ=53.809394°, ψ=53.625811°, a difference of about 0.183584°. The difference is small but enters precise coordinate transformation formulas.</span>
+            <strong>大地纬度 φ 与地心纬度 ψ</strong>
+            <span class="en" lang="en"><strong>Geodetic latitude φ vs geocentric latitude ψ</strong></span>
+            这张剖面图使用 WGS 84 真实扁率计算。φ 是椭球法线与赤道平面的夹角，ψ 是地心连线与赤道平面的夹角。图中的 S(p_S,z_S) 表示椭球面点 S 在子午剖面中的坐标：p_S 是 S 到 Z 轴的水平距离，z_S 是 S 的竖直坐标。这里的 p_S、z_S 与下一段推导中的 p_S、z_S 是同一对量；它们都属于表面点 S，不是反算目标点 P 的 p。在参考纬度 φ=53.809394° 处，ψ=53.625811°，二者相差约 0.183584°。差异很小但会进入精密坐标转换公式。图中 ψ 在地心 O 处量取，φ 在法线与 p 轴的交点处量取；按真实扁率这个交点离 O 只有约 25 km，所以两段角弧几乎同心。二者的关系是 tan ψ = z_S/p_S，tan φ = z_S/((1−e²)p_S)，只有球体（e²=0）时才相等。
+            <span class="en" lang="en">This section diagram uses the true WGS 84 flattening. φ is the angle between the ellipsoid normal and the equatorial plane, while ψ is the angle between the geocentric line and the equatorial plane. S(p_S,z_S) denotes the coordinates of ellipsoid surface point S in the meridian section: p_S is the horizontal distance from S to the Z axis, and z_S is its vertical coordinate. These p_S and z_S are the same pair used in the next derivation; they belong to surface point S, not to the inverse-conversion target point P. At the reference latitude φ=53.809394°, ψ=53.625811°, a difference of about 0.183584°. The difference is small but enters precise coordinate transformation formulas. In the diagram ψ is measured at the Earth’s center O and φ where the normal meets the p axis; with the true flattening that point is only about 25 km from O, so the two angle arcs are almost concentric. The two are related by tan ψ = z_S/p_S and tan φ = z_S/((1−e²)p_S), which agree only for a sphere (e²=0).</span>
           </figcaption>
         </figure>
 
@@ -1020,8 +1028,10 @@ S(\phi,\lambda,h=0)
           <figure class="diagram" aria-labelledby="fig-tangent-slope-title">
             <img src="assets/geodetic_ecef/03-tangent-slope-dp.svg" alt="说明 dz/dp 中 p 的含义、delta p、delta z、割线和切线斜率的 WGS 84 子午剖面图 / WGS 84 meridian-section diagram explaining the p in dz/dp, delta p, delta z, the secant, and the tangent slope">
             <figcaption id="fig-tangent-slope-title">
-              这张图只画子午剖面右上象限。横轴 p 不是某个新坐标系的 X 轴，而是任意三维点到 Z 轴的水平距离 p=sqrt(x²+y²)。对固定点 S 来说，p 的取值是 p_S；对附近点 S′ 来说，p 的取值是 p_S+Δp。割线斜率 Δz/Δp 在 Δp 趋近 0 时，极限就是 S 处的导数 dz/dp，也就是切线斜率。
-              <span class="en" lang="en">This diagram shows only the upper-right quadrant of the meridian section. The horizontal axis p is not the X axis of a new coordinate system; it is the horizontal distance p=sqrt(x²+y²) from any three-dimensional point to the Z axis. For the fixed point S, the value of p is p_S; for a nearby point S′, it is p_S+Δp. As Δp approaches 0, the secant slope Δz/Δp approaches the derivative dz/dp at S, which is the tangent slope.</span>
+              <strong>dz/dp 中的 p 是剖面的水平坐标</strong>
+              <span class="en" lang="en"><strong>The p in dz/dp is the horizontal coordinate of the section</strong></span>
+              这张图只画子午剖面右上象限。横轴 p 不是某个新坐标系的 X 轴，而是任意三维点到 Z 轴的水平距离 p=sqrt(x²+y²)。对固定点 S 来说，p 的取值是 p_S；对附近点 S′ 来说，p 的取值是 p_S+Δp。割线斜率 Δz/Δp 在 Δp 趋近 0 时，极限就是 S 处的导数 dz/dp，也就是切线斜率（不是曲率）。图中 Δp 放大到 0.12a，只为看清割线。
+              <span class="en" lang="en">This diagram shows only the upper-right quadrant of the meridian section. The horizontal axis p is not the X axis of a new coordinate system; it is the horizontal distance p=sqrt(x²+y²) from any three-dimensional point to the Z axis. For the fixed point S, the value of p is p_S; for a nearby point S′, it is p_S+Δp. As Δp approaches 0, the secant slope Δz/Δp approaches the derivative dz/dp at S, which is the tangent slope (not the curvature). Δp is drawn exaggerated at 0.12a only to make the secant visible.</span>
             </figcaption>
           </figure>
           <div class="callout">
@@ -1204,14 +1214,16 @@ p_S=\nu\cos\phi
           <figure class="diagram" aria-labelledby="fig-prime-vertical-projection-title">
             <img src="assets/geodetic_ecef/03-prime-vertical-projection.svg" alt="解释纬线圆曲率向量投影到椭球法线方向后得到卯酉圈法曲率的生成式图解 / Generated diagram explaining how the parallel-circle curvature vector projects onto the ellipsoid normal to produce prime-vertical normal curvature">
             <figcaption id="fig-prime-vertical-projection-title">
-              左图从 Z 轴方向俯看纬线圆：\(\kappa_{\mathrm{circle}}\) 是这条圆作为空间曲线的曲率，方向水平向内。右图把同一方向放到 S 点附近看：水平向内单位向量 \(\hat q\) 与向内法线 \(-\hat{\mathbf n}\) 的夹角正是 \(\phi\)，所以把 \(\kappa_{\mathrm{circle}}\) 投影到法线方向时要乘 \(\cos\phi\)。
-              <span class="en" lang="en">The left panel looks down along the Z axis at the parallel circle: \(\kappa_{\mathrm{circle}}\) is the curvature of that circle as a space curve, pointing horizontally inward. The right panel views the same direction locally at S: the inward horizontal unit vector \(\hat q\) makes angle \(\phi\) with the inward normal \(-\hat{\mathbf n}\), so projecting \(\kappa_{\mathrm{circle}}\) onto the normal direction multiplies it by \(\cos\phi\).</span>
+              <strong>为什么纬线圆曲率与卯酉圈法曲率不同</strong>
+              <span class="en" lang="en"><strong>Why the parallel’s curvature differs from the prime-vertical normal curvature</strong></span>
+              左图从 Z 轴方向俯看纬线圆：\(\kappa_{\mathrm{circle}}\) 是这条圆作为空间曲线的曲率，方向水平向内。右图把同一方向放到 S 点附近看：水平向内单位向量 \(\hat q\) 与向内法线 \(-\hat{\mathbf u}\) 的夹角正是 \(\phi\)，所以把 \(\kappa_{\mathrm{circle}}=1/(\nu\cos\phi)\) 投影到法线方向时要乘 \(\cos\phi\)，得到 \(\kappa_{\mathrm{PV}}=1/\nu\)。
+              <span class="en" lang="en">The left panel looks down along the Z axis at the parallel circle: \(\kappa_{\mathrm{circle}}\) is the curvature of that circle as a space curve, pointing horizontally inward. The right panel views the same direction locally at S: the inward horizontal unit vector \(\hat q\) makes angle \(\phi\) with the inward normal \(-\hat{\mathbf u}\), so projecting \(\kappa_{\mathrm{circle}}=1/(\nu\cos\phi)\) onto the normal direction multiplies it by \(\cos\phi\), giving \(\kappa_{\mathrm{PV}}=1/\nu\).</span>
             </figcaption>
           </figure>
 
           <p>
-            这里的投影因子不是凭感觉选出来的。设 \(\hat q\) 是从 S 水平指向 Z 轴的单位向量，也就是 \(\kappa_{\mathrm{circle}}\) 的方向；\(-\hat{\mathbf n}\) 是向内椭球法线方向。两个单位向量的点积等于它们夹角的余弦，也等于把 \(\hat q\) 投影到 \(-\hat{\mathbf n}\) 方向后的长度比例。由于这两个方向的夹角是 \(\phi\)，所以投影因子就是 \(\cos\phi\)：
-            <span class="en" lang="en">The projection factor here is not chosen by intuition. Let \(\hat q\) be the unit vector from S horizontally toward the Z axis, which is the direction of \(\kappa_{\mathrm{circle}}\); let \(-\hat{\mathbf n}\) be the inward ellipsoid-normal direction. The dot product of two unit vectors equals the cosine of the angle between them, and also equals the length ratio after projecting one vector onto the other direction. Because the angle between these two directions is \(\phi\), the projection factor is \(\cos\phi\):</span>
+            这里的投影因子不是凭感觉选出来的。设 \(\hat q\) 是从 S 水平指向 Z 轴的单位向量，也就是 \(\kappa_{\mathrm{circle}}\) 的方向；\(-\hat{\mathbf u}\) 是向内椭球法线方向。两个单位向量的点积等于它们夹角的余弦，也等于把 \(\hat q\) 投影到 \(-\hat{\mathbf u}\) 方向后的长度比例。由于这两个方向的夹角是 \(\phi\)，所以投影因子就是 \(\cos\phi\)：
+            <span class="en" lang="en">The projection factor here is not chosen by intuition. Let \(\hat q\) be the unit vector from S horizontally toward the Z axis, which is the direction of \(\kappa_{\mathrm{circle}}\); let \(-\hat{\mathbf u}\) be the inward ellipsoid-normal direction. The dot product of two unit vectors equals the cosine of the angle between them, and also equals the length ratio after projecting one vector onto the other direction. Because the angle between these two directions is \(\phi\), the projection factor is \(\cos\phi\):</span>
           </p>
 
           <div class="formula">
@@ -1223,10 +1235,10 @@ p_S=\nu\cos\phi
 \hat q=(-\cos\lambda,\ -\sin\lambda,\ 0)
 \]</span>
             <span class="formula-line">\[
-\hat{\mathbf n}=(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi)
+\hat{\mathbf u}=(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi)
 \]</span>
             <span class="formula-line">\[
-\hat q\cdot(-\hat{\mathbf n})
+\hat q\cdot(-\hat{\mathbf u})
 =
 \cos\phi\cos^2\lambda+\cos\phi\sin^2\lambda
 =
@@ -1280,15 +1292,17 @@ S(p_S,z_S)
       <section id="forward">
         <h2>5. 坐标变换一：大地坐标 (φ, λ, h) 到 ECEF (X, Y, Z)<span class="en" lang="en">Coordinate Transformation 1: Geodetic Coordinates (φ, λ, h) to ECEF (X, Y, Z)</span></h2>
         <p class="section-intro">
-          正算最容易建立空间直觉：φ 和 λ 先确定椭球表面点 S 以及该点的单位法线 n̂；再沿 n̂ 走有符号距离 h 到点 P；最后把 P 的三维位置分解到 X、Y、Z 轴。
-          <span class="en" lang="en">The forward conversion is the easiest way to build spatial intuition: φ and λ first determine the ellipsoid surface point S and its unit normal n̂; then move a signed distance h along n̂ to reach P; finally decompose the three-dimensional position of P onto the X, Y, and Z axes.</span>
+          正算最容易建立空间直觉：φ 和 λ 先确定椭球表面点 S 以及该点的单位法线 û；再沿 û 走有符号距离 h 到点 P；最后把 P 的三维位置分解到 X、Y、Z 轴。
+          <span class="en" lang="en">The forward conversion is the easiest way to build spatial intuition: φ and λ first determine the ellipsoid surface point S and its unit normal û; then move a signed distance h along û to reach P; finally decompose the three-dimensional position of P onto the X, Y, and Z axes.</span>
         </p>
 
         <figure class="diagram" aria-labelledby="fig-forward-title">
           <img src="assets/geodetic_ecef/04-forward-geodetic-to-ecef.svg" alt="从大地坐标 phi lambda h 正算到 ECEF X Y Z 的生成式三维坐标变换图 / Generated 3D coordinate transformation diagram from geodetic phi lambda h to ECEF X Y Z">
           <figcaption id="fig-forward-title">
-            正算图由脚本从公式 S(φ,λ)、n̂(φ,λ)、P=S+h·n̂、Q=(X,Y,0) 生成。φ 和 λ 先确定椭球面点 S 及其单位法线 n̂，h 是沿 n̂ 的有符号距离，最后把 P 的三维位置分解成 X、Y、Z。
-            <span class="en" lang="en">The forward-conversion diagram is generated from the formulas S(φ,λ), n̂(φ,λ), P=S+h·n̂, and Q=(X,Y,0). φ and λ first determine the ellipsoid surface point S and its unit normal n̂; h is the signed distance along n̂; finally the three-dimensional position of P is decomposed into X, Y, and Z.</span>
+            <strong>正算：大地坐标 → ECEF</strong>
+            <span class="en" lang="en"><strong>Forward conversion: geodetic → ECEF</strong></span>
+            正算图由脚本从公式 S(φ,λ)、û(φ,λ)、P=S+h·û、Q=(X,Y,0) 生成。φ 和 λ 先确定椭球面点 S 及其单位法线 û，h 是沿 û 的有符号距离，最后把 P 的三维位置分解成 X、Y、Z。
+            <span class="en" lang="en">The forward-conversion diagram is generated from the formulas S(φ,λ), û(φ,λ), P=S+h·û, and Q=(X,Y,0). φ and λ first determine the ellipsoid surface point S and its unit normal û; h is the signed distance along û; finally the three-dimensional position of P is decomposed into X, Y, and Z.</span>
           </figcaption>
         </figure>
 
@@ -1296,8 +1310,8 @@ S(p_S,z_S)
           <article class="card">
             <h3>正算公式<span class="en" lang="en">Forward Formula</span></h3>
             <p>
-              本卡片处理正算：已知大地纬度 φ、大地经度 λ、椭球高 h，以及 WGS 84 椭球参数 a 和 e²。先算卯酉圈曲率半径 ν，再写出椭球面点 S 和单位法线 n̂；P 是最终目标点。
-              <span class="en" lang="en">This card handles the forward conversion: geodetic latitude φ, geodetic longitude λ, ellipsoidal height h, and WGS 84 ellipsoid parameters a and e² are known. First compute the prime vertical radius of curvature ν, then write the ellipsoid surface point S and the unit normal n̂; P is the final target point.</span>
+              本卡片处理正算：已知大地纬度 φ、大地经度 λ、椭球高 h，以及 WGS 84 椭球参数 a 和 e²。先算卯酉圈曲率半径 ν，再写出椭球面点 S 和单位法线 û；P 是最终目标点。
+              <span class="en" lang="en">This card handles the forward conversion: geodetic latitude φ, geodetic longitude λ, ellipsoidal height h, and WGS 84 ellipsoid parameters a and e² are known. First compute the prime vertical radius of curvature ν, then write the ellipsoid surface point S and the unit normal û; P is the final target point.</span>
             </p>
             <div class="formula">
               <span class="formula-line">\[
@@ -1307,10 +1321,10 @@ S(p_S,z_S)
 S=\left(\nu\cos\phi\cos\lambda,\ \nu\cos\phi\sin\lambda,\ (1-e^2)\nu\sin\phi\right)
 \]</span>
               <span class="formula-line">\[
-\hat{\mathbf n}=\left(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi\right)
+\hat{\mathbf u}=\left(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi\right)
 \]</span>
               <span class="formula-line">\[
-P=S+h\hat{\mathbf n}
+P=S+h\hat{\mathbf u}
 \]</span>
             </div>
             <p>把 P 的三个分量展开，就得到 ECEF 坐标 X、Y、Z；它们分别是 P 在三条地心直角轴上的坐标值：<span class="en" lang="en">Expanding the three components of P gives the ECEF coordinates X, Y, and Z. They are the coordinate values of P along the three Earth-centered Cartesian axes:</span></p>
@@ -1329,7 +1343,7 @@ Z&amp;=\left((1-e^2)\nu+h\right)\sin\phi
             <ul>
               <li><strong>S</strong> 是 h=0 时的椭球面点。它不是地心，也不是平面地图上的点。<span class="en" lang="en">S is the ellipsoid surface point when h=0. It is not the Earth center and not a point on a flat map.</span></li>
               <li><strong>ν</strong> 是 S 处东西方向法截线的曲率半径，也常写 N；它随 φ 改变。<span class="en" lang="en">ν is the radius of curvature of the east-west normal section at S, also often written as N; it changes with φ.</span></li>
-              <li><strong>n̂</strong> 是 S 处垂直于椭球切平面的单位方向。单位方向的长度为 1，所以 h n̂ 的长度就是 h。<span class="en" lang="en">n̂ is the unit direction perpendicular to the tangent plane of the ellipsoid at S. Because its length is 1, the length of h n̂ is exactly h.</span></li>
+              <li><strong>û</strong> 是 S 处垂直于椭球切平面的单位方向。单位方向的长度为 1，所以 h û 的长度就是 h。<span class="en" lang="en">û is the unit direction perpendicular to the tangent plane of the ellipsoid at S. Because its length is 1, the length of h û is exactly h.</span></li>
               <li><strong>h</strong> 为正时 P 在椭球外侧，为负时 P 在椭球内侧；h=0 时 P 就在参考椭球面上。<span class="en" lang="en">When h is positive, P lies outside the ellipsoid; when h is negative, P lies inside it; when h=0, P is on the reference ellipsoid surface.</span></li>
               <li><strong>cos φ</strong> 把法线方向的单位向量压到赤道平面，得到水平投影比例。<span class="en" lang="en">cos φ projects the normal-direction unit vector onto the equatorial plane, giving the horizontal projection ratio.</span></li>
               <li><strong>cos λ、sin λ</strong> 把赤道平面的投影分解到 X 轴和 Y 轴。<span class="en" lang="en">cos λ and sin λ decompose the equatorial-plane projection onto the X and Y axes.</span></li>
@@ -1396,8 +1410,10 @@ Z&amp;\approx 5\,124\,304.349\ \mathrm{m}
         <figure class="diagram" aria-labelledby="fig-inverse-title">
           <img src="assets/geodetic_ecef/05-inverse-ecef-to-geodetic.svg" alt="从 ECEF X Y Z 反算大地坐标 phi lambda h 的生成式三维坐标变换图 / Generated 3D coordinate transformation diagram from ECEF X Y Z back to geodetic phi lambda h">
           <figcaption id="fig-inverse-title">
-            反算图同样由脚本生成。已知 P(X,Y,Z) 后，先投影到赤道平面得到 Q，从 Q 求 p 和 λ；这里 p 是目标点 P 到 Z 轴的水平距离，不是表面点 S 的 p_S。难点是找到椭球面上的 S，使向量 P-S 与该点法线 n̂ 平行。找到 S 后，φ 来自这条法线方向，h 来自 P-S 在 n̂ 上的有符号长度。
-            <span class="en" lang="en">The inverse-conversion diagram is also generated by script. Given P(X,Y,Z), first project it to the equatorial plane to obtain Q, then compute p and λ from Q. Here p is the horizontal distance from target point P to the Z axis, not the p_S of surface point S. The hard part is finding S on the ellipsoid surface such that the vector P-S is parallel to the normal n̂ at that point. Once S is found, φ comes from the normal direction, and h comes from the signed length of P-S along n̂.</span>
+            <strong>反算：ECEF → 大地坐标</strong>
+            <span class="en" lang="en"><strong>Inverse conversion: ECEF → geodetic</strong></span>
+            反算图同样由脚本生成。已知 P(X,Y,Z) 后，先投影到赤道平面得到 Q，从 Q 求 p 和 λ；这里 p 是目标点 P 到 Z 轴的水平距离，不是表面点 S 的 p_S。难点是找到椭球面上的 S，使向量 P-S 与该点法线 û 平行。找到 S 后，φ 来自这条法线方向，h 来自 P-S 在 û 上的有符号长度。φ 需要迭代或用 Bowring 公式求得。
+            <span class="en" lang="en">The inverse-conversion diagram is also generated by script. Given P(X,Y,Z), first project it to the equatorial plane to obtain Q, then compute p and λ from Q. Here p is the horizontal distance from target point P to the Z axis, not the p_S of surface point S. The hard part is finding S on the ellipsoid surface such that the vector P-S is parallel to the normal û at that point. Once S is found, φ comes from the normal direction, and h comes from the signed length of P-S along û. φ is found by iteration or with Bowring’s formula.</span>
           </figcaption>
         </figure>
 
@@ -1466,8 +1482,10 @@ Z
           <figure class="diagram" aria-labelledby="fig-iterative-inverse-atan2-title">
             <img src="assets/geodetic_ecef/05-iterative-inverse-atan2.svg" alt="ECEF 到大地纬度迭代反算中 atan2 角度更新的生成式剖面图 / Generated section diagram showing the atan2 angle update in iterative ECEF-to-geodetic latitude inversion">
             <figcaption id="fig-iterative-inverse-atan2-title">
-              这张图把反算放到固定经度的 \((p,z)\) 剖面中。原始点是 \(P(p,Z)\)，但大地纬度 \(\phi\) 不是地心连线 \(OP\) 的角度。由椭球正算式整理后，需要把竖直边修正成 \(z_{c,n}=Z+e^2\nu_n\sin\phi_n\)。于是下一轮纬度就是从水平轴 p 指向修正点 \(C_n=(p,z_{c,n})\) 的角度。
-              <span class="en" lang="en">This diagram places the inverse conversion in the fixed-longitude \((p,z)\) section. The raw point is \(P(p,Z)\), but geodetic latitude \(\phi\) is not the angle of the geocentric line \(OP\). After rearranging the forward ellipsoid equations, the vertical leg is corrected to \(z_{c,n}=Z+e^2\nu_n\sin\phi_n\). The next latitude estimate is therefore the angle from the horizontal p-axis to the corrected point \(C_n=(p,z_{c,n})\).</span>
+              <strong>方法 A：为什么纬度 φ 可以写成 atan2</strong>
+              <span class="en" lang="en"><strong>Method A: why latitude φ can be written as atan2</strong></span>
+              这张图把反算放到固定经度的 \((p,z)\) 剖面中。原始点是 \(P(p,Z)\)，但大地纬度 \(\phi\) 不是地心连线 \(OP\) 的角度。由椭球正算式整理后，需要把竖直边修正成 \(z_{c,n}=Z+e^2\nu_n\sin\phi_n\)。于是下一轮纬度就是从水平轴 p 指向修正点 \(C_n=(p,z_{c,n})\) 的角度：由 \(Z=p\tan\phi-e^2\nu\sin\phi\) 得 \(p\tan\phi=Z+e^2\nu\sin\phi\)，所以 \(\phi_{n+1}=\operatorname{atan2}(z_{c,n},p)\)；初值取 \(\operatorname{atan2}(Z,p(1-e^2))\)。图中 P 的高度放大显示。
+              <span class="en" lang="en">This diagram places the inverse conversion in the fixed-longitude \((p,z)\) section. The raw point is \(P(p,Z)\), but geodetic latitude \(\phi\) is not the angle of the geocentric line \(OP\). After rearranging the forward ellipsoid equations, the vertical leg is corrected to \(z_{c,n}=Z+e^2\nu_n\sin\phi_n\). The next latitude estimate is therefore the angle from the horizontal p-axis to the corrected point \(C_n=(p,z_{c,n})\): from \(Z=p\tan\phi-e^2\nu\sin\phi\) we get \(p\tan\phi=Z+e^2\nu\sin\phi\), so \(\phi_{n+1}=\operatorname{atan2}(z_{c,n},p)\), starting from \(\operatorname{atan2}(Z,p(1-e^2))\). The height of P is exaggerated.</span>
             </figcaption>
           </figure>
           <p>
@@ -1639,29 +1657,29 @@ S=\left(\nu\cos\phi\cos\lambda,\ \nu\cos\phi\sin\lambda,\ (1-e^2)\nu\sin\phi\rig
             </div>
           </article>
           <article class="card">
-            <h3>第二步：在 S 处定义法线 n̂<span class="en" lang="en">Step 2: Define the Normal n̂ at S</span></h3>
+            <h3>第二步：在 S 处定义法线 û<span class="en" lang="en">Step 2: Define the Normal û at S</span></h3>
             <p>
-              想象一个平面刚好贴住椭球表面点 S，这个平面叫 tangent plane，即切平面。与切平面垂直、指向椭球外侧的单位方向叫 normal vector，即单位法线 n̂。下面公式中的 φ 和 λ 仍是确定 S 的大地纬度和大地经度。
-              <span class="en" lang="en">Imagine a plane that just touches the ellipsoid at surface point S. This plane is the tangent plane. The unit direction perpendicular to the tangent plane and pointing outward from the ellipsoid is the normal vector, or unit normal n̂. The φ and λ in the formula below are still the geodetic latitude and longitude that determine S.</span>
+              想象一个平面刚好贴住椭球表面点 S，这个平面叫 tangent plane，即切平面。与切平面垂直、指向椭球外侧的单位方向叫 normal vector，即单位法线 û。下面公式中的 φ 和 λ 仍是确定 S 的大地纬度和大地经度。
+              <span class="en" lang="en">Imagine a plane that just touches the ellipsoid at surface point S. This plane is the tangent plane. The unit direction perpendicular to the tangent plane and pointing outward from the ellipsoid is the normal vector, or unit normal û. The φ and λ in the formula below are still the geodetic latitude and longitude that determine S.</span>
             </p>
             <div class="formula">
               <span class="formula-line">\[
-\hat{\mathbf n}=\left(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi\right)
+\hat{\mathbf u}=\left(\cos\phi\cos\lambda,\ \cos\phi\sin\lambda,\ \sin\phi\right)
 \]</span>
             </div>
           </article>
           <article class="card">
-            <h3>第三步：h 是沿 n̂ 的有符号距离<span class="en" lang="en">Step 3: h Is a Signed Distance Along n̂</span></h3>
+            <h3>第三步：h 是沿 û 的有符号距离<span class="en" lang="en">Step 3: h Is a Signed Distance Along û</span></h3>
             <p>
-              目标点 P 不直接由地心半径定义，而由 S 和 n̂ 定义。h 是从 S 沿 n̂ 到 P 的有符号距离：h 为正表示从 S 沿 n̂ 向椭球外走；h 为负表示向椭球内部走；h=0 表示点就在参考椭球面上。
-              <span class="en" lang="en">Target point P is not defined directly by a geocentric radius; it is defined by S and n̂. h is the signed distance from S to P along n̂: positive h means moving outward from S along n̂, negative h means moving inward into the ellipsoid, and h=0 means the point lies on the reference ellipsoid surface.</span>
+              目标点 P 不直接由地心半径定义，而由 S 和 û 定义。h 是从 S 沿 û 到 P 的有符号距离：h 为正表示从 S 沿 û 向椭球外走；h 为负表示向椭球内部走；h=0 表示点就在参考椭球面上。
+              <span class="en" lang="en">Target point P is not defined directly by a geocentric radius; it is defined by S and û. h is the signed distance from S to P along û: positive h means moving outward from S along û, negative h means moving inward into the ellipsoid, and h=0 means the point lies on the reference ellipsoid surface.</span>
             </p>
             <div class="formula">
               <span class="formula-line">\[
-P=S+h\hat{\mathbf n}
+P=S+h\hat{\mathbf u}
 \]</span>
               <span class="formula-line">\[
-h=(P-S)\cdot\hat{\mathbf n}
+h=(P-S)\cdot\hat{\mathbf u}
 \]</span>
             </div>
           </article>
@@ -1711,8 +1729,10 @@ H=h-N
         <figure class="diagram" aria-labelledby="fig-height-title">
           <img src="assets/geodetic_ecef/06-height-normal-vs-radial.svg" alt="椭球高 h 沿法线而不是沿地心半径测量的精确剖面图 / Precise section diagram showing ellipsoidal height h measured along the normal rather than along the geocentric radius">
           <figcaption id="fig-height-title">
-            高度图使用 WGS 84 子午剖面计算。h 是从椭球面法线脚点 S 沿单位法线 n̂ 到 P 的距离；r=||P|| 是从地心 O 到 P 的地心半径长度，通常是六百多万米量级，绝不是 h。海拔或正高 H 还需要大地水准面起伏 N，常用关系是 h = H + N。
-            <span class="en" lang="en">The height diagram is computed in the WGS 84 meridian section. h is the distance from the ellipsoid normal foot point S to P along the unit normal n̂; r=||P|| is the geocentric radius length from Earth center O to P, usually on the order of millions of meters, and is definitely not h. Elevation or orthometric height H also requires the geoid undulation N, with the common relation h = H + N.</span>
+            <strong>椭球高 h 沿法线，而不是沿地心半径</strong>
+            <span class="en" lang="en"><strong>Ellipsoidal height h is measured along the normal, not the geocentric radius</strong></span>
+            高度图使用 WGS 84 子午剖面计算。h 是从椭球面法线脚点 S 沿单位法线 û 到 P 的距离；r=||P|| 是从地心 O 到 P 的地心半径长度，通常是六百多万米量级，绝不是 h。只有在球面上或赤道、两极处，法线才与地心方向重合；图中 h 箭头放大显示。海拔或正高 H 还需要大地水准面起伏 N，常用关系是 h = H + N。
+            <span class="en" lang="en">The height diagram is computed in the WGS 84 meridian section. h is the distance from the ellipsoid normal foot point S to P along the unit normal û; r=||P|| is the geocentric radius length from Earth center O to P, usually on the order of millions of meters, and is definitely not h. The normal is radial only on a sphere or at the equator and poles; the h arrow is exaggerated. Elevation or orthometric height H also requires the geoid undulation N, with the common relation h = H + N.</span>
           </figcaption>
         </figure>
       </section>
@@ -1725,14 +1745,14 @@ H=h-N
         </p>
 
         <div class="card" style="margin-top:18px">
-          <h3>先定义三个帽子向量：\(\hat{\mathbf e}_0,\hat{\mathbf n}_{N,0},\hat{\mathbf u}_0\)<span class="en" lang="en">First Define the Three Unit Vectors: \(\hat{\mathbf e}_0,\hat{\mathbf n}_{N,0},\hat{\mathbf u}_0\)</span></h3>
+          <h3>先定义三个帽子向量：\(\hat{\mathbf e}_0,\hat{\mathbf n}_0,\hat{\mathbf u}_0\)<span class="en" lang="en">First Define the Three Unit Vectors: \(\hat{\mathbf e}_0,\hat{\mathbf n}_0,\hat{\mathbf u}_0\)</span></h3>
           <p>
-            帽子符号 \(\hat{\ }\) 表示 unit vector，即长度为 1 的单位向量。下标 0 表示这些向量只由本地原点 \(O_L=(\phi_0,\lambda_0,h_0)\) 的纬度和经度决定。这里 \(\hat{\mathbf e}_0\) 指向 East，\(\hat{\mathbf n}_{N,0}\) 指向 North，\(\hat{\mathbf u}_0\) 指向 Up。为了避免和前文“椭球法线 \(\hat{\mathbf n}\)”混淆，北向量写成 \(\hat{\mathbf n}_{N,0}\)，其中 N 表示 North。
-            <span class="en" lang="en">The hat symbol \(\hat{\ }\) means a unit vector, a vector of length 1. The subscript 0 means these vectors are determined only by the latitude and longitude of the local origin \(O_L=(\phi_0,\lambda_0,h_0)\). Here \(\hat{\mathbf e}_0\) points East, \(\hat{\mathbf n}_{N,0}\) points North, and \(\hat{\mathbf u}_0\) points Up. To avoid confusion with the earlier ellipsoid normal \(\hat{\mathbf n}\), the north vector is written as \(\hat{\mathbf n}_{N,0}\), where N means North.</span>
+            帽子符号 \(\hat{\ }\) 表示 unit vector，即长度为 1 的单位向量。下标 0 表示这些向量只由本地原点 \(O_L=(\phi_0,\lambda_0,h_0)\) 的纬度和经度决定。这里 \(\hat{\mathbf e}_0\) 指向 East，\(\hat{\mathbf n}_0\) 指向 North，\(\hat{\mathbf u}_0\) 指向 Up。\(\hat{\mathbf u}_0\) 就是前文椭球外法线 \(\hat{\mathbf u}\) 在本地原点处的取值，所以全文法线与 Up 共用字母 u。
+            <span class="en" lang="en">The hat symbol \(\hat{\ }\) means a unit vector, a vector of length 1. The subscript 0 means these vectors are determined only by the latitude and longitude of the local origin \(O_L=(\phi_0,\lambda_0,h_0)\). Here \(\hat{\mathbf e}_0\) points East, \(\hat{\mathbf n}_0\) points North, and \(\hat{\mathbf u}_0\) points Up. \(\hat{\mathbf u}_0\) is the earlier outward ellipsoid normal \(\hat{\mathbf u}\) evaluated at the local origin, so the normal and Up share the letter u throughout.</span>
           </p>
           <p>
-            \(\hat{\mathbf u}_0\) 直接来自原点处的椭球外法线；\(\hat{\mathbf e}_0\) 来自“固定纬度、增大经度”的方向，也就是沿纬线向东的切向；\(\hat{\mathbf n}_{N,0}\) 用叉乘 \(\hat{\mathbf u}_0\times\hat{\mathbf e}_0\) 得到，这样它会落在切平面内并指向北。
-            <span class="en" lang="en">\(\hat{\mathbf u}_0\) comes directly from the outward ellipsoid normal at the origin; \(\hat{\mathbf e}_0\) comes from the direction of increasing longitude at fixed latitude, namely the eastward tangent to the parallel; \(\hat{\mathbf n}_{N,0}\) is obtained by the cross product \(\hat{\mathbf u}_0\times\hat{\mathbf e}_0\), so it lies in the tangent plane and points north.</span>
+            \(\hat{\mathbf u}_0\) 直接来自原点处的椭球外法线；\(\hat{\mathbf e}_0\) 来自“固定纬度、增大经度”的方向，也就是沿纬线向东的切向；\(\hat{\mathbf n}_0\) 用叉乘 \(\hat{\mathbf u}_0\times\hat{\mathbf e}_0\) 得到，这样它会落在切平面内并指向北。
+            <span class="en" lang="en">\(\hat{\mathbf u}_0\) comes directly from the outward ellipsoid normal at the origin; \(\hat{\mathbf e}_0\) comes from the direction of increasing longitude at fixed latitude, namely the eastward tangent to the parallel; \(\hat{\mathbf n}_0\) is obtained by the cross product \(\hat{\mathbf u}_0\times\hat{\mathbf e}_0\), so it lies in the tangent plane and points north.</span>
           </p>
           <div class="formula">
             <span class="formula-line">\[
@@ -1751,7 +1771,7 @@ H=h-N
 \end{bmatrix}
 \]</span>
             <span class="formula-line">\[
-\hat{\mathbf n}_{N,0}
+\hat{\mathbf n}_0
 =\hat{\mathbf u}_0\times\hat{\mathbf e}_0
 =
 \begin{bmatrix}
@@ -1761,22 +1781,24 @@ H=h-N
 \end{bmatrix}
 \]</span>
             <span class="formula-line">\[
-\hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}
+\hat{\mathbf e}_0\times\hat{\mathbf n}_0
 =\hat{\mathbf u}_0
 \]</span>
           </div>
           <div class="callout good">
             <strong>ENU 是右手坐标系。</strong>
-            按 \(E,N,U\) 的顺序看，\(\hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}=\hat{\mathbf u}_0\)，所以 ENU 与普通数学/物理里的右手三维直角坐标系一致。如果你的动力学模型把 \(x,y,z\) 分别解释为 East、North、Up，那么可以直接把 \((x,y,z)\) 对应到 \((E,N,U)\)。
-            <span class="en" lang="en"><strong>ENU is right-handed.</strong> In the \(E,N,U\) order, \(\hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}=\hat{\mathbf u}_0\), so ENU is consistent with an ordinary right-handed Cartesian coordinate system used in mathematics and physics. If your dynamics model interprets \(x,y,z\) as East, North, and Up respectively, then \((x,y,z)\) can map directly to \((E,N,U)\).</span>
+            按 \(E,N,U\) 的顺序看，\(\hat{\mathbf e}_0\times\hat{\mathbf n}_0=\hat{\mathbf u}_0\)，所以 ENU 与普通数学/物理里的右手三维直角坐标系一致。如果你的动力学模型把 \(x,y,z\) 分别解释为 East、North、Up，那么可以直接把 \((x,y,z)\) 对应到 \((E,N,U)\)。
+            <span class="en" lang="en"><strong>ENU is right-handed.</strong> In the \(E,N,U\) order, \(\hat{\mathbf e}_0\times\hat{\mathbf n}_0=\hat{\mathbf u}_0\), so ENU is consistent with an ordinary right-handed Cartesian coordinate system used in mathematics and physics. If your dynamics model interprets \(x,y,z\) as East, North, and Up respectively, then \((x,y,z)\) can map directly to \((E,N,U)\).</span>
           </div>
         </div>
 
         <figure class="diagram" aria-labelledby="fig-enu-basis-title">
           <img src="assets/geodetic_ecef/07-enu-basis-derivation.svg" alt="从 WGS 84 本地原点推导 ENU 三个单位轴的生成式三维图 / Generated 3D diagram deriving the ENU unit basis vectors from a WGS 84 local origin">
           <figcaption id="fig-enu-basis-title">
-            这张图由脚本按同一教学原点生成。East 来自纬线切向，Up 来自椭球外法线，North 由 \( \hat{\mathbf u}_0\times\hat{\mathbf e}_0 \) 得到。图底部同时标出右手关系 \( \hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}=\hat{\mathbf u}_0 \)。
-            <span class="en" lang="en">This diagram is generated at the same teaching origin. East comes from the tangent to the parallel, Up comes from the outward ellipsoid normal, and North is obtained from \( \hat{\mathbf u}_0\times\hat{\mathbf e}_0 \). The bottom of the diagram also marks the right-handed relation \( \hat{\mathbf e}_0\times\hat{\mathbf n}_{N,0}=\hat{\mathbf u}_0 \).</span>
+            <strong>本地原点处的 ENU 单位向量</strong>
+            <span class="en" lang="en"><strong>ENU unit vectors at the local origin</strong></span>
+            这张图由脚本在同一参考点生成，并换了观察方向，使三个轴都不被透视压缩。East 来自纬线切向，Up 来自椭球外法线，North 由 \( \hat{\mathbf u}_0\times\hat{\mathbf e}_0 \) 得到。三者满足右手关系 \( \hat{\mathbf e}_0\times\hat{\mathbf n}_0=\hat{\mathbf u}_0 \)。
+            <span class="en" lang="en">This diagram is generated at the same reference point, viewed from a different direction so that none of the three axes is foreshortened. East comes from the tangent to the parallel, Up comes from the outward ellipsoid normal, and North is obtained from \( \hat{\mathbf u}_0\times\hat{\mathbf e}_0 \). The three satisfy the right-handed relation \( \hat{\mathbf e}_0\times\hat{\mathbf n}_0=\hat{\mathbf u}_0 \).</span>
           </figcaption>
         </figure>
 
@@ -1789,8 +1811,10 @@ H=h-N
         <figure class="diagram" aria-labelledby="fig-local-tangent-title">
           <img src="assets/geodetic_ecef/07-local-tangent-enu.svg" alt="WGS 84 大地坐标转换到本地切平面 ENU 坐标的生成式三维示意图 / Generated 3D diagram of converting WGS 84 geodetic coordinates to local tangent plane ENU coordinates">
           <figcaption id="fig-local-tangent-title">
-            本地图由脚本生成。O_L 是本地原点，P 是目标点；二者先各自转成 ECEF，再形成差向量 Δr。east、north、up 三个单位轴由原点的 φ₀、λ₀ 精确计算，E、N、U 分量就是 Δr 在这三个方向上的投影。图中局部偏移被放大，只用于看清分解方向。
-            <span class="en" lang="en">This local-coordinate diagram is generated by script. O_L is the local origin, and P is the target point. Both are first converted to ECEF, then their difference vector Δr is formed. The east, north, and up unit axes are computed exactly from the origin’s φ₀ and λ₀, and the E, N, and U components are the projections of Δr onto those three directions. The local offsets in the diagram are enlarged only to make the decomposition directions visible.</span>
+            <strong>WGS 84 → 本地切平面 ENU</strong>
+            <span class="en" lang="en"><strong>WGS 84 → local tangent-plane ENU</strong></span>
+            本地图由脚本生成。O_L 是本地原点，P 是目标点；二者先各自转成 ECEF，再形成差向量 Δr。east、north、up 三个单位轴由原点的 φ₀、λ₀ 精确计算，E、N、U 分量就是 Δr 在这三个方向上的投影，图中沿 E ê₀、N n̂₀、U û₀ 的折线加起来就是 Δr。图中局部偏移被放大，只用于看清分解方向。
+            <span class="en" lang="en">This local-coordinate diagram is generated by script. O_L is the local origin, and P is the target point. Both are first converted to ECEF, then their difference vector Δr is formed. The east, north, and up unit axes are computed exactly from the origin’s φ₀ and λ₀, and the E, N, and U components are the projections of Δr onto those three directions; the path E ê₀, N n̂₀, U û₀ adds up to Δr. The local offsets in the diagram are enlarged only to make the decomposition directions visible.</span>
           </figcaption>
         </figure>
 
@@ -1881,8 +1905,8 @@ X-X_0\\Y-Y_0\\Z-Z_0
           <article class="card">
             <h3>第三步：在原点处构造 ENU 三个单位轴<span class="en" lang="en">Step 3: Build the Three ENU Unit Axes at the Origin</span></h3>
             <p>
-              这一步使用本节开头定义过的三个单位轴。它们不是由目标点 P 决定的，而是由原点 \(O_L\) 的 \(\phi_0,\lambda_0\) 决定的固定本地基底。只要本地原点不变，后续所有附近点都投影到同一组 \(\hat{\mathbf e}_0,\hat{\mathbf n}_{N,0},\hat{\mathbf u}_0\) 上。
-              <span class="en" lang="en">This step uses the three unit axes defined at the beginning of this section. They are not determined by target point P; they are the fixed local basis determined by the origin \(O_L\) through \(\phi_0,\lambda_0\). As long as the local origin is fixed, all nearby points are projected onto the same \(\hat{\mathbf e}_0,\hat{\mathbf n}_{N,0},\hat{\mathbf u}_0\) basis.</span>
+              这一步使用本节开头定义过的三个单位轴。它们不是由目标点 P 决定的，而是由原点 \(O_L\) 的 \(\phi_0,\lambda_0\) 决定的固定本地基底。只要本地原点不变，后续所有附近点都投影到同一组 \(\hat{\mathbf e}_0,\hat{\mathbf n}_0,\hat{\mathbf u}_0\) 上。
+              <span class="en" lang="en">This step uses the three unit axes defined at the beginning of this section. They are not determined by target point P; they are the fixed local basis determined by the origin \(O_L\) through \(\phi_0,\lambda_0\). As long as the local origin is fixed, all nearby points are projected onto the same \(\hat{\mathbf e}_0,\hat{\mathbf n}_0,\hat{\mathbf u}_0\) basis.</span>
             </p>
             <div class="formula">
               <span class="formula-line">\[
@@ -1902,7 +1926,7 @@ X-X_0\\Y-Y_0\\Z-Z_0
 \end{bmatrix}
 \]</span>
               <span class="formula-line">\[
-\hat{\mathbf n}_{N,0}
+\hat{\mathbf n}_0
 =\hat{\mathbf u}_0\times\hat{\mathbf e}_0
 =
 \begin{bmatrix}
@@ -1925,7 +1949,7 @@ X-X_0\\Y-Y_0\\Z-Z_0
             <span class="formula-line">\[
 E=\hat{\mathbf e}_0\cdot\Delta\mathbf r,
 \qquad
-N=\hat{\mathbf n}_{N,0}\cdot\Delta\mathbf r,
+N=\hat{\mathbf n}_0\cdot\Delta\mathbf r,
 \qquad
 U=\hat{\mathbf u}_0\cdot\Delta\mathbf r
 \]</span>
@@ -1954,13 +1978,13 @@ X-X_0\\Y-Y_0\\Z-Z_0
           <article class="card">
             <h3>反向：ENU 回到 ECEF，再回到 WGS 84<span class="en" lang="en">Reverse Direction: ENU Back to ECEF, Then Back to WGS 84</span></h3>
             <p>
-              如果已知本地坐标 E、N、U，要回到 ECEF，只需把三个本地分量沿三个单位轴加回去。因为 ê₀、n̂_N,0、û₀ 互相垂直且长度为 1，这个反向过程就是矩阵转置。
-              <span class="en" lang="en">If the local coordinates E, N, and U are known, returning to ECEF only requires adding the three local components back along the three unit axes. Because ê₀, n̂_N,0, and û₀ are mutually perpendicular and have length 1, this reverse process is the matrix transpose.</span>
+              如果已知本地坐标 E、N、U，要回到 ECEF，只需把三个本地分量沿三个单位轴加回去。因为 ê₀、n̂₀、û₀ 互相垂直且长度为 1，这个反向过程就是矩阵转置。
+              <span class="en" lang="en">If the local coordinates E, N, and U are known, returning to ECEF only requires adding the three local components back along the three unit axes. Because ê₀, n̂₀, and û₀ are mutually perpendicular and have length 1, this reverse process is the matrix transpose.</span>
             </p>
             <div class="formula">
               <span class="formula-line">\[
 \Delta\mathbf r
-=E\hat{\mathbf e}_0+N\hat{\mathbf n}_{N,0}+U\hat{\mathbf u}_0
+=E\hat{\mathbf e}_0+N\hat{\mathbf n}_0+U\hat{\mathbf u}_0
 \]</span>
               <span class="formula-line">\[
 \mathbf r=\mathbf r_0+\Delta\mathbf r
@@ -2010,7 +2034,7 @@ N_{\mathrm{ENU}}\\E_{\mathrm{ENU}}\\-U_{\mathrm{ENU}}
 =
 \begin{bmatrix}
 \hat{\mathbf e}_0^T\\
-\hat{\mathbf n}_{N,0}^T\\
+\hat{\mathbf n}_0^T\\
 \hat{\mathbf u}_0^T
 \end{bmatrix}
 \left(\mathbf r_k-\mathbf r_0\right)
@@ -2051,7 +2075,7 @@ N_{\mathrm{ENU}}\\E_{\mathrm{ENU}}\\-U_{\mathrm{ENU}}
 =
 \mathbf r_0
 +E_{k+1}\hat{\mathbf e}_0
-+N_{k+1}\hat{\mathbf n}_{N,0}
++N_{k+1}\hat{\mathbf n}_0
 +U_{k+1}\hat{\mathbf u}_0
 \]</span>
             <span class="formula-line">\[
@@ -2094,7 +2118,7 @@ N_{\mathrm{ENU}}\\E_{\mathrm{ENU}}\\-U_{\mathrm{ENU}}
               <li>输入纬度 φ 是大地纬度，不是地心纬度 ψ。<span class="en" lang="en">The input latitude φ is geodetic latitude, not geocentric latitude ψ.</span></li>
               <li>输入经度 λ 的零点是格林尼治子午线，东西方向约定明确。<span class="en" lang="en">The zero meridian for input longitude λ is Greenwich, and the east-west sign convention is explicit.</span></li>
               <li>角度已经转成弧度，再调用 sin、cos、tan、atan2。<span class="en" lang="en">Angles have been converted to radians before calling sin, cos, tan, or atan2.</span></li>
-              <li>高度 h 是沿 S 处单位法线 n̂ 的有符号距离，不是地心半径 r，也不是 r-a。<span class="en" lang="en">Height h is the signed distance along the unit normal n̂ at S, not the geocentric radius r and not r-a.</span></li>
+              <li>高度 h 是沿 S 处单位法线 û 的有符号距离，不是地心半径 r，也不是 r-a。<span class="en" lang="en">Height h is the signed distance along the unit normal û at S, not the geocentric radius r and not r-a.</span></li>
               <li>如果高度来自海拔、机场标高或地形高程，先确认是否需要大地水准面模型 N。<span class="en" lang="en">If the height comes from elevation, airport elevation, or terrain height, first check whether a geoid model N is needed.</span></li>
               <li>所有参数都来自同一个参考系统，例如 WGS 84。<span class="en" lang="en">All parameters come from the same reference system, such as WGS 84.</span></li>
               <li>ECEF 坐标单位是米，X、Y、Z 轴方向没有被交换。<span class="en" lang="en">ECEF coordinates are in meters, and the X, Y, and Z axis directions have not been swapped.</span></li>
