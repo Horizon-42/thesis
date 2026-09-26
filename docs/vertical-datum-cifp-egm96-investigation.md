@@ -325,6 +325,9 @@ CIFP HAE 的情况下仍依赖外部 EGM96 grid，并把 OurAirports/EGM96 与 F
 “所有 modeling MSL 都是 EGM96 height”的假设上；它没有利用 scenario 已知的 runway
 CIFP datum。
 
+（2026-09-26：最后还用 EGM96 往回换的是 Training 视图的四个写高度的地方。三个导出器已改加跑道差值；
+后端现飞等分支 `dev-model-autopilot` 合并后再改，那时 `flight_scenarios.datum.geoid_undulation_m` 随之删除。）
+
 ### 7.4 文档漂移
 
 [`CLAUDE.md`](../CLAUDE.md) 当前写有“runway thresholds, CIFP altitudes and gates are

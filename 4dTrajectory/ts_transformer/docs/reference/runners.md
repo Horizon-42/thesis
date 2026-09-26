@@ -219,7 +219,9 @@ row plus `heading_lead_s` to the next word's, never past the clearance) with eac
 `envelope.heading_words_inside` asked one row at a time), refused unless the count is `Reading.checks["heading"]`'s; the
 capture turn is its rows (clearance → capture) and `checks["capture_turn"]`; the stratum is `readout.flight_record`'s
 (from `turning_deg`). The runner adds only the geodesy (airport-frame metres → lat/lon; MSL → HAE for the track
-and the tube walls, `flight_scenarios.datum.geoid_undulation_m`) and refuses a word kind outside `WORD_KINDS` (the
+and the tube walls: plus the flight's runway's offset, `training_files.runway_hae_minus_msl_m`, read from the live
+arrival manifest and refused unless it is the one the artefact recorded — so after a re-roster no artefact re-exports,
+as the overlay exporters already could not through `rebuild_series`) and refuses a word kind outside `WORD_KINDS` (the
 frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `tests/test_instruction_training_export.py`
 (every write into `tmp_path`; the schema / rule / columns / kinds mirrors checked against `trainingSample.ts`).
 

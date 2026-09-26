@@ -266,7 +266,9 @@ that divergence is a known open item (see the README's "Future Improvements").
 - 三维：航迹用 `signals.altitudeHaeM`（椭球高）；高度管子是一面墙，沿飞机自己的地面航迹，上下沿为导出的
   `lowerHaeM` / `upperHaeM`；航向词被判的那几行、截获转弯的那几行、走廊、候选跑道和延长中线**贴地画**——它们只关于
   平面，词没有给它们高度，飘在任何高度都是编出来的。文件里其余高度都是几何 MSL，椭球高只在这三处，由导出器
-  一次换好（h = H + N，EGM96）。
+  一次换好：MSL 加航班所落跑道的 `hae_minus_msl_m`（数据面减掉的同一个数，`training_files.runway_hae_minus_msl_m`；
+  执行器回放和生成层的轨迹也加这个数）。2026-09-26 之前用 EGM96，没重导的旧集仍是旧值（差 −1.1 到 +2.8 m）。
+  **后端现飞的轨迹暂时还加 EGM96**（`autopilot_segment/payload.py`），等 `dev-model-autopilot` 合并后改成同一个数。
 - 航迹下面贴地画一条**地面投影**——贴地的东西只能对着它读，斜着看时空中的航迹和地面上的东西有视差；走廊另画一条
   **贴地边线**；每根管子另画**上下沿两条线**——±25 m 的墙在任何正常距离都缩成航迹下面的一条缝；**选中一架航班时
   相机取景一次**（`frameTrajectoryCamera`，框住航迹，留 1.5 倍余量，因为句子条和左栏遮住了画面的一部分），之后相机

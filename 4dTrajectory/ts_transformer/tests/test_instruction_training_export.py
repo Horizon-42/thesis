@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import replace
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -21,6 +22,7 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import (
     labeller_source_sha256, write_candidates, write_sentences, write_signals, write_spec,
 )
+from ts_transformer.io_utils import file_sha256
 from ts_transformer.instructions.labeller.read import admit, read_flight
 from ts_transformer.instructions.labeller.vertical import tube_bounds
 from ts_transformer.instructions.spec import READING_RULE
@@ -73,9 +75,20 @@ def _artefact(directory, flights, readings=None, also=()):
     return one
 
 
+#: The HAE − MSL offset `_offsets` gives runway 09, where every synthetic flight lands, and a runway beside it that is
+#: none of theirs (a writer that took another runway's offset would put the track 8 m off). The synthetic artefact has
+#: no arrival manifest; the real lookup, `training_files.runway_hae_minus_msl_m`, is tested on a manifest of its own.
+HAE_MINUS_MSL_M = -32.0
+
+
+def _offsets(artefact, airport, manifest):
+    return {"09": HAE_MINUS_MSL_M, "27": HAE_MINUS_MSL_M + 8.0}
+
+
 def _run(tmp_path, *extra: str) -> int:
-    return export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
-                        "--airport", "KXXX", "--per-stratum", "1", *extra])
+    with mock.patch.object(export, "runway_hae_minus_msl_m", _offsets):
+        return export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
+                            "--airport", "KXXX", "--per-stratum", "1", *extra])
 
 
 # ---- the contract with the frontend reader
@@ -241,12 +254,12 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
     frame = instruction_airport().frame
     e, n = frame.horizontal_from_latlon(np.array(signals["lat"]), np.array(signals["lon"]))
     assert np.allclose(e, signals["eM"], atol=0.05) and np.allclose(n, signals["nM"], atol=0.05)
-    # one geoid undulation per row, the same for the track and for the tube over that row
+    # the height Cesium draws in: the flight's runway's HAE − MSL offset added, the same for the track and its tubes
     offset = np.array(signals["altitudeHaeM"]) - np.array(signals["raw"]["altitudeM"])
-    assert -40.0 < offset.mean() < -25.0                                        # EGM96 near 35° N, 78° W
+    assert np.allclose(offset, HAE_MINUS_MSL_M, atol=0.011)                    # each side rounded to 0.01 m
     for tube in flight["envelopes"]["altitude"]:
-        span = slice(tube["row"], tube["endRow"])
-        assert np.allclose(np.array(tube["lowerHaeM"]) - np.array(tube["lowerM"]), offset[span], atol=0.02)
+        assert np.allclose(np.array(tube["lowerHaeM"]) - np.array(tube["lowerM"]), HAE_MINUS_MSL_M, atol=0.011)
+        assert np.allclose(np.array(tube["upperHaeM"]) - np.array(tube["upperM"]), HAE_MINUS_MSL_M, atol=0.011)
         assert sum(tube["inside"]) == tube["check"]["inside"]
     # the words: step 0 complete, events sparse, and the in-force table their forward fill
     events = flight["words"]["events"]
@@ -285,6 +298,30 @@ def test_one_flight_s_file_holds_its_words_its_envelopes_and_the_geodesy(tmp_pat
     assert sample["centrelineLengthM"] % 1000 == 0
 
 
+def _manifest_artefact(tmp_path):
+    """An artefact whose signals record the sha256 of KXXX's arrival manifest, and that manifest."""
+    manifest = tmp_path / "manifest.json"
+    targets = {"09": {"hae_minus_msl_m": -32.0}, "27": {"hae_minus_msl_m": -32.1}}
+    manifest.write_text(json.dumps({"runway_targets": targets}), encoding="utf-8")
+    directory = tmp_path / "artefact"
+    directory.mkdir()
+    write_signals(directory, {"val": [_straight(_key("S1"))]},
+                  {"sources": [{"airport": "KXXX", "arrival_manifest_sha256": file_sha256(manifest)}]}, fixture_days())
+    return directory, manifest
+
+
+def test_each_runway_s_offset_is_the_one_the_manifest_the_signals_were_read_from_gives(tmp_path):
+    directory, manifest = _manifest_artefact(tmp_path)
+    assert files.runway_hae_minus_msl_m(directory, "KXXX", manifest) == {"09": -32.0, "27": -32.1}
+
+
+def test_a_manifest_moved_since_the_signals_were_read_gives_no_offset(tmp_path):
+    directory, manifest = _manifest_artefact(tmp_path)
+    manifest.write_text(json.dumps({"runway_targets": {"09": {"hae_minus_msl_m": -33.53}}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="is not the arrival manifest"):
+        files.runway_hae_minus_msl_m(directory, "KXXX", manifest)
+
+
 def test_a_flight_whose_stored_sentence_differs_from_its_reading_stops_the_export(tmp_path):
     flights = [_straight(_key("S1")), _vectored(_key("V1"))]
     one = spec()
@@ -310,6 +347,7 @@ def test_a_refusal_at_a_later_airport_writes_nothing_at_an_earlier_one(tmp_path,
 
     real = export.draw
     monkeypatch.setattr(export, "draw", refuse_on_second)
+    monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
     with pytest.raises(ValueError, match="stopped at the second airport"):
         export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
                      "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])
@@ -346,6 +384,7 @@ def test_a_set_is_written_only_while_every_airport_s_index_is_what_the_run_read(
         return real(code, *args, **kwargs)
 
     monkeypatch.setattr(export, "draw", another_export_meanwhile)
+    monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
     with pytest.raises(ValueError, match="changed since this run read it"):
         export.main(["--dir", str(tmp_path / "artefact"), "--airports-root", str(tmp_path / "airports"),
                      "--airport", "KXXX", "--airport", "KYYY", "--per-stratum", "1"])

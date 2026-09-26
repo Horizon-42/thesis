@@ -12,7 +12,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from flight_scenarios.datum import geoid_undulation_m
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.experiments import prior_generation_training_export as export
@@ -20,6 +19,7 @@ from ts_transformer.experiments.prior_free_generation import GENERATION_SCHEMA, 
 from ts_transformer.instructions.labeller.read import read_flight
 from ts_transformer.instructions.words import UNCHANGED, Words
 from ts_transformer.prior.scene import N_LOOK
+from ts_transformer.tests.test_instruction_training_export import HAE_MINUS_MSL_M, _offsets
 from ts_transformer.tests.test_prior_free_generation import _speak
 
 
@@ -38,7 +38,7 @@ def _sample(seed: int):
 def test_a_sample_is_the_words_said_on_the_flights_own_steps_and_the_track_on_its_own_clock(seed):
     flown, grid, geometry, words, row, inputs = _sample(seed)
     step_s, start_s = words.spec.step_s, N_LOOK * words.spec.step_s
-    payload = export.sample_payload(flown, 0, row, grid, geometry, words)
+    payload = export.sample_payload(flown, 0, row, grid, geometry, words, HAE_MINUS_MSL_M)
     assert payload["outcome"] == row["outcome"] and payload["sample"] == 0
     # the words said up to the flight's end, each on the flight's own step: the first predicted step says every column
     said = grid[: row["steps_said"]]
@@ -58,9 +58,8 @@ def test_a_sample_is_the_words_said_on_the_flights_own_steps_and_the_track_on_it
     assert payload["endS"] == pytest.approx(start_s + row["end_s"])
     state = inputs.initial_state[0].numpy()
     assert (track["lat"][0], track["lon"][0]) == pytest.approx((float(state[0]), float(state[1])), abs=1e-7)
-    # the height Cesium draws in is the ellipsoid's: h = H + N, once
-    undulation = np.asarray(geoid_undulation_m(track["lat"], track["lon"]))
-    assert np.allclose(np.asarray(track["altitudeHaeM"]) - np.asarray(track["altitudeM"]), undulation, atol=0.02)
+    # the height Cesium draws in: the flight's runway's HAE − MSL offset added, once (each side rounded to 0.01 m)
+    assert np.allclose(np.asarray(track["altitudeHaeM"]) - np.asarray(track["altitudeM"]), HAE_MINUS_MSL_M, atol=0.011)
     if payload["crossing"] is not None:
         assert payload["crossing"]["atS"] == pytest.approx(start_s + outcome.crossing["at_row"] * flown.cycle_s, abs=1e-3)
     assert set(payload["forbiddenMass"]) == {"runway", "approach", "angle"}
@@ -69,8 +68,9 @@ def test_a_sample_is_the_words_said_on_the_flights_own_steps_and_the_track_on_it
 def test_a_dynamics_failure_s_track_stops_before_the_failed_state():
     flown, _, geometry, words, _, _ = _sample(3)
     start_s = N_LOOK * words.spec.step_s
-    landed = export.track_payload(flown, 0, 5, "landed", geometry, words.spec.step_s, start_s)
-    failed = export.track_payload(flown, 0, 5, "dynamics_failure", geometry, words.spec.step_s, start_s)
+    step_s = words.spec.step_s
+    landed = export.track_payload(flown, 0, 5, "landed", geometry, step_s, start_s, HAE_MINUS_MSL_M)
+    failed = export.track_payload(flown, 0, 5, "dynamics_failure", geometry, step_s, start_s, HAE_MINUS_MSL_M)
     assert landed["tS"] == [start_s, start_s + 2.0, start_s + 4.0, start_s + 5.0]
     assert failed["tS"] == [start_s, start_s + 2.0, start_s + 4.0]
 
@@ -80,7 +80,7 @@ def test_a_sentence_whose_first_predicted_step_leaves_a_column_unsaid_is_refused
     broken = grid.copy()
     broken[0, 2] = UNCHANGED
     with pytest.raises(ValueError, match="does not say every column"):
-        export.sample_payload(flown, 0, row, broken, geometry, words)
+        export.sample_payload(flown, 0, row, broken, geometry, words, HAE_MINUS_MSL_M)
 
 
 # ---- the formal val readout, bound to this prior, executor spec, artefact and draw
@@ -214,6 +214,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     monkeypatch.setattr(export, "rebuild_series", lambda directory, flights: [series(signals_by_id[f.dataset_id]) for f in flights])
     monkeypatch.setattr(export, "flight_inputs", inputs)
     monkeypatch.setattr(export, "published_crossing_heights", lambda geometry: (15.0,) * len(geometry.candidates))
+    monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
     args = ["--prior", str(tmp_path / "prior"), "--label", "a test prior", "--instructions", str(tmp_path / "artefact"),
             "--executor", str(tmp_path / "executor"), "--airports-root", str(tmp_path / "airports"), "--set", SET_ID,
             "--airport", "KXXX", "--samples", "3"]
@@ -233,6 +234,9 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
                                           "group": "no identified type", "flown": False, "samples": []}
     for item in flown[vectored.dataset_id]["samples"]:
         assert item["events"][0]["row"] == N_LOOK and item["track"]["tS"][0] == N_LOOK * one.step_s
+        # its height the observed track's: the flight's own runway's offset added, taken per flight from the lookup
+        height = np.asarray(item["track"]["altitudeHaeM"]) - np.asarray(item["track"]["altitudeM"])
+        assert np.allclose(height, HAE_MINUS_MSL_M, atol=0.011)
     manifest = json.loads((training / sets.OVERLAYS_FILE).read_text(encoding="utf-8"))
     assert [(o["id"], o["kind"], o["base"]) for o in manifest["overlays"]] == [(overlay_id, sets.KIND_GENERATION, SET_ID)]
     # the same seed, the same sentences: a second export under another id is identical flight for flight

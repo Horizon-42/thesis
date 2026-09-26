@@ -26,8 +26,9 @@ says the sentence shown is the sentence stored.
 **All envelope geometry comes from `instructions.display`**, which builds it from `envelope.py` and
 `labeller/*`; the frontend draws numbers and computes none. This module only adds the geodesy: the
 airport frame's metres → latitude / longitude (`AirportENUFrame.latlon_from_horizontal`), and MSL →
-the ellipsoid height Cesium draws in (h = H + N, `flight_scenarios.datum.geoid_undulation_m`) for
-the track and the altitude tubes that ride it. Units are SI throughout.
+the ellipsoid height Cesium draws in for the track and the altitude tubes that ride it: plus the
+flight's runway's HAE − MSL offset, the one the data plane subtracted
+(`training_files.runway_hae_minus_msl_m`). Units are SI throughout.
 
 **Overlays.** What another model makes of a set's own flights — the executor's replay
 (`executor_training_export`), the prior's predictions (`prior_training_export`) — is written beside
@@ -47,7 +48,6 @@ from typing import Any
 
 import numpy as np
 
-from flight_scenarios.datum import geoid_undulation_m
 from ts_transformer.instructions import display
 from ts_transformer.instructions.airport import AirportGeometry, landing_cross_limit_m
 from ts_transformer.instructions.artefact import (
@@ -60,13 +60,13 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import READING_RULE, VocabularySpec
 from ts_transformer.instructions.training_files import (
     KIND_READBACK, SAMPLE_FILE, SAMPLE_SCHEMA, SPLIT, WORD_KINDS, band_payload, read_index, require_index_unchanged,
-    require_stored_sentence, rounded, serialise, stored_sentence, words_in_force, write_set,
+    require_stored_sentence, rounded, runway_hae_minus_msl_m, serialise, stored_sentence, words_in_force, write_set,
 )
 from ts_transformer.instructions.words import (
     ANGLE_LEVEL, APPROACH_CLEARED, APPROACH_GO_AROUND, APPROACH_NOT_CLEARED, COLUMNS, UNCHANGED, Words,
 )
 from ts_transformer.io_utils import utc_now
-from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
+from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
 RUNNER = "ts_transformer.experiments.instruction_training_export"
 
@@ -96,10 +96,12 @@ def candidates_sha256(geometry: AirportGeometry) -> str:
 
 
 class Globe:
-    """The airport frame on the globe: metres → latitude / longitude, and MSL → the ellipsoid."""
+    """The airport frame on the globe: metres → latitude / longitude, and a flight's MSL heights → the ellipsoid height
+    Cesium draws in (``hae_minus_msl_m``: `training_files.runway_hae_minus_msl_m`)."""
 
-    def __init__(self, geometry: AirportGeometry) -> None:
+    def __init__(self, geometry: AirportGeometry, hae_minus_msl_m: dict[str, float]) -> None:
         self.frame = geometry.frame
+        self.hae_minus_msl_m = hae_minus_msl_m
 
     def latlon(self, e_m: np.ndarray, n_m: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         lat, lon = self.frame.latlon_from_horizontal(np.asarray(e_m, dtype=np.float64), np.asarray(n_m, dtype=np.float64))
@@ -109,10 +111,9 @@ class Globe:
         lat, lon = self.latlon(line.e_m, line.n_m)
         return {"eM": rounded(line.e_m, 1), "nM": rounded(line.n_m, 1), "lon": rounded(lon, 7), "lat": rounded(lat, 7)}
 
-    @staticmethod
-    def undulation_m(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
-        """N = h_HAE − H_MSL per point (EGM96)."""
-        return geoid_undulation_m(lat, lon)
+    def hae_m(self, msl_m: np.ndarray, runway: str) -> np.ndarray:
+        """``msl_m`` of a flight assigned to ``runway``, as the height its aircraft reported."""
+        return np.asarray(msl_m, dtype=np.float64) + self.hae_minus_msl_m[runway]
 
 
 # ---- the draw
@@ -176,7 +177,6 @@ def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, 
     signals, smoothed, relative = flight.signals, flight.smoothed, flight.relative
     rows = signals.n_rows
     lat, lon = globe.latlon(signals.e_m, signals.n_m)
-    undulation = globe.undulation_m(lat, lon)
     key = signals.dataset_id.split(":", 1)[1]
     callsign, runway, _icao24, _landing = key.rsplit("_", 3)
     if runway != signals.runway:
@@ -206,7 +206,7 @@ def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, 
         "captureBeforeThresholdM": capture_before_m,
         "signals": {
             "tS": rounded(signals.time_s, 3), "eM": rounded(signals.e_m, 1), "nM": rounded(signals.n_m, 1),
-            "lon": rounded(lon, 7), "lat": rounded(lat, 7), "altitudeHaeM": rounded(signals.altitude_m + undulation, 2),
+            "lon": rounded(lon, 7), "lat": rounded(lat, 7), "altitudeHaeM": rounded(globe.hae_m(signals.altitude_m, runway), 2),
             "raw": {"trackDeg": rounded(signals.track_deg, 3), "altitudeM": rounded(signals.altitude_m, 2),
                     "groundSpeedMps": rounded(signals.ground_speed_mps, 3), "verticalRateMps": rounded(signals.vertical_rate_mps, 3)},
             "smoothed": {"trackDeg": rounded(smoothed.track_deg, 3), "altitudeM": rounded(smoothed.altitude_m, 2),
@@ -235,8 +235,8 @@ def flight_payload(original: FlightSignals, flight: Admitted, reading: Reading, 
                 "row": tube.word.row, "endRow": tube.end_row, "value": tube.word.value, "kind": tube.word.kind,
                 "targetM": words.altitude_m(tube.word.value),
                 "lowerM": rounded(tube.lower_m, 2), "upperM": rounded(tube.upper_m, 2),
-                "lowerHaeM": rounded(tube.lower_m + undulation[tube.word.row: tube.end_row], 2),
-                "upperHaeM": rounded(tube.upper_m + undulation[tube.word.row: tube.end_row], 2),
+                "lowerHaeM": rounded(globe.hae_m(tube.lower_m, runway), 2),
+                "upperHaeM": rounded(globe.hae_m(tube.upper_m, runway), 2),
                 "inside": _flags(tube.inside),
                 "check": {"rows": int(tube.check["rows"]), "inside": int(tube.check["inside"]),
                           "contained": bool(tube.check["contained"]),
@@ -369,7 +369,7 @@ def export(directory: Path, root: Path, airports: list[str], per_stratum: int, s
     built: dict[str, tuple[str, dict[str, Any], dict[str, int]]] = {}
     for code in airports:
         geometry = geometries[code]
-        globe = Globe(geometry)
+        globe = Globe(geometry, runway_hae_minus_msl_m(directory, code, arrival_manifest_path(code)))
         chosen, counts = draw(code, flights, sentences, geometry, spec, words, per_stratum, seed)
         payloads, reach = [], 0.0
         for stratum, flight, reading in chosen:

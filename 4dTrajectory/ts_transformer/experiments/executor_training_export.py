@@ -46,7 +46,9 @@ leaves out, so its words keep the judge's statuses and checks but draw no band a
 
 A flight the replay does not fly (no identified type, or a type publishing no approach speed) is listed with the reason
 and no track. Units are SI; the flown track is exported every sentence step (2 s) to its outcome's row, with its
-geometric MSL height and the ellipsoid height Cesium draws in (h = H + N).
+geometric MSL height and the ellipsoid height Cesium draws in: plus the flight's runway's HAE − MSL offset, the one
+the data plane subtracted from its observed track (`training_files.runway_hae_minus_msl_m`), so it reads beside the
+set's observed track on one datum.
 """
 
 from __future__ import annotations
@@ -62,7 +64,6 @@ from typing import Any
 import numpy as np
 import torch
 
-from flight_scenarios.datum import geoid_undulation_m
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.params import ExecutorParams
@@ -80,13 +81,14 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.spec import VocabularySpec
 from ts_transformer.instructions.training_files import (
     KIND_EXECUTOR, SPLIT, BaseSet, band_payload, base_flights, open_base_set, overlay_entry, read_overlays,
-    require_overlays_unchanged, require_stored_sentence, rounded, serialise, stored_sentence, write_overlay,
+    require_overlays_unchanged, require_stored_sentence, rounded, runway_hae_minus_msl_m, serialise, stored_sentence,
+    write_overlay,
 )
 from ts_transformer.instructions.words import (
     ALTITUDE, ANGLE, APPROACH, COLUMNS, HEADING, RUNWAY, SPEED, Words,
 )
 from ts_transformer.io_utils import utc_now
-from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
+from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_EXECUTOR_SCHEMA`, `TRAINING_EXECUTOR_STATUSES`);
 #: the reader refuses anything else by name. A name changes with its file's shape, on both sides, in one change: v2
@@ -306,10 +308,11 @@ def word_verdicts(flown: Flown, index: int, verdict: Verdict, reading: Reading, 
 
 
 def track_payload(flown: Flown, index: int, verdict: Verdict, geometry: AirportGeometry, spec: VocabularySpec,
-                  shift_deg: float) -> dict[str, Any]:
+                  shift_deg: float, hae_minus_msl_m: float) -> dict[str, Any]:
     """The flown track every sentence step from row 0 to its outcome's row (a dynamics failure: to the row before
-    it, as the records keep it), in the airport frame and on the globe; its track unwrapped and moved by
-    ``shift_deg`` (`chart_shift_deg`) onto the observed smoothed track's branch, so the two read on one heading axis."""
+    it, as the records keep it), in the airport frame and on the globe (``hae_minus_msl_m``: the flight's runway's); its
+    track unwrapped and moved by ``shift_deg`` (`chart_shift_deg`) onto the observed smoothed track's branch, so the two
+    read on one heading axis."""
     end = verdict.end_row - 1 if verdict.outcome == "dynamics_failure" else verdict.end_row
     states = flown.states[index, : end + 1].cpu().numpy()
     track = flown_track(states, geometry)
@@ -318,11 +321,10 @@ def track_payload(flown: Flown, index: int, verdict: Verdict, geometry: AirportG
     if rows[-1] != end:
         rows.append(end)
     lat, lon, height = states[rows, LAT], states[rows, LON], states[rows, ALT]
-    undulation = geoid_undulation_m(lat, lon)
     distance = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(track["e"]), np.diff(track["n"])))))
     heading = track["track"][rows] + shift_deg
     return {"tS": rounded(np.asarray(rows) * flown.cycle_s, 3), "eM": rounded(track["e"][rows], 1), "nM": rounded(track["n"][rows], 1),
-            "lon": rounded(lon, 7), "lat": rounded(lat, 7), "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + undulation, 2),
+            "lon": rounded(lon, 7), "lat": rounded(lat, 7), "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + hae_minus_msl_m, 2),
             "groundSpeedMps": rounded(track["ground_speed"][rows], 3), "trackDeg": rounded(heading, 3),
             "distanceM": rounded(distance[rows], 1)}
 
@@ -344,9 +346,9 @@ def gate_block(gates: dict[str, Any], airport: str) -> dict[str, Any]:
 
 def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index: int, verdict: Verdict | None,
                    reading: Reading | None, observed: FlightSignals, geometry: AirportGeometry, spec: VocabularySpec,
-                   words: Words, formal: dict[str, Any] | None) -> dict[str, Any]:
+                   words: Words, formal: dict[str, Any] | None, hae_minus_msl_m: dict[str, float]) -> dict[str, Any]:
     """One flight of the set: not flown (``group`` says why), or flown — re-flown here and checked against its
-    ``formal`` replay row."""
+    ``formal`` replay row (``hae_minus_msl_m``: `runway_hae_minus_msl_m` of its airport)."""
     base = {"flightKey": item["flightKey"], "datasetId": item["datasetId"], "group": group}
     if flown is None:
         return {**base, "flown": False, "outcome": None, "flewTheSentence": None, "endS": None, "crossing": None,
@@ -397,7 +399,7 @@ def flight_payload(item: dict[str, Any], group: str, flown: Flown | None, index:
         "counts": {"wordsJudged": 0 if judged is None else len(judged),
                    "wordsInside": 0 if judged is None else sum(ok for _, ok in judged),
                    "headingWordsNotJudged": not_judged},
-        "track": track_payload(flown, index, verdict, geometry, spec, shift),
+        "track": track_payload(flown, index, verdict, geometry, spec, shift, hae_minus_msl_m[observed.runway]),
         "judgedTrackDeg": None if judged_track is None else rounded(judged_track, 3),
         "words": verdicts,
     }
@@ -408,6 +410,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
                   device: torch.device) -> list[dict[str, Any]]:
     """Every flight of the set: those the replay flies re-flown in one batch and judged; the rest listed."""
     spec = words.spec
+    offsets = runway_hae_minus_msl_m(instructions, geometry.code, arrival_manifest_path(geometry.code))
     located = base_flights(base, flights, sentences)
     signals = [flight for flight, _ in located]
     series = rebuild_series(instructions, signals)
@@ -438,9 +441,10 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         if j in position:
             n = position[j]
             out.append(flight_payload(item, groups[j], flown, n, verdicts[n], readings[n], signals[j], geometry, spec,
-                                      words, formal[signals[j].dataset_id]))
+                                      words, formal[signals[j].dataset_id], offsets))
         else:
-            out.append(flight_payload(item, groups[j], None, 0, None, None, signals[j], geometry, spec, words, None))
+            out.append(flight_payload(item, groups[j], None, 0, None, None, signals[j], geometry, spec, words, None,
+                                      offsets))
     return out
 
 

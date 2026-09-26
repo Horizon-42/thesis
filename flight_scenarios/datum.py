@@ -5,9 +5,10 @@ WHAT RUNS: ``flight_to_msl`` subtracts the flight's runway's CIFP offset,
 05L -32.0 m), from every altitude of the track -- one runway-local constant per flight, not
 a per-point geoid model (EGM96 would give -33.53 m there). Records carry the offset as
 ``source.hae_minus_msl_m``, and the comparison CZML adds exactly that back on the way out.
-``geoid_undulation_m`` (EGM96 via pyproj) is NOT this conversion: it serves the Training
-view's exports of executor-flown tracks (``aeroviz_backend.autopilot_segment``,
-``executor_training_export``).
+``geoid_undulation_m`` (EGM96 via pyproj) is NOT this conversion: since 2026-09-26 it serves
+only the backend's live executor (``aeroviz_backend.autopilot_segment``), which moves to the
+runway offset the Training exporters add (``training_files.runway_hae_minus_msl_m``) once branch
+``dev-model-autopilot`` has merged -- this function goes with it.
 
 OpenSky's ``geoaltitude`` -- the only altitude the harvest keeps (``altitude_source:
 "opensky_history_geoaltitude_m"``) -- is GNSS geometric altitude, i.e. height above the

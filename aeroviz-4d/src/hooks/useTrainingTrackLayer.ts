@@ -6,7 +6,8 @@
  * replay and the live executor are `useTrainingExecutorLayers`, a model's own sentence `useTrainingGenerationLayers`,
  * both called from here. The truth — this track and its sentence's envelopes — is drawn whichever sentence is read.
  *
- *  • THE TRACK, in 3D, at its ellipsoid height (the exporter converted MSL once: h = H + N), and its GROUND TRACE draped
+ *  • THE TRACK, in 3D, at its ellipsoid height (the exporter converted MSL once, adding the flight's runway's HAE − MSL
+ *    offset — the one the data plane subtracted — so it is the height the aircraft reported), and its GROUND TRACE draped
  *    under it: the lateral envelopes lie on the ground, and from any oblique view the airborne line is displaced from
  *    them — the trace is what they are read against.
  *  • THE HEADING WORDS (`headingBands`, instruction-v3): a heading word bounds no position — it says where the track is a

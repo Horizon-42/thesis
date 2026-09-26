@@ -81,6 +81,17 @@ def test_every_word_gets_one_verdict_and_the_judged_ones_give_back_the_judges_co
     assert all((w["heading"] is not None) == (w["column"] == HEADING) for w in words)
 
 
+def test_the_flown_track_is_drawn_at_the_height_the_observed_one_is_drawn_at():
+    """MSL plus the flight's runway's HAE − MSL offset — the one the set's observed track adds — once; a geoid model's
+    local value put the flown track ~1.5 m off the observed one (2026-09-26)."""
+    signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+    flown, verdict, _ = _fly_sentence(signals)
+    shift = executor_export.chart_shift_deg(flown, 0, instruction_airport(), float(signals.track_deg[0]))
+    track = executor_export.track_payload(flown, 0, verdict, instruction_airport(), spec(), shift, -32.0)
+    assert len(track["altitudeHaeM"]) == len(track["tS"]) > 1
+    assert np.allclose(np.asarray(track["altitudeHaeM"]) - np.asarray(track["altitudeM"]), -32.0, atol=0.011)
+
+
 def test_the_verdicts_give_back_the_judges_count_on_every_clock():
     """The re-review of 2026-09-24: the export filed the words by its own copy of the judge's bookkeeping, and on the
     track and distance clocks (the gate's is the track clock) that copy put the heading words on other rows than the

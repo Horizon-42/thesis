@@ -31,9 +31,10 @@ whose outputs are the same tree), on this executor spec, this artefact, val, wit
 What is written per sample: the words said as events (``row``: the flight's own step, the first `N_LOOK` observed), the
 flown track every 2 s step on the flight's own clock (``tS`` from row `N_LOOK`'s time) to its outcome's row — a dynamics
 failure to the row before, as the executor's replay export keeps it — in MSL and in the ellipsoid height Cesium draws in
-(h = H + N), the outcome, the crossing, the runway pointed first and last, and the probability the prior put on what the
-masks removed. The words carry no verdicts: the judge would say how the EXECUTOR flew the prior's words, not what the
-prior said; the landing is the prior's answer. SI units.
+(plus the flight's runway's HAE − MSL offset, `training_files.runway_hae_minus_msl_m`), the outcome, the crossing, the
+runway pointed first and last, and the probability the prior put on what the masks removed. The words carry no
+verdicts: the judge would say how the EXECUTOR flew the prior's words, not what the prior said; the landing is the
+prior's answer. SI units.
 
 **The words run to where the executor stopped, the track to the outcome**: `flight_rows` counts a sentence to the step
 whose cycles ended the flight for the executor, which flies on after two outcomes its judge reads earlier — crossing the
@@ -54,7 +55,6 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 
-from flight_scenarios.datum import geoid_undulation_m
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Flown
 from ts_transformer.autopilot.flights import flight_inputs, rebuild_series
@@ -74,14 +74,14 @@ from ts_transformer.instructions.readout import STRATA
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import (
     KIND_GENERATION, SPLIT, BaseSet, base_flights, open_base_set, overlay_entry, read_overlays,
-    require_overlays_unchanged, rounded, serialise, write_overlay,
+    require_overlays_unchanged, rounded, runway_hae_minus_msl_m, serialise, write_overlay,
 )
 from ts_transformer.instructions.words import COLUMNS, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now
 from ts_transformer.prior.data import VARIANTS, airport_landings
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK
-from ts_transformer.repo_layout import REPO_ROOT, git_state, repo_relative
+from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_state, repo_relative
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_GENERATION_SCHEMA`); the reader refuses anything else
 #: by name. A name changes with its file's shape or meaning, on both sides, in one change.
@@ -144,10 +144,10 @@ def readout_block(generation: dict[str, Any], prior_dir: Path, executor_sha256: 
 
 
 def track_payload(flown: Flown, index: int, end_row: int, outcome: str, geometry: AirportGeometry, step_s: float,
-                  start_s: float) -> dict[str, Any]:
+                  start_s: float, hae_minus_msl_m: float) -> dict[str, Any]:
     """The flown track every sentence step from its first state to its outcome's row (a dynamics failure: to the row
     before, as the replay export keeps it — the failed state may not be finite), on the flight's own clock
-    (``start_s``: the time of the row the executor started at)."""
+    (``start_s``: the time of the row the executor started at); ``hae_minus_msl_m``: the flight's runway's."""
     end = end_row - 1 if outcome == "dynamics_failure" else end_row
     states = flown.states[index, : end + 1].cpu().numpy()
     step_rows = int(round(step_s / flown.cycle_s))
@@ -156,17 +156,16 @@ def track_payload(flown: Flown, index: int, end_row: int, outcome: str, geometry
         rows.append(end)
     track = flown_track(states[rows], geometry)
     lat, lon, height = states[rows, LAT], states[rows, LON], states[rows, ALT]
-    undulation = geoid_undulation_m(lat, lon)
     return {"tS": rounded(start_s + np.asarray(rows) * flown.cycle_s, 3), "lon": rounded(lon, 7), "lat": rounded(lat, 7),
-            "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + undulation, 2),
+            "altitudeM": rounded(height, 2), "altitudeHaeM": rounded(height + hae_minus_msl_m, 2),
             "groundSpeedMps": rounded(track["ground_speed"], 3)}
 
 
 def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarray, geometry: AirportGeometry,
-                   words: Words) -> dict[str, Any]:
+                   words: Words, hae_minus_msl_m: float) -> dict[str, Any]:
     """One sample as the frontend reads it: `flight_rows`'s ``row`` of it (its outcome and bookkeeping), the words
     it said up to its end as events on the flight's own steps (``grid``: [steps, 6], UNCHANGED where a column says
-    nothing; step 0 is row `N_LOOK`), the crossing and the flown track."""
+    nothing; step 0 is row `N_LOOK`), the crossing and the flown track (``hae_minus_msl_m``: the flight's runway's)."""
     step_s = words.spec.step_s
     said = np.asarray(grid)[: row["steps_said"]]
     if (said[0] == UNCHANGED).any():
@@ -186,7 +185,8 @@ def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarr
         "rows": N_LOOK + len(said),
         "events": [{"row": N_LOOK + int(step), "column": int(column), "value": int(said[step, column])}
                    for step, column in zip(*np.nonzero(said != UNCHANGED))],
-        "track": track_payload(flown, index, outcome.end_row, row["outcome"], geometry, step_s, start_s),
+        "track": track_payload(flown, index, outcome.end_row, row["outcome"], geometry, step_s, start_s,
+                               hae_minus_msl_m),
     }
 
 
@@ -196,6 +196,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
     """Every flight of the set: those the val readout flies (their own dynamics) flown ``samples`` times with the
     prior speaking, in one batch; the rest listed with the reason."""
     spec = words.spec
+    offsets = runway_hae_minus_msl_m(instructions, geometry.code, arrival_manifest_path(geometry.code))
     located = base_flights(base, flights, sentences)
     signals = [flight for flight, _ in located]
     series = rebuild_series(instructions, signals)
@@ -225,7 +226,8 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         grids = [said[i] for i in range(len(said))]
         rows = flight_rows(repeated, flown, grids, words, "prior", [i % samples for i in range(len(grids))], forbidden)
         for i, row in enumerate(rows):
-            by_flight[flyable[i // samples]].append(sample_payload(flown, i, row, grids[i], geometry, words))
+            j = flyable[i // samples]
+            by_flight[j].append(sample_payload(flown, i, row, grids[i], geometry, words, offsets[signals[j].runway]))
     return [{"flightKey": item["flightKey"], "datasetId": item["datasetId"], "group": groups[j],
              "flown": j in by_flight, "samples": by_flight.get(j, [])}
             for j, item in enumerate(base.sample["flights"])]
