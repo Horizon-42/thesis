@@ -17,7 +17,7 @@
 |---|---|---|
 | 1 词表 | **定稿**：读法 `instruction-v3`（航向词逐行标注、5° 一档、提前 4 s 说）；规格 `145d6911e75b`，在按运行日划分的训练集上测量 | `docs/2026-09-23_instruction_vocabulary_design.zh.md` |
 | 2 标注器 | **完成**：现行句子产物 `outputs/POOLED/instruction_language/v5_20260926/`（§5；标注器源码指纹 `55f6f0bcd6ee`）；测试日不打开 | 包 `instructions/` |
-| 3 执行器 | **完成，只用词表**，词表以外只读被指跑道公布的入口跨越高度 TCH；每种机型按公布的最大着陆重量飞（§2）。现行规格 `outputs/POOLED/executor/v9_20260926/` | `docs/2026-09-23_executor_design.zh.md`（它的 §0 表停在 2026-09-24，现行规格以本文为准）；包 `autopilot/` |
+| 3 执行器 | **完成，只用词表**，词表以外只读被指跑道公布的入口跨越高度 TCH；每种机型按公布的最大着陆重量飞（§2）。现行规格 `outputs/POOLED/executor/v9_20260926/` | `docs/executor_design.zh.md`（它的 §0 表停在 2026-09-24，现行规格以本文为准）；包 `autopilot/` |
 | 4 回放门 | v9 训练集每格都过（落地 99.7 %、词在包络内 98.0 %、evaluation 98.1 %）；验证集回放门最后一次跑在 v6 上（落地 99.9 %、词 98.0 %、evaluation 98.6 %），v9 上没重跑验证集回放门 | 执行器设计 §11 |
 | 5 先验 | 第三版第 0 步、第 1 步（单机）、单机自由生成完成；**base 模型** `prior/v3_step1_20260924/full_s1337`（§3） | `docs/2026-09-24_prior_design.zh.md`、`docs/2026-09-24_prior_readouts.zh.md` §3–§5 |
 | 6 后训练 | 第一阶段**采用**：`prior/v3_rl_20260925/grpo_s1337/round_01`；闭环监督微调（CAT-K）不采用；第二阶段**不采用**（§4） | `docs/2026-09-25_post_training_design.zh.md`；读数文档 §6–§11 |

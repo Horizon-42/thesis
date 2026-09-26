@@ -452,7 +452,7 @@ let escape its handler.
 
 ### L31 · `autopilot/`: the executor, flying the words through the shared dynamics
 
-2026-09-24 (`docs/2026-09-23_executor_design.zh.md`). Stage 3 of the two-tier framework: `frame`
+2026-09-24 (`docs/executor_design.zh.md`). Stage 3 of the two-tier framework: `frame`
 (the dynamics' geodetic rows read the way the words read a flight — airport frame, compass track,
 geometric MSL height; a positive bank turns LEFT), `sentence` (the word in force per column per
 control cycle, each column's delay after its step), `flights` (a labelled flight rebuilt from the

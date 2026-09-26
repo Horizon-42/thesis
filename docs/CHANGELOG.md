@@ -1,5 +1,17 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — 执行器设计文档按实现重写、去掉日期；下滑道下沿诊断
+
+- `4dTrajectory/ts_transformer/docs/2026-09-23_executor_design.zh.md` 改名为 `executor_design.zh.md`（用户：设计文档名字不带日期），
+  九份文档里的引用随之改；旧条目里的旧名不改。`autopilot/__init__.py` 的说明里还是旧名：改它会动执行器源码指纹、现行代码就拒绝
+  v9，记进 `docs/code-health-followups.md`，随下一次执行器规格一起改；新加的 `autopilot/README.md`（不在指纹里）指向新名。
+- 文档按现行代码重写为最终设计：去掉已不存在的机制（数据量出的 r_turn、φ_cap、延迟与办法 B、拆分转弯、截获与沿线跟踪上的
+  "收得住"限制），常数改成现行词表规格的（下降档中心 0.92 / 2.13 / 3.06 / 4.41°，最陡一档下沿 3.74°，爬升 1.32°），加上按最大着陆
+  重量飞、源码指纹的覆盖与后果（§12）、关键代码索引（§14）、已知问题（§16）。
+- 新 runner `prior_glidepath_diagnosis`（R22，分支 `dev-glidepath-diagnosis`，两轮 opus 审查）：照标注的词重飞时被判低于下滑道下沿
+  的原因——"下降至落地"配平缓的两档时，执行器截获后朝越过点、贴着管子最陡的一侧下降，真实飞机在下滑道下方基本平飞等下滑道；
+  读数在先验读数文档 §12，设计文档 §5.3.4。
+
 ### 2026-09-26 — 按合并后的代码重建：句子产物 v5、执行器规格 v9
 
 - `outputs/POOLED/rebuild_20260926/`（工作树 `rebuild`，`dev-two-tier` `786d7aec`）：`instruction_language/v5_20260926` 与 v4 的词表规格

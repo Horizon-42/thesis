@@ -227,7 +227,7 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 
 ### R12 · the executor: `executor_spec` → `executor_sensitivity` → `executor_replay`
 
-2026-09-24 (`docs/2026-09-23_executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
+2026-09-24 (`docs/executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
 --dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v5` since 2026-09-24: the executor takes no
 information beyond the vocabulary and the pointed runway's published threshold crossing height) refuses a dirty tree,
 an existing directory and a labeller other than the artefact's; takes τ_ψ (the heading lead) and p (the vocabulary's

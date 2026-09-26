@@ -111,6 +111,7 @@ added three entries (the rows after the performance index's).
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
 | ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | open | new; dev-post-train's file, left untouched | no: a document |
 | `aeroviz-4d/python/requirements.txt` still lists `pyproj` (09-26) | open | new; see the entry | no: a requirements list |
+| `autopilot/__init__.py` names the executor design by its old file name (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -486,3 +487,11 @@ edited; one line to change when that branch has merged.
 grid), was deleted 2026-09-26; no live `.py` imports `pyproj` (the archived exporter under
 `ts_transformer/archive/instruction_vocabulary_2026_09/` still names the deleted function and is not live). The file is a
 loose list, not the environment spec (`docs/environment.md`): drop the line, or say what it is for.
+
+## `autopilot/__init__.py` names the executor design by its old file name (2026-09-26)
+
+**Verified.** The design was renamed `docs/2026-09-23_executor_design.zh.md` → `docs/executor_design.zh.md` (the user,
+2026-09-26: design documents carry no date). The package docstring still names the old file. Every `.py` of
+`autopilot/` is in the executor source hash (`spec.executor_source_files`), so editing the docstring makes the current code
+refuse executor spec v9 — change it together with the next executor change (new spec + train replay gate).
+`autopilot/README.md` (not hashed) points at the new name meanwhile.

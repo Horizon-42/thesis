@@ -5,7 +5,7 @@
 要么是一个新词）。它先在句子产物上用 teacher forcing 训练（训练时每一步的输入用真实的指令，而不是模型自己上一步说的），
 再和执行器接成闭环：先验说一步指令，执行器按指令飞 2 s，如此往复。
 
-词的定义见[指令词表设计](2026-09-23_instruction_vocabulary_design.zh.md)，执行器见[执行器设计](2026-09-23_executor_design.zh.md)，
+词的定义见[指令词表设计](2026-09-23_instruction_vocabulary_design.zh.md)，执行器见[执行器设计](executor_design.zh.md)，
 整体框架见[两层模型框架](2026-09-23_two_tier_framework.zh.md) §1、§4；每次训练的结果见[先验的读数](2026-09-24_prior_readouts.zh.md)。
 本文只写现行的设计；设计是怎么一步步改过来的，看 git 历史和 `docs/CHANGELOG.md`。
 

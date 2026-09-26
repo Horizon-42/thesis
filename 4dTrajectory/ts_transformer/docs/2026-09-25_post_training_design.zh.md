@@ -5,7 +5,7 @@
 
 预训练、单机自由生成（后训练用的闭环就是它）见[先验设计](2026-09-24_prior_design.zh.md) §7、§9.1；每次运行的结果见
 [先验的读数](2026-09-24_prior_readouts.zh.md)；词和执行器见[指令词表设计](2026-09-23_instruction_vocabulary_design.zh.md)、
-[执行器设计](2026-09-23_executor_design.zh.md)。本文只写现行的设计；设计是怎么改过来的，看 git 历史和 `docs/CHANGELOG.md`。
+[执行器设计](executor_design.zh.md)。本文只写现行的设计；设计是怎么改过来的，看 git 历史和 `docs/CHANGELOG.md`。
 
 **base 模型**：先验第 1 步只用数据（teacher forcing）训出的模型 `outputs/POOLED/prior/v3_step1_20260924/full_s1337`，没做过任何后训练。
 各阶段的拉回项都拉回它（用户 2026-09-25 定名）。
