@@ -4,7 +4,7 @@ said, the flown track and how the flight ended — ``--samples`` times (the Trai
 `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`).
 
     python run_ts.py prior_generation_training_export \\
-        --prior 4dTrajectory/outputs/POOLED/prior/<the prior run> --label "base model" \\
+        --prior 4dTrajectory/outputs/POOLED/prior/<the prior run, or one round of a post-training run> \\
         --instructions 4dTrajectory/outputs/POOLED/instruction_language/<its artefact> \\
         --executor 4dTrajectory/outputs/POOLED/executor/<a spec this executor code opens> \\
         --readout 4dTrajectory/outputs/POOLED/prior/<campaign>/<its val free generation> \\
@@ -22,6 +22,17 @@ flies until the executor is done with it or its time limit (`prior_free_generati
 readout flies — their own dynamics (`replay.OWN`) — are flown; the rest of the set is listed with the reason. The
 outcome is the executor's judge's (`prior_free_generation.flight_rows`: `judge.outcome_of` on the runway pointed at the
 end). One generator, seeded, draws every sample of every airport in the order the airports are named.
+
+**The prior speaks under the grammar's masks only** (the vocabulary's compatibility rules, the listener's runway lock) —
+never the procedure's (`prior_free_generation.procedure_masks`: the pre-join floor, no climb back, the glidepath lower
+edge), which post-training stage 2 (augmented) was trained and read out under. The frontend says so; a readout drawn
+under the procedure's masks is refused.
+
+**Which model it is, by name** (`MODEL_NAMES`, the post-training design's table): a prior trained on data alone is
+``base``; a post-trained round is named by the method that trained it (`fine_tuning.schema` less its version,
+`METHOD_MODELS`), with its round, the run holding its rounds and the model it started from, named the same way — so the
+frontend can switch between the rounds of every stage. A method with no name is refused: a new stage's name is agreed
+with the user and added here.
 
 ``--readout`` (optional) carries the prior's formal val readout beside the set's own flights: the landed share in all
 and per approach kind, at the payload's airport and pooled over every airport the readout drew, refused unless it is a
@@ -48,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -62,9 +74,11 @@ from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import flown_track, outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import published_vertical_paths
+from ts_transformer.experiments.prior_augmented_reward import AUGMENTED_REWARD_SCHEMA
 from ts_transformer.experiments.prior_free_generation import (
     GENERATION_SCHEMA, _physics, flight_rows, limits_s, speak_and_fly,
 )
+from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
 from ts_transformer.experiments.prior_train import rosters
 from ts_transformer.experiments.prior_training_export import open_trained_prior
 from ts_transformer.instructions.airport import AirportGeometry
@@ -86,13 +100,65 @@ from ts_transformer.repo_layout import REPO_ROOT, arrival_manifest_path, git_sta
 
 #: MIRROR of `aeroviz-4d/src/data/trainingOverlays.ts` (`TRAINING_GENERATION_SCHEMA`); the reader refuses anything else
 #: by name. A name changes with its file's shape or meaning, on both sides, in one change.
-SCHEMA = "aeroviz-training-generation-v1"
+SCHEMA = "aeroviz-training-generation-v2"
 PAYLOAD_FILE = "generation.json"
 RUNNER = "ts_transformer.experiments.prior_generation_training_export"
 #: The one tree every checkout's outputs are (a worktree links it): a readout's prior is known by its path from here on.
 OUTPUTS_MARK = "4dTrajectory/outputs/"
 #: MIRROR of the phrase `replay.draw_flights` writes for ``per_airport`` 0 (every labelled flight of the split).
 EVERY_FLIGHT = "every labelled flight"
+#: The prior's models by name, in the order they are trained (the post-training design's table; the user, 2026-09-26):
+#: MIRROR of `TRAINING_MODEL_NAMES` in `aeroviz-4d/src/data/trainingOverlays.ts`, which orders the views by it.
+MODEL_NAMES = ("base", "landing", "augmented")
+
+
+def method_of(schema: str) -> str:
+    """A post-training method's name: its checkpoint schema less the version (``ts-prior-landing-reward-v3`` →
+    ``ts-prior-landing-reward``) — every version of a method trains the same model."""
+    match = re.fullmatch(r"(.+)-v\d+", schema)
+    if match is None:
+        raise ValueError(f"{schema!r} is not a versioned post-training schema")
+    return match.group(1)
+
+
+#: The model a post-training method makes (``base`` has none: it is trained on data alone).
+METHOD_MODELS = {method_of(LANDING_REWARD_SCHEMA): "landing", method_of(AUGMENTED_REWARD_SCHEMA): "augmented"}
+
+
+def model_identity(config_file: dict[str, Any]) -> tuple[str, int | None]:
+    """A prior's name and round from its config file: ``base`` and no round without a ``fine_tuning`` block, else the
+    name of the method that post-trained it and the round it wrote."""
+    if "fine_tuning" not in config_file:
+        return "base", None
+    tuning = config_file["fine_tuning"]
+    method = method_of(tuning["schema"])
+    if method not in METHOD_MODELS:
+        raise ValueError(f"no model is named for {tuning['schema']}: a new stage's name is agreed with the user and "
+                         f"added to MODEL_NAMES / METHOD_MODELS")
+    return METHOD_MODELS[method], tuning["round"]
+
+
+def display_name(name: str, round_number: int | None) -> str:
+    """How a model is called: ``base``, ``landing r1``, ``augmented r3``."""
+    return name if round_number is None else f"{name} r{round_number}"
+
+
+def model_block(prior_dir: Path, config_file: dict[str, Any], checkpoint_sha: str, variant: str) -> dict[str, Any]:
+    """Who the prior is: its name and round, the run holding its rounds (``base``: its own directory), its checkpoint,
+    and — post-trained — the method's schema and the model it started from, named from that model's own config file
+    (read in ``prior_dir``'s outputs tree: the rounds were run from worktrees whose outputs are the same tree)."""
+    name, round_number = model_identity(config_file)
+    fine_tuning = None
+    if name != "base":
+        tuning = config_file["fine_tuning"]
+        start = outputs_path(tuning["from"])
+        start_config = in_tree_of(prior_dir, start) / "config.json"
+        start_name, start_round = model_identity(json.loads(start_config.read_text(encoding="utf-8")))
+        fine_tuning = {"schema": tuning["schema"], "from": start, "fromName": start_name, "fromRound": start_round}
+    return {"name": name, "round": round_number,
+            "run": outputs_path(prior_dir if round_number is None else prior_dir.parent),
+            "checkpointSha256": checkpoint_sha, "variant": variant, "trainedAt": config_file["git"],
+            "fineTuning": fine_tuning}
 
 
 def outputs_path(path: str | Path) -> str:
@@ -101,6 +167,14 @@ def outputs_path(path: str | Path) -> str:
     if OUTPUTS_MARK not in text:
         raise ValueError(f"{text} is not under {OUTPUTS_MARK}")
     return text[text.rindex(OUTPUTS_MARK):]
+
+
+def in_tree_of(path: Path, other: str) -> Path:
+    """``other`` (a path from `OUTPUTS_MARK` on) in the outputs tree ``path`` is in."""
+    text = path.as_posix()
+    if OUTPUTS_MARK not in text:
+        raise ValueError(f"{text} is not under {OUTPUTS_MARK}")
+    return Path(text[: text.rindex(OUTPUTS_MARK)]) / outputs_path(other)
 
 
 def readout_block(generation: dict[str, Any], prior_dir: Path, executor_sha256: str, instructions: Path, samples: int,
@@ -242,7 +316,6 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)
     parser.add_argument("--prior", type=Path, required=True, help="the prior run whose sentences are drawn")
-    parser.add_argument("--label", required=True, help="what the frontend calls it, e.g. 'base model'")
     parser.add_argument("--instructions", type=Path, required=True, help="the instruction artefact it was trained on")
     parser.add_argument("--executor", type=Path, required=True, help="an executor spec directory this code opens")
     parser.add_argument("--readout", type=Path, default=None, help="this prior's val free generation (optional)")
@@ -253,7 +326,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--samples", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=1337)
-    parser.add_argument("--overlay-id", default=None, help="default: generation_<the prior's parent>_<its name>")
+    parser.add_argument("--overlay-id", default=None,
+                        help="default: generation_<its name>[_r<round>]_<its checkpoint's sha256, 8 digits>")
     args = parser.parse_args(argv)
 
     def resolved(path: Path) -> Path:
@@ -266,11 +340,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"an airport is named twice in {airports}")
     if args.samples < 1:
         parser.error("--samples is at least 1")
-    overlay_id = args.overlay_id or f"generation_{prior_dir.parent.name}_{prior_dir.name}"
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor, instructions)
     spec = words.spec
     model, config_file, checkpoint_sha = open_trained_prior(prior_dir, instructions)
+    model_part = model_block(prior_dir, config_file, checkpoint_sha, model.config.variant)
+    name = display_name(model_part["name"], model_part["round"])
+    suffix = "" if model_part["round"] is None else f"_r{model_part['round']:02d}"
+    overlay_id = args.overlay_id or f"generation_{model_part['name']}{suffix}_{checkpoint_sha[:8]}"
     missing = [code for code in airports if code not in model.config.airports]
     if missing:
         parser.error(f"the prior knows no airport {missing} ({list(model.config.airports)})")
@@ -295,28 +372,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "executor": repo_relative(executor),
               "instructions": repo_relative(instructions),
               "readout": None if args.readout is None else repo_relative(resolved(args.readout)), "git": git_state()}
-    # a post-trained round's config names its method, round and start model (`prior_landing_reward` writes the key);
-    # a prior trained on data alone (`prior_train`) has none
-    tuning = config_file["fine_tuning"] if "fine_tuning" in config_file else None
-    model_block = {
-        "label": args.label, "checkpointSha256": checkpoint_sha, "variant": model.config.variant,
-        "trainedAt": config_file["git"],
-        "fineTuning": None if tuning is None else {"schema": tuning["schema"], "round": tuning["round"],
-                                                   "from": outputs_path(tuning["from"])},
-    }
     generation = {"samples": args.samples, "temperature": args.temperature, "seed": args.seed,
                   "firstPredictedRow": N_LOOK, "stepS": spec.step_s, "executor": {
                       "specSha256": record["sha256"], "wordClock": params.word_clock, "cycleS": params.cycle_s,
                       "timeoutFactor": params.timeout_factor}}
-    title = (f"{args.label} · {prior_dir.parent.name}/{prior_dir.name} · its own sentences, {args.samples} a flight, flown "
-             f"by executor spec {record['sha256'][:12]} from step {N_LOOK}")
+    title = (f"{name} · {prior_dir.parent.name}/{prior_dir.name} · its own sentences, {args.samples} a flight (the "
+             f"grammar's masks only), flown by executor spec {record['sha256'][:12]} from step {N_LOOK}")
     generator = torch.Generator().manual_seed(args.seed)
     built = {}
     for code in airports:
         payloads = build_airport(bases[code], flights, sentences, instructions, geometries[code], model, params, words,
                                  landings, args.samples, generator=generator, temperature=args.temperature)
         payload = {"schema": SCHEMA, "overlayId": overlay_id, "airport": code, "writtenUtc": utc_now(),
-                   "producedBy": source, "base": bases[code].block, "model": model_block, "generation": generation,
+                   "producedBy": source, "base": bases[code].block, "model": model_part, "generation": generation,
                    "readout": readouts[code], "columns": list(COLUMNS), "flights": payloads}
         entry = overlay_entry(overlay_id, KIND_GENERATION, bases[code], title, PAYLOAD_FILE, len(payloads), source)
         built[code] = (serialise(payload), entry)

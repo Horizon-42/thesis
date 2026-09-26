@@ -75,7 +75,7 @@ describe("useTrainingOverlays", () => {
   it("downloads every model's own sentences published for the set, with no switch, and publishes them for the selected flight", async () => {
     files[OVERLAYS] = mockOverlaysWithGenerations();
     files[`data/airports/KXXX/training/${BASE_MODEL_ID}/generation.json`] = mockGenerationOverlay(BASE_MODEL_ID);
-    files[`data/airports/KXXX/training/${POST_TRAINED_ID}/generation.json`] = { ...mockGenerationOverlay(POST_TRAINED_ID, true), schema: "x" };
+    files[`data/airports/KXXX/training/${POST_TRAINED_ID}/generation.json`] = { ...mockGenerationOverlay(POST_TRAINED_ID), schema: "x" };
     const set = sample();
     const { result, rerender, unmount } = renderHook(({ key }) => useTrainingOverlays("KXXX", set, key), { initialProps: { key: VECTORED_KEY } });
     await waitFor(() => expect(result.current.generations.map(({ load }) => load.status)).toEqual(["ready", "invalid"]));

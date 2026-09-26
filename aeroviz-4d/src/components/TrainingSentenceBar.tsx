@@ -11,7 +11,11 @@
  * speed becoming "unspecified" — are dashed lines across the rows.
  *
  * WHICH SENTENCE (`trainingSource`): the tabs at the head of the bar — "Truth", then one per model whose own sentences
- * are published for the set (`trainingGenerations`, each in its colour) — choose what the rows draw. The TRUTH is the
+ * are published for the set (`trainingGenerations`: base, landing, augmented, each in its colour; two runs of one stage
+ * are two tabs, named with their run) — choose what the rows draw. A model published at SEVERAL ROUNDS shows its rounds
+ * beside the tabs ("r1 r2 …", each titled with how many of this flight's samples landed): a round keeps the sample number
+ * read, so one flight is compared round by round; a tab returns to the round last read in it (chosen here or in the
+ * panel). Two runs of one stage are named with their run, one round exported twice with its overlay id. The TRUTH is the
  * labelled sentence, as above. A MODEL's is one of its samples (the numbered buttons, each marked by how the flight
  * ended), drawn in the same bands — one sentence is read at a time, so what says it is a model's is the frame: the bar's
  * border and a strip down the left edge of its rows in the model's colour, the tab, the sample's chip (the hatching this
@@ -55,7 +59,7 @@
  * (`index.css`) instead of under it.
  */
 
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useApp, useTrainingCursor } from "../context/AppContext";
 import TrainingLegend from "./TrainingLegend";
 import TrainingPriorWindow from "./TrainingPriorWindow";
@@ -81,6 +85,7 @@ import {
   generationOnScreen,
   sourceOf,
   overlayOnScreen,
+  trainingModelGroups,
   TRAINING_CROSSING_OUTCOMES,
   type TrainingExecutorFlight,
   type TrainingExecutorWord,
@@ -105,7 +110,7 @@ import {
   type TrainingWordEvent,
 } from "../data/trainingSample";
 import {
-  checkMark, checkText, crossingText, TRAINING_COLUMN_LABEL, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT,
+  checkMark, checkText, crossingText, TRAINING_COLUMN_LABEL, TRAINING_OUTCOME_TAG, TRAINING_OUTCOME_TEXT, trainingModelText,
 } from "../data/trainingText";
 
 // One SVG unit is one pixel: the bar is as wide as the dock and always VIEW_H tall.
@@ -210,9 +215,9 @@ function verdictMark(status: TrainingExecutorWord["status"]): { fill: string; st
 }
 
 /** A model's sample as its chip reads it — how the flight ended, where and when — and its full reading, for the tooltip. */
-function sampleChip(view: TrainingGenerationView, sentence: TrainingGeneratedSentence, flight: TrainingFlight,
+function sampleChip(view: TrainingGenerationView, label: string, sentence: TrainingGeneratedSentence, flight: TrainingFlight,
   runwayName: (index: number) => string, stepS: number): { text: string; title: string } {
-  const { model, generation } = view.overlay;
+  const { generation } = view.overlay;
   const later = sentence.events.filter((event) => event.row > sentence.firstRow);
   const said = later.filter((event) => event.row * stepS < sentence.endS).length;
   const where = TRAINING_CROSSING_OUTCOMES.includes(sentence.outcome)
@@ -220,7 +225,7 @@ function sampleChip(view: TrainingGenerationView, sentence: TrainingGeneratedSen
   return {
     text: `#${sentence.sample + 1}: ${TRAINING_OUTCOME_TAG[sentence.outcome]}${where} at ${formatSeconds(sentence.endS)} s ` +
       `(observed ${formatSeconds(flight.rows * stepS)} s)`,
-    title: `${model.label}, sample ${sentence.sample + 1} of ${generation.samples}: it spoke from step ` +
+    title: `${label}, sample ${sentence.sample + 1} of ${generation.samples}: it spoke from step ` +
       `${sentence.firstRow}, ${said} words after it before the flight ended` +
       (later.length > said ? ` (and ${later.length - said} after the end, to where the executor stopped)` : "") +
       `; the executor flew each step as it was said and the flight ` +
@@ -265,6 +270,8 @@ export default function TrainingSentenceBar() {
   const bar = useBarHeight();
   const [openWindow, setOpenWindow] = useState<"readback" | "prior" | null>(null);
   const [notesOpen, setNotesOpen] = useState<boolean>(false);
+  // the round last read in each model's tab (group key → overlay id), wherever it was chosen: its tab returns to it
+  const roundRead = useRef<Record<string, string>>({});
 
   // the Training session outlives a task switch (the panel stays mounted): the bar draws only in Training
   if (!selection || mode !== "training") return null;
@@ -273,9 +280,14 @@ export default function TrainingSentenceBar() {
   const plotW = frameW - GUTTER - PAD_R;
   const { tS } = flight.signals;
   // THE SENTENCE READ: the truth, or the chosen model's sample of this flight (none: a flight its readout does not fly)
-  const models = trainingGenerations.flatMap((view) => overlayOnScreen(view, selection) ?? []);
+  const models = trainingModelGroups(trainingGenerations.flatMap((view) => overlayOnScreen(view, selection) ?? []),
+    (view) => view.overlay);
   const read = generationOnScreen(trainingGenerations, trainingSource, selection);
   const model = read?.view ?? null;
+  const modelGroup = models.find((group) => group.members.some((view) => view === model)) ?? null;
+  const modelName = model === null ? null : modelGroup!.memberLabel(model);
+  // remembered at render, not only on a click here: the panel chooses rounds too (a write the render reads nowhere)
+  if (model !== null) roundRead.current[modelGroup!.key] = model.overlay.overlayId;
   const generated = read?.sentence ?? null;
   const modelColour = model === null ? null : trainingModelColour(model.overlay.model);
   const sentence: TrainingSentence<TrainingSentenceEvent> = generated ?? trainingTruthSentence(flight);
@@ -318,11 +330,11 @@ export default function TrainingSentenceBar() {
       title: `speed left to the pilot from ${formatSeconds(timeOf(flight.unspecifiedRow))} s` },
   ] : [
     ...(modelClearance === null ? [] : [{ at: timeOf(modelClearance.row), key: "model-cleared", colour: TRAINING_COLUMN_COLOR.approach,
-      dash: "3 3", title: `${model!.overlay.model.label} cleared the flight to join the final at ${formatSeconds(timeOf(modelClearance.row))} s` }]),
+      dash: "3 3", title: `${modelName!} cleared the flight to join the final at ${formatSeconds(timeOf(modelClearance.row))} s` }]),
     { at: flight.rows * stepS, key: "observed-end", colour: TRAINING_TRACE_COLOR, dash: "2 3",
       title: `the observed flight's sentence ends at ${formatSeconds(flight.rows * stepS)} s` },
     { at: generated.endS, key: "model-end", colour: modelColour!, dash: undefined,
-      title: `${model!.overlay.model.label}'s flight ${TRAINING_OUTCOME_TEXT[generated.outcome]} at ${formatSeconds(generated.endS)} s` },
+      title: `${modelName!}'s flight ${TRAINING_OUTCOME_TEXT[generated.outcome]} at ${formatSeconds(generated.endS)} s` },
   ];
   const landing = flight.envelopes.approach.landing;
   // the overlays and the live executor, when they are of the flight on screen (not the last one's, in flight)
@@ -343,7 +355,7 @@ export default function TrainingSentenceBar() {
     && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
   const flyingHere = pickedHere && autopilot?.status === "flying";
   const flyLabel = flyingHere ? "Flying …" : pickedHere && autopilot !== null ? "↻ Fly again" : "▶ Fly";
-  const chip = model !== null && generated !== null ? sampleChip(model, generated, flight, runwayName, stepS) : null;
+  const chip = model !== null && generated !== null ? sampleChip(model, modelName!, generated, flight, runwayName, stepS) : null;
   const truthEvents = flight.words.events;
   const observedW = generated === null ? 0 : xFor(timeOf(generated.firstRow)) - GUTTER;
   // the rows a model spoke on after its flight ended, to where the executor stopped — only when it said at least one
@@ -352,15 +364,25 @@ export default function TrainingSentenceBar() {
     : xFor(timeOf(generated.rows)) - xFor(generated.endS);
   // a model chosen that does not fly this flight: the truth is drawn, and said so
   const notFlown = model !== null && generated === null ? model : null;
-  /** Choose a model's sentence: its first sample. */
-  const chooseModel = (overlayId: string) => setTrainingSource({ overlayId, sample: 0 });
+  /** A model's tab: the round last read in it (the first, never read), from its first sample. */
+  const chooseModel = (group: (typeof models)[number]) => {
+    const last = group.members.find((view) => view.overlay.overlayId === roundRead.current[group.key]) ?? group.members[0];
+    setTrainingSource({ overlayId: last.overlay.overlayId, sample: 0 });
+  };
+  /** A round's tooltip: the model in full, and how its samples of this flight ended. */
+  const roundTitle = (view: TrainingGenerationView) => {
+    const landed = view.flight.samples.filter((item) => item.outcome === "landed").length;
+    return `${trainingModelText(view.overlay.model)}: ` + (view.flight.flown
+      ? `${landed} of ${view.flight.samples.length} of its sentences for this flight landed`
+      : `does not fly this flight (${view.flight.group})`);
+  };
 
   return (
     <section className="training-sentence-bar" aria-label="Sentence bar" ref={bar}
       style={generated === null ? undefined : { borderColor: modelColour! }}>
       <TrainingLegend layers={trainingLayers} vocabulary={vocabulary} executorTrack={executor?.flown === true}
         autopilotColour={autopilot?.status === "ready" && autopilotHasLine(autopilot.segment) ? autopilotColour(autopilot.segment) : null}
-        model={model === null || generated === null ? null : { label: model.overlay.model.label, colour: modelColour!, samples: model.flight.samples.length }} />
+        model={model === null || generated === null ? null : { label: modelName!, colour: modelColour!, samples: model.flight.samples.length }} />
       <header className="training-sentence-head">
         {models.length > 0 ? (
           <span className="training-source-tabs" role="group" aria-label="Which sentence is read">
@@ -368,25 +390,37 @@ export default function TrainingSentenceBar() {
               title="The labelled sentence of the observed flight" onClick={() => setTrainingSource(null)}>
               Truth
             </button>
-            {models.map((view) => {
-              const colour = trainingModelColour(view.overlay.model);
-              const on = model?.overlay.overlayId === view.overlay.overlayId;
+            {models.map((group) => {
+              const colour = trainingModelColour(group);
+              const on = group === modelGroup;
+              const rounds = group.members.map(group.memberLabel).join(", ");
               return (
-                <button key={view.overlay.overlayId} type="button" className="training-source-tab" aria-pressed={on}
-                  style={on ? { borderColor: colour, color: colour } : undefined} title={view.overlay.model.fineTuning === null
-                    ? `${view.overlay.model.label}: the prior trained on data alone, speaking its own sentences`
-                    : `${view.overlay.model.label}: post-trained (${view.overlay.model.fineTuning.schema}, round ` +
-                      `${view.overlay.model.fineTuning.round}), speaking its own sentences`}
-                  onClick={() => chooseModel(view.overlay.overlayId)}>
+                <button key={group.key} type="button" className="training-source-tab" aria-pressed={on}
+                  style={on ? { borderColor: colour } : undefined}
+                  title={group.members.length === 1 ? `${trainingModelText(group.members[0].overlay.model)}, speaking its own sentences`
+                    : `${group.title}: ${group.members.length} rounds published (${rounds}), speaking their own sentences`}
+                  onClick={() => chooseModel(group)}>
                   <span className="training-source-dot" style={{ background: colour }} />
-                  {view.overlay.model.label}
+                  {group.members.length === 1 ? group.memberLabel(group.members[0]) : group.title}
                 </button>
               );
             })}
           </span>
         ) : null}
+        {modelGroup !== null && modelGroup.members.length > 1 ? (
+          <span className="training-source-tabs training-round-tabs" role="group" aria-label={`${modelGroup.title}'s rounds`}>
+            {modelGroup.members.map((view) => (
+              <button key={view.overlay.overlayId} type="button" className="training-source-tab"
+                aria-pressed={view === model} style={view === model ? { borderColor: modelColour! } : undefined}
+                aria-label={modelGroup.memberLabel(view)} title={roundTitle(view)}
+                onClick={() => setTrainingSource({ overlayId: view.overlay.overlayId, sample: trainingSource!.sample })}>
+                r{view.overlay.model.round}
+              </button>
+            ))}
+          </span>
+        ) : null}
         {model !== null && model.flight.flown ? (
-          <span className="training-sample-buttons" role="group" aria-label={`${model.overlay.model.label}'s samples`}>
+          <span className="training-sample-buttons" role="group" aria-label={`${modelName}'s samples`}>
             {model.flight.samples.map((item) => (
               <button key={item.sample} type="button" aria-pressed={generated?.sample === item.sample}
                 className={`training-sample-button${item.outcome === "landed" ? " landed" : ""}`}
@@ -401,9 +435,9 @@ export default function TrainingSentenceBar() {
         <strong title={flightFacts}>{flight.callsign}</strong>
         <span className="training-chip">runway {flight.runway}</span>
         {notFlown !== null ? (
-          <span className="training-chip training-sample-chip" title={`${notFlown.overlay.model.label}'s sentences fly only the ` +
+          <span className="training-chip training-sample-chip" title={`${modelName}'s sentences fly only the ` +
             "flights on their own aircraft dynamics, as its readout does"}>
-            {notFlown.overlay.model.label}: not flown ({notFlown.flight.group}) — the truth is shown
+            {modelName}: not flown ({notFlown.flight.group}) — the truth is shown
           </span>
         ) : null}
         {generated === null ? (
@@ -418,7 +452,7 @@ export default function TrainingSentenceBar() {
           </>
         ) : (
           <span className="training-chip training-sample-chip" title={chip!.title}
-            style={{ color: generated.outcome === "landed" ? modelColour! : TRAINING_OUTSIDE_COLOR }}>
+            style={{ borderColor: modelColour!, color: generated.outcome === "landed" ? undefined : TRAINING_OUTSIDE_COLOR }}>
             {chip!.text}
           </span>
         )}
@@ -461,7 +495,7 @@ export default function TrainingSentenceBar() {
         <svg className="training-sentence-svg" width={GUTTER + plotW + PAD_R} height={VIEW_H}
           viewBox={`0 0 ${GUTTER + plotW + PAD_R} ${VIEW_H}`} role="group"
           aria-label={generated === null ? `The sentence of ${flight.callsign} on runway ${flight.runway}`
-            : `${model!.overlay.model.label}'s sentence ${generated.sample + 1} for ${flight.callsign}`}>
+            : `${modelName!}'s sentence ${generated.sample + 1} for ${flight.callsign}`}>
           {/* the steps that say something: numbers along the top, each a button */}
           {issueRows.map((row, index) => {
             const left = index === 0 ? GUTTER : xFor((timeOf(issueRows[index - 1]) + timeOf(row)) / 2);
@@ -521,7 +555,7 @@ export default function TrainingSentenceBar() {
                     ? `${column} ${label} — ${trainingKindLabel((run.event as TrainingWordEvent).kind)}, issued at step ${run.row} ` +
                       `(${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s` +
                       (verdict === null ? "" : `\n${executorVerdictText(verdict)}`)
-                    : `${column} ${label} — said by ${model!.overlay.model.label} at step ${run.row} ` +
+                    : `${column} ${label} — said by ${modelName!} at step ${run.row} ` +
                       `(${formatSeconds(timeOf(run.row))} s), in force to ${formatSeconds(timeOf(run.endRow))} s`;
                   const selected = selectedColumn && run.row <= cursorRow && cursorRow < run.endRow;
                   const choose = () => {
@@ -586,7 +620,7 @@ export default function TrainingSentenceBar() {
           {generated !== null ? (
             <rect x={GUTTER - MODEL_STRIP_W - 2} y={HEAD_H} width={MODEL_STRIP_W} height={TRAINING_COLUMNS.length * ROW_H} rx={2}
               fill={modelColour!} className="training-sentence-model-strip">
-              <title>{model!.overlay.model.label}'s own sentence, sample {generated.sample + 1}</title>
+              <title>{modelName!}'s own sentence, sample {generated.sample + 1}</title>
             </rect>
           ) : null}
 
@@ -606,7 +640,7 @@ export default function TrainingSentenceBar() {
             <text x={endLabelX} y={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 15}
               textAnchor={endAnchoredEnd ? "end" : "middle"}
               className="training-sentence-tick training-sentence-model-end" fill={modelColour!}
-              aria-label={`${model!.overlay.model.label}'s flight ended at ${formatSeconds(generated!.endS)} s`}>
+              aria-label={`${modelName!}'s flight ended at ${formatSeconds(generated!.endS)} s`}>
               {formatSeconds(generated!.endS)} s
             </text>
           ) : null}

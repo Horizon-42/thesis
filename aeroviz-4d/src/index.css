@@ -890,6 +890,30 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   border-radius: 2px;
 }
 
+/* a model published at several rounds: its name, then a line per round under it */
+.training-model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.training-model-heading {
+  cursor: default;
+}
+
+.training-model-round {
+  padding-left: 20px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+/* in a table's row heading, not a flex line */
+.training-results-table .training-model-swatch {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 5px;
+}
+
 .training-model-swatch-truth {
   background: #e2e8f0;
 }
@@ -1330,6 +1354,16 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   border-color: #e2e8f0;
   color: #f1f5f9;
   font-weight: 600;
+}
+
+/* a model's rounds, beside the tabs when it is published at several */
+.training-round-tabs {
+  margin-left: 4px;
+}
+
+.training-round-tabs .training-source-tab {
+  padding: 2px 7px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
 .training-source-dot {

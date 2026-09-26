@@ -11,6 +11,7 @@
 import { formatSeconds, TRAINING_COLUMNS, TRAINING_STRATA, type TrainingFlight } from "../data/trainingSample";
 import {
   generationLanded,
+  trainingModelGroups,
   type TrainingExecutorOverlay,
   type TrainingGateCell,
   type TrainingGenerationCell,
@@ -19,7 +20,7 @@ import {
   type TrainingGenerationSetCells,
   type TrainingPriorOverlay,
 } from "../data/trainingOverlays";
-import { checkMark, shortSha } from "../data/trainingText";
+import { checkMark, shortSha, trainingModelText } from "../data/trainingText";
 import { trainingModelColour } from "../utils/trainingWordColors";
 
 function share(value: number | null): string {
@@ -155,7 +156,7 @@ function CellsRow({ name, cells }: { name: string; cells: TrainingGenerationRead
 /** How a model's sentences were drawn and flown, in one line. */
 function drawnText(overlay: TrainingGenerationOverlay): string {
   const { generation, readout } = overlay;
-  return `${overlay.model.label}: ${generation.samples} samples a flight at temperature ${generation.temperature} (seed ` +
+  return `${trainingModelText(overlay.model)}: ${generation.samples} samples a flight at temperature ${generation.temperature} (seed ` +
     `${generation.seed}), flown by executor spec ${shortSha(generation.executor.specSha256)} until it was done or ` +
     `${generation.executor.timeoutFactor}× the observed remaining time ran out` +
     (readout === null ? "; no formal readout given" : `; its formal readout drew ${readout.drawn.flights.toLocaleString("en")} ` +
@@ -163,13 +164,16 @@ function drawnText(overlay: TrainingGenerationOverlay): string {
       `written ${readout.writtenUtc.slice(0, 16).replace("T", " ")} UTC`) + ".";
 }
 
-export function TrainingGenerationReadout({ overlays, flights }: { overlays: TrainingGenerationOverlay[]; flights: TrainingFlight[] }) {
-  const summary = overlays.map((overlay) => {
+export function TrainingGenerationReadout({ overlays: published, flights }: { overlays: TrainingGenerationOverlay[]; flights: TrainingFlight[] }) {
+  // in the views' order (by name in training order, then run, then round), each named as the bar and the panel name it
+  const named = trainingModelGroups(published, (overlay) => overlay)
+    .flatMap((group) => group.members.map((overlay) => ({ overlay, label: group.memberLabel(overlay) })));
+  const summary = named.map(({ overlay, label }) => {
     const own = generationLanded(overlay, flights).all;
-    return `${overlay.model.label} ${own === null ? "—" : `${(own.landed * 100).toFixed(0)}%`}` +
+    return `${label} ${own === null ? "—" : `${(own.landed * 100).toFixed(0)}%`}` +
       (overlay.readout === null ? "" : ` (${overlay.readout.split} ${(overlay.readout.prior.all.all.landed * 100).toFixed(1)}%)`);
   }).join(" · ");
-  const airport = overlays[0].airport;
+  const airport = published[0].airport;
   return (
     <details className="training-results" aria-label="The models' own sentences">
       <summary>The models' own sentences, landed · {summary}</summary>
@@ -178,10 +182,11 @@ export function TrainingGenerationReadout({ overlays, flights }: { overlays: Tra
         <thead>
           <tr><th scope="col" />{READ_STRATA.map((key) => <th key={key} scope="col">{key}</th>)}</tr>
         </thead>
-        {overlays.map((overlay) => (
+        {named.map(({ overlay, label }) => (
           <tbody key={overlay.overlayId}>
-            <tr><th scope="rowgroup" colSpan={READ_STRATA.length + 1} style={{ color: trainingModelColour(overlay.model) }}>
-              {overlay.model.label}
+            <tr><th scope="rowgroup" colSpan={READ_STRATA.length + 1} title={trainingModelText(overlay.model)}>
+              <span className="training-model-swatch" style={{ background: trainingModelColour(overlay.model) }} />
+              {label}
             </th></tr>
             <CellsRow name="this set" cells={generationLanded(overlay, flights)} />
             {overlay.readout !== null ? (
@@ -199,9 +204,12 @@ export function TrainingGenerationReadout({ overlays, flights }: { overlays: Tra
         Each model speaks from its first predicted step (the steps before are observed), a sentence of its own, and the
         executor flies each step as it is said. Landed: on the runway pointed at the end, as the executor's judge reads a
         landing. Only flights on their own aircraft dynamics are flown, as in the formal readout. "labelled words": the
-        truth sentence flown the same way from the same step — how far the executor alone gets.
+        truth sentence flown the same way from the same step — how far the executor alone gets. Every model speaks under
+        the grammar's masks only (the vocabulary's rules, the runway lock), never the procedure's (the floor before the
+        join, no climbing back, the glidepath's lower edge), which augmented was post-trained under — so its formal
+        readouts, drawn under those masks, are not shown beside it.
       </p>
-      {overlays.map((overlay) => <p key={overlay.overlayId} className="training-results-note">{drawnText(overlay)}</p>)}
+      {named.map(({ overlay }) => <p key={overlay.overlayId} className="training-results-note">{drawnText(overlay)}</p>)}
     </details>
   );
 }

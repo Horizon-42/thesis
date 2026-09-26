@@ -13,7 +13,10 @@ import {
   generationOnScreen,
   parseTrainingGenerationOverlay,
   parseTrainingOverlays,
+  trainingModelGroups,
+  trainingModelLabel,
   trainingOverlaysOf,
+  trainingRunName,
   TRAINING_GENERATION_SCHEMA,
   type TrainingGenerationOverlay,
   type TrainingGenerationView,
@@ -21,9 +24,11 @@ import {
 import { trainingSelectionOf } from "../trainingSample";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
 import {
-  BASE_MODEL_ID, MOCK_GENERATION_FIRST_ROW, POST_TRAINED_ID, mockGenerationEntry, mockGenerationOverlay, mockOverlaysWithGenerations,
+  AUGMENTED_R1_ID, AUGMENTED_R2_ID, BASE_MODEL_ID, MOCK_GENERATION_FIRST_ROW, POST_TRAINED_ID, mockGenerationEntry, mockGenerationOverlay,
+  mockOverlaysWithGenerations,
 } from "./trainingOverlays.fixture";
-import { trainingModelColour, TRAINING_BASE_MODEL_COLOR, TRAINING_POST_TRAINED_COLOR } from "../../utils/trainingWordColors";
+import { trainingModelColour, TRAINING_MODEL_COLOR } from "../../utils/trainingWordColors";
+import { trainingModelText } from "../trainingText";
 
 function sample(): TrainingSample {
   const parsed = parseTrainingSample(mockSample());
@@ -31,8 +36,8 @@ function sample(): TrainingSample {
   return parsed.value;
 }
 
-function read(id = BASE_MODEL_ID, postTrained = false): TrainingGenerationOverlay {
-  const parsed = parseTrainingGenerationOverlay(mockGenerationOverlay(id, postTrained), mockGenerationEntry(id), sample());
+function read(id = BASE_MODEL_ID): TrainingGenerationOverlay {
+  const parsed = parseTrainingGenerationOverlay(mockGenerationOverlay(id), mockGenerationEntry(id), sample());
   if (!parsed.ok) throw new Error(parsed.problem);
   return parsed.value;
 }
@@ -57,7 +62,7 @@ describe("a generation overlay", () => {
 
   it("reads each flight's samples: the words from the first predicted row, the flight's end and its track", () => {
     const overlay = read();
-    expect(overlay.model.label).toBe("base model");
+    expect(trainingModelLabel(overlay.model)).toBe("base");
     expect(overlay.generation.firstPredictedRow).toBe(MOCK_GENERATION_FIRST_ROW);
     const [vectored, straight] = overlay.flights;
     expect([vectored.flightKey, straight.flightKey]).toEqual([VECTORED_KEY, STRAIGHT_KEY]);
@@ -77,11 +82,36 @@ describe("a generation overlay", () => {
     expect(overlay.readout?.labelled.here.vectored).toBeNull();
   });
 
-  it("names its model's colour by role: the base model's, or a post-trained round's", () => {
-    expect(trainingModelColour(read().model)).toBe(TRAINING_BASE_MODEL_COLOR);
-    const post = read(POST_TRAINED_ID, true);
-    expect(post.model.fineTuning).toEqual({ schema: "ts-prior-landing-reward-v1", round: 1, from: "4dTrajectory/outputs/POOLED/prior/base" });
-    expect(trainingModelColour(post.model)).toBe(TRAINING_POST_TRAINED_COLOR);
+  it("names its model — base, or a post-trained round and the model it started from — and colours it by name", () => {
+    expect(read().model).toMatchObject({ name: "base", round: null, fineTuning: null });
+    expect(trainingModelColour(read().model)).toBe(TRAINING_MODEL_COLOR.base);
+    const landing = read(POST_TRAINED_ID);
+    expect(landing.model).toMatchObject({ name: "landing", round: 1, run: "4dTrajectory/outputs/POOLED/prior/v3_rl/grpo_s1",
+      fineTuning: { schema: "ts-prior-landing-reward-v1", fromName: "base", fromRound: null } });
+    expect(trainingModelColour(landing.model)).toBe(TRAINING_MODEL_COLOR.landing);
+    const augmented = read(AUGMENTED_R2_ID);
+    expect(trainingModelLabel(augmented.model)).toBe("augmented r2");
+    expect(trainingModelColour(augmented.model)).toBe(TRAINING_MODEL_COLOR.augmented);
+    expect(trainingModelText(augmented.model)).toBe(
+      "augmented r2 (v3_stage2/aug_s1, post-trained from landing r1 by ts-prior-augmented-reward-v5)");
+    expect(trainingModelText(read().model)).toBe("base (v3_step1/full_s1, trained on data alone)");
+    // every name its own colour
+    expect(new Set(Object.values(TRAINING_MODEL_COLOR)).size).toBe(3);
+  });
+
+  it("refuses a model whose name, round and start model disagree, by name", () => {
+    expect(refusal((raw) => { raw.model.name = "post-trained"; })).toMatch("not one of base, landing, augmented");
+    expect(refusal((raw) => { raw.model.round = 1; })).toMatch("is base with round 1 and no fineTuning: base alone has neither");
+    expect(refusal((raw) => { delete raw.model.run; })).toMatch("model.run is undefined, not a non-empty string");
+    expect(refusal((raw) => { raw.model.run = "somewhere/full_s1"; })).toMatch('run "somewhere/full_s1" is not a prior run');
+    const tuned = (change: (model: any) => void) => refusal((raw) => {
+      Object.assign(raw.model, mockGenerationOverlay(AUGMENTED_R1_ID).model);
+      change(raw.model);
+    });
+    expect(tuned((model) => { model.fineTuning = null; })).toMatch("is augmented with round 1 and no fineTuning");
+    expect(tuned((model) => { model.round = 0; })).toMatch("model.round is 0, not a whole number of at least 1");
+    expect(tuned((model) => { model.fineTuning.fromRound = null; })).toMatch("starts from landing round null: base alone has no round");
+    expect(tuned((model) => { model.fineTuning.fromName = "sft"; })).toMatch("not one of base, landing, augmented");
   });
 
   it("refuses another schema, another step or columns in another order by name", () => {
@@ -176,7 +206,7 @@ describe("a set's samples, counted", () => {
 
 describe("the sentence read", () => {
   const selection = () => trainingSelectionOf(sample(), sample().flights[0]);
-  const views = (): TrainingGenerationView[] => [read(), read(POST_TRAINED_ID, true)].map((overlay) => ({ overlay, flight: overlay.flights[0] }));
+  const views = (): TrainingGenerationView[] => [read(), read(POST_TRAINED_ID)].map((overlay) => ({ overlay, flight: overlay.flights[0] }));
 
   it("is the truth without a source, or with one no view of the flight on screen publishes", () => {
     expect(generationOnScreen(views(), null, selection())).toBeNull();
@@ -202,5 +232,44 @@ describe("the sentence read", () => {
     expect(generatedTrackRows(landed, landed.firstRow, 16, 56)).toEqual({ first: 12, last: landed.track.tS.length - 1 });
     expect(generatedTrackRows(landed, landed.firstRow, 12, 16)).toEqual({ first: 8, last: 12 });
     expect(generatedTrackRows(landed, landed.firstRow, 90, 95)).toBeNull();
+  });
+});
+
+describe("the models grouped for the views", () => {
+  const models = (ids: string[]) => ids.map((id) => read(id));
+  /** One of the fixture's overlays under another id and run (another run of its stage). */
+  const inRun = (id: string, overlayId: string, run: string): TrainingGenerationOverlay => {
+    const overlay = read(id);
+    return { ...overlay, overlayId, model: { ...overlay.model, run: `4dTrajectory/outputs/POOLED/prior/${run}` } };
+  };
+  const named = (overlays: TrainingGenerationOverlay[]) => trainingModelGroups(overlays, (o) => o)
+    .map((group) => [group.title, group.members.map(group.memberLabel)]);
+
+  it("orders them by name as they are trained, then run, each model's rounds in order", () => {
+    expect(named(models([AUGMENTED_R2_ID, POST_TRAINED_ID, AUGMENTED_R1_ID, BASE_MODEL_ID]))).toEqual([
+      ["base", ["base"]], ["landing", ["landing r1"]], ["augmented", ["augmented r1", "augmented r2"]],
+    ]);
+  });
+
+  it("names two runs of one stage by their runs — a run of one round too — and no other model", () => {
+    const restart = inRun(AUGMENTED_R1_ID, "restart_r1", "v3_restart/aug_s1");
+    expect(named([...models([BASE_MODEL_ID, AUGMENTED_R2_ID, AUGMENTED_R1_ID]), restart])).toEqual([
+      ["base", ["base"]],
+      ["augmented · v3_restart/aug_s1", ["augmented r1 · v3_restart/aug_s1"]],
+      ["augmented · v3_stage2/aug_s1", ["augmented r1 · v3_stage2/aug_s1", "augmented r2 · v3_stage2/aug_s1"]],
+    ]);
+    expect(trainingRunName("4dTrajectory/outputs/POOLED/prior/v3_rl/grpo_s1")).toBe("v3_rl/grpo_s1");
+  });
+
+  it("gives a round published twice for its run a group of its own each, named by overlay id — never two same chips", () => {
+    const again = { ...read(BASE_MODEL_ID), overlayId: "generation_base_again" };
+    const twice = { ...read(AUGMENTED_R2_ID), overlayId: "generation_aug_r2_again" };
+    expect(named([...models([BASE_MODEL_ID, AUGMENTED_R1_ID, AUGMENTED_R2_ID]), again, twice])).toEqual([
+      ["base · generation_base", ["base · generation_base"]],
+      ["base · generation_base_again", ["base · generation_base_again"]],
+      ["augmented", ["augmented r1"]],
+      ["augmented · generation_aug_r2", ["augmented r2 · generation_aug_r2"]],
+      ["augmented · generation_aug_r2_again", ["augmented r2 · generation_aug_r2_again"]],
+    ]);
   });
 });

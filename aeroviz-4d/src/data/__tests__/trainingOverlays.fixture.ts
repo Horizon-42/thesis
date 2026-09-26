@@ -212,23 +212,39 @@ export function mockPriorOverlay(): Record<string, unknown> {
 // ── the models' own sentences ────────────────────────────────────────────────
 
 export const BASE_MODEL_ID = "generation_base";
+/** landing r1: post-trained from base. */
 export const POST_TRAINED_ID = "generation_post";
+/** augmented r1 and r2 of one run, post-trained from landing r1 — a model published at several rounds. */
+export const AUGMENTED_R1_ID = "generation_aug_r1";
+export const AUGMENTED_R2_ID = "generation_aug_r2";
 /** The row a model first speaks at in these fixtures (the rows before are observed only). */
 export const MOCK_GENERATION_FIRST_ROW = 4;
 
-/** The fixture's manifest with the two models' sentences listed beside the executor and the prior. */
-export function mockOverlaysWithGenerations(): Record<string, unknown> {
+const PRIOR_RUNS = "4dTrajectory/outputs/POOLED/prior";
+/** Each fixture overlay's model, as the exporter writes it. */
+const MOCK_MODELS: Record<string, Record<string, unknown>> = {
+  [BASE_MODEL_ID]: { name: "base", round: null, run: `${PRIOR_RUNS}/v3_step1/full_s1`, fineTuning: null },
+  [POST_TRAINED_ID]: { name: "landing", round: 1, run: `${PRIOR_RUNS}/v3_rl/grpo_s1`, fineTuning: {
+    schema: "ts-prior-landing-reward-v1", from: `${PRIOR_RUNS}/v3_step1/full_s1`, fromName: "base", fromRound: null } },
+  ...Object.fromEntries([[AUGMENTED_R1_ID, 1], [AUGMENTED_R2_ID, 2]].map(([id, round]) => [id, {
+    name: "augmented", round, run: `${PRIOR_RUNS}/v3_stage2/aug_s1`, fineTuning: {
+      schema: "ts-prior-augmented-reward-v5", from: `${PRIOR_RUNS}/v3_rl/grpo_s1/round_01`, fromName: "landing", fromRound: 1 } }])),
+};
+
+/** The fixture's manifest with models' sentences listed beside the executor and the prior (``ids``: base and landing r1
+ *  by default). */
+export function mockOverlaysWithGenerations(ids: string[] = [BASE_MODEL_ID, POST_TRAINED_ID]): Record<string, unknown> {
   const manifest = mockOverlays() as { overlays: unknown[] };
   const entry = (id: string) => ({
     id, kind: "prior-generation", base: SET_ID, baseSampleSha256: MOCK_SAMPLE_SHA, title: `the ${id} test overlay`,
     file: `${id}/generation.json`, flights: 2, source: { runner: "test" },
   });
-  return { ...manifest, overlays: [...manifest.overlays, entry(BASE_MODEL_ID), entry(POST_TRAINED_ID)] };
+  return { ...manifest, overlays: [...manifest.overlays, ...ids.map(entry)] };
 }
 
 /** The manifest entry of a generation overlay (`mockOverlaysWithGenerations`), as the reader parses it. */
 export function mockGenerationEntry(id: string): TrainingOverlayEntry {
-  const parsed = parseTrainingOverlays(mockOverlaysWithGenerations());
+  const parsed = parseTrainingOverlays(mockOverlaysWithGenerations(Object.keys(MOCK_MODELS)));
   if (!parsed.ok) throw new Error(parsed.problem);
   return parsed.value.overlays.find((item) => item.id === id)!;
 }
@@ -267,7 +283,8 @@ const opening = (runway: number) => [
  * at 150 s, past the observed flight's 120 s — and the STRAIGHT-IN one not flown (stand-in dynamics). ``postTrained``:
  * the round that names its start model.
  */
-export function mockGenerationOverlay(id: string, postTrained = false): Record<string, unknown> {
+export function mockGenerationOverlay(id: string): Record<string, unknown> {
+  const postTrained = MOCK_MODELS[id].name !== "base";
   const landed = {
     sample: 0, outcome: "landed", endS: 110, crossing: { crossM: -1.2, heightM: 16.5, atS: 109.8 }, firstRunway: 0, lastRunway: 0,
     runwayChanges: 0, goArounds: 0, clearedAtEnd: true, forbiddenMass: { runway: 0, approach: 0, angle: 0.0004 }, rows: 56,
@@ -292,11 +309,7 @@ export function mockGenerationOverlay(id: string, postTrained = false): Record<s
     writtenUtc: "2026-09-25T00:00:00+00:00",
     producedBy: { runner: "test" },
     base: mockBase(),
-    model: {
-      label: postTrained ? "post-trained" : "base model", checkpointSha256: "9".repeat(64), variant: "full",
-      trainedAt: { head: "test", dirty: false },
-      fineTuning: postTrained ? { schema: "ts-prior-landing-reward-v1", round: 1, from: "4dTrajectory/outputs/POOLED/prior/base" } : null,
-    },
+    model: { ...structuredClone(MOCK_MODELS[id]), checkpointSha256: "9".repeat(64), variant: "full", trainedAt: { head: "test", dirty: false } },
     generation: {
       samples: 2, temperature: 1, seed: 1337, firstPredictedRow: MOCK_GENERATION_FIRST_ROW, stepS: 2,
       executor: { specSha256: "e".repeat(64), wordClock: "track", cycleS: 1, timeoutFactor: 1.5 },
@@ -318,9 +331,9 @@ export function mockGenerationOverlay(id: string, postTrained = false): Record<s
 /** Both models' sentences over ``sample`` read as the panel publishes them, for the flight at ``position`` (``change``: of
  *  each raw payload first). */
 export function mockGenerationViews(sample: TrainingSample, position = 0,
-  change: (raw: any) => void = () => undefined): TrainingGenerationView[] {
-  return ([[BASE_MODEL_ID, false], [POST_TRAINED_ID, true]] as const).map(([id, post]) => {
-    const raw = mockGenerationOverlay(id, post);
+  change: (raw: any) => void = () => undefined, ids: string[] = [BASE_MODEL_ID, POST_TRAINED_ID]): TrainingGenerationView[] {
+  return ids.map((id) => {
+    const raw = mockGenerationOverlay(id);
     change(raw);
     const overlay = parseTrainingGenerationOverlay(raw, mockGenerationEntry(id), sample);
     if (!overlay.ok) throw new Error(overlay.problem);

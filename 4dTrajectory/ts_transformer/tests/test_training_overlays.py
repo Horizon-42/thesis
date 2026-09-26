@@ -358,6 +358,7 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_EXECUTOR_STATUSES"))) == executor_export.STATUSES
     assert json.loads(_ts_constant("TRAINING_PRIOR_SCHEMA")) == prior_export.SCHEMA
     assert json.loads(_ts_constant("TRAINING_GENERATION_SCHEMA")) == generation_export.SCHEMA
+    assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_MODEL_NAMES"))) == generation_export.MODEL_NAMES
     # the outcomes read at a crossing of the threshold, which alone carry where it was crossed
     from ts_transformer.autopilot.judge import CROSSINGS
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_CROSSING_OUTCOMES"))) == CROSSINGS
@@ -447,3 +448,21 @@ def test_the_prior_export_writes_a_set_s_predictions_beside_it_and_refuses_a_sec
     elsewhere.write_bytes(roster.read_bytes())
     with pytest.raises(ValueError, match="exists; an overlay is never overwritten"):
         prior_export.main(args)
+
+
+def test_the_frontend_reads_the_model_block_the_exporter_writes(tmp_path):
+    """Field for field: the reader's `TrainingGenerationModel` against `model_block`'s output (``trainedAt`` is written for
+    provenance and not read)."""
+    import json as json_module
+
+    source = TRAINING_OVERLAYS_TS.read_text(encoding="utf-8")
+    body = re.search(r"export interface TrainingGenerationModel \{(?P<body>.*?)\n\}", source, re.S).group("body")
+    tuning = re.search(r"fineTuning: \{(?P<fields>[^}]*)\}", body).group("fields")
+    read = set(re.findall(r"^\s*(\w+)\??:", re.sub(r"fineTuning: \{[^}]*\}", "fineTuning: x", body), re.M))
+    prior = tmp_path / "4dTrajectory" / "outputs" / "POOLED" / "prior"
+    (prior / "base").mkdir(parents=True)
+    (prior / "base" / "config.json").write_text(json_module.dumps({"git": {}}), encoding="utf-8")
+    config = {"git": {}, "fine_tuning": {"schema": "ts-prior-landing-reward-v3", "from": str(prior / "base"), "round": 1}}
+    block = generation_export.model_block(prior / "rl" / "round_01", config, "a" * 64, "full")
+    assert read == set(block) - {"trainedAt"}
+    assert set(re.findall(r"(\w+):", tuning)) == set(block["fineTuning"])

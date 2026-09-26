@@ -77,8 +77,14 @@ export type TrainingExecutorOutcome = (typeof TRAINING_EXECUTOR_OUTCOMES)[number
 export const TRAINING_PRIOR_RULES = ["B0_majority", "B1_active_config", "B3_same_sector_last"] as const;
 /** MIRROR of `prior_training_export.SCHEMA`. */
 export const TRAINING_PRIOR_SCHEMA = "aeroviz-training-prior-v3";
-/** MIRROR of `prior_generation_training_export.SCHEMA`: the prior's own sentences, flown. */
-export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v1";
+/** MIRROR of `prior_generation_training_export.SCHEMA`: the prior's own sentences, flown; v2 names the model (its name,
+ *  round, run and start model) where v1 carried a free label. */
+export const TRAINING_GENERATION_SCHEMA = "aeroviz-training-generation-v2";
+/** MIRROR of `prior_generation_training_export.MODEL_NAMES`: the prior's models, in the order they are trained — base
+ *  (data alone), landing (post-trained on the landing reward), augmented (landing post-trained again on augmented
+ *  starts). The views order them so. */
+export const TRAINING_MODEL_NAMES = ["base", "landing", "augmented"] as const;
+export type TrainingModelName = (typeof TRAINING_MODEL_NAMES)[number];
 /** MIRROR of `ts_transformer.autopilot.judge.CROSSINGS`: the outcomes read at a crossing of the threshold, which carry
  *  where it was crossed; no other outcome does. */
 export const TRAINING_CROSSING_OUTCOMES: readonly TrainingExecutorOutcome[] = ["landed", "crossed_without_capture", "crossed_off_runway"];
@@ -359,18 +365,25 @@ export interface TrainingGenerationCell {
   landed: number;
 }
 
+/** Which model spoke: its name and round (`trainingModelLabel`), the run holding its rounds, its checkpoint and — a
+ *  post-trained round — the method and the model it started from. */
+export interface TrainingGenerationModel {
+  name: TrainingModelName;
+  /** A post-trained round's number (from 1); null for base. */
+  round: number | null;
+  /** From `4dTrajectory/outputs/` on: the directory holding a post-training run's rounds; base's own directory. */
+  run: string;
+  checkpointSha256: string;
+  variant: string;
+  /** The method's checkpoint schema and the model the round started from, named the same way; null for base. */
+  fineTuning: { schema: string; from: string; fromName: TrainingModelName; fromRound: number | null } | null;
+}
+
 export interface TrainingGenerationOverlay {
   overlayId: string;
   airport: string;
   base: TrainingOverlayBase;
-  model: {
-    /** What the views call it. */
-    label: string;
-    checkpointSha256: string;
-    variant: string;
-    /** A post-trained round's method, round and start model; null for a prior trained on data alone. */
-    fineTuning: { schema: string; round: number; from: string } | null;
-  };
+  model: TrainingGenerationModel;
   generation: {
     samples: number;
     temperature: number;
@@ -406,6 +419,64 @@ export interface TrainingPriorView {
 export interface TrainingGenerationView {
   overlay: TrainingGenerationOverlay;
   flight: TrainingGenerationFlight;
+}
+
+/** How the views call a model: ``base``, ``landing r1``, ``augmented r3``. */
+export function trainingModelLabel(model: { name: TrainingModelName; round: number | null }): string {
+  return model.round === null ? model.name : `${model.name} r${model.round}`;
+}
+
+/** A run as the views name it: its path under `…/prior/` (``v3_stage2_clip_20260926/aug_s1337``; the reader refuses a
+ *  run elsewhere). */
+export function trainingRunName(run: string): string {
+  return run.slice(run.indexOf(PRIOR_RUNS) + PRIOR_RUNS.length);
+}
+
+/** Where every prior run lives, as the exporter writes ``run`` (from `4dTrajectory/outputs/` on). */
+const PRIOR_RUNS = "/prior/";
+
+/** One model of a set's published sentences — a name and the run its rounds come from — with every round published,
+ *  each round once (base: its one member); ``title`` names it (its tab), ``memberLabel`` each member (its line, its
+ *  table row, its legend). The run is said when another group has the same name (two runs of a stage). An overlay that
+ *  repeats a round already published for its run (the same checkpoint exported twice) is a group of its own, named
+ *  with its overlay id — two "r3" would say nothing. */
+export interface TrainingModelGroup<T> {
+  key: string;
+  name: TrainingModelName;
+  title: string;
+  members: T[];
+  memberLabel: (member: T) => string;
+}
+
+/** The published models of a set grouped for the views — by name in training order, then run, each group's rounds in
+ *  order. ``overlayOf`` reads an item's overlay (items are overlays, or views of them). */
+export function trainingModelGroups<T>(items: T[], overlayOf: (item: T) => TrainingGenerationOverlay): TrainingModelGroup<T>[] {
+  const modelOf = (item: T) => overlayOf(item).model;
+  const roundKey = (item: T) => `${modelOf(item).name} ${modelOf(item).run} ${modelOf(item).round}`;
+  const repeated = new Set(items.map(roundKey).filter((key, index, keys) => keys.indexOf(key) !== index));
+  const buckets = new Map<string, T[]>();
+  for (const item of items) {
+    const { name, run } = modelOf(item);
+    const key = repeated.has(roundKey(item)) ? overlayOf(item).overlayId : `${name} ${run}`;
+    buckets.set(key, [...(buckets.get(key) ?? []), item]);
+  }
+  const order = (item: T) => [TRAINING_MODEL_NAMES.indexOf(modelOf(item).name), modelOf(item).run, overlayOf(item).overlayId] as const;
+  const ordered = [...buckets.entries()].map(([key, members]) => ({
+    key, members: members.sort((a, b) => (modelOf(a).round ?? 0) - (modelOf(b).round ?? 0)),
+  })).sort((a, b) => {
+    const [x, y] = [order(a.members[0]), order(b.members[0])];
+    return x[0] - y[0] || x[1].localeCompare(y[1]) || x[2].localeCompare(y[2]);
+  });
+  return ordered.map(({ key, members }) => {
+    const { name, run } = modelOf(members[0]);
+    const twin = repeated.has(roundKey(members[0]));
+    const runs = new Set(items.filter((item) => modelOf(item).name === name).map((item) => modelOf(item).run));
+    const qualifier = twin ? ` · ${overlayOf(members[0]).overlayId}` : runs.size > 1 ? ` · ${trainingRunName(run)}` : "";
+    return {
+      key, name, members, title: `${name}${qualifier}`,
+      memberLabel: (member: T) => `${trainingModelLabel(modelOf(member))}${qualifier}`,
+    };
+  });
 }
 
 /** WHICH SENTENCE the views read: the truth's (null) or one sample of a model's own (`TrainingGenerationView`). */
@@ -1064,6 +1135,28 @@ function parsePlaces(reader: Reader) {
   return { here: parseGenerationCells(reader.child("here")), all: parseGenerationCells(reader.child("all")) };
 }
 
+/** A round is post-trained and names what it started from; base is neither — each name's round and start model agree. */
+function parseGenerationModel(model: Reader): TrainingGenerationModel {
+  const name = model.oneOf("name", TRAINING_MODEL_NAMES);
+  const round = model.nullableCount("round", 1);
+  const tuning = model.nullableChild("fineTuning");
+  if ((name === "base") !== (round === null) || (round === null) !== (tuning === null)) {
+    model.fail(`is ${name} with round ${round} and ${tuning === null ? "no" : "a"} fineTuning: base alone has neither`);
+  }
+  const fineTuning = tuning === null ? null : {
+    schema: tuning.string("schema"), from: tuning.string("from"), fromName: tuning.oneOf("fromName", TRAINING_MODEL_NAMES),
+    fromRound: tuning.nullableCount("fromRound", 1),
+  };
+  if (fineTuning !== null && (fineTuning.fromName === "base") !== (fineTuning.fromRound === null)) {
+    tuning!.fail(`starts from ${fineTuning.fromName} round ${fineTuning.fromRound}: base alone has no round`);
+  }
+  const run = model.string("run");
+  if (!run.includes(PRIOR_RUNS)) model.fail(`run ${JSON.stringify(run)} is not a prior run (under ${PRIOR_RUNS})`);
+  return {
+    name, round, run, checkpointSha256: model.string("checkpointSha256"), variant: model.string("variant"), fineTuning,
+  };
+}
+
 /** Parse a generation overlay against the manifest entry that listed it and the sample it is drawn over — all or
  *  nothing. */
 export function parseTrainingGenerationOverlay(
@@ -1076,8 +1169,7 @@ export function parseTrainingGenerationOverlay(
     }
     overlay.sameNames("columns", TRAINING_COLUMNS);
     const base = parseBase(overlay, entry, sample);
-    const model = overlay.child("model");
-    const tuning = model.nullableChild("fineTuning");
+    const model = parseGenerationModel(overlay.child("model"));
     const generation = overlay.child("generation");
     const stepS = generation.number("stepS");
     if (stepS !== sample.vocabulary.stepS) generation.fail(`stepS is ${stepS}, the set's step ${sample.vocabulary.stepS}`);
@@ -1090,11 +1182,7 @@ export function parseTrainingGenerationOverlay(
       overlayId: entry.id,
       airport: sample.airport,
       base,
-      model: {
-        label: model.string("label"), checkpointSha256: model.string("checkpointSha256"), variant: model.string("variant"),
-        fineTuning: tuning === null ? null
-          : { schema: tuning.string("schema"), round: tuning.count("round"), from: tuning.string("from") },
-      },
+      model,
       generation: {
         samples, temperature: generation.number("temperature"), seed: generation.number("seed"), firstPredictedRow,
         executor: { specSha256: executor.string("specSha256"), wordClock: executor.string("wordClock"), cycleS,

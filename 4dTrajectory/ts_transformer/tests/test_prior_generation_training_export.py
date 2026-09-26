@@ -5,6 +5,7 @@ The runner's loop over a set is `prior_free_generation`'s own (`speak_and_fly`, 
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -165,6 +166,59 @@ def test_a_path_outside_the_outputs_tree_names_itself():
     with pytest.raises(ValueError, match="is not under 4dTrajectory/outputs/"):
         export.outputs_path("/elsewhere/prior/full_s1337")
     assert export.outputs_path(PRIOR) == "4dTrajectory/outputs/POOLED/prior/v3_step1_20260924/full_s1337"
+    with pytest.raises(ValueError, match="is not under 4dTrajectory/outputs/"):
+        export.in_tree_of(Path("/elsewhere/prior"), PRIOR)
+
+
+# ---- which model it is, by name: base, and each post-training stage's rounds
+def _tuned(schema, start, round_number):
+    return {"git": {"head": "h", "dirty": False},
+            "fine_tuning": {"schema": schema, "from": start, "round": round_number, "samples": 8}}
+
+
+def test_the_models_are_named_by_the_method_that_trained_them_every_version_alike():
+    from ts_transformer.experiments.prior_augmented_reward import AUGMENTED_REWARD_SCHEMA
+    from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
+
+    assert export.model_identity({"git": {}}) == ("base", None)
+    assert export.model_identity(_tuned(LANDING_REWARD_SCHEMA, PRIOR, 3)) == ("landing", 3)
+    assert export.model_identity(_tuned(AUGMENTED_REWARD_SCHEMA, PRIOR, 2)) == ("augmented", 2)
+    # the adopted landing model was written by the method's first version: the same model
+    assert export.model_identity(_tuned("ts-prior-landing-reward-v1", PRIOR, 1)) == ("landing", 1)
+    with pytest.raises(ValueError, match="no model is named for ts-prior-closed-loop-sft-v1"):
+        export.model_identity(_tuned("ts-prior-closed-loop-sft-v1", PRIOR, 1))
+    for schema in ("ts-prior-landing-reward-vnext", "ts-prior-landing-reward"):
+        with pytest.raises(ValueError, match="not a versioned post-training schema"):
+            export.method_of(schema)
+    assert set(export.METHOD_MODELS.values()) | {"base"} == set(export.MODEL_NAMES)
+    assert [export.display_name(*pair) for pair in (("base", None), ("augmented", 3))] == ["base", "augmented r3"]
+
+
+def test_a_round_names_its_run_and_the_model_it_started_from_read_in_its_own_outputs_tree(tmp_path):
+    """The rounds ran from worktrees: their ``from`` paths name another checkout, read here in the round's own tree."""
+    from ts_transformer.experiments.prior_augmented_reward import AUGMENTED_REWARD_SCHEMA
+
+    prior = tmp_path / "4dTrajectory" / "outputs" / "POOLED" / "prior"
+    elsewhere = "/repo/.claude/worktrees/w/4dTrajectory/outputs/POOLED/prior"
+    base, landing, augmented = (prior / "step1" / "full_s1", prior / "rl" / "grpo_s1" / "round_02",
+                                prior / "stage2" / "aug_s1" / "round_04")
+    for directory, config in ((base, {"git": {"head": "b", "dirty": False}}),
+                              (landing, _tuned("ts-prior-landing-reward-v1", f"{elsewhere}/step1/full_s1", 2)),
+                              (augmented, _tuned(AUGMENTED_REWARD_SCHEMA, f"{elsewhere}/rl/grpo_s1/round_02", 4))):
+        directory.mkdir(parents=True)
+        (directory / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    block = export.model_block(augmented, json.loads((augmented / "config.json").read_text()), "a" * 64, "full")
+    assert block == {"name": "augmented", "round": 4, "run": "4dTrajectory/outputs/POOLED/prior/stage2/aug_s1",
+                     "checkpointSha256": "a" * 64, "variant": "full", "trainedAt": {"head": "h", "dirty": False},
+                     "fineTuning": {"schema": AUGMENTED_REWARD_SCHEMA,
+                                    "from": "4dTrajectory/outputs/POOLED/prior/rl/grpo_s1/round_02",
+                                    "fromName": "landing", "fromRound": 2}}
+    assert export.model_block(landing, json.loads((landing / "config.json").read_text()), "b" * 64, "full")[
+        "fineTuning"]["fromName"] == "base"
+    # base: its own directory is its run, and it started from nothing
+    block = export.model_block(base, {"git": {"head": "b", "dirty": False}}, "c" * 64, "full")
+    assert (block["name"], block["round"], block["run"], block["fineTuning"]) == (
+        "base", None, "4dTrajectory/outputs/POOLED/prior/step1/full_s1", None)
 
 
 # ---- the runner end to end, on a synthetic artefact, an untrained prior and an executor spec (every write in tmp_path)
@@ -193,7 +247,9 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     roster.write_text(json.dumps({"records": [{"outcome": "assigned", "runway": "09", "flight_key": "own",
                                                "landing_time_utc": landing_on("val")}]}), encoding="utf-8")
     monkeypatch.setattr(prior_train, "tracks_manifest_path", lambda code: roster)
-    _prior_dir(tmp_path / "prior", tmp_path / "artefact", roster)
+    prior = tmp_path / "4dTrajectory" / "outputs" / "POOLED" / "prior" / "v_test" / "full_s1"   # every prior's tree
+    prior.parent.mkdir(parents=True)
+    _prior_dir(prior, tmp_path / "artefact", roster)
     executor_spec.write_spec(tmp_path / "executor", _params(), one.sha256, {}, {
         "executor_source_sha256": executor_spec.executor_source_sha256(), "labeller_source_sha256": labeller_source_sha256(),
         "git": {"head": "test", "dirty": False}})
@@ -219,16 +275,19 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     monkeypatch.setattr(export, "published_vertical_paths",
                         lambda geometry: (VerticalPath(15.0, 3.0),) * len(geometry.candidates))
     monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
-    args = ["--prior", str(tmp_path / "prior"), "--label", "a test prior", "--instructions", str(tmp_path / "artefact"),
+    args = ["--prior", str(prior), "--instructions", str(tmp_path / "artefact"),
             "--executor", str(tmp_path / "executor"), "--airports-root", str(tmp_path / "airports"), "--set", SET_ID,
             "--airport", "KXXX", "--samples", "3"]
     assert export.main(args) == 0
     training = tmp_path / "airports" / "KXXX" / "training"
-    overlay_id = f"generation_{tmp_path.name}_prior"                   # the default: the prior's parent and name
+    checkpoint = hashlib.sha256((prior / "checkpoint.pt").read_bytes()).hexdigest()
+    overlay_id = f"generation_base_{checkpoint[:8]}"                   # the default: its name and checkpoint
     payload = json.loads((training / overlay_id / export.PAYLOAD_FILE).read_text(encoding="utf-8"))
     sample = json.loads((training / SET_ID / "sample.json").read_text(encoding="utf-8"))
     assert payload["schema"] == export.SCHEMA and payload["base"]["setId"] == SET_ID and payload["readout"] is None
-    assert payload["model"]["label"] == "a test prior" and payload["model"]["fineTuning"] is None
+    assert payload["model"] == {"name": "base", "round": None, "run": "4dTrajectory/outputs/POOLED/prior/v_test/full_s1",
+                                "checkpointSha256": checkpoint, "variant": "full",
+                                "trainedAt": {"head": "test", "dirty": False}, "fineTuning": None}
     assert payload["generation"]["firstPredictedRow"] == N_LOOK and payload["generation"]["samples"] == 3
     # the set's flights in its order: the own-dynamics one flown three times, the other listed with its group
     assert [f["flightKey"] for f in payload["flights"]] == [f["flightKey"] for f in sample["flights"]]

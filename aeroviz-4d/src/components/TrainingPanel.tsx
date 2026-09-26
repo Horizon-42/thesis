@@ -21,8 +21,9 @@
  *
  * Over the open set it offers the OVERLAYS published for it (`useTrainingOverlays`): the executor's replay and the
  * prior's predictions, each behind its own switch; a set with none says so and folds away the command that writes one.
- * And THE MODELS' OWN SENTENCES (`prior-generation`): each model published for the set is a line of "Model sentences" —
- * its colour, its name, how many of its samples landed on this set — which chooses it as the sentence read
+ * And THE MODELS' OWN SENTENCES (`prior-generation`): each model round published for the set is a line of "Sentences
+ * read" — grouped by model (base, landing, augmented), a model published at several rounds a heading with a line per
+ * round; its colour, its name, how many of its samples landed on this set — which chooses it as the sentence read
  * (`trainingSource`, as the sentence bar's tabs do); while one is chosen, each flight in the list shows its samples,
  * filled where the flight landed.
  *
@@ -54,11 +55,13 @@ import {
 } from "../utils/trainingWordColors";
 import {
   generationLanded,
+  trainingModelGroups,
   trainingOverlaysPath,
   type TrainingExecutorFlight,
   type TrainingGenerationFlight,
+  type TrainingGenerationOverlay,
 } from "../data/trainingOverlays";
-import { TRAINING_OUTCOME_TAG } from "../data/trainingText";
+import { TRAINING_OUTCOME_TAG, trainingModelText } from "../data/trainingText";
 import { TrainingExecutorGate, TrainingGenerationReadout, TrainingPriorReadout } from "./TrainingResults";
 import type { GenerationItem } from "../hooks/useTrainingOverlays";
 import {
@@ -113,7 +116,7 @@ const TRAINING_OVERLAY_COMMAND = {
     "--instructions <artefact> --airports-root aeroviz-4d/public/data/airports --set ",
   "prior-prediction": "python run_ts.py prior_training_export --prior <prior dir> --instructions <artefact> " +
     "--airports-root aeroviz-4d/public/data/airports --set ",
-  "prior-generation": "python run_ts.py prior_generation_training_export --prior <prior dir> --label <its name> " +
+  "prior-generation": "python run_ts.py prior_generation_training_export --prior <prior dir, or one round of a post-training run> " +
     "--instructions <artefact> --executor <executor spec dir> --readout <its val free generation> " +
     "--airports-root aeroviz-4d/public/data/airports --set ",
 } as const;
@@ -179,8 +182,33 @@ function SampleMarks({ flight, colour }: { flight: TrainingGenerationFlight; col
   );
 }
 
-/** THE MODELS' OWN SENTENCES published for the set: each a line that chooses it as the sentence read (from its first
- *  sample); the truth first — and checked when the chosen model is not one of this set's. */
+/** One model round as a line of the list: its radio (read from its first sample), its name, and how many of its
+ *  samples over the set's flights landed. */
+function ModelLine({ overlay, text, chosen, flights, indent }: {
+  overlay: TrainingGenerationOverlay; text: string; chosen: boolean; flights: TrainingFlight[]; indent: boolean;
+}) {
+  const { setTrainingSource } = useApp();
+  const count = generationLanded(overlay, flights).all;
+  return (
+    <label className={`training-model${indent ? " training-model-round" : ""}`} title={trainingModelText(overlay.model)}>
+      <input type="radio" name="training-source" checked={chosen}
+        onChange={() => setTrainingSource({ overlayId: overlay.overlayId, sample: 0 })} />
+      {indent ? null : <span className="training-model-swatch" style={{ background: trainingModelColour(overlay.model) }} />}
+      {text}
+      {count !== null ? (
+        <span className="training-model-count" title={`of the ${count.flights} sentences it said over the set's flights ` +
+          "(each flown by the executor from its first predicted step), those that landed"}>
+          {" "}{Math.round(count.landed * count.flights)}/{count.flights} landed
+        </span>
+      ) : null}
+    </label>
+  );
+}
+
+/** THE MODELS' OWN SENTENCES published for the set, by model (`trainingModelGroups`: base, landing, augmented; a model
+ *  published at several rounds is a heading with one line per round): each line chooses it as the sentence read (from its
+ *  first sample); the truth first — and checked when the chosen model is not one of this set's. An overlay still loading
+ *  or unreadable is listed after them by its id. */
 function ModelSentences({ items, setId, airport, flights }: {
   items: GenerationItem[]; setId: string; airport: string; flights: TrainingFlight[];
 }) {
@@ -197,6 +225,8 @@ function ModelSentences({ items, setId, airport, flights }: {
     );
   }
   const chosen = items.some(({ entry }) => entry.id === trainingSource?.overlayId) ? trainingSource!.overlayId : null;
+  const groups = trainingModelGroups(items.flatMap(({ load }) => (load.status === "ready" ? [load.overlay] : [])),
+    (overlay) => overlay);
   return (
     <div className="training-models" role="radiogroup" aria-label="Which sentence is read">
       <span className="training-models-title">Sentences read</span>
@@ -205,35 +235,37 @@ function ModelSentences({ items, setId, airport, flights }: {
         <span className="training-model-swatch training-model-swatch-truth" />
         truth (labelled)
       </label>
-      {items.map(({ entry, load, retry }) => {
-        const overlay = load.status === "ready" ? load.overlay : null;
-        const count = overlay === null ? null : generationLanded(overlay, flights).all;
-        return (
-          <div key={entry.id}>
-            <label className="training-model" title={entry.title}
-              style={overlay === null ? undefined : { color: trainingModelColour(overlay.model) }}>
-              <input type="radio" name="training-source" checked={chosen === entry.id} disabled={overlay === null}
-                onChange={() => setTrainingSource({ overlayId: entry.id, sample: 0 })} />
-              <span className="training-model-swatch"
-                style={overlay === null ? undefined : { background: trainingModelColour(overlay.model) }} />
-              {overlay?.model.label ?? entry.id}
-              {count !== null ? (
-                <span className="training-model-count" title={`of the ${count.flights} sentences it said over the set's flights ` +
-                  "(each flown by the executor from its first predicted step), those that landed"}>
-                  {" "}{Math.round(count.landed * count.flights)}/{count.flights} landed
-                </span>
-              ) : null}
-              {load.status === "loading" || load.status === "idle" ? <span className="training-overlay-note" role="status"> loading …</span> : null}
-            </label>
-            {load.status === "invalid" ? (
-              <>
-                <ProblemBox title={`Overlay ${entry.id} cannot be read.`} detail={load.problem} />
-                <button type="button" className="training-sentence-readback-button" onClick={retry}>Retry</button>
-              </>
-            ) : null}
-          </div>
-        );
-      })}
+      {groups.map((group) => (group.members.length === 1 ? (
+        <ModelLine key={group.key} overlay={group.members[0]} text={group.memberLabel(group.members[0])}
+          chosen={chosen === group.members[0].overlayId} flights={flights} indent={false} />
+      ) : (
+        <div key={group.key} className="training-model-group" role="group" aria-label={`${group.title}: the rounds published`}>
+          <span className="training-model training-model-heading">
+            <span className="training-model-swatch" style={{ background: trainingModelColour(group) }} />
+            {group.title}
+          </span>
+          {group.members.map((overlay) => (
+            <ModelLine key={overlay.overlayId} overlay={overlay} text={`r${overlay.model.round}`}
+              chosen={chosen === overlay.overlayId} flights={flights} indent />
+          ))}
+        </div>
+      )))}
+      {items.filter(({ load }) => load.status !== "ready").map(({ entry, load, retry }) => (
+        <div key={entry.id}>
+          <label className="training-model" title={entry.title}>
+            <input type="radio" name="training-source" checked={false} disabled />
+            <span className="training-model-swatch" />
+            {entry.id}
+            {load.status === "loading" || load.status === "idle" ? <span className="training-overlay-note" role="status"> loading …</span> : null}
+          </label>
+          {load.status === "invalid" ? (
+            <>
+              <ProblemBox title={`Overlay ${entry.id} cannot be read.`} detail={load.problem} />
+              <button type="button" className="training-sentence-readback-button" onClick={retry}>Retry</button>
+            </>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }

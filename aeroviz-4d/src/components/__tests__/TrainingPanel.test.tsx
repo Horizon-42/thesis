@@ -40,7 +40,7 @@ vi.mock("../../context/AppContext", () => ({
 import TrainingPanel from "../TrainingPanel";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
-  BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
+  AUGMENTED_R1_ID, AUGMENTED_R2_ID, BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
   mockOverlaysWithGenerations, mockPriorOverlay,
 } from "../../data/__tests__/trainingOverlays.fixture";
 
@@ -271,18 +271,35 @@ describe("TrainingPanel", () => {
     beforeEach(() => serve({
       [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlaysWithGenerations(),
       [EXECUTOR_PATH]: mockExecutorOverlay(), [PRIOR_PATH]: mockPriorOverlay(),
-      [BASE_PATH]: mockGenerationOverlay(BASE_MODEL_ID), [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID, true),
+      [BASE_PATH]: mockGenerationOverlay(BASE_MODEL_ID), [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID),
     }));
 
     it("lists each beside the truth as the sentence read, with how many of its samples landed on this set", async () => {
       render(<TrainingPanel hidden={false} />);
       const group = await screen.findByRole("radiogroup", { name: "Which sentence is read" });
-      await waitFor(() => expect(group.textContent).toMatch(/base model 1\/2 landed/));
+      await waitFor(() => expect(group.textContent).toMatch(/base 1\/2 landed/));
       expect(group.textContent).toMatch(/truth \(labelled\)/);
-      expect(group.textContent).toMatch(/post-trained 1\/2 landed/);
+      expect(group.textContent).toMatch(/landing r1 1\/2 landed/);
       expect((screen.getByLabelText(/truth \(labelled\)/) as HTMLInputElement).checked).toBe(true);
-      fireEvent.click(screen.getByLabelText(/^post-trained/));
+      fireEvent.click(screen.getByLabelText(/^landing r1/));
       expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: POST_TRAINED_ID, sample: 0 });
+    });
+
+    it("groups a model published at several rounds under its name, a line per round, each choosing it", async () => {
+      const path = (id: string) => `data/airports/KXXX/training/${id}/generation.json`;
+      serve({
+        [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(),
+        [OVERLAYS_PATH]: mockOverlaysWithGenerations([AUGMENTED_R2_ID, BASE_MODEL_ID, AUGMENTED_R1_ID]),
+        ...Object.fromEntries([BASE_MODEL_ID, AUGMENTED_R1_ID, AUGMENTED_R2_ID].map((id) => [path(id), mockGenerationOverlay(id)])),
+      });
+      render(<TrainingPanel hidden={false} />);
+      const rounds = await screen.findByRole("group", { name: "augmented: the rounds published" });
+      await waitFor(() => expect(rounds.textContent).toBe("augmentedr1 1/2 landedr2 1/2 landed"));
+      const group = screen.getByRole("radiogroup", { name: "Which sentence is read" });
+      // in training order, whatever the manifest's
+      expect(group.textContent!.indexOf("base")).toBeLessThan(group.textContent!.indexOf("augmented"));
+      fireEvent.click(screen.getByLabelText(/^r2/));
+      expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: AUGMENTED_R2_ID, sample: 0 });
     });
 
     it("marks each flight with the chosen model's samples, filled where its flight landed", async () => {
@@ -296,19 +313,19 @@ describe("TrainingPanel", () => {
 
     it("folds how each model's samples landed, beside its formal readout here and at every airport, under the switches", async () => {
       render(<TrainingPanel hidden={false} />);
-      expect(await screen.findByText(/The models' own sentences, landed · base model 50% \(val 90\.0%\) · post-trained 50% \(val 97\.0%\)/)).toBeTruthy();
+      expect(await screen.findByText(/The models' own sentences, landed · base 50% \(val 90\.0%\) · landing r1 50% \(val 97\.0%\)/)).toBeTruthy();
       expect(screen.getAllByText("val · KXXX")).toHaveLength(2);
       expect(screen.getAllByText("val · all airports")).toHaveLength(2);
-      expect(screen.getByText(/^base model: 2 samples a flight at temperature 1 \(seed 1337\)/)).toBeTruthy();
+      expect(screen.getByText(/^base \(v3_step1\/full_s1, trained on data alone\): 2 samples a flight at temperature 1 \(seed 1337\)/)).toBeTruthy();
     });
 
     it("reads a model that flies none of the set's flights without failing: nothing to count", async () => {
       const none: any = mockGenerationOverlay(BASE_MODEL_ID);
       none.flights[0] = { ...none.flights[0], flown: false, group: "stand-in dynamics", samples: [] };
       serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlaysWithGenerations(),
-              [BASE_PATH]: none, [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID, true) });
+              [BASE_PATH]: none, [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID) });
       render(<TrainingPanel hidden={false} />);
-      expect(await screen.findByText(/The models' own sentences, landed · base model — \(val 90\.0%\)/)).toBeTruthy();
+      expect(await screen.findByText(/The models' own sentences, landed · base — \(val 90\.0%\)/)).toBeTruthy();
     });
 
     it("checks the truth when the model chosen is not one of this set's", async () => {
@@ -323,7 +340,7 @@ describe("TrainingPanel", () => {
       broken.schema = "aeroviz-training-generation-v0";
       const files: Record<string, unknown> = {
         [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlaysWithGenerations(),
-        [BASE_PATH]: broken, [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID, true),
+        [BASE_PATH]: broken, [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID),
       };
       serve(files);
       render(<TrainingPanel hidden={false} />);
@@ -333,7 +350,7 @@ describe("TrainingPanel", () => {
       fireEvent.click(screen.getByRole("button", { name: "Retry" }));
       await waitFor(() => expect(screen.queryByText(`Overlay ${BASE_MODEL_ID} cannot be read.`)).toBeNull());
       const group = screen.getByRole("radiogroup", { name: "Which sentence is read" });
-      await waitFor(() => expect(group.textContent).toMatch(/base model 1\/2 landed/));
+      await waitFor(() => expect(group.textContent).toMatch(/base 1\/2 landed/));
     });
   });
 

@@ -29,6 +29,7 @@ import {
   generatedRowAt,
   generatedTrackRows,
   generationOnScreen,
+  trainingModelLabel,
   type TrainingGeneratedSentence,
   type TrainingGenerationView,
 } from "../data/trainingOverlays";
@@ -57,7 +58,7 @@ function buildModel(viewer: Cesium.Viewer, view: TrainingGenerationView, read: T
   selection: TrainingSelection): () => void {
   const group = entityGroup(viewer);
   const css = trainingModelColour(view.overlay.model);
-  const label = view.overlay.model.label;
+  const label = trainingModelLabel(view.overlay.model);
   for (const item of view.flight.samples) {
     if (item.sample === read.sample) continue;
     group.add({

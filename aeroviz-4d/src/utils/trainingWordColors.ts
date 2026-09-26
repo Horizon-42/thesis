@@ -10,6 +10,7 @@
  */
 
 import type { TrainingColumn } from "../data/trainingSample";
+import type { TrainingModelName } from "../data/trainingOverlays";
 
 /** The sentence bar's surface — every colour here is validated against it; `index.css` draws `.training-sentence-bar` in it
  *  at 0.94 opacity (MIRROR: CSS cannot import it). The bar shades with it. */
@@ -85,20 +86,28 @@ export const TRAINING_AUTOPILOT_COLOR = "#2563eb";
 export const TRAINING_AUTOPILOT_OUTSIDE_COLOR = "#ff2d2d";
 
 /** THE PRIOR'S OWN SENTENCES (`trainingOverlays.TrainingGenerationOverlay`): each model in one colour — its tab in the
- *  sentence bar, its flown tracks in 3D, its samples in the flight list — by ROLE: the base model (trained on data alone)
- *  and a post-trained round. The truth is the observed track's own near-white (`TRAINING_TRACE_COLOR`), always drawn.
+ *  sentence bar, its flown tracks in 3D, its samples in the flight list — by NAME (`TRAINING_MODEL_NAMES`): every round
+ *  of a model shares its colour, the round is said in words. The truth is the observed track's own near-white
+ *  (`TRAINING_TRACE_COLOR`), always drawn.
  *  The palette above leaves two hue regions free (2026-09-25, the dataviz validator's OKLab ΔE on the bar's surface
- *  #0f131e): fuchsia is ≥ 14.4 from every colour drawn in 3D (nearest: the approach pink, a marker there) and 9.2 from
- *  the speed purple, which draws nothing in 3D; lime is ≥ 9.5 from every colour (nearest: the corridor's translucent
- *  fill on the ground, and the runway green), contrast ≥ 5:1 both. The two are never drawn together (the bar reads one
- *  model at a time), and ΔE 60 apart. */
-export const TRAINING_BASE_MODEL_COLOR = "#d946ef";
-export const TRAINING_POST_TRAINED_COLOR = "#a3e635";
+ *  #0f131e): base's fuchsia is ≥ 14.4 from every colour drawn in 3D (nearest: the approach pink, a marker there) and 9.2
+ *  from the speed purple, which draws nothing in 3D; landing's lime is ≥ 9.5 from every colour (nearest: the corridor's
+ *  translucent fill on the ground, and the runway green), contrast ≥ 5:1 both. augmented's raspberry (2026-09-26, the
+ *  best of a search over hue × saturation × lightness against every colour above) is ≥ 17.7 from every one of them under
+ *  normal vision (nearest: the live executor's outside red; 18.5 from base's fuchsia) and ≥ 11.6 under simulated colour
+ *  blindness, but its contrast is only 3.3:1 — enough for a mark (lines, swatches, borders, the flight's end time on the
+ *  bar's axis, which the user asked to see in the model's colour), too little for running text: names and counts stay in
+ *  the text colour beside a swatch. Two models are never drawn together (the bar reads one at a time). */
+export const TRAINING_MODEL_COLOR: Record<TrainingModelName, string> = {
+  base: "#d946ef",
+  landing: "#a3e635",
+  augmented: "#b82e7a",
+};
 
 /** How opaque a model's samples other than the one read are drawn in 3D (thin), and in the legend. */
 export const TRAINING_OTHER_SAMPLE_ALPHA = 0.35;
 
-/** A model's colour by its role: post-trained when it names the round it was tuned in. */
-export function trainingModelColour(model: { fineTuning: unknown | null }): string {
-  return model.fineTuning === null ? TRAINING_BASE_MODEL_COLOR : TRAINING_POST_TRAINED_COLOR;
+/** A model's colour, by its name. */
+export function trainingModelColour(model: { name: TrainingModelName }): string {
+  return TRAINING_MODEL_COLOR[model.name];
 }
