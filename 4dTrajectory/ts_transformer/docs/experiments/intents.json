@@ -47,7 +47,7 @@
     "state_v2_20260903": {
       "title": "state-v2 · 锚点相对位置输出",
       "intent": "绝对位置输出让 KRDU 的预测从第一步起整体偏向西北。state-v2 候选把位置通道读作相对锚点的位移，其余照 state-v1；与机场帧消融的 A_threshold_enu 同 manifest/名册/分割配对。预注册：首步跳变与直线进近横向偏差应趋零；两个种子的雷达引导层都退化则否决。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-03_state_v2_anchor_relative_results.md",
+      "design": "4dTrajectory/ts_transformer/docs/history/2026-09_frames/2026-09-03_state_v2_anchor_relative_results.md",
       "runs": {
         "A_anchor_relative": "state_position_reference=anchor-relative（零输出即「原地不动」），threshold ENU，其余同 A_threshold_enu；对照 A 臂读首步跳变、直线进近 FDE 与雷达引导层。"
       }
@@ -55,7 +55,7 @@
     "control_procedure_20260905": {
       "title": "control 罚项 · 走廊/下滑道 hinge",
       "intent": "state 输出上被否决的五边罚项改接到 control 路径：hinge 作用于 rollout 段端点状态，约束经点质量动力学传回控制量，路径保持动力学可行。固定权重 1e-3 与 5× 剂量对照新的 simple-v3 基线；问违反率能否下降而不付 ADE/FDE 代价，并查坡度调度是否被压平。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-05_control_penalty_results.zh.md",
+      "design": "4dTrajectory/ts_transformer/docs/history/2026-09_constraints/2026-09-05_control_penalty_results.zh.md",
       "runs": {
         "A_control_v3": "simple-v3 新基线（此前的 control checkpoint 都早于 v5 名册）；本组剂量臂及后续 hook、Phase 0、closure 各臂的逐航班配对参照。",
         "C_control_1e-3": "simple-v3 + 走廊/下滑道 hinge 罚项，λ=1e-3（state 路径上罚项约等于位置项的权重，作起点）；对照 A_control_v3 读违反率与 ADE/FDE。",
@@ -105,7 +105,7 @@
     "final_constraint_20260904": {
       "title": "五边约束 · 有界输出/罚项/投影",
       "intent": "把五边走廊 + 下滑道约束放进 state 模型，比较三种方式：推理期投影（P0，不训练）、有界输出（约束由构造成立，无权重）与跑道尺度 hinge 罚项（原始-对偶或固定权重）。与机场帧 A 臂同配方逐航班配对；预期有界输出消除 KRDU 直线进近的横向偏差且不动雷达引导层，两种子退化即否决。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-05_final_constraint_results.zh.md",
+      "design": "4dTrajectory/ts_transformer/docs/history/2026-09_constraints/2026-09-05_final_constraint_results.zh.md",
       "runs": {
         "B_corridor_bounded": "P1：state_position_reference=corridor-bounded，on-final 门内的输出由构造限制在走廊内；对照 A 臂读直线进近横偏、终点误差与雷达引导层。",
         "C_procedure_dual": "P1 对照：跑道尺度 hinge 罚项，λ 自 1e-3 起按原始-对偶上升，ε=0.05 为容许违反率；看 λ 能否自行找到水平而不牺牲 ADE。",
@@ -115,7 +115,7 @@
     "closure_p1c_20260905": {
       "title": "P1.c · closure 解码器",
       "intent": "closure 输出（prediction_output=closure）：网络只回归 14 个数（汇入距离 d_join、跑道轴系下的汇入姿态、各 4 个慢度/高度节点），轨迹按闭式族画出。与 A_control_v3、O_join_duration 逐航班配对；门：真值意图臂雷达引导 ADE < 1.5 km 且 chamfer p50 < 500 m，C_pred 不劣于 A_control_v3 且直线进近不退化。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-06_closure_p1c_results.zh.md",
+      "design": "4dTrajectory/ts_transformer/archive/closure_2026_09/docs/2026-09-06_closure_p1c_results.zh.md",
       "runs": {
         "C_pred": "closure 解码器只看自机历史（可部署形态）；对照 A_control_v3，直线进近不得退化。",
         "C_truth_intent": "closure 解码器 + 真值 (d_join, 剩余时间) 作为只输入通道（读未来，仅开发测量）：知道「何处、何时」汇入时该族能到多好。"
@@ -304,7 +304,7 @@
     "scene_phase0_20260905": {
       "title": "Phase 0 · 真值意图上界",
       "intent": "在建场景编码器之前先量意图信息值多少：simple-v3 加真值汇入点（以及前机真实落地时刻或真值剩余时间）作为只输入通道。读未来，仅作开发测量；与 A_control_v3 逐航班配对。预注册门：雷达引导层 ADE 降到 1.5 km 以下才值得做场景工作，几乎不动则停止；直线进近不得退化。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-05_scene_phase0_results.zh.md",
+      "design": "4dTrajectory/ts_transformer/archive/scene_encoder_2026_09/docs/2026-09-05_scene_phase0_results.zh.md",
       "runs": {
         "O_join_lead": "simple-v3 + 真值汇入点 + 前机真值落地时刻（相对锚点），只输入通道：汇入位置加前机信息的上界。",
         "O_join": "只加真值汇入点；与 O_join_lead 对比，把两个通道的贡献分开。",
@@ -314,7 +314,7 @@
     "plan_guidance_20260910": {
       "title": "plan-and-guidance · K=4 下一指令头",
       "intent": "新架构：以发布的进近程序为骨架，网络只预测程序留下的自由度——一次一条指令（下一个 fly-by 定位点及该处速度），由确定性制导层在走廊内飞出，可按指定到达时刻闭合。本组是 K=4 混合头：KRDU 头对照同配方 L1 点估计头；另四场各自训练，对照五场合训的 pooled 头，并做第二种子检查。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-09_plan_and_guidance_design.md §9、§12.8、§12.11",
+      "design": "4dTrajectory/ts_transformer/archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md §9、§12.8、§12.11",
       "runs": {
         "step3g_fan4_head": "KRDU：指令组改为 K=4 对角高斯混合、以负对数似然训练（rolled windows 份额 0.75），top-weight 分量作点预测；对照同配方 L1 点头，另读一步扇形对 5 km 环对照。",
         "step5b_KSJC_fan4_head": "KSJC 专属 K=4 头（3(g) 配方、本场队列，rolled windows 取自 pooled 表）；与 pooled 五场头在同批航班上配对：专属头是否胜过合训头。",
@@ -368,7 +368,7 @@
     "control_simple_v1_20260816": {
       "title": "simple-v1 · 教师初始化对照（KSJC）",
       "intent": "冻结的 control-simple-v1 配方（均匀时长，位置 + 端点 + 时长三项损失）在 KSJC 上的严格配对开发对照：同配方、同种子、同 manifest，唯一变量是正式 rollout 训练前是否用 32 条 outer-train oracle 教师调度做 1000 步模仿初始化，用于解释初始化的贡献；单种子，不作泛化结论。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-08-16_control_simple_v1_development.zh.md §6–7",
+      "design": "4dTrajectory/ts_transformer/docs/history/2026-08_control_path/2026-08-16_control_simple_v1_development.zh.md §6–7",
       "runs": {
         "development_teacher_current_manifest_seed1337": "simple-v1 + 2026-08 oracle 教师初始化（当前 manifest 上 32 条 outer-train 调度、1000 步模仿）；与无教师臂配对。",
         "development_no_teacher_current_manifest_seed1337": "同配方、同种子、同数据，不做教师初始化；作为衡量教师初始化贡献的对照。"
@@ -377,7 +377,7 @@
     "runway_intent_r2b_20260913": {
       "title": "跑道意图 R2b · 按天划分重训的 plan 专家",
       "intent": "论文要引用\"不知道跑道的代价\"：用学到的跑道头（R1.1b 的 r11_lift）选跑道、再由 plan 专家飞出来，端到端误差比已知跑道高多少、比用同时段落地规则选跑道低多少。R2a 的专家按航班划分训练，见过评估日的其他航班；这里把五个机场的专家在 day_a 的训练日上重训，评估日它们一架都没见过，数字才可引用。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md §16.2",
+      "design": "4dTrajectory/ts_transformer/docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md §16.2",
       "runs": {
         "KRDU_day_a_expert": "KRDU 的 plan 专家按天划分重训：原专家（step3g_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。",
         "KSJC_day_a_expert": "KSJC 的 plan 专家按天划分重训：原专家（step5b_KSJC_fan4_head）的配方与 rolled windows 表，队列只留 day_a 的训练日；在 day_a 全部验证日航班上，与跑道头（r11_lift）选的跑道、规则选的跑道、已知跑道配对比较端到端误差。",
@@ -396,12 +396,12 @@
     "runway_intent_r3_20260914": {
       "title": "跑道意图 R3 · 多跑道到场调度，飞出来",
       "intent": "学到的跑道意图能不能直接当多机调度的输入：按 FAA JO 7110.65BB 的最低间隔（3 NM 雷达、CWT 尾流、平行跑道的相关/独立规则）先来先服务排定每架机的跑道与落地时刻，再让 plan 专家按排定的时刻飞出来——看排出的计划能否被飞出来、间隔在飞出来的轨迹里是否还保持，以及调度排出的时刻本身作为落地时刻的预测有多准。航班是 day_a 验证日的全部航班，由只见过 day_a 训练日的 R2b 专家飞（划分 dayval）。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-13_runway_intent_plan.zh.md §17, §18.3"
+      "design": "4dTrajectory/ts_transformer/docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md §17, §18.3"
     },
     "two_tier_t0c_20260916": {
       "title": "T0(c) · 长历史信息测试（共同锚点 119）",
       "intent": "两重 Transformer 可行性 T0(c)：比现役 120 s 更长的观测历史是否携带控制路径能用的进近信息？到达序列从 25 km 切片起，10 分钟历史在数据里不存在，所以在共同固定锚点 119（切片起点后 238 s）上比较 118 / 178 / 238 s 回看，native32 配方、两个种子。门 G2：L=120 对 L=60 雷达引导 ADE 配对改善 > 125 m 且两种子都过；不过则第二层没有'长程'可言，T3 不建。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-16_two_tier_transformer_feasibility.zh.md §7、§10.2",
+      "design": "4dTrajectory/ts_transformer/archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md §7、§10.2",
       "runs": {
         "T0c_L60_s1337": "118 s 回看（L=60），锚点在 119，种子 1337：门 G2 的基线。",
         "T0c_L120_s1337": "238 s 回看（L=120），锚点 119，种子 1337：门 G2 的被测臂。",
@@ -414,7 +414,7 @@
     "two_tier_t1a_20260916": {
       "title": "T1a · 计划给定的学习型跟踪器（协议 C）",
       "intent": "两重 Transformer T1：学习型控制层被告知真值计划（plan 头的标签）与真值到达时间，随机锚点训练，每 30 s 在自己飞出的行上再问——能否把计划飞得比规则制导近？控制契约为比力 + 航迹角（头给 n_x、坡度、目标航迹角，N7′ 的契约；推力分数契约下完全可飞只有 0.4 %，门里的可飞率够不着）。门 G1：雷达引导 ADE < 1000 m、直线 < 200 m（两种子），可飞 ≥ 95 %，建立率 ≥ 规则制导的 88 %。读未来，是 oracle，不是预测结果。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-16_two_tier_transformer_feasibility.zh.md §10.3",
+      "design": "4dTrajectory/ts_transformer/archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md §10.3",
       "runs": {
         "T1a_plan_p50_s1337": "真值计划 token + 真值 CTA，训练时 50 % 样本遮掉 token，种子 1337：G1 的被测臂。",
         "T1a_plan_p50_s2024": "同上，种子 2024：G1 的第二种子。",
@@ -1234,8 +1234,8 @@
     },
     "two_tier_v3_grid_20260918": {
       "title": "两层计划 v3 · 阶段 A1：无 token 执行器的 lookback × 段长网格（4 × 5 格 × 2 种子）",
-      "intent": "v3 计划（docs/2026-09-18_two_tier_plan_v3.zh.md §5.1、§6 D1–D11）的第一个 campaign：09-18 的 token campaign 建立在没有消融过的执行器基线上（lookback 被悄悄定在 60 s，段长成了 token campaign 的轴），所以先把执行器自身的两个轴——看多长历史 L ∈ {30, 60, 90, 120} s、一次飞多长 Δ ∈ {20, 30, 60, 90, 120} s——在无任何第二层信息的执行器上做全网格，每格两个种子。问题：哪一格在闭环里 established（全部与雷达引导组）最高、fully flyable ≥ 0.95；差在本网格自己的 seed 线内算平手，平手取 Δ 短、L 短的（§3.3 A1 行）；若整张网格都在 seed 线内，结论是「在这个范围内 L、Δ 不是关键变量」。每臂两种读数：(a) 从进圈后 L 秒起的闭环；(b) 从剩余 12 / 8 / 6 km 起的闭环。胜出格再做 A2 失败方式诊断（雷达引导组没穿越的航班停在哪、对准过没有、转弯早晚）。09-18 campaign 的三格不复用（cohort 与开始预测的时刻不同）。KRDU only，val split。",
-      "design": "4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md §5–§8；决定 §6 D1–D11；开发笔记 docs/2026-09-18_two_tier_v3_stage_a_notes.md",
+      "intent": "v3 计划（docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md §5.1、§6 D1–D11）的第一个 campaign：09-18 的 token campaign 建立在没有消融过的执行器基线上（lookback 被悄悄定在 60 s，段长成了 token campaign 的轴），所以先把执行器自身的两个轴——看多长历史 L ∈ {30, 60, 90, 120} s、一次飞多长 Δ ∈ {20, 30, 60, 90, 120} s——在无任何第二层信息的执行器上做全网格，每格两个种子。问题：哪一格在闭环里 established（全部与雷达引导组）最高、fully flyable ≥ 0.95；差在本网格自己的 seed 线内算平手，平手取 Δ 短、L 短的（§3.3 A1 行）；若整张网格都在 seed 线内，结论是「在这个范围内 L、Δ 不是关键变量」。每臂两种读数：(a) 从进圈后 L 秒起的闭环；(b) 从剩余 12 / 8 / 6 km 起的闭环。胜出格再做 A2 失败方式诊断（雷达引导组没穿越的航班停在哪、对准过没有、转弯早晚）。09-18 campaign 的三格不复用（cohort 与开始预测的时刻不同）。KRDU only，val split。",
+      "design": "4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md §5–§8；决定 §6 D1–D11；开发笔记 docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_stage_a_notes.md",
       "runs": {
         "L30_D20_s1337": "无 token 执行器（`plan_conditioning=off`，pa 契约、一阶滞后），lookback 30 s（seq_len 15 行）、段长 20 s、N₁ = 2、种子 1337；第一次预测在第 14 行（进圈后 30 s，无 floor）；训练锚点全随机（remaining-path-uniform，固定锚点份额 0）；该格 cohort = 记录 ≥ 30 + 20 s 的航班（train / val 同一条件）。网格 (L, Δ) 的一格，两种子之一。",
         "L30_D20_s2024": "无 token 执行器（`plan_conditioning=off`，pa 契约、一阶滞后），lookback 30 s（seq_len 15 行）、段长 20 s、N₁ = 2、种子 2024；第一次预测在第 14 行（进圈后 30 s，无 floor）；训练锚点全随机（remaining-path-uniform，固定锚点份额 0）；该格 cohort = 记录 ≥ 30 + 20 s 的航班（train / val 同一条件）。网格 (L, Δ) 的一格，两种子之一。",
@@ -1472,7 +1472,7 @@
     "two_tier_v3_b_20260919": {
       "title": "两层计划 v3 · 阶段 B：意图 token 的相对门（token 跨度 S ∈ {20, 60} s × 学习码本 K16 / 指令词表 × 2 种子）",
       "intent": "阶段 A 定了执行器 L60_D20，A2 说雷达引导航班没穿过入口的主要原因是没转基边、转晚了、末段形状错——都是历史里没有的信息。阶段 B 问：每 S 秒一个的离散意图 token 能不能把这些信息交给执行器；S 取 20 s（等于每轮飞出的段长）还是 60 s（一条管制指令的量级，两种做法：执行器视界 20 s 连用三轮，或视界 60 s 每轮只飞 20 s）；以及先于一切——真值 token 装不装得下这些信息。先用真值 token 读一次（门 B1：任一项两 seed 都超过 seed 线 0.078 / 雷达 0.184 / 雷达 ADE 150 m，fully flyable ≥ 0.95），过了才训预测 token 的模型（先验），再读先验 token 读法对无 token 读法的相对门（门 B：三项都不差且至少一项两 seed 都超线）。对照：S20 与 S60-held 对 B0 在同一批航班上重读的 L60_D20；S60-h60 对 A3-a。",
-      "design": "docs/2026-09-18_two_tier_plan_v3.zh.md §5.2（B0–B3）、§6.2（D30–D45）、§7.2、§8.2、§9.2；臂文件 docs/experiments/two_tier_v3_b_arms.json；开发笔记 docs/2026-09-18_two_tier_v3_stage_a_notes.md 阶段 B 一节。12 臂 = 3 配置 × 2 词表 × 2 种子；同一 cohort（网格的 L60_D60 那份，记录 ≥ 120 s）。",
+      "design": "docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md §5.2（B0–B3）、§6.2（D30–D45）、§7.2、§8.2、§9.2；臂文件 archive/manoeuvre_codes_2026_09/docs/experiments/two_tier_v3_b_arms.json；开发笔记 docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_stage_a_notes.md 阶段 B 一节。12 臂 = 3 配置 × 2 词表 × 2 种子；同一 cohort（网格的 L60_D60 那份，记录 ≥ 120 s）。",
       "runs": {
         "S20_K16_s1337": "S20：一个 token 管 20 s，等于每轮飞出的段长（token 每次预测换一个）；词表 = 学习码本 K = 16（FSQ 4 × 4，与执行器联合训练）；种子 1337。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
         "S20_K16_s2024": "S20：一个 token 管 20 s，等于每轮飞出的段长（token 每次预测换一个）；词表 = 学习码本 K = 16（FSQ 4 × 4，与执行器联合训练）；种子 2024。执行器其余同网格的 L60_D20（lookback 60 s、pa 契约、训练锚点全随机），cohort = 记录 ≥ 120 s 的 B cohort（val 1404 架）。对照 = B0 在 B cohort 上重读的 L60_D20（无 token）。",
@@ -1529,7 +1529,7 @@
     "executor_val_replay_20260924": {
       "title": "执行器 · 真值句子的 val 回放（两层框架阶段 4）",
       "intent": "执行器按真值句子飞——这套词表飞得出来吗？val 里每一架已标注、机型公布了进近速度的航班，都从第 0 行起交给执行器（规格 2674ab8c71a9）：每条词在执行器飞到观测飞机听到它的位置时说（按航迹说词 `track`），经点质量动力学积分，再判三件事：是否落在所指跑道上、每条词是否飞在自己的包络里（包络从执行器听到这条词的位置重新画）、evaluation 的判定与观测航迹配对。门：按机场 × 进近方式（直线进近 / 雷达引导），在用自己机型动力学的航班上 ≥ 95 %；机型用 A320 代替动力学的航班只报不判，因为它们的误差来自 A320 的气动。这里每个类别是一个机场全部被飞的航班，两组都在里面，evaluation 的判定是回放当时自己的，没有重跑。",
-      "design": "4dTrajectory/ts_transformer/docs/executor_design.zh.md §8（怎么判）、§11（回放门与 val 读数）",
+      "design": "4dTrajectory/ts_transformer/docs/two_tier/executor_design.zh.md §8（怎么判）、§11（回放门与 val 读数）",
       "runs": {
         "v2_20260924": "正式执行器规格 2674ab8c71a9（在 train 上量出，代码 1c63eb3e；说词延迟：航向 1 s、垂直 0 s、速度 0 s；按航迹说词），飞 val 全部可飞的 10,366 架：用自己机型动力学的 7,773 架进门——落地 98.6 %、evaluation 与观测配对 96.7 %、词在包络里 94.2 %；用 A320 代替动力学的 2,593 架只报。"
       }

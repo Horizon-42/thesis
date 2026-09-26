@@ -7,7 +7,7 @@ index line in CLAUDE.md that ends in its ID; find one with `grep -n '^### C7 ·'
 
 **Maintenance: when a fact here changes, edit it HERE and keep its index line true; a new fact
 gets a new ID here and ONE new line in the index.** Measurements and campaign evidence still
-belong in `docs/ENGINEERING_NOTES.md` / the design documents, status in `docs/OPEN_ITEMS.md`.
+belong in `docs/reference/ENGINEERING_NOTES.md` / the design documents, status in `docs/history/OPEN_ITEMS_2026-09-18.md`.
 
 **2026-09-18:** the main line's 2026-09-14…09-17 additions to that CLAUDE.md (the control
 contracts, the two-tier axes and traps) were placed here the same way when this branch was
@@ -156,7 +156,7 @@ rebased — same rule, new IDs.
 
 ### R8 · two-tier v3 stage A (`run_ts.py plan_cohort --arms`, `frame_ablation --only`, `manoeuvre_lockstep` (protocol `none`), `executor_failure_modes`, `executor_grid_gate`, `two_tier_grid_queue`; 2026-09-18)
 
-The no-token executor's own axes — lookback L × segment Δ, `docs/experiments/two_tier_v3_grid_arms.json` (40 arms, `L<L>_D<Δ>_s<seed>`, plan `docs/2026-09-18_two_tier_plan_v3.zh.md` §5–§8, decisions D1–D11; the development notes `docs/2026-09-18_two_tier_v3_stage_a_notes.md`). Nothing here launches before the user's sign-off (M-A0′).
+The no-token executor's own axes — lookback L × segment Δ, `docs/experiments/two_tier_v3_grid_arms.json` (40 arms, `L<L>_D<Δ>_s<seed>`, plan `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` §5–§8, decisions D1–D11; the development notes `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_stage_a_notes.md`). Nothing here launches before the user's sign-off (M-A0′).
 
 - **One development cohort per cell** (D1): every arm names its own `"development_cohort"` (an arm-level path wins over the file's; arms of one cell share it), and `plan_cohort --arms <declaration> --airport KRDU --name <campaign> --output-dir <campaign>` writes all of them from ONE data load (the build under the shortest lookback keeps every flight any cell keeps), plus `cohorts.json` (per-cell counts) and `data_selection.json`. A cell's usable set = the flights with one window at L−1 and Δ of truth after it on BOTH sides of the split (`train.usable_series`), minus the train flights the random-anchor window set (the control path's airborne rule) gives no anchor — the flight the trainer would otherwise refuse the run over. The split is the per-flight hash on the pinned `split_seed` (1337), so it is the same set-independent split in every cell and both seeds; `--arms` refuses a declaration whose split seed is not pinned, or whose arms share a cohort path but differ beyond `seed`. KRDU, written 2026-09-18: train 6798–6857 / val 1392–1405 per cell (3956 of the locked split's 12218 are the aircraft filter's, cell-independent).
 - **`frame_ablation --only KEY …`** runs a subset of the arms (the queue trains one cell, reads it, moves on); resume is unchanged (an arm skips on its `history.json`) — and an arm that names a `development_cohort` resumes only when its training recorded that cohort with the same train / val flights (`data_selection.development_cohort`); `plan_cohort` rewrites the file in place, so the path alone proves nothing (2026-09-23).
@@ -170,7 +170,7 @@ The no-token executor's own axes — lookback L × segment Δ, `docs/experiments
 
 ### R9 · two-tier v3 stage B (`manoeuvre_lockstep --cohort`, the held token, `executor_relative_gate` gate B1, `two_tier_b_queue`; 2026-09-19)
 
-**ARCHIVED 2026-09-20** — code under `archive/manoeuvre_codes_2026_09/` (its README says what moved and why; plan v3 §10's audit). The text below describes the archived code and is kept as its record. **Live now**: `manoeuvre_lockstep` flies the no-token closed loop only — no `--codebook`, `--protocol`, `--prior` or `--prior-landing-ends-flight` — and its payload schema is `ts-manoeuvre-lockstep-v4` (the v3 token / prior keys and `e_plan` gone). `executor_relative_gate`, `executor_failure_modes`, `executor_grid_gate` and `two_tier_grid_queue` read that payload unchanged; the relative gate's row B1 stays as the upper-bound row. The second layer's relative gate on the stage A executor L60_D20 — `docs/experiments/two_tier_v3_b_arms.json` (12 arms `<configuration>_<tokenizer>_s<seed>`: S20 / S60held / S60h60 × K16 / cv × 1337 / 2024; plan `docs/2026-09-18_two_tier_plan_v3.zh.md` §5.2, decisions D30–D47; the development notes' §7). Every arm shares ONE cohort, the grid's L60_D60 `development_cohort.json` (D47: records ≥ 120 s, train 6853 / val 1404). Nothing launches before the user's "跑" (M-B0′).
+**ARCHIVED 2026-09-20** — code under `archive/manoeuvre_codes_2026_09/` (its README says what moved and why; plan v3 §10's audit). The text below describes the archived code and is kept as its record. **Live now**: `manoeuvre_lockstep` flies the no-token closed loop only — no `--codebook`, `--protocol`, `--prior` or `--prior-landing-ends-flight` — and its payload schema is `ts-manoeuvre-lockstep-v4` (the v3 token / prior keys and `e_plan` gone). `executor_relative_gate`, `executor_failure_modes`, `executor_grid_gate` and `two_tier_grid_queue` read that payload unchanged; the relative gate's row B1 stays as the upper-bound row. The second layer's relative gate on the stage A executor L60_D20 — `archive/manoeuvre_codes_2026_09/docs/experiments/two_tier_v3_b_arms.json` (12 arms `<configuration>_<tokenizer>_s<seed>`: S20 / S60held / S60h60 × K16 / cv × 1337 / 2024; plan `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` §5.2, decisions D30–D47; the development notes' §7). Every arm shares ONE cohort, the grid's L60_D60 `development_cohort.json` (D47: records ≥ 120 s, train 6853 / val 1404). Nothing launches before the user's "跑" (M-B0′).
 
 - **`manoeuvre_lockstep … --cohort <development_cohort.json>`** (B0, D33): flies only that cohort's roster of `--split`, in the checkpoint's order (`cohort_keys`; a cohort flight the checkpoint's split lacks refuses), the payload's `cohort` block being the package's `development_cohort_audit` plus the path and the flown count. **The baselines are the queue's own step 0** (`baseline_steps`, the declaration's `stage_b.baselines`, only those the selected groups are judged against): the grid's L60_D20 re-read with records on the B cohort (`<campaign>/baseline/L60_D20_s<seed>/L-1/`; the baseline of S20 and S60-held) and L60_D60 flown 20 s at a time (`--execute-s 20`, A3-a re-flown by this code; `baseline/L60_D60_exec20_s<seed>/L-1/`; S60-h60's), each with `executor_failure_modes` into `failure_modes/<name>_s<seed>_none/`. A gate never reads another campaign's payload: `executor_relative_gate` and `executor_failure_modes` refuse a payload whose schema is not this code's `LOCKSTEP_SCHEMA` by name, and `gates.cell_reading` reads `executed_s` strictly (no compatibility — the repo rule of 2026-09-19; the stage A readings on disk are v2, their gates and failure-mode tables stand as written and are not re-run).
 - **The held token in `lockstep.fly`** (D31 / D38 in `defaults.md`): a coded protocol's round flies `round_step_s` = the config's `token_step_s` (`--execute-s` stays a protocol-none option), one token for `token_hold` rounds; payload schema `ts-manoeuvre-lockstep-v3` (`token_span_s` / `token_step_s` / `token_hold` / `prior_landing_ends_flight`; per row `token_refreshes`, `prior_landed_at_s`, `prior_landed_error_s`; per round `token_index`, `phase`; strata `token_refreshes_p50`, `prior_landed_share`, `prior_landed_error_p50_s`). `--prior-landing-ends-flight` (A / A-truth only) restores the 09-18 rule; off (D37) the landing is recorded.
@@ -180,7 +180,7 @@ The no-token executor's own axes — lookback L × segment Δ, `docs/experiments
 
 ### R10 · the instruction labeller: `instruction_signals` → `instruction_spec` → `instruction_labels` → `instruction_figures`
 
-2026-09-23 (`docs/2026-09-23_instruction_vocabulary_design.zh.md` §3, §7–§8; artefact contract C30).
+2026-09-23 (`docs/two_tier/instruction_vocabulary_design.zh.md` §3, §7–§8; artefact contract C30).
 `instruction_signals --out <new dir> [--airports …] [--workers N] [--limit N]` deals the eligible arrivals by the
 committed day split (C32; refused when the harvest's days are not its days), reads the train, select and val flights
 (process pool, 500 keys per chunk, spawn) — a test day's flight is only counted from the roster, with how many of
@@ -227,7 +227,7 @@ frontend's `TRAINING_WORD_KINDS`). Torch-free; ~2 s for five airports. Tests: `t
 
 ### R12 · the executor: `executor_spec` → `executor_sensitivity` → `executor_replay`
 
-2026-09-24 (`docs/executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
+2026-09-24 (`docs/two_tier/executor_design.zh.md` §9–§11; layout L31). `executor_spec --instructions <artefact>
 --dir <new dir> --word-clock {time,distance,track}` (`ts-executor-spec-v5` since 2026-09-24: the executor takes no
 information beyond the vocabulary and the pointed runway's published threshold crossing height) refuses a dirty tree,
 an existing directory and a labeller other than the artefact's; takes τ_ψ (the heading lead) and p (the vocabulary's
@@ -259,7 +259,7 @@ existing directory. Tests: `tests/test_autopilot.py` (every write into `tmp_path
 AV24–AV25). Two runners write OVERLAYS beside a Training set (R11), never into it: a file of their own schema under
 `<root>/<ICAO>/training/<overlay-id>/`, listed in the airport's `training/overlays.json` (`OVERLAYS_SCHEMA`
 `aeroviz-training-overlays-v1`, one entry per overlay: its kind, the set it is drawn over, that set's sample sha256, the
-file). The index (`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instruction_training_export`
+file). The index (`aeroviz-training-index-v1`) is not touched. The shared helpers live in `instructions/training_files.py`
 (`open_base_set`: the set must be a read-back of this reading rule and spec under this `SAMPLE_SCHEMA`, drawn from val;
 `base_flights`: each of its flights found in the artefact, its stored sentence equal to the set's events;
 `read_overlays` / `write_overlay`: an id listed or a directory existing is refused; the payload is written compact).
@@ -306,7 +306,7 @@ refused unless it is this prior (path from `4dTrajectory/outputs/` on), this exe
 `N_LOOK`, samples and temperature, and its draw's per-airport count is a number or `EVERY_FLIGHT` (the draw's phrase, pinned
 against `replay.py`). The checkpoint: `prior_training_export.open_trained_prior` (shared with `prior_training_export`); a
 post-trained round's `fine_tuning` block is carried as `model.fineTuning` (the frontend colours by it). The executor spec must be one this code opens
-(2026-09-26: `v7_20260925`; `v8` holds the same content sha but was written by code that still had the archived CAT-K). ~2 min a
+(since the 2026-09-26 rebuild: `v9_20260926`; the code refuses `v7` and `v8`, C33). ~2 min a
 model for five airports of 40 flights on CPU, 1.2–1.9 MB an airport; a re-run is identical. Tests:
 `tests/test_prior_generation_training_export.py` (the pieces, and `main` end to end on a synthetic artefact with stand-in
 series).
@@ -346,7 +346,7 @@ to end on a synthetic artefact and checkpoint — every write into `tmp_path`) a
 `2674ab8c71a9`, prior `v1_20260924`, over the v5 `instruction_v2` sets) was made at `a320d1bd` on
 `dev-publish-executor-prior`, where tests also ran both `main()` on those artefacts; since 9fb1b137 (signals v2, sample v6,
 no A320 stand-in) neither the artefact nor the spec opens, so the next publication needs the next generation — since
-2026-09-24 an `instruction-v3` artefact, Training v7 sets (R11), an executor spec (`ts-executor-spec-v4`) and replay
+2026-09-24 an `instruction-v3` artefact, Training v7 sets (R11), an executor spec (then `ts-executor-spec-v4`, now `-v5`) and replay
 (`ts-executor-replay-v3`) measured by this code, a prior trained on the new sentences; and the frontend's
 `TRAINING_SPEC_SHA256` moved to the v3 spec's sha, or every v7 set is refused.
 

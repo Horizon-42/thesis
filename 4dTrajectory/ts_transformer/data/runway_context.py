@@ -1,6 +1,6 @@
 """Causal runway context: what an observer at time ``t`` knows about the airport's runway use.
 
-Runway-intent plan R0 (`docs/2026-09-13_runway_intent_plan.zh.md` §5, §7): the causal baseline
+Runway-intent plan R0 (`docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §5, §7): the causal baseline
 rules a learned runway head has to beat. Every answer is built from events strictly BEFORE ``t``
 — landings that have already happened, METAR reports already issued — so no rule here reads the
 flight's own future, and the caller decides which flights may be context at all (the runner

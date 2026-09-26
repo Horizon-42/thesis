@@ -1,4 +1,4 @@
-"""Two-tier plan v3, stage A (`docs/2026-09-18_two_tier_plan_v3.zh.md` §5–§6): the (L, Δ) grid
+"""Two-tier plan v3, stage A (`docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` §5–§6): the (L, Δ) grid
 declaration pins the numbered decisions (a silently changed lookback is what the 09-18 campaign
 was built on), every cell names its own development cohort, `plan_cohort --arms` resolves one
 config per cell, and `cohort_selection` keeps exactly the flights long enough for the cell —

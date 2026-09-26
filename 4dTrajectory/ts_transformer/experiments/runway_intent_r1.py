@@ -1,6 +1,6 @@
 """Runway-intent R1: a learned runway head against the causal rules — and what the split does.
 
-Plan `docs/2026-09-13_runway_intent_plan.zh.md` §12 (design) and §11.4 (the pre-registered gates).
+Plan `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §12 (design) and §11.4 (the pre-registered gates).
 Per airport, every arrival whose per-flight split hash is NOT outer-test gives one sample per
 anchor — the arrival-slice entry (the 25 km ring) and the first crossing of each ring in
 `RING_RADII_KM` around the airport reference, runway-independent (`ring_anchors`; R0's

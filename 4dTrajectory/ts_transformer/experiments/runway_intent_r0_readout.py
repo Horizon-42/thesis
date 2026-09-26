@@ -1,6 +1,6 @@
 """Runway-intent R0 readout: the five airports' R0a (`runway_intent_r0.json`) and R0b (`hypotheses.json`) in one table set.
 
-Plan `docs/2026-09-13_runway_intent_plan.zh.md` §11. R0b is re-summarised here with the PAIRED
+Plan `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §11. R0b is re-summarised here with the PAIRED
 `runway_hypotheses.summarise` (every selector's FDE change against the assigned runway on the same
 flights), from the per-flight records each run stored, so every airport is read with one
 definition whichever code wrote its `hypotheses.json`. Written to the campaign folder as

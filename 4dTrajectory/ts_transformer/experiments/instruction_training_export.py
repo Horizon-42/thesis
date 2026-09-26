@@ -1,7 +1,7 @@
 """Instruction sentences for the frontend's Training module: a seeded sample of VAL flights per
 airport, each with its words and every word's envelope drawn as geometry, from a frozen instruction
 artefact (design: `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md`; the words:
-`docs/2026-09-23_instruction_vocabulary_design.zh.md`).
+`docs/two_tier/instruction_vocabulary_design.zh.md`).
 
     python run_ts.py instruction_training_export \\
         --dir 4dTrajectory/outputs/POOLED/instruction_language/<an instruction-v3 artefact> \\

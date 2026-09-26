@@ -1,7 +1,7 @@
 """The approach geometry runway-intent R0 and R1 share, R1's per-anchor feature vector, and
 R1.1's candidate-symmetric rows built from it (`candidate_rows`).
 
-Plan `docs/2026-09-13_runway_intent_plan.zh.md` §12. CAUSAL by construction: a feature at anchor
+Plan `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §12. CAUSAL by construction: a feature at anchor
 ``i`` reads the flight's waypoints ``[0, i]`` and the airport context strictly before the anchor's
 wall-clock time (`data.runway_context`). The flown path LEFT decides which samples are anchors —
 an evaluation grid — and is never a feature value: it is the future.

@@ -26,11 +26,11 @@ live one.
 
 ## The documents that cite it
 
-- `docs/2026-08-02_oracle_teacher_experiment.zh.md` — the campaign itself.
-- `docs/2026-08-16_control_simple_v1_development.zh.md` — `simple-v1`'s development, whose
+- `archive/oracle_teacher_2026_08/docs/2026-08-02_oracle_teacher_experiment.zh.md` — the campaign itself.
+- `docs/history/2026-08_control_path/2026-08-16_control_simple_v1_development.zh.md` — `simple-v1`'s development, whose
   frozen teacher schedule (`SIMPLE_V1_TEACHER_SCHEDULE_SHA256`) is pinned in
   `control_oracle/pretraining.py`.
-- `docs/control_parameter_prediction.zh.md` — the module-by-module call graph as it stood.
+- `docs/history/2026-08_control_path/control_parameter_prediction.zh.md` — the module-by-module call graph as it stood.
 
 ## Taken from
 
@@ -57,3 +57,5 @@ Commit `882d048` (`dev-t2`), package audit T2, 2026-09-07.
   `physical_criteria.fixed_dt_position_ade_m` — is still live, and drifts without notice.
 - `tests/` here are the campaign's own tests, renamed off pytest's `test_*.py` pattern so the
   suite does not collect them.
+
+**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the campaign's documents (`2026-07-30_direct_control_oracle.zh.md`, `2026-08-02_oracle_teacher_experiment.zh.md`, the explainer html).

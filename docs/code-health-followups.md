@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **17 open, 8 partly, 55 resolved or dismissed, 5 obsolete**. *open*: the problem is still in the
+(the right-hand column): **20 open, 7 partly, 57 resolved or dismissed, 5 obsolete** (recounted 2026-09-26). *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -63,7 +63,9 @@ added three entries (the rows after the performance index's).
 | 13. eleven `test_ts_pipeline.py` reuse-guard failures | resolved | fixtures fixed (`ed708dea`, `803605e0`); entry removed | — |
 | 14. A320-family speed windows exclude most crossings | resolved | superseded: the gate uses published VREF (`53ae8e80`); entry removed | — |
 | 2026-09-03 — 14 pre-existing failures in `trajectory_data_process/tests` | resolved | all fixed; entry removed | — |
-| ts: reusable measurement code lives in `docs/` (09-07) | partly | runners import `inference/arm_readout.py`, 15 test preambles removed (`3f38f8af`); left: the `docs/*.py` readouts themselves and the audit plan's other hubs | no: readout scripts |
+| ts: reusable measurement code lives in `docs/` (09-07) | resolved | runners import `inference/arm_readout.py`, 15 test preambles removed (`3f38f8af`); the thirteen `docs/*.py` moved on branch `docs-reorg` (2026-09-26): seven became runners, six went to three archives, `test_docs_holds_no_python` guards it (L20); entry removed; the tests' `sys.path` lines are the next row | — |
+| ts: five test files still touch `sys.path` (09-26) | open | new; see the entry | no: tests |
+| ts: ten dated records stay in the `docs/` root because hashed code cites them by path (09-26) | open | new; see the entry | **yes — executor**: the path edits change the executor source hash; do them with the next executor spec |
 | ts: the auto-batch probe measures a smaller graph than a latent run | resolved | the probe hands a latent model the future, as training does (`b10b1d68`); entry removed | — |
 | scene data plane: review leftovers (09-07) | resolved | (7)–(9), (12), (14) and the three test gaps fixed, (11) documented, a landed-before-t₀ neighbour no longer a lead (`96d299d1`, `50412e71`); (10), (13) obsolete; entry removed | — |
 | ts: T2 leftovers (09-07) | resolved | `chart_scale` required (`6c363ef9`); the transport-chart rollouts kept as the scaled chart's test reference; the pointers demoted (`06801fe7`); entry removed | — |
@@ -109,13 +111,14 @@ added three entries (the rows after the performance index's).
 | A ts checkpoint does not record where its landing masses came from (09-26) | open | needs the user's decision (a payload change) | no for the two-tier chain (its artefacts record the aircraft tables); yes for any control-path checkpoint replayed after the rebuild |
 | The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | resolved | every writer adds the flight's runway offset — the exporters (`0b1fe50a`), the live executor (`c708a497`, `2a64d3f4`); `geoid_undulation_m` deleted; `instruction_v3_day_split` and its four overlays re-exported (`check-publication` 0 errors); the older sets kept as published with EGM96 heights (user 2026-09-26; `aeroviz-4d/docs/36-…` §2.3); entry removed | — |
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
-| ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | open | new; dev-post-train's file, left untouched | no: a document |
+| ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | resolved | the line names `instructions/training_files.py` (branch `docs-reorg`); entry removed | — |
 | `aeroviz-4d/python/requirements.txt` still lists `pyproj` (09-26) | open | new; see the entry | no: a requirements list |
-| `autopilot/__init__.py` names the executor design by its old file name (09-26) | resolved | renamed with the executor's glidepath floor (`9557315d`, spec v10); entry removed | — |
+| `autopilot/__init__.py` names the executor design by its old path (09-26) | open | renamed to `docs/executor_design.zh.md` with spec v10 (`9557315d`); the docs reorganisation then moved the design to `docs/two_tier/`; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
 | The land law leaves a shallow final class's tube near the threshold on some profiles (09-26) | open | new; see the entry | **yes — executor** (a law change is a new spec) |
 | No mode reports when the executor's glidepath floor binds (09-26) | open | new; see the entry | **yes — executor** (adds a Flown mode; the backend payload reads the modes) |
 | The Training export and the live model flight fly a model without the procedure's masks (09-26) | open | new; see the entry | no: the Training view's exports and the backend (a stage-2 model is used with the masks on) |
 | The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (09-26) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts change) |
+| `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -187,14 +190,6 @@ runway-intent R0 rule touches it — R0 builds its own pool without test-hash fl
 drop test-hash rows (the checkpoint's `split_name_for_dataset_id`) from the leader pool — which
 changes the lead of every flight whose true leader was a test flight, i.e. the stored truth-intent
 arms' inputs, so it is the owner's call.
-
-## ts_transformer: reusable measurement code lives in `docs/` (verified, 2026-09-07)
-
-What is left (2026-09-25): the twelve `docs/*.py` readouts stay command-line scripts over the package — nothing in the
-package imports them since `compare_frame_arms`' library half became `inference/arm_readout.py` (L20) — and the audit
-plan's other hubs (`score_control_arms` first; `4dTrajectory/ts_transformer/docs/2026-09-07_package_audit_plan.zh.md`
-§七) are not migrated. Five test files keep a `sys.path` line: three add `4dTrajectory/optimization`, which
-`tests/conftest.py` does not, and `test_architecture.py` / `test_prior_procedure.py` belong to branch `dev-post-train`.
 
 ## 15. KRDU 14's 13 arrivals still render as "indeterminate" in the Observe view
 
@@ -343,7 +338,7 @@ It is the owner's call.
 ## 38. Formulas the control-contract refactor left restated outside the contract rows (2026-09-16)
 
 Found by the sf-n7 architecture review before the merge; out of the refactor's scope
-(`4dTrajectory/ts_transformer/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11.2), recorded so they
+(`4dTrajectory/ts_transformer/archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11.2), recorded so they
 are not rediscovered.
 
 **Verified** (code read, 2026-09-16):
@@ -479,12 +474,6 @@ datasets filter on. A version list read by a consumer is the schema-version bran
 forbids; refusing everything but v9 would refuse the rosters built from older reports — the user's call, and a change
 on the training data plane.
 
-## ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (2026-09-25)
-
-**Verified.** `runners.md:260` says "The shared helpers live in `instruction_training_export`"; since 2026-09-25 they
-are `instructions/training_files.py` (layout L30's note). The file belongs to branch `dev-post-train`, so it was not
-edited; one line to change when that branch has merged.
-
 ## `aeroviz-4d/python/requirements.txt` still lists `pyproj` (2026-09-26)
 
 **Verified** (opus review of `c708a497`). Its last importer, `flight_scenarios.datum.geoid_undulation_m` (the EGM96
@@ -531,3 +520,36 @@ counts as landed (base model, KMSY JBU75_11_a39338 sample 3). Fix (judgement): a
 runway's threshold plane within its landing condition (ending the flight there), and the landed lateral limit at the
 runway itself (the LPV cone's half-width at the threshold, ~107 m). Both change the executor's source hash: a new spec and a
 new replay gate.
+
+## `autopilot/__init__.py` names the executor design by its old path (2026-09-26)
+
+**Verified.** Spec v10 (`9557315d`) renamed the docstring's pointer to `docs/executor_design.zh.md`; the docs
+reorganisation (branch `docs-reorg`, merged into `dev-two-tier` 2026-09-26) moved the design to
+`docs/two_tier/executor_design.zh.md`. Every `.py` of `autopilot/` is in the executor source hash, so correcting the
+docstring makes the current code refuse spec v10 — change it with the next executor spec (with the ten dated records
+below). `autopilot/README.md` (not hashed) points at the new path.
+
+## `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (2026-09-26)
+
+**Verified.** Two comments (`envelope.py:110`, `:118`) cite the measurement behind the specific-force box by its old
+path; the script is the runner `experiments/specific_force_teacher_distribution.py` since branch `docs-reorg`
+(2026-09-26, layout L20). `outputs.envelope` is imported directly by `autopilot/`, so it is in the executor source hash
+(`spec.executor_source_files`, contract C33): editing the comment makes the current code refuse executor spec v10 —
+change it together with the next executor change, as the `autopilot/__init__.py` entry above.
+
+## ts: five test files still touch `sys.path` (2026-09-26)
+
+**Verified** (split off the resolved `docs/` scripts entry). `test_architecture`, `test_final_approach_geometry`,
+`test_guidance_skeleton_mirrors`, `test_import_boundaries` and `test_prior_procedure` add to `sys.path`; three of them add
+`4dTrajectory/optimization`, which `tests/conftest.py` does not. **Judgement**: move that one path into `conftest.py` and
+drop the per-file lines, or say in each why it stays.
+
+## ts: ten dated records stay in the `docs/` root because hashed code cites them by path (2026-09-26)
+
+**Verified.** The docs reorganisation (branch `docs-reorg`) moved every finished record into `docs/history/` or
+`archive/<line>/docs/`, except ten that `ts_transformer/config.py`, `outputs/envelope.py` and
+`outputs/constraints/speed_floor.py` cite by path — all three in the executor source hash (contract C33), so correcting
+the comments would make the current code refuse executor spec v10. `4dTrajectory/ts_transformer/docs/README.md` lists the
+ten and where each goes. With the next executor spec: `git mv` them, fix those comments (and `autopilot/__init__.py`,
+`envelope.py:110/118`, the entries above), re-write the spec and re-run the train replay gate.
+

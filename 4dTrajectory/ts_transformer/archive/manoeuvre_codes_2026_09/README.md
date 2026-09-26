@@ -4,7 +4,7 @@ The second layer as a small **discrete intent space**: a learned encoder + FSQ c
 of the truth into one code `z`, the control-path executor held that tokenizer as a submodule and
 flew the segment under the code, and a causal transformer over code sequences was the prior that
 said the next code. Design: `docs/2026-09-18_manoeuvre_token_plan.zh.md` (the intent-token plan)
-and `docs/2026-09-18_two_tier_plan_v3.zh.md` §5.2 **as it read before 2026-09-20**.
+and `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` §5.2 **as it read before 2026-09-20**.
 
 **Archived 2026-09-20.** Plan v3 §10's audit (written after the user stopped the stage B queue)
 found the defect the readings were taken on top of: **both layers train on the truth and are only
@@ -79,9 +79,11 @@ read them through plan v3 §10 item 1):
 - `4dTrajectory/outputs/KRDU/experiments/manoeuvre_tok_20260918/` — the P1.4 token campaign
   (stopped the day it started; its executor baseline was unsettled).
 - `4dTrajectory/outputs/codebooks/` — the exported codebook artefacts.
-- `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 — the readouts themselves, and
-  `docs/2026-09-18_two_tier_plan_v3.zh.md` §5.2 the evidence paragraph that quotes them.
+- `archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 — the readouts themselves, and
+  `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` §5.2 the evidence paragraph that quotes them.
 - The published picker categories carrying the `manoeuvre_readout` / `manoeuvre_lockstep` record
   blocks stay published: `publish_ts_experiment_trajectories.VARIANT_RECORD_BLOCKS` keeps both
   names (the publisher cannot import torch, so `manoeuvre_readout` is a mirror of
   `readout.RECORDS_BLOCK` here).
+
+**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the intent-code readouts (`2026-09-18_manoeuvre_token_results.zh.md`) and the campaign's arm declarations; the plan itself stays in `docs/` (cited by path from `config.py`, which the executor source hash covers).

@@ -1,4 +1,4 @@
-"""Arrival scheduling across runways (runway-intent R3, plan `docs/2026-09-13_runway_intent_plan.zh.md` §17).
+"""Arrival scheduling across runways (runway-intent R3, plan `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` §17).
 
 Each arrival brings a belief over its candidate runways and an ETA under each; the scheduler gives it a
 (runway, landing time) first-come-first-served by ETA, scoring a runway ``log p - lambda * delay`` and

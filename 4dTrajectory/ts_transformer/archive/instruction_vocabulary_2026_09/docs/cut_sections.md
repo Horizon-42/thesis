@@ -12,9 +12,9 @@ nothing) is in the same commit's diff.
   readout, `plan_token.py`, gates T/X/P/E/S copied to `gates_manoeuvre.py`, the `manoeuvre_*`
   runners and `two_tier_b_queue`). Why: plan v3 §10's audit — both layers trained on truth and
   only ever evaluated closed-loop, and the truth codes were indexed by time, not by where the
-  executor was — so stage B was rewritten (2026-09-20, `docs/2026-09-18_two_tier_plan_v3.zh.md`
+  executor was — so stage B was rewritten (2026-09-20, `docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md`
   §5.2 / §6.2) around an INSTRUCTION vocabulary with closed-loop post-training of both layers.
-  Numbers: `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
+  Numbers: `archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
   `4dTrajectory/outputs/KRDU/experiments/{two_tier_v3_b_20260919,manoeuvre_tok_20260918}` +
   `outputs/codebooks/` — read them through §10 item 1 (open-loop-trained executors). `plan_conditioning`
   is `off` or `instruction` (the words in force over the segment, `outputs/control/instruction_token.py`);
@@ -94,29 +94,29 @@ nothing) is in the same commit's diff.
 
 ## `4dTrajectory/ts_transformer/CLAUDE.md` — Where to go next, the second-layer row
 
-| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/2026-09-18_two_tier_plan_v3.zh.md`** — the OVERVIEW (intent, outline, the metric and readout protocol §3, the framework §4, the 2026-09-20 audit §10) and an index to the two stage documents it was split into on 2026-09-20: **`…_v3_A.zh.md`** (stage A, the no-token executor's (L, Δ) grid, run) and **`…_v3_B.zh.md`** (stage B: an INSTRUCTION vocabulary of SIX word kinds — runway, heading, altitude, speed, intercept, duration — laid out as an EVENT SEQUENCE rather than an even grid (D52/D70/D71, 2026-09-20), closed-loop post-training of both layers, goal-directed decoding; B0′/B0′′ done, no arm trained). The intent-CODE version
+| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md`** — the OVERVIEW (intent, outline, the metric and readout protocol §3, the framework §4, the 2026-09-20 audit §10) and an index to the two stage documents it was split into on 2026-09-20: **`…_v3_A.zh.md`** (stage A, the no-token executor's (L, Δ) grid, run) and **`…_v3_B.zh.md`** (stage B: an INSTRUCTION vocabulary of SIX word kinds — runway, heading, altitude, speed, intercept, duration — laid out as an EVENT SEQUENCE rather than an even grid (D52/D70/D71, 2026-09-20), closed-loop post-training of both layers, goal-directed decoding; B0′/B0′′ done, no arm trained). The intent-CODE version
 
 ## `4dTrajectory/ts_transformer/docs/reference/layout.md` — L29, the live-now sentence
 
 **Live now**: `manoeuvre.segments` is the ONE leaf (the data plane, `config`, `io_utils` and torch — `test_the_manoeuvre_leaves_import_no_layer_above_the_data_plane`), and **nothing under `outputs/` reaches `manoeuvre` at all** — only the runners under `experiments/` do (`test_only_the_runners_reach_the_manoeuvre_package`). The reverse edge the two-leaf rule existed for (the executor holding the tokenizer as a submodule) went with the archive; a new edge from `outputs/` is a layering decision that amends `MANOEUVRE_LEAVES` and that rule together.
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` — 审核表 §5 行
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` — 审核表 §5 行
 
 | §5 | 实验阶段与门（阶段 A 已跑完，结论与索引在 5.1；阶段 B 2026-09-20 按指令词表重写在 §5.2；C / D 待 B 结果） | 待过 |
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` — 审核表 §6 行
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` — 审核表 §6 行
 
 | §6 | 决定项（阶段 A 的 D1–D11、D28–D29；阶段 B 的 D49–D60 在 §6.2，作废的 D31–D38 / D43 / D44 / D48 留编号） | 待过 |
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` — 审核表 §7 行
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` — 审核表 §7 行
 
 | §7 | 里程碑与交付（阶段 A 已到 M-A2；阶段 B 在 §7.2） | 待过 |
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` — 审核表 §8 行
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` — 审核表 §8 行
 
 | §8 | 队列与成本（阶段 A；阶段 B 在 §8.2） | 待过 |
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` — §4 阶段 B 小节
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` — §4 阶段 B 小节
 
 ### 阶段 B：指令词表的第二层（2026-09-20 重写；详见 §5.2、§6.2、§7.2、§8.2、§9.2）
 
@@ -124,7 +124,7 @@ nothing) is in the same commit's diff.
 - 判定仍是相对门：同一执行器家族、同一 cohort、同一闭环读数下，带指令的读法对无 token 基线的 established（全部与雷达引导组）与雷达 ADE。先用真值指令读上限，再读先验 + 目标导向解码的部署形态。
 - 2026-09-19 的意图码版本（K16 码本 + top-1 先验）作废：它的执行器从未在自己飞出的历史上训过、码是压缩的段、解码无目标，读数留作证据（结果文档 §9–§11，计划 §10 审计）。
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_plan_v3.zh.md` — §5 的文档索引
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_plan_v3.zh.md` — §5 的文档索引
 
 **阶段 A 与阶段 B 各自一份文档**（2026-09-20 拆开，原文太长）。节号沿用本文的编号，所以别处引用 §5.2.1、D51
 这类记号不受影响。
@@ -137,7 +137,7 @@ nothing) is in the same commit's diff.
 | 两个阶段的全部读数 | `2026-09-18_two_tier_v3_results.zh.md`（A 在 §1–§8，B 在 §9–§14） |
 | 词表本身的说明文（词是什么、怎么读、两层怎么用） | `2026-09-20_instruction_vocabulary.zh.md` |
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_v3_results.zh.md` — §12–§15（阶段 B′ 的全部读数）
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_results.zh.md` — §12–§15（阶段 B′ 的全部读数）
 
 ## 12. 阶段 B′ · B0′：指令词表与人工核（2026-09-20；计划 §5.2.1、D51 / D53；campaign `two_tier_v3_bprime_20260920`）
 
@@ -485,11 +485,11 @@ val 侧一致：4 类全部用到，clamp 高度 1 / 地速 1，几何词的分�
 自己的 summary 时看出来的；若不看，这个数会写成"两个新词从未使用"进结论。已修（提交 53e9c7e6），产物按修好的
 读数重出。
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_v3_stage_a_notes.md` — 现状的标题
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_stage_a_notes.md` — 现状的标题
 
 ## 现状（2026-09-20 晚更新；接手的 agent 先读这一节和 §7，再读计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2）
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_v3_stage_a_notes.md` — 现状：2026-09-20 晚 / 白天两段
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_stage_a_notes.md` — 现状：2026-09-20 晚 / 白天两段
 
 **2026-09-20 晚**：阶段 B′（指令词表版）的代码在分支 `dev-instruction-vocab`（worktree `.claude/worktrees/instruction-vocab`，基于主树 79f871f = 意图码层归档之后），提交：87fff1cb（标注器）、7e711f75（平台反读）、f043f90e（执行器吃指令 + 指令先验）、426aaee5（门 B1、队列、臂、intents）、f3eed83f / cb7b1712 / 8f60e73c / 9b6dc3a2（反读规则 v4 / v5 / v6 / v8）、608bb06c、46493288（文档）；全套 ts 测试 1263 通过；**未合并到主树，未训练任何臂**。主树上 79f871f 是意图码层的归档提交（agent 做的，我在主树上提交）。
 - B0′ 反读与人工核：反读规则 v1 → v8、五轮人工核（结果文档 §12）：率阈值 0.903 → 平台 v2 0.793 → v4 **0.967**（过线）→ v6 **0.847**（我按第 3 轮的报告改发词时刻，改错了）→ v8（第 5 轮新抽 150 页，进行中）。
@@ -502,7 +502,7 @@ val 侧一致：4 类全部用到，clamp 高度 1 / 地速 1，几何词的分�
 
 **2026-09-20 白天**：意图码版本的阶段 B 作废（读数留在结果文档 §9–§11）；计划 v3 的 §5.2 / §6.2 / §7.2 / §8.2 / §9.2 已按指令词表重写（提交 1fe0660）：词 = 绝对目标的管制指令，执行器吃生效指令，两层 CAT-K 式闭环再训（D49、D55），K 候选滚出按目标打分（D56），程序作解码掩码（D59），RL 本阶段不做（D58），多机层在阶段 C 之后（D60）；文献 `docs/literature/trajectory_as_language/`。§7 是指令词表版的开发记录；§7.5 是意图码版本（作废）的记录。
 
-## `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_v3_stage_a_notes.md` — §7.1–§7.4（阶段 B′ 的开发记录）
+## `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_stage_a_notes.md` — §7.1–§7.4（阶段 B′ 的开发记录）
 
 ## 7. 阶段 B′ 开发（指令词表版，2026-09-20；分支 `dev-instruction-vocab`）
 

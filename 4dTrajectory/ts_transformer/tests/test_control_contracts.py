@@ -3,7 +3,7 @@
 side, and every consumer reads a row instead of comparing the value.
 
 What this pins is the STRUCTURE the refactor of 2026-09-16 bought
-(`docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11): the two tables name the same
+(`archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11): the two tables name the same
 values, a row is internally consistent (its law flies the columns its names say, the record
 carries a command exactly where the newton column is the law's resolution of it), and the
 identities a stored checkpoint carries are spelled verbatim. The laws' physics and each

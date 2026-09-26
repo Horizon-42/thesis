@@ -3,7 +3,7 @@
 The closed-form decision vector regressed on per-flight labels: a comparison arm whose tracker
 was deleted on 2026-09-07 and whose training was FROZEN on 2026-09-09. Archived 2026-09-18 with
 the manoeuvre-token plan's repository clean-up (`docs/2026-09-18_manoeuvre_token_plan.zh.md`
-§5.1). Results: `docs/2026-09-06_closure_p1c_results.zh.md`, `docs/2026-09-06_closure_p1d_tracking_results.zh.md`.
+§5.1). Results: `archive/closure_2026_09/docs/2026-09-06_closure_p1c_results.zh.md`, `archive/closure_2026_09/docs/2026-09-06_closure_p1d_tracking_results.zh.md`.
 Off the import path on purpose: nothing live imports it.
 
 | file | was |
@@ -16,3 +16,5 @@ survives only in `config.PREDICTION_OUTPUTS_RETIRED` (its six published categori
 `predictionOutput`); a stored closure config is refused at load. `config.CLOSURE_TIMING_SCALE_S`
 stays only as the value `RETIRED_CONSTANT_FIELDS` drops from stored state/control configs written
 while the output existed.
+
+**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the closure readouts (`2026-09-06_closure_p1c_results.zh.md`, `2026-09-06_closure_p1d_tracking_results.zh.md`) and the P1.c arm declarations.

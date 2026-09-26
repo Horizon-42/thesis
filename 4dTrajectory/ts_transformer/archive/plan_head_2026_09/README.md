@@ -3,7 +3,7 @@
 Archived 2026-09-18 when the manoeuvre-token plan
 (`docs/2026-09-18_manoeuvre_token_plan.zh.md`, §5.1) replaced it. Design, steps and every
 measurement (§12.1–§12.11: the oracle ceilings, rolled windows, the order hold, the K = 4
-mixture, the assigned time, the pooled five-airport head): `docs/2026-09-09_plan_and_guidance_design.md`
+mixture, the assigned time, the pooled five-airport head): `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md`
 (superseded). Off the import path on purpose: nothing live imports it.
 
 **What stayed live**: the guidance layer — `outputs/plan/guidance/` and `outputs/plan/skeleton.py`
@@ -23,3 +23,5 @@ Their tests are archived beside them, unmodified (`tests/`); they do not run. Th
 (`step3d_lockstep_l1`) is the rule-guidance baseline the new gates read, and its published
 categories stay. The `PREDICTION_PLAN` name survives only in `config.PREDICTION_OUTPUTS_RETIRED`;
 a stored plan config is refused at load.
+
+**Documents** (moved here 2026-09-26 from `docs/`, basenames kept): `docs/` holds the plan-and-guidance design (`2026-09-09_plan_and_guidance_design.md`; its §4 is the live `outputs/guidance/`, its §12 the measurements the reference cites).

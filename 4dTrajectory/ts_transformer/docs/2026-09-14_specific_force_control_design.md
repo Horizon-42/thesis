@@ -257,7 +257,7 @@ The torch modules have no importer outside `ts_transformer` and the package's ow
 - Census over every stored `history.json`: display name, slug and `from_dict` before and after
   must be identical.
 - Docs: this file's status table, `ts_transformer/CLAUDE.md` (the controls contract line, the
-  current-defaults table), `docs/OPEN_ITEMS.md`, the root `docs/CHANGELOG.md`.
+  current-defaults table), `docs/history/OPEN_ITEMS_2026-09-18.md`, the root `docs/CHANGELOG.md`.
 - Smoke: a short real-data train (a few epochs, KRDU) → predict → `python -m evaluation`, under
   both laws, to prove the chain end to end. The numbers are not quotable.
 
@@ -1601,5 +1601,5 @@ The contract code of §2–§14 (per-law RHS copies, `backends._LAG_CONTROL_LAWS
 `vertical_commands`) was refactored into one `ControlContract` row + one `CONTROL_PARAMETERIZATION_SCOPES` row per
 value and one law protocol over one lag RHS. Names in the sections above are the names at the time; the structure,
 its verification (every stored checkpoint bit-identical) and the one behaviour change (the heading-rate loss
-admitted under the path-angle contract) are in `docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11.
+admitted under the path-angle contract) are in `archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11.
 

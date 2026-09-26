@@ -11,9 +11,10 @@ metrics, anchor grid, command hooks (`defaults.md`), `L` layout (`layout.md`), `
 That text was moved there verbatim on 2026-09-16 (this file had reached 118 KB),
 and the 09-14…09-17 additions were placed there the same way on 09-18. The evidence
 behind each line — measurements, campaign results, the causes already ruled out — lives in
-`docs/ENGINEERING_NOTES.md`; status and next steps in `docs/OPEN_ITEMS.md`; mechanism and result
-tables in the package `README.md`; history in the repo's `docs/CHANGELOG.md` (2026-07-19,
-07-20 ×2; the move itself: 2026-09-16).
+`docs/reference/ENGINEERING_NOTES.md` for the one-tier paths up to 2026-09-10, and in the design and readout
+documents the line names after that; **the two-tier model's status is `docs/two_tier/two_tier_stage_notes.zh.md`**;
+mechanism and result tables of the one-tier paths in the package `README.md`; history in the repo's
+`docs/CHANGELOG.md` (2026-07-19, 07-20 ×2; the move itself: 2026-09-16).
 Read the notes before designing an experiment or touching the loss, rollout or output layer.
 
 **Maintenance: a new fact goes into its `docs/reference/` file under a new ID, and this index
@@ -48,7 +49,7 @@ of the package, not a migration in progress.
   code under `archive/{closure,plan_head,two_tier_v2}_2026_09/` (a README each), stored checkpoints
   refused at load, published categories kept (the frontend mirrors `PREDICTION_OUTPUTS_PUBLISHED`).
   Only the rule guidance stayed live, as `outputs/guidance/`. Their numbers:
-  `docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
+  `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md` §12, `docs/2026-09-17_two_tier_plan_v2.zh.md` §10–§12 (P3, P4, P9).
 - **`manoeuvre` — the SECOND LAYER's line; the second layer itself is not built.** The
   **intent-code** layer (a learned FSQ code per segment, the executor conditioned on it, a causal
   prior over codes) is **ARCHIVED 2026-09-20**: `archive/manoeuvre_codes_2026_09/` (README there;
@@ -56,7 +57,7 @@ of the package, not a migration in progress.
   `gates_manoeuvre.py`, the `manoeuvre_*` runners and `two_tier_b_queue`). Why: plan v3 §10's
   audit — both layers trained on truth and only ever evaluated closed-loop, and the truth codes
   were indexed by time, not by where the executor was. Numbers:
-  `docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
+  `archive/manoeuvre_codes_2026_09/docs/2026-09-18_manoeuvre_token_results.zh.md` §9–§11 and the campaign trees
   `4dTrajectory/outputs/KRDU/experiments/{two_tier_v3_b_20260919,manoeuvre_tok_20260918}` +
   `outputs/codebooks/` — read them through §10 item 1 (open-loop-trained executors). `plan_conditioning`
   keeps ONLY `off`; `manoeuvre-code` is refused at load by name (`PLAN_CONDITIONINGS_RETIRED`).
@@ -151,6 +152,10 @@ of the package, not a migration in progress.
   signals (it ends before the landing — since `instruction-v2` the harvest's condition, parallel runways
   from every runway end the harvest builds; the labeller, the judge and the display share one heading-word check,
   `envelope.heading_words_inside`, since `instruction-v3`) (C30).
+- **An executor spec is bound to the executor's source** (`executor_source_sha256` over `autopilot/` and every repository
+  module it imports directly — `config`, `data.dataset`, `outputs.envelope`, …), the vocabulary and the labeller: a byte
+  changed in a hashed file, a comment included, makes the current code refuse every stored spec (C33). **A prior belongs to
+  one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
 - **The two-tier line splits BY OPERATING DAY** (2026-09-24): a flight's day = its landing day (UTC − 9 h); the
   90-day deal (14 test / 14 val / 9 select / 53 train) is COMMITTED (`data/day_split_20260924.json`) and a harvest
   with other days is refused; test days are sealed — never opened, labelled, counted as context or put in a scene;
@@ -221,7 +226,7 @@ of the package, not a migration in progress.
 
 - **Seed noise on the control path is ~125 m of pooled ADE, not 30 m** (2026-09-08: `B1_point_matched` seeds 1337/2024 = 1248/1373 m around native32's 1322; duration MAE spread ~1 s). The 30 m line came from two-seed STATE arms. A single-seed control-arm ADE difference below ~125 m is not evidence; a gate on it needs a second seed (early stopping off, as A0.b's p180) or must be read against this line. Straight-in FDE and duration MAE spreads are smaller (~0.9 s MAE) but still single-seed unless replicated. **The same config re-trained at the 2026-09-15 code as a pair (`sf_n4/N4_twin` / `_s2024`, 180 / 168 epochs) differs by only 30 m of pooled ADE and 16 m of straight-in FDE p50.** The stored pair's 125 m came with an early stop at 143 epochs, so the line may be inflated by convergence. Keep 125 m as the conservative line until more converged pairs are measured (specific-force design §7.3).
 - **Bank skill is read against the random-flight floor and the same-runway twin ceiling that
-  `docs/score_control_arms.py` prints per arm — never against 1.0**, which is unreachable.
+  `experiments/score_control_arms.py` (`run_ts.py score_control_arms`) prints per arm — never against 1.0**, which is unreachable.
 - **Flyability: read the DELTA against observed tracks, never the absolute rate** — the polar is
   clean-configuration, real approaches are flown dirty, and on REAL tracks it first scored
   0/149. **Flyability alone is not a quality metric**: the WORSE predictor scores higher on it in
@@ -282,8 +287,8 @@ of the package, not a migration in progress.
 - A dynamics backend is a ROW keyed by the model × backend pair (L18).
 - `archive/` is off the import path (asserted by `tests/test_architecture.py`); finished one-off
   drivers belong there (L19).
-- Measurement code is CODE — package + tests, or `experiments/`; `docs/` holds documents; do not
-  add `docs/*.py` (L20).
+- Measurement code is CODE — package + tests, or `experiments/`; `docs/` holds documents and no `.py`
+  (tested) (L20).
 - `tests/` is one file per topic; shared fixtures in `tests/support.py` (L21).
 - A module belongs under `outputs/control/` only if EVERY consumer is control-specific (L23);
   import direction rules, all enforced by `tests/test_architecture.py` (L24). **Between paths**: the
@@ -292,7 +297,9 @@ of the package, not a migration in progress.
   layer's language — vocabulary, signals, envelopes, labeller, artefact; torch-free, below every
   model, consumed by the runners and the executor (L30). **`autopilot/`** (2026-09-24): the executor —
   flies the words through the control path's point-mass dynamics one 1 s cycle at a time (that backend
-  runs no hooks), exact inverse, limits in order; imports no model, training or path package (L31).
+  runs no hooks), exact inverse, limits in order; imports no model, training or path package (L31). **`prior/`**
+  (2026-09-24): the prior — data, scenes, model, training, the speaker, the glidepath edge; reads only the instruction
+  language, the day split and `data.runway_context`, never the executor; only the runners join the two (L32).
 - Every CLI flag is named after the `TSConfig` field it sets, parsers use `allow_abbrev=False`;
   the exceptions are listed (L25).
 - `run_naming.py` is the single naming grammar and every field is named or excused;
@@ -369,7 +376,7 @@ labelled words on both start kinds, not by the teacher-forced NLL. **Why the lab
 executor against the observed aircraft cycle by cycle, the height given up by word, and a one-line what-if of the vertical
 law run in-process (readouts §12).
 
-## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
+## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
 - **A stored config lacks every field added after it trained — read the absence as `from_dict`
   does** (`config.absent_field_defaults`), never as `None` (T18).
@@ -415,12 +422,14 @@ law run in-process (readouts §12).
 
 | doing this | read first |
 |---|---|
-| designing an experiment / changing loss, rollout, output layer | `docs/ENGINEERING_NOTES.md` |
-| picking up work, checking what a campaign settled | `docs/OPEN_ITEMS.md` |
-| putting the procedure constraint into TRAINING as a hard constraint (either path), or the lazy-network / gate question | `docs/2026-09-08_hard_constraints_survey_and_integration_plan.md` (survey with formulas + H0–H6 plan; papers in repo `docs/literature/procedure_hard_constraints/`) |
+| finding any document (what is current, what is history, where the archived lines' documents went) | `docs/README.md` |
+| picking up the two-tier model (the current line) | `docs/two_tier/two_tier_stage_notes.zh.md` (status, artefacts, decisions, next step), then W2 |
+| designing a one-tier experiment / changing loss, rollout, output layer | `docs/reference/ENGINEERING_NOTES.md` (evidence up to 2026-09-10) |
+| checking what a one-tier campaign settled | `docs/history/OPEN_ITEMS_2026-09-18.md` (up to 2026-09-18) and the defaults table above |
+| putting the procedure constraint into TRAINING as a hard constraint, or the lazy-network / gate question | `docs/history/2026-09_constraints/2026-09-08_hard_constraints_survey_and_integration_plan.md` §3 — a literature survey with formulas; its H0–H6 plan was never built (papers in repo `docs/literature/procedure_hard_constraints/`). The two-tier model's procedure constraint is a decode mask: post-training design §3 |
 | mechanism, architecture, result tables, deliberate scope | `README.md` |
 | comparing airports or quoting an ADE | `data/approach_difficulty.py`, repo `docs/2026-08-21_ksjc_route_mix_and_ade.md` |
-| predicting the landing runway (runway intent), multi-runway scheduling | `docs/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
-| building or reading the **second layer** (what the executor is told each segment, a causal prior over it, later a multi-aircraft graph with separation masks) | **`docs/2026-09-18_two_tier_plan_v3.zh.md`** — the OVERVIEW (intent, outline, the metric and readout protocol §3, the framework §4, the 2026-09-20 audit §10) and its stage A document **`…_v3_A.zh.md`** (the no-token executor's (L, Δ) grid, run). **The second layer now**: **`docs/2026-09-23_two_tier_framework.zh.md`** (layers, packages, artefact, stage gates), **`docs/2026-09-23_instruction_vocabulary_design.zh.md`** (the words, envelopes, labelling rules, values) and **`docs/2026-09-23_instruction_labels_readout.zh.md`** (the labeller's readout on the five-airport development set). The intent-CODE version (`2026-09-18_manoeuvre_token_plan.zh.md` + its readouts `…_results.zh.md`), the two-tier v2 plan (`2026-09-17_two_tier_plan_v2.zh.md`) and the 09-16 feasibility doc are SUPERSEDED: only their measurements are citable (v2 §10–§12; the code readouts §9–§11, read through v3 §10 item 1): W2 |
+| predicting the landing runway (runway intent), multi-runway scheduling | `docs/history/2026-09_runway_intent/2026-09-13_runway_intent_plan.zh.md` (status by stage R0–R4: W1). The separation rules themselves: `inference/runway_schedule.py` and repo `docs/literature/arrival_separation/` |
+| building or reading the **two-tier model** (a prior that says controller-like words, an executor that flies them; later several aircraft with separation masks) | the stage notes, then **`docs/two_tier/two_tier_framework.zh.md`** (layers, packages, artefacts, gates), **`docs/two_tier/instruction_vocabulary_design.zh.md`** (the words, envelopes, labeller, values), **`docs/two_tier/executor_design.zh.md`**, **`docs/two_tier/prior_design.zh.md`**, **`docs/two_tier/post_training_design.zh.md`**; readouts `docs/two_tier/readouts/2026-09-24_prior_readouts.zh.md`. Plans v2 / v3, the intent-code plan and the 09-16 feasibility doc are SUPERSEDED — only their measurements are citable: W2 |
 | the full text behind any line of this index | `docs/reference/*.md`, by ID |
 | anything about vertical datum, velocity seam, flight identity | `flight_scenarios/CLAUDE.md` |

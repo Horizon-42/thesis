@@ -64,15 +64,15 @@ kept where they are labelled as such, because two design decisions were made on 
 data and the real run either confirmed or corrected them.
 
 **Scope:** `prediction_output=state` remains the purely kinematic, single-aircraft baseline
-used by the recorded experiments below. `prediction_output=control` (and the separate
-`control-mixture` strategy) is a checkpointed architecture that adds per-flight aircraft
+used by the recorded experiments below. `prediction_output=control` is a checkpointed architecture that adds per-flight aircraft
 conditioning and a differentiable dynamics rollout. See
 [the output architecture](#state-baseline-and-dynamics-constrained-control-output).
 `control_recipe_name` selects between `custom` (every historical control ablation axis,
 still supported and validated) and `simple-v1` (a frozen, minimal recipe — construction
-rejects any field that drifts from it). The full ablation matrix, call graph, oracle-teacher
-warm-start pipeline, and a module-by-module live/ablation-only/orphan census live in
-[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md); this
+rejects any field that drifts from it). The control path's design history (ablation matrix, call graph,
+the archived oracle-teacher pipeline) is
+[`docs/history/2026-08_control_path/control_parameter_prediction.zh.md`](docs/history/2026-08_control_path/control_parameter_prediction.zh.md) — a superseded record of the
+2026-08-16 code, not the live module list (that is the package itself and `docs/reference/`); this
 README states only what a reader needs to run and interpret it.
 
 ## Glossary
@@ -136,7 +136,7 @@ qualified name (`from ts_transformer.data.dataset import build_series`).
 | `__main__.py` / `cli/` | the subcommand table, and one module per subcommand (`train`, `cross_validate`, `evaluate_fit`, `freeze`, `predict`, plus `common`) — each exposes `HELP` / `add_cli_arguments()` / `run_cli()` |
 | `data/synthetic.py` | synthetic arrivals, so the pipeline is runnable before real data lands |
 | `backbone/vendor/` | upstream model code, byte-identical, with `LICENSE` + `PROVENANCE.md` each |
-| `outputs/control/` (package: strategy, supervision, forecast, envelope, heads, conditioning, latent, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control`/`control-mixture` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — the package itself is the live module list (layout: `docs/reference/layout.md` L6, L23); [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) keeps the design history, and its module table and call graph describe the teacher chain archived in T2 |
+| `outputs/control/` (package: strategy, supervision, forecast, envelope, heads, conditioning, latent, basis_fit, dynamics/, loss/, training/, constraints/) | the `prediction_output=control` strategy matrix (duration/value parameterizations, dynamics backends, tracking objectives, command hooks) — the package itself is the live module list (layout: `docs/reference/layout.md` L6, L23); [`docs/history/2026-08_control_path/control_parameter_prediction.zh.md`](docs/history/2026-08_control_path/control_parameter_prediction.zh.md) keeps the design history, and its module table and call graph describe the teacher chain archived in T2 |
 
 ## Running it
 
@@ -400,7 +400,7 @@ The four `run_ts_*.py` scripts above (repo root, alongside this package) are the
 ones. The rest — kinematic-loss/overfit diagnostics for the state path, and the control
 path's own drivers (`run_ts.py control_basis_oracle`, `run_ts.py control_capacity_ceiling`,
 …) — are indexed with dates and one-line purposes in
-[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) (§7)
+[`docs/history/2026-08_control_path/control_parameter_prediction.zh.md`](docs/history/2026-08_control_path/control_parameter_prediction.zh.md) (§7)
 rather than duplicated here.
 
 ## Data selection & flight identity
@@ -516,7 +516,7 @@ ADE. Alternative selectors are explicit research ablations, not production headl
 When fixed and random arms must use an identical 60-second-capable training roster, pass
 `--training-cohort-min-future-s 60` to both arms; it never filters validation.
 The frozen train/validation protocol is recorded in
-[`docs/2026-07-30_random_anchor_experiment_plan.zh.md`](docs/2026-07-30_random_anchor_experiment_plan.zh.md).
+[`docs/history/2026-08_control_path/2026-07-30_random_anchor_experiment_plan.zh.md`](docs/history/2026-08_control_path/2026-07-30_random_anchor_experiment_plan.zh.md).
 
 `N` controls model output resolution, not forecast seconds. It is serialized in checkpoints;
 the default normalized-mode CV grid is now `16, 32, 64, 128, 256`. Every candidate is judged
@@ -538,7 +538,7 @@ from about 1.92 km to 1.33 km while slightly improving mean ADE. Previous checkp
 on normalized six-channel MSE, kinematic weight `3.0`, terminal weight `0.02`, or the old
 `N=64/128/256` grid are historical artifacts and must not be mixed with this contract.
 The mathematical definitions and evidence are in
-[`docs/2026-08-15_comprehensive_metrics_review.zh.md`](docs/2026-08-15_comprehensive_metrics_review.zh.md).
+[`docs/history/2026-08_control_path/2026-08-15_comprehensive_metrics_review.zh.md`](docs/history/2026-08_control_path/2026-08-15_comprehensive_metrics_review.zh.md).
 
 Final fit reports and exported prediction summaries also persist raw-node
 position/velocity RMSE, heading-consistency p95, turn-rate p95, acceleration p95 and jerk
@@ -674,15 +674,10 @@ parameterization, validation selection, command hook — registries, each a
 concrete point in that space (uniform duration, absolute controls, the
 `scaled-transport-chart-velocity` dynamics backend, a minimal "true-time-position" tracking
 objective, every auxiliary loss weight zeroed); `TSConfig.__post_init__` raises if any of its
-fields drift from the frozen values. A third prediction output, `control-mixture`
-(`prediction_output=control-mixture`), trains `K` independent control experts plus a
-history-only deployable selector on a best-of-K hindsight objective — a first attempt at the
-"deterministic point prediction" limitation in
-[Deliberate scope](#deliberate-scope--not-bugs-do-not-fix-without-deciding-to). All of this —
-the objective/backend/duration/clock registries, the exact call graph, and which of the
-`outputs/control/` package's modules are live on the default path vs. ablation-only vs. genuinely
-unwired — is in
-[`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
+fields drift from the frozen values. (A third output, `control-mixture` — `K` control experts plus a
+deployable selector — was deleted on 2026-08-18.) The registries' design history is in
+[`docs/history/2026-08_control_path/control_parameter_prediction.zh.md`](docs/history/2026-08_control_path/control_parameter_prediction.zh.md), a superseded record; the live
+registries are `config.py` and `docs/reference/`.
 
 Control mode currently requires `--horizon-mode normalized`. It needs no inverse-control
 labels. Uniform truth nodes are interpolated onto `cumsum(segment_durations)` before the
@@ -728,11 +723,11 @@ The repository now contains routes 1 and 4; routes 2 and 3 remain distinct alter
    in-training imitation term and archived under `archive/oracle_teacher_2026_08/`. Details of
    the rollout itself, including why it needs no second (casadi) environment despite
    optimizing a per-flight trajectory, are in
-   [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
+   [`docs/history/2026-08_control_path/control_parameter_prediction.zh.md`](docs/history/2026-08_control_path/control_parameter_prediction.zh.md).
 
 ## Historical results on real KRDU data (pre-normalized-time architecture)
 
-> **First-generation numbers (995 arrivals, not reproducible — see CLAUDE.md "Quote ONLY current-artifact numbers").** Current results: `docs/2026-09-07_l1_lowdim_results.zh.md`, `docs/2026-09-07_l0_control_basis_results.zh.md`, `docs/2026-09-06_closure_p1c_results.zh.md`.
+> **First-generation numbers (995 arrivals, not reproducible — see CLAUDE.md "Quote ONLY current-artifact numbers").** Current results: `docs/history/2026-09_latent_anytime/2026-09-07_l1_lowdim_results.zh.md`, `docs/history/2026-09_latent_anytime/2026-09-07_l0_control_basis_results.zh.md`, `archive/closure_2026_09/docs/2026-09-06_closure_p1c_results.zh.md`.
 
 995 arrivals across 6 runways, split **by flight** (`flight_key`) into 702 train / 141 val /
 152 test. Both models, both horizon modes, 120-epoch cap with patience 15, `lr=5e-4`, on an
@@ -1057,7 +1052,7 @@ use it for NEW run/category directories; existing directories are historical rec
 are never renamed. Relabeling already-published categories is metadata-only:
 `publish_ts_experiment_trajectories.py --refresh-labels-only` re-derives every
 publisher-managed category label from its stored manifest, and
-`docs/relabel_published_categories.py` was the 2026-08-24 one-off for the legacy
+`archive/publication_oneoffs_2026_08/relabel_published_categories.py` was the 2026-08-24 one-off for the legacy
 hand-published `ts_*` categories.
 
 ## Vendored code
@@ -1105,13 +1100,13 @@ point that later work may choose to extend, but none is an accident:
   toward generative/probabilistic terminal models (CVAE, diffusion) precisely because runway
   configuration and vectoring make the future genuinely multimodal; these two models cannot
   represent that, and a point prediction is the honest baseline against which they are measured.
-  `prediction_output=control-mixture` (K independent control experts + a deployable selector,
-  best-of-K training) is a first, still-evaluated attempt at this specifically for the control
-  output — see [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md).
+  A first attempt for the control output, `prediction_output=control-mixture` (K control experts + a deployable
+  selector), was deleted on 2026-08-18; the two-tier model (a prior that samples several sentences per flight) is where
+  multimodality is now addressed (`docs/two_tier/two_tier_stage_notes.zh.md`).
 
 ## Known gaps — actual unfinished work
 
-> **Historical.** The control path has six published result documents since 2026-09-04 and all five airports are harvested (v5, 42,650 arrivals); the live open items are `docs/OPEN_ITEMS.md`.
+> **Historical.** The control path has six published result documents since 2026-09-04 and all five airports are harvested (v5, 42,650 arrivals); the live open items are `docs/history/OPEN_ITEMS_2026-09-18.md`.
 
 - **Only KRDU so far.** 3747 arrivals are harvested across 5 airports (KMSY, KRDU, KSJC,
   KSMF, KSTL); only KRDU has been trained. Cross-airport generalisation is untested, and the
@@ -1139,5 +1134,5 @@ point that later work may choose to extend, but none is an accident:
   full train → predict → `evaluate` cycle and published an ADE/FDE/gate-pass table the way
   the state-output results above are published. The paired teacher CV meant to produce that
   table is archived with its campaign (`archive/oracle_teacher_2026_08/`). See
-  [`docs/control_parameter_prediction.zh.md`](docs/control_parameter_prediction.zh.md) for
+  [`docs/history/2026-08_control_path/control_parameter_prediction.zh.md`](docs/history/2026-08_control_path/control_parameter_prediction.zh.md) for
   the full design history (its module-by-module table describes the teacher chain archived in T2).

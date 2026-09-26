@@ -7,7 +7,7 @@ index line in CLAUDE.md that ends in its ID; find one with `grep -n '^### C7 ·'
 
 **Maintenance: when a fact here changes, edit it HERE and keep its index line true; a new fact
 gets a new ID here and ONE new line in the index.** Measurements and campaign evidence still
-belong in `docs/ENGINEERING_NOTES.md` / the design documents, status in `docs/OPEN_ITEMS.md`.
+belong in `docs/reference/ENGINEERING_NOTES.md` / the design documents, status in `docs/history/OPEN_ITEMS_2026-09-18.md`.
 
 **2026-09-18:** the main line's 2026-09-14…09-17 additions to that CLAUDE.md (the control
 contracts, the two-tier axes and traps) were placed here the same way when this branch was
@@ -34,6 +34,8 @@ point of the package, not a migration in progress.
 
 ### P3 · `closure` — FROZEN comparison arm, tracker deleted
 
+**RETIRED 2026-09-18** — code under `archive/closure_2026_09/` (its README); stored checkpoints are refused at load (`config.PREDICTION_OUTPUTS_RETIRED`), published categories kept. The text below describes the archived code and is kept as its record.
+
 - **`closure`** — **FROZEN 2026-09-09 (review §5)**: its two stored checkpoints load, predict
   and publish exactly as before; no NEW run may select it (`PREDICTION_OUTPUTS_AVAILABLE`,
   refused by `cli.common._refuse_unavailable_selection`). (Scene design P1.c, 2026-09-05; **a COMPARISON ARM since 2026-09-07** — the
@@ -52,11 +54,13 @@ point of the package, not a migration in progress.
   dynamics of its own (22 % fully flyable); the P1.d tracker that flew it with the point-mass
   rollout (`outputs/control/constraints/closure_tracking.py`, `predict --closure-track`) is RETIRED —
   code DELETED 2026-09-07, its numbers (+10.5 m of ADE, 92 % fully flyable) kept as history in
-  `docs/2026-09-06_closure_p1d_tracking_results.zh.md`. Do not rebuild it.
+  `archive/closure_2026_09/docs/2026-09-06_closure_p1d_tracking_results.zh.md`. Do not rebuild it.
 
 ### P4.a · `plan` — plan-and-guidance, the lockstep, "no fix ahead"
 
-- **`plan`** — the plan-and-guidance path (design v5, `docs/2026-09-09_plan_and_guidance_design.md`;
+**RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
+
+- **`plan`** — the plan-and-guidance path (design v5, `archive/plan_head_2026_09/docs/2026-09-09_plan_and_guidance_design.md`;
   step 3 built 2026-09-11): the network predicts the OPERATING PARAMETERS and the NEXT
   INSTRUCTION at any anchor (`outputs/plan/labels.TARGETS`: `T`, `V_mid`, `d_decel`,
   `V_final`, `h_capture`, `d_join`, the remaining path; the next fix ahead / across the
@@ -79,6 +83,8 @@ point of the package, not a migration in progress.
   straight-in flights out of the corridor).
 
 ### P4.b · `plan` v5.2 — the head trained on rolled windows
+
+**RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
 
 **v5.2 (2026-09-11): the head is TRAINED ON
   ROLLED WINDOWS** (`outputs/plan/rolled.py`, design §9 step 3(e), §12.6): `run_ts.py
@@ -111,6 +117,8 @@ point of the package, not a migration in progress.
 
 ### P4.c · `plan` v5.3 — the order hold is an axis (default 1)
 
+**RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
+
 **v5.3 (2026-09-12): an ORDER HOLD in the lockstep is an
   AXIS, not the default** (`forecast.held_order`; `plan_oracle --hold-asks N
   [--hold-flips-only]`, `fly_lockstep(hold_asks=, hold_flips_only=)`; default 1 = adopt at
@@ -124,6 +132,8 @@ point of the package, not a migration in progress.
 
 ### P4.d · `plan` — `run_ts.py plan_oracle_pair`, the one comparison instrument
 
+**RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
+
 **`run_ts.py plan_oracle_pair --base L=<dir> --arm
   L=<dir>` is how two plan-oracle artifacts are compared** — flight by flight, never two
   summary tables; its identity line is the refactor check, and a hold-1 re-roll differs
@@ -131,6 +141,8 @@ point of the package, not a migration in progress.
   bit-reproducible between runs (51 of 78 differing rows differ at step 0).
 
 ### P4.e · `plan` v5.3 — the K-component mixture head (the fan)
+
+**RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
 
 **v5.3 (2026-09-12,
   §9 step 3(g)): `plan_fan_components` = K ≥ 2 makes the instruction group a K-component
@@ -158,6 +170,8 @@ point of the package, not a migration in progress.
   deliverable in this form.**
 
 ### P4.f · `plan` v5.4 — the scheduler's assignment and the time closure
+
+**RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
 
 **v5.4 (2026-09-12, §9 step 4): the scheduler's ASSIGNMENT**
   (`strategy.Assignment(arrival_time_s, d_join_m)` — the arrival ABSOLUTE on the series clock;
@@ -190,6 +204,8 @@ point of the package, not a migration in progress.
 
 ### P4.g · `plan` v5.5 — the pooled five-airport run and its tooling
 
+**RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
+
 **v5.5 (2026-09-12, §9 step 5): the POOLED five-airport run and its tooling.** `run_ts.py
   plan_cohort` writes the development cohort a random-anchor plan run needs (the train CLI
   refuses a run whose 20 s future contract covers fewer train flights than the locked split
@@ -208,6 +224,8 @@ point of the package, not a migration in progress.
   once per window set — six copies on five airports (`docs/code-health-followups.md` §30).
 
 ### P4.h · `plan` — a per-airport head's seed line scales with its cohort
+
+**RETIRED 2026-09-18** — the plan head is under `archive/plan_head_2026_09/` (its README); only the rule guidance stayed live, as `outputs/guidance/` (L8, L9). The text below describes the archived code and is kept as its record.
 
 **A per-airport plan head's SEED LINE scales with its cohort (2026-09-12, design §12.11's
   two-seed check)**: at seed 2024 the KSJC and KSTL heads move ≤ 30 m paired (means ≤ 240 m),
@@ -266,6 +284,8 @@ term and chart projection — so it is the point-mass model plus three actuators
 flight model.
 
 ### P9 · `prediction_output` = `segment-plan` — the two-tier L2 plan layer
+
+**RETIRED 2026-09-18** — code under `archive/two_tier_v2_2026_09/` (its README; plan v2 superseded by plan v3, which the 2026-09-23 two-tier framework superseded in turn). The text below describes the archived code and is kept as its record.
 
 (A row of the defaults table in the source; it is a prediction path, so it is indexed with the others. Text verbatim.)
 

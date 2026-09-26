@@ -5,7 +5,7 @@ trajectory predictor is given and how far ahead it is asked to predict** has to 
 papers' own experimental-setup text, not from memory. Our own setting is unusual on both axes: the
 executor is a **closed loop** that flies each arrival from ~25 km to the runway threshold, taking
 **60–120 s of observed history** and **re-planning every 20 s**, on ADS-B sampled at **2 s**; and
-reading (c) of `4dTrajectory/ts_transformer/docs/2026-09-18_two_tier_v3_results.zh.md` §7 found
+reading (c) of `4dTrajectory/ts_transformer/docs/history/2026-09_two_tier_v3/2026-09-18_two_tier_v3_results.zh.md` §7 found
 **no gain beyond 60 s of history** once every cell starts from the same row ("60 s 历史够用，更长
 的历史在同一起点上没有超过 seed 线的收益"). So the questions this folder answers from primary text:
 

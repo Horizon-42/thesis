@@ -7,7 +7,7 @@ index line in CLAUDE.md that ends in its ID; find one with `grep -n '^### C7 ·'
 
 **Maintenance: when a fact here changes, edit it HERE and keep its index line true; a new fact
 gets a new ID here and ONE new line in the index.** Measurements and campaign evidence still
-belong in `docs/ENGINEERING_NOTES.md` / the design documents, status in `docs/OPEN_ITEMS.md`.
+belong in `docs/reference/ENGINEERING_NOTES.md` / the design documents, status in `docs/history/OPEN_ITEMS_2026-09-18.md`.
 
 **2026-09-18:** the main line's 2026-09-14…09-17 additions to that CLAUDE.md (the control
 contracts, the two-tier axes and traps) were placed here the same way when this branch was
@@ -60,7 +60,7 @@ rebased — same rule, new IDs.
 
 - **The control head has FOUR contracts — `control_thrust_parameterization` — and each is ONE row**
   (2026-09-14 → 09-16; `docs/2026-09-14_specific_force_control_design.md`; the one-row structure:
-  `docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11):
+  `archive/two_tier_v2_2026_09/docs/2026-09-16_two_tier_transformer_feasibility.zh.md` §11):
   - **`thrust-fraction`** (the default, every stored run, pinned by every named recipe) is the
     box below. **`specific-force`** makes the first column `n_x = (T − D)/W` (box `[−0.20, 0.23]` g,
     neutral −0.05; the lag RHS re-solves `T = clamp(W·a_x + D, −0.2·T_max, T_max)` at EVERY RK4
@@ -391,7 +391,7 @@ four runners that restated it import it).
 
 ### C30 · the instruction sentence artefact: one spec sha, written once, rows aligned with the signals
 
-2026-09-23 (the instruction labeller, `docs/2026-09-23_two_tier_framework.zh.md` §3). An artefact
+2026-09-23 (the instruction labeller, `docs/two_tier/two_tier_framework.zh.md` §3). An artefact
 directory under `4dTrajectory/outputs/POOLED/instruction_language/<name>/` is written by the four
 runners in order and never overwritten (`instructions.artefact._fresh` refuses an existing file):
 `signals_{train,select,val}.npz` + `signals.json` (the flights, from the live harvest's eligible arrivals,
@@ -475,7 +475,7 @@ excluded by the index, 612 unresolved identity). Val 10,635 / 9,668 / 7,574. Tes
 
 ### C32 · the two-tier line splits by operating day, dealt once and committed; test days are sealed
 
-2026-09-24 (`docs/2026-09-24_prior_design.zh.md` §3.3). `data/day_split.py`: an operating day is the UTC date
+2026-09-24 (`docs/two_tier/prior_design.zh.md` §3.3). `data/day_split.py`: an operating day is the UTC date
 9 h earlier (`OPERATIONAL_DAY_SHIFT`, the overnight traffic minimum); a flight's day is its LANDING day (the one time
 both the arrivals and the tracks roster carry; 20 of 72,247 eligible arrivals enter and land on different days).
 The days are dealt by COUNT over sha256(seed:day): round-half-up 15 % test, 15 % val, 1/7 of the rest `select`
@@ -488,3 +488,23 @@ refuses a test day by name (`SealedDay`). Sealed means: no test-day flight's tra
 landing context (`prior.scene.context_landings`) or put in a scene. The per-flight split (`data.splits`) stays the
 other ts models'; a cross-model comparison uses the flights both hold out (1,458: on a test day AND in the flight
 split's test).
+
+### C33 · the executor spec: written once, bound to the executor code, the vocabulary and the labeller
+
+2026-09-24 (`autopilot/spec.py`, `autopilot/replay.py`; executor design §12). An executor spec is a directory written once
+(`spec.json` + `measurements.json`, an existing file refuses): the parameters under their own sha, the vocabulary spec sha
+it was measured against, and `source`: `executor_source_sha256` over `executor_source_files` (every `autopilot/` module
+but `spec.py`, plus every repository module they import directly — `ts_transformer.config`, `data.dataset`,
+`outputs.envelope`, `outputs.dynamics.*`, `outputs.constraints.speed_floor`, `geometry.flyability`, `geokit`, …, labelled
+by module name so the hash is the same from any checkout) and the labeller's source sha. `replay.open_executor` refuses a
+spec of another schema (`ts-executor-spec-v5`), of other executor code, of another vocabulary, or of another labeller.
+**So a byte changed in any hashed file — a comment included — makes the current code refuse every stored spec**: a new
+spec is written and the train replay gate re-run (v7 → v9 on 2026-09-26 came that way).
+
+### C34 · a prior checkpoint belongs to one sentence artefact
+
+2026-09-24 (`experiments/prior_train.py` `load_prior`). A prior is `checkpoint.pt` + `config.json` under
+`ts-prior-checkpoint-v3`, written by `prior_train`, `prior_landing_reward` and `prior_augmented_reward` alike. It is refused
+unless its vocabulary spec sha, the labeller source sha and the day split recorded in `config.json` are those of the
+sentence artefact it is opened with, its candidate-runway table equals the artefact's, and its state loads whole
+(`strict=True`). A new artefact under the same spec and labeller (v4 → v5 on 2026-09-26) opens every stored prior.
