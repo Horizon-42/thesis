@@ -64,7 +64,7 @@ def _sentences(samples=3, seed=2):
                                             generator=torch.Generator().manual_seed(seed), temperature=1.0)
     steps = [steps_said(flown, j, said.shape[1], round(one.step_s / flown.cycle_s)) for j in range(samples)]
     reading = read_flight(signals, geometry, one, words)
-    batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[geometry], crossing_heights=[],
+    batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[geometry], vertical_paths=[],
                          approach_ias_mps=[], groups=[], drawn={})
     sentences = Sentences(np.zeros(samples, dtype=np.int64),
                           [np.column_stack((speaker.e[j, :N_LOOK + s], speaker.n[j, :N_LOOK + s],

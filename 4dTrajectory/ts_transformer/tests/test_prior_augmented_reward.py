@@ -154,7 +154,7 @@ def test_augmented_sentences_read_the_moved_rows_carry_their_masks_and_train_und
                                                                    approach[index]))
     reading = read_flight(signals, geometry, one, words)
     batch = replay.Batch(signals=[signals], series=[None], readings=[reading], geometries=[geometry],
-                         crossing_heights=[()], approach_ias_mps=[0.0], groups=["own"], drawn={})
+                         vertical_paths=[()], approach_ias_mps=[0.0], groups=["own"], drawn={})
     # an edge high above the start and wide enough to bind wherever the moved start takes the aircraft
     final = _final(crossing_m=1_500.0, faf_d_m=40_000.0, cone=FasCourseGeometry(40_000.0, 41_000.0, 80_000.0))
     model = _model(words)

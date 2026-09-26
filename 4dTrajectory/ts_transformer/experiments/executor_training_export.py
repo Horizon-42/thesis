@@ -70,7 +70,7 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.flights import rebuild_series
 from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
-from ts_transformer.autopilot.runway_data import published_crossing_heights
+from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.experiments.executor_replay import REPLAY_SCHEMA
 from ts_transformer.instructions import display
 from ts_transformer.instructions.airport import AirportGeometry
@@ -431,7 +431,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
             raise ValueError(f"{signals[j].dataset_id} is not flown here ({group}) but has a row in the formal replay")
     batch = replay.Batch(signals=[signals[j] for j in flyable], series=[series[j] for j in flyable], readings=readings,
                          geometries=[geometry] * len(flyable),
-                         crossing_heights=[published_crossing_heights(geometry)] * len(flyable),
+                         vertical_paths=[published_vertical_paths(geometry)] * len(flyable),
                          approach_ias_mps=[replay.flight_approach_ias_mps(series[j], groups[j]) for j in flyable],
                          groups=[groups[j] for j in flyable], drawn={})
     flown, verdicts = replay.fly_batch(batch, params, words, device=device) if flyable else (None, [])

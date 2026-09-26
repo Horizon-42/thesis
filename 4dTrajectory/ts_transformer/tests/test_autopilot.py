@@ -287,12 +287,15 @@ def test_the_parameters_are_checked_against_the_designs_constraints():
 
 
 # ---- whole flights
-#: The test airport's runways' published threshold crossing height (the fleet's run 13.7–19.5 m).
+#: The test airport's runways' published threshold crossing height (the fleet's run 13.7–19.5 m) and glidepath.
 TEST_TCH_M = 15.0
+TEST_GLIDEPATH_DEG = 3.0
 
 
-def crossing_heights(geometry):
-    return tuple(TEST_TCH_M for _ in geometry.candidates)
+def vertical_paths(geometry):
+    from ts_transformer.autopilot.runway_data import VerticalPath
+
+    return tuple(VerticalPath(TEST_TCH_M, TEST_GLIDEPATH_DEG) for _ in geometry.candidates)
 
 
 def _params(**changes):
@@ -324,7 +327,7 @@ def _physics(signals, geometry, approach_ias=None):
         aero_params=torch.tensor([[aero.S, aero.Cl_max, aero.Cd0, aero.k, aero.stall_threshold, aero.k_stall]], dtype=F64),
         frame_params=torch.tensor([[tlat, tlon, candidate.elevation_m, 0.0]], dtype=F64),
         max_thrust_n=torch.tensor([aircraft.engine.max_thrust_total_n], dtype=F64))
-    return (inputs, Runways.of([geometry], [crossing_heights(geometry)], dtype=F64, device=CPU),
+    return (inputs, Runways.of([geometry], [vertical_paths(geometry)], dtype=F64, device=CPU),
             AirportCharts.of([geometry], dtype=F64, device=CPU),
             torch.tensor([approach_speed_ias_mps("A320", mass) if approach_ias is None else approach_ias], dtype=F64))
 
@@ -565,7 +568,7 @@ def test_a_batch_readout_counts_what_was_flown_and_how_far_it_lies_from_the_obse
     signals = instruction_flight(*fly_legs(DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
     flown, verdict, reading = _fly_sentence(signals)
     batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[instruction_airport()],
-                         crossing_heights=[crossing_heights(instruction_airport())], approach_ias_mps=[],
+                         vertical_paths=[vertical_paths(instruction_airport())], approach_ias_mps=[],
                          groups=[replay.OWN], drawn={})
     summary = replay.summary([verdict])
     judged = replay.word_results(verdict)[0]
@@ -858,7 +861,7 @@ def test_the_words_the_executor_refuses():
     data = instruction_airport().to_dict()
     data["candidates"].append({**data["candidates"][0], "ident": "09R", "threshold_n_m": -1500.0})
     geometry = AirportGeometry.from_dict(data)
-    runways = Runways.of([geometry], [crossing_heights(geometry)], dtype=F64, device=CPU)
+    runways = Runways.of([geometry], [vertical_paths(geometry)], dtype=F64, device=CPU)
     lateral = Lateral(1, _params(), spec(), CPU)
     state = read_state(torch.tensor([[35.0, -78.05, 900.0, 80.0, 0.0, 0.0, 60000.0]], dtype=F64),
                        AirportCharts.of([geometry], dtype=F64, device=CPU))
@@ -1003,7 +1006,10 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
     typecode = {i: ("A320", "A320") if i % 4 else ("CRJ7", "A320") for i in range(30)}
     geometries = {code: SimpleNamespace(code=code, candidates=(SimpleNamespace(ident="09"),)) for code in ("KAAA", "KBBB")}
     monkeypatch.setattr(replay, "load_candidates", lambda d: geometries)
-    monkeypatch.setattr(replay, "published_crossing_heights", lambda geometry: {"KAAA": (15.0,), "KBBB": (16.0,)}[geometry.code])
+    from ts_transformer.autopilot.runway_data import VerticalPath
+
+    paths = {"KAAA": (VerticalPath(15.0, 3.0),), "KBBB": (VerticalPath(16.0, 3.5),)}
+    monkeypatch.setattr(replay, "published_vertical_paths", lambda geometry: paths[geometry.code])
     monkeypatch.setattr(replay, "load_signals", lambda d, split: flights)
     monkeypatch.setattr(replay, "load_sentences", lambda d, split, spec: sentences)
     monkeypatch.setattr(replay, "rebuild_series", lambda d, items: [SimpleNamespace(scenario=SimpleNamespace(
@@ -1018,7 +1024,7 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
     assert [f.dataset_id for f in first.signals] == [f.dataset_id for f in again.signals]
     assert Counter(f.airport for f in first.signals) == {"KAAA": 3, "KBBB": 3}
     assert set(first.groups) == {replay.OWN}
-    assert first.crossing_heights == [(15.0,) if f.airport == "KAAA" else (16.0,) for f in first.signals]
+    assert first.vertical_paths == [paths[f.airport] for f in first.signals]
     assert first.drawn["threshold_crossing_heights_m"] == {"KAAA": {"09": 15.0}, "KBBB": {"09": 16.0}}
     every = replay.draw(Path("x"), "train", one, words, per_airport=0, seed=5, groups=(replay.OWN, replay.STAND_IN))
     assert len(every.signals) == 30 and every.drawn["by_group"] == {replay.OWN: 22, replay.STAND_IN: 8}
@@ -1029,33 +1035,94 @@ def test_draw_reads_a_seeded_permutation_until_each_airport_is_full(monkeypatch)
         replay.draw(Path("x"), "train", one, words, per_airport=3, seed=5)
 
 
-def test_each_candidate_crosses_at_its_runways_published_crossing_height(monkeypatch):
-    """Stage 2 (2026-09-24): "descend to land" aims at the pointed runway's published TCH, read from the harvest's
-    runway data in the candidates' order; a candidate that publishes none, or that the harvest has no runway for, is
-    refused (the labeller's first runner refuses it too, before writing anything); the executor's runway table takes
-    exactly one height per candidate."""
+def test_each_candidate_reads_its_runways_published_vertical_path(monkeypatch):
+    """"Descend to land" crosses the pointed runway at its published TCH and does not descend under its published
+    glidepath's lower edge before the threshold — both read from the harvest's runway data in the
+    candidates' order; a candidate that publishes either not, or that the harvest has no runway for, is refused (the
+    labeller's first runner refuses it too, before writing anything); the executor's runway table takes exactly one
+    path per candidate, the glidepath as its tangent."""
     from ts_transformer.autopilot import runway_data
     from ts_transformer.autopilot.lateral import Runways
+    from ts_transformer.autopilot.runway_data import VerticalPath
 
     geometry = instruction_airport()
     idents = [c.ident for c in geometry.candidates]
-    published = {ident: 15.0 + k for k, ident in enumerate(idents)}
+    published = {ident: (15.0 + k, 3.0 + 0.5 * k) for k, ident in enumerate(idents)}
 
     def runways():
-        return [SimpleNamespace(ident=ident, threshold_crossing_height_m=height)
-                for ident, height in reversed(published.items())]
+        return [SimpleNamespace(ident=ident, threshold_crossing_height_m=tch, published_glidepath_deg=glidepath)
+                for ident, (tch, glidepath) in reversed(published.items())]
 
     monkeypatch.setattr(runway_data, "load_airport", lambda code, **_: SimpleNamespace(runways=runways()))
-    heights = tuple(published[ident] for ident in idents)
-    assert runway_data.crossing_heights(geometry, runways()) == heights
-    assert runway_data.published_crossing_heights(geometry) == heights
-    with pytest.raises(ValueError, match="one published crossing height per candidate"):
-        Runways.of([geometry], [heights[:-1]], dtype=F64, device=CPU)
+    paths = tuple(VerticalPath(*published[ident]) for ident in idents)
+    assert runway_data.vertical_paths(geometry, runways()) == paths
+    assert runway_data.published_vertical_paths(geometry) == paths
+    table = Runways.of([geometry], [paths], dtype=F64, device=CPU)
+    assert torch.allclose(table.crossing_height_m[0], torch.tensor([p.crossing_height_m for p in paths], dtype=F64))
+    assert torch.allclose(table.glidepath_tan[0],
+                          torch.tensor([math.tan(math.radians(p.glidepath_deg)) for p in paths], dtype=F64))
+    with pytest.raises(ValueError, match="one published vertical path per candidate"):
+        Runways.of([geometry], [paths[:-1]], dtype=F64, device=CPU)
     with pytest.raises(ValueError, match="not among the harvest's runways"):
-        runway_data.crossing_heights(geometry, [r for r in runways() if r.ident != idents[0]])
-    published[idents[0]] = None
-    with pytest.raises(ValueError, match="publishes no threshold crossing height"):
-        runway_data.crossing_heights(geometry, runways())
+        runway_data.vertical_paths(geometry, [r for r in runways() if r.ident != idents[0]])
+    for missing in ((None, 3.0), (15.0, None)):
+        published[idents[0]] = missing
+        with pytest.raises(ValueError, match="publishes no threshold crossing height or glidepath"):
+            runway_data.vertical_paths(geometry, runways())
+
+
+def test_descend_to_land_never_goes_under_the_published_glidepaths_lower_edge_before_the_threshold():
+    """Prior readouts §12: under "descend to land", below the pointed runway's published glidepath's lower edge, the
+    aircraft levels off until the glidepath comes down to it — captured or not; on the glidepath the law is the one
+    without it; past the threshold it does not bind; a go-around climbs as before. Off the course the edge falls at the
+    glidepath's slope times the share of the speed along the course: on it, that is the most the law descends; flying
+    away from the runway, it stays level."""
+    from ts_transformer.autopilot.frame import Kinematics
+    from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M, Vertical
+
+    words = Words(spec())
+    params = _params()
+    tan3 = math.tan(math.radians(TEST_GLIDEPATH_DEG))
+
+    def aim_deg(above_threshold_m, to_go_m, captured, glidepath_tan=tan3, go_around=False, off_course_deg=0.0,
+                angle_class=1):
+        """The path angle asked for on the first cycle, deg, descending positive, level at 75 m/s under "descend to
+        land" with ``angle_class`` (the shallowest descent class unless given)."""
+        law = Vertical(1, params, words, CPU)
+        state = Kinematics(*(torch.tensor([v], dtype=F64)
+                             for v in (0.0, 0.0, 100.0 + above_threshold_m, 75.0, 90.0, 0.0, 75.0, 60000.0)))
+        _, wanted, _ = law.rate(state, torch.tensor([float("nan")], dtype=F64), torch.tensor([True]),
+                                torch.tensor([angle_class]), torch.tensor([words.angle_deg(angle_class)], dtype=F64),
+                                torch.tensor([[0, 0]]),
+                                torch.tensor([to_go_m], dtype=F64), torch.tensor([100.0], dtype=F64),
+                                torch.tensor([TEST_TCH_M], dtype=F64), torch.tensor([glidepath_tan], dtype=F64),
+                                torch.tensor([off_course_deg], dtype=F64), torch.tensor([abs(to_go_m)], dtype=F64),
+                                torch.tensor([captured]), torch.tensor([go_around]))
+        return -math.degrees(float(wanted[0]) * params.path_time_constant_s)       # level now: the reference is −aim
+
+    under = TEST_TCH_M + 8000.0 * tan3 - 134.0                                     # 8 km out, 134 m under the glidepath
+    on = TEST_TCH_M + 8000.0 * tan3
+    for captured in (True, False):
+        assert aim_deg(under, 8000.0, captured) == pytest.approx(0.0)              # levels off
+        assert aim_deg(under, 8000.0, captured, glidepath_tan=0.0) > 0.5           # the tube alone descends
+        assert aim_deg(on, 8000.0, captured) == pytest.approx(aim_deg(on, 8000.0, captured, glidepath_tan=0.0))
+    assert aim_deg(30.0, -200.0, True) == pytest.approx(aim_deg(30.0, -200.0, True, glidepath_tan=0.0))
+    assert aim_deg(under, 8000.0, True, go_around=True) == pytest.approx(-words.spec.climb_angle_centre_deg)
+    # on the edge, 60° off the course (a base leg), under the steepest class: without the edge the law descends
+    # steeper than the edge falls there (half the glidepath's slope); with it, exactly that; flying away, level
+    edge, steepest = TEST_TCH_M + 8000.0 * tan3 - GLIDEPATH_BELOW_M, words.n_descent
+    base_leg = math.degrees(math.atan(tan3 * 0.5))
+    assert aim_deg(edge, 8000.0, False, glidepath_tan=0.0, off_course_deg=60.0, angle_class=steepest) > base_leg + 0.5
+    assert aim_deg(edge, 8000.0, False, off_course_deg=60.0, angle_class=steepest) == pytest.approx(base_leg)
+    assert aim_deg(edge, 8000.0, False, off_course_deg=180.0, angle_class=steepest) == pytest.approx(0.0)
+
+
+def test_the_executors_glidepath_edge_is_the_post_training_checks():
+    """`vertical.GLIDEPATH_BELOW_M` mirrors `prior.procedure.GLIDEPATH_BELOW_M` (`autopilot` imports no model package)."""
+    from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M
+    from ts_transformer.prior import procedure
+
+    assert GLIDEPATH_BELOW_M == procedure.GLIDEPATH_BELOW_M
 
 
 def test_words_said_on_one_flown_row_leave_the_later_one_of_each_column():
@@ -1108,7 +1175,9 @@ def test_the_landing_aim_leaves_the_words_tube_only_when_the_admitted_heights_ar
                                        torch.tensor([angle_class]), torch.tensor([words.angle_deg(angle_class)], dtype=F64),
                                        torch.tensor([[0, 0]]), torch.tensor([3000.0], dtype=F64),
                                        torch.tensor([100.0], dtype=F64), torch.tensor([TEST_TCH_M], dtype=F64),
-                                       torch.tensor([3000.0], dtype=F64), torch.tensor([True]), torch.tensor([False]))
+                                       torch.tensor([math.tan(math.radians(TEST_GLIDEPATH_DEG))], dtype=F64),
+                                       torch.zeros(1, dtype=F64), torch.tensor([3000.0], dtype=F64), torch.tensor([True]),
+                                       torch.tensor([False]))
         return bool(modes["aim_left_tube"][0])
 
     # 3000 m out, the 3° class from 160 m over the threshold: its tube reaches the threshold near 0 m — admitted
@@ -1120,22 +1189,65 @@ def test_the_landing_aim_leaves_the_words_tube_only_when_the_admitted_heights_ar
     assert crossing_for(600.0, 1)
 
 
-@pytest.mark.parametrize("angles", [(2.1, 3.3, 4.3), (3.9, 2.8, 2.0)], ids=["steepening", "shallowing"])
-def test_a_landing_descent_whose_class_changes_toward_the_runway_stays_in_each_words_tube(angles):
+def _descent_legs(angles, rows, level_rows):
+    """``level_rows`` of level flight, then three descent legs at ``angles`` (deg) over ``rows`` each, slowing
+    82 → 78 m/s."""
+    return [(level_rows, 0.0, 85.0, 0.0), *[(n, 0.0, v, -v * np.tan(np.radians(angle)))
+                                            for n, v, angle in zip(rows, (82.0, 80.0, 78.0), angles)]]
+
+
+def _under_the_glidepath_m(signals):
+    """How far each observed row is under the test runway's 3° glidepath (runway 09: threshold at the origin), m."""
+    return 100.0 + TEST_TCH_M - signals.e_m * math.tan(math.radians(TEST_GLIDEPATH_DEG)) - signals.altitude_m
+
+
+@pytest.mark.parametrize("angles, rows, level_rows", [((2.1, 3.3, 4.3), (50, 50, 30), 30),
+                                                     ((4.3, 3.2, 2.3), (40, 50, 15), 5)],
+                         ids=["steepening", "shallowing"])
+def test_a_landing_descent_whose_class_changes_toward_the_runway_stays_in_each_words_tube(angles, rows, level_rows):
     """Review 2026-09-24: a straight-in descent said as three angle words that steepen or shallow toward the runway.
     No one class reaches the landing, but each word's tube is flown while a later word can still bring it there: the
-    land word inside on every row, crossing inside evaluation's vertical gate about the published TCH."""
+    land word inside on every row, crossing inside evaluation's vertical gate about the published TCH. Both profiles
+    descend above the glidepath's lower edge (the next test flies one under it)."""
     from evaluation.thresholds import RNAV_TERMINAL_VERTICAL_BOUND_M
+    from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M
 
-    legs = [(30, 0.0, 85.0, 0.0), *[(rows, 0.0, v, -v * np.tan(np.radians(angle)))
-                                    for rows, v, angle in zip((50, 50, 30) if angles[0] < angles[-1] else (40, 50, 50),
-                                                              (82.0, 80.0, 78.0), angles)]]
-    drop = sum(rows * 2.0 * -climb for rows, _, _, climb in legs)
-    _, verdict, _ = _fly_sentence(instruction_flight(*fly_legs(legs, 90.0, 120.0 + drop, -150.0, 0.0)))
+    legs = _descent_legs(angles, rows, level_rows)
+    drop = sum(n * 2.0 * -climb for n, _, _, climb in legs)
+    signals = instruction_flight(*fly_legs(legs, 90.0, 120.0 + drop, -150.0, 0.0))
+    descending = np.arange(len(signals.e_m)) >= level_rows
+    assert _under_the_glidepath_m(signals)[descending].max() < GLIDEPATH_BELOW_M
+    _, verdict, _ = _fly_sentence(signals)
     land = verdict.words["vertical"][-1]
     assert verdict.outcome == "landed"
     assert land["inside"] == land["rows"]
     assert abs(verdict.crossing["height_m"] - TEST_TCH_M) <= RNAV_TERMINAL_VERTICAL_BOUND_M
+
+
+def test_a_final_said_under_the_glidepaths_lower_edge_is_held_at_the_edge():
+    """Prior readouts §12: after "descend to land" the observed aircraft shallows (3.9° → 2.8° → 2.0°) and flies up to
+    ~167 m under the 3° glidepath (the law before the edge followed it 127 m under). The executor does not follow it
+    under the lower edge (the glidepath less `GLIDEPATH_BELOW_M`): it levels off there, still lands, and crosses inside
+    evaluation's vertical gate; the land word gives up its tube where the two disagree."""
+    from evaluation.thresholds import RNAV_TERMINAL_VERTICAL_BOUND_M
+    from ts_transformer.autopilot.judge import flown_track
+    from ts_transformer.autopilot.vertical import GLIDEPATH_BELOW_M
+
+    legs = _descent_legs((3.9, 2.8, 2.0), (40, 50, 50), 30)
+    drop = sum(n * 2.0 * -climb for n, _, _, climb in legs)
+    signals = instruction_flight(*fly_legs(legs, 90.0, 120.0 + drop, -150.0, 0.0))
+    flown, verdict, reading = _fly_sentence(signals)
+    said = int(np.flatnonzero(reading.words[:, ALTITUDE] == Words(spec()).altitude_land)[0])   # "descend to land"
+    assert _under_the_glidepath_m(signals)[said:].max() > GLIDEPATH_BELOW_M + 50.0           # the observed goes under
+    track = flown_track(flown.states[0, : int(flown.done_cycle[0]) + 2].numpy(), instruction_airport())
+    after = np.arange(len(track["e"])) >= said * round(spec().step_s / _params().cycle_s)  # the time clock
+    before = after & (-track["e"] > 0.0)                                                    # runway 09: threshold at the origin
+    glidepath = 100.0 + TEST_TCH_M - track["e"][before] * math.tan(math.radians(TEST_GLIDEPATH_DEG))
+    assert (glidepath - track["height"][before]).max() <= GLIDEPATH_BELOW_M + 2.0          # the hold law settles within metres
+    assert verdict.outcome == "landed"
+    assert abs(verdict.crossing["height_m"] - TEST_TCH_M) <= RNAV_TERMINAL_VERTICAL_BOUND_M
+    land = verdict.words["vertical"][-1]
+    assert land["inside"] < land["rows"]
 
 
 def test_a_speed_word_is_flown_at_the_vocabularys_pace_both_ways():

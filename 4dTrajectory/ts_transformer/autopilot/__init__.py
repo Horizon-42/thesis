@@ -1,5 +1,5 @@
 """Stage 3 of the two-tier framework: the executor, an autopilot that flies the instruction words
-through the point-mass dynamics (``docs/2026-09-23_executor_design.zh.md``).
+through the point-mass dynamics (``docs/executor_design.zh.md``).
 
 Once per control cycle it reads the aircraft's state and the words in force, turns the words into
 the rates it wants, inverts the point-mass equations for the controls that produce them, and

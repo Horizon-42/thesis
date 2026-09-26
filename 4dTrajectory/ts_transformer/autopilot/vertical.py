@@ -8,7 +8,7 @@ The inner loop (§5.1) turns a reference path angle into the rate the inverse fl
 | target T + level          | the hold law ``−(h − T) / (V τ_h)``, ``τ_h = 4 τ_γ`` (§5.4)  |
 | target T + descent k      | ``−γ_k`` until ``h − T ≤ V γ_k² / (2 γ̇_max)``, then hold (§5.3) |
 | target T + climb          | ``+γ_climb`` until ``T − h ≤ V γ_climb² / (2 γ̇_max)``, then hold |
-| descend to land + descent k | toward a crossing point (below), inside the tube in force while the landing can still be reached from it (between level and the steepest class's lower edge); before the capture never steeper than the straight line to that point, after it never steeper than the hold law toward its height or the line to it |
+| descend to land + descent k | toward a crossing point (below), inside the tube in force while the landing can still be reached from it (between level and the steepest class's lower edge); before the capture never steeper than the straight line to that point, after it never steeper than the hold law toward its height or the line to it; never under the glidepath's lower edge before the threshold |
 | go-around, descend to land  | ``+γ_climb`` (§4.6: a new altitude word gives the target) |
 
 γ_k is the class's nominal angle (the spec's class centre, `Words.angle_deg`). "Descend to land" means land on
@@ -26,11 +26,20 @@ heights is flown while a later angle word could still bring it there — the jud
 (the review of 2026-09-24: leaving it as soon as the class in force missed the landing failed the land word on flights
 whose classes steepened or shallowed toward the runway). After the capture the descent is never steeper than the hold
 law toward the crossing height or the line to the point, whichever is steeper, so it cannot pass under that height
-before the threshold. Nothing here is measured from data: the TCH is the runway's, the rest the vocabulary's. (Stage 2
-of the vocabulary-only plan, 500 train flights: the altitude column's words inside their envelopes 86.9 % → 95.1 %
-against the law that left the tube as soon as the class in force missed the landing, every flight landed, no crossing
-outside evaluation's ±22 m; planning the reach at the steepest class's open upper edge, 10°, left the tube too late —
-19 crossings above TCH + 22 m; aiming at the TCH itself, 94.5 %.) ``γ̇_max`` is ``path_rate_factor`` times the least rate that keeps an entry into the steepest class inside its tube (§5.1:
+before the threshold. And before the threshold, captured or not, it never descends under the pointed runway's published
+glidepath less `GLIDEPATH_BELOW_M` — the glidepath's lower edge, the one the post-training check draws
+(`prior.procedure`), which binds only inside the FAF and the LPV cone; here it binds at any lateral position, at the
+edge's height at the distance to go — by a hold law toward that line as the aircraft closes on it, at most level: under
+the edge it descends less steeply than the edge falls, level when more than V τ_h times the edge's slope under it, and
+rejoins the edge as the glidepath comes down (the approach joined from below, as flown). A class's tube leaves the height
+inside it open ("descend to land" with the shallowest class holds level flight as well as 1.5°), and aiming at the
+crossing point from below the glidepath rides the tube's steep edge, far under the glidepath (prior readouts §12; the
+floor's effect on the replays, readouts §13). Nothing here is measured from data: the TCH and the glidepath are the
+runway's, the edge the procedure's, the rest the vocabulary's. (Stage 2 of the vocabulary-only plan, 500 train flights:
+the altitude column's words inside their envelopes 86.9 % → 95.1 % against the law that left the tube as soon as the
+class in force missed the landing, every flight landed, no crossing outside evaluation's ±22 m; planning the reach at the
+steepest class's open upper edge, 10°, left the tube too late — 19 crossings above TCH + 22 m; aiming at the TCH itself,
+94.5 %.) ``γ̇_max`` is ``path_rate_factor`` times the least rate that keeps an entry into the steepest class inside its tube (§5.1:
 ``V γ_lo² / (2 ε)``, γ_lo the steepest class's lower edge, ε the altitude tolerance). Once a target is
 captured the flight holds it until a new altitude or angle word arrives, so the mode does not chatter
 at the capture height. The hold law's reference is kept inside the vocabulary's own nominal angles —
@@ -47,6 +56,10 @@ from ts_transformer.autopilot.frame import Kinematics
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.instructions.words import ANGLE_LEVEL, Words
 
+#: How far under the pointed runway's published glidepath "descend to land" may go before the threshold, m: the
+#: glidepath lower edge — MIRROR of `prior.procedure.GLIDEPATH_BELOW_M` (itself the optimizer's; `autopilot` imports no
+#: model package), held equal by `tests/test_autopilot.py`.
+GLIDEPATH_BELOW_M = 60.0
 #: The landing aim keeps this share of the altitude tolerance in hand, in the word's tube and in the heights admitted
 #: at the threshold (the tube is judged on the smoothed altitude, and the path-angle loop tracks its reference within
 #: metres; at the full tolerance about the TCH, 17 of 500 train crossings fell outside evaluation's ±22 m, none at half).
@@ -84,13 +97,15 @@ class Vertical:
 
     def rate(self, state: Kinematics, altitude_m: torch.Tensor, land: torch.Tensor, angle_class: torch.Tensor,
              angle_deg: torch.Tensor, issued: torch.Tensor, to_go_m: torch.Tensor, threshold_elevation_m: torch.Tensor,
-             crossing_height_m: torch.Tensor, straight_m: torch.Tensor, line_captured: torch.Tensor,
-             go_around: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+             crossing_height_m: torch.Tensor, glidepath_tan: torch.Tensor, off_course_deg: torch.Tensor,
+             straight_m: torch.Tensor, line_captured: torch.Tensor, go_around: torch.Tensor
+             ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         """The path-angle rate for this cycle, the rate the law wanted before its own limit ``γ̇_max``, and
         its modes; ``issued`` is ``[B, 2]``, the steps the altitude and angle words in force were written at
         (a new word releases a captured target); ``to_go_m`` is the distance along the centreline to the
-        pointed threshold, whose elevation is ``threshold_elevation_m`` and published crossing height
-        ``crossing_height_m``, ``straight_m`` the straight-line distance to it, ``line_captured`` whether the
+        pointed threshold, whose elevation is ``threshold_elevation_m``, published crossing height
+        ``crossing_height_m`` and published glidepath's tangent ``glidepath_tan``, ``off_course_deg`` the track
+        less its course, ``straight_m`` the straight-line distance to it, ``line_captured`` whether the
         lateral law has captured that centreline, and ``go_around`` whether a go-around is in force (§4.6:
         with a target it is climbed to — the hold law climbs at most at the climb class — and with "descend
         to land" in force the flight climbs at the climb class until an altitude word gives it one)."""
@@ -147,6 +162,14 @@ class Vertical:
         # never under the crossing height before the threshold: after the capture no steeper than the hold law toward
         # it or the line to it, whichever is steeper; before, than the straight line to it (never into the ground)
         floor = torch.where(line_captured, torch.maximum(above_crossing / speed_tau, on_line), shortest)
+        # never under the published glidepath's lower edge before the threshold, captured or not, at the edge's height
+        # at the distance to go: a hold law toward that line as the aircraft closes on it (the line falls at the
+        # glidepath's slope times the share of the speed along the course; flying away from the runway it rises) — the
+        # aim's own clamp below keeps the aircraft level under it until the glidepath comes down
+        glidepath = crossing_height_m + to_go_m * glidepath_tan - GLIDEPATH_BELOW_M
+        closing_tan = glidepath_tan * torch.cos(torch.deg2rad(off_course_deg))
+        on_glidepath = torch.atan(closing_tan) + (height - glidepath) / speed_tau
+        floor = torch.where(to_go_m > 0.0, torch.minimum(floor, on_glidepath), floor)
         aim = torch.minimum(torch.where(in_reach, in_tube, toward), floor).clamp(0.0, self.steepest_rad)
         reference = torch.where(land, torch.where(go_around, torch.full_like(aim, self.climb_rad), -aim),
                                 torch.where(self.captured, hold, -nominal))

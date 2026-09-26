@@ -10,8 +10,8 @@ included, since the labeller reads kinematics only) and projected into each airp
 (`instructions.signals`). The candidates are each manifest's published runway geometry; beside them
 go every runway end the harvest builds, from the configuration and CIFP the harvest and the
 evaluator read by default (`evaluation.cli.DEFAULT_CONFIG`, `DEFAULT_CIFP`). Every candidate must
-publish a threshold crossing height there (the executor's crossing point for "descend to land",
-`autopilot.runway_data.crossing_heights`): a runway without one is refused before anything is
+publish a threshold crossing height and a glidepath there (the executor's crossing point and floor for "descend to
+land", `autopilot.runway_data.vertical_paths`): a runway without them is refused before anything is
 written, never dropped quietly. Writes ``signals_{train,select,val}.npz``, ``signals.json`` (with the
 day split) and ``candidates.json`` into a NEW directory.
 
@@ -32,7 +32,7 @@ from typing import Any
 from aircraft.performance_index import performance_index_identity
 from evaluation.cli import DEFAULT_CIFP, DEFAULT_CONFIG
 from trajectory_data_process.harvest.airports import load_airport
-from ts_transformer.autopilot.runway_data import crossing_heights
+from ts_transformer.autopilot.runway_data import vertical_paths
 from ts_transformer.config import TSConfig
 from ts_transformer.data.data_provenance import arrival_data_provenance
 from ts_transformer.data.day_split import (
@@ -126,10 +126,11 @@ def main(argv: list[str] | None = None) -> int:
     runways = {a: load_airport(a, config_file=DEFAULT_CONFIG, cifp_file=DEFAULT_CIFP).runways for a in airports}
     geometries = {a: airport_geometry(a, json.loads(m.read_text(encoding="utf-8"))["runway_targets"], runways[a])
                   for a, m in manifests.items()}
-    # a candidate runway must publish a threshold crossing height: "descend to land" crosses it there (the executor's
-    # crossing point, executor design §5.2) — refused before anything is written, never dropped quietly
+    # a candidate runway must publish a threshold crossing height and a glidepath: "descend to land" crosses it at the
+    # one and does not descend under the other's lower edge (executor design §5.3) — refused before anything is written,
+    # never dropped quietly
     for airport, geometry in geometries.items():
-        crossing_heights(geometry, runways[airport])
+        vertical_paths(geometry, runways[airport])
 
     jobs = build_jobs(keys, manifests, args.limit)
     geometry_data = {a: g.to_dict() for a, g in geometries.items()}

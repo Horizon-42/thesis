@@ -33,7 +33,7 @@ from ts_transformer.autopilot.frame import AirportCharts
 from ts_transformer.autopilot.judge import Verdict, judge, read_flown
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.runway_data import published_crossing_heights
+from ts_transformer.autopilot.runway_data import VerticalPath, published_vertical_paths
 from ts_transformer.autopilot.sentence import DistanceClock, Sentences, TimeClock, TrackClock, row_at
 from ts_transformer.data.dataset import FlightSeries, series_from_row
 from ts_transformer.instructions.airport import AirportGeometry
@@ -58,7 +58,7 @@ class FlightContext:
     series: FlightSeries
     reading: Reading
     geometry: AirportGeometry
-    crossing_heights: tuple[float, ...]
+    vertical_paths: tuple[VerticalPath, ...]
     group: str
     approach_ias_mps: float
     observed_track_deg: np.ndarray     # the labeller's smoothed track of the observed flight (the heading chart's)
@@ -90,7 +90,7 @@ def open_flight(artefact: Path, split: str, dataset_id: str, words: Words) -> Fl
         raise NotFlyable(f"{dataset_id} cannot be flown: {group}")
     observed = admit(flight, geometry, spec)
     return FlightContext(signals=flight, series=series, reading=reading, geometry=geometry,
-                         crossing_heights=published_crossing_heights(geometry), group=group,
+                         vertical_paths=published_vertical_paths(geometry), group=group,
                          approach_ias_mps=replay.flight_approach_ias_mps(series, group),
                          observed_track_deg=observed.smoothed.track_deg,
                          observed_distance_m=observed.smoothed.distance_m,
@@ -124,7 +124,7 @@ def segment_batch(context: FlightContext, segment: Segment, reading: Reading, si
     starts at."""
     return replay.Batch(signals=[signals], series=[series_from_row(context.series, segment.start_row)],
                         readings=[reading], geometries=[context.geometry],
-                        crossing_heights=[context.crossing_heights], approach_ias_mps=[context.approach_ias_mps],
+                        vertical_paths=[context.vertical_paths], approach_ias_mps=[context.approach_ias_mps],
                         groups=[context.group], drawn={})
 
 
@@ -152,7 +152,7 @@ def fly_batch_until(batch: replay.Batch, params: ExecutorParams, words: Words, s
     (reading,) = batch.readings
     limit_s = len(reading.words) * spec.step_s * params.timeout_factor if model_limit_s is None else model_limit_s
     executor = Executor(batch.inputs(DEVICE),
-                        Runways.of(batch.geometries, batch.crossing_heights, dtype=f64, device=DEVICE),
+                        Runways.of(batch.geometries, batch.vertical_paths, dtype=f64, device=DEVICE),
                         AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
                         torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
                         time_limit_s=torch.tensor([limit_s], dtype=f64, device=DEVICE))

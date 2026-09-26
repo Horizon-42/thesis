@@ -109,12 +109,13 @@ class Executor:
         track_rate, lateral_modes = self.lateral.rate(now, force.heading_deg, force.issued_step[:, HEADING],
                                                       force.approach, force.runway, self.runways, self.bank, bank_rate,
                                                       cycle * params.cycle_s)
-        e0, n0, course, elevation, crossing = self.runways.pointed(force.runway)
-        before, right, _off = relative(now, e0, n0, course)
+        e0, n0, course, elevation, crossing, glidepath_tan = self.runways.pointed(force.runway)
+        before, right, off_course = relative(now, e0, n0, course)
         gamma_rate, gamma_wanted, vertical_modes = self.vertical.rate(now, force.altitude_m, force.land,
                                                         force.angle_class, force.angle_deg,
                                                         force.issued_step[:, [ALTITUDE, ANGLE]], before, elevation,
-                                                        crossing, torch.hypot(before, right), self.lateral.captured,
+                                                        crossing, glidepath_tan, off_course, torch.hypot(before, right),
+                                                        self.lateral.captured,
                                                         lateral_modes["go_around"])
         attitude = inverse.attitude(now, track_rate, gamma_rate, self.bank,
                                     bank_cap_rad=math.radians(self.words.spec.turn_bank_max_deg),

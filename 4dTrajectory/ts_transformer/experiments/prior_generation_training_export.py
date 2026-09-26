@@ -61,7 +61,7 @@ from ts_transformer.autopilot.flights import flight_inputs, rebuild_series
 from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import flown_track, outcome_of
 from ts_transformer.autopilot.params import ExecutorParams
-from ts_transformer.autopilot.runway_data import published_crossing_heights
+from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.experiments.prior_free_generation import (
     GENERATION_SCHEMA, _physics, flight_rows, limits_s, speak_and_fly,
 )
@@ -213,7 +213,7 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
     if flyable:
         batch = replay.Batch(signals=[signals[j] for j in flyable], series=[series[j] for j in flyable],
                              readings=readings, geometries=[geometry] * len(flyable),
-                             crossing_heights=[published_crossing_heights(geometry)] * len(flyable),
+                             vertical_paths=[published_vertical_paths(geometry)] * len(flyable),
                              approach_ias_mps=[replay.flight_approach_ias_mps(series[j], replay.OWN) for j in flyable],
                              groups=[replay.OWN] * len(flyable), drawn={})
         cpu = torch.device("cpu")

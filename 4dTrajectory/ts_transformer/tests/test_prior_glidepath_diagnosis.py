@@ -35,7 +35,8 @@ def _aim(captured: bool, above_threshold_m: float = 300.0, to_go_m: float = 8_00
     """The path angle the vertical law asks for (descending positive), deg, on its first cycle under "descend to land"
     with the shallowest class, level at 75 m/s ``above_threshold_m`` over a threshold ``to_go_m`` ahead on the course,
     and whether it left the tube. From 300 m at 8 km the line to the crossing point (about 2°) is steeper than the class
-    and the tube can still reach the landing; from 600 m at 3 km it cannot."""
+    and the tube can still reach the landing; from 600 m at 3 km it cannot. The glidepath is given at 0°, which puts
+    its lower edge (`vertical`) flat at the TCH less 60 m, out of the way: the what-if is about the tube."""
     params = _params()
     law = vertical.Vertical(1, params, WORDS, torch.device("cpu"))
     state = Kinematics(*(torch.tensor([v], dtype=F64)
@@ -44,7 +45,8 @@ def _aim(captured: bool, above_threshold_m: float = 300.0, to_go_m: float = 8_00
                                 torch.tensor([SHALLOWEST]), torch.tensor([WORDS.angle_deg(SHALLOWEST)], dtype=F64),
                                 torch.tensor([[0, 0]]), torch.tensor([to_go_m], dtype=F64),
                                 torch.tensor([100.0], dtype=F64), torch.tensor([TEST_TCH_M], dtype=F64),
-                                torch.tensor([to_go_m], dtype=F64), torch.tensor([captured]), torch.tensor([False]))
+                                torch.zeros(1, dtype=F64), torch.zeros(1, dtype=F64), torch.tensor([to_go_m], dtype=F64),
+                                torch.tensor([captured]), torch.tensor([False]))
     # level now: the reference is −aim
     return -math.degrees(float(wanted[0]) * params.path_time_constant_s), bool(modes["aim_left_tube"][0])
 

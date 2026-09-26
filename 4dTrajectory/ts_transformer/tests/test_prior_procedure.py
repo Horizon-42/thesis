@@ -353,7 +353,7 @@ def test_a_closed_loop_speaks_above_the_edge_and_stops_at_the_first_step_that_en
     assert np.flatnonzero(below).tolist()[:1] == [step]
     # the stopped sentence ends at its stop, whatever the executor made of the rest
     reading = read_flight(signals, geometry, one, words)
-    batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[geometry], crossing_heights=[],
+    batch = replay.Batch(signals=[signals], series=[], readings=[reading], geometries=[geometry], vertical_paths=[],
                          approach_ias_mps=[], groups=[], drawn={})
     row = flight_rows(batch, flown, [grid], words, "prior", [0], None, stops)[0]
     assert row["outcome"] == BELOW_GLIDEPATH and row["steps_said"] == step + 1

@@ -3,8 +3,9 @@
 The executor takes no information beyond the vocabulary (the user's rule, 2026-09-24): method A
 (`autopilot/derive.py`) sets τ_ψ = the heading lead and p = the bank limit over the lead; the turn rates, the bank
 limit, the speed changes' pace and the altitude tolerance are the vocabulary's, read at run time; a word takes effect
-when it is said; the landing crosses the pointed runway at its published threshold crossing height (read at replay,
-`runway_data.published_crossing_heights`). Nothing is measured from data (the measurements that set these before are
+when it is said; the landing crosses the pointed runway at its published threshold crossing height and never
+descends under its published glidepath's lower edge (read at replay, `runway_data.published_vertical_paths`;
+every candidate's is recorded in ``measurements.json`` as the spec is written). Nothing is measured from data (the measurements that set these before are
 archived: `archive/executor_vocabulary_only_2026_09/`). The design's fixed choices are module constants below. Writes ``spec.json`` + ``measurements.json`` into
 ``--dir`` (never over an existing file), from a clean tree only: the spec records the commit it was
 measured at and the executor's source hash, and a replay refuses a spec written by other code.
@@ -23,10 +24,13 @@ from pathlib import Path
 
 from ts_transformer.autopilot import derive
 from ts_transformer.autopilot.params import ExecutorParams
+from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.autopilot.sentence import CLOCKS
 from ts_transformer.autopilot.speed import speed_change_mps2
 from ts_transformer.autopilot.spec import executor_source_sha256, params_sha256, write_spec
-from ts_transformer.instructions.artefact import labeller_source_sha256, load_spec, require_current_labeller
+from ts_transformer.instructions.artefact import (
+    labeller_source_sha256, load_candidates, load_spec, require_current_labeller,
+)
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 #: Δt, the control period (the user's choice, design §14 item 5).
@@ -86,8 +90,14 @@ def main(argv: list[str] | None = None) -> int:
                                 "speed_change_mps2": speed_change_mps2(spec),
                                 "altitude_tolerance_m": spec.altitude_tolerance_m,
                                 "landing_max_height_m": spec.landing_max_height_m},
-        "from_the_runway": "each candidate's published threshold crossing height, read at replay "
-                           "(runway_data.published_crossing_heights)",
+        "from_the_runway": {
+            "rule": "each candidate's published threshold crossing height (the landing's crossing point) and glidepath "
+                    "angle (its lower edge not descended under before the threshold), read at replay "
+                    "(runway_data.published_vertical_paths); recorded here as the spec was written",
+            "published": {code: {candidate.ident: asdict(path)
+                                 for candidate, path in zip(geometry.candidates, published_vertical_paths(geometry))}
+                          for code, geometry in sorted(load_candidates(instructions).items())},
+        },
         "fixed": {"cycle_s": CYCLE_S, "path_time_constant_s": PATH_TIME_CONSTANT_S, "path_rate_factor": PATH_RATE_FACTOR,
                   "timeout_factor": TIMEOUT_FACTOR},
     }

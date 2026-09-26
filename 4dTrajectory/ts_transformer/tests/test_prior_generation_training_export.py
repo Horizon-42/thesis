@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from ts_transformer.autopilot import replay
+from ts_transformer.autopilot.runway_data import VerticalPath
 from ts_transformer.autopilot.judge import outcome_of
 from ts_transformer.experiments import prior_generation_training_export as export
 from ts_transformer.experiments.prior_free_generation import GENERATION_SCHEMA, flight_rows
@@ -28,7 +29,7 @@ def _sample(seed: int):
     flown, said, geometry, one, inputs, forbidden, signals, _ = _speak(seed)
     words = Words(one)
     batch = replay.Batch(signals=[signals], series=[None], readings=[read_flight(signals, geometry, one, words)],
-                         geometries=[geometry], crossing_heights=[(15.0,)], approach_ias_mps=[70.0],
+                         geometries=[geometry], vertical_paths=[(VerticalPath(15.0, 3.0),)], approach_ias_mps=[70.0],
                          groups=[replay.OWN], drawn={})
     (row,) = flight_rows(batch, flown, [said[0]], words, "prior", [0], forbidden)
     return flown, said[0], geometry, words, row, inputs
@@ -213,7 +214,8 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
     signals_by_id = {flight.dataset_id: flight for flight in (vectored, straight)}
     monkeypatch.setattr(export, "rebuild_series", lambda directory, flights: [series(signals_by_id[f.dataset_id]) for f in flights])
     monkeypatch.setattr(export, "flight_inputs", inputs)
-    monkeypatch.setattr(export, "published_crossing_heights", lambda geometry: (15.0,) * len(geometry.candidates))
+    monkeypatch.setattr(export, "published_vertical_paths",
+                        lambda geometry: (VerticalPath(15.0, 3.0),) * len(geometry.candidates))
     monkeypatch.setattr(export, "runway_hae_minus_msl_m", _offsets)
     args = ["--prior", str(tmp_path / "prior"), "--label", "a test prior", "--instructions", str(tmp_path / "artefact"),
             "--executor", str(tmp_path / "executor"), "--airports-root", str(tmp_path / "airports"), "--set", SET_ID,

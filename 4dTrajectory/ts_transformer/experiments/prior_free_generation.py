@@ -165,7 +165,7 @@ def augmented_inputs(inputs: FlightInputs, geometries: Sequence[AirportGeometry]
 
 def _physics(batch: replay.Batch, device: torch.device) -> tuple[Runways, AirportCharts, torch.Tensor]:
     f64 = torch.float64
-    return (Runways.of(batch.geometries, batch.crossing_heights, dtype=f64, device=device),
+    return (Runways.of(batch.geometries, batch.vertical_paths, dtype=f64, device=device),
             AirportCharts.of(batch.geometries, dtype=f64, device=device),
             torch.tensor(batch.approach_ias_mps, dtype=f64, device=device))
 
