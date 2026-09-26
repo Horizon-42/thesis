@@ -445,8 +445,11 @@ that divergence is a known open item (see the README's "Future Improvements").
   这套配色里能找到的最好的一个：和 Training 的每种颜色 OKLab 色差正常视觉 ≥ 17.7（最近的是实时执行器的出界红，离 base 18.5），
   模拟色盲 ≥ 11.6；但对比度只有 3.3:1，所以只用在线、色块、边框和时间轴上的结束时刻（用户要这个时刻用模型的颜色写），名字和数字
   用正文颜色，旁边放色块。同一模型的各轮同色，轮次用文字说。
-- **导出时模型只在词表规则下说话**（相容规则、跑道锁定），不带它自己的程序屏蔽（加入前的高度下限、不许爬回、下滑道下边界；
-  屏蔽已跟着模型记在它的目录里，导出器明确传"无"，因为载荷还装不下被下滑道下边界截停的句子）——augmented 是在程序屏蔽下训练和读数的。导出器拒绝在程序屏蔽下画的正式读数，结果表的说明写明这一点；修法见仓库
+- **模型按它训练时的屏蔽说话**：词表规则总是开着；程序屏蔽是模型自己的（`procedure_masks.json`：base、landing 无，augmented
+  `procedure-altitudes-v2`）。带程序高度的句子在飞到下滑道下边界以下的那一步截停，结局 `below_glidepath`（`TRAINING_FREE_OUTCOMES`
+  = 判决的结局 + 它，`prior_free_generation.FREE_OUTCOMES` 的镜像），航迹到那一步结束、没有越过入口；读取器只在叠加层的
+  `generation.procedureMasks` 含 `procedure-altitudes-v2`（`TRAINING_PROCEDURE_ALTITUDES`）时接受这个结局。实时执行器重飞时带回
+  这几套屏蔽和数据摘要，后端核对后在同一步截停（AV26）。导出器拒绝在程序屏蔽下画的正式读数，结果表的说明写明这一点；修法见仓库
   `docs/code-health-followups.md`（2026-09-26）。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
@@ -507,7 +510,10 @@ that divergence is a known open item (see the README's "Future Improvements").
   下一个航向词总放得下；会截短的是没有上限的距离词钟一步越过下一个词、或更长的提前量——2026-09-25 全部 3,526 个航向词试飞，0 次。
 - 前端把答复绑到屏幕上这一段：同一架航班、`endRow` 是色块的终点、词表规格相同、**告诉执行器的词就是句子条这一段显示的词**；
   航向带的行是执行器自己飞过的步，以判决读到的飞出航迹为界、不以句子段尾为界（执行器可能晚听到下一个航向词）；
-  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v4` 两边钉住（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
+  对不上整份拒读；答复只画在它飞的那一句上（`autopilotOnScreen` 比 `source`）。答复格式 `aeroviz-autopilot-segment-v5` 两边钉住
+  （v5：模型的句子带它说话时的程序屏蔽 `procedureMasks`——名字和数据摘要，后端重建后核对，不一致按名字拒绝；在程序高度下说的句子
+  飞完按自由生成的规则 `fly.glidepath_stop` 截在下滑道下边界的那一步，结局 `below_glidepath`；`GlidepathStopTest` 逐架钉住它与
+  `glidepath_stops` 相同）（`SCHEMA` / `TRAINING_AUTOPILOT_SCHEMA`，判定状态与结局
   名也是镜像）；它带 `timing`（后端墙钟：等待；加起来等于总计的各项——集合与规格、重建航班或沿用、准备这一段、执行器与算了的周期数、判定、
   写答复；`flyS` 只是执行器的周期，装配物理量算在"准备"里），前端加上浏览器往返时间。单步飞法由
   `test_autopilot_segment.StepperTest` 钉住：真实执行器上，不设段尾时与 `executor.fly` 逐周期相同，设了段尾时等于它在词钟首次把

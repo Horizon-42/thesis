@@ -141,7 +141,7 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
 - **`EXPERIMENT_HORIZON_MODES` = `config.HORIZON_MODES` + the executor replay's `sentence`** — its records' horizon, stamped
   by the comparison builder; unlisted, one executor category would empty the airport's picker (AV25).
 - **Training's live executor flies the CLICKED word's segment on the backend, every time** (`POST /autopilot/segment`,
-  `aeroviz-autopilot-segment-v4`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
+  `aeroviz-autopilot-segment-v5`; `trainingPick`, never the hover cursor): from the observed state where the word is said to
   where its envelope ends (the next word of its column; a heading word's a lead later — drawn as a faded, dashed TAIL from
   where the executor heard the next heading word, `nextWordHeardS` / `autopilotRunAndTail`; the sentence's end: to the landing),
   the executor's own stepper driven cycle by cycle and stopped there (never fly-then-cut); the answer is refused unless the
@@ -178,7 +178,9 @@ UI components (ControlPanel, HUD, FlightTable) overlay on the Cesium canvas via 
   grouping — by name in training order, then run, a run's rounds in order; a run named when its stage has two, a round exported
   twice named by overlay id — and every view prints its `title` / `memberLabel`, never a name of its own; the bar: a tab per
   model, the read model's rounds as `r1 r2 …` chips (a round keeps the sample number); colour by NAME (`TRAINING_MODEL_COLOR`:
-  base `#d946ef`, landing `#a3e635`, augmented `#b82e7a` — 3.3:1, a mark colour, not for running text) (AV32).
+  base `#d946ef`, landing `#a3e635`, augmented `#b82e7a` — 3.3:1, a mark colour, not for running text); **a model speaks under
+  its OWN procedure's masks** (`generation.procedureMasks`); under the procedure's altitudes a sentence may end
+  `below_glidepath` (`TRAINING_FREE_OUTCOMES`), and the live executor sends the masks back and is cut at the same step (AV32).
 
 ## Comparison CZML colour contract
 

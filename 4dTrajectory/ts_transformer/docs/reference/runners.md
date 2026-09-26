@@ -304,10 +304,13 @@ which follows `endS` for a crossing without the capture and the stall cut-off (`
 as the formal readout counts them, shaded by the frontend. `--readout` copies the model's formal val free generation landed
 shares (all / straight-in / vectored, null where the draw had none) at the payload's airport (`here`) and pooled (`all`),
 refused unless it is this prior (path from `4dTrajectory/outputs/` on), this executor spec (content sha), artefact, val,
-`N_LOOK`, samples, temperature and NO procedure masks, and its draw's per-airport count is a number or `EVERY_FLIGHT` (the
-draw's phrase, pinned against `replay.py`). **The prior speaks under the vocabulary's rules only**, never its own procedure's masks (`prior.masks`, `ProcedureMasks.none()` passed explicitly: the payload cannot yet carry a stopped sentence), i.e. not the procedure's
-(the pre-join floor, no climb back, the glidepath's lower edge) that stage 2 (augmented) was trained and read out under
-(`docs/code-health-followups.md`, 2026-09-26): a readout drawn under them is refused and the frontend says so. The
+`N_LOOK`, samples, temperature and the procedure's altitudes exactly when the model's own masks hold them, and its draw's
+per-airport count is a number or `EVERY_FLIGHT` (the draw's phrase, pinned against `replay.py`). **The prior speaks as it was
+trained to**: under the vocabulary's rules and its OWN procedure's masks (`open_trained_prior` returns them from
+`load_prior`), its sentences read by the formal readout's own `prior_free_generation.said_rows` — under the procedure's
+altitudes a sentence stops at the first flown step below the glidepath lower edge (`BELOW_GLIDEPATH`; `sample_payload`'s
+``stop``: no crossing, the track to that step's end state); `generation.procedureMasks` names each set with the digest of
+the data it read, which the live backend checks before flying a sample again (AV26). The
 checkpoint: `prior_training_export.open_trained_prior` (shared with `prior_training_export`). **The model is named, not
 labelled** (`MODEL_NAMES` = base / landing / augmented, the post-training design's table; mirrored by the frontend's
 `TRAINING_MODEL_NAMES`): `model_identity` reads the config — no `fine_tuning` is `base`, else the method that post-trained it

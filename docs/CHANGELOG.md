@@ -1,5 +1,21 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-27 — Training：模型按它自己的程序屏蔽说话，被下滑道下边界截停的句子一路显示到实时执行器（branch `dev-training-rounds`）
+
+- 用户：程序屏蔽应该在模型预测时就加上；`dev-procedure-masks` 已经让屏蔽跟着模型走（`procedure_masks.json`），只剩 Training 这一条链
+  还明确传"无"。用户同意三处一起补、合并前做完、合并后再重导出。
+- 导出器：用模型自己的程序屏蔽说话（`open_trained_prior` 一并返回），句子按正式读数的同一个函数读——从 `prior_rows` 抽出的
+  `prior_free_generation.said_rows`：带程序高度时在飞到下滑道下边界以下的那一步截停，结局 `below_glidepath`，之后说的词不算，航迹到
+  那一步结束时的状态、没有越过入口；`generation.procedureMasks` 写出每套屏蔽和它读的数据摘要；`--readout` 要与模型的屏蔽一致。
+- 前端：`TRAINING_FREE_OUTCOMES`（判决结局 + `below_glidepath`，`FREE_OUTCOMES` 的镜像）；只有含 `procedure-altitudes-v2` 的叠加层
+  接受这个结局，且结束时刻必须是最后一步的末尾；屏蔽名只收 `TRAINING_PROCEDURE_MASK_SETS`（`masks.SETS` 的镜像）、摘要必须是 sha256。
+- 后端实时执行器（`aeroviz-autopilot-segment-v5`）：请求里模型的句子带 `procedureMasks`；后端用自己的数据重建、摘要不同就拒绝（提示
+  重启）；飞完用 `fly.glidepath_stop`（`glidepath_stops` 的镜像，测试逐架钉住）找截停步，把飞行截在那一步结束时的状态（`cut_at_step`：
+  `done_cycle = (k+1)·每步周期数 − 1`），结局 `below_glidepath`；判决在截停之前就读到事件（越过入口没截获、失速）的，按名字拒绝。
+- 测试：Vitest 845；后端 71；ts 全套 1,514（审查修改之前跑的；之后改到的文件单独重跑）。opus 审查：1 条必须改（截停晚了一个周期——
+  `done_cycle` 是"在其末尾结束的周期"，截停状态在它之后）、3 条应改、7 条小处，全部改掉；新测试在真实判决上核对截停后的最后一个
+  状态就是导出样本航迹的最后一点。
+
 ### 2026-09-26 — Training：多轮后训练之间切换，模型按名字认（branch `dev-training-rounds`）
 
 - 用户：Training 里只有 base 与"后训练"两种切换，多轮后训练的不同模型分不开。原因：导出器的载荷只带一个自由文字 `--label`

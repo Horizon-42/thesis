@@ -348,7 +348,7 @@ OVERLAYS beside a Training set (`training/overlays.json`; every re-flown flight 
 heading word's verdict is the judge's per-row band result, exported with its band, overlay v2 — the prior's path reproduces
 its val readout; the executor export runs from a worktree — the spec's hash counts `geokit` from the main checkout), and the
 root publisher's `--executor-replay` files the replay's records under Experiments (R13). `prior_generation_training_export`
-(2026-09-26) writes a model's OWN sentences over a set — free generation's own loop (the vocabulary's rules only — not the model's own procedure's masks yet),
+(2026-09-26) writes a model's OWN sentences over a set — free generation's own loop under the model's OWN procedure's masks (read by `said_rows`, the glidepath stop included),
 `--samples` a flight, words + flown track + outcome, the model NAMED from its config (base / landing / augmented, its round,
 run and start model; `MODEL_NAMES` is a frontend mirror), the formal val readout bound by prior / spec / artefact (R13).
 `heading_reading_compare` (ARCHIVED 2026-09-24 with the holds reading) flew one train sample under every heading reading at
