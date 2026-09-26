@@ -1,4 +1,4 @@
-# 两层模型：阶段记录（更新于 2026-09-27 00:20 UTC）
+# 两层模型：阶段记录（更新于 2026-09-26 22:30 UTC）
 
 **用途**：压缩上下文之前的交接文档。写明此刻每个阶段做到了哪里、产物在哪、关键数字、用户做过的决定、接下来按什么顺序做。
 设计本身在各自的设计文档里，这里只给结论和指路；历史看 git 和 `docs/CHANGELOG.md`。
@@ -244,11 +244,11 @@ landing 起，切入前加了两条硬约束（决断高度、跌破入口高度
   代码相同），**运行期间不要改它**；跑完再问用户删工作树和分支（删前先 unlink 数据软链接）。
 - **工作树 `executor-glidepath`、分支 `dev-executor-glidepath`**：已快进合并（`9557315d`），v10 的重读从它跑过；已删（用户 2026-09-26）——
   `v3_reread_v10_20260926/run.sh`、`v3_stage2_step0_v10_20260926/run.sh` 写的是它的路径，只作记录，不能照原样重跑。另一个会话整理 ts 文档的分支 `docs-reorg` 已合并进 dev-two-tier（用户 2026-09-26）：设计文档移到 `docs/two_tier/`（读数在 `docs/two_tier/readouts/`），`docs/` 里的脚本变成 runner 或归档，入口 `docs/README.md`；执行器指纹里的代码引用的十份记录和 `autopilot/__init__.py` 的路径等下一版执行器规格一起改（`docs/code-health-followups.md`）。它的工作树和分支已删（用户 2026-09-26）。
-- **分支 `dev-procedure-masks`（工作树 `.claude/worktrees/procedure-masks`，一个功能提交加一个审查修复提交，可快进合并）**：程序屏蔽跟着模型走、与词表规则分开
+- **分支 `dev-procedure-masks` 已快进合并进 dev-two-tier**（用户 2026-09-26，`c0fc756b`；工作树 `.claude/worktrees/procedure-masks` 还在，删之前问用户）：程序屏蔽跟着模型走、与词表规则分开
   （先验设计 §5.1，契约 C35）。每个模型目录多一个 `procedure_masks.json`，`load_prior` 一起读出，说话器的程序屏蔽必须给；自由生成
   `--procedure-masks` 默认用模型自己的（`none` 或点名换）。重构前后逐位相同（真实起点开关各 50 句、扩充起点 200 句）；ts 全套通过；opus 审查
-  没有必须修的，建议项已修。**合并之后、补记录之前所有先验都打不开**：补记录脚本 `/home/supercomputing/.claude/jobs/51eaaa9b/tmp/stamp.py`（演练：
-  现在补 22 个目录，带截断的运行跑完再补它的 8 轮），**写之前要用户同意**。与 `dev-training-rounds` 试合并：代码自动合并，只有
+  没有必须修的，建议项已修。**现有模型已补记录**（用户同意，2026-09-26 22:25 UTC）：22 个目录，脚本和日志在
+  `outputs/POOLED/prior/procedure_masks_stamp_20260927/`；**带截断的运行跑完后再用同一个脚本补它的 8 轮**（没有记录的目录 `load_prior` 拒绝打开）。与 `dev-training-rounds` 试合并：代码自动合并，只有
   `docs/CHANGELOG.md`、`docs/code-health-followups.md` 两处文字冲突。
 - **工作树 `training-rounds`（分支 `dev-training-rounds`，`f90a306c`）**：不是这边建的，另一个会话的，不要动。
 - **本地分支**：`dev-two-tier`、`main`、`wip-r32-leg-timing`（跑道意图 R3.2 没采纳的第三种改法，远端也有；跑道意图计划 §18.2 引用它
@@ -304,8 +304,8 @@ landing 起，切入前加了两条硬约束（决断高度、跌破入口高度
 
 ## 9 下一步
 
-0. **程序屏蔽跟着模型走**（分支 `dev-procedure-masks`，§6）：等用户合并；合并后马上补现有模型的 `procedure_masks.json`（要用户同意，先验设计
-   §5.1 第 6 条），带截断的运行跑完后再补它的各轮。以后拿 landing 和第二阶段的轮次比验证集，landing 要点名 `--procedure-masks
+0. **程序屏蔽跟着模型走**（§6）：已合并、现有 22 个模型已补记录；带截断的运行跑完后，用
+   `outputs/POOLED/prior/procedure_masks_stamp_20260927/stamp.py --write --record outputs/POOLED/prior/procedure_masks_stamp_<日期>` 补它的 8 轮（用户已同意这一步）。以后拿 landing 和第二阶段的轮次比验证集，landing 要点名 `--procedure-masks
    procedure-altitudes-v2`（它自己的是"无"）；这次运行结尾的验证集读数由工作树 `stage2-restart` 的旧代码跑，两者都开着程序高度，不受影响。
 1. **第二阶段带截断的比，在跑**（`outputs/POOLED/prior/v3_stage2_clip_20260926/`，run.pid，从工作树 `stage2-restart` `735edc69` 跑，与合并后的代码
    相同）：第 0–2 轮见 §4.4；还剩 6 轮（每轮约 35 分钟），然后 `choice.json` 选轮、验证集读一次（`val_kept_400x4`、`val_kept_aug_400x4`，与 landing

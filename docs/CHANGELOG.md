@@ -16,7 +16,9 @@
   高度的读数（与 `dev-training-rounds` 同一处同样的改法）；数据摘要里的浮点数先取到 1e-6（换一台机器三角函数的最后一位可能不同）；记录
   里的集合要按代码的顺序、各一次；第一阶段固定为"无"，不留可传错的参数；两个阶段交给说话器和读数的屏蔽各有测试；R21 写明拿 landing
   与第二阶段的轮次比验证集时要点名 `--procedure-masks procedure-altitudes-v2`（landing 自己的是"无"）。
-- 合并之后、现有模型补上 `procedure_masks.json` 之前，所有先验都打不开；补记录要用户同意（先验设计 §5.1 第 6 条）。
+- 用户同意后快进合并进 `dev-two-tier`（`c0fc756b`），随即给 22 个已结束的模型补上 `procedure_masks.json`（base 等 4 个、landing 各轮、CAT-K
+  各轮为"无"，停掉的重启 2 轮为 `procedure-altitudes-v2`；每个写完都用 `load_prior` 打开核对；`outputs/POOLED/prior/procedure_masks_stamp_20260927/`）。
+  带截断的第二阶段运行跑完后再补它的 8 轮；用退役规则训练的 10 个不补，打不开来说话。
 
 ### 2026-09-26 — 后训练第二阶段重启：切入前两条硬约束、MVA 只作读数、真实 / 扩充起点各半
 
