@@ -1,4 +1,4 @@
-"""Post-training stage 2 (post-training design §3–§5): augmented starts, the glidepath edge, reward and base pull only.
+"""Post-training stage 2 (post-training design §3–§5): augmented starts and the glidepath edge, the first stage's loss.
 
 Each round:
 
@@ -12,13 +12,11 @@ Each round:
 3. **rewards** — as the first stage (`prior.landing_reward`: 1 for landing in the airport's landing direction — the
    source flight's, its day and time kept), so a stopped sentence earns 0; each sentence's advantage is its reward less
    its start's mean; only starts whose sentences differ are trained on;
-4. **one pass** (`train.RewardTuner`, no data term): the advantage × the NLL of each sentence's own words and the pull
-   to the BASE model (``--base``: the data-only model every post-training stage pulls back to), both under the masks the
-   sentence was said under. The pull measures the distance exactly (`train.flight_exact_kl`) and its weight starts at
-   ``--kl-weight`` and follows a KL budget (`train.KlBudget`, design §5): before round 1's pass the start's distance to
-   the base on that round's trained sentences D₀ is measured, the target is D₀ + `BUDGET_DELTA`, and every update
-   adjusts the weight from the smoothed distance (fast up, slowly down, never below ``--kl-weight``); a smoothed distance
-   past the budget's stop ends the pass; every round records its model's distance before its pass;
+4. **one pass** (`train.RewardTuner`, the first stage's recipe, design §5): the advantage × the NLL of each sentence's own
+   words and ``--kl-weight`` × the pull to the BASE model (``--base``: the data-only model every post-training stage pulls
+   back to), both under the masks the sentence was said under, and ``--data-weight`` × the teacher-forced NLL of a batch
+   of train-day flights (their ADS-B rows and labelled words) with every update; every round records its model's
+   distance to the base on its fresh sentences before the pass;
 5. **the select readouts**, both with the edge: the select days' real starts (``--select-per-airport`` ×
    ``--select-samples``, the same flights and seed every round) and the same flights' augmented starts (one fixed
    augmentation each, drawn with ``seed`` + `SELECT_AUGMENT_OFFSET`), and the teacher-forced NLL on the select sentences.
@@ -27,8 +25,8 @@ The round kept (``choice.json``): among the rounds within round 0's guards — r
 `GUARD_LANDED_DROP` below, landed on the observed runway at most `GUARD_RUNWAY_DROP` below, and in every column of
 `GUARD_WORD_COLUMNS` the words a flight says after its first predicted step no farther from the labelled words on the
 same flights (the ratio's |ln|) than round 0 was plus ln `GUARD_HEADING_GROWTH` — the highest augmented-start landed
-share, the earliest within `TIE_SHARE`. The teacher-forced NLL is recorded, not a guard (the distance to the base is
-the budget's). Val is not read here. Writes into ``--out`` (a new directory, from a clean tree unless
+share, the earliest within `TIE_SHARE`. The teacher-forced NLL is recorded, not a guard (the data term holds it). Val
+is not read here. Writes into ``--out`` (a new directory, from a clean tree unless
 ``--smoke``): ``config.json``, ``round_00/readout.json``, ``round_<k>/{sentences.npz, sentences.json, checkpoint.pt,
 config.json, readout.json}``, ``history.json``, ``choice.json``.
 
@@ -72,13 +70,10 @@ from ts_transformer.prior.landing_reward import group_advantages, landing_direct
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import RunwayProcedure, published_procedures
 from ts_transformer.prior.scene import N_LOOK, Landings
-from ts_transformer.prior.train import (
-    BUDGET_ERROR_CLIP, BUDGET_GAIN_DOWN, BUDGET_GAIN_UP, BUDGET_SMOOTHING, BUDGET_STOP, KlBudget, RewardConfig,
-    RewardTuner, TrainConfig, evaluate,
-)
+from ts_transformer.prior.train import RewardConfig, RewardTuner, TrainConfig, evaluate
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-AUGMENTED_REWARD_SCHEMA = "ts-prior-augmented-reward-v2"
+AUGMENTED_REWARD_SCHEMA = "ts-prior-augmented-reward-v3"
 #: The pool a round draws its starts from, × the starts it needs: a flight with no plausible augmentation gives way to
 #: the pool's next.
 POOL_FACTOR = 1.25
@@ -92,10 +87,6 @@ GUARD_WORD_COLUMNS = ("approach", "heading", "altitude", "angle", "speed")
 #: How much farther from the labelled words a column may be than round 0, as a ratio: the first stage's heading-word
 #: growth, applied to every guarded column.
 GUARD_WORD_GROWTH = GUARD_HEADING_GROWTH
-#: The KL budget above the start's own distance to the base (design §5): the first stage's kept round is about this far
-#: from the base — the passes after it measured 0.008–0.012 on their own fresh sentences (the sampled-words estimate of
-#: the same KL `flight_exact_kl` computes, v3_rl_20260925 history) — so the second stage may go as far again.
-BUDGET_DELTA = 0.01
 
 
 @dataclass(frozen=True)
@@ -256,8 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="cuda", help="the prior's; the executor flies on CPU")
     parser.add_argument("--smoke", action="store_true", help="a dirty tree allowed; the runs are marked smoke")
     for field, default in asdict(RewardConfig()).items():
-        if field not in ("data_weight", "kl_estimate"):   # no data term, the exact distance (design §5)
-            parser.add_argument(f"--{field.replace('_', '-')}", type=type(default), default=default)
+        parser.add_argument(f"--{field.replace('_', '-')}", type=type(default), default=default)
     args = parser.parse_args(argv)
 
     def resolved(path: Path) -> Path:
@@ -269,13 +259,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{out} exists; a fine-tuning run is never overwritten")
     if args.samples < 2:
         parser.error("a start's sentences are compared with each other: --samples ≥ 2")
-    if args.kl_weight <= 0.0:
-        parser.error("the budget adjusts the pull's weight by factors: --kl-weight must be positive")
+    if args.data_weight <= 0.0:
+        parser.error("the second stage trains beside the data (design §5): --data-weight > 0")
     git = git_state()
     if git["dirty"] and not args.smoke:
         parser.error("the tree has uncommitted changes; a fine-tuning run is made at a commit")
-    config = RewardConfig(**{f: getattr(args, f) for f in asdict(RewardConfig()) if f not in ("data_weight", "kl_estimate")},
-                          data_weight=0.0, kl_estimate="exact")
+    config = RewardConfig(**{f: getattr(args, f) for f in asdict(RewardConfig())})
     started = time.perf_counter()
     device = torch.device(args.device)
     params, record, words = replay.open_executor(executor_dir, instructions)
@@ -305,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     select_moves = [select_starts.moves[j] for j in select_kept]
     select = load_split(instructions, "select", spec, words, variant, landings=every_landing,
                         airports=model.config.airports)
+    data = load_split(instructions, "train", spec, words, variant, landings=every_landing,
+                      airports=model.config.airports)
     select_directions = {signals.dataset_id: landing_direction(signals, geometry, every_landing[signals.airport])
                          for signals, geometry in zip(select_batch.signals, select_batch.geometries)}
     labelled = labelled_words(select_batch)
@@ -324,9 +315,7 @@ def main(argv: list[str] | None = None) -> int:
                                      for j, m in zip(select_kept, select_moves)],
                    "labelled_words_after_first_per_flight": labelled},
         "seed": args.seed, "tie_share": TIE_SHARE,
-        "budget": {"delta": BUDGET_DELTA, "gain_up": BUDGET_GAIN_UP, "gain_down": BUDGET_GAIN_DOWN,
-                   "error_clip": BUDGET_ERROR_CLIP, "stop": BUDGET_STOP, "smoothing": BUDGET_SMOOTHING,
-                   "start_weight_and_floor": config.kl_weight},
+        "data": {"split": "train", "flights": len(data.flights)},
         "guards": {"landed_drop": GUARD_LANDED_DROP, "runway_drop": GUARD_RUNWAY_DROP,
                    "word_columns": list(GUARD_WORD_COLUMNS), "word_margin_ln": math.log(GUARD_WORD_GROWTH)},
         "n_look": N_LOOK})
@@ -407,33 +396,21 @@ def main(argv: list[str] | None = None) -> int:
         log(f"round {round_number}: {len(earned)} sentences, reward {summary['reward_mean']:.3f}, below the edge "
             f"{Counter(sentences.outcomes)['below_glidepath']}, {summary['flights_with_contrast']} starts with a contrast")
         flights = sentence_flights(augmented, sentences, keep, model.config.airports, spec.step_s, landings)
-        split = Split(flights, select.airports, select.candidates, select.runways, select.courses, select.classes,
-                      variant)
+        split = Split(flights, data.airports, data.candidates, data.runways, data.courses, data.classes, variant)
         allowed = [sentences.allowed[s] for s in keep]
         # the model's distance to the base on its own fresh sentences, before the pass
         start_distance = tuner.distance(split, allowed)
-        if tuner.budget is None:
-            # the budget (design §5): the start's own distance to the base on its first round's sentences, plus the delta
-            tuner.budget = KlBudget(start_distance + BUDGET_DELTA, floor=config.kl_weight)
-            write_json_atomic(out / "budget.json", {"start_distance": start_distance, "target": tuner.budget.target,
-                                                   "measured_on": f"round {round_number}'s {len(flights)} trained sentences"})
-            log(f"KL budget: the start is {start_distance:.4f} from the base, target {tuner.budget.target:.4f}")
-        passed = {**tuner.one_pass(split, advantages[keep], None, allowed, start_distance),
-                  "distance_at_start": start_distance}
+        passed = {**tuner.one_pass(split, advantages[keep], data, allowed), "distance_at_start": start_distance}
         log(f"round {round_number}: one pass over {len(flights)} sentences, reward term {passed['reward_mean']:.4f}, "
             f"KL to the base {start_distance:.4f} at the start, {passed['kl_mean']:.4f} in the pass (max "
-            f"{passed['kl_max']:.4f}, target {tuner.budget.target:.4f}), "
-            f"pull weight {passed['kl_weight_start']:.4g} → {passed['kl_weight_end']:.4g}"
-            + (f"; stopped at batch {passed['stopped']['batch']} (smoothed {passed['stopped']['smoothed']:.4f})"
-               if passed["stopped"] else ""))
+            f"{passed['kl_max']:.4f}), data NLL {passed['data_mean']:.4f}")
         torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
                     "train_config": start_config["train"], "state": copy.deepcopy(model.state_dict()),
                     "spec_sha256": spec.sha256}, directory / "checkpoint.pt")
         write_json_atomic(directory / "config.json", {
             **start_config, "written_utc": utc_now(), "git": git, "smoke": args.smoke,
             "fine_tuning": {"schema": AUGMENTED_REWARD_SCHEMA, "from": str(prior_dir), "base": str(base_dir),
-                            "round": round_number, "optimiser": asdict(config), "samples": args.samples,
-                            "kl_budget_target": tuner.budget.target, "kl_weight_end": tuner.kl_weight}})
+                            "round": round_number, "optimiser": asdict(config), "samples": args.samples}})
         readout = read_select(round_number)
         write_json_atomic(directory / "readout.json", readout)
         history.append(history_row(round_number, readout, train_pass=passed,

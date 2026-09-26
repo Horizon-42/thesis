@@ -32,10 +32,8 @@ from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY,
 from ts_transformer.prior.augment import Augmentation, Limits, augment_signals, augment_state, draw, rotate
 from ts_transformer.prior.generate import allowed_classes
 from ts_transformer.prior.scene import N_LOOK
-from ts_transformer.prior.model import asked_entries
 from ts_transformer.prior.train import (
-    BUDGET_ERROR_CLIP, BUDGET_GAIN_DOWN, BUDGET_GAIN_UP, BUDGET_SMOOTHING, BUDGET_STOP, KlBudget, RewardConfig, RewardTuner,
-    allowed_tensors, flight_exact_kl, masked,
+    RewardConfig, RewardTuner, allowed_tensors, masked,
 )
 from ts_transformer.tests.test_autopilot import _params
 from ts_transformer.tests.test_prior_landing_reward import _sentences, _split
@@ -174,12 +172,13 @@ def test_augmented_sentences_read_the_moved_rows_carry_their_masks_and_train_und
     augmented = replace(batch, signals=[moved])
     keep = np.arange(samples)
     split = _split(sentence_flights(augmented, sentences, keep, ("KXXX",), one.step_s, None), words)
-    tuner = RewardTuner(_model(words), _model(words), RewardConfig(learning_rate=1e-3, warmup_steps=1, data_weight=0.0),
-                        CPU, seed=0)
-    passed = tuner.one_pass(split, np.array([1.0, -1.0, 0.5, -0.5]), None, sentences.allowed)
-    assert all(math.isfinite(passed[k]) for k in ("reward_mean", "kl_mean"))
-    # the budget's measure is the pull's own: a model is no distance from itself, and after the pass it is some
-    assert RewardTuner(_model(words), _model(words), RewardConfig(data_weight=0.0), CPU, seed=0).distance(
+    # the second stage's pass: the sentences under the masks they were said under, beside a data batch (here the same
+    # flights teacher-forced — the fixture has no labelled train split)
+    tuner = RewardTuner(_model(words), _model(words), RewardConfig(learning_rate=1e-3, warmup_steps=1), CPU, seed=0)
+    passed = tuner.one_pass(split, np.array([1.0, -1.0, 0.5, -0.5]), split, sentences.allowed)
+    assert passed["data_mean"] > 0.0 and all(math.isfinite(passed[k]) for k in ("reward_mean", "kl_mean"))
+    # the distance to the base is the pull's own measure: a model is no distance from itself, and after the pass it is some
+    assert RewardTuner(_model(words), _model(words), RewardConfig(), CPU, seed=0).distance(
         split, sentences.allowed) == pytest.approx(0.0, abs=1e-9)
     assert tuner.distance(split, sentences.allowed) > 0.0
 
@@ -218,26 +217,24 @@ def test_the_trainer_scores_a_sentence_under_the_masks_it_was_said_under():
 HEADING_COLUMN = 2
 
 
-def test_without_a_data_term_the_pass_needs_no_data_and_trains_under_the_masks():
+def test_masks_that_allow_every_word_score_as_no_masks():
     one, geometry, batch, sentences = _sentences()
     words = Words(one)
     from ts_transformer.experiments.prior_landing_reward import sentence_flights
 
     split = _split(sentence_flights(batch, sentences, np.arange(3), ("KXXX",), one.step_s, None), words)
-    config = RewardConfig(learning_rate=1e-3, warmup_steps=1, data_weight=0.0)
+    config = RewardConfig(learning_rate=1e-3, warmup_steps=1)
     classes = _model(words).config.classes
     everything = [{c: np.packbits(np.ones((len(s), classes[c]), dtype=bool), axis=1, bitorder="little")
                    for c in (RUNWAY, ALTITUDE)} for s in sentences.said]
     free = RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split, np.array([1.0, -1.0, 0.0]),
-                                                                                   None)
+                                                                                   split)
     masked_all = RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(
-        split, np.array([1.0, -1.0, 0.0]), None, everything)
-    assert free["data_mean"] == 0.0
-    # masks that allow everything score as no masks
+        split, np.array([1.0, -1.0, 0.0]), split, everything)
     assert masked_all["reward_mean"] == pytest.approx(free["reward_mean"]) and masked_all["kl_mean"] == pytest.approx(
-        free["kl_mean"])
+        free["kl_mean"]) and masked_all["data_mean"] == pytest.approx(free["data_mean"])
     with pytest.raises(ValueError, match="sentences' masks for"):
-        RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split, np.zeros(3), None, everything[:1])
+        RewardTuner(_model(words), _model(words), config, CPU, seed=0).one_pass(split, np.zeros(3), split, everything[:1])
 
 
 def test_a_round_takes_each_airport_s_first_plausible_starts_from_its_pool():
@@ -285,89 +282,24 @@ def test_the_word_guard_reads_the_labelled_sentences_after_their_first_step():
         labelled_words(SimpleNamespace(readings=[silent]))
 
 
-def test_the_exact_distance_is_the_kl_over_each_cell_s_allowed_words():
-    """`flight_exact_kl`: Σ p (log p − log q) over a column's allowed classes per asked cell, summed per scene; what the
-    masks removed adds nothing, and its gradient stays finite."""
-    torch.manual_seed(0)
-    present = torch.zeros(1, 1, N_LOOK + 2, dtype=torch.bool)
-    present[..., : N_LOOK + 2] = True                                    # two predicted steps
-    asked = torch.ones(1, 1, N_LOOK + 2, 2, dtype=torch.bool)
-    model = [torch.randn(1, 1, N_LOOK + 2, 4, requires_grad=True), torch.randn(1, 1, N_LOOK + 2, 3)]
-    reference = [torch.randn(1, 1, N_LOOK + 2, 4), torch.randn(1, 1, N_LOOK + 2, 3)]
-    expected = 0.0
-    for m, r in zip(model, reference):
-        for row in range(N_LOOK, N_LOOK + 2):
-            p, q = torch.softmax(m[0, 0, row], -1), torch.softmax(r[0, 0, row], -1)
-            expected += float((p * (p.log() - q.log())).sum().detach())
-    assert float(flight_exact_kl(model, reference, present, asked)[0]) == pytest.approx(expected, rel=1e-5)
-    assert float(flight_exact_kl(reference, reference, present, asked)[0]) == pytest.approx(0.0, abs=1e-6)
-    allowed = torch.ones(1, 1, N_LOOK + 2, 4, dtype=torch.bool)
-    allowed[..., 3] = False                                              # the last class masked everywhere
-    kl = flight_exact_kl(masked(model, [allowed, None]), masked(reference, [allowed, None]), present, asked)[0]
-    kl.backward()
-    assert math.isfinite(float(kl)) and torch.isfinite(model[0].grad).all()
-    renormalised = 0.0
-    for row in range(N_LOOK, N_LOOK + 2):
-        p = torch.softmax(model[0][0, 0, row, :3].detach(), -1)
-        q = torch.softmax(reference[0][0, 0, row, :3], -1)
-        renormalised += float((p * (p.log() - q.log())).sum())
-    for row in range(N_LOOK, N_LOOK + 2):
-        p, q = torch.softmax(model[1][0, 0, row], -1), torch.softmax(reference[1][0, 0, row], -1)
-        renormalised += float((p * (p.log() - q.log())).sum())
-    assert float(kl) == pytest.approx(renormalised, rel=1e-5)
-    assert asked_entries(present).sum() == 2
-
-
-def test_the_budget_raises_the_pull_fast_above_its_target_lowers_it_slowly_below_and_never_under_its_floor():
-    budget = KlBudget(target=0.05, floor=0.01)
-    assert budget.adjusted(0.04, 0.05) == pytest.approx(0.04)
-    assert budget.adjusted(0.04, 0.075) == pytest.approx(0.04 * math.exp(BUDGET_GAIN_UP * 0.5))
-    assert budget.adjusted(0.04, 0.025) == pytest.approx(0.04 * math.exp(-BUDGET_GAIN_DOWN * 0.5))
-    # the error is cut: ten times over the target moves the weight no more than twice over it
-    assert budget.adjusted(0.04, 0.5) == pytest.approx(0.04 * math.exp(BUDGET_GAIN_UP * BUDGET_ERROR_CLIP))
-    assert budget.adjusted(0.04, 0.0) == pytest.approx(0.04 * math.exp(-BUDGET_GAIN_DOWN * BUDGET_ERROR_CLIP))
-    assert budget.adjusted(0.0101, 0.0) == 0.01                                   # never under the floor
-    # the stop: past its multiple of the target, or of the pass's start distance when that is farther
-    assert not budget.stops(BUDGET_STOP * 0.05, 0.01) and budget.stops(BUDGET_STOP * 0.05 + 1e-9, 0.01)
-    assert not budget.stops(BUDGET_STOP * 0.2, 0.2) and budget.stops(BUDGET_STOP * 0.2 + 1e-9, 0.2)
-
-
-def test_with_a_budget_the_pass_adjusts_the_pull_after_every_update_and_carries_it():
+def test_the_distance_before_a_pass_is_the_pass_s_own_measure():
     one, geometry, batch, sentences = _sentences()
     words = Words(one)
     from ts_transformer.experiments.prior_landing_reward import sentence_flights
 
     split = _split(sentence_flights(batch, sentences, np.arange(3), ("KXXX",), one.step_s, None), words)
-    config = RewardConfig(learning_rate=1e-2, warmup_steps=1, data_weight=0.0, tokens_per_batch=2)   # a sentence a batch
-    fixed = RewardTuner(_model(words), _model(words), config, CPU, seed=0)
-    first = fixed.one_pass(split, np.array([1.0, -1.0, 0.0]), None)
-    assert first["kl_weight_start"] == first["kl_weight_end"] == config.kl_weight == fixed.kl_weight
-    # the fixture's three batches: the first at no distance (the model still the reference), the second a little way
-    # off, the third far. The smoothed distance starts at the pass's start (0 here) and takes BUDGET_SMOOTHING of each
-    # batch; a target a little under the second smoothed value makes the second update raise the weight and the third
-    # batch end the pass (past 3 × the target) with no update from it
-    second = BUDGET_SMOOTHING * first["trace"]["kl"][1]
-    tuner = RewardTuner(_model(words), _model(words), config, CPU, seed=0)
-    tuner.budget = KlBudget(target=second / 1.5, floor=config.kl_weight)
-    passed = tuner.one_pass(split, np.array([1.0, -1.0, 0.0]), None, start_distance=0.0)
-    assert passed["batches"] == 2 and passed["kl_weight_start"] == config.kl_weight
-    assert passed["trace"]["smoothed"] == pytest.approx([0.0, second])
-    assert passed["trace"]["weight"] == pytest.approx([config.kl_weight, config.kl_weight])    # the floor held it
-    assert passed["kl_weight_end"] == pytest.approx(config.kl_weight * math.exp(BUDGET_GAIN_UP * 0.5))
-    assert passed["stopped"]["batch"] == 2 and passed["stopped"]["smoothed"] > BUDGET_STOP * tuner.budget.target
-    again = tuner.one_pass(split, np.array([1.0, -1.0, 0.0]), None, start_distance=tuner.distance(split))
-    assert again["kl_weight_start"] == passed["kl_weight_end"]          # carried across passes
-    with pytest.raises(ValueError, match="start distance"):
-        tuner.one_pass(split, np.array([1.0, -1.0, 0.0]), None)
-    with pytest.raises(ValueError, match="start distance"):
-        fixed.one_pass(split, np.array([1.0, -1.0, 0.0]), None, start_distance=0.0)
-    # the distance the budget is set from is the statistic its controller holds: a one-batch pass's measured distance
-    # (taken before its update) is `distance` taken before the pass
-    exact = RewardConfig(learning_rate=1e-2, warmup_steps=1, data_weight=0.0, kl_estimate="exact")
-    for estimate in (replace(config, tokens_per_batch=exact.tokens_per_batch), exact):     # one batch each
-        moved = RewardTuner(_model(words), _model(words), estimate, CPU, seed=0)
-        moved.one_pass(split, np.array([1.0, -1.0, 0.0]), None)
-        before = moved.distance(split)
-        assert moved.one_pass(split, np.array([1.0, -1.0, 0.0]), None)["kl_mean"] == pytest.approx(before, rel=1e-5)
-    with pytest.raises(ValueError, match="kl_estimate"):
-        RewardTuner(_model(words), _model(words), RewardConfig(kl_estimate="k3"), CPU, seed=0)
+    # a one-batch pass measures its distance before its update: `distance` taken before the pass
+    config = RewardConfig(learning_rate=1e-2, warmup_steps=1)
+    moved = RewardTuner(_model(words), _model(words), config, CPU, seed=0)
+    moved.one_pass(split, np.array([1.0, -1.0, 0.0]), split)
+    before = moved.distance(split)
+    again = moved.one_pass(split, np.array([1.0, -1.0, 0.0]), split)
+    assert again["batches"] == 1 and again["kl_mean"] == pytest.approx(before, rel=1e-5)
+    assert again["kl_trace"] == [again["kl_mean"]] and again["kl_max"] == again["kl_mean"]
+
+
+def test_the_runner_refuses_to_train_without_the_data_term(tmp_path):
+    with pytest.raises(SystemExit):
+        runner.main(["--prior", str(tmp_path / "p"), "--base", str(tmp_path / "b"), "--instructions", str(tmp_path / "i"),
+                     "--executor", str(tmp_path / "e"), "--out", str(tmp_path / "new"), "--data-weight", "0"])
+    assert not (tmp_path / "new").exists()
