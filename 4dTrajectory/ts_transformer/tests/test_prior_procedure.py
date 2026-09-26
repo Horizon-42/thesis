@@ -1,6 +1,7 @@
-"""The glidepath lower edge (post-training design §3, `prior.procedure`): where it binds, the word rules, the flown-track
-check, the final read from the coded approach, the mirrored constants; its mask in the speaker (`prior.generate`), the
-stop in the closed loop (`experiments.prior_free_generation.glidepath_stops`), and the stage-0 check's pieces
+"""The procedure's altitudes (post-training design §3, `prior.procedure`): where the glidepath lower edge binds, the join
+and the dip, the word rules 1–5, the flown-track check, the readouts before the join, the final read from the coded
+approach, the mirrored constants; the masks in the speaker (`prior.generate`), the stop in the closed loop
+(`experiments.prior_free_generation.glidepath_stops`), and the stage-0 check's pieces
 (`experiments.prior_procedure_check`)."""
 
 from __future__ import annotations
@@ -19,19 +20,24 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.frame import ALT, GAMMA, LAT, LON, MASS, PSI, SPEED
 from ts_transformer.experiments import prior_procedure_check
 from ts_transformer.experiments.prior_free_generation import (
-    BELOW_GLIDEPATH, flight_rows, glidepath_stops, in_force, speak_and_fly,
+    BELOW_GLIDEPATH, ProcedureMasks, flight_rows, glidepath_stops, in_force, sentence_pre_join, speak_and_fly,
 )
 from ts_transformer.experiments.prior_procedure_check import (
     MAX_FORBIDDEN_WORDS, MAX_STOPPED_REPLAYS, check_labelled, labelled_rows, passes,
 )
 from ts_transformer.instructions.airport import RunwayCandidate
 from ts_transformer.instructions.labeller.read import read_flight
-from ts_transformer.instructions.words import ALTITUDE, RUNWAY, UNCHANGED, Words
+from ts_transformer.instructions.words import (
+    ALTITUDE, ANGLE, APPROACH, APPROACH_CLEARED, APPROACH_GO_AROUND, APPROACH_NOT_CLEARED, HEADING, RUNWAY, UNCHANGED,
+    Words,
+)
 from ts_transformer.prior import procedure
 from ts_transformer.prior.generate import Speaker
+from ts_transformer.prior.mva import MvaChart
 from ts_transformer.prior.procedure import (
-    GLIDEPATH_BELOW_M, THRESHOLD_TOLERANCE_M, RunwayProcedure, airport_procedures, altitude_word_allowed, below_floor,
-    runway_procedure, track_tolerance_m, word_tolerance_m,
+    GLIDEPATH_BELOW_M, THRESHOLD_TOLERANCE_M, RunwayProcedure, airport_procedures, altitude_word_allowed,
+    angle_word_allowed, below_floor, climb_barred, pre_join, pre_join_readout, runway_procedure, track_tolerance_m,
+    word_tolerance_m,
 )
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT
@@ -45,10 +51,20 @@ TAN = math.tan(math.radians(3.0))
 RUNWAY_09 = instruction_airport().candidates[0]                   # threshold at the origin, flown eastbound
 
 
+#: A chart with no sector: no point has an MVA.
+NO_CHART = MvaChart("none", ())
+
+
 def _final(crossing_m: float = 115.0, candidate: RunwayCandidate = RUNWAY_09, faf_d_m: float = FAF_D_M,
-           cone: FasCourseGeometry | None = None) -> RunwayProcedure:
+           cone: FasCourseGeometry | None = None, decision_m: float | None = None) -> RunwayProcedure:
+    """A final on runway 09's course; its DA 46 m above the crossing point unless given (the TCH 15 m, a DA 61 m up)."""
     return RunwayProcedure(candidate=candidate, crossing_m=crossing_m, glidepath_tan=TAN, faf_d_m=faf_d_m,
-                           cone=cone or fas_course_geometry(candidate.length_m))
+                           cone=cone or fas_course_geometry(candidate.length_m),
+                           decision_m=crossing_m + 46.0 if decision_m is None else decision_m)
+
+
+#: Rules 3 and 4 off: joined, the climb not barred.
+FINAL_ONLY = {"joined": np.array(True), "barred": np.array(False)}
 
 
 def _at(d: float, xt: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
@@ -89,13 +105,15 @@ def test_the_word_rules_allow_the_step_holding_the_floor_and_land_only_from_abov
     floor = float(final.floor_m(*_at(d))[0])
     assert floor == pytest.approx(20 * step)
     e, n = _at(d)
-    assert altitude_word_allowed(final, np.array([20, 21, 19]), e, n, np.zeros(1), words).tolist() == [True, True, False]
+    assert altitude_word_allowed(final, np.array([20, 21, 19]), e, n, np.zeros(1), words,
+                                 **FINAL_ONLY).tolist() == [True, True, False]
     land = np.array([words.altitude_land])
-    assert altitude_word_allowed(final, land, e, n, np.array([floor - tolerance + 0.1]), words)[0]
-    assert not altitude_word_allowed(final, land, e, n, np.array([floor - tolerance - 0.1]), words)[0]
+    assert altitude_word_allowed(final, land, e, n, np.array([floor - tolerance + 0.1]), words, **FINAL_ONLY)[0]
+    assert not altitude_word_allowed(final, land, e, n, np.array([floor - tolerance - 0.1]), words, **FINAL_ONLY)[0]
     # outside the FAF there is no floor: any word
     far = _at(FAF_D_M + 500.0)
-    assert altitude_word_allowed(final, np.array([0, words.altitude_land]), *far, np.zeros(1), words).all()
+    assert altitude_word_allowed(final, np.array([0, words.altitude_land]), *far, np.zeros(1), words,
+                                 **FINAL_ONLY).all()
 
 
 def test_a_flown_row_is_below_only_beyond_the_track_tolerance():
@@ -125,13 +143,16 @@ def _skeleton(geometry, threshold_e_m: float, faf_d_m: float, course_deg: float 
 def test_the_final_is_read_from_the_coded_approach_and_the_published_glidepath(monkeypatch):
     geometry = instruction_airport()
     candidate = geometry.candidates[0]
-    runway = SimpleNamespace(ident="09", threshold_crossing_height_m=15.0, published_glidepath_deg=3.0)
+    runway = SimpleNamespace(ident="09", threshold_crossing_height_m=15.0, published_glidepath_deg=3.0,
+                             decision_height_above_threshold_m=61.0)
     monkeypatch.setattr(procedure, "procedure_skeleton", lambda code, ident, root: _skeleton(geometry, 0.5, 9_800.0))
     final = runway_procedure(geometry, candidate, runway)
     assert final.faf_d_m == pytest.approx(9_799.5, abs=1e-6) and final.ident == "09"   # measured from the candidate
     assert final.crossing_m == candidate.elevation_m + 15.0
     assert final.glidepath_tan == pytest.approx(TAN)
     assert final.cone == fas_course_geometry(candidate.length_m)
+    assert final.decision_m == candidate.elevation_m + 61.0
+    assert final.entry_m == pytest.approx(final.crossing_m + final.faf_d_m * TAN)
     # a document whose threshold is another runway's is refused, and so is a runway without a published glidepath
     far = THRESHOLD_TOLERANCE_M + 1.0
     monkeypatch.setattr(procedure, "procedure_skeleton", lambda code, ident, root: _skeleton(geometry, far, 9_800.0))
@@ -140,14 +161,16 @@ def test_the_final_is_read_from_the_coded_approach_and_the_published_glidepath(m
     monkeypatch.setattr(procedure, "procedure_skeleton", lambda code, ident, root: _skeleton(geometry, 0.0, 9_800.0))
     with pytest.raises(ValueError, match="no threshold crossing height or glidepath"):
         runway_procedure(geometry, candidate, SimpleNamespace(ident="09", threshold_crossing_height_m=15.0,
-                                                              published_glidepath_deg=None))
+                                                              published_glidepath_deg=None,
+                                                              decision_height_above_threshold_m=61.0))
 
 
 def test_an_airport_s_finals_follow_the_runway_pointer_whatever_order_the_runways_come_in(monkeypatch):
     geometry = _two_runways()                                    # 09 at the origin, 27 3 km east flown westbound
     skeletons = {"09": _skeleton(geometry, 0.0, 9_000.0), "27": _skeleton(geometry, 3_000.0, 11_000.0, 270.0, 500.0)}
     monkeypatch.setattr(procedure, "procedure_skeleton", lambda code, ident, root: skeletons[ident])
-    runways = [SimpleNamespace(ident=ident, threshold_crossing_height_m=tch, published_glidepath_deg=3.0)
+    runways = [SimpleNamespace(ident=ident, threshold_crossing_height_m=tch, published_glidepath_deg=3.0,
+                               decision_height_above_threshold_m=61.0)
                for ident, tch in (("27", 16.0), ("09", 15.0))]            # the harvest's order, not the pointer's
     finals = airport_procedures(geometry, runways)
     assert [f.ident for f in finals] == ["09", "27"]
@@ -181,17 +204,25 @@ def test_the_check_counts_the_words_where_the_prior_would_say_them():
     force, said = in_force(grid)[:, ALTITUDE], grid[:, ALTITUDE]
 
     def check(heights):
+        joined, dipped = pre_join(final, -d, np.zeros(rows), heights, spec)
         return check_labelled({"e": -d, "n": np.zeros(rows), "h": heights, "in_force": force, "said": said,
-                               "row": np.arange(rows), "flight": np.zeros(rows, dtype=int)}, final, words)
+                               "angle_in_force": np.full(rows, 1), "angle_said": np.full(rows, UNCHANGED),
+                               "approach": np.full(rows, APPROACH_CLEARED), "joined": joined, "dipped": dipped,
+                               "row": np.arange(rows), "flight": np.zeros(rows, dtype=int),
+                               "pre_join": np.array([{"under_decision": False, "climbed_after_dip": False,
+                                                      "under_mva": True}], dtype=object)}, final, words)
 
     on = check(h)
-    assert on["words"] == {"level": 1, "land": 1, "level_forbidden": 1, "land_forbidden": 0}
+    assert on["words"] == {"level": 1, "land": 1, "angle": 1, "level_forbidden_edge": 1, "land_forbidden_edge": 0,
+                           "level_forbidden_decision": 0, "level_forbidden_climb": 0, "angle_forbidden_climb": 0,
+                           "forbidden": 1}
+    assert on["observed_pre_join"] == {"under_decision": 0, "climbed_after_dip": 0, "under_mva": 1}
     # the level word in force is forbidden at the one silent step before the landing word replaces it
     assert on["forced_steps"] == 1 and on["steps"] == 3 and on["flights_forced"] == 1
     assert on["observed_below"] == 0
     low = check(h - GLIDEPATH_BELOW_M - track_tolerance_m(spec) - 1.0)
     assert low["observed_below"] == 1 and low["observed_depth_m"][0] == pytest.approx(track_tolerance_m(spec) + 1.0)
-    assert low["words"]["land_forbidden"] == 1
+    assert low["words"]["land_forbidden_edge"] == 1
 
 
 def test_a_labelled_flight_s_rows_are_its_signals_first_rows(monkeypatch):
@@ -202,14 +233,18 @@ def test_a_labelled_flight_s_rows_are_its_signals_first_rows(monkeypatch):
                                altitude_m=np.full(rows + extra, 500.0 + k)) for k in range(2)]
     grid = np.full((rows, 6), UNCHANGED, dtype=np.int16)
     grid[0] = 3
+    grid[0, RUNWAY] = 0                                        # the one candidate
     sentences = {"signal_index": np.array([1, 0]), "offsets": np.array([0, rows, 2 * rows]),
                  "words": np.concatenate([grid, grid]), "runway_index": np.array([0, 0])}
     monkeypatch.setattr(prior_procedure_check, "load_signals", lambda directory, split: flights)
     monkeypatch.setattr(prior_procedure_check, "load_sentences", lambda directory, split, spec: sentences)
-    pooled = labelled_rows("train", None, words)[("KXXX", 0)]
+    monkeypatch.setattr(prior_procedure_check, "load_candidates", lambda directory: {"KXXX": instruction_airport()})
+    masks = ProcedureMasks({"KXXX": (_final(),)}, {"KXXX": NO_CHART})
+    pooled = labelled_rows("train", None, words, masks)[("KXXX", 0)]
     assert pooled["e"].tolist() == [*(np.arange(rows) + 100.0), *np.arange(rows)]      # sentence 0 is signal 1
     assert pooled["h"].tolist() == [501.0] * rows + [500.0] * rows
     assert pooled["flight"].tolist() == [0] * rows + [1] * rows and pooled["row"].tolist() == [*range(rows)] * 2
+    assert len(pooled["pre_join"]) == 2 and pooled["pre_join"][0]["mva_under_m"] is None       # one per flight
 
 
 def test_the_check_passes_only_within_both_lines():
@@ -297,7 +332,7 @@ def test_the_speaker_masks_the_altitude_column_by_the_runway_just_sampled_and_th
     # runway 09's edge lies over the aircraft (a cone wide enough to hold it), runway 27's nowhere near it
     wide = _final(crossing_m=1_500.0, faf_d_m=20_000.0,
                   cone=FasCourseGeometry(d_fpap_m=3_000.0, d_garp_m=3_300.0, course_width_m=2_000.0))
-    nowhere = _final(candidate=geometry.candidates[1], crossing_m=110.0, faf_d_m=0.0)
+    nowhere = _final(candidate=geometry.candidates[1], crossing_m=110.0, faf_d_m=0.0, decision_m=-1_000.0)
     floor = float(wide.floor_m(np.array([e]), np.array([n]))[0])
     assert floor > signals.altitude_m[N_LOOK] + 200.0
     speaker = Speaker(_prior_model(variant="no-context"), [signals] * 2, [geometry] * 2, None, words,
@@ -305,15 +340,17 @@ def test_the_speaker_masks_the_altitude_column_by_the_runway_just_sampled_and_th
     classes = words.n_altitude_levels + 2
     chosen = np.zeros((2, 6), dtype=np.int64)
     chosen[:, RUNWAY] = [1, 2]                                    # this step's runway: 09, then 27
-    out = speaker._above_the_glidepath(chosen, True, classes)
+    chosen[:, APPROACH] = 1 + APPROACH_CLEARED
+    out = speaker._procedure_altitude(chosen, True, classes)
     levels = np.arange(words.n_altitude_levels) * words.spec.altitude_step_m
     assert np.array_equal(out[0, 1:-1], levels >= floor - word_tolerance_m(words.spec))
     assert not out[0, -1] and out[0, 0]                          # below the edge: no landing; "unchanged" not asked
-    assert out[1].all()                                           # runway 27: no edge here
+    assert out[1].all()                                           # runway 27: no edge here, a DA under the ground
     # later steps: "unchanged" only where the word in force still holds, for the runway in force when none is said
     speaker.value[:, RUNWAY] = 1
     speaker.value[:, ALTITUDE] = [1 + words.altitude_index(600.0), 1 + words.altitude_index(3000.0)]
-    later = speaker._above_the_glidepath(np.zeros((2, 6), dtype=np.int64), False, classes)
+    speaker.value[:, APPROACH] = 1 + APPROACH_CLEARED
+    later = speaker._procedure_altitude(np.zeros((2, 6), dtype=np.int64), False, classes)
     assert later[:, 0].tolist() == [False, True]
     with pytest.raises(ValueError, match="flights' finals"):
         Speaker(_prior_model(variant="no-context"), [signals] * 2, [geometry] * 2, None, words, max_rows=N_LOOK + 3,
@@ -323,26 +360,33 @@ def test_the_speaker_masks_the_altitude_column_by_the_runway_just_sampled_and_th
                 generator=torch.Generator(), finals=[(nowhere, wide)] * 2)
 
 
-def _closed_loop(finals):
+def _closed_loop(finals, seed: int = 2):
     one, geometry, signals, (inputs, runways, charts, approach) = _flight()
     words = Words(one)
     flown, said, forbidden, speaker = speak_and_fly(_speaker_model(words), [signals], [geometry], inputs, runways,
                                                     charts, approach, [200.0], words, _params(), None,
-                                                    generator=torch.Generator().manual_seed(2), temperature=1.0,
+                                                    generator=torch.Generator().manual_seed(seed), temperature=1.0,
                                                     finals=finals)
     return one, geometry, signals, words, flown, said[0], forbidden, speaker
 
 
 def test_a_closed_loop_speaks_above_the_edge_and_stops_at_the_first_step_that_ends_below_it():
-    # 2 km up: the aircraft is far below it once it turns onto the final (in the first 200 s)
-    final = _final(crossing_m=2_000.0, faf_d_m=12_000.0)
-    one, geometry, signals, words, flown, grid, forbidden, speaker = _closed_loop([(final,)])
+    # 2 km up: the aircraft is far below it once it turns onto the final (in the first 200 s); a DA under the ground.
+    # Under the entry height from the start, it may not climb before the join: the untrained model's draws with seed 8
+    # take it into the cone (step 65), most seeds' do not
+    final = _final(crossing_m=2_000.0, faf_d_m=12_000.0, decision_m=-1_000.0)
+    one, geometry, signals, words, flown, grid, forbidden, speaker = _closed_loop([(final,)], seed=8)
     assert forbidden[ALTITUDE].shape == (1, len(grid)) and forbidden[ALTITUDE].max() > 0
     force = in_force(grid)
+    joined, dipped = pre_join(final, speaker.e[0], speaker.n[0], speaker.h[0], one)
+    # the speaker's state, kept a row at a time, is the function's over its rows
+    assert (speaker.joined[0, 0], speaker.dipped[0, 0]) == (joined[speaker.rows - 1], dipped[speaker.rows - 1])
     for k in range(len(grid)):                                   # every word in force was allowed where it was said from
         row = N_LOOK + k
+        barred = climb_barred(joined[row], dipped[row], force[k, APPROACH])
         assert altitude_word_allowed(final, force[k:k + 1, ALTITUDE], speaker.e[0, row:row + 1],
-                                     speaker.n[0, row:row + 1], speaker.h[0, row:row + 1], words)[0]
+                                     speaker.n[0, row:row + 1], speaker.h[0, row:row + 1], words,
+                                     joined=joined[row], barred=barred)[0]
     # the post-hoc scan stops where a check in the loop would have: the speaker's row after step k is the state the
     # scan reads for step k, and the stop is the first such row below the edge
     stops = glidepath_stops(flown, [grid], [geometry], [(final,)], words)
@@ -369,3 +413,151 @@ def test_an_edge_that_never_binds_leaves_the_closed_loop_draw_for_draw_as_withou
     assert ALTITUDE not in forbidden_bare and not forbidden[ALTITUDE].any()
     stops = glidepath_stops(flown, [grid], [instruction_airport()], [(low,)], Words(instruction_spec()))
     assert stops.step.tolist() == [-1] and stops.row.tolist() == [-1]
+
+
+def _approach(d: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Positions ``d`` before runway 09's threshold on its centreline."""
+    return -np.asarray(d, dtype=np.float64), np.zeros(len(d))
+
+
+def test_the_join_is_the_first_row_in_the_region_and_a_dip_counts_only_before_it():
+    spec = instruction_spec()
+    final = _final()
+    entry = final.entry_m
+    assert entry == pytest.approx(115.0 + FAF_D_M * TAN)
+    d = np.array([20_000.0, 16_000.0, 12_000.0, 9_000.0, 6_000.0])       # joins at the fourth row
+    e, n = _approach(d)
+    above = np.array([entry + 100.0, entry + 50.0, entry, entry - 20.0, entry - 300.0])
+    joined, dipped = pre_join(final, e, n, above, spec)
+    assert joined.tolist() == [False, False, False, True, True]
+    assert not dipped.any()                                 # low only from the join on: no dip
+    low = above.copy()
+    low[1] = entry - word_tolerance_m(spec) - 1.0           # under the entry height less the tolerance, before the join
+    joined, dipped = pre_join(final, e, n, low, spec)
+    assert dipped.tolist() == [False, True, True, True, True]
+    edge = above.copy()
+    edge[1] = entry - word_tolerance_m(spec) + 1.0          # within the tolerance: no dip
+    assert not pre_join(final, e, n, edge, spec)[1].any()
+
+
+def test_the_climb_is_barred_after_a_dip_before_the_join_unless_a_go_around_is_in_force():
+    joined = np.array([False, False, True])
+    dipped = np.array([False, True, True])
+    approach = np.array([APPROACH_NOT_CLEARED, APPROACH_CLEARED, APPROACH_CLEARED])
+    assert climb_barred(joined, dipped, approach).tolist() == [False, True, False]
+    assert not climb_barred(np.array(False), np.array(True), np.array(APPROACH_GO_AROUND))
+
+
+def test_before_the_join_a_level_under_the_decision_altitude_is_forbidden_and_landing_is_not():
+    spec = instruction_spec()
+    words = Words(spec)
+    step, tolerance = spec.altitude_step_m, word_tolerance_m(spec)
+    final = _final(decision_m=10 * step)                   # the DA on a step
+    e, n = _at(FAF_D_M + 5_000.0)                            # outside the FAF: no glidepath edge here
+    levels = np.array([10, 9, words.altitude_land])
+    assert 9 * step < final.decision_m - tolerance
+    free = {"barred": np.array(False)}
+    assert altitude_word_allowed(final, levels, e, n, np.zeros(1), words, joined=np.array(False),
+                                 **free).tolist() == [True, False, True]
+    assert altitude_word_allowed(final, levels, e, n, np.zeros(1), words, joined=np.array(True), **free).all()
+
+
+def test_after_a_dip_no_level_above_the_aircraft_and_no_climb_class_may_be_said():
+    spec = instruction_spec()
+    words = Words(spec)
+    step, tolerance = spec.altitude_step_m, word_tolerance_m(spec)
+    final = _final(decision_m=-1_000.0)
+    e, n = _at(FAF_D_M + 5_000.0)
+    h = np.array([20 * step])
+    levels = np.array([20, 21, 19, words.altitude_land])
+    barred = {"joined": np.array(False), "barred": np.array(True)}
+    assert altitude_word_allowed(final, levels, e, n, h, words, **barred).tolist() == [True, False, True, True]
+    assert altitude_word_allowed(final, levels, e, n, h - tolerance - 0.1, words, **barred).tolist() == [
+        False, False, True, True]                             # 20 × step is now more than the tolerance above
+    assert altitude_word_allowed(final, levels, e, n, h, words, joined=np.array(False), barred=np.array(False)).all()
+    angles = np.arange(words.angle_climb + 1)
+    assert angle_word_allowed(angles, np.array(True), words).tolist() == [True] * words.angle_climb + [False]
+    assert angle_word_allowed(angles, np.array(False), words).all()
+
+
+def test_the_speaker_masks_the_climb_once_the_observed_rows_dipped_under_the_entry_height():
+    spec = instruction_spec()
+    words, geometry = Words(spec), _two_runways()
+    signals = _signals(N_LOOK + 3)
+    h = float(signals.altitude_m[N_LOOK])
+    # runway 09's FAF far out and its entry height well above the aircraft; the cone too narrow to hold it; DA below
+    high = _final(crossing_m=h + 400.0 - 30_000.0 * TAN, faf_d_m=30_000.0, decision_m=h - 200.0)
+    nowhere = _final(candidate=geometry.candidates[1], crossing_m=110.0, faf_d_m=0.0, decision_m=-1_000.0)
+    assert high.entry_m > h + 100.0
+    speaker = Speaker(_prior_model(variant="no-context"), [signals], [geometry], None, words, max_rows=N_LOOK + 3,
+                      generator=torch.Generator().manual_seed(0), finals=[(high, nowhere)])
+    rows = N_LOOK + 1
+    joined, dipped = pre_join(high, speaker.e[0, :rows], speaker.n[0, :rows], speaker.h[0, :rows], spec)
+    assert speaker.joined[0, 0] == joined[-1] and speaker.dipped[0, 0] == dipped[-1]
+    assert not joined[-1] and dipped[-1]
+    classes = words.n_altitude_levels + 2
+    chosen = np.zeros((1, 6), dtype=np.int64)
+    chosen[0, RUNWAY], chosen[0, APPROACH] = 1, 1 + APPROACH_CLEARED
+    out = speaker._procedure_altitude(chosen, True, classes)
+    levels = np.arange(words.n_altitude_levels) * spec.altitude_step_m
+    tolerance = word_tolerance_m(spec)
+    assert np.array_equal(out[0, 1:-1], (levels <= h + tolerance) & (levels >= high.decision_m - tolerance))
+    assert out[0, -1]                                         # "descend to land" stays
+    chosen[0, HEADING], chosen[0, ALTITUDE] = 1, 1 + words.altitude_index(h)     # the columns before the angle
+    angle = speaker._allowed(ANGLE, chosen, True, words.angle_climb + 2, np.zeros(1, dtype=bool))
+    assert not angle[0, 1 + words.angle_climb]
+    chosen[0, APPROACH] = 1 + APPROACH_GO_AROUND              # a go-around may climb
+    assert speaker._procedure_altitude(chosen, True, classes)[0, 1:-1][levels > h + 100.0].all()
+
+
+def test_the_readout_before_the_join_reads_the_dip_the_decision_altitude_and_the_mva_where_not_cleared():
+    spec = instruction_spec()
+    final = _final(decision_m=300.0)
+    entry = final.entry_m
+    d = np.linspace(24_000.0, 8_000.0, N_LOOK + 9)            # joins at the last rows
+    e, n = _approach(d)
+    h = np.full(len(d), entry + 200.0)
+    h[N_LOOK + 1] = entry - 50.0                              # the dip
+    h[N_LOOK + 4] = 300.0 - 60.0                              # 60 m under the DA, the lowest since the dip
+    runway = np.zeros(len(d), dtype=np.int64)
+    approach = np.full(len(d), APPROACH_NOT_CLEARED)
+    approach[N_LOOK + 5:] = APPROACH_CLEARED
+    mva = np.full(len(d), np.nan)
+    mva[N_LOOK + 2] = h[N_LOOK + 2] + 70.0                    # 70 m under the MVA, not cleared
+    mva[N_LOOK + 6] = h[N_LOOK + 6] + 500.0                   # cleared: not read
+    got = pre_join_readout((final,), runway, approach, e, n, h, mva, N_LOOK, spec)
+    assert got["decision_under_m"] == pytest.approx(60.0) and got["under_decision"]
+    assert got["climb_after_dip_m"] == pytest.approx(entry + 200.0 - (300.0 - 60.0))    # the rows after the lowest
+    assert got["climbed_after_dip"]
+    assert got["mva_under_m"] == pytest.approx(70.0) and got["under_mva"]
+    # rows before the first predicted step only set the dip; none of them is read
+    early = h.copy()
+    early[2] = 300.0 - 500.0
+    assert pre_join_readout((final,), runway, approach, e, n, early, mva, N_LOOK, spec)["decision_under_m"] \
+        == pytest.approx(60.0)
+    quiet = pre_join_readout((final,), runway, approach, e, n, np.full(len(d), entry + 200.0), np.full(len(d), np.nan),
+                             N_LOOK, spec)
+    assert quiet["climb_after_dip_m"] is None and quiet["mva_under_m"] is None and not quiet["under_decision"]
+
+
+def test_a_sentence_is_read_before_the_join_on_the_rows_the_speaker_read_with_the_words_of_each_step():
+    spec = instruction_spec()
+    words = Words(spec)
+    final = _final(decision_m=300.0)
+    steps = 4
+    d = np.linspace(24_000.0, 20_000.0, N_LOOK + steps + 3)     # rows past the sentence's steps are not read
+    e, n = _approach(d)
+    h = np.full(len(d), final.entry_m + 200.0)
+    h[N_LOOK + steps:] = 0.0                                    # far under the DA, but after the last step said
+    h[N_LOOK - 2] = 200.0                                       # 100 m under the DA, but before the first step
+    grid = np.full((steps, 6), UNCHANGED)
+    grid[0] = [0, APPROACH_NOT_CLEARED, 9, 20, 1, 3]
+    grid[2, APPROACH] = APPROACH_CLEARED
+    geometry = instruction_airport()
+    got = sentence_pre_join(grid, steps, e, n, h, (final,), NO_CHART, geometry, words)
+    assert got["decision_under_m"] == pytest.approx(300.0 - h[N_LOOK])
+    # every row of the sentence under a 1 km MVA: only the rows before the clearance count, and they are all as deep
+    chart = SimpleNamespace(at=lambda lon, lat: np.full(len(lon), 1_000.0))
+    deep = sentence_pre_join(grid, steps, e, n, h, (final,), chart, geometry, words)
+    assert deep["mva_under_m"] == pytest.approx(1_000.0 - h[N_LOOK]) and deep["under_mva"] == (
+        1_000.0 - h[N_LOOK] > track_tolerance_m(spec))

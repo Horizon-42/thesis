@@ -91,10 +91,11 @@ def speak_sentences(model: Prior, batch: replay.Batch, samples: int, words: Word
     count = len(batch.readings)
     repeated = replay.subset(batch, [j for j in range(count) for _ in range(samples)])
     runways, charts, approach = _physics(repeated, cpu)
+    limits = limits_s(repeated, params, words.spec.step_s, augmented=False)
     flown, said, forbidden, speaker = speak_and_fly(model, repeated.signals, repeated.geometries,
                                                     flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways,
-                                                    charts, approach, limits_s(repeated, params, words.spec.step_s),
-                                                    words, params, landings, generator=generator, temperature=1.0)
+                                                    charts, approach, limits, words, params, landings,
+                                                    generator=generator, temperature=1.0)
     grids = [said[j] for j in range(len(said))]
     rows = flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden)
     step_rows = round(words.spec.step_s / flown.cycle_s)

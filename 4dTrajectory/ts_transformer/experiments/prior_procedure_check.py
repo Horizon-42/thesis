@@ -1,13 +1,17 @@
-"""The glidepath lower edge checked on labelled data before any model trains through it (post-training design §3.6).
+"""The procedure's altitude masks checked on labelled data before any model trains through them (post-training design
+§3.6).
 
-The second stage's step 0. On every labelled flight of the split:
+The second stage's step 0. On every labelled flight of the split, its sentence's runway throughout (the labels never
+change it after the first step):
 
-- **words** — the labelled altitude words the mask would forbid where the prior would say them: the word in force at
-  the first predicted step (row `N_LOOK`, where every column is said) and every word said after it (rules 1 and 2, a
-  level and "descend to land" counted apart);
-- **forced** — the later steps where nothing is said but the word in force fails here, so the mask would make the prior
-  say a new one (rule 3);
-- **observed** — the tracks with a row more than the track tolerance below its floor;
+- **words** — the labelled altitude and descent-angle words the masks would forbid where the prior would say them: the
+  word in force at the first predicted step (row `N_LOOK`, where every column is said) and every word said after it,
+  rule by rule (`procedure`: 1–2 the glidepath lower edge, a level and "descend to land" apart; 3 the decision
+  altitude; 4 no climbing back — a level above the aircraft and the climb class apart);
+- **forced** — the later steps where no altitude word is said but the word in force fails here, so the mask would make
+  the prior say a new one (rule 5);
+- **observed** — the tracks with a row more than the track tolerance below the glidepath lower edge, and the tracks'
+  readouts before the join (`procedure.pre_join_readout`: under the DA, climbing back after the dip, under the MVA);
 
 and on a seeded per-airport sample flown on its own dynamics (``--replay-per-airport``), the labelled words flown by the
 executor from the first predicted step as free generation flies its reference (`prior_free_generation.fly_reference`):
@@ -15,8 +19,8 @@ executor from the first predicted step as free generation flies its reference (`
 free generation and training use (`prior_free_generation.glidepath_stops`).
 
 The pass lines, written before the run (user 2026-09-25, design §3.6): at most `MAX_FORBIDDEN_WORDS` of the labelled
-altitude words forbidden and at most `MAX_STOPPED_REPLAYS` of the replayed flights stopped; failing either, the numbers go
-back to the user.
+altitude and descent-angle words forbidden (every rule together) and at most `MAX_STOPPED_REPLAYS` of the replayed
+flights stopped; failing either, the numbers go back to the user.
 
 Writes ``--out`` (a new directory, from a clean tree): ``check.json``.
 """
@@ -35,67 +39,97 @@ import torch
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.judge import flown_track
 from ts_transformer.experiments.prior_free_generation import (
-    flight_rows, fly_reference, glidepath_stops, in_force, reference_grid,
+    PRE_JOIN_LINES, ProcedureMasks, _mva, flight_rows, fly_reference, glidepath_stops, in_force, procedure_masks,
+    reference_grid,
 )
 from ts_transformer.instructions.artefact import SPLITS, load_candidates, load_sentences, load_signals
-from ts_transformer.instructions.words import ALTITUDE, RUNWAY, UNCHANGED, Words
+from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, RUNWAY, UNCHANGED, Words
 from ts_transformer.io_utils import utc_now, write_json_atomic
+from ts_transformer.prior import mva
 from ts_transformer.prior.procedure import (
-    GLIDEPATH_BELOW_M, RunwayProcedure, altitude_word_allowed, below_floor, published_procedures, track_tolerance_m,
-    word_tolerance_m,
+    GLIDEPATH_BELOW_M, RunwayProcedure, angle_word_allowed, below_floor, climb_allowed, climb_barred,
+    decision_allowed, glidepath_allowed, pre_join, pre_join_readout, track_tolerance_m, word_tolerance_m,
 )
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
-CHECK_SCHEMA = "ts-prior-procedure-check-v1"
+CHECK_SCHEMA = "ts-prior-procedure-check-v2"
 #: The pass lines of design §3.6 (user 2026-09-25).
 MAX_FORBIDDEN_WORDS = 0.01
 MAX_STOPPED_REPLAYS = 0.03
 
 
-def labelled_rows(split: str, instructions: Path, words: Words) -> dict[tuple[str, int], dict[str, np.ndarray]]:
-    """Every labelled flight's sentence rows, pooled by ``(airport, runway index)``: position, height, the altitude word
-    in force and the one said, the row and the flight."""
+def labelled_rows(split: str, instructions: Path, words: Words, masks: ProcedureMasks
+                  ) -> dict[tuple[str, int], dict[str, np.ndarray]]:
+    """Every labelled flight's sentence rows, pooled by ``(airport, runway index)``: position, height, the altitude and
+    descent-angle words in force and the ones said, the approach word in force, where the flight had joined its
+    runway's final and dipped under its entry height (`procedure.pre_join`), the row and the flight — and, one per
+    flight, its observed readouts before the join (`procedure.pre_join_readout`, under ``"pre_join"``)."""
     signals = load_signals(instructions, split)
     sentences = load_sentences(instructions, split, words.spec)
-    groups: dict[tuple[str, int], list[dict[str, np.ndarray]]] = defaultdict(list)
+    geometries = load_candidates(instructions)
+    groups: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
     for k, index in enumerate(sentences["signal_index"]):
         flight = signals[int(index)]
         grid = sentences["words"][sentences["offsets"][k]: sentences["offsets"][k + 1]].astype(np.int64)
-        count = len(grid)
-        groups[(flight.airport, int(sentences["runway_index"][k]))].append({
-            "e": flight.e_m[:count], "n": flight.n_m[:count], "h": flight.altitude_m[:count],
-            "in_force": in_force(grid)[:, ALTITUDE], "said": grid[:, ALTITUDE], "row": np.arange(count),
-            "flight": np.full(count, k)})
+        count, runway = len(grid), int(sentences["runway_index"][k])
+        finals = masks.finals[flight.airport]
+        e, n, h = flight.e_m[:count], flight.n_m[:count], flight.altitude_m[:count]
+        force = in_force(grid)
+        joined, dipped = pre_join(finals[runway], e, n, h, words.spec)
+        readout = pre_join_readout(finals, force[:, RUNWAY], force[:, APPROACH], e, n, h,
+                                   _mva(masks.charts[flight.airport], geometries[flight.airport], e, n), N_LOOK,
+                                   words.spec)
+        groups[(flight.airport, runway)].append({
+            "e": e, "n": n, "h": h, "in_force": force[:, ALTITUDE], "said": grid[:, ALTITUDE],
+            "angle_in_force": force[:, ANGLE], "angle_said": grid[:, ANGLE], "approach": force[:, APPROACH],
+            "joined": joined, "dipped": dipped, "row": np.arange(count), "flight": np.full(count, k),
+            "pre_join": np.array([readout], dtype=object)})
     return {key: {name: np.concatenate([part[name] for part in parts]) for name in parts[0]}
             for key, parts in groups.items()}
 
 
 def check_labelled(rows: dict[str, np.ndarray], procedure: RunwayProcedure, words: Words) -> dict[str, Any]:
-    """One runway's flights: the words forbidden (rules 1–2), the steps forced (rule 3), the observed tracks below their
-    floor (and how far below, at each one's deepest row)."""
-    allowed = altitude_word_allowed(procedure, rows["in_force"], rows["e"], rows["n"], rows["h"], words)
+    """One runway's flights: the words forbidden, rule by rule (1–2 the glidepath lower edge, 3 the decision altitude,
+    4 no climbing back — the altitude column's and the descent-angle column's), the steps forced (rule 5), the observed
+    tracks below the glidepath lower edge (and how far below, at each one's deepest row), and the observed readouts
+    before the join."""
+    barred = climb_barred(rows["joined"], rows["dipped"], rows["approach"])
+    word, h = rows["in_force"], rows["h"]
+    edge = glidepath_allowed(procedure, word, rows["e"], rows["n"], h, words)
+    decision = decision_allowed(procedure, word, rows["joined"], words)
+    climb = climb_allowed(word, h, barred, words)
+    allowed = edge & decision & climb
+    angle = angle_word_allowed(rows["angle_in_force"], barred, words)
     first, later = rows["row"] == N_LOOK, rows["row"] > N_LOOK
     said = first | (later & (rows["said"] != UNCHANGED))
-    land = rows["in_force"] == words.altitude_land
+    angle_said = first | (later & (rows["angle_said"] != UNCHANGED))
+    land = word == words.altitude_land
     forced = later & (rows["said"] == UNCHANGED) & ~allowed
-    below, floor = below_floor(procedure, rows["e"], rows["n"], rows["h"], words.spec)
+    below, floor = below_floor(procedure, rows["e"], rows["n"], h, words.spec)
     flights, index = np.unique(rows["flight"][below], return_inverse=True)
     deepest = np.full(len(flights), -np.inf)
-    np.maximum.at(deepest, index, (floor - rows["h"])[below])
+    np.maximum.at(deepest, index, (floor - h)[below])
+    readouts = rows["pre_join"]
     return {
         "flights": int(len(np.unique(rows["flight"]))),
         "words": {"level": int((said & ~land).sum()), "land": int((said & land).sum()),
-                  "level_forbidden": int((said & ~land & ~allowed).sum()),
-                  "land_forbidden": int((said & land & ~allowed).sum())},
+                  "angle": int(angle_said.sum()),
+                  "level_forbidden_edge": int((said & ~land & ~edge).sum()),
+                  "land_forbidden_edge": int((said & land & ~edge).sum()),
+                  "level_forbidden_decision": int((said & ~decision).sum()),
+                  "level_forbidden_climb": int((said & ~climb).sum()),
+                  "angle_forbidden_climb": int((angle_said & ~angle).sum()),
+                  "forbidden": int((said & ~allowed).sum() + (angle_said & ~angle).sum())},
         "forced_steps": int(forced.sum()), "steps": int(later.sum()),
         "flights_forced": int(len(np.unique(rows["flight"][forced]))),
         "observed_below": len(flights), "observed_depth_m": sorted(deepest.tolist()),
+        "observed_pre_join": {key: int(sum(r[key] for r in readouts)) for key in PRE_JOIN_LINES},
     }
 
 
-def check_replays(batch: replay.Batch, procedures: dict[str, tuple[RunwayProcedure, ...]], words: Words, params: Any,
-                  chunk: int) -> list[dict[str, Any]]:
+def check_replays(batch: replay.Batch, procedures: ProcedureMasks, words: Words, params: Any, chunk: int
+                  ) -> list[dict[str, Any]]:
     """Each flight of ``batch`` flown on its labelled words from the first predicted step: its outcome and stratum, and
     whether a flown step sank below its floor (`glidepath_stops`; at the stop: its distance to go, depth, altitude word).
     The outcome is the executor's judge's — the one the flight would have had without the stop."""
@@ -106,7 +140,7 @@ def check_replays(batch: replay.Batch, procedures: dict[str, tuple[RunwayProcedu
         flown = fly_reference(part, words, params, device=cpu)
         grids = [reference_grid(r.words) for r in part.readings]
         rows = flight_rows(part, flown, grids, words, "labelled", [None] * len(grids), None)
-        finals = [procedures[g.code] for g in part.geometries]
+        finals = [procedures.finals[g.code] for g in part.geometries]
         stops = glidepath_stops(flown, grids, part.geometries, finals, words)
         step_rows = round(spec.step_s / flown.cycle_s)
         for j, (reading, grid, row) in enumerate(zip(part.readings, grids, rows)):
@@ -133,15 +167,18 @@ def _percentiles(values: list[float]) -> dict[str, float] | None:
 
 def summarise(labelled: dict[str, dict[str, Any]], replays: list[dict[str, Any]]) -> dict[str, Any]:
     """The totals: the words forbidden, the steps forced, the observed tracks below, the replays stopped."""
-    words = Counter()
+    words, pre_join = Counter(), Counter()
     for part in labelled.values():
         words.update(part["words"])
-    checked, forbidden = words["level"] + words["land"], words["level_forbidden"] + words["land_forbidden"]
+        pre_join.update(part["observed_pre_join"])
+    checked = words["level"] + words["land"] + words["angle"]
     flights = sum(part["flights"] for part in labelled.values())
     below = sum(part["observed_below"] for part in labelled.values())
     stopped = [r for r in replays if r["stopped"]]
     return {
-        "flights": flights, "words": dict(words), "forbidden_share": forbidden / checked,
+        "flights": flights, "words": dict(words), "forbidden_share": words["forbidden"] / checked,
+        "observed_pre_join": dict(pre_join),
+        "observed_pre_join_share": {key: pre_join[key] / flights for key in PRE_JOIN_LINES},
         "forced_steps": sum(p["forced_steps"] for p in labelled.values()),
         "steps": sum(p["steps"] for p in labelled.values()),
         "flights_forced": sum(p["flights_forced"] for p in labelled.values()),
@@ -185,9 +222,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the check runs from a clean tree")
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor_dir, instructions)
-    procedures = published_procedures(load_candidates(instructions))
-    labelled = {f"{airport} {procedures[airport][runway].ident}": check_labelled(rows, procedures[airport][runway], words)
-                for (airport, runway), rows in sorted(labelled_rows(args.split, instructions, words).items())}
+    procedures = procedure_masks(load_candidates(instructions))
+    finals = procedures.finals
+    labelled = {f"{airport} {finals[airport][runway].ident}": check_labelled(rows, finals[airport][runway], words)
+                for (airport, runway), rows in sorted(labelled_rows(args.split, instructions, words,
+                                                                    procedures).items())}
     print(f"labelled {args.split} flights read, {time.perf_counter() - started:.0f}s", flush=True)
     batch = replay.draw(instructions, args.split, words.spec, words, per_airport=args.replay_per_airport,
                         seed=args.seed)
@@ -200,16 +239,22 @@ def main(argv: list[str] | None = None) -> int:
         "instructions": str(instructions), "executor": {"directory": str(executor_dir), "sha256": record["sha256"]},
         "tolerances_m": {"word": word_tolerance_m(words.spec), "track": track_tolerance_m(words.spec),
                          "glidepath_below": GLIDEPATH_BELOW_M},
-        "faf_d_m": {code: {p.ident: p.faf_d_m for p in runways} for code, runways in procedures.items()},
+        "faf_d_m": {code: {p.ident: p.faf_d_m for p in runways} for code, runways in finals.items()},
+        "entry_m": {code: {p.ident: p.entry_m for p in runways} for code, runways in finals.items()},
+        "decision_m": {code: {p.ident: p.decision_m for p in runways} for code, runways in finals.items()},
+        "mva": {"charts_date": mva.CHARTS_DATE, "chart": mva.CHART},
         "pass_lines": {"forbidden_words": MAX_FORBIDDEN_WORDS, "stopped_replays": MAX_STOPPED_REPLAYS},
         "replay_sample": batch.drawn, "summary": summary, "passed": passed, "by_runway": labelled,
         "replays": replays, "elapsed_s": time.perf_counter() - started})
     w = summary["words"]
-    print(f"words forbidden {summary['forbidden_share']:.2%} (level {w['level_forbidden']}/{w['level']}, "
-          f"descend to land {w['land_forbidden']}/{w['land']}); forced steps {summary['forced_steps']}/"
-          f"{summary['steps']} in {summary['flights_forced']} flights; observed tracks below "
-          f"{summary['observed_below']}/{summary['flights']} ({summary['observed_below_share']:.2%}); replays stopped "
-          f"{summary['stopped']}/{summary['replays']} ({summary['stopped_share']:.2%}, landed {summary['stopped_landed']})")
+    print(f"words forbidden {summary['forbidden_share']:.2%} of {w['level'] + w['land'] + w['angle']} (edge: level "
+          f"{w['level_forbidden_edge']}/{w['level']}, descend to land {w['land_forbidden_edge']}/{w['land']}; decision "
+          f"altitude {w['level_forbidden_decision']}; no climbing back: level {w['level_forbidden_climb']}, climb class "
+          f"{w['angle_forbidden_climb']}/{w['angle']}); forced steps {summary['forced_steps']}/{summary['steps']} in "
+          f"{summary['flights_forced']} flights; observed tracks below the edge {summary['observed_below']}/"
+          f"{summary['flights']} ({summary['observed_below_share']:.2%}), before the join "
+          f"{summary['observed_pre_join_share']}; replays stopped {summary['stopped']}/{summary['replays']} "
+          f"({summary['stopped_share']:.2%}, landed {summary['stopped_landed']})")
     print(f"passed: {passed}  (≤ {MAX_FORBIDDEN_WORDS:.0%} words forbidden, ≤ {MAX_STOPPED_REPLAYS:.0%} replays "
           f"stopped)  → {out}")
     return 0
