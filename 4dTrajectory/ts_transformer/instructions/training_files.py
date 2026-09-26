@@ -250,8 +250,8 @@ def runway_hae_minus_msl_m(artefact: Path, airport: str, manifest: Path) -> dict
     """Each runway's HAE − MSL offset at ``airport``, metres by ident: what the data plane subtracted from the reported
     heights of the flights assigned to that runway (`flight_scenarios.datum.flight_to_msl`, from the arrival manifest's
     ``runway_targets``). A flight's MSL height plus its OWN runway's offset is the height its aircraft reported — the
-    ellipsoid height Cesium draws in — so every track exported for a flight (observed, replayed, generated) adds that
-    one number (the backend's live executor still adds EGM96's local value until it moves here too). A geoid model's local value does not give the reported height back: at KRDU 05L EGM96 says
+    ellipsoid height Cesium draws in — so every track drawn for a flight (observed, replayed, generated, flown live)
+    adds that one number. A geoid model's local value does not give the reported height back: at KRDU 05L EGM96 says
     −33.53 m where −32.0 m was subtracted. ``manifest``: the airport's arrival manifest (`repo_layout.
     arrival_manifest_path`), refused unless it is the one ``artefact``'s signals were read from (its recorded sha256,
     as `autopilot.flights.rebuild_series` checks it)."""

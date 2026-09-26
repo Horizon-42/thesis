@@ -6,7 +6,8 @@ whose sentence was flown again from its first step (`segment.model_segment`), th
 aircraft got there — is flown and judged but not returned (``source`` says which sentence it was).
 
 Units are SI; the flown track is returned every control cycle, in the airport frame and on the globe (geometric MSL
-height, and the ellipsoid height Cesium draws in: h = H + N).
+height, and the ellipsoid height Cesium draws in: plus the flight's runway's HAE − MSL offset, the one its observed
+track was drawn with — `training_files.runway_hae_minus_msl_m`).
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ from typing import Any
 
 import numpy as np
 
-from flight_scenarios.datum import geoid_undulation_m
 from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.frame import ALT, LAT, LON
 from ts_transformer.autopilot.judge import Verdict, flown_track, read_flown, words_said
@@ -59,7 +59,6 @@ def track_payload(result: FlownSegment, context: FlightContext, step_s: float) -
     states = flown.states[0, : last + 1].cpu().numpy()
     track = flown_track(states, context.geometry)
     lat, lon, height = states[:, LAT], states[:, LON], states[:, ALT]
-    undulation = geoid_undulation_m(lat, lon)
     distance = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(track["e"]), np.diff(track["n"])))))
     shift = 360.0 * round((float(context.observed_track_deg[start]) - float(track["track"][0])) / 360.0)
     commands = flown.commands[0, :last].cpu().numpy()
@@ -68,7 +67,7 @@ def track_payload(result: FlownSegment, context: FlightContext, step_s: float) -
         "tS": rounded(result.segment.row * step_s + np.arange(len(states) - first) * flown.cycle_s, 3),
         "eM": rounded(track["e"][shown], 1), "nM": rounded(track["n"][shown], 1), "lon": rounded(lon[shown], 7),
         "lat": rounded(lat[shown], 7), "altitudeM": rounded(height[shown], 2),
-        "altitudeHaeM": rounded((height + undulation)[shown], 2),
+        "altitudeHaeM": rounded(height[shown] + context.hae_minus_msl_m, 2),
         "groundSpeedMps": rounded(track["ground_speed"][shown], 3), "verticalRateMps": rounded(track["vertical_rate"][shown], 3),
         "trackDeg": rounded((track["track"] + shift)[shown], 3),
         "distanceM": rounded((float(context.observed_distance_m[start]) + distance)[shown], 1),

@@ -477,13 +477,16 @@ class TrackTest(unittest.TestCase):
         # the observed smoothed track reads 450° (one turn up) and has flown 1200 m by step 3
         context = FlightContext(signals=None, series=None, reading=reading(), geometry=geometry(), crossing_heights=(15.0,),
                                 group="own dynamics", approach_ias_mps=70.0,
-                                observed_track_deg=np.full(10, 450.0), observed_distance_m=400.0 * np.arange(10))
+                                observed_track_deg=np.full(10, 450.0), observed_distance_m=400.0 * np.arange(10),
+                                hae_minus_msl_m=-32.0)
         return track_payload(result, context, 2.0)
 
     def test_the_flown_segment_reads_on_the_flights_own_clock_distance_and_heading_branch(self):
         track, shift = self.payload("timeout")
         self.assertEqual(track["tS"], [6.0, 7.0, 8.0, 9.0, 10.0])
         self.assertEqual(shift, 360.0)
+        # drawn at the observed track's height: MSL plus the flight's runway's HAE − MSL offset
+        self.assertEqual((track["altitudeM"], track["altitudeHaeM"]), ([900.0] * 5, [868.0] * 5))
         np.testing.assert_allclose(track["trackDeg"], 450.0, atol=1e-6)
         np.testing.assert_allclose(track["distanceM"], [1200.0, 1300.0, 1400.0, 1500.0, 1600.0], atol=0.6)
         # the commands: one per cycle, the dynamics' left bank read as a negative right bank
@@ -525,7 +528,8 @@ class PayloadTest(unittest.TestCase):
                               reached_end=reached, fly_s=0.1, judge_s=0.01)
         context = FlightContext(signals=signals10(), series=None, reading=reading(), geometry=geometry(),
                                 crossing_heights=(15.0,), group="own dynamics", approach_ias_mps=70.0,
-                                observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10))
+                                observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10),
+                                hae_minus_msl_m=-32.0)
         words = SimpleNamespace(spec=SPEC, speed_mps=WORDS.speed_mps)
         return segment_payload(result, context, words)
 
@@ -557,7 +561,8 @@ class PayloadTest(unittest.TestCase):
                               reached_end=False, fly_s=0.1, judge_s=0.01)
         context = FlightContext(signals=signals10(), series=None, reading=reading(), geometry=geometry(),
                                 crossing_heights=(15.0,), group="own dynamics", approach_ias_mps=70.0,
-                                observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10))
+                                observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10),
+                                hae_minus_msl_m=-32.0)
         # the flown track as its judge read it: seven steps, all on the word's 60°
         admitted = SimpleNamespace(smoothed=SimpleNamespace(track_deg=np.full(7, 60.0)))
         with mock.patch.object(payload_module, "read_flown", lambda *args, **kwargs: admitted):
@@ -919,7 +924,7 @@ class ModelSegmentTest(unittest.TestCase):
         for observed_rows, first in ((20, 8), (121, 8), (57, 8)):
             context = FlightContext(signals=None, series=None, reading=SimpleNamespace(words=np.zeros((observed_rows, 6))),
                                     geometry=None, crossing_heights=(), group="own dynamics", approach_ias_mps=70.0,
-                                    observed_track_deg=None, observed_distance_m=None)
+                                    observed_track_deg=None, observed_distance_m=None, hae_minus_msl_m=-32.0)
             limit = fly_module.model_time_limit_s(context, first, params, 2.0)
             self.assertEqual(model_steps_max(observed_rows, first, 1.5), rows_for(limit, 2.0) - N_LOOK)
 
@@ -979,7 +984,8 @@ class ModelSegmentTest(unittest.TestCase):
         truth = SimpleNamespace(words=np.zeros((60, 6)))
         batch = SimpleNamespace(readings=[truth])
         context = FlightContext(signals=None, series=None, reading=truth, geometry=None, crossing_heights=(), group="own dynamics",
-                                approach_ias_mps=70.0, observed_track_deg=None, observed_distance_m=None)
+                                approach_ias_mps=70.0, observed_track_deg=None, observed_distance_m=None,
+                                hae_minus_msl_m=-32.0)
         self.assertEqual(fly_module.model_time_limit_s(context, N_LOOK, params, 2.0), limits_s(batch, params, 2.0)[0])
 
     def test_a_model_word_is_its_own_step_s_result_in_the_judges_verdict(self):
@@ -1099,9 +1105,12 @@ class ModelSegmentTest(unittest.TestCase):
                               fly_s=0.1, judge_s=0.01)
         context = FlightContext(signals=None, series=None, reading=reading(), geometry=geometry(), crossing_heights=(15.0,),
                                 group="own dynamics", approach_ias_mps=70.0,
-                                observed_track_deg=np.full(20, 90.0), observed_distance_m=400.0 * np.arange(20))
+                                observed_track_deg=np.full(20, 90.0), observed_distance_m=400.0 * np.arange(20),
+                                hae_minus_msl_m=-32.0)
         track, _ = track_payload(result, context, 2.0)
         self.assertEqual(track["tS"], [20.0, 21.0, 22.0, 23.0, 24.0])
+        # from the word on, at the observed track's height: MSL plus the flight's runway's HAE − MSL offset
+        self.assertEqual((track["altitudeM"], track["altitudeHaeM"]), ([900.0] * 5, [868.0] * 5))
         # the distance flown from the observed flight's at the sentence's first step (3200 m), 100 m a cycle
         np.testing.assert_allclose(track["distanceM"], [3600.0, 3700.0, 3800.0, 3900.0, 4000.0], atol=0.6)
         self.assertEqual(len(track["loadFactor"]), 4)
@@ -1121,7 +1130,7 @@ class ModelFlightTest(unittest.TestCase):
                                 vertical_rate_mps=0.0 * rows)
         return FlightContext(signals=signals, series=None, reading=SimpleNamespace(words=np.zeros((20, 6))),
                              geometry=geometry2(), crossing_heights=(15.0, 15.0), group=group, approach_ias_mps=70.0,
-                             observed_track_deg=np.full(20, 90.0), observed_distance_m=200.0 * rows)
+                             observed_track_deg=np.full(20, 90.0), observed_distance_m=200.0 * rows, hae_minus_msl_m=-32.0)
 
     def fly(self, column: int, row: int, end_row: int, group: str = "own dynamics", events: list | None = None,
             read_rows: int | None = None):

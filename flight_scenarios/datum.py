@@ -4,11 +4,9 @@ WHAT RUNS: ``flight_to_msl`` subtracts the flight's runway's CIFP offset,
 ``runway_target["hae_minus_msl_m"]`` (the runway record's HAE minus MSL elevation: KRDU
 05L -32.0 m), from every altitude of the track -- one runway-local constant per flight, not
 a per-point geoid model (EGM96 would give -33.53 m there). Records carry the offset as
-``source.hae_minus_msl_m``, and the comparison CZML adds exactly that back on the way out.
-``geoid_undulation_m`` (EGM96 via pyproj) is NOT this conversion: since 2026-09-26 it serves
-only the backend's live executor (``aeroviz_backend.autopilot_segment``), which moves to the
-runway offset the Training exporters add (``training_files.runway_hae_minus_msl_m``) once branch
-``dev-model-autopilot`` has merged -- this function goes with it.
+``source.hae_minus_msl_m``, and the comparison CZML adds exactly that back on the way out; so
+does the Training view (``ts_transformer.instructions.training_files.runway_hae_minus_msl_m``).
+Nothing here models the geoid.
 
 OpenSky's ``geoaltitude`` -- the only altitude the harvest keeps (``altitude_source:
 "opensky_history_geoaltitude_m"``) -- is GNSS geometric altitude, i.e. height above the
@@ -47,11 +45,7 @@ than being silently assumed to be one datum or the other.
 
 from __future__ import annotations
 
-import functools
-import os
-from typing import Any, Iterable, Sequence
-
-import numpy as np
+from typing import Any, Iterable
 
 # MIRROR of ``trajectory_data_process.harvest.store.ALTITUDE_SOURCE`` (the tag the harvest
 # writes). Not imported: the harvest package imports this module, so a top-level import
@@ -64,58 +58,6 @@ LEGACY_EGM96_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_msl_egm96"
 #   "synthetic" -- ``ts_transformer/data/synthetic.py`` builds waypoints as
 #                  ``threshold["elevation_m"] + height``, and threshold elevations are MSL.
 MSL_ALTITUDE_SOURCES = frozenset({MSL_ALTITUDE_SOURCE, "synthetic"})
-
-# EPSG:4979 = WGS84 3D (ellipsoidal height); EPSG:4326+5773 = WGS84 2D + EGM96 height.
-_HAE_CRS = "EPSG:4979"
-_MSL_CRS = "EPSG:4326+5773"
-
-@functools.cache
-def _geoid_transformer():
-    """The EGM96 transformer behind ``geoid_undulation_m``, built once (a raising build is not
-    cached, so it retries). Not used by ``flight_to_msl`` (see the module docstring).
-
-    ``pyproj`` needs the EGM96 grid (``us_nga_egm96_15.tif``). Without it PROJ silently
-    falls back to a "ballpark" no-op that returns the input unchanged -- which would look
-    exactly like a correctly-applied zero correction -- so the transform is verified against
-    a known undulation before it is ever used on real data.
-    """
-    try:
-        import pyproj
-        from pyproj import Transformer
-    except ImportError as exc:  # pragma: no cover - environment problem, not logic
-        raise RuntimeError(
-            "the HAE->MSL conversion needs pyproj (EGM96 geoid grid); install pyproj into "
-            "the thesis env, or the observed altitudes will be ~30 m off their datum"
-        ) from exc
-    # An explicit PROJ_NETWORK from the operator wins (the probe below still fails loudly
-    # if the grid then isn't reachable); otherwise enable network so PROJ can fetch and
-    # cache the grid.
-    if "PROJ_NETWORK" not in os.environ:
-        pyproj.network.set_network_enabled(True)
-    transformer = Transformer.from_crs(_HAE_CRS, _MSL_CRS, always_xy=True)
-    # KRDU: EGM96 N = -33.53 m. A no-op transform returns 0.0 here. Written as
-    # not-(within-tolerance) so a NaN probe also raises -- every comparison with NaN is
-    # False, and `> 1.0` would have cached a transformer that NaNs every altitude.
-    _, _, probe = transformer.transform(-78.7794, 35.8792, 0.0)
-    if not (abs(probe - 33.53) <= 1.0):
-        raise RuntimeError(
-            "PROJ returned a ballpark (no-op) vertical transform: the EGM96 grid "
-            "'us_nga_egm96_15.tif' is missing and PROJ network access is unavailable. "
-            f"Expected a KRDU geoid undulation near -33.53 m, got {-probe:.2f} m. "
-            "Fetch the grid (PROJ_NETWORK=ON, or projsync) before building scenarios."
-        )
-    return transformer
-
-
-def geoid_undulation_m(lats: Sequence[float], lons: Sequence[float]) -> np.ndarray:
-    """EGM96 geoid undulation N = h_HAE - H_MSL, metres, one per point (float64).
-
-    The Training view's MSL -> HAE for executor-flown tracks; the modeling seam converts with
-    the runway's CIFP offset instead (``flight_to_msl``)."""
-    _, _, msl_of_zero = _geoid_transformer().transform(list(lons), list(lats), [0.0] * len(lats))
-    # Transforming HAE 0 gives -N, so N is its negation.
-    return -np.asarray(msl_of_zero, dtype=np.float64)
-
 
 def _runway_offset(flight: dict[str, Any]) -> float:
     target = flight.get("runway_target") or {}

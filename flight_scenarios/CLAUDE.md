@@ -17,9 +17,9 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   `flight_scenarios/datum.flight_to_msl`, which subtracts the flight's RUNWAY's CIFP offset
   `runway_target["hae_minus_msl_m"]` (HAE minus MSL elevation of the threshold: KRDU 05L −32.0 m) —
   one runway-local constant per flight, NOT EGM96 (−33.53 m there; 1.5 m apart). The measurements
-  above were taken with EGM96. `datum.geoid_undulation_m` (EGM96 via pyproj) is a different tool,
-  now used only by the backend's live executor (`autopilot_segment/payload.py`); that follows the
-  exporters onto the runway offset once `dev-model-autopilot` has merged, and the function is deleted.
+  above were taken with EGM96. Nothing in the live code models the geoid any more:
+  `datum.geoid_undulation_m` (EGM96 via pyproj) was deleted with its last caller, the backend's
+  live executor.
 - **Do NOT move this into the harvest**: CZML positions are consumed by Cesium as metres above
   the ellipsoid (`aeroviz-4d/src/types/czml.d.ts`) and are CORRECT as recorded — converting at
   the source fixes modeling and breaks the viewer by the same 33 m.
@@ -34,14 +34,15 @@ Everything below is a contract this seam owns; getting one wrong is silent, not 
   MSL, and `build_scenario_comparison_czml._states_to_waypoints` — the single point every
   record-derived entity flows through — adds the record's own `source.hae_minus_msl_m` back (the
   same runway offset, so the round trip is exact). The observed reference bypasses it (deep-copied
-  from `trajectories.czml`, already HAE). The Training exporters add the same offset back too
+  from `trajectories.czml`, already HAE). The Training exporters and the live executor add the same offset back too
   (`ts_transformer.instructions.training_files.runway_hae_minus_msl_m`, read from the arrival
   manifest the artefact recorded; they used EGM96 until 2026-09-26, up to 2.8 m off).
 - Records are MSL by ASSUMPTION, not by tag — pre-datum-fix HAE-era artifacts are discarded
   wholesale (user decision); feeding one through the builder would double-shift it ~33.5 m low.
-- **PROJ trap** (for `geoid_undulation_m`): with the EGM96 grid missing and network off, pyproj
-  silently returns a "ballpark" no-op vertical transform — a correction that looks applied and does
-  nothing; `_geoid_transformer()` probes a known undulation and raises.
+- **PROJ trap**, if a geoid model ever comes back: with the EGM96 grid missing and network off,
+  pyproj silently returns a "ballpark" no-op vertical transform — a correction that looks applied
+  and does nothing. The deleted `_geoid_transformer()` probed a known undulation (KRDU −33.53 m) and
+  raised (git history).
 
 ## Flight identity
 

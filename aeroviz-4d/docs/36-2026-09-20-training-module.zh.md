@@ -105,7 +105,7 @@ v3 导出后这里写 v3 的数字。
 `hae_minus_msl_m`，数据面当初减掉的就是它，`training_files.runway_hae_minus_msl_m`），所以换回来正是飞机报的高度。
 2026-09-26 之前用的是 EGM96 当地值，和减掉的那个数不一样（instruction_v3_day_split 五个机场 200 个航班上，
 差 −1.1 到 +2.8 m）；那之前导出、现有代码不能重导的集（instruction_v1/v2/v3、box、box_v3、v15_nomerge_noposition
-及其叠加层）按用户决定保持原样，仍是旧值。后端现飞（§4.7）暂时还加 EGM96，等 `dev-model-autopilot` 合并后改成同一个数。
+及其叠加层）按用户决定保持原样，仍是旧值。后端现飞（§4.7）也加同一个数。
 
 ### 2.4 一条原则：前端不算包络
 

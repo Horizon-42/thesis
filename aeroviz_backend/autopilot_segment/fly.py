@@ -40,8 +40,9 @@ from ts_transformer.instructions.airport import AirportGeometry
 from ts_transformer.instructions.artefact import load_candidates, load_sentences, load_signals
 from ts_transformer.instructions.labeller.read import Reading, admit, read_flight
 from ts_transformer.instructions.signals import FlightSignals
-from ts_transformer.instructions.training_files import require_stored_sentence, stored_sentence
+from ts_transformer.instructions.training_files import require_stored_sentence, runway_hae_minus_msl_m, stored_sentence
 from ts_transformer.instructions.words import Words
+from ts_transformer.repo_layout import arrival_manifest_path
 
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.segment import (
@@ -62,11 +63,13 @@ class FlightContext:
     approach_ias_mps: float
     observed_track_deg: np.ndarray     # the labeller's smoothed track of the observed flight (the heading chart's)
     observed_distance_m: np.ndarray    # and its smoothed distance flown (the altitude chart's axis)
+    hae_minus_msl_m: float             # its runway's HAE − MSL offset (`training_files.runway_hae_minus_msl_m`)
 
 
 def open_flight(artefact: Path, split: str, dataset_id: str, words: Words) -> FlightContext:
     """One labelled flight of ``artefact``: its stored signals, the flight rebuilt from the data plane and checked
-    against them (`rebuild_series`), and the labeller's reading, which must give the stored sentence."""
+    against them (`rebuild_series`), the labeller's reading, which must give the stored sentence, and the offset that
+    gives its heights back as the aircraft reported them."""
     spec = words.spec
     signals = load_signals(artefact, split)
     found = [index for index, item in enumerate(signals) if item.dataset_id == dataset_id]
@@ -90,7 +93,9 @@ def open_flight(artefact: Path, split: str, dataset_id: str, words: Words) -> Fl
                          crossing_heights=published_crossing_heights(geometry), group=group,
                          approach_ias_mps=replay.flight_approach_ias_mps(series, group),
                          observed_track_deg=observed.smoothed.track_deg,
-                         observed_distance_m=observed.smoothed.distance_m)
+                         observed_distance_m=observed.smoothed.distance_m,
+                         hae_minus_msl_m=runway_hae_minus_msl_m(artefact, flight.airport,
+                                                                arrival_manifest_path(flight.airport))[flight.runway])
 
 
 def fly_until(executor: Executor, sentences: Sentences, clock: TimeClock | DistanceClock | TrackClock, step_s: float,

@@ -27,7 +27,7 @@ from .build import (
     build_scenarios_from_arrivals,
     load_model_arrivals,
 )
-from .datum import flights_to_msl, geoid_undulation_m
+from .datum import flights_to_msl
 from .fitted_approach import FittedApproach, TimedFittedPoint, fit_flight_final_approach
 from .identity import flight_key
 from .runway_target import threshold_target_state
@@ -45,7 +45,6 @@ __all__ = [
     "build_scenarios_from_arrivals",
     "load_model_arrivals",
     "flights_to_msl",
-    "geoid_undulation_m",
     "FittedApproach",
     "TimedFittedPoint",
     "fit_flight_final_approach",
