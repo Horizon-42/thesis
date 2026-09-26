@@ -491,6 +491,24 @@ than round 0 plus ln 1.2), the highest augmented landed share, the earliest with
 term, a KL budget — are the stopped runs of readouts §9); val is read afterwards with `prior_free_generation --glidepath-mask` (real
 starts, and `--augment-seed` for augmented ones).
 
+### R22 · `run_ts.py prior_glidepath_diagnosis` — why the labelled replays sink below the glidepath lower edge (prior readouts §12)
+
+2026-09-26. `prior_glidepath_diagnosis --instructions <artefact> --executor <executor spec dir> [--split train]
+[--per-airport 400] [--seed 1337] [--chunk 64] --out <new dir>` flies the stage-0 check's kind of sample (R20: own
+dynamics, `replay.draw`, the labelled words from `N_LOOK` on the spec's clock) and compares the executor with the observed
+aircraft cycle by cycle — the observed aircraft read at the row the word clock matched to the executor (`TrackClock`), both
+against the published glidepath of the runway in force. Per stopped replay: executor and observed against the glidepath at
+the stop, the observed binned (on the glidepath ≤ 30 m below / above the lower edge / above the stop line / beyond it);
+over the stopped replays, the height the executor gave up to the observed aircraft summed by the words in force (altitude
+kind × angle class × lateral capture); per descent class, on each replay's longest ≥ 20 s run of "descend to land" after
+the capture, both mean path angles (height lost ÷ distance to go covered, each ≥ 500 m), the observed aircraft against the
+glidepath at the run's start and the height given up per minute; at the first captured cycle inside the FAF, executor −
+observed, apart for the replays that flew "descend to land" with the shallowest class before it. A what-if flies the same
+sample with ONE line of `Vertical.rate` replaced in-process (`class_centre_in_tube`: inside the tube after the capture, the
+class's nominal angle, never steeper than the line to the crossing point; refused unless the line is there exactly once) —
+stops and outcomes only; the executor's source and spec are untouched. Writes `diagnosis.json`
+(`ts-prior-glidepath-diagnosis-v1`); from a clean tree, never over an existing directory; development splits only.
+
 ### R18 · `run_ts.py prior_closed_loop` — archived 2026-09-25 → `archive/closed_loop_sft_2026_09/` (`docs/reference/entries.md` there)
 
 ### R19 · `run_ts.py prior_landing_reward` — the landing reward (prior design §9.3)

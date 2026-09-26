@@ -361,7 +361,9 @@ before training (R20). **Post-training stage 2** (`prior_augmented_reward`, R21)
 the edge, the terminal reward, scored under the masks each sentence was said under;
 the first stage's loss (reward + 0.04 × the pull to the base model + 1 × the teacher-forced data term — without the data
 term the pull alone could not hold it, readouts §9), and the rounds are guarded by words per flight against the
-labelled words, not by the teacher-forced NLL.
+labelled words, not by the teacher-forced NLL. **Why the labelled replays sink below the edge** (`prior_glidepath_diagnosis`, R22): the
+executor against the observed aircraft cycle by cycle, the height given up by word, and a one-line what-if of the vertical
+law run in-process (readouts §12).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/ENGINEERING_NOTES.md`)
 
