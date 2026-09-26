@@ -25,15 +25,16 @@ from ts_transformer.instructions.labeller.read import Admitted
 from ts_transformer.instructions.training_files import band_payload, rounded
 from ts_transformer.instructions.words import COLUMNS, HEADING, Words
 
-from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment
+from aeroviz_backend.autopilot_segment.fly import BELOW_GLIDEPATH, FlightContext, FlownSegment
 from aeroviz_backend.autopilot_segment.segment import told_words
 from aeroviz_backend.autopilot_segment.verdict import HeadingFacts, selected_heading, word_verdict
 
 #: MIRROR of `aeroviz-4d/src/data/trainingAutopilot.ts` (`TRAINING_AUTOPILOT_SCHEMA`); the reader refuses anything
 #: else by name. A name changes with the payload's shape, on both sides, in one change.
-SCHEMA = "aeroviz-autopilot-segment-v4"
+SCHEMA = "aeroviz-autopilot-segment-v5"
 #: The end of a segment flown to its ``stopRow``: the executor reached it. Otherwise the end is the judge's outcome
-#: (`judge.OUTCOMES`, mirrored by `trainingOverlays.ts`'s `TRAINING_EXECUTOR_OUTCOMES`). MIRROR of `trainingAutopilot.ts`
+#: (`judge.OUTCOMES`, mirrored by `trainingOverlays.ts`'s `TRAINING_EXECUTOR_OUTCOMES`), or — a model's sentence spoken
+#: under the procedure's altitudes — `fly.BELOW_GLIDEPATH` (v5: the request names the masks, the answer this end). MIRROR of `trainingAutopilot.ts`
 #: (`TRAINING_AUTOPILOT_SEGMENT_END`).
 SEGMENT_END = "segment_end"
 
@@ -178,8 +179,10 @@ def segment_payload(result: FlownSegment, context: FlightContext, words: Words) 
     else:
         observed_s = (segment.stop_row - segment.row) * spec.step_s
     crossing = verdict.crossing
-    # the judge's outcome, unless the flight simply reached the segment's end (no event before it)
-    reason = SEGMENT_END if ended_at_stop(result) else verdict.outcome
+    # the judge's outcome, unless the flight simply reached the segment's end (no event before it) or the glidepath lower
+    # edge stopped a model's sentence (the flight cut there reads as a timeout to the judge)
+    reason = (BELOW_GLIDEPATH if result.glidepath_step is not None else
+              SEGMENT_END if ended_at_stop(result) else verdict.outcome)
     offset = None
     if reason == SEGMENT_END and model is None:
         # where the executor was when its clock put it at the observed aircraft's point of the segment's stop

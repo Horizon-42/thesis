@@ -69,6 +69,9 @@ class ModelSentence:
     first_row: int
     rows: int
     grid: np.ndarray                # [rows - first_row, 6], UNCHANGED where a column says nothing; row 0 complete
+    # the procedure's masks it was spoken under, as its overlay records them: each set's name and the digest of the data
+    # it read (`prior.masks`); empty: the vocabulary's rules alone
+    procedure_masks: tuple[tuple[str, str], ...]
 
     @property
     def last_runway(self) -> int:
@@ -93,13 +96,14 @@ def model_steps_max(observed_rows: int, first_row: int, timeout_factor: float) -
 
 
 def model_sentence(record: object, words: Words, runways: int, observed_rows: int, timeout_factor: float) -> ModelSentence:
-    """A model's sentence from the request's ``sentence`` (``{overlayId, sample, firstRow, rows, events}``), refused by
+    """A model's sentence from the request's ``sentence`` (``{overlayId, sample, firstRow, rows, events,
+    procedureMasks}``; ``procedureMasks``: ``[{name, dataSha256}]``, the sets its overlay says it was spoken under), refused by
     name unless its words are the vocabulary's, in (step, column) order, from a first step inside the observed flight
     that says every column — the prior's first predicted step (`N_LOOK`), where the free generation starts and which
     its time limit counts from — over no more steps than its flight can say (`model_steps_max`)."""
     if not isinstance(record, dict):
         raise RequestRefused(f"the sentence must be an object, got {record!r}")
-    missing = [key for key in ("overlayId", "sample", "firstRow", "rows", "events") if key not in record]
+    missing = [key for key in ("overlayId", "sample", "firstRow", "rows", "events", "procedureMasks") if key not in record]
     if missing:
         raise RequestRefused(f"the sentence has no {missing}")
     overlay_id = record["overlayId"]
@@ -136,7 +140,12 @@ def model_sentence(record: object, words: Words, runways: int, observed_rows: in
         grid[row - first, column] = value
     if (grid[0] == UNCHANGED).any():
         raise RequestRefused(f"the sentence's first step {first} does not say every column")
-    return ModelSentence(overlay_id=overlay_id, sample=sample, first_row=first, rows=rows, grid=grid)
+    masks = record["procedureMasks"]
+    if not isinstance(masks, list) or not all(isinstance(item, dict) and set(item) == {"name", "dataSha256"}
+                                              and all(isinstance(value, str) for value in item.values()) for item in masks):
+        raise RequestRefused(f"the sentence's procedureMasks must be a list of {{name, dataSha256}}, got {masks!r}")
+    return ModelSentence(overlay_id=overlay_id, sample=sample, first_row=first, rows=rows, grid=grid,
+                         procedure_masks=tuple((item["name"], item["dataSha256"]) for item in masks))
 
 
 def sentence_instructions(grid: np.ndarray, words: Words) -> list[Instruction]:

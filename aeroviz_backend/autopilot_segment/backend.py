@@ -8,7 +8,10 @@ Which flight: the request names a Training set (``airport``, ``setId``) and a fl
 sample (under the frontend's airports root) names the artefact it was exported from and the split it was drawn from.
 Which sentence: ``sentence`` is null for the flight's labelled sentence (the truth), or a model's own sentence of it
 (`segment.model_sentence`: the prior's free generation, one sample, as the Training view read it from its overlay) —
-the words are the request's; nothing precomputed is read.
+the words are the request's; nothing precomputed is read. It names the procedure's masks it was spoken under, each with
+the digest of the data the set read; the backend builds them on its own code and data (`prior.masks`) and refuses the
+request when a set is unknown or its data moved — the glidepath lower edge must stop the flight where it stopped the
+sample.
 Its spec is the ONE executor spec this code accepts for the artefact (`replay.open_executor`), looked up again whenever
 a spec is added, moved or rewritten.
 """
@@ -27,7 +30,9 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.instructions import training_files
 from ts_transformer.instructions.words import COLUMNS, Words
+from ts_transformer.instructions.artefact import load_candidates
 from ts_transformer.io_utils import utc_now
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, OPT_OUTPUTS_ROOT, REPO_ROOT
 
 from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
@@ -66,6 +71,28 @@ class AutopilotSegmentBackend:
         self._executors: dict[Path, tuple[tuple[tuple[Path, int], ...], tuple[Path, ExecutorParams, dict[str, Any], Words]]] = {}
         self._flights: OrderedDict[tuple[Path, str], FlightContext] = OrderedDict()
         self._files: dict[Path, tuple[int, dict[str, Any]]] = {}
+        # the procedure's masks built for an artefact's airports (the published finals are read once)
+        self._masks: dict[tuple[Path, tuple[str, ...]], ProcedureMasks] = {}
+
+    def procedure_masks(self, artefact: Path, asked: tuple[tuple[str, str], ...]) -> ProcedureMasks:
+        """The sets ``asked`` (name, data digest) built for ``artefact``'s airports on this code and data — refused
+        unless this code implements each and it reads the data the sample was spoken under."""
+        names = tuple(name for name, _ in asked)
+        if not names:
+            return ProcedureMasks.none()
+        key = (artefact, names)
+        if key not in self._masks:
+            try:
+                self._masks[key] = ProcedureMasks.build(names, load_candidates(artefact))
+            except ValueError as error:
+                raise RequestRefused(f"the sentence's procedure's masks: {error}") from None
+        built = self._masks[key].data_sha256()
+        moved = [name for name, digest in asked if built[name] != digest]
+        if moved:
+            raise RequestRefused(f"the data the procedure's masks {moved} read differs from the sample's (its overlay's "
+                                 f"digests differ from this backend's, built once when it first flew them — restart the "
+                                 f"backend if the procedure data changed since): it cannot be flown as it was said")
+        return self._masks[key]
 
     def _json(self, path: Path) -> dict[str, Any]:
         """A Training file, parsed once per version on disk (a sample is several MB)."""
@@ -163,7 +190,8 @@ class AutopilotSegmentBackend:
             model = None if sentence is None else model_sentence(sentence, words, len(context.geometry.candidates),
                                                                  len(context.reading.words), params.timeout_factor)
             opened = time.perf_counter()
-            result = fly_segment(context, params, words, COLUMNS.index(column_name), row, superseded, model)
+            masks = None if model is None else self.procedure_masks(artefact, model.procedure_masks)
+            result = fly_segment(context, params, words, COLUMNS.index(column_name), row, superseded, model, masks)
             answering = time.perf_counter()
             body = segment_payload(result, context, words)
             finished = time.perf_counter()

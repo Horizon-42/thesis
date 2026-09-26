@@ -11,7 +11,7 @@ import {
   trainingRunName,
   type TrainingCrossing,
   type TrainingExecutorCheck,
-  type TrainingExecutorOutcome,
+  type TrainingFreeOutcome,
   type TrainingGenerationModel,
 } from "./trainingOverlays";
 import type { TrainingAutopilotStatus } from "./trainingAutopilot";
@@ -22,24 +22,26 @@ export const TRAINING_COLUMN_LABEL: Record<TrainingColumn, string> = {
   runway: "Runway", approach: "Approach", heading: "Heading", altitude: "Altitude", angle: "Angle", speed: "Speed",
 };
 
-/** How the executor's flight ended (the judge's outcomes), in words. */
-export const TRAINING_OUTCOME_TEXT: Record<TrainingExecutorOutcome, string> = {
+/** How the executor's flight ended (the judge's outcomes, and a model's sentence stopped below the glidepath), in words. */
+export const TRAINING_OUTCOME_TEXT: Record<TrainingFreeOutcome, string> = {
   landed: "landed",
   crossed_without_capture: "crossed the threshold without capturing the final",
   crossed_off_runway: "crossed the threshold off the runway",
   ground_contact: "reached the threshold's elevation before the threshold",
   timeout: "did not get there within its time limit",
   dynamics_failure: "left the dynamics (a non-finite state, no airspeed or a stall)",
+  below_glidepath: "sank below the glidepath's lower edge (the procedure's altitudes stop the sentence there)",
 };
 
 /** The same, as a short tag: the flight list, the 3D label. */
-export const TRAINING_OUTCOME_TAG: Record<TrainingExecutorOutcome, string> = {
+export const TRAINING_OUTCOME_TAG: Record<TrainingFreeOutcome, string> = {
   landed: "landed",
   crossed_without_capture: "no capture",
   crossed_off_runway: "off the runway",
   ground_contact: "ground contact",
   timeout: "timed out",
   dynamics_failure: "dynamics failure",
+  below_glidepath: "below glidepath",
 };
 
 /** The live executor's verdict on its word, as it is read first. */

@@ -13,7 +13,10 @@ A MODEL's word (`segment.model_segment`) is flown as the prior's free generation
 heard at the step it was said (the time clock: `ClosedLoop.step` tells step k's words on its first cycle), under the
 same time limit — the observed flight's remaining time from that step × the spec's timeout factor (`limits_s`) — and
 judged against the runway the model points at, not the observed one. The executor is deterministic, so the flight is
-the exported sample's own, which the frontend checks point for point.
+the exported sample's own, which the frontend checks point for point. A sentence spoken under the procedure's altitudes
+ends where its free generation ended it: at the first flown step whose end state sank more than the track tolerance below
+the glidepath lower edge of the runway in force (`glidepath_stop`, the readout's rule read on the flown record, as the
+readout reads it — after the flight); the flight is cut there and its answer's outcome is `BELOW_GLIDEPATH`.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ from ts_transformer.autopilot import replay
 from ts_transformer.autopilot.executor import Executor, Flown
 from ts_transformer.autopilot.flights import rebuild_series
 from ts_transformer.autopilot.frame import AirportCharts
-from ts_transformer.autopilot.judge import Verdict, judge, read_flown
+from ts_transformer.autopilot.judge import Verdict, flown_track, judge, read_flown
 from ts_transformer.autopilot.lateral import Runways
 from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import VerticalPath, published_vertical_paths
@@ -41,7 +44,9 @@ from ts_transformer.instructions.artefact import load_candidates, load_sentences
 from ts_transformer.instructions.labeller.read import Reading, admit, read_flight
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import require_stored_sentence, runway_hae_minus_msl_m, stored_sentence
-from ts_transformer.instructions.words import Words
+from ts_transformer.instructions.words import RUNWAY, UNCHANGED, Words
+from ts_transformer.prior.masks import ProcedureMasks
+from ts_transformer.prior.procedure import RunwayProcedure, below_floor
 from ts_transformer.repo_layout import arrival_manifest_path
 
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, RequestRefused, Superseded
@@ -169,6 +174,48 @@ def fly_batch_until(batch: replay.Batch, params: ExecutorParams, words: Words, s
     return flown, reached, fly_s
 
 
+#: MIRROR of `experiments.prior_free_generation.BELOW_GLIDEPATH` (a runner the backend does not import; pinned by
+#: `test_autopilot_segment.GlidepathStopTest`): a model's flight cut at the glidepath lower edge.
+BELOW_GLIDEPATH = "below_glidepath"
+
+
+def in_force(grid: np.ndarray) -> np.ndarray:
+    """``[N, 6]``: each column's word in force at each row of a said grid, whose first row says every column (refused
+    otherwise). MIRROR of `experiments.prior_free_generation.in_force` (pinned by `GlidepathStopTest`)."""
+    grid = np.asarray(grid, dtype=np.int64)
+    if (grid[0] == UNCHANGED).any():
+        raise ValueError("a sentence's first row says every column")
+    last = np.maximum.accumulate(np.where(grid != UNCHANGED, np.arange(len(grid))[:, None], 0), axis=0)
+    return np.take_along_axis(grid, last, axis=0)
+
+
+def glidepath_stop(flown: Flown, grid: np.ndarray, geometry: AirportGeometry, finals: tuple[RunwayProcedure, ...],
+                   words: Words) -> int:
+    """The first flown step whose end state is more than the track tolerance below the glidepath lower edge of the
+    runway in force during it (-1: none) — one flight's `experiments.prior_free_generation.glidepath_stops`, a MIRROR
+    (pinned by `GlidepathStopTest` flight for flight): the state after step k is the cycle boundary (k + 1) × the step's
+    cycles, up to the one the flight ended at; the words step k flies are the row heard at its first cycle."""
+    step_rows = round(words.spec.step_s / flown.cycle_s)
+    boundaries = np.arange(step_rows, int(flown.done_cycle[0]) + 2, step_rows)
+    track = flown_track(flown.states[0, boundaries].cpu().numpy(), geometry)
+    force = in_force(grid)
+    heard = np.minimum(row_at(flown.sentence_s[0, boundaries - step_rows].cpu().numpy(), words.spec.step_s), len(force) - 1)
+    runway = force[heard, RUNWAY]
+    below = np.zeros(len(boundaries), dtype=bool)
+    for pointer in np.unique(runway):
+        steps = runway == pointer
+        below[steps], _ = below_floor(finals[pointer], track["e"][steps], track["n"][steps], track["height"][steps],
+                                      words.spec)
+    return int(np.flatnonzero(below)[0]) if below.any() else -1
+
+
+def cut_at_step(flown: Flown, step: int, words: Words) -> Flown:
+    """``flown`` over when its step ``step`` ended: the state after it (``states[(step + 1) × the step's cycles]``) is its
+    last — ``done_cycle`` is the cycle at whose end the flight was done, whose state follows it (`executor.Flown`)."""
+    step_rows = int(round(words.spec.step_s / flown.cycle_s))
+    return replace(flown, done_cycle=torch.full_like(flown.done_cycle, (step + 1) * step_rows - 1))
+
+
 @dataclass(frozen=True)
 class FlownSegment:
     segment: Segment
@@ -180,12 +227,20 @@ class FlownSegment:
     reached_end: bool | None         # None when flown to its outcome (``stop_row`` is the sentence's end)
     fly_s: float                     # wall time the executor's cycles took, and the judge
     judge_s: float
+    # a model's sentence spoken under the procedure's altitudes: the step the glidepath lower edge stopped it at, from
+    # its first step (the flight is cut there); None: not stopped
+    glidepath_step: int | None = None
 
 
 def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, column: int, row: int,
-                superseded: Callable[[], bool], model: ModelSentence | None = None) -> FlownSegment:
+                superseded: Callable[[], bool], model: ModelSentence | None = None,
+                procedure_masks: ProcedureMasks | None = None) -> FlownSegment:
     """``column``'s word said at ``row`` flown and judged: the truth's from the observed state there; a model's
-    (``model``) as its sentence was flown, from its first step (`segment.model_segment`)."""
+    (``model``) as its sentence was flown, from its first step (`segment.model_segment`), under the procedure's masks it
+    was spoken under (``procedure_masks``, built for the request: under the procedure's altitudes the flight is cut at
+    the glidepath lower edge's stop)."""
+    if (model is None) != (procedure_masks is None):
+        raise ValueError("a model's sentence is flown with the procedure's masks it was spoken under, the truth's without")
     spec = words.spec
     lead = spec.rows_exact(spec.heading_lead_s)
     if model is None:
@@ -206,8 +261,22 @@ def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, co
     flown, reached, fly_s = fly_batch_until(batch, params, words,
                                             None if segment.to_landing else segment.stop_row - segment.start_row,
                                             superseded, model_limit_s=limit_s)
+    glidepath_step = None
+    if procedure_masks is not None and procedure_masks.altitudes:
+        stop = glidepath_stop(flown, segment.grid, context.geometry, procedure_masks.finals[context.geometry.code], words)
+        if stop >= 0:
+            # the free generation's end: the flight is over at that step's end state, whatever the executor flew after
+            # (a stopped sample's sentence ends at its stop step, so only a segment flown to its outcome gets here)
+            glidepath_step, flown = stop, cut_at_step(flown, stop, words)
     started = time.perf_counter()
     verdict = judge(flown, 0, context.geometry, reading.runway_index, judged_reading(reading, segment), signals, spec, words)
+    stop_row = None if glidepath_step is None else int(flown.done_cycle[0]) + 1
+    if glidepath_step is not None and (verdict.outcome, verdict.end_row) != ("timeout", stop_row):
+        # the free generation's sample ends at the stop whatever came before it; the judge read an event first (an
+        # uncaptured crossing or a stall the executor flew on past): the word cannot be judged as the sample ended
+        raise RequestRefused(f"the judge ended the model's flight at {verdict.outcome} ({verdict.end_row * flown.cycle_s:g} s "
+                             f"after step {segment.start_row}) before the glidepath lower edge stopped its sample at step "
+                             f"{segment.start_row + glidepath_step}")
     # a word said as or after the flight ended has nothing flown after it — the sentence bar offers it no Fly (its step's
     # time is not before the sample's end); at a crossing or failure the judge does not even read its step
     if model is not None and verdict.end_row <= segment.word_step * int(round(spec.step_s / flown.cycle_s)):
@@ -222,4 +291,4 @@ def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, co
                                  f"{segment.start_row + read - 1}, before it said this word at step {row}")
     return FlownSegment(segment=segment, reading=reading, signals=signals, model=model, flown=flown, verdict=verdict,
                         reached_end=None if segment.to_landing else reached, fly_s=fly_s,
-                        judge_s=time.perf_counter() - started)
+                        judge_s=time.perf_counter() - started, glidepath_step=glidepath_step)

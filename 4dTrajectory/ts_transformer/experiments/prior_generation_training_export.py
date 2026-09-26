@@ -23,10 +23,13 @@ readout flies — their own dynamics (`replay.OWN`) — are flown; the rest of t
 outcome is the executor's judge's (`prior_free_generation.flight_rows`: `judge.outcome_of` on the runway pointed at the
 end). One generator, seeded, draws every sample of every airport in the order the airports are named.
 
-**The prior speaks under the vocabulary's rules alone** — never its own procedure's masks (`prior.masks`, recorded
-beside its checkpoint: none for base and landing, the procedure's altitudes for augmented), because this payload cannot
-yet carry a sentence the glidepath lower edge stopped (`docs/code-health-followups.md`). The frontend says so; a readout
-drawn under the procedure's masks is refused.
+**The prior speaks as it was trained to**: under the vocabulary's rules and its OWN procedure's masks (`prior.masks`,
+recorded beside its checkpoint — none for base and landing, the procedure's altitudes for augmented), read as the formal
+readout reads a free sentence (`prior_free_generation.said_rows`): under the procedure's altitudes a sentence stops at
+the first flown step more than the track tolerance below the glidepath lower edge (outcome `BELOW_GLIDEPATH`; nothing
+said after it counts, its track ends at that step's end state). The payload names the sets and the digest of the data
+each read, which the live backend checks before it flies a sample again (`aeroviz_backend/autopilot_segment`). A
+``--readout`` must have been drawn under the same masks.
 
 **Which model it is, by name** (`MODEL_NAMES`, the post-training design's table): a prior trained on data alone is
 ``base``; a post-trained round is named by the method that trained it (`fine_tuning.schema` less its version,
@@ -76,7 +79,7 @@ from ts_transformer.autopilot.params import ExecutorParams
 from ts_transformer.autopilot.runway_data import published_vertical_paths
 from ts_transformer.experiments.prior_augmented_reward import AUGMENTED_REWARD_SCHEMA
 from ts_transformer.experiments.prior_free_generation import (
-    GENERATION_SCHEMA, _physics, flight_rows, limits_s, speak_and_fly,
+    BELOW_GLIDEPATH, GENERATION_SCHEMA, _physics, limits_s, said_rows, speak_and_fly,
 )
 from ts_transformer.experiments.prior_landing_reward import LANDING_REWARD_SCHEMA
 from ts_transformer.experiments.prior_train import rosters
@@ -178,17 +181,20 @@ def in_tree_of(path: Path, other: str) -> Path:
 
 
 def readout_block(generation: dict[str, Any], prior_dir: Path, executor_sha256: str, instructions: Path, samples: int,
-                  temperature: float, airport: str) -> dict[str, Any]:
+                  temperature: float, airport: str,
+                  procedure_altitudes: bool) -> dict[str, Any]:
     """The prior's formal val free generation (`prior_free_generation`'s ``generation.json``) as the frontend reads it —
     the landed share in all and per approach kind, at ``airport`` (``here``) and over every airport the readout drew
     (``all``), of the prior's sentences and of the labelled words flown from the same row — refused unless it is this
-    prior's, on this executor spec and artefact, val, with these samples and this temperature."""
+    prior's, on this executor spec and artefact, val, with these samples and this temperature, drawn under the
+    procedure's altitudes exactly when the export is (``procedure_altitudes``: the model's own)."""
     if generation["schema"] != GENERATION_SCHEMA:
         raise ValueError(f"the readout is a {generation['schema']} file, not {GENERATION_SCHEMA}")
-    # the export speaks under the grammar's masks only: a readout under the procedure's is another generation
+    # the export speaks under the model's own procedure's masks: a readout drawn with the procedure's altitudes where the
+    # model has none (or without them where it has them) is another generation — the readout records only that flag
     wanted = {"prior": outputs_path(prior_dir), "executor": executor_sha256,
               "instructions": outputs_path(instructions), "split": SPLIT, "n_look": N_LOOK, "samples": samples,
-              "temperature": temperature, "procedure_masks": False}
+              "temperature": temperature, "procedure_masks": procedure_altitudes}
     found = {"prior": outputs_path(generation["prior"]["directory"]),
              "executor": generation["executor"]["sha256"], "instructions": outputs_path(generation["instructions"]),
              "split": generation["split"], "n_look": generation["n_look"], "samples": generation["samples"],
@@ -238,17 +244,22 @@ def track_payload(flown: Flown, index: int, end_row: int, outcome: str, geometry
 
 
 def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarray, geometry: AirportGeometry,
-                   words: Words, hae_minus_msl_m: float) -> dict[str, Any]:
+                   words: Words, hae_minus_msl_m: float, stop: int = -1) -> dict[str, Any]:
     """One sample as the frontend reads it: `flight_rows`'s ``row`` of it (its outcome and bookkeeping), the words
     it said up to its end as events on the flight's own steps (``grid``: [steps, 6], UNCHANGED where a column says
-    nothing; step 0 is row `N_LOOK`), the crossing and the flown track (``hae_minus_msl_m``: the flight's runway's)."""
+    nothing; step 0 is row `N_LOOK`), the crossing and the flown track (``hae_minus_msl_m``: the flight's runway's).
+    ``stop``: the step the glidepath lower edge stopped it at (`said_rows`; -1: it did not) — no crossing, the track to
+    that step's end state."""
     step_s = words.spec.step_s
     said = np.asarray(grid)[: row["steps_said"]]
     if (said[0] == UNCHANGED).any():
         raise ValueError(f"{row['dataset_id']}: the first predicted step does not say every column")
     # the crossing and the outcome's row: `flight_rows` read them with this call and kept only the outcome and the time
     outcome = outcome_of(flown, index, geometry, row["last_runway"], words.spec)
-    crossing = outcome.crossing
+    step_rows = int(round(step_s / flown.cycle_s))
+    crossing, end_row = (outcome.crossing, outcome.end_row) if stop < 0 else (None, (stop + 1) * step_rows)
+    if (stop >= 0) != (row["outcome"] == BELOW_GLIDEPATH):
+        raise ValueError(f"{row['dataset_id']}: outcome {row['outcome']} with the glidepath stop at step {stop}")
     start_s = N_LOOK * step_s
     return {
         "sample": row["sample"], "outcome": row["outcome"], "endS": round(start_s + row["end_s"], 3),
@@ -261,16 +272,16 @@ def sample_payload(flown: Flown, index: int, row: dict[str, Any], grid: np.ndarr
         "rows": N_LOOK + len(said),
         "events": [{"row": N_LOOK + int(step), "column": int(column), "value": int(said[step, column])}
                    for step, column in zip(*np.nonzero(said != UNCHANGED))],
-        "track": track_payload(flown, index, outcome.end_row, row["outcome"], geometry, step_s, start_s,
-                               hae_minus_msl_m),
+        "track": track_payload(flown, index, end_row, row["outcome"], geometry, step_s, start_s, hae_minus_msl_m),
     }
 
 
 def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[str, np.ndarray], instructions: Path,
                   geometry: AirportGeometry, model: Prior, params: ExecutorParams, words: Words, landings: Any,
-                  samples: int, *, generator: torch.Generator, temperature: float) -> list[dict[str, Any]]:
+                  samples: int, *, generator: torch.Generator, temperature: float,
+                  procedure_masks: ProcedureMasks) -> list[dict[str, Any]]:
     """Every flight of the set: those the val readout flies (their own dynamics) flown ``samples`` times with the
-    prior speaking, in one batch; the rest listed with the reason."""
+    prior speaking under ``procedure_masks`` (its own), in one batch; the rest listed with the reason."""
     spec = words.spec
     offsets = runway_hae_minus_msl_m(instructions, geometry.code, arrival_manifest_path(geometry.code))
     located = base_flights(base, flights, sentences)
@@ -296,18 +307,17 @@ def build_airport(base: BaseSet, flights: list[FlightSignals], sentences: dict[s
         repeated = replay.subset(batch, [n for n in range(len(flyable)) for _ in range(samples)])
         runways, charts, approach = _physics(repeated, cpu)
         limits = limits_s(repeated, params, spec.step_s, augmented=False)
-        # the vocabulary's rules alone, whatever the model's own procedure's masks: the payload cannot yet carry a
-        # sentence the glidepath lower edge stopped (docs/code-health-followups.md, prior design §5.1)
         flown, said, forbidden, _ = speak_and_fly(model, repeated.signals, repeated.geometries,
                                                   flight_inputs(repeated.series, device=cpu, anchor=N_LOOK), runways,
                                                   charts, approach, limits, words, params, landings,
                                                   generator=generator, temperature=temperature,
-                                                  procedure_masks=ProcedureMasks.none())
-        grids = [said[i] for i in range(len(said))]
-        rows = flight_rows(repeated, flown, grids, words, "prior", [i % samples for i in range(len(grids))], forbidden)
+                                                  procedure_masks=procedure_masks)
+        rows, grids, stops = said_rows(repeated, flown, said, forbidden, words, [i % samples for i in range(len(said))],
+                                       procedure_masks)
         for i, row in enumerate(rows):
             j = flyable[i // samples]
-            by_flight[j].append(sample_payload(flown, i, row, grids[i], geometry, words, offsets[signals[j].runway]))
+            by_flight[j].append(sample_payload(flown, i, row, grids[i], geometry, words, offsets[signals[j].runway],
+                                               -1 if stops is None else int(stops.step[i])))
     return [{"flightKey": item["flightKey"], "datasetId": item["datasetId"], "group": groups[j],
              "flown": j in by_flight, "samples": by_flight.get(j, [])}
             for j, item in enumerate(base.sample["flights"])]
@@ -343,7 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     started = time.perf_counter()
     params, record, words = replay.open_executor(executor, instructions)
     spec = words.spec
-    model, config_file, checkpoint_sha = open_trained_prior(prior_dir, instructions)
+    model, config_file, checkpoint_sha, procedure_masks = open_trained_prior(prior_dir, instructions)
     model_part = model_block(prior_dir, config_file, checkpoint_sha, model.config.variant)
     name = display_name(model_part["name"], model_part["round"])
     suffix = "" if model_part["round"] is None else f"_r{model_part['round']:02d}"
@@ -353,7 +363,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"the prior knows no airport {missing} ({list(model.config.airports)})")
     formal = None if args.readout is None else json.loads((resolved(args.readout) / "generation.json").read_text(encoding="utf-8"))
     readouts = {code: None if formal is None else readout_block(formal, prior_dir, record["sha256"], instructions,
-                                                                 args.samples, args.temperature, code)
+                                                                 args.samples, args.temperature, code,
+                                                                 procedure_masks.altitudes)
                 for code in airports}
     geometries = load_candidates(instructions)
     landings = (airport_landings(instructions, rosters(instructions))
@@ -372,17 +383,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     source = {"runner": RUNNER, "prior": repo_relative(prior_dir), "executor": repo_relative(executor),
               "instructions": repo_relative(instructions),
               "readout": None if args.readout is None else repo_relative(resolved(args.readout)), "git": git_state()}
+    digests = procedure_masks.data_sha256()
     generation = {"samples": args.samples, "temperature": args.temperature, "seed": args.seed,
-                  "firstPredictedRow": N_LOOK, "stepS": spec.step_s, "executor": {
+                  "firstPredictedRow": N_LOOK, "stepS": spec.step_s,
+                  # the model's own (`prior.masks`), each set with the digest of the data it read here
+                  "procedureMasks": [{"name": mask, "dataSha256": digests[mask]} for mask in procedure_masks.names],
+                  "executor": {
                       "specSha256": record["sha256"], "wordClock": params.word_clock, "cycleS": params.cycle_s,
                       "timeoutFactor": params.timeout_factor}}
-    title = (f"{name} · {prior_dir.parent.name}/{prior_dir.name} · its own sentences, {args.samples} a flight (the "
-             f"vocabulary's rules only), flown by executor spec {record['sha256'][:12]} from step {N_LOOK}")
+    masks_text = ", ".join(procedure_masks.names) or "no procedure's masks"
+    title = (f"{name} · {prior_dir.parent.name}/{prior_dir.name} · its own sentences, {args.samples} a flight "
+             f"({masks_text}), flown by executor spec {record['sha256'][:12]} from step {N_LOOK}")
     generator = torch.Generator().manual_seed(args.seed)
     built = {}
     for code in airports:
         payloads = build_airport(bases[code], flights, sentences, instructions, geometries[code], model, params, words,
-                                 landings, args.samples, generator=generator, temperature=args.temperature)
+                                 landings, args.samples, generator=generator, temperature=args.temperature,
+                                 procedure_masks=procedure_masks)
         payload = {"schema": SCHEMA, "overlayId": overlay_id, "airport": code, "writtenUtc": utc_now(),
                    "producedBy": source, "base": bases[code].block, "model": model_part, "generation": generation,
                    "readout": readouts[code], "columns": list(COLUMNS), "flights": payloads}

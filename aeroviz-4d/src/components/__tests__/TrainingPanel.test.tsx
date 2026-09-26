@@ -316,7 +316,7 @@ describe("TrainingPanel", () => {
       expect(await screen.findByText(/The models' own sentences, landed · base 50% \(val 90\.0%\) · landing r1 50% \(val 97\.0%\)/)).toBeTruthy();
       expect(screen.getAllByText("val · KXXX")).toHaveLength(2);
       expect(screen.getAllByText("val · all airports")).toHaveLength(2);
-      expect(screen.getByText(/^base \(v3_step1\/full_s1, trained on data alone\): 2 samples a flight at temperature 1 \(seed 1337\)/)).toBeTruthy();
+      expect(screen.getByText(/^base \(v3_step1\/full_s1, trained on data alone\): 2 samples a flight at temperature 1, spoken under the vocabulary's rules alone \(seed 1337\)/)).toBeTruthy();
     });
 
     it("reads a model that flies none of the set's flights without failing: nothing to count", async () => {

@@ -34,10 +34,13 @@ export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEN
   // the model's overlay is no longer published for the flight: nothing is asked).
   const key = useMemo(() => {
     if (trainingSelection === null || trainingPick === null) return null;
-    const sentence = trainingPick.source === null ? null
-      : generationOnScreen(trainingGenerations, trainingPick.source, trainingSelection)?.sentence ?? null;
+    const read = trainingPick.source === null ? null
+      : generationOnScreen(trainingGenerations, trainingPick.source, trainingSelection);
+    const sentence = read?.sentence ?? null;
     if (trainingPick.source !== null && sentence?.sample !== trainingPick.source.sample) return null;
-    return JSON.stringify({ request: trainingAutopilotRequest(trainingSelection, trainingPick, sentence), attempt: trainingPick.attempt });
+    const model = read === null || sentence === null ? null
+      : { sentence, procedureMasks: read.view.overlay.generation.procedureMasks };
+    return JSON.stringify({ request: trainingAutopilotRequest(trainingSelection, trainingPick, model), attempt: trainingPick.attempt });
   }, [trainingSelection, trainingPick, trainingGenerations]);
 
   useEffect(() => {

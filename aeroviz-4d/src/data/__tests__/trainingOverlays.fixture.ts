@@ -15,6 +15,7 @@ import {
   parseTrainingOverlays,
   TRAINING_EXECUTOR_SCHEMA,
   TRAINING_GENERATION_SCHEMA,
+  TRAINING_PROCEDURE_ALTITUDES,
   TRAINING_OVERLAYS_SCHEMA,
   TRAINING_PRIOR_SCHEMA,
   type TrainingGenerationView,
@@ -312,6 +313,8 @@ export function mockGenerationOverlay(id: string): Record<string, unknown> {
     model: { ...structuredClone(MOCK_MODELS[id]), checkpointSha256: "9".repeat(64), variant: "full", trainedAt: { head: "test", dirty: false } },
     generation: {
       samples: 2, temperature: 1, seed: 1337, firstPredictedRow: MOCK_GENERATION_FIRST_ROW, stepS: 2,
+      // augmented was trained under the procedure's altitudes; base and landing under none
+      procedureMasks: MOCK_MODELS[id].name === "augmented" ? [{ name: TRAINING_PROCEDURE_ALTITUDES, dataSha256: "d".repeat(64) }] : [],
       executor: { specSha256: "e".repeat(64), wordClock: "track", cycleS: 1, timeoutFactor: 1.5 },
     },
     readout: {

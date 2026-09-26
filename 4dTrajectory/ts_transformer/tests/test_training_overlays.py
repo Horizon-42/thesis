@@ -359,6 +359,16 @@ def test_the_frontend_reader_mirrors_the_exporters_names():
     assert json.loads(_ts_constant("TRAINING_PRIOR_SCHEMA")) == prior_export.SCHEMA
     assert json.loads(_ts_constant("TRAINING_GENERATION_SCHEMA")) == generation_export.SCHEMA
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_MODEL_NAMES"))) == generation_export.MODEL_NAMES
+    # a free sentence's outcomes: the judge's (the executor's list, pinned by the backend's MirrorTest) and the glidepath stop
+    from ts_transformer.experiments.prior_free_generation import BELOW_GLIDEPATH, FREE_OUTCOMES
+    from ts_transformer.prior.masks import PROCEDURE_ALTITUDES
+    assert json.loads(_ts_constant("TRAINING_BELOW_GLIDEPATH")) == BELOW_GLIDEPATH
+    assert _ts_constant("TRAINING_FREE_OUTCOMES").split(" as const")[0] == "[...TRAINING_EXECUTOR_OUTCOMES, TRAINING_BELOW_GLIDEPATH]"
+    assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_EXECUTOR_OUTCOMES"))) + (BELOW_GLIDEPATH,) == FREE_OUTCOMES
+    assert json.loads(_ts_constant("TRAINING_PROCEDURE_ALTITUDES")) == PROCEDURE_ALTITUDES
+    from ts_transformer.prior.masks import SETS
+    assert _ts_constant("TRAINING_PROCEDURE_MASK_SETS").split(" as const")[0] == "[TRAINING_PROCEDURE_ALTITUDES]"
+    assert SETS == (PROCEDURE_ALTITUDES,)
     # the outcomes read at a crossing of the threshold, which alone carry where it was crossed
     from ts_transformer.autopilot.judge import CROSSINGS
     assert tuple(re.findall(r'"([^"]+)"', _ts_constant("TRAINING_CROSSING_OUTCOMES"))) == CROSSINGS

@@ -17,7 +17,9 @@ import {
   trainingModelLabel,
   trainingOverlaysOf,
   trainingRunName,
+  TRAINING_BELOW_GLIDEPATH,
   TRAINING_GENERATION_SCHEMA,
+  TRAINING_PROCEDURE_ALTITUDES,
   type TrainingGenerationOverlay,
   type TrainingGenerationView,
 } from "../trainingOverlays";
@@ -97,6 +99,37 @@ describe("a generation overlay", () => {
     expect(trainingModelText(read().model)).toBe("base (v3_step1/full_s1, trained on data alone)");
     // every name its own colour
     expect(new Set(Object.values(TRAINING_MODEL_COLOR)).size).toBe(3);
+  });
+
+  it("reads a sentence the glidepath lower edge stopped only from a model that spoke under the procedure's altitudes", () => {
+    const stopped = (id: string) => {
+      const raw: any = mockGenerationOverlay(id);
+      raw.flights[0].samples[1].outcome = TRAINING_BELOW_GLIDEPATH;      // no crossing; stopped at its last step, 150 s
+      raw.flights[0].samples[1].rows = 75;
+      return parseTrainingGenerationOverlay(raw, mockGenerationEntry(id), sample());
+    };
+    const augmented = stopped(AUGMENTED_R1_ID);
+    if (!augmented.ok) throw new Error(augmented.problem);
+    expect(augmented.value.flights[0].samples[1].outcome).toBe(TRAINING_BELOW_GLIDEPATH);
+    expect(augmented.value.generation.procedureMasks).toEqual([{ name: TRAINING_PROCEDURE_ALTITUDES, dataSha256: "d".repeat(64) }]);
+    expect(read().generation.procedureMasks).toEqual([]);
+    const base = stopped(BASE_MODEL_ID);
+    expect(base.ok ? "" : base.problem).toMatch("is below_glidepath, but its model spoke without the procedure's altitudes");
+    // a stopped sentence carries no crossing
+    const crossed: any = mockGenerationOverlay(AUGMENTED_R1_ID);
+    crossed.flights[0].samples[0].outcome = TRAINING_BELOW_GLIDEPATH;
+    const refused = parseTrainingGenerationOverlay(crossed, mockGenerationEntry(AUGMENTED_R1_ID), sample());
+    expect(refused.ok ? "" : refused.problem).toMatch("is below_glidepath and carries a crossing");
+    // stopped anywhere but at the end of its last step
+    const early: any = mockGenerationOverlay(AUGMENTED_R1_ID);
+    Object.assign(early.flights[0].samples[1], { outcome: TRAINING_BELOW_GLIDEPATH, rows: 76 });
+    const late = parseTrainingGenerationOverlay(early, mockGenerationEntry(AUGMENTED_R1_ID), sample());
+    expect(late.ok ? "" : late.problem).toMatch("is below_glidepath at 150 s, not at the end of its last step, 152 s");
+    const set = { name: TRAINING_PROCEDURE_ALTITUDES, dataSha256: "d".repeat(64) };
+    expect(refusal((raw) => { raw.generation.procedureMasks = [set, set]; })).toMatch("names a set of the procedure's masks twice");
+    expect(refusal((raw) => { raw.generation.procedureMasks = [{ ...set, name: "procedure-altitudes-v1" }]; }))
+      .toMatch("not one of procedure-altitudes-v2");
+    expect(refusal((raw) => { raw.generation.procedureMasks = [{ ...set, dataSha256: "x" }]; })).toMatch('dataSha256 "x" is not a sha256');
   });
 
   it("refuses a model whose name, round and start model disagree, by name", () => {

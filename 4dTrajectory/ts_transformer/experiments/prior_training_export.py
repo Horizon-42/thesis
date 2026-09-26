@@ -53,6 +53,7 @@ from ts_transformer.instructions.training_files import (
 from ts_transformer.instructions.words import COLUMNS
 from ts_transformer.io_utils import file_sha256, utc_now
 from ts_transformer.prior.data import VARIANTS, Split, airport_landings, batches, flight_record, runway_names
+from ts_transformer.prior.masks import ProcedureMasks
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.prior.train import TrainConfig, batch_logits, to_batch
@@ -69,24 +70,26 @@ TOP_K = 3
 PROBABILITY_DIGITS = 4
 
 
-def open_trained_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], str]:
-    """The prior at ``directory`` on CPU, in eval mode, with its config file and its checkpoint's sha256 — refused
+def open_trained_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], str, ProcedureMasks]:
+    """The prior at ``directory`` on CPU, in eval mode, with its config file, its checkpoint's sha256 and the procedure's
+    masks it was trained under (`prior.masks`: what its own sentences are spoken under) — refused
     unless `prior_train.load_prior` opens it on ``instructions``, it is not a smoke run and — for a variant that reads
     the landing context — today's tracks rosters are its own (by sha256, wherever the checkout is). Every exporter of
     a prior opens it here (this one, `prior_generation_training_export`)."""
-    model, _, config_file, _ = load_prior(directory, instructions)
+    model, _, config_file, procedure_masks = load_prior(directory, instructions)
     if (VARIANTS[model.config.variant].landing_context
             and roster_digests(roster_record(rosters(instructions))) != roster_digests(config_file["tracks_rosters"])):
         raise ValueError(f"the tracks rosters changed since {directory} was trained (its landing context)")
     if config_file["smoke"]:
         raise ValueError(f"{directory} is a smoke run (--limit {config_file['limit']}), not a trained prior")
-    return model, config_file, file_sha256(directory / "checkpoint.pt")
+    return model, config_file, file_sha256(directory / "checkpoint.pt"), procedure_masks
 
 
 def open_prior(directory: Path, instructions: Path) -> tuple[Prior, dict[str, Any], dict[str, Any], str]:
     """`open_trained_prior`, and its val readout — refused unless it holds one (`prior_select` writes one, on the
     chosen variant only)."""
-    model, config_file, checkpoint_sha = open_trained_prior(directory, instructions)
+    # teacher-forced: the procedure's masks, which take words from a free sentence, have nothing to take here
+    model, config_file, checkpoint_sha, _ = open_trained_prior(directory, instructions)
     if not (directory / "readout.json").exists():
         raise ValueError(f"{directory} holds no val readout: it is not a chosen prior (prior_select)")
     readout = json.loads((directory / "readout.json").read_text(encoding="utf-8"))

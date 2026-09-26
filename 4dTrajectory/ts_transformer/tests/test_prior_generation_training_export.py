@@ -115,10 +115,10 @@ def _generation(**changes):
 
 def _block(generation, **changes):
     arguments = {"prior_dir": PRIOR, "executor_sha256": "e" * 64, "instructions": INSTRUCTIONS, "samples": 4,
-                 "temperature": 1.0, "airport": "KXXX", **changes}
+                 "temperature": 1.0, "airport": "KXXX", "procedure_altitudes": False, **changes}
     return export.readout_block(generation, arguments["prior_dir"], arguments["executor_sha256"],
                                 arguments["instructions"], arguments["samples"], arguments["temperature"],
-                                arguments["airport"])
+                                arguments["airport"], arguments["procedure_altitudes"])
 
 
 def test_the_readout_is_this_prior_s_val_free_generation_at_the_airport_and_pooled():
@@ -148,13 +148,44 @@ def test_the_every_flight_phrase_is_the_draw_s_own():
     (dict(generation=dict(split="select")), "split"),
     (dict(samples=1), "samples"),
     (dict(temperature=0.7), "temperature"),
-    # the export speaks under the grammar's masks only: a readout under the procedure's is another generation
+    # the export speaks under the model's own procedure's masks: a readout under others is another generation
     (dict(generation=dict(procedure_masks=True)), "procedure_masks"),
+    (dict(procedure_altitudes=True), "procedure_masks"),
 ])
 def test_a_readout_of_another_prior_spec_split_or_draw_is_refused_by_name(change, name):
     generation = _generation(**change.pop("generation", {}))
     with pytest.raises(ValueError, match=rf"\b{name} "):
         _block(generation, **change)
+
+
+def test_a_model_trained_under_the_procedure_s_altitudes_takes_a_readout_drawn_under_them():
+    assert _block(_generation(procedure_masks=True), procedure_altitudes=True)["split"] == "val"
+
+
+def test_a_sentence_the_glidepath_edge_stopped_ends_at_its_stop_with_no_crossing():
+    """The closed loop of `test_prior_procedure` whose untrained speaker's draws (seed 8) sink below the edge at step 65,
+    read as the export reads it (`said_rows`, the formal readout's reading): its words to the stop, its track to that
+    step's end state, no crossing; a stop the row does not carry is refused."""
+    from ts_transformer.experiments.prior_free_generation import BELOW_GLIDEPATH, said_rows
+    from ts_transformer.tests.test_prior_procedure import _altitudes, _closed_loop, _final
+
+    final = _final(crossing_m=2_000.0, faf_d_m=12_000.0, decision_m=-1_000.0)
+    one, geometry, signals, words, flown, grid, forbidden, _ = _closed_loop((final,), seed=8)
+    masks = _altitudes(geometry, final)
+    batch = replay.Batch(signals=[signals], series=[], readings=[read_flight(signals, geometry, one, words)],
+                         geometries=[geometry], vertical_paths=[], approach_ias_mps=[], groups=[], drawn={})
+    rows, grids, stops = said_rows(batch, flown, np.asarray([grid]), forbidden, words, [0], masks)
+    step = int(stops.step[0])
+    assert step >= 0 and rows[0]["outcome"] == BELOW_GLIDEPATH
+    payload = export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M, step)
+    start_s = N_LOOK * one.step_s
+    assert payload["outcome"] == BELOW_GLIDEPATH and payload["crossing"] is None
+    assert payload["endS"] == pytest.approx(start_s + (step + 1) * one.step_s)
+    assert payload["track"]["tS"][-1] == pytest.approx(payload["endS"])
+    assert payload["rows"] == N_LOOK + step + 1 and max(e["row"] for e in payload["events"]) <= N_LOOK + step
+    assert "altitude" in payload["forbiddenMass"]                      # the procedure's altitudes mask the altitude words
+    with pytest.raises(ValueError, match="outcome below_glidepath with the glidepath stop at step -1"):
+        export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, HAE_MINUS_MSL_M)
 
 
 def test_a_readout_of_another_schema_is_refused_by_name_before_it_is_read():
@@ -289,6 +320,7 @@ def test_the_export_flies_the_set_s_own_dynamics_flights_and_lists_the_rest(tmp_
                                 "checkpointSha256": checkpoint, "variant": "full",
                                 "trainedAt": {"head": "test", "dirty": False}, "fineTuning": None}
     assert payload["generation"]["firstPredictedRow"] == N_LOOK and payload["generation"]["samples"] == 3
+    assert payload["generation"]["procedureMasks"] == []                 # the model's own: none (`_prior_dir`)
     # the set's flights in its order: the own-dynamics one flown three times, the other listed with its group
     assert [f["flightKey"] for f in payload["flights"]] == [f["flightKey"] for f in sample["flights"]]
     flown = {f["datasetId"]: f for f in payload["flights"]}

@@ -26,7 +26,7 @@ import {
   failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockModelAutopilotRequest, mockSelection, onSampleLine,
 } from "./trainingAutopilot.fixture";
 import { BASE_MODEL_ID, MOCK_GENERATION_FIRST_ROW, mockGenerationViews } from "./trainingOverlays.fixture";
-import type { TrainingGeneratedSentence } from "../trainingOverlays";
+import { TRAINING_BELOW_GLIDEPATH, TRAINING_PROCEDURE_ALTITUDES, type TrainingGeneratedSentence } from "../trainingOverlays";
 
 function sample(): TrainingSample {
   const parsed = parseTrainingSample(mockSample());
@@ -81,11 +81,39 @@ describe("a model's word", () => {
     const { sentence } = modelAsk(set);
     const selection = mockSelection(set, mockAutopilotRequest(set, VECTORED_KEY, "heading", 8));
     const source = { overlayId: BASE_MODEL_ID, sample: 0 };
-    const asked = trainingAutopilotRequest(selection, { source, column: "heading", row: 12, attempt: 0 }, sentence);
+    const masks = [{ name: TRAINING_PROCEDURE_ALTITUDES, dataSha256: "d".repeat(64) }];
+    const asked = trainingAutopilotRequest(selection, { source, column: "heading", row: 12, attempt: 0 },
+      { sentence, procedureMasks: masks });
     expect(asked.sentence).toMatchObject({ overlayId: BASE_MODEL_ID, sample: 0, firstRow: MOCK_GENERATION_FIRST_ROW, rows: 56 });
+    // the masks it was spoken under go with it: the backend cuts the flight where the glidepath lower edge stopped it
+    expect(asked.sentence!.procedureMasks).toEqual(masks);
     expect(asked.sentence!.events).toHaveLength(sentence.events.length);
     expect(() => trainingAutopilotRequest(selection, { source, column: "heading", row: 12, attempt: 0 }, null)).toThrow(/with its sentence/);
-    expect(() => trainingAutopilotRequest(selection, { source: null, column: "heading", row: 8, attempt: 0 }, sentence)).toThrow();
+    expect(() => trainingAutopilotRequest(selection, { source: null, column: "heading", row: 8, attempt: 0 },
+      { sentence, procedureMasks: [] })).toThrow();
+  });
+
+  it("may end below the glidepath, where its sample was stopped — spoken under the procedure's altitudes only", () => {
+    const set = sample();
+    const { request: bare } = modelAsk(set);
+    const request = { ...bare, sentence: { ...bare.sentence!, procedureMasks: [{ name: TRAINING_PROCEDURE_ALTITUDES, dataSha256: "d".repeat(64) }] } };
+    const stopped = mockAutopilotAnswer(set, request);
+    stopped.end = { ...stopped.end, reason: TRAINING_BELOW_GLIDEPATH, reachedSegmentEnd: false };
+    const parsed = parseTrainingAutopilot(stopped, request, mockSelection(set, request));
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.end.reason).toBe(TRAINING_BELOW_GLIDEPATH);
+    // the same answer to a sentence spoken under none
+    const unmasked = parseTrainingAutopilot(stopped, bare, mockSelection(set, bare));
+    expect(unmasked.ok ? "" : unmasked.problem).toMatch("spoken without the procedure's altitudes");
+    // a stop carries no crossing
+    const crossed = parseTrainingAutopilot({ ...stopped, end: { ...stopped.end, crossing: { crossM: 1, heightM: 15, atS: 100 } } },
+      request, mockSelection(set, request));
+    expect(crossed.ok ? "" : crossed.problem).toMatch("ends below_glidepath and carries a crossing");
+    const truth = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
+    const refused = mockAutopilotAnswer(set, truth);
+    refused.end = { ...refused.end, reason: TRAINING_BELOW_GLIDEPATH, reachedSegmentEnd: false, offsetFromObserved: null };
+    const read = parseTrainingAutopilot(refused, truth, mockSelection(set, truth));
+    expect(read.ok ? "" : read.problem).toMatch("the truth's flight is never stopped below the glidepath");
   });
 
   it("reads as the model's: its source echoed, no observed time, no offset from the observed aircraft", () => {

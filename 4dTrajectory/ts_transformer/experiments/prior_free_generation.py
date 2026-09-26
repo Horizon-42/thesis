@@ -399,6 +399,23 @@ def mva_charts(procedure_masks: ProcedureMasks, codes: Sequence[str]) -> dict[st
     return airport_charts(sorted(codes)) if procedure_masks.altitudes else {}
 
 
+def said_rows(batch: replay.Batch, flown: Flown, said: np.ndarray, forbidden: dict[int, np.ndarray], words: Words,
+              samples: Sequence[int], procedure_masks: ProcedureMasks
+              ) -> tuple[list[dict[str, Any]], list[np.ndarray], GlidepathStops | None]:
+    """What `speak_and_fly` said under ``procedure_masks``, read: each sentence's `flight_rows` row, its words, and —
+    under the procedure's altitudes — where the glidepath lower edge stopped it (`glidepath_stops`; nothing it said after
+    the stop counts: the speaker went on). The one reading of a free sentence: the formal readout (`prior_rows`) and the
+    Training export (`prior_generation_training_export`) both read theirs here."""
+    grids = [said[j] for j in range(len(said))]
+    stops = None
+    if procedure_masks.altitudes:
+        stops = glidepath_stops(flown, grids, batch.geometries, [procedure_masks.finals[g.code] for g in batch.geometries],
+                                words)
+        for j in np.flatnonzero(stops.step >= 0):
+            grids[j][stops.row[j] + 1:] = UNCHANGED
+    return flight_rows(batch, flown, grids, words, "prior", samples, forbidden, stops), grids, stops
+
+
 def prior_rows(model: Prior, batch: replay.Batch, words: Words, params: ExecutorParams, landings: Any,
                samples: int, *, generator: torch.Generator, temperature: float, procedure_masks: ProcedureMasks,
                charts: dict[str, MvaChart], augmentations: Sequence[Augmentation] | None = None
@@ -417,20 +434,15 @@ def prior_rows(model: Prior, batch: replay.Batch, words: Words, params: Executor
         repeated = replace(repeated, signals=[augment_signals(s, a) for s, a in zip(repeated.signals, moves)])
         inputs = augmented_inputs(inputs, repeated.geometries, moves)
     runways, executor_charts, approach = _physics(repeated, cpu)
-    finals = ([procedure_masks.finals[g.code] for g in repeated.geometries] if procedure_masks.altitudes else None)
     limits = limits_s(repeated, params, words.spec.step_s, augmented=augmentations is not None)
     flown, said, forbidden, speaker = speak_and_fly(model, repeated.signals, repeated.geometries, inputs, runways,
                                                     executor_charts, approach, limits, words, params, landings,
                                                     generator=generator, temperature=temperature,
                                                     procedure_masks=procedure_masks)
-    grids = [said[j] for j in range(len(said))]
-    stops = None if finals is None else glidepath_stops(flown, grids, repeated.geometries, finals, words)
-    if stops is not None:
-        for j in np.flatnonzero(stops.step >= 0):
-            grids[j][stops.row[j] + 1:] = UNCHANGED          # the speaker went on; nothing after the stop was said
-    rows = flight_rows(repeated, flown, grids, words, "prior", [j % samples for j in range(len(grids))], forbidden,
-                       stops)
-    if finals is not None:
+    rows, grids, _ = said_rows(repeated, flown, said, forbidden, words, [j % samples for j in range(len(said))],
+                               procedure_masks)
+    if procedure_masks.altitudes:
+        finals = [procedure_masks.finals[g.code] for g in repeated.geometries]
         for j, row in enumerate(rows):
             geometry, chart = repeated.geometries[j], charts[repeated.geometries[j].code]
             row["pre_join"] = sentence_pre_join(grids[j], row["steps_said"], speaker.e[j], speaker.n[j], speaker.h[j],

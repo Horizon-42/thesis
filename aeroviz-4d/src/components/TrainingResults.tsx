@@ -156,7 +156,10 @@ function CellsRow({ name, cells }: { name: string; cells: TrainingGenerationRead
 /** How a model's sentences were drawn and flown, in one line. */
 function drawnText(overlay: TrainingGenerationOverlay): string {
   const { generation, readout } = overlay;
-  return `${trainingModelText(overlay.model)}: ${generation.samples} samples a flight at temperature ${generation.temperature} (seed ` +
+  const masks = generation.procedureMasks.length === 0 ? "the vocabulary's rules alone"
+    : `the vocabulary's rules and ${generation.procedureMasks.map((item) => item.name).join(", ")}`;
+  return `${trainingModelText(overlay.model)}: ${generation.samples} samples a flight at temperature ${generation.temperature}, ` +
+    `spoken under ${masks} (seed ` +
     `${generation.seed}), flown by executor spec ${shortSha(generation.executor.specSha256)} until it was done or ` +
     `${generation.executor.timeoutFactor}× the observed remaining time ran out` +
     (readout === null ? "; no formal readout given" : `; its formal readout drew ${readout.drawn.flights.toLocaleString("en")} ` +
@@ -204,10 +207,10 @@ export function TrainingGenerationReadout({ overlays: published, flights }: { ov
         Each model speaks from its first predicted step (the steps before are observed), a sentence of its own, and the
         executor flies each step as it is said. Landed: on the runway pointed at the end, as the executor's judge reads a
         landing. Only flights on their own aircraft dynamics are flown, as in the formal readout. "labelled words": the
-        truth sentence flown the same way from the same step — how far the executor alone gets. Every model speaks under
-        the vocabulary's rules only (its compatibility rules, the runway lock), never its procedure's masks (the floor before the
-        join, no climbing back, the glidepath's lower edge), which augmented was post-trained under — so its formal
-        readouts, drawn under those masks, are not shown beside it.
+        truth sentence flown the same way from the same step — how far the executor alone gets. Each model speaks as it was
+        trained to: under the vocabulary's rules and the procedure's masks it was post-trained under, if any (each model's
+        line below names them); under the procedure's altitudes (the floor before the join, no climbing back, the
+        glidepath's lower edge) a sentence stops at the first step that sinks below the edge — "below glidepath".
       </p>
       {named.map(({ overlay }) => <p key={overlay.overlayId} className="training-results-note">{drawnText(overlay)}</p>)}
     </details>

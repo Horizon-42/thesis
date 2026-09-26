@@ -72,6 +72,18 @@ export const TRAINING_EXECUTOR_OUTCOMES = [
   "landed", "crossed_without_capture", "crossed_off_runway", "ground_contact", "timeout", "dynamics_failure",
 ] as const;
 export type TrainingExecutorOutcome = (typeof TRAINING_EXECUTOR_OUTCOMES)[number];
+/** MIRROR of `prior_free_generation.BELOW_GLIDEPATH`: a free sentence under the procedure's altitudes stops at the first
+ *  flown step that sank more than the track tolerance below the glidepath lower edge — whatever the executor made of the
+ *  rest, its outcome is this. */
+export const TRAINING_BELOW_GLIDEPATH = "below_glidepath";
+/** MIRROR of `prior_free_generation.FREE_OUTCOMES`: how a model's own sentence ended — the judge's outcomes, or stopped
+ *  below the glidepath. */
+export const TRAINING_FREE_OUTCOMES = [...TRAINING_EXECUTOR_OUTCOMES, TRAINING_BELOW_GLIDEPATH] as const;
+export type TrainingFreeOutcome = (typeof TRAINING_FREE_OUTCOMES)[number];
+/** MIRROR of `prior.masks.PROCEDURE_ALTITUDES`: the procedure's masks whose sentences the glidepath lower edge stops. */
+export const TRAINING_PROCEDURE_ALTITUDES = "procedure-altitudes-v2";
+/** MIRROR of `prior.masks.SETS`: every set of the procedure's masks a model can have spoken under; another is refused. */
+export const TRAINING_PROCEDURE_MASK_SETS = [TRAINING_PROCEDURE_ALTITUDES] as const;
 /** MIRROR of `prior.readout.RULES`: the causal rules the first-step runway readout sets the prior beside (B0, B1, B3;
  *  pinned by the backend's `test_autopilot_segment.MirrorTest`). */
 export const TRAINING_PRIOR_RULES = ["B0_majority", "B1_active_config", "B3_same_sector_last"] as const;
@@ -87,7 +99,7 @@ export const TRAINING_MODEL_NAMES = ["base", "landing", "augmented"] as const;
 export type TrainingModelName = (typeof TRAINING_MODEL_NAMES)[number];
 /** MIRROR of `ts_transformer.autopilot.judge.CROSSINGS`: the outcomes read at a crossing of the threshold, which carry
  *  where it was crossed; no other outcome does. */
-export const TRAINING_CROSSING_OUTCOMES: readonly TrainingExecutorOutcome[] = ["landed", "crossed_without_capture", "crossed_off_runway"];
+export const TRAINING_CROSSING_OUTCOMES: readonly TrainingFreeOutcome[] = ["landed", "crossed_without_capture", "crossed_off_runway"];
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -326,7 +338,8 @@ export interface TrainingGeneratedTrack {
  *  over — counted as the formal readout counts them, shaded in the bar. */
 export interface TrainingGeneratedSentence extends TrainingSentence {
   sample: number;
-  outcome: TrainingExecutorOutcome;
+  /** ``below_glidepath`` only under the procedure's altitudes: stopped at its step's end state, words and track. */
+  outcome: TrainingFreeOutcome;
   /** When the flight ended, on the flight's own clock. */
   endS: number;
   crossing: TrainingCrossing | null;
@@ -365,6 +378,12 @@ export interface TrainingGenerationCell {
   landed: number;
 }
 
+/** A set of the procedure's masks a model spoke under (`prior.masks`): its name and the digest of the data it read. */
+export interface TrainingProcedureMask {
+  name: string;
+  dataSha256: string;
+}
+
 /** Which model spoke: its name and round (`trainingModelLabel`), the run holding its rounds, its checkpoint and — a
  *  post-trained round — the method and the model it started from. */
 export interface TrainingGenerationModel {
@@ -390,6 +409,9 @@ export interface TrainingGenerationOverlay {
     seed: number;
     /** The first row the prior speaks at; every sentence opens there. */
     firstPredictedRow: number;
+    /** The procedure's masks it spoke under — its own (`prior.masks`), each with the digest of the data it read; empty:
+     *  the vocabulary's rules alone. The live executor sends them back with a sample it flies again. */
+    procedureMasks: TrainingProcedureMask[];
     executor: { specSha256: string; wordClock: string; cycleS: number; timeoutFactor: number };
   };
   /** The prior's formal val free generation, when the exporter was given it. */
@@ -1060,8 +1082,9 @@ function parseGeneratedTrack(reader: Reader, firstS: number, stepS: number): Tra
 /** One sample: its words — in (row, column) order, from the first predicted row, which says every column — and its end,
  *  its crossing and its track bound to each other: a crossing exactly for an outcome read at one, the track to the end
  *  (a dynamics failure's to the row before the failed state), the runway pointed first and last the sentence's own. */
+/** ``stoppable``: its model spoke under the procedure's altitudes, whose sentences the glidepath lower edge stops. */
 function parseGeneratedSentence(
-  item: Reader, index: number, firstRow: number, stepS: number, cycleS: number, sample: TrainingSample,
+  item: Reader, index: number, firstRow: number, stepS: number, cycleS: number, sample: TrainingSample, stoppable: boolean,
 ): TrainingGeneratedSentence {
   item.integer("sample", index, index);
   const rows = item.integer("rows", firstRow + 1, Number.MAX_SAFE_INTEGER);
@@ -1100,7 +1123,8 @@ function parseGeneratedSentence(
   const found = { runwayChanges, goArounds, clearedAtEnd };
   const differ = (Object.keys(expected) as Array<keyof typeof expected>).filter((key) => found[key] !== expected[key]);
   if (differ.length > 0) item.fail(differ.map((key) => `${key} is ${found[key]}, its words give ${expected[key]}`).join("; "));
-  const outcome = item.oneOf("outcome", TRAINING_EXECUTOR_OUTCOMES);
+  const outcome = item.oneOf("outcome", TRAINING_FREE_OUTCOMES);
+  if (outcome === TRAINING_BELOW_GLIDEPATH && !stoppable) item.fail(`is ${outcome}, but its model spoke without the procedure's altitudes`);
   const endS = item.number("endS");
   const crossingReader = item.nullableChild("crossing");
   const crossing = crossingReader === null ? null : readCrossing(crossingReader);
@@ -1109,6 +1133,10 @@ function parseGeneratedSentence(
   }
   const firstS = firstRow * stepS;
   if (endS < firstS || endS > rows * stepS + TIME_SLACK) item.fail(`ends at ${endS} s, outside its rows ${firstS}…${rows * stepS} s`);
+  // stopped at its last step said: its end is that step's end
+  if (outcome === TRAINING_BELOW_GLIDEPATH && Math.abs(endS - rows * stepS) > TIME_SLACK) {
+    item.fail(`is ${outcome} at ${endS} s, not at the end of its last step, ${rows * stepS} s`);
+  }
   const track = parseGeneratedTrack(item.child("track"), firstS, stepS);
   const trackEnd = track.tS[track.tS.length - 1];
   // the track stops at the outcome's state — a dynamics failure's at the state before it
@@ -1183,6 +1211,14 @@ export function parseTrainingGenerationOverlay(
     if (stepS !== sample.vocabulary.stepS) generation.fail(`stepS is ${stepS}, the set's step ${sample.vocabulary.stepS}`);
     const samples = generation.count("samples", 1);
     const firstPredictedRow = generation.count("firstPredictedRow");
+    const procedureMasks = generation.children("procedureMasks").map((item) => {
+      const dataSha256 = item.string("dataSha256");
+      if (!/^[0-9a-f]{64}$/.test(dataSha256)) item.fail(`dataSha256 ${JSON.stringify(dataSha256)} is not a sha256`);
+      return { name: item.oneOf("name", TRAINING_PROCEDURE_MASK_SETS) as string, dataSha256 };
+    });
+    if (new Set(procedureMasks.map((item) => item.name)).size !== procedureMasks.length) {
+      generation.fail(`names a set of the procedure's masks twice: ${procedureMasks.map((item) => item.name).join(", ")}`);
+    }
     const executor = generation.child("executor");
     const cycleS = executor.number("cycleS");
     const readout = overlay.nullableChild("readout");
@@ -1192,7 +1228,7 @@ export function parseTrainingGenerationOverlay(
       base,
       model,
       generation: {
-        samples, temperature: generation.number("temperature"), seed: generation.number("seed"), firstPredictedRow,
+        samples, temperature: generation.number("temperature"), seed: generation.number("seed"), firstPredictedRow, procedureMasks,
         executor: { specSha256: executor.string("specSha256"), wordClock: executor.string("wordClock"), cycleS,
           timeoutFactor: executor.number("timeoutFactor") },
       },
@@ -1210,7 +1246,8 @@ export function parseTrainingGenerationOverlay(
         if (firstPredictedRow >= flight.rows) item.fail(`has ${flight.rows} rows: the prior speaks from row ${firstPredictedRow}`);
         return {
           flightKey: flight.flightKey, datasetId: flight.datasetId, group: item.string("group"), flown,
-          samples: list.map((one, index) => parseGeneratedSentence(one, index, firstPredictedRow, stepS, cycleS, sample)),
+          samples: list.map((one, index) => parseGeneratedSentence(one, index, firstPredictedRow, stepS, cycleS, sample,
+            procedureMasks.some((item) => item.name === TRAINING_PROCEDURE_ALTITUDES))),
         };
       }),
     };

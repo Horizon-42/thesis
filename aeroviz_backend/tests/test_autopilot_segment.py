@@ -41,6 +41,7 @@ from ts_transformer.instructions.labeller.read import Reading
 from ts_transformer.instructions.labeller.records import Instruction
 from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.words import ALTITUDE, ANGLE, APPROACH, HEADING, RUNWAY, SPEED, UNCHANGED
+from ts_transformer.prior.masks import PROCEDURE_ALTITUDES, ProcedureMasks
 
 U = UNCHANGED
 #: No newer request ever comes in.
@@ -512,7 +513,7 @@ class PayloadTest(unittest.TestCase):
     """The answer for a segment flown to its stop: the reason (`SEGMENT_END` exactly when it got there before any
     event), where it was against the observed aircraft there, the observed time over the same steps, the flown time."""
 
-    def answer(self, reached: bool, outcome: str = "timeout"):
+    def answer(self, reached: bool, outcome: str = "timeout", glidepath_step: int | None = None):
         segment = segment_of(reading(), ALTITUDE, 0, LEAD)           # steps 0–4, stopped at 4
         cycles = 8
         states = torch.zeros(1, cycles + 1, 7, dtype=torch.float64)
@@ -526,13 +527,19 @@ class PayloadTest(unittest.TestCase):
         limits = {"cycles": {"cycles": cycles}, "bank_rate": {"cycles": 2}, "bank_cap": {"cycles": 0}}
         result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, model=None, flown=run,
                               verdict=Verdict(outcome, cycles, None, limits, judged, flown_rows=cycles + 1),
-                              reached_end=reached, fly_s=0.1, judge_s=0.01)
+                              reached_end=reached, fly_s=0.1, judge_s=0.01, glidepath_step=glidepath_step)
         context = FlightContext(signals=signals10(), series=None, reading=reading(), geometry=geometry(),
                                 vertical_paths=(VerticalPath(15.0, 3.0),), group="own dynamics", approach_ias_mps=70.0,
                                 observed_track_deg=np.full(10, 90.0), observed_distance_m=200.0 * np.arange(10),
                                 hae_minus_msl_m=-32.0)
         words = SimpleNamespace(spec=SPEC, speed_mps=WORDS.speed_mps)
         return segment_payload(result, context, words)
+
+    def test_a_flight_the_glidepath_lower_edge_stopped_ends_below_the_glidepath_not_at_a_timeout(self):
+        body = self.answer(reached=False, glidepath_step=3)
+        self.assertEqual((body["end"]["reason"], body["end"]["reachedSegmentEnd"]), (fly_module.BELOW_GLIDEPATH, False))
+        self.assertEqual((body["end"]["crossing"], body["end"]["flownS"]), (None, 8.0))
+        self.assertEqual(self.answer(reached=False)["end"]["reason"], "timeout")
 
     def test_a_segment_that_got_to_its_stop_ends_there_and_says_where_it_was_against_the_observed_aircraft(self):
         body = self.answer(reached=True)
@@ -806,7 +813,7 @@ class BackendTest(unittest.TestCase):
                    "row": 3, "sentence": None}
         asked: list[bool] = []
 
-        def flying(context, params, words, column, row, superseded, model):
+        def flying(context, params, words, column, row, superseded, model, masks):
             asked.append(superseded())
             backend._claim("another page", 7)                  # another page's request: not this page's
             asked.append(superseded())
@@ -831,7 +838,8 @@ class BackendTest(unittest.TestCase):
         record = {"sha256": "s" * 64, "source": {"executor_source_sha256": "c" * 64}}
         flown_with = []
 
-        def flying(context_, params_, words_, column, row, superseded, model):
+        def flying(context_, params_, words_, column, row, superseded, model, masks):
+            self.assertEqual(masks, None if model is None else ProcedureMasks.none())
             flown_with.append(model)
             return SimpleNamespace(fly_s=0.0, judge_s=0.0, flown=SimpleNamespace(commands=torch.zeros(1, 3, 3)))
 
@@ -853,6 +861,71 @@ class BackendTest(unittest.TestCase):
         self.assertEqual((model.overlay_id, model.sample, model.first_row, model.rows), ("generation_x", 2, 8, 18))
         self.assertIsNone(truth)
         self.assertEqual([answer["executor"]["wordClock"] for answer in answers], ["time", "track"])
+
+
+class ProcedureMasksTest(unittest.TestCase):
+    """The masks a model's sample was spoken under, built again for the request: none reads no data; a set this code
+    does not implement, or data other than the sample's, is refused by name."""
+
+    def test_the_masks_are_built_on_this_backends_data_and_its_digests_checked(self):
+        backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
+        self.assertEqual(backend.procedure_masks(Path("a"), ()), ProcedureMasks.none())
+        built = SimpleNamespace(data_sha256=lambda: {PROCEDURE_ALTITUDES: "d" * 64})
+        with mock.patch("aeroviz_backend.autopilot_segment.backend.load_candidates", lambda artefact: {}), \
+                mock.patch.object(ProcedureMasks, "build", classmethod(lambda cls, names, geometries: built)):
+            self.assertIs(backend.procedure_masks(Path("a"), ((PROCEDURE_ALTITUDES, "d" * 64),)), built)
+            with self.assertRaisesRegex(RequestRefused, r"\['procedure-altitudes-v2'\] read differs from the sample's .* restart the backend"):
+                backend.procedure_masks(Path("a"), ((PROCEDURE_ALTITUDES, "e" * 64),))
+        with mock.patch("aeroviz_backend.autopilot_segment.backend.load_candidates", lambda artefact: {}):
+            with self.assertRaisesRegex(RequestRefused, "the sentence's procedure's masks: .*not sets of the procedure's masks"):
+                backend.procedure_masks(Path("b"), (("procedure-altitudes-v0", "d" * 64),))
+
+
+class GlidepathStopTest(unittest.TestCase):
+    """`fly.glidepath_stop` and `fly.in_force` are mirrors of the free generation's (a runner the backend does not
+    import): the same step on the same flown sentences — a closed loop the edge stops (the untrained speaker of
+    `test_prior_procedure`, seed 8) and one it never binds on — and the same outcome's name."""
+
+    def test_the_stop_is_the_free_generations_flight_for_flight(self):
+        from ts_transformer.experiments import prior_free_generation as generation
+        from ts_transformer.tests.test_prior_procedure import _closed_loop, _final
+        self.assertEqual(fly_module.BELOW_GLIDEPATH, generation.BELOW_GLIDEPATH)
+        stops = []
+        for final, seed in ((_final(crossing_m=2_000.0, faf_d_m=12_000.0, decision_m=-1_000.0), 8),
+                            (_final(crossing_m=-5_000.0, faf_d_m=12_000.0), 2)):
+            one, geometry, _, words, flown, grid, _, _ = _closed_loop((final,), seed=seed)
+            expected = int(generation.glidepath_stops(flown, [grid], [geometry], [(final,)], words).step[0])
+            self.assertEqual(fly_module.glidepath_stop(flown, grid, geometry, (final,), words), expected)
+            np.testing.assert_array_equal(fly_module.in_force(grid), generation.in_force(grid))
+            stops.append(expected)
+        self.assertEqual([stop >= 0 for stop in stops], [True, False])     # one stopped, one never
+
+    def test_the_cut_flight_ends_at_the_exported_samples_last_state(self):
+        """The seed-8 loop cut as `fly_segment` cuts it: the judge's outcome reads a timeout at the stop state, the state
+        the export's stopped sample ends its track at (`sample_payload`'s last point)."""
+        from ts_transformer.autopilot.judge import outcome_of
+        from ts_transformer.experiments import prior_free_generation as generation
+        from ts_transformer.experiments import prior_generation_training_export as export
+        from ts_transformer.instructions.labeller.read import read_flight
+        from ts_transformer.autopilot import replay
+        from ts_transformer.tests.test_prior_procedure import _altitudes, _closed_loop, _final
+        final = _final(crossing_m=2_000.0, faf_d_m=12_000.0, decision_m=-1_000.0)
+        one, geometry, signals, words, flown, grid, forbidden, _ = _closed_loop((final,), seed=8)
+        stop = fly_module.glidepath_stop(flown, grid, geometry, (final,), words)
+        cut = fly_module.cut_at_step(flown, stop, words)
+        step_rows = int(round(one.step_s / flown.cycle_s))
+        runway = int(grid[:, RUNWAY][grid[:, RUNWAY] != UNCHANGED][-1])
+        outcome = outcome_of(cut, 0, geometry, runway, one)
+        self.assertEqual((outcome.outcome, outcome.end_row), ("timeout", (stop + 1) * step_rows))
+        batch = replay.Batch(signals=[signals], series=[], readings=[read_flight(signals, geometry, one, words)],
+                             geometries=[geometry], vertical_paths=[], approach_ias_mps=[], groups=[], drawn={})
+        rows, grids, _ = generation.said_rows(batch, flown, np.asarray([grid]), forbidden, words, [0],
+                                              _altitudes(geometry, final))
+        sample = export.sample_payload(flown, 0, rows[0], grids[0], geometry, words, 0.0, stop)
+        last = cut.states[0, outcome.end_row].numpy()
+        self.assertAlmostEqual(sample["track"]["lat"][-1], float(last[LAT]), places=7)
+        self.assertAlmostEqual(sample["track"]["lon"][-1], float(last[LON]), places=7)
+        self.assertAlmostEqual(sample["track"]["altitudeM"][-1], float(last[ALT]), places=2)
 
 
 class FakeAutopilot:
@@ -905,7 +978,8 @@ def model_record(**changes) -> dict:
     events += [{"row": 10, "column": HEADING, "value": 12}, {"row": 12, "column": APPROACH, "value": 1},
                {"row": 14, "column": HEADING, "value": 14}, {"row": 15, "column": RUNWAY, "value": 1},
                {"row": 16, "column": SPEED, "value": 9}]
-    return {"overlayId": "generation_x", "sample": 2, "firstRow": 8, "rows": 18, "events": events, **changes}
+    return {"overlayId": "generation_x", "sample": 2, "firstRow": 8, "rows": 18, "events": events, "procedureMasks": [],
+            **changes}
 
 
 MODEL_WORDS = SimpleNamespace(
@@ -937,6 +1011,8 @@ class ModelSegmentTest(unittest.TestCase):
             (dict(events=[*record["events"][:6], {"row": 18, "column": HEADING, "value": 3}]), "is not a word of"),
             (dict(events=[*record["events"][:6], {"row": 9, "column": RUNWAY, "value": 2}]), "is not a word of"),
             (dict(events=[*record["events"][:6], {"row": 9, "column": HEADING}]), "is not {row, column, value}"),
+            (dict(procedureMasks=None), "procedureMasks must be a list of"),
+            (dict(procedureMasks=[{"name": "procedure-altitudes-v2"}]), "procedureMasks must be a list of"),
             (dict(sample=1.5), "must be a whole number"),
             (dict(overlayId=7), "overlayId must be a string"),
             # 12 observed steps left from step 8 × 1.5: 1 + 18 steps said at most
@@ -1190,8 +1266,10 @@ class ModelFlightTest(unittest.TestCase):
                              observed_track_deg=np.full(20, 90.0), observed_distance_m=200.0 * rows, hae_minus_msl_m=-32.0)
 
     def fly(self, column: int, row: int, end_row: int, group: str = "own dynamics", events: list | None = None,
-            read_rows: int | None = None):
-        """``read_rows``: the rows the judge read through the labeller's gate — None, a gate that refused the track."""
+            read_rows: int | None = None, stop: int | None = None):
+        """``read_rows``: the rows the judge read through the labeller's gate — None, a gate that refused the track;
+        ``stop``: the step the glidepath lower edge stops the flight at, under the procedure's altitudes (None: spoken
+        under none)."""
         record = model_record() if events is None else model_record(events=events)
         sentence = model_sentence(record, MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
         asked = {}
@@ -1201,19 +1279,47 @@ class ModelFlightTest(unittest.TestCase):
             return flown([float(c) for c in range(20)], 19), stop_steps is not None, 0.0
 
         def judge(run, index, geometry, runway_index, judged, signals, spec, words):
-            asked.update(runway_index=runway_index, judged=judged, runway=signals.runway)
+            asked.update(runway_index=runway_index, judged=judged, runway=signals.runway, done_cycle=int(run.done_cycle[0]))
             return (Verdict("timeout", end_row, None, {}, None, flown_rows=end_row + 1, refused="not read here")
                     if read_rows is None else replace(verdict(), end_row=end_row, flown_rows=end_row + 1))
 
         words = SimpleNamespace(**vars(MODEL_WORDS), spec=SPEC)
         params = SimpleNamespace(timeout_factor=1.5, cycle_s=1.0)
         admitted = SimpleNamespace(signals=SimpleNamespace(n_rows=read_rows))
+        masks = (ProcedureMasks.none() if stop is None
+                 else ProcedureMasks((PROCEDURE_ALTITUDES,), {"KXXX": ("final 09", "final 27")}))
+
+        def glidepath_stop(run, grid, geometry, finals, words_):
+            asked.update(stop_finals=finals, stop_grid=grid)
+            return stop
+
         with mock.patch.object(fly_module, "segment_batch", lambda *args: None), \
                 mock.patch.object(fly_module, "fly_batch_until", fly_batch_until), \
                 mock.patch.object(fly_module, "judge", judge), \
+                mock.patch.object(fly_module, "glidepath_stop", glidepath_stop), \
                 mock.patch.object(fly_module, "read_flown", lambda *args: admitted):
-            result = fly_module.fly_segment(self.context(group), params, words, column, row, NEVER, sentence)
+            result = fly_module.fly_segment(self.context(group), params, words, column, row, NEVER, sentence, masks)
         return result, asked
+
+    def test_under_the_procedures_altitudes_the_flight_is_cut_where_the_glidepath_lower_edge_stopped_it(self):
+        """Stopped at the flown sentence's step 5 (its end state: state 12, after cycle 11, of 1 s cycles and 2 s steps):
+        the judge reads the flight to there and the answer says where it was stopped; a judge that read an event before
+        it (the executor flies on past an uncaptured crossing) is refused — the sample ended at the stop."""
+        result, asked = self.fly(HEADING, 10, end_row=12, stop=5)
+        self.assertEqual((asked["done_cycle"], result.glidepath_step), (11, 5))
+        with self.assertRaisesRegex(RequestRefused, "ended the model's flight at timeout .* before the glidepath lower edge "
+                                                    "stopped its sample at step 13"):
+            self.fly(HEADING, 10, end_row=10, stop=5)
+        self.assertEqual(asked["stop_finals"], ("final 09", "final 27"))
+        self.assertIs(asked["stop_grid"], result.segment.grid)
+        # never stopped: flown as before, no stop read
+        result, asked = self.fly(HEADING, 10, end_row=16, stop=-1)
+        self.assertEqual((asked["done_cycle"], result.glidepath_step), (19, None))
+        # spoken under none: the edge is not even looked at
+        result, asked = self.fly(HEADING, 10, end_row=16)
+        self.assertNotIn("stop_finals", asked)
+        with self.assertRaisesRegex(ValueError, "flown with the procedure's masks it was spoken under"):
+            fly_module.fly_segment(self.context(), None, None, HEADING, 10, NEVER, None, ProcedureMasks.none())
 
     def test_it_flies_on_the_flights_own_dynamics_only(self):
         with self.assertRaisesRegex(RequestRefused, "own dynamics only"):
