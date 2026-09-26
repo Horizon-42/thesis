@@ -12,7 +12,7 @@ the entry itself is deleted.
 
 Checked entry by entry against `dev-two-tier` `1a7ac875` plus branch `dev-frontend-followups`, then updated after branch
 `dev-followups-no-training` (2026-09-25) fixed every entry whose fix touches neither the training nor the post-training
-(the right-hand column): **17 open, 8 partly, 3 fixed on a branch, 50 resolved or dismissed, 5 obsolete**. *open*: the problem is still in the
+(the right-hand column): **16 open, 9 partly, 4 fixed on a branch, 50 resolved or dismissed, 5 obsolete**. *open*: the problem is still in the
 code; *partly*: some of it is fixed (the note says what is left); *resolved*: fixed (the note says by what);
 *dismissed*: not a defect (the note says why); *obsolete*: the code is gone. A resolved, dismissed or obsolete entry's
 text is removed below (its row stays); rows follow the entries' order; note the two sets of numbers (§19–§21 each appear
@@ -107,7 +107,7 @@ it merges (24, the B77W preset, review #14 and #21, the performance index's B722
 | OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | fixed on a branch | every modelled airframe lands at its published MALW, B737's MALW from Boeing (user 2026-09-26) on branch `dev-training-followups` `d3d83716` | **yes — executor**: those types' mass and approach speed |
 | An alias-resolved identity is not recorded as one (09-26) | open | unchanged | no: provenance only, the types are the same |
 | A ts checkpoint does not record where its landing masses came from (09-26) | open | needs the user's decision (a payload change) | no for the two-tier chain (its artefacts record the aircraft tables); yes for any control-path checkpoint replayed after the rebuild |
-| The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | open | scope checked (entry): four writers, only the current set re-exportable | no: the Training view's exports (a re-export) |
+| The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | partly | the three exporters add the flight's runway offset (`0b1fe50a`); `instruction_v3_day_split` and its four overlays re-exported (2026-09-26, `check-publication` 0 errors); the live executor and the deletion of `geoid_undulation_m` on branch `dev-training-view-live-datum` `c110ea86`, after `dev-model-autopilot` merges; the older sets kept as published (user) | no: the Training view's exports |
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
 | ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | open | new; dev-post-train's file, left untouched | no: a document |
 
@@ -562,6 +562,22 @@ SHA-256, so they follow their base. Re-exportable by today's code: only `instruc
 (current labeller, executor spec `v7_20260925`). The older sets and overlays are refused by today's code (labeller
 v1–v3, executor specs v2 / v5), and the archived exporter is never edited: keep them as published or withdraw them —
 the user's call.
+
+**Fixed for the exporters 2026-09-26** (`0b1fe50a`; the user: fix it, re-export the current set, keep the older ones
+as published; nothing may touch training or training-related development).
+`instructions.training_files.runway_hae_minus_msl_m(artefact, airport, manifest)` reads each runway's `hae_minus_msl_m`
+from the arrival manifest the artefact's signals recorded (the bytes it parses are the bytes whose sha256 it checks, as
+`rebuild_series` checks it) — the numbers `flight_to_msl` subtracted — and the three exporters add the flight's own
+runway's. Reviewed (opus): the same offset in and out, checked on 12 rebuilt flights and on all 72,574 manifest rows;
+its low findings fixed. **Re-exported** into a staging root with the recorded arguments and order (CPU only, 4
+threads, nice 19, beside a running post-training job), compared leaf by leaf with the published files, then swapped
+in: words, outcomes, verdicts and landings identical (base 652/720 samples landed, post-trained 694/720, the executor
+188 flown, all landed); the heights moved −1.16 to +3.10 m (KRDU up to +3.10, KSJC down to −0.98); one prior
+probability's fourth decimal differs (KSMF, 0.8712 vs 0.8713: a CPU thread count changes the summation order);
+`check-publication` 0 errors on disk and served. **Left:** the backend's live executor still adds EGM96 — its change
+and the deletion of `geoid_undulation_m` are branch `dev-training-view-live-datum` `c110ea86`, held because
+`dev-model-autopilot` rewrites the same payload lines and still calls it; rebase after that merges. The older sets
+stay as published with EGM96 heights (noted in `aeroviz-4d/docs/36-…` §2.3).
 
 ## `evaluation.metrics.READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (2026-09-25)
 

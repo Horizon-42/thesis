@@ -1,5 +1,20 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-26 — Training 视图的高度：导出器按航班所落跑道的差值换回椭球高，不再用 EGM96；现行集合重导
+
+数据面把观测高度从椭球高换成海拔时，减的是航班所落跑道的 CIFP 差值（`hae_minus_msl_m`，KRDU 05L −32.0 m）；
+Training 视图写高度的地方往回换时加的却是 EGM96 当地值（KRDU −33.53 m），画出来的轨迹偏离飞机报的高度。
+只影响显示，训练链的执行器 / 标注器哈希没动（`d3ff8929…` / `55f6f0bc…`），训练与后训练分支都不受影响。
+
+- `0b1fe50a`：`instructions/training_files.runway_hae_minus_msl_m` 从句子产物记录的到达清单读每条跑道的差值（先核对清单
+  sha256，和 `rebuild_series` 同一个检查）；指令、执行器回放、生成三个导出器都加航班自己跑道的差值。opus 审查无严重问题。
+- 重导：`instruction_v3_day_split` 和它的四个叠加层（五个机场），先导到临时目录、按原参数和原顺序，逐字段和已发布的比对后
+  再对调：词、结局、判定、落地数全部相同，高度移动 −1.16 到 +3.10 m；KSMF 先验预测有一个概率第四位小数不同（CPU 线程数改变
+  求和顺序）。`check-publication` 五个机场 0 错误（磁盘与服务）。更早的集按用户决定保持原样。重导时一个后训练任务在跑：
+  导出只用 CPU、4 线程、nice 19，只读它也读的文件。
+- 暂缓：后端现飞的同一改动和删除 `flight_scenarios.datum.geoid_undulation_m` 在分支 `dev-training-view-live-datum`
+  `c110ea86`，没合并——`dev-model-autopilot` 正在改同样几行、还在调用这个函数；它合并后再变基上去。
+
 ### 2026-09-25 — code-health-followups：不影响训练的问题全部修掉（多个 package）
 
 分支 `dev-followups-no-training`（worktree），每个 package 一组提交、一次 opus 审查，审查意见随后修掉；
