@@ -115,6 +115,7 @@ added three entries (the rows after the performance index's).
 | The land law leaves a shallow final class's tube near the threshold on some profiles (09-26) | open | new; see the entry | **yes — executor** (a law change is a new spec) |
 | No mode reports when the executor's glidepath floor binds (09-26) | open | new; see the entry | **yes — executor** (adds a Flown mode; the backend payload reads the modes) |
 | The Training export and the live model flight fly a model without the procedure's masks (09-26) | open | new; see the entry | no: the Training view's exports and the backend (a stage-2 model is used with the masks on) |
+| The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (09-26) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts change) |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -517,3 +518,16 @@ design §3.1 says a model trained under the procedure's masks is used with them 
 trajectories beside a masked readout. The fix passes `procedure_masks(...).finals` to the export's loop (and a
 `--procedure-masks` flag, recorded in the overlay), and the same to the backend's `fly.py`; it changes the Training
 overlay's payload (a new schema) and needs the user's OK to re-export.
+
+## The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (2026-09-26)
+
+**Verified** (opus diagnosis, prior readouts §16, `outputs/POOLED/prior/v3_runway_mismatch_diagnosis_20260926/`). `autopilot/judge.py`
+`_outcome` (lines 124–138) tests only the pointed runway's threshold plane: an aircraft flown down the PARALLEL runway (the
+prior's heading words lined it up there, the clearance came too late for the capture) ends as `timeout`, and one that
+touches down on the parallel after a late capture as `crossed_off_runway` — the failure exists (landing 10 / 8,000 val
+sentences, base ≈ 28 / 8,000) but no readout names it. Separately, the `landed` test's lateral limit is the harvest's
+assignment limit, min(1,000 m, half the parallel spacing): at an airport without a parallel a crossing 654 m off the centreline
+counts as landed (base model, KMSY JBU75_11_a39338 sample 3). Fix (judgement): an outcome of its own for crossing another
+runway's threshold plane within its landing condition (ending the flight there), and the landed lateral limit at the
+runway itself (the LPV cone's half-width at the threshold, ~107 m). Both change the executor's source hash: a new spec and a
+new replay gate.
