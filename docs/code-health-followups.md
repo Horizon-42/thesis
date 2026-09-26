@@ -111,7 +111,9 @@ added three entries (the rows after the performance index's).
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
 | ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | open | new; dev-post-train's file, left untouched | no: a document |
 | `aeroviz-4d/python/requirements.txt` still lists `pyproj` (09-26) | open | new; see the entry | no: a requirements list |
-| `autopilot/__init__.py` names the executor design by its old file name (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
+| `autopilot/__init__.py` names the executor design by its old file name (09-26) | resolved | renamed with the executor's glidepath floor (`9557315d`, spec v10); entry removed | — |
+| The land law leaves a shallow final class's tube near the threshold on some profiles (09-26) | open | new; see the entry | **yes — executor** (a law change is a new spec) |
+| No mode reports when the executor's glidepath floor binds (09-26) | open | new; see the entry | **yes — executor** (adds a Flown mode; the backend payload reads the modes) |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -488,10 +490,19 @@ grid), was deleted 2026-09-26; no live `.py` imports `pyproj` (the archived expo
 `ts_transformer/archive/instruction_vocabulary_2026_09/` still names the deleted function and is not live). The file is a
 loose list, not the environment spec (`docs/environment.md`): drop the line, or say what it is for.
 
-## `autopilot/__init__.py` names the executor design by its old file name (2026-09-26)
+## The land law leaves a shallow final class's tube near the threshold on some profiles (2026-09-26)
 
-**Verified.** The design was renamed `docs/2026-09-23_executor_design.zh.md` → `docs/executor_design.zh.md` (the user,
-2026-09-26: design documents carry no date). The package docstring still names the old file. Every `.py` of
-`autopilot/` is in the executor source hash (`spec.executor_source_files`), so editing the docstring makes the current code
-refuse executor spec v9 — change it together with the next executor change (new spec + train replay gate).
-`autopilot/README.md` (not hashed) points at the new name meanwhile.
+**Verified** (opus review of `9557315d`, reproduced on `dev-two-tier` before it). A synthetic straight-in said as three
+angle words shallowing 4.3° → 3.2° → 2.3° keeps "descend to land" inside its tube when the last (2.3°) leg is 15 rows,
+but leaves it for 3 of 131 rows at 20 rows (and at 30 and 50), crossing at the admitted upper edge (TCH + 12.5 m): the
+same under the law before and after the glidepath floor, so it is older than it. `tests/test_autopilot.py`'s shallowing
+case uses 15 rows. Judgement: the reach test (`in_reach`, from the tube's lower edge at the steepest class) and the
+crossing point's clamp to the admitted heights meet at an edge; look at it with the next executor change.
+
+## No mode reports when the executor's glidepath floor binds (2026-09-26)
+
+**Verified** (opus review of `9557315d`). Under "descend to land" the vertical law's floor (never under the published
+glidepath's lower edge) sets the aim without a mode of its own: `aim_left_tube` stays false, and the replay summary counts
+a word it pushes out of its tube as "altitude word outside its tube". A `glidepath_floor` mode (MODES, judge, summary)
+would make its cost readable; it changes the Flown modes the backend's payload reads, so it waits for the next executor
+spec and a quiet frontend.
