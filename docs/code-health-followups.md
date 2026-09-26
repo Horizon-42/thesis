@@ -104,8 +104,9 @@ it merges (24, the B77W preset, review #14 and #21, the performance index's B722
 | Pilot frontend tests use a 145 / 135 / 155 kt fixture (09-24) | resolved | real catalog fixture + a range preset (`3d0fc579`, `d2323adf`); entry removed | — |
 | Performance index: stage-2 review leftovers (09-24) | partly | the observed mass label and the readout scripts fixed (`6c363ef9`, `3c4a92a4`); B722's mass fixed on branch `dev-training-followups` `dcbf6388` (merged with the rebuild); the 60 t observed fallback and the MD88 / LJ35 / GLF3 judgements remain | **yes — executor**: B722's mass, MD88 → B737, LJ35 → B737 and GLF3 → B763 change what those flights fly; the 60 t fallback: no |
 | The native stall-margin range after the preset masses moved (09-26) | fixed on a branch | re-judged by the rule (user 2026-09-26) on branch `dev-training-followups` `fde40395`: E545, E550 → C550, B733 → exclude | **yes — executor**: E545 / E550 flights fly as C550 |
-| OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | open | sources compared (entry); awaits the user's choice, and the FAA's B737 cell is wrong either way | **yes — executor**: those types' mass and approach speed |
+| OpenAP-direct types land at OpenAP's MLW, not the published MALW (09-26) | fixed on a branch | every modelled airframe lands at its published MALW, B737's MALW from Boeing (user 2026-09-26) on branch `dev-training-followups` `d3d83716` | **yes — executor**: those types' mass and approach speed |
 | An alias-resolved identity is not recorded as one (09-26) | open | unchanged | no: provenance only, the types are the same |
+| A ts checkpoint does not record where its landing masses came from (09-26) | open | needs the user's decision (a payload change) | no for the two-tier chain (its artefacts record the aircraft tables); yes for any control-path checkpoint replayed after the rebuild |
 | The Training view draws executor and observed tracks with EGM96, not the runway's offset (09-25) | open | scope checked (entry): four writers, only the current set re-exportable | no: the Training view's exports (a re-export) |
 | `READABLE_REPORT_SCHEMA_VERSIONS` reads four report versions (09-25) | open | new; see the entry | **yes — data plane**: ts `lateral_eligibility` reads reports through it |
 | ts `docs/reference/runners.md` still names `instruction_training_export` as the Training helpers' home (09-25) | open | new; dev-post-train's file, left untouched | no: a document |
@@ -514,6 +515,26 @@ designator (the file names it: "Boeing 737-700", "Boeing 767-300"…) with no pe
   (MAX 7)'s; Boeing's 737-700 lands at 58,059 / 58,604 kg (737NG ACAP 2.1.2), and OpenAP's 58,600 is right. The
   provenance README already calls this row "doubly suspect"; B739's FAA cell was replaced by Boeing's for the same
   reason. Replacing B737's MALW moves its approach-speed anchor (130 kt then sits at 58.6 t) and so the speed gate.
+
+**Fixed on branch `dev-training-followups` `d3d83716`** (user 2026-09-26: both): OpenAP-direct types land at the published
+MALW, `Mass.max_landing_kg` is required and the 0.85 × MTOW fallback is gone; B737 carries Boeing's 58,604 kg. What moves
+(opus review): 17 OpenAP-direct types' masses by ≥ 1 % (B37M +10.1 %, B744 +9.8 %, C550 −10.0 %, B763 +6.7 %, …); B737's
+target speed at its landing mass 122.5 → 130 kt (the optimizer's runway target and the executor's unspecified speed), its
+observed gate's lower edge 98.2 → 104.2 kt (1 of 8,903 published B737 rows flips); the analysis's decisions do not change.
+Left as they are: the observed records' `mass_source` label still says `openap_landing_mass` (the performance-index entry
+above); `dynamics_source` for OpenAP-direct types stays `openap-<version>` although its mass changed (next entry).
+Delete this entry when the branch merges.
+
+## A ts checkpoint does not record where its landing masses came from (2026-09-26)
+
+**Verified** (opus review of `dev-training-followups`), the fix is **judgement**. Under `aircraft_filter=openap-direct`
+`load_checkpoint` skips the performance-index check (`train.py:1417-1430`), and no ts identity records
+`reference_speeds.json` (`reference_speeds_identity` is used only by `evaluation/metrics.py:177`). So a control-path
+checkpoint trained before the landing masses moved to the published MALW would load silently and be rolled out at the new
+masses (17 OpenAP-direct types move by ≥ 1 %); under `modelled` / `all-flights` it is refused only because the index's basis
+texts happen to change. Recording a reference-speeds / landing-mass identity in the checkpoint and checking it under every
+filter that uses dynamics is a payload change — the user's decision. The two-tier chain is not exposed: its sentence
+artefact records the aircraft tables and is rebuilt.
 
 ## An alias-resolved identity is not recorded as one (2026-09-26)
 
