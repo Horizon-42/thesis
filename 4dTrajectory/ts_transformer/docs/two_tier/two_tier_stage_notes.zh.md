@@ -206,7 +206,7 @@
   两轮 opus 审查没有必须修的；ts 全套 1,498 通过。**工作树 `stage2-restart` 还在用**：带截断的第二阶段正在从它跑（`735edc69`，与合并后的
   代码相同），**运行期间不要改它**；跑完再问用户删工作树和分支（删前先 unlink 数据软链接）。
 - **工作树 `executor-glidepath`、分支 `dev-executor-glidepath`**：已快进合并（`9557315d`），v10 的重读从它跑过；留在盘上等用户同意再删
-  （删前先 unlink 数据软链接）。另一个会话整理 ts 文档的分支 `docs-reorg` 已合并进 dev-two-tier（用户 2026-09-26）：设计文档移到 `docs/two_tier/`（读数在 `docs/two_tier/readouts/`），`docs/` 里的脚本变成 runner 或归档，入口 `docs/README.md`；执行器指纹里的代码引用的十份记录和 `autopilot/__init__.py` 的路径等下一版执行器规格一起改（`docs/code-health-followups.md`）。它的工作树留在盘上，删不删问用户。
+  （删前先 unlink 数据软链接）。另一个会话整理 ts 文档的分支 `docs-reorg` 已合并进 dev-two-tier（用户 2026-09-26）：设计文档移到 `docs/two_tier/`（读数在 `docs/two_tier/readouts/`），`docs/` 里的脚本变成 runner 或归档，入口 `docs/README.md`；执行器指纹里的代码引用的十份记录和 `autopilot/__init__.py` 的路径等下一版执行器规格一起改（`docs/code-health-followups.md`）。它的工作树和分支已删（用户 2026-09-26）。
 - **本地分支**：`dev-two-tier`、`main`、`wip-r32-leg-timing`（跑道意图 R3.2 没采纳的第三种改法，远端也有；跑道意图计划 §18.2 引用它
   备查，保留）。2026-09-26 删掉的：工作树 `post-train`、`rebuild`、`training-sentences` 及分支 `dev-post-train`、`dev-training-followups`、
   `dev-post-train-merged`、`dev-rebuild`、`dev-model-autopilot`、`dev-training-sentences`，工作树 `glidepath-diagnosis` 及分支
