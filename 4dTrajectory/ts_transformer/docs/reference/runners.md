@@ -458,8 +458,10 @@ first stage's kept round: 0.107 inside its pass, ~0.01 on fresh sentences). **Th
 (`train.KlBudget`, design §5): before round 1's pass the start's distance to the base on that round's trained sentences
 D₀ is measured (`RewardTuner.distance`: the mean over the pass's batches, the statistic the controller holds) and written
 to `budget.json`; the target is D₀ + `BUDGET_DELTA` (0.01); every update multiplies the weight (from `--kl-weight`,
-refused unless positive) by exp(`BUDGET_GAIN` 0.05 × the batch's relative distance error cut at ± 1), carried across
-rounds; every round records its model's distance before the pass (`distance_at_start`) and the pass's per-batch distance
+refused unless positive) by exp(gain × the batch's relative distance error cut at ± 1) — `BUDGET_GAIN_UP` 0.2 over the
+target, `BUDGET_GAIN_DOWN` 0.05 under it — never below its start, carried across rounds; a batch farther than
+`BUDGET_STOP` 3 × the larger of the target and the pass's first distance ends the pass without an update from it
+(`stopped`); every round records its model's distance before the pass (`distance_at_start`) and the pass's per-batch distance
 and weight (`trace`). Select readouts with the edge: the real starts (same flights and seed every round) and one
 fixed augmented start per flight (seed + 7919; a flight none fits is left out and counted, never replaced; the
 augmentations are in `config.json`), plus the teacher-forced NLL (recorded only). `choice.json`: among the rounds within

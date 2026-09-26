@@ -34,7 +34,8 @@ from ts_transformer.prior.generate import allowed_classes
 from ts_transformer.prior.scene import N_LOOK
 from ts_transformer.prior.model import asked_entries
 from ts_transformer.prior.train import (
-    BUDGET_ERROR_CLIP, BUDGET_GAIN, KlBudget, RewardConfig, RewardTuner, allowed_tensors, flight_exact_kl, masked,
+    BUDGET_ERROR_CLIP, BUDGET_GAIN_DOWN, BUDGET_GAIN_UP, BUDGET_STOP, KlBudget, RewardConfig, RewardTuner,
+    allowed_tensors, flight_exact_kl, masked,
 )
 from ts_transformer.tests.test_autopilot import _params
 from ts_transformer.tests.test_prior_landing_reward import _sentences, _split
@@ -317,14 +318,19 @@ def test_the_exact_distance_is_the_kl_over_each_cell_s_allowed_words():
     assert asked_entries(present).sum() == 2
 
 
-def test_the_budget_raises_the_pull_above_its_target_and_lowers_it_below():
-    budget = KlBudget(target=0.05)
+def test_the_budget_raises_the_pull_fast_above_its_target_lowers_it_slowly_below_and_never_under_its_floor():
+    budget = KlBudget(target=0.05, floor=0.01)
     assert budget.adjusted(0.04, 0.05) == pytest.approx(0.04)
-    assert budget.adjusted(0.04, 0.075) == pytest.approx(0.04 * math.exp(BUDGET_GAIN * 0.5))
-    assert budget.adjusted(0.04, 0.025) == pytest.approx(0.04 * math.exp(-BUDGET_GAIN * 0.5))
+    assert budget.adjusted(0.04, 0.075) == pytest.approx(0.04 * math.exp(BUDGET_GAIN_UP * 0.5))
+    assert budget.adjusted(0.04, 0.025) == pytest.approx(0.04 * math.exp(-BUDGET_GAIN_DOWN * 0.5))
     # the error is cut: ten times over the target moves the weight no more than twice over it
-    assert budget.adjusted(0.04, 0.5) == pytest.approx(0.04 * math.exp(BUDGET_GAIN * BUDGET_ERROR_CLIP))
-    assert budget.adjusted(0.04, 0.0) == pytest.approx(0.04 * math.exp(-BUDGET_GAIN * BUDGET_ERROR_CLIP))
+    assert budget.adjusted(0.04, 0.5) == pytest.approx(0.04 * math.exp(BUDGET_GAIN_UP * BUDGET_ERROR_CLIP))
+    assert budget.adjusted(0.04, 0.0) == pytest.approx(0.04 * math.exp(-BUDGET_GAIN_DOWN * BUDGET_ERROR_CLIP))
+    assert budget.adjusted(0.0101, 0.0) == 0.01                                   # never under the floor
+    # the stop: past its multiple of the target, or of the pass's own first distance when that is farther
+    assert not budget.stops(BUDGET_STOP * 0.05, 0.01) and budget.stops(BUDGET_STOP * 0.05 + 1e-9, 0.01)
+    assert not budget.stops(BUDGET_STOP * 0.2, 0.2) and budget.stops(BUDGET_STOP * 0.2 + 1e-9, 0.2)
+    assert not budget.stops(1.0, 1.0)                                              # a first batch never stops
 
 
 def test_with_a_budget_the_pass_adjusts_the_pull_after_every_update_and_carries_it():
@@ -338,15 +344,17 @@ def test_with_a_budget_the_pass_adjusts_the_pull_after_every_update_and_carries_
     first = fixed.one_pass(split, np.array([1.0, -1.0, 0.0]), None)
     assert first["kl_weight_start"] == first["kl_weight_end"] == config.kl_weight == fixed.kl_weight
     tuner = RewardTuner(_model(words), _model(words), config, CPU, seed=0)
-    # a target below any distance once the weights have moved: the first update (the model still the reference, no
-    # distance) lowers the weight by the cut error, the two after it raise it by as much each
-    tuner.budget = KlBudget(target=1e-9)
+    # the fixture's three batches lie 0, ~2e-8 and ~0.5 from the reference: with a target of 1e-8 the first update (no
+    # distance) cannot lower the weight under its floor, the second (over the target, under the stop) raises it by the
+    # cut error, and the third batch is past the stop (3 × the target: the first was nearer) — no update from it
+    tuner.budget = KlBudget(target=1e-8, floor=config.kl_weight)
     passed = tuner.one_pass(split, np.array([1.0, -1.0, 0.0]), None)
-    assert passed["batches"] == 3 and passed["kl_weight_start"] == config.kl_weight
-    assert passed["kl_weight_end"] == pytest.approx(config.kl_weight * math.exp(BUDGET_GAIN * BUDGET_ERROR_CLIP))
+    assert passed["batches"] == 2 and passed["kl_weight_start"] == config.kl_weight
+    assert passed["stopped"]["batch"] == 2 and passed["stopped"]["distance"] > BUDGET_STOP * 1e-8
+    assert passed["kl_weight_end"] == pytest.approx(config.kl_weight * math.exp(BUDGET_GAIN_UP * BUDGET_ERROR_CLIP))
     again = tuner.one_pass(split, np.array([1.0, -1.0, 0.0]), None)
     assert again["kl_weight_start"] == passed["kl_weight_end"]          # carried across passes
-    assert passed["kl_max"] > 0.0 and len(passed["trace"]["kl"]) == len(passed["trace"]["weight"]) == 3
+    assert passed["kl_max"] > 0.0 and len(passed["trace"]["kl"]) == len(passed["trace"]["weight"]) == 2
     # the distance the budget is set from is the statistic its controller holds: a one-batch pass's measured distance
     # (taken before its update) is `distance` taken before the pass
     exact = RewardConfig(learning_rate=1e-2, warmup_steps=1, data_weight=0.0, kl_estimate="exact")
@@ -355,5 +363,11 @@ def test_with_a_budget_the_pass_adjusts_the_pull_after_every_update_and_carries_
         moved.one_pass(split, np.array([1.0, -1.0, 0.0]), None)
         before = moved.distance(split)
         assert moved.one_pass(split, np.array([1.0, -1.0, 0.0]), None)["kl_mean"] == pytest.approx(before, rel=1e-5)
+    # a batch past the stop ends the pass without an update from it: a first batch at no distance, a target so small
+    # that the second batch, once the weights moved, is past the stop
+    stopping = RewardTuner(_model(words), _model(words), config, CPU, seed=0)
+    stopping.budget = KlBudget(target=1e-12, floor=config.kl_weight)
+    ended = stopping.one_pass(split, np.array([1.0, -1.0, 0.0]), None)
+    assert ended["batches"] == 1 and ended["stopped"]["batch"] == 1 and ended["stopped"]["distance"] > 3e-12
     with pytest.raises(ValueError, match="kl_estimate"):
         RewardTuner(_model(words), _model(words), RewardConfig(kl_estimate="k3"), CPU, seed=0)

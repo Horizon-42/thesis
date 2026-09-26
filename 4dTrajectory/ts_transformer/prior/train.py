@@ -243,24 +243,35 @@ class RewardConfig:
     kl_estimate: str = "sampled-words"      # `KL_ESTIMATES`
 
 
-#: The KL budget's controller (post-training design §5, Ziegler et al. 2019's adaptive KL coefficient): each update
-#: multiplies the pull's weight by exp(gain × the batch's relative distance error, cut at ± `BUDGET_ERROR_CLIP`) — a
-#: distance held above the target raises it ten-fold in about 46 updates (a round is ~220).
-BUDGET_GAIN = 0.05
+#: The KL budget's controller (post-training design §5; after Ziegler et al. 2019's adaptive KL coefficient): after each
+#: update the pull's weight is multiplied by exp(gain × the batch's relative distance error, cut at ± `BUDGET_ERROR_CLIP`),
+#: the gain `BUDGET_GAIN_UP` over the target (× 1.22 an update at most: ten-fold in ~12) and `BUDGET_GAIN_DOWN` under it,
+#: and never below the weight it started at. A symmetric gain of 0.05 with no floor let a model under budget for its first
+#: hundred updates drop the pull to a tenth and then run twenty times past the target before the pull recovered
+#: (readouts §9). A pass ends at a batch farther than `BUDGET_STOP` × the larger of the target and the pass's own first
+#: distance (a pass that starts past the target is not frozen: its pull brings it back).
+BUDGET_GAIN_UP = 0.2
+BUDGET_GAIN_DOWN = 0.05
 BUDGET_ERROR_CLIP = 1.0
+BUDGET_STOP = 3.0
 
 
 @dataclass(frozen=True)
 class KlBudget:
     """How far from the reference the model may be (the pull's own measure, `RewardTuner.distance`, per predicted step
-    summed over its asked cells): the pull's weight is raised while a batch is farther than ``target`` and lowered while
-    it is nearer."""
+    summed over its asked cells): the pull's weight is raised fast while a batch is farther than ``target``, lowered
+    slowly while it is nearer, never below ``floor``."""
 
     target: float
+    floor: float
 
     def adjusted(self, weight: float, distance: float) -> float:
         error = min(max(distance / self.target - 1.0, -BUDGET_ERROR_CLIP), BUDGET_ERROR_CLIP)
-        return weight * math.exp(BUDGET_GAIN * error)
+        return max(self.floor, weight * math.exp((BUDGET_GAIN_UP if error > 0.0 else BUDGET_GAIN_DOWN) * error))
+
+    def stops(self, distance: float, first: float) -> bool:
+        """Whether a pass whose first batch was ``first`` from the reference ends at a batch ``distance`` away."""
+        return distance > BUDGET_STOP * max(self.target, first)
 
 
 class RewardTuner:
@@ -365,12 +376,17 @@ class RewardTuner:
         self.model.eval()
         started = time.perf_counter()
         sums = {"reward": 0.0, "kl": 0.0, "data": 0.0}
-        count, weight_start, trace = 0, self.kl_weight, {"kl": [], "weight": []}
+        count, weight_start, trace, stopped = 0, self.kl_weight, {"kl": [], "weight": []}, None
         for indices in batches(sentences.flights, self.config.tokens_per_batch // 2, self.rng):
             batch, logits, reference, steps = self._scored(sentences, indices, allowed)
             advantage = torch.as_tensor(advantages[indices], dtype=logits[0].dtype, device=self.device)
             reward = (advantage * flight_nll(logits, batch["targets"], batch["present"], batch["asked"]) / steps).mean()
             kl = self._kl(batch, logits, reference, steps)
+            if self.budget is not None and self.budget.stops(float(kl.detach()), trace["kl"][0] if trace["kl"] else
+                                                             float(kl.detach())):
+                # this batch is past the budget's stop: no update from it, the pass ends
+                stopped = {"batch": count, "distance": float(kl.detach())}
+                break
             if data is None:
                 data_loss = torch.zeros((), device=self.device)
             else:
@@ -394,4 +410,4 @@ class RewardTuner:
         return {**{f"{name}_mean": value / count for name, value in sums.items()}, "kl_max": max(trace["kl"]),
                 "kl_weight_start": weight_start, "kl_weight_end": self.kl_weight, "batches": count,
                 "sentences": len(sentences.flights), "seconds": time.perf_counter() - started,
-                "trace": trace}
+                "stopped": stopped, "trace": trace}

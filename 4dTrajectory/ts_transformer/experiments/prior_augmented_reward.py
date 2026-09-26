@@ -17,7 +17,8 @@ Each round:
    sentence was said under. The pull measures the distance exactly (`train.flight_exact_kl`) and its weight starts at
    ``--kl-weight`` and follows a KL budget (`train.KlBudget`, design §5): before round 1's pass the start's distance to
    the base on that round's trained sentences D₀ is measured, the target is D₀ + `BUDGET_DELTA`, and every update
-   adjusts the weight from its batch's distance; every round records its model's distance before its pass;
+   adjusts the weight from its batch's distance (fast up, slowly down, never below ``--kl-weight``); a batch past the
+   budget's stop ends the pass; every round records its model's distance before its pass;
 5. **the select readouts**, both with the edge: the select days' real starts (``--select-per-airport`` ×
    ``--select-samples``, the same flights and seed every round) and the same flights' augmented starts (one fixed
    augmentation each, drawn with ``seed`` + `SELECT_AUGMENT_OFFSET`), and the teacher-forced NLL on the select sentences.
@@ -71,7 +72,10 @@ from ts_transformer.prior.landing_reward import group_advantages, landing_direct
 from ts_transformer.prior.model import Prior
 from ts_transformer.prior.procedure import RunwayProcedure, published_procedures
 from ts_transformer.prior.scene import N_LOOK, Landings
-from ts_transformer.prior.train import BUDGET_ERROR_CLIP, BUDGET_GAIN, KlBudget, RewardConfig, RewardTuner, TrainConfig, evaluate
+from ts_transformer.prior.train import (
+    BUDGET_ERROR_CLIP, BUDGET_GAIN_DOWN, BUDGET_GAIN_UP, BUDGET_STOP, KlBudget, RewardConfig, RewardTuner, TrainConfig,
+    evaluate,
+)
 from ts_transformer.repo_layout import REPO_ROOT, git_state
 
 AUGMENTED_REWARD_SCHEMA = "ts-prior-augmented-reward-v2"
@@ -320,8 +324,8 @@ def main(argv: list[str] | None = None) -> int:
                                      for j, m in zip(select_kept, select_moves)],
                    "labelled_words_after_first_per_flight": labelled},
         "seed": args.seed, "tie_share": TIE_SHARE,
-        "budget": {"delta": BUDGET_DELTA, "gain": BUDGET_GAIN, "error_clip": BUDGET_ERROR_CLIP,
-                   "start_weight": config.kl_weight},
+        "budget": {"delta": BUDGET_DELTA, "gain_up": BUDGET_GAIN_UP, "gain_down": BUDGET_GAIN_DOWN,
+                   "error_clip": BUDGET_ERROR_CLIP, "stop": BUDGET_STOP, "start_weight_and_floor": config.kl_weight},
         "guards": {"landed_drop": GUARD_LANDED_DROP, "runway_drop": GUARD_RUNWAY_DROP,
                    "word_columns": list(GUARD_WORD_COLUMNS), "word_margin_ln": math.log(GUARD_WORD_GROWTH)},
         "n_look": N_LOOK})
@@ -409,7 +413,7 @@ def main(argv: list[str] | None = None) -> int:
         start_distance = tuner.distance(split, allowed)
         if tuner.budget is None:
             # the budget (design §5): the start's own distance to the base on its first round's sentences, plus the delta
-            tuner.budget = KlBudget(start_distance + BUDGET_DELTA)
+            tuner.budget = KlBudget(start_distance + BUDGET_DELTA, floor=config.kl_weight)
             write_json_atomic(out / "budget.json", {"start_distance": start_distance, "target": tuner.budget.target,
                                                    "measured_on": f"round {round_number}'s {len(flights)} trained sentences"})
             log(f"KL budget: the start is {start_distance:.4f} from the base, target {tuner.budget.target:.4f}")
@@ -417,7 +421,9 @@ def main(argv: list[str] | None = None) -> int:
         log(f"round {round_number}: one pass over {len(flights)} sentences, reward term {passed['reward_mean']:.4f}, "
             f"KL to the base {start_distance:.4f} at the start, {passed['kl_mean']:.4f} in the pass (max "
             f"{passed['kl_max']:.4f}, target {tuner.budget.target:.4f}), "
-            f"pull weight {passed['kl_weight_start']:.4g} → {passed['kl_weight_end']:.4g}")
+            f"pull weight {passed['kl_weight_start']:.4g} → {passed['kl_weight_end']:.4g}"
+            + (f"; stopped at batch {passed['stopped']['batch']} ({passed['stopped']['distance']:.4f})"
+               if passed["stopped"] else ""))
         torch.save({"schema": PRIOR_CHECKPOINT_SCHEMA, "model_config": model.config.to_dict(),
                     "train_config": start_config["train"], "state": copy.deepcopy(model.state_dict()),
                     "spec_sha256": spec.sha256}, directory / "checkpoint.pt")
