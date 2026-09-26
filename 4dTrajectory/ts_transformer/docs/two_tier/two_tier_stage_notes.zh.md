@@ -305,7 +305,8 @@ landing 起，切入前加了两条硬约束（决断高度、跌破入口高度
 ## 9 下一步
 
 0. **程序屏蔽跟着模型走**（§6）：已合并、现有 22 个模型已补记录；带截断的运行跑完后，用
-   `outputs/POOLED/prior/procedure_masks_stamp_20260927/stamp.py --write --record outputs/POOLED/prior/procedure_masks_stamp_<日期>` 补它的 8 轮（用户已同意这一步）。以后拿 landing 和第二阶段的轮次比验证集，landing 要点名 `--procedure-masks
+   仓库根目录下 `PYTHONPATH=.:4dTrajectory python 4dTrajectory/outputs/POOLED/prior/procedure_masks_stamp_20260927/stamp.py --write --record
+   4dTrajectory/outputs/POOLED/prior/procedure_masks_stamp_<日期>`（`--record` 相对仓库根目录；先不带 `--write` 演练）补它的 8 轮（用户已同意这一步）。以后拿 landing 和第二阶段的轮次比验证集，landing 要点名 `--procedure-masks
    procedure-altitudes-v2`（它自己的是"无"）；这次运行结尾的验证集读数由工作树 `stage2-restart` 的旧代码跑，两者都开着程序高度，不受影响。
 1. **第二阶段带截断的比，在跑**（`outputs/POOLED/prior/v3_stage2_clip_20260926/`，run.pid，从工作树 `stage2-restart` `735edc69` 跑，与合并后的代码
    相同）：第 0–2 轮见 §4.4；还剩 6 轮（每轮约 35 分钟），然后 `choice.json` 选轮、验证集读一次（`val_kept_400x4`、`val_kept_aug_400x4`，与 landing
