@@ -98,6 +98,7 @@ from ts_transformer.data.target_conditioning import (
 )
 from ts_transformer.data.time_grids import ROW_TOLERANCE_S, output_time_grid
 from ts_transformer.data.reference_velocity import rebuild_reference_velocities
+from ts_transformer.geometry.final_approach_geometry import alignment_cosine, runway_axes, threshold_crossing_mask
 
 
 
@@ -680,37 +681,51 @@ def _observed_threshold_crossing(
 
     The plane passes through the TARGET (``target_chart``), normal to the runway course —
     not through the frame origin, which only coincides with the threshold under the
-    threshold-anchored frames.
+    threshold-anchored frames. With a fit the scan starts after its last sample, on the final;
+    without one it starts at row 1 and a crossing counts only ON THE FINAL (contract C3: the row
+    past the plane inside the membership cone, the chord flown into it within 30° of the
+    course — `final_approach_geometry.threshold_crossing_mask`), or a pass abeam or on an upwind leg
+    would cut the flight early (code-health follow-up 14: 3 of the 44 unfitted flights).
     """
     cosine = np.cos(runway_heading_rad)
     sine = np.sin(runway_heading_rad)
-    along = np.asarray([
-        east * cosine + north * sine
-        for east, north in (
-            frame.to_world_horizontal(
-                float(row[0]) - float(target_chart[0]),
-                float(row[1]) - float(target_chart[1]),
-            )
-            for row in measured_values
-        )
-    ])
+    world = np.asarray([
+        frame.to_world_horizontal(float(row[0]) - float(target_chart[0]), float(row[1]) - float(target_chart[1]))
+        for row in measured_values
+    ]).reshape(-1, 2)
+    along = world[:, 0] * cosine + world[:, 1] * sine
     first_right_index = fitted.fit.last_sample_index + 1 if fitted is not None else 1
     for right_index in range(first_right_index, len(along)):
         left_index = right_index - 1
         left_along = along[left_index]
         right_along = along[right_index]
-        if left_along <= 0.0 <= right_along and right_along > left_along:
-            # The project's single crossing-fraction definition (final_approach) —
-            # the same two-point operation the harvest bracket and the evaluator use.
-            fraction = bracket_fraction(float(left_along), float(right_along))
-            crossing_time = measured_times[left_index] + fraction * (
-                measured_times[right_index] - measured_times[left_index]
-            )
-            crossing_values = measured_values[left_index] + fraction * (
-                measured_values[right_index] - measured_values[left_index]
-            )
-            return float(crossing_time), crossing_values
+        if not (left_along <= 0.0 <= right_along and right_along > left_along):
+            continue
+        if fitted is None and not _crosses_on_final(world[right_index], world[right_index] - world[left_index],
+                                                    runway_heading_rad):
+            continue
+        # The project's single crossing-fraction definition (final_approach) —
+        # the same two-point operation the harvest bracket and the evaluator use.
+        fraction = bracket_fraction(float(left_along), float(right_along))
+        crossing_time = measured_times[left_index] + fraction * (
+            measured_times[right_index] - measured_times[left_index]
+        )
+        crossing_values = measured_values[left_index] + fraction * (
+            measured_values[right_index] - measured_values[left_index]
+        )
+        return float(crossing_time), crossing_values
     return None
+
+
+def _crosses_on_final(position: np.ndarray, chord: np.ndarray, runway_heading_rad: float) -> bool:
+    """Contract C3 at one row (`final_approach_geometry.threshold_crossing_mask`, the one rule): ``position`` the
+    row's world offset from the target, ``chord`` the world step flown into it."""
+    f64 = torch.float64
+    psi = torch.tensor([runway_heading_rad], dtype=f64)
+    point = torch.as_tensor(position, dtype=f64)
+    d, xt = runway_axes(point[None, 0:1], point[None, 1:2], psi)
+    step = torch.as_tensor(chord, dtype=f64)
+    return bool(threshold_crossing_mask(d, xt, alignment_cosine(step[None, 0:1], step[None, 1:2], psi))[0, 0])
 
 
 def _build_supervision(

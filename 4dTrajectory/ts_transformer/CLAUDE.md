@@ -83,8 +83,8 @@ of the package, not a migration in progress.
 - Distance-to-go is measured from `FlightSeries.target_chart`; a consumer reading `hypot(e, n)` is
   silently wrong under the airport frame only (C2).
 - "It crossed the threshold" is `d ≤ 0` AND on the final
-  (`final_approach_geometry.threshold_crossing_index`) — the plane alone fires ABEAM on a downwind;
-  no crossing means say so, never cut somewhere (C3).
+  (`final_approach_geometry.threshold_crossing_index`; the observed-row scan of an unfitted flight reads the same
+  mask) — the plane alone fires ABEAM on a downwind; no crossing means say so, never cut somewhere (C3).
 - **The control head has FOUR contracts and each is ONE row** (`control_thrust_parameterization` ∈
   `thrust-fraction` (default, every stored run) | `specific-force` | `speed-command` (failed, kept
   loadable) | `specific-force+path-angle`): the row is `ControlContract` in `outputs/envelope.py`

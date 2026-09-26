@@ -36,8 +36,11 @@ rebased — same rule, new IDs.
 ### C3 · "it crossed the threshold" = `d ≤ 0` AND on the final
 
 - **"It crossed the threshold" is `d ≤ 0` AND on the final — never the plane alone**
-  (`final_approach_geometry.threshold_crossing_index`, the one rule both consumers of an arrival
-  point read; the closest-approach / in-segment refinement is the caller's). A vectored flight's
+  (`final_approach_geometry.threshold_crossing_index` / `threshold_crossing_mask`, the one rule every consumer of
+  an arrival point reads — the forecast cut, the trombone and, since 2026-09-26, the dataset's scan of the OBSERVED
+  rows of a flight without a fitted crossing (`dataset._observed_threshold_crossing`: 3 of the 44 unfitted flights
+  had been cut at a plane pass off the final; a fitted flight is scanned after its fit, on the final); the
+  closest-approach / in-segment refinement is the caller's). A vectored flight's
   DOWNWIND is parallel to the course and opposite it, several km abeam, and passes `d = 0` out
   there, so the plane-only rule fired ABEAM (2026-09-09: 96.5 % of the vectored
   `--truncate-at-threshold` cuts > 1 km from the threshold, median |xt| 8.7 km at a median

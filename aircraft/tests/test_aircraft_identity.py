@@ -443,3 +443,26 @@ def test_shipped_identity_was_built_from_the_shipped_crosswalk_and_catalog():
     registry = get_default_identity_resolver().faa_registry
     assert registry["crosswalk_policy"]["documented_crosswalk"]["sha256"] == sha256_file(DEFAULT_CROSSWALK)
     assert registry["source"]["icao_raw_sha256"] == catalog.source["raw_sha256"]
+
+
+def test_openskys_marketing_codes_resolve_to_the_designator_the_snapshot_gives_their_model(monkeypatch):
+    """Code-health follow-up 24: OpenSky files some types under codes Doc 8643 does not list; each alias names the
+    snapshot row it stands for and takes that row's designator — never one typed in."""
+    from aircraft.icao_type_designators import MARKETING_ALIASES
+
+    from aircraft.build_aircraft_identity_database import DEFAULT_ICAO_OUTPUT
+
+    catalog = IcaoTypeDesignatorCatalog.from_json(DEFAULT_ICAO_OUTPUT)
+    assert {alias: catalog.normalize_typecode(alias.lower()) for alias in MARKETING_ALIASES} == {
+        "F2EX": "F2TH", "F2LX": "F2TH", "H900": "H25B", "CL61": "CL60", "G450": "GLF4", "G650": "GLF6"}
+    for alias, (manufacturer, model) in MARKETING_ALIASES.items():
+        assert not catalog.contains(alias)                        # the table's premise: the snapshot does not list it
+        assert catalog.record_typecodes(manufacturer, model) == {catalog.normalize_typecode(alias)}
+    with pytest.raises(KeyError):                                 # gliders: no alias, no snapshot row
+        catalog.normalize_typecode("AS29")
+    # an alias the snapshot lists itself would override the real designator: refused by name
+    import aircraft.icao_type_designators as designators
+
+    monkeypatch.setattr(designators, "MARKETING_ALIASES", {"A320": ("DASSAULT", "Falcon 2000")})
+    with pytest.raises(KeyError, match="is itself a designator"):
+        catalog.normalize_typecode("A320")

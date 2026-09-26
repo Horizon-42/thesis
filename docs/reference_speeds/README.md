@@ -45,8 +45,8 @@ first 40; 27 of them also carry a published minimum operating mass.
   are recorded as corroboration only; they never replace it.
 * `malw_kg` = FAA `MALW_lb` x 0.45359237, rounded to the kilogram. That rounding can differ by 1 kg
   from the kilogram figure printed by the manufacturer (e.g. CRJ900 33,339 here vs 33,340 printed),
-  because the manufacturers round their own conversion. The single exception is **B739**, where the
-  FAA cell is wrong - see the row note.
+  because the manufacturers round their own conversion. The two exceptions are **B739** and **B737**, where the
+  FAA cell is wrong - see the row notes (B737 since 2026-09-26).
 * `min_mass_kg` is the lowest published operating-empty / basic-operating / minimum-flight weight for
   the designator. Preference order: a certified minimum flight weight (the type certificate data sheet
   of the FAA or EASA, or the manufacturer's own document), then a certified minimum zero fuel weight
@@ -128,7 +128,7 @@ Retrieved: 2026-09-07
 Local path: `data/reference_speeds/boeing/737MAX_RevK.pdf` (18,127,573 bytes)  
 sha256: `6ac41b3794c19e96ec7413fe45f2cc13f68d748561573a032d13ea2d6a9119ee`
 
-Read: Sections 2.1.2 (737-8) and 2.1.5 (737-9), printed pages 2-3 and 2-6. Taken: MAX DESIGN LANDING WEIGHT. Excerpt `excerpts/boeing_737MAX_2.1_weights.txt`. **This document publishes no OPERATING EMPTY WEIGHT row and no approach speed** - that absence is why B38M/B39M fall back to OpenAP for minimum mass.
+Read: Sections 2.1.2 (737-8) and 2.1.5 (737-9), printed pages 2-3 and 2-6. Taken: MAX DESIGN LANDING WEIGHT. Section 2.1.1 (737-7), printed page 2-2, read 2026-09-26 to identify the FAA B737 cell (see the B737 row). Excerpt `excerpts/boeing_737MAX_2.1_weights.txt`. **This document publishes no OPERATING EMPTY WEIGHT row and no approach speed** - that absence is why B38M/B39M fall back to OpenAP for minimum mass.
 
 ### boeing_757_acap_rev_h
 
@@ -746,7 +746,7 @@ every entry is the `corroboration[].note` of that type in the JSON.
 | type | rows | FAA speed kt main/min/max | FAA MALW lb | malw_kg | manufacturer corroboration (speed @ MLW, doc, section) | EC Vat kt | minimum mass kg | kind | min-mass source | notes |
 |---|---:|---|---:|---:|---|---:|---:|---|---|---|
 | B38M | 5864 | 145 / 140 / 145 | 152,800 | 69,309 | no speed published; MLW 69,308 kg (same weight as the FAA MALW, -1 kg conversion rounding) -- `boeing_737max_acap_rev_k` 2.1.2 (737-8) | 145 | **45,000** | OEW | `openap_2_4` | min mass = OpenAP fallback; dual FSB value |
-| B737 | 5537 | 130 / 130 / 130 | 145,600 | 66,043 | no speed published; MLW 58,604 kg (FAA MALW is 7,439 kg higher) -- `boeing_737ng_acap_rev_c` 2.1.2 (737-700) | 137 | **37,648** | OEW | `boeing_737ng_acap_rev_c` |  |
+| B737 | 5537 | 130 / 130 / 130 | 145,600 (rejected) | 58,604 | no speed published; MLW 58,604 kg (this is the value carried as `malw_kg`; the FAA cell is the 737-7's 66,043 kg) -- `boeing_737ng_acap_rev_c` 2.1.2 (737-700) | 137 | **37,648** | OEW | `boeing_737ng_acap_rev_c` | **FAA MALW cell is wrong** (the 737-7's, `boeing_737max_acap_rev_k` 2.1.1), Boeing value used since 2026-09-26 |
 | B738 | 4963 | 144 / 140 / 144 | 146,275 | 66,349 | no speed published; MLW 66,360 kg (FAA MALW is 11 kg lower) -- `boeing_737ng_acap_rev_c` 2.1.3 (737-800) | 147 | **41,412** | OEW | `boeing_737ng_acap_rev_c` | dual FSB value |
 | E75L | 3401 | 126 / 126 / 126 | 74,957 | 34,000 | no speed published; MLW 34,000 kg (same weight as the FAA MALW, +0 kg conversion rounding) -- `embraer_e175_apm` Table 2.1 | - | **21,500** | BOW | `embraer_e175_apm` | no EUROCONTROL entry |
 | B739 | 2249 | 149 / 140 / 149 | 71400 (rejected) | 71,350 | no speed published; MLW 71,350 kg (this is the value carried as `malw_kg`) -- `boeing_737ng_acap_rev_c` 2.1.5 (737-900ER) | 150 | **42,900** | OEW | `boeing_737ng_acap_rev_c` | **FAA MALW cell is wrong**, Boeing value used; dual FSB value |
@@ -1151,7 +1151,7 @@ the number as settled. All values in knots IAS at the respective maximum landing
 
 | type | FAA | other source | value | difference | remark |
 |---|---:|---|---:|---:|---|
-| B737 | 130 | `eurocontrol_apd` | 137 | -7 | the FAA MALW for B737 (145,600 lb) also matches no published Boeing 737-700 or BBJ landing weight, so this row is doubly suspect |
+| B737 | 130 | `eurocontrol_apd` | 137 | -7 | the FAA MALW for B737 (145,600 lb) also matches no published Boeing 737-700 or BBJ landing weight, so this row is doubly suspect (it is the 737-7's; since 2026-09-26 the JSON carries Boeing's 737-700 58,604 kg) |
 | CRJ9 | 141 | `eurocontrol_apd` | 135 | +6 | the FAA value is the AAC-D Long Range figure; the CRJ900 APM graph reading (139.5 kt at 33,340 kg, flaps 45) sits between the FAA 141 kt and the EUROCONTROL 135 kt |
 | A20N | 137 | `airbus_ac_a320_0624` | 131.5 | +5.5 | Airbus publishes 131.5 kt at MLW 67,400 kg for the A320neo and the FAA MALW is the same weight, so the 5.5 kt gap is a genuine source disagreement, not a weight difference |
 | B752 | 137 | `eurocontrol_apd` | 130 | +7 | EUROCONTROL's B752 MTOW (115,680 kg) is the high-gross-weight 757-200; its Vat is nevertheless 7 kt below the FAA figure |
