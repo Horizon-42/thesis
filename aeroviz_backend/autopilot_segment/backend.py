@@ -6,6 +6,9 @@ The page's own numbers decide, not the order requests happen to arrive in.
 
 Which flight: the request names a Training set (``airport``, ``setId``) and a flight of it (``flightKey``); the set's
 sample (under the frontend's airports root) names the artefact it was exported from and the split it was drawn from.
+Which sentence: ``sentence`` is null for the flight's labelled sentence (the truth), or a model's own sentence of it
+(`segment.model_sentence`: the prior's free generation, one sample, as the Training view read it from its overlay) —
+the words are the request's; nothing precomputed is read.
 Its spec is the ONE executor spec this code accepts for the artefact (`replay.open_executor`), looked up again whenever
 a spec is added, moved or rewritten.
 """
@@ -30,6 +33,7 @@ from ts_transformer.repo_layout import COMPARISON_AIRPORTS_ROOT, OPT_OUTPUTS_ROO
 from aeroviz_backend.autopilot_segment.errors import NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import FlightContext, fly_segment, open_flight
 from aeroviz_backend.autopilot_segment.payload import SCHEMA, segment_payload
+from aeroviz_backend.autopilot_segment.segment import model_sentence
 
 #: Where executor specs are written (`run_ts.py executor_spec --dir`): each is a directory holding ``spec.json``.
 DEFAULT_EXECUTOR_ROOT = OPT_OUTPUTS_ROOT / "POOLED" / "executor"
@@ -47,7 +51,8 @@ def _field(record: dict[str, Any], name: str) -> Any:
 
 
 class AutopilotSegmentBackend:
-    """``fly(payload)`` for ``POST /autopilot/segment``: ``{clientId, seq, airport, setId, flightKey, column, row}``."""
+    """``fly(payload)`` for ``POST /autopilot/segment``: ``{clientId, seq, airport, setId, flightKey, column, row,
+    sentence}``."""
 
     def __init__(self, *, airports_root: Path = COMPARISON_AIRPORTS_ROOT,
                  executor_root: Path = DEFAULT_EXECUTOR_ROOT) -> None:
@@ -133,6 +138,7 @@ class AutopilotSegmentBackend:
         flight_key = str(_field(payload, "flightKey"))
         column_name = _field(payload, "column")
         row = _field(payload, "row")
+        sentence = _field(payload, "sentence")
         if column_name not in COLUMNS:
             raise RequestRefused(f"column {column_name!r} is none of {COLUMNS}")
         if not isinstance(row, int) or isinstance(row, bool):
@@ -154,8 +160,10 @@ class AutopilotSegmentBackend:
             directory, params, record, words = self.executor_for(artefact)
             opening = time.perf_counter()
             context, kept = self.flight(artefact, split, dataset_id, words)
+            model = None if sentence is None else model_sentence(sentence, words, len(context.geometry.candidates),
+                                                                 len(context.reading.words), params.timeout_factor)
             opened = time.perf_counter()
-            result = fly_segment(context, params, words, COLUMNS.index(column_name), row, superseded)
+            result = fly_segment(context, params, words, COLUMNS.index(column_name), row, superseded, model)
             answering = time.perf_counter()
             body = segment_payload(result, context, words)
             finished = time.perf_counter()

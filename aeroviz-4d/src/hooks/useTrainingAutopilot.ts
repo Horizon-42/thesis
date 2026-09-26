@@ -6,9 +6,10 @@
  * and reset with the flight (`AppContext`) — is flown by the backend the moment it is picked, and the answer is published
  * as `trainingAutopilot` for the sentence bar, the read-back window and 3D.
  *
- * EVERY PICK IS FLOWN AGAIN: nothing is cached here and no overlay is read — the point is to see what the executor does
- * now. The cursor asks nothing (the charts move it on hover); a new pick, or a new attempt at the same one ("Fly again",
- * `nextPick`), does. A request still in flight when the pick moves is aborted, and an answer to anything but the current
+ * EVERY PICK IS FLOWN AGAIN: nothing is cached here — the point is to see what the executor does now. A MODEL's word
+ * (`TrainingPick.source`) is asked with the model's words as the view read them (its sample's sentence): the backend flies
+ * them, it reads no overlay. The cursor asks nothing (the charts move it on hover); a new pick, or a new attempt at the
+ * same one ("Fly again", `nextPick`), does. A request still in flight when the pick moves is aborted, and an answer to anything but the current
  * pick is never published.
  */
 
@@ -21,17 +22,23 @@ import {
   trainingAutopilotRequest,
   type TrainingAutopilotRequest,
 } from "../data/trainingAutopilot";
+import { generationOnScreen } from "../data/trainingOverlays";
 
 export default function useTrainingAutopilot(backendUrl: string = AEROVIZ_BACKEND_URL): void {
-  const { trainingSelection, trainingPick, setTrainingAutopilot } = useApp();
+  const { trainingSelection, trainingPick, setTrainingAutopilot, trainingGenerations } = useApp();
   // The answer is read against the flight on screen; the pick is reset with it, so the latest is the one asked about.
   const selection = useRef(trainingSelection);
   selection.current = trainingSelection;
 
-  // The segment picked and the attempt at it, as a key.
-  const key = useMemo(() => (trainingSelection === null || trainingPick === null ? null
-    : JSON.stringify({ request: trainingAutopilotRequest(trainingSelection, trainingPick), attempt: trainingPick.attempt })),
-  [trainingSelection, trainingPick]);
+  // The segment picked and the attempt at it, as a key — a model's word with the sentence it is a word of (none, when
+  // the model's overlay is no longer published for the flight: nothing is asked).
+  const key = useMemo(() => {
+    if (trainingSelection === null || trainingPick === null) return null;
+    const sentence = trainingPick.source === null ? null
+      : generationOnScreen(trainingGenerations, trainingPick.source, trainingSelection)?.sentence ?? null;
+    if (trainingPick.source !== null && sentence?.sample !== trainingPick.source.sample) return null;
+    return JSON.stringify({ request: trainingAutopilotRequest(trainingSelection, trainingPick, sentence), attempt: trainingPick.attempt });
+  }, [trainingSelection, trainingPick, trainingGenerations]);
 
   useEffect(() => {
     if (key === null) {

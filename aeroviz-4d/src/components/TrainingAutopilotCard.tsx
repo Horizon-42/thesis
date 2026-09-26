@@ -22,12 +22,15 @@ import {
   autopilotColour,
   autopilotHasLine,
   autopilotOnScreen,
+  autopilotSampleGap,
   autopilotWord,
   nextPick,
+  requestSource,
   TRAINING_AUTOPILOT_SEGMENT_END,
   type TrainingAutopilotSegment,
   type TrainingAutopilotView,
 } from "../data/trainingAutopilot";
+import { sourceOnScreen } from "../data/trainingOverlays";
 import type { TrainingSelection } from "../data/trainingSample";
 import {
   checkText,
@@ -107,8 +110,13 @@ export function TrainingAutopilotStatus({ view, selection }: { view: TrainingAut
 }
 
 export default function TrainingAutopilotCard() {
-  const { trainingSelection: selection, trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick } = useApp();
-  const view = autopilotOnScreen(trainingAutopilot, selection);
+  const {
+    trainingSelection: selection, trainingAutopilot, replayTrainingAutopilot, trainingPick, setTrainingPick, trainingGenerations,
+    trainingSource,
+  } = useApp();
+  // the answer of the sentence read — and, for a model's word, the sample it re-flies
+  const read = sourceOnScreen(trainingGenerations, trainingSource, selection);
+  const view = autopilotOnScreen(trainingAutopilot, selection, read.source);
   if (view === null || selection === null) return null;
   const word = autopilotWord(view.request, selection);
   if (view.status === "flying") {
@@ -118,7 +126,7 @@ export default function TrainingAutopilotCard() {
     return (
       <ProblemBox title={`The autopilot did not fly ${word} from step ${view.request.row}.`} detail={view.problem}>
         <button type="button" className="training-autopilot-button"
-          onClick={() => setTrainingPick(nextPick(trainingPick, view.request.column, view.request.row))}>
+          onClick={() => setTrainingPick(nextPick(trainingPick, requestSource(view.request), view.request.column, view.request.row))}>
           Fly again
         </button>
       </ProblemBox>
@@ -127,6 +135,8 @@ export default function TrainingAutopilotCard() {
   const { segment } = view;
   const { end } = segment;
   const colour = autopilotColour(segment);
+  // a model's word re-flies its sample: how closely the live flight lands on it
+  const gap = read.sentence === null ? null : autopilotSampleGap(segment, read.sentence);
   const bound = Object.entries(segment.limits.bound).filter(([, cycles]) => cycles > 0);
   return (
     <section className="training-autopilot-card" aria-label="The autopilot, live" style={{ borderLeftColor: colour }}>
@@ -142,7 +152,9 @@ export default function TrainingAutopilotCard() {
         <div className="training-autopilot-time" aria-label="Simulated flight time">
           <span className="training-autopilot-time-label">Simulated flight</span>
           <span className="training-autopilot-time-value">{formatElapsed(end.flownS)}</span>
-          <span className="training-autopilot-time-note">observed {formatElapsed(segment.segment.observedS)}</span>
+          <span className="training-autopilot-time-note">
+            {segment.segment.observedS === null ? "a model's word" : `observed ${formatElapsed(segment.segment.observedS)}`}
+          </span>
         </div>
         <div className="training-autopilot-time" aria-label="Computation time">
           <span className="training-autopilot-time-label">Computed in</span>
@@ -150,6 +162,13 @@ export default function TrainingAutopilotCard() {
           <span className="training-autopilot-time-note">round trip {formatElapsed(view.roundTripS)}</span>
         </div>
       </div>
+      {gap !== null ? (
+        <p className="training-autopilot-sample" title={`the live flight against the exported sample ${read.sentence!.sample + 1}, ` +
+          `at the ${gap.points} times both hold a point: the executor is deterministic, so they are one flight`}>
+          {gap.gapM < 0.5 ? "✓ the sample's own flight" : "✗ not the sample's flight"} — {gap.gapM.toFixed(gap.gapM < 10 ? 2 : 0)} m
+          at most from sample #{read.sentence!.sample + 1} over {gap.points} points
+        </p>
+      ) : null}
       {segment.word.checks.length ? (
         <ul className="training-autopilot-checks">
           {segment.word.checks.map((check) => (
@@ -160,8 +179,12 @@ export default function TrainingAutopilotCard() {
       <details className="training-autopilot-details">
         <summary>Details</summary>
         <p>
-          From the observed state at step {segment.segment.row}, told the six words in force there and then the sentence's
-          words as the observed aircraft heard them: {endText(segment)}.
+          {segment.source.kind === "truth"
+            ? `From the observed state at step ${segment.segment.row}, told the six words in force there and then the sentence's ` +
+              "words as the observed aircraft heard them"
+            : `The model's sentence flown again from its first step (${segment.source.firstRow}), from the observed state there, ` +
+              `each word heard at the step it was said, as its free generation flew it; shown from step ${segment.segment.row}`}
+          : {endText(segment)}.
           {end.offsetFromObserved === null ? "" : ` There it was ${end.offsetFromObserved.horizontalM.toFixed(0)} m from the ` +
             `observed aircraft, ${Math.abs(end.offsetFromObserved.aboveM).toFixed(0)} m ${end.offsetFromObserved.aboveM >= 0
               ? "above" : "below"} it, ${Math.abs(end.offsetFromObserved.groundSpeedMps).toFixed(1)} m/s ` +
@@ -170,6 +193,8 @@ export default function TrainingAutopilotCard() {
         </p>
         <p>
           {segment.limits.cycles} cycles of {segment.executor.cycleS} s judged
+          {segment.source.kind === "truth" ? "" : ` — the model's whole flight from its first step (${segment.source.firstRow}), ` +
+            "not only this word's segment"}
           {bound.length ? `; limits bound: ${bound.map(([name, cycles]) => `${name.replace(/_/g, " ")} ${cycles}`).join(", ")}` : "; no limit bound"}.
         </p>
         <p>Computed: {timingText(segment, view.roundTripS)}.</p>

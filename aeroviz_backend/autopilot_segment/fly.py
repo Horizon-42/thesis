@@ -7,6 +7,13 @@ time, driven exactly as `executor.fly` drives it — the spec's word clock read 
 on the cycle that starts it (`sentence.row_at`, as `judge.words_said` reads the clock) — and stopped at the segment's
 stop: nothing past it is flown. The executor starts from the observed aircraft's state at the segment's first step (the
 data plane's flight first seen there, `dataset.series_from_row`).
+
+A MODEL's word (`segment.model_segment`) is flown as the prior's free generation flew it
+(`experiments.prior_free_generation.speak_and_fly`): from the observed state at the sentence's first step, each word
+heard at the step it was said (the time clock: `ClosedLoop.step` tells step k's words on its first cycle), under the
+same time limit — the observed flight's remaining time from that step × the spec's timeout factor (`limits_s`) — and
+judged against the runway the model points at, not the observed one. The executor is deterministic, so the flight is
+the exported sample's own, which the frontend checks point for point.
 """
 
 from __future__ import annotations
@@ -36,8 +43,10 @@ from ts_transformer.instructions.signals import FlightSignals
 from ts_transformer.instructions.training_files import require_stored_sentence, stored_sentence
 from ts_transformer.instructions.words import Words
 
-from aeroviz_backend.autopilot_segment.errors import NotFlyable, Superseded
-from aeroviz_backend.autopilot_segment.segment import Segment, segment_of, segment_reading, segment_signals
+from aeroviz_backend.autopilot_segment.errors import NotFlyable, RequestRefused, Superseded
+from aeroviz_backend.autopilot_segment.segment import (
+    ModelSentence, Segment, judged_reading, model_reading, model_segment, segment_of, segment_reading, segment_signals,
+)
 
 DEVICE = torch.device("cpu")
 
@@ -105,31 +114,41 @@ def fly_until(executor: Executor, sentences: Sentences, clock: TimeClock | Dista
     return False
 
 
-def segment_batch(context: FlightContext, segment: Segment) -> replay.Batch:
-    """The segment as the replay's batch of one: its reading and observed rows, the flight from its first step."""
-    return replay.Batch(signals=[segment_signals(context.signals, segment)],
-                        series=[series_from_row(context.series, segment.row)],
-                        readings=[segment_reading(context.reading, segment)], geometries=[context.geometry],
+def segment_batch(context: FlightContext, segment: Segment, reading: Reading, signals: FlightSignals) -> replay.Batch:
+    """The segment as the replay's batch of one: its reading and observed rows, the flight from the step the executor
+    starts at."""
+    return replay.Batch(signals=[signals], series=[series_from_row(context.series, segment.start_row)],
+                        readings=[reading], geometries=[context.geometry],
                         crossing_heights=[context.crossing_heights], approach_ias_mps=[context.approach_ias_mps],
                         groups=[context.group], drawn={})
 
 
+def model_time_limit_s(context: FlightContext, first_row: int, params: ExecutorParams, step_s: float) -> float:
+    """A model's flight's time limit: the observed flight's remaining time from the sentence's first step × the spec's
+    timeout factor. MIRROR of `experiments.prior_free_generation.limits_s` (a runner the backend does not import; pinned
+    by `test_autopilot_segment.ModelSegmentTest`)."""
+    return (len(context.reading.words) - first_row) * step_s * params.timeout_factor
+
+
 def fly_batch_until(batch: replay.Batch, params: ExecutorParams, words: Words, stop_steps: int | None,
-                    superseded: Callable[[], bool]) -> tuple[Flown, bool, float]:
+                    superseded: Callable[[], bool], *, model_limit_s: float | None = None) -> tuple[Flown, bool, float]:
     """``batch``'s one sentence flown to ``stop_steps`` (or its outcome): the flown record, whether it stopped there,
     and the executor's own wall time. The setup is `replay.fly_sentences`' — its time limit, runways, charts, approach
     speeds and word clock — with the executor stepped here (`fly_until`) in place of `executor.fly`: the setup is pinned
-    against it by `test_autopilot_segment.SetupTest`, the stepping by `StepperTest`."""
+    against it by `test_autopilot_segment.SetupTest`, the stepping by `StepperTest`. ``model_limit_s``: a model's
+    sentence, flown as its free generation flew it — its time limit, and every word heard at its own step (the time
+    clock) — None for the truth."""
     spec, f64 = words.spec, torch.float64
     (reading,) = batch.readings
+    limit_s = len(reading.words) * spec.step_s * params.timeout_factor if model_limit_s is None else model_limit_s
     executor = Executor(batch.inputs(DEVICE),
                         Runways.of(batch.geometries, batch.crossing_heights, dtype=f64, device=DEVICE),
                         AirportCharts.of(batch.geometries, dtype=f64, device=DEVICE),
                         torch.tensor(batch.approach_ias_mps, dtype=f64, device=DEVICE), params, words,
-                        time_limit_s=torch.tensor([len(reading.words) * spec.step_s * params.timeout_factor], dtype=f64,
-                                                  device=DEVICE))
+                        time_limit_s=torch.tensor([limit_s], dtype=f64, device=DEVICE))
     sentences = Sentences([reading.words], words, device=DEVICE)
-    clock = replay.word_clock(batch, params, spec.step_s, DEVICE)
+    clock = (replay.word_clock(batch, params, spec.step_s, DEVICE) if model_limit_s is None
+             else TimeClock(params.cycle_s))
     started = time.perf_counter()
     reached = fly_until(executor, sentences, clock, spec.step_s, stop_steps, superseded)
     fly_s = time.perf_counter() - started
@@ -144,7 +163,8 @@ def fly_batch_until(batch: replay.Batch, params: ExecutorParams, words: Words, s
 class FlownSegment:
     segment: Segment
     reading: Reading                 # the segment's: the sentence the executor was told
-    signals: FlightSignals           # the observed rows its clock read
+    signals: FlightSignals           # the observed rows from where it started (its clock read the truth's)
+    model: ModelSentence | None      # the model's sentence flown, or None for the truth's
     flown: Flown                     # to its stop, or its outcome
     verdict: Verdict
     reached_end: bool | None         # None when flown to its outcome (``stop_row`` is the sentence's end)
@@ -153,16 +173,36 @@ class FlownSegment:
 
 
 def fly_segment(context: FlightContext, params: ExecutorParams, words: Words, column: int, row: int,
-                superseded: Callable[[], bool]) -> FlownSegment:
-    """``column``'s word said at ``row`` flown from the observed state there, and judged."""
+                superseded: Callable[[], bool], model: ModelSentence | None = None) -> FlownSegment:
+    """``column``'s word said at ``row`` flown and judged: the truth's from the observed state there; a model's
+    (``model``) as its sentence was flown, from its first step (`segment.model_segment`)."""
     spec = words.spec
-    segment = segment_of(context.reading, column, row, spec.rows_exact(spec.heading_lead_s))
-    batch = segment_batch(context, segment)
-    flown, reached, fly_s = fly_batch_until(batch, params, words, None if segment.to_landing else segment.stop_row - segment.row,
-                                            superseded)
-    (reading,), (signals,) = batch.readings, batch.signals
+    lead = spec.rows_exact(spec.heading_lead_s)
+    if model is None:
+        segment = segment_of(context.reading, column, row, lead)
+        reading, signals = segment_reading(context.reading, segment), segment_signals(context.signals, segment)
+        limit_s = None
+    else:
+        if context.group != replay.OWN:
+            raise RequestRefused(f"a model's sentences are flown on the flight's own dynamics only, as its free generation "
+                                 f"flies them: this flight flies on {context.group}")
+        segment = model_segment(model, column, row, lead, words)
+        reading = model_reading(context.signals, segment, words)
+        # the judge reads the flown track against the runway the MODEL points at (the observed rows name the observed one)
+        signals = replace(segment_signals(context.signals, segment),
+                          runway=context.geometry.candidates[reading.runway_index].ident)
+        limit_s = model_time_limit_s(context, model.first_row, params, spec.step_s)
+    batch = segment_batch(context, segment, reading, signals)
+    flown, reached, fly_s = fly_batch_until(batch, params, words,
+                                            None if segment.to_landing else segment.stop_row - segment.start_row,
+                                            superseded, model_limit_s=limit_s)
     started = time.perf_counter()
-    verdict = judge(flown, 0, context.geometry, reading.runway_index, reading, signals, spec, words)
-    return FlownSegment(segment=segment, reading=reading, signals=signals, flown=flown, verdict=verdict,
+    verdict = judge(flown, 0, context.geometry, reading.runway_index, judged_reading(reading, segment), signals, spec, words)
+    # a word said as or after the flight ended has nothing flown after it — the sentence bar offers it no Fly (its step's
+    # time is not before the sample's end); at a crossing or failure the judge does not even read its step
+    if model is not None and verdict.end_row <= segment.word_step * int(round(spec.step_s / flown.cycle_s)):
+        raise RequestRefused(f"the model's flight had ended ({verdict.outcome}, {verdict.end_row * flown.cycle_s:g} s after "
+                             f"step {segment.start_row}) by the time it said this word at step {row}")
+    return FlownSegment(segment=segment, reading=reading, signals=signals, model=model, flown=flown, verdict=verdict,
                         reached_end=None if segment.to_landing else reached, fly_s=fly_s,
                         judge_s=time.perf_counter() - started)

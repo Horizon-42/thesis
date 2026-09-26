@@ -9,13 +9,15 @@
  * first where one is said — except the vectored flight's heading turn at step 10, where it ranks 185° above 180°.
  */
 
-import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256 } from "../trainingSample";
+import { TRAINING_COLUMNS, TRAINING_SPEC_SHA256, type TrainingSample } from "../trainingSample";
 import {
+  parseTrainingGenerationOverlay,
   parseTrainingOverlays,
   TRAINING_EXECUTOR_SCHEMA,
   TRAINING_GENERATION_SCHEMA,
   TRAINING_OVERLAYS_SCHEMA,
   TRAINING_PRIOR_SCHEMA,
+  type TrainingGenerationView,
   type TrainingOverlayEntry,
 } from "../trainingOverlays";
 import { MOCK_ROWS, SET_ID, STRAIGHT_KEY, VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
@@ -231,14 +233,21 @@ export function mockGenerationEntry(id: string): TrainingOverlayEntry {
   return parsed.value.overlays.find((item) => item.id === id)!;
 }
 
+/** Where every sample of these fixtures is at ``at`` seconds: one straight descending line. */
+export function mockGeneratedPoint(at: number): { lon: number; lat: number; altitudeM: number } {
+  return { lon: -78.8 + at * 1e-4, lat: 35.87, altitudeM: 1200 - at * 5 };
+}
+
 /** A flown track from the first predicted row's time to ``endS``, every 2 s step (the last point where it ended). */
 function generatedTrack(endS: number) {
   const tS: number[] = [];
   for (let at = MOCK_GENERATION_FIRST_ROW * 2; at < endS; at += 2) tS.push(at);
   tS.push(endS);
+  const points = tS.map(mockGeneratedPoint);
   return {
-    tS, lon: tS.map((at) => -78.8 + at * 1e-4), lat: tS.map(() => 35.87), altitudeM: tS.map((at) => 1200 - at * 5),
-    altitudeHaeM: tS.map((at) => 1167 - at * 5), groundSpeedMps: tS.map(() => 70),
+    tS, lon: points.map((point) => point.lon), lat: points.map((point) => point.lat),
+    altitudeM: points.map((point) => point.altitudeM), altitudeHaeM: points.map((point) => point.altitudeM - 33),
+    groundSpeedMps: tS.map(() => 70),
   };
 }
 
@@ -304,4 +313,17 @@ export function mockGenerationOverlay(id: string, postTrained = false): Record<s
       { flightKey: STRAIGHT_KEY, datasetId: `KXXX:${STRAIGHT_KEY}`, group: "stand-in dynamics", flown: false, samples: [] },
     ],
   };
+}
+
+/** Both models' sentences over ``sample`` read as the panel publishes them, for the flight at ``position`` (``change``: of
+ *  each raw payload first). */
+export function mockGenerationViews(sample: TrainingSample, position = 0,
+  change: (raw: any) => void = () => undefined): TrainingGenerationView[] {
+  return ([[BASE_MODEL_ID, false], [POST_TRAINED_ID, true]] as const).map(([id, post]) => {
+    const raw = mockGenerationOverlay(id, post);
+    change(raw);
+    const overlay = parseTrainingGenerationOverlay(raw, mockGenerationEntry(id), sample);
+    if (!overlay.ok) throw new Error(overlay.problem);
+    return { overlay: overlay.value, flight: overlay.value.flights[position] };
+  });
 }

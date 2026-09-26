@@ -16,6 +16,8 @@ const {
     // no word selected: the live executor asks for nothing
     trainingSelection: null, trainingColumn: null, trainingAutopilot: null, trainingPick: null,
     trainingAutopilotAuto: true, trainingSource: null as unknown,
+    // the models' sentences the panel publishes go to the mocked setter: the card reads none
+    trainingGenerations: [] as unknown[],
   },
   setTrainingGenerations: vi.fn(),
   setTrainingSource: vi.fn(),

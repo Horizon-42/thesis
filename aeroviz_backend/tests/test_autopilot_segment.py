@@ -21,9 +21,12 @@ from aeroviz_backend.autopilot_segment.backend import FLIGHT_CACHE_SIZE, Autopil
 from aeroviz_backend.autopilot_segment.errors import NotFlyable, NotListed, RequestRefused, Superseded
 from aeroviz_backend.autopilot_segment.fly import FlightContext, FlownSegment, fly_batch_until, fly_until
 from aeroviz_backend.autopilot_segment.payload import (
-    SCHEMA, SEGMENT_END, band_cut_by_stop, heading_facts, segment_payload, track_payload,
+    SCHEMA, SEGMENT_END, band_cut_by_stop, heading_facts, heading_payload, segment_payload, track_payload,
 )
-from aeroviz_backend.autopilot_segment.segment import segment_of, segment_reading, segment_signals, told_words
+from aeroviz_backend.autopilot_segment.segment import (
+    ModelSentence, judged_reading, model_reading, model_segment, model_sentence, model_steps_max, segment_of,
+    segment_reading, segment_signals, sentence_instructions, told_words,
+)
 from aeroviz_backend.autopilot_segment.verdict import STATUSES, HeadingFacts, selected_heading, word_verdict
 from aeroviz_backend.http_server import AeroVizBackendApp
 from aeroviz_backend.paths import REPO_ROOT
@@ -380,7 +383,7 @@ class WordVerdictTest(unittest.TestCase):
         def facts(cycles: list[int], end_row: int) -> HeadingFacts:
             off = torch.zeros(1, 10, dtype=torch.bool)
             off[0, cycles] = True
-            result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None,
+            result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, model=None,
                                   flown=replace(run, modes={**run.modes, "intercepting_off_word": off}),
                                   verdict=Verdict("timeout", end_row, None, {}, {}, flown_rows=end_row + 1),
                                   reached_end=True, fly_s=0.0, judge_s=0.0)
@@ -429,7 +432,7 @@ class WordVerdictTest(unittest.TestCase):
 
     def test_the_selected_heading_word_is_the_one_told_at_step_0(self):
         judged = {"heading": [{"row": 3, "rows": 0, "inside": 0}, {"row": 0, "rows": 5, "inside": 2}]}
-        self.assertEqual(selected_heading(judged), {"row": 0, "rows": 5, "inside": 2})
+        self.assertEqual(selected_heading(judged, 0), {"row": 0, "rows": 5, "inside": 2})
 
 
 def geometry() -> AirportGeometry:
@@ -438,6 +441,18 @@ def geometry() -> AirportGeometry:
         "candidates": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0,
                         "elevation_m": 100.0, "length_m": 3000.0}],
         "runway_ends": [{"ident": "09", "threshold_e_m": 0.0, "threshold_n_m": 0.0, "course_deg": 90.0}],
+    })
+
+
+def geometry2() -> AirportGeometry:
+    """`geometry` with a second runway, 27, for a model that changes its runway."""
+    return AirportGeometry.from_dict({
+        "code": "KXXX", "reference": {"lat": 35.0, "lon": -78.0, "elevation_m": 100.0},
+        "candidates": [{"ident": ident, "threshold_e_m": east, "threshold_n_m": 0.0, "course_deg": course,
+                        "elevation_m": 100.0, "length_m": 3000.0}
+                       for ident, east, course in (("09", 0.0, 90.0), ("27", 3000.0, 270.0))],
+        "runway_ends": [{"ident": ident, "threshold_e_m": east, "threshold_n_m": 0.0, "course_deg": course}
+                        for ident, east, course in (("09", 0.0, 90.0), ("27", 3000.0, 270.0))],
     })
 
 
@@ -455,7 +470,7 @@ class TrackTest(unittest.TestCase):
         commands[0, :, 1] = np.radians(10.0)
         run = replace(base, states=states, commands=commands)
         segment = segment_of(reading(), HEADING, 3, LEAD)
-        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
+        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, model=None, flown=run,
                               verdict=Verdict(outcome, cycles, None, {}, None, flown_rows=cycles + 1), reached_end=True,
                               fly_s=0.1, judge_s=0.01)
         # the observed smoothed track reads 450° (one turn up) and has flown 1200 m by step 3
@@ -504,7 +519,7 @@ class PayloadTest(unittest.TestCase):
                   "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0},
                   "vertical": [{"row": 0, "rows": 4, "inside": 4, "contained": True, "target_m": 1110.0}], "speed": []}
         limits = {"cycles": {"cycles": cycles}, "bank_rate": {"cycles": 2}, "bank_cap": {"cycles": 0}}
-        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
+        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, model=None, flown=run,
                               verdict=Verdict(outcome, cycles, None, limits, judged, flown_rows=cycles + 1),
                               reached_end=reached, fly_s=0.1, judge_s=0.01)
         context = FlightContext(signals=signals10(), series=None, reading=reading(), geometry=geometry(),
@@ -535,7 +550,7 @@ class PayloadTest(unittest.TestCase):
         run = replace(flown([float(c) for c in range(cycles)], cycles - 1), states=states)
         judged = {"heading": [{"row": 0, "rows": 4, "inside": 4}], "capture_turn": None, "intercepting_off_word_cycles": 0,
                   "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0}, "vertical": [], "speed": []}
-        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, flown=run,
+        result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, model=None, flown=run,
                               verdict=Verdict("dynamics_failure", cycles, None, {"cycles": {"cycles": cycles}}, judged,
                                               flown_rows=cycles + 1),
                               reached_end=False, fly_s=0.1, judge_s=0.01)
@@ -565,7 +580,7 @@ class PayloadTest(unittest.TestCase):
             judged = {"heading": [{"row": 0, "rows": band_rows, "inside": band_rows}], "capture_turn": None,
                       "intercepting_off_word_cycles": 0,
                       "corridor": {"cleared": False, "entered": False, "rows": 0, "inside": 0}, "vertical": [], "speed": []}
-            result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None,
+            result = FlownSegment(segment=segment, reading=segment_reading(reading(), segment), signals=None, model=None,
                                   flown=flown(executor.heard, executor.count - 1),
                                   verdict=Verdict(outcome, executor.count, None, {}, judged, flown_rows=executor.count + 1),
                                   reached_end=reached, fly_s=0.0, judge_s=0.0)
@@ -690,7 +705,8 @@ class BackendTest(unittest.TestCase):
 
     def test_a_request_names_a_column_and_an_integer_step(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
-        request = {"clientId": "page", "seq": 1, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading", "row": 3}
+        request = {"clientId": "page", "seq": 1, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading", "row": 3,
+                   "sentence": None}
         with self.assertRaisesRegex(RequestRefused, "none of"):
             backend.fly({**request, "column": "track"})
         with self.assertRaisesRegex(RequestRefused, "integer step"):
@@ -706,7 +722,7 @@ class BackendTest(unittest.TestCase):
     def test_a_page_s_later_request_supersedes_its_earlier_ones_whatever_order_they_arrive_in(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
         request = {"clientId": "page", "seq": 2, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading",
-                   "row": 3}
+                   "row": 3, "sentence": None}
         with self.assertRaises(NotListed):                     # it goes on (and finds no Training export here)
             backend.fly(request)
         # the page's request 1 arrives after its request 2: refused at once
@@ -719,7 +735,7 @@ class BackendTest(unittest.TestCase):
     def test_a_later_request_supersedes_one_still_waiting(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
         request = {"clientId": "page", "seq": 1, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading",
-                   "row": 3}
+                   "row": 3, "sentence": None}
 
         class Flying:
             """Another segment flying: while this request waits for it, the page sends ``newer_from``'s request 2."""
@@ -745,10 +761,10 @@ class BackendTest(unittest.TestCase):
     def test_the_flight_is_asked_each_cycle_whether_a_later_request_came_in(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
         request = {"clientId": "page", "seq": 1, "airport": "KXXX", "setId": "a_set", "flightKey": "F", "column": "heading",
-                   "row": 3}
+                   "row": 3, "sentence": None}
         asked: list[bool] = []
 
-        def flying(context, params, words, column, row, superseded):
+        def flying(context, params, words, column, row, superseded, model):
             asked.append(superseded())
             backend._claim("another page", 7)                  # another page's request: not this page's
             asked.append(superseded())
@@ -806,6 +822,370 @@ def ts_constant(path: Path, name: str):
     if match is None:
         raise AssertionError(f"{path.name} has no {name}")
     return json.loads(re.sub(r",\s*\]", "]", match.group(1)))
+
+
+# ---- a MODEL's word: its own sentence, flown again from its first step
+def model_record(**changes) -> dict:
+    """A model's sentence of a 20-step flight, from step 8 (every column said there): a heading word at 10, the clearance
+    at 12, another heading word at 14, a runway change at 15, the speed left to the pilot at 16; it ends at step 18."""
+    events = [{"row": 8, "column": column, "value": value} for column, value in enumerate([0, 0, 10, 7, 0, 4])]
+    events += [{"row": 10, "column": HEADING, "value": 12}, {"row": 12, "column": APPROACH, "value": 1},
+               {"row": 14, "column": HEADING, "value": 14}, {"row": 15, "column": RUNWAY, "value": 1},
+               {"row": 16, "column": SPEED, "value": 9}]
+    return {"overlayId": "generation_x", "sample": 2, "firstRow": 8, "rows": 18, "events": events, **changes}
+
+
+MODEL_WORDS = SimpleNamespace(
+    class_counts=lambda: {"approach": 3, "heading": 72, "altitude": 182, "angle": 6, "speed": 10},
+    heading_deg=lambda value: 5.0 * value, speed_unspecified=9)
+
+
+class ModelSegmentTest(unittest.TestCase):
+    def sentence(self, **changes) -> ModelSentence:
+        return model_sentence(model_record(**changes), MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
+
+    def test_a_models_sentence_is_read_from_its_first_step_at_the_flights_own_steps(self):
+        sentence = self.sentence()
+        self.assertEqual((sentence.overlay_id, sentence.sample, sentence.first_row, sentence.rows), ("generation_x", 2, 8, 18))
+        self.assertEqual(sentence.grid.shape, (10, 6))
+        self.assertEqual(list(sentence.grid[0]), [0, 0, 10, 7, 0, 4])
+        self.assertEqual(sentence.grid[2, HEADING], 12)          # step 10
+        self.assertEqual(sentence.grid[7, RUNWAY], 1)            # step 15
+
+    def test_a_sentence_that_is_not_one_is_refused_by_name(self):
+        record = model_record()
+        cases = [
+            (dict(firstRow=20), "not a step of the observed flight"),
+            (dict(rows=8), "not after its first step"),
+            (dict(events=[*record["events"][1:], record["events"][0]]), "not in (step, column) order"),
+            (dict(events=record["events"][1:]), "does not say every column"),
+            (dict(events=[*record["events"][:6], {"row": 10, "column": HEADING, "value": 72}]), "is not a word of"),
+            (dict(events=[*record["events"][:6], {"row": 18, "column": HEADING, "value": 3}]), "is not a word of"),
+            (dict(events=[*record["events"][:6], {"row": 9, "column": RUNWAY, "value": 2}]), "is not a word of"),
+            (dict(events=[*record["events"][:6], {"row": 9, "column": HEADING}]), "is not {row, column, value}"),
+            (dict(sample=1.5), "must be a whole number"),
+            (dict(overlayId=7), "overlayId must be a string"),
+            # 12 observed steps left from step 8 × 1.5: 1 + 18 steps said at most
+            (dict(rows=8 + 20), "its flight's time limit lets it say 19"),
+        ]
+        for change, message in cases:
+            with self.subTest(change=list(change)), self.assertRaisesRegex(RequestRefused, re.escape(message)):
+                self.sentence(**change)
+        self.assertEqual(self.sentence(rows=8 + 19).rows, 27)
+        with self.assertRaisesRegex(RequestRefused, "has no"):
+            model_sentence({"overlayId": "x"}, MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
+
+    def test_a_models_steps_are_bounded_by_its_free_generations_own_cap(self):
+        from ts_transformer.prior.generate import rows_for
+        from ts_transformer.prior.scene import N_LOOK
+
+        params = SimpleNamespace(timeout_factor=1.5)
+        for observed_rows, first in ((20, 8), (121, 8), (57, 8)):
+            context = FlightContext(signals=None, series=None, reading=SimpleNamespace(words=np.zeros((observed_rows, 6))),
+                                    geometry=None, crossing_heights=(), group="own dynamics", approach_ias_mps=70.0,
+                                    observed_track_deg=None, observed_distance_m=None)
+            limit = fly_module.model_time_limit_s(context, first, params, 2.0)
+            self.assertEqual(model_steps_max(observed_rows, first, 1.5), rows_for(limit, 2.0) - N_LOOK)
+
+    def test_a_models_segment_is_its_sentence_from_its_first_step_to_the_words_stop(self):
+        segment = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)
+        # said at 10, the next heading word at 14, stopped a lead later; the executor starts at the sentence's first step
+        self.assertEqual((segment.row, segment.end_row, segment.stop_row, segment.start_row, segment.to_landing),
+                         (10, 14, 16, 8, False))
+        self.assertEqual(segment.word_step, 2)
+        self.assertEqual(len(segment.grid), 16 - 8 + 1)          # to the stop, and one silent step there
+        self.assertTrue((segment.grid[-1] == U).all())
+        self.assertEqual(segment.selected().value, 12)
+        # the words told: the model's, from its first step, at the flight's steps
+        told = told_words(segment)
+        self.assertEqual(told[0], {"row": 8, "column": RUNWAY, "value": 0})
+        self.assertEqual([(w["row"], w["column"]) for w in told[6:]],
+                         [(10, HEADING), (12, APPROACH), (14, HEADING), (15, RUNWAY)])
+
+    def test_a_models_columns_last_word_is_flown_to_its_outcome_and_a_word_it_did_not_say_is_refused(self):
+        last = model_segment(self.sentence(), SPEED, 16, LEAD, MODEL_WORDS)
+        self.assertEqual((last.stop_row, last.to_landing, len(last.grid)), (18, True, 10))
+        # said at the sentence's last step: the step the flight was still flying in when it ended — flown to its outcome
+        record = model_record()
+        final = model_segment(self.sentence(events=[*record["events"], {"row": 17, "column": ALTITUDE, "value": 5}]),
+                              ALTITUDE, 17, LEAD, MODEL_WORDS)
+        self.assertEqual((final.word_step, final.stop_row, final.to_landing, len(final.grid)), (9, 18, True, 10))
+        with self.assertRaisesRegex(RequestRefused, "says no heading word at step 11"):
+            model_segment(self.sentence(), HEADING, 11, LEAD, MODEL_WORDS)
+        with self.assertRaisesRegex(RequestRefused, "not a step of the model's sentence"):
+            model_segment(self.sentence(), HEADING, 7, LEAD, MODEL_WORDS)
+
+    def test_the_judge_reads_a_models_words_as_it_reads_the_labellers(self):
+        words = sentence_instructions(self.sentence().grid, MODEL_WORDS)
+        clear = [w for w in words if w.column == APPROACH and w.value == 1]
+        self.assertEqual([(w.row, w.kind) for w in clear], [(4, "clear")])
+        self.assertEqual({w.info["target_deg"] for w in words if w.column == HEADING}, {50.0, 60.0, 70.0})
+        self.assertTrue(all(w.kind == "said" for w in words if w.column != APPROACH or w.value != 1))
+
+    def test_a_models_reading_points_at_the_runway_in_force_where_its_segment_stops(self):
+        before = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)       # stops at 16: after the change
+        after = model_segment(self.sentence(), APPROACH, 12, LEAD, MODEL_WORDS)       # to the outcome
+        signals = signals10()
+        self.assertEqual(model_reading(signals, before, MODEL_WORDS).runway_index, 1)
+        early = model_segment(self.sentence(), HEADING, 8, LEAD, MODEL_WORDS)         # stops at 12: before it
+        self.assertEqual(model_reading(signals, early, MODEL_WORDS).runway_index, 0)
+        reading_ = model_reading(signals, after, MODEL_WORDS)
+        self.assertEqual((reading_.join_row, reading_.unspecified_row), (4, 8))
+
+    def test_a_models_time_limit_is_its_free_generations(self):
+        from ts_transformer.experiments.prior_free_generation import limits_s
+        from ts_transformer.prior.scene import N_LOOK
+
+        params = SimpleNamespace(timeout_factor=1.5)
+        truth = SimpleNamespace(words=np.zeros((60, 6)))
+        batch = SimpleNamespace(readings=[truth])
+        context = FlightContext(signals=None, series=None, reading=truth, geometry=None, crossing_heights=(), group="own dynamics",
+                                approach_ias_mps=70.0, observed_track_deg=None, observed_distance_m=None)
+        self.assertEqual(fly_module.model_time_limit_s(context, N_LOOK, params, 2.0), limits_s(batch, params, 2.0)[0])
+
+    def test_a_model_word_is_its_own_step_s_result_in_the_judges_verdict(self):
+        segment = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)
+        judged = verdict(heading=[{"row": 0, "rows": 2, "inside": 2}, {"row": 2, "rows": 4, "inside": 3},
+                                  {"row": 6, "rows": 0, "inside": 0}])
+        body = word_verdict(judged, segment, SPEC, WORDS, HELD)
+        self.assertEqual(body["status"], "outside")
+        self.assertEqual(body["checks"][0]["inside"], 3)
+        self.assertEqual(selected_heading(judged.words, 2), {"row": 2, "rows": 4, "inside": 3})
+
+    def test_an_angle_word_is_judged_on_the_tube_it_anchors_from_its_own_step(self):
+        """The judge counts a tube from its altitude word's step: for a model's angle word said later, the altitude word in
+        force is said again at the angle word's step in the reading the judge reads (never in what the executor flies),
+        and only the tubes from that step count."""
+        record = model_record()
+        events = sorted([*record["events"], {"row": 11, "column": ANGLE, "value": 2}],
+                        key=lambda event: (event["row"], event["column"]))
+        sentence = self.sentence(events=events)
+        angle = model_segment(sentence, ANGLE, 11, LEAD, MODEL_WORDS)
+        flown_reading = model_reading(signals10(), angle, MODEL_WORDS)
+        judged = judged_reading(flown_reading, angle)
+        added = [word for word in judged.instructions if word not in flown_reading.instructions]
+        self.assertEqual([(w.column, w.value, w.row, w.kind) for w in added], [(ALTITUDE, 7, 3, "in force")])
+        self.assertIs(judged.words, flown_reading.words)
+        # the truth's, a model's word at its first step, and a model's altitude word: read as flown
+        truth = segment_of(reading(), ANGLE, 7, LEAD)
+        self.assertIs(judged_reading(segment_reading(reading(), truth), truth).instructions,
+                      segment_reading(reading(), truth).instructions)
+        first = model_segment(sentence, ANGLE, 8, LEAD, MODEL_WORDS)
+        self.assertEqual(len(judged_reading(model_reading(signals10(), first, MODEL_WORDS), first).instructions),
+                         len(first.instructions))
+        # the tubes before the word's step are other angle words': the verdict reads the ones from it on
+        tubes = [{"row": 0, "rows": 3, "inside": 1, "contained": False, "target_m": 1110.0},
+                 {"row": 3, "rows": 4, "inside": 4, "contained": True, "target_m": 1110.0}]
+        body = word_verdict(verdict(vertical=tubes), angle, SPEC, WORDS, None)
+        self.assertEqual((body["status"], [check["rows"] for check in body["checks"]]), ("inside", [4]))
+
+    def test_a_models_second_clearance_is_not_judged_on_the_first_ones_capture(self):
+        record = model_record()
+        events = sorted([*record["events"], {"row": 13, "column": APPROACH, "value": 2},
+                         {"row": 15, "column": APPROACH, "value": 1}], key=lambda event: (event["row"], event["column"]))
+        sentence = self.sentence(events=events)
+        again = model_segment(sentence, APPROACH, 15, LEAD, MODEL_WORDS)
+        body = word_verdict(verdict(capture_turn={"progress_ok": True, "rate_ok": True},
+                                    corridor={"cleared": True, "entered": True, "rows": 5, "inside": 5}),
+                            again, SPEC, WORDS, None)
+        self.assertEqual(body["status"], "not judged")
+        self.assertRegex(body["reason"], "a clearance after an earlier one")
+        first = word_verdict(verdict(capture_turn={"progress_ok": True, "rate_ok": True},
+                                     corridor={"cleared": True, "entered": True, "rows": 5, "inside": 5}),
+                             model_segment(sentence, APPROACH, 12, LEAD, MODEL_WORDS), SPEC, WORDS, None)
+        self.assertEqual(first["status"], "inside")
+
+    def test_a_models_heading_word_is_read_from_its_own_step(self):
+        """Heard at cycle 4 (its step 2 of 1 s cycles, 2 s steps), the next heading word at cycle 12: the cycles it was
+        left to intercept on its own count between; its band starts a lead after its step, in the flight's steps."""
+        segment = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)
+        run = flown([float(c) for c in range(16)], 15)
+        off = torch.zeros(1, 16, dtype=torch.bool)
+        off[0, 3:14] = True
+        judged = verdict(heading=[{"row": 0, "rows": 2, "inside": 2}, {"row": 2, "rows": 4, "inside": 4},
+                                  {"row": 6, "rows": 0, "inside": 0}])
+        result = FlownSegment(segment=segment, reading=model_reading(signals10(), segment, MODEL_WORDS), signals=None,
+                              model=self.sentence(), flown=replace(run, modes={**run.modes, "intercepting_off_word": off}),
+                              verdict=replace(judged, end_row=16), reached_end=True, fly_s=0.0, judge_s=0.0)
+        admitted = SimpleNamespace(smoothed=SimpleNamespace(track_deg=np.full(9, 60.0)))
+        self.assertEqual(heading_facts(result, admitted, SPEC), HeadingFacts(off_word_cycles=8, judged_rows=9))
+        band, track = heading_payload(result, admitted, SPEC, 0.0)
+        self.assertEqual((band["firstRow"], band["stopRow"], band["inside"]), (12, 16, [1, 1, 1, 1]))
+        self.assertEqual(len(track), 9 - 2)                     # the judged track from the word's step on
+
+    def test_a_models_segment_is_returned_from_its_word_on(self):
+        """Eight cycles flown from the sentence's first step (8): the heading word said at 10 starts at cycle 4."""
+        segment = model_segment(self.sentence(), HEADING, 10, LEAD, MODEL_WORDS)
+        cycles = 8
+        states = torch.zeros(1, cycles + 1, 7, dtype=torch.float64)
+        states[0, :, LAT] = 35.0
+        states[0, :, LON] = -78.0 + torch.arange(cycles + 1, dtype=torch.float64) * 100.0 / (111320.0 * 0.8191520)
+        states[0, :, ALT], states[0, :, SPEED_STATE], states[0, :, MASS] = 900.0, 100.0, 60000.0
+        run = replace(flown([float(c) for c in range(cycles)], cycles - 1), states=states,
+                      commands=torch.zeros(1, cycles, 3, dtype=torch.float64))
+        result = FlownSegment(segment=segment, reading=None, signals=None, model=self.sentence(), flown=run,
+                              verdict=Verdict("timeout", cycles, None, {}, None, flown_rows=cycles + 1), reached_end=True,
+                              fly_s=0.1, judge_s=0.01)
+        context = FlightContext(signals=None, series=None, reading=reading(), geometry=geometry(), crossing_heights=(15.0,),
+                                group="own dynamics", approach_ias_mps=70.0,
+                                observed_track_deg=np.full(20, 90.0), observed_distance_m=400.0 * np.arange(20))
+        track, _ = track_payload(result, context, 2.0)
+        self.assertEqual(track["tS"], [20.0, 21.0, 22.0, 23.0, 24.0])
+        # the distance flown from the observed flight's at the sentence's first step (3200 m), 100 m a cycle
+        np.testing.assert_allclose(track["distanceM"], [3600.0, 3700.0, 3800.0, 3900.0, 4000.0], atol=0.6)
+        self.assertEqual(len(track["loadFactor"]), 4)
+
+
+class ModelFlightTest(unittest.TestCase):
+    """`fly_segment` for a model's word: the flight's own dynamics only; the executor set up as the free generation sets
+    it up — the time clock and the generation's time limit — and judged against the model's runway, on the reading with
+    an angle word's tube anchored at its step; a word said as or after the flight ended refused."""
+
+    def context(self, group: str = "own dynamics") -> FlightContext:
+        rows = np.arange(20, dtype=np.float64)
+        signals = FlightSignals(dataset_id="KXXX:test", airport="KXXX", runway="09", typecode="A320",
+                                entry_time_utc="2026-09-01T00:00:00Z", landing_time_utc="2026-09-01T00:05:00Z",
+                                time_s=2.0 * rows, e_m=100.0 * rows, n_m=0.0 * rows, altitude_m=np.full(20, 900.0),
+                                track_deg=np.full(20, 90.0), ground_speed_mps=np.full(20, 100.0),
+                                vertical_rate_mps=0.0 * rows)
+        return FlightContext(signals=signals, series=None, reading=SimpleNamespace(words=np.zeros((20, 6))),
+                             geometry=geometry2(), crossing_heights=(15.0, 15.0), group=group, approach_ias_mps=70.0,
+                             observed_track_deg=np.full(20, 90.0), observed_distance_m=200.0 * rows)
+
+    def fly(self, column: int, row: int, end_row: int, group: str = "own dynamics", events: list | None = None):
+        record = model_record() if events is None else model_record(events=events)
+        sentence = model_sentence(record, MODEL_WORDS, runways=2, observed_rows=20, timeout_factor=1.5)
+        asked = {}
+
+        def fly_batch_until(batch, params, words, stop_steps, superseded, *, model_limit_s=None):
+            asked.update(stop_steps=stop_steps, model_limit_s=model_limit_s)
+            return flown([float(c) for c in range(20)], 19), stop_steps is not None, 0.0
+
+        def judge(run, index, geometry, runway_index, judged, signals, spec, words):
+            asked.update(runway_index=runway_index, judged=judged, runway=signals.runway)
+            return Verdict("timeout", end_row, None, {}, None, flown_rows=end_row + 1, refused="not read here")
+
+        words = SimpleNamespace(**vars(MODEL_WORDS), spec=SPEC)
+        params = SimpleNamespace(timeout_factor=1.5, cycle_s=1.0)
+        with mock.patch.object(fly_module, "segment_batch", lambda *args: None), \
+                mock.patch.object(fly_module, "fly_batch_until", fly_batch_until), \
+                mock.patch.object(fly_module, "judge", judge):
+            result = fly_module.fly_segment(self.context(group), params, words, column, row, NEVER, sentence)
+        return result, asked
+
+    def test_it_flies_on_the_flights_own_dynamics_only(self):
+        with self.assertRaisesRegex(RequestRefused, "own dynamics only"):
+            self.fly(HEADING, 10, 16, group="stand-in dynamics")
+
+    def test_it_is_flown_under_the_generations_limit_and_judged_on_the_runway_the_model_points_at(self):
+        result, asked = self.fly(HEADING, 10, 16)               # said at 10, stopped at 16: after the change to 27 at 15
+        # 12 observed steps left from step 8, 2 s each, × 1.5; from the sentence's first step to the stop
+        self.assertEqual((asked["model_limit_s"], asked["stop_steps"]), (36.0, 8))
+        self.assertEqual((asked["runway_index"], asked["runway"]), (1, "27"))
+        self.assertIs(result.reading, asked["judged"])          # a heading word: judged on what was flown
+        _, early = self.fly(HEADING, 8, 12)                      # stopped at 12: before the change
+        self.assertEqual((early["runway_index"], early["runway"]), (0, "09"))
+
+    def test_an_angle_word_is_judged_on_its_tube_from_its_step(self):
+        record = model_record()
+        events = sorted([*record["events"], {"row": 11, "column": ANGLE, "value": 2}],
+                        key=lambda event: (event["row"], event["column"]))
+        result, asked = self.fly(ANGLE, 11, 19, events=events)
+        extra = [word for word in asked["judged"].instructions if word not in result.reading.instructions]
+        self.assertEqual([(w.column, w.row, w.kind) for w in extra], [(ALTITUDE, 3, "in force")])
+
+    def test_a_word_said_as_or_after_the_flight_ended_is_refused(self):
+        # the heading word at 10 is the flown sentence's step 2: cycle 4 of 1 s cycles
+        with self.assertRaisesRegex(RequestRefused, "had ended .* by the time it said this word at step 10"):
+            self.fly(HEADING, 10, end_row=4)
+        result, _ = self.fly(HEADING, 10, end_row=5)
+        self.assertEqual(result.segment.word_step, 2)
+
+    def test_the_drive_is_the_time_clock_under_the_given_limit(self):
+        """`fly_batch_until` for a model: its stepper handed the time clock (the spec's word clock not even asked for)
+        and the executor the limit given."""
+        grid = np.arange(42).reshape(7, 6)
+        batch = SimpleNamespace(inputs=lambda *args, **kwargs: "the inputs", readings=[SimpleNamespace(words=grid)],
+                                geometries=["the geometry"], crossing_heights=[(15.0,)], approach_ias_mps=[70.0])
+        params, words = SimpleNamespace(timeout_factor=1.5, cycle_s=1.0), SimpleNamespace(spec=SimpleNamespace(step_s=2.0))
+        recorded = {}
+
+        class Stop(Exception):
+            pass
+
+        def executor(*args, **kwargs):
+            recorded["executor"] = kwargs
+            return SimpleNamespace()
+
+        def stepper(executor_, sentences, clock, *args):
+            recorded["clock"] = clock
+            raise Stop
+
+        clock = mock.Mock(side_effect=AssertionError("the spec's word clock asked for"))
+        with mock.patch.object(fly_module, "Sentences", lambda *args, **kwargs: "the sentences"), \
+                mock.patch("ts_transformer.autopilot.replay.word_clock", clock), \
+                mock.patch.object(fly_module.Runways, "of", lambda *args, **kwargs: "the runways"), \
+                mock.patch.object(fly_module.AirportCharts, "of", lambda *args, **kwargs: "the charts"), \
+                mock.patch.object(fly_module, "Executor", executor), \
+                mock.patch.object(fly_module, "fly_until", stepper), self.assertRaises(Stop):
+            fly_batch_until(batch, params, words, None, NEVER, model_limit_s=36.0)
+        self.assertEqual(float(recorded["executor"]["time_limit_s"][0]), 36.0)
+        self.assertIsInstance(recorded["clock"], fly_module.TimeClock)
+
+
+class FreeGenerationTest(unittest.TestCase):
+    """A model's sentence flown on the backend's drive — `fly_until` with the time clock, the words said as a grid —
+    IS the flight the free generation flew while the model said them (`prior_free_generation.speak_and_fly`, its own
+    loop, a scripted speaker in the prior's place): the real executor on the executor tests' synthetic downwind, base
+    and final, state for state. The export writes those words; the frontend re-flies them."""
+
+    def test_the_backends_drive_flies_the_free_generations_flight(self):
+        from ts_transformer.autopilot.executor import Executor
+        from ts_transformer.autopilot.sentence import Sentences, TimeClock
+        from ts_transformer.experiments import prior_free_generation as generation
+        from ts_transformer.instructions.labeller.read import read_flight
+        from ts_transformer.instructions.words import Words
+        from ts_transformer.tests import test_autopilot as executor_tests
+        from ts_transformer.tests.support import fly_legs, instruction_airport, instruction_flight, instruction_spec
+
+        spec, geometry_ = instruction_spec(), instruction_airport()
+        words, params = Words(spec), executor_tests._params()
+        signals = instruction_flight(*fly_legs(executor_tests.DOWNWIND_BASE_FINAL, 270.0, 1110.0, -400.0, 0.0))
+        script = read_flight(signals, geometry_, spec, words).words
+        inputs, runways, charts, approach = executor_tests._physics(signals, geometry_)
+        limit = len(script) * spec.step_s * params.timeout_factor
+
+        class ScriptedSpeaker:
+            """Says the labelled sentence a step at a time, as the prior would say its own; nothing after it."""
+
+            def __init__(self, *args, **kwargs):
+                self.step, self.forbidden = 0, {}
+
+            def append(self, *args, **kwargs):
+                pass
+
+            def speak(self, active, runway_locked):
+                row = script[self.step] if self.step < len(script) else np.full(6, U)
+                self.step += 1
+                return np.where(active[:, None], np.where(row == U, 0, row.astype(np.int64) + 1)[None, :], 0)
+
+        with mock.patch.object(generation, "Speaker", ScriptedSpeaker):
+            spoken, said, _, _ = generation.speak_and_fly(None, [], [], inputs, runways, charts, approach, [limit], words,
+                                                          params, None, generator=None, temperature=1.0)
+        step_rows = int(round(spec.step_s / params.cycle_s))
+        grid = said[0][: generation.steps_said(spoken, 0, said.shape[1], step_rows)]
+        executor = Executor(inputs, runways, charts, approach, params, words,
+                            time_limit_s=torch.tensor([limit], dtype=torch.float64))
+        self.assertFalse(fly_until(executor, Sentences([grid], words, device=torch.device("cpu")), TimeClock(params.cycle_s),
+                                   spec.step_s, None, NEVER))
+        again = executor.flown()
+        self.assertTrue(torch.equal(again.done_cycle, spoken.done_cycle))
+        # through the cycle the flight ended in — all the export keeps: the generation's loop flies out the rest of that
+        # step, its cycles after the end, which the stepper does not
+        cycles = int(spoken.done_cycle[0]) + 1
+        self.assertTrue(torch.equal(again.states[:, : cycles + 1], spoken.states[:, : cycles + 1]))
+        self.assertTrue(torch.equal(again.commands[:, :cycles], spoken.commands[:, :cycles]))
+        self.assertTrue(torch.equal(again.sentence_s[:, :cycles], spoken.sentence_s[:, :cycles]))
 
 
 class MirrorTest(unittest.TestCase):

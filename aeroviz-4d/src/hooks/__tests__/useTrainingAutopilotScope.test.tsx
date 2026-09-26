@@ -40,7 +40,7 @@ describe("the live executor's pick", () => {
     render(<AppProvider><Harness /></AppProvider>);
 
     act(() => app.setTrainingSelection(vectored));
-    act(() => app.setTrainingPick(nextPick(null, "heading", 8)));
+    act(() => app.setTrainingPick(nextPick(null, null, "heading", 8)));
     await waitFor(() => expect(app.trainingAutopilot?.status).toBe("ready"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     act(() => cursor.setTrainingCursorS(40));
@@ -57,7 +57,7 @@ describe("the live executor's pick", () => {
     expect(app.trainingAutopilot).toBeNull();
     expect(cursor.trainingCursorS).toBe(0);
     // another set with the same flight key
-    act(() => app.setTrainingPick(nextPick(null, "heading", 8)));
+    act(() => app.setTrainingPick(nextPick(null, null, "heading", 8)));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     act(() => app.setTrainingSelection({ ...vectored, setId: "another_set" }));
     expect(app.trainingPick).toBeNull();

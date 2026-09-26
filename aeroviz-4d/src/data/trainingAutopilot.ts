@@ -6,11 +6,17 @@
  * `aeroviz-4d/docs/36-2026-09-20-training-module.zh.md` §4.7.
  *
  * A SEGMENT is the band the sentence bar draws and the user CLICKED: one column's word from the step it is said to the
- * step the next word of its column is said (`TrainingWordRun`). The executor starts from the observed aircraft's state at
- * that step, is told the six words in force there, then the sentence's words, each where the observed aircraft heard it,
- * and flies to where the word's own envelope ends (`segmentStopRow`: the next word of its column; a heading word's a lead
- * later, the next heading word told on the way as the sentence says) — or, when that is the sentence's end, on to its
- * outcome. Only the selected word is judged, by the executor's judge.
+ * step the next word of its column is said (`TrainingWordRun`), flown to where the word's own envelope ends
+ * (`segmentStopRow`: the next word of its column; a heading word's a lead later, the next heading word told on the way as
+ * the sentence says) — or, when that is the sentence's end, on to its outcome. Only the selected word is judged, by the
+ * executor's judge. WHICH SENTENCE the word is of (`TrainingPick.source`) decides where the executor starts:
+ *
+ *  • THE TRUTH's word: from the observed aircraft's state at that step, told the six words in force there, then the
+ *    sentence's words, each where the observed aircraft heard it.
+ *  • A MODEL's word (its own sentence, one sample): the request carries the model's words, and the backend flies them as
+ *    the model's free generation flew them — from the observed state at the sentence's first step, each word heard at its
+ *    own step — to the word's stop, answering the flight from the word on. The executor is deterministic, so that is the
+ *    exported sample's own flight: `autopilotSampleGap` measures how closely it lands on it.
  *
  * NOTHING IS PRECOMPUTED: no replay record, no overlay. Every request is flown again by the executor code the backend
  * runs — its stepper, one control cycle at a time, stopped at the segment's stop — under the executor spec written by
@@ -37,24 +43,29 @@ import {
   type TrainingCrossing,
   type TrainingExecutorOutcome,
   type TrainingExecutorCheck,
+  type TrainingGeneratedSentence,
+  type TrainingSource,
 } from "./trainingOverlays";
+import { haversineDistanceM } from "../utils/procedureGeoMath";
 import { TRAINING_AUTOPILOT_COLOR, TRAINING_AUTOPILOT_OUTSIDE_COLOR } from "../utils/trainingWordColors";
 import {
-  trainingColumnRuns,
+  sentenceColumnRuns,
+  sentenceWordAt,
+  trainingTruthSentence,
   trainingWordLabel,
-  TRAINING_COLUMN_INDEX,
   TRAINING_COLUMNS,
   type TrainingColumn,
   type TrainingFlight,
   type TrainingHeadingBand,
   type TrainingSelection,
+  type TrainingSentence,
+  type TrainingSentenceEvent,
   type TrainingVocabulary,
-  type TrainingWordRun,
 } from "./trainingSample";
 
 /** MIRROR of `aeroviz_backend/autopilot_segment/payload.py` `SCHEMA`: the backend's answer; anything else is refused by
  *  name (the backend's `MirrorTest` pins these four). */
-export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v2";
+export const TRAINING_AUTOPILOT_SCHEMA = "aeroviz-autopilot-segment-v3";
 /** MIRROR of `autopilot_segment/verdict.py` `STATUSES`: the selected word's verdict. */
 export const TRAINING_AUTOPILOT_STATUSES = ["inside", "outside", "not judged", "no check"] as const;
 export type TrainingAutopilotStatus = (typeof TRAINING_AUTOPILOT_STATUSES)[number];
@@ -71,7 +82,17 @@ export const TRAINING_AUTOPILOT_CLIENT_ID = Array.from(globalThis.crypto.getRand
  *  order they happen to arrive in. */
 let requestSeq = 0;
 
-/** What the Training view asks for: the clicked word's segment of the selected flight. */
+/** A model's own sentence as a request carries it (the sample on screen): its words from its first step. */
+export interface TrainingAutopilotSentence {
+  overlayId: string;
+  sample: number;
+  firstRow: number;
+  rows: number;
+  events: TrainingSentenceEvent[];
+}
+
+/** What the Training view asks for: the clicked word's segment of the selected flight — of its truth (``sentence``
+ *  null), or of a model's own sentence of it. */
 export interface TrainingAutopilotRequest {
   airport: string;
   setId: string;
@@ -79,6 +100,13 @@ export interface TrainingAutopilotRequest {
   column: TrainingColumn;
   /** The step the selected word is said at: its segment's first step. */
   row: number;
+  sentence: TrainingAutopilotSentence | null;
+}
+
+/** A request's sentence as the sentence bar draws it. */
+export function requestSentence(request: TrainingAutopilotRequest, flight: TrainingFlight): TrainingSentence {
+  return request.sentence === null ? trainingTruthSentence(flight)
+    : { rows: request.sentence.rows, firstRow: request.sentence.firstRow, events: request.sentence.events };
 }
 
 /** The flown segment every control cycle, on the flight's own clock and axes (see the backend's `track_payload`). */
@@ -146,6 +174,8 @@ export interface TrainingAutopilotSegment {
   vocabularySpecSha256: string;
   /** "own dynamics" or "stand-in dynamics" (a stand-in's errors are its aerodynamics, not the executor's). */
   group: string;
+  /** Which sentence was flown: the truth's, or one sample of a model's own, flown again from its first step. */
+  source: { kind: "truth" } | { kind: "model"; overlayId: string; sample: number; firstRow: number };
   segment: {
     column: TrainingColumn;
     row: number;
@@ -155,8 +185,9 @@ export interface TrainingAutopilotSegment {
     stopRow: number;
     /** `stopRow` is the sentence's end: flown on to the outcome. */
     toLanding: boolean;
-    /** The observed aircraft's time over the same steps (to the landing: to its threshold crossing). */
-    observedS: number;
+    /** The observed aircraft's time over the same steps (to the landing: to its threshold crossing); null for a model's
+     *  word, whose flight has no observed counterpart. */
+    observedS: number | null;
     /** The words the executor was told, at the flight's steps, by step then column. */
     told: Array<{ row: number; column: number; value: number }>;
   };
@@ -165,8 +196,9 @@ export interface TrainingAutopilotSegment {
     reason: typeof TRAINING_AUTOPILOT_SEGMENT_END | TrainingExecutorOutcome;
     /** null for a column's last word. */
     reachedSegmentEnd: boolean | null;
-    /** At the segment's end: the executor minus the observed aircraft where the next word was said. */
+    /** At the segment's end: the executor minus the observed aircraft where the next word was said (the truth's only). */
     offsetFromObserved: { horizontalM: number; aboveM: number; groundSpeedMps: number } | null;
+    /** From the selected word on. */
     flownS: number;
     crossing: TrainingCrossing | null;
     /** Why the labeller's gate refused the flown segment (nothing is then judged). */
@@ -196,43 +228,75 @@ export type TrainingAutopilotView =
 
 /** Where a word's segment stops: where its own envelope ends — the step the next word of its column is said, and for a
  *  heading word a lead later (it is judged from a lead after it is said to a lead after the next heading word is) —
- *  never past the sentence's end. MIRROR of the backend's `segment_of`. */
-export function segmentStopRow(flight: TrainingFlight, column: TrainingColumn, endRow: number, headingLeadRows: number): number {
-  return Math.min(endRow + (column === "heading" ? headingLeadRows : 0), flight.rows);
+ *  never past its sentence's end (``rows``). MIRROR of the backend's `segment_of` / `model_segment`. */
+export function segmentStopRow(rows: number, column: TrainingColumn, endRow: number, headingLeadRows: number): number {
+  return Math.min(endRow + (column === "heading" ? headingLeadRows : 0), rows);
 }
 
 /** THE WORD THE LIVE EXECUTOR FLIES (`trainingPick`) — of the flight on screen, which the pick belongs to and is reset
- *  with (`AppContext`): the word's column and the step it is said at, and which attempt at it — a new attempt at the
- *  same word flies it again. */
+ *  with (`AppContext`): the sentence it is a word of (``source``: null for the truth, or a model's sample), the word's
+ *  column and the step it is said at, and which attempt at it — a new attempt at the same word flies it again. */
 export interface TrainingPick {
+  source: TrainingSource | null;
   column: TrainingColumn;
   row: number;
   attempt: number;
 }
 
-/** The pick that flies ``column``'s word said at ``row`` now: a new attempt when it is the word picked already, else its
- *  first. */
-export function nextPick(current: TrainingPick | null, column: TrainingColumn, row: number): TrainingPick {
-  const same = current !== null && current.column === column && current.row === row;
-  return { column, row, attempt: same ? current.attempt + 1 : 0 };
+/** Two sources the same: both the truth, or the same sample of the same model. */
+export function sameSource(a: TrainingSource | null, b: TrainingSource | null): boolean {
+  return a === null || b === null ? a === b : a.overlayId === b.overlayId && a.sample === b.sample;
 }
 
-/** The live executor's view if it is of the flight on screen — its airport, set and flight — else null: in the render
- *  after a switch, the view still published is the last flight's, and is not drawn. */
+/** The pick that flies ``column``'s word said at ``row`` of ``source``'s sentence now: a new attempt when it is the word
+ *  picked already, else its first. */
+export function nextPick(current: TrainingPick | null, source: TrainingSource | null, column: TrainingColumn, row: number): TrainingPick {
+  const same = current !== null && sameSource(current.source, source) && current.column === column && current.row === row;
+  return { source, column, row, attempt: same ? current.attempt + 1 : 0 };
+}
+
+/** The source a request flew. */
+export function requestSource(request: TrainingAutopilotRequest): TrainingSource | null {
+  return request.sentence === null ? null : { overlayId: request.sentence.overlayId, sample: request.sentence.sample };
+}
+
+/** The live executor's view if it is of the flight on screen — its airport, set and flight — and of the sentence read
+ *  (``source``: the truth's, or the model's sample on screen), else null: in the render after a switch, the view still
+ *  published is the last flight's or the last sentence's, and is not drawn. */
 export function autopilotOnScreen(
-  view: TrainingAutopilotView | null, selection: TrainingSelection | null,
+  view: TrainingAutopilotView | null, selection: TrainingSelection | null, source: TrainingSource | null,
 ): TrainingAutopilotView | null {
   if (view === null || selection === null) return null;
   const { request } = view;
   return request.airport === selection.airport && request.setId === selection.setId
-    && request.flightKey === selection.flight.flightKey ? view : null;
+    && request.flightKey === selection.flight.flightKey && sameSource(requestSource(request), source) ? view : null;
 }
 
-/** The word a request flies, as the sentence reads it: "heading 270°" — the word said at its step, whichever word the
+/** The word a request flies, as its sentence reads it: "heading 270°" — the word said at its step, whichever word the
  *  views have selected since. */
 export function autopilotWord(request: TrainingAutopilotRequest, selection: TrainingSelection): string {
-  const value = selection.flight.words.inForce[TRAINING_COLUMN_INDEX[request.column]][request.row];
+  const value = sentenceWordAt(requestSentence(request, selection.flight), request.column, request.row)!.value;
   return `${request.column} ${trainingWordLabel(selection.vocabulary, selection.candidates, request.column, value)}`;
+}
+
+/** How closely a model word's live flight lands on the exported sample it re-flies: the largest distance between the
+ *  two at the times both hold a point (horizontal and vertical, metres), and how many they share — null when they share
+ *  none. The executor is deterministic, so this is 0 up to the export's rounding; anything else means the backend's
+ *  executor is not the one that flew the sample. */
+export function autopilotSampleGap(segment: TrainingAutopilotSegment, sample: TrainingGeneratedSentence): { gapM: number; points: number } | null {
+  const at = new Map(segment.track.tS.map((time, index) => [time.toFixed(3), index]));
+  let gapM = 0;
+  let points = 0;
+  sample.track.tS.forEach((time, index) => {
+    const live = at.get(time.toFixed(3));
+    if (live === undefined) return;
+    points += 1;
+    const horizontal = haversineDistanceM(
+      { lonDeg: segment.track.lon[live], latDeg: segment.track.lat[live], altM: 0 },
+      { lonDeg: sample.track.lon[index], latDeg: sample.track.lat[index], altM: 0 });
+    gapM = Math.max(gapM, horizontal, Math.abs(segment.track.altitudeM[live] - sample.track.altitudeM[index]));
+  });
+  return points === 0 ? null : { gapM, points };
 }
 
 /** The flown segment has a line to draw: two states or more (a dynamics failure in its first cycle keeps one — the
@@ -290,15 +354,18 @@ export function autopilotJudgedPoints(segment: TrainingAutopilotSegment): { lon:
   };
 }
 
-/** The words the sentence says for a segment, as the backend lists what it told: the six in force at its first step,
- *  then every word said before its end, by step then column. */
-export function segmentWords(flight: TrainingFlight, row: number, endRow: number): Array<{ row: number; column: number; value: number }> {
-  const opening = TRAINING_COLUMNS.map((_, column) => ({ row, column, value: flight.words.inForce[column][row] }));
-  const after = flight.words.events
-    .filter((event) => event.row > row && event.row < endRow)
-    .map(({ row: step, column, value }) => ({ row: step, column, value }))
+/** The words a segment's sentence tells the executor, as the backend lists them, by step then column — the truth's: the
+ *  six in force at the word's step, then every word said before the stop; a model's: its whole sentence from its first
+ *  step to the stop (its flight is flown again from there). */
+export function segmentWords(
+  request: TrainingAutopilotRequest, flight: TrainingFlight, stopRow: number,
+): Array<{ row: number; column: number; value: number }> {
+  const plain = (events: TrainingSentenceEvent[]) => events.map(({ row: step, column, value }) => ({ row: step, column, value }))
     .sort((a, b) => a.row - b.row || a.column - b.column);
-  return [...opening, ...after];
+  if (request.sentence !== null) return plain(request.sentence.events.filter((event) => event.row < stopRow));
+  const { row } = request;
+  const opening = TRAINING_COLUMNS.map((_, column) => ({ row, column, value: flight.words.inForce[column][row] }));
+  return [...opening, ...plain(flight.words.events.filter((event) => event.row > row && event.row < stopRow))];
 }
 
 function parseTrack(reader: Reader, row: number, stepS: number): TrainingAutopilotTrack {
@@ -323,38 +390,43 @@ function parseTrack(reader: Reader, row: number, stepS: number): TrainingAutopil
 function readSegment(
   segment: Reader, request: TrainingAutopilotRequest, flight: TrainingFlight, vocabulary: TrainingVocabulary,
 ): TrainingAutopilotSegment["segment"] {
+  const sentence = requestSentence(request, flight);
+  const rows = sentence.rows;
   const column = segment.oneOf("column", TRAINING_COLUMNS);
-  const row = segment.integer("row", 0, flight.rows - 1);
+  const row = segment.integer("row", sentence.firstRow, rows - 1);
   if (column !== request.column || row !== request.row) {
     segment.fail(`is ${column} from step ${row}, but ${request.column} from step ${request.row} was asked for`);
   }
-  const run: TrainingWordRun | undefined = trainingColumnRuns(flight, column).find((item) => item.row === row);
+  const run = sentenceColumnRuns(sentence, column).find((item) => item.row === row);
   if (run === undefined) segment.fail(`no ${column} word is said at step ${row} of the sentence on screen`);
-  const endRow = segment.integer("endRow", row + 1, flight.rows);
+  const endRow = segment.integer("endRow", row + 1, rows);
   if (endRow !== run.endRow) segment.fail(`ends at step ${endRow}, but the word on screen is in force to step ${run.endRow}`);
-  const stopRow = segment.integer("stopRow", row + 1, flight.rows);
+  const stopRow = segment.integer("stopRow", row + 1, rows);
   const toLanding = segment.boolean("toLanding");
-  const stop = segmentStopRow(flight, column, endRow, vocabulary.headingLeadRows);
-  if (stopRow !== stop || toLanding !== (stopRow === flight.rows)) {
+  const stop = segmentStopRow(rows, column, endRow, vocabulary.headingLeadRows);
+  if (stopRow !== stop || toLanding !== (stopRow === rows)) {
     segment.fail(`stops at step ${stopRow}${toLanding ? " (to the landing)" : ""}, but this word's envelope ends at step ${stop}`);
   }
   const told = segment.children("told").map((word) => ({
-    row: word.integer("row", 0, flight.rows - 1), column: word.integer("column", 0, TRAINING_COLUMNS.length - 1),
+    row: word.integer("row", 0, rows - 1), column: word.integer("column", 0, TRAINING_COLUMNS.length - 1),
     value: word.count("value"),
   }));
-  const shown = segmentWords(flight, row, stopRow);
+  const shown = segmentWords(request, flight, stopRow);
   const same = told.length === shown.length && told.every((word, index) =>
     word.row === shown[index].row && word.column === shown[index].column && word.value === shown[index].value);
   if (!same) {
     segment.fail(`told the executor ${told.length} words that are not the ${shown.length} the sentence shows for this ` +
-      "segment: the backend flew another reading of this flight");
+      "segment: the backend flew another sentence of this flight");
   }
-  return { column, row, endRow, stopRow, toLanding, observedS: segment.number("observedS"), told };
+  // a model's word has no observed counterpart; the truth's has the observed aircraft's time over the same steps
+  if (request.sentence !== null && segment.raw("observedS") !== null) segment.fail("gives an observed time for a model's word");
+  const observedS = request.sentence === null ? segment.number("observedS") : null;
+  return { column, row, endRow, stopRow, toLanding, observedS, told };
 }
 
-/** How the flight ended: at its segment's end (with its offset from the observed aircraft there), or the judge's
- *  outcome — to the landing, only the latter. */
-function readEnd(end: Reader, toLanding: boolean): TrainingAutopilotSegment["end"] {
+/** How the flight ended: at its segment's end (with its offset from the observed aircraft there — the truth's only), or
+ *  the judge's outcome — to the landing, only the latter. */
+function readEnd(end: Reader, toLanding: boolean, truth: boolean): TrainingAutopilotSegment["end"] {
   const reason = end.oneOf("reason", [TRAINING_AUTOPILOT_SEGMENT_END, ...TRAINING_EXECUTOR_OUTCOMES] as const);
   const reachedSegmentEnd = end.nullableBoolean("reachedSegmentEnd");
   if ((reachedSegmentEnd === null) !== toLanding) {
@@ -363,8 +435,8 @@ function readEnd(end: Reader, toLanding: boolean): TrainingAutopilotSegment["end
   }
   if (reason === TRAINING_AUTOPILOT_SEGMENT_END && reachedSegmentEnd !== true) end.fail("ended at a segment end it did not reach");
   const offset = end.nullableChild("offsetFromObserved");
-  if ((offset !== null) !== (reason === TRAINING_AUTOPILOT_SEGMENT_END)) {
-    end.fail("offsetFromObserved is given exactly when the flight ended at its segment's end");
+  if ((offset !== null) !== (truth && reason === TRAINING_AUTOPILOT_SEGMENT_END)) {
+    end.fail("offsetFromObserved is given exactly when the truth's flight ended at its segment's end");
   }
   const crossing = end.nullableChild("crossing");
   return {
@@ -388,10 +460,19 @@ function readTiming(timing: Reader, states: number): TrainingAutopilotSegment["t
   };
 }
 
-/** What the Training view asks the backend for: the picked word's segment of the flight on screen. */
-export function trainingAutopilotRequest(selection: TrainingSelection, pick: TrainingPick): TrainingAutopilotRequest {
-  return { airport: selection.airport, setId: selection.setId, flightKey: selection.flight.flightKey, column: pick.column,
-    row: pick.row };
+/** What the Training view asks the backend for: the picked word's segment of the flight on screen — of the truth, or of
+ *  the model's sample the pick names (``sentence``: that sample, as the view read it). */
+export function trainingAutopilotRequest(
+  selection: TrainingSelection, pick: TrainingPick, sentence: TrainingGeneratedSentence | null,
+): TrainingAutopilotRequest {
+  if ((pick.source === null) !== (sentence === null)) throw new Error("a model's pick is flown with its sentence, the truth's without");
+  return {
+    airport: selection.airport, setId: selection.setId, flightKey: selection.flight.flightKey, column: pick.column, row: pick.row,
+    sentence: pick.source === null || sentence === null ? null : {
+      overlayId: pick.source.overlayId, sample: pick.source.sample, firstRow: sentence.firstRow, rows: sentence.rows,
+      events: sentence.events.map(({ row, column, value }) => ({ row, column, value })),
+    },
+  };
 }
 
 /** Parse the backend's answer against the request and the flight on screen — all or nothing. */
@@ -421,13 +502,24 @@ export function parseTrainingAutopilot(
     if (vocabularySpecSha256 !== vocabulary.specSha256) {
       answer.fail(`flew vocabulary ${vocabularySpecSha256.slice(0, 12)}, the set on screen is ${vocabulary.specSha256.slice(0, 12)}`);
     }
+    const source = answer.child("source");
+    const kind = source.oneOf("kind", ["truth", "model"] as const);
+    const flownSource: TrainingAutopilotSegment["source"] = kind === "truth" ? { kind }
+      : { kind, overlayId: source.string("overlayId"), sample: source.count("sample"), firstRow: source.count("firstRow") };
+    const asked = request.sentence;
+    if (flownSource.kind === "truth" ? asked !== null
+      : asked === null || flownSource.overlayId !== asked.overlayId || flownSource.sample !== asked.sample
+        || flownSource.firstRow !== asked.firstRow) {
+      source.fail(`flew ${flownSource.kind === "truth" ? "the truth" : `${flownSource.overlayId} #${flownSource.sample}`}, but ` +
+        `${asked === null ? "the truth" : `${asked.overlayId} #${asked.sample}`} was asked for`);
+    }
     const segment = readSegment(answer.child("segment"), request, flight, vocabulary);
     const executor = answer.child("executor");
     const cycleS = executor.number("cycleS");
     const stepCycles = vocabulary.stepS / cycleS;
     if (!Number.isInteger(stepCycles) || stepCycles < 1) executor.fail(`a ${cycleS} s cycle does not divide the ${vocabulary.stepS} s step`);
     const track = parseTrack(answer.child("track"), segment.row, vocabulary.stepS);
-    const end = readEnd(answer.child("end"), segment.toLanding);
+    const end = readEnd(answer.child("end"), segment.toLanding, flownSource.kind === "truth");
 
     // ── the selected word's verdict: a heading word's band and the track its judge read come together ──
     const word = answer.child("word");
@@ -444,7 +536,7 @@ export function parseTrainingAutopilot(
       // Its rows are FLOWN steps, and end by the track its judge read: where the executor heard the next heading word
       // (plus the lead) is its own step, not the sentence's — lagging the observed aircraft on the track clock, it hears
       // it later — so the segment's stop, a sentence step, does not bound them.
-      const targetDeg = vocabulary.headingTargetsDeg[flight.words.inForce[TRAINING_COLUMN_INDEX.heading][segment.row]];
+      const targetDeg = vocabulary.headingTargetsDeg[sentenceWordAt(requestSentence(request, flight), "heading", segment.row)!.value];
       heading = readJudgedBand(word, verdict, segment.row, targetDeg, vocabulary, segment.row + judgedTrackDeg.length);
     }
     const limits = answer.child("limits");
@@ -459,6 +551,7 @@ export function parseTrainingAutopilot(
       artefact: answer.string("artefact"),
       vocabularySpecSha256,
       group: answer.string("group"),
+      source: flownSource,
       segment,
       end,
       word: { status: verdict.status, checks: verdict.checks, reason: verdict.reason, heading },

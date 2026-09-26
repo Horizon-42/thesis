@@ -13,15 +13,20 @@
  * WHICH SENTENCE (`trainingSource`): the tabs at the head of the bar — "Truth", then one per model whose own sentences
  * are published for the set (`trainingGenerations`, each in its colour) — choose what the rows draw. The TRUTH is the
  * labelled sentence, as above. A MODEL's is one of its samples (the numbered buttons, each marked by how the flight
- * ended): its bands HATCHED and dash-edged, so a model's word never passes for a labelled one; the rows it only observed
- * (before its first predicted step) shaded; under each row a white tick wherever the truth says a word of that column,
- * so where the two sentences part is read at a glance; a dashed line where the model cleared the flight, a solid one in
- * its colour where its flight ended, a dashed white one where the observed flight's sentence ends. Words a model said
- * after its flight ended (the executor flies on after two outcomes its judge reads earlier) sit under a grey shade. The
+ * ended), drawn in the same bands — one sentence is read at a time, so what says it is a model's is the frame: the bar's
+ * border and a strip down the left edge of its rows in the model's colour, the tab, the sample's chip (the hatching this
+ * once had made the bar hard to read, the user 2026-09-26). The rows it only observed (before its first predicted step)
+ * are shaded; under each row a white tick wherever the truth says a word of that column, so where the two sentences part
+ * is read at a glance; a dashed line where the model cleared the flight, a solid one in its colour where its flight
+ * ended — its time written on the axis under it, in its colour — a dashed white one where the observed flight's sentence
+ * ends. Words a model said after its flight ended (the executor flies on after two outcomes its judge reads earlier) sit
+ * under a grey shade. The
  * time axis is the observed flight's, stretched to the sentence read when that one runs longer (a model's flight that
  * timed out runs on to 1.5× the observed time): the truth is never squeezed by a sample it is not showing. Choosing a
  * model starts at its first sample. A model that does not fly the flight on screen leaves the truth drawn, with its whole
  * header, and says so. The Read-back and Prior windows read the truth, so they are offered only while it is read.
+ * A model's words are flown live like the truth's (Fly, or a band click with the panel's switch on): the backend flies
+ * the model's sentence again from its first step (`trainingAutopilot.ts`), which lands on the sample's own track.
  *
  * THE HEADER IS SHORT: the tabs, the callsign (its type, stratum and counts in its tooltip), the runway, one chip of the
  * labeller's own verdicts (a model's: how its sample ended), one of the executor's replay when it is on, the live
@@ -40,10 +45,11 @@
  * inside its envelope, red outside, hollow grey not judged, not reached or superseded; none for a word with no check of
  * its own); the PRIOR's window behind its button (`TrainingPriorWindow`). One window is open at a time.
  *
- * THE EXECUTOR, LIVE (`trainingAutopilot`): the Fly button PICKS the selected word for the live executor (`trainingPick`;
- * "↻ Fly again" once it has flown), and so does clicking a band while the panel's switch is on (`trainingAutopilotAuto`;
- * clicking the selected band again clears the pick) — never the cursor. Its line (`TrainingAutopilotStatus`) names the
- * word it flew, whether it stayed inside its envelope and the two times. It flies truth words only.
+ * THE EXECUTOR, LIVE (`trainingAutopilot`): the Fly button PICKS the selected word of the sentence read for the live
+ * executor (`trainingPick`, with its source; "↻ Fly again" once it has flown), and so does clicking a band while the
+ * panel's switch is on (`trainingAutopilotAuto`; clicking the selected band again clears the pick) — never the cursor. Its
+ * line (`TrainingAutopilotStatus`) names the word it flew, whether it stayed inside its envelope and the two times. A
+ * model's word said after its flight ended has no flight to fly: its Fly button is off.
  *
  * THE BAR MEASURES ITSELF: its height is published on the workbench as `--training-bar-height`, so the docks end above it
  * (`index.css`) instead of under it.
@@ -67,12 +73,13 @@ import {
   TRAINING_WORD_COLOR,
   trainingModelColour,
 } from "../utils/trainingWordColors";
-import { autopilotColour, autopilotHasLine, autopilotOnScreen, nextPick } from "../data/trainingAutopilot";
+import { autopilotColour, autopilotHasLine, autopilotOnScreen, nextPick, sameSource } from "../data/trainingAutopilot";
 import {
   executorWordAt,
   executorWordCounts,
   generatedRowAt,
   generationOnScreen,
+  sourceOf,
   overlayOnScreen,
   TRAINING_CROSSING_OUTCOMES,
   type TrainingExecutorFlight,
@@ -84,11 +91,11 @@ import {
   formatSeconds,
   rowAtTime,
   sentenceColumnRuns,
+  sentenceWordAt,
   trainingClearedValue,
   trainingKindLabel,
   trainingTruthSentence,
   trainingVerdicts,
-  trainingWordAt,
   trainingWordLabel,
   TRAINING_COLUMN_INDEX,
   TRAINING_COLUMNS,
@@ -117,9 +124,8 @@ const STEP_LABEL_GAP = 14;
 const TICK_LABEL_GAP = 34;
 /** The observed-only span says so in words above this many pixels. */
 const OBSERVED_LABEL_MIN_W = 52;
-/** The fills a model's sentence is drawn with (`<defs>`): its bands' hatch, the span it only observed. */
-const HATCH_ID = "training-model-hatch";
-const OBSERVED_ID = "training-observed-hatch";
+/** The strip down the left edge of a model's rows, in its colour (px). */
+const MODEL_STRIP_W = 4;
 
 /**
  * Which of these ascending x positions may carry a text label: greedy from the left, keeping one only when it clears the
@@ -287,9 +293,18 @@ export default function TrainingSentenceBar() {
   // The steps that SAY something, numbered; the sentence's first step is its opening and is always complete.
   const issueRows = [...new Set(sentence.events.map((event) => event.row))].sort((a, b) => a - b);
   const stepShown = spacedLabels(issueRows.map((row) => xFor(timeOf(row))), STEP_LABEL_GAP);
-  // the axis ends where the longer sentence does, and says so
+  // the axis ends where the longer sentence does, and says so; a model's flight's end is written under its line, in its
+  // colour, always — a tick too close to it gives way (the axis's own end, too, when the flight ran to it)
   const tickRows = [...issueRows, Math.round(endS / stepS)];
-  const tickShown = spacedLabels(tickRows.map((row) => xFor(timeOf(row))), TICK_LABEL_GAP, true);
+  const endLabelX = generated === null ? null : xFor(generated.endS);
+  const endAnchoredEnd = endLabelX !== null && GUTTER + plotW - endLabelX < TICK_LABEL_GAP / 2;
+  // a label's middle: a centred one's x, an end-anchored one's (the axis's last, the end label at the axis's end) half a
+  // label width to its left
+  const middle = (x: number, anchoredEnd: boolean) => (anchoredEnd ? x - TICK_LABEL_GAP / 2 : x);
+  const tickShown = spacedLabels(tickRows.map((row) => xFor(timeOf(row))), TICK_LABEL_GAP, true)
+    .map((shown, index) => shown && (endLabelX === null
+      || Math.abs(middle(xFor(timeOf(tickRows[index])), index === tickRows.length - 1) - middle(endLabelX, endAnchoredEnd))
+        >= TICK_LABEL_GAP));
   const cleared = trainingClearedValue(vocabulary);
   const modelClearance = generated === null ? null
     : generated.events.find((event) => event.column === TRAINING_COLUMN_INDEX.approach && event.value === cleared && event.row > generated.firstRow) ?? null;
@@ -313,15 +328,19 @@ export default function TrainingSentenceBar() {
   // the overlays and the live executor, when they are of the flight on screen (not the last one's, in flight)
   const executor = overlayOnScreen(trainingExecutor, selection)?.flight ?? null;
   const prior = overlayOnScreen(trainingPrior, selection);
-  const autopilot = autopilotOnScreen(trainingAutopilot, selection);
+  // the sentence read, as the live executor's source: its answer is drawn only over the sentence it flew
+  const readSource = sourceOf(read);
+  const autopilot = autopilotOnScreen(trainingAutopilot, selection, readSource);
   const replay = executor === null ? null : replayChip(executor);
   const verdictsChip = verdictChip(flight);
   const flightFacts = `${flight.typecode ?? "type unknown"} · ${flight.stratum} · ${flight.rows} steps · ` +
     `${verdicts.instructionsAfterStep0} words after step 0 · ${verdicts.silentSteps} of ${flight.rows - 1} later steps silent`;
-  // the Fly button: the selected TRUTH word's segment, and what the live executor is doing with it
-  const focusRun = focusColumn === null || generated !== null ? null : trainingWordAt(flight, focusColumn, cursorRow);
-  const pickedHere = focusRun !== null && trainingPick !== null && trainingPick.column === focusColumn
-    && trainingPick.row === focusRun.row;
+  // the Fly button: the selected word's segment of the sentence read, and what the live executor is doing with it
+  const focusRun = focusColumn === null ? null : sentenceWordAt(sentence, focusColumn, cursorRow);
+  /** A model's word said after its flight ended has no flight to fly. */
+  const flyable = (row: number) => generated === null || timeOf(row) < generated.endS;
+  const pickedHere = focusRun !== null && trainingPick !== null && sameSource(trainingPick.source, readSource)
+    && trainingPick.column === focusColumn && trainingPick.row === focusRun.row;
   const flyingHere = pickedHere && autopilot?.status === "flying";
   const flyLabel = flyingHere ? "Flying …" : pickedHere && autopilot !== null ? "↻ Fly again" : "▶ Fly";
   const chip = model !== null && generated !== null ? sampleChip(model, generated, flight, runwayName, stepS) : null;
@@ -396,7 +415,6 @@ export default function TrainingSentenceBar() {
                 {replay.text}
               </span>
             ) : null}
-            {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection} /> : null}
           </>
         ) : (
           <span className="training-chip training-sample-chip" title={chip!.title}
@@ -404,16 +422,20 @@ export default function TrainingSentenceBar() {
             {chip!.text}
           </span>
         )}
+        {autopilot ? <TrainingAutopilotStatus view={autopilot} selection={selection} /> : null}
         <span className="training-sentence-cursor-readout">t = {formatSeconds(cursorS)} s · step {cursorRow}</span>
-        {generated === null ? (
-          <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere}
-            title={focusRun === null
-              ? "Select a word (click its band): the executor then flies that word's segment from where it was said."
-              : `The executor flies ${focusColumn} from step ${focusRun.row} now, on the backend, from the observed state there.`}
-            onClick={() => setTrainingPick(nextPick(trainingPick, focusColumn!, focusRun!.row))}>
-            {flyLabel}
-          </button>
-        ) : null}
+        <button type="button" className="training-autopilot-fly" disabled={focusRun === null || flyingHere || !flyable(focusRun.row)}
+          title={focusRun === null
+            ? "Select a word (click its band): the executor then flies that word's segment from where it was said."
+            : !flyable(focusRun.row)
+              ? `The model said this word after its flight had ended (${formatSeconds(generated!.endS)} s): there is no flight to fly.`
+              : generated === null
+                ? `The executor flies ${focusColumn} from step ${focusRun.row} now, on the backend, from the observed state there.`
+                : `The executor flies the model's sentence again from its first step (${generated.firstRow}) to the end of this ` +
+                  `${focusColumn} word's segment, on the backend — the sample's own flight — and judges the word.`}
+          onClick={() => setTrainingPick(nextPick(trainingPick, readSource, focusColumn!, focusRun!.row))}>
+          {flyLabel}
+        </button>
         {generated === null ? (
           <button type="button" className="training-sentence-readback-button" aria-pressed={openWindow === "readback"}
             title="The truth sentence against its track, envelope by envelope" onClick={() => toggle("readback")}>
@@ -440,14 +462,6 @@ export default function TrainingSentenceBar() {
           viewBox={`0 0 ${GUTTER + plotW + PAD_R} ${VIEW_H}`} role="group"
           aria-label={generated === null ? `The sentence of ${flight.callsign} on runway ${flight.runway}`
             : `${model!.overlay.model.label}'s sentence ${generated.sample + 1} for ${flight.callsign}`}>
-          <defs>
-            <pattern id={HATCH_ID} patternUnits="userSpaceOnUse" width={5} height={5} patternTransform="rotate(45)">
-              <line x1={0} y1={0} x2={0} y2={5} stroke="#ffffff" strokeOpacity={0.28} strokeWidth={1.6} />
-            </pattern>
-            <pattern id={OBSERVED_ID} patternUnits="userSpaceOnUse" width={6} height={6} patternTransform="rotate(-45)">
-              <line x1={0} y1={0} x2={0} y2={6} stroke={TRAINING_RAW_COLOR} strokeOpacity={0.35} strokeWidth={1} />
-            </pattern>
-          </defs>
           {/* the steps that say something: numbers along the top, each a button */}
           {issueRows.map((row, index) => {
             const left = index === 0 ? GUTTER : xFor((timeOf(issueRows[index - 1]) + timeOf(row)) / 2);
@@ -478,7 +492,7 @@ export default function TrainingSentenceBar() {
               className="training-sentence-observed">
               <title>steps 0–{generated.firstRow - 1}: observed only — the model speaks from step {generated.firstRow}</title>
               <rect x={GUTTER} y={HEAD_H} width={Math.max(observedW, 0)} height={TRAINING_COLUMNS.length * ROW_H}
-                fill={`url(#${OBSERVED_ID})`} />
+                fill={TRAINING_RAW_COLOR} fillOpacity={0.12} />
               {observedW >= OBSERVED_LABEL_MIN_W ? (
                 <text x={GUTTER + observedW / 2} y={HEAD_H + (TRAINING_COLUMNS.length * ROW_H) / 2 + 4} textAnchor="middle"
                   className="training-sentence-observed-label">observed</text>
@@ -513,12 +527,12 @@ export default function TrainingSentenceBar() {
                   const choose = () => {
                     if (selected) {
                       setFocusColumn(null);
-                      if (generated === null) setTrainingPick(null);
+                      setTrainingPick(null);
                       return;
                     }
                     setFocusColumn(column);
                     setCursorS(timeOf(run.row));
-                    if (generated === null && trainingAutopilotAuto) setTrainingPick(nextPick(trainingPick, column, run.row));
+                    if (trainingAutopilotAuto && flyable(run.row)) setTrainingPick(nextPick(trainingPick, readSource, column, run.row));
                   };
                   return (
                     <g key={`${column}-${run.row}`} role="button" tabIndex={0} aria-label={title} aria-pressed={selected}
@@ -529,13 +543,7 @@ export default function TrainingSentenceBar() {
                       <title>{title}</title>
                       <rect x={x + 1} y={y + 4} width={Math.max(width - 2, 1)} height={ROW_H - 8} rx={3} fill={colour}
                         fillOpacity={selected ? 0.4 : 0.16} stroke={selected ? TRAINING_WORD_COLOR : colour}
-                        strokeOpacity={selected ? 1 : 0.6} strokeWidth={selected ? 2 : 1}
-                        strokeDasharray={generated === null || selected ? undefined : "3 2"} className="training-sentence-band-fill" />
-                      {/* a model's word: hatched, so it never passes for a labelled one */}
-                      {generated !== null ? (
-                        <rect x={x + 1} y={y + 4} width={Math.max(width - 2, 1)} height={ROW_H - 8} rx={3}
-                          fill={`url(#${HATCH_ID})`} pointerEvents="none" className="training-sentence-hatch" />
-                      ) : null}
+                        strokeOpacity={selected ? 1 : 0.6} strokeWidth={selected ? 2 : 1} className="training-sentence-band-fill" />
                       {/* the issue itself */}
                       <rect x={x} y={y + 2} width={2} height={ROW_H - 4} fill={colour} className="training-sentence-issue" />
                       {/* the executor's verdict on this word */}
@@ -574,6 +582,14 @@ export default function TrainingSentenceBar() {
             </g>
           ) : null}
 
+          {/* a model's sentence: a strip in its colour down the left edge of its rows */}
+          {generated !== null ? (
+            <rect x={GUTTER - MODEL_STRIP_W - 2} y={HEAD_H} width={MODEL_STRIP_W} height={TRAINING_COLUMNS.length * ROW_H} rx={2}
+              fill={modelColour!} className="training-sentence-model-strip">
+              <title>{model!.overlay.model.label}'s own sentence, sample {generated.sample + 1}</title>
+            </rect>
+          ) : null}
+
           {/* the moments that are not words */}
           {markers.map((marker) => (
             <g key={marker.key} aria-label={marker.title}>
@@ -586,6 +602,14 @@ export default function TrainingSentenceBar() {
 
           <line x1={GUTTER} x2={GUTTER + plotW} y1={HEAD_H + TRAINING_COLUMNS.length * ROW_H}
             y2={HEAD_H + TRAINING_COLUMNS.length * ROW_H} className="training-sentence-axis" />
+          {endLabelX !== null ? (
+            <text x={endLabelX} y={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 15}
+              textAnchor={endAnchoredEnd ? "end" : "middle"}
+              className="training-sentence-tick training-sentence-model-end" fill={modelColour!}
+              aria-label={`${model!.overlay.model.label}'s flight ended at ${formatSeconds(generated!.endS)} s`}>
+              {formatSeconds(generated!.endS)} s
+            </text>
+          ) : null}
           {tickRows.map((row, index) => (tickShown[index] ? (
             <text key={`tick-${row}`} x={xFor(timeOf(row))} y={HEAD_H + TRAINING_COLUMNS.length * ROW_H + 15}
               textAnchor={index === tickRows.length - 1 ? "end" : "middle"} className="training-sentence-tick">
@@ -606,15 +630,18 @@ export default function TrainingSentenceBar() {
           <span>
             A band is a word in force, from the tick where it was issued to the next word of its column; step 0 gives all
             six. Click a band to select its word — here, in the read-back check and in 3D — and again to clear it; ▶ Fly
-            flies the selected truth word's segment live (a band click does too, with the panel's "Fly on band click" on). The
+            flies the selected word's segment live (a band click does too, with the panel's "Fly on band click" on). The
             dashed lines: the clearance, the capture of the final, the speed left to the pilot.
           </span>
           {models.length > 0 ? (
             <span>
               The tabs choose the sentence read: the truth, or a model's own — one of its samples, numbered (✗: its flight did
-              not land). A model's words are hatched with a dashed edge; the grey hatch before its first step is what it only
-              observed; a white tick under a row is where the truth says a word of that column; the solid line in the model's
-              colour is where its flight ended, the dashed white one where the observed flight's sentence ends; words under the
+              not land). Its words are drawn like the truth's; the frame in the model's colour — the bar's border, the strip
+              down the rows — says whose they are; the grey before its first step is what it only observed; a white tick under
+              a row is where the truth says a word of that column; the solid line in the model's colour is where its flight
+              ended, its time written under it on the axis, the dashed white one where the observed flight's sentence ends; its
+              words fly live like the truth's: the executor flies its sentence again from its first step — the sample's own
+              flight — except a word said after its flight ended; words under the
               dark shade after it were said to a flight already over (the executor flies on after crossing the threshold
               without the capture, or a stall). The time axis runs on past the observed flight's when the model's flight
               lasts longer. The Read-back and Prior windows read the truth: they are offered on its tab.

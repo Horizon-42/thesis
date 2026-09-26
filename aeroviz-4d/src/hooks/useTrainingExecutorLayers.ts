@@ -25,7 +25,7 @@ import * as Cesium from "cesium";
 import { useApp } from "../context/AppContext";
 import { isCesiumViewerUsable } from "../utils/isCesiumViewerUsable";
 import { TRAINING_EXECUTOR_COLOR, TRAINING_OUTSIDE_COLOR } from "../utils/trainingWordColors";
-import { overlayOnScreen, type TrainingExecutorFlown } from "../data/trainingOverlays";
+import { overlayOnScreen, sourceOnScreen, type TrainingExecutorFlown } from "../data/trainingOverlays";
 import {
   autopilotAircraftLabel,
   autopilotColour,
@@ -106,7 +106,9 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
       return at.index === last ? positions : [...positions.slice(0, at.index + 1), aircraftAt(at)];
     }, false), hue, 4));
   group.add({
-    id: TRAINING_ENTITY.autopilotStart, name: "Where the autopilot took over: the observed state as the word was said",
+    id: TRAINING_ENTITY.autopilotStart,
+    name: segment.source.kind === "truth" ? "Where the autopilot took over: the observed state as the word was said"
+      : "Where the model said the word: its flight, flown again from the model's first step, at that step",
     position: positions[0],
     point: { pixelSize: 8, color: colour(hue), outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5,
       disableDepthTestDistance: Number.POSITIVE_INFINITY },
@@ -153,11 +155,12 @@ function flyOut(viewer: Cesium.Viewer, view: Ready, bandsShown: () => boolean, o
 }
 
 export default function useTrainingExecutorLayers(): void {
-  const { viewer, mode, trainingSelection, trainingLayers, trainingExecutor, trainingAutopilot } = useApp();
+  const { viewer, mode, trainingSelection, trainingLayers, trainingExecutor, trainingAutopilot, trainingGenerations, trainingSource } = useApp();
   const selection = mode === "training" ? trainingSelection : null;
   const replay = overlayOnScreen(trainingExecutor, selection)?.flight ?? null;
   const flown = replay?.flown ? replay : null;
-  const live = autopilotOnScreen(trainingAutopilot, selection);
+  // the live answer of the sentence read: the truth's word, or the model's sample on screen
+  const live = autopilotOnScreen(trainingAutopilot, selection, sourceOnScreen(trainingGenerations, trainingSource, selection).source);
   // a segment of one state (a dynamics failure in its first cycle) has no line to fly out: the card and the status say so
   const ready = live?.status === "ready" && autopilotHasLine(live.segment) ? live : null;
   const { headingBands } = trainingLayers;

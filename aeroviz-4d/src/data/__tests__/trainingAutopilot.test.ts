@@ -1,22 +1,30 @@
 /**
  * The live executor's reader: an answer is accepted only for the segment on screen — the same flight, the run's own end,
- * the vocabulary of the set, and the very words the sentence bar shows for it — and refused whole, by name, otherwise.
+ * the vocabulary of the set, and the very words the sentence bar shows for it — and refused whole, by name, otherwise. A
+ * model's word is asked with its sentence and answered as its: no observed time, no offset from the observed aircraft.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseTrainingSample, TRAINING_UNCHANGED, type TrainingSample } from "../trainingSample";
 import {
   autopilotHasLine,
+  autopilotOnScreen,
+  autopilotSampleGap,
   parseTrainingAutopilot,
   requestTrainingAutopilot,
   segmentWords,
+  trainingAutopilotRequest,
   TRAINING_AUTOPILOT_CLIENT_ID,
   TRAINING_AUTOPILOT_PATH,
   TRAINING_AUTOPILOT_SCHEMA,
   TRAINING_AUTOPILOT_SEGMENT_END,
 } from "../trainingAutopilot";
 import { VECTORED_KEY, WORD, mockSample } from "./trainingSample.fixture";
-import { failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "./trainingAutopilot.fixture";
+import {
+  failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockModelAutopilotRequest, mockSelection, onSampleLine,
+} from "./trainingAutopilot.fixture";
+import { BASE_MODEL_ID, MOCK_GENERATION_FIRST_ROW, mockGenerationViews } from "./trainingOverlays.fixture";
+import type { TrainingGeneratedSentence } from "../trainingOverlays";
 
 function sample(): TrainingSample {
   const parsed = parseTrainingSample(mockSample());
@@ -36,16 +44,109 @@ function refusal(change: (raw: any) => void, request = HEADING_225): string {
   return result.problem;
 }
 
+/** The base model's first sample of the vectored flight, and its heading 225° said at step 12, asked for. */
+function modelAsk(set: TrainingSample, sampleIndex = 0) {
+  const sentence: TrainingGeneratedSentence = mockGenerationViews(set)[0].flight.samples[sampleIndex];
+  return { sentence, request: mockModelAutopilotRequest(set, VECTORED_KEY, "heading", 12, BASE_MODEL_ID, sentence) };
+}
+
 describe("the words a segment is told", () => {
   it("are the six in force at its first step, then every word said before its end, by step then column", () => {
     const flight = sample().flights[0];
-    const words = segmentWords(flight, 10, 60);
+    const words = segmentWords(mockAutopilotRequest(sample(), flight.flightKey, "heading", 10), flight, 60);
     expect(words.slice(0, 6).map((word) => word.value)).toEqual([
       WORD.runway09, WORD.notCleared, WORD.heading180, WORD.altitude1110, WORD.level, WORD.speed110,
     ]);
     expect(words.every((word, index) => index < 6 ? word.row === 10 : word.row > 10)).toBe(true);
     expect(words.slice(6).map((word) => [word.row, word.column])).toEqual([[20, 1], [20, 3], [20, 4], [30, 5]]);
     expect(words.some((word) => word.value === TRAINING_UNCHANGED)).toBe(false);
+  });
+
+  it("are a model's whole sentence from its first step to the segment's stop — it is flown again from there", () => {
+    const set = sample();
+    const { request } = modelAsk(set);
+    const words = segmentWords(request, set.flights[0], 18);
+    expect(words[0].row).toBe(MOCK_GENERATION_FIRST_ROW);
+    expect(words.map((word) => [word.row, word.column])).toEqual([
+      [4, 0], [4, 1], [4, 2], [4, 3], [4, 4], [4, 5], [12, 2], [16, 2],
+    ]);
+  });
+});
+
+describe("a model's word", () => {
+  it("is asked with its sentence — refused without it, or with the truth's pick", () => {
+    const set = sample();
+    const { sentence } = modelAsk(set);
+    const selection = mockSelection(set, mockAutopilotRequest(set, VECTORED_KEY, "heading", 8));
+    const source = { overlayId: BASE_MODEL_ID, sample: 0 };
+    const asked = trainingAutopilotRequest(selection, { source, column: "heading", row: 12, attempt: 0 }, sentence);
+    expect(asked.sentence).toMatchObject({ overlayId: BASE_MODEL_ID, sample: 0, firstRow: MOCK_GENERATION_FIRST_ROW, rows: 56 });
+    expect(asked.sentence!.events).toHaveLength(sentence.events.length);
+    expect(() => trainingAutopilotRequest(selection, { source, column: "heading", row: 12, attempt: 0 }, null)).toThrow(/with its sentence/);
+    expect(() => trainingAutopilotRequest(selection, { source: null, column: "heading", row: 8, attempt: 0 }, sentence)).toThrow();
+  });
+
+  it("reads as the model's: its source echoed, no observed time, no offset from the observed aircraft", () => {
+    const set = sample();
+    const { request } = modelAsk(set);
+    const parsed = parseTrainingAutopilot(mockAutopilotAnswer(set, request), request, mockSelection(set, request));
+    if (!parsed.ok) throw new Error(parsed.problem);
+    expect(parsed.value.source).toEqual({ kind: "model", overlayId: BASE_MODEL_ID, sample: 0, firstRow: MOCK_GENERATION_FIRST_ROW });
+    // heading 225° said at 12, the next heading word at 16, flown a lead past it
+    expect(parsed.value.segment).toMatchObject({ row: 12, endRow: 16, stopRow: 18, observedS: null });
+    expect(parsed.value.end.offsetFromObserved).toBeNull();
+    expect(parsed.value.word.heading!.targetOnTrackDeg).toBe(225);
+  });
+
+  it("refuses another sentence flown, an observed time, and an offset from the observed aircraft", () => {
+    const set = sample();
+    const { request } = modelAsk(set);
+    const refused = (change: (raw: any) => void) => {
+      const raw = mockAutopilotAnswer(set, request);
+      change(raw);
+      const result = parseTrainingAutopilot(raw, request, mockSelection(set, request));
+      if (result.ok) throw new Error("the change was accepted");
+      return result.problem;
+    };
+    expect(refused((raw) => { raw.source = { kind: "truth" }; })).toMatch(/flew the truth, but generation_base #0 was asked for/);
+    expect(refused((raw) => { raw.source.sample = 1; })).toMatch(/flew generation_base #1, but generation_base #0 was asked for/);
+    expect(refused((raw) => { raw.segment.observedS = 12; })).toMatch(/gives an observed time for a model's word/);
+    expect(refused((raw) => { raw.end.offsetFromObserved = { horizontalM: 1, aboveM: 0, groundSpeedMps: 0 }; }))
+      .toMatch(/offsetFromObserved is given exactly when the truth's flight ended at its segment's end/);
+    // and the truth's word answered as a model's
+    const truth = mockAutopilotRequest(set, VECTORED_KEY, "heading", 8);
+    const raw = mockAutopilotAnswer(set, truth);
+    raw.source = { kind: "model", overlayId: BASE_MODEL_ID, sample: 0, firstRow: 4 };
+    const result = parseTrainingAutopilot(raw, truth, mockSelection(set, truth));
+    expect(result.ok ? "" : result.problem).toMatch(/flew generation_base #0, but the truth was asked for/);
+  });
+
+  it("is drawn only over the sentence it flew", () => {
+    const set = sample();
+    const { request } = modelAsk(set);
+    const selection = mockSelection(set, request);
+    const view = { status: "flying" as const, request };
+    expect(autopilotOnScreen(view, selection, { overlayId: BASE_MODEL_ID, sample: 0 })).toBe(view);
+    expect(autopilotOnScreen(view, selection, { overlayId: BASE_MODEL_ID, sample: 1 })).toBeNull();
+    expect(autopilotOnScreen(view, selection, null)).toBeNull();
+  });
+
+  it("says how closely the live flight lands on the sample it re-flies, at the times both hold a point", () => {
+    const set = sample();
+    const { request, sentence } = modelAsk(set);
+    const read = (raw: Record<string, any>) => {
+      const parsed = parseTrainingAutopilot(raw, request, mockSelection(set, request));
+      if (!parsed.ok) throw new Error(parsed.problem);
+      return parsed.value;
+    };
+    // flown 24–36 s every second; the sample holds a point every 2 s: seven shared
+    expect(autopilotSampleGap(read(onSampleLine(mockAutopilotAnswer(set, request))), sentence)).toEqual({ gapM: 0, points: 7 });
+    const moved = onSampleLine(mockAutopilotAnswer(set, request));
+    moved.track.altitudeM[4] += 3;                                     // 28 s, a shared time
+    moved.track.altitudeM[5] += 50;                                    // 29 s, the sample has no point there
+    expect(autopilotSampleGap(read(moved), sentence)!.gapM).toBeCloseTo(3, 9);
+    expect(autopilotSampleGap(read(onSampleLine(mockAutopilotAnswer(set, request))),
+      { ...sentence, track: { ...sentence.track, tS: sentence.track.tS.map((at) => at + 0.5) } })).toBeNull();
   });
 });
 

@@ -5,21 +5,34 @@
  *
  * The flown track is a straight line at 1 s cycles from the segment's first step to its stop (`segmentStopRow`: a
  * heading word's a lead past the next heading word); a heading word carries its band from its step plus the lead to the
- * next heading word's plus the lead, every row inside.
+ * next heading word's plus the lead, every row inside. A MODEL's word (`mockModelAutopilotRequest`, a sample of the
+ * generation fixture) is answered the same way over the model's sentence, with no observed time and no offset from the
+ * observed aircraft.
  */
 
 import {
+  requestSentence,
   segmentStopRow,
   segmentWords,
   TRAINING_AUTOPILOT_SCHEMA,
   TRAINING_AUTOPILOT_SEGMENT_END,
   type TrainingAutopilotRequest,
 } from "../trainingAutopilot";
-import { trainingColumnRuns, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";
+import { sentenceColumnRuns, trainingSelectionOf, type TrainingSample, type TrainingSelection } from "../trainingSample";
+import type { TrainingGeneratedSentence } from "../trainingOverlays";
+import { mockGeneratedPoint } from "./trainingOverlays.fixture";
 
 export function mockAutopilotRequest(sample: TrainingSample, flightKey: string, column: TrainingAutopilotRequest["column"],
   row: number): TrainingAutopilotRequest {
-  return { airport: sample.airport, setId: sample.setId, flightKey, column, row };
+  return { airport: sample.airport, setId: sample.setId, flightKey, column, row, sentence: null };
+}
+
+/** A request for a MODEL's word: ``sentence`` (a sample the generation fixture's reader gave) of ``overlayId``. */
+export function mockModelAutopilotRequest(sample: TrainingSample, flightKey: string, column: TrainingAutopilotRequest["column"],
+  row: number, overlayId: string, sentence: TrainingGeneratedSentence): TrainingAutopilotRequest {
+  return { airport: sample.airport, setId: sample.setId, flightKey, column, row,
+    sentence: { overlayId, sample: sentence.sample, firstRow: sentence.firstRow, rows: sentence.rows,
+      events: sentence.events.map(({ row: step, column: index, value }) => ({ row: step, column: index, value })) } };
 }
 
 /** The flight on screen that ``request`` asks about: its selection. */
@@ -30,12 +43,14 @@ export function mockSelection(sample: TrainingSample, request: TrainingAutopilot
 /** A consistent answer for ``request`` over ``sample``; ``cycles`` flown (to the segment's end unless it is the last word). */
 export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAutopilotRequest): Record<string, any> {
   const flight = sample.flights.find((item) => item.flightKey === request.flightKey)!;
-  const run = trainingColumnRuns(flight, request.column).find((item) => item.row === request.row)!;
+  const sentence = requestSentence(request, flight);
+  const model = request.sentence;
+  const run = sentenceColumnRuns(sentence, request.column).find((item) => item.row === request.row)!;
   const stepS = sample.vocabulary.stepS;
   const lead = sample.vocabulary.headingLeadRows;
-  const stopRow = segmentStopRow(flight, request.column, run.endRow, lead);
-  const toLanding = stopRow === flight.rows;
-  const steps = (toLanding ? flight.rows - 1 : stopRow) - run.row;
+  const stopRow = segmentStopRow(sentence.rows, request.column, run.endRow, lead);
+  const toLanding = stopRow === sentence.rows;
+  const steps = (toLanding ? sentence.rows - 1 : stopRow) - run.row;
   const cycles = steps * stepS;                     // one-second cycles
   const n = cycles + 1;
   const along = Array.from({ length: n }, (_, index) => index);
@@ -44,7 +59,9 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
   const judgedSteps = steps + 1;
   const firstRow = run.row + lead;
   const bandStop = Math.max(firstRow, Math.min(run.endRow + lead, run.row + judgedSteps));
-  const envelope = flight.envelopes.heading.find((item) => item.row === run.row);
+  // the truth's heading word's target as its envelope reads it; a model's, the vocabulary's
+  const targetDeg = model === null ? flight.envelopes.heading.find((item) => item.row === run.row)?.targetDeg
+    : sample.vocabulary.headingTargetsDeg[run.value];
   const tolerance = sample.vocabulary.headingToleranceDeg;
   const inside = Array.from({ length: bandStop - firstRow }, () => 1);
   return {
@@ -59,22 +76,25 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
     artefact: "4dTrajectory/outputs/POOLED/instruction_language/test",
     vocabularySpecSha256: sample.vocabulary.specSha256,
     group: "own dynamics",
+    source: model === null ? { kind: "truth" }
+      : { kind: "model", overlayId: model.overlayId, sample: model.sample, firstRow: model.firstRow },
     segment: {
-      column: request.column, row: run.row, endRow: run.endRow, stopRow, toLanding, observedS: steps * stepS,
-      told: segmentWords(flight, run.row, stopRow),
+      column: request.column, row: run.row, endRow: run.endRow, stopRow, toLanding, observedS: model === null ? steps * stepS : null,
+      told: segmentWords(request, flight, stopRow),
     },
     end: toLanding
       ? { reason: "landed", reachedSegmentEnd: null, offsetFromObserved: null, flownS: cycles,
           crossing: { crossM: -1.5, heightM: 15.2, atS: tS[n - 1] }, refused: null }
       : { reason: TRAINING_AUTOPILOT_SEGMENT_END, reachedSegmentEnd: true,
-          offsetFromObserved: { horizontalM: 120, aboveM: -8, groundSpeedMps: 1.5 }, flownS: cycles, crossing: null, refused: null },
+          offsetFromObserved: model === null ? { horizontalM: 120, aboveM: -8, groundSpeedMps: 1.5 } : null, flownS: cycles,
+          crossing: null, refused: null },
     word: judged
       ? { status: inside.every(Boolean) ? "inside" : "outside",
           checks: [{ name: "track within the tolerance of the word", ok: inside.every(Boolean),
                      inside: inside.filter(Boolean).length, rows: inside.length }],
           reason: null,
-          heading: { firstRow, stopRow: bandStop, targetOnTrackDeg: envelope!.targetDeg,
-                     bandDeg: [envelope!.targetDeg - tolerance, envelope!.targetDeg + tolerance], inside } }
+          heading: { firstRow, stopRow: bandStop, targetOnTrackDeg: targetDeg!,
+                     bandDeg: [targetDeg! - tolerance, targetDeg! + tolerance], inside } }
       : { status: "no check", checks: [], reason: "the runway pointer: judged by the landing", heading: null },
     limits: { cycles, bound: { bank_cap: 0, bank_rate: 2 } },
     track: {
@@ -86,6 +106,16 @@ export function mockAutopilotAnswer(sample: TrainingSample, request: TrainingAut
     },
     judgedTrackDeg: judged ? Array.from({ length: judgedSteps }, () => 225) : null,
   };
+}
+
+/** ``answer`` (a model word's) flown on its sample's own line (`mockGeneratedPoint`), as the deterministic executor
+ *  flies a model's sentence again. */
+export function onSampleLine(answer: Record<string, any>): Record<string, any> {
+  const points = answer.track.tS.map(mockGeneratedPoint);
+  answer.track.lon = points.map((point: { lon: number }) => point.lon);
+  answer.track.lat = points.map((point: { lat: number }) => point.lat);
+  answer.track.altitudeM = points.map((point: { altitudeM: number }) => point.altitudeM);
+  return answer;
 }
 
 /** ``answer`` (a heading word's, `mockAutopilotAnswer`) as a dynamics failure after ``states`` − 1 cycles: the failed

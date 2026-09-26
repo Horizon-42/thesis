@@ -472,6 +472,22 @@ export function generationOnScreen(
   return { view, sentence: samples.length === 0 ? null : samples[Math.min(source.sample, samples.length - 1)] };
 }
 
+/** A model sentence the views read (`generationOnScreen`) as the source it is — its overlay and the sample shown — or
+ *  null for the truth (no model chosen, or one its readout does not fly this flight). What the live executor flies and
+ *  what its answer must be of (`trainingAutopilot.autopilotOnScreen`). */
+export function sourceOf(read: ReturnType<typeof generationOnScreen>): TrainingSource | null {
+  return read === null || read.sentence === null ? null : { overlayId: read.view.overlay.overlayId, sample: read.sentence.sample };
+}
+
+/** The sentence read for the flight on screen, as a source (`sourceOf`), with that sample. */
+export function sourceOnScreen(
+  views: TrainingGenerationView[], source: TrainingSource | null, selection: TrainingSelection | null,
+): { source: TrainingSource | null; sentence: TrainingGeneratedSentence | null } {
+  const read = generationOnScreen(views, source, selection);
+  const shown = sourceOf(read);
+  return { source: shown, sentence: shown === null ? null : read!.sentence };
+}
+
 /** The row of a model's sentence at a flight time — past its last row when the cursor is (the observed flight may last
  *  longer): no word is in force there. */
 export function generatedRowAt(stepS: number, seconds: number): number {

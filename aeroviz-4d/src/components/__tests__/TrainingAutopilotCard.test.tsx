@@ -1,13 +1,17 @@
 /**
  * The live executor's card in the Training panel: nothing before a word is flown, a refusal with its reason, and a
  * flown segment written out — the word it flew, its verdict first, the two times, the rest in Details — with "Replay
- * in 3D", which asks the backend nothing; a refusal's "Fly again" picks the word anew.
+ * in 3D", which asks the backend nothing; a refusal's "Fly again" picks the word anew. A model's word says it has no
+ * observed counterpart, and how closely the live flight lands on the sample it re-flies.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 const { appState, replayTrainingAutopilot, setTrainingPick } = vi.hoisted(() => ({
-  appState: { trainingAutopilot: null as unknown, trainingSelection: null as unknown, trainingPick: null as unknown },
+  appState: {
+    trainingAutopilot: null as unknown, trainingSelection: null as unknown, trainingPick: null as unknown,
+    trainingGenerations: [] as unknown[], trainingSource: null as unknown,
+  },
   replayTrainingAutopilot: vi.fn(),
   setTrainingPick: vi.fn(),
 }));
@@ -21,7 +25,10 @@ import { parseTrainingSample, type TrainingSample } from "../../data/trainingSam
 import { parseTrainingAutopilot } from "../../data/trainingAutopilot";
 import { formatElapsed } from "../../data/trainingText";
 import { VECTORED_KEY, mockSample } from "../../data/__tests__/trainingSample.fixture";
-import { failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockSelection } from "../../data/__tests__/trainingAutopilot.fixture";
+import {
+  failedAnswer, mockAutopilotAnswer, mockAutopilotRequest, mockModelAutopilotRequest, mockSelection, onSampleLine,
+} from "../../data/__tests__/trainingAutopilot.fixture";
+import { BASE_MODEL_ID, mockGenerationViews } from "../../data/__tests__/trainingOverlays.fixture";
 
 function sample(): TrainingSample {
   const parsed = parseTrainingSample(mockSample());
@@ -38,6 +45,8 @@ describe("TrainingAutopilotCard", () => {
     appState.trainingAutopilot = null;
     appState.trainingSelection = mockSelection(set, request());
     appState.trainingPick = null;
+    appState.trainingGenerations = [];
+    appState.trainingSource = null;
     replayTrainingAutopilot.mockClear();
     setTrainingPick.mockClear();
   });
@@ -55,16 +64,16 @@ describe("TrainingAutopilotCard", () => {
 
   it("flies a refused word again — the word asked for, whichever the bar has selected since", () => {
     appState.trainingAutopilot = { status: "failed", request: request(), problem: "the backend did not answer" };
-    appState.trainingPick = { column: "heading", row: 8, attempt: 2 };
+    appState.trainingPick = { source: null, column: "heading", row: 8, attempt: 2 };
     const { rerender } = render(<TrainingAutopilotCard />);
     fireEvent.click(screen.getByRole("button", { name: "Fly again" }));
-    expect(setTrainingPick).toHaveBeenCalledWith({ column: "heading", row: 8, attempt: 3 });
+    expect(setTrainingPick).toHaveBeenCalledWith({ source: null, column: "heading", row: 8, attempt: 3 });
     // the pick has moved on to another word since: that word is not flown, the refused one is
     setTrainingPick.mockClear();
-    appState.trainingPick = { column: "altitude", row: 20, attempt: 0 };
+    appState.trainingPick = { source: null, column: "altitude", row: 20, attempt: 0 };
     rerender(<TrainingAutopilotCard />);
     fireEvent.click(screen.getByRole("button", { name: "Fly again" }));
-    expect(setTrainingPick).toHaveBeenCalledWith({ column: "heading", row: 8, attempt: 0 });
+    expect(setTrainingPick).toHaveBeenCalledWith({ source: null, column: "heading", row: 8, attempt: 0 });
   });
 
   it("says how a flight that failed in its first cycle ended, and offers nothing to replay", () => {
@@ -122,6 +131,47 @@ describe("TrainingAutopilotCard", () => {
     render(<TrainingAutopilotCard />);
     expect(document.querySelector("details.training-autopilot-details")!.textContent).toMatch(
       /flight kept from an earlier request \(0 ms\) · .* · waited 1\.50 s for the flight before it · round trip 2\.00 s\./);
+  });
+
+  it("writes a model's word out: no observed time, the sample it re-flies and how closely the live flight lands on it", () => {
+    appState.trainingGenerations = mockGenerationViews(set);
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    const sentence = mockGenerationViews(set)[0].flight.samples[0];
+    const asked = mockModelAutopilotRequest(set, VECTORED_KEY, "heading", 12, BASE_MODEL_ID, sentence);
+    const show = (raw: Record<string, any>) => {
+      const answer = parseTrainingAutopilot(raw, asked, mockSelection(set, asked));
+      if (!answer.ok) throw new Error(answer.problem);
+      appState.trainingAutopilot = { status: "ready", request: asked, segment: answer.value, playedAt: 1, roundTripS: 0.5 };
+      return render(<TrainingAutopilotCard />);
+    };
+    const { unmount } = show(onSampleLine(mockAutopilotAnswer(set, asked)));
+    expect(document.querySelector(".training-autopilot-title")!.textContent).toBe("heading 225° · steps 12–16, flown on to step 18");
+    expect(screen.getByLabelText("Simulated flight time").textContent).toBe("Simulated flight12.0 sa model's word");
+    expect(document.querySelector(".training-autopilot-sample")!.textContent)
+      .toBe("✓ the sample's own flight — 0.00 m at most from sample #1 over 7 points");
+    const details = document.querySelector("details.training-autopilot-details")!.textContent!;
+    expect(details).toMatch(/^DetailsThe model's sentence flown again from its first step \(4\)/);
+    expect(details).not.toMatch(/from the observed aircraft/);
+    // the executor's limits count over the whole re-flight, and say so
+    expect(details).toMatch(/cycles of 1 s judged — the model's whole flight from its first step \(4\), not only this word's segment/);
+    unmount();
+    // a live flight off the sample: the backend's executor is not the one that flew it
+    const moved = onSampleLine(mockAutopilotAnswer(set, asked));
+    moved.track.altitudeM[4] += 30;
+    show(moved);
+    expect(document.querySelector(".training-autopilot-sample")!.textContent)
+      .toBe("✗ not the sample's flight — 30 m at most from sample #1 over 7 points");
+  });
+
+  it("shows nothing for the answer of a sentence not read", () => {
+    const asked = request();
+    const answer = parseTrainingAutopilot(mockAutopilotAnswer(set, asked), asked, mockSelection(set, asked));
+    if (!answer.ok) throw new Error(answer.problem);
+    appState.trainingAutopilot = { status: "ready", request: asked, segment: answer.value, playedAt: 1, roundTripS: 0.5 };
+    appState.trainingGenerations = mockGenerationViews(set);
+    appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 0 };
+    const { container } = render(<TrainingAutopilotCard />);
+    expect(container.innerHTML).toBe("");
   });
 
   it("turns the verdict red and says how a flight that ended badly ended", () => {
