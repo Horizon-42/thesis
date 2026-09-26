@@ -59,6 +59,7 @@ LEGACY_EGM96_ALTITUDE_SOURCE = "opensky_history_geoaltitude_m_to_msl_egm96"
 #                  ``threshold["elevation_m"] + height``, and threshold elevations are MSL.
 MSL_ALTITUDE_SOURCES = frozenset({MSL_ALTITUDE_SOURCE, "synthetic"})
 
+
 def _runway_offset(flight: dict[str, Any]) -> float:
     target = flight.get("runway_target") or {}
     required = ("elevation_hae_m", "elevation_msl_m", "hae_minus_msl_m",

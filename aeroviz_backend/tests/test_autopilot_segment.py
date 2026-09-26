@@ -1097,7 +1097,8 @@ class ModelSegmentTest(unittest.TestCase):
         states = torch.zeros(1, cycles + 1, 7, dtype=torch.float64)
         states[0, :, LAT] = 35.0
         states[0, :, LON] = -78.0 + torch.arange(cycles + 1, dtype=torch.float64) * 100.0 / (111320.0 * 0.8191520)
-        states[0, :, ALT], states[0, :, SPEED_STATE], states[0, :, MASS] = 900.0, 100.0, 60000.0
+        states[0, :, SPEED_STATE], states[0, :, MASS] = 100.0, 60000.0
+        states[0, :, ALT] = 900.0 - 5.0 * torch.arange(cycles + 1, dtype=torch.float64)     # a height per cycle
         run = replace(flown([float(c) for c in range(cycles)], cycles - 1), states=states,
                       commands=torch.zeros(1, cycles, 3, dtype=torch.float64))
         result = FlownSegment(segment=segment, reading=None, signals=None, model=self.sentence(), flown=run,
@@ -1109,8 +1110,9 @@ class ModelSegmentTest(unittest.TestCase):
                                 hae_minus_msl_m=-32.0)
         track, _ = track_payload(result, context, 2.0)
         self.assertEqual(track["tS"], [20.0, 21.0, 22.0, 23.0, 24.0])
-        # from the word on, at the observed track's height: MSL plus the flight's runway's HAE − MSL offset
-        self.assertEqual((track["altitudeM"], track["altitudeHaeM"]), ([900.0] * 5, [868.0] * 5))
+        # cycles 4..8, at the observed track's height: MSL plus the flight's runway's HAE − MSL offset
+        self.assertEqual(track["altitudeM"], [880.0, 875.0, 870.0, 865.0, 860.0])
+        self.assertEqual(track["altitudeHaeM"], [848.0, 843.0, 838.0, 833.0, 828.0])
         # the distance flown from the observed flight's at the sentence's first step (3200 m), 100 m a cycle
         np.testing.assert_allclose(track["distanceM"], [3600.0, 3700.0, 3800.0, 3900.0, 4000.0], atol=0.6)
         self.assertEqual(len(track["loadFactor"]), 4)
