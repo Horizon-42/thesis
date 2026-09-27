@@ -8,7 +8,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 
 const {
   appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
-  setTrainingAutopilotAuto, setTrainingGenerations, setTrainingSource, fetchMock,
+  setTrainingAutopilotAuto, setTrainingGenerations, fetchMock,
 } = vi.hoisted(() => ({
   appState: {
     activeAirportCode: "KXXX" as string,
@@ -20,7 +20,6 @@ const {
     trainingGenerations: [] as unknown[],
   },
   setTrainingGenerations: vi.fn(),
-  setTrainingSource: vi.fn(),
   setTrainingSelection: vi.fn(),
   setTrainingLayer: vi.fn(),
   setTrainingExecutor: vi.fn(),
@@ -33,14 +32,14 @@ const {
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     ...appState, setTrainingSelection, setTrainingLayer, setTrainingExecutor, setTrainingPrior, setTrainingAutopilot,
-    setTrainingAutopilotAuto, setTrainingGenerations, setTrainingSource,
+    setTrainingAutopilotAuto, setTrainingGenerations,
   }),
 }));
 
 import TrainingPanel from "../TrainingPanel";
 import { SET_ID, STRAIGHT_KEY, VECTORED_KEY, mockIndex, mockSample } from "../../data/__tests__/trainingSample.fixture";
 import {
-  AUGMENTED_R1_ID, AUGMENTED_R2_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID, BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
+  AUGSTART_BASE_ID, AUGSTART_POST_ID, BASE_MODEL_ID, EXECUTOR_ID, POST_TRAINED_ID, PRIOR_ID, mockExecutorOverlay, mockGenerationOverlay, mockOverlays,
   mockOverlaysWithGenerations, mockPriorOverlay,
 } from "../../data/__tests__/trainingOverlays.fixture";
 
@@ -82,7 +81,6 @@ describe("TrainingPanel", () => {
     setTrainingLayer.mockClear();
     setTrainingExecutor.mockClear();
     setTrainingPrior.mockClear();
-    setTrainingSource.mockClear();
     appState.trainingSource = null;
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
@@ -168,8 +166,8 @@ describe("TrainingPanel", () => {
       const prior = screen.getByLabelText("Prior predictions") as HTMLInputElement;
       expect(replay.disabled && prior.disabled).toBe(true);
       expect(replay.checked || prior.checked).toBe(false);
-      // the commands fold away under "none published" — the two switches' and the models' own sentences'
-      expect(screen.getAllByText("none published")).toHaveLength(3);
+      // the commands fold away under "none published", under each switch
+      expect(screen.getAllByText("none published")).toHaveLength(2);
       expect(screen.getByText(new RegExp(`run_ts\\.py executor_training_export .*--set ${SET_ID} --airport KXXX`)).closest("details")).not.toBeNull();
       expect(screen.getByText(new RegExp(`run_ts\\.py prior_training_export .*--set ${SET_ID} --airport KXXX`))).toBeTruthy();
       await waitFor(() => expect(lastOf(setTrainingExecutor)).toBeNull());
@@ -323,34 +321,6 @@ describe("TrainingPanel", () => {
       [BASE_PATH]: mockGenerationOverlay(BASE_MODEL_ID), [POST_PATH]: mockGenerationOverlay(POST_TRAINED_ID),
     }));
 
-    it("lists each beside the truth as the sentence read, with how many of its samples landed on this set", async () => {
-      render(<TrainingPanel hidden={false} />);
-      const group = await screen.findByRole("radiogroup", { name: "Which sentence is read" });
-      await waitFor(() => expect(group.textContent).toMatch(/base 1\/2 landed/));
-      expect(group.textContent).toMatch(/truth \(labelled\)/);
-      expect(group.textContent).toMatch(/landing r1 1\/2 landed/);
-      expect((screen.getByLabelText(/truth \(labelled\)/) as HTMLInputElement).checked).toBe(true);
-      fireEvent.click(screen.getByLabelText(/^landing r1/));
-      expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: POST_TRAINED_ID, sample: 0 });
-    });
-
-    it("groups a model published at several rounds under its name, a line per round, each choosing it", async () => {
-      const path = (id: string) => `data/airports/KXXX/training/${id}/generation.json`;
-      serve({
-        [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(),
-        [OVERLAYS_PATH]: mockOverlaysWithGenerations([AUGMENTED_R2_ID, BASE_MODEL_ID, AUGMENTED_R1_ID]),
-        ...Object.fromEntries([BASE_MODEL_ID, AUGMENTED_R1_ID, AUGMENTED_R2_ID].map((id) => [path(id), mockGenerationOverlay(id)])),
-      });
-      render(<TrainingPanel hidden={false} />);
-      const rounds = await screen.findByRole("group", { name: "augmented: the rounds published" });
-      await waitFor(() => expect(rounds.textContent).toBe("augmentedr1 1/2 landedr2 1/2 landed"));
-      const group = screen.getByRole("radiogroup", { name: "Which sentence is read" });
-      // in training order, whatever the manifest's
-      expect(group.textContent!.indexOf("base")).toBeLessThan(group.textContent!.indexOf("augmented"));
-      fireEvent.click(screen.getByLabelText(/^r2/));
-      expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: AUGMENTED_R2_ID, sample: 0 });
-    });
-
     it("marks each flight with the chosen model's samples, filled where its flight landed", async () => {
       appState.trainingSource = { overlayId: BASE_MODEL_ID, sample: 1 };
       render(<TrainingPanel hidden={false} />);
@@ -376,7 +346,7 @@ describe("TrainingPanel", () => {
       expect(base.textContent).toMatch(/trained on data alone/);
     });
 
-    it("lists the models flown from augmented starts apart, and counts them apart on the details page", async () => {
+    it("counts the models flown from augmented starts apart: in the readout line and on the details page", async () => {
       const path = (id: string) => `data/airports/KXXX/training/${id}/generation.json`;
       serve({
         [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(),
@@ -384,18 +354,15 @@ describe("TrainingPanel", () => {
         ...Object.fromEntries([BASE_MODEL_ID, POST_TRAINED_ID, AUGSTART_BASE_ID, AUGSTART_POST_ID]
           .map((id) => [path(id), mockGenerationOverlay(id)])),
       });
+      // a model read from an augmented start (chosen in the sentence bar): each flight shows its samples
       appState.trainingSource = { overlayId: AUGSTART_BASE_ID, sample: 0 };
       render(<TrainingPanel hidden={false} />);
-      const family = await screen.findByRole("group", { name: "From augmented starts" });
-      await waitFor(() => expect(family.textContent).toBe("From augmented startsbase 1/2 landedlanding r1 1/2 landed"));
-      expect((within(family).getByLabelText(/^base/) as HTMLInputElement).checked).toBe(true);
-      fireEvent.click(within(family).getByLabelText(/^landing r1/));
-      expect(setTrainingSource).toHaveBeenCalledWith({ overlayId: AUGSTART_POST_ID, sample: 0 });
+      expect(await screen.findByText("●○")).toBeTruthy();
       // the straight-in flight is not on its own dynamics: never drawn
       const unflown = [...document.querySelectorAll(".training-flight-samples")].find((item) => item.textContent === "—");
       expect(unflown?.getAttribute("title")).toBe("the model's sentences do not fly it: stand-in dynamics");
       // the readout line: the set's own starts, then the augmented ones; the details page: a table each
-      const link = screen.getByText(/^base 50% \(val 90\.0%\) · landing r1 50% \(val 97\.0%\) · augmented starts: base 50% · landing r1 50%$/);
+      const link = await screen.findByText(/^base 50% \(val 90\.0%\) · landing r1 50% \(val 97\.0%\) · augmented starts: base 50% · landing r1 50%$/);
       fireEvent.click(link);
       const page = screen.getByRole("dialog", { name: "Training details" });
       expect(within(page).getByText("From augmented starts")).toBeTruthy();
@@ -429,13 +396,6 @@ describe("TrainingPanel", () => {
       expect(await screen.findByText(/^base — \(val 90\.0%\)/)).toBeTruthy();
     });
 
-    it("checks the truth when the model chosen is not one of this set's", async () => {
-      appState.trainingSource = { overlayId: "another_sets_model", sample: 0 };
-      render(<TrainingPanel hidden={false} />);
-      await screen.findByRole("radiogroup", { name: "Which sentence is read" });
-      expect((screen.getByLabelText(/truth \(labelled\)/) as HTMLInputElement).checked).toBe(true);
-    });
-
     it("says why a model's sentences cannot be read, and asks again on Retry", async () => {
       const broken: any = mockGenerationOverlay(BASE_MODEL_ID);
       broken.schema = "aeroviz-training-generation-v0";
@@ -450,17 +410,21 @@ describe("TrainingPanel", () => {
       serve(files);
       fireEvent.click(screen.getByRole("button", { name: "Retry" }));
       await waitFor(() => expect(screen.queryByText(`Overlay ${BASE_MODEL_ID} cannot be read.`)).toBeNull());
-      const group = screen.getByRole("radiogroup", { name: "Which sentence is read" });
-      await waitFor(() => expect(group.textContent).toMatch(/base 1\/2 landed/));
+      // read now: counted in the readout line (and offered in the sentence bar's tabs)
+      expect(await screen.findByText(/^base 50% \(val 90\.0%\) · landing r1 50% \(val 97\.0%\)$/)).toBeTruthy();
     });
   });
 
-  it("says no model's sentences are published, and names the command that writes them", async () => {
+  it("with no model's sentences published, lists no readout of them and says so on the details page", async () => {
     serve({ [INDEX_PATH]: mockIndex(), [SAMPLE_PATH]: mockSample(), [OVERLAYS_PATH]: mockOverlays() });
     render(<TrainingPanel hidden={false} />);
     await screen.findByText("TST1");
-    expect(screen.getByText("Model sentences")).toBeTruthy();
-    expect(screen.getAllByText(/prior_generation_training_export/).length).toBe(1);
+    expect(screen.queryByText("Models' sentences")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Training details" }));
+    const page = screen.getByRole("dialog", { name: "Training details" });
+    const models = within(page).getByRole("tab", { name: /The models' own sentences/ }) as HTMLButtonElement;
+    expect(models.disabled).toBe(true);
+    expect(models.textContent).toMatch(/none published for this set/);
   });
 
   it("names the field when a readable set fails, and leaves the manifest standing", async () => {

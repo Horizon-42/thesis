@@ -403,7 +403,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   可以不满一步，到结束时刻；动力学失败的早一个周期；MSL 与椭球高）。换跑道次数、复飞词数、结束时是否许可要和词对得上。读取器
   逐项核对这些账，对不上整份拒读（`trainingGeneration.test.ts`）。词写到执行器停下处，可能在结束时刻之后（越过入口没截获、失速
   截断）：照正式读数的数法写出，句子条把多说了一整步以上的那段涂暗。正式读数分这个机场与全部机场两份（`readout.prior.here/all`）。
-- 读哪一句是 `AppContext.trainingSource`（null = 真值；或 `{overlayId, sample}`），句子条的标签页和左栏的 Sentences read 共用；换航班
+- 读哪一句是 `AppContext.trainingSource`（null = 真值；或 `{overlayId, sample}`），只在句子条的标签页上选（左栏的 Sentences read 已删，2026-09-27）；换航班
   保留。`generationOnScreen` 找出屏幕上这架航班的那个样本；模型不飞这架航班时回到真值。**真值总是画**，模型的东西只在读它时画。
 - 区分靠框不靠带：模型的带和真值的一样平涂（斜线 + 虚线边框让看板太乱，用户 2026-09-26），句子条边框、各行左边的竖色条
   （`training-sentence-model-strip`）、标签页、样本小块是模型的颜色；前 8 步淡灰底 "observed"，每行底边白色短竖线是真值在这一列
@@ -438,9 +438,8 @@ that divergence is a known open item (see the README's "Future Improvements").
   run 的同一轮导出了两次（同一个检查点换了导出设置），各自单成一组，用叠加层 id 区分——不会出现两个一样的 "r3"。句子条、左栏、
   结果表、图例都用它给的 `title` / `memberLabel`，不自己拼名字。
 - 句子条：每个模型一个标签页；正在读的模型发布了不止一轮时，标签页旁边是它的各轮 "r1 r2 …"，提示里写这一轮全称和这架航班上它的
-  样本落地了几个。换轮次**保留样本号**，同一架航班可以一轮一轮地比；标签页回到这个模型上次读的那一轮（在句子条或左栏选的都算），
-  没读过的从第一轮开始、从第 1 个样本开始。左栏 Sentences read 按模型分组，多轮的模型一行名字、下面每轮一行（带这一轮在本集合上的
-  落地数）。结果表按同样的顺序和名字。
+  样本落地了几个。换轮次**保留样本号**，同一架航班可以一轮一轮地比；标签页回到这个模型上次读的那一轮，
+  没读过的从第一轮开始、从第 1 个样本开始。结果表按同样的顺序和名字。
 - 颜色按名字（`TRAINING_MODEL_COLOR`）：base 品红 `#d946ef`、landing 黄绿 `#a3e635`、augmented 树莓红 `#b82e7a`——配色校验器在
   这套配色里能找到的最好的一个：和 Training 的每种颜色 OKLab 色差正常视觉 ≥ 17.7（最近的是实时执行器的出界红，离 base 18.5），
   模拟色盲 ≥ 11.6；但对比度只有 3.3:1，所以只用在线、色块、边框和时间轴上的结束时刻（用户要这个时刻用模型的颜色写），名字和数字
@@ -495,8 +494,7 @@ that divergence is a known open item (see the README's "Future Improvements").
   按起点分开调用，名字不串）；读增强起点的样本时没有 Truth 标签页、不画真值的发令短竖线和观测结束虚线，灰底写 "observed,
   moved"，样本小块写增强量；▶ Fly 照样能用：请求带上增强量，后端按 `augment_state` 挪执行器的起点（`fly.moved_inputs`，
   与第二阶段的 `augmented_inputs` 逐位相同）、按 `augment_signals` 挪观测行、时限 ×2，飞出来就是那个样本（导出的增强量
-  取整到 0.0001° 时差约 2 cm，此后导出不取整）；左栏 Sentences read 下面单列一组
-  "From augmented starts"；详情页的模型一节多一张表；三维把增强后的前 8 行用模型颜色虚线画出，接到样本航迹起点。
+  取整到 0.0001° 时差约 2 cm，此后导出不取整）；详情页的模型一节多一张表；三维把增强后的前 8 行用模型颜色虚线画出，接到样本航迹起点。
 
 ### AV25 · Experiments 里的执行器回放：横轴模式 `sentence`
 

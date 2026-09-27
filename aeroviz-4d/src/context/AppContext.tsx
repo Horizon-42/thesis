@@ -287,7 +287,7 @@ interface TrainingSessionState {
   setTrainingGenerations: (views: TrainingGenerationView[]) => void;
   /**
    * WHICH SENTENCE THE VIEWS READ: null for the truth — the labelled sentence of the observed flight — or one sample of
-   * one model's own. Chosen in the sentence bar (its tabs and sample buttons) or the panel. It is kept across flights and
+   * one model's own. Chosen in the sentence bar (its start switch, tabs, rounds and sample buttons). It is kept across flights and
    * sets — reading one model's sentences flight after flight is the point — and a flight it has nothing for reads the
    * truth (`generationOnScreen`). The truth's track is drawn in 3D whichever is read.
    */

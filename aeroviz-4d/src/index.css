@@ -867,88 +867,6 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   letter-spacing: 1px;
 }
 
-/* Which sentence is read: the truth, or a model's own (`ModelSentences`). */
-.training-models {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 5px 8px;
-  border: 1px solid #2a3552;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.training-models-title {
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: rgba(224, 230, 240, 0.55);
-}
-
-/* The models flown from augmented starts: a family of their own under the set's own, set off by a rule. */
-.training-model-family {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid #2a3552;
-}
-
-.training-model {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.training-model input {
-  margin: 0;
-}
-
-.training-model-swatch {
-  flex: none;
-  width: 14px;
-  height: 3px;
-  border-radius: 2px;
-}
-
-/* a model published at several rounds: its name, then a line per round under it */
-.training-model-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.training-model-heading {
-  cursor: default;
-}
-
-.training-model-round {
-  padding-left: 20px;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 11px;
-}
-
-/* in a table's row heading, not a flex line */
-.training-model-swatch-truth {
-  background: #e2e8f0;
-}
-
-/* a long name (a run said beside it) wraps; its count stays on the line */
-.training-model-name {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.training-model-count {
-  margin-left: auto;
-  white-space: nowrap;
-  font-size: 10.5px;
-  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
-  color: rgba(224, 230, 240, 0.65);
-}
-
 /* The executor's outcome under each flight: a line of its own, in its verdict's colour. */
 .training-flight-executor {
   grid-column: 1 / -1;
@@ -1331,6 +1249,7 @@ body.workbench-presentation-active .cesium-viewer-animationContainer {
   width: 16px;
   height: 4px;
   margin-right: 8px;
+  border-radius: 2px;
 }
 
 /* the readings of each switch and overlay, and every field every model shares: a name column and its text */

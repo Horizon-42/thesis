@@ -14,8 +14,7 @@
  * are published for the set (`trainingGenerations`: base, landing, augmented, each in its colour; two runs of one stage
  * are two tabs, named with their run) — choose what the rows draw. A model published at SEVERAL ROUNDS shows its rounds
  * beside the tabs ("r1 r2 …", each titled with how many of this flight's samples landed): a round keeps the sample number
- * read, so one flight is compared round by round; a tab returns to the round last read in it (chosen here or in the
- * panel). Two runs of one stage are named with their run, one round exported twice with its overlay id. The TRUTH is the
+ * read, so one flight is compared round by round; a tab returns to the round last read in it. Two runs of one stage are named with their run, one round exported twice with its overlay id. The TRUTH is the
  * labelled sentence, as above. A MODEL's is one of its samples (the numbered buttons, each marked by how the flight
  * ended), drawn in the same bands — one sentence is read at a time, so what says it is a model's is the frame: the bar's
  * border and a strip down the left edge of its rows in the model's colour, the tab, the sample's chip (the hatching this
@@ -309,7 +308,8 @@ export default function TrainingSentenceBar() {
     (view) => view.overlay);
   const modelGroup = models.find((group) => group.members.some((view) => view === model)) ?? null;
   const modelName = model === null ? null : modelGroup!.memberLabel(model);
-  // remembered at render, not only on a click here: the panel chooses rounds too (a write the render reads nowhere)
+  // remembered at render, whichever control of the bar chose it (a tab, a round, the start switch): a write the render
+  // reads nowhere
   // a model's tab in each start family remembers its own round: the group key is the same in both
   const familyKey = (key: string) => `${augmentedStart ? "augmented start" : "own start"} ${key}`;
   if (model !== null) roundRead.current[familyKey(modelGroup!.key)] = model.overlay.overlayId;

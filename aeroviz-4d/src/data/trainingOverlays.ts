@@ -510,8 +510,8 @@ function shortRunName(run: string, runs: string[]): string {
 const PRIOR_RUNS = "/prior/";
 
 /** One model of a set's published sentences — a name and the run its rounds come from — with every round published,
- *  each round once (base: its one member); ``title`` names it (its tab), ``memberLabel`` each member (its line, its
- *  table row, its legend). The run is said — by its campaign directory, whole when that is shared — when another group
+ *  each round once (base: its one member); ``title`` names it (its tab), ``memberLabel`` each member (its round, its
+ *  readout, its table row, its legend). The run is said — by its campaign directory, whole when that is shared — when another group
  *  has the same name (two runs of a stage). An overlay that
  *  repeats a round already published for its run (the same checkpoint exported twice) is a group of its own, named
  *  with its overlay id — two "r3" would say nothing. */
