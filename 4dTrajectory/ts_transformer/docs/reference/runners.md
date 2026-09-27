@@ -621,3 +621,29 @@ Writes `plan.json` (commit and library versions; `--resume` continues only the s
 `cells/<nn>_<cell>/{cell.json, evaluation/<ICAO>.json}` (the flown records dropped once graded unless `--keep-records`),
 `ablation.json` (`ts-heading-lead-ablation-v1`) and `ablation.md`; train only, CPU, from a clean tree at the plan's commit,
 checked before a cell is flown and before its result is written.
+
+### R24 · `run_ts.py traffic_census` — the observed traffic of the training days judged as the multi-aircraft closed loop will be (multi-aircraft design §6.4 step 4)
+
+2026-09-27. `traffic_census --instructions <sentence artefact> --out <new dir> [--airports ...]`. Every arrival of the
+training days (with a sentence or background) in its airport's scene on the even-second steps its rows hang on
+(`prior.scene.hung_span`), judged at every step with two or more aircraft under both readings (C36): the aircraft's
+runway is the one it landed on, its capture the artefact's (or the labeller's rule on `admit`'s / the raw track for a
+background flight), the angle off its course stored UNWRAPPED along the rows and wrapped at the step. Per airport:
+loss episodes (a pair's consecutive steps; kinds, closest step) and pairs with a loss per hour with traffic, by
+relation and kind, per reading; each landing's follower on the approach clock once (radar and TBL 5-5-2; the same under
+both readings); closing speeds between consecutive established aircraft with sentences; order swaps; segment lengths;
+the §2.3 samples and the 20-minute windows (`A_max`). Refuses a manifest other than the one the signals were read from,
+and stops on a type neither CWT table lists (`types_not_listed.json`). Writes `census.json` (`ts-traffic-census-v3`)
+into a NEW directory; about two minutes. Formal: `outputs/POOLED/traffic/census_20260927/` (`8e788f9f`): 0.98 (IFR) vs
+0.60 (VISUAL) pairs with a loss per hour.
+
+### R25 · `run_ts.py traffic_separation_examples` — recorded examples of the losses the census finds (readout figures)
+
+2026-09-27. `traffic_separation_examples --census <census dir> --instructions <the artefact it read> --out <dir>`. For
+five IFR categories (KSMF turn-on beside an independent final, KSJC close pair, KRDU dependent aligned, KRDU crossing
+established, KSTL same runway in trail) draws the TYPICAL episode (closest approach nearest the category's median, the
+earliest of equals) as an SVG: plan view and the pair's distances over time, both verdicts in the title. `examples.json`
+holds each example's numbers (distances at its first, closest and last step) and, per relation at those airports, every
+IFR episode summarised at its first step. Refuses a census of another schema. Output:
+`docs/two_tier/readouts/figures/parallel_runway_separation/`.
+

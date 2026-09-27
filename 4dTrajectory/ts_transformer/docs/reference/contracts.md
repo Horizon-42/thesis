@@ -529,3 +529,21 @@ schema, another checkpoint beside it, a set this code does not implement, or pro
 `Speaker` / `ClosedLoop` / `speak_and_fly` take `procedure_masks` with no default; `prior_free_generation` uses the model's
 own unless `--procedure-masks none|<sets>` says otherwise. A change to what a set allows is a new name, the old one deleted
 — a model trained under a set the code no longer has is refused, never spoken under the new rules.
+
+### C36 · loss of separation is judged by `inference/separation.py` under two readings; the closed loop's checks and reward use `VISUAL`
+
+2026-09-27 (multi-aircraft design §3.2, §9 items 15–16; readout `two_tier/readouts/2026-09-27_parallel_runway_separation.md`).
+`losses(traffic, separation, reading)` judges every pair at one instant; `next_behind` / `wake_at_threshold` (TBL 5-5-2 at
+the leader's threshold) are the same under both readings and take none. `IFR` is JO 7110.65BB's instrument rules as
+written. `VISUAL` (user 2026-09-27) assumes visual approach clearances and NEVER visual separation (7-2-1: the vocabulary
+has no traffic-in-sight / maintain-visual-separation words). It differs from `IFR` only in two places, and never judges
+a pair `IFR` would not (a random-scene test): dependent and independent parallels are free once both aircraft are
+TURNED IN (`_turned_in`: track within `runway_schedule.FAA_VISUAL_INTERCEPT_MAX_DEG` = 30° of the course, 7-4-4 c2 a /
+c3 a, AND on its own side of the midline between the two centrelines — the midline is our reading of "will intercept";
+reading it as "heading toward its centreline" made on-centreline drift a loss); established finals of other directions
+are not judged (3-10-4 not modelled). A close pair (< 2,500 ft) stays one runway under both (7-4-4 c1 b, N JO 7110.805,
+needs visual separation). `Traffic` holds its contract: along, signed track − course (in [−180, 180]) and signed
+distance right of the centreline are finite exactly when a runway is in force; an established aircraft has a runway.
+`Separation.right_nm` (from `parallel_relations`) carries each parallel centreline's signed offset, both orders. The
+package does not reach `instructions` (architecture test): the caller measures capture, clock position and the angles.
+

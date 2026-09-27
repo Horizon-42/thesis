@@ -159,6 +159,10 @@ of the package, not a migration in progress.
   one sentence artefact**: spec, labeller, day split and candidate table must match (`ts-prior-checkpoint-v3`, C34).
   **A prior speaks under the procedure's masks it was trained under**: named sets, recorded beside its checkpoint
   (`procedure_masks.json`, `prior/masks.py`), read by `load_prior`; the vocabulary's rules apart, always on (C35).
+- **Loss of separation has ONE judge, two readings** (`inference/separation.py`, 2026-09-27): `IFR` (7110.65BB as written)
+  and `VISUAL` — the closed loop's checks and reward — = 7-4-4 c with visual approach clearances and NEVER visual
+  separation: parallels ≥ 2,500 ft free once both are turned in (≤ 30°, own side of the midline), close pairs one runway,
+  established crossing finals not judged; `VISUAL` ⊆ `IFR` (C36).
 - **The two-tier line splits BY OPERATING DAY** (2026-09-24): a flight's day = its landing day (UTC − 9 h); the
   90-day deal (14 test / 14 val / 9 select / 53 train) is COMMITTED (`data/day_split_20260924.json`) and a harvest
   with other days is refused; test days are sealed — never opened, labelled, counted as context or put in a scene;
@@ -382,7 +386,10 @@ labelled words on both start kinds, not by the teacher-forced NLL. **Why the lab
 executor against the observed aircraft cycle by cycle, the height given up by word, and a one-line what-if of the vertical
 law run in-process (readouts §12). **The heading-lead ablation** (`heading_lead_ablation`, R23, 2026-09-27): L, the bank limit and p moved
 over the formal train replay's sample, relabelled and flown with no hashed code touched; the reference cell must reproduce the
-formal replay first; words inside compare neither across L nor across the bank limit.
+formal replay first; words inside compare neither across L nor across the bank limit. **Multi-aircraft M0**
+(2026-09-27): `traffic_census` judges the training days' observed traffic under both readings (C36) into a new directory
+(`ts-traffic-census-v3`; formal `census_20260927`: 0.98 vs 0.60 pairs/h) (R24); `traffic_separation_examples` draws five
+typical recorded losses for the readout (R25).
 
 ## Traps (one line each; full text `docs/reference/traps.md`, evidence `docs/reference/ENGINEERING_NOTES.md`)
 
