@@ -120,6 +120,7 @@ added three entries (the rows after the performance index's).
 | The judge folds a wrong-parallel-runway approach into timeout / crossed off runway; its landed lateral limit is 1,000 m where there is no parallel (09-26) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts change) |
 | `outputs/envelope.py` names `docs/specific_force_teacher_distribution.py` (09-26) | open | new; see the entry | **yes — executor**: the edit changes the executor source hash; do it with the next executor spec |
 | `instructions/grammar.py` is outside the labeller sha (09-26) | open | new; see the entry | **yes — every sentence artefact and prior**: adding it to the hash changes the labeller sha they record; do it with the next vocabulary spec |
+| The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (09-27) | open | new; see the entry | **yes — executor** (the judge is in the spec's source hash; readouts' outcome counts move) |
 
 **Fix affects training / post-training?** — against what the two-tier chain runs today (the labeller's `instruction_signals`,
 the executor `autopilot/` and its replay, `prior_train` / `prior_select` / `prior_free_generation`, the land-by-reward
@@ -551,3 +552,13 @@ rules the prior's speaker masks by (`grammar.step_allowed`, prior design §5.1) 
 not among the files the labeller sha covers; a change to it alone would change what every model may say with no identity
 moving. Unchanged since it was written (`0bbe6abf`, 2026-09-25). Adding it to `LABELLER_MODULES` changes the labeller sha
 every sentence artefact and every prior's `config.json` records, so it waits for the next vocabulary spec (judgement).
+
+## The judge calls a captured, on-centreline crossing that is too high "crossed off runway" (2026-09-27)
+
+**Verified** (`autopilot/judge.py` `_outcome`, `instructions/labeller/read.py` `landing_passages`; prior readouts §17, the lineup
+diagnosis `outputs/POOLED/prior/v3_stage2_lineup_diagnosis_20260927/`). A captured flight whose threshold-plane crossing is
+not a landing passage becomes `crossed_off_runway` — whether it was wide of the centreline OR more than
+`landing_max_height_m` (100 m) above the threshold. In the stage-2 run 34 of 35 such real-start sentences at round 5 were on
+the centreline (median 8–23 m off) and 140–260 m too high: the name reads as a lateral miss and hides a vertical one. Give
+the too-high crossing its own outcome with the next executor spec, with the other runway's crossing and the tighter lateral
+limit already queued there (prior readouts §16).
