@@ -2,7 +2,8 @@
 
 NOTHING IS PRECOMPUTED. A Training set's flights are rebuilt together from the arrival manifests their artefact recorded
 (`flights.rebuild_series` refuses a moved manifest or a rebuilt flight that differs from the stored signals) the first
-time the set is asked for, each re-read with the labeller (it must give the stored sentence). A segment is flown by
+time the set is asked for — or when the backend warms up (`backend.AutopilotSegmentBackend.warm_up`) — each re-read with
+the labeller (it must give the stored sentence), from the artefact split's stored files (`read_split`). A segment is flown by
 `single.SingleExecutor` — the executor's cycle for one flight in plain floats, pinned to the executor's code
 (`single.require_mirrored_source`, checked when the spec is chosen), checked against `executor.Executor` by result —
 one control cycle at a time, driven exactly as `executor.fly` drives it: the spec's word clock read before each cycle, a
@@ -83,29 +84,51 @@ class FlightContext:
     hae_minus_msl_m: float             # its runway's HAE − MSL offset (`training_files.runway_hae_minus_msl_m`)
 
 
-def open_flights(artefact: Path, split: str, dataset_ids: Sequence[str], words: Words
-                 ) -> dict[str, FlightContext | NotFlyable | ValueError]:
-    """Labelled flights of ``artefact`` (a Training set's), each with its stored signals, the flight rebuilt from the
-    data plane and checked against them (`rebuild_series`), the labeller's reading, which must give the stored sentence,
-    and the offset that gives its heights back as the aircraft reported them — what they share read once: the split's
-    signals and sentences, the candidates, each airport's published vertical paths and height offsets, and one
-    `rebuild_series` over them all (one read of each arrival manifest). Each flight answers for itself, as one opened
-    alone did: a flight the data cannot fly is its `NotFlyable`, one a check refuses its `ValueError` — the others open
-    (`rebuilt_each`)."""
-    spec = words.spec
+@dataclass(frozen=True)
+class SplitFiles:
+    """An artefact split's stored files as every set drawn from it reads them (`read_split`): its signals and where each
+    dataset id sits among them, its stored sentences and the signal each is of, and the candidates."""
+
+    split: str
+    signals: list[FlightSignals]
+    positions: dict[str, list[int]]
+    sentences: dict[str, np.ndarray]
+    stored: dict[int, int]            # signal index → stored sentence index
+    geometries: dict[str, AirportGeometry]
+
+
+def read_split(artefact: Path, split: str, words: Words) -> SplitFiles:
+    """``artefact``'s ``split``: the whole split's signals (~0.8 s for val — thousands of flights, of which a set takes
+    forty), its sentences read with ``words``' spec, and the candidates."""
     signals = load_signals(artefact, split)
     positions: dict[str, list[int]] = {}
     for index, item in enumerate(signals):
         positions.setdefault(item.dataset_id, []).append(index)
-    sentences = load_sentences(artefact, split, spec)
-    stored = {int(value): k for k, value in enumerate(sentences["signal_index"])}
-    geometries = load_candidates(artefact)
+    sentences = load_sentences(artefact, split, words.spec)
+    return SplitFiles(split=split, signals=signals, positions=positions, sentences=sentences,
+                      stored={int(value): k for k, value in enumerate(sentences["signal_index"])},
+                      geometries=load_candidates(artefact))
+
+
+def open_flights(artefact: Path, files: SplitFiles, dataset_ids: Sequence[str], words: Words,
+                 vertical_paths: Callable[[AirportGeometry], tuple[VerticalPath, ...]]
+                 ) -> dict[str, FlightContext | NotFlyable | ValueError]:
+    """Labelled flights of ``artefact`` (a Training set's; ``files``: its split's, `read_split`), each with its stored
+    signals, the flight rebuilt from the data plane and checked against them (`rebuild_series`), the labeller's
+    reading, which must give the stored sentence, and the offset that gives its heights back as the aircraft reported
+    them — what they share read once: each airport's published vertical paths (``vertical_paths``, the backend's kept
+    ones) and height offsets, and one `rebuild_series` over them all (one read of each arrival manifest). Each flight
+    answers for itself, as one opened alone did: a flight the data cannot fly is its `NotFlyable`, one a check refuses
+    its `ValueError` — the others open (`rebuilt_each`)."""
+    spec = words.spec
+    signals, positions, sentences, stored, geometries = (files.signals, files.positions, files.sentences, files.stored,
+                                                          files.geometries)
     contexts: dict[str, FlightContext | NotFlyable | ValueError] = {}
     read: list[tuple[FlightSignals, Reading]] = []
     for dataset_id in dataset_ids:
         try:
             if dataset_id not in positions or len(positions[dataset_id]) != 1:
-                raise ValueError(f"{dataset_id} is not a labelled {split} flight of {artefact.name}")
+                raise ValueError(f"{dataset_id} is not a labelled {files.split} flight of {artefact.name}")
             (index,) = positions[dataset_id]
             if index not in stored:
                 raise ValueError(f"{dataset_id} has no stored sentence in {artefact.name}")
@@ -117,7 +140,7 @@ def open_flights(artefact: Path, split: str, dataset_ids: Sequence[str], words: 
             continue
         read.append((flight, reading))
     airports = sorted({flight.airport for flight, _ in read})
-    paths = {airport: published_vertical_paths(geometries[airport]) for airport in airports}
+    paths = {airport: vertical_paths(geometries[airport]) for airport in airports}
     offsets = {airport: runway_hae_minus_msl_m(artefact, airport, arrival_manifest_path(airport)) for airport in airports}
     for (flight, reading), rebuilt in zip(read, rebuilt_each(artefact, [flight for flight, _ in read])):
         if isinstance(rebuilt, ValueError):

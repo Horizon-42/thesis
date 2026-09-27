@@ -1,5 +1,16 @@
 # AeroViz-4D Development Changelog
 
+### 2026-09-28 — 实时执行器启动时预热：第一次点不再等 2 秒以上
+
+- 用户：第一次跑 autopilot 要 2 秒以上。实测（冷启动的后端）：飞一段只要 1–11 ms；时间在第一次用到一个集合时现场重建它的
+  40 架航班——重建（harvest 记录、起飞状态的速度拟合）~1.3 s、读 val 整个划分的信号 ~0.8 s、机场程序数据 ~0.5 s——每个机场
+  1.9–3.6 s，第一个还加执行器规格核对 0.35 s；第一次点模型的词再加 2.2 s（程序屏蔽）；之后 ~10 ms。
+- 做了两件（用户选"1 和 2 都做"）：① 服务器启动后在后台线程预热（`http_server.warm_autopilot` → `AutopilotSegmentBackend.warm_up`）：
+  建好后端、打开每个机场能飞的集合、选好规格、建好程序屏蔽，和请求用同一把锁、一个集合一个集合地做；飞不了的集合（旧规格）
+  记一行跳过。② val 划分的文件（`fly.read_split`）在预热期间只读一次、五个机场共用，结束后放掉；每个机场的公布垂直剖面
+  （`published_vertical_paths`）缓存。实测：五个机场预热 10.3 s（第一个 4.2 s，之后 1.0–1.3 s），之后各机场第一次点
+  3–17 ms。`aeroviz_backend/CLAUDE.md`，文档 36 §4.7。
+
 ### 2026-09-27 — Training 左栏删掉 "Sentences read"（读哪一句只在句子条上选）
 
 - 用户：左栏的 Sentences read（真值 / 各模型各轮的单选，含 "From augmented starts" 一组）与句子条的标签页重复，删干净。

@@ -732,18 +732,102 @@ class BackendTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, r"2 executor specs .* \(\['three', 'two'\]\); one is needed"):
                     backend.executor_for(Path(tmp) / "artefact")
 
+    def test_a_request_reads_its_sets_split_and_lets_it_go_and_the_vertical_paths_are_read_once_an_airport(self):
+        backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
+        reads, given = [], []
+        with mock.patch("aeroviz_backend.autopilot_segment.backend.read_split",
+                        lambda artefact, split, words: reads.append(split) or "read here"), \
+                mock.patch("aeroviz_backend.autopilot_segment.backend.open_flights",
+                           lambda artefact, files, ids, words, paths: given.append(files) or {}):
+            backend.open_set(Path("a"), "val", {"flights": [{"datasetId": "K:1"}]}, None)
+            backend.open_set(Path("a"), "val", {"flights": [{"datasetId": "K:2"}]}, None, lambda: "the warm-up's")
+            backend.open_set(Path("a"), "val", {"flights": [{"datasetId": "K:2"}]}, None, lambda: "not asked")  # kept
+        self.assertEqual((reads, given), (["val"], ["read here", "the warm-up's"]))
+        geometry = SimpleNamespace(code="KXXX")
+        with mock.patch("aeroviz_backend.autopilot_segment.backend.published_vertical_paths",
+                        mock.Mock(return_value=("paths",))) as published:
+            self.assertEqual(backend.vertical_paths(Path("a"), geometry), ("paths",))
+            self.assertEqual(backend.vertical_paths(Path("a"), geometry), ("paths",))
+            self.assertEqual(published.call_count, 1)
+
+    def test_the_warm_up_opens_every_set_it_can_fly_under_the_request_lock_and_says_what_it_skipped(self):
+        """Each airport's read-back sets of the current reading rule: opened (flights, spec, the masks of every set this
+        code implements) under the request lock, one split read for the two sets drawn from it; one with no spec for its
+        artefact, and one whose sample is missing, skipped and said, their samples let go; an unreadable index skipped;
+        a set of another reading rule not even looked at."""
+        from ts_transformer.instructions.spec import READING_RULE
+        from ts_transformer.instructions.training_files import INDEX_SCHEMA, KIND_READBACK
+        from ts_transformer.prior.masks import SETS
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sets = {"KAAA": [("current", READING_RULE), ("old_vocabulary", "instruction-v1")],
+                    "KBBB": [("current", READING_RULE), ("no_spec", READING_RULE), ("missing", READING_RULE)]}
+            for airport, listed in sets.items():
+                (root / airport / "training").mkdir(parents=True)
+                (root / airport / "training" / "index.json").write_text(json.dumps({
+                    "schema": INDEX_SCHEMA, "airport": airport,
+                    "sets": [{"id": set_id, "kind": KIND_READBACK, "readingRule": rule, "file": f"{set_id}/sample.json"}
+                             for set_id, rule in listed]}))
+            (root / "CXXX").mkdir()                                  # an airport with no Training export
+            (root / "KZZZ" / "training").mkdir(parents=True)             # an index that is not one
+            (root / "KZZZ" / "training" / "index.json").write_text(json.dumps({"schema": "another", "airport": "KZZZ"}))
+            backend = AutopilotSegmentBackend(airports_root=root, executor_root=root / "none")
+            opened, masks, lines, reads = [], [], [], []
+
+            def training_set(airport, set_id):
+                self.assertTrue(backend._lock.locked())
+                if set_id == "missing":
+                    raise FileNotFoundError(f"{set_id}/sample.json")
+                backend._files[root / airport / "training" / set_id / "sample.json"] = (0, {"sample": set_id})
+                return root / set_id, "val", {"flights": []}
+
+            def executor_for(artefact):
+                if artefact.name == "no_spec":
+                    raise ValueError("0 executor specs fly no_spec with this code ([]); one is needed. Refused: ['v1: …']")
+                return None, None, None, "words"
+
+            def open_set(artefact, split, sample, words, files):
+                self.assertTrue(backend._lock.locked())
+                opened.append((artefact.name, files()))
+                return {"K:1": FlightContext(*[None] * 10), "K:2": NotFlyable("no dynamics")}, False
+
+            with mock.patch.object(backend, "training_set", training_set), mock.patch.object(backend, "executor_for", executor_for), \
+                    mock.patch.object(backend, "open_set", open_set), \
+                    mock.patch.object(backend, "_built_masks", lambda artefact, names: masks.append((artefact.name, names))), \
+                    mock.patch("aeroviz_backend.autopilot_segment.backend.read_split",
+                               lambda artefact, split, words: reads.append(artefact.name) or f"{artefact.name} {split}"):
+                backend.warm_up(log=lines.append)
+            # the two sets drawn from one artefact split read it once
+            self.assertEqual(opened, [("current", "current val"), ("current", "current val")])
+            self.assertEqual(reads, ["current"])
+            self.assertEqual(masks, [("current", names) for names in {(name,) for name in SETS} | {tuple(SETS)}] * 2)
+            self.assertEqual(lines[:4], ["autopilot warm-up: KAAA current: 1 of 2 flights opened in 0.0 s",
+                                         "autopilot warm-up: KBBB current: 1 of 2 flights opened in 0.0 s",
+                                         "autopilot warm-up: KBBB no_spec skipped — ValueError: 0 executor specs fly no_spec "
+                                         "with this code ([])",
+                                         "autopilot warm-up: KBBB missing skipped — FileNotFoundError: missing/sample.json"])
+            self.assertRegex(lines[4], r"^autopilot warm-up: KZZZ skipped — .*index\.json is a another file")
+            self.assertRegex(lines[5], r"^autopilot warm-up: 2 sets ready in \d+\.\d s$")
+            # the skipped set's sample let go, the opened ones kept
+            self.assertNotIn(root / "KBBB" / "training" / "no_spec" / "sample.json", backend._files)
+            self.assertIn(root / "KBBB" / "training" / "current" / "sample.json", backend._files)
+
     def test_a_sets_flights_are_rebuilt_together_once_and_kept(self):
         backend = AutopilotSegmentBackend(airports_root=Path("/nonexistent"), executor_root=Path("/nonexistent"))
         opened = []
 
-        def open_flights(artefact, split, dataset_ids, words):
+        def open_flights(artefact, files, dataset_ids, words, vertical_paths):
+            self.assertEqual(files, ("split files", artefact, "val"))
             opened.append(dataset_ids)
             refused = {"K:2": NotFlyable("K:2 cannot be flown: no aircraft dynamics"),
                        "K:3": ValueError("K:3: the rebuilt flight's altitude_m differs from the stored signals")}
             return {key: refused[key] if key in refused else f"context {key}" for key in dataset_ids}
 
         sample = {"flights": [{"datasetId": f"K:{index}"} for index in range(4)]}
-        with mock.patch("aeroviz_backend.autopilot_segment.backend.open_flights", open_flights):
+        with mock.patch("aeroviz_backend.autopilot_segment.backend.open_flights", open_flights), \
+                mock.patch("aeroviz_backend.autopilot_segment.backend.read_split",
+                           lambda artefact, split, words: ("split files", artefact, split)):
             self.assertEqual(backend.flight(Path("a"), "val", sample, "K:0", None), ("context K:0", False))
             self.assertEqual(backend.flight(Path("a"), "val", sample, "K:1", None), ("context K:1", True))
             self.assertEqual(opened, [("K:0", "K:1", "K:2", "K:3")])  # the whole set, once
