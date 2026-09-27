@@ -12,7 +12,8 @@ the larger of the radar minimum and the wake minimum for the leader/follower cat
 parallels, the along-track stagger that keeps the diagonal separation (``sqrt(D^2 - s^2)`` for a diagonal
 minimum D and a centerline spacing s); independent parallels and runways of another direction impose
 none (crossing-runway operations are not modelled). `faa_separation` builds it from the FAA order, every
-value cited to its paragraph. Pure numpy / stdlib: no torch, no data plane.
+value cited to its paragraph. Pure numpy / stdlib: no torch, no data plane; the one file it reads is the aircraft type
+table (`wake_category`).
 
 The approach clock (`Separation.approach_time_s`) is a landing's threshold time less its threshold's
 position along the course flown at the approach speed: the time the aircraft passes abeam a common
@@ -25,12 +26,17 @@ separation, and every minimum is applied there.
 from __future__ import annotations
 
 import bisect
+import csv
+import functools
 import math
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Mapping, Sequence
 
 import numpy as np
 from geokit import FT_M, METRES_PER_DEG_LAT, NM_M, metres_per_deg_lon
+
+from ts_transformer.repo_layout import CWT_SUPPLEMENT, CWT_TABLE
 
 #: How far under a minimum two times may be and still keep it: the times are wall clocks (~1.8e9 s,
 #: float64 resolution ~2e-7 s), so a slot placed exactly at its minimum can read a few 1e-7 s short.
@@ -187,22 +193,48 @@ CWT_ON_APPROACH_NM: dict[tuple[str, str], float] = {
     ("E", "I"): 4.0,
     ("F", "I"): 4.0,
 }
-#: The CWT column of JO 7360.1K Appendix A for every type in the R2b rosters (the full parsed table:
-#: `docs/literature/arrival_separation/papers/FAA_JO_7360.1K_AppendixA_categories_parsed.csv`).
-CWT_BY_TYPECODE: dict[str, str] = {
-    "A20N": "F", "A21N": "F", "A319": "F", "A320": "F", "A321": "F", "A332": "B", "A333": "B", "A359": "B",
-    "B734": "F", "B737": "F", "B738": "F", "B739": "F", "B38M": "F", "B39M": "F", "B752": "E", "B763": "C",
-    "B772": "B", "B788": "B", "B789": "B", "C550": "I", "CRJ9": "G", "E170": "G", "E190": "F", "E75L": "G",
-    "GLF6": "F",
-}
+#: The CWT categories (7110.65BB 5-5-4: A heaviest … I lightest).
+CWT_CATEGORIES = frozenset("ABCDEFGHI")
 
 
-def wake_category(typecode: str | None) -> str:
-    """The CWT category of an ICAO type designator (JO 7360.1K Appendix A); a type not listed raises."""
-    if typecode not in CWT_BY_TYPECODE:
-        raise KeyError(f"no CWT category for {typecode!r}: add it from JO 7360.1K Appendix A "
-                       "(docs/literature/arrival_separation/papers/FAA_JO_7360.1K_AppendixA_categories_parsed.csv)")
-    return CWT_BY_TYPECODE[typecode]
+def read_cwt_tables(table: Path = CWT_TABLE, supplement: Path = CWT_SUPPLEMENT) -> dict[str, str]:
+    """Every ICAO type designator's CWT category: JO 7360.1K Appendix A's CWT column (a type it lists with the column
+    blank is left out) and this project's supplement (``type_designator,cwt,source,added``: types the Order does not list
+    yet, each with its source). A designator listed twice — within a table or in both — is refused, as are a category
+    that is not one of `CWT_CATEGORIES` and a supplement row without its source."""
+    categories: dict[str, str] = {}
+
+    def add(designator: str, category: str, where: Path) -> None:
+        if designator in categories:
+            raise ValueError(f"{designator} is listed twice ({where.name}); one type, one row")
+        if category not in CWT_CATEGORIES:
+            raise ValueError(f"{designator}: CWT category {category!r} in {where.name} is not one of A–I")
+        categories[designator] = category
+
+    with table.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            if row["cwt"]:
+                add(row["type_designator"], row["cwt"], table)
+    with supplement.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            if not row["source"]:
+                raise ValueError(f"{supplement.name}: {row['type_designator']} has no source")
+            add(row["type_designator"], row["cwt"], supplement)
+    return categories
+
+
+@functools.cache
+def _cwt_by_typecode() -> dict[str, str]:
+    return read_cwt_tables()
+
+
+def wake_category(typecode: str) -> str:
+    """The CWT category of an ICAO type designator (`read_cwt_tables`); a type in neither table raises."""
+    categories = _cwt_by_typecode()
+    if typecode not in categories:
+        raise KeyError(f"no CWT category for {typecode!r}: add it to {CWT_SUPPLEMENT.name} with its source "
+                       f"(the Order's table is {CWT_TABLE.name})")
+    return categories[typecode]
 
 
 def faa_separation(
