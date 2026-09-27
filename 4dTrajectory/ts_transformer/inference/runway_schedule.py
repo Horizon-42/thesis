@@ -181,6 +181,21 @@ FAA_PARALLEL_REGIMES = (
     ParallelRegime(3600.0, DEPENDENT, 1.0),      # 5-9-6 a2
     ParallelRegime(4300.0, DEPENDENT, 1.5),      # 5-9-6 a3 (independent needs FMA + PRM below 4,300 ft)
 )                                                # >= 4,300 ft: independent, 5-9-7 a2
+#: TBL 5-5-1 "Wake Turbulence Separation for Directly Behind" (5-5-4 g: following an aircraft conducting an instrument
+#: approach, or within 2,500 ft of and less than 1,000 ft below the flight path of a Category A–D aircraft), NM,
+#: (leader, follower) CWT category; a blank cell sets none (`docs/literature/arrival_separation/README.md` §2.3).
+CWT_DIRECTLY_BEHIND_NM: dict[tuple[str, str], float] = {
+    ("A", "B"): 5.0, ("A", "C"): 6.0, ("A", "D"): 6.0, ("A", "E"): 7.0, ("A", "F"): 7.0, ("A", "G"): 7.0,
+    ("A", "H"): 8.0, ("A", "I"): 8.0,
+    ("B", "B"): 3.0, ("B", "C"): 4.0, ("B", "D"): 4.0, ("B", "E"): 5.0, ("B", "F"): 5.0, ("B", "G"): 5.0,
+    ("B", "H"): 5.0, ("B", "I"): 5.0,
+    ("C", "E"): 3.5, ("C", "F"): 3.5, ("C", "G"): 3.5, ("C", "H"): 5.0, ("C", "I"): 5.0,
+    ("D", "B"): 3.0, ("D", "C"): 4.0, ("D", "D"): 4.0, ("D", "E"): 5.0, ("D", "F"): 5.0, ("D", "G"): 5.0,
+    ("D", "H"): 5.0, ("D", "I"): 5.0,
+    ("E", "I"): 4.0,
+}
+#: The vertical separation minimum up to FL 410 (4-5-1 a: "Up to and including FL 410- 1,000 feet.").
+FAA_VERTICAL_FT = 1_000.0
 #: TBL 5-5-2 "Wake Turbulence Separation for On Approach" (5-5-4 h), NM, (leader, follower) CWT category.
 CWT_ON_APPROACH_NM: dict[tuple[str, str], float] = {
     ("A", "B"): 5.0, ("A", "C"): 6.0, ("A", "D"): 6.0, ("A", "E"): 7.0, ("A", "F"): 7.0, ("A", "G"): 7.0,
